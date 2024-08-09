@@ -5,6 +5,9 @@ set(install_dir ${CMAKE_CURRENT_BINARY_DIR}/${name}/install)
 ExternalProject_Add(
     ${name}
     URL https://github.com/gabime/spdlog/archive/refs/tags/v1.12.0.tar.gz
+        # this url is maintained by the vsag project, if it's broken, please try
+        #  the latest commit or contact the vsag project
+        http://vsagcache.oss-rg-china-mainland.aliyuncs.com/spdlog/v1.12.0.tar.gz
     URL_HASH MD5=6b4446526264c1d1276105482adc18d1
     DOWNLOAD_NAME spdlog-1.12.0.tar.gz
     PREFIX ${CMAKE_CURRENT_BINARY_DIR}/${name}
