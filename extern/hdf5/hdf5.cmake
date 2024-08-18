@@ -28,6 +28,8 @@ ExternalProject_Add(
     LOG_BUILD TRUE
     LOG_INSTALL TRUE
     DOWNLOAD_NO_PROGRESS 1
+    INACTIVITY_TIMEOUT 5
+    TIMEOUT 30
 
     BUILD_BYPRODUCTS
         ${CMAKE_CURRENT_BINARY_DIR}/${name}/build/bin/libhdf5_cpp.a
