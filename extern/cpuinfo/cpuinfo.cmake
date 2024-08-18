@@ -6,6 +6,9 @@ FetchContent_Declare(
             #  the latest commit or contact the vsag project
            http://vsagcache.oss-rg-china-mainland.aliyuncs.com/cpuinfo/ca678952a9a8eaa6de112d154e8e104b22f9ab3f.tar.gz
   URL_HASH MD5=a72699bc703dfea4ab2c9c01025e46e9
+  DOWNLOAD_NO_PROGRESS 1
+  INACTIVITY_TIMEOUT 5
+  TIMEOUT 30
 )
 
 set(CPUINFO_BUILD_TOOLS OFF CACHE BOOL "Disable some option in the library" FORCE)
