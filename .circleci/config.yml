@@ -1,0 +1,21 @@
+version: 2.1
+
+jobs:
+  check-code-format:
+    docker:
+      - image: vsaglib/vsag:ubuntu
+    steps:
+      - checkout
+      - run: make fmt
+  run-tests:
+    docker:
+      - image: vsaglib/vsag:ubuntu
+    steps:
+      - checkout
+      - run: make test
+
+workflows:
+  ci-workflow:
+    jobs:
+      - check-code-format
+      - run-tests
