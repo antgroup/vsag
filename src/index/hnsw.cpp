@@ -236,7 +236,7 @@ HNSW::knn_search(const DatasetPtr& query,
                  int64_t k,
                  const std::string& parameters,
                  BitsetPtr invalid) const {
-    SlowTaskTimer t("hnsw knnsearch", 1000);
+    SlowTaskTimer t("hnsw knnsearch", 100000);
 
     // cannot perform search on empty index
     if (empty_index_) {

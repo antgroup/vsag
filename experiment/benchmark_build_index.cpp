@@ -427,7 +427,7 @@ int main() {
 
     // search
     std::vector<uint32_t> efs = {10, 20, 30, 40, 50, 60, 70, 80, 90, 100};
-//    efs.resize(1000, 80);
+    efs.resize(100, 80);
     for (int round = 0; round < 2; round++) {
          if (round == 0) {
              sq_num_bits = 4;

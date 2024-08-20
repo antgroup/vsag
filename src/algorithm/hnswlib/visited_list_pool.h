@@ -35,7 +35,7 @@ reallocate(void* p, size_t size);
 }  // namespace vsag
 
 namespace hnswlib {
-typedef unsigned short int vl_type;
+typedef uint8_t vl_type;
 
 class VisitedList {
 public:

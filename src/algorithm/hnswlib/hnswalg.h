@@ -35,12 +35,14 @@
 #include "../../default_allocator.h"
 #include "hnswlib.h"
 #include "visited_list_pool.h"
+#include "../../logger.h"
 
 namespace hnswlib {
 typedef unsigned int tableint;
 typedef unsigned int linklistsizeint;
 
 const static float THRESHOLD_ERROR = 1e-6;
+static float rate_ = 0.9999f;
 
 class HierarchicalNSW : public AlgorithmInterface<float> {
 private:
@@ -1155,7 +1157,7 @@ public:
         }
     }
 
-    uint32_t
+    inline uint32_t
     visit(std::pair<float, tableint>& current_node_pair,
           std::pair<float, tableint>& next_node_pair,
           vl_type* visited_array,
@@ -1169,7 +1171,10 @@ public:
         size_t size = getListCount((linklistsizeint*)data);
 
         uint32_t count_no_visited = 0;
+        if (rate_ < 0.9)
+            size *= rate_;
         for (size_t j = 1; j <= size; j++) {
+            _mm_prefetch(visited_array + *(data + j + 4), _MM_HINT_T0);
             int candidate_id = *(data + j);
             if (!(visited_array[candidate_id] == visited_array_tag)) {
                 to_be_visited[count_no_visited++] = candidate_id;
@@ -1247,9 +1252,24 @@ public:
         uint32_t dist_cmp = 0;
         std::vector<int> to_be_visited(M_ * 2);
 
+        int last_lb = 0;
         while (!candidate_set.empty()) {
             hops++;
+            if (hops % 10 == 0) {
+                if (last_lb - lowerBound < last_lb / 500) {
+                    rate_ = 0.8f;
+                } else {
+                    rate_ = 0.999999f;
+                }
+                last_lb = lowerBound;
+            }
             std::pair<float, tableint> current_node_pair = candidate_set.top();
+            if (hops == 1) {
+                last_lb = current_node_pair.first * -1;
+            }
+//
+//            vsag::logger::info(fmt::format("hops: {}, nearest candidate dist: {:.2f}, LB: {:.2f}",
+//                                           hops, current_node_pair.first, lowerBound));
 
             if ((-current_node_pair.first) > lowerBound &&
                 (top_candidates.size() == ef || (!isIdAllowed && !has_deletions))) {
