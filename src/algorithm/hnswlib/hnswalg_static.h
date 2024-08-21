@@ -74,6 +74,8 @@ private:
 
     size_t data_size_{0};
 
+    size_t data_element_per_block_{0};
+
     vsag::Allocator* allocator_;
     DISTFUNC fstdistfunc_;
     void* dist_func_param_{nullptr};
@@ -155,6 +157,7 @@ public:
 
         data_level0_memory_ =
             new BlockManager(max_elements_, size_data_per_element_, block_size_limit, allocator_);
+        data_element_per_block_ = block_size_limit / size_data_per_element_;
 
         cur_element_count_ = 0;
 
@@ -1009,7 +1012,7 @@ public:
         writeVarToMem(dest, pq_sub_dim);
 
         // output.write(data_level0_memory_, cur_element_count_ * size_data_per_element_);
-        data_level0_memory_->serialize(dest);
+        data_level0_memory_->serialize(dest, cur_element_count_);
 
         for (size_t i = 0; i < cur_element_count_; i++) {
             unsigned int linkListSize =
@@ -1119,7 +1122,7 @@ public:
         writeBinaryPOD(out_stream, pq_cluster);
         writeBinaryPOD(out_stream, pq_sub_dim);
 
-        data_level0_memory_->serialize(out_stream);
+        data_level0_memory_->serialize(out_stream, cur_element_count_);
 
         for (size_t i = 0; i < cur_element_count_; i++) {
             unsigned int linkListSize =
@@ -1266,11 +1269,10 @@ public:
         /// Optional check end
 
         // input.seekg(pos, input.beg);
-
         resizeIndex(max_elements);
 
-        data_level0_memory_->deserialize(read_func, cursor);
-        cursor += data_level0_memory_->getSize();
+        data_level0_memory_->deserialize(read_func, cursor, cur_element_count_);
+        cursor += cur_element_count_ * size_data_per_element_;
 
         size_links_per_element_ = maxM_ * sizeof(tableint) + sizeof(linklistsizeint);
 
@@ -1388,9 +1390,9 @@ public:
         */
         /// Optional check end
 
-        in_stream.seekg(pos, in_stream.beg);
         resizeIndex(max_elements);
-        data_level0_memory_->deserialize(in_stream);
+        in_stream.seekg(pos, in_stream.beg);
+        data_level0_memory_->deserialize(in_stream, cur_element_count_);
 
         size_links_per_element_ = maxM_ * sizeof(tableint) + sizeof(linklistsizeint);
 
@@ -1505,7 +1507,7 @@ public:
 
         input.seekg(pos, input.beg);
 
-        data_level0_memory_->deserialize(input);
+        data_level0_memory_->deserialize(input, cur_element_count_);
 
         size_links_per_element_ = maxM_ * sizeof(tableint) + sizeof(linklistsizeint);
 
@@ -1614,7 +1616,7 @@ public:
             }
 
             if (cur_element_count_ >= max_elements_) {
-                throw std::runtime_error("The number of elements exceeds the specified limit");
+                resizeIndex(max_elements_ + data_element_per_block_);
             }
 
             cur_c = cur_element_count_;

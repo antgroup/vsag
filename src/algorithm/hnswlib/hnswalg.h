@@ -86,6 +86,8 @@ private:
 
     size_t data_size_{0};
 
+    size_t data_element_per_block_{0};
+
     DISTFUNC fstdistfunc_;
     void* dist_func_param_{nullptr};
 
@@ -170,6 +172,8 @@ public:
 
         data_level0_memory_ =
             new BlockManager(max_elements_, size_data_per_element_, block_size_limit, allocator_);
+        data_element_per_block_ = block_size_limit / size_data_per_element_;
+
         if (data_level0_memory_ == nullptr)
             throw std::runtime_error("Not enough memory");
 
@@ -699,14 +703,17 @@ public:
 
                         if ((!has_deletions || !isMarkedDeleted(candidate_id)) &&
                             ((!isIdAllowed) || (*isIdAllowed)(getExternalLabel(candidate_id))))
-                            if (dist <= radius + THRESHOLD_ERROR)
-                                top_candidates.emplace(dist, candidate_id);
+                            top_candidates.emplace(dist, candidate_id);
 
                         if (!top_candidates.empty())
                             lowerBound = top_candidates.top().first;
                     }
                 }
             }
+        }
+        while (not top_candidates.empty() &&
+               top_candidates.top().first > radius + THRESHOLD_ERROR) {
+            top_candidates.pop();
         }
 
         visited_list_pool_->releaseVisitedList(vl);
@@ -997,7 +1004,7 @@ public:
         // writeBinaryPOD(output, ef_construction_);
         writeVarToMem(dest, ef_construction_);
 
-        data_level0_memory_->serialize(dest);
+        data_level0_memory_->serialize(dest, cur_element_count_);
 
         for (size_t i = 0; i < cur_element_count_; i++) {
             unsigned int link_list_size =
@@ -1081,7 +1088,7 @@ public:
         writeBinaryPOD(out_stream, mult_);
         writeBinaryPOD(out_stream, ef_construction_);
 
-        data_level0_memory_->serialize(out_stream);
+        data_level0_memory_->serialize(out_stream, cur_element_count_);
 
         for (size_t i = 0; i < cur_element_count_; i++) {
             unsigned int link_list_size =
@@ -1113,7 +1120,7 @@ public:
         writeBinaryPOD(output, mult_);
         writeBinaryPOD(output, ef_construction_);
 
-        data_level0_memory_->serialize(output);
+        data_level0_memory_->serialize(output, cur_element_count_);
 
         for (size_t i = 0; i < cur_element_count_; i++) {
             unsigned int link_list_size =
@@ -1211,12 +1218,12 @@ public:
         /// Optional check end
 
         // input.seekg(pos, input.beg);
-        resizeIndex(max_elements);
         if (data_level0_memory_ == nullptr)
             throw std::runtime_error("Not enough memory: loadIndex failed to allocate level0");
         // input.read(data_level0_memory_, cur_element_count_ * size_data_per_element_);
-        data_level0_memory_->deserialize(read_func, cursor);
-        cursor += data_level0_memory_->getSize();
+        resizeIndex(max_elements);
+        data_level0_memory_->deserialize(read_func, cursor, cur_element_count_);
+        cursor += cur_element_count_ * size_data_per_element_;
 
         size_links_per_element_ = maxM_ * sizeof(tableint) + sizeof(linklistsizeint);
 
@@ -1311,8 +1318,7 @@ public:
         in_stream.seekg(pos, in_stream.beg);
 
         resizeIndex(max_elements);
-
-        data_level0_memory_->deserialize(in_stream);
+        data_level0_memory_->deserialize(in_stream, cur_element_count_);
 
         size_links_per_element_ = maxM_ * sizeof(tableint) + sizeof(linklistsizeint);
 
@@ -1427,7 +1433,7 @@ public:
 
         input.seekg(pos, input.beg);
 
-        data_level0_memory_->deserialize(input);
+        data_level0_memory_->deserialize(input, cur_element_count_);
 
         size_links_per_element_ = maxM_ * sizeof(tableint) + sizeof(linklistsizeint);
 
@@ -1832,7 +1838,7 @@ public:
             }
 
             if (cur_element_count_ >= max_elements_) {
-                throw std::runtime_error("The number of elements exceeds the specified limit");
+                resizeIndex(max_elements_ + data_element_per_block_);
             }
 
             cur_c = cur_element_count_;

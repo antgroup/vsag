@@ -56,15 +56,15 @@ CreateDiskannParameters::FromJson(const std::string& json_string) {
 
     // set obj.max_degree
     CHECK_ARGUMENT(
-        params[INDEX_DISKANN].contains(DISKANN_PARAMETER_L),
-        fmt::format("parameters[{}] must contains {}", INDEX_DISKANN, DISKANN_PARAMETER_L));
-    obj.max_degree = params[INDEX_DISKANN][DISKANN_PARAMETER_L];
+        params[INDEX_DISKANN].contains(DISKANN_PARAMETER_R),
+        fmt::format("parameters[{}] must contains {}", INDEX_DISKANN, DISKANN_PARAMETER_R));
+    obj.max_degree = params[INDEX_DISKANN][DISKANN_PARAMETER_R];
 
     // set obj.ef_construction
     CHECK_ARGUMENT(
-        params[INDEX_DISKANN].contains(DISKANN_PARAMETER_R),
-        fmt::format("parameters[{}] must contains {}", INDEX_DISKANN, DISKANN_PARAMETER_R));
-    obj.ef_construction = params[INDEX_DISKANN][DISKANN_PARAMETER_R];
+        params[INDEX_DISKANN].contains(DISKANN_PARAMETER_L),
+        fmt::format("parameters[{}] must contains {}", INDEX_DISKANN, DISKANN_PARAMETER_L));
+    obj.ef_construction = params[INDEX_DISKANN][DISKANN_PARAMETER_L];
 
     // set obj.pq_dims
     CHECK_ARGUMENT(

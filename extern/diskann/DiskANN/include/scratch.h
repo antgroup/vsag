@@ -35,7 +35,7 @@ template <typename T> class InMemQueryScratch
     ~InMemQueryScratch();
     // REFACTOR TODO: move all parameters to a new class.
     InMemQueryScratch(uint32_t search_l, uint32_t indexing_l, uint32_t r, uint32_t maxc, size_t dim, size_t aligned_dim,
-                      size_t alignment_factor, bool init_pq_scratch = false);
+                      size_t alignment_factor, bool init_pq_scratch = false, size_t max_degree = MAX_GRAPH_DEGREE, size_t pq_chunk = MAX_PQ_CHUNKS);
     void resize_for_new_L(uint32_t new_search_l);
     void clear();
 
@@ -153,19 +153,14 @@ template <typename T> class SSDQueryScratch
   public:
     T *coord_scratch = nullptr; // MUST BE AT LEAST [sizeof(T) * data_dim]
 
-    char *sector_scratch = nullptr; // MUST BE AT LEAST [MAX_N_SECTOR_READS * SECTOR_LEN]
     size_t sector_idx = 0;          // index of next [SECTOR_LEN] scratch to use
 
     T *aligned_query_T = nullptr;
 
     PQScratch<T> *_pq_scratch;
 
-    tsl::robin_set<size_t> visited;
-    NeighborPriorityQueue retset;
-    std::vector<Neighbor> full_retset;
 
-    SSDQueryScratch(size_t aligned_dim, size_t visited_reserve);
-    SSDQueryScratch(size_t aligned_dim, size_t visited_reserve, size_t sector_size, size_t sector_len);
+    SSDQueryScratch(size_t max_degree, size_t aligned_dim, size_t pq_chunk);
     ~SSDQueryScratch();
 
     void reset();
@@ -175,9 +170,7 @@ template <typename T> class SSDThreadData
 {
   public:
     SSDQueryScratch<T> scratch;
-
-    SSDThreadData(size_t aligned_dim, size_t visited_reserve);
-    SSDThreadData(size_t aligned_dim, size_t visited_reserve, size_t sector_size, size_t sector_len);
+    SSDThreadData(size_t max_degree, size_t aligned_dim, size_t pq_chunk);
     void clear();
 };
 

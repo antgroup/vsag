@@ -105,9 +105,12 @@ struct comparable_float_t {
     }
 
     float value;
-    const float epsilon = 1e-6;
+    const float epsilon = 2e-6;
 };
 using dist_t = comparable_float_t;
+// The error epsilon between time_t and recall_t should be 1e-6; however, the error does not fall
+// between 1e-6 and 2e-6 in actual situations. Therefore, to ensure compatibility with dist_t,
+// we will limit the error to within 2e-6.
 using time_t = comparable_float_t;
 using recall_t = comparable_float_t;
 

@@ -1920,7 +1920,7 @@ void generate_disk_quantized_data(const T* train_data, size_t train_size, size_t
 
     if (compare_metric == diskann::Metric::INNER_PRODUCT)
         generate_pq_data_from_pivots<float>((const float*)train_data, train_size, train_dim, skip_locs, 256, (uint32_t)disk_pq_dims, disk_pq_pivots,
-                                            disk_pq_compressed_vectors, use_opq, rotate);
+                                            disk_pq_compressed_vectors, use_opq, rotate, use_bsa);
     else
         generate_pq_data_from_pivots<T>(train_data, train_size, train_dim, skip_locs, 256, (uint32_t)disk_pq_dims, disk_pq_pivots,
                                         disk_pq_compressed_vectors, use_opq, rotate, use_bsa);

@@ -11,6 +11,8 @@
 #define NUM_KMEANS_REPS_PQ 12
 #define MAX_PQ_TRAINING_SET_SIZE 256000
 #define MAX_PQ_CHUNKS 512
+#define NUM_CENTROID 256
+#define ALIGNED_SIZE 256
 
 namespace vsag {
 
@@ -22,7 +24,7 @@ namespace diskann
 {
 class FixedChunkPQTable
 {
-    float *tables = nullptr; // pq_tables = float array of size [256 * ndims]
+    float *tables = nullptr; // pq_tables = float array of size [NUM_CENTROID * ndims]
     uint64_t ndims = 0;      // ndims = true dimension of vectors
     uint64_t n_chunks = 0;
     bool use_rotation = false;
@@ -67,19 +69,20 @@ class FixedChunkPQTable
 
 template <typename T> struct PQScratch
 {
-    float *aligned_pqtable_dist_scratch = nullptr; // MUST BE AT LEAST [256 * NCHUNKS]
+    float *aligned_pqtable_dist_scratch = nullptr; // MUST BE AT LEAST [NUM_CENTROID * NCHUNKS]
     float *aligned_dist_scratch = nullptr;         // MUST BE AT LEAST diskann MAX_DEGREE
     uint8_t *aligned_pq_coord_scratch = nullptr;   // MUST BE AT LEAST  [N_CHUNKS * MAX_DEGREE]
     float *rotated_query = nullptr;
     float *aligned_query_float = nullptr;
 
-    PQScratch(size_t graph_degree, size_t aligned_dim)
+    PQScratch(size_t graph_degree, size_t aligned_dim, size_t pq_chunks)
     {
+
         diskann::alloc_aligned((void **)&aligned_pq_coord_scratch,
-                               (size_t)graph_degree * (size_t)MAX_PQ_CHUNKS * sizeof(uint8_t), 256);
-        diskann::alloc_aligned((void **)&aligned_pqtable_dist_scratch, 256 * (size_t)MAX_PQ_CHUNKS * sizeof(float),
-                               256);
-        diskann::alloc_aligned((void **)&aligned_dist_scratch, (size_t)graph_degree * sizeof(float), 256);
+                               ROUND_UP(((size_t)graph_degree * (size_t)pq_chunks * sizeof(uint8_t)), ALIGNED_SIZE), ALIGNED_SIZE);
+        diskann::alloc_aligned((void **)&aligned_pqtable_dist_scratch, NUM_CENTROID * (size_t)pq_chunks * sizeof(float),
+                               ALIGNED_SIZE);
+        diskann::alloc_aligned((void **)&aligned_dist_scratch, ROUND_UP((size_t)graph_degree * sizeof(float), ALIGNED_SIZE), ALIGNED_SIZE);
         diskann::alloc_aligned((void **)&aligned_query_float, aligned_dim * sizeof(float), 8 * sizeof(float));
         diskann::alloc_aligned((void **)&rotated_query, aligned_dim * sizeof(float), 8 * sizeof(float));
 

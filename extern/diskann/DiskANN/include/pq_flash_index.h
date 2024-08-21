@@ -24,7 +24,7 @@ namespace diskann
 template <typename T, typename LabelT = uint32_t> class PQFlashIndex
 {
   public:
-    DISKANN_DLLEXPORT PQFlashIndex(std::shared_ptr<LocalFileReader> &fileReader, diskann::Metric m, size_t len, bool use_bsa = false);
+    DISKANN_DLLEXPORT PQFlashIndex(std::shared_ptr<LocalFileReader> &fileReader, diskann::Metric m, size_t len, size_t dim, bool use_bsa = false);
     DISKANN_DLLEXPORT ~PQFlashIndex();
 
 #ifdef EXEC_ENV_OLS
@@ -45,7 +45,7 @@ template <typename T, typename LabelT = uint32_t> class PQFlashIndex
 
     DISKANN_DLLEXPORT int load_from_separate_paths(uint32_t num_threads, const char *index_filepath,
                                                    std::stringstream &pivots_stream, std::stringstream &compressed_stream);
-    DISKANN_DLLEXPORT int load_from_separate_paths(uint32_t num_threads, std::stringstream &pivots_stream, std::stringstream &compressed_stream,
+    DISKANN_DLLEXPORT int load_from_separate_paths(std::stringstream &pivots_stream, std::stringstream &compressed_stream,
                                                    std::stringstream &tag_stream);
 
     DISKANN_DLLEXPORT size_t load_graph(std::stringstream &in);
@@ -77,7 +77,7 @@ template <typename T, typename LabelT = uint32_t> class PQFlashIndex
                                               uint64_t *indices, float *distances, const uint64_t beam_width,
                                               std::function<bool(int64_t)> filter,
                                               const uint32_t io_limit, const bool reorder = false,
-                                              QueryStats *stats = nullptr);
+                                              QueryStats *stats = nullptr, bool use_for_range = false);
 
     DISKANN_DLLEXPORT int64_t cached_beam_search_async(const T *query, const uint64_t k_search, const uint64_t l_search,
                                                         uint64_t *indices, float *distances, const uint64_t beam_width,
@@ -102,8 +102,6 @@ template <typename T, typename LabelT = uint32_t> class PQFlashIndex
     DISKANN_DLLEXPORT diskann::Metric get_metric();
 
     DISKANN_DLLEXPORT int64_t get_memory_usage();
-
-    void set_sector_size(size_t sector_size);
 
   protected:
     DISKANN_DLLEXPORT void use_medoids_data_as_centroids();
@@ -194,7 +192,6 @@ template <typename T, typename LabelT = uint32_t> class PQFlashIndex
 
     // thread-specific scratch
     ConcurrentQueue<SSDThreadData<T> *> thread_data;
-    size_t sector_size = MAX_N_SECTOR_READS;
     uint64_t max_nthreads;
     bool load_flag = false;
     bool count_visited_nodes = false;

@@ -204,23 +204,35 @@ public:
     }
 
     bool
-    serialize(char*& buffer) {
+    serialize(char*& buffer, size_t cur_element_count) {
+        size_t store_size = cur_element_count * size_data_per_element_;
         size_t offset = 0;
         for (int i = 0; i < blocks_.size(); ++i) {
-            size_t current_block_size = block_lens_[i];
+            size_t new_offset = offset + block_lens_[i];
+            size_t current_block_size = std::min(new_offset, store_size) - offset;
             std::memcpy(buffer + offset, blocks_[i], current_block_size);
-            offset += current_block_size;
+            offset = new_offset;
+            if (new_offset >= store_size) {
+                break;
+            }
         }
-        buffer += offset;
+        buffer += store_size;
         return true;
     }
 
     bool
-    serialize(std::ostream& ofs) {
+    serialize(std::ostream& ofs, size_t cur_element_count) {
+        size_t store_size = cur_element_count * size_data_per_element_;
         try {
+            size_t offset = 0;
             for (int i = 0; i < blocks_.size(); ++i) {
-                size_t current_block_size = block_lens_[i];
+                size_t new_offset = offset + block_lens_[i];
+                size_t current_block_size = std::min(new_offset, store_size) - offset;
                 ofs.write(blocks_[i], current_block_size);
+                offset = new_offset;
+                if (new_offset >= store_size) {
+                    break;
+                }
             }
         } catch (const std::ios_base::failure&) {
             return false;
@@ -229,26 +241,34 @@ public:
     }
 
     void
-    deserialize(std::function<void(uint64_t, uint64_t, void*)> read_func, uint64_t cursor) {
+    deserialize(std::function<void(uint64_t, uint64_t, void*)> read_func,
+                uint64_t cursor,
+                size_t cur_element_count) {
         size_t offset = 0;
-
+        size_t need_read_size = cur_element_count * size_data_per_element_;
         for (size_t i = 0; i < blocks_.size(); ++i) {
-            read_func(cursor + offset, block_lens_[i], blocks_[i]);
+            size_t current_read_size = std::min(need_read_size, offset + block_lens_[i]) - offset;
+            read_func(cursor + offset, current_read_size, blocks_[i]);
             offset += block_lens_[i];
+            if (offset >= need_read_size) {
+                break;
+            }
         }
     }
 
     bool
-    deserialize(std::istream& ifs) {
+    deserialize(std::istream& ifs, size_t cur_element_count) {
         try {
+            size_t offset = 0;
+            size_t need_read_size = cur_element_count * size_data_per_element_;
             for (size_t i = 0; i < blocks_.size(); ++i) {
-                size_t current_block_size = 0;
-                if ((i + 1) * block_size_ <= max_elements_ * size_data_per_element_) {
-                    current_block_size = block_size_;
-                } else {
-                    current_block_size = (max_elements_ * size_data_per_element_) % block_size_;
+                size_t current_read_size =
+                    std::min(need_read_size, offset + block_lens_[i]) - offset;
+                ifs.read(blocks_[i], current_read_size);
+                offset += block_lens_[i];
+                if (offset >= need_read_size) {
+                    break;
                 }
-                ifs.read(blocks_[i], current_block_size);
             }
         } catch (const std::ios_base::failure&) {
             return false;

@@ -44,15 +44,26 @@ public:
     KnnSearch(const DatasetPtr& query,
               int64_t k,
               const std::string& parameters,
-              const std::function<bool(int64_t)>& filter) const override {
-        throw std::runtime_error("Index not support func-filter");
-    }
+              const std::function<bool(int64_t)>& filter) const override;
 
     tl::expected<DatasetPtr, Error>
     RangeSearch(const DatasetPtr& query,
                 float radius,
                 const std::string& parameters,
-                BitsetPtr invalid = nullptr,
+                int64_t limited_size = -1) const override;
+
+    tl::expected<DatasetPtr, Error>
+    RangeSearch(const DatasetPtr& query,
+                float radius,
+                const std::string& parameters,
+                BitsetPtr invalid,
+                int64_t limited_size = -1) const override;
+
+    tl::expected<DatasetPtr, Error>
+    RangeSearch(const DatasetPtr& query,
+                float radius,
+                const std::string& parameters,
+                const std::function<bool(int64_t)>& filter,
                 int64_t limited_size = -1) const override;
 
 public:
@@ -84,10 +95,12 @@ private:
     using rs = std::pair<float, int64_t>;
 
     std::vector<rs>
-    knn_search(const float* query, int64_t k, BitsetPtr invalid) const;
+    knn_search(const float* query, int64_t k, const std::function<bool(int64_t)>& filter) const;
 
     std::vector<rs>
-    range_search(const float* query, float radius, BitsetPtr invalid) const;
+    range_search(const float* query,
+                 float radius,
+                 const std::function<bool(int64_t)>& filter) const;
 
     static float
     l2(const float* v1, const float* v2, int64_t dim);

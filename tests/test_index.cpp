@@ -22,6 +22,7 @@
 #include <fstream>
 #include <iostream>
 #include <nlohmann/json.hpp>
+#include <unordered_set>
 
 #include "fixtures/fixtures.h"
 #include "vsag/dataset.h"
@@ -29,6 +30,16 @@
 #include "vsag/logger.h"
 #include "vsag/options.h"
 #include "vsag/vsag.h"
+
+namespace vsag {
+
+extern float
+L2Sqr(const void* pVect1v, const void* pVect2v, const void* qty_ptr);
+
+extern float
+InnerProduct(const void* pVect1v, const void* pVect2v, const void* qty_ptr);
+
+}  // namespace vsag
 
 /////////////////////////////////////////////////////////
 // index->build
@@ -204,6 +215,135 @@ TEST_CASE("hnsw float32 recall", "[ft][index][hnsw]") {
     float range_recall =
         fixtures::test_range_recall(index, search_parameters, num_vectors, dim, ids, vectors);
     REQUIRE(range_recall > 0.99);
+}
+
+TEST_CASE("index search distance", "[ft][index]") {
+    vsag::Options::Instance().logger()->SetLevel(vsag::Logger::Level::kDEBUG);
+
+    size_t num_vectors = 1000;
+    size_t dim = 256;
+    auto metric_type = GENERATE("ip", "l2");
+    auto algorithm = GENERATE("hnsw", "diskann");
+
+    auto [ids, vectors] = fixtures::generate_ids_and_vectors(num_vectors, dim);
+
+    constexpr auto build_parameter_json = R"(
+    {{
+        "dtype": "float32",
+        "metric_type": "{}",
+        "dim": {},
+        "hnsw": {{
+            "max_degree": 24,
+            "ef_construction": 200
+        }},
+        "diskann": {{
+            "max_degree": 24,
+            "ef_construction": 200,
+            "pq_dims": 32,
+            "pq_sample_rate": 1,
+            "use_pq_search": true,
+            "use_bsa": true
+        }}
+    }}
+    )";
+
+    auto build_parameter = fmt::format(build_parameter_json, metric_type, dim);
+
+    auto createindex = vsag::Factory::CreateIndex(algorithm, build_parameter);
+    REQUIRE(createindex.has_value());
+    auto index = createindex.value();
+
+    // build index
+    auto base = vsag::Dataset::Make();
+    base->NumElements(num_vectors)
+        ->Dim(dim)
+        ->Ids(ids.data())
+        ->Float32Vectors(vectors.data())
+        ->Owner(false);
+    auto buildindex = index->Build(base);
+    REQUIRE(buildindex.has_value());
+
+    auto search_parameters = R"(
+    {
+        "hnsw": {
+            "ef_search": 100
+        },
+        "diskann": {
+            "ef_search": 100,
+            "io_limit": 100,
+            "beam_search": 4,
+            "use_reorder": true
+        }
+    }
+    )";
+
+    for (int i = 0; i < num_vectors; ++i) {
+        vsag::DatasetPtr query = vsag::Dataset::Make();
+        query->NumElements(1)->Dim(dim)->Float32Vectors(vectors.data() + dim * i)->Owner(false);
+
+        int64_t k = 10;
+        float max_score = 0;
+
+        auto result = index->KnnSearch(query, k, search_parameters);
+        REQUIRE(result.has_value());
+        auto knn_result = result.value();
+        for (int j = 0; j < knn_result->GetDim(); ++j) {
+            auto id = knn_result->GetIds()[j];
+            float score = 0;
+            if (metric_type == std::string("l2")) {
+                score = vsag::L2Sqr(vectors.data() + dim * i, vectors.data() + dim * id, &dim);
+            } else if (metric_type == std::string("ip")) {
+                score = 1 - vsag::InnerProduct(
+                                vectors.data() + dim * i, vectors.data() + dim * id, &dim);
+            }
+            fixtures::dist_t return_score = knn_result->GetDistances()[j];
+
+            REQUIRE(return_score == score);
+            max_score = score;
+        }
+
+        result = index->RangeSearch(query, max_score, search_parameters);
+        REQUIRE(result.has_value());
+        auto range_result = result.value();
+        REQUIRE(range_result->GetDim() >= k);
+        for (int j = 0; j < range_result->GetDim(); ++j) {
+            auto id = range_result->GetIds()[j];
+            float score = 0;
+            if (metric_type == std::string("l2")) {
+                score = vsag::L2Sqr(vectors.data() + dim * i, vectors.data() + dim * id, &dim);
+            } else if (metric_type == std::string("ip")) {
+                score = 1 - vsag::InnerProduct(
+                                vectors.data() + dim * i, vectors.data() + dim * id, &dim);
+            }
+
+            fixtures::dist_t return_score = range_result->GetDistances()[j];
+            REQUIRE(return_score == score);
+        }
+
+        auto search_parameters_no_reorder = R"(
+        {
+            "hnsw": {
+                "ef_search": 100
+            },
+            "diskann": {
+                "ef_search": 100,
+                "io_limit": 100,
+                "beam_search": 4
+            }
+        }
+        )";
+        result = index->RangeSearch(query, max_score, search_parameters_no_reorder);
+        REQUIRE(result.has_value());
+        auto range_upper_result = result.value();
+        std::unordered_set<uint32_t> candidates_results;
+        for (int j = 0; j < range_upper_result->GetDim(); ++j) {
+            candidates_results.insert(range_upper_result->GetIds()[j]);
+        }
+        for (int j = 0; j < range_result->GetDim(); ++j) {
+            auto iter = candidates_results.find(range_result->GetIds()[j]);
+            REQUIRE(iter != candidates_results.end());
+        }
+    }
 }
 
 TEST_CASE("index get distance by id", "[ft][index][hnsw]") {
@@ -1445,7 +1585,7 @@ TEST_CASE("hnsw with pretrained by conjugate graph", "[ft][index][hnsw]") {
     }
 }
 
-TEST_CASE("HNSW filtered knn search", "[ft][index][hnsw]") {
+TEST_CASE("HNSW filtered search", "[ft][index][hnsw]") {
     auto logger = vsag::Options::Instance().logger();
     logger->SetLevel(vsag::Logger::Level::kDEBUG);
 
@@ -1505,16 +1645,48 @@ TEST_CASE("HNSW filtered knn search", "[ft][index][hnsw]") {
     // Tests
     auto query = vsag::Dataset::Make();
     int64_t k = max_elements;
+    float radius = 100000;
+
+    SECTION("no filter") {
+        std::function<bool(int64_t)> null_func;
+        for (int i = 0; i < max_elements; i++) {
+            query->NumElements(1)->Dim(dim)->Float32Vectors(data + i * dim)->Owner(false);
+
+            {  // knn search
+                auto result = hnsw->KnnSearch(query, k, search_parameters);
+                REQUIRE(result.has_value());
+                REQUIRE(result.value()->GetDim() == k);
+            }
+
+            {  // range search
+                auto result = hnsw->RangeSearch(query, radius, search_parameters, -1);
+                REQUIRE(result.has_value());
+                REQUIRE(result.value()->GetDim() == max_elements);
+            }
+        }
+    }
+
     SECTION("valid functional filter") {
         auto filter = [](int64_t id) -> bool { return (id % 2 == 0); };
         for (int i = 0; i < max_elements; i++) {
             query->NumElements(1)->Dim(dim)->Float32Vectors(data + i * dim)->Owner(false);
 
-            auto result = hnsw->KnnSearch(query, k, search_parameters, filter);
-            REQUIRE(result.has_value());
-            REQUIRE(result.value()->GetDim() == max_elements / 2);
-            for (int j = 0; j < result.value()->GetDim(); j++) {
-                REQUIRE(not filter(result.value()->GetIds()[j]));
+            {  // knn search
+                auto result = hnsw->KnnSearch(query, k, search_parameters, filter);
+                REQUIRE(result.has_value());
+                REQUIRE(result.value()->GetDim() == max_elements / 2);
+                for (int j = 0; j < result.value()->GetDim(); j++) {
+                    REQUIRE(not filter(result.value()->GetIds()[j]));
+                }
+            }
+
+            {  // range search
+                auto result = hnsw->RangeSearch(query, radius, search_parameters, filter);
+                REQUIRE(result.has_value());
+                REQUIRE(result.value()->GetDim() == max_elements / 2);
+                for (int j = 0; j < result.value()->GetDim(); j++) {
+                    REQUIRE(not filter(result.value()->GetIds()[j]));
+                }
             }
         }
     }
@@ -1524,9 +1696,17 @@ TEST_CASE("HNSW filtered knn search", "[ft][index][hnsw]") {
         for (int i = 0; i < max_elements; i++) {
             query->NumElements(1)->Dim(dim)->Float32Vectors(data + i * dim)->Owner(false);
 
-            auto result = hnsw->KnnSearch(query, k, search_parameters, null_func);
-            REQUIRE(result.has_value());
-            REQUIRE(result.value()->GetDim() == k);
+            {  // knn search
+                auto result = hnsw->KnnSearch(query, k, search_parameters, null_func);
+                REQUIRE(result.has_value());
+                REQUIRE(result.value()->GetDim() == k);
+            }
+
+            {  // range search
+                auto result = hnsw->RangeSearch(query, radius, search_parameters, null_func);
+                REQUIRE(result.has_value());
+                REQUIRE(result.value()->GetDim() == max_elements);
+            }
         }
     }
 
@@ -1537,12 +1717,24 @@ TEST_CASE("HNSW filtered knn search", "[ft][index][hnsw]") {
             vsag::BitsetPtr filter = vsag::Bitset::Random(max_elements);
             int64_t num_deleted = filter->Count();
 
-            auto result = hnsw->KnnSearch(query, k, search_parameters, filter);
-            REQUIRE(result.has_value());
-            REQUIRE(result.value()->GetDim() == max_elements - num_deleted);
-            for (int64_t j = 0; j < result.value()->GetDim(); ++j) {
-                // deleted ids NOT in result
-                REQUIRE(filter->Test(result.value()->GetIds()[j] & 0xFFFFFFFFLL) == false);
+            {  // knn search
+                auto result = hnsw->KnnSearch(query, k, search_parameters, filter);
+                REQUIRE(result.has_value());
+                REQUIRE(result.value()->GetDim() == max_elements - num_deleted);
+                for (int64_t j = 0; j < result.value()->GetDim(); ++j) {
+                    // deleted ids NOT in result
+                    REQUIRE(filter->Test(result.value()->GetIds()[j] & 0xFFFFFFFFLL) == false);
+                }
+            }
+
+            {  // range search
+                auto result = hnsw->RangeSearch(query, radius, search_parameters, filter);
+                REQUIRE(result.has_value());
+                REQUIRE(result.value()->GetDim() == max_elements - num_deleted);
+                for (int64_t j = 0; j < result.value()->GetDim(); ++j) {
+                    // deleted ids NOT in result
+                    REQUIRE(filter->Test(result.value()->GetIds()[j] & 0xFFFFFFFFLL) == false);
+                }
             }
         }
     }
@@ -1552,9 +1744,17 @@ TEST_CASE("HNSW filtered knn search", "[ft][index][hnsw]") {
         for (int i = 0; i < max_elements; i++) {
             query->NumElements(1)->Dim(dim)->Float32Vectors(data + i * dim)->Owner(false);
 
-            auto result = hnsw->KnnSearch(query, k, search_parameters, filter);
-            REQUIRE(result.has_value());
-            REQUIRE(result.value()->GetDim() == max_elements);
+            {  // knn search
+                auto result = hnsw->KnnSearch(query, k, search_parameters, filter);
+                REQUIRE(result.has_value());
+                REQUIRE(result.value()->GetDim() == max_elements);
+            }
+
+            {  // range search
+                auto result = hnsw->KnnSearch(query, radius, search_parameters, filter);
+                REQUIRE(result.has_value());
+                REQUIRE(result.value()->GetDim() == max_elements);
+            }
         }
     }
 }
@@ -1574,6 +1774,7 @@ TEST_CASE("DiskAnn filtered knn search", "[ft][index][diskann]") {
     int beam_search = 4;
     int io_limit = 200;
     int k = 100;
+    float radius = 100000;
     auto metric_type = GENERATE("l2");
     constexpr auto build_parameter_json = R"(
     {{
@@ -1639,10 +1840,39 @@ TEST_CASE("DiskAnn filtered knn search", "[ft][index][diskann]") {
         for (int i = 0; i < max_elements; i++) {
             query->NumElements(1)->Dim(dim)->Float32Vectors(data + i * dim)->Owner(false);
 
-            auto result = diskann->KnnSearch(query, k, search_parameters, filter);
-            REQUIRE(result.has_value());
-            for (int j = 0; j < result.value()->GetDim(); j++) {
-                REQUIRE(not filter(result.value()->GetIds()[j]));
+            {  // knn search
+                auto result = diskann->KnnSearch(query, k, search_parameters, filter);
+                REQUIRE(result.has_value());
+                for (int j = 0; j < result.value()->GetDim(); j++) {
+                    REQUIRE(not filter(result.value()->GetIds()[j]));
+                }
+            }
+
+            {  // range search
+                auto result = diskann->RangeSearch(query, radius, search_parameters, filter);
+                REQUIRE(result.has_value());
+                for (int j = 0; j < result.value()->GetDim(); j++) {
+                    REQUIRE(not filter(result.value()->GetIds()[j]));
+                }
+            }
+        }
+    }
+
+    SECTION("no filter") {
+        std::function<bool(int64_t)> null_func;
+        for (int i = 0; i < max_elements; i++) {
+            query->NumElements(1)->Dim(dim)->Float32Vectors(data + i * dim)->Owner(false);
+
+            {  // knn search
+                auto result = diskann->KnnSearch(query, k, search_parameters);
+                REQUIRE(result.has_value());
+                REQUIRE(result.value()->GetDim() == k);
+            }
+
+            {  // range search
+                auto result = diskann->RangeSearch(query, radius, search_parameters, -1);
+                REQUIRE(result.has_value());
+                REQUIRE(result.value()->GetDim() == max_elements);
             }
         }
     }
@@ -1652,9 +1882,17 @@ TEST_CASE("DiskAnn filtered knn search", "[ft][index][diskann]") {
         for (int i = 0; i < max_elements; i++) {
             query->NumElements(1)->Dim(dim)->Float32Vectors(data + i * dim)->Owner(false);
 
-            auto result = diskann->KnnSearch(query, k, search_parameters, null_func);
-            REQUIRE(result.has_value());
-            REQUIRE(result.value()->GetDim() == k);
+            {  // knn search
+                auto result = diskann->KnnSearch(query, k, search_parameters, null_func);
+                REQUIRE(result.has_value());
+                REQUIRE(result.value()->GetDim() == k);
+            }
+
+            {  // range search
+                auto result = diskann->RangeSearch(query, radius, search_parameters, null_func);
+                REQUIRE(result.has_value());
+                REQUIRE(result.value()->GetDim() == max_elements);
+            }
         }
     }
 
@@ -1665,11 +1903,22 @@ TEST_CASE("DiskAnn filtered knn search", "[ft][index][diskann]") {
             vsag::BitsetPtr filter = vsag::Bitset::Random(max_elements);
             int64_t num_deleted = filter->Count();
 
-            auto result = diskann->KnnSearch(query, k, search_parameters, filter);
-            REQUIRE(result.has_value());
-            for (int64_t j = 0; j < result.value()->GetDim(); ++j) {
-                // deleted ids NOT in result
-                REQUIRE(filter->Test(result.value()->GetIds()[j] & 0xFFFFFFFFLL) == false);
+            {  // knn search
+                auto result = diskann->KnnSearch(query, k, search_parameters, filter);
+                REQUIRE(result.has_value());
+                for (int64_t j = 0; j < result.value()->GetDim(); ++j) {
+                    // deleted ids NOT in result
+                    REQUIRE(filter->Test(result.value()->GetIds()[j] & 0xFFFFFFFFLL) == false);
+                }
+            }
+
+            {  // range search
+                auto result = diskann->RangeSearch(query, radius, search_parameters, filter);
+                REQUIRE(result.has_value());
+                for (int64_t j = 0; j < result.value()->GetDim(); ++j) {
+                    // deleted ids NOT in result
+                    REQUIRE(filter->Test(result.value()->GetIds()[j] & 0xFFFFFFFFLL) == false);
+                }
             }
         }
     }
@@ -1679,9 +1928,17 @@ TEST_CASE("DiskAnn filtered knn search", "[ft][index][diskann]") {
         for (int i = 0; i < max_elements; i++) {
             query->NumElements(1)->Dim(dim)->Float32Vectors(data + i * dim)->Owner(false);
 
-            auto result = diskann->KnnSearch(query, k, search_parameters, filter);
-            REQUIRE(result.has_value());
-            REQUIRE(result.value()->GetDim() == k);
+            {  // knn search
+                auto result = diskann->KnnSearch(query, k, search_parameters, filter);
+                REQUIRE(result.has_value());
+                REQUIRE(result.value()->GetDim() == k);
+            }
+
+            {  // range search
+                auto result = diskann->RangeSearch(query, radius, search_parameters, filter);
+                REQUIRE(result.has_value());
+                REQUIRE(result.value()->GetDim() == max_elements);
+            }
         }
     }
 }
