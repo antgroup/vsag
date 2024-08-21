@@ -110,6 +110,21 @@ SimpleFlat::KnnSearch(const DatasetPtr& query,
                       int64_t k,
                       const std::string& parameters,
                       BitsetPtr invalid) const {
+    auto filter = [invalid](int64_t id) -> bool {
+        if (invalid) {
+            return invalid->Test(id);
+        } else {
+            return false;
+        }
+    };
+    return this->KnnSearch(query, k, parameters, filter);
+}
+
+tl::expected<DatasetPtr, Error>
+SimpleFlat::KnnSearch(const DatasetPtr& query,
+                      int64_t k,
+                      const std::string& parameters,
+                      const std::function<bool(int64_t)>& filter) const {
     int64_t dim = query->GetDim();
     k = std::min(k, GetNumElements());
     int64_t num_elements = query->GetNumElements();
@@ -120,7 +135,7 @@ SimpleFlat::KnnSearch(const DatasetPtr& query,
         return tl::unexpected(Error(ErrorType::DIMENSION_NOT_EQUAL, ""));
     }
 
-    std::vector<rs> knn_result = knn_search(query->GetFloat32Vectors(), k, invalid);
+    std::vector<rs> knn_result = knn_search(query->GetFloat32Vectors(), k, filter);
 
     auto result = Dataset::Make();
     if (knn_result.size() == 0) {
@@ -142,7 +157,31 @@ tl::expected<DatasetPtr, Error>
 SimpleFlat::RangeSearch(const DatasetPtr& query,
                         float radius,
                         const std::string& parameters,
+                        int64_t limited_size) const {
+    return this->RangeSearch(query, radius, parameters, (BitsetPtr) nullptr, limited_size);
+}
+
+tl::expected<DatasetPtr, Error>
+SimpleFlat::RangeSearch(const DatasetPtr& query,
+                        float radius,
+                        const std::string& parameters,
                         BitsetPtr invalid,
+                        int64_t limited_size) const {
+    auto filter = [invalid](int64_t id) -> bool {
+        if (invalid) {
+            return invalid->Test(id);
+        } else {
+            return false;
+        }
+    };
+    return this->RangeSearch(query, radius, parameters, filter, limited_size);
+}
+
+tl::expected<DatasetPtr, Error>
+SimpleFlat::RangeSearch(const DatasetPtr& query,
+                        float radius,
+                        const std::string& parameters,
+                        const std::function<bool(int64_t)>& filter,
                         int64_t limited_size) const {
     int64_t nq = query->GetNumElements();
     int64_t dim = query->GetDim();
@@ -154,7 +193,7 @@ SimpleFlat::RangeSearch(const DatasetPtr& query,
         return tl::unexpected(Error(ErrorType::INTERNAL_ERROR, ""));
     }
 
-    auto range_result = range_search(query->GetFloat32Vectors(), radius, invalid);
+    auto range_result = range_search(query->GetFloat32Vectors(), radius, filter);
 
     auto result = Dataset::Make();
     size_t target_size = range_result.size();
@@ -280,11 +319,12 @@ SimpleFlat::Deserialize(const ReaderSet& reader_set) {
     return {};
 }
 std::vector<SimpleFlat::rs>
-SimpleFlat::knn_search(const float* query, int64_t k, BitsetPtr invalid) const {
+SimpleFlat::knn_search(const float* query,
+                       int64_t k,
+                       const std::function<bool(int64_t)>& filter) const {
     std::priority_queue<SimpleFlat::rs> q;
     for (int64_t i = 0; i < this->num_elements_; ++i) {
-        int64_t bit_index = this->ids_[i] & ROW_ID_MASK;
-        if (invalid && invalid->Test(bit_index)) {
+        if (filter(ids_[i])) {
             continue;
         }
         const float* base = data_.data() + i * this->dim_;
@@ -314,11 +354,12 @@ SimpleFlat::knn_search(const float* query, int64_t k, BitsetPtr invalid) const {
 }
 
 std::vector<SimpleFlat::rs>
-SimpleFlat::range_search(const float* query, float radius, BitsetPtr invalid) const {
+SimpleFlat::range_search(const float* query,
+                         float radius,
+                         const std::function<bool(int64_t)>& filter) const {
     std::priority_queue<SimpleFlat::rs> q;
     for (int64_t i = 0; i < this->num_elements_; ++i) {
-        int64_t bit_index = this->ids_[i] & ROW_ID_MASK;
-        if (invalid && invalid->Test(bit_index)) {
+        if (filter(ids_[i])) {
             continue;
         }
         const float* base = data_.data() + i * this->dim_;

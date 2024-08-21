@@ -71,8 +71,8 @@ Factory::CreateIndex(const std::string& origin_name,
             logger::debug("created a diskann index");
             return std::make_shared<DiskANN>(params.metric,
                                              params.dtype,
-                                             params.max_degree,
                                              params.ef_construction,
+                                             params.max_degree,
                                              params.pq_sample_rate,
                                              params.pq_dims,
                                              params.dim,
@@ -101,7 +101,7 @@ public:
           file_(std::ifstream(filename, std::ios::binary)),
           base_offset_(base_offset),
           size_(size) {
-        pool_ = std::make_unique<progschj::ThreadPool>(Option::Instance().sector_size());
+        pool_ = std::make_unique<progschj::ThreadPool>(Option::Instance().num_threads());
     }
 
     ~LocalFileReader() {

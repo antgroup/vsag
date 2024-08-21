@@ -37,4 +37,21 @@ Options::logger() {
     return logger_;
 }
 
+void
+Options::set_block_size_limit(size_t size) {
+    if (size < 128 * 1024 * 1024) {
+        throw std::runtime_error(fmt::format("size ({}) should be greater than 128M.", size));
+    }
+    block_size_limit_.store(size, std::memory_order_release);
+}
+
+void
+Options::set_num_threads(size_t num_threads) {
+    if (num_threads < 1 || num_threads > 200) {
+        throw std::runtime_error(
+            fmt::format("num_threads must be set between 1 and 200, but found {}.", num_threads));
+    }
+    num_threads_.store(num_threads, std::memory_order_release);
+}
+
 }  // namespace vsag

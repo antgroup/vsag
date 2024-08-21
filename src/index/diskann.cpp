@@ -75,7 +75,7 @@ class LocalMemoryReader : public Reader {
 public:
     LocalMemoryReader(std::stringstream& file, bool support_async_io) {
         if (support_async_io) {
-            pool_ = std::make_unique<ThreadPool>(Option::Instance().sector_size());
+            pool_ = std::make_unique<ThreadPool>(Option::Instance().num_threads());
         }
         file_ << file.rdbuf();
         file_.seekg(0, std::ios::end);
@@ -162,7 +162,7 @@ DiskANN::DiskANN(diskann::Metric metric,
       use_bsa_(use_bsa),
       use_async_io_(use_async_io) {
     if (not use_async_io_) {
-        pool_ = std::make_unique<ThreadPool>(Option::Instance().sector_size());
+        pool_ = std::make_unique<ThreadPool>(Option::Instance().num_threads());
     }
     status_ = IndexStatus::EMPTY;
     batch_read_ =
@@ -272,11 +272,10 @@ DiskANN::build(const DatasetPtr& base) {
         disk_layout_reader_ =
             std::make_shared<LocalMemoryReader>(disk_layout_stream_, use_async_io_);
         reader_.reset(new LocalFileReader(batch_read_));
-        index_.reset(
-            new diskann::PQFlashIndex<float, int64_t>(reader_, metric_, sector_len_, use_bsa_));
-        index_->set_sector_size(Option::Instance().sector_size());
+        index_.reset(new diskann::PQFlashIndex<float, int64_t>(
+            reader_, metric_, sector_len_, dim_, use_bsa_));
         index_->load_from_separate_paths(
-            omp_get_num_procs(), pq_pivots_stream_, disk_pq_compressed_vectors_, tag_stream_);
+            pq_pivots_stream_, disk_pq_compressed_vectors_, tag_stream_);
         if (preload_) {
             index_->load_graph(graph_stream_);
         } else {
@@ -450,6 +449,23 @@ DiskANN::range_search(const DatasetPtr& query,
                       const std::string& parameters,
                       BitsetPtr invalid,
                       int64_t limited_size) const {
+    // check filter
+    std::function<bool(int64_t)> filter = nullptr;
+    if (invalid != nullptr) {
+        filter = [invalid](int64_t offset) -> bool {
+            int64_t bit_index = offset & ROW_ID_MASK;
+            return invalid->Test(bit_index);
+        };
+    }
+    return this->range_search(query, radius, parameters, filter, limited_size);
+};
+
+tl::expected<DatasetPtr, Error>
+DiskANN::range_search(const DatasetPtr& query,
+                      float radius,
+                      const std::string& parameters,
+                      const std::function<bool(int64_t)>& filter,
+                      int64_t limited_size) const {
     SlowTaskTimer t("diskann rangesearch", 200);
 
     // cannot perform search on empty index
@@ -488,21 +504,8 @@ DiskANN::range_search(const DatasetPtr& query,
         CHECK_ARGUMENT(ef_search > 0,
                        fmt::format("ef_search({}) must be greater than 0", ef_search));
 
-        // check filter
-        std::function<bool(int64_t)> filter = nullptr;
-        if (invalid) {
-            filter = [&](int64_t offset) -> bool {
-                int64_t bit_index = offset & ROW_ID_MASK;
-                return invalid->Test(bit_index & ROW_ID_MASK);
-            };
-        }
-
         bool reorder = params.use_reorder;
         int64_t io_limit = params.io_limit;
-
-        if (reorder && preload_) {
-            io_limit = std::min((int64_t)Option::Instance().sector_size(), io_limit);
-        }
 
         beam_search = std::min(beam_search, MAXIMAL_BEAM_SEARCH);
         beam_search = std::max(beam_search, MINIMAL_BEAM_SEARCH);
@@ -692,10 +695,8 @@ DiskANN::deserialize(const ReaderSet& reader_set) {
     disk_layout_reader_ = reader_set.Get(DISKANN_LAYOUT_FILE);
     reader_.reset(new LocalFileReader(batch_read_));
     index_.reset(
-        new diskann::PQFlashIndex<float, int64_t>(reader_, metric_, sector_len_, use_bsa_));
-    index_->set_sector_size(Option::Instance().sector_size());
-    index_->load_from_separate_paths(
-        omp_get_num_procs(), pq_pivots_stream, disk_pq_compressed_vectors, tag_stream);
+        new diskann::PQFlashIndex<float, int64_t>(reader_, metric_, sector_len_, dim_, use_bsa_));
+    index_->load_from_separate_paths(pq_pivots_stream, disk_pq_compressed_vectors, tag_stream);
 
     auto graph_reader = reader_set.Get(DISKANN_GRAPH);
     if (preload_) {
@@ -950,7 +951,7 @@ DiskANN::build_partial_graph(const DatasetPtr& base,
             convert_binary_to_stream(binary_set.Get(DISKANN_GRAPH), graph_stream);
             convert_binary_to_stream(binary_set.Get(DISKANN_TAG_FILE), tag_stream);
 
-            build_index_->load(graph_stream, tag_stream, omp_get_max_threads(), L_);
+            build_index_->load(graph_stream, tag_stream, Options::Instance().num_threads(), L_);
             builded_nodes =
                 deserialize_from_binary<std::unordered_set<uint32_t>>(binary_set.Get(BUILD_NODES));
         }
@@ -980,15 +981,13 @@ DiskANN::load_disk_index(const BinarySet& binary_set) {
     disk_layout_reader_ = std::make_shared<LocalMemoryReader>(disk_layout_stream_, use_async_io_);
     reader_.reset(new LocalFileReader(batch_read_));
     index_.reset(
-        new diskann::PQFlashIndex<float, int64_t>(reader_, metric_, sector_len_, use_bsa_));
-    index_->set_sector_size(Option::Instance().sector_size());
+        new diskann::PQFlashIndex<float, int64_t>(reader_, metric_, sector_len_, dim_, use_bsa_));
 
     convert_binary_to_stream(binary_set.Get(DISKANN_COMPRESSED_VECTOR),
                              disk_pq_compressed_vectors_);
     convert_binary_to_stream(binary_set.Get(DISKANN_PQ), pq_pivots_stream_);
     convert_binary_to_stream(binary_set.Get(DISKANN_TAG_FILE), tag_stream_);
-    index_->load_from_separate_paths(
-        omp_get_num_procs(), pq_pivots_stream_, disk_pq_compressed_vectors_, tag_stream_);
+    index_->load_from_separate_paths(pq_pivots_stream_, disk_pq_compressed_vectors_, tag_stream_);
     if (preload_) {
         index_->load_graph(graph_stream_);
     } else {

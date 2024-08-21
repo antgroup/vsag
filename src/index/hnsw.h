@@ -107,9 +107,29 @@ public:
     RangeSearch(const DatasetPtr& query,
                 float radius,
                 const std::string& parameters,
-                BitsetPtr invalid = nullptr,
                 int64_t limited_size = -1) const override {
-        SAFE_CALL(return this->range_search(query, radius, parameters, invalid, limited_size));
+        SAFE_CALL(return this->range_search_internal(
+            query, radius, parameters, (BitsetPtr) nullptr, limited_size));
+    }
+
+    tl::expected<DatasetPtr, Error>
+    RangeSearch(const DatasetPtr& query,
+                float radius,
+                const std::string& parameters,
+                const std::function<bool(int64_t)>& filter,
+                int64_t limited_size = -1) const override {
+        SAFE_CALL(
+            return this->range_search_internal(query, radius, parameters, filter, limited_size));
+    }
+
+    tl::expected<DatasetPtr, Error>
+    RangeSearch(const DatasetPtr& query,
+                float radius,
+                const std::string& parameters,
+                BitsetPtr invalid,
+                int64_t limited_size = -1) const override {
+        SAFE_CALL(
+            return this->range_search_internal(query, radius, parameters, invalid, limited_size));
     }
 
     tl::expected<uint32_t, Error>
@@ -202,11 +222,19 @@ private:
                const std::string& parameters,
                hnswlib::BaseFilterFunctor* filter_ptr) const;
 
+    template <typename FilterType>
+    tl::expected<DatasetPtr, Error>
+    range_search_internal(const DatasetPtr& query,
+                          float radius,
+                          const std::string& parameters,
+                          const FilterType& filter_obj,
+                          int64_t limited_size) const;
+
     tl::expected<DatasetPtr, Error>
     range_search(const DatasetPtr& query,
                  float radius,
                  const std::string& parameters,
-                 BitsetPtr invalid,
+                 hnswlib::BaseFilterFunctor* filter_ptr,
                  int64_t limited_size) const;
 
     tl::expected<uint32_t, Error>

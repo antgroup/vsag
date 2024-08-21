@@ -30,27 +30,27 @@ public:
     Instance();
 
 public:
-    // Gets the sector size with memory order acquire for thread safety
+    // Gets the number of threads with memory order acquire for thread safety. In a non-isolated
+    // resource environment, limit the number of threads used for disk index IO during the search
+    // process; it is recommended to set this to one to two times the number of available CPU cores
+    // in the system. The size of num_threads is limited to between 1 and 200.
     inline size_t
-    sector_size() const {
-        return sector_size_.load(std::memory_order_acquire);
+    num_threads() const {
+        return num_threads_.load(std::memory_order_acquire);
     }
 
-    inline void
-    set_sector_size(size_t size) {
-        sector_size_.store(size, std::memory_order_release);
-    }
+    void
+    set_num_threads(size_t num_threads);
 
-    // Gets the limit of block size with memory order acquire for thread safety
+    // Gets the limit of block size with memory order acquire for thread safety. The setting of
+    // block size should be greater than 128M.
     inline size_t
     block_size_limit() const {
         return block_size_limit_.load(std::memory_order_acquire);
     }
 
-    inline void
-    set_block_size_limit(size_t size) {
-        block_size_limit_.store(size, std::memory_order_release);
-    }
+    void
+    set_block_size_limit(size_t size);
 
     Logger*
     logger();
@@ -73,7 +73,7 @@ private:
 
 private:
     // In a single query, the space size used to store disk vectors.
-    std::atomic<size_t> sector_size_{512};
+    std::atomic<size_t> num_threads_{8};
 
     // The size of the maximum memory allocated each time (default is 128MB)
     std::atomic<size_t> block_size_limit_{128 * 1024 * 1024};

@@ -93,7 +93,25 @@ public:
     RangeSearch(const DatasetPtr& query,
                 float radius,
                 const std::string& parameters,
-                BitsetPtr invalid = nullptr,
+                int64_t limited_size = -1) const override {
+        SAFE_CALL(return this->range_search(
+            query, radius, parameters, (BitsetPtr) nullptr, limited_size));
+    }
+
+    tl::expected<DatasetPtr, Error>
+    RangeSearch(const DatasetPtr& query,
+                float radius,
+                const std::string& parameters,
+                const std::function<bool(int64_t)>& filter,
+                int64_t limited_size = -1) const override {
+        SAFE_CALL(return this->range_search(query, radius, parameters, filter, limited_size));
+    }
+
+    tl::expected<DatasetPtr, Error>
+    RangeSearch(const DatasetPtr& query,
+                float radius,
+                const std::string& parameters,
+                BitsetPtr invalid,
                 int64_t limited_size = -1) const override {
         SAFE_CALL(return this->range_search(query, radius, parameters, invalid, limited_size));
     }
@@ -158,6 +176,13 @@ private:
                int64_t k,
                const std::string& parameters,
                const std::function<bool(int64_t)>& filter) const;
+
+    tl::expected<DatasetPtr, Error>
+    range_search(const DatasetPtr& query,
+                 float radius,
+                 const std::string& parameters,
+                 const std::function<bool(int64_t)>& filter,
+                 int64_t limited_size) const;
 
     tl::expected<DatasetPtr, Error>
     range_search(const DatasetPtr& query,

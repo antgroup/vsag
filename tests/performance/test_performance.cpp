@@ -155,6 +155,11 @@ public:
         return neighbors_[i * neighbors_shape_.second];
     }
 
+    int64_t*
+    GetNeighbors(int64_t i) const {
+        return neighbors_.get() + i * neighbors_shape_.second;
+    }
+
     int64_t
     GetNumberOfBase() const {
         return number_of_base_;

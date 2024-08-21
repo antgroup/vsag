@@ -90,7 +90,7 @@ public:
       * 
       * @param query should contains dim, num_elements and vectors
       * @param k the result size of every query
-      * @param invalid represents whether an element is filtered out by post-filter
+      * @param invalid represents whether an element is filtered out by pre-filter
       * @return result contains 
       *                - num_elements: 1
       *                - ids, distances: length is (num_elements * k)
@@ -106,7 +106,7 @@ public:
       *
       * @param query should contains dim, num_elements and vectors
       * @param k the result size of every query
-      * @param filter represents whether an element is filtered out by post-filter
+      * @param filter represents whether an element is filtered out by pre-filter
       * @return result contains
       *                - num_elements: 1
       *                - ids, distances: length is (num_elements * k)
@@ -126,7 +126,6 @@ public:
       *                - limited_size <= 0 : no limit
       *                - limited_size == 0 : error
       *                - limited_size >= 1 : limit result size to limited_size
-      * @param invalid represents whether an element is filteing out by pre-filter
       * @return result contains
       *                - num_elements: 1
       *                - dim: the size of results
@@ -136,10 +135,51 @@ public:
     RangeSearch(const DatasetPtr& query,
                 float radius,
                 const std::string& parameters,
-                BitsetPtr invalid = nullptr,
-                int64_t limited_size = -1) const {
-        throw std::runtime_error("Index not support range search");
-    }
+                int64_t limited_size = -1) const = 0;
+
+    /**
+      * Performing single range search on index
+      *
+      * @param query should contains dim, num_elements and vectors
+      * @param radius of search, determines which results will be returned
+      * @param limited_size of search result size.
+      *                - limited_size <= 0 : no limit
+      *                - limited_size == 0 : error
+      *                - limited_size >= 1 : limit result size to limited_size
+      * @param invalid represents whether an element is filtered out by pre-filter
+      * @return result contains
+      *                - num_elements: 1
+      *                - dim: the size of results
+      *                - ids, distances: length is dim
+      */
+    virtual tl::expected<DatasetPtr, Error>
+    RangeSearch(const DatasetPtr& query,
+                float radius,
+                const std::string& parameters,
+                BitsetPtr invalid,
+                int64_t limited_size = -1) const = 0;
+
+    /**
+      * Performing single range search on index
+      *
+      * @param query should contains dim, num_elements and vectors
+      * @param radius of search, determines which results will be returned
+      * @param limited_size of search result size.
+      *                - limited_size <= 0 : no limit
+      *                - limited_size == 0 : error
+      *                - limited_size >= 1 : limit result size to limited_size
+      * @param filter represents whether an element is filtered out by pre-filter
+      * @return result contains
+      *                - num_elements: 1
+      *                - dim: the size of results
+      *                - ids, distances: length is dim
+      */
+    virtual tl::expected<DatasetPtr, Error>
+    RangeSearch(const DatasetPtr& query,
+                float radius,
+                const std::string& parameters,
+                const std::function<bool(int64_t)>& filter,
+                int64_t limited_size = -1) const = 0;
 
     /**
      * Pretraining the conjugate graph involves searching with generated queries and providing feedback.

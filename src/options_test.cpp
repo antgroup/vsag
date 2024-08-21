@@ -19,11 +19,16 @@
 #include "default_allocator.h"
 
 TEST_CASE("option test", "[ut][option]") {
-    size_t sector_size = 100;
-    vsag::Options::Instance().set_sector_size(sector_size);
-    REQUIRE(vsag::Option::Instance().sector_size() == sector_size);
-
     size_t block_size_limit = 134217728;
     vsag::Options::Instance().set_block_size_limit(block_size_limit);
     REQUIRE(vsag::Option::Instance().block_size_limit() == block_size_limit);
+
+    REQUIRE_THROWS(vsag::Option::Instance().set_block_size_limit(1));
+
+    size_t num_threads = 24;
+    vsag::Options::Instance().set_num_threads(num_threads);
+    REQUIRE(vsag::Option::Instance().num_threads() == num_threads);
+
+    REQUIRE_THROWS(vsag::Option::Instance().set_num_threads(0));
+    REQUIRE_THROWS(vsag::Option::Instance().set_num_threads(201));
 }

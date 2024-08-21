@@ -43,28 +43,10 @@ namespace diskann
 {
 
 template <typename T, typename LabelT>
-PQFlashIndex<T, LabelT>::PQFlashIndex(std::shared_ptr<LocalFileReader> &fileReader, diskann::Metric m, size_t sector_len, bool use_bsa)
-    : reader(fileReader), metric(m), thread_data(nullptr), sector_len(sector_len), use_bsa(use_bsa)
+PQFlashIndex<T, LabelT>::PQFlashIndex(std::shared_ptr<LocalFileReader> &fileReader, diskann::Metric m, size_t sector_len, size_t dim, bool use_bsa)
+    : reader(fileReader), metric(m), thread_data(nullptr), sector_len(sector_len), use_bsa(use_bsa), data_dim(dim)
 {
-    if (m == diskann::Metric::COSINE || m == diskann::Metric::INNER_PRODUCT)
-    {
-        if (std::is_floating_point<T>::value)
-        {
-            diskann::cout << "Cosine metric chosen for (normalized) float data."
-                             "Changing distance to L2 to boost accuracy."
-                          << std::endl;
-            metric = diskann::Metric::L2;
-        }
-        else
-        {
-            diskann::cerr << "WARNING: Cannot normalize integral data types."
-                          << " This may result in erroneous results or poor recall."
-                          << " Consider using L2 distance with integral data types." << std::endl;
-        }
-    }
-
-    this->dist_cmp.reset(diskann::get_distance_function<T>(metric));
-    this->dist_cmp_float.reset(diskann::get_distance_function<float>(metric));
+    this->dist_cmp_float.reset(new VsagDistanceL2Float(data_dim));
 }
 
 template <typename T, typename LabelT> PQFlashIndex<T, LabelT>::~PQFlashIndex()
@@ -121,7 +103,7 @@ void PQFlashIndex<T, LabelT>::setup_thread_data(uint64_t nthreads, uint64_t visi
     for (int64_t thread = 0; thread < (int64_t)nthreads; thread++)
     {
         {
-            SSDThreadData<T> *data = new SSDThreadData<T>(this->aligned_dim, visited_reserve, sector_size, sector_len);
+            SSDThreadData<T> *data = new SSDThreadData<T>(this->max_degree, this->aligned_dim, this->n_chunks);
             this->thread_data.push(data);
         }
     }
@@ -435,8 +417,6 @@ template <typename T, typename LabelT> void PQFlashIndex<T, LabelT>::use_medoids
     alloc_aligned(((void **)&centroid_data), num_medoids * aligned_dim * sizeof(float), 32);
     std::memset(centroid_data, 0, num_medoids * aligned_dim * sizeof(float));
 
-    ScratchStoreManager<SSDThreadData<T>> manager(this->thread_data);
-    auto data = manager.scratch_space();
     // diskann::cout << "Loading centroid data from medoids vector data of " << num_medoids << " medoid(s)" << std::endl;
     for (uint64_t cur_m = 0; cur_m < num_medoids; cur_m++)
     {
@@ -1325,7 +1305,7 @@ int PQFlashIndex<T, LabelT>::load_from_separate_paths(uint32_t num_threads, cons
 }
 
 template <typename T, typename LabelT>
-int PQFlashIndex<T, LabelT>::load_from_separate_paths(uint32_t num_threads, std::stringstream &pivots_stream,
+int PQFlashIndex<T, LabelT>::load_from_separate_paths(std::stringstream &pivots_stream,
                                                       std::stringstream &compressed_stream, std::stringstream& tag_stream)
 {
 
@@ -1356,9 +1336,13 @@ int PQFlashIndex<T, LabelT>::load_from_separate_paths(uint32_t num_threads, std:
     size_t npts_u64, nchunks_u64;
     diskann::load_bin<uint8_t>(compressed_stream, this->data, npts_u64, nchunks_u64);
     if (use_bsa) {
-        errors.reset(new float[npts_u64]);
-        compressed_stream.seekg(sizeof(uint32_t) * 2 + npts_u64 * nchunks_u64 * sizeof(uint8_t), compressed_stream.beg);
-        compressed_stream.read((char *) errors.get(), npts_u64 * sizeof(float));
+        try {
+            errors.reset(new float[npts_u64]);
+            compressed_stream.seekg(sizeof(uint32_t) * 2 + npts_u64 * nchunks_u64 * sizeof(uint8_t), compressed_stream.beg);
+            compressed_stream.read((char *) errors.get(), npts_u64 * sizeof(float));
+        } catch (std::exception e) {
+            throw std::runtime_error("get errors for bsa failed:" + std::string(e.what()));
+        }
     }
 
 
@@ -1461,9 +1445,6 @@ int PQFlashIndex<T, LabelT>::load_from_separate_paths(uint32_t num_threads, std:
     medoids = new uint32_t[1];
     medoids[0] = (uint32_t)(medoid_id_on_file);
 
-    this->setup_thread_data(num_threads);
-    this->max_nthreads = num_threads;
-
     use_medoids_data_as_centroids();
     // diskann::cout << "done.." << std::endl;
     return 0;
@@ -1478,87 +1459,46 @@ int64_t PQFlashIndex<T, LabelT>::cached_beam_search(const T *query1, const uint6
                                                  const uint32_t io_limit, const bool use_reorder_data,
                                                  QueryStats *stats)
 {
-    int32_t filter_num = 0;
+    std::shared_ptr<float[]> aligned_query_T = std::shared_ptr<float[]>(new float[this->data_dim]);
 
-    if (beam_width > MAX_N_SECTOR_READS)
-        throw ANNException("Beamwidth can not be higher than MAX_N_SECTOR_READS", -1, __FUNCSIG__, __FILE__, __LINE__);
 
-    ScratchStoreManager<SSDThreadData<T>> manager(this->thread_data);
-    auto data = manager.scratch_space();
-    auto query_scratch = &(data->scratch);
-    auto pq_query_scratch = query_scratch->_pq_scratch;
-
-    // reset query scratch
-    query_scratch->reset();
-
-    // copy query to thread specific aligned and allocated memory (for distance
-    // calculations we need aligned data)
-    float query_norm = 0;
-    T *aligned_query_T = query_scratch->aligned_query_T;
-    float *query_float = pq_query_scratch->aligned_query_float;
-    float *query_rotated = pq_query_scratch->rotated_query;
-
-    // if inner product, we laso normalize the query and set the last coordinate
-    // to 0 (this is the extra coordindate used to convert MIPS to L2 search)
-    if (metric == diskann::Metric::INNER_PRODUCT)
+    for (size_t i = 0; i < this->data_dim; i++)
     {
-        for (size_t i = 0; i < this->data_dim - 1; i++)
-        {
-            aligned_query_T[i] = query1[i];
-            query_norm += query1[i] * query1[i];
-        }
-        aligned_query_T[this->data_dim - 1] = 0;
-
-        query_norm = std::sqrt(query_norm);
-
-        for (size_t i = 0; i < this->data_dim - 1; i++)
-        {
-            aligned_query_T[i] = (T)(aligned_query_T[i] / query_norm);
-        }
-        pq_query_scratch->set(this->data_dim, aligned_query_T);
-    }
-    else
-    {
-        for (size_t i = 0; i < this->data_dim; i++)
-        {
-            aligned_query_T[i] = query1[i];
-        }
-        pq_query_scratch->set(this->data_dim, aligned_query_T);
+        aligned_query_T[i] = (float) query1[i];
     }
 
-    // pointers to buffers for data
-    T *data_buf = query_scratch->coord_scratch;
     // FIXME: alternative instruction on aarch64
 #if defined(__i386__) || defined(__x86_64__)
-    _mm_prefetch((char *)data_buf, _MM_HINT_T1);
+    _mm_prefetch((char *)aligned_query_T.get(), _MM_HINT_T1);
 #endif
 
     // sector scratch
-    char *sector_scratch = query_scratch->sector_scratch;
-    uint64_t &sector_scratch_idx = query_scratch->sector_idx;
+    auto sector_scratch = std::shared_ptr<char[]>(new char[beam_width * sector_len]);
 
     // query <-> PQ chunk centers distances
-    pq_table.preprocess_query(query_rotated); // center the query and rotate if
-                                              // we have a rotation matrix
-    float *pq_dists = pq_query_scratch->aligned_pqtable_dist_scratch;
-    pq_table.populate_chunk_distances(query_rotated, pq_dists);
+    pq_table.preprocess_query(aligned_query_T.get()); // center the query and rotate if
+    // we have a rotation matrix
+    auto pq_dists = std::shared_ptr<float[]>(new float[NUM_CENTROID * this->n_chunks]);
+    pq_table.populate_chunk_distances(aligned_query_T.get(), pq_dists.get());
 
     // query <-> neighbor list
-    float *dist_scratch = pq_query_scratch->aligned_dist_scratch;
-    uint8_t *pq_coord_scratch = pq_query_scratch->aligned_pq_coord_scratch;
+    auto dist_scratch = std::shared_ptr<float[]>(new float[this->max_degree]);
+    auto pq_coord_scratch = std::shared_ptr<uint8_t[]>(new uint8_t[this->max_degree * this->n_chunks]);
 
     // lambda to batch compute query<-> node distances in PQ space
     auto compute_dists = [this, pq_coord_scratch, pq_dists](const uint32_t *ids, const uint64_t n_ids,
                                                             float *dists_out) {
-        diskann::aggregate_coords(ids, n_ids, this->data, this->n_chunks, pq_coord_scratch);
-        diskann::pq_dist_lookup(pq_coord_scratch, n_ids, this->n_chunks, pq_dists, dists_out);
+        diskann::aggregate_coords(ids, n_ids, this->data, this->n_chunks, pq_coord_scratch.get());
+        diskann::pq_dist_lookup(pq_coord_scratch.get(), n_ids, this->n_chunks, pq_dists.get(), dists_out);
     };
     Timer query_timer, io_timer, cpu_timer;
 
-    tsl::robin_set<uint64_t> &visited = query_scratch->visited;
-    NeighborPriorityQueue &retset = query_scratch->retset;
+    tsl::robin_set<uint64_t> visited;
+    std::vector<Neighbor> full_retset;
+    NeighborPriorityQueue retset;
+    visited.reserve(l_search);
+    full_retset.reserve(l_search);
     retset.reserve(l_search);
-    std::vector<Neighbor> &full_retset = query_scratch->full_retset;
 
     uint32_t best_medoid = 0;
     float best_dist = std::numeric_limits<float>::max();
@@ -1566,7 +1506,7 @@ int64_t PQFlashIndex<T, LabelT>::cached_beam_search(const T *query1, const uint6
     for (uint64_t cur_m = 0; cur_m < num_medoids; cur_m++)
     {
         float cur_expanded_dist =
-                dist_cmp_float->compare(query_float, centroid_data + aligned_dim * cur_m, (uint32_t)aligned_dim);
+            dist_cmp_float->compare(aligned_query_T.get(), centroid_data + aligned_dim * cur_m, (uint32_t)data_dim);
         if (cur_expanded_dist < best_dist)
         {
             best_medoid = medoids[cur_m];
@@ -1574,7 +1514,7 @@ int64_t PQFlashIndex<T, LabelT>::cached_beam_search(const T *query1, const uint6
         }
     }
 
-    compute_dists(&best_medoid, 1, dist_scratch);
+    compute_dists(&best_medoid, 1, dist_scratch.get());
     retset.insert(Neighbor(best_medoid, dist_scratch[0]));
     visited.insert(best_medoid);
 
@@ -1599,7 +1539,7 @@ int64_t PQFlashIndex<T, LabelT>::cached_beam_search(const T *query1, const uint6
         frontier_nhoods.clear();
         frontier_read_reqs.clear();
         cached_nhoods.clear();
-        sector_scratch_idx = 0;
+        uint64_t sector_scratch_idx = 0;
         // find new beam
         uint32_t num_seen = 0;
         while (retset.has_unexpanded_node() && frontier.size() < beam_width && num_seen < beam_width)
@@ -1635,7 +1575,7 @@ int64_t PQFlashIndex<T, LabelT>::cached_beam_search(const T *query1, const uint6
                 auto id = frontier[i];
                 std::pair<uint32_t, char *> fnhood;
                 fnhood.first = id;
-                fnhood.second = sector_scratch + sector_scratch_idx * sector_len;
+                fnhood.second = sector_scratch.get() + sector_scratch_idx * sector_len;
                 sector_scratch_idx++;
                 frontier_nhoods.push_back(fnhood);
                 frontier_read_reqs.emplace_back(NODE_SECTOR_NO(((size_t)id)) * sector_len, sector_len, fnhood.second);
@@ -1646,7 +1586,6 @@ int64_t PQFlashIndex<T, LabelT>::cached_beam_search(const T *query1, const uint6
                 }
                 num_ios++;
             }
-            io_timer.reset();
             reader->read(frontier_read_reqs);
 
 //            diskann_stream.seekg(13598720);
@@ -1673,31 +1612,14 @@ int64_t PQFlashIndex<T, LabelT>::cached_beam_search(const T *query1, const uint6
             auto global_cache_iter = coord_cache.find(cached_nhood.first);
             T *node_fp_coords_copy = global_cache_iter->second;
             float cur_expanded_dist;
-            if (!use_disk_index_pq)
-            {
-                cur_expanded_dist = dist_cmp->compare(aligned_query_T, node_fp_coords_copy, (uint32_t)aligned_dim);
-            }
-            else
-            {
-                if (metric == diskann::Metric::INNER_PRODUCT)
-                    cur_expanded_dist = disk_pq_table.inner_product(query_float, (uint8_t *)node_fp_coords_copy);
-                else
-                    cur_expanded_dist = disk_pq_table.l2_distance( // disk_pq does not support OPQ yet
-                        query_float, (uint8_t *)node_fp_coords_copy);
-            }
+            cur_expanded_dist = dist_cmp_float->compare(aligned_query_T.get(), (float *)node_fp_coords_copy, (uint32_t)data_dim);
             full_retset.push_back(Neighbor((uint32_t)cached_nhood.first, cur_expanded_dist));
 
             uint64_t nnbrs = cached_nhood.second.first;
             uint32_t *node_nbrs = cached_nhood.second.second;
 
             // compute node_nbrs <-> query dists in PQ space
-            cpu_timer.reset();
-            compute_dists(node_nbrs, nnbrs, dist_scratch);
-            if (stats != nullptr)
-            {
-                stats->n_cmps += (uint32_t)nnbrs;
-                stats->cpu_us += (float)cpu_timer.elapsed();
-            }
+            compute_dists(node_nbrs, nnbrs, dist_scratch.get());
 
             // process prefetched nhood
             for (uint64_t m = 0; m < nnbrs; ++m)
@@ -1718,32 +1640,15 @@ int64_t PQFlashIndex<T, LabelT>::cached_beam_search(const T *query1, const uint6
             uint32_t *node_buf = OFFSET_TO_NODE_NHOOD(node_disk_buf);
             uint64_t nnbrs = (uint64_t)(*node_buf);
             T *node_fp_coords = OFFSET_TO_NODE_COORDS(node_disk_buf);
-            memcpy(data_buf, node_fp_coords, disk_bytes_per_point);
-            float cur_expanded_dist;
-            if (!use_disk_index_pq)
-            {
-                cur_expanded_dist = dist_cmp->compare(aligned_query_T, data_buf, (uint32_t)aligned_dim);
-            }
-
-            else
-            {
-                if (metric == diskann::Metric::INNER_PRODUCT)
-                    cur_expanded_dist = disk_pq_table.inner_product(query_float, (uint8_t *)data_buf);
-                else
-                    cur_expanded_dist = disk_pq_table.l2_distance(query_float, (uint8_t *)data_buf);
-            }
+            float cur_expanded_dist = dist_cmp_float->compare((float *)aligned_query_T.get(), (float *)node_fp_coords, (uint32_t)data_dim);
             full_retset.push_back(Neighbor(frontier_nhood.first, cur_expanded_dist));
             uint32_t *node_nbrs = (node_buf + 1);
             // compute node_nbrs <-> query dist in PQ space
-            cpu_timer.reset();
-            compute_dists(node_nbrs, nnbrs, dist_scratch);
+            compute_dists(node_nbrs, nnbrs, dist_scratch.get());
             if (stats != nullptr)
             {
                 stats->n_cmps += (uint32_t)nnbrs;
-                stats->cpu_us += (float)cpu_timer.elapsed();
             }
-
-            cpu_timer.reset();
             // process prefetch-ed nhood
             for (uint64_t m = 0; m < nnbrs; ++m)
             {
@@ -1752,19 +1657,10 @@ int64_t PQFlashIndex<T, LabelT>::cached_beam_search(const T *query1, const uint6
                 {
                     cmps++;
                     float dist = dist_scratch[m];
-                    if (stats != nullptr)
-                    {
-                        stats->n_cmps++;
-                    }
 
                     Neighbor nn(id, dist);
                     retset.insert(nn);
                 }
-            }
-
-            if (stats != nullptr)
-            {
-                stats->cpu_us += (float)cpu_timer.elapsed();
             }
         }
 
@@ -1791,20 +1687,12 @@ int64_t PQFlashIndex<T, LabelT>::cached_beam_search(const T *query1, const uint6
             distances[result_size] = full_retset[i].distance;
             if (metric == diskann::Metric::INNER_PRODUCT)
             {
-                // flip the sign to convert min to max
-                distances[result_size] = (-distances[result_size]);
-                // rescale to revert back to original norms (cancelling the
-                // effect of base and query pre-processing)
-                if (max_base_norm != 0)
-                    distances[result_size] *= (max_base_norm * query_norm);
+                // When using L2 distance to calculate IP distance, the L2
+                // distance is exactly twice the IP distance.
+                distances[result_size] = distances[result_size] / 2;
             }
         }
         result_size ++;
-    }
-
-    if (stats != nullptr)
-    {
-        stats->total_us = (float)query_timer.elapsed();
     }
     return result_size;
 }
@@ -1838,7 +1726,7 @@ size_t PQFlashIndex<T, LabelT>::load_graph(std::stringstream &in)
         {
             throw diskann::ANNException("ERROR: Point found with no out-neighbors.", -1);
         }
-
+        max_degree = std::max(max_degree, (uint64_t)k);
         cc += k;
         ++nodes_read;
         std::vector<uint32_t> tmp(k);
@@ -1866,90 +1754,50 @@ int64_t PQFlashIndex<T, LabelT>::cached_beam_search_memory(const T *query, const
                                                  uint64_t *indices, float *distances, const uint64_t beam_width,
                                                  std::function<bool(int64_t)> filter,
                                                  const uint32_t io_limit, const bool reorder,
-                                                 QueryStats *stats)
+                                                 QueryStats *stats, bool use_for_range)
 {
-    if (beam_width > MAX_N_SECTOR_READS)
-        throw ANNException("Beamwidth can not be higher than MAX_N_SECTOR_READS", -1, __FUNCSIG__, __FILE__, __LINE__);
-
-    ScratchStoreManager<SSDThreadData<T>> manager(this->thread_data);
-    auto data = manager.scratch_space();
-    auto query_scratch = &(data->scratch);
-    auto pq_query_scratch = query_scratch->_pq_scratch;
-
-    // reset query scratch
-    query_scratch->reset();
-
-    // copy query to thread specific aligned and allocated memory (for distance
-    // calculations we need aligned data)
-    float query_norm = 0;
-    T *aligned_query_T = query_scratch->aligned_query_T;
-    float *query_float = pq_query_scratch->aligned_query_float;
-    float *query_rotated = pq_query_scratch->rotated_query;
+    std::shared_ptr<float[]> aligned_query_T = std::shared_ptr<float[]>(new float[this->data_dim]);
 
     // if inner product, we also normalize the query and set the last coordinate
     // to 0 (this is the extra coordinate used to convert MIPS to L2 search)
-    if (metric == diskann::Metric::INNER_PRODUCT)
-    {
-        for (size_t i = 0; i < this->data_dim - 1; i++)
-        {
-            aligned_query_T[i] = query[i];
-            query_norm += query[i] * query[i];
-        }
-        aligned_query_T[this->data_dim - 1] = 0;
 
-        query_norm = std::sqrt(query_norm);
-
-        for (size_t i = 0; i < this->data_dim - 1; i++)
-        {
-            aligned_query_T[i] = (T)(aligned_query_T[i] / query_norm);
-        }
-        pq_query_scratch->set(this->data_dim, aligned_query_T);
-    }
-    else
+    for (size_t i = 0; i < this->data_dim; i++)
     {
-        for (size_t i = 0; i < this->data_dim; i++)
-        {
-            aligned_query_T[i] = query[i];
-        }
-        pq_query_scratch->set(this->data_dim, aligned_query_T);
+        aligned_query_T[i] = (float) query[i];
     }
 
-    // pointers to buffers for data
-    T *data_buf = query_scratch->coord_scratch;
     // FIXME: alternative instruction on aarch64
 #if defined(__i386__) || defined(__x86_64__)
-    _mm_prefetch((char *)data_buf, _MM_HINT_T1);
+    _mm_prefetch((char *)aligned_query_T.get(), _MM_HINT_T1);
 #endif
 
-    // sector scratch
-    char *sector_scratch = query_scratch->sector_scratch;
-    uint64_t &sector_scratch_idx = query_scratch->sector_idx;
-
     // query <-> PQ chunk centers distances
-    pq_table.preprocess_query(query_rotated); // center the query and rotate if
+    pq_table.preprocess_query(aligned_query_T.get()); // center the query and rotate if
     // we have a rotation matrix
-    float *pq_dists = pq_query_scratch->aligned_pqtable_dist_scratch;
-    pq_table.populate_chunk_distances(query_rotated, pq_dists);
+    auto pq_dists = std::shared_ptr<float[]>(new float[NUM_CENTROID * this->n_chunks]);
+    pq_table.populate_chunk_distances(aligned_query_T.get(), pq_dists.get());
 
     // query <-> neighbor list
-    float *dist_scratch = pq_query_scratch->aligned_dist_scratch;
-    uint8_t *pq_coord_scratch = pq_query_scratch->aligned_pq_coord_scratch;
+    auto dist_scratch = std::shared_ptr<float[]>(new float[this->max_degree]);
+    auto pq_coord_scratch = std::shared_ptr<uint8_t[]>(new uint8_t[this->max_degree * this->n_chunks]);
 
     // lambda to batch compute query<-> node distances in PQ space
     auto compute_dists = [this, pq_coord_scratch, pq_dists](const uint32_t *ids, const uint64_t n_ids,
                                                             float *dists_out) {
-        diskann::aggregate_coords(ids, n_ids, this->data, this->n_chunks, pq_coord_scratch);
-        diskann::pq_dist_lookup(pq_coord_scratch, n_ids, this->n_chunks, pq_dists, dists_out);
+        diskann::aggregate_coords(ids, n_ids, this->data, this->n_chunks, pq_coord_scratch.get());
+        diskann::pq_dist_lookup(pq_coord_scratch.get(), n_ids, this->n_chunks, pq_dists.get(), dists_out);
     };
 
-    tsl::robin_set<uint64_t> &visited = query_scratch->visited;
-    std::vector<Neighbor> &full_retset = query_scratch->full_retset;
+    tsl::robin_set<uint64_t> visited;
+    std::vector<Neighbor> full_retset;
+    visited.reserve(l_search);
+    full_retset.reserve(l_search);
     uint32_t best_medoid = 0;
     float best_dist = std::numeric_limits<float>::max();
     for (uint64_t cur_m = 0; cur_m < num_medoids; cur_m++)
     {
         float cur_expanded_dist =
-                dist_cmp_float->compare(query_float, centroid_data + aligned_dim * cur_m, (uint32_t)aligned_dim);
+                dist_cmp_float->compare(aligned_query_T.get(), centroid_data + aligned_dim * cur_m, (uint32_t)data_dim);
         if (cur_expanded_dist < best_dist)
         {
             best_medoid = medoids[cur_m];
@@ -1957,7 +1805,7 @@ int64_t PQFlashIndex<T, LabelT>::cached_beam_search_memory(const T *query, const
         }
     }
 
-    compute_dists(&best_medoid, 1, dist_scratch);
+    compute_dists(&best_medoid, 1, dist_scratch.get());
     visited.insert(best_medoid);
 
     uint64_t has_searched = 0;
@@ -1987,7 +1835,7 @@ int64_t PQFlashIndex<T, LabelT>::cached_beam_search_memory(const T *query, const
             }
         }
         if (unseen_ids.size() != 0) {
-            compute_dists(unseen_ids.data(), unseen_ids.size(), dist_scratch);
+            compute_dists(unseen_ids.data(), unseen_ids.size(), dist_scratch.get());
             for (uint64_t i = 0; i < unseen_ids.size(); ++i)
             {
                 float dist = dist_scratch[i];
@@ -1998,12 +1846,20 @@ int64_t PQFlashIndex<T, LabelT>::cached_beam_search_memory(const T *query, const
         has_searched ++;
     }
 
+    if (use_bsa && use_for_range && not reorder) {
+        for (int i = 0; i < full_retset.size(); ++i)
+        {
+            full_retset[i].distance -= this->errors[full_retset[i].id];
+        }
+    }
+
     // re-sort by distance
     std::sort(full_retset.begin(), full_retset.end());
     if (reorder) {
         std::vector<Neighbor> reorder_retset;
         std::priority_queue<float> distance_ranks;
         int loc = 0;
+        auto sector_scratch = std::shared_ptr<char[]>(new char[beam_width * sector_len]);
         while (loc < io_limit && loc < full_retset.size())
         {
             std::vector<AlignedRead> sorted_read_reqs;
@@ -2015,7 +1871,7 @@ int64_t PQFlashIndex<T, LabelT>::cached_beam_search_memory(const T *query, const
                     distance_ranks.top() + this->errors[id] > full_retset[loc].distance) {
                     ids.push_back(id);
                     sorted_read_reqs.push_back({NODE_SECTOR_NO(((size_t)id)) * sector_len, sector_len,
-                                                sector_scratch + cur_loc * sector_len});
+                                                sector_scratch.get() + cur_loc * sector_len});
                     cur_loc ++;
                 }
                 loc ++;
@@ -2036,7 +1892,7 @@ int64_t PQFlashIndex<T, LabelT>::cached_beam_search_memory(const T *query, const
                 char *node_disk_buf = OFFSET_TO_NODE(sorted_read_reqs[j].buf, id);
                 T *node_fp_coords = OFFSET_TO_NODE_COORDS(node_disk_buf);
                 float exact_dist;
-                exact_dist = dist_cmp->compare(aligned_query_T, node_fp_coords, (uint32_t)data_dim);
+                exact_dist = dist_cmp_float->compare((float *)query, (float *)node_fp_coords, (uint32_t)data_dim);
                 reorder_retset.push_back(Neighbor(id, exact_dist));
                 distance_ranks.push(exact_dist);
                 if (distance_ranks.size() > k_search) {
@@ -2064,12 +1920,9 @@ int64_t PQFlashIndex<T, LabelT>::cached_beam_search_memory(const T *query, const
             distances[result_size] = full_retset[i].distance;
             if (metric == diskann::Metric::INNER_PRODUCT)
             {
-                // flip the sign to convert min to max
-                distances[result_size] = (-distances[result_size]);
-                // rescale to revert back to original norms (cancelling the
-                // effect of base and query pre-processing)
-                if (max_base_norm != 0)
-                    distances[result_size] *= (max_base_norm * query_norm);
+                // When using L2 distance to calculate IP distance, the L2
+                // distance is exactly twice the IP distance.
+                distances[result_size] = distances[result_size] / 2;
             }
         }
         result_size ++;
@@ -2085,85 +1938,48 @@ int64_t PQFlashIndex<T, LabelT>::cached_beam_search_async(const T *query, const 
                                                            const uint32_t io_limit, const bool reorder,
                                                            QueryStats *stats)
 {
-    ScratchStoreManager<SSDThreadData<T>> manager(this->thread_data);
-    auto data = manager.scratch_space();
-    auto query_scratch = &(data->scratch);
-    auto pq_query_scratch = query_scratch->_pq_scratch;
-
-    // reset query scratch
-    query_scratch->reset();
-
-    // copy query to thread specific aligned and allocated memory (for distance
-    // calculations we need aligned data)
-    float query_norm = 0;
-    T *aligned_query_T = query_scratch->aligned_query_T;
-    float *query_float = pq_query_scratch->aligned_query_float;
-    float *query_rotated = pq_query_scratch->rotated_query;
+    std::shared_ptr<float[]> aligned_query_T = std::shared_ptr<float[]>(new float[this->data_dim]); // TODO: add support for other data type
 
     // if inner product, we also normalize the query and set the last coordinate
     // to 0 (this is the extra coordinate used to convert MIPS to L2 search)
-    if (metric == diskann::Metric::INNER_PRODUCT)
-    {
-        for (size_t i = 0; i < this->data_dim - 1; i++)
-        {
-            aligned_query_T[i] = query[i];
-            query_norm += query[i] * query[i];
-        }
-        aligned_query_T[this->data_dim - 1] = 0;
 
-        query_norm = std::sqrt(query_norm);
-
-        for (size_t i = 0; i < this->data_dim - 1; i++)
-        {
-            aligned_query_T[i] = (T)(aligned_query_T[i] / query_norm);
-        }
-        pq_query_scratch->set(this->data_dim, aligned_query_T);
-    }
-    else
+    for (size_t i = 0; i < this->data_dim; i++)
     {
-        for (size_t i = 0; i < this->data_dim; i++)
-        {
-            aligned_query_T[i] = query[i];
-        }
-        pq_query_scratch->set(this->data_dim, aligned_query_T);
+        aligned_query_T[i] = (float) query[i];
     }
 
-    // pointers to buffers for data
-    T *data_buf = query_scratch->coord_scratch;
     // FIXME: alternative instruction on aarch64
 #if defined(__i386__) || defined(__x86_64__)
-    _mm_prefetch((char *)data_buf, _MM_HINT_T1);
+    _mm_prefetch((char *)aligned_query_T.get(), _MM_HINT_T1);
 #endif
 
-    // sector scratch
-    char *sector_scratch = query_scratch->sector_scratch;
-    uint64_t &sector_scratch_idx = query_scratch->sector_idx;
-
     // query <-> PQ chunk centers distances
-    pq_table.preprocess_query(query_rotated); // center the query and rotate if
+    pq_table.preprocess_query(aligned_query_T.get()); // center the query and rotate if
     // we have a rotation matrix
-    float *pq_dists = pq_query_scratch->aligned_pqtable_dist_scratch;
-    pq_table.populate_chunk_distances(query_rotated, pq_dists);
+    auto pq_dists = std::shared_ptr<float[]>(new float[NUM_CENTROID * this->n_chunks]);
+    pq_table.populate_chunk_distances(aligned_query_T.get(), pq_dists.get());
 
     // query <-> neighbor list
-    float *dist_scratch = pq_query_scratch->aligned_dist_scratch;
-    uint8_t *pq_coord_scratch = pq_query_scratch->aligned_pq_coord_scratch;
+    auto dist_scratch = std::shared_ptr<float[]>(new float[this->max_degree]);
+    auto pq_coord_scratch = std::shared_ptr<uint8_t[]>(new uint8_t[this->max_degree * this->n_chunks]);
 
     // lambda to batch compute query<-> node distances in PQ space
     auto compute_dists = [this, pq_coord_scratch, pq_dists](const uint32_t *ids, const uint64_t n_ids,
                                                             float *dists_out) {
-        diskann::aggregate_coords(ids, n_ids, this->data, this->n_chunks, pq_coord_scratch);
-        diskann::pq_dist_lookup(pq_coord_scratch, n_ids, this->n_chunks, pq_dists, dists_out);
+        diskann::aggregate_coords(ids, n_ids, this->data, this->n_chunks, pq_coord_scratch.get());
+        diskann::pq_dist_lookup(pq_coord_scratch.get(), n_ids, this->n_chunks, pq_dists.get(), dists_out);
     };
 
-    tsl::robin_set<uint64_t> &visited = query_scratch->visited;
-    std::vector<Neighbor> &full_retset = query_scratch->full_retset;
+    tsl::robin_set<uint64_t> visited;
+    std::vector<Neighbor> full_retset;
+    visited.reserve(l_search);
+    full_retset.reserve(l_search);
     uint32_t best_medoid = 0;
     float best_dist = std::numeric_limits<float>::max();
     for (uint64_t cur_m = 0; cur_m < num_medoids; cur_m++)
     {
         float cur_expanded_dist =
-            dist_cmp_float->compare(query_float, centroid_data + aligned_dim * cur_m, (uint32_t)aligned_dim);
+            dist_cmp_float->compare(aligned_query_T.get(), centroid_data + aligned_dim * cur_m, (uint32_t)data_dim);
         if (cur_expanded_dist < best_dist)
         {
             best_medoid = medoids[cur_m];
@@ -2171,7 +1987,7 @@ int64_t PQFlashIndex<T, LabelT>::cached_beam_search_async(const T *query, const 
         }
     }
 
-    compute_dists(&best_medoid, 1, dist_scratch);
+    compute_dists(&best_medoid, 1, dist_scratch.get());
     visited.insert(best_medoid);
 
     uint64_t has_searched = 0;
@@ -2204,6 +2020,9 @@ int64_t PQFlashIndex<T, LabelT>::cached_beam_search_async(const T *query, const 
                                           cache_sectors.get() + has_searched * sector_len);
             if (sorted_read_reqs.size() >= beam_width || has_searched == l_search - 1) {
                 int io_count = has_searched / beam_width;
+                if (stats != nullptr) {
+                    stats->n_ios += io_count;
+                }
                 futures.push_back(promises[io_count].get_future());
                 auto remaining_ops = std::make_shared<std::atomic<int>>(sorted_read_reqs.size());
                 CallBack callBack = [&promises, io_count, remaining_ops] (vsag::IOErrorCode code, const std::string& message){
@@ -2236,7 +2055,7 @@ int64_t PQFlashIndex<T, LabelT>::cached_beam_search_async(const T *query, const 
             }
         }
         if (unseen_ids.size() != 0) {
-            compute_dists(unseen_ids.data(), unseen_ids.size(), dist_scratch);
+            compute_dists(unseen_ids.data(), unseen_ids.size(), dist_scratch.get());
             for (uint64_t i = 0; i < unseen_ids.size(); ++i)
             {
                 float dist = dist_scratch[i];
@@ -2269,7 +2088,11 @@ int64_t PQFlashIndex<T, LabelT>::cached_beam_search_async(const T *query, const 
                 char *node_disk_buf = OFFSET_TO_NODE(cache_sectors.get() + loc * sector_len, id);
                 T *node_fp_coords = OFFSET_TO_NODE_COORDS(node_disk_buf);
                 float exact_dist;
-                exact_dist = dist_cmp->compare(aligned_query_T, node_fp_coords, (uint32_t)data_dim);
+                exact_dist = dist_cmp_float->compare((float *)aligned_query_T.get(), (float *)node_fp_coords, (uint32_t)data_dim);
+                if (stats != nullptr)
+                {
+                    stats->n_cmps += 1;
+                }
                 reorder_retset.push_back(Neighbor(id, exact_dist));
                 distance_ranks.push(exact_dist);
                 if (distance_ranks.size() > k_search) {
@@ -2297,12 +2120,9 @@ int64_t PQFlashIndex<T, LabelT>::cached_beam_search_async(const T *query, const 
             distances[result_size] = full_retset[i].distance;
             if (metric == diskann::Metric::INNER_PRODUCT)
             {
-                // flip the sign to convert min to max
-                distances[result_size] = (-distances[result_size]);
-                // rescale to revert back to original norms (cancelling the
-                // effect of base and query pre-processing)
-                if (max_base_norm != 0)
-                    distances[result_size] *= (max_base_norm * query_norm);
+                // When using L2 distance to calculate IP distance, the L2
+                // distance is exactly twice the IP distance.
+                distances[result_size] = distances[result_size] / 2;
             }
         }
         result_size ++;
@@ -2310,7 +2130,7 @@ int64_t PQFlashIndex<T, LabelT>::cached_beam_search_async(const T *query, const 
     return result_size;
 }
 
-
+const static float THRESHOLD_ERROR = 1e-6;
 
 // range search returns results of all neighbors within distance of range.
 // indices and distances need to be pre-allocated of size l_search and the
@@ -2331,29 +2151,27 @@ int64_t PQFlashIndex<T, LabelT>::range_search(const T *query, const double range
     {
         indices.resize(l_search);
         distances.resize(l_search);
-        uint64_t cur_bw = min_beam_width > (l_search / 5) ? min_beam_width : l_search / 5;
-        cur_bw = (cur_bw > 100) ? 100 : cur_bw;
         for (auto &x : distances)
             x = std::numeric_limits<float>::max();
         int64_t result_size = 0;
         if (memory) {
-            result_size = this->cached_beam_search_memory(query, l_search, l_search, indices.data(), distances.data(), cur_bw, filter, io_limit, reorder, stats);
+            result_size = this->cached_beam_search_memory(query, l_search, l_search, indices.data(), distances.data(), min_beam_width, filter, io_limit, reorder, stats, true);
         } else {
-            result_size = this->cached_beam_search(query, l_search, l_search, indices.data(), distances.data(), cur_bw, filter, io_limit, false, stats);
+            result_size = this->cached_beam_search(query, l_search, l_search, indices.data(), distances.data(), min_beam_width, filter, io_limit, false, stats);
         }
         for (uint32_t i = 0; i < result_size; i++)
         {
-            if (distances[i] > (float)range)
+            if (distances[i] > (float)(range + THRESHOLD_ERROR))
             {
-                res_count = i;
                 break;
+            } else {
+                res_count = i + 1;
             }
-            else if (i == result_size - 1)
-                res_count = result_size;
         }
         if (res_count < (result_size / 2.0))
             stop_flag = true;
         l_search = l_search * 2;
+        io_limit = io_limit * 2;
         if (l_search > max_l_search || l_search > num_points)
             stop_flag = true;
     }
@@ -2387,14 +2205,9 @@ template <typename T, typename LabelT>  int64_t PQFlashIndex<T, LabelT>::get_mem
     memory_size += _labels.size() * sizeof(LabelT);
     memory_size += _filter_list.size() * sizeof(LabelT);
     memory_size += graph_size * sizeof(uint32_t);
+    memory_size += num_points * n_chunks * sizeof(uint8_t); // record the memory usage for pq
     memory_size += num_points * sizeof(LabelT); // record memory usage for tags
     return memory_size;
-}
-
-
-template <typename T, typename LabelT> void PQFlashIndex<T, LabelT>::set_sector_size(size_t sector_size)
-{
-    this->sector_size = sector_size;
 }
 
 // instantiations

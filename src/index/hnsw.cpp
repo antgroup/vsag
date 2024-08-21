@@ -35,7 +35,7 @@
 namespace vsag {
 
 const static int64_t EXPANSION_NUM = 1000000;
-const static int64_t DEFAULT_MAX_ELEMENT = 500;
+const static int64_t DEFAULT_MAX_ELEMENT = 1;
 const static int MINIMAL_M = 8;
 const static int MAXIMAL_M = 64;
 const static uint32_t GENERATE_SEARCH_K = 50;
@@ -108,13 +108,6 @@ HNSW::build(const DatasetPtr& base) {
                        fmt::format("base.dim({}) must be equal to index.dim({})", base_dim, dim_));
 
         int64_t num_elements = base->GetNumElements();
-        int64_t max_elements = alg_hnsw->getMaxElements();
-        if (max_elements < num_elements) {
-            logger::debug("max_elements={}, num_elements={}", max_elements, num_elements);
-            max_elements = num_elements;
-            // noexcept even cannot alloc memory
-            alg_hnsw->resizeIndex(max_elements);
-        }
 
         auto ids = base->GetIds();
         auto vectors = base->GetFloat32Vectors();
@@ -157,24 +150,6 @@ HNSW::add(const DatasetPtr& base) {
                        fmt::format("base.dim({}) must be equal to index.dim({})", base_dim, dim_));
 
         int64_t num_elements = base->GetNumElements();
-        int64_t max_elements = alg_hnsw->getMaxElements();
-        size_t require_size = num_elements + alg_hnsw->getCurrentElementCount();
-        if (require_size > max_elements) {
-            while (require_size > max_elements) {
-                if (max_elements > EXPANSION_NUM) {
-                    max_elements += EXPANSION_NUM;
-                } else {
-                    max_elements *= 2;
-                }
-            }
-            logger::debug("num_elements={}, index.num_elements={}, max_elements_={}",
-                          num_elements,
-                          alg_hnsw->getCurrentElementCount(),
-                          max_elements);
-            // noexcept even cannot alloc memory
-            alg_hnsw->resizeIndex(max_elements);
-        }
-
         auto ids = base->GetIds();
         auto vectors = base->GetFloat32Vectors();
         std::vector<int64_t> failed_ids;
@@ -296,11 +271,26 @@ HNSW::knn_search(const DatasetPtr& query,
     }
 }
 
+template <typename FilterType>
+tl::expected<DatasetPtr, Error>
+HNSW::range_search_internal(const DatasetPtr& query,
+                            float radius,
+                            const std::string& parameters,
+                            const FilterType& filter_obj,
+                            int64_t limited_size) const {
+    if (filter_obj) {
+        BitsetOrCallbackFilter filter(filter_obj);
+        return this->range_search(query, radius, parameters, &filter, limited_size);
+    } else {
+        return this->range_search(query, radius, parameters, nullptr, limited_size);
+    }
+};
+
 tl::expected<DatasetPtr, Error>
 HNSW::range_search(const DatasetPtr& query,
                    float radius,
                    const std::string& parameters,
-                   BitsetPtr invalid,
+                   hnswlib::BaseFilterFunctor* filter_ptr,
                    int64_t limited_size) const {
     SlowTaskTimer t("hnsw rangesearch", 20);
 
@@ -341,12 +331,7 @@ HNSW::range_search(const DatasetPtr& query,
         double time_cost;
         try {
             Timer timer(time_cost);
-            if (invalid) {
-                BitsetOrCallbackFilter filter(invalid);
-                results = alg_hnsw->searchRange((const void*)(vector), radius, &filter);
-            } else {
-                results = alg_hnsw->searchRange((const void*)(vector), radius, nullptr);
-            }
+            results = alg_hnsw->searchRange((const void*)(vector), radius, filter_ptr);
         } catch (std::runtime_error& e) {
             LOG_ERROR_AND_RETURNS(ErrorType::INTERNAL_ERROR,
                                   "failed to perofrm range_search(internalError): ",
