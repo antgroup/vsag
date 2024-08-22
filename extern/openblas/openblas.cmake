@@ -29,6 +29,8 @@ ExternalProject_Add(
     LOG_BUILD TRUE
     LOG_INSTALL TRUE
     DOWNLOAD_NO_PROGRESS 1
+    INACTIVITY_TIMEOUT 5
+    TIMEOUT 30
 )
 
 include_directories(${install_dir}/include)

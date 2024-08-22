@@ -6,6 +6,9 @@ FetchContent_Declare(
                     #  the latest commit or contact the vsag project
 		    http://vsagcache.oss-rg-china-mainland.aliyuncs.com/roaringbitmap/v3.0.1.tar.gz
 		URL_HASH MD5=463db911f97d5da69393d4a3190f9201
+                DOWNLOAD_NO_PROGRESS 0
+                INACTIVITY_TIMEOUT 5
+                TIMEOUT 30
 )
 
 set(ROARING_USE_CPM OFF)

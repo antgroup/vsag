@@ -8,6 +8,9 @@ FetchContent_Declare(
         #  the latest commit or contact the vsag project
         http://vsagcache.oss-rg-china-mainland.aliyuncs.com/fmt/10.2.1.tar.gz
     URL_HASH MD5=dc09168c94f90ea890257995f2c497a5
+    DOWNLOAD_NO_PROGRESS 1
+    INACTIVITY_TIMEOUT 5
+    TIMEOUT 30
 )
 
 # exclude fmt in vsag installation

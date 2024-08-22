@@ -114,6 +114,7 @@ private:
     float alpha_;
     uint32_t po_;
     uint32_t pl_;
+    int cut_num_;
 
 public:
     HierarchicalNSW(SpaceInterface* s) {
@@ -158,6 +159,7 @@ public:
         maxM_ = M_;
         maxM0_ = M_ * 2;
         ef_construction_ = std::max(ef_construction, M_);
+        cut_num_ = M_;
         ef_ = 10;
 
         element_levels_ = (int*)allocator->Allocate(max_elements * sizeof(int));
@@ -601,7 +603,7 @@ public:
 
     inline int8_t*
     get_encoded_data(tableint internal_id, size_t code_size) const override {
-        return data_int8.get() + internal_id * code_size * (M_ * 2 + 1);
+        return data_int8.get() + internal_id * code_size * (cut_num_ + 1);
     }
 
     void
@@ -642,7 +644,7 @@ public:
         // 0 :[code(code_size) + norm(8) + neighbor_size(8)]    -> code_size + 16
         //    neighbor1 : [code(code_size) + norm(8) + id(8)]   -> code_size + 16
         //    neighbor2...                                      -> maximum items: (M_ * 2 + 1)
-        void* ptr = std::aligned_alloc(4096, cur_element_count_ * (code_size + 16) * (M_ * 2 + 1));
+        void* ptr = std::aligned_alloc(4096, cur_element_count_ * (code_size + 16) * (cut_num_ + 1));
         data_int8 = std::shared_ptr<int8_t[]>(static_cast<int8_t*>(ptr), AlignedDeleter());
         // norm_pre_compute.resize(cur_element_count_);
         for (int i = 0; i < cur_element_count_; ++i) {
@@ -654,7 +656,7 @@ public:
 
         for (int i = 0; i < cur_element_count_; i++) {
             int* data = (int*)get_linklist0(i);
-            uint64_t size = getListCount((linklistsizeint*)data);
+            uint64_t size = std::min((uint64_t)getListCount((linklistsizeint*)data), (uint64_t)cut_num_);
             auto* code = get_encoded_data(i, code_size + 16);
             memcpy(code + code_size + 8, &size, 8);
 
@@ -670,7 +672,7 @@ public:
         if (check_transform) {
             for (int i = 0; i < cur_element_count_; i++) {
                 int* data = (int*)get_linklist0(i);
-                uint64_t size = getListCount((linklistsizeint*)data);
+                uint64_t size = std::min((uint64_t)getListCount((linklistsizeint*)data), (uint64_t)cut_num_);
                 auto* code = get_encoded_data(i, code_size + 16);
 
                 uint64_t size_valid = *(uint64_t*)(code + code_size + 8);
@@ -1213,6 +1215,9 @@ public:
         }
         auto* code = get_encoded_data(current_node_pair.second, code_size + 16);
         uint64_t size = *(uint64_t*)(code + code_size + 8);
+        for (int j = 1; j <= 4; j++) {
+            _mm_prefetch((char*)(code + j * (code_size + 16) + code_size + 8), _MM_HINT_T0);
+        }
 
         for (int j = 1; j <= size; j++) {
             _mm_prefetch((char*)(code + (j + 4) * (code_size + 16) + code_size + 8), _MM_HINT_T0);
@@ -1221,19 +1226,18 @@ public:
                 to_be_visited[count_no_visited++] = j;  // note here return j
             }
             visited_array[candidate_id] = visited_array_tag;
-
-//            auto* neighbor_code = get_encoded_data(candidate_id, code_size + 16);
-//            for (int k = 0; k < code_size + 8; k++) {
-//                assert((code + j * (code_size + 16))[k] == neighbor_code[k]);
-//            }
         }
-//        for (size_t j = 1; j <= size; j++) {
-//            int candidate_id = *(data + j);
-//            if (!(visited_array[candidate_id] == visited_array_tag)) {
-//                to_be_visited[count_no_visited++] = candidate_id;
-//            }
-//            visited_array[candidate_id] = visited_array_tag;
-//        }
+
+        int* data = (int*)get_linklist0(current_node_pair.second);
+        size_t size_all = getListCount((linklistsizeint*)data);
+        _mm_prefetch((char * )(data + size), _MM_HINT_T0);
+        for (size_t j = size; j <= size_all; j++) {
+            int candidate_id = *(data + j);
+            if (!(visited_array[candidate_id] == visited_array_tag)) {
+                to_be_visited[count_no_visited++] = j;  // note here return j
+            }
+            visited_array[candidate_id] = visited_array_tag;
+        }
         return count_no_visited;
     }
 
@@ -1319,6 +1323,10 @@ public:
                 current_node_pair, next_node_pair, visited_array, visited_array_tag, to_be_visited);
             dist_cmp += count_no_visited;
 
+            uint64_t candidate_id;
+            int* data = (int*)get_linklist0(current_node_pair.second);
+            _mm_prefetch(data, _MM_HINT_T0);
+
             auto* code = get_encoded_data(current_node_pair.second, code_size + 16);
             for (size_t j = 0; j < this->po_; j++) {
                 auto vector_data_ptr = (uint8_t *)(code + to_be_visited[j] * (code_size + 16));
@@ -1328,21 +1336,43 @@ public:
             }
 
             for (size_t j = 0; j < count_no_visited; j++) {
-                if (j + this->po_ <= count_no_visited) {
-                    auto vector_data_ptr = (uint8_t *)(code + to_be_visited[j + this->po_] * (code_size + 16));
+                if (j + this->po_ < count_no_visited) {
+                    if (to_be_visited[j + this->po_] <= cut_num_) {
+                        auto vector_data_ptr = (uint8_t *)(code + to_be_visited[j + this->po_] * (code_size + 16));
 #ifdef USE_SSE
-                    mem_prefetch(vector_data_ptr, this->pl_);
+                        mem_prefetch(vector_data_ptr, this->pl_);
 #endif
+                    } else {
+                        auto vector_data_ptr = (uint8_t *)get_encoded_data(*(data + to_be_visited[j + this->po_]), code_size + 16);
+#ifdef USE_SSE
+                        mem_prefetch(vector_data_ptr, this->pl_);
+#endif
+                    }
                 }
-                dist = INT4_L2_precompute(
-                    *((int64_t*)(code + to_be_visited[j] * (code_size + 16) + code_size)),
-                    norm2,
-                    code + to_be_visited[j] * (code_size + 16),
-                    transformed_query,
-                    dim);
+                
+                if (to_be_visited[j] <= cut_num_) {
+                    candidate_id = *(uint64_t*)(code + to_be_visited[j] * (code_size + 16) + code_size + 8);
+
+                    dist = INT4_L2_precompute(
+                        *((int64_t*)(code + to_be_visited[j] * (code_size + 16) + code_size)),
+                        norm2,
+                        code + to_be_visited[j] * (code_size + 16),
+                        transformed_query,
+                        dim);
+                } else {
+                    candidate_id = *(data + to_be_visited[j]);
+
+                    code = get_encoded_data(candidate_id, code_size + 16);
+                    dist = INT4_L2_precompute(
+                        *((int64_t*)(code + code_size)),
+                        norm2,
+                        code,
+                        transformed_query,
+                        dim);
+                }
+
 
                 if (top_candidates.size() < ef || lowerBound > dist) {
-                    auto candidate_id = *(uint64_t*)(code + to_be_visited[j] * (code_size + 16) + code_size + 8);
                     candidate_set.emplace(-dist, candidate_id);
 
                     top_candidates.emplace(dist, candidate_id);
