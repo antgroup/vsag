@@ -1402,7 +1402,7 @@ public:
                 linkLists_[i] = nullptr;
             } else {
                 element_levels_[i] = linkListSize / size_links_per_element_;
-                linkLists_[i] = (char*)malloc(linkListSize);
+                linkLists_[i] = (char*)allocator_->Allocate(linkListSize);
                 if (linkLists_[i] == nullptr)
                     throw std::runtime_error(
                         "Not enough memory: loadIndex failed to allocate linklist");

@@ -14,20 +14,53 @@
 
 #include "default_allocator.h"
 
+#include <fmt/format.h>
+
 namespace vsag {
 void*
 DefaultAllocator::Allocate(size_t size) {
-    return malloc(size);
+    auto ptr = malloc(size);
+#ifndef NDEBUG
+    std::lock_guard<std::mutex> guard(set_mutex_);
+    allocated_ptrs_.insert(ptr);
+#endif
+    return ptr;
 }
 
 void
 DefaultAllocator::Deallocate(void* p) {
+#ifndef NDEBUG
+    if (!p) {
+        return;
+    }
+    std::lock_guard<std::mutex> guard(set_mutex_);
+    if (allocated_ptrs_.find(p) == allocated_ptrs_.end()) {
+        throw std::runtime_error(
+            fmt::format("deallocate: address {} is not allocated by {}", p, Name()));
+    }
+    allocated_ptrs_.erase(p);
+#endif
     free(p);
 }
 
 void*
 DefaultAllocator::Reallocate(void* p, size_t size) {
-    return realloc(p, size);
+#ifndef NDEBUG
+    if (!p) {
+        return Allocate(size);
+    }
+    std::lock_guard<std::mutex> guard(set_mutex_);
+    if (allocated_ptrs_.find(p) == allocated_ptrs_.end()) {
+        throw std::runtime_error(
+            fmt::format("reallocate: address {} is not allocated by {}", p, Name()));
+    }
+    allocated_ptrs_.erase(p);
+#endif
+    auto ptr = realloc(p, size);
+#ifndef NDEBUG
+    allocated_ptrs_.insert(ptr);
+#endif
+    return ptr;
 }
 
 std::string

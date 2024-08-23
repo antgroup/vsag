@@ -30,3 +30,18 @@ TEST_CASE("default allocator", "[ut]") {
 
     allocator.Deallocate(p2);
 }
+
+TEST_CASE("match of malloc and free", "[ut]") {
+#ifndef NDBUG
+    vsag::DefaultAllocator allocator;
+    size_t alloc_size = 1024;
+    auto p = malloc(alloc_size);
+    REQUIRE_THROWS(allocator.Reallocate(p, alloc_size));
+    REQUIRE_THROWS(allocator.Deallocate(p));
+    free(p);
+
+    p = allocator.Reallocate(nullptr, alloc_size);
+    allocator.Deallocate(p);
+    allocator.Deallocate(nullptr);
+#endif
+}
