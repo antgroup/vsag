@@ -43,7 +43,7 @@ public:
     set_num_threads(size_t num_threads);
 
     // Gets the limit of block size with memory order acquire for thread safety. The setting of
-    // block size should be greater than 128M.
+    // block size should be greater than 2M.
     inline size_t
     block_size_limit() const {
         return block_size_limit_.load(std::memory_order_acquire);
@@ -80,6 +80,7 @@ private:
 
     Logger* logger_ = nullptr;
 };
+
 using Option = Options;  // for compatibility
 
 }  // namespace vsag
