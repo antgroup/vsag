@@ -1,6 +1,10 @@
 
 include(FetchContent)
 
+# suppress "stringop-overflow" warning which caused by a compiler bug in gcc 10 or earlier
+# ref: https://github.com/fmtlib/fmt/issues/2708
+set (FMT_SYSTEM_HEADERS ON)
+
 FetchContent_Declare(
     fmt
     URL https://github.com/fmtlib/fmt/archive/refs/tags/10.2.1.tar.gz
