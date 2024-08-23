@@ -20,6 +20,7 @@
 #include <mutex>
 #include <nlohmann/json.hpp>
 #include <queue>
+#include <shared_mutex>
 #include <stdexcept>
 #include <utility>
 #include <vector>
@@ -286,6 +287,8 @@ private:
 
     mutable std::mutex stats_mutex_;
     mutable std::map<std::string, WindowResultQueue> result_queues_;
+
+    mutable std::shared_mutex rw_mutex_;
 };
 
 }  // namespace vsag

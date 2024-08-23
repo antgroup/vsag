@@ -20,6 +20,7 @@
 #include <thread>
 #include <type_traits>
 
+#include "vsag/options.h"
 #include "vsag/vsag.h"
 
 class ThreadPool {
@@ -198,18 +199,26 @@ TEST_CASE("HNSW Multi-threading", "[ft][hnsw]") {
     std::uniform_real_distribution<> distrib_real;
     for (int i = 0; i < max_elements; i++) ids[i] = i;
     for (int i = 0; i < dim * max_elements; i++) data[i] = distrib_real(rng);
-    // Build index
-    auto dataset = vsag::Dataset::Make();
-    dataset->Dim(dim)
-        ->NumElements(max_elements)
-        ->Ids(ids.get())
-        ->Float32Vectors(data.get())
-        ->Owner(false);
-
-    auto result = index->Build(dataset);
-    REQUIRE(result.has_value());
 
     ThreadPool pool(10);
+    std::vector<std::future<uint64_t>> insert_results;
+    for (int64_t i = 0; i < max_elements; ++i) {
+        insert_results.push_back(pool.enqueue([&ids, &data, &index, dim, i]() -> uint64_t {
+            auto dataset = vsag::Dataset::Make();
+            dataset->Dim(dim)
+                ->NumElements(1)
+                ->Ids(ids.get() + i)
+                ->Float32Vectors(data.get() + i * dim)
+                ->Owner(false);
+            auto add_res = index->Add(dataset);
+            REQUIRE(add_res.has_value());
+            return add_res.value().size();
+        }));
+    }
+    for (auto& res : insert_results) {
+        REQUIRE(res.get() == 0);
+    }
+
     std::vector<std::future<float>> future_results;
     float correct = 0;
     nlohmann::json parameters{
@@ -233,4 +242,71 @@ TEST_CASE("HNSW Multi-threading", "[ft][hnsw]") {
     float recall = correct / max_elements;
     std::cout << index->GetStats() << std::endl;
     REQUIRE(recall == 1);
+}
+
+TEST_CASE("multi-threading read-write test", "[ft][hnsw]") {
+    // avoid too much slow task logs
+    vsag::Options::Instance().logger()->SetLevel(vsag::Logger::Level::kWARN);
+
+    int dim = 16;
+    int max_elements = 5000;
+    int max_degree = 16;
+    int ef_construction = 200;
+    int ef_search = 100;
+    nlohmann::json hnsw_parameters{
+        {"max_degree", max_degree},
+        {"ef_construction", ef_construction},
+        {"ef_search", ef_search},
+    };
+    nlohmann::json index_parameters{
+        {"dtype", "float32"}, {"metric_type", "l2"}, {"dim", dim}, {"hnsw", hnsw_parameters}};
+    auto index = vsag::Factory::CreateIndex("hnsw", index_parameters.dump()).value();
+    std::shared_ptr<int64_t[]> ids(new int64_t[max_elements]);
+    std::shared_ptr<float[]> data(new float[dim * max_elements]);
+
+    ThreadPool pool(16);
+
+    // Generate random data
+    std::mt19937 rng;
+    rng.seed(47);
+    std::uniform_real_distribution<> distrib_real;
+    for (int i = 0; i < max_elements; i++) ids[i] = i;
+    for (int i = 0; i < dim * max_elements; i++) data[i] = distrib_real(rng);
+    nlohmann::json parameters{
+        {"hnsw", {{"ef_search", ef_search}}},
+    };
+    std::string str_parameters = parameters.dump();
+
+    std::vector<std::future<uint64_t>> insert_results;
+    std::vector<std::future<bool>> search_results;
+    for (int64_t i = 0; i < max_elements; ++i) {
+        // insert
+        insert_results.push_back(pool.enqueue([&ids, &data, &index, dim, i]() -> uint64_t {
+            auto dataset = vsag::Dataset::Make();
+            dataset->Dim(dim)
+                ->NumElements(1)
+                ->Ids(ids.get() + i)
+                ->Float32Vectors(data.get() + i * dim)
+                ->Owner(false);
+            auto add_res = index->Add(dataset);
+            REQUIRE(add_res.has_value());
+            return add_res.value().size();
+        }));
+
+        // search
+        search_results.push_back(
+            pool.enqueue([&index, &ids, dim, &data, i, &str_parameters]() -> bool {
+                auto query = vsag::Dataset::Make();
+                query->NumElements(1)->Dim(dim)->Float32Vectors(data.get() + i * dim)->Owner(false);
+                auto result = index->KnnSearch(query, 2, str_parameters);
+                return result.has_value();
+            }));
+    }
+    for (auto& res : insert_results) {
+        REQUIRE(res.get() == 0);
+    }
+
+    for (int i = 0; i < search_results.size(); ++i) {
+        REQUIRE(search_results[i].get());
+    }
 }
