@@ -200,15 +200,16 @@ public:
     addPoint(const void* datapoint, labeltype label) = 0;
 
     virtual std::priority_queue<std::pair<dist_t, labeltype>>
-    searchKnn(const void*, size_t, BaseFilterFunctor* isIdAllowed = nullptr) const = 0;
+    searchKnn(const void*, size_t, size_t, BaseFilterFunctor* isIdAllowed = nullptr) const = 0;
 
     virtual std::priority_queue<std::pair<dist_t, labeltype>>
-    searchRange(const void*, float, BaseFilterFunctor* isIdAllowed = nullptr) const = 0;
+    searchRange(const void*, float, size_t, BaseFilterFunctor* isIdAllowed = nullptr) const = 0;
 
     // Return k nearest neighbor in the order of closer fist
     virtual std::vector<std::pair<dist_t, labeltype>>
     searchKnnCloserFirst(const void* query_data,
                          size_t k,
+                         size_t ef,
                          BaseFilterFunctor* isIdAllowed = nullptr) const;
 
     virtual void
@@ -222,9 +223,6 @@ public:
 
     virtual size_t
     getMaxElements() = 0;
-
-    virtual void
-    setEf(size_t ef) = 0;
 
     virtual float
     getDistanceByLabel(labeltype label, const void* data_point) = 0;
@@ -266,11 +264,12 @@ template <typename dist_t>
 std::vector<std::pair<dist_t, labeltype>>
 AlgorithmInterface<dist_t>::searchKnnCloserFirst(const void* query_data,
                                                  size_t k,
+                                                 size_t ef,
                                                  BaseFilterFunctor* isIdAllowed) const {
     std::vector<std::pair<dist_t, labeltype>> result;
 
     // here searchKnn returns the result in the order of further first
-    auto ret = searchKnn(query_data, k, isIdAllowed);
+    auto ret = searchKnn(query_data, k, ef, isIdAllowed);
     {
         size_t sz = ret.size();
         result.resize(sz);

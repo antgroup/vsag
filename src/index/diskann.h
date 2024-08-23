@@ -25,6 +25,7 @@
 #include <map>
 #include <nlohmann/json.hpp>
 #include <queue>
+#include <shared_mutex>
 #include <string>
 
 #include "../common.h"
@@ -243,6 +244,8 @@ private:
     bool preload_;
     IndexStatus status_;
     bool empty_index_ = false;
+
+    mutable std::shared_mutex rw_mutex_;
 
 private:  // Request Statistics
     mutable std::mutex stats_mutex_;

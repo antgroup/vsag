@@ -216,6 +216,8 @@ DiskANN::build(const DatasetPtr& base) {
         CHECK_ARGUMENT(data_dim == dim_,
                        fmt::format("base.dim({}) must be equal to index.dim({})", data_dim, dim_));
 
+        std::unique_lock lock(rw_mutex_);
+
         if (this->index_) {
             LOG_ERROR_AND_RETURNS(ErrorType::BUILD_TWICE, "failed to build index: build twice");
         }
@@ -365,6 +367,7 @@ DiskANN::knn_search(const DatasetPtr& query,
             try {
                 double time_cost = 0;
                 {
+                    std::shared_lock lock(rw_mutex_);
                     Timer timer(time_cost);
                     if (preload_) {
                         if (use_async_io_) {
@@ -516,6 +519,7 @@ DiskANN::range_search(const DatasetPtr& query,
         try {
             double time_cost = 0;
             {
+                std::shared_lock lock(rw_mutex_);
                 Timer timer(time_cost);
                 index_->range_search(query->GetFloat32Vectors(),
                                      radius,
@@ -599,6 +603,7 @@ DiskANN::serialize() const {
 
     SlowTaskTimer t("diskann serialize");
     try {
+        std::shared_lock lock(rw_mutex_);
         BinarySet bs;
 
         bs.Set(DISKANN_PQ, convert_stream_to_binary(pq_pivots_stream_));
@@ -617,6 +622,7 @@ DiskANN::serialize() const {
 tl::expected<void, Error>
 DiskANN::deserialize(const BinarySet& binary_set) {
     SlowTaskTimer t("diskann deserialize");
+    std::unique_lock lock(rw_mutex_);
     if (this->index_) {
         LOG_ERROR_AND_RETURNS(ErrorType::INDEX_NOT_EMPTY,
                               "failed to deserialize: index is not empty")
@@ -653,6 +659,7 @@ tl::expected<void, Error>
 DiskANN::deserialize(const ReaderSet& reader_set) {
     SlowTaskTimer t("diskann deserialize");
 
+    std::unique_lock lock(rw_mutex_);
     if (this->index_) {
         LOG_ERROR_AND_RETURNS(ErrorType::INDEX_NOT_EMPTY,
                               fmt::format("failed to deserialize: {} is not empty", INDEX_DISKANN));
@@ -831,6 +838,7 @@ deserialize_vector_from_binary(const Binary& binary_data) {
 
 tl::expected<Index::Checkpoint, Error>
 DiskANN::continue_build(const DatasetPtr& base, const BinarySet& binary_set) {
+    std::unique_lock lock(rw_mutex_);
     try {
         BuildStatus build_status = BuildStatus::BEGIN;
         if (not binary_set.GetKeys().empty()) {

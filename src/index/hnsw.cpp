@@ -109,6 +109,8 @@ HNSW::build(const DatasetPtr& base) {
 
         int64_t num_elements = base->GetNumElements();
 
+        std::unique_lock lock(rw_mutex_);
+
         auto ids = base->GetIds();
         auto vectors = base->GetFloat32Vectors();
         std::vector<int64_t> failed_ids;
@@ -153,6 +155,8 @@ HNSW::add(const DatasetPtr& base) {
         auto ids = base->GetIds();
         auto vectors = base->GetFloat32Vectors();
         std::vector<int64_t> failed_ids;
+
+        std::unique_lock lock(rw_mutex_);
         for (int64_t i = 0; i < num_elements; ++i) {
             // noexcept runtime
             if (!alg_hnsw->addPoint((const void*)(vectors + i * dim_), ids[i])) {
@@ -209,16 +213,18 @@ HNSW::knn_search(const DatasetPtr& query,
         CHECK_ARGUMENT(k > 0, fmt::format("k({}) must be greater than 0", k))
         k = std::min(k, GetNumElements());
 
+        std::shared_lock lock(rw_mutex_);
+
         // check search parameters
         auto params = HnswSearchParameters::FromJson(parameters);
-        alg_hnsw->setEf(std::max(params.ef_search, k));
 
         // perform search
         std::priority_queue<std::pair<float, size_t>> results;
         double time_cost;
         try {
             Timer t(time_cost);
-            results = alg_hnsw->searchKnn((const void*)(vector), k, filter_ptr);
+            results = alg_hnsw->searchKnn(
+                (const void*)(vector), k, std::max(params.ef_search, k), filter_ptr);
         } catch (const std::runtime_error& e) {
             LOG_ERROR_AND_RETURNS(ErrorType::INTERNAL_ERROR,
                                   "failed to perofrm knn_search(internalError): ",
@@ -240,6 +246,7 @@ HNSW::knn_search(const DatasetPtr& query,
 
         // perform conjugate graph enhancement
         if (use_conjugate_graph_ and params.use_conjugate_graph_search) {
+            std::shared_lock lock(rw_mutex_);
             time_cost = 0;
             Timer t(time_cost);
 
@@ -324,14 +331,15 @@ HNSW::range_search(const DatasetPtr& query,
 
         // check search parameters
         auto params = HnswSearchParameters::FromJson(parameters);
-        alg_hnsw->setEf(params.ef_search);
 
         // perform search
         std::priority_queue<std::pair<float, size_t>> results;
         double time_cost;
         try {
+            std::shared_lock lock(rw_mutex_);
             Timer timer(time_cost);
-            results = alg_hnsw->searchRange((const void*)(vector), radius, filter_ptr);
+            results =
+                alg_hnsw->searchRange((const void*)(vector), radius, params.ef_search, filter_ptr);
         } catch (std::runtime_error& e) {
             LOG_ERROR_AND_RETURNS(ErrorType::INTERNAL_ERROR,
                                   "failed to perofrm range_search(internalError): ",
@@ -406,6 +414,7 @@ HNSW::serialize() const {
     size_t num_bytes = alg_hnsw->calcSerializeSize();
     try {
         std::shared_ptr<int8_t[]> bin(new int8_t[num_bytes]);
+        std::shared_lock lock(rw_mutex_);
         alg_hnsw->saveIndex(bin.get());
         Binary b{
             .data = bin,
@@ -443,6 +452,7 @@ HNSW::serialize(std::ostream& out_stream) {
     SlowTaskTimer t("hnsw serialize");
 
     // no expected exception
+    std::shared_lock lock(rw_mutex_);
     alg_hnsw->saveIndex(out_stream);
 
     if (use_conjugate_graph_) {
@@ -472,6 +482,7 @@ HNSW::deserialize(const BinarySet& binary_set) {
     };
 
     try {
+        std::unique_lock lock(rw_mutex_);
         alg_hnsw->loadIndex(func, this->space.get());
         if (use_conjugate_graph_) {
             Binary b_cg = binary_set.Get(CONJUGATE_GRAPH_DATA);
@@ -507,6 +518,7 @@ HNSW::deserialize(const ReaderSet& reader_set) {
     };
 
     try {
+        std::unique_lock lock(rw_mutex_);
         alg_hnsw->loadIndex(func, this->space.get());
     } catch (const std::runtime_error& e) {
         LOG_ERROR_AND_RETURNS(ErrorType::READ_ERROR, "failed to deserialize: ", e.what());
@@ -524,6 +536,7 @@ HNSW::deserialize(std::istream& in_stream) {
     }
 
     try {
+        std::unique_lock lock(rw_mutex_);
         alg_hnsw->loadIndex(in_stream, this->space.get());
         if (use_conjugate_graph_ and not conjugate_graph_->Deserialize(in_stream).has_value()) {
             throw std::runtime_error("error in deserialize conjugate graph");
@@ -559,6 +572,7 @@ HNSW::remove(int64_t id) {
     }
 
     try {
+        std::unique_lock lock(rw_mutex_);
         if (use_reversed_edges_) {
             std::reinterpret_pointer_cast<hnswlib::HierarchicalNSW>(alg_hnsw)->removePoint(id);
         } else {
@@ -598,6 +612,7 @@ HNSW::feedback(const DatasetPtr& query,
 
     auto result = this->knn_search(query, k, parameters, nullptr);
     if (result.has_value()) {
+        std::unique_lock lock(rw_mutex_);
         return this->feedback(*result, global_optimum_tag_id, k);
     } else {
         LOG_ERROR_AND_RETURNS(ErrorType::INVALID_ARGUMENT,
@@ -648,6 +663,7 @@ HNSW::brute_force(const DatasetPtr& query, int64_t k) {
         result->Ids(ids)->Distances(dists)->NumElements(k)->Owner(true, allocator_);
 
         auto vector = query->GetFloat32Vectors();
+        std::shared_lock lock(rw_mutex_);
         std::priority_queue<std::pair<float, hnswlib::labeltype>> bf_result =
             alg_hnsw->bruteForce((const void*)vector, k);
         result->Dim(std::min(k, (int64_t)bf_result.size()));

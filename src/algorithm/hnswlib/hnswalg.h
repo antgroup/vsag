@@ -58,7 +58,6 @@ private:
     size_t maxM_{0};
     size_t maxM0_{0};
     size_t ef_construction_{0};
-    size_t ef_{0};
 
     double mult_{0.0}, revSize_{0.0};
     int maxlevel_{0};
@@ -145,7 +144,6 @@ public:
         maxM_ = M_;
         maxM0_ = M_ * 2;
         ef_construction_ = std::max(ef_construction, M_);
-        ef_ = 10;
 
         element_levels_ = (int*)allocator->Allocate(max_elements * sizeof(int));
 
@@ -251,11 +249,6 @@ public:
             return a.first < b.first;
         }
     };
-
-    void
-    setEf(size_t ef) override {
-        ef_ = ef;
-    }
 
     inline std::mutex&
     getLabelOpMutex(labeltype label) const {
@@ -624,6 +617,7 @@ public:
     searchBaseLayerST(tableint ep_id,
                       const void* data_point,
                       float radius,
+                      int64_t ef,
                       BaseFilterFunctor* isIdAllowed = nullptr) const {
         VisitedList* vl = visited_list_pool_->getFreeVisitedList();
         vl_type* visited_array = vl->mass;
@@ -692,7 +686,7 @@ public:
                     char* currObj1 = (getDataByInternalId(candidate_id));
                     float dist = fstdistfunc_(data_point, currObj1, dist_func_param_);
 
-                    if (visited_count < ef_ || dist <= radius + THRESHOLD_ERROR ||
+                    if (visited_count < ef || dist <= radius + THRESHOLD_ERROR ||
                         lowerBound > dist) {
                         candidate_set.emplace(-dist, candidate_id);
                         auto vector_data_ptr = data_level0_memory_->getElementPtr(
@@ -1235,7 +1229,6 @@ public:
             throw std::runtime_error("Not enough memory: loadIndex failed to allocate linklists");
 
         revSize_ = 1.0 / mult_;
-        ef_ = 10;
         for (size_t i = 0; i < cur_element_count_; i++) {
             label_lookup_[getExternalLabel(i)] = i;
             unsigned int link_list_size;
@@ -1327,7 +1320,6 @@ public:
         std::vector<std::mutex>(MAX_LABEL_OPERATION_LOCKS).swap(label_op_locks_);
 
         revSize_ = 1.0 / mult_;
-        ef_ = 10;
         for (size_t i = 0; i < cur_element_count_; i++) {
             label_lookup_[getExternalLabel(i)] = i;
             unsigned int link_list_size;
@@ -1449,7 +1441,6 @@ public:
             throw std::runtime_error("Not enough memory: loadIndex failed to allocate linklists");
 
         revSize_ = 1.0 / mult_;
-        ef_ = 10;
         for (size_t i = 0; i < cur_element_count_; i++) {
             label_lookup_[getExternalLabel(i)] = i;
             unsigned int link_list_size;
@@ -1942,6 +1933,7 @@ public:
     std::priority_queue<std::pair<float, labeltype>>
     searchKnn(const void* query_data,
               size_t k,
+              uint64_t ef,
               BaseFilterFunctor* isIdAllowed = nullptr) const override {
         std::priority_queue<std::pair<float, labeltype>> result;
         if (cur_element_count_ == 0)
@@ -1984,10 +1976,10 @@ public:
             top_candidates;
         if (num_deleted_) {
             top_candidates =
-                searchBaseLayerST<true, true>(currObj, query_data, std::max(ef_, k), isIdAllowed);
+                searchBaseLayerST<true, true>(currObj, query_data, std::max(ef, k), isIdAllowed);
         } else {
             top_candidates =
-                searchBaseLayerST<false, true>(currObj, query_data, std::max(ef_, k), isIdAllowed);
+                searchBaseLayerST<false, true>(currObj, query_data, std::max(ef, k), isIdAllowed);
         }
 
         while (top_candidates.size() > k) {
@@ -2004,6 +1996,7 @@ public:
     std::priority_queue<std::pair<float, labeltype>>
     searchRange(const void* query_data,
                 float radius,
+                uint64_t ef,
                 BaseFilterFunctor* isIdAllowed = nullptr) const override {
         std::priority_queue<std::pair<float, labeltype>> result;
         if (cur_element_count_ == 0)
@@ -2049,7 +2042,7 @@ public:
                 "not support perform range search on a index that deleted some vectors");
         } else {
             top_candidates =
-                searchBaseLayerST<false, true>(currObj, query_data, radius, isIdAllowed);
+                searchBaseLayerST<false, true>(currObj, query_data, radius, ef, isIdAllowed);
             // std::cout << "top_candidates.size(): " << top_candidates.size() << std::endl;
         }
 
