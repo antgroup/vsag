@@ -40,8 +40,8 @@ public:
         if (not allocated_ptrs_.empty()) {
             logger::error(fmt::format("There is a memory leak in {}.", Name()));
             abort();
-#endif
         }
+#endif
     }
 
     DefaultAllocator(const DefaultAllocator&) = delete;
