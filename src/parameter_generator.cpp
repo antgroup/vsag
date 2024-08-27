@@ -87,7 +87,7 @@ generate_build_parameters(std::string metric_type,
         metric_type.begin(), metric_type.end(), metric_type.begin(), [](unsigned char c) {
             return std::tolower(c);
         });
-    if (metric_type != "l2" and metric_type != "ip") {
+    if (metric_type != "l2" and metric_type != "ip" and metric_type != "cosine") {
         return tl::unexpected(Error(
             ErrorType::INVALID_ARGUMENT,
             fmt::format("failed to generate build parameter: metric_type({}) is not in [l2, ip]",

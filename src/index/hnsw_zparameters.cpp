@@ -46,12 +46,16 @@ CreateHnswParameters::FromJson(const std::string& json_string) {
         obj.space = std::make_shared<hnswlib::L2Space>(params[PARAMETER_DIM]);
     } else if (params[PARAMETER_METRIC_TYPE] == METRIC_IP) {
         obj.space = std::make_shared<hnswlib::InnerProductSpace>(params[PARAMETER_DIM]);
+    } else if (params[PARAMETER_METRIC_TYPE] == METRIC_COSINE) {
+        obj.normalize = true;
+        obj.space = std::make_shared<hnswlib::InnerProductSpace>(params[PARAMETER_DIM]);
     } else {
         std::string metric = params[PARAMETER_METRIC_TYPE];
-        throw std::invalid_argument(fmt::format("parameters[{}] must in [{}, {}], now is {}",
+        throw std::invalid_argument(fmt::format("parameters[{}] must in [{}, {}, {}], now is {}",
                                                 PARAMETER_METRIC_TYPE,
                                                 METRIC_L2,
                                                 METRIC_IP,
+                                                METRIC_COSINE,
                                                 metric));
     }
 
@@ -121,6 +125,7 @@ CreateFreshHnswParameters::FromJson(const std::string& json_string) {
     obj.ef_construction = parrent_obj.ef_construction;
     obj.space = parrent_obj.space;
     obj.use_static = false;
+    obj.normalize = parrent_obj.normalize;
 
     // set obj.use_reversed_edges
     obj.use_reversed_edges = true;

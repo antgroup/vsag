@@ -44,7 +44,7 @@ normalize(float* input_vector, int64_t dim) {
 }
 
 std::vector<float>
-generate_vectors(int64_t num_vectors, int64_t dim) {
+generate_vectors(int64_t num_vectors, int64_t dim, bool need_normalize) {
     std::mt19937 rng;
     rng.seed(47);
     std::uniform_real_distribution<> distrib_real;
@@ -52,21 +52,23 @@ generate_vectors(int64_t num_vectors, int64_t dim) {
     for (int64_t i = 0; i < dim * num_vectors; ++i) {
         vectors[i] = distrib_real(rng);
     }
-    for (int64_t i = 0; i < num_vectors; ++i) {
-        normalize(vectors.data() + i * dim, dim);
+    if (need_normalize) {
+        for (int64_t i = 0; i < num_vectors; ++i) {
+            normalize(vectors.data() + i * dim, dim);
+        }
     }
 
     return vectors;
 }
 
 std::tuple<std::vector<int64_t>, std::vector<float>>
-generate_ids_and_vectors(int64_t num_vectors, int64_t dim) {
+generate_ids_and_vectors(int64_t num_vectors, int64_t dim, bool need_normalize) {
     std::vector<int64_t> ids(num_vectors);
     for (int64_t i = 0; i < num_vectors; ++i) {
         ids[i] = i;
     }
 
-    return {ids, generate_vectors(num_vectors, dim)};
+    return {ids, generate_vectors(num_vectors, dim, need_normalize)};
 }
 
 vsag::IndexPtr

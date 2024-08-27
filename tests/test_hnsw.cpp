@@ -470,14 +470,21 @@ TEST_CASE("hnsw serialize", "[ft][hnsw]") {
     int max_degree = 64;
     int ef_construction = 200;
     int ef_search = 200;
+    auto metric_type = GENERATE("cosine", "l2");
+    auto use_static = GENERATE(true, false);
     // Initing index
     nlohmann::json hnsw_parameters{{"max_degree", max_degree},
                                    {"ef_construction", ef_construction},
-                                   {"use_static", true},
+                                   {"use_static", use_static},
                                    {"use_conjugate_graph", true}};
-    nlohmann::json index_parameters{
-        {"dtype", "float32"}, {"metric_type", "l2"}, {"dim", dim}, {"hnsw", hnsw_parameters}};
+    nlohmann::json index_parameters{{"dtype", "float32"},
+                                    {"metric_type", metric_type},
+                                    {"dim", dim},
+                                    {"hnsw", hnsw_parameters}};
 
+    if (metric_type == std::string("cosine") && use_static) {
+        return;  // static hnsw only support the metric type of l2.
+    }
     std::shared_ptr<vsag::Index> hnsw;
     auto index = vsag::Factory::CreateIndex("hnsw", index_parameters.dump());
     REQUIRE(index.has_value());

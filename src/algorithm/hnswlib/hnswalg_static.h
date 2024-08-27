@@ -679,8 +679,8 @@ public:
     //            size_t size = getListCount((linklistsizeint*)data);
     //            //                bool cur_node_deleted = isMarkedDeleted(current_node_id);
     //            if (collect_metrics) {
-    //                metric_hops++;
-    //                metric_distance_computations += size;
+    //                metric_hops_++;
+    //                metric_distance_computations_ += size;
     //            }
     //
     //#ifdef USE_SSE
@@ -1803,8 +1803,8 @@ public:
         //
         //                data = (unsigned int*)get_linklist(currObj, level);
         //                int size = getListCount(data);
-        //                metric_hops++;
-        //                metric_distance_computations += size;
+        //                metric_hops_++;
+        //                metric_distance_computations_ += size;
         //
         //                tableint* datal = (tableint*)(data + 1);
         //                for (int i = 0; i < size; i++) {

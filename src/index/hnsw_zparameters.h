@@ -33,6 +33,7 @@ public:
     int64_t ef_construction;
     bool use_conjugate_graph;
     bool use_static;
+    bool normalize = false;
 
 protected:
     CreateHnswParameters() = default;

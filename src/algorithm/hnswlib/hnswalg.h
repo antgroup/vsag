@@ -32,6 +32,7 @@
 #include <unordered_set>
 
 #include "../../default_allocator.h"
+#include "../../simd/simd.h"
 #include "hnswlib.h"
 #include "visited_list_pool.h"
 
@@ -58,6 +59,7 @@ private:
     size_t maxM_{0};
     size_t maxM0_{0};
     size_t ef_construction_{0};
+    size_t dim_{0};
 
     double mult_{0.0}, revSize_{0.0};
     int maxlevel_{0};
@@ -74,6 +76,9 @@ private:
 
     size_t size_links_level0_{0};
     size_t offsetData_{0}, offsetLevel0_{0}, label_offset_{0};
+
+    bool normalize_ = false;
+    float* molds_ = nullptr;
 
     BlockManager* data_level0_memory_;
     char** link_lists_{nullptr};
@@ -99,8 +104,10 @@ private:
     vsag::Allocator* allocator_;
     std::shared_ptr<vsag::AllocatorWrapper<tableint>> reverse_link_list_allocator_;
 
-    mutable std::atomic<long> metric_distance_computations{0};
-    mutable std::atomic<long> metric_hops{0};
+    mutable std::atomic<long> metric_distance_computations_{0};
+    mutable std::atomic<long> metric_hops_{0};
+
+    vsag::DistanceFunc ip_func_;
 
     bool allow_replace_deleted_ =
         false;  // flag to replace deleted elements (marked as deleted) during insertions
@@ -127,6 +134,7 @@ public:
                     size_t M = 16,
                     size_t ef_construction = 200,
                     bool use_reversed_edges = false,
+                    bool normalize = false,
                     size_t block_size_limit = 128 * 1024 * 1024,
                     size_t random_seed = 100,
                     bool allow_replace_deleted = false)
@@ -134,12 +142,14 @@ public:
           link_list_locks_(max_elements),
           label_op_locks_(MAX_LABEL_OPERATION_LOCKS),
           allow_replace_deleted_(allow_replace_deleted),
-          use_reversed_edges_(use_reversed_edges) {
+          use_reversed_edges_(use_reversed_edges),
+          normalize_(normalize) {
         max_elements_ = max_elements;
         num_deleted_ = 0;
         data_size_ = s->get_data_size();
         fstdistfunc_ = s->get_dist_func();
         dist_func_param_ = s->get_dist_func_param();
+        dim_ = data_size_ / sizeof(float);
         M_ = M;
         maxM_ = M_;
         maxM0_ = M_ * 2;
@@ -166,6 +176,11 @@ public:
                 max_elements_ * sizeof(std::map<int, reverselinklist>*));
             memset(
                 reversed_link_lists_, 0, max_elements_ * sizeof(std::map<int, reverselinklist>*));
+        }
+
+        if (normalize) {
+            ip_func_ = vsag::InnerProduct;
+            molds_ = (float*)allocator->Allocate(max_elements_ * sizeof(float));
         }
 
         data_level0_memory_ =
@@ -214,9 +229,24 @@ public:
             allocator_->Deallocate(reversed_link_lists_);
             allocator_->Deallocate(reversed_level0_link_list_);
         }
+        if (normalize_) {
+            allocator_->Deallocate(molds_);
+        }
         allocator_->Deallocate(element_levels_);
         allocator_->Deallocate(link_lists_);
         delete visited_list_pool_;
+    }
+
+    void
+    normalize_vector(const void*& data_point, std::shared_ptr<float[]>& normalize_data) const {
+        if (normalize_) {
+            float query_mold = std::sqrt(ip_func_(data_point, data_point, dist_func_param_));
+            normalize_data.reset(new float[dim_]);
+            for (int i = 0; i < dim_; ++i) {
+                normalize_data[i] = ((float*)data_point)[i] / query_mold;
+            }
+            data_point = normalize_data.get();
+        }
     }
 
     float
@@ -229,7 +259,8 @@ public:
         }
         tableint internal_id = search->second;
         lock_table.unlock();
-
+        std::shared_ptr<float[]> normalize_query;
+        normalize_vector(data_point, normalize_query);
         float dist = fstdistfunc_(data_point, getDataByInternalId(internal_id), dist_func_param_);
         return dist;
     }
@@ -557,8 +588,8 @@ public:
             size_t size = getListCount((linklistsizeint*)data);
             //                bool cur_node_deleted = isMarkedDeleted(current_node_id);
             if (collect_metrics) {
-                metric_hops++;
-                metric_distance_computations += size;
+                metric_hops_++;
+                metric_distance_computations_ += size;
             }
 
             auto vector_data_ptr = data_level0_memory_->getElementPtr((*(data + 1)), offsetData_);
@@ -583,7 +614,6 @@ public:
 
                     char* currObj1 = (getDataByInternalId(candidate_id));
                     float dist = fstdistfunc_(data_point, currObj1, dist_func_param_);
-
                     if (top_candidates.size() < ef || lowerBound > dist) {
                         candidate_set.emplace(-dist, candidate_id);
                         auto vector_data_ptr = data_level0_memory_->getElementPtr(
@@ -658,8 +688,8 @@ public:
             size_t size = getListCount((linklistsizeint*)data);
             //                bool cur_node_deleted = isMarkedDeleted(current_node_id);
             if (collect_metrics) {
-                metric_hops++;
-                metric_distance_computations += size;
+                metric_hops_++;
+                metric_distance_computations_ += size;
             }
 
             auto vector_data_ptr = data_level0_memory_->getElementPtr((*(data + 1)), offsetData_);
@@ -910,6 +940,16 @@ public:
         element_levels_ = element_levels_new;
         std::vector<std::recursive_mutex>(new_max_elements).swap(link_list_locks_);
 
+        if (normalize_) {
+            auto new_molds =
+                (float*)allocator_->Reallocate(molds_, new_max_elements * sizeof(float));
+            if (new_molds == nullptr) {
+                throw std::runtime_error(
+                    "Not enough memory: resizeIndex failed to allocate molds_");
+            }
+            molds_ = new_molds;
+        }
+
         // Reallocate base layer
         if (not data_level0_memory_->resize(new_max_elements))
             throw std::runtime_error(
@@ -1010,6 +1050,10 @@ public:
                 writeBinaryToMem(dest, link_lists_[i], link_list_size);
             }
         }
+
+        if (normalize_) {
+            writeBinaryToMem(dest, (char*)molds_, max_elements_ * sizeof(float));
+        }
         // output.close();
     }
 
@@ -1060,6 +1104,11 @@ public:
                 size += link_list_size * 2;  // record the size of reversed link list
             }
         }
+
+        if (normalize_) {
+            size += max_elements_ * sizeof(float);
+        }
+
         // output.close();
         return size;
     }
@@ -1091,6 +1140,9 @@ public:
             if (link_list_size) {
                 out_stream.write(link_lists_[i], link_list_size);
             }
+        }
+        if (normalize_) {
+            out_stream.write((char*)molds_, max_elements_ * sizeof(float));
         }
     }
 
@@ -1249,6 +1301,10 @@ public:
             }
         }
 
+        if (normalize_) {
+            read_func(cursor, max_elements_ * sizeof(float), molds_);
+        }
+
         if (use_reversed_edges_) {
             for (int internal_id = 0; internal_id < cur_element_count_; ++internal_id) {
                 for (int level = 0; level <= element_levels_[internal_id]; ++level) {
@@ -1335,6 +1391,9 @@ public:
                         "Not enough memory: loadIndex failed to allocate linklist");
                 in_stream.read(link_lists_[i], link_list_size);
             }
+        }
+        if (normalize_) {
+            in_stream.read((char*)molds_, sizeof(float) * max_elements_);
         }
 
         if (use_reversed_edges_) {
@@ -1652,6 +1711,9 @@ public:
                    size_data_per_element_);
             memcpy(get_linklist0(post_internal_id), tmp_data_element.get(), size_data_per_element_);
 
+            if (normalize_) {
+                std::swap(molds_[pre_internal_id], molds_[post_internal_id]);
+            }
             std::swap(link_lists_[pre_internal_id], link_lists_[post_internal_id]);
             std::swap(element_levels_[pre_internal_id], element_levels_[post_internal_id]);
         }
@@ -1683,13 +1745,16 @@ public:
     }
 
     void
-    dealNoInEdge(tableint id, int level, int m_curmax) {
+    dealNoInEdge(tableint id, int level, int m_curmax, int skip_c) {
         // Establish edges from the neighbors of the id pointing to the id.
         auto alone_data = get_linklist_at_level(id, level);
         int alone_size = getListCount(alone_data);
         auto alone_link = (unsigned int*)(alone_data + 1);
         auto& in_edges = getEdges(id, level);
         for (int j = 0; j < alone_size; ++j) {
+            if (alone_link[j] == skip_c) {
+                continue;
+            }
             auto to_edge_data_cur = (unsigned int*)get_linklist_at_level(alone_link[j], level);
             int to_edge_size_cur = getListCount(to_edge_data_cur);
             auto to_edge_data_link_cur = (unsigned int*)(to_edge_data_cur + 1);
@@ -1743,6 +1808,7 @@ public:
                 if (size != 0) {
                     maxlevel_ = level;
                     enterpoint_node_ = *(data + 1);
+                    break;
                 }
             }
         }
@@ -1804,7 +1870,7 @@ public:
                 size_t m_curmax = level ? maxM_ : maxM0_;
                 for (auto id : unique_ids) {
                     if (getEdges(id, level).size() == 0) {
-                        dealNoInEdge(id, level, m_curmax);
+                        dealNoInEdge(id, level, m_curmax, cur_c);
                     }
                 }
             }
@@ -1813,7 +1879,6 @@ public:
                 getEdges(data_link_cur[i], level).erase(cur_c);
             }
         }
-        return;
     }
 
     tableint
@@ -1837,13 +1902,15 @@ public:
             label_lookup_[label] = cur_c;
         }
 
+        std::shared_ptr<float[]> normalize_data;
+        normalize_vector(data_point, normalize_data);
+
         std::unique_lock<std::recursive_mutex> lock_el(link_list_locks_[cur_c]);
         int curlevel = getRandomLevel(mult_);
         if (level > 0)
             curlevel = level;
 
         element_levels_[cur_c] = curlevel;
-
         std::unique_lock<std::mutex> lock(global);
         int maxlevelcopy = maxlevel_;
         if (curlevel <= maxlevelcopy)
@@ -1856,7 +1923,6 @@ public:
         // Initialisation of the data and label
         memcpy(getExternalLabeLp(cur_c), &label, sizeof(labeltype));
         memcpy(getDataByInternalId(cur_c), data_point, data_size_);
-
         if (curlevel) {
             auto new_link_lists = (char*)allocator_->Reallocate(
                 link_lists_[cur_c], size_links_per_element_ * curlevel + 1);
@@ -1939,10 +2005,11 @@ public:
         if (cur_element_count_ == 0)
             return result;
 
+        std::shared_ptr<float[]> normalize_query;
+        normalize_vector(query_data, normalize_query);
         tableint currObj = enterpoint_node_;
         float curdist =
             fstdistfunc_(query_data, getDataByInternalId(enterpoint_node_), dist_func_param_);
-
         for (int level = maxlevel_; level > 0; level--) {
             bool changed = true;
             while (changed) {
@@ -1951,8 +2018,8 @@ public:
 
                 data = (unsigned int*)get_linklist(currObj, level);
                 int size = getListCount(data);
-                metric_hops++;
-                metric_distance_computations += size;
+                metric_hops_++;
+                metric_distance_computations_ += size;
 
                 tableint* datal = (tableint*)(data + 1);
                 for (int i = 0; i < size; i++) {
@@ -2002,6 +2069,8 @@ public:
         if (cur_element_count_ == 0)
             return result;
 
+        std::shared_ptr<float[]> normalize_query;
+        normalize_vector(query_data, normalize_query);
         tableint currObj = enterpoint_node_;
         float curdist =
             fstdistfunc_(query_data, getDataByInternalId(enterpoint_node_), dist_func_param_);
@@ -2014,8 +2083,8 @@ public:
 
                 data = (unsigned int*)get_linklist(currObj, level);
                 int size = getListCount(data);
-                metric_hops++;
-                metric_distance_computations += size;
+                metric_hops_++;
+                metric_distance_computations_ += size;
 
                 tableint* datal = (tableint*)(data + 1);
                 for (int i = 0; i < size; i++) {
