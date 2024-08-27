@@ -48,6 +48,7 @@ HNSW::HNSW(std::shared_ptr<hnswlib::SpaceInterface> space_interface,
            bool use_static,
            bool use_reversed_edges,
            bool use_conjugate_graph,
+           bool normalize,
            Allocator* allocator)
     : space(std::move(space_interface)),
       use_static_(use_static),
@@ -78,6 +79,7 @@ HNSW::HNSW(std::shared_ptr<hnswlib::SpaceInterface> space_interface,
                                                        M,
                                                        ef_construction,
                                                        use_reversed_edges_,
+                                                       normalize,
                                                        Options::Instance().block_size_limit());
     } else {
         if (dim_ % 4 != 0) {

@@ -54,6 +54,7 @@ Factory::CreateIndex(const std::string& origin_name,
                                           params.use_static,
                                           false,
                                           params.use_conjugate_graph,
+                                          params.normalize,
                                           allocator);
         } else if (name == INDEX_FRESH_HNSW) {
             // read parameters from json, throw exception if not exists
@@ -63,7 +64,9 @@ Factory::CreateIndex(const std::string& origin_name,
                                           params.max_degree,
                                           params.ef_construction,
                                           params.use_static,
-                                          params.use_reversed_edges,
+                                          true,
+                                          false,
+                                          params.normalize,
                                           allocator);
         } else if (name == INDEX_DISKANN) {
             // read parameters from json, throw exception if not exists

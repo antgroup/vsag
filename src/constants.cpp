@@ -36,6 +36,7 @@ const char* const DISKANN_GRAPH = "diskann_graph";
 const char* const SIMPLEFLAT_VECTORS = "simpleflat_vectors";
 const char* const SIMPLEFLAT_IDS = "simpleflat_ids";
 const char* const METRIC_L2 = "l2";
+const char* const METRIC_COSINE = "cosine";
 const char* const METRIC_IP = "ip";
 const char* const DATATYPE_FLOAT32 = "float32";
 const char* const BLANK_INDEX = "blank_index";

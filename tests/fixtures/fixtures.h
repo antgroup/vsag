@@ -25,10 +25,10 @@
 namespace fixtures {
 
 std::vector<float>
-generate_vectors(int64_t num_vectors, int64_t dim);
+generate_vectors(int64_t num_vectors, int64_t dim, bool need_normalize = true);
 
 std::tuple<std::vector<int64_t>, std::vector<float>>
-generate_ids_and_vectors(int64_t num_elements, int64_t dim);
+generate_ids_and_vectors(int64_t num_elements, int64_t dim, bool need_normalize = true);
 
 vsag::IndexPtr
 generate_index(const std::string& name,

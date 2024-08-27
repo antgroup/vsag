@@ -71,6 +71,7 @@ public:
          bool use_static = false,
          bool use_reversed_edges = false,
          bool use_conjugate_graph = false,
+         bool normalize = false,
          Allocator* allocator = nullptr);
 
     tl::expected<std::vector<int64_t>, Error>

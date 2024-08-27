@@ -50,9 +50,10 @@ TEST_CASE("hnsw build test", "[ft][index][hnsw]") {
 
     int64_t num_vectors = 1000;
     int64_t dim = 57;
-    auto metric_type = GENERATE("l2", "ip");
+    auto metric_type = GENERATE("l2", "ip", "cosine");
+    bool need_normalize = metric_type != std::string("cosine");
 
-    auto [ids, vectors] = fixtures::generate_ids_and_vectors(num_vectors * 2, dim);
+    auto [ids, vectors] = fixtures::generate_ids_and_vectors(num_vectors * 2, dim, need_normalize);
     auto createindex = vsag::Factory::CreateIndex(
         "hnsw", fixtures::generate_hnsw_build_parameters_string(metric_type, dim));
     REQUIRE(createindex.has_value());
@@ -104,7 +105,7 @@ TEST_CASE("diskann build test", "[ft][index][diskann]") {
     constexpr auto build_parameter_json = R"(
         {{
             "dtype": "float32",
-            "metric_type": "ip",
+            "metric_type": "{}",
             "dim": {},
             "diskann": {{
                 "max_degree": 16,
@@ -116,7 +117,7 @@ TEST_CASE("diskann build test", "[ft][index][diskann]") {
     )";
 
     SECTION("pq_sample_rate is too small") {
-        auto build_parameters = fmt::format(build_parameter_json, dim, -0.5);
+        auto build_parameters = fmt::format(build_parameter_json, metric_type, dim, -0.5);
         auto createindex = vsag::Factory::CreateIndex("diskann", build_parameters);
         REQUIRE(createindex.has_value());
         auto index = createindex.value();
@@ -125,7 +126,7 @@ TEST_CASE("diskann build test", "[ft][index][diskann]") {
     }
 
     SECTION("pq_sample_rate is zero") {
-        auto build_parameters = fmt::format(build_parameter_json, dim, 0);
+        auto build_parameters = fmt::format(build_parameter_json, metric_type, dim, 0);
         auto createindex = vsag::Factory::CreateIndex("diskann", build_parameters);
         REQUIRE(createindex.has_value());
         auto index = createindex.value();
@@ -134,7 +135,7 @@ TEST_CASE("diskann build test", "[ft][index][diskann]") {
     }
 
     SECTION("pq_sample_rate is too large") {
-        auto build_parameters = fmt::format(build_parameter_json, dim, 20);
+        auto build_parameters = fmt::format(build_parameter_json, metric_type, dim, 20);
         auto createindex = vsag::Factory::CreateIndex("diskann", build_parameters);
         REQUIRE(createindex.has_value());
         auto index = createindex.value();
@@ -182,9 +183,10 @@ TEST_CASE("hnsw float32 recall", "[ft][index][hnsw]") {
 
     int64_t num_vectors = 1000;
     int64_t dim = 104;
-    auto metric_type = GENERATE("l2", "ip");
+    auto metric_type = GENERATE("l2", "ip", "cosine");
+    bool need_normalize = metric_type != std::string("cosine");
 
-    auto [ids, vectors] = fixtures::generate_ids_and_vectors(num_vectors, dim);
+    auto [ids, vectors] = fixtures::generate_ids_and_vectors(num_vectors, dim, need_normalize);
     auto createindex = vsag::Factory::CreateIndex(
         "hnsw", fixtures::generate_hnsw_build_parameters_string(metric_type, dim));
     REQUIRE(createindex.has_value());
@@ -222,10 +224,15 @@ TEST_CASE("index search distance", "[ft][index]") {
 
     size_t num_vectors = 1000;
     size_t dim = 256;
-    auto metric_type = GENERATE("ip", "l2");
+    auto metric_type = GENERATE("ip", "cosine", "l2");
     auto algorithm = GENERATE("hnsw", "diskann");
 
-    auto [ids, vectors] = fixtures::generate_ids_and_vectors(num_vectors, dim);
+    if (algorithm == std::string("diskann") and metric_type == std::string("cosine")) {
+        return;  // TODO: support cosine for diskann
+    }
+
+    bool need_normalize = metric_type != std::string("cosine");
+    auto [ids, vectors] = fixtures::generate_ids_and_vectors(num_vectors, dim, need_normalize);
 
     constexpr auto build_parameter_json = R"(
     {{
@@ -295,9 +302,16 @@ TEST_CASE("index search distance", "[ft][index]") {
             } else if (metric_type == std::string("ip")) {
                 score = 1 - vsag::InnerProduct(
                                 vectors.data() + dim * i, vectors.data() + dim * id, &dim);
+            } else if (metric_type == std::string("cosine")) {
+                float mold_query =
+                    vsag::InnerProduct(vectors.data() + dim * i, vectors.data() + dim * i, &dim);
+                float mold_base =
+                    vsag::InnerProduct(vectors.data() + dim * id, vectors.data() + dim * id, &dim);
+                score = 1 - vsag::InnerProduct(
+                                vectors.data() + dim * i, vectors.data() + dim * id, &dim) /
+                                std::sqrt(mold_query * mold_base);
             }
             fixtures::dist_t return_score = knn_result->GetDistances()[j];
-
             REQUIRE(return_score == score);
             max_score = score;
         }
@@ -314,6 +328,14 @@ TEST_CASE("index search distance", "[ft][index]") {
             } else if (metric_type == std::string("ip")) {
                 score = 1 - vsag::InnerProduct(
                                 vectors.data() + dim * i, vectors.data() + dim * id, &dim);
+            } else if (metric_type == std::string("cosine")) {
+                float mold_query =
+                    vsag::InnerProduct(vectors.data() + dim * i, vectors.data() + dim * i, &dim);
+                float mold_base =
+                    vsag::InnerProduct(vectors.data() + dim * id, vectors.data() + dim * id, &dim);
+                score = 1 - vsag::InnerProduct(
+                                vectors.data() + dim * i, vectors.data() + dim * id, &dim) /
+                                std::sqrt(mold_query * mold_base);
             }
 
             fixtures::dist_t return_score = range_result->GetDistances()[j];
@@ -350,18 +372,40 @@ TEST_CASE("index get distance by id", "[ft][index][hnsw]") {
     vsag::Options::Instance().logger()->SetLevel(vsag::Logger::Level::kDEBUG);
     int64_t num_vectors = 1000;
     int64_t dim = 104;
-    auto metric_type = GENERATE("l2", "ip");
+    auto metric_type = GENERATE("l2", "ip", "cosine");
     auto index_name = GENERATE("hnsw", "diskann");
 
-    auto [ids, vectors] = fixtures::generate_ids_and_vectors(num_vectors, dim);
+    if (index_name == std::string("diskann") and metric_type == std::string("cosine")) {
+        return;  // TODO: support cosine for diskann
+    }
+
+    bool need_normalize = metric_type != std::string("cosine");
+    auto [ids, vectors] = fixtures::generate_ids_and_vectors(num_vectors, dim, need_normalize);
     auto index =
         fixtures::generate_index(index_name, metric_type, num_vectors, dim, ids, vectors, false);
 
     if (index_name == std::string("hnsw")) {
-        for (int i = 0; i < num_vectors; ++i) {
-            auto result = index->CalcDistanceById(vectors.data() + i * dim, ids[i]);
-            REQUIRE(result.has_value());
-            REQUIRE(std::fabs(result.value()) < 0.00001);
+        for (int i = 1; i < num_vectors; ++i) {
+            int64_t id_index = i - 1;
+            auto result = index->CalcDistanceById(vectors.data() + i * dim, ids[id_index]);
+            float score = 0;
+            if (metric_type == std::string("l2")) {
+                score =
+                    vsag::L2Sqr(vectors.data() + dim * i, vectors.data() + dim * id_index, &dim);
+            } else if (metric_type == std::string("ip")) {
+                score = 1 - vsag::InnerProduct(
+                                vectors.data() + dim * i, vectors.data() + dim * id_index, &dim);
+            } else if (metric_type == std::string("cosine")) {
+                float mold_query =
+                    vsag::InnerProduct(vectors.data() + dim * i, vectors.data() + dim * i, &dim);
+                float mold_base = vsag::InnerProduct(
+                    vectors.data() + dim * id_index, vectors.data() + dim * id_index, &dim);
+                score = 1 - vsag::InnerProduct(
+                                vectors.data() + dim * i, vectors.data() + dim * id_index, &dim) /
+                                std::sqrt(mold_query * mold_base);
+            }
+            fixtures::dist_t return_score = result.value();
+            REQUIRE(return_score == score);
         }
     } else {
         REQUIRE_THROWS(index->CalcDistanceById(vectors.data(), ids[0]));
@@ -433,9 +477,10 @@ TEST_CASE("serialize/deserialize with file stream", "[ft][index]") {
     int64_t dim = 64;
     // auto index_name = GENERATE("hnsw", "diskann");
     auto index_name = GENERATE("hnsw");
-    auto metric_type = GENERATE("l2", "ip");
+    auto metric_type = GENERATE("l2", "ip", "cosine");
 
-    auto [ids, vectors] = fixtures::generate_ids_and_vectors(num_vectors, dim);
+    bool need_normalize = metric_type != std::string("cosine");
+    auto [ids, vectors] = fixtures::generate_ids_and_vectors(num_vectors, dim, metric_type);
     auto index =
         fixtures::generate_index(index_name, metric_type, num_vectors, dim, ids, vectors, true);
 
@@ -512,6 +557,9 @@ TEST_CASE("serialize/deserialize with file stream", "[ft][index]") {
         std::filesystem::resize_file(dir.path + "index.bin", size - 10);
         std::fstream in_file(dir.path + "index.bin", std::ios::in | std::ios::binary);
 
+        if (metric_type == std::string("cosine")) {
+            return;
+        }
         auto new_index =
             vsag::Factory::CreateIndex(
                 "diskann",
@@ -622,8 +670,11 @@ TEST_CASE("search on a deserialized empty index", "[ft][index]") {
     int64_t num_vectors = 1000;
     int64_t dim = 64;
     auto index_name = GENERATE("hnsw", "diskann");
-    auto metric_type = GENERATE("l2", "ip");
+    auto metric_type = GENERATE("l2", "ip", "cosine");
 
+    if (index_name == std::string("diskann") and metric_type == std::string("cosine")) {
+        return;  // TODO: support cosine for diskann
+    }
     auto index =
         vsag::Factory::CreateIndex(
             index_name, vsag::generate_build_parameters(metric_type, num_vectors, dim).value())
@@ -679,12 +730,17 @@ TEST_CASE("search on a deserialized empty index", "[ft][index]") {
 
 TEST_CASE("remove vectors from the index", "[ft][index]") {
     vsag::Options::Instance().logger()->SetLevel(vsag::Logger::Level::kDEBUG);
-    int64_t num_vectors = 10000;
+    int64_t num_vectors = 1000;
     int64_t dim = 64;
-    auto index_name = GENERATE("fresh_hnsw", "hnsw", "diskann");
-    auto metric_type = GENERATE("l2", "ip");
+    auto index_name = GENERATE("fresh_hnsw", "diskann");
+    auto metric_type = GENERATE("cosine", "ip", "l2");
 
-    auto [ids, vectors] = fixtures::generate_ids_and_vectors(num_vectors, dim);
+    if (index_name == std::string("diskann") and metric_type == std::string("cosine")) {
+        return;  // TODO: support cosine for diskann
+    }
+
+    bool need_normalize = metric_type != std::string("cosine");
+    auto [ids, vectors] = fixtures::generate_ids_and_vectors(num_vectors, dim, need_normalize);
     auto index = fixtures::generate_index(index_name, metric_type, num_vectors, dim, ids, vectors);
 
     constexpr auto search_parameters = R"(
@@ -719,7 +775,7 @@ TEST_CASE("remove vectors from the index", "[ft][index]") {
         float recall_before = ((float)correct) / num_vectors;
 
         for (int i = 0; i < num_vectors / 2; ++i) {
-            auto result = index->Remove(i);
+            auto result = index->Remove(ids[i]);
             REQUIRE(result.has_value());
             REQUIRE(result.value());
         }

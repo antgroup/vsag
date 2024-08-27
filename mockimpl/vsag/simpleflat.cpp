@@ -399,20 +399,25 @@ SimpleFlat::l2(const float* v1, const float* v2, int64_t dim) {
 float
 SimpleFlat::ip(const float* v1, const float* v2, int64_t dim) {
     float dist = 0;
-    float mold_v1 = 0;
-    float mold_v2 = 0;
     for (int64_t i = 0; i < dim; ++i) {
-        mold_v1 += std::pow(v1[i], 2);
-        mold_v2 += std::pow(v2[i], 2);
         dist += v1[i] * v2[i];
     }
-    dist = (1 - dist / std::sqrt(mold_v1 * mold_v2)) / 2 + 0.5;
+    dist = 1 - dist;
     return dist;
 }
 
 float
 SimpleFlat::cosine(const float* v1, const float* v2, int64_t dim) {
-    return 0;
+    float dist = 0;
+    float mold_v1 = 0;
+    float mold_v2 = 0;
+    for (int64_t i = 0; i < dim; ++i) {
+        mold_v1 += v1[i] * v1[i];
+        mold_v2 += v2[i] * v2[i];
+        dist += v1[i] * v2[i];
+    }
+    dist = 1 - dist / std::sqrt(mold_v1 * mold_v2);
+    return dist;
 }
 
 std::string
