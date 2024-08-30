@@ -1,3 +1,4 @@
+
 // Copyright 2024-present the vsag project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -207,26 +208,26 @@ public:
     getExternalLabel(tableint internal_id) const {
         labeltype return_label;
         memcpy(&return_label,
-               (data_level0_memory_->getElementPtr(internal_id, label_offset_)),
+               (data_level0_memory_->GetElementPtr(internal_id, label_offset_)),
                sizeof(labeltype));
         return return_label;
     }
 
     inline void
     setExternalLabel(tableint internal_id, labeltype label) const {
-        memcpy((data_level0_memory_->getElementPtr(internal_id, label_offset_)),
+        memcpy((data_level0_memory_->GetElementPtr(internal_id, label_offset_)),
                &label,
                sizeof(labeltype));
     }
 
     inline labeltype*
     getExternalLabeLp(tableint internal_id) const {
-        return (labeltype*)(data_level0_memory_->getElementPtr(internal_id, label_offset_));
+        return (labeltype*)(data_level0_memory_->GetElementPtr(internal_id, label_offset_));
     }
 
     inline char*
     getDataByInternalId(tableint internal_id) const {
-        return (data_level0_memory_->getElementPtr(internal_id, offsetData_));
+        return (data_level0_memory_->GetElementPtr(internal_id, offsetData_));
     }
 
     int
@@ -777,7 +778,7 @@ public:
 
     linklistsizeint*
     get_linklist0(tableint internal_id) const {
-        return (linklistsizeint*)(data_level0_memory_->getElementPtr(internal_id, offsetLevel0_));
+        return (linklistsizeint*)(data_level0_memory_->GetElementPtr(internal_id, offsetLevel0_));
     }
 
     linklistsizeint*
@@ -928,7 +929,7 @@ public:
     resizeIndex(size_t new_max_elements) override {
         if (new_max_elements < cur_element_count_)
             throw std::runtime_error(
-                "Cannot resize, max element is less than the current number of elements");
+                "Cannot Resize, max element is less than the current number of elements");
 
         delete visited_list_pool_;
         visited_list_pool_ = new VisitedListPool(1, new_max_elements, allocator_);
@@ -938,7 +939,7 @@ public:
         std::vector<std::mutex>(new_max_elements).swap(link_list_locks_);
 
         // Reallocate base layer
-        data_level0_memory_->resize(new_max_elements);
+        data_level0_memory_->Resize(new_max_elements);
 
         // Reallocate all other layers
         char** linkLists_new =
@@ -1005,7 +1006,7 @@ public:
         writeVarToMem(dest, pq_sub_dim);
 
         // output.write(data_level0_memory_, cur_element_count_ * size_data_per_element_);
-        data_level0_memory_->serialize(dest, cur_element_count_);
+        data_level0_memory_->Serialize(dest, cur_element_count_);
 
         for (size_t i = 0; i < cur_element_count_; i++) {
             unsigned int linkListSize =
@@ -1071,7 +1072,7 @@ public:
         size += sizeof(pq_sub_dim);
 
         // output.write(data_level0_memory_, cur_element_count_ * size_data_per_element_);
-        size += data_level0_memory_->getSize();
+        size += data_level0_memory_->GetSize();
 
         for (size_t i = 0; i < cur_element_count_; i++) {
             unsigned int linkListSize =
@@ -1115,7 +1116,7 @@ public:
         writeBinaryPOD(out_stream, pq_cluster);
         writeBinaryPOD(out_stream, pq_sub_dim);
 
-        data_level0_memory_->serialize(out_stream, cur_element_count_);
+        data_level0_memory_->Serialize(out_stream, cur_element_count_);
 
         for (size_t i = 0; i < cur_element_count_; i++) {
             unsigned int linkListSize =
@@ -1264,7 +1265,7 @@ public:
         // input.seekg(pos, input.beg);
         resizeIndex(max_elements);
 
-        data_level0_memory_->deserialize(read_func, cursor, cur_element_count_);
+        data_level0_memory_->Deserialize(read_func, cursor, cur_element_count_);
         cursor += cur_element_count_ * size_data_per_element_;
 
         size_links_per_element_ = maxM_ * sizeof(tableint) + sizeof(linklistsizeint);
@@ -1384,7 +1385,7 @@ public:
 
         resizeIndex(max_elements);
         in_stream.seekg(pos, in_stream.beg);
-        data_level0_memory_->deserialize(in_stream, cur_element_count_);
+        data_level0_memory_->Deserialize(in_stream, cur_element_count_);
 
         size_links_per_element_ = maxM_ * sizeof(tableint) + sizeof(linklistsizeint);
 
@@ -1498,7 +1499,7 @@ public:
 
         input.seekg(pos, input.beg);
 
-        data_level0_memory_->deserialize(input, cur_element_count_);
+        data_level0_memory_->Deserialize(input, cur_element_count_);
 
         size_links_per_element_ = maxM_ * sizeof(tableint) + sizeof(linklistsizeint);
 
@@ -1628,7 +1629,7 @@ public:
         tableint currObj = enterpoint_node_;
         tableint enterpoint_copy = enterpoint_node_;
 
-        memset(data_level0_memory_->getElementPtr(cur_c, offsetLevel0_), 0, size_data_per_element_);
+        memset(data_level0_memory_->GetElementPtr(cur_c, offsetLevel0_), 0, size_data_per_element_);
 
         // Initialisation of the data and label
         memcpy(getExternalLabeLp(cur_c), &label, sizeof(labeltype));

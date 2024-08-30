@@ -1,4 +1,5 @@
 
+
 // Copyright 2024-present the vsag project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -61,7 +62,6 @@ public:
     Reallocate(void* p, size_t size) override;
 
 private:
-
 #ifndef NDEBUG
     std::unordered_set<void*> allocated_ptrs_;
     std::mutex set_mutex_;

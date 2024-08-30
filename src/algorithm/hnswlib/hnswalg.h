@@ -1,3 +1,4 @@
+
 // Copyright 2024-present the vsag project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -33,15 +34,15 @@
 
 #include "../../default_allocator.h"
 #include "../../simd/simd.h"
+#include "block_manager.h"
 #include "hnswlib.h"
 #include "visited_list_pool.h"
 
 namespace hnswlib {
-typedef unsigned int tableint;
-typedef unsigned int linklistsizeint;
-typedef std::
-    unordered_set<tableint, std::hash<tableint>, std::equal_to<>, vsag::AllocatorWrapper<tableint>>
-        reverselinklist;
+using tableint = unsigned int;
+using linklistsizeint = unsigned int;
+using reverselinklist = std::
+    unordered_set<tableint, std::hash<tableint>, std::equal_to<>, vsag::AllocatorWrapper<tableint>>;
 
 const static float THRESHOLD_ERROR = 1e-6;
 
@@ -292,19 +293,19 @@ public:
     getExternalLabel(tableint internal_id) const {
         labeltype value;
         std::memcpy(&value,
-                    data_level0_memory_->getElementPtr(internal_id, label_offset_),
+                    data_level0_memory_->GetElementPtr(internal_id, label_offset_),
                     sizeof(labeltype));
         return value;
     }
 
     inline void
     setExternalLabel(tableint internal_id, labeltype label) const {
-        *(labeltype*)(data_level0_memory_->getElementPtr(internal_id, label_offset_)) = label;
+        *(labeltype*)(data_level0_memory_->GetElementPtr(internal_id, label_offset_)) = label;
     }
 
     inline labeltype*
     getExternalLabeLp(tableint internal_id) const {
-        return (labeltype*)(data_level0_memory_->getElementPtr(internal_id, label_offset_));
+        return (labeltype*)(data_level0_memory_->GetElementPtr(internal_id, label_offset_));
     }
 
     inline reverselinklist&
@@ -405,7 +406,7 @@ public:
 
     inline char*
     getDataByInternalId(tableint internal_id) const {
-        return (data_level0_memory_->getElementPtr(internal_id, offsetData_));
+        return (data_level0_memory_->GetElementPtr(internal_id, offsetData_));
     }
 
     std::priority_queue<std::pair<float, labeltype>>
@@ -592,7 +593,7 @@ public:
                 metric_distance_computations_ += size;
             }
 
-            auto vector_data_ptr = data_level0_memory_->getElementPtr((*(data + 1)), offsetData_);
+            auto vector_data_ptr = data_level0_memory_->GetElementPtr((*(data + 1)), offsetData_);
 #ifdef USE_SSE
             _mm_prefetch((char*)(visited_array + *(data + 1)), _MM_HINT_T0);
             _mm_prefetch((char*)(visited_array + *(data + 1) + 64), _MM_HINT_T0);
@@ -604,7 +605,7 @@ public:
                 int candidate_id = *(data + j);
                 size_t pre_l = std::min(j, size - 2);
                 auto vector_data_ptr =
-                    data_level0_memory_->getElementPtr((*(data + pre_l + 1)), offsetData_);
+                    data_level0_memory_->GetElementPtr((*(data + pre_l + 1)), offsetData_);
 #ifdef USE_SSE
                 _mm_prefetch((char*)(visited_array + *(data + pre_l + 1)), _MM_HINT_T0);
                 _mm_prefetch(vector_data_ptr, _MM_HINT_T0);  ////////////
@@ -616,7 +617,7 @@ public:
                     float dist = fstdistfunc_(data_point, currObj1, dist_func_param_);
                     if (top_candidates.size() < ef || lowerBound > dist) {
                         candidate_set.emplace(-dist, candidate_id);
-                        auto vector_data_ptr = data_level0_memory_->getElementPtr(
+                        auto vector_data_ptr = data_level0_memory_->GetElementPtr(
                             candidate_set.top().second, offsetLevel0_);
 #ifdef USE_SSE
                         _mm_prefetch(vector_data_ptr, _MM_HINT_T0);
@@ -692,7 +693,7 @@ public:
                 metric_distance_computations_ += size;
             }
 
-            auto vector_data_ptr = data_level0_memory_->getElementPtr((*(data + 1)), offsetData_);
+            auto vector_data_ptr = data_level0_memory_->GetElementPtr((*(data + 1)), offsetData_);
 #ifdef USE_SSE
             _mm_prefetch((char*)(visited_array + *(data + 1)), _MM_HINT_T0);
             _mm_prefetch((char*)(visited_array + *(data + 1) + 64), _MM_HINT_T0);
@@ -704,7 +705,7 @@ public:
                 int candidate_id = *(data + j);
                 size_t pre_l = std::min(j, size - 2);
                 auto vector_data_ptr =
-                    data_level0_memory_->getElementPtr((*(data + pre_l + 1)), offsetData_);
+                    data_level0_memory_->GetElementPtr((*(data + pre_l + 1)), offsetData_);
 #ifdef USE_SSE
                 _mm_prefetch((char*)(visited_array + *(data + pre_l + 1)), _MM_HINT_T0);
                 _mm_prefetch(vector_data_ptr, _MM_HINT_T0);  ////////////
@@ -719,7 +720,7 @@ public:
                     if (visited_count < ef || dist <= radius + THRESHOLD_ERROR ||
                         lowerBound > dist) {
                         candidate_set.emplace(-dist, candidate_id);
-                        auto vector_data_ptr = data_level0_memory_->getElementPtr(
+                        auto vector_data_ptr = data_level0_memory_->GetElementPtr(
                             candidate_set.top().second, offsetLevel0_);
 #ifdef USE_SSE
                         _mm_prefetch(vector_data_ptr, _MM_HINT_T0);  ////////////////////////
@@ -789,7 +790,7 @@ public:
 
     linklistsizeint*
     get_linklist0(tableint internal_id) const {
-        return (linklistsizeint*)(data_level0_memory_->getElementPtr(internal_id, offsetLevel0_));
+        return (linklistsizeint*)(data_level0_memory_->GetElementPtr(internal_id, offsetLevel0_));
     }
 
     linklistsizeint*
@@ -924,7 +925,7 @@ public:
     resizeIndex(size_t new_max_elements) override {
         if (new_max_elements < cur_element_count_)
             throw std::runtime_error(
-                "Cannot resize, max element is less than the current number of elements");
+                "Cannot Resize, max element is less than the current number of elements");
 
         if (visited_list_pool_ != nullptr) {
             delete visited_list_pool_;
@@ -951,7 +952,7 @@ public:
         }
 
         // Reallocate base layer
-        if (not data_level0_memory_->resize(new_max_elements))
+        if (not data_level0_memory_->Resize(new_max_elements))
             throw std::runtime_error(
                 "Not enough memory: resizeIndex failed to allocate base layer");
 
@@ -991,72 +992,6 @@ public:
         max_elements_ = new_max_elements;
     }
 
-    template <typename T>
-    static void
-    writeVarToMem(char*& dest, const T& ref) {
-        std::memcpy(dest, (char*)&ref, sizeof(T));
-        dest += sizeof(T);
-    }
-
-    static void
-    writeBinaryToMem(char*& dest, const char* src, size_t len) {
-        std::memcpy(dest, src, len);
-        dest += len;
-    }
-
-    void
-    saveIndex(void* d) override {
-        // std::ofstream output(location, std::ios::binary);
-        // std::streampos position;
-        char* dest = (char*)d;
-
-        // writeBinaryPOD(output, offsetLevel0_);
-        writeVarToMem(dest, offsetLevel0_);
-        // writeBinaryPOD(output, max_elements_);
-        writeVarToMem(dest, max_elements_);
-        // writeBinaryPOD(output, cur_element_count_);
-        writeVarToMem(dest, cur_element_count_);
-        // writeBinaryPOD(output, size_data_per_element_);
-        writeVarToMem(dest, size_data_per_element_);
-        // writeBinaryPOD(output, label_offset_);
-        writeVarToMem(dest, label_offset_);
-        // writeBinaryPOD(output, offsetData_);
-        writeVarToMem(dest, offsetData_);
-        // writeBinaryPOD(output, maxlevel_);
-        writeVarToMem(dest, maxlevel_);
-        // writeBinaryPOD(output, enterpoint_node_);
-        writeVarToMem(dest, enterpoint_node_);
-        // writeBinaryPOD(output, maxM_);
-        writeVarToMem(dest, maxM_);
-
-        // writeBinaryPOD(output, maxM0_);
-        writeVarToMem(dest, maxM0_);
-        // writeBinaryPOD(output, M_);
-        writeVarToMem(dest, M_);
-        // writeBinaryPOD(output, mult_);
-        writeVarToMem(dest, mult_);
-        // writeBinaryPOD(output, ef_construction_);
-        writeVarToMem(dest, ef_construction_);
-
-        data_level0_memory_->serialize(dest, cur_element_count_);
-
-        for (size_t i = 0; i < cur_element_count_; i++) {
-            unsigned int link_list_size =
-                element_levels_[i] > 0 ? size_links_per_element_ * element_levels_[i] : 0;
-            // writeBinaryPOD(output, link_list_size);
-            writeVarToMem(dest, link_list_size);
-            if (link_list_size) {
-                // output.write(link_lists_[i], link_list_size);
-                writeBinaryToMem(dest, link_lists_[i], link_list_size);
-            }
-        }
-
-        if (normalize_) {
-            writeBinaryToMem(dest, (char*)molds_, max_elements_ * sizeof(float));
-        }
-        // output.close();
-    }
-
     size_t
     calcSerializeSize() override {
         // std::ofstream output(location, std::ios::binary);
@@ -1092,7 +1027,7 @@ public:
         size += sizeof(ef_construction_);
 
         // output.write(data_level0_memory_, cur_element_count_ * size_data_per_element_);
-        size += data_level0_memory_->getSize();
+        size += data_level0_memory_->GetSize();
         size += maxM0_ * sizeof(uint32_t) * max_elements_;
         for (size_t i = 0; i < cur_element_count_; i++) {
             unsigned int link_list_size =
@@ -1113,378 +1048,125 @@ public:
         return size;
     }
 
+    void
+    saveIndex(void* d) override {
+        char* dest = (char*)d;
+        BufferStreamWriter writer(dest);
+        SerializeImpl(writer);
+    }
     // save index to a file stream
     void
     saveIndex(std::ostream& out_stream) override {
-        writeBinaryPOD(out_stream, offsetLevel0_);
-        writeBinaryPOD(out_stream, max_elements_);
-        writeBinaryPOD(out_stream, cur_element_count_);
-        writeBinaryPOD(out_stream, size_data_per_element_);
-        writeBinaryPOD(out_stream, label_offset_);
-        writeBinaryPOD(out_stream, offsetData_);
-        writeBinaryPOD(out_stream, maxlevel_);
-        writeBinaryPOD(out_stream, enterpoint_node_);
-        writeBinaryPOD(out_stream, maxM_);
-
-        writeBinaryPOD(out_stream, maxM0_);
-        writeBinaryPOD(out_stream, M_);
-        writeBinaryPOD(out_stream, mult_);
-        writeBinaryPOD(out_stream, ef_construction_);
-
-        data_level0_memory_->serialize(out_stream, cur_element_count_);
-
-        for (size_t i = 0; i < cur_element_count_; i++) {
-            unsigned int link_list_size =
-                element_levels_[i] > 0 ? size_links_per_element_ * element_levels_[i] : 0;
-            writeBinaryPOD(out_stream, link_list_size);
-            if (link_list_size) {
-                out_stream.write(link_lists_[i], link_list_size);
-            }
-        }
-        if (normalize_) {
-            out_stream.write((char*)molds_, max_elements_ * sizeof(float));
-        }
+        IOStreamWriter writer(out_stream);
+        SerializeImpl(writer);
     }
 
     void
     saveIndex(const std::string& location) override {
         std::ofstream output(location, std::ios::binary);
-        std::streampos position;
-
-        writeBinaryPOD(output, offsetLevel0_);
-        writeBinaryPOD(output, max_elements_);
-        writeBinaryPOD(output, cur_element_count_);
-        writeBinaryPOD(output, size_data_per_element_);
-        writeBinaryPOD(output, label_offset_);
-        writeBinaryPOD(output, offsetData_);
-        writeBinaryPOD(output, maxlevel_);
-        writeBinaryPOD(output, enterpoint_node_);
-        writeBinaryPOD(output, maxM_);
-
-        writeBinaryPOD(output, maxM0_);
-        writeBinaryPOD(output, M_);
-        writeBinaryPOD(output, mult_);
-        writeBinaryPOD(output, ef_construction_);
-
-        data_level0_memory_->serialize(output, cur_element_count_);
-
-        for (size_t i = 0; i < cur_element_count_; i++) {
-            unsigned int link_list_size =
-                element_levels_[i] > 0 ? size_links_per_element_ * element_levels_[i] : 0;
-            writeBinaryPOD(output, link_list_size);
-            if (link_list_size)
-                output.write(link_lists_[i], link_list_size);
-        }
+        IOStreamWriter writer(output);
+        SerializeImpl(writer);
         output.close();
     }
 
     template <typename T>
+    static void
+    WriteOne(StreamWriter& writer, T& value) {
+        writer.Write(reinterpret_cast<char*>(&value), sizeof(value));
+    }
+
     void
-    readFromReader(std::function<void(uint64_t, uint64_t, void*)> read_func,
-                   uint64_t& cursor,
-                   T& var) {
-        read_func(cursor, sizeof(T), &var);
-        cursor += sizeof(T);
+    SerializeImpl(StreamWriter& writer) {
+        WriteOne(writer, offsetLevel0_);
+        WriteOne(writer, max_elements_);
+        WriteOne(writer, cur_element_count_);
+        WriteOne(writer, size_data_per_element_);
+        WriteOne(writer, label_offset_);
+        WriteOne(writer, offsetData_);
+        WriteOne(writer, maxlevel_);
+        WriteOne(writer, enterpoint_node_);
+        WriteOne(writer, maxM_);
+
+        WriteOne(writer, maxM0_);
+        WriteOne(writer, M_);
+        WriteOne(writer, mult_);
+        WriteOne(writer, ef_construction_);
+
+        data_level0_memory_->SerializeImpl(writer, cur_element_count_);
+
+        for (size_t i = 0; i < cur_element_count_; i++) {
+            unsigned int link_list_size =
+                element_levels_[i] > 0 ? size_links_per_element_ * element_levels_[i] : 0;
+            WriteOne(writer, link_list_size);
+            if (link_list_size) {
+                writer.Write(link_lists_[i], link_list_size);
+            }
+        }
+        if (normalize_) {
+            writer.Write(reinterpret_cast<char*>(molds_), max_elements_ * sizeof(float));
+        }
     }
 
     // load using reader
     void
     loadIndex(std::function<void(uint64_t, uint64_t, void*)> read_func,
               SpaceInterface* s,
-              size_t max_elements_i = 0) override {
-        // std::ifstream input(location, std::ios::binary);
-
-        // if (!input.is_open())
-        //     throw std::runtime_error("Cannot open file");
-
-        // get file size:
-        // input.seekg(0, input.end);
-        // std::streampos total_filesize = input.tellg();
-        // input.seekg(0, input.beg);
-
-        uint64_t cursor = 0;
-
-        // readBinaryPOD(input, offsetLevel0_);
-        readFromReader(read_func, cursor, offsetLevel0_);
-        // readBinaryPOD(input, max_elements_);
-        size_t max_elements;
-        readFromReader(read_func, cursor, max_elements);
-        max_elements = std::max(max_elements, max_elements_i);
-        max_elements = std::max(max_elements, max_elements_);
-
-        // readBinaryPOD(input, cur_element_count_);
-        readFromReader(read_func, cursor, cur_element_count_);
-        // readBinaryPOD(input, size_data_per_element_);
-        readFromReader(read_func, cursor, size_data_per_element_);
-        // readBinaryPOD(input, label_offset_);
-        readFromReader(read_func, cursor, label_offset_);
-        // readBinaryPOD(input, offsetData_);
-        readFromReader(read_func, cursor, offsetData_);
-        // readBinaryPOD(input, maxlevel_);
-        readFromReader(read_func, cursor, maxlevel_);
-        // readBinaryPOD(input, enterpoint_node_);
-        readFromReader(read_func, cursor, enterpoint_node_);
-
-        // readBinaryPOD(input, maxM_);
-        readFromReader(read_func, cursor, maxM_);
-        // readBinaryPOD(input, maxM0_);
-        readFromReader(read_func, cursor, maxM0_);
-        // readBinaryPOD(input, M_);
-        readFromReader(read_func, cursor, M_);
-        // readBinaryPOD(input, mult_);
-        readFromReader(read_func, cursor, mult_);
-        // readBinaryPOD(input, ef_construction_);
-        readFromReader(read_func, cursor, ef_construction_);
-
-        data_size_ = s->get_data_size();
-        fstdistfunc_ = s->get_dist_func();
-        dist_func_param_ = s->get_dist_func_param();
-
-        // auto pos = input.tellg();
-
-        /// Optional - check if index is ok:
-        // input.seekg(cur_element_count_ * size_data_per_element_, input.cur);
-        // for (size_t i = 0; i < cur_element_count_; i++) {
-        //     if (input.tellg() < 0 || input.tellg() >= total_filesize) {
-        //         throw std::runtime_error("Index seems to be corrupted or unsupported");
-        //     }
-
-        //     unsigned int link_list_size;
-        //     readBinaryPOD(input, link_list_size);
-        //     if (link_list_size != 0) {
-        //         input.seekg(link_list_size, input.cur);
-        //     }
-        // }
-
-        // throw exception if it either corrupted or old index
-        // if (input.tellg() != total_filesize)
-        //     throw std::runtime_error("Index seems to be corrupted or unsupported");
-
-        // input.clear();
-        /// Optional check end
-
-        // input.seekg(pos, input.beg);
-        if (data_level0_memory_ == nullptr)
-            throw std::runtime_error("Not enough memory: loadIndex failed to allocate level0");
-        // input.read(data_level0_memory_, cur_element_count_ * size_data_per_element_);
-        resizeIndex(max_elements);
-        data_level0_memory_->deserialize(read_func, cursor, cur_element_count_);
-        cursor += cur_element_count_ * size_data_per_element_;
-
-        size_links_per_element_ = maxM_ * sizeof(tableint) + sizeof(linklistsizeint);
-
-        size_links_level0_ = maxM0_ * sizeof(tableint) + sizeof(linklistsizeint);
-        std::vector<std::recursive_mutex>(max_elements).swap(link_list_locks_);
-        std::vector<std::mutex>(MAX_LABEL_OPERATION_LOCKS).swap(label_op_locks_);
-
-        if (link_lists_ == nullptr)
-            throw std::runtime_error("Not enough memory: loadIndex failed to allocate linklists");
-
-        revSize_ = 1.0 / mult_;
-        for (size_t i = 0; i < cur_element_count_; i++) {
-            label_lookup_[getExternalLabel(i)] = i;
-            unsigned int link_list_size;
-            // readBinaryPOD(input, link_list_size);
-            readFromReader(read_func, cursor, link_list_size);
-            if (link_list_size == 0) {
-                element_levels_[i] = 0;
-                link_lists_[i] = nullptr;
-            } else {
-                element_levels_[i] = link_list_size / size_links_per_element_;
-                link_lists_[i] = (char*)allocator_->Allocate(link_list_size);
-                if (link_lists_[i] == nullptr)
-                    throw std::runtime_error(
-                        "Not enough memory: loadIndex failed to allocate linklist");
-                // input.read(link_lists_[i], link_list_size);
-                read_func(cursor, link_list_size, link_lists_[i]);
-                cursor += link_list_size;
-            }
-        }
-
-        if (normalize_) {
-            read_func(cursor, max_elements_ * sizeof(float), molds_);
-        }
-
-        if (use_reversed_edges_) {
-            for (int internal_id = 0; internal_id < cur_element_count_; ++internal_id) {
-                for (int level = 0; level <= element_levels_[internal_id]; ++level) {
-                    unsigned int* data = get_linklist_at_level(internal_id, level);
-                    auto link_list = data + 1;
-                    auto size = getListCount(data);
-                    for (int j = 0; j < size; ++j) {
-                        auto id = link_list[j];
-                        auto& in_edges = getEdges(id, level);
-                        in_edges.insert(internal_id);
-                    }
-                }
-            }
-        }
-
-        for (size_t i = 0; i < cur_element_count_; i++) {
-            if (isMarkedDeleted(i)) {
-                num_deleted_ += 1;
-                if (allow_replace_deleted_)
-                    deleted_elements.insert(i);
-            }
-        }
-
-        // input.close();
-
-        return;
+              size_t max_elements_i) override {
+        int64_t cursor = 0;
+        ReadFuncStreamReader reader(read_func, cursor);
+        DeserializeImpl(reader, s, max_elements_i);
     }
 
     // load index from a file stream
     void
-    loadIndex(std::istream& in_stream, SpaceInterface* s, size_t max_elements_i = 0) override {
-        auto beg_pos = in_stream.tellg();
-
-        readBinaryPOD(in_stream, offsetLevel0_);
-
-        size_t max_elements;
-        readBinaryPOD(in_stream, max_elements);
-        max_elements = std::max(max_elements, max_elements_i);
-        max_elements = std::max(max_elements, max_elements_);
-
-        readBinaryPOD(in_stream, cur_element_count_);
-        readBinaryPOD(in_stream, size_data_per_element_);
-        readBinaryPOD(in_stream, label_offset_);
-        readBinaryPOD(in_stream, offsetData_);
-        readBinaryPOD(in_stream, maxlevel_);
-        readBinaryPOD(in_stream, enterpoint_node_);
-
-        readBinaryPOD(in_stream, maxM_);
-        readBinaryPOD(in_stream, maxM0_);
-        readBinaryPOD(in_stream, M_);
-        readBinaryPOD(in_stream, mult_);
-        readBinaryPOD(in_stream, ef_construction_);
-
-        data_size_ = s->get_data_size();
-        fstdistfunc_ = s->get_dist_func();
-        dist_func_param_ = s->get_dist_func_param();
-
-        auto pos = in_stream.tellg();
-
-        in_stream.seekg(pos, in_stream.beg);
-
-        resizeIndex(max_elements);
-        data_level0_memory_->deserialize(in_stream, cur_element_count_);
-
-        size_links_per_element_ = maxM_ * sizeof(tableint) + sizeof(linklistsizeint);
-
-        size_links_level0_ = maxM0_ * sizeof(tableint) + sizeof(linklistsizeint);
-        std::vector<std::recursive_mutex>(max_elements).swap(link_list_locks_);
-        std::vector<std::mutex>(MAX_LABEL_OPERATION_LOCKS).swap(label_op_locks_);
-
-        revSize_ = 1.0 / mult_;
-        for (size_t i = 0; i < cur_element_count_; i++) {
-            label_lookup_[getExternalLabel(i)] = i;
-            unsigned int link_list_size;
-            readBinaryPOD(in_stream, link_list_size);
-            if (link_list_size == 0) {
-                element_levels_[i] = 0;
-                link_lists_[i] = nullptr;
-            } else {
-                element_levels_[i] = link_list_size / size_links_per_element_;
-                link_lists_[i] = (char*)allocator_->Allocate(link_list_size);
-                if (link_lists_[i] == nullptr)
-                    throw std::runtime_error(
-                        "Not enough memory: loadIndex failed to allocate linklist");
-                in_stream.read(link_lists_[i], link_list_size);
-            }
-        }
-        if (normalize_) {
-            in_stream.read((char*)molds_, sizeof(float) * max_elements_);
-        }
-
-        if (use_reversed_edges_) {
-            for (int internal_id = 0; internal_id < cur_element_count_; ++internal_id) {
-                for (int level = 0; level <= element_levels_[internal_id]; ++level) {
-                    unsigned int* data = get_linklist_at_level(internal_id, level);
-                    auto link_list = data + 1;
-                    auto size = getListCount(data);
-                    for (int j = 0; j < size; ++j) {
-                        auto id = link_list[j];
-                        auto& in_edges = getEdges(id, level);
-                        in_edges.insert(internal_id);
-                    }
-                }
-            }
-        }
-
-        for (size_t i = 0; i < cur_element_count_; i++) {
-            if (isMarkedDeleted(i)) {
-                num_deleted_ += 1;
-                if (allow_replace_deleted_)
-                    deleted_elements.insert(i);
-            }
-        }
-
-        return;
+    loadIndex(std::istream& in_stream, SpaceInterface* s, size_t max_elements_i) override {
+        IOStreamReader reader(in_stream);
+        this->DeserializeImpl(reader, s, max_elements_i);
     }
 
     // origin load function
     void
     loadIndex(const std::string& location, SpaceInterface* s, size_t max_elements_i = 0) {
         std::ifstream input(location, std::ios::binary);
+        IOStreamReader reader(input);
+        this->DeserializeImpl(reader, s, max_elements_i);
+        input.close();
+    }
 
-        if (!input.is_open())
-            throw std::runtime_error("Cannot open file");
+    template <typename T>
+    static void
+    ReadOne(StreamReader& reader, T& value) {
+        reader.Read(reinterpret_cast<char*>(&value), sizeof(value));
+    }
 
-        // get file size:
-        input.seekg(0, input.end);
-        std::streampos total_filesize = input.tellg();
-        input.seekg(0, input.beg);
+    void
+    DeserializeImpl(StreamReader& reader, SpaceInterface* s, size_t max_elements_i = 0) {
+        ReadOne(reader, offsetLevel0_);
 
-        readBinaryPOD(input, offsetLevel0_);
-        readBinaryPOD(input, max_elements_);
-        readBinaryPOD(input, cur_element_count_);
+        size_t max_elements;
+        ReadOne(reader, max_elements);
+        max_elements = std::max(max_elements, max_elements_i);
+        max_elements = std::max(max_elements, max_elements_);
 
-        size_t max_elements = max_elements_i;
-        if (max_elements < cur_element_count_)
-            max_elements = max_elements_;
-        max_elements_ = max_elements;
-        readBinaryPOD(input, size_data_per_element_);
-        readBinaryPOD(input, label_offset_);
-        readBinaryPOD(input, offsetData_);
-        readBinaryPOD(input, maxlevel_);
-        readBinaryPOD(input, enterpoint_node_);
+        ReadOne(reader, cur_element_count_);
+        ReadOne(reader, size_data_per_element_);
+        ReadOne(reader, label_offset_);
+        ReadOne(reader, offsetData_);
+        ReadOne(reader, maxlevel_);
+        ReadOne(reader, enterpoint_node_);
 
-        readBinaryPOD(input, maxM_);
-        readBinaryPOD(input, maxM0_);
-        readBinaryPOD(input, M_);
-        readBinaryPOD(input, mult_);
-        readBinaryPOD(input, ef_construction_);
+        ReadOne(reader, maxM_);
+        ReadOne(reader, maxM0_);
+        ReadOne(reader, M_);
+        ReadOne(reader, mult_);
+        ReadOne(reader, ef_construction_);
 
         data_size_ = s->get_data_size();
         fstdistfunc_ = s->get_dist_func();
         dist_func_param_ = s->get_dist_func_param();
 
-        auto pos = input.tellg();
-
-        /// Optional - check if index is ok:
-        input.seekg(cur_element_count_ * size_data_per_element_, input.cur);
-        for (size_t i = 0; i < cur_element_count_; i++) {
-            if (input.tellg() < 0 || input.tellg() >= total_filesize) {
-                throw std::runtime_error("Index seems to be corrupted or unsupported");
-            }
-
-            unsigned int link_list_size;
-            readBinaryPOD(input, link_list_size);
-            if (link_list_size != 0) {
-                input.seekg(link_list_size, input.cur);
-            }
-        }
-
-        // throw exception if it either corrupted or old index
-        if (input.tellg() != total_filesize)
-            throw std::runtime_error("Index seems to be corrupted or unsupported");
-
-        input.clear();
-        /// Optional check end
-
-        input.seekg(pos, input.beg);
-
-        data_level0_memory_->deserialize(input, cur_element_count_);
+        resizeIndex(max_elements);
+        data_level0_memory_->DeserializeImpl(reader, cur_element_count_);
 
         size_links_per_element_ = maxM_ * sizeof(tableint) + sizeof(linklistsizeint);
 
@@ -1492,28 +1174,39 @@ public:
         std::vector<std::recursive_mutex>(max_elements).swap(link_list_locks_);
         std::vector<std::mutex>(MAX_LABEL_OPERATION_LOCKS).swap(label_op_locks_);
 
-        delete visited_list_pool_;
-        visited_list_pool_ = new VisitedListPool(1, max_elements, allocator_);
-
-        link_lists_ = (char**)malloc(sizeof(void*) * max_elements);
-        if (link_lists_ == nullptr)
-            throw std::runtime_error("Not enough memory: loadIndex failed to allocate linklists");
-
         revSize_ = 1.0 / mult_;
         for (size_t i = 0; i < cur_element_count_; i++) {
             label_lookup_[getExternalLabel(i)] = i;
             unsigned int link_list_size;
-            readBinaryPOD(input, link_list_size);
+            ReadOne(reader, link_list_size);
             if (link_list_size == 0) {
                 element_levels_[i] = 0;
                 link_lists_[i] = nullptr;
             } else {
                 element_levels_[i] = link_list_size / size_links_per_element_;
-                link_lists_[i] = (char*)malloc(link_list_size);
+                link_lists_[i] = (char*)allocator_->Allocate(link_list_size);
                 if (link_lists_[i] == nullptr)
                     throw std::runtime_error(
                         "Not enough memory: loadIndex failed to allocate linklist");
-                input.read(link_lists_[i], link_list_size);
+                reader.Read(link_lists_[i], link_list_size);
+            }
+        }
+        if (normalize_) {
+            reader.Read(reinterpret_cast<char*>(molds_), max_elements_ * sizeof(float));
+        }
+
+        if (use_reversed_edges_) {
+            for (int internal_id = 0; internal_id < cur_element_count_; ++internal_id) {
+                for (int level = 0; level <= element_levels_[internal_id]; ++level) {
+                    unsigned int* data = get_linklist_at_level(internal_id, level);
+                    auto link_list = data + 1;
+                    auto size = getListCount(data);
+                    for (int j = 0; j < size; ++j) {
+                        auto id = link_list[j];
+                        auto& in_edges = getEdges(id, level);
+                        in_edges.insert(internal_id);
+                    }
+                }
             }
         }
 
@@ -1524,10 +1217,6 @@ public:
                     deleted_elements.insert(i);
             }
         }
-
-        input.close();
-
-        return;
     }
 
     const float*
@@ -1918,7 +1607,7 @@ public:
         tableint currObj = enterpoint_node_;
         tableint enterpoint_copy = enterpoint_node_;
 
-        memset(data_level0_memory_->getElementPtr(cur_c, offsetLevel0_), 0, size_data_per_element_);
+        memset(data_level0_memory_->GetElementPtr(cur_c, offsetLevel0_), 0, size_data_per_element_);
 
         // Initialisation of the data and label
         memcpy(getExternalLabeLp(cur_c), &label, sizeof(labeltype));

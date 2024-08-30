@@ -1,5 +1,4 @@
 
-
 // Copyright 2024-present the vsag project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -14,18 +13,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "./dataset_impl.h"
-
-#include <cstdint>
-#include <string>
-#include <unordered_map>
-#include <variant>
-
-namespace vsag {
-
-DatasetPtr
-Dataset::Make() {
-    return std::make_shared<DatasetImpl>();
+#include "stream_reader.h"
+ReadFuncStreamReader::ReadFuncStreamReader(
+    const std::function<void(uint64_t, uint64_t, void*)>& read_func, uint64_t cursor)
+    : readFunc_(read_func), cursor_(cursor), StreamReader() {
 }
 
-};  // namespace vsag
+void
+ReadFuncStreamReader::Read(char* data, uint64_t size) {
+    readFunc_(cursor_, size, data);
+    cursor_ += size;
+}
+
+IOStreamReader::IOStreamReader(std::istream& istream) : istream_(istream), StreamReader() {
+}
+
+void
+IOStreamReader::Read(char* data, uint64_t size) {
+    this->istream_.read(data, static_cast<int64_t>(size));
+}
