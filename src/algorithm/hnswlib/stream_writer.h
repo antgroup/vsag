@@ -1,5 +1,4 @@
 
-
 // Copyright 2024-present the vsag project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -14,18 +13,35 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "./dataset_impl.h"
+#pragma once
 
 #include <cstdint>
-#include <string>
-#include <unordered_map>
-#include <variant>
+#include <ostream>
 
-namespace vsag {
+class StreamWriter {
+public:
+    StreamWriter() = default;
 
-DatasetPtr
-Dataset::Make() {
-    return std::make_shared<DatasetImpl>();
-}
+    virtual void
+    Write(char* data, uint64_t size) = 0;
+};
 
-};  // namespace vsag
+class BufferStreamWriter : public StreamWriter {
+public:
+    explicit BufferStreamWriter(char*& buffer);
+
+    void
+    Write(char* data, uint64_t size) override;
+
+    char*& buffer_;
+};
+
+class IOStreamWriter : public StreamWriter {
+public:
+    explicit IOStreamWriter(std::ostream& ostream);
+
+    void
+    Write(char* data, uint64_t size) override;
+
+    std::ostream& ostream_;
+};
