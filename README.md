@@ -24,6 +24,14 @@ ____    ____   _______.     ___       _______
 ```
 VSAG is a vector indexing library used for similarity search. The indexing algorithm allows users to search through various sizes of vector sets, especially those that cannot fit in memory. The library also provides methods for generating parameters based on vector dimensions and data scale, allowing developers to use it without understanding the algorithm’s principles. VSAG is written in C++ and provides a Python wrapper package called pyvsag. Developed by the Vector Database Team at Ant Group.
 
+## Performance
+VSAG provides an optimized HNSW implementation that achieves state-of-the-art (SOTA) performance on the GIST dataset.
+The test in [ann-benchmarks](https://ann-benchmarks.com/) is running on an r6i.16xlarge machine on AWS with `--parallelism 31`, single-CPU, and hyperthreading disabled. 
+The result is as follows:
+
+### gist-960-euclidean
+![](gist-960-euclidean_10_euclidean.png)
+
 ## Getting Started
 ### Integrate with CMake
 ```cmake
