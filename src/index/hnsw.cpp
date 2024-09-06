@@ -20,12 +20,14 @@
 
 #include <cstdint>
 #include <exception>
+#include <new>
 #include <nlohmann/json.hpp>
 #include <stdexcept>
 
 #include "../algorithm/hnswlib/hnswlib.h"
 #include "../common.h"
 #include "../logger.h"
+#include "../safe_allocator.h"
 #include "../utils.h"
 #include "./hnsw_zparameters.h"
 #include "vsag/binaryset.h"
@@ -70,7 +72,7 @@ HNSW::HNSW(std::shared_ptr<hnswlib::SpaceInterface> space_interface,
     if (not allocator) {
         allocator = DefaultAllocator::Instance();
     }
-    allocator_ = allocator;
+    allocator_ = new SafeAllocator(allocator);
 
     if (!use_static_) {
         alg_hnsw =
@@ -84,6 +86,8 @@ HNSW::HNSW(std::shared_ptr<hnswlib::SpaceInterface> space_interface,
                                                        Options::Instance().block_size_limit());
     } else {
         if (dim_ % 4 != 0) {
+            // FIXME(wxyu): remove throw stmt from construct function
+            delete allocator_;
             throw std::runtime_error("cannot build static hnsw while dim % 4 != 0");
         }
         alg_hnsw = std::make_shared<hnswlib::StaticHierarchicalNSW>(
@@ -278,6 +282,10 @@ HNSW::knn_search(const DatasetPtr& query,
         LOG_ERROR_AND_RETURNS(ErrorType::INVALID_ARGUMENT,
                               "failed to perform knn_search(invalid argument): ",
                               e.what());
+    } catch (const std::bad_alloc& e) {
+        LOG_ERROR_AND_RETURNS(ErrorType::NO_ENOUGH_MEMORY,
+                              "failed to perform knn_search(not enough memory): ",
+                              e.what());
     }
 }
 
@@ -384,6 +392,10 @@ HNSW::range_search(const DatasetPtr& query,
     } catch (const std::invalid_argument& e) {
         LOG_ERROR_AND_RETURNS(ErrorType::INVALID_ARGUMENT,
                               "failed to perform range_search(invalid argument): ",
+                              e.what());
+    } catch (const std::bad_alloc& e) {
+        LOG_ERROR_AND_RETURNS(ErrorType::NO_ENOUGH_MEMORY,
+                              "failed to perform range_search(not enough memory): ",
                               e.what());
     }
 }

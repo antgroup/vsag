@@ -24,6 +24,7 @@
 #include <functional>
 #include <future>
 #include <iterator>
+#include <new>
 #include <nlohmann/json.hpp>
 #include <stdexcept>
 #include <utility>
@@ -444,6 +445,10 @@ DiskANN::knn_search(const DatasetPtr& query,
         LOG_ERROR_AND_RETURNS(ErrorType::INVALID_ARGUMENT,
                               "failed to perform knn_search(invalid argument): ",
                               e.what());
+    } catch (const std::bad_alloc& e) {
+        LOG_ERROR_AND_RETURNS(ErrorType::NO_ENOUGH_MEMORY,
+                              "failed to perform knn_search(not enough memory): ",
+                              e.what());
     }
 }
 
@@ -573,6 +578,10 @@ DiskANN::range_search(const DatasetPtr& query,
     } catch (const std::invalid_argument& e) {
         LOG_ERROR_AND_RETURNS(ErrorType::INVALID_ARGUMENT,
                               "falied to perform range_search(invalid argument): ",
+                              e.what());
+    } catch (const std::bad_alloc& e) {
+        LOG_ERROR_AND_RETURNS(ErrorType::NO_ENOUGH_MEMORY,
+                              "failed to perform range_search(not enough memory): ",
                               e.what());
     }
 }
