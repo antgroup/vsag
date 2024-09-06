@@ -31,6 +31,7 @@
 #include "../default_allocator.h"
 #include "../impl/conjugate_graph.h"
 #include "../logger.h"
+#include "../safe_allocator.h"
 #include "../utils.h"
 #include "vsag/binaryset.h"
 #include "vsag/errors.h"
@@ -75,6 +76,11 @@ public:
          bool normalize = false,
          Allocator* allocator = nullptr);
 
+    virtual ~HNSW() {
+        delete allocator_;
+    }
+
+public:
     tl::expected<std::vector<int64_t>, Error>
     Build(const DatasetPtr& base) override {
         SAFE_CALL(return this->build(base));
@@ -285,7 +291,7 @@ private:
     bool empty_index_ = false;
     bool use_reversed_edges_ = false;
 
-    Allocator* allocator_ = nullptr;
+    SafeAllocator* allocator_ = nullptr;
 
     mutable std::mutex stats_mutex_;
     mutable std::map<std::string, WindowResultQueue> result_queues_;
