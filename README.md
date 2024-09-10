@@ -193,5 +193,9 @@ install:                ## Build and install the release version of vsag.
 ## Contribution Guidelines
 Contributions are welcomed and greatly appreciated. Please read our [contribution guidelines](./CONTRIBUTING.md) for detailed contribution workflow. 
 
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=alipay/vsag&type=Date)](https://star-history.com/#alipay/vsag&Date)
+
 ## License
 [Apache License 2.0](./LICENSE)
