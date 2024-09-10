@@ -43,9 +43,9 @@ class VisitedList {
 public:
     vl_type curV;
     vl_type* mass;
-    unsigned int numelements;
+    uint64_t numelements;
 
-    VisitedList(int numelements1, vsag::Allocator* allocator) : allocator_(allocator) {
+    VisitedList(uint64_t numelements1, vsag::Allocator* allocator) : allocator_(allocator) {
         curV = -1;
         numelements = numelements1;
         mass = (vl_type*)allocator_->Allocate(numelements * sizeof(vl_type));
@@ -74,12 +74,8 @@ public:
 /////////////////////////////////////////////////////////
 
 class VisitedListPool {
-    std::deque<VisitedList*> pool;
-    std::mutex poolguard;
-    int numelements;
-
 public:
-    VisitedListPool(int initmaxpools, int numelements1, vsag::Allocator* allocator)
+    VisitedListPool(int initmaxpools, uint64_t numelements1, vsag::Allocator* allocator)
         : allocator_(allocator) {
         numelements = numelements1;
         for (int i = 0; i < initmaxpools; i++)
@@ -91,7 +87,7 @@ public:
         VisitedList* rez;
         {
             std::unique_lock<std::mutex> lock(poolguard);
-            if (pool.size() > 0) {
+            if (not pool.empty()) {
                 rez = pool.front();
                 pool.pop_front();
             } else {
@@ -109,7 +105,7 @@ public:
     }
 
     ~VisitedListPool() {
-        while (pool.size()) {
+        while (not pool.empty()) {
             VisitedList* rez = pool.front();
             pool.pop_front();
             delete rez;
@@ -117,6 +113,9 @@ public:
     }
 
 private:
+    std::deque<VisitedList*> pool;
+    std::mutex poolguard;
+    uint64_t numelements;
     vsag::Allocator* allocator_;
 };
 

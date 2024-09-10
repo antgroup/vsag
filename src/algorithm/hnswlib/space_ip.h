@@ -14,7 +14,7 @@
 // limitations under the License.
 
 #pragma once
-#include "hnswlib.h"
+#include "space_interface.h"
 
 namespace vsag {
 
@@ -30,7 +30,7 @@ class InnerProductSpace : public SpaceInterface {
     size_t dim_;
 
 public:
-    InnerProductSpace(size_t dim) {
+    explicit InnerProductSpace(size_t dim) {
         fstdistfunc_ = vsag::GetInnerProductDistanceFunc(dim);
         dim_ = dim;
         data_size_ = dim * sizeof(float);

@@ -676,7 +676,7 @@ public:
     //            candidate_set.pop();
     //
     //            tableint current_node_id = current_node_pair.second;
-    //            int* data = (int*)get_linklist0(current_node_id);
+    //            int* data = (int*)getLinklist0(current_node_id);
     //            size_t size = getListCount((linklistsizeint*)data);
     //            //                bool cur_node_deleted = isMarkedDeleted(current_node_id);
     //            if (collect_metrics) {
@@ -1092,6 +1092,22 @@ public:
         size += max_elements_ * sizeof(float);
         // output.close();
         return size;
+    }
+
+    template <typename T>
+    static void
+    writeBinaryPOD(std::ostream& out, const T& podRef) {
+        out.write((char*)&podRef, sizeof(T));
+    }
+
+    template <typename T>
+    static void
+    readBinaryPOD(std::istream& in, T& podRef) {
+        in.read((char*)&podRef, sizeof(T));
+
+        if (in.fail()) {
+            throw std::runtime_error("Failed to read from stream.");
+        }
     }
 
     // save index to a file stream
@@ -1802,7 +1818,7 @@ public:
         //                changed = false;
         //                unsigned int* data;
         //
-        //                data = (unsigned int*)get_linklist(currObj, level);
+        //                data = (unsigned int*)getLinklist(currObj, level);
         //                int size = getListCount(data);
         //                metric_hops_++;
         //                metric_distance_computations_ += size;
