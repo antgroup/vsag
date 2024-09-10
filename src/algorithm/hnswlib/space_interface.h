@@ -14,46 +14,26 @@
 // limitations under the License.
 
 #pragma once
-#include "space_interface.h"
 
-namespace vsag {
-
-extern hnswlib::DISTFUNC
-GetL2DistanceFunc(size_t dim);
-
-}  // namespace vsag
+#include <string>
 
 namespace hnswlib {
 
-class L2Space : public SpaceInterface {
-    DISTFUNC fstdistfunc_;
-    size_t data_size_;
-    size_t dim_;
+using DISTFUNC = float (*)(const void*, const void*, const void*);
 
+class SpaceInterface {
 public:
-    explicit L2Space(size_t dim) {
-        fstdistfunc_ = vsag::GetL2DistanceFunc(dim);
-        dim_ = dim;
-        data_size_ = dim * sizeof(float);
-    }
+    // virtual void search(void *);
+    virtual size_t
+    get_data_size() = 0;
 
-    size_t
-    get_data_size() override {
-        return data_size_;
-    }
+    virtual DISTFUNC
+    get_dist_func() = 0;
 
-    DISTFUNC
-    get_dist_func() override {
-        return fstdistfunc_;
-    }
+    virtual void*
+    get_dist_func_param() = 0;
 
-    void*
-    get_dist_func_param() override {
-        return &dim_;
-    }
-
-    ~L2Space() {
+    virtual ~SpaceInterface() {
     }
 };
-
 }  // namespace hnswlib
