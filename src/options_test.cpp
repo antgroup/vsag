@@ -26,10 +26,17 @@ TEST_CASE("option test", "[ut][option]") {
 
     REQUIRE_THROWS(vsag::Option::Instance().set_block_size_limit(1));
 
-    size_t num_threads = 24;
-    vsag::Options::Instance().set_num_threads(num_threads);
-    REQUIRE(vsag::Option::Instance().num_threads() == num_threads);
+    size_t num_threads_io = 24;
+    vsag::Options::Instance().set_num_threads_io(num_threads_io);
+    REQUIRE(vsag::Option::Instance().num_threads_io() == num_threads_io);
 
-    REQUIRE_THROWS(vsag::Option::Instance().set_num_threads(0));
-    REQUIRE_THROWS(vsag::Option::Instance().set_num_threads(201));
+    REQUIRE_THROWS(vsag::Option::Instance().set_num_threads_io(0));
+    REQUIRE_THROWS(vsag::Option::Instance().set_num_threads_io(201));
+
+    size_t num_threads_building = 24;
+    vsag::Options::Instance().set_num_threads_building(num_threads_building);
+    REQUIRE(vsag::Option::Instance().num_threads_building() == num_threads_building);
+
+    REQUIRE_THROWS(vsag::Option::Instance().set_num_threads_building(0));
+    REQUIRE_THROWS(vsag::Option::Instance().set_num_threads_building(201));
 }

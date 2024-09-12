@@ -104,7 +104,7 @@ public:
           file_(std::ifstream(filename, std::ios::binary)),
           base_offset_(base_offset),
           size_(size) {
-        pool_ = std::make_unique<progschj::ThreadPool>(Option::Instance().num_threads());
+        pool_ = std::make_unique<progschj::ThreadPool>(Option::Instance().num_threads_io());
     }
 
     ~LocalFileReader() {
