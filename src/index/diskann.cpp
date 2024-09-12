@@ -76,7 +76,7 @@ class LocalMemoryReader : public Reader {
 public:
     LocalMemoryReader(std::stringstream& file, bool support_async_io) {
         if (support_async_io) {
-            pool_ = std::make_unique<ThreadPool>(Option::Instance().num_threads());
+            pool_ = std::make_unique<ThreadPool>(Option::Instance().num_threads_io());
         }
         file_ << file.rdbuf();
         file_.seekg(0, std::ios::end);
@@ -163,7 +163,7 @@ DiskANN::DiskANN(diskann::Metric metric,
       use_bsa_(use_bsa),
       use_async_io_(use_async_io) {
     if (not use_async_io_) {
-        pool_ = std::make_unique<ThreadPool>(Option::Instance().num_threads());
+        pool_ = std::make_unique<ThreadPool>(Option::Instance().num_threads_io());
     }
     status_ = IndexStatus::EMPTY;
     batch_read_ =
@@ -234,7 +234,10 @@ DiskANN::build(const DatasetPtr& base) {
             build_index_ = std::make_shared<diskann::Index<float, int64_t, int64_t>>(
                 metric_, data_dim, data_num, false, true, false, false, 0, false);
             std::vector<int64_t> tags(ids, ids + data_num);
-            auto index_build_params = diskann::IndexWriteParametersBuilder(L_, R_).build();
+            auto index_build_params =
+                diskann::IndexWriteParametersBuilder(L_, R_)
+                    .with_num_threads(Options::Instance().num_threads_building())
+                    .build();
             failed_locs =
                 build_index_->build(vectors, data_num, index_build_params, tags, use_reference_);
             build_index_->save(graph_stream_, tag_stream_);
@@ -968,12 +971,14 @@ DiskANN::build_partial_graph(const DatasetPtr& base,
             convert_binary_to_stream(binary_set.Get(DISKANN_GRAPH), graph_stream);
             convert_binary_to_stream(binary_set.Get(DISKANN_TAG_FILE), tag_stream);
 
-            build_index_->load(graph_stream, tag_stream, Options::Instance().num_threads(), L_);
+            build_index_->load(graph_stream, tag_stream, Options::Instance().num_threads_io(), L_);
             builded_nodes =
                 deserialize_from_binary<std::unordered_set<uint32_t>>(binary_set.Get(BUILD_NODES));
         }
 
-        auto index_build_params = diskann::IndexWriteParametersBuilder(L_, R_).build();
+        auto index_build_params = diskann::IndexWriteParametersBuilder(L_, R_)
+                                      .with_num_threads(Options::Instance().num_threads_building())
+                                      .build();
         std::vector<size_t> failed_locs = build_index_->build(vectors,
                                                               dim_,
                                                               index_build_params,

@@ -35,12 +35,20 @@ public:
     // process; it is recommended to set this to one to two times the number of available CPU cores
     // in the system. The size of num_threads is limited to between 1 and 200.
     inline size_t
-    num_threads() const {
-        return num_threads_.load(std::memory_order_acquire);
+    num_threads_io() const {
+        return num_threads_io_.load(std::memory_order_acquire);
+    }
+
+    inline size_t
+    num_threads_building() const {
+        return num_threads_building_.load(std::memory_order_acquire);
     }
 
     void
-    set_num_threads(size_t num_threads);
+    set_num_threads_io(size_t num_threads);
+
+    void
+    set_num_threads_building(size_t num_threads);
 
     // Gets the limit of block size with memory order acquire for thread safety. The setting of
     // block size should be greater than 2M.
@@ -72,8 +80,11 @@ private:
     operator=(const Options&) = delete;
 
 private:
-    // In a single query, the space size used to store disk vectors.
-    std::atomic<size_t> num_threads_{8};
+    // The size of the thread pool for single index I/O during searches.
+    std::atomic<size_t> num_threads_io_{8};
+
+    // The number of threads used for building a single index.
+    std::atomic<size_t> num_threads_building_{4};
 
     // The size of the maximum memory allocated each time (default is 128MB)
     std::atomic<size_t> block_size_limit_{128 * 1024 * 1024};
