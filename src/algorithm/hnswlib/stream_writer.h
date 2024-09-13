@@ -49,13 +49,13 @@ public:
 
 class WriteFuncStreamWriter : public StreamWriter {
 public:
-    explicit WriteFuncStreamWriter(const std::function<void(uint64_t, uint64_t, void*)>& writeFunc,
+    explicit WriteFuncStreamWriter(std::function<void(uint64_t, uint64_t, void*)> writeFunc,
                                    uint64_t cursor);
 
     void
     Write(char* data, uint64_t size) override;
 
-    const std::function<void(uint64_t, uint64_t, void*)>& writeFunc_;
+    std::function<void(uint64_t, uint64_t, void*)> writeFunc_;
 
 public:
     uint64_t cursor_{0};
