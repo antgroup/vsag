@@ -422,21 +422,20 @@ template <typename T, typename LabelT> void PQFlashIndex<T, LabelT>::use_medoids
     {
         auto medoid = medoids[cur_m];
         // read medoid nhood
-        char *medoid_buf = nullptr;
-        alloc_aligned((void **)&medoid_buf, sector_len, sector_len);
+        auto medoid_buf = std::shared_ptr<char[]>(new char[sector_len]);
         std::vector<AlignedRead> medoid_read(1);
         medoid_read[0].len = sector_len;
-        medoid_read[0].buf = medoid_buf;
+        medoid_read[0].buf = medoid_buf.get();
         medoid_read[0].offset = NODE_SECTOR_NO(medoid) * sector_len;
         reader->read(medoid_read);
 
         // all data about medoid
-        char *medoid_node_buf = OFFSET_TO_NODE(medoid_buf, medoid);
+        char *medoid_node_buf = OFFSET_TO_NODE(medoid_buf.get(), medoid);
 
         // add medoid coords to `coord_cache`
-        T *medoid_coords = new T[data_dim];
+        auto medoid_coords = std::shared_ptr<T[]>(new T[data_dim]);
         T *medoid_disk_coords = OFFSET_TO_NODE_COORDS(medoid_node_buf);
-        memcpy(medoid_coords, medoid_disk_coords, disk_bytes_per_point);
+        memcpy(medoid_coords.get(), medoid_disk_coords, disk_bytes_per_point);
 
         if (!use_disk_index_pq)
         {
@@ -445,11 +444,8 @@ template <typename T, typename LabelT> void PQFlashIndex<T, LabelT>::use_medoids
         }
         else
         {
-            disk_pq_table.inflate_vector((uint8_t *)medoid_coords, (centroid_data + cur_m * aligned_dim));
+            disk_pq_table.inflate_vector((uint8_t *)medoid_coords.get(), (centroid_data + cur_m * aligned_dim));
         }
-
-        aligned_free(medoid_buf);
-        delete[] medoid_coords;
     }
 }
 
