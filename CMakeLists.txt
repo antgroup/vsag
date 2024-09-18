@@ -203,7 +203,7 @@ set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fPIC -Werror=suggest-override")
 if (CMAKE_BUILD_TYPE STREQUAL "Debug")
   set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -O0")
 elseif (CMAKE_BUILD_TYPE STREQUAL "Release")
-  set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Ofast")
+  set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -Ofast")
 endif ()
 
 if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")

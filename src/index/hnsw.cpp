@@ -77,7 +77,7 @@ HNSW::HNSW(std::shared_ptr<hnswlib::SpaceInterface> space_interface,
         alg_hnsw =
             std::make_shared<hnswlib::HierarchicalNSW>(space.get(),
                                                        DEFAULT_MAX_ELEMENT,
-                                                       allocator,
+                                                       allocator_,
                                                        M,
                                                        ef_construction,
                                                        use_reversed_edges_,
@@ -92,7 +92,7 @@ HNSW::HNSW(std::shared_ptr<hnswlib::SpaceInterface> space_interface,
         alg_hnsw = std::make_shared<hnswlib::StaticHierarchicalNSW>(
             space.get(),
             DEFAULT_MAX_ELEMENT,
-            allocator,
+            allocator_,
             M,
             ef_construction,
             Options::Instance().block_size_limit());
@@ -199,14 +199,14 @@ HNSW::knn_search(const DatasetPtr& query,
                  hnswlib::BaseFilterFunctor* filter_ptr) const {
     SlowTaskTimer t("hnsw knnsearch", 20);
 
-    // cannot perform search on empty index
-    if (empty_index_) {
-        auto ret = Dataset::Make();
-        ret->Dim(0)->NumElements(1);
-        return ret;
-    }
-
     try {
+        // cannot perform search on empty index
+        if (empty_index_) {
+            auto ret = Dataset::Make();
+            ret->Dim(0)->NumElements(1);
+            return ret;
+        }
+
         // check query vector
         CHECK_ARGUMENT(query->GetNumElements() == 1, "query dataset should contain 1 vector only");
         auto vector = query->GetFloat32Vectors();
@@ -311,19 +311,19 @@ HNSW::range_search(const DatasetPtr& query,
                    int64_t limited_size) const {
     SlowTaskTimer t("hnsw rangesearch", 20);
 
-    // cannot perform search on empty index
-    if (empty_index_) {
-        auto ret = Dataset::Make();
-        ret->Dim(0)->NumElements(1);
-        return ret;
-    }
-
-    if (use_static_) {
-        LOG_ERROR_AND_RETURNS(ErrorType::UNSUPPORTED_INDEX_OPERATION,
-                              "static index does not support rangesearch");
-    }
-
     try {
+        // cannot perform search on empty index
+        if (empty_index_) {
+            auto ret = Dataset::Make();
+            ret->Dim(0)->NumElements(1);
+            return ret;
+        }
+
+        if (use_static_) {
+            LOG_ERROR_AND_RETURNS(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                                  "static index does not support rangesearch");
+        }
+
         // check query vector
         CHECK_ARGUMENT(query->GetNumElements() == 1, "query dataset should contain 1 vector only");
         auto vector = query->GetFloat32Vectors();

@@ -77,6 +77,7 @@ public:
          Allocator* allocator = nullptr);
 
     virtual ~HNSW() {
+        alg_hnsw = nullptr;
         delete allocator_;
     }
 
