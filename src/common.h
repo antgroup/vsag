@@ -20,6 +20,8 @@
         stmt;                                                                        \
     } catch (const std::exception& e) {                                              \
         LOG_ERROR_AND_RETURNS(ErrorType::UNKNOWN_ERROR, "unknownError: ", e.what()); \
+    } catch (...) {                                                                  \
+        LOG_ERROR_AND_RETURNS(ErrorType::UNKNOWN_ERROR, "unknown error");            \
     }
 
 #define CHECK_ARGUMENT(expr, message)             \
