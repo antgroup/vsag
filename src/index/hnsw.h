@@ -77,7 +77,7 @@ public:
          Allocator* allocator = nullptr);
 
     virtual ~HNSW() {
-        alg_hnsw = nullptr;
+        alg_hnsw_ = nullptr;
         delete allocator_;
     }
 
@@ -159,7 +159,7 @@ public:
 
     virtual tl::expected<float, Error>
     CalcDistanceById(const float* vector, int64_t id) const override {
-        SAFE_CALL(return alg_hnsw->getDistanceByLabel(id, vector));
+        SAFE_CALL(return alg_hnsw_->getDistanceByLabel(id, vector));
     };
 
 public:
@@ -191,15 +191,15 @@ public:
 public:
     int64_t
     GetNumElements() const override {
-        return alg_hnsw->getCurrentElementCount() - alg_hnsw->getDeletedCount();
+        return alg_hnsw_->getCurrentElementCount() - alg_hnsw_->getDeletedCount();
     }
 
     int64_t
     GetMemoryUsage() const override {
         if (use_conjugate_graph_)
-            return alg_hnsw->calcSerializeSize() + conjugate_graph_->GetMemoryUsage();
+            return alg_hnsw_->calcSerializeSize() + conjugate_graph_->GetMemoryUsage();
         else
-            return alg_hnsw->calcSerializeSize();
+            return alg_hnsw_->calcSerializeSize();
     }
 
     std::string
@@ -281,8 +281,8 @@ private:
     empty_binaryset() const;
 
 private:
-    std::shared_ptr<hnswlib::AlgorithmInterface<float>> alg_hnsw;
-    std::shared_ptr<hnswlib::SpaceInterface> space;
+    std::shared_ptr<hnswlib::AlgorithmInterface<float>> alg_hnsw_;
+    std::shared_ptr<hnswlib::SpaceInterface> space_;
 
     bool use_conjugate_graph_;
     std::shared_ptr<ConjugateGraph> conjugate_graph_;
