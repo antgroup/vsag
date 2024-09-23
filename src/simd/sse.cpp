@@ -15,8 +15,7 @@
 
 #include <x86intrin.h>
 
-#include <iostream>
-
+#include "fp32_simd.h"
 namespace vsag {
 
 #define PORTABLE_ALIGN32 __attribute__((aligned(32)))
@@ -296,3 +295,54 @@ PQDistanceSSEFloat256(const void* single_dim_centers, float single_dim_val, void
 }
 
 }  // namespace vsag
+
+namespace vsag::SSE {
+float
+FP32ComputeIP(const float* query, const float* codes, uint64_t dim) {
+#if defined(ENABLE_SSE)
+    const int n = dim / 4;
+    if (n == 0) {
+        return Generic::FP32ComputeIP(query, codes, dim);
+    }
+    // process 4 floats at a time
+    __m128 sum = _mm_setzero_ps();  // initialize to 0
+    for (int i = 0; i < n; ++i) {
+        __m128 a = _mm_loadu_ps(query + i * 4);   // load 4 floats from memory
+        __m128 b = _mm_loadu_ps(codes + i * 4);   // load 4 floats from memory
+        sum = _mm_add_ps(sum, _mm_mul_ps(a, b));  // accumulate the product
+    }
+    alignas(16) float result[4];
+    _mm_store_ps(result, sum);  // store the accumulated result into an array
+    float ip = result[0] + result[1] + result[2] +
+               result[3];  // calculate the sum of the accumulated results
+    ip += Generic::FP32ComputeIP(query + n * 4, codes + n * 4, dim - n * 4);
+    return ip;
+#else
+    return vsag::Generic::FP32ComputeIP(query, codes, dim);
+#endif
+}
+float
+FP32ComputeL2Sqr(const float* query, const float* codes, uint64_t dim) {
+#if defined(ENABLE_SSE)
+    const uint64_t n = dim / 4;
+    if (n == 0) {
+        return Generic::FP32ComputeL2Sqr(query, codes, dim);
+    }
+    __m128 sum = _mm_setzero_ps();
+    for (int i = 0; i < n; ++i) {
+        __m128 a = _mm_loadu_ps(query + i * 4);
+        __m128 b = _mm_loadu_ps(codes + i * 4);
+        __m128 diff = _mm_sub_ps(a, b);
+        sum = _mm_add_ps(sum, _mm_mul_ps(diff, diff));
+    }
+    alignas(16) float result[4];
+    _mm_store_ps(result, sum);
+    float l2 = result[0] + result[1] + result[2] + result[3];
+    l2 += Generic::FP32ComputeL2Sqr(query + n * 4, codes + n * 4, dim - n * 4);
+    return l2;
+#else
+    return vsag::Generic::FP32ComputeL2Sqr(query, codes, dim);
+#endif
+}
+
+}  // namespace vsag::SSE

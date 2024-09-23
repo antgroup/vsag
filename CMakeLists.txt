@@ -189,6 +189,7 @@ endif ()
 
 include_directories (${CMAKE_CURRENT_BINARY_DIR}/spdlog/install/include)
 include_directories (include)
+include_directories (src)
 
 set (CMAKE_CXX_STANDARD 17)
 

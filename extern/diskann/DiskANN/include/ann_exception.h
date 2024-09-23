@@ -3,6 +3,7 @@
 
 #pragma once
 #include <string>
+#include <cstdint>
 #include <stdexcept>
 #include <system_error>
 #include "windows_customizations.h"

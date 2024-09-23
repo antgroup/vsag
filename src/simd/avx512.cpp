@@ -15,8 +15,7 @@
 
 #include <x86intrin.h>
 
-#include <iostream>
-
+#include "fp32_simd.h"
 namespace vsag {
 
 #define PORTABLE_ALIGN32 __attribute__((aligned(32)))
@@ -83,5 +82,52 @@ InnerProductSIMD16ExtAVX512(const void* pVect1v, const void* pVect2v, const void
 
     return sum;
 }
+
+namespace AVX512 {
+float
+FP32ComputeIP(const float* query, const float* codes, uint64_t dim) {
+#if defined(ENABLE_AVX512)
+    const int n = dim / 16;
+    if (n == 0) {
+        return AVX2::FP32ComputeIP(query, codes, dim);
+    }
+    // process 16 floats at a time
+    __m512 sum = _mm512_setzero_ps();  // initialize to 0
+    for (int i = 0; i < n; ++i) {
+        __m512 a = _mm512_loadu_ps(query + i * 16);     // load 16 floats from memory
+        __m512 b = _mm512_loadu_ps(codes + i * 16);     // load 16 floats from memory
+        sum = _mm512_add_ps(sum, _mm512_mul_ps(a, b));  // accumulate the product
+    }
+    float ip = _mm512_reduce_add_ps(sum);
+    ip += AVX2::FP32ComputeIP(query + n * 16, codes + n * 16, dim - n * 16);
+    return ip;
+#else
+    return vsag::Generic::FP32ComputeIP(query, codes, dim);
+#endif
+}
+
+float
+FP32ComputeL2Sqr(const float* query, const float* codes, uint64_t dim) {
+#if defined(ENABLE_AVX512)
+    const int n = dim / 16;
+    if (n == 0) {
+        return AVX2::FP32ComputeL2Sqr(query, codes, dim);
+    }
+    // process 16 floats at a time
+    __m512 sum = _mm512_setzero_ps();  // initialize to 0
+    for (int i = 0; i < n; ++i) {
+        __m512 a = _mm512_loadu_ps(query + i * 16);  // load 16 floats from memory
+        __m512 b = _mm512_loadu_ps(codes + i * 16);  // load 16 floats from memory
+        __m512 diff = _mm512_sub_ps(a, b);           // calculate the difference
+        sum = _mm512_fmadd_ps(diff, diff, sum);      // accumulate the squared difference
+    }
+    float l2 = _mm512_reduce_add_ps(sum);
+    l2 += AVX2::FP32ComputeL2Sqr(query + n * 16, codes + n * 16, dim - n * 16);
+    return l2;
+#else
+    return vsag::Generic::FP32ComputeL2Sqr(query, codes, dim);
+#endif
+}
+}  // namespace AVX512
 
 }  // namespace vsag

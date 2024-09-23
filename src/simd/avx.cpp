@@ -15,7 +15,7 @@
 
 #include <x86intrin.h>
 
-#include <iostream>
+#include "fp32_simd.h"
 
 namespace vsag {
 
@@ -154,5 +154,59 @@ PQDistanceAVXFloat256(const void* single_dim_centers, float single_dim_val, void
         _mm256_storeu_ps(&float_result[idx], v_chunk_dists);
     }
 }
+
+namespace AVX2 {
+float
+FP32ComputeIP(const float* query, const float* codes, uint64_t dim) {
+#if defined(ENABLE_AVX2)
+    const int n = dim / 8;
+    if (n == 0) {
+        return SSE::FP32ComputeIP(query, codes, dim);
+    }
+    // process 8 floats at a time
+    __m256 sum = _mm256_setzero_ps();  // initialize to 0
+    for (int i = 0; i < n; ++i) {
+        __m256 a = _mm256_loadu_ps(query + i * 8);      // load 8 floats from memory
+        __m256 b = _mm256_loadu_ps(codes + i * 8);      // load 8 floats from memory
+        sum = _mm256_add_ps(sum, _mm256_mul_ps(a, b));  // accumulate the product
+    }
+    alignas(32) float result[8];
+    _mm256_store_ps(result, sum);  // store the accumulated result into an array
+    float ip = result[0] + result[1] + result[2] + result[3] + result[4] + result[5] + result[6] +
+               result[7];  // calculate the sum of the accumulated results
+    ip += SSE::FP32ComputeIP(query + n * 8, codes + n * 8, dim - n * 8);
+    return ip;
+#else
+    return vsag::Generic::FP32ComputeIP(query, codes, dim);
+#endif
+}
+
+float
+FP32ComputeL2Sqr(const float* query, const float* codes, uint64_t dim) {
+#if defined(ENABLE_AVX2)
+    const int n = dim / 8;
+    if (n == 0) {
+        return SSE::FP32ComputeL2Sqr(query, codes, dim);
+    }
+    // process 8 floats at a time
+    __m256 sum = _mm256_setzero_ps();  // initialize to 0
+    for (int i = 0; i < n; ++i) {
+        __m256 a = _mm256_loadu_ps(query + i * 8);  // load 8 floats from memory
+        __m256 b = _mm256_loadu_ps(codes + i * 8);  // load 8 floats from memory
+        __m256 diff = _mm256_sub_ps(a, b);          // calculate the difference
+        sum = _mm256_fmadd_ps(diff, diff, sum);     // accumulate the squared difference
+    }
+    alignas(32) float result[8];
+    _mm256_store_ps(result, sum);  // store the accumulated result into an array
+    float l2 = result[0] + result[1] + result[2] + result[3] + result[4] + result[5] + result[6] +
+               result[7];  // calculate the sum of the accumulated results
+    l2 += SSE::FP32ComputeL2Sqr(query + n * 8, codes + n * 8, dim - n * 8);
+    return l2;
+#else
+    return vsag::Generic::FP32ComputeL2Sqr(query, codes, dim);
+#endif
+}
+
+}  // namespace AVX2
 
 }  // namespace vsag
