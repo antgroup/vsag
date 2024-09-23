@@ -15,8 +15,7 @@
 
 #pragma once
 
-#include <stdlib.h>
-
+#include <cstdlib>
 #include <string>
 
 namespace vsag {

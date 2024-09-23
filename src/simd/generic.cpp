@@ -15,6 +15,7 @@
 
 #include <iostream>
 
+#include "fp32_simd.h"
 namespace vsag {
 
 float
@@ -57,5 +58,26 @@ PQDistanceFloat256(const void* single_dim_centers, float single_dim_val, void* r
         float_result[idx] += (float)(diff * diff);
     }
 }
+
+namespace Generic {
+float
+FP32ComputeIP(const float* query, const float* codes, uint64_t dim) {
+    float result = 0.;
+
+    for (uint64_t i = 0; i < dim; ++i) {
+        result += query[i] * codes[i];
+    }
+    return result;
+}
+float
+FP32ComputeL2Sqr(const float* query, const float* codes, uint64_t dim) {
+    float result = 0.;
+    for (uint64_t i = 0; i < dim; ++i) {
+        auto val = query[i] - codes[i];
+        result += val * val;
+    }
+    return result;
+}
+}  // namespace Generic
 
 }  // namespace vsag

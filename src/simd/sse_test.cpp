@@ -14,7 +14,6 @@
 // limitations under the License.
 
 #include <catch2/catch_test_macros.hpp>
-#include <cstdint>
 
 #include "./simd.h"
 #include "catch2/catch_approx.hpp"
