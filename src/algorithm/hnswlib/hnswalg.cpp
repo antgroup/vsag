@@ -1404,13 +1404,9 @@ HierarchicalNSW::searchKnn(const void* query_data,
     }
 
     MaxHeap top_candidates;
-    if (num_deleted_) {
-        top_candidates =
-            searchBaseLayerST<true, true>(currObj, query_data, std::max(ef, k), isIdAllowed);
-    } else {
-        top_candidates =
-            searchBaseLayerST<false, true>(currObj, query_data, std::max(ef, k), isIdAllowed);
-    }
+
+    top_candidates =
+        searchBaseLayerST<false, true>(currObj, query_data, std::max(ef, k), isIdAllowed);
 
     while (top_candidates.size() > k) {
         top_candidates.pop();
@@ -1466,13 +1462,8 @@ HierarchicalNSW::searchRange(const void* query_data,
     }
 
     MaxHeap top_candidates;
-    if (num_deleted_) {
-        throw std::runtime_error(
-            "not support perform range search on a index that deleted some vectors");
-    } else {
-        top_candidates =
-            searchBaseLayerST<false, true>(currObj, query_data, radius, ef, isIdAllowed);
-    }
+
+    top_candidates = searchBaseLayerST<false, true>(currObj, query_data, radius, ef, isIdAllowed);
 
     while (not top_candidates.empty()) {
         std::pair<float, tableint> rez = top_candidates.top();
