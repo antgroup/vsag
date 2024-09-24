@@ -13,9 +13,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <x86intrin.h>
+#include <immintrin.h>
+
+#include <cstdint>
 
 #include "fp32_simd.h"
+#include "sq8_simd.h"
 
 namespace vsag {
 
@@ -155,13 +158,13 @@ PQDistanceAVXFloat256(const void* single_dim_centers, float single_dim_val, void
     }
 }
 
-namespace AVX2 {
+namespace avx2 {
 float
 FP32ComputeIP(const float* query, const float* codes, uint64_t dim) {
 #if defined(ENABLE_AVX2)
     const int n = dim / 8;
     if (n == 0) {
-        return SSE::FP32ComputeIP(query, codes, dim);
+        return sse::FP32ComputeIP(query, codes, dim);
     }
     // process 8 floats at a time
     __m256 sum = _mm256_setzero_ps();  // initialize to 0
@@ -174,7 +177,7 @@ FP32ComputeIP(const float* query, const float* codes, uint64_t dim) {
     _mm256_store_ps(result, sum);  // store the accumulated result into an array
     float ip = result[0] + result[1] + result[2] + result[3] + result[4] + result[5] + result[6] +
                result[7];  // calculate the sum of the accumulated results
-    ip += SSE::FP32ComputeIP(query + n * 8, codes + n * 8, dim - n * 8);
+    ip += sse::FP32ComputeIP(query + n * 8, codes + n * 8, dim - n * 8);
     return ip;
 #else
     return vsag::Generic::FP32ComputeIP(query, codes, dim);
@@ -186,7 +189,7 @@ FP32ComputeL2Sqr(const float* query, const float* codes, uint64_t dim) {
 #if defined(ENABLE_AVX2)
     const int n = dim / 8;
     if (n == 0) {
-        return SSE::FP32ComputeL2Sqr(query, codes, dim);
+        return sse::FP32ComputeL2Sqr(query, codes, dim);
     }
     // process 8 floats at a time
     __m256 sum = _mm256_setzero_ps();  // initialize to 0
@@ -200,13 +203,188 @@ FP32ComputeL2Sqr(const float* query, const float* codes, uint64_t dim) {
     _mm256_store_ps(result, sum);  // store the accumulated result into an array
     float l2 = result[0] + result[1] + result[2] + result[3] + result[4] + result[5] + result[6] +
                result[7];  // calculate the sum of the accumulated results
-    l2 += SSE::FP32ComputeL2Sqr(query + n * 8, codes + n * 8, dim - n * 8);
+    l2 += sse::FP32ComputeL2Sqr(query + n * 8, codes + n * 8, dim - n * 8);
     return l2;
 #else
     return vsag::Generic::FP32ComputeL2Sqr(query, codes, dim);
 #endif
 }
 
-}  // namespace AVX2
+float
+SQ8ComputeIP(const float* query,
+             const uint8_t* codes,
+             const float* lowerBound,
+             const float* diff,
+             uint64_t dim) {
+#if defined(ENABLE_AVX2)
+    __m256 sum = _mm256_setzero_ps();
+    uint64_t i = 0;
+
+    for (; i + 7 < dim; i += 8) {
+        __m128i code_values = _mm_loadu_si128(reinterpret_cast<const __m128i*>(codes + i));
+        __m256 code_floats = _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(code_values));
+        __m256 query_values = _mm256_loadu_ps(query + i);
+        __m256 diff_values = _mm256_loadu_ps(diff + i);
+        __m256 lowerBound_values = _mm256_loadu_ps(lowerBound + i);
+
+        __m256 scaled_codes =
+            _mm256_mul_ps(_mm256_div_ps(code_floats, _mm256_set1_ps(255.0f)), diff_values);
+        __m256 adjusted_codes = _mm256_add_ps(scaled_codes, lowerBound_values);
+        __m256 val = _mm256_mul_ps(query_values, adjusted_codes);
+        sum = _mm256_add_ps(sum, val);
+    }
+
+    __m128 sum_high = _mm256_extractf128_ps(sum, 1);
+    __m128 sum_low = _mm256_castps256_ps128(sum);
+    __m128 sum_final = _mm_add_ps(sum_low, sum_high);
+
+    alignas(16) float result[4];
+    _mm_store_ps(result, sum_final);
+    float finalResult = result[0] + result[1] + result[2] + result[3];
+
+    // Process the remaining elements recursively
+    finalResult += sse::SQ8ComputeIP(query + i, codes + i, lowerBound + i, diff + i, dim - i);
+    return finalResult;
+#else
+    return Generic::SQ8ComputeIP(query, codes, lowerBound, diff, dim);
+#endif
+}
+
+float
+SQ8ComputeL2Sqr(const float* query,
+                const uint8_t* codes,
+                const float* lowerBound,
+                const float* diff,
+                uint64_t dim) {
+#if defined(ENABLE_AVX2)
+    __m256 sum = _mm256_setzero_ps();
+    uint64_t i = 0;
+
+    for (; i + 7 < dim; i += 8) {
+        // Load data into registers
+        __m256i code_values =
+            _mm256_cvtepu8_epi32(_mm_loadu_si128(reinterpret_cast<const __m128i*>(codes + i)));
+        __m256 code_floats = _mm256_div_ps(_mm256_cvtepi32_ps(code_values), _mm256_set1_ps(255.0f));
+        __m256 diff_values = _mm256_loadu_ps(diff + i);
+        __m256 lowerBound_values = _mm256_loadu_ps(lowerBound + i);
+        __m256 query_values = _mm256_loadu_ps(query + i);
+
+        // Perform calculations
+        __m256 scaled_codes = _mm256_mul_ps(code_floats, diff_values);
+        scaled_codes = _mm256_add_ps(scaled_codes, lowerBound_values);
+        __m256 val = _mm256_sub_ps(query_values, scaled_codes);
+        val = _mm256_mul_ps(val, val);
+        sum = _mm256_add_ps(sum, val);
+    }
+
+    // Horizontal addition
+    __m128 sum_high = _mm256_extractf128_ps(sum, 1);
+    __m128 sum_low = _mm256_castps256_ps128(sum);
+    __m128 sum_final = _mm_add_ps(sum_low, sum_high);
+    sum_final = _mm_hadd_ps(sum_final, sum_final);
+    sum_final = _mm_hadd_ps(sum_final, sum_final);
+
+    // Extract the result from the register
+    float result;
+    _mm_store_ss(&result, sum_final);
+
+    // Process the remaining elements
+    result += sse::SQ8ComputeL2Sqr(query + i, codes + i, lowerBound + i, diff + i, dim - i);
+    return result;
+#else
+    return vsag::Generic::SQ8ComputeL2Sqr(query, codes, lowerBound, diff, dim);  // TODO
+#endif
+}
+
+float
+SQ8ComputeCodesIP(const uint8_t* codes1,
+                  const uint8_t* codes2,
+                  const float* lowerBound,
+                  const float* diff,
+                  uint64_t dim) {
+#if defined(ENABLE_AVX2)
+    __m256 sum = _mm256_setzero_ps();
+    uint64_t i = 0;
+    for (; i + 7 < dim; i += 8) {
+        // Load data into registers
+        __m128i code1_values = _mm_loadu_si128(reinterpret_cast<const __m128i*>(codes1 + i));
+        __m128i code2_values = _mm_loadu_si128(reinterpret_cast<const __m128i*>(codes2 + i));
+        __m256i codes1_256 = _mm256_cvtepu8_epi32(code1_values);
+        __m256i codes2_256 = _mm256_cvtepu8_epi32(code2_values);
+        __m256 code1_floats = _mm256_div_ps(_mm256_cvtepi32_ps(codes1_256), _mm256_set1_ps(255.0f));
+        __m256 code2_floats = _mm256_div_ps(_mm256_cvtepi32_ps(codes2_256), _mm256_set1_ps(255.0f));
+        __m256 diff_values = _mm256_loadu_ps(diff + i);
+        __m256 lowerBound_values = _mm256_loadu_ps(lowerBound + i);
+        // Perform calculations
+        __m256 scaled_codes1 = _mm256_fmadd_ps(code1_floats, diff_values, lowerBound_values);
+        __m256 scaled_codes2 = _mm256_fmadd_ps(code2_floats, diff_values, lowerBound_values);
+        __m256 val = _mm256_mul_ps(scaled_codes1, scaled_codes2);
+        sum = _mm256_add_ps(sum, val);
+    }
+
+    // Horizontal addition
+    __m128 sum_high = _mm256_extractf128_ps(sum, 1);
+    __m128 sum_low = _mm256_castps256_ps128(sum);
+    __m128 sum_final = _mm_add_ps(sum_low, sum_high);
+    sum_final = _mm_hadd_ps(sum_final, sum_final);
+    sum_final = _mm_hadd_ps(sum_final, sum_final);
+
+    // Extract the result from the register
+    float result;
+    _mm_store_ss(&result, sum_final);
+
+    result += sse::SQ8ComputeCodesIP(codes1 + i, codes2 + i, lowerBound + i, diff + i, dim - i);
+    return result;
+#else
+    return Generic::SQ8ComputeCodesIP(codes1, codes2, lowerBound, diff, dim);
+#endif
+}
+
+float
+SQ8ComputeCodesL2Sqr(const uint8_t* codes1,
+                     const uint8_t* codes2,
+                     const float* lowerBound,
+                     const float* diff,
+                     uint64_t dim) {
+#if defined(ENABLE_AVX2)
+    __m256 sum = _mm256_setzero_ps();
+    uint64_t i = 0;
+    for (; i + 7 < dim; i += 8) {
+        // Load data into registers
+        __m256i code1_values =
+            _mm256_cvtepu8_epi32(_mm_loadl_epi64(reinterpret_cast<const __m128i*>(codes1 + i)));
+        __m256i code2_values =
+            _mm256_cvtepu8_epi32(_mm_loadl_epi64(reinterpret_cast<const __m128i*>(codes2 + i)));
+        __m256 codes1_floats =
+            _mm256_div_ps(_mm256_cvtepi32_ps(code1_values), _mm256_set1_ps(255.0f));
+        __m256 codes2_floats =
+            _mm256_div_ps(_mm256_cvtepi32_ps(code2_values), _mm256_set1_ps(255.0f));
+        __m256 diff_values = _mm256_loadu_ps(diff + i);
+        __m256 lowerBound_values = _mm256_loadu_ps(lowerBound + i);
+        // Perform calculations
+        __m256 scaled_codes1 = _mm256_fmadd_ps(codes1_floats, diff_values, lowerBound_values);
+        __m256 scaled_codes2 = _mm256_fmadd_ps(codes2_floats, diff_values, lowerBound_values);
+        __m256 val = _mm256_sub_ps(scaled_codes1, scaled_codes2);
+        val = _mm256_mul_ps(val, val);
+        sum = _mm256_add_ps(sum, val);
+    }
+    // Horizontal addition
+    __m128 sum_high = _mm256_extractf128_ps(sum, 1);
+    __m128 sum_low = _mm256_castps256_ps128(sum);
+    __m128 sum_final = _mm_add_ps(sum_low, sum_high);
+    sum_final = _mm_hadd_ps(sum_final, sum_final);
+    sum_final = _mm_hadd_ps(sum_final, sum_final);
+    // Extract the result from the register
+    float result;
+    _mm_store_ss(&result, sum_final);
+
+    result += sse::SQ8ComputeCodesL2Sqr(codes1 + i, codes2 + i, lowerBound + i, diff + i, dim - i);
+    return result;
+#else
+    return Generic::SQ8ComputeCodesIP(codes1, codes2, lowerBound, diff, dim);
+#endif
+}
+
+}  // namespace avx2
 
 }  // namespace vsag

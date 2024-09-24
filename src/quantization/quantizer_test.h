@@ -25,38 +25,30 @@ void
 TestQuantizerEncodeDecode(Quantizer<T>& quant, int64_t dim, int count, float error = 1e-5) {
     auto vecs = fixtures::generate_vectors(count, dim);
     quant.ReTrain(vecs.data(), count);
-
     // Test EncodeOne & DecodeOne
     auto idx = random() % count;
-    auto* codes = new uint8_t[quant.GetCodeSize()];
-    quant.EncodeOne(vecs.data() + idx * dim, codes);
-    auto* outVec = new float[dim];
-    quant.DecodeOne(codes, outVec);
+    std::vector<uint8_t> codes(quant.GetCodeSize());
+    quant.EncodeOne(vecs.data() + idx * dim, codes.data());
+    std::vector<float> out_vec(dim);
+    quant.DecodeOne(codes.data(), out_vec.data());
     for (int i = 0; i < dim; ++i) {
-        REQUIRE(std::abs(vecs[idx * dim + i] - outVec[i]) < error);
+        REQUIRE(std::abs(vecs[idx * dim + i] - out_vec[i]) < error);
     }
-
     // Test EncodeBatch & DecodeBatch
-    delete[] codes;
-    delete[] outVec;
-
-    codes = new uint8_t[quant.GetCodeSize() * count];
-    quant.EncodeBatch(vecs.data(), codes, count);
-    outVec = new float[dim * count];
-    quant.DecodeBatch(codes, outVec, count);
+    codes.resize(quant.GetCodeSize() * count);
+    quant.EncodeBatch(vecs.data(), codes.data(), count);
+    std::vector<float> outVecBatch(dim * count);
+    quant.DecodeBatch(codes.data(), outVecBatch.data(), count);
     for (int64_t i = 0; i < dim * count; ++i) {
-        REQUIRE(std::abs(vecs[i] - outVec[i]) < error);
+        REQUIRE(std::abs(vecs[i] - outVecBatch[i]) < error);
     }
-
-    delete[] outVec;
-    delete[] codes;
 }
 
 template <typename T>
 void
 TestQuantizerEncodeDecodeSame(
     Quantizer<T>& quant, int64_t dim, int count, int code_max = 15, float error = 1e-5) {
-    float* data = new float[dim * count];
+    std::vector<float> data(dim * count);
     std::random_device rd;
     std::mt19937 gen(rd());
     std::uniform_int_distribution<> dis(0, code_max);
@@ -64,34 +56,31 @@ TestQuantizerEncodeDecodeSame(
     for (int i = 0; i < dim * count; i++) {
         data[i] = int(dis(gen));
     }
-    quant.ReTrain(data, count);
+    quant.ReTrain(data.data(), count);
 
     // Test EncodeOne & DecodeOne
     for (int k = 0; k < count; k++) {
         auto idx = random() % count;
-        auto* codes = new uint8_t[quant.GetCodeSize()];
-        quant.EncodeOne(data + idx * dim, codes);
-        auto* outVec = new float[dim];
-        quant.DecodeOne(codes, outVec);
+        std::vector<uint8_t> codes(quant.GetCodeSize());
+        quant.EncodeOne(data.data() + idx * dim, codes.data());
+        std::vector<float> out_vec(dim);
+        quant.DecodeOne(codes.data(), out_vec.data());
         for (int i = 0; i < dim; ++i) {
-            REQUIRE(std::abs(data[idx * dim + i] - outVec[i]) < error);
+            REQUIRE(std::abs(data[idx * dim + i] - out_vec[i]) < error);
         }
-        delete[] codes;
-        delete[] outVec;
     }
 
     // Test EncodeBatch & DecodeBatch
     {
-        auto codes = new uint8_t[quant.GetCodeSize() * count];
-        quant.EncodeBatch(data, codes, count);
-        auto outVec = new float[dim * count];
-        quant.DecodeBatch(codes, outVec, count);
-        for (int64_t i = 0; i < dim * count; ++i) {
-            REQUIRE(std::abs(data[i] - outVec[i]) < error);
-        }
+        std::vector<uint8_t> codes(quant.GetCodeSize() * count);
+        quant.EncodeBatch(data.data(), codes.data(), count);
 
-        delete[] outVec;
-        delete[] codes;
+        std::vector<float> out_vec(dim * count);
+        quant.DecodeBatch(codes.data(), out_vec.data(), count);
+
+        for (int64_t i = 0; i < dim * count; ++i) {
+            REQUIRE(std::abs(data[i] - out_vec[i]) < error);
+        }
     }
 }
 
@@ -99,17 +88,16 @@ template <typename T>
 void
 TestComputeCodes(Quantizer<T>& quantizer, size_t dim, uint32_t size, const MetricType& metric) {
     auto vecs = fixtures::generate_vectors(size, dim);
-
     quantizer.ReTrain(vecs.data(), size);
     for (int i = 0; i < size; ++i) {
         auto idx1 = random() % size;
         auto idx2 = random() % size;
-        auto* codes1 = new uint8_t[quantizer.GetCodeSize()];
-        auto* codes2 = new uint8_t[quantizer.GetCodeSize()];
-        quantizer.EncodeOne(vecs.data() + idx1 * dim, codes1);
-        quantizer.EncodeOne(vecs.data() + idx2 * dim, codes2);
-        float gt = 0.;
-        float value = quantizer.Compute(codes1, codes2);
+        std::vector<uint8_t> codes1(quantizer.GetCodeSize());
+        std::vector<uint8_t> codes2(quantizer.GetCodeSize());
+        quantizer.EncodeOne(vecs.data() + idx1 * dim, codes1.data());
+        quantizer.EncodeOne(vecs.data() + idx2 * dim, codes2.data());
+        float gt = 0.0;
+        float value = quantizer.Compute(codes1.data(), codes2.data());
         if (metric == vsag::MetricType::METRIC_TYPE_IP ||
             metric == vsag::MetricType::METRIC_TYPE_COSINE) {
             gt = InnerProduct(vecs.data() + idx1 * dim, vecs.data() + idx2 * dim, &dim);
@@ -117,82 +105,68 @@ TestComputeCodes(Quantizer<T>& quantizer, size_t dim, uint32_t size, const Metri
             gt = L2Sqr(vecs.data() + idx1 * dim, vecs.data() + idx2 * dim, &dim);
         }
         REQUIRE(std::abs(gt - value) < 1e-4);
-        delete[] codes1;
-        delete[] codes2;
     }
 }
 
 template <typename T>
 void
 TestComputeCodesSame(Quantizer<T>& quantizer, size_t dim, uint32_t size, const MetricType& metric) {
-    float* data = new float[dim * size];
+    std::vector<float> data(dim * size);
     std::random_device rd;
     std::mt19937 gen(rd());
     std::uniform_int_distribution<> dis(0, 15);
-
     for (int i = 0; i < dim * size; i++) {
-        data[i] = int(dis(gen));
+        data[i] = dis(gen);
     }
-
-    quantizer.ReTrain(data, size);
+    quantizer.ReTrain(data.data(), size);
     for (int i = 0; i < size; ++i) {
         auto idx1 = random() % size;
         auto idx2 = random() % size;
-        auto* codes1 = new uint8_t[quantizer.GetCodeSize()];
-        auto* codes2 = new uint8_t[quantizer.GetCodeSize()];
-        quantizer.EncodeOne(data + idx1 * dim, codes1);
-        quantizer.EncodeOne(data + idx2 * dim, codes2);
+        std::vector<uint8_t> codes1(quantizer.GetCodeSize());
+        std::vector<uint8_t> codes2(quantizer.GetCodeSize());
+        quantizer.EncodeOne(data.data() + idx1 * dim, codes1.data());
+        quantizer.EncodeOne(data.data() + idx2 * dim, codes2.data());
         float gt = 0.;
-        float value = quantizer.Compute(codes1, codes2);
+        float value = quantizer.Compute(codes1.data(), codes2.data());
         if (metric == vsag::MetricType::METRIC_TYPE_IP ||
             metric == vsag::MetricType::METRIC_TYPE_COSINE) {
-            gt = InnerProduct(data + idx1 * dim, data + idx2 * dim, &dim);
+            gt = InnerProduct(data.data() + idx1 * dim, data.data() + idx2 * dim, &dim);
         } else if (metric == vsag::MetricType::METRIC_TYPE_L2SQR) {
-            gt = L2Sqr(data + idx1 * dim, data + idx2 * dim, &dim);
+            gt = L2Sqr(data.data() + idx1 * dim, data.data() + idx2 * dim, &dim);
         }
-        REQUIRE(std::abs(gt - value) < 1e-4);
-        delete[] codes1;
-        delete[] codes2;
+        REQUIRE(fixtures::dist_t(gt) == fixtures::dist_t(value));
     }
-
-    delete[] data;
 }
 
 template <typename T>
 void
 TestComputerSame(Quantizer<T>& quant, size_t dim, uint32_t size, const MetricType& metric) {
-    float* data = new float[dim * size];
-    float* query = new float[dim * size];
+    std::vector<float> data(dim * size);
+    std::vector<float> query(dim * size);
     std::random_device rd;
     std::mt19937 gen(rd());
     std::uniform_int_distribution<> dis(0, 15);
-
     for (int i = 0; i < dim * size; i++) {
-        data[i] = int(dis(gen));
-        query[i] = int(dis(gen));
+        data[i] = dis(gen);
+        query[i] = dis(gen);
     }
-
-    auto* codes = new uint8_t[quant.GetCodeSize() * dim];
-    quant.Train(data, size);
+    std::vector<uint8_t> codes(quant.GetCodeSize() * dim);
+    quant.Train(data.data(), size);
     for (int i = 0; i < size; ++i) {
         auto computer = quant.FactoryComputer();
-        computer->SetQuery(query + i * dim);
+        computer->SetQuery(query.data() + i * dim);
         auto idx1 = random() % size;
-        auto* codes1 = new uint8_t[quant.GetCodeSize()];
-        quant.EncodeOne(data + idx1 * dim, codes1);
-        float gt = 0.;
-        float value = 0.;
-        computer->ComputeDist(codes1, &value);
+        std::vector<uint8_t> codes1(quant.GetCodeSize());
+        quant.EncodeOne(data.data() + idx1 * dim, codes1.data());
+        float gt = 0.0;
+        float value = 0.0;
+        computer->ComputeDist(codes1.data(), &value);
         if (metric == vsag::MetricType::METRIC_TYPE_IP ||
             metric == vsag::MetricType::METRIC_TYPE_COSINE) {
-            gt = InnerProduct(data + idx1 * dim, query + i * dim, &dim);
+            gt = InnerProduct(data.data() + idx1 * dim, query.data() + i * dim, &dim);
         } else if (metric == vsag::MetricType::METRIC_TYPE_L2SQR) {
-            gt = L2Sqr(data + idx1 * dim, query + i * dim, &dim);
+            gt = L2Sqr(data.data() + idx1 * dim, query.data() + i * dim, &dim);
         }
-        REQUIRE(std::abs(gt - value) < 1e-4);
+        REQUIRE(fixtures::dist_t(gt) == fixtures::dist_t(value));
     }
-    delete[] codes;
-
-    delete[] data;
-    delete[] query;
 }

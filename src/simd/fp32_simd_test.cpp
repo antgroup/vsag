@@ -34,16 +34,16 @@ namespace AVX512 = AVX2;
 
 #define TEST_ACCURACY(Func)                                                            \
     {                                                                                  \
-        auto gt = Generic::Func(vec1.data() + i * dim, vec2.data() + i * dim, dim);    \
-        auto sse = SSE::Func(vec1.data() + i * dim, vec2.data() + i * dim, dim);       \
-        auto avx2 = AVX2::Func(vec1.data() + i * dim, vec2.data() + i * dim, dim);     \
-        auto avx512 = AVX512::Func(vec1.data() + i * dim, vec2.data() + i * dim, dim); \
+        auto gt = generic::Func(vec1.data() + i * dim, vec2.data() + i * dim, dim);    \
+        auto sse = sse::Func(vec1.data() + i * dim, vec2.data() + i * dim, dim);       \
+        auto avx2 = avx2::Func(vec1.data() + i * dim, vec2.data() + i * dim, dim);     \
+        auto avx512 = avx512::Func(vec1.data() + i * dim, vec2.data() + i * dim, dim); \
         REQUIRE(fixtures::dist_t(gt) == fixtures::dist_t(sse));                        \
         REQUIRE(fixtures::dist_t(gt) == fixtures::dist_t(avx2));                       \
         REQUIRE(fixtures::dist_t(gt) == fixtures::dist_t(avx512));                     \
     };
 
-TEST_CASE("FP32Compute", "[FP32SIMD]") {
+TEST_CASE("FP32 SIMD Compute", "[FP32SIMD]") {
     const std::vector<int64_t> dims = {1, 8, 16, 32, 256};
     int64_t count = 100;
     for (const auto& dim : dims) {
@@ -65,17 +65,17 @@ TEST_CASE("FP32Compute", "[FP32SIMD]") {
     }
 
 TEST_CASE("FP32 benchmark", "[FP32SIMD benchmark]") {
-    int64_t count = 1000;
-    int64_t dim = 256;
+    int64_t count = 500;
+    int64_t dim = 128;
     auto vec1 = fixtures::generate_vectors(count * 2, dim);
     std::vector<float> vec2(vec1.begin() + count, vec1.end());
-    BENCHMARK_SIMD_COMPUTE(Generic, FP32ComputeIP);
-    BENCHMARK_SIMD_COMPUTE(SSE, FP32ComputeIP);
-    BENCHMARK_SIMD_COMPUTE(AVX2, FP32ComputeIP);
-    BENCHMARK_SIMD_COMPUTE(AVX512, FP32ComputeIP);
+    BENCHMARK_SIMD_COMPUTE(generic, FP32ComputeIP);
+    BENCHMARK_SIMD_COMPUTE(sse, FP32ComputeIP);
+    BENCHMARK_SIMD_COMPUTE(avx2, FP32ComputeIP);
+    BENCHMARK_SIMD_COMPUTE(avx512, FP32ComputeIP);
 
-    BENCHMARK_SIMD_COMPUTE(Generic, FP32ComputeL2Sqr);
-    BENCHMARK_SIMD_COMPUTE(SSE, FP32ComputeL2Sqr);
-    BENCHMARK_SIMD_COMPUTE(AVX2, FP32ComputeL2Sqr);
-    BENCHMARK_SIMD_COMPUTE(AVX512, FP32ComputeL2Sqr);
+    BENCHMARK_SIMD_COMPUTE(generic, FP32ComputeL2Sqr);
+    BENCHMARK_SIMD_COMPUTE(sse, FP32ComputeL2Sqr);
+    BENCHMARK_SIMD_COMPUTE(avx2, FP32ComputeL2Sqr);
+    BENCHMARK_SIMD_COMPUTE(avx512, FP32ComputeL2Sqr);
 }

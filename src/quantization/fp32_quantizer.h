@@ -58,20 +58,20 @@ public:
 
 template <MetricType Metric>
 FP32Quantizer<Metric>::FP32Quantizer(int dim) : Quantizer<FP32Quantizer<Metric>>(dim) {
-    this->codeSize_ = dim * sizeof(float);
+    this->code_size_ = dim * sizeof(float);
 }
 
 template <MetricType Metric>
 bool
 FP32Quantizer<Metric>::TrainImpl(const DataType* data, uint64_t count) {
-    this->isTrained_ = true;
+    this->is_trained_ = true;
     return true;
 }
 
 template <MetricType Metric>
 bool
 FP32Quantizer<Metric>::EncodeOneImpl(const DataType* data, uint8_t* codes) {
-    memcpy(codes, data, this->codeSize_);
+    memcpy(codes, data, this->code_size_);
     return true;
 }
 
@@ -79,7 +79,7 @@ template <MetricType Metric>
 bool
 FP32Quantizer<Metric>::EncodeBatchImpl(const DataType* data, uint8_t* codes, uint64_t count) {
     for (uint64_t i = 0; i < count; ++i) {
-        memcpy(codes + i * this->codeSize_, data + i * this->dim_, this->codeSize_);
+        memcpy(codes + i * this->code_size_, data + i * this->dim_, this->code_size_);
     }
     return true;
 }
@@ -87,7 +87,7 @@ FP32Quantizer<Metric>::EncodeBatchImpl(const DataType* data, uint8_t* codes, uin
 template <MetricType Metric>
 bool
 FP32Quantizer<Metric>::DecodeOneImpl(const uint8_t* codes, DataType* data) {
-    memcpy(data, codes, this->codeSize_);
+    memcpy(data, codes, this->code_size_);
     return true;
 }
 
@@ -95,7 +95,7 @@ template <MetricType Metric>
 bool
 FP32Quantizer<Metric>::DecodeBatchImpl(const uint8_t* codes, DataType* data, uint64_t count) {
     for (uint64_t i = 0; i < count; ++i) {
-        memcpy(data + i * this->dim_, codes + i * this->codeSize_, this->codeSize_);
+        memcpy(data + i * this->dim_, codes + i * this->code_size_, this->code_size_);
     }
     return true;
 }
@@ -118,8 +118,8 @@ template <MetricType Metric>
 void
 FP32Quantizer<Metric>::ProcessQueryImpl(const DataType* query,
                                         Computer<FP32Quantizer<Metric>>& computer) const {
-    computer.buf_ = new uint8_t[this->codeSize_];
-    memcpy(computer.buf_, query, this->codeSize_);
+    computer.buf_ = new uint8_t[this->code_size_];
+    memcpy(computer.buf_, query, this->code_size_);
 }
 
 template <MetricType Metric>
