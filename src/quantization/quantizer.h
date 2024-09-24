@@ -56,7 +56,7 @@ public:
 template <typename T>
 class Quantizer {
 public:
-    explicit Quantizer<T>(int dim) : dim_(dim), codeSize_(dim * sizeof(DataType)){};
+    explicit Quantizer<T>(int dim) : dim_(dim), code_size_(dim * sizeof(DataType)){};
 
     ~Quantizer() = default;
 
@@ -81,7 +81,7 @@ public:
      */
     bool
     ReTrain(const DataType* data, uint64_t count) {
-        this->isTrained_ = false;
+        this->is_trained_ = false;
         return cast().TrainImpl(data, count);
     }
 
@@ -177,7 +177,7 @@ public:
      */
     inline uint64_t
     GetCodeSize() const {
-        return this->codeSize_;
+        return this->code_size_;
     }
 
     /**
@@ -206,9 +206,9 @@ private:
 private:
     uint64_t dim_{0};
 
-    uint64_t codeSize_{0};
+    uint64_t code_size_{0};
 
-    bool isTrained_{false};
+    bool is_trained_{false};
 
     MetricType metric_{MetricType::METRIC_TYPE_L2SQR};
 };

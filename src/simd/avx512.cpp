@@ -13,9 +13,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <x86intrin.h>
+#include <immintrin.h>
 
 #include "fp32_simd.h"
+#include "sq8_simd.h"
 namespace vsag {
 
 #define PORTABLE_ALIGN32 __attribute__((aligned(32)))
@@ -83,13 +84,13 @@ InnerProductSIMD16ExtAVX512(const void* pVect1v, const void* pVect2v, const void
     return sum;
 }
 
-namespace AVX512 {
+namespace avx512 {
 float
 FP32ComputeIP(const float* query, const float* codes, uint64_t dim) {
 #if defined(ENABLE_AVX512)
     const int n = dim / 16;
     if (n == 0) {
-        return AVX2::FP32ComputeIP(query, codes, dim);
+        return avx2::FP32ComputeIP(query, codes, dim);
     }
     // process 16 floats at a time
     __m512 sum = _mm512_setzero_ps();  // initialize to 0
@@ -99,7 +100,7 @@ FP32ComputeIP(const float* query, const float* codes, uint64_t dim) {
         sum = _mm512_add_ps(sum, _mm512_mul_ps(a, b));  // accumulate the product
     }
     float ip = _mm512_reduce_add_ps(sum);
-    ip += AVX2::FP32ComputeIP(query + n * 16, codes + n * 16, dim - n * 16);
+    ip += avx2::FP32ComputeIP(query + n * 16, codes + n * 16, dim - n * 16);
     return ip;
 #else
     return vsag::Generic::FP32ComputeIP(query, codes, dim);
@@ -111,7 +112,7 @@ FP32ComputeL2Sqr(const float* query, const float* codes, uint64_t dim) {
 #if defined(ENABLE_AVX512)
     const int n = dim / 16;
     if (n == 0) {
-        return AVX2::FP32ComputeL2Sqr(query, codes, dim);
+        return avx2::FP32ComputeL2Sqr(query, codes, dim);
     }
     // process 16 floats at a time
     __m512 sum = _mm512_setzero_ps();  // initialize to 0
@@ -122,12 +123,163 @@ FP32ComputeL2Sqr(const float* query, const float* codes, uint64_t dim) {
         sum = _mm512_fmadd_ps(diff, diff, sum);      // accumulate the squared difference
     }
     float l2 = _mm512_reduce_add_ps(sum);
-    l2 += AVX2::FP32ComputeL2Sqr(query + n * 16, codes + n * 16, dim - n * 16);
+    l2 += avx2::FP32ComputeL2Sqr(query + n * 16, codes + n * 16, dim - n * 16);
     return l2;
 #else
     return vsag::Generic::FP32ComputeL2Sqr(query, codes, dim);
 #endif
 }
-}  // namespace AVX512
+
+float
+SQ8ComputeIP(const float* query,
+             const uint8_t* codes,
+             const float* lowerBound,
+             const float* diff,
+             uint64_t dim) {
+#if defined(ENABLE_AVX512)
+    // Initialize the sum to 0
+    __m512 sum = _mm512_setzero_ps();
+    uint64_t i = 0;
+
+    // Process the data in 512-bit chunks
+    for (; i + 15 < dim; i += 16) {
+        // Load data into registers
+        __m128i code_values = _mm_loadu_si128(reinterpret_cast<const __m128i*>(codes + i));
+        __m512i codes_512 = _mm512_cvtepu8_epi32(code_values);
+        __m512 code_floats = _mm512_cvtepi32_ps(codes_512);
+        __m512 query_values = _mm512_loadu_ps(query + i);
+        __m512 diff_values = _mm512_loadu_ps(diff + i);
+        __m512 lowerBound_values = _mm512_loadu_ps(lowerBound + i);
+
+        // Perform calculations
+        __m512 scaled_codes =
+            _mm512_mul_ps(_mm512_div_ps(code_floats, _mm512_set1_ps(255.0f)), diff_values);
+        __m512 adjusted_codes = _mm512_add_ps(scaled_codes, lowerBound_values);
+        __m512 val = _mm512_mul_ps(query_values, adjusted_codes);
+        sum = _mm512_add_ps(sum, val);
+    }
+    // Horizontal addition
+    float finalResult = _mm512_reduce_add_ps(sum);
+    // Process the remaining elements recursively
+    finalResult += avx2::SQ8ComputeIP(query + i, codes + i, lowerBound + i, diff + i, dim - i);
+    return finalResult;
+#else
+    return Generic::SQ8ComputeIP(query, codes, lowerBound, diff, dim);
+#endif
+}
+
+float
+SQ8ComputeL2Sqr(const float* query,
+                const uint8_t* codes,
+                const float* lowerBound,
+                const float* diff,
+                uint64_t dim) {
+#if defined(ENABLE_AVX512)
+    __m512 sum = _mm512_setzero_ps();
+    uint64_t i = 0;
+
+    for (; i + 15 < dim; i += 16) {
+        // Load data into registers
+        __m128i code_values = _mm_loadu_si128(reinterpret_cast<const __m128i*>(codes + i));
+        __m512i codes_512 = _mm512_cvtepu8_epi32(code_values);
+        __m512 code_floats = _mm512_div_ps(_mm512_cvtepi32_ps(codes_512), _mm512_set1_ps(255.0f));
+        __m512 diff_values = _mm512_loadu_ps(diff + i);
+        __m512 lowerBound_values = _mm512_loadu_ps(lowerBound + i);
+        __m512 query_values = _mm512_loadu_ps(query + i);
+
+        // Perform calculations
+        __m512 scaled_codes = _mm512_mul_ps(code_floats, diff_values);
+        scaled_codes = _mm512_add_ps(scaled_codes, lowerBound_values);
+        __m512 val = _mm512_sub_ps(query_values, scaled_codes);
+        val = _mm512_mul_ps(val, val);
+        sum = _mm512_add_ps(sum, val);
+    }
+
+    // Horizontal addition
+    float result = _mm512_reduce_add_ps(sum);
+    // Process the remaining elements
+    result += avx2::SQ8ComputeL2Sqr(query + i, codes + i, lowerBound + i, diff + i, dim - i);
+    return result;
+#else
+    return Generic::SQ8ComputeL2Sqr(query, codes, lowerBound, diff, dim);
+#endif
+}
+
+float
+SQ8ComputeCodesIP(const uint8_t* codes1,
+                  const uint8_t* codes2,
+                  const float* lowerBound,
+                  const float* diff,
+                  uint64_t dim) {
+#if defined(ENABLE_AVX512)
+    __m512 sum = _mm512_setzero_ps();
+    uint64_t i = 0;
+
+    for (; i + 15 < dim; i += 16) {
+        // Load data into registers
+        __m128i code1_values = _mm_loadu_si128(reinterpret_cast<const __m128i*>(codes1 + i));
+        __m128i code2_values = _mm_loadu_si128(reinterpret_cast<const __m128i*>(codes2 + i));
+        __m512i codes1_512 = _mm512_cvtepu8_epi32(code1_values);
+        __m512i codes2_512 = _mm512_cvtepu8_epi32(code2_values);
+        __m512 code1_floats = _mm512_div_ps(_mm512_cvtepi32_ps(codes1_512), _mm512_set1_ps(255.0f));
+        __m512 code2_floats = _mm512_div_ps(_mm512_cvtepi32_ps(codes2_512), _mm512_set1_ps(255.0f));
+        __m512 diff_values = _mm512_loadu_ps(diff + i);
+        __m512 lowerBound_values = _mm512_loadu_ps(lowerBound + i);
+
+        // Perform calculations
+        __m512 scaled_codes1 = _mm512_fmadd_ps(code1_floats, diff_values, lowerBound_values);
+        __m512 scaled_codes2 = _mm512_fmadd_ps(code2_floats, diff_values, lowerBound_values);
+        __m512 val = _mm512_mul_ps(scaled_codes1, scaled_codes2);
+        sum = _mm512_add_ps(sum, val);
+    }
+    // Horizontal addition
+    float result = _mm512_reduce_add_ps(sum);
+    // Process the remaining elements
+    result += avx2::SQ8ComputeCodesIP(codes1 + i, codes2 + i, lowerBound + i, diff + i, dim - i);
+    return result;
+#else
+    return Generic::SQ8ComputeCodesIP(codes1, codes2, lowerBound, diff, dim);
+#endif
+}
+
+float
+SQ8ComputeCodesL2Sqr(const uint8_t* codes1,
+                     const uint8_t* codes2,
+                     const float* lowerBound,
+                     const float* diff,
+                     uint64_t dim) {
+#if defined(ENABLE_AVX512)
+    __m512 sum = _mm512_setzero_ps();
+    uint64_t i = 0;
+
+    for (; i + 15 < dim; i += 16) {
+        __m128i code1_values = _mm_loadu_si128(reinterpret_cast<const __m128i*>(codes1 + i));
+        __m128i code2_values = _mm_loadu_si128(reinterpret_cast<const __m128i*>(codes2 + i));
+        __m512i codes1_512 = _mm512_cvtepu8_epi32(code1_values);
+        __m512i codes2_512 = _mm512_cvtepu8_epi32(code2_values);
+        __m512 code1_floats = _mm512_div_ps(_mm512_cvtepi32_ps(codes1_512), _mm512_set1_ps(255.0f));
+        __m512 code2_floats = _mm512_div_ps(_mm512_cvtepi32_ps(codes2_512), _mm512_set1_ps(255.0f));
+        __m512 diff_values = _mm512_loadu_ps(diff + i);
+        __m512 lowerBound_values = _mm512_loadu_ps(lowerBound + i);
+
+        // Perform calculations
+        __m512 scaled_codes1 = _mm512_fmadd_ps(code1_floats, diff_values, lowerBound_values);
+        __m512 scaled_codes2 = _mm512_fmadd_ps(code2_floats, diff_values, lowerBound_values);
+        __m512 val = _mm512_sub_ps(scaled_codes1, scaled_codes2);
+        val = _mm512_mul_ps(val, val);
+        sum = _mm512_add_ps(sum, val);
+    }
+
+    // Horizontal addition
+    float result = _mm512_reduce_add_ps(sum);
+    // Process the remaining elements
+    result += avx2::SQ8ComputeCodesL2Sqr(codes1 + i, codes2 + i, lowerBound + i, diff + i, dim - i);
+    return result;
+#else
+    return Generic::SQ8ComputeL2Sqr(query, codes, lowerBound, diff, dim);
+#endif
+}
+
+}  // namespace avx512
 
 }  // namespace vsag

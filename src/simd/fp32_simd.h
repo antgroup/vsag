@@ -20,66 +20,66 @@
 
 namespace vsag {
 
-namespace Generic {
+namespace generic {
 float
 FP32ComputeIP(const float* query, const float* codes, uint64_t dim);
 float
 FP32ComputeL2Sqr(const float* query, const float* codes, uint64_t dim);
-}  // namespace Generic
+}  // namespace generic
 
 #if defined(ENABLE_SSE)
-namespace SSE {
+namespace sse {
 float
 FP32ComputeIP(const float* query, const float* codes, uint64_t dim);
 float
 FP32ComputeL2Sqr(const float* query, const float* codes, uint64_t dim);
-}  // namespace SSE
+}  // namespace sse
 #endif
 
 #if defined(ENABLE_AVX2)
-namespace AVX2 {
+namespace avx2 {
 float
 FP32ComputeIP(const float* query, const float* codes, uint64_t dim);
 float
 FP32ComputeL2Sqr(const float* query, const float* codes, uint64_t dim);
-}  // namespace AVX2
+}  // namespace avx2
 #endif
 
 #if defined(ENABLE_AVX512)
-namespace AVX512 {
+namespace avx512 {
 float
 FP32ComputeIP(const float* query, const float* codes, uint64_t dim);
 float
 FP32ComputeL2Sqr(const float* query, const float* codes, uint64_t dim);
-}  // namespace AVX512
+}  // namespace avx512
 #endif
 
 inline float
 FP32ComputeIP(const float* query, const float* codes, uint64_t dim) {
 #if defined(ENABLE_AVX512)
-    return AVX512::FP32ComputeIP(query, codes, dim);
+    return avx512::FP32ComputeIP(query, codes, dim);
 #endif
 #if defined(ENABLE_AVX22)
     return AVX2::FP32ComputeIP(query, codes, dim);
 #endif
 #if defined(ENABLE_SSE)
-    return SSE::FP32ComputeIP(query, codes, dim);
+    return sse::FP32ComputeIP(query, codes, dim);
 #endif
-    return Generic::FP32ComputeIP(query, codes, dim);
+    return generic::FP32ComputeIP(query, codes, dim);
 }
 
 inline float
 FP32ComputeL2Sqr(const float* query, const float* codes, uint64_t dim) {
 #if defined(ENABLE_AVX512)
-    return AVX512::FP32ComputeL2Sqr(query, codes, dim);
+    return avx512::FP32ComputeL2Sqr(query, codes, dim);
 #endif
 #if defined(ENABLE_AVX22)
     return AVX2::FP32ComputeL2Sqr(query, codes, dim);
 #endif
 #if defined(ENABLE_SSE)
-    return SSE::FP32ComputeL2Sqr(query, codes, dim);
+    return sse::FP32ComputeL2Sqr(query, codes, dim);
 #endif
-    return Generic::FP32ComputeL2Sqr(query, codes, dim);
+    return generic::FP32ComputeL2Sqr(query, codes, dim);
 }
 
 }  // namespace vsag

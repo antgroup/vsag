@@ -14,9 +14,11 @@
 // limitations under the License.
 
 #pragma once
+
 #if defined(ENABLE_SSE)
 #include <xmmintrin.h>  //todo
 #endif
+
 #include <cstring>
 
 #include "basic_io.h"
@@ -48,7 +50,7 @@ public:
     MultiReadImpl(uint8_t* datas, uint64_t* sizes, uint64_t* offsets, uint64_t count) const;
 
     inline void
-    PrefetchImpl(uint64_t offset, uint64_t cacheLine = 64);
+    PrefetchImpl(uint64_t offset, uint64_t cache_line = 64);
 
 private:
     [[nodiscard]] inline bool
@@ -106,7 +108,7 @@ MemoryIO::MultiReadImpl(uint8_t* datas, uint64_t* sizes, uint64_t* offsets, uint
     return ret;
 }
 void
-MemoryIO::PrefetchImpl(uint64_t offset, uint64_t cacheLine) {
+MemoryIO::PrefetchImpl(uint64_t offset, uint64_t cache_line) {
 #if defined(ENABLE_SSE)
     _mm_prefetch(this->start_ + offset, _MM_HINT_T0);  // todo
 #endif
