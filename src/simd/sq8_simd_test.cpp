@@ -18,18 +18,19 @@
 #include "catch2/benchmark/catch_benchmark.hpp"
 #include "catch2/catch_test_macros.hpp"
 #include "fixtures.h"
+
 using namespace vsag;
 
 #ifndef ENABLE_SSE
-namespace SSE = Generic;
+namespace sse = generic;
 #endif
 
 #ifndef ENABLE_AVX2
-namespace AVX2 = SSE;
+namespace avx2 = sse;
 #endif
 
 #ifndef ENABLE_AVX512
-namespace AVX512 = AVX2;
+namespace avx512 = avx2;
 #endif
 
 #define TEST_ACCURACY(Func)                                                                        \
