@@ -110,7 +110,7 @@ FP32Quantizer<Metric>::ComputeImpl(const uint8_t* codes1, const uint8_t* codes2)
     } else if (Metric == MetricType::METRIC_TYPE_COSINE) {
         return InnerProduct(codes1, codes2, &this->dim_);  // TODO
     } else {
-        return 0.;
+        return 0.0f;
     }
 }
 
@@ -134,7 +134,7 @@ FP32Quantizer<Metric>::ComputeDistImpl(Computer<FP32Quantizer<Metric>>& computer
     } else if (Metric == MetricType::METRIC_TYPE_COSINE) {
         *dists = InnerProduct(codes, computer.buf_, &this->dim_);  // TODO
     } else {
-        *dists = 0.;
+        *dists = 0.0f;
     }
 }
 }  // namespace vsag

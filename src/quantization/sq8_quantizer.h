@@ -149,7 +149,7 @@ SQ8Quantizer<Metric>::ComputeImpl(const uint8_t* codes1, const uint8_t* codes2) 
         return SQ8ComputeCodesIP(
             codes1, codes2, this->lower_bound_.data(), this->diff_.data(), this->dim_);  // TODO
     } else {
-        return 0.;
+        return 0.0f;
     }
 }
 
@@ -178,7 +178,7 @@ SQ8Quantizer<Metric>::ComputeDistImpl(Computer<SQ8Quantizer>& computer,
         *dists = SQ8ComputeIP(
             query, codes, this->lower_bound_.data(), this->diff_.data(), this->dim_);  // TODO
     } else {
-        *dists = 0.;
+        *dists = 0.0f;
     }
 }
 
