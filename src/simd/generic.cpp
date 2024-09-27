@@ -63,7 +63,7 @@ namespace generic {
 
 float
 FP32ComputeIP(const float* query, const float* codes, uint64_t dim) {
-    float result = 0.;
+    float result = 0.0f;
 
     for (uint64_t i = 0; i < dim; ++i) {
         result += query[i] * codes[i];
@@ -73,7 +73,7 @@ FP32ComputeIP(const float* query, const float* codes, uint64_t dim) {
 
 float
 FP32ComputeL2Sqr(const float* query, const float* codes, uint64_t dim) {
-    float result = 0.;
+    float result = 0.0f;
     for (uint64_t i = 0; i < dim; ++i) {
         auto val = query[i] - codes[i];
         result += val * val;
@@ -87,7 +87,7 @@ SQ8ComputeIP(const float* query,
              const float* lowerBound,
              const float* diff,
              uint64_t dim) {
-    float result = 0.;
+    float result = 0.0f;
     for (uint64_t i = 0; i < dim; ++i) {
         result += query[i] * static_cast<float>(static_cast<float>(codes[i]) / 255.0 * diff[i] +
                                                 lowerBound[i]);
@@ -101,7 +101,7 @@ SQ8ComputeL2Sqr(const float* query,
                 const float* lowerBound,
                 const float* diff,
                 uint64_t dim) {
-    float result = 0.;
+    float result = 0.0f;
     for (uint64_t i = 0; i < dim; ++i) {
         auto val = (query[i] - static_cast<float>(static_cast<float>(codes[i]) / 255.0 * diff[i] +
                                                   lowerBound[i]));
@@ -116,7 +116,7 @@ SQ8ComputeCodesIP(const uint8_t* codes1,
                   const float* lowerBound,
                   const float* diff,
                   uint64_t dim) {
-    float result = 0.;
+    float result = 0.0f;
     for (uint64_t i = 0; i < dim; ++i) {
         auto val1 =
             static_cast<float>(static_cast<float>(codes1[i]) / 255.0 * diff[i] + lowerBound[i]);
@@ -133,7 +133,7 @@ SQ8ComputeCodesL2Sqr(const uint8_t* codes1,
                      const float* lowerBound,
                      const float* diff,
                      uint64_t dim) {
-    float result = 0.;
+    float result = 0.0f;
     for (uint64_t i = 0; i < dim; ++i) {
         auto val1 =
             static_cast<float>(static_cast<float>(codes1[i]) / 255.0 * diff[i] + lowerBound[i]);

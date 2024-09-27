@@ -47,8 +47,8 @@ public:
     }
 
     inline void
-    Prefetch(uint64_t offset, uint64_t cacheLine = 64) {
-        return cast().PrefetchImpl(offset, cacheLine);
+    Prefetch(uint64_t offset, uint64_t cache_line = 64) {
+        return cast().PrefetchImpl(offset, cache_line);
     }
 
 private:

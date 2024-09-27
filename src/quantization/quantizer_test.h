@@ -126,7 +126,7 @@ TestComputeCodesSame(Quantizer<T>& quantizer, size_t dim, uint32_t size, const M
         std::vector<uint8_t> codes2(quantizer.GetCodeSize());
         quantizer.EncodeOne(data.data() + idx1 * dim, codes1.data());
         quantizer.EncodeOne(data.data() + idx2 * dim, codes2.data());
-        float gt = 0.;
+        float gt = 0.0f;
         float value = quantizer.Compute(codes1.data(), codes2.data());
         if (metric == vsag::MetricType::METRIC_TYPE_IP ||
             metric == vsag::MetricType::METRIC_TYPE_COSINE) {

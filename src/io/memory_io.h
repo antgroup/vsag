@@ -67,12 +67,10 @@ private:
         current_size_ = size;
     }
 
+private:
     Allocator* allocator_{nullptr};
-
     uint8_t* start_{nullptr};
-
     uint64_t current_size_{0};
-
     static const uint64_t MIN_SIZE = 1024;
 };
 

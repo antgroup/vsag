@@ -18,36 +18,10 @@
 #include <cstdint>
 #include <memory>
 
+#include "computer.h"
 #include "metric_type.h"
 namespace vsag {
 using DataType = float;
-
-template <typename T>
-class Quantizer;
-
-template <typename T>
-class Computer {
-public:
-    ~Computer() {
-        delete[] buf_;
-    }
-
-    explicit Computer(const T& quantizer) : quantizer_(&quantizer){};
-
-    void
-    SetQuery(const DataType* query) {
-        quantizer_->ProcessQuery(query, *this);
-    }
-
-    inline void
-    ComputeDist(const uint8_t* codes, float* dists) {
-        quantizer_->ComputeDist(*this, codes, dists);
-    }
-
-    const T* quantizer_{nullptr};
-
-    uint8_t* buf_{nullptr};  // todo how to alloc and free
-};
 
 /**
  * @class Quantizer
@@ -148,9 +122,9 @@ public:
         return cast().ComputeImpl(codes1, codes2);
     }
 
-    std::unique_ptr<Computer<T>>
+    std::shared_ptr<Computer<T>>
     FactoryComputer() {
-        return std::make_unique<Computer<T>>(cast());
+        return std::make_shared<Computer<T>>(static_cast<T*>(this));
     }
 
     inline void
@@ -165,7 +139,7 @@ public:
 
     inline float
     ComputeDist(Computer<T>& computer, const uint8_t* codes) const {
-        float dist = 0.;
+        float dist = 0.0f;
         cast().ComputeDistImpl(computer, codes, dist);
         return dist;
     }
@@ -205,11 +179,8 @@ private:
 
 private:
     uint64_t dim_{0};
-
     uint64_t code_size_{0};
-
     bool is_trained_{false};
-
     MetricType metric_{MetricType::METRIC_TYPE_L2SQR};
 };
 

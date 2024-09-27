@@ -36,7 +36,7 @@ TestComputeCodes(Quantizer<T>& quant, int64_t dim, int count, const MetricType& 
         auto* codes2 = new uint8_t[quant.GetCodeSize()];
         quant.EncodeOne(vecs.data() + idx1 * dim, codes1);
         quant.EncodeOne(vecs.data() + idx2 * dim, codes2);
-        float gt = 0.;
+        float gt = 0.0f;
         float value = quant.Compute(codes2, codes1);
         if (metric == vsag::MetricType::METRIC_TYPE_IP ||
             metric == vsag::MetricType::METRIC_TYPE_COSINE) {
@@ -63,8 +63,8 @@ TestComputer(Quantizer<T>& quant, int64_t dim, int count, const MetricType& metr
         auto idx1 = random() % count;
         auto* codes1 = new uint8_t[quant.GetCodeSize()];
         quant.EncodeOne(vecs.data() + idx1 * dim, codes1);
-        float gt = 0.;
-        float value = 0.;
+        float gt = 0.0f;
+        float value = 0.0f;
         computer->ComputeDist(codes1, &value);
         if (metric == vsag::MetricType::METRIC_TYPE_IP ||
             metric == vsag::MetricType::METRIC_TYPE_COSINE) {
