@@ -20,11 +20,26 @@
 #include <string>
 #include <vector>
 
+#include "default_allocator.h"
 #include "spdlog/spdlog.h"
 #include "vsag/errors.h"
 #include "vsag/expected.hpp"
 
 namespace vsag {
+
+template <typename T>
+using UnorderedSet =
+    std::unordered_set<T, std::hash<T>, std::equal_to<T>, vsag::AllocatorWrapper<T>>;
+
+template <typename T>
+using Vector = std::vector<T, vsag::AllocatorWrapper<T>>;
+
+template <typename KeyType, typename ValType>
+using UnorderedMap = std::unordered_map<KeyType,
+                                        ValType,
+                                        std::hash<KeyType>,
+                                        std::equal_to<KeyType>,
+                                        vsag::AllocatorWrapper<std::pair<const KeyType, ValType>>>;
 
 struct SlowTaskTimer {
     SlowTaskTimer(const std::string& name, int64_t log_threshold_ms = 0);
