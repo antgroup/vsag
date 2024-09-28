@@ -85,6 +85,11 @@ public:
     AllocatorWrapper(const AllocatorWrapper<U>& other) : allocator_(other.allocator_) {
     }
 
+    bool
+    operator==(const AllocatorWrapper& other) const noexcept {
+        return allocator_ == other.allocator_;
+    }
+
     pointer
     allocate(size_type n, const_void_pointer hint = 0) {
         return static_cast<pointer>(allocator_->Allocate(n * sizeof(value_type)));

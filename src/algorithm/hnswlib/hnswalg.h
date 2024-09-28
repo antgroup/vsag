@@ -33,6 +33,7 @@
 
 #include "../../default_allocator.h"
 #include "../../simd/simd.h"
+#include "../../utils.h"
 #include "algorithm_interface.h"
 #include "block_manager.h"
 #include "visited_list_pool.h"
@@ -40,8 +41,7 @@
 namespace hnswlib {
 using tableint = unsigned int;
 using linklistsizeint = unsigned int;
-using reverselinklist = std::
-    unordered_set<tableint, std::hash<tableint>, std::equal_to<>, vsag::AllocatorWrapper<tableint>>;
+using reverselinklist = vsag::UnorderedSet<uint32_t>;
 struct CompareByFirst {
     constexpr bool
     operator()(std::pair<float, tableint> const& a,
@@ -76,10 +76,10 @@ private:
     VisitedListPool* visited_list_pool_{nullptr};
 
     // Locks operations with element by label value
-    mutable std::vector<std::mutex> label_op_locks_{};
+    mutable vsag::Vector<std::mutex> label_op_locks_;
 
     std::mutex global_{};
-    std::vector<std::recursive_mutex> link_list_locks_{};
+    vsag::Vector<std::recursive_mutex> link_list_locks_;
 
     tableint enterpoint_node_{0};
 
@@ -97,7 +97,7 @@ private:
 
     bool use_reversed_edges_{false};
     reverselinklist** reversed_level0_link_list_{nullptr};
-    std::unordered_map<int, reverselinklist>** reversed_link_lists_{nullptr};
+    vsag::UnorderedMap<int, reverselinklist>** reversed_link_lists_{nullptr};
 
     size_t data_size_{0};
 
@@ -107,13 +107,12 @@ private:
     void* dist_func_param_{nullptr};
 
     mutable std::mutex label_lookup_lock_{};  // lock for label_lookup_
-    std::unordered_map<labeltype, tableint> label_lookup_{};
+    vsag::UnorderedMap<labeltype, tableint> label_lookup_;
 
     std::default_random_engine level_generator_;
     std::default_random_engine update_probability_generator_;
 
     vsag::Allocator* allocator_{nullptr};
-    std::shared_ptr<vsag::AllocatorWrapper<tableint>> reverse_link_list_allocator_{nullptr};
 
     mutable std::atomic<uint64_t> metric_distance_computations_{0};
     mutable std::atomic<uint64_t> metric_hops_{0};
@@ -123,22 +122,10 @@ private:
     // flag to replace deleted elements (marked as deleted) during insertion
     bool allow_replace_deleted_{false};
 
-    std::mutex deleted_elements_lock_{};               // lock for deleted_elements_
-    std::unordered_set<tableint> deleted_elements_{};  // contains internal ids of deleted elements
+    std::mutex deleted_elements_lock_{};             // lock for deleted_elements_
+    vsag::UnorderedSet<tableint> deleted_elements_;  // contains internal ids of deleted elements
 
 public:
-    HierarchicalNSW(SpaceInterface* s) {
-    }
-
-    HierarchicalNSW(SpaceInterface* s,
-                    const std::string& location,
-                    bool nmslib = false,
-                    size_t max_elements = 0,
-                    bool allow_replace_deleted = false)
-        : allow_replace_deleted_(allow_replace_deleted) {
-        loadIndex(location, s, max_elements);
-    }
-
     HierarchicalNSW(SpaceInterface* s,
                     size_t max_elements,
                     vsag::Allocator* allocator,
@@ -192,18 +179,17 @@ public:
         if (level != 0) {
             auto& edge_map_ptr = reversed_link_lists_[internal_id];
             if (edge_map_ptr == nullptr) {
-                edge_map_ptr = new std::unordered_map<int, reverselinklist>();
+                edge_map_ptr = new vsag::UnorderedMap<int, reverselinklist>(allocator_);
             }
             auto& edge_map = *edge_map_ptr;
             if (edge_map.find(level) == edge_map.end()) {
-                edge_map.insert(
-                    std::make_pair(level, reverselinklist(*reverse_link_list_allocator_)));
+                edge_map.insert(std::make_pair(level, reverselinklist(allocator_)));
             }
             return edge_map.at(level);
         } else {
             auto& edge_ptr = reversed_level0_link_list_[internal_id];
             if (edge_ptr == nullptr) {
-                edge_ptr = new reverselinklist(*reverse_link_list_allocator_);
+                edge_ptr = new reverselinklist(allocator_);
             }
             return *edge_ptr;
         }
@@ -211,7 +197,7 @@ public:
 
     void
     updateConnections(tableint internal_id,
-                      const std::vector<tableint>& cand_neighbors,
+                      const vsag::Vector<tableint>& cand_neighbors,
                       int level,
                       bool is_update);
 
