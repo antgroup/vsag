@@ -34,14 +34,13 @@ set(DISKANN_SOURCES
 # not working without FMA
 #set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -mavx2 -mfma -msse2 -ftree-vectorize -fno-builtin-malloc -fno-builtin-calloc -fno-builtin-realloc -fno-builtin-free -fopenmp -fopenmp-simd -funroll-loops -Wfatal-errors -DUSE_AVX2")
 
+add_library(diskann STATIC ${DISKANN_SOURCES})
 # work
 if (${CMAKE_SYSTEM_PROCESSOR} MATCHES "x86_64")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -mavx -msse2 -ftree-vectorize -fno-builtin-malloc -fno-builtin-calloc -fno-builtin-realloc -fno-builtin-free -fopenmp -fopenmp-simd -funroll-loops -Wfatal-errors")
+  target_compile_options(diskann PRIVATE -mavx -msse2 -ftree-vectorize -fno-builtin-malloc -fno-builtin-calloc -fno-builtin-realloc -fno-builtin-free -fopenmp -fopenmp-simd -funroll-loops -Wfatal-errors)
 else ()
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -ftree-vectorize -fno-builtin-malloc -fno-builtin-calloc -fno-builtin-realloc -fno-builtin-free -fopenmp -fopenmp-simd -funroll-loops -Wfatal-errors")
+  target_compile_options(diskann PRIVATE -ftree-vectorize -fno-builtin-malloc -fno-builtin-calloc -fno-builtin-realloc -fno-builtin-free -fopenmp -fopenmp-simd -funroll-loops -Wfatal-errors)
 endif ()
-
-add_library(diskann STATIC ${DISKANN_SOURCES})
 set_property(TARGET diskann PROPERTY CXX_STANDARD 17)
 add_dependencies(diskann boost openblas)
 
