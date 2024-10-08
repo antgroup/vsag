@@ -21,7 +21,6 @@
 #include "flatten_interface.h"
 #include "io/basic_io.h"
 #include "quantization/quantizer.h"
-
 namespace vsag {
 
 template <typename QuantTmpl, typename IOTmpl>

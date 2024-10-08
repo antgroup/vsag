@@ -17,25 +17,12 @@
 
 namespace hnswlib {
 
-BlockManager::BlockManager(size_t max_elements,
-                           size_t size_data_per_element,
+BlockManager::BlockManager(size_t size_data_per_element,
                            size_t block_size_limit,
                            vsag::Allocator* allocator)
-    : max_elements_(max_elements),
-      size_data_per_element_(size_data_per_element),
-      allocator_(allocator) {
+    : max_elements_(0), size_data_per_element_(size_data_per_element), allocator_(allocator) {
     data_num_per_block_ = block_size_limit / size_data_per_element_;
     block_size_ = size_data_per_element * data_num_per_block_;
-    size_t full_blocks = (max_elements * size_data_per_element) / block_size_;
-    size_t remaining_size = (max_elements * size_data_per_element) % block_size_;
-    for (size_t i = 0; i < full_blocks; ++i) {
-        blocks_.emplace_back(static_cast<char*>(allocator_->Allocate(block_size_)));
-        block_lens_.emplace_back(block_size_);
-    }
-    if (remaining_size > 0) {
-        blocks_.emplace_back(static_cast<char*>(allocator_->Allocate(remaining_size)));
-        block_lens_.emplace_back(remaining_size);
-    }
 }
 
 BlockManager::~BlockManager() {

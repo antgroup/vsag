@@ -70,10 +70,10 @@ private:
     size_t ef_construction_{0};
     size_t dim_{0};
 
-    double mult_{0.0}, revSize_{0.0};
-    int maxlevel_{0};
+    double mult_{0.0}, rev_size_{0.0};
+    int max_level_{0};
 
-    VisitedListPool* visited_list_pool_{nullptr};
+    std::shared_ptr<VisitedListPool> visited_list_pool_{nullptr};
 
     // Locks operations with element by label value
     mutable vsag::Vector<std::mutex> label_op_locks_;
@@ -84,14 +84,14 @@ private:
     tableint enterpoint_node_{0};
 
     size_t size_links_level0_{0};
-    size_t offsetData_{0};
+    size_t offset_data_{0};
     size_t offsetLevel0_{0};
     size_t label_offset_{0};
 
     bool normalize_{false};
     float* molds_{nullptr};
 
-    BlockManager* data_level0_memory_{nullptr};
+    std::shared_ptr<BlockManager> data_level0_memory_{nullptr};
     char** link_lists_{nullptr};
     int* element_levels_{nullptr};  // keeps level of each element
 
@@ -206,7 +206,7 @@ public:
 
     inline char*
     getDataByInternalId(tableint internal_id) const {
-        return (data_level0_memory_->GetElementPtr(internal_id, offsetData_));
+        return (data_level0_memory_->GetElementPtr(internal_id, offset_data_));
     }
 
     std::priority_queue<std::pair<float, labeltype>>
@@ -390,5 +390,8 @@ public:
 
     void
     checkIntegrity();
+
+    bool
+    init_memory_space() override;
 };
 }  // namespace hnswlib
