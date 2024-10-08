@@ -78,7 +78,7 @@ public:
 
     virtual ~HNSW() {
         alg_hnsw_ = nullptr;
-        delete allocator_;
+        allocator_.reset();
     }
 
 public:
@@ -277,6 +277,9 @@ private:
     tl::expected<void, Error>
     deserialize(std::istream& in_stream);
 
+    tl::expected<bool, Error>
+    init_memory_space();
+
     BinarySet
     empty_binaryset() const;
 
@@ -291,8 +294,9 @@ private:
     bool use_static_ = false;
     bool empty_index_ = false;
     bool use_reversed_edges_ = false;
+    bool is_init_memory_ = false;
 
-    SafeAllocator* allocator_ = nullptr;
+    std::shared_ptr<SafeAllocator> allocator_;
 
     mutable std::mutex stats_mutex_;
     mutable std::map<std::string, WindowResultQueue> result_queues_;

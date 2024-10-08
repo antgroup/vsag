@@ -155,7 +155,8 @@ public:
         offsetLevel0_ = 0;
 
         data_level0_memory_ =
-            new BlockManager(max_elements_, size_data_per_element_, block_size_limit, allocator_);
+            new BlockManager(size_data_per_element_, block_size_limit, allocator_);
+        data_level0_memory_->Resize(max_elements_);
         data_element_per_block_ = block_size_limit / size_data_per_element_;
 
         cur_element_count_ = 0;
@@ -174,7 +175,10 @@ public:
         mult_ = 1 / log(1.0 * M_);
         revSize_ = 1.0 / mult_;
     }
-
+    bool
+    init_memory_space() override {
+        return true;
+    }
     ~StaticHierarchicalNSW() {
         delete data_level0_memory_;
         for (tableint i = 0; i < cur_element_count_; i++) {

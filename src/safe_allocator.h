@@ -53,6 +53,10 @@ public:
         }
         return ret;
     }
+    Allocator*
+    GetRawAllocator() {
+        return raw_allocator_;
+    }
 
 public:
     virtual ~SafeAllocator() = default;
