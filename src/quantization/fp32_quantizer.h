@@ -58,7 +58,8 @@ public:
 
 template <MetricType Metric>
 FP32Quantizer<Metric>::FP32Quantizer(int dim) : Quantizer<FP32Quantizer<Metric>>(dim) {
-    this->code_size_ = dim * sizeof(float);
+    // align 64 bytes (512 bits) to avoid illegal memory access in SIMD
+    this->code_size_ = (dim * sizeof(float) + (1 << 6) - 1) >> 6 << 6;
 }
 
 template <MetricType Metric>
