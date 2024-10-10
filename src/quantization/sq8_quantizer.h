@@ -64,7 +64,8 @@ public:
 
 template <MetricType Metric>
 SQ8Quantizer<Metric>::SQ8Quantizer(int dim) : Quantizer<SQ8Quantizer<Metric>>(dim) {
-    this->code_size_ = this->dim_;
+    // align 64 bytes (512 bits) to avoid illegal memory access in SIMD
+    this->code_size_ = (this->dim_ + (1 << 6) - 1) >> 6 << 6;
     this->diff_.resize(dim, 0);
     this->lower_bound_.resize(dim, std::numeric_limits<DataType>::max());
 }
@@ -157,7 +158,9 @@ template <MetricType Metric>
 void
 SQ8Quantizer<Metric>::ProcessQueryImpl(const DataType* query,
                                        Computer<SQ8Quantizer>& computer) const {
-    computer.buf_ = new uint8_t[this->dim_ * sizeof(float)];
+    // align 64 bytes (512 bits) to avoid illegal memory access in SIMD
+    uint64_t aligned_size = (this->dim_ * sizeof(float) + (1 << 6) - 1) >> 6 << 6;
+    computer.buf_ = new uint8_t[aligned_size];
     std::memcpy(computer.buf_, query, this->dim_ * sizeof(float));
 }
 
