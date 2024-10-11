@@ -17,6 +17,7 @@
 
 namespace vsag {
 
+const char* const INDEX_HGRAPH = "hgraph";
 const char* const INDEX_DISKANN = "diskann";
 const char* const INDEX_HNSW = "hnsw";
 const char* const INDEX_FRESH_HNSW = "fresh_hnsw";
@@ -91,5 +92,38 @@ const char* const MESSAGE_PARAMETER = "invalid parameter";
 // Serialize key
 const char* const SERIALIZE_MAGIC_NUM = "MAGIC_NUM";
 const char* const SERIALIZE_VERSION = "VERSION";
+
+// Index Type
+const char* const INDEX_TYPE_HGRAPH = "hgraph";
+
+// Parameter key for hgraph
+const char* const HGRAPH_USE_REORDER_KEY = "use_reorder";
+const char* const HGRAPH_GRAPH_KEY = "graph";
+const char* const HGRAPH_BASE_CODES_KEY = "base_codes";
+const char* const HGRAPH_PRECISE_CODES_KEY = "precise_codes";
+
+// IO type
+const char* const IO_TYPE_KEY = "io_type";
+const char* const IO_TYPE_VALUE_MEMORY_IO = "memory";
+const char* const IO_TYPE_VALUE_BLOCK_MEMORY_IO = "block_memory";
+
+// IO param key
+const char* const IO_PARAMS_KEY = "io_params";
+const char* const BLOCK_IO_BLOCK_SIZE_KEY = "block_size";
+
+// quantization type
+const char* const QUANTIZATION_TYPE_KEY = "quantization_type";
+const char* const QUANTIZATION_TYPE_VALUE_SQ8 = "sq8";
+const char* const QUANTIZATION_TYPE_VALUE_FP32 = "fp32";
+
+// quantization params key
+const char* const QUANTIZATION_PARAMS_KEY = "quantization_params";
+
+// graph param key
+const char* const GRAPH_PARAMS_KEY = "graph_params";
+
+// graph param value
+const char* const GRAPH_PARAM_MAX_DEGREE = "max_degree";
+const char* const GRAPH_PARAM_INIT_MAX_CAPACITY = "init_capacity";
 
 };  // namespace vsag

@@ -15,7 +15,18 @@
 
 #pragma once
 
-namespace vsag {
-enum class MetricType { METRIC_TYPE_L2SQR = 0, METRIC_TYPE_IP = 1, METRIC_TYPE_COSINE = 2 };
+#include <cstdint>
 
+#include "data_type.h"
+#include "metric_type.h"
+#include "vsag/allocator.h"
+
+namespace vsag {
+class IndexCommonParam {
+public:
+    MetricType metric_{MetricType::METRIC_TYPE_L2SQR};
+    DataTypes data_type_{DataTypes::DATA_TYPE_FLOAT};
+    int64_t dim_{0};
+    Allocator* allocator_{nullptr};
+};
 }  // namespace vsag

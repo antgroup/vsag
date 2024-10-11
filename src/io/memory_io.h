@@ -20,8 +20,10 @@
 #endif
 
 #include <cstring>
+#include <nlohmann/json.hpp>
 
 #include "basic_io.h"
+#include "index/index_common_param.h"
 #include "vsag/allocator.h"
 
 namespace vsag {
@@ -29,6 +31,12 @@ namespace vsag {
 class MemoryIO : public BasicIO<MemoryIO> {
 public:
     explicit MemoryIO(Allocator* allocator) : allocator_(allocator) {
+        start_ = reinterpret_cast<uint8_t*>(allocator_->Allocate(MIN_SIZE));
+        current_size_ = MIN_SIZE;
+    }
+
+    MemoryIO(const nlohmann::json& io_obj, const IndexCommonParam& common_param)
+        : allocator_(common_param.allocator_) {
         start_ = reinterpret_cast<uint8_t*>(allocator_->Allocate(MIN_SIZE));
         current_size_ = MIN_SIZE;
     }
@@ -52,6 +60,12 @@ public:
     inline void
     PrefetchImpl(uint64_t offset, uint64_t cache_line = 64);
 
+    inline void
+    SerializeImpl(StreamWriter& writer);
+
+    inline void
+    DeserializeImpl(StreamReader& reader);
+
 private:
     [[nodiscard]] inline bool
     checkValidOffset(uint64_t size) const {
@@ -68,7 +82,7 @@ private:
     }
 
 private:
-    Allocator* allocator_{nullptr};
+    Allocator* const allocator_{nullptr};
     uint8_t* start_{nullptr};
     uint64_t current_size_{0};
     static const uint64_t MIN_SIZE = 1024;
@@ -110,6 +124,19 @@ MemoryIO::PrefetchImpl(uint64_t offset, uint64_t cache_line) {
 #if defined(ENABLE_SSE)
     _mm_prefetch(this->start_ + offset, _MM_HINT_T0);  // todo
 #endif
+}
+void
+MemoryIO::SerializeImpl(StreamWriter& writer) {
+    StreamWriter::WriteObj(writer, this->current_size_);
+    writer.Write(reinterpret_cast<char*>(this->start_), current_size_);
+}
+
+void
+MemoryIO::DeserializeImpl(StreamReader& reader) {
+    allocator_->Deallocate(this->start_);
+    StreamReader::ReadObj(reader, this->current_size_);
+    this->start_ = static_cast<uint8_t*>(allocator_->Allocate(this->current_size_));
+    reader.Read(reinterpret_cast<char*>(this->start_), current_size_);
 }
 
 }  // namespace vsag

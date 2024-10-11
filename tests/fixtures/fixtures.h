@@ -68,7 +68,7 @@ brute_force(const vsag::DatasetPtr& query,
             const std::string& metric_type);
 
 struct temp_dir {
-    temp_dir(const std::string& name) {
+    explicit temp_dir(const std::string& name) {
         auto epoch_time = std::chrono::system_clock::now().time_since_epoch();
         auto seconds = std::chrono::duration_cast<std::chrono::seconds>(epoch_time).count();
 
@@ -116,5 +116,18 @@ using dist_t = comparable_float_t;
 // we will limit the error to within 2e-6.
 using time_t = comparable_float_t;
 using recall_t = comparable_float_t;
+
+struct IOItem {
+    uint64_t start_;
+    uint64_t length_;
+    uint8_t* data_;
+
+    ~IOItem() {
+        delete[] data_;
+    }
+};
+
+std::vector<IOItem>
+GenTestItems(uint64_t count, uint64_t max_length, uint64_t max_index = 100000);
 
 }  // Namespace fixtures

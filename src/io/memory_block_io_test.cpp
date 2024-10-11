@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "memory_io.h"
+#include "memory_block_io.h"
 
 #include <catch2/catch_test_macros.hpp>
 #include <memory>
@@ -22,15 +22,15 @@
 #include "default_allocator.h"
 using namespace vsag;
 
-TEST_CASE("read&write [ut][memory_io]") {
+TEST_CASE("read&write [ut][memory_block_io]") {
     auto allocator = std::make_unique<DefaultAllocator>();
-    auto io = std::make_unique<MemoryIO>(allocator.get());
+    auto io = std::make_unique<MemoryBlockIO>(allocator.get());
     TestBasicReadWrite(*io);
 }
 
-TEST_CASE("serialize&deserialize [ut][memory_io]") {
+TEST_CASE("serialize&deserialize [ut][memory_block_io]") {
     auto allocator = std::make_unique<DefaultAllocator>();
-    auto wio = std::make_unique<MemoryIO>(allocator.get());
-    auto rio = std::make_unique<MemoryIO>(allocator.get());
+    auto wio = std::make_unique<MemoryBlockIO>(allocator.get());
+    auto rio = std::make_unique<MemoryBlockIO>(allocator.get());
     TestSerializeAndDeserialize(*wio, *rio);
 }
