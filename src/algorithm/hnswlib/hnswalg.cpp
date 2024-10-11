@@ -71,8 +71,24 @@ HierarchicalNSW::HierarchicalNSW(SpaceInterface* s,
     rev_size_ = 1.0 / mult_;
 }
 
+void
+HierarchicalNSW::reset() {
+    allocator_->Deallocate(element_levels_);
+    element_levels_ = nullptr;
+    allocator_->Deallocate(reversed_level0_link_list_);
+    reversed_level0_link_list_ = nullptr;
+    allocator_->Deallocate(reversed_link_lists_);
+    reversed_link_lists_ = nullptr;
+    allocator_->Deallocate(molds_);
+    molds_ = nullptr;
+    allocator_->Deallocate(link_lists_);
+    link_lists_ = nullptr;
+}
+
 bool
 HierarchicalNSW::init_memory_space() {
+    // release the memory allocated by the init_memory_space function that was called earlier
+    reset();
     element_levels_ = (int*)allocator_->Allocate(max_elements_ * sizeof(int));
     if (not data_level0_memory_->Resize(max_elements_)) {
         throw std::runtime_error("allocate data_level0_memory_ error");
@@ -112,7 +128,6 @@ HierarchicalNSW::~HierarchicalNSW() {
             if (element_levels_[i] > 0 || link_lists_[i] != nullptr)
                 allocator_->Deallocate(link_lists_[i]);
         }
-        allocator_->Deallocate(link_lists_);
     }
 
     if (use_reversed_edges_) {
@@ -122,13 +137,8 @@ HierarchicalNSW::~HierarchicalNSW() {
             auto& in_edges = *(reversed_link_lists_ + i);
             delete in_edges;
         }
-        allocator_->Deallocate(reversed_link_lists_);
-        allocator_->Deallocate(reversed_level0_link_list_);
     }
-    if (normalize_) {
-        allocator_->Deallocate(molds_);
-    }
-    allocator_->Deallocate(element_levels_);
+    reset();
 }
 
 void
@@ -269,12 +279,12 @@ HierarchicalNSW::getRandomLevel(double reverse_size) {
 
 MaxHeap
 HierarchicalNSW::searchBaseLayer(tableint ep_id, const void* data_point, int layer) {
-    VisitedList* vl = visited_list_pool_->getFreeVisitedList();
+    std::shared_ptr<VisitedList> vl = visited_list_pool_->getFreeVisitedList();
     vl_type* visited_array = vl->mass;
     vl_type visited_array_tag = vl->curV;
 
-    MaxHeap top_candidates;
-    MaxHeap candidateSet;
+    MaxHeap top_candidates(allocator_);
+    MaxHeap candidateSet(allocator_);
 
     float lowerBound;
     if (!isMarkedDeleted(ep_id)) {
@@ -356,12 +366,12 @@ HierarchicalNSW::searchBaseLayerST(tableint ep_id,
                                    const void* data_point,
                                    size_t ef,
                                    BaseFilterFunctor* isIdAllowed) const {
-    VisitedList* vl = visited_list_pool_->getFreeVisitedList();
+    std::shared_ptr<VisitedList> vl = visited_list_pool_->getFreeVisitedList();
     vl_type* visited_array = vl->mass;
     vl_type visited_array_tag = vl->curV;
 
-    MaxHeap top_candidates;
-    MaxHeap candidate_set;
+    MaxHeap top_candidates(allocator_);
+    MaxHeap candidate_set(allocator_);
 
     float lowerBound;
     if ((!has_deletions || !isMarkedDeleted(ep_id)) &&
@@ -450,12 +460,12 @@ HierarchicalNSW::searchBaseLayerST(tableint ep_id,
                                    float radius,
                                    int64_t ef,
                                    BaseFilterFunctor* isIdAllowed) const {
-    VisitedList* vl = visited_list_pool_->getFreeVisitedList();
+    std::shared_ptr<VisitedList> vl = visited_list_pool_->getFreeVisitedList();
     vl_type* visited_array = vl->mass;
     vl_type visited_array_tag = vl->curV;
 
-    MaxHeap top_candidates;
-    MaxHeap candidate_set;
+    MaxHeap top_candidates(allocator_);
+    MaxHeap candidate_set(allocator_);
 
     float lowerBound;
     if ((!has_deletions || !isMarkedDeleted(ep_id)) &&
@@ -652,7 +662,7 @@ HierarchicalNSW::mutuallyConnectNewElement(tableint cur_c,
                                            getDataByInternalId(selectedNeighbor),
                                            dist_func_param_);
                 // Heuristic:
-                MaxHeap candidates;
+                MaxHeap candidates(allocator_);
                 candidates.emplace(d_max, cur_c);
 
                 for (size_t j = 0; j < sz_link_list_other; j++) {
@@ -1209,7 +1219,7 @@ HierarchicalNSW::removePoint(labeltype label) {
         auto data_link_cur = (unsigned int*)(data_cur + 1);
 
         for (const auto in_edge : in_edges_cur) {
-            MaxHeap candidates;
+            MaxHeap candidates(allocator_);
             vsag::UnorderedSet<tableint> unique_ids(allocator_);
 
             // Add the original neighbors of the indegree node to the candidate queue.
@@ -1415,7 +1425,7 @@ HierarchicalNSW::searchKnn(const void* query_data,
         }
     }
 
-    MaxHeap top_candidates;
+    MaxHeap top_candidates(allocator_);
 
     top_candidates =
         searchBaseLayerST<false, true>(currObj, query_data, std::max(ef, k), isIdAllowed);
@@ -1473,7 +1483,7 @@ HierarchicalNSW::searchRange(const void* query_data,
         }
     }
 
-    MaxHeap top_candidates;
+    MaxHeap top_candidates(allocator_);
 
     top_candidates = searchBaseLayerST<false, true>(currObj, query_data, radius, ef, isIdAllowed);
 

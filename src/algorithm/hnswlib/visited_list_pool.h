@@ -79,19 +79,19 @@ public:
         : allocator_(allocator) {
         numelements = numelements1;
         for (int i = 0; i < initmaxpools; i++)
-            pool.push_front(new VisitedList(numelements, allocator_));
+            pool.push_front(std::make_shared<VisitedList>(numelements, allocator_));
     }
 
-    VisitedList*
+    std::shared_ptr<VisitedList>
     getFreeVisitedList() {
-        VisitedList* rez;
+        std::shared_ptr<VisitedList> rez;
         {
             std::unique_lock<std::mutex> lock(poolguard);
             if (not pool.empty()) {
                 rez = pool.front();
                 pool.pop_front();
             } else {
-                rez = new VisitedList(numelements, allocator_);
+                rez = std::make_shared<VisitedList>(numelements, allocator_);
             }
         }
         rez->reset();
@@ -99,21 +99,13 @@ public:
     }
 
     void
-    releaseVisitedList(VisitedList* vl) {
+    releaseVisitedList(std::shared_ptr<VisitedList> vl) {
         std::unique_lock<std::mutex> lock(poolguard);
         pool.push_front(vl);
     }
 
-    ~VisitedListPool() {
-        while (not pool.empty()) {
-            VisitedList* rez = pool.front();
-            pool.pop_front();
-            delete rez;
-        }
-    }
-
 private:
-    std::deque<VisitedList*> pool;
+    std::deque<std::shared_ptr<VisitedList>> pool;
     std::mutex poolguard;
     uint64_t numelements;
     vsag::Allocator* allocator_;

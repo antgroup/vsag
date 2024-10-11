@@ -70,6 +70,10 @@ TEST_CASE("HNSW range search", "[ft][hnsw]") {
     std::random_device rd;
     std::mt19937 rng(rd());
     std::uniform_real_distribution<> distrib_real;
+    std::uniform_int_distribution<int> seed_random;
+    int seed = seed_random(rng);
+    std::cout << "seed: " << seed << std::endl;
+    rng.seed(seed);
     int64_t* ids = new int64_t[max_elements];
     float* data = new float[dim * max_elements];
     for (int64_t i = 0; i < max_elements; i++) {
