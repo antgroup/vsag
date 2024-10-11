@@ -19,12 +19,38 @@
 #include <functional>
 #include <istream>
 
+#include "utils.h"
+
 class StreamReader {
 public:
     StreamReader() = default;
 
     virtual void
     Read(char* data, uint64_t size) = 0;
+
+    template <typename T>
+    static void
+    ReadObj(StreamReader& reader, T& val) {
+        reader.Read(reinterpret_cast<char*>(&val), sizeof(val));
+    }
+
+    template <typename T>
+    static void
+    ReadVector(StreamReader& reader, std::vector<T>& val) {
+        uint64_t size;
+        ReadObj(reader, size);
+        val.resize(size);
+        reader.Read(reinterpret_cast<char*>(val.data()), size * sizeof(T));
+    }
+
+    template <typename T>
+    static void
+    ReadVector(StreamReader& reader, vsag::Vector<T>& val) {
+        uint64_t size;
+        ReadObj(reader, size);
+        val.resize(size);
+        reader.Read(reinterpret_cast<char*>(val.data()), size * sizeof(T));
+    }
 };
 
 class ReadFuncStreamReader : public StreamReader {

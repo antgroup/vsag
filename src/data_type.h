@@ -16,6 +16,6 @@
 #pragma once
 
 namespace vsag {
-enum class MetricType { METRIC_TYPE_L2SQR = 0, METRIC_TYPE_IP = 1, METRIC_TYPE_COSINE = 2 };
+enum class DataTypes { DATA_TYPE_FLOAT = 0, DATA_TYPE_INT8 = 1, DATA_TYPE_FP16 = 2 };
 
 }  // namespace vsag

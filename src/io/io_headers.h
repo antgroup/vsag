@@ -15,7 +15,6 @@
 
 #pragma once
 
-namespace vsag {
-enum class MetricType { METRIC_TYPE_L2SQR = 0, METRIC_TYPE_IP = 1, METRIC_TYPE_COSINE = 2 };
-
-}  // namespace vsag
+#include "basic_io.h"
+#include "memory_block_io.h"
+#include "memory_io.h"

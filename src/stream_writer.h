@@ -19,12 +19,36 @@
 #include <functional>
 #include <ostream>
 
+#include "utils.h"
+
 class StreamWriter {
 public:
     StreamWriter() = default;
 
     virtual void
     Write(char* data, uint64_t size) = 0;
+
+    template <typename T>
+    static void
+    WriteObj(StreamWriter& writer, T& val) {
+        writer.Write(reinterpret_cast<char*>(&val), sizeof(val));
+    }
+
+    template <typename T>
+    static void
+    WriteVector(StreamWriter& writer, std::vector<T>& val) {
+        uint64_t size = val.size();
+        WriteObj(writer, size);
+        writer.Write(reinterpret_cast<char*>(val.data()), size * sizeof(T));
+    }
+
+    template <typename T>
+    static void
+    WriteVector(StreamWriter& writer, vsag::Vector<T>& val) {
+        uint64_t size = val.size();
+        WriteObj(writer, size);
+        writer.Write(reinterpret_cast<char*>(val.data()), size * sizeof(T));
+    }
 };
 
 class BufferStreamWriter : public StreamWriter {
