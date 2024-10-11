@@ -50,7 +50,7 @@ struct CompareByFirst {
     }
 };
 using MaxHeap = std::priority_queue<std::pair<float, tableint>,
-                                    std::vector<std::pair<float, tableint>>,
+                                    vsag::Vector<std::pair<float, tableint>>,
                                     CompareByFirst>;
 const static float THRESHOLD_ERROR = 1e-6;
 
@@ -390,6 +390,9 @@ public:
 
     void
     checkIntegrity();
+
+    void
+    reset();
 
     bool
     init_memory_space() override;
