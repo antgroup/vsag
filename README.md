@@ -1,17 +1,4 @@
 # VSAG
-- [VSAG](#vsag)
-  - [What is VSAG](#what-is-vsag)
-  - [Getting Started](#getting-started)
-    - [Integrate with CMake](#integrate-with-cmake)
-    - [Try the Example](#try-the-example)
-  - [Developer Guide](#developer-guide)
-    - [Dependencies](#dependencies)
-    - [VSAG Build Tool](#vsag-build-tool)
-    - [Project Structure](#project-structure)
-  - [Roadmap](#roadmap)
-  - [Contribution Guidelines](#contribution-guidelines)
-  - [License](#license)
-
 
 ## What is VSAG
 ```
@@ -47,7 +34,7 @@ include (FetchContent)
 FetchContent_Declare (
   vsag
   GIT_REPOSITORY https://github.com/alipay/vsag
-  GIT_TAG master
+  GIT_TAG main
 )
 FetchContent_MakeAvailable (vsag)
 include_directories (vsag-cmake-example PRIVATE ${vsag_SOURCE_DIR}/include)
@@ -199,3 +186,4 @@ Contributions are welcomed and greatly appreciated. Please read our [contributio
 
 ## License
 [Apache License 2.0](./LICENSE)
+
