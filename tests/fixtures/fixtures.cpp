@@ -44,6 +44,22 @@ normalize(float* input_vector, int64_t dim) {
     }
 }
 
+std::vector<int>
+get_common_used_dims() {
+    std::vector<int> dims = {1,    8,   9,    // generic (dim < 32)
+                             32,   33,  48,   // sse(32) + generic(dim < 16)
+                             64,   65,  70,   // avx(64) + generic(dim < 16)
+                             96,   97,  109,  // avx(64) + sse(32) + generic(dim < 16)
+                             128,  129,       // avx512(128) + generic(dim < 16)
+                             160,  161,       // avx512(128) + sse(32) + generic(dim < 16)
+                             192,  193,       // avx512(128) + avx(64) + generic(dim < 16)
+                             224,  225,       // avx512(128) + avx(64) + sse(32) + generic(dim < 16)
+                             256,  512,       // common used dims
+                             784,  960,       // common used dims
+                             1024, 1536};     // common used dims
+    return dims;
+}
+
 std::vector<float>
 generate_vectors(int64_t num_vectors, int64_t dim, bool need_normalize, int seed) {
     std::mt19937 rng(seed);
@@ -59,6 +75,35 @@ generate_vectors(int64_t num_vectors, int64_t dim, bool need_normalize, int seed
     }
 
     return vectors;
+}
+
+std::vector<uint8_t>
+generate_int4_codes(uint64_t count, uint32_t dim, int seed) {
+    auto code_size = (dim + 1) / 2;
+    std::vector<uint8_t> codes(count * code_size, 0);
+    auto vec = fixtures::generate_vectors(count, dim, true, seed);
+
+    for (int i = 0; i < count; i++) {
+        auto pos = code_size * i;
+
+        for (int d = 0; d < dim; d++) {
+            float delta = vec[d + i * dim];
+            if (delta < 0) {
+                delta = 0;
+            } else if (delta > 0.999) {
+                delta = 1;
+            }
+            uint8_t scaled = 15.0 * delta;
+
+            if (d & 1) {
+                codes[pos + (d >> 1)] |= scaled << 4;
+            } else {
+                codes[pos + (d >> 1)] = 0;
+                codes[pos + (d >> 1)] |= scaled;
+            }
+        }
+    }
+    return codes;
 }
 
 std::tuple<std::vector<int64_t>, std::vector<float>>
