@@ -18,6 +18,7 @@
 #include <cstdint>
 #include <memory>
 
+#include "../logger.h"
 #include "computer.h"
 #include "metric_type.h"
 namespace vsag {

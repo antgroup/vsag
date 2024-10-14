@@ -13,6 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <cmath>
 #include <iostream>
 
 #include "fp32_simd.h"
@@ -141,6 +142,130 @@ SQ8ComputeCodesL2Sqr(const uint8_t* codes1,
             static_cast<float>(static_cast<float>(codes2[i]) / 255.0 * diff[i] + lowerBound[i]);
         result += (val1 - val2) * (val1 - val2);
     }
+    return result;
+}
+
+float
+SQ4ComputeIP(const float* query,
+             const uint8_t* codes,
+             const float* lower_bound,
+             const float* diff,
+             uint64_t dim) {
+    float result = 0;
+    float x_lo = 0, x_hi = 0, y_lo = 0, y_hi = 0;
+
+    for (uint64_t d = 0; d < dim; d += 2) {
+        x_lo = query[d];
+        y_lo = (codes[d >> 1] & 0x0f) * 15.0 / diff[d] + lower_bound[d];
+        if (d + 1 < dim) {
+            x_hi = query[d + 1];
+            y_hi = ((codes[d >> 1] & 0xf0) >> 4) * 15.0 / diff[d + 1] + lower_bound[d + 1];
+        } else {
+            x_hi = 0;
+            y_hi = 0;
+        }
+
+        result += (x_lo * y_lo + x_hi * y_hi);
+    }
+
+    return result;
+}
+
+float
+SQ4ComputeL2Sqr(const float* query,
+                const uint8_t* codes,
+                const float* lower_bound,
+                const float* diff,
+                uint64_t dim) {
+    float result = 0;
+    float x_lo = 0, x_hi = 0, y_lo = 0, y_hi = 0;
+
+    for (uint64_t d = 0; d < dim; d += 2) {
+        x_lo = query[d];
+        y_lo = (codes[d >> 1] & 0x0f) * 15.0 / diff[d] + lower_bound[d];
+        if (d + 1 < dim) {
+            x_hi = query[d + 1];
+            y_hi = ((codes[d >> 1] & 0xf0) >> 4) * 15.0 / diff[d + 1] + lower_bound[d + 1];
+        } else {
+            x_hi = 0;
+            y_hi = 0;
+        }
+
+        result += (x_lo - y_lo) * (x_lo - y_lo) + (x_hi - y_hi) * (x_hi - y_hi);
+    }
+
+    return result;
+}
+
+float
+SQ4ComputeCodesIP(const uint8_t* codes1,
+                  const uint8_t* codes2,
+                  const float* lower_bound,
+                  const float* diff,
+                  uint64_t dim) {
+    float result = 0, delta = 0;
+    float x_lo = 0, x_hi = 0, y_lo = 0, y_hi = 0;
+
+    for (uint64_t d = 0; d < dim; d += 2) {
+        delta = 15.0 / diff[d] + lower_bound[d];
+        x_lo = (codes1[d >> 1] & 0x0f) * delta;
+        y_lo = (codes2[d >> 1] & 0x0f) * delta;
+        if (d + 1 < dim) {
+            delta = 15.0 / diff[d + 1] + lower_bound[d + 1];
+            x_hi = ((codes1[d >> 1] & 0xf0) >> 4) * delta;
+            y_hi = ((codes2[d >> 1] & 0xf0) >> 4) * delta;
+        } else {
+            x_hi = 0;
+            y_hi = 0;
+        }
+
+        result += (x_lo * y_lo + x_hi * y_hi);
+    }
+
+    return result;
+}
+
+float
+SQ4ComputeCodesL2Sqr(const uint8_t* codes1,
+                     const uint8_t* codes2,
+                     const float* lower_bound,
+                     const float* diff,
+                     uint64_t dim) {
+    float result = 0, delta = 0;
+    float x_lo = 0, x_hi = 0, y_lo = 0, y_hi = 0;
+
+    for (uint64_t d = 0; d < dim; d += 2) {
+        delta = 15.0 / diff[d] + lower_bound[d];
+        x_lo = (codes1[d >> 1] & 0x0f) * delta;
+        y_lo = (codes2[d >> 1] & 0x0f) * delta;
+        if (d + 1 < dim) {
+            delta = 15.0 / diff[d + 1] + lower_bound[d + 1];
+            x_hi = ((codes1[d >> 1] & 0xf0) >> 4) * delta;
+            y_hi = ((codes2[d >> 1] & 0xf0) >> 4) * delta;
+        } else {
+            x_hi = 0;
+            y_hi = 0;
+        }
+
+        result += (x_lo - y_lo) * (x_lo - y_lo) + (x_hi - y_hi) * (x_hi - y_hi);
+    }
+
+    return result;
+}
+
+float
+SQ4UniformComputeCodesIP(const uint8_t* codes1, const uint8_t* codes2, uint64_t dim) {
+    int32_t result = 0;
+
+    for (uint64_t d = 0; d < dim; d += 2) {
+        float x_lo = codes1[d >> 1] & 0x0f;
+        float x_hi = (codes1[d >> 1] & 0xf0) >> 4;
+        float y_lo = codes2[d >> 1] & 0x0f;
+        float y_hi = (codes2[d >> 1] & 0xf0) >> 4;
+
+        result += (x_lo * y_lo + x_hi * y_hi);
+    }
+
     return result;
 }
 

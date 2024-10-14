@@ -1,7 +1,6 @@
 
 add_subdirectory (simd)
 
-
 file (GLOB CPP_SRCS "*.cpp")
 file (GLOB CPP_FACTORY_SRCS "factory/*.cpp")
 file (GLOB CPP_CONJUGATE_GRAPH_SRCS "impl/*.cpp")
