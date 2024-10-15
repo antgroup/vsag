@@ -35,13 +35,13 @@ public:
     }
 
     inline bool
-    Read(uint8_t* data, uint64_t size, uint64_t offset) const {
-        return cast().ReadImpl(data, size, offset);
+    Read(uint64_t size, uint64_t offset, uint8_t* data) const {
+        return cast().ReadImpl(size, offset, data);
     }
 
     [[nodiscard]] inline const uint8_t*
-    Read(uint64_t size, uint64_t offset) const {
-        return cast().ReadImpl(size, offset);
+    Read(uint64_t size, uint64_t offset, bool& need_release) const {
+        return cast().ReadImpl(size, offset, need_release);  // TODO(LHT129): use IOReadObject
     }
 
     inline bool
@@ -62,6 +62,11 @@ public:
     inline void
     Deserialize(StreamReader& reader) {
         return cast().DeserializeImpl(reader);
+    }
+
+    inline void
+    Release(const uint8_t* data) const {
+        return cast().ReleaseImpl(data);
     }
 
 private:

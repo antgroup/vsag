@@ -48,8 +48,13 @@ public:
     };
 
     [[nodiscard]] virtual const uint8_t*
-    GetCodesById(uint64_t id) const {
+    GetCodesById(uint64_t id, bool& need_release) const {
         return nullptr;
+    }
+
+    virtual bool
+    GetCodesById(uint64_t id, uint8_t* codes) const {
+        return false;
     }
 
     [[nodiscard]] virtual uint64_t
