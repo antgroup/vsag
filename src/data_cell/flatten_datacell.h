@@ -67,7 +67,10 @@ public:
     }
 
     [[nodiscard]] const uint8_t*
-    GetCodesById(uint64_t id) const override;
+    GetCodesById(uint64_t id, bool& need_release) const override;
+
+    bool
+    GetCodesById(uint64_t id, uint8_t* codes) const override;
 
     inline void
     SetQuantizer(std::shared_ptr<Quantizer<QuantTmpl>> quantizer) {
@@ -165,23 +168,41 @@ FlattenDataCell<QuantTmpl, IOTmpl>::query(float* result_dists,
                                           const uint64_t* idx,
                                           uint64_t id_count) {
     for (uint64_t i = 0; i < id_count; ++i) {
-        const auto* codes = this->GetCodesById(idx[i]);
+        bool release = false;
+        const auto* codes = this->GetCodesById(idx[i], release);
         computer->ComputeDist(codes, result_dists + i);
+        if (release) {
+            this->io_->Release(codes);
+        }
     }
 }
 
 template <typename QuantTmpl, typename IOTmpl>
 float
 FlattenDataCell<QuantTmpl, IOTmpl>::ComputePairVectors(uint64_t id1, uint64_t id2) {
-    const auto* codes1 = this->GetCodesById(id1);
-    const auto* codes2 = this->GetCodesById(id1);
-    return this->quantizer_->Compute(codes1, codes2);
+    bool release1, release2;
+    const auto* codes1 = this->GetCodesById(id1, release1);
+    const auto* codes2 = this->GetCodesById(id1, release2);
+    auto result = this->quantizer_->Compute(codes1, codes2);
+    if (release1) {
+        io_->Release(codes1);
+    }
+    if (release2) {
+        io_->Release(codes2);
+    }
+
+    return result;
 }
 
 template <typename QuantTmpl, typename IOTmpl>
 const uint8_t*
-FlattenDataCell<QuantTmpl, IOTmpl>::GetCodesById(uint64_t id) const {
-    return io_->Read(code_size_, id * code_size_);
+FlattenDataCell<QuantTmpl, IOTmpl>::GetCodesById(uint64_t id, bool& need_release) const {
+    return io_->Read(code_size_, id * code_size_, need_release);
 }
 
+template <typename QuantTmpl, typename IOTmpl>
+bool
+FlattenDataCell<QuantTmpl, IOTmpl>::GetCodesById(uint64_t id, uint8_t* codes) const {
+    return io_->Read(code_size_, id * code_size_, codes);
+}
 }  // namespace vsag

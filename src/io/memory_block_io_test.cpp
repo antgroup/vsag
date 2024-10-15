@@ -22,15 +22,21 @@
 #include "default_allocator.h"
 using namespace vsag;
 
+auto block_memory_io_block_sizes = {64, 1023, 4096, 123123, 1024 * 1024 * 1024};
+
 TEST_CASE("read&write [ut][memory_block_io]") {
     auto allocator = std::make_unique<DefaultAllocator>();
-    auto io = std::make_unique<MemoryBlockIO>(allocator.get());
-    TestBasicReadWrite(*io);
+    for (auto block_size : block_memory_io_block_sizes) {
+        auto io = std::make_unique<MemoryBlockIO>(allocator.get(), block_size);
+        TestBasicReadWrite(*io);
+    }
 }
 
 TEST_CASE("serialize&deserialize [ut][memory_block_io]") {
     auto allocator = std::make_unique<DefaultAllocator>();
-    auto wio = std::make_unique<MemoryBlockIO>(allocator.get());
-    auto rio = std::make_unique<MemoryBlockIO>(allocator.get());
-    TestSerializeAndDeserialize(*wio, *rio);
+    for (auto block_size : block_memory_io_block_sizes) {
+        auto wio = std::make_unique<MemoryBlockIO>(allocator.get(), block_size);
+        auto rio = std::make_unique<MemoryBlockIO>(allocator.get(), block_size);
+        TestSerializeAndDeserialize(*wio, *rio);
+    }
 }
