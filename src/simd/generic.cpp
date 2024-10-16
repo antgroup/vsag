@@ -156,10 +156,10 @@ SQ4ComputeIP(const float* query,
 
     for (uint64_t d = 0; d < dim; d += 2) {
         x_lo = query[d];
-        y_lo = (codes[d >> 1] & 0x0f) * 15.0 / diff[d] + lower_bound[d];
+        y_lo = (codes[d >> 1] & 0x0f) / 15.0 * diff[d] + lower_bound[d];
         if (d + 1 < dim) {
             x_hi = query[d + 1];
-            y_hi = ((codes[d >> 1] & 0xf0) >> 4) * 15.0 / diff[d + 1] + lower_bound[d + 1];
+            y_hi = (codes[d >> 1] >> 4) / 15.0 * diff[d + 1] + lower_bound[d + 1];
         } else {
             x_hi = 0;
             y_hi = 0;
@@ -182,10 +182,10 @@ SQ4ComputeL2Sqr(const float* query,
 
     for (uint64_t d = 0; d < dim; d += 2) {
         x_lo = query[d];
-        y_lo = (codes[d >> 1] & 0x0f) * 15.0 / diff[d] + lower_bound[d];
+        y_lo = (codes[d >> 1] & 0x0f) / 15.0 * diff[d] + lower_bound[d];
         if (d + 1 < dim) {
             x_hi = query[d + 1];
-            y_hi = ((codes[d >> 1] & 0xf0) >> 4) * 15.0 / diff[d + 1] + lower_bound[d + 1];
+            y_hi = ((codes[d >> 1] & 0xf0) >> 4) / 15.0 * diff[d + 1] + lower_bound[d + 1];
         } else {
             x_hi = 0;
             y_hi = 0;
@@ -207,13 +207,11 @@ SQ4ComputeCodesIP(const uint8_t* codes1,
     float x_lo = 0, x_hi = 0, y_lo = 0, y_hi = 0;
 
     for (uint64_t d = 0; d < dim; d += 2) {
-        delta = 15.0 / diff[d] + lower_bound[d];
-        x_lo = (codes1[d >> 1] & 0x0f) * delta;
-        y_lo = (codes2[d >> 1] & 0x0f) * delta;
+        x_lo = (codes1[d >> 1] & 0x0f) / 15.0 * diff[d] + lower_bound[d];
+        y_lo = (codes2[d >> 1] & 0x0f) / 15.0 * diff[d] + lower_bound[d];
         if (d + 1 < dim) {
-            delta = 15.0 / diff[d + 1] + lower_bound[d + 1];
-            x_hi = ((codes1[d >> 1] & 0xf0) >> 4) * delta;
-            y_hi = ((codes2[d >> 1] & 0xf0) >> 4) * delta;
+            x_hi = ((codes1[d >> 1] & 0xf0) >> 4) / 15.0 * diff[d] + lower_bound[d];
+            y_hi = ((codes2[d >> 1] & 0xf0) >> 4) / 15.0 * diff[d] + lower_bound[d];
         } else {
             x_hi = 0;
             y_hi = 0;
@@ -235,13 +233,11 @@ SQ4ComputeCodesL2Sqr(const uint8_t* codes1,
     float x_lo = 0, x_hi = 0, y_lo = 0, y_hi = 0;
 
     for (uint64_t d = 0; d < dim; d += 2) {
-        delta = 15.0 / diff[d] + lower_bound[d];
-        x_lo = (codes1[d >> 1] & 0x0f) * delta;
-        y_lo = (codes2[d >> 1] & 0x0f) * delta;
+        x_lo = (codes1[d >> 1] & 0x0f) / 15.0 * diff[d] + lower_bound[d];
+        y_lo = (codes2[d >> 1] & 0x0f) / 15.0 * diff[d] + lower_bound[d];
         if (d + 1 < dim) {
-            delta = 15.0 / diff[d + 1] + lower_bound[d + 1];
-            x_hi = ((codes1[d >> 1] & 0xf0) >> 4) * delta;
-            y_hi = ((codes2[d >> 1] & 0xf0) >> 4) * delta;
+            x_hi = ((codes1[d >> 1] & 0xf0) >> 4) / 15.0 * diff[d] + lower_bound[d];
+            y_hi = ((codes2[d >> 1] & 0xf0) >> 4) / 15.0 * diff[d] + lower_bound[d];
         } else {
             x_hi = 0;
             y_hi = 0;
