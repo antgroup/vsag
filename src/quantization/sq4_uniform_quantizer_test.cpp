@@ -23,75 +23,50 @@
 
 using namespace vsag;
 
+const auto dims = {64, 128};
+const auto counts = {10, 101};
+
+template <MetricType Metric>
+void
+TestQuantizerEncodeDecodeMetricSQ4Uniform(uint64_t dim,
+                                          int count,
+                                          float error = 1e-5,
+                                          float error_same = 1e-2) {
+    SQ4UniformQuantizer<Metric> quantizer(dim);
+    TestQuantizerEncodeDecode(quantizer, dim, count, error);
+    TestQuantizerEncodeDecodeSame(quantizer, dim, count, 15, error_same);
+}
+
 TEST_CASE("SQ4 Uniform Encode and Decode", "[ut][SQ4UniformQuantizer]") {
-    auto dims = fixtures::get_common_used_dims();
-    uint32_t size = 1000;
+    constexpr MetricType metrics[3] = {
+        MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_COSINE, MetricType::METRIC_TYPE_IP};
     float error = 2 * 1.0f / 15.0f;
-    constexpr MetricType metrics[3] = {
-        MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_COSINE, MetricType::METRIC_TYPE_IP};
-
     for (auto dim : dims) {
-        {
-            SQ4UniformQuantizer<metrics[0]> quantizer{dim};
-            TestQuantizerEncodeDecode<>(quantizer, dim, size, error);
-            TestQuantizerEncodeDecodeSame<>(quantizer, dim, size, 15);
-        }
-        {
-            SQ4UniformQuantizer<metrics[1]> quantizer{dim};
-            TestQuantizerEncodeDecode<>(quantizer, dim, size, error);
-            TestQuantizerEncodeDecodeSame<>(quantizer, dim, size, 15);
-        }
-        {
-            SQ4UniformQuantizer<metrics[2]> quantizer{dim};
-            TestQuantizerEncodeDecode<>(quantizer, dim, size, error);
-            TestQuantizerEncodeDecodeSame<>(quantizer, dim, size, 15);
+        for (auto count : counts) {
+            auto error_same = (float)(dim * 255 * 0.01);
+            TestQuantizerEncodeDecodeMetricSQ4Uniform<metrics[0]>(dim, count, error, error_same);
+            TestQuantizerEncodeDecodeMetricSQ4Uniform<metrics[1]>(dim, count, error, error_same);
+            TestQuantizerEncodeDecodeMetricSQ4Uniform<metrics[2]>(dim, count, error, error_same);
         }
     }
 }
 
-TEST_CASE("SQ4 Uniform Compute Code with Code", "[ut][SQ4UniformQuantizer]") {
-    auto dims = fixtures::get_common_used_dims();
-    uint32_t size = 1000;
-    constexpr MetricType metrics[3] = {
-        MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_COSINE, MetricType::METRIC_TYPE_IP};
-
-    for (auto dim : dims) {
-        {
-            SQ4UniformQuantizer<metrics[0]> quantizer{dim};
-            TestComputeCodesSame<>(quantizer, dim, size, metrics[0]);
-        }
-
-        {
-            SQ4UniformQuantizer<metrics[1]> quantizer{dim};
-            TestComputeCodesSame<>(quantizer, dim, size, metrics[1]);
-        }
-
-        {
-            SQ4UniformQuantizer<metrics[2]> quantizer{dim};
-            TestComputeCodesSame<>(quantizer, dim, size, metrics[2]);
-        }
-    }
+template <MetricType Metric>
+void
+TestComputeMetricSQ4Uniform(uint64_t dim, int count, float error = 1e-5) {
+    SQ4UniformQuantizer<Metric> quantizer(dim);
+    TestComputeCodesSame<SQ4UniformQuantizer<Metric>, Metric>(quantizer, dim, count, error);
 }
 
-TEST_CASE("SQ4 Uniform Compute Computer with Code", "[ut][SQ4UniformQuantizer]") {
-    auto dims = fixtures::get_common_used_dims();
-    uint32_t size = 1000;
+TEST_CASE("compute [ut][SQ4UniformQuantizer]") {
     constexpr MetricType metrics[3] = {
         MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_COSINE, MetricType::METRIC_TYPE_IP};
+    float error = 4 * 1.0f / 15.0f;
     for (auto dim : dims) {
-        {
-            SQ4UniformQuantizer<metrics[0]> quantizer{dim};
-            TestComputerSame<>(quantizer, dim, size, metrics[0]);
-        }
-
-        {
-            SQ4UniformQuantizer<metrics[1]> quantizer{dim};
-            TestComputerSame<>(quantizer, dim, size, metrics[1]);
-        }
-
-        {
-            SQ4UniformQuantizer<metrics[2]> quantizer{dim};
-            TestComputerSame<>(quantizer, dim, size, metrics[2]);
+        for (auto count : counts) {
+            TestComputeMetricSQ4Uniform<metrics[0]>(dim, count, error);
+            TestComputeMetricSQ4Uniform<metrics[1]>(dim, count, error);
+            TestComputeMetricSQ4Uniform<metrics[2]>(dim, count, error);
         }
     }
 }

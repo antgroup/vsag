@@ -19,156 +19,74 @@
 #include <memory>
 
 #include "fixtures.h"
-#include "simd/simd.h"
+#include "quantizer_test.h"
+
 using namespace vsag;
 
-template <typename T>
+const auto dims = {64, 128};
+const auto counts = {10, 101};
+
+template <MetricType Metric>
 void
-TestQuantizerEncodeDecode(Quantizer<T>& quant, int64_t dim, int count) {
-    auto vecs = fixtures::generate_vectors(count, dim);
-    quant.Train(vecs.data(), count);
-
-    // Test EncodeOne
-    auto idx = int(count / 3);
-    auto* codes = new uint8_t[quant.GetCodeSize()];
-    quant.EncodeOne(vecs.data() + idx * dim, codes);
-    auto values = (float*)(codes);
-    for (int i = 0; i < dim; ++i) {
-        REQUIRE(std::abs(vecs[idx * dim + i] - values[i]) < 1e-5);
-    }
-
-    // Test DecodeOne
-    auto* out_vec = new float[dim];
-    quant.DecodeOne(codes, out_vec);
-    for (int i = 0; i < dim; ++i) {
-        REQUIRE(std::abs(vecs[idx * dim + i] - out_vec[i]) < 1e-5);
-    }
-
-    // Test EncodeBatch
-    delete[] codes;
-    delete[] out_vec;
-    codes = new uint8_t[quant.GetCodeSize() * count];
-    quant.EncodeBatch(vecs.data(), codes, count);
-    values = (float*)(codes);
-    for (int64_t i = 0; i < dim * count; ++i) {
-        REQUIRE(std::abs(vecs[i] - values[i]) < 1e-5);
-    }
-
-    // Test DecodeBatch
-    out_vec = new float[dim * count];
-    quant.DecodeBatch(codes, out_vec, count);
-    for (int i = 0; i < dim; ++i) {
-        REQUIRE(fixtures::dist_t(vecs[i]) == fixtures::dist_t(out_vec[i]));
-    }
-
-    delete[] out_vec;
-    delete[] codes;
+TestQuantizerEncodeDecodeMetricFP32(uint64_t dim, int count, float error = 1e-5) {
+    FP32Quantizer<Metric> quantizer(dim);
+    TestQuantizerEncodeDecode(quantizer, dim, count, error);
+    TestQuantizerEncodeDecodeSame(quantizer, dim, count, 65536, error);
 }
 
-template <typename T>
-void
-TestComputeCodes(Quantizer<T>& quant, int64_t dim, int count, const MetricType& metric) {
-    auto vecs = fixtures::generate_vectors(count, dim);
-    quant.Train(vecs.data(), count);
-    for (int i = 0; i < 100; ++i) {
-        auto idx1 = random() % count;
-        auto idx2 = random() % count;
-        auto* codes1 = new uint8_t[quant.GetCodeSize()];
-        auto* codes2 = new uint8_t[quant.GetCodeSize()];
-        quant.EncodeOne(vecs.data() + idx1 * dim, codes1);
-        quant.EncodeOne(vecs.data() + idx2 * dim, codes2);
-        float gt = 0.0f;
-        float value = quant.Compute(codes2, codes1);
-        if (metric == vsag::MetricType::METRIC_TYPE_IP ||
-            metric == vsag::MetricType::METRIC_TYPE_COSINE) {
-            gt = InnerProduct(vecs.data() + idx1 * dim, vecs.data() + idx2 * dim, &dim);
-        } else if (metric == vsag::MetricType::METRIC_TYPE_L2SQR) {
-            gt = L2Sqr(vecs.data() + idx1 * dim, vecs.data() + idx2 * dim, &dim);
+TEST_CASE("encode&decode [ut][fp32_quantizer]") {
+    constexpr MetricType metrics[3] = {
+        MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_COSINE, MetricType::METRIC_TYPE_IP};
+    float error = 1e-5f;
+    for (auto dim : dims) {
+        for (auto count : counts) {
+            TestQuantizerEncodeDecodeMetricFP32<metrics[0]>(dim, count, error);
+            TestQuantizerEncodeDecodeMetricFP32<metrics[1]>(dim, count, error);
+            TestQuantizerEncodeDecodeMetricFP32<metrics[2]>(dim, count, error);
         }
-        REQUIRE(fixtures::dist_t(gt) == fixtures::dist_t(value));
-        delete[] codes1;
-        delete[] codes2;
     }
 }
 
-template <typename T>
+template <MetricType Metric>
 void
-TestComputer(Quantizer<T>& quant, int64_t dim, int count, const MetricType& metric) {
-    auto vecs = fixtures::generate_vectors(count, dim);
-    auto querys = fixtures::generate_vectors(100, dim);
-    auto* codes = new uint8_t[quant.GetCodeSize() * dim];
-    quant.Train(vecs.data(), count);
-    for (int i = 0; i < 100; ++i) {
-        auto computer = quant.FactoryComputer();
-        computer->SetQuery(querys.data() + i * dim);
-        auto idx1 = random() % count;
-        auto* codes1 = new uint8_t[quant.GetCodeSize()];
-        quant.EncodeOne(vecs.data() + idx1 * dim, codes1);
-        float gt = 0.0f;
-        float value = 0.0f;
-        computer->ComputeDist(codes1, &value);
-        if (metric == vsag::MetricType::METRIC_TYPE_IP ||
-            metric == vsag::MetricType::METRIC_TYPE_COSINE) {
-            gt = InnerProduct(vecs.data() + idx1 * dim, querys.data() + i * dim, &dim);
-        } else if (metric == vsag::MetricType::METRIC_TYPE_L2SQR) {
-            gt = L2Sqr(vecs.data() + idx1 * dim, querys.data() + i * dim, &dim);
+TestComputeMetricFP32(uint64_t dim, int count, float error = 1e-5) {
+    FP32Quantizer<Metric> quantizer(dim);
+    TestComputeCodes<FP32Quantizer<Metric>, Metric>(quantizer, dim, count, error);
+    TestComputeCodesSame<FP32Quantizer<Metric>, Metric>(quantizer, dim, count, 65536);
+    TestComputer<FP32Quantizer<Metric>, Metric>(quantizer, dim, count, error);
+}
+
+TEST_CASE("compute [ut][fp32_quantizer]") {
+    constexpr MetricType metrics[3] = {
+        MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_COSINE, MetricType::METRIC_TYPE_IP};
+    float error = 1e-5f;
+    for (auto dim : dims) {
+        for (auto count : counts) {
+            TestComputeMetricFP32<metrics[0]>(dim, count, error);
+            TestComputeMetricFP32<metrics[1]>(dim, count, error);
+            TestComputeMetricFP32<metrics[2]>(dim, count, error);
         }
-        REQUIRE(fixtures::dist_t(gt) == fixtures::dist_t(value));
-        delete[] codes1;
-    }
-    delete[] codes;
-}
-
-TEST_CASE("encode&decode", "[ut][fp32_quantizer]") {
-    constexpr MetricType metrics[3] = {
-        MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_COSINE, MetricType::METRIC_TYPE_IP};
-    auto dim = 32;
-    {
-        FP32Quantizer<metrics[0]> quantizer{dim};
-        TestQuantizerEncodeDecode<>(quantizer, dim, 100);
-    }
-    {
-        FP32Quantizer<metrics[1]> quantizer{dim};
-        TestQuantizerEncodeDecode<>(quantizer, dim, 100);
-    }
-    {
-        FP32Quantizer<metrics[2]> quantizer{dim};
-        TestQuantizerEncodeDecode<>(quantizer, dim, 100);
     }
 }
 
-TEST_CASE("compute_codes[ut][fp32_quantizer]") {
-    constexpr MetricType metrics[3] = {
-        MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_COSINE, MetricType::METRIC_TYPE_IP};
-    auto dim = 32;
-    {
-        FP32Quantizer<metrics[0]> quantizer{dim};
-        TestComputeCodes<>(quantizer, dim, 100, metrics[0]);
-    }
-    {
-        FP32Quantizer<metrics[1]> quantizer{dim};
-        TestComputeCodes<>(quantizer, dim, 100, metrics[1]);
-    }
-    {
-        FP32Quantizer<metrics[2]> quantizer{dim};
-        TestComputeCodes<>(quantizer, dim, 100, metrics[2]);
-    }
+template <MetricType Metric>
+void
+TestSerializeAndDeserializeMetricFP32(uint64_t dim, int count, float error = 1e-5) {
+    FP32Quantizer<Metric> quantizer1(dim);
+    FP32Quantizer<Metric> quantizer2(0);
+    TestSerializeAndDeserialize<FP32Quantizer<Metric>, Metric>(
+        quantizer1, quantizer2, dim, count, error);
 }
 
-TEST_CASE("computer[ut][fp32_quantizer]") {
+TEST_CASE("serialize&deserialize [ut][fp32_quantizer]") {
     constexpr MetricType metrics[3] = {
         MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_COSINE, MetricType::METRIC_TYPE_IP};
-    auto dim = 32;
-    {
-        FP32Quantizer<metrics[0]> quantizer{dim};
-        TestComputer<>(quantizer, dim, 100, metrics[0]);
-    }
-    {
-        FP32Quantizer<metrics[1]> quantizer{dim};
-        TestComputer<>(quantizer, dim, 100, metrics[1]);
-    }
-    {
-        FP32Quantizer<metrics[2]> quantizer{dim};
-        TestComputer<>(quantizer, dim, 100, metrics[2]);
+    float error = 1e-5f;
+    for (auto dim : dims) {
+        for (auto count : counts) {
+            TestSerializeAndDeserializeMetricFP32<metrics[0]>(dim, count, error);
+            TestSerializeAndDeserializeMetricFP32<metrics[1]>(dim, count, error);
+            TestSerializeAndDeserializeMetricFP32<metrics[2]>(dim, count, error);
+        }
     }
 }
