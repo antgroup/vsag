@@ -834,7 +834,7 @@ TEST_CASE("remove vectors from the index", "[ft][index]") {
             }
         }
         float recall_after = ((float)correct) / num_vectors;
-        REQUIRE(abs(recall_before - recall_after) < 0.001);
+        REQUIRE(std::abs(recall_before - recall_after) < 0.001);
     } else {  // index that does not supports remove
         REQUIRE_THROWS(index->Remove(-1));
     }
