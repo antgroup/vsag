@@ -19,6 +19,7 @@
 #include <fstream>
 #include <iostream>
 #include <memory>
+#include <regex>
 #include <string>
 #include <unordered_set>
 
@@ -72,6 +73,21 @@ main(int argc, char* argv[]) {
     std::cout << result.dump(4) << std::endl;
 
     return 0;
+}
+
+std::unordered_set<int64_t>
+getIntersection(const int64_t* neighbors,
+                const int64_t* ground_truth,
+                size_t recall_num,
+                size_t top_k) {
+    std::unordered_set<int64_t> neighbors_set(neighbors, neighbors + recall_num);
+    std::unordered_set<int64_t> intersection;
+    for (size_t i = 0; i < top_k; ++i) {
+        if (i < top_k && neighbors_set.count(ground_truth[i])) {
+            intersection.insert(ground_truth[i]);
+        }
+    }
+    return intersection;
 }
 
 class TestDataset;
@@ -274,6 +290,7 @@ public:
         index = nullptr;
 
         json output;
+        output["index_name"] = index_name;
         output["build_parameters"] = build_parameters;
         output["dataset"] = dataset_path;
         output["num_base"] = total_base;
@@ -287,6 +304,7 @@ public:
     static json
     Search(const std::string& dataset_path,
            const std::string& index_name,
+           const int64_t top_k,
            const std::string& build_parameters,
            const std::string& search_parameters) {
         // deserialize
@@ -341,7 +359,7 @@ public:
                 ->Float32Vectors(test_dataset->GetTest().get() + i * test_dataset->GetDim())
                 ->Owner(false);
 
-            auto result = index->KnnSearch(query, 10, search_parameters);
+            auto result = index->KnnSearch(query, top_k, search_parameters);
             if (not result.has_value()) {
                 std::cerr << "query error: " << result.error().message << std::endl;
                 exit(-1);
@@ -352,16 +370,14 @@ public:
 
         // calculate recall
         for (int64_t i = 0; i < total; ++i) {
-            for (int64_t j = 0; j < results[i]->GetDim(); ++j) {
-                // 1@10
-                if (results[i]->GetIds()[j] == test_dataset->GetNearestNeighbor(i)) {
-                    ++correct;
-                    break;
-                }
-            }
+            // k@k
+            int64_t* neighbors = test_dataset->GetNeighbors(i);
+            const int64_t* ground_truth = results[i]->GetIds();
+            auto hit_result = getIntersection(neighbors, ground_truth, top_k, top_k);
+            correct += hit_result.size();
         }
         spdlog::debug("correct: " + std::to_string(correct));
-        float recall = 1.0 * correct / total;
+        float recall = 1.0 * correct / (total * top_k);
 
         json output;
         // input
@@ -374,6 +390,7 @@ public:
         output["search_time_in_second"] = search_time_in_second;
         output["correct"] = correct;
         output["num_query"] = total;
+        output["top_k"] = top_k;
         // key results
         output["recall"] = recall;
         output["qps"] = total / search_time_in_second;
@@ -393,16 +410,36 @@ private:
     }
 };
 
+bool
+valid_and_extrcat_top_k(const std::string& input, int64_t& number) {
+    std::regex pattern(R"(^search:(\d+)$)");
+    std::smatch match;
+    if (std::regex_match(input, match, pattern)) {
+        number = std::stoi(match[1].str());
+        if (number <= 0) {
+            std::cerr << "top k must be set to a value more than 0" << std::endl;
+            exit(-1);
+        }
+        return true;
+    }
+    if (input == "search") {
+        number = 1;
+        return true;
+    }
+    return false;
+}
+
 nlohmann::json
 run_test(const std::string& dataset_path,
          const std::string& process,
          const std::string& index_name,
          const std::string& build_parameters,
          const std::string& search_parameters) {
+    int64_t top_k;
     if (process == "build") {
         return Test::Build(dataset_path, index_name, build_parameters);
-    } else if (process == "search") {
-        return Test::Search(dataset_path, index_name, build_parameters, search_parameters);
+    } else if (valid_and_extrcat_top_k(process, top_k)) {
+        return Test::Search(dataset_path, index_name, top_k, build_parameters, search_parameters);
     } else {
         std::cerr << "process must be search or build." << std::endl;
         exit(-1);

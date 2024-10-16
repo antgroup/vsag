@@ -2,7 +2,8 @@
 
 usage:
 ```
-Usage: ./build/tests/test_performance <dataset_file_path> <process> <index_name> <build_param> <search_param>
+build: ./build/tests/test_performance <dataset_file_path> "build" <index_name> <build_param> <search_param>
+search: ./build/tests/test_performance <dataset_file_path> "search:<top-k>" <index_name> <build_param> <search_param>
 ```
 
 example running commands for building index:
@@ -31,7 +32,7 @@ example running commands for searching:
 ```
 ./build/tests/test_performance \
     '/data/random-100k-128-euclidean.hdf5' \
-    'search' \
+    'search:1' \
 	'hnsw' \
 	'{"dim": 128, "dtype": "float32", "metric_type": "l2", "hnsw": {"max_degree": 12, "ef_construction": 100}, "diskann": {"max_degree": 12, "ef_construction": 100, "pq_dims": 64, "pq_sample_rate": 0.1}}' \
 	'{"hnsw":{"ef_search":100},"diskann":{"ef_search":100,"beam_search":4,"io_limit":200,"use_reorder":true}}'
