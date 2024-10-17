@@ -18,8 +18,6 @@
 #include <cstdint>
 #include <unordered_set>
 
-#include "./logger.h"
-
 namespace vsag {
 
 const static int64_t DEFAULT_WATCH_WINDOW_SIZE = 20;

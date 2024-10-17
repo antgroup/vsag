@@ -59,7 +59,7 @@ public:
     }
 
 public:
-    virtual ~SafeAllocator() = default;
+    ~SafeAllocator() override = default;
 
 private:
     Allocator* raw_allocator_ = nullptr;

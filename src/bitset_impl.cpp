@@ -13,10 +13,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "./bitset_impl.h"
+#include "bitset_impl.h"
 
 #include <cstdint>
-#include <cstring>
 #include <functional>
 #include <mutex>
 #include <random>

@@ -13,10 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <assert.h>
-
 #include <cstdint>
-#include <vector>
 
 #include "vsag/utils.h"
 
@@ -24,8 +21,8 @@ namespace vsag {
 
 float
 l2sqr(const void* vec1, const void* vec2, int64_t dim) {
-    float* v1 = (float*)vec1;
-    float* v2 = (float*)vec2;
+    auto* v1 = (float*)vec1;
+    auto* v2 = (float*)vec2;
 
     float res = 0;
     for (int64_t i = 0; i < dim; i++) {

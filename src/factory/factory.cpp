@@ -13,26 +13,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <fmt/format-inl.h>
-#include <fmt/format.h>
-
 #include <algorithm>
 #include <cctype>
 #include <cstdint>
 #include <exception>
 #include <fstream>
 #include <ios>
-#include <locale>
 #include <memory>
 #include <mutex>
 #include <stdexcept>
 #include <string>
 
-#include "../common.h"
-#include "../index/diskann.h"
-#include "../index/diskann_zparameters.h"
-#include "../index/hnsw.h"
-#include "../index/hnsw_zparameters.h"
+#include "index/diskann.h"
+#include "index/diskann_zparameters.h"
+#include "index/hnsw.h"
+#include "index/hnsw_zparameters.h"
 #include "vsag/vsag.h"
 
 namespace vsag {

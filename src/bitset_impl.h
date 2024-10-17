@@ -28,7 +28,7 @@ namespace vsag {
 class BitsetImpl : public Bitset {
 public:
     BitsetImpl() = default;
-    virtual ~BitsetImpl() = default;
+    ~BitsetImpl() override = default;
 
     BitsetImpl(const BitsetImpl&) = delete;
     BitsetImpl&
@@ -36,16 +36,16 @@ public:
     BitsetImpl(BitsetImpl&&) = delete;
 
 public:
-    virtual void
+    void
     Set(int64_t pos, bool value) override;
 
-    virtual bool
+    bool
     Test(int64_t pos) override;
 
-    virtual uint64_t
+    uint64_t
     Count() override;
 
-    virtual std::string
+    std::string
     Dump() override;
 
 private:
