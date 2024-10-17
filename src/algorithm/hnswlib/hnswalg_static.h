@@ -35,7 +35,7 @@
 #include "visited_list_pool.h"
 
 namespace hnswlib {
-typedef unsigned int tableint;
+using tableint = vsag::InnerIdType;
 typedef unsigned int linklistsizeint;
 class StaticHierarchicalNSW : public AlgorithmInterface<float> {
 private:
@@ -81,7 +81,7 @@ private:
     void* dist_func_param_{nullptr};
 
     mutable std::mutex label_lookup_lock;  // lock for label_lookup_
-    std::unordered_map<labeltype, tableint> label_lookup_;
+    std::unordered_map<LabelType, tableint> label_lookup_;
 
     std::default_random_engine level_generator_;
     std::default_random_engine update_probability_generator_;
@@ -149,7 +149,7 @@ public:
         update_probability_generator_.seed(random_seed + 1);
 
         size_links_level0_ = maxM0_ * sizeof(tableint) + sizeof(linklistsizeint);
-        size_data_per_element_ = size_links_level0_ + data_size_ + sizeof(labeltype);
+        size_data_per_element_ = size_links_level0_ + data_size_ + sizeof(LabelType);
         offsetData_ = size_links_level0_;
         label_offset_ = size_links_level0_ + data_size_;
         offsetLevel0_ = 0;
@@ -202,31 +202,31 @@ public:
     };
 
     inline std::mutex&
-    getLabelOpMutex(labeltype label) const {
+    getLabelOpMutex(LabelType label) const {
         // calculate hash
         size_t lock_id = label & (MAX_LABEL_OPERATION_LOCKS - 1);
         return label_op_locks_[lock_id];
     }
 
-    inline labeltype
+    inline LabelType
     getExternalLabel(tableint internal_id) const {
-        labeltype return_label;
+        LabelType return_label;
         memcpy(&return_label,
                (data_level0_memory_->GetElementPtr(internal_id, label_offset_)),
-               sizeof(labeltype));
+               sizeof(LabelType));
         return return_label;
     }
 
     inline void
-    setExternalLabel(tableint internal_id, labeltype label) const {
+    setExternalLabel(tableint internal_id, LabelType label) const {
         memcpy((data_level0_memory_->GetElementPtr(internal_id, label_offset_)),
                &label,
-               sizeof(labeltype));
+               sizeof(LabelType));
     }
 
-    inline labeltype*
+    inline LabelType*
     getExternalLabeLp(tableint internal_id) const {
-        return (labeltype*)(data_level0_memory_->GetElementPtr(internal_id, label_offset_));
+        return (LabelType*)(data_level0_memory_->GetElementPtr(internal_id, label_offset_));
     }
 
     inline char*
@@ -257,7 +257,7 @@ public:
     }
 
     float
-    getDistanceByLabel(labeltype label, const void* data_point) override {
+    getDistanceByLabel(LabelType label, const void* data_point) override {
         std::unique_lock<std::mutex> lock_table(label_lookup_lock);
 
         auto search = label_lookup_.find(label);
@@ -272,7 +272,7 @@ public:
     }
 
     bool
-    isValidLabel(labeltype label) override {
+    isValidLabel(LabelType label) override {
         std::unique_lock<std::mutex> lock_table(label_lookup_lock);
         bool is_valid = (label_lookup_.find(label) != label_lookup_.end());
         lock_table.unlock();
@@ -1567,7 +1567,7 @@ public:
     }
 
     const float*
-    getDataByLabel(labeltype label) const override {
+    getDataByLabel(LabelType label) const override {
         std::lock_guard<std::mutex> lock_label(getLabelOpMutex(label));
 
         std::unique_lock<std::mutex> lock_table(label_lookup_lock);
@@ -1607,7 +1607,7 @@ public:
     * Adds point.
     */
     bool
-    addPoint(const void* data_point, labeltype label) override {
+    addPoint(const void* data_point, LabelType label) override {
         if (addPoint(data_point, label, -1) == -1) {
             return false;
         }
@@ -1615,7 +1615,7 @@ public:
     }
 
     tableint
-    addPoint(const void* data_point, labeltype label, int level) {
+    addPoint(const void* data_point, LabelType label, int level) {
         tableint cur_c = 0;
         {
             // Checking if the element with the same label already exists
@@ -1652,7 +1652,7 @@ public:
         memset(data_level0_memory_->GetElementPtr(cur_c, offsetLevel0_), 0, size_data_per_element_);
 
         // Initialisation of the data and label
-        memcpy(getExternalLabeLp(cur_c), &label, sizeof(labeltype));
+        memcpy(getExternalLabeLp(cur_c), &label, sizeof(LabelType));
         memcpy(getDataByInternalId(cur_c), data_point, data_size_);
 
         if (curlevel) {
@@ -1726,12 +1726,12 @@ public:
         return cur_c;
     }
 
-    std::priority_queue<std::pair<float, labeltype>>
+    std::priority_queue<std::pair<float, LabelType>>
     searchKnn(const void* query_data,
               size_t k,
               uint64_t ef,
               BaseFilterFunctor* isIdAllowed = nullptr) const override {
-        std::priority_queue<std::pair<float, labeltype>> result;
+        std::priority_queue<std::pair<float, LabelType>> result;
         if (cur_element_count_ == 0)
             return result;
         float* dist_map = nullptr;
@@ -1795,20 +1795,20 @@ public:
         }
         while (top_candidates.size() > 0) {
             std::pair<float, tableint> rez = top_candidates.top();
-            result.push(std::pair<float, labeltype>(rez.first, getExternalLabel(rez.second)));
+            result.push(std::pair<float, LabelType>(rez.first, getExternalLabel(rez.second)));
             top_candidates.pop();
         }
         delete[] dist_map;
         return result;
     }
 
-    std::priority_queue<std::pair<float, labeltype>>
+    std::priority_queue<std::pair<float, LabelType>>
     searchRange(const void* query_data,
                 float radius,
                 uint64_t ef,
                 BaseFilterFunctor* isIdAllowed = nullptr) const override {
         std::runtime_error("static hnsw does not support range search");
-        //        std::priority_queue<std::pair<float, labeltype>> result;
+        //        std::priority_queue<std::pair<float, LabelType>> result;
         //        if (cur_element_count_ == 0)
         //            return result;
         //
@@ -1861,7 +1861,7 @@ public:
         //        // }
         //        while (top_candidates.size() > 0) {
         //            std::pair<float, tableint> rez = top_candidates.top();
-        //            result.push(std::pair<float, labeltype>(rez.first, getExternalLabel(rez.second)));
+        //            result.push(std::pair<float, LabelType>(rez.first, getExternalLabel(rez.second)));
         //            top_candidates.pop();
         //        }
         //
@@ -1870,9 +1870,9 @@ public:
         return {};
     }
 
-    std::priority_queue<std::pair<float, labeltype>>
+    std::priority_queue<std::pair<float, LabelType>>
     bruteForce(const void* data_point, int64_t k) override {
-        std::priority_queue<std::pair<float, labeltype>> results;
+        std::priority_queue<std::pair<float, LabelType>> results;
         for (uint32_t i = 0; i < cur_element_count_; i++) {
             float dist = fstdistfunc_(data_point, getDataByInternalId(i), dist_func_param_);
             if (results.size() < k) {
