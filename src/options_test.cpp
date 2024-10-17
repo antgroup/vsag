@@ -17,8 +17,6 @@
 
 #include <catch2/catch_test_macros.hpp>
 
-#include "default_allocator.h"
-
 TEST_CASE("option test", "[ut][option]") {
     size_t block_size_limit = 134217728;
     vsag::Options::Instance().set_block_size_limit(block_size_limit);

@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "./default_logger.h"
+#include "default_logger.h"
 
 namespace vsag {
 

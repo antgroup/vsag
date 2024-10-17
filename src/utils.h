@@ -42,7 +42,7 @@ using UnorderedMap = std::unordered_map<KeyType,
                                         vsag::AllocatorWrapper<std::pair<const KeyType, ValType>>>;
 
 struct SlowTaskTimer {
-    SlowTaskTimer(const std::string& name, int64_t log_threshold_ms = 0);
+    explicit SlowTaskTimer(const std::string& name, int64_t log_threshold_ms = 0);
     ~SlowTaskTimer();
 
     std::string name;
@@ -51,7 +51,7 @@ struct SlowTaskTimer {
 };
 
 struct Timer {
-    Timer(double& ref);
+    explicit Timer(double& ref);
     ~Timer();
 
     double& ref_;
@@ -62,7 +62,7 @@ class WindowResultQueue {
 public:
     WindowResultQueue();
 
-    WindowResultQueue(size_t window_size);
+    explicit WindowResultQueue(size_t window_size);
 
     void
     Push(float value);
@@ -70,7 +70,7 @@ public:
     size_t
     ResizeWindowSize(size_t new_window_size_);
 
-    float
+    [[nodiscard]] float
     GetAvgResult() const;
 
 private:
@@ -80,7 +80,7 @@ private:
 
 template <typename T>
 struct Number {
-    Number(T n) : num(n) {
+    explicit Number(T n) : num(n) {
     }
 
     bool
