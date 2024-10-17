@@ -33,6 +33,7 @@
 #include "../logger.h"
 #include "../safe_allocator.h"
 #include "../utils.h"
+#include "typing.h"
 #include "vsag/binaryset.h"
 #include "vsag/errors.h"
 #include "vsag/index.h"
@@ -50,7 +51,7 @@ public:
     }
 
     bool
-    operator()(hnswlib::labeltype id) override {
+    operator()(LabelType id) override {
         if (is_bitset_filter_) {
             int64_t bit_index = id & ROW_ID_MASK;
             return not bitset_->Test(bit_index);

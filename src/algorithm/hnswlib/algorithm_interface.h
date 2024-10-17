@@ -21,14 +21,16 @@
 #include <string>
 
 #include "space_interface.h"
+#include "typing.h"
 
 namespace hnswlib {
-typedef size_t labeltype;
+
+using LabelType = vsag::LabelType;
 
 class BaseFilterFunctor {
 public:
     virtual bool
-    operator()(hnswlib::labeltype id) {
+    operator()(LabelType id) {
         return true;
     }
 };
@@ -37,16 +39,16 @@ template <typename dist_t>
 class AlgorithmInterface {
 public:
     virtual bool
-    addPoint(const void* datapoint, labeltype label) = 0;
+    addPoint(const void* datapoint, LabelType label) = 0;
 
-    virtual std::priority_queue<std::pair<dist_t, labeltype>>
+    virtual std::priority_queue<std::pair<dist_t, LabelType>>
     searchKnn(const void*, size_t, size_t, BaseFilterFunctor* isIdAllowed = nullptr) const = 0;
 
-    virtual std::priority_queue<std::pair<dist_t, labeltype>>
+    virtual std::priority_queue<std::pair<dist_t, LabelType>>
     searchRange(const void*, float, size_t, BaseFilterFunctor* isIdAllowed = nullptr) const = 0;
 
     // Return k nearest neighbor in the order of closer fist
-    virtual std::vector<std::pair<dist_t, labeltype>>
+    virtual std::vector<std::pair<dist_t, LabelType>>
     searchKnnCloserFirst(const void* query_data,
                          size_t k,
                          size_t ef,
@@ -65,12 +67,12 @@ public:
     getMaxElements() = 0;
 
     virtual float
-    getDistanceByLabel(labeltype label, const void* data_point) = 0;
+    getDistanceByLabel(LabelType label, const void* data_point) = 0;
 
     virtual const float*
-    getDataByLabel(labeltype label) const = 0;
+    getDataByLabel(LabelType label) const = 0;
 
-    virtual std::priority_queue<std::pair<float, labeltype>>
+    virtual std::priority_queue<std::pair<float, LabelType>>
     bruteForce(const void* data_point, int64_t k) = 0;
 
     virtual void
@@ -94,7 +96,7 @@ public:
     getDeletedCount() = 0;
 
     virtual bool
-    isValidLabel(labeltype label) = 0;
+    isValidLabel(LabelType label) = 0;
 
     virtual bool
     init_memory_space() = 0;

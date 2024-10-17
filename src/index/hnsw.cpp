@@ -692,7 +692,7 @@ HNSW::brute_force(const DatasetPtr& query, int64_t k) {
 
         auto vector = query->GetFloat32Vectors();
         std::shared_lock lock(rw_mutex_);
-        std::priority_queue<std::pair<float, hnswlib::labeltype>> bf_result =
+        std::priority_queue<std::pair<float, LabelType>> bf_result =
             alg_hnsw_->bruteForce((const void*)vector, k);
         result->Dim(std::min(k, (int64_t)bf_result.size()));
 

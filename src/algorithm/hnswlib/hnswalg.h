@@ -39,24 +39,24 @@
 #include "visited_list_pool.h"
 
 namespace hnswlib {
-using tableint = unsigned int;
+using InnerIdType = vsag::InnerIdType;
 using linklistsizeint = unsigned int;
 using reverselinklist = vsag::UnorderedSet<uint32_t>;
 struct CompareByFirst {
     constexpr bool
-    operator()(std::pair<float, tableint> const& a,
-               std::pair<float, tableint> const& b) const noexcept {
+    operator()(std::pair<float, InnerIdType> const& a,
+               std::pair<float, InnerIdType> const& b) const noexcept {
         return a.first < b.first;
     }
 };
-using MaxHeap = std::priority_queue<std::pair<float, tableint>,
-                                    vsag::Vector<std::pair<float, tableint>>,
+using MaxHeap = std::priority_queue<std::pair<float, InnerIdType>,
+                                    vsag::Vector<std::pair<float, InnerIdType>>,
                                     CompareByFirst>;
 const static float THRESHOLD_ERROR = 1e-6;
 
 class HierarchicalNSW : public AlgorithmInterface<float> {
 private:
-    static const tableint MAX_LABEL_OPERATION_LOCKS = 65536;
+    static const InnerIdType MAX_LABEL_OPERATION_LOCKS = 65536;
     static const unsigned char DELETE_MARK = 0x01;
 
     size_t max_elements_ = 0;
@@ -81,7 +81,7 @@ private:
     std::mutex global_{};
     vsag::Vector<std::recursive_mutex> link_list_locks_;
 
-    tableint enterpoint_node_{0};
+    InnerIdType enterpoint_node_{0};
 
     size_t size_links_level0_{0};
     size_t offset_data_{0};
@@ -107,7 +107,7 @@ private:
     void* dist_func_param_{nullptr};
 
     mutable std::mutex label_lookup_lock_{};  // lock for label_lookup_
-    vsag::UnorderedMap<labeltype, tableint> label_lookup_;
+    vsag::UnorderedMap<LabelType, InnerIdType> label_lookup_;
 
     std::default_random_engine level_generator_;
     std::default_random_engine update_probability_generator_;
@@ -122,8 +122,8 @@ private:
     // flag to replace deleted elements (marked as deleted) during insertion
     bool allow_replace_deleted_{false};
 
-    std::mutex deleted_elements_lock_{};             // lock for deleted_elements_
-    vsag::UnorderedSet<tableint> deleted_elements_;  // contains internal ids of deleted elements
+    std::mutex deleted_elements_lock_{};                // lock for deleted_elements_
+    vsag::UnorderedSet<InnerIdType> deleted_elements_;  // contains internal ids of deleted elements
 
 public:
     HierarchicalNSW(SpaceInterface* s,
@@ -143,39 +143,39 @@ public:
     normalizeVector(const void*& data_point, std::shared_ptr<float[]>& normalize_data) const;
 
     float
-    getDistanceByLabel(labeltype label, const void* data_point) override;
+    getDistanceByLabel(LabelType label, const void* data_point) override;
 
     bool
-    isValidLabel(labeltype label) override;
+    isValidLabel(LabelType label) override;
 
     inline std::mutex&
-    getLabelOpMutex(labeltype label) const {
+    getLabelOpMutex(LabelType label) const {
         // calculate hash
         size_t lock_id = label & (MAX_LABEL_OPERATION_LOCKS - 1);
         return label_op_locks_[lock_id];
     }
 
-    inline labeltype
-    getExternalLabel(tableint internal_id) const {
-        labeltype value;
+    inline LabelType
+    getExternalLabel(InnerIdType internal_id) const {
+        LabelType value;
         std::memcpy(&value,
                     data_level0_memory_->GetElementPtr(internal_id, label_offset_),
-                    sizeof(labeltype));
+                    sizeof(LabelType));
         return value;
     }
 
     inline void
-    setExternalLabel(tableint internal_id, labeltype label) const {
-        *(labeltype*)(data_level0_memory_->GetElementPtr(internal_id, label_offset_)) = label;
+    setExternalLabel(InnerIdType internal_id, LabelType label) const {
+        *(LabelType*)(data_level0_memory_->GetElementPtr(internal_id, label_offset_)) = label;
     }
 
-    inline labeltype*
-    getExternalLabeLp(tableint internal_id) const {
-        return (labeltype*)(data_level0_memory_->GetElementPtr(internal_id, label_offset_));
+    inline LabelType*
+    getExternalLabeLp(InnerIdType internal_id) const {
+        return (LabelType*)(data_level0_memory_->GetElementPtr(internal_id, label_offset_));
     }
 
     inline reverselinklist&
-    getEdges(tableint internal_id, int level = 0) {
+    getEdges(InnerIdType internal_id, int level = 0) {
         if (level != 0) {
             auto& edge_map_ptr = reversed_link_lists_[internal_id];
             if (edge_map_ptr == nullptr) {
@@ -196,8 +196,8 @@ public:
     }
 
     void
-    updateConnections(tableint internal_id,
-                      const vsag::Vector<tableint>& cand_neighbors,
+    updateConnections(InnerIdType internal_id,
+                      const vsag::Vector<InnerIdType>& cand_neighbors,
                       int level,
                       bool is_update);
 
@@ -205,11 +205,11 @@ public:
     checkReverseConnection();
 
     inline char*
-    getDataByInternalId(tableint internal_id) const {
+    getDataByInternalId(InnerIdType internal_id) const {
         return (data_level0_memory_->GetElementPtr(internal_id, offset_data_));
     }
 
-    std::priority_queue<std::pair<float, labeltype>>
+    std::priority_queue<std::pair<float, LabelType>>
     bruteForce(const void* data_point, int64_t k) override;
 
     int
@@ -231,18 +231,18 @@ public:
     }
 
     MaxHeap
-    searchBaseLayer(tableint ep_id, const void* data_point, int layer);
+    searchBaseLayer(InnerIdType ep_id, const void* data_point, int layer);
 
     template <bool has_deletions, bool collect_metrics = false>
     MaxHeap
-    searchBaseLayerST(tableint ep_id,
+    searchBaseLayerST(InnerIdType ep_id,
                       const void* data_point,
                       size_t ef,
                       BaseFilterFunctor* isIdAllowed = nullptr) const;
 
     template <bool has_deletions, bool collect_metrics = false>
     MaxHeap
-    searchBaseLayerST(tableint ep_id,
+    searchBaseLayerST(InnerIdType ep_id,
                       const void* data_point,
                       float radius,
                       int64_t ef,
@@ -252,22 +252,22 @@ public:
     getNeighborsByHeuristic2(MaxHeap& top_candidates, size_t M);
 
     linklistsizeint*
-    getLinklist0(tableint internal_id) const {
+    getLinklist0(InnerIdType internal_id) const {
         return (linklistsizeint*)(data_level0_memory_->GetElementPtr(internal_id, offsetLevel0_));
     }
 
     linklistsizeint*
-    getLinklist(tableint internal_id, int level) const {
+    getLinklist(InnerIdType internal_id, int level) const {
         return (linklistsizeint*)(link_lists_[internal_id] + (level - 1) * size_links_per_element_);
     }
 
     linklistsizeint*
-    getLinklistAtLevel(tableint internal_id, int level) const {
+    getLinklistAtLevel(InnerIdType internal_id, int level) const {
         return level == 0 ? getLinklist0(internal_id) : getLinklist(internal_id, level);
     }
 
-    tableint
-    mutuallyConnectNewElement(tableint cur_c, MaxHeap& top_candidates, int level, bool isUpdate);
+    InnerIdType
+    mutuallyConnectNewElement(InnerIdType cur_c, MaxHeap& top_candidates, int level, bool isUpdate);
 
     void
     resizeIndex(size_t new_max_elements) override;
@@ -305,19 +305,19 @@ public:
     DeserializeImpl(StreamReader& reader, SpaceInterface* s, size_t max_elements_i = 0);
 
     const float*
-    getDataByLabel(labeltype label) const override;
+    getDataByLabel(LabelType label) const override;
     /*
     * Marks an element with the given label deleted, does NOT really change the current graph.
     */
     void
-    markDelete(labeltype label);
+    markDelete(LabelType label);
 
     /*
     * Uses the last 16 bits of the memory for the linked list size to store the mark,
     * whereas maxM0_ has to be limited to the lower 16 bits, however, still large enough in almost all cases.
     */
     void
-    markDeletedInternal(tableint internalId);
+    markDeletedInternal(InnerIdType internalId);
 
     /*
     * Removes the deleted mark of the node, does NOT really change the current graph.
@@ -326,18 +326,18 @@ public:
     *  because elements marked as deleted can be completely removed by addPoint
     */
     void
-    unmarkDelete(labeltype label);
+    unmarkDelete(LabelType label);
     /*
     * Remove the deleted mark of the node.
     */
     void
-    unmarkDeletedInternal(tableint internalId);
+    unmarkDeletedInternal(InnerIdType internalId);
 
     /*
     * Checks the first 16 bits of the memory to see if the element is marked deleted.
     */
     bool
-    isMarkedDeleted(tableint internalId) const {
+    isMarkedDeleted(InnerIdType internalId) const {
         unsigned char* ll_cur = ((unsigned char*)getLinklist0(internalId)) + 2;
         return *ll_cur & DELETE_MARK;
     }
@@ -356,33 +356,33 @@ public:
     * Adds point.
     */
     bool
-    addPoint(const void* data_point, labeltype label) override;
+    addPoint(const void* data_point, LabelType label) override;
 
     void
-    modifyOutEdge(tableint old_internal_id, tableint new_internal_id);
+    modifyOutEdge(InnerIdType old_internal_id, InnerIdType new_internal_id);
 
     void
-    modifyInEdges(tableint right_internal_id, tableint wrong_internal_id, bool is_erase);
+    modifyInEdges(InnerIdType right_internal_id, InnerIdType wrong_internal_id, bool is_erase);
 
     bool
-    swapConnections(tableint pre_internal_id, tableint post_internal_id);
+    swapConnections(InnerIdType pre_internal_id, InnerIdType post_internal_id);
 
     void
-    dealNoInEdge(tableint id, int level, int m_curmax, int skip_c);
+    dealNoInEdge(InnerIdType id, int level, int m_curmax, int skip_c);
 
     void
-    removePoint(labeltype label);
+    removePoint(LabelType label);
 
-    tableint
-    addPoint(const void* data_point, labeltype label, int level);
+    InnerIdType
+    addPoint(const void* data_point, LabelType label, int level);
 
-    std::priority_queue<std::pair<float, labeltype>>
+    std::priority_queue<std::pair<float, LabelType>>
     searchKnn(const void* query_data,
               size_t k,
               uint64_t ef,
               BaseFilterFunctor* isIdAllowed = nullptr) const override;
 
-    std::priority_queue<std::pair<float, labeltype>>
+    std::priority_queue<std::pair<float, LabelType>>
     searchRange(const void* query_data,
                 float radius,
                 uint64_t ef,
