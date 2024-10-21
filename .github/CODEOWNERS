@@ -1,0 +1,26 @@
+# This is a CODEOWNERS file that defines the reviewers of
+# specific directories or files. All the reviewers defined
+# in this will automatically be invited to review a pull
+# request in which modified files match the pattern.
+
+# Fallback rule
+*                        @wxyucs @jiaweizone
+
+# All the markdown files
+*.md                     @wxyucs @jiaweizone
+
+# GitHub routines
+/.circleci/              @wxyucs
+/.github/                @wxyucs
+/docker/                 @wxyucs
+/.*                      @wxyucs
+/LICENSE                 @wxyucs
+
+# Released Indexes
+/extern/diskann/         @inabao
+
+# Core codes, maybe assign reviewers later
+/src/                    @jiaweizone
+
+# All the SIMD related codes
+/src/simd/               @LHT129 @ShawnShawnYou
