@@ -200,7 +200,7 @@ tl::expected<DatasetPtr, Error>
 HNSW::knn_search(const DatasetPtr& query,
                  int64_t k,
                  const std::string& parameters,
-                 hnswlib::BaseFilterFunctor* filter_ptr) const {
+                 BaseFilterFunctor* filter_ptr) const {
     SlowTaskTimer t("hnsw knnsearch", 20);
 
     try {
@@ -312,7 +312,7 @@ tl::expected<DatasetPtr, Error>
 HNSW::range_search(const DatasetPtr& query,
                    float radius,
                    const std::string& parameters,
-                   hnswlib::BaseFilterFunctor* filter_ptr,
+                   BaseFilterFunctor* filter_ptr,
                    int64_t limited_size) const {
     SlowTaskTimer t("hnsw rangesearch", 20);
 

@@ -238,7 +238,7 @@ public:
     searchBaseLayerST(InnerIdType ep_id,
                       const void* data_point,
                       size_t ef,
-                      BaseFilterFunctor* isIdAllowed = nullptr) const;
+                      vsag::BaseFilterFunctor* isIdAllowed = nullptr) const;
 
     template <bool has_deletions, bool collect_metrics = false>
     MaxHeap
@@ -246,7 +246,7 @@ public:
                       const void* data_point,
                       float radius,
                       int64_t ef,
-                      BaseFilterFunctor* isIdAllowed = nullptr) const;
+                      vsag::BaseFilterFunctor* isIdAllowed = nullptr) const;
 
     void
     getNeighborsByHeuristic2(MaxHeap& top_candidates, size_t M);
@@ -380,13 +380,13 @@ public:
     searchKnn(const void* query_data,
               size_t k,
               uint64_t ef,
-              BaseFilterFunctor* isIdAllowed = nullptr) const override;
+              vsag::BaseFilterFunctor* isIdAllowed = nullptr) const override;
 
     std::priority_queue<std::pair<float, LabelType>>
     searchRange(const void* query_data,
                 float radius,
                 uint64_t ef,
-                BaseFilterFunctor* isIdAllowed = nullptr) const override;
+                vsag::BaseFilterFunctor* isIdAllowed = nullptr) const override;
 
     void
     checkIntegrity();

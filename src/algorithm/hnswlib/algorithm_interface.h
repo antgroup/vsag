@@ -20,20 +20,13 @@
 #include <queue>
 #include <string>
 
+#include "base_filter_functor.h"
 #include "space_interface.h"
 #include "typing.h"
 
 namespace hnswlib {
 
 using LabelType = vsag::LabelType;
-
-class BaseFilterFunctor {
-public:
-    virtual bool
-    operator()(LabelType id) {
-        return true;
-    }
-};
 
 template <typename dist_t>
 class AlgorithmInterface {
@@ -42,17 +35,23 @@ public:
     addPoint(const void* datapoint, LabelType label) = 0;
 
     virtual std::priority_queue<std::pair<dist_t, LabelType>>
-    searchKnn(const void*, size_t, size_t, BaseFilterFunctor* isIdAllowed = nullptr) const = 0;
+    searchKnn(const void*,
+              size_t,
+              size_t,
+              vsag::BaseFilterFunctor* isIdAllowed = nullptr) const = 0;
 
     virtual std::priority_queue<std::pair<dist_t, LabelType>>
-    searchRange(const void*, float, size_t, BaseFilterFunctor* isIdAllowed = nullptr) const = 0;
+    searchRange(const void*,
+                float,
+                size_t,
+                vsag::BaseFilterFunctor* isIdAllowed = nullptr) const = 0;
 
     // Return k nearest neighbor in the order of closer fist
     virtual std::vector<std::pair<dist_t, LabelType>>
     searchKnnCloserFirst(const void* query_data,
                          size_t k,
                          size_t ef,
-                         BaseFilterFunctor* isIdAllowed = nullptr) const;
+                         vsag::BaseFilterFunctor* isIdAllowed = nullptr) const;
 
     virtual void
     saveIndex(const std::string& location) = 0;

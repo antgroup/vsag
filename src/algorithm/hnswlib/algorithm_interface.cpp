@@ -22,7 +22,7 @@ std::vector<std::pair<dist_t, LabelType>>
 AlgorithmInterface<dist_t>::searchKnnCloserFirst(const void* query_data,
                                                  size_t k,
                                                  size_t ef,
-                                                 BaseFilterFunctor* isIdAllowed) const {
+                                                 vsag::BaseFilterFunctor* isIdAllowed) const {
     std::vector<std::pair<dist_t, LabelType>> result;
 
     // here searchKnn returns the result in the order of further first
