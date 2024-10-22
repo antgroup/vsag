@@ -165,20 +165,31 @@ install:                ## Build and install the release version of vsag.
 `tests/`: the functional tests</br>
 
 ## Roadmap
-- v0.11 (ETA: Jul. 2024)
-  - support cosine distance type, with normalization
-  - support EnhanceGraph on HNSW
-- v1.0 (ETA: Aug. 2024)
-  - support IVFFlat index
-  - support int8 datatype
-  - support DFS index
-- v1.1 (ETA: Sep. 2024)
-  - support FP16 datatype
-  - support freshHNSW index
+- v0.12 (ETA: Oct. 2024)
+  - introduce datacell as the new index framework
+  - support pluggable scalar quantization(known as SQ) in datacell
+  - implement a new Hierarchical Graph(named HGraph) index based on datacell
+  - support INT8 datatype on HNSW Index
+
+- v0.13 (ETA: Nov. 2024)
+  - support inverted index(be like IVFFlat) based on datacell
+  - introduce pluggable product quantization(known as PQ) in datacell
+  - support extrainfo storage within vector
+
+- v0.14 (ETA: Dec. 2024)
+  - implement a new MultiIndex that supports efficient pre-filtering on enumerable tags
   - support automated parameter
+  - support sparse vector searching
+
 
 ## Contribution Guidelines
 Contributions are welcomed and greatly appreciated. Please read our [contribution guidelines](./CONTRIBUTING.md) for detailed contribution workflow. 
+
+## Who's Using VSAG
+
+- OCEANBASE: https://github.com/oceanbase/oceanbase
+- TuGraph: https://github.com/TuGraph-family/tugraph-db
+- GreptimeDB: https://github.com/GreptimeTeam/greptimedb
 
 ## Star History
 
