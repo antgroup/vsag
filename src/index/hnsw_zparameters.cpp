@@ -64,8 +64,8 @@ CreateHnswParameters::FromJson(const std::string& json_string) {
     CHECK_ARGUMENT(params[INDEX_HNSW].contains(HNSW_PARAMETER_M),
                    fmt::format("parameters[{}] must contains {}", INDEX_HNSW, HNSW_PARAMETER_M));
     obj.max_degree = params[INDEX_HNSW][HNSW_PARAMETER_M];
-    CHECK_ARGUMENT((5 <= obj.max_degree) and (obj.max_degree <= 64),
-                   fmt::format("max_degree({}) must in range[5, 64]", obj.max_degree));
+    CHECK_ARGUMENT((5 <= obj.max_degree) and (obj.max_degree <= 128),
+                   fmt::format("max_degree({}) must in range[5, 128]", obj.max_degree));
 
     // set obj.ef_construction
     CHECK_ARGUMENT(
