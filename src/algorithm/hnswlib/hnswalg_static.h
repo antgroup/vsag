@@ -384,7 +384,7 @@ public:
                                float*& dist_map,
                                size_t ef,
                                size_t k,
-                               BaseFilterFunctor* isIdAllowed = nullptr) const {
+                               vsag::BaseFilterFunctor* isIdAllowed = nullptr) const {
         std::shared_ptr<VisitedList> vl = visited_list_pool_->getFreeVisitedList();
         vl_type* visited_array = vl->mass;
         vl_type visited_array_tag = vl->curV;
@@ -520,7 +520,7 @@ public:
                            float*& dist_map,
                            size_t ef,
                            size_t k,
-                           BaseFilterFunctor* isIdAllowed = nullptr) const {
+                           vsag::BaseFilterFunctor* isIdAllowed = nullptr) const {
         std::shared_ptr<VisitedList> vl = visited_list_pool_->getFreeVisitedList();
         vl_type* visited_array = vl->mass;
         vl_type visited_array_tag = vl->curV;
@@ -644,7 +644,7 @@ public:
     //    searchBaseLayerST(tableint ep_id,
     //                      const void* data_point,
     //                      float radius,
-    //                      BaseFilterFunctor* isIdAllowed = nullptr) const {
+    //                      vsag::BaseFilterFunctor* isIdAllowed = nullptr) const {
     //        VisitedList* vl = visited_list_pool_->getFreeVisitedList();
     //        vl_type* visited_array = vl->mass;
     //        vl_type visited_array_tag = vl->curV;
@@ -1730,7 +1730,7 @@ public:
     searchKnn(const void* query_data,
               size_t k,
               uint64_t ef,
-              BaseFilterFunctor* isIdAllowed = nullptr) const override {
+              vsag::BaseFilterFunctor* isIdAllowed = nullptr) const override {
         std::priority_queue<std::pair<float, LabelType>> result;
         if (cur_element_count_ == 0)
             return result;
@@ -1806,7 +1806,7 @@ public:
     searchRange(const void* query_data,
                 float radius,
                 uint64_t ef,
-                BaseFilterFunctor* isIdAllowed = nullptr) const override {
+                vsag::BaseFilterFunctor* isIdAllowed = nullptr) const override {
         std::runtime_error("static hnsw does not support range search");
         //        std::priority_queue<std::pair<float, LabelType>> result;
         //        if (cur_element_count_ == 0)

@@ -365,7 +365,7 @@ MaxHeap
 HierarchicalNSW::searchBaseLayerST(InnerIdType ep_id,
                                    const void* data_point,
                                    size_t ef,
-                                   BaseFilterFunctor* isIdAllowed) const {
+                                   vsag::BaseFilterFunctor* isIdAllowed) const {
     std::shared_ptr<VisitedList> vl = visited_list_pool_->getFreeVisitedList();
     vl_type* visited_array = vl->mass;
     vl_type visited_array_tag = vl->curV;
@@ -459,7 +459,7 @@ HierarchicalNSW::searchBaseLayerST(InnerIdType ep_id,
                                    const void* data_point,
                                    float radius,
                                    int64_t ef,
-                                   BaseFilterFunctor* isIdAllowed) const {
+                                   vsag::BaseFilterFunctor* isIdAllowed) const {
     std::shared_ptr<VisitedList> vl = visited_list_pool_->getFreeVisitedList();
     vl_type* visited_array = vl->mass;
     vl_type visited_array_tag = vl->curV;
@@ -1388,7 +1388,7 @@ std::priority_queue<std::pair<float, LabelType>>
 HierarchicalNSW::searchKnn(const void* query_data,
                            size_t k,
                            uint64_t ef,
-                           BaseFilterFunctor* isIdAllowed) const {
+                           vsag::BaseFilterFunctor* isIdAllowed) const {
     std::priority_queue<std::pair<float, LabelType>> result;
     if (cur_element_count_ == 0)
         return result;
@@ -1445,7 +1445,7 @@ std::priority_queue<std::pair<float, LabelType>>
 HierarchicalNSW::searchRange(const void* query_data,
                              float radius,
                              uint64_t ef,
-                             BaseFilterFunctor* isIdAllowed) const {
+                             vsag::BaseFilterFunctor* isIdAllowed) const {
     std::priority_queue<std::pair<float, LabelType>> result;
     if (cur_element_count_ == 0)
         return result;

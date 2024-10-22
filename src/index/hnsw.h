@@ -33,6 +33,7 @@
 #include "../logger.h"
 #include "../safe_allocator.h"
 #include "../utils.h"
+#include "base_filter_functor.h"
 #include "typing.h"
 #include "vsag/binaryset.h"
 #include "vsag/errors.h"
@@ -40,31 +41,6 @@
 #include "vsag/readerset.h"
 
 namespace vsag {
-class BitsetOrCallbackFilter : public hnswlib::BaseFilterFunctor {
-public:
-    BitsetOrCallbackFilter(const std::function<bool(int64_t)>& func) : func_(func) {
-        is_bitset_filter_ = false;
-    }
-
-    BitsetOrCallbackFilter(const BitsetPtr& bitset) : bitset_(bitset) {
-        is_bitset_filter_ = true;
-    }
-
-    bool
-    operator()(LabelType id) override {
-        if (is_bitset_filter_) {
-            int64_t bit_index = id & ROW_ID_MASK;
-            return not bitset_->Test(bit_index);
-        } else {
-            return not func_(id);
-        }
-    }
-
-private:
-    std::function<bool(int64_t)> func_;
-    BitsetPtr bitset_;
-    bool is_bitset_filter_ = false;
-};
 
 class HNSW : public Index {
 public:
@@ -231,7 +207,7 @@ private:
     knn_search(const DatasetPtr& query,
                int64_t k,
                const std::string& parameters,
-               hnswlib::BaseFilterFunctor* filter_ptr) const;
+               BaseFilterFunctor* filter_ptr) const;
 
     template <typename FilterType>
     tl::expected<DatasetPtr, Error>
@@ -245,7 +221,7 @@ private:
     range_search(const DatasetPtr& query,
                  float radius,
                  const std::string& parameters,
-                 hnswlib::BaseFilterFunctor* filter_ptr,
+                 BaseFilterFunctor* filter_ptr,
                  int64_t limited_size) const;
 
     tl::expected<uint32_t, Error>
