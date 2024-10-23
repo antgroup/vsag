@@ -20,6 +20,7 @@
 #include <nlohmann/json.hpp>
 #include <vector>
 
+#include "../data_type.h"
 #include "../logger.h"
 #include "fixtures.h"
 #include "vsag/bitset.h"
@@ -32,8 +33,10 @@ TEST_CASE("build & add", "[ut][hnsw]") {
     int64_t dim = 128;
     int64_t max_degree = 12;
     int64_t ef_construction = 100;
-    auto index = std::make_shared<vsag::HNSW>(
-        std::make_shared<hnswlib::L2Space>(dim), max_degree, ef_construction);
+    auto index = std::make_shared<vsag::HNSW>(std::make_shared<hnswlib::L2Space>(dim),
+                                              max_degree,
+                                              ef_construction,
+                                              vsag::DataTypes::DATA_TYPE_FLOAT);
 
     std::vector<int64_t> ids(1);
     int64_t incorrect_dim = 63;
@@ -66,8 +69,11 @@ TEST_CASE("build with allocator", "[ut][hnsw]") {
     int64_t max_degree = 12;
     int64_t ef_construction = 100;
     vsag::DefaultAllocator allocator;
-    auto index = std::make_shared<vsag::HNSW>(
-        std::make_shared<hnswlib::L2Space>(dim), max_degree, ef_construction, &allocator);
+    auto index = std::make_shared<vsag::HNSW>(std::make_shared<hnswlib::L2Space>(dim),
+                                              max_degree,
+                                              ef_construction,
+                                              vsag::DataTypes::DATA_TYPE_FLOAT,
+                                              &allocator);
 
     const int64_t num_elements = 10;
     auto [ids, vectors] = fixtures::generate_ids_and_vectors(num_elements, dim);
@@ -88,8 +94,10 @@ TEST_CASE("knn_search", "[ut][hnsw]") {
     int64_t dim = 128;
     int64_t max_degree = 12;
     int64_t ef_construction = 100;
-    auto index = std::make_shared<vsag::HNSW>(
-        std::make_shared<hnswlib::L2Space>(dim), max_degree, ef_construction);
+    auto index = std::make_shared<vsag::HNSW>(std::make_shared<hnswlib::L2Space>(dim),
+                                              max_degree,
+                                              ef_construction,
+                                              vsag::DataTypes::DATA_TYPE_FLOAT);
 
     const int64_t num_elements = 10;
     auto [ids, vectors] = fixtures::generate_ids_and_vectors(num_elements, dim);
@@ -161,8 +169,10 @@ TEST_CASE("range_search", "[ut][hnsw]") {
     int64_t dim = 128;
     int64_t max_degree = 12;
     int64_t ef_construction = 100;
-    auto index = std::make_shared<vsag::HNSW>(
-        std::make_shared<hnswlib::L2Space>(dim), max_degree, ef_construction);
+    auto index = std::make_shared<vsag::HNSW>(std::make_shared<hnswlib::L2Space>(dim),
+                                              max_degree,
+                                              ef_construction,
+                                              vsag::DataTypes::DATA_TYPE_FLOAT);
 
     const int64_t num_elements = 10;
     auto [ids, vectors] = fixtures::generate_ids_and_vectors(num_elements, dim);
@@ -257,8 +267,10 @@ TEST_CASE("serialize empty index", "[ut][hnsw]") {
     int64_t dim = 128;
     int64_t max_degree = 12;
     int64_t ef_construction = 100;
-    auto index = std::make_shared<vsag::HNSW>(
-        std::make_shared<hnswlib::L2Space>(dim), max_degree, ef_construction);
+    auto index = std::make_shared<vsag::HNSW>(std::make_shared<hnswlib::L2Space>(dim),
+                                              max_degree,
+                                              ef_construction,
+                                              vsag::DataTypes::DATA_TYPE_FLOAT);
 
     SECTION("serialize to binaryset") {
         auto result = index->Serialize();
@@ -281,8 +293,13 @@ TEST_CASE("deserialize on not empty index", "[ut][hnsw]") {
     int64_t dim = 128;
     int64_t max_degree = 12;
     int64_t ef_construction = 100;
-    auto index = std::make_shared<vsag::HNSW>(
-        std::make_shared<hnswlib::L2Space>(dim), max_degree, ef_construction, false, false, true);
+    auto index = std::make_shared<vsag::HNSW>(std::make_shared<hnswlib::L2Space>(dim),
+                                              max_degree,
+                                              ef_construction,
+                                              vsag::DataTypes::DATA_TYPE_FLOAT,
+                                              false,
+                                              false,
+                                              true);
 
     const int64_t num_elements = 10;
     auto [ids, vectors] = fixtures::generate_ids_and_vectors(num_elements, dim);
@@ -307,6 +324,7 @@ TEST_CASE("deserialize on not empty index", "[ut][hnsw]") {
         auto another_index = std::make_shared<vsag::HNSW>(std::make_shared<hnswlib::L2Space>(dim),
                                                           max_degree,
                                                           ef_construction,
+                                                          vsag::DataTypes::DATA_TYPE_FLOAT,
                                                           false,
                                                           false,
                                                           true);
@@ -335,8 +353,11 @@ TEST_CASE("static hnsw", "[ut][hnsw]") {
     int64_t dim = 128;
     int64_t max_degree = 12;
     int64_t ef_construction = 100;
-    auto index = std::make_shared<vsag::HNSW>(
-        std::make_shared<hnswlib::L2Space>(dim), max_degree, ef_construction, true);
+    auto index = std::make_shared<vsag::HNSW>(std::make_shared<hnswlib::L2Space>(dim),
+                                              max_degree,
+                                              ef_construction,
+                                              vsag::DataTypes::DATA_TYPE_FLOAT,
+                                              true);
 
     const int64_t num_elements = 10;
     auto [ids, vectors] = fixtures::generate_ids_and_vectors(num_elements, dim);
@@ -371,8 +392,11 @@ TEST_CASE("static hnsw", "[ut][hnsw]") {
     REQUIRE_FALSE(range_result.has_value());
     REQUIRE(range_result.error().type == vsag::ErrorType::UNSUPPORTED_INDEX_OPERATION);
 
-    REQUIRE_THROWS(std::make_shared<vsag::HNSW>(
-        std::make_shared<hnswlib::L2Space>(127), max_degree, ef_construction, true));
+    REQUIRE_THROWS(std::make_shared<vsag::HNSW>(std::make_shared<hnswlib::L2Space>(127),
+                                                max_degree,
+                                                ef_construction,
+                                                vsag::DataTypes::DATA_TYPE_FLOAT,
+                                                true));
 
     auto remove_result = index->Remove(ids[0]);
     REQUIRE_FALSE(remove_result.has_value());
@@ -385,8 +409,10 @@ TEST_CASE("hnsw add vector with duplicated id", "[ut][hnsw]") {
     int64_t dim = 128;
     int64_t max_degree = 12;
     int64_t ef_construction = 100;
-    auto index = std::make_shared<vsag::HNSW>(
-        std::make_shared<hnswlib::L2Space>(dim), max_degree, ef_construction);
+    auto index = std::make_shared<vsag::HNSW>(std::make_shared<hnswlib::L2Space>(dim),
+                                              max_degree,
+                                              ef_construction,
+                                              vsag::DataTypes::DATA_TYPE_FLOAT);
 
     std::vector<int64_t> ids{1};
     std::vector<float> vectors(dim);
@@ -420,8 +446,12 @@ TEST_CASE("build with reversed edges", "[ut][hnsw]") {
     int64_t dim = 128;
     int64_t max_degree = 12;
     int64_t ef_construction = 100;
-    auto index = std::make_shared<vsag::HNSW>(
-        std::make_shared<hnswlib::L2Space>(dim), max_degree, ef_construction, false, true);
+    auto index = std::make_shared<vsag::HNSW>(std::make_shared<hnswlib::L2Space>(dim),
+                                              max_degree,
+                                              ef_construction,
+                                              vsag::DataTypes::DATA_TYPE_FLOAT,
+                                              false,
+                                              true);
 
     const int64_t num_elements = 1000;
     auto [ids, vectors] = fixtures::generate_ids_and_vectors(num_elements, dim);
@@ -451,8 +481,12 @@ TEST_CASE("build with reversed edges", "[ut][hnsw]") {
         in_file.seekg(0, std::ios::end);
         int64_t length = in_file.tellg();
         in_file.seekg(0, std::ios::beg);
-        auto new_index = std::make_shared<vsag::HNSW>(
-            std::make_shared<hnswlib::L2Space>(dim), max_degree, ef_construction, false, true);
+        auto new_index = std::make_shared<vsag::HNSW>(std::make_shared<hnswlib::L2Space>(dim),
+                                                      max_degree,
+                                                      ef_construction,
+                                                      vsag::DataTypes::DATA_TYPE_FLOAT,
+                                                      false,
+                                                      true);
         REQUIRE(new_index->Deserialize(in_file).has_value());
         REQUIRE(new_index->CheckGraphIntegrity());
     }
@@ -498,8 +532,12 @@ TEST_CASE("build with reversed edges", "[ut][hnsw]") {
             bs.Set(key, b);
         }
 
-        auto new_index = std::make_shared<vsag::HNSW>(
-            std::make_shared<hnswlib::L2Space>(dim), max_degree, ef_construction, false, true);
+        auto new_index = std::make_shared<vsag::HNSW>(std::make_shared<hnswlib::L2Space>(dim),
+                                                      max_degree,
+                                                      ef_construction,
+                                                      vsag::DataTypes::DATA_TYPE_FLOAT,
+                                                      false,
+                                                      true);
         REQUIRE(new_index->Deserialize(bs).has_value());
         REQUIRE(new_index->CheckGraphIntegrity());
     }
@@ -514,8 +552,13 @@ TEST_CASE("feedback with invalid argument", "[ut][hnsw]") {
     int64_t num_vectors = 1000;
     int64_t k = 10;
 
-    auto index = std::make_shared<vsag::HNSW>(
-        std::make_shared<hnswlib::L2Space>(dim), max_degree, ef_construction, false, false, true);
+    auto index = std::make_shared<vsag::HNSW>(std::make_shared<hnswlib::L2Space>(dim),
+                                              max_degree,
+                                              ef_construction,
+                                              vsag::DataTypes::DATA_TYPE_FLOAT,
+                                              false,
+                                              false,
+                                              true);
 
     nlohmann::json search_parameters{
         {"hnsw", {{"ef_search", 200}}},
@@ -549,8 +592,13 @@ TEST_CASE("redundant feedback and empty enhancement", "[ut][hnsw]") {
     int64_t num_query = 1;
     int64_t k = 10;
 
-    auto index = std::make_shared<vsag::HNSW>(
-        std::make_shared<hnswlib::L2Space>(dim), max_degree, ef_construction, false, false, true);
+    auto index = std::make_shared<vsag::HNSW>(std::make_shared<hnswlib::L2Space>(dim),
+                                              max_degree,
+                                              ef_construction,
+                                              vsag::DataTypes::DATA_TYPE_FLOAT,
+                                              false,
+                                              false,
+                                              true);
 
     auto [base_ids, base_vectors] = fixtures::generate_ids_and_vectors(num_base, dim);
     auto base = vsag::Dataset::Make();
@@ -605,8 +653,10 @@ TEST_CASE("feedback and pretrain without use conjugate graph", "[ut][hnsw]") {
     int64_t num_query = 1;
     int64_t k = 10;
 
-    auto index = std::make_shared<vsag::HNSW>(
-        std::make_shared<hnswlib::L2Space>(dim), max_degree, ef_construction);
+    auto index = std::make_shared<vsag::HNSW>(std::make_shared<hnswlib::L2Space>(dim),
+                                              max_degree,
+                                              ef_construction,
+                                              vsag::DataTypes::DATA_TYPE_FLOAT);
 
     auto [base_ids, base_vectors] = fixtures::generate_ids_and_vectors(num_base, dim);
     auto base = vsag::Dataset::Make();
@@ -647,8 +697,13 @@ TEST_CASE("feedback and pretrain on empty index", "[ut][hnsw]") {
     int64_t num_query = 1;
     int64_t k = 100;
 
-    auto index = std::make_shared<vsag::HNSW>(
-        std::make_shared<hnswlib::L2Space>(dim), max_degree, ef_construction, false, false, true);
+    auto index = std::make_shared<vsag::HNSW>(std::make_shared<hnswlib::L2Space>(dim),
+                                              max_degree,
+                                              ef_construction,
+                                              vsag::DataTypes::DATA_TYPE_FLOAT,
+                                              false,
+                                              false,
+                                              true);
 
     auto [base_ids, base_vectors] = fixtures::generate_ids_and_vectors(num_base, dim);
     auto base = vsag::Dataset::Make();
@@ -689,8 +744,13 @@ TEST_CASE("invalid pretrain", "[ut][hnsw]") {
     int64_t num_query = 1;
     int64_t k = 100;
 
-    auto index = std::make_shared<vsag::HNSW>(
-        std::make_shared<hnswlib::L2Space>(dim), max_degree, ef_construction, false, false, true);
+    auto index = std::make_shared<vsag::HNSW>(std::make_shared<hnswlib::L2Space>(dim),
+                                              max_degree,
+                                              ef_construction,
+                                              vsag::DataTypes::DATA_TYPE_FLOAT,
+                                              false,
+                                              false,
+                                              true);
 
     auto [base_ids, base_vectors] = fixtures::generate_ids_and_vectors(num_base, dim);
     auto base = vsag::Dataset::Make();

@@ -124,6 +124,18 @@ GetInnerProductDistanceFunc(size_t dim) {
     }
 }
 
+DistanceFunc
+GetINT8InnerProductDistanceFunc(size_t dim) {
+#ifdef ENABLE_AVX512
+    if (dim > 32) {
+        return vsag::INT8InnerProduct512ResidualsAVX512Distance;
+    } else if (dim > 16) {
+        return vsag::INT8InnerProduct256ResidualsAVX512Distance;
+    }
+#endif
+    return vsag::INT8InnerProductDistance;
+}
+
 PQDistanceFunc
 GetPQDistanceFunc() {
 #ifdef ENABLE_AVX

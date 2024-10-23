@@ -123,29 +123,54 @@ public:
         obj->number_of_base_ = train_shape.first;
         obj->number_of_query_ = test_shape.first;
 
-        // alloc memory
-        {
-            obj->train_ =
-                std::shared_ptr<float[]>(new float[train_shape.first * train_shape.second]);
-            obj->test_ = std::shared_ptr<float[]>(new float[test_shape.first * test_shape.second]);
-            obj->neighbors_ = std::shared_ptr<int64_t[]>(
-                new int64_t[neighbors_shape.first * neighbors_shape.second]);
-        }
-
         // read from file
         {
             H5::DataSet dataset = file.openDataSet("/train");
             H5::DataSpace dataspace = dataset.getSpace();
-            H5::FloatType datatype(H5::PredType::NATIVE_FLOAT);
-            dataset.read(obj->train_.get(), datatype, dataspace);
+            auto data_type = dataset.getDataType();
+            H5::PredType type = H5::PredType::ALPHA_I8;
+            if (data_type.getClass() == H5T_INTEGER && data_type.getSize() == 1) {
+                obj->train_data_type_ = vsag::DATATYPE_INT8;
+                type = H5::PredType::ALPHA_I8;
+                obj->train_data_size_ = 1;
+            } else if (data_type.getClass() == H5T_FLOAT) {
+                obj->train_data_type_ = vsag::DATATYPE_FLOAT32;
+                type = H5::PredType::NATIVE_FLOAT;
+                obj->train_data_size_ = 4;
+            } else {
+                throw std::runtime_error(
+                    fmt::format("wrong data type, data type ({}), data size ({})",
+                                (int)data_type.getClass(),
+                                data_type.getSize()));
+            }
+            obj->train_ = std::shared_ptr<char[]>(
+                new char[train_shape.first * train_shape.second * obj->train_data_size_]);
+            dataset.read(obj->train_.get(), type, dataspace);
         }
+
         {
             H5::DataSet dataset = file.openDataSet("/test");
             H5::DataSpace dataspace = dataset.getSpace();
-            H5::FloatType datatype(H5::PredType::NATIVE_FLOAT);
-            dataset.read(obj->test_.get(), datatype, dataspace);
+            auto data_type = dataset.getDataType();
+            H5::PredType type = H5::PredType::ALPHA_I8;
+            if (data_type.getClass() == H5T_INTEGER && data_type.getSize() == 1) {
+                obj->test_data_type_ = vsag::DATATYPE_INT8;
+                type = H5::PredType::ALPHA_I8;
+                obj->test_data_size_ = 1;
+            } else if (data_type.getClass() == H5T_FLOAT) {
+                obj->test_data_type_ = vsag::DATATYPE_FLOAT32;
+                type = H5::PredType::NATIVE_FLOAT;
+                obj->test_data_size_ = 4;
+            } else {
+                throw std::runtime_error("wrong data type");
+            }
+            obj->test_ = std::shared_ptr<char[]>(
+                new char[test_shape.first * test_shape.second * obj->test_data_size_]);
+            dataset.read(obj->test_.get(), type, dataspace);
         }
         {
+            obj->neighbors_ = std::shared_ptr<int64_t[]>(
+                new int64_t[neighbors_shape.first * neighbors_shape.second]);
             H5::DataSet dataset = file.openDataSet("/neighbors");
             H5::DataSpace dataspace = dataset.getSpace();
             H5::FloatType datatype(H5::PredType::NATIVE_INT64);
@@ -156,14 +181,19 @@ public:
     }
 
 public:
-    std::shared_ptr<float[]>
+    const void*
     GetTrain() const {
-        return train_;
+        return train_.get();
     }
 
-    std::shared_ptr<float[]>
+    const void*
     GetTest() const {
-        return test_;
+        return test_.get();
+    }
+
+    const void*
+    GetOneTest(int64_t id) const {
+        return test_.get() + id * dim_ * test_data_size_;
     }
 
     int64_t
@@ -189,6 +219,15 @@ public:
     int64_t
     GetDim() const {
         return dim_;
+    }
+
+    std::string
+    GetTrainDataType() const {
+        return train_data_type_;
+    }
+    std::string
+    GetTestDataType() const {
+        return test_data_type_;
     }
 
 private:
@@ -224,8 +263,8 @@ private:
     }
 
 private:
-    std::shared_ptr<float[]> train_;
-    std::shared_ptr<float[]> test_;
+    std::shared_ptr<char[]> train_;
+    std::shared_ptr<char[]> test_;
     std::shared_ptr<int64_t[]> neighbors_;
     shape_t train_shape_;
     shape_t test_shape_;
@@ -233,6 +272,10 @@ private:
     int64_t number_of_base_;
     int64_t number_of_query_;
     int64_t dim_;
+    size_t train_data_size_;
+    size_t test_data_size_;
+    std::string train_data_type_;
+    std::string test_data_type_;
 };
 
 class Test {
@@ -252,11 +295,12 @@ public:
         int64_t total_base = test_dataset->GetNumberOfBase();
         auto ids = range(total_base);
         auto base = Dataset::Make();
-        base->NumElements(total_base)
-            ->Dim(test_dataset->GetDim())
-            ->Ids(ids.get())
-            ->Float32Vectors(test_dataset->GetTrain().get())
-            ->Owner(false);
+        base->NumElements(total_base)->Dim(test_dataset->GetDim())->Ids(ids.get())->Owner(false);
+        if (test_dataset->GetTrainDataType() == vsag::DATATYPE_FLOAT32) {
+            base->Float32Vectors((const float*)test_dataset->GetTrain());
+        } else if (test_dataset->GetTrainDataType() == vsag::DATATYPE_INT8) {
+            base->Int8Vectors((const int8_t*)test_dataset->GetTrain());
+        }
         auto build_start = std::chrono::steady_clock::now();
         if (auto buildindex = index->Build(base); not buildindex.has_value()) {
             std::cerr << "build error: " << buildindex.error().message << std::endl;
@@ -354,11 +398,13 @@ public:
         std::vector<DatasetPtr> results;
         for (int64_t i = 0; i < total; ++i) {
             auto query = Dataset::Make();
-            query->NumElements(1)
-                ->Dim(test_dataset->GetDim())
-                ->Float32Vectors(test_dataset->GetTest().get() + i * test_dataset->GetDim())
-                ->Owner(false);
+            query->NumElements(1)->Dim(test_dataset->GetDim())->Owner(false);
 
+            if (test_dataset->GetTestDataType() == vsag::DATATYPE_FLOAT32) {
+                query->Float32Vectors((const float*)test_dataset->GetOneTest(i));
+            } else if (test_dataset->GetTestDataType() == vsag::DATATYPE_INT8) {
+                query->Int8Vectors((const int8_t*)test_dataset->GetOneTest(i));
+            }
             auto result = index->KnnSearch(query, top_k, search_parameters);
             if (not result.has_value()) {
                 std::cerr << "query error: " << result.error().message << std::endl;

@@ -14,14 +14,8 @@
 // limitations under the License.
 
 #pragma once
+#include "simd/simd.h"
 #include "space_interface.h"
-
-namespace vsag {
-
-extern hnswlib::DISTFUNC
-GetL2DistanceFunc(size_t dim);
-
-}  // namespace vsag
 
 namespace hnswlib {
 

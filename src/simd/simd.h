@@ -98,6 +98,10 @@ float
 InnerProduct(const void* pVect1, const void* pVect2, const void* qty_ptr);
 float
 InnerProductDistance(const void* pVect1, const void* pVect2, const void* qty_ptr);
+float
+INT8InnerProduct(const void* pVect1, const void* pVect2, const void* qty_ptr);
+float
+INT8InnerProductDistance(const void* pVect1, const void* pVect2, const void* qty_ptr);
 
 void
 PQDistanceFloat256(const void* single_dim_centers, float single_dim_val, void* result);
@@ -148,6 +152,14 @@ float
 L2SqrSIMD16ExtAVX512(const void* pVect1v, const void* pVect2v, const void* qty_ptr);
 float
 InnerProductSIMD16ExtAVX512(const void* pVect1v, const void* pVect2v, const void* qty_ptr);
+float
+INT8InnerProduct256ResidualsAVX512Distance(const void* pVect1v,
+                                           const void* pVect2v,
+                                           const void* qty_ptr);
+float
+INT8InnerProduct512ResidualsAVX512Distance(const void* pVect1v,
+                                           const void* pVect2v,
+                                           const void* qty_ptr);
 #endif
 
 typedef float (*DistanceFunc)(const void* pVect1, const void* pVect2, const void* qty_ptr);
@@ -155,6 +167,9 @@ DistanceFunc
 GetL2DistanceFunc(size_t dim);
 DistanceFunc
 GetInnerProductDistanceFunc(size_t dim);
+
+DistanceFunc
+GetINT8InnerProductDistanceFunc(size_t dim);
 
 typedef void (*PQDistanceFunc)(const void* single_dim_centers, float single_dim_val, void* result);
 

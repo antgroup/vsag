@@ -40,7 +40,7 @@ HierarchicalNSW::HierarchicalNSW(SpaceInterface* s,
     data_size_ = s->get_data_size();
     fstdistfunc_ = s->get_dist_func();
     dist_func_param_ = s->get_dist_func_param();
-    dim_ = data_size_ / sizeof(float);
+    dim_ = *((size_t*)dist_func_param_);
     M_ = M;
     maxM_ = M_;
     maxM0_ = M_ * 2;
