@@ -49,16 +49,16 @@ namespace avx512 = avx2;
     }
 
 TEST_CASE("SQ8 SIMD Compute Codes", "[SQ8 SIMD]") {
-    const std::vector<int64_t> dims = {1, 8, 16, 32, 97, 129, 256};
+    auto dims = fixtures::get_common_used_dims();
     int64_t count = 100;
     std::vector<uint8_t> vec1, vec2;
     for (const auto& dim : dims) {
         auto vec = fixtures::generate_vectors(count * 2, dim);
-        vec1.resize(count * dim * 2, 0);
+        vec1.resize(count * dim);
         std::transform(vec.begin(), vec.begin() + count * dim, vec1.begin(), [](float x) {
             return static_cast<uint8_t>(x * 255.0);
         });
-        vec2.resize(count * dim * 2, 0);
+        vec2.resize(count * dim);
         std::transform(vec.begin() + count * dim, vec.end(), vec2.begin(), [](float x) {
             return static_cast<uint8_t>(x * 255.0);
         });
@@ -72,11 +72,11 @@ TEST_CASE("SQ8 SIMD Compute Codes", "[SQ8 SIMD]") {
 }
 
 TEST_CASE("SQ8 SIMD Compute", "[SQ8 SIMD]") {
-    const std::vector<int64_t> dims = {1, 8, 16, 32, 97, 129, 256};
+    auto dims = fixtures::get_common_used_dims();
     int64_t count = 100;
     for (const auto& dim : dims) {
         auto vec1 = fixtures::generate_vectors(count * 2, dim);
-        std::vector<uint8_t> vec2(count * dim * 2);
+        std::vector<uint8_t> vec2(count * dim);
         std::transform(vec1.begin() + count * dim, vec1.end(), vec2.begin(), [](float x) {
             return uint64_t(x * 255.0);
         });
@@ -103,7 +103,7 @@ TEST_CASE("SQ8 SIMD Compute Benchmark", "[SQ8 SIMD]") {
     int64_t dim = 256;
 
     auto vec1 = fixtures::generate_vectors(count * 2, dim);
-    std::vector<uint8_t> vec2(count * dim * 2);
+    std::vector<uint8_t> vec2(count * dim);
     std::transform(vec1.begin() + count * dim, vec1.end(), vec2.begin(), [](float x) {
         return uint64_t(x * 255.0);
     });
