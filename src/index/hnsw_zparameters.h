@@ -19,6 +19,7 @@
 #include <string>
 
 #include "../algorithm/hnswlib/hnswlib.h"
+#include "../data_type.h"
 
 namespace vsag {
 
@@ -35,6 +36,7 @@ public:
     bool use_conjugate_graph;
     bool use_static;
     bool normalize = false;
+    DataTypes type;
 
 protected:
     CreateHnswParameters() = default;

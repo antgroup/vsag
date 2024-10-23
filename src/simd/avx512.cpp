@@ -15,7 +15,10 @@
 
 #include <immintrin.h>
 
+#include <iostream>
+
 #include "fp32_simd.h"
+#include "simd.h"
 #include "sq4_simd.h"
 #include "sq4_uniform_simd.h"
 #include "sq8_simd.h"
@@ -85,6 +88,116 @@ InnerProductSIMD16ExtAVX512(const void* pVect1v, const void* pVect2v, const void
                 TmpRes[13] + TmpRes[14] + TmpRes[15];
 
     return sum;
+}
+
+float
+INT8InnerProduct512AVX512(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
+    __mmask32 mask = 0xFFFFFFFF;
+    __mmask64 mask64 = 0xFFFFFFFFFFFFFFFF;
+
+    size_t qty = *((size_t*)qty_ptr);
+    int32_t cTmp[16];
+
+    int8_t* pVect1 = (int8_t*)pVect1v;
+    int8_t* pVect2 = (int8_t*)pVect2v;
+    const int8_t* pEnd1 = pVect1 + qty;
+
+    __m512i sum512 = _mm512_set1_epi32(0);
+
+    while (pVect1 < pEnd1) {
+        __m256i v1 = _mm256_maskz_loadu_epi8(mask, pVect1);
+        __m512i v1_512 = _mm512_cvtepi8_epi16(v1);
+        pVect1 += 32;
+        __m256i v2 = _mm256_maskz_loadu_epi8(mask, pVect2);
+        __m512i v2_512 = _mm512_cvtepi8_epi16(v2);
+        pVect2 += 32;
+
+        sum512 = _mm512_add_epi32(sum512, _mm512_madd_epi16(v1_512, v2_512));
+    }
+
+    _mm512_mask_storeu_epi32(cTmp, mask64, sum512);
+    double res = 0;
+    for (int i = 0; i < 16; i++) {
+        res += cTmp[i];
+    }
+    return res;
+}
+
+float
+INT8InnerProduct256AVX512(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
+    __mmask16 mask = 0xFFFF;
+    __mmask64 mask64 = 0xFFFFFFFFFFFFFFFF;
+    size_t qty = *((size_t*)qty_ptr);
+
+    int32_t cTmp[16];
+
+    int8_t* pVect1 = (int8_t*)pVect1v;
+    int8_t* pVect2 = (int8_t*)pVect2v;
+    const int8_t* pEnd1 = pVect1 + qty;
+
+    __m512i sum512 = _mm512_set1_epi32(0);
+
+    while (pVect1 < pEnd1) {
+        __m128i v1 = _mm_maskz_loadu_epi8(mask, pVect1);
+        __m512i v1_512 = _mm512_cvtepi8_epi32(v1);
+        pVect1 += 16;
+        __m128i v2 = _mm_maskz_loadu_epi8(mask, pVect2);
+        __m512i v2_512 = _mm512_cvtepi8_epi32(v2);
+        pVect2 += 16;
+
+        sum512 = _mm512_add_epi32(sum512, _mm512_mullo_epi32(v1_512, v2_512));
+    }
+
+    _mm512_mask_storeu_epi32(cTmp, mask64, sum512);
+    double res = 0;
+    for (int i = 0; i < 16; i++) {
+        res += cTmp[i];
+    }
+    return res;
+}
+
+float
+INT8InnerProduct256ResidualsAVX512(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
+    size_t qty = *((size_t*)qty_ptr);
+    size_t qty2 = qty >> 4 << 4;
+    double res = INT8InnerProduct256AVX512(pVect1v, pVect2v, &qty2);
+    int8_t* pVect1 = (int8_t*)pVect1v + qty2;
+    int8_t* pVect2 = (int8_t*)pVect2v + qty2;
+
+    size_t qty_left = qty - qty2;
+    if (qty_left != 0) {
+        res += INT8InnerProduct(pVect1, pVect2, &qty_left);
+    }
+    return res;
+}
+
+float
+INT8InnerProduct256ResidualsAVX512Distance(const void* pVect1v,
+                                           const void* pVect2v,
+                                           const void* qty_ptr) {
+    return -INT8InnerProduct256ResidualsAVX512(pVect1v, pVect2v, qty_ptr);
+}
+
+float
+INT8InnerProduct512ResidualsAVX512(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
+    size_t qty = *((size_t*)qty_ptr);
+    size_t qty2 = qty >> 5 << 5;
+    double res = INT8InnerProduct512AVX512(pVect1v, pVect2v, &qty2);
+    int8_t* pVect1 = (int8_t*)pVect1v + qty2;
+    int8_t* pVect2 = (int8_t*)pVect2v + qty2;
+
+    size_t qty_left = qty - qty2;
+    if (qty_left != 0) {
+        res += INT8InnerProduct256ResidualsAVX512(pVect1, pVect2, &qty_left);
+    }
+    return res;
+}
+
+float
+INT8InnerProduct512ResidualsAVX512Distance(const void* pVect1v,
+                                           const void* pVect2v,
+                                           const void* qty_ptr) {
+    return -INT8InnerProduct512ResidualsAVX512(pVect1v, pVect2v, qty_ptr);
 }
 
 namespace avx512 {

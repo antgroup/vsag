@@ -219,6 +219,56 @@ TEST_CASE("hnsw float32 recall", "[ft][index][hnsw]") {
     REQUIRE(range_recall > 0.99);
 }
 
+TEST_CASE("hnsw int8 recall", "[ft][index][hnsw]") {
+    vsag::Options::Instance().logger()->SetLevel(vsag::Logger::Level::kDEBUG);
+
+    int64_t num_vectors = 1000;
+    int64_t dim = 104;
+
+    nlohmann::json hnsw_parameters{{"max_degree", 12}, {"ef_construction", 50}, {"ef_search", 50}};
+    nlohmann::json index_parameters{
+        {"dtype", "int8"}, {"metric_type", "ip"}, {"dim", dim}, {"hnsw", hnsw_parameters}};
+    std::shared_ptr<vsag::Index> hnsw;
+    if (auto index = vsag::Factory::CreateIndex("hnsw", index_parameters.dump());
+        index.has_value()) {
+        hnsw = index.value();
+    } else {
+        std::cout << "Build HNSW Error" << std::endl;
+        return;
+    }
+    std::shared_ptr<int64_t[]> ids(new int64_t[num_vectors]);
+    std::shared_ptr<int8_t[]> data(new int8_t[dim * num_vectors]);
+
+    // Generate random data
+    std::mt19937 rng;
+    rng.seed(47);
+    std::uniform_int_distribution<> distrib_real;
+    for (int i = 0; i < num_vectors; i++) ids[i] = i;
+    for (int i = 0; i < dim * num_vectors; i++) data[i] = (int8_t)distrib_real(rng);
+
+    // build index
+    auto base = vsag::Dataset::Make();
+    base->NumElements(num_vectors)->Dim(dim)->Ids(ids.get())->Int8Vectors(data.get())->Owner(false);
+    auto buildindex = hnsw->Build(base);
+    REQUIRE(buildindex.has_value());
+
+    for (int i = 0; i < num_vectors; i++) {
+        auto query = vsag::Dataset::Make();
+        query->NumElements(1)->Dim(dim)->Int8Vectors(data.get() + i * dim)->Owner(false);
+        auto search_parameters = R"(
+                {
+                    "hnsw": {
+                        "ef_search": 100
+                    }
+                }
+                )";
+        int64_t k = 10;
+        auto result = hnsw->KnnSearch(query, k, search_parameters);
+        REQUIRE(result.has_value());
+        REQUIRE(result.value()->GetIds()[0] == ids[i]);
+    }
+}
+
 TEST_CASE("index search distance", "[ft][index]") {
     vsag::Options::Instance().logger()->SetLevel(vsag::Logger::Level::kDEBUG);
 

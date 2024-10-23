@@ -49,6 +49,23 @@ InnerProductDistance(const void* pVect1, const void* pVect2, const void* qty_ptr
     return 1.0f - InnerProduct(pVect1, pVect2, qty_ptr);
 }
 
+float
+INT8InnerProduct(const void* pVect1, const void* pVect2, const void* qty_ptr) {
+    size_t qty = *((size_t*)qty_ptr);
+    int8_t* vec1 = (int8_t*)pVect1;
+    int8_t* vec2 = (int8_t*)pVect2;
+    double res = 0;
+    for (size_t i = 0; i < qty; i++) {
+        res += vec1[i] * vec2[i];
+    }
+    return res;
+}
+
+float
+INT8InnerProductDistance(const void* pVect1, const void* pVect2, const void* qty_ptr) {
+    return -INT8InnerProduct(pVect1, pVect2, qty_ptr);
+}
+
 void
 PQDistanceFloat256(const void* single_dim_centers, float single_dim_val, void* result) {
     const auto* float_centers = (const float*)single_dim_centers;
