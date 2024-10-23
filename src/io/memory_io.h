@@ -71,13 +71,13 @@ public:
 
 private:
     [[nodiscard]] inline bool
-    checkValidOffset(uint64_t size) const {
+    check_valid_offset(uint64_t size) const {
         return size <= current_size_;
     }
 
     void
-    checkAndRealloc(uint64_t size) {
-        if (checkValidOffset(size)) {
+    check_and_realloc(uint64_t size) {
+        if (check_valid_offset(size)) {
             return;
         }
         start_ = reinterpret_cast<uint8_t*>(allocator_->Reallocate(start_, size));
@@ -93,13 +93,13 @@ private:
 
 void
 MemoryIO::WriteImpl(const uint8_t* data, uint64_t size, uint64_t offset) {
-    checkAndRealloc(size + offset);
+    check_and_realloc(size + offset);
     memcpy(start_ + offset, data, size);
 }
 
 bool
 MemoryIO::ReadImpl(uint64_t size, uint64_t offset, uint8_t* data) const {
-    bool ret = checkValidOffset(size + offset);
+    bool ret = check_valid_offset(size + offset);
     if (ret) {
         memcpy(data, start_ + offset, size);
     }
@@ -109,7 +109,7 @@ MemoryIO::ReadImpl(uint64_t size, uint64_t offset, uint8_t* data) const {
 const uint8_t*
 MemoryIO::ReadImpl(uint64_t size, uint64_t offset, bool& need_release) const {
     need_release = false;
-    if (checkValidOffset(size + offset)) {
+    if (check_valid_offset(size + offset)) {
         return start_ + offset;
     }
     return nullptr;

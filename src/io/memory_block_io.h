@@ -24,7 +24,6 @@
 #include <cstring>
 #include <nlohmann/json.hpp>
 #include <stdexcept>
-#include <vector>
 
 #include "basic_io.h"
 #include "common.h"
@@ -37,16 +36,15 @@ namespace vsag {
 class MemoryBlockIO : public BasicIO<MemoryBlockIO> {
 public:
     explicit MemoryBlockIO(Allocator* allocator, uint64_t block_size = DEFAULT_BLOCK_SIZE)
-        : block_size_(block_size), allocator_(allocator) {
+        : block_size_(block_size), allocator_(allocator), blocks_(0, allocator) {
     }
 
     MemoryBlockIO(const nlohmann::json& io_obj, const IndexCommonParam& common_param)
-        : allocator_(common_param.allocator_) {
-        CHECK_ARGUMENT(
-            io_obj.contains(BLOCK_IO_BLOCK_SIZE_KEY),
-            fmt::format("memory block io parameters must contains {}", BLOCK_IO_BLOCK_SIZE_KEY));
-
-        this->block_size_ = io_obj[BLOCK_IO_BLOCK_SIZE_KEY];  // TODO(LHT): trans str to uint64_t
+        : allocator_(common_param.allocator_), blocks_(0, common_param.allocator_) {
+        if (io_obj.contains(BLOCK_IO_BLOCK_SIZE_KEY)) {
+            this->block_size_ =
+                io_obj[BLOCK_IO_BLOCK_SIZE_KEY];  // TODO(LHT): trans str to uint64_t
+        }
     }
 
     ~MemoryBlockIO() override {
@@ -106,7 +104,7 @@ private:
 private:
     uint64_t block_size_{DEFAULT_BLOCK_SIZE};
 
-    std::vector<uint8_t*> blocks_{};
+    Vector<uint8_t*> blocks_;
 
     Allocator* const allocator_{nullptr};
 
@@ -140,9 +138,9 @@ MemoryBlockIO::ReadImpl(uint64_t size, uint64_t offset, uint8_t* data) const {
         auto start_off = offset % block_size_;
         auto max_size = block_size_ - start_off;
         while (cur_size < size) {
-            const uint8_t* cur_write = blocks_[start_no] + start_off;
+            const uint8_t* cur_read = blocks_[start_no] + start_off;
             auto cur_length = std::min(size - cur_size, max_size);
-            memcpy(data + cur_size, cur_write, cur_length);
+            memcpy(data + cur_size, cur_read, cur_length);
             cur_size += cur_length;
             max_size = block_size_;
             ++start_no;
@@ -160,7 +158,7 @@ MemoryBlockIO::ReadImpl(uint64_t size, uint64_t offset, bool& need_release) cons
             return this->get_data_ptr(offset);
         } else {
             need_release = true;
-            uint8_t* ptr = reinterpret_cast<uint8_t*>(allocator_->Allocate(size));
+            auto* ptr = reinterpret_cast<uint8_t*>(allocator_->Allocate(size));
             this->ReadImpl(size, offset, ptr);
             return ptr;
         }
