@@ -14,7 +14,6 @@
 // limitations under the License.
 
 #include <cmath>
-#include <iostream>
 
 #include "fp32_simd.h"
 namespace vsag {
