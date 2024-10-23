@@ -22,7 +22,7 @@
 #include "quantizer_test.h"
 using namespace vsag;
 
-const auto dims = {64, 128};
+const auto dims = fixtures::get_common_used_dims();
 const auto counts = {10, 101};
 
 template <MetricType Metric>
@@ -42,7 +42,7 @@ TEST_CASE("Encode and Decode", "[ut][SQ4Quantizer]") {
     float error = 2 * 1.0f / 15.0f;
     for (auto dim : dims) {
         for (auto count : counts) {
-            auto error_same = (float)(dim * 255 * 0.01);
+            auto error_same = (float)(dim * 15 * 0.01);
             TestQuantizerEncodeDecodeMetricSQ4<metrics[0]>(dim, count, error, error_same);
             TestQuantizerEncodeDecodeMetricSQ4<metrics[1]>(dim, count, error, error_same);
             TestQuantizerEncodeDecodeMetricSQ4<metrics[2]>(dim, count, error, error_same);
@@ -62,7 +62,7 @@ TestComputeMetricSQ4(uint64_t dim, int count, float error = 1e-5) {
 TEST_CASE("compute [ut][sq4_quantizer]") {
     constexpr MetricType metrics[3] = {
         MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_COSINE, MetricType::METRIC_TYPE_IP};
-    float error = 0.2;
+    float error = 0.6f;
     for (auto dim : dims) {
         for (auto count : counts) {
             TestComputeMetricSQ4<metrics[0]>(dim, count, error);

@@ -23,7 +23,6 @@
 
 using namespace vsag;
 
-const auto dims = {64, 128};
 const auto counts = {10, 101};
 
 template <MetricType Metric>
@@ -38,6 +37,7 @@ TestQuantizerEncodeDecodeMetricSQ8(uint64_t dim,
 }
 
 TEST_CASE("encode&decode [SQ8Quantizer]") {
+    auto dims = fixtures::get_common_used_dims();
     constexpr MetricType metrics[3] = {
         MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_COSINE, MetricType::METRIC_TYPE_IP};
     float error = 1e-2f;
@@ -60,6 +60,7 @@ TestComputeMetricSQ8(uint64_t dim, int count, float error = 1e-5) {
 }
 
 TEST_CASE("compute [ut][sq8_quantizer]") {
+    auto dims = fixtures::get_common_used_dims();
     constexpr MetricType metrics[3] = {
         MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_COSINE, MetricType::METRIC_TYPE_IP};
     float error = 0.05;
@@ -82,6 +83,7 @@ TestSerializeAndDeserializeMetricSQ8(uint64_t dim, int count, float error = 1e-5
 }
 
 TEST_CASE("serialize&deserialize [ut][sq8_quantizer]") {
+    auto dims = fixtures::get_common_used_dims();
     constexpr MetricType metrics[3] = {
         MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_COSINE, MetricType::METRIC_TYPE_IP};
     float error = 0.05f;

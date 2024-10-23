@@ -299,6 +299,15 @@ PQDistanceSSEFloat256(const void* single_dim_centers, float single_dim_val, void
 }
 
 namespace sse {
+
+#if defined(ENABLE_SSE)
+
+__inline __m128i __attribute__((__always_inline__)) load_4_char(const uint8_t* data) {
+    return _mm_set_epi8(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, data[3], data[2], data[1], data[0]);
+}
+
+#endif
+
 float
 FP32ComputeIP(const float* query, const float* codes, uint64_t dim) {
 #if defined(ENABLE_SSE)
@@ -362,7 +371,7 @@ SQ8ComputeIP(const float* query,
     uint64_t i = 0;
     for (; i + 3 < dim; i += 4) {
         // Load data into registers
-        __m128i code_values = _mm_loadu_si128(reinterpret_cast<const __m128i*>(codes + i));
+        __m128i code_values = load_4_char(codes + i);
         __m128 code_floats = _mm_cvtepi32_ps(_mm_cvtepu8_epi32(code_values));
         __m128 query_values = _mm_loadu_ps(query + i);
         __m128 diff_values = _mm_loadu_ps(diff + i);
@@ -403,8 +412,7 @@ SQ8ComputeL2Sqr(const float* query,
     uint64_t i = 0;
     for (; i + 3 < dim; i += 4) {
         // Load data into registers
-        __m128i code_values =
-            _mm_cvtepu8_epi32(_mm_loadu_si128(reinterpret_cast<const __m128i*>(codes + i)));
+        __m128i code_values = _mm_cvtepu8_epi32(load_4_char(codes + i));
         __m128 code_floats = _mm_div_ps(_mm_cvtepi32_ps(code_values), _mm_set1_ps(255.0f));
         __m128 diff_values = _mm_loadu_ps(diff + i);
         __m128 lowerBound_values = _mm_loadu_ps(lowerBound + i);
@@ -444,8 +452,8 @@ SQ8ComputeCodesIP(const uint8_t* codes1,
     uint64_t i = 0;
     for (; i + 3 < dim; i += 4) {
         // Load data into registers
-        __m128i code1_values = _mm_loadu_si128(reinterpret_cast<const __m128i*>(codes1 + i));
-        __m128i code2_values = _mm_loadu_si128(reinterpret_cast<const __m128i*>(codes2 + i));
+        __m128i code1_values = load_4_char(codes1 + i);
+        __m128i code2_values = load_4_char(codes2 + i);
         __m128i codes1_128 = _mm_cvtepu8_epi32(code1_values);
         __m128i codes2_128 = _mm_cvtepu8_epi32(code2_values);
         __m128 codes1_floats = _mm_div_ps(_mm_cvtepi32_ps(codes1_128), _mm_set1_ps(255.0f));
@@ -484,8 +492,8 @@ SQ8ComputeCodesL2Sqr(const uint8_t* codes1,
     uint64_t i = 0;
     for (; i + 3 < dim; i += 4) {
         // Load data into registers
-        __m128i code1_values = _mm_loadu_si128(reinterpret_cast<const __m128i*>(codes1 + i));
-        __m128i code2_values = _mm_loadu_si128(reinterpret_cast<const __m128i*>(codes2 + i));
+        __m128i code1_values = load_4_char(codes1 + i);
+        __m128i code2_values = load_4_char(codes2 + i);
         __m128i codes1_128 = _mm_cvtepu8_epi32(code1_values);
         __m128i codes2_128 = _mm_cvtepu8_epi32(code2_values);
         __m128 codes1_floats = _mm_div_ps(_mm_cvtepi32_ps(codes1_128), _mm_set1_ps(255.0f));
