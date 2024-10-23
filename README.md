@@ -122,6 +122,8 @@ Please read the [DEVELOPMENT](./DEVELOPMENT.md) guide for instructions on how to
 - [TuGraph](https://github.com/TuGraph-family/tugraph-db)
 - [GreptimeDB](https://github.com/GreptimeTeam/greptimedb)
 
+![vsag_users](./docs/vsag_users.svg)
+
 If your system uses VSAG, then feel free to make a pull request to add it to the list.
 
 ## How to Contribute
