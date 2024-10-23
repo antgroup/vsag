@@ -141,8 +141,8 @@ SQ8ComputeIP(const float* query,
 #if defined(ENABLE_AVX512)
     return avx512::SQ8ComputeIP(query, codes, lowerBound, diff, dim);
 #endif
-#if defined(ENABLE_AVX22)
-    return AVX2::SQ8ComputeIP(query, codes, lowerBound, diff, dim);
+#if defined(ENABLE_AVX2)
+    return avx2::SQ8ComputeIP(query, codes, lowerBound, diff, dim);
 #endif
 #if defined(ENABLE_SSE)
     return sse::SQ8ComputeIP(query, codes, lowerBound, diff, dim);
@@ -159,8 +159,8 @@ SQ8ComputeL2Sqr(const float* query,
 #if defined(ENABLE_AVX512)
     return avx512::SQ8ComputeL2Sqr(query, codes, lowerBound, diff, dim);
 #endif
-#if defined(ENABLE_AVX22)
-    return AVX2::SQ8ComputeL2Sqr(query, codes, lowerBound, diff, dim);
+#if defined(ENABLE_AVX2)
+    return avx2::SQ8ComputeL2Sqr(query, codes, lowerBound, diff, dim);
 #endif
 #if defined(ENABLE_SSE)
     return sse::SQ8ComputeL2Sqr(query, codes, lowerBound, diff, dim);
@@ -177,8 +177,8 @@ SQ8ComputeCodesIP(const uint8_t* codes1,
 #if defined(ENABLE_AVX512)
     return avx512::SQ8ComputeCodesIP(codes1, codes2, lowerBound, diff, dim);
 #endif
-#if defined(ENABLE_AVX22)
-    return AVX2::SQ8ComputeCodesIP(codes1, codes2, lowerBound, diff, dim);
+#if defined(ENABLE_AVX2)
+    return avx2::SQ8ComputeCodesIP(codes1, codes2, lowerBound, diff, dim);
 #endif
 #if defined(ENABLE_SSE)
     return sse::SQ8ComputeCodesIP(codes1, codes2, lowerBound, diff, dim);
@@ -195,8 +195,8 @@ SQ8ComputeCodesL2Sqr(const uint8_t* codes1,
 #if defined(ENABLE_AVX512)
     return avx512::SQ8ComputeCodesL2Sqr(codes1, codes2, lowerBound, diff, dim);
 #endif
-#if defined(ENABLE_AVX22)
-    return AVX2::SQ8ComputeCodesL2Sqr(codes1, codes2, lowerBound, diff, dim);
+#if defined(ENABLE_AVX2)
+    return avx2::SQ8ComputeCodesL2Sqr(codes1, codes2, lowerBound, diff, dim);
 #endif
 #if defined(ENABLE_SSE)
     return sse::SQ8ComputeCodesL2Sqr(codes1, codes2, lowerBound, diff, dim);

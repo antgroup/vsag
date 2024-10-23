@@ -51,7 +51,7 @@ SQ4UniformComputeCodesIP(const uint8_t* codes1, const uint8_t* codes2, uint64_t 
 #if defined(ENABLE_AVX512)
     return avx512::SQ4UniformComputeCodesIP(codes1, codes2, dim);
 #endif
-#if defined(ENABLE_AVX22)
+#if defined(ENABLE_AVX2)
     return avx2::SQ4UniformComputeCodesIP(codes1, codes2, dim);
 #endif
 #if defined(ENABLE_SSE)
