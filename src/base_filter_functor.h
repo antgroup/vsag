@@ -32,13 +32,10 @@ public:
 
 class BitsetOrCallbackFilter : public BaseFilterFunctor {
 public:
-    BitsetOrCallbackFilter(const std::function<bool(int64_t)>& func) : func_(func) {
-        is_bitset_filter_ = false;
-    }
+    BitsetOrCallbackFilter(const std::function<bool(int64_t)>& func)
+        : func_(func), is_bitset_filter_(false){};
 
-    BitsetOrCallbackFilter(const BitsetPtr& bitset) : bitset_(bitset) {
-        is_bitset_filter_ = true;
-    }
+    BitsetOrCallbackFilter(const BitsetPtr& bitset) : bitset_(bitset), is_bitset_filter_(true){};
 
     bool
     operator()(LabelType id) override {
@@ -52,8 +49,8 @@ public:
 
 private:
     std::function<bool(int64_t)> func_{nullptr};
-    const BitsetPtr& bitset_{nullptr};
-    bool is_bitset_filter_{false};
+    const BitsetPtr bitset_{nullptr};
+    const bool is_bitset_filter_{false};
 };
 
 }  // namespace vsag
