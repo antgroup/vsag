@@ -26,7 +26,12 @@ jobs:
       - run: ./scripts/check_format.sh
       - restore_cache:
           keys:
-            - main-ccache-{{ checksum "CMakeLists.txt" }}
+            - fork-cache-{{ checksum "CMakeLists.txt" }}
+      - run: make asan
+      - save_cache:
+          key: fork-cache-{{ checksum "CMakeLists.txt" }}
+          paths:
+            - ./build
       - run: make test_asan
 
   main-branch-check:
@@ -36,6 +41,9 @@ jobs:
     steps:
       - checkout
       - run: ./scripts/check_format.sh
+      - restore_cache:
+          keys:
+            - main-ccache-{{ checksum "CMakeLists.txt" }}
       - run: make test_asan
       - save_cache:
           key: main-ccache-{{ checksum "CMakeLists.txt" }}
