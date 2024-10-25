@@ -52,7 +52,7 @@ public:
     ReadImpl(uint64_t size, uint64_t offset, uint8_t* data) const;
 
     [[nodiscard]] inline const uint8_t*
-    ReadImpl(uint64_t size, uint64_t offset, bool& need_release) const;
+    DirectReadImpl(uint64_t size, uint64_t offset, bool& need_release) const;
 
     inline void
     ReleaseImpl(const uint8_t* data) const {};
@@ -107,7 +107,7 @@ MemoryIO::ReadImpl(uint64_t size, uint64_t offset, uint8_t* data) const {
 }
 
 const uint8_t*
-MemoryIO::ReadImpl(uint64_t size, uint64_t offset, bool& need_release) const {
+MemoryIO::DirectReadImpl(uint64_t size, uint64_t offset, bool& need_release) const {
     need_release = false;
     if (check_valid_offset(size + offset)) {
         return start_ + offset;
