@@ -60,7 +60,7 @@ public:
     ReadImpl(uint64_t size, uint64_t offset, uint8_t* data) const;
 
     [[nodiscard]] inline const uint8_t*
-    ReadImpl(uint64_t size, uint64_t offset, bool& need_release) const;
+    DirectReadImpl(uint64_t size, uint64_t offset, bool& need_release) const;
 
     inline void
     ReleaseImpl(const uint8_t* data) const {
@@ -151,7 +151,7 @@ MemoryBlockIO::ReadImpl(uint64_t size, uint64_t offset, uint8_t* data) const {
 }
 
 const uint8_t*
-MemoryBlockIO::ReadImpl(uint64_t size, uint64_t offset, bool& need_release) const {
+MemoryBlockIO::DirectReadImpl(uint64_t size, uint64_t offset, bool& need_release) const {
     if (check_valid_offset(size + offset)) {
         if (check_in_one_block(offset, size + offset)) {
             need_release = false;
