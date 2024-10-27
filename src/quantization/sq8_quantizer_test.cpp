@@ -25,13 +25,14 @@ using namespace vsag;
 
 const auto counts = {10, 101};
 
-template <MetricType Metric>
+template <MetricType metric>
 void
 TestQuantizerEncodeDecodeMetricSQ8(uint64_t dim,
                                    int count,
                                    float error = 1e-5,
                                    float error_same = 1e-2) {
-    SQ8Quantizer<Metric> quantizer(dim);
+    auto allocator = std::make_shared<DefaultAllocator>();
+    SQ8Quantizer<metric> quantizer(dim, allocator.get());
     TestQuantizerEncodeDecode(quantizer, dim, count, error);
     TestQuantizerEncodeDecodeSame(quantizer, dim, count, 255, error_same);
 }
@@ -51,12 +52,13 @@ TEST_CASE("encode&decode [SQ8Quantizer]") {
     }
 }
 
-template <MetricType Metric>
+template <MetricType metric>
 void
 TestComputeMetricSQ8(uint64_t dim, int count, float error = 1e-5) {
-    SQ8Quantizer<Metric> quantizer(dim);
-    TestComputeCodes<SQ8Quantizer<Metric>, Metric>(quantizer, dim, count, error);
-    TestComputer<SQ8Quantizer<Metric>, Metric>(quantizer, dim, count, error);
+    auto allocator = std::make_shared<DefaultAllocator>();
+    SQ8Quantizer<metric> quantizer(dim, allocator.get());
+    TestComputeCodes<SQ8Quantizer<metric>, metric>(quantizer, dim, count, error);
+    TestComputer<SQ8Quantizer<metric>, metric>(quantizer, dim, count, error);
 }
 
 TEST_CASE("compute [ut][sq8_quantizer]") {
@@ -73,12 +75,13 @@ TEST_CASE("compute [ut][sq8_quantizer]") {
     }
 }
 
-template <MetricType Metric>
+template <MetricType metric>
 void
 TestSerializeAndDeserializeMetricSQ8(uint64_t dim, int count, float error = 1e-5) {
-    SQ8Quantizer<Metric> quantizer1(dim);
-    SQ8Quantizer<Metric> quantizer2(0);
-    TestSerializeAndDeserialize<SQ8Quantizer<Metric>, Metric>(
+    auto allocator = std::make_shared<DefaultAllocator>();
+    SQ8Quantizer<metric> quantizer1(dim, allocator.get());
+    SQ8Quantizer<metric> quantizer2(0, allocator.get());
+    TestSerializeAndDeserialize<SQ8Quantizer<metric>, metric>(
         quantizer1, quantizer2, dim, count, error);
 }
 

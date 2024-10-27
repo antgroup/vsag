@@ -14,13 +14,13 @@
 // limitations under the License.
 
 #pragma once
-
 #include <cstdint>
 #include <cstring>
 
 #include "index/index_common_param.h"
 #include "nlohmann/json.hpp"
 #include "quantizer.h"
+#include "simd/fp32_simd.h"
 #include "simd/simd.h"
 
 namespace vsag {
@@ -28,7 +28,7 @@ namespace vsag {
 template <MetricType metric = MetricType::METRIC_TYPE_L2SQR>
 class FP32Quantizer : public Quantizer<FP32Quantizer<metric>> {
 public:
-    explicit FP32Quantizer(int dim);
+    explicit FP32Quantizer(int dim, Allocator* allocator);
 
     FP32Quantizer(const nlohmann::json& quantization_obj, const IndexCommonParam& common_param);
 
@@ -65,17 +65,21 @@ public:
     ComputeDistImpl(Computer<FP32Quantizer<metric>>& computer,
                     const uint8_t* codes,
                     float* dists) const;
+
+    inline void
+    ReleaseComputerImpl(Computer<FP32Quantizer<metric>>& computer) const;
 };
 
 template <MetricType metric>
 FP32Quantizer<metric>::FP32Quantizer(const nlohmann::json& quantization_obj,
                                      const IndexCommonParam& common_param)
-    : Quantizer<FP32Quantizer<metric>>(common_param.dim_) {
+    : Quantizer<FP32Quantizer<metric>>(common_param.dim_, common_param.allocator_) {
     this->code_size_ = common_param.dim_ * sizeof(float);
 }
 
 template <MetricType metric>
-FP32Quantizer<metric>::FP32Quantizer(int dim) : Quantizer<FP32Quantizer<metric>>(dim) {
+FP32Quantizer<metric>::FP32Quantizer(int dim, Allocator* allocator)
+    : Quantizer<FP32Quantizer<metric>>(dim, allocator) {
     this->code_size_ = dim * sizeof(float);
 }
 
@@ -122,11 +126,17 @@ template <MetricType metric>
 float
 FP32Quantizer<metric>::ComputeImpl(const uint8_t* codes1, const uint8_t* codes2) {
     if (metric == MetricType::METRIC_TYPE_IP) {
-        return InnerProduct(codes1, codes2, &this->dim_);
+        return 1 - FP32ComputeIP(reinterpret_cast<const float*>(codes1),
+                                 reinterpret_cast<const float*>(codes2),
+                                 this->dim_);
     } else if (metric == MetricType::METRIC_TYPE_L2SQR) {
-        return L2Sqr(codes1, codes2, &this->dim_);
+        return FP32ComputeL2Sqr(reinterpret_cast<const float*>(codes1),
+                                reinterpret_cast<const float*>(codes2),
+                                this->dim_);
     } else if (metric == MetricType::METRIC_TYPE_COSINE) {
-        return InnerProduct(codes1, codes2, &this->dim_);  // TODO
+        return 1 - FP32ComputeIP(reinterpret_cast<const float*>(codes1),
+                                 reinterpret_cast<const float*>(codes2),
+                                 this->dim_);  // TODO
     } else {
         return 0.0f;
     }
@@ -136,7 +146,13 @@ template <MetricType metric>
 void
 FP32Quantizer<metric>::ProcessQueryImpl(const DataType* query,
                                         Computer<FP32Quantizer<metric>>& computer) const {
-    computer.buf_ = new uint8_t[this->code_size_];
+    try {
+        computer.buf_ = reinterpret_cast<uint8_t*>(this->allocator_->Allocate(this->code_size_));
+    } catch (const std::bad_alloc& e) {
+        computer.buf_ = nullptr;
+        logger::error("bad alloc when init computer buf");
+        throw std::bad_alloc();
+    }
     memcpy(computer.buf_, query, this->code_size_);
 }
 
@@ -146,14 +162,26 @@ FP32Quantizer<metric>::ComputeDistImpl(Computer<FP32Quantizer<metric>>& computer
                                        const uint8_t* codes,
                                        float* dists) const {
     if (metric == MetricType::METRIC_TYPE_IP) {
-        *dists = InnerProduct(codes, computer.buf_, &this->dim_);
+        *dists = 1 - FP32ComputeIP(reinterpret_cast<const float*>(codes),
+                                   reinterpret_cast<const float*>(computer.buf_),
+                                   this->dim_);
     } else if (metric == MetricType::METRIC_TYPE_L2SQR) {
-        *dists = L2Sqr(codes, computer.buf_, &this->dim_);
+        *dists = FP32ComputeL2Sqr(reinterpret_cast<const float*>(codes),
+                                  reinterpret_cast<const float*>(computer.buf_),
+                                  this->dim_);
     } else if (metric == MetricType::METRIC_TYPE_COSINE) {
-        *dists = InnerProduct(codes, computer.buf_, &this->dim_);  // TODO
+        *dists = 1 - FP32ComputeIP(reinterpret_cast<const float*>(codes),
+                                   reinterpret_cast<const float*>(computer.buf_),
+                                   this->dim_);  // TODO
     } else {
         *dists = 0.0f;
     }
+}
+
+template <MetricType metric>
+void
+FP32Quantizer<metric>::ReleaseComputerImpl(Computer<FP32Quantizer<metric>>& computer) const {
+    this->allocator_->Deallocate(computer.buf_);
 }
 
 }  // namespace vsag

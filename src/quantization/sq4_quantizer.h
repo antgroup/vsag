@@ -14,6 +14,7 @@
 // limitations under the License.
 
 #pragma once
+
 #include <cstring>
 #include <limits>
 #include <vector>
@@ -26,7 +27,7 @@ namespace vsag {
 template <MetricType metric = MetricType::METRIC_TYPE_L2SQR>
 class SQ4Quantizer : public Quantizer<SQ4Quantizer<metric>> {
 public:
-    explicit SQ4Quantizer(int dim);
+    explicit SQ4Quantizer(int dim, Allocator* allocator);
 
     bool
     TrainImpl(const DataType* data, uint64_t count);
@@ -52,13 +53,17 @@ public:
     inline void
     ComputeDistImpl(Computer<SQ4Quantizer>& computer, const uint8_t* codes, float* dists) const;
 
+    inline void
+    ReleaseComputerImpl(Computer<SQ4Quantizer<metric>>& computer) const;
+
 private:
     std::vector<DataType> lower_bound_{};
     std::vector<DataType> diff_{};
 };
 
 template <MetricType metric>
-SQ4Quantizer<metric>::SQ4Quantizer(int dim) : Quantizer<SQ4Quantizer<metric>>(dim) {
+SQ4Quantizer<metric>::SQ4Quantizer(int dim, Allocator* allocator)
+    : Quantizer<SQ4Quantizer<metric>>(dim, allocator) {
     this->code_size_ = (dim + (1 << 6) - 1) >> 6 << 6;
     lower_bound_.resize(dim, std::numeric_limits<DataType>::max());
     diff_.resize(dim, std::numeric_limits<DataType>::lowest());
@@ -161,9 +166,9 @@ SQ4Quantizer<metric>::ComputeImpl(const uint8_t* codes1, const uint8_t* codes2) 
     if constexpr (metric == MetricType::METRIC_TYPE_L2SQR) {
         return SQ4ComputeCodesL2Sqr(codes1, codes2, lower_bound_.data(), diff_.data(), this->dim_);
     } else if constexpr (metric == MetricType::METRIC_TYPE_IP) {
-        return SQ4ComputeCodesIP(codes1, codes2, lower_bound_.data(), diff_.data(), this->dim_);
+        return 1 - SQ4ComputeCodesIP(codes1, codes2, lower_bound_.data(), diff_.data(), this->dim_);
     } else if constexpr (metric == MetricType::METRIC_TYPE_COSINE) {
-        return SQ4ComputeCodesIP(codes1, codes2, lower_bound_.data(), diff_.data(), this->dim_);
+        return 1 - SQ4ComputeCodesIP(codes1, codes2, lower_bound_.data(), diff_.data(), this->dim_);
     } else {
         return 0;
     }
@@ -174,11 +179,12 @@ void
 SQ4Quantizer<metric>::ProcessQueryImpl(const DataType* query,
                                        Computer<SQ4Quantizer>& computer) const {
     try {
-        computer.buf_ = new uint8_t[this->code_size_];  // todo: replace with allocator
+        computer.buf_ = reinterpret_cast<uint8_t*>(this->allocator_->Allocate(this->code_size_));
         this->EncodeOneImpl(query, computer.buf_);
     } catch (const std::bad_alloc& e) {
         computer.buf_ = nullptr;
         logger::error("bad alloc when init computer buf");
+        throw std::bad_alloc();
     }
 }
 
@@ -191,15 +197,21 @@ SQ4Quantizer<metric>::ComputeDistImpl(Computer<SQ4Quantizer>& computer,
         dists[0] = SQ4ComputeCodesL2Sqr(
             computer.buf_, codes, lower_bound_.data(), diff_.data(), this->dim_);
     } else if constexpr (metric == MetricType::METRIC_TYPE_IP) {
-        dists[0] =
-            SQ4ComputeCodesIP(computer.buf_, codes, lower_bound_.data(), diff_.data(), this->dim_);
+        dists[0] = 1 - SQ4ComputeCodesIP(
+                           computer.buf_, codes, lower_bound_.data(), diff_.data(), this->dim_);
     } else if constexpr (metric == MetricType::METRIC_TYPE_COSINE) {
-        dists[0] =
-            SQ4ComputeCodesIP(computer.buf_, codes, lower_bound_.data(), diff_.data(), this->dim_);
+        dists[0] = 1 - SQ4ComputeCodesIP(
+                           computer.buf_, codes, lower_bound_.data(), diff_.data(), this->dim_);
     } else {
         logger::error("unsupported metric type");
         dists[0] = 0;
     }
+}
+
+template <MetricType metric>
+void
+SQ4Quantizer<metric>::ReleaseComputerImpl(Computer<SQ4Quantizer<metric>>& computer) const {
+    this->allocator_->Deallocate(computer.buf_);
 }
 
 }  // namespace vsag

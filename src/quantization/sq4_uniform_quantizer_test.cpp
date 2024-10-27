@@ -18,7 +18,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <vector>
 
-#include "../../tests/fixtures/fixtures.h"
+#include "fixtures.h"
 #include "quantizer_test.h"
 
 using namespace vsag;
@@ -26,13 +26,14 @@ using namespace vsag;
 const auto dims = fixtures::get_common_used_dims();
 const auto counts = {10, 101};
 
-template <MetricType Metric>
+template <MetricType metric>
 void
 TestQuantizerEncodeDecodeMetricSQ4Uniform(uint64_t dim,
                                           int count,
                                           float error = 1e-5,
                                           float error_same = 1e-2) {
-    SQ4UniformQuantizer<Metric> quantizer(dim);
+    auto allocator = std::make_shared<DefaultAllocator>();
+    SQ4UniformQuantizer<metric> quantizer(dim, allocator.get());
     TestQuantizerEncodeDecode(quantizer, dim, count, error);
     TestQuantizerEncodeDecodeSame(quantizer, dim, count, 15, error_same);
 }
@@ -51,11 +52,12 @@ TEST_CASE("SQ4 Uniform Encode and Decode", "[ut][SQ4UniformQuantizer]") {
     }
 }
 
-template <MetricType Metric>
+template <MetricType metric>
 void
 TestComputeMetricSQ4Uniform(uint64_t dim, int count, float error = 1e-5) {
-    SQ4UniformQuantizer<Metric> quantizer(dim);
-    TestComputeCodesSame<SQ4UniformQuantizer<Metric>, Metric>(quantizer, dim, count, error);
+    auto allocator = std::make_shared<DefaultAllocator>();
+    SQ4UniformQuantizer<metric> quantizer(dim, allocator.get());
+    TestComputeCodesSame<SQ4UniformQuantizer<metric>, metric>(quantizer, dim, count, error);
 }
 
 TEST_CASE("compute [ut][SQ4UniformQuantizer]") {
