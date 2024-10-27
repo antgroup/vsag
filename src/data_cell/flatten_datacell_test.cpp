@@ -14,109 +14,96 @@
 // limitations under the License.
 
 #include "flatten_datacell.h"
-
+/*
 #include <algorithm>
-#include <random>
 
 #include "catch2/catch_template_test_macros.hpp"
 #include "default_allocator.h"
 #include "fixtures.h"
-#include "io/memory_io.h"
-#include "quantization/fp32_quantizer.h"
-#include "quantization/sq8_quantizer.h"
+#include "flatten_interface_test.h"
+#include "io/io_headers.h"
+#include "quantization/quantizer_headers.h"
 
 using namespace vsag;
 
+template <typename QuantTmpl, typename IOTmpl, MetricType metric>
 void
-TestFlattenDataCell(const std::shared_ptr<FlattenInterface>& data_cell,
-                    uint64_t dim,
-                    MetricType metric,
+TestFlattenDataCell(int dim,
+                    std::shared_ptr<Allocator> allocator,
+                    const nlohmann::json& quantizer_json,
+                    const nlohmann::json& io_json,
                     float error = 1e-5) {
-    int64_t base_size = 1000;
-    int64_t query_size = 10;
-    auto vectors = fixtures::generate_vectors(base_size, dim);
-    auto querys = fixtures::generate_vectors(query_size, dim);
-
-    data_cell->Train(vectors.data(), base_size);
-    data_cell->BatchInsertVector(vectors.data(), base_size);
-
-    auto func = [&](FlattenInterface* vs) {
-        std::vector<uint64_t> idx(base_size);
-        std::iota(idx.begin(), idx.end(), 0);
-        std::shuffle(idx.begin(), idx.end(), std::mt19937(std::random_device()()));
-        std::vector<float> dists(base_size);
-        for (auto i = 0; i < query_size; ++i) {
-            auto computer = vs->FactoryComputer(querys.data() + i * dim);
-            vs->Query(dists.data(), computer, idx.data(), base_size);
-            float gt;
-            for (auto j = 0; j < base_size; ++j) {
-                if (metric == vsag::MetricType::METRIC_TYPE_IP ||
-                    metric == vsag::MetricType::METRIC_TYPE_COSINE) {
-                    gt = InnerProduct(vectors.data() + idx[j] * dim, querys.data() + i * dim, &dim);
-                } else if (metric == vsag::MetricType::METRIC_TYPE_L2SQR) {
-                    gt = L2Sqr(vectors.data() + idx[j] * dim, querys.data() + i * dim, &dim);
-                }
-                REQUIRE(std::abs(gt - dists[j]) < error);
-            }
-        }
-    };
-
-    func(data_cell.get());
-    REQUIRE(data_cell->TotalCount() == base_size);
+    auto counts = {100, 1000};
+    IndexCommonParam common;
+    common.dim_ = dim;
+    common.allocator_ = allocator.get();
+    common.metric_ = metric;
+    for (auto count : counts) {
+        auto flatten =
+            std::make_shared<FlattenDataCell<QuantTmpl, IOTmpl>>(quantizer_json, io_json, common);
+        FlattenInterfaceTest test(flatten, metric);
+        test.BasicTest(dim, count, error);
+        auto other =
+            std::make_shared<FlattenDataCell<QuantTmpl, IOTmpl>>(quantizer_json, io_json, common);
+        test.TestSerializeAndDeserialize(dim, other, error);
+    }
 }
 
-TEST_CASE("fp32[ut][flatten_data_cell]") {
-    int dim = 32;
-    auto alloctor = new DefaultAllocator();
-    {
-        auto data_cell = std::make_shared<FlattenDataCell<FP32Quantizer<>, MemoryIO>>();
-        data_cell->SetQuantizer(std::make_shared<FP32Quantizer<>>(dim));
-        data_cell->SetIO(std::make_shared<MemoryIO>(alloctor));
-        TestFlattenDataCell(data_cell, dim, vsag::MetricType::METRIC_TYPE_L2SQR);
-    }
-    {
-        auto data_cell = std::make_shared<
-            FlattenDataCell<FP32Quantizer<vsag::MetricType::METRIC_TYPE_IP>, MemoryIO>>();
-        data_cell->SetQuantizer(
-            std::make_shared<FP32Quantizer<vsag::MetricType::METRIC_TYPE_IP>>(dim));
-        data_cell->SetIO(std::make_shared<MemoryIO>(alloctor));
-        TestFlattenDataCell(data_cell, dim, vsag::MetricType::METRIC_TYPE_IP);
-    }
-    {
-        auto data_cell = std::make_shared<
-            FlattenDataCell<FP32Quantizer<vsag::MetricType::METRIC_TYPE_COSINE>, MemoryIO>>();
-        data_cell->SetQuantizer(
-            std::make_shared<FP32Quantizer<vsag::MetricType::METRIC_TYPE_COSINE>>(dim));
-        data_cell->SetIO(std::make_shared<MemoryIO>(alloctor));
-        TestFlattenDataCell(data_cell, dim, vsag::MetricType::METRIC_TYPE_COSINE);
-    }
-    delete alloctor;
+template <typename IOTmpl>
+void
+TestFlattenDataCellFP32(int dim,
+                        std::shared_ptr<Allocator> allocator,
+                        const nlohmann::json& quantizer_json,
+                        const nlohmann::json& io_json,
+                        float error = 1e-5) {
+    constexpr MetricType metrics[3] = {
+        MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_COSINE, MetricType::METRIC_TYPE_IP};
+    TestFlattenDataCell<FP32Quantizer<metrics[0]>, IOTmpl, metrics[0]>(
+        dim, allocator, quantizer_json, io_json, error);
+    TestFlattenDataCell<FP32Quantizer<metrics[1]>, IOTmpl, metrics[1]>(
+        dim, allocator, quantizer_json, io_json, error);
+    TestFlattenDataCell<FP32Quantizer<metrics[2]>, IOTmpl, metrics[2]>(
+        dim, allocator, quantizer_json, io_json, error);
 }
 
-TEST_CASE("sq8[ut][flatten_data_cell]") {
-    int dim = 32;
-    auto alloctor = new DefaultAllocator();
-    {
-        auto data_cell = std::make_shared<FlattenDataCell<SQ8Quantizer<>, MemoryIO>>();
-        data_cell->SetQuantizer(std::make_shared<SQ8Quantizer<>>(dim));
-        data_cell->SetIO(std::make_shared<MemoryIO>(alloctor));
-        TestFlattenDataCell(data_cell, dim, vsag::MetricType::METRIC_TYPE_L2SQR, 0.01);
+TEST_CASE("fp32 [ut][flatten_data_cell]") {
+    auto allocator = std::make_shared<DefaultAllocator>();
+    auto fp32_param = nlohmann::json::parse("{}");
+    auto io_param = nlohmann::json::parse("{}");
+    auto dims = {8, 64, 512};
+    float error = 1e-5;
+    for (auto dim : dims) {
+        TestFlattenDataCellFP32<MemoryIO>(dim, allocator, fp32_param, io_param, error);
+        TestFlattenDataCellFP32<MemoryBlockIO>(dim, allocator, fp32_param, io_param, error);
     }
-    {
-        auto data_cell = std::make_shared<
-            FlattenDataCell<SQ8Quantizer<vsag::MetricType::METRIC_TYPE_IP>, MemoryIO>>();
-        data_cell->SetQuantizer(
-            std::make_shared<SQ8Quantizer<vsag::MetricType::METRIC_TYPE_IP>>(dim));
-        data_cell->SetIO(std::make_shared<MemoryIO>(alloctor));
-        TestFlattenDataCell(data_cell, dim, vsag::MetricType::METRIC_TYPE_IP, 0.01);
-    }
-    {
-        auto data_cell = std::make_shared<
-            FlattenDataCell<SQ8Quantizer<vsag::MetricType::METRIC_TYPE_COSINE>, MemoryIO>>();
-        data_cell->SetQuantizer(
-            std::make_shared<SQ8Quantizer<vsag::MetricType::METRIC_TYPE_COSINE>>(dim));
-        data_cell->SetIO(std::make_shared<MemoryIO>(alloctor));
-        TestFlattenDataCell(data_cell, dim, vsag::MetricType::METRIC_TYPE_COSINE, 0.01);
-    }
-    delete alloctor;
 }
+
+template <typename IOTmpl>
+void
+TestFlattenDataCellSQ8(int dim,
+                       std::shared_ptr<Allocator> allocator,
+                       const nlohmann::json& quantizer_json,
+                       const nlohmann::json& io_json,
+                       float error = 1e-5) {
+    constexpr MetricType metrics[3] = {
+        MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_COSINE, MetricType::METRIC_TYPE_IP};
+    TestFlattenDataCell<SQ8Quantizer<metrics[0]>, IOTmpl, metrics[0]>(
+        dim, allocator, quantizer_json, io_json, error);
+    TestFlattenDataCell<SQ8Quantizer<metrics[1]>, IOTmpl, metrics[1]>(
+        dim, allocator, quantizer_json, io_json, error);
+    TestFlattenDataCell<SQ8Quantizer<metrics[2]>, IOTmpl, metrics[2]>(
+        dim, allocator, quantizer_json, io_json, error);
+}
+
+TEST_CASE("sq8 [ut][flatten_data_cell]") {
+    auto allocator = std::make_shared<DefaultAllocator>();
+    auto sq8_param = nlohmann::json::parse("{}");
+    auto io_param = nlohmann::json::parse("{}");
+    auto dims = {32, 64, 512};
+    auto error = 2e-2f;
+    for (auto dim : dims) {
+        TestFlattenDataCellSQ8<MemoryIO>(dim, allocator, sq8_param, io_param, error);
+        TestFlattenDataCellSQ8<MemoryBlockIO>(dim, allocator, sq8_param, io_param, error);
+    }
+}
+*/

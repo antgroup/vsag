@@ -14,8 +14,8 @@
 // limitations under the License.
 
 #pragma once
-#include <math.h>
 
+#include <cmath>
 #include <limits>
 #include <string>
 #include <unordered_map>
@@ -32,7 +32,7 @@ using sum_type = float;
 template <MetricType metric = MetricType::METRIC_TYPE_L2SQR>
 class SQ4UniformQuantizer : public Quantizer<SQ4UniformQuantizer<metric>> {
 public:
-    explicit SQ4UniformQuantizer(int dim);
+    explicit SQ4UniformQuantizer(int dim, Allocator* allocator);
 
     bool
     TrainImpl(const DataType* data, uint64_t count);
@@ -60,6 +60,9 @@ public:
                     const uint8_t* codes,
                     float* dists) const;
 
+    inline void
+    ReleaseComputerImpl(Computer<SQ4UniformQuantizer<metric>>& computer) const;
+
 private:
     DataType lower_bound_{0};
     DataType diff_{0};
@@ -75,8 +78,8 @@ private:
 };
 
 template <MetricType metric>
-SQ4UniformQuantizer<metric>::SQ4UniformQuantizer(int dim)
-    : Quantizer<SQ4UniformQuantizer<metric>>(dim) {
+SQ4UniformQuantizer<metric>::SQ4UniformQuantizer(int dim, Allocator* allocator)
+    : Quantizer<SQ4UniformQuantizer<metric>>(dim, allocator) {
     lower_bound_ = std::numeric_limits<DataType>::max();
     diff_ = std::numeric_limits<DataType>::lowest();
 
@@ -217,7 +220,7 @@ SQ4UniformQuantizer<metric>::DecodeBatchImpl(const uint8_t* codes, DataType* dat
 template <MetricType metric>
 inline float
 SQ4UniformQuantizer<metric>::ComputeImpl(const uint8_t* codes1, const uint8_t* codes2) const {
-    float result = 0;
+    float result = 0.0f;
     if constexpr (metric == MetricType::METRIC_TYPE_L2SQR) {
         result = SQ4UniformComputeCodesIP(codes1, codes2, this->dim_);
 
@@ -234,6 +237,8 @@ SQ4UniformQuantizer<metric>::ComputeImpl(const uint8_t* codes1, const uint8_t* c
         result = lower_bound_ * (sum1 + sum2) + (diff_ / 15.0) * (diff_ / 15.0) * result -
                  lower_bound_ * lower_bound_;
 
+        result = 1 - result;
+
     } else if constexpr (metric == MetricType::METRIC_TYPE_COSINE) {
         result = SQ4UniformComputeCodesIP(codes1, codes2, this->dim_);
 
@@ -242,6 +247,8 @@ SQ4UniformQuantizer<metric>::ComputeImpl(const uint8_t* codes1, const uint8_t* c
 
         result = lower_bound_ * (sum1 + sum2) + (diff_ / 15.0) * (diff_ / 15.0) * result -
                  lower_bound_ * lower_bound_;
+
+        result = 1 - result;
     } else {
         logger::error("unsupported metric type");
         result = 0;
@@ -254,11 +261,12 @@ void
 SQ4UniformQuantizer<metric>::ProcessQueryImpl(const DataType* query,
                                               Computer<SQ4UniformQuantizer>& computer) const {
     try {
-        computer.buf_ = new uint8_t[this->code_size_];  // todo: replace with allocator
+        computer.buf_ = reinterpret_cast<uint8_t*>(this->allocator_->Allocate(this->code_size_));
         this->EncodeOneImpl(query, computer.buf_);
     } catch (const std::bad_alloc& e) {
         computer.buf_ = nullptr;
         logger::error("bad alloc when init computer buf");
+        throw std::bad_alloc();
     }
 }
 
@@ -268,6 +276,13 @@ SQ4UniformQuantizer<metric>::ComputeDistImpl(Computer<SQ4UniformQuantizer>& comp
                                              const uint8_t* codes,
                                              float* dists) const {
     dists[0] = this->ComputeImpl(computer.buf_, codes);
+}
+
+template <MetricType metric>
+void
+SQ4UniformQuantizer<metric>::ReleaseComputerImpl(
+    Computer<SQ4UniformQuantizer<metric>>& computer) const {
+    this->allocator_->Deallocate(computer.buf_);
 }
 
 }  // namespace vsag

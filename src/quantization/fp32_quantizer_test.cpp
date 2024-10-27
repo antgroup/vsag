@@ -26,10 +26,11 @@ using namespace vsag;
 const auto dims = {64, 128};
 const auto counts = {10, 101};
 
-template <MetricType Metric>
+template <MetricType metric>
 void
 TestQuantizerEncodeDecodeMetricFP32(uint64_t dim, int count, float error = 1e-5) {
-    FP32Quantizer<Metric> quantizer(dim);
+    auto allocator = std::make_shared<DefaultAllocator>();
+    FP32Quantizer<metric> quantizer(dim, allocator.get());
     TestQuantizerEncodeDecode(quantizer, dim, count, error);
     TestQuantizerEncodeDecodeSame(quantizer, dim, count, 65536, error);
 }
@@ -47,13 +48,14 @@ TEST_CASE("encode&decode [ut][fp32_quantizer]") {
     }
 }
 
-template <MetricType Metric>
+template <MetricType metric>
 void
 TestComputeMetricFP32(uint64_t dim, int count, float error = 1e-5) {
-    FP32Quantizer<Metric> quantizer(dim);
-    TestComputeCodes<FP32Quantizer<Metric>, Metric>(quantizer, dim, count, error);
-    TestComputeCodesSame<FP32Quantizer<Metric>, Metric>(quantizer, dim, count, 65536);
-    TestComputer<FP32Quantizer<Metric>, Metric>(quantizer, dim, count, error);
+    auto allocator = std::make_shared<DefaultAllocator>();
+    FP32Quantizer<metric> quantizer(dim, allocator.get());
+    TestComputeCodes<FP32Quantizer<metric>, metric>(quantizer, dim, count, error);
+    TestComputeCodesSame<FP32Quantizer<metric>, metric>(quantizer, dim, count, 65536);
+    TestComputer<FP32Quantizer<metric>, metric>(quantizer, dim, count, error);
 }
 
 TEST_CASE("compute [ut][fp32_quantizer]") {
@@ -69,12 +71,13 @@ TEST_CASE("compute [ut][fp32_quantizer]") {
     }
 }
 
-template <MetricType Metric>
+template <MetricType metric>
 void
 TestSerializeAndDeserializeMetricFP32(uint64_t dim, int count, float error = 1e-5) {
-    FP32Quantizer<Metric> quantizer1(dim);
-    FP32Quantizer<Metric> quantizer2(0);
-    TestSerializeAndDeserialize<FP32Quantizer<Metric>, Metric>(
+    auto allocator = std::make_shared<DefaultAllocator>();
+    FP32Quantizer<metric> quantizer1(dim, allocator.get());
+    FP32Quantizer<metric> quantizer2(0, allocator.get());
+    TestSerializeAndDeserialize<FP32Quantizer<metric>, metric>(
         quantizer1, quantizer2, dim, count, error);
 }
 

@@ -111,7 +111,7 @@ TestComputeCodes(
         float value = quantizer.Compute(codes1.data(), codes2.data());
         if constexpr (metric == vsag::MetricType::METRIC_TYPE_IP ||
                       metric == vsag::MetricType::METRIC_TYPE_COSINE) {
-            gt = InnerProduct(vecs.data() + idx1 * dim, vecs.data() + idx2 * dim, &dim);
+            gt = 1 - InnerProduct(vecs.data() + idx1 * dim, vecs.data() + idx2 * dim, &dim);
         } else if constexpr (metric == vsag::MetricType::METRIC_TYPE_L2SQR) {
             gt = L2Sqr(vecs.data() + idx1 * dim, vecs.data() + idx2 * dim, &dim);
         }
@@ -145,7 +145,7 @@ TestComputeCodesSame(Quantizer<T>& quantizer,
         float value = quantizer.Compute(codes1.data(), codes2.data());
         if constexpr (metric == vsag::MetricType::METRIC_TYPE_IP ||
                       metric == vsag::MetricType::METRIC_TYPE_COSINE) {
-            gt = InnerProduct(data.data() + idx1 * dim, data.data() + idx2 * dim, &dim);
+            gt = 1 - InnerProduct(data.data() + idx1 * dim, data.data() + idx2 * dim, &dim);
         } else if constexpr (metric == vsag::MetricType::METRIC_TYPE_L2SQR) {
             gt = L2Sqr(data.data() + idx1 * dim, data.data() + idx2 * dim, &dim);
         }
@@ -177,7 +177,7 @@ TestComputer(
             REQUIRE(quant.ComputeDist(*computer, codes1) == value);
             if constexpr (metric == vsag::MetricType::METRIC_TYPE_IP ||
                           metric == vsag::MetricType::METRIC_TYPE_COSINE) {
-                gt = InnerProduct(vecs.data() + idx1 * dim, querys.data() + i * dim, &dim);
+                gt = 1 - InnerProduct(vecs.data() + idx1 * dim, querys.data() + i * dim, &dim);
             } else if constexpr (metric == vsag::MetricType::METRIC_TYPE_L2SQR) {
                 gt = L2Sqr(vecs.data() + idx1 * dim, querys.data() + i * dim, &dim);
             }

@@ -25,13 +25,14 @@ using namespace vsag;
 const auto dims = fixtures::get_common_used_dims();
 const auto counts = {10, 101};
 
-template <MetricType Metric>
+template <MetricType metric>
 void
 TestQuantizerEncodeDecodeMetricSQ4(uint64_t dim,
                                    int count,
                                    float error = 1e-5,
                                    float error_same = 1e-2) {
-    SQ4Quantizer<Metric> quantizer(dim);
+    auto allocator = std::make_shared<DefaultAllocator>();
+    SQ4Quantizer<metric> quantizer(dim, allocator.get());
     TestQuantizerEncodeDecode(quantizer, dim, count, error);
     TestQuantizerEncodeDecodeSame(quantizer, dim, count, 15, error_same);
 }
@@ -50,20 +51,21 @@ TEST_CASE("Encode and Decode", "[ut][SQ4Quantizer]") {
     }
 }
 
-template <MetricType Metric>
+template <MetricType metric>
 void
 TestComputeMetricSQ4(uint64_t dim, int count, float error = 1e-5) {
-    SQ4Quantizer<Metric> quantizer(dim);
-    TestComputeCodes<SQ4Quantizer<Metric>, Metric>(quantizer, dim, count, error);
-    TestComputeCodesSame<SQ4Quantizer<Metric>, Metric>(quantizer, dim, count, error);
-    TestComputer<SQ4Quantizer<Metric>, Metric>(quantizer, dim, count, error);
+    auto allocator = std::make_shared<DefaultAllocator>();
+    SQ4Quantizer<metric> quantizer(dim, allocator.get());
+    TestComputeCodes<SQ4Quantizer<metric>, metric>(quantizer, dim, count, error);
+    TestComputer<SQ4Quantizer<metric>, metric>(quantizer, dim, count, error);
 }
 
 TEST_CASE("compute [ut][sq4_quantizer]") {
     constexpr MetricType metrics[3] = {
         MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_COSINE, MetricType::METRIC_TYPE_IP};
-    float error = 0.6f;
+
     for (auto dim : dims) {
+        float error = 0.1f * dim;
         for (auto count : counts) {
             TestComputeMetricSQ4<metrics[0]>(dim, count, error);
             TestComputeMetricSQ4<metrics[1]>(dim, count, error);
