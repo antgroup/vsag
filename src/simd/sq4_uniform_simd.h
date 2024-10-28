@@ -14,10 +14,8 @@
 // limitations under the License.
 
 #pragma once
-#include <cpuinfo.h>
-#include <x86intrin.h>
 
-#include <vector>
+#include <cstdint>
 
 namespace vsag {
 namespace generic {
