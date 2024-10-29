@@ -25,7 +25,9 @@
 
 #include "H5Cpp.h"
 #include "nlohmann/json.hpp"
+#include "omp.h"
 #include "spdlog/spdlog.h"
+#include "vsag/logger.h"
 #include "vsag/vsag.h"
 
 using namespace nlohmann;
@@ -49,6 +51,8 @@ main(int argc, char* argv[]) {
         std::cerr << "Usage: " << argv[0]
                   << " <dataset_file_path> <process> <index_name> <build_param> <search_param>"
                   << std::endl;
+        std::cerr << "Actual: " << argc << " " << argv[0] << " " << argv[1] << " " << argv[2] << " "
+                  << argv[3] << " " << argv[4] << " " << argv[5] << std::endl;
         return -1;
     }
 
@@ -99,13 +103,11 @@ public:
         H5::H5File file(filename, H5F_ACC_RDONLY);
 
         // check datasets exist
-        bool has_labels = false;
         {
             auto datasets = get_datasets(file);
             assert(datasets.count("train"));
             assert(datasets.count("test"));
             assert(datasets.count("neighbors"));
-            has_labels = datasets.count("train_labels") && datasets.count("test_labels");
         }
 
         // get and (should check shape)
@@ -124,6 +126,7 @@ public:
         obj->dim_ = train_shape.second;
         obj->number_of_base_ = train_shape.first;
         obj->number_of_query_ = test_shape.first;
+        obj->number_of_neighbor_ = neighbors_shape.first;
 
         // read from file
         {
@@ -178,19 +181,6 @@ public:
             H5::FloatType datatype(H5::PredType::NATIVE_INT64);
             dataset.read(obj->neighbors_.get(), datatype, dataspace);
         }
-        if (has_labels) {
-            H5::FloatType datatype(H5::PredType::NATIVE_INT64);
-
-            H5::DataSet train_labels_dataset = file.openDataSet("/train_labels");
-            H5::DataSpace train_labels_dataspace = train_labels_dataset.getSpace();
-            obj->train_labels_ = std::shared_ptr<int64_t[]>(new int64_t[obj->number_of_base_]);
-            train_labels_dataset.read(obj->train_labels_.get(), datatype, train_labels_dataspace);
-
-            H5::DataSet test_labels_dataset = file.openDataSet("/test_labels");
-            H5::DataSpace test_labels_dataspace = test_labels_dataset.getSpace();
-            obj->test_labels_ = std::shared_ptr<int64_t[]>(new int64_t[obj->number_of_query_]);
-            test_labels_dataset.read(obj->test_labels_.get(), datatype, test_labels_dataspace);
-        }
 
         return obj;
     }
@@ -232,6 +222,11 @@ public:
     }
 
     int64_t
+    GetNumberOfNeighbor() const {
+        return number_of_neighbor_;
+    }
+
+    int64_t
     GetDim() const {
         return dim_;
     }
@@ -243,14 +238,6 @@ public:
     std::string
     GetTestDataType() const {
         return test_data_type_;
-    }
-
-    bool
-    IsMatch(int64_t query_id, int64_t base_id) {
-        if (this->test_labels_ == nullptr || this->train_labels_ == nullptr) {
-            return true;
-        }
-        return test_labels_[query_id] == train_labels_[base_id];
     }
 
 private:
@@ -289,13 +276,12 @@ private:
     std::shared_ptr<char[]> train_;
     std::shared_ptr<char[]> test_;
     std::shared_ptr<int64_t[]> neighbors_;
-    std::shared_ptr<int64_t[]> train_labels_;
-    std::shared_ptr<int64_t[]> test_labels_;
     shape_t train_shape_;
     shape_t test_shape_;
     shape_t neighbors_shape_;
     int64_t number_of_base_;
     int64_t number_of_query_;
+    int64_t number_of_neighbor_;
     int64_t dim_;
     size_t train_data_size_;
     size_t test_data_size_;
@@ -415,62 +401,83 @@ public:
 
         auto test_dataset = TestDataset::Load(dataset_path);
 
-        // search
-        auto search_start = std::chrono::steady_clock::now();
-        int64_t correct = 0;
-        int64_t total = test_dataset->GetNumberOfQuery();
-        spdlog::debug("total: " + std::to_string(total));
-        std::vector<DatasetPtr> results;
-        for (int64_t i = 0; i < total; ++i) {
-            auto query = Dataset::Make();
-            query->NumElements(1)->Dim(test_dataset->GetDim())->Owner(false);
+        for (int round = 0; round < 2; round++) {
+            // search
+            int64_t correct = 0;
+            double search_time_in_second = std::chrono::duration<double>(0).count();
+            int64_t total = 10000000;
+            std::cout << total << std::endl;
+            std::vector<DatasetPtr> results(total);
+            omp_set_num_threads(48);
+#pragma omp parallel for schedule(dynamic, 100)
+            for (int64_t i = 0; i < total; ++i) {
+                if (i % 10000 == 0) {
+                    std::cout << "searched on: " << std::to_string(i) << std::endl;
+                }
+                auto query = Dataset::Make();
+                query->NumElements(1)->Dim(test_dataset->GetDim())->Owner(false);
 
-            if (test_dataset->GetTestDataType() == vsag::DATATYPE_FLOAT32) {
-                query->Float32Vectors((const float*)test_dataset->GetOneTest(i));
-            } else if (test_dataset->GetTestDataType() == vsag::DATATYPE_INT8) {
-                query->Int8Vectors((const int8_t*)test_dataset->GetOneTest(i));
+                if (test_dataset->GetTestDataType() == vsag::DATATYPE_FLOAT32) {
+                    query->Float32Vectors((const float*)test_dataset->GetOneTest(i));
+                } else if (test_dataset->GetTestDataType() == vsag::DATATYPE_INT8) {
+                    query->Int8Vectors((const int8_t*)test_dataset->GetOneTest(i));
+                }
+                auto search_start = std::chrono::steady_clock::now();
+                auto result = index->KnnSearch(query, top_k, search_parameters);
+                auto search_finish = std::chrono::steady_clock::now();
+
+                std::vector<int64_t> ids(result.value()->GetIds(),
+                                         result.value()->GetIds() + top_k);
+                std::vector<int64_t> dists(result.value()->GetDistances(),
+                                           result.value()->GetDistances() + top_k);
+#pragma omp critical
+                {
+                    search_time_in_second +=
+                        std::chrono::duration<double>(search_finish - search_start).count();
+                    auto go = test_dataset->GetNeighbors(i)[0];
+                    auto lo = result.value()->GetIds()[0];
+                    if (lo != go) {
+                        // index->Feedback(query, top_k, search_parameters, go);
+                        index->Pretrain({go}, top_k, search_parameters);
+                    }
+                };
+
+                if (not result.has_value()) {
+                    std::cerr << "query error: " << result.error().message << std::endl;
+                    exit(-1);
+                }
+                results[i] = result.value();
             }
-            auto filter = [&test_dataset, i](int64_t base_id) {
-                return not test_dataset->IsMatch(i, base_id);
-            };
-            auto result = index->KnnSearch(query, top_k, search_parameters, filter);
-            if (not result.has_value()) {
-                std::cerr << "query error: " << result.error().message << std::endl;
-                exit(-1);
+
+            // calculate recall
+            for (int64_t i = 0; i < total; ++i) {
+                auto go = test_dataset->GetNeighbors(i)[0];
+                auto lo = results[i]->GetIds()[0];
+                if (lo == go) {
+                    correct++;
+                }
             }
-            results.emplace_back(result.value());
-        }
-        auto search_finish = std::chrono::steady_clock::now();
+            spdlog::debug("correct: " + std::to_string(correct));
+            float recall = 1.0 * correct / total;
 
-        // calculate recall
-        for (int64_t i = 0; i < total; ++i) {
-            // k@k
-            int64_t* neighbors = test_dataset->GetNeighbors(i);
-            const int64_t* ground_truth = results[i]->GetIds();
-            auto hit_result = getIntersection(neighbors, ground_truth, top_k, top_k);
-            correct += hit_result.size();
+            json output;
+            // input
+            output["index_name"] = index_name;
+            output["search_parameters"] = search_parameters;
+            output["dataset"] = dataset_path;
+            // for debugging
+            output["search_time_in_second"] = search_time_in_second;
+            output["correct"] = correct;
+            output["num_query"] = total;
+            output["top_k"] = top_k;
+            // key results
+            output["recall"] = recall;
+            output["qps"] = total / search_time_in_second;
+            output["estimate_used_memory"] = index->GetMemoryUsage();
+            output["memory"] = memoryUsage;
+            std::cout << output << std::endl;
         }
-        spdlog::debug("correct: " + std::to_string(correct));
-        float recall = 1.0 * correct / (total * top_k);
-
-        json output;
-        // input
-        output["index_name"] = index_name;
-        output["search_parameters"] = search_parameters;
-        output["dataset"] = dataset_path;
-        // for debugging
-        double search_time_in_second =
-            std::chrono::duration<double>(search_finish - search_start).count();
-        output["search_time_in_second"] = search_time_in_second;
-        output["correct"] = correct;
-        output["num_query"] = total;
-        output["top_k"] = top_k;
-        // key results
-        output["recall"] = recall;
-        output["qps"] = total / search_time_in_second;
-        output["estimate_used_memory"] = index->GetMemoryUsage();
-        output["memory"] = memoryUsage;
-        return output;
+        return "";
     }
 
 private:

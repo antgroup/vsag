@@ -29,7 +29,12 @@ namespace vsag {
 extern float
 L2Sqr(const void* pVect1v, const void* pVect2v, const void* qty_ptr);
 
-}
+extern float
+InnerProductDistance(const void* pVect1, const void* pVect2, const void* qty_ptr);
+
+extern float
+INT8InnerProductDistance(const void* pVect1, const void* pVect2, const void* qty_ptr);
+}  // namespace vsag
 
 namespace fixtures {
 
@@ -84,6 +89,27 @@ generate_vectors(int64_t num_vectors, int64_t dim, bool need_normalize, int seed
     }
 
     return vectors;
+}
+
+std::vector<int8_t>
+generate_int8_codes(uint64_t count, uint32_t dim, int seed) {
+    auto code_size = dim;
+    std::vector<int8_t> codes(count * code_size, 0);
+    auto vec = fixtures::generate_vectors(count, dim, true, seed);
+
+    for (int i = 0; i < count; i++) {
+        for (int d = 0; d < dim; d++) {
+            float delta = vec[d + i * dim];
+            if (delta < 0) {
+                delta = 0;
+            } else if (delta > 0.999) {
+                delta = 1;
+            }
+            // Note that here we use overflowed uint8 value to obtain int8 value
+            codes[code_size * i + d] = 255.0 * delta;
+        }
+    }
+    return codes;
 }
 
 std::vector<uint8_t>
@@ -215,6 +241,66 @@ generate_hnsw_build_parameters_string(const std::string& metric_type, int64_t di
     )";
     auto build_parameters = fmt::format(parameter_temp, metric_type, dim);
     return build_parameters;
+}
+
+vsag::DatasetPtr
+brute_force(const vsag::DatasetPtr& query,
+            const vsag::DatasetPtr& base,
+            int64_t k,
+            const std::string& metric_type,
+            const std::string& data_type) {
+    assert(query->GetDim() == base->GetDim());
+    assert(query->GetNumElements() == 1);
+
+    auto result = vsag::Dataset::Make();
+    int64_t* ids = new int64_t[k];
+    float* dists = new float[k];
+    result->Ids(ids)->Distances(dists)->NumElements(k);
+
+    std::priority_queue<std::pair<float, int64_t>> bf_result;
+
+    size_t dim = query->GetDim();
+    const void* query_vec = nullptr;
+    const void* base_vec = nullptr;
+    float dist = 0;
+    for (uint32_t i = 0; i < base->GetNumElements(); i++) {
+        if (data_type == "float32") {
+            query_vec = query->GetFloat32Vectors();
+            base_vec = base->GetFloat32Vectors() + i * base->GetDim();
+        } else if (data_type == "int8") {
+            query_vec = query->GetInt8Vectors();
+            base_vec = base->GetInt8Vectors() + i * base->GetDim();
+        } else {
+            throw std::runtime_error("un-support data type");
+        }
+
+        if (metric_type == "l2") {
+            dist = vsag::L2Sqr(query_vec, base_vec, &dim);
+        } else if (metric_type == "ip") {
+            if (data_type == "float32") {
+                dist = vsag::InnerProductDistance(query_vec, base_vec, &dim);
+            } else {
+                dist = vsag::INT8InnerProductDistance(query_vec, base_vec, &dim);
+            }
+        }
+
+        if (bf_result.size() < k) {
+            bf_result.push({dist, base->GetIds()[i]});
+        } else {
+            if (dist < bf_result.top().first) {
+                bf_result.pop();
+                bf_result.push({dist, base->GetIds()[i]});
+            }
+        }
+    }
+
+    for (int i = k - 1; i >= 0; i--) {
+        ids[i] = bf_result.top().second;
+        dists[i] = bf_result.top().first;
+        bf_result.pop();
+    }
+
+    return std::move(result);
 }
 
 vsag::DatasetPtr

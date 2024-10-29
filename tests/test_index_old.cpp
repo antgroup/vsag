@@ -1060,6 +1060,115 @@ TEST_CASE("build index with generated_build_parameters", "[ft][index]") {
     REQUIRE(recall > 0.95);
 }
 
+TEST_CASE("int8 + freshhnsw + feedback", "[ft][index][hnsw]") {
+    auto logger = vsag::Options::Instance().logger();
+    logger->SetLevel(vsag::Logger::Level::kDEBUG);
+
+    // parameters
+    int dim = 256;
+    int num_base = 10000;
+    int num_query = 1000;
+    int64_t k = 3;
+    auto metric_type = GENERATE("ip");
+    constexpr auto build_parameter_json = R"(
+    {{
+        "dtype": "int8",
+        "metric_type": "{}",
+        "dim": {},
+        "hnsw": {{
+            "max_degree": 16,
+            "ef_construction": 200,
+            "use_conjugate_graph": true
+        }}
+    }}
+    )";
+    auto build_parameter = fmt::format(build_parameter_json, metric_type, dim);
+
+    // create index
+    auto createindex = vsag::Factory::CreateIndex("fresh_hnsw", build_parameter);
+    REQUIRE(createindex.has_value());
+    auto index = createindex.value();
+
+    // generate dataset
+    std::vector<int64_t> base_ids(num_base);
+    for (int64_t i = 0; i < num_base; ++i) {
+        base_ids[i] = i;
+    }
+    auto base_vectors = fixtures::generate_int8_codes(num_base, dim);
+    auto base = vsag::Dataset::Make();
+    auto queries = vsag::Dataset::Make();
+    base->NumElements(num_base)
+        ->Dim(dim)
+        ->Ids(base_ids.data())
+        ->Int8Vectors(base_vectors.data())
+        ->Owner(false);
+
+    auto query_vectors = fixtures::generate_int8_codes(num_query, dim);
+    queries->NumElements(num_query)->Dim(dim)->Int8Vectors(query_vectors.data())->Owner(false);
+
+    // build index
+    auto buildindex = index->Build(base);
+    REQUIRE(buildindex.has_value());
+
+    // train and search
+    float recall[2];
+    int correct;
+    uint32_t error_fix = 0;
+    bool use_conjugate_graph_search = false;
+    for (int round = 0; round < 2; round++) {
+        correct = 0;
+
+        if (round == 0) {
+            logger->Debug("====train stage====");
+        } else {
+            logger->Debug("====test stage====");
+        }
+
+        logger->Debug(fmt::format(R"(Memory Usage: {:.3f} KB)", index->GetMemoryUsage() / 1024.0));
+
+        use_conjugate_graph_search = (round != 0);
+        constexpr auto search_parameters_json = R"(
+        {{
+            "hnsw": {{
+                "ef_search": 100,
+                "use_conjugate_graph_search": {}
+            }}
+        }}
+        )";
+        auto search_parameters = fmt::format(search_parameters_json, use_conjugate_graph_search);
+
+        for (int i = 0; i < num_query; i++) {
+            auto query = vsag::Dataset::Make();
+            query->Dim(dim)
+                ->Int8Vectors(queries->GetInt8Vectors() + i * dim)
+                ->NumElements(1)
+                ->Owner(false);
+
+            auto result = index->KnnSearch(query, k, search_parameters);
+            REQUIRE(result.has_value());
+            auto bf_result = fixtures::brute_force(query, base, 1, metric_type, "int8");
+            int64_t global_optimum = bf_result->GetIds()[0];
+            int64_t local_optimum = result.value()->GetIds()[0];
+
+            if (local_optimum != global_optimum and round == 0) {
+                error_fix += *index->Feedback(query, k, search_parameters, global_optimum);
+                REQUIRE(*index->Feedback(query, k, search_parameters) == 0);
+            }
+
+            if (local_optimum == global_optimum) {
+                correct++;
+            }
+        }
+        recall[round] = correct / (1.0 * num_query);
+        logger->Debug(fmt::format(R"(Recall: {:.4f})", recall[round]));
+    }
+
+    logger->Debug("====summary====");
+    logger->Debug(fmt::format(R"(Error fix: {})", error_fix));
+
+    REQUIRE(fixtures::time_t(recall[1]) == fixtures::time_t(1.0f));
+}
+
 TEST_CASE("hnsw + feedback with global optimum id", "[ft][index][hnsw]") {
     auto logger = vsag::Options::Instance().logger();
     logger->SetLevel(vsag::Logger::Level::kDEBUG);

@@ -65,7 +65,7 @@ Factory::CreateIndex(const std::string& origin_name,
                                           params.type,
                                           params.use_static,
                                           true,
-                                          false,
+                                          params.use_conjugate_graph,
                                           params.normalize,
                                           allocator);
         } else if (name == INDEX_DISKANN) {

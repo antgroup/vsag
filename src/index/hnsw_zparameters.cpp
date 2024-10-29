@@ -127,6 +127,7 @@ CreateFreshHnswParameters::FromJson(const std::string& json_string) {
     obj.use_static = false;
     obj.normalize = parrent_obj.normalize;
     obj.type = parrent_obj.type;
+    obj.use_conjugate_graph = parrent_obj.use_conjugate_graph;
 
     // set obj.use_reversed_edges
     obj.use_reversed_edges = true;
