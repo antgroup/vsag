@@ -238,10 +238,14 @@ HNSW::knn_search(const DatasetPtr& query,
         auto params = HnswSearchParameters::FromJson(parameters);
 
         // perform search
+        int64_t original_k = k;
         std::priority_queue<std::pair<float, size_t>> results;
         double time_cost;
         try {
             Timer t(time_cost);
+            if (use_conjugate_graph_ and params.use_conjugate_graph_search) {
+                k = LOOK_AT_K;
+            }
             results = alg_hnsw_->searchKnn(
                 (const void*)(vector), k, std::max(params.ef_search, k), filter_ptr);
         } catch (const std::runtime_error& e) {
@@ -273,9 +277,13 @@ HNSW::knn_search(const DatasetPtr& query,
                 return this->alg_hnsw_->getDistanceByLabel(label, vector);
             };
             conjugate_graph_->EnhanceResult(results, func);
+            k = original_k;
         }
 
         // return result
+        while (results.size() > k) {
+            results.pop();
+        }
 
         result->Dim(results.size())->NumElements(1)->Owner(true, allocator_->GetRawAllocator());
 
@@ -701,10 +709,15 @@ HNSW::brute_force(const DatasetPtr& query, int64_t k) {
         float* dists = (float*)allocator_->Allocate(sizeof(float) * k);
         result->Distances(dists);
 
-        auto vector = query->GetFloat32Vectors();
+        const void* vector;
+        if (type_ == DataTypes::DATA_TYPE_INT8) {
+            vector = (const void*)query->GetInt8Vectors();
+        } else {
+            vector = (const void*)query->GetFloat32Vectors();
+        }
         std::shared_lock lock(rw_mutex_);
         std::priority_queue<std::pair<float, LabelType>> bf_result =
-            alg_hnsw_->bruteForce((const void*)vector, k);
+            alg_hnsw_->bruteForce(vector, k);
         result->Dim(std::min(k, (int64_t)bf_result.size()));
 
         for (int i = result->GetDim() - 1; i >= 0; i--) {
@@ -739,18 +752,37 @@ HNSW::pretrain(const std::vector<int64_t>& base_tag_ids,
         return 0;
     }
 
+    uint32_t data_size = 0;
     uint32_t add_edges = 0;
     int64_t topk_neighbor_tag_id;
-    const float* topk_data;
-    std::shared_ptr<float[]> generated_data(new float[dim_]);
+    const int8_t* topk_data;
     auto base = Dataset::Make();
     auto generated_query = Dataset::Make();
+    if (type_ == DataTypes::DATA_TYPE_INT8) {
+        data_size = dim_;
+    } else {
+        data_size = dim_ * 4;
+    }
+
+    std::shared_ptr<int8_t[]> generated_data(new int8_t[data_size]);
+    if (type_ == DataTypes::DATA_TYPE_INT8) {
+        generated_query->Dim(dim_)->NumElements(1)->Int8Vectors(generated_data.get())->Owner(false);
+    } else {
+        generated_query->Dim(dim_)
+            ->NumElements(1)
+            ->Float32Vectors((float*)generated_data.get())
+            ->Owner(false);
+    }
+
     base->Dim(dim_)->NumElements(1)->Owner(false);
-    generated_query->Dim(dim_)->NumElements(1)->Float32Vectors(generated_data.get())->Owner(false);
 
     for (const int64_t& base_tag_id : base_tag_ids) {
         try {
-            base->Float32Vectors(this->alg_hnsw_->getDataByLabel(base_tag_id));
+            if (type_ == DataTypes::DATA_TYPE_INT8) {
+                base->Int8Vectors((const int8_t*)this->alg_hnsw_->getDataByLabel(base_tag_id));
+            } else {
+                base->Float32Vectors(this->alg_hnsw_->getDataByLabel(base_tag_id));
+            }
         } catch (const std::runtime_error& e) {
             LOG_ERROR_AND_RETURNS(
                 ErrorType::INVALID_ARGUMENT,
@@ -776,11 +808,18 @@ HNSW::pretrain(const std::vector<int64_t>& base_tag_ids,
             if (topk_neighbor_tag_id == base_tag_id) {
                 continue;
             }
-            topk_data = this->alg_hnsw_->getDataByLabel(topk_neighbor_tag_id);
+            topk_data = (const int8_t*)this->alg_hnsw_->getDataByLabel(topk_neighbor_tag_id);
 
             for (int d = 0; d < dim_; d++) {
-                generated_data.get()[d] = vsag::GENERATE_OMEGA * base->GetFloat32Vectors()[d] +
-                                          (1 - vsag::GENERATE_OMEGA) * topk_data[d];
+                if (type_ == DataTypes::DATA_TYPE_INT8) {
+                    generated_data.get()[d] =
+                        vsag::GENERATE_OMEGA * (float)base->GetInt8Vectors()[d] +
+                        (1 - vsag::GENERATE_OMEGA) * (float)topk_data[d];
+                } else {
+                    generated_data.get()[d] =
+                        vsag::GENERATE_OMEGA * (float)base->GetFloat32Vectors()[d] +
+                        (1 - vsag::GENERATE_OMEGA) * (float)topk_data[d];
+                }
             }
 
             auto feedback_result = this->Feedback(generated_query, k, parameters, base_tag_id);

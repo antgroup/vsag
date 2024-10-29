@@ -310,3 +310,83 @@ TEST_CASE("multi-threading read-write test", "[ft][hnsw]") {
         REQUIRE(search_results[i].get());
     }
 }
+
+TEST_CASE("multi-threading read-write with feedback and pretrain test", "[ft][hnsw]") {
+    // avoid too much slow task logs
+    vsag::Options::Instance().logger()->SetLevel(vsag::Logger::Level::kWARN);
+
+    int thread_num = 32;
+    int dim = 256;
+    int max_elements = 10000;
+    int max_degree = 32;
+    int ef_construction = 200;
+    int ef_search = 100;
+    int k = 10;
+    nlohmann::json hnsw_parameters{{"max_degree", max_degree},
+                                   {"ef_construction", ef_construction},
+                                   {"ef_search", ef_search},
+                                   {"use_conjugate_graph", true}};
+    nlohmann::json index_parameters{
+        {"dtype", "int8"}, {"metric_type", "ip"}, {"dim", dim}, {"hnsw", hnsw_parameters}};
+    auto index = vsag::Factory::CreateIndex("hnsw", index_parameters.dump()).value();
+    std::shared_ptr<int64_t[]> ids(new int64_t[max_elements]);
+    std::shared_ptr<int8_t[]> data(new int8_t[dim * max_elements]);
+
+    ThreadPool pool(thread_num);
+
+    // Generate random data
+    std::mt19937 rng;
+    rng.seed(47);
+    std::uniform_real_distribution<> distrib_real(-128, 127);
+    for (int i = 0; i < max_elements; i++) ids[i] = i;
+    for (int i = 0; i < dim * max_elements; i++) data[i] = (int8_t)distrib_real(rng);
+    nlohmann::json parameters{
+        {"hnsw", {{"ef_search", ef_search}, {"use_conjugate_graph_search", true}}},
+    };
+    std::string str_parameters = parameters.dump();
+
+    std::vector<std::future<uint64_t>> feedback_results;
+    std::vector<std::future<bool>> search_results;
+
+    for (int64_t i = 0; i < max_elements; ++i) {
+        // insert
+        pool.enqueue([&ids, &data, &index, dim, i]() -> uint64_t {
+            auto dataset = vsag::Dataset::Make();
+            dataset->Dim(dim)
+                ->NumElements(1)
+                ->Ids(ids.get() + i)
+                ->Int8Vectors(data.get() + i * dim)
+                ->Owner(false);
+            auto add_res = index->Add(dataset);
+            REQUIRE(add_res.has_value());
+            return add_res.value().size();
+        });
+    }
+
+    for (int64_t i = 0; i < max_elements; ++i) {
+        // feedback
+        feedback_results.push_back(
+            pool.enqueue([&index, &data, i, dim, k, str_parameters]() -> uint64_t {
+                auto query = vsag::Dataset::Make();
+                query->Dim(dim)->NumElements(1)->Int8Vectors(data.get() + i * dim)->Owner(false);
+                auto feedback_res = index->Feedback(query, k, str_parameters);
+                REQUIRE(feedback_res.has_value());
+                return feedback_res.value();
+            }));
+
+        // search
+        search_results.push_back(pool.enqueue([&index, &data, i, dim, k, str_parameters]() -> bool {
+            auto query = vsag::Dataset::Make();
+            query->Dim(dim)->NumElements(1)->Int8Vectors(data.get() + i * dim)->Owner(false);
+            auto result = index->KnnSearch(query, k, str_parameters);
+            return result.has_value();
+        }));
+    }
+    for (auto& res : feedback_results) {
+        REQUIRE(res.get() >= 0);
+    }
+
+    for (int i = 0; i < search_results.size(); ++i) {
+        REQUIRE(search_results[i].get());
+    }
+}
