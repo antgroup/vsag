@@ -152,7 +152,7 @@ TEST_CASE("serialize and deserialize with stream", "[ut][conjugate_graph]") {
     conjugate_graph->AddNeighbor(1, 0);
 
     SECTION("successful case") {
-        fixtures::temp_dir dir("conjugate_graph_test_deserialize_on_not_empty_index");
+        fixtures::TempDir dir("conjugate_graph_test_deserialize_on_not_empty_index");
         std::fstream out_stream(dir.path + "conjugate_graph.bin", std::ios::out | std::ios::binary);
         auto serialize_result = conjugate_graph->Serialize(out_stream);
         REQUIRE(serialize_result.has_value());
@@ -172,7 +172,7 @@ TEST_CASE("serialize and deserialize with stream", "[ut][conjugate_graph]") {
     }
 
     SECTION("invalid magic_num") {
-        fixtures::temp_dir dir("conjugate_graph_test_deserialize_on_not_empty_index");
+        fixtures::TempDir dir("conjugate_graph_test_deserialize_on_not_empty_index");
         std::fstream out_stream(dir.path + "conjugate_graph.bin", std::ios::out | std::ios::binary);
         auto serialize_result = conjugate_graph->Serialize(out_stream);
         REQUIRE(serialize_result.has_value());
@@ -195,7 +195,7 @@ TEST_CASE("serialize and deserialize with stream", "[ut][conjugate_graph]") {
     }
 
     SECTION("invalid version") {
-        fixtures::temp_dir dir("conjugate_graph_test_deserialize_on_not_empty_index");
+        fixtures::TempDir dir("conjugate_graph_test_deserialize_on_not_empty_index");
         std::fstream out_stream(dir.path + "conjugate_graph.bin", std::ios::out | std::ios::binary);
         auto serialize_result = conjugate_graph->Serialize(out_stream);
         REQUIRE(serialize_result.has_value());
@@ -218,7 +218,7 @@ TEST_CASE("serialize and deserialize with stream", "[ut][conjugate_graph]") {
     }
 
     SECTION("less bits") {
-        fixtures::temp_dir dir("conjugate_graph_test_deserialize_on_not_empty_index");
+        fixtures::TempDir dir("conjugate_graph_test_deserialize_on_not_empty_index");
         std::fstream out_stream(dir.path + "conjugate_graph.bin", std::ios::out | std::ios::binary);
         auto serialize_result = conjugate_graph->Serialize(out_stream);
         REQUIRE(serialize_result.has_value());
@@ -234,7 +234,7 @@ TEST_CASE("serialize and deserialize with stream", "[ut][conjugate_graph]") {
 
     SECTION("invalid header") {
         uint32_t invalid_memory_usage = 0;
-        fixtures::temp_dir dir("conjugate_graph_test_deserialize_on_not_empty_index");
+        fixtures::TempDir dir("conjugate_graph_test_deserialize_on_not_empty_index");
         std::fstream out_stream(dir.path + "conjugate_graph.bin", std::ios::out | std::ios::binary);
         auto serialize_result = conjugate_graph->Serialize(out_stream);
         REQUIRE(serialize_result.has_value());
@@ -249,7 +249,7 @@ TEST_CASE("serialize and deserialize with stream", "[ut][conjugate_graph]") {
     }
 
     SECTION("failed deserialize and re-serialize") {
-        fixtures::temp_dir dir("conjugate_graph_test_deserialize_on_not_empty_index");
+        fixtures::TempDir dir("conjugate_graph_test_deserialize_on_not_empty_index");
         std::fstream out_stream(dir.path + "conjugate_graph.bin", std::ios::out | std::ios::binary);
         auto serialize_result = conjugate_graph->Serialize(out_stream);
         REQUIRE(serialize_result.has_value());

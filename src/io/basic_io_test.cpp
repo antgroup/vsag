@@ -27,8 +27,8 @@ TEST_CASE("wrong io", "[ut][basic io]") {
     auto io = std::make_shared<WrongIO>();
     std::vector<uint8_t> data(100);
     bool release;
-    fixtures::temp_dir dirname("TestWrongIO");
-    std::string filename = dirname.path + "/11";
+    fixtures::TempDir dirname("TestWrongIO");
+    std::string filename = dirname.GenerateRandomFile();
     std::ofstream outfile(filename.c_str(), std::ios::binary);
     IOStreamWriter writer(outfile);
     REQUIRE_THROWS(io->Serialize(writer));

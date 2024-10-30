@@ -279,7 +279,7 @@ TEST_CASE("serialize empty index", "[ut][hnsw]") {
     }
 
     SECTION("serialize to fstream") {
-        fixtures::temp_dir dir("hnsw_test_serialize_empty_index");
+        fixtures::TempDir dir("hnsw_test_serialize_empty_index");
         std::fstream out_stream(dir.path + "empty_index.bin", std::ios::out | std::ios::binary);
         auto result = index->Serialize(out_stream);
         REQUIRE_FALSE(result.has_value());
@@ -333,7 +333,7 @@ TEST_CASE("deserialize on not empty index", "[ut][hnsw]") {
     }
 
     SECTION("serialize to fstream") {
-        fixtures::temp_dir dir("hnsw_test_deserialize_on_not_empty_index");
+        fixtures::TempDir dir("hnsw_test_deserialize_on_not_empty_index");
         std::fstream out_stream(dir.path + "index.bin", std::ios::out | std::ios::binary);
         auto serialize_result = index->Serialize(out_stream);
         REQUIRE(serialize_result.has_value());
@@ -469,7 +469,7 @@ TEST_CASE("build with reversed edges", "[ut][hnsw]") {
     REQUIRE(index->CheckGraphIntegrity());
 
     {
-        fixtures::temp_dir dir("test_index_serialize_via_stream");
+        fixtures::TempDir dir("test_index_serialize_via_stream");
 
         // serialize to file stream
         std::fstream out_file(dir.path + "index.bin", std::ios::out | std::ios::binary);
@@ -493,7 +493,7 @@ TEST_CASE("build with reversed edges", "[ut][hnsw]") {
 
     // Serialize(multi-file)
     {
-        fixtures::temp_dir dir("test_index_serialize_via_stream");
+        fixtures::TempDir dir("test_index_serialize_via_stream");
 
         if (auto bs = index->Serialize(); bs.has_value()) {
             auto keys = bs->GetKeys();

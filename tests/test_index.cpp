@@ -549,7 +549,7 @@ TEST_CASE("serialize/deserialize with file stream", "[ft][index]") {
     )";
 
     SECTION("successful case") {
-        fixtures::temp_dir dir("test_index_serialize_via_stream");
+        fixtures::TempDir dir("test_index_serialize_via_stream");
 
         // serialize to file stream
         std::fstream out_file(dir.path + "index.bin", std::ios::out | std::ios::binary);
@@ -574,7 +574,7 @@ TEST_CASE("serialize/deserialize with file stream", "[ft][index]") {
     }
 
     SECTION("less bits") {
-        fixtures::temp_dir dir("test_index_serialize_via_stream");
+        fixtures::TempDir dir("test_index_serialize_via_stream");
 
         // serialize to file stream
         std::fstream out_file(dir.path + "index.bin", std::ios::out | std::ios::binary);
@@ -595,7 +595,7 @@ TEST_CASE("serialize/deserialize with file stream", "[ft][index]") {
     }
 
     SECTION("diskann invalid") {
-        fixtures::temp_dir dir("test_index_serialize_via_stream");
+        fixtures::TempDir dir("test_index_serialize_via_stream");
 
         // serialize to file stream
         std::fstream out_file(dir.path + "index.bin", std::ios::out | std::ios::binary);
@@ -675,7 +675,7 @@ TEST_CASE("serialize/deserialize hnswstatic with file stream", "[ft][index]") {
     )";
 
     SECTION("successful case") {
-        fixtures::temp_dir dir("test_index_serialize_via_stream");
+        fixtures::TempDir dir("test_index_serialize_via_stream");
 
         // serialize to file stream
         std::fstream out_file(dir.path + "index.bin", std::ios::out | std::ios::binary);
@@ -697,17 +697,17 @@ TEST_CASE("serialize/deserialize hnswstatic with file stream", "[ft][index]") {
     }
 
     SECTION("less bits") {
-        fixtures::temp_dir dir("test_index_serialize_via_stream");
-
+        fixtures::TempDir dir("test_index_serialize_via_stream");
+        auto filepath = dir.GenerateRandomFile();
         // serialize to file stream
-        std::fstream out_file(dir.path + "index.bin", std::ios::out | std::ios::binary);
+        std::fstream out_file(filepath, std::ios::out | std::ios::binary);
         REQUIRE(index->Serialize(out_file).has_value());
         int size = out_file.tellg();
         out_file.close();
 
         // deserialize from file stream
-        std::filesystem::resize_file(dir.path + "index.bin", size - 10);
-        std::fstream in_file(dir.path + "index.bin", std::ios::in | std::ios::binary);
+        std::filesystem::resize_file(filepath, size - 10);
+        std::fstream in_file(filepath, std::ios::in | std::ios::binary);
 
         auto new_index = vsag::Factory::CreateIndex(index_name, build_parameters).value();
         REQUIRE(new_index->Deserialize(in_file).error().type == vsag::ErrorType::READ_ERROR);
