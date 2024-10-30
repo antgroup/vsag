@@ -14,7 +14,7 @@
 // limitations under the License.
 
 #include "flatten_datacell.h"
-/*
+
 #include <algorithm>
 
 #include "catch2/catch_template_test_macros.hpp"
@@ -106,4 +106,3 @@ TEST_CASE("sq8 [ut][flatten_data_cell]") {
         TestFlattenDataCellSQ8<MemoryBlockIO>(dim, allocator, sq8_param, io_param, error);
     }
 }
-*/

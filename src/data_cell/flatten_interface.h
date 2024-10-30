@@ -15,16 +15,32 @@
 
 #pragma once
 
+#include <nlohmann/json.hpp>
+#include <string>
+
+#include "index/index_common_param.h"
 #include "quantization/computer.h"
+#include "stream_reader.h"
+#include "stream_writer.h"
+#include "typing.h"
 
 namespace vsag {
+class FlattenInterface;
+using FlattenInterfacePtr = std::shared_ptr<FlattenInterface>;
+
 class FlattenInterface {
+public:
+    FlattenInterface() = default;
+
+    static FlattenInterfacePtr
+    MakeInstance(const nlohmann::json& json_obj, const IndexCommonParam& common_param);
+
 public:
     virtual void
     Query(float* result_dists,
           std::shared_ptr<ComputerInterface> computer,
-          const uint64_t* idx,
-          uint64_t id_count) = 0;
+          const InnerIdType* idx,
+          InnerIdType id_count) = 0;
 
     virtual std::shared_ptr<ComputerInterface>
     FactoryComputer(const float* query) = 0;
@@ -33,38 +49,57 @@ public:
     Train(const float* data, uint64_t count) = 0;
 
     virtual void
-    InsertVector(const float* vector, uint64_t idx = INT64_MAX) = 0;
+    InsertVector(const float* vector,
+                 InnerIdType idx = std::numeric_limits<InnerIdType>::max()) = 0;
 
     virtual void
-    BatchInsertVector(const float* vectors, uint64_t count, uint64_t* idx = nullptr) = 0;
+    BatchInsertVector(const float* vectors, InnerIdType count, InnerIdType* idx = nullptr) = 0;
 
     virtual float
-    ComputePairVectors(uint64_t id1, uint64_t id2) = 0;
+    ComputePairVectors(InnerIdType id1, InnerIdType id2) = 0;
+
+    virtual void
+    Prefetch(InnerIdType id) = 0;
 
 public:
     virtual void
-    SetMaxCapacity(uint64_t capacity) {
+    SetMaxCapacity(InnerIdType capacity) {
         this->max_capacity_ = capacity;
     };
 
     [[nodiscard]] virtual const uint8_t*
-    GetCodesById(uint64_t id, bool& need_release) const {
+    GetCodesById(InnerIdType id, bool& need_release) const {
         return nullptr;
     }
 
     virtual bool
-    GetCodesById(uint64_t id, uint8_t* codes) const {
+    GetCodesById(InnerIdType id, uint8_t* codes) const {
         return false;
     }
 
-    [[nodiscard]] virtual uint64_t
+    [[nodiscard]] virtual InnerIdType
     TotalCount() const {
         return this->total_count_;
     }
 
+    virtual void
+    Serialize(StreamWriter& writer) {
+        StreamWriter::WriteObj(writer, this->total_count_);
+        StreamWriter::WriteObj(writer, this->max_capacity_);
+        StreamWriter::WriteObj(writer, this->code_size_);
+    }
+
+    virtual void
+    Deserialize(StreamReader& reader) {
+        StreamReader::ReadObj(reader, this->total_count_);
+        StreamReader::ReadObj(reader, this->max_capacity_);
+        StreamReader::ReadObj(reader, this->code_size_);
+    }
+
 public:
-    uint64_t total_count_{0};
-    uint64_t max_capacity_{1000000};
-    uint64_t code_size_{0};
+    InnerIdType total_count_{0};
+    InnerIdType max_capacity_{1000000};
+    uint32_t code_size_{0};
 };
+
 }  // namespace vsag
