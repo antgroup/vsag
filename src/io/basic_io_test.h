@@ -57,10 +57,10 @@ TestSerializeAndDeserialize(BasicIO<T>& wio, BasicIO<T>& rio) {
     std::vector<uint64_t> counts = {200, 500};
     std::vector<uint64_t> max_lengths = {2, 20, 37, 64, 128, 260, 999};
     srandom(time(nullptr));
-    fixtures::temp_dir dirname("TestSerializeAndDeserialize");
+    fixtures::TempDir dirname("TestSerializeAndDeserialize");
     for (auto count : counts) {
         for (auto max_length : max_lengths) {
-            auto filename = dirname.path + "/file_" + std::to_string(random());
+            auto filename = dirname.GenerateRandomFile();
             auto vecs = fixtures::GenTestItems(count, max_length);
             for (auto& item : vecs) {
                 wio.Write(item.data_, item.length_, item.start_);

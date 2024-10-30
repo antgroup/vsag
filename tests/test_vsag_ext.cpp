@@ -134,7 +134,7 @@ TEST_CASE("index handler", "[ft][ext]") {
     }
 
     {
-        fixtures::temp_dir dir("test_ext");
+        fixtures::TempDir dir("test_ext");
         std::fstream out_file(dir.path + "index.bin", std::ios::out | std::ios::binary);
         REQUIRE(index_handler->Serialize(out_file).has_value());
         out_file.close();
