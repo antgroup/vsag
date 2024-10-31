@@ -71,8 +71,8 @@ void
 FlattenInterfaceTest::TestSerializeAndDeserialize(int64_t dim,
                                                   FlattenInterfacePtr other,
                                                   float error) {
-    fixtures::temp_dir dir("");
-    auto path = dir.path + "/flatten";
+    fixtures::TempDir dir("flatten");
+    auto path = dir.GenerateRandomFile();
     std::ofstream outfile(path.c_str(), std::ios::binary);
     IOStreamWriter writer(outfile);
     this->flatten_->Serialize(writer);
