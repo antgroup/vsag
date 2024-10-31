@@ -35,6 +35,11 @@ distribution:           ## Build vsag with distribution options.
 	cmake ${VSAG_CMAKE_ARGS} -DCMAKE_BUILD_TYPE=Release -DENABLE_CXX11_ABI=off -DENABLE_LIBCXX=off
 	cmake --build build --parallel ${COMPILE_JOBS}
 
+.PHONY: libcxx
+libcxx:           ## Build vsag using libc++.
+	cmake ${VSAG_CMAKE_ARGS} -DCMAKE_BUILD_TYPE=Release -DENABLE_LIBCXX=on
+	cmake --build build --parallel ${COMPILE_JOBS}
+
 .PHONY: fmt
 fmt:                    ## Format codes.
 	find include/ -iname "*.h" -o -iname "*.cpp" | xargs clang-format -i
