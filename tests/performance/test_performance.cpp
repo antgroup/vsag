@@ -99,11 +99,13 @@ public:
         H5::H5File file(filename, H5F_ACC_RDONLY);
 
         // check datasets exist
+        bool has_labels = false;
         {
             auto datasets = get_datasets(file);
             assert(datasets.count("train"));
             assert(datasets.count("test"));
             assert(datasets.count("neighbors"));
+            has_labels = datasets.count("train_labels") && datasets.count("test_labels");
         }
 
         // get and (should check shape)
@@ -176,6 +178,19 @@ public:
             H5::FloatType datatype(H5::PredType::NATIVE_INT64);
             dataset.read(obj->neighbors_.get(), datatype, dataspace);
         }
+        if (has_labels) {
+            H5::FloatType datatype(H5::PredType::NATIVE_INT64);
+
+            H5::DataSet train_labels_dataset = file.openDataSet("/train_labels");
+            H5::DataSpace train_labels_dataspace = train_labels_dataset.getSpace();
+            obj->train_labels_ = std::shared_ptr<int64_t[]>(new int64_t[obj->number_of_base_]);
+            train_labels_dataset.read(obj->train_labels_.get(), datatype, train_labels_dataspace);
+
+            H5::DataSet test_labels_dataset = file.openDataSet("/test_labels");
+            H5::DataSpace test_labels_dataspace = test_labels_dataset.getSpace();
+            obj->test_labels_ = std::shared_ptr<int64_t[]>(new int64_t[obj->number_of_query_]);
+            test_labels_dataset.read(obj->test_labels_.get(), datatype, test_labels_dataspace);
+        }
 
         return obj;
     }
@@ -230,6 +245,11 @@ public:
         return test_data_type_;
     }
 
+    bool
+    IsMatch(int64_t query_id, int64_t base_id) {
+        return test_labels_[query_id] == train_labels_[base_id];
+    }
+
 private:
     using shape_t = std::pair<int64_t, int64_t>;
     static std::unordered_set<std::string>
@@ -266,6 +286,8 @@ private:
     std::shared_ptr<char[]> train_;
     std::shared_ptr<char[]> test_;
     std::shared_ptr<int64_t[]> neighbors_;
+    std::shared_ptr<int64_t[]> train_labels_;
+    std::shared_ptr<int64_t[]> test_labels_;
     shape_t train_shape_;
     shape_t test_shape_;
     shape_t neighbors_shape_;
@@ -405,7 +427,10 @@ public:
             } else if (test_dataset->GetTestDataType() == vsag::DATATYPE_INT8) {
                 query->Int8Vectors((const int8_t*)test_dataset->GetOneTest(i));
             }
-            auto result = index->KnnSearch(query, top_k, search_parameters);
+            auto filter = [&test_dataset, i](int64_t base_id) {
+                return not test_dataset->IsMatch(i, base_id);
+            };
+            auto result = index->KnnSearch(query, top_k, search_parameters, filter);
             if (not result.has_value()) {
                 std::cerr << "query error: " << result.error().message << std::endl;
                 exit(-1);
