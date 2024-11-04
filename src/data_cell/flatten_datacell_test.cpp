@@ -30,8 +30,8 @@ template <typename QuantTmpl, typename IOTmpl, MetricType metric>
 void
 TestFlattenDataCell(int dim,
                     std::shared_ptr<Allocator> allocator,
-                    const nlohmann::json& quantizer_json,
-                    const nlohmann::json& io_json,
+                    const JsonType& quantizer_json,
+                    const JsonType& io_json,
                     float error = 1e-5) {
     auto counts = {100, 1000};
     IndexCommonParam common;
@@ -53,8 +53,8 @@ template <typename IOTmpl>
 void
 TestFlattenDataCellFP32(int dim,
                         std::shared_ptr<Allocator> allocator,
-                        const nlohmann::json& quantizer_json,
-                        const nlohmann::json& io_json,
+                        const JsonType& quantizer_json,
+                        const JsonType& io_json,
                         float error = 1e-5) {
     constexpr MetricType metrics[3] = {
         MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_COSINE, MetricType::METRIC_TYPE_IP};
@@ -66,10 +66,10 @@ TestFlattenDataCellFP32(int dim,
         dim, allocator, quantizer_json, io_json, error);
 }
 
-TEST_CASE("fp32 [ut][flatten_data_cell]") {
+TEST_CASE("fp32", "[ut][flatten_data_cell]") {
     auto allocator = std::make_shared<DefaultAllocator>();
-    auto fp32_param = nlohmann::json::parse("{}");
-    auto io_param = nlohmann::json::parse("{}");
+    auto fp32_param = JsonType::parse("{}");
+    auto io_param = JsonType::parse("{}");
     auto dims = {8, 64, 512};
     float error = 1e-5;
     for (auto dim : dims) {
@@ -82,8 +82,8 @@ template <typename IOTmpl>
 void
 TestFlattenDataCellSQ8(int dim,
                        std::shared_ptr<Allocator> allocator,
-                       const nlohmann::json& quantizer_json,
-                       const nlohmann::json& io_json,
+                       const JsonType& quantizer_json,
+                       const JsonType& io_json,
                        float error = 1e-5) {
     constexpr MetricType metrics[3] = {
         MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_COSINE, MetricType::METRIC_TYPE_IP};
@@ -95,10 +95,10 @@ TestFlattenDataCellSQ8(int dim,
         dim, allocator, quantizer_json, io_json, error);
 }
 
-TEST_CASE("sq8 [ut][flatten_data_cell]") {
+TEST_CASE("sq8", "[ut][flatten_data_cell]") {
     auto allocator = std::make_shared<DefaultAllocator>();
-    auto sq8_param = nlohmann::json::parse("{}");
-    auto io_param = nlohmann::json::parse("{}");
+    auto sq8_param = JsonType::parse("{}");
+    auto io_param = JsonType::parse("{}");
     auto dims = {32, 64, 512};
     auto error = 2e-2f;
     for (auto dim : dims) {

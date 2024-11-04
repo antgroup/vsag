@@ -33,7 +33,7 @@ class SQ8Quantizer : public Quantizer<SQ8Quantizer<metric>> {
 public:
     explicit SQ8Quantizer(int dim, Allocator* allocator);
 
-    SQ8Quantizer(const nlohmann::json& quantization_obj, const IndexCommonParam& common_param);
+    SQ8Quantizer(const nlohmann::json& quantization_param, const IndexCommonParam& common_param);
 
     ~SQ8Quantizer() = default;
 
@@ -85,7 +85,7 @@ SQ8Quantizer<Metric>::SQ8Quantizer(int dim, Allocator* allocator)
 }
 
 template <MetricType metric>
-SQ8Quantizer<metric>::SQ8Quantizer(const nlohmann::json& quantization_obj,
+SQ8Quantizer<metric>::SQ8Quantizer(const nlohmann::json& quantization_param,
                                    const IndexCommonParam& common_param)
     : Quantizer<SQ8Quantizer<metric>>(common_param.dim_, common_param.allocator_),
       diff_(common_param.allocator_),

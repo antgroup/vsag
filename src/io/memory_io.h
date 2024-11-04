@@ -35,7 +35,7 @@ public:
         current_size_ = MIN_SIZE;
     }
 
-    MemoryIO(const nlohmann::json& io_obj, const IndexCommonParam& common_param)
+    MemoryIO(const nlohmann::json& io_param, const IndexCommonParam& common_param)
         : allocator_(common_param.allocator_) {
         start_ = reinterpret_cast<uint8_t*>(allocator_->Allocate(MIN_SIZE));
         current_size_ = MIN_SIZE;

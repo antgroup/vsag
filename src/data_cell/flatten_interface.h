@@ -33,7 +33,7 @@ public:
     FlattenInterface() = default;
 
     static FlattenInterfacePtr
-    MakeInstance(const nlohmann::json& json_obj, const IndexCommonParam& common_param);
+    MakeInstance(const JsonType& flatten_interface_param, const IndexCommonParam& common_param);
 
 public:
     virtual void
