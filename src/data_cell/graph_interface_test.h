@@ -15,12 +15,20 @@
 
 #pragma once
 
-#include <cstdint>
-#include <nlohmann/json.hpp>
+#include <algorithm>
+#include <random>
+
+#include "graph_interface.h"
+
 namespace vsag {
+class GraphInterfaceTest {
+public:
+    explicit GraphInterfaceTest(GraphInterfacePtr graph) : graph_(std::move(graph)){};
 
-using InnerIdType = uint32_t;  // inner id's type; index's vector count may less than 2^31 - 1
-using LabelType = uint64_t;    // external id's type
+    void
+    BasicTest(uint64_t max_id, uint64_t count, GraphInterfacePtr other);
 
-using JsonType = nlohmann::json;  // alias for nlohmann::json type
+public:
+    GraphInterfacePtr graph_{nullptr};
+};
 }  // namespace vsag

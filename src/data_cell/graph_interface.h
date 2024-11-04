@@ -24,8 +24,12 @@
 #include "index/index_common_param.h"
 #include "stream_reader.h"
 #include "stream_writer.h"
+#include "typing.h"
 
 namespace vsag {
+
+class GraphInterface;
+using GraphInterfacePtr = std::shared_ptr<GraphInterface>;
 
 class GraphInterface {
 public:
@@ -33,23 +37,23 @@ public:
 
     virtual ~GraphInterface() = default;
 
-    static std::shared_ptr<GraphInterface>
-    MakeInstance(const nlohmann::json& json_obj,
+    static GraphInterfacePtr
+    MakeInstance(const JsonType& graph_interface_param,
                  const IndexCommonParam& common_param,
                  bool is_sparse = false);
 
 public:
     virtual void
-    InsertNeighborsById(uint64_t id, const std::vector<uint64_t>& neighbor_ids) = 0;
+    InsertNeighborsById(InnerIdType id, const Vector<InnerIdType>& neighbor_ids) = 0;
 
     virtual uint32_t
-    GetNeighborSize(uint64_t id) = 0;
+    GetNeighborSize(InnerIdType id) const = 0;
 
     virtual void
-    GetNeighbors(uint64_t id, std::vector<uint64_t>& neighbor_ids) = 0;
+    GetNeighbors(InnerIdType id, Vector<InnerIdType>& neighbor_ids) const = 0;
 
     virtual void
-    Prefetch(uint64_t id, uint64_t neighbor_i) = 0;
+    Prefetch(InnerIdType id, uint32_t neighbor_i) = 0;
 
 public:
     virtual void
@@ -66,8 +70,8 @@ public:
         StreamReader::ReadObj(reader, this->maximum_degree_);
     }
 
-    virtual uint64_t
-    InsertNeighbors(const std::vector<uint64_t>& neighbor_ids) {
+    virtual InnerIdType
+    InsertNeighbors(const Vector<InnerIdType>& neighbor_ids) {
         this->max_capacity_ = std::max(this->max_capacity_, total_count_ + 1);
         this->InsertNeighborsById(total_count_ + 1, neighbor_ids);
         IncreaseTotalCount(1);
@@ -75,22 +79,22 @@ public:
     }
 
     virtual void
-    IncreaseTotalCount(uint64_t count) {
+    IncreaseTotalCount(InnerIdType count) {
         std::unique_lock<std::mutex> lock(global_);
         total_count_ += count;
     }
 
-    [[nodiscard]] virtual uint64_t
+    [[nodiscard]] virtual InnerIdType
     TotalCount() const {
         return this->total_count_;
     }
 
-    [[nodiscard]] virtual uint32_t
+    [[nodiscard]] virtual InnerIdType
     MaximumDegree() const {
         return this->maximum_degree_;
     }
 
-    [[nodiscard]] virtual uint64_t
+    [[nodiscard]] virtual InnerIdType
     MaxCapacity() const {
         return this->max_capacity_;
     }
@@ -101,19 +105,19 @@ public:
     }
 
     virtual void
-    SetTotalCount(uint64_t total_count) {
+    SetTotalCount(InnerIdType total_count) {
         this->total_count_ = total_count;
     };
 
     virtual void
-    SetMaxCapacity(uint64_t capacity) {
+    SetMaxCapacity(InnerIdType capacity) {
         this->max_capacity_ = std::max(capacity, this->total_count_);
     };
 
 public:
-    uint64_t total_count_{0};
+    InnerIdType total_count_{0};
 
-    uint64_t max_capacity_{1000000};
+    InnerIdType max_capacity_{1000000};
     uint32_t maximum_degree_{0};
 
     std::mutex global_{};
