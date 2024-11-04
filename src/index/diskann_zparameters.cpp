@@ -15,36 +15,31 @@
 
 #include "diskann_zparameters.h"
 
+#include "index_common_param.h"
+
 namespace vsag {
 
 CreateDiskannParameters
 CreateDiskannParameters::FromJson(const std::string& json_string) {
     nlohmann::json params = nlohmann::json::parse(json_string);
-
-    CHECK_ARGUMENT(params.contains(PARAMETER_DTYPE),
-                   fmt::format("parameters must contains {}", PARAMETER_DTYPE));
-    CHECK_ARGUMENT(
-        params[PARAMETER_DTYPE] == DATATYPE_FLOAT32,
-        fmt::format("parameters[{}] supports {} only now", PARAMETER_DTYPE, DATATYPE_FLOAT32));
-    CHECK_ARGUMENT(params.contains(PARAMETER_METRIC_TYPE),
-                   fmt::format("parameters must contains {}", PARAMETER_METRIC_TYPE));
-    CHECK_ARGUMENT(params.contains(PARAMETER_DIM),
-                   fmt::format("parameters must contains {}", PARAMETER_DIM));
-
     CreateDiskannParameters obj;
 
-    // set ojb.dim
-    obj.dim = params[PARAMETER_DIM];
+    auto index_common_param = IndexCommonParam::CheckAndCreate(json_string);
 
-    // set ojb.dtype
+    CHECK_ARGUMENT(
+        index_common_param.data_type_ == DataTypes::DATA_TYPE_FLOAT,
+        fmt::format("parameters[{}] supports {} only now", PARAMETER_DTYPE, DATATYPE_FLOAT32));
+
+    // set obj.dim
+    obj.dim = index_common_param.dim_;
+
+    // set obj.dtype
     obj.dtype = params[PARAMETER_DTYPE];
 
     // set obj.metric
-    CHECK_ARGUMENT(params.contains(INDEX_DISKANN),
-                   fmt::format("parameters must contains {}", INDEX_DISKANN));
-    if (params[PARAMETER_METRIC_TYPE] == METRIC_L2) {
+    if (index_common_param.metric_ == MetricType::METRIC_TYPE_L2SQR) {
         obj.metric = diskann::Metric::L2;
-    } else if (params[PARAMETER_METRIC_TYPE] == METRIC_IP) {
+    } else if (index_common_param.metric_ == MetricType::METRIC_TYPE_IP) {
         obj.metric = diskann::Metric::INNER_PRODUCT;
     } else {
         std::string metric = params[PARAMETER_METRIC_TYPE];
@@ -54,6 +49,9 @@ CreateDiskannParameters::FromJson(const std::string& json_string) {
                                                 METRIC_IP,
                                                 metric));
     }
+
+    CHECK_ARGUMENT(params.contains(INDEX_DISKANN),
+                   fmt::format("parameters must contains {}", INDEX_DISKANN));
 
     // set obj.max_degree
     CHECK_ARGUMENT(
