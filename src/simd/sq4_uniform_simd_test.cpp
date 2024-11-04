@@ -69,7 +69,7 @@ TEST_CASE("SQ4 Uniform SIMD Compute Codes", "[SQ4 Uniform SIMD]") {
         return;                                                                            \
     }
 
-TEST_CASE("SQ4 Uniform SIMD Compute Benchmark", "[SQ4 Uniform SIMD]") {
+TEST_CASE("SQ4 Uniform SIMD Compute Benchmark", "[simd][!benchmark]") {
     int64_t count = 100;
     int64_t dim = 256;
     uint32_t code_size = (dim + 1) / 2;

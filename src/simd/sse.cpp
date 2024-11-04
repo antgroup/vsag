@@ -15,7 +15,10 @@
 
 #include <x86intrin.h>
 
+#include <cmath>
+
 #include "fp32_simd.h"
+#include "normalize.h"
 #include "sq4_simd.h"
 #include "sq4_uniform_simd.h"
 #include "sq8_simd.h"
@@ -592,6 +595,34 @@ SQ4UniformComputeCodesIP(const uint8_t* codes1, const uint8_t* codes2, uint64_t 
 #endif
 }
 
+void
+DivScalar(const float* from, float* to, uint64_t dim, float scalar) {
+#if defined(ENABLE_SSE)
+    if (dim == 0) {
+        return;
+    }
+    if (scalar == 0) {
+        scalar = 1.0f;  // TODO(LHT): logger?
+    }
+    int i = 0;
+    __m128 scalarVec = _mm_set1_ps(scalar);
+    for (; i + 3 < dim; i += 4) {
+        __m128 vec = _mm_loadu_ps(from + i);
+        vec = _mm_div_ps(vec, scalarVec);
+        _mm_storeu_ps(to + i, vec);
+    }
+    generic::DivScalar(from + i, to + i, dim - i, scalar);
+#else
+    generic::DivScalar(from, to, dim, scalar);
+#endif
+}
+
+float
+Normalize(const float* from, float* to, uint64_t dim) {
+    float norm = std::sqrt(FP32ComputeIP(from, from, dim));
+    sse::DivScalar(from, to, dim, norm);
+    return norm;
+}
 }  // namespace sse
 
 }  // namespace vsag

@@ -33,7 +33,7 @@ namespace fixtures {
 
 void
 normalize(float* input_vector, int64_t dim) {
-    float magnitude = 0.0f;
+    float magnitude = std::numeric_limits<float>::min();
     for (int64_t i = 0; i < dim; ++i) {
         magnitude += input_vector[i] * input_vector[i];
     }

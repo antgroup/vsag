@@ -97,7 +97,7 @@ TEST_CASE("SQ8 SIMD Compute", "[SQ8 SIMD]") {
         return;                                                                                    \
     }
 
-TEST_CASE("SQ8 SIMD Compute Benchmark", "[SQ8 SIMD]") {
+TEST_CASE("SQ8 SIMD Compute Benchmark", "[simd][!benchmark]") {
     const std::vector<int64_t> dims = {256};
     int64_t count = 200;
     int64_t dim = 256;

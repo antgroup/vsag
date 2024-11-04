@@ -65,7 +65,7 @@ TEST_CASE("FP32 SIMD Compute", "[FP32SIMD]") {
         return;                                                            \
     }
 
-TEST_CASE("FP32 benchmark", "[FP32SIMD benchmark]") {
+TEST_CASE("FP32 benchmark", "[simd][!benchmark]") {
     int64_t count = 500;
     int64_t dim = 128;
     auto vec1 = fixtures::generate_vectors(count * 2, dim);

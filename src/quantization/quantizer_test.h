@@ -18,14 +18,16 @@
 
 #include "fixtures.h"
 #include "quantizer.h"
+#include "simd/normalize.h"
 #include "simd/simd.h"
+
 using namespace vsag;
 
 template <typename T>
 void
 TestQuantizerEncodeDecode(
     Quantizer<T>& quant, int64_t dim, int count, float error = 1e-5, bool retrain = true) {
-    auto vecs = fixtures::generate_vectors(count, dim);
+    auto vecs = fixtures::generate_vectors(count, dim, true);
     if (retrain) {
         quant.ReTrain(vecs.data(), count);
     }
@@ -143,11 +145,16 @@ TestComputeCodesSame(Quantizer<T>& quantizer,
         quantizer.EncodeOne(data.data() + idx2 * dim, codes2.data());
         float gt = 0.0f;
         float value = quantizer.Compute(codes1.data(), codes2.data());
-        if constexpr (metric == vsag::MetricType::METRIC_TYPE_IP ||
-                      metric == vsag::MetricType::METRIC_TYPE_COSINE) {
+        if constexpr (metric == vsag::MetricType::METRIC_TYPE_IP) {
             gt = 1 - InnerProduct(data.data() + idx1 * dim, data.data() + idx2 * dim, &dim);
         } else if constexpr (metric == vsag::MetricType::METRIC_TYPE_L2SQR) {
             gt = L2Sqr(data.data() + idx1 * dim, data.data() + idx2 * dim, &dim);
+        } else if constexpr (metric == vsag::MetricType::METRIC_TYPE_COSINE) {
+            std::vector<float> v1(dim);
+            std::vector<float> v2(dim);
+            Normalize(data.data() + idx1 * dim, v1.data(), dim);
+            Normalize(data.data() + idx2 * dim, v2.data(), dim);
+            gt = 1 - InnerProduct(v1.data(), v2.data(), &dim);
         }
         REQUIRE(std::abs(gt - value) < error);
     }
@@ -158,8 +165,12 @@ void
 TestComputer(
     Quantizer<T>& quant, size_t dim, uint32_t count, float error = 1e-5f, bool retrain = true) {
     auto query_count = 100;
-    auto vecs = fixtures::generate_vectors(count, dim);
-    auto querys = fixtures::generate_vectors(query_count, dim);
+    bool need_normalize = true;
+    if constexpr (metric == vsag::MetricType::METRIC_TYPE_COSINE) {
+        need_normalize = false;
+    }
+    auto vecs = fixtures::generate_vectors(count, dim, need_normalize);
+    auto querys = fixtures::generate_vectors(query_count, dim, need_normalize);
     if (retrain) {
         quant.ReTrain(vecs.data(), count);
     }
@@ -175,11 +186,16 @@ TestComputer(
             float value = 0.0f;
             quant.ComputeDist(*computer, codes1, &value);
             REQUIRE(quant.ComputeDist(*computer, codes1) == value);
-            if constexpr (metric == vsag::MetricType::METRIC_TYPE_IP ||
-                          metric == vsag::MetricType::METRIC_TYPE_COSINE) {
+            if constexpr (metric == vsag::MetricType::METRIC_TYPE_IP) {
                 gt = 1 - InnerProduct(vecs.data() + idx1 * dim, querys.data() + i * dim, &dim);
             } else if constexpr (metric == vsag::MetricType::METRIC_TYPE_L2SQR) {
                 gt = L2Sqr(vecs.data() + idx1 * dim, querys.data() + i * dim, &dim);
+            } else if constexpr (metric == vsag::MetricType::METRIC_TYPE_COSINE) {
+                std::vector<float> v1(dim);
+                std::vector<float> v2(dim);
+                Normalize(vecs.data() + idx1 * dim, v1.data(), dim);
+                Normalize(querys.data() + i * dim, v2.data(), dim);
+                gt = 1 - InnerProduct(v1.data(), v2.data(), &dim);
             }
             REQUIRE(std::abs(gt - value) < error);
             delete[] codes1;

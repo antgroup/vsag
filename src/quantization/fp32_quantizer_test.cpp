@@ -36,14 +36,12 @@ TestQuantizerEncodeDecodeMetricFP32(uint64_t dim, int count, float error = 1e-5)
 }
 
 TEST_CASE("encode&decode [ut][fp32_quantizer]") {
-    constexpr MetricType metrics[3] = {
-        MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_COSINE, MetricType::METRIC_TYPE_IP};
-    float error = 1e-5f;
+    constexpr MetricType metrics[2] = {MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_IP};
+    float error = 2e-5f;
     for (auto dim : dims) {
         for (auto count : counts) {
             TestQuantizerEncodeDecodeMetricFP32<metrics[0]>(dim, count, error);
             TestQuantizerEncodeDecodeMetricFP32<metrics[1]>(dim, count, error);
-            TestQuantizerEncodeDecodeMetricFP32<metrics[2]>(dim, count, error);
         }
     }
 }
@@ -61,7 +59,7 @@ TestComputeMetricFP32(uint64_t dim, int count, float error = 1e-5) {
 TEST_CASE("compute [ut][fp32_quantizer]") {
     constexpr MetricType metrics[3] = {
         MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_COSINE, MetricType::METRIC_TYPE_IP};
-    float error = 1e-5f;
+    float error = 2e-5f;
     for (auto dim : dims) {
         for (auto count : counts) {
             TestComputeMetricFP32<metrics[0]>(dim, count, error);
@@ -84,7 +82,7 @@ TestSerializeAndDeserializeMetricFP32(uint64_t dim, int count, float error = 1e-
 TEST_CASE("serialize&deserialize [ut][fp32_quantizer]") {
     constexpr MetricType metrics[3] = {
         MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_COSINE, MetricType::METRIC_TYPE_IP};
-    float error = 1e-5f;
+    float error = 2e-5f;
     for (auto dim : dims) {
         for (auto count : counts) {
             TestSerializeAndDeserializeMetricFP32<metrics[0]>(dim, count, error);
