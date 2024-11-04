@@ -27,10 +27,13 @@ namespace vsag {
 
 class DefaultAllocator : public Allocator {
 public:
-    static DefaultAllocator*
+    static std::shared_ptr<Allocator>
     Instance() {
-        static DefaultAllocator s_instance;
-        return &s_instance;
+        static std::shared_ptr<Allocator> s_instance;
+        if (s_instance == nullptr) {
+            s_instance = std::make_shared<DefaultAllocator>();
+        }
+        return s_instance;
     }
 
 public:
