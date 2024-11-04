@@ -15,9 +15,10 @@
 
 #include <immintrin.h>
 
-#include <iostream>
+#include <cmath>
 
 #include "fp32_simd.h"
+#include "normalize.h"
 #include "simd.h"
 #include "sq4_simd.h"
 #include "sq4_uniform_simd.h"
@@ -463,6 +464,35 @@ SQ4UniformComputeCodesIP(const uint8_t* codes1, const uint8_t* codes2, uint64_t 
 #else
     return avx2::SQ4UniformComputeCodesIP(codes1, codes2, dim);
 #endif
+}
+
+void
+DivScalar(const float* from, float* to, uint64_t dim, float scalar) {
+#if defined(ENABLE_AVX2)
+    if (dim == 0) {
+        return;
+    }
+    if (scalar == 0) {
+        scalar = 1.0f;  // TODO(LHT): logger?
+    }
+    int i = 0;
+    __m512 scalarVec = _mm512_set1_ps(scalar);
+    for (; i + 15 < dim; i += 16) {
+        __m512 vec = _mm512_loadu_ps(from + i);
+        vec = _mm512_div_ps(vec, scalarVec);
+        _mm512_storeu_ps(to + i, vec);
+    }
+    avx2::DivScalar(from + i, to + i, dim - i, scalar);
+#else
+    avx2::DivScalar(from, to, dim, scalar);
+#endif
+}
+
+float
+Normalize(const float* from, float* to, uint64_t dim) {
+    float norm = std::sqrt(FP32ComputeIP(from, from, dim));
+    avx512::DivScalar(from, to, dim, norm);
+    return norm;
 }
 
 }  // namespace avx512

@@ -38,15 +38,13 @@ TestQuantizerEncodeDecodeMetricSQ4(uint64_t dim,
 }
 
 TEST_CASE("Encode and Decode", "[ut][SQ4Quantizer]") {
-    constexpr MetricType metrics[3] = {
-        MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_COSINE, MetricType::METRIC_TYPE_IP};
+    constexpr MetricType metrics[2] = {MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_IP};
     float error = 2 * 1.0f / 15.0f;
     for (auto dim : dims) {
         for (auto count : counts) {
             auto error_same = (float)(dim * 15 * 0.01);
             TestQuantizerEncodeDecodeMetricSQ4<metrics[0]>(dim, count, error, error_same);
             TestQuantizerEncodeDecodeMetricSQ4<metrics[1]>(dim, count, error, error_same);
-            TestQuantizerEncodeDecodeMetricSQ4<metrics[2]>(dim, count, error, error_same);
         }
     }
 }

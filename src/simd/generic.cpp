@@ -16,6 +16,9 @@
 #include <cmath>
 
 #include "fp32_simd.h"
+#include "normalize.h"
+#include "sq8_simd.h"
+
 namespace vsag {
 
 float
@@ -279,6 +282,26 @@ SQ4UniformComputeCodesIP(const uint8_t* codes1, const uint8_t* codes2, uint64_t 
     }
 
     return result;
+}
+
+float
+Normalize(const float* from, float* to, uint64_t dim) {
+    float norm = std::sqrt(FP32ComputeIP(from, from, dim));
+    generic::DivScalar(from, to, dim, norm);
+    return norm;
+}
+
+void
+DivScalar(const float* from, float* to, uint64_t dim, float scalar) {
+    if (dim == 0) {
+        return;
+    }
+    if (scalar == 0) {
+        scalar = 1.0f;  // TODO(LHT): logger?
+    }
+    for (uint64_t i = 0; i < dim; ++i) {
+        to[i] = from[i] / scalar;
+    }
 }
 
 }  // namespace generic

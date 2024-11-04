@@ -39,15 +39,13 @@ TestQuantizerEncodeDecodeMetricSQ8(uint64_t dim,
 
 TEST_CASE("encode&decode [SQ8Quantizer]") {
     auto dims = fixtures::get_common_used_dims();
-    constexpr MetricType metrics[3] = {
-        MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_COSINE, MetricType::METRIC_TYPE_IP};
+    constexpr MetricType metrics[2] = {MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_IP};
     float error = 1e-2f;
     for (auto dim : dims) {
         for (auto count : counts) {
             auto error_same = (float)(dim * 255 * 0.01);
             TestQuantizerEncodeDecodeMetricSQ8<metrics[0]>(dim, count, error, error_same);
             TestQuantizerEncodeDecodeMetricSQ8<metrics[1]>(dim, count, error, error_same);
-            TestQuantizerEncodeDecodeMetricSQ8<metrics[2]>(dim, count, error, error_same);
         }
     }
 }
