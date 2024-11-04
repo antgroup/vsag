@@ -28,5 +28,8 @@ public:
     DataTypes data_type_{DataTypes::DATA_TYPE_FLOAT};
     int64_t dim_{0};
     Allocator* allocator_{nullptr};
+
+    static IndexCommonParam
+    CheckAndCreate(const std::string& json_string);
 };
 }  // namespace vsag
