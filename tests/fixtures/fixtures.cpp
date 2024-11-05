@@ -16,10 +16,12 @@
 #include "fixtures.h"
 
 #include <cstdint>
+#include <random>
 #include <string>
 #include <unordered_set>
 
 #include "fmt/format.h"
+#include "test_dataset.h"
 #include "vsag/dataset.h"
 
 namespace vsag {
@@ -45,19 +47,26 @@ normalize(float* input_vector, int64_t dim) {
 }
 
 std::vector<int>
-get_common_used_dims() {
-    std::vector<int> dims = {1,    8,   9,    // generic (dim < 32)
-                             32,   33,  48,   // sse(32) + generic(dim < 16)
-                             64,   65,  70,   // avx(64) + generic(dim < 16)
-                             96,   97,  109,  // avx(64) + sse(32) + generic(dim < 16)
-                             128,  129,       // avx512(128) + generic(dim < 16)
-                             160,  161,       // avx512(128) + sse(32) + generic(dim < 16)
-                             192,  193,       // avx512(128) + avx(64) + generic(dim < 16)
-                             224,  225,       // avx512(128) + avx(64) + sse(32) + generic(dim < 16)
-                             256,  512,       // common used dims
-                             784,  960,       // common used dims
-                             1024, 1536};     // common used dims
-    return dims;
+get_common_used_dims(uint64_t count, int seed) {
+    const std::vector<int> dims = {
+        1,    8,    9,      // generic (dim < 32)
+        32,   33,   48,     // sse(32) + generic(dim < 16)
+        64,   65,   70,     // avx(64) + generic(dim < 16)
+        96,   97,   109,    // avx(64) + sse(32) + generic(dim < 16)
+        128,  129,          // avx512(128) + generic(dim < 16)
+        160,  161,          // avx512(128) + sse(32) + generic(dim < 16)
+        192,  193,          // avx512(128) + avx(64) + generic(dim < 16)
+        224,  225,          // avx512(128) + avx(64) + sse(32) + generic(dim < 16)
+        256,  512,          // common used dims
+        784,  960,          // common used dims
+        1024, 1536, 2048};  // common used dims
+    if (count == -1 || count >= dims.size()) {
+        return dims;
+    }
+    std::vector<int> result(dims.begin(), dims.end());
+    std::shuffle(result.begin(), result.end(), std::mt19937(seed));
+    result.resize(count);
+    return result;
 }
 
 std::vector<float>
@@ -265,6 +274,32 @@ GenTestItems(uint64_t count, uint64_t max_length, uint64_t max_index) {
         memcpy(item.data_, vec.data(), item.length_);
     }
     return result;
+}
+
+template <typename T>
+static T*
+CopyVector(const std::vector<T>& vec) {
+    auto result = new T[vec.size()];
+    memcpy(result, vec.data(), vec.size() * sizeof(T));
+    return result;
+}
+
+vsag::DatasetPtr
+generate_one_dataset(int64_t dim, uint64_t count) {
+    auto result = vsag::Dataset::Make();
+    auto [ids, vectors] = generate_ids_and_vectors(count, dim, true, time(nullptr));
+    result->Dim(dim)
+        ->NumElements(count)
+        ->Float32Vectors(CopyVector(vectors))
+        ->Ids(CopyVector(ids))
+        ->Owner(true);
+    return result;
+}
+
+uint64_t
+GetFileSize(const std::string& filename) {
+    std::ifstream file(filename, std::ios::binary | std::ios::ate);
+    return static_cast<uint64_t>(file.tellg());
 }
 
 }  // namespace fixtures

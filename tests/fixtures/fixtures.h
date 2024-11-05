@@ -26,7 +26,7 @@
 namespace fixtures {
 
 std::vector<int>
-get_common_used_dims();
+get_common_used_dims(uint64_t count = -1, int seed = 369);
 
 std::vector<float>
 generate_vectors(int64_t num_vectors, int64_t dim, bool need_normalize = true, int seed = 47);
@@ -177,4 +177,9 @@ struct IOItem {
 std::vector<IOItem>
 GenTestItems(uint64_t count, uint64_t max_length, uint64_t max_index = 100000);
 
+vsag::DatasetPtr
+generate_one_dataset(int64_t dim, uint64_t count);
+
+uint64_t
+GetFileSize(const std::string& filename);
 }  // Namespace fixtures
