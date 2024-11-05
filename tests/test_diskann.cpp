@@ -12,16 +12,49 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <fmt/format-inl.h>
+
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
 #include <fstream>
 #include <iostream>
 #include <nlohmann/json.hpp>
 
+#include "test_index.h"
 #include "vsag/errors.h"
 #include "vsag/vsag.h"
 
 const std::string tmp_dir = "/tmp/";
+
+TEST_CASE_METHOD(fixtures::TestIndex, "diskann build test", "[ft][index][diskann]") {
+    vsag::Options::Instance().logger()->SetLevel(vsag::Logger::Level::kDEBUG);
+
+    auto test_dim_count = 3;
+    auto dims = fixtures::get_common_used_dims(3);
+    auto metric_type = GENERATE("l2", "ip");
+    auto pq_sample_rate = GENERATE(-0.5, 1.0, 20.0);
+    const std::string name = "diskann";
+
+    constexpr auto build_parameter_json = R"(
+        {{
+            "dtype": "float32",
+            "metric_type": "{}",
+            "dim": {},
+            "diskann": {{
+                "max_degree": 16,
+                "ef_construction": 200,
+                "pq_dims": 32,
+                "pq_sample_rate": {}
+            }}
+        }}
+    )";
+
+    for (auto dim : dims) {
+        auto param = fmt::format(build_parameter_json, metric_type, dim, pq_sample_rate);
+        auto index = TestFactory(name, param, true);
+        TestBuildIndex(index, dim);
+    }
+}
 
 TEST_CASE("DiskAnn Float Recall", "[ft][diskann]") {
     int dim = 128;            // Dimension of the elements
