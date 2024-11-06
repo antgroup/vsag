@@ -22,6 +22,7 @@
 #include <vector>
 
 #include "index/index_common_param.h"
+#include "inner_string_params.h"
 #include "stream_reader.h"
 #include "stream_writer.h"
 #include "typing.h"

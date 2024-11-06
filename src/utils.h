@@ -101,4 +101,6 @@ try_parse_parameters(const std::string& json_string) {
     }
 }
 
+std::string
+format_map(const std::string& str, const std::unordered_map<std::string, std::string>& mappings);
 }  // namespace vsag
