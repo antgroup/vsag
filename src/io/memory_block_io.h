@@ -28,8 +28,8 @@
 #include "basic_io.h"
 #include "common.h"
 #include "index/index_common_param.h"
+#include "inner_string_params.h"
 #include "vsag/allocator.h"
-#include "vsag/constants.h"
 
 namespace vsag {
 

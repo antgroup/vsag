@@ -93,37 +93,7 @@ extern const char* const MESSAGE_PARAMETER;
 extern const char* const SERIALIZE_MAGIC_NUM;
 extern const char* const SERIALIZE_VERSION;
 
-// Index Type
-extern const char* const INDEX_TYPE_HGRAPH;
-
-// Parameter key for hgraph
-extern const char* const HGRAPH_USE_REORDER_KEY;
-extern const char* const HGRAPH_GRAPH_KEY;
-extern const char* const HGRAPH_BASE_CODES_KEY;
-extern const char* const HGRAPH_PRECISE_CODES_KEY;
-
-// IO type
-extern const char* const IO_TYPE_KEY;
-extern const char* const IO_TYPE_VALUE_MEMORY_IO;
-extern const char* const IO_TYPE_VALUE_BLOCK_MEMORY_IO;
-
-// IO param key
-extern const char* const IO_PARAMS_KEY;
-extern const char* const BLOCK_IO_BLOCK_SIZE_KEY;
-
-// quantization type
-extern const char* const QUANTIZATION_TYPE_KEY;
-extern const char* const QUANTIZATION_TYPE_VALUE_SQ8;
-extern const char* const QUANTIZATION_TYPE_VALUE_FP32;
-
-// quantization param key
-extern const char* const QUANTIZATION_PARAMS_KEY;
-
-// graph param key
-extern const char* const GRAPH_PARAMS_KEY;
-
-// graph param value
-extern const char* const GRAPH_PARAM_MAX_DEGREE;
-extern const char* const GRAPH_PARAM_INIT_MAX_CAPACITY;
+extern const char* const HGRAPH_USE_REORDER;
+extern const char* const HGRAPH_BASE_QUANTIZATION_TYPE;
 
 }  // namespace vsag

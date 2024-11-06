@@ -19,12 +19,11 @@
 
 #include "common.h"
 #include "flatten_datacell.h"
+#include "inner_string_params.h"
 #include "io/io_headers.h"
 #include "quantization/quantizer_headers.h"
-#include "vsag/constants.h"
 
 namespace vsag {
-
 template <typename QuantTemp, typename IOTemp>
 static FlattenInterfacePtr
 make_instance(const JsonType& flatten_interface_param, const IndexCommonParam& common_param) {
