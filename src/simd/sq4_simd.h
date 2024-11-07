@@ -24,25 +24,25 @@ SQ4ComputeIP(const float* query,
              const uint8_t* codes,
              const float* lower_bound,
              const float* diff,
-             const uint64_t dim);
+             uint64_t dim);
 float
 SQ4ComputeL2Sqr(const float* query,
                 const uint8_t* codes,
                 const float* lower_bound,
                 const float* diff,
-                const uint64_t dim);
+                uint64_t dim);
 float
 SQ4ComputeCodesIP(const uint8_t* codes1,
                   const uint8_t* codes2,
                   const float* lower_bound,
                   const float* diff,
-                  const uint64_t dim);
+                  uint64_t dim);
 float
 SQ4ComputeCodesL2Sqr(const uint8_t* codes1,
                      const uint8_t* codes2,
                      const float* lower_bound,
                      const float* diff,
-                     const uint64_t dim);
+                     uint64_t dim);
 }  // namespace generic
 
 #if defined(ENABLE_SSE)
@@ -52,25 +52,25 @@ SQ4ComputeIP(const float* query,
              const uint8_t* codes,
              const float* lower_bound,
              const float* diff,
-             const uint64_t dim);
+             uint64_t dim);
 float
 SQ4ComputeL2Sqr(const float* query,
                 const uint8_t* codes,
                 const float* lower_bound,
                 const float* diff,
-                const uint64_t dim);
+                uint64_t dim);
 float
 SQ4ComputeCodesIP(const uint8_t* codes1,
                   const uint8_t* codes2,
                   const float* lower_bound,
                   const float* diff,
-                  const uint64_t dim);
+                  uint64_t dim);
 float
 SQ4ComputeCodesL2Sqr(const uint8_t* codes1,
                      const uint8_t* codes2,
                      const float* lower_bound,
                      const float* diff,
-                     const uint64_t dim);
+                     uint64_t dim);
 }  // namespace sse
 #endif
 
@@ -81,25 +81,25 @@ SQ4ComputeIP(const float* query,
              const uint8_t* codes,
              const float* lower_bound,
              const float* diff,
-             const uint64_t dim);
+             uint64_t dim);
 float
 SQ4ComputeL2Sqr(const float* query,
                 const uint8_t* codes,
                 const float* lower_bound,
                 const float* diff,
-                const uint64_t dim);
+                uint64_t dim);
 float
 SQ4ComputeCodesIP(const uint8_t* codes1,
                   const uint8_t* codes2,
                   const float* lower_bound,
                   const float* diff,
-                  const uint64_t dim);
+                  uint64_t dim);
 float
 SQ4ComputeCodesL2Sqr(const uint8_t* codes1,
                      const uint8_t* codes2,
                      const float* lower_bound,
                      const float* diff,
-                     const uint64_t dim);
+                     uint64_t dim);
 }  // namespace avx2
 #endif
 
@@ -110,98 +110,41 @@ SQ4ComputeIP(const float* query,
              const uint8_t* codes,
              const float* lower_bound,
              const float* diff,
-             const uint64_t dim);
+             uint64_t dim);
 float
 SQ4ComputeL2Sqr(const float* query,
                 const uint8_t* codes,
                 const float* lower_bound,
                 const float* diff,
-                const uint64_t dim);
+                uint64_t dim);
 float
 SQ4ComputeCodesIP(const uint8_t* codes1,
                   const uint8_t* codes2,
                   const float* lower_bound,
                   const float* diff,
-                  const uint64_t dim);
+                  uint64_t dim);
 float
 SQ4ComputeCodesL2Sqr(const uint8_t* codes1,
                      const uint8_t* codes2,
                      const float* lower_bound,
                      const float* diff,
-                     const uint64_t dim);
+                     uint64_t dim);
 }  // namespace avx512
 #endif
 
-inline float
-SQ4ComputeIP(const float* query,
-             const uint8_t* codes,
-             const float* lower_bound,
-             const float* diff,
-             uint64_t dim) {
-#if defined(ENABLE_AVX512)
-    return avx512::SQ4ComputeIP(query, codes, lower_bound, diff, dim);
-#endif
-#if defined(ENABLE_AVX2)
-    return avx2::SQ4ComputeIP(query, codes, lower_bound, diff, dim);
-#endif
-#if defined(ENABLE_SSE)
-    return sse::SQ4ComputeIP(query, codes, lower_bound, diff, dim);
-#endif
-    return generic::SQ4ComputeIP(query, codes, lower_bound, diff, dim);
-}
+using SQ4ComputeType = float (*)(const float* query,
+                                 const uint8_t* codes,
+                                 const float* lower_bound,
+                                 const float* diff,
+                                 uint64_t dim);
+extern SQ4ComputeType SQ4ComputeIP;
+extern SQ4ComputeType SQ4ComputeL2Sqr;
 
-inline float
-SQ4ComputeL2Sqr(const float* query,
-                const uint8_t* codes,
-                const float* lower_bound,
-                const float* diff,
-                uint64_t dim) {
-#if defined(ENABLE_AVX512)
-    return avx512::SQ4ComputeL2Sqr(query, codes, lower_bound, diff, dim);
-#endif
-#if defined(ENABLE_AVX2)
-    return avx2::SQ4ComputeL2Sqr(query, codes, lower_bound, diff, dim);
-#endif
-#if defined(ENABLE_SSE)
-    return sse::SQ4ComputeL2Sqr(query, codes, lower_bound, diff, dim);
-#endif
-    return generic::SQ4ComputeL2Sqr(query, codes, lower_bound, diff, dim);
-}
-
-inline float
-SQ4ComputeCodesIP(const uint8_t* codes1,
-                  const uint8_t* codes2,
-                  const float* lower_bound,
-                  const float* diff,
-                  uint64_t dim) {
-#if defined(ENABLE_AVX512)
-    return avx512::SQ4ComputeCodesIP(codes1, codes2, lower_bound, diff, dim);
-#endif
-#if defined(ENABLE_AVX2)
-    return avx2::SQ4ComputeCodesIP(codes1, codes2, lower_bound, diff, dim);
-#endif
-#if defined(ENABLE_SSE)
-    return sse::SQ4ComputeCodesIP(codes1, codes2, lower_bound, diff, dim);
-#endif
-    return generic::SQ4ComputeCodesIP(codes1, codes2, lower_bound, diff, dim);
-}
-
-inline float
-SQ4ComputeCodesL2Sqr(const uint8_t* codes1,
-                     const uint8_t* codes2,
-                     const float* lower_bound,
-                     const float* diff,
-                     uint64_t dim) {
-#if defined(ENABLE_AVX512)
-    return avx512::SQ4ComputeCodesL2Sqr(codes1, codes2, lower_bound, diff, dim);
-#endif
-#if defined(ENABLE_AVX2)
-    return avx2::SQ4ComputeCodesL2Sqr(codes1, codes2, lower_bound, diff, dim);
-#endif
-#if defined(ENABLE_SSE)
-    return sse::SQ4ComputeCodesL2Sqr(codes1, codes2, lower_bound, diff, dim);
-#endif
-    return generic::SQ4ComputeCodesL2Sqr(codes1, codes2, lower_bound, diff, dim);
-}
-
+using SQ4ComputeCodesType = float (*)(const uint8_t* codes1,
+                                      const uint8_t* codes2,
+                                      const float* lower_bound,
+                                      const float* diff,
+                                      uint64_t dim);
+extern SQ4ComputeCodesType SQ4ComputeCodesIP;
+extern SQ4ComputeCodesType SQ4ComputeCodesL2Sqr;
 }  // namespace vsag

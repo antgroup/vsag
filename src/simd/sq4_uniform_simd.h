@@ -44,18 +44,8 @@ SQ4UniformComputeCodesIP(const uint8_t* codes1, const uint8_t* codes2, uint64_t 
 }  // namespace avx512
 #endif
 
-inline float
-SQ4UniformComputeCodesIP(const uint8_t* codes1, const uint8_t* codes2, uint64_t dim) {
-#if defined(ENABLE_AVX512)
-    return avx512::SQ4UniformComputeCodesIP(codes1, codes2, dim);
-#endif
-#if defined(ENABLE_AVX2)
-    return avx2::SQ4UniformComputeCodesIP(codes1, codes2, dim);
-#endif
-#if defined(ENABLE_SSE)
-    return sse::SQ4UniformComputeCodesIP(codes1, codes2, dim);
-#endif
-    return generic::SQ4UniformComputeCodesIP(codes1, codes2, dim);
-}
-
+using SQ4UniformComputeCodesType = float (*)(const uint8_t* codes1,
+                                             const uint8_t* codes2,
+                                             uint64_t dim);
+extern SQ4UniformComputeCodesType SQ4UniformComputeCodesIP;
 }  // namespace vsag
