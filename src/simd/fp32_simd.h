@@ -54,32 +54,8 @@ FP32ComputeL2Sqr(const float* query, const float* codes, uint64_t dim);
 }  // namespace avx512
 #endif
 
-inline float
-FP32ComputeIP(const float* query, const float* codes, uint64_t dim) {
-#if defined(ENABLE_AVX512)
-    return avx512::FP32ComputeIP(query, codes, dim);
-#endif
-#if defined(ENABLE_AVX2)
-    return avx2::FP32ComputeIP(query, codes, dim);
-#endif
-#if defined(ENABLE_SSE)
-    return sse::FP32ComputeIP(query, codes, dim);
-#endif
-    return generic::FP32ComputeIP(query, codes, dim);
-}
-
-inline float
-FP32ComputeL2Sqr(const float* query, const float* codes, uint64_t dim) {
-#if defined(ENABLE_AVX512)
-    return avx512::FP32ComputeL2Sqr(query, codes, dim);
-#endif
-#if defined(ENABLE_AVX2)
-    return avx2::FP32ComputeL2Sqr(query, codes, dim);
-#endif
-#if defined(ENABLE_SSE)
-    return sse::FP32ComputeL2Sqr(query, codes, dim);
-#endif
-    return generic::FP32ComputeL2Sqr(query, codes, dim);
-}
+using FP32ComputeType = float (*)(const float* query, const float* codes, uint64_t dim);
+extern FP32ComputeType FP32ComputeIP;
+extern FP32ComputeType FP32ComputeL2Sqr;
 
 }  // namespace vsag

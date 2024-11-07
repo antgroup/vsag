@@ -16,77 +16,9 @@
 #pragma once
 
 #include <cstdlib>
-#include <string>
 
+#include "simd_status.h"
 namespace vsag {
-
-struct SimdStatus {
-    bool dist_support_sse = false;
-    bool dist_support_avx = false;
-    bool dist_support_avx2 = false;
-    bool dist_support_avx512f = false;
-    bool dist_support_avx512dq = false;
-    bool dist_support_avx512bw = false;
-    bool dist_support_avx512vl = false;
-    bool runtime_has_sse = false;
-    bool runtime_has_avx = false;
-    bool runtime_has_avx2 = false;
-    bool runtime_has_avx512f = false;
-    bool runtime_has_avx512dq = false;
-    bool runtime_has_avx512bw = false;
-    bool runtime_has_avx512vl = false;
-
-    std::string
-    sse() {
-        return status_to_string(dist_support_sse, runtime_has_sse);
-    }
-
-    std::string
-    avx() {
-        return status_to_string(dist_support_avx, runtime_has_avx);
-    }
-
-    std::string
-    avx2() {
-        return status_to_string(dist_support_avx2, runtime_has_avx2);
-    }
-
-    std::string
-    avx512f() {
-        return status_to_string(dist_support_avx512f, runtime_has_avx512f);
-    }
-
-    std::string
-    avx512dq() {
-        return status_to_string(dist_support_avx512dq, runtime_has_avx512dq);
-    }
-
-    std::string
-    avx512bw() {
-        return status_to_string(dist_support_avx512bw, runtime_has_avx512bw);
-    }
-
-    std::string
-    avx512vl() {
-        return status_to_string(dist_support_avx512vl, runtime_has_avx512vl);
-    }
-
-    std::string
-    boolean_to_string(bool value) {
-        if (value) {
-            return "Y";
-        } else {
-            return "N";
-        }
-    }
-
-    std::string
-    status_to_string(bool dist, bool runtime) {
-        return "dist_support:" + boolean_to_string(dist) +
-               " + platform:" + boolean_to_string(runtime) +
-               " = using:" + boolean_to_string(dist & runtime);
-    }
-};
 
 SimdStatus
 setup_simd();
