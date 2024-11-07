@@ -145,7 +145,11 @@ struct comparable_float_t {
 
     bool
     operator==(const comparable_float_t& d) const {
-        return std::fabs(this->value - d.value) < epsilon;
+        double a = this->value;
+        double b = d.value;
+        double max_value = std::max(std::abs(a), std::abs(b));
+        int power = std::max(0, int(log10(max_value) + 1));
+        return std::abs(a - b) <= epsilon * pow(10.0, power);
     }
 
     friend std::ostream&
@@ -155,7 +159,7 @@ struct comparable_float_t {
     }
 
     float value;
-    const float epsilon = 2e-6;
+    const double epsilon = 2e-6;
 };
 using dist_t = comparable_float_t;
 // The error epsilon between time_t and recall_t should be 1e-6; however, the error does not fall

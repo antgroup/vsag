@@ -168,7 +168,7 @@ TEST_CASE("index search distance", "[ft][index]") {
                                 std::sqrt(mold_query * mold_base);
             }
             fixtures::dist_t return_score = knn_result->GetDistances()[j];
-            REQUIRE(return_score == score);
+            REQUIRE(return_score == fixtures::dist_t(score));
             max_score = score;
         }
 
@@ -195,7 +195,7 @@ TEST_CASE("index search distance", "[ft][index]") {
             }
 
             fixtures::dist_t return_score = range_result->GetDistances()[j];
-            REQUIRE(return_score == score);
+            REQUIRE(return_score == fixtures::dist_t(score));
         }
 
         auto search_parameters_no_reorder = R"(
@@ -1181,7 +1181,7 @@ TEST_CASE("hnsw + feedback with global optimum id", "[ft][index][hnsw]") {
     logger->Debug("====summary====");
     logger->Debug(fmt::format(R"(Error fix: {})", error_fix));
 
-    REQUIRE(fixtures::time_t(recall[1]) == 1.0f);
+    REQUIRE(fixtures::time_t(recall[1]) == fixtures::time_t(1.0f));
 }
 
 TEST_CASE("static hnsw + feedback without global optimum id", "[ft][index][hnsw]") {
