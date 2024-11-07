@@ -6,7 +6,7 @@ parallel_tags="[diskann] [hnsw]"
 othertag=""
 
 ./build/tests/unittests -d yes ${UT_FILTER} --allow-running-no-tests --shard-count 1 --shard-index 0
-pids+=($!)
+exit_codes+=($?)
 
 for tag in ${parallel_tags}
 do
