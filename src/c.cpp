@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "wrapper.h"
+#include "vsag/c.h"
 #include "vsag/factory.h"
 #include "vsag/index.h"
 #include <cstddef>
