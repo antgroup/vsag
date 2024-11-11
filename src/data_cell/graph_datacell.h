@@ -66,8 +66,8 @@ public:
      */
     void
     Prefetch(InnerIdType id, uint32_t neighbor_i) override {
-        io_->Prefetch(id * this->code_line_size_ + sizeof(uint32_t) +
-                      neighbor_i * sizeof(InnerIdType));
+        io_->Prefetch(static_cast<uint64_t>(id) * static_cast<uint64_t>(this->code_line_size_) +
+                      sizeof(uint32_t) + neighbor_i * sizeof(InnerIdType));
     }
 
     void
@@ -107,17 +107,19 @@ GraphDataCell<IOTmpl, false>::InsertNeighborsById(InnerIdType id,
             "insert neighbors count {} more than {}", neighbor_ids.size(), this->maximum_degree_));
     }
     this->max_capacity_ = std::max(this->max_capacity_, id + 1);
-    auto start = id * this->code_line_size_;
+    auto start = static_cast<uint64_t>(id) * static_cast<uint64_t>(this->code_line_size_);
     uint32_t neighbor_count = std::min((uint32_t)(neighbor_ids.size()), this->maximum_degree_);
     this->io_->Write((uint8_t*)(&neighbor_count), sizeof(neighbor_count), start);
     start += sizeof(neighbor_count);
-    this->io_->Write((uint8_t*)(neighbor_ids.data()), neighbor_count * sizeof(InnerIdType), start);
+    this->io_->Write((uint8_t*)(neighbor_ids.data()),
+                     static_cast<uint64_t>(neighbor_count) * sizeof(InnerIdType),
+                     start);
 }
 
 template <typename IOTmpl>
 uint32_t
 GraphDataCell<IOTmpl, false>::GetNeighborSize(InnerIdType id) const {
-    auto start = id * this->code_line_size_;
+    auto start = static_cast<uint64_t>(id) * static_cast<uint64_t>(this->code_line_size_);
     uint32_t result = 0;
     this->io_->Read(sizeof(result), start, (uint8_t*)(&result));
     return result;
@@ -127,7 +129,7 @@ template <typename IOTmpl>
 void
 GraphDataCell<IOTmpl, false>::GetNeighbors(InnerIdType id,
                                            Vector<InnerIdType>& neighbor_ids) const {
-    auto start = id * this->code_line_size_;
+    auto start = static_cast<uint64_t>(id) * static_cast<uint64_t>(this->code_line_size_);
     uint32_t neighbor_count = 0;
     this->io_->Read(sizeof(neighbor_count), start, (uint8_t*)(&neighbor_count));
     neighbor_ids.resize(neighbor_count);
