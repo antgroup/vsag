@@ -26,12 +26,12 @@ public:
     StreamWriter() = default;
 
     virtual void
-    Write(char* data, uint64_t size) = 0;
+    Write(const char* data, uint64_t size) = 0;
 
     template <typename T>
     static void
-    WriteObj(StreamWriter& writer, T& val) {
-        writer.Write(reinterpret_cast<char*>(&val), sizeof(val));
+    WriteObj(StreamWriter& writer, const T& val) {
+        writer.Write(reinterpret_cast<const char*>(&val), sizeof(val));
     }
 
     template <typename T>
@@ -56,7 +56,7 @@ public:
     explicit BufferStreamWriter(char*& buffer);
 
     void
-    Write(char* data, uint64_t size) override;
+    Write(const char* data, uint64_t size) override;
 
     char*& buffer_;
 };
@@ -66,7 +66,7 @@ public:
     explicit IOStreamWriter(std::ostream& ostream);
 
     void
-    Write(char* data, uint64_t size) override;
+    Write(const char* data, uint64_t size) override;
 
     std::ostream& ostream_;
 };
@@ -77,7 +77,7 @@ public:
                                    uint64_t cursor);
 
     void
-    Write(char* data, uint64_t size) override;
+    Write(const char* data, uint64_t size) override;
 
     std::function<void(uint64_t, uint64_t, void*)> writeFunc_;
 

@@ -30,14 +30,19 @@ HGraphParameters::HGraphParameters(const IndexCommonParam& common_param, const s
     : common_param_(common_param) {
     this->refresh_json_by_string();
     this->ParseStringParam(str);
+    this->refresh_string_by_json();
 }
 
 void
 HGraphParameters::ParseStringParam(const std::string& str) {
+    if (str == "") {
+        return;
+    }
     auto json_obj = nlohmann::json::parse(str);
     for (const auto& [key, value] : json_obj.items()) {
         this->CheckAndSetKeyValue(key, value);
     }
+    this->refresh_string_by_json();
 }
 
 void
@@ -45,11 +50,11 @@ HGraphParameters::CheckAndSetKeyValue(const std::string& key, nlohmann::json& va
     const auto& iter = EXTERNAL_MAPPING.find(key);
     if (iter != EXTERNAL_MAPPING.end()) {
         const auto& vec = iter->second;
-        auto& json = json_;
+        auto* json = &json_;
         for (const auto& str : vec) {
-            json = json[str];
+            json = &(json->operator[](str));
         }
-        json = value;
+        *json = value;
     } else {
         // TODO(LHT): Error logger
     }
@@ -66,8 +71,8 @@ const std::string HGraphParameters::DEFAULT_HGRAPH_PARAMS = format_map(
             },
             "type": "nsw",
             "{GRAPH_PARAMS_KEY}": {
-                "{GRAPH_PARAM_MAX_DEGREE}": 32,
-                "{GRAPH_PARAM_INIT_MAX_CAPACITY}": 1000000
+                "{GRAPH_PARAM_MAX_DEGREE}": 64,
+                "{GRAPH_PARAM_INIT_MAX_CAPACITY}": 20000000
             }
         },
         "{HGRAPH_BASE_CODES_KEY}": {
@@ -92,7 +97,7 @@ const std::string HGraphParameters::DEFAULT_HGRAPH_PARAMS = format_map(
             "{QUANTIZATION_PARAMS_KEY}": {}
         },
         "build_params": {
-            "ef_construction": 300,
+            "ef_construction": 400,
             "{BUILD_THREAD_COUNT}": 5
         }
     })",

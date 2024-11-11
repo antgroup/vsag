@@ -150,7 +150,7 @@ FlattenDataCell<QuantTmpl, IOTmpl>::InsertVector(const float* vector, InnerIdTyp
 
     auto* codes = reinterpret_cast<uint8_t*>(allocator_->Allocate(code_size_));
     quantizer_->EncodeOne(vector, codes);
-    io_->Write(codes, code_size_, idx * code_size_);
+    io_->Write(codes, code_size_, static_cast<uint64_t>(idx) * static_cast<uint64_t>(code_size_));
     allocator_->Deallocate(codes);
 }
 
@@ -160,9 +160,12 @@ FlattenDataCell<QuantTmpl, IOTmpl>::BatchInsertVector(const float* vectors,
                                                       InnerIdType count,
                                                       InnerIdType* idx) {
     if (idx == nullptr) {
-        auto* codes = reinterpret_cast<uint8_t*>(allocator_->Allocate(code_size_ * count));
+        auto* codes = reinterpret_cast<uint8_t*>(
+            allocator_->Allocate(static_cast<uint64_t>(count) * static_cast<uint64_t>(code_size_)));
         quantizer_->EncodeBatch(vectors, codes, count);
-        io_->Write(codes, code_size_ * count, total_count_ * code_size_);
+        io_->Write(codes,
+                   static_cast<uint64_t>(count) * static_cast<uint64_t>(code_size_),
+                   static_cast<uint64_t>(total_count_) * static_cast<uint64_t>(code_size_));
         total_count_ += count;
         allocator_->Deallocate(codes);
     } else {
@@ -220,13 +223,15 @@ FlattenDataCell<QuantTmpl, IOTmpl>::ComputePairVectors(InnerIdType id1, InnerIdT
 template <typename QuantTmpl, typename IOTmpl>
 const uint8_t*
 FlattenDataCell<QuantTmpl, IOTmpl>::GetCodesById(InnerIdType id, bool& need_release) const {
-    return io_->Read(code_size_, id * code_size_, need_release);
+    return io_->Read(
+        code_size_, static_cast<uint64_t>(id) * static_cast<uint64_t>(code_size_), need_release);
 }
 
 template <typename QuantTmpl, typename IOTmpl>
 bool
 FlattenDataCell<QuantTmpl, IOTmpl>::GetCodesById(InnerIdType id, uint8_t* codes) const {
-    return io_->Read(code_size_, id * code_size_, codes);
+    return io_->Read(
+        code_size_, static_cast<uint64_t>(id) * static_cast<uint64_t>(code_size_), codes);
 }
 
 template <typename QuantTmpl, typename IOTmpl>

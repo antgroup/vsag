@@ -26,8 +26,11 @@
 
 #include "index/diskann.h"
 #include "index/diskann_zparameters.h"
+#include "index/hgraph_index.h"
+#include "index/hgraph_zparameters.h"
 #include "index/hnsw.h"
 #include "index/hnsw_zparameters.h"
+#include "index/index_common_param.h"
 #include "vsag/vsag.h"
 
 namespace vsag {
@@ -81,6 +84,23 @@ Factory::CreateIndex(const std::string& origin_name,
                                              params.use_opq,
                                              params.use_bsa,
                                              params.use_async_io);
+        } else if (name == INDEX_HGRAPH) {
+            auto param = nlohmann::json::parse(parameters);
+            auto common_param = IndexCommonParam::CheckAndCreate(parameters);
+            if (allocator != nullptr) {
+                common_param.allocator_ = allocator;
+            } else {
+                common_param.allocator_ = DefaultAllocator::Instance().get();
+            }
+            logger::debug("created a hgraph index");
+            std::string hgraph_str = "{}";
+            if (param.contains("index_param")) {
+                hgraph_str = param["index_param"].dump();
+            }
+            HGraphParameters hgraph_param(common_param, hgraph_str);
+            auto hgraph_index = std::make_shared<HGraphIndex>(hgraph_param.GetJson(), common_param);
+            hgraph_index->Init();
+            return hgraph_index;
         } else {
             LOG_ERROR_AND_RETURNS(
                 ErrorType::UNSUPPORTED_INDEX, "failed to create index(unsupported): ", name);
