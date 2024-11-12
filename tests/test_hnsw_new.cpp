@@ -80,7 +80,7 @@ TEST_CASE_METHOD(fixtures::TestIndex, "HNSW Factory Test With Exceptions", "[ft]
 
     SECTION("Invalid param") {
         auto metric = GENERATE("", "l4", "inner_product", "cosin", "hamming");
-        auto param_tmp = R"(
+        constexpr const char* param_tmp = R"(
         {{
             "dtype": "float32",
             "metric_type": {},
@@ -96,7 +96,7 @@ TEST_CASE_METHOD(fixtures::TestIndex, "HNSW Factory Test With Exceptions", "[ft]
 
     SECTION("Invalid datatype param") {
         auto datatype = GENERATE("fp32", "uint8_t", "binary", "", "float");
-        auto param_tmp = R"(
+        constexpr const char* param_tmp = R"(
         {{
             "dtype": "{}",
             "metric_type": "l2",
@@ -152,7 +152,7 @@ TEST_CASE_METHOD(fixtures::TestIndex, "HNSW Factory Test With Exceptions", "[ft]
     SECTION("Invalid hnsw param max_degree") {
         auto max_degree = GENERATE(-1, 0, 256, 3);
         // TODO(LHT): test for float param
-        auto param_temp =
+        constexpr const char* param_temp =
             R"({{
                 "dtype": "float32",
                 "metric_type": "l2",
@@ -169,7 +169,7 @@ TEST_CASE_METHOD(fixtures::TestIndex, "HNSW Factory Test With Exceptions", "[ft]
     SECTION("Invalid hnsw param ef_construction") {
         auto ef_construction = GENERATE(-1, 0, 100000, 31);
         // TODO(LHT): test for float param
-        auto param_temp =
+        constexpr const char* param_temp =
             R"({{
                 "dtype": "float32",
                 "metric_type": "l2",
@@ -416,7 +416,7 @@ TEST_CASE_METHOD(fixtures::TestIndex,
 
     SECTION("Invalid search_param ef_search value") {
         auto ef_search = GENERATE(-1, 0, 37182903, -100);  // TODO(LHT): float param
-        auto param_temp =
+        constexpr const char* param_temp =
             R"({{
                 "hnsw": {{
                     "ef_search": {}
