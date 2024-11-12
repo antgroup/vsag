@@ -39,7 +39,7 @@ TEST_CASE("graph basic test", "[ut][sparse_graph_datacell]") {
     auto max_degrees = {5, 12, 24, 32, 64, 128};
     auto max_capacities = {1, 100, 10000, 10'000'000, 32'179'837};
     std::vector<JsonType> graph_params;
-    std::string graph_param_temp = R"(
+    constexpr const char* graph_param_temp = R"(
         {{
             "max_degree": {},
             "init_capacity": {}
