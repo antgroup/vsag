@@ -51,7 +51,6 @@ if(CMAKE_HOST_SYSTEM_PROCESSOR STREQUAL "x86_64" AND ENABLE_INTEL_MKL)
 endif()
 target_link_libraries(diskann
   ${BLAS_LIBRARIES}
-  gfortran
 )
 
 install (
