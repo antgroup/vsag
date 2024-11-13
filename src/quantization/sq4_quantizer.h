@@ -19,9 +19,11 @@
 #include <limits>
 #include <vector>
 
+#include "index/index_common_param.h"
 #include "quantizer.h"
 #include "simd/normalize.h"
 #include "simd/sq4_simd.h"
+#include "typing.h"
 
 namespace vsag {
 
@@ -29,6 +31,9 @@ template <MetricType metric = MetricType::METRIC_TYPE_L2SQR>
 class SQ4Quantizer : public Quantizer<SQ4Quantizer<metric>> {
 public:
     explicit SQ4Quantizer(int dim, Allocator* allocator);
+
+    explicit SQ4Quantizer(const nlohmann::json& quantization_param,
+                          const IndexCommonParam& common_param);
 
     bool
     TrainImpl(const DataType* data, uint64_t count);
@@ -57,6 +62,12 @@ public:
     inline void
     ReleaseComputerImpl(Computer<SQ4Quantizer<metric>>& computer) const;
 
+    inline void
+    SerializeImpl(StreamWriter& writer);
+
+    inline void
+    DeserializeImpl(StreamReader& reader);
+
 private:
     std::vector<DataType> lower_bound_{};
     std::vector<DataType> diff_{};
@@ -69,6 +80,11 @@ SQ4Quantizer<metric>::SQ4Quantizer(int dim, Allocator* allocator)
     lower_bound_.resize(dim, std::numeric_limits<DataType>::max());
     diff_.resize(dim, std::numeric_limits<DataType>::lowest());
 }
+
+template <MetricType metric>
+SQ4Quantizer<metric>::SQ4Quantizer(const nlohmann::json& quantization_param,
+                                   const IndexCommonParam& common_param)
+    : SQ4Quantizer<metric>(common_param.dim_, common_param.allocator_){};
 
 template <MetricType metric>
 bool
@@ -237,6 +253,20 @@ template <MetricType metric>
 void
 SQ4Quantizer<metric>::ReleaseComputerImpl(Computer<SQ4Quantizer<metric>>& computer) const {
     this->allocator_->Deallocate(computer.buf_);
+}
+
+template <MetricType metric>
+void
+SQ4Quantizer<metric>::SerializeImpl(StreamWriter& writer) {
+    StreamWriter::WriteVector(writer, this->diff_);
+    StreamWriter::WriteVector(writer, this->lower_bound_);
+}
+
+template <MetricType metric>
+void
+SQ4Quantizer<metric>::DeserializeImpl(StreamReader& reader) {
+    StreamReader::ReadVector(reader, this->diff_);
+    StreamReader::ReadVector(reader, this->lower_bound_);
 }
 
 }  // namespace vsag

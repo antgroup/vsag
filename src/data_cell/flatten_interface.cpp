@@ -50,6 +50,11 @@ make_instance(const JsonType& flatten_interface_param, const IndexCommonParam& c
         return make_instance<SQ8Quantizer<metric>, IOTemp>(flatten_interface_param, common_param);
     } else if (quantization_string == QUANTIZATION_TYPE_VALUE_FP32) {
         return make_instance<FP32Quantizer<metric>, IOTemp>(flatten_interface_param, common_param);
+    } else if (quantization_string == QUANTIZATION_TYPE_VALUE_SQ4) {
+        return make_instance<SQ4Quantizer<metric>, IOTemp>(flatten_interface_param, common_param);
+    } else if (quantization_string == QUANTIZATION_TYPE_VALUE_SQ4_UNIFORM) {
+        return make_instance<SQ4UniformQuantizer<metric>, IOTemp>(flatten_interface_param,
+                                                                  common_param);
     }
     return nullptr;
 }

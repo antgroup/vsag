@@ -40,6 +40,8 @@ const char* const BLOCK_IO_BLOCK_SIZE_KEY = "block_size";
 // quantization type
 const char* const QUANTIZATION_TYPE_KEY = "quantization_type";
 const char* const QUANTIZATION_TYPE_VALUE_SQ8 = "sq8";
+const char* const QUANTIZATION_TYPE_VALUE_SQ4 = "sq4";
+const char* const QUANTIZATION_TYPE_VALUE_SQ4_UNIFORM = "sq4_uniform";
 const char* const QUANTIZATION_TYPE_VALUE_FP32 = "fp32";
 const char* const QUANTIZATION_TYPE_VALUE_PQ = "pq";
 
