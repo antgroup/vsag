@@ -10,6 +10,9 @@ target_link_libraries (example_diskann vsag_static)
 add_executable (simple_hnsw simple_hnsw.cpp)
 target_link_libraries (simple_hnsw vsag_static)
 
+add_executable (simple_hgraph_sq8 simple_hgraph_sq8.cpp)
+target_link_libraries (simple_hgraph_sq8 vsag_static)
+
 add_executable (example_conjugate_graph example_conjugate_graph.cpp)
 target_link_libraries(example_conjugate_graph vsag)
 
