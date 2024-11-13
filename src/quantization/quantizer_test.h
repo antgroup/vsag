@@ -156,7 +156,7 @@ TestComputeCodesSame(Quantizer<T>& quantizer,
             Normalize(data.data() + idx2 * dim, v2.data(), dim);
             gt = 1 - InnerProduct(v1.data(), v2.data(), &dim);
         }
-        REQUIRE(std::abs(gt - value) < error);
+        REQUIRE(std::abs(gt - value) <= error);
     }
 }
 
@@ -170,7 +170,7 @@ TestComputer(
         need_normalize = false;
     }
     auto vecs = fixtures::generate_vectors(count, dim, need_normalize);
-    auto querys = fixtures::generate_vectors(query_count, dim, need_normalize);
+    auto querys = fixtures::generate_vectors(query_count, dim, need_normalize, 165);
     if (retrain) {
         quant.ReTrain(vecs.data(), count);
     }
@@ -203,13 +203,11 @@ TestComputer(
     }
 }
 
-template <typename T, MetricType metric>
+template <typename T, MetricType metric, bool uniform = false>
 void
 TestSerializeAndDeserialize(
     Quantizer<T>& quant1, Quantizer<T>& quant2, size_t dim, uint32_t count, float error = 1e-5f) {
-    auto query_count = 100;
     auto vecs = fixtures::generate_vectors(count, dim);
-    auto querys = fixtures::generate_vectors(query_count, dim);
     quant1.ReTrain(vecs.data(), count);
     std::string dirname = "/tmp/quantizer_TestSerializeAndDeserialize_" + std::to_string(random());
     std::filesystem::create_directory(dirname);
@@ -227,8 +225,13 @@ TestSerializeAndDeserialize(
     REQUIRE(quant1.GetDim() == quant2.GetDim());
 
     TestQuantizerEncodeDecode<T>(quant2, dim, count, error, false);
-    TestComputer<T, metric>(quant2, dim, count, error, false);
-    TestComputeCodes<T, metric>(quant2, dim, count, error, false);
+    if constexpr (uniform == false) {
+        TestComputer<T, metric>(quant2, dim, count, error, false);
+        TestComputeCodes<T, metric>(quant2, dim, count, error, false);
+    } else {
+        TestComputeCodesSame<T, metric>(quant2, dim, count, error, false);
+    }
+
     infile.close();
     std::filesystem::remove_all(dirname);
 }

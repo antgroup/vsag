@@ -21,8 +21,11 @@
 #include <unordered_map>
 #include <vector>
 
+#include "index/index_common_param.h"
 #include "quantizer.h"
+#include "simd/normalize.h"
 #include "simd/sq4_uniform_simd.h"
+#include "typing.h"
 
 namespace vsag {
 
@@ -33,6 +36,9 @@ template <MetricType metric = MetricType::METRIC_TYPE_L2SQR>
 class SQ4UniformQuantizer : public Quantizer<SQ4UniformQuantizer<metric>> {
 public:
     explicit SQ4UniformQuantizer(int dim, Allocator* allocator);
+
+    explicit SQ4UniformQuantizer(const nlohmann::json& quantization_param,
+                                 const IndexCommonParam& common_param);
 
     bool
     TrainImpl(const DataType* data, uint64_t count);
@@ -62,6 +68,12 @@ public:
 
     inline void
     ReleaseComputerImpl(Computer<SQ4UniformQuantizer<metric>>& computer) const;
+
+    inline void
+    SerializeImpl(StreamWriter& writer);
+
+    inline void
+    DeserializeImpl(StreamReader& reader);
 
 private:
     DataType lower_bound_{0};
@@ -114,6 +126,11 @@ SQ4UniformQuantizer<metric>::SQ4UniformQuantizer(int dim, Allocator* allocator)
     // align 64 bytes (512 bits) to avoid illegal memory access in SIMD
     this->code_size_ = (this->code_size_ + (1 << 6) - 1) >> 6 << 6;
 }
+
+template <MetricType metric>
+SQ4UniformQuantizer<metric>::SQ4UniformQuantizer(const nlohmann::json& quantization_param,
+                                                 const IndexCommonParam& common_param)
+    : SQ4UniformQuantizer<metric>(common_param.dim_, common_param.allocator_){};
 
 template <MetricType metric>
 bool
@@ -283,6 +300,26 @@ void
 SQ4UniformQuantizer<metric>::ReleaseComputerImpl(
     Computer<SQ4UniformQuantizer<metric>>& computer) const {
     this->allocator_->Deallocate(computer.buf_);
+}
+
+template <MetricType metric>
+void
+SQ4UniformQuantizer<metric>::SerializeImpl(StreamWriter& writer) {
+    StreamWriter::WriteObj(writer, this->diff_);
+    StreamWriter::WriteObj(writer, this->lower_bound_);
+    StreamWriter::WriteObj(writer, this->offset_code_);
+    StreamWriter::WriteObj(writer, this->offset_norm_);
+    StreamWriter::WriteObj(writer, this->offset_sum_);
+}
+
+template <MetricType metric>
+void
+SQ4UniformQuantizer<metric>::DeserializeImpl(StreamReader& reader) {
+    StreamReader::ReadObj(reader, this->diff_);
+    StreamReader::ReadObj(reader, this->lower_bound_);
+    StreamReader::ReadObj(reader, this->offset_code_);
+    StreamReader::ReadObj(reader, this->offset_norm_);
+    StreamReader::ReadObj(reader, this->offset_sum_);
 }
 
 }  // namespace vsag

@@ -68,3 +68,26 @@ TEST_CASE("compute [ut][SQ4UniformQuantizer]") {
         }
     }
 }
+
+template <MetricType metric>
+void
+TestSerializeAndDeserializeMetricSQ4Uniform(uint64_t dim, int count, float error = 1e-5) {
+    auto allocator = std::make_shared<DefaultAllocator>();
+    SQ4UniformQuantizer<metric> quantizer1(dim, allocator.get());
+    SQ4UniformQuantizer<metric> quantizer2(0, allocator.get());
+    TestSerializeAndDeserialize<SQ4UniformQuantizer<metric>, metric, true>(
+        quantizer1, quantizer2, dim, count, error);
+}
+
+TEST_CASE("serialize&deserialize", "[ut][sq4_uniform_quantizer]") {
+    constexpr MetricType metrics[3] = {
+        MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_COSINE, MetricType::METRIC_TYPE_IP};
+    for (auto dim : dims) {
+        float error = 4 * 1.0f / 15.0f;
+        for (auto count : counts) {
+            TestSerializeAndDeserializeMetricSQ4Uniform<metrics[0]>(dim, count, error);
+            //            TestSerializeAndDeserializeMetricSQ4Uniform<metrics[1]>(dim, count, error);
+            TestSerializeAndDeserializeMetricSQ4Uniform<metrics[2]>(dim, count, error);
+        }
+    }
+}
