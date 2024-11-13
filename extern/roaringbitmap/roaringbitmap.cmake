@@ -8,7 +8,8 @@ FetchContent_Declare(
 		URL_HASH MD5=463db911f97d5da69393d4a3190f9201
                 DOWNLOAD_NO_PROGRESS 0
                 INACTIVITY_TIMEOUT 5
-                TIMEOUT 30
+                # filesize ~= 90MiB
+                TIMEOUT 90
 )
 
 set(ROARING_USE_CPM OFF)
