@@ -54,4 +54,7 @@ public:
     const T* quantizer_{nullptr};
     uint8_t* buf_{nullptr};
 };
+
+using ComputerInterfacePtr = std::shared_ptr<ComputerInterface>;
+
 }  // namespace vsag

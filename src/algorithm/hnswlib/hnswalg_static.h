@@ -283,7 +283,7 @@ public:
                         std::vector<std::pair<float, tableint>>,
                         CompareByFirst>
     searchBaseLayer(tableint ep_id, const void* data_point, int layer) {
-        std::shared_ptr<VisitedList> vl = visited_list_pool_->getFreeVisitedList();
+        VisitedListPtr vl = visited_list_pool_->getFreeVisitedList();
         vl_type* visited_array = vl->mass;
         vl_type visited_array_tag = vl->curV;
 
@@ -385,7 +385,7 @@ public:
                                size_t ef,
                                size_t k,
                                vsag::BaseFilterFunctor* isIdAllowed = nullptr) const {
-        std::shared_ptr<VisitedList> vl = visited_list_pool_->getFreeVisitedList();
+        VisitedListPtr vl = visited_list_pool_->getFreeVisitedList();
         vl_type* visited_array = vl->mass;
         vl_type visited_array_tag = vl->curV;
 
@@ -521,7 +521,7 @@ public:
                            size_t ef,
                            size_t k,
                            vsag::BaseFilterFunctor* isIdAllowed = nullptr) const {
-        std::shared_ptr<VisitedList> vl = visited_list_pool_->getFreeVisitedList();
+        VisitedListPtr vl = visited_list_pool_->getFreeVisitedList();
         vl_type* visited_array = vl->mass;
         vl_type visited_array_tag = vl->curV;
 

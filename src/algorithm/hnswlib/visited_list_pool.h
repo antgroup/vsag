@@ -67,6 +67,8 @@ public:
     vsag::Allocator* allocator_;
 };
 
+using VisitedListPtr = std::shared_ptr<VisitedList>;
+
 ///////////////////////////////////////////////////////////
 //
 // Class for multi-threaded pool-management of VisitedLists
@@ -82,9 +84,9 @@ public:
             pool.push_front(std::make_shared<VisitedList>(numelements, allocator_));
     }
 
-    std::shared_ptr<VisitedList>
+    VisitedListPtr
     getFreeVisitedList() {
-        std::shared_ptr<VisitedList> rez;
+        VisitedListPtr rez;
         {
             std::unique_lock<std::mutex> lock(poolguard);
             if (not pool.empty()) {
@@ -99,13 +101,13 @@ public:
     }
 
     void
-    releaseVisitedList(std::shared_ptr<VisitedList> vl) {
+    releaseVisitedList(VisitedListPtr vl) {
         std::unique_lock<std::mutex> lock(poolguard);
         pool.push_front(vl);
     }
 
 private:
-    std::deque<std::shared_ptr<VisitedList>> pool;
+    std::deque<VisitedListPtr> pool;
     std::mutex poolguard;
     uint64_t numelements;
     vsag::Allocator* allocator_;

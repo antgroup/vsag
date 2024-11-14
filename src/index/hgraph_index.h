@@ -167,8 +167,8 @@ public:
     deserialize(StreamReader& reader);
 
 public:
-    std::shared_ptr<FlattenInterface> basic_flatten_codes_{nullptr};
-    std::shared_ptr<FlattenInterface> high_precise_codes_{nullptr};
+    FlattenInterfacePtr basic_flatten_codes_{nullptr};
+    FlattenInterfacePtr high_precise_codes_{nullptr};
     Vector<GraphInterfacePtr> route_graphs_;
     GraphInterfacePtr bottom_graph_{nullptr};
 
@@ -227,7 +227,7 @@ private:
     MaxHeap
     search_one_graph(const float* query,
                      const GraphInterfacePtr& graph,
-                     const std::shared_ptr<FlattenInterface>& codes,
+                     const FlattenInterfacePtr& codes,
                      InnerIdType ep,
                      uint64_t ef,
                      BaseFilterFunctor* is_id_allowed = nullptr) const;
@@ -235,13 +235,13 @@ private:
     void
     select_edges_by_heuristic(MaxHeap& edges,
                               uint64_t max_size,
-                              const std::shared_ptr<FlattenInterface>& flatten);
+                              const FlattenInterfacePtr& flatten);
 
     InnerIdType
     mutually_connect_new_element(InnerIdType cur_c,
                                  MaxHeap& top_candidates,
                                  GraphInterfacePtr graph,
-                                 std::shared_ptr<FlattenInterface> flatten,
+                                 FlattenInterfacePtr flatten,
                                  bool is_update);
 
     void
