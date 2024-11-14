@@ -14,34 +14,34 @@ endif
 
 
 .PHONY: help
-help:                   ## Show the help.
+help:                    ## Show the help.
 	@echo "Usage: make <target>"
 	@echo ""
 	@echo "Targets:"
 	@fgrep "##" Makefile | fgrep -v fgrep
 
 .PHONY: debug
-debug:                  ## Build vsag with debug options.
+debug:                   ## Build vsag with debug options.
 	cmake ${VSAG_CMAKE_ARGS} -DCMAKE_BUILD_TYPE=Debug -DENABLE_CCACHE=ON
 	cmake --build build --parallel ${COMPILE_JOBS}
 
 .PHONY: release
-release:                ## Build vsag with release options.
+release:                 ## Build vsag with release options.
 	cmake ${VSAG_CMAKE_ARGS} -DCMAKE_BUILD_TYPE=Release
 	cmake --build build --parallel ${COMPILE_JOBS}
 
 .PHONY: distribution
-distribution:           ## Build vsag with distribution options.
+distribution:            ## Build vsag with distribution options.
 	cmake ${VSAG_CMAKE_ARGS} -DCMAKE_BUILD_TYPE=Release -DENABLE_CXX11_ABI=off -DENABLE_LIBCXX=off
 	cmake --build build --parallel ${COMPILE_JOBS}
 
 .PHONY: libcxx
-libcxx:           ## Build vsag using libc++.
+libcxx:                  ## Build vsag using libc++.
 	cmake ${VSAG_CMAKE_ARGS} -DCMAKE_BUILD_TYPE=Release -DENABLE_LIBCXX=on
 	cmake --build build --parallel ${COMPILE_JOBS}
 
 .PHONY: fmt
-fmt:                    ## Format codes.
+fmt:                     ## Format codes.
 	find include/ -iname "*.h" -o -iname "*.cpp" | xargs clang-format -i
 	find src/ -iname "*.h" -o -iname "*.cpp" | xargs clang-format -i
 	find python_bindings/ -iname "*.h" -o -iname "*.cpp" | xargs clang-format -i
@@ -50,7 +50,7 @@ fmt:                    ## Format codes.
 	find tests/ -iname "*.h" -o -iname "*.cpp" | xargs clang-format -i
 
 .PHONY: test
-test:                   ## Build and run unit tests.
+test:                    ## Build and run unit tests.
 	cmake ${VSAG_CMAKE_ARGS} -DCMAKE_BUILD_TYPE=Debug -DENABLE_CCACHE=ON
 	cmake --build build --parallel ${COMPILE_JOBS}
 	./build/tests/unittests -d yes ${UT_FILTER} --allow-running-no-tests ${UT_SHARD}
@@ -58,28 +58,28 @@ test:                   ## Build and run unit tests.
 	./build/mockimpl/tests_mockimpl -d yes ${UT_FILTER} --allow-running-no-tests ${UT_SHARD}
 
 .PHONY: asan
-asan:                   ## Build with AddressSanitizer option.
+asan:                    ## Build with AddressSanitizer option.
 	cmake ${VSAG_CMAKE_ARGS} -DCMAKE_BUILD_TYPE=Debug -DENABLE_ASAN=ON -DENABLE_CCACHE=ON
 	cmake --build build --parallel ${COMPILE_JOBS}
 
-.PHONY: test_asan_parallel 		## Run unit tests parallel with AddressSanitizer option.
-test_asan_parallel: asan
+.PHONY: test_asan_parallel
+test_asan_parallel: asan ## Run unit tests parallel with AddressSanitizer option.
 	@./scripts/test_asan_bg.sh
 	./build/mockimpl/tests_mockimpl -d yes ${UT_FILTER} --allow-running-no-tests ${UT_SHARD}
 
 .PHONY: test_asan
-test_asan: asan         ## Run unit tests with AddressSanitizer option.
+test_asan: asan          ## Run unit tests with AddressSanitizer option.
 	./build/tests/unittests -d yes ${UT_FILTER} --allow-running-no-tests ${UT_SHARD}
 	./build/tests/functests -d yes ${UT_FILTER} --allow-running-no-tests ${UT_SHARD}
 	./build/mockimpl/tests_mockimpl -d yes ${UT_FILTER} --allow-running-no-tests ${UT_SHARD}
 
 .PHONY: tsan
-tsan:                   ## Build with ThreadSanitizer option.
+tsan:                    ## Build with ThreadSanitizer option.
 	cmake ${VSAG_CMAKE_ARGS} -DCMAKE_BUILD_TYPE=Debug -DENABLE_TSAN=ON -DENABLE_CCACHE=ON
 	cmake --build build --parallel ${COMPILE_JOBS}
 
 .PHONY: test_tsan
-test_tsan: tsan         ## Run unit tests with ThreadSanitizer option.
+test_tsan: tsan          ## Run unit tests with ThreadSanitizer option.
 	./build/tests/unittests -d yes ${UT_FILTER} --allow-running-no-tests ${UT_SHARD}
 	./build/tests/functests -d yes ${UT_FILTER} --allow-running-no-tests ${UT_SHARD}
 	./build/mockimpl/tests_mockimpl -d yes ${UT_FILTER} --allow-running-no-tests ${UT_SHARD}
@@ -98,9 +98,9 @@ test_cov: cov            ## Build and run unit tests with code coverage enabled.
 	genhtml --output-directory testresult/coverage/html testresult/coverage/coverage.info --ignore-errors inconsistent,inconsistent
 
 .PHONY: clean
-clean:                  ## Clear build/ directory.
+clean:                   ## Clear build/ directory.
 	rm -rf build/*
 
 .PHONY: install
-install:                ## Build and install the release version of vsag.
+install:                 ## Build and install the release version of vsag.
 	cmake --install build/
