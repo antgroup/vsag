@@ -38,11 +38,11 @@ public:
 public:
     virtual void
     Query(float* result_dists,
-          std::shared_ptr<ComputerInterface> computer,
+          ComputerInterfacePtr computer,
           const InnerIdType* idx,
           InnerIdType id_count) = 0;
 
-    virtual std::shared_ptr<ComputerInterface>
+    virtual ComputerInterfacePtr
     FactoryComputer(const float* query) = 0;
 
     virtual void

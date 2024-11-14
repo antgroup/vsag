@@ -36,14 +36,14 @@ public:
 
     void
     Query(float* result_dists,
-          std::shared_ptr<ComputerInterface> computer,
+          ComputerInterfacePtr computer,
           const InnerIdType* idx,
           InnerIdType id_count) override {
         auto comp = std::static_pointer_cast<Computer<QuantTmpl>>(computer);
         this->query(result_dists, comp, idx, id_count);
     }
 
-    std::shared_ptr<ComputerInterface>
+    ComputerInterfacePtr
     FactoryComputer(const float* query) override {
         return this->factory_computer(query);
     }
@@ -112,7 +112,7 @@ private:
           const InnerIdType* idx,
           InnerIdType id_count);
 
-    std::shared_ptr<ComputerInterface>
+    ComputerInterfacePtr
     factory_computer(const float* query) {
         auto computer = this->quantizer_->FactoryComputer();
         computer->SetQuery(query);
