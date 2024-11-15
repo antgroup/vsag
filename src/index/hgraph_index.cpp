@@ -17,6 +17,8 @@
 
 #include <fmt/format-inl.h>
 
+#include <memory>
+
 #include "common.h"
 #include "data_cell/sparse_graph_datacell.h"
 #include "hnsw.h"
@@ -234,7 +236,7 @@ HGraphIndex::hnsw_add(const DatasetPtr& data) {
     auto* ids = data->GetIds();
     auto* datas = data->GetFloat32Vectors();
     auto cur_count = this->bottom_graph_->TotalCount();
-    vsag::Vector<std::shared_mutex>(total + cur_count, allocator_).swap(this->neighbors_mutex_);
+    this->resize(total + cur_count);
 
     auto build_func = [&](InnerIdType begin, InnerIdType end) -> void {
         for (InnerIdType i = begin; i < end; ++i) {
@@ -694,6 +696,15 @@ HGraphIndex::calc_distance_by_id(const float* vector, int64_t id) const {
             LOG_ERROR_AND_RETURNS(ErrorType::INVALID_ARGUMENT,
                                   fmt::format("failed to find id: {}", id));
         }
+    }
+}
+void
+HGraphIndex::resize(uint64_t new_size) {
+    auto cur_size = this->bottom_graph_->MaxCapacity();
+    if (new_size > cur_size) {
+        vsag::Vector<std::shared_mutex>(new_size, allocator_).swap(this->neighbors_mutex_);
+        pool_ = std::make_shared<hnswlib::VisitedListPool>(1, new_size, allocator_);
+        this->bottom_graph_->SetMaxCapacity(new_size);
     }
 }
 
