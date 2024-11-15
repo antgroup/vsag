@@ -93,7 +93,9 @@ extern const char* const MESSAGE_PARAMETER;
 extern const char* const SERIALIZE_MAGIC_NUM;
 extern const char* const SERIALIZE_VERSION;
 
+// hgraph params
 extern const char* const HGRAPH_USE_REORDER;
 extern const char* const HGRAPH_BASE_QUANTIZATION_TYPE;
+extern const char* const HGRAPH_GRAPH_MAX_DEGREE;
 
 }  // namespace vsag

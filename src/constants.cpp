@@ -97,5 +97,6 @@ const char* const SERIALIZE_VERSION = "VERSION";
 
 const char* const HGRAPH_USE_REORDER = HGRAPH_USE_REORDER_KEY;
 const char* const HGRAPH_BASE_QUANTIZATION_TYPE = "base_quantization_type";
+const char* const HGRAPH_GRAPH_MAX_DEGREE = "max_degree";
 
 };  // namespace vsag

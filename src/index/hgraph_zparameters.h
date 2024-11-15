@@ -19,6 +19,7 @@
 #include <string>
 
 #include "index_common_param.h"
+#include "typing.h"
 
 namespace vsag {
 class HGraphParameters {
@@ -53,6 +54,9 @@ private:
     refresh_string_by_json() {
         this->str_ = this->json_.dump();
     }
+
+    void
+    check_common_param() const;
 
 private:
     JsonType json_;
