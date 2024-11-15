@@ -742,7 +742,7 @@ DiskANN::deserialize(const ReaderSet& reader_set) {
 
 std::string
 DiskANN::GetStats() const {
-    nlohmann::json j;
+    JsonType j;
     j[STATSTIC_DATA_NUM] = GetNumElements();
     j[STATSTIC_INDEX_NAME] = INDEX_DISKANN;
     j[STATSTIC_MEMORY] = GetMemoryUsage();

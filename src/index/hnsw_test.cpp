@@ -114,7 +114,7 @@ TEST_CASE("knn_search", "[ut][hnsw]") {
     auto query = vsag::Dataset::Make();
     query->NumElements(1)->Dim(dim)->Float32Vectors(vectors.data())->Owner(false);
     int64_t k = 10;
-    nlohmann::json params{
+    vsag::JsonType params{
         {"hnsw", {{"ef_search", 100}}},
     };
 
@@ -131,14 +131,14 @@ TEST_CASE("knn_search", "[ut][hnsw]") {
     }
 
     SECTION("invalid parameters hnsw not found") {
-        nlohmann::json invalid_params{};
+        vsag::JsonType invalid_params{};
         auto result = index->KnnSearch(query, k, invalid_params.dump());
         REQUIRE_FALSE(result.has_value());
         REQUIRE(result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
     }
 
     SECTION("invalid parameters ef_search not found") {
-        nlohmann::json invalid_params{
+        vsag::JsonType invalid_params{
             {"hnsw", {}},
         };
         auto result = index->KnnSearch(query, k, invalid_params.dump());
@@ -189,7 +189,7 @@ TEST_CASE("range_search", "[ut][hnsw]") {
     auto query = vsag::Dataset::Make();
     query->NumElements(1)->Dim(dim)->Float32Vectors(vectors.data())->Owner(false);
     float radius = 9.9f;
-    nlohmann::json params{
+    vsag::JsonType params{
         {"hnsw", {{"ef_search", 100}}},
     };
 
@@ -237,14 +237,14 @@ TEST_CASE("range_search", "[ut][hnsw]") {
     }
 
     SECTION("invalid parameters hnsw not found") {
-        nlohmann::json invalid_params{};
+        vsag::JsonType invalid_params{};
         auto result = index->RangeSearch(query, radius, invalid_params.dump());
         REQUIRE_FALSE(result.has_value());
         REQUIRE(result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
     }
 
     SECTION("invalid parameters ef_search not found") {
-        nlohmann::json invalid_params{
+        vsag::JsonType invalid_params{
             {"hnsw", {}},
         };
         auto result = index->RangeSearch(query, radius, invalid_params.dump());
@@ -381,7 +381,7 @@ TEST_CASE("static hnsw", "[ut][hnsw]") {
     REQUIRE_FALSE(result.has_value());
     REQUIRE(result.error().type == vsag::ErrorType::UNSUPPORTED_INDEX_OPERATION);
 
-    nlohmann::json params{
+    vsag::JsonType params{
         {"hnsw", {{"ef_search", 100}}},
     };
 
@@ -560,7 +560,7 @@ TEST_CASE("feedback with invalid argument", "[ut][hnsw]") {
                                               false,
                                               true);
 
-    nlohmann::json search_parameters{
+    vsag::JsonType search_parameters{
         {"hnsw", {{"ef_search", 200}}},
     };
 
@@ -611,7 +611,7 @@ TEST_CASE("redundant feedback and empty enhancement", "[ut][hnsw]") {
     auto buildindex = index->Build(base);
     REQUIRE(buildindex.has_value());
 
-    nlohmann::json search_parameters{
+    vsag::JsonType search_parameters{
         {"hnsw", {{"ef_search", 200}, {"use_conjugate_graph", true}}},
     };
 
@@ -669,7 +669,7 @@ TEST_CASE("feedback and pretrain without use conjugate graph", "[ut][hnsw]") {
     auto buildindex = index->Build(base);
     REQUIRE(buildindex.has_value());
 
-    nlohmann::json search_parameters{
+    vsag::JsonType search_parameters{
         {"hnsw", {{"ef_search", 200}}},
     };
 
@@ -716,7 +716,7 @@ TEST_CASE("feedback and pretrain on empty index", "[ut][hnsw]") {
     auto buildindex = index->Build(base);
     REQUIRE(buildindex.has_value());
 
-    nlohmann::json search_parameters{
+    vsag::JsonType search_parameters{
         {"hnsw", {{"ef_search", 200}}},
     };
 
@@ -763,7 +763,7 @@ TEST_CASE("invalid pretrain", "[ut][hnsw]") {
     auto buildindex = index->Build(base);
     REQUIRE(buildindex.has_value());
 
-    nlohmann::json search_parameters{
+    vsag::JsonType search_parameters{
         {"hnsw", {{"ef_search", 200}}},
     };
 
@@ -782,7 +782,7 @@ TEST_CASE("invalid pretrain", "[ut][hnsw]") {
     }
 
     SECTION("invalid search parameter") {
-        nlohmann::json invalid_search_parameters{
+        vsag::JsonType invalid_search_parameters{
             {"hnsw", {{"ef_search", -1}}},
         };
         std::vector<int64_t> base_tag_ids;

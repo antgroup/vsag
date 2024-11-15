@@ -32,8 +32,7 @@ class SQ4Quantizer : public Quantizer<SQ4Quantizer<metric>> {
 public:
     explicit SQ4Quantizer(int dim, Allocator* allocator);
 
-    explicit SQ4Quantizer(const nlohmann::json& quantization_param,
-                          const IndexCommonParam& common_param);
+    explicit SQ4Quantizer(const JsonType& quantization_param, const IndexCommonParam& common_param);
 
     bool
     TrainImpl(const DataType* data, uint64_t count);
@@ -82,7 +81,7 @@ SQ4Quantizer<metric>::SQ4Quantizer(int dim, Allocator* allocator)
 }
 
 template <MetricType metric>
-SQ4Quantizer<metric>::SQ4Quantizer(const nlohmann::json& quantization_param,
+SQ4Quantizer<metric>::SQ4Quantizer(const JsonType& quantization_param,
                                    const IndexCommonParam& common_param)
     : SQ4Quantizer<metric>(common_param.dim_, common_param.allocator_){};
 

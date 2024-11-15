@@ -45,7 +45,7 @@ public:
                                         Vector<std::pair<float, InnerIdType>>,
                                         CompareByFirst>;
 
-    HGraphIndex(const nlohmann::json& index_param, const IndexCommonParam& common_param) noexcept;
+    HGraphIndex(const JsonType& index_param, const IndexCommonParam& common_param) noexcept;
 
     void
     Init();
@@ -177,7 +177,7 @@ public:
     int64_t dim_{0};
     MetricType metric_{MetricType::METRIC_TYPE_L2SQR};
 
-    const nlohmann::json index_param_{};
+    const JsonType index_param_{};
     const IndexCommonParam common_param_{};
 
 private:

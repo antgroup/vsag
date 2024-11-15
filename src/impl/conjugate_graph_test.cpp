@@ -20,7 +20,7 @@
 #include <fstream>
 #include <nlohmann/json.hpp>
 
-#include "../../tests/fixtures/fixtures.h"
+#include "fixtures.h"
 
 TEST_CASE("build, add and memory usage", "[ut][conjugate_graph]") {
     std::shared_ptr<vsag::ConjugateGraph> conjugate_graph =
@@ -97,7 +97,7 @@ TEST_CASE("serialize and deserialize with binary", "[ut][conjugate_graph]") {
     SECTION("deserialize with invalid magic_num") {
         vsag::Binary binary = *conjugate_graph->Serialize();
 
-        nlohmann::json json;
+        vsag::JsonType json;
         json[vsag::SERIALIZE_MAGIC_NUM] = std::to_string(0xABCD1234);
         json[vsag::SERIALIZE_VERSION] = vsag::VERSION;
         std::string json_str = json.dump();
@@ -121,7 +121,7 @@ TEST_CASE("serialize and deserialize with binary", "[ut][conjugate_graph]") {
     SECTION("deserialize with invalid version") {
         vsag::Binary binary = *conjugate_graph->Serialize();
 
-        nlohmann::json json;
+        vsag::JsonType json;
         json[vsag::SERIALIZE_MAGIC_NUM] = vsag::MAGIC_NUM;
         json[vsag::SERIALIZE_VERSION] = std::to_string(2);
         std::string json_str = json.dump();
@@ -178,7 +178,7 @@ TEST_CASE("serialize and deserialize with stream", "[ut][conjugate_graph]") {
         REQUIRE(serialize_result.has_value());
         out_stream.seekg(conjugate_graph->GetMemoryUsage() - vsag::FOOTER_SIZE, std::ios::beg);
 
-        nlohmann::json json;
+        vsag::JsonType json;
         json[vsag::SERIALIZE_MAGIC_NUM] = std::to_string(0xABCD1234);
         json[vsag::SERIALIZE_VERSION] = vsag::VERSION;
         std::string json_str = json.dump();
@@ -201,7 +201,7 @@ TEST_CASE("serialize and deserialize with stream", "[ut][conjugate_graph]") {
         REQUIRE(serialize_result.has_value());
         out_stream.seekg(conjugate_graph->GetMemoryUsage() - vsag::FOOTER_SIZE, std::ios::beg);
 
-        nlohmann::json json;
+        vsag::JsonType json;
         json[vsag::SERIALIZE_MAGIC_NUM] = vsag::MAGIC_NUM;
         json[vsag::SERIALIZE_VERSION] = std::to_string(2);
         std::string json_str = json.dump();

@@ -587,7 +587,7 @@ HNSW::deserialize(std::istream& in_stream) {
 
 std::string
 HNSW::GetStats() const {
-    nlohmann::json j;
+    JsonType j;
     j[STATSTIC_DATA_NUM] = GetNumElements();
     j[STATSTIC_INDEX_NAME] = INDEX_HNSW;
     j[STATSTIC_MEMORY] = GetMemoryUsage();

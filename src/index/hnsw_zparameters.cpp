@@ -26,7 +26,7 @@ namespace vsag {
 
 CreateHnswParameters
 CreateHnswParameters::FromJson(const std::string& json_string) {
-    nlohmann::json params = nlohmann::json::parse(json_string);
+    JsonType params = JsonType::parse(json_string);
     CreateHnswParameters obj;
 
     auto index_common_param = IndexCommonParam::CheckAndCreate(json_string);
@@ -91,7 +91,7 @@ CreateHnswParameters::FromJson(const std::string& json_string) {
 
 HnswSearchParameters
 HnswSearchParameters::FromJson(const std::string& json_string) {
-    nlohmann::json params = nlohmann::json::parse(json_string);
+    JsonType params = JsonType::parse(json_string);
 
     HnswSearchParameters obj;
 

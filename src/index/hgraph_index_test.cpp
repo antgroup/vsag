@@ -62,7 +62,7 @@ TEST_CASE("build with allocator", "[ut][hgraphindex]") {
             }
           }
         })";
-    auto json_param = nlohmann::json::parse(json_str);
+    auto json_param = vsag::JsonType::parse(json_str);
     vsag::IndexCommonParam param;
     auto allocator = std::make_shared<vsag::DefaultAllocator>();
     param.dim_ = 128;
@@ -92,7 +92,7 @@ TEST_CASE("build with allocator", "[ut][hgraphindex]") {
                 ->Dim(param.dim_)
                 ->Float32Vectors(vectors.data() + new_id * param.dim_)
                 ->Owner(false);
-            nlohmann::json params{
+            vsag::JsonType params{
                 {"hnsw", {{"ef_search", 100}}},
             };
             auto result2 = index->KnnSearch(query, 1, params.dump());

@@ -95,7 +95,7 @@ SerializationFooter::Deserialize(std::istream& in_stream) {
 
     // parse json
     std::string serialized_data(buffer.begin(), buffer.begin() + FOOTER_SIZE - sizeof(uint32_t));
-    json_ = nlohmann::json::parse(serialized_data, nullptr, false);
+    json_ = JsonType::parse(serialized_data, nullptr, false);
     if (json_.is_discarded()) {
         throw std::runtime_error("Failed to parse JSON data");
     }

@@ -21,13 +21,14 @@
 #include <nlohmann/json.hpp>
 
 #include "../logger.h"
+#include "typing.h"
 #include "vsag/errors.h"
 
 TEST_CASE("create index with full parameters", "[factory][ut]") {
     vsag::logger::set_level(vsag::logger::level::debug);
 
     SECTION("hnsw") {
-        auto parameters = nlohmann::json::parse(R"(
+        auto parameters = vsag::JsonType::parse(R"(
         {
             "dtype": "float32",
             "metric_type": "l2",
@@ -44,7 +45,7 @@ TEST_CASE("create index with full parameters", "[factory][ut]") {
     }
 
     SECTION("diskann") {
-        auto parameters = nlohmann::json::parse(R"(
+        auto parameters = vsag::JsonType::parse(R"(
         {
             "dtype": "float32",
             "metric_type": "l2",
@@ -66,7 +67,7 @@ TEST_CASE("create index with full parameters", "[factory][ut]") {
 TEST_CASE("create hnsw with incomplete parameters", "[factory][ut]") {
     vsag::logger::set_level(vsag::logger::level::debug);
 
-    auto standard_parameters = nlohmann::json::parse(R"(
+    auto standard_parameters = vsag::JsonType::parse(R"(
             {
                 "dtype": "float32",
                 "metric_type": "l2",
@@ -124,7 +125,7 @@ TEST_CASE("create hnsw with incomplete parameters", "[factory][ut]") {
 TEST_CASE("create diskann with incomplete parameters", "[factory][ut]") {
     vsag::logger::set_level(vsag::logger::level::debug);
 
-    auto standard_parameters = nlohmann::json::parse(R"(
+    auto standard_parameters = vsag::JsonType::parse(R"(
             {
                 "dim": 256,
                 "dtype": "float32",
