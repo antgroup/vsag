@@ -39,7 +39,7 @@ public:
         : block_size_(block_size), allocator_(allocator), blocks_(0, allocator) {
     }
 
-    MemoryBlockIO(const nlohmann::json& io_param, const IndexCommonParam& common_param)
+    MemoryBlockIO(const JsonType& io_param, const IndexCommonParam& common_param)
         : allocator_(common_param.allocator_), blocks_(0, common_param.allocator_) {
         if (io_param.contains(BLOCK_IO_BLOCK_SIZE_KEY)) {
             this->block_size_ =

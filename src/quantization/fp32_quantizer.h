@@ -31,7 +31,7 @@ class FP32Quantizer : public Quantizer<FP32Quantizer<metric>> {
 public:
     explicit FP32Quantizer(int dim, Allocator* allocator);
 
-    FP32Quantizer(const nlohmann::json& quantization_param, const IndexCommonParam& common_param);
+    FP32Quantizer(const JsonType& quantization_param, const IndexCommonParam& common_param);
 
     ~FP32Quantizer() = default;
 
@@ -72,7 +72,7 @@ public:
 };
 
 template <MetricType metric>
-FP32Quantizer<metric>::FP32Quantizer(const nlohmann::json& quantization_param,
+FP32Quantizer<metric>::FP32Quantizer(const JsonType& quantization_param,
                                      const IndexCommonParam& common_param)
     : Quantizer<FP32Quantizer<metric>>(common_param.dim_, common_param.allocator_) {
     this->code_size_ = common_param.dim_ * sizeof(float);

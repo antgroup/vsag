@@ -85,7 +85,7 @@ Factory::CreateIndex(const std::string& origin_name,
                                              params.use_bsa,
                                              params.use_async_io);
         } else if (name == INDEX_HGRAPH) {
-            auto param = nlohmann::json::parse(parameters);
+            auto param = JsonType::parse(parameters);
             auto common_param = IndexCommonParam::CheckAndCreate(parameters);
             if (allocator != nullptr) {
                 common_param.allocator_ = allocator;

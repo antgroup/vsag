@@ -27,7 +27,7 @@ namespace vsag {
 IndexCommonParam
 IndexCommonParam::CheckAndCreate(const std::string& json_string) {
     IndexCommonParam result;
-    nlohmann::json params = nlohmann::json::parse(json_string);
+    JsonType params = JsonType::parse(json_string);
 
     // Check DataType
     CHECK_ARGUMENT(params.contains(PARAMETER_DTYPE),

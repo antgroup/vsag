@@ -16,6 +16,7 @@
 #pragma once
 #include "fmt/format.h"
 #include "nlohmann/json.hpp"
+#include "typing.h"
 #include "vsag/constants.h"
 
 namespace vsag {
@@ -44,7 +45,7 @@ public:
     Deserialize(std::istream& in_stream);
 
 private:
-    nlohmann::json json_;
+    JsonType json_;
 };
 
 }  // namespace vsag

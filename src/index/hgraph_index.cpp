@@ -39,7 +39,7 @@ empty_binaryset() {
     return bs;
 }
 
-HGraphIndex::HGraphIndex(const nlohmann::json& index_param,
+HGraphIndex::HGraphIndex(const JsonType& index_param,
                          const vsag::IndexCommonParam& common_param) noexcept
     : index_param_(index_param),
       common_param_(common_param),

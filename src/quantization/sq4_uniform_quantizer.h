@@ -37,7 +37,7 @@ class SQ4UniformQuantizer : public Quantizer<SQ4UniformQuantizer<metric>> {
 public:
     explicit SQ4UniformQuantizer(int dim, Allocator* allocator);
 
-    explicit SQ4UniformQuantizer(const nlohmann::json& quantization_param,
+    explicit SQ4UniformQuantizer(const JsonType& quantization_param,
                                  const IndexCommonParam& common_param);
 
     bool
@@ -128,7 +128,7 @@ SQ4UniformQuantizer<metric>::SQ4UniformQuantizer(int dim, Allocator* allocator)
 }
 
 template <MetricType metric>
-SQ4UniformQuantizer<metric>::SQ4UniformQuantizer(const nlohmann::json& quantization_param,
+SQ4UniformQuantizer<metric>::SQ4UniformQuantizer(const JsonType& quantization_param,
                                                  const IndexCommonParam& common_param)
     : SQ4UniformQuantizer<metric>(common_param.dim_, common_param.allocator_){};
 

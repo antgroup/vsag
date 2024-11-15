@@ -159,7 +159,7 @@ TEST_CASE("knn_search", "[diskann][ut]") {
     auto query = vsag::Dataset::Make();
     query->Dim(dim)->NumElements(1)->Ids(ids.data())->Float32Vectors(vectors.data())->Owner(false);
     int64_t k = 10;
-    nlohmann::json params{{"diskann", {{"ef_search", 100}, {"beam_search", 4}, {"io_limit", 200}}}};
+    vsag::JsonType params{{"diskann", {{"ef_search", 100}, {"beam_search", 4}, {"io_limit", 200}}}};
 
     SECTION("index empty") {
         auto empty_index = std::make_shared<vsag::DiskANN>(diskann::Metric::L2,
@@ -198,14 +198,14 @@ TEST_CASE("knn_search", "[diskann][ut]") {
     }
 
     SECTION("invalid parameters diskann not found") {
-        nlohmann::json invalid_params{};
+        vsag::JsonType invalid_params{};
         auto result = index->KnnSearch(query, k, invalid_params.dump());
         REQUIRE_FALSE(result.has_value());
         REQUIRE(result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
     }
 
     SECTION("invalid parameters beam_search not found") {
-        nlohmann::json invalid_params{{"diskann", {{"ef_search", 100}, {"io_limit", 200}}}};
+        vsag::JsonType invalid_params{{"diskann", {{"ef_search", 100}, {"io_limit", 200}}}};
 
         auto result = index->KnnSearch(query, k, invalid_params.dump());
         REQUIRE_FALSE(result.has_value());
@@ -213,7 +213,7 @@ TEST_CASE("knn_search", "[diskann][ut]") {
     }
 
     SECTION("invalid parameters io_limit not found") {
-        nlohmann::json invalid_params{{"diskann", {{"ef_search", 100}, {"beam_search", 4}}}};
+        vsag::JsonType invalid_params{{"diskann", {{"ef_search", 100}, {"beam_search", 4}}}};
 
         auto result = index->KnnSearch(query, k, invalid_params.dump());
         REQUIRE_FALSE(result.has_value());
@@ -221,7 +221,7 @@ TEST_CASE("knn_search", "[diskann][ut]") {
     }
 
     SECTION("invalid parameters ef_search not found") {
-        nlohmann::json invalid_params{{"diskann", {{"beam_search", 4}, {"io_limit", 200}}}};
+        vsag::JsonType invalid_params{{"diskann", {{"beam_search", 4}, {"io_limit", 200}}}};
 
         auto result = index->KnnSearch(query, k, invalid_params.dump());
         REQUIRE_FALSE(result.has_value());
@@ -262,7 +262,7 @@ TEST_CASE("range_search", "[diskann][ut]") {
     auto query = vsag::Dataset::Make();
     query->Dim(dim)->NumElements(1)->Ids(ids.data())->Float32Vectors(vectors.data())->Owner(false);
     float radius = 9.9f;
-    nlohmann::json params{{"diskann", {{"ef_search", 100}, {"beam_search", 4}, {"io_limit", 200}}}};
+    vsag::JsonType params{{"diskann", {{"ef_search", 100}, {"beam_search", 4}, {"io_limit", 200}}}};
 
     SECTION("successful case with smaller range_search_limit") {
         int64_t range_search_limit = num_elements - 1;
@@ -340,14 +340,14 @@ TEST_CASE("range_search", "[diskann][ut]") {
     }
 
     SECTION("invalid parameters diskann not found") {
-        nlohmann::json invalid_params{};
+        vsag::JsonType invalid_params{};
         auto result = index->RangeSearch(query, radius, invalid_params.dump());
         REQUIRE_FALSE(result.has_value());
         REQUIRE(result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
     }
 
     SECTION("invalid parameters beam_search not found") {
-        nlohmann::json invalid_params{{"diskann", {{"ef_search", 100}, {"io_limit", 200}}}};
+        vsag::JsonType invalid_params{{"diskann", {{"ef_search", 100}, {"io_limit", 200}}}};
 
         auto result = index->RangeSearch(query, radius, invalid_params.dump());
         REQUIRE_FALSE(result.has_value());
@@ -355,7 +355,7 @@ TEST_CASE("range_search", "[diskann][ut]") {
     }
 
     SECTION("invalid parameters io_limit not found") {
-        nlohmann::json invalid_params{{"diskann", {{"ef_search", 100}, {"beam_search", 4}}}};
+        vsag::JsonType invalid_params{{"diskann", {{"ef_search", 100}, {"beam_search", 4}}}};
 
         auto result = index->RangeSearch(query, radius, invalid_params.dump());
         REQUIRE_FALSE(result.has_value());
@@ -363,7 +363,7 @@ TEST_CASE("range_search", "[diskann][ut]") {
     }
 
     SECTION("invalid parameters ef_search not found") {
-        nlohmann::json invalid_params{{"diskann", {{"beam_search", 4}, {"io_limit", 200}}}};
+        vsag::JsonType invalid_params{{"diskann", {{"beam_search", 4}, {"io_limit", 200}}}};
 
         auto result = index->RangeSearch(query, radius, invalid_params.dump());
         REQUIRE_FALSE(result.has_value());
@@ -469,7 +469,7 @@ TEST_CASE("split building process", "[diskann][ut]") {
         }
     }
 
-    nlohmann::json parameters{
+    vsag::JsonType parameters{
         {"diskann", {{"ef_search", 10}, {"beam_search", 4}, {"io_limit", 20}}}};
     float correct = 0;
     for (int i = 0; i < num_elements; i++) {

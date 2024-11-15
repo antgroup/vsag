@@ -21,7 +21,7 @@ namespace vsag {
 
 CreateDiskannParameters
 CreateDiskannParameters::FromJson(const std::string& json_string) {
-    nlohmann::json params = nlohmann::json::parse(json_string);
+    JsonType params = JsonType::parse(json_string);
     CreateDiskannParameters obj;
 
     auto index_common_param = IndexCommonParam::CheckAndCreate(json_string);
@@ -113,7 +113,7 @@ CreateDiskannParameters::FromJson(const std::string& json_string) {
 
 DiskannSearchParameters
 DiskannSearchParameters::FromJson(const std::string& json_string) {
-    nlohmann::json params = nlohmann::json::parse(json_string);
+    JsonType params = JsonType::parse(json_string);
 
     DiskannSearchParameters obj;
 
