@@ -24,13 +24,22 @@ namespace vsag {
 
 const std::unordered_map<std::string, std::vector<std::string>> HGraphParameters::EXTERNAL_MAPPING =
     {{HGRAPH_USE_REORDER, {HGRAPH_USE_REORDER_KEY}},
-     {HGRAPH_BASE_QUANTIZATION_TYPE, {HGRAPH_BASE_CODES_KEY, QUANTIZATION_TYPE_KEY}}};
+     {HGRAPH_BASE_QUANTIZATION_TYPE, {HGRAPH_BASE_CODES_KEY, QUANTIZATION_TYPE_KEY}},
+     {HGRAPH_GRAPH_MAX_DEGREE, {HGRAPH_GRAPH_KEY, GRAPH_PARAMS_KEY, GRAPH_PARAM_MAX_DEGREE}}};
 
 HGraphParameters::HGraphParameters(const IndexCommonParam& common_param, const std::string& str)
     : common_param_(common_param) {
+    this->check_common_param();
     this->refresh_json_by_string();
     this->ParseStringParam(str);
     this->refresh_string_by_json();
+}
+
+void
+HGraphParameters::check_common_param() const {
+    if (this->common_param_.data_type_ == DataTypes::DATA_TYPE_INT8) {
+        throw std::invalid_argument(fmt::format("HGraph not support {} datatype", DATATYPE_INT8));
+    }
 }
 
 void
@@ -48,6 +57,18 @@ HGraphParameters::ParseStringParam(const std::string& str) {
 void
 HGraphParameters::CheckAndSetKeyValue(const std::string& key, JsonType& value) {
     const auto& iter = EXTERNAL_MAPPING.find(key);
+
+    if (key == HGRAPH_BASE_QUANTIZATION_TYPE) {
+        std::string value_str = value;
+        if (value_str != QUANTIZATION_TYPE_VALUE_SQ8 && value_str != QUANTIZATION_TYPE_VALUE_FP32) {
+            throw std::invalid_argument(fmt::format("parameters[{}] must be {} or {}, now is {}",
+                                                    HGRAPH_BASE_QUANTIZATION_TYPE,
+                                                    QUANTIZATION_TYPE_VALUE_SQ8,
+                                                    QUANTIZATION_TYPE_VALUE_FP32,
+                                                    value_str));
+        }
+    }
+
     if (iter != EXTERNAL_MAPPING.end()) {
         const auto& vec = iter->second;
         auto* json = &json_;
@@ -56,7 +77,7 @@ HGraphParameters::CheckAndSetKeyValue(const std::string& key, JsonType& value) {
         }
         *json = value;
     } else {
-        // TODO(LHT): Error logger
+        throw std::invalid_argument(fmt::format("HGraph have no config param: {}", key));
     }
 }
 
@@ -72,7 +93,7 @@ const std::string HGraphParameters::DEFAULT_HGRAPH_PARAMS = format_map(
             "type": "nsw",
             "{GRAPH_PARAMS_KEY}": {
                 "{GRAPH_PARAM_MAX_DEGREE}": 64,
-                "{GRAPH_PARAM_INIT_MAX_CAPACITY}": 20000000
+                "{GRAPH_PARAM_INIT_MAX_CAPACITY}": 2000000
             }
         },
         "{HGRAPH_BASE_CODES_KEY}": {
