@@ -1024,7 +1024,7 @@ void create_disk_layout(const std::string base_file, const std::string mem_index
 
 template <typename T>
 void create_disk_layout(const T *data, uint32_t npts, uint32_t ndims, const std::vector<size_t>& skip_locs, std::stringstream &vamana_reader,
-                        std::stringstream &diskann_writer, size_t sector_len, const std::string reorder_data_file)
+                        std::stringstream &diskann_writer, size_t sector_len, diskann::Metric metric)
     {
         // amount to read or write in one shot
         size_t read_blk_size = 64 * 1024 * 1024;
@@ -1039,29 +1039,6 @@ void create_disk_layout(const T *data, uint32_t npts, uint32_t ndims, const std:
         std::ifstream reorder_data_reader;
 
         uint32_t npts_reorder_file = 0, ndims_reorder_file = 0;
-        if (reorder_data_file != std::string(""))
-        {
-            append_reorder_data = true;
-            size_t reorder_data_file_size = get_file_size(reorder_data_file);
-            reorder_data_reader.exceptions(std::ofstream::failbit | std::ofstream::badbit);
-
-            try
-            {
-                reorder_data_reader.open(reorder_data_file, std::ios::binary);
-                reorder_data_reader.read((char *)&npts_reorder_file, sizeof(uint32_t));
-                reorder_data_reader.read((char *)&ndims_reorder_file, sizeof(uint32_t));
-                if (npts_reorder_file != npts)
-                    throw ANNException("Mismatch in num_points between reorder "
-                                       "data file and base file",
-                                       -1, __FUNCSIG__, __FILE__, __LINE__);
-                if (reorder_data_file_size != 8 + sizeof(float) * (size_t)npts_reorder_file * (size_t)ndims_reorder_file)
-                    throw ANNException("Discrepancy in reorder data file size ", -1, __FUNCSIG__, __FILE__, __LINE__);
-            }
-            catch (std::system_error &e)
-            {
-                throw FileException(reorder_data_file, e, __FUNCSIG__, __FILE__, __LINE__);
-            }
-        }
 
         // create cached reader + writer
         size_t actual_file_size = vamana_reader.str().size();
@@ -1166,7 +1143,9 @@ void create_disk_layout(const T *data, uint32_t npts, uint32_t ndims, const std:
 
                 // write coords of node first
                 memcpy(node_buf.get(), data + ((uint64_t) ndims_64 * cur_node_id), ndims_64 * sizeof(T));
-
+                if (diskann::Metric::COSINE == metric) {
+                    normalize((float *)node_buf.get(), ndims);
+                }
                 // write nnbrs
                 *(uint32_t *)(node_buf.get() + ndims_64 * sizeof(T)) = (std::min)(nnbrs, width_u32);
 
@@ -1462,11 +1441,11 @@ template DISKANN_DLLEXPORT void create_disk_layout<float>(const std::string base
 
 
 template DISKANN_DLLEXPORT void create_disk_layout<int8_t>(const int8_t *data, uint32_t npts, uint32_t ndims, const std::vector<size_t>& skip_locs, std::stringstream &vamana_reader, std::stringstream &diskann_writer,
-                                                           size_t sector_len, const std::string reorder_data_file);
+                                                           size_t sector_len, diskann::Metric metric);
 template DISKANN_DLLEXPORT void create_disk_layout<uint8_t>(const uint8_t *data, uint32_t npts, uint32_t ndims, const std::vector<size_t>& skip_locs, std::stringstream &vamana_reader, std::stringstream &diskann_writer,
-                                                            size_t sector_len, const std::string reorder_data_file);
+                                                            size_t sector_len, diskann::Metric metric);
 template DISKANN_DLLEXPORT void create_disk_layout<float>(const float *data, uint32_t npts, uint32_t ndims, const std::vector<size_t>& skip_locs, std::stringstream &vamana_reader, std::stringstream &diskann_writer,
-                                                          size_t sector_len, const std::string reorder_data_file);
+                                                          size_t sector_len, diskann::Metric metric);
 template DISKANN_DLLEXPORT int8_t *load_warmup<int8_t>(const std::string &cache_warmup_file, uint64_t &warmup_num,
                                                        uint64_t warmup_dim, uint64_t warmup_aligned_dim);
 template DISKANN_DLLEXPORT uint8_t *load_warmup<uint8_t>(const std::string &cache_warmup_file, uint64_t &warmup_num,

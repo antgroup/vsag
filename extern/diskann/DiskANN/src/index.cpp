@@ -120,11 +120,8 @@ Index<T, TagT, LabelT>::Index(Metric m, const size_t dim, const size_t max_point
         else if (m == diskann::Metric::COSINE && std::is_floating_point<T>::value)
         {
             // This is safe because T is float inside the if block.
-            this->_distance.reset((Distance<T> *)new AVXNormalizedCosineDistanceFloat());
+            this->_distance.reset((Distance<T> *)new VsagDistanceInnerProductFloat(dim));
             this->_normalize_vecs = true;
-            diskann::cout << "Normalizing vectors and using L2 for cosine "
-                             "AVXNormalizedCosineDistanceFloat()."
-                          << std::endl;
         }
         else
         {
@@ -132,7 +129,8 @@ Index<T, TagT, LabelT>::Index(Metric m, const size_t dim, const size_t max_point
         }
         // Note: moved this to factory, keeping this for backward compatibility.
         _data_store =
-            std::make_unique<diskann::InMemDataStore<T>>((location_t)total_internal_points, _dim, this->_distance);
+            std::make_unique<diskann::InMemDataStore<T>>((location_t)total_internal_points, _dim,
+                                                         this->_distance, this->_normalize_vecs);
     }
 
     _locks = std::vector<non_recursive_mutex>(total_internal_points);

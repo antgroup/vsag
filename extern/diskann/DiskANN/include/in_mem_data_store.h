@@ -21,7 +21,7 @@ namespace diskann
 template <typename data_t> class InMemDataStore : public AbstractDataStore<data_t>
 {
   public:
-    InMemDataStore(const location_t capacity, const size_t dim, std::shared_ptr<Distance<data_t>> distance_fn);
+    InMemDataStore(const location_t capacity, const size_t dim, std::shared_ptr<Distance<data_t>> distance_fn, bool compute_norm = false);
     virtual ~InMemDataStore();
 
     virtual location_t load(const std::string &filename) override;
@@ -79,6 +79,7 @@ template <typename data_t> class InMemDataStore : public AbstractDataStore<data_
     std::shared_ptr<Distance<data_t>> _distance_fn;
 
     // in case we need to save vector norms for optimization
+    bool _compute_norms = false;
     std::shared_ptr<float[]> _pre_computed_norms;
 
     bool _use_data_reference = false;

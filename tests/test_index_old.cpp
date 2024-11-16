@@ -83,10 +83,6 @@ TEST_CASE("index search distance", "[ft][index]") {
     auto metric_type = GENERATE("ip", "cosine", "l2");
     auto algorithm = GENERATE("hnsw", "diskann");
 
-    if (algorithm == std::string("diskann") and metric_type == std::string("cosine")) {
-        return;  // TODO: support cosine for diskann
-    }
-
     bool need_normalize = metric_type != std::string("cosine");
     auto [ids, vectors] = fixtures::generate_ids_and_vectors(num_vectors, dim, need_normalize);
 
@@ -368,10 +364,6 @@ TEST_CASE("serialize/deserialize with file stream", "[ft][index]") {
         // deserialize from file stream
         std::filesystem::resize_file(dir.path + "index.bin", size - 10);
         std::fstream in_file(dir.path + "index.bin", std::ios::in | std::ios::binary);
-
-        if (metric_type == std::string("cosine")) {
-            return;
-        }
         auto new_index =
             vsag::Factory::CreateIndex(
                 "diskann",
@@ -484,9 +476,6 @@ TEST_CASE("search on a deserialized empty index", "[ft][index]") {
     auto index_name = GENERATE("hnsw", "diskann");
     auto metric_type = GENERATE("l2", "ip", "cosine");
 
-    if (index_name == std::string("diskann") and metric_type == std::string("cosine")) {
-        return;  // TODO: support cosine for diskann
-    }
     auto index =
         vsag::Factory::CreateIndex(
             index_name, vsag::generate_build_parameters(metric_type, num_vectors, dim).value())
@@ -546,10 +535,6 @@ TEST_CASE("remove vectors from the index", "[ft][index]") {
     int64_t dim = 64;
     auto index_name = GENERATE("fresh_hnsw", "diskann");
     auto metric_type = GENERATE("cosine", "ip", "l2");
-
-    if (index_name == std::string("diskann") and metric_type == std::string("cosine")) {
-        return;  // TODO: support cosine for diskann
-    }
 
     bool need_normalize = metric_type != std::string("cosine");
     auto [ids, vectors] = fixtures::generate_ids_and_vectors(num_vectors, dim, need_normalize);

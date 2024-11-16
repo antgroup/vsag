@@ -13,6 +13,7 @@
 // block size for reading/processing large files and matrices in blocks
 #define BLOCK_SIZE 5000000
 #define MIN_SAMPLE_NUM 1000
+#define MAX_SAMPLE_NUM 131072
 namespace vsag {
 
 extern PQDistanceFunc
@@ -1904,6 +1905,19 @@ void generate_disk_quantized_data(const T* train_data, size_t train_size, size_t
     // instantiates train_data with random sample updates train_size
     size_t sample_size = std::min(train_size, (size_t)(train_size * p_val));
     sample_size = std::max(sample_size, std::min(train_size, (size_t)MIN_SAMPLE_NUM));
+    sample_size = std::min(sample_size, (size_t)MAX_SAMPLE_NUM);
+    auto sample_data = train_data;
+    std::shared_ptr<T[]> new_train_data;
+    if (compare_metric == diskann::Metric::COSINE) {
+        new_train_data.reset(new T[train_dim * sample_size]);
+        memcpy(new_train_data.get(), train_data, train_dim * sample_size * sizeof(T));
+        for (int i = 0; i < sample_size; ++i)
+        {
+            normalize(new_train_data.get() + i * train_dim, train_dim);
+        }
+        sample_data = new_train_data.get();
+    }
+    
     // diskann::cout << "Training data with " << sample_size << " samples loaded." << std::endl;
     if (disk_pq_dims > train_dim)
         disk_pq_dims = train_dim;
@@ -1911,10 +1925,10 @@ void generate_disk_quantized_data(const T* train_data, size_t train_size, size_t
    // diskann::cout << "Compressing base for disk-PQ into " << disk_pq_dims << " chunks " << std::endl;
     std::shared_ptr<float[]> rotate;
     if (use_opq) {
-        generate_opq_pivots((const float*)train_data, sample_size, (uint32_t)train_dim, 256, (uint32_t)disk_pq_dims,
+        generate_opq_pivots((const float*)sample_data, sample_size, (uint32_t)train_dim, 256, (uint32_t)disk_pq_dims,
                             disk_pq_pivots, rotate, false);
     } else {
-        generate_pq_pivots((const float*)train_data, sample_size, (uint32_t)train_dim, 256, (uint32_t)disk_pq_dims, NUM_KMEANS_REPS_PQ,
+        generate_pq_pivots((const float*)sample_data, sample_size, (uint32_t)train_dim, 256, (uint32_t)disk_pq_dims, NUM_KMEANS_REPS_PQ,
                            disk_pq_pivots, false);
     }
 
