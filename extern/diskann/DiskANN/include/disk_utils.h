@@ -106,5 +106,5 @@ DISKANN_DLLEXPORT void create_disk_layout(const std::string base_file, const std
                                           const std::string reorder_data_file = std::string(""));
 template <typename T>
 void create_disk_layout(const T *data, uint32_t npts, uint32_t ndims, const std::vector<size_t>& skip_locs, std::stringstream &vamana_reader,
-                        std::stringstream &diskann_writer, size_t sector_len, const std::string reorder_data_file);
+                        std::stringstream &diskann_writer, size_t sector_len, diskann::Metric metric);
 } // namespace diskann

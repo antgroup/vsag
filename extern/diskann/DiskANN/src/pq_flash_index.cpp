@@ -1462,6 +1462,9 @@ int64_t PQFlashIndex<T, LabelT>::cached_beam_search(const T *query1, const uint6
     {
         aligned_query_T[i] = (float) query1[i];
     }
+    if (diskann::Metric::COSINE == metric) {
+        normalize(aligned_query_T.get(), this->data_dim);
+    }
 
     // FIXME: alternative instruction on aarch64
 #if defined(__i386__) || defined(__x86_64__)
@@ -1681,7 +1684,7 @@ int64_t PQFlashIndex<T, LabelT>::cached_beam_search(const T *query1, const uint6
         if (distances != nullptr)
         {
             distances[result_size] = full_retset[i].distance;
-            if (metric == diskann::Metric::INNER_PRODUCT)
+            if (metric == diskann::Metric::INNER_PRODUCT || metric == diskann::Metric::COSINE)
             {
                 // When using L2 distance to calculate IP distance, the L2
                 // distance is exactly twice the IP distance.
@@ -1760,6 +1763,10 @@ int64_t PQFlashIndex<T, LabelT>::cached_beam_search_memory(const T *query, const
     for (size_t i = 0; i < this->data_dim; i++)
     {
         aligned_query_T[i] = (float) query[i];
+    }
+
+    if (diskann::Metric::COSINE == metric) {
+        normalize(aligned_query_T.get(), this->data_dim);
     }
 
     // FIXME: alternative instruction on aarch64
@@ -1888,7 +1895,7 @@ int64_t PQFlashIndex<T, LabelT>::cached_beam_search_memory(const T *query, const
                 char *node_disk_buf = OFFSET_TO_NODE(sorted_read_reqs[j].buf, id);
                 T *node_fp_coords = OFFSET_TO_NODE_COORDS(node_disk_buf);
                 float exact_dist;
-                exact_dist = dist_cmp_float->compare((float *)query, (float *)node_fp_coords, (uint32_t)data_dim);
+                exact_dist = dist_cmp_float->compare(aligned_query_T.get(), (float *)node_fp_coords, (uint32_t)data_dim);
                 reorder_retset.push_back(Neighbor(id, exact_dist));
                 distance_ranks.push(exact_dist);
                 if (distance_ranks.size() > k_search) {
@@ -1914,7 +1921,7 @@ int64_t PQFlashIndex<T, LabelT>::cached_beam_search_memory(const T *query, const
         if (distances != nullptr)
         {
             distances[result_size] = full_retset[i].distance;
-            if (metric == diskann::Metric::INNER_PRODUCT)
+            if (metric == diskann::Metric::INNER_PRODUCT || metric == diskann::Metric::COSINE)
             {
                 // When using L2 distance to calculate IP distance, the L2
                 // distance is exactly twice the IP distance.
@@ -1942,6 +1949,10 @@ int64_t PQFlashIndex<T, LabelT>::cached_beam_search_async(const T *query, const 
     for (size_t i = 0; i < this->data_dim; i++)
     {
         aligned_query_T[i] = (float) query[i];
+    }
+
+    if (diskann::Metric::COSINE == metric) {
+        normalize(aligned_query_T.get(), this->data_dim);
     }
 
     // FIXME: alternative instruction on aarch64
