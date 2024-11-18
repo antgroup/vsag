@@ -244,7 +244,7 @@ HNSW::knn_search(const DatasetPtr& query,
         try {
             Timer t(time_cost);
             if (use_conjugate_graph_ and params.use_conjugate_graph_search) {
-                k = LOOK_AT_K;
+                k = std::max(k, LOOK_AT_K);
             }
             results = alg_hnsw_->searchKnn(
                 (const void*)(vector), k, std::max(params.ef_search, k), filter_ptr);
