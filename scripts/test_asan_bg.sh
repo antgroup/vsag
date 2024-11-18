@@ -3,25 +3,25 @@
 pids=()
 exit_codes=()
 logger_files=()
-parallel_tags="[diskann] [hnsw] [hgraph]"
+parallel_tags="[diskann] [hnsw]"
 othertag=""
 
 mkdir ./log
 
-./build/tests/unittests -d yes ${UT_FILTER} --allow-running-no-tests --shard-count 1 --shard-index 0 > ./log/unittest.log &
-pids+=($!)
+./build/tests/unittests -d yes ${UT_FILTER} --allow-running-no-tests 2>&1 | tee ./log/unittest.log
+exit_codes+=($?)
 logger_files+=("./log/unittest.log")
 
 for tag in ${parallel_tags}
 do
   othertag="~"${tag}${othertag}
-  ./build/tests/functests -d yes ${UT_FILTER} --allow-running-no-tests ${tag} > ./log/${tag}.log &
+  ./build/tests/functests -d yes ${UT_FILTER} --allow-running-no-tests ${tag} 2>&1 | tee ./log/${tag}.log &
   pids+=($!)
   logname="./log/"${tag}".log"
   logger_files+=($logname)
 done
 
-./build/tests/functests -d yes ${UT_FILTER} --allow-running-no-tests ${othertag} > ./log/other.log &
+./build/tests/functests -d yes ${UT_FILTER} --allow-running-no-tests ${othertag} 2>&1 | tee ./log/other.log &
 pids+=($!)
 logger_files+=("./log/other.log")
 
