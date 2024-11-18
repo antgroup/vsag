@@ -26,10 +26,10 @@ jobs:
       - run: ./scripts/check_format.sh
       - restore_cache:
           keys:
-            - fork-cache-{{ checksum "CMakeLists.txt" }}
+            - fork-cache-{{ checksum "CMakeLists.txt" }}-{{ checksum ".circleci/fresh_ci_cache.commit" }}
       - run: make asan
       - save_cache:
-          key: fork-cache-{{ checksum "CMakeLists.txt" }}
+          key: fork-cache-{{ checksum "CMakeLists.txt" }}-{{ checksum ".circleci/fresh_ci_cache.commit" }}
           paths:
             - ./build
       - run: make test_asan_parallel
@@ -43,10 +43,10 @@ jobs:
       - run: ./scripts/check_format.sh
       - restore_cache:
           keys:
-            - main-ccache-{{ checksum "CMakeLists.txt" }}
+            - main-ccache-{{ checksum "CMakeLists.txt" }}-{{ checksum ".circleci/fresh_ci_cache.commit" }}
       - run: make asan
       - save_cache:
-          key: main-ccache-{{ checksum "CMakeLists.txt" }}
+          key: main-ccache-{{ checksum "CMakeLists.txt" }}-{{ checksum ".circleci/fresh_ci_cache.commit" }}
           paths:
             - ./build
       - run: make test_asan_parallel
