@@ -709,12 +709,10 @@ HNSW::brute_force(const DatasetPtr& query, int64_t k) {
         float* dists = (float*)allocator_->Allocate(sizeof(float) * k);
         result->Distances(dists);
 
-        const void* vector;
-        if (type_ == DataTypes::DATA_TYPE_INT8) {
-            vector = (const void*)query->GetInt8Vectors();
-        } else {
-            vector = (const void*)query->GetFloat32Vectors();
-        }
+        void* vector = nullptr;
+        size_t data_size = 0;
+        get_vectors(query, &vector, &data_size);
+
         std::shared_lock lock(rw_mutex_);
         std::priority_queue<std::pair<float, LabelType>> bf_result =
             alg_hnsw_->bruteForce(vector, k);
@@ -755,7 +753,8 @@ HNSW::pretrain(const std::vector<int64_t>& base_tag_ids,
     uint32_t data_size = 0;
     uint32_t add_edges = 0;
     int64_t topk_neighbor_tag_id;
-    const int8_t* topk_data;
+    const void* topk_data;
+    const void* base_data;
     auto base = Dataset::Make();
     auto generated_query = Dataset::Make();
     if (type_ == DataTypes::DATA_TYPE_INT8) {
@@ -765,24 +764,12 @@ HNSW::pretrain(const std::vector<int64_t>& base_tag_ids,
     }
 
     std::shared_ptr<int8_t[]> generated_data(new int8_t[data_size]);
-    if (type_ == DataTypes::DATA_TYPE_INT8) {
-        generated_query->Dim(dim_)->NumElements(1)->Int8Vectors(generated_data.get())->Owner(false);
-    } else {
-        generated_query->Dim(dim_)
-            ->NumElements(1)
-            ->Float32Vectors((float*)generated_data.get())
-            ->Owner(false);
-    }
-
-    base->Dim(dim_)->NumElements(1)->Owner(false);
+    set_dataset(generated_query, generated_data.get(), 1);
 
     for (const int64_t& base_tag_id : base_tag_ids) {
+        base_data = (const void*)this->alg_hnsw_->getDataByLabel(base_tag_id);
         try {
-            if (type_ == DataTypes::DATA_TYPE_INT8) {
-                base->Int8Vectors((const int8_t*)this->alg_hnsw_->getDataByLabel(base_tag_id));
-            } else {
-                base->Float32Vectors(this->alg_hnsw_->getDataByLabel(base_tag_id));
-            }
+            set_dataset(base, base_data, 1);
         } catch (const std::runtime_error& e) {
             LOG_ERROR_AND_RETURNS(
                 ErrorType::INVALID_ARGUMENT,
@@ -808,17 +795,17 @@ HNSW::pretrain(const std::vector<int64_t>& base_tag_ids,
             if (topk_neighbor_tag_id == base_tag_id) {
                 continue;
             }
-            topk_data = (const int8_t*)this->alg_hnsw_->getDataByLabel(topk_neighbor_tag_id);
+            topk_data = (const void*)this->alg_hnsw_->getDataByLabel(topk_neighbor_tag_id);
 
             for (int d = 0; d < dim_; d++) {
                 if (type_ == DataTypes::DATA_TYPE_INT8) {
                     generated_data.get()[d] =
-                        vsag::GENERATE_OMEGA * (float)base->GetInt8Vectors()[d] +
-                        (1 - vsag::GENERATE_OMEGA) * (float)topk_data[d];
+                        vsag::GENERATE_OMEGA * (float)(((int8_t*)base_data)[d]) +
+                        (1 - vsag::GENERATE_OMEGA) * (float)(((int8_t*)topk_data)[d]);
                 } else {
-                    generated_data.get()[d] =
-                        vsag::GENERATE_OMEGA * (float)base->GetFloat32Vectors()[d] +
-                        (1 - vsag::GENERATE_OMEGA) * (float)topk_data[d];
+                    ((float*)generated_data.get())[d] =
+                        vsag::GENERATE_OMEGA * ((float*)base_data)[d] +
+                        (1 - vsag::GENERATE_OMEGA) * ((float*)topk_data)[d];
                 }
             }
 
@@ -858,6 +845,20 @@ HNSW::get_vectors(const vsag::DatasetPtr& base, void** vectors_ptr, size_t* data
     } else if (type_ == DataTypes::DATA_TYPE_INT8) {
         *vectors_ptr = (void*)base->GetInt8Vectors();
         *data_size_ptr = dim_ * sizeof(int8_t);
+    } else {
+        throw std::invalid_argument(fmt::format("no support for this metric: {}", (int)type_));
+    }
+}
+
+void
+HNSW::set_dataset(const DatasetPtr& base, const void* vectors_ptr, uint32_t num_element) const {
+    if (type_ == DataTypes::DATA_TYPE_FLOAT) {
+        base->Float32Vectors((float*)vectors_ptr)
+            ->Dim(dim_)
+            ->Owner(false)
+            ->NumElements(num_element);
+    } else if (type_ == DataTypes::DATA_TYPE_INT8) {
+        base->Int8Vectors((int8_t*)vectors_ptr)->Dim(dim_)->Owner(false)->NumElements(num_element);
     } else {
         throw std::invalid_argument(fmt::format("no support for this metric: {}", (int)type_));
     }
