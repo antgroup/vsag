@@ -23,12 +23,12 @@
 #include <nlohmann/json.hpp>
 #include <stdexcept>
 
-#include "../algorithm/hnswlib/hnswlib.h"
 #include "../common.h"
 #include "../logger.h"
 #include "../safe_allocator.h"
 #include "../utils.h"
 #include "./hnsw_zparameters.h"
+#include "algorithm/hnswlib/hnswlib.h"
 #include "vsag/binaryset.h"
 #include "vsag/constants.h"
 #include "vsag/errors.h"

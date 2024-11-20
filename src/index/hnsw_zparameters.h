@@ -18,8 +18,8 @@
 #include <memory>
 #include <string>
 
-#include "../algorithm/hnswlib/hnswlib.h"
-#include "../data_type.h"
+#include "algorithm/hnswlib/hnswlib.h"
+#include "data_type.h"
 
 namespace vsag {
 

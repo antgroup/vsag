@@ -15,8 +15,6 @@
 
 #include "hnsw_zparameters.h"
 
-#include <fmt/format-inl.h>
-
 #include <nlohmann/json.hpp>
 
 #include "index_common_param.h"
