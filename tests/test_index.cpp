@@ -32,18 +32,13 @@ Intersection(const int64_t* x, int64_t x_count, const int64_t* y, int64_t y_coun
     return result;
 }
 
-int TestIndex::dataset_base_count = 1000;
-std::unordered_map<std::string, std::shared_ptr<TestDataset>> TestIndex::datasets = {};
-std::unordered_map<std::string, std::pair<TestIndex::IndexPtr, TestIndex::IndexStatus>>
-    TestIndex::indexs = {};
-
 TestIndex::IndexPtr
 TestIndex::FastGeneralTest(const std::string& name,
                            const std::string& build_param,
                            const std::string& search_parameters,
                            const std::string& metric_type,
                            int64_t dim,
-                           IndexStatus end_status) {
+                           IndexStatus end_status) const {
     auto dataset = TestIndex::GenerateAndSetDataset<float>(dim, 1000);
 
     auto top_k = 10;
@@ -102,7 +97,7 @@ TestIndex::TestFactory(const std::string& name,
 }
 
 void
-TestIndex::TestBuildIndex(IndexPtr index, int64_t dim, bool expected_success) {
+TestIndex::TestBuildIndex(IndexPtr index, int64_t dim, bool expected_success) const {
     auto dataset = GenerateAndSetDataset<float>(dim, dataset_base_count)->base_;
     TestBuildIndex(index, dataset, expected_success);
 }
@@ -120,7 +115,7 @@ TestIndex::TestBuildIndex(IndexPtr index, DatasetPtr dataset, bool expected_succ
 }
 
 void
-TestIndex::TestAddIndex(IndexPtr index, int64_t dim, bool expected_success) {
+TestIndex::TestAddIndex(IndexPtr index, int64_t dim, bool expected_success) const {
     auto dataset = GenerateAndSetDataset<float>(dim, dataset_base_count)->base_;
     TestAddIndex(index, dataset, expected_success);
 }

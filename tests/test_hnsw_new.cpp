@@ -17,19 +17,13 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
-#include <fstream>
-#include <iostream>
 #include <limits>
-#include <nlohmann/json.hpp>
-#include <numeric>
-#include <random>
 
 #include "simd/simd.h"
 #include "test_index.h"
-#include "vsag/errors.h"
 #include "vsag/vsag.h"
 
-TEST_CASE_METHOD(fixtures::TestIndex, "HNSW Build & ContinueAdd Test", "[ft][hnsw]") {
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::TestIndex, "HNSW Build & ContinueAdd Test", "[ft][hnsw]") {
     auto dims = fixtures::get_common_used_dims(3);
     auto metric_type = GENERATE("l2", "ip", "cosine");
     const std::string name = "hnsw";
@@ -41,7 +35,7 @@ TEST_CASE_METHOD(fixtures::TestIndex, "HNSW Build & ContinueAdd Test", "[ft][hns
     }
 }
 
-TEST_CASE_METHOD(fixtures::TestIndex, "HNSW Float General Test", "[ft][hnsw]") {
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::TestIndex, "HNSW Float General Test", "[ft][hnsw]") {
     auto dims = fixtures::get_common_used_dims(3);
     auto metric_type = GENERATE("l2", "ip", "cosine");
     const std::string name = "hnsw";
@@ -58,7 +52,9 @@ TEST_CASE_METHOD(fixtures::TestIndex, "HNSW Float General Test", "[ft][hnsw]") {
     }
 }
 
-TEST_CASE_METHOD(fixtures::TestIndex, "HNSW Factory Test With Exceptions", "[ft][hnsw]") {
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::TestIndex,
+                             "HNSW Factory Test With Exceptions",
+                             "[ft][hnsw]") {
     auto name = "hnsw";
     SECTION("Empty parameters") {
         auto param = "{}";
@@ -83,7 +79,7 @@ TEST_CASE_METHOD(fixtures::TestIndex, "HNSW Factory Test With Exceptions", "[ft]
         constexpr const char* param_tmp = R"(
         {{
             "dtype": "float32",
-            "metric_type": {},
+            "metric_type": "{}",
             "dim": 23,
             "hnsw": {{
                 "max_degree": 64,
@@ -197,21 +193,11 @@ TEST_CASE_METHOD(fixtures::TestIndex, "HNSW Factory Test With Exceptions", "[ft]
             }})";
         REQUIRE_THROWS(TestFactory(new_name, param, false));
     }
-
-    SECTION("Success") {
-        auto dims = fixtures::get_common_used_dims(3);
-        auto metric_type = GENERATE("l2", "ip", "cosine");
-        for (auto& dim : dims) {
-            auto build_param = fixtures::generate_hnsw_build_parameters_string(metric_type, dim);
-            auto index = TestFactory(name, build_param, true);
-            std::string metric = metric_type;
-            auto key = KeyGenIndex(dim, dataset_base_count, "hnsw_" + metric);
-            SaveIndex(key, index, IndexStatus::Factory);
-        }
-    }
 }
 
-TEST_CASE_METHOD(fixtures::TestIndex, "HNSW Build & Add Test With Exceptions", "[ft][hnsw]") {
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::TestIndex,
+                             "HNSW Build & Add Test With Exceptions",
+                             "[ft][hnsw]") {
     vsag::Options::Instance().logger()->SetLevel(vsag::Logger::Level::kINFO);
     auto dims = fixtures::get_common_used_dims(3);
     auto metric_type = GENERATE("l2", "ip", "cosine");
@@ -226,13 +212,10 @@ TEST_CASE_METHOD(fixtures::TestIndex, "HNSW Build & Add Test With Exceptions", "
     )";
     for (auto& dim : dims) {
         auto key = KeyGenIndex(dim, dataset_base_count, "hnsw_" + metric);
-        auto [index, status] = LoadIndex(key);
-        if (index == nullptr || status != IndexStatus::Factory) {
-            auto build_param = fixtures::generate_hnsw_build_parameters_string(metric_type, dim);
-            index = FastGeneralTest(
-                name, build_param, search_parameters, metric_type, dim, IndexStatus::Factory);
-            SaveIndex(key, index, IndexStatus::Factory);
-        }
+        auto build_param = fixtures::generate_hnsw_build_parameters_string(metric_type, dim);
+        auto index = FastGeneralTest(
+            name, build_param, search_parameters, metric_type, dim, IndexStatus::Factory);
+        SaveIndex(key, index, IndexStatus::Factory);
     }
 
     SECTION("Invalid dim for build") {
@@ -351,15 +334,6 @@ TEST_CASE_METHOD(fixtures::TestIndex, "HNSW Build & Add Test With Exceptions", "
         }
     }
      */
-    SECTION("Success") {
-        for (auto& dim : dims) {
-            auto key = KeyGenIndex(dim, dataset_base_count, "hnsw_" + metric);
-            auto [index, status] = LoadIndex(key);
-            vsag::Options::Instance().logger()->Info(fmt::format("dim={}, metric={}", dim, metric));
-            TestAddIndex(index, dim, true);
-            SaveIndex(key, index, IndexStatus::Build);
-        }
-    }
 }
 
 TEST_CASE_METHOD(fixtures::TestIndex,
@@ -383,13 +357,11 @@ TEST_CASE_METHOD(fixtures::TestIndex,
 
     for (auto& dim : dims) {
         auto key = KeyGenIndex(dim, dataset_base_count, "hnsw_" + metric);
-        auto [index, status] = LoadIndex(key);
-        if (index == nullptr || status != IndexStatus::Build) {
-            auto build_param = fixtures::generate_hnsw_build_parameters_string(metric_type, dim);
-            index = FastGeneralTest(
-                name, build_param, search_parameters, metric_type, dim, IndexStatus::Build);
-            SaveIndex(key, index, IndexStatus::Build);
-        }
+
+        auto build_param = fixtures::generate_hnsw_build_parameters_string(metric_type, dim);
+        auto index = FastGeneralTest(
+            name, build_param, search_parameters, metric_type, dim, IndexStatus::Build);
+        SaveIndex(key, index, IndexStatus::Build);
     }
 
     SECTION("Miss search_param or wrong key") {
@@ -590,13 +562,11 @@ TEST_CASE_METHOD(fixtures::TestIndex,
 
     for (auto& dim : dims) {
         auto key = KeyGenIndex(dim, dataset_base_count, "hnsw_" + metric);
-        auto [index, status] = LoadIndex(key);
-        if (index == nullptr || status != IndexStatus::Build) {
-            auto build_param = fixtures::generate_hnsw_build_parameters_string(metric_type, dim);
-            index = FastGeneralTest(
-                name, build_param, search_parameters, metric_type, dim, IndexStatus::Build);
-            SaveIndex(key, index, IndexStatus::Build);
-        }
+
+        auto build_param = fixtures::generate_hnsw_build_parameters_string(metric_type, dim);
+        auto index = FastGeneralTest(
+            name, build_param, search_parameters, metric_type, dim, IndexStatus::Build);
+        SaveIndex(key, index, IndexStatus::Build);
     }
     // TODO(LHT): bugfix
     /*
