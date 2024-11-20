@@ -268,7 +268,7 @@ GenTestItems(uint64_t count, uint64_t max_length, uint64_t max_index) {
                 break;
             }
         };
-        item.length_ = random() % max_length;
+        item.length_ = random() % max_length + 1;
         item.data_ = new uint8_t[item.length_];
         auto vec = fixtures::generate_vectors(1, max_length, false, random());
         memcpy(item.data_, vec.data(), item.length_);
