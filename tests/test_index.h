@@ -52,27 +52,27 @@ public:
     }
 
 protected:
-    static IndexPtr
+    IndexPtr
     FastGeneralTest(const std::string& name,
                     const std::string& build_param,
                     const std::string& search_parameters,
                     const std::string& metric_type,
                     int64_t dim,
-                    IndexStatus end_status = IndexStatus::DeSerialize);
+                    IndexStatus end_status = IndexStatus::DeSerialize) const;
 
     static IndexPtr
     TestFactory(const std::string& name,
                 const std::string& build_param,
                 bool expect_success = true);
 
-    static void
-    TestBuildIndex(IndexPtr index, int64_t dim, bool expected_success = true);
+    void
+    TestBuildIndex(IndexPtr index, int64_t dim, bool expected_success = true) const;
 
     static void
     TestBuildIndex(IndexPtr index, DatasetPtr dataset, bool expected_success = true);
 
-    static void
-    TestAddIndex(IndexPtr index, int64_t dim, bool expected_success = true);
+    void
+    TestAddIndex(IndexPtr index, int64_t dim, bool expected_success = true) const;
 
     static void
     TestAddIndex(IndexPtr index, DatasetPtr dataset, bool expected_success = true);
@@ -111,8 +111,8 @@ protected:
                         const std::string& param,
                         bool expected_success = true);
 
-    static bool
-    SetDataset(const std::string& key, TestDatasetPtr value) {
+    bool
+    SetDataset(const std::string& key, TestDatasetPtr value) const {
         if (datasets.find(key) != datasets.end()) {
             return false;
         }
@@ -120,8 +120,8 @@ protected:
         return true;
     }
 
-    static TestDatasetPtr
-    GetDataset(const std::string& key) {
+    TestDatasetPtr
+    GetDataset(const std::string& key) const {
         auto iter = datasets.find(key);
         if (iter == datasets.end()) {
             return nullptr;
@@ -129,8 +129,8 @@ protected:
         return iter->second;
     }
 
-    static void
-    DeleteDataset(const std::string& key) {
+    void
+    DeleteDataset(const std::string& key) const {
         auto iter = datasets.find(key);
         if (iter != datasets.end()) {
             datasets.erase(iter);
@@ -138,8 +138,8 @@ protected:
     }
 
     template <typename T>
-    static TestDatasetPtr
-    GenerateAndSetDataset(int64_t dim, uint64_t count) {
+    TestDatasetPtr
+    GenerateAndSetDataset(int64_t dim, uint64_t count) const {
         std::string datatype = "float";
         if constexpr (std::is_same_v<T, int8_t>) {
             datatype = "int8";
@@ -157,8 +157,8 @@ protected:
     }
 
     template <typename T>
-    static TestDatasetPtr
-    GenerateDataset(int64_t dim, uint64_t count) {
+    TestDatasetPtr
+    GenerateDataset(int64_t dim, uint64_t count) const {
         if constexpr (std::is_same_v<T, int8_t>) {
             return GenerateDatasetInt8(dim, count);
         } else if constexpr (std::is_same_v<T, float>) {
@@ -172,49 +172,49 @@ protected:
     static TestDatasetPtr
     GenerateDatasetFloat(int64_t dim, uint64_t count);
 
-    static TestDatasetPtr
-    GenerateDatasetInt8(int64_t dim, uint64_t count) {
+    TestDatasetPtr
+    GenerateDatasetInt8(int64_t dim, uint64_t count) const {
         return nullptr;  // TODO
     };
 
-    static std::string
+    std::string
     KeyGen(int64_t dim,
            uint64_t count,
            std::string datatype = "float",
-           std::string name = "classic") {
+           std::string name = "classic") const {
         return fmt::format(
             "[dim={}][count={}][type={}][dataset_name={}]", dim, count, datatype, name);
     }
 
-    static std::string
+    std::string
     KeyGenIndex(int64_t dim,
                 uint64_t count,
                 std::string index_name,
                 std::string datatype = "float",
-                std::string dataset_name = "classic") {
+                std::string dataset_name = "classic") const {
         auto str = KeyGen(dim, count, datatype, dataset_name);
         return str + fmt::format("[index_name={}]", index_name);
     }
 
-    static std::pair<IndexPtr, IndexStatus>
-    LoadIndex(std::string key) {
+    std::pair<IndexPtr, IndexStatus>
+    LoadIndex(std::string key) const {
         if (indexs.find(key) == indexs.end()) {
             return {nullptr, IndexStatus::Init};
         }
         return indexs[key];
     }
 
-    static void
-    SaveIndex(const std::string& key, IndexPtr index, IndexStatus status) {
+    void
+    SaveIndex(const std::string& key, IndexPtr index, IndexStatus status) const {
         indexs[key] = {index, status};
     }
 
-    static int dataset_base_count;
+    mutable int dataset_base_count{1000};
 
 private:
-    static std::unordered_map<std::string, std::shared_ptr<TestDataset>> datasets;
+    mutable std::unordered_map<std::string, std::shared_ptr<TestDataset>> datasets;
 
-    static std::unordered_map<std::string, std::pair<IndexPtr, IndexStatus>> indexs;
+    mutable std::unordered_map<std::string, std::pair<IndexPtr, IndexStatus>> indexs;
 };
 
 }  // namespace fixtures
