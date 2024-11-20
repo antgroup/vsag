@@ -858,9 +858,12 @@ HNSW::set_dataset(const DatasetPtr& base, const void* vectors_ptr, uint32_t num_
             ->Owner(false)
             ->NumElements(num_element);
     } else if (type_ == DataTypes::DATA_TYPE_INT8) {
-        base->Int8Vectors((int8_t*)vectors_ptr)->Dim(dim_)->Owner(false)->NumElements(num_element);
+        base->Int8Vectors((int8_t*)vectors_ptr)
+            ->Dim(dim_)
+            ->Owner(false)
+            ->NumElements(num_element);
     } else {
-        throw std::invalid_argument(fmt::format("no support for this metric: {}", (int)type_));
+        throw std::invalid_argument(fmt::format("no support for this type: {}", (int)type_));
     }
 }
 
