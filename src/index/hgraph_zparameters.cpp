@@ -60,12 +60,17 @@ HGraphParameters::CheckAndSetKeyValue(const std::string& key, JsonType& value) {
 
     if (key == HGRAPH_BASE_QUANTIZATION_TYPE) {
         std::string value_str = value;
-        if (value_str != QUANTIZATION_TYPE_VALUE_SQ8 && value_str != QUANTIZATION_TYPE_VALUE_FP32) {
-            throw std::invalid_argument(fmt::format("parameters[{}] must be {} or {}, now is {}",
-                                                    HGRAPH_BASE_QUANTIZATION_TYPE,
-                                                    QUANTIZATION_TYPE_VALUE_SQ8,
-                                                    QUANTIZATION_TYPE_VALUE_FP32,
-                                                    value_str));
+        if (value_str != QUANTIZATION_TYPE_VALUE_SQ8 && value_str != QUANTIZATION_TYPE_VALUE_FP32 &&
+            value_str != QUANTIZATION_TYPE_VALUE_SQ4 &&
+            value_str != QUANTIZATION_TYPE_VALUE_SQ4_UNIFORM) {
+            throw std::invalid_argument(
+                fmt::format("parameters[{}] must in [{}, {}, {}, {}], now is {}",
+                            HGRAPH_BASE_QUANTIZATION_TYPE,
+                            QUANTIZATION_TYPE_VALUE_SQ8,
+                            QUANTIZATION_TYPE_VALUE_FP32,
+                            QUANTIZATION_TYPE_VALUE_SQ4,
+                            QUANTIZATION_TYPE_VALUE_SQ4_UNIFORM,
+                            value_str));
         }
     }
 
