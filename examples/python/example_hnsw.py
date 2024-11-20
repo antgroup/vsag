@@ -58,16 +58,14 @@ def float32_hnsw_test():
     search_params = json.dumps({"hnsw": {"ef_search": 100}})
     
     print("[build] float32 recall:", cal_recall(index, ids, data, 11, search_params))
-    root_dir = "/tmp/"
-    file_sizes = index.save(root_dir)
+    filename = "./example_hnsw.index"
+    file_sizes = index.save(filename)
     
     index = pyvsag.Index("hnsw", index_params)
-    index.load(root_dir, file_sizes, True)
-    print("[memory] float32 recall:", cal_recall(index, ids, data, 11, search_params))
-    
-    index = pyvsag.Index("hnsw", index_params)
-    index.load(root_dir, file_sizes, False)
-    print("[disk] float32 recall:", cal_recall(index, ids, data, 11, search_params))
+    index.load(filename)
+    print("float32 recall:", cal_recall(index, ids, data, 11, search_params))
+
 
 if __name__ == '__main__':
     float32_hnsw_test()
+
