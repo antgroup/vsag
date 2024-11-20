@@ -29,7 +29,7 @@ GraphInterfaceTest::BasicTest(uint64_t max_id, uint64_t count, GraphInterfacePtr
     auto old_count = this->graph_->TotalCount();
     UnorderedMap<InnerIdType, std::shared_ptr<Vector<InnerIdType>>> maps(allocator.get());
     for (auto i = 0; i < count; ++i) {
-        auto length = random() % max_degree;
+        auto length = random() % max_degree + 1;
         auto ids = std::make_shared<Vector<InnerIdType>>(length, allocator.get());
         for (auto& id : *ids) {
             id = random() % max_id;
