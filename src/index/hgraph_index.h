@@ -159,13 +159,6 @@ public:
         this->build_pool_->set_pool_size(count);
     }
 
-    // TODO(LHT): make private
-    void
-    serialize(StreamWriter& writer) const;
-
-    void
-    deserialize(StreamReader& reader);
-
 public:
     FlattenInterfacePtr basic_flatten_codes_{nullptr};
     FlattenInterfacePtr high_precise_codes_{nullptr};
@@ -199,6 +192,9 @@ private:
     tl::expected<BinarySet, Error>
     serialize() const;
 
+    void
+    serialize(StreamWriter& writer) const;
+
     tl::expected<void, Error>
     deserialize(const ReaderSet& reader_set);
 
@@ -207,6 +203,9 @@ private:
 
     tl::expected<void, Error>
     deserialize(std::istream& in_stream);
+
+    void
+    deserialize(StreamReader& reader);
 
     tl::expected<float, Error>
     calc_distance_by_id(const float* vector, int64_t id) const;
