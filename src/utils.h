@@ -18,9 +18,11 @@
 #include <chrono>
 #include <cstdint>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
-#include "default_allocator.h"
+#include "allocator_wrapper.h"
+#include "logger.h"
 #include "spdlog/spdlog.h"
 #include "vsag/errors.h"
 #include "vsag/expected.hpp"

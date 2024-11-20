@@ -15,7 +15,6 @@
 
 #pragma once
 
-#include <map>
 #include <memory>
 #include <unordered_set>
 #include <vector>
@@ -68,59 +67,6 @@ private:
     std::unordered_set<void*> allocated_ptrs_;
     std::mutex set_mutex_;
 #endif
-};
-
-template <class T>
-class AllocatorWrapper {
-public:
-    using value_type = T;
-    using pointer = T*;
-    using void_pointer = void*;
-    using const_void_pointer = const void*;
-    using size_type = size_t;
-    using difference_type = ptrdiff_t;
-
-    AllocatorWrapper(Allocator* allocator) {
-        this->allocator_ = allocator;
-    }
-
-    template <class U>
-    AllocatorWrapper(const AllocatorWrapper<U>& other) : allocator_(other.allocator_) {
-    }
-
-    bool
-    operator==(const AllocatorWrapper& other) const noexcept {
-        return allocator_ == other.allocator_;
-    }
-
-    pointer
-    allocate(size_type n, const_void_pointer hint = 0) {
-        return static_cast<pointer>(allocator_->Allocate(n * sizeof(value_type)));
-    }
-
-    void
-    deallocate(pointer p, size_type n) {
-        allocator_->Deallocate(static_cast<void_pointer>(p));
-    }
-
-    template <class U, class... Args>
-    void
-    construct(U* p, Args&&... args) {
-        ::new ((void_pointer)p) U(std::forward<Args>(args)...);
-    }
-
-    template <class U>
-    void
-    destroy(U* p) {
-        p->~U();
-    }
-
-    template <class U>
-    struct rebind {
-        using other = AllocatorWrapper<U>;
-    };
-
-    Allocator* allocator_{};
 };
 
 }  // namespace vsag

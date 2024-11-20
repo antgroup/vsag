@@ -18,6 +18,7 @@
 #include <fstream>
 
 #include "catch2/catch_test_macros.hpp"
+#include "default_allocator.h"
 #include "fixtures.h"
 
 using namespace vsag;

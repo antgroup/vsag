@@ -18,8 +18,10 @@
 #include <catch2/catch_test_macros.hpp>
 #include <vector>
 
+#include "default_allocator.h"
 #include "fixtures.h"
 #include "quantizer_test.h"
+
 using namespace vsag;
 
 const auto dims = fixtures::get_common_used_dims();

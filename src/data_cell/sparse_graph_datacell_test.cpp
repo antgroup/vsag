@@ -16,6 +16,7 @@
 #include "sparse_graph_datacell.h"
 
 #include "catch2/catch_template_test_macros.hpp"
+#include "default_allocator.h"
 #include "fmt/format-inl.h"
 #include "graph_interface_test.h"
 
