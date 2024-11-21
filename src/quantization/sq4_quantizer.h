@@ -21,6 +21,7 @@
 
 #include "index/index_common_param.h"
 #include "quantizer.h"
+#include "scalar_quantization_trainer.h"
 #include "simd/normalize.h"
 #include "simd/sq4_simd.h"
 #include "typing.h"
@@ -92,42 +93,20 @@ SQ4Quantizer<metric>::TrainImpl(const DataType* data, uint64_t count) {
         return false;
     }
 
-    std::fill(lower_bound_.begin(), lower_bound_.end(), std::numeric_limits<DataType>::max());
-    std::fill(diff_.begin(), diff_.end(), std::numeric_limits<DataType>::lowest());
-
-    Vector<float> norms(this->allocator_);
+    if (this->is_trained_) {
+        return true;
+    }
+    bool need_normalize = false;
     if constexpr (metric == MetricType::METRIC_TYPE_COSINE) {
-        norms.resize(count);
-        Vector<float> tmp(this->dim_, this->allocator_);
-        for (uint64_t i = 0; i < count; ++i) {
-            norms[i] = Normalize(data + i * this->dim_, tmp.data(), this->dim_);
-        }
+        need_normalize = true;
     }
 
-    for (uint64_t d = 0; d < this->dim_; d++) {
-        for (uint64_t i = 0; i < count; i++) {
-            auto val = data[i * this->dim_ + d];
-            if constexpr (metric == MetricType::METRIC_TYPE_COSINE) {
-                if (norms[i] != 0) {
-                    val /= norms[i];
-                }
-            }
-            if (val > diff_[d]) {
-                diff_[d] = val;
-            }
-            if (val < lower_bound_[d]) {
-                lower_bound_[d] = val;
-            }
-        }
-    }
+    ScalarQuantizationTrainer trainer(this->dim_, 4);
+    trainer.Train(data, count, this->diff_.data(), this->lower_bound_.data(), need_normalize);
 
-    for (uint64_t d = 0; d < this->dim_; d++) {
-        diff_[d] -= lower_bound_[d];
-        if (diff_[d] < 1e-4) {
-            diff_[d] = 1;
-        }
+    for (uint64_t i = 0; i < this->dim_; ++i) {
+        this->diff_[i] -= this->lower_bound_[i];
     }
-
     this->is_trained_ = true;
     return true;
 }

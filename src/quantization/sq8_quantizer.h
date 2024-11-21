@@ -23,6 +23,7 @@
 
 #include "index/index_common_param.h"
 #include "quantizer.h"
+#include "scalar_quantization_trainer.h"
 #include "simd/normalize.h"
 #include "simd/sq8_simd.h"
 
@@ -102,31 +103,16 @@ SQ8Quantizer<metric>::TrainImpl(const vsag::DataType* data, uint64_t count) {
     if (this->is_trained_) {
         return true;
     }
-    Vector<float> norms(this->allocator_);
-    Vector<DataType> upper_bound(
-        this->dim_, std::numeric_limits<DataType>::lowest(), this->allocator_);
+    bool need_normalize = false;
     if constexpr (metric == MetricType::METRIC_TYPE_COSINE) {
-        norms.resize(count);
-        Vector<float> tmp(this->dim_, this->allocator_);
-        for (uint64_t i = 0; i < count; ++i) {
-            norms[i] = Normalize(data + i * this->dim_, tmp.data(), this->dim_);
-        }
+        need_normalize = true;
     }
 
+    ScalarQuantizationTrainer trainer(this->dim_, 8);
+    trainer.Train(data, count, this->diff_.data(), this->lower_bound_.data(), need_normalize);
+
     for (uint64_t i = 0; i < this->dim_; ++i) {
-        for (uint64_t j = 0; j < count; ++j) {
-            DataType value = data[j * this->dim_ + i];
-            if constexpr (metric == MetricType::METRIC_TYPE_COSINE) {
-                if (norms[j] != 0) {
-                    value /= norms[j];
-                }
-            }
-            upper_bound[i] = std::max(upper_bound[i], value);
-            lower_bound_[i] = std::min(lower_bound_[i], value);
-        }
-    }
-    for (uint64_t i = 0; i < this->dim_; ++i) {
-        this->diff_[i] = upper_bound[i] - this->lower_bound_[i];
+        this->diff_[i] -= this->lower_bound_[i];
     }
     this->is_trained_ = true;
     return true;

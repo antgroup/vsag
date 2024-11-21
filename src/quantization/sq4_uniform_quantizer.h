@@ -23,6 +23,7 @@
 
 #include "index/index_common_param.h"
 #include "quantizer.h"
+#include "scalar_quantization_trainer.h"
 #include "simd/normalize.h"
 #include "simd/sq4_uniform_simd.h"
 #include "typing.h"
@@ -139,25 +140,18 @@ SQ4UniformQuantizer<metric>::TrainImpl(const DataType* data, uint64_t count) {
         return false;
     }
 
-    lower_bound_ = std::numeric_limits<DataType>::max();
-    diff_ = std::numeric_limits<DataType>::lowest();
-
-    for (uint64_t i = 0; i < count; i++) {
-        for (uint64_t d = 0; d < this->dim_; d++) {
-            auto val = data[i * this->dim_ + d];
-            if (val > diff_) {
-                diff_ = val;
-            }
-            if (val < lower_bound_) {
-                lower_bound_ = val;
-            }
-        }
+    if (this->is_trained_) {
+        return true;
+    }
+    bool need_normalize = false;
+    if constexpr (metric == MetricType::METRIC_TYPE_COSINE) {
+        need_normalize = true;
     }
 
-    diff_ -= lower_bound_;
-    if (diff_ < 1e-4) {
-        diff_ = 1;  // todo: throw warning here
-    }
+    ScalarQuantizationTrainer trainer(this->dim_, 4);
+    trainer.TrainUniform(data, count, this->diff_, this->lower_bound_, need_normalize);
+
+    this->diff_ -= this->lower_bound_;
 
     this->is_trained_ = true;
     return true;
