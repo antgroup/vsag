@@ -36,7 +36,7 @@ public:
 
     void
     Query(float* result_dists,
-          ComputerInterfacePtr computer,
+          const ComputerInterfacePtr& computer,
           const InnerIdType* idx,
           InnerIdType id_count) override {
         auto comp = std::static_pointer_cast<Computer<QuantTmpl>>(computer);
@@ -108,7 +108,7 @@ private:
 
     inline void
     query(float* result_dists,
-          std::shared_ptr<Computer<QuantTmpl>> computer,
+          const std::shared_ptr<Computer<QuantTmpl>>& computer,
           const InnerIdType* idx,
           InnerIdType id_count);
 
@@ -190,7 +190,7 @@ FlattenDataCell<QuantTmpl, IOTmpl>::query(float* result_dists,
 template <typename QuantTmpl, typename IOTmpl>
 void
 FlattenDataCell<QuantTmpl, IOTmpl>::query(float* result_dists,
-                                          std::shared_ptr<Computer<QuantTmpl>> computer,
+                                          const std::shared_ptr<Computer<QuantTmpl>>& computer,
                                           const InnerIdType* idx,
                                           InnerIdType id_count) {
     for (int64_t i = 0; i < id_count; ++i) {
