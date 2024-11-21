@@ -19,7 +19,7 @@
 #include <functional>
 #include <ostream>
 
-#include "utils.h"
+#include "typing.h"
 
 class StreamWriter {
 public:

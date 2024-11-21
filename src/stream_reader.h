@@ -19,7 +19,7 @@
 #include <functional>
 #include <istream>
 
-#include "utils.h"
+#include "typing.h"
 
 class StreamReader {
 public:
