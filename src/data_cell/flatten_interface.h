@@ -38,7 +38,7 @@ public:
 public:
     virtual void
     Query(float* result_dists,
-          ComputerInterfacePtr computer,
+          const ComputerInterfacePtr& computer,
           const InnerIdType* idx,
           InnerIdType id_count) = 0;
 
