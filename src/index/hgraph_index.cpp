@@ -95,6 +95,11 @@ tl::expected<std::vector<int64_t>, Error>
 HGraphIndex::add(const DatasetPtr& data) {
     std::vector<int64_t> failed_ids;
     try {
+        auto base_dim = data->GetDim();
+        CHECK_ARGUMENT(base_dim == dim_,
+                       fmt::format("base.dim({}) must be equal to index.dim({})", base_dim, dim_));
+        CHECK_ARGUMENT(data->GetFloat32Vectors() != nullptr, "base.float_vector is nullptr");
+
         this->basic_flatten_codes_->Train(data->GetFloat32Vectors(), data->GetNumElements());
         this->basic_flatten_codes_->BatchInsertVector(data->GetFloat32Vectors(),
                                                       data->GetNumElements());
@@ -117,42 +122,62 @@ HGraphIndex::knn_search(const DatasetPtr& query,
                         const std::string& parameters,
                         const std::function<bool(int64_t)>& filter) const {
     BitsetOrCallbackFilter ft(filter);
+    try {
+        int64_t query_dim = query->GetDim();
+        CHECK_ARGUMENT(
+            query_dim == dim_,
+            fmt::format("query.dim({}) must be equal to index.dim({})", query_dim, dim_));
+        // check k
+        CHECK_ARGUMENT(k > 0, fmt::format("k({}) must be greater than 0", k));
+        k = std::min(k, GetNumElements());
 
-    auto ep = this->entry_point_id_;
-    for (int64_t i = this->route_graphs_.size() - 1; i >= 0; --i) {
-        auto result = this->search_one_graph(query->GetFloat32Vectors(),
-                                             this->route_graphs_[i],
-                                             this->basic_flatten_codes_,
-                                             ep,
-                                             1,
-                                             nullptr);
-        ep = result.top().second;
+        // check query vector
+        CHECK_ARGUMENT(query->GetNumElements() == 1, "query dataset should contain 1 vector only");
+
+        auto ep = this->entry_point_id_;
+        for (int64_t i = this->route_graphs_.size() - 1; i >= 0; --i) {
+            auto result = this->search_one_graph(query->GetFloat32Vectors(),
+                                                 this->route_graphs_[i],
+                                                 this->basic_flatten_codes_,
+                                                 ep,
+                                                 1,
+                                                 nullptr);
+            ep = result.top().second;
+        }
+
+        auto params = HnswSearchParameters::FromJson(parameters);
+
+        auto ef = params.ef_search;
+        auto search_result = this->search_one_graph(query->GetFloat32Vectors(),
+                                                    this->bottom_graph_,
+                                                    this->basic_flatten_codes_,
+                                                    ep,
+                                                    ef,
+                                                    &ft);
+
+        while (search_result.size() > k) {
+            search_result.pop();
+        }
+
+        auto dataset_results = Dataset::Make();
+        dataset_results->Dim(search_result.size())->NumElements(1)->Owner(true, allocator_);
+
+        auto* ids = (int64_t*)allocator_->Allocate(sizeof(int64_t) * search_result.size());
+        dataset_results->Ids(ids);
+        auto* dists = (float*)allocator_->Allocate(sizeof(float) * search_result.size());
+        dataset_results->Distances(dists);
+
+        for (int64_t j = search_result.size() - 1; j >= 0; --j) {
+            dists[j] = search_result.top().first;
+            ids[j] = search_result.top().second;
+            search_result.pop();
+        }
+        return std::move(dataset_results);
+    } catch (const std::invalid_argument& e) {
+        LOG_ERROR_AND_RETURNS(ErrorType::INVALID_ARGUMENT,
+                              "[HGraph] failed to knn_search(invalid argument): ",
+                              e.what());
     }
-
-    auto params = HnswSearchParameters::FromJson(parameters);
-
-    auto ef = params.ef_search;
-    auto search_result = this->search_one_graph(
-        query->GetFloat32Vectors(), this->bottom_graph_, this->basic_flatten_codes_, ep, ef, &ft);
-
-    while (search_result.size() > k) {
-        search_result.pop();
-    }
-
-    auto dataset_results = Dataset::Make();
-    dataset_results->Dim(search_result.size())->NumElements(1)->Owner(true, allocator_);
-
-    auto* ids = (int64_t*)allocator_->Allocate(sizeof(int64_t) * search_result.size());
-    dataset_results->Ids(ids);
-    auto* dists = (float*)allocator_->Allocate(sizeof(float) * search_result.size());
-    dataset_results->Distances(dists);
-
-    for (int64_t j = search_result.size() - 1; j >= 0; --j) {
-        dists[j] = search_result.top().first;
-        ids[j] = search_result.top().second;
-        search_result.pop();
-    }
-    return std::move(dataset_results);
 }
 
 tl::expected<BinarySet, Error>
