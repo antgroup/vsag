@@ -72,7 +72,7 @@ public:
             int64_t bit_index = id & ROW_ID_MASK;
             return invalid->Test(bit_index);
         };
-        SAFE_CALL(return this->knn_search(query, k, parameters, func);)
+        SAFE_CALL(return this->knn_search(query, k, parameters, func));
     }
 
     tl::expected<DatasetPtr, Error>
@@ -80,51 +80,50 @@ public:
               int64_t k,
               const std::string& parameters,
               const std::function<bool(int64_t)>& filter) const override {
-        SAFE_CALL(return this->knn_search(query, k, parameters, filter);)
+        SAFE_CALL(return this->knn_search(query, k, parameters, filter));
     }
 
-    // TODO(LHT): implement
     tl::expected<DatasetPtr, Error>
     RangeSearch(const DatasetPtr& query,
                 float radius,
                 const std::string& parameters,
                 int64_t limited_size = -1) const override {
-        return Dataset::Make();
+        SAFE_CALL(return this->range_search(query, radius, parameters, nullptr, limited_size));
     }
 
-    // TODO(LHT): implement
     tl::expected<DatasetPtr, Error>
     RangeSearch(const DatasetPtr& query,
                 float radius,
                 const std::string& parameters,
                 BitsetPtr invalid,
                 int64_t limited_size = -1) const override {
-        return Dataset::Make();
+        BitsetOrCallbackFilter filter(invalid);
+        SAFE_CALL(return this->range_search(query, radius, parameters, &filter, limited_size));
     }
 
-    // TODO(LHT): implement
     tl::expected<DatasetPtr, Error>
     RangeSearch(const DatasetPtr& query,
                 float radius,
                 const std::string& parameters,
                 const std::function<bool(int64_t)>& filter,
                 int64_t limited_size) const override {
-        return Dataset::Make();
+        BitsetOrCallbackFilter callback(filter);
+        SAFE_CALL(return this->range_search(query, radius, parameters, &callback, limited_size));
     }
 
     tl::expected<float, Error>
     CalcDistanceById(const float* vector, int64_t id) const override {
-        SAFE_CALL(return this->calc_distance_by_id(vector, id);)
+        SAFE_CALL(return this->calc_distance_by_id(vector, id));
     };
 
     tl::expected<BinarySet, Error>
     Serialize() const override {
-        SAFE_CALL(return this->serialize();)
+        SAFE_CALL(return this->serialize());
     }
 
     tl::expected<void, Error>
     Serialize(std::ostream& out_stream) override {
-        SAFE_CALL(return this->serialize(out_stream);)
+        SAFE_CALL(return this->serialize(out_stream));
     }
 
     tl::expected<void, Error>
@@ -139,7 +138,7 @@ public:
 
     tl::expected<void, Error>
     Deserialize(const ReaderSet& reader_set) override {
-        SAFE_CALL(return this->deserialize(reader_set);)
+        SAFE_CALL(return this->deserialize(reader_set));
     }
 
     int64_t
@@ -174,6 +173,17 @@ public:
     const IndexCommonParam common_param_{};
 
 private:
+    class InnerSearchParam {
+    public:
+        int topk_{0};
+        float radius_{0.0f};
+        InnerIdType ep_{0};
+        uint64_t ef_{10};
+        BaseFilterFunctor* is_id_allowed_{nullptr};
+    };
+
+    enum InnerSearchMode { KNN_SEARCH_MODE = 1, RANGE_SEARCH_MODE = 2 };
+
     tl::expected<std::vector<int64_t>, Error>
     build(const DatasetPtr& data);
 
@@ -185,6 +195,16 @@ private:
                int64_t k,
                const std::string& parameters,
                const std::function<bool(int64_t)>& filter) const;
+
+    // TODO(LHT): implement
+    tl::expected<DatasetPtr, Error>
+    range_search(const DatasetPtr& query,
+                 float radius,
+                 const std::string& parameters,
+                 BaseFilterFunctor* filter_ptr,
+                 int64_t limited_size) const {
+        return Dataset::Make();
+    };
 
     tl::expected<void, Error>
     serialize(std::ostream& out_stream) const;
