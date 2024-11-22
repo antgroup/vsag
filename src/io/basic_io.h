@@ -15,6 +15,8 @@
 
 #pragma once
 
+#include <fmt/format-inl.h>
+
 #include <cstdint>
 
 #include "stream_reader.h"

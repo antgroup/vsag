@@ -19,7 +19,7 @@
 #include <unordered_map>
 #include <unordered_set>
 
-#include "default_allocator.h"
+#include "allocator_wrapper.h"
 #include "nlohmann/json.hpp"
 
 namespace vsag {
