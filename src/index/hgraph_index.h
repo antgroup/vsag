@@ -272,6 +272,13 @@ private:
     uint64_t
     cal_serialize_size() const;
 
+    inline LabelType
+    get_label_by_id(InnerIdType inner_id) const {
+        std::shared_lock<std::shared_mutex> lock(this->label_lookup_mutex_);
+        // the inner_id is guarantee in label_lookup
+        return this->label_lookup_.at(inner_id);
+    }
+
 private:
     std::default_random_engine level_generator_{2021};
     double mult_{1.0};

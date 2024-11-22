@@ -341,7 +341,7 @@ HGraphIndex::search_one_graph(const float* query,
     float dist = 0.0f;
     auto lower_bound = std::numeric_limits<float>::max();
     flatten->Query(&dist, computer, &ep, 1);
-    if (not is_id_allowed || (*is_id_allowed)(ep)) {
+    if (not is_id_allowed || (*is_id_allowed)(get_label_by_id(ep))) {
         cur_result.emplace(dist, ep);
         lower_bound = cur_result.top().first;
     }
@@ -398,7 +398,7 @@ HGraphIndex::search_one_graph(const float* query,
                 candidate_set.emplace(-dist, to_be_visited[i]);
                 flatten->Prefetch(candidate_set.top().second);
 
-                if (not is_id_allowed || (*is_id_allowed)(to_be_visited[i])) {
+                if (not is_id_allowed || (*is_id_allowed)(get_label_by_id(to_be_visited[i]))) {
                     cur_result.emplace(dist, to_be_visited[i]);
                 }
 
