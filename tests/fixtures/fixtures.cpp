@@ -263,6 +263,24 @@ generate_hnsw_build_parameters_string(const std::string& metric_type, int64_t di
     return build_parameters;
 }
 
+std::string
+generate_hgraph_build_parameters_string(const std::string& metric_type,
+                                        int64_t dim,
+                                        const std::string& base_quantization_type) {
+    constexpr auto parameter_temp = R"(
+    {{
+        "dtype": "float32",
+        "metric_type": "{}",
+        "dim": {},
+        "index_param": {{
+            "base_quantization_type": "{}"
+        }}
+    }}
+    )";
+    auto build_parameters = fmt::format(parameter_temp, metric_type, dim, base_quantization_type);
+    return build_parameters;
+}
+
 vsag::DatasetPtr
 brute_force(const vsag::DatasetPtr& query,
             const vsag::DatasetPtr& base,
