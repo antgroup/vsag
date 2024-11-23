@@ -1,3 +1,4 @@
+
 // Copyright 2024-present the vsag project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -26,6 +27,7 @@
 #include "vsag/dataset.h"
 #include "vsag/errors.h"
 #include "vsag/expected.hpp"
+#include "vsag/index_feature.h"
 #include "vsag/readerset.h"
 
 namespace vsag {
