@@ -287,3 +287,4 @@ add_custom_target (version
                    -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/GenerateVersionHeader.cmake
   )
 add_dependencies (vsag version)
+add_dependencies (vsag_static version)
