@@ -78,8 +78,8 @@ HGraphIndex::Init() {
 
     mult_ = 1 / log(1.0 * static_cast<double>(this->bottom_graph_->MaximumDegree()));
 
-    this->pool_ = std::make_shared<hnswlib::VisitedListPool>(
-        1, this->bottom_graph_->MaxCapacity(), allocator_);
+    this->pool_ =
+        std::make_shared<hnswlib::VisitedListPool>(this->bottom_graph_->MaxCapacity(), allocator_);
 
     if (this->build_thread_count_ > 1) {
         this->build_pool_ = std::make_unique<progschj::ThreadPool>(this->build_thread_count_);

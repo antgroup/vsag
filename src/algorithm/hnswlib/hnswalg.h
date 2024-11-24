@@ -73,7 +73,7 @@ private:
     double mult_{0.0}, rev_size_{0.0};
     int max_level_{0};
 
-    std::shared_ptr<VisitedListPool> visited_list_pool_{nullptr};
+    VisitedListPool* visited_list_pool_{nullptr};
 
     // Locks operations with element by label value
     mutable vsag::Vector<std::mutex> label_op_locks_;

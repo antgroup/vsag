@@ -36,6 +36,22 @@ public:
     virtual void*
     Reallocate(void* p, size_t size) = 0;
 
+    template <typename T, typename... Args>
+    T*
+    New(Args&&... args) {
+        void* p = Allocate(sizeof(T));
+        return (T*)::new (p) T(std::forward<Args>(args)...);
+    }
+
+    template <typename T>
+    void
+    Delete(T* p) {
+        if (p) {
+            p->~T();
+            Deallocate(static_cast<void*>(p));
+        }
+    }
+
 public:
     virtual ~Allocator() = default;
 };

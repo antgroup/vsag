@@ -161,7 +161,7 @@ public:
 
         cur_element_count_ = 0;
 
-        visited_list_pool_ = new VisitedListPool(1, max_elements, allocator_);
+        visited_list_pool_ = allocator_->New<VisitedListPool>(max_elements, allocator_);
 
         // initializations for special treatment of the first node
         enterpoint_node_ = -1;
@@ -187,7 +187,7 @@ public:
         }
         allocator_->Deallocate(element_levels_);
         allocator_->Deallocate(linkLists_);
-        delete visited_list_pool_;
+        allocator_->Delete(visited_list_pool_);
         CodeBook().swap(pq_book);
         allocator_->Deallocate(pq_map);
         allocator_->Deallocate(node_cluster_dist_);
@@ -935,8 +935,8 @@ public:
             throw std::runtime_error(
                 "Cannot Resize, max element is less than the current number of elements");
 
-        delete visited_list_pool_;
-        visited_list_pool_ = new VisitedListPool(1, new_max_elements, allocator_);
+        allocator_->Delete(visited_list_pool_);
+        visited_list_pool_ = allocator_->New<VisitedListPool>(new_max_elements, allocator_);
 
         element_levels_ =
             (int*)allocator_->Reallocate(element_levels_, new_max_elements * sizeof(int));
@@ -1527,8 +1527,7 @@ public:
         std::vector<std::mutex>(max_elements).swap(link_list_locks_);
         std::vector<std::mutex>(MAX_LABEL_OPERATION_LOCKS).swap(label_op_locks_);
 
-        delete visited_list_pool_;
-        visited_list_pool_ = new VisitedListPool(1, max_elements, allocator_);
+        visited_list_pool_ = allocator_->New<VisitedListPool>(max_elements, allocator_);
 
         free(linkLists_);
         linkLists_ = (char**)malloc(sizeof(void*) * max_elements);
