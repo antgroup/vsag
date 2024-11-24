@@ -83,6 +83,7 @@ public:
     virtual void
     loadIndex(std::function<void(uint64_t, uint64_t, void*)> read_func,
               SpaceInterface* s,
+              size_t file_size,
               size_t max_elements_i = 0) = 0;
 
     virtual void

@@ -77,7 +77,7 @@ GraphInterfaceTest::BasicTest(uint64_t max_id, uint64_t count, GraphInterfacePtr
         outfile.close();
 
         std::ifstream infile(path.c_str(), std::ios::binary);
-        IOStreamReader reader(infile);
+        IOStreamReader reader(infile, allocator.get());
         other->Deserialize(reader);
 
         REQUIRE(this->graph_->TotalCount() == other->TotalCount());

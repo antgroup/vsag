@@ -20,6 +20,7 @@
 #include <fstream>
 #include <memory>
 
+#include "../default_allocator.h"
 #include "basic_io.h"
 #include "fixtures.h"
 
@@ -57,6 +58,7 @@ TestSerializeAndDeserialize(BasicIO<T>& wio, BasicIO<T>& rio) {
     std::vector<uint64_t> counts = {200, 500};
     std::vector<uint64_t> max_lengths = {2, 20, 37, 64, 128, 260, 999};
     srandom(time(nullptr));
+    vsag::DefaultAllocator allocator;
     fixtures::TempDir dirname("TestSerializeAndDeserialize");
     for (auto count : counts) {
         for (auto max_length : max_lengths) {
@@ -71,7 +73,7 @@ TestSerializeAndDeserialize(BasicIO<T>& wio, BasicIO<T>& rio) {
             outfile.close();
 
             std::ifstream infile(filename.c_str(), std::ios::binary);
-            IOStreamReader reader(infile);
+            IOStreamReader reader(infile, &allocator);
             rio.Deserialize(reader);
 
             for (auto& item : vecs) {

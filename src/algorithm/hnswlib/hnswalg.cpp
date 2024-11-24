@@ -842,16 +842,17 @@ HierarchicalNSW::SerializeImpl(StreamWriter& writer) {
 void
 HierarchicalNSW::loadIndex(std::function<void(uint64_t, uint64_t, void*)> read_func,
                            SpaceInterface* s,
+                           size_t file_size,
                            size_t max_elements_i) {
     int64_t cursor = 0;
-    ReadFuncStreamReader reader(read_func, cursor);
+    ReadFuncStreamReader reader(read_func, cursor, cursor + file_size, allocator_, true);
     DeserializeImpl(reader, s, max_elements_i);
 }
 
 // load index from a file stream
 void
 HierarchicalNSW::loadIndex(std::istream& in_stream, SpaceInterface* s, size_t max_elements_i) {
-    IOStreamReader reader(in_stream);
+    IOStreamReader reader(in_stream, allocator_, true);
     this->DeserializeImpl(reader, s, max_elements_i);
 }
 
@@ -859,7 +860,7 @@ HierarchicalNSW::loadIndex(std::istream& in_stream, SpaceInterface* s, size_t ma
 void
 HierarchicalNSW::loadIndex(const std::string& location, SpaceInterface* s, size_t max_elements_i) {
     std::ifstream input(location, std::ios::binary);
-    IOStreamReader reader(input);
+    IOStreamReader reader(input, allocator_, true);
     this->DeserializeImpl(reader, s, max_elements_i);
     input.close();
 }

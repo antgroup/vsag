@@ -514,7 +514,7 @@ HNSW::deserialize(const BinarySet& binary_set) {
         if (auto result = init_memory_space(); not result.has_value()) {
             return tl::unexpected(result.error());
         }
-        alg_hnsw_->loadIndex(func, this->space_.get());
+        alg_hnsw_->loadIndex(func, this->space_.get(), b.size);
         if (use_conjugate_graph_) {
             Binary b_cg = binary_set.Get(CONJUGATE_GRAPH_DATA);
             if (not conjugate_graph_->Deserialize(b_cg).has_value()) {
@@ -553,7 +553,7 @@ HNSW::deserialize(const ReaderSet& reader_set) {
         if (auto result = init_memory_space(); not result.has_value()) {
             return tl::unexpected(result.error());
         }
-        alg_hnsw_->loadIndex(func, this->space_.get());
+        alg_hnsw_->loadIndex(func, this->space_.get(), reader_set.Get(HNSW_DATA)->Size());
     } catch (const std::runtime_error& e) {
         LOG_ERROR_AND_RETURNS(ErrorType::READ_ERROR, "failed to deserialize: ", e.what());
     }

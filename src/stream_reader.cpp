@@ -14,21 +14,49 @@
 // limitations under the License.
 
 #include "stream_reader.h"
+
+#include <iostream>
 ReadFuncStreamReader::ReadFuncStreamReader(
-    const std::function<void(uint64_t, uint64_t, void*)>& read_func, uint64_t cursor)
-    : readFunc_(read_func), cursor_(cursor), StreamReader() {
+    const std::function<void(uint64_t, uint64_t, void*)>& read_func,
+    uint64_t cursor,
+    size_t max_size,
+    vsag::Allocator* allocator,
+    bool use_buffer)
+    : readFunc_(read_func), StreamReader(allocator) {
+    cursor_ = cursor;
+    use_buffer_ = use_buffer;
+    max_size_ = max_size;
+    if (use_buffer_) {
+        buffer_size_ = std::min(max_size_, vsag::Options::Instance().block_size_limit());
+        buffer_.resize(buffer_size_);
+        buffer_cursor_ = buffer_size_;
+    }
 }
 
 void
-ReadFuncStreamReader::Read(char* data, uint64_t size) {
+ReadFuncStreamReader::ReadImpl(char* data, uint64_t size) {
     readFunc_(cursor_, size, data);
     cursor_ += size;
 }
 
-IOStreamReader::IOStreamReader(std::istream& istream) : istream_(istream), StreamReader() {
+IOStreamReader::IOStreamReader(std::istream& istream, vsag::Allocator* allocator, bool use_buffer)
+    : istream_(istream), StreamReader(allocator) {
+    std::streampos current_position = istream.tellg();
+    istream.seekg(0, std::ios::end);
+    std::streamsize size = istream.tellg();
+    istream.seekg(current_position);
+    cursor_ = 0;
+    max_size_ = size - current_position;
+
+    if (use_buffer_) {
+        buffer_size_ = std::min(max_size_, vsag::Options::Instance().block_size_limit());
+        buffer_.resize(buffer_size_);
+        buffer_cursor_ = buffer_size_;
+    }
 }
 
 void
-IOStreamReader::Read(char* data, uint64_t size) {
+IOStreamReader::ReadImpl(char* data, uint64_t size) {
     this->istream_.read(data, static_cast<int64_t>(size));
+    cursor_ += size;
 }

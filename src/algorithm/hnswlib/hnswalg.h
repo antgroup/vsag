@@ -291,6 +291,7 @@ public:
     void
     loadIndex(std::function<void(uint64_t, uint64_t, void*)> read_func,
               SpaceInterface* s,
+              size_t file_size,
               size_t max_elements_i) override;
 
     // load index from a file stream

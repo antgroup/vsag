@@ -44,12 +44,12 @@ public:
     bool
     Serialize(std::ostream& ofs, size_t cur_element_count);
 
-    bool
+    size_t
     Deserialize(std::function<void(uint64_t, uint64_t, void*)> read_func,
                 uint64_t cursor,
                 size_t cur_element_count);
 
-    bool
+    size_t
     Deserialize(std::istream& ifs, size_t cur_element_count);
 
     inline size_t
@@ -60,7 +60,7 @@ public:
     bool
     SerializeImpl(StreamWriter& writer, uint64_t cur_element_count);
 
-    bool
+    size_t
     DeserializeImpl(StreamReader& reader, uint64_t cur_element_count);
 
 private:
