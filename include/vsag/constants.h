@@ -70,6 +70,8 @@ extern const char* const HNSW_PARAMETER_CONSTRUCTION;
 extern const char* const HNSW_PARAMETER_USE_STATIC;
 extern const char* const HNSW_PARAMETER_REVERSED_EDGES;
 
+extern const char* const INDEX_PARAM;
+
 // statstic key
 extern const char* const STATSTIC_MEMORY;
 extern const char* const STATSTIC_INDEX_NAME;
