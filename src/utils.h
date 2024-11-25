@@ -22,6 +22,7 @@
 #include <vector>
 
 #include "allocator_wrapper.h"
+#include "index/index_common_param.h"
 #include "logger.h"
 #include "spdlog/spdlog.h"
 #include "vsag/errors.h"
@@ -84,6 +85,16 @@ tl::expected<IndexOpParameters, Error>
 try_parse_parameters(const std::string& json_string) {
     try {
         return IndexOpParameters::FromJson(json_string);
+    } catch (const std::exception& e) {
+        return tl::unexpected<Error>(ErrorType::INVALID_ARGUMENT, e.what());
+    }
+}
+
+template <typename IndexOpParameters>
+tl::expected<IndexOpParameters, Error>
+try_parse_parameters(IndexCommonParam index_common_param, JsonType& param_obj) {
+    try {
+        return IndexOpParameters::FromJson(index_common_param, param_obj);
     } catch (const std::exception& e) {
         return tl::unexpected<Error>(ErrorType::INVALID_ARGUMENT, e.what());
     }
