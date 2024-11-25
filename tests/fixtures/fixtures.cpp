@@ -115,6 +115,26 @@ generate_int4_codes(uint64_t count, uint32_t dim, int seed) {
     return codes;
 }
 
+std::vector<uint8_t>
+generate_uint8_codes(uint64_t count, uint32_t dim, int seed) {
+    auto code_size = dim;
+    std::vector<uint8_t> codes(count * code_size, 0);
+    auto vec = fixtures::generate_vectors(count, dim, true, seed);
+
+    for (int i = 0; i < count; i++) {
+        for (int d = 0; d < dim; d++) {
+            float delta = vec[d + i * dim];
+            if (delta < 0) {
+                delta = 0;
+            } else if (delta > 0.999) {
+                delta = 1;
+            }
+            codes[i * dim + d] = static_cast<uint8_t>(255.0 * delta);
+        }
+    }
+    return codes;
+}
+
 std::tuple<std::vector<int64_t>, std::vector<float>>
 generate_ids_and_vectors(int64_t num_vectors, int64_t dim, bool need_normalize, int seed) {
     std::vector<int64_t> ids(num_vectors);
