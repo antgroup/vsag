@@ -113,15 +113,6 @@ public:
     }
 
     StaticHierarchicalNSW(SpaceInterface* s,
-                          const std::string& location,
-                          bool nmslib = false,
-                          size_t max_elements = 0,
-                          bool allow_replace_deleted = false)
-        : allow_replace_deleted_(allow_replace_deleted) {
-        loadIndex(location, s, max_elements);
-    }
-
-    StaticHierarchicalNSW(SpaceInterface* s,
                           size_t max_elements,
                           vsag::Allocator* allocator,
                           size_t M = 16,
@@ -1106,12 +1097,8 @@ public:
 
     template <typename T>
     static void
-    readBinaryPOD(std::istream& in, T& podRef) {
-        in.read((char*)&podRef, sizeof(T));
-
-        if (in.fail()) {
-            throw std::runtime_error("Failed to read from stream.");
-        }
+    readBinaryPOD(StreamReader& in, T& podRef) {
+        in.Read((char*)&podRef, sizeof(T));
     }
 
     // save index to a file stream
@@ -1190,166 +1177,9 @@ public:
         //        output.close();
     }
 
-    template <typename T>
-    void
-    readFromReader(std::function<void(uint64_t, uint64_t, void*)> read_func,
-                   uint64_t& cursor,
-                   T& var) {
-        read_func(cursor, sizeof(T), &var);
-        cursor += sizeof(T);
-    }
-
-    // load using reader
-    void
-    loadIndex(std::function<void(uint64_t, uint64_t, void*)> read_func,
-              SpaceInterface* s,
-              size_t max_elements_i = 0) override {
-        // std::ifstream input(location, std::ios::binary);
-
-        // if (!input.is_open())
-        //     throw std::runtime_error("Cannot open file");
-
-        // get file size:
-        // input.seekg(0, input.end);
-        // std::streampos total_filesize = input.tellg();
-        // input.seekg(0, input.beg);
-
-        uint64_t cursor = 0;
-
-        // readBinaryPOD(input, offsetLevel0_);
-        readFromReader(read_func, cursor, offsetLevel0_);
-        // readBinaryPOD(input, max_elements_);
-        readFromReader(read_func, cursor, max_elements_);
-        // readBinaryPOD(input, cur_element_count_);
-        readFromReader(read_func, cursor, cur_element_count_);
-
-        size_t max_elements = max_elements_i;
-        if (max_elements < cur_element_count_)
-            max_elements = max_elements_;
-        max_elements_ = max_elements;
-        // readBinaryPOD(input, size_data_per_element_);
-        readFromReader(read_func, cursor, size_data_per_element_);
-        // readBinaryPOD(input, label_offset_);
-        readFromReader(read_func, cursor, label_offset_);
-        // readBinaryPOD(input, offsetData_);
-        readFromReader(read_func, cursor, offsetData_);
-        // readBinaryPOD(input, maxlevel_);
-        readFromReader(read_func, cursor, maxlevel_);
-        // readBinaryPOD(input, enterpoint_node_);
-        readFromReader(read_func, cursor, enterpoint_node_);
-
-        // readBinaryPOD(input, maxM_);
-        readFromReader(read_func, cursor, maxM_);
-        // readBinaryPOD(input, maxM0_);
-        readFromReader(read_func, cursor, maxM0_);
-        // readBinaryPOD(input, M_);
-        readFromReader(read_func, cursor, M_);
-        // readBinaryPOD(input, mult_);
-        readFromReader(read_func, cursor, mult_);
-        // readBinaryPOD(input, ef_construction_);
-        readFromReader(read_func, cursor, ef_construction_);
-
-        readFromReader(read_func, cursor, pq_chunk);
-
-        readFromReader(read_func, cursor, pq_cluster);
-
-        readFromReader(read_func, cursor, pq_sub_dim);
-
-        data_size_ = s->get_data_size();
-        fstdistfunc_ = s->get_dist_func();
-        dist_func_param_ = s->get_dist_func_param();
-
-        // auto pos = input.tellg();
-
-        /// Optional - check if index is ok:
-        // input.seekg(cur_element_count_ * size_data_per_element_, input.cur);
-        // for (size_t i = 0; i < cur_element_count_; i++) {
-        //     if (input.tellg() < 0 || input.tellg() >= total_filesize) {
-        //         throw std::runtime_error("Index seems to be corrupted or unsupported");
-        //     }
-
-        //     unsigned int linkListSize;
-        //     readBinaryPOD(input, linkListSize);
-        //     if (linkListSize != 0) {
-        //         input.seekg(linkListSize, input.cur);
-        //     }
-        // }
-
-        // throw exception if it either corrupted or old index
-        // if (input.tellg() != total_filesize)
-        //     throw std::runtime_error("Index seems to be corrupted or unsupported");
-
-        // input.clear();
-        /// Optional check end
-
-        // input.seekg(pos, input.beg);
-        resizeIndex(max_elements);
-
-        data_level0_memory_->Deserialize(read_func, cursor, cur_element_count_);
-        cursor += cur_element_count_ * size_data_per_element_;
-
-        size_links_per_element_ = maxM_ * sizeof(tableint) + sizeof(linklistsizeint);
-
-        size_links_level0_ = maxM0_ * sizeof(tableint) + sizeof(linklistsizeint);
-        std::vector<std::mutex>(max_elements).swap(link_list_locks_);
-        std::vector<std::mutex>(MAX_LABEL_OPERATION_LOCKS).swap(label_op_locks_);
-
-        if (linkLists_ == nullptr)
-            throw std::runtime_error("Not enough memory: loadIndex failed to allocate linklists");
-
-        revSize_ = 1.0 / mult_;
-        for (size_t i = 0; i < cur_element_count_; i++) {
-            label_lookup_[getExternalLabel(i)] = i;
-            unsigned int linkListSize;
-            // readBinaryPOD(input, linkListSize);
-            readFromReader(read_func, cursor, linkListSize);
-            if (linkListSize == 0) {
-                element_levels_[i] = 0;
-                linkLists_[i] = nullptr;
-            } else {
-                element_levels_[i] = linkListSize / size_links_per_element_;
-                linkLists_[i] = (char*)allocator_->Allocate(linkListSize);
-                if (linkLists_[i] == nullptr)
-                    throw std::runtime_error(
-                        "Not enough memory: loadIndex failed to allocate linklist");
-                // input.read(linkLists_[i], linkListSize);
-                read_func(cursor, linkListSize, linkLists_[i]);
-                cursor += linkListSize;
-            }
-        }
-
-        for (size_t i = 0; i < cur_element_count_; i++) {
-            if (isMarkedDeleted(i)) {
-                num_deleted_ += 1;
-                if (allow_replace_deleted_)
-                    deleted_elements.insert(i);
-            }
-        }
-        pq_map = (uint8_t*)allocator_->Allocate(max_elements_ * pq_chunk * sizeof(uint8_t));
-        read_func(cursor, max_elements_ * pq_chunk * sizeof(uint8_t), (char*)pq_map);
-        cursor += max_elements_ * pq_chunk * sizeof(uint8_t);
-
-        pq_book.resize(pq_chunk);
-        for (auto& chunk : pq_book) {
-            chunk.resize(pq_cluster);
-            for (auto& cluster : chunk) {
-                cluster.resize(pq_sub_dim);
-                read_func(cursor, pq_sub_dim * sizeof(float), (char*)cluster.data());
-                cursor += pq_sub_dim * sizeof(float);
-            }
-        }
-
-        node_cluster_dist_ = (float*)allocator_->Allocate(max_elements_ * sizeof(float));
-        read_func(cursor, max_elements_ * sizeof(float), (char*)node_cluster_dist_);
-        cursor += max_elements_ * sizeof(float);
-        return;
-    }
-
     // load index from a file stream
     void
-    loadIndex(std::istream& in_stream, SpaceInterface* s, size_t max_elements_i = 0) override {
-        auto beg_pos = in_stream.tellg();
-
+    loadIndex(StreamReader& in_stream, SpaceInterface* s, size_t max_elements_i = 0) override {
         readBinaryPOD(in_stream, offsetLevel0_);
         readBinaryPOD(in_stream, max_elements_);
         readBinaryPOD(in_stream, cur_element_count_);
@@ -1378,8 +1208,6 @@ public:
         fstdistfunc_ = s->get_dist_func();
         dist_func_param_ = s->get_dist_func_param();
 
-        auto pos = in_stream.tellg();
-
         /// Optional - check if index is ok:
         /*
         in_stream.seekg(cur_element_count_ * size_data_per_element_, in_stream.cur);
@@ -1404,8 +1232,7 @@ public:
         /// Optional check end
 
         resizeIndex(max_elements);
-        in_stream.seekg(pos, in_stream.beg);
-        data_level0_memory_->Deserialize(in_stream, cur_element_count_);
+        data_level0_memory_->DeserializeImpl(in_stream, cur_element_count_);
 
         size_links_per_element_ = maxM_ * sizeof(tableint) + sizeof(linklistsizeint);
 
@@ -1427,7 +1254,7 @@ public:
                 if (linkLists_[i] == nullptr)
                     throw std::runtime_error(
                         "Not enough memory: loadIndex failed to allocate linklist");
-                in_stream.read(linkLists_[i], linkListSize);
+                in_stream.Read(linkLists_[i], linkListSize);
             }
         }
 
@@ -1439,130 +1266,19 @@ public:
             }
         }
         pq_map = (uint8_t*)allocator_->Allocate(max_elements_ * pq_chunk * sizeof(uint8_t));
-        ;
-        in_stream.read((char*)pq_map, max_elements_ * pq_chunk * sizeof(uint8_t));
+        in_stream.Read((char*)pq_map, max_elements_ * pq_chunk * sizeof(uint8_t));
 
         pq_book.resize(pq_chunk);
         for (auto& chunk : pq_book) {
             chunk.resize(pq_cluster);
             for (auto& cluster : chunk) {
                 cluster.resize(pq_sub_dim);
-                in_stream.read((char*)cluster.data(), pq_sub_dim * sizeof(float));
+                in_stream.Read((char*)cluster.data(), pq_sub_dim * sizeof(float));
             }
         }
 
         node_cluster_dist_ = (float*)allocator_->Allocate(max_elements_ * sizeof(float));
-        in_stream.read((char*)node_cluster_dist_, max_elements_ * sizeof(float));
-
-        return;
-    }
-
-    // origin load function
-    void
-    loadIndex(const std::string& location, SpaceInterface* s, size_t max_elements_i = 0) {
-        std::ifstream input(location, std::ios::binary);
-
-        if (!input.is_open())
-            throw std::runtime_error("Cannot open file");
-
-        // get file size:
-        input.seekg(0, input.end);
-        std::streampos total_filesize = input.tellg();
-        input.seekg(0, input.beg);
-
-        readBinaryPOD(input, offsetLevel0_);
-        readBinaryPOD(input, max_elements_);
-        readBinaryPOD(input, cur_element_count_);
-
-        size_t max_elements = max_elements_i;
-        if (max_elements < cur_element_count_)
-            max_elements = max_elements_;
-        max_elements_ = max_elements;
-        readBinaryPOD(input, size_data_per_element_);
-        readBinaryPOD(input, label_offset_);
-        readBinaryPOD(input, offsetData_);
-        readBinaryPOD(input, maxlevel_);
-        readBinaryPOD(input, enterpoint_node_);
-
-        readBinaryPOD(input, maxM_);
-        readBinaryPOD(input, maxM0_);
-        readBinaryPOD(input, M_);
-        readBinaryPOD(input, mult_);
-        readBinaryPOD(input, ef_construction_);
-
-        data_size_ = s->get_data_size();
-        fstdistfunc_ = s->get_dist_func();
-        dist_func_param_ = s->get_dist_func_param();
-
-        auto pos = input.tellg();
-
-        /// Optional - check if index is ok:
-        input.seekg(cur_element_count_ * size_data_per_element_, input.cur);
-        for (size_t i = 0; i < cur_element_count_; i++) {
-            if (input.tellg() < 0 || input.tellg() >= total_filesize) {
-                throw std::runtime_error("Index seems to be corrupted or unsupported");
-            }
-
-            unsigned int linkListSize;
-            readBinaryPOD(input, linkListSize);
-            if (linkListSize != 0) {
-                input.seekg(linkListSize, input.cur);
-            }
-        }
-
-        // throw exception if it either corrupted or old index
-        if (input.tellg() != total_filesize)
-            throw std::runtime_error("Index seems to be corrupted or unsupported");
-
-        input.clear();
-        /// Optional check end
-
-        input.seekg(pos, input.beg);
-
-        data_level0_memory_->Deserialize(input, cur_element_count_);
-
-        size_links_per_element_ = maxM_ * sizeof(tableint) + sizeof(linklistsizeint);
-
-        size_links_level0_ = maxM0_ * sizeof(tableint) + sizeof(linklistsizeint);
-        std::vector<std::mutex>(max_elements).swap(link_list_locks_);
-        std::vector<std::mutex>(MAX_LABEL_OPERATION_LOCKS).swap(label_op_locks_);
-
-        visited_list_pool_ = allocator_->New<VisitedListPool>(max_elements, allocator_);
-
-        free(linkLists_);
-        linkLists_ = (char**)malloc(sizeof(void*) * max_elements);
-        if (linkLists_ == nullptr)
-            throw std::runtime_error("Not enough memory: loadIndex failed to allocate linklists");
-
-        revSize_ = 1.0 / mult_;
-        for (size_t i = 0; i < cur_element_count_; i++) {
-            label_lookup_[getExternalLabel(i)] = i;
-            unsigned int linkListSize;
-            readBinaryPOD(input, linkListSize);
-            if (linkListSize == 0) {
-                element_levels_[i] = 0;
-                linkLists_[i] = nullptr;
-            } else {
-                element_levels_[i] = linkListSize / size_links_per_element_;
-                linkLists_[i] = (char*)malloc(linkListSize);
-                if (linkLists_[i] == nullptr)
-                    throw std::runtime_error(
-                        "Not enough memory: loadIndex failed to allocate linklist");
-                input.read(linkLists_[i], linkListSize);
-            }
-        }
-
-        for (size_t i = 0; i < cur_element_count_; i++) {
-            if (isMarkedDeleted(i)) {
-                num_deleted_ += 1;
-                if (allow_replace_deleted_)
-                    deleted_elements.insert(i);
-            }
-        }
-
-        input.close();
-
-        return;
+        in_stream.Read((char*)node_cluster_dist_, max_elements_ * sizeof(float));
     }
 
     const float*

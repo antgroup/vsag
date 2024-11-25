@@ -838,66 +838,49 @@ HierarchicalNSW::SerializeImpl(StreamWriter& writer) {
     }
 }
 
-// load using reader
-void
-HierarchicalNSW::loadIndex(std::function<void(uint64_t, uint64_t, void*)> read_func,
-                           SpaceInterface* s,
-                           size_t max_elements_i) {
-    int64_t cursor = 0;
-    ReadFuncStreamReader reader(read_func, cursor);
-    DeserializeImpl(reader, s, max_elements_i);
-}
-
 // load index from a file stream
 void
-HierarchicalNSW::loadIndex(std::istream& in_stream, SpaceInterface* s, size_t max_elements_i) {
-    IOStreamReader reader(in_stream);
-    this->DeserializeImpl(reader, s, max_elements_i);
-}
-
-// origin load function
-void
-HierarchicalNSW::loadIndex(const std::string& location, SpaceInterface* s, size_t max_elements_i) {
-    std::ifstream input(location, std::ios::binary);
-    IOStreamReader reader(input);
-    this->DeserializeImpl(reader, s, max_elements_i);
-    input.close();
+HierarchicalNSW::loadIndex(StreamReader& buffer_reader, SpaceInterface* s, size_t max_elements_i) {
+    this->DeserializeImpl(buffer_reader, s, max_elements_i);
 }
 
 template <typename T>
 static void
-ReadOne(StreamReader& reader, T& value) {
+ReadOne(StreamReader& reader, T& value, size_t& cursor) {
     reader.Read(reinterpret_cast<char*>(&value), sizeof(value));
+    cursor += sizeof(value);
 }
 
 void
 HierarchicalNSW::DeserializeImpl(StreamReader& reader, SpaceInterface* s, size_t max_elements_i) {
-    ReadOne(reader, offsetLevel0_);
+    size_t cursor = 0;
+
+    ReadOne(reader, offsetLevel0_, cursor);
 
     size_t max_elements;
-    ReadOne(reader, max_elements);
+    ReadOne(reader, max_elements, cursor);
     max_elements = std::max(max_elements, max_elements_i);
     max_elements = std::max(max_elements, max_elements_);
 
-    ReadOne(reader, cur_element_count_);
-    ReadOne(reader, size_data_per_element_);
-    ReadOne(reader, label_offset_);
-    ReadOne(reader, offset_data_);
-    ReadOne(reader, max_level_);
-    ReadOne(reader, enterpoint_node_);
+    ReadOne(reader, cur_element_count_, cursor);
+    ReadOne(reader, size_data_per_element_, cursor);
+    ReadOne(reader, label_offset_, cursor);
+    ReadOne(reader, offset_data_, cursor);
+    ReadOne(reader, max_level_, cursor);
+    ReadOne(reader, enterpoint_node_, cursor);
 
-    ReadOne(reader, maxM_);
-    ReadOne(reader, maxM0_);
-    ReadOne(reader, M_);
-    ReadOne(reader, mult_);
-    ReadOne(reader, ef_construction_);
+    ReadOne(reader, maxM_, cursor);
+    ReadOne(reader, maxM0_, cursor);
+    ReadOne(reader, M_, cursor);
+    ReadOne(reader, mult_, cursor);
+    ReadOne(reader, ef_construction_, cursor);
 
     data_size_ = s->get_data_size();
     fstdistfunc_ = s->get_dist_func();
     dist_func_param_ = s->get_dist_func_param();
 
     resizeIndex(max_elements);
-    data_level0_memory_->DeserializeImpl(reader, cur_element_count_);
+    cursor += data_level0_memory_->DeserializeImpl(reader, cur_element_count_);
 
     size_links_per_element_ = maxM_ * sizeof(InnerIdType) + sizeof(linklistsizeint);
 
@@ -909,7 +892,7 @@ HierarchicalNSW::DeserializeImpl(StreamReader& reader, SpaceInterface* s, size_t
     for (size_t i = 0; i < cur_element_count_; i++) {
         label_lookup_[getExternalLabel(i)] = i;
         unsigned int link_list_size;
-        ReadOne(reader, link_list_size);
+        ReadOne(reader, link_list_size, cursor);
         if (link_list_size == 0) {
             element_levels_[i] = 0;
             link_lists_[i] = nullptr;
@@ -920,10 +903,12 @@ HierarchicalNSW::DeserializeImpl(StreamReader& reader, SpaceInterface* s, size_t
                 throw std::runtime_error(
                     "Not enough memory: loadIndex failed to allocate linklist");
             reader.Read(link_lists_[i], link_list_size);
+            cursor += link_list_size;
         }
     }
     if (normalize_) {
         reader.Read(reinterpret_cast<char*>(molds_), max_elements_ * sizeof(float));
+        cursor += max_elements_ * sizeof(float);
     }
 
     if (use_reversed_edges_) {
@@ -948,6 +933,7 @@ HierarchicalNSW::DeserializeImpl(StreamReader& reader, SpaceInterface* s, size_t
                 deleted_elements_.insert(i);
         }
     }
+    return cursor;
 }
 
 const float*
