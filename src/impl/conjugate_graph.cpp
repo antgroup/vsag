@@ -27,6 +27,9 @@ ConjugateGraph::AddNeighbor(int64_t from_tag_id, int64_t to_tag_id) {
         return false;
     }
     auto& neighbor_set = conjugate_graph_[from_tag_id];
+    if (neighbor_set.size() >= MAXIMUM_DEGREE) {
+        return false;
+    }
     auto insert_result = neighbor_set.insert(to_tag_id);
     if (!insert_result.second) {
         return false;
@@ -54,6 +57,10 @@ ConjugateGraph::get_neighbors(int64_t from_tag_id) const {
 tl::expected<uint32_t, Error>
 ConjugateGraph::EnhanceResult(std::priority_queue<std::pair<float, size_t>>& results,
                               const std::function<float(int64_t)>& distance_of_tag) const {
+    if (this->is_empty()) {
+        return 0;
+    }
+
     int64_t k = results.size();
     int64_t look_at_k = std::min(LOOK_AT_K, k);
     std::priority_queue<std::pair<float, size_t>> old_results(results);
@@ -202,6 +209,11 @@ ConjugateGraph::Deserialize(std::istream& in_stream) {
         clear();
         LOG_ERROR_AND_RETURNS(ErrorType::READ_ERROR, "failed to deserialize: ", e.what());
     }
+}
+
+bool
+ConjugateGraph::is_empty() const {
+    return (this->memory_usage_ == sizeof(this->memory_usage_) + FOOTER_SIZE);
 }
 
 }  // namespace vsag

@@ -34,6 +34,9 @@ generate_vectors(int64_t num_vectors, int64_t dim, bool need_normalize = true, i
 std::vector<uint8_t>
 generate_int4_codes(uint64_t count, uint32_t dim, int seed = 47);
 
+std::vector<int8_t>
+generate_int8_codes(uint64_t count, uint32_t dim, int seed = 47);
+
 std::tuple<std::vector<int64_t>, std::vector<float>>
 generate_ids_and_vectors(int64_t num_elements,
                          int64_t dim,
@@ -73,6 +76,13 @@ brute_force(const vsag::DatasetPtr& query,
             const vsag::DatasetPtr& base,
             int64_t k,
             const std::string& metric_type);
+
+vsag::DatasetPtr
+brute_force(const vsag::DatasetPtr& query,
+            const vsag::DatasetPtr& base,
+            int64_t k,
+            const std::string& metric_type,
+            const std::string& data_type);
 
 template <typename T>
 typename std::enable_if<std::is_floating_point<T>::value, T>::type
