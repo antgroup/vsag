@@ -1,7 +1,7 @@
 
 CMAKE_GENERATOR ?= "Unix Makefiles"
 CMAKE_INSTALL_PREFIX ?= "/usr/local/"
-COMPILE_JOBS ?= 32
+COMPILE_JOBS ?= 4
 VSAG_CMAKE_ARGS = -DCMAKE_EXPORT_COMPILE_COMMANDS=1 -DCMAKE_INSTALL_PREFIX=${CMAKE_INSTALL_PREFIX} -DNUM_BUILDING_JOBS=${COMPILE_JOBS} -DENABLE_TESTS=1 -DENABLE_PYBINDS=1 -G ${CMAKE_GENERATOR} -S. -Bbuild
 UT_FILTER = ""
 ifdef CASE
@@ -22,13 +22,13 @@ help:                    ## Show the help.
 
 .PHONY: debug
 debug:                   ## Build vsag with debug options.
-	cmake ${VSAG_CMAKE_ARGS} -Bbuild -DCMAKE_BUILD_TYPE=Debug -DENABLE_CCACHE=ON
+	cmake ${VSAG_CMAKE_ARGS} -DCMAKE_BUILD_TYPE=Debug -DENABLE_CCACHE=ON
 	cmake --build build --parallel ${COMPILE_JOBS}
 
 .PHONY: release
 release:                 ## Build vsag with release options.
-	cmake ${VSAG_CMAKE_ARGS} -Bbuild-release -DCMAKE_BUILD_TYPE=Release
-	cmake --build build-release --parallel ${COMPILE_JOBS}
+	cmake ${VSAG_CMAKE_ARGS} -DCMAKE_BUILD_TYPE=Release
+	cmake --build build --parallel ${COMPILE_JOBS}
 
 .PHONY: distribution
 distribution:            ## Build vsag with distribution options.
