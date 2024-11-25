@@ -240,6 +240,9 @@ private:
     void
     hnsw_add(const DatasetPtr& data);
 
+    void
+    resize(uint64_t new_size);
+
     GraphInterfacePtr
     generate_one_route_graph();
 
