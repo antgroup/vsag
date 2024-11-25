@@ -345,12 +345,13 @@ TEST_CASE("multi-threading read-write with feedback and pretrain test", "[ft][hn
     };
     std::string str_parameters = parameters.dump();
 
+    std::vector<std::future<int64_t>> insert_results;
     std::vector<std::future<uint64_t>> feedback_results;
     std::vector<std::future<bool>> search_results;
 
     for (int64_t i = 0; i < max_elements; ++i) {
         // insert
-        pool.enqueue([&ids, &data, &index, dim, i]() -> uint64_t {
+        insert_results.push_back(pool.enqueue([&ids, &data, &index, dim, i]() -> int64_t {
             auto dataset = vsag::Dataset::Make();
             dataset->Dim(dim)
                 ->NumElements(1)
@@ -358,9 +359,8 @@ TEST_CASE("multi-threading read-write with feedback and pretrain test", "[ft][hn
                 ->Int8Vectors(data.get() + i * dim)
                 ->Owner(false);
             auto add_res = index->Add(dataset);
-            REQUIRE(add_res.has_value());
             return add_res.value().size();
-        });
+        }));
     }
 
     for (int64_t i = 0; i < max_elements; ++i) {
@@ -370,7 +370,6 @@ TEST_CASE("multi-threading read-write with feedback and pretrain test", "[ft][hn
                 auto query = vsag::Dataset::Make();
                 query->Dim(dim)->NumElements(1)->Int8Vectors(data.get() + i * dim)->Owner(false);
                 auto feedback_res = index->Feedback(query, k, str_parameters);
-                REQUIRE(feedback_res.has_value());
                 return feedback_res.value();
             }));
 
@@ -382,11 +381,16 @@ TEST_CASE("multi-threading read-write with feedback and pretrain test", "[ft][hn
             return result.has_value();
         }));
     }
+
+    for (auto& res : insert_results) {
+        REQUIRE(res.get() == 0);
+    }
+
     for (auto& res : feedback_results) {
         REQUIRE(res.get() >= 0);
     }
 
-    for (int i = 0; i < search_results.size(); ++i) {
-        REQUIRE(search_results[i].get());
+    for (auto& res : search_results) {
+        REQUIRE(res.get());
     }
 }
