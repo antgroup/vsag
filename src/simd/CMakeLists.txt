@@ -1,5 +1,12 @@
-set (SIMD_SRCS generic.cpp simd.cpp fp32_simd.cpp sq8_simd.cpp sq4_simd.cpp
-        sq4_uniform_simd.cpp)
+set (SIMD_SRCS
+        generic.cpp
+        simd.cpp
+        fp32_simd.cpp
+        sq8_simd.cpp
+        sq4_simd.cpp
+        sq4_uniform_simd.cpp
+        sq8_uniform_simd.cpp
+)
 if (DIST_CONTAINS_SSE)
     set (SIMD_SRCS ${SIMD_SRCS} sse.cpp)
     set_source_files_properties (
