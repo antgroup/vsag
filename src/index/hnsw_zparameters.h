@@ -50,6 +50,7 @@ public:
 public:
     // required vars
     bool use_reversed_edges;
+    bool use_conjugate_graph;
 
 private:
     CreateFreshHnswParameters() = default;

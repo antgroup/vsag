@@ -28,6 +28,7 @@
 namespace vsag {
 
 static const int64_t LOOK_AT_K = 20;
+static const int64_t MAXIMUM_DEGREE = 128;
 
 class ConjugateGraph {
 public:
@@ -62,6 +63,9 @@ private:
 
     void
     clear();
+
+    bool
+    is_empty() const;
 
 private:
     uint32_t memory_usage_;
