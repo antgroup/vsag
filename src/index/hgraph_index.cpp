@@ -236,6 +236,8 @@ HGraphIndex::hnsw_add(const DatasetPtr& data) {
     auto cur_count = this->bottom_graph_->TotalCount();
     vsag::Vector<std::shared_mutex>(total + cur_count, allocator_).swap(this->neighbors_mutex_);
 
+    std::mutex add_mutex;
+
     auto build_func = [&](InnerIdType begin, InnerIdType end) -> void {
         for (InnerIdType i = begin; i < end; ++i) {
             int level = this->get_random_level() - 1;
@@ -246,60 +248,20 @@ HGraphIndex::hnsw_add(const DatasetPtr& data) {
                 this->label_lookup_[label] = inner_id;
             }
 
-            std::unique_lock<std::mutex> lock(this->global_mutex_);
-            bool need_lock = false;
+            std::unique_lock<std::mutex> add_lock(add_mutex);
             if (level >= int64_t(this->max_level_) || bottom_graph_->TotalCount() == 0) {
+                std::unique_lock<std::shared_mutex> wlock(this->global_mutex_);
                 for (int64_t j = max_level_; j <= level; ++j) {
                     this->route_graphs_.emplace_back(this->generate_one_route_graph());
                 }
                 max_level_ = level + 1;
-                need_lock = true;
-            } else {
-                lock.unlock();
-            }
-
-            {
-                auto ep = this->entry_point_id_;
-                MaxHeap result(allocator_);
-                for (auto j = max_level_ - 1; j > level; --j) {
-                    result = search_one_graph(
-                        datas + dim_ * i, route_graphs_[j], basic_flatten_codes_, ep, 1, nullptr);
-                    ep = result.top().second;
-                }
-
-                for (auto j = level; j >= 0; --j) {
-                    if (route_graphs_[j]->TotalCount() != 0) {
-                        result = search_one_graph(datas + dim_ * i,
-                                                  route_graphs_[j],
-                                                  basic_flatten_codes_,
-                                                  ep,
-                                                  this->ef_construct_,
-                                                  nullptr);
-                        ep = this->mutually_connect_new_element(
-                            inner_id, result, route_graphs_[j], basic_flatten_codes_, false);
-                    } else {
-                        route_graphs_[j]->InsertNeighborsById(inner_id,
-                                                              Vector<InnerIdType>(allocator_));
-                    }
-                    route_graphs_[j]->IncreaseTotalCount(1);
-                }
-                if (bottom_graph_->TotalCount() != 0) {
-                    result = search_one_graph(datas + dim_ * i,
-                                              this->bottom_graph_,
-                                              basic_flatten_codes_,
-                                              ep,
-                                              this->ef_construct_,
-                                              nullptr);
-                    this->mutually_connect_new_element(
-                        inner_id, result, this->bottom_graph_, basic_flatten_codes_, false);
-                } else {
-                    bottom_graph_->InsertNeighborsById(inner_id, Vector<InnerIdType>(allocator_));
-                }
-                bottom_graph_->IncreaseTotalCount(1);
-            }
-
-            if (need_lock) {
+                this->add_one_point(datas + i * dim_, level, inner_id);
                 entry_point_id_ = inner_id;
+                add_lock.unlock();
+            } else {
+                add_lock.unlock();
+                std::shared_lock<std::shared_mutex> rlock(this->global_mutex_);
+                this->add_one_point(datas + i * dim_, level, inner_id);
             }
         }
     };
@@ -617,6 +579,7 @@ HGraphIndex::cal_serialize_size() const {
     this->serialize(writer);
     return writer.cursor_;
 }
+
 tl::expected<void, Error>
 HGraphIndex::serialize(std::ostream& out_stream) const {
     try {
@@ -659,6 +622,7 @@ HGraphIndex::deserialize(const BinarySet& binary_set) {
 
     return {};
 }
+
 tl::expected<void, Error>
 HGraphIndex::deserialize(std::istream& in_stream) {
     SlowTaskTimer t("hgraph deserialize");
@@ -695,6 +659,36 @@ HGraphIndex::calc_distance_by_id(const float* vector, int64_t id) const {
                                   fmt::format("failed to find id: {}", id));
         }
     }
+}
+void
+HGraphIndex::add_one_point(const float* data, int level, InnerIdType inner_id) {
+    auto ep = this->entry_point_id_;
+    MaxHeap result(allocator_);
+    for (auto j = max_level_ - 1; j > level; --j) {
+        result = search_one_graph(data, route_graphs_[j], basic_flatten_codes_, ep, 1, nullptr);
+        ep = result.top().second;
+    }
+
+    for (auto j = level; j >= 0; --j) {
+        if (route_graphs_[j]->TotalCount() != 0) {
+            result = search_one_graph(
+                data, route_graphs_[j], basic_flatten_codes_, ep, this->ef_construct_, nullptr);
+            ep = this->mutually_connect_new_element(
+                inner_id, result, route_graphs_[j], basic_flatten_codes_, false);
+        } else {
+            route_graphs_[j]->InsertNeighborsById(inner_id, Vector<InnerIdType>(allocator_));
+        }
+        route_graphs_[j]->IncreaseTotalCount(1);
+    }
+    if (bottom_graph_->TotalCount() != 0) {
+        result = search_one_graph(
+            data, this->bottom_graph_, basic_flatten_codes_, ep, this->ef_construct_, nullptr);
+        this->mutually_connect_new_element(
+            inner_id, result, this->bottom_graph_, basic_flatten_codes_, false);
+    } else {
+        bottom_graph_->InsertNeighborsById(inner_id, Vector<InnerIdType>(allocator_));
+    }
+    bottom_graph_->IncreaseTotalCount(1);
 }
 
 }  // namespace vsag
