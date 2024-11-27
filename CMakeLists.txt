@@ -186,6 +186,7 @@ include (extern/roaringbitmap/roaringbitmap.cmake)
 # thirdparties of tools
 if (ENABLE_TOOLS)
     include (extern/hdf5/hdf5.cmake)
+    include (extern/argparse/argparse.cmake)
 endif ()
 
 include_directories (${CMAKE_CURRENT_BINARY_DIR}/spdlog/install/include)
