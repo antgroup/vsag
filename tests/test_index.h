@@ -25,6 +25,7 @@
 #include <iostream>
 #include <nlohmann/json.hpp>
 #include <unordered_set>
+#include <utility>
 
 #include "fixtures/fixtures.h"
 #include "fixtures/test_dataset.h"
@@ -66,44 +67,47 @@ protected:
                 bool expect_success = true);
 
     void
-    TestBuildIndex(IndexPtr index, int64_t dim, bool expected_success = true) const;
+    TestBuildIndex(const IndexPtr& index, int64_t dim, bool expected_success = true) const;
 
     static void
-    TestBuildIndex(IndexPtr index, DatasetPtr dataset, bool expected_success = true);
+    TestBuildIndex(const IndexPtr& index, const DatasetPtr& dataset, bool expected_success = true);
 
     void
-    TestAddIndex(IndexPtr index, int64_t dim, bool expected_success = true) const;
+    TestAddIndex(const IndexPtr& index, int64_t dim, bool expected_success = true) const;
 
     static void
-    TestAddIndex(IndexPtr index, DatasetPtr dataset, bool expected_success = true);
+    TestAddIndex(const IndexPtr& index, const DatasetPtr& dataset, bool expected_success = true);
 
     static void
-    TestContinueAdd(IndexPtr index, int64_t dim, int64_t count = 100, bool expected_success = true);
+    TestContinueAdd(const IndexPtr& index,
+                    int64_t dim,
+                    int64_t count = 100,
+                    bool expected_success = true);
 
     static void
-    TestKnnSearch(IndexPtr index,
-                  std::shared_ptr<fixtures::TestDataset> dataset,
+    TestKnnSearch(const IndexPtr& index,
+                  const TestDatasetPtr& dataset,
                   const std::string& search_param,
                   int topk = 10,
                   float recall = 0.99,
                   bool expected_success = true);
 
     static void
-    TestRangeSearch(IndexPtr index,
-                    std::shared_ptr<fixtures::TestDataset> dataset,
+    TestRangeSearch(const IndexPtr& index,
+                    const TestDatasetPtr& dataset,
                     const std::string& search_param,
                     float radius = 0.01,
                     float recall = 0.99,
                     int64_t limited_size = -1,
                     bool expected_success = true);
     static void
-    TestCalcDistanceById(IndexPtr index,
-                         std::shared_ptr<fixtures::TestDataset> dataset,
+    TestCalcDistanceById(const IndexPtr& index,
+                         const TestDatasetPtr& dataset,
                          const std::string& metric_str,
                          float error = 1e-5);
 
     static void
-    TestSerializeFile(IndexPtr index, const std::string& path, bool expected_success = true);
+    TestSerializeFile(const IndexPtr& index, const std::string& path, bool expected_success = true);
 
     static IndexPtr
     TestDeserializeFile(const std::string& path,
@@ -111,17 +115,17 @@ protected:
                         const std::string& param,
                         bool expected_success = true);
 
-    bool
-    SetDataset(const std::string& key, TestDatasetPtr value) const {
+    static bool
+    SetDataset(const std::string& key, TestDatasetPtr value) {
         if (datasets.find(key) != datasets.end()) {
             return false;
         }
-        datasets[key] = value;
+        datasets[key] = std::move(value);
         return true;
     }
 
-    TestDatasetPtr
-    GetDataset(const std::string& key) const {
+    static TestDatasetPtr
+    GetDataset(const std::string& key) {
         auto iter = datasets.find(key);
         if (iter == datasets.end()) {
             return nullptr;
@@ -129,8 +133,8 @@ protected:
         return iter->second;
     }
 
-    void
-    DeleteDataset(const std::string& key) const {
+    static void
+    DeleteDataset(const std::string& key) {
         auto iter = datasets.find(key);
         if (iter != datasets.end()) {
             datasets.erase(iter);
@@ -138,8 +142,8 @@ protected:
     }
 
     template <typename T>
-    TestDatasetPtr
-    GenerateAndSetDataset(int64_t dim, uint64_t count) const {
+    static TestDatasetPtr
+    GenerateAndSetDataset(int64_t dim, int64_t count) {
         std::string datatype = "float";
         if constexpr (std::is_same_v<T, int8_t>) {
             datatype = "int8";
@@ -157,8 +161,8 @@ protected:
     }
 
     template <typename T>
-    TestDatasetPtr
-    GenerateDataset(int64_t dim, uint64_t count) const {
+    static TestDatasetPtr
+    GenerateDataset(int64_t dim, int64_t count) {
         if constexpr (std::is_same_v<T, int8_t>) {
             return GenerateDatasetInt8(dim, count);
         } else if constexpr (std::is_same_v<T, float>) {
@@ -170,51 +174,51 @@ protected:
     }
 
     static TestDatasetPtr
-    GenerateDatasetFloat(int64_t dim, uint64_t count);
+    GenerateDatasetFloat(int64_t dim, int64_t count);
 
-    TestDatasetPtr
-    GenerateDatasetInt8(int64_t dim, uint64_t count) const {
+    static TestDatasetPtr
+    GenerateDatasetInt8(int64_t dim, int64_t count) {
         return nullptr;  // TODO
     };
 
-    std::string
+    static std::string
     KeyGen(int64_t dim,
            uint64_t count,
            std::string datatype = "float",
-           std::string name = "classic") const {
+           std::string name = "classic") {
         return fmt::format(
             "[dim={}][count={}][type={}][dataset_name={}]", dim, count, datatype, name);
     }
 
-    std::string
+    static std::string
     KeyGenIndex(int64_t dim,
                 uint64_t count,
                 std::string index_name,
                 std::string datatype = "float",
-                std::string dataset_name = "classic") const {
-        auto str = KeyGen(dim, count, datatype, dataset_name);
+                std::string dataset_name = "classic") {
+        auto str = KeyGen(dim, count, std::move(datatype), std::move(dataset_name));
         return str + fmt::format("[index_name={}]", index_name);
     }
 
     std::pair<IndexPtr, IndexStatus>
-    LoadIndex(std::string key) const {
-        if (indexs.find(key) == indexs.end()) {
+    LoadIndex(const std::string& key) const {
+        if (indexes.find(key) == indexes.end()) {
             return {nullptr, IndexStatus::Init};
         }
-        return indexs[key];
+        return indexes[key];
     }
 
     void
-    SaveIndex(const std::string& key, IndexPtr index, IndexStatus status) const {
-        indexs[key] = {index, status};
+    SaveIndex(const std::string& key, const IndexPtr& index, IndexStatus status) const {
+        indexes[key] = {index, status};
     }
 
     mutable int dataset_base_count{1000};
 
 private:
-    mutable std::unordered_map<std::string, std::shared_ptr<TestDataset>> datasets;
+    static std::unordered_map<std::string, TestDatasetPtr> datasets;
 
-    mutable std::unordered_map<std::string, std::pair<IndexPtr, IndexStatus>> indexs;
+    mutable std::unordered_map<std::string, std::pair<IndexPtr, IndexStatus>> indexes;
 };
 
 }  // namespace fixtures

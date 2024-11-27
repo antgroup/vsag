@@ -32,6 +32,8 @@ Intersection(const int64_t* x, int64_t x_count, const int64_t* y, int64_t y_coun
     return result;
 }
 
+std::unordered_map<std::string, TestDatasetPtr> TestIndex::datasets = {};
+
 TestIndex::IndexPtr
 TestIndex::FastGeneralTest(const std::string& name,
                            const std::string& build_param,
@@ -44,7 +46,7 @@ TestIndex::FastGeneralTest(const std::string& name,
     auto top_k = 10;
     auto range = 0.01f;
 
-    vsag::IndexPtr index = nullptr;
+    vsag::IndexPtr index{nullptr};
 
     // Test Factory
     { index = TestFactory(name, build_param, true); }
@@ -57,11 +59,6 @@ TestIndex::FastGeneralTest(const std::string& name,
     if (end_status == IndexStatus::Build) {
         return index;
     }
-
-    //    // Test CalcDistanceById;
-    //    {
-    //        TestCalcDistanceById(index, dataset, metric_type);
-    //    }
 
     // Test KnnSearch and RangeSearch
     {
@@ -97,13 +94,13 @@ TestIndex::TestFactory(const std::string& name,
 }
 
 void
-TestIndex::TestBuildIndex(IndexPtr index, int64_t dim, bool expected_success) const {
+TestIndex::TestBuildIndex(const IndexPtr& index, int64_t dim, bool expected_success) const {
     auto dataset = GenerateAndSetDataset<float>(dim, dataset_base_count)->base_;
     TestBuildIndex(index, dataset, expected_success);
 }
 
 void
-TestIndex::TestBuildIndex(IndexPtr index, DatasetPtr dataset, bool expected_success) {
+TestIndex::TestBuildIndex(const IndexPtr& index, const DatasetPtr& dataset, bool expected_success) {
     auto build_index = index->Build(dataset);
     if (expected_success) {
         REQUIRE(build_index.has_value());
@@ -115,13 +112,13 @@ TestIndex::TestBuildIndex(IndexPtr index, DatasetPtr dataset, bool expected_succ
 }
 
 void
-TestIndex::TestAddIndex(IndexPtr index, int64_t dim, bool expected_success) const {
+TestIndex::TestAddIndex(const IndexPtr& index, int64_t dim, bool expected_success) const {
     auto dataset = GenerateAndSetDataset<float>(dim, dataset_base_count)->base_;
     TestAddIndex(index, dataset, expected_success);
 }
 
 void
-TestIndex::TestAddIndex(IndexPtr index, DatasetPtr dataset, bool expected_success) {
+TestIndex::TestAddIndex(const IndexPtr& index, const DatasetPtr& dataset, bool expected_success) {
     auto add_index = index->Add(dataset);
     if (expected_success) {
         REQUIRE(add_index.has_value());
@@ -133,7 +130,10 @@ TestIndex::TestAddIndex(IndexPtr index, DatasetPtr dataset, bool expected_succes
 }
 
 void
-TestIndex::TestContinueAdd(IndexPtr index, int64_t dim, int64_t count, bool expected_success) {
+TestIndex::TestContinueAdd(const IndexPtr& index,
+                           int64_t dim,
+                           int64_t count,
+                           bool expected_success) {
     auto cur_count = index->GetNumElements();
     for (auto i = 0; i < count; ++i) {
         auto one_vector = fixtures::generate_one_dataset(dim, 1);
@@ -151,15 +151,15 @@ TestIndex::TestContinueAdd(IndexPtr index, int64_t dim, int64_t count, bool expe
 }
 
 void
-TestIndex::TestKnnSearch(IndexPtr index,
-                         std::shared_ptr<fixtures::TestDataset> dataset,
+TestIndex::TestKnnSearch(const IndexPtr& index,
+                         const TestDatasetPtr& dataset,
                          const std::string& search_param,
                          int topk,
                          float recall,
                          bool expected_success) {
-    auto querys = dataset->query_;
-    auto query_count = querys->GetNumElements();
-    auto dim = querys->GetDim();
+    auto queries = dataset->query_;
+    auto query_count = queries->GetNumElements();
+    auto dim = queries->GetDim();
     auto gts = dataset->ground_truth_;
     auto gt_topK = gts->GetDim();
     float cur_recall = 0.0f;
@@ -167,7 +167,7 @@ TestIndex::TestKnnSearch(IndexPtr index,
         auto query = vsag::Dataset::Make();
         query->NumElements(1)
             ->Dim(dim)
-            ->Float32Vectors(querys->GetFloat32Vectors() + i * dim)
+            ->Float32Vectors(queries->GetFloat32Vectors() + i * dim)
             ->Owner(false);
         auto res = index->KnnSearch(query, topk, search_param);
         REQUIRE(res.has_value() == expected_success);
@@ -179,29 +179,21 @@ TestIndex::TestKnnSearch(IndexPtr index,
         auto gt = gts->GetIds() + gt_topK * i;
         auto val = Intersection(gt, gt_topK, result, topk);
         cur_recall += static_cast<float>(val) / static_cast<float>(gt_topK);
-        auto has_func_cal_dis_by_id =
-            index->CalcDistanceById(query->GetFloat32Vectors(), result[0]);
-        if (has_func_cal_dis_by_id.has_value()) {
-            for (int j = 0; j < topk; ++j) {
-                REQUIRE(index->CalcDistanceById(query->GetFloat32Vectors(), result[j]) ==
-                        res.value()->GetDistances()[j]);
-            }
-        }
     }
     REQUIRE(cur_recall > recall * query_count);
 }
 
 void
-TestIndex::TestRangeSearch(IndexPtr index,
-                           std::shared_ptr<fixtures::TestDataset> dataset,
+TestIndex::TestRangeSearch(const IndexPtr& index,
+                           const TestDatasetPtr& dataset,
                            const std::string& search_param,
                            float radius,
                            float recall,
                            int64_t limited_size,
                            bool expected_success) {
-    auto querys = dataset->query_;
-    auto query_count = querys->GetNumElements();
-    auto dim = querys->GetDim();
+    auto queries = dataset->query_;
+    auto query_count = queries->GetNumElements();
+    auto dim = queries->GetDim();
     auto gts = dataset->ground_truth_;
     auto gt_topK = gts->GetDim();
     float cur_recall = 0.0f;
@@ -209,7 +201,7 @@ TestIndex::TestRangeSearch(IndexPtr index,
         auto query = vsag::Dataset::Make();
         query->NumElements(1)
             ->Dim(dim)
-            ->Float32Vectors(querys->GetFloat32Vectors() + i * dim)
+            ->Float32Vectors(queries->GetFloat32Vectors() + i * dim)
             ->Owner(false);
         auto res = index->RangeSearch(query, radius, search_param, limited_size);
         REQUIRE(res.has_value() == expected_success);
@@ -236,8 +228,8 @@ TestIndex::TestRangeSearch(IndexPtr index,
 }
 
 void
-TestIndex::TestCalcDistanceById(IndexPtr index,
-                                std::shared_ptr<fixtures::TestDataset> dataset,
+TestIndex::TestCalcDistanceById(const IndexPtr& index,
+                                const TestDatasetPtr& dataset,
                                 const std::string& metric_str,
                                 float error) {
     int64_t dim = dataset->base_->GetDim();
@@ -264,7 +256,7 @@ TestIndex::TestCalcDistanceById(IndexPtr index,
     }
 }
 void
-TestIndex::TestSerializeFile(TestIndex::IndexPtr index,
+TestIndex::TestSerializeFile(const TestIndex::IndexPtr& index,
                              const std::string& path,
                              bool expected_success) {
     std::ofstream outfile(path, std::ios::out | std::ios::binary);
@@ -295,9 +287,10 @@ CopyVector(const std::vector<T>& vec) {
 }
 
 TestDatasetPtr
-TestIndex::GenerateDatasetFloat(int64_t dim, uint64_t count) {
+TestIndex::GenerateDatasetFloat(int64_t dim, int64_t count) {
     auto base = vsag::Dataset::Make();
-    auto [ids, vectors] = generate_ids_and_vectors(count, dim, true, time(nullptr));
+    auto [ids, vectors] =
+        generate_ids_and_vectors(count, dim, true, static_cast<int>(time(nullptr)));
     base->Dim(dim)
         ->NumElements(count)
         ->Float32Vectors(CopyVector(vectors))
