@@ -17,7 +17,10 @@
 
 #include "fp32_simd.h"
 #include "normalize.h"
+#include "sq4_simd.h"
+#include "sq4_uniform_simd.h"
 #include "sq8_simd.h"
+#include "sq8_uniform_simd.h"
 
 namespace vsag {
 
@@ -282,6 +285,15 @@ SQ4UniformComputeCodesIP(const uint8_t* codes1, const uint8_t* codes2, uint64_t 
     }
 
     return result;
+}
+
+float
+SQ8UniformComputeCodesIP(const uint8_t* codes1, const uint8_t* codes2, uint64_t dim) {
+    int32_t result = 0;
+    for (uint64_t d = 0; d < dim; d++) {
+        result += codes1[d] * codes2[d];
+    }
+    return static_cast<float>(result);
 }
 
 float

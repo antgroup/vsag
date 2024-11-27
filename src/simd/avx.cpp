@@ -23,6 +23,7 @@
 #include "sq4_simd.h"
 #include "sq4_uniform_simd.h"
 #include "sq8_simd.h"
+#include "sq8_uniform_simd.h"
 
 namespace vsag {
 
@@ -479,6 +480,41 @@ SQ4UniformComputeCodesIP(const uint8_t* codes1, const uint8_t* codes2, uint64_t 
 #endif
 }
 
+float
+SQ8UniformComputeCodesIP(const uint8_t* codes1, const uint8_t* codes2, uint64_t dim) {
+#if defined(ENABLE_AVX2)
+    if (dim == 0) {
+        return 0.0f;
+    }
+
+    alignas(32) int32_t temp[8];
+    int32_t result = 0;
+    uint64_t d = 0;
+    __m256i sum = _mm256_setzero_si256();
+    __m256i mask = _mm256_set1_epi16(0xff);
+    for (; d + 31 < dim; d += 32) {
+        auto xx = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(codes1 + d));
+        auto yy = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(codes2 + d));
+
+        auto xx1 = _mm256_and_si256(xx, mask);
+        auto xx2 = _mm256_srli_epi16(xx, 8);
+        auto yy1 = _mm256_and_si256(yy, mask);
+        auto yy2 = _mm256_srli_epi16(yy, 8);
+
+        sum = _mm256_add_epi32(sum, _mm256_madd_epi16(xx1, yy1));
+        sum = _mm256_add_epi32(sum, _mm256_madd_epi16(xx2, yy2));
+    }
+    _mm256_store_si256(reinterpret_cast<__m256i*>(temp), sum);
+    for (int i : temp) {
+        result += i;
+    }
+    result += static_cast<int32_t>(sse::SQ8UniformComputeCodesIP(codes1 + d, codes2 + d, dim - d));
+    return static_cast<float>(result);
+#else
+    return sse::S8UniformComputeCodesIP(codes1, codes2, dim);
+#endif
+}
+
 void
 DivScalar(const float* from, float* to, uint64_t dim, float scalar) {
 #if defined(ENABLE_AVX2)
@@ -509,5 +545,4 @@ Normalize(const float* from, float* to, uint64_t dim) {
 }
 
 }  // namespace avx2
-
 }  // namespace vsag
