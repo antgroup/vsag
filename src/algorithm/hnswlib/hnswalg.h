@@ -287,19 +287,8 @@ public:
     void
     SerializeImpl(StreamWriter& writer);
 
-    // load using reader
     void
-    loadIndex(std::function<void(uint64_t, uint64_t, void*)> read_func,
-              SpaceInterface* s,
-              size_t max_elements_i) override;
-
-    // load index from a file stream
-    void
-    loadIndex(std::istream& in_stream, SpaceInterface* s, size_t max_elements_i) override;
-
-    // origin load function
-    void
-    loadIndex(const std::string& location, SpaceInterface* s, size_t max_elements_i = 0);
+    loadIndex(StreamReader& buffer_reader, SpaceInterface* s, size_t max_elements_i = 0) override;
 
     void
     DeserializeImpl(StreamReader& reader, SpaceInterface* s, size_t max_elements_i = 0);

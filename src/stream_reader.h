@@ -28,6 +28,12 @@ public:
     virtual void
     Read(char* data, uint64_t size) = 0;
 
+    virtual void
+    Seek(uint64_t cursor) = 0;
+
+    virtual uint64_t
+    GetCursor() const = 0;
+
     template <typename T>
     static void
     ReadObj(StreamReader& reader, T& val) {
@@ -55,14 +61,20 @@ public:
 
 class ReadFuncStreamReader : public StreamReader {
 public:
-    ReadFuncStreamReader(const std::function<void(uint64_t, uint64_t, void*)>& read_func,
+    ReadFuncStreamReader(const std::function<void(uint64_t, uint64_t, void*)> read_func,
                          uint64_t cursor);
 
     void
     Read(char* data, uint64_t size) override;
 
+    void
+    Seek(uint64_t cursor) override;
+
+    uint64_t
+    GetCursor() const override;
+
 private:
-    const std::function<void(uint64_t, uint64_t, void*)>& readFunc_;
+    const std::function<void(uint64_t, uint64_t, void*)> readFunc_;
     uint64_t cursor_;
 };
 
@@ -73,6 +85,35 @@ public:
     void
     Read(char* data, uint64_t size) override;
 
+    void
+    Seek(uint64_t cursor) override;
+
+    uint64_t
+    GetCursor() const override;
+
 private:
     std::istream& istream_;
+};
+
+class BufferStreamReader : public StreamReader {
+public:
+    explicit BufferStreamReader(StreamReader* reader, size_t max_size, vsag::Allocator* allocator);
+
+    void
+    Read(char* data, uint64_t size) override;
+
+    void
+    Seek(uint64_t cursor) override;
+
+    uint64_t
+    GetCursor() const override;
+
+private:
+    StreamReader* const reader_impl_{nullptr};
+    vsag::Vector<char> buffer_;  // Stores the cached content
+    size_t buffer_cursor_{0};    // Current read position in the cache
+    size_t valid_size_{0};       // Size of valid data in the cache
+    size_t buffer_size_{0};      // Maximum capacity of the cache
+    size_t max_size_{0};         // Maximum capacity of the actual data stream
+    size_t cursor_{0};           // Current read position in the actual data stream
 };

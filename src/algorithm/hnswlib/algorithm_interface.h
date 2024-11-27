@@ -22,6 +22,7 @@
 
 #include "base_filter_functor.h"
 #include "space_interface.h"
+#include "stream_reader.h"
 #include "typing.h"
 
 namespace hnswlib {
@@ -81,12 +82,7 @@ public:
     calcSerializeSize() = 0;
 
     virtual void
-    loadIndex(std::function<void(uint64_t, uint64_t, void*)> read_func,
-              SpaceInterface* s,
-              size_t max_elements_i = 0) = 0;
-
-    virtual void
-    loadIndex(std::istream& in_stream, SpaceInterface* s, size_t max_elements_i = 0) = 0;
+    loadIndex(StreamReader& reader, SpaceInterface* s, size_t max_elements_i = 0) = 0;
 
     virtual size_t
     getCurrentElementCount() = 0;

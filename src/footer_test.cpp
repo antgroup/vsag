@@ -17,6 +17,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include "stream_reader.h"
 TEST_CASE("footer basic usage", "[ut][footer]") {
     vsag::SerializationFooter footer;
 
@@ -30,7 +31,8 @@ TEST_CASE("footer basic usage", "[ut][footer]") {
 
         std::stringstream in_ss(std::ios::in | std::ios::binary);
         in_ss.str(str);
-        footer.Deserialize(in_ss);
+        IOStreamReader reader(in_ss);
+        footer.Deserialize(reader);
         for (int i = 0; i < 10; i++) {
             REQUIRE(std::stoi(footer.GetMetadata(std::to_string(i))) == i);
         }
@@ -52,7 +54,8 @@ TEST_CASE("footer basic usage", "[ut][footer]") {
         std::string str = ss.str();
         str.resize(vsag::FOOTER_SIZE - 1);
         ss.str(str);
-        REQUIRE_THROWS(footer.Deserialize(ss));
+        IOStreamReader reader(ss);
+        REQUIRE_THROWS(footer.Deserialize(reader));
     }
 
     SECTION("error in Deserialize: less bits") {
@@ -66,7 +69,8 @@ TEST_CASE("footer basic usage", "[ut][footer]") {
         std::stringstream in_ss(std::ios::in | std::ios::binary);
         str.resize(10);
         in_ss.str(str);
-        REQUIRE_THROWS(footer.Deserialize(in_ss));
+        IOStreamReader reader(in_ss);
+        REQUIRE_THROWS(footer.Deserialize(reader));
     }
 
     SECTION("error in GetMetadata: invalid key") {
@@ -85,14 +89,16 @@ TEST_CASE("footer basic usage", "[ut][footer]") {
 
         std::stringstream in_ss(std::ios::in | std::ios::binary);
         in_ss.str(str);
-        REQUIRE_THROWS(footer.Deserialize(in_ss));
+        IOStreamReader reader(in_ss);
+        REQUIRE_THROWS(footer.Deserialize(reader));
     }
 
     SECTION("error in Deserialize: invalid footer size") {
         std::stringstream ss(std::ios::in | std::ios::out | std::ios::binary);
         uint32_t serialized_data_size = vsag::FOOTER_SIZE + 1;
         ss << serialized_data_size;
-        REQUIRE_THROWS(footer.Deserialize(ss));
+        IOStreamReader reader(ss);
+        REQUIRE_THROWS(footer.Deserialize(reader));
     }
 
     SECTION("error in Deserialize: invalid magic num") {
@@ -100,7 +106,8 @@ TEST_CASE("footer basic usage", "[ut][footer]") {
         std::string invalid_value = "abcd";
         footer.SetMetadata(vsag::SERIALIZE_MAGIC_NUM, invalid_value);
         footer.Serialize(ss);
-        REQUIRE_THROWS(footer.Deserialize(ss));
+        IOStreamReader reader(ss);
+        REQUIRE_THROWS(footer.Deserialize(reader));
     }
 
     SECTION("error in Deserialize: invalid version") {
@@ -108,6 +115,7 @@ TEST_CASE("footer basic usage", "[ut][footer]") {
         std::string invalid_value = "1.0";
         footer.SetMetadata(vsag::SERIALIZE_VERSION, invalid_value);
         footer.Serialize(ss);
-        REQUIRE_THROWS(footer.Deserialize(ss));
+        IOStreamReader reader(ss);
+        REQUIRE_THROWS(footer.Deserialize(reader));
     }
 }

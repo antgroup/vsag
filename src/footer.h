@@ -16,6 +16,7 @@
 #pragma once
 #include "fmt/format.h"
 #include "nlohmann/json.hpp"
+#include "stream_reader.h"
 #include "typing.h"
 #include "vsag/constants.h"
 
@@ -42,7 +43,7 @@ public:
     Serialize(std::ostream& out_stream) const;
 
     void
-    Deserialize(std::istream& in_stream);
+    Deserialize(StreamReader& in_stream);
 
 private:
     JsonType json_;
