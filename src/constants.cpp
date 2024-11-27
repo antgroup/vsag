@@ -72,6 +72,8 @@ const char* const HNSW_PARAMETER_CONSTRUCTION = "ef_construction";
 const char* const HNSW_PARAMETER_USE_STATIC = "use_static";
 const char* const HNSW_PARAMETER_REVERSED_EDGES = "use_reversed_edges";
 
+const char* const INDEX_PARAM = "index_param";
+
 // statstic key
 const char* const STATSTIC_MEMORY = "memory";
 const char* const STATSTIC_INDEX_NAME = "index_name";

@@ -17,24 +17,18 @@
 
 #include <catch2/catch_test_macros.hpp>
 
-TEST_CASE("create hnsw with invalid metric type", "[ut][hnsw]") {
-    auto json_string = R"(
+TEST_CASE("create hnsw with correct parameter", "[ut][hnsw]") {
+    vsag::IndexCommonParam commom_param;
+    commom_param.dim_ = 128;
+    commom_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    commom_param.metric_ = vsag::MetricType::METRIC_TYPE_L2SQR;
+    auto build_parameter_json = R"(
         {
-            "dtype": "float32",
-            "metric_type": "unknown-metric-type",
-            "dim": 512,
-            "hnsw": {
-                "max_degree": 16,
-                "ef_construction": 100
-            },
-            "diskann": {
-                "max_degree": 16,
-                "ef_construction": 200,
-                "pq_dims": 32,
-                "pq_sample_rate": 0.5
-            }
+            "max_degree": 16,
+            "ef_construction": 100
         }
         )";
 
-    REQUIRE_THROWS_AS(vsag::CreateHnswParameters::FromJson(json_string), std::invalid_argument);
+    nlohmann::json parsed_params = nlohmann::json::parse(build_parameter_json);
+    vsag::HnswParameters::FromJson(parsed_params, commom_param);
 }

@@ -19,17 +19,13 @@
 
 #include <nlohmann/json.hpp>
 
-#include "index_common_param.h"
 #include "vsag/constants.h"
 
 namespace vsag {
 
-CreateHnswParameters
-CreateHnswParameters::FromJson(const std::string& json_string) {
-    JsonType params = JsonType::parse(json_string);
-    CreateHnswParameters obj;
-
-    auto index_common_param = IndexCommonParam::CheckAndCreate(json_string);
+HnswParameters
+HnswParameters::FromJson(JsonType& hnsw_param_obj, IndexCommonParam index_common_param) {
+    HnswParameters obj;
 
     if (index_common_param.data_type_ == DataTypes::DATA_TYPE_FLOAT) {
         obj.type = DataTypes::DATA_TYPE_FLOAT;
@@ -49,11 +45,6 @@ CreateHnswParameters::FromJson(const std::string& json_string) {
         obj.normalize = true;
         obj.space = std::make_shared<hnswlib::InnerProductSpace>(index_common_param.dim_, obj.type);
     }
-
-    // set obj.space
-    CHECK_ARGUMENT(params.contains(INDEX_HNSW),
-                   fmt::format("parameters must contains {}", INDEX_HNSW));
-    const auto& hnsw_param_obj = params[INDEX_HNSW];
 
     // set obj.max_degree
     CHECK_ARGUMENT(hnsw_param_obj.contains(HNSW_PARAMETER_M),
@@ -116,18 +107,10 @@ HnswSearchParameters::FromJson(const std::string& json_string) {
     return obj;
 }
 
-CreateFreshHnswParameters
-CreateFreshHnswParameters::FromJson(const std::string& json_string) {
-    auto parrent_obj = CreateHnswParameters::FromJson(json_string);
-    CreateFreshHnswParameters obj;
-
-    obj.max_degree = parrent_obj.max_degree;
-    obj.ef_construction = parrent_obj.ef_construction;
-    obj.space = parrent_obj.space;
+HnswParameters
+FreshHnswParameters::FromJson(JsonType& hnsw_param_obj, IndexCommonParam index_common_param) {
+    HnswParameters obj = HnswParameters::FromJson(hnsw_param_obj, index_common_param);
     obj.use_static = false;
-    obj.normalize = parrent_obj.normalize;
-    obj.type = parrent_obj.type;
-
     // set obj.use_reversed_edges
     obj.use_reversed_edges = true;
     return obj;
