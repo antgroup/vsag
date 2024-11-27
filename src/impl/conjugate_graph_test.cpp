@@ -21,6 +21,7 @@
 #include <nlohmann/json.hpp>
 
 #include "fixtures.h"
+#include "stream_reader.h"
 
 TEST_CASE("build, add and memory usage", "[ut][conjugate_graph]") {
     std::shared_ptr<vsag::ConjugateGraph> conjugate_graph =
@@ -162,7 +163,8 @@ TEST_CASE("serialize and deserialize with stream", "[ut][conjugate_graph]") {
         in_stream.seekg(0, std::ios::end);
         REQUIRE(in_stream.tellg() == 60 + vsag::FOOTER_SIZE);
         in_stream.seekg(0, std::ios::beg);
-        REQUIRE(conjugate_graph->Deserialize(in_stream).has_value());
+        IOStreamReader reader(in_stream);
+        REQUIRE(conjugate_graph->Deserialize(reader).has_value());
         in_stream.close();
 
         REQUIRE(conjugate_graph->GetMemoryUsage() == 60 + vsag::FOOTER_SIZE);
@@ -189,8 +191,8 @@ TEST_CASE("serialize and deserialize with stream", "[ut][conjugate_graph]") {
         out_stream.close();
 
         std::fstream in_stream(dir.path + "conjugate_graph.bin", std::ios::in | std::ios::binary);
-        REQUIRE(conjugate_graph->Deserialize(in_stream).error().type ==
-                vsag::ErrorType::READ_ERROR);
+        IOStreamReader reader(in_stream);
+        REQUIRE(conjugate_graph->Deserialize(reader).error().type == vsag::ErrorType::READ_ERROR);
         in_stream.close();
     }
 
@@ -212,8 +214,8 @@ TEST_CASE("serialize and deserialize with stream", "[ut][conjugate_graph]") {
         out_stream.close();
 
         std::fstream in_stream(dir.path + "conjugate_graph.bin", std::ios::in | std::ios::binary);
-        REQUIRE(conjugate_graph->Deserialize(in_stream).error().type ==
-                vsag::ErrorType::READ_ERROR);
+        IOStreamReader reader(in_stream);
+        REQUIRE(conjugate_graph->Deserialize(reader).error().type == vsag::ErrorType::READ_ERROR);
         in_stream.close();
     }
 
@@ -227,8 +229,8 @@ TEST_CASE("serialize and deserialize with stream", "[ut][conjugate_graph]") {
         std::filesystem::resize_file(dir.path + "conjugate_graph.bin", 55 + vsag::FOOTER_SIZE);
 
         std::fstream in_stream(dir.path + "conjugate_graph.bin", std::ios::in | std::ios::binary);
-        REQUIRE(conjugate_graph->Deserialize(in_stream).error().type ==
-                vsag::ErrorType::READ_ERROR);
+        IOStreamReader reader(in_stream);
+        REQUIRE(conjugate_graph->Deserialize(reader).error().type == vsag::ErrorType::READ_ERROR);
         in_stream.close();
     }
 
@@ -243,8 +245,8 @@ TEST_CASE("serialize and deserialize with stream", "[ut][conjugate_graph]") {
         out_stream.close();
 
         std::fstream in_stream(dir.path + "conjugate_graph.bin", std::ios::in | std::ios::binary);
-        REQUIRE(conjugate_graph->Deserialize(in_stream).error().type ==
-                vsag::ErrorType::READ_ERROR);
+        IOStreamReader reader(in_stream);
+        REQUIRE(conjugate_graph->Deserialize(reader).error().type == vsag::ErrorType::READ_ERROR);
         in_stream.close();
     }
 
@@ -258,8 +260,8 @@ TEST_CASE("serialize and deserialize with stream", "[ut][conjugate_graph]") {
         std::filesystem::resize_file(dir.path + "conjugate_graph.bin", 55 + vsag::FOOTER_SIZE);
 
         std::fstream in_stream(dir.path + "conjugate_graph.bin", std::ios::in | std::ios::binary);
-        REQUIRE(conjugate_graph->Deserialize(in_stream).error().type ==
-                vsag::ErrorType::READ_ERROR);
+        IOStreamReader reader(in_stream);
+        REQUIRE(conjugate_graph->Deserialize(reader).error().type == vsag::ErrorType::READ_ERROR);
         in_stream.close();
 
         REQUIRE(conjugate_graph->GetMemoryUsage() == 4 + vsag::FOOTER_SIZE);
@@ -272,7 +274,8 @@ TEST_CASE("serialize and deserialize with stream", "[ut][conjugate_graph]") {
 
         std::fstream re_in_stream(dir.path + "conjugate_graph.bin",
                                   std::ios::in | std::ios::binary);
-        REQUIRE(conjugate_graph->Deserialize(re_in_stream).has_value());
+        IOStreamReader re_reader(re_in_stream);
+        REQUIRE(conjugate_graph->Deserialize(re_reader).has_value());
         REQUIRE(conjugate_graph->GetMemoryUsage() == 4 + vsag::FOOTER_SIZE);
         re_in_stream.close();
     }

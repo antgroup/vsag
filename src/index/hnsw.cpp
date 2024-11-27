@@ -506,6 +506,10 @@ HNSW::deserialize(const BinarySet& binary_set) {
 
     Binary b = binary_set.Get(HNSW_DATA);
     auto func = [&](uint64_t offset, uint64_t len, void* dest) -> void {
+        if (len + offset > b.size) {
+            throw std::runtime_error(
+                fmt::format("offset({}) + len({}) > size({})", offset, len, b.size));
+        }
         std::memcpy(dest, b.data.get() + offset, len);
     };
 
@@ -514,7 +518,11 @@ HNSW::deserialize(const BinarySet& binary_set) {
         if (auto result = init_memory_space(); not result.has_value()) {
             return tl::unexpected(result.error());
         }
-        alg_hnsw_->loadIndex(func, this->space_.get());
+
+        int64_t cursor = 0;
+        ReadFuncStreamReader reader(func, cursor);
+        BufferStreamReader buffer_reader(&reader, b.size, allocator_.get());
+        alg_hnsw_->loadIndex(buffer_reader, this->space_.get());
         if (use_conjugate_graph_) {
             Binary b_cg = binary_set.Get(CONJUGATE_GRAPH_DATA);
             if (not conjugate_graph_->Deserialize(b_cg).has_value()) {
@@ -544,8 +552,14 @@ HNSW::deserialize(const ReaderSet& reader_set) {
         return {};
     }
 
+    const auto& hnsw_data = reader_set.Get(HNSW_DATA);
+
     auto func = [&](uint64_t offset, uint64_t len, void* dest) -> void {
-        reader_set.Get(HNSW_DATA)->Read(offset, len, dest);
+        if (len + offset > hnsw_data->Size()) {
+            throw std::runtime_error(
+                fmt::format("offset({}) + len({}) > size({})", offset, len, hnsw_data->Size()));
+        }
+        hnsw_data->Read(offset, len, dest);
     };
 
     try {
@@ -553,7 +567,11 @@ HNSW::deserialize(const ReaderSet& reader_set) {
         if (auto result = init_memory_space(); not result.has_value()) {
             return tl::unexpected(result.error());
         }
-        alg_hnsw_->loadIndex(func, this->space_.get());
+
+        int64_t cursor = 0;
+        ReadFuncStreamReader reader(func, cursor);
+        BufferStreamReader buffer_reader(&reader, hnsw_data->Size(), allocator_.get());
+        alg_hnsw_->loadIndex(buffer_reader, this->space_.get());
     } catch (const std::runtime_error& e) {
         LOG_ERROR_AND_RETURNS(ErrorType::READ_ERROR, "failed to deserialize: ", e.what());
     }
@@ -574,8 +592,18 @@ HNSW::deserialize(std::istream& in_stream) {
         if (auto result = init_memory_space(); not result.has_value()) {
             return tl::unexpected(result.error());
         }
-        alg_hnsw_->loadIndex(in_stream, this->space_.get());
-        if (use_conjugate_graph_ and not conjugate_graph_->Deserialize(in_stream).has_value()) {
+
+        std::streampos current_position = in_stream.tellg();
+        in_stream.seekg(0, std::ios::end);
+        std::streamsize size = in_stream.tellg();
+        in_stream.seekg(current_position);
+        auto max_size = size - current_position;
+
+        IOStreamReader reader(in_stream);
+        BufferStreamReader buffer_reader(&reader, max_size, allocator_.get());
+        alg_hnsw_->loadIndex(buffer_reader, this->space_.get());
+
+        if (use_conjugate_graph_ and not conjugate_graph_->Deserialize(buffer_reader).has_value()) {
             throw std::runtime_error("error in deserialize conjugate graph");
         }
     } catch (const std::runtime_error& e) {
