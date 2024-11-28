@@ -44,36 +44,27 @@ const static uint32_t GENERATE_SEARCH_K = 50;
 const static uint32_t GENERATE_SEARCH_L = 400;
 const static float GENERATE_OMEGA = 0.51;
 
-HNSW::HNSW(std::shared_ptr<hnswlib::SpaceInterface> space_interface,
-           int M,
-           int ef_construction,
-           DataTypes type,
-           bool use_static,
-           bool use_reversed_edges,
-           bool use_conjugate_graph,
-           bool normalize,
-           Allocator* allocator)
-    : space_(std::move(space_interface)),
-      use_static_(use_static),
-      use_conjugate_graph_(use_conjugate_graph),
-      use_reversed_edges_(use_reversed_edges),
-      type_(type) {
-    dim_ = *((size_t*)space_->get_dist_func_param());
+HNSW::HNSW(HnswParameters hnsw_params, const IndexCommonParam& index_common_param)
+    : space_(std::move(hnsw_params.space)),
+      use_static_(hnsw_params.use_static),
+      use_conjugate_graph_(hnsw_params.use_conjugate_graph),
+      use_reversed_edges_(hnsw_params.use_reversed_edges),
+      type_(hnsw_params.type),
+      dim_(index_common_param.dim_) {
+    auto M = std::min(std::max((int)hnsw_params.max_degree, MINIMAL_M), MAXIMAL_M);
 
-    M = std::min(std::max(M, MINIMAL_M), MAXIMAL_M);
-
-    if (ef_construction <= 0) {
+    if (hnsw_params.ef_construction <= 0) {
         throw std::runtime_error(MESSAGE_PARAMETER);
     }
 
-    if (use_conjugate_graph) {
+    if (hnsw_params.use_conjugate_graph) {
         conjugate_graph_ = std::make_shared<ConjugateGraph>();
     }
 
-    if (not allocator) {
+    if (not index_common_param.allocator_) {
         allocator_ = std::make_shared<SafeAllocator>(DefaultAllocator::Instance());
     } else {
-        allocator_ = std::make_shared<SafeAllocator>(allocator);
+        allocator_ = std::make_shared<SafeAllocator>(index_common_param.allocator_);
     }
 
     if (!use_static_) {
@@ -82,9 +73,9 @@ HNSW::HNSW(std::shared_ptr<hnswlib::SpaceInterface> space_interface,
                                                        DEFAULT_MAX_ELEMENT,
                                                        allocator_.get(),
                                                        M,
-                                                       ef_construction,
+                                                       hnsw_params.ef_construction,
                                                        use_reversed_edges_,
-                                                       normalize,
+                                                       hnsw_params.normalize,
                                                        Options::Instance().block_size_limit());
     } else {
         if (dim_ % 4 != 0) {
@@ -96,7 +87,7 @@ HNSW::HNSW(std::shared_ptr<hnswlib::SpaceInterface> space_interface,
             DEFAULT_MAX_ELEMENT,
             allocator_.get(),
             M,
-            ef_construction,
+            hnsw_params.ef_construction,
             Options::Instance().block_size_limit());
     }
 }

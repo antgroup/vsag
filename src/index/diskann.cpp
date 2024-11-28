@@ -28,10 +28,6 @@
 #include <stdexcept>
 #include <utility>
 
-#include "../common.h"
-#include "../logger.h"
-#include "../utils.h"
-#include "./diskann_zparameters.h"
 #include "vsag/constants.h"
 #include "vsag/errors.h"
 #include "vsag/expected.hpp"
@@ -138,30 +134,18 @@ convert_binary_to_stream(const Binary& binary, std::stringstream& stream) {
     }
 }
 
-DiskANN::DiskANN(diskann::Metric metric,
-                 std::string data_type,
-                 int L,
-                 int R,
-                 float p_val,
-                 size_t disk_pq_dims,
-                 int64_t dim,
-                 bool preload,
-                 bool use_reference,
-                 bool use_opq,
-                 bool use_bsa,
-                 bool use_async_io)
-    : metric_(metric),
-      L_(L),
-      R_(R),
-      p_val_(p_val),
-      data_type_(data_type),
-      disk_pq_dims_(disk_pq_dims),
-      dim_(dim),
-      preload_(preload),
-      use_reference_(use_reference),
-      use_opq_(use_opq),
-      use_bsa_(use_bsa),
-      use_async_io_(use_async_io) {
+DiskANN::DiskANN(DiskannParameters& diskann_params, const IndexCommonParam& index_common_param)
+    : metric_(diskann_params.metric),
+      L_(diskann_params.ef_construction),
+      R_(diskann_params.max_degree),
+      p_val_(diskann_params.pq_sample_rate),
+      disk_pq_dims_(diskann_params.pq_dims),
+      dim_(index_common_param.dim_),
+      preload_(diskann_params.use_preload),
+      use_reference_(diskann_params.use_reference),
+      use_opq_(diskann_params.use_opq),
+      use_bsa_(diskann_params.use_bsa),
+      use_async_io_(diskann_params.use_async_io) {
     if (not use_async_io_) {
         pool_ = std::make_unique<ThreadPool>(Option::Instance().num_threads_io());
     }
@@ -201,7 +185,7 @@ DiskANN::DiskANN(diskann::Metric metric,
     // When the length of the vector is too long, set sector_len_ to the size of storing a vector along with its linkage list.
     sector_len_ =
         std::max(MINIMAL_SECTOR_LEN,
-                 (size_t)(dim * sizeof(float) + (R_ * GRAPH_SLACK + 1) * sizeof(uint32_t)) *
+                 (size_t)(dim_ * sizeof(float) + (R_ * GRAPH_SLACK + 1) * sizeof(uint32_t)) *
                      VECTOR_PER_BLOCK);
 }
 

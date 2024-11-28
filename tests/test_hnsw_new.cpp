@@ -109,7 +109,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::TestIndex,
     /*
     SECTION("Invalid dim param") {
         auto dim = GENERATE(-1, std::numeric_limits<uint64_t>::max(), 0, 8.6);
-        auto param_tmp = R"(
+        constexpr const char* param_tmp = R"(
         {{
             "dtype": "float32",
             "metric_type": "l2",

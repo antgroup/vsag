@@ -35,6 +35,8 @@
 #include "../safe_allocator.h"
 #include "../utils.h"
 #include "base_filter_functor.h"
+#include "hnsw_zparameters.h"
+#include "index_common_param.h"
 #include "typing.h"
 #include "vsag/binaryset.h"
 #include "vsag/errors.h"
@@ -45,15 +47,7 @@ namespace vsag {
 
 class HNSW : public Index {
 public:
-    HNSW(std::shared_ptr<hnswlib::SpaceInterface> space_interface,
-         int M,
-         int ef_construction,
-         DataTypes type,
-         bool use_static = false,
-         bool use_reversed_edges = false,
-         bool use_conjugate_graph = false,
-         bool normalize = false,
-         Allocator* allocator = nullptr);
+    HNSW(HnswParameters hnsw_params, const IndexCommonParam& index_common_param);
 
     virtual ~HNSW() {
         alg_hnsw_ = nullptr;

@@ -15,21 +15,22 @@
 
 #pragma once
 
+#include <distance.h>
+
 #include <string>
 
-#include "diskann.h"
+#include "index_common_param.h"
 
 namespace vsag {
 
-struct CreateDiskannParameters {
+struct DiskannParameters {
 public:
-    static CreateDiskannParameters
-    FromJson(const std::string& json_string);
+    static DiskannParameters
+    FromJson(JsonType& diskann_param_obj, IndexCommonParam index_common_param);
 
 public:
     // require vars
     int64_t dim;
-    std::string dtype;
     diskann::Metric metric;
     int64_t max_degree;
     int64_t ef_construction;
@@ -44,7 +45,7 @@ public:
     bool use_async_io = false;
 
 private:
-    CreateDiskannParameters() = default;
+    DiskannParameters() = default;
 };
 
 struct DiskannSearchParameters {
