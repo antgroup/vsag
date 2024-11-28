@@ -70,4 +70,17 @@ private:
     static const std::unordered_map<std::string, std::vector<std::string>> EXTERNAL_MAPPING;
 };
 
+class HGraphSearchParameters {
+public:
+    static HGraphSearchParameters
+    FromJson(const std::string& json_string);
+
+public:
+    int64_t ef_search{30};
+    bool use_reorder{false};
+
+private:
+    HGraphSearchParameters() = default;
+};
+
 }  // namespace vsag

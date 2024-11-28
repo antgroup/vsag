@@ -19,8 +19,7 @@
 
 #include "common.h"
 #include "data_cell/sparse_graph_datacell.h"
-#include "hnsw.h"
-#include "hnsw_zparameters.h"
+#include "hgraph_zparameters.h"
 
 namespace vsag {
 BinarySet
@@ -145,7 +144,7 @@ HGraphIndex::knn_search(const DatasetPtr& query,
             ep = result.top().second;
         }
 
-        auto params = HnswSearchParameters::FromJson(parameters);
+        auto params = HGraphSearchParameters::FromJson(parameters);
 
         auto ef = params.ef_search;
         auto search_result = this->search_one_graph(query->GetFloat32Vectors(),
