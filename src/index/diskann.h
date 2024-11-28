@@ -32,6 +32,7 @@
 #include "../common.h"
 #include "../logger.h"
 #include "../utils.h"
+#include "diskann_zparameters.h"
 #include "typing.h"
 #include "vsag/index.h"
 #include "vsag/options.h"
@@ -51,18 +52,7 @@ public:
     // offset: uint64, len: uint64, dest: void*
     using read_request = std::tuple<uint64_t, uint64_t, void*>;
 
-    DiskANN(diskann::Metric metric,
-            std::string data_type,
-            int L,
-            int R,
-            float p_val,
-            size_t disk_pq_dims,
-            int64_t dim,
-            bool preload,
-            bool use_reference = true,
-            bool use_opq = false,
-            bool use_bsa = false,
-            bool use_async_io = false);
+    DiskANN(DiskannParameters& diskann_params, const IndexCommonParam& index_common_param);
 
     ~DiskANN() = default;
 
@@ -228,7 +218,6 @@ private:
     std::function<void(const std::vector<read_request>&, bool, CallBack)> batch_read_;
     diskann::Metric metric_;
     std::shared_ptr<Reader> disk_layout_reader_;
-    std::string data_type_;
 
     int L_ = 200;
     int R_ = 64;

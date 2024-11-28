@@ -17,18 +17,15 @@
 
 #include <fmt/format-inl.h>
 
-#include <nlohmann/json.hpp>
-
 #include "common.h"
 #include "vsag/constants.h"
 
 namespace vsag {
 
 IndexCommonParam
-IndexCommonParam::CheckAndCreate(const std::string& json_string) {
+IndexCommonParam::CheckAndCreate(JsonType& params, Allocator* allocator) {
     IndexCommonParam result;
-    JsonType params = JsonType::parse(json_string);
-
+    result.allocator_ = allocator;
     // Check DataType
     CHECK_ARGUMENT(params.contains(PARAMETER_DTYPE),
                    fmt::format("parameters must contains {}", PARAMETER_DTYPE));
