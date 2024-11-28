@@ -23,6 +23,7 @@
 #include "sq4_simd.h"
 #include "sq4_uniform_simd.h"
 #include "sq8_simd.h"
+#include "sq8_uniform_simd.h"
 
 namespace vsag {
 
@@ -463,6 +464,41 @@ SQ4UniformComputeCodesIP(const uint8_t* codes1, const uint8_t* codes2, uint64_t 
     return result;
 #else
     return avx2::SQ4UniformComputeCodesIP(codes1, codes2, dim);
+#endif
+}
+
+float
+SQ8UniformComputeCodesIP(const uint8_t* codes1, const uint8_t* codes2, uint64_t dim) {
+#if defined(ENABLE_AVX512)
+    if (dim == 0) {
+        return 0.0f;
+    }
+
+    alignas(64) int32_t temp[16];
+    int32_t result = 0;
+    uint64_t d = 0;
+    __m512i sum = _mm512_setzero_si512();
+    __m512i mask = _mm512_set1_epi16(0xff);
+    for (; d + 63 < dim; d += 64) {
+        auto xx = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(codes1 + d));
+        auto yy = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(codes2 + d));
+
+        auto xx1 = _mm512_and_si512(xx, mask);
+        auto xx2 = _mm512_srli_epi16(xx, 8);
+        auto yy1 = _mm512_and_si512(yy, mask);
+        auto yy2 = _mm512_srli_epi16(yy, 8);
+
+        sum = _mm512_add_epi32(sum, _mm512_madd_epi16(xx1, yy1));
+        sum = _mm512_add_epi32(sum, _mm512_madd_epi16(xx2, yy2));
+    }
+    _mm512_store_si512(reinterpret_cast<__m512i*>(temp), sum);
+    for (int i = 0; i < 16; ++i) {
+        result += temp[i];
+    }
+    result += static_cast<int32_t>(avx2::SQ8UniformComputeCodesIP(codes1 + d, codes2 + d, dim - d));
+    return static_cast<float>(result);
+#else
+    return avx2::S8UniformComputeCodesIP(codes1, codes2, dim);
 #endif
 }
 

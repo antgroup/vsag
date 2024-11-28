@@ -22,6 +22,7 @@
 #include "sq4_simd.h"
 #include "sq4_uniform_simd.h"
 #include "sq8_simd.h"
+#include "sq8_uniform_simd.h"
 
 namespace vsag {
 
@@ -592,6 +593,41 @@ SQ4UniformComputeCodesIP(const uint8_t* codes1, const uint8_t* codes2, uint64_t 
     return result;
 #else
     return generic::SQ4UniformComputeCodesIP(codes1, codes2, dim);
+#endif
+}
+
+float
+SQ8UniformComputeCodesIP(const uint8_t* codes1, const uint8_t* codes2, uint64_t dim) {
+#if defined(ENABLE_SSE)
+    if (dim == 0) {
+        return 0;
+    }
+    alignas(128) int32_t temp[4];
+    int32_t result = 0;
+    uint64_t d = 0;
+    __m128i sum = _mm_setzero_si128();
+    __m128i mask = _mm_set1_epi16(0xff);
+    for (; d + 15 < dim; d += 16) {
+        auto xx = _mm_loadu_si128((__m128i*)(codes1 + d));
+        auto yy = _mm_loadu_si128((__m128i*)(codes2 + d));
+
+        auto xx1 = _mm_and_si128(xx, mask);  // 16 * 8bits
+        auto xx2 = _mm_srli_epi16(xx, 8);    // 16 * 8bits
+        auto yy1 = _mm_and_si128(yy, mask);
+        auto yy2 = _mm_srli_epi16(yy, 8);
+
+        sum = _mm_add_epi32(sum, _mm_madd_epi16(xx1, yy1));
+        sum = _mm_add_epi32(sum, _mm_madd_epi16(xx2, yy2));
+    }
+    _mm_store_si128((__m128i*)temp, sum);
+    for (int i = 0; i < 4; ++i) {
+        result += temp[i];
+    }
+    result +=
+        static_cast<int32_t>(generic::SQ8UniformComputeCodesIP(codes1 + d, codes2 + d, dim - d));
+    return static_cast<float>(result);
+#else
+    return generic::S8UniformComputeCodesIP(codes1, codes2, dim);
 #endif
 }
 
