@@ -16,6 +16,7 @@
 #include "hgraph_zparameters.h"
 
 #include "../utils.h"
+#include "common.h"
 #include "fmt/format-inl.h"
 #include "inner_string_params.h"
 #include "vsag/constants.h"
@@ -129,4 +130,23 @@ const std::string HGraphParameters::DEFAULT_HGRAPH_PARAMS = format_map(
     })",
     DEFAULT_MAP);
 
+HGraphSearchParameters
+HGraphSearchParameters::FromJson(const std::string& json_string) {
+    JsonType params = JsonType::parse(json_string);
+
+    HGraphSearchParameters obj;
+
+    // set obj.ef_search
+    CHECK_ARGUMENT(params.contains(INDEX_HGRAPH),
+                   fmt::format("parameters must contains {}", INDEX_HGRAPH));
+
+    CHECK_ARGUMENT(
+        params[INDEX_HGRAPH].contains(HNSW_PARAMETER_EF_RUNTIME),
+        fmt::format("parameters[{}] must contains {}", INDEX_HGRAPH, HNSW_PARAMETER_EF_RUNTIME));
+    obj.ef_search = params[INDEX_HGRAPH][HNSW_PARAMETER_EF_RUNTIME];
+    CHECK_ARGUMENT((1 <= obj.ef_search) and (obj.ef_search <= 1000),
+                   fmt::format("ef_search({}) must in range[1, 1000]", obj.ef_search));
+
+    return obj;
+}
 }  // namespace vsag
