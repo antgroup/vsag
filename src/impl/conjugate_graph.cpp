@@ -153,6 +153,10 @@ ConjugateGraph::Serialize(std::ostream& out_stream) const {
 tl::expected<void, Error>
 ConjugateGraph::Deserialize(const Binary& binary) {
     auto func = [&](uint64_t offset, uint64_t len, void* dest) -> void {
+        if (len + offset > binary.size) {
+            throw std::runtime_error(
+                fmt::format("offset({}) + len({}) > size({})", offset, len, binary.size));
+        }
         std::memcpy(dest, binary.data.get() + offset, len);
     };
 
