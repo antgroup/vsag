@@ -179,3 +179,5 @@ data/
 /coverage_ut.info
 /lcov_cobertura.py
 /testresult/
+*.index
+
