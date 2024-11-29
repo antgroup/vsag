@@ -24,7 +24,7 @@ set (CMAKE_CXX_STANDARD 11)
 include (FetchContent)
 FetchContent_Declare (
   vsag
-  GIT_REPOSITORY https://github.com/alipay/vsag
+  GIT_REPOSITORY https://github.com/antgroup/vsag
   GIT_TAG main
 )
 FetchContent_MakeAvailable (vsag)
@@ -58,7 +58,7 @@ If your system uses VSAG, then feel free to make a pull request to add it to the
 ## How to Contribute
 
 Although VSAG is initially developed by the Vector Database Team at Ant Group, it's the work of
-the [community](https://github.com/alipay/vsag/graphs/contributors), and contributions are always welcome!
+the [community](https://github.com/antgroup/vsag/graphs/contributors), and contributions are always welcome!
 See [CONTRIBUTING](./CONTRIBUTING.md) for ways to get started.
 
 ## Community
@@ -85,7 +85,8 @@ Thrive together in VSAG community with users and developers from all around the 
 
 ## Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=alipay/vsag&type=Date)](https://star-history.com/#alipay/vsag&Date)
+[![Star History Chart](https://api.star-history.com/svg?repos=antgroup/vsag&type=Date)](https://star-history.com/#antgroup/vsag&Date)
 
 ## License
 [Apache License 2.0](./LICENSE)
+
