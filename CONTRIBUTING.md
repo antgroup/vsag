@@ -18,8 +18,8 @@ Before you make any contributions, make sure you follow this list.
 
 Contributions to vsag fall into the following categories.
 
-1.  To report a bug or a problem with documentation, please file an [issue](https://github.com/alipay/vsag/issues/new/choose) providing the details of the problem. If you believe the issue needs priority attention, please comment on the issue to notify the team.
-2.  To propose a new feature, please file a new feature request [issue](https://github.com/alipay/vsag/issues/new/choose). Describe the intended feature and discuss the design and implementation with the team and community. Once the team agrees that the plan looks good, go ahead and implement it, following the [Contributing code](CONTRIBUTING.md#contributing-code).
+1.  To report a bug or a problem with documentation, please file an [issue](https://github.com/antgroup/vsag/issues/new/choose) providing the details of the problem. If you believe the issue needs priority attention, please comment on the issue to notify the team.
+2.  To propose a new feature, please file a new feature request [issue](https://github.com/antgroup/vsag/issues/new/choose). Describe the intended feature and discuss the design and implementation with the team and community. Once the team agrees that the plan looks good, go ahead and implement it, following the [Contributing code](CONTRIBUTING.md#contributing-code).
 3.  To implement a feature or bug-fix for an existing outstanding issue, follow the [Contributing code](CONTRIBUTING.md#contributing-code). If you need more context on a particular issue, comment on the issue to let people know.
 
 ## How can I contribute?
@@ -41,7 +41,7 @@ Please create a new branch from an up-to-date master on your fork.
 If you have an existing local repository, please update it before you start, to minimize the chance of merge conflicts.
 
 ```shell
-git remote add upstream git@github.com:alipay/vsag.git
+git remote add upstream git@github.com:antgroup/vsag.git
 git checkout master
 git pull upstream master
 git checkout -b my-topic-branch
