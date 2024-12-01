@@ -33,6 +33,8 @@ include_directories (vsag-cmake-example PRIVATE ${vsag_SOURCE_DIR}/include)
 # compile executable and link to vsag
 add_executable (vsag-cmake-example src/main.cpp)
 target_link_libraries (vsag-cmake-example PRIVATE vsag)
+# If you want static linking
+# target_link_libraries (vsag-cmake-example PRIVATE vsag_static)
 
 # add dependency
 add_dependencies (vsag-cmake-example vsag)
