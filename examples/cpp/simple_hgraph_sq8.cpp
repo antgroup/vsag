@@ -44,7 +44,9 @@ main(int argc, char** argv) {
         "metric_type": "l2",
         "dim": 128,
         "index_param": {
-            "base_quantization_type": "sq8"
+            "base_quantization_type": "sq8",
+            "max_degree": 26,
+            "ef_construction": 100
         }
     }
     )";
