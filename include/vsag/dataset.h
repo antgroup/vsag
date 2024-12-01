@@ -74,6 +74,12 @@ public:
 
     virtual const float*
     GetFloat32Vectors() const = 0;
+
+    virtual DatasetPtr
+    Paths(const std::string* paths) = 0;
+
+    virtual const std::string*
+    GetPaths() const = 0;
 };
 
 };  // namespace vsag
