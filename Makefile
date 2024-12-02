@@ -64,8 +64,8 @@ asan:                    ## Build with AddressSanitizer option.
 
 .PHONY: test_asan_parallel
 test_asan_parallel: asan ## Run unit tests parallel with AddressSanitizer option.
-	@./scripts/test_asan_bg.sh
-	./build/mockimpl/tests_mockimpl -d yes ${UT_FILTER} --allow-running-no-tests ${UT_SHARD}
+	@setarch `uname -m` -R ./scripts/test_asan_bg.sh
+	setarch `uname -m` -R ./build/mockimpl/tests_mockimpl -d yes ${UT_FILTER} --allow-running-no-tests ${UT_SHARD}
 
 .PHONY: test_asan
 test_asan: asan          ## Run unit tests with AddressSanitizer option.
