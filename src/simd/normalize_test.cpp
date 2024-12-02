@@ -18,6 +18,7 @@
 #include "catch2/benchmark/catch_benchmark.hpp"
 #include "catch2/catch_test_macros.hpp"
 #include "fixtures.h"
+#include "simd_status.h"
 
 using namespace vsag;
 
@@ -41,16 +42,30 @@ TEST_CASE("Normalize SIMD Compute", "[simd]") {
         std::vector<float> tmp_value(dim * 4);
         for (uint64_t i = 0; i < count; ++i) {
             auto gt = generic::Normalize(vec1.data() + i * dim, tmp_value.data(), dim);
-            auto sse = sse::Normalize(vec1.data() + i * dim, tmp_value.data() + dim, dim);
-            auto avx2 = avx2::Normalize(vec1.data() + i * dim, tmp_value.data() + dim * 2, dim);
-            auto avx512 = avx512::Normalize(vec1.data() + i * dim, tmp_value.data() + dim * 3, dim);
-            REQUIRE(fixtures::dist_t(gt) == fixtures::dist_t(sse));
-            REQUIRE(fixtures::dist_t(gt) == fixtures::dist_t(avx2));
-            REQUIRE(fixtures::dist_t(gt) == fixtures::dist_t(avx512));
-            for (int j = 0; j < dim; ++j) {
-                REQUIRE(fixtures::dist_t(tmp_value[j]) == fixtures::dist_t(tmp_value[j + dim]));
-                REQUIRE(fixtures::dist_t(tmp_value[j]) == fixtures::dist_t(tmp_value[j + dim * 2]));
-                REQUIRE(fixtures::dist_t(tmp_value[j]) == fixtures::dist_t(tmp_value[j + dim * 3]));
+            if (SimdStatus::SupportSSE()) {
+                auto sse = sse::Normalize(vec1.data() + i * dim, tmp_value.data() + dim, dim);
+                REQUIRE(fixtures::dist_t(gt) == fixtures::dist_t(sse));
+                for (int j = 0; j < dim; ++j) {
+                    REQUIRE(fixtures::dist_t(tmp_value[j]) ==
+                            fixtures::dist_t(tmp_value[j + dim * 1]));
+                }
+            }
+            if (SimdStatus::SupportAVX2()) {
+                auto avx2 = avx2::Normalize(vec1.data() + i * dim, tmp_value.data() + dim * 2, dim);
+                REQUIRE(fixtures::dist_t(gt) == fixtures::dist_t(avx2));
+                for (int j = 0; j < dim; ++j) {
+                    REQUIRE(fixtures::dist_t(tmp_value[j]) ==
+                            fixtures::dist_t(tmp_value[j + dim * 2]));
+                }
+            }
+            if (SimdStatus::SupportAVX512()) {
+                auto avx512 =
+                    avx512::Normalize(vec1.data() + i * dim, tmp_value.data() + dim * 3, dim);
+                REQUIRE(fixtures::dist_t(gt) == fixtures::dist_t(avx512));
+                for (int j = 0; j < dim; ++j) {
+                    REQUIRE(fixtures::dist_t(tmp_value[j]) ==
+                            fixtures::dist_t(tmp_value[j + dim * 3]));
+                }
             }
         }
     }
