@@ -256,6 +256,9 @@ private:
     void
     get_vectors(const DatasetPtr& base, void** vectors_ptr, size_t* data_size_ptr) const;
 
+    void
+    set_dataset(const DatasetPtr& base, const void* vectors_ptr, uint32_t num_element) const;
+
     BinarySet
     empty_binaryset() const;
 
