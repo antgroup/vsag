@@ -14,16 +14,15 @@
 // limitations under the License.
 
 #include <catch2/catch_test_macros.hpp>
-#include <cstdint>
 
 #include "./simd.h"
 #include "catch2/catch_approx.hpp"
-#include "cpuinfo.h"
 #include "fixtures.h"
+#include "simd_status.h"
 
 TEST_CASE("avx l2 simd16", "[ut][simd][avx]") {
-#if defined(ENABLE_AVX)
-    if (cpuinfo_has_x86_sse()) {
+#if defined(ENABLE_AVX2)
+    if (vsag::SimdStatus::SupportAVX2()) {
         size_t dim = 16;
         auto vectors = fixtures::generate_vectors(2, dim);
 
@@ -37,8 +36,8 @@ TEST_CASE("avx l2 simd16", "[ut][simd][avx]") {
 }
 
 TEST_CASE("avx ip simd16", "[ut][simd][avx]") {
-#if defined(ENABLE_AVX)
-    if (cpuinfo_has_x86_sse()) {
+#if defined(ENABLE_AVX2)
+    if (vsag::SimdStatus::SupportAVX2()) {
         size_t dim = 16;
         auto vectors = fixtures::generate_vectors(2, dim);
 
@@ -52,8 +51,8 @@ TEST_CASE("avx ip simd16", "[ut][simd][avx]") {
 }
 
 TEST_CASE("avx pq calculation", "[ut][simd][avx]") {
-#if defined(ENABLE_AVX)
-    if (cpuinfo_has_x86_avx2()) {
+#if defined(ENABLE_AVX2)
+    if (vsag::SimdStatus::SupportAVX2()) {
         size_t dim = 256;
         float single_dim_value = 0.571;
         float results_expected[256]{0.0f};
