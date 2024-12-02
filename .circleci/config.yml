@@ -41,6 +41,7 @@ jobs:
     steps:
       - checkout
       - run: ./scripts/check_format.sh
+      - run: echo 0 | tee /proc/sys/kernel/randomize_va_space
       - restore_cache:
           keys:
             - main-ccache-{{ checksum "CMakeLists.txt" }}-{{ checksum ".circleci/fresh_ci_cache.commit" }}
