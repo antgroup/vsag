@@ -8,22 +8,25 @@ othertag=""
 
 mkdir ./log
 
-./build/tests/unittests -d yes ${UT_FILTER} --allow-running-no-tests 2>&1 | tee ./log/unittest.log
-exit_codes+=($?)
+./build/tests/unittests -d yes ${UT_FILTER} --allow-running-no-tests &> "./log/unittest.log" &
+pids+=($!)
+tail -f "./log/unittest.log" &
 logger_files+=("./log/unittest.log")
 
 for tag in ${parallel_tags}
 do
   othertag="~"${tag}${othertag}
-  ./build/tests/functests -d yes ${UT_FILTER} --allow-running-no-tests ${tag} 2>&1 | tee ./log/${tag}.log &
+  ./build/tests/functests -d yes ${UT_FILTER} --allow-running-no-tests &> ./log/${tag}.log &
   pids+=($!)
   logname="./log/"${tag}".log"
   logger_files+=($logname)
+  tail -f ./log/${tag}.log &
 done
 
-./build/tests/functests -d yes ${UT_FILTER} --allow-running-no-tests ${othertag} 2>&1 | tee ./log/other.log &
+./build/tests/functests -d yes ${UT_FILTER} --allow-running-no-tests ${othertag} &> ./log/other.log &
 pids+=($!)
 logger_files+=("./log/other.log")
+tail -f "./log/other.log" &
 
 for pid in "${pids[@]}"
 do

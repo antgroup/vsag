@@ -786,8 +786,8 @@ HNSW::pretrain(const std::vector<int64_t>& base_tag_ids,
     set_dataset(generated_query, generated_data.get(), 1);
 
     for (const int64_t& base_tag_id : base_tag_ids) {
-        base_data = (const void*)this->alg_hnsw_->getDataByLabel(base_tag_id);
         try {
+            base_data = (const void*)this->alg_hnsw_->getDataByLabel(base_tag_id);
             set_dataset(base, base_data, 1);
         } catch (const std::runtime_error& e) {
             LOG_ERROR_AND_RETURNS(
