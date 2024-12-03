@@ -99,5 +99,6 @@ extern const char* const SERIALIZE_VERSION;
 extern const char* const HGRAPH_USE_REORDER;
 extern const char* const HGRAPH_BASE_QUANTIZATION_TYPE;
 extern const char* const HGRAPH_GRAPH_MAX_DEGREE;
+extern const char* const HGRAPH_BUILD_EF_CONSTRUCTION;
 
 }  // namespace vsag

@@ -55,7 +55,9 @@ const char* const GRAPH_PARAMS_KEY = "graph_params";
 const char* const GRAPH_PARAM_MAX_DEGREE = "max_degree";
 const char* const GRAPH_PARAM_INIT_MAX_CAPACITY = "init_capacity";
 
+const char* const BUILD_PARAMS_KEY = "build_params";
 const char* const BUILD_THREAD_COUNT = "build_thread_count";
+const char* const BUILD_EF_CONSTRUCTION = "ef_construction";
 
 const std::unordered_map<std::string, std::string> DEFAULT_MAP = {
     {"HGRAPH_USE_REORDER_KEY", HGRAPH_USE_REORDER_KEY},
@@ -75,7 +77,9 @@ const std::unordered_map<std::string, std::string> DEFAULT_MAP = {
     {"GRAPH_PARAMS_KEY", GRAPH_PARAMS_KEY},
     {"GRAPH_PARAM_MAX_DEGREE", GRAPH_PARAM_MAX_DEGREE},
     {"GRAPH_PARAM_INIT_MAX_CAPACITY", GRAPH_PARAM_INIT_MAX_CAPACITY},
+    {"BUILD_PARAMS_KEY", BUILD_PARAMS_KEY},
     {"BUILD_THREAD_COUNT", BUILD_THREAD_COUNT},
+    {"BUILD_EF_CONSTRUCTION", BUILD_EF_CONSTRUCTION},
 };
 
 }  // namespace vsag
