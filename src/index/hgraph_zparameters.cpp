@@ -96,7 +96,7 @@ const std::string HGraphParameters::DEFAULT_HGRAPH_PARAMS = format_map(
             "type": "nsw",
             "{GRAPH_PARAMS_KEY}": {
                 "{GRAPH_PARAM_MAX_DEGREE}": 64,
-                "{GRAPH_PARAM_INIT_MAX_CAPACITY}": 1000
+                "{GRAPH_PARAM_INIT_MAX_CAPACITY}": 100
             }
         },
         "{HGRAPH_BASE_CODES_KEY}": {

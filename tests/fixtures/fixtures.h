@@ -74,6 +74,11 @@ test_range_recall(const vsag::IndexPtr& index,
 std::string
 generate_hnsw_build_parameters_string(const std::string& metric_type, int64_t dim);
 
+std::string
+generate_hgraph_build_parameters_string(const std::string& metric_type,
+                                        int64_t dim,
+                                        const std::string& base_quantization_type = "sq8");
+
 vsag::DatasetPtr
 brute_force(const vsag::DatasetPtr& query,
             const vsag::DatasetPtr& base,

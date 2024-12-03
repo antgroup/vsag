@@ -279,7 +279,7 @@ private:
     get_label_by_id(InnerIdType inner_id) const {
         std::shared_lock<std::shared_mutex> lock(this->label_lookup_mutex_);
         // the inner_id is guarantee in label_lookup
-        return this->label_lookup_.at(inner_id);
+        return this->labels_[inner_id];
     }
 
     void
@@ -292,7 +292,8 @@ private:
     Allocator* allocator_{nullptr};
 
     UnorderedMap<LabelType, InnerIdType> label_lookup_;
-    mutable std::shared_mutex label_lookup_mutex_{};  // lock for label_lookup_
+    Vector<LabelType> labels_;
+    mutable std::shared_mutex label_lookup_mutex_{};  // lock for label_lookup_ & labels_
 
     InnerIdType entry_point_id_{std::numeric_limits<InnerIdType>::max()};
     uint64_t max_level_{0};
@@ -311,5 +312,7 @@ private:
 
     std::unique_ptr<progschj::ThreadPool> build_pool_{nullptr};
     uint64_t build_thread_count_{100};
+
+    InnerIdType max_capacity_{0};
 };
 }  // namespace vsag
