@@ -26,7 +26,8 @@ namespace vsag {
 const std::unordered_map<std::string, std::vector<std::string>> HGraphParameters::EXTERNAL_MAPPING =
     {{HGRAPH_USE_REORDER, {HGRAPH_USE_REORDER_KEY}},
      {HGRAPH_BASE_QUANTIZATION_TYPE, {HGRAPH_BASE_CODES_KEY, QUANTIZATION_TYPE_KEY}},
-     {HGRAPH_GRAPH_MAX_DEGREE, {HGRAPH_GRAPH_KEY, GRAPH_PARAMS_KEY, GRAPH_PARAM_MAX_DEGREE}}};
+     {HGRAPH_GRAPH_MAX_DEGREE, {HGRAPH_GRAPH_KEY, GRAPH_PARAMS_KEY, GRAPH_PARAM_MAX_DEGREE}},
+     {HGRAPH_BUILD_EF_CONSTRUCTION, {BUILD_PARAMS_KEY, BUILD_EF_CONSTRUCTION}}};
 
 HGraphParameters::HGraphParameters(JsonType& hgraph_param, const IndexCommonParam& common_param)
     : common_param_(common_param) {
@@ -119,8 +120,8 @@ const std::string HGraphParameters::DEFAULT_HGRAPH_PARAMS = format_map(
             "{QUANTIZATION_TYPE_KEY}": "{QUANTIZATION_TYPE_VALUE_SQ8}",
             "{QUANTIZATION_PARAMS_KEY}": {}
         },
-        "build_params": {
-            "ef_construction": 400,
+        "{BUILD_PARAMS_KEY}": {
+            "{BUILD_EF_CONSTRUCTION}": 400,
             "{BUILD_THREAD_COUNT}": 5
         }
     })",

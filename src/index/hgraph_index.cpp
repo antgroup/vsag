@@ -82,6 +82,16 @@ HGraphIndex::Init() {
     this->pool_ =
         std::make_shared<hnswlib::VisitedListPool>(this->bottom_graph_->MaxCapacity(), allocator_);
 
+    if (this->index_param_.contains(BUILD_PARAMS_KEY)) {
+        auto& build_params = this->index_param_[BUILD_PARAMS_KEY];
+        if (build_params.contains(BUILD_EF_CONSTRUCTION)) {
+            this->ef_construct_ = build_params[BUILD_EF_CONSTRUCTION];
+        }
+        if (build_params.contains(BUILD_THREAD_COUNT)) {
+            this->build_thread_count_ = build_params[BUILD_THREAD_COUNT];
+        }
+    }
+
     if (this->build_thread_count_ > 1) {
         this->build_pool_ = std::make_unique<progschj::ThreadPool>(this->build_thread_count_);
     }
