@@ -102,7 +102,7 @@ public:
 
     virtual void
     SetMaximumDegree(uint32_t maximum_degree) {
-        this->max_capacity_ = maximum_degree;
+        this->maximum_degree_ = maximum_degree;
     }
 
     virtual void
