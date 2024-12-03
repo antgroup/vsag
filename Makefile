@@ -22,7 +22,7 @@ help:                    ## Show the help.
 
 .PHONY: debug
 debug:                   ## Build vsag with debug options.
-	cmake ${VSAG_CMAKE_ARGS} -DCMAKE_BUILD_TYPE=Debug -DENABLE_CCACHE=ON
+	cmake ${VSAG_CMAKE_ARGS} -DCMAKE_BUILD_TYPE=Debug -DENABLE_CCACHE=ON -DENABLE_ASAN=OFF
 	cmake --build build --parallel ${COMPILE_JOBS}
 
 .PHONY: release
@@ -57,6 +57,11 @@ test:                    ## Build and run unit tests.
 	./build/tests/functests -d yes ${UT_FILTER} --allow-running-no-tests ${UT_SHARD}
 	./build/mockimpl/tests_mockimpl -d yes ${UT_FILTER} --allow-running-no-tests ${UT_SHARD}
 
+.PHONY: test_parallel
+test_parallel: debug
+	@./scripts/test_parallel_bg.sh
+	./build/mockimpl/tests_mockimpl -d yes ${UT_FILTER} --allow-running-no-tests ${UT_SHARD}
+
 .PHONY: asan
 asan:                    ## Build with AddressSanitizer option.
 	cmake ${VSAG_CMAKE_ARGS} -DCMAKE_BUILD_TYPE=Debug -DENABLE_ASAN=ON -DENABLE_CCACHE=ON
@@ -64,7 +69,7 @@ asan:                    ## Build with AddressSanitizer option.
 
 .PHONY: test_asan_parallel
 test_asan_parallel: asan ## Run unit tests parallel with AddressSanitizer option.
-	@./scripts/test_asan_bg.sh
+	@./scripts/test_parallel_bg.sh
 	./build/mockimpl/tests_mockimpl -d yes ${UT_FILTER} --allow-running-no-tests ${UT_SHARD}
 
 .PHONY: test_asan
