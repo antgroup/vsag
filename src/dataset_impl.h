@@ -30,7 +30,8 @@
 namespace vsag {
 
 class DatasetImpl : public Dataset {
-    using var = std::variant<int64_t, const float*, const int8_t*, const int64_t*>;
+    using var =
+        std::variant<int64_t, const float*, const int8_t*, const int64_t*, const std::string*>;
 
 public:
     DatasetImpl() = default;
@@ -159,6 +160,20 @@ public:
             return std::get<const float*>(iter->second);
         }
 
+        return nullptr;
+    }
+
+    DatasetPtr
+    Paths(const std::string* paths) override {
+        this->data_[DATASET_PATHS] = paths;
+        return shared_from_this();
+    }
+
+    const std::string*
+    GetPaths() const override {
+        if (auto iter = this->data_.find(DATASET_PATHS); iter != this->data_.end()) {
+            return std::get<const std::string*>(iter->second);
+        }
         return nullptr;
     }
 

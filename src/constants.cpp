@@ -28,6 +28,7 @@ const char* const IDS = "ids";
 const char* const DISTS = "dists";
 const char* const FLOAT32_VECTORS = "f32_vectors";
 const char* const INT8_VECTORS = "i8_vectors";
+const char* const DATASET_PATHS = "paths";
 const char* const HNSW_DATA = "hnsw_data";
 const char* const CONJUGATE_GRAPH_DATA = "conjugate_graph_data";
 const char* const DISKANN_PQ = "diskann_qp";
