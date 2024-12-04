@@ -47,7 +47,8 @@ HGraphIndex::HGraphIndex(const JsonType& index_param,
       label_lookup_(common_param.allocator_),
       label_op_mutex_(MAX_LABEL_OPERATION_LOCKS, common_param_.allocator_),
       neighbors_mutex_(0, common_param_.allocator_),
-      route_graphs_(common_param.allocator_) {
+      route_graphs_(common_param.allocator_),
+      labels_(common_param.allocator_) {
     this->dim_ = common_param.dim_;
     this->metric_ = common_param.metric_;
     this->allocator_ = common_param.allocator_;
@@ -79,8 +80,7 @@ HGraphIndex::Init() {
 
     mult_ = 1 / log(1.0 * static_cast<double>(this->bottom_graph_->MaximumDegree()));
 
-    this->pool_ =
-        std::make_shared<hnswlib::VisitedListPool>(this->bottom_graph_->MaxCapacity(), allocator_);
+    resize(bottom_graph_->max_capacity_);
 
     if (this->index_param_.contains(BUILD_PARAMS_KEY)) {
         auto& build_params = this->index_param_[BUILD_PARAMS_KEY];
@@ -257,6 +257,7 @@ HGraphIndex::hnsw_add(const DatasetPtr& data) {
             {
                 std::unique_lock<std::shared_mutex> lock(this->label_lookup_mutex_);
                 this->label_lookup_[label] = inner_id;
+                this->labels_[inner_id] = label;
             }
 
             std::unique_lock<std::mutex> add_lock(add_mutex);
@@ -520,6 +521,9 @@ HGraphIndex::serialize_basic_info(StreamWriter& writer) const {
     StreamWriter::WriteObj(writer, this->entry_point_id_);
     StreamWriter::WriteObj(writer, this->ef_construct_);
     StreamWriter::WriteObj(writer, this->mult_);
+    StreamWriter::WriteObj(writer, this->max_capacity_);
+    StreamWriter::WriteVector(writer, this->labels_);
+
     uint64_t size = this->label_lookup_.size();
     StreamWriter::WriteObj(writer, size);
     for (auto& pair : this->label_lookup_) {
@@ -558,8 +562,7 @@ HGraphIndex::deserialize(StreamReader& reader) {
     for (uint64_t i = 0; i < this->max_level_; ++i) {
         this->route_graphs_[i]->Deserialize(reader);
     }
-    vsag::Vector<std::shared_mutex>(this->GetNumElements(), allocator_)
-        .swap(this->neighbors_mutex_);
+    resize(max_capacity_);
 }
 
 void
@@ -571,6 +574,8 @@ HGraphIndex::deserialize_basic_info(StreamReader& reader) {
     StreamReader::ReadObj(reader, this->entry_point_id_);
     StreamReader::ReadObj(reader, this->ef_construct_);
     StreamReader::ReadObj(reader, this->mult_);
+    StreamReader::ReadObj(reader, this->max_capacity_);
+    StreamReader::ReadVector(reader, this->labels_);
 
     uint64_t size;
     StreamReader::ReadObj(reader, size);
@@ -704,11 +709,12 @@ HGraphIndex::add_one_point(const float* data, int level, InnerIdType inner_id) {
 
 void
 HGraphIndex::resize(uint64_t new_size) {
-    auto cur_size = this->bottom_graph_->MaxCapacity();
-    if (new_size > cur_size) {
+    auto cur_size = this->neighbors_mutex_.size();
+    if (cur_size < new_size) {
         vsag::Vector<std::shared_mutex>(new_size, allocator_).swap(this->neighbors_mutex_);
         pool_ = std::make_shared<hnswlib::VisitedListPool>(new_size, allocator_);
-        this->bottom_graph_->SetMaxCapacity(new_size);
+        labels_.resize(new_size);
+        this->max_capacity_ = new_size;
     }
 }
 

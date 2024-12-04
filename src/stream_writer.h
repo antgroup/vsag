@@ -36,18 +36,18 @@ public:
 
     template <typename T>
     static void
-    WriteVector(StreamWriter& writer, std::vector<T>& val) {
+    WriteVector(StreamWriter& writer, const std::vector<T>& val) {
         uint64_t size = val.size();
         WriteObj(writer, size);
-        writer.Write(reinterpret_cast<char*>(val.data()), size * sizeof(T));
+        writer.Write(reinterpret_cast<const char*>(val.data()), size * sizeof(T));
     }
 
     template <typename T>
     static void
-    WriteVector(StreamWriter& writer, vsag::Vector<T>& val) {
+    WriteVector(StreamWriter& writer, const vsag::Vector<T>& val) {
         uint64_t size = val.size();
         WriteObj(writer, size);
-        writer.Write(reinterpret_cast<char*>(val.data()), size * sizeof(T));
+        writer.Write(reinterpret_cast<const char*>(val.data()), size * sizeof(T));
     }
 };
 
