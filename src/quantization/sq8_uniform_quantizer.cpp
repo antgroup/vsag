@@ -13,11 +13,4 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#pragma once
-
-#include "fp32_quantizer.h"
-#include "quantizer.h"
-#include "sq4_quantizer.h"
-#include "sq4_uniform_quantizer.h"
-#include "sq8_quantizer.h"
 #include "sq8_uniform_quantizer.h"
