@@ -47,6 +47,9 @@ public:
                  bool need_normalize = false,
                  SQTrainMode mode = SQTrainMode::CLASSIC);
 
+    void
+    Encode(const float* origin_data, uint8_t*);
+
     inline void
     SetSampleCount(uint64_t sample) {
         this->max_sample_count_ = sample;
