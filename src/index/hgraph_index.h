@@ -196,15 +196,12 @@ private:
                const std::string& parameters,
                const std::function<bool(int64_t)>& filter) const;
 
-    // TODO(LHT): implement
     tl::expected<DatasetPtr, Error>
     range_search(const DatasetPtr& query,
                  float radius,
                  const std::string& parameters,
                  BaseFilterFunctor* filter_ptr,
-                 int64_t limited_size) const {
-        return Dataset::Make();
-    };
+                 int64_t limited_size) const;
 
     tl::expected<void, Error>
     serialize(std::ostream& out_stream) const;
@@ -246,13 +243,12 @@ private:
     GraphInterfacePtr
     generate_one_route_graph();
 
+    template <InnerSearchMode mode = InnerSearchMode::KNN_SEARCH_MODE>
     MaxHeap
     search_one_graph(const float* query,
                      const GraphInterfacePtr& graph,
                      const FlattenInterfacePtr& codes,
-                     InnerIdType ep,
-                     uint64_t ef,
-                     BaseFilterFunctor* is_id_allowed = nullptr) const;
+                     InnerSearchParam& inner_search_param) const;
 
     void
     select_edges_by_heuristic(MaxHeap& edges,
