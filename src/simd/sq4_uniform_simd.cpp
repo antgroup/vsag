@@ -20,7 +20,7 @@
 namespace vsag {
 
 static SQ4UniformComputeCodesType
-SetSQ4UniformComputeCodesIP() {
+GetSQ4UniformComputeCodesIP() {
     if (SimdStatus::SupportAVX512()) {
 #if defined(ENABLE_AVX512)
         return avx512::SQ4UniformComputeCodesIP;
@@ -36,5 +36,5 @@ SetSQ4UniformComputeCodesIP() {
     }
     return generic::SQ4UniformComputeCodesIP;
 }
-SQ4UniformComputeCodesType SQ4UniformComputeCodesIP = SetSQ4UniformComputeCodesIP();
+SQ4UniformComputeCodesType SQ4UniformComputeCodesIP = GetSQ4UniformComputeCodesIP();
 }  // namespace vsag
