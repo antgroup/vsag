@@ -20,7 +20,7 @@
 namespace vsag {
 
 static SQ4ComputeType
-SetSQ4ComputeIP() {
+GetSQ4ComputeIP() {
     if (SimdStatus::SupportAVX512()) {
 #if defined(ENABLE_AVX512)
         return avx512::SQ4ComputeIP;
@@ -36,10 +36,10 @@ SetSQ4ComputeIP() {
     }
     return generic::SQ4ComputeIP;
 }
-SQ4ComputeType SQ4ComputeIP = SetSQ4ComputeIP();
+SQ4ComputeType SQ4ComputeIP = GetSQ4ComputeIP();
 
 static SQ4ComputeType
-SetSQ4ComputeL2Sqr() {
+GetSQ4ComputeL2Sqr() {
     if (SimdStatus::SupportAVX512()) {
 #if defined(ENABLE_AVX512)
         return avx512::SQ4ComputeL2Sqr;
@@ -55,10 +55,10 @@ SetSQ4ComputeL2Sqr() {
     }
     return generic::SQ4ComputeL2Sqr;
 }
-SQ4ComputeType SQ4ComputeL2Sqr = SetSQ4ComputeL2Sqr();
+SQ4ComputeType SQ4ComputeL2Sqr = GetSQ4ComputeL2Sqr();
 
 static SQ4ComputeCodesType
-SetSQ4ComputeCodesIP() {
+GetSQ4ComputeCodesIP() {
     if (SimdStatus::SupportAVX512()) {
 #if defined(ENABLE_AVX512)
         return avx512::SQ4ComputeCodesIP;
@@ -74,10 +74,10 @@ SetSQ4ComputeCodesIP() {
     }
     return generic::SQ4ComputeCodesIP;
 }
-SQ4ComputeCodesType SQ4ComputeCodesIP = SetSQ4ComputeCodesIP();
+SQ4ComputeCodesType SQ4ComputeCodesIP = GetSQ4ComputeCodesIP();
 
 static SQ4ComputeCodesType
-SetSQ4ComputeCodesL2Sqr() {
+GetSQ4ComputeCodesL2Sqr() {
     if (SimdStatus::SupportAVX512()) {
 #if defined(ENABLE_AVX512)
         return avx512::SQ4ComputeCodesL2Sqr;
@@ -93,5 +93,5 @@ SetSQ4ComputeCodesL2Sqr() {
     }
     return generic::SQ4ComputeCodesL2Sqr;
 }
-SQ4ComputeCodesType SQ4ComputeCodesL2Sqr = SetSQ4ComputeCodesL2Sqr();
+SQ4ComputeCodesType SQ4ComputeCodesL2Sqr = GetSQ4ComputeCodesL2Sqr();
 }  // namespace vsag

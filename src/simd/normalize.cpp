@@ -20,7 +20,7 @@
 namespace vsag {
 
 static NormalizeType
-SetNormalize() {
+GetNormalize() {
     if (SimdStatus::SupportAVX512()) {
 #if defined(ENABLE_AVX512)
         return avx512::Normalize;
@@ -36,10 +36,10 @@ SetNormalize() {
     }
     return generic::Normalize;
 }
-NormalizeType Normalize = SetNormalize();
+NormalizeType Normalize = GetNormalize();
 
 static DivScalarType
-SetDivScalar() {
+GetDivScalar() {
     if (SimdStatus::SupportAVX512()) {
 #if defined(ENABLE_AVX512)
         return avx512::DivScalar;
@@ -55,6 +55,6 @@ SetDivScalar() {
     }
     return generic::DivScalar;
 }
-DivScalarType DivScalar = SetDivScalar();
+DivScalarType DivScalar = GetDivScalar();
 
 }  // namespace vsag

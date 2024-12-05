@@ -20,7 +20,7 @@
 namespace vsag {
 
 static FP32ComputeType
-SetFP32ComputeIP() {
+GetFP32ComputeIP() {
     if (SimdStatus::SupportAVX512()) {
 #if defined(ENABLE_AVX512)
         return avx512::FP32ComputeIP;
@@ -36,10 +36,10 @@ SetFP32ComputeIP() {
     }
     return generic::FP32ComputeIP;
 }
-FP32ComputeType FP32ComputeIP = SetFP32ComputeIP();
+FP32ComputeType FP32ComputeIP = GetFP32ComputeIP();
 
 static FP32ComputeType
-SetFP32ComputeL2Sqr() {
+GetFP32ComputeL2Sqr() {
     if (SimdStatus::SupportAVX512()) {
 #if defined(ENABLE_AVX512)
         return avx512::FP32ComputeL2Sqr;
@@ -55,5 +55,5 @@ SetFP32ComputeL2Sqr() {
     }
     return generic::FP32ComputeL2Sqr;
 }
-FP32ComputeType FP32ComputeL2Sqr = SetFP32ComputeL2Sqr();
+FP32ComputeType FP32ComputeL2Sqr = GetFP32ComputeL2Sqr();
 }  // namespace vsag
