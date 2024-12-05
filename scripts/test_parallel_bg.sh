@@ -3,30 +3,28 @@
 pids=()
 exit_codes=()
 logger_files=()
-parallel_tags="[diskann] [hnsw]"
+parallel_tags="[diskann] [hnsw] [hgraph]"
 othertag=""
 
+rm -rf ./log
 mkdir ./log
 
-./build/tests/unittests -d yes ${UT_FILTER} --allow-running-no-tests &> "./log/unittest.log" &
+./build/tests/unittests -d yes ${UT_FILTER} -a --order rand --allow-running-no-tests -o "./log/unittest.log" &
 pids+=($!)
-tail -f "./log/unittest.log" &
 logger_files+=("./log/unittest.log")
 
 for tag in ${parallel_tags}
 do
   othertag="~"${tag}${othertag}
-  ./build/tests/functests -d yes ${UT_FILTER} --allow-running-no-tests &> ./log/${tag}.log &
+  ./build/tests/functests -d yes ${UT_FILTER} -a --order rand --allow-running-no-tests -o ./log/${tag}.log &
   pids+=($!)
   logname="./log/"${tag}".log"
   logger_files+=($logname)
-  tail -f ./log/${tag}.log &
 done
 
-./build/tests/functests -d yes ${UT_FILTER} --allow-running-no-tests ${othertag} &> ./log/other.log &
+./build/tests/functests -d yes ${UT_FILTER} -a --order rand --allow-running-no-tests ${othertag} -o ./log/other.log &
 pids+=($!)
 logger_files+=("./log/other.log")
-tail -f "./log/other.log" &
 
 for pid in "${pids[@]}"
 do
