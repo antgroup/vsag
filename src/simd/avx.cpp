@@ -209,7 +209,7 @@ FP32ComputeIP(const float* query, const float* codes, uint64_t dim) {
     ip += sse::FP32ComputeIP(query + n * 8, codes + n * 8, dim - n * 8);
     return ip;
 #else
-    return vsag::Generic::FP32ComputeIP(query, codes, dim);
+    return vsag::generic::FP32ComputeIP(query, codes, dim);
 #endif
 }
 
@@ -235,7 +235,7 @@ FP32ComputeL2Sqr(const float* query, const float* codes, uint64_t dim) {
     l2 += sse::FP32ComputeL2Sqr(query + n * 8, codes + n * 8, dim - n * 8);
     return l2;
 #else
-    return vsag::Generic::FP32ComputeL2Sqr(query, codes, dim);
+    return vsag::generic::FP32ComputeL2Sqr(query, codes, dim);
 #endif
 }
 
@@ -275,7 +275,7 @@ SQ8ComputeIP(const float* query,
     finalResult += sse::SQ8ComputeIP(query + i, codes + i, lowerBound + i, diff + i, dim - i);
     return finalResult;
 #else
-    return Generic::SQ8ComputeIP(query, codes, lowerBound, diff, dim);
+    return generic::SQ8ComputeIP(query, codes, lowerBound, diff, dim);
 #endif
 }
 
@@ -320,7 +320,7 @@ SQ8ComputeL2Sqr(const float* query,
     result += sse::SQ8ComputeL2Sqr(query + i, codes + i, lowerBound + i, diff + i, dim - i);
     return result;
 #else
-    return vsag::Generic::SQ8ComputeL2Sqr(query, codes, lowerBound, diff, dim);  // TODO
+    return vsag::generic::SQ8ComputeL2Sqr(query, codes, lowerBound, diff, dim);  // TODO
 #endif
 }
 
@@ -364,7 +364,7 @@ SQ8ComputeCodesIP(const uint8_t* codes1,
     result += sse::SQ8ComputeCodesIP(codes1 + i, codes2 + i, lowerBound + i, diff + i, dim - i);
     return result;
 #else
-    return Generic::SQ8ComputeCodesIP(codes1, codes2, lowerBound, diff, dim);
+    return generic::SQ8ComputeCodesIP(codes1, codes2, lowerBound, diff, dim);
 #endif
 }
 
@@ -407,7 +407,7 @@ SQ8ComputeCodesL2Sqr(const uint8_t* codes1,
     result += sse::SQ8ComputeCodesL2Sqr(codes1 + i, codes2 + i, lowerBound + i, diff + i, dim - i);
     return result;
 #else
-    return Generic::SQ8ComputeCodesIP(codes1, codes2, lowerBound, diff, dim);
+    return generic::SQ8ComputeCodesL2Sqr(codes1, codes2, lowerBound, diff, dim);
 #endif
 }
 
@@ -511,7 +511,7 @@ SQ8UniformComputeCodesIP(const uint8_t* codes1, const uint8_t* codes2, uint64_t 
     result += static_cast<int32_t>(sse::SQ8UniformComputeCodesIP(codes1 + d, codes2 + d, dim - d));
     return static_cast<float>(result);
 #else
-    return sse::S8UniformComputeCodesIP(codes1, codes2, dim);
+    return sse::SQ8UniformComputeCodesIP(codes1, codes2, dim);
 #endif
 }
 

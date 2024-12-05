@@ -23,26 +23,20 @@ float
 SQ4UniformComputeCodesIP(const uint8_t* codes1, const uint8_t* codes2, uint64_t dim);
 }  // namespace generic
 
-#if defined(ENABLE_SSE)
 namespace sse {
 float
 SQ4UniformComputeCodesIP(const uint8_t* codes1, const uint8_t* codes2, uint64_t dim);
 }  // namespace sse
-#endif
 
-#if defined(ENABLE_AVX2)
 namespace avx2 {
 float
 SQ4UniformComputeCodesIP(const uint8_t* codes1, const uint8_t* codes2, uint64_t dim);
 }  // namespace avx2
-#endif
 
-#if defined(ENABLE_AVX512)
 namespace avx512 {
 float
 SQ4UniformComputeCodesIP(const uint8_t* codes1, const uint8_t* codes2, uint64_t dim);
 }  // namespace avx512
-#endif
 
 using SQ4UniformComputeCodesType = float (*)(const uint8_t* codes1,
                                              const uint8_t* codes2,

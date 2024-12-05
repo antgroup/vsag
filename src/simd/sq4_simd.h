@@ -45,7 +45,6 @@ SQ4ComputeCodesL2Sqr(const uint8_t* codes1,
                      uint64_t dim);
 }  // namespace generic
 
-#if defined(ENABLE_SSE)
 namespace sse {
 float
 SQ4ComputeIP(const float* query,
@@ -72,9 +71,7 @@ SQ4ComputeCodesL2Sqr(const uint8_t* codes1,
                      const float* diff,
                      uint64_t dim);
 }  // namespace sse
-#endif
 
-#if defined(ENABLE_AVX2)
 namespace avx2 {
 float
 SQ4ComputeIP(const float* query,
@@ -101,9 +98,7 @@ SQ4ComputeCodesL2Sqr(const uint8_t* codes1,
                      const float* diff,
                      uint64_t dim);
 }  // namespace avx2
-#endif
 
-#if defined(ENABLE_AVX512)
 namespace avx512 {
 float
 SQ4ComputeIP(const float* query,
@@ -130,7 +125,6 @@ SQ4ComputeCodesL2Sqr(const uint8_t* codes1,
                      const float* diff,
                      uint64_t dim);
 }  // namespace avx512
-#endif
 
 using SQ4ComputeType = float (*)(const float* query,
                                  const uint8_t* codes,

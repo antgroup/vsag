@@ -6,6 +6,9 @@ set (SIMD_SRCS
         sq4_simd.cpp
         sq4_uniform_simd.cpp
         sq8_uniform_simd.cpp
+        sse.cpp
+        avx.cpp
+        avx512.cpp
 )
 if (DIST_CONTAINS_SSE)
     set (SIMD_SRCS ${SIMD_SRCS} sse.cpp)
@@ -18,11 +21,13 @@ if (DIST_CONTAINS_AVX)
     set (SIMD_SRCS ${SIMD_SRCS} avx.cpp)
     set_source_files_properties (avx.cpp PROPERTIES COMPILE_FLAGS "-mavx")
 endif ()
-if (DIST_CONTAINS_AVX2)
-    set_source_files_properties (avx.cpp PROPERTIES COMPILE_FLAGS "-mavx2 -mfma")
-endif ()
+# FIXME(LHT): cause illegal instruction on platform which has avx only
+#if (DIST_CONTAINS_AVX2)
+#    set_source_files_properties (avx.cpp PROPERTIES COMPILE_FLAGS "-mavx2 -mfma")
+#endif ()
 if (DIST_CONTAINS_AVX512)
-    set (SIMD_SRCS ${SIMD_SRCS} avx512.cpp)
+    set (SIMD_SRCS ${SIMD_SRCS} avx512.cpp
+            normalize.cpp)
     set_source_files_properties (
             avx512.cpp
             PROPERTIES
@@ -50,7 +55,7 @@ endmacro ()
 
 simd_add_definitions (DIST_CONTAINS_SSE -DENABLE_SSE=1)
 simd_add_definitions (DIST_CONTAINS_AVX -DENABLE_AVX=1)
-simd_add_definitions (DIST_CONTAINS_AVX2 -DENABLE_AVX2=1)
+#simd_add_definitions (DIST_CONTAINS_AVX2 -DENABLE_AVX2=1)
 simd_add_definitions (DIST_CONTAINS_AVX512 -DENABLE_AVX512=1)
 
 target_link_libraries (simd PRIVATE cpuinfo)
