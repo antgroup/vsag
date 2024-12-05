@@ -18,6 +18,7 @@
 #include "catch2/benchmark/catch_benchmark.hpp"
 #include "catch2/catch_test_macros.hpp"
 #include "fixtures.h"
+#include "simd_status.h"
 
 using namespace vsag;
 
@@ -33,19 +34,25 @@ namespace avx2 = sse;
 namespace avx512 = avx2;
 #endif
 
-#define TEST_ACCURACY(Func)                                                                        \
-    {                                                                                              \
-        auto gt = generic::Func(                                                                   \
-            vec1.data() + i * dim, vec2.data() + i * dim, lb.data(), diff.data(), dim);            \
-        auto sse =                                                                                 \
-            sse::Func(vec1.data() + i * dim, vec2.data() + i * dim, lb.data(), diff.data(), dim);  \
-        auto avx2 =                                                                                \
-            avx2::Func(vec1.data() + i * dim, vec2.data() + i * dim, lb.data(), diff.data(), dim); \
-        auto avx512 = avx512::Func(                                                                \
-            vec1.data() + i * dim, vec2.data() + i * dim, lb.data(), diff.data(), dim);            \
-        REQUIRE(fixtures::dist_t(gt) == fixtures::dist_t(sse));                                    \
-        REQUIRE(fixtures::dist_t(gt) == fixtures::dist_t(avx2));                                   \
-        REQUIRE(fixtures::dist_t(gt) == fixtures::dist_t(avx512));                                 \
+#define TEST_ACCURACY(Func)                                                                 \
+    {                                                                                       \
+        auto gt = generic::Func(                                                            \
+            vec1.data() + i * dim, vec2.data() + i * dim, lb.data(), diff.data(), dim);     \
+        if (SimdStatus::SupportSSE()) {                                                     \
+            auto sse = sse::Func(                                                           \
+                vec1.data() + i * dim, vec2.data() + i * dim, lb.data(), diff.data(), dim); \
+            REQUIRE(fixtures::dist_t(gt) == fixtures::dist_t(sse));                         \
+        }                                                                                   \
+        if (SimdStatus::SupportAVX2()) {                                                    \
+            auto avx2 = avx2::Func(                                                         \
+                vec1.data() + i * dim, vec2.data() + i * dim, lb.data(), diff.data(), dim); \
+            REQUIRE(fixtures::dist_t(gt) == fixtures::dist_t(avx2));                        \
+        }                                                                                   \
+        if (SimdStatus::SupportAVX512()) {                                                  \
+            auto avx512 = avx512::Func(                                                     \
+                vec1.data() + i * dim, vec2.data() + i * dim, lb.data(), diff.data(), dim); \
+            REQUIRE(fixtures::dist_t(gt) == fixtures::dist_t(avx512));                      \
+        }                                                                                   \
     }
 
 TEST_CASE("SQ8 SIMD Compute Codes", "[SQ8 SIMD]") {

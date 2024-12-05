@@ -22,10 +22,11 @@
 #include "cpuinfo.h"
 #include "fixtures.h"
 #include "simd.h"
+#include "simd_status.h"
 
 TEST_CASE("avx512 int8", "[ut][simd][avx]") {
 #if defined(ENABLE_AVX512)
-    if (cpuinfo_has_x86_sse()) {
+    if (vsag::SimdStatus::SupportAVX512()) {
         auto common_dims = fixtures::get_common_used_dims();
         for (size_t dim : common_dims) {
             auto vectors = fixtures::generate_vectors(2, dim);

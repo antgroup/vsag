@@ -27,32 +27,26 @@ float
 FP32ComputeL2Sqr(const float* query, const float* codes, uint64_t dim);
 }  // namespace generic
 
-#if defined(ENABLE_SSE)
 namespace sse {
 float
 FP32ComputeIP(const float* query, const float* codes, uint64_t dim);
 float
 FP32ComputeL2Sqr(const float* query, const float* codes, uint64_t dim);
 }  // namespace sse
-#endif
 
-#if defined(ENABLE_AVX2)
 namespace avx2 {
 float
 FP32ComputeIP(const float* query, const float* codes, uint64_t dim);
 float
 FP32ComputeL2Sqr(const float* query, const float* codes, uint64_t dim);
 }  // namespace avx2
-#endif
 
-#if defined(ENABLE_AVX512)
 namespace avx512 {
 float
 FP32ComputeIP(const float* query, const float* codes, uint64_t dim);
 float
 FP32ComputeL2Sqr(const float* query, const float* codes, uint64_t dim);
 }  // namespace avx512
-#endif
 
 using FP32ComputeType = float (*)(const float* query, const float* codes, uint64_t dim);
 extern FP32ComputeType FP32ComputeIP;
