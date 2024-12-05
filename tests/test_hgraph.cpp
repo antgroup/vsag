@@ -21,7 +21,6 @@
 
 #include "simd/simd.h"
 #include "test_index.h"
-#include "vsag/vsag.h"
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::TestIndex,
                              "HGraph Build & ContinueAdd Test",
