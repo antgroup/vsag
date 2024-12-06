@@ -2137,7 +2137,7 @@ int64_t PQFlashIndex<T, LabelT>::cached_beam_search_async(const T *query, const 
     return result_size;
 }
 
-const static float THRESHOLD_ERROR = 1e-6;
+const static float THRESHOLD_ERROR = 2e-6;
 
 // range search returns results of all neighbors within distance of range.
 // indices and distances need to be pre-allocated of size l_search and the

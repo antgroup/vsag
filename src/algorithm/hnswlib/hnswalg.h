@@ -52,7 +52,7 @@ struct CompareByFirst {
 using MaxHeap = std::priority_queue<std::pair<float, InnerIdType>,
                                     vsag::Vector<std::pair<float, InnerIdType>>,
                                     CompareByFirst>;
-const static float THRESHOLD_ERROR = 1e-6;
+const static float THRESHOLD_ERROR = 2e-6;
 
 class HierarchicalNSW : public AlgorithmInterface<float> {
 private:
