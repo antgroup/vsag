@@ -159,7 +159,7 @@ HierarchicalNSW::normalizeVector(const void*& data_point,
 
 float
 HierarchicalNSW::getDistanceByLabel(LabelType label, const void* data_point) {
-    std::unique_lock<std::mutex> lock_table(label_lookup_lock_);
+    std::shared_lock lock_table(label_lookup_lock_);
 
     auto search = label_lookup_.find(label);
     if (search == label_lookup_.end()) {
@@ -175,10 +175,37 @@ HierarchicalNSW::getDistanceByLabel(LabelType label, const void* data_point) {
 
 bool
 HierarchicalNSW::isValidLabel(LabelType label) {
-    std::unique_lock<std::mutex> lock_table(label_lookup_lock_);
+    std::shared_lock lock_table(label_lookup_lock_);
     bool is_valid = (label_lookup_.find(label) != label_lookup_.end());
     lock_table.unlock();
     return is_valid;
+}
+
+void
+HierarchicalNSW::setBatchNeigohbors(InnerIdType internal_id,
+                                    int level,
+                                    const InnerIdType* neighbors,
+                                    size_t neigbor_count) {
+    linklistsizeint* ll_cur = getLinklistAtLevel(internal_id, level);
+    std::unique_lock lock(link_list_locks_[internal_id]);
+    for (int i = 1; i <= neigbor_count; ++i) {
+        ll_cur[i] = neighbors[i - 1];
+    }
+    setListCount(ll_cur, neigbor_count);
+}
+
+void
+HierarchicalNSW::appendNeigohbor(InnerIdType internal_id,
+                                 int level,
+                                 InnerIdType neighbor,
+                                 size_t max_degree) {
+    linklistsizeint* ll_cur = getLinklistAtLevel(internal_id, level);
+    std::unique_lock lock(link_list_locks_[internal_id]);
+    size_t neigbor_count = getListCount(ll_cur) + 1;
+    if (neigbor_count <= max_degree) {
+        ll_cur[neigbor_count] = neighbor;
+        setListCount(ll_cur, neigbor_count);
+    }
 }
 
 void
@@ -186,36 +213,28 @@ HierarchicalNSW::updateConnections(InnerIdType internal_id,
                                    const vsag::Vector<InnerIdType>& cand_neighbors,
                                    int level,
                                    bool is_update) {
-    linklistsizeint* ll_cur;
-    if (level == 0)
-        ll_cur = getLinklist0(internal_id);
-    else
-        ll_cur = getLinklist(internal_id, level);
+    auto link_data = getLinklistAtLevelWithLock(internal_id, level);
+    linklistsizeint* ll_cur = (linklistsizeint*)link_data.get();
 
     auto cur_size = getListCount(ll_cur);
     auto* data = (InnerIdType*)(ll_cur + 1);
 
-    if (is_update && use_reversed_edges_) {
-        for (int i = 0; i < cur_size; ++i) {
-            auto id = data[i];
+    if (use_reversed_edges_) {
+        if (is_update) {
+            for (int i = 0; i < cur_size; ++i) {
+                auto id = data[i];
+                auto& in_edges = getEdges(id, level);
+                // remove the node that point to the current node
+                in_edges.erase(internal_id);
+            }
+        }
+        for (size_t i = 0; i < cand_neighbors.size(); i++) {
+            auto id = cand_neighbors[i];
             auto& in_edges = getEdges(id, level);
-            // remove the node that point to the current node
-            std::unique_lock<std::recursive_mutex> lock(link_list_locks_[i]);
-            in_edges.erase(internal_id);
+            in_edges.insert(internal_id);
         }
     }
-
-    setListCount(ll_cur, cand_neighbors.size());
-    for (size_t i = 0; i < cand_neighbors.size(); i++) {
-        auto id = cand_neighbors[i];
-        data[i] = cand_neighbors[i];
-        if (not use_reversed_edges_) {
-            continue;
-        }
-        std::unique_lock<std::recursive_mutex> lock(link_list_locks_[id]);
-        auto& in_edges = getEdges(id, level);
-        in_edges.insert(internal_id);
-    }
+    setBatchNeigohbors(internal_id, level, cand_neighbors.data(), cand_neighbors.size());
 }
 
 bool
@@ -224,12 +243,8 @@ HierarchicalNSW::checkReverseConnection() {
     uint64_t reversed_edge_count = 0;
     for (int internal_id = 0; internal_id < cur_element_count_; ++internal_id) {
         for (int level = 0; level <= element_levels_[internal_id]; ++level) {
-            unsigned int* data;
-            if (level == 0) {
-                data = getLinklist0(internal_id);
-            } else {
-                data = getLinklist(internal_id, level);
-            }
+            auto link_data = getLinklistAtLevelWithLock(internal_id, level);
+            unsigned int* data = (unsigned int*)link_data.get();
             auto link_list = data + 1;
             auto size = getListCount(data);
             edge_count += size;
@@ -281,7 +296,7 @@ HierarchicalNSW::getRandomLevel(double reverse_size) {
 }
 
 MaxHeap
-HierarchicalNSW::searchBaseLayer(InnerIdType ep_id, const void* data_point, int layer) {
+HierarchicalNSW::searchBaseLayer(InnerIdType ep_id, const void* data_point, int layer) const {
     VisitedListPtr vl = visited_list_pool_->getFreeVisitedList();
     vl_type* visited_array = vl->mass;
     vl_type visited_array_tag = vl->curV;
@@ -310,15 +325,10 @@ HierarchicalNSW::searchBaseLayer(InnerIdType ep_id, const void* data_point, int 
 
         InnerIdType curNodeNum = curr_el_pair.second;
 
-        std::unique_lock<std::recursive_mutex> lock(link_list_locks_[curNodeNum]);
-
-        int* data;  // = (int *)(linkList0_ + curNodeNum * size_links_per_element0_);
-        if (layer == 0) {
-            data = (int*)getLinklist0(curNodeNum);
-        } else {
-            data = (int*)getLinklist(curNodeNum, layer);
-            //                    data = (int *) (link_lists_[curNodeNum] + (layer - 1) * size_links_per_element_);
-        }
+        auto link_data = getLinklistAtLevelWithLock(curNodeNum, layer);
+        int* data =
+            (int*)
+                link_data.get();  // = (int *)(linkList0_ + curNodeNum * size_links_per_element0_);
         size_t size = getListCount((linklistsizeint*)data);
         auto* datal = (InnerIdType*)(data + 1);
 #ifdef USE_SSE
@@ -400,7 +410,8 @@ HierarchicalNSW::searchBaseLayerST(InnerIdType ep_id,
         candidate_set.pop();
 
         InnerIdType current_node_id = current_node_pair.second;
-        int* data = (int*)getLinklist0(current_node_id);
+        auto link_data = getLinklistAtLevelWithLock(current_node_id, 0);
+        int* data = (int*)link_data.get();
         size_t size = getListCount((linklistsizeint*)data);
         //                bool cur_node_deleted = isMarkedDeleted(current_node_id);
         if (collect_metrics) {
@@ -492,7 +503,8 @@ HierarchicalNSW::searchBaseLayerST(InnerIdType ep_id,
         candidate_set.pop();
 
         InnerIdType current_node_id = current_node_pair.second;
-        int* data = (int*)getLinklist0(current_node_id);
+        auto link_data = getLinklistAtLevelWithLock(current_node_id, 0);
+        int* data = (int*)link_data.get();
         size_t size = getListCount((linklistsizeint*)data);
         //                bool cur_node_deleted = isMarkedDeleted(current_node_id);
         if (collect_metrics) {
@@ -610,24 +622,11 @@ HierarchicalNSW::mutuallyConnectNewElement(InnerIdType cur_c,
 
     InnerIdType next_closest_entry_point = selectedNeighbors.back();
 
-    {
-        // lock only during the update
-        // because during the addition the lock for cur_c is already acquired
-        std::unique_lock<std::recursive_mutex> lock(link_list_locks_[cur_c], std::defer_lock);
-        if (isUpdate) {
-            lock.lock();
-        }
-        updateConnections(cur_c, selectedNeighbors, level, isUpdate);
-    }
+    updateConnections(cur_c, selectedNeighbors, level, isUpdate);
 
     for (unsigned int selectedNeighbor : selectedNeighbors) {
-        std::unique_lock<std::recursive_mutex> lock(link_list_locks_[selectedNeighbor]);
-
-        linklistsizeint* ll_other;
-        if (level == 0)
-            ll_other = getLinklist0(selectedNeighbor);
-        else
-            ll_other = getLinklist(selectedNeighbor, level);
+        auto ll_other_data = getLinklistAtLevelWithLock(selectedNeighbor, level);
+        linklistsizeint* ll_other = (linklistsizeint*)ll_other_data.get();
 
         size_t sz_link_list_other = getListCount(ll_other);
 
@@ -653,8 +652,7 @@ HierarchicalNSW::mutuallyConnectNewElement(InnerIdType cur_c,
         // If cur_c is already present in the neighboring connections of `selectedNeighbors[idx]` then no need to modify any connections or run the heuristics.
         if (!is_cur_c_present) {
             if (sz_link_list_other < m_curmax) {
-                data[sz_link_list_other] = cur_c;
-                setListCount(ll_other, sz_link_list_other + 1);
+                appendNeigohbor(selectedNeighbor, level, cur_c, m_curmax);
                 if (use_reversed_edges_) {
                     auto& cur_in_edges = getEdges(cur_c, level);
                     cur_in_edges.insert(selectedNeighbor);
@@ -704,6 +702,7 @@ HierarchicalNSW::mutuallyConnectNewElement(InnerIdType cur_c,
 
 void
 HierarchicalNSW::resizeIndex(size_t new_max_elements) {
+    std::unique_lock resize_lock(resize_mutex_);
     if (new_max_elements < cur_element_count_)
         throw std::runtime_error(
             "Cannot Resize, max element is less than the current number of elements");
@@ -719,7 +718,7 @@ HierarchicalNSW::resizeIndex(size_t new_max_elements) {
             "Not enough memory: resizeIndex failed to allocate element_levels_");
     }
     element_levels_ = element_levels_new;
-    vsag::Vector<std::recursive_mutex>(new_max_elements, allocator_).swap(link_list_locks_);
+    vsag::Vector<std::shared_mutex>(new_max_elements, allocator_).swap(link_list_locks_);
 
     if (normalize_) {
         auto new_molds = (float*)allocator_->Reallocate(molds_, new_max_elements * sizeof(float));
@@ -882,7 +881,7 @@ HierarchicalNSW::DeserializeImpl(StreamReader& reader, SpaceInterface* s, size_t
     size_links_per_element_ = maxM_ * sizeof(InnerIdType) + sizeof(linklistsizeint);
 
     size_links_level0_ = maxM0_ * sizeof(InnerIdType) + sizeof(linklistsizeint);
-    vsag::Vector<std::recursive_mutex>(max_elements, allocator_).swap(link_list_locks_);
+    vsag::Vector<std::shared_mutex>(max_elements, allocator_).swap(link_list_locks_);
     vsag::Vector<std::mutex>(MAX_LABEL_OPERATION_LOCKS, allocator_).swap(label_op_locks_);
 
     rev_size_ = 1.0 / mult_;
@@ -909,7 +908,8 @@ HierarchicalNSW::DeserializeImpl(StreamReader& reader, SpaceInterface* s, size_t
     if (use_reversed_edges_) {
         for (int internal_id = 0; internal_id < cur_element_count_; ++internal_id) {
             for (int level = 0; level <= element_levels_[internal_id]; ++level) {
-                unsigned int* data = getLinklistAtLevel(internal_id, level);
+                auto link_data = getLinklistAtLevelWithLock(internal_id, level);
+                unsigned int* data = (unsigned int*)link_data.get();
                 auto link_list = data + 1;
                 auto size = getListCount(data);
                 for (int j = 0; j < size; ++j) {
@@ -934,7 +934,7 @@ const float*
 HierarchicalNSW::getDataByLabel(LabelType label) const {
     std::lock_guard<std::mutex> lock_label(getLabelOpMutex(label));
 
-    std::unique_lock<std::mutex> lock_table(label_lookup_lock_);
+    std::shared_lock lock_table(label_lookup_lock_);
     auto search = label_lookup_.find(label);
     if (search == label_lookup_.end() || isMarkedDeleted(search->second)) {
         throw std::runtime_error("Label not found");
@@ -956,7 +956,7 @@ HierarchicalNSW::markDelete(LabelType label) {
     // lock all operations with element by label
     std::unique_lock<std::mutex> lock_label(getLabelOpMutex(label));
 
-    std::unique_lock<std::mutex> lock_table(label_lookup_lock_);
+    std::shared_lock lock_table(label_lookup_lock_);
     auto search = label_lookup_.find(label);
     if (search == label_lookup_.end()) {
         throw std::runtime_error("Label not found");
@@ -975,7 +975,8 @@ void
 HierarchicalNSW::markDeletedInternal(InnerIdType internalId) {
     assert(internalId < cur_element_count_);
     if (!isMarkedDeleted(internalId)) {
-        unsigned char* ll_cur = ((unsigned char*)getLinklist0(internalId)) + 2;
+        unsigned char* ll_cur =
+            (unsigned char*)data_level0_memory_->GetElementPtr(internalId, offsetLevel0_) + 2;
         *ll_cur |= DELETE_MARK;
         num_deleted_ += 1;
         if (allow_replace_deleted_) {
@@ -998,7 +999,7 @@ HierarchicalNSW::unmarkDelete(LabelType label) {
     // lock all operations with element by label
     std::unique_lock<std::mutex> lock_label(getLabelOpMutex(label));
 
-    std::unique_lock<std::mutex> lock_table(label_lookup_lock_);
+    std::unique_lock lock_table(label_lookup_lock_);
     auto search = label_lookup_.find(label);
     if (search == label_lookup_.end()) {
         throw std::runtime_error("Label not found");
@@ -1016,7 +1017,8 @@ void
 HierarchicalNSW::unmarkDeletedInternal(InnerIdType internalId) {
     assert(internalId < cur_element_count_);
     if (isMarkedDeleted(internalId)) {
-        unsigned char* ll_cur = ((unsigned char*)getLinklist0(internalId)) + 2;
+        unsigned char* ll_cur =
+            (unsigned char*)data_level0_memory_->GetElementPtr(internalId, offsetLevel0_) + 2;
         *ll_cur &= ~DELETE_MARK;
         num_deleted_ -= 1;
         if (allow_replace_deleted_) {
@@ -1151,12 +1153,12 @@ void
 HierarchicalNSW::removePoint(LabelType label) {
     InnerIdType cur_c = 0;
     InnerIdType internal_id = 0;
-    std::lock_guard<std::mutex> lock(global_);
+    std::unique_lock lock(global_);
     {
         // Swap the connection relationship corresponding to the label to be deleted with the
         // last element, and modify the information in label_lookup_. By swapping the two points,
         // fill the void left by the deletion.
-        std::unique_lock<std::mutex> lock_table(label_lookup_lock_);
+        std::unique_lock lock_table(label_lookup_lock_);
         auto iter = label_lookup_.find(label);
         if (iter == label_lookup_.end()) {
             throw std::runtime_error("no label in FreshHnsw");
@@ -1261,10 +1263,11 @@ HierarchicalNSW::removePoint(LabelType label) {
 InnerIdType
 HierarchicalNSW::addPoint(const void* data_point, LabelType label, int level) {
     InnerIdType cur_c = 0;
+    int curlevel;
     {
         // Checking if the element with the same label already exists
         // if so, updating it *instead* of creating a new element.
-        std::unique_lock<std::mutex> lock_table(label_lookup_lock_);
+        std::unique_lock lock_table(label_lookup_lock_);
         auto search = label_lookup_.find(label);
         if (search != label_lookup_.end()) {
             return -1;
@@ -1277,18 +1280,18 @@ HierarchicalNSW::addPoint(const void* data_point, LabelType label, int level) {
         cur_c = cur_element_count_;
         cur_element_count_++;
         label_lookup_[label] = cur_c;
+
+        curlevel = getRandomLevel(mult_);
+        if (level > 0)
+            curlevel = level;
+        element_levels_[cur_c] = curlevel;
     }
 
     std::shared_ptr<float[]> normalize_data;
     normalizeVector(data_point, normalize_data);
 
-    std::unique_lock<std::recursive_mutex> lock_el(link_list_locks_[cur_c]);
-    int curlevel = getRandomLevel(mult_);
-    if (level > 0)
-        curlevel = level;
-
-    element_levels_[cur_c] = curlevel;
-    std::unique_lock<std::mutex> lock(global_);
+    std::shared_lock resize_lock(resize_mutex_);
+    std::unique_lock lock(global_);
     int maxlevelcopy = max_level_;
     if (curlevel <= maxlevelcopy)
         lock.unlock();
@@ -1317,9 +1320,8 @@ HierarchicalNSW::addPoint(const void* data_point, LabelType label, int level) {
                 bool changed = true;
                 while (changed) {
                     changed = false;
-                    unsigned int* data;
-                    std::unique_lock<std::recursive_mutex> link_lock(link_list_locks_[currObj]);
-                    data = getLinklist(currObj, lev);
+                    auto link_data = getLinklistAtLevelWithLock(currObj, lev);
+                    auto* data = (unsigned int*)link_data.get();
                     int size = getListCount(data);
 
                     auto* datal = (InnerIdType*)(data + 1);
@@ -1374,25 +1376,29 @@ HierarchicalNSW::searchKnn(const void* query_data,
                            size_t k,
                            uint64_t ef,
                            vsag::BaseFilterFunctor* isIdAllowed) const {
+    std::shared_lock resize_lock(resize_mutex_);
     std::priority_queue<std::pair<float, LabelType>> result;
     if (cur_element_count_ == 0)
         return result;
 
     std::shared_ptr<float[]> normalize_query;
     normalizeVector(query_data, normalize_query);
-    InnerIdType currObj = enterpoint_node_;
+    InnerIdType currObj;
+    {
+        std::shared_lock data_loc(global_);
+        currObj = enterpoint_node_;
+    }
     float curdist =
         fstdistfunc_(query_data, getDataByInternalId(enterpoint_node_), dist_func_param_);
     for (int level = max_level_; level > 0; level--) {
         bool changed = true;
         while (changed) {
             changed = false;
-            unsigned int* data;
-
-            data = (unsigned int*)getLinklist(currObj, level);
+            auto link_data = getLinklistAtLevelWithLock(currObj, level);
+            auto* data = (unsigned int*)link_data.get();
             int size = getListCount(data);
-            metric_hops_++;
-            metric_distance_computations_ += size;
+            //            metric_hops_++;
+            //            metric_distance_computations_ += size;
 
             auto* datal = (InnerIdType*)(data + 1);
             for (int i = 0; i < size; i++) {
@@ -1431,6 +1437,7 @@ HierarchicalNSW::searchRange(const void* query_data,
                              float radius,
                              uint64_t ef,
                              vsag::BaseFilterFunctor* isIdAllowed) const {
+    std::shared_lock resize_lock(resize_mutex_);
     std::priority_queue<std::pair<float, LabelType>> result;
     if (cur_element_count_ == 0)
         return result;
@@ -1445,9 +1452,8 @@ HierarchicalNSW::searchRange(const void* query_data,
         bool changed = true;
         while (changed) {
             changed = false;
-            unsigned int* data;
-
-            data = (unsigned int*)getLinklist(currObj, level);
+            auto link_data = getLinklistAtLevelWithLock(currObj, level);
+            auto* data = (unsigned int*)link_data.get();
             int size = getListCount(data);
             metric_hops_++;
             metric_distance_computations_ += size;
@@ -1488,7 +1494,8 @@ HierarchicalNSW::checkIntegrity() {
     vsag::Vector<int> inbound_connections_num(cur_element_count_, 0, allocator_);
     for (int i = 0; i < cur_element_count_; i++) {
         for (int l = 0; l <= element_levels_[i]; l++) {
-            linklistsizeint* ll_cur = getLinklistAtLevel(i, l);
+            auto data_ll_cur = getLinklistAtLevelWithLock(i, l);
+            linklistsizeint* ll_cur = (linklistsizeint*)data_ll_cur.get();
             int size = getListCount(ll_cur);
             auto* data = (InnerIdType*)(ll_cur + 1);
             vsag::UnorderedSet<InnerIdType> s(allocator_);
