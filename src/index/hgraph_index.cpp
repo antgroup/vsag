@@ -180,7 +180,7 @@ HGraphIndex::knn_search(const DatasetPtr& query,
 
         for (int64_t j = search_result.size() - 1; j >= 0; --j) {
             dists[j] = search_result.top().first;
-            ids[j] = search_result.top().second;
+            ids[j] = this->labels_.at(search_result.top().second);
             search_result.pop();
         }
         return std::move(dataset_results);
@@ -459,7 +459,7 @@ HGraphIndex::range_search(const DatasetPtr& query,
 
         for (int64_t j = search_result.size() - 1; j >= 0; --j) {
             dists[j] = search_result.top().first;
-            ids[j] = search_result.top().second;
+            ids[j] = this->labels_.at(search_result.top().second);
             search_result.pop();
         }
         return std::move(dataset_results);
