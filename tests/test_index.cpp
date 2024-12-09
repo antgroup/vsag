@@ -291,6 +291,10 @@ TestIndex::GenerateDatasetFloat(int64_t dim, int64_t count) {
     auto base = vsag::Dataset::Make();
     auto [ids, vectors] =
         generate_ids_and_vectors(count, dim, true, static_cast<int>(time(nullptr)));
+    auto bias = 1000007;
+    for (auto& id : ids) {
+        id += bias;
+    }
     base->Dim(dim)
         ->NumElements(count)
         ->Float32Vectors(CopyVector(vectors))
@@ -302,7 +306,6 @@ TestIndex::GenerateDatasetFloat(int64_t dim, int64_t count) {
     query->Dim(dim)
         ->NumElements(query_count)
         ->Float32Vectors(base->GetFloat32Vectors() + start * dim)
-        ->Ids(base->GetIds() + start)
         ->Owner(false);
     auto gt = vsag::Dataset::Make();  // TODO(LHT) brute_force
     gt->Dim(1)->NumElements(query_count)->Ids(base->GetIds() + start)->Owner(false);
