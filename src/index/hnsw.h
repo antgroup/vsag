@@ -70,6 +70,16 @@ public:
         SAFE_CALL(return this->remove(id));
     }
 
+    tl::expected<bool, Error>
+    UpdateId(int64_t old_id, int64_t new_id) override {
+        SAFE_CALL(return this->update_id(old_id, new_id));
+    }
+
+    tl::expected<bool, Error>
+    UpdateVector(int64_t id, const DatasetPtr& new_base, bool need_fine_tune = false) override {
+        SAFE_CALL(return this->update_vector(id, new_base, need_fine_tune));
+    }
+
     tl::expected<DatasetPtr, Error>
     KnnSearch(const DatasetPtr& query,
               int64_t k,
@@ -191,6 +201,12 @@ private:
 
     tl::expected<bool, Error>
     remove(int64_t id);
+
+    tl::expected<bool, Error>
+    update_id(int64_t old_id, int64_t new_id);
+
+    tl::expected<bool, Error>
+    update_vector(int64_t id, const DatasetPtr& new_base, bool need_fine_tune);
 
     template <typename FilterType>
     tl::expected<DatasetPtr, Error>
