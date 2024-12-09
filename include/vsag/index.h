@@ -89,6 +89,31 @@ public:
     }
 
     /**
+     * Update the id of a base point from the index
+     *
+     * @param old_id indicates the old id of a base point in index
+     * @param new_id is the updated new id of the base point
+     * @return result indicates whether the update operation is successful.
+     */
+    virtual tl::expected<bool, Error>
+    UpdateId(int64_t old_id, int64_t new_id) {
+        throw std::runtime_error("Index not support update id");
+    }
+
+    /**
+     * Update the vector of a base point from the index
+     *
+     * @param id indicates the old id of a base point in index
+     * @param new_base is the updated new vector of the base point
+     * @param need_fine_tune indicates whether the connection of the base point needs to be fine-tuned
+     * @return result indicates whether the update operation is successful.
+     */
+    virtual tl::expected<bool, Error>
+    UpdateVector(int64_t id, const DatasetPtr& new_base, bool need_fine_tune = false) {
+        throw std::runtime_error("Index not support update vector");
+    }
+
+    /**
       * Performing single KNN search on index
       * 
       * @param query should contains dim, num_elements and vectors
