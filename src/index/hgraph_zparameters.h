@@ -58,6 +58,9 @@ private:
     void
     check_common_param() const;
 
+    void
+    init_by_options();
+
 private:
     JsonType json_;
 
