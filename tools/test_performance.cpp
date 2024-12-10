@@ -23,7 +23,7 @@
 #include <string>
 #include <unordered_set>
 
-#include "H5Cpp.h"
+#include "eval_dataset.h"
 #include "nlohmann/json.hpp"
 #include "spdlog/spdlog.h"
 #include "vsag/vsag.h"
@@ -76,10 +76,10 @@ main(int argc, char* argv[]) {
 }
 
 std::unordered_set<int64_t>
-getIntersection(const int64_t* neighbors,
-                const int64_t* ground_truth,
-                size_t recall_num,
-                size_t top_k) {
+get_intersection(const int64_t* neighbors,
+                 const int64_t* ground_truth,
+                 size_t recall_num,
+                 size_t top_k) {
     std::unordered_set<int64_t> neighbors_set(neighbors, neighbors + recall_num);
     std::unordered_set<int64_t> intersection;
     for (size_t i = 0; i < top_k; ++i) {
@@ -90,220 +90,7 @@ getIntersection(const int64_t* neighbors,
     return intersection;
 }
 
-class TestDataset;
-using TestDatasetPtr = std::shared_ptr<TestDataset>;
-class TestDataset {
-public:
-    static TestDatasetPtr
-    Load(const std::string& filename) {
-        H5::H5File file(filename, H5F_ACC_RDONLY);
-
-        // check datasets exist
-        bool has_labels = false;
-        {
-            auto datasets = get_datasets(file);
-            assert(datasets.count("train"));
-            assert(datasets.count("test"));
-            assert(datasets.count("neighbors"));
-            has_labels = datasets.count("train_labels") && datasets.count("test_labels");
-        }
-
-        // get and (should check shape)
-        auto train_shape = get_shape(file, "train");
-        spdlog::debug("train.shape: " + to_string(train_shape));
-        auto test_shape = get_shape(file, "test");
-        spdlog::debug("test.shape: " + to_string(test_shape));
-        auto neighbors_shape = get_shape(file, "neighbors");
-        spdlog::debug("neighbors.shape: " + to_string(neighbors_shape));
-        assert(train_shape.second == test_shape.second);
-
-        auto obj = std::make_shared<TestDataset>();
-        obj->train_shape_ = train_shape;
-        obj->test_shape_ = test_shape;
-        obj->neighbors_shape_ = neighbors_shape;
-        obj->dim_ = train_shape.second;
-        obj->number_of_base_ = train_shape.first;
-        obj->number_of_query_ = test_shape.first;
-
-        // read from file
-        {
-            H5::DataSet dataset = file.openDataSet("/train");
-            H5::DataSpace dataspace = dataset.getSpace();
-            auto data_type = dataset.getDataType();
-            H5::PredType type = H5::PredType::ALPHA_I8;
-            if (data_type.getClass() == H5T_INTEGER && data_type.getSize() == 1) {
-                obj->train_data_type_ = vsag::DATATYPE_INT8;
-                type = H5::PredType::ALPHA_I8;
-                obj->train_data_size_ = 1;
-            } else if (data_type.getClass() == H5T_FLOAT) {
-                obj->train_data_type_ = vsag::DATATYPE_FLOAT32;
-                type = H5::PredType::NATIVE_FLOAT;
-                obj->train_data_size_ = 4;
-            } else {
-                throw std::runtime_error(
-                    fmt::format("wrong data type, data type ({}), data size ({})",
-                                (int)data_type.getClass(),
-                                data_type.getSize()));
-            }
-            obj->train_ = std::shared_ptr<char[]>(
-                new char[train_shape.first * train_shape.second * obj->train_data_size_]);
-            dataset.read(obj->train_.get(), type, dataspace);
-        }
-
-        {
-            H5::DataSet dataset = file.openDataSet("/test");
-            H5::DataSpace dataspace = dataset.getSpace();
-            auto data_type = dataset.getDataType();
-            H5::PredType type = H5::PredType::ALPHA_I8;
-            if (data_type.getClass() == H5T_INTEGER && data_type.getSize() == 1) {
-                obj->test_data_type_ = vsag::DATATYPE_INT8;
-                type = H5::PredType::ALPHA_I8;
-                obj->test_data_size_ = 1;
-            } else if (data_type.getClass() == H5T_FLOAT) {
-                obj->test_data_type_ = vsag::DATATYPE_FLOAT32;
-                type = H5::PredType::NATIVE_FLOAT;
-                obj->test_data_size_ = 4;
-            } else {
-                throw std::runtime_error("wrong data type");
-            }
-            obj->test_ = std::shared_ptr<char[]>(
-                new char[test_shape.first * test_shape.second * obj->test_data_size_]);
-            dataset.read(obj->test_.get(), type, dataspace);
-        }
-        {
-            obj->neighbors_ = std::shared_ptr<int64_t[]>(
-                new int64_t[neighbors_shape.first * neighbors_shape.second]);
-            H5::DataSet dataset = file.openDataSet("/neighbors");
-            H5::DataSpace dataspace = dataset.getSpace();
-            H5::FloatType datatype(H5::PredType::NATIVE_INT64);
-            dataset.read(obj->neighbors_.get(), datatype, dataspace);
-        }
-        if (has_labels) {
-            H5::FloatType datatype(H5::PredType::NATIVE_INT64);
-
-            H5::DataSet train_labels_dataset = file.openDataSet("/train_labels");
-            H5::DataSpace train_labels_dataspace = train_labels_dataset.getSpace();
-            obj->train_labels_ = std::shared_ptr<int64_t[]>(new int64_t[obj->number_of_base_]);
-            train_labels_dataset.read(obj->train_labels_.get(), datatype, train_labels_dataspace);
-
-            H5::DataSet test_labels_dataset = file.openDataSet("/test_labels");
-            H5::DataSpace test_labels_dataspace = test_labels_dataset.getSpace();
-            obj->test_labels_ = std::shared_ptr<int64_t[]>(new int64_t[obj->number_of_query_]);
-            test_labels_dataset.read(obj->test_labels_.get(), datatype, test_labels_dataspace);
-        }
-
-        return obj;
-    }
-
-public:
-    const void*
-    GetTrain() const {
-        return train_.get();
-    }
-
-    const void*
-    GetTest() const {
-        return test_.get();
-    }
-
-    const void*
-    GetOneTest(int64_t id) const {
-        return test_.get() + id * dim_ * test_data_size_;
-    }
-
-    int64_t
-    GetNearestNeighbor(int64_t i) const {
-        return neighbors_[i * neighbors_shape_.second];
-    }
-
-    int64_t*
-    GetNeighbors(int64_t i) const {
-        return neighbors_.get() + i * neighbors_shape_.second;
-    }
-
-    int64_t
-    GetNumberOfBase() const {
-        return number_of_base_;
-    }
-
-    int64_t
-    GetNumberOfQuery() const {
-        return number_of_query_;
-    }
-
-    int64_t
-    GetDim() const {
-        return dim_;
-    }
-
-    std::string
-    GetTrainDataType() const {
-        return train_data_type_;
-    }
-    std::string
-    GetTestDataType() const {
-        return test_data_type_;
-    }
-
-    bool
-    IsMatch(int64_t query_id, int64_t base_id) {
-        if (this->test_labels_ == nullptr || this->train_labels_ == nullptr) {
-            return true;
-        }
-        return test_labels_[query_id] == train_labels_[base_id];
-    }
-
-private:
-    using shape_t = std::pair<int64_t, int64_t>;
-    static std::unordered_set<std::string>
-    get_datasets(const H5::H5File& file) {
-        std::unordered_set<std::string> datasets;
-        H5::Group root = file.openGroup("/");
-        hsize_t numObj = root.getNumObjs();
-        for (unsigned i = 0; i < numObj; ++i) {
-            std::string objname = root.getObjnameByIdx(i);
-            H5O_info_t objinfo;
-            root.getObjinfo(objname, objinfo);
-            if (objinfo.type == H5O_type_t::H5O_TYPE_DATASET) {
-                datasets.insert(objname);
-            }
-        }
-        return datasets;
-    }
-
-    static shape_t
-    get_shape(const H5::H5File& file, const std::string& dataset_name) {
-        H5::DataSet dataset = file.openDataSet(dataset_name);
-        H5::DataSpace dataspace = dataset.getSpace();
-        hsize_t dims_out[2];
-        int ndims = dataspace.getSimpleExtentDims(dims_out, NULL);
-        return std::make_pair<int64_t, int64_t>(dims_out[0], dims_out[1]);
-    }
-
-    static std::string
-    to_string(const shape_t& shape) {
-        return "[" + std::to_string(shape.first) + "," + std::to_string(shape.second) + "]";
-    }
-
-private:
-    std::shared_ptr<char[]> train_;
-    std::shared_ptr<char[]> test_;
-    std::shared_ptr<int64_t[]> neighbors_;
-    std::shared_ptr<int64_t[]> train_labels_;
-    std::shared_ptr<int64_t[]> test_labels_;
-    shape_t train_shape_;
-    shape_t test_shape_;
-    shape_t neighbors_shape_;
-    int64_t number_of_base_;
-    int64_t number_of_query_;
-    int64_t dim_;
-    size_t train_data_size_;
-    size_t test_data_size_;
-    std::string train_data_type_;
-    std::string test_data_type_;
-};
-
-class Test {
+class PerfTools {
 public:
     static json
     Build(const std::string& dataset_path,
@@ -314,17 +101,17 @@ public:
         auto index = Factory::CreateIndex(index_name, build_parameters).value();
 
         spdlog::debug("dataset_path: " + dataset_path);
-        auto test_dataset = TestDataset::Load(dataset_path);
+        auto eval_dataset = EvalDataset::Load(dataset_path);
 
         // build
-        int64_t total_base = test_dataset->GetNumberOfBase();
+        int64_t total_base = eval_dataset->GetNumberOfBase();
         auto ids = range(total_base);
         auto base = Dataset::Make();
-        base->NumElements(total_base)->Dim(test_dataset->GetDim())->Ids(ids.get())->Owner(false);
-        if (test_dataset->GetTrainDataType() == vsag::DATATYPE_FLOAT32) {
-            base->Float32Vectors((const float*)test_dataset->GetTrain());
-        } else if (test_dataset->GetTrainDataType() == vsag::DATATYPE_INT8) {
-            base->Int8Vectors((const int8_t*)test_dataset->GetTrain());
+        base->NumElements(total_base)->Dim(eval_dataset->GetDim())->Ids(ids.get())->Owner(false);
+        if (eval_dataset->GetTrainDataType() == vsag::DATATYPE_FLOAT32) {
+            base->Float32Vectors((const float*)eval_dataset->GetTrain());
+        } else if (eval_dataset->GetTrainDataType() == vsag::DATATYPE_INT8) {
+            base->Int8Vectors((const int8_t*)eval_dataset->GetTrain());
         }
         auto build_start = std::chrono::steady_clock::now();
         if (auto buildindex = index->Build(base); not buildindex.has_value()) {
@@ -391,7 +178,7 @@ public:
         vsag::ReaderSet reader_set;
         for (const auto& single_file : file_sizes) {
             const std::string& key = single_file.first;
-            size_t size = single_file.second;
+            size = single_file.second;
             std::filesystem::path file_path(key);
             std::filesystem::path full_path = dir / file_path;
             auto reader = vsag::Factory::CreateLocalFileReader(full_path.string(), 0, size);
@@ -413,25 +200,25 @@ public:
             statFileAfter.close();
         }
 
-        auto test_dataset = TestDataset::Load(dataset_path);
+        auto eval_dataset = EvalDataset::Load(dataset_path);
 
         // search
         auto search_start = std::chrono::steady_clock::now();
         int64_t correct = 0;
-        int64_t total = test_dataset->GetNumberOfQuery();
+        int64_t total = eval_dataset->GetNumberOfQuery();
         spdlog::debug("total: " + std::to_string(total));
         std::vector<DatasetPtr> results;
         for (int64_t i = 0; i < total; ++i) {
             auto query = Dataset::Make();
-            query->NumElements(1)->Dim(test_dataset->GetDim())->Owner(false);
+            query->NumElements(1)->Dim(eval_dataset->GetDim())->Owner(false);
 
-            if (test_dataset->GetTestDataType() == vsag::DATATYPE_FLOAT32) {
-                query->Float32Vectors((const float*)test_dataset->GetOneTest(i));
-            } else if (test_dataset->GetTestDataType() == vsag::DATATYPE_INT8) {
-                query->Int8Vectors((const int8_t*)test_dataset->GetOneTest(i));
+            if (eval_dataset->GetTestDataType() == vsag::DATATYPE_FLOAT32) {
+                query->Float32Vectors((const float*)eval_dataset->GetOneTest(i));
+            } else if (eval_dataset->GetTestDataType() == vsag::DATATYPE_INT8) {
+                query->Int8Vectors((const int8_t*)eval_dataset->GetOneTest(i));
             }
-            auto filter = [&test_dataset, i](int64_t base_id) {
-                return not test_dataset->IsMatch(i, base_id);
+            auto filter = [&eval_dataset, i](int64_t base_id) {
+                return not eval_dataset->IsMatch(i, base_id);
             };
             auto result = index->KnnSearch(query, top_k, search_parameters, filter);
             if (not result.has_value()) {
@@ -445,9 +232,9 @@ public:
         // calculate recall
         for (int64_t i = 0; i < total; ++i) {
             // k@k
-            int64_t* neighbors = test_dataset->GetNeighbors(i);
+            int64_t* neighbors = eval_dataset->GetNeighbors(i);
             const int64_t* ground_truth = results[i]->GetIds();
-            auto hit_result = getIntersection(neighbors, ground_truth, top_k, top_k);
+            auto hit_result = get_intersection(neighbors, ground_truth, top_k, top_k);
             correct += hit_result.size();
         }
         spdlog::debug("correct: " + std::to_string(correct));
@@ -511,9 +298,10 @@ run_test(const std::string& dataset_path,
          const std::string& search_parameters) {
     int64_t top_k;
     if (process == "build") {
-        return Test::Build(dataset_path, index_name, build_parameters);
+        return PerfTools::Build(dataset_path, index_name, build_parameters);
     } else if (valid_and_extrcat_top_k(process, top_k)) {
-        return Test::Search(dataset_path, index_name, top_k, build_parameters, search_parameters);
+        return PerfTools::Search(
+            dataset_path, index_name, top_k, build_parameters, search_parameters);
     } else {
         std::cerr << "process must be search or build." << std::endl;
         exit(-1);
