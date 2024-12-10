@@ -48,6 +48,7 @@ fmt:                     ## Format codes.
 	find examples/cpp/ -iname "*.h" -o -iname "*.cpp" | xargs clang-format -i
 	find mockimpl/ -iname "*.h" -o -iname "*.cpp" | xargs clang-format -i
 	find tests/ -iname "*.h" -o -iname "*.cpp" | xargs clang-format -i
+	find tools/ -iname "*.h" -o -iname "*.cpp" | xargs clang-format -i
 
 .PHONY: test
 test:                    ## Build and run unit tests.

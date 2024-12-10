@@ -2,13 +2,13 @@
 
 usage:
 ```
-build: ./build/tests/test_performance <dataset_file_path> "build" <index_name> <build_param> <search_param>
-search: ./build/tests/test_performance <dataset_file_path> "search:<top-k>" <index_name> <build_param> <search_param>
+build: ./build/tools/test_performance <dataset_file_path> "build" <index_name> <build_param> <search_param>
+search: ./build/tools/test_performance <dataset_file_path> "search:<top-k>" <index_name> <build_param> <search_param>
 ```
 
 example running commands for building index:
 ```
-./build/tests/test_performance \
+./build/tools/test_performance \
     '/data/random-100k-128-euclidean.hdf5' \
     'build' \
 	'hnsw' \
@@ -30,7 +30,7 @@ example output:
 
 example running commands for searching:
 ```
-./build/tests/test_performance \
+./build/tools/test_performance \
     '/data/random-100k-128-euclidean.hdf5' \
     'search:1' \
 	'hnsw' \

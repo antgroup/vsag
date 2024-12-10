@@ -31,10 +31,3 @@ target_include_directories (functests PRIVATE
     ${HDF5_INCLUDE_DIRS})
 target_link_libraries (functests PRIVATE Catch2::Catch2WithMain vsag simd)
 add_dependencies (functests spdlog Catch2)
-
-# test performance tool, cannot compile with _GLIBCXX_USE_CXX11_ABI=0
-if (ENABLE_TOOLS AND ENABLE_TESTS AND ENABLE_CXX11_ABI)
-  add_executable (test_performance performance/test_performance.cpp)
-  target_link_libraries (test_performance PRIVATE vsag simd libhdf5_cpp.a libhdf5.a z)
-  add_dependencies (test_performance hdf5)
-endif ()
