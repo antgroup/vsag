@@ -19,28 +19,16 @@
 # Released Indexes
 /extern/diskann/         @inabao
 
-# Core codes, maybe assign reviewers later
-/src/                    @jiaweizone
+# Core codes
+/src/                    @jiaweizone @inabao @wxyucs @LHT129 @ShawnShawnYou
 
-# index codes
+# Detail source codes
 /src/index               @inabao @wxyucs @LHT129 @ShawnShawnYou
-
-# datacell codes
 /src/data_cell/          @LHT129 @ShawnShawnYou
-
-# io codes
 /src/io/                 @LHT129
-
-# quantization codes
 /src/quantization/       @LHT129 @ShawnShawnYou
-
-# impl codes (conjugate graph)
 /src/impl/               @ShawnShawnYou
-
-# hnswlib codes
 /src/algorithm/          @inabao @wxyucs
-
-# All the SIMD related codes
 /src/simd/               @LHT129 @ShawnShawnYou
 
 # pybinds
