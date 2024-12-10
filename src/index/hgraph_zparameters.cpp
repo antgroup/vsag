@@ -32,6 +32,7 @@ const std::unordered_map<std::string, std::vector<std::string>> HGraphParameters
 HGraphParameters::HGraphParameters(JsonType& hgraph_param, const IndexCommonParam& common_param)
     : common_param_(common_param) {
     this->check_common_param();
+    this->init_by_options();
     this->refresh_json_by_string();
     this->ParseStringParam(hgraph_param);
     this->refresh_string_by_json();
@@ -84,6 +85,14 @@ HGraphParameters::CheckAndSetKeyValue(const std::string& key, JsonType& value) {
     }
 }
 
+void
+HGraphParameters::init_by_options() {
+    const std::string DEFAULT_BLOCK_SIZE = std::to_string(Options::Instance().block_size_limit());
+    std::unordered_map<std::string, std::string> option_map;
+    option_map.insert({"DEFAULT_BLOCK_SIZE", DEFAULT_BLOCK_SIZE});
+    this->str_ = format_map(this->str_, option_map);
+}
+
 const std::string HGraphParameters::DEFAULT_HGRAPH_PARAMS = format_map(
     R"(
     {
@@ -91,7 +100,7 @@ const std::string HGraphParameters::DEFAULT_HGRAPH_PARAMS = format_map(
         "{HGRAPH_GRAPH_KEY}": {
             "{IO_TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
             "{IO_PARAMS_KEY}": {
-                "{BLOCK_IO_BLOCK_SIZE_KEY}": 134217728
+                "{BLOCK_IO_BLOCK_SIZE_KEY}": {DEFAULT_BLOCK_SIZE}
             },
             "type": "nsw",
             "{GRAPH_PARAMS_KEY}": {
@@ -102,7 +111,7 @@ const std::string HGraphParameters::DEFAULT_HGRAPH_PARAMS = format_map(
         "{HGRAPH_BASE_CODES_KEY}": {
             "{IO_TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
             "{IO_PARAMS_KEY}": {
-                "{BLOCK_IO_BLOCK_SIZE_KEY}": 134217728
+                "{BLOCK_IO_BLOCK_SIZE_KEY}": {DEFAULT_BLOCK_SIZE}
             },
             "codes_type": "flatten_codes",
             "codes_param": {},
