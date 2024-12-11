@@ -22,6 +22,7 @@
 #include <stdexcept>
 
 #include "bitset.h"
+#include "features.h"
 #include "vsag/binaryset.h"
 #include "vsag/bitset.h"
 #include "vsag/dataset.h"
@@ -222,6 +223,11 @@ public:
     CalcDistanceById(const float* vector, int64_t id) const {
         throw std::runtime_error("Index doesn't support get distance by id");
     };
+
+    virtual tl::expected<bool, Error>
+    CheckFeature(IndexFeature feature) const {
+        throw std::runtime_error("Index doesn't support check feature");
+    }
 
 public:
     // [serialize/deserialize with binaryset]
