@@ -22,6 +22,7 @@ const char* const INDEX_HGRAPH = "hgraph";
 const char* const INDEX_DISKANN = "diskann";
 const char* const INDEX_HNSW = "hnsw";
 const char* const INDEX_FRESH_HNSW = "fresh_hnsw";
+const char* const INDEX_BRUTE_FORCE = "brute_force";
 const char* const DIM = "dim";
 const char* const NUM_ELEMENTS = "num_elements";
 const char* const IDS = "ids";
