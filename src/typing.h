@@ -17,6 +17,7 @@
 
 #include <cstdint>
 #include <deque>
+#include <queue>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -46,5 +47,17 @@ using UnorderedMap = std::unordered_map<KeyType,
                                         std::hash<KeyType>,
                                         std::equal_to<KeyType>,
                                         vsag::AllocatorWrapper<std::pair<const KeyType, ValType>>>;
+
+struct CompareByFirst {
+    constexpr bool
+    operator()(std::pair<float, InnerIdType> const& a,
+               std::pair<float, InnerIdType> const& b) const noexcept {
+        return a.first < b.first;
+    }
+};
+
+using MaxHeap = std::priority_queue<std::pair<float, InnerIdType>,
+                                    Vector<std::pair<float, InnerIdType>>,
+                                    CompareByFirst>;
 
 }  // namespace vsag
