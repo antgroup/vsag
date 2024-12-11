@@ -16,6 +16,7 @@
 #pragma once
 
 #include <cstdint>
+#include <deque>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -35,6 +36,9 @@ using UnorderedSet =
 
 template <typename T>
 using Vector = std::vector<T, vsag::AllocatorWrapper<T>>;
+
+template <typename T>
+using Deque = std::deque<T, vsag::AllocatorWrapper<T>>;
 
 template <typename KeyType, typename ValType>
 using UnorderedMap = std::unordered_map<KeyType,
