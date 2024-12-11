@@ -23,7 +23,8 @@ namespace vsag {
 
 class SafeAllocator : public Allocator {
 public:
-    explicit SafeAllocator(Allocator* raw_allocator) : raw_allocator_(raw_allocator) {
+    explicit SafeAllocator(Allocator* raw_allocator, bool owner = false)
+        : raw_allocator_(raw_allocator), owner_(owner) {
     }
 
     explicit SafeAllocator(std::shared_ptr<Allocator> owned_allocator)
@@ -68,6 +69,8 @@ public:
 private:
     Allocator* const raw_allocator_ = nullptr;
     std::shared_ptr<Allocator> owned_allocator_ = nullptr;
+
+    bool owner_{false};
 };
 
 }  // namespace vsag
