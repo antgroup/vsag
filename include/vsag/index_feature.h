@@ -17,8 +17,8 @@
 
 namespace vsag {
 
-enum class IndexFeature {
-    NEED_TRAIN, /**< Indicates that the class needs to be trained */
+enum IndexFeature {
+    NEED_TRAIN = 1, /**< Indicates that the class needs to be trained */
 
     SUPPORT_BUILD,                     /**< Supports building the index */
     SUPPORT_ADD,                       /**< Supports adding new elements */
@@ -47,12 +47,14 @@ enum class IndexFeature {
     SUPPORT_SEARCH_ONE_WITH_MULTI_THREAD, /**< Supports searching one element with multi-threading */
     SUPPORT_BATCH_SEARCH_WITH_MULTI_THREAD, /**< Supports batch searching with multi-threading */
 
-    SUPPORT_ADD_CONCURRENT,              /**< Supports concurrent addition of elements */
-    SUPPORT_SEARCH_CONCURRENT,           /**< Supports concurrent searching */
-    SUPPORT_DELETE_CONCURRENT,           /**< Supports concurrent deletion */
-    SUPPORT_ADD_SEARCH_CONCURRENT,       /**< Supports concurrent addition and searching */
-    SUPPORT_ADD_DELETE_CONCURRENT,       /**< Supports concurrent addition and deletion */
-    SUPPORT_SEARCH_DELETE_CONCURRENT,    /**< Supports concurrent searching and deletion */
-    SUPPORT_ADD_SEARCH_DELETE_CONCURRENT /**< Supports concurrent addition, searching, and deletion */
+    SUPPORT_ADD_CONCURRENT,               /**< Supports concurrent addition of elements */
+    SUPPORT_SEARCH_CONCURRENT,            /**< Supports concurrent searching */
+    SUPPORT_DELETE_CONCURRENT,            /**< Supports concurrent deletion */
+    SUPPORT_ADD_SEARCH_CONCURRENT,        /**< Supports concurrent addition and searching */
+    SUPPORT_ADD_DELETE_CONCURRENT,        /**< Supports concurrent addition and deletion */
+    SUPPORT_SEARCH_DELETE_CONCURRENT,     /**< Supports concurrent searching and deletion */
+    SUPPORT_ADD_SEARCH_DELETE_CONCURRENT, /**< Supports concurrent addition, searching, and deletion */
+
+    INDEX_FEATURE_COUNT /** must be last one */
 };
 }  // namespace vsag
