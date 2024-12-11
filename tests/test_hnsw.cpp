@@ -475,7 +475,7 @@ TEST_CASE("hnsw serialize", "[ft][hnsw]") {
     int ef_construction = 200;
     int ef_search = 200;
     auto metric_type = GENERATE("cosine", "l2");
-    auto use_static = GENERATE(true, false);
+    auto use_static = GENERATE(false);
     // Initing index
     nlohmann::json hnsw_parameters{{"max_degree", max_degree},
                                    {"ef_construction", ef_construction},

@@ -89,20 +89,28 @@ SQ8UniformQuantizer<metric>::SQ8UniformQuantizer(int dim, Allocator* allocator)
     lower_bound_ = std::numeric_limits<DataType>::max();
     diff_ = std::numeric_limits<DataType>::lowest();
 
+    size_t align_size = 1;
+    if constexpr (metric == MetricType::METRIC_TYPE_L2SQR) {
+        align_size = std::max(align_size, sizeof(norm_type));
+    }
+    if constexpr (metric == MetricType::METRIC_TYPE_IP or
+                  metric == MetricType::METRIC_TYPE_COSINE) {
+        align_size = std::max(align_size, sizeof(sum_type));
+    }
     this->code_size_ = 0;
 
     offset_code_ = this->code_size_;
-    this->code_size_ += dim;
+    this->code_size_ += ((dim + align_size - 1) / align_size) * align_size;
 
     if constexpr (metric == MetricType::METRIC_TYPE_L2SQR) {
         offset_norm_ = this->code_size_;
-        this->code_size_ += sizeof(norm_type);
+        this->code_size_ += ((sizeof(norm_type) + align_size - 1) / align_size) * align_size;
     }
 
     if constexpr (metric == MetricType::METRIC_TYPE_IP or
                   metric == MetricType::METRIC_TYPE_COSINE) {
         offset_sum_ = this->code_size_;
-        this->code_size_ += sizeof(sum_type);
+        this->code_size_ += ((sizeof(sum_type) + align_size - 1) / align_size) * align_size;
     }
 }
 

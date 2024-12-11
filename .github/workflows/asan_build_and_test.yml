@@ -1,0 +1,80 @@
+name: Asan Build & Test Parallel
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  clang-format-check:
+    name: Format
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Install Clang format
+        run: sudo apt-get install clang-format
+      - name: Run Clang format check
+        run: ./scripts/check_format.sh
+
+  build_asan:
+    name: Asan Build
+    runs-on: ubuntu-latest
+    container:
+      image: vsaglib/vsag:ubuntu
+    steps:
+      - uses: actions/checkout@v4
+      - name: Load Cache
+        uses: actions/cache@v4.1.2
+        with:
+          path: ./build/
+          key: build-${{ hashFiles('./CMakeLists.txt') }}-${{ hashFiles('./.circleci/fresh_ci_cache.commit') }}
+      - name: Make Asan
+        run: make asan
+      - name: Save Test
+        uses: actions/upload-artifact@v4
+        with:
+          path: ./build
+          name: test-${{ github.run_id }}
+          compression-level: 1
+          retention-days: 1
+          overwrite: 'true'
+
+  test_asan:
+    name: Unit Test
+    needs: build_asan
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        test_type: [ unittests, functests ]
+    container:
+      image: vsaglib/vsag:ubuntu
+    steps:
+      - name: Clean Env
+        run: rm -rf ./build
+      - name: Download Test
+        uses: actions/download-artifact@v4
+        with:
+          name: test-${{ github.run_id }}
+          path: ./build/
+      - name: Do Asan Test In ${{ matrix.test_type }}
+        run: |
+          chmod +x ./build/tests/${{ matrix.test_type }}
+          ./build/tests/${{ matrix.test_type }} -d yes ${UT_FILTER} -a --order rand --allow-running-no-tests -o log && cat log
+
+  clean_up:
+    name: Clean Up
+    needs: test_asan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create Empty File
+        run: touch /tmp/clean_up
+      - name: Overwrite Test Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          path: /tmp/clean_up
+          name: test-${{ github.run_id }}
+          compression-level: 1
+          retention-days: 1
+          overwrite: 'true'

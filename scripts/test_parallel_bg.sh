@@ -16,7 +16,7 @@ logger_files+=("./log/unittest.log")
 for tag in ${parallel_tags}
 do
   othertag="~"${tag}${othertag}
-  ./build/tests/functests -d yes ${UT_FILTER} -a --order rand --allow-running-no-tests -o ./log/${tag}.log &
+  ./build/tests/functests -d yes ${UT_FILTER} -a --order rand --allow-running-no-tests ${tag} -o ./log/${tag}.log &
   pids+=($!)
   logname="./log/"${tag}".log"
   logger_files+=($logname)
