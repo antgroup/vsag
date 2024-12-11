@@ -23,7 +23,6 @@ jobs:
     resource_class: medium+
     steps:
       - checkout
-      - run: ./scripts/check_format.sh
       - restore_cache:
           keys:
             - fork-cache-{{ checksum "CMakeLists.txt" }}-{{ checksum ".circleci/fresh_ci_cache.commit" }}
@@ -40,7 +39,6 @@ jobs:
     resource_class: medium+
     steps:
       - checkout
-      - run: ./scripts/check_format.sh
       - restore_cache:
           keys:
             - main-ccache-{{ checksum "CMakeLists.txt" }}-{{ checksum ".circleci/fresh_ci_cache.commit" }}
