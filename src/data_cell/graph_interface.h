@@ -54,6 +54,9 @@ public:
     GetNeighbors(InnerIdType id, Vector<InnerIdType>& neighbor_ids) const = 0;
 
     virtual void
+    Resize(InnerIdType new_size) = 0;
+
+    virtual void
     Prefetch(InnerIdType id, uint32_t neighbor_i) = 0;
 
 public:

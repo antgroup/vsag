@@ -92,4 +92,6 @@ SparseGraphDataCell::Deserialize(StreamReader& reader) {
         StreamReader::ReadVector(reader, *(this->neighbors_[key]));
     }
 }
+void
+SparseGraphDataCell::Resize(InnerIdType new_size){};
 }  // namespace vsag

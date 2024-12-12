@@ -21,20 +21,26 @@
 
 #include "simd/simd.h"
 #include "test_index.h"
+#include "vsag/options.h"
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::TestIndex,
                              "HGraph Build & ContinueAdd Test",
                              "[ft][hgraph]") {
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    auto size = GENERATE(1024 * 1024 * 2);
     auto dims = fixtures::get_common_used_dims(2);
     auto metric_type = GENERATE("l2", "ip", "cosine");
     std::string base_quantization_str = GENERATE("sq8", "fp32");
     const std::string name = "hgraph";
     for (auto& dim : dims) {
+        vsag::Options::Instance().set_block_size_limit(size);
         auto param = fixtures::generate_hgraph_build_parameters_string(
             metric_type, dim, base_quantization_str);
+        auto dataset = GenerateAndSetDataset<float>(dim, 10000)->base_;
         auto index = TestFactory(name, param, true);
-        TestBuildIndex(index, dim);
+        TestBuildIndex(index, dataset, dim);
         TestContinueAdd(index, dim);
+        vsag::Options::Instance().set_block_size_limit(origin_size);
     }
 }
 

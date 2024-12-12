@@ -262,14 +262,14 @@ HGraph::hnsw_add(const DatasetPtr& data) {
             auto label = ids[i];
             auto inner_id = i + cur_count;
             {
-                std::unique_lock<std::shared_mutex> lock(this->label_lookup_mutex_);
+                std::lock_guard<std::shared_mutex> lock(this->label_lookup_mutex_);
                 this->label_lookup_[label] = inner_id;
                 this->labels_[inner_id] = label;
             }
 
             std::unique_lock<std::mutex> add_lock(add_mutex);
             if (level >= int64_t(this->max_level_) || bottom_graph_->TotalCount() == 0) {
-                std::unique_lock<std::shared_mutex> wlock(this->global_mutex_);
+                std::lock_guard<std::shared_mutex> wlock(this->global_mutex_);
                 for (int64_t j = max_level_; j <= level; ++j) {
                     this->route_graphs_.emplace_back(this->generate_one_route_graph());
                 }
@@ -548,7 +548,7 @@ HGraph::mutually_connect_new_element(InnerIdType cur_c,
     }
 
     for (auto selectedNeighbor : selected_neighbors) {
-        std::unique_lock<std::shared_mutex> lock(neighbors_mutex_[selectedNeighbor]);
+        std::lock_guard<std::shared_mutex> lock(neighbors_mutex_[selectedNeighbor]);
 
         Vector<InnerIdType> neighbors(allocator_);
         graph->GetNeighbors(selectedNeighbor, neighbors);
@@ -775,6 +775,8 @@ HGraph::add_one_point(const float* data, int level, InnerIdType inner_id) {
         .is_id_allowed_ = nullptr,
     };
 
+    std::lock_guard cur_lock(this->neighbors_mutex_[inner_id]);
+
     for (auto j = max_level_ - 1; j > level; --j) {
         result = search_one_graph(data, route_graphs_[j], basic_flatten_codes_, param);
         param.ep_ = result.top().second;
@@ -808,6 +810,7 @@ HGraph::resize(uint64_t new_size) {
         vsag::Vector<std::shared_mutex>(new_size, allocator_).swap(this->neighbors_mutex_);
         pool_ = std::make_shared<hnswlib::VisitedListPool>(new_size, allocator_);
         labels_.resize(new_size);
+        bottom_graph_->Resize(new_size);
         this->max_capacity_ = new_size;
     }
 }

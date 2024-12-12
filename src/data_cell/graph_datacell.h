@@ -54,6 +54,9 @@ public:
     void
     GetNeighbors(InnerIdType id, Vector<InnerIdType>& neighbor_ids) const override;
 
+    void
+    Resize(InnerIdType new_size) override;
+
     inline void
     SetIO(std::shared_ptr<BasicIO<IOTmpl>> io) {
         this->io_ = io;
@@ -136,6 +139,19 @@ GraphDataCell<IOTmpl, false>::GetNeighbors(InnerIdType id,
     start += sizeof(neighbor_count);
     this->io_->Read(
         neighbor_ids.size() * sizeof(InnerIdType), start, (uint8_t*)(neighbor_ids.data()));
+}
+
+template <typename IOTmpl>
+void
+GraphDataCell<IOTmpl, false>::Resize(InnerIdType new_size) {
+    if (new_size < this->max_capacity_) {
+        return;
+    }
+    this->max_capacity_ = new_size;
+    uint64_t io_size = new_size * code_line_size_;
+    uint8_t end_flag =
+        127;  // the value is meaningless, only to occupy the position for io allocate
+    this->io_->Write(&end_flag, 1, io_size);
 }
 
 template <typename IOTmpl>
