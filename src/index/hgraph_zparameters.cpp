@@ -131,7 +131,7 @@ const std::string HGraphParameters::DEFAULT_HGRAPH_PARAMS = format_map(
         },
         "{BUILD_PARAMS_KEY}": {
             "{BUILD_EF_CONSTRUCTION}": 400,
-            "{BUILD_THREAD_COUNT}": 5
+            "{BUILD_THREAD_COUNT}": 100
         }
     })",
     DEFAULT_MAP);

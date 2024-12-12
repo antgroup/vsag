@@ -203,7 +203,7 @@ private:
     uint64_t max_level_{0};
 
     uint64_t ef_construct_{400};
-    std::shared_mutex global_mutex_;
+    mutable std::shared_mutex global_mutex_;
 
     // Locks operations with element by label value
     mutable vsag::Vector<std::mutex> label_op_mutex_;

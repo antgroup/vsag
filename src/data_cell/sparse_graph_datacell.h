@@ -40,6 +40,9 @@ public:
     void
     GetNeighbors(InnerIdType id, Vector<InnerIdType>& neighbor_ids) const override;
 
+    void
+    Resize(InnerIdType new_size) override;
+
     /****
      * prefetch neighbors of a base point with id
      * @param id of base point
