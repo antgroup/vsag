@@ -1,0 +1,42 @@
+name: Coverage
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  coverage:
+    name: Test Coverage
+    runs-on: ubuntu-latest
+    container:
+      image: vsaglib/vsag:ubuntu
+    steps:
+      - uses: actions/checkout@v4
+      - name: Load Cache
+        uses: actions/cache@v4.1.2
+        with:
+          path: ./build/
+          key: build-${{ hashFiles('./CMakeLists.txt') }}-${{ hashFiles('./.circleci/fresh_ci_cache.commit') }}
+      - name: Compile
+        run: make cov
+      - name: Run Test
+        run: |
+          ./scripts/test_parallel_bg.sh
+          ./build/mockimpl/tests_mockimpl -d yes ${UT_FILTER} --allow-running-no-tests ${UT_SHARD}
+      - name: Collect Coverage Info
+        run: bash scripts/collect_cpp_coverage.sh
+      - name: Generate HTML
+        run: genhtml --output-directory coverage/html coverage/coverage.info
+      - name: Upload HTML coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report-${{ github.run_id }}
+          path: coverage/html/
+          compression-level: 1
+          retention-days: 3
+          overwrite: 'true'
+      - name: Set Threshold
+        run: bash ./scripts/check_cov.sh
+
