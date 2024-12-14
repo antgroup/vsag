@@ -20,6 +20,7 @@
 #include <vector>
 
 #include "index/index_common_param.h"
+#include "inner_string_params.h"
 #include "quantizer.h"
 #include "scalar_quantization_trainer.h"
 #include "simd/normalize.h"
@@ -67,6 +68,11 @@ public:
 
     inline void
     DeserializeImpl(StreamReader& reader);
+
+    [[nodiscard]] std::string
+    NameImpl() const {
+        return QUANTIZATION_TYPE_VALUE_SQ4;
+    }
 
 private:
     std::vector<DataType> lower_bound_{};
