@@ -172,6 +172,16 @@ public:
         cast().ReleaseComputerImpl(computer);
     }
 
+    [[nodiscard]] virtual std::string
+    Name() const {
+        return cast().NameImpl();
+    }
+
+    [[nodiscard]] MetricType
+    Metric() const {
+        return this->metric_;
+    }
+
     /**
      * @brief Get the size of the encoded code in bytes.
      *

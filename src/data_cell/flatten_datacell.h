@@ -70,6 +70,12 @@ public:
         io_->Prefetch(id * code_size_);
     };
 
+    [[nodiscard]] std::string
+    GetQuantizerName() override;
+
+    [[nodiscard]] MetricType
+    GetMetricType() override;
+
     [[nodiscard]] const uint8_t*
     GetCodesById(InnerIdType id, bool& need_release) const override;
 
@@ -174,6 +180,18 @@ FlattenDataCell<QuantTmpl, IOTmpl>::BatchInsertVector(const float* vectors,
             this->InsertVector(vectors + dim * i, idx[i]);
         }
     }
+}
+
+template <typename QuantTmpl, typename IOTmpl>
+std::string
+FlattenDataCell<QuantTmpl, IOTmpl>::GetQuantizerName() {
+    return this->quantizer_->Name();
+}
+
+template <typename QuantTmpl, typename IOTmpl>
+MetricType
+FlattenDataCell<QuantTmpl, IOTmpl>::GetMetricType() {
+    return this->quantizer_->Metric();
 }
 
 template <typename QuantTmpl, typename IOTmpl>

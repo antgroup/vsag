@@ -15,6 +15,8 @@
 
 #include "index_feature_list.h"
 
+#include <fmt/format-inl.h>
+
 #include <stdexcept>
 
 namespace vsag {
@@ -31,11 +33,12 @@ IndexFeatureList::IndexFeatureList()
 }
 
 bool
-IndexFeatureList::CheckFeature(IndexFeature feature) {
-    if (static_cast<uint32_t>(feature) >= feature_count_) {
-        throw std::runtime_error("wrong feature");
+IndexFeatureList::CheckFeature(IndexFeature feature) const {
+    auto val = static_cast<uint32_t>(feature);
+    if (val >= feature_count_ or val == 0) {
+        throw std::invalid_argument(fmt::format("wrong feature value: {}", val));
     } else {
-        auto [x, y] = get_pos(static_cast<uint32_t>(feature));
+        auto [x, y] = get_pos(val);
         return data_[x] & (1U << y);
     }
 }
@@ -51,6 +54,13 @@ IndexFeatureList::SetFeature(vsag::IndexFeature feature, bool val) {
         } else {
             data_[x] &= ~(1U << y);
         }
+    }
+}
+
+void
+IndexFeatureList::SetFeatures(const std::vector<IndexFeature>& features, bool val) {
+    for (auto feature : features) {
+        this->SetFeature(feature, val);
     }
 }
 

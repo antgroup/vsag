@@ -22,6 +22,7 @@
 #include <nlohmann/json.hpp>
 
 #include "index/index_common_param.h"
+#include "inner_string_params.h"
 #include "quantizer.h"
 #include "scalar_quantization_trainer.h"
 #include "simd/normalize.h"
@@ -70,6 +71,11 @@ public:
 
     inline void
     ReleaseComputerImpl(Computer<SQ8Quantizer<metric>>& computer) const;
+
+    [[nodiscard]] std::string
+    NameImpl() const {
+        return QUANTIZATION_TYPE_VALUE_SQ8;
+    }
 
 public:
     Vector<DataType> diff_;

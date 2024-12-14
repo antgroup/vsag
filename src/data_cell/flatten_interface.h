@@ -61,6 +61,12 @@ public:
     virtual void
     Prefetch(InnerIdType id) = 0;
 
+    [[nodiscard]] virtual std::string
+    GetQuantizerName() = 0;
+
+    [[nodiscard]] virtual MetricType
+    GetMetricType() = 0;
+
 public:
     virtual void
     SetMaxCapacity(InnerIdType capacity) {

@@ -21,7 +21,7 @@ enum IndexFeature {
     NEED_TRAIN = 1, /**< Indicates that the class needs to be trained */
 
     SUPPORT_BUILD,                     /**< Supports building the index */
-    SUPPORT_ADD,                       /**< Supports adding new elements */
+    SUPPORT_ADD_AFTER_BUILD,           /**< Supports adding new elements after building*/
     SUPPORT_ADD_FROM_EMPTY,            /**< Supports adding elements to an empty index */
     SUPPORT_KNN_SEARCH,                /**< Supports K-nearest neighbor search */
     SUPPORT_KNN_SEARCH_WITH_ID_FILTER, /**< Supports K-nearest neighbor search with ID filtering */

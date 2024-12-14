@@ -27,8 +27,10 @@
 #include "data_cell/flatten_interface.h"
 #include "data_cell/graph_interface.h"
 #include "index/index_common_param.h"
+#include "index_feature_list.h"
 #include "typing.h"
 #include "vsag/index.h"
+#include "vsag/index_feature.h"
 
 namespace vsag {
 class HGraph {
@@ -104,6 +106,9 @@ public:
     tl::expected<float, Error>
     CalculateDistanceById(const float* vector, int64_t id) const;
 
+    tl::expected<bool, Error>
+    CheckFeature(IndexFeature feature) const;
+
     inline void
     SetBuildThreadsCount(uint64_t count) {
         this->build_thread_count_ = count;
@@ -176,6 +181,9 @@ private:
     void
     add_one_point(const float* data, int level, InnerIdType id);
 
+    void
+    init_features();
+
 private:
     FlattenInterfacePtr basic_flatten_codes_{nullptr};
     FlattenInterfacePtr high_precise_codes_{nullptr};
@@ -218,5 +226,7 @@ private:
     uint64_t build_thread_count_{100};
 
     InnerIdType max_capacity_{0};
+
+    IndexFeatureList feature_list_{};
 };
 }  // namespace vsag

@@ -134,6 +134,11 @@ public:
         return this->hgraph_->GetMemoryUsage();
     }
 
+    tl::expected<bool, Error>
+    CheckFeature(IndexFeature feature) const override {
+        SAFE_CALL(return this->hgraph_->CheckFeature(feature));
+    }
+
 private:
     std::unique_ptr<HGraph> hgraph_{nullptr};
 };

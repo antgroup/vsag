@@ -25,11 +25,14 @@ class IndexFeatureList {
 public:
     explicit IndexFeatureList();
 
-    bool
-    CheckFeature(IndexFeature feature);
+    [[nodiscard]] bool
+    CheckFeature(IndexFeature feature) const;
 
     void
     SetFeature(IndexFeature feature, bool val = true);
+
+    void
+    SetFeatures(const std::vector<IndexFeature>& features, bool val = true);
 
 private:
     std::vector<uint8_t> data_{};

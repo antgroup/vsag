@@ -18,6 +18,7 @@
 #include <cstring>
 
 #include "index/index_common_param.h"
+#include "inner_string_params.h"
 #include "nlohmann/json.hpp"
 #include "quantizer.h"
 #include "simd/fp32_simd.h"
@@ -69,6 +70,11 @@ public:
 
     inline void
     ReleaseComputerImpl(Computer<FP32Quantizer<metric>>& computer) const;
+
+    [[nodiscard]] std::string
+    NameImpl() const {
+        return QUANTIZATION_TYPE_VALUE_FP32;
+    }
 };
 
 template <MetricType metric>
