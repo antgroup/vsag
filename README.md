@@ -83,6 +83,17 @@ Thrive together in VSAG community with users and developers from all around the 
   - support automated parameter
   - support sparse vector searching
 
+## Reference
+Reference to cite when you use VSAG in a research paper:
+```
+@article{Yang2024EffectiveAG,
+  title={Effective and General Distance Computation for Approximate Nearest Neighbor Search},
+  author={Mingyu Yang and Wentao Li and Jiabao Jin and Xiaoyao Zhong and Xiangyu Wang and Zhitao Shen and Wei Jia and Wei Wang},
+  year={2024},
+  url={https://arxiv.org/abs/2404.16322}
+}
+```
+
 ## Star History
 
 [![Star History Chart](https://api.star-history.com/svg?repos=antgroup/vsag&type=Date)](https://star-history.com/#antgroup/vsag&Date)
