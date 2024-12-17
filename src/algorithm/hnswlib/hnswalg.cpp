@@ -1271,7 +1271,8 @@ HierarchicalNSW::addPoint(const void* data_point, LabelType label, int level) {
         }
 
         if (cur_element_count_ >= max_elements_) {
-            resizeIndex(max_elements_ + data_element_per_block_);
+            size_t extend_size = std::min(max_elements_, data_element_per_block_);
+            resizeIndex(max_elements_ + extend_size);
         }
 
         cur_c = cur_element_count_;
