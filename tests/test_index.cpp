@@ -28,102 +28,32 @@ Intersection(const int64_t* x, int64_t x_count, const int64_t* y, int64_t y_coun
             ++result;
         }
     }
-
     return result;
 }
 
-std::unordered_map<std::string, TestDatasetPtr> TestIndex::datasets = {};
-
-TestIndex::IndexPtr
-TestIndex::FastGeneralTest(const std::string& name,
-                           const std::string& build_param,
-                           const std::string& search_parameters,
-                           const std::string& metric_type,
-                           int64_t dim,
-                           IndexStatus end_status) const {
-    auto dataset = TestIndex::GenerateAndSetDataset<float>(dim, 1000);
-
-    auto top_k = 10;
-    auto range = 0.01f;
-
-    vsag::IndexPtr index{nullptr};
-
-    // Test Factory
-    { index = TestFactory(name, build_param, true); }
-    if (end_status == IndexStatus::Factory) {
-        return index;
-    }
-
-    // Test Build
-    { TestBuildIndex(index, dim); }
-    if (end_status == IndexStatus::Build) {
-        return index;
-    }
-
-    // Test KnnSearch and RangeSearch
-    {
-        TestKnnSearch(index, dataset, search_parameters, top_k, 0.989);
-        TestRangeSearch(index, dataset, search_parameters, range, 0.989);
-    }
-
-    // Serialize & Deserialize
-    {
-        fixtures::TempDir dir("serialize");
-        auto filename = dir.GenerateRandomFile();
-        TestSerializeFile(index, filename, true);
-
-        auto another_index = TestDeserializeFile(filename, name, build_param, true);
-
-        TestKnnSearch(another_index, dataset, search_parameters, top_k, 0.989);
-        TestRangeSearch(another_index, dataset, search_parameters, range, 0.989);
-        //        TestCalcDistanceById(another_index, dataset, metric_type);
-        if (end_status == IndexStatus::DeSerialize) {
-            return another_index;
-        }
-    }
-    return index;
-}
-
-TestIndex::IndexPtr
-TestIndex::TestFactory(const std::string& name,
-                       const std::string& build_param,
-                       bool expect_success) {
-    auto created_index = vsag::Factory::CreateIndex(name, build_param);
-    REQUIRE(created_index.has_value() == expect_success);
-    return created_index.value();
-}
-
 void
-TestIndex::TestBuildIndex(const IndexPtr& index, int64_t dim, bool expected_success) const {
-    auto dataset = GenerateAndSetDataset<float>(dim, dataset_base_count)->base_;
-    TestBuildIndex(index, dataset, expected_success);
-}
-
-void
-TestIndex::TestBuildIndex(const IndexPtr& index, const DatasetPtr& dataset, bool expected_success) {
-    auto build_index = index->Build(dataset);
+TestIndex::TestBuildIndex(const IndexPtr& index,
+                          const TestDatasetPtr& dataset,
+                          bool expected_success) {
+    auto build_index = index->Build(dataset->base_);
     if (expected_success) {
         REQUIRE(build_index.has_value());
         // check the number of vectors in index
-        REQUIRE(index->GetNumElements() == dataset->GetNumElements());
+        REQUIRE(index->GetNumElements() == dataset->base_->GetNumElements());
     } else {
         REQUIRE(build_index.has_value() == expected_success);
     }
 }
 
 void
-TestIndex::TestAddIndex(const IndexPtr& index, int64_t dim, bool expected_success) const {
-    auto dataset = GenerateAndSetDataset<float>(dim, dataset_base_count)->base_;
-    TestAddIndex(index, dataset, expected_success);
-}
-
-void
-TestIndex::TestAddIndex(const IndexPtr& index, const DatasetPtr& dataset, bool expected_success) {
-    auto add_index = index->Add(dataset);
+TestIndex::TestAddIndex(const IndexPtr& index,
+                        const TestDatasetPtr& dataset,
+                        bool expected_success) {
+    auto add_index = index->Add(dataset->base_);
     if (expected_success) {
         REQUIRE(add_index.has_value());
         // check the number of vectors in index
-        REQUIRE(index->GetNumElements() == dataset->GetNumElements());
+        REQUIRE(index->GetNumElements() == dataset->base_->GetNumElements());
     } else {
         REQUIRE(not add_index.has_value());
     }
@@ -131,22 +61,34 @@ TestIndex::TestAddIndex(const IndexPtr& index, const DatasetPtr& dataset, bool e
 
 void
 TestIndex::TestContinueAdd(const IndexPtr& index,
-                           int64_t dim,
-                           int64_t count,
+                           const TestDatasetPtr& dataset,
                            bool expected_success) {
-    auto cur_count = index->GetNumElements();
-    for (auto i = 0; i < count; ++i) {
-        auto one_vector = fixtures::generate_one_dataset(dim, 1);
-        delete[] one_vector->GetIds();
-        auto ids = new int64_t[1];
-        ids[0] = i + cur_count;
-        one_vector->Ids(ids);
+    auto base_count = dataset->base_->GetNumElements();
+    int64_t temp_count = base_count / 2;
+    auto dim = dataset->base_->GetDim();
+    auto temp_dataset = vsag::Dataset::Make();
+    temp_dataset->Dim(dim)
+        ->Ids(dataset->base_->GetIds())
+        ->NumElements(temp_count)
+        ->Float32Vectors(dataset->base_->GetFloat32Vectors())
+        ->Owner(false);
+    index->Build(temp_dataset);
+    auto rest_count = base_count - temp_count;
+    for (uint64_t j = rest_count; j < base_count; ++j) {
+        auto data_one = vsag::Dataset::Make();
+        data_one->Dim(dim)
+            ->Ids(dataset->base_->GetIds() + j)
+            ->NumElements(1)
+            ->Float32Vectors(dataset->base_->GetFloat32Vectors() + j * dim)
+            ->Owner(false);
+        auto add_index = index->Add(data_one);
         if (expected_success) {
-            REQUIRE(index->Add(one_vector).has_value());
+            REQUIRE(add_index.has_value());
+            // check the number of vectors in index
+            REQUIRE(index->GetNumElements() == (j + 1));
+        } else {
+            REQUIRE(not add_index.has_value());
         }
-    }
-    if (expected_success) {
-        REQUIRE(index->GetNumElements() == cur_count + count);
     }
 }
 
@@ -154,15 +96,15 @@ void
 TestIndex::TestKnnSearch(const IndexPtr& index,
                          const TestDatasetPtr& dataset,
                          const std::string& search_param,
-                         int topk,
                          float recall,
                          bool expected_success) {
     auto queries = dataset->query_;
     auto query_count = queries->GetNumElements();
     auto dim = queries->GetDim();
     auto gts = dataset->ground_truth_;
-    auto gt_topK = gts->GetDim();
+    auto gt_topK = dataset->top_k;
     float cur_recall = 0.0f;
+    auto topk = gt_topK;
     for (auto i = 0; i < query_count; ++i) {
         auto query = vsag::Dataset::Make();
         query->NumElements(1)
@@ -187,15 +129,15 @@ void
 TestIndex::TestRangeSearch(const IndexPtr& index,
                            const TestDatasetPtr& dataset,
                            const std::string& search_param,
-                           float radius,
                            float recall,
                            int64_t limited_size,
                            bool expected_success) {
-    auto queries = dataset->query_;
+    auto queries = dataset->range_query_;
     auto query_count = queries->GetNumElements();
     auto dim = queries->GetDim();
-    auto gts = dataset->ground_truth_;
+    auto gts = dataset->range_ground_truth_;
     auto gt_topK = gts->GetDim();
+    const auto& radius = dataset->range_radius_;
     float cur_recall = 0.0f;
     for (auto i = 0; i < query_count; ++i) {
         auto query = vsag::Dataset::Make();
@@ -203,7 +145,7 @@ TestIndex::TestRangeSearch(const IndexPtr& index,
             ->Dim(dim)
             ->Float32Vectors(queries->GetFloat32Vectors() + i * dim)
             ->Owner(false);
-        auto res = index->RangeSearch(query, radius, search_param, limited_size);
+        auto res = index->RangeSearch(query, radius[i], search_param, limited_size);
         REQUIRE(res.has_value() == expected_success);
         if (!expected_success) {
             return;
@@ -215,102 +157,101 @@ TestIndex::TestRangeSearch(const IndexPtr& index,
         auto gt = gts->GetIds() + gt_topK * i;
         auto val = Intersection(gt, gt_topK, result, res.value()->GetDim());
         cur_recall += static_cast<float>(val) / static_cast<float>(gt_topK);
-        auto has_func_cal_dis_by_id =
-            index->CalcDistanceById(query->GetFloat32Vectors(), result[0]);
-        if (has_func_cal_dis_by_id.has_value()) {
-            for (int j = 0; j < res.value()->GetDim(); ++j) {
-                REQUIRE(index->CalcDistanceById(query->GetFloat32Vectors(), result[j]) ==
-                        res.value()->GetDistances()[j]);
-            }
+    }
+    REQUIRE(cur_recall > recall * query_count);
+}
+void
+TestIndex::TestFilterSearch(const TestIndex::IndexPtr& index,
+                            const TestDatasetPtr& dataset,
+                            const std::string& search_param,
+                            float recall,
+                            bool expected_success) {
+    auto queries = dataset->filter_query_;
+    auto query_count = queries->GetNumElements();
+    auto dim = queries->GetDim();
+    auto gts = dataset->filter_ground_truth_;
+    auto gt_topK = dataset->top_k;
+    float cur_recall = 0.0f;
+    auto topk = gt_topK;
+    for (auto i = 0; i < query_count; ++i) {
+        auto query = vsag::Dataset::Make();
+        query->NumElements(1)
+            ->Dim(dim)
+            ->Float32Vectors(queries->GetFloat32Vectors() + i * dim)
+            ->Owner(false);
+        auto res = index->KnnSearch(query, topk, search_param, dataset->filter_function_);
+        REQUIRE(res.has_value() == expected_success);
+        if (!expected_success) {
+            return;
         }
+        REQUIRE(res.value()->GetDim() == topk);
+        auto result = res.value()->GetIds();
+        auto gt = gts->GetIds() + gt_topK * i;
+        auto val = Intersection(gt, gt_topK, result, topk);
+        cur_recall += static_cast<float>(val) / static_cast<float>(gt_topK);
     }
     REQUIRE(cur_recall > recall * query_count);
 }
 
 void
-TestIndex::TestCalcDistanceById(const IndexPtr& index,
-                                const TestDatasetPtr& dataset,
-                                const std::string& metric_str,
-                                float error) {
-    int64_t dim = dataset->base_->GetDim();
-    auto query = fixtures::generate_one_dataset(dim, 1);
-    for (int j = 0; j < 10; ++j) {
-        auto id = fixtures::RandomValue<int>(0, 999);
-
-        auto result = index->CalcDistanceById(query->GetFloat32Vectors(), id);
-        const auto data = dataset->base_->GetFloat32Vectors() + dim * id;
-        float score = 0;
-        if (metric_str == std::string("l2")) {
-            score = vsag::FP32ComputeL2Sqr(query->GetFloat32Vectors(), data, dim);
-        } else if (metric_str == std::string("ip")) {
-            score = 1 - vsag::FP32ComputeIP(query->GetFloat32Vectors(), data, dim);
-        } else if (metric_str == std::string("cosine")) {
-            float mold_query =
-                vsag::FP32ComputeIP(query->GetFloat32Vectors(), query->GetFloat32Vectors(), dim);
-            float mold_base = vsag::FP32ComputeIP(data, data, dim);
-            score = 1 - vsag::FP32ComputeIP(query->GetFloat32Vectors(), data, dim) /
-                            std::sqrt(mold_query * mold_base);
+TestIndex::TestCalcDistanceById(const IndexPtr& index, const TestDatasetPtr& dataset, float error) {
+    auto queries = dataset->query_;
+    auto query_count = queries->GetNumElements();
+    auto dim = queries->GetDim();
+    auto gts = dataset->ground_truth_;
+    auto gt_topK = dataset->top_k;
+    for (auto i = 0; i < query_count; ++i) {
+        auto query = vsag::Dataset::Make();
+        query->NumElements(1)
+            ->Dim(dim)
+            ->Float32Vectors(queries->GetFloat32Vectors() + i * dim)
+            ->Owner(false);
+        for (auto j = 0; j < gt_topK; ++j) {
+            auto id = gts->GetIds()[i * gt_topK + j];
+            auto dist = gts->GetDistances()[i * gt_topK + j];
+            auto result = index->CalcDistanceById(query->GetFloat32Vectors(), id);
+            REQUIRE(result.has_value());
+            REQUIRE(std::abs(dist - result.value()) < error);
         }
-        float return_score = result.value();
-        REQUIRE(std::abs(return_score - score) < error);
     }
 }
 void
-TestIndex::TestSerializeFile(const TestIndex::IndexPtr& index,
-                             const std::string& path,
+TestIndex::TestSerializeFile(const IndexPtr& index_from,
+                             const IndexPtr& index_to,
+                             const TestDatasetPtr& dataset,
+                             const std::string& search_param,
                              bool expected_success) {
+    auto dir = fixtures::TempDir("serialize");
+    auto path = dir.GenerateRandomFile();
     std::ofstream outfile(path, std::ios::out | std::ios::binary);
-    auto serialize_index = index->Serialize(outfile);
+    auto serialize_index = index_from->Serialize(outfile);
     REQUIRE(serialize_index.has_value() == expected_success);
     outfile.close();
-}
 
-TestIndex::IndexPtr
-TestIndex::TestDeserializeFile(const std::string& path,
-                               const std::string& name,
-                               const std::string& param,
-                               bool expected_success) {
-    auto another_index = TestFactory(name, param, true);
     std::ifstream infile(path, std::ios::in | std::ios::binary);
-    auto deserialize_index = another_index->Deserialize(infile);
+    auto deserialize_index = index_to->Deserialize(infile);
     REQUIRE(deserialize_index.has_value() == expected_success);
     infile.close();
-    return another_index;
-}
 
-template <typename T>
-static T*
-CopyVector(const std::vector<T>& vec) {
-    auto result = new T[vec.size()];
-    memcpy(result, vec.data(), vec.size() * sizeof(T));
-    return result;
-}
-
-TestDatasetPtr
-TestIndex::GenerateDatasetFloat(int64_t dim, int64_t count) {
-    auto base = vsag::Dataset::Make();
-    auto [ids, vectors] =
-        generate_ids_and_vectors(count, dim, true, static_cast<int>(time(nullptr)));
-    auto bias = 1000007;
-    for (auto& id : ids) {
-        id += bias;
+    const auto& queries = dataset->query_;
+    auto query_count = queries->GetNumElements();
+    auto dim = queries->GetDim();
+    auto topk = 10;
+    for (auto i = 0; i < query_count; ++i) {
+        auto query = vsag::Dataset::Make();
+        query->NumElements(1)
+            ->Dim(dim)
+            ->Float32Vectors(queries->GetFloat32Vectors() + i * dim)
+            ->Owner(false);
+        auto res_from = index_from->KnnSearch(query, topk, search_param);
+        auto res_to = index_to->KnnSearch(query, topk, search_param);
+        REQUIRE(res_from.has_value());
+        REQUIRE(res_to.has_value());
+        REQUIRE(res_from.value()->GetDim() == res_to.value()->GetDim());
+        for (auto j = 0; j < topk; ++j) {
+            REQUIRE(res_to.value()->GetIds()[j] == res_from.value()->GetIds()[j]);
+        }
     }
-    base->Dim(dim)
-        ->NumElements(count)
-        ->Float32Vectors(CopyVector(vectors))
-        ->Ids(CopyVector(ids))
-        ->Owner(true);
-    int64_t query_count = count / 10;
-    auto start = random() % (count - query_count);
-    auto query = vsag::Dataset::Make();
-    query->Dim(dim)
-        ->NumElements(query_count)
-        ->Float32Vectors(base->GetFloat32Vectors() + start * dim)
-        ->Owner(false);
-    auto gt = vsag::Dataset::Make();  // TODO(LHT) brute_force
-    gt->Dim(1)->NumElements(query_count)->Ids(base->GetIds() + start)->Owner(false);
-    auto dataset = std::make_shared<TestDataset>(base, query, gt);
-    return dataset;
 }
 
 }  // namespace fixtures

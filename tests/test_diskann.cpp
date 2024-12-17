@@ -20,13 +20,21 @@
 #include <iostream>
 #include <nlohmann/json.hpp>
 
+#include "fixtures/test_dataset_pool.h"
 #include "test_index.h"
 #include "vsag/errors.h"
 #include "vsag/vsag.h"
 
 const std::string tmp_dir = "/tmp/";
+namespace fixtures {
+class DiskANNTestIndex : public fixtures::TestIndex {
+public:
+    static TestDatasetPool pool;
+};
+TestDatasetPool DiskANNTestIndex::pool{};
 
-TEST_CASE_METHOD(fixtures::TestIndex, "diskann build test", "[ft][index][diskann]") {
+}  // namespace fixtures
+TEST_CASE_METHOD(fixtures::DiskANNTestIndex, "diskann build test", "[ft][index][diskann]") {
     vsag::Options::Instance().logger()->SetLevel(vsag::Logger::Level::kDEBUG);
 
     auto test_dim_count = 3;
@@ -48,11 +56,12 @@ TEST_CASE_METHOD(fixtures::TestIndex, "diskann build test", "[ft][index][diskann
             }}
         }}
     )";
-
+    auto count = 1000;
     for (auto dim : dims) {
         auto param = fmt::format(build_parameter_json, metric_type, dim, pq_sample_rate);
         auto index = TestFactory(name, param, true);
-        TestBuildIndex(index, dim);
+        auto dataset = pool.GetDatasetAndCreate(dim, count, metric_type);
+        TestBuildIndex(index, dataset, true);
     }
 }
 

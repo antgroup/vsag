@@ -15,7 +15,8 @@
 
 #pragma once
 
-#include <utility>
+#include <functional>
+#include <vector>
 
 #include "vsag/dataset.h"
 namespace fixtures {
@@ -24,14 +25,24 @@ class TestDataset {
 public:
     using DatasetPtr = vsag::DatasetPtr;
 
-    TestDataset(DatasetPtr base, DatasetPtr query, DatasetPtr ground_truth)
-        : base_(std::move(base)),
-          query_(std::move(query)),
-          ground_truth_(std::move(ground_truth)){};
+    TestDataset(uint64_t dim, uint64_t count, std::string metric_str = "l2");
 
     DatasetPtr base_{nullptr};
+
     DatasetPtr query_{nullptr};
     DatasetPtr ground_truth_{nullptr};
+    int64_t top_k{10};
+
+    DatasetPtr range_query_{nullptr};
+    DatasetPtr range_ground_truth_{nullptr};
+    std::vector<float> range_radius_{0.0f};
+
+    DatasetPtr filter_query_{nullptr};
+    DatasetPtr filter_ground_truth_{nullptr};
+    std::function<bool(int64_t)> filter_function_{nullptr};
+
+    const uint64_t dim_;
+    const uint64_t count_;
 };
 
 using TestDatasetPtr = std::shared_ptr<TestDataset>;
