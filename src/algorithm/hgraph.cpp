@@ -40,6 +40,16 @@ empty_binaryset() {
     return bs;
 }
 
+static uint64_t
+next_multiple_of_power_of_two(uint64_t x, uint64_t n) {
+    if (n > 63) {
+        throw std::runtime_error(fmt::format("n is larger than 63, n is {}", n));
+    }
+    uint64_t y = 1 << n;
+    auto result = (x + y - 1) & ~(y - 1);
+    return result;
+}
+
 HGraph::HGraph(const JsonType& index_param, const vsag::IndexCommonParam& common_param) noexcept
     : index_param_(index_param),
       common_param_(common_param),
@@ -808,12 +818,14 @@ HGraph::add_one_point(const float* data, int level, InnerIdType inner_id) {
 void
 HGraph::resize(uint64_t new_size) {
     auto cur_size = this->neighbors_mutex_.size();
-    if (cur_size < new_size) {
-        vsag::Vector<std::shared_mutex>(new_size, allocator_).swap(this->neighbors_mutex_);
-        pool_ = std::make_shared<hnswlib::VisitedListPool>(new_size, allocator_);
-        labels_.resize(new_size);
-        bottom_graph_->Resize(new_size);
-        this->max_capacity_ = new_size;
+    auto new_size_power_2 =
+        next_multiple_of_power_of_two(new_size, this->resize_increase_count_bit_);
+    if (cur_size < new_size_power_2) {
+        vsag::Vector<std::shared_mutex>(new_size_power_2, allocator_).swap(this->neighbors_mutex_);
+        pool_ = std::make_shared<hnswlib::VisitedListPool>(new_size_power_2, allocator_);
+        labels_.resize(new_size_power_2);
+        bottom_graph_->Resize(new_size_power_2);
+        this->max_capacity_ = new_size_power_2;
     }
 }
 void
