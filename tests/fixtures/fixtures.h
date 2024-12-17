@@ -21,6 +21,7 @@
 #include <tuple>
 #include <vector>
 
+#include "simd/normalize.h"
 #include "vsag/vsag.h"
 
 namespace fixtures {
@@ -28,8 +29,41 @@ namespace fixtures {
 std::vector<int>
 get_common_used_dims(uint64_t count = -1, int seed = 369);
 
+template <typename T, typename RT = typename std::enable_if<std::is_integral_v<T>, T>::type>
+std::vector<RT>
+GenerateVectors(uint64_t count,
+                uint32_t dim,
+                T min = std::numeric_limits<T>::lowest(),
+                T max = std::numeric_limits<T>::max(),
+                int seed = 47) {
+    std::mt19937 rng(seed);
+    std::uniform_int_distribution<T> distrib_real(min, max);
+    std::vector<T> vectors(dim * count);
+    for (int64_t i = 0; i < dim * count; ++i) {
+        vectors[i] = distrib_real(rng);
+    }
+    return vectors;
+}
+
+template <typename T, typename RT = typename std::enable_if<std::is_floating_point_v<T>, T>::type>
+std::vector<RT>
+GenerateVectors(uint64_t count, uint32_t dim, bool need_normalize = true, int seed = 47) {
+    std::mt19937 rng(seed);
+    std::uniform_real_distribution<T> distrib_real;
+    std::vector<T> vectors(dim * count);
+    for (int64_t i = 0; i < dim * count; ++i) {
+        vectors[i] = distrib_real(rng);
+    }
+    if (need_normalize) {
+        for (int64_t i = 0; i < count; ++i) {
+            vsag::Normalize(vectors.data() + i * dim, vectors.data() + i * dim, dim);
+        }
+    }
+    return vectors;
+}
+
 std::vector<float>
-generate_vectors(int64_t num_vectors, int64_t dim, bool need_normalize = true, int seed = 47);
+generate_vectors(uint64_t count, uint32_t dim, bool need_normalize = true, int seed = 47);
 
 std::vector<uint8_t>
 generate_int4_codes(uint64_t count, uint32_t dim, int seed = 47);
@@ -63,21 +97,8 @@ test_knn_recall(const vsag::IndexPtr& index,
                 std::vector<int64_t>& ids,
                 std::vector<float>& vectors);
 
-float
-test_range_recall(const vsag::IndexPtr& index,
-                  const std::string& search_parameters,
-                  int64_t num_vectors,
-                  int64_t dim,
-                  std::vector<int64_t>& ids,
-                  std::vector<float>& vectors);
-
 std::string
 generate_hnsw_build_parameters_string(const std::string& metric_type, int64_t dim);
-
-std::string
-generate_hgraph_build_parameters_string(const std::string& metric_type,
-                                        int64_t dim,
-                                        const std::string& base_quantization_type = "sq8");
 
 vsag::DatasetPtr
 brute_force(const vsag::DatasetPtr& query,
@@ -134,7 +155,7 @@ public:
         std::filesystem::remove_all(path);
     }
 
-    std::string
+    [[nodiscard]] std::string
     GenerateRandomFile() const {
         namespace fs = std::filesystem;
         const std::string chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
@@ -142,7 +163,7 @@ public:
         do {
             fileName = "";
             for (int i = 0; i < 10; i++) {
-                fileName += chars[RandomValue<int>(0, chars.length() - 1)];
+                fileName += chars[RandomValue<uint64_t>(0, chars.length() - 1)];
             }
         } while (fs::exists(path + fileName));
 

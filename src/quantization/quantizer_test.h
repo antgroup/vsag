@@ -60,9 +60,10 @@ TestQuantizerEncodeDecodeSame(Quantizer<T>& quant,
                               int code_max = 15,
                               float error = 1e-5,
                               bool retrain = true) {
-    auto data = fixtures::generate_vectors(count, dim);
-    for (auto& val : data) {
-        val = uint8_t(val * code_max);
+    auto data_uint8 = fixtures::GenerateVectors<uint8_t>(count, dim, 0, 16);
+    std::vector<float> data(dim * count);
+    for (uint64_t i = 0; i < dim * count; ++i) {
+        data[i] = static_cast<float>(data_uint8[i]);
     }
     if (retrain) {
         quant.ReTrain(data.data(), count);
@@ -70,13 +71,12 @@ TestQuantizerEncodeDecodeSame(Quantizer<T>& quant,
 
     // Test EncodeOne & DecodeOne
     for (int k = 0; k < count; k++) {
-        auto idx = random() % count;
         std::vector<uint8_t> codes(quant.GetCodeSize());
-        quant.EncodeOne(data.data() + idx * dim, codes.data());
+        quant.EncodeOne(data.data() + k * dim, codes.data());
         std::vector<float> out_vec(dim);
         quant.DecodeOne(codes.data(), out_vec.data());
         for (int i = 0; i < dim; ++i) {
-            REQUIRE(std::abs(data[idx * dim + i] - out_vec[i]) < error);
+            REQUIRE(std::abs(data[k * dim + i] - out_vec[i]) < error);
         }
     }
 

@@ -21,7 +21,7 @@
 #include <unordered_set>
 
 #include "fmt/format.h"
-#include "test_dataset.h"
+#include "simd/normalize.h"
 #include "vsag/dataset.h"
 
 namespace vsag {
@@ -38,23 +38,10 @@ INT8InnerProductDistance(const void* pVect1, const void* pVect2, const void* qty
 
 namespace fixtures {
 
-void
-normalize(float* input_vector, int64_t dim) {
-    float magnitude = std::numeric_limits<float>::min();
-    for (int64_t i = 0; i < dim; ++i) {
-        magnitude += input_vector[i] * input_vector[i];
-    }
-    magnitude = std::sqrt(magnitude);
-
-    for (int64_t i = 0; i < dim; ++i) {
-        input_vector[i] = input_vector[i] / magnitude;
-    }
-}
-
 std::vector<int>
 get_common_used_dims(uint64_t count, int seed) {
     const std::vector<int> dims = {
-        1,    8,    9,      // generic (dim < 32)
+        7,    8,    9,      // generic (dim < 32)
         32,   33,   48,     // sse(32) + generic(dim < 16)
         64,   65,   70,     // avx(64) + generic(dim < 16)
         96,   97,   109,    // avx(64) + sse(32) + generic(dim < 16)
@@ -75,99 +62,29 @@ get_common_used_dims(uint64_t count, int seed) {
 }
 
 std::vector<float>
-generate_vectors(int64_t num_vectors, int64_t dim, bool need_normalize, int seed) {
-    std::mt19937 rng(seed);
-    std::uniform_real_distribution<> distrib_real;
-    std::vector<float> vectors(dim * num_vectors);
-    for (int64_t i = 0; i < dim * num_vectors; ++i) {
-        vectors[i] = distrib_real(rng);
-    }
-    if (need_normalize) {
-        for (int64_t i = 0; i < num_vectors; ++i) {
-            normalize(vectors.data() + i * dim, dim);
-        }
-    }
-
-    return vectors;
+generate_vectors(uint64_t count, uint32_t dim, bool need_normalize, int seed) {
+    return std::move(GenerateVectors<float>(count, dim, need_normalize, seed));
 }
 
 std::vector<int8_t>
 generate_int8_codes(uint64_t count, uint32_t dim, int seed) {
-    auto code_size = dim;
-    std::vector<int8_t> codes(count * code_size, 0);
-    auto vec = fixtures::generate_vectors(count, dim, true, seed);
-
-    for (int i = 0; i < count; i++) {
-        for (int d = 0; d < dim; d++) {
-            float delta = vec[d + i * dim];
-            if (delta < 0) {
-                delta = 0;
-            } else if (delta > 0.999) {
-                delta = 1;
-            }
-            // Note that here we use overflowed uint8 value to obtain int8 value
-            codes[code_size * i + d] = 255.0 * delta;
-        }
-    }
-    return codes;
+    return GenerateVectors<int8_t>(count, dim, seed);
 }
 
 std::vector<uint8_t>
 generate_int4_codes(uint64_t count, uint32_t dim, int seed) {
-    auto code_size = (dim + 1) / 2;
-    std::vector<uint8_t> codes(count * code_size, 0);
-    auto vec = fixtures::generate_vectors(count, dim, true, seed);
-
-    for (int i = 0; i < count; i++) {
-        auto pos = code_size * i;
-
-        for (int d = 0; d < dim; d++) {
-            float delta = vec[d + i * dim];
-            if (delta < 0) {
-                delta = 0;
-            } else if (delta > 0.999) {
-                delta = 1;
-            }
-            uint8_t scaled = 15.0 * delta;
-
-            if (d & 1) {
-                codes[pos + (d >> 1)] |= scaled << 4;
-            } else {
-                codes[pos + (d >> 1)] = 0;
-                codes[pos + (d >> 1)] |= scaled;
-            }
-        }
-    }
-    return codes;
+    return generate_uint8_codes(count, dim, seed);
 }
 
 std::vector<uint8_t>
 generate_uint8_codes(uint64_t count, uint32_t dim, int seed) {
-    auto code_size = dim;
-    std::vector<uint8_t> codes(count * code_size, 0);
-    auto vec = fixtures::generate_vectors(count, dim, true, seed);
-
-    for (int i = 0; i < count; i++) {
-        for (int d = 0; d < dim; d++) {
-            float delta = vec[d + i * dim];
-            if (delta < 0) {
-                delta = 0;
-            } else if (delta > 0.999) {
-                delta = 1;
-            }
-            codes[i * dim + d] = static_cast<uint8_t>(255.0 * delta);
-        }
-    }
-    return codes;
+    return GenerateVectors<uint8_t>(count, dim, seed);
 }
 
 std::tuple<std::vector<int64_t>, std::vector<float>>
 generate_ids_and_vectors(int64_t num_vectors, int64_t dim, bool need_normalize, int seed) {
     std::vector<int64_t> ids(num_vectors);
-    for (int64_t i = 0; i < num_vectors; ++i) {
-        ids[i] = i;
-    }
-
+    std::iota(ids.begin(), ids.end(), 0);
     return {ids, generate_vectors(num_vectors, dim, need_normalize, seed)};
 }
 
@@ -222,30 +139,6 @@ test_knn_recall(const vsag::IndexPtr& index,
     return recall;
 }
 
-float
-test_range_recall(const vsag::IndexPtr& index,
-                  const std::string& search_parameters,
-                  int64_t num_vectors,
-                  int64_t dim,
-                  std::vector<int64_t>& ids,
-                  std::vector<float>& vectors) {
-    int64_t correct = 0;
-    for (int64_t i = 0; i < num_vectors; ++i) {
-        auto query = vsag::Dataset::Make();
-        query->NumElements(1)->Dim(dim)->Float32Vectors(vectors.data() + i * dim)->Owner(false);
-        auto result = index->RangeSearch(query, 0, search_parameters).value();
-        for (int64_t j = 0; j < result->GetDim(); ++j) {
-            if (ids[i] == result->GetIds()[j]) {
-                ++correct;
-                break;
-            }
-        }
-    }
-
-    float recall = 1.0 * correct / num_vectors;
-    return recall;
-}
-
 std::string
 generate_hnsw_build_parameters_string(const std::string& metric_type, int64_t dim) {
     constexpr auto parameter_temp = R"(
@@ -263,25 +156,6 @@ generate_hnsw_build_parameters_string(const std::string& metric_type, int64_t di
     return build_parameters_str;
 }
 
-std::string
-generate_hgraph_build_parameters_string(const std::string& metric_type,
-                                        int64_t dim,
-                                        const std::string& base_quantization_type) {
-    constexpr auto parameter_temp = R"(
-    {{
-        "dtype": "float32",
-        "metric_type": "{}",
-        "dim": {},
-        "index_param": {{
-            "base_quantization_type": "{}"
-        }}
-    }}
-    )";
-    auto build_parameters_str =
-        fmt::format(parameter_temp, metric_type, dim, base_quantization_type);
-    return build_parameters_str;
-}
-
 vsag::DatasetPtr
 brute_force(const vsag::DatasetPtr& query,
             const vsag::DatasetPtr& base,
@@ -292,8 +166,8 @@ brute_force(const vsag::DatasetPtr& query,
     assert(query->GetNumElements() == 1);
 
     auto result = vsag::Dataset::Make();
-    int64_t* ids = new int64_t[k];
-    float* dists = new float[k];
+    auto* ids = new int64_t[k];
+    auto* dists = new float[k];
     result->Ids(ids)->Distances(dists)->NumElements(k);
 
     std::priority_queue<std::pair<float, int64_t>> bf_result;
@@ -324,11 +198,11 @@ brute_force(const vsag::DatasetPtr& query,
         }
 
         if (bf_result.size() < k) {
-            bf_result.push({dist, base->GetIds()[i]});
+            bf_result.emplace(dist, base->GetIds()[i]);
         } else {
             if (dist < bf_result.top().first) {
                 bf_result.pop();
-                bf_result.push({dist, base->GetIds()[i]});
+                bf_result.emplace(dist, base->GetIds()[i]);
             }
         }
     }
@@ -352,8 +226,8 @@ brute_force(const vsag::DatasetPtr& query,
     assert(query->GetNumElements() == 1);
 
     auto result = vsag::Dataset::Make();
-    int64_t* ids = new int64_t[k];
-    float* dists = new float[k];
+    auto* ids = new int64_t[k];
+    auto* dists = new float[k];
     result->Ids(ids)->Distances(dists)->NumElements(k);
 
     std::priority_queue<std::pair<float, int64_t>> bf_result;
@@ -363,11 +237,11 @@ brute_force(const vsag::DatasetPtr& query,
         float dist = vsag::L2Sqr(
             query->GetFloat32Vectors(), base->GetFloat32Vectors() + i * base->GetDim(), &dim);
         if (bf_result.size() < k) {
-            bf_result.push({dist, base->GetIds()[i]});
+            bf_result.emplace(dist, base->GetIds()[i]);
         } else {
             if (dist < bf_result.top().first) {
                 bf_result.pop();
-                bf_result.push({dist, base->GetIds()[i]});
+                bf_result.emplace(dist, base->GetIds()[i]);
             }
         }
     }
