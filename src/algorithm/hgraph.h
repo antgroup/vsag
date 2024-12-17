@@ -228,5 +228,7 @@ private:
     InnerIdType max_capacity_{0};
 
     IndexFeatureList feature_list_{};
+
+    const uint64_t resize_increase_count_bit_{10};  // 2^resize_increase_count_bit_ for resize count
 };
 }  // namespace vsag
