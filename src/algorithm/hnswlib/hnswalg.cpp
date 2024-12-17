@@ -29,7 +29,6 @@ HierarchicalNSW::HierarchicalNSW(SpaceInterface* s,
                                  bool allow_replace_deleted)
     : allocator_(allocator),
       link_list_locks_(max_elements, allocator),
-      label_op_locks_(MAX_LABEL_OPERATION_LOCKS, allocator),
       allow_replace_deleted_(allow_replace_deleted),
       use_reversed_edges_(use_reversed_edges),
       normalize_(normalize),
@@ -883,7 +882,6 @@ HierarchicalNSW::DeserializeImpl(StreamReader& reader, SpaceInterface* s, size_t
 
     size_links_level0_ = maxM0_ * sizeof(InnerIdType) + sizeof(linklistsizeint);
     vsag::Vector<std::recursive_mutex>(max_elements, allocator_).swap(link_list_locks_);
-    vsag::Vector<std::mutex>(MAX_LABEL_OPERATION_LOCKS, allocator_).swap(label_op_locks_);
 
     rev_size_ = 1.0 / mult_;
     for (size_t i = 0; i < cur_element_count_; i++) {
@@ -932,15 +930,12 @@ HierarchicalNSW::DeserializeImpl(StreamReader& reader, SpaceInterface* s, size_t
 
 const float*
 HierarchicalNSW::getDataByLabel(LabelType label) const {
-    std::lock_guard<std::mutex> lock_label(getLabelOpMutex(label));
-
     std::unique_lock<std::mutex> lock_table(label_lookup_lock_);
     auto search = label_lookup_.find(label);
     if (search == label_lookup_.end() || isMarkedDeleted(search->second)) {
         throw std::runtime_error("Label not found");
     }
     InnerIdType internalId = search->second;
-    lock_table.unlock();
 
     char* data_ptrv = getDataByInternalId(internalId);
     auto* data_ptr = (float*)data_ptrv;
@@ -954,8 +949,6 @@ HierarchicalNSW::getDataByLabel(LabelType label) const {
 void
 HierarchicalNSW::markDelete(LabelType label) {
     // lock all operations with element by label
-    std::unique_lock<std::mutex> lock_label(getLabelOpMutex(label));
-
     std::unique_lock<std::mutex> lock_table(label_lookup_lock_);
     auto search = label_lookup_.find(label);
     if (search == label_lookup_.end()) {
@@ -963,7 +956,6 @@ HierarchicalNSW::markDelete(LabelType label) {
     }
     InnerIdType internalId = search->second;
     label_lookup_.erase(search);
-    lock_table.unlock();
     markDeletedInternal(internalId);
 }
 
@@ -996,8 +988,6 @@ HierarchicalNSW::markDeletedInternal(InnerIdType internalId) {
 void
 HierarchicalNSW::unmarkDelete(LabelType label) {
     // lock all operations with element by label
-    std::unique_lock<std::mutex> lock_label(getLabelOpMutex(label));
-
     std::unique_lock<std::mutex> lock_table(label_lookup_lock_);
     auto search = label_lookup_.find(label);
     if (search == label_lookup_.end()) {
@@ -1033,7 +1023,6 @@ HierarchicalNSW::unmarkDeletedInternal(InnerIdType internalId) {
     */
 bool
 HierarchicalNSW::addPoint(const void* data_point, LabelType label) {
-    std::lock_guard<std::mutex> lock_label(getLabelOpMutex(label));
     if (addPoint(data_point, label, -1) == -1) {
         return false;
     }

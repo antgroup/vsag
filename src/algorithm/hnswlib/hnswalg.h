@@ -56,7 +56,6 @@ const static float THRESHOLD_ERROR = 2e-6;
 
 class HierarchicalNSW : public AlgorithmInterface<float> {
 private:
-    static const InnerIdType MAX_LABEL_OPERATION_LOCKS = 65536;
     static const unsigned char DELETE_MARK = 0x01;
 
     size_t max_elements_ = 0;
@@ -74,9 +73,6 @@ private:
     int max_level_{0};
 
     VisitedListPool* visited_list_pool_{nullptr};
-
-    // Locks operations with element by label value
-    mutable vsag::Vector<std::mutex> label_op_locks_;
 
     std::mutex global_{};
     vsag::Vector<std::recursive_mutex> link_list_locks_;
@@ -147,13 +143,6 @@ public:
 
     bool
     isValidLabel(LabelType label) override;
-
-    inline std::mutex&
-    getLabelOpMutex(LabelType label) const {
-        // calculate hash
-        size_t lock_id = label & (MAX_LABEL_OPERATION_LOCKS - 1);
-        return label_op_locks_[lock_id];
-    }
 
     inline LabelType
     getExternalLabel(InnerIdType internal_id) const {
