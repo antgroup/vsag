@@ -23,7 +23,7 @@
 #include <string>
 #include <unordered_set>
 
-#include "eval_dataset.h"
+#include "eval/eval_dataset.h"
 #include "nlohmann/json.hpp"
 #include "spdlog/spdlog.h"
 #include "vsag/vsag.h"
@@ -31,6 +31,7 @@
 using namespace nlohmann;
 using namespace spdlog;
 using namespace vsag;
+using namespace vsag::eval;
 
 json
 run_test(const std::string& index_name,
