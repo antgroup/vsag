@@ -60,6 +60,8 @@ jobs:
           path: ./build/
       - name: Do Asan Test In ${{ matrix.test_type }}
         run: |
+          echo leak:libomp.so > omp.supp
+          export LSAN_OPTIONS=suppressions=omp.supp
           chmod +x ./build/tests/${{ matrix.test_type }}
           ./build/tests/${{ matrix.test_type }} -d yes ${UT_FILTER} -a --order rand --allow-running-no-tests -o log && cat log
 
