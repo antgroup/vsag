@@ -299,9 +299,10 @@ SQ8ComputeL2Sqr(const float* query,
     for (; i + 15 < dim; i += 16) {
         // Load data into registers
         __m128i code_values = _mm_loadu_si128(reinterpret_cast<const __m128i*>(codes + i));
+        __m512 diff_values = _mm512_loadu_ps(diff + i);
+
         __m512i codes_512 = _mm512_cvtepu8_epi32(code_values);
         __m512 code_floats = _mm512_div_ps(_mm512_cvtepi32_ps(codes_512), _mm512_set1_ps(255.0f));
-        __m512 diff_values = _mm512_loadu_ps(diff + i);
         __m512 lowerBound_values = _mm512_loadu_ps(lowerBound + i);
         __m512 query_values = _mm512_loadu_ps(query + i);
 
@@ -373,19 +374,14 @@ SQ8ComputeCodesL2Sqr(const uint8_t* codes1,
     for (; i + 15 < dim; i += 16) {
         __m128i code1_values = _mm_loadu_si128(reinterpret_cast<const __m128i*>(codes1 + i));
         __m128i code2_values = _mm_loadu_si128(reinterpret_cast<const __m128i*>(codes2 + i));
+        __m512 diff_values = _mm512_loadu_ps(diff + i);
+
         __m512i codes1_512 = _mm512_cvtepu8_epi32(code1_values);
         __m512i codes2_512 = _mm512_cvtepu8_epi32(code2_values);
-        __m512 code1_floats = _mm512_div_ps(_mm512_cvtepi32_ps(codes1_512), _mm512_set1_ps(255.0f));
-        __m512 code2_floats = _mm512_div_ps(_mm512_cvtepi32_ps(codes2_512), _mm512_set1_ps(255.0f));
-        __m512 diff_values = _mm512_loadu_ps(diff + i);
-        __m512 lowerBound_values = _mm512_loadu_ps(lowerBound + i);
-
-        // Perform calculations
-        __m512 scaled_codes1 = _mm512_fmadd_ps(code1_floats, diff_values, lowerBound_values);
-        __m512 scaled_codes2 = _mm512_fmadd_ps(code2_floats, diff_values, lowerBound_values);
-        __m512 val = _mm512_sub_ps(scaled_codes1, scaled_codes2);
-        val = _mm512_mul_ps(val, val);
-        sum = _mm512_add_ps(sum, val);
+        __m512 sub = _mm512_cvtepi32_ps(_mm512_sub_epi32(codes1_512, codes2_512));
+        __m512 scaled = _mm512_mul_ps(sub, _mm512_set1_ps(1.0 / 255.0f));
+        __m512 val = _mm512_mul_ps(scaled, diff_values);
+        sum = _mm512_fmadd_ps(val, val, sum);
     }
 
     // Horizontal addition
