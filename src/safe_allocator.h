@@ -15,6 +15,7 @@
 
 #pragma once
 
+#include <memory>
 #include <new>
 
 #include "default_allocator.h"

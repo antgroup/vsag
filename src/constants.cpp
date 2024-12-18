@@ -22,6 +22,7 @@ const char* const INDEX_HGRAPH = "hgraph";
 const char* const INDEX_DISKANN = "diskann";
 const char* const INDEX_HNSW = "hnsw";
 const char* const INDEX_FRESH_HNSW = "fresh_hnsw";
+const char* const INDEX_PYRAMID = "pyramid";
 const char* const DIM = "dim";
 const char* const NUM_ELEMENTS = "num_elements";
 const char* const IDS = "ids";
@@ -74,6 +75,9 @@ const char* const HNSW_PARAMETER_USE_STATIC = "use_static";
 const char* const HNSW_PARAMETER_REVERSED_EDGES = "use_reversed_edges";
 
 const char* const INDEX_PARAM = "index_param";
+
+const char* const PYRAMID_PARAMETER_SUBINDEX_TYPE = "sub_index_type";
+const char PART_SLASH = '/';
 
 // statstic key
 const char* const STATSTIC_MEMORY = "memory";

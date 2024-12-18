@@ -13,6 +13,9 @@ target_link_libraries (example_engine vsag_static)
 add_executable (simple_hnsw simple_hnsw.cpp)
 target_link_libraries (simple_hnsw vsag_static)
 
+add_executable (simple_pyramid simple_pyramid.cpp)
+target_link_libraries (simple_pyramid vsag_static)
+
 add_executable (simple_hgraph_sq8 simple_hgraph_sq8.cpp)
 target_link_libraries (simple_hgraph_sq8 vsag_static)
 
