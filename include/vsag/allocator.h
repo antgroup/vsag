@@ -40,7 +40,12 @@ public:
     T*
     New(Args&&... args) {
         void* p = Allocate(sizeof(T));
-        return (T*)::new (p) T(std::forward<Args>(args)...);
+        try {
+            return (T*)::new (p) T(std::forward<Args>(args)...);
+        } catch (std::exception& e) {
+            Deallocate(p);
+            throw e;
+        }
     }
 
     template <typename T>
