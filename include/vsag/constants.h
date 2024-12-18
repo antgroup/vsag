@@ -26,6 +26,7 @@ extern const char* const IDS;
 extern const char* const DISTS;
 extern const char* const FLOAT32_VECTORS;
 extern const char* const INT8_VECTORS;
+extern const char* const DATASET_PATHS;
 extern const char* const HNSW_DATA;
 extern const char* const CONJUGATE_GRAPH_DATA;
 extern const char* const DISKANN_PQ;
