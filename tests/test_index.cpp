@@ -338,6 +338,7 @@ TestIndex::TestRangeSearch(const IndexPtr& index,
         query->NumElements(1)
             ->Dim(dim)
             ->Float32Vectors(queries->GetFloat32Vectors() + i * dim)
+            ->Paths(queries->GetPaths() + i)
             ->Owner(false);
         auto res = index->RangeSearch(query, radius[i], search_param, limited_size);
         REQUIRE(res.has_value() == expected_success);
@@ -349,8 +350,8 @@ TestIndex::TestRangeSearch(const IndexPtr& index,
         }
         auto result = res.value()->GetIds();
         auto gt = gts->GetIds() + gt_topK * i;
-        auto val = Intersection(gt, gt_topK, result, res.value()->GetDim());
-        cur_recall += static_cast<float>(val) / static_cast<float>(gt_topK);
+        auto val = Intersection(gt, gt_topK - 1, result, res.value()->GetDim());
+        cur_recall += static_cast<float>(val) / static_cast<float>(gt_topK - 1);
     }
     if (cur_recall <= expected_recall * query_count) {
         WARN(fmt::format("cur_result({}) <= expected_recall * query_count({})",
@@ -377,6 +378,7 @@ TestIndex::TestFilterSearch(const TestIndex::IndexPtr& index,
         query->NumElements(1)
             ->Dim(dim)
             ->Float32Vectors(queries->GetFloat32Vectors() + i * dim)
+            ->Paths(queries->GetPaths() + i)
             ->Owner(false);
         auto res = index->KnnSearch(query, topk, search_param, dataset->filter_function_);
         REQUIRE(res.has_value() == expected_success);
@@ -446,6 +448,7 @@ TestIndex::TestSerializeFile(const IndexPtr& index_from,
         auto query = vsag::Dataset::Make();
         query->NumElements(1)
             ->Dim(dim)
+            ->Paths(queries->GetPaths() + i)
             ->Float32Vectors(queries->GetFloat32Vectors() + i * dim)
             ->Owner(false);
         auto res_from = index_from->KnnSearch(query, topk, search_param);
@@ -529,6 +532,7 @@ TestIndex::TestSerializeBinarySet(const IndexPtr& index_from,
         auto query = vsag::Dataset::Make();
         query->NumElements(1)
             ->Dim(dim)
+            ->Paths(queries->GetPaths() + i)
             ->Float32Vectors(queries->GetFloat32Vectors() + i * dim)
             ->Owner(false);
         auto res_from = index_from->KnnSearch(query, topk, search_param);
@@ -567,6 +571,7 @@ TestIndex::TestSerializeReaderSet(const IndexPtr& index_from,
         auto query = vsag::Dataset::Make();
         query->NumElements(1)
             ->Dim(dim)
+            ->Paths(queries->GetPaths() + i)
             ->Float32Vectors(queries->GetFloat32Vectors() + i * dim)
             ->Owner(false);
         auto res_from = index_from->KnnSearch(query, topk, search_param);

@@ -300,8 +300,11 @@ TestDataset::CreateTestDataset(uint64_t dim,
         dataset->range_ground_truth_ = dataset->ground_truth_;
         dataset->range_radius_.resize(query_count);
         for (uint64_t i = 0; i < query_count; ++i) {
-            dataset->range_radius_[i] = 0.5f * (result.first[i * count + dataset->top_k] +
-                                                result.first[i * count + dataset->top_k - 1]);
+            dataset->range_radius_[i] =
+                0.5f * (dataset->range_ground_truth_
+                            ->GetDistances()[i * dataset->top_k + dataset->top_k - 1] +
+                        dataset->range_ground_truth_
+                            ->GetDistances()[i * dataset->top_k + dataset->top_k - 2]);
         }
         delete[] result.first;
         delete[] result.second;
