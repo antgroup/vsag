@@ -11,6 +11,10 @@ Let's dive in and explore how you can become an integral part of our vibrant ope
 There are two ways to build and develop the VSAG project now.
 
 ### Use Docker(recommended)
+
+![Docker Pulls](https://img.shields.io/docker/pulls/vsaglib/vsag)
+![Docker Image Size](https://img.shields.io/docker/image-size/vsaglib/vsag)
+
 ```bash
 docker pull vsaglib/vsag:ubuntu
 ```
