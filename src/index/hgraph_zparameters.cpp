@@ -23,16 +23,60 @@
 
 namespace vsag {
 
-const std::unordered_map<std::string, std::vector<std::string>> HGraphParameters::EXTERNAL_MAPPING =
-    {{HGRAPH_USE_REORDER, {HGRAPH_USE_REORDER_KEY}},
-     {HGRAPH_BASE_QUANTIZATION_TYPE, {HGRAPH_BASE_CODES_KEY, QUANTIZATION_TYPE_KEY}},
-     {HGRAPH_GRAPH_MAX_DEGREE, {HGRAPH_GRAPH_KEY, GRAPH_PARAMS_KEY, GRAPH_PARAM_MAX_DEGREE}},
-     {HGRAPH_BUILD_EF_CONSTRUCTION, {BUILD_PARAMS_KEY, BUILD_EF_CONSTRUCTION}},
-     {HGRAPH_INIT_CAPACITY, {HGRAPH_GRAPH_KEY, GRAPH_PARAMS_KEY, GRAPH_PARAM_INIT_MAX_CAPACITY}},
-     {HGRAPH_BUILD_THREAD_COUNT, {BUILD_PARAMS_KEY, BUILD_THREAD_COUNT}}};
+static const std::unordered_map<std::string, std::vector<std::string>> EXTERNAL_MAPPING = {
+    {HGRAPH_USE_REORDER, {HGRAPH_USE_REORDER_KEY}},
+    {HGRAPH_BASE_QUANTIZATION_TYPE, {HGRAPH_BASE_CODES_KEY, QUANTIZATION_TYPE_KEY}},
+    {HGRAPH_GRAPH_MAX_DEGREE, {HGRAPH_GRAPH_KEY, GRAPH_PARAMS_KEY, GRAPH_PARAM_MAX_DEGREE}},
+    {HGRAPH_BUILD_EF_CONSTRUCTION, {BUILD_PARAMS_KEY, BUILD_EF_CONSTRUCTION}},
+    {HGRAPH_INIT_CAPACITY, {HGRAPH_GRAPH_KEY, GRAPH_PARAMS_KEY, GRAPH_PARAM_INIT_MAX_CAPACITY}},
+    {HGRAPH_BUILD_THREAD_COUNT, {BUILD_PARAMS_KEY, BUILD_THREAD_COUNT}}};
+
+static const std::string HGRAPH_PARAMS_TEMPLATE =
+    R"(
+    {
+        "{HGRAPH_USE_REORDER_KEY}": false,
+        "{HGRAPH_GRAPH_KEY}": {
+            "{IO_TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
+            "{IO_PARAMS_KEY}": {
+                "{BLOCK_IO_BLOCK_SIZE_KEY}": {DEFAULT_BLOCK_SIZE}
+            },
+            "type": "nsw",
+            "{GRAPH_PARAMS_KEY}": {
+                "{GRAPH_PARAM_MAX_DEGREE}": 64,
+                "{GRAPH_PARAM_INIT_MAX_CAPACITY}": 100
+            }
+        },
+        "{HGRAPH_BASE_CODES_KEY}": {
+            "{IO_TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
+            "{IO_PARAMS_KEY}": {
+                "{BLOCK_IO_BLOCK_SIZE_KEY}": {DEFAULT_BLOCK_SIZE}
+            },
+            "codes_type": "flatten_codes",
+            "codes_param": {},
+            "{QUANTIZATION_TYPE_KEY}": "{QUANTIZATION_TYPE_VALUE_PQ}",
+            "{QUANTIZATION_PARAMS_KEY}": {
+                "subspace": 64,
+                "nbits": 8
+            }
+        },
+        "precise_codes": {
+            "{IO_TYPE_KEY}": "aio_ssd",
+            "{IO_PARAMS_KEY}": {},
+            "codes_type": "flatten_codes",
+            "codes_param": {},
+            "{QUANTIZATION_TYPE_KEY}": "{QUANTIZATION_TYPE_VALUE_SQ8}",
+            "{QUANTIZATION_PARAMS_KEY}": {}
+        },
+        "{BUILD_PARAMS_KEY}": {
+            "{BUILD_EF_CONSTRUCTION}": 400,
+            "{BUILD_THREAD_COUNT}": 100
+        }
+    })";
 
 HGraphParameters::HGraphParameters(JsonType& hgraph_param, const IndexCommonParam& common_param)
-    : common_param_(common_param) {
+    : common_param_(common_param),
+      default_hgraph_params_(format_map(HGRAPH_PARAMS_TEMPLATE, DEFAULT_MAP)) {
+    this->str_ = default_hgraph_params_;
     this->check_common_param();
     this->init_by_options();
     this->refresh_json_by_string();
@@ -96,49 +140,6 @@ HGraphParameters::init_by_options() {
     option_map.insert({"DEFAULT_BLOCK_SIZE", DEFAULT_BLOCK_SIZE});
     this->str_ = format_map(this->str_, option_map);
 }
-
-const std::string HGraphParameters::DEFAULT_HGRAPH_PARAMS = format_map(
-    R"(
-    {
-        "{HGRAPH_USE_REORDER_KEY}": false,
-        "{HGRAPH_GRAPH_KEY}": {
-            "{IO_TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
-            "{IO_PARAMS_KEY}": {
-                "{BLOCK_IO_BLOCK_SIZE_KEY}": {DEFAULT_BLOCK_SIZE}
-            },
-            "type": "nsw",
-            "{GRAPH_PARAMS_KEY}": {
-                "{GRAPH_PARAM_MAX_DEGREE}": 64,
-                "{GRAPH_PARAM_INIT_MAX_CAPACITY}": 100
-            }
-        },
-        "{HGRAPH_BASE_CODES_KEY}": {
-            "{IO_TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
-            "{IO_PARAMS_KEY}": {
-                "{BLOCK_IO_BLOCK_SIZE_KEY}": {DEFAULT_BLOCK_SIZE}
-            },
-            "codes_type": "flatten_codes",
-            "codes_param": {},
-            "{QUANTIZATION_TYPE_KEY}": "{QUANTIZATION_TYPE_VALUE_PQ}",
-            "{QUANTIZATION_PARAMS_KEY}": {
-                "subspace": 64,
-                "nbits": 8
-            }
-        },
-        "precise_codes": {
-            "{IO_TYPE_KEY}": "aio_ssd",
-            "{IO_PARAMS_KEY}": {},
-            "codes_type": "flatten_codes",
-            "codes_param": {},
-            "{QUANTIZATION_TYPE_KEY}": "{QUANTIZATION_TYPE_VALUE_SQ8}",
-            "{QUANTIZATION_PARAMS_KEY}": {}
-        },
-        "{BUILD_PARAMS_KEY}": {
-            "{BUILD_EF_CONSTRUCTION}": 400,
-            "{BUILD_THREAD_COUNT}": 100
-        }
-    })",
-    DEFAULT_MAP);
 
 HGraphSearchParameters
 HGraphSearchParameters::FromJson(const std::string& json_string) {
