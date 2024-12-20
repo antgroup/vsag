@@ -209,6 +209,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex,
         auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
         TestContinueAdd(index, dataset, true);
         TestKnnSearch(index, dataset, search_param, 0.99, true);
+        TestConcurrentKnnSearch(index, dataset, search_param, 0.99, true);
         TestRangeSearch(index, dataset, search_param, 0.99, 10, true);
         TestRangeSearch(index, dataset, search_param, 0.49, 5, true);
         TestFilterSearch(index, dataset, search_param, 0.99, true);
@@ -231,6 +232,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex, "HNSW Build", "[ft][hnsw]"
 
         TestBuildIndex(index, dataset, true);
         TestKnnSearch(index, dataset, search_param, 0.99, true);
+        TestConcurrentKnnSearch(index, dataset, search_param, 0.99, true);
         TestRangeSearch(index, dataset, search_param, 0.99, 10, true);
         TestRangeSearch(index, dataset, search_param, 0.49, 5, true);
         TestFilterSearch(index, dataset, search_param, 0.99, true);
@@ -253,6 +255,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex, "HNSW Add", "[ft][hnsw]") 
         auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
         TestAddIndex(index, dataset, true);
         TestKnnSearch(index, dataset, search_param, 0.99, true);
+        TestConcurrentKnnSearch(index, dataset, search_param, 0.99, true);
         TestRangeSearch(index, dataset, search_param, 0.99, 10, true);
         TestRangeSearch(index, dataset, search_param, 0.49, 5, true);
         TestFilterSearch(index, dataset, search_param, 0.99, true);
