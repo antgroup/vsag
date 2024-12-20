@@ -13,25 +13,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "vsag/factory.h"
+
 #include <algorithm>
-#include <cctype>
 #include <cstdint>
 #include <exception>
 #include <fstream>
 #include <ios>
 #include <memory>
 #include <mutex>
-#include <stdexcept>
 #include <string>
 
-#include "index/diskann.h"
-#include "index/diskann_zparameters.h"
-#include "index/hgraph_index.h"
-#include "index/hgraph_zparameters.h"
-#include "index/hnsw.h"
-#include "index/hnsw_zparameters.h"
-#include "index/index_common_param.h"
-#include "vsag/vsag.h"
+#include "ThreadPool.h"
+#include "vsag/engine.h"
+#include "vsag/options.h"
 
 namespace vsag {
 
@@ -39,61 +34,9 @@ tl::expected<std::shared_ptr<Index>, Error>
 Factory::CreateIndex(const std::string& origin_name,
                      const std::string& parameters,
                      Allocator* allocator) {
-    try {
-        std::string name = origin_name;
-        transform(name.begin(), name.end(), name.begin(), ::tolower);
-        JsonType parsed_params = JsonType::parse(parameters);
-        auto index_common_params = IndexCommonParam::CheckAndCreate(parsed_params, allocator);
-        if (name == INDEX_HNSW) {
-            // read parameters from json, throw exception if not exists
-            CHECK_ARGUMENT(parsed_params.contains(INDEX_HNSW),
-                           fmt::format("parameters must contains {}", INDEX_HNSW));
-            auto& hnsw_param_obj = parsed_params[INDEX_HNSW];
-            auto hnsw_params = HnswParameters::FromJson(hnsw_param_obj, index_common_params);
-            logger::debug("created a hnsw index");
-            return std::make_shared<HNSW>(hnsw_params, index_common_params);
-        } else if (name == INDEX_FRESH_HNSW) {
-            // read parameters from json, throw exception if not exists
-            CHECK_ARGUMENT(parsed_params.contains(INDEX_HNSW),
-                           fmt::format("parameters must contains {}", INDEX_HNSW));
-            auto& hnsw_param_obj = parsed_params[INDEX_HNSW];
-            auto hnsw_params = FreshHnswParameters::FromJson(hnsw_param_obj, index_common_params);
-            logger::debug("created a fresh-hnsw index");
-            return std::make_shared<HNSW>(hnsw_params, index_common_params);
-        } else if (name == INDEX_DISKANN) {
-            // read parameters from json, throw exception if not exists
-            CHECK_ARGUMENT(parsed_params.contains(INDEX_DISKANN),
-                           fmt::format("parameters must contains {}", INDEX_DISKANN));
-            auto& diskann_param_obj = parsed_params[INDEX_DISKANN];
-            auto diskann_params =
-                DiskannParameters::FromJson(diskann_param_obj, index_common_params);
-            logger::debug("created a diskann index");
-            return std::make_shared<DiskANN>(diskann_params, index_common_params);
-        } else if (name == INDEX_HGRAPH) {
-            if (allocator == nullptr) {
-                index_common_params.allocator_ = DefaultAllocator::Instance().get();
-            }
-            logger::debug("created a hgraph index");
-            JsonType hgraph_params;
-            if (parsed_params.contains(INDEX_PARAM)) {
-                hgraph_params = std::move(parsed_params[INDEX_PARAM]);
-            }
-            HGraphParameters hgraph_param(hgraph_params, index_common_params);
-            auto hgraph_index =
-                std::make_shared<HGraphIndex>(hgraph_param.GetJson(), index_common_params);
-            hgraph_index->Init();
-            return hgraph_index;
-        } else {
-            LOG_ERROR_AND_RETURNS(
-                ErrorType::UNSUPPORTED_INDEX, "failed to create index(unsupported): ", name);
-        }
-    } catch (const std::invalid_argument& e) {
-        LOG_ERROR_AND_RETURNS(
-            ErrorType::INVALID_ARGUMENT, "failed to create index(invalid argument): ", e.what());
-    } catch (const std::exception& e) {
-        LOG_ERROR_AND_RETURNS(
-            ErrorType::UNSUPPORTED_INDEX, "failed to create index(unknown error): ", e.what());
-    }
+    Resource resource(allocator);
+    Engine e(&resource);
+    return e.CreateIndex(origin_name, parameters);
 }
 
 class LocalFileReader : public Reader {

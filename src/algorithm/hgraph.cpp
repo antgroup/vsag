@@ -53,14 +53,14 @@ next_multiple_of_power_of_two(uint64_t x, uint64_t n) {
 HGraph::HGraph(const JsonType& index_param, const vsag::IndexCommonParam& common_param) noexcept
     : index_param_(index_param),
       common_param_(common_param),
-      label_lookup_(common_param.allocator_),
-      label_op_mutex_(MAX_LABEL_OPERATION_LOCKS, common_param_.allocator_),
-      neighbors_mutex_(0, common_param_.allocator_),
-      route_graphs_(common_param.allocator_),
-      labels_(common_param.allocator_) {
+      label_lookup_(common_param.allocator_.get()),
+      label_op_mutex_(MAX_LABEL_OPERATION_LOCKS, common_param.allocator_.get()),
+      neighbors_mutex_(0, common_param.allocator_.get()),
+      route_graphs_(common_param.allocator_.get()),
+      labels_(common_param.allocator_.get()) {
     this->dim_ = common_param.dim_;
     this->metric_ = common_param.metric_;
-    this->allocator_ = common_param.allocator_;
+    this->allocator_ = common_param.allocator_.get();
 }
 
 tl::expected<void, Error>

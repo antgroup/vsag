@@ -130,7 +130,7 @@ template <typename QuantTmpl, typename IOTmpl>
 FlattenDataCell<QuantTmpl, IOTmpl>::FlattenDataCell(const JsonType& quantization_param,
                                                     const JsonType& io_param,
                                                     const IndexCommonParam& common_param)
-    : allocator_(common_param.allocator_) {
+    : allocator_(common_param.allocator_.get()) {
     this->quantizer_ = std::make_shared<QuantTmpl>(quantization_param, common_param);
     this->io_ = std::make_shared<IOTmpl>(io_param, common_param);
     this->code_size_ = quantizer_->GetCodeSize();
