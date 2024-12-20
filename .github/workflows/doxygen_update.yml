@@ -1,0 +1,39 @@
+name: Doxygen Update
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches: [ "main" ]
+jobs:
+  doxygen:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v3
+        with:
+          python-version: '3.10'
+      - name: Install dependencies
+        run: |
+          sudo apt-get install -y doxygen
+          python -m pip install --upgrade pip
+          pip install breathe
+      - name: Generate doxygen xml
+        run: doxygen
+      - name: Push changes
+        run: |
+          git config --global user.email "$GITHUB_ACTOR@users.noreply.github.com"
+          git config --global user.name "$GITHUB_ACTOR"
+          mv ./doxy_doc/xml ./xml
+          breathe-apidoc -o cpp_api xml
+          git add xml cpp_api
+          if [ -n "$(git status --porcelain)" ]
+          then
+            git commit -m "Update API Docs ($(git rev-parse --short main))."
+            git push origin HEAD:gh-pages
+          fi
+
+#          git fetch origin gh-pages
+#          git checkout gh-pages
+#          git rm -rf xml cpp_api

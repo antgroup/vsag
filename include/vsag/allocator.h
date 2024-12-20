@@ -18,24 +18,53 @@
 
 namespace vsag {
 
+/**
+ * @class Allocator
+ * @brief An abstract base class that defines a general interface for memory allocation.
+ *
+ * This class provides a set of pure virtual methods for memory management,
+ * including allocation, deallocation, and reallocation of memory blocks.
+ */
 class Allocator {
 public:
-    // Return the name of the allocator.
+    /**
+     * @brief Get the name of the allocator.
+     * @return A string representing the name of the allocator.
+     */
     virtual std::string
     Name() = 0;
 
-    // Allocate a block of at least size.
+    /**
+     * @brief Allocate a block of memory of at least the specified size.
+     * @param size The size of memory to allocate in bytes.
+     * @return A pointer to the beginning of the allocated memory block.
+     */
     virtual void*
     Allocate(size_t size) = 0;
 
-    // Deallocate previously allocated block.
+    /**
+     * @brief Deallocate a previously allocated block of memory.
+     * @param p A pointer to the memory block to deallocate.
+     */
     virtual void
     Deallocate(void* p) = 0;
 
-    // Reallocate the previously allocated block with long size.
+    /**
+     * @brief Reallocate the previously allocated block with a new size.
+     * @param p A pointer to the previously allocated memory block.
+     * @param size The new size for the memory block in bytes.
+     * @return A pointer to the reallocated memory block.
+     */
     virtual void*
     Reallocate(void* p, size_t size) = 0;
 
+    /**
+     * @brief Construct a new object and allocate memory for it.
+     * @tparam T The type of the object to be created.
+     * @tparam Args The types of the arguments for the constructor of T.
+     * @param args The arguments to be forwarded to the constructor of T.
+     * @return A pointer to the newly constructed object.
+     */
     template <typename T, typename... Args>
     T*
     New(Args&&... args) {
@@ -48,6 +77,11 @@ public:
         }
     }
 
+    /**
+     * @brief Destroy an object and deallocate its memory.
+     * @tparam T The type of the object to be destroyed.
+     * @param p A pointer to the object to be destroyed.
+     */
     template <typename T>
     void
     Delete(T* p) {
@@ -58,6 +92,9 @@ public:
     }
 
 public:
+    /**
+     * @brief Virtual destructor to allow proper cleanup of derived classes.
+     */
     virtual ~Allocator() = default;
 };
 
