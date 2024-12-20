@@ -20,7 +20,10 @@ jobs:
 
   build_asan:
     name: Asan Build
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        os_version: [ ubuntu-latest, macos-13 ]
+    runs-on: ${{ matrix.os_version }}
     container:
       image: vsaglib/vsag:ubuntu
     steps:
@@ -36,7 +39,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           path: ./build
-          name: test-${{ github.run_id }}
+          name: test-${{ github.run_id }}-${{ matrix.os_version }}
           compression-level: 1
           retention-days: 1
           overwrite: 'true'
@@ -44,10 +47,11 @@ jobs:
   test_asan:
     name: Unit Test
     needs: build_asan
-    runs-on: ubuntu-latest
     strategy:
       matrix:
         test_type: [ unittests, functests ]
+        os_version: [ ubuntu-latest, macos-13 ]
+    runs-on: ${{ matrix.os_version }}
     container:
       image: vsaglib/vsag:ubuntu
     steps:
@@ -56,7 +60,7 @@ jobs:
       - name: Download Test
         uses: actions/download-artifact@v4
         with:
-          name: test-${{ github.run_id }}
+          name: test-${{ github.run_id }}-${{ matrix.os_version }}
           path: ./build/
       - name: Do Asan Test In ${{ matrix.test_type }}
         run: |
