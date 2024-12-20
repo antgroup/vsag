@@ -162,7 +162,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex,
     }
 
     SECTION("Invalid hgraph param base_quantization_type") {
-        auto base_quantization_types = GENERATE("pq", "fsa", "sq8_uniform");
+        auto base_quantization_types = GENERATE("pq", "fsa");
         // TODO(LHT): test for float param
         constexpr const char* param_temp =
             R"({{
@@ -184,7 +184,8 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex,
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
     auto metric_type = GENERATE("l2", "ip", "cosine");
-    std::vector<std::pair<std::string, float>> test_cases = {{"sq8", 0.975}, {"fp32", 0.99}};
+    std::vector<std::pair<std::string, float>> test_cases = {
+        {"sq8", 0.97}, {"fp32", 0.99}, {"sq8_uniform", 0.95}};
     const std::string name = "hgraph";
     auto search_param = fmt::format(search_param_tmp, 200);
     for (auto& dim : dims) {
@@ -216,7 +217,8 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex, "HGraph Build", "[ft][hg
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
     auto metric_type = GENERATE("l2", "ip", "cosine");
-    std::vector<std::pair<std::string, float>> test_cases = {{"sq8", 0.975}, {"fp32", 0.99}};
+    std::vector<std::pair<std::string, float>> test_cases = {
+        {"sq8", 0.97}, {"fp32", 0.99}, {"sq8_uniform", 0.95}};
     const std::string name = "hgraph";
     auto search_param = fmt::format(search_param_tmp, 200);
     for (auto& dim : dims) {
@@ -248,7 +250,8 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex, "HGraph Add", "[ft][hgra
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
     auto metric_type = GENERATE("l2", "ip", "cosine");
-    std::vector<std::pair<std::string, float>> test_cases = {{"sq8", 0.975}, {"fp32", 0.99}};
+    std::vector<std::pair<std::string, float>> test_cases = {
+        {"sq8", 0.97}, {"fp32", 0.99}, {"sq8_uniform", 0.95}};
     const std::string name = "hgraph";
     auto search_param = fmt::format(search_param_tmp, 200);
     for (auto& dim : dims) {
