@@ -13,7 +13,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#if defined(ENABLE_AVX)
 #include <immintrin.h>
+#endif
 
 #include <cmath>
 #include <cstdint>
@@ -30,6 +32,7 @@ namespace vsag {
 #define PORTABLE_ALIGN32 __attribute__((aligned(32)))
 #define PORTABLE_ALIGN64 __attribute__((aligned(64)))
 
+#if defined(ENABLE_AVX)
 float
 L2SqrSIMD16ExtAVX(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
     float* pVect1 = (float*)pVect1v;
@@ -162,6 +165,8 @@ PQDistanceAVXFloat256(const void* single_dim_centers, float single_dim_val, void
         _mm256_storeu_ps(&float_result[idx], v_chunk_dists);
     }
 }
+
+#endif
 
 namespace avx2 {
 
