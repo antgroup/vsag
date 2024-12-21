@@ -32,6 +32,10 @@
 
 namespace vsag {
 
+Engine::Engine() {
+    this->resource_ = std::make_shared<ResourceOwnerWrapper>(new Resource(), /*owned*/ true);
+}
+
 Engine::Engine(Resource* resource) {
     if (resource == nullptr) {
         this->resource_ = std::make_shared<ResourceOwnerWrapper>(new Resource(), /*owned*/ true);
@@ -42,13 +46,16 @@ Engine::Engine(Resource* resource) {
 
 void
 Engine::Shutdown() {
+    auto refcount = this->resource_.use_count();
     this->resource_.reset();
+
+    // TODO(LHT): add refcount warning
 }
 
 tl::expected<std::shared_ptr<Index>, Error>
 Engine::CreateIndex(const std::string& origin_name, const std::string& parameters) {
     try {
-        auto* allocator = this->resource_->allocator.get();
+        auto allocator = this->resource_->GetAllocator();
         std::string name = origin_name;
         transform(name.begin(), name.end(), name.begin(), ::tolower);
         JsonType parsed_params = JsonType::parse(parameters);
@@ -79,9 +86,6 @@ Engine::CreateIndex(const std::string& origin_name, const std::string& parameter
             logger::debug("created a diskann index");
             return std::make_shared<DiskANN>(diskann_params, index_common_params);
         } else if (name == INDEX_HGRAPH) {
-            if (allocator == nullptr) {
-                index_common_params.allocator_ = DefaultAllocator::Instance().get();
-            }
             logger::debug("created a hgraph index");
             JsonType hgraph_params;
             if (parsed_params.contains(INDEX_PARAM)) {

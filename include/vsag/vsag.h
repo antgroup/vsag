@@ -41,6 +41,7 @@ init();
 #include "bitset.h"
 #include "constants.h"
 #include "dataset.h"
+#include "engine.h"
 #include "errors.h"
 #include "expected.hpp"
 #include "factory.h"

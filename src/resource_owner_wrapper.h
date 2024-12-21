@@ -24,6 +24,11 @@ public:
         : resource_(resource), owned_(owned) {
     }
 
+    std::shared_ptr<Allocator>
+    GetAllocator() override {
+        return resource_->GetAllocator();
+    }
+
     ~ResourceOwnerWrapper() override {
         if (owned_) {
             delete resource_;
