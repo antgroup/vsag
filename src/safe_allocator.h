@@ -17,18 +17,21 @@
 
 #include <new>
 
+#include "default_allocator.h"
 #include "vsag/allocator.h"
 
 namespace vsag {
 
 class SafeAllocator : public Allocator {
 public:
-    explicit SafeAllocator(Allocator* raw_allocator, bool owner = false)
-        : raw_allocator_(raw_allocator), owner_(owner) {
+    static std::shared_ptr<Allocator>
+    FactoryDefaultAllocator() {
+        return std::make_shared<SafeAllocator>(new DefaultAllocator(), true);
     }
 
-    explicit SafeAllocator(std::shared_ptr<Allocator> owned_allocator)
-        : owned_allocator_(owned_allocator), raw_allocator_(owned_allocator.get()) {
+public:
+    explicit SafeAllocator(Allocator* raw_allocator, bool owned = false)
+        : raw_allocator_(raw_allocator), owned_(owned) {
     }
 
     std::string
@@ -64,13 +67,16 @@ public:
     }
 
 public:
-    ~SafeAllocator() override = default;
+    ~SafeAllocator() override {
+        if (owned_) {
+            delete raw_allocator_;
+        }
+    }
 
 private:
     Allocator* const raw_allocator_ = nullptr;
-    std::shared_ptr<Allocator> owned_allocator_ = nullptr;
 
-    bool owner_{false};
+    bool owned_{false};
 };
 
 }  // namespace vsag

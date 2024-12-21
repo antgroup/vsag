@@ -26,16 +26,6 @@ namespace vsag {
 
 class DefaultAllocator : public Allocator {
 public:
-    static std::shared_ptr<Allocator>
-    Instance() {
-        static std::shared_ptr<Allocator> s_instance;
-        if (s_instance == nullptr) {
-            s_instance = std::make_shared<DefaultAllocator>();
-        }
-        return s_instance;
-    }
-
-public:
     DefaultAllocator() = default;
     ~DefaultAllocator() override {
 #ifndef NDEBUG

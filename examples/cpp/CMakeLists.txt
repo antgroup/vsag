@@ -7,6 +7,9 @@ target_link_libraries (example_fresh_hnsw vsag)
 add_executable (example_diskann example_diskann.cpp)
 target_link_libraries (example_diskann vsag_static)
 
+add_executable (example_engine example_engine.cpp)
+target_link_libraries (example_engine vsag_static)
+
 add_executable (simple_hnsw simple_hnsw.cpp)
 target_link_libraries (simple_hnsw vsag_static)
 

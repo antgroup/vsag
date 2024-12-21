@@ -18,5 +18,11 @@ namespace vsag {
 HGraphIndex::HGraphIndex(const vsag::JsonType& index_param,
                          const vsag::IndexCommonParam& common_param) noexcept {
     this->hgraph_ = std::make_unique<HGraph>(index_param, common_param);
+    this->allocator_ = common_param.allocator_;
+}
+
+HGraphIndex::~HGraphIndex() {
+    this->hgraph_.reset();
+    this->allocator_.reset();
 }
 }  // namespace vsag

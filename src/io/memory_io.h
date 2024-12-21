@@ -36,7 +36,7 @@ public:
     }
 
     MemoryIO(const JsonType& io_param, const IndexCommonParam& common_param)
-        : allocator_(common_param.allocator_) {
+        : allocator_(common_param.allocator_.get()) {
         start_ = reinterpret_cast<uint8_t*>(allocator_->Allocate(MIN_SIZE));
         current_size_ = MIN_SIZE;
     }

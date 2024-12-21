@@ -20,12 +20,13 @@
 #include "catch2/catch_test_macros.hpp"
 #include "default_allocator.h"
 #include "fixtures.h"
+#include "safe_allocator.h"
 
 using namespace vsag;
 
 void
 GraphInterfaceTest::BasicTest(uint64_t max_id, uint64_t count, GraphInterfacePtr other) {
-    auto allocator = std::make_shared<DefaultAllocator>();
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
     auto max_degree = this->graph_->MaximumDegree();
     auto old_count = this->graph_->TotalCount();
     UnorderedMap<InnerIdType, std::shared_ptr<Vector<InnerIdType>>> maps(allocator.get());

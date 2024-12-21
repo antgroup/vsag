@@ -41,7 +41,7 @@ public:
     }
 
     MemoryBlockIO(const JsonType& io_param, const IndexCommonParam& common_param)
-        : MemoryBlockIO(common_param.allocator_) {
+        : MemoryBlockIO(common_param.allocator_.get()) {
         if (io_param.contains(BLOCK_IO_BLOCK_SIZE_KEY)) {
             this->block_size_ =
                 io_param[BLOCK_IO_BLOCK_SIZE_KEY];  // TODO(LHT): trans str to uint64_t

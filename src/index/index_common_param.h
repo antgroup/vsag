@@ -29,9 +29,9 @@ public:
     MetricType metric_{MetricType::METRIC_TYPE_L2SQR};
     DataTypes data_type_{DataTypes::DATA_TYPE_FLOAT};
     int64_t dim_{0};
-    Allocator* allocator_{nullptr};
+    std::shared_ptr<Allocator> allocator_{nullptr};
 
     static IndexCommonParam
-    CheckAndCreate(JsonType& params, Allocator* allocator);
+    CheckAndCreate(JsonType& params, std::shared_ptr<Allocator> allocator);
 };
 }  // namespace vsag

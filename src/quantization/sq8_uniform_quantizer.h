@@ -124,7 +124,7 @@ SQ8UniformQuantizer<metric>::SQ8UniformQuantizer(int dim, Allocator* allocator)
 template <MetricType metric>
 SQ8UniformQuantizer<metric>::SQ8UniformQuantizer(const JsonType& quantization_param,
                                                  const IndexCommonParam& common_param)
-    : SQ8UniformQuantizer<metric>(common_param.dim_, common_param.allocator_){};
+    : SQ8UniformQuantizer<metric>(common_param.dim_, common_param.allocator_.get()){};
 
 template <MetricType metric>
 bool

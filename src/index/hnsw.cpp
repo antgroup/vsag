@@ -61,11 +61,7 @@ HNSW::HNSW(HnswParameters hnsw_params, const IndexCommonParam& index_common_para
         conjugate_graph_ = std::make_shared<ConjugateGraph>();
     }
 
-    if (not index_common_param.allocator_) {
-        allocator_ = std::make_shared<SafeAllocator>(DefaultAllocator::Instance());
-    } else {
-        allocator_ = std::make_shared<SafeAllocator>(index_common_param.allocator_);
-    }
+    allocator_ = index_common_param.allocator_;
 
     if (!use_static_) {
         alg_hnsw_ =
@@ -276,7 +272,7 @@ HNSW::knn_search(const DatasetPtr& query,
             results.pop();
         }
 
-        result->Dim(results.size())->NumElements(1)->Owner(true, allocator_->GetRawAllocator());
+        result->Dim(results.size())->NumElements(1)->Owner(true, allocator_.get());
 
         int64_t* ids = (int64_t*)allocator_->Allocate(sizeof(int64_t) * results.size());
         result->Ids(ids);
@@ -387,7 +383,7 @@ HNSW::range_search(const DatasetPtr& query,
         if (limited_size >= 1) {
             target_size = std::min((size_t)limited_size, target_size);
         }
-        result->Dim(target_size)->NumElements(1)->Owner(true, allocator_->GetRawAllocator());
+        result->Dim(target_size)->NumElements(1)->Owner(true, allocator_.get());
         int64_t* ids = (int64_t*)allocator_->Allocate(sizeof(int64_t) * target_size);
         result->Ids(ids);
         float* dists = (float*)allocator_->Allocate(sizeof(float) * target_size);
@@ -714,7 +710,7 @@ HNSW::brute_force(const DatasetPtr& query, int64_t k) {
             fmt::format("query.dim({}) must be equal to index.dim({})", query->GetDim(), dim_));
 
         auto result = Dataset::Make();
-        result->NumElements(k)->Owner(true, allocator_->GetRawAllocator());
+        result->NumElements(k)->Owner(true, allocator_.get());
         int64_t* ids = (int64_t*)allocator_->Allocate(sizeof(int64_t) * k);
         result->Ids(ids);
         float* dists = (float*)allocator_->Allocate(sizeof(float) * k);

@@ -19,6 +19,7 @@
 #include "fmt/format-inl.h"
 #include "graph_interface_test.h"
 #include "io/io_headers.h"
+#include "safe_allocator.h"
 using namespace vsag;
 
 template <typename IOTemp>
@@ -37,7 +38,7 @@ TestGraphDataCell(const JsonType& graph_param,
 }
 
 TEST_CASE("graph basic test", "[ut][graph_datacell]") {
-    auto allocator = std::make_shared<DefaultAllocator>();
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
     auto dims = {32, 64};
     auto max_degrees = {5, 12, 24, 32, 64, 128};
     auto max_capacities = {1, 100, 10000, 10'000'000, 32'179'837};
@@ -58,7 +59,7 @@ TEST_CASE("graph basic test", "[ut][graph_datacell]") {
     for (auto dim : dims) {
         IndexCommonParam param;
         param.dim_ = dim;
-        param.allocator_ = allocator.get();
+        param.allocator_ = allocator;
         for (auto& gp : graph_params) {
             TestGraphDataCell<MemoryIO>(gp, io_param, param);
             TestGraphDataCell<MemoryBlockIO>(gp, io_param, param);

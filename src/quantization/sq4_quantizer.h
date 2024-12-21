@@ -90,7 +90,7 @@ SQ4Quantizer<metric>::SQ4Quantizer(int dim, Allocator* allocator)
 template <MetricType metric>
 SQ4Quantizer<metric>::SQ4Quantizer(const JsonType& quantization_param,
                                    const IndexCommonParam& common_param)
-    : SQ4Quantizer<metric>(common_param.dim_, common_param.allocator_){};
+    : SQ4Quantizer<metric>(common_param.dim_, common_param.allocator_.get()){};
 
 template <MetricType metric>
 bool

@@ -21,6 +21,7 @@
 #include "default_allocator.h"
 #include "fixtures.h"
 #include "quantizer_test.h"
+#include "safe_allocator.h"
 
 using namespace vsag;
 
@@ -30,7 +31,7 @@ const auto counts = {10, 101};
 template <MetricType metric>
 void
 TestQuantizerEncodeDecodeMetricFP32(uint64_t dim, int count, float error = 1e-5) {
-    auto allocator = std::make_shared<DefaultAllocator>();
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
     FP32Quantizer<metric> quantizer(dim, allocator.get());
     TestQuantizerEncodeDecode(quantizer, dim, count, error);
     TestQuantizerEncodeDecodeSame(quantizer, dim, count, 65536, error);
@@ -50,7 +51,7 @@ TEST_CASE("encode&decode [ut][fp32_quantizer]") {
 template <MetricType metric>
 void
 TestComputeMetricFP32(uint64_t dim, int count, float error = 1e-5) {
-    auto allocator = std::make_shared<DefaultAllocator>();
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
     FP32Quantizer<metric> quantizer(dim, allocator.get());
     TestComputeCodes<FP32Quantizer<metric>, metric>(quantizer, dim, count, error);
     TestComputeCodesSame<FP32Quantizer<metric>, metric>(quantizer, dim, count, 65536);
@@ -73,7 +74,7 @@ TEST_CASE("compute [ut][fp32_quantizer]") {
 template <MetricType metric>
 void
 TestSerializeAndDeserializeMetricFP32(uint64_t dim, int count, float error = 1e-5) {
-    auto allocator = std::make_shared<DefaultAllocator>();
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
     FP32Quantizer<metric> quantizer1(dim, allocator.get());
     FP32Quantizer<metric> quantizer2(0, allocator.get());
     TestSerializeAndDeserialize<FP32Quantizer<metric>, metric>(
