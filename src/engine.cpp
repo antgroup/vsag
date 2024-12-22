@@ -67,7 +67,11 @@ Engine::CreateIndex(const std::string& origin_name, const std::string& parameter
             auto& hnsw_param_obj = parsed_params[INDEX_HNSW];
             auto hnsw_params = HnswParameters::FromJson(hnsw_param_obj, index_common_params);
             logger::debug("created a hnsw index");
-            return std::make_shared<HNSW>(hnsw_params, index_common_params);
+            auto index = std::make_shared<HNSW>(hnsw_params, index_common_params);
+            if (auto result = index->InitMemorySpace(); not result.has_value()) {
+                return tl::unexpected(result.error());
+            }
+            return index;
         } else if (name == INDEX_FRESH_HNSW) {
             // read parameters from json, throw exception if not exists
             CHECK_ARGUMENT(parsed_params.contains(INDEX_HNSW),
@@ -75,7 +79,11 @@ Engine::CreateIndex(const std::string& origin_name, const std::string& parameter
             auto& hnsw_param_obj = parsed_params[INDEX_HNSW];
             auto hnsw_params = FreshHnswParameters::FromJson(hnsw_param_obj, index_common_params);
             logger::debug("created a fresh-hnsw index");
-            return std::make_shared<HNSW>(hnsw_params, index_common_params);
+            auto index = std::make_shared<HNSW>(hnsw_params, index_common_params);
+            if (auto result = index->InitMemorySpace(); not result.has_value()) {
+                return tl::unexpected(result.error());
+            }
+            return index;
         } else if (name == INDEX_DISKANN) {
             // read parameters from json, throw exception if not exists
             CHECK_ARGUMENT(parsed_params.contains(INDEX_DISKANN),

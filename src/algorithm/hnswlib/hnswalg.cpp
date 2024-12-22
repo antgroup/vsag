@@ -165,7 +165,6 @@ HierarchicalNSW::getDistanceByLabel(LabelType label, const void* data_point) {
         throw std::runtime_error("Label not found");
     }
     InnerIdType internal_id = search->second;
-    lock_table.unlock();
     std::shared_ptr<float[]> normalize_query;
     normalizeVector(data_point, normalize_query);
     float dist = fstdistfunc_(data_point, getDataByInternalId(internal_id), dist_func_param_);
@@ -176,7 +175,6 @@ bool
 HierarchicalNSW::isValidLabel(LabelType label) {
     std::shared_lock lock_table(label_lookup_lock_);
     bool is_valid = (label_lookup_.find(label) != label_lookup_.end());
-    lock_table.unlock();
     return is_valid;
 }
 
@@ -995,8 +993,6 @@ HierarchicalNSW::unmarkDelete(LabelType label) {
         throw std::runtime_error("Label not found");
     }
     InnerIdType internalId = search->second;
-    lock_table.unlock();
-
     unmarkDeletedInternal(internalId);
 }
 
