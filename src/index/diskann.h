@@ -15,7 +15,6 @@
 
 #pragma once
 
-#include <ThreadPool.h>
 #include <abstract_index.h>
 #include <disk_utils.h>
 #include <index.h>
@@ -29,10 +28,10 @@
 #include <shared_mutex>
 #include <string>
 
-#include "../common.h"
-#include "../logger.h"
 #include "../utils.h"
+#include "common.h"
 #include "diskann_zparameters.h"
+#include "logger.h"
 #include "typing.h"
 #include "vsag/index.h"
 #include "vsag/options.h"
@@ -214,6 +213,8 @@ private:
     std::stringstream tag_stream_;
     std::stringstream graph_stream_;
 
+    const IndexCommonParam index_common_param_;
+
     std::function<void(const std::vector<read_request>&, bool, CallBack)> batch_read_;
     diskann::Metric metric_;
     std::shared_ptr<Reader> disk_layout_reader_;
@@ -239,7 +240,7 @@ private:
 
 private:  // Request Statistics
     mutable std::mutex stats_mutex_;
-    std::unique_ptr<progschj::ThreadPool> pool_;
+    std::shared_ptr<SafeThreadPool> pool_;
 
     mutable std::map<std::string, WindowResultQueue> result_queues_;
 };

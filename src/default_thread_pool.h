@@ -15,10 +15,11 @@
 
 #pragma once
 
+#include <ThreadPool.h>
+
 #include <functional>
 #include <future>
 
-#include "ThreadPool.h"
 #include "vsag/options.h"
 #include "vsag/thread_pool.h"
 

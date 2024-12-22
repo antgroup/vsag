@@ -22,7 +22,7 @@ namespace vsag {
 
 class SafeThreadPool : public ThreadPool {
 public:
-    static std::shared_ptr<ThreadPool>
+    static std::shared_ptr<SafeThreadPool>
     FactoryDefaultThreadPool() {
         return std::make_shared<SafeThreadPool>(
             new DefaultThreadPool(Options::Instance().num_threads_building()), true);
@@ -53,7 +53,7 @@ public:
 
     std::future<void>
     Enqueue(std::function<void(void)> task) override {
-        auto func_wrapper = [task]() {
+        auto func_wrapper = [task = std::move(task)]() {
             try {
                 task();
             } catch (std::exception& e) {
