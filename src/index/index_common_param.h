@@ -20,8 +20,10 @@
 
 #include "data_type.h"
 #include "metric_type.h"
+#include "safe_thread_pool.h"
 #include "typing.h"
 #include "vsag/allocator.h"
+#include "vsag/resource.h"
 
 namespace vsag {
 class IndexCommonParam {
@@ -30,8 +32,9 @@ public:
     DataTypes data_type_{DataTypes::DATA_TYPE_FLOAT};
     int64_t dim_{0};
     std::shared_ptr<Allocator> allocator_{nullptr};
+    std::shared_ptr<SafeThreadPool> thread_pool_{nullptr};
 
     static IndexCommonParam
-    CheckAndCreate(JsonType& params, std::shared_ptr<Allocator> allocator);
+    CheckAndCreate(JsonType& params, const std::shared_ptr<Resource>& resource);
 };
 }  // namespace vsag

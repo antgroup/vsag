@@ -36,8 +36,7 @@
 #include "typing.h"
 #include "vsag/index.h"
 #include "vsag/options.h"
-
-using ThreadPool = progschj::ThreadPool;
+#include "vsag/thread_pool.h"
 
 namespace vsag {
 
@@ -240,7 +239,7 @@ private:
 
 private:  // Request Statistics
     mutable std::mutex stats_mutex_;
-    std::unique_ptr<ThreadPool> pool_;
+    std::unique_ptr<progschj::ThreadPool> pool_;
 
     mutable std::map<std::string, WindowResultQueue> result_queues_;
 };

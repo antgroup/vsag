@@ -89,7 +89,7 @@ main(int argc, char** argv) {
     auto* allocator = new SimpleAllocator();
 
     {
-        vsag::Resource resource(allocator);
+        vsag::Resource resource(allocator, nullptr);
         vsag::Engine engine(&resource);
         auto index = engine.CreateIndex("hnsw", hnsw_build_paramesters).value();
         auto base = vsag::Dataset::Make();

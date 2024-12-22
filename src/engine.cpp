@@ -28,6 +28,7 @@
 #include "index/hnsw_zparameters.h"
 #include "index/index_common_param.h"
 #include "resource_owner_wrapper.h"
+#include "safe_thread_pool.h"
 #include "typing.h"
 
 namespace vsag {
@@ -55,11 +56,10 @@ Engine::Shutdown() {
 tl::expected<std::shared_ptr<Index>, Error>
 Engine::CreateIndex(const std::string& origin_name, const std::string& parameters) {
     try {
-        auto allocator = this->resource_->GetAllocator();
         std::string name = origin_name;
         transform(name.begin(), name.end(), name.begin(), ::tolower);
         JsonType parsed_params = JsonType::parse(parameters);
-        auto index_common_params = IndexCommonParam::CheckAndCreate(parsed_params, allocator);
+        auto index_common_params = IndexCommonParam::CheckAndCreate(parsed_params, this->resource_);
         if (name == INDEX_HNSW) {
             // read parameters from json, throw exception if not exists
             CHECK_ARGUMENT(parsed_params.contains(INDEX_HNSW),
