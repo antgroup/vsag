@@ -23,77 +23,15 @@
 
 namespace vsag {
 
-const std::unordered_map<std::string, std::vector<std::string>> HGraphParameters::EXTERNAL_MAPPING =
-    {{HGRAPH_USE_REORDER, {HGRAPH_USE_REORDER_KEY}},
-     {HGRAPH_BASE_QUANTIZATION_TYPE, {HGRAPH_BASE_CODES_KEY, QUANTIZATION_TYPE_KEY}},
-     {HGRAPH_GRAPH_MAX_DEGREE, {HGRAPH_GRAPH_KEY, GRAPH_PARAMS_KEY, GRAPH_PARAM_MAX_DEGREE}},
-     {HGRAPH_BUILD_EF_CONSTRUCTION, {BUILD_PARAMS_KEY, BUILD_EF_CONSTRUCTION}}};
+static const std::unordered_map<std::string, std::vector<std::string>> EXTERNAL_MAPPING = {
+    {HGRAPH_USE_REORDER, {HGRAPH_USE_REORDER_KEY}},
+    {HGRAPH_BASE_QUANTIZATION_TYPE, {HGRAPH_BASE_CODES_KEY, QUANTIZATION_TYPE_KEY}},
+    {HGRAPH_GRAPH_MAX_DEGREE, {HGRAPH_GRAPH_KEY, GRAPH_PARAMS_KEY, GRAPH_PARAM_MAX_DEGREE}},
+    {HGRAPH_BUILD_EF_CONSTRUCTION, {BUILD_PARAMS_KEY, BUILD_EF_CONSTRUCTION}},
+    {HGRAPH_INIT_CAPACITY, {HGRAPH_GRAPH_KEY, GRAPH_PARAMS_KEY, GRAPH_PARAM_INIT_MAX_CAPACITY}},
+    {HGRAPH_BUILD_THREAD_COUNT, {BUILD_PARAMS_KEY, BUILD_THREAD_COUNT}}};
 
-HGraphParameters::HGraphParameters(JsonType& hgraph_param, const IndexCommonParam& common_param)
-    : common_param_(common_param) {
-    this->check_common_param();
-    this->init_by_options();
-    this->refresh_json_by_string();
-    this->ParseStringParam(hgraph_param);
-    this->refresh_string_by_json();
-}
-
-void
-HGraphParameters::check_common_param() const {
-    if (this->common_param_.data_type_ == DataTypes::DATA_TYPE_INT8) {
-        throw std::invalid_argument(fmt::format("HGraph not support {} datatype", DATATYPE_INT8));
-    }
-}
-
-void
-HGraphParameters::ParseStringParam(JsonType& hgraph_param) {
-    for (const auto& [key, value] : hgraph_param.items()) {
-        this->CheckAndSetKeyValue(key, value);
-    }
-    this->refresh_string_by_json();
-}
-
-void
-HGraphParameters::CheckAndSetKeyValue(const std::string& key, JsonType& value) {
-    const auto& iter = EXTERNAL_MAPPING.find(key);
-
-    if (key == HGRAPH_BASE_QUANTIZATION_TYPE) {
-        std::string value_str = value;
-        if (value_str != QUANTIZATION_TYPE_VALUE_SQ8 && value_str != QUANTIZATION_TYPE_VALUE_FP32 &&
-            value_str != QUANTIZATION_TYPE_VALUE_SQ4 &&
-            value_str != QUANTIZATION_TYPE_VALUE_SQ4_UNIFORM) {
-            throw std::invalid_argument(
-                fmt::format("parameters[{}] must in [{}, {}, {}, {}], now is {}",
-                            HGRAPH_BASE_QUANTIZATION_TYPE,
-                            QUANTIZATION_TYPE_VALUE_SQ8,
-                            QUANTIZATION_TYPE_VALUE_FP32,
-                            QUANTIZATION_TYPE_VALUE_SQ4,
-                            QUANTIZATION_TYPE_VALUE_SQ4_UNIFORM,
-                            value_str));
-        }
-    }
-
-    if (iter != EXTERNAL_MAPPING.end()) {
-        const auto& vec = iter->second;
-        auto* json = &json_;
-        for (const auto& str : vec) {
-            json = &(json->operator[](str));
-        }
-        *json = value;
-    } else {
-        throw std::invalid_argument(fmt::format("HGraph have no config param: {}", key));
-    }
-}
-
-void
-HGraphParameters::init_by_options() {
-    const std::string DEFAULT_BLOCK_SIZE = std::to_string(Options::Instance().block_size_limit());
-    std::unordered_map<std::string, std::string> option_map;
-    option_map.insert({"DEFAULT_BLOCK_SIZE", DEFAULT_BLOCK_SIZE});
-    this->str_ = format_map(this->str_, option_map);
-}
-
-const std::string HGraphParameters::DEFAULT_HGRAPH_PARAMS = format_map(
+static const std::string HGRAPH_PARAMS_TEMPLATE =
     R"(
     {
         "{HGRAPH_USE_REORDER_KEY}": false,
@@ -133,8 +71,75 @@ const std::string HGraphParameters::DEFAULT_HGRAPH_PARAMS = format_map(
             "{BUILD_EF_CONSTRUCTION}": 400,
             "{BUILD_THREAD_COUNT}": 100
         }
-    })",
-    DEFAULT_MAP);
+    })";
+
+HGraphParameters::HGraphParameters(JsonType& hgraph_param, const IndexCommonParam& common_param)
+    : common_param_(common_param),
+      default_hgraph_params_(format_map(HGRAPH_PARAMS_TEMPLATE, DEFAULT_MAP)) {
+    this->str_ = default_hgraph_params_;
+    this->check_common_param();
+    this->init_by_options();
+    this->refresh_json_by_string();
+    this->ParseStringParam(hgraph_param);
+    this->refresh_string_by_json();
+}
+
+void
+HGraphParameters::check_common_param() const {
+    if (this->common_param_.data_type_ == DataTypes::DATA_TYPE_INT8) {
+        throw std::invalid_argument(fmt::format("HGraph not support {} datatype", DATATYPE_INT8));
+    }
+}
+
+void
+HGraphParameters::ParseStringParam(JsonType& hgraph_param) {
+    for (const auto& [key, value] : hgraph_param.items()) {
+        this->CheckAndSetKeyValue(key, value);
+    }
+    this->refresh_string_by_json();
+}
+
+void
+HGraphParameters::CheckAndSetKeyValue(const std::string& key, JsonType& value) {
+    const auto& iter = EXTERNAL_MAPPING.find(key);
+
+    if (key == HGRAPH_BASE_QUANTIZATION_TYPE) {
+        std::string value_str = value;
+        if (value_str != QUANTIZATION_TYPE_VALUE_SQ8 && value_str != QUANTIZATION_TYPE_VALUE_FP32 &&
+            value_str != QUANTIZATION_TYPE_VALUE_SQ4 &&
+            value_str != QUANTIZATION_TYPE_VALUE_SQ4_UNIFORM &&
+            value_str != QUANTIZATION_TYPE_VALUE_SQ8_UNIFORM) {
+            throw std::invalid_argument(
+                fmt::format("parameters[{}] must in [{}, {}, {}, {}, {}], now is {}",
+                            HGRAPH_BASE_QUANTIZATION_TYPE,
+                            QUANTIZATION_TYPE_VALUE_SQ8,
+                            QUANTIZATION_TYPE_VALUE_FP32,
+                            QUANTIZATION_TYPE_VALUE_SQ4,
+                            QUANTIZATION_TYPE_VALUE_SQ4_UNIFORM,
+                            QUANTIZATION_TYPE_VALUE_SQ8_UNIFORM,
+                            value_str));
+        }
+    }
+
+    if (iter != EXTERNAL_MAPPING.end()) {
+        const auto& vec = iter->second;
+        auto* json = &json_;
+        for (const auto& str : vec) {
+            json = &(json->operator[](str));
+        }
+        *json = value;
+    } else {
+        throw std::invalid_argument(fmt::format("HGraph have no config param: {}", key));
+    }
+}
+
+void
+HGraphParameters::init_by_options() {
+    const std::string DEFAULT_BLOCK_SIZE = std::to_string(Options::Instance().block_size_limit());
+    std::unordered_map<std::string, std::string> option_map;
+    option_map.insert({"DEFAULT_BLOCK_SIZE", DEFAULT_BLOCK_SIZE});
+    this->str_ = format_map(this->str_, option_map);
+}
 
 HGraphSearchParameters
 HGraphSearchParameters::FromJson(const std::string& json_string) {

@@ -20,15 +20,18 @@
 #include "allocator.h"
 
 namespace vsag {
-struct Resource {
+class Resource {
 public:
     explicit Resource(Allocator* allocator = nullptr);
 
     virtual ~Resource() = default;
 
+    virtual std::shared_ptr<Allocator>
+    GetAllocator() {
+        return this->allocator;
+    }
+
 public:
     std::shared_ptr<Allocator> allocator;
-
-    // std::shared_ptr<> thread_pool;
 };
 }  // namespace vsag

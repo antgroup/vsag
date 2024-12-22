@@ -19,7 +19,7 @@ namespace vsag {
 
 SparseGraphDataCell::SparseGraphDataCell(const JsonType& graph_param,
                                          const IndexCommonParam& common_param)
-    : allocator_(common_param.allocator_), neighbors_(common_param.allocator_) {
+    : allocator_(common_param.allocator_.get()), neighbors_(common_param.allocator_.get()) {
     if (graph_param.contains(GRAPH_PARAM_MAX_DEGREE)) {
         this->maximum_degree_ = graph_param[GRAPH_PARAM_MAX_DEGREE];
     }

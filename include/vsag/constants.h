@@ -101,5 +101,7 @@ extern const char* const HGRAPH_USE_REORDER;
 extern const char* const HGRAPH_BASE_QUANTIZATION_TYPE;
 extern const char* const HGRAPH_GRAPH_MAX_DEGREE;
 extern const char* const HGRAPH_BUILD_EF_CONSTRUCTION;
+extern const char* const HGRAPH_INIT_CAPACITY;
+extern const char* const HGRAPH_BUILD_THREAD_COUNT;
 
 }  // namespace vsag

@@ -16,6 +16,7 @@
 #include "flatten_datacell.h"
 
 #include <algorithm>
+#include <utility>
 
 #include "catch2/catch_template_test_macros.hpp"
 #include "default_allocator.h"
@@ -23,6 +24,7 @@
 #include "flatten_interface_test.h"
 #include "io/io_headers.h"
 #include "quantization/quantizer_headers.h"
+#include "safe_allocator.h"
 
 using namespace vsag;
 
@@ -36,7 +38,7 @@ TestFlattenDataCell(int dim,
     auto counts = {100, 1000};
     IndexCommonParam common;
     common.dim_ = dim;
-    common.allocator_ = allocator.get();
+    common.allocator_ = std::move(allocator);
     common.metric_ = metric;
     for (auto count : counts) {
         auto flatten =
@@ -67,7 +69,7 @@ TestFlattenDataCellFP32(int dim,
 }
 
 TEST_CASE("fp32", "[ut][flatten_data_cell]") {
-    auto allocator = std::make_shared<DefaultAllocator>();
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
     auto fp32_param = JsonType::parse("{}");
     auto io_param = JsonType::parse("{}");
     auto dims = {8, 64, 512};
@@ -96,7 +98,7 @@ TestFlattenDataCellSQ8(int dim,
 }
 
 TEST_CASE("sq8", "[ut][flatten_data_cell]") {
-    auto allocator = std::make_shared<DefaultAllocator>();
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
     auto sq8_param = JsonType::parse("{}");
     auto io_param = JsonType::parse("{}");
     auto dims = {32, 64, 512};

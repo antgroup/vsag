@@ -64,13 +64,11 @@ private:
 private:
     JsonType json_;
 
-    std::string str_{DEFAULT_HGRAPH_PARAMS};
+    std::string str_;
 
     const IndexCommonParam common_param_;
 
-    static const std::string DEFAULT_HGRAPH_PARAMS;
-
-    static const std::unordered_map<std::string, std::vector<std::string>> EXTERNAL_MAPPING;
+    const std::string default_hgraph_params_;
 };
 
 class HGraphSearchParameters {

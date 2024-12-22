@@ -102,5 +102,7 @@ const char* const HGRAPH_USE_REORDER = HGRAPH_USE_REORDER_KEY;
 const char* const HGRAPH_BASE_QUANTIZATION_TYPE = "base_quantization_type";
 const char* const HGRAPH_GRAPH_MAX_DEGREE = "max_degree";
 const char* const HGRAPH_BUILD_EF_CONSTRUCTION = "ef_construction";
+const char* const HGRAPH_INIT_CAPACITY = "hgraph_init_capacity";
+const char* const HGRAPH_BUILD_THREAD_COUNT = "build_thread_count";
 
 };  // namespace vsag
