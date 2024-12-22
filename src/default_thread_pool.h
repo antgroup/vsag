@@ -15,26 +15,33 @@
 
 #pragma once
 
-#include <cstdint>
-#include <nlohmann/json.hpp>
+#include <functional>
+#include <future>
 
-#include "data_type.h"
-#include "metric_type.h"
-#include "safe_thread_pool.h"
-#include "typing.h"
-#include "vsag/allocator.h"
-#include "vsag/resource.h"
+#include "ThreadPool.h"
+#include "vsag/options.h"
+#include "vsag/thread_pool.h"
 
 namespace vsag {
-class IndexCommonParam {
-public:
-    MetricType metric_{MetricType::METRIC_TYPE_L2SQR};
-    DataTypes data_type_{DataTypes::DATA_TYPE_FLOAT};
-    int64_t dim_{0};
-    std::shared_ptr<Allocator> allocator_{nullptr};
-    std::shared_ptr<SafeThreadPool> thread_pool_{nullptr};
 
-    static IndexCommonParam
-    CheckAndCreate(JsonType& params, const std::shared_ptr<Resource>& resource);
+class DefaultThreadPool : public ThreadPool {
+public:
+    explicit DefaultThreadPool(std::size_t threads);
+
+    std::future<void>
+    enqueue(std::function<void(void)> task) override;
+
+    void
+    wait_until_empty() override;
+
+    void
+    set_queue_size_limit(std::size_t limit) override;
+
+    void
+    set_pool_size(std::size_t limit) override;
+
+private:
+    std::unique_ptr<progschj::ThreadPool> pool_;
 };
+
 }  // namespace vsag

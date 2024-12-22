@@ -15,15 +15,19 @@
 
 #include "vsag/resource.h"
 
-#include "default_allocator.h"
 #include "safe_allocator.h"
+#include "safe_thread_pool.h"
 
 namespace vsag {
-Resource::Resource(Allocator* allocator) {
-    if (allocator == nullptr) {
-        this->allocator = SafeAllocator::FactoryDefaultAllocator();
-    } else {
-        this->allocator = std::make_shared<SafeAllocator>(allocator, false);
-    }
+
+Resource::Resource() {
+    this->allocator = SafeAllocator::FactoryDefaultAllocator();
+    this->thread_pool = SafeThreadPool::FactoryDefaultThreadPool();
 }
+
+Resource::Resource(Allocator* allocator, ThreadPool* thread_pool) {
+    this->allocator = std::make_shared<SafeAllocator>(allocator, false);
+    this->thread_pool = std::make_shared<SafeThreadPool>(thread_pool, false);
+}
+
 }  // namespace vsag
