@@ -1,0 +1,47 @@
+
+pull_request_rules:
+  - name: add module/datacell label
+    conditions:
+      - files~=^src/data_cell/.*$
+      - files~=^src/io/*$
+      - files~=^src/quantization/*$
+    actions:
+      label:
+        add:
+          - module/datacell
+  - name: add module/simd label
+    conditions:
+      - files~=^src/simd/.*$
+    actions:
+      label:
+        add:
+          - module/simd
+  - name: add module/pyvsag label
+    conditions:
+      - files~=^python/.*$
+      - files~=^python_bindings/.*$
+    actions:
+      label:
+        add:
+          - module/pyvsag
+  - name: add module/tools label
+    conditions:
+      - files~=^tools/.*$
+    actions:
+      label:
+        add:
+          - module/tools
+  - name: add module/index label
+    conditions:
+      - files~=^index/.*$
+    actions:
+      label:
+        add:
+          - module/index
+  - name: add module/testing label
+    conditions:
+      - files~=^tests/.*$
+    actions:
+      label:
+        add:
+          - module/testing
