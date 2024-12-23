@@ -302,4 +302,29 @@ TestIndex::TestConcurrentKnnSearch(const TestIndex::IndexPtr& index,
     REQUIRE(cur_recall > recall * query_count);
 }
 
+void
+TestIndex::TestContinueAddIgnoreRequire(const TestIndex::IndexPtr& index,
+                                        const TestDatasetPtr& dataset) {
+    auto base_count = dataset->base_->GetNumElements();
+    int64_t temp_count = base_count / 2;
+    auto dim = dataset->base_->GetDim();
+    auto temp_dataset = vsag::Dataset::Make();
+    temp_dataset->Dim(dim)
+        ->Ids(dataset->base_->GetIds())
+        ->NumElements(temp_count)
+        ->Float32Vectors(dataset->base_->GetFloat32Vectors())
+        ->Owner(false);
+    index->Build(temp_dataset);
+    auto rest_count = base_count - temp_count;
+    for (uint64_t j = rest_count; j < base_count; ++j) {
+        auto data_one = vsag::Dataset::Make();
+        data_one->Dim(dim)
+            ->Ids(dataset->base_->GetIds() + j)
+            ->NumElements(1)
+            ->Float32Vectors(dataset->base_->GetFloat32Vectors() + j * dim)
+            ->Owner(false);
+        auto add_index = index->Add(data_one);
+    }
+}
+
 }  // namespace fixtures
