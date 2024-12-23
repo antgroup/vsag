@@ -136,9 +136,9 @@ public:
         return this->hgraph_->GetMemoryUsage();
     }
 
-    tl::expected<bool, Error>
+    bool
     CheckFeature(IndexFeature feature) const override {
-        SAFE_CALL(return this->hgraph_->CheckFeature(feature));
+        return this->hgraph_->CheckFeature(feature);
     }
 
 private:

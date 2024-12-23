@@ -224,7 +224,7 @@ public:
         throw std::runtime_error("Index doesn't support get distance by id");
     };
 
-    virtual tl::expected<bool, Error>
+    [[nodiscard]] virtual bool
     CheckFeature(IndexFeature feature) const {
         throw std::runtime_error("Index doesn't support check feature");
     }
