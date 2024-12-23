@@ -21,10 +21,16 @@
 #include "test_dataset.h"
 
 namespace fixtures {
+
+static const std::string NAN_DATASET = "nan_dataset";
+
 class TestDatasetPool {
 public:
     TestDatasetPtr
     GetDatasetAndCreate(uint64_t dim, uint64_t count, const std::string& metric_str = "l2");
+
+    TestDatasetPtr
+    GetNanDataset(const std::string& metric_str);
 
 private:
     static std::string
