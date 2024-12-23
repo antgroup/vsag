@@ -7,6 +7,12 @@
 #include "logger_impl.h"
 #include "windows_customizations.h"
 
+namespace vsag
+{
+extern std::function<void(diskann::LogLevel, const char*)>
+vsag_get_logger();
+} // namespace vsag
+
 namespace diskann
 {
 
@@ -16,13 +22,7 @@ DISKANN_DLLEXPORT ANNStreamBuf cerrBuff(stderr);
 
 DISKANN_DLLEXPORT std::basic_ostream<char> cout(&coutBuff);
 DISKANN_DLLEXPORT std::basic_ostream<char> cerr(&cerrBuff);
-std::function<void(LogLevel, const char *)> g_logger;
 
-void SetCustomLogger(std::function<void(LogLevel, const char *)> logger)
-{
-    g_logger = logger;
-    diskann::cout << "Set Custom Logger" << std::endl;
-}
 
 ANNStreamBuf::ANNStreamBuf(FILE *fp)
 {
@@ -40,10 +40,14 @@ ANNStreamBuf::ANNStreamBuf(FILE *fp)
 
     std::memset(_buf, 0, (BUFFER_SIZE) * sizeof(char));
     setp(_buf, _buf + BUFFER_SIZE - 1);
+
+    g_logger = vsag::vsag_get_logger();
+    g_logger(_logLevel, "diskann switch logger");
 }
 
 ANNStreamBuf::~ANNStreamBuf()
 {
+    g_logger = nullptr;
     sync();
     _fp = nullptr; // we'll not close because we can't.
     delete[] _buf;
@@ -80,8 +84,13 @@ int ANNStreamBuf::flush()
     pbump(-num);
     return num;
 }
+
 void ANNStreamBuf::logImpl(char *str, int num)
 {
+    // remove the newline at the end of str, 'cause logger provides
+    if (num > 0 and str[num - 1] == '\n') {
+        --num;
+    }
     str[num] = '\0'; // Safe. See the c'tor.
     // Invoke the OLS custom logging function.
     if (g_logger)
