@@ -1149,8 +1149,8 @@ size_t Index<T, TagT, LabelT>::load_graph(std::stringstream &in, size_t expected
         }
     }
 
-    diskann::cout << "load graph done. Index has " << nodes_read << " nodes and " << cc << " out-edges, _start is set to "
-                  << _start << std::endl;
+    // diskann::cout << "load graph done. Index has " << nodes_read << " nodes and " << cc << " out-edges, _start is set to "
+    //               << _start << std::endl;
     return nodes_read;
 }
 
