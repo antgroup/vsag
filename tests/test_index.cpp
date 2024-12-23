@@ -254,6 +254,82 @@ TestIndex::TestSerializeFile(const IndexPtr& index_from,
         }
     }
 }
+void
+TestIndex::TestKnnSearchWithNan(const TestIndex::IndexPtr& index,
+                                const TestDatasetPtr& dataset,
+                                const std::string& search_param,
+                                float recall,
+                                bool expected_success) {
+    auto queries = dataset->query_;
+    auto query_count = queries->GetNumElements();
+    auto dim = queries->GetDim();
+    auto gts = dataset->ground_truth_;
+    auto gt_topK = dataset->top_k;
+    float cur_recall = 0.0f;
+    auto topk = gt_topK;
+    for (auto i = 0; i < (int)(query_count * 0.9); ++i) {
+        auto query = vsag::Dataset::Make();
+        query->NumElements(1)
+            ->Dim(dim)
+            ->Float32Vectors(queries->GetFloat32Vectors() + i * dim)
+            ->Owner(false);
+        auto res = index->KnnSearch(query, topk, search_param);
+        REQUIRE(res.has_value() == expected_success);
+        if (!expected_success) {
+            return;
+        }
+        REQUIRE(res.value()->GetDim() == topk);
+        auto result = res.value()->GetIds();
+        auto dists = res.value()->GetDistances();
+        for (int j = 0; j < topk; ++j) {
+            REQUIRE_FALSE(std::isnan(dists[j]));
+        }
+        auto gt = gts->GetIds() + gt_topK * i;
+        auto val = Intersection(gt, gt_topK, result, topk);
+        cur_recall += static_cast<float>(val) / static_cast<float>(gt_topK);
+    }
+    float knn_recall = cur_recall / (query_count / 2);
+    REQUIRE(knn_recall > recall);
+
+    cur_recall = 0.0f;
+    const auto& radius = dataset->range_radius_;
+    for (auto i = 0; i < (int)(query_count * 0.9); ++i) {
+        auto query = vsag::Dataset::Make();
+        query->NumElements(1)
+            ->Dim(dim)
+            ->Float32Vectors(queries->GetFloat32Vectors() + i * dim)
+            ->Owner(false);
+        auto res = index->RangeSearch(query, radius[i], search_param);
+        REQUIRE(res.has_value() == expected_success);
+        if (!expected_success) {
+            return;
+        }
+        REQUIRE((res.value()->GetDim() >= topk && res.value()->GetDim() <= topk + 1));
+        auto result = res.value()->GetIds();
+        auto dists = res.value()->GetDistances();
+        for (int j = 0; j < topk; ++j) {
+            REQUIRE_FALSE(std::isnan(dists[j]));
+        }
+        auto gt = gts->GetIds() + gt_topK * i;
+        auto val = Intersection(gt, gt_topK, result, topk);
+        cur_recall += static_cast<float>(val) / static_cast<float>(gt_topK);
+    }
+    float range_recall = cur_recall / (query_count / 2);
+    REQUIRE(range_recall > recall);
+
+    for (auto i = (int)(query_count * 0.9); i < query_count; ++i) {
+        auto query = vsag::Dataset::Make();
+        query->NumElements(1)
+            ->Dim(dim)
+            ->Float32Vectors(queries->GetFloat32Vectors() + i * dim)
+            ->Owner(false);
+        auto res = index->KnnSearch(query, topk, search_param);
+        REQUIRE(res.has_value() == expected_success);
+        if (!expected_success) {
+            return;
+        }
+    }
+}
 
 void
 TestIndex::TestConcurrentAdd(const TestIndex::IndexPtr& index,

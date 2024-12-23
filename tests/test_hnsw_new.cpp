@@ -217,6 +217,23 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex,
     vsag::Options::Instance().set_block_size_limit(origin_size);
 }
 
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex, "HNSW Search with Nan", "[ft][hnsw]") {
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    auto size = GENERATE(1024 * 1024 * 2);
+    auto metric_type = GENERATE("l2", "ip", "cosine");
+    auto dataset = pool.GetNanDataset(metric_type);
+    auto dim = dataset->dim_;
+    const std::string name = "hnsw";
+    auto search_param = fmt::format(search_param_tmp, 100);
+
+    vsag::Options::Instance().set_block_size_limit(size);
+    auto param = GenerateHNSWBuildParametersString(metric_type, dim);
+    auto index = TestFactory(name, param, true);
+    TestContinueAdd(index, dataset, true);
+    TestKnnSearchWithNan(index, dataset, search_param, 0.98, true);
+    vsag::Options::Instance().set_block_size_limit(origin_size);
+}
+
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex, "HNSW Build", "[ft][hnsw]") {
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
