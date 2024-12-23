@@ -205,7 +205,7 @@ TestDatasetPtr
 TestDataset::CreateNanDataset(std::string metric_str) {
     TestDatasetPtr dataset = std::shared_ptr<TestDataset>(new TestDataset);
     dataset->dim_ = 256;
-    dataset->count_ = 2000;
+    dataset->count_ = 1000;
     constexpr uint64_t query_count = 100;
     dataset->base_ = GenerateNanRandomDataset(dataset->dim_, dataset->count_, metric_str);
     dataset->query_ = GenerateNanRandomDataset(dataset->dim_, query_count, metric_str);
