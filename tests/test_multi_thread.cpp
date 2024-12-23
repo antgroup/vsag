@@ -18,69 +18,10 @@
 #include <iostream>
 #include <nlohmann/json.hpp>
 #include <thread>
-#include <type_traits>
 
+#include "fixtures/thread_pool.h"
 #include "vsag/options.h"
 #include "vsag/vsag.h"
-
-class ThreadPool {
-public:
-    ThreadPool(size_t threads) : stop(false) {
-        for (size_t i = 0; i < threads; ++i) {
-            workers.emplace_back([this] {
-                for (;;) {
-                    std::function<void()> task;
-                    {
-                        std::unique_lock<std::mutex> lock(this->queue_mutex);
-                        this->condition.wait(lock,
-                                             [this] { return this->stop || !this->tasks.empty(); });
-                        if (this->stop && this->tasks.empty())
-                            return;
-                        task = std::move(this->tasks.front());
-                        this->tasks.pop();
-                    }
-                    task();
-                }
-            });
-        }
-    }
-
-    template <class F, class... Args>
-    auto
-    enqueue(F&& f, Args&&... args) -> std::future<typename std::invoke_result<F, Args...>::type> {
-        using return_type = typename std::invoke_result<F, Args...>::type;
-
-        auto task = std::make_shared<std::packaged_task<return_type()>>(
-            std::bind(std::forward<F>(f), std::forward<Args>(args)...));
-
-        std::future<return_type> res = task->get_future();
-        {
-            std::unique_lock<std::mutex> lock(queue_mutex);
-            if (stop)
-                throw std::runtime_error("enqueue on stopped ThreadPool");
-            tasks.emplace([task]() { (*task)(); });
-        }
-        condition.notify_one();
-        return res;
-    }
-
-    ~ThreadPool() {
-        {
-            std::unique_lock<std::mutex> lock(queue_mutex);
-            stop = true;
-        }
-        condition.notify_all();
-        for (std::thread& worker : workers) worker.join();
-    }
-
-private:
-    std::vector<std::thread> workers;
-    std::queue<std::function<void()>> tasks;
-
-    std::mutex queue_mutex;
-    std::condition_variable condition;
-    bool stop;
-};
 
 float
 query_knn(std::shared_ptr<vsag::Index> index,
@@ -148,7 +89,7 @@ TEST_CASE("DiskAnn Multi-threading", "[ft][diskann]") {
     auto result = index->Build(dataset);
     REQUIRE(result.has_value());
 
-    ThreadPool pool(10);
+    fixtures::ThreadPool pool(10);
     std::vector<std::future<float>> future_results;
     float correct = 0;
     nlohmann::json parameters{
@@ -200,7 +141,7 @@ TEST_CASE("HNSW Multi-threading", "[ft][hnsw]") {
     for (int i = 0; i < max_elements; i++) ids[i] = i;
     for (int i = 0; i < dim * max_elements; i++) data[i] = distrib_real(rng);
 
-    ThreadPool pool(10);
+    fixtures::ThreadPool pool(10);
     std::vector<std::future<uint64_t>> insert_results;
     for (int64_t i = 0; i < max_elements; ++i) {
         insert_results.push_back(pool.enqueue([&ids, &data, &index, dim, i]() -> uint64_t {
@@ -264,7 +205,7 @@ TEST_CASE("multi-threading read-write test", "[ft][hnsw]") {
     std::shared_ptr<int64_t[]> ids(new int64_t[max_elements]);
     std::shared_ptr<float[]> data(new float[dim * max_elements]);
 
-    ThreadPool pool(16);
+    fixtures::ThreadPool pool(16);
 
     // Generate random data
     std::mt19937 rng;
@@ -332,7 +273,7 @@ TEST_CASE("multi-threading read-write with feedback and pretrain test", "[ft][hn
     std::shared_ptr<int64_t[]> ids(new int64_t[max_elements]);
     std::shared_ptr<int8_t[]> data(new int8_t[dim * max_elements]);
 
-    ThreadPool pool(thread_num);
+    fixtures::ThreadPool pool(thread_num);
 
     // Generate random data
     std::mt19937 rng;

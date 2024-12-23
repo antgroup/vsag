@@ -15,6 +15,7 @@
 
 #include "test_index.h"
 
+#include "fixtures/thread_pool.h"
 #include "simd/fp32_simd.h"
 
 namespace fixtures {
@@ -252,6 +253,53 @@ TestIndex::TestSerializeFile(const IndexPtr& index_from,
             REQUIRE(res_to.value()->GetIds()[j] == res_from.value()->GetIds()[j]);
         }
     }
+}
+void
+TestIndex::TestConcurrentKnnSearch(const TestIndex::IndexPtr& index,
+                                   const TestDatasetPtr& dataset,
+                                   const std::string& search_param,
+                                   float recall,
+                                   bool expected_success) {
+    auto queries = dataset->query_;
+    auto query_count = queries->GetNumElements();
+    auto dim = queries->GetDim();
+    auto gts = dataset->ground_truth_;
+    auto gt_topK = dataset->top_k;
+    std::vector<float> search_results(query_count, 0.0f);
+    using RetType = std::pair<tl::expected<DatasetPtr, vsag::Error>, uint64_t>;
+    std::vector<std::future<RetType>> futures;
+    auto topk = gt_topK;
+    fixtures::ThreadPool pool(5);
+
+    auto func = [&](uint64_t i) -> RetType {
+        auto query = vsag::Dataset::Make();
+        query->NumElements(1)
+            ->Dim(dim)
+            ->Float32Vectors(queries->GetFloat32Vectors() + i * dim)
+            ->Owner(false);
+        auto res = index->KnnSearch(query, topk, search_param);
+        return {res, i};
+    };
+
+    for (auto i = 0; i < query_count; ++i) {
+        futures.emplace_back(pool.enqueue(func, i));
+    }
+
+    for (auto& res1 : futures) {
+        auto [res, id] = res1.get();
+        REQUIRE(res.has_value() == expected_success);
+        if (!expected_success) {
+            return;
+        }
+        REQUIRE(res.value()->GetDim() == topk);
+        auto result = res.value()->GetIds();
+        auto gt = gts->GetIds() + gt_topK * id;
+        auto val = Intersection(gt, gt_topK, result, topk);
+        search_results[id] = static_cast<float>(val) / static_cast<float>(gt_topK);
+    }
+
+    auto cur_recall = std::accumulate(search_results.begin(), search_results.end(), 0.0f);
+    REQUIRE(cur_recall > recall * query_count);
 }
 
 }  // namespace fixtures
