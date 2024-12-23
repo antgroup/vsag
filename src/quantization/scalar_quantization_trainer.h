@@ -21,15 +21,15 @@
 
 namespace vsag {
 
+enum SQTrainMode {
+    CLASSIC = 1,
+    K_MEANS = 2,
+    TRUNC_BOUND = 3,
+};
+
 class ScalarQuantizationTrainer {
 public:
     explicit ScalarQuantizationTrainer(int32_t dim, int bits = 8);
-
-    enum SQTrainMode {
-        CLASSIC = 1,
-        K_MEANS = 2,
-        TRUNC_BOUND = 3,
-    };
 
     void
     Train(const float* data,
@@ -57,13 +57,19 @@ public:
 
 private:
     void
-    classic_train(const float* data, uint64_t count, float* upper_bound, float* lower_bound);
+    classic_train(const float* data, uint64_t count, float* upper_bound, float* lower_bound) const;
+
+    void
+    trunc_bound_train(const float* data,
+                      uint64_t count,
+                      float* upper_bound,
+                      float* lower_bound) const;
 
     uint64_t
     sample_train_data(const float* data,
                       uint64_t count,
                       std::vector<float>& sample_datas,
-                      bool need_normalize = false);
+                      bool need_normalize = false) const;
 
 private:
     int dim_{0};
