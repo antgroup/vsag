@@ -93,6 +93,12 @@ protected:
                   bool expected_success = true);
 
     static void
+    TestSearchWithDirtyVector(const IndexPtr& index,
+                              const TestDatasetPtr& dataset,
+                              const std::string& search_param,
+                              bool expected_success = true);
+
+    static void
     TestRangeSearch(const IndexPtr& index,
                     const TestDatasetPtr& dataset,
                     const std::string& search_param,

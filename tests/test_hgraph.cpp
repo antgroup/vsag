@@ -348,6 +348,26 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex, "HGraph Add", "[ft][hgra
     }
 }
 
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex,
+                             "HGraph Search with Dirty Vector",
+                             "[ft][hgraph]") {
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    auto size = GENERATE(1024 * 1024 * 2);
+    auto metric_type = GENERATE("l2", "ip", "cosine");
+    auto dataset = pool.GetNanDataset(metric_type);
+    auto dim = dataset->dim_;
+    const std::string name = "hgraph";
+    auto search_param = fmt::format(search_param_tmp, 100);
+    for (auto& [base_quantization_str, recall] : test_cases) {
+        vsag::Options::Instance().set_block_size_limit(size);
+        auto param = GenerateHGraphBuildParametersString(metric_type, dim, base_quantization_str);
+        auto index = TestFactory(name, param, true);
+        TestBuildIndex(index, dataset, true);
+        TestSearchWithDirtyVector(index, dataset, search_param, true);
+    }
+    vsag::Options::Instance().set_block_size_limit(origin_size);
+}
+
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex, "HGraph Concurrent Add", "[ft][hgraph]") {
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
