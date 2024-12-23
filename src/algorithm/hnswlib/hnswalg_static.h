@@ -1784,8 +1784,8 @@ public:
             if (use_node_centroid)
                 node_cluster_dist_[i] = dist_to_centroid;
         }
-        std::cout << "encode HNSW finished with ave encode loss:: "
-                  << ave_encode_loss / (float)(right_range - left_range) << std::endl;
+        // std::cout << "encode HNSW finished with ave encode loss:: "
+        //           << ave_encode_loss / (float)(right_range - left_range) << std::endl;
     }
 
     void
