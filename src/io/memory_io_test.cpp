@@ -20,16 +20,18 @@
 
 #include "basic_io_test.h"
 #include "default_allocator.h"
+#include "safe_allocator.h"
+
 using namespace vsag;
 
 TEST_CASE("read&write [ut][memory_io]") {
-    auto allocator = std::make_unique<DefaultAllocator>();
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
     auto io = std::make_unique<MemoryIO>(allocator.get());
     TestBasicReadWrite(*io);
 }
 
 TEST_CASE("serialize&deserialize [ut][memory_io]") {
-    auto allocator = std::make_unique<DefaultAllocator>();
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
     auto wio = std::make_unique<MemoryIO>(allocator.get());
     auto rio = std::make_unique<MemoryIO>(allocator.get());
     TestSerializeAndDeserialize(*wio, *rio);

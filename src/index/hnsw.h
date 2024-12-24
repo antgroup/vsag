@@ -276,7 +276,7 @@ private:
     bool is_init_memory_ = false;
     DataTypes type_;
 
-    std::shared_ptr<SafeAllocator> allocator_;
+    std::shared_ptr<Allocator> allocator_;
 
     mutable std::mutex stats_mutex_;
     mutable std::map<std::string, WindowResultQueue> result_queues_;

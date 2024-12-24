@@ -21,7 +21,7 @@
 namespace vsag {
 Resource::Resource(Allocator* allocator) {
     if (allocator == nullptr) {
-        this->allocator = std::make_shared<SafeAllocator>(new DefaultAllocator(), true);
+        this->allocator = SafeAllocator::FactoryDefaultAllocator();
     } else {
         this->allocator = std::make_shared<SafeAllocator>(allocator, false);
     }

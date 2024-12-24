@@ -99,6 +99,8 @@ class BufferStreamReader : public StreamReader {
 public:
     explicit BufferStreamReader(StreamReader* reader, size_t max_size, vsag::Allocator* allocator);
 
+    ~BufferStreamReader();
+
     void
     Read(char* data, uint64_t size) override;
 
@@ -110,10 +112,11 @@ public:
 
 private:
     StreamReader* const reader_impl_{nullptr};
-    vsag::Vector<char> buffer_;  // Stores the cached content
-    size_t buffer_cursor_{0};    // Current read position in the cache
-    size_t valid_size_{0};       // Size of valid data in the cache
-    size_t buffer_size_{0};      // Maximum capacity of the cache
-    size_t max_size_{0};         // Maximum capacity of the actual data stream
-    size_t cursor_{0};           // Current read position in the actual data stream
+    vsag::Allocator* allocator_;
+    char* buffer_{nullptr};    // Stores the cached content
+    size_t buffer_cursor_{0};  // Current read position in the cache
+    size_t valid_size_{0};     // Size of valid data in the cache
+    size_t buffer_size_{0};    // Maximum capacity of the cache
+    size_t max_size_{0};       // Maximum capacity of the actual data stream
+    size_t cursor_{0};         // Current read position in the actual data stream
 };

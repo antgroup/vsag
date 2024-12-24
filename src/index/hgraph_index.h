@@ -25,9 +25,11 @@ class HGraphIndex : public Index {
 public:
     HGraphIndex(const JsonType& index_param, const IndexCommonParam& common_param) noexcept;
 
+    ~HGraphIndex() override;
+
     tl::expected<void, Error>
     Init() {
-        SAFE_CALL(return this->hgraph_->Init());
+        return this->hgraph_->Init();
     }
 
     tl::expected<std::vector<int64_t>, Error>
@@ -141,5 +143,7 @@ public:
 
 private:
     std::unique_ptr<HGraph> hgraph_{nullptr};
+
+    std::shared_ptr<Allocator> allocator_{nullptr};
 };
 }  // namespace vsag

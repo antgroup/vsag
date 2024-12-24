@@ -130,7 +130,7 @@ template <typename QuantTmpl, typename IOTmpl>
 FlattenDataCell<QuantTmpl, IOTmpl>::FlattenDataCell(const JsonType& quantization_param,
                                                     const JsonType& io_param,
                                                     const IndexCommonParam& common_param)
-    : allocator_(common_param.allocator_) {
+    : allocator_(common_param.allocator_.get()) {
     this->quantizer_ = std::make_shared<QuantTmpl>(quantization_param, common_param);
     this->io_ = std::make_shared<IOTmpl>(io_param, common_param);
     this->code_size_ = quantizer_->GetCodeSize();
@@ -160,20 +160,35 @@ FlattenDataCell<QuantTmpl, IOTmpl>::InsertVector(const float* vector, InnerIdTyp
     allocator_->Deallocate(codes);
 }
 
+struct BufferWrapper {
+public:
+    BufferWrapper(uint64_t size, Allocator* allocator) : allocator(allocator) {
+        data = static_cast<uint8_t*>(allocator->Allocate(size));
+    }
+
+    ~BufferWrapper() {
+        allocator->Deallocate(data);
+    }
+
+public:
+    uint8_t* data;
+
+    Allocator* allocator;
+};
+
 template <typename QuantTmpl, typename IOTmpl>
 void
 FlattenDataCell<QuantTmpl, IOTmpl>::BatchInsertVector(const float* vectors,
                                                       InnerIdType count,
                                                       InnerIdType* idx) {
     if (idx == nullptr) {
-        auto* codes = reinterpret_cast<uint8_t*>(
-            allocator_->Allocate(static_cast<uint64_t>(count) * static_cast<uint64_t>(code_size_)));
-        quantizer_->EncodeBatch(vectors, codes, count);
-        io_->Write(codes,
+        BufferWrapper codes(static_cast<uint64_t>(count) * static_cast<uint64_t>(code_size_),
+                            allocator_);
+        quantizer_->EncodeBatch(vectors, codes.data, count);
+        io_->Write(codes.data,
                    static_cast<uint64_t>(count) * static_cast<uint64_t>(code_size_),
                    static_cast<uint64_t>(total_count_) * static_cast<uint64_t>(code_size_));
         total_count_ += count;
-        allocator_->Deallocate(codes);
     } else {
         auto dim = quantizer_->GetDim();
         for (int64_t i = 0; i < count; ++i) {

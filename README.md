@@ -1,6 +1,16 @@
 # VSAG
 
-VSAG is a vector indexing library used for similarity search. The indexing algorithm allows users to search through various sizes of vector sets, especially those that cannot fit in memory. The library also provides methods for generating parameters based on vector dimensions and data scale, allowing developers to use it without understanding the algorithm’s principles. VSAG is written in C++ and provides a Python wrapper package called pyvsag.
+![CircleCI](https://img.shields.io/circleci/build/github/antgroup/vsag?logo=circleci&label=CircleCI)
+![GitHub License](https://img.shields.io/github/license/antgroup/vsag)
+![GitHub Release](https://img.shields.io/github/v/release/antgroup/vsag?label=last%20release)
+
+![PyPI - Version](https://img.shields.io/pypi/v/pyvsag)
+![PyPI - Python Version](https://img.shields.io/pypi/pyversions/pyvsag)
+[![PyPI Downloads](https://static.pepy.tech/badge/pyvsag)](https://pepy.tech/projects/pyvsag)
+[![PyPI Downloads](https://static.pepy.tech/badge/pyvsag/month)](https://pepy.tech/projects/pyvsag)
+[![PyPI Downloads](https://static.pepy.tech/badge/pyvsag/week)](https://pepy.tech/projects/pyvsag)
+
+VSAG is a vector indexing library used for similarity search. The indexing algorithm allows users to search through various sizes of vector sets, especially those that cannot fit in memory. The library also provides methods for generating parameters based on vector dimensions and data scale, allowing developers to use it without understanding the algorithm’s principles. VSAG is written in C++ and provides a Python wrapper package called [pyvsag](https://pypi.org/project/pyvsag/).
 
 ## Performance
 The VSAG algorithm achieves a significant boost of efficiency and outperforms the previous **state-of-the-art (SOTA)** by a clear margin. Specifically, VSAG's QPS exceeds that of the previous SOTA algorithm, Glass, by over 100%, and the baseline algorithm, HNSWLIB, by over 300% according to the ann-benchmark result on the GIST dataset at 90% recall.
@@ -56,13 +66,15 @@ Please read the [DEVELOPMENT](./DEVELOPMENT.md) guide for instructions on how to
 If your system uses VSAG, then feel free to make a pull request to add it to the list.
 
 ## How to Contribute
-
 Although VSAG is initially developed by the Vector Database Team at Ant Group, it's the work of
 the [community](https://github.com/antgroup/vsag/graphs/contributors), and contributions are always welcome!
 See [CONTRIBUTING](./CONTRIBUTING.md) for ways to get started.
 
 ## Community
+![Discord](https://img.shields.io/discord/1298249687836393523?logo=discord&label=Discord)
+
 Thrive together in VSAG community with users and developers from all around the world.
+
 - Discuss at [discord](https://discord.com/invite/JyDmUzuhrp).
 - Follow us on [Weixin Official Accounts](./docs/weixin-qr.jpg)（微信公众平台）to get the latest news.
 

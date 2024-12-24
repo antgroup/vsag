@@ -13,16 +13,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "hgraph_index.h"
-namespace vsag {
-HGraphIndex::HGraphIndex(const vsag::JsonType& index_param,
-                         const vsag::IndexCommonParam& common_param) noexcept {
-    this->hgraph_ = std::make_unique<HGraph>(index_param, common_param);
-    this->allocator_ = common_param.allocator_;
+#include <Python.h>
+
+static PyObject* hello(PyObject* self, PyObject* args) {
+    return Py_BuildValue("s", "Hello, world!");
 }
 
-HGraphIndex::~HGraphIndex() {
-    this->hgraph_.reset();
-    this->allocator_.reset();
+static PyMethodDef ExampleMethods[] = {
+    {"hello", hello, METH_VARARGS, "Greet the world."},
+    {NULL, NULL, 0, NULL}
+};
+
+static struct PyModuleDef examplemodule = {
+    PyModuleDef_HEAD_INIT,
+    "example",
+    NULL,
+    -1,
+    ExampleMethods
+};
+
+PyMODINIT_FUNC PyInit_example(void) {
+    return PyModule_Create(&examplemodule);
 }
-}  // namespace vsag

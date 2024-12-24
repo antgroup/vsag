@@ -67,11 +67,14 @@ IOStreamReader::GetCursor() const {
 BufferStreamReader::BufferStreamReader(StreamReader* reader,
                                        size_t max_size,
                                        vsag::Allocator* allocator)
-    : reader_impl_(reader), max_size_(max_size), buffer_(allocator), StreamReader() {
+    : reader_impl_(reader), max_size_(max_size), allocator_(allocator), StreamReader() {
     buffer_size_ = std::min(max_size_, vsag::Options::Instance().block_size_limit());
-    buffer_.resize(buffer_size_);
     buffer_cursor_ = buffer_size_;
     valid_size_ = buffer_size_;
+}
+
+BufferStreamReader::~BufferStreamReader() {
+    allocator_->Deallocate(buffer_);
 }
 
 void
@@ -79,6 +82,12 @@ BufferStreamReader::Read(char* data, uint64_t size) {
     // Total bytes copied to dest
     size_t total_copied = 0;
 
+    if (buffer_ == nullptr) {
+        buffer_ = (char*)allocator_->Allocate(buffer_size_);
+        if (buffer_ == nullptr) {
+            throw std::runtime_error("fail to allocate buffer in BufferStreamReader");
+        }
+    }
     // Loop to read until read_size is satisfied
     while (total_copied < size) {
         // Calculate the available data in buffer_
@@ -87,7 +96,7 @@ BufferStreamReader::Read(char* data, uint64_t size) {
         // If there is available data in buffer_, copy it to dest
         if (available_in_src > 0) {
             size_t bytes_to_copy = std::min(size - total_copied, available_in_src);
-            memcpy(data + total_copied, buffer_.data() + buffer_cursor_, bytes_to_copy);
+            memcpy(data + total_copied, buffer_ + buffer_cursor_, bytes_to_copy);
             total_copied += bytes_to_copy;
             buffer_cursor_ += bytes_to_copy;
         }
@@ -103,7 +112,7 @@ BufferStreamReader::Read(char* data, uint64_t size) {
             throw std::runtime_error(
                 "BufferStreamReader: The file size is smaller than the memory you want to read.");
         }
-        reader_impl_->Read(buffer_.data(), valid_size_);
+        reader_impl_->Read(buffer_, valid_size_);
         cursor_ += valid_size_;
     }
 }

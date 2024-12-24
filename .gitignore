@@ -181,3 +181,6 @@ data/
 /testresult/
 *.index
 
+/build-release/
+*.so.[0-9]*
+/python/pyvsag/_version.py

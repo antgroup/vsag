@@ -27,10 +27,16 @@
 #include "index/hnsw.h"
 #include "index/hnsw_zparameters.h"
 #include "index/index_common_param.h"
+#include "index/pyramid.h"
+#include "index/pyramid_zparameters.h"
 #include "resource_owner_wrapper.h"
 #include "typing.h"
 
 namespace vsag {
+
+Engine::Engine() {
+    this->resource_ = std::make_shared<ResourceOwnerWrapper>(new Resource(), /*owned*/ true);
+}
 
 Engine::Engine(Resource* resource) {
     if (resource == nullptr) {
@@ -42,13 +48,16 @@ Engine::Engine(Resource* resource) {
 
 void
 Engine::Shutdown() {
+    auto refcount = this->resource_.use_count();
     this->resource_.reset();
+
+    // TODO(LHT): add refcount warning
 }
 
 tl::expected<std::shared_ptr<Index>, Error>
 Engine::CreateIndex(const std::string& origin_name, const std::string& parameters) {
     try {
-        auto* allocator = this->resource_->allocator.get();
+        auto allocator = this->resource_->GetAllocator();
         std::string name = origin_name;
         transform(name.begin(), name.end(), name.begin(), ::tolower);
         JsonType parsed_params = JsonType::parse(parameters);
@@ -79,9 +88,6 @@ Engine::CreateIndex(const std::string& origin_name, const std::string& parameter
             logger::debug("created a diskann index");
             return std::make_shared<DiskANN>(diskann_params, index_common_params);
         } else if (name == INDEX_HGRAPH) {
-            if (allocator == nullptr) {
-                index_common_params.allocator_ = DefaultAllocator::Instance().get();
-            }
             logger::debug("created a hgraph index");
             JsonType hgraph_params;
             if (parsed_params.contains(INDEX_PARAM)) {
@@ -92,6 +98,15 @@ Engine::CreateIndex(const std::string& origin_name, const std::string& parameter
                 std::make_shared<HGraphIndex>(hgraph_param.GetJson(), index_common_params);
             hgraph_index->Init();
             return hgraph_index;
+        } else if (name == INDEX_PYRAMID) {
+            // read parameters from json, throw exception if not exists
+            CHECK_ARGUMENT(parsed_params.contains(INDEX_PARAM),
+                           fmt::format("parameters must contains {}", INDEX_PARAM));
+            auto& pyramid_param_obj = parsed_params[INDEX_PARAM];
+            auto pyramid_params =
+                PyramidParameters::FromJson(pyramid_param_obj, index_common_params);
+            logger::debug("created a pyramid index");
+            return std::make_shared<Pyramid>(pyramid_params, index_common_params);
         } else {
             LOG_ERROR_AND_RETURNS(
                 ErrorType::UNSUPPORTED_INDEX, "failed to create index(unsupported): ", name);

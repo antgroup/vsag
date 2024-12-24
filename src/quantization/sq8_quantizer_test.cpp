@@ -21,6 +21,7 @@
 #include "default_allocator.h"
 #include "fixtures.h"
 #include "quantizer_test.h"
+#include "safe_allocator.h"
 
 using namespace vsag;
 
@@ -32,7 +33,7 @@ TestQuantizerEncodeDecodeMetricSQ8(uint64_t dim,
                                    int count,
                                    float error = 1e-5,
                                    float error_same = 1e-2) {
-    auto allocator = std::make_shared<DefaultAllocator>();
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
     SQ8Quantizer<metric> quantizer(dim, allocator.get());
     TestQuantizerEncodeDecode(quantizer, dim, count, error);
     TestQuantizerEncodeDecodeSame(quantizer, dim, count, 255, error_same);
@@ -54,7 +55,7 @@ TEST_CASE("encode&decode [SQ8Quantizer]") {
 template <MetricType metric>
 void
 TestComputeMetricSQ8(uint64_t dim, int count, float error = 1e-5) {
-    auto allocator = std::make_shared<DefaultAllocator>();
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
     SQ8Quantizer<metric> quantizer(dim, allocator.get());
     TestComputeCodes<SQ8Quantizer<metric>, metric>(quantizer, dim, count, error);
     TestComputer<SQ8Quantizer<metric>, metric>(quantizer, dim, count, error);
@@ -77,7 +78,7 @@ TEST_CASE("compute [ut][sq8_quantizer]") {
 template <MetricType metric>
 void
 TestSerializeAndDeserializeMetricSQ8(uint64_t dim, int count, float error = 1e-5) {
-    auto allocator = std::make_shared<DefaultAllocator>();
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
     SQ8Quantizer<metric> quantizer1(dim, allocator.get());
     SQ8Quantizer<metric> quantizer2(0, allocator.get());
     TestSerializeAndDeserialize<SQ8Quantizer<metric>, metric>(

@@ -80,7 +80,7 @@ public:
 template <MetricType metric>
 FP32Quantizer<metric>::FP32Quantizer(const JsonType& quantization_param,
                                      const IndexCommonParam& common_param)
-    : Quantizer<FP32Quantizer<metric>>(common_param.dim_, common_param.allocator_) {
+    : Quantizer<FP32Quantizer<metric>>(common_param.dim_, common_param.allocator_.get()) {
     this->code_size_ = common_param.dim_ * sizeof(float);
 }
 

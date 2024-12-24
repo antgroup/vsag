@@ -17,16 +17,19 @@
 
 #include <memory>
 
+#include "dataset.h"
 #include "index.h"
 #include "resource.h"
 
 namespace vsag {
 class Engine {
 public:
-    explicit Engine(Resource* resource = nullptr);
+    explicit Engine();
+
+    explicit Engine(Resource* resource);
 
     void
-    Shutdown();
+    Shutdown();  // like ~Engine(), but will warn whether the resources are still reference outside
 
     tl::expected<std::shared_ptr<Index>, Error>
     CreateIndex(const std::string& name, const std::string& parameters);

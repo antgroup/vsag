@@ -1591,12 +1591,12 @@ public:
         for (uint32_t i = 0; i < cur_element_count_; i++) {
             float dist = fstdistfunc_(data_point, getDataByInternalId(i), dist_func_param_);
             if (results.size() < k) {
-                results.push({dist, *getExternalLabeLp(i)});
+                results.push({dist, getExternalLabel(i)});
             } else {
                 float current_max_dist = results.top().first;
                 if (dist < current_max_dist) {
                     results.pop();
-                    results.push({dist, *getExternalLabeLp(i)});
+                    results.push({dist, getExternalLabel(i)});
                 }
             }
         }

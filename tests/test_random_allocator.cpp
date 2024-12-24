@@ -16,55 +16,11 @@
 #include <catch2/catch_test_macros.hpp>
 #include <iostream>
 
-#include "vsag/vsag.h"
-
-class RandomAllocator : public vsag::Allocator {
-public:
-    std::string
-    Name() override {
-        return "myallocator";
-    }
-    RandomAllocator() {
-        rd_ = std::shared_ptr<std::random_device>(new std::random_device());
-        gen_ = std::shared_ptr<std::mt19937>(new std::mt19937((*rd_)()));
-        std::uniform_int_distribution<int> seed_random;
-        std::uniform_real_distribution<> dis;
-        std::uniform_real_distribution<> ratio_range(0.001f, 0.1f);
-        int seed = seed_random(*gen_);
-        float r = ratio_range(*gen_);
-        std::cout << "seed: " << seed << "   error ratio: " << r << std::endl;
-        gen_->seed(seed);
-        error_ratio_ = r;
-    }
-
-    void*
-    Allocate(size_t size) override {
-        auto number = dis_(*gen_);
-        if (number < error_ratio_) {
-            return nullptr;
-        }
-        return malloc(size);
-    }
-
-    void
-    Deallocate(void* p) override {
-        return free(p);
-    }
-
-    void*
-    Reallocate(void* p, size_t size) override {
-        return realloc(p, size);
-    }
-
-private:
-    std::shared_ptr<std::random_device> rd_;
-    std::shared_ptr<std::mt19937> gen_;
-    std::uniform_real_distribution<> dis_;
-    float error_ratio_ = 0.0f;
-};
+#include "fixtures/random_allocator.h"
+#include "vsag//factory.h"
 
 TEST_CASE("Random Alocator Test", "[ft][hnsw]") {
-    RandomAllocator allocator;
+    fixtures::RandomAllocator allocator;
 
     auto paramesters = R"(
     {
