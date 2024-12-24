@@ -211,6 +211,7 @@ MemoryBlockIO::check_and_realloc(uint64_t size) {
     }
     const uint64_t new_block_count = (size + this->block_size_ - 1) >> block_bit_;
     auto cur_block_size = this->blocks_.size();
+    this->blocks_.reserve(new_block_count);
     while (cur_block_size < new_block_count) {
         this->blocks_.emplace_back((uint8_t*)(allocator_->Allocate(block_size_)));
         ++cur_block_size;

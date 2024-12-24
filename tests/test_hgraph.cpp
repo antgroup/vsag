@@ -30,7 +30,8 @@ public:
     static std::string
     GenerateHGraphBuildParametersString(const std::string& metric_type,
                                         int64_t dim,
-                                        const std::string& base_quantization_type = "sq8");
+                                        const std::string& base_quantization_type = "sq8",
+                                        const int thread_count = 5);
     static TestDatasetPool pool;
 
     static std::vector<int> dims;
@@ -51,19 +52,23 @@ std::vector<int> HgraphTestIndex::dims = fixtures::get_common_used_dims(2, Rando
 std::string
 HgraphTestIndex::GenerateHGraphBuildParametersString(const std::string& metric_type,
                                                      int64_t dim,
-                                                     const std::string& base_quantization_type) {
+                                                     const std::string& base_quantization_type,
+                                                     const int thread_count) {
     constexpr auto parameter_temp = R"(
     {{
         "dtype": "float32",
         "metric_type": "{}",
         "dim": {},
         "index_param": {{
-            "base_quantization_type": "{}"
+            "base_quantization_type": "{}",
+            "max_degree": 96,
+            "ef_construction": 500,
+            "build_thread_count": {}
         }}
     }}
     )";
     std::string build_parameters_str =
-        fmt::format(parameter_temp, metric_type, dim, base_quantization_type);
+        fmt::format(parameter_temp, metric_type, dim, base_quantization_type, thread_count);
     return build_parameters_str;
 }
 }  // namespace fixtures
@@ -312,4 +317,27 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex, "HGraph Serialize File",
         }
         vsag::Options::Instance().set_block_size_limit(origin_size);
     }
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex,
+                             "HGraph Build & ContinueAdd Test With Random Allocator",
+                             "[ft][hnsw]") {
+    auto allocator = std::make_shared<fixtures::RandomAllocator>();
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    auto size = GENERATE(1024 * 1024 * 2);
+    auto metric_type = GENERATE("l2", "ip", "cosine");
+    std::string base_quantization_str = GENERATE("sq8", "fp32");
+    const std::string name = "hgraph";
+    for (auto& dim : dims) {
+        vsag::Options::Instance().set_block_size_limit(size);
+        auto param =
+            GenerateHGraphBuildParametersString(metric_type, dim, base_quantization_str, 1);
+        auto index = vsag::Factory::CreateIndex(name, param, allocator.get());
+        if (not index.has_value()) {
+            continue;
+        }
+        auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
+        TestContinueAddIgnoreRequire(index.value(), dataset);
+    }
+    vsag::Options::Instance().set_block_size_limit(origin_size);
 }

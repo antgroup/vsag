@@ -29,7 +29,7 @@ public:
 
     tl::expected<void, Error>
     Init() {
-        SAFE_CALL(return this->hgraph_->Init());
+        return this->hgraph_->Init();
     }
 
     tl::expected<std::vector<int64_t>, Error>

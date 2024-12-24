@@ -213,11 +213,6 @@ private:
     uint64_t ef_construct_{400};
     mutable std::shared_mutex global_mutex_;
 
-    // Locks operations with element by label value
-    mutable vsag::Vector<std::mutex> label_op_mutex_;
-
-    static const uint64_t MAX_LABEL_OPERATION_LOCKS = 65536;
-
     std::shared_ptr<hnswlib::VisitedListPool> pool_{nullptr};
 
     mutable vsag::Vector<std::shared_mutex> neighbors_mutex_;
