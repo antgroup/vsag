@@ -117,6 +117,9 @@ protected:
                             const std::string& search_param,
                             float recall = 0.99,
                             bool expected_success = true);
+
+    static void
+    TestDuplicateAdd(const IndexPtr& index, const TestDatasetPtr& dataset);
 };
 
 }  // namespace fixtures
