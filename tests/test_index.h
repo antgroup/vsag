@@ -66,6 +66,18 @@ protected:
                  bool expected_success = true);
 
     static void
+    TestUpdateId(const IndexPtr& index,
+                 const TestDatasetPtr& dataset,
+                 const std::string& search_param,
+                 bool expected_success = true);
+
+    static void
+    TestUpdateVector(const IndexPtr& index,
+                     const TestDatasetPtr& dataset,
+                     const std::string& search_param,
+                     bool expected_success = true);
+
+    static void
     TestContinueAdd(const IndexPtr& index,
                     const TestDatasetPtr& dataset,
                     bool expected_success = true);

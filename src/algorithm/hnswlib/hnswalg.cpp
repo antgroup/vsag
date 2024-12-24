@@ -1137,6 +1137,41 @@ HierarchicalNSW::dealNoInEdge(InnerIdType id, int level, int m_curmax, int skip_
 }
 
 void
+HierarchicalNSW::updateVector(LabelType label, const void* data_point) {
+    std::unique_lock<std::mutex> lock(global_);
+    auto iter = label_lookup_.find(label);
+    if (iter == label_lookup_.end()) {
+        throw std::runtime_error(fmt::format("no label {} in HNSW", label));
+    } else {
+        InnerIdType internal_id = iter->second;
+
+        // reset data
+        std::shared_ptr<float[]> normalize_data;
+        normalizeVector(data_point, normalize_data);
+        memcpy(getDataByInternalId(internal_id), data_point, data_size_);
+    }
+}
+
+void
+HierarchicalNSW::updateLabel(LabelType old_label, LabelType new_label) {
+    std::unique_lock<std::mutex> lock(global_);
+    auto iter_old = label_lookup_.find(old_label);
+    auto iter_new = label_lookup_.find(new_label);
+    if (iter_old == label_lookup_.end()) {
+        throw std::runtime_error(fmt::format("no old label {} in HNSW", old_label));
+    } else if (iter_new != label_lookup_.end()) {
+        throw std::runtime_error(fmt::format("new label {} has been in HNSW", new_label));
+    } else {
+        InnerIdType internal_id = iter_old->second;
+
+        // reset label
+        label_lookup_.erase(iter_old);
+        label_lookup_[new_label] = internal_id;
+        setExternalLabel(internal_id, new_label);
+    }
+}
+
+void
 HierarchicalNSW::removePoint(LabelType label) {
     InnerIdType cur_c = 0;
     InnerIdType internal_id = 0;

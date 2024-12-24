@@ -219,6 +219,8 @@ TEST_CASE("multi-threading read-write test", "[ft][hnsw]") {
     std::string str_parameters = parameters.dump();
 
     std::vector<std::future<uint64_t>> insert_results;
+    std::vector<std::future<bool>> update_id_results;
+    std::vector<std::future<bool>> update_vec_results;
     std::vector<std::future<bool>> search_results;
     for (int64_t i = 0; i < max_elements; ++i) {
         // insert
@@ -234,6 +236,31 @@ TEST_CASE("multi-threading read-write test", "[ft][hnsw]") {
             return add_res.value().size();
         }));
 
+        // update id
+        update_id_results.push_back(
+            pool.enqueue([&ids, &data, &index, dim, i, max_elements]() -> bool {
+                auto dataset = vsag::Dataset::Make();
+                dataset->Dim(dim)
+                    ->NumElements(1)
+                    ->Ids(ids.get() + i)
+                    ->Float32Vectors(data.get() + i * dim)
+                    ->Owner(false);
+                auto res = index->UpdateId(ids[i], ids[i] + 2 * max_elements);
+                return res.has_value();
+            }));
+
+        // update vector
+        update_vec_results.push_back(pool.enqueue([&ids, &data, &index, dim, i]() -> bool {
+            auto dataset = vsag::Dataset::Make();
+            dataset->Dim(dim)
+                ->NumElements(1)
+                ->Ids(ids.get() + i)
+                ->Float32Vectors(data.get() + i * dim)
+                ->Owner(false);
+            auto res = index->UpdateVector(ids[i], dataset);
+            return res.has_value();
+        }));
+
         // search
         search_results.push_back(
             pool.enqueue([&index, &ids, dim, &data, i, &str_parameters]() -> bool {
@@ -243,11 +270,11 @@ TEST_CASE("multi-threading read-write test", "[ft][hnsw]") {
                 return result.has_value();
             }));
     }
-    for (auto& res : insert_results) {
-        REQUIRE(res.get() == 0);
-    }
 
-    for (int i = 0; i < search_results.size(); ++i) {
+    for (int i = 0; i < max_elements; ++i) {
+        REQUIRE(insert_results[i].get() == 0);
+        REQUIRE(update_id_results[i].get());
+        REQUIRE(update_vec_results[i].get());
         REQUIRE(search_results[i].get());
     }
 }
