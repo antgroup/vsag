@@ -183,8 +183,8 @@ HierarchicalNSW::setBatchNeigohbors(InnerIdType internal_id,
                                     int level,
                                     const InnerIdType* neighbors,
                                     size_t neigbor_count) {
-    linklistsizeint* ll_cur = getLinklistAtLevel(internal_id, level);
     std::unique_lock lock(link_list_locks_[internal_id]);
+    linklistsizeint* ll_cur = getLinklistAtLevel(internal_id, level);
     for (int i = 1; i <= neigbor_count; ++i) {
         ll_cur[i] = neighbors[i - 1];
     }
@@ -196,8 +196,8 @@ HierarchicalNSW::appendNeigohbor(InnerIdType internal_id,
                                  int level,
                                  InnerIdType neighbor,
                                  size_t max_degree) {
-    linklistsizeint* ll_cur = getLinklistAtLevel(internal_id, level);
     std::unique_lock lock(link_list_locks_[internal_id]);
+    linklistsizeint* ll_cur = getLinklistAtLevel(internal_id, level);
     size_t neigbor_count = getListCount(ll_cur) + 1;
     if (neigbor_count <= max_degree) {
         ll_cur[neigbor_count] = neighbor;
