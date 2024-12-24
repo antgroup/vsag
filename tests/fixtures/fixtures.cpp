@@ -63,7 +63,7 @@ get_common_used_dims(uint64_t count, int seed) {
 
 std::vector<float>
 generate_vectors(uint64_t count, uint32_t dim, bool need_normalize, int seed) {
-    return std::move(GenerateVectors<float>(count, dim, need_normalize, seed));
+    return std::move(GenerateVectors<float>(count, dim, seed, need_normalize));
 }
 
 std::vector<int8_t>
