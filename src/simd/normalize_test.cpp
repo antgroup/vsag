@@ -22,18 +22,6 @@
 
 using namespace vsag;
 
-#ifndef ENABLE_SSE
-namespace sse = generic;
-#endif
-
-#ifndef ENABLE_AVX2
-namespace avx2 = sse;
-#endif
-
-#ifndef ENABLE_AVX512
-namespace avx512 = avx2;
-#endif
-
 TEST_CASE("Normalize SIMD Compute", "[simd]") {
     auto dims = fixtures::get_common_used_dims();
     int64_t count = 100;

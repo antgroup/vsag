@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "simd/sq8_simd.h"
+#include "sq8_simd.h"
 
 #include "catch2/benchmark/catch_benchmark.hpp"
 #include "catch2/catch_test_macros.hpp"
@@ -21,18 +21,6 @@
 #include "simd_status.h"
 
 using namespace vsag;
-
-#ifndef ENABLE_SSE
-namespace sse = generic;
-#endif
-
-#ifndef ENABLE_AVX2
-namespace avx2 = sse;
-#endif
-
-#ifndef ENABLE_AVX512
-namespace avx512 = avx2;
-#endif
 
 #define TEST_ACCURACY(Func)                                                                 \
     {                                                                                       \
