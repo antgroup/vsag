@@ -1,4 +1,3 @@
-
 // Copyright 2024-present the vsag project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -26,6 +25,33 @@
 #include "vsag/vsag.h"
 
 namespace py = pybind11;
+
+void
+SetLoggerOff() {
+    vsag::Options::Instance().logger()->SetLevel(vsag::Logger::Level::kOFF);
+}
+
+void
+SetLoggerInfo() {
+    vsag::Options::Instance().logger()->SetLevel(vsag::Logger::Level::kINFO);
+}
+
+void
+SetLoggerDebug() {
+    vsag::Options::Instance().logger()->SetLevel(vsag::Logger::Level::kDEBUG);
+}
+
+template <typename T>
+static void
+writeBinaryPOD(std::ostream& out, const T& podRef) {
+    out.write((char*)&podRef, sizeof(T));
+}
+
+template <typename T>
+static void
+readBinaryPOD(std::istream& in, T& podRef) {
+    in.read((char*)&podRef, sizeof(T));
+}
 
 class Index {
 public:
@@ -65,20 +91,26 @@ public:
             ->Float32Vectors(vector.mutable_data())
             ->Owner(false);
 
-        auto labels = py::array_t<int64_t>(k);
-        auto dists = py::array_t<float>(k);
+        size_t ids_shape[1]{k};
+        size_t ids_strides[1]{sizeof(int64_t)};
+        size_t dists_shape[1]{k};
+        size_t dists_strides[1]{sizeof(float)};
+
+        auto ids = py::array_t<int64_t>(ids_shape, ids_strides);
+        auto dists = py::array_t<float>(dists_shape, dists_strides);
         if (auto result = index_->KnnSearch(query, k, parameters); result.has_value()) {
-            auto labels_data = labels.mutable_data();
-            auto dists_data = dists.mutable_data();
-            auto ids = result.value()->GetIds();
-            auto distances = result.value()->GetDistances();
+            auto ids_view = ids.mutable_unchecked<1>();
+            auto dists_view = dists.mutable_unchecked<1>();
+
+            auto vsag_ids = result.value()->GetIds();
+            auto vsag_distances = result.value()->GetDistances();
             for (int i = 0; i < data_num * k; ++i) {
-                labels_data[i] = ids[i];
-                dists_data[i] = distances[i];
+                ids_view(i) = vsag_ids[i];
+                dists_view(i) = vsag_distances[i];
             }
         }
 
-        return py::make_tuple(labels, dists);
+        return py::make_tuple(ids, dists);
     }
 
     py::object
@@ -109,68 +141,29 @@ public:
         return py::make_tuple(labels, dists);
     }
 
-    std::map<std::string, size_t>
-    Save(const std::string& dir_name) {
-        auto serialize_result = index_->Serialize();
-        if (not serialize_result.has_value()) {
-            throw std::runtime_error("serialize error: " + serialize_result.error().message);
-        }
-        vsag::BinarySet& binary_set = serialize_result.value();
-        std::filesystem::path dir(dir_name);
-        std::map<std::string, size_t> file_sizes;
-        for (const auto& key : binary_set.GetKeys()) {
-            std::filesystem::path file_path(key);
-            std::filesystem::path full_path = dir / file_path;
-            vsag::Binary binary = binary_set.Get(key);
-            std::ofstream file(full_path.string(), std::ios::binary);
-            file.write(reinterpret_cast<char*>(binary.data.get()), binary.size);
-            file_sizes[key] = binary.size;
-            file.close();
-        }
-
-        return std::move(file_sizes);
+    void
+    Save(const std::string& filename) {
+        std::ofstream file(filename, std::ios::binary);
+        index_->Serialize(file);
+        file.close();
     }
 
     void
-    Load(const std::string& dir_name,
-         const std::map<std::string, size_t>& file_sizes,
-         bool load_memory) {
-        std::filesystem::path dir(dir_name);
-        if (load_memory) {
-            vsag::BinarySet binary_set;
-            for (const auto& single_file : file_sizes) {
-                const std::string& key = single_file.first;
-                size_t size = single_file.second;
-                std::filesystem::path file_path(key);
-                std::filesystem::path full_path = dir / file_path;
-                std::ifstream file(full_path.string(), std::ios::binary);
-                vsag::Binary binary;
-                binary.size = size;
-                binary.data.reset(new int8_t[binary.size]);
-                file.read(reinterpret_cast<char*>(binary.data.get()), size);
-                file.close();
-                binary_set.Set(key, binary);
-            }
-            index_->Deserialize(binary_set);
-        } else {
-            vsag::ReaderSet reader_set;
-            for (const auto& single_file : file_sizes) {
-                const std::string& key = single_file.first;
-                size_t size = single_file.second;
-                std::filesystem::path file_path(key);
-                std::filesystem::path full_path = dir / file_path;
-                auto reader = vsag::Factory::CreateLocalFileReader(full_path.string(), 0, size);
-                reader_set.Set(key, reader);
-            }
-            index_->Deserialize(reader_set);
-        }
+    Load(const std::string& filename) {
+        std::ifstream file(filename, std::ios::binary);
+
+        index_->Deserialize(file);
+        file.close();
     }
 
 private:
     std::shared_ptr<vsag::Index> index_;
 };
 
-PYBIND11_MODULE(pyvsag, m) {
+PYBIND11_MODULE(_pyvsag, m) {
+    m.def("set_logger_off", &SetLoggerOff, "SetLoggerOff");
+    m.def("set_logger_info", &SetLoggerInfo, "SetLoggerInfo");
+    m.def("set_logger_debug", &SetLoggerDebug, "SetLoggerDebug");
     py::class_<Index>(m, "Index")
         .def(py::init<std::string, std::string&>(), py::arg("name"), py::arg("parameters"))
         .def("build",
@@ -186,10 +179,6 @@ PYBIND11_MODULE(pyvsag, m) {
              py::arg("vector"),
              py::arg("threshold"),
              py::arg("parameters"))
-        .def("save", &Index::Save, py::arg("dir_name"))
-        .def("load",
-             &Index::Load,
-             py::arg("dir_name"),
-             py::arg("file_sizes"),
-             py::arg("load_memory"));
+        .def("save", &Index::Save, py::arg("filename"))
+        .def("load", &Index::Load, py::arg("filename"));
 }
