@@ -29,6 +29,10 @@ GetFP32ComputeIP() {
 #if defined(ENABLE_AVX2)
         return avx2::FP32ComputeIP;
 #endif
+    } else if (SimdStatus::SupportAVX()) {
+#if defined(ENABLE_AVX)
+        return avx::FP32ComputeIP;
+#endif
     } else if (SimdStatus::SupportSSE()) {
 #if defined(ENABLE_SSE)
         return sse::FP32ComputeIP;
@@ -47,6 +51,10 @@ GetFP32ComputeL2Sqr() {
     } else if (SimdStatus::SupportAVX2()) {
 #if defined(ENABLE_AVX2)
         return avx2::FP32ComputeL2Sqr;
+#endif
+    } else if (SimdStatus::SupportAVX()) {
+#if defined(ENABLE_AVX)
+        return avx::FP32ComputeL2Sqr;
 #endif
     } else if (SimdStatus::SupportSSE()) {
 #if defined(ENABLE_SSE)

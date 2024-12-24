@@ -19,281 +19,49 @@
 
 #include <cmath>
 
-#include "fp32_simd.h"
-#include "normalize.h"
-#include "sq4_simd.h"
-#include "sq4_uniform_simd.h"
-#include "sq8_simd.h"
-#include "sq8_uniform_simd.h"
-
-namespace vsag {
+#include "simd.h"
 
 #define PORTABLE_ALIGN32 __attribute__((aligned(32)))
 #define PORTABLE_ALIGN64 __attribute__((aligned(64)))
 
-extern float
-L2Sqr(const void* pVect1v, const void* pVect2v, const void* qty_ptr);
+namespace vsag::sse {
 
-extern float
-InnerProduct(const void* pVect1, const void* pVect2, const void* qty_ptr);
-
-#if defined(ENABLE_SSE)
-/* L2 Distance */
 float
-L2SqrSIMD4ExtSSE(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
-    float PORTABLE_ALIGN32 TmpRes[8];
-    float* pVect1 = (float*)pVect1v;
-    float* pVect2 = (float*)pVect2v;
-    size_t qty = *((size_t*)qty_ptr);
-
-    size_t qty4 = qty >> 2;
-
-    const float* pEnd1 = pVect1 + (qty4 << 2);
-
-    __m128 diff, v1, v2;
-    __m128 sum = _mm_set1_ps(0);
-
-    while (pVect1 < pEnd1) {
-        v1 = _mm_loadu_ps(pVect1);
-        pVect1 += 4;
-        v2 = _mm_loadu_ps(pVect2);
-        pVect2 += 4;
-        diff = _mm_sub_ps(v1, v2);
-        sum = _mm_add_ps(sum, _mm_mul_ps(diff, diff));
-    }
-    _mm_store_ps(TmpRes, sum);
-    return TmpRes[0] + TmpRes[1] + TmpRes[2] + TmpRes[3];
+L2Sqr(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
+    auto* pVect1 = (float*)pVect1v;
+    auto* pVect2 = (float*)pVect2v;
+    auto qty = *((size_t*)qty_ptr);
+    return sse::FP32ComputeL2Sqr(pVect1, pVect2, qty);
 }
 
 float
-L2SqrSIMD4ExtResidualsSSE(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
-    size_t qty = *((size_t*)qty_ptr);
-    size_t qty4 = qty >> 2 << 2;
-
-    float res = L2SqrSIMD4ExtSSE(pVect1v, pVect2v, &qty4);
-    size_t qty_left = qty - qty4;
-
-    float* pVect1 = (float*)pVect1v + qty4;
-    float* pVect2 = (float*)pVect2v + qty4;
-    float res_tail = L2Sqr(pVect1, pVect2, &qty_left);
-
-    return (res + res_tail);
+InnerProduct(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
+    auto* pVect1 = (float*)pVect1v;
+    auto* pVect2 = (float*)pVect2v;
+    auto qty = *((size_t*)qty_ptr);
+    return sse::FP32ComputeIP(pVect1, pVect2, qty);
 }
 
 float
-L2SqrSIMD16ExtSSE(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
-    float* pVect1 = (float*)pVect1v;
-    float* pVect2 = (float*)pVect2v;
-    size_t qty = *((size_t*)qty_ptr);
-    float PORTABLE_ALIGN32 TmpRes[8];
-    size_t qty16 = qty >> 4;
-
-    const float* pEnd1 = pVect1 + (qty16 << 4);
-
-    __m128 diff, v1, v2;
-    __m128 sum = _mm_set1_ps(0);
-
-    while (pVect1 < pEnd1) {
-        //_mm_prefetch((char*)(pVect2 + 16), _MM_HINT_T0);
-        v1 = _mm_loadu_ps(pVect1);
-        pVect1 += 4;
-        v2 = _mm_loadu_ps(pVect2);
-        pVect2 += 4;
-        diff = _mm_sub_ps(v1, v2);
-        sum = _mm_add_ps(sum, _mm_mul_ps(diff, diff));
-
-        v1 = _mm_loadu_ps(pVect1);
-        pVect1 += 4;
-        v2 = _mm_loadu_ps(pVect2);
-        pVect2 += 4;
-        diff = _mm_sub_ps(v1, v2);
-        sum = _mm_add_ps(sum, _mm_mul_ps(diff, diff));
-
-        v1 = _mm_loadu_ps(pVect1);
-        pVect1 += 4;
-        v2 = _mm_loadu_ps(pVect2);
-        pVect2 += 4;
-        diff = _mm_sub_ps(v1, v2);
-        sum = _mm_add_ps(sum, _mm_mul_ps(diff, diff));
-
-        v1 = _mm_loadu_ps(pVect1);
-        pVect1 += 4;
-        v2 = _mm_loadu_ps(pVect2);
-        pVect2 += 4;
-        diff = _mm_sub_ps(v1, v2);
-        sum = _mm_add_ps(sum, _mm_mul_ps(diff, diff));
-    }
-
-    _mm_store_ps(TmpRes, sum);
-    return TmpRes[0] + TmpRes[1] + TmpRes[2] + TmpRes[3];
-}
-
-extern float (*L2SqrSIMD16Ext)(const void*, const void*, const void*);
-
-float
-L2SqrSIMD16ExtResidualsSSE(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
-    size_t qty = *((size_t*)qty_ptr);
-    size_t qty16 = qty >> 4 << 4;
-    float res = L2SqrSIMD16Ext(pVect1v, pVect2v, &qty16);
-    float* pVect1 = (float*)pVect1v + qty16;
-    float* pVect2 = (float*)pVect2v + qty16;
-
-    size_t qty_left = qty - qty16;
-    float res_tail = L2Sqr(pVect1, pVect2, &qty_left);
-    return (res + res_tail);
-}
-
-/* IP Distance */
-float
-InnerProductSIMD4ExtSSE(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
-    float PORTABLE_ALIGN32 TmpRes[8];
-    float* pVect1 = (float*)pVect1v;
-    float* pVect2 = (float*)pVect2v;
-    size_t qty = *((size_t*)qty_ptr);
-
-    size_t qty16 = qty / 16;
-    size_t qty4 = qty / 4;
-
-    const float* pEnd1 = pVect1 + 16 * qty16;
-    const float* pEnd2 = pVect1 + 4 * qty4;
-
-    __m128 v1, v2;
-    __m128 sum_prod = _mm_set1_ps(0);
-
-    while (pVect1 < pEnd1) {
-        v1 = _mm_loadu_ps(pVect1);
-        pVect1 += 4;
-        v2 = _mm_loadu_ps(pVect2);
-        pVect2 += 4;
-        sum_prod = _mm_add_ps(sum_prod, _mm_mul_ps(v1, v2));
-
-        v1 = _mm_loadu_ps(pVect1);
-        pVect1 += 4;
-        v2 = _mm_loadu_ps(pVect2);
-        pVect2 += 4;
-        sum_prod = _mm_add_ps(sum_prod, _mm_mul_ps(v1, v2));
-
-        v1 = _mm_loadu_ps(pVect1);
-        pVect1 += 4;
-        v2 = _mm_loadu_ps(pVect2);
-        pVect2 += 4;
-        sum_prod = _mm_add_ps(sum_prod, _mm_mul_ps(v1, v2));
-
-        v1 = _mm_loadu_ps(pVect1);
-        pVect1 += 4;
-        v2 = _mm_loadu_ps(pVect2);
-        pVect2 += 4;
-        sum_prod = _mm_add_ps(sum_prod, _mm_mul_ps(v1, v2));
-    }
-
-    while (pVect1 < pEnd2) {
-        v1 = _mm_loadu_ps(pVect1);
-        pVect1 += 4;
-        v2 = _mm_loadu_ps(pVect2);
-        pVect2 += 4;
-        sum_prod = _mm_add_ps(sum_prod, _mm_mul_ps(v1, v2));
-    }
-
-    _mm_store_ps(TmpRes, sum_prod);
-    float sum = TmpRes[0] + TmpRes[1] + TmpRes[2] + TmpRes[3];
-
-    return sum;
+InnerProductDistance(const void* pVect1, const void* pVect2, const void* qty_ptr) {
+    return 1.0f - sse::InnerProduct(pVect1, pVect2, qty_ptr);
 }
 
 float
-InnerProductSIMD16ExtSSE(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
-    float PORTABLE_ALIGN32 TmpRes[8];
-    float* pVect1 = (float*)pVect1v;
-    float* pVect2 = (float*)pVect2v;
-    size_t qty = *((size_t*)qty_ptr);
-
-    size_t qty16 = qty / 16;
-
-    const float* pEnd1 = pVect1 + 16 * qty16;
-
-    __m128 v1, v2;
-    __m128 sum_prod = _mm_set1_ps(0);
-
-    while (pVect1 < pEnd1) {
-        v1 = _mm_loadu_ps(pVect1);
-        pVect1 += 4;
-        v2 = _mm_loadu_ps(pVect2);
-        pVect2 += 4;
-        sum_prod = _mm_add_ps(sum_prod, _mm_mul_ps(v1, v2));
-
-        v1 = _mm_loadu_ps(pVect1);
-        pVect1 += 4;
-        v2 = _mm_loadu_ps(pVect2);
-        pVect2 += 4;
-        sum_prod = _mm_add_ps(sum_prod, _mm_mul_ps(v1, v2));
-
-        v1 = _mm_loadu_ps(pVect1);
-        pVect1 += 4;
-        v2 = _mm_loadu_ps(pVect2);
-        pVect2 += 4;
-        sum_prod = _mm_add_ps(sum_prod, _mm_mul_ps(v1, v2));
-
-        v1 = _mm_loadu_ps(pVect1);
-        pVect1 += 4;
-        v2 = _mm_loadu_ps(pVect2);
-        pVect2 += 4;
-        sum_prod = _mm_add_ps(sum_prod, _mm_mul_ps(v1, v2));
-    }
-    _mm_store_ps(TmpRes, sum_prod);
-    float sum = TmpRes[0] + TmpRes[1] + TmpRes[2] + TmpRes[3];
-
-    return sum;
-}
-
-extern float (*InnerProductSIMD16Ext)(const void*, const void*, const void*);
-extern float (*InnerProductSIMD4Ext)(const void*, const void*, const void*);
-
-float
-InnerProductDistanceSIMD16ExtResidualsSSE(const void* pVect1v,
-                                          const void* pVect2v,
-                                          const void* qty_ptr) {
-    size_t qty = *((size_t*)qty_ptr);
-    size_t qty16 = qty >> 4 << 4;
-    float res = InnerProductSIMD16Ext(pVect1v, pVect2v, &qty16);
-    float* pVect1 = (float*)pVect1v + qty16;
-    float* pVect2 = (float*)pVect2v + qty16;
-
-    size_t qty_left = qty - qty16;
-    float res_tail = InnerProduct(pVect1, pVect2, &qty_left);
-    return 1.0f - (res + res_tail);
+INT8InnerProduct(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
+    return generic::INT8InnerProduct(pVect1v, pVect2v, qty_ptr);  // TODO(LHT): implement
 }
 
 float
-InnerProductDistanceSIMD16ExtSSE(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
-    return 1.0f - InnerProductSIMD16Ext(pVect1v, pVect2v, qty_ptr);
-}
-
-float
-InnerProductDistanceSIMD4ExtSSE(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
-    return 1.0f - InnerProductSIMD4Ext(pVect1v, pVect2v, qty_ptr);
-}
-
-float
-InnerProductDistanceSIMD4ExtResidualsSSE(const void* pVect1v,
-                                         const void* pVect2v,
-                                         const void* qty_ptr) {
-    size_t qty = *((size_t*)qty_ptr);
-    size_t qty4 = qty >> 2 << 2;
-
-    float res = InnerProductSIMD4Ext(pVect1v, pVect2v, &qty4);
-    size_t qty_left = qty - qty4;
-
-    float* pVect1 = (float*)pVect1v + qty4;
-    float* pVect2 = (float*)pVect2v + qty4;
-    float res_tail = InnerProduct(pVect1, pVect2, &qty_left);
-
-    return 1.0f - (res + res_tail);
+INT8InnerProductDistance(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
+    return -sse::INT8InnerProduct(pVect1v, pVect2v, qty_ptr);
 }
 
 void
-PQDistanceSSEFloat256(const void* single_dim_centers, float single_dim_val, void* result) {
-    const float* float_centers = (const float*)single_dim_centers;
-    float* float_result = (float*)result;
+PQDistanceFloat256(const void* single_dim_centers, float single_dim_val, void* result) {
+#if defined(ENABLE_SSE)
+    const auto* float_centers = (const float*)single_dim_centers;
+    auto* float_result = (float*)result;
     for (size_t idx = 0; idx < 256; idx += 4) {
         __m128 v_centers_dim = _mm_loadu_ps(float_centers + idx);
         __m128 v_query_vec = _mm_set1_ps(single_dim_val);
@@ -303,18 +71,15 @@ PQDistanceSSEFloat256(const void* single_dim_centers, float single_dim_val, void
         v_chunk_dists = _mm_add_ps(v_chunk_dists, v_diff_sq);
         _mm_storeu_ps(&float_result[idx], v_chunk_dists);
     }
+#else
+    return generic::PQDistanceFloat256(single_dim_centers, single_dim_val, result);
+#endif
 }
 
-#endif
-
-namespace sse {
-
 #if defined(ENABLE_SSE)
-
 __inline __m128i __attribute__((__always_inline__)) load_4_char(const uint8_t* data) {
     return _mm_set_epi8(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, data[3], data[2], data[1], data[0]);
 }
-
 #endif
 
 float
@@ -664,6 +429,4 @@ Normalize(const float* from, float* to, uint64_t dim) {
     sse::DivScalar(from, to, dim, norm);
     return norm;
 }
-}  // namespace sse
-
-}  // namespace vsag
+}  // namespace vsag::sse
