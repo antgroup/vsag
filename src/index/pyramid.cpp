@@ -156,7 +156,7 @@ Pyramid::Add(const DatasetPtr& base) {
         std::string current_path = path[i];
         auto result = split(current_path, PART_SLASH);
         if (indexes_.find(result[0]) == indexes_.end()) {
-            indexes_[result[0]] = std::make_shared<IndexNode>(commom_param_.allocator_);
+            indexes_[result[0]] = std::make_shared<IndexNode>(commom_param_.allocator_.get());
         }
         std::shared_ptr<IndexNode> node = indexes_.at(result[0]);
         DatasetPtr single_data = Dataset::Make();
@@ -170,7 +170,8 @@ Pyramid::Add(const DatasetPtr& base) {
                 node->index->Add(single_data);
             }
             if (node->children.find(result[j]) == node->children.end()) {
-                node->children[result[j]] = std::make_shared<IndexNode>(commom_param_.allocator_);
+                node->children[result[j]] =
+                    std::make_shared<IndexNode>(commom_param_.allocator_.get());
             }
             node = node->children.at(result[j]);
         }
@@ -207,7 +208,7 @@ Pyramid::KnnSearch(const DatasetPtr& query,
         }
         root = root->children.at(parsed_path[j]);
     }
-    Deque<std::shared_ptr<IndexNode>> candidate_indexes(commom_param_.allocator_);
+    Deque<std::shared_ptr<IndexNode>> candidate_indexes(commom_param_.allocator_.get());
 
     std::priority_queue<std::pair<float, int64_t>> results;
     candidate_indexes.push_back(root);
@@ -242,7 +243,7 @@ Pyramid::KnnSearch(const DatasetPtr& query,
         result->Dim(0)->NumElements(1);
         return result;
     }
-    result->Dim(target_size)->NumElements(1)->Owner(true, commom_param_.allocator_);
+    result->Dim(target_size)->NumElements(1)->Owner(true, commom_param_.allocator_.get());
     int64_t* ids = (int64_t*)commom_param_.allocator_->Allocate(sizeof(int64_t) * target_size);
     result->Ids(ids);
     float* dists = (float*)commom_param_.allocator_->Allocate(sizeof(float) * target_size);
@@ -324,13 +325,13 @@ Pyramid::Deserialize(const BinarySet& binary_set) {
         const auto& binary = binary_set.Get(path);
         auto parsed_path = split(path, PART_OCTOTHORPE);
         if (indexes_.find(parsed_path[0]) == indexes_.end()) {
-            indexes_[parsed_path[0]] = std::make_shared<IndexNode>(commom_param_.allocator_);
+            indexes_[parsed_path[0]] = std::make_shared<IndexNode>(commom_param_.allocator_.get());
         }
         std::shared_ptr<IndexNode> node = indexes_.at(parsed_path[0]);
         for (int j = 1; j < parsed_path.size(); ++j) {
             if (node->children.find(parsed_path[j]) == node->children.end()) {
                 node->children[parsed_path[j]] =
-                    std::make_shared<IndexNode>(commom_param_.allocator_);
+                    std::make_shared<IndexNode>(commom_param_.allocator_.get());
             }
             node = node->children.at(parsed_path[j]);
         }

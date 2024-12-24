@@ -71,7 +71,7 @@ struct IndexNode {
 class Pyramid : public Index {
 public:
     Pyramid(PyramidParameters pyramid_param, const IndexCommonParam commom_param)
-        : indexes_(commom_param.allocator_),
+        : indexes_(commom_param.allocator_.get()),
           pyramid_param_(std::move(pyramid_param)),
           commom_param_(std::move(commom_param)) {
     }
