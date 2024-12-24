@@ -122,6 +122,8 @@ protected:
     TestConcurrentAdd(const IndexPtr& index,
                       const TestDatasetPtr& dataset,
                       bool expected_success = true);
+    static void
+    TestDuplicateAdd(const IndexPtr& index, const TestDatasetPtr& dataset);
 };
 
 }  // namespace fixtures
