@@ -29,6 +29,11 @@ public:
         return resource_->GetAllocator();
     }
 
+    std::shared_ptr<ThreadPool>
+    GetThreadPool() override {
+        return resource_->GetThreadPool();
+    }
+
     ~ResourceOwnerWrapper() override {
         if (owned_) {
             delete resource_;

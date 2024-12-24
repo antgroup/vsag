@@ -18,11 +18,14 @@
 #include <memory>
 
 #include "allocator.h"
+#include "thread_pool.h"
 
 namespace vsag {
 class Resource {
 public:
-    explicit Resource(Allocator* allocator = nullptr);
+    explicit Resource();
+
+    explicit Resource(Allocator* allocator, ThreadPool* thread_pool);
 
     virtual ~Resource() = default;
 
@@ -31,7 +34,13 @@ public:
         return this->allocator;
     }
 
+    virtual std::shared_ptr<ThreadPool>
+    GetThreadPool() {
+        return this->thread_pool;
+    }
+
 public:
     std::shared_ptr<Allocator> allocator;
+    std::shared_ptr<ThreadPool> thread_pool;
 };
 }  // namespace vsag
