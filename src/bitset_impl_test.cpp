@@ -70,14 +70,14 @@ TEST_CASE("roaringbitmap example", "[ut][bitset]") {
     r1.setCopyOnWrite(true);
 
     uint32_t compact_size = r1.getSizeInBytes();
-    std::cout << "size before run optimize " << size << " bytes, and after " << compact_size
-              << " bytes." << std::endl;
+    // std::cout << "size before run optimize " << size << " bytes, and after " << compact_size
+    //           << " bytes." << std::endl;
 
     // create a new bitmap with varargs
     Roaring r2 = Roaring::bitmapOf(5, 1, 2, 3, 5, 6);
 
-    r2.printf();
-    printf("\n");
+    // r2.printf();
+    // printf("\n");
 
     // create a new bitmap with initializer list
     Roaring r2i = Roaring::bitmapOfList({1, 2, 3, 5, 6});
