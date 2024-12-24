@@ -28,7 +28,7 @@ example_module = Extension('example', sources=['example.c'])
 
 def get_version():
     from setuptools_scm import get_version as scm_get_version
-    from setuptools_scm.version import get_local_node_and_date, get_no_local_node
+    from setuptools_scm.version import release_branch_semver, get_local_node_and_date, get_no_local_node
     from pep440 import is_canonical
 
     # the package with local version is not allowed to be uploaded to the
@@ -38,7 +38,7 @@ def get_version():
     if build_local_version:
         local_scheme = get_local_node_and_date
 
-    version = scm_get_version(root=f'{__file__}/../..', local_scheme=local_scheme)
+    version = scm_get_version(root=f'{__file__}/../..', version_scheme=release_branch_semver, local_scheme=local_scheme)
     version_file = os.path.join(os.path.dirname(__file__), 'pyvsag', '_version.py')
     with open(version_file, 'w') as f:
         f.write(f"\n__version__ = '{version}'\n")
