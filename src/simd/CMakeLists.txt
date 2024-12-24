@@ -9,6 +9,7 @@ set (SIMD_SRCS
         sse.cpp
         avx.cpp
         avx512.cpp
+        normalize.cpp
 )
 if (DIST_CONTAINS_SSE)
     set (SIMD_SRCS ${SIMD_SRCS} sse.cpp)

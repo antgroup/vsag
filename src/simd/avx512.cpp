@@ -12,8 +12,9 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
+#if defined(ENABLE_AVX512)
 #include <immintrin.h>
+#endif
 
 #include <cmath>
 
@@ -30,6 +31,7 @@ namespace vsag {
 #define PORTABLE_ALIGN32 __attribute__((aligned(32)))
 #define PORTABLE_ALIGN64 __attribute__((aligned(64)))
 
+#if defined(ENABLE_AVX512)
 float
 L2SqrSIMD16ExtAVX512(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
     float* pVect1 = (float*)pVect1v;
@@ -202,6 +204,8 @@ INT8InnerProduct512ResidualsAVX512Distance(const void* pVect1v,
     return -INT8InnerProduct512ResidualsAVX512(pVect1v, pVect2v, qty_ptr);
 }
 
+#endif
+
 namespace avx512 {
 float
 FP32ComputeIP(const float* query, const float* codes, uint64_t dim) {
@@ -221,7 +225,7 @@ FP32ComputeIP(const float* query, const float* codes, uint64_t dim) {
     ip += avx2::FP32ComputeIP(query + n * 16, codes + n * 16, dim - n * 16);
     return ip;
 #else
-    return vsag::Generic::FP32ComputeIP(query, codes, dim);
+    return vsag::generic::FP32ComputeIP(query, codes, dim);
 #endif
 }
 
@@ -244,7 +248,7 @@ FP32ComputeL2Sqr(const float* query, const float* codes, uint64_t dim) {
     l2 += avx2::FP32ComputeL2Sqr(query + n * 16, codes + n * 16, dim - n * 16);
     return l2;
 #else
-    return vsag::Generic::FP32ComputeL2Sqr(query, codes, dim);
+    return vsag::generic::FP32ComputeL2Sqr(query, codes, dim);
 #endif
 }
 
@@ -282,7 +286,7 @@ SQ8ComputeIP(const float* query,
     finalResult += avx2::SQ8ComputeIP(query + i, codes + i, lowerBound + i, diff + i, dim - i);
     return finalResult;
 #else
-    return Generic::SQ8ComputeIP(query, codes, lowerBound, diff, dim);
+    return generic::SQ8ComputeIP(query, codes, lowerBound, diff, dim);
 #endif
 }
 
@@ -320,7 +324,7 @@ SQ8ComputeL2Sqr(const float* query,
     result += avx2::SQ8ComputeL2Sqr(query + i, codes + i, lowerBound + i, diff + i, dim - i);
     return result;
 #else
-    return Generic::SQ8ComputeL2Sqr(query, codes, lowerBound, diff, dim);
+    return generic::SQ8ComputeL2Sqr(query, codes, lowerBound, diff, dim);
 #endif
 }
 
@@ -357,7 +361,7 @@ SQ8ComputeCodesIP(const uint8_t* codes1,
     result += avx2::SQ8ComputeCodesIP(codes1 + i, codes2 + i, lowerBound + i, diff + i, dim - i);
     return result;
 #else
-    return Generic::SQ8ComputeCodesIP(codes1, codes2, lowerBound, diff, dim);
+    return generic::SQ8ComputeCodesIP(codes1, codes2, lowerBound, diff, dim);
 #endif
 }
 
@@ -390,7 +394,7 @@ SQ8ComputeCodesL2Sqr(const uint8_t* codes1,
     result += avx2::SQ8ComputeCodesL2Sqr(codes1 + i, codes2 + i, lowerBound + i, diff + i, dim - i);
     return result;
 #else
-    return Generic::SQ8ComputeL2Sqr(query, codes, lowerBound, diff, dim);
+    return generic::SQ8ComputeCodesL2Sqr(codes1, codes2, lowerBound, diff, dim);
 #endif
 }
 
@@ -494,7 +498,7 @@ SQ8UniformComputeCodesIP(const uint8_t* codes1, const uint8_t* codes2, uint64_t 
     result += static_cast<int32_t>(avx2::SQ8UniformComputeCodesIP(codes1 + d, codes2 + d, dim - d));
     return static_cast<float>(result);
 #else
-    return avx2::S8UniformComputeCodesIP(codes1, codes2, dim);
+    return avx2::SQ8UniformComputeCodesIP(codes1, codes2, dim);
 #endif
 }
 

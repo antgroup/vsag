@@ -45,7 +45,6 @@ SQ8ComputeCodesL2Sqr(const uint8_t* codes1,
                      uint64_t dim);
 }  // namespace generic
 
-#if defined(ENABLE_SSE)
 namespace sse {
 float
 SQ8ComputeIP(const float* query,
@@ -72,7 +71,6 @@ SQ8ComputeCodesL2Sqr(const uint8_t* codes1,
                      const float* diff,
                      uint64_t dim);
 }  // namespace sse
-#endif
 
 namespace avx2 {
 float
