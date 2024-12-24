@@ -47,7 +47,7 @@ GenerateVectors(uint64_t count,
 
 template <typename T, typename RT = typename std::enable_if<std::is_floating_point_v<T>, T>::type>
 std::vector<RT>
-GenerateVectors(uint64_t count, uint32_t dim, bool need_normalize = true, int seed = 47) {
+GenerateVectors(uint64_t count, uint32_t dim, int seed = 47, bool need_normalize = true) {
     std::mt19937 rng(seed);
     std::uniform_real_distribution<T> distrib_real;
     std::vector<T> vectors(dim * count);
