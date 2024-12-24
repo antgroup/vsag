@@ -22,18 +22,6 @@
 
 using namespace vsag;
 
-#ifndef ENABLE_SSE
-namespace sse = generic;
-#endif
-
-#ifndef ENABLE_AVX2
-namespace avx2 = sse;
-#endif
-
-#ifndef ENABLE_AVX512
-namespace avx512 = avx2;
-#endif
-
 #define TEST_ACCURACY(Func)                                                           \
     {                                                                                 \
         float gt, sse, avx2, avx512;                                                  \

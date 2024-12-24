@@ -13,7 +13,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#if defined(ENABLE_SSE)
 #include <x86intrin.h>
+#endif
 
 #include <cmath>
 
@@ -35,6 +37,7 @@ L2Sqr(const void* pVect1v, const void* pVect2v, const void* qty_ptr);
 extern float
 InnerProduct(const void* pVect1, const void* pVect2, const void* qty_ptr);
 
+#if defined(ENABLE_SSE)
 /* L2 Distance */
 float
 L2SqrSIMD4ExtSSE(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
@@ -302,6 +305,8 @@ PQDistanceSSEFloat256(const void* single_dim_centers, float single_dim_val, void
     }
 }
 
+#endif
+
 namespace sse {
 
 #if defined(ENABLE_SSE)
@@ -333,7 +338,7 @@ FP32ComputeIP(const float* query, const float* codes, uint64_t dim) {
     ip += generic::FP32ComputeIP(query + n * 4, codes + n * 4, dim - n * 4);
     return ip;
 #else
-    return vsag::Generic::FP32ComputeIP(query, codes, dim);
+    return vsag::generic::FP32ComputeIP(query, codes, dim);
 #endif
 }
 
@@ -357,7 +362,7 @@ FP32ComputeL2Sqr(const float* query, const float* codes, uint64_t dim) {
     l2 += generic::FP32ComputeL2Sqr(query + n * 4, codes + n * 4, dim - n * 4);
     return l2;
 #else
-    return vsag::Generic::FP32ComputeL2Sqr(query, codes, dim);
+    return vsag::generic::FP32ComputeL2Sqr(query, codes, dim);
 #endif
 }
 
@@ -399,7 +404,7 @@ SQ8ComputeIP(const float* query,
     return result[0] +
            generic::SQ8ComputeIP(query + i, codes + i, lowerBound + i, diff + i, dim - i);
 #else
-    return Generic::SQ8ComputeIP(query, codes, lowerBound, diff, dim);
+    return generic::SQ8ComputeIP(query, codes, lowerBound, diff, dim);
 #endif
 }
 
@@ -441,7 +446,7 @@ SQ8ComputeL2Sqr(const float* query,
 
     return result;
 #else
-    return Generic::SQ8ComputeL2Sqr(query, codes, lowerBound, diff, dim);
+    return generic::SQ8ComputeL2Sqr(query, codes, lowerBound, diff, dim);
 #endif
 }
 
@@ -481,7 +486,7 @@ SQ8ComputeCodesIP(const uint8_t* codes1,
     result += generic::SQ8ComputeCodesIP(codes1 + i, codes2 + i, lowerBound + i, diff + i, dim - i);
     return result;
 #else
-    return Generic::SQ8ComputeCodesIP(codes1, codes2, lowerBound, diff, dim);
+    return generic::SQ8ComputeCodesIP(codes1, codes2, lowerBound, diff, dim);
 #endif
 }
 
@@ -523,7 +528,7 @@ SQ8ComputeCodesL2Sqr(const uint8_t* codes1,
         generic::SQ8ComputeCodesL2Sqr(codes1 + i, codes2 + i, lowerBound + i, diff + i, dim - i);
     return result;
 #else
-    return Generic::SQ8ComputeCodesIP(codes1, codes2, lowerBound, diff, dim);
+    return generic::SQ8ComputeCodesIP(codes1, codes2, lowerBound, diff, dim);
 #endif
 }
 
@@ -627,7 +632,7 @@ SQ8UniformComputeCodesIP(const uint8_t* codes1, const uint8_t* codes2, uint64_t 
         static_cast<int32_t>(generic::SQ8UniformComputeCodesIP(codes1 + d, codes2 + d, dim - d));
     return static_cast<float>(result);
 #else
-    return generic::S8UniformComputeCodesIP(codes1, codes2, dim);
+    return generic::SQ8UniformComputeCodesIP(codes1, codes2, dim);
 #endif
 }
 

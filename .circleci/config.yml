@@ -8,9 +8,19 @@ workflows:
             branches:
               ignore:
                 - main
+      - pull-request-check-aarch64:
+          filters:
+            branches:
+              ignore:
+                - main
   main-branch-workflow:
     jobs:
       - main-branch-check:
+          filters:
+            branches:
+              only:
+                - main
+      - main-branch-check-aarch64:
           filters:
             branches:
               only:
@@ -33,12 +43,46 @@ jobs:
             - ./build
       - run: make test_parallel
 
+  pull-request-check-aarch64:
+    docker:
+      - image: ubuntu:22.04
+    resource_class: arm.medium
+    steps:
+      - checkout
+      - run: bash scripts/deps/install_deps_ubuntu.sh
+      - restore_cache:
+          keys:
+            - fork-cache-arm-{{ checksum "CMakeLists.txt" }}-{{ checksum ".circleci/fresh_ci_cache.commit" }}
+      - run: make debug
+      - save_cache:
+          key: fork-cache-arm-{{ checksum "CMakeLists.txt" }}-{{ checksum ".circleci/fresh_ci_cache.commit" }}
+          paths:
+            - ./build
+      - run: make test_parallel
+
   main-branch-check:
     docker:
       - image: vsaglib/vsag:ubuntu
     resource_class: medium+
     steps:
       - checkout
+      - restore_cache:
+          keys:
+            - main-ccache-arm-{{ checksum "CMakeLists.txt" }}-{{ checksum ".circleci/fresh_ci_cache.commit" }}
+      - run: make debug
+      - save_cache:
+          key: main-ccache-arm-{{ checksum "CMakeLists.txt" }}-{{ checksum ".circleci/fresh_ci_cache.commit" }}
+          paths:
+            - ./build
+      - run: make test_parallel
+
+  main-branch-check-aarch64:
+    docker:
+      - image: ubuntu:22.04
+    resource_class: arm.medium
+    steps:
+      - checkout
+      - run: bash scripts/deps/install_deps_ubuntu.sh
       - restore_cache:
           keys:
             - main-ccache-{{ checksum "CMakeLists.txt" }}-{{ checksum ".circleci/fresh_ci_cache.commit" }}
@@ -48,3 +92,4 @@ jobs:
           paths:
             - ./build
       - run: make test_parallel
+

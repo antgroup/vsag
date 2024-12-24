@@ -17,23 +17,10 @@
 
 #include <catch2/catch_test_macros.hpp>
 
-#include "../logger.h"
 #include "catch2/benchmark/catch_benchmark.hpp"
 #include "fixtures.h"
 
 using namespace vsag;
-
-#ifndef ENABLE_SSE
-namespace sse = generic;
-#endif
-
-#ifndef ENABLE_AVX2
-namespace avx2 = sse;
-#endif
-
-#ifndef ENABLE_AVX512
-namespace avx512 = avx2;
-#endif
 
 #define TEST_ACCURACY(Func)                                        \
     {                                                              \
