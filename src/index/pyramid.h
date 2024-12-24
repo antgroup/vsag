@@ -15,8 +15,8 @@
 
 #pragma once
 
-#include "../safe_allocator.h"
 #include "pyramid_zparameters.h"
+#include "safe_allocator.h"
 
 namespace vsag {
 
@@ -61,6 +61,9 @@ struct IndexNode {
     std::string name;
     IndexNode(Allocator* allocator) : children(allocator) {
     }
+    ~IndexNode() {
+        children.clear();
+    }
 
     void
     CreateIndex(IndexBuildFunction func) {
@@ -70,13 +73,15 @@ struct IndexNode {
 
 class Pyramid : public Index {
 public:
-    Pyramid(PyramidParameters pyramid_param, const IndexCommonParam commom_param)
+    Pyramid(PyramidParameters pyramid_param, const IndexCommonParam& commom_param)
         : indexes_(commom_param.allocator_.get()),
           pyramid_param_(std::move(pyramid_param)),
           commom_param_(std::move(commom_param)) {
     }
 
-    ~Pyramid() = default;
+    ~Pyramid() override {
+        indexes_.clear();
+    }
 
     tl::expected<std::vector<int64_t>, Error>
     Build(const DatasetPtr& base) override;
@@ -132,9 +137,9 @@ public:
     GetMemoryUsage() const override;
 
 private:
-    UnorderedMap<std::string, std::shared_ptr<IndexNode>> indexes_;
-    PyramidParameters pyramid_param_;
     IndexCommonParam commom_param_;
+    PyramidParameters pyramid_param_;
+    UnorderedMap<std::string, std::shared_ptr<IndexNode>> indexes_;
     int64_t data_num_{0};
 };
 
