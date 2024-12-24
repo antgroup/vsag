@@ -28,6 +28,7 @@
 #include <utility>
 
 #include "fixtures/fixtures.h"
+#include "fixtures/random_allocator.h"
 #include "fixtures/test_dataset.h"
 #include "vsag/dataset.h"
 #include "vsag/errors.h"
@@ -68,6 +69,9 @@ protected:
     TestContinueAdd(const IndexPtr& index,
                     const TestDatasetPtr& dataset,
                     bool expected_success = true);
+
+    static void
+    TestContinueAddIgnoreRequire(const IndexPtr& index, const TestDatasetPtr& dataset);
 
     static void
     TestKnnSearch(const IndexPtr& index,
