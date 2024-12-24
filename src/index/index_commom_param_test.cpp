@@ -16,8 +16,11 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "index_common_param.h"
+#include "resource_owner_wrapper.h"
 
 TEST_CASE("create common parameter", "[ut]") {
+    std::shared_ptr<vsag::Resource> resource =
+        std::make_shared<vsag::ResourceOwnerWrapper>(new vsag::Resource(), true);
     SECTION("worng metric type") {
         auto build_parameter_json = R"(
         {
@@ -27,7 +30,7 @@ TEST_CASE("create common parameter", "[ut]") {
         }
         )";
         auto parsed_params = nlohmann::json::parse(build_parameter_json);
-        REQUIRE_THROWS(vsag::IndexCommonParam::CheckAndCreate(parsed_params, nullptr));
+        REQUIRE_THROWS(vsag::IndexCommonParam::CheckAndCreate(parsed_params, resource));
     }
 
     SECTION("worng data type") {
@@ -39,7 +42,7 @@ TEST_CASE("create common parameter", "[ut]") {
         }
         )";
         auto parsed_params = nlohmann::json::parse(build_parameter_json);
-        REQUIRE_THROWS(vsag::IndexCommonParam::CheckAndCreate(parsed_params, nullptr));
+        REQUIRE_THROWS(vsag::IndexCommonParam::CheckAndCreate(parsed_params, resource));
     }
 
     SECTION("worng dim") {
@@ -51,6 +54,6 @@ TEST_CASE("create common parameter", "[ut]") {
         }
         )";
         auto parsed_params = nlohmann::json::parse(build_parameter_json);
-        REQUIRE_THROWS(vsag::IndexCommonParam::CheckAndCreate(parsed_params, nullptr));
+        REQUIRE_THROWS(vsag::IndexCommonParam::CheckAndCreate(parsed_params, resource));
     }
 }
