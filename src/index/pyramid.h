@@ -15,15 +15,17 @@
 
 #pragma once
 
-#include "../safe_allocator.h"
+#include <utility>
+
 #include "pyramid_zparameters.h"
+#include "safe_allocator.h"
 
 namespace vsag {
 
 class SubReader : public Reader {
 public:
     SubReader(std::shared_ptr<Reader> parrent_reader, uint64_t start_pos, uint64_t size)
-        : parrent_reader_(parrent_reader), size_(size), start_pos_(start_pos) {
+        : parrent_reader_(std::move(parrent_reader)), size_(size), start_pos_(start_pos) {
     }
 
     void
@@ -49,7 +51,7 @@ private:
 };
 
 Binary
-binaryset_to_binary(const BinarySet binarySet);
+binaryset_to_binary(const BinarySet binary_set);
 BinarySet
 binary_to_binaryset(const Binary binary);
 ReaderSet
@@ -61,6 +63,9 @@ struct IndexNode {
     std::string name;
     IndexNode(Allocator* allocator) : children(allocator) {
     }
+    ~IndexNode() {
+        children.clear();
+    }
 
     void
     CreateIndex(IndexBuildFunction func) {
@@ -70,13 +75,15 @@ struct IndexNode {
 
 class Pyramid : public Index {
 public:
-    Pyramid(PyramidParameters pyramid_param, const IndexCommonParam commom_param)
-        : indexes_(commom_param.allocator_),
+    Pyramid(PyramidParameters pyramid_param, const IndexCommonParam& commom_param)
+        : indexes_(commom_param.allocator_.get()),
           pyramid_param_(std::move(pyramid_param)),
           commom_param_(std::move(commom_param)) {
     }
 
-    ~Pyramid() = default;
+    ~Pyramid() override {
+        indexes_.clear();
+    }
 
     tl::expected<std::vector<int64_t>, Error>
     Build(const DatasetPtr& base) override;
@@ -132,9 +139,24 @@ public:
     GetMemoryUsage() const override;
 
 private:
-    UnorderedMap<std::string, std::shared_ptr<IndexNode>> indexes_;
-    PyramidParameters pyramid_param_;
+    inline std::shared_ptr<IndexNode>
+    try_get_node_with_init(UnorderedMap<std::string, std::shared_ptr<IndexNode>>& index_map,
+                           const std::string& key) {
+        auto iter = index_map.find(key);
+        std::shared_ptr<IndexNode> node = nullptr;
+        if (iter == index_map.end()) {
+            node = std::make_shared<IndexNode>(commom_param_.allocator_.get());
+            index_map[key] = node;
+        } else {
+            node = iter->second;
+        }
+        return node;
+    }
+
+private:
     IndexCommonParam commom_param_;
+    PyramidParameters pyramid_param_;
+    UnorderedMap<std::string, std::shared_ptr<IndexNode>> indexes_;
     int64_t data_num_{0};
 };
 

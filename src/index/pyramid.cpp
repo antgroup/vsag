@@ -15,35 +15,34 @@
 
 #include "pyramid.h"
 
-#include "../logger.h"
 namespace vsag {
 
 // Function to convert BinarySet to a Binary
 Binary
-binaryset_to_binary(const BinarySet binarySet) {
-    size_t totalSize = 0;
-    auto keys = binarySet.GetKeys();
+binaryset_to_binary(const BinarySet binary_set) {
+    size_t total_size = 0;
+    auto keys = binary_set.GetKeys();
 
     for (const auto& key : keys) {
-        totalSize += sizeof(size_t) + key.size();
-        totalSize += sizeof(size_t);
-        totalSize += binarySet.Get(key).size;
+        total_size += sizeof(size_t) + key.size();
+        total_size += sizeof(size_t);
+        total_size += binary_set.Get(key).size;
     }
 
     Binary result;
-    result.data = std::shared_ptr<int8_t[]>(new int8_t[totalSize]);
-    result.size = totalSize;
+    result.data = std::shared_ptr<int8_t[]>(new int8_t[total_size]);
+    result.size = total_size;
 
     size_t offset = 0;
 
     for (const auto& key : keys) {
-        size_t keySize = key.size();
-        memcpy(result.data.get() + offset, &keySize, sizeof(size_t));
+        size_t key_size = key.size();
+        memcpy(result.data.get() + offset, &key_size, sizeof(size_t));
         offset += sizeof(size_t);
-        memcpy(result.data.get() + offset, key.data(), keySize);
-        offset += keySize;
+        memcpy(result.data.get() + offset, key.data(), key_size);
+        offset += key_size;
 
-        Binary binary = binarySet.Get(key);
+        Binary binary = binary_set.Get(key);
         memcpy(result.data.get() + offset, &binary.size, sizeof(size_t));
         offset += sizeof(size_t);
         memcpy(result.data.get() + offset, binary.data.get(), binary.size);
@@ -55,64 +54,63 @@ binaryset_to_binary(const BinarySet binarySet) {
 
 BinarySet
 binary_to_binaryset(const Binary binary) {
-    BinarySet binarySet;
+    BinarySet binary_set;
     size_t offset = 0;
 
     while (offset < binary.size) {
-        size_t keySize;
-        memcpy(&keySize, binary.data.get() + offset, sizeof(size_t));
+        size_t key_size;
+        memcpy(&key_size, binary.data.get() + offset, sizeof(size_t));
         offset += sizeof(size_t);
 
-        std::string key(reinterpret_cast<const char*>(binary.data.get() + offset), keySize);
-        offset += keySize;
+        std::string key(reinterpret_cast<const char*>(binary.data.get() + offset), key_size);
+        offset += key_size;
 
-        size_t binarySize;
-        memcpy(&binarySize, binary.data.get() + offset, sizeof(size_t));
+        size_t binary_size;
+        memcpy(&binary_size, binary.data.get() + offset, sizeof(size_t));
         offset += sizeof(size_t);
 
-        Binary newBinary;
-        newBinary.size = binarySize;
-        newBinary.data = std::shared_ptr<int8_t[]>(new int8_t[binarySize]);
-        memcpy(newBinary.data.get(), binary.data.get() + offset, binarySize);
-        offset += binarySize;
+        Binary new_binary;
+        new_binary.size = binary_size;
+        new_binary.data = std::shared_ptr<int8_t[]>(new int8_t[binary_size]);
+        memcpy(new_binary.data.get(), binary.data.get() + offset, binary_size);
+        offset += binary_size;
 
-        binarySet.Set(key, newBinary);
+        binary_set.Set(key, new_binary);
     }
 
-    return binarySet;
+    return binary_set;
 }
 
 ReaderSet
 reader_to_readerset(std::shared_ptr<Reader> reader) {
-    ReaderSet readerSet;
+    ReaderSet reader_set;
     size_t offset = 0;
 
     while (offset < reader->Size()) {
-        size_t keySize;
-        reader->Read(offset, sizeof(size_t), &keySize);
+        size_t key_size;
+        reader->Read(offset, sizeof(size_t), &key_size);
         offset += sizeof(size_t);
-        std::shared_ptr<char[]> key_chars = std::shared_ptr<char[]>(new char[keySize]);
-        reader->Read(offset, keySize, key_chars.get());
-        std::string key(key_chars.get(), keySize);
-        offset += keySize;
+        std::shared_ptr<char[]> key_chars = std::shared_ptr<char[]>(new char[key_size]);
+        reader->Read(offset, key_size, key_chars.get());
+        std::string key(key_chars.get(), key_size);
+        offset += key_size;
 
-        size_t binarySize;
-        reader->Read(offset, sizeof(size_t), &binarySize);
+        size_t binary_size;
+        reader->Read(offset, sizeof(size_t), &binary_size);
         offset += sizeof(size_t);
 
-        auto newReader = std::shared_ptr<SubReader>(new SubReader(reader, offset, binarySize));
-        offset += binarySize;
+        auto new_eader = std::make_shared<SubReader>(reader, offset, binary_size);
+        offset += binary_size;
 
-        readerSet.Set(key, newReader);
+        reader_set.Set(key, new_eader);
     }
 
-    return readerSet;
+    return reader_set;
 }
 
 template <typename T>
 using Deque = std::deque<T, vsag::AllocatorWrapper<T>>;
 
-constexpr static const char PART_SLASH = '/';
 constexpr static const char PART_OCTOTHORPE = '#';
 std::vector<std::string>
 split(const std::string& str, char delimiter) {
@@ -132,8 +130,8 @@ split(const std::string& str, char delimiter) {
         start = end + 1;
         end = str.find(delimiter, start);
     }
-    std::string lastToken = str.substr(start);
-    if (lastToken.empty()) {
+    std::string last_token = str.substr(start);
+    if (last_token.empty()) {
         throw std::runtime_error("fail to parse path:" + str);
     }
     tokens.push_back(str.substr(start, end - start));
@@ -154,25 +152,19 @@ Pyramid::Add(const DatasetPtr& base) {
     auto data_vectors = base->GetFloat32Vectors();
     for (int i = 0; i < data_num; ++i) {
         std::string current_path = path[i];
-        auto result = split(current_path, PART_SLASH);
-        if (indexes_.find(result[0]) == indexes_.end()) {
-            indexes_[result[0]] = std::make_shared<IndexNode>(commom_param_.allocator_);
-        }
-        std::shared_ptr<IndexNode> node = indexes_.at(result[0]);
+        auto path_slices = split(current_path, PART_SLASH);
+        std::shared_ptr<IndexNode> node = try_get_node_with_init(indexes_, path_slices[0]);
         DatasetPtr single_data = Dataset::Make();
         single_data->Owner(false)
             ->NumElements(1)
             ->Dim(data_dim)
             ->Float32Vectors(data_vectors + data_dim * i)
             ->Ids(data_ids + i);
-        for (int j = 1; j < result.size(); ++j) {
+        for (int j = 1; j < path_slices.size(); ++j) {
             if (node->index) {
                 node->index->Add(single_data);
             }
-            if (node->children.find(result[j]) == node->children.end()) {
-                node->children[result[j]] = std::make_shared<IndexNode>(commom_param_.allocator_);
-            }
-            node = node->children.at(result[j]);
+            node = try_get_node_with_init(node->children, path_slices[j]);
         }
         if (node->index == nullptr) {
             node->CreateIndex(pyramid_param_.index_builder);
@@ -191,23 +183,25 @@ Pyramid::KnnSearch(const DatasetPtr& query,
     auto path = query->GetPaths();
 
     std::string current_path = path[0];
-    auto parsed_path = split(current_path, PART_SLASH);
-
-    if (indexes_.find(parsed_path[0]) == indexes_.end()) {
+    auto path_slices = split(current_path, PART_SLASH);
+    auto iter = indexes_.find(path_slices[0]);
+    if (iter == indexes_.end()) {
         auto ret = Dataset::Make();
         ret->Dim(0)->NumElements(1);
         return ret;
     }
-    std::shared_ptr<IndexNode> root = indexes_.at(parsed_path[0]);
-    for (int j = 1; j < parsed_path.size(); ++j) {
-        if (root->children.find(parsed_path[j]) == root->children.end()) {
+    std::shared_ptr<IndexNode> root = iter->second;
+    for (int j = 1; j < path_slices.size(); ++j) {
+        auto root_iter = root->children.find(path_slices[j]);
+        if (root_iter == root->children.end()) {
             auto ret = Dataset::Make();
             ret->Dim(0)->NumElements(1);
             return ret;
+        } else {
+            root = root_iter->second;
         }
-        root = root->children.at(parsed_path[j]);
     }
-    Deque<std::shared_ptr<IndexNode>> candidate_indexes(commom_param_.allocator_);
+    Deque<std::shared_ptr<IndexNode>> candidate_indexes(commom_param_.allocator_.get());
 
     std::priority_queue<std::pair<float, int64_t>> results;
     candidate_indexes.push_back(root);
@@ -242,7 +236,7 @@ Pyramid::KnnSearch(const DatasetPtr& query,
         result->Dim(0)->NumElements(1);
         return result;
     }
-    result->Dim(target_size)->NumElements(1)->Owner(true, commom_param_.allocator_);
+    result->Dim(target_size)->NumElements(1)->Owner(true, commom_param_.allocator_.get());
     int64_t* ids = (int64_t*)commom_param_.allocator_->Allocate(sizeof(int64_t) * target_size);
     result->Ids(ids);
     float* dists = (float*)commom_param_.allocator_->Allocate(sizeof(float) * target_size);
@@ -322,17 +316,10 @@ Pyramid::Deserialize(const BinarySet& binary_set) {
     auto keys = binary_set.GetKeys();
     for (const auto& path : keys) {
         const auto& binary = binary_set.Get(path);
-        auto parsed_path = split(path, PART_OCTOTHORPE);
-        if (indexes_.find(parsed_path[0]) == indexes_.end()) {
-            indexes_[parsed_path[0]] = std::make_shared<IndexNode>(commom_param_.allocator_);
-        }
-        std::shared_ptr<IndexNode> node = indexes_.at(parsed_path[0]);
-        for (int j = 1; j < parsed_path.size(); ++j) {
-            if (node->children.find(parsed_path[j]) == node->children.end()) {
-                node->children[parsed_path[j]] =
-                    std::make_shared<IndexNode>(commom_param_.allocator_);
-            }
-            node = node->children.at(parsed_path[j]);
+        auto path_slices = split(path, PART_OCTOTHORPE);
+        std::shared_ptr<IndexNode> node = try_get_node_with_init(indexes_, path_slices[0]);
+        for (int j = 1; j < path_slices.size(); ++j) {
+            node = try_get_node_with_init(node->children, path_slices[j]);
         }
         node->CreateIndex(pyramid_param_.index_builder);
         node->index->Deserialize(binary_to_binaryset(binary));
