@@ -13,36 +13,29 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <cmath>
+#include "simd.h"
 
-#include "fp32_simd.h"
-#include "normalize.h"
-#include "sq4_simd.h"
-#include "sq4_uniform_simd.h"
-#include "sq8_simd.h"
-#include "sq8_uniform_simd.h"
-
-namespace vsag {
+namespace vsag::generic {
 
 float
 L2Sqr(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
-    float* pVect1 = (float*)pVect1v;
-    float* pVect2 = (float*)pVect2v;
-    size_t qty = *((size_t*)qty_ptr);
+    auto* pVect1 = (float*)pVect1v;
+    auto* pVect2 = (float*)pVect2v;
+    uint64_t qty = *((uint64_t*)qty_ptr);
 
-    float res = 0;
-    for (size_t i = 0; i < qty; i++) {
+    float res = 0.0f;
+    for (uint64_t i = 0; i < qty; i++) {
         float t = *pVect1 - *pVect2;
         pVect1++;
         pVect2++;
         res += t * t;
     }
-    return (res);
+    return res;
 }
 
 float
 InnerProduct(const void* pVect1, const void* pVect2, const void* qty_ptr) {
-    size_t qty = *((size_t*)qty_ptr);
+    uint64_t qty = *((uint64_t*)qty_ptr);
     float res = 0;
     for (unsigned i = 0; i < qty; i++) {
         res += ((float*)pVect1)[i] * ((float*)pVect2)[i];
@@ -57,14 +50,14 @@ InnerProductDistance(const void* pVect1, const void* pVect2, const void* qty_ptr
 
 float
 INT8InnerProduct(const void* pVect1, const void* pVect2, const void* qty_ptr) {
-    size_t qty = *((size_t*)qty_ptr);
-    int8_t* vec1 = (int8_t*)pVect1;
-    int8_t* vec2 = (int8_t*)pVect2;
+    uint64_t qty = *((uint64_t*)qty_ptr);
+    auto* vec1 = (int8_t*)pVect1;
+    auto* vec2 = (int8_t*)pVect2;
     double res = 0;
-    for (size_t i = 0; i < qty; i++) {
+    for (uint64_t i = 0; i < qty; i++) {
         res += vec1[i] * vec2[i];
     }
-    return res;
+    return static_cast<float>(res);
 }
 
 float
@@ -76,13 +69,11 @@ void
 PQDistanceFloat256(const void* single_dim_centers, float single_dim_val, void* result) {
     const auto* float_centers = (const float*)single_dim_centers;
     auto* float_result = (float*)result;
-    for (size_t idx = 0; idx < 256; idx++) {
+    for (uint64_t idx = 0; idx < 256; idx++) {
         double diff = float_centers[idx] - single_dim_val;
         float_result[idx] += (float)(diff * diff);
     }
 }
-
-namespace generic {
 
 float
 FP32ComputeIP(const float* query, const float* codes, uint64_t dim) {
@@ -316,5 +307,4 @@ DivScalar(const float* from, float* to, uint64_t dim, float scalar) {
     }
 }
 
-}  // namespace generic
-}  // namespace vsag
+}  // namespace vsag::generic

@@ -72,6 +72,33 @@ SQ8ComputeCodesL2Sqr(const uint8_t* codes1,
                      uint64_t dim);
 }  // namespace sse
 
+namespace avx {
+float
+SQ8ComputeIP(const float* query,
+             const uint8_t* codes,
+             const float* lowerBound,
+             const float* diff,
+             uint64_t dim);
+float
+SQ8ComputeL2Sqr(const float* query,
+                const uint8_t* codes,
+                const float* lowerBound,
+                const float* diff,
+                uint64_t dim);
+float
+SQ8ComputeCodesIP(const uint8_t* codes1,
+                  const uint8_t* codes2,
+                  const float* lowerBound,
+                  const float* diff,
+                  uint64_t dim);
+float
+SQ8ComputeCodesL2Sqr(const uint8_t* codes1,
+                     const uint8_t* codes2,
+                     const float* lowerBound,
+                     const float* diff,
+                     uint64_t dim);
+}  // namespace avx
+
 namespace avx2 {
 float
 SQ8ComputeIP(const float* query,
