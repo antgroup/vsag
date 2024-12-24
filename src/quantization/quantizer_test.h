@@ -60,7 +60,8 @@ TestQuantizerEncodeDecodeSame(Quantizer<T>& quant,
                               int code_max = 15,
                               float error = 1e-5,
                               bool retrain = true) {
-    auto data_uint8 = fixtures::GenerateVectors<uint8_t>(count, dim, 0, 16);
+    int seed = 47;
+    auto data_uint8 = fixtures::GenerateVectors<uint8_t>(count, dim, seed, 0, 16);
     std::vector<float> data(dim * count);
     for (uint64_t i = 0; i < dim * count; ++i) {
         data[i] = static_cast<float>(data_uint8[i]);
