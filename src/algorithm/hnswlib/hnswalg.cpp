@@ -437,9 +437,11 @@ HierarchicalNSW::searchBaseLayerST(InnerIdType ep_id,
                     _mm_prefetch(vector_data_ptr, _MM_HINT_T0);
 #endif
 
-                    if ((!has_deletions || !isMarkedDeleted(candidate_id)) &&
-                        ((!isIdAllowed) || (*isIdAllowed)(getExternalLabel(candidate_id))))
-                        top_candidates.emplace(dist, candidate_id);
+                    if ((!isIdAllowed) || (*isIdAllowed)(getExternalLabel(candidate_id))) {
+                        if (not std::isnan(dist)) {
+                            top_candidates.emplace(dist, candidate_id);
+                        }
+                    }
 
                     if (top_candidates.size() > ef)
                         top_candidates.pop();
@@ -531,9 +533,11 @@ HierarchicalNSW::searchBaseLayerST(InnerIdType ep_id,
                     _mm_prefetch(vector_data_ptr, _MM_HINT_T0);  ////////////////////////
 #endif
 
-                    if ((!has_deletions || !isMarkedDeleted(candidate_id)) &&
-                        ((!isIdAllowed) || (*isIdAllowed)(getExternalLabel(candidate_id))))
-                        top_candidates.emplace(dist, candidate_id);
+                    if (((!isIdAllowed) || (*isIdAllowed)(getExternalLabel(candidate_id)))) {
+                        if (not std::isnan(dist)) {
+                            top_candidates.emplace(dist, candidate_id);
+                        }
+                    }
 
                     if (not top_candidates.empty())
                         lowerBound = top_candidates.top().first;
