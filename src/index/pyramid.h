@@ -15,6 +15,8 @@
 
 #pragma once
 
+#include <utility>
+
 #include "pyramid_zparameters.h"
 #include "safe_allocator.h"
 
@@ -23,7 +25,7 @@ namespace vsag {
 class SubReader : public Reader {
 public:
     SubReader(std::shared_ptr<Reader> parrent_reader, uint64_t start_pos, uint64_t size)
-        : parrent_reader_(parrent_reader), size_(size), start_pos_(start_pos) {
+        : parrent_reader_(std::move(parrent_reader)), size_(size), start_pos_(start_pos) {
     }
 
     void
