@@ -288,21 +288,21 @@ HierarchicalNSW::searchBaseLayer(InnerIdType ep_id, const void* data_point, int 
     MaxHeap top_candidates(allocator_);
     MaxHeap candidateSet(allocator_);
 
-    float lowerBound;
+    float lower_bound;
     if (!isMarkedDeleted(ep_id)) {
         float dist = fstdistfunc_(data_point, getDataByInternalId(ep_id), dist_func_param_);
         top_candidates.emplace(dist, ep_id);
-        lowerBound = dist;
+        lower_bound = dist;
         candidateSet.emplace(-dist, ep_id);
     } else {
-        lowerBound = std::numeric_limits<float>::max();
-        candidateSet.emplace(-lowerBound, ep_id);
+        lower_bound = std::numeric_limits<float>::max();
+        candidateSet.emplace(-lower_bound, ep_id);
     }
     visited_array[ep_id] = visited_array_tag;
 
     while (not candidateSet.empty()) {
         std::pair<float, InnerIdType> curr_el_pair = candidateSet.top();
-        if ((-curr_el_pair.first) > lowerBound && top_candidates.size() == ef_construction_) {
+        if ((-curr_el_pair.first) > lower_bound && top_candidates.size() == ef_construction_) {
             break;
         }
         candidateSet.pop();
@@ -340,7 +340,7 @@ HierarchicalNSW::searchBaseLayer(InnerIdType ep_id, const void* data_point, int 
             char* currObj1 = (getDataByInternalId(candidate_id));
 
             float dist1 = fstdistfunc_(data_point, currObj1, dist_func_param_);
-            if (top_candidates.size() < ef_construction_ || lowerBound > dist1) {
+            if (top_candidates.size() < ef_construction_ || lower_bound > dist1) {
                 candidateSet.emplace(-dist1, candidate_id);
 #ifdef USE_SSE
                 _mm_prefetch(getDataByInternalId(candidateSet.top().second), _MM_HINT_T0);
@@ -353,7 +353,7 @@ HierarchicalNSW::searchBaseLayer(InnerIdType ep_id, const void* data_point, int 
                     top_candidates.pop();
 
                 if (not top_candidates.empty())
-                    lowerBound = top_candidates.top().first;
+                    lower_bound = top_candidates.top().first;
             }
         }
     }
@@ -375,16 +375,16 @@ HierarchicalNSW::searchBaseLayerST(InnerIdType ep_id,
     MaxHeap top_candidates(allocator_);
     MaxHeap candidate_set(allocator_);
 
-    float lowerBound;
+    float lower_bound;
     if ((!has_deletions || !isMarkedDeleted(ep_id)) &&
         ((!isIdAllowed) || (*isIdAllowed)(getExternalLabel(ep_id)))) {
         float dist = fstdistfunc_(data_point, getDataByInternalId(ep_id), dist_func_param_);
-        lowerBound = dist;
+        lower_bound = dist;
         top_candidates.emplace(dist, ep_id);
         candidate_set.emplace(-dist, ep_id);
     } else {
-        lowerBound = std::numeric_limits<float>::max();
-        candidate_set.emplace(-lowerBound, ep_id);
+        lower_bound = std::numeric_limits<float>::max();
+        candidate_set.emplace(-lower_bound, ep_id);
     }
 
     visited_array[ep_id] = visited_array_tag;
@@ -392,7 +392,7 @@ HierarchicalNSW::searchBaseLayerST(InnerIdType ep_id,
     while (not candidate_set.empty()) {
         std::pair<float, InnerIdType> current_node_pair = candidate_set.top();
 
-        if ((-current_node_pair.first) > lowerBound &&
+        if ((-current_node_pair.first) > lower_bound &&
             (top_candidates.size() == ef || (!isIdAllowed && !has_deletions))) {
             break;
         }
@@ -429,7 +429,7 @@ HierarchicalNSW::searchBaseLayerST(InnerIdType ep_id,
 
                 char* currObj1 = (getDataByInternalId(candidate_id));
                 float dist = fstdistfunc_(data_point, currObj1, dist_func_param_);
-                if (top_candidates.size() < ef || lowerBound > dist) {
+                if (top_candidates.size() < ef || lower_bound > dist) {
                     candidate_set.emplace(-dist, candidate_id);
                     vector_data_ptr = data_level0_memory_->GetElementPtr(candidate_set.top().second,
                                                                          offsetLevel0_);
@@ -445,7 +445,7 @@ HierarchicalNSW::searchBaseLayerST(InnerIdType ep_id,
                         top_candidates.pop();
 
                     if (not top_candidates.empty())
-                        lowerBound = top_candidates.top().first;
+                        lower_bound = top_candidates.top().first;
                 }
             }
         }
@@ -469,17 +469,17 @@ HierarchicalNSW::searchBaseLayerST(InnerIdType ep_id,
     MaxHeap top_candidates(allocator_);
     MaxHeap candidate_set(allocator_);
 
-    float lowerBound;
+    float lower_bound;
     if ((!has_deletions || !isMarkedDeleted(ep_id)) &&
         ((!isIdAllowed) || (*isIdAllowed)(getExternalLabel(ep_id)))) {
         float dist = fstdistfunc_(data_point, getDataByInternalId(ep_id), dist_func_param_);
-        lowerBound = dist;
+        lower_bound = dist;
         if (dist <= radius + THRESHOLD_ERROR)
             top_candidates.emplace(dist, ep_id);
         candidate_set.emplace(-dist, ep_id);
     } else {
-        lowerBound = std::numeric_limits<float>::max();
-        candidate_set.emplace(-lowerBound, ep_id);
+        lower_bound = std::numeric_limits<float>::max();
+        candidate_set.emplace(-lower_bound, ep_id);
     }
 
     visited_array[ep_id] = visited_array_tag;
@@ -523,7 +523,7 @@ HierarchicalNSW::searchBaseLayerST(InnerIdType ep_id,
                 char* currObj1 = (getDataByInternalId(candidate_id));
                 float dist = fstdistfunc_(data_point, currObj1, dist_func_param_);
 
-                if (visited_count < ef || dist <= radius + THRESHOLD_ERROR || lowerBound > dist) {
+                if (visited_count < ef || dist <= radius + THRESHOLD_ERROR || lower_bound > dist) {
                     candidate_set.emplace(-dist, candidate_id);
                     vector_data_ptr = data_level0_memory_->GetElementPtr(candidate_set.top().second,
                                                                          offsetLevel0_);
@@ -536,7 +536,7 @@ HierarchicalNSW::searchBaseLayerST(InnerIdType ep_id,
                         top_candidates.emplace(dist, candidate_id);
 
                     if (not top_candidates.empty())
-                        lowerBound = top_candidates.top().first;
+                        lower_bound = top_candidates.top().first;
                 }
             }
         }

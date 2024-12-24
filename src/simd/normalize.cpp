@@ -29,6 +29,10 @@ GetNormalize() {
 #if defined(ENABLE_AVX2)
         return avx2::Normalize;
 #endif
+    } else if (SimdStatus::SupportAVX()) {
+#if defined(ENABLE_AVX)
+        return avx::Normalize;
+#endif
     } else if (SimdStatus::SupportSSE()) {
 #if defined(ENABLE_SSE)
         return sse::Normalize;
@@ -47,6 +51,10 @@ GetDivScalar() {
     } else if (SimdStatus::SupportAVX2()) {
 #if defined(ENABLE_AVX2)
         return avx2::DivScalar;
+#endif
+    } else if (SimdStatus::SupportAVX()) {
+#if defined(ENABLE_AVX)
+        return avx::DivScalar;
 #endif
     } else if (SimdStatus::SupportSSE()) {
 #if defined(ENABLE_SSE)
