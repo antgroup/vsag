@@ -210,6 +210,8 @@ DiskANN::build(const DatasetPtr& base) {
         auto vectors = base->GetFloat32Vectors();
         auto ids = base->GetIds();
         auto data_num = base->GetNumElements();
+        CHECK_ARGUMENT(data_num > 1,
+                       fmt::format("base.num_elements({}) must be greater than 1", data_num));
 
         std::vector<size_t> failed_locs;
         {
