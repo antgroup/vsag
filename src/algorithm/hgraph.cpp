@@ -54,7 +54,6 @@ HGraph::HGraph(const JsonType& index_param, const vsag::IndexCommonParam& common
     : index_param_(index_param),
       common_param_(common_param),
       label_lookup_(common_param.allocator_.get()),
-      label_op_mutex_(MAX_LABEL_OPERATION_LOCKS, common_param.allocator_.get()),
       neighbors_mutex_(0, common_param.allocator_.get()),
       route_graphs_(common_param.allocator_.get()),
       labels_(common_param.allocator_.get()) {

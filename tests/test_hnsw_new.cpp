@@ -209,6 +209,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex,
         auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
         TestContinueAdd(index, dataset, true);
         TestKnnSearch(index, dataset, search_param, 0.99, true);
+        TestConcurrentKnnSearch(index, dataset, search_param, 0.99, true);
         TestRangeSearch(index, dataset, search_param, 0.99, 10, true);
         TestRangeSearch(index, dataset, search_param, 0.49, 5, true);
         TestFilterSearch(index, dataset, search_param, 0.99, true);
@@ -220,7 +221,6 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex, "HNSW Build", "[ft][hnsw]"
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
     auto metric_type = GENERATE("l2", "ip", "cosine");
-    std::string base_quantization_str = GENERATE("sq8", "fp32");
     const std::string name = "hnsw";
     auto search_param = fmt::format(search_param_tmp, 100);
     for (auto& dim : dims) {
@@ -231,6 +231,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex, "HNSW Build", "[ft][hnsw]"
 
         TestBuildIndex(index, dataset, true);
         TestKnnSearch(index, dataset, search_param, 0.99, true);
+        TestConcurrentKnnSearch(index, dataset, search_param, 0.99, true);
         TestRangeSearch(index, dataset, search_param, 0.99, 10, true);
         TestRangeSearch(index, dataset, search_param, 0.49, 5, true);
         TestFilterSearch(index, dataset, search_param, 0.99, true);
@@ -242,7 +243,6 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex, "HNSW Add", "[ft][hnsw]") 
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
     auto metric_type = GENERATE("l2", "ip", "cosine");
-    std::string base_quantization_str = GENERATE("sq8", "fp32");
     const std::string name = "hnsw";
     auto search_param = fmt::format(search_param_tmp, 100);
     for (auto& dim : dims) {
@@ -253,6 +253,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex, "HNSW Add", "[ft][hnsw]") 
         auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
         TestAddIndex(index, dataset, true);
         TestKnnSearch(index, dataset, search_param, 0.99, true);
+        TestConcurrentKnnSearch(index, dataset, search_param, 0.99, true);
         TestRangeSearch(index, dataset, search_param, 0.99, 10, true);
         TestRangeSearch(index, dataset, search_param, 0.49, 5, true);
         TestFilterSearch(index, dataset, search_param, 0.99, true);
@@ -265,7 +266,6 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex, "HNSW Serialize File", "[f
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
     auto metric_type = GENERATE("l2", "ip", "cosine");
-    std::string base_quantization_str = GENERATE("sq8", "fp32");
     const std::string name = "hnsw";
     auto search_param = fmt::format(search_param_tmp, 100);
 
@@ -279,6 +279,27 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex, "HNSW Serialize File", "[f
 
         auto index2 = TestFactory(name, param, true);
         TestSerializeFile(index, index2, dataset, search_param, true);
+    }
+    vsag::Options::Instance().set_block_size_limit(origin_size);
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex,
+                             "HNSW Build & ContinueAdd Test With Random Allocator",
+                             "[ft][hnsw]") {
+    auto allocator = std::make_shared<fixtures::RandomAllocator>();
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    auto size = GENERATE(1024 * 1024 * 2);
+    auto metric_type = GENERATE("l2", "ip", "cosine");
+    const std::string name = "hnsw";
+    for (auto& dim : dims) {
+        vsag::Options::Instance().set_block_size_limit(size);
+        auto param = GenerateHNSWBuildParametersString(metric_type, dim);
+        auto index = vsag::Factory::CreateIndex(name, param, allocator.get());
+        if (not index.has_value()) {
+            continue;
+        }
+        auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
+        TestContinueAddIgnoreRequire(index.value(), dataset);
     }
     vsag::Options::Instance().set_block_size_limit(origin_size);
 }
