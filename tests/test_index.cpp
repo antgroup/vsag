@@ -256,10 +256,10 @@ TestIndex::TestSerializeFile(const IndexPtr& index_from,
 }
 void
 TestIndex::TestSearchWithNan(const TestIndex::IndexPtr& index,
-                                const TestDatasetPtr& dataset,
-                                const std::string& search_param,
-                                float recall,
-                                bool expected_success) {
+                             const TestDatasetPtr& dataset,
+                             const std::string& search_param,
+                             float recall,
+                             bool expected_success) {
     auto queries = dataset->query_;
     auto query_count = queries->GetNumElements();
     auto dim = queries->GetDim();
@@ -481,4 +481,3 @@ TestIndex::TestDuplicateAdd(const TestIndex::IndexPtr& index, const TestDatasetP
 }
 
 }  // namespace fixtures
-

@@ -82,10 +82,10 @@ protected:
 
     static void
     TestSearchWithNan(const IndexPtr& index,
-                         const TestDatasetPtr& dataset,
-                         const std::string& search_param,
-                         float recall = 0.99,
-                         bool expected_success = true);
+                      const TestDatasetPtr& dataset,
+                      const std::string& search_param,
+                      float recall = 0.99,
+                      bool expected_success = true);
 
     static void
     TestRangeSearch(const IndexPtr& index,
