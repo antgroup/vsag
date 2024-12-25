@@ -29,7 +29,7 @@ get_pos(const uint32_t val) {
 IndexFeatureList::IndexFeatureList()
     : feature_count_(static_cast<uint32_t>(IndexFeature::INDEX_FEATURE_COUNT)) {
     uint32_t size = (feature_count_ + 7) / 8;
-    data_.resize(size);
+    data_.resize(size, 0);
 }
 
 bool

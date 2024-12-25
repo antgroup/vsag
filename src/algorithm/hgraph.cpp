@@ -862,14 +862,9 @@ HGraph::init_features() {
     }
 }
 
-tl::expected<bool, Error>
+bool
 HGraph::CheckFeature(IndexFeature feature) const {
-    try {
-        return this->feature_list_.CheckFeature(feature);
-    } catch (const std::invalid_argument& e) {
-        LOG_ERROR_AND_RETURNS(
-            ErrorType::INVALID_ARGUMENT, "[HGraph] failed to CheckFeature: ", e.what());
-    }
+    return this->feature_list_.CheckFeature(feature);
 }
 
 }  // namespace vsag

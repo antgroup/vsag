@@ -77,14 +77,14 @@ protected:
     TestKnnSearch(const IndexPtr& index,
                   const TestDatasetPtr& dataset,
                   const std::string& search_param,
-                  float recall = 0.99,
+                  float expected_recall = 0.99,
                   bool expected_success = true);
 
     static void
     TestRangeSearch(const IndexPtr& index,
                     const TestDatasetPtr& dataset,
                     const std::string& search_param,
-                    float recall = 0.99,
+                    float expected_recall = 0.99,
                     int64_t limited_size = -1,
                     bool expected_success = true);
 
@@ -92,7 +92,7 @@ protected:
     TestFilterSearch(const IndexPtr& index,
                      const TestDatasetPtr& dataset,
                      const std::string& search_param,
-                     float recall = 0.99,
+                     float expected_recall = 0.99,
                      bool expected_success = true);
 
     static void
@@ -115,8 +115,13 @@ protected:
     TestConcurrentKnnSearch(const IndexPtr& index,
                             const TestDatasetPtr& dataset,
                             const std::string& search_param,
-                            float recall = 0.99,
+                            float expected_recall = 0.99,
                             bool expected_success = true);
+
+    static void
+    TestConcurrentAdd(const IndexPtr& index,
+                      const TestDatasetPtr& dataset,
+                      bool expected_success = true);
 };
 
 }  // namespace fixtures
