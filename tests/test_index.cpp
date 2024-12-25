@@ -368,5 +368,43 @@ TestIndex::TestContinueAddIgnoreRequire(const TestIndex::IndexPtr& index,
         auto add_index = index->Add(data_one);
     }
 }
+void
+TestIndex::TestDuplicateAdd(const TestIndex::IndexPtr& index, const TestDatasetPtr& dataset) {
+    auto double_dataset = vsag::Dataset::Make();
+    uint64_t base_count = dataset->base_->GetNumElements();
+    uint64_t double_count = base_count * 2;
+    auto dim = dataset->base_->GetDim();
+    auto new_data = std::shared_ptr<float[]>(new float[double_count * dim]);
+    auto new_ids = std::shared_ptr<int64_t[]>(new int64_t[double_count]);
+    memcpy(new_data.get(), dataset->base_->GetFloat32Vectors(), base_count * dim * sizeof(float));
+    memcpy(new_data.get() + base_count * dim,
+           dataset->base_->GetFloat32Vectors(),
+           base_count * dim * sizeof(float));
+    memcpy(new_ids.get(), dataset->base_->GetIds(), base_count * sizeof(int64_t));
+    memcpy(new_ids.get() + base_count, dataset->base_->GetIds(), base_count * sizeof(int64_t));
+    double_dataset->Dim(dim)
+        ->NumElements(double_count)
+        ->Ids(new_ids.get())
+        ->Float32Vectors(new_data.get())
+        ->Owner(false);
+
+    auto check_func = [&](std::vector<int64_t>& failed_ids) -> void {
+        REQUIRE(failed_ids.size() == base_count);
+        std::sort(failed_ids.begin(), failed_ids.end());
+        for (uint64_t i = 0; i < base_count; ++i) {
+            REQUIRE(failed_ids[i] == dataset->base_->GetIds()[i]);
+        }
+    };
+
+    // add once with duplicate;
+    auto add_index = index->Add(double_dataset);
+    REQUIRE(add_index.has_value());
+    check_func(add_index.value());
+
+    // add twice with duplicate;
+    auto add_index_2 = index->Add(dataset->base_);
+    REQUIRE(add_index_2.has_value());
+    check_func(add_index_2.value());
+}
 
 }  // namespace fixtures

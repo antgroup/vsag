@@ -55,7 +55,7 @@ ConjugateGraph::get_neighbors(int64_t from_tag_id) const {
 }
 
 tl::expected<uint32_t, Error>
-ConjugateGraph::EnhanceResult(std::priority_queue<std::pair<float, size_t>>& results,
+ConjugateGraph::EnhanceResult(std::priority_queue<std::pair<float, LabelType>>& results,
                               const std::function<float(int64_t)>& distance_of_tag) const {
     if (this->is_empty()) {
         return 0;
@@ -63,7 +63,7 @@ ConjugateGraph::EnhanceResult(std::priority_queue<std::pair<float, size_t>>& res
 
     int64_t k = results.size();
     int64_t look_at_k = std::min(LOOK_AT_K, k);
-    std::priority_queue<std::pair<float, size_t>> old_results(results);
+    std::priority_queue<std::pair<float, LabelType>> old_results(results);
     std::vector<int64_t> to_be_visited(look_at_k);
     std::unordered_set<int64_t> visited_set;
     uint32_t successfully_enhanced = 0;
