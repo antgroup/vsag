@@ -128,17 +128,22 @@ HGraph::Add(const DatasetPtr& data) {
         CHECK_ARGUMENT(base_dim == dim_,
                        fmt::format("base.dim({}) must be equal to index.dim({})", base_dim, dim_));
         CHECK_ARGUMENT(data->GetFloat32Vectors() != nullptr, "base.float_vector is nullptr");
+        auto split_datasets = this->split_dataset_by_duplicate_label(data, failed_ids);
 
-        this->basic_flatten_codes_->Train(data->GetFloat32Vectors(), data->GetNumElements());
-        this->basic_flatten_codes_->BatchInsertVector(data->GetFloat32Vectors(),
-                                                      data->GetNumElements());
-        if (use_reorder_) {
-            this->high_precise_codes_->Train(data->GetFloat32Vectors(), data->GetNumElements());
-            this->high_precise_codes_->BatchInsertVector(data->GetFloat32Vectors(),
-                                                         data->GetNumElements());
+        for (auto& data_ptr : split_datasets) {
+            this->basic_flatten_codes_->Train(data_ptr->GetFloat32Vectors(),
+                                              data_ptr->GetNumElements());
+            this->basic_flatten_codes_->BatchInsertVector(data_ptr->GetFloat32Vectors(),
+                                                          data_ptr->GetNumElements());
+            if (use_reorder_) {
+                this->high_precise_codes_->Train(data_ptr->GetFloat32Vectors(),
+                                                 data_ptr->GetNumElements());
+                this->high_precise_codes_->BatchInsertVector(data_ptr->GetFloat32Vectors(),
+                                                             data_ptr->GetNumElements());
+            }
+            this->hnsw_add(data_ptr);
         }
-        this->hnsw_add(data);
-        return failed_ids;  // TODO(LHT): maybe use copy for small batch filtered by label
+        return failed_ids;
     } catch (const std::invalid_argument& e) {
         LOG_ERROR_AND_RETURNS(
             ErrorType::INVALID_ARGUMENT, "failed to add(invalid argument): ", e.what());
@@ -865,6 +870,51 @@ HGraph::init_features() {
 bool
 HGraph::CheckFeature(IndexFeature feature) const {
     return this->feature_list_.CheckFeature(feature);
+}
+Vector<DatasetPtr>
+HGraph::split_dataset_by_duplicate_label(const DatasetPtr& dataset,
+                                         std::vector<LabelType>& failed_ids) const {
+    Vector<DatasetPtr> return_datasets(0, this->allocator_);
+    auto count = dataset->GetNumElements();
+    auto dim = dataset->GetDim();
+    auto* labels = dataset->GetIds();
+    auto* vec = dataset->GetFloat32Vectors();
+    UnorderedSet<LabelType> temp_labels(allocator_);
+
+    for (uint64_t i = 0; i < count; ++i) {
+        if (label_lookup_.find(labels[i]) != label_lookup_.end() or
+            temp_labels.find(labels[i]) != temp_labels.end()) {
+            failed_ids.emplace_back(i);
+            continue;
+        }
+        temp_labels.emplace(labels[i]);
+    }
+    failed_ids.emplace_back(count);
+
+    if (failed_ids.size() == 1) {
+        return_datasets.emplace_back(dataset);
+        return return_datasets;
+    }
+    int64_t start = -1;
+    for (auto end : failed_ids) {
+        if (end - start == 1) {
+            start = end;
+            continue;
+        }
+        auto new_dataset = Dataset::Make();
+        new_dataset->NumElements(end - start - 1)
+            ->Dim(dim)
+            ->Ids(labels + start + 1)
+            ->Float32Vectors(vec + dim * (start + 1))
+            ->Owner(false);
+        return_datasets.emplace_back(new_dataset);
+        start = end;
+    }
+    failed_ids.pop_back();
+    for (auto& failed_id : failed_ids) {
+        failed_id = labels[failed_id];
+    }
+    return return_datasets;
 }
 
 }  // namespace vsag

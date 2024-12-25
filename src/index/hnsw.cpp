@@ -226,7 +226,7 @@ HNSW::knn_search(const DatasetPtr& query,
 
         // perform search
         int64_t original_k = k;
-        std::priority_queue<std::pair<float, size_t>> results;
+        std::priority_queue<std::pair<float, LabelType>> results;
         double time_cost;
         try {
             Timer t(time_cost);
@@ -354,7 +354,7 @@ HNSW::range_search(const DatasetPtr& query,
         auto params = HnswSearchParameters::FromJson(parameters);
 
         // perform search
-        std::priority_queue<std::pair<float, size_t>> results;
+        std::priority_queue<std::pair<float, LabelType>> results;
         double time_cost;
         try {
             std::shared_lock lock(rw_mutex_);

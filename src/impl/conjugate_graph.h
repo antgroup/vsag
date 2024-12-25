@@ -38,7 +38,7 @@ public:
     AddNeighbor(int64_t from_tag_id, int64_t to_tag_id);
 
     tl::expected<uint32_t, Error>
-    EnhanceResult(std::priority_queue<std::pair<float, size_t>>& results,
+    EnhanceResult(std::priority_queue<std::pair<float, LabelType>>& results,
                   const std::function<float(int64_t)>& distance_of_tag) const;
 
 public:
