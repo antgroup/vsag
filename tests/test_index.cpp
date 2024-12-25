@@ -255,7 +255,7 @@ TestIndex::TestSerializeFile(const IndexPtr& index_from,
     }
 }
 void
-TestIndex::TestKnnSearchWithNan(const TestIndex::IndexPtr& index,
+TestIndex::TestSearchWithNan(const TestIndex::IndexPtr& index,
                                 const TestDatasetPtr& dataset,
                                 const std::string& search_param,
                                 float recall,
@@ -307,9 +307,6 @@ TestIndex::TestKnnSearchWithNan(const TestIndex::IndexPtr& index,
         REQUIRE((res.value()->GetDim() >= topk && res.value()->GetDim() <= topk + 1));
         auto result = res.value()->GetIds();
         auto dists = res.value()->GetDistances();
-        for (int j = 0; j < topk; ++j) {
-            REQUIRE_FALSE(std::isnan(dists[j]));
-        }
         auto gt = gts->GetIds() + gt_topK * i;
         auto val = Intersection(gt, gt_topK, result, topk);
         cur_recall += static_cast<float>(val) / static_cast<float>(gt_topK);

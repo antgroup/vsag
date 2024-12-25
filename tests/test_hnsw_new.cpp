@@ -230,7 +230,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex, "HNSW Search with Nan", "[
     auto param = GenerateHNSWBuildParametersString(metric_type, dim);
     auto index = TestFactory(name, param, true);
     TestContinueAdd(index, dataset, true);
-    TestKnnSearchWithNan(index, dataset, search_param, 0.98, true);
+    TestSearchWithNan(index, dataset, search_param, 0.98, true);
     vsag::Options::Instance().set_block_size_limit(origin_size);
 }
 
