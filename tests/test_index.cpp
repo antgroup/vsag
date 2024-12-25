@@ -481,3 +481,4 @@ TestIndex::TestDuplicateAdd(const TestIndex::IndexPtr& index, const TestDatasetP
 }
 
 }  // namespace fixtures
+
