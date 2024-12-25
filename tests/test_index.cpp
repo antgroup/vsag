@@ -97,7 +97,7 @@ void
 TestIndex::TestKnnSearch(const IndexPtr& index,
                          const TestDatasetPtr& dataset,
                          const std::string& search_param,
-                         float recall,
+                         float expected_recall,
                          bool expected_success) {
     auto queries = dataset->query_;
     auto query_count = queries->GetNumElements();
@@ -123,14 +123,14 @@ TestIndex::TestKnnSearch(const IndexPtr& index,
         auto val = Intersection(gt, gt_topK, result, topk);
         cur_recall += static_cast<float>(val) / static_cast<float>(gt_topK);
     }
-    REQUIRE(cur_recall > recall * query_count);
+    REQUIRE(cur_recall > expected_recall * query_count);
 }
 
 void
 TestIndex::TestRangeSearch(const IndexPtr& index,
                            const TestDatasetPtr& dataset,
                            const std::string& search_param,
-                           float recall,
+                           float expected_recall,
                            int64_t limited_size,
                            bool expected_success) {
     auto queries = dataset->range_query_;
@@ -159,13 +159,13 @@ TestIndex::TestRangeSearch(const IndexPtr& index,
         auto val = Intersection(gt, gt_topK, result, res.value()->GetDim());
         cur_recall += static_cast<float>(val) / static_cast<float>(gt_topK);
     }
-    REQUIRE(cur_recall > recall * query_count);
+    REQUIRE(cur_recall > expected_recall * query_count);
 }
 void
 TestIndex::TestFilterSearch(const TestIndex::IndexPtr& index,
                             const TestDatasetPtr& dataset,
                             const std::string& search_param,
-                            float recall,
+                            float expected_recall,
                             bool expected_success) {
     auto queries = dataset->filter_query_;
     auto query_count = queries->GetNumElements();
@@ -191,7 +191,7 @@ TestIndex::TestFilterSearch(const TestIndex::IndexPtr& index,
         auto val = Intersection(gt, gt_topK, result, topk);
         cur_recall += static_cast<float>(val) / static_cast<float>(gt_topK);
     }
-    REQUIRE(cur_recall > recall * query_count);
+    REQUIRE(cur_recall > expected_recall * query_count);
 }
 
 void
@@ -254,11 +254,53 @@ TestIndex::TestSerializeFile(const IndexPtr& index_from,
         }
     }
 }
+
+void
+TestIndex::TestConcurrentAdd(const TestIndex::IndexPtr& index,
+                             const TestDatasetPtr& dataset,
+                             bool expected_success) {
+    auto base_count = dataset->base_->GetNumElements();
+    int64_t temp_count = base_count / 2;
+    auto dim = dataset->base_->GetDim();
+    auto temp_dataset = vsag::Dataset::Make();
+    temp_dataset->Dim(dim)
+        ->Ids(dataset->base_->GetIds())
+        ->NumElements(temp_count)
+        ->Float32Vectors(dataset->base_->GetFloat32Vectors())
+        ->Owner(false);
+    index->Build(temp_dataset);
+    auto rest_count = base_count - temp_count;
+    fixtures::ThreadPool pool(5);
+    using RetType = tl::expected<std::vector<int64_t>, vsag::Error>;
+    std::vector<std::future<RetType>> futures;
+
+    auto func = [&](uint64_t i) -> RetType {
+        auto data_one = vsag::Dataset::Make();
+        data_one->Dim(dim)
+            ->Ids(dataset->base_->GetIds() + i)
+            ->NumElements(1)
+            ->Float32Vectors(dataset->base_->GetFloat32Vectors() + i * dim)
+            ->Owner(false);
+        auto add_index = index->Add(data_one);
+        return add_index;
+    };
+
+    for (uint64_t j = rest_count; j < base_count; ++j) {
+        futures.emplace_back(pool.enqueue(func, j));
+    }
+
+    for (auto& res : futures) {
+        auto val = res.get();
+        REQUIRE(val.has_value() == expected_success);
+    }
+    REQUIRE(index->GetNumElements() == base_count);
+}
+
 void
 TestIndex::TestConcurrentKnnSearch(const TestIndex::IndexPtr& index,
                                    const TestDatasetPtr& dataset,
                                    const std::string& search_param,
-                                   float recall,
+                                   float expected_recall,
                                    bool expected_success) {
     auto queries = dataset->query_;
     auto query_count = queries->GetNumElements();
@@ -299,7 +341,7 @@ TestIndex::TestConcurrentKnnSearch(const TestIndex::IndexPtr& index,
     }
 
     auto cur_recall = std::accumulate(search_results.begin(), search_results.end(), 0.0f);
-    REQUIRE(cur_recall > recall * query_count);
+    REQUIRE(cur_recall > expected_recall * query_count);
 }
 
 void

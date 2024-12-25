@@ -106,7 +106,7 @@ public:
     tl::expected<float, Error>
     CalculateDistanceById(const float* vector, int64_t id) const;
 
-    tl::expected<bool, Error>
+    bool
     CheckFeature(IndexFeature feature) const;
 
     inline void

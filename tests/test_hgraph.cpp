@@ -293,6 +293,42 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex, "HGraph Add", "[ft][hgra
     }
 }
 
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex, "HGraph Concurrent Add", "[ft][hgraph]") {
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    auto size = GENERATE(1024 * 1024 * 2);
+    auto metric_type = GENERATE("l2", "ip", "cosine");
+    std::vector<std::pair<std::string, float>> test_cases = {
+        {"sq8", 0.97}, {"fp32", 0.99}, {"sq8_uniform", 0.95}};
+    const std::string name = "hgraph";
+    auto search_param = fmt::format(search_param_tmp, 200);
+    for (auto& dim : dims) {
+        for (auto& [base_quantization_str, recall] : test_cases) {
+            vsag::Options::Instance().set_block_size_limit(size);
+            auto param =
+                GenerateHGraphBuildParametersString(metric_type, dim, base_quantization_str);
+            auto index = TestFactory(name, param, true);
+            if (index->CheckFeature(vsag::SUPPORT_ADD_CONCURRENT)) {
+                auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
+                TestConcurrentAdd(index, dataset, true);
+                if (index->CheckFeature(vsag::SUPPORT_KNN_SEARCH)) {
+                    TestKnnSearch(index, dataset, search_param, recall, true);
+                    if (index->CheckFeature(vsag::SUPPORT_SEARCH_CONCURRENT)) {
+                        TestConcurrentKnnSearch(index, dataset, search_param, recall, true);
+                    }
+                }
+                if (index->CheckFeature(vsag::SUPPORT_RANGE_SEARCH)) {
+                    TestRangeSearch(index, dataset, search_param, recall, 10, true);
+                    TestRangeSearch(index, dataset, search_param, recall / 2.0, 5, true);
+                }
+                if (index->CheckFeature(vsag::SUPPORT_KNN_SEARCH_WITH_ID_FILTER)) {
+                    TestFilterSearch(index, dataset, search_param, recall, true);
+                }
+            }
+            vsag::Options::Instance().set_block_size_limit(origin_size);
+        }
+    }
+}
+
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex, "HGraph Serialize File", "[ft][hgraph]") {
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
