@@ -188,6 +188,7 @@ HierarchicalNSW::setBatchNeigohbors(InnerIdType internal_id,
     for (int i = 1; i <= neigbor_count; ++i) {
         ll_cur[i] = neighbors[i - 1];
     }
+
     setListCount(ll_cur, neigbor_count);
 }
 
