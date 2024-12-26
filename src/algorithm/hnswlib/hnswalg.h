@@ -155,7 +155,9 @@ public:
 
     inline void
     setExternalLabel(InnerIdType internal_id, LabelType label) const {
-        *(LabelType*)(data_level0_memory_->GetElementPtr(internal_id, label_offset_)) = label;
+        std::memcpy(data_level0_memory_->GetElementPtr(internal_id, label_offset_),
+                    &label,
+                    sizeof(LabelType));
     }
 
     inline LabelType*
