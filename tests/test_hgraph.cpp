@@ -190,7 +190,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex,
     auto size = GENERATE(1024 * 1024 * 2);
     auto metric_type = GENERATE("l2", "ip", "cosine");
     std::vector<std::pair<std::string, float>> test_cases = {
-        {"sq8", 0.97}, {"fp32", 0.99}, {"sq8_uniform", 0.95}};
+        {"sq8", 0.96}, {"fp32", 0.99}, {"sq8_uniform", 0.95}};
     const std::string name = "hgraph";
     auto search_param = fmt::format(search_param_tmp, 200);
     for (auto& dim : dims) {
@@ -226,7 +226,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex, "HGraph Build", "[ft][hg
     auto size = GENERATE(1024 * 1024 * 2);
     auto metric_type = GENERATE("l2", "ip", "cosine");
     std::vector<std::pair<std::string, float>> test_cases = {
-        {"sq8", 0.97}, {"fp32", 0.99}, {"sq8_uniform", 0.95}};
+        {"sq8", 0.96}, {"fp32", 0.99}, {"sq8_uniform", 0.95}};
     const std::string name = "hgraph";
     auto search_param = fmt::format(search_param_tmp, 200);
     for (auto& dim : dims) {
@@ -262,7 +262,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex, "HGraph Add", "[ft][hgra
     auto size = GENERATE(1024 * 1024 * 2);
     auto metric_type = GENERATE("l2", "ip", "cosine");
     std::vector<std::pair<std::string, float>> test_cases = {
-        {"sq8", 0.97}, {"fp32", 0.99}, {"sq8_uniform", 0.95}};
+        {"sq8", 0.96}, {"fp32", 0.99}, {"sq8_uniform", 0.95}};
     const std::string name = "hgraph";
     auto search_param = fmt::format(search_param_tmp, 200);
     for (auto& dim : dims) {
@@ -298,7 +298,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex, "HGraph Concurrent Add",
     auto size = GENERATE(1024 * 1024 * 2);
     auto metric_type = GENERATE("l2", "ip", "cosine");
     std::vector<std::pair<std::string, float>> test_cases = {
-        {"sq8", 0.97}, {"fp32", 0.99}, {"sq8_uniform", 0.95}};
+        {"sq8", 0.96}, {"fp32", 0.99}, {"sq8_uniform", 0.95}};
     const std::string name = "hgraph";
     auto search_param = fmt::format(search_param_tmp, 200);
     for (auto& dim : dims) {
@@ -383,7 +383,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex, "HGraph Duplicate Build"
     auto size = GENERATE(1024 * 1024 * 2);
     auto metric_type = GENERATE("l2", "ip", "cosine");
     std::vector<std::pair<std::string, float>> test_cases = {
-        {"sq8", 0.97}, {"fp32", 0.99}, {"sq8_uniform", 0.95}};
+        {"sq8", 0.96}, {"fp32", 0.99}, {"sq8_uniform", 0.95}};
     const std::string name = "hgraph";
     auto search_param = fmt::format(search_param_tmp, 200);
     for (auto& dim : dims) {

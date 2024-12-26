@@ -22,25 +22,25 @@ namespace generic {
 float
 SQ8ComputeIP(const float* query,
              const uint8_t* codes,
-             const float* lowerBound,
+             const float* lower_bound,
              const float* diff,
              uint64_t dim);
 float
 SQ8ComputeL2Sqr(const float* query,
                 const uint8_t* codes,
-                const float* lowerBound,
+                const float* lower_bound,
                 const float* diff,
                 uint64_t dim);
 float
 SQ8ComputeCodesIP(const uint8_t* codes1,
                   const uint8_t* codes2,
-                  const float* lowerBound,
+                  const float* lower_bound,
                   const float* diff,
                   uint64_t dim);
 float
 SQ8ComputeCodesL2Sqr(const uint8_t* codes1,
                      const uint8_t* codes2,
-                     const float* lowerBound,
+                     const float* lower_bound,
                      const float* diff,
                      uint64_t dim);
 }  // namespace generic
@@ -49,52 +49,79 @@ namespace sse {
 float
 SQ8ComputeIP(const float* query,
              const uint8_t* codes,
-             const float* lowerBound,
+             const float* lower_bound,
              const float* diff,
              uint64_t dim);
 float
 SQ8ComputeL2Sqr(const float* query,
                 const uint8_t* codes,
-                const float* lowerBound,
+                const float* lower_bound,
                 const float* diff,
                 uint64_t dim);
 float
 SQ8ComputeCodesIP(const uint8_t* codes1,
                   const uint8_t* codes2,
-                  const float* lowerBound,
+                  const float* lower_bound,
                   const float* diff,
                   uint64_t dim);
 float
 SQ8ComputeCodesL2Sqr(const uint8_t* codes1,
                      const uint8_t* codes2,
-                     const float* lowerBound,
+                     const float* lower_bound,
                      const float* diff,
                      uint64_t dim);
 }  // namespace sse
+
+namespace avx {
+float
+SQ8ComputeIP(const float* query,
+             const uint8_t* codes,
+             const float* lower_bound,
+             const float* diff,
+             uint64_t dim);
+float
+SQ8ComputeL2Sqr(const float* query,
+                const uint8_t* codes,
+                const float* lower_bound,
+                const float* diff,
+                uint64_t dim);
+float
+SQ8ComputeCodesIP(const uint8_t* codes1,
+                  const uint8_t* codes2,
+                  const float* lower_bound,
+                  const float* diff,
+                  uint64_t dim);
+float
+SQ8ComputeCodesL2Sqr(const uint8_t* codes1,
+                     const uint8_t* codes2,
+                     const float* lower_bound,
+                     const float* diff,
+                     uint64_t dim);
+}  // namespace avx
 
 namespace avx2 {
 float
 SQ8ComputeIP(const float* query,
              const uint8_t* codes,
-             const float* lowerBound,
+             const float* lower_bound,
              const float* diff,
              uint64_t dim);
 float
 SQ8ComputeL2Sqr(const float* query,
                 const uint8_t* codes,
-                const float* lowerBound,
+                const float* lower_bound,
                 const float* diff,
                 uint64_t dim);
 float
 SQ8ComputeCodesIP(const uint8_t* codes1,
                   const uint8_t* codes2,
-                  const float* lowerBound,
+                  const float* lower_bound,
                   const float* diff,
                   uint64_t dim);
 float
 SQ8ComputeCodesL2Sqr(const uint8_t* codes1,
                      const uint8_t* codes2,
-                     const float* lowerBound,
+                     const float* lower_bound,
                      const float* diff,
                      uint64_t dim);
 }  // namespace avx2
@@ -103,32 +130,32 @@ namespace avx512 {
 float
 SQ8ComputeIP(const float* query,
              const uint8_t* codes,
-             const float* lowerBound,
+             const float* lower_bound,
              const float* diff,
              uint64_t dim);
 float
 SQ8ComputeL2Sqr(const float* query,
                 const uint8_t* codes,
-                const float* lowerBound,
+                const float* lower_bound,
                 const float* diff,
                 uint64_t dim);
 float
 SQ8ComputeCodesIP(const uint8_t* codes1,
                   const uint8_t* codes2,
-                  const float* lowerBound,
+                  const float* lower_bound,
                   const float* diff,
                   uint64_t dim);
 float
 SQ8ComputeCodesL2Sqr(const uint8_t* codes1,
                      const uint8_t* codes2,
-                     const float* lowerBound,
+                     const float* lower_bound,
                      const float* diff,
                      uint64_t dim);
 }  // namespace avx512
 
 using SQ8ComputeType = float (*)(const float* query,
                                  const uint8_t* codes,
-                                 const float* lowerBound,
+                                 const float* lower_bound,
                                  const float* diff,
                                  uint64_t dim);
 extern SQ8ComputeType SQ8ComputeIP;
@@ -136,7 +163,7 @@ extern SQ8ComputeType SQ8ComputeL2Sqr;
 
 using SQ8ComputeCodesType = float (*)(const uint8_t* codes1,
                                       const uint8_t* codes2,
-                                      const float* lowerBound,
+                                      const float* lower_bound,
                                       const float* diff,
                                       uint64_t dim);
 

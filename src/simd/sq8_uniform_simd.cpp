@@ -29,6 +29,10 @@ GetSQ8UniformComputeCodesIP() {
 #if defined(ENABLE_AVX2)
         return avx2::SQ8UniformComputeCodesIP;
 #endif
+    } else if (SimdStatus::SupportAVX()) {
+#if defined(ENABLE_AVX)
+        return avx::SQ8UniformComputeCodesIP;
+#endif
     } else if (SimdStatus::SupportSSE()) {
 #if defined(ENABLE_SSE)
         return sse::SQ8UniformComputeCodesIP;
