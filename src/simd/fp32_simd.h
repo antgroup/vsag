@@ -34,6 +34,13 @@ float
 FP32ComputeL2Sqr(const float* query, const float* codes, uint64_t dim);
 }  // namespace sse
 
+namespace avx {
+float
+FP32ComputeIP(const float* query, const float* codes, uint64_t dim);
+float
+FP32ComputeL2Sqr(const float* query, const float* codes, uint64_t dim);
+}  // namespace avx
+
 namespace avx2 {
 float
 FP32ComputeIP(const float* query, const float* codes, uint64_t dim);

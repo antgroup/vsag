@@ -21,20 +21,8 @@
 #include <unordered_set>
 
 #include "fmt/format.h"
-#include "simd/normalize.h"
+#include "simd/simd.h"
 #include "vsag/dataset.h"
-
-namespace vsag {
-
-extern float
-L2Sqr(const void* pVect1v, const void* pVect2v, const void* qty_ptr);
-
-extern float
-InnerProductDistance(const void* pVect1, const void* pVect2, const void* qty_ptr);
-
-extern float
-INT8InnerProductDistance(const void* pVect1, const void* pVect2, const void* qty_ptr);
-}  // namespace vsag
 
 namespace fixtures {
 

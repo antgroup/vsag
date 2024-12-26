@@ -24,11 +24,15 @@ using namespace vsag;
 
 #define TEST_ACCURACY(Func)                                                           \
     {                                                                                 \
-        float gt, sse, avx2, avx512;                                                  \
+        float gt, sse, avx, avx2, avx512;                                             \
         gt = generic::Func(vec1.data() + i * dim, vec2.data() + i * dim, dim);        \
         if (SimdStatus::SupportSSE()) {                                               \
             sse = sse::Func(vec1.data() + i * dim, vec2.data() + i * dim, dim);       \
             REQUIRE(fixtures::dist_t(gt) == fixtures::dist_t(sse));                   \
+        }                                                                             \
+        if (SimdStatus::SupportAVX()) {                                               \
+            avx = avx::Func(vec1.data() + i * dim, vec2.data() + i * dim, dim);       \
+            REQUIRE(fixtures::dist_t(gt) == fixtures::dist_t(avx));                   \
         }                                                                             \
         if (SimdStatus::SupportAVX2()) {                                              \
             avx2 = avx2::Func(vec1.data() + i * dim, vec2.data() + i * dim, dim);     \

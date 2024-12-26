@@ -85,10 +85,10 @@ jobs:
       - run: bash scripts/deps/install_deps_ubuntu.sh
       - restore_cache:
           keys:
-            - main-ccache-{{ checksum "CMakeLists.txt" }}-{{ checksum ".circleci/fresh_ci_cache.commit" }}
+            - main-ccache-arm-{{ checksum "CMakeLists.txt" }}-{{ checksum ".circleci/fresh_ci_cache.commit" }}
       - run: make debug
       - save_cache:
-          key: main-ccache-{{ checksum "CMakeLists.txt" }}-{{ checksum ".circleci/fresh_ci_cache.commit" }}
+          key: main-ccache-arm-{{ checksum "CMakeLists.txt" }}-{{ checksum ".circleci/fresh_ci_cache.commit" }}
           paths:
             - ./build
       - run: make test_parallel

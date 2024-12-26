@@ -28,6 +28,11 @@ float
 SQ8UniformComputeCodesIP(const uint8_t* codes1, const uint8_t* codes2, uint64_t dim);
 }  // namespace sse
 
+namespace avx {
+float
+SQ8UniformComputeCodesIP(const uint8_t* codes1, const uint8_t* codes2, uint64_t dim);
+}  // namespace avx
+
 namespace avx2 {
 float
 SQ8UniformComputeCodesIP(const uint8_t* codes1, const uint8_t* codes2, uint64_t dim);
