@@ -15,52 +15,75 @@
 
 #include <iostream>
 
+#include "vsag/logger.h"
 #include "vsag/vsag.h"
 
 class ExampleAllocator : public vsag::Allocator {
 public:
     std::string
     Name() override {
-        return "myallocator";
+        return "example-allocator";
     }
 
     void*
     Allocate(size_t size) override {
-        return malloc(size);
+        vsag::Options::Instance().logger()->Debug("allocate " + std::to_string(size) + " bytes.");
+        auto addr = (void*)malloc(size);
+        sizes_[addr] = size;
+        return addr;
     }
 
     void
     Deallocate(void* p) override {
+        if (sizes_.find(p) == sizes_.end())
+            return;
+        vsag::Options::Instance().logger()->Debug("deallocate " + std::to_string(sizes_[p]) +
+                                                  " bytes.");
+        sizes_.erase(p);
         return free(p);
     }
 
     void*
     Reallocate(void* p, size_t size) override {
-        return realloc(p, size);
+        vsag::Options::Instance().logger()->Debug("reallocate " + std::to_string(size) + " bytes.");
+        auto addr = (void*)realloc(p, size);
+        sizes_.erase(p);
+        sizes_[addr] = size;
+        return addr;
     }
+
+private:
+    std::unordered_map<void*, size_t> sizes_;
 };
 
 int
 main() {
+    vsag::Options::Instance().logger()->SetLevel(vsag::Logger::kINFO);
+
+    // uncomment this line to show the memory allocation
+    // vsag::Options::Instance().logger()->SetLevel(vsag::Logger::kDEBUG);
+
     ExampleAllocator allocator;
+    vsag::Resource resource(&allocator);
+    vsag::Engine engine(&resource);
 
     auto paramesters = R"(
     {
         "dtype": "float32",
         "metric_type": "l2",
-        "dim": 128,
+        "dim": 4,
         "hnsw": {
-            "max_degree": 16,
-            "ef_construction": 100
+            "max_degree": 5,
+            "ef_construction": 20
         }
     }
     )";
     std::cout << "create index" << std::endl;
-    auto index = vsag::Factory::CreateIndex("hnsw", paramesters, &allocator).value();
+    auto index = engine.CreateIndex("hnsw", paramesters).value();
 
     std::cout << "prepare data" << std::endl;
-    int64_t num_vectors = 10000;
-    int64_t dim = 128;
+    int64_t num_vectors = 100;
+    int64_t dim = 4;
 
     // prepare ids and vectors
     auto ids = (int64_t*)allocator.Allocate(sizeof(int64_t) * num_vectors);
