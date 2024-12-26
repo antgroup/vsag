@@ -258,7 +258,7 @@ void
 TestIndex::TestSearchWithNan(const TestIndex::IndexPtr& index,
                              const TestDatasetPtr& dataset,
                              const std::string& search_param,
-                             float recall,
+                             float expected_recall,
                              bool expected_success) {
     auto queries = dataset->query_;
     auto query_count = queries->GetNumElements();

@@ -202,7 +202,7 @@ TestDataset::CreateTestDataset(uint64_t dim, uint64_t count, std::string metric_
 }
 
 TestDatasetPtr
-TestDataset::CreateNanDataset(std::string metric_str) {
+TestDataset::CreateNanDataset(const std::string& metric_str) {
     TestDatasetPtr dataset = std::shared_ptr<TestDataset>(new TestDataset);
     dataset->dim_ = 256;
     dataset->count_ = 1000;

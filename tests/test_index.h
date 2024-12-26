@@ -84,7 +84,7 @@ protected:
     TestSearchWithNan(const IndexPtr& index,
                       const TestDatasetPtr& dataset,
                       const std::string& search_param,
-                      float recall = 0.99,
+                      float expected_recall = 0.99,
                       bool expected_success = true);
 
     static void

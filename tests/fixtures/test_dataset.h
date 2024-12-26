@@ -29,7 +29,7 @@ public:
     CreateTestDataset(uint64_t dim, uint64_t count, std::string metric_str = "l2");
 
     static std::shared_ptr<TestDataset>
-    CreateNanDataset(std::string metric_str);
+    CreateNanDataset(const std::string& metric_str);
 
     DatasetPtr base_{nullptr};
 
