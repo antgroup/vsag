@@ -68,10 +68,10 @@ jobs:
       - checkout
       - restore_cache:
           keys:
-            - main-ccache-arm-{{ checksum "CMakeLists.txt" }}-{{ checksum ".circleci/fresh_ci_cache.commit" }}
+            - main-ccache-{{ checksum "CMakeLists.txt" }}-{{ checksum ".circleci/fresh_ci_cache.commit" }}
       - run: make debug
       - save_cache:
-          key: main-ccache-arm-{{ checksum "CMakeLists.txt" }}-{{ checksum ".circleci/fresh_ci_cache.commit" }}
+          key: main-ccache-{{ checksum "CMakeLists.txt" }}-{{ checksum ".circleci/fresh_ci_cache.commit" }}
           paths:
             - ./build
       - run: make test_parallel
@@ -92,4 +92,3 @@ jobs:
           paths:
             - ./build
       - run: make test_parallel
-
