@@ -48,6 +48,8 @@ enum IndexFeature {
     SUPPORT_BATCH_SEARCH_WITH_MULTI_THREAD, /**< Supports batch searching with multi-threading */
 
     SUPPORT_ADD_CONCURRENT,               /**< Supports concurrent addition of elements */
+    SUPPORT_UPDATE_ID_CONCURRENT,         /**< Supports concurrent update id of elements */
+    SUPPORT_UPDATE_VECTOR_CONCURRENT,     /**< Supports concurrent update vector of elements */
     SUPPORT_SEARCH_CONCURRENT,            /**< Supports concurrent searching */
     SUPPORT_DELETE_CONCURRENT,            /**< Supports concurrent deletion */
     SUPPORT_ADD_SEARCH_CONCURRENT,        /**< Supports concurrent addition and searching */

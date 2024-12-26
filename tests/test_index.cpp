@@ -61,6 +61,137 @@ TestIndex::TestAddIndex(const IndexPtr& index,
 }
 
 void
+TestIndex::TestUpdateId(const IndexPtr& index,
+                        const TestDatasetPtr& dataset,
+                        const std::string& search_param,
+                        bool expected_success) {
+    auto ids = dataset->base_->GetIds();
+    auto num_vectors = dataset->base_->GetNumElements();
+    auto dim = dataset->base_->GetDim();
+    auto gt_topK = dataset->top_k;
+    auto base = dataset->base_->GetFloat32Vectors();
+
+    std::unordered_map<int64_t, int64_t> update_id_map;
+    std::unordered_map<int64_t, int64_t> reverse_id_map;
+    int64_t max_id = num_vectors;
+    for (int i = 0; i < num_vectors; i++) {
+        if (ids[i] > max_id) {
+            max_id = ids[i];
+        }
+    }
+    for (int i = 0; i < num_vectors; i++) {
+        update_id_map[ids[i]] = ids[i] + 2 * max_id;
+    }
+
+    std::vector<int> correct_num = {0, 0};
+    for (int round = 0; round < 2; round++) {
+        // round 0 for update, round 1 for validate update results
+        for (int i = 0; i < num_vectors; i++) {
+            auto query = vsag::Dataset::Make();
+            query->NumElements(1)->Dim(dim)->Float32Vectors(base + i * dim)->Owner(false);
+
+            auto result = index->KnnSearch(query, gt_topK, search_param);
+            REQUIRE(result.has_value());
+
+            if (round == 0) {
+                if (result.value()->GetIds()[0] == ids[i]) {
+                    correct_num[round] += 1;
+                }
+
+                auto succ_update_res = index->UpdateId(ids[i], update_id_map[ids[i]]);
+                REQUIRE(succ_update_res.has_value());
+                if (expected_success) {
+                    REQUIRE(succ_update_res.value());
+                }
+
+                // old id don't exist
+                auto failed_old_res = index->UpdateId(ids[i], update_id_map[ids[i]]);
+                REQUIRE(failed_old_res.has_value());
+                REQUIRE(not failed_old_res.value());
+
+                // new id is used
+                auto failed_new_res = index->UpdateId(update_id_map[ids[i]], update_id_map[ids[i]]);
+                REQUIRE(failed_new_res.has_value());
+                REQUIRE(not failed_new_res.value());
+            } else {
+                if (result.value()->GetIds()[0] == update_id_map[ids[i]]) {
+                    correct_num[round] += 1;
+                }
+            }
+        }
+    }
+
+    REQUIRE(correct_num[0] == correct_num[1]);
+}
+
+void
+TestIndex::TestUpdateVector(const IndexPtr& index,
+                            const TestDatasetPtr& dataset,
+                            const std::string& search_param,
+                            bool expected_success) {
+    auto ids = dataset->base_->GetIds();
+    auto num_vectors = dataset->base_->GetNumElements();
+    auto dim = dataset->base_->GetDim();
+    auto gt_topK = dataset->top_k;
+    auto base = dataset->base_->GetFloat32Vectors();
+
+    int64_t max_id = num_vectors;
+    for (int i = 0; i < num_vectors; i++) {
+        if (ids[i] > max_id) {
+            max_id = ids[i];
+        }
+    }
+
+    std::vector<int> correct_num = {0, 0};
+    for (int round = 0; round < 2; round++) {
+        // round 0 for update, round 1 for validate update results
+        for (int i = 0; i < num_vectors; i++) {
+            auto query = vsag::Dataset::Make();
+            query->NumElements(1)->Dim(dim)->Float32Vectors(base + i * dim)->Owner(false);
+
+            auto result = index->KnnSearch(query, gt_topK, search_param);
+            REQUIRE(result.has_value());
+
+            if (round == 0) {
+                if (result.value()->GetIds()[0] == ids[i]) {
+                    correct_num[round] += 1;
+                }
+
+                std::vector<float> update_vecs(dim);
+                for (int d = 0; d < dim; d++) {
+                    update_vecs[d] = base[i * dim + d] + 0.001f;
+                }
+                auto new_base = vsag::Dataset::Make();
+                new_base->NumElements(1)
+                    ->Dim(dim)
+                    ->Float32Vectors(update_vecs.data())
+                    ->Owner(false);
+
+                auto before_update_dist = *index->CalcDistanceById(base + i * dim, ids[i]);
+                auto succ_vec_res = index->UpdateVector(ids[i], new_base);
+                REQUIRE(succ_vec_res.has_value());
+                if (expected_success) {
+                    REQUIRE(succ_vec_res.value());
+                }
+                auto after_update_dist = *index->CalcDistanceById(base + i * dim, ids[i]);
+                REQUIRE(before_update_dist < after_update_dist);
+
+                // old id don't exist
+                auto failed_old_res = index->UpdateVector(ids[i] + 2 * max_id, new_base);
+                REQUIRE(failed_old_res.has_value());
+                REQUIRE(not failed_old_res.value());
+            } else {
+                if (result.value()->GetIds()[0] == ids[i]) {
+                    correct_num[round] += 1;
+                }
+            }
+        }
+    }
+
+    REQUIRE(correct_num[0] == correct_num[1]);
+}
+
+void
 TestIndex::TestContinueAdd(const IndexPtr& index,
                            const TestDatasetPtr& dataset,
                            bool expected_success) {

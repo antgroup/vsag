@@ -349,6 +349,12 @@ public:
     dealNoInEdge(InnerIdType id, int level, int m_curmax, int skip_c);
 
     void
+    updateLabel(LabelType old_label, LabelType new_label);
+
+    void
+    updateVector(LabelType label, const void* data_point);
+
+    void
     removePoint(LabelType label);
 
     InnerIdType
