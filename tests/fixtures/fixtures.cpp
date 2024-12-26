@@ -289,4 +289,17 @@ GetFileSize(const std::string& filename) {
     return static_cast<uint64_t>(file.tellg());
 }
 
+std::vector<std::string>
+SplitString(const std::string& s, char delimiter) {
+    std::vector<std::string> tokens;
+    std::string token;
+    std::stringstream ss(s);
+
+    while (std::getline(ss, token, delimiter)) {
+        tokens.emplace_back(token);
+    }
+
+    return tokens;
+}
+
 }  // namespace fixtures
