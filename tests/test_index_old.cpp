@@ -13,17 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "simd/simd.h"
 #include "test_index.h"
-
-namespace vsag {
-
-extern float
-L2Sqr(const void* pVect1v, const void* pVect2v, const void* qty_ptr);
-
-extern float
-InnerProduct(const void* pVect1v, const void* pVect2v, const void* qty_ptr);
-
-}  // namespace vsag
 
 TEST_CASE("hnsw int8 recall", "[ft][index][hnsw]") {
     vsag::Options::Instance().logger()->SetLevel(vsag::Logger::Level::kDEBUG);

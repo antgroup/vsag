@@ -34,6 +34,14 @@ float
 Normalize(const float* from, float* to, uint64_t dim);
 }  // namespace sse
 
+namespace avx {
+void
+DivScalar(const float* from, float* to, uint64_t dim, float scalar);
+
+float
+Normalize(const float* from, float* to, uint64_t dim);
+}  // namespace avx
+
 namespace avx2 {
 void
 DivScalar(const float* from, float* to, uint64_t dim, float scalar);

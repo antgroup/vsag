@@ -106,7 +106,7 @@ public:
     tl::expected<float, Error>
     CalculateDistanceById(const float* vector, int64_t id) const;
 
-    tl::expected<bool, Error>
+    bool
     CheckFeature(IndexFeature feature) const;
 
     inline void
@@ -183,6 +183,10 @@ private:
 
     void
     init_features();
+
+    Vector<DatasetPtr>
+    split_dataset_by_duplicate_label(const DatasetPtr& dataset,
+                                     std::vector<LabelType>& failed_ids) const;
 
 private:
     FlattenInterfacePtr basic_flatten_codes_{nullptr};

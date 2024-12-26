@@ -29,6 +29,10 @@ GetSQ8ComputeIP() {
 #if defined(ENABLE_AVX2)
         return avx2::SQ8ComputeIP;
 #endif
+    } else if (SimdStatus::SupportAVX()) {
+#if defined(ENABLE_AVX)
+        return avx::SQ8ComputeIP;
+#endif
     } else if (SimdStatus::SupportSSE()) {
 #if defined(ENABLE_SSE)
         return sse::SQ8ComputeIP;
@@ -47,6 +51,10 @@ GetSQ8ComputeL2Sqr() {
     } else if (SimdStatus::SupportAVX2()) {
 #if defined(ENABLE_AVX2)
         return avx2::SQ8ComputeL2Sqr;
+#endif
+    } else if (SimdStatus::SupportAVX()) {
+#if defined(ENABLE_AVX)
+        return avx::SQ8ComputeL2Sqr;
 #endif
     } else if (SimdStatus::SupportSSE()) {
 #if defined(ENABLE_SSE)
@@ -67,6 +75,10 @@ GetSQ8ComputeCodesIP() {
 #if defined(ENABLE_AVX2)
         return avx2::SQ8ComputeCodesIP;
 #endif
+    } else if (SimdStatus::SupportAVX()) {
+#if defined(ENABLE_AVX)
+        return avx::SQ8ComputeCodesIP;
+#endif
     } else if (SimdStatus::SupportSSE()) {
 #if defined(ENABLE_SSE)
         return sse::SQ8ComputeCodesIP;
@@ -85,6 +97,10 @@ GetSQ8ComputeCodesL2Sqr() {
     } else if (SimdStatus::SupportAVX2()) {
 #if defined(ENABLE_AVX2)
         return avx2::SQ8ComputeCodesL2Sqr;
+#endif
+    } else if (SimdStatus::SupportAVX()) {
+#if defined(ENABLE_AVX)
+        return avx::SQ8ComputeCodesL2Sqr;
 #endif
     } else if (SimdStatus::SupportSSE()) {
 #if defined(ENABLE_SSE)

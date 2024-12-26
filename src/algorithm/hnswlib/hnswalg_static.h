@@ -287,21 +287,21 @@ public:
                             CompareByFirst>
             candidateSet;
 
-        float lowerBound;
+        float lower_bound;
         if (!isMarkedDeleted(ep_id)) {
             float dist = fstdistfunc_(data_point, getDataByInternalId(ep_id), dist_func_param_);
             top_candidates.emplace(dist, ep_id);
-            lowerBound = dist;
+            lower_bound = dist;
             candidateSet.emplace(-dist, ep_id);
         } else {
-            lowerBound = std::numeric_limits<float>::max();
-            candidateSet.emplace(-lowerBound, ep_id);
+            lower_bound = std::numeric_limits<float>::max();
+            candidateSet.emplace(-lower_bound, ep_id);
         }
         visited_array[ep_id] = visited_array_tag;
 
         while (!candidateSet.empty()) {
             std::pair<float, tableint> curr_el_pair = candidateSet.top();
-            if ((-curr_el_pair.first) > lowerBound && top_candidates.size() == ef_construction_) {
+            if ((-curr_el_pair.first) > lower_bound && top_candidates.size() == ef_construction_) {
                 break;
             }
             candidateSet.pop();
@@ -343,7 +343,7 @@ public:
                 char* currObj1 = (getDataByInternalId(candidate_id));
 
                 float dist1 = fstdistfunc_(data_point, currObj1, dist_func_param_);
-                if (top_candidates.size() < ef_construction_ || lowerBound > dist1) {
+                if (top_candidates.size() < ef_construction_ || lower_bound > dist1) {
                     candidateSet.emplace(-dist1, candidate_id);
                     auto tmp_data_ptr4 = getDataByInternalId(candidateSet.top().second);
 #ifdef USE_SSE
@@ -357,7 +357,7 @@ public:
                         top_candidates.pop();
 
                     if (!top_candidates.empty())
-                        lowerBound = top_candidates.top().first;
+                        lower_bound = top_candidates.top().first;
                 }
             }
         }
@@ -396,20 +396,20 @@ public:
                             CompareByFirst>
             candidate_set;
 
-        float lowerBound;
-        float lowerBoundcan;
+        float lower_bound;
+        float lower_boundcan;
         // Insert the entry point to the result and search set with its exact distance as a key.
         if (!has_deletions || !isMarkedDeleted(ep_id)) {
             float dist = fstdistfunc_(data_point, getDataByInternalId(ep_id), dist_func_param_);
-            lowerBound = dist;
-            lowerBoundcan = dist;
+            lower_bound = dist;
+            lower_boundcan = dist;
             answers.emplace(dist, ep_id);
             top_candidates.emplace(dist, ep_id);
             candidate_set.emplace(-dist, ep_id);
         } else {
-            lowerBound = std::numeric_limits<float>::max();
-            lowerBoundcan = std::numeric_limits<float>::max();
-            candidate_set.emplace(-lowerBound, ep_id);
+            lower_bound = std::numeric_limits<float>::max();
+            lower_boundcan = std::numeric_limits<float>::max();
+            candidate_set.emplace(-lower_bound, ep_id);
         }
 
         visited_array[ep_id] = visited_array_tag;
@@ -461,14 +461,14 @@ public:
                         answers.emplace(dist, candidate_id);
                     }
                     if (!answers.empty())
-                        lowerBound = answers.top().first;
+                        lower_bound = answers.top().first;
                     if (!top_candidates.empty())
-                        lowerBoundcan = top_candidates.top().first;
+                        lower_boundcan = top_candidates.top().first;
                 }
                 // Otherwise, conduct DCO with Quantization Distance wrt the N_ef th NN.
                 else {
-                    if (res[j] - node_cluster_dist_[candidate_id] > lowerBound) {
-                        if (top_candidates.size() < ef || lowerBoundcan > res[j]) {
+                    if (res[j] - node_cluster_dist_[candidate_id] > lower_bound) {
+                        if (top_candidates.size() < ef || lower_boundcan > res[j]) {
                             top_candidates.emplace(res[j], candidate_id);
                             candidate_set.emplace(-res[j], candidate_id);
                         }
@@ -476,7 +476,7 @@ public:
                             top_candidates.pop();
                         }
                         if (!top_candidates.empty())
-                            lowerBoundcan = top_candidates.top().first;
+                            lower_boundcan = top_candidates.top().first;
                     } else {
                         char* currObj1 = (getDataByInternalId(candidate_id));
                         float dist = fstdistfunc_(data_point, currObj1, dist_func_param_);
@@ -491,9 +491,9 @@ public:
                             answers.pop();
 
                         if (!answers.empty())
-                            lowerBound = answers.top().first;
+                            lower_bound = answers.top().first;
                         if (!top_candidates.empty())
-                            lowerBoundcan = top_candidates.top().first;
+                            lower_boundcan = top_candidates.top().first;
                     }
                 }
             }
@@ -532,20 +532,20 @@ public:
                             CompareByFirst>
             candidate_set;
 
-        float lowerBound;
-        float lowerBoundcan;
+        float lower_bound;
+        float lower_boundcan;
         // Insert the entry point to the result and search set with its exact distance as a key.
         if (!has_deletions || !isMarkedDeleted(ep_id)) {
             float dist = fstdistfunc_(data_point, getDataByInternalId(ep_id), dist_func_param_);
-            lowerBound = dist;
-            lowerBoundcan = dist;
+            lower_bound = dist;
+            lower_boundcan = dist;
             answers.emplace(dist, ep_id);
             top_candidates.emplace(dist, ep_id);
             candidate_set.emplace(-dist, ep_id);
         } else {
-            lowerBound = std::numeric_limits<float>::max();
-            lowerBoundcan = std::numeric_limits<float>::max();
-            candidate_set.emplace(-lowerBound, ep_id);
+            lower_bound = std::numeric_limits<float>::max();
+            lower_boundcan = std::numeric_limits<float>::max();
+            candidate_set.emplace(-lower_bound, ep_id);
         }
 
         visited_array[ep_id] = visited_array_tag;
@@ -587,13 +587,13 @@ public:
                             answers.emplace(dist, candidate_id);
                         }
                         if (!answers.empty())
-                            lowerBound = answers.top().first;
+                            lower_bound = answers.top().first;
                         if (!top_candidates.empty())
-                            lowerBoundcan = top_candidates.top().first;
+                            lower_boundcan = top_candidates.top().first;
                     } else {
                         float app_dist = naive_product_map_dist(candidate_id, dist_map);
-                        if (app_dist - node_cluster_dist_[candidate_id] > lowerBound) {
-                            if (top_candidates.size() < ef || lowerBoundcan > app_dist) {
+                        if (app_dist - node_cluster_dist_[candidate_id] > lower_bound) {
+                            if (top_candidates.size() < ef || lower_boundcan > app_dist) {
                                 top_candidates.emplace(app_dist, candidate_id);
                                 candidate_set.emplace(-app_dist, candidate_id);
                             }
@@ -601,7 +601,7 @@ public:
                                 top_candidates.pop();
                             }
                             if (!top_candidates.empty())
-                                lowerBoundcan = top_candidates.top().first;
+                                lower_boundcan = top_candidates.top().first;
                         } else {
                             char* currObj1 = (getDataByInternalId(candidate_id));
                             float dist = fstdistfunc_(data_point, currObj1, dist_func_param_);
@@ -616,9 +616,9 @@ public:
                                 answers.pop();
 
                             if (!answers.empty())
-                                lowerBound = answers.top().first;
+                                lower_bound = answers.top().first;
                             if (!top_candidates.empty())
-                                lowerBoundcan = top_candidates.top().first;
+                                lower_boundcan = top_candidates.top().first;
                         }
                     }
                 }
@@ -649,17 +649,17 @@ public:
     //                            CompareByFirst>
     //            candidate_set;
     //
-    //        float lowerBound;
+    //        float lower_bound;
     //        if ((!has_deletions || !isMarkedDeleted(ep_id)) &&
     //            ((!isIdAllowed) || (*isIdAllowed)(getExternalLabel(ep_id)))) {
     //            float dist = fstdistfunc_(data_point, getDataByInternalId(ep_id), dist_func_param_);
-    //            lowerBound = dist;
+    //            lower_bound = dist;
     //            if (dist < radius)
     //                top_candidates.emplace(dist, ep_id);
     //            candidate_set.emplace(-dist, ep_id);
     //        } else {
-    //            lowerBound = std::numeric_limits<float>::max();
-    //            candidate_set.emplace(-lowerBound, ep_id);
+    //            lower_bound = std::numeric_limits<float>::max();
+    //            candidate_set.emplace(-lower_bound, ep_id);
     //        }
     //
     //        visited_array[ep_id] = visited_array_tag;
@@ -703,7 +703,7 @@ public:
     //                    char* currObj1 = (getDataByInternalId(candidate_id));
     //                    float dist = fstdistfunc_(data_point, currObj1, dist_func_param_);
     //
-    //                    if (visited_count < ef_ || dist < radius || lowerBound > dist) {
+    //                    if (visited_count < ef_ || dist < radius || lower_bound > dist) {
     //                        candidate_set.emplace(-dist, candidate_id);
     //#ifdef USE_SSE
     //                        _mm_prefetch(data_level0_memory_ +
@@ -718,7 +718,7 @@ public:
     //                                top_candidates.emplace(dist, candidate_id);
     //
     //                        if (!top_candidates.empty())
-    //                            lowerBound = top_candidates.top().first;
+    //                            lower_bound = top_candidates.top().first;
     //                    }
     //                }
     //            }

@@ -219,7 +219,7 @@ HNSW::knn_search(const DatasetPtr& query,
 
         // perform search
         int64_t original_k = k;
-        std::priority_queue<std::pair<float, size_t>> results;
+        std::priority_queue<std::pair<float, LabelType>> results;
         double time_cost;
         try {
             Timer t(time_cost);
@@ -347,7 +347,7 @@ HNSW::range_search(const DatasetPtr& query,
         auto params = HnswSearchParameters::FromJson(parameters);
 
         // perform search
-        std::priority_queue<std::pair<float, size_t>> results;
+        std::priority_queue<std::pair<float, LabelType>> results;
         double time_cost;
         try {
             std::shared_lock lock(rw_mutex_);
@@ -597,6 +597,51 @@ HNSW::GetStats() const {
         }
     }
     return j.dump();
+}
+
+tl::expected<bool, Error>
+HNSW::update_id(int64_t old_id, int64_t new_id) {
+    if (use_static_) {
+        LOG_ERROR_AND_RETURNS(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                              "static hnsw does not support update");
+    }
+
+    try {
+        // note that the validation of old_id is handled within updateLabel.
+        std::reinterpret_pointer_cast<hnswlib::HierarchicalNSW>(alg_hnsw_)->updateLabel(old_id,
+                                                                                        new_id);
+    } catch (const std::runtime_error& e) {
+        spdlog::warn(
+            "update error for replace old_id {} to new_id {}: {}", old_id, new_id, e.what());
+        return false;
+    }
+
+    return true;
+}
+
+tl::expected<bool, Error>
+HNSW::update_vector(int64_t id, const DatasetPtr& new_base, bool need_fine_tune) {
+    // TODO(ZXY): implement need_fine_tune to allow update with distant vector
+    if (use_static_) {
+        LOG_ERROR_AND_RETURNS(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                              "static hnsw does not support update");
+    }
+
+    try {
+        // the validation of the new vector
+        void* new_base_vec = nullptr;
+        size_t data_size = 0;
+        get_vectors(new_base, &new_base_vec, &data_size);
+
+        // note that the validation of old_id is handled within updatePoint.
+        std::reinterpret_pointer_cast<hnswlib::HierarchicalNSW>(alg_hnsw_)->updateVector(
+            id, new_base_vec);
+    } catch (const std::runtime_error& e) {
+        spdlog::warn("update error for replace vector of id {}: {}", id, e.what());
+        return false;
+    }
+
+    return true;
 }
 
 tl::expected<bool, Error>

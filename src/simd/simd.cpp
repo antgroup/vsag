@@ -19,32 +19,8 @@
 
 namespace vsag {
 
-float (*L2SqrSIMD16Ext)(const void*, const void*, const void*);
-float (*L2SqrSIMD16ExtResiduals)(const void*, const void*, const void*);
-float (*L2SqrSIMD4Ext)(const void*, const void*, const void*);
-float (*L2SqrSIMD4ExtResiduals)(const void*, const void*, const void*);
-
-float (*InnerProductSIMD4Ext)(const void*, const void*, const void*);
-float (*InnerProductSIMD16Ext)(const void*, const void*, const void*);
-float (*InnerProductDistanceSIMD16Ext)(const void*, const void*, const void*);
-float (*InnerProductDistanceSIMD16ExtResiduals)(const void*, const void*, const void*);
-float (*InnerProductDistanceSIMD4Ext)(const void*, const void*, const void*);
-float (*InnerProductDistanceSIMD4ExtResiduals)(const void*, const void*, const void*);
-
 SimdStatus
 setup_simd() {
-    L2SqrSIMD16Ext = L2Sqr;
-    L2SqrSIMD16ExtResiduals = L2Sqr;
-    L2SqrSIMD4Ext = L2Sqr;
-    L2SqrSIMD4ExtResiduals = L2Sqr;
-
-    InnerProductSIMD4Ext = InnerProduct;
-    InnerProductSIMD16Ext = InnerProduct;
-    InnerProductDistanceSIMD16Ext = InnerProductDistance;
-    InnerProductDistanceSIMD16ExtResiduals = InnerProductDistance;
-    InnerProductDistanceSIMD4Ext = InnerProductDistance;
-    InnerProductDistanceSIMD4ExtResiduals = InnerProductDistance;
-
     SimdStatus ret;
 
     if (cpuinfo_has_x86_sse()) {
@@ -52,17 +28,6 @@ setup_simd() {
 #ifndef ENABLE_SSE
     }
 #else
-        L2SqrSIMD16Ext = L2SqrSIMD16ExtSSE;
-        L2SqrSIMD16ExtResiduals = L2SqrSIMD16ExtResidualsSSE;
-        L2SqrSIMD4Ext = L2SqrSIMD4ExtSSE;
-        L2SqrSIMD4ExtResiduals = L2SqrSIMD4ExtResidualsSSE;
-
-        InnerProductSIMD4Ext = InnerProductSIMD4ExtSSE;
-        InnerProductSIMD16Ext = InnerProductSIMD16ExtSSE;
-        InnerProductDistanceSIMD16Ext = InnerProductDistanceSIMD16ExtSSE;
-        InnerProductDistanceSIMD16ExtResiduals = InnerProductDistanceSIMD16ExtResidualsSSE;
-        InnerProductDistanceSIMD4Ext = InnerProductDistanceSIMD4ExtSSE;
-        InnerProductDistanceSIMD4ExtResiduals = InnerProductDistanceSIMD4ExtResidualsSSE;
     }
     ret.dist_support_sse = true;
 #endif
@@ -72,9 +37,6 @@ setup_simd() {
 #ifndef ENABLE_AVX
     }
 #else
-        L2SqrSIMD16Ext = L2SqrSIMD16ExtAVX;
-        InnerProductSIMD4Ext = InnerProductSIMD4ExtAVX;
-        InnerProductSIMD16Ext = InnerProductSIMD16ExtAVX;
     }
     ret.dist_support_avx = true;
 #endif
@@ -97,71 +59,33 @@ setup_simd() {
 #ifndef ENABLE_AVX512
     }
 #else
-        L2SqrSIMD16Ext = L2SqrSIMD16ExtAVX512;
-        InnerProductSIMD16Ext = InnerProductSIMD16ExtAVX512;
     }
     ret.dist_support_avx512f = true;
     ret.dist_support_avx512dq = true;
     ret.dist_support_avx512bw = true;
     ret.dist_support_avx512vl = true;
 #endif
-
     return ret;
 }
 
 DistanceFunc
 GetInnerProductDistanceFunc(size_t dim) {
-    if (dim % 16 == 0) {
-        return vsag::InnerProductDistanceSIMD16Ext;
-    } else if (dim % 4 == 0) {
-        return vsag::InnerProductDistanceSIMD4Ext;
-    } else if (dim > 16) {
-        return vsag::InnerProductDistanceSIMD16ExtResiduals;
-    } else if (dim > 4) {
-        return vsag::InnerProductDistanceSIMD4ExtResiduals;
-    } else {
-        return vsag::InnerProductDistance;
-    }
+    return vsag::InnerProductDistance;
 }
 
 DistanceFunc
 GetINT8InnerProductDistanceFunc(size_t dim) {
-    if (SimdStatus::SupportAVX512()) {
-#ifdef ENABLE_AVX512
-        if (dim > 32) {
-            return vsag::INT8InnerProduct512ResidualsAVX512Distance;
-        } else if (dim > 16) {
-            return vsag::INT8InnerProduct256ResidualsAVX512Distance;
-        }
-#endif
-    }
     return vsag::INT8InnerProductDistance;
 }
 
 PQDistanceFunc
 GetPQDistanceFunc() {
-#ifdef ENABLE_AVX
-    return PQDistanceAVXFloat256;
-#endif
-#ifdef ENABLE_SSE
-    return PQDistanceSSEFloat256;
-#endif
-    return PQDistanceFloat256;
+    return vsag::PQDistanceFloat256;
 }
 
 DistanceFunc
 GetL2DistanceFunc(size_t dim) {
-    if (dim % 16 == 0) {
-        return vsag::L2SqrSIMD16Ext;
-    } else if (dim % 4 == 0) {
-        return vsag::L2SqrSIMD4Ext;
-    } else if (dim > 16) {
-        return vsag::L2SqrSIMD16ExtResiduals;
-    } else if (dim > 4) {
-        return vsag::L2SqrSIMD4ExtResiduals;
-    } else {
-        return vsag::L2Sqr;
-    }
+    return vsag::L2Sqr;
 }
 
 }  // namespace vsag
