@@ -1138,7 +1138,7 @@ HierarchicalNSW::dealNoInEdge(InnerIdType id, int level, int m_curmax, int skip_
 
 void
 HierarchicalNSW::updateVector(LabelType label, const void* data_point) {
-    std::unique_lock<std::mutex> lock(global_);
+    std::unique_lock<std::mutex> lock(label_lookup_lock_);
     auto iter = label_lookup_.find(label);
     if (iter == label_lookup_.end()) {
         throw std::runtime_error(fmt::format("no label {} in HNSW", label));
@@ -1154,7 +1154,7 @@ HierarchicalNSW::updateVector(LabelType label, const void* data_point) {
 
 void
 HierarchicalNSW::updateLabel(LabelType old_label, LabelType new_label) {
-    std::unique_lock<std::mutex> lock(global_);
+    std::unique_lock<std::mutex> lock(label_lookup_lock_);
     auto iter_old = label_lookup_.find(old_label);
     auto iter_new = label_lookup_.find(new_label);
     if (iter_old == label_lookup_.end()) {
