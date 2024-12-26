@@ -289,7 +289,7 @@ TestIndex::TestSearchWithNan(const TestIndex::IndexPtr& index,
         cur_recall += static_cast<float>(val) / static_cast<float>(gt_topK);
     }
     float knn_recall = cur_recall / (query_count / 2);
-    REQUIRE(knn_recall > recall);
+    REQUIRE(knn_recall > expected_recall);
 
     cur_recall = 0.0f;
     const auto& radius = dataset->range_radius_;
@@ -312,7 +312,7 @@ TestIndex::TestSearchWithNan(const TestIndex::IndexPtr& index,
         cur_recall += static_cast<float>(val) / static_cast<float>(gt_topK);
     }
     float range_recall = cur_recall / (query_count / 2);
-    REQUIRE(range_recall > recall);
+    REQUIRE(range_recall > expected_recall);
 
     for (auto i = (int)(query_count * 0.9); i < query_count; ++i) {
         auto query = vsag::Dataset::Make();
