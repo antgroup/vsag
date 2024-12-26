@@ -149,6 +149,7 @@ public:
 
     inline LabelType
     getExternalLabel(InnerIdType internal_id) const {
+        std::shared_lock lock(link_list_locks_[internal_id]);
         LabelType value;
         std::memcpy(&value,
                     data_level0_memory_->GetElementPtr(internal_id, label_offset_),
@@ -158,12 +159,10 @@ public:
 
     inline void
     setExternalLabel(InnerIdType internal_id, LabelType label) const {
-        *(LabelType*)(data_level0_memory_->GetElementPtr(internal_id, label_offset_)) = label;
-    }
-
-    inline LabelType*
-    getExternalLabeLp(InnerIdType internal_id) const {
-        return (LabelType*)(data_level0_memory_->GetElementPtr(internal_id, label_offset_));
+        std::unique_lock lock(link_list_locks_[internal_id]);
+        std::memcpy(data_level0_memory_->GetElementPtr(internal_id, label_offset_),
+                    &label,
+                    sizeof(LabelType));
     }
 
     inline reverselinklist&
