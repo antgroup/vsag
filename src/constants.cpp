@@ -104,5 +104,6 @@ const char* const HGRAPH_GRAPH_MAX_DEGREE = "max_degree";
 const char* const HGRAPH_BUILD_EF_CONSTRUCTION = "ef_construction";
 const char* const HGRAPH_INIT_CAPACITY = "hgraph_init_capacity";
 const char* const HGRAPH_BUILD_THREAD_COUNT = "build_thread_count";
+const char* const HGRAPH_PRECISE_QUANTIZATION_TYPE = "precise_quantization_type";
 
 };  // namespace vsag

@@ -26,6 +26,7 @@ namespace vsag {
 static const std::unordered_map<std::string, std::vector<std::string>> EXTERNAL_MAPPING = {
     {HGRAPH_USE_REORDER, {HGRAPH_USE_REORDER_KEY}},
     {HGRAPH_BASE_QUANTIZATION_TYPE, {HGRAPH_BASE_CODES_KEY, QUANTIZATION_TYPE_KEY}},
+    {HGRAPH_PRECISE_QUANTIZATION_TYPE, {HGRAPH_PRECISE_CODES_KEY, QUANTIZATION_TYPE_KEY}},
     {HGRAPH_GRAPH_MAX_DEGREE, {HGRAPH_GRAPH_KEY, GRAPH_PARAMS_KEY, GRAPH_PARAM_MAX_DEGREE}},
     {HGRAPH_BUILD_EF_CONSTRUCTION, {BUILD_PARAMS_KEY, BUILD_EF_CONSTRUCTION}},
     {HGRAPH_INIT_CAPACITY, {HGRAPH_GRAPH_KEY, GRAPH_PARAMS_KEY, GRAPH_PARAM_INIT_MAX_CAPACITY}},
@@ -59,12 +60,12 @@ static const std::string HGRAPH_PARAMS_TEMPLATE =
                 "nbits": 8
             }
         },
-        "precise_codes": {
-            "{IO_TYPE_KEY}": "aio_ssd",
+        "{HGRAPH_PRECISE_CODES_KEY}": {
+            "{IO_TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
             "{IO_PARAMS_KEY}": {},
             "codes_type": "flatten_codes",
             "codes_param": {},
-            "{QUANTIZATION_TYPE_KEY}": "{QUANTIZATION_TYPE_VALUE_SQ8}",
+            "{QUANTIZATION_TYPE_KEY}": "{QUANTIZATION_TYPE_VALUE_FP32}",
             "{QUANTIZATION_PARAMS_KEY}": {}
         },
         "{BUILD_PARAMS_KEY}": {
