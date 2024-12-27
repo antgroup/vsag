@@ -225,4 +225,7 @@ generate_one_dataset(int64_t dim, uint64_t count);
 
 uint64_t
 GetFileSize(const std::string& filename);
+
+std::vector<std::string>
+SplitString(const std::string& s, char delimiter);
 }  // Namespace fixtures

@@ -189,6 +189,10 @@ HGraph::KnnSearch(const DatasetPtr& query,
                                                     this->basic_flatten_codes_,
                                                     search_param);
 
+        if (use_reorder_) {
+            this->reorder(query->GetFloat32Vectors(), this->high_precise_codes_, search_result, k);
+        }
+
         while (search_result.size() > k) {
             search_result.pop();
         }
@@ -467,6 +471,11 @@ HGraph::RangeSearch(const DatasetPtr& query,
                                                     this->bottom_graph_,
                                                     this->basic_flatten_codes_,
                                                     search_param);
+        if (use_reorder_) {
+            this->reorder(
+                query->GetFloat32Vectors(), this->high_precise_codes_, search_result, limited_size);
+        }
+
         if (limited_size > 0) {
             while (search_result.size() > limited_size) {
                 search_result.pop();
@@ -792,27 +801,30 @@ HGraph::add_one_point(const float* data, int level, InnerIdType inner_id) {
     };
 
     std::lock_guard cur_lock(this->neighbors_mutex_[inner_id]);
-
+    auto flatten_codes = basic_flatten_codes_;
+    if (use_reorder_) {
+        flatten_codes = high_precise_codes_;
+    }
     for (auto j = max_level_ - 1; j > level; --j) {
-        result = search_one_graph(data, route_graphs_[j], basic_flatten_codes_, param);
+        result = search_one_graph(data, route_graphs_[j], flatten_codes, param);
         param.ep_ = result.top().second;
     }
 
     param.ef_ = this->ef_construct_;
     for (auto j = level; j >= 0; --j) {
         if (route_graphs_[j]->TotalCount() != 0) {
-            result = search_one_graph(data, route_graphs_[j], basic_flatten_codes_, param);
+            result = search_one_graph(data, route_graphs_[j], flatten_codes, param);
             param.ep_ = this->mutually_connect_new_element(
-                inner_id, result, route_graphs_[j], basic_flatten_codes_, false);
+                inner_id, result, route_graphs_[j], flatten_codes, false);
         } else {
             route_graphs_[j]->InsertNeighborsById(inner_id, Vector<InnerIdType>(allocator_));
         }
         route_graphs_[j]->IncreaseTotalCount(1);
     }
     if (bottom_graph_->TotalCount() != 0) {
-        result = search_one_graph(data, this->bottom_graph_, basic_flatten_codes_, param);
+        result = search_one_graph(data, this->bottom_graph_, flatten_codes, param);
         this->mutually_connect_new_element(
-            inner_id, result, this->bottom_graph_, basic_flatten_codes_, false);
+            inner_id, result, this->bottom_graph_, flatten_codes, false);
     } else {
         bottom_graph_->InsertNeighborsById(inner_id, Vector<InnerIdType>(allocator_));
     }
@@ -915,6 +927,35 @@ HGraph::split_dataset_by_duplicate_label(const DatasetPtr& dataset,
         failed_id = labels[failed_id];
     }
     return return_datasets;
+}
+
+void
+HGraph::reorder(const float* query,
+                const FlattenInterfacePtr& flatten_interface,
+                MaxHeap& candidate_heap,
+                int64_t k) const {
+    uint64_t size = candidate_heap.size();
+    if (k <= 0) {
+        k = static_cast<int64_t>(size);
+    }
+    Vector<InnerIdType> ids(size, allocator_);
+    Vector<float> dists(size, allocator_);
+    uint64_t idx = 0;
+    while (not candidate_heap.empty()) {
+        ids[idx] = candidate_heap.top().second;
+        ++idx;
+        candidate_heap.pop();
+    }
+    auto computer = flatten_interface->FactoryComputer(query);
+    flatten_interface->Query(dists.data(), computer, ids.data(), size);
+    for (uint64_t i = 0; i < size; ++i) {
+        if (candidate_heap.size() < k or dists[i] <= candidate_heap.top().first) {
+            candidate_heap.emplace(dists[i], ids[i]);
+        }
+        if (candidate_heap.size() > k) {
+            candidate_heap.pop();
+        }
+    }
 }
 
 }  // namespace vsag

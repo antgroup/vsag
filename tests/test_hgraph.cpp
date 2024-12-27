@@ -30,7 +30,7 @@ public:
     static std::string
     GenerateHGraphBuildParametersString(const std::string& metric_type,
                                         int64_t dim,
-                                        const std::string& base_quantization_type = "sq8",
+                                        const std::string& quantization_str = "sq8",
                                         const int thread_count = 5);
     static TestDatasetPool pool;
 
@@ -44,6 +44,9 @@ public:
                 "ef_search": {}
             }}
         }})";
+
+    const std::vector<std::pair<std::string, float>> test_cases = {
+        {"sq8_uniform,fp32", 0.98}, {"sq8", 0.96}, {"fp32", 0.99}, {"sq8_uniform", 0.95}};
 };
 
 TestDatasetPool HgraphTestIndex::pool{};
@@ -52,9 +55,27 @@ std::vector<int> HgraphTestIndex::dims = fixtures::get_common_used_dims(2, Rando
 std::string
 HgraphTestIndex::GenerateHGraphBuildParametersString(const std::string& metric_type,
                                                      int64_t dim,
-                                                     const std::string& base_quantization_type,
+                                                     const std::string& quantization_str,
                                                      const int thread_count) {
-    constexpr auto parameter_temp = R"(
+    std::string build_parameters_str;
+
+    constexpr auto parameter_temp_reorder = R"(
+    {{
+        "dtype": "float32",
+        "metric_type": "{}",
+        "dim": {},
+        "index_param": {{
+            "use_reorder": {},
+            "base_quantization_type": "{}",
+            "max_degree": 96,
+            "ef_construction": 500,
+            "build_thread_count": {},
+            "precise_quantization_type": "{}"
+        }}
+    }}
+    )";
+
+    constexpr auto parameter_temp_origin = R"(
     {{
         "dtype": "float32",
         "metric_type": "{}",
@@ -67,8 +88,23 @@ HgraphTestIndex::GenerateHGraphBuildParametersString(const std::string& metric_t
         }}
     }}
     )";
-    std::string build_parameters_str =
-        fmt::format(parameter_temp, metric_type, dim, base_quantization_type, thread_count);
+
+    auto strs = fixtures::SplitString(quantization_str, ',');
+    std::string high_quantizer_str;
+    auto& base_quantizer_str = strs[0];
+    if (strs.size() > 1) {
+        high_quantizer_str = strs[1];
+        build_parameters_str = fmt::format(parameter_temp_reorder,
+                                           metric_type,
+                                           dim,
+                                           true, /* reorder */
+                                           base_quantizer_str,
+                                           thread_count,
+                                           high_quantizer_str);
+    } else {
+        build_parameters_str =
+            fmt::format(parameter_temp_origin, metric_type, dim, base_quantizer_str, thread_count);
+    }
     return build_parameters_str;
 }
 }  // namespace fixtures
@@ -189,8 +225,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex,
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
     auto metric_type = GENERATE("l2", "ip", "cosine");
-    std::vector<std::pair<std::string, float>> test_cases = {
-        {"sq8", 0.96}, {"fp32", 0.99}, {"sq8_uniform", 0.95}};
+
     const std::string name = "hgraph";
     auto search_param = fmt::format(search_param_tmp, 200);
     for (auto& dim : dims) {
@@ -225,8 +260,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex, "HGraph Build", "[ft][hg
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
     auto metric_type = GENERATE("l2", "ip", "cosine");
-    std::vector<std::pair<std::string, float>> test_cases = {
-        {"sq8", 0.96}, {"fp32", 0.99}, {"sq8_uniform", 0.95}};
+
     const std::string name = "hgraph";
     auto search_param = fmt::format(search_param_tmp, 200);
     for (auto& dim : dims) {
@@ -261,8 +295,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex, "HGraph Add", "[ft][hgra
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
     auto metric_type = GENERATE("l2", "ip", "cosine");
-    std::vector<std::pair<std::string, float>> test_cases = {
-        {"sq8", 0.96}, {"fp32", 0.99}, {"sq8_uniform", 0.95}};
+
     const std::string name = "hgraph";
     auto search_param = fmt::format(search_param_tmp, 200);
     for (auto& dim : dims) {
@@ -297,8 +330,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex, "HGraph Concurrent Add",
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
     auto metric_type = GENERATE("l2", "ip", "cosine");
-    std::vector<std::pair<std::string, float>> test_cases = {
-        {"sq8", 0.96}, {"fp32", 0.99}, {"sq8_uniform", 0.95}};
+
     const std::string name = "hgraph";
     auto search_param = fmt::format(search_param_tmp, 200);
     for (auto& dim : dims) {
@@ -382,8 +414,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex, "HGraph Duplicate Build"
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
     auto metric_type = GENERATE("l2", "ip", "cosine");
-    std::vector<std::pair<std::string, float>> test_cases = {
-        {"sq8", 0.96}, {"fp32", 0.99}, {"sq8_uniform", 0.95}};
+
     const std::string name = "hgraph";
     auto search_param = fmt::format(search_param_tmp, 200);
     for (auto& dim : dims) {
