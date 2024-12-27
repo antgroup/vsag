@@ -88,8 +88,8 @@ test_cov: cov            ## Build and run unit tests with code coverage enabled.
 	./build/tests/unittests -d yes ${UT_FILTER} --allow-running-no-tests ${UT_SHARD}
 	./build/tests/functests -d yes ${UT_FILTER} --allow-running-no-tests ${UT_SHARD}
 	./build/mockimpl/tests_mockimpl -d yes ${UT_FILTER} --allow-running-no-tests ${UT_SHARD}
-	bash scripts/aci/collect_cpp_coverage.sh
-	genhtml --output-directory testresult/coverage/html testresult/coverage/coverage.info --ignore-errors inconsistent,inconsistent
+	bash scripts/collect_cpp_coverage.sh
+	genhtml --output-directory coverage/coverage/html coverage/coverage.info --ignore-errors inconsistent,inconsistent
 
 .PHONY: clean
 clean:                   ## Clear build/ directory.
