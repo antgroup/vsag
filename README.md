@@ -1,4 +1,5 @@
-# VSAG
+<div align="center">
+  <h1><img alt="vsag-pages" src="docs/banner.svg" width=500/></h1>
 
 ![CircleCI](https://img.shields.io/circleci/build/github/antgroup/vsag?logo=circleci&label=CircleCI)
 ![GitHub License](https://img.shields.io/github/license/antgroup/vsag)
@@ -9,6 +10,10 @@
 [![PyPI Downloads](https://static.pepy.tech/badge/pyvsag)](https://pepy.tech/projects/pyvsag)
 [![PyPI Downloads](https://static.pepy.tech/badge/pyvsag/month)](https://pepy.tech/projects/pyvsag)
 [![PyPI Downloads](https://static.pepy.tech/badge/pyvsag/week)](https://pepy.tech/projects/pyvsag)
+</div>
+
+
+## What is VSAG
 
 VSAG is a vector indexing library used for similarity search. The indexing algorithm allows users to search through various sizes of vector sets, especially those that cannot fit in memory. The library also provides methods for generating parameters based on vector dimensions and data scale, allowing developers to use it without understanding the algorithm’s principles. VSAG is written in C++ and provides a Python wrapper package called [pyvsag](https://pypi.org/project/pyvsag/).
 
@@ -79,21 +84,17 @@ Thrive together in VSAG community with users and developers from all around the 
 - Follow us on [Weixin Official Accounts](./docs/weixin-qr.jpg)（微信公众平台）to get the latest news.
 
 ## Roadmap
-- v0.12 (ETA: Oct. 2024)
-  - introduce datacell as the new index framework
-  - support pluggable scalar quantization(known as SQ) in datacell
-  - implement a new Hierarchical Graph(named HGraph) index based on datacell
-  - support INT8 datatype on HNSW Index
-
-- v0.13 (ETA: Nov. 2024)
+- v0.13 (ETA: Jan. 2025)
+  - introduce new index AllScanIndex that supports brute force search and read raw vector
+  - support in-place update on HNSW
+  - support automatically optimization on Graph
+- v0.14 (ETA: Mar. 2025)
   - support inverted index(be like IVFFlat) based on datacell
-  - introduce pluggable product quantization(known as PQ) in datacell
   - support extrainfo storage within vector
-
-- v0.14 (ETA: Dec. 2024)
   - implement a new MultiIndex that supports efficient pre-filtering on enumerable tags
-  - support automated parameter
+- v0.15 (ETA: Apr. 2025)
   - support sparse vector searching
+  - introduce pluggable product quantization(known as PQ) in datacell
 
 ## Reference
 Reference to cite when you use VSAG in a research paper:
