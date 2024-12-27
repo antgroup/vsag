@@ -68,7 +68,7 @@ public:
     }
 
     DatasetPtr
-    Owner(bool is_owner, Allocator* allocator = nullptr) override {
+    Owner(bool is_owner, Allocator* allocator) override {
         this->owner_ = is_owner;
         this->allocator_ = allocator;
         return shared_from_this();
@@ -76,7 +76,7 @@ public:
 
 public:
     DatasetPtr
-    NumElements(const int64_t num_elements) override {
+    NumElements(int64_t num_elements) override {
         this->data_[NUM_ELEMENTS] = num_elements;
         return shared_from_this();
     }
@@ -91,7 +91,7 @@ public:
     }
 
     DatasetPtr
-    Dim(const int64_t dim) override {
+    Dim(int64_t dim) override {
         this->data_[DIM] = dim;
         return shared_from_this();
     }

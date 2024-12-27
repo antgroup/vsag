@@ -20,18 +20,50 @@
 #include "allocator.h"
 
 namespace vsag {
+/**
+ * @class Resource
+ * @brief A class for managing resources, primarily focused on memory allocation.
+ *
+ * The `Resource` class is designed to handle resources with a specific allocator
+ */
 class Resource {
 public:
-    explicit Resource(Allocator* allocator = nullptr);
+    /**
+     * @brief Constructs a Resource with an optional allocator.
+     *
+     * This constructor initializes a `Resource` with a given allocator. If no allocator
+     * is provided, default allocator will be created and owned by Resource
+     *
+     * @param allocator A outside pointer to an `Allocator` object used for
+     * managing resource allocations.
+     */
+    explicit Resource(Allocator* allocator);
 
+    /**
+     * @brief Constructs a Resource without specifying an allocator.
+     *
+     * Default allocator will be created and owned.
+     */
+    Resource() : Resource(nullptr) {
+    }
+
+    /// Virtual destructor for proper cleanup of derived classes.
     virtual ~Resource() = default;
 
+    /**
+     * @brief Retrieves the allocator associated with this resource.
+     *
+     * This function returns a shared pointer to the `Allocator` associated with this resource,
+     *
+     * @return std::shared_ptr<Allocator> A shared pointer to the allocator.
+     */
     virtual std::shared_ptr<Allocator>
     GetAllocator() {
         return this->allocator;
     }
 
 public:
+    ///< Shared pointer to the allocator associated with this resource.
     std::shared_ptr<Allocator> allocator;
 };
 }  // namespace vsag
