@@ -16,6 +16,7 @@
 
 #include <sstream>
 #include <string>
+#include <utility>
 
 namespace vsag {
 
@@ -43,7 +44,7 @@ enum class ErrorType {
 };
 
 struct Error {
-    Error(ErrorType t, const std::string& msg) : type(t), message(msg) {
+    Error(ErrorType t, std::string msg) : type(t), message(std::move(msg)) {
     }
 
     ErrorType type;
@@ -52,20 +53,20 @@ struct Error {
 
 template <typename T>
 void
-_concate(std::stringstream& ss, const T& value) {
+_concatenate(std::stringstream& ss, const T& value) {
     ss << value;
 }
 
 template <typename T, typename... Args>
 void
-_concate(std::stringstream& ss, const T& value, const Args&... args) {
+_concatenate(std::stringstream& ss, const T& value, const Args&... args) {
     ss << value;
-    _concate(ss, args...);
+    _concatenate(ss, args...);
 }
 
 #define LOG_ERROR_AND_RETURNS(t, ...) \
     std::stringstream ss;             \
-    _concate(ss, __VA_ARGS__);        \
+    _concatenate(ss, __VA_ARGS__);    \
     logger::error(ss.str());          \
     return tl::unexpected(Error(t, ss.str()));
 
