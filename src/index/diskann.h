@@ -243,6 +243,9 @@ private:
 
     mutable std::shared_mutex rw_mutex_;
 
+    IndexCommonParam common_param_;
+    DiskannParameters diskann_params_;
+
 private:  // Request Statistics
     mutable std::mutex stats_mutex_;
     std::shared_ptr<SafeThreadPool> pool_;

@@ -69,6 +69,13 @@ const char* const DISKANN_PARAMETER_BEAM_SEARCH = "beam_search";
 const char* const DISKANN_PARAMETER_IO_LIMIT = "io_limit";
 const char* const DISKANN_PARAMETER_EF_SEARCH = "ef_search";
 const char* const DISKANN_PARAMETER_REORDER = "use_reorder";
+const char* const DISKANN_PARAMETER_GRAPH_TYPE = "graph_type";
+const char* const DISKANN_PARAMETER_ALPHA = "alpha";
+const char* const DISKANN_PARAMETER_GRAPH_ITER_TURN = "graph_iter_turn";
+const char* const DISKANN_PARAMETER_NEIGHBOR_SAMPLE_RATE = "neighbor_sample_rate";
+
+const char* const DISKANN_GRAPH_TYPE_VAMANA = "vamana";
+const char* const DISKANN_GRAPH_TYPE_ODESCENT = "odescent";
 
 const char* const HNSW_PARAMETER_EF_RUNTIME = "ef_search";
 const char* const HNSW_PARAMETER_M = "max_degree";
