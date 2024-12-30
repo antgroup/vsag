@@ -35,6 +35,8 @@ public:
 
     static std::vector<int> dims;
 
+    static fixtures::TempDir dir;
+
     constexpr static uint64_t base_count = 1000;
 
     constexpr static const char* search_param_tmp = R"(
@@ -45,11 +47,16 @@ public:
         }})";
 
     const std::vector<std::pair<std::string, float>> test_cases = {
-        {"sq8_uniform,fp32", 0.98}, {"sq8", 0.95}, {"fp32", 0.99}, {"sq8_uniform", 0.95}};
+        {"sq8_uniform,fp32,buffer_io", 0.98},
+        {"sq8_uniform,fp32", 0.98},
+        {"sq8", 0.95},
+        {"fp32", 0.99},
+        {"sq8_uniform", 0.95}};
 };
 
 TestDatasetPool HgraphTestIndex::pool{};
 std::vector<int> HgraphTestIndex::dims = fixtures::get_common_used_dims(2, RandomValue(0, 999));
+fixtures::TempDir HgraphTestIndex::dir{"hgraph_test"};
 
 std::string
 HgraphTestIndex::GenerateHGraphBuildParametersString(const std::string& metric_type,
@@ -69,7 +76,9 @@ HgraphTestIndex::GenerateHGraphBuildParametersString(const std::string& metric_t
             "max_degree": 96,
             "ef_construction": 500,
             "build_thread_count": {},
-            "precise_quantization_type": "{}"
+            "precise_quantization_type": "{}",
+            "precise_io_type": "{}",
+            "precise_file_path": "{}"
         }}
     }}
     )";
@@ -89,17 +98,22 @@ HgraphTestIndex::GenerateHGraphBuildParametersString(const std::string& metric_t
     )";
 
     auto strs = fixtures::SplitString(quantization_str, ',');
-    std::string high_quantizer_str;
+    std::string high_quantizer_str, precise_io_type = "block_memory_io";
     auto& base_quantizer_str = strs[0];
     if (strs.size() > 1) {
         high_quantizer_str = strs[1];
+        if (strs.size() > 2) {
+            precise_io_type = strs[2];
+        }
         build_parameters_str = fmt::format(parameter_temp_reorder,
                                            metric_type,
                                            dim,
                                            true, /* reorder */
                                            base_quantizer_str,
                                            thread_count,
-                                           high_quantizer_str);
+                                           high_quantizer_str,
+                                           precise_io_type,
+                                           dir.GenerateRandomFile());
     } else {
         build_parameters_str =
             fmt::format(parameter_temp_origin, metric_type, dim, base_quantizer_str, thread_count);
@@ -520,7 +534,6 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex, "HGraph Estimate Memory"
             auto param =
                 GenerateHGraphBuildParametersString(metric_type, dim, base_quantization_str);
             auto dataset = pool.GetDatasetAndCreate(dim, estimate_count, metric_type);
-
             TestEstimateMemory(name, param, dataset);
             vsag::Options::Instance().set_block_size_limit(origin_size);
         }

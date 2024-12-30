@@ -32,6 +32,10 @@ static const std::unordered_map<std::string, std::vector<std::string>> EXTERNAL_
     {HGRAPH_USE_REORDER, {HGRAPH_USE_REORDER_KEY}},
     {HGRAPH_BASE_QUANTIZATION_TYPE,
      {HGRAPH_BASE_CODES_KEY, QUANTIZATION_PARAMS_KEY, QUANTIZATION_TYPE_KEY}},
+    {HGRAPH_BASE_IO_TYPE, {HGRAPH_BASE_CODES_KEY, IO_PARAMS_KEY, IO_TYPE_KEY}},
+    {HGRAPH_PRECISE_IO_TYPE, {HGRAPH_PRECISE_CODES_KEY, IO_PARAMS_KEY, IO_TYPE_KEY}},
+    {HGRAPH_BASE_FILE_PATH, {HGRAPH_BASE_CODES_KEY, IO_PARAMS_KEY, IO_FILE_PATH}},
+    {HGRAPH_PRECISE_FILE_PATH, {HGRAPH_PRECISE_CODES_KEY, IO_PARAMS_KEY, IO_FILE_PATH}},
     {HGRAPH_PRECISE_QUANTIZATION_TYPE,
      {HGRAPH_PRECISE_CODES_KEY, QUANTIZATION_PARAMS_KEY, QUANTIZATION_TYPE_KEY}},
     {HGRAPH_GRAPH_MAX_DEGREE, {HGRAPH_GRAPH_KEY, GRAPH_PARAM_MAX_DEGREE}},
@@ -46,14 +50,16 @@ static const std::string HGRAPH_PARAMS_TEMPLATE =
         "{HGRAPH_USE_REORDER_KEY}": false,
         "{HGRAPH_GRAPH_KEY}": {
             "{IO_PARAMS_KEY}": {
-                "{IO_TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}"
+                "{IO_TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
+                "{IO_FILE_PATH}": "{DEFAULT_FILE_PATH_VALUE}"
             },
             "{GRAPH_PARAM_MAX_DEGREE}": 64,
             "{GRAPH_PARAM_INIT_MAX_CAPACITY}": 100
         },
         "{HGRAPH_BASE_CODES_KEY}": {
             "{IO_PARAMS_KEY}": {
-                "{IO_TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}"
+                "{IO_TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
+                "{IO_FILE_PATH}": "{DEFAULT_FILE_PATH_VALUE}"
             },
             "codes_type": "flatten_codes",
             "{QUANTIZATION_PARAMS_KEY}": {
@@ -64,7 +70,8 @@ static const std::string HGRAPH_PARAMS_TEMPLATE =
         },
         "{HGRAPH_PRECISE_CODES_KEY}": {
             "{IO_PARAMS_KEY}": {
-                "{IO_TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}"
+                "{IO_TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
+                "{IO_FILE_PATH}": "{DEFAULT_FILE_PATH_VALUE}"
             },
             "codes_type": "flatten_codes",
             "{QUANTIZATION_PARAMS_KEY}": {
