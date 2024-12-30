@@ -26,17 +26,17 @@
 #include <utility>
 #include <vector>
 
-#include "../algorithm/hnswlib/hnswlib.h"
-#include "../common.h"
-#include "../data_type.h"
-#include "../default_allocator.h"
-#include "../impl/conjugate_graph.h"
-#include "../logger.h"
-#include "../safe_allocator.h"
 #include "../utils.h"
+#include "algorithm/hnswlib/hnswlib.h"
 #include "base_filter_functor.h"
+#include "common.h"
+#include "data_type.h"
 #include "hnsw_zparameters.h"
+#include "impl/conjugate_graph.h"
 #include "index_common_param.h"
+#include "index_feature_list.h"
+#include "logger.h"
+#include "safe_allocator.h"
 #include "typing.h"
 #include "vsag/binaryset.h"
 #include "vsag/errors.h"
@@ -144,6 +144,9 @@ public:
     CalcDistanceById(const float* vector, int64_t id) const override {
         SAFE_CALL(return alg_hnsw_->getDistanceByLabel(id, vector));
     };
+
+    [[nodiscard]] bool
+    CheckFeature(IndexFeature feature) const override;
 
 public:
     tl::expected<BinarySet, Error>
@@ -278,6 +281,9 @@ private:
     BinarySet
     empty_binaryset() const;
 
+    void
+    init_feature_list();
+
 private:
     std::shared_ptr<hnswlib::AlgorithmInterface<float>> alg_hnsw_;
     std::shared_ptr<hnswlib::SpaceInterface> space_;
@@ -298,6 +304,8 @@ private:
     mutable std::map<std::string, WindowResultQueue> result_queues_;
 
     mutable std::shared_mutex rw_mutex_;
+
+    IndexFeatureList feature_list_{};
 };
 
 }  // namespace vsag
