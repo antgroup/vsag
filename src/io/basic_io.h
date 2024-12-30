@@ -19,6 +19,7 @@
 
 #include <cstdint>
 
+#include "io_parameter.h"
 #include "stream_reader.h"
 #include "stream_writer.h"
 

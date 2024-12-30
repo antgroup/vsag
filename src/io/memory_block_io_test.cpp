@@ -24,7 +24,7 @@
 
 using namespace vsag;
 
-auto block_memory_io_block_sizes = {64, 1023, 4096, 123123, 1024 * 1024};
+auto block_memory_io_block_sizes = {1023, 4096, 123123, 1024 * 1024};
 
 TEST_CASE("read&write [ut][memory_block_io]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();

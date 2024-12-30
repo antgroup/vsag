@@ -13,4 +13,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "sq8_uniform_quantizer.h"
+#pragma once
+
+#include "quantization/quantizer_parameter.h"
+
+namespace vsag {
+class SQ4UniformQuantizerParameter : public QuantizerParameter {
+public:
+    SQ4UniformQuantizerParameter();
+
+    ~SQ4UniformQuantizerParameter() override = default;
+
+    void
+    FromJson(const JsonType& json) override;
+
+    JsonType
+    ToJson() override;
+
+public:
+};
+
+using SQ4UniformQuantizerParamPtr = std::shared_ptr<SQ4UniformQuantizerParameter>;
+}  // namespace vsag

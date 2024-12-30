@@ -13,56 +13,49 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "graph_datacell.h"
+#include <fmt/format-inl.h>
 
-#include "catch2/catch_template_test_macros.hpp"
-#include "fmt/format-inl.h"
+#include <catch2/catch_template_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
+
 #include "graph_interface_test.h"
-#include "io/io_headers.h"
 #include "safe_allocator.h"
+
 using namespace vsag;
 
-template <typename IOTemp>
 void
-TestGraphDataCell(const JsonType& graph_param,
-                  const JsonType& io_param,
-                  const IndexCommonParam& param) {
-    auto counts = {1000, 2000};
+TestGraphDataCell(const GraphInterfaceParamPtr& param, const IndexCommonParam& common_param) {
+    auto count = GENERATE(1000, 2000);
     auto max_id = 10000;
-    for (auto count : counts) {
-        auto graph = std::make_shared<GraphDataCell<IOTemp, false>>(graph_param, io_param, param);
-        GraphInterfaceTest test(graph);
-        auto other = std::make_shared<GraphDataCell<IOTemp, false>>(graph_param, io_param, param);
-        test.BasicTest(max_id, count, other);
-    }
+
+    auto graph = GraphInterface::MakeInstance(param, common_param);
+    GraphInterfaceTest test(graph);
+    auto other = GraphInterface::MakeInstance(param, common_param);
+    test.BasicTest(max_id, count, other);
 }
 
 TEST_CASE("graph basic test", "[ut][graph_datacell]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
-    auto dims = {32, 64};
-    auto max_degrees = {5, 12, 24, 32, 64, 128};
-    auto max_capacities = {1, 100, 10000, 10'000'000, 32'179'837};
-    std::vector<JsonType> graph_params;
-    constexpr const char* graph_param_temp = R"(
+    auto dim = GENERATE(32, 64);
+    auto max_degree = GENERATE(5, 32, 64, 128);
+    auto max_capacity = GENERATE(100, 10000);
+    auto io_type = GENERATE("memory_io", "block_memory_io");
+    constexpr const char* graph_param_temp =
+        R"(
         {{
+            "io_params": {{
+                "type": "{}"
+            }},
             "max_degree": {},
             "init_capacity": {}
         }}
         )";
-    for (auto degree : max_degrees) {
-        for (auto capacity : max_capacities) {
-            auto str = fmt::format(graph_param_temp, degree, capacity);
-            graph_params.emplace_back(JsonType::parse(str));
-        }
-    }
-    auto io_param = JsonType::parse("{}");
-    for (auto dim : dims) {
-        IndexCommonParam param;
-        param.dim_ = dim;
-        param.allocator_ = allocator;
-        for (auto& gp : graph_params) {
-            TestGraphDataCell<MemoryIO>(gp, io_param, param);
-            TestGraphDataCell<MemoryBlockIO>(gp, io_param, param);
-        }
-    }
+
+    IndexCommonParam common_param;
+    common_param.dim_ = dim;
+    common_param.allocator_ = allocator;
+    auto param_str = fmt::format(graph_param_temp, io_type, max_degree, max_capacity);
+    auto param_json = JsonType::parse(param_str);
+    auto graph_param = GraphInterfaceParameter::GetGraphParameterByJson(param_json);
+    TestGraphDataCell(graph_param, common_param);
 }

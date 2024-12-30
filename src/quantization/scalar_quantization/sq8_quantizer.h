@@ -23,10 +23,11 @@
 
 #include "index/index_common_param.h"
 #include "inner_string_params.h"
-#include "quantizer.h"
+#include "quantization/quantizer.h"
 #include "scalar_quantization_trainer.h"
 #include "simd/normalize.h"
 #include "simd/sq8_simd.h"
+#include "sq8_quantizer_parameter.h"
 
 namespace vsag {
 
@@ -35,7 +36,9 @@ class SQ8Quantizer : public Quantizer<SQ8Quantizer<metric>> {
 public:
     explicit SQ8Quantizer(int dim, Allocator* allocator);
 
-    SQ8Quantizer(const JsonType& quantization_param, const IndexCommonParam& common_param);
+    SQ8Quantizer(const SQ8QuantizerParamPtr& param, const IndexCommonParam& common_param);
+
+    SQ8Quantizer(const QuantizerParamPtr& param, const IndexCommonParam& common_param);
 
     ~SQ8Quantizer() = default;
 
@@ -92,15 +95,15 @@ SQ8Quantizer<Metric>::SQ8Quantizer(int dim, Allocator* allocator)
 }
 
 template <MetricType metric>
-SQ8Quantizer<metric>::SQ8Quantizer(const JsonType& quantization_param,
+SQ8Quantizer<metric>::SQ8Quantizer(const SQ8QuantizerParamPtr& param,
                                    const IndexCommonParam& common_param)
-    : Quantizer<SQ8Quantizer<metric>>(common_param.dim_, common_param.allocator_.get()),
-      diff_(common_param.allocator_.get()),
-      lower_bound_(common_param.allocator_.get()) {
-    // align 64 bytes (512 bits) to avoid illegal memory access in SIMD
-    this->code_size_ = this->dim_;
-    this->diff_.resize(this->dim_, 0);
-    this->lower_bound_.resize(this->dim_, std::numeric_limits<DataType>::max());
+    : SQ8Quantizer<metric>(common_param.dim_, common_param.allocator_.get()) {
+}
+
+template <MetricType metric>
+SQ8Quantizer<metric>::SQ8Quantizer(const QuantizerParamPtr& param,
+                                   const IndexCommonParam& common_param)
+    : SQ8Quantizer<metric>(std::dynamic_pointer_cast<SQ8QuantizerParameter>(param), common_param) {
 }
 
 template <MetricType metric>

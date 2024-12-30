@@ -15,10 +15,7 @@
 
 #pragma once
 
-#include "basic_io.h"
-
-namespace vsag {
-
-class FileAIO : public BasicIO<FileAIO> {};
-
-}  // namespace vsag
+#include "sq4_quantizer.h"
+#include "sq4_uniform_quantizer.h"
+#include "sq8_quantizer.h"
+#include "sq8_uniform_quantizer.h"
