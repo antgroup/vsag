@@ -15,6 +15,27 @@
 
 #pragma once
 
-#include "fp32_quantizer.h"
-#include "quantizer.h"
-#include "scalar_quantization/sq_headers.h"
+#include "graph_interface_parameter.h"
+#include "io/io_parameter.h"
+
+namespace vsag {
+class GraphDataCellParameter : public GraphInterfaceParameter {
+public:
+    GraphDataCellParameter() = default;
+
+    void
+    FromJson(const JsonType& json) override;
+
+    JsonType
+    ToJson() override;
+
+public:
+    IOParameterPtr io_parameter_{nullptr};
+
+    uint64_t max_degree_{64};
+
+    uint64_t init_max_capacity_{100};
+};
+
+using GraphDataCellParameterPtr = std::shared_ptr<GraphDataCellParameter>;
+}  // namespace vsag

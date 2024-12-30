@@ -13,8 +13,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#pragma once
+#include "sq4_uniform_quantizer_parameter.h"
 
-#include "fp32_quantizer.h"
-#include "quantizer.h"
-#include "scalar_quantization/sq_headers.h"
+#include "inner_string_params.h"
+
+namespace vsag {
+SQ4UniformQuantizerParameter::SQ4UniformQuantizerParameter()
+    : QuantizerParameter(QUANTIZATION_TYPE_VALUE_SQ4_UNIFORM) {
+}
+
+void
+SQ4UniformQuantizerParameter::FromJson(const JsonType& json) {
+}
+
+JsonType
+SQ4UniformQuantizerParameter::ToJson() {
+    JsonType json;
+    json[QUANTIZATION_TYPE_KEY] = QUANTIZATION_TYPE_VALUE_SQ4_UNIFORM;
+    return json;
+}
+}  // namespace vsag

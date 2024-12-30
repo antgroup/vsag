@@ -18,6 +18,7 @@
 #include <nlohmann/json.hpp>
 #include <string>
 
+#include "flatten_datacell_parameter.h"
 #include "index/index_common_param.h"
 #include "quantization/computer.h"
 #include "stream_reader.h"
@@ -33,7 +34,7 @@ public:
     FlattenInterface() = default;
 
     static FlattenInterfacePtr
-    MakeInstance(const JsonType& flatten_interface_param, const IndexCommonParam& common_param);
+    MakeInstance(const FlattenDataCellParameterPtr& param, const IndexCommonParam& common_param);
 
 public:
     virtual void

@@ -15,6 +15,29 @@
 
 #pragma once
 
-#include "fp32_quantizer.h"
-#include "quantizer.h"
-#include "scalar_quantization/sq_headers.h"
+#include "parameter.h"
+
+namespace vsag {
+
+class IOParameter;
+using IOParameterPtr = std::shared_ptr<IOParameter>;
+
+class IOParameter : public Parameter {
+public:
+    static IOParameterPtr
+    GetIOParameterByJson(const JsonType& json);
+
+public:
+    inline std::string
+    GetTypeName() {
+        return this->name_;
+    }
+
+protected:
+    explicit IOParameter(std::string name);
+
+private:
+    std::string name_{};
+};
+
+}  // namespace vsag

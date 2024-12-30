@@ -15,6 +15,27 @@
 
 #pragma once
 
-#include "fp32_quantizer.h"
-#include "quantizer.h"
-#include "scalar_quantization/sq_headers.h"
+#include "io/io_parameter.h"
+#include "parameter.h"
+#include "quantization/quantizer_parameter.h"
+namespace vsag {
+
+class FlattenDataCellParameter : public Parameter {
+public:
+    explicit FlattenDataCellParameter();
+
+    void
+    FromJson(const JsonType& json) override;
+
+    JsonType
+    ToJson() override;
+
+public:
+    QuantizerParameterPtr quantizer_parameter_{nullptr};
+
+    IOParameterPtr io_parameter_{nullptr};
+};
+
+using FlattenDataCellParameterPtr = std::shared_ptr<FlattenDataCellParameter>;
+
+}  // namespace vsag

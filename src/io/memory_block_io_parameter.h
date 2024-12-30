@@ -15,6 +15,28 @@
 
 #pragma once
 
-#include "fp32_quantizer.h"
-#include "quantizer.h"
-#include "scalar_quantization/sq_headers.h"
+#include "io_parameter.h"
+
+namespace vsag {
+class MemoryBlockIOParameter : public IOParameter {
+public:
+    MemoryBlockIOParameter();
+
+    explicit MemoryBlockIOParameter(const JsonType& json);
+
+    void
+    FromJson(const JsonType& json) override;
+
+    JsonType
+    ToJson() override;
+
+    static uint64_t
+    NearestPowerOfTwo(uint64_t value);
+
+public:
+    uint64_t block_size_{};
+};
+
+using MemoryBlockIOParameterPtr = std::shared_ptr<MemoryBlockIOParameter>;
+
+}  // namespace vsag

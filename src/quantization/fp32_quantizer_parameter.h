@@ -15,6 +15,23 @@
 
 #pragma once
 
-#include "fp32_quantizer.h"
-#include "quantizer.h"
-#include "scalar_quantization/sq_headers.h"
+#include "quantizer_parameter.h"
+
+namespace vsag {
+class FP32QuantizerParameter : public QuantizerParameter {
+public:
+    FP32QuantizerParameter();
+
+    ~FP32QuantizerParameter() override = default;
+
+    void
+    FromJson(const JsonType& json) override;
+
+    JsonType
+    ToJson() override;
+
+public:
+};
+
+using FP32QuantizerParameterPtr = std::shared_ptr<FP32QuantizerParameter>;
+}  // namespace vsag

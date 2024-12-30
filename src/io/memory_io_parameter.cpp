@@ -13,8 +13,28 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#pragma once
+#include "memory_io_parameter.h"
 
-#include "fp32_quantizer.h"
-#include "quantizer.h"
-#include "scalar_quantization/sq_headers.h"
+#include "inner_string_params.h"
+
+namespace vsag {
+
+MemoryIOParameter::MemoryIOParameter() : IOParameter(IO_TYPE_VALUE_MEMORY_IO) {
+}
+
+MemoryIOParameter::MemoryIOParameter(const vsag::JsonType& json)
+    : IOParameter(IO_TYPE_VALUE_MEMORY_IO) {
+    this->FromJson(json);
+}
+
+void
+MemoryIOParameter::FromJson(const JsonType& json) {
+}
+
+JsonType
+MemoryIOParameter::ToJson() {
+    JsonType json;
+    json[IO_TYPE_KEY] = IO_TYPE_VALUE_MEMORY_IO;
+    return json;
+}
+}  // namespace vsag

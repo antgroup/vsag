@@ -15,6 +15,20 @@
 
 #pragma once
 
-#include "fp32_quantizer.h"
-#include "quantizer.h"
-#include "scalar_quantization/sq_headers.h"
+#include "parameter.h"
+
+namespace vsag {
+
+class GraphInterfaceParameter;
+using GraphInterfaceParameterPtr = std::shared_ptr<GraphInterfaceParameter>;
+
+class GraphInterfaceParameter : public Parameter {
+public:
+    static GraphInterfaceParameterPtr
+    GetGraphParameterByJson(const JsonType& json);
+
+protected:
+    explicit GraphInterfaceParameter() = default;
+};
+
+}  // namespace vsag
