@@ -102,6 +102,17 @@ public:
         StreamReader::ReadObj(reader, this->code_size_);
     }
 
+    [[nodiscard]] virtual bool
+    InMemory() const {
+        return true;
+    }
+
+    virtual void
+    EnableForceInMemory(){};
+
+    virtual void
+    DisableForceInMemory(){};
+
 public:
     InnerIdType total_count_{0};
     InnerIdType max_capacity_{1000000};
