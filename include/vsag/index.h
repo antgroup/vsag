@@ -335,6 +335,17 @@ public:
     GetMemoryUsage() const = 0;
 
     /**
+      * @brief estimate the memory used by the index with given element counts
+      *
+      * @param num_elements
+      * @return number of bytes estimate used.
+      */
+    [[nodiscard]] virtual uint64_t
+    EstimateMemory(const uint64_t num_elements) const {
+        throw std::runtime_error("Index not support estimate the memory by element counts");
+    }
+
+    /**
       * @brief Return the estimated memory required during building
       *
       * @param num_elements denotes the amount of data used to build the index.

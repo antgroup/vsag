@@ -218,6 +218,45 @@ HGraph::KnnSearch(const DatasetPtr& query,
     }
 }
 
+uint64_t
+HGraph::EstimateMemory(const uint64_t num_elements) const {
+    uint64_t estimate_memory = 0;
+    auto block_size = Options::Instance().block_size_limit();
+    auto element_count =
+        next_multiple_of_power_of_two(num_elements, this->resize_increase_count_bit_);
+
+    auto block_memory_ceil = [](uint64_t memory, uint64_t block_size) -> uint64_t {
+        return static_cast<uint64_t>(
+            std::ceil(static_cast<double>(memory) / static_cast<double>(block_size)) *
+            static_cast<double>(block_size));
+    };
+
+    auto base_memory = this->basic_flatten_codes_->code_size_ * element_count;
+    estimate_memory += block_memory_ceil(base_memory, block_size);
+
+    auto bottom_graph_memory =
+        (this->bottom_graph_->maximum_degree_ + 1) * sizeof(InnerIdType) * element_count;
+    estimate_memory += block_memory_ceil(bottom_graph_memory, block_size);
+
+    if (use_reorder_) {
+        auto precise_memory = this->high_precise_codes_->code_size_ * element_count;
+        estimate_memory += block_memory_ceil(precise_memory, block_size);
+    }
+
+    auto label_map_memory =
+        element_count * (sizeof(std::pair<LabelType, InnerIdType>) + 2 * sizeof(void*));
+    estimate_memory += label_map_memory;
+
+    auto sparse_graph_memory = (this->mult_ * 0.05 * element_count) * sizeof(InnerIdType) *
+                               (this->bottom_graph_->maximum_degree_ / 2 + 1);
+    estimate_memory += sparse_graph_memory;
+
+    auto other_memory = element_count * (sizeof(LabelType) + sizeof(std::shared_mutex));
+    estimate_memory += other_memory;
+
+    return estimate_memory;
+}
+
 tl::expected<BinarySet, Error>
 HGraph::Serialize() const {
     if (GetNumElements() == 0) {
