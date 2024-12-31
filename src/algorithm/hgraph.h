@@ -97,6 +97,9 @@ public:
         return this->basic_flatten_codes_->TotalCount();
     }
 
+    uint64_t
+    EstimateMemory(const uint64_t num_elements) const;
+
     // TODO(LHT): implement
     inline int64_t
     GetMemoryUsage() const {
