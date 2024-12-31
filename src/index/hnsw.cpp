@@ -51,7 +51,9 @@ HNSW::HNSW(HnswParameters hnsw_params, const IndexCommonParam& index_common_para
       use_reversed_edges_(hnsw_params.use_reversed_edges),
       type_(hnsw_params.type),
       dim_(index_common_param.dim_) {
-    auto M = std::min(std::max((int)hnsw_params.max_degree, MINIMAL_M), MAXIMAL_M);
+    auto M = std::min(  // NOLINT(readability-identifier-naming)
+        std::max((int)hnsw_params.max_degree, MINIMAL_M),
+        MAXIMAL_M);
 
     if (hnsw_params.ef_construction <= 0) {
         throw std::runtime_error(MESSAGE_PARAMETER);

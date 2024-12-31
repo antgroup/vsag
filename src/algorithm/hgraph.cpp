@@ -611,17 +611,17 @@ HGraph::mutually_connect_new_element(InnerIdType cur_c,
         graph->InsertNeighborsById(cur_c, selected_neighbors);
     }
 
-    for (auto selectedNeighbor : selected_neighbors) {
-        std::lock_guard<std::shared_mutex> lock(neighbors_mutex_[selectedNeighbor]);
+    for (auto selected_neighbor : selected_neighbors) {
+        std::lock_guard<std::shared_mutex> lock(neighbors_mutex_[selected_neighbor]);
 
         Vector<InnerIdType> neighbors(allocator_);
-        graph->GetNeighbors(selectedNeighbor, neighbors);
+        graph->GetNeighbors(selected_neighbor, neighbors);
 
         size_t sz_link_list_other = neighbors.size();
 
         if (sz_link_list_other > max_size)
             throw std::runtime_error("Bad value of sz_link_list_other");
-        if (selectedNeighbor == cur_c)
+        if (selected_neighbor == cur_c)
             throw std::runtime_error("Trying to connect an element to itself");
 
         bool is_cur_c_present = false;
@@ -634,20 +634,20 @@ HGraph::mutually_connect_new_element(InnerIdType cur_c,
             }
         }
 
-        // If cur_c is already present in the neighboring connections of `selectedNeighbors[idx]` then no need to modify any connections or run the heuristics.
+        // If cur_c is already present in the neighboring connections of `selected_neighbors[idx]` then no need to modify any connections or run the heuristics.
         if (!is_cur_c_present) {
             if (sz_link_list_other < max_size) {
                 neighbors.emplace_back(cur_c);
-                graph->InsertNeighborsById(selectedNeighbor, neighbors);
+                graph->InsertNeighborsById(selected_neighbor, neighbors);
             } else {
                 // finding the "weakest" element to replace it with the new one
-                float d_max = flatten->ComputePairVectors(cur_c, selectedNeighbor);
+                float d_max = flatten->ComputePairVectors(cur_c, selected_neighbor);
 
                 MaxHeap candidates(allocator_);
                 candidates.emplace(d_max, cur_c);
 
                 for (size_t j = 0; j < sz_link_list_other; j++) {
-                    candidates.emplace(flatten->ComputePairVectors(neighbors[j], selectedNeighbor),
+                    candidates.emplace(flatten->ComputePairVectors(neighbors[j], selected_neighbor),
                                        neighbors[j]);
                 }
 
@@ -658,7 +658,7 @@ HGraph::mutually_connect_new_element(InnerIdType cur_c,
                     cand_neighbors.emplace_back(candidates.top().second);
                     candidates.pop();
                 }
-                graph->InsertNeighborsById(selectedNeighbor, cand_neighbors);
+                graph->InsertNeighborsById(selected_neighbor, cand_neighbors);
             }
         }
     }
@@ -743,8 +743,8 @@ HGraph::deserialize_basic_info(StreamReader& reader) {
 
 uint64_t
 HGraph::cal_serialize_size() const {
-    auto calSizeFunc = [](uint64_t cursor, uint64_t size, void* buf) { return; };
-    WriteFuncStreamWriter writer(calSizeFunc, 0);
+    auto cal_size_func = [](uint64_t cursor, uint64_t size, void* buf) { return; };
+    WriteFuncStreamWriter writer(cal_size_func, 0);
     this->Serialize(writer);
     return writer.cursor_;
 }

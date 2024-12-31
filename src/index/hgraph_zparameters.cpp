@@ -136,9 +136,9 @@ HGraphParameters::CheckAndSetKeyValue(const std::string& key, JsonType& value) {
 
 void
 HGraphParameters::init_by_options() {
-    const std::string DEFAULT_BLOCK_SIZE = std::to_string(Options::Instance().block_size_limit());
+    const std::string default_block_size = std::to_string(Options::Instance().block_size_limit());
     std::unordered_map<std::string, std::string> option_map;
-    option_map.insert({"DEFAULT_BLOCK_SIZE", DEFAULT_BLOCK_SIZE});
+    option_map.insert({"DEFAULT_BLOCK_SIZE", default_block_size});
     this->str_ = format_map(this->str_, option_map);
 }
 

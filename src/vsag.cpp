@@ -58,6 +58,7 @@ init() {
     return true;
 }
 
-static bool _init = init();
+// to trigger initial
+static bool init_status = init();
 
 }  // namespace vsag

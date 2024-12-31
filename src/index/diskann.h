@@ -15,11 +15,16 @@
 
 #pragma once
 
+// to suppress deprecated warning below(no better way found that works with clang-tidy-15):
+// - clang-diagnostic-deprecated-builtins
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-builtins"
 #include <abstract_index.h>
 #include <disk_utils.h>
 #include <index.h>
 #include <omp.h>
 #include <pq_flash_index.h>
+#pragma clang diagnostic pop
 
 #include <functional>
 #include <map>
