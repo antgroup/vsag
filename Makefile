@@ -80,7 +80,7 @@ test_tsan: tsan          ## Run unit tests with ThreadSanitizer option.
 
 .PHONY: cov     # Build unit tests with code coverage enabled.
 cov:
-	cmake ${VSAG_CMAKE_ARGS} -B${DEBUG_BUILD_DIR} -DCMAKE_BUILD_TYPE=Debug -DENABLE_COVERAGE=ON -DENABLE_CCACHE=ON
+	cmake ${VSAG_CMAKE_ARGS} -B${DEBUG_BUILD_DIR} -DCMAKE_BUILD_TYPE=Debug -DENABLE_COVERAGE=ON -DENABLE_CCACHE=ON -DENABLE_ASAN=OFF
 	cmake --build ${DEBUG_BUILD_DIR} --parallel ${COMPILE_JOBS}
 
 .PHONY: test_cov
