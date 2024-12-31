@@ -41,7 +41,7 @@ public:
     // [basic methods]
 
     /**
-      * Building index with all vectors
+      * @brief Building index with all vectors
       * 
       * @param base should contains dim, num_elements, ids and vectors
       * @return IDs that failed to insert into the index
@@ -55,7 +55,7 @@ public:
     };
 
     /**
-      * Provide dynamism for indexes that do not support insertions
+      * @brief Provide dynamism for indexes that do not support insertions
       *
       * @param base should contains dim, num_elements, ids and vectors
       * @param binary_set contains intermediate data from the last checkpoint
@@ -67,7 +67,7 @@ public:
     }
 
     /**
-      * Adding vectors into a built index, only HNSW supported now, called on other index will cause exception
+      * @brief Adding vectors into a built index, only HNSW supported now, called on other index will cause exception
       * 
       * @param base should contains dim, num_elements, ids and vectors
       * @return IDs that failed to insert into the index
@@ -78,7 +78,7 @@ public:
     }
 
     /**
-      * Remove the vector corresponding to the given ID from the index
+      * @brief Remove the vector corresponding to the given ID from the index
       *
       * @param id of the vector that need to be removed from the index
       * @return result indicates whether the remove operation is successful.
@@ -89,7 +89,7 @@ public:
     }
 
     /**
-     * Update the id of a base point from the index
+     * @brief Update the id of a base point from the index
      *
      * @param old_id indicates the old id of a base point in index
      * @param new_id is the updated new id of the base point
@@ -101,7 +101,7 @@ public:
     }
 
     /**
-     * Update the vector of a base point from the index
+     * @brief Update the vector of a base point from the index
      *
      * @param id indicates the old id of a base point in index
      * @param new_base is the updated new vector of the base point
@@ -114,7 +114,7 @@ public:
     }
 
     /**
-      * Performing single KNN search on index
+      * @brief Performing single KNN search on index
       * 
       * @param query should contains dim, num_elements and vectors
       * @param k the result size of every query
@@ -123,14 +123,14 @@ public:
       *                - num_elements: 1
       *                - ids, distances: length is (num_elements * k)
       */
-    virtual tl::expected<DatasetPtr, Error>
+    [[nodiscard]] virtual tl::expected<DatasetPtr, Error>
     KnnSearch(const DatasetPtr& query,
               int64_t k,
               const std::string& parameters,
               BitsetPtr invalid = nullptr) const = 0;
 
     /**
-      * Performing single KNN search on index
+      * @brief Performing single KNN search on index
       *
       * @param query should contains dim, num_elements and vectors
       * @param k the result size of every query
@@ -146,7 +146,7 @@ public:
               const std::function<bool(int64_t)>& filter) const = 0;
 
     /**
-      * Performing single range search on index
+      * @brief Performing single range search on index
       *
       * @param query should contains dim, num_elements and vectors
       * @param radius of search, determines which results will be returned
@@ -159,14 +159,14 @@ public:
       *                - dim: the size of results
       *                - ids, distances: length is dim
       */
-    virtual tl::expected<DatasetPtr, Error>
+    [[nodiscard]] virtual tl::expected<DatasetPtr, Error>
     RangeSearch(const DatasetPtr& query,
                 float radius,
                 const std::string& parameters,
                 int64_t limited_size = -1) const = 0;
 
     /**
-      * Performing single range search on index
+      * @brief Performing single range search on index
       *
       * @param query should contains dim, num_elements and vectors
       * @param radius of search, determines which results will be returned
@@ -180,7 +180,7 @@ public:
       *                - dim: the size of results
       *                - ids, distances: length is dim
       */
-    virtual tl::expected<DatasetPtr, Error>
+    [[nodiscard]] virtual tl::expected<DatasetPtr, Error>
     RangeSearch(const DatasetPtr& query,
                 float radius,
                 const std::string& parameters,
@@ -188,7 +188,7 @@ public:
                 int64_t limited_size = -1) const = 0;
 
     /**
-      * Performing single range search on index
+      * @brief Performing single range search on index
       *
       * @param query should contains dim, num_elements and vectors
       * @param radius of search, determines which results will be returned
@@ -210,7 +210,7 @@ public:
                 int64_t limited_size = -1) const = 0;
 
     /**
-     * Pretraining the conjugate graph involves searching with generated queries and providing feedback.
+     * @brief Pretraining the conjugate graph involves searching with generated queries and providing feedback.
      *
      * @param base_tag_ids is the label of choosen base vectors that need to be enhanced
      * @param k is the number of edges inserted into conjugate graph
@@ -222,7 +222,7 @@ public:
     };
 
     /**
-     * Performing feedback on conjugate graph
+     * @brief Performing feedback on conjugate graph
      *
      * @param query should contains dim, num_elements and vectors
      * @param k is the number of edges inserted into conjugate graph
@@ -238,7 +238,7 @@ public:
     };
 
     /**
-     * Calculate the distance between the query and the vector of the given ID.
+     * @brief Calculate the distance between the query and the vector of the given ID.
      *
      * @param vector is the embedding of query
      * @param id is the unique identifier of the vector to be calculated in the index.
@@ -249,6 +249,15 @@ public:
         throw std::runtime_error("Index doesn't support get distance by id");
     };
 
+    /**
+     * @brief Checks if the specified feature is supported by the index.
+     *
+     * This method checks whether the given `feature` is supported by the index.
+     * @see IndexFeature
+     *
+     * @param feature The feature to check for support.
+     * @return bool Returns true if the feature is supported, false otherwise.
+     */
     [[nodiscard]] virtual bool
     CheckFeature(IndexFeature feature) const {
         throw std::runtime_error("Index doesn't support check feature");
@@ -258,15 +267,15 @@ public:
     // [serialize/deserialize with binaryset]
 
     /**
-      * Serialize index to a set of byte array
+      * @brief Serialize index to a set of byte array
       *
       * @return binaryset contains all parts of the index
       */
-    virtual tl::expected<BinarySet, Error>
+    [[nodiscard]] virtual tl::expected<BinarySet, Error>
     Serialize() const = 0;
 
     /**
-      * Deserialize index from a set of byte array. Causing exception if this index is not empty
+      * @brief Deserialize index from a set of byte array. Causing exception if this index is not empty
       *
       * @param binaryset contains all parts of the index
       */
@@ -274,7 +283,7 @@ public:
     Deserialize(const BinarySet& binary_set) = 0;
 
     /**
-      * Deserialize index from a set of reader array. Causing exception if this index is not empty
+      * @brief Deserialize index from a set of reader array. Causing exception if this index is not empty
       *
       * @param reader contains all parts of the index
       */
@@ -285,7 +294,7 @@ public:
     // [serialize/deserialize with file stream]
 
     /**
-      * Serialize index to a file stream
+      * @brief Serialize index to a file stream
       *
       * @param out_stream is a already opened file stream for outputing the serialized index
       */
@@ -295,7 +304,7 @@ public:
     }
 
     /**
-      * Deserialize index from a file stream
+      * @brief Deserialize index from a file stream
       * 
       * @param in_stream is a already opened file stream contains serialized index
       * @param length is the length of serialized index(may differ from the actual file size
@@ -310,38 +319,38 @@ public:
     // [statstics methods]
 
     /**
-      * Return the number of elements in the index
+      * @brief Return the number of elements in the index
       *
       * @return number of elements in the index.
       */
-    virtual int64_t
+    [[nodiscard]] virtual int64_t
     GetNumElements() const = 0;
 
     /**
-      * Return the memory occupied by the index
+      * @brief Return the memory occupied by the index
       *
       * @return number of bytes occupied by the index.
       */
-    virtual int64_t
+    [[nodiscard]] virtual int64_t
     GetMemoryUsage() const = 0;
 
     /**
-      * Return the estimated memory required during building
+      * @brief Return the estimated memory required during building
       *
       * @param num_elements denotes the amount of data used to build the index.
       * @return estimated memory required during building.
       */
-    virtual int64_t
+    [[nodiscard]] virtual int64_t
     GetEstimateBuildMemory(const int64_t num_elements) const {
         throw std::runtime_error("Index not support estimate the memory while building");
     }
 
     /**
-      * Get the statstics from index
+      * @brief Get the statstics from index
       *
       * @return a json string contains runtime statstics of the index.
       */
-    virtual std::string
+    [[nodiscard]] virtual std::string
     GetStats() const {
         throw std::runtime_error("Index not support range search");
     }
@@ -351,7 +360,7 @@ public:
 };
 
 /**
-  * check if the build parameter is valid
+  * @brief check if the build parameter is valid
   *
   * @return true if the parameter is valid, otherwise error with detail message.
   */
@@ -359,7 +368,7 @@ tl::expected<bool, Error>
 check_diskann_hnsw_build_parameters(const std::string& json_string);
 
 /**
-  * check if the build parameter is valid
+  * @brief check if the build parameter is valid
   *
   * @return true if the parameter is valid, otherwise error with detail message.
   */
@@ -367,7 +376,7 @@ tl::expected<bool, Error>
 check_diskann_hnsw_search_parameters(const std::string& json_string);
 
 /**
-  * estimate search time for index
+  * @brief estimate search time for index
   *
   * @return the estimated search time in milliseconds.
   */
@@ -379,7 +388,7 @@ estimate_search_time(const std::string& index_name,
 
 /**
   * [experimental]
-  * generate build index parameters from data size and dim
+  * @brief generate build index parameters from data size and dim
   *
   * @return the build parameter string
   */
