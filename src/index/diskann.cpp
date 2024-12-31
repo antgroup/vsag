@@ -72,7 +72,7 @@ class LocalMemoryReader : public Reader {
 public:
     LocalMemoryReader(std::stringstream& file, bool support_async_io) {
         if (support_async_io) {
-            pool_ = std::make_unique<ThreadPool>(Option::Instance().num_threads_io());
+            pool_ = std::make_unique<progschj::ThreadPool>(Option::Instance().num_threads_io());
         }
         file_ << file.rdbuf();
         file_.seekg(0, std::ios::end);
@@ -109,7 +109,7 @@ private:
     std::stringstream file_;
     uint64_t size_;
     std::mutex mutex_;
-    std::unique_ptr<ThreadPool> pool_;
+    std::unique_ptr<progschj::ThreadPool> pool_;
 };
 
 Binary
@@ -147,7 +147,7 @@ DiskANN::DiskANN(DiskannParameters& diskann_params, const IndexCommonParam& inde
       use_bsa_(diskann_params.use_bsa),
       use_async_io_(diskann_params.use_async_io) {
     if (not use_async_io_) {
-        pool_ = std::make_unique<ThreadPool>(Option::Instance().num_threads_io());
+        pool_ = std::make_unique<progschj::ThreadPool>(Option::Instance().num_threads_io());
     }
     status_ = IndexStatus::EMPTY;
     batch_read_ =

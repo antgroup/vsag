@@ -13,27 +13,35 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "vsag/resource.h"
+#pragma once
 
-#include "safe_allocator.h"
-#include "safe_thread_pool.h"
+#include <functional>
+#include <future>
+
+#include "ThreadPool.h"
+#include "vsag/options.h"
+#include "vsag/thread_pool.h"
 
 namespace vsag {
 
-Resource::Resource() : Resource(nullptr, nullptr) {
-}
+class DefaultThreadPool : public ThreadPool {
+public:
+    explicit DefaultThreadPool(std::size_t threads);
 
-Resource::Resource(Allocator* allocator, ThreadPool* thread_pool) {
-    if (allocator != nullptr) {
-        this->allocator = std::make_shared<SafeAllocator>(allocator, false);
-    } else {
-        this->allocator = SafeAllocator::FactoryDefaultAllocator();
-    }
-    if (thread_pool != nullptr) {
-        this->thread_pool = std::make_shared<SafeThreadPool>(thread_pool, false);
-    } else {
-        this->allocator = SafeAllocator::FactoryDefaultAllocator();
-    }
-}
+    std::future<void>
+    Enqueue(std::function<void(void)> task) override;
+
+    void
+    WaitUntilEmpty() override;
+
+    void
+    SetQueueSizeLimit(std::size_t limit) override;
+
+    void
+    SetPoolSize(std::size_t limit) override;
+
+private:
+    std::unique_ptr<progschj::ThreadPool> pool_;
+};
 
 }  // namespace vsag

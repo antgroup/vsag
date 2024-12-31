@@ -18,6 +18,7 @@
 #include <memory>
 
 #include "allocator.h"
+#include "thread_pool.h"
 
 namespace vsag {
 /**
@@ -29,23 +30,25 @@ namespace vsag {
 class Resource {
 public:
     /**
-     * @brief Constructs a Resource with an optional allocator.
+     * @brief Constructs a Resource with an allocator and a thread pool
      *
-     * This constructor initializes a `Resource` with a given allocator. If no allocator
-     * is provided, default allocator will be created and owned by Resource
+     * This constructor initializes a `Resource` with the given allocator. If no allocator
+     * is provided, a default allocator will be created and owned by the Resource.
+     * If no thread pool is provided, the Resource will not use a thread pool for its operations.
      *
-     * @param allocator A outside pointer to an `Allocator` object used for
-     * managing resource allocations.
+     * @param allocator A pointer to an external `Allocator` object used for managing resource allocations.
+     *                  If `nullptr`, a default allocator will be created and used.
+     * @param thread_pool A pointer to a `ThreadPool` object used for executing multi-threaded tasks.
+     *                    If `nullptr`, the Resource will not use a thread pool.
      */
-    explicit Resource(Allocator* allocator);
+    explicit Resource(Allocator* allocator, ThreadPool* thread_pool);
 
     /**
      * @brief Constructs a Resource without specifying an allocator.
      *
      * Default allocator will be created and owned.
      */
-    Resource() : Resource(nullptr) {
-    }
+    explicit Resource();
 
     /// Virtual destructor for proper cleanup of derived classes.
     virtual ~Resource() = default;
@@ -53,17 +56,34 @@ public:
     /**
      * @brief Retrieves the allocator associated with this resource.
      *
-     * This function returns a shared pointer to the `Allocator` associated with this resource,
+     * This function returns a shared pointer to the `Allocator` associated with this resource.
      *
-     * @return std::shared_ptr<Allocator> A shared pointer to the allocator.
+     * @return std::shared_ptr<Allocator> A shared pointer to the allocator. If no allocator was provided,
+     *                                    a default allocator will be returned.
      */
     virtual std::shared_ptr<Allocator>
-    GetAllocator() {
+    GetAllocator() const {
         return this->allocator;
+    }
+
+    /**
+     * @brief Retrieves the thread pool associated with this resource.
+     *
+     * This function returns a shared pointer to the `ThreadPool` associated with this resource.
+     *
+     * @return std::shared_ptr<ThreadPool> A shared pointer to the thread pool. If no thread pool was provided,
+     *                                     a null shared pointer will be returned.
+     */
+    virtual std::shared_ptr<ThreadPool>
+    GetThreadPool() const {
+        return this->thread_pool;
     }
 
 public:
     ///< Shared pointer to the allocator associated with this resource.
     std::shared_ptr<Allocator> allocator;
+
+    ///< Shared pointer to the thread pool associated with this resource.
+    std::shared_ptr<ThreadPool> thread_pool;
 };
 }  // namespace vsag

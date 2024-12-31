@@ -17,6 +17,7 @@
 
 #include "index/diskann_zparameters.h"
 #include "index/hnsw_zparameters.h"
+#include "resource_owner_wrapper.h"
 #include "utils.h"
 #include "vsag/constants.h"
 #include "vsag/errors.h"
@@ -27,9 +28,12 @@ namespace vsag {
 tl::expected<bool, Error>
 check_diskann_hnsw_build_parameters(const std::string& json_string) {
     JsonType parsed_params = JsonType::parse(json_string);
+    std::shared_ptr<vsag::Resource> resource =
+        std::make_shared<vsag::ResourceOwnerWrapper>(new vsag::Resource(), true);
+
     IndexCommonParam index_common_params;
     try {
-        index_common_params = IndexCommonParam::CheckAndCreate(parsed_params, nullptr);
+        index_common_params = IndexCommonParam::CheckAndCreate(parsed_params, resource);
     } catch (const std::exception& e) {
         return tl::unexpected<Error>(ErrorType::INVALID_ARGUMENT, e.what());
     }

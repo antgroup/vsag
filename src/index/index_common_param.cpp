@@ -23,9 +23,10 @@
 namespace vsag {
 
 IndexCommonParam
-IndexCommonParam::CheckAndCreate(JsonType& params, std::shared_ptr<Allocator> allocator) {
+IndexCommonParam::CheckAndCreate(JsonType& params, const std::shared_ptr<Resource>& resource) {
     IndexCommonParam result;
-    result.allocator_ = std::move(allocator);
+    result.allocator_ = resource->allocator;
+    result.thread_pool_ = std::dynamic_pointer_cast<SafeThreadPool>(resource->thread_pool);
     // Check DataType
     CHECK_ARGUMENT(params.contains(PARAMETER_DTYPE),
                    fmt::format("parameters must contains {}", PARAMETER_DTYPE));
