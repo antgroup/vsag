@@ -25,8 +25,13 @@ public:
     }
 
     std::shared_ptr<Allocator>
-    GetAllocator() override {
+    GetAllocator() const override {
         return resource_->GetAllocator();
+    }
+
+    std::shared_ptr<ThreadPool>
+    GetThreadPool() const override {
+        return resource_->GetThreadPool();
     }
 
     ~ResourceOwnerWrapper() override {
