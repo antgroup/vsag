@@ -35,24 +35,33 @@ Usage: make <target>
 
 Targets:
 help:                    ## Show the help.
+##
+## ================ development ================
 debug:                   ## Build vsag with debug options.
-release:                 ## Build vsag with release options.
-distribution:            ## Build vsag with distribution options.
-libcxx:                  ## Build vsag using libc++.
-fmt:                     ## Format codes.
 test:                    ## Build and run unit tests.
 asan:                    ## Build with AddressSanitizer option.
-test_asan_parallel: asan ## Run unit tests parallel with AddressSanitizer option.
 test_asan: asan          ## Run unit tests with AddressSanitizer option.
 tsan:                    ## Build with ThreadSanitizer option.
 test_tsan: tsan          ## Run unit tests with ThreadSanitizer option.
-test_cov: cov            ## Build and run unit tests with code coverage enabled.
 clean:                   ## Clear build/ directory.
+##
+## ================ integration ================
+fmt:                     ## Format codes.
+cov:                     ## Build unit tests with code coverage enabled.
+test_parallel: debug     ## Run all tests parallel (used in CI).
+test_asan_parallel: asan ## Run unit tests parallel with AddressSanitizer option.
+test_tsan_parallel: tsan ## Run unit tests parallel with ThreadSanitizer option.
+##
+## ================ distribution ================
+release:                 ## Build vsag with release options.
+distribution:            ## Build vsag with distribution options.
+libcxx:                  ## Build vsag using libc++.
+pyvsag:                  ## Build pyvsag wheel.
+clean-release:           ## Clear build-release/ directory.
 install:                 ## Build and install the release version of vsag.
 ```
 
 ## Project Structure
-- `benchs/`: benchmark script in Python
 - `cmake/`: cmake util functions
 - `docker/`: the dockerfile to build develop and ci image
 - `docs/`: the design documents
@@ -60,7 +69,9 @@ install:                 ## Build and install the release version of vsag.
 - `extern/`: third-party libraries
 - `include/`: export header files
 - `mockimpl/`: the mock implementation that can be used in interface test
+- `python/`: the pyvsag package and setup tools
 - `python_bindings/`: the python bindings
 - `scripts/`: useful scripts
 - `src/`: the source codes and unit tests
 - `tests/`: the functional tests
+- `tools/`: the tools
