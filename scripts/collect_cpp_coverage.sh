@@ -20,23 +20,15 @@ lcov --gcov-tool ${SCRIPTS_DIR}/gcov_for_clang.sh \
      --include "*/vsag/src/*" \
      --exclude "*/vsag/include/vsag/expected.hpp*" \
      --exclude "*_test.cpp" \
+     --exclude "*/vsag/test_*.cpp" \
      --capture \
      --directory . \
-     --output-file  "${COVERAGE_DIR}/coverage_ut.info"
+     --output-file  "${COVERAGE_DIR}/coverage.info"
 
 pushd "${COVERAGE_DIR}"
-coverages=$(ls coverage_*.info)
+coverages=$(ls coverage.info)
 if [ ! "$coverages" ];then
     echo "no coverage file"
     exit 0
 fi
-lcov_command="lcov"
-for coverage in $coverages; do
-    echo "$coverage"
-    lcov_command="$lcov_command -a $coverage"
-done
-$lcov_command -o coverage.info \
-        --rc branch_coverage=1 \
-        --ignore-errors inconsistent,inconsistent \
-        --ignore-errors corrupt,corrupt
 popd
