@@ -136,6 +136,11 @@ public:
         return this->hgraph_->GetMemoryUsage();
     }
 
+    [[nodiscard]] uint64_t
+    EstimateMemory(const uint64_t num_elements) const override {
+        return this->hgraph_->EstimateMemory(num_elements);
+    }
+
     bool
     CheckFeature(IndexFeature feature) const override {
         return this->hgraph_->CheckFeature(feature);
