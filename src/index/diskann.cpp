@@ -15,7 +15,6 @@
 
 #include "diskann.h"
 
-#include <ThreadPool.h>
 #include <local_file_reader.h>
 
 #include <algorithm>
@@ -72,7 +71,7 @@ class LocalMemoryReader : public Reader {
 public:
     LocalMemoryReader(std::stringstream& file, bool support_async_io) {
         if (support_async_io) {
-            pool_ = std::make_unique<progschj::ThreadPool>(Option::Instance().num_threads_io());
+            pool_ = SafeThreadPool::FactoryDefaultThreadPool();
         }
         file_ << file.rdbuf();
         file_.seekg(0, std::ios::end);
@@ -91,7 +90,7 @@ public:
     virtual void
     AsyncRead(uint64_t offset, uint64_t len, void* dest, CallBack callback) override {
         if (pool_) {
-            pool_->enqueue([this, offset, len, dest, callback]() {
+            pool_->GeneralEnqueue([this, offset, len, dest, callback]() {
                 this->Read(offset, len, dest);
                 callback(IOErrorCode::IO_SUCCESS, "success");
             });
@@ -109,7 +108,7 @@ private:
     std::stringstream file_;
     uint64_t size_;
     std::mutex mutex_;
-    std::unique_ptr<progschj::ThreadPool> pool_;
+    std::shared_ptr<SafeThreadPool> pool_;
 };
 
 Binary
@@ -145,9 +144,10 @@ DiskANN::DiskANN(DiskannParameters& diskann_params, const IndexCommonParam& inde
       use_reference_(diskann_params.use_reference),
       use_opq_(diskann_params.use_opq),
       use_bsa_(diskann_params.use_bsa),
-      use_async_io_(diskann_params.use_async_io) {
+      use_async_io_(diskann_params.use_async_io),
+      index_common_param_(index_common_param) {
     if (not use_async_io_) {
-        pool_ = std::make_unique<progschj::ThreadPool>(Option::Instance().num_threads_io());
+        pool_ = index_common_param_.thread_pool_;
     }
     status_ = IndexStatus::EMPTY;
     batch_read_ =
@@ -166,7 +166,7 @@ DiskANN::DiskANN(DiskannParameters& diskann_params, const IndexCommonParam& inde
             } else {
                 std::vector<std::future<void>> futures;
                 for (const auto& req : requests) {
-                    auto future = pool_->enqueue([&, req]() {
+                    auto future = pool_->GeneralEnqueue([&]() {
                         auto [offset, len, dest] = req;
                         disk_layout_reader_->Read(offset, len, dest);
                     });

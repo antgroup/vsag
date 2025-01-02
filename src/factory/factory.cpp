@@ -24,7 +24,7 @@
 #include <mutex>
 #include <string>
 
-#include "ThreadPool.h"
+#include "safe_thread_pool.h"
 #include "vsag/engine.h"
 #include "vsag/options.h"
 
@@ -41,12 +41,15 @@ Factory::CreateIndex(const std::string& origin_name,
 
 class LocalFileReader : public Reader {
 public:
-    LocalFileReader(const std::string& filename, int64_t base_offset = 0, int64_t size = 0)
+    explicit LocalFileReader(const std::string& filename,
+                             int64_t base_offset = 0,
+                             int64_t size = 0,
+                             std::shared_ptr<SafeThreadPool> pool = nullptr)
         : filename_(filename),
           file_(std::ifstream(filename, std::ios::binary)),
           base_offset_(base_offset),
-          size_(size) {
-        pool_ = std::make_unique<progschj::ThreadPool>(Option::Instance().num_threads_io());
+          size_(size),
+          pool_(pool) {
     }
 
     ~LocalFileReader() {
@@ -62,10 +65,14 @@ public:
 
     virtual void
     AsyncRead(uint64_t offset, uint64_t len, void* dest, CallBack callback) override {
-        pool_->enqueue([this, offset, len, dest, callback]() {
-            this->Read(offset, len, dest);
-            callback(IOErrorCode::IO_SUCCESS, "success");
-        });
+        if (pool_) {
+            pool_->GeneralEnqueue([this, offset, len, dest, callback]() {
+                this->Read(offset, len, dest);
+                callback(IOErrorCode::IO_SUCCESS, "success");
+            });
+        } else {
+            pool_ = SafeThreadPool::FactoryDefaultThreadPool();
+        }
     }
 
     virtual uint64_t
@@ -79,7 +86,7 @@ private:
     int64_t base_offset_;
     uint64_t size_;
     std::mutex mutex_;
-    std::unique_ptr<progschj::ThreadPool> pool_;
+    std::shared_ptr<SafeThreadPool> pool_;
 };
 
 std::shared_ptr<Reader>
