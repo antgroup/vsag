@@ -24,7 +24,7 @@
 namespace vsag {
 class HGraphIndex : public Index {
 public:
-    HGraphIndex(const HGraphIndexParameter& param, const IndexCommonParam& common_param) noexcept;
+    HGraphIndex(const HGraphIndexParameter& param, const IndexCommonParam& common_param);
 
     ~HGraphIndex() override;
 
