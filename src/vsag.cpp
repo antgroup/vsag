@@ -31,7 +31,7 @@ version() {
 }
 
 bool
-init() {
+_init() {
 #ifndef NDEBUG
     // set debug level by default in debug version of VSAG
     logger::set_level(logger::level::debug);
@@ -58,6 +58,11 @@ init() {
     return true;
 }
 
-static bool _init = init();
+static bool _is_init = _init();
+
+bool
+init() {
+    return _is_init;
+}
 
 }  // namespace vsag
