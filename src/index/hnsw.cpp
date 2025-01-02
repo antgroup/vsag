@@ -86,6 +86,8 @@ HNSW::HNSW(HnswParameters hnsw_params, const IndexCommonParam& index_common_para
             hnsw_params.ef_construction,
             Options::Instance().block_size_limit());
     }
+
+    this->init_feature_list();
 }
 
 tl::expected<std::vector<int64_t>, Error>
@@ -195,7 +197,7 @@ HNSW::knn_search(const DatasetPtr& query,
                  int64_t k,
                  const std::string& parameters,
                  BaseFilterFunctor* filter_ptr) const {
-    SlowTaskTimer t("hnsw knnsearch", 20);
+    SlowTaskTimer t_total("hnsw knnsearch", 20);
 
     try {
         // cannot perform search on empty index
@@ -219,7 +221,7 @@ HNSW::knn_search(const DatasetPtr& query,
         CHECK_ARGUMENT(k > 0, fmt::format("k({}) must be greater than 0", k))
         k = std::min(k, GetNumElements());
 
-        std::shared_lock lock(rw_mutex_);
+        std::shared_lock lock_global(rw_mutex_);
 
         // check search parameters
         auto params = HnswSearchParameters::FromJson(parameters);
@@ -249,7 +251,7 @@ HNSW::knn_search(const DatasetPtr& query,
 
         // return result
         auto result = Dataset::Make();
-        if (results.size() == 0) {
+        if (results.empty()) {
             result->Dim(0)->NumElements(1);
             return result;
         }
@@ -274,9 +276,9 @@ HNSW::knn_search(const DatasetPtr& query,
 
         result->Dim(results.size())->NumElements(1)->Owner(true, allocator_.get());
 
-        int64_t* ids = (int64_t*)allocator_->Allocate(sizeof(int64_t) * results.size());
+        auto* ids = (int64_t*)allocator_->Allocate(sizeof(int64_t) * results.size());
         result->Ids(ids);
-        float* dists = (float*)allocator_->Allocate(sizeof(float) * results.size());
+        auto* dists = (float*)allocator_->Allocate(sizeof(float) * results.size());
         result->Distances(dists);
 
         for (int64_t j = results.size() - 1; j >= 0; --j) {
@@ -376,7 +378,7 @@ HNSW::range_search(const DatasetPtr& query,
         // return result
         auto result = Dataset::Make();
         size_t target_size = results.size();
-        if (results.size() == 0) {
+        if (results.empty()) {
             result->Dim(0)->NumElements(1);
             return result;
         }
@@ -384,9 +386,9 @@ HNSW::range_search(const DatasetPtr& query,
             target_size = std::min((size_t)limited_size, target_size);
         }
         result->Dim(target_size)->NumElements(1)->Owner(true, allocator_.get());
-        int64_t* ids = (int64_t*)allocator_->Allocate(sizeof(int64_t) * target_size);
+        auto* ids = (int64_t*)allocator_->Allocate(sizeof(int64_t) * target_size);
         result->Ids(ids);
-        float* dists = (float*)allocator_->Allocate(sizeof(float) * target_size);
+        auto* dists = (float*)allocator_->Allocate(sizeof(float) * target_size);
         result->Distances(dists);
         for (int64_t j = results.size() - 1; j >= 0; --j) {
             if (j < target_size) {
@@ -914,6 +916,38 @@ HNSW::set_dataset(const DatasetPtr& base, const void* vectors_ptr, uint32_t num_
     } else {
         throw std::invalid_argument(fmt::format("no support for this type: {}", (int)type_));
     }
+}
+bool
+HNSW::CheckFeature(IndexFeature feature) const {
+    return this->feature_list_.CheckFeature(feature);
+}
+
+void
+HNSW::init_feature_list() {
+    // Add & Build
+    feature_list_.SetFeatures({IndexFeature::SUPPORT_BUILD,
+                               IndexFeature::SUPPORT_BUILD_WITH_MULTI_THREAD,
+                               IndexFeature::SUPPORT_ADD_AFTER_BUILD,
+                               IndexFeature::SUPPORT_ADD_FROM_EMPTY});
+    // Search
+    feature_list_.SetFeatures({IndexFeature::SUPPORT_KNN_SEARCH,
+                               IndexFeature::SUPPORT_RANGE_SEARCH,
+                               IndexFeature::SUPPORT_KNN_SEARCH_WITH_ID_FILTER,
+                               IndexFeature::SUPPORT_RANGE_SEARCH_WITH_ID_FILTER});
+    // concurrency
+    feature_list_.SetFeatures({IndexFeature::SUPPORT_SEARCH_CONCURRENT,
+                               IndexFeature::SUPPORT_ADD_SEARCH_CONCURRENT,
+                               IndexFeature::SUPPORT_ADD_CONCURRENT,
+                               IndexFeature::SUPPORT_UPDATE_ID_CONCURRENT,
+                               IndexFeature::SUPPORT_UPDATE_VECTOR_CONCURRENT});
+    // serialize
+    feature_list_.SetFeatures({IndexFeature::SUPPORT_DESERIALIZE_BINARY_SET,
+                               IndexFeature::SUPPORT_DESERIALIZE_FILE,
+                               IndexFeature::SUPPORT_DESERIALIZE_READER_SET,
+                               IndexFeature::SUPPORT_SERIALIZE_BINARY_SET,
+                               IndexFeature::SUPPORT_SERIALIZE_FILE});
+    // other
+    feature_list_.SetFeature(IndexFeature::SUPPORT_CAL_DISTANCE_BY_ID);
 }
 
 }  // namespace vsag
