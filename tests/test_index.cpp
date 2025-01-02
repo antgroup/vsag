@@ -537,5 +537,22 @@ TestIndex::TestDuplicateAdd(const TestIndex::IndexPtr& index, const TestDatasetP
     REQUIRE(add_index_2.has_value());
     check_func(add_index_2.value());
 }
+void
+TestIndex::TestEstimateMemory(const std::string& index_name,
+                              const std::string& build_param,
+                              const TestDatasetPtr& dataset) {
+    auto init_memory = fixtures::GetMemoryUsageByte();
+    auto index = TestFactory(index_name, build_param, /*expect_success= */ true);
+    REQUIRE(index->GetNumElements() == 0);
+    if (index->CheckFeature(vsag::SUPPORT_ESTIMATE_MEMORY)) {
+        auto data_size = dataset->base_->GetNumElements();
+        auto estimate_memory = index->EstimateMemory(data_size);
+        index->Build(dataset->base_);
+        auto end_memory = fixtures::GetMemoryUsageByte();
+        auto real_memory = end_memory - init_memory;
+        REQUIRE(estimate_memory >= static_cast<uint64_t>(real_memory));
+        REQUIRE(estimate_memory <= static_cast<uint64_t>(real_memory + 5 * 1024 * 1024));
+    }
+}
 
 }  // namespace fixtures

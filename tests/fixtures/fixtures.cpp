@@ -15,6 +15,9 @@
 
 #include "fixtures.h"
 
+#include <malloc.h>
+#include <unistd.h>
+
 #include <cstdint>
 #include <random>
 #include <string>
@@ -300,6 +303,16 @@ SplitString(const std::string& s, char delimiter) {
     }
 
     return tokens;
+}
+uint64_t
+GetMemoryUsageByte() {
+    malloc_trim(0);
+    sleep(1);
+    std::ifstream statm("/proc/self/statm");
+    uint64_t sizes[6];
+    statm >> sizes[0] >> sizes[1] >> sizes[2] >> sizes[3] >> sizes[4] >> sizes[5];
+    size_t pageSize = 4096;
+    return sizes[1] * pageSize;
 }
 
 }  // namespace fixtures
