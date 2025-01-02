@@ -28,7 +28,7 @@ HierarchicalNSW::HierarchicalNSW(SpaceInterface* s,
                                  size_t random_seed,
                                  bool allow_replace_deleted)
     : allocator_(allocator),
-      link_list_locks_(max_elements, allocator),
+      points_locks_(max_elements, allocator),
       allow_replace_deleted_(allow_replace_deleted),
       use_reversed_edges_(use_reversed_edges),
       normalize_(normalize),
@@ -183,7 +183,7 @@ HierarchicalNSW::setBatchNeigohbors(InnerIdType internal_id,
                                     int level,
                                     const InnerIdType* neighbors,
                                     size_t neigbor_count) {
-    std::unique_lock lock(link_list_locks_[internal_id]);
+    std::unique_lock lock(points_locks_[internal_id]);
     linklistsizeint* ll_cur = getLinklistAtLevel(internal_id, level);
     for (int i = 1; i <= neigbor_count; ++i) {
         ll_cur[i] = neighbors[i - 1];
@@ -197,7 +197,7 @@ HierarchicalNSW::appendNeigohbor(InnerIdType internal_id,
                                  int level,
                                  InnerIdType neighbor,
                                  size_t max_degree) {
-    std::unique_lock lock(link_list_locks_[internal_id]);
+    std::unique_lock lock(points_locks_[internal_id]);
     linklistsizeint* ll_cur = getLinklistAtLevel(internal_id, level);
     size_t neigbor_count = getListCount(ll_cur) + 1;
     if (neigbor_count <= max_degree) {
@@ -716,7 +716,7 @@ HierarchicalNSW::resizeIndex(size_t new_max_elements) {
             "Not enough memory: resizeIndex failed to allocate element_levels_");
     }
     element_levels_ = element_levels_new;
-    vsag::Vector<std::shared_mutex>(new_max_elements, allocator_).swap(link_list_locks_);
+    vsag::Vector<std::shared_mutex>(new_max_elements, allocator_).swap(points_locks_);
 
     if (normalize_) {
         auto new_molds = (float*)allocator_->Reallocate(molds_, new_max_elements * sizeof(float));
@@ -879,7 +879,7 @@ HierarchicalNSW::DeserializeImpl(StreamReader& reader, SpaceInterface* s, size_t
     size_links_per_element_ = maxM_ * sizeof(InnerIdType) + sizeof(linklistsizeint);
 
     size_links_level0_ = maxM0_ * sizeof(InnerIdType) + sizeof(linklistsizeint);
-    vsag::Vector<std::shared_mutex>(max_elements, allocator_).swap(link_list_locks_);
+    vsag::Vector<std::shared_mutex>(max_elements, allocator_).swap(points_locks_);
 
     rev_size_ = 1.0 / mult_;
     for (size_t i = 0; i < cur_element_count_; i++) {
@@ -1174,7 +1174,7 @@ void
 HierarchicalNSW::removePoint(LabelType label) {
     InnerIdType cur_c = 0;
     InnerIdType internal_id = 0;
-    std::unique_lock lock(global_);
+    std::unique_lock lock(max_level_mutex_);
     {
         // Swap the connection relationship corresponding to the label to be deleted with the
         // last element, and modify the information in label_lookup_. By swapping the two points,
@@ -1317,7 +1317,7 @@ HierarchicalNSW::addPoint(const void* data_point, LabelType label, int level) {
     }
 
     std::shared_lock resize_lock(resize_mutex_);
-    std::unique_lock lock(global_);
+    std::unique_lock lock(max_level_mutex_);
     int maxlevelcopy = max_level_;
     if (curlevel <= maxlevelcopy)
         lock.unlock();
@@ -1406,7 +1406,7 @@ HierarchicalNSW::searchKnn(const void* query_data,
     normalizeVector(query_data, normalize_query);
     int64_t currObj;
     {
-        std::shared_lock data_loc(global_);
+        std::shared_lock data_loc(max_level_mutex_);
         currObj = enterpoint_node_;
     }
     if (currObj < 0) {
@@ -1469,7 +1469,7 @@ HierarchicalNSW::searchRange(const void* query_data,
     normalizeVector(query_data, normalize_query);
     int64_t currObj;
     {
-        std::shared_lock data_loc(global_);
+        std::shared_lock data_loc(max_level_mutex_);
         currObj = enterpoint_node_;
     }
     float curdist = fstdistfunc_(query_data, getDataByInternalId(currObj), dist_func_param_);

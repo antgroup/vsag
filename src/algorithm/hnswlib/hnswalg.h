@@ -74,11 +74,14 @@ private:
 
     VisitedListPool* visited_list_pool_{nullptr};
 
-    // Locks operations with element by label value
-    mutable std::shared_mutex resize_mutex_{};
-
-    mutable std::shared_mutex global_{};
-    mutable vsag::Vector<std::shared_mutex> link_list_locks_;
+    mutable std::shared_mutex
+        resize_mutex_{};  // Ensures safety during the resize process; is the largest lock.
+    mutable std::shared_mutex
+        max_level_mutex_{};  // Ensures access safety for global max_level and entry point.
+    mutable vsag::Vector<std::shared_mutex>
+        points_locks_;  // Ensures access safety for the link list and label of a specific point.
+    mutable std::shared_mutex
+        label_lookup_lock_{};  // Ensures access safety for the global label lookup table.
 
     int64_t enterpoint_node_{0};
 
@@ -105,7 +108,6 @@ private:
     DISTFUNC fstdistfunc_{nullptr};
     void* dist_func_param_{nullptr};
 
-    mutable std::shared_mutex label_lookup_lock_{};  // lock for label_lookup_
     vsag::UnorderedMap<LabelType, InnerIdType> label_lookup_;
 
     std::default_random_engine level_generator_;
@@ -149,7 +151,7 @@ public:
 
     inline LabelType
     getExternalLabel(InnerIdType internal_id) const {
-        std::shared_lock lock(link_list_locks_[internal_id]);
+        std::shared_lock lock(points_locks_[internal_id]);
         LabelType value;
         std::memcpy(&value,
                     data_level0_memory_->GetElementPtr(internal_id, label_offset_),
@@ -159,7 +161,7 @@ public:
 
     inline void
     setExternalLabel(InnerIdType internal_id, LabelType label) const {
-        std::unique_lock lock(link_list_locks_[internal_id]);
+        std::unique_lock lock(points_locks_[internal_id]);
         std::memcpy(data_level0_memory_->GetElementPtr(internal_id, label_offset_),
                     &label,
                     sizeof(LabelType));
@@ -269,13 +271,13 @@ public:
     inline std::shared_ptr<char[]>
     getLinklistAtLevelWithLock(InnerIdType internal_id, int level) const {
         if (level == 0) {
-            std::shared_lock lock(link_list_locks_[internal_id]);
+            std::shared_lock lock(points_locks_[internal_id]);
             std::shared_ptr<char[]> data = std::shared_ptr<char[]>(new char[size_links_level0_]);
             auto src = data_level0_memory_->GetElementPtr(internal_id, offsetLevel0_);
             std::memcpy(data.get(), src, size_links_level0_);
             return data;
         } else {
-            std::shared_lock lock(link_list_locks_[internal_id]);
+            std::shared_lock lock(points_locks_[internal_id]);
             std::shared_ptr<char[]> data =
                 std::shared_ptr<char[]>(new char[size_links_per_element_]);
             std::memcpy(data.get(),
