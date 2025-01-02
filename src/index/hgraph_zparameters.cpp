@@ -62,7 +62,9 @@ static const std::string HGRAPH_PARAMS_TEMPLATE =
         },
         "{HGRAPH_PRECISE_CODES_KEY}": {
             "{IO_TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
-            "{IO_PARAMS_KEY}": {},
+            "{IO_PARAMS_KEY}": {
+                "{BLOCK_IO_BLOCK_SIZE_KEY}": {DEFAULT_BLOCK_SIZE}
+            },
             "codes_type": "flatten_codes",
             "codes_param": {},
             "{QUANTIZATION_TYPE_KEY}": "{QUANTIZATION_TYPE_VALUE_FP32}",

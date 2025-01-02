@@ -228,4 +228,7 @@ GetFileSize(const std::string& filename);
 
 std::vector<std::string>
 SplitString(const std::string& s, char delimiter);
+
+uint64_t
+GetMemoryUsageByte();
 }  // Namespace fixtures
