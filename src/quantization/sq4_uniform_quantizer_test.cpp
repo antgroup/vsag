@@ -60,7 +60,7 @@ TestComputeMetricSQ4Uniform(uint64_t dim, int count, float error = 1e-5) {
     TestComputeCodesSame<SQ4UniformQuantizer<metric>, metric>(quantizer, dim, count, error);
 }
 
-TEST_CASE("compute [ut][SQ4UniformQuantizer]") {
+TEST_CASE("compute", "[ut][SQ4UniformQuantizer]") {
     constexpr MetricType metrics[2] = {MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_IP};
     float error = 4 * 1.0f / 15.0f;
     for (auto dim : dims) {
