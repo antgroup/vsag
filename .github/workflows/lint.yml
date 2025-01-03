@@ -1,0 +1,19 @@
+name: Lint
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  clang-tidy-check:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Install clang-tidy
+        run: sudo apt install clang-tidy-15 -y
+      - name: Run lint
+        run: make lint
