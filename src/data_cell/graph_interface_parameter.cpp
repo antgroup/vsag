@@ -13,8 +13,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#pragma once
+#include "graph_interface_parameter.h"
 
-#include "fp32_quantizer.h"
-#include "quantizer.h"
-#include "scalar_quantization/sq_headers.h"
+#include "graph_datacell_parameter.h"
+
+namespace vsag {
+GraphInterfaceParameterPtr
+GraphInterfaceParameter::GetGraphParameterByJson(const JsonType& json) {
+    auto param = std::make_shared<GraphDataCellParameter>();
+    param->FromJson(json);
+    return param;
+}
+}  // namespace vsag

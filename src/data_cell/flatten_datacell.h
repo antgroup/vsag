@@ -30,8 +30,8 @@ class FlattenDataCell : public FlattenInterface {
 public:
     FlattenDataCell() = default;
 
-    explicit FlattenDataCell(const JsonType& quantization_param,
-                             const JsonType& io_param,
+    explicit FlattenDataCell(const QuantizerParameterPtr& quantization_param,
+                             const IOParameterPtr& io_param,
                              const IndexCommonParam& common_param);
 
     void
@@ -127,8 +127,8 @@ private:
 };
 
 template <typename QuantTmpl, typename IOTmpl>
-FlattenDataCell<QuantTmpl, IOTmpl>::FlattenDataCell(const JsonType& quantization_param,
-                                                    const JsonType& io_param,
+FlattenDataCell<QuantTmpl, IOTmpl>::FlattenDataCell(const QuantizerParameterPtr& quantization_param,
+                                                    const IOParameterPtr& io_param,
                                                     const IndexCommonParam& common_param)
     : allocator_(common_param.allocator_.get()) {
     this->quantizer_ = std::make_shared<QuantTmpl>(quantization_param, common_param);

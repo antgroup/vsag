@@ -13,4 +13,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "sq8_uniform_quantizer.h"
+#pragma once
+
+#include "io_parameter.h"
+
+namespace vsag {
+class MemoryIOParameter : public IOParameter {
+public:
+    MemoryIOParameter();
+
+    explicit MemoryIOParameter(const JsonType& json);
+
+    void
+    FromJson(const JsonType& json) override;
+
+    JsonType
+    ToJson() override;
+};
+
+using MemoryIOParameterPtr = std::shared_ptr<MemoryIOParameter>;
+
+}  // namespace vsag

@@ -13,8 +13,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#pragma once
+#include "sq8_quantizer_parameter.h"
 
-#include "fp32_quantizer.h"
-#include "quantizer.h"
-#include "scalar_quantization/sq_headers.h"
+#include "inner_string_params.h"
+
+namespace vsag {
+SQ8QuantizerParameter::SQ8QuantizerParameter() : QuantizerParameter(QUANTIZATION_TYPE_VALUE_SQ8) {
+}
+
+void
+SQ8QuantizerParameter::FromJson(const JsonType& json) {
+}
+
+JsonType
+SQ8QuantizerParameter::ToJson() {
+    JsonType json;
+    json[QUANTIZATION_TYPE_KEY] = QUANTIZATION_TYPE_VALUE_SQ8;
+    return json;
+}
+}  // namespace vsag

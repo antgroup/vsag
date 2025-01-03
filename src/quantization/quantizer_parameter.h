@@ -15,6 +15,29 @@
 
 #pragma once
 
-#include "fp32_quantizer.h"
-#include "quantizer.h"
-#include "scalar_quantization/sq_headers.h"
+#include "parameter.h"
+
+namespace vsag {
+
+class QuantizerParameter;
+using QuantizerParameterPtr = std::shared_ptr<QuantizerParameter>;
+
+class QuantizerParameter : public Parameter {
+public:
+    static QuantizerParameterPtr
+    GetQuantizerParameterByJson(const JsonType& json);
+
+public:
+    inline std::string
+    GetTypeName() {
+        return this->name_;
+    }
+
+protected:
+    explicit QuantizerParameter(std::string name);
+
+private:
+    std::string name_{};
+};
+
+}  // namespace vsag

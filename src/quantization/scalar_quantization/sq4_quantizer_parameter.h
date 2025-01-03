@@ -15,6 +15,24 @@
 
 #pragma once
 
-#include "fp32_quantizer.h"
-#include "quantizer.h"
-#include "scalar_quantization/sq_headers.h"
+#include "quantization/quantizer_parameter.h"
+
+namespace vsag {
+class SQ4QuantizerParameter : public QuantizerParameter {
+public:
+    SQ4QuantizerParameter();
+
+    ~SQ4QuantizerParameter() override = default;
+
+    void
+    FromJson(const JsonType& json) override;
+
+    JsonType
+    ToJson() override;
+
+public:
+};
+
+using SQ4QuantizerParameterPtr = std::shared_ptr<SQ4QuantizerParameter>;
+
+}  // namespace vsag

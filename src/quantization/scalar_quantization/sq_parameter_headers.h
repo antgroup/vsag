@@ -15,6 +15,7 @@
 
 #pragma once
 
-#include "fp32_quantizer.h"
-#include "quantizer.h"
-#include "scalar_quantization/sq_headers.h"
+#include "sq4_quantizer_parameter.h"
+#include "sq4_uniform_quantizer_parameter.h"
+#include "sq8_quantizer_parameter.h"
+#include "sq8_uniform_quantizer_parameter.h"
