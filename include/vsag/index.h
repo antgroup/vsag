@@ -28,7 +28,7 @@
 #include "vsag/dataset.h"
 #include "vsag/errors.h"
 #include "vsag/expected.hpp"
-#include "vsag/index_feature.h"
+#include "vsag/index_features.h"
 #include "vsag/readerset.h"
 
 namespace vsag {
