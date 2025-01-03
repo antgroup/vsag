@@ -3,6 +3,7 @@
 
 ![CircleCI](https://img.shields.io/circleci/build/github/antgroup/vsag?logo=circleci&label=CircleCI)
 ![GitHub License](https://img.shields.io/github/license/antgroup/vsag)
+![GitHub Contributors](https://img.shields.io/github/contributors/antgroup/vsag)
 ![GitHub Release](https://img.shields.io/github/v/release/antgroup/vsag?label=last%20release)
 
 ![PyPI - Version](https://img.shields.io/pypi/v/pyvsag)
