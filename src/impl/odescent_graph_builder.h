@@ -48,9 +48,12 @@ struct Node {
     Node() {
     }
 
-    inline bool
+    bool
     operator<(const Node& other) const {
-        return distance < other.distance;
+        if (distance != other.distance) {
+            return distance < other.distance;
+        }
+        return old && not other.old;
     }
 
     bool
