@@ -51,11 +51,11 @@ Odescent::Build(const DatasetPtr& dataset) {
     min_in_degree_ = std::min(min_in_degree_, data_num_ - 1);
     Vector<Vector<uint32_t>> old_neigbors(allocator_);
     Vector<Vector<uint32_t>> new_neigbors(allocator_);
-    new_candidates_.resize(data_num_, Vector<Node>(allocator_));
+    candidates_len_.resize(data_num_);
+    new_candidates_.resize(data_num_, Vector<Node>(2 * max_degree_,allocator_));
     old_neigbors.resize(data_num_, Vector<uint32_t>(allocator_));
     new_neigbors.resize(data_num_, Vector<uint32_t>(allocator_));
     for (int i = 0; i < data_num_; ++i) {
-        new_candidates_[i].reserve(max_degree_);
         old_neigbors[i].reserve(max_degree_);
         new_neigbors[i].reserve(max_degree_);
     }
@@ -83,8 +83,9 @@ Odescent::SaveGraph(std::stringstream& out) {
     out.write((char*)&index_size, sizeof(uint64_t));
     out.write((char*)&max_degree, sizeof(uint32_t));
     uint32_t ep_u32 = 0;
+    size_t num_frozen = 0;
     out.write((char*)&ep_u32, sizeof(uint32_t));
-    out.write((char*)&ep_u32, sizeof(size_t));
+    out.write((char*)&num_frozen, sizeof(size_t));
     // Note: at this point, either _nd == _max_points or any frozen points have
     // been temporarily moved to _nd, so _nd + _num_frozen_points is the valid
     // location limit.
@@ -148,6 +149,7 @@ Odescent::init_graph() {
 void
 Odescent::update_neighbors(Vector<Vector<uint32_t>>& old_neigbors,
                            Vector<Vector<uint32_t>>& new_neigbors) {
+    std::fill(candidates_len_.begin(), candidates_len_.end(), 0);
     for (int i = 0; i < data_num_; ++i) {
         for (int j = 0; j < new_neigbors[i].size(); ++j) {
             for (int k = j + 1; k < new_neigbors[i].size(); ++k) {
@@ -156,10 +158,24 @@ Odescent::update_neighbors(Vector<Vector<uint32_t>>& old_neigbors,
                 }
                 float dist = get_distance(new_neigbors[i][j], new_neigbors[i][k]);
                 if (dist < graph[new_neigbors[i][j]].greast_neighbor_distance) {
-                    new_candidates_[new_neigbors[i][j]].emplace_back(new_neigbors[i][k], dist);
+                    auto & current_loc = candidates_len_[new_neigbors[i][j]];
+                    if (current_loc >= new_candidates_[new_neigbors[i][j]].size()) {
+                        new_candidates_[new_neigbors[i][j]].resize(new_candidates_[new_neigbors[i][j]].size() + max_degree_);
+                    }
+                    auto& node = new_candidates_[new_neigbors[i][j]][current_loc];
+                    node.id = new_neigbors[i][k];
+                    node.distance = dist;
+                    current_loc ++;
                 }
                 if (dist < graph[new_neigbors[i][k]].greast_neighbor_distance) {
-                    new_candidates_[new_neigbors[i][k]].emplace_back(new_neigbors[i][j], dist);
+                    auto & current_loc = candidates_len_[new_neigbors[i][k]];
+                    if (current_loc >= new_candidates_[new_neigbors[i][k]].size()) {
+                        new_candidates_[new_neigbors[i][k]].resize(new_candidates_[new_neigbors[i][k]].size() + max_degree_);
+                    }
+                    auto& node = new_candidates_[new_neigbors[i][k]][current_loc];
+                    node.id = new_neigbors[i][j];
+                    node.distance = dist;
+                    current_loc ++;
                 }
             }
 
@@ -169,10 +185,24 @@ Odescent::update_neighbors(Vector<Vector<uint32_t>>& old_neigbors,
                 }
                 float dist = get_distance(new_neigbors[i][j], old_neigbors[i][k]);
                 if (dist < graph[new_neigbors[i][j]].greast_neighbor_distance) {
-                    new_candidates_[new_neigbors[i][j]].emplace_back(old_neigbors[i][k], dist);
+                    auto & current_loc = candidates_len_[new_neigbors[i][j]];
+                    if (current_loc >= new_candidates_[new_neigbors[i][j]].size()) {
+                        new_candidates_[new_neigbors[i][j]].resize(new_candidates_[new_neigbors[i][j]].size() + max_degree_);
+                    }
+                    auto& node = new_candidates_[new_neigbors[i][j]][current_loc];
+                    node.id = old_neigbors[i][k];
+                    node.distance = dist;
+                    current_loc ++;
                 }
                 if (dist < graph[old_neigbors[i][k]].greast_neighbor_distance) {
-                    new_candidates_[old_neigbors[i][k]].emplace_back(new_neigbors[i][j], dist);
+                    auto & current_loc = candidates_len_[old_neigbors[i][k]];
+                    if (current_loc >= new_candidates_[old_neigbors[i][k]].size()) {
+                        new_candidates_[old_neigbors[i][k]].resize(new_candidates_[old_neigbors[i][k]].size() + max_degree_);
+                    }
+                    auto& node = new_candidates_[old_neigbors[i][k]][current_loc];
+                    node.id = new_neigbors[i][j];
+                    node.distance = dist;
+                    current_loc ++;
                 }
             }
         }
@@ -182,7 +212,7 @@ Odescent::update_neighbors(Vector<Vector<uint32_t>>& old_neigbors,
 
     for (uint32_t i = 0; i < data_num_; ++i) {
         graph[i].neigbors.insert(
-            graph[i].neigbors.end(), new_candidates_[i].begin(), new_candidates_[i].end());
+            graph[i].neigbors.end(), new_candidates_[i].begin(), new_candidates_[i].begin() + candidates_len_[i]);
         std::sort(graph[i].neigbors.begin(), graph[i].neigbors.end());
         graph[i].neigbors.erase(std::unique(graph[i].neigbors.begin(), graph[i].neigbors.end()),
                                 graph[i].neigbors.end());
@@ -190,7 +220,6 @@ Odescent::update_neighbors(Vector<Vector<uint32_t>>& old_neigbors,
             graph[i].neigbors.resize(max_degree_);
         }
         graph[i].greast_neighbor_distance = graph[i].neigbors.back().distance;
-        new_candidates_[i].clear();
     }
 }
 

@@ -78,6 +78,7 @@ public:
              float sample_rate,
              FlattenInterfacePtr flatten_interface,
              Allocator* allocator,
+             SafeThreadPool* thread_pool,
              bool pruning = true)
         : max_degree_(max_degree),
           alpha_(alpha),
@@ -87,7 +88,9 @@ public:
           pruning_(pruning),
           allocator_(allocator),
           new_candidates_(allocator),
-          graph(allocator) {
+          graph(allocator),
+          candidates_len_(allocator),
+          thread_pool_(thread_pool){
     }
 
     bool
@@ -139,6 +142,8 @@ private:
     int64_t min_in_degree_ = 5;
 
     Vector<Vector<Node>> new_candidates_;
+    Vector<uint32_t> candidates_len_;
+    SafeThreadPool* thread_pool_;
 
     bool pruning_{true};
     float sample_rate_{0.3};

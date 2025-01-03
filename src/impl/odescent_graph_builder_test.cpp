@@ -78,6 +78,7 @@ TEST_CASE("build nndescent", "[ut][nndescent]") {
     param.metric_ = vsag::MetricType::METRIC_TYPE_L2SQR;
     param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
     param.allocator_ = vsag::SafeAllocator::FactoryDefaultAllocator();
+    param.thread_pool_ = vsag::SafeThreadPool::FactoryDefaultThreadPool();
     vsag::JsonType type = vsag::JsonType::parse(FLATTEN_PARAM);
     vsag::FlattenInterfacePtr flatten_interface_ptr =
         vsag::FlattenInterface::MakeInstance(type, param);
@@ -87,7 +88,7 @@ TEST_CASE("build nndescent", "[ut][nndescent]") {
     vsag::DatasetPtr dataset = vsag::Dataset::Make();
     dataset->NumElements(num_vectors)->Float32Vectors(vectors)->Dim(dim)->Owner(true);
     vsag::Odescent graph(
-        max_degree, 1, 30, 0.3, flatten_interface_ptr, param.allocator_.get(), false);
+        max_degree, 1, 30, 0.3, flatten_interface_ptr, param.allocator_.get(), param.thread_pool_.get(), false);
     graph.Build(dataset);
 
     auto extract_graph = graph.GetGraph();

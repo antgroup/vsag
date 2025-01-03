@@ -237,7 +237,8 @@ DiskANN::build(const DatasetPtr& base) {
                                  diskann_params_.turn,
                                  diskann_params_.sample_rate,
                                  flatten_interface_ptr,
-                                 common_param_.allocator_.get());
+                                 common_param_.allocator_.get(),
+                                 common_param_.thread_pool_.get());
             graph.Build(base);
             graph.SaveGraph(graph_stream_);
             int data_num_int32 = data_num;
@@ -253,7 +254,7 @@ DiskANN::build(const DatasetPtr& base) {
             std::vector<int64_t> tags(ids, ids + data_num);
             auto index_build_params =
                 diskann::IndexWriteParametersBuilder(L_, R_)
-                    .with_num_threads(Options::Instance().num_threads_building())
+                    .with_num_threads(1)
                     .build();
             failed_locs =
                 build_index_->build(vectors, data_num, index_build_params, tags, use_reference_);
