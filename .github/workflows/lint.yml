@@ -10,10 +10,12 @@ jobs:
   clang-tidy-check:
     name: Lint
     runs-on: ubuntu-latest
+    container:
+      image: vsaglib/vsag:ubuntu
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
       - name: Install clang-tidy
-        run: sudo apt install clang-tidy-15 -y
+        run: sudo apt install clang-tidy-15 -y && sudo ln -s /usr/bin/clang-tidy-15 /usr/bin/clang-tidy
       - name: Run lint
-        run: make lint
+        run: make debug && make lint
