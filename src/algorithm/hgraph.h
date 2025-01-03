@@ -30,7 +30,7 @@
 #include "index_feature_list.h"
 #include "typing.h"
 #include "vsag/index.h"
-#include "vsag/index_feature.h"
+#include "vsag/index_features.h"
 
 namespace vsag {
 class HGraph {
