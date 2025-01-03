@@ -39,7 +39,7 @@ readBinaryPOD(std::istream& in, T& podRef) {
 void
 float_diskann() {
     int dim = 65;             // Dimension of the elements
-    int max_elements = 1000;  // Maximum number of elements, should be known beforehand
+    int max_elements = 100000;  // Maximum number of elements, should be known beforehand
     int max_degree = 16;      // Tightly connected with internal dimensionality of the data
     // strongly affects the memory consumption
     int ef_construction = 200;  // Controls index search speed/build speed tradeoff
@@ -65,6 +65,7 @@ float_diskann() {
                                       {"ef_construction", ef_construction},
                                       {"pq_sample_rate", pq_sample_rate},
                                       {"pq_dims", pq_dims},
+                                      {"graph_type", "odescent"},
                                       {"use_pq_search", true},
                                       {"use_async_io", true}};
     nlohmann::json index_parameters{
@@ -118,13 +119,7 @@ float_diskann() {
             {"diskann", {{"ef_search", ef_search}, {"beam_search", 1}, {"io_limit", io_limit}}}};
         int64_t k = 2;
         if (auto result = diskann->KnnSearch(query, k, parameters.dump()); result.has_value()) {
-            correct += vsag::knn_search_recall(data,
-                                               ids,
-                                               max_elements,
-                                               data + i * dim,
-                                               dim,
-                                               result.value()->GetIds(),
-                                               result.value()->GetDim());
+            correct += result.value()->GetIds()[0] == i? 1: 0;
         } else if (result.error().type == vsag::ErrorType::INTERNAL_ERROR) {
             std::cerr << "failed to perform knn search on index" << std::endl;
         }

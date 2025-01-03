@@ -27,6 +27,8 @@
 #include <stdexcept>
 #include <utility>
 
+#include "data_cell/flatten_datacell.h"
+#include "impl/odescent_graph_builder.h"
 #include "vsag/constants.h"
 #include "vsag/errors.h"
 #include "vsag/expected.hpp"
@@ -48,6 +50,16 @@ const static std::string BUILD_STATUS = "status";
 const static std::string BUILD_CURRENT_ROUND = "round";
 const static std::string BUILD_NODES = "builded_nodes";
 const static std::string BUILD_FAILED_LOC = "failed_loc";
+
+const static std::string FLATTEN_PARAM = R"(
+    {
+        "io_type": "memory",
+        "io_params": {},
+        "codes_type": "flatten_codes",
+        "quantization_type": "sq8",
+        "quantization_params": {}
+    }
+)";
 
 template <typename T>
 Binary
@@ -145,7 +157,8 @@ DiskANN::DiskANN(DiskannParameters& diskann_params, const IndexCommonParam& inde
       use_opq_(diskann_params.use_opq),
       use_bsa_(diskann_params.use_bsa),
       use_async_io_(diskann_params.use_async_io),
-      index_common_param_(index_common_param) {
+      diskann_params_(diskann_params),
+      common_param_(index_common_param) {
     if (not use_async_io_) {
         pool_ = index_common_param_.thread_pool_;
     }
@@ -212,7 +225,28 @@ DiskANN::build(const DatasetPtr& base) {
         auto data_num = base->GetNumElements();
 
         std::vector<size_t> failed_locs;
-        {
+        if (diskann_params_.graph_type == DISKANN_GRAPH_TYPE_ODESCENT) {
+            SlowTaskTimer t("odescent build full (graph)");
+            JsonType type = JsonType::parse(FLATTEN_PARAM);
+            FlattenInterfacePtr flatten_interface_ptr =
+                FlattenInterface::MakeInstance(type, common_param_);
+            flatten_interface_ptr->Train(vectors, data_num);
+            flatten_interface_ptr->BatchInsertVector(vectors, data_num);
+            vsag::Odescent graph(2 * R_,
+                                 diskann_params_.alpha,
+                                 diskann_params_.turn,
+                                 diskann_params_.sample_rate,
+                                 flatten_interface_ptr,
+                                 common_param_.allocator_.get(),
+                                 common_param_.thread_pool_.get());
+            graph.Build(base);
+            graph.SaveGraph(graph_stream_);
+            int data_num_int32 = data_num;
+            int data_dim_int32 = data_dim;
+            tag_stream_.write((char*)&data_num_int32, sizeof(data_num_int32));
+            tag_stream_.write((char*)&data_dim_int32, sizeof(data_dim_int32));
+            tag_stream_.write((char*)ids, data_num * sizeof(ids));
+        } else if (diskann_params_.graph_type == DISKANN_GRAPH_TYPE_VAMANA) {
             SlowTaskTimer t("diskann build full (graph)");
             // build graph
             build_index_ = std::make_shared<diskann::Index<float, int64_t, int64_t>>(
@@ -220,7 +254,7 @@ DiskANN::build(const DatasetPtr& base) {
             std::vector<int64_t> tags(ids, ids + data_num);
             auto index_build_params =
                 diskann::IndexWriteParametersBuilder(L_, R_)
-                    .with_num_threads(Options::Instance().num_threads_building())
+                    .with_num_threads(1)
                     .build();
             failed_locs =
                 build_index_->build(vectors, data_num, index_build_params, tags, use_reference_);

@@ -20,7 +20,6 @@
 #include "fmt/format-inl.h"
 #include "inner_string_params.h"
 #include "vsag/constants.h"
-
 namespace vsag {
 
 static const std::unordered_map<std::string, std::vector<std::string>> EXTERNAL_MAPPING = {
