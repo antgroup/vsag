@@ -78,6 +78,10 @@ cov:                     ## Build unit tests with code coverage enabled.
 	cmake ${VSAG_CMAKE_ARGS} -B${DEBUG_BUILD_DIR} -DCMAKE_BUILD_TYPE=Debug -DENABLE_COVERAGE=ON -DENABLE_CCACHE=ON -DENABLE_ASAN=OFF
 	cmake --build ${DEBUG_BUILD_DIR} --parallel ${COMPILE_JOBS}
 
+.PHONEY: lint
+lint:                    ## Run lint.
+	@./scripts/linters/run-clang-tidy.py -p build/ -use-color -source-filter '^.*vsag\/src.*(?<!_test)\.cpp$$'
+
 .PHONY: test_parallel
 test_parallel: debug     ## Run all tests parallel (used in CI).
 	@./scripts/test_parallel_bg.sh
