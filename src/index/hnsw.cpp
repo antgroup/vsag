@@ -109,9 +109,6 @@ HNSW::build(const DatasetPtr& base) {
         int64_t num_elements = base->GetNumElements();
 
         std::unique_lock lock(rw_mutex_);
-        if (auto result = init_memory_space(); not result.has_value()) {
-            return tl::unexpected(result.error());
-        }
 
         auto ids = base->GetIds();
         void* vectors = nullptr;
@@ -160,13 +157,9 @@ HNSW::add(const DatasetPtr& base) {
         size_t data_size = 0;
         get_vectors(base, &vectors, &data_size);
         std::vector<int64_t> failed_ids;
-
-        std::unique_lock lock(rw_mutex_);
-        if (auto result = init_memory_space(); not result.has_value()) {
-            return tl::unexpected(result.error());
-        }
         for (int64_t i = 0; i < num_elements; ++i) {
             // noexcept runtime
+            std::shared_lock lock(rw_mutex_);
             if (!alg_hnsw_->addPoint((const void*)((char*)vectors + data_size * i), ids[i])) {
                 logger::debug("duplicate point: {}", i);
                 failed_ids.push_back(ids[i]);
@@ -514,10 +507,6 @@ HNSW::deserialize(const BinarySet& binary_set) {
 
     try {
         std::unique_lock lock(rw_mutex_);
-        if (auto result = init_memory_space(); not result.has_value()) {
-            return tl::unexpected(result.error());
-        }
-
         int64_t cursor = 0;
         ReadFuncStreamReader reader(func, cursor);
         BufferStreamReader buffer_reader(&reader, b.size, allocator_.get());
@@ -563,9 +552,6 @@ HNSW::deserialize(const ReaderSet& reader_set) {
 
     try {
         std::unique_lock lock(rw_mutex_);
-        if (auto result = init_memory_space(); not result.has_value()) {
-            return tl::unexpected(result.error());
-        }
 
         int64_t cursor = 0;
         ReadFuncStreamReader reader(func, cursor);
@@ -588,9 +574,6 @@ HNSW::deserialize(std::istream& in_stream) {
 
     try {
         std::unique_lock lock(rw_mutex_);
-        if (auto result = init_memory_space(); not result.has_value()) {
-            return tl::unexpected(result.error());
-        }
 
         IOStreamReader reader(in_stream);
         alg_hnsw_->loadIndex(reader, this->space_.get());
@@ -880,7 +863,7 @@ HNSW::pretrain(const std::vector<int64_t>& base_tag_ids,
 }
 
 tl::expected<bool, Error>
-HNSW::init_memory_space() {
+HNSW::InitMemorySpace() {
     if (is_init_memory_) {
         return true;
     }

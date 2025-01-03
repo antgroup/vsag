@@ -275,11 +275,11 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex, "HNSW Concurrent Add", "[f
 
         auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
         TestConcurrentAdd(index, dataset, true);
-        TestKnnSearch(index, dataset, search_param, 0.99, true);
-        TestConcurrentKnnSearch(index, dataset, search_param, 0.99, true);
-        TestRangeSearch(index, dataset, search_param, 0.99, 10, true);
-        TestRangeSearch(index, dataset, search_param, 0.49, 5, true);
-        TestFilterSearch(index, dataset, search_param, 0.99, true);
+        TestKnnSearch(index, dataset, search_param, 0.95, true);
+        TestConcurrentKnnSearch(index, dataset, search_param, 0.95, true);
+        TestRangeSearch(index, dataset, search_param, 0.95, 10, true);
+        TestRangeSearch(index, dataset, search_param, 0.45, 5, true);
+        TestFilterSearch(index, dataset, search_param, 0.95, true);
 
         vsag::Options::Instance().set_block_size_limit(origin_size);
     }

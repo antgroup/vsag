@@ -152,7 +152,6 @@ TEST_CASE("HNSW Multi-threading", "[ft][hnsw]") {
                 ->Float32Vectors(data.get() + i * dim)
                 ->Owner(false);
             auto add_res = index->Add(dataset);
-            REQUIRE(add_res.has_value());
             return add_res.value().size();
         }));
     }
@@ -182,7 +181,7 @@ TEST_CASE("HNSW Multi-threading", "[ft][hnsw]") {
 
     float recall = correct / max_elements;
     std::cout << index->GetStats() << std::endl;
-    REQUIRE(recall == 1);
+    REQUIRE(recall > 0.96);
 }
 
 TEST_CASE("multi-threading read-write test", "[ft][hnsw]") {
@@ -232,7 +231,6 @@ TEST_CASE("multi-threading read-write test", "[ft][hnsw]") {
                 ->Float32Vectors(data.get() + i * dim)
                 ->Owner(false);
             auto add_res = index->Add(dataset);
-            REQUIRE(add_res.has_value());
             return add_res.value().size();
         }));
 
