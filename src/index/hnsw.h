@@ -195,6 +195,9 @@ public:
     bool
     CheckGraphIntegrity() const;
 
+    tl::expected<bool, Error>
+    InitMemorySpace();
+
 private:
     tl::expected<std::vector<int64_t>, Error>
     build(const DatasetPtr& base);
@@ -268,9 +271,6 @@ private:
 
     tl::expected<void, Error>
     deserialize(std::istream& in_stream);
-
-    tl::expected<bool, Error>
-    init_memory_space();
 
     void
     get_vectors(const DatasetPtr& base, void** vectors_ptr, size_t* data_size_ptr) const;
