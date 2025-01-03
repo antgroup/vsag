@@ -171,6 +171,13 @@ SQ4UniformQuantizer<metric>::EncodeOneImpl(const DataType* data, uint8_t* codes)
     norm_type norm = 0;
     sum_type sum = 0;
 
+    Vector<DataType> norm_data(this->allocator_);
+    if constexpr (metric == MetricType::METRIC_TYPE_COSINE) {
+        norm_data.resize(this->dim_);
+        Normalize(data, norm_data.data(), this->dim_);
+        data = norm_data.data();
+    }
+
     for (uint64_t d = 0; d < this->dim_; d++) {
         delta = 1.0f * (data[d] - lower_bound_) / diff_;
         if (delta < 0.0) {
@@ -190,12 +197,12 @@ SQ4UniformQuantizer<metric>::EncodeOneImpl(const DataType* data, uint8_t* codes)
         sum += data[d];
     }
 
-    if constexpr (metric == MetricType::METRIC_TYPE_L2SQR or
-                  metric == MetricType::METRIC_TYPE_COSINE) {
+    if constexpr (metric == MetricType::METRIC_TYPE_L2SQR) {
         *(norm_type*)(codes + offset_norm_) = norm;
     }
 
-    if constexpr (metric == MetricType::METRIC_TYPE_IP) {
+    if constexpr (metric == MetricType::METRIC_TYPE_IP or
+                  metric == MetricType::METRIC_TYPE_COSINE) {
         *(sum_type*)(codes + offset_sum_) = sum;
     }
 
@@ -245,7 +252,8 @@ SQ4UniformQuantizer<metric>::ComputeImpl(const uint8_t* codes1, const uint8_t* c
         norm_type norm2 = *((norm_type*)(codes2 + offset_norm_));
 
         result = norm1 + norm2 - 2 * result;
-    } else if constexpr (metric == MetricType::METRIC_TYPE_IP) {
+    } else if constexpr (metric == MetricType::METRIC_TYPE_IP or
+                         metric == MetricType::METRIC_TYPE_COSINE) {
         result = SQ4UniformComputeCodesIP(codes1, codes2, this->dim_);
 
         sum_type sum1 = *((sum_type*)(codes1 + offset_sum_));
@@ -256,16 +264,6 @@ SQ4UniformQuantizer<metric>::ComputeImpl(const uint8_t* codes1, const uint8_t* c
 
         result = 1 - result;
 
-    } else if constexpr (metric == MetricType::METRIC_TYPE_COSINE) {
-        result = SQ4UniformComputeCodesIP(codes1, codes2, this->dim_);
-
-        sum_type sum1 = *((sum_type*)(codes1 + offset_sum_));
-        sum_type sum2 = *((sum_type*)(codes2 + offset_sum_));
-
-        result = lower_bound_ * (sum1 + sum2) + (diff_ / 15.0) * (diff_ / 15.0) * result -
-                 lower_bound_ * lower_bound_;
-
-        result = 1 - result;
     } else {
         logger::error("unsupported metric type");
         result = 0;
