@@ -353,8 +353,6 @@ SQ8UniformComputeCodesIP(const uint8_t* codes1, const uint8_t* codes2, uint64_t 
         return 0.0f;
     }
 
-    alignas(64) int32_t temp[16];
-    int32_t result = 0;
     uint64_t d = 0;
     __m512i sum = _mm512_setzero_si512();
     __m512i mask = _mm512_set1_epi16(0xff);
@@ -370,10 +368,7 @@ SQ8UniformComputeCodesIP(const uint8_t* codes1, const uint8_t* codes2, uint64_t 
         sum = _mm512_add_epi32(sum, _mm512_madd_epi16(xx1, yy1));
         sum = _mm512_add_epi32(sum, _mm512_madd_epi16(xx2, yy2));
     }
-    _mm512_store_si512(reinterpret_cast<__m512i*>(temp), sum);
-    for (int i = 0; i < 16; ++i) {
-        result += temp[i];
-    }
+    int32_t result = _mm512_reduce_add_epi32(sum);
     result += static_cast<int32_t>(avx2::SQ8UniformComputeCodesIP(codes1 + d, codes2 + d, dim - d));
     return static_cast<float>(result);
 #else

@@ -155,7 +155,10 @@ HGraph::KnnSearch(const DatasetPtr& query,
                   int64_t k,
                   const std::string& parameters,
                   const std::function<bool(int64_t)>& filter) const {
-    BitsetOrCallbackFilter ft(filter);
+    std::unique_ptr<BitsetOrCallbackFilter> ft = nullptr;
+    if (filter != nullptr) {
+        ft = std::make_unique<BitsetOrCallbackFilter>(filter);
+    }
     try {
         int64_t query_dim = query->GetDim();
         CHECK_ARGUMENT(
@@ -183,7 +186,7 @@ HGraph::KnnSearch(const DatasetPtr& query,
         auto params = HGraphSearchParameters::FromJson(parameters);
 
         search_param.ef_ = params.ef_search;
-        search_param.is_id_allowed_ = &ft;
+        search_param.is_id_allowed_ = ft.get();
         auto search_result = this->search_one_graph(query->GetFloat32Vectors(),
                                                     this->bottom_graph_,
                                                     this->basic_flatten_codes_,

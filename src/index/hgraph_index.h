@@ -47,13 +47,13 @@ public:
               int64_t k,
               const std::string& parameters,
               BitsetPtr invalid = nullptr) const override {
-        auto func = [&invalid](int64_t id) -> bool {
-            if (invalid == nullptr) {
-                return false;
-            }
+        std::function<bool(int64_t)> func = [&invalid](int64_t id) -> bool {
             int64_t bit_index = id & ROW_ID_MASK;
             return invalid->Test(bit_index);
         };
+        if (invalid == nullptr) {
+            func = nullptr;
+        }
         SAFE_CALL(return this->hgraph_->KnnSearch(query, k, parameters, func));
     }
 
