@@ -173,7 +173,7 @@ HierarchicalNSW::getDistanceByLabel(LabelType label, const void* data_point) {
 
 int64_t
 HierarchicalNSW::getBatchDistanceByLabel(int64_t count, 
-                                         int64_t *vids, 
+                                         const int64_t *vids, 
                                          const void* data_point, 
                                          float *&distances) {
     std::shared_lock lock_table(label_lookup_lock_);

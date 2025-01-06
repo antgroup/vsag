@@ -147,10 +147,10 @@ public:
 
     virtual tl::expected<int64_t, Error>
     CalcBatchDistanceById(int64_t count, 
-                          int64_t *vids, 
+                          const int64_t *vids, 
                           const float* vector,
                           float *&distances) const override {
-        SAFE_CALL(return alg_hnsw_->getBatchDistanceByLabel(count, vid, vector, distances));
+        SAFE_CALL(return alg_hnsw_->getBatchDistanceByLabel(count, vids, vector, distances));
     };
 
     [[nodiscard]] bool

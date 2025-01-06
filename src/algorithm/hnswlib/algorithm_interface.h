@@ -71,8 +71,8 @@ public:
 
     virtual int64_t 
     getBatchDistanceByLabel(int64_t count, 
-                            int64_t *vids, 
-                            const void* data_point, 
+                            const int64_t *vids, 
+                            const void *data_point, 
                             float *&distances) = 0;
 
     virtual const float*

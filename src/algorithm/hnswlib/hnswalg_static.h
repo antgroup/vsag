@@ -265,14 +265,14 @@ public:
 
     int64_t
     getBatchDistanceByLabel(int64_t count, 
-                            int64_t *vids, 
+                            const int64_t *vids, 
                             const void* data_point, 
                             float *&distances) override {
         std::shared_lock<std::shared_mutex> lock_table(shared_label_lookup_lock);
         int64_t ret_cnt = 0;
         distances = (float *)allocator_->Allocate(sizeof(float) * count);
         for (int i = 0; i < count; i++) {
-            auto search = label_lookup_.find(vid[i]);
+            auto search = label_lookup_.find(vids[i]);
             if (search == label_lookup_.end()) {
                 distances[i] = -1;
             } else {
