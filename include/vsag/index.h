@@ -260,7 +260,7 @@ public:
      */
     virtual tl::expected<int64_t, Error>
     CalcBatchDistanceById(int64_t count, 
-                          int64_t *vids, 
+                          const int64_t *vids, 
                           const float* vector,
                           float *&distances) const {
         throw std::runtime_error("Index doesn't support get distance by id");

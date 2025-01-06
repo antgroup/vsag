@@ -148,7 +148,7 @@ public:
 
     int64_t
     getBatchDistanceByLabel(int64_t count, 
-                            int64_t *vids, 
+                            const int64_t *vids, 
                             const void* data_point,
                             float *&distances) override;
 
