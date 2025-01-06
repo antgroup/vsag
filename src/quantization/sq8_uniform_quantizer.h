@@ -158,16 +158,15 @@ SQ8UniformQuantizer<metric>::EncodeOneImpl(const DataType* data, uint8_t* codes)
     norm_type norm = 0;
     sum_type sum = 0;
 
-    const DataType* new_data = data;
     Vector<DataType> norm_data(this->allocator_);
     if constexpr (metric == MetricType::METRIC_TYPE_COSINE) {
         norm_data.resize(this->dim_);
         Normalize(data, norm_data.data(), this->dim_);
-        new_data = norm_data.data();
+        data = norm_data.data();
     }
 
     for (uint64_t d = 0; d < this->dim_; d++) {
-        delta = 1.0f * (new_data[d] - lower_bound_) / diff_;
+        delta = 1.0f * (data[d] - lower_bound_) / diff_;
         if (delta < 0.0) {
             delta = 0;
         } else if (delta > 0.999) {
@@ -177,7 +176,7 @@ SQ8UniformQuantizer<metric>::EncodeOneImpl(const DataType* data, uint8_t* codes)
         codes[offset_code_ + d] = scaled;
 
         norm += scaled * scaled;
-        sum += new_data[d];
+        sum += data[d];
     }
 
     if constexpr (metric == MetricType::METRIC_TYPE_L2SQR) {
