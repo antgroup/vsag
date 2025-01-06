@@ -250,6 +250,23 @@ public:
     };
 
     /**
+     * @brief Calculate the distance between the query and the vector of the given ID for batch.
+     *
+     * @param count is the count of vids
+     * @param vids is the unique identifier of the vector to be calculated in the index.
+     * @param vector is the embedding of query
+     * @param distances is the distances between the query and the vector of the given ID
+     * @return result is valid distance of input vids.
+     */
+    virtual tl::expected<int64_t, Error>
+    CalcBatchDistanceById(int64_t count, 
+                          const int64_t *vids, 
+                          const float* vector,
+                          float *&distances) const {
+        throw std::runtime_error("Index doesn't support get distance by id");
+    };
+
+    /**
      * @brief Checks if the specified feature is supported by the index.
      *
      * This method checks whether the given `feature` is supported by the index.

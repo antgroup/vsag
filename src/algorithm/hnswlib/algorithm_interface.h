@@ -69,6 +69,12 @@ public:
     virtual float
     getDistanceByLabel(LabelType label, const void* data_point) = 0;
 
+    virtual int64_t 
+    getBatchDistanceByLabel(int64_t count, 
+                            const int64_t *vids, 
+                            const void *data_point, 
+                            float *&distances) = 0;
+
     virtual const float*
     getDataByLabel(LabelType label) const = 0;
 

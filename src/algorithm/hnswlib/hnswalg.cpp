@@ -171,6 +171,28 @@ HierarchicalNSW::getDistanceByLabel(LabelType label, const void* data_point) {
     return dist;
 }
 
+int64_t
+HierarchicalNSW::getBatchDistanceByLabel(int64_t count, 
+                                         const int64_t *vids, 
+                                         const void* data_point, 
+                                         float *&distances) {
+    std::shared_lock lock_table(label_lookup_lock_);
+    int64_t ret_cnt = 0;
+    distances = (float *)allocator_->Allocate(sizeof(float) * count);
+    for (int i = 0; i < count; i++) {
+        auto search = label_lookup_.find(vids[i]);
+        if (search == label_lookup_.end()) {
+            distances[i] = -1;
+        } else {
+            InnerIdType internal_id = search->second;
+            float dist = fstdistfunc_(data_point, getDataByInternalId(internal_id), dist_func_param_);
+            distances[i] = dist;
+            ret_cnt++;
+        }
+    }
+    return ret_cnt;
+}
+
 bool
 HierarchicalNSW::isValidLabel(LabelType label) {
     std::shared_lock lock_table(label_lookup_lock_);
