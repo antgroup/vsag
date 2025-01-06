@@ -146,6 +146,12 @@ public:
     float
     getDistanceByLabel(LabelType label, const void* data_point) override;
 
+    int64_t
+    getBatchDistanceByLabel(int64_t count, 
+                            int64_t *vids, 
+                            const void* data_point,
+                            float *&distances) override;
+
     bool
     isValidLabel(LabelType label) override;
 

@@ -81,6 +81,7 @@ private:
     void* dist_func_param_{nullptr};
 
     mutable std::mutex label_lookup_lock;  // lock for label_lookup_
+    mutable std::shared_mutex shared_label_lookup_lock;
     std::unordered_map<LabelType, tableint> label_lookup_;
 
     std::default_random_engine level_generator_;
@@ -260,6 +261,28 @@ public:
 
         float dist = fstdistfunc_(data_point, getDataByInternalId(internal_id), dist_func_param_);
         return dist;
+    }
+
+    int64_t
+    getBatchDistanceByLabel(int64_t count, 
+                            int64_t *vids, 
+                            const void* data_point, 
+                            float *&distances) override {
+        std::shared_lock<std::shared_mutex> lock_table(shared_label_lookup_lock);
+        int64_t ret_cnt = 0;
+        distances = (float *)allocator_->Allocate(sizeof(float) * count);
+        for (int i = 0; i < count; i++) {
+            auto search = label_lookup_.find(vid[i]);
+            if (search == label_lookup_.end()) {
+                distances[i] = -1;
+            } else {
+                InnerIdType internal_id = search->second;
+                float dist = fstdistfunc_(data_point, getDataByInternalId(internal_id), dist_func_param_);
+                distances[i] = dist;
+                ret_cnt++;
+            }
+        }
+        return ret_cnt;
     }
 
     bool
