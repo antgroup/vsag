@@ -23,9 +23,9 @@ class ANNStreamBuf : public std::basic_streambuf<char>
         return true; // because stdout and stderr are always open.
     }
     DISKANN_DLLEXPORT void close();
-    DISKANN_DLLEXPORT virtual int underflow();
-    DISKANN_DLLEXPORT virtual int overflow(int c);
-    DISKANN_DLLEXPORT virtual int sync();
+    DISKANN_DLLEXPORT virtual int underflow() override;
+    DISKANN_DLLEXPORT virtual int overflow(int c) override;
+    DISKANN_DLLEXPORT virtual int sync() override;
 
   private:
     FILE *_fp;
@@ -33,6 +33,7 @@ class ANNStreamBuf : public std::basic_streambuf<char>
     int _bufIndex;
     std::mutex _mutex;
     LogLevel _logLevel;
+    std::function<void(LogLevel, const char *)> g_logger;
 
     int flush();
     void logImpl(char *str, int numchars);

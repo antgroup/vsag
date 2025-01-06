@@ -17,8 +17,11 @@
 #include <future>
 #include <iostream>
 #include <nlohmann/json.hpp>
+#include <sstream>
 #include <thread>
 
+#include "default_logger.h"
+#include "fixtures/test_logger.h"
 #include "fixtures/thread_pool.h"
 #include "vsag/options.h"
 #include "vsag/vsag.h"
@@ -34,8 +37,10 @@ query_knn(std::shared_ptr<vsag::Index> index,
         if (result.value()->GetDim() != 0 && result.value()->GetIds()[0] == id) {
             return 1.0;
         } else {
-            std::cout << result.value()->GetDim() << " " << result.value()->GetIds()[0] << " " << id
-                      << std::endl;
+            std::stringstream ss;
+            ss << "recall failure: dim " << result.value()->GetDim() << ", id "
+               << result.value()->GetIds()[0] << ", expected_id " << id;
+            fixtures::logger.Debug(ss.str());
         }
     } else if (result.error().type == vsag::ErrorType::INTERNAL_ERROR) {
         std::cerr << "failed to perform knn search on index" << std::endl;
@@ -43,7 +48,27 @@ query_knn(std::shared_ptr<vsag::Index> index,
     return 0.0;
 }
 
+// catch2 logger is NOT supported to be used in multi-threading tests, so
+//  we need to replace it at the start of all the test cases in this file
+class LoggerReplacer {
+public:
+    LoggerReplacer() {
+        origin_logger_ = vsag::Options::Instance().logger();
+        vsag::Options::Instance().set_logger(&logger_);
+    }
+
+    ~LoggerReplacer() {
+        vsag::Options::Instance().set_logger(origin_logger_);
+    }
+
+private:
+    vsag::Logger* origin_logger_;
+    vsag::DefaultLogger logger_;
+};
+
 TEST_CASE("DiskAnn Multi-threading", "[ft][diskann]") {
+    LoggerReplacer _;
+
     int dim = 65;             // Dimension of the elements
     int max_elements = 1000;  // Maximum number of elements, should be known beforehand
     int max_degree = 16;      // Tightly connected with internal dimensionality of the data
@@ -116,6 +141,8 @@ TEST_CASE("DiskAnn Multi-threading", "[ft][diskann]") {
 }
 
 TEST_CASE("HNSW Multi-threading", "[ft][hnsw]") {
+    LoggerReplacer _;
+
     int dim = 16;             // Dimension of the elements
     int max_elements = 1000;  // Maximum number of elements, should be known beforehand
     int max_degree = 16;      // Tightly connected with internal dimensionality of the data
@@ -185,6 +212,8 @@ TEST_CASE("HNSW Multi-threading", "[ft][hnsw]") {
 }
 
 TEST_CASE("multi-threading read-write test", "[ft][hnsw]") {
+    LoggerReplacer _;
+
     // avoid too much slow task logs
     vsag::Options::Instance().logger()->SetLevel(vsag::Logger::Level::kWARN);
 
@@ -278,6 +307,8 @@ TEST_CASE("multi-threading read-write test", "[ft][hnsw]") {
 }
 
 TEST_CASE("multi-threading read-write with feedback and pretrain test", "[ft][hnsw]") {
+    LoggerReplacer _;
+
     // avoid too much slow task logs
     vsag::Options::Instance().logger()->SetLevel(vsag::Logger::Level::kWARN);
 
