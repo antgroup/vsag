@@ -64,7 +64,7 @@ main() {
     // vsag::Options::Instance().logger()->SetLevel(vsag::Logger::kDEBUG);
 
     ExampleAllocator allocator;
-    vsag::Resource resource(&allocator);
+    vsag::Resource resource(&allocator, nullptr);
     vsag::Engine engine(&resource);
 
     auto paramesters = R"(
