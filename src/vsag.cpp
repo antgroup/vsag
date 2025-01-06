@@ -15,6 +15,7 @@
 
 #include "vsag/vsag.h"
 
+#include <../extern/diskann/DiskANN/include/logger.h>
 #include <cpuinfo.h>
 
 #include <sstream>
@@ -22,6 +23,13 @@
 #include "logger.h"
 #include "simd/simd.h"
 #include "version.h"
+
+namespace vsag {
+std::function<void(diskann::LogLevel, const char*)>
+vsag_get_logger() {
+    return [](diskann::LogLevel, const char* msg) { vsag::logger::debug(msg); };
+}
+}  // namespace vsag
 
 namespace vsag {
 
