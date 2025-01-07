@@ -18,8 +18,10 @@
 
 #include "fixtures/random_allocator.h"
 #include "vsag//factory.h"
+#include "vsag/options.h"
 
 TEST_CASE("Random Alocator Test", "[ft][hnsw]") {
+    vsag::Options::Instance().logger()->SetLevel(vsag::Logger::Level::kOFF);
     fixtures::RandomAllocator allocator;
 
     auto paramesters = R"(
