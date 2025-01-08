@@ -615,7 +615,7 @@ HNSW::update_id(int64_t old_id, int64_t new_id) {
         std::reinterpret_pointer_cast<hnswlib::HierarchicalNSW>(alg_hnsw_)->updateLabel(old_id,
                                                                                         new_id);
     } catch (const std::runtime_error& e) {
-        spdlog::warn(
+        logger::warn(
             "update error for replace old_id {} to new_id {}: {}", old_id, new_id, e.what());
         return false;
     }
@@ -641,7 +641,7 @@ HNSW::update_vector(int64_t id, const DatasetPtr& new_base, bool need_fine_tune)
         std::reinterpret_pointer_cast<hnswlib::HierarchicalNSW>(alg_hnsw_)->updateVector(
             id, new_base_vec);
     } catch (const std::runtime_error& e) {
-        spdlog::warn("update error for replace vector of id {}: {}", id, e.what());
+        logger::warn("update error for replace vector of id {}: {}", id, e.what());
         return false;
     }
 
@@ -663,7 +663,7 @@ HNSW::remove(int64_t id) {
             std::reinterpret_pointer_cast<hnswlib::HierarchicalNSW>(alg_hnsw_)->markDelete(id);
         }
     } catch (const std::runtime_error& e) {
-        spdlog::warn("mark delete error for id {}: {}", id, e.what());
+        logger::warn("mark delete error for id {}: {}", id, e.what());
         return false;
     }
 

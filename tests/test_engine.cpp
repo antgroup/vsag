@@ -17,6 +17,7 @@
 #include <iostream>
 #include <nlohmann/json.hpp>
 
+#include "fixtures/test_logger.h"
 #include "vsag/vsag.h"
 
 TEST_CASE("index params", "[ft][engine]") {
@@ -71,7 +72,7 @@ TEST_CASE("index params", "[ft][engine]") {
                 correct++;
             }
         } else if (result.error().type == vsag::ErrorType::INTERNAL_ERROR) {
-            std::cerr << "failed to search on index: internalError" << std::endl;
+            fixtures::logger::error << "failed to search on index: internalError" << std::endl;
         }
     }
     float recall = correct / static_cast<float>(max_elements);

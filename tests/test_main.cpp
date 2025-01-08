@@ -21,7 +21,7 @@
 int
 main(int argc, char** argv) {
     // your setup ...
-    vsag::Options::Instance().set_logger(&fixtures::logger);
+    vsag::Options::Instance().set_logger(&fixtures::logger::test_logger);
 
     int result = Catch::Session().run(argc, argv);
 
