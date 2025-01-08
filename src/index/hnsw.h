@@ -211,6 +211,12 @@ public:
     tl::expected<bool, Error>
     InitMemorySpace();
 
+    bool
+    ExtractDataAndGraph(const DatasetPtr& dataset, Vector<Vector<uint32_t>>& graph);
+
+    bool
+    SetDataAndGraph(const DatasetPtr& dataset, const Vector<Vector<uint32_t>>& graph);
+
 private:
     tl::expected<std::vector<int64_t>, Error>
     build(const DatasetPtr& base);

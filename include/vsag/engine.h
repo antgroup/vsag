@@ -75,6 +75,11 @@ public:
     tl::expected<std::shared_ptr<Index>, Error>
     CreateIndex(const std::string& name, const std::string& parameters);
 
+    tl::expected<std::shared_ptr<Index>, Error>
+    MergeGraphIndex(const std::string& name,
+                    const std::string& parameters,
+                    const std::vector<std::shared_ptr<Index>>& sub_indexes);
+
 private:
     std::shared_ptr<Resource> resource_;  ///< The resource used by this engine.
 };

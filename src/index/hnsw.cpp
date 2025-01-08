@@ -992,4 +992,49 @@ HNSW::init_feature_list() {
     });
 }
 
+bool
+HNSW::ExtractDataAndGraph(const DatasetPtr& dataset, Vector<Vector<uint32_t>>& graph) {
+    if (use_static_) {
+        return false;
+    }
+    auto hnsw = std::static_pointer_cast<hnswlib::HierarchicalNSW>(alg_hnsw_);
+    int64_t cur_element_count = hnsw->getCurrentElementCount();
+    int64_t origin_data_num = dataset->GetNumElements();
+    int64_t origin_data_dim = dataset->GetDim();
+    auto dataset_vectors = dataset->GetFloat32Vectors();
+    auto dataset_ids = const_cast<int64_t*>(dataset->GetIds());
+    CHECK_ARGUMENT(
+        origin_data_dim == dim_,
+        fmt::format("origin_data_dim({}) is not equal to dim_({}) when extract data in hnsw",
+                    origin_data_dim,
+                    dim_));
+    for (int i = 0; i < cur_element_count; ++i) {
+        auto offset = i + origin_data_num;
+        char* vector_data = hnsw->getDataByInternalId(i);
+        std::memcpy((char*)(dataset_vectors + offset * dim_), vector_data, sizeof(float) * dim_);
+        int* data = (int*)hnsw->getLinklistAtLevel(i, 0);
+        size_t size = hnsw->getListCount((unsigned int*)data);
+        graph[offset].resize(size);
+        for (int j = 0; j < size; ++j) {
+            graph[offset][j] = origin_data_num + *(data + 1 + j);
+        }
+        dataset_ids[offset] = hnsw->getExternalLabel(i);
+    }
+    dataset->NumElements(origin_data_num + cur_element_count);
+    return true;
+}
+bool
+HNSW::SetDataAndGraph(const DatasetPtr& dataset, const Vector<Vector<uint32_t>>& graph) {
+    if (use_static_) {
+        return false;
+    }
+    auto hnsw = std::static_pointer_cast<hnswlib::HierarchicalNSW>(alg_hnsw_);
+    hnsw->setDataAndGraph(dataset->GetFloat32Vectors(),
+                          dataset->GetIds(),
+                          dataset->GetNumElements(),
+                          dataset->GetDim(),
+                          graph);
+    return true;
+}
+
 }  // namespace vsag

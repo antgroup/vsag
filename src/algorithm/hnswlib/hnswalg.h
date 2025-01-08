@@ -308,6 +308,13 @@ public:
     void
     resizeIndex(size_t new_max_elements) override;
 
+    void
+    setDataAndGraph(const float* data,
+                    const int64_t* ids,
+                    int64_t data_num,
+                    int64_t data_dim,
+                    const vsag::Vector<vsag::Vector<uint32_t>>& graph);
+
     size_t
     calcSerializeSize() override;
 

@@ -935,3 +935,68 @@ TEST_CASE("get data by label", "[ut][hnsw]") {
         delete alg_hnsw_static;
     }
 }
+
+TEST_CASE("extract/set data and graph", "[ut][hnsw]") {
+    logger::set_level(logger::level::debug);
+
+    int64_t dim = 128;
+    IndexCommonParam commom_param;
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+
+    commom_param.dim_ = dim;
+    commom_param.data_type_ = DataTypes::DATA_TYPE_FLOAT;
+    commom_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
+    commom_param.allocator_ = allocator;
+
+    HnswParameters hnsw_obj = parse_hnsw_params(commom_param);
+    hnsw_obj.max_degree = 12;
+    hnsw_obj.ef_construction = 100;
+    auto index = std::make_shared<HNSW>(hnsw_obj, commom_param);
+    index->InitMemorySpace();
+
+    const int64_t num_elements = 2000;
+    auto [ids, vectors] = fixtures::generate_ids_and_vectors(num_elements, dim);
+
+    auto dataset = Dataset::Make();
+    dataset->Dim(dim)
+        ->NumElements(num_elements / 2)
+        ->Ids(ids.data())
+        ->Float32Vectors(vectors.data())
+        ->Owner(false);
+    auto result = index->Build(dataset);
+    REQUIRE(result.has_value());
+
+    auto new_dataset = Dataset::Make();
+    auto new_ids = new int64_t[num_elements];
+    auto new_vectors = new float[num_elements * dim];
+    Vector<Vector<uint32_t>> graph(
+        num_elements, Vector<uint32_t>(allocator.get()), allocator.get());
+    new_dataset->NumElements(0)->Dim(dim)->Float32Vectors(new_vectors)->Ids(new_ids);
+
+    REQUIRE(index->ExtractDataAndGraph(new_dataset, graph));
+
+    auto another_index = std::make_shared<HNSW>(hnsw_obj, commom_param);
+    another_index->InitMemorySpace();
+    REQUIRE(another_index->SetDataAndGraph(new_dataset, graph));
+
+    dataset->Dim(dim)
+        ->NumElements(num_elements / 2)
+        ->Ids(ids.data() + num_elements / 2)
+        ->Float32Vectors(vectors.data() + num_elements / 2 * dim)
+        ->Owner(false);
+    another_index->Add(dataset);
+
+    JsonType search_parameters{
+        {"hnsw", {{"ef_search", 200}}},
+    };
+    int correct = 0;
+    for (int i = 0; i < num_elements; ++i) {
+        auto query = Dataset::Make();
+        query->Dim(dim)->Float32Vectors(vectors.data() + i * dim)->NumElements(1)->Owner(false);
+        auto query_result = another_index->KnnSearch(query, 10, search_parameters.dump());
+        REQUIRE(query_result.has_value());
+        correct += query_result.value()->GetIds()[0] == ids[i] ? 1 : 0;
+    }
+    float recall = correct / (float)num_elements;
+    REQUIRE(recall > 0.99);
+}
