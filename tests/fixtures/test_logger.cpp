@@ -16,9 +16,25 @@
 #include "test_logger.h"
 
 #include <catch2/catch_message.hpp>
+#include <mutex>
 
-namespace fixtures {
+#include "vsag/logger.h"
 
-TestLogger logger;
+namespace fixtures::logger {
 
-}  // namespace fixtures
+TestLogger test_logger;
+
+LoggerStream trace_buff(&test_logger, vsag::Logger::kTRACE);
+LoggerStream debug_buff(&test_logger, vsag::Logger::kDEBUG);
+LoggerStream info_buff(&test_logger, vsag::Logger::kINFO);
+LoggerStream warn_buff(&test_logger, vsag::Logger::kWARN);
+LoggerStream error_buff(&test_logger, vsag::Logger::kERR);
+LoggerStream critical_buff(&test_logger, vsag::Logger::kCRITICAL);
+
+std::basic_ostream<char> trace(&trace_buff);
+std::basic_ostream<char> debug(&debug_buff);
+std::basic_ostream<char> info(&info_buff);
+std::basic_ostream<char> warn(&warn_buff);
+std::basic_ostream<char> error(&error_buff);
+
+}  // namespace fixtures::logger

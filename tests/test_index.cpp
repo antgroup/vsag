@@ -15,6 +15,7 @@
 
 #include "test_index.h"
 
+#include "fixtures/test_logger.h"
 #include "fixtures/thread_pool.h"
 #include "simd/fp32_simd.h"
 
@@ -390,6 +391,8 @@ void
 TestIndex::TestConcurrentAdd(const TestIndex::IndexPtr& index,
                              const TestDatasetPtr& dataset,
                              bool expected_success) {
+    fixtures::logger::LoggerReplacer _;
+
     auto base_count = dataset->base_->GetNumElements();
     int64_t temp_count = base_count / 2;
     auto dim = dataset->base_->GetDim();
@@ -433,6 +436,8 @@ TestIndex::TestConcurrentKnnSearch(const TestIndex::IndexPtr& index,
                                    const std::string& search_param,
                                    float expected_recall,
                                    bool expected_success) {
+    fixtures::logger::LoggerReplacer _;
+
     auto queries = dataset->query_;
     auto query_count = queries->GetNumElements();
     auto dim = queries->GetDim();

@@ -21,6 +21,7 @@
 #include <nlohmann/json.hpp>
 
 #include "fixtures/test_dataset_pool.h"
+#include "fixtures/test_logger.h"
 #include "test_index.h"
 #include "vsag/errors.h"
 #include "vsag/vsag.h"
@@ -35,8 +36,6 @@ TestDatasetPool DiskANNTestIndex::pool{};
 
 }  // namespace fixtures
 TEST_CASE_METHOD(fixtures::DiskANNTestIndex, "diskann build test", "[ft][index][diskann]") {
-    vsag::Options::Instance().logger()->SetLevel(vsag::Logger::Level::kDEBUG);
-
     auto test_dim_count = 3;
     auto dims = fixtures::get_common_used_dims(3);
     auto metric_type = GENERATE("l2", "ip");

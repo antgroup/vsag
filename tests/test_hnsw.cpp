@@ -13,8 +13,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <spdlog/spdlog.h>
-
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
 #include <fstream>
@@ -24,6 +22,7 @@
 #include <numeric>
 #include <random>
 
+#include "fixtures/test_logger.h"
 #include "vsag/errors.h"
 #include "vsag/vsag.h"
 
@@ -31,21 +30,17 @@ using namespace std;
 
 template <typename T>
 static void
-writeBinaryPOD(std::ostream& out, const T& podRef) {
+write_binary_pod(std::ostream& out, const T& podRef) {
     out.write((char*)&podRef, sizeof(T));
 }
 
 template <typename T>
 static void
-readBinaryPOD(std::istream& in, T& podRef) {
+read_binary_pod(std::istream& in, T& podRef) {
     in.read((char*)&podRef, sizeof(T));
 }
 
-const std::string tmp_dir = "/tmp/";
-
 TEST_CASE("HNSW range search", "[ft][hnsw]") {
-    spdlog::set_level(spdlog::level::debug);
-
     int dim = 71;
     int max_elements = 10000;
     int max_degree = 16;
@@ -120,8 +115,6 @@ TEST_CASE("HNSW range search", "[ft][hnsw]") {
 }
 
 TEST_CASE("HNSW Filtering Test", "[ft][hnsw]") {
-    spdlog::set_level(spdlog::level::debug);
-
     int dim = 17;
     int max_elements = 1000;
     int max_degree = 16;
@@ -259,8 +252,6 @@ TEST_CASE("HNSW Filtering Test", "[ft][hnsw]") {
 }
 
 TEST_CASE("HNSW small dimension", "[ft][hnsw]") {
-    spdlog::set_level(spdlog::level::debug);
-
     int dim = 3;
     int max_elements = 1000;
     int max_degree = 24;
@@ -322,8 +313,6 @@ TEST_CASE("HNSW small dimension", "[ft][hnsw]") {
 }
 
 TEST_CASE("HNSW Random Id", "[ft][hnsw]") {
-    spdlog::set_level(spdlog::level::debug);
-
     int dim = 128;
     int max_elements = 1000;
     int max_degree = 64;
@@ -405,8 +394,6 @@ TEST_CASE("HNSW Random Id", "[ft][hnsw]") {
 }
 
 TEST_CASE("pq infer knn search time recall", "[ft][hnsw]") {
-    spdlog::set_level(spdlog::level::debug);
-
     int dim = 128;
     int max_elements = 1000;
     int max_degree = 64;
@@ -467,7 +454,7 @@ TEST_CASE("pq infer knn search time recall", "[ft][hnsw]") {
 }
 
 TEST_CASE("hnsw serialize", "[ft][hnsw]") {
-    spdlog::set_level(spdlog::level::debug);
+    const std::string tmp_dir = "/tmp/";
 
     int dim = 128;
     int max_elements = 1000;
@@ -523,7 +510,7 @@ TEST_CASE("hnsw serialize", "[ft][hnsw]") {
             for (auto key : keys) {
                 // [len][data...][len][data...]...
                 vsag::Binary b = bs->Get(key);
-                writeBinaryPOD(file, b.size);
+                write_binary_pod(file, b.size);
                 file.write((const char*)b.data.get(), b.size);
                 offsets.push_back(offset);
                 offset += sizeof(b.size) + b.size;
@@ -533,13 +520,13 @@ TEST_CASE("hnsw serialize", "[ft][hnsw]") {
                 // [len][key...][offset][len][key...][offset]...
                 const auto& key = keys[i];
                 int64_t len = key.length();
-                writeBinaryPOD(file, len);
+                write_binary_pod(file, len);
                 file.write(key.c_str(), key.length());
-                writeBinaryPOD(file, offsets[i]);
+                write_binary_pod(file, offsets[i]);
             }
             // [num_keys][footer_offset]$
-            writeBinaryPOD(file, keys.size());
-            writeBinaryPOD(file, offset);
+            write_binary_pod(file, keys.size());
+            write_binary_pod(file, offset);
             file.close();
         } else if (bs.error().type == vsag::ErrorType::NO_ENOUGH_MEMORY) {
             std::cerr << "no enough memory to serialize index" << std::endl;
@@ -551,8 +538,8 @@ TEST_CASE("hnsw serialize", "[ft][hnsw]") {
         std::ifstream file(tmp_dir + "hnsw.index", std::ios::in);
         file.seekg(-sizeof(uint64_t) * 2, std::ios::end);
         uint64_t num_keys, footer_offset;
-        readBinaryPOD(file, num_keys);
-        readBinaryPOD(file, footer_offset);
+        read_binary_pod(file, num_keys);
+        read_binary_pod(file, footer_offset);
         // std::cout << "num_keys: " << num_keys << std::endl;
         // std::cout << "footer_offset: " << footer_offset << std::endl;
         file.seekg(footer_offset, std::ios::beg);
@@ -561,7 +548,7 @@ TEST_CASE("hnsw serialize", "[ft][hnsw]") {
         std::vector<uint64_t> offsets;
         for (uint64_t i = 0; i < num_keys; ++i) {
             int64_t key_len;
-            readBinaryPOD(file, key_len);
+            read_binary_pod(file, key_len);
             // std::cout << "key_len: " << key_len << std::endl;
             char key_buf[key_len + 1];
             memset(key_buf, 0, key_len + 1);
@@ -570,7 +557,7 @@ TEST_CASE("hnsw serialize", "[ft][hnsw]") {
             keys.push_back(key_buf);
 
             uint64_t offset;
-            readBinaryPOD(file, offset);
+            read_binary_pod(file, offset);
             // std::cout << "offset: " << offset << std::endl;
             offsets.push_back(offset);
         }
@@ -579,7 +566,7 @@ TEST_CASE("hnsw serialize", "[ft][hnsw]") {
         for (uint64_t i = 0; i < num_keys; ++i) {
             file.seekg(offsets[i], std::ios::beg);
             vsag::Binary b;
-            readBinaryPOD(file, b.size);
+            read_binary_pod(file, b.size);
             // std::cout << "len: " << b.size << std::endl;
             b.data.reset(new int8_t[b.size]);
             file.read((char*)b.data.get(), b.size);
@@ -601,8 +588,8 @@ TEST_CASE("hnsw serialize", "[ft][hnsw]") {
         std::ifstream file(tmp_dir + "hnsw.index", std::ios::in);
         file.seekg(-sizeof(uint64_t) * 2, std::ios::end);
         uint64_t num_keys, footer_offset;
-        readBinaryPOD(file, num_keys);
-        readBinaryPOD(file, footer_offset);
+        read_binary_pod(file, num_keys);
+        read_binary_pod(file, footer_offset);
         // std::cout << "num_keys: " << num_keys << std::endl;
         // std::cout << "footer_offset: " << footer_offset << std::endl;
         file.seekg(footer_offset, std::ios::beg);
@@ -611,7 +598,7 @@ TEST_CASE("hnsw serialize", "[ft][hnsw]") {
         std::vector<uint64_t> offsets;
         for (uint64_t i = 0; i < num_keys; ++i) {
             int64_t key_len;
-            readBinaryPOD(file, key_len);
+            read_binary_pod(file, key_len);
             // std::cout << "key_len: " << key_len << std::endl;
             char key_buf[key_len + 1];
             memset(key_buf, 0, key_len + 1);
@@ -620,7 +607,7 @@ TEST_CASE("hnsw serialize", "[ft][hnsw]") {
             keys.push_back(key_buf);
 
             uint64_t offset;
-            readBinaryPOD(file, offset);
+            read_binary_pod(file, offset);
             // std::cout << "offset: " << offset << std::endl;
             offsets.push_back(offset);
         }
