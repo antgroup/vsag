@@ -13,17 +13,17 @@ else
     mkdir -p "${COVERAGE_DIR}"
 fi
 
-lcov --gcov-tool ${SCRIPTS_DIR}/gcov_for_clang.sh \
-     --rc branch_coverage=1 \
+lcov --rc branch_coverage=1 \
      --rc geninfo_unexecuted_blocks=1 \
-     --include "*/vsag/include/*" \
-     --include "*/vsag/src/*" \
-     --exclude "*/vsag/include/vsag/expected.hpp*" \
-     --exclude "*_test.cpp" \
-     --exclude "*/vsag/test_*.cpp" \
-     --capture \
+     --parallel 8 \
      --directory . \
-     --output-file  "${COVERAGE_DIR}/coverage.info"
+     --capture \
+     --ignore-errors mismatch,mismatch \
+     --ignore-errors count,count \
+     --output-file ${COVERAGE_DIR}/coverage.info
+
+lcov --remove ${COVERAGE_DIR}/coverage.info '/usr/*' '*/build/*' '*/vsag/tests/*' --ignore-errors inconsistent,inconsistent --output-file ${COVERAGE_DIR}/coverage.info
+lcov --list ${COVERAGE_DIR}/coverage.info --ignore-errors inconsistent,inconsistent
 
 pushd "${COVERAGE_DIR}"
 coverages=$(ls coverage.info)
