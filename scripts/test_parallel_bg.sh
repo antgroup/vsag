@@ -48,6 +48,7 @@ done
 
 rm -rf ./log
 
+
 if [ $all_successful = true ]; then
   exit 0
 else
