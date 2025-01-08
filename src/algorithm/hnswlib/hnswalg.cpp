@@ -759,11 +759,11 @@ HierarchicalNSW::resizeIndex(size_t new_max_elements) {
     }
 
     // Reallocate all other layers
-    char** linkLists_new =
+    char** link_lists_new =
         (char**)allocator_->Reallocate(link_lists_, sizeof(void*) * new_max_elements);
-    if (linkLists_new == nullptr)
+    if (link_lists_new == nullptr)
         throw std::runtime_error("Not enough memory: resizeIndex failed to allocate other layers");
-    link_lists_ = linkLists_new;
+    link_lists_ = link_lists_new;
     memset(link_lists_ + max_elements_, 0, (new_max_elements - max_elements_) * sizeof(void*));
     max_elements_ = new_max_elements;
 }
@@ -1490,4 +1490,58 @@ HierarchicalNSW::searchRange(const void* query_data,
     // std::cout << "hnswalg::result.size(): " << result.size() << std::endl;
     return result;
 }
+
+void
+HierarchicalNSW::checkIntegrity() {
+    int connections_checked = 0;
+    vsag::Vector<int> inbound_connections_num(cur_element_count_, 0, allocator_);
+    for (int i = 0; i < cur_element_count_; i++) {
+        for (int l = 0; l <= element_levels_[i]; l++) {
+            auto data_ll_cur = getLinklistAtLevelWithLock(i, l);
+            linklistsizeint* ll_cur = (linklistsizeint*)data_ll_cur.get();
+            int size = getListCount(ll_cur);
+            auto* data = (InnerIdType*)(ll_cur + 1);
+            vsag::UnorderedSet<InnerIdType> s(allocator_);
+            for (int j = 0; j < size; j++) {
+                assert(data[j] > 0);
+                assert(data[j] < cur_element_count_);
+                assert(data[j] != i);
+                inbound_connections_num[data[j]]++;
+                s.insert(data[j]);
+                connections_checked++;
+            }
+            assert(s.size() == size);
+        }
+    }
+    if (cur_element_count_ > 1) {
+        int min1 = inbound_connections_num[0], max1 = inbound_connections_num[0];
+        for (int i = 0; i < cur_element_count_; i++) {
+            assert(inbound_connections_num[i] > 0);
+            min1 = std::min(inbound_connections_num[i], min1);
+            max1 = std::max(inbound_connections_num[i], max1);
+        }
+        std::cout << "Min inbound: " << min1 << ", Max inbound:" << max1 << "\n";
+    }
+    std::cout << "integrity ok, checked " << connections_checked << " connections\n";
+}
+
+void
+HierarchicalNSW::setDataAndGraph(const float* data,
+                                 const int64_t* ids,
+                                 int64_t data_num,
+                                 int64_t data_dim,
+                                 const vsag::Vector<vsag::Vector<uint32_t>>& graph) {
+    resizeIndex(data_num);
+    for (int i = 0; i < data_num; ++i) {
+        std::memcpy(getDataByInternalId(i), data + i * data_dim, data_size_);
+        setBatchNeigohbors(i, 0, graph[i].data(), graph[i].size());
+        setExternalLabel(i, ids[i]);
+        label_lookup_[ids[i]] = i;
+        element_levels_[i] = 0;
+    }
+    cur_element_count_ = data_num;
+    enterpoint_node_ = 0;
+    max_level_ = 0;
+}
+
 }  // namespace hnswlib
