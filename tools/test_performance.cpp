@@ -32,6 +32,16 @@ using namespace nlohmann;
 using namespace spdlog;
 using namespace vsag;
 
+float
+InnerProduct(const void* pVect1, const void* pVect2, const void* qty_ptr) {
+    uint64_t qty = *((uint64_t*)qty_ptr);
+    float res = 0;
+    for (unsigned i = 0; i < qty; i++) {
+        res += ((float*)pVect1)[i] * ((float*)pVect2)[i];
+    }
+    return res;
+}
+
 json
 run_test(const std::string& index_name,
          const std::string& process,

@@ -58,6 +58,11 @@ public:
         return neighbors_.get() + i * neighbors_shape_.second;
     }
 
+    [[nodiscard]] float*
+    GetDistances(int64_t i) const {
+        return distances_.get() + i * neighbors_shape_.second;
+    }
+
     [[nodiscard]] int64_t
     GetNumberOfBase() const {
         return number_of_base_;
@@ -126,6 +131,7 @@ private:
     std::shared_ptr<char[]> train_;
     std::shared_ptr<char[]> test_;
     std::shared_ptr<int64_t[]> neighbors_;
+    std::shared_ptr<float[]> distances_;
     std::shared_ptr<int64_t[]> train_labels_;
     std::shared_ptr<int64_t[]> test_labels_;
     shape_t train_shape_;
