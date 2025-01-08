@@ -141,7 +141,7 @@ HNSW::build(const DatasetPtr& base) {
 
 tl::expected<std::vector<int64_t>, Error>
 HNSW::add(const DatasetPtr& base) {
-#ifdef NDEBUG
+#ifndef ENABLE_TESTS
     SlowTaskTimer t("hnsw add", 20);
 #endif
     if (use_static_) {
@@ -194,7 +194,7 @@ HNSW::knn_search(const DatasetPtr& query,
                  int64_t k,
                  const std::string& parameters,
                  BaseFilterFunctor* filter_ptr) const {
-#ifdef NDEBUG
+#ifndef ENABLE_TESTS
     SlowTaskTimer t_total("hnsw knnsearch", 20);
 #endif
     try {
@@ -318,7 +318,7 @@ HNSW::range_search(const DatasetPtr& query,
                    const std::string& parameters,
                    BaseFilterFunctor* filter_ptr,
                    int64_t limited_size) const {
-#ifdef NDEBUG
+#ifndef ENABLE_TESTS
     SlowTaskTimer t("hnsw rangesearch", 20);
 #endif
     try {
@@ -619,7 +619,7 @@ HNSW::update_id(int64_t old_id, int64_t new_id) {
         std::reinterpret_pointer_cast<hnswlib::HierarchicalNSW>(alg_hnsw_)->updateLabel(old_id,
                                                                                         new_id);
     } catch (const std::runtime_error& e) {
-#ifdef NDEBUG
+#ifndef ENABLE_TESTS
         logger::warn(
             "update error for replace old_id {} to new_id {}: {}", old_id, new_id, e.what());
 #endif
@@ -647,7 +647,7 @@ HNSW::update_vector(int64_t id, const DatasetPtr& new_base, bool need_fine_tune)
         std::reinterpret_pointer_cast<hnswlib::HierarchicalNSW>(alg_hnsw_)->updateVector(
             id, new_base_vec);
     } catch (const std::runtime_error& e) {
-#ifdef NDEBUG
+#ifndef ENABLE_TESTS
         logger::warn("update error for replace vector of id {}: {}", id, e.what());
 #endif
         return false;
