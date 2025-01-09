@@ -24,11 +24,17 @@ namespace fixtures {
 class TestDatasetPool {
 public:
     TestDatasetPtr
-    GetDatasetAndCreate(uint64_t dim, uint64_t count, const std::string& metric_str = "l2");
+    GetDatasetAndCreate(uint64_t dim,
+                        uint64_t count,
+                        const std::string& metric_str = "l2",
+                        bool with_path = false);
 
 private:
     static std::string
-    key_gen(int64_t dim, uint64_t count, const std::string& metric_str = "l2");
+    key_gen(int64_t dim,
+            uint64_t count,
+            const std::string& metric_str = "l2",
+            bool with_path = false);
 
 private:
     std::unordered_map<std::string, TestDatasetPtr> pool_;

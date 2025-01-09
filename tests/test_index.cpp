@@ -204,6 +204,7 @@ TestIndex::TestContinueAdd(const IndexPtr& index,
         ->Ids(dataset->base_->GetIds())
         ->NumElements(temp_count)
         ->Float32Vectors(dataset->base_->GetFloat32Vectors())
+        ->Paths(dataset->base_->GetPaths())
         ->Owner(false);
     index->Build(temp_dataset);
     auto rest_count = base_count - temp_count;
@@ -213,6 +214,7 @@ TestIndex::TestContinueAdd(const IndexPtr& index,
             ->Ids(dataset->base_->GetIds() + j)
             ->NumElements(1)
             ->Float32Vectors(dataset->base_->GetFloat32Vectors() + j * dim)
+            ->Paths(dataset->base_->GetPaths() + j)
             ->Owner(false);
         auto add_index = index->Add(data_one);
         if (expected_success) {
@@ -243,6 +245,7 @@ TestIndex::TestKnnSearch(const IndexPtr& index,
         query->NumElements(1)
             ->Dim(dim)
             ->Float32Vectors(queries->GetFloat32Vectors() + i * dim)
+            ->Paths(queries->GetPaths() + i)
             ->Owner(false);
         auto res = index->KnnSearch(query, topk, search_param);
         REQUIRE(res.has_value() == expected_success);

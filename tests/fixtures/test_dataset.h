@@ -25,7 +25,10 @@ class TestDataset {
 public:
     using DatasetPtr = vsag::DatasetPtr;
 
-    TestDataset(uint64_t dim, uint64_t count, std::string metric_str = "l2");
+    TestDataset(uint64_t dim,
+                uint64_t count,
+                std::string metric_str = "l2",
+                bool with_path = false);
 
     DatasetPtr base_{nullptr};
 
