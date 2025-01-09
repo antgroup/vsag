@@ -13,15 +13,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <cpuinfo.h>
+#include <catch2/catch_session.hpp>
 
-#include <catch2/catch_test_macros.hpp>
-#include <iostream>
+#include "./fixtures/test_logger.h"
+#include "vsag/vsag.h"
 
-#include "fixtures/test_logger.h"
+int
+main(int argc, char** argv) {
+    // your setup ...
+    vsag::Options::Instance().set_logger(&fixtures::logger::test_logger);
 
-TEST_CASE("CPU info", "[ft][cpuinfo]") {
-    cpuinfo_initialize();
-    fixtures::logger::debug << cpuinfo_get_processors_count() << std::endl;
-    cpuinfo_deinitialize();
+    int result = Catch::Session().run(argc, argv);
+
+    // your clean-up...
+
+    return result;
 }

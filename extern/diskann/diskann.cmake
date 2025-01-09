@@ -37,9 +37,9 @@ set(DISKANN_SOURCES
 add_library(diskann STATIC ${DISKANN_SOURCES})
 # work
 if (${CMAKE_SYSTEM_PROCESSOR} MATCHES "x86_64")
-  target_compile_options(diskann PRIVATE -mavx -msse2 -ftree-vectorize -fno-builtin-malloc -fno-builtin-calloc -fno-builtin-realloc -fno-builtin-free -fopenmp -fopenmp-simd -funroll-loops -Wfatal-errors)
+  target_compile_options(diskann PRIVATE -mavx -msse2 -ftree-vectorize -fno-builtin-malloc -fno-builtin-calloc -fno-builtin-realloc -fno-builtin-free -fopenmp -fopenmp-simd -funroll-loops -Wfatal-errors -DENABLE_CUSTOM_LOGGER=1)
 else ()
-  target_compile_options(diskann PRIVATE -ftree-vectorize -fno-builtin-malloc -fno-builtin-calloc -fno-builtin-realloc -fno-builtin-free -fopenmp -fopenmp-simd -funroll-loops -Wfatal-errors)
+  target_compile_options(diskann PRIVATE -ftree-vectorize -fno-builtin-malloc -fno-builtin-calloc -fno-builtin-realloc -fno-builtin-free -fopenmp -fopenmp-simd -funroll-loops -Wfatal-errors -DENABLE_CUSTOM_LOGGER=1)
 endif ()
 set_property(TARGET diskann PROPERTY CXX_STANDARD 17)
 add_dependencies(diskann boost openblas)

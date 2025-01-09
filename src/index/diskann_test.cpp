@@ -534,6 +534,6 @@ TEST_CASE("split building process", "[diskann][ut]") {
         }
     }
     float recall_full = correct / 1000;
-    std::cout << "Recall: " << recall_full << std::endl;
+    vsag::logger::debug("Recall: " + std::to_string(recall_full));
     REQUIRE(recall_full == recall_partial);
 }

@@ -16,7 +16,9 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <nlohmann/json.hpp>
+#include <thread>
 
+#include "fixtures/test_logger.h"
 #include "vsag/vsag.h"
 
 using namespace std;
@@ -57,22 +59,14 @@ TEST_CASE("Random Index Test", "[ft][random]") {
     int seed = seed_random(rng);
     rng.seed(seed);
 
-    spdlog::info(
-        "seed: {}, dim: {}, max_elements: {}, max_degree: {}, ef_construction: {}, ef_search: {}, "
-        "k: {}, "
-        "io_limit: {}, threshold: {}, pq_dims: {}, use_pq_search: {}, mold: {}",
-        seed,
-        dim,
-        max_elements,
-        max_degree,
-        ef_construction,
-        ef_search,
-        k,
-        io_limit,
-        threshold,
-        pq_dims,
-        use_pq_search,
-        mold);
+    fixtures::logger::info << "seed: " << seed << ", dim: " << dim
+                           << ", max_elements: " << max_elements << ", max_degree: " << max_degree
+                           << ", ef_construction: " << ef_construction
+                           << ", ef_search: " << ef_search << ", k: " << k
+                           << ",io_limit: " << io_limit << ", threshold: " << threshold
+                           << ", pq_dims: " << pq_dims << ", use_pq_search: " << use_pq_search
+                           << ", mold: " << mold << std::endl;
+    ;
     float pq_sample_rate = 0.5;
     // Initing index
     nlohmann::json hnsw_parameters{
