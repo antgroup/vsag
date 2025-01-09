@@ -300,7 +300,9 @@ DiskANN::knn_search(const DatasetPtr& query,
                     int64_t k,
                     const std::string& parameters,
                     const std::function<bool(int64_t)>& filter) const {
+#ifndef ENABLE_TESTS
     SlowTaskTimer t("diskann knnsearch", 200);
+#endif
 
     // cannot perform search on empty index
     if (empty_index_) {
@@ -461,7 +463,9 @@ DiskANN::range_search(const DatasetPtr& query,
                       const std::string& parameters,
                       const std::function<bool(int64_t)>& filter,
                       int64_t limited_size) const {
+#ifndef ENABLE_TESTS
     SlowTaskTimer t("diskann rangesearch", 200);
+#endif
 
     // cannot perform search on empty index
     if (empty_index_) {

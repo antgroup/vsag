@@ -141,7 +141,9 @@ HNSW::build(const DatasetPtr& base) {
 
 tl::expected<std::vector<int64_t>, Error>
 HNSW::add(const DatasetPtr& base) {
+#ifndef ENABLE_TESTS
     SlowTaskTimer t("hnsw add", 20);
+#endif
     if (use_static_) {
         LOG_ERROR_AND_RETURNS(ErrorType::UNSUPPORTED_INDEX_OPERATION,
                               "static index does not support add");
@@ -192,8 +194,9 @@ HNSW::knn_search(const DatasetPtr& query,
                  int64_t k,
                  const std::string& parameters,
                  BaseFilterFunctor* filter_ptr) const {
+#ifndef ENABLE_TESTS
     SlowTaskTimer t_total("hnsw knnsearch", 20);
-
+#endif
     try {
         // cannot perform search on empty index
         if (empty_index_) {
@@ -315,8 +318,9 @@ HNSW::range_search(const DatasetPtr& query,
                    const std::string& parameters,
                    BaseFilterFunctor* filter_ptr,
                    int64_t limited_size) const {
+#ifndef ENABLE_TESTS
     SlowTaskTimer t("hnsw rangesearch", 20);
-
+#endif
     try {
         // cannot perform search on empty index
         if (empty_index_) {
@@ -615,8 +619,10 @@ HNSW::update_id(int64_t old_id, int64_t new_id) {
         std::reinterpret_pointer_cast<hnswlib::HierarchicalNSW>(alg_hnsw_)->updateLabel(old_id,
                                                                                         new_id);
     } catch (const std::runtime_error& e) {
+#ifndef ENABLE_TESTS
         logger::warn(
             "update error for replace old_id {} to new_id {}: {}", old_id, new_id, e.what());
+#endif
         return false;
     }
 
@@ -641,7 +647,9 @@ HNSW::update_vector(int64_t id, const DatasetPtr& new_base, bool need_fine_tune)
         std::reinterpret_pointer_cast<hnswlib::HierarchicalNSW>(alg_hnsw_)->updateVector(
             id, new_base_vec);
     } catch (const std::runtime_error& e) {
+#ifndef ENABLE_TESTS
         logger::warn("update error for replace vector of id {}: {}", id, e.what());
+#endif
         return false;
     }
 
