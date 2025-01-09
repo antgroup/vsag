@@ -17,11 +17,14 @@
 
 #include <algorithm>
 #include <cstring>
+#include <functional>
 
 #include "fixtures.h"
 #include "simd/fp32_simd.h"
 
 namespace fixtures {
+
+const static int ID_BIAS = 10086;
 
 struct CompareByFirst {
     constexpr bool
@@ -43,20 +46,71 @@ CopyVector(const std::vector<T>& vec) {
     return result;
 }
 
+bool
+is_path_belong_to(const std::string& a, const std::string& b) {
+    return b.compare(0, a.size(), a) == 0;
+}
+
+std::string
+create_random_string(bool is_full) {
+    const std::vector<std::string> level1 = {"a", "b", "c"};
+    const std::vector<std::string> level2 = {"d", "e"};
+    const std::vector<std::string> level3 = {"f", "g", "h"};
+
+    std::random_device rd;
+    std::mt19937 mt(rd());
+    std::uniform_int_distribution<> distr;
+
+    std::vector<std::string> selected_levels;
+
+    if (is_full) {
+        selected_levels.push_back(level1[distr(mt) % level1.size()]);
+        selected_levels.push_back(level2[distr(mt) % level2.size()]);
+        selected_levels.push_back(level3[distr(mt) % level3.size()]);
+    } else {
+        std::uniform_int_distribution<> dist(1, 3);
+        int num_levels = dist(mt);
+
+        if (num_levels >= 1) {
+            selected_levels.push_back(level1[distr(mt) % level1.size()]);
+        }
+        if (num_levels >= 2) {
+            selected_levels.push_back(level2[distr(mt) % level2.size()]);
+        }
+        if (num_levels == 3) {
+            selected_levels.push_back(level3[distr(mt) % level3.size()]);
+        }
+    }
+
+    std::string random_string = selected_levels.empty() ? "" : selected_levels[0];
+    for (size_t i = 1; i < selected_levels.size(); ++i) {
+        random_string += "/" + selected_levels[i];
+    }
+
+    return random_string;
+}
+
 static TestDataset::DatasetPtr
-GenerateRandomDataset(uint64_t dim, uint64_t count, std::string metric_str = "l2") {
+GenerateRandomDataset(uint64_t dim,
+                      uint64_t count,
+                      std::string metric_str = "l2",
+                      bool is_query = false) {
     auto base = vsag::Dataset::Make();
-    constexpr uint64_t query_count = 100;
     bool need_normalize = (metric_str != "cosine");
     auto vecs =
         fixtures::generate_vectors(count, dim, need_normalize, fixtures::RandomValue(0, 564));
     auto vecs_int8 = fixtures::generate_int8_codes(count, dim, fixtures::RandomValue(0, 564));
+    auto paths = new std::string[count];
+    for (int i = 0; i < count; ++i) {
+        paths[i] = create_random_string(!is_query);
+    }
     std::vector<int64_t> ids(count);
-    std::iota(ids.begin(), ids.end(), 10086);
+    std::iota(ids.begin(), ids.end(), ID_BIAS);
     base->Dim(dim)
         ->Ids(CopyVector(ids))
         ->Float32Vectors(CopyVector(vecs))
         ->Int8Vectors(CopyVector(vecs_int8))
+        ->Paths(paths)
         ->NumElements(count)
         ->Owner(true);
     return base;
@@ -127,8 +181,7 @@ CalTopKGroundTruth(const std::pair<float*, int64_t*>& result,
 static vsag::DatasetPtr
 CalFilterGroundTruth(const std::pair<float*, int64_t*>& result,
                      uint64_t top_k,
-                     uint64_t div,
-                     uint64_t mod,
+                     std::function<bool(int64_t)> filter,
                      uint64_t base_count,
                      uint64_t query_count) {
     auto gt = vsag::Dataset::Make();
@@ -138,7 +191,7 @@ CalFilterGroundTruth(const std::pair<float*, int64_t*>& result,
         auto start = 0;
         for (int j = 0; j < top_k; ++j) {
             while (start < base_count) {
-                if (result.second[i * base_count + start] % div == mod) {
+                if (not filter(result.second[i * base_count + start])) {
                     ids[i * top_k + j] = result.second[i * base_count + start];
                     dists[i * top_k + j] = result.first[i * base_count + start];
                     ++start;
@@ -152,25 +205,66 @@ CalFilterGroundTruth(const std::pair<float*, int64_t*>& result,
     return gt;
 }
 
-TestDataset::TestDataset(uint64_t dim, uint64_t count, std::string metric_str)
+static vsag::DatasetPtr
+CalGroundTruthWithPath(const std::pair<float*, int64_t*>& result,
+                       uint64_t top_k,
+                       const vsag::DatasetPtr base,
+                       const vsag::DatasetPtr query,
+                       std::function<bool(int64_t)> filter = nullptr) {
+    auto base_count = base->GetNumElements();
+    auto query_count = query->GetNumElements();
+    auto base_paths = base->GetPaths();
+    auto query_paths = query->GetPaths();
+    auto gt = vsag::Dataset::Make();
+    auto* ids = new int64_t[query_count * top_k];
+    auto* dists = new float[query_count * top_k];
+    for (uint64_t i = 0; i < query_count; ++i) {
+        auto start = 0;
+        for (int j = 0; j < top_k; ++j) {
+            while (start < base_count) {
+                auto base_id = result.second[i * base_count + start];
+                if (is_path_belong_to(query_paths[i], base_paths[base_id - ID_BIAS]) &&
+                    (not filter || not filter(base_id))) {
+                    ids[i * top_k + j] = base_id;
+                    dists[i * top_k + j] = result.first[i * base_count + start];
+                    ++start;
+                    break;
+                }
+                ++start;
+            }
+        }
+    }
+    gt->Dim(top_k)->Ids(ids)->Distances(dists)->Owner(true)->NumElements(query_count);
+    return gt;
+}
+
+TestDataset::TestDataset(uint64_t dim, uint64_t count, std::string metric_str, bool with_path)
     : dim_(dim), count_(count) {
     this->base_ = GenerateRandomDataset(dim, count, metric_str);
     constexpr uint64_t query_count = 100;
-    this->query_ = GenerateRandomDataset(dim, query_count, metric_str);
+    this->query_ = GenerateRandomDataset(dim, query_count, metric_str, true);
     this->filter_query_ = query_;
     this->range_query_ = query_;
     {
         auto result = CalDistanceFloatMetrix(query_, base_, metric_str);
         this->top_k = 10;
-        this->ground_truth_ = CalTopKGroundTruth(result, top_k, count, query_count);
+
+        this->filter_function_ = [](int64_t id) -> bool { return id % 7 != 5; };
+        if (with_path) {
+            this->ground_truth_ = CalGroundTruthWithPath(result, top_k, base_, query_);
+            this->filter_ground_truth_ =
+                CalGroundTruthWithPath(result, top_k, base_, query_, this->filter_function_);
+        } else {
+            this->ground_truth_ = CalTopKGroundTruth(result, top_k, count, query_count);
+            this->filter_ground_truth_ =
+                CalFilterGroundTruth(result, top_k, this->filter_function_, count, query_count);
+        }
         this->range_ground_truth_ = this->ground_truth_;
         this->range_radius_.resize(query_count);
         for (uint64_t i = 0; i < query_count; ++i) {
             this->range_radius_[i] =
                 0.5f * (result.first[i * count + top_k] + result.first[i * count + top_k - 1]);
         }
-        this->filter_function_ = [](int64_t id) -> bool { return id % 7 != 5; };
-        this->filter_ground_truth_ = CalFilterGroundTruth(result, top_k, 7, 5, count, query_count);
         delete[] result.first;
         delete[] result.second;
     }
