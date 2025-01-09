@@ -262,7 +262,7 @@ endif ()
 
 # tests
 if (ENABLE_TESTS)
-    add_definitions(-DENABLE_TESTS)
+    target_compile_definitions(vsag PRIVATE ENABLE_TESTS)
     add_subdirectory (tests)
 endif ()
 
