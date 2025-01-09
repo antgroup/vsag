@@ -107,7 +107,7 @@ EvalDataset::Load(const std::string& filename) {
         H5::DataSet dataset = file.openDataSet("/distances");
         H5::DataSpace dataspace = dataset.getSpace();
         H5::FloatType datatype(H5::PredType::NATIVE_FLOAT);
-        dataset.read(obj->neighbors_.get(), datatype, dataspace);
+        dataset.read(obj->distances_.get(), datatype, dataspace);
     }
 
     if (has_labels) {
