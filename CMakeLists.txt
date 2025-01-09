@@ -262,6 +262,7 @@ endif ()
 
 # tests
 if (ENABLE_TESTS)
+    add_definitions(-DENABLE_TESTS)
     add_subdirectory (tests)
 endif ()
 
