@@ -17,8 +17,10 @@
 #include <future>
 #include <iostream>
 #include <nlohmann/json.hpp>
+#include <sstream>
 #include <thread>
 
+#include "fixtures/test_logger.h"
 #include "fixtures/thread_pool.h"
 #include "vsag/options.h"
 #include "vsag/vsag.h"
@@ -34,8 +36,10 @@ query_knn(std::shared_ptr<vsag::Index> index,
         if (result.value()->GetDim() != 0 && result.value()->GetIds()[0] == id) {
             return 1.0;
         } else {
-            std::cout << result.value()->GetDim() << " " << result.value()->GetIds()[0] << " " << id
-                      << std::endl;
+            fixtures::logger::debug << "recall failure: dim " << result.value()->GetDim() << ", id "
+                                    << result.value()->GetIds()[0] << ", expected_id " << id
+                                    << std::endl;
+            ;
         }
     } else if (result.error().type == vsag::ErrorType::INTERNAL_ERROR) {
         std::cerr << "failed to perform knn search on index" << std::endl;
@@ -44,6 +48,8 @@ query_knn(std::shared_ptr<vsag::Index> index,
 }
 
 TEST_CASE("DiskAnn Multi-threading", "[ft][diskann]") {
+    fixtures::logger::LoggerReplacer _;
+
     int dim = 65;             // Dimension of the elements
     int max_elements = 1000;  // Maximum number of elements, should be known beforehand
     int max_degree = 16;      // Tightly connected with internal dimensionality of the data
@@ -116,6 +122,8 @@ TEST_CASE("DiskAnn Multi-threading", "[ft][diskann]") {
 }
 
 TEST_CASE("HNSW Multi-threading", "[ft][hnsw]") {
+    fixtures::logger::LoggerReplacer _;
+
     int dim = 16;             // Dimension of the elements
     int max_elements = 1000;  // Maximum number of elements, should be known beforehand
     int max_degree = 16;      // Tightly connected with internal dimensionality of the data
@@ -185,6 +193,8 @@ TEST_CASE("HNSW Multi-threading", "[ft][hnsw]") {
 }
 
 TEST_CASE("multi-threading read-write test", "[ft][hnsw]") {
+    fixtures::logger::LoggerReplacer _;
+
     // avoid too much slow task logs
     vsag::Options::Instance().logger()->SetLevel(vsag::Logger::Level::kWARN);
 
@@ -278,6 +288,8 @@ TEST_CASE("multi-threading read-write test", "[ft][hnsw]") {
 }
 
 TEST_CASE("multi-threading read-write with feedback and pretrain test", "[ft][hnsw]") {
+    fixtures::logger::LoggerReplacer _;
+
     // avoid too much slow task logs
     vsag::Options::Instance().logger()->SetLevel(vsag::Logger::Level::kWARN);
 

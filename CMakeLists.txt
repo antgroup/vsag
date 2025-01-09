@@ -43,7 +43,7 @@ option (ENABLE_INTEL_MKL "Enable intel-mkl (x86 platform only)" ON)
 option (ENABLE_CXX11_ABI "Use CXX11 ABI" ON)
 option (ENABLE_LIBCXX "Use libc++ instead of libstdc++" OFF) # only support in clang
 option (ENABLE_TOOLS "Whether compile vsag tools" ON)
-option (ENABLE_EXAMPLES "Whether compile examples" OFF)
+option (ENABLE_EXAMPLES "Whether compile examples" ON)
 option (ENABLE_TESTS "Whether compile vsag tests" ON)
 option (DISABLE_SSE_FORCE "Force disable sse and higher instructions" OFF)
 option (DISABLE_AVX_FORCE "Force disable avx and higher instructions" OFF)
@@ -195,6 +195,7 @@ if (ENABLE_TOOLS AND ENABLE_CXX11_ABI)
 endif ()
 
 set (CMAKE_CXX_STANDARD 17)
+set (CMAKE_CXX_STANDARD_REQUIRED ON)
 
 if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
     if (CMAKE_CXX_COMPILER_VERSION VERSION_EQUAL 17 OR CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 17)
@@ -261,6 +262,7 @@ endif ()
 
 # tests
 if (ENABLE_TESTS)
+    target_compile_definitions(vsag PRIVATE ENABLE_TESTS)
     add_subdirectory (tests)
 endif ()
 
