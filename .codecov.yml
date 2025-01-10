@@ -1,0 +1,29 @@
+
+# Configuration for CodeCov
+codecov:
+  require_ci_to_pass: no
+  notify:
+    require_ci_to_pass: no
+    wait_for_ci: false
+coverage:
+  precision: 2
+  round: down
+  range: "90...100"
+
+  status:
+    project:
+      default:
+        target: 95%
+        threshold: 0%
+    patch:
+      default:
+        target: 80%
+        threshold: 0%
+        if_ci_failed: error
+
+comment:
+  layout: "reach, diff, flags, files"
+  behavior: default
+  require_changes: false
+  branches:
+    - main
