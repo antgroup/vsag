@@ -145,12 +145,14 @@ Pyramid::KnnSearch(const DatasetPtr& query,
         result->Dim(0)->NumElements(1);
         return result;
     }
-    result->Dim(target_size)->NumElements(1)->Owner(true, commom_param_.allocator_.get());
+    result->Dim(static_cast<int64_t>(target_size))
+        ->NumElements(1)
+        ->Owner(true, commom_param_.allocator_.get());
     int64_t* ids = (int64_t*)commom_param_.allocator_->Allocate(sizeof(int64_t) * target_size);
     result->Ids(ids);
     float* dists = (float*)commom_param_.allocator_->Allocate(sizeof(float) * target_size);
     result->Distances(dists);
-    for (int64_t j = results.size() - 1; j >= 0; --j) {
+    for (int64_t j = static_cast<int64_t>(results.size() - 1); j >= 0; --j) {
         if (j < target_size) {
             dists[j] = results.top().first;
             ids[j] = results.top().second;

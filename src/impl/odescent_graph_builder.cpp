@@ -16,6 +16,7 @@
 #include "odescent_graph_builder.h"
 
 #include <chrono>
+#include <ios>
 
 namespace vsag {
 
@@ -75,7 +76,7 @@ ODescent::Build() {
 
 void
 ODescent::SaveGraph(std::stringstream& out) {
-    size_t file_offset = 0;  // we will use this if we want
+    std::streamoff file_offset = 0;  // we will use this if we want
     out.seekp(file_offset, out.beg);
     size_t index_size = 24;
     uint32_t max_degree = 0;
@@ -92,7 +93,8 @@ ODescent::SaveGraph(std::stringstream& out) {
     for (uint32_t i = 0; i < data_num_; i++) {
         uint32_t gk = (uint32_t)final_graph[i].size();
         out.write((char*)&gk, sizeof(uint32_t));
-        out.write((char*)final_graph[i].data(), gk * sizeof(uint32_t));
+        out.write((char*)final_graph[i].data(),
+                  static_cast<std::streamsize>(gk * sizeof(uint32_t)));
         max_degree =
             final_graph[i].size() > max_degree ? (uint32_t)final_graph[i].size() : max_degree;
         index_size += (size_t)(sizeof(uint32_t) * (gk + 1));
@@ -122,13 +124,13 @@ ODescent::init_graph() {
 
     auto task = [&, this](int64_t start, int64_t end) {
         std::random_device rd;
-        std::uniform_int_distribution<int> k_generate(0, data_num_ - 1);
+        std::uniform_int_distribution<int64_t> k_generate(0, data_num_ - 1);
         std::mt19937 rng(rd());
-        for (int i = start; i < end; ++i) {
+        for (int64_t i = start; i < end; ++i) {
             UnorderedSet<uint32_t> ids_set(allocator_);
             ids_set.insert(i);
             graph[i].neighbors.reserve(max_degree_);
-            int max_neighbors = std::min(data_num_ - 1, max_degree_);
+            int64_t max_neighbors = std::min(data_num_ - 1, max_degree_);
             for (int j = 0; j < max_neighbors; ++j) {
                 uint32_t id = i;
                 if (data_num_ - 1 < max_degree_) {
@@ -154,7 +156,7 @@ ODescent::update_neighbors(Vector<UnorderedSet<uint32_t>>& old_neighbors,
                            Vector<UnorderedSet<uint32_t>>& new_neighbors) {
     Vector<std::future<void>> futures(allocator_);
     auto task = [&, this](int64_t start, int64_t end) {
-        for (int i = start; i < end; ++i) {
+        for (int64_t i = start; i < end; ++i) {
             Vector<uint32_t> new_neighbors_candidates(allocator_);
             for (uint32_t node_id : new_neighbors[i]) {
                 for (int k = 0; k < new_neighbors_candidates.size(); ++k) {
@@ -220,7 +222,7 @@ ODescent::add_reverse_edges() {
     }
 
     auto task = [&, this](int64_t start, int64_t end) {
-        for (int i = start; i < end; ++i) {
+        for (int64_t i = start; i < end; ++i) {
             auto& neighbors = graph[i].neighbors;
             neighbors.insert(neighbors.end(),
                              reverse_graph[i].neighbors.begin(),
@@ -241,7 +243,7 @@ ODescent::sample_candidates(Vector<UnorderedSet<uint32_t>>& old_neighbors,
                             float sample_rate) {
     auto task = [&, this](int64_t start, int64_t end) {
         LinearCongruentialGenerator r;
-        for (int i = start; i < end; ++i) {
+        for (int64_t i = start; i < end; ++i) {
             auto& neighbors = graph[i].neighbors;
             for (int j = 0; j < neighbors.size(); ++j) {
                 float current_state = r.NextFloat();
@@ -282,7 +284,8 @@ ODescent::repair_no_in_edge() {
         }
     }
 
-    Vector<int> replace_pos(data_num_, std::min(data_num_ - 1, max_degree_) - 1, allocator_);
+    Vector<int> replace_pos(
+        data_num_, static_cast<int32_t>(std::min(data_num_ - 1, max_degree_) - 1), allocator_);
     for (int i = 0; i < data_num_; ++i) {
         auto& link = graph[i].neighbors;
         int need_replace_loc = 0;
@@ -321,7 +324,7 @@ ODescent::prune_graph() {
     }
 
     auto task = [&, this](int64_t start, int64_t end) {
-        for (int loc = start; loc < end; ++loc) {
+        for (int64_t loc = start; loc < end; ++loc) {
             auto& neighbors = graph[loc].neighbors;
             std::sort(neighbors.begin(), neighbors.end());
             neighbors.erase(std::unique(neighbors.begin(), neighbors.end()), neighbors.end());
@@ -364,7 +367,7 @@ void
 ODescent::parallelize_task(std::function<void(int64_t, int64_t)> task) {
     Vector<std::future<void>> futures(allocator_);
     for (int64_t i = 0; i < data_num_; i += block_size_) {
-        int end = std::min(i + block_size_, data_num_);
+        int64_t end = std::min(i + block_size_, data_num_);
         futures.push_back(thread_pool_->GeneralEnqueue(task, i, end));
     }
     for (auto& future : futures) {
