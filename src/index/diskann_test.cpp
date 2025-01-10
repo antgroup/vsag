@@ -144,25 +144,25 @@ TEST_CASE("build & search empty index", "[diskann][ut]") {
 
 TEST_CASE("build index with one vector", "[diskann][ut]") {
     vsag::logger::set_level(vsag::logger::level::debug);
-    int64_t dim = 128;
-    int64_t ef_construction = 100;
-    int64_t max_degree = 12;
-    float pq_sample_rate = 1.0f;
-    size_t pq_dims = 16;
-    auto index = std::make_shared<vsag::DiskANN>(diskann::Metric::L2,
-                                                 "float32",
-                                                 ef_construction,
-                                                 max_degree,
-                                                 pq_sample_rate,
-                                                 pq_dims,
-                                                 dim,
-                                                 false,
-                                                 false,
-                                                 false);
-    auto [ids, vectors] = fixtures::generate_ids_and_vectors(1, dim);
+    vsag::IndexCommonParam commom_param;
+    commom_param.dim_ = 128;
+    commom_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    commom_param.metric_ = vsag::MetricType::METRIC_TYPE_L2SQR;
+    vsag::DiskannParameters diskann_obj = parse_diskann_params(commom_param);
+    diskann_obj.metric = diskann::Metric::L2;
+    diskann_obj.pq_sample_rate = 1.0f;
+    diskann_obj.pq_dims = 16;
+    diskann_obj.max_degree = 12;
+    diskann_obj.ef_construction = 100;
+    diskann_obj.use_bsa = false;
+    diskann_obj.use_reference = false;
+    diskann_obj.use_preload = false;
+
+    auto index = std::make_shared<vsag::DiskANN>(diskann_obj, commom_param);
+    auto [ids, vectors] = fixtures::generate_ids_and_vectors(1, commom_param.dim_);
     auto one_vector = vsag::Dataset::Make();
     one_vector->NumElements(1)
-        ->Dim(dim)
+        ->Dim(commom_param.dim_)
         ->Ids(ids.data())
         ->Float32Vectors(vectors.data())
         ->Owner(false);
