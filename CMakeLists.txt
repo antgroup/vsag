@@ -38,7 +38,6 @@ option (ENABLE_TSAN "Whether to turn Thread Sanitizer ON or OFF" OFF)
 option (ENABLE_FRAME_POINTER "Whether to build with -fno-omit-frame-pointer" ON)
 option (ENABLE_THIN_LTO "Whether to build with thin lto -flto=thin" OFF)
 option (ENABLE_CCACHE "Whether to open ccache" OFF)
-option (ENABLE_COVERAGE "Enable gcov (debug, Linux builds only)" OFF)
 option (ENABLE_INTEL_MKL "Enable intel-mkl (x86 platform only)" ON)
 option (ENABLE_CXX11_ABI "Use CXX11 ABI" ON)
 option (ENABLE_LIBCXX "Use libc++ instead of libstdc++" OFF) # only support in clang
@@ -215,10 +214,16 @@ if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
     set (CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wno-incompatible-pointer-types-discards-qualifiers")
 endif ()
 
-# coverage
-if (ENABLE_COVERAGE AND NOT WIN32 AND NOT APPLE)
-    set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} --coverage -DCOVERAGE_TEST_USE_GCOV")
-    set (CMAKE_C_FLAGS "${CMAKE_C_FLAGS} --coverage -DCOVERAGE_TEST_USE_GCOV")
+# code coverage configuration
+add_library (coverage_config INTERFACE)
+if (ENABLE_COVERAGE AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang" AND NOT WIN32 AND NOT APPLE)
+    target_compile_options (coverage_config INTERFACE
+        -O0
+        -g
+        --coverage
+        -fprofile-update=atomic
+    )
+    target_link_options (coverage_config INTERFACE --coverage)
 endif ()
 
 # asan
