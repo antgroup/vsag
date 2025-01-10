@@ -149,6 +149,17 @@ public:
     bool
     isValidLabel(LabelType label) override;
 
+    size_t
+    getMaxDegree() {
+        return maxM0_;
+    };
+
+    linklistsizeint*
+    get_linklist0(InnerIdType internal_id) const {
+        // only for test now
+        return (linklistsizeint*)(data_level0_memory_->GetElementPtr(internal_id, offsetLevel0_));
+    }
+
     inline LabelType
     getExternalLabel(InnerIdType internal_id) const {
         std::shared_lock lock(points_locks_[internal_id]);
