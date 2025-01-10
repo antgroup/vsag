@@ -81,7 +81,6 @@ private:
     void* dist_func_param_{nullptr};
 
     mutable std::mutex label_lookup_lock;  // lock for label_lookup_
-    mutable std::shared_mutex shared_label_lookup_lock;
     std::unordered_map<LabelType, tableint> label_lookup_;
 
     std::default_random_engine level_generator_;
@@ -263,14 +262,14 @@ public:
         return dist;
     }
 
-    int64_t
+    tl::expected<vsag::DatasetPtr, vsag::Error>
     getBatchDistanceByLabel(int64_t count, 
                             const int64_t *vids, 
-                            const void* data_point, 
-                            float *&distances) override {
-        std::shared_lock<std::shared_mutex> lock_table(shared_label_lookup_lock);
-        int64_t ret_cnt = 0;
-        distances = (float *)allocator_->Allocate(sizeof(float) * count);
+                            const void* data_point) override {
+        std::unique_lock<std::mutex> lock_table(label_lookup_lock);
+        int64_t valid_cnt = 0;
+        auto result = vsag::Dataset::Make();
+        auto *distances = (float *)allocator_->Allocate(sizeof(float) * count);
         for (int i = 0; i < count; i++) {
             auto search = label_lookup_.find(vids[i]);
             if (search == label_lookup_.end()) {
@@ -279,10 +278,12 @@ public:
                 InnerIdType internal_id = search->second;
                 float dist = fstdistfunc_(data_point, getDataByInternalId(internal_id), dist_func_param_);
                 distances[i] = dist;
-                ret_cnt++;
+                valid_cnt++;
             }
         }
-        return ret_cnt;
+        result->NumElements(valid_cnt)->Owner(true, allocator_);
+        result->Distances(distances);
+        return std::move(result);
     }
 
     bool

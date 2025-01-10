@@ -256,13 +256,12 @@ public:
      * @param vids is the unique identifier of the vector to be calculated in the index.
      * @param vector is the embedding of query
      * @param distances is the distances between the query and the vector of the given ID
-     * @return result is valid distance of input vids.
+     * @return result is valid distance of input vids. '-1' indicates an invalid distance.
      */
-    virtual tl::expected<int64_t, Error>
+    virtual tl::expected<DatasetPtr, Error>
     CalcBatchDistanceById(int64_t count, 
                           const int64_t *vids, 
-                          const float* vector,
-                          float *&distances) const {
+                          const float* vector) const {
         throw std::runtime_error("Index doesn't support get distance by id");
     };
 

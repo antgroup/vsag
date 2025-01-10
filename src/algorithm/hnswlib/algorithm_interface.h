@@ -24,6 +24,9 @@
 #include "space_interface.h"
 #include "stream_reader.h"
 #include "typing.h"
+#include "vsag/dataset.h"
+#include "vsag/expected.hpp"
+#include "vsag/errors.h"
 
 namespace hnswlib {
 
@@ -69,11 +72,10 @@ public:
     virtual float
     getDistanceByLabel(LabelType label, const void* data_point) = 0;
 
-    virtual int64_t 
+    virtual tl::expected<vsag::DatasetPtr, vsag::Error>
     getBatchDistanceByLabel(int64_t count, 
                             const int64_t *vids, 
-                            const void *data_point, 
-                            float *&distances) = 0;
+                            const void *data_point) = 0;
 
     virtual const float*
     getDataByLabel(LabelType label) const = 0;
