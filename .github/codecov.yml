@@ -1,10 +1,14 @@
 
 # Configuration for CodeCov
 codecov:
+  max_report_age: off
   require_ci_to_pass: no
   notify:
     require_ci_to_pass: no
     wait_for_ci: false
+fixes:
+  - "/__w/vsag/::/"
+
 coverage:
   precision: 2
   round: down
@@ -22,7 +26,7 @@ coverage:
         if_ci_failed: error
 
 comment:
-  layout: "reach, diff, flags, files"
+  layout: "header, diff, files, footer"
   behavior: default
   require_changes: false
   branches:

@@ -19,7 +19,7 @@ jobs:
           apt update
           apt install -y libcapture-tiny-perl libdatetime-perl curl jq
           git clone https://github.com/linux-test-project/lcov.git
-          cd lcov && git checkout v2.2 && make install
+          cd lcov && git checkout v2.3 && make install
           lcov --version
       - name: Compile with Coverage Flags
         run: make cov
@@ -28,12 +28,15 @@ jobs:
           ./scripts/test_parallel_bg.sh
           ./build/mockimpl/tests_mockimpl -d yes ${UT_FILTER} --allow-running-no-tests ${UT_SHARD}
       - name: Collect Coverage Info
-        run: bash scripts/collect_cpp_coverage.sh
+        run: |
+          bash scripts/collect_cpp_coverage.sh
+          head -n10 coverage/coverage.info
       - name: Upload Coverage to Codecov
         uses: codecov/codecov-action@v5
         with:
           fail_ci_if_error: true
           files: coverage/coverage.info
+          disable_search: true
           flags: cpp
           token: ${{ secrets.CODECOV_TOKEN }}
           verbose: true
