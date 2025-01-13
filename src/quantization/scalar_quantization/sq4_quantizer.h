@@ -21,10 +21,11 @@
 
 #include "index/index_common_param.h"
 #include "inner_string_params.h"
-#include "quantizer.h"
+#include "quantization/quantizer.h"
 #include "scalar_quantization_trainer.h"
 #include "simd/normalize.h"
 #include "simd/sq4_simd.h"
+#include "sq4_quantizer_parameter.h"
 #include "typing.h"
 
 namespace vsag {
@@ -34,7 +35,9 @@ class SQ4Quantizer : public Quantizer<SQ4Quantizer<metric>> {
 public:
     explicit SQ4Quantizer(int dim, Allocator* allocator);
 
-    explicit SQ4Quantizer(const JsonType& quantization_param, const IndexCommonParam& common_param);
+    explicit SQ4Quantizer(const SQ4QuantizerParamPtr& param, const IndexCommonParam& common_param);
+
+    explicit SQ4Quantizer(const QuantizerParamPtr& param, const IndexCommonParam& common_param);
 
     bool
     TrainImpl(const DataType* data, uint64_t count);
@@ -88,9 +91,14 @@ SQ4Quantizer<metric>::SQ4Quantizer(int dim, Allocator* allocator)
 }
 
 template <MetricType metric>
-SQ4Quantizer<metric>::SQ4Quantizer(const JsonType& quantization_param,
+SQ4Quantizer<metric>::SQ4Quantizer(const SQ4QuantizerParamPtr& param,
                                    const IndexCommonParam& common_param)
     : SQ4Quantizer<metric>(common_param.dim_, common_param.allocator_.get()){};
+
+template <MetricType metric>
+SQ4Quantizer<metric>::SQ4Quantizer(const QuantizerParamPtr& param,
+                                   const IndexCommonParam& common_param)
+    : SQ4Quantizer<metric>(std::dynamic_pointer_cast<SQ4QuantizerParameter>(param), common_param){};
 
 template <MetricType metric>
 bool

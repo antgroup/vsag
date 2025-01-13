@@ -15,23 +15,20 @@
 
 #include "sparse_graph_datacell.h"
 
+#include "graph_datacell_parameter.h"
+
 namespace vsag {
-
-SparseGraphDataCell::SparseGraphDataCell(const JsonType& graph_param,
-                                         const IndexCommonParam& common_param)
-    : allocator_(common_param.allocator_.get()), neighbors_(common_param.allocator_.get()) {
-    if (graph_param.contains(GRAPH_PARAM_MAX_DEGREE)) {
-        this->maximum_degree_ = graph_param[GRAPH_PARAM_MAX_DEGREE];
-    }
-
-    if (graph_param.contains(GRAPH_PARAM_INIT_MAX_CAPACITY)) {
-        this->max_capacity_ = graph_param[GRAPH_PARAM_INIT_MAX_CAPACITY];
-    }
-}
 
 SparseGraphDataCell::SparseGraphDataCell(Allocator* allocator, uint32_t max_degree)
     : allocator_(allocator), neighbors_(allocator_) {
     this->maximum_degree_ = max_degree;
+}
+
+SparseGraphDataCell::SparseGraphDataCell(const GraphInterfaceParamPtr& param,
+                                         const IndexCommonParam& common_param)
+    : SparseGraphDataCell(
+          common_param.allocator_.get(),
+          std::dynamic_pointer_cast<GraphDataCellParameter>(param)->max_degree_ / 2) {
 }
 
 void

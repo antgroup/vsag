@@ -23,7 +23,9 @@
 
 #include "algorithm/hnswlib/hnswalg.h"
 #include "common.h"
+#include "graph_datacell_parameter.h"
 #include "graph_interface.h"
+#include "graph_interface_parameter.h"
 #include "index/index_common_param.h"
 #include "io/basic_io.h"
 #include "vsag/constants.h"
@@ -41,9 +43,11 @@ class GraphDataCell;
 template <typename IOTmpl>
 class GraphDataCell<IOTmpl, false> : public GraphInterface {
 public:
-    GraphDataCell(const JsonType& graph_param,
-                  const JsonType& io_param,
-                  const IndexCommonParam& common_param);
+    explicit GraphDataCell(const GraphInterfaceParamPtr& graph_param,
+                           const IndexCommonParam& common_param);
+
+    explicit GraphDataCell(const GraphDataCellParamPtr& graph_param,
+                           const IndexCommonParam& common_param);
 
     void
     InsertNeighborsById(InnerIdType id, const Vector<InnerIdType>& neighbor_ids) override;
@@ -86,19 +90,19 @@ private:
 };
 
 template <typename IOTmpl>
-GraphDataCell<IOTmpl, false>::GraphDataCell(const JsonType& graph_param,
-                                            const JsonType& io_param,
+GraphDataCell<IOTmpl, false>::GraphDataCell(const GraphDataCellParamPtr& param,
                                             const IndexCommonParam& common_param) {
-    this->io_ = std::make_shared<IOTmpl>(io_param, common_param);
-    if (graph_param.contains(GRAPH_PARAM_MAX_DEGREE)) {
-        this->maximum_degree_ = graph_param[GRAPH_PARAM_MAX_DEGREE];
-    }
-
-    if (graph_param.contains(GRAPH_PARAM_INIT_MAX_CAPACITY)) {
-        this->max_capacity_ = graph_param[GRAPH_PARAM_INIT_MAX_CAPACITY];
-    }
-
+    this->io_ = std::make_shared<IOTmpl>(param->io_parameter_, common_param);
+    this->maximum_degree_ = param->max_degree_;
+    this->max_capacity_ = param->init_max_capacity_;
     this->code_line_size_ = this->maximum_degree_ * sizeof(InnerIdType) + sizeof(uint32_t);
+}
+
+template <typename IOTmpl>
+GraphDataCell<IOTmpl, false>::GraphDataCell(const GraphInterfaceParamPtr& param,
+                                            const IndexCommonParam& common_param)
+    : GraphDataCell<IOTmpl, false>(std::dynamic_pointer_cast<GraphDataCellParameter>(param),
+                                   common_param) {
 }
 
 template <typename IOTmpl>

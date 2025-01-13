@@ -20,7 +20,6 @@
 #include <limits>
 
 #include "fixtures/test_dataset_pool.h"
-#include "simd/simd.h"
 #include "test_index.h"
 #include "vsag/options.h"
 
@@ -31,7 +30,7 @@ public:
     GenerateHGraphBuildParametersString(const std::string& metric_type,
                                         int64_t dim,
                                         const std::string& quantization_str = "sq8",
-                                        const int thread_count = 5);
+                                        int thread_count = 5);
     static TestDatasetPool pool;
 
     static std::vector<int> dims;
@@ -56,7 +55,7 @@ std::string
 HgraphTestIndex::GenerateHGraphBuildParametersString(const std::string& metric_type,
                                                      int64_t dim,
                                                      const std::string& quantization_str,
-                                                     const int thread_count) {
+                                                     int thread_count) {
     std::string build_parameters_str;
 
     constexpr auto parameter_temp_reorder = R"(

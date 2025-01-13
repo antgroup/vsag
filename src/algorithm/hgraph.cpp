@@ -21,7 +21,7 @@
 
 #include "common.h"
 #include "data_cell/sparse_graph_datacell.h"
-#include "index/hgraph_zparameters.h"
+#include "index/hgraph_index_zparameters.h"
 
 namespace vsag {
 static BinarySet
@@ -50,69 +50,33 @@ next_multiple_of_power_of_two(uint64_t x, uint64_t n) {
     return result;
 }
 
-HGraph::HGraph(const JsonType& index_param, const vsag::IndexCommonParam& common_param) noexcept
-    : index_param_(index_param),
-      common_param_(common_param),
+HGraph::HGraph(const HGraphParameter& hgraph_param,
+               const vsag::IndexCommonParam& common_param) noexcept
+    : common_param_(common_param),
+      dim_(common_param.dim_),
+      metric_(common_param.metric_),
+      allocator_(common_param.allocator_.get()),
       label_lookup_(common_param.allocator_.get()),
       neighbors_mutex_(0, common_param.allocator_.get()),
       route_graphs_(common_param.allocator_.get()),
-      labels_(common_param.allocator_.get()) {
-    this->dim_ = common_param.dim_;
-    this->metric_ = common_param.metric_;
-    this->allocator_ = common_param.allocator_.get();
-}
-
-tl::expected<void, Error>
-HGraph::Init() {
-    try {
-        CHECK_ARGUMENT(this->index_param_.contains(HGRAPH_USE_REORDER_KEY),
-                       fmt::format("hgraph parameters must contains {}", HGRAPH_USE_REORDER_KEY));
-        this->use_reorder_ = this->index_param_[HGRAPH_USE_REORDER_KEY];
-
-        CHECK_ARGUMENT(this->index_param_.contains(HGRAPH_BASE_CODES_KEY),
-                       fmt::format("hgraph parameters must contains {}", HGRAPH_BASE_CODES_KEY));
-        const auto& base_codes_json_obj = this->index_param_[HGRAPH_BASE_CODES_KEY];
-        this->basic_flatten_codes_ =
-            FlattenInterface::MakeInstance(base_codes_json_obj, common_param_);
-
-        if (this->use_reorder_) {
-            CHECK_ARGUMENT(
-                this->index_param_.contains(HGRAPH_PRECISE_CODES_KEY),
-                fmt::format("hgraph parameters must contains {}", HGRAPH_PRECISE_CODES_KEY));
-            const auto& precise_codes_json_obj = this->index_param_[HGRAPH_PRECISE_CODES_KEY];
-            this->high_precise_codes_ =
-                FlattenInterface::MakeInstance(precise_codes_json_obj, common_param_);
-        }
-
-        CHECK_ARGUMENT(this->index_param_.contains(HGRAPH_GRAPH_KEY),
-                       fmt::format("hgraph parameters must contains {}", HGRAPH_GRAPH_KEY));
-        const auto& graph_json_obj = this->index_param_[HGRAPH_GRAPH_KEY];
-        this->bottom_graph_ = GraphInterface::MakeInstance(graph_json_obj, common_param_);
-
-        mult_ = 1 / log(1.0 * static_cast<double>(this->bottom_graph_->MaximumDegree()));
-
-        resize(bottom_graph_->max_capacity_);
-
-        if (this->index_param_.contains(BUILD_PARAMS_KEY)) {
-            auto& build_params = this->index_param_[BUILD_PARAMS_KEY];
-            if (build_params.contains(BUILD_EF_CONSTRUCTION)) {
-                this->ef_construct_ = build_params[BUILD_EF_CONSTRUCTION];
-            }
-            if (build_params.contains(BUILD_THREAD_COUNT)) {
-                this->build_thread_count_ = build_params[BUILD_THREAD_COUNT];
-            }
-        }
-
-        if (this->build_thread_count_ > 1) {
-            this->build_pool_ = std::make_unique<progschj::ThreadPool>(this->build_thread_count_);
-        }
-
-        this->init_features();
-    } catch (const std::invalid_argument& e) {
-        LOG_ERROR_AND_RETURNS(
-            ErrorType::INVALID_ARGUMENT, "failed to init(invalid argument): ", e.what());
+      labels_(common_param.allocator_.get()),
+      use_reorder_(hgraph_param.use_reorder_),
+      ef_construct_(hgraph_param.ef_construction_),
+      build_thread_count_(hgraph_param.build_thread_count_) {
+    this->basic_flatten_codes_ =
+        FlattenInterface::MakeInstance(hgraph_param.base_codes_param_, common_param);
+    if (use_reorder_) {
+        this->high_precise_codes_ =
+            FlattenInterface::MakeInstance(hgraph_param.precise_codes_param_, common_param);
     }
-    return {};
+    this->bottom_graph_ =
+        GraphInterface::MakeInstance(hgraph_param.bottom_graph_param_, common_param);
+    mult_ = 1 / log(1.0 * static_cast<double>(this->bottom_graph_->MaximumDegree()));
+    resize(bottom_graph_->max_capacity_);
+    if (this->build_thread_count_ > 1) {
+        this->build_pool_ = std::make_unique<progschj::ThreadPool>(this->build_thread_count_);
+    }
+    this->init_features();
 }
 
 tl::expected<std::vector<int64_t>, Error>

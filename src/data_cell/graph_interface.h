@@ -21,6 +21,7 @@
 #include <nlohmann/json.hpp>
 #include <vector>
 
+#include "graph_interface_parameter.h"
 #include "index/index_common_param.h"
 #include "inner_string_params.h"
 #include "stream_reader.h"
@@ -39,7 +40,7 @@ public:
     virtual ~GraphInterface() = default;
 
     static GraphInterfacePtr
-    MakeInstance(const JsonType& graph_interface_param,
+    MakeInstance(const GraphInterfaceParamPtr& graph_interface_param,
                  const IndexCommonParam& common_param,
                  bool is_sparse = false);
 

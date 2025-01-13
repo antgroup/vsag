@@ -22,30 +22,19 @@
 namespace vsag {
 
 GraphInterfacePtr
-GraphInterface::MakeInstance(const JsonType& graph_interface_param,
+GraphInterface::MakeInstance(const GraphInterfaceParamPtr& param,
                              const IndexCommonParam& common_param,
                              bool is_sparse) {
-    CHECK_ARGUMENT(graph_interface_param.contains(GRAPH_PARAMS_KEY),
-                   fmt::format("graph interface parameters must contains {}", GRAPH_PARAMS_KEY));
-    const auto& graph_param = graph_interface_param[GRAPH_PARAMS_KEY];
     if (is_sparse) {
-        return std::make_shared<SparseGraphDataCell>(graph_param, common_param);
+        return std::make_shared<SparseGraphDataCell>(param, common_param);
     }
 
-    CHECK_ARGUMENT(graph_interface_param.contains(IO_TYPE_KEY),
-                   fmt::format("graph interface parameters must contains {}", IO_TYPE_KEY));
-    std::string io_string = graph_interface_param[IO_TYPE_KEY];
-
-    CHECK_ARGUMENT(graph_interface_param.contains(IO_PARAMS_KEY),
-                   fmt::format("graph interface parameters must contains {}", IO_PARAMS_KEY));
-    const auto& io_param = graph_interface_param[IO_PARAMS_KEY];
-
+    auto io_string =
+        std::dynamic_pointer_cast<GraphDataCellParameter>(param)->io_parameter_->GetTypeName();
     if (io_string == IO_TYPE_VALUE_BLOCK_MEMORY_IO) {
-        return std::make_shared<GraphDataCell<MemoryBlockIO, false>>(
-            graph_param, io_param, common_param);
+        return std::make_shared<GraphDataCell<MemoryBlockIO, false>>(param, common_param);
     } else if (io_string == IO_TYPE_VALUE_MEMORY_IO) {
-        return std::make_shared<GraphDataCell<MemoryIO, false>>(
-            graph_param, io_param, common_param);
+        return std::make_shared<GraphDataCell<MemoryIO, false>>(param, common_param);
     }
     return nullptr;
 }

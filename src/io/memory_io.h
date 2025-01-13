@@ -24,6 +24,7 @@
 
 #include "basic_io.h"
 #include "index/index_common_param.h"
+#include "memory_io_parameter.h"
 #include "vsag/allocator.h"
 
 namespace vsag {
@@ -35,13 +36,15 @@ public:
         current_size_ = MIN_SIZE;
     }
 
-    MemoryIO(const JsonType& io_param, const IndexCommonParam& common_param)
-        : allocator_(common_param.allocator_.get()) {
-        start_ = reinterpret_cast<uint8_t*>(allocator_->Allocate(MIN_SIZE));
-        current_size_ = MIN_SIZE;
+    explicit MemoryIO(const MemoryIOParamPtr& param, const IndexCommonParam& common_param)
+        : MemoryIO(common_param.allocator_.get()) {
     }
 
-    ~MemoryIO() {
+    explicit MemoryIO(const IOParamPtr& param, const IndexCommonParam& common_param)
+        : MemoryIO(std::dynamic_pointer_cast<MemoryIOParameter>(param), common_param) {
+    }
+
+    ~MemoryIO() override {
         allocator_->Deallocate(start_);
     }
 
