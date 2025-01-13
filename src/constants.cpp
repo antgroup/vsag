@@ -30,6 +30,7 @@ const char* const NUM_ELEMENTS = "num_elements";
 const char* const IDS = "ids";
 const char* const DISTS = "dists";
 const char* const FLOAT32_VECTORS = "f32_vectors";
+const char* const SPARSE_VECTORS = "sparse_vectors";
 const char* const INT8_VECTORS = "i8_vectors";
 const char* const DATASET_PATHS = "paths";
 const char* const HNSW_DATA = "hnsw_data";
