@@ -217,4 +217,38 @@ ConjugateGraph::is_empty() const {
     return (this->memory_usage_ == sizeof(this->memory_usage_) + FOOTER_SIZE);
 }
 
+tl::expected<bool, Error>
+ConjugateGraph::UpdateId(int64_t old_tag_id, int64_t new_tag_id) {
+    if (old_tag_id == new_tag_id) {
+        return true;
+    }
+
+    // 1. update key
+    bool updated = false;
+    auto it_old_key = conjugate_graph_.find(old_tag_id);
+    if (it_old_key != conjugate_graph_.end()) {
+        auto it_new_key = conjugate_graph_.find(new_tag_id);
+        if (it_new_key != conjugate_graph_.end()) {
+            // both two id exists in graph, note that this situation should be filtered out before use this function.
+            return false;
+        } else {
+            conjugate_graph_[new_tag_id] = std::move(it_old_key->second);
+        }
+        conjugate_graph_.erase(it_old_key);
+        updated = true;
+    }
+
+    // 2. update neighbors
+    for (auto& [key, neighbors] : conjugate_graph_) {
+        auto it_old_neighbor = neighbors.find(old_tag_id);
+        if (it_old_neighbor != neighbors.end()) {
+            neighbors.erase(it_old_neighbor);
+            neighbors.insert(new_tag_id);
+            updated = true;
+        }
+    }
+
+    return updated;
+}
+
 }  // namespace vsag
