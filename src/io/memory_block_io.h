@@ -20,6 +20,7 @@
 #endif
 
 #include <algorithm>
+#include <bit>
 #include <cmath>
 #include <cstring>
 #include <nlohmann/json.hpp>
@@ -29,25 +30,25 @@
 #include "common.h"
 #include "index/index_common_param.h"
 #include "inner_string_params.h"
+#include "memory_block_io_parameter.h"
 #include "vsag/allocator.h"
 
 namespace vsag {
 
 class MemoryBlockIO : public BasicIO<MemoryBlockIO> {
 public:
-    explicit MemoryBlockIO(Allocator* allocator, uint64_t block_size = DEFAULT_BLOCK_SIZE)
-        : block_size_(block_size), allocator_(allocator), blocks_(0, allocator) {
+    explicit MemoryBlockIO(Allocator* allocator, uint64_t block_size)
+        : block_size_(MemoryBlockIOParameter::NearestPowerOfTwo(block_size)),
+          allocator_(allocator),
+          blocks_(0, allocator) {
         this->update_by_block_size();
     }
 
-    MemoryBlockIO(const JsonType& io_param, const IndexCommonParam& common_param)
-        : MemoryBlockIO(common_param.allocator_.get()) {
-        if (io_param.contains(BLOCK_IO_BLOCK_SIZE_KEY)) {
-            this->block_size_ =
-                io_param[BLOCK_IO_BLOCK_SIZE_KEY];  // TODO(LHT): trans str to uint64_t
-            this->update_by_block_size();
-        }
-    }
+    explicit MemoryBlockIO(const MemoryBlockIOParamPtr& param, const IndexCommonParam& common_param)
+        : MemoryBlockIO(common_param.allocator_.get(), param->block_size_){};
+
+    explicit MemoryBlockIO(const IOParamPtr& param, const IndexCommonParam& common_param)
+        : MemoryBlockIO(std::dynamic_pointer_cast<MemoryBlockIOParameter>(param), common_param){};
 
     ~MemoryBlockIO() override {
         for (auto* block : blocks_) {
@@ -90,14 +91,8 @@ private:
 
     inline void
     update_by_block_size() {
-        block_bit_ = 0;
-        while (block_size_ > 0) {
-            block_size_ >>= 1;
-            block_bit_ += 1;
-        }
-        block_bit_ -= 1;
-        in_block_mask_ = (1ULL << block_bit_) - 1;
-        block_size_ = in_block_mask_ + 1;
+        block_bit_ = std::__countr_zero(block_size_);
+        in_block_mask_ = block_size_ - 1;
     }
 
     inline void

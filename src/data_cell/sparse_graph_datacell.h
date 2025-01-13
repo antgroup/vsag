@@ -27,7 +27,8 @@ class SparseGraphDataCell : public GraphInterface {
 public:
     using NeighborCountsType = uint32_t;
 
-    SparseGraphDataCell(const JsonType& graph_param, const IndexCommonParam& common_param);
+    SparseGraphDataCell(const GraphInterfaceParamPtr& graph_param,
+                        const IndexCommonParam& common_param);
 
     explicit SparseGraphDataCell(Allocator* allocator = nullptr, uint32_t max_degree = 32);
 

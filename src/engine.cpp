@@ -23,7 +23,7 @@
 #include "index/diskann.h"
 #include "index/diskann_zparameters.h"
 #include "index/hgraph_index.h"
-#include "index/hgraph_zparameters.h"
+#include "index/hgraph_index_zparameters.h"
 #include "index/hnsw.h"
 #include "index/hnsw_zparameters.h"
 #include "index/index_common_param.h"
@@ -97,14 +97,13 @@ Engine::CreateIndex(const std::string& origin_name, const std::string& parameter
             return std::make_shared<DiskANN>(diskann_params, index_common_params);
         } else if (name == INDEX_HGRAPH) {
             logger::debug("created a hgraph index");
-            JsonType hgraph_params;
+            JsonType hgraph_json;
             if (parsed_params.contains(INDEX_PARAM)) {
-                hgraph_params = std::move(parsed_params[INDEX_PARAM]);
+                hgraph_json = std::move(parsed_params[INDEX_PARAM]);
             }
-            HGraphParameters hgraph_param(hgraph_params, index_common_params);
-            auto hgraph_index =
-                std::make_shared<HGraphIndex>(hgraph_param.GetJson(), index_common_params);
-            hgraph_index->Init();
+            auto hgraph_param = std::make_shared<HGraphIndexParameter>(index_common_params);
+            hgraph_param->FromJson(hgraph_json);
+            auto hgraph_index = std::make_shared<HGraphIndex>(*hgraph_param, index_common_params);
             return hgraph_index;
         } else if (name == INDEX_PYRAMID) {
             // read parameters from json, throw exception if not exists

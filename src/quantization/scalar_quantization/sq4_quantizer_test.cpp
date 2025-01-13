@@ -20,7 +20,7 @@
 
 #include "default_allocator.h"
 #include "fixtures.h"
-#include "quantizer_test.h"
+#include "quantization/quantizer_test.h"
 #include "safe_allocator.h"
 
 using namespace vsag;

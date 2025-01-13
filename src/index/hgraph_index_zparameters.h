@@ -15,60 +15,33 @@
 
 #pragma once
 
-#include <nlohmann/json.hpp>
 #include <string>
 
+#include "algorithm/hgraph_parameter.h"
 #include "index_common_param.h"
+#include "parameter.h"
 #include "typing.h"
 
 namespace vsag {
-class HGraphParameters {
+class HGraphIndexParameter : public Parameter {
 public:
-    explicit HGraphParameters(JsonType& hgraph_param, const IndexCommonParam& common_param);
+    explicit HGraphIndexParameter(IndexCommonParam common_param);
 
     void
-    ParseStringParam(JsonType& hgraph_param);
-
-    void
-    CheckAndSetKeyValue(const std::string& key, JsonType& value);
-
-    std::string
-    GetString() {
-        this->refresh_string_by_json();
-        return this->str_;
-    }
+    FromJson(const JsonType& json) override;
 
     JsonType
-    GetJson() {
-        this->refresh_json_by_string();
-        return this->json_;
-    }
+    ToJson() override;
+
+public:
+    std::shared_ptr<HGraphParameter> hgraph_parameter_{nullptr};
 
 private:
-    inline void
-    refresh_json_by_string() {
-        this->json_ = JsonType::parse(str_);
-    }
-
-    inline void
-    refresh_string_by_json() {
-        this->str_ = this->json_.dump();
-    }
-
     void
     check_common_param() const;
 
-    void
-    init_by_options();
-
 private:
-    JsonType json_;
-
-    std::string str_;
-
     const IndexCommonParam common_param_;
-
-    const std::string default_hgraph_params_;
 };
 
 class HGraphSearchParameters {

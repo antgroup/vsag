@@ -13,11 +13,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <catch2/catch_message.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <cstdint>
 #include <fstream>
 
-#include "catch2/catch_message.hpp"
 #include "fixtures/fixtures.h"
 #include "vsag/dataset.h"
 #include "vsag/vsag_ext.h"

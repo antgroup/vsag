@@ -15,32 +15,30 @@
 
 #pragma once
 
-#include <cmath>
-#include <limits>
-#include <string>
-#include <unordered_map>
-#include <vector>
-
 #include "index/index_common_param.h"
 #include "inner_string_params.h"
-#include "quantizer.h"
+#include "quantization/quantizer.h"
 #include "scalar_quantization_trainer.h"
 #include "simd/normalize.h"
-#include "simd/sq4_uniform_simd.h"
+#include "simd/sq8_uniform_simd.h"
+#include "sq8_uniform_quantizer_parameter.h"
 #include "typing.h"
 
 namespace vsag {
-
-using norm_type = uint64_t;
-using sum_type = float;
-
 template <MetricType metric = MetricType::METRIC_TYPE_L2SQR>
-class SQ4UniformQuantizer : public Quantizer<SQ4UniformQuantizer<metric>> {
+class SQ8UniformQuantizer : public Quantizer<SQ8UniformQuantizer<metric>> {
 public:
-    explicit SQ4UniformQuantizer(int dim, Allocator* allocator);
+    using norm_type = uint64_t;
+    using sum_type = float;
 
-    explicit SQ4UniformQuantizer(const JsonType& quantization_param,
-                                 const IndexCommonParam& common_param);
+    explicit SQ8UniformQuantizer(int dim, Allocator* allocator);
+
+    SQ8UniformQuantizer(const SQ8UniformQuantizerParamPtr& param,
+                        const IndexCommonParam& common_param);
+
+    SQ8UniformQuantizer(const QuantizerParamPtr& param, const IndexCommonParam& common_param);
+
+    ~SQ8UniformQuantizer() = default;
 
     bool
     TrainImpl(const DataType* data, uint64_t count);
@@ -57,19 +55,16 @@ public:
     bool
     DecodeBatchImpl(const uint8_t* codes, DataType* data, uint64_t count);
 
-    inline float
+    float
     ComputeImpl(const uint8_t* codes1, const uint8_t* codes2) const;
 
     inline void
-    ProcessQueryImpl(const DataType* query, Computer<SQ4UniformQuantizer>& computer) const;
+    ProcessQueryImpl(const DataType* query, Computer<SQ8UniformQuantizer>& computer) const;
 
     inline void
-    ComputeDistImpl(Computer<SQ4UniformQuantizer>& computer,
+    ComputeDistImpl(Computer<SQ8UniformQuantizer>& computer,
                     const uint8_t* codes,
                     float* dists) const;
-
-    inline void
-    ReleaseComputerImpl(Computer<SQ4UniformQuantizer<metric>>& computer) const;
 
     inline void
     SerializeImpl(StreamWriter& writer);
@@ -77,9 +72,12 @@ public:
     inline void
     DeserializeImpl(StreamReader& reader);
 
+    inline void
+    ReleaseComputerImpl(Computer<SQ8UniformQuantizer<metric>>& computer) const;
+
     [[nodiscard]] std::string
     NameImpl() const {
-        return QUANTIZATION_TYPE_VALUE_SQ4_UNIFORM;
+        return QUANTIZATION_TYPE_VALUE_SQ8_UNIFORM;
     }
 
 private:
@@ -97,14 +95,13 @@ private:
 };
 
 template <MetricType metric>
-SQ4UniformQuantizer<metric>::SQ4UniformQuantizer(int dim, Allocator* allocator)
-    : Quantizer<SQ4UniformQuantizer<metric>>(dim, allocator) {
+SQ8UniformQuantizer<metric>::SQ8UniformQuantizer(int dim, Allocator* allocator)
+    : Quantizer<SQ8UniformQuantizer<metric>>(dim, allocator) {
     lower_bound_ = std::numeric_limits<DataType>::max();
     diff_ = std::numeric_limits<DataType>::lowest();
 
     size_t align_size = 1;
-    if constexpr (metric == MetricType::METRIC_TYPE_L2SQR or
-                  metric == MetricType::METRIC_TYPE_COSINE) {
+    if constexpr (metric == MetricType::METRIC_TYPE_L2SQR) {
         align_size = std::max(align_size, sizeof(norm_type));
     }
     if constexpr (metric == MetricType::METRIC_TYPE_IP or
@@ -116,32 +113,32 @@ SQ4UniformQuantizer<metric>::SQ4UniformQuantizer(int dim, Allocator* allocator)
     offset_code_ = this->code_size_;
     this->code_size_ += ((dim + align_size - 1) / align_size) * align_size;
 
-    if constexpr (metric == MetricType::METRIC_TYPE_L2SQR or
-                  metric == MetricType::METRIC_TYPE_COSINE) {
+    if constexpr (metric == MetricType::METRIC_TYPE_L2SQR) {
         offset_norm_ = this->code_size_;
-        this->code_size_ +=
-            ((sizeof(norm_type) + align_size - 1) / align_size) * align_size;  // norm of vector
+        this->code_size_ += ((sizeof(norm_type) + align_size - 1) / align_size) * align_size;
     }
 
     if constexpr (metric == MetricType::METRIC_TYPE_IP or
                   metric == MetricType::METRIC_TYPE_COSINE) {
         offset_sum_ = this->code_size_;
-        this->code_size_ +=
-            ((sizeof(sum_type) + align_size - 1) / align_size) * align_size;  // sum of vector
+        this->code_size_ += ((sizeof(sum_type) + align_size - 1) / align_size) * align_size;
     }
-
-    // align 64 bytes (512 bits) to avoid illegal memory access in SIMD
-    this->code_size_ = (this->code_size_ + (1 << 6) - 1) >> 6 << 6;
 }
 
 template <MetricType metric>
-SQ4UniformQuantizer<metric>::SQ4UniformQuantizer(const JsonType& quantization_param,
+SQ8UniformQuantizer<metric>::SQ8UniformQuantizer(const SQ8UniformQuantizerParamPtr& param,
                                                  const IndexCommonParam& common_param)
-    : SQ4UniformQuantizer<metric>(common_param.dim_, common_param.allocator_.get()){};
+    : SQ8UniformQuantizer<metric>(common_param.dim_, common_param.allocator_.get()){};
+
+template <MetricType metric>
+SQ8UniformQuantizer<metric>::SQ8UniformQuantizer(const QuantizerParamPtr& param,
+                                                 const IndexCommonParam& common_param)
+    : SQ8UniformQuantizer<metric>(std::dynamic_pointer_cast<SQ8UniformQuantizerParameter>(param),
+                                  common_param){};
 
 template <MetricType metric>
 bool
-SQ4UniformQuantizer<metric>::TrainImpl(const DataType* data, uint64_t count) {
+SQ8UniformQuantizer<metric>::TrainImpl(const DataType* data, uint64_t count) {
     if (data == nullptr) {
         return false;
     }
@@ -154,7 +151,7 @@ SQ4UniformQuantizer<metric>::TrainImpl(const DataType* data, uint64_t count) {
         need_normalize = true;
     }
 
-    ScalarQuantizationTrainer trainer(this->dim_, 4);
+    ScalarQuantizationTrainer trainer(this->dim_, 8);
     trainer.TrainUniform(data, count, this->diff_, this->lower_bound_, need_normalize);
 
     this->diff_ -= this->lower_bound_;
@@ -165,7 +162,7 @@ SQ4UniformQuantizer<metric>::TrainImpl(const DataType* data, uint64_t count) {
 
 template <MetricType metric>
 bool
-SQ4UniformQuantizer<metric>::EncodeOneImpl(const DataType* data, uint8_t* codes) const {
+SQ8UniformQuantizer<metric>::EncodeOneImpl(const DataType* data, uint8_t* codes) const {
     float delta = 0;
     uint8_t scaled = 0;
     norm_type norm = 0;
@@ -185,14 +182,9 @@ SQ4UniformQuantizer<metric>::EncodeOneImpl(const DataType* data, uint8_t* codes)
         } else if (delta > 0.999) {
             delta = 1;
         }
-        scaled = 15 * delta;
+        scaled = 255 * delta;
+        codes[offset_code_ + d] = scaled;
 
-        if (d & 1) {
-            codes[offset_code_ + (d >> 1)] |= scaled << 4;
-        } else {
-            codes[offset_code_ + (d >> 1)] = 0;
-            codes[offset_code_ + (d >> 1)] |= scaled;
-        }
         norm += scaled * scaled;
         sum += data[d];
     }
@@ -211,7 +203,7 @@ SQ4UniformQuantizer<metric>::EncodeOneImpl(const DataType* data, uint8_t* codes)
 
 template <MetricType metric>
 bool
-SQ4UniformQuantizer<metric>::EncodeBatchImpl(const DataType* data, uint8_t* codes, uint64_t count) {
+SQ8UniformQuantizer<metric>::EncodeBatchImpl(const DataType* data, uint8_t* codes, uint64_t count) {
     for (uint64_t i = 0; i < count; ++i) {
         this->EncodeOneImpl(data + i * this->dim_, codes + i * this->code_size_);
     }
@@ -220,21 +212,16 @@ SQ4UniformQuantizer<metric>::EncodeBatchImpl(const DataType* data, uint8_t* code
 
 template <MetricType metric>
 bool
-SQ4UniformQuantizer<metric>::DecodeOneImpl(const uint8_t* codes, DataType* data) {
+SQ8UniformQuantizer<metric>::DecodeOneImpl(const uint8_t* codes, DataType* data) {
     for (uint64_t d = 0; d < this->dim_; d++) {
-        if (d & 1) {
-            data[d] = ((codes[d >> 1] & 0xf0) >> 4) / 15.0 * diff_ + lower_bound_;
-        } else {
-            data[d] = (codes[d >> 1] & 0x0f) / 15.0 * diff_ + lower_bound_;
-        }
+        data[d] = codes[d] / 255.0 * diff_ + lower_bound_;
     }
-
     return true;
 }
 
 template <MetricType metric>
 bool
-SQ4UniformQuantizer<metric>::DecodeBatchImpl(const uint8_t* codes, DataType* data, uint64_t count) {
+SQ8UniformQuantizer<metric>::DecodeBatchImpl(const uint8_t* codes, DataType* data, uint64_t count) {
     for (uint64_t i = 0; i < count; ++i) {
         this->DecodeOneImpl(codes + i * this->code_size_, data + i * this->dim_);
     }
@@ -243,10 +230,10 @@ SQ4UniformQuantizer<metric>::DecodeBatchImpl(const uint8_t* codes, DataType* dat
 
 template <MetricType metric>
 inline float
-SQ4UniformQuantizer<metric>::ComputeImpl(const uint8_t* codes1, const uint8_t* codes2) const {
-    float result = 0.0f;
+SQ8UniformQuantizer<metric>::ComputeImpl(const uint8_t* codes1, const uint8_t* codes2) const {
+    float result;
     if constexpr (metric == MetricType::METRIC_TYPE_L2SQR) {
-        result = SQ4UniformComputeCodesIP(codes1, codes2, this->dim_);
+        result = SQ8UniformComputeCodesIP(codes1, codes2, this->dim_);
 
         norm_type norm1 = *((norm_type*)(codes1 + offset_norm_));
         norm_type norm2 = *((norm_type*)(codes2 + offset_norm_));
@@ -254,12 +241,12 @@ SQ4UniformQuantizer<metric>::ComputeImpl(const uint8_t* codes1, const uint8_t* c
         result = norm1 + norm2 - 2 * result;
     } else if constexpr (metric == MetricType::METRIC_TYPE_IP or
                          metric == MetricType::METRIC_TYPE_COSINE) {
-        result = SQ4UniformComputeCodesIP(codes1, codes2, this->dim_);
+        result = SQ8UniformComputeCodesIP(codes1, codes2, this->dim_);
 
         sum_type sum1 = *((sum_type*)(codes1 + offset_sum_));
         sum_type sum2 = *((sum_type*)(codes2 + offset_sum_));
 
-        result = lower_bound_ * (sum1 + sum2) + (diff_ / 15.0) * (diff_ / 15.0) * result -
+        result = lower_bound_ * (sum1 + sum2) + (diff_ / 255.0) * (diff_ / 255.0) * result -
                  lower_bound_ * lower_bound_;
 
         result = 1 - result;
@@ -273,8 +260,8 @@ SQ4UniformQuantizer<metric>::ComputeImpl(const uint8_t* codes1, const uint8_t* c
 
 template <MetricType metric>
 void
-SQ4UniformQuantizer<metric>::ProcessQueryImpl(const DataType* query,
-                                              Computer<SQ4UniformQuantizer>& computer) const {
+SQ8UniformQuantizer<metric>::ProcessQueryImpl(const DataType* query,
+                                              Computer<SQ8UniformQuantizer>& computer) const {
     try {
         computer.buf_ = reinterpret_cast<uint8_t*>(this->allocator_->Allocate(this->code_size_));
         this->EncodeOneImpl(query, computer.buf_);
@@ -287,7 +274,7 @@ SQ4UniformQuantizer<metric>::ProcessQueryImpl(const DataType* query,
 
 template <MetricType metric>
 void
-SQ4UniformQuantizer<metric>::ComputeDistImpl(Computer<SQ4UniformQuantizer>& computer,
+SQ8UniformQuantizer<metric>::ComputeDistImpl(Computer<SQ8UniformQuantizer>& computer,
                                              const uint8_t* codes,
                                              float* dists) const {
     dists[0] = this->ComputeImpl(computer.buf_, codes);
@@ -295,14 +282,14 @@ SQ4UniformQuantizer<metric>::ComputeDistImpl(Computer<SQ4UniformQuantizer>& comp
 
 template <MetricType metric>
 void
-SQ4UniformQuantizer<metric>::ReleaseComputerImpl(
-    Computer<SQ4UniformQuantizer<metric>>& computer) const {
+SQ8UniformQuantizer<metric>::ReleaseComputerImpl(
+    Computer<SQ8UniformQuantizer<metric>>& computer) const {
     this->allocator_->Deallocate(computer.buf_);
 }
 
 template <MetricType metric>
 void
-SQ4UniformQuantizer<metric>::SerializeImpl(StreamWriter& writer) {
+SQ8UniformQuantizer<metric>::SerializeImpl(StreamWriter& writer) {
     StreamWriter::WriteObj(writer, this->diff_);
     StreamWriter::WriteObj(writer, this->lower_bound_);
     StreamWriter::WriteObj(writer, this->offset_code_);
@@ -312,7 +299,7 @@ SQ4UniformQuantizer<metric>::SerializeImpl(StreamWriter& writer) {
 
 template <MetricType metric>
 void
-SQ4UniformQuantizer<metric>::DeserializeImpl(StreamReader& reader) {
+SQ8UniformQuantizer<metric>::DeserializeImpl(StreamReader& reader) {
     StreamReader::ReadObj(reader, this->diff_);
     StreamReader::ReadObj(reader, this->lower_bound_);
     StreamReader::ReadObj(reader, this->offset_code_);

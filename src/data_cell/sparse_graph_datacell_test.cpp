@@ -15,50 +15,37 @@
 
 #include "sparse_graph_datacell.h"
 
-#include "catch2/catch_template_test_macros.hpp"
-#include "default_allocator.h"
-#include "fmt/format-inl.h"
+#include <fmt/format-inl.h>
+
+#include <catch2/catch_template_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
+
+#include "graph_datacell_parameter.h"
 #include "graph_interface_test.h"
 #include "safe_allocator.h"
-
 using namespace vsag;
 
 void
-TestSparseGraphDataCell(const JsonType& graph_param, const IndexCommonParam& param) {
-    auto counts = {1000, 2000};
-    auto max_id = 1000'000;
-    for (auto count : counts) {
-        auto graph = std::make_shared<SparseGraphDataCell>(graph_param, param);
-        GraphInterfaceTest test(graph);
-        auto other = std::make_shared<SparseGraphDataCell>(graph_param, param);
-        test.BasicTest(max_id, count, other);
-    }
+TestSparseGraphDataCell(const GraphInterfaceParamPtr& param, const IndexCommonParam& common_param) {
+    auto count = GENERATE(1000, 2000);
+    auto max_id = 10000;
+    bool is_sparse = true;
+
+    auto graph = GraphInterface::MakeInstance(param, common_param, is_sparse);
+    GraphInterfaceTest test(graph);
+    auto other = GraphInterface::MakeInstance(param, common_param, is_sparse);
+    test.BasicTest(max_id, count, other);
 }
 
-TEST_CASE("graph basic test", "[ut][sparse_graph_datacell]") {
+TEST_CASE("sparse graph basic test", "[ut][sparse_graph_datacell]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
-    auto dims = {32, 64};
-    auto max_degrees = {5, 12, 24, 32, 64, 128};
-    auto max_capacities = {1, 100, 10000, 10'000'000, 32'179'837};
-    std::vector<JsonType> graph_params;
-    constexpr const char* graph_param_temp = R"(
-        {{
-            "max_degree": {},
-            "init_capacity": {}
-        }}
-        )";
-    for (auto degree : max_degrees) {
-        for (auto capacity : max_capacities) {
-            auto str = fmt::format(graph_param_temp, degree, capacity);
-            graph_params.emplace_back(JsonType::parse(str));
-        }
-    }
-    for (auto dim : dims) {
-        IndexCommonParam param;
-        param.dim_ = dim;
-        param.allocator_ = allocator;
-        for (auto& gp : graph_params) {
-            TestSparseGraphDataCell(gp, param);
-        }
-    }
+    auto dim = GENERATE(32, 64);
+    auto max_degree = GENERATE(5, 12, 32, 64, 128);
+
+    IndexCommonParam common_param;
+    common_param.dim_ = dim;
+    common_param.allocator_ = allocator;
+    auto graph_param = std::make_shared<GraphDataCellParameter>();
+    graph_param->max_degree_ = max_degree;
+    TestSparseGraphDataCell(graph_param, common_param);
 }

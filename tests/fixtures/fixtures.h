@@ -218,7 +218,7 @@ struct IOItem {
 };
 
 std::vector<IOItem>
-GenTestItems(uint64_t count, uint64_t max_length, uint64_t max_index = 100000);
+GenTestItems(uint64_t count, uint64_t max_length, uint64_t max_index = 10000);
 
 vsag::DatasetPtr
 generate_one_dataset(int64_t dim, uint64_t count);

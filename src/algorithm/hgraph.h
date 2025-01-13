@@ -26,6 +26,7 @@
 #include "common.h"
 #include "data_cell/flatten_interface.h"
 #include "data_cell/graph_interface.h"
+#include "hgraph_parameter.h"
 #include "index/index_common_param.h"
 #include "index_feature_list.h"
 #include "typing.h"
@@ -47,10 +48,7 @@ public:
                                         Vector<std::pair<float, InnerIdType>>,
                                         CompareByFirst>;
 
-    HGraph(const JsonType& index_param, const IndexCommonParam& common_param) noexcept;
-
-    tl::expected<void, Error>
-    Init();
+    HGraph(const HGraphParameter& param, const IndexCommonParam& common_param) noexcept;
 
     tl::expected<std::vector<int64_t>, Error>
     Build(const DatasetPtr& data);
@@ -208,7 +206,6 @@ private:
     int64_t dim_{0};
     MetricType metric_{MetricType::METRIC_TYPE_L2SQR};
 
-    const JsonType index_param_{};
     const IndexCommonParam common_param_{};
 
     std::default_random_engine level_generator_{2021};

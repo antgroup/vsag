@@ -17,6 +17,7 @@
 #include <cstdint>
 #include <cstring>
 
+#include "fp32_quantizer_parameter.h"
 #include "index/index_common_param.h"
 #include "inner_string_params.h"
 #include "nlohmann/json.hpp"
@@ -32,7 +33,9 @@ class FP32Quantizer : public Quantizer<FP32Quantizer<metric>> {
 public:
     explicit FP32Quantizer(int dim, Allocator* allocator);
 
-    FP32Quantizer(const JsonType& quantization_param, const IndexCommonParam& common_param);
+    FP32Quantizer(const FP32QuantizerParamPtr& param, const IndexCommonParam& common_param);
+
+    FP32Quantizer(const QuantizerParamPtr& param, const IndexCommonParam& common_param);
 
     ~FP32Quantizer() = default;
 
@@ -78,16 +81,22 @@ public:
 };
 
 template <MetricType metric>
-FP32Quantizer<metric>::FP32Quantizer(const JsonType& quantization_param,
-                                     const IndexCommonParam& common_param)
-    : Quantizer<FP32Quantizer<metric>>(common_param.dim_, common_param.allocator_.get()) {
-    this->code_size_ = common_param.dim_ * sizeof(float);
-}
-
-template <MetricType metric>
 FP32Quantizer<metric>::FP32Quantizer(int dim, Allocator* allocator)
     : Quantizer<FP32Quantizer<metric>>(dim, allocator) {
     this->code_size_ = dim * sizeof(float);
+}
+
+template <MetricType metric>
+FP32Quantizer<metric>::FP32Quantizer(const FP32QuantizerParamPtr& param,
+                                     const IndexCommonParam& common_param)
+    : FP32Quantizer<metric>(common_param.dim_, common_param.allocator_.get()) {
+}
+
+template <MetricType metric>
+FP32Quantizer<metric>::FP32Quantizer(const QuantizerParamPtr& param,
+                                     const IndexCommonParam& common_param)
+    : FP32Quantizer<metric>(std::dynamic_pointer_cast<FP32QuantizerParameter>(param),
+                            common_param) {
 }
 
 template <MetricType metric>
