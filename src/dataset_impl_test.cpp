@@ -18,6 +18,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "default_allocator.h"
+#include "fixtures.h"
 #include "vsag/dataset.h"
 
 TEST_CASE("test dataset", "[ut][dataset]") {
@@ -39,5 +40,11 @@ TEST_CASE("test dataset", "[ut][dataset]") {
         auto* data = new float[1];
         dataset->Float32Vectors(data)->Owner(false);
         delete[] data;
+    }
+
+    SECTION("sparse vector") {
+        auto dataset = vsag::Dataset::Make();
+        vsag::SparseVectors sparse_vectors = fixtures::GenerateSparseVectors(100);
+        dataset->SparseVectors(sparse_vectors)->Owner(true);
     }
 }

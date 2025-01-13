@@ -62,6 +62,9 @@ GenerateVectors(uint64_t count, uint32_t dim, int seed = 47, bool need_normalize
     return vectors;
 }
 
+vsag::SparseVectors
+GenerateSparseVectors(uint32_t count, uint32_t dim_limit = 100, int seed = 47);
+
 std::vector<float>
 generate_vectors(uint64_t count, uint32_t dim, bool need_normalize = true, int seed = 47);
 
