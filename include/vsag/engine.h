@@ -75,6 +75,24 @@ public:
     tl::expected<std::shared_ptr<Index>, Error>
     CreateIndex(const std::string& name, const std::string& parameters);
 
+    /**
+     * @brief Merges multiple graph indexes into a single index.
+     *
+     * This function takes a specified `name` and `parameters`, along with a vector of
+     * `sub_indexes`, and attempts to merge them into a single graph index. The result is
+     * either a shared pointer to the newly merged `Index` or an `Error` object that describes
+     * any failures encountered during the merging process.
+     *
+     * @param name The name assigned to the merged graph index, which will represent the
+     *              combined structure of the provided sub-indexes.
+     * @param parameters A JSON-like string containing various parameters that dictate
+     *                   the merging behavior and properties of the resulting index.
+     * @param sub_indexes A vector of shared pointers to the `Index` objects that are to be merged.
+     * @return tl::expected<std::shared_ptr<Index>, Error> An expected value that contains either
+     * a shared pointer to the successfully merged `Index` or an `Error` detailing
+     * why the merge operation failed.
+     * @see Index
+     */
     tl::expected<std::shared_ptr<Index>, Error>
     MergeGraphIndex(const std::string& name,
                     const std::string& parameters,
