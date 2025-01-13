@@ -26,8 +26,37 @@ coverage:
         if_ci_failed: error
 
 comment:
-  layout: "header, diff, files, footer"
+  layout: "header, diff, flags, components, footer"
   behavior: default
   require_changes: false
   branches:
     - main
+
+component_management:
+  default_rules:
+    statuses:
+      - type: project
+        target: auto
+        branches:
+          - "!main"
+  individual_components:  # in alphabetical
+    - component_id: module_common
+      name: common
+      paths:
+        - src/*
+    - component_id: module_datacell
+      name: datacell
+      paths:
+        - src/data_cell/**
+        - src/io/**
+        - src/quantization/**
+    - component_id: module_index
+      name: index
+      paths:
+        - src/index/**
+        - src/algorithm/**
+        - extern/diskann/**
+    - component_id: module_simd
+      name: simd
+      paths:
+        - src/simd/**
