@@ -27,6 +27,7 @@ EvalDataset::Load(const std::string& filename) {
         assert(datasets.count("train"));
         assert(datasets.count("test"));
         assert(datasets.count("neighbors"));
+        assert(datasets.count("distances"));
         has_labels = datasets.count("train_labels") && datasets.count("test_labels");
     }
 
@@ -99,6 +100,16 @@ EvalDataset::Load(const std::string& filename) {
         H5::FloatType datatype(H5::PredType::NATIVE_INT64);
         dataset.read(obj->neighbors_.get(), datatype, dataspace);
     }
+
+    {
+        obj->distances_ =
+            std::shared_ptr<float[]>(new float[neighbors_shape.first * neighbors_shape.second]);
+        H5::DataSet dataset = file.openDataSet("/distances");
+        H5::DataSpace dataspace = dataset.getSpace();
+        H5::FloatType datatype(H5::PredType::NATIVE_FLOAT);
+        dataset.read(obj->distances_.get(), datatype, dataspace);
+    }
+
     if (has_labels) {
         H5::FloatType datatype(H5::PredType::NATIVE_INT64);
 
