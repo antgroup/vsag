@@ -55,9 +55,6 @@ public:
                          vsag::BaseFilterFunctor* isIdAllowed = nullptr) const;
 
     virtual void
-    saveIndex(const std::string& location) = 0;
-
-    virtual void
     saveIndex(void* d) = 0;
 
     virtual void

@@ -1144,39 +1144,6 @@ public:
         out_stream.write((char*)node_cluster_dist_, max_elements_ * sizeof(float));
     }
 
-    void
-    saveIndex(const std::string& location) override {
-        throw std::runtime_error("static hnsw does not support save index");
-        //        std::ofstream output(location, std::ios::binary);
-        //        std::streampos position;
-        //
-        //        writeBinaryPOD(output, offsetLevel0_);
-        //        writeBinaryPOD(output, max_elements_);
-        //        writeBinaryPOD(output, cur_element_count_);
-        //        writeBinaryPOD(output, size_data_per_element_);
-        //        writeBinaryPOD(output, label_offset_);
-        //        writeBinaryPOD(output, offsetData_);
-        //        writeBinaryPOD(output, maxlevel_);
-        //        writeBinaryPOD(output, enterpoint_node_);
-        //        writeBinaryPOD(output, maxM_);
-        //
-        //        writeBinaryPOD(output, maxM0_);
-        //        writeBinaryPOD(output, M_);
-        //        writeBinaryPOD(output, mult_);
-        //        writeBinaryPOD(output, ef_construction_);
-        //
-        //        output.write(data_level0_memory_, cur_element_count_ * size_data_per_element_);
-        //
-        //        for (size_t i = 0; i < cur_element_count_; i++) {
-        //            unsigned int linkListSize =
-        //                element_levels_[i] > 0 ? size_links_per_element_ * element_levels_[i] : 0;
-        //            writeBinaryPOD(output, linkListSize);
-        //            if (linkListSize)
-        //                output.write(linkLists_[i], linkListSize);
-        //        }
-        //        output.close();
-    }
-
     // load index from a file stream
     void
     loadIndex(StreamReader& in_stream, SpaceInterface* s, size_t max_elements_i = 0) override {
