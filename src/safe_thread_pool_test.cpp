@@ -16,8 +16,6 @@
 #include "safe_thread_pool.h"
 
 #include <catch2/catch_test_macros.hpp>
-#include <chrono>
-#include <thread>
 
 TEST_CASE("test safe thread pool", "[ut][thread_pool]") {
     auto thread_pool = vsag::SafeThreadPool::FactoryDefaultThreadPool();
@@ -30,7 +28,6 @@ TEST_CASE("test safe thread pool", "[ut][thread_pool]") {
     for (int i = 0; i < round; ++i) {
         results.emplace_back(thread_pool->GeneralEnqueue(
             [&data, &m](int i) -> int {
-                std::this_thread::sleep_for(std::chrono::seconds(1));
                 std::lock_guard lock(m);
                 vsag::logger::info("current data:{}", data);
                 data++;
