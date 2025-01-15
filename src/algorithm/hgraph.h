@@ -36,18 +36,6 @@
 namespace vsag {
 class HGraph {
 public:
-    struct CompareByFirst {
-        constexpr bool
-        operator()(std::pair<float, InnerIdType> const& a,
-                   std::pair<float, InnerIdType> const& b) const noexcept {
-            return a.first < b.first;
-        }
-    };
-
-    using MaxHeap = std::priority_queue<std::pair<float, InnerIdType>,
-                                        Vector<std::pair<float, InnerIdType>>,
-                                        CompareByFirst>;
-
     HGraph(const HGraphParameter& param, const IndexCommonParam& common_param) noexcept;
 
     tl::expected<std::vector<int64_t>, Error>

@@ -330,7 +330,7 @@ HGraph::generate_one_route_graph() {
 }
 
 template <HGraph::InnerSearchMode mode>
-HGraph::MaxHeap
+MaxHeap
 HGraph::search_one_graph(const float* query,
                          const GraphInterfacePtr& graph,
                          const FlattenInterfacePtr& flatten,
@@ -509,7 +509,7 @@ HGraph::RangeSearch(const DatasetPtr& query,
 }
 
 void
-HGraph::select_edges_by_heuristic(HGraph::MaxHeap& edges,
+HGraph::select_edges_by_heuristic(MaxHeap& edges,
                                   uint64_t max_size,
                                   const FlattenInterfacePtr& flatten) {
     if (edges.size() < max_size) {
@@ -730,7 +730,7 @@ HGraph::Serialize(std::ostream& out_stream) const {
 
 tl::expected<void, Error>
 HGraph::Deserialize(const BinarySet& binary_set) {
-    SlowTaskTimer t("hnsw Deserialize");
+    SlowTaskTimer t("hgraph Deserialize");
     if (this->GetNumElements() > 0) {
         LOG_ERROR_AND_RETURNS(ErrorType::INDEX_NOT_EMPTY,
                               "failed to Deserialize: index is not empty");
