@@ -20,6 +20,8 @@
 #include <string>
 
 #include "common.h"
+#include "index/brute_force.h"
+#include "index/brute_force_parameter.h"
 #include "index/diskann.h"
 #include "index/diskann_zparameters.h"
 #include "index/hgraph_index.h"
@@ -86,6 +88,17 @@ Engine::CreateIndex(const std::string& origin_name, const std::string& parameter
                 return tl::unexpected(result.error());
             }
             return index;
+        } else if (name == INDEX_BRUTE_FORCE) {
+            logger::debug("created a brute_force index");
+            JsonType json;
+            if (parsed_params.contains(INDEX_PARAM)) {
+                json = std::move(parsed_params[INDEX_PARAM]);
+            }
+            BruteForceParameter param;
+            param.FromJson(json);
+            auto brute_force = std::make_shared<BruteForce>(param, index_common_params);
+
+            return brute_force;
         } else if (name == INDEX_DISKANN) {
             // read parameters from json, throw exception if not exists
             CHECK_ARGUMENT(parsed_params.contains(INDEX_DISKANN),
