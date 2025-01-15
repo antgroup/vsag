@@ -28,7 +28,9 @@ namespace fixtures {
 class HNSWTestIndex : public fixtures::TestIndex {
 public:
     static std::string
-    GenerateHNSWBuildParametersString(const std::string& metric_type, int64_t dim, bool use_static=false);
+    GenerateHNSWBuildParametersString(const std::string& metric_type,
+                                      int64_t dim,
+                                      bool use_static = false);
 
     static TestDatasetPool pool;
 
@@ -48,7 +50,9 @@ TestDatasetPool HNSWTestIndex::pool{};
 std::vector<int> HNSWTestIndex::dims = fixtures::get_common_used_dims(2, RandomValue(0, 999));
 
 std::string
-HNSWTestIndex::GenerateHNSWBuildParametersString(const std::string& metric_type, int64_t dim, bool use_static) {
+HNSWTestIndex::GenerateHNSWBuildParametersString(const std::string& metric_type,
+                                                 int64_t dim,
+                                                 bool use_static) {
     constexpr auto parameter_temp = R"(
     {{
         "dtype": "float32",
