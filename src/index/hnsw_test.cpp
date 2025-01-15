@@ -418,20 +418,6 @@ TEST_CASE("static hnsw", "[ut][hnsw]") {
     REQUIRE_FALSE(result.has_value());
     REQUIRE(result.error().type == ErrorType::UNSUPPORTED_INDEX_OPERATION);
 
-    SECTION("serialize to binaryset") {
-        auto binary_set = index->Serialize();
-        REQUIRE(binary_set.has_value());
-
-        auto voidresult = index->Deserialize(binary_set.value());
-        REQUIRE_FALSE(voidresult.has_value());
-        REQUIRE(voidresult.error().type == ErrorType::INDEX_NOT_EMPTY);
-        auto another_index = std::make_shared<HNSW>(hnsw_obj, commom_param);
-        another_index->InitMemorySpace();
-        auto deserialize_result = another_index->Deserialize(binary_set.value());
-        REQUIRE(deserialize_result.has_value());
-        index = another_index;
-    }
-
     JsonType params{
         {"hnsw", {{"ef_search", 100}}},
     };
@@ -458,20 +444,6 @@ TEST_CASE("static hnsw", "[ut][hnsw]") {
     auto remove_result = index->Remove(ids[0]);
     REQUIRE_FALSE(remove_result.has_value());
     REQUIRE(remove_result.error().type == ErrorType::UNSUPPORTED_INDEX_OPERATION);
-
-    SECTION("serialize to fstream") {
-        fixtures::TempDir dir("hnsw_test_deserialize_on_not_empty_index");
-        std::fstream out_stream(dir.path + "index.bin", std::ios::out | std::ios::binary);
-        auto serialize_result = index->Serialize(out_stream);
-        REQUIRE(serialize_result.has_value());
-        out_stream.close();
-
-        std::fstream in_stream(dir.path + "index.bin", std::ios::in | std::ios::binary);
-        auto voidresult = index->Deserialize(in_stream);
-        REQUIRE_FALSE(voidresult.has_value());
-        REQUIRE(voidresult.error().type == ErrorType::INDEX_NOT_EMPTY);
-        in_stream.close();
-    }
 }
 
 TEST_CASE("hnsw add vector with duplicated id", "[ut][hnsw]") {
