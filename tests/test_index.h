@@ -118,10 +118,19 @@ protected:
                       bool expected_success = true);
 
     static void
-    TestSerializeBinary(const IndexPtr& index,
-                        const TestDatasetPtr& dataset,
-                        const std::string& path,
-                        bool expected_success = true){};
+    TestSerializeBinarySet(const IndexPtr& index_from,
+                           const IndexPtr& index_to,
+                           const TestDatasetPtr& dataset,
+                           const std::string& search_param,
+                           bool expected_success = true);
+
+    static void
+    TestSerializeReaderSet(const IndexPtr& index_from,
+                           const IndexPtr& index_to,
+                           const TestDatasetPtr& dataset,
+                           const std::string& search_param,
+                           const std::string& index_name,
+                           bool expected_success = true);
 
     static void
     TestConcurrentKnnSearch(const IndexPtr& index,
