@@ -53,24 +53,11 @@ WindowResultQueue::WindowResultQueue() {
     queue_.resize(DEFAULT_WATCH_WINDOW_SIZE);
 }
 
-WindowResultQueue::WindowResultQueue(size_t window_size) {
-    queue_.resize(window_size > 0 ? window_size : DEFAULT_WATCH_WINDOW_SIZE);
-}
-
 void
 WindowResultQueue::Push(float value) {
     size_t window_size = queue_.size();
     queue_[count_ % window_size] = value;
     count_++;
-}
-
-size_t
-WindowResultQueue::ResizeWindowSize(size_t new_window_size) {
-    if (new_window_size > queue_.size()) {
-        count_ = std::min(count_, queue_.size());
-        queue_.resize(new_window_size);
-    }
-    return queue_.size();
 }
 
 float
