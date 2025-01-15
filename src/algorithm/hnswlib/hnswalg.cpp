@@ -178,7 +178,9 @@ HierarchicalNSW::getBatchDistanceByLabel(int64_t count,
     std::shared_lock lock_table(label_lookup_lock_);
     int64_t valid_cnt = 0;
     auto result = vsag::Dataset::Make();
+    result->Owner(true, allocator_);
     auto *distances = (float *)allocator_->Allocate(sizeof(float) * count);
+    result->Distances(distances);
     for (int i = 0; i < count; i++) {
         auto search = label_lookup_.find(vids[i]);
         if (search == label_lookup_.end()) {
@@ -190,8 +192,7 @@ HierarchicalNSW::getBatchDistanceByLabel(int64_t count,
             valid_cnt++;
         }
     }
-    result->NumElements(valid_cnt)->Owner(true, allocator_);
-    result->Distances(distances);
+    result->NumElements(valid_cnt);
     return std::move(result);
 }
 
