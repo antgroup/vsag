@@ -17,6 +17,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <chrono>
+#include <thread>
 
 TEST_CASE("test safe thread pool", "[ut][thread_pool]") {
     auto thread_pool = vsag::SafeThreadPool::FactoryDefaultThreadPool();
