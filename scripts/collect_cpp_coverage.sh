@@ -27,6 +27,7 @@ lcov --remove ${COVERAGE_DIR}/coverage.info \
      'build/*' \
      'tests/*' \
      '*/expected.hpp' \
+     '*_test.cpp' \
      --ignore-errors inconsistent,inconsistent \
      --output-file ${COVERAGE_DIR}/coverage.info
 lcov --list ${COVERAGE_DIR}/coverage.info \

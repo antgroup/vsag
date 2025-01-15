@@ -351,6 +351,7 @@ TestIndex::TestCalcDistanceById(const IndexPtr& index, const TestDatasetPtr& dat
         }
     }
 }
+
 void
 TestIndex::TestSerializeFile(const IndexPtr& index_from,
                              const IndexPtr& index_to,
@@ -368,6 +369,80 @@ TestIndex::TestSerializeFile(const IndexPtr& index_from,
     auto deserialize_index = index_to->Deserialize(infile);
     REQUIRE(deserialize_index.has_value() == expected_success);
     infile.close();
+
+    const auto& queries = dataset->query_;
+    auto query_count = queries->GetNumElements();
+    auto dim = queries->GetDim();
+    auto topk = 10;
+    for (auto i = 0; i < query_count; ++i) {
+        auto query = vsag::Dataset::Make();
+        query->NumElements(1)
+            ->Dim(dim)
+            ->Float32Vectors(queries->GetFloat32Vectors() + i * dim)
+            ->Owner(false);
+        auto res_from = index_from->KnnSearch(query, topk, search_param);
+        auto res_to = index_to->KnnSearch(query, topk, search_param);
+        REQUIRE(res_from.has_value());
+        REQUIRE(res_to.has_value());
+        REQUIRE(res_from.value()->GetDim() == res_to.value()->GetDim());
+        for (auto j = 0; j < topk; ++j) {
+            REQUIRE(res_to.value()->GetIds()[j] == res_from.value()->GetIds()[j]);
+        }
+    }
+}
+
+void
+TestIndex::TestSerializeBinarySet(const IndexPtr& index_from,
+                                  const IndexPtr& index_to,
+                                  const TestDatasetPtr& dataset,
+                                  const std::string& search_param,
+                                  bool expected_success) {
+    auto serialize_binary = index_from->Serialize();
+    REQUIRE(serialize_binary.has_value() == expected_success);
+
+    auto deserialize_index = index_to->Deserialize(serialize_binary.value());
+    REQUIRE(deserialize_index.has_value() == expected_success);
+
+    const auto& queries = dataset->query_;
+    auto query_count = queries->GetNumElements();
+    auto dim = queries->GetDim();
+    auto topk = 10;
+    for (auto i = 0; i < query_count; ++i) {
+        auto query = vsag::Dataset::Make();
+        query->NumElements(1)
+            ->Dim(dim)
+            ->Float32Vectors(queries->GetFloat32Vectors() + i * dim)
+            ->Owner(false);
+        auto res_from = index_from->KnnSearch(query, topk, search_param);
+        auto res_to = index_to->KnnSearch(query, topk, search_param);
+        REQUIRE(res_from.has_value());
+        REQUIRE(res_to.has_value());
+        REQUIRE(res_from.value()->GetDim() == res_to.value()->GetDim());
+        for (auto j = 0; j < topk; ++j) {
+            REQUIRE(res_to.value()->GetIds()[j] == res_from.value()->GetIds()[j]);
+        }
+    }
+}
+
+void
+TestIndex::TestSerializeReaderSet(const IndexPtr& index_from,
+                                  const IndexPtr& index_to,
+                                  const TestDatasetPtr& dataset,
+                                  const std::string& search_param,
+                                  const std::string& index_name,
+                                  bool expected_success) {
+    auto dir = fixtures::TempDir("serialize");
+    auto path = dir.GenerateRandomFile();
+    std::ofstream outfile(path, std::ios::out | std::ios::binary);
+    auto serialize_index = index_from->Serialize(outfile);
+    REQUIRE(serialize_index.has_value() == expected_success);
+    outfile.close();
+
+    vsag::ReaderSet rs;
+    auto reader = vsag::Factory::CreateLocalFileReader(path, 0, 0);
+    rs.Set(index_name, reader);
+    auto deserialize_index = index_to->Deserialize(rs);
+    REQUIRE(deserialize_index.has_value() == expected_success);
 
     const auto& queries = dataset->query_;
     auto query_count = queries->GetNumElements();
