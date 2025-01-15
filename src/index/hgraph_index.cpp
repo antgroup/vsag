@@ -16,7 +16,7 @@
 #include "hgraph_index.h"
 namespace vsag {
 HGraphIndex::HGraphIndex(const HGraphIndexParameter& param,
-                         const vsag::IndexCommonParam& common_param) noexcept {
+                         const vsag::IndexCommonParam& common_param) {
     this->hgraph_ = std::make_unique<HGraph>(*param.hgraph_parameter_, common_param);
     this->allocator_ = common_param.allocator_;
 }

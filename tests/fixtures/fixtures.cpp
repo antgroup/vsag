@@ -15,6 +15,8 @@
 
 #include "fixtures.h"
 
+#include <unistd.h>
+
 #include <cstdint>
 #include <random>
 #include <string>
@@ -301,5 +303,4 @@ SplitString(const std::string& s, char delimiter) {
 
     return tokens;
 }
-
 }  // namespace fixtures

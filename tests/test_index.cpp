@@ -15,6 +15,7 @@
 
 #include "test_index.h"
 
+#include "fixtures/memory_record_allocator.h"
 #include "fixtures/test_logger.h"
 #include "fixtures/thread_pool.h"
 #include "simd/fp32_simd.h"
@@ -619,6 +620,25 @@ TestIndex::TestDuplicateAdd(const TestIndex::IndexPtr& index, const TestDatasetP
     auto add_index_2 = index->Add(dataset->base_);
     REQUIRE(add_index_2.has_value());
     check_func(add_index_2.value());
+}
+void
+TestIndex::TestEstimateMemory(const std::string& index_name,
+                              const std::string& build_param,
+                              const TestDatasetPtr& dataset) {
+    auto allocator = std::make_shared<fixtures::MemoryRecordAllocator>();
+    {
+        auto index = vsag::Factory::CreateIndex(index_name, build_param, allocator.get()).value();
+        REQUIRE(index->GetNumElements() == 0);
+        if (index->CheckFeature(vsag::SUPPORT_ESTIMATE_MEMORY)) {
+            auto data_size = dataset->base_->GetNumElements();
+            auto estimate_memory = index->EstimateMemory(data_size);
+            auto build_index = index->Build(dataset->base_);
+            REQUIRE(build_index.has_value());
+            auto real_memory = allocator->GetCurrentMemory();
+            REQUIRE(estimate_memory >= static_cast<uint64_t>(real_memory * 0.8));
+            REQUIRE(estimate_memory <= static_cast<uint64_t>(real_memory * 1.2));
+        }
+    }
 }
 
 }  // namespace fixtures

@@ -36,7 +36,7 @@
 namespace vsag {
 class HGraph {
 public:
-    HGraph(const HGraphParameter& param, const IndexCommonParam& common_param) noexcept;
+    HGraph(const HGraphParameter& param, const IndexCommonParam& common_param);
 
     tl::expected<std::vector<int64_t>, Error>
     Build(const DatasetPtr& data);
