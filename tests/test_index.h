@@ -145,6 +145,11 @@ protected:
                       bool expected_success = true);
     static void
     TestDuplicateAdd(const IndexPtr& index, const TestDatasetPtr& dataset);
+
+    static void
+    TestEstimateMemory(const std::string& index_name,
+                       const std::string& build_param,
+                       const TestDatasetPtr& dataset);
 };
 
 }  // namespace fixtures
