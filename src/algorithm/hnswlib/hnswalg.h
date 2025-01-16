@@ -303,9 +303,6 @@ public:
     saveIndex(std::ostream& out_stream) override;
 
     void
-    saveIndex(const std::string& location) override;
-
-    void
     SerializeImpl(StreamWriter& writer);
 
     void
@@ -328,20 +325,6 @@ public:
     */
     void
     markDeletedInternal(InnerIdType internalId);
-
-    /*
-    * Removes the deleted mark of the node, does NOT really change the current graph.
-    *
-    * Note: the method is not safe to use when replacement of deleted elements is enabled,
-    *  because elements marked as deleted can be completely removed by addPoint
-    */
-    void
-    unmarkDelete(LabelType label);
-    /*
-    * Remove the deleted mark of the node.
-    */
-    void
-    unmarkDeletedInternal(InnerIdType internalId);
 
     /*
     * Checks the first 16 bits of the memory to see if the element is marked deleted.
@@ -404,9 +387,6 @@ public:
                 float radius,
                 uint64_t ef,
                 vsag::BaseFilterFunctor* isIdAllowed = nullptr) const override;
-
-    void
-    checkIntegrity();
 
     void
     reset();

@@ -524,7 +524,7 @@ TEST_CASE("remove vectors from the index", "[ft][index]") {
     vsag::Options::Instance().logger()->SetLevel(vsag::Logger::Level::kDEBUG);
     int64_t num_vectors = 1000;
     int64_t dim = 64;
-    auto index_name = GENERATE("fresh_hnsw", "diskann");
+    auto index_name = GENERATE("fresh_hnsw", "diskann", "hnsw");
     auto metric_type = GENERATE("cosine", "ip", "l2");
 
     bool need_normalize = metric_type != std::string("cosine");

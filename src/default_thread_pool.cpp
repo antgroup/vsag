@@ -28,7 +28,8 @@ DefaultThreadPool::Enqueue(std::function<void(void)> func) {
 
 void
 DefaultThreadPool::WaitUntilEmpty() {
-    pool_->wait_until_empty();
+    // In progschj::ThreadPool, wait_until_nothing_in_flight indicates that all tasks have been completed, while wait_until_empty means that there are no tasks waiting. Therefore, what we actually need here is the semantics of wait_until_nothing_in_flight.
+    pool_->wait_until_nothing_in_flight();
 }
 
 void
