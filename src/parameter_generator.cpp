@@ -52,6 +52,11 @@ parameter_string(const std::string& metric_type,
                             	"ef_construction": {},
                                 "use_conjugate_graph": {}
                             }},
+                            "fresh_hnsw": {{
+                                "max_degree": {},
+                                "ef_construction": {},
+                                "use_conjugate_graph": {}
+                            }},
                             "diskann": {{
                                 "max_degree": {},
                                 "ef_construction": {},
@@ -62,6 +67,9 @@ parameter_string(const std::string& metric_type,
                         )",
                        metric_type,
                        dimension,
+                       hnsw_max_degree,
+                       hnsw_ef_construction,
+                       use_conjugate_graph,
                        hnsw_max_degree,
                        hnsw_ef_construction,
                        use_conjugate_graph,

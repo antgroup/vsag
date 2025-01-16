@@ -1,5 +1,20 @@
+add_executable(101_index_hnsw 101_index_hnsw.cpp)
+target_link_libraries(101_index_hnsw vsag)
+
+add_executable(102_index_diskann 102_index_diskann.cpp)
+target_link_libraries(102_index_diskann vsag)
+
 add_executable (103_index_hgraph 103_index_hgraph.cpp)
 target_link_libraries (103_index_hgraph vsag_static)
 
+add_executable(104_index_fresh_hnsw 104_index_fresh_hnsw.cpp)
+target_link_libraries(104_index_fresh_hnsw vsag)
+
 add_executable (105_index_brute_force 105_index_brute_force.cpp)
 target_link_libraries (105_index_brute_force vsag_static)
+
+add_executable(302_feature_range_search 302_feature_range_search.cpp)
+target_link_libraries(302_feature_range_search vsag)
+
+add_executable(304_feature_enhance_graph 304_feature_enhance_graph.cpp)
+target_link_libraries(304_feature_enhance_graph vsag)
