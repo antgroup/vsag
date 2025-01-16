@@ -146,6 +146,7 @@ TestIndex::TestUpdateVector(const IndexPtr& index,
     }
 
     std::vector<int> correct_num = {0, 0};
+    uint32_t success_force_updated = 0, failed_force_updated = 0;
     for (int round = 0; round < 2; round++) {
         // round 0 for update, round 1 for validate update results
         for (int i = 0; i < num_vectors; i++) {
@@ -161,8 +162,10 @@ TestIndex::TestUpdateVector(const IndexPtr& index,
                 }
 
                 std::vector<float> update_vecs(dim);
+                std::vector<float> far_vecs(dim);
                 for (int d = 0; d < dim; d++) {
                     update_vecs[d] = base[i * dim + d] + 0.001f;
+                    far_vecs[d] = base[i * dim + d] + 1.0f;
                 }
                 auto new_base = vsag::Dataset::Make();
                 new_base->NumElements(1)
@@ -170,6 +173,7 @@ TestIndex::TestUpdateVector(const IndexPtr& index,
                     ->Float32Vectors(update_vecs.data())
                     ->Owner(false);
 
+                // success case
                 auto before_update_dist = *index->CalcDistanceById(base + i * dim, ids[i]);
                 auto succ_vec_res = index->UpdateVector(ids[i], new_base);
                 REQUIRE(succ_vec_res.has_value());
@@ -178,6 +182,38 @@ TestIndex::TestUpdateVector(const IndexPtr& index,
                 }
                 auto after_update_dist = *index->CalcDistanceById(base + i * dim, ids[i]);
                 REQUIRE(before_update_dist < after_update_dist);
+
+                // update with far vector
+                new_base->Float32Vectors(far_vecs.data());
+                auto fail_vec_res = index->UpdateVector(ids[i], new_base);
+                REQUIRE(fail_vec_res.has_value());
+                if (fail_vec_res.value()) {
+                    // note that the update should be failed, but for some cases, it success
+                    auto force_update_dist = *index->CalcDistanceById(base + i * dim, ids[i]);
+                    REQUIRE(after_update_dist < force_update_dist);
+                    success_force_updated++;
+                } else {
+                    failed_force_updated++;
+                }
+
+                // force update with far vector
+                new_base->Float32Vectors(far_vecs.data());
+                auto force_update_res1 = index->UpdateVector(ids[i], new_base, true);
+                REQUIRE(force_update_res1.has_value());
+                if (expected_success) {
+                    REQUIRE(force_update_res1.value());
+                    auto force_update_dist = *index->CalcDistanceById(base + i * dim, ids[i]);
+                    REQUIRE(after_update_dist < force_update_dist);
+                }
+
+                new_base->Float32Vectors(update_vecs.data());
+                auto force_update_res2 = index->UpdateVector(ids[i], new_base, true);
+                REQUIRE(force_update_res2.has_value());
+                if (expected_success) {
+                    REQUIRE(force_update_res2.value());
+                    auto force_update_dist = *index->CalcDistanceById(base + i * dim, ids[i]);
+                    REQUIRE(std::abs(after_update_dist - force_update_dist) < 1e-5);
+                }
 
                 // old id don't exist
                 auto failed_old_res = index->UpdateVector(ids[i] + 2 * max_id, new_base);
@@ -192,6 +228,7 @@ TestIndex::TestUpdateVector(const IndexPtr& index,
     }
 
     REQUIRE(correct_num[0] == correct_num[1]);
+    REQUIRE(success_force_updated < failed_force_updated);
 }
 
 void

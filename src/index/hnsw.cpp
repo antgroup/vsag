@@ -41,7 +41,9 @@ const static int64_t DEFAULT_MAX_ELEMENT = 1;
 const static int MINIMAL_M = 8;
 const static int MAXIMAL_M = 64;
 const static uint32_t GENERATE_SEARCH_K = 50;
+const static uint32_t UPDATE_CHECK_SEARCH_K = 10;
 const static uint32_t GENERATE_SEARCH_L = 400;
+const static uint32_t UPDATE_CHECK_SEARCH_L = 100;
 const static float GENERATE_OMEGA = 0.51;
 
 HNSW::HNSW(HnswParameters hnsw_params, const IndexCommonParam& index_common_param)
@@ -630,8 +632,7 @@ HNSW::update_id(int64_t old_id, int64_t new_id) {
 }
 
 tl::expected<bool, Error>
-HNSW::update_vector(int64_t id, const DatasetPtr& new_base, bool need_fine_tune) {
-    // TODO(ZXY): implement need_fine_tune to allow update with distant vector
+HNSW::update_vector(int64_t id, const DatasetPtr& new_base, bool force_update) {
     if (use_static_) {
         LOG_ERROR_AND_RETURNS(ErrorType::UNSUPPORTED_INDEX_OPERATION,
                               "static hnsw does not support update");
@@ -642,6 +643,41 @@ HNSW::update_vector(int64_t id, const DatasetPtr& new_base, bool need_fine_tune)
         void* new_base_vec = nullptr;
         size_t data_size = 0;
         get_vectors(new_base, &new_base_vec, &data_size);
+
+        if (not force_update) {
+            const void* base_data;
+            auto base = Dataset::Make();
+
+            // check if id exists
+            base_data =
+                std::reinterpret_pointer_cast<hnswlib::HierarchicalNSW>(alg_hnsw_)->getDataByLabel(
+                    id);
+            set_dataset(base, base_data, 1);
+
+            // search neighbors
+            auto result = this->knn_search(base,
+                                           vsag::UPDATE_CHECK_SEARCH_K,
+                                           fmt::format(R"({{
+                                                            "hnsw":
+                                                                {{
+                                                                    "ef_search": {}
+                                                                }}
+                                                        }})",
+                                                       vsag::UPDATE_CHECK_SEARCH_L),
+                                           nullptr);
+
+            // check whether the neighborhood relationship is same
+            float self_dist = std::reinterpret_pointer_cast<hnswlib::HierarchicalNSW>(alg_hnsw_)
+                                  ->getDistanceByLabel(id, new_base_vec);
+            for (int i = 0; i < result.value()->GetDim(); i++) {
+                float neighbor_dist =
+                    std::reinterpret_pointer_cast<hnswlib::HierarchicalNSW>(alg_hnsw_)
+                        ->getDistanceByLabel(result.value()->GetIds()[i], new_base_vec);
+                if (neighbor_dist < self_dist) {
+                    return false;
+                }
+            }
+        }
 
         // note that the validation of old_id is handled within updatePoint.
         std::reinterpret_pointer_cast<hnswlib::HierarchicalNSW>(alg_hnsw_)->updateVector(
@@ -818,11 +854,10 @@ HNSW::pretrain(const std::vector<int64_t>& base_tag_ids,
             base_data = (const void*)this->alg_hnsw_->getDataByLabel(base_tag_id);
             set_dataset(base, base_data, 1);
         } catch (const std::runtime_error& e) {
-            LOG_ERROR_AND_RETURNS(
-                ErrorType::INVALID_ARGUMENT,
-                fmt::format(
-                    "failed to pretrain(invalid argument): bas tag id ({}) doesn't belong to index",
-                    base_tag_id));
+            LOG_ERROR_AND_RETURNS(ErrorType::INVALID_ARGUMENT,
+                                  fmt::format("failed to pretrain(invalid argument): base tag id "
+                                              "({}) doesn't belong to index",
+                                              base_tag_id));
         }
 
         auto result = this->knn_search(base,

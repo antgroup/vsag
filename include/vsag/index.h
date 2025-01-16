@@ -105,11 +105,11 @@ public:
      *
      * @param id indicates the old id of a base point in index
      * @param new_base is the updated new vector of the base point
-     * @param need_fine_tune indicates whether the connection of the base point needs to be fine-tuned
+     * @param force_update is false means that a check of the connectivity of the graph updated by this operation is performed
      * @return result indicates whether the update operation is successful.
      */
     virtual tl::expected<bool, Error>
-    UpdateVector(int64_t id, const DatasetPtr& new_base, bool need_fine_tune = false) {
+    UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update = false) {
         throw std::runtime_error("Index not support update vector");
     }
 

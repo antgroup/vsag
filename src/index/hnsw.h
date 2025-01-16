@@ -76,8 +76,8 @@ public:
     }
 
     tl::expected<bool, Error>
-    UpdateVector(int64_t id, const DatasetPtr& new_base, bool need_fine_tune = false) override {
-        SAFE_CALL(return this->update_vector(id, new_base, need_fine_tune));
+    UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update = false) override {
+        SAFE_CALL(return this->update_vector(id, new_base, force_update));
     }
 
     tl::expected<DatasetPtr, Error>
@@ -212,7 +212,7 @@ private:
     update_id(int64_t old_id, int64_t new_id);
 
     tl::expected<bool, Error>
-    update_vector(int64_t id, const DatasetPtr& new_base, bool need_fine_tune);
+    update_vector(int64_t id, const DatasetPtr& new_base, bool force_update);
 
     template <typename FilterType>
     tl::expected<DatasetPtr, Error>
