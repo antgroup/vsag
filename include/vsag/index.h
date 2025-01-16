@@ -341,7 +341,7 @@ public:
       * @return number of bytes estimate used.
       */
     [[nodiscard]] virtual uint64_t
-    EstimateMemory(const uint64_t num_elements) const {
+    EstimateMemory(uint64_t num_elements) const {
         throw std::runtime_error("Index not support estimate the memory by element counts");
     }
 
@@ -364,6 +364,18 @@ public:
     [[nodiscard]] virtual std::string
     GetStats() const {
         throw std::runtime_error("Index not support range search");
+    }
+
+    /**
+      * @brief Check if a specific ID exists in the index.
+      *
+      * @param id The ID to check for existence in the index.
+      * @return True if the ID exists, otherwise false.
+      * @throws std::runtime_error if the index does not support checking ID existence.
+      */
+    [[nodiscard]] virtual bool
+    CheckIdExist(int64_t id) const {
+        throw std::runtime_error("Index not support check id exist");
     }
 
 public:

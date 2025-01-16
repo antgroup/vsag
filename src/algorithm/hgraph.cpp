@@ -185,7 +185,7 @@ HGraph::KnnSearch(const DatasetPtr& query,
 }
 
 uint64_t
-HGraph::EstimateMemory(const uint64_t num_elements) const {
+HGraph::EstimateMemory(uint64_t num_elements) const {
     uint64_t estimate_memory = 0;
     auto block_size = Options::Instance().block_size_limit();
     auto element_count =
@@ -853,24 +853,33 @@ void
 HGraph::init_features() {
     // Common Init
     // Build & Add
-    feature_list_.SetFeatures({IndexFeature::SUPPORT_BUILD,
-                               IndexFeature::SUPPORT_BUILD_WITH_MULTI_THREAD,
-                               IndexFeature::SUPPORT_ADD_AFTER_BUILD});
+    feature_list_.SetFeatures({
+        IndexFeature::SUPPORT_BUILD,
+        IndexFeature::SUPPORT_BUILD_WITH_MULTI_THREAD,
+        IndexFeature::SUPPORT_ADD_AFTER_BUILD,
+    });
     // search
-    feature_list_.SetFeatures({IndexFeature::SUPPORT_KNN_SEARCH,
-                               IndexFeature::SUPPORT_RANGE_SEARCH,
-                               IndexFeature::SUPPORT_KNN_SEARCH_WITH_ID_FILTER,
-                               IndexFeature::SUPPORT_RANGE_SEARCH_WITH_ID_FILTER});
+    feature_list_.SetFeatures({
+        IndexFeature::SUPPORT_KNN_SEARCH,
+        IndexFeature::SUPPORT_RANGE_SEARCH,
+        IndexFeature::SUPPORT_KNN_SEARCH_WITH_ID_FILTER,
+        IndexFeature::SUPPORT_RANGE_SEARCH_WITH_ID_FILTER,
+    });
     // concurrency
     feature_list_.SetFeature(IndexFeature::SUPPORT_SEARCH_CONCURRENT);
     // serialize
-    feature_list_.SetFeatures({IndexFeature::SUPPORT_DESERIALIZE_BINARY_SET,
-                               IndexFeature::SUPPORT_DESERIALIZE_FILE,
-                               IndexFeature::SUPPORT_DESERIALIZE_READER_SET,
-                               IndexFeature::SUPPORT_SERIALIZE_BINARY_SET,
-                               IndexFeature::SUPPORT_SERIALIZE_FILE});
+    feature_list_.SetFeatures({
+        IndexFeature::SUPPORT_DESERIALIZE_BINARY_SET,
+        IndexFeature::SUPPORT_DESERIALIZE_FILE,
+        IndexFeature::SUPPORT_DESERIALIZE_READER_SET,
+        IndexFeature::SUPPORT_SERIALIZE_BINARY_SET,
+        IndexFeature::SUPPORT_SERIALIZE_FILE,
+    });
     // other
-    feature_list_.SetFeatures({IndexFeature::SUPPORT_ESTIMATE_MEMORY});
+    feature_list_.SetFeatures({
+        IndexFeature::SUPPORT_ESTIMATE_MEMORY,
+        IndexFeature::SUPPORT_CHECK_ID_EXIST,
+    });
 
     // About Train
     auto name = this->basic_flatten_codes_->GetQuantizerName();

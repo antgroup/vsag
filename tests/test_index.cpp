@@ -104,6 +104,10 @@ TestIndex::TestUpdateId(const IndexPtr& index,
                 auto succ_update_res = index->UpdateId(ids[i], update_id_map[ids[i]]);
                 REQUIRE(succ_update_res.has_value());
                 if (expected_success) {
+                    if (index->CheckFeature(vsag::IndexFeature::SUPPORT_CHECK_ID_EXIST)) {
+                        REQUIRE(index->CheckIdExist(ids[i]) == false);
+                        REQUIRE(index->CheckIdExist(update_id_map[ids[i]]) == true);
+                    }
                     REQUIRE(succ_update_res.value());
                 }
 
@@ -673,6 +677,28 @@ TestIndex::TestEstimateMemory(const std::string& index_name,
             REQUIRE(estimate_memory >= static_cast<uint64_t>(real_memory * 0.8));
             REQUIRE(estimate_memory <= static_cast<uint64_t>(real_memory * 1.2));
         }
+    }
+}
+
+void
+TestIndex::TestCheckIdExist(const TestIndex::IndexPtr& index, const TestDatasetPtr& dataset) {
+    auto data_count = dataset->base_->GetNumElements();
+    auto* ids = dataset->base_->GetIds();
+    int N = 10;
+    for (int i = 0; i < N; ++i) {
+        auto good_id = ids[random() % data_count];
+        REQUIRE(index->CheckIdExist(good_id) == true);
+    }
+    std::unordered_set<int64_t> exist_ids(ids, ids + data_count);
+    int bad_id = 97;
+    while (N > 0) {
+        for (; bad_id < data_count * N; ++bad_id) {
+            if (exist_ids.count(bad_id) == 0) {
+                break;
+            }
+        }
+        REQUIRE(index->CheckIdExist(bad_id) == false);
+        --N;
     }
 }
 

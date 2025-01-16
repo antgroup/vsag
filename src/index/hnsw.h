@@ -148,6 +148,11 @@ public:
     [[nodiscard]] bool
     CheckFeature(IndexFeature feature) const override;
 
+    [[nodiscard]] bool
+    CheckIdExist(int64_t id) const override {
+        return this->alg_hnsw_->isValidLabel(id);
+    }
+
 public:
     tl::expected<BinarySet, Error>
     Serialize() const override {

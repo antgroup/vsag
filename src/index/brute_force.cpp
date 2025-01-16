@@ -292,28 +292,45 @@ BruteForce::init_feature_list() {
     if (name != QUANTIZATION_TYPE_VALUE_FP32) {
         feature_list_.SetFeature(IndexFeature::NEED_TRAIN);
     } else {
-        feature_list_.SetFeatures({IndexFeature::SUPPORT_ADD_FROM_EMPTY,
-                                   IndexFeature::SUPPORT_RANGE_SEARCH,
-                                   IndexFeature::SUPPORT_CAL_DISTANCE_BY_ID,
-                                   IndexFeature::SUPPORT_RANGE_SEARCH_WITH_ID_FILTER});
+        feature_list_.SetFeatures({
+            IndexFeature::SUPPORT_ADD_FROM_EMPTY,
+            IndexFeature::SUPPORT_RANGE_SEARCH,
+            IndexFeature::SUPPORT_CAL_DISTANCE_BY_ID,
+            IndexFeature::SUPPORT_RANGE_SEARCH_WITH_ID_FILTER,
+        });
     }
     // Add & Build
-    feature_list_.SetFeatures({IndexFeature::SUPPORT_BUILD, IndexFeature::SUPPORT_ADD_AFTER_BUILD});
+    feature_list_.SetFeatures({
+        IndexFeature::SUPPORT_BUILD,
+        IndexFeature::SUPPORT_ADD_AFTER_BUILD,
+    });
     // Search
     feature_list_.SetFeatures({
         IndexFeature::SUPPORT_KNN_SEARCH,
-
         IndexFeature::SUPPORT_KNN_SEARCH_WITH_ID_FILTER,
     });
     // concurrency
-    feature_list_.SetFeatures({IndexFeature::SUPPORT_SEARCH_CONCURRENT});
+    feature_list_.SetFeatures({
+        IndexFeature::SUPPORT_SEARCH_CONCURRENT,
+    });
 
     // serialize
-    feature_list_.SetFeatures({IndexFeature::SUPPORT_DESERIALIZE_BINARY_SET,
-                               IndexFeature::SUPPORT_DESERIALIZE_FILE,
-                               IndexFeature::SUPPORT_DESERIALIZE_READER_SET,
-                               IndexFeature::SUPPORT_SERIALIZE_BINARY_SET,
-                               IndexFeature::SUPPORT_SERIALIZE_FILE});
+    feature_list_.SetFeatures({
+        IndexFeature::SUPPORT_DESERIALIZE_BINARY_SET,
+        IndexFeature::SUPPORT_DESERIALIZE_FILE,
+        IndexFeature::SUPPORT_DESERIALIZE_READER_SET,
+        IndexFeature::SUPPORT_SERIALIZE_BINARY_SET,
+        IndexFeature::SUPPORT_SERIALIZE_FILE,
+    });
+    // others
+    feature_list_.SetFeatures({
+        IndexFeature::SUPPORT_ESTIMATE_MEMORY,
+        IndexFeature::SUPPORT_CHECK_ID_EXIST,
+    });
+}
+bool
+BruteForce::CheckIdExist(int64_t id) const {
+    return this->label_table_->CheckLabel(id);
 }
 
 }  // namespace vsag
