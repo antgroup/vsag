@@ -140,6 +140,9 @@ public:
     [[nodiscard]] bool
     CheckFeature(IndexFeature feature) const override;
 
+    [[nodiscard]] bool
+    CheckIdExist(int64_t id) const override;
+
 private:
     std::vector<int64_t>
     build(const DatasetPtr& data);

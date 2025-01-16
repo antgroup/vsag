@@ -263,6 +263,9 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex,
                 if (index->CheckFeature(vsag::SUPPORT_KNN_SEARCH_WITH_ID_FILTER)) {
                     TestFilterSearch(index, dataset, search_param, recall, true);
                 }
+                if (index->CheckFeature(vsag::IndexFeature::SUPPORT_CHECK_ID_EXIST)) {
+                    TestCheckIdExist(index, dataset);
+                }
             }
             vsag::Options::Instance().set_block_size_limit(origin_size);
         }
@@ -297,6 +300,9 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex, "HGraph Build", "[ft][hg
                 }
                 if (index->CheckFeature(vsag::SUPPORT_KNN_SEARCH_WITH_ID_FILTER)) {
                     TestFilterSearch(index, dataset, search_param, recall, true);
+                }
+                if (index->CheckFeature(vsag::IndexFeature::SUPPORT_CHECK_ID_EXIST)) {
+                    TestCheckIdExist(index, dataset);
                 }
             }
             vsag::Options::Instance().set_block_size_limit(origin_size);
@@ -333,6 +339,9 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex, "HGraph Add", "[ft][hgra
                 if (index->CheckFeature(vsag::SUPPORT_KNN_SEARCH_WITH_ID_FILTER)) {
                     TestFilterSearch(index, dataset, search_param, recall, true);
                 }
+                if (index->CheckFeature(vsag::IndexFeature::SUPPORT_CHECK_ID_EXIST)) {
+                    TestCheckIdExist(index, dataset);
+                }
             }
             vsag::Options::Instance().set_block_size_limit(origin_size);
         }
@@ -367,6 +376,9 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex, "HGraph Concurrent Add",
                 }
                 if (index->CheckFeature(vsag::SUPPORT_KNN_SEARCH_WITH_ID_FILTER)) {
                     TestFilterSearch(index, dataset, search_param, recall, true);
+                }
+                if (index->CheckFeature(vsag::IndexFeature::SUPPORT_CHECK_ID_EXIST)) {
+                    TestCheckIdExist(index, dataset);
                 }
             }
             vsag::Options::Instance().set_block_size_limit(origin_size);
@@ -464,6 +476,9 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex, "HGraph Duplicate Build"
                 }
                 if (index->CheckFeature(vsag::SUPPORT_KNN_SEARCH_WITH_ID_FILTER)) {
                     TestFilterSearch(index, dataset, search_param, recall, true);
+                }
+                if (index->CheckFeature(vsag::IndexFeature::SUPPORT_CHECK_ID_EXIST)) {
+                    TestCheckIdExist(index, dataset);
                 }
             }
             vsag::Options::Instance().set_block_size_limit(origin_size);

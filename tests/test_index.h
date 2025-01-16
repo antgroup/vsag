@@ -150,6 +150,9 @@ protected:
     TestEstimateMemory(const std::string& index_name,
                        const std::string& build_param,
                        const TestDatasetPtr& dataset);
+
+    static void
+    TestCheckIdExist(const IndexPtr& index, const TestDatasetPtr& dataset);
 };
 
 }  // namespace fixtures

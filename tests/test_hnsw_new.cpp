@@ -240,6 +240,9 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex, "HNSW Build", "[ft][hnsw]"
         TestRangeSearch(index, dataset, search_param, 0.99, 10, true);
         TestRangeSearch(index, dataset, search_param, 0.49, 5, true);
         TestFilterSearch(index, dataset, search_param, 0.99, true);
+        if (index->CheckFeature(vsag::IndexFeature::SUPPORT_CHECK_ID_EXIST)) {
+            TestCheckIdExist(index, dataset);
+        }
     }
     vsag::Options::Instance().set_block_size_limit(origin_size);
 }
@@ -262,6 +265,9 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex, "HNSW Add", "[ft][hnsw]") 
         TestRangeSearch(index, dataset, search_param, 0.99, 10, true);
         TestRangeSearch(index, dataset, search_param, 0.49, 5, true);
         TestFilterSearch(index, dataset, search_param, 0.99, true);
+        if (index->CheckFeature(vsag::IndexFeature::SUPPORT_CHECK_ID_EXIST)) {
+            TestCheckIdExist(index, dataset);
+        }
 
         vsag::Options::Instance().set_block_size_limit(origin_size);
     }
@@ -285,6 +291,9 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex, "HNSW Concurrent Add", "[f
         TestRangeSearch(index, dataset, search_param, 0.95, 10, true);
         TestRangeSearch(index, dataset, search_param, 0.45, 5, true);
         TestFilterSearch(index, dataset, search_param, 0.95, true);
+        if (index->CheckFeature(vsag::IndexFeature::SUPPORT_CHECK_ID_EXIST)) {
+            TestCheckIdExist(index, dataset);
+        }
 
         vsag::Options::Instance().set_block_size_limit(origin_size);
     }
