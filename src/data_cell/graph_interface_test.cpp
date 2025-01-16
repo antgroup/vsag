@@ -15,9 +15,9 @@
 
 #include "graph_interface_test.h"
 
+#include <catch2/catch_test_macros.hpp>
 #include <fstream>
 
-#include "catch2/catch_test_macros.hpp"
 #include "default_allocator.h"
 #include "fixtures.h"
 #include "safe_allocator.h"

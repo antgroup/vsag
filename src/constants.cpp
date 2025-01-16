@@ -22,6 +22,9 @@ const char* const INDEX_HGRAPH = "hgraph";
 const char* const INDEX_DISKANN = "diskann";
 const char* const INDEX_HNSW = "hnsw";
 const char* const INDEX_FRESH_HNSW = "fresh_hnsw";
+const char* const INDEX_PYRAMID = "pyramid";
+const char* const INDEX_BRUTE_FORCE = "brute_force";
+
 const char* const DIM = "dim";
 const char* const NUM_ELEMENTS = "num_elements";
 const char* const IDS = "ids";
@@ -75,6 +78,9 @@ const char* const HNSW_PARAMETER_REVERSED_EDGES = "use_reversed_edges";
 
 const char* const INDEX_PARAM = "index_param";
 
+const char* const PYRAMID_PARAMETER_SUBINDEX_TYPE = "sub_index_type";
+const char PART_SLASH = '/';
+
 // statstic key
 const char* const STATSTIC_MEMORY = "memory";
 const char* const STATSTIC_INDEX_NAME = "index_name";
@@ -105,5 +111,8 @@ const char* const HGRAPH_BUILD_EF_CONSTRUCTION = "ef_construction";
 const char* const HGRAPH_INIT_CAPACITY = "hgraph_init_capacity";
 const char* const HGRAPH_BUILD_THREAD_COUNT = "build_thread_count";
 const char* const HGRAPH_PRECISE_QUANTIZATION_TYPE = "precise_quantization_type";
+
+const char* const BRUTE_FORCE_QUANTIZATION_TYPE = "quantization_type";
+const char* const BRUTE_FORCE_IO_TYPE = "io_type";
 
 };  // namespace vsag

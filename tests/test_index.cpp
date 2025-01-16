@@ -15,7 +15,9 @@
 
 #include "test_index.h"
 
+#include "fixtures/memory_record_allocator.h"
 #include "fixtures/test_logger.h"
+#include "fixtures/test_reader.h"
 #include "fixtures/thread_pool.h"
 #include "simd/fp32_simd.h"
 
@@ -144,6 +146,7 @@ TestIndex::TestUpdateVector(const IndexPtr& index,
     }
 
     std::vector<int> correct_num = {0, 0};
+    uint32_t success_force_updated = 0, failed_force_updated = 0;
     for (int round = 0; round < 2; round++) {
         // round 0 for update, round 1 for validate update results
         for (int i = 0; i < num_vectors; i++) {
@@ -159,8 +162,10 @@ TestIndex::TestUpdateVector(const IndexPtr& index,
                 }
 
                 std::vector<float> update_vecs(dim);
+                std::vector<float> far_vecs(dim);
                 for (int d = 0; d < dim; d++) {
                     update_vecs[d] = base[i * dim + d] + 0.001f;
+                    far_vecs[d] = base[i * dim + d] + 1.0f;
                 }
                 auto new_base = vsag::Dataset::Make();
                 new_base->NumElements(1)
@@ -168,6 +173,7 @@ TestIndex::TestUpdateVector(const IndexPtr& index,
                     ->Float32Vectors(update_vecs.data())
                     ->Owner(false);
 
+                // success case
                 auto before_update_dist = *index->CalcDistanceById(base + i * dim, ids[i]);
                 auto succ_vec_res = index->UpdateVector(ids[i], new_base);
                 REQUIRE(succ_vec_res.has_value());
@@ -176,6 +182,38 @@ TestIndex::TestUpdateVector(const IndexPtr& index,
                 }
                 auto after_update_dist = *index->CalcDistanceById(base + i * dim, ids[i]);
                 REQUIRE(before_update_dist < after_update_dist);
+
+                // update with far vector
+                new_base->Float32Vectors(far_vecs.data());
+                auto fail_vec_res = index->UpdateVector(ids[i], new_base);
+                REQUIRE(fail_vec_res.has_value());
+                if (fail_vec_res.value()) {
+                    // note that the update should be failed, but for some cases, it success
+                    auto force_update_dist = *index->CalcDistanceById(base + i * dim, ids[i]);
+                    REQUIRE(after_update_dist < force_update_dist);
+                    success_force_updated++;
+                } else {
+                    failed_force_updated++;
+                }
+
+                // force update with far vector
+                new_base->Float32Vectors(far_vecs.data());
+                auto force_update_res1 = index->UpdateVector(ids[i], new_base, true);
+                REQUIRE(force_update_res1.has_value());
+                if (expected_success) {
+                    REQUIRE(force_update_res1.value());
+                    auto force_update_dist = *index->CalcDistanceById(base + i * dim, ids[i]);
+                    REQUIRE(after_update_dist < force_update_dist);
+                }
+
+                new_base->Float32Vectors(update_vecs.data());
+                auto force_update_res2 = index->UpdateVector(ids[i], new_base, true);
+                REQUIRE(force_update_res2.has_value());
+                if (expected_success) {
+                    REQUIRE(force_update_res2.value());
+                    auto force_update_dist = *index->CalcDistanceById(base + i * dim, ids[i]);
+                    REQUIRE(std::abs(after_update_dist - force_update_dist) < 1e-5);
+                }
 
                 // old id don't exist
                 auto failed_old_res = index->UpdateVector(ids[i] + 2 * max_id, new_base);
@@ -190,6 +228,7 @@ TestIndex::TestUpdateVector(const IndexPtr& index,
     }
 
     REQUIRE(correct_num[0] == correct_num[1]);
+    REQUIRE(success_force_updated < failed_force_updated);
 }
 
 void
@@ -204,6 +243,7 @@ TestIndex::TestContinueAdd(const IndexPtr& index,
         ->Ids(dataset->base_->GetIds())
         ->NumElements(temp_count)
         ->Float32Vectors(dataset->base_->GetFloat32Vectors())
+        ->Paths(dataset->base_->GetPaths())
         ->Owner(false);
     index->Build(temp_dataset);
     auto rest_count = base_count - temp_count;
@@ -213,6 +253,7 @@ TestIndex::TestContinueAdd(const IndexPtr& index,
             ->Ids(dataset->base_->GetIds() + j)
             ->NumElements(1)
             ->Float32Vectors(dataset->base_->GetFloat32Vectors() + j * dim)
+            ->Paths(dataset->base_->GetPaths() + j)
             ->Owner(false);
         auto add_index = index->Add(data_one);
         if (expected_success) {
@@ -243,6 +284,7 @@ TestIndex::TestKnnSearch(const IndexPtr& index,
         query->NumElements(1)
             ->Dim(dim)
             ->Float32Vectors(queries->GetFloat32Vectors() + i * dim)
+            ->Paths(queries->GetPaths() + i)
             ->Owner(false);
         auto res = index->KnnSearch(query, topk, search_param);
         REQUIRE(res.has_value() == expected_success);
@@ -348,6 +390,7 @@ TestIndex::TestCalcDistanceById(const IndexPtr& index, const TestDatasetPtr& dat
         }
     }
 }
+
 void
 TestIndex::TestSerializeFile(const IndexPtr& index_from,
                              const IndexPtr& index_to,
@@ -365,6 +408,77 @@ TestIndex::TestSerializeFile(const IndexPtr& index_from,
     auto deserialize_index = index_to->Deserialize(infile);
     REQUIRE(deserialize_index.has_value() == expected_success);
     infile.close();
+
+    const auto& queries = dataset->query_;
+    auto query_count = queries->GetNumElements();
+    auto dim = queries->GetDim();
+    auto topk = 10;
+    for (auto i = 0; i < query_count; ++i) {
+        auto query = vsag::Dataset::Make();
+        query->NumElements(1)
+            ->Dim(dim)
+            ->Float32Vectors(queries->GetFloat32Vectors() + i * dim)
+            ->Owner(false);
+        auto res_from = index_from->KnnSearch(query, topk, search_param);
+        auto res_to = index_to->KnnSearch(query, topk, search_param);
+        REQUIRE(res_from.has_value());
+        REQUIRE(res_to.has_value());
+        REQUIRE(res_from.value()->GetDim() == res_to.value()->GetDim());
+        for (auto j = 0; j < topk; ++j) {
+            REQUIRE(res_to.value()->GetIds()[j] == res_from.value()->GetIds()[j]);
+        }
+    }
+}
+
+void
+TestIndex::TestSerializeBinarySet(const IndexPtr& index_from,
+                                  const IndexPtr& index_to,
+                                  const TestDatasetPtr& dataset,
+                                  const std::string& search_param,
+                                  bool expected_success) {
+    auto serialize_binary = index_from->Serialize();
+    REQUIRE(serialize_binary.has_value() == expected_success);
+
+    auto deserialize_index = index_to->Deserialize(serialize_binary.value());
+    REQUIRE(deserialize_index.has_value() == expected_success);
+
+    const auto& queries = dataset->query_;
+    auto query_count = queries->GetNumElements();
+    auto dim = queries->GetDim();
+    auto topk = 10;
+    for (auto i = 0; i < query_count; ++i) {
+        auto query = vsag::Dataset::Make();
+        query->NumElements(1)
+            ->Dim(dim)
+            ->Float32Vectors(queries->GetFloat32Vectors() + i * dim)
+            ->Owner(false);
+        auto res_from = index_from->KnnSearch(query, topk, search_param);
+        auto res_to = index_to->KnnSearch(query, topk, search_param);
+        REQUIRE(res_from.has_value());
+        REQUIRE(res_to.has_value());
+        REQUIRE(res_from.value()->GetDim() == res_to.value()->GetDim());
+        for (auto j = 0; j < topk; ++j) {
+            REQUIRE(res_to.value()->GetIds()[j] == res_from.value()->GetIds()[j]);
+        }
+    }
+}
+
+void
+TestIndex::TestSerializeReaderSet(const IndexPtr& index_from,
+                                  const IndexPtr& index_to,
+                                  const TestDatasetPtr& dataset,
+                                  const std::string& search_param,
+                                  const std::string& index_name,
+                                  bool expected_success) {
+    vsag::ReaderSet rs;
+    auto serialize_binary = index_from->Serialize();
+    REQUIRE(serialize_binary.has_value() == expected_success);
+    auto binary_set = serialize_binary.value();
+    for (const auto& key : binary_set.GetKeys()) {
+        rs.Set(key, std::make_shared<TestReader>(binary_set.Get(key)));
+    }
+    auto deserialize_index = index_to->Deserialize(rs);
+    REQUIRE(deserialize_index.has_value() == expected_success);
 
     const auto& queries = dataset->query_;
     auto query_count = queries->GetNumElements();
@@ -541,6 +655,25 @@ TestIndex::TestDuplicateAdd(const TestIndex::IndexPtr& index, const TestDatasetP
     auto add_index_2 = index->Add(dataset->base_);
     REQUIRE(add_index_2.has_value());
     check_func(add_index_2.value());
+}
+void
+TestIndex::TestEstimateMemory(const std::string& index_name,
+                              const std::string& build_param,
+                              const TestDatasetPtr& dataset) {
+    auto allocator = std::make_shared<fixtures::MemoryRecordAllocator>();
+    {
+        auto index = vsag::Factory::CreateIndex(index_name, build_param, allocator.get()).value();
+        REQUIRE(index->GetNumElements() == 0);
+        if (index->CheckFeature(vsag::SUPPORT_ESTIMATE_MEMORY)) {
+            auto data_size = dataset->base_->GetNumElements();
+            auto estimate_memory = index->EstimateMemory(data_size);
+            auto build_index = index->Build(dataset->base_);
+            REQUIRE(build_index.has_value());
+            auto real_memory = allocator->GetCurrentMemory();
+            REQUIRE(estimate_memory >= static_cast<uint64_t>(real_memory * 0.8));
+            REQUIRE(estimate_memory <= static_cast<uint64_t>(real_memory * 1.2));
+        }
+    }
 }
 
 }  // namespace fixtures

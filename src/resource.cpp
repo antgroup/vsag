@@ -32,7 +32,7 @@ Resource::Resource(Allocator* allocator, ThreadPool* thread_pool) {
     if (thread_pool != nullptr) {
         this->thread_pool = std::make_shared<SafeThreadPool>(thread_pool, false);
     } else {
-        this->allocator = SafeAllocator::FactoryDefaultAllocator();
+        this->thread_pool = SafeThreadPool::FactoryDefaultThreadPool();
     }
 }
 

@@ -20,6 +20,8 @@ extern const char* const INDEX_HGRAPH;
 extern const char* const INDEX_DISKANN;
 extern const char* const INDEX_HNSW;
 extern const char* const INDEX_FRESH_HNSW;
+extern const char* const INDEX_PYRAMID;
+extern const char* const INDEX_BRUTE_FORCE;
 extern const char* const DIM;
 extern const char* const NUM_ELEMENTS;
 extern const char* const IDS;
@@ -73,6 +75,9 @@ extern const char* const HNSW_PARAMETER_REVERSED_EDGES;
 
 extern const char* const INDEX_PARAM;
 
+extern const char* const PYRAMID_PARAMETER_SUBINDEX_TYPE;
+extern const char PART_SLASH;
+
 // statstic key
 extern const char* const STATSTIC_MEMORY;
 extern const char* const STATSTIC_INDEX_NAME;
@@ -104,5 +109,8 @@ extern const char* const HGRAPH_BUILD_EF_CONSTRUCTION;
 extern const char* const HGRAPH_INIT_CAPACITY;
 extern const char* const HGRAPH_BUILD_THREAD_COUNT;
 extern const char* const HGRAPH_PRECISE_QUANTIZATION_TYPE;
+
+extern const char* const BRUTE_FORCE_QUANTIZATION_TYPE;
+extern const char* const BRUTE_FORCE_IO_TYPE;
 
 }  // namespace vsag

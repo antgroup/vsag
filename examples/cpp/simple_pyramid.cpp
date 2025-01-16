@@ -30,25 +30,26 @@ create_random_string(bool is_full) {
 
     std::random_device rd;
     std::mt19937 mt(rd());
+    std::uniform_int_distribution<> distr;
 
     std::vector<std::string> selected_levels;
 
     if (is_full) {
-        selected_levels.emplace_back(level1[rand() % level1.size()]);
-        selected_levels.emplace_back(level2[rand() % level2.size()]);
-        selected_levels.emplace_back(level3[rand() % level3.size()]);
+        selected_levels.emplace_back(level1[distr(mt) % level1.size()]);
+        selected_levels.emplace_back(level2[distr(mt) % level2.size()]);
+        selected_levels.emplace_back(level3[distr(mt) % level3.size()]);
     } else {
-        std::uniform_int_distribution<int> dist(1, 3);
+        std::uniform_int_distribution<> dist(1, 3);
         int num_levels = dist(mt);
 
         if (num_levels >= 1) {
-            selected_levels.emplace_back(level1[rand() % level1.size()]);
+            selected_levels.emplace_back(level1[distr(mt) % level1.size()]);
         }
         if (num_levels >= 2) {
-            selected_levels.emplace_back(level2[rand() % level2.size()]);
+            selected_levels.emplace_back(level2[distr(mt) % level2.size()]);
         }
         if (num_levels == 3) {
-            selected_levels.emplace_back(level3[rand() % level3.size()]);
+            selected_levels.emplace_back(level3[distr(mt) % level3.size()]);
         }
     }
 
@@ -119,11 +120,11 @@ main(int argc, char** argv) {
         query_vector[i] = distrib_real(rng);
     }
     query_path[0] = create_random_string(false);
-
+    std::cout << "query_path:" << query_path[0] << std::endl;
     // search on the index
     auto pyramid_search_parameters = R"(
     {
-        "pyramid": {
+        "hnsw": {
             "ef_search": 100
         }
     }
@@ -136,7 +137,8 @@ main(int argc, char** argv) {
     // print the results
     std::cout << "results: " << std::endl;
     for (int64_t i = 0; i < result->GetDim(); ++i) {
-        std::cout << result->GetIds()[i] << ": " << result->GetDistances()[i] << std::endl;
+        std::cout << result->GetIds()[i] << ": " << result->GetDistances()[i]
+                  << "  path:" << paths[result->GetIds()[i]] << std::endl;
     }
 
     // free memory

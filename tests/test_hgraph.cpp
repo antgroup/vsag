@@ -20,7 +20,6 @@
 #include <limits>
 
 #include "fixtures/test_dataset_pool.h"
-#include "simd/simd.h"
 #include "test_index.h"
 #include "vsag/options.h"
 
@@ -31,7 +30,7 @@ public:
     GenerateHGraphBuildParametersString(const std::string& metric_type,
                                         int64_t dim,
                                         const std::string& quantization_str = "sq8",
-                                        const int thread_count = 5);
+                                        int thread_count = 5);
     static TestDatasetPool pool;
 
     static std::vector<int> dims;
@@ -56,7 +55,7 @@ std::string
 HgraphTestIndex::GenerateHGraphBuildParametersString(const std::string& metric_type,
                                                      int64_t dim,
                                                      const std::string& quantization_str,
-                                                     const int thread_count) {
+                                                     int thread_count) {
     std::string build_parameters_str;
 
     constexpr auto parameter_temp_reorder = R"(
@@ -365,49 +364,62 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex, "HGraph Serialize File",
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
     auto metric_type = GENERATE("l2", "ip", "cosine");
-    std::string base_quantization_str = GENERATE("sq8", "fp32");
     const std::string name = "hgraph";
     auto search_param = fmt::format(search_param_tmp, 200);
 
     for (auto& dim : dims) {
-        vsag::Options::Instance().set_block_size_limit(size);
-        auto param = GenerateHGraphBuildParametersString(metric_type, dim, base_quantization_str);
-        auto index = TestFactory(name, param, true);
+        for (auto& [base_quantization_str, recall] : test_cases) {
+            vsag::Options::Instance().set_block_size_limit(size);
+            auto param =
+                GenerateHGraphBuildParametersString(metric_type, dim, base_quantization_str);
+            auto index = TestFactory(name, param, true);
 
-        if (index->CheckFeature(vsag::SUPPORT_BUILD)) {
-            auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
-            TestBuildIndex(index, dataset, true);
-            if (index->CheckFeature(vsag::SUPPORT_SERIALIZE_FILE) and
-                index->CheckFeature(vsag::SUPPORT_DESERIALIZE_FILE)) {
-                auto index2 = TestFactory(name, param, true);
-                TestSerializeFile(index, index2, dataset, search_param, true);
+            if (index->CheckFeature(vsag::SUPPORT_BUILD)) {
+                auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
+                TestBuildIndex(index, dataset, true);
+                if (index->CheckFeature(vsag::SUPPORT_SERIALIZE_FILE) and
+                    index->CheckFeature(vsag::SUPPORT_DESERIALIZE_FILE)) {
+                    auto index2 = TestFactory(name, param, true);
+                    TestSerializeFile(index, index2, dataset, search_param, true);
+                }
+                if (index->CheckFeature(vsag::SUPPORT_SERIALIZE_BINARY_SET) and
+                    index->CheckFeature(vsag::SUPPORT_DESERIALIZE_BINARY_SET)) {
+                    auto index2 = TestFactory(name, param, true);
+                    TestSerializeBinarySet(index, index2, dataset, search_param, true);
+                }
+                if (index->CheckFeature(vsag::SUPPORT_SERIALIZE_FILE) and
+                    index->CheckFeature(vsag::SUPPORT_DESERIALIZE_READER_SET)) {
+                    auto index2 = TestFactory(name, param, true);
+                    TestSerializeReaderSet(index, index2, dataset, search_param, name, true);
+                }
             }
+            vsag::Options::Instance().set_block_size_limit(origin_size);
         }
-        vsag::Options::Instance().set_block_size_limit(origin_size);
     }
 }
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex,
                              "HGraph Build & ContinueAdd Test With Random Allocator",
-                             "[ft][hnsw]") {
+                             "[ft][hgraph]") {
     auto allocator = std::make_shared<fixtures::RandomAllocator>();
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
     auto metric_type = GENERATE("l2", "ip", "cosine");
-    std::string base_quantization_str = GENERATE("sq8", "fp32");
     const std::string name = "hgraph";
     for (auto& dim : dims) {
-        vsag::Options::Instance().set_block_size_limit(size);
-        auto param =
-            GenerateHGraphBuildParametersString(metric_type, dim, base_quantization_str, 1);
-        auto index = vsag::Factory::CreateIndex(name, param, allocator.get());
-        if (not index.has_value()) {
-            continue;
+        for (auto& [base_quantization_str, recall] : test_cases) {
+            vsag::Options::Instance().set_block_size_limit(size);
+            auto param =
+                GenerateHGraphBuildParametersString(metric_type, dim, base_quantization_str, 1);
+            auto index = vsag::Factory::CreateIndex(name, param, allocator.get());
+            if (not index.has_value()) {
+                continue;
+            }
+            auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
+            TestContinueAddIgnoreRequire(index.value(), dataset);
+            vsag::Options::Instance().set_block_size_limit(origin_size);
         }
-        auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
-        TestContinueAddIgnoreRequire(index.value(), dataset);
     }
-    vsag::Options::Instance().set_block_size_limit(origin_size);
 }
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex, "HGraph Duplicate Build", "[ft][hgraph]") {
@@ -440,6 +452,27 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex, "HGraph Duplicate Build"
                     TestFilterSearch(index, dataset, search_param, recall, true);
                 }
             }
+            vsag::Options::Instance().set_block_size_limit(origin_size);
+        }
+    }
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex, "HGraph Estimate Memory", "[ft][hgraph]") {
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    auto size = GENERATE(1024 * 1024 * 2);
+    auto metric_type = GENERATE("l2", "ip", "cosine");
+
+    const std::string name = "hgraph";
+    auto search_param = fmt::format(search_param_tmp, 200);
+    uint64_t estimate_count = 1000;
+    for (auto& dim : dims) {
+        for (auto& [base_quantization_str, recall] : test_cases) {
+            vsag::Options::Instance().set_block_size_limit(size);
+            auto param =
+                GenerateHGraphBuildParametersString(metric_type, dim, base_quantization_str);
+            auto dataset = pool.GetDatasetAndCreate(dim, estimate_count, metric_type);
+
+            TestEstimateMemory(name, param, dataset);
             vsag::Options::Instance().set_block_size_limit(origin_size);
         }
     }

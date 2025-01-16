@@ -20,13 +20,17 @@
 #include <string>
 
 #include "common.h"
+#include "index/brute_force.h"
+#include "index/brute_force_parameter.h"
 #include "index/diskann.h"
 #include "index/diskann_zparameters.h"
 #include "index/hgraph_index.h"
-#include "index/hgraph_zparameters.h"
+#include "index/hgraph_index_zparameters.h"
 #include "index/hnsw.h"
 #include "index/hnsw_zparameters.h"
 #include "index/index_common_param.h"
+#include "index/pyramid.h"
+#include "index/pyramid_zparameters.h"
 #include "resource_owner_wrapper.h"
 #include "safe_thread_pool.h"
 #include "typing.h"
@@ -84,6 +88,17 @@ Engine::CreateIndex(const std::string& origin_name, const std::string& parameter
                 return tl::unexpected(result.error());
             }
             return index;
+        } else if (name == INDEX_BRUTE_FORCE) {
+            logger::debug("created a brute_force index");
+            JsonType json;
+            if (parsed_params.contains(INDEX_PARAM)) {
+                json = std::move(parsed_params[INDEX_PARAM]);
+            }
+            BruteForceParameter param;
+            param.FromJson(json);
+            auto brute_force = std::make_shared<BruteForce>(param, index_common_params);
+
+            return brute_force;
         } else if (name == INDEX_DISKANN) {
             // read parameters from json, throw exception if not exists
             CHECK_ARGUMENT(parsed_params.contains(INDEX_DISKANN),
@@ -95,15 +110,23 @@ Engine::CreateIndex(const std::string& origin_name, const std::string& parameter
             return std::make_shared<DiskANN>(diskann_params, index_common_params);
         } else if (name == INDEX_HGRAPH) {
             logger::debug("created a hgraph index");
-            JsonType hgraph_params;
+            JsonType hgraph_json;
             if (parsed_params.contains(INDEX_PARAM)) {
-                hgraph_params = std::move(parsed_params[INDEX_PARAM]);
+                hgraph_json = std::move(parsed_params[INDEX_PARAM]);
             }
-            HGraphParameters hgraph_param(hgraph_params, index_common_params);
-            auto hgraph_index =
-                std::make_shared<HGraphIndex>(hgraph_param.GetJson(), index_common_params);
-            hgraph_index->Init();
+            auto hgraph_param = std::make_shared<HGraphIndexParameter>(index_common_params);
+            hgraph_param->FromJson(hgraph_json);
+            auto hgraph_index = std::make_shared<HGraphIndex>(*hgraph_param, index_common_params);
             return hgraph_index;
+        } else if (name == INDEX_PYRAMID) {
+            // read parameters from json, throw exception if not exists
+            CHECK_ARGUMENT(parsed_params.contains(INDEX_PARAM),
+                           fmt::format("parameters must contains {}", INDEX_PARAM));
+            auto& pyramid_param_obj = parsed_params[INDEX_PARAM];
+            auto pyramid_params =
+                PyramidParameters::FromJson(pyramid_param_obj, index_common_params);
+            logger::debug("created a pyramid index");
+            return std::make_shared<Pyramid>(pyramid_params, index_common_params);
         } else {
             LOG_ERROR_AND_RETURNS(
                 ErrorType::UNSUPPORTED_INDEX, "failed to create index(unsupported): ", name);
