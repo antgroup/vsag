@@ -30,3 +30,5 @@ target_link_libraries(custom_logger vsag)
 
 add_executable (vsag_ext_example vsag_ext_example.cpp)
 target_link_libraries(vsag_ext_example vsag)
+
+add_subdirectory (todo_examples)
