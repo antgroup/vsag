@@ -17,6 +17,7 @@
 
 #include "fixtures/memory_record_allocator.h"
 #include "fixtures/test_logger.h"
+#include "fixtures/test_reader.h"
 #include "fixtures/thread_pool.h"
 #include "simd/fp32_simd.h"
 
@@ -432,16 +433,13 @@ TestIndex::TestSerializeReaderSet(const IndexPtr& index_from,
                                   const std::string& search_param,
                                   const std::string& index_name,
                                   bool expected_success) {
-    auto dir = fixtures::TempDir("serialize");
-    auto path = dir.GenerateRandomFile();
-    std::ofstream outfile(path, std::ios::out | std::ios::binary);
-    auto serialize_index = index_from->Serialize(outfile);
-    REQUIRE(serialize_index.has_value() == expected_success);
-    outfile.close();
-
     vsag::ReaderSet rs;
-    auto reader = vsag::Factory::CreateLocalFileReader(path, 0, 0);
-    rs.Set(index_name, reader);
+    auto serialize_binary = index_from->Serialize();
+    REQUIRE(serialize_binary.has_value() == expected_success);
+    auto binary_set = serialize_binary.value();
+    for (const auto& key : binary_set.GetKeys()) {
+        rs.Set(key, std::make_shared<TestReader>(binary_set.Get(key)));
+    }
     auto deserialize_index = index_to->Deserialize(rs);
     REQUIRE(deserialize_index.has_value() == expected_success);
 
