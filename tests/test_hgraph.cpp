@@ -203,7 +203,6 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex,
 
     SECTION("Invalid hgraph param base_quantization_type") {
         auto base_quantization_types = GENERATE("pq", "fsa");
-        // TODO(LHT): test for float param
         constexpr const char* param_temp =
             R"({{
                 "dtype": "float32",
@@ -214,6 +213,21 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex,
                 }}
             }})";
         auto param = fmt::format(param_temp, base_quantization_types);
+        REQUIRE_THROWS(TestFactory(name, param, false));
+    }
+
+    SECTION("Invalid hgraph param key") {
+        auto param_keys = GENERATE("base_quantization_types", "base_quantization");
+        constexpr const char* param_temp =
+            R"({{
+                "dtype": "float32",
+                "metric_type": "l2",
+                "dim": 35,
+                "index_param": {{
+                    "{}": "sq8"
+                }}
+            }})";
+        auto param = fmt::format(param_temp, param_keys);
         REQUIRE_THROWS(TestFactory(name, param, false));
     }
 }

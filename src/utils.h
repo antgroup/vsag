@@ -51,13 +51,8 @@ class WindowResultQueue {
 public:
     WindowResultQueue();
 
-    explicit WindowResultQueue(size_t window_size);
-
     void
     Push(float value);
-
-    size_t
-    ResizeWindowSize(size_t new_window_size_);
 
     [[nodiscard]] float
     GetAvgResult() const;
