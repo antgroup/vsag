@@ -15,16 +15,13 @@
 
 #pragma once
 
-#if defined(ENABLE_SSE)
-#include <xmmintrin.h>  //todo
-#endif
-
 #include <cstring>
 #include <nlohmann/json.hpp>
 
 #include "basic_io.h"
 #include "index/index_common_param.h"
 #include "memory_io_parameter.h"
+#include "prefetch.h"
 #include "vsag/allocator.h"
 
 namespace vsag {
@@ -128,9 +125,7 @@ MemoryIO::MultiReadImpl(uint8_t* datas, uint64_t* sizes, uint64_t* offsets, uint
 }
 void
 MemoryIO::PrefetchImpl(uint64_t offset, uint64_t cache_line) {
-#if defined(ENABLE_SSE)
-    _mm_prefetch(this->start_ + offset, _MM_HINT_T0);  // todo
-#endif
+    PrefetchLines(this->start_ + offset, cache_line);
 }
 void
 MemoryIO::SerializeImpl(StreamWriter& writer) {

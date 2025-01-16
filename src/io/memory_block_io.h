@@ -15,10 +15,6 @@
 
 #pragma once
 
-#if defined(ENABLE_SSE)
-#include <xmmintrin.h>  //todo
-#endif
-
 #include <algorithm>
 #include <bit>
 #include <cmath>
@@ -31,6 +27,7 @@
 #include "index/index_common_param.h"
 #include "inner_string_params.h"
 #include "memory_block_io_parameter.h"
+#include "prefetch.h"
 #include "vsag/allocator.h"
 
 namespace vsag {
@@ -194,9 +191,7 @@ MemoryBlockIO::MultiReadImpl(uint8_t* datas,
 }
 void
 MemoryBlockIO::PrefetchImpl(uint64_t offset, uint64_t cache_line) {
-#if defined(ENABLE_SSE)
-    _mm_prefetch(get_data_ptr(offset), _MM_HINT_T0);  // todo
-#endif
+    PrefetchLines(get_data_ptr(offset), cache_line);
 }
 
 void

@@ -32,6 +32,8 @@ float
 INT8InnerProductDistance(const void* pVect1, const void* pVect2, const void* qty_ptr);
 void
 PQDistanceFloat256(const void* single_dim_centers, float single_dim_val, void* result);
+void
+Prefetch(const void* data);
 }  // namespace generic
 
 namespace sse {
@@ -47,6 +49,8 @@ float
 INT8InnerProductDistance(const void* pVect1, const void* pVect2, const void* qty_ptr);
 void
 PQDistanceFloat256(const void* single_dim_centers, float single_dim_val, void* result);
+void
+Prefetch(const void* data);
 }  // namespace sse
 
 namespace avx {
@@ -104,4 +108,6 @@ extern DistanceFuncType INT8InnerProductDistance;
 using PQDistanceFunc = void (*)(const void* single_dim_centers, float single_dim_val, void* result);
 extern PQDistanceFunc PQDistanceFloat256;
 
+using PrefetchFunc = void (*)(const void* data);
+extern PrefetchFunc Prefetch;
 }  // namespace vsag
