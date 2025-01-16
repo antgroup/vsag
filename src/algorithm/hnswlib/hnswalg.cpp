@@ -789,14 +789,6 @@ HierarchicalNSW::saveIndex(std::ostream& out_stream) {
     SerializeImpl(writer);
 }
 
-void
-HierarchicalNSW::saveIndex(const std::string& location) {
-    std::ofstream output(location, std::ios::binary);
-    IOStreamWriter writer(output);
-    SerializeImpl(writer);
-    output.close();
-}
-
 template <typename T>
 static void
 WriteOne(StreamWriter& writer, T& value) {
@@ -976,44 +968,6 @@ HierarchicalNSW::markDeletedInternal(InnerIdType internalId) {
         }
     } else {
         throw std::runtime_error("The requested to delete element is already deleted");
-    }
-}
-
-/*
-    * Removes the deleted mark of the node, does NOT really change the current graph.
-    *
-    * Note: the method is not safe to use when replacement of deleted elements is enabled,
-    *  because elements marked as deleted can be completely removed by addPoint
-    */
-void
-HierarchicalNSW::unmarkDelete(LabelType label) {
-    // lock all operations with element by label
-    std::unique_lock lock_table(label_lookup_lock_);
-    auto search = label_lookup_.find(label);
-    if (search == label_lookup_.end()) {
-        throw std::runtime_error("Label not found");
-    }
-    InnerIdType internalId = search->second;
-    unmarkDeletedInternal(internalId);
-}
-
-/*
-    * Remove the deleted mark of the node.
-    */
-void
-HierarchicalNSW::unmarkDeletedInternal(InnerIdType internalId) {
-    assert(internalId < cur_element_count_);
-    if (isMarkedDeleted(internalId)) {
-        unsigned char* ll_cur =
-            (unsigned char*)data_level0_memory_->GetElementPtr(internalId, offsetLevel0_) + 2;
-        *ll_cur &= ~DELETE_MARK;
-        num_deleted_ -= 1;
-        if (allow_replace_deleted_) {
-            std::unique_lock<std::mutex> lock_deleted_elements(deleted_elements_lock_);
-            deleted_elements_.erase(internalId);
-        }
-    } else {
-        throw std::runtime_error("The requested to undelete element is not deleted");
     }
 }
 
@@ -1441,8 +1395,13 @@ HierarchicalNSW::searchKnn(const void* query_data,
 
     MaxHeap top_candidates(allocator_);
 
-    top_candidates =
-        searchBaseLayerST<false, true>(currObj, query_data, std::max(ef, k), isIdAllowed);
+    if (num_deleted_ == 0) {
+        top_candidates =
+            searchBaseLayerST<false, true>(currObj, query_data, std::max(ef, k), isIdAllowed);
+    } else {
+        top_candidates =
+            searchBaseLayerST<true, true>(currObj, query_data, std::max(ef, k), isIdAllowed);
+    }
 
     while (top_candidates.size() > k) {
         top_candidates.pop();
@@ -1501,8 +1460,13 @@ HierarchicalNSW::searchRange(const void* query_data,
     }
 
     MaxHeap top_candidates(allocator_);
-
-    top_candidates = searchBaseLayerST<false, true>(currObj, query_data, radius, ef, isIdAllowed);
+    if (num_deleted_ == 0) {
+        top_candidates =
+            searchBaseLayerST<false, true>(currObj, query_data, radius, ef, isIdAllowed);
+    } else {
+        top_candidates =
+            searchBaseLayerST<true, true>(currObj, query_data, radius, ef, isIdAllowed);
+    }
 
     while (not top_candidates.empty()) {
         std::pair<float, InnerIdType> rez = top_candidates.top();
@@ -1513,39 +1477,4 @@ HierarchicalNSW::searchRange(const void* query_data,
     // std::cout << "hnswalg::result.size(): " << result.size() << std::endl;
     return result;
 }
-
-void
-HierarchicalNSW::checkIntegrity() {
-    int connections_checked = 0;
-    vsag::Vector<int> inbound_connections_num(cur_element_count_, 0, allocator_);
-    for (int i = 0; i < cur_element_count_; i++) {
-        for (int l = 0; l <= element_levels_[i]; l++) {
-            auto data_ll_cur = getLinklistAtLevelWithLock(i, l);
-            linklistsizeint* ll_cur = (linklistsizeint*)data_ll_cur.get();
-            int size = getListCount(ll_cur);
-            auto* data = (InnerIdType*)(ll_cur + 1);
-            vsag::UnorderedSet<InnerIdType> s(allocator_);
-            for (int j = 0; j < size; j++) {
-                assert(data[j] > 0);
-                assert(data[j] < cur_element_count_);
-                assert(data[j] != i);
-                inbound_connections_num[data[j]]++;
-                s.insert(data[j]);
-                connections_checked++;
-            }
-            assert(s.size() == size);
-        }
-    }
-    if (cur_element_count_ > 1) {
-        int min1 = inbound_connections_num[0], max1 = inbound_connections_num[0];
-        for (int i = 0; i < cur_element_count_; i++) {
-            assert(inbound_connections_num[i] > 0);
-            min1 = std::min(inbound_connections_num[i], min1);
-            max1 = std::max(inbound_connections_num[i], max1);
-        }
-        std::cout << "Min inbound: " << min1 << ", Max inbound:" << max1 << "\n";
-    }
-    std::cout << "integrity ok, checked " << connections_checked << " connections\n";
-}
-
 }  // namespace hnswlib

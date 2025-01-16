@@ -28,7 +28,9 @@ namespace fixtures {
 class HNSWTestIndex : public fixtures::TestIndex {
 public:
     static std::string
-    GenerateHNSWBuildParametersString(const std::string& metric_type, int64_t dim);
+    GenerateHNSWBuildParametersString(const std::string& metric_type,
+                                      int64_t dim,
+                                      bool use_static = false);
 
     static TestDatasetPool pool;
 
@@ -48,7 +50,9 @@ TestDatasetPool HNSWTestIndex::pool{};
 std::vector<int> HNSWTestIndex::dims = fixtures::get_common_used_dims(2, RandomValue(0, 999));
 
 std::string
-HNSWTestIndex::GenerateHNSWBuildParametersString(const std::string& metric_type, int64_t dim) {
+HNSWTestIndex::GenerateHNSWBuildParametersString(const std::string& metric_type,
+                                                 int64_t dim,
+                                                 bool use_static) {
     constexpr auto parameter_temp = R"(
     {{
         "dtype": "float32",
@@ -56,11 +60,12 @@ HNSWTestIndex::GenerateHNSWBuildParametersString(const std::string& metric_type,
         "dim": {},
         "hnsw": {{
             "max_degree": 64,
-            "ef_construction": 500
+            "ef_construction": 500,
+            "use_static": {}
         }}
     }}
     )";
-    auto build_parameters_str = fmt::format(parameter_temp, metric_type, dim);
+    auto build_parameters_str = fmt::format(parameter_temp, metric_type, dim, use_static);
     return build_parameters_str;
 }
 }  // namespace fixtures
@@ -336,6 +341,37 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex, "HNSW Serialize File", "[f
 
         auto index2 = TestFactory(name, param, true);
         TestSerializeFile(index, index2, dataset, search_param, true);
+    }
+    vsag::Options::Instance().set_block_size_limit(origin_size);
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex, "static HNSW Serialize File", "[ft][hnsw]") {
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    auto size = GENERATE(1024 * 1024 * 2);
+    auto metric_type = "l2";
+    const std::string name = "hnsw";
+    auto search_param = fmt::format(search_param_tmp, 100);
+    auto dim = 128;
+    vsag::Options::Instance().set_block_size_limit(size);
+    auto param = GenerateHNSWBuildParametersString(metric_type, dim, true);
+    auto index = TestFactory(name, param, true);
+
+    auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
+    TestBuildIndex(index, dataset, true);
+    if (index->CheckFeature(vsag::SUPPORT_SERIALIZE_FILE) and
+        index->CheckFeature(vsag::SUPPORT_DESERIALIZE_FILE)) {
+        auto index2 = TestFactory(name, param, true);
+        TestSerializeFile(index, index2, dataset, search_param, true);
+    }
+    if (index->CheckFeature(vsag::SUPPORT_SERIALIZE_BINARY_SET) and
+        index->CheckFeature(vsag::SUPPORT_DESERIALIZE_BINARY_SET)) {
+        auto index2 = TestFactory(name, param, true);
+        TestSerializeBinarySet(index, index2, dataset, search_param, true);
+    }
+    if (index->CheckFeature(vsag::SUPPORT_SERIALIZE_FILE) and
+        index->CheckFeature(vsag::SUPPORT_DESERIALIZE_READER_SET)) {
+        auto index2 = TestFactory(name, param, true);
+        TestSerializeReaderSet(index, index2, dataset, search_param, name, true);
     }
     vsag::Options::Instance().set_block_size_limit(origin_size);
 }

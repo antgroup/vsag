@@ -22,41 +22,6 @@
 
 namespace vsag {
 
-class SubReader : public Reader {
-public:
-    SubReader(std::shared_ptr<Reader> parrent_reader, uint64_t start_pos, uint64_t size)
-        : parrent_reader_(std::move(parrent_reader)), size_(size), start_pos_(start_pos) {
-    }
-
-    void
-    Read(uint64_t offset, uint64_t len, void* dest) override {
-        if (offset + len > size_)
-            throw std::out_of_range("Read out of range.");
-        parrent_reader_->Read(offset + start_pos_, len, dest);
-    }
-
-    void
-    AsyncRead(uint64_t offset, uint64_t len, void* dest, CallBack callback) override {
-    }
-
-    uint64_t
-    Size() const override {
-        return size_;
-    }
-
-private:
-    std::shared_ptr<Reader> parrent_reader_;
-    uint64_t size_;
-    uint64_t start_pos_;
-};
-
-Binary
-binaryset_to_binary(const BinarySet binary_set);
-BinarySet
-binary_to_binaryset(const Binary binary);
-ReaderSet
-reader_to_readerset(std::shared_ptr<Reader> reader);
-
 struct IndexNode {
     std::shared_ptr<Index> index{nullptr};
     UnorderedMap<std::string, std::shared_ptr<IndexNode>> children;

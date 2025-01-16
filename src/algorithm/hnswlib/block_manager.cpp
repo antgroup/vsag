@@ -100,14 +100,6 @@ BlockManager::Serialize(std::ostream& ofs, size_t cur_element_count) {
 }
 
 bool
-BlockManager::Deserialize(std::function<void(uint64_t, uint64_t, void*)> read_func,
-                          uint64_t cursor,
-                          size_t cur_element_count) {
-    ReadFuncStreamReader reader(read_func, cursor);
-    return this->DeserializeImpl(reader, cur_element_count);
-}
-
-bool
 BlockManager::Deserialize(std::istream& ifs, size_t cur_element_count) {
     IOStreamReader reader(ifs);
     return this->DeserializeImpl(reader, cur_element_count);
