@@ -645,34 +645,33 @@ HNSW::update_vector(int64_t id, const DatasetPtr& new_base, bool force_update) {
         get_vectors(new_base, &new_base_vec, &data_size);
 
         if (not force_update) {
-            const void* base_data;
+            std::shared_ptr<int8_t[]> base_data(new int8_t[data_size]);
             auto base = Dataset::Make();
 
-            // check if id exists
-            base_data =
-                std::reinterpret_pointer_cast<hnswlib::HierarchicalNSW>(alg_hnsw_)->getDataByLabel(
-                    id);
-            set_dataset(base, base_data, 1);
+            // check if id exists and get copied base data
+            std::reinterpret_pointer_cast<hnswlib::HierarchicalNSW>(alg_hnsw_)->copyDataByLabel(
+                id, base_data.get());
+            set_dataset(base, base_data.get(), 1);
 
             // search neighbors
-            auto result = this->knn_search(base,
-                                           vsag::UPDATE_CHECK_SEARCH_K,
-                                           fmt::format(R"({{
-                                                            "hnsw":
-                                                                {{
-                                                                    "ef_search": {}
-                                                                }}
-                                                        }})",
-                                                       vsag::UPDATE_CHECK_SEARCH_L),
-                                           nullptr);
+            auto neighbors = *this->knn_search(base,
+                                               vsag::UPDATE_CHECK_SEARCH_K,
+                                               fmt::format(R"({{
+                                                                "hnsw":
+                                                                    {{
+                                                                        "ef_search": {}
+                                                                    }}
+                                                            }})",
+                                                           vsag::UPDATE_CHECK_SEARCH_L),
+                                               nullptr);
 
             // check whether the neighborhood relationship is same
             float self_dist = std::reinterpret_pointer_cast<hnswlib::HierarchicalNSW>(alg_hnsw_)
                                   ->getDistanceByLabel(id, new_base_vec);
-            for (int i = 0; i < result.value()->GetDim(); i++) {
+            for (int i = 0; i < neighbors->GetDim(); i++) {
                 float neighbor_dist =
                     std::reinterpret_pointer_cast<hnswlib::HierarchicalNSW>(alg_hnsw_)
-                        ->getDistanceByLabel(result.value()->GetIds()[i], new_base_vec);
+                        ->getDistanceByLabel(neighbors->GetIds()[i], new_base_vec);
                 if (neighbor_dist < self_dist) {
                     return false;
                 }
@@ -836,8 +835,6 @@ HNSW::pretrain(const std::vector<int64_t>& base_tag_ids,
     uint32_t data_size = 0;
     uint32_t add_edges = 0;
     int64_t topk_neighbor_tag_id;
-    const void* topk_data;
-    const void* base_data;
     auto base = Dataset::Make();
     auto generated_query = Dataset::Make();
     if (type_ == DataTypes::DATA_TYPE_INT8) {
@@ -845,14 +842,17 @@ HNSW::pretrain(const std::vector<int64_t>& base_tag_ids,
     } else {
         data_size = dim_ * 4;
     }
+    std::shared_ptr<int8_t[]> base_data(new int8_t[data_size]);
+    std::shared_ptr<int8_t[]> topk_data(new int8_t[data_size]);
 
     std::shared_ptr<int8_t[]> generated_data(new int8_t[data_size]);
     set_dataset(generated_query, generated_data.get(), 1);
 
     for (const int64_t& base_tag_id : base_tag_ids) {
         try {
-            base_data = (const void*)this->alg_hnsw_->getDataByLabel(base_tag_id);
-            set_dataset(base, base_data, 1);
+            std::reinterpret_pointer_cast<hnswlib::HierarchicalNSW>(alg_hnsw_)->copyDataByLabel(
+                base_tag_id, base_data.get());
+            set_dataset(base, base_data.get(), 1);
         } catch (const std::runtime_error& e) {
             LOG_ERROR_AND_RETURNS(ErrorType::INVALID_ARGUMENT,
                                   fmt::format("failed to pretrain(invalid argument): base tag id "
@@ -877,17 +877,18 @@ HNSW::pretrain(const std::vector<int64_t>& base_tag_ids,
             if (topk_neighbor_tag_id == base_tag_id) {
                 continue;
             }
-            topk_data = (const void*)this->alg_hnsw_->getDataByLabel(topk_neighbor_tag_id);
+
+            std::reinterpret_pointer_cast<hnswlib::HierarchicalNSW>(alg_hnsw_)->copyDataByLabel(
+                topk_neighbor_tag_id, topk_data.get());
 
             for (int d = 0; d < dim_; d++) {
                 if (type_ == DataTypes::DATA_TYPE_INT8) {
-                    generated_data.get()[d] =
-                        vsag::GENERATE_OMEGA * (float)(((int8_t*)base_data)[d]) +
-                        (1 - vsag::GENERATE_OMEGA) * (float)(((int8_t*)topk_data)[d]);
+                    generated_data.get()[d] = vsag::GENERATE_OMEGA * (float)(base_data[d]) +
+                                              (1 - vsag::GENERATE_OMEGA) * (float)(topk_data[d]);
                 } else {
                     ((float*)generated_data.get())[d] =
-                        vsag::GENERATE_OMEGA * ((float*)base_data)[d] +
-                        (1 - vsag::GENERATE_OMEGA) * ((float*)topk_data)[d];
+                        vsag::GENERATE_OMEGA * ((float*)base_data.get())[d] +
+                        (1 - vsag::GENERATE_OMEGA) * ((float*)topk_data.get())[d];
                 }
             }
 

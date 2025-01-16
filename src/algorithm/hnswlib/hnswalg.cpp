@@ -934,6 +934,19 @@ HierarchicalNSW::getDataByLabel(LabelType label) const {
     return data_ptr;
 }
 
+void
+HierarchicalNSW::copyDataByLabel(LabelType label, void* data_point) {
+    std::unique_lock lock_table(label_lookup_lock_);
+
+    auto search = label_lookup_.find(label);
+    if (search == label_lookup_.end() || isMarkedDeleted(search->second)) {
+        throw std::runtime_error("Label not found");
+    }
+    InnerIdType internal_id = search->second;
+
+    memcpy(data_point, getDataByInternalId(internal_id), data_size_);
+}
+
 /*
     * Marks an element with the given label deleted, does NOT really change the current graph.
     */
