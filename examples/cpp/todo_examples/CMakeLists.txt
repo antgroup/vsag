@@ -1,0 +1,5 @@
+add_executable (103_index_hgraph 103_index_hgraph.cpp)
+target_link_libraries (103_index_hgraph vsag_static)
+
+add_executable (105_index_brute_force 105_index_brute_force.cpp)
+target_link_libraries (105_index_brute_force vsag_static)
