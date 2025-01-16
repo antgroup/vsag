@@ -975,7 +975,10 @@ HNSW::init_feature_list() {
                                IndexFeature::SUPPORT_SERIALIZE_BINARY_SET,
                                IndexFeature::SUPPORT_SERIALIZE_FILE});
     // other
-    feature_list_.SetFeature(IndexFeature::SUPPORT_CAL_DISTANCE_BY_ID);
+    feature_list_.SetFeatures({
+        IndexFeature::SUPPORT_CAL_DISTANCE_BY_ID,
+        IndexFeature::SUPPORT_CHECK_ID_EXIST,
+    });
 }
 
 }  // namespace vsag

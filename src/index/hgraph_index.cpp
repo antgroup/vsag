@@ -25,4 +25,5 @@ HGraphIndex::~HGraphIndex() {
     this->hgraph_.reset();
     this->allocator_.reset();
 }
+
 }  // namespace vsag

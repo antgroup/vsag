@@ -59,6 +59,8 @@ enum IndexFeature {
 
     SUPPORT_ESTIMATE_MEMORY, /**< Supports estimate memory usage by data count */
 
+    SUPPORT_CHECK_ID_EXIST, /**< Supports check whether given id exists in index */
+
     INDEX_FEATURE_COUNT /** must be last one */
 };
 }  // namespace vsag

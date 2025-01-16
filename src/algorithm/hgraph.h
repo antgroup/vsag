@@ -84,7 +84,7 @@ public:
     }
 
     uint64_t
-    EstimateMemory(const uint64_t num_elements) const;
+    EstimateMemory(uint64_t num_elements) const;
 
     // TODO(LHT): implement
     inline int64_t
@@ -97,6 +97,11 @@ public:
 
     bool
     CheckFeature(IndexFeature feature) const;
+
+    bool
+    CheckIdExist(LabelType id) const {
+        return this->label_lookup_.find(id) != this->label_lookup_.end();
+    }
 
     inline void
     SetBuildThreadsCount(uint64_t count) {
