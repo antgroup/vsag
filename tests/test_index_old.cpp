@@ -841,9 +841,8 @@ TEST_CASE("check incorrect build parameters", "[ft][index]") {
         "dtype": "float32",
         "metric_type": "l2",
         "dim": 512,
-        "hhhhhhhh": {
-            "max_degree": 16,
-            "ef_construction": 100
+        "hnsw": {
+            "max_degree": 16
         },
         "diskann": {
             "max_degree": 16,

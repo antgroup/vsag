@@ -345,7 +345,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::BruteForceTestIndex,
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::BruteForceTestIndex,
                              "BruteForce Build & ContinueAdd Test With Random Allocator",
-                             "[ft][hnsw]") {
+                             "[ft][bruteforce]") {
     auto allocator = std::make_shared<fixtures::RandomAllocator>();
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
@@ -364,6 +364,27 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::BruteForceTestIndex,
             TestContinueAddIgnoreRequire(index.value(), dataset);
             vsag::Options::Instance().set_block_size_limit(origin_size);
         }
+    }
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::BruteForceTestIndex,
+                             "BruteForce GetDistance By ID",
+                             "[ft][bruteforce]") {
+    auto allocator = std::make_shared<fixtures::RandomAllocator>();
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    auto size = GENERATE(1024 * 1024 * 2);
+    auto metric_type = GENERATE("l2", "ip", "cosine");
+    const std::string name = "brute_force";
+    for (auto& dim : dims) {
+        auto base_quantization_str = "fp32";
+        vsag::Options::Instance().set_block_size_limit(size);
+        auto param =
+            GenerateBruteForceBuildParametersString(metric_type, dim, base_quantization_str, 1);
+        auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
+        auto index = TestFactory(name, param, true);
+        TestBuildIndex(index, dataset, true);
+        TestCalcDistanceById(index, dataset);
+        vsag::Options::Instance().set_block_size_limit(origin_size);
     }
 }
 

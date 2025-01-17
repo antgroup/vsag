@@ -119,14 +119,34 @@ TEST_CASE("index handler", "[ft][ext]") {
     }
     )";
 
-    // search
-    auto knn_search = index_handler->KnnSearch(query_handler, 10, search_parameters);
-    REQUIRE(knn_search.has_value());
-    vsag::ext::DatasetHandler* search_result_handler = knn_search.value();
-    auto range_search = index_handler->RangeSearch(query_handler, 0.5, search_parameters);
-    REQUIRE(range_search.has_value());
-    delete search_result_handler;
-    search_result_handler = range_search.value();
+    // search without filter
+    {
+        auto knn_search = index_handler->KnnSearch(query_handler, 10, search_parameters);
+        REQUIRE(knn_search.has_value());
+        REQUIRE(knn_search.value()->GetDim() == 10);
+        vsag::ext::DatasetHandler* search_result_handler = knn_search.value();
+        auto range_search = index_handler->RangeSearch(query_handler, 0.5, search_parameters);
+        REQUIRE(range_search.has_value());
+        delete search_result_handler;
+        search_result_handler = range_search.value();
+        delete search_result_handler;
+    }
+
+    // search with filter
+    {
+        auto bitset = vsag::ext::BitsetHandler::Make();
+        auto knn_search = index_handler->KnnSearch(query_handler, 10, search_parameters, bitset);
+        REQUIRE(knn_search.has_value());
+        REQUIRE(knn_search.value()->GetDim() == 10);
+        vsag::ext::DatasetHandler* search_result_handler = knn_search.value();
+        auto range_search =
+            index_handler->RangeSearch(query_handler, 0.5, search_parameters, bitset);
+        REQUIRE(range_search.has_value());
+        delete search_result_handler;
+        search_result_handler = range_search.value();
+        delete search_result_handler;
+        delete bitset;
+    }
 
     // serialize/deserialize
     {
@@ -180,7 +200,6 @@ TEST_CASE("index handler", "[ft][ext]") {
     CHECK(index_handler->GetMemoryUsage() > 0);
 
     // free memory
-    delete search_result_handler;
     delete query_handler;
     delete base_handler;
     delete index_handler;

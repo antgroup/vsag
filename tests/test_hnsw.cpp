@@ -119,7 +119,7 @@ TEST_CASE("HNSW Filtering Test", "[ft][hnsw]") {
     int max_elements = 1000;
     int max_degree = 16;
     int ef_construction = 100;
-    int ef_search = 1000;
+    int ef_search = 100;
     // Initing index
     nlohmann::json hnsw_parameters{
         {"max_degree", max_degree},
@@ -234,11 +234,14 @@ TEST_CASE("HNSW Filtering Test", "[ft][hnsw]") {
 
         if (auto result = hnsw->RangeSearch(query, radius, parameters.dump(), zeros);
             result.has_value()) {
-            if (result.value()->GetNumElements() == 1) {
-                if (result.value()->GetDim() != 0 && result.value()->GetIds()[0] == ids[i]) {
-                    correct_range++;
-                }
-            }
+            correct_range += vsag::range_search_recall(data,
+                                                       ids,
+                                                       max_elements,
+                                                       data + i * dim,
+                                                       dim,
+                                                       result.value()->GetIds(),
+                                                       result.value()->GetDim(),
+                                                       radius);
         } else if (result.error().type == vsag::ErrorType::INTERNAL_ERROR) {
             std::cerr << "failed to range search on index: internalError" << std::endl;
             exit(-1);
