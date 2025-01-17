@@ -116,14 +116,24 @@ TestIndex::TestUpdateId(const IndexPtr& index,
                 REQUIRE(failed_old_res.has_value());
                 REQUIRE(not failed_old_res.value());
 
-                // new id is used
-                auto failed_new_res = index->UpdateId(update_id_map[ids[i]], update_id_map[ids[i]]);
-                REQUIRE(failed_new_res.has_value());
-                REQUIRE(not failed_new_res.value());
+                // same id
+                auto succ_same_res = index->UpdateId(update_id_map[ids[i]], update_id_map[ids[i]]);
+                REQUIRE(succ_same_res.has_value());
+                REQUIRE(succ_same_res.value());
             } else {
                 if (result.value()->GetIds()[0] == update_id_map[ids[i]]) {
                     correct_num[round] += 1;
                 }
+            }
+        }
+
+        for (int i = 0; i < num_vectors; i++) {
+            if (round == 0) {
+                // new id is used
+                auto failed_new_res =
+                    index->UpdateId(update_id_map[ids[i]], update_id_map[ids[num_vectors - i - 1]]);
+                REQUIRE(failed_new_res.has_value());
+                REQUIRE(not failed_new_res.value());
             }
         }
     }

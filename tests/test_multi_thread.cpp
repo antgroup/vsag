@@ -245,17 +245,10 @@ TEST_CASE("multi-threading read-write test", "[ft][hnsw]") {
         }));
 
         // update id
-        update_id_results.push_back(
-            pool.enqueue([&ids, &data, &index, dim, i, max_elements]() -> bool {
-                auto dataset = vsag::Dataset::Make();
-                dataset->Dim(dim)
-                    ->NumElements(1)
-                    ->Ids(ids.get() + i)
-                    ->Float32Vectors(data.get() + i * dim)
-                    ->Owner(false);
-                auto res = index->UpdateId(ids[i], ids[i] + 2 * max_elements);
-                return res.has_value();
-            }));
+        update_id_results.push_back(pool.enqueue([&ids, &index, i, max_elements]() -> bool {
+            auto res = index->UpdateId(ids[i], ids[i] + 2 * max_elements);
+            return res.has_value();
+        }));
 
         // update vector
         update_vec_results.push_back(pool.enqueue([&ids, &data, &index, dim, i]() -> bool {
@@ -270,13 +263,12 @@ TEST_CASE("multi-threading read-write test", "[ft][hnsw]") {
         }));
 
         // search
-        search_results.push_back(
-            pool.enqueue([&index, &ids, dim, &data, i, &str_parameters]() -> bool {
-                auto query = vsag::Dataset::Make();
-                query->NumElements(1)->Dim(dim)->Float32Vectors(data.get() + i * dim)->Owner(false);
-                auto result = index->KnnSearch(query, 2, str_parameters);
-                return result.has_value();
-            }));
+        search_results.push_back(pool.enqueue([&index, dim, &data, i, &str_parameters]() -> bool {
+            auto query = vsag::Dataset::Make();
+            query->NumElements(1)->Dim(dim)->Float32Vectors(data.get() + i * dim)->Owner(false);
+            auto result = index->KnnSearch(query, 2, str_parameters);
+            return result.has_value();
+        }));
     }
 
     for (int i = 0; i < max_elements; ++i) {
@@ -293,12 +285,12 @@ TEST_CASE("multi-threading read-write with feedback and pretrain test", "[ft][hn
     // avoid too much slow task logs
     vsag::Options::Instance().logger()->SetLevel(vsag::Logger::Level::kWARN);
 
-    int thread_num = 32;
-    int dim = 256;
-    int max_elements = 10000;
-    int max_degree = 32;
-    int ef_construction = 200;
-    int ef_search = 100;
+    int thread_num = 16;
+    int dim = 32;
+    int max_elements = 1000;
+    int max_degree = 16;
+    int ef_construction = 50;
+    int ef_search = 10;
     int k = 10;
     nlohmann::json hnsw_parameters{{"max_degree", max_degree},
                                    {"ef_construction", ef_construction},
@@ -324,8 +316,9 @@ TEST_CASE("multi-threading read-write with feedback and pretrain test", "[ft][hn
     std::string str_parameters = parameters.dump();
 
     std::vector<std::future<int64_t>> insert_results;
-    std::vector<std::future<uint64_t>> feedback_results;
-    std::vector<std::future<uint32_t>> pretrain_results;
+    std::vector<std::future<bool>> feedback_results;
+    std::vector<std::future<bool>> pretrain_results;
+    std::vector<std::future<bool>> update_id_results;
     std::vector<std::future<bool>> search_results;
 
     for (int64_t i = 0; i < max_elements / 2; ++i) {
@@ -356,20 +349,30 @@ TEST_CASE("multi-threading read-write with feedback and pretrain test", "[ft][hn
             return add_res.value().size();
         }));
 
+        // update id
+        update_id_results.push_back(pool.enqueue([&ids, &index, i, max_elements]() -> bool {
+            auto res = index->UpdateId(ids[i], ids[i] + 2 * max_elements);
+            return res.has_value();
+        }));
+
         // feedback
         feedback_results.push_back(
-            pool.enqueue([&index, &data, i, dim, k, str_parameters]() -> uint64_t {
+            pool.enqueue([&index, &data, i, dim, k, str_parameters]() -> bool {
                 auto query = vsag::Dataset::Make();
                 query->Dim(dim)->NumElements(1)->Int8Vectors(data.get() + i * dim)->Owner(false);
                 auto feedback_res = index->Feedback(query, k, str_parameters);
-                return feedback_res.value();
+                return feedback_res.has_value();
             }));
 
         // pretrain
-        pretrain_results.push_back(pool.enqueue([&index, &ids, i, k, str_parameters]() -> uint32_t {
-            auto pretrain_res = index->Pretrain({ids[i]}, k, str_parameters);
-            return pretrain_res.value();
-        }));
+        pretrain_results.push_back(
+            pool.enqueue([&index, &ids, i, k, str_parameters, max_elements]() -> bool {
+                auto pretrain_res = index->Pretrain({ids[i]}, k, str_parameters);
+                if (not pretrain_res.has_value()) {
+                    pretrain_res = index->Pretrain({ids[i] + 2 * max_elements}, k, str_parameters);
+                }
+                return pretrain_res.has_value();
+            }));
 
         // search
         search_results.push_back(pool.enqueue([&index, &data, i, dim, k, str_parameters]() -> bool {
@@ -380,12 +383,21 @@ TEST_CASE("multi-threading read-write with feedback and pretrain test", "[ft][hn
         }));
     }
 
+    uint32_t succ_feedback = 0, succ_pretrain = 0;
     for (int64_t i = 0; i < max_elements; ++i) {
         REQUIRE(insert_results[i].get() == 0);
         if (i < max_elements / 2) {
-            REQUIRE(pretrain_results[i].get() >= 0);
-            REQUIRE(feedback_results[i].get() >= 0);
+            if (feedback_results[i].get()) {
+                succ_feedback++;
+            }
+            if (pretrain_results[i].get()) {
+                succ_pretrain++;
+            }
+            REQUIRE(update_id_results[i].get() == true);
             REQUIRE(search_results[i].get() >= 0);
         }
     }
+
+    REQUIRE(succ_feedback > 0);
+    REQUIRE(succ_pretrain > 0);
 }

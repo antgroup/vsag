@@ -280,3 +280,31 @@ TEST_CASE("serialize and deserialize with stream", "[ut][conjugate_graph]") {
         re_in_stream.close();
     }
 }
+
+TEST_CASE("update id", "[ut][conjugate_graph]") {
+    std::shared_ptr<vsag::ConjugateGraph> conjugate_graph =
+        std::make_shared<vsag::ConjugateGraph>();
+
+    REQUIRE(conjugate_graph->AddNeighbor(0, 1) == true);
+    REQUIRE(conjugate_graph->AddNeighbor(0, 2) == true);
+    REQUIRE(conjugate_graph->AddNeighbor(1, 0) == true);
+    REQUIRE(conjugate_graph->AddNeighbor(4, 0) == true);
+
+    // update key
+    REQUIRE(conjugate_graph->UpdateId(1, 1) == true);      // succ case: 1 -> 1
+    REQUIRE(conjugate_graph->UpdateId(5, 4) == false);     // old id don't exist
+    REQUIRE(conjugate_graph->UpdateId(0, 4) == false);     // old id and new id both exists
+    REQUIRE(conjugate_graph->UpdateId(4, 5) == true);      // succ case: 4 -> 5
+    REQUIRE(conjugate_graph->AddNeighbor(5, 0) == false);  // valid of succ case
+
+    // update value
+    REQUIRE(conjugate_graph->UpdateId(2, 3) == true);      // succ case: 2 -> 3
+    REQUIRE(conjugate_graph->AddNeighbor(0, 3) == false);  // neighbor exists
+
+    // update both key and value
+    REQUIRE(conjugate_graph->UpdateId(0, -1) == true);  // succ case: 0 -> -1
+    REQUIRE(conjugate_graph->AddNeighbor(-1, 1) == false);
+    REQUIRE(conjugate_graph->AddNeighbor(-1, 3) == false);
+    REQUIRE(conjugate_graph->AddNeighbor(1, -1) == false);
+    REQUIRE(conjugate_graph->AddNeighbor(5, -1) == false);
+}

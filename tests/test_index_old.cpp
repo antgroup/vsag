@@ -1051,7 +1051,7 @@ TEST_CASE("build index with generated_build_parameters", "[ft][index]") {
     REQUIRE(recall > 0.95);
 }
 
-TEST_CASE("int8 + freshhnsw + feedback", "[ft][index][hnsw]") {
+TEST_CASE("int8 + freshhnsw + feedback + update", "[ft][index][hnsw]") {
     auto logger = vsag::Options::Instance().logger();
     logger->SetLevel(vsag::Logger::Level::kDEBUG);
 
@@ -1068,7 +1068,7 @@ TEST_CASE("int8 + freshhnsw + feedback", "[ft][index][hnsw]") {
         "dim": {},
         "hnsw": {{
             "max_degree": 16,
-            "ef_construction": 200,
+            "ef_construction": 100,
             "use_conjugate_graph": true
         }}
     }}
@@ -1082,8 +1082,10 @@ TEST_CASE("int8 + freshhnsw + feedback", "[ft][index][hnsw]") {
 
     // generate dataset
     std::vector<int64_t> base_ids(num_base);
+    std::vector<int64_t> update_ids(num_base);
     for (int64_t i = 0; i < num_base; ++i) {
         base_ids[i] = i;
+        update_ids[i] = i + 2 * num_base;
     }
     auto base_vectors = fixtures::generate_int8_codes(num_base, dim);
     auto base = vsag::Dataset::Make();
@@ -1121,7 +1123,7 @@ TEST_CASE("int8 + freshhnsw + feedback", "[ft][index][hnsw]") {
         constexpr auto search_parameters_json = R"(
         {{
             "hnsw": {{
-                "ef_search": 50,
+                "ef_search": 10,
                 "use_conjugate_graph_search": {}
             }}
         }}
@@ -1146,8 +1148,14 @@ TEST_CASE("int8 + freshhnsw + feedback", "[ft][index][hnsw]") {
                 REQUIRE(*index->Feedback(query, k, search_parameters) == 0);
             }
 
-            if (local_optimum == global_optimum) {
+            if (local_optimum == global_optimum or local_optimum == update_ids[global_optimum]) {
                 correct++;
+            }
+        }
+
+        if (round == 0) {
+            for (int i = 0; i < num_base; i++) {
+                REQUIRE(*index->UpdateId(base_ids[i], update_ids[i]) == true);
             }
         }
         recall[round] = correct / (1.0 * num_query);
@@ -1157,6 +1165,7 @@ TEST_CASE("int8 + freshhnsw + feedback", "[ft][index][hnsw]") {
     logger->Debug("====summary====");
     logger->Debug(fmt::format(R"(Error fix: {})", error_fix));
 
+    REQUIRE(recall[0] < recall[1]);
     REQUIRE(fixtures::time_t(recall[1]) == fixtures::time_t(1.0f));
 }
 
@@ -1230,7 +1239,7 @@ TEST_CASE("hnsw + feedback with global optimum id", "[ft][index][hnsw]") {
         constexpr auto search_parameters_json = R"(
         {{
             "hnsw": {{
-                "ef_search": 100,
+                "ef_search": 10,
                 "use_conjugate_graph_search": {}
             }}
         }}
