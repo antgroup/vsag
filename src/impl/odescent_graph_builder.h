@@ -65,7 +65,7 @@ struct Node {
 struct Linklist {
     Vector<Node> neighbors;
     float greast_neighbor_distance;
-    Linklist(Allocator* allocator)
+    Linklist(Allocator*& allocator)
         : neighbors(allocator), greast_neighbor_distance(std::numeric_limits<float>::max()) {
     }
 };
@@ -76,7 +76,7 @@ public:
              float alpha,
              int64_t turn,
              float sample_rate,
-             FlattenInterfacePtr flatten_interface,
+             const FlattenInterfacePtr& flatten_interface,
              Allocator* allocator,
              SafeThreadPool* thread_pool,
              bool pruning = true)
@@ -149,7 +149,7 @@ private:
     float sample_rate_{0.3};
     Allocator* allocator_;
 
-    FlattenInterfacePtr flatten_interface_;
+    const FlattenInterfacePtr& flatten_interface_;
 };
 
 }  // namespace vsag
