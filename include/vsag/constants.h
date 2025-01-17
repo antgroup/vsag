@@ -61,6 +61,12 @@ extern const char* const DISKANN_PARAMETER_USE_REFERENCE;
 extern const char* const DISKANN_PARAMETER_USE_OPQ;
 extern const char* const DISKANN_PARAMETER_USE_ASYNC_IO;
 extern const char* const DISKANN_PARAMETER_USE_BSA;
+extern const char* const DISKANN_PARAMETER_GRAPH_TYPE;
+extern const char* const DISKANN_PARAMETER_ALPHA;
+extern const char* const DISKANN_PARAMETER_GRAPH_ITER_TURN;
+extern const char* const DISKANN_PARAMETER_NEIGHBOR_SAMPLE_RATE;
+extern const char* const DISKANN_GRAPH_TYPE_VAMANA;
+extern const char* const DISKANN_GRAPH_TYPE_ODESCENT;
 
 extern const char* const DISKANN_PARAMETER_BEAM_SEARCH;
 extern const char* const DISKANN_PARAMETER_IO_LIMIT;

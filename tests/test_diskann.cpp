@@ -64,6 +64,50 @@ TEST_CASE_METHOD(fixtures::DiskANNTestIndex, "diskann build test", "[ft][index][
     }
 }
 
+TEST_CASE_METHOD(fixtures::DiskANNTestIndex, "diskann build and search", "[ft][index][diskann]") {
+    vsag::Options::Instance().logger()->SetLevel(vsag::Logger::Level::kDEBUG);
+    auto dims = fixtures::get_common_used_dims(1);
+    auto metric_type = GENERATE("l2", "ip");
+    auto graph_type = GENERATE("vamana", "odescent");
+    const std::string name = "diskann";
+
+    constexpr auto build_parameter_json = R"(
+        {{
+            "dtype": "float32",
+            "metric_type": "{}",
+            "dim": {},
+            "diskann": {{
+                "max_degree": 16,
+                "ef_construction": 200,
+                "graph_type": "{}",
+                "graph_iter_turn": 30,
+                "neighbor_sample_rate": 0.3,
+                "alpha": 1.2,
+                "pq_dims": 32,
+                "pq_sample_rate": 1
+            }}
+        }}
+    )";
+    constexpr auto search_param = R"(
+        {
+            "diskann": {
+                "ef_search": 200,
+                "io_limit": 200,
+                "beam_search": 4,
+                "use_reorder": true
+            }
+        }
+    )";
+    auto count = 1000;
+    for (auto dim : dims) {
+        auto param = fmt::format(build_parameter_json, metric_type, dim, graph_type);
+        auto index = TestFactory(name, param, true);
+        auto dataset = pool.GetDatasetAndCreate(dim, count, metric_type);
+        TestBuildIndex(index, dataset, true);
+        TestKnnSearch(index, dataset, search_param, 0.99, true);
+    }
+}
+
 TEST_CASE("DiskAnn Float Recall", "[ft][diskann]") {
     int dim = 128;            // Dimension of the elements
     int max_elements = 1000;  // Maximum number of elements, should be known beforehand

@@ -44,6 +44,12 @@ public:
     bool use_bsa = false;
     bool use_async_io = false;
 
+    // use new construction method
+    std::string graph_type = "vamana";
+    float alpha = 1.2;
+    int64_t turn = 40;
+    float sample_rate = 0.3;
+
 private:
     DiskannParameters() = default;
 };

@@ -99,7 +99,8 @@ public:
           const std::string& build_parameters) {
         spdlog::debug("index_name: " + index_name);
         spdlog::debug("build_parameters: " + build_parameters);
-        auto index = Factory::CreateIndex(index_name, build_parameters).value();
+        Engine e;
+        auto index = e.CreateIndex(index_name, build_parameters).value();
 
         spdlog::debug("dataset_path: " + dataset_path);
         auto eval_dataset = EvalDataset::Load(dataset_path);
