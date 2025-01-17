@@ -114,14 +114,26 @@ DiskannParameters::FromJson(JsonType& diskann_param_obj, IndexCommonParam index_
         // set obj.alpha
         if (diskann_param_obj.contains(DISKANN_PARAMETER_ALPHA)) {
             obj.alpha = diskann_param_obj[DISKANN_PARAMETER_ALPHA];
+            CHECK_ARGUMENT(
+                (obj.alpha >= 1.0 && obj.alpha <= 2.0),
+                fmt::format(
+                    "{} must in range[1.0, 2.0], now is {}", DISKANN_PARAMETER_ALPHA, obj.alpha));
         }
         // set obj.turn
         if (diskann_param_obj.contains(DISKANN_PARAMETER_GRAPH_ITER_TURN)) {
             obj.turn = diskann_param_obj[DISKANN_PARAMETER_GRAPH_ITER_TURN];
+            CHECK_ARGUMENT((obj.turn > 0),
+                           fmt::format("{} must be greater than 0, now is {}",
+                                       DISKANN_PARAMETER_GRAPH_ITER_TURN,
+                                       obj.turn));
         }
         // set obj.sample_rate
         if (diskann_param_obj.contains(DISKANN_PARAMETER_NEIGHBOR_SAMPLE_RATE)) {
             obj.sample_rate = diskann_param_obj[DISKANN_PARAMETER_NEIGHBOR_SAMPLE_RATE];
+            CHECK_ARGUMENT((obj.sample_rate > 0.05 && obj.sample_rate < 0.5),
+                           fmt::format("{} must in range[0.05, 0.5], now is {}",
+                                       DISKANN_PARAMETER_NEIGHBOR_SAMPLE_RATE,
+                                       obj.sample_rate));
         }
     } else {
         throw std::invalid_argument(fmt::format("parameters[{}] must in [{}, {}], now is {}",
