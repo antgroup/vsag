@@ -836,12 +836,12 @@ TEST_CASE("check correct build parameters", "[ft][index]") {
 TEST_CASE("check incorrect build parameters", "[ft][index]") {
     vsag::Options::Instance().logger()->SetLevel(vsag::Logger::Level::kDEBUG);
 
-    // dtype is missing
     auto json_string = R"(
     {
+        "dtype": "float32",
         "metric_type": "l2",
         "dim": 512,
-        "hnsw": {
+        "hhhhhhhh": {
             "max_degree": 16,
             "ef_construction": 100
         },
