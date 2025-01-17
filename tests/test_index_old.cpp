@@ -1066,7 +1066,7 @@ TEST_CASE("int8 + freshhnsw + feedback + update", "[ft][index][hnsw]") {
         "dtype": "int8",
         "metric_type": "{}",
         "dim": {},
-        "hnsw": {{
+        "fresh_hnsw": {{
             "max_degree": 16,
             "ef_construction": 100,
             "use_conjugate_graph": true
@@ -1122,7 +1122,7 @@ TEST_CASE("int8 + freshhnsw + feedback + update", "[ft][index][hnsw]") {
         use_conjugate_graph_search = (round != 0);
         constexpr auto search_parameters_json = R"(
         {{
-            "hnsw": {{
+            "fresh_hnsw": {{
                 "ef_search": 10,
                 "use_conjugate_graph_search": {}
             }}

@@ -87,19 +87,26 @@ HnswSearchParameters::FromJson(const std::string& json_string) {
     HnswSearchParameters obj;
 
     // set obj.ef_search
-    CHECK_ARGUMENT(params.contains(INDEX_HNSW),
-                   fmt::format("parameters must contains {}", INDEX_HNSW));
+    std::string index_name;
+    if (params.contains(INDEX_HNSW)) {
+        index_name = INDEX_HNSW;
+    } else if (params.contains(INDEX_FRESH_HNSW)) {
+        index_name = INDEX_FRESH_HNSW;
+    } else {
+        throw std::invalid_argument(
+            fmt::format("parameters must contains {}/{}", INDEX_HNSW, INDEX_FRESH_HNSW));
+    }
 
     CHECK_ARGUMENT(
-        params[INDEX_HNSW].contains(HNSW_PARAMETER_EF_RUNTIME),
-        fmt::format("parameters[{}] must contains {}", INDEX_HNSW, HNSW_PARAMETER_EF_RUNTIME));
-    obj.ef_search = params[INDEX_HNSW][HNSW_PARAMETER_EF_RUNTIME];
+        params[index_name].contains(HNSW_PARAMETER_EF_RUNTIME),
+        fmt::format("parameters[{}] must contains {}", index_name, HNSW_PARAMETER_EF_RUNTIME));
+    obj.ef_search = params[index_name][HNSW_PARAMETER_EF_RUNTIME];
     CHECK_ARGUMENT((1 <= obj.ef_search) and (obj.ef_search <= 1000),
                    fmt::format("ef_search({}) must in range[1, 1000]", obj.ef_search));
 
     // set obj.use_conjugate_graph search
-    if (params[INDEX_HNSW].contains(PARAMETER_USE_CONJUGATE_GRAPH_SEARCH)) {
-        obj.use_conjugate_graph_search = params[INDEX_HNSW][PARAMETER_USE_CONJUGATE_GRAPH_SEARCH];
+    if (params[index_name].contains(PARAMETER_USE_CONJUGATE_GRAPH_SEARCH)) {
+        obj.use_conjugate_graph_search = params[index_name][PARAMETER_USE_CONJUGATE_GRAPH_SEARCH];
     } else {
         obj.use_conjugate_graph_search = true;
     }
