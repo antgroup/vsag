@@ -21,9 +21,10 @@
 #include <unordered_set>
 
 #include "H5Cpp.h"
+#include "nlohmann/json.hpp"
 #include "vsag/constants.h"
 
-namespace vsag {
+namespace vsag::eval {
 
 class EvalDataset;
 using EvalDatasetPtr = std::shared_ptr<EvalDataset>;
@@ -95,6 +96,25 @@ public:
         return test_labels_[query_id] == train_labels_[base_id];
     }
 
+    std::string
+    GetFilePath() {
+        return this->file_path_;
+    }
+
+    using JsonType = nlohmann::json;
+    JsonType
+    GetInfo() {
+        JsonType result;
+        JsonType temp;
+        temp["filepath"] = this->GetFilePath();
+        temp["dim"] = this->GetDim();
+        temp["base_count"] = this->GetNumberOfBase();
+        temp["query_count"] = this->GetNumberOfQuery();
+        temp["data_type"] = this->GetTrainDataType();
+        result["dataset_info"] = temp;
+        return result;
+    };
+
 private:
     using shape_t = std::pair<int64_t, int64_t>;
     static std::unordered_set<std::string>
@@ -144,5 +164,6 @@ private:
     size_t test_data_size_{};
     std::string train_data_type_;
     std::string test_data_type_;
+    std::string file_path_;
 };
-}  // namespace vsag
+}  // namespace vsag::eval

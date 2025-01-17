@@ -15,7 +15,7 @@
 
 #include "eval_dataset.h"
 
-namespace vsag {
+namespace vsag::eval {
 EvalDatasetPtr
 EvalDataset::Load(const std::string& filename) {
     H5::H5File file(filename, H5F_ACC_RDONLY);
@@ -41,6 +41,7 @@ EvalDataset::Load(const std::string& filename) {
     assert(train_shape.second == test_shape.second);
 
     auto obj = std::make_shared<EvalDataset>();
+    obj->file_path_ = filename;
     obj->train_shape_ = train_shape;
     obj->test_shape_ = test_shape;
     obj->neighbors_shape_ = neighbors_shape;
@@ -126,4 +127,4 @@ EvalDataset::Load(const std::string& filename) {
 
     return obj;
 }
-}  // namespace vsag
+}  // namespace vsag::eval
