@@ -13,8 +13,14 @@ target_link_libraries(104_index_fresh_hnsw vsag)
 add_executable (105_index_brute_force 105_index_brute_force.cpp)
 target_link_libraries (105_index_brute_force vsag_static)
 
+add_executable (301_feature_filter 301_feature_filter.cpp)
+target_link_libraries (301_feature_filter vsag_static)
+
 add_executable(302_feature_range_search 302_feature_range_search.cpp)
 target_link_libraries(302_feature_range_search vsag)
 
 add_executable(304_feature_enhance_graph 304_feature_enhance_graph.cpp)
 target_link_libraries(304_feature_enhance_graph vsag)
+
+add_executable (305_feature_remove 305_feature_remove.cpp)
+target_link_libraries (305_feature_remove vsag_static)
