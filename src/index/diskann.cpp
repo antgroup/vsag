@@ -27,6 +27,10 @@
 #include <stdexcept>
 #include <utility>
 
+#include "data_cell/flatten_datacell.h"
+#include "impl/odescent_graph_builder.h"
+#include "io/memory_io_parameter.h"
+#include "quantization/fp32_quantizer_parameter.h"
 #include "vsag/constants.h"
 #include "vsag/errors.h"
 #include "vsag/expected.hpp"
@@ -145,7 +149,8 @@ DiskANN::DiskANN(DiskannParameters& diskann_params, const IndexCommonParam& inde
       use_opq_(diskann_params.use_opq),
       use_bsa_(diskann_params.use_bsa),
       use_async_io_(diskann_params.use_async_io),
-      index_common_param_(index_common_param) {
+      diskann_params_(diskann_params),
+      common_param_(index_common_param) {
     if (not use_async_io_) {
         pool_ = index_common_param_.thread_pool_;
     }
@@ -214,7 +219,31 @@ DiskANN::build(const DatasetPtr& base) {
                        fmt::format("base.num_elements({}) must be greater than 1", data_num));
 
         std::vector<size_t> failed_locs;
-        {
+        if (diskann_params_.graph_type == DISKANN_GRAPH_TYPE_ODESCENT) {
+            SlowTaskTimer t("odescent build full (graph)");
+            FlattenDataCellParamPtr flatten_param =
+                std::make_shared<vsag::FlattenDataCellParameter>();
+            flatten_param->quantizer_parameter_ = std::make_shared<FP32QuantizerParameter>();
+            flatten_param->io_parameter_ = std::make_shared<MemoryIOParameter>();
+            vsag::FlattenInterfacePtr flatten_interface_ptr =
+                vsag::FlattenInterface::MakeInstance(flatten_param, this->common_param_);
+            flatten_interface_ptr->Train(vectors, data_num);
+            flatten_interface_ptr->BatchInsertVector(vectors, data_num);
+            vsag::ODescent graph(2 * R_,
+                                 diskann_params_.alpha,
+                                 diskann_params_.turn,
+                                 diskann_params_.sample_rate,
+                                 flatten_interface_ptr,
+                                 common_param_.allocator_.get(),
+                                 common_param_.thread_pool_.get());
+            graph.Build();
+            graph.SaveGraph(graph_stream_);
+            int data_num_int32 = data_num;
+            int data_dim_int32 = data_dim;
+            tag_stream_.write((char*)&data_num_int32, sizeof(data_num_int32));
+            tag_stream_.write((char*)&data_dim_int32, sizeof(data_dim_int32));
+            tag_stream_.write((char*)ids, data_num * sizeof(ids));
+        } else if (diskann_params_.graph_type == DISKANN_GRAPH_TYPE_VAMANA) {
             SlowTaskTimer t("diskann build full (graph)");
             // build graph
             build_index_ = std::make_shared<diskann::Index<float, int64_t, int64_t>>(

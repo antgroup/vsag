@@ -58,16 +58,6 @@ DiskannParameters::FromJson(JsonType& diskann_param_obj, IndexCommonParam index_
     CHECK_ARGUMENT((5 <= obj.max_degree) and (obj.max_degree <= 128),
                    fmt::format("max_degree({}) must in range[5, 128]", obj.max_degree));
 
-    // set obj.ef_construction
-    CHECK_ARGUMENT(
-        diskann_param_obj.contains(DISKANN_PARAMETER_L),
-        fmt::format("parameters[{}] must contains {}", INDEX_DISKANN, DISKANN_PARAMETER_L));
-    obj.ef_construction = diskann_param_obj[DISKANN_PARAMETER_L];
-    CHECK_ARGUMENT((obj.max_degree <= obj.ef_construction) and (obj.ef_construction <= 1000),
-                   fmt::format("ef_construction({}) must in range[$max_degree({}), 64]",
-                               obj.ef_construction,
-                               obj.max_degree));
-
     // set obj.pq_dims
     CHECK_ARGUMENT(
         diskann_param_obj.contains(DISKANN_PARAMETER_DISK_PQ_DIMS),
@@ -105,6 +95,53 @@ DiskannParameters::FromJson(JsonType& diskann_param_obj, IndexCommonParam index_
         obj.use_async_io = diskann_param_obj[DISKANN_PARAMETER_USE_ASYNC_IO];
     }
 
+    // set obj.graph_type
+    if (diskann_param_obj.contains(DISKANN_PARAMETER_GRAPH_TYPE)) {
+        obj.graph_type = diskann_param_obj[DISKANN_PARAMETER_GRAPH_TYPE];
+    }
+
+    if (obj.graph_type == DISKANN_GRAPH_TYPE_VAMANA) {
+        // set obj.ef_construction
+        CHECK_ARGUMENT(
+            diskann_param_obj.contains(DISKANN_PARAMETER_L),
+            fmt::format("parameters[{}] must contains {}", INDEX_DISKANN, DISKANN_PARAMETER_L));
+        obj.ef_construction = diskann_param_obj[DISKANN_PARAMETER_L];
+        CHECK_ARGUMENT((obj.max_degree <= obj.ef_construction) and (obj.ef_construction <= 1000),
+                       fmt::format("ef_construction({}) must in range[$max_degree({}), 64]",
+                                   obj.ef_construction,
+                                   obj.max_degree));
+    } else if (obj.graph_type == DISKANN_GRAPH_TYPE_ODESCENT) {
+        // set obj.alpha
+        if (diskann_param_obj.contains(DISKANN_PARAMETER_ALPHA)) {
+            obj.alpha = diskann_param_obj[DISKANN_PARAMETER_ALPHA];
+            CHECK_ARGUMENT(
+                (obj.alpha >= 1.0 && obj.alpha <= 2.0),
+                fmt::format(
+                    "{} must in range[1.0, 2.0], now is {}", DISKANN_PARAMETER_ALPHA, obj.alpha));
+        }
+        // set obj.turn
+        if (diskann_param_obj.contains(DISKANN_PARAMETER_GRAPH_ITER_TURN)) {
+            obj.turn = diskann_param_obj[DISKANN_PARAMETER_GRAPH_ITER_TURN];
+            CHECK_ARGUMENT((obj.turn > 0),
+                           fmt::format("{} must be greater than 0, now is {}",
+                                       DISKANN_PARAMETER_GRAPH_ITER_TURN,
+                                       obj.turn));
+        }
+        // set obj.sample_rate
+        if (diskann_param_obj.contains(DISKANN_PARAMETER_NEIGHBOR_SAMPLE_RATE)) {
+            obj.sample_rate = diskann_param_obj[DISKANN_PARAMETER_NEIGHBOR_SAMPLE_RATE];
+            CHECK_ARGUMENT((obj.sample_rate > 0.05 && obj.sample_rate < 0.5),
+                           fmt::format("{} must in range[0.05, 0.5], now is {}",
+                                       DISKANN_PARAMETER_NEIGHBOR_SAMPLE_RATE,
+                                       obj.sample_rate));
+        }
+    } else {
+        throw std::invalid_argument(fmt::format("parameters[{}] must in [{}, {}], now is {}",
+                                                DISKANN_PARAMETER_GRAPH_TYPE,
+                                                DISKANN_GRAPH_TYPE_VAMANA,
+                                                DISKANN_GRAPH_TYPE_ODESCENT,
+                                                obj.graph_type));
+    }
     return obj;
 }
 

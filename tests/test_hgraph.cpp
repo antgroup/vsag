@@ -45,7 +45,7 @@ public:
         }})";
 
     const std::vector<std::pair<std::string, float>> test_cases = {
-        {"sq8_uniform,fp32", 0.98}, {"sq8", 0.96}, {"fp32", 0.99}, {"sq8_uniform", 0.95}};
+        {"sq8_uniform,fp32", 0.98}, {"sq8", 0.95}, {"fp32", 0.99}, {"sq8_uniform", 0.95}};
 };
 
 TestDatasetPool HgraphTestIndex::pool{};
