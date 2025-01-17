@@ -12,3 +12,110 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
+#include <vsag/vsag.h>
+
+#include <iostream>
+
+int
+main(int argc, char** argv) {
+    /******************* Prepare Base Dataset *****************/
+    int64_t num_vectors = 1000;
+    int64_t dim = 128;
+    auto ids = new int64_t[num_vectors];
+    auto vectors = new float[dim * num_vectors];
+
+    std::mt19937 rng;
+    rng.seed(47);
+    std::uniform_real_distribution<> distrib_real;
+    for (int64_t i = 0; i < num_vectors; ++i) {
+        ids[i] = i;
+    }
+    for (int64_t i = 0; i < dim * num_vectors; ++i) {
+        vectors[i] = distrib_real(rng);
+    }
+    auto base = vsag::Dataset::Make();
+    // Transfer the ownership of the data (ids, vectors) to the base.
+    base->NumElements(num_vectors)->Dim(dim)->Ids(ids)->Float32Vectors(vectors);
+
+    /******************* Create DiskANN Index *****************/
+    // diskann_build_paramesters is the configuration for building a DiskANN index.
+    // The "dtype" specifies the data type, "metric_type" indicates the distance metric,
+    // and "dim" represents the dimensionality of the feature vectors.
+    // The "diskann" section contains parameters specific to DiskANN:
+    // - "max_degree": Maximum degree of the graph
+    // - "ef_construction": Construction phase efficiency factor
+    // - "pq_sample_rate": PQ sampling rate
+    // - "pq_dims": PQ dimensionality
+    // - "use_pq_search": Indicates whether to cache the graph in memory and use PQ vectors for retrieval (optional)
+    // - "use_async_io": Specifies whether to use asynchronous I/O (optional)
+    // - "use_bsa": Determines whether to use the BSA method for lossless filtering during the reordering phase (optional)
+    // Other parameters are mandatory.
+    auto diskann_build_paramesters = R"(
+    {
+        "dtype": "float32",
+        "metric_type": "l2",
+        "dim": 128,
+        "diskann": {
+            "max_degree": 16,
+            "ef_construction": 200,
+            "pq_sample_rate": 0.5,
+            "pq_dims": 9,
+            "use_pq_search": true,
+            "use_async_io": true,
+            "use_bsa": true
+        }
+    }
+    )";
+    auto index = vsag::Factory::CreateIndex("diskann", diskann_build_paramesters).value();
+
+    /******************* Build DiskANN Index *****************/
+    if (auto build_result = index->Build(base); build_result.has_value()) {
+        std::cout << "After Build(), Index DiskANN contains: " << index->GetNumElements()
+                  << std::endl;
+    } else {
+        std::cerr << "Failed to build index: " << build_result.error().message << std::endl;
+        exit(-1);
+    }
+
+    /******************* KnnSearch For DiskANN Index *****************/
+    auto query_vector = new float[dim];
+    for (int64_t i = 0; i < dim; ++i) {
+        query_vector[i] = distrib_real(rng);
+    }
+
+    // diskann_search_parameters is the configuration for searching in a DiskANN index.
+    // The "diskann" section contains parameters specific to the search operation:
+    // - "ef_search": The search efficiency factor, which influences accuracy and speed.
+    // - "beam_search": The number of beams to use during the search process, balancing exploration and exploitation.
+    // - "io_limit": The maximum number of I/O operations allowed during the search.
+    // - "use_reorder": Indicates whether to perform reordering of results for better accuracy (optional).
+
+    auto diskann_search_parameters = R"(
+    {
+        "diskann": {
+            "ef_search": 100,
+            "beam_search": 4,
+            "io_limit": 50,
+            "use_reorder": true
+        }
+    }
+    )";
+    int64_t topk = 10;
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)->Dim(dim)->Float32Vectors(query_vector)->Owner(true);
+    auto knn_result = index->KnnSearch(query, topk, diskann_search_parameters);
+
+    /******************* Print Search Result *****************/
+    if (knn_result.has_value()) {
+        auto result = knn_result.value();
+        std::cout << "results: " << std::endl;
+        for (int64_t i = 0; i < result->GetDim(); ++i) {
+            std::cout << result->GetIds()[i] << ": " << result->GetDistances()[i] << std::endl;
+        }
+    } else {
+        std::cerr << "Search Error: " << knn_result.error().message << std::endl;
+    }
+
+    return 0;
+}
