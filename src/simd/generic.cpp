@@ -307,4 +307,7 @@ DivScalar(const float* from, float* to, uint64_t dim, float scalar) {
     }
 }
 
+void
+Prefetch(const void* data){};
+
 }  // namespace vsag::generic
