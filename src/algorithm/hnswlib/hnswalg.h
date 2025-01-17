@@ -313,6 +313,10 @@ public:
 
     const float*
     getDataByLabel(LabelType label) const override;
+
+    void
+    copyDataByLabel(LabelType label, void* data_point) override;
+
     /*
     * Marks an element with the given label deleted, does NOT really change the current graph.
     */

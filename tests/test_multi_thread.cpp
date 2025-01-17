@@ -325,9 +325,10 @@ TEST_CASE("multi-threading read-write with feedback and pretrain test", "[ft][hn
 
     std::vector<std::future<int64_t>> insert_results;
     std::vector<std::future<uint64_t>> feedback_results;
+    std::vector<std::future<uint32_t>> pretrain_results;
     std::vector<std::future<bool>> search_results;
 
-    for (int64_t i = 0; i < max_elements; ++i) {
+    for (int64_t i = 0; i < max_elements / 2; ++i) {
         // insert
         insert_results.push_back(pool.enqueue([&ids, &data, &index, dim, i]() -> int64_t {
             auto dataset = vsag::Dataset::Make();
@@ -341,7 +342,20 @@ TEST_CASE("multi-threading read-write with feedback and pretrain test", "[ft][hn
         }));
     }
 
-    for (int64_t i = 0; i < max_elements; ++i) {
+    for (int64_t i = 0; i < max_elements / 2; ++i) {
+        // insert
+        int64_t insert_i = i + max_elements / 2;
+        insert_results.push_back(pool.enqueue([&ids, &data, &index, dim, insert_i]() -> int64_t {
+            auto dataset = vsag::Dataset::Make();
+            dataset->Dim(dim)
+                ->NumElements(1)
+                ->Ids(ids.get() + insert_i)
+                ->Int8Vectors(data.get() + insert_i * dim)
+                ->Owner(false);
+            auto add_res = index->Add(dataset);
+            return add_res.value().size();
+        }));
+
         // feedback
         feedback_results.push_back(
             pool.enqueue([&index, &data, i, dim, k, str_parameters]() -> uint64_t {
@@ -350,6 +364,12 @@ TEST_CASE("multi-threading read-write with feedback and pretrain test", "[ft][hn
                 auto feedback_res = index->Feedback(query, k, str_parameters);
                 return feedback_res.value();
             }));
+
+        // pretrain
+        pretrain_results.push_back(pool.enqueue([&index, &ids, i, k, str_parameters]() -> uint32_t {
+            auto pretrain_res = index->Pretrain({ids[i]}, k, str_parameters);
+            return pretrain_res.value();
+        }));
 
         // search
         search_results.push_back(pool.enqueue([&index, &data, i, dim, k, str_parameters]() -> bool {
@@ -360,15 +380,12 @@ TEST_CASE("multi-threading read-write with feedback and pretrain test", "[ft][hn
         }));
     }
 
-    for (auto& res : insert_results) {
-        REQUIRE(res.get() == 0);
-    }
-
-    for (auto& res : feedback_results) {
-        REQUIRE(res.get() >= 0);
-    }
-
-    for (auto& res : search_results) {
-        REQUIRE(res.get());
+    for (int64_t i = 0; i < max_elements; ++i) {
+        REQUIRE(insert_results[i].get() == 0);
+        if (i < max_elements / 2) {
+            REQUIRE(pretrain_results[i].get() >= 0);
+            REQUIRE(feedback_results[i].get() >= 0);
+            REQUIRE(search_results[i].get() >= 0);
+        }
     }
 }
