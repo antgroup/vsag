@@ -617,9 +617,17 @@ HNSW::update_id(int64_t old_id, int64_t new_id) {
     }
 
     try {
+        if (old_id == new_id) {
+            return true;
+        }
+
         // note that the validation of old_id is handled within updateLabel.
         std::reinterpret_pointer_cast<hnswlib::HierarchicalNSW>(alg_hnsw_)->updateLabel(old_id,
                                                                                         new_id);
+        if (use_conjugate_graph_) {
+            std::unique_lock lock(rw_mutex_);
+            conjugate_graph_->UpdateId(old_id, new_id);
+        }
     } catch (const std::runtime_error& e) {
 #ifndef ENABLE_TESTS
         logger::warn(
