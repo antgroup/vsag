@@ -430,4 +430,12 @@ Normalize(const float* from, float* to, uint64_t dim) {
     sse::DivScalar(from, to, dim, norm);
     return norm;
 }
+
+void
+Prefetch(const void* data) {
+#if defined(ENABLE_SSE)
+    _mm_prefetch(data, _MM_HINT_T0);
+#endif
+};
+
 }  // namespace vsag::sse

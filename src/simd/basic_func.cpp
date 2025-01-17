@@ -156,4 +156,15 @@ GetPQDistanceFloat256() {
     return generic::PQDistanceFloat256;
 }
 PQDistanceFunc PQDistanceFloat256 = GetPQDistanceFloat256();
+
+static PrefetchFunc
+GetPrefetch() {
+    if (SimdStatus::SupportSSE()) {
+#if defined(ENABLE_SSE)
+        return sse::Prefetch;
+#endif
+    }
+    return generic::Prefetch;
+}
+PrefetchFunc Prefetch = GetPrefetch();
 }  // namespace vsag
