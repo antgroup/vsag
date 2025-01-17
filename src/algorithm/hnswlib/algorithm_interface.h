@@ -69,6 +69,9 @@ public:
     virtual const float*
     getDataByLabel(LabelType label) const = 0;
 
+    virtual void
+    copyDataByLabel(LabelType label, void* data_point) = 0;
+
     virtual std::priority_queue<std::pair<float, LabelType>>
     bruteForce(const void* data_point, int64_t k) = 0;
 
