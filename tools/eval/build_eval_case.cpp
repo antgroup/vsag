@@ -89,6 +89,7 @@ BuildEvalCase::process_result() {
     result["tps"] = double(this->dataset_ptr_->GetNumberOfBase()) / double(result["duration(s)"]);
     EvalCase::MergeJsonType(this->basic_info_, result);
     result["index_info"] = JsonType::parse(config_.build_param);
+    result["action"] = "build";
     return result;
 }
 

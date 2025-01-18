@@ -16,6 +16,7 @@
 #pragma once
 
 #include "argparse/argparse.hpp"
+#include "yaml-cpp/yaml.h"
 
 namespace vsag::eval {
 class EvalConfig {
@@ -23,15 +24,18 @@ public:
     static EvalConfig
     Load(argparse::ArgumentParser& parser);
 
+    static EvalConfig
+    Load(YAML::Node& yaml_node);
+
 public:
     std::string dataset_path;
     std::string action_type;
     std::string index_name;
     std::string build_param;
-    std::string index_path;
+    std::string index_path{"/tmp/performance/index"};
 
     std::string search_param;
-    std::string search_mode;
+    std::string search_mode{"knn"};
     int top_k{10};
     float radius{0.5f};
 
@@ -43,7 +47,6 @@ public:
     bool enable_latency{true};
     bool enable_percent_latency{true};
 
-private:
     EvalConfig() = default;
 };
 

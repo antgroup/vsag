@@ -16,6 +16,15 @@
 #include "eval_config.h"
 
 namespace vsag::eval {
+
+template <class T = std::string>
+void
+check_and_get_value(const YAML::Node& node, const std::string& key, T& value) {
+    if (node[key].IsDefined()) {
+        value = node[key].as<T>();
+    }
+};
+
 EvalConfig
 EvalConfig::Load(argparse::ArgumentParser& parser) {
     EvalConfig config;
@@ -53,6 +62,64 @@ EvalConfig::Load(argparse::ArgumentParser& parser) {
         config.enable_percent_latency = false;
     }
 
+    return config;
+}
+
+EvalConfig
+EvalConfig::Load(YAML::Node& yaml_node) {
+    EvalConfig config;
+    config.dataset_path = yaml_node["datapath"].as<std::string>();
+    config.action_type = yaml_node["type"].as<std::string>();
+    config.build_param = yaml_node["create_params"].as<std::string>();
+    config.index_name = yaml_node["index_name"].as<std::string>();
+    check_and_get_value<>(yaml_node, "search_mode", config.search_mode);
+    check_and_get_value<>(yaml_node, "search_params", config.search_param);
+
+    check_and_get_value<>(yaml_node, "index_path", config.index_path);
+    check_and_get_value<int>(yaml_node, "topk", config.top_k);
+    check_and_get_value<float>(yaml_node, "range", config.radius);
+
+    bool disable = false;
+    check_and_get_value<bool>(yaml_node, "disable_recall", disable);
+    if (disable == true) {
+        config.enable_recall = false;
+        disable = false;
+    }
+    check_and_get_value<bool>(yaml_node, "disable_recall", disable);
+    if (disable == true) {
+        config.enable_recall = false;
+        disable = false;
+    }
+    check_and_get_value<bool>(yaml_node, "disable_percent_recall", disable);
+    if (disable == true) {
+        config.enable_percent_recall = false;
+        disable = false;
+    }
+    check_and_get_value<bool>(yaml_node, "disable_qps", disable);
+    if (disable == true) {
+        config.enable_qps = false;
+        disable = false;
+    }
+    check_and_get_value<bool>(yaml_node, "disable_tps", disable);
+    if (disable == true) {
+        config.enable_tps = false;
+        disable = false;
+    }
+    check_and_get_value<bool>(yaml_node, "disable_memory", disable);
+    if (disable == true) {
+        config.enable_memory = false;
+        disable = false;
+    }
+    check_and_get_value<bool>(yaml_node, "disable_latency", disable);
+    if (disable == true) {
+        config.enable_latency = false;
+        disable = false;
+    }
+    check_and_get_value<bool>(yaml_node, "disable_percent_latency", disable);
+    if (disable == true) {
+        config.enable_percent_latency = false;
+        disable = false;
+    }
     return config;
 }
 }  // namespace vsag::eval

@@ -120,9 +120,11 @@ SearchEvalCase::do_knn_search() {
     uint64_t topk = config_.top_k;
     auto query_count = this->dataset_ptr_->GetNumberOfQuery();
     this->logger_->Debug("query count is " + std::to_string(query_count));
+    auto min_query = std::max(query_count, 10000L);
     for (auto& monitor : this->monitors_) {
         monitor->Start();
-        for (int64_t i = 0; i < query_count; ++i) {
+        for (int64_t id = 0; id < min_query; ++id) {
+            auto i = id % query_count;
             auto query = vsag::Dataset::Make();
             query->NumElements(1)->Dim(this->dataset_ptr_->GetDim())->Owner(false);
             if (this->dataset_ptr_->GetTestDataType() == vsag::DATATYPE_FLOAT32) {
@@ -160,6 +162,11 @@ SearchEvalCase::process_result() {
         const auto& one_result = monitor->GetResult();
         EvalCase::MergeJsonType(one_result, result);
     }
+    result["action"] = config_.action_type;
+    result["search_mode"] = config_.search_mode;
+    result["index_info"] = JsonType::parse(config_.build_param);
+    result["search_param"] = config_.search_param;
+    EvalCase::MergeJsonType(this->basic_info_, result);
     return result;
 }
 
