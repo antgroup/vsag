@@ -102,9 +102,6 @@ public:
     void
     SaveGraph(GraphInterfacePtr& graph_storage);
 
-    Vector<Vector<uint32_t>>
-    GetGraph();
-
 private:
     inline float
     get_distance(uint32_t loc1, uint32_t loc2) {
