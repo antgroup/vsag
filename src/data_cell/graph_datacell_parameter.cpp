@@ -29,7 +29,7 @@ GraphDataCellParameter::FromJson(const JsonType& json) {
         this->max_degree_ = json[GRAPH_PARAM_MAX_DEGREE];
     }
     if (json.contains(GRAPH_PARAM_INIT_MAX_CAPACITY)) {
-        this->max_degree_ = json[GRAPH_PARAM_INIT_MAX_CAPACITY];
+        this->init_max_capacity_ = json[GRAPH_PARAM_INIT_MAX_CAPACITY];
     }
 }
 JsonType
