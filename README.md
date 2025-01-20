@@ -2,9 +2,11 @@
   <h1><img alt="vsag-pages" src="docs/banner.svg" width=500/></h1>
 
 ![CircleCI](https://img.shields.io/circleci/build/github/antgroup/vsag?logo=circleci&label=CircleCI)
+[![codecov](https://codecov.io/gh/antgroup/vsag/graph/badge.svg?token=KDT3SpPMYS)](https://codecov.io/gh/antgroup/vsag)
 ![GitHub License](https://img.shields.io/github/license/antgroup/vsag)
-![GitHub Contributors](https://img.shields.io/github/contributors/antgroup/vsag)
 ![GitHub Release](https://img.shields.io/github/v/release/antgroup/vsag?label=last%20release)
+![GitHub Contributors](https://img.shields.io/github/contributors/antgroup/vsag)
+[![arXiv](https://badgen.net/static/arXiv/2404.16322/red)](http://arxiv.org/abs/2404.16322)
 
 ![PyPI - Version](https://img.shields.io/pypi/v/pyvsag)
 ![PyPI - Python Version](https://img.shields.io/pypi/pyversions/pyvsag)
