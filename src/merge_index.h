@@ -25,10 +25,4 @@ extract_data_and_graph(const std::vector<std::shared_ptr<Index>>& indexes,
                        const DatasetPtr& dataset,
                        Vector<Vector<uint32_t>>& graph);
 
-void
-set_data_and_graph(const std::string& index_name,
-                   std::shared_ptr<Index>& index,
-                   const DatasetPtr& dataset,
-                   const Vector<Vector<uint32_t>>& graph);
-
 }  // namespace vsag

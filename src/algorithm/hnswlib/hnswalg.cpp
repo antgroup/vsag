@@ -1492,40 +1492,6 @@ HierarchicalNSW::searchRange(const void* query_data,
 }
 
 void
-HierarchicalNSW::checkIntegrity() {
-    int connections_checked = 0;
-    vsag::Vector<int> inbound_connections_num(cur_element_count_, 0, allocator_);
-    for (int i = 0; i < cur_element_count_; i++) {
-        for (int l = 0; l <= element_levels_[i]; l++) {
-            auto data_ll_cur = getLinklistAtLevelWithLock(i, l);
-            linklistsizeint* ll_cur = (linklistsizeint*)data_ll_cur.get();
-            int size = getListCount(ll_cur);
-            auto* data = (InnerIdType*)(ll_cur + 1);
-            vsag::UnorderedSet<InnerIdType> s(allocator_);
-            for (int j = 0; j < size; j++) {
-                assert(data[j] > 0);
-                assert(data[j] < cur_element_count_);
-                assert(data[j] != i);
-                inbound_connections_num[data[j]]++;
-                s.insert(data[j]);
-                connections_checked++;
-            }
-            assert(s.size() == size);
-        }
-    }
-    if (cur_element_count_ > 1) {
-        int min1 = inbound_connections_num[0], max1 = inbound_connections_num[0];
-        for (int i = 0; i < cur_element_count_; i++) {
-            assert(inbound_connections_num[i] > 0);
-            min1 = std::min(inbound_connections_num[i], min1);
-            max1 = std::max(inbound_connections_num[i], max1);
-        }
-        std::cout << "Min inbound: " << min1 << ", Max inbound:" << max1 << "\n";
-    }
-    std::cout << "integrity ok, checked " << connections_checked << " connections\n";
-}
-
-void
 HierarchicalNSW::setDataAndGraph(const float* data,
                                  const int64_t* ids,
                                  int64_t data_num,

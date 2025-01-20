@@ -178,6 +178,10 @@ public:
     Deserialize(std::istream& in_stream) override {
         SAFE_CALL(return this->deserialize(in_stream));
     }
+    tl::expected<void, Error>
+    Merge(const std::vector<std::shared_ptr<Index>>& sub_indexes) override {
+        SAFE_CALL(return this->merge(sub_indexes));
+    }
 
 public:
     int64_t
@@ -288,6 +292,9 @@ private:
 
     void
     set_dataset(const DatasetPtr& base, const void* vectors_ptr, uint32_t num_element) const;
+
+    tl::expected<void, Error>
+    merge(const std::vector<std::shared_ptr<Index>>& sub_indexes);
 
     BinarySet
     empty_binaryset() const;
