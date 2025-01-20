@@ -11,4 +11,4 @@ set (EVAL_SRC
         monitor/memory_peak_monitor.cpp
         monitor/duration_monitor.cpp)
 add_library (eval_obj OBJECT ${EVAL_SRC})
-add_dependencies (eval_obj hdf5 spdlog)
+add_dependencies (eval_obj hdf5 spdlog yaml-cpp)
