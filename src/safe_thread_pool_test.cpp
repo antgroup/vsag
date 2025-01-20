@@ -20,20 +20,21 @@
 TEST_CASE("test safe thread pool", "[ut][thread_pool]") {
     auto thread_pool = vsag::SafeThreadPool::FactoryDefaultThreadPool();
     int data = 0;
-    std::vector<std::future<int>> results;
     std::mutex m;
     thread_pool->SetPoolSize(4);
     thread_pool->SetQueueSizeLimit(6);
     int round = 10;
     for (int i = 0; i < round; ++i) {
-        results.emplace_back(thread_pool->GeneralEnqueue(
+        thread_pool->GeneralEnqueue(
             [&data, &m](int i) -> int {
                 std::lock_guard lock(m);
                 vsag::logger::info("current data:{}", data);
                 data++;
                 return i * i;
             },
-            i));
+            i);
+        thread_pool->GeneralEnqueue(
+            []() { throw std::runtime_error("throw a error in thread pool"); });
     }
     thread_pool->WaitUntilEmpty();
     REQUIRE(data == round);
