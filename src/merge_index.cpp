@@ -33,15 +33,4 @@ extract_data_and_graph(const std::vector<std::shared_ptr<Index>>& indexes,
         }
     }
 }
-void
-set_data_and_graph(const std::string& index_name,
-                   std::shared_ptr<Index>& index,
-                   const DatasetPtr& dataset,
-                   const Vector<Vector<uint32_t>>& graph) {
-    if (index_name == INDEX_HNSW) {
-        auto hnsw = std::dynamic_pointer_cast<HNSW>(index);
-        hnsw->SetDataAndGraph(dataset, graph);
-    }
-}
-
 }  // namespace vsag

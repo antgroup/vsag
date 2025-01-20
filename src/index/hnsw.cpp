@@ -23,12 +23,13 @@
 #include <nlohmann/json.hpp>
 #include <stdexcept>
 
-#include "../algorithm/hnswlib/hnswlib.h"
-#include "../common.h"
-#include "../logger.h"
-#include "../safe_allocator.h"
 #include "../utils.h"
-#include "./hnsw_zparameters.h"
+#include "algorithm/hnswlib/hnswlib.h"
+#include "common.h"
+#include "index/hnsw_zparameters.h"
+#include "logger.h"
+#include "merge_index.h"
+#include "safe_allocator.h"
 #include "vsag/binaryset.h"
 #include "vsag/constants.h"
 #include "vsag/errors.h"
@@ -1035,6 +1036,40 @@ HNSW::SetDataAndGraph(const DatasetPtr& dataset, const Vector<Vector<uint32_t>>&
                           dataset->GetDim(),
                           graph);
     return true;
+}
+
+tl::expected<void, Error>
+HNSW::merge(const std::vector<std::shared_ptr<Index>>& sub_indexes) {
+    int64_t total_data_num = this->GetNumElements();
+    for (const auto& sub_index : sub_indexes) {
+        total_data_num += sub_index->GetNumElements();
+    }
+    DatasetPtr dataset = Dataset::Make();
+    auto& allocator = allocator_;
+    dataset->Owner(true, allocator.get());
+    auto vectors = (float*)allocator->Allocate(dim_ * total_data_num * sizeof(float*));
+    if (vectors == nullptr) {
+        LOG_ERROR_AND_RETURNS(ErrorType::NO_ENOUGH_MEMORY,
+                              "fail to allocate vectors in the process of merge index");
+    }
+    dataset->Float32Vectors(vectors);
+    auto ids = (int64_t*)allocator->Allocate(total_data_num * sizeof(int64_t*));
+    if (ids == nullptr) {
+        LOG_ERROR_AND_RETURNS(ErrorType::NO_ENOUGH_MEMORY,
+                              "fail to allocate ids in the process of merge index");
+    }
+    dataset->Ids(ids);
+    dataset->NumElements(0);
+    dataset->Dim(dim_);
+    Vector<Vector<uint32_t>> graph(
+        total_data_num, Vector<uint32_t>(allocator.get()), allocator.get());
+    // extract data and graph
+    ExtractDataAndGraph(dataset, graph);
+    extract_data_and_graph(sub_indexes, dataset, graph);
+    // TODO(inabao): merge graph
+    // set graph
+    SetDataAndGraph(dataset, graph);
+    return {};
 }
 
 }  // namespace vsag

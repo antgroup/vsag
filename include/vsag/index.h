@@ -319,6 +319,23 @@ public:
         throw std::runtime_error("Index doesn't support check feature");
     }
 
+    /**
+     * @brief Merges multiple graph indexes into a single index.
+     *
+     * This function takes a vector of `sub_indexes`, and attempts to merge them into a single
+     * graph index. The result is either a shared pointer to the newly merged `Index` or an `Error`
+     * object that describes any failures encountered during the merging process.
+     *
+     * @param sub_indexes A vector of shared pointers to the `Index` objects that are to be merged.
+     * @return tl::expected<std::shared_ptr<Index>, Error> An expected value that contains either
+     * a shared pointer to the successfully merged `Index` or an `Error` detailing
+     * why the merge operation failed.
+     */
+    virtual tl::expected<void, Error>
+    Merge(const std::vector<std::shared_ptr<Index>>& sub_indexes) {
+        throw std::runtime_error("Index doesn't support check feature");
+    }
+
 public:
     // [serialize/deserialize with binaryset]
 
