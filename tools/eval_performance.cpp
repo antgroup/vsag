@@ -66,19 +66,21 @@ ParseArgs(argparse::ArgumentParser& parser, int argc, char** argv) {
         .default_value(0.5f)
         .help("The range value for range search or range_filter search")
         .scan<'f', float>();
-    parser.add_argument("--disable_recall").default_value(false).help("Enable average recall eval");
+    parser.add_argument("--disable_recall")
+        .default_value(false)
+        .help("Disable average recall eval");
     parser.add_argument("--disable_percent_recall")
         .default_value(false)
-        .help("Enable percent recall eval, include p0, p10, p30, p50, p70, p90");
-    parser.add_argument("--disable_qps").default_value(false).help("Enable qps eval");
-    parser.add_argument("--disable_tps").default_value(false).help("Enable tps eval");
-    parser.add_argument("--disable_memory").default_value(false).help("Enable memory eval");
+        .help("Disable percent recall eval, include p0, p10, p30, p50, p70, p90");
+    parser.add_argument("--disable_qps").default_value(false).help("Disable qps eval");
+    parser.add_argument("--disable_tps").default_value(false).help("Disable tps eval");
+    parser.add_argument("--disable_memory").default_value(false).help("Disable memory eval");
     parser.add_argument("--disable_latency")
         .default_value(false)
-        .help("Enable average latency eval");
+        .help("Disable average latency eval");
     parser.add_argument("--disable_percent_latency")
         .default_value(false)
-        .help("Enable percent latency eval, include p50, p80, p90, p95, p99");
+        .help("Disable percent latency eval, include p50, p80, p90, p95, p99");
 
     try {
         parser.parse_args(argc, argv);
@@ -88,14 +90,86 @@ ParseArgs(argparse::ArgumentParser& parser, int argc, char** argv) {
         std::cerr << parser;
     }
 }
+template <class T = std::string>
+T
+check_exist_and_get_value(const YAML::Node& node, const std::string& key) {
+    if (not node[key].IsDefined()) {
+        throw std::invalid_argument(key + " is not in config file");
+    }
+    return node[key].as<T>();
+};
+
+template <class T = std::string>
+T
+check_and_get_value(const YAML::Node& node, const std::string& key) {
+    if (node[key].IsDefined()) {
+        return node[key].as<T>();
+    } else {
+        return T();
+    }
+};
+
+std::vector<YAML::Node>
+ParseYamlFile(const std::string& yaml_file) {
+    using Node = YAML::Node;
+    Node config_all = YAML::LoadFile(yaml_file);
+    std::vector<YAML::Node> nodes;
+    for (auto it = config_all.begin(); it != config_all.end(); ++it) {
+        auto config = it->second;
+        try {
+            if (config.IsMap()) {
+                check_exist_and_get_value<>(config, "datapath");
+                auto action = check_exist_and_get_value<>(config, "type");
+                check_exist_and_get_value<>(config, "index_name");
+                check_exist_and_get_value<>(config, "create_params");
+                if (action == "search") {
+                    check_exist_and_get_value<>(config, "search_params");
+                }
+                check_and_get_value<>(config, "search_mode");
+                check_and_get_value<>(config, "index_path");
+                check_and_get_value<int>(config, "topk");
+                check_and_get_value<float>(config, "range");
+                check_and_get_value<bool>(config, "disable_recall");
+                check_and_get_value<bool>(config, "disable_percent_recall");
+                check_and_get_value<bool>(config, "disable_qps");
+                check_and_get_value<bool>(config, "disable_tps");
+                check_and_get_value<bool>(config, "disable_memory");
+                check_and_get_value<bool>(config, "disable_latency");
+                check_and_get_value<bool>(config, "disable_percent_latency");
+
+            } else {
+                std::cout << "The root node is not a map!" << std::endl;
+                exit(-1);
+            }
+        } catch (YAML::Exception& e) {
+            std::cerr << "Error parsing YAML: " << e.what() << std::endl;
+            exit(-1);
+        }
+        nodes.emplace_back(config);
+    }
+    return nodes;
+}
 
 int
 main(int argc, char** argv) {
-    argparse::ArgumentParser program("eval_performance");
-    ParseArgs(program, argc, argv);
-    auto config = vsag::eval::EvalConfig::Load(program);
-    auto eval_case = vsag::eval::EvalCase::MakeInstance(config);
-    if (eval_case != nullptr) {
-        eval_case->Run();
+    vsag::eval::EvalConfig config;
+    if (argc == 2) {
+        std::string yaml_file = argv[1];
+        auto nodes = ParseYamlFile(yaml_file);
+        for (auto& node : nodes) {
+            config = vsag::eval::EvalConfig::Load(node);
+            auto eval_case = vsag::eval::EvalCase::MakeInstance(config);
+            if (eval_case != nullptr) {
+                eval_case->Run();
+            }
+        }
+    } else {
+        argparse::ArgumentParser program("eval_performance");
+        ParseArgs(program, argc, argv);
+        config = vsag::eval::EvalConfig::Load(program);
+        auto eval_case = vsag::eval::EvalCase::MakeInstance(config);
+        if (eval_case != nullptr) {
+            eval_case->Run();
+        }
     }
 }
