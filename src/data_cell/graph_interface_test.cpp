@@ -25,7 +25,7 @@
 using namespace vsag;
 
 void
-GraphInterfaceTest::BasicTest(uint64_t max_id, uint64_t count, GraphInterfacePtr other) {
+GraphInterfaceTest::BasicTest(uint64_t max_id, uint64_t count, const GraphInterfacePtr& other) {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     auto max_degree = this->graph_->MaximumDegree();
     auto old_count = this->graph_->TotalCount();
@@ -67,6 +67,10 @@ GraphInterfaceTest::BasicTest(uint64_t max_id, uint64_t count, GraphInterfacePtr
         REQUIRE(this->graph_->TotalCount() == old_count + maps.size());
         REQUIRE(this->graph_->MaxCapacity() > this->graph_->TotalCount());
         REQUIRE(this->graph_->MaximumDegree() == max_degree);
+
+        this->graph_->SetTotalCount(this->graph_->TotalCount());
+        this->graph_->SetMaxCapacity(this->graph_->MaxCapacity());
+        this->graph_->SetMaximumDegree(this->graph_->MaximumDegree());
     }
 
     SECTION("Serialize & Deserialize") {

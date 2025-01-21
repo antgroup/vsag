@@ -31,7 +31,7 @@ TEST_CASE("default allocator", "[ut]") {
     allocator.Deallocate(p2);
 }
 
-TEST_CASE("match of malloc and free", "[ut]") {
+TEST_CASE("mismatch of malloc and free", "[ut]") {
 #ifndef NDEBUG
     vsag::DefaultAllocator allocator;
     size_t alloc_size = 1024;
