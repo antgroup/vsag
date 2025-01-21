@@ -51,6 +51,9 @@ public:
 
     virtual ~HNSW() {
         alg_hnsw_ = nullptr;
+        if (use_conjugate_graph_) {
+            conjugate_graph_.reset();
+        }
         allocator_.reset();
     }
 
