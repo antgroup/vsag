@@ -153,6 +153,8 @@ protected:
 
     static void
     TestCheckIdExist(const IndexPtr& index, const TestDatasetPtr& dataset);
+
+    constexpr static float RECALL_THRESHOLD = 0.95;
 };
 
 }  // namespace fixtures
