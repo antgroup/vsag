@@ -1057,7 +1057,7 @@ TEST_CASE("int8 + freshhnsw + feedback + update", "[ft][index][hnsw]") {
 
     // parameters
     int dim = 256;
-    int num_base = 10000;
+    int num_base = 1000;
     int num_query = 1000;
     int64_t k = 3;
     auto metric_type = GENERATE("ip");
@@ -1068,7 +1068,7 @@ TEST_CASE("int8 + freshhnsw + feedback + update", "[ft][index][hnsw]") {
         "dim": {},
         "fresh_hnsw": {{
             "max_degree": 16,
-            "ef_construction": 100,
+            "ef_construction": 20,
             "use_conjugate_graph": true
         }}
     }}
@@ -1165,6 +1165,7 @@ TEST_CASE("int8 + freshhnsw + feedback + update", "[ft][index][hnsw]") {
     logger->Debug("====summary====");
     logger->Debug(fmt::format(R"(Error fix: {})", error_fix));
 
+    REQUIRE(error_fix > 0);
     REQUIRE(recall[0] < recall[1]);
     REQUIRE(fixtures::time_t(recall[1]) == fixtures::time_t(1.0f));
 }
@@ -1186,7 +1187,7 @@ TEST_CASE("hnsw + feedback with global optimum id", "[ft][index][hnsw]") {
         "dim": {},
         "hnsw": {{
             "max_degree": 16,
-            "ef_construction": 200,
+            "ef_construction": 20,
             "use_conjugate_graph": true
         }}
     }}
@@ -1275,6 +1276,8 @@ TEST_CASE("hnsw + feedback with global optimum id", "[ft][index][hnsw]") {
     logger->Debug("====summary====");
     logger->Debug(fmt::format(R"(Error fix: {})", error_fix));
 
+    REQUIRE(error_fix > 0);
+    REQUIRE(recall[0] < recall[1]);
     REQUIRE(fixtures::time_t(recall[1]) == fixtures::time_t(1.0f));
 }
 
@@ -1294,7 +1297,7 @@ TEST_CASE("static hnsw + feedback without global optimum id", "[ft][index][hnsw]
         "dim": {},
         "hnsw": {{
             "max_degree": 16,
-            "ef_construction": 200,
+            "ef_construction": 20,
             "use_conjugate_graph": true,
             "use_static": true
         }}
@@ -1384,7 +1387,9 @@ TEST_CASE("static hnsw + feedback without global optimum id", "[ft][index][hnsw]
     logger->Debug("====summary====");
     logger->Debug(fmt::format(R"(Error fix: {})", error_fix));
 
-    REQUIRE(std::fabs(recall[1] - 1.0) < 1e-7);
+    REQUIRE(error_fix > 0);
+    REQUIRE(recall[0] < recall[1]);
+    REQUIRE(fixtures::time_t(recall[1]) == fixtures::time_t(1.0f));
 }
 
 TEST_CASE("using indexes that do not support conjugate graph", "[ft][index]") {
