@@ -55,9 +55,11 @@ ScalarQuantizationTrainer::TrainUniform(const float* data,
     std::vector<float> lower(dim_);
     if (mode == CLASSIC) {
         this->classic_train(sample_datas.data(), sample_count, upper.data(), lower.data());
-        upper_bound = *std::max_element(upper.begin(), upper.end());
-        lower_bound = *std::min_element(lower.begin(), lower.end());
+    } else if (mode == TRUNC_BOUND) {
+        this->trunc_bound_train(sample_datas.data(), sample_count, upper.data(), lower.data());
     }
+    upper_bound = *std::max_element(upper.begin(), upper.end());
+    lower_bound = *std::min_element(lower.begin(), lower.end());
 }
 
 void
@@ -81,7 +83,7 @@ ScalarQuantizationTrainer::trunc_bound_train(const float* data,
                                              uint64_t count,
                                              float* upper_bound,
                                              float* lower_bound) const {
-    auto ignore_count = static_cast<uint64_t>(static_cast<float>(count - 1) * 0.001);
+    auto ignore_count = static_cast<uint64_t>(static_cast<float>(count - 1) * 0.0001);
     for (uint64_t i = 0; i < dim_; ++i) {
         std::priority_queue<float, std::vector<float>, std::greater<>> heap_max;
         std::priority_queue<float, std::vector<float>, std::less<>> heap_min;

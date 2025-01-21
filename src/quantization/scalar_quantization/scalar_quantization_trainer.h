@@ -37,7 +37,7 @@ public:
           float* upper_bound,
           float* lower_bound,
           bool need_normalize = false,
-          SQTrainMode mode = SQTrainMode::CLASSIC);
+          SQTrainMode mode = SQTrainMode::TRUNC_BOUND);
 
     void
     TrainUniform(const float* data,
@@ -45,10 +45,7 @@ public:
                  float& upper_bound,
                  float& lower_bound,
                  bool need_normalize = false,
-                 SQTrainMode mode = SQTrainMode::CLASSIC);
-
-    void
-    Encode(const float* origin_data, uint8_t*);
+                 SQTrainMode mode = SQTrainMode::TRUNC_BOUND);
 
     inline void
     SetSampleCount(uint64_t sample) {
@@ -78,7 +75,7 @@ private:
 
     uint64_t max_sample_count_{MAX_DEFAULT_SAMPLE};
 
-    const static uint64_t MAX_DEFAULT_SAMPLE{65536};
+    constexpr static uint64_t MAX_DEFAULT_SAMPLE{65536};
 };
 
 }  // namespace vsag
