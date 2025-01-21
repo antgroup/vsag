@@ -127,10 +127,11 @@ SearchEvalCase::do_knn_search() {
             auto i = id % query_count;
             auto query = vsag::Dataset::Make();
             query->NumElements(1)->Dim(this->dataset_ptr_->GetDim())->Owner(false);
+            const void* query_vector = this->dataset_ptr_->GetOneTest(i);
             if (this->dataset_ptr_->GetTestDataType() == vsag::DATATYPE_FLOAT32) {
-                query->Float32Vectors((const float*)this->dataset_ptr_->GetOneTest(i));
+                query->Float32Vectors((const float*)query_vector);
             } else if (this->dataset_ptr_->GetTestDataType() == vsag::DATATYPE_INT8) {
-                query->Int8Vectors((const int8_t*)this->dataset_ptr_->GetOneTest(i));
+                query->Int8Vectors((const int8_t*)query_vector);
             }
             auto result = this->index_->KnnSearch(query, topk, config_.search_param);
             if (not result.has_value()) {
@@ -140,9 +141,12 @@ SearchEvalCase::do_knn_search() {
             int64_t* ground_truth_neighbors = dataset_ptr_->GetNeighbors(i);
             const int64_t* neighbors = result.value()->GetIds();
             float* ground_truth_distances = dataset_ptr_->GetDistances(i);
-            const float* distances = result.value()->GetDistances();
-            auto record = std::make_tuple(
-                ground_truth_neighbors, neighbors, ground_truth_distances, distances, topk);
+            auto record = std::make_tuple(ground_truth_neighbors,
+                                          neighbors,
+                                          ground_truth_distances,
+                                          dataset_ptr_.get(),
+                                          query_vector,
+                                          topk);
             monitor->Record(&record);
         }
         monitor->Stop();

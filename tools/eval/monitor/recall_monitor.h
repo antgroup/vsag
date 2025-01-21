@@ -45,15 +45,14 @@ private:
     void
     cal_and_set_result(const std::string& metric, JsonType& result);
 
-    std::tuple<double, double>
+    double
     cal_avg_recall();
 
-    std::tuple<double, double>
+    double
     cal_recall_rate(double rate);
 
 private:
     std::vector<double> recall_records_;
-    std::vector<double> distance_recall_records_;
 
     std::vector<std::string> metrics_;
 };
