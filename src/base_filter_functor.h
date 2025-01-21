@@ -25,9 +25,7 @@ namespace vsag {
 class BaseFilterFunctor {
 public:
     virtual bool
-    operator()(LabelType id) {
-        return true;
-    }
+    operator()(LabelType id) = 0;
 };
 
 class BitsetOrCallbackFilter : public BaseFilterFunctor {

@@ -13,22 +13,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#pragma once
+#include "prefetch.h"
 
-#include <algorithm>
-#include <random>
+#include <catch2/catch_test_macros.hpp>
+#include <memory>
 
-#include "graph_interface.h"
-
-namespace vsag {
-class GraphInterfaceTest {
-public:
-    explicit GraphInterfaceTest(GraphInterfacePtr graph) : graph_(std::move(graph)){};
-
-    void
-    BasicTest(uint64_t max_id, uint64_t count, const GraphInterfacePtr& other);
-
-public:
-    GraphInterfacePtr graph_{nullptr};
-};
-}  // namespace vsag
+TEST_CASE("prefetch test", "[ut][prefetch]") {
+    std::vector<int64_t> data(65536);
+    for (int64_t i = 0; i < 500; ++i) {
+        vsag::PrefetchLines(data.data(), i * 61);
+    }
+}

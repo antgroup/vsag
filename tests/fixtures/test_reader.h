@@ -24,7 +24,7 @@ namespace fixtures {
 
 class TestReader : public vsag::Reader {
 public:
-    TestReader(vsag::Binary binary) : binary_(binary) {
+    TestReader(vsag::Binary binary) : binary_(std::move(binary)) {
     }
 
     void
@@ -38,7 +38,7 @@ public:
         callback(vsag::IOErrorCode::IO_SUCCESS, "success");
     }
 
-    uint64_t
+    [[nodiscard]] uint64_t
     Size() const override {
         return binary_.size;
     }

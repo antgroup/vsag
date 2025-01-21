@@ -29,8 +29,10 @@ FlattenInterfaceTest::BasicTest(int64_t dim, uint64_t base_count, float error) {
     auto querys = fixtures::generate_vectors(query_count, dim, random());
 
     auto old_count = flatten_->TotalCount();
+    InnerIdType last_one = base_count + old_count - 1;
     flatten_->Train(vectors.data(), base_count);
-    flatten_->BatchInsertVector(vectors.data(), base_count);
+    flatten_->BatchInsertVector(vectors.data(), base_count - 1);
+    flatten_->BatchInsertVector(vectors.data() + (base_count - 1) * dim, 1, &last_one);
     REQUIRE(flatten_->TotalCount() == base_count + old_count);
 
     std::vector<InnerIdType> idx(base_count);
