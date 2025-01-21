@@ -15,7 +15,6 @@
 
 #include "recall_monitor.h"
 
-#include <iostream>
 #include <unordered_set>
 
 #include "../eval_dataset.h"
@@ -63,9 +62,9 @@ RecallMonitor::GetResult() {
 }
 void
 RecallMonitor::Record(void* input) {
-    auto [gt_neighbors, neighbors, gt_distances, dataset, query_data, topk] =
+    auto [neighbors, gt_distances, dataset, query_data, topk] =
         *(reinterpret_cast<
-            std::tuple<int64_t*, int64_t*, float*, EvalDataset*, const void*, uint64_t>*>(input));
+            std::tuple<int64_t*, float*, EvalDataset*, const void*, uint64_t>*>(input));
     size_t dim = dataset->GetDim();
     auto distance_func = dataset->GetDistanceFunc();
     auto distances = std::shared_ptr<float[]>(new float[topk]);

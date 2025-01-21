@@ -138,11 +138,9 @@ SearchEvalCase::do_knn_search() {
                 std::cerr << "query error: " << result.error().message << std::endl;
                 exit(-1);
             }
-            int64_t* ground_truth_neighbors = dataset_ptr_->GetNeighbors(i);
             const int64_t* neighbors = result.value()->GetIds();
             float* ground_truth_distances = dataset_ptr_->GetDistances(i);
-            auto record = std::make_tuple(ground_truth_neighbors,
-                                          neighbors,
+            auto record = std::make_tuple(neighbors,
                                           ground_truth_distances,
                                           dataset_ptr_.get(),
                                           query_vector,
