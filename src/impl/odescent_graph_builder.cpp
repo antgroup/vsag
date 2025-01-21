@@ -97,7 +97,7 @@ ODescent::SaveGraph(std::stringstream& out) {
     // Note: at this point, either _nd == _max_points or any frozen points have
     // been temporarily moved to _nd, so _nd + _num_frozen_points is the valid
     // location limit.
-    for (uint32_t i = 0; i < data_num_; i++) {
+    for (uint32_t i = 0; i < static_cast<uint32_t>(data_num_); i++) {
         Vector<uint32_t> edges(allocator_);
         edges.resize(graph[i].neighbors.size());
         for (int j = 0; j < graph[i].neighbors.size(); ++j) {
