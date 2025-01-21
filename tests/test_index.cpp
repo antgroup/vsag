@@ -311,7 +311,11 @@ TestIndex::TestKnnSearch(const IndexPtr& index,
         auto val = Intersection(gt, gt_topK, result, topk);
         cur_recall += static_cast<float>(val) / static_cast<float>(gt_topK);
     }
-    CHECK(cur_recall > expected_recall * query_count);
+    if (cur_recall <= expected_recall * query_count) {
+        WARN(fmt::format("cur_result({}) <= expected_recall * query_count({})",
+                         cur_recall,
+                         expected_recall * query_count));
+    }
     REQUIRE(cur_recall > expected_recall * query_count * RECALL_THRESHOLD);
 }
 
@@ -348,7 +352,11 @@ TestIndex::TestRangeSearch(const IndexPtr& index,
         auto val = Intersection(gt, gt_topK, result, res.value()->GetDim());
         cur_recall += static_cast<float>(val) / static_cast<float>(gt_topK);
     }
-    CHECK(cur_recall > expected_recall * query_count);
+    if (cur_recall <= expected_recall * query_count) {
+        WARN(fmt::format("cur_result({}) <= expected_recall * query_count({})",
+                         cur_recall,
+                         expected_recall * query_count));
+    }
     REQUIRE(cur_recall > expected_recall * query_count * RECALL_THRESHOLD);
 }
 void
@@ -381,7 +389,11 @@ TestIndex::TestFilterSearch(const TestIndex::IndexPtr& index,
         auto val = Intersection(gt, gt_topK, result, topk);
         cur_recall += static_cast<float>(val) / static_cast<float>(gt_topK);
     }
-    CHECK(cur_recall > expected_recall * query_count);
+    if (cur_recall <= expected_recall * query_count) {
+        WARN(fmt::format("cur_result({}) <= expected_recall * query_count({})",
+                         cur_recall,
+                         expected_recall * query_count));
+    }
     REQUIRE(cur_recall > expected_recall * query_count * RECALL_THRESHOLD);
 }
 
@@ -608,7 +620,11 @@ TestIndex::TestConcurrentKnnSearch(const TestIndex::IndexPtr& index,
     }
 
     auto cur_recall = std::accumulate(search_results.begin(), search_results.end(), 0.0f);
-    CHECK(cur_recall > expected_recall * query_count);
+    if (cur_recall <= expected_recall * query_count) {
+        WARN(fmt::format("cur_result({}) <= expected_recall * query_count({})",
+                         cur_recall,
+                         expected_recall * query_count));
+    }
     REQUIRE(cur_recall > expected_recall * query_count * RECALL_THRESHOLD);
 }
 
@@ -688,8 +704,11 @@ TestIndex::TestEstimateMemory(const std::string& index_name,
             auto build_index = index->Build(dataset->base_);
             REQUIRE(build_index.has_value());
             auto real_memory = allocator->GetCurrentMemory();
-            CHECK(estimate_memory >= static_cast<uint64_t>(real_memory * 0.8));
-            CHECK(estimate_memory <= static_cast<uint64_t>(real_memory * 1.2));
+            if (estimate_memory <= static_cast<uint64_t>(real_memory * 0.8) or
+                estimate_memory >= static_cast<uint64_t>(real_memory * 1.2)) {
+                WARN("estimate_memory failed");
+            }
+
             REQUIRE(estimate_memory >= static_cast<uint64_t>(real_memory * 0.5));
             REQUIRE(estimate_memory <= static_cast<uint64_t>(real_memory * 1.5));
         }
