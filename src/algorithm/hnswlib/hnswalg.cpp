@@ -14,6 +14,7 @@
 // limitations under the License.
 
 #include "hnswalg.h"
+#include "neighbor.h"
 
 #include <memory>
 namespace hnswlib {
@@ -368,6 +369,104 @@ HierarchicalNSW::searchBaseLayer(InnerIdType ep_id, const void* data_point, int 
     }
     visited_list_pool_->releaseVisitedList(vl);
 
+    return top_candidates;
+}
+
+template <bool has_deletions, bool collect_metrics>
+MaxHeap
+HierarchicalNSW::searchBaseLayerST(InnerIdType ep_id,
+                                   const void* data_point,
+                                   size_t ef,
+                                   vsag::BaseFilterFunctor* isIdAllowed,
+                                   const int64_t totalValid,
+                                   const size_t k) const {
+    VisitedListPtr vl = visited_list_pool_->getFreeVisitedList();
+    vl_type* visited_array = vl->mass;
+    vl_type visited_array_tag = vl->curV;
+
+    MaxHeap top_candidates(allocator_); // 结果队列
+    NeighborSetDoublePopList retset(ef);
+
+    float dist = fstdistfunc_(data_point, getDataByInternalId(ep_id), dist_func_param_);
+    if ((!has_deletions || !isMarkedDeleted(ep_id)) &&
+        ((!isIdAllowed) || (*isIdAllowed)(getExternalLabel(ep_id)))) {
+        retset.insert(Neighbor(ep_id, dist, Neighbor::kValid));
+    } else {
+        retset.insert(Neighbor(ep_id, dist, Neighbor::kInvalid));
+    }
+
+    visited_array[ep_id] = visited_array_tag;
+    const int64_t total_cnt = max_elements_;
+    float kAlpha = 1.0 - ((float)totalValid / (float)total_cnt);
+    float accumulative_alpha = 1;
+    auto add_search_candidate = [&](Neighbor n) { return retset.insert(n, nullptr); };
+
+    while (retset.has_next()) {
+        auto [u, d, s] = retset.pop(); // id, distance, status
+
+        InnerIdType current_node_id = u;
+        auto link_data = getLinklistAtLevelWithLock(current_node_id, 0);
+        int* data = (int*)link_data.get();
+        size_t size = getListCount((linklistsizeint*)data);
+        if (collect_metrics) {
+            metric_hops_++;
+            metric_distance_computations_ += size;
+        }
+
+        auto vector_data_ptr = data_level0_memory_->GetElementPtr((*(data + 1)), offset_data_);
+#ifdef USE_SSE
+        _mm_prefetch((char*)(visited_array + *(data + 1)), _MM_HINT_T0);
+        _mm_prefetch((char*)(visited_array + *(data + 1) + 64), _MM_HINT_T0);
+        _mm_prefetch(vector_data_ptr, _MM_HINT_T0);
+        _mm_prefetch((char*)(data + 2), _MM_HINT_T0);
+#endif
+
+        for (size_t j = 1; j <= size; j++) {
+            int candidate_id = *(data + j);
+            size_t pre_l = std::min(j, size - 2);
+            vector_data_ptr =
+                data_level0_memory_->GetElementPtr((*(data + pre_l + 1)), offset_data_);
+#ifdef USE_SSE
+            _mm_prefetch((char*)(visited_array + *(data + pre_l + 1)), _MM_HINT_T0);
+            _mm_prefetch(vector_data_ptr, _MM_HINT_T0);  ////////////
+#endif
+            int status = Neighbor::kValid;
+            if (visited_array[candidate_id] != visited_array_tag) {
+                visited_array[candidate_id] = visited_array_tag;
+
+                // invalid
+                if ((has_deletions && isMarkedDeleted(candidate_id)) ||
+                    (isIdAllowed && !(*isIdAllowed)(getExternalLabel(candidate_id)))) {
+                    status = Neighbor::kInvalid;
+                    accumulative_alpha += kAlpha;
+                    if (accumulative_alpha < 1.0f) {
+                        continue;// 剪枝
+                    }
+                    accumulative_alpha -= 1.0f;
+                }
+
+                char* currObj1 = (getDataByInternalId(candidate_id));
+                float dist = fstdistfunc_(data_point, currObj1, dist_func_param_);
+                Neighbor nn(candidate_id, dist, status);
+                if (add_search_candidate(nn)) {
+#ifdef USE_SSE
+                    // todo: _mm_prefetch
+#endif                    
+                }
+            }
+        }
+    }
+    // TODO
+    // if (retset.size() < k) { // 不足的部分暴搜
+    //     return searchKnnBF(query_data, k, bitset);
+    // }
+
+    size_t len = std::min(k, retset.size());
+    for (int i = 0; i < len; ++i) {
+        top_candidates.emplace(dist, (LabelType)retset[i].id);
+    }
+
+    visited_list_pool_->releaseVisitedList(vl);
     return top_candidates;
 }
 
@@ -1363,7 +1462,8 @@ std::priority_queue<std::pair<float, LabelType>>
 HierarchicalNSW::searchKnn(const void* query_data,
                            size_t k,
                            uint64_t ef,
-                           vsag::BaseFilterFunctor* isIdAllowed) const {
+                           vsag::BaseFilterFunctor* isIdAllowed,
+                           const int64_t totalValid) const {
     std::shared_lock resize_lock(resize_mutex_);
     std::priority_queue<std::pair<float, LabelType>> result;
     if (cur_element_count_ == 0)
@@ -1410,10 +1510,10 @@ HierarchicalNSW::searchKnn(const void* query_data,
 
     if (num_deleted_ == 0) {
         top_candidates =
-            searchBaseLayerST<false, true>(currObj, query_data, std::max(ef, k), isIdAllowed);
+            searchBaseLayerST<false, true>(currObj, query_data, std::max(ef, k), isIdAllowed, totalValid, k);
     } else {
         top_candidates =
-            searchBaseLayerST<true, true>(currObj, query_data, std::max(ef, k), isIdAllowed);
+            searchBaseLayerST<true, true>(currObj, query_data, std::max(ef, k), isIdAllowed, totalValid, k);
     }
 
     while (top_candidates.size() > k) {

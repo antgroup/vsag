@@ -139,12 +139,13 @@ public:
       *                - num_elements: 1
       *                - ids, distances: length is (num_elements * k)
       */
+
     virtual tl::expected<DatasetPtr, Error>
     KnnSearch(const DatasetPtr& query,
               int64_t k,
               const std::string& parameters,
-              const std::function<bool(int64_t)>& filter) const = 0;
-
+              const std::function<bool(int64_t)>& filter,
+              const int64_t totalValid = 0) const = 0;
     /**
       * @brief Performing single range search on index
       *

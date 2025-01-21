@@ -33,12 +33,9 @@ BlockManager::~BlockManager() {
 
 char*
 BlockManager::GetElementPtr(size_t index, size_t offset) {
-    if (index >= max_elements_) {
-        throw std::out_of_range("Index is out of range:" + std::to_string(index));
-    }
-
-    size_t block_index = (index * size_data_per_element_) / block_size_;
-    size_t offset_in_block = (index * size_data_per_element_) % block_size_;
+    size_t index_size_product = index * size_data_per_element_;
+    size_t block_index = index_size_product / block_size_;
+    size_t offset_in_block = index_size_product % block_size_;
     return blocks_[block_index] + offset_in_block + offset;
 }
 

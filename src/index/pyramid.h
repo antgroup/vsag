@@ -61,7 +61,8 @@ public:
     KnnSearch(const DatasetPtr& query,
               int64_t k,
               const std::string& parameters,
-              const std::function<bool(int64_t)>& filter) const override;
+              const std::function<bool(int64_t)>& filter,
+              const int64_t totalValid = 0) const override;
 
     tl::expected<DatasetPtr, Error>
     RangeSearch(const DatasetPtr& query,

@@ -84,8 +84,9 @@ public:
     KnnSearch(const DatasetPtr& query,
               int64_t k,
               const std::string& parameters,
-              const std::function<bool(int64_t)>& filter) const override {
-        SAFE_CALL(return this->knn_search_internal(query, k, parameters, filter));
+              const std::function<bool(int64_t)>& filter,
+              const int64_t totalValid = 0) const override {
+        SAFE_CALL(return this->knn_search_internal(query, k, parameters, filter, totalValid));
     }
 
     tl::expected<DatasetPtr, Error>
@@ -226,11 +227,19 @@ private:
                         const std::string& parameters,
                         const FilterType& filter_obj) const;
 
+    template <typename FilterType>
+    tl::expected<DatasetPtr, Error>
+    knn_search_internal(const DatasetPtr& query,
+                        int64_t k,
+                        const std::string& parameters,
+                        const FilterType& filter_obj,
+                        const int64_t totalValid) const;
     tl::expected<DatasetPtr, Error>
     knn_search(const DatasetPtr& query,
                int64_t k,
                const std::string& parameters,
-               BaseFilterFunctor* filter_ptr) const;
+               BaseFilterFunctor* filter_ptr,
+               const int64_t totalValid = 0) const;
 
     template <typename FilterType>
     tl::expected<DatasetPtr, Error>
