@@ -37,6 +37,7 @@ component_management:
     statuses:
       - type: project
         target: auto
+        thresholds: 1%
         branches:
           - "!main"
   individual_components:  # in alphabetical
