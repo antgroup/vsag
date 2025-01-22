@@ -27,7 +27,7 @@
 namespace vsag {
 
 bool
-is_multiple_of_four(int n) {
+is_multiple_of_four(int64_t n) {
     return (n > 0) && (n % 4 == 0);
 }
 
@@ -152,7 +152,9 @@ estimate_search_time(const std::string& index_name,
         if (data_num < 100000 || data_dim < 2 || params.ef_search < 50) {
             return 1.0f;
         }
-        return (data_dim / 128.0) * (params.ef_search / 100.0) * (log10(data_num / 100000.0));
+        return (static_cast<double>(data_dim) / 128.0) *
+               (static_cast<double>(params.ef_search) / 100.0) *
+               (log10(static_cast<double>(data_num) / 100000.0));
     } else {
         LOG_ERROR_AND_RETURNS(ErrorType::UNSUPPORTED_INDEX_OPERATION,
                               "cannot estimate search cost for unsupported index:",

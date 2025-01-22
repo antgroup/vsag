@@ -30,7 +30,7 @@ SlowTaskTimer::SlowTaskTimer(const std::string& n, int64_t log_threshold_ms)
 SlowTaskTimer::~SlowTaskTimer() {
     auto finish = std::chrono::steady_clock::now();
     std::chrono::duration<double, std::milli> duration = finish - start;
-    if (duration.count() > threshold) {
+    if (duration.count() > static_cast<double>(threshold)) {
         if (duration.count() >= 1000) {
             logger::info("{0} cost {1:.3f}s", name, duration.count() / 1000);
         } else {
@@ -62,12 +62,12 @@ WindowResultQueue::Push(float value) {
 
 float
 WindowResultQueue::GetAvgResult() const {
-    size_t statstic_num = std::min(count_, queue_.size());
+    size_t statistic_num = std::min(count_, queue_.size());
     float result = 0;
-    for (int i = 0; i < statstic_num; i++) {
+    for (int i = 0; i < statistic_num; i++) {
         result += queue_[i];
     }
-    return result / statstic_num;
+    return result / static_cast<float>(statistic_num);
 }
 
 std::string

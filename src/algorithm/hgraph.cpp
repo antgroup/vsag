@@ -18,10 +18,12 @@
 #include <fmt/format-inl.h>
 
 #include <memory>
+#include <stdexcept>
 
 #include "common.h"
 #include "data_cell/sparse_graph_datacell.h"
 #include "index/hgraph_index_zparameters.h"
+#include "logger.h"
 
 namespace vsag {
 static BinarySet
@@ -138,7 +140,7 @@ HGraph::KnnSearch(const DatasetPtr& query,
         search_param.ep_ = this->entry_point_id_;
         search_param.ef_ = 1;
         search_param.is_id_allowed_ = nullptr;
-        for (int64_t i = this->route_graphs_.size() - 1; i >= 0; --i) {
+        for (int64_t i = static_cast<int64_t>(this->route_graphs_.size() - 1); i >= 0; --i) {
             auto result = this->search_one_graph(query->GetFloat32Vectors(),
                                                  this->route_graphs_[i],
                                                  this->basic_flatten_codes_,
@@ -164,14 +166,16 @@ HGraph::KnnSearch(const DatasetPtr& query,
         }
 
         auto dataset_results = Dataset::Make();
-        dataset_results->Dim(search_result.size())->NumElements(1)->Owner(true, allocator_);
+        dataset_results->Dim(static_cast<int64_t>(search_result.size()))
+            ->NumElements(1)
+            ->Owner(true, allocator_);
 
         auto* ids = (int64_t*)allocator_->Allocate(sizeof(int64_t) * search_result.size());
         dataset_results->Ids(ids);
         auto* dists = (float*)allocator_->Allocate(sizeof(float) * search_result.size());
         dataset_results->Distances(dists);
 
-        for (int64_t j = search_result.size() - 1; j >= 0; --j) {
+        for (int64_t j = static_cast<int64_t>(search_result.size() - 1); j >= 0; --j) {
             dists[j] = search_result.top().first;
             ids[j] = this->labels_.at(search_result.top().second);
             search_result.pop();
@@ -213,9 +217,10 @@ HGraph::EstimateMemory(uint64_t num_elements) const {
         element_count * (sizeof(std::pair<LabelType, InnerIdType>) + 2 * sizeof(void*));
     estimate_memory += label_map_memory;
 
-    auto sparse_graph_memory = (this->mult_ * 0.05 * element_count) * sizeof(InnerIdType) *
-                               (this->bottom_graph_->maximum_degree_ / 2 + 1);
-    estimate_memory += sparse_graph_memory;
+    auto sparse_graph_memory = (this->mult_ * 0.05 * static_cast<double>(element_count)) *
+                               sizeof(InnerIdType) *
+                               (static_cast<double>(this->bottom_graph_->maximum_degree_) / 2 + 1);
+    estimate_memory += static_cast<uint64_t>(sparse_graph_memory);
 
     auto other_memory = element_count * (sizeof(LabelType) + sizeof(std::shared_mutex));
     estimate_memory += other_memory;
@@ -295,7 +300,8 @@ HGraph::hnsw_add(const DatasetPtr& data) {
             std::unique_lock<std::mutex> add_lock(add_mutex);
             if (level >= int64_t(this->max_level_) || bottom_graph_->TotalCount() == 0) {
                 std::lock_guard<std::shared_mutex> wlock(this->global_mutex_);
-                for (int64_t j = max_level_; j <= level; ++j) {
+                // level maybe a negative number(-1)
+                for (int64_t j = static_cast<int64_t>(max_level_); j <= level; ++j) {
                     this->route_graphs_.emplace_back(this->generate_one_route_graph());
                 }
                 max_level_ = level + 1;
@@ -459,7 +465,7 @@ HGraph::RangeSearch(const DatasetPtr& query,
         InnerSearchParam search_param;
         search_param.ep_ = this->entry_point_id_;
         search_param.ef_ = 1;
-        for (int64_t i = this->route_graphs_.size() - 1; i >= 0; --i) {
+        for (int64_t i = static_cast<int64_t>(this->route_graphs_.size() - 1); i >= 0; --i) {
             auto result = this->search_one_graph(query->GetFloat32Vectors(),
                                                  this->route_graphs_[i],
                                                  this->basic_flatten_codes_,
@@ -488,13 +494,15 @@ HGraph::RangeSearch(const DatasetPtr& query,
         }
 
         auto dataset_results = Dataset::Make();
-        dataset_results->Dim(search_result.size())->NumElements(1)->Owner(true, allocator_);
+        dataset_results->Dim(static_cast<int64_t>(search_result.size()))
+            ->NumElements(1)
+            ->Owner(true, allocator_);
         auto* ids = (int64_t*)allocator_->Allocate(sizeof(int64_t) * search_result.size());
         dataset_results->Ids(ids);
         auto* dists = (float*)allocator_->Allocate(sizeof(float) * search_result.size());
         dataset_results->Distances(dists);
 
-        for (int64_t j = search_result.size() - 1; j >= 0; --j) {
+        for (int64_t j = static_cast<int64_t>(search_result.size() - 1); j >= 0; --j) {
             dists[j] = search_result.top().first;
             ids[j] = this->labels_.at(search_result.top().second);
             search_result.pop();
@@ -839,7 +847,7 @@ HGraph::add_one_point(const float* data, int level, InnerIdType inner_id) {
 void
 HGraph::resize(uint64_t new_size) {
     auto cur_size = this->neighbors_mutex_.size();
-    auto new_size_power_2 =
+    uint64_t new_size_power_2 =
         next_multiple_of_power_of_two(new_size, this->resize_increase_count_bit_);
     if (cur_size < new_size_power_2) {
         vsag::Vector<std::shared_mutex>(new_size_power_2, allocator_).swap(this->neighbors_mutex_);

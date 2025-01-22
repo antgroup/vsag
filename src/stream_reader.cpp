@@ -55,7 +55,7 @@ IOStreamReader::Read(char* data, uint64_t size) {
 
 void
 IOStreamReader::Seek(uint64_t cursor) {
-    istream_.seekg(cursor, std::ios::beg);
+    istream_.seekg(static_cast<int64_t>(cursor), std::ios::beg);
 }
 
 uint64_t
