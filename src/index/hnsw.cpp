@@ -61,11 +61,11 @@ HNSW::HNSW(HnswParameters hnsw_params, const IndexCommonParam& index_common_para
         throw std::runtime_error(MESSAGE_PARAMETER);
     }
 
-    if (hnsw_params.use_conjugate_graph) {
-        conjugate_graph_ = std::make_shared<ConjugateGraph>();
-    }
-
     allocator_ = index_common_param.allocator_;
+
+    if (hnsw_params.use_conjugate_graph) {
+        conjugate_graph_ = std::make_shared<ConjugateGraph>(allocator_.get());
+    }
 
     if (!use_static_) {
         alg_hnsw_ =

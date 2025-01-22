@@ -21,11 +21,13 @@
 #include <nlohmann/json.hpp>
 
 #include "fixtures.h"
+#include "safe_allocator.h"
 #include "stream_reader.h"
 
 TEST_CASE("build, add and memory usage", "[ut][conjugate_graph]") {
+    auto allocator = vsag::SafeAllocator::FactoryDefaultAllocator();
     std::shared_ptr<vsag::ConjugateGraph> conjugate_graph =
-        std::make_shared<vsag::ConjugateGraph>();
+        std::make_shared<vsag::ConjugateGraph>(allocator.get());
     REQUIRE(conjugate_graph->GetMemoryUsage() == 4 + vsag::FOOTER_SIZE);
     REQUIRE(conjugate_graph->AddNeighbor(0, 0) == false);
     REQUIRE(conjugate_graph->GetMemoryUsage() == 4 + vsag::FOOTER_SIZE);
@@ -44,8 +46,9 @@ TEST_CASE("build, add and memory usage", "[ut][conjugate_graph]") {
 }
 
 TEST_CASE("serialize and deserialize with binary", "[ut][conjugate_graph]") {
+    auto allocator = vsag::SafeAllocator::FactoryDefaultAllocator();
     std::shared_ptr<vsag::ConjugateGraph> conjugate_graph =
-        std::make_shared<vsag::ConjugateGraph>();
+        std::make_shared<vsag::ConjugateGraph>(allocator.get());
 
     conjugate_graph->AddNeighbor(0, 2);
     conjugate_graph->AddNeighbor(0, 1);
@@ -145,8 +148,9 @@ TEST_CASE("serialize and deserialize with binary", "[ut][conjugate_graph]") {
 }
 
 TEST_CASE("serialize and deserialize with stream", "[ut][conjugate_graph]") {
+    auto allocator = vsag::SafeAllocator::FactoryDefaultAllocator();
     std::shared_ptr<vsag::ConjugateGraph> conjugate_graph =
-        std::make_shared<vsag::ConjugateGraph>();
+        std::make_shared<vsag::ConjugateGraph>(allocator.get());
 
     conjugate_graph->AddNeighbor(0, 2);
     conjugate_graph->AddNeighbor(0, 1);
@@ -282,8 +286,9 @@ TEST_CASE("serialize and deserialize with stream", "[ut][conjugate_graph]") {
 }
 
 TEST_CASE("update id", "[ut][conjugate_graph]") {
+    auto allocator = vsag::SafeAllocator::FactoryDefaultAllocator();
     std::shared_ptr<vsag::ConjugateGraph> conjugate_graph =
-        std::make_shared<vsag::ConjugateGraph>();
+        std::make_shared<vsag::ConjugateGraph>(allocator.get());
 
     REQUIRE(conjugate_graph->AddNeighbor(0, 1) == true);
     REQUIRE(conjugate_graph->AddNeighbor(0, 2) == true);
