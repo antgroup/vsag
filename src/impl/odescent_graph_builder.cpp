@@ -43,12 +43,20 @@ private:
 };
 
 bool
-ODescent::Build() {
+ODescent::Build(const uint32_t* valid_ids, int64_t data_num) {
     if (is_build_) {
         return false;
     }
     is_build_ = true;
-    data_num_ = flatten_interface_->TotalCount();
+    valid_ids_ = valid_ids;
+    if (valid_ids_ != nullptr) {
+        data_num_ = data_num;
+    } else {
+        data_num_ = flatten_interface_->TotalCount();
+    }
+    if (data_num_ <= 1) {
+        throw std::runtime_error("ODescent cannot build a graph with data_num less than 1");
+    }
     min_in_degree_ = std::min(min_in_degree_, data_num_ - 1);
     Vector<std::mutex>(data_num_, allocator_).swap(points_lock_);
     Vector<UnorderedSet<uint32_t>> old_neighbors(allocator_);
@@ -89,33 +97,21 @@ ODescent::SaveGraph(std::stringstream& out) {
     // Note: at this point, either _nd == _max_points or any frozen points have
     // been temporarily moved to _nd, so _nd + _num_frozen_points is the valid
     // location limit.
-    auto final_graph = GetGraph();
-    for (uint32_t i = 0; i < data_num_; i++) {
-        uint32_t gk = (uint32_t)final_graph[i].size();
+    for (uint32_t i = 0; i < static_cast<uint32_t>(data_num_); i++) {
+        Vector<uint32_t> edges(allocator_);
+        edges.resize(graph[i].neighbors.size());
+        for (int j = 0; j < graph[i].neighbors.size(); ++j) {
+            edges[j] = graph[i].neighbors[j].id;
+        }
+        uint32_t gk = (uint32_t)edges.size();
         out.write((char*)&gk, sizeof(uint32_t));
-        out.write((char*)final_graph[i].data(),
-                  static_cast<std::streamsize>(gk * sizeof(uint32_t)));
-        max_degree =
-            final_graph[i].size() > max_degree ? (uint32_t)final_graph[i].size() : max_degree;
+        out.write((char*)edges.data(), static_cast<std::streamsize>(gk * sizeof(uint32_t)));
+        max_degree = edges.size() > max_degree ? (uint32_t)edges.size() : max_degree;
         index_size += (size_t)(sizeof(uint32_t) * (gk + 1));
     }
     out.seekp(file_offset, out.beg);
     out.write((char*)&index_size, sizeof(uint64_t));
     out.write((char*)&max_degree, sizeof(uint32_t));
-}
-
-Vector<Vector<uint32_t>>
-ODescent::GetGraph() {
-    Vector<Vector<uint32_t>> extract_graph(allocator_);
-    extract_graph.resize(data_num_, Vector<uint32_t>(allocator_));
-    for (int i = 0; i < data_num_; ++i) {
-        extract_graph[i].resize(graph[i].neighbors.size());
-        for (int j = 0; j < graph[i].neighbors.size(); ++j) {
-            extract_graph[i][j] = graph[i].neighbors[j].id;
-        }
-    }
-
-    return extract_graph;
 }
 
 void
@@ -372,6 +368,25 @@ ODescent::parallelize_task(std::function<void(int64_t, int64_t)> task) {
     }
     for (auto& future : futures) {
         future.get();
+    }
+}
+
+void
+ODescent::SaveGraph(GraphInterfacePtr& graph_storage) {
+    for (int i = 0; i < data_num_; ++i) {
+        uint32_t id = i;
+        if (valid_ids_) {
+            id = valid_ids_[i];
+        }
+        Vector<uint32_t> edges(allocator_);
+        edges.resize(graph[i].neighbors.size());
+        for (int j = 0; j < graph[i].neighbors.size(); ++j) {
+            edges[j] = graph[i].neighbors[j].id;
+            if (valid_ids_) {
+                edges[j] = valid_ids_[graph[i].neighbors[j].id];
+            }
+        }
+        graph_storage->InsertNeighborsById(id, edges);
     }
 }
 

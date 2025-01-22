@@ -16,10 +16,13 @@
 #include "odescent_graph_builder.h"
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 #include <filesystem>
 #include <set>
 
 #include "data_cell/flatten_interface.h"
+#include "data_cell/graph_interface.h"
+#include "fixtures.h"
 #include "io/memory_io_parameter.h"
 #include "quantization/fp32_quantizer_parameter.h"
 #include "safe_allocator.h"
@@ -47,38 +50,36 @@ calculate_overlap(const std::vector<uint32_t>& vec1, vsag::Vector<uint32_t>& vec
     return intersection.size();
 }
 
-TEST_CASE("build nndescent", "[ut][nndescent]") {
-    int64_t num_vectors = 2000;
+TEST_CASE("build nndescent", "[ut][odescent]") {
+    auto num_vectors = GENERATE(2, 4, 11, 2000);
     size_t dim = 128;
     int64_t max_degree = 32;
+    auto partial_data = GENERATE(true, false);
 
-    auto vectors = new float[dim * num_vectors];
-
-    std::mt19937 rng;
-    rng.seed(47);
-    std::uniform_real_distribution<> distrib_real;
-    for (int64_t i = 0; i < dim * num_vectors; ++i) {
-        vectors[i] = distrib_real(rng);
-    }
-
-    std::vector<std::vector<std::pair<float, uint32_t>>> ground_truths(num_vectors);
+    auto [ids, vectors] = fixtures::generate_ids_and_vectors(num_vectors, dim);
+    // prepare common param
     vsag::IndexCommonParam param;
     param.dim_ = dim;
     param.metric_ = vsag::MetricType::METRIC_TYPE_L2SQR;
     param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
     param.allocator_ = vsag::SafeAllocator::FactoryDefaultAllocator();
     param.thread_pool_ = vsag::SafeThreadPool::FactoryDefaultThreadPool();
+
+    // prepare data param
     vsag::FlattenDataCellParamPtr flatten_param =
         std::make_shared<vsag::FlattenDataCellParameter>();
     flatten_param->quantizer_parameter_ = std::make_shared<vsag::FP32QuantizerParameter>();
     flatten_param->io_parameter_ = std::make_shared<vsag::MemoryIOParameter>();
     vsag::FlattenInterfacePtr flatten_interface_ptr =
         vsag::FlattenInterface::MakeInstance(flatten_param, param);
-    flatten_interface_ptr->Train(vectors, num_vectors);
-    flatten_interface_ptr->BatchInsertVector(vectors, num_vectors);
+    flatten_interface_ptr->Train(vectors.data(), num_vectors);
+    flatten_interface_ptr->BatchInsertVector(vectors.data(), num_vectors);
 
-    vsag::DatasetPtr dataset = vsag::Dataset::Make();
-    dataset->NumElements(num_vectors)->Float32Vectors(vectors)->Dim(dim)->Owner(true);
+    // prepare graph param
+    vsag::GraphDataCellParamPtr graph_param_ptr = std::make_shared<vsag::GraphDataCellParameter>();
+    graph_param_ptr->io_parameter_ = std::make_shared<vsag::MemoryIOParameter>();
+    graph_param_ptr->max_degree_ = partial_data ? 2 * max_degree : max_degree;
+    // build graph
     vsag::ODescent graph(max_degree,
                          1,
                          30,
@@ -87,23 +88,46 @@ TEST_CASE("build nndescent", "[ut][nndescent]") {
                          param.allocator_.get(),
                          param.thread_pool_.get(),
                          false);
-    graph.Build();
+    std::shared_ptr<uint32_t[]> valid_ids = nullptr;
+    if (partial_data) {
+        num_vectors /= 2;
+        valid_ids.reset(new uint32_t[num_vectors]);
+        for (int i = 0; i < num_vectors; ++i) {
+            valid_ids[i] = 2 * i;
+        }
+    }
+    if (num_vectors <= 1) {
+        REQUIRE_THROWS(graph.Build(valid_ids.get(), num_vectors));
+        return;
+    }
+    graph.Build(valid_ids.get(), num_vectors);
 
-    auto extract_graph = graph.GetGraph();
+    // check result
+    vsag::GraphInterfacePtr graph_interface = nullptr;
+    graph_interface = vsag::GraphInterface::MakeInstance(graph_param_ptr, param, partial_data);
+    graph.SaveGraph(graph_interface);
 
     float hit_edge_count = 0;
+    int64_t indeed_max_degree = std::min(max_degree, (int64_t)num_vectors - 1);
+    auto id_map = [&](uint32_t id) -> uint32_t { return partial_data ? valid_ids[id] : id; };
     for (int i = 0; i < num_vectors; ++i) {
+        std::vector<std::pair<float, uint32_t>> ground_truths;
+        uint32_t i_id = id_map(i);
         for (int j = 0; j < num_vectors; ++j) {
-            if (i != j) {
-                ground_truths[i].emplace_back(flatten_interface_ptr->ComputePairVectors(i, j), j);
+            uint32_t j_id = id_map(j);
+            if (i_id != j_id) {
+                ground_truths.emplace_back(flatten_interface_ptr->ComputePairVectors(i_id, j_id),
+                                           j_id);
             }
         }
-        std::sort(ground_truths[i].begin(), ground_truths[i].end());
-        std::vector<uint32_t> truths_edges(max_degree);
-        for (int j = 0; j < max_degree; ++j) {
-            truths_edges[j] = ground_truths[i][j].second;
+        std::sort(ground_truths.begin(), ground_truths.end());
+        std::vector<uint32_t> truths_edges(indeed_max_degree);
+        for (int j = 0; j < indeed_max_degree; ++j) {
+            truths_edges[j] = ground_truths[j].second;
         }
-        hit_edge_count += calculate_overlap(truths_edges, extract_graph[i], max_degree);
+        vsag::Vector<uint32_t> edges(param.allocator_.get());
+        graph_interface->GetNeighbors(i_id, edges);
+        hit_edge_count += calculate_overlap(truths_edges, edges, indeed_max_degree);
     }
-    REQUIRE(hit_edge_count / (num_vectors * max_degree) > 0.95);
+    REQUIRE(hit_edge_count / (num_vectors * indeed_max_degree) > 0.95);
 }
