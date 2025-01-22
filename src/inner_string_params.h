@@ -55,6 +55,8 @@ const char* const BUILD_PARAMS_KEY = "build_params";
 const char* const BUILD_THREAD_COUNT = "build_thread_count";
 const char* const BUILD_EF_CONSTRUCTION = "ef_construction";
 
+const char* const BUCKETS_COUNT_KEY = "buckets_count";
+
 const std::unordered_map<std::string, std::string> DEFAULT_MAP = {
     {"INDEX_TYPE_HGRAPH", INDEX_TYPE_HGRAPH},
     {"HGRAPH_USE_REORDER_KEY", HGRAPH_USE_REORDER_KEY},
@@ -76,6 +78,7 @@ const std::unordered_map<std::string, std::string> DEFAULT_MAP = {
     {"BUILD_PARAMS_KEY", BUILD_PARAMS_KEY},
     {"BUILD_THREAD_COUNT", BUILD_THREAD_COUNT},
     {"BUILD_EF_CONSTRUCTION", BUILD_EF_CONSTRUCTION},
+    {"BUCKETS_COUNT_KEY", BUCKETS_COUNT_KEY},
 };
 
 }  // namespace vsag
