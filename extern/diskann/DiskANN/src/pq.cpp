@@ -1906,7 +1906,7 @@ void generate_disk_quantized_data(const T* train_data, size_t train_size, size_t
     size_t sample_size = std::min(train_size, (size_t)(train_size * p_val));
     sample_size = std::max(sample_size, std::min(train_size, (size_t)MIN_SAMPLE_NUM));
     sample_size = std::min(sample_size, (size_t)MAX_SAMPLE_NUM);
-    std::shared_ptr<T[]> new_train_data = std::shared_ptr<T[]>(new T[train_dim * sample_size]);
+    auto new_train_data = std::shared_ptr<T[]>(new T[train_dim * sample_size]);
     size_t valid_size = 0;
     for (int i = 0; i < sample_size; ++i)
     {

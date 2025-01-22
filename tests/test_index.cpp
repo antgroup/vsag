@@ -468,9 +468,8 @@ TestIndex::TestSearchWithDirtyVector(const TestIndex::IndexPtr& index,
     auto dim = queries->GetDim();
     auto gts = dataset->ground_truth_;
     auto gt_topK = dataset->top_k;
-    float cur_recall = 0.0f;
     auto topk = gt_topK;
-    int valid_query_count = static_cast<int>(query_count * 0.9);
+    int valid_query_count = static_cast<int64_t>(query_count * 0.9);
     for (auto i = 0; i < valid_query_count; ++i) {
         auto query = vsag::Dataset::Make();
         query->NumElements(1)
@@ -485,7 +484,6 @@ TestIndex::TestSearchWithDirtyVector(const TestIndex::IndexPtr& index,
         REQUIRE(res.value()->GetDim() == topk);
     }
 
-    cur_recall = 0.0f;
     const auto& radius = dataset->range_radius_;
     for (auto i = 0; i < valid_query_count; ++i) {
         auto query = vsag::Dataset::Make();
@@ -500,7 +498,7 @@ TestIndex::TestSearchWithDirtyVector(const TestIndex::IndexPtr& index,
         REQUIRE(res.has_value() == expected_success);
     }
 
-    for (auto i = (int)(query_count * 0.9); i < query_count; ++i) {
+    for (auto i = valid_query_count; i < query_count; ++i) {
         auto query = vsag::Dataset::Make();
         query->NumElements(1)
             ->Dim(dim)
