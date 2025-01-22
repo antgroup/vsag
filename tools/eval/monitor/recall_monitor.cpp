@@ -63,8 +63,8 @@ RecallMonitor::GetResult() {
 void
 RecallMonitor::Record(void* input) {
     auto [neighbors, gt_distances, dataset, query_data, topk] =
-        *(reinterpret_cast<
-            std::tuple<int64_t*, float*, EvalDataset*, const void*, uint64_t>*>(input));
+        *(reinterpret_cast<std::tuple<int64_t*, float*, EvalDataset*, const void*, uint64_t>*>(
+            input));
     size_t dim = dataset->GetDim();
     auto distance_func = dataset->GetDistanceFunc();
     auto distances = std::shared_ptr<float[]>(new float[topk]);

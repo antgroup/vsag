@@ -140,11 +140,8 @@ SearchEvalCase::do_knn_search() {
             }
             const int64_t* neighbors = result.value()->GetIds();
             float* ground_truth_distances = dataset_ptr_->GetDistances(i);
-            auto record = std::make_tuple(neighbors,
-                                          ground_truth_distances,
-                                          dataset_ptr_.get(),
-                                          query_vector,
-                                          topk);
+            auto record = std::make_tuple(
+                neighbors, ground_truth_distances, dataset_ptr_.get(), query_vector, topk);
             monitor->Record(&record);
         }
         monitor->Stop();
