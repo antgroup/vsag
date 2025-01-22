@@ -73,6 +73,12 @@ public:
                     float* dists) const;
 
     inline void
+    ComputeBatchDistImpl(Computer<SQ4UniformQuantizer<metric>>& computer,
+                         uint64_t count,
+                         const uint8_t* codes,
+                         float* dists) const;
+
+    inline void
     ReleaseComputerImpl(Computer<SQ4UniformQuantizer<metric>>& computer) const;
 
     inline void
@@ -300,6 +306,18 @@ SQ4UniformQuantizer<metric>::ComputeDistImpl(Computer<SQ4UniformQuantizer>& comp
                                              const uint8_t* codes,
                                              float* dists) const {
     dists[0] = this->ComputeImpl(computer.buf_, codes);
+}
+
+template <MetricType metric>
+void
+SQ4UniformQuantizer<metric>::ComputeBatchDistImpl(Computer<SQ4UniformQuantizer<metric>>& computer,
+                                                  uint64_t count,
+                                                  const uint8_t* codes,
+                                                  float* dists) const {
+    // TODO(LHT): Optimize batch for simd
+    for (uint64_t i = 0; i < count; ++i) {
+        this->ComputeDistImpl(computer, codes + i * this->code_size_, dists + i);
+    }
 }
 
 template <MetricType metric>

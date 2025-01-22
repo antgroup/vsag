@@ -64,6 +64,12 @@ public:
     ComputeDistImpl(Computer<SQ4Quantizer>& computer, const uint8_t* codes, float* dists) const;
 
     inline void
+    ComputeBatchDistImpl(Computer<SQ4Quantizer<metric>>& computer,
+                         uint64_t count,
+                         const uint8_t* codes,
+                         float* dists) const;
+
+    inline void
     ReleaseComputerImpl(Computer<SQ4Quantizer<metric>>& computer) const;
 
     inline void
@@ -238,6 +244,18 @@ SQ4Quantizer<metric>::ComputeDistImpl(Computer<SQ4Quantizer>& computer,
     } else {
         logger::error("unsupported metric type");
         dists[0] = 0;
+    }
+}
+
+template <MetricType metric>
+void
+SQ4Quantizer<metric>::ComputeBatchDistImpl(Computer<SQ4Quantizer<metric>>& computer,
+                                           uint64_t count,
+                                           const uint8_t* codes,
+                                           float* dists) const {
+    // TODO(LHT): Optimize batch for simd
+    for (uint64_t i = 0; i < count; ++i) {
+        this->ComputeDistImpl(computer, codes + i * this->code_size_, dists + i);
     }
 }
 
