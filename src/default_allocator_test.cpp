@@ -17,7 +17,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
-TEST_CASE("default allocator", "[ut]") {
+TEST_CASE("DefaultAllocator Basic Test", "[ut][DefaultAllocator]") {
     vsag::DefaultAllocator allocator;
     int number = 69278;
     auto p = (int*)allocator.Allocate(sizeof(int) * 1);
@@ -31,7 +31,7 @@ TEST_CASE("default allocator", "[ut]") {
     allocator.Deallocate(p2);
 }
 
-TEST_CASE("mismatch of malloc and free", "[ut]") {
+TEST_CASE("DefaultAllocator Mismatch of Malloc and Free", "[ut][DefaultAllocator]") {
 #ifndef NDEBUG
     vsag::DefaultAllocator allocator;
     size_t alloc_size = 1024;

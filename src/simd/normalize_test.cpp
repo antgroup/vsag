@@ -23,7 +23,7 @@
 
 using namespace vsag;
 
-TEST_CASE("Normalize SIMD Compute", "[simd]") {
+TEST_CASE("Normalize Compute", "[ut][simd]") {
     auto dims = fixtures::get_common_used_dims();
     int64_t count = 100;
     for (auto& dim : dims) {
@@ -68,7 +68,7 @@ TEST_CASE("Normalize SIMD Compute", "[simd]") {
         return;                                                            \
     }
 
-TEST_CASE("Normalize benchmark", "[simd][!benchmark]") {
+TEST_CASE("Normalize Benchmark", "[ut][simd][!benchmark]") {
     int64_t count = 500;
     int64_t dim = 128;
     auto vec1 = fixtures::generate_vectors(count * 2, dim);

@@ -23,7 +23,7 @@ info(const std::string& msg) {
     vsag::Options::Instance().logger()->Info(msg);
 }
 
-TEST_CASE("set external logger", "[ft][options]") {
+TEST_CASE("Test Set External Logger", "[ft][options]") {
     class MyLogger : public vsag::Logger {
     public:
         inline void

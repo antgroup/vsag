@@ -95,7 +95,7 @@ public:
     }
 };
 
-TEST_CASE("Simple Index", "[ft][simple_index]") {
+TEST_CASE("Test Simple Index", "[ft][simple_index]") {
     auto index = std::make_shared<SimpleIndex>();
     auto pool = std::make_shared<fixtures::TestDatasetPool>();
     auto dim = 12;

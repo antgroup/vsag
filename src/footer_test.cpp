@@ -18,7 +18,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "stream_reader.h"
-TEST_CASE("footer basic usage", "[ut][footer]") {
+TEST_CASE("Footer Basic Usage Test", "[ut][footer]") {
     vsag::SerializationFooter footer;
 
     SECTION("successful case") {

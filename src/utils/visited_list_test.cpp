@@ -21,7 +21,7 @@
 #include "default_allocator.h"
 using namespace vsag;
 
-TEST_CASE("test visited_list basic", "[ut][visited_list]") {
+TEST_CASE("VisitedList Basic Test", "[ut][VisitedList]") {
     auto allocator = std::make_shared<DefaultAllocator>();
     auto size = 10000;
     auto vl_ptr = std::make_shared<VisitedList>(size, allocator.get());
@@ -60,7 +60,7 @@ TEST_CASE("test visited_list basic", "[ut][visited_list]") {
     }
 }
 
-TEST_CASE("test visited_list_pool basic", "[ut][visited_list_pool]") {
+TEST_CASE("VisitedListPool Basic Test", "[ut][VisitedListPool]") {
     auto allocator = std::make_shared<DefaultAllocator>();
     auto init_size = 10;
     auto vl_size = 1000;

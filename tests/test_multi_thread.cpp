@@ -47,7 +47,7 @@ query_knn(std::shared_ptr<vsag::Index> index,
     return 0.0;
 }
 
-TEST_CASE("DiskAnn Multi-threading", "[ft][diskann]") {
+TEST_CASE("Test DiskAnn Multi-threading", "[ft][diskann]") {
     fixtures::logger::LoggerReplacer _;
 
     int dim = 65;             // Dimension of the elements
@@ -121,7 +121,7 @@ TEST_CASE("DiskAnn Multi-threading", "[ft][diskann]") {
     REQUIRE(recall >= 0.99);
 }
 
-TEST_CASE("HNSW Multi-threading", "[ft][hnsw]") {
+TEST_CASE("Test HNSW Multi-threading", "[ft][hnsw]") {
     fixtures::logger::LoggerReplacer _;
 
     int dim = 16;             // Dimension of the elements
@@ -192,7 +192,7 @@ TEST_CASE("HNSW Multi-threading", "[ft][hnsw]") {
     REQUIRE(recall > 0.96);
 }
 
-TEST_CASE("multi-threading read-write test", "[ft][hnsw]") {
+TEST_CASE("Test HNSW Multi-threading Read and Write", "[ft][hnsw]") {
     fixtures::logger::LoggerReplacer _;
 
     // avoid too much slow task logs
@@ -279,7 +279,7 @@ TEST_CASE("multi-threading read-write test", "[ft][hnsw]") {
     }
 }
 
-TEST_CASE("multi-threading read-write with feedback and pretrain test", "[ft][hnsw]") {
+TEST_CASE("Test HNSW Multi-threading read-write with Feedback and Pretrain", "[ft][hnsw]") {
     fixtures::logger::LoggerReplacer _;
 
     // avoid too much slow task logs

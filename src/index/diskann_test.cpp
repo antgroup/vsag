@@ -41,7 +41,7 @@ parse_diskann_params(vsag::IndexCommonParam index_common_param) {
     return vsag::DiskannParameters::FromJson(parsed_params, index_common_param);
 }
 
-TEST_CASE("build", "[diskann][ut]") {
+TEST_CASE("diskann build", "[ut][diskann]") {
     vsag::logger::set_level(vsag::logger::level::debug);
     vsag::IndexCommonParam commom_param;
     commom_param.dim_ = 128;
@@ -90,7 +90,7 @@ TEST_CASE("build", "[diskann][ut]") {
     }
 }
 
-TEST_CASE("build & search empty index", "[diskann][ut]") {
+TEST_CASE("build & search empty index for diskann", "[ut][diskann]") {
     vsag::logger::set_level(vsag::logger::level::debug);
     vsag::IndexCommonParam commom_param;
     commom_param.dim_ = 128;
@@ -142,7 +142,7 @@ TEST_CASE("build & search empty index", "[diskann][ut]") {
     REQUIRE(rangesearch.value()->GetDim() == 0);
 }
 
-TEST_CASE("build index with one vector", "[diskann][ut]") {
+TEST_CASE("build diskann index with one vector", "[ut][diskann]") {
     vsag::logger::set_level(vsag::logger::level::debug);
     vsag::IndexCommonParam commom_param;
     commom_param.dim_ = 128;
@@ -170,7 +170,7 @@ TEST_CASE("build index with one vector", "[diskann][ut]") {
     REQUIRE(not result.has_value());
 }
 
-TEST_CASE("knn_search", "[diskann][ut]") {
+TEST_CASE("diskann knn_search", "[ut][diskann]") {
     vsag::logger::set_level(vsag::logger::level::debug);
     vsag::IndexCommonParam commom_param;
     commom_param.dim_ = 128;
@@ -197,8 +197,8 @@ TEST_CASE("knn_search", "[diskann][ut]") {
         ->Ids(ids.data())
         ->Float32Vectors(vectors.data())
         ->Owner(false);
-    auto result = index->Build(dataset);
-    REQUIRE(result.has_value());
+    auto build_result = index->Build(dataset);
+    REQUIRE(build_result.has_value());
 
     auto query = vsag::Dataset::Make();
     query->Dim(commom_param.dim_)
@@ -229,12 +229,12 @@ TEST_CASE("knn_search", "[diskann][ut]") {
     }
 
     SECTION("dimension not equal") {
-        auto query = vsag::Dataset::Make();
-        query->NumElements(1)
+        auto query2 = vsag::Dataset::Make();
+        query2->NumElements(1)
             ->Dim(commom_param.dim_ - 1)
             ->Float32Vectors(vectors.data())
             ->Owner(false);
-        auto result = index->KnnSearch(query, k, params.dump());
+        auto result = index->KnnSearch(query2, k, params.dump());
         REQUIRE_FALSE(result.has_value());
         REQUIRE(result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
     }
@@ -271,7 +271,7 @@ TEST_CASE("knn_search", "[diskann][ut]") {
     }
 }
 
-TEST_CASE("range_search", "[diskann][ut]") {
+TEST_CASE("range_search", "[ut][diskann]") {
     vsag::logger::set_level(vsag::logger::level::debug);
     vsag::IndexCommonParam commom_param;
     commom_param.dim_ = 128;
@@ -298,8 +298,8 @@ TEST_CASE("range_search", "[diskann][ut]") {
         ->Ids(ids.data())
         ->Float32Vectors(vectors.data())
         ->Owner(false);
-    auto result = index->Build(dataset);
-    REQUIRE(result.has_value());
+    auto build_result = index->Build(dataset);
+    REQUIRE(build_result.has_value());
 
     auto query = vsag::Dataset::Make();
     query->Dim(commom_param.dim_)
@@ -346,35 +346,44 @@ TEST_CASE("range_search", "[diskann][ut]") {
     }
 
     SECTION("invalid parameter radius equals to 0") {
-        auto query = vsag::Dataset::Make();
-        query->NumElements(1)->Dim(commom_param.dim_)->Float32Vectors(vectors.data())->Owner(false);
-        auto result = index->RangeSearch(query, 0, params.dump());
+        auto query2 = vsag::Dataset::Make();
+        query2->NumElements(1)
+            ->Dim(commom_param.dim_)
+            ->Float32Vectors(vectors.data())
+            ->Owner(false);
+        auto result = index->RangeSearch(query2, 0, params.dump());
         REQUIRE(result.has_value());
     }
 
     SECTION("invalid parameter radius less than 0") {
-        auto query = vsag::Dataset::Make();
-        query->NumElements(1)->Dim(commom_param.dim_)->Float32Vectors(vectors.data())->Owner(false);
-        auto result = index->RangeSearch(query, -1, params.dump());
+        auto query2 = vsag::Dataset::Make();
+        query2->NumElements(1)
+            ->Dim(commom_param.dim_)
+            ->Float32Vectors(vectors.data())
+            ->Owner(false);
+        auto result = index->RangeSearch(query2, -1, params.dump());
         REQUIRE_FALSE(result.has_value());
         REQUIRE(result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
     }
 
     SECTION("dimension not equal") {
-        auto query = vsag::Dataset::Make();
-        query->NumElements(1)
+        auto query2 = vsag::Dataset::Make();
+        query2->NumElements(1)
             ->Dim(commom_param.dim_ - 1)
             ->Float32Vectors(vectors.data())
             ->Owner(false);
-        auto result = index->RangeSearch(query, radius, params.dump());
+        auto result = index->RangeSearch(query2, radius, params.dump());
         REQUIRE_FALSE(result.has_value());
         REQUIRE(result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
     }
 
     SECTION("query length is not 1") {
-        auto query = vsag::Dataset::Make();
-        query->NumElements(2)->Dim(commom_param.dim_)->Float32Vectors(vectors.data())->Owner(false);
-        auto result = index->RangeSearch(query, radius, params.dump());
+        auto query2 = vsag::Dataset::Make();
+        query2->NumElements(2)
+            ->Dim(commom_param.dim_)
+            ->Float32Vectors(vectors.data())
+            ->Owner(false);
+        auto result = index->RangeSearch(query2, radius, params.dump());
         REQUIRE_FALSE(result.has_value());
         REQUIRE(result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
     }
@@ -411,7 +420,7 @@ TEST_CASE("range_search", "[diskann][ut]") {
     }
 }
 
-TEST_CASE("serialize empty index", "[diskann][ut]") {
+TEST_CASE("serialize empty index", "[ut][diskann]") {
     vsag::logger::set_level(vsag::logger::level::debug);
     vsag::IndexCommonParam commom_param;
     commom_param.dim_ = 128;
@@ -433,7 +442,7 @@ TEST_CASE("serialize empty index", "[diskann][ut]") {
     REQUIRE(result.has_value());
 }
 
-TEST_CASE("deserialize on not empty index", "[diskann][ut]") {
+TEST_CASE("deserialize on not empty index", "[ut][diskann]") {
     vsag::logger::set_level(vsag::logger::level::debug);
     vsag::IndexCommonParam commom_param;
     commom_param.dim_ = 128;
@@ -471,7 +480,7 @@ TEST_CASE("deserialize on not empty index", "[diskann][ut]") {
     REQUIRE(voidresult.error().type == vsag::ErrorType::INDEX_NOT_EMPTY);
 }
 
-TEST_CASE("split building process", "[diskann][ut]") {
+TEST_CASE("split building process", "[ut][diskann]") {
     vsag::logger::set_level(vsag::logger::level::debug);
     vsag::IndexCommonParam commom_param;
     commom_param.dim_ = 128;

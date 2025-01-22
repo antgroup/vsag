@@ -19,7 +19,7 @@
 
 #include "vsag/logger.h"
 
-TEST_CASE("test default logger", "[ut][logger]") {
+TEST_CASE("DefaultLogger Basic Test", "[ut][logger]") {
     vsag::DefaultLogger logger;
     logger.SetLevel(vsag::Logger::Level::kTRACE);
     logger.Trace("this is a trace level message");

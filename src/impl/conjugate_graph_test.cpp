@@ -24,7 +24,7 @@
 #include "safe_allocator.h"
 #include "stream_reader.h"
 
-TEST_CASE("build, add and memory usage", "[ut][conjugate_graph]") {
+TEST_CASE("ConjugateGraph Build, Add and Memory Usage", "[ut][ConjugateGraph]") {
     auto allocator = vsag::SafeAllocator::FactoryDefaultAllocator();
     std::shared_ptr<vsag::ConjugateGraph> conjugate_graph =
         std::make_shared<vsag::ConjugateGraph>(allocator.get());
@@ -45,7 +45,7 @@ TEST_CASE("build, add and memory usage", "[ut][conjugate_graph]") {
     REQUIRE(conjugate_graph->GetMemoryUsage() == 60 + vsag::FOOTER_SIZE);
 }
 
-TEST_CASE("serialize and deserialize with binary", "[ut][conjugate_graph]") {
+TEST_CASE("ConjugateGraph Serialize and Deserialize with Binary", "[ut][ConjugateGraph]") {
     auto allocator = vsag::SafeAllocator::FactoryDefaultAllocator();
     std::shared_ptr<vsag::ConjugateGraph> conjugate_graph =
         std::make_shared<vsag::ConjugateGraph>(allocator.get());
@@ -147,7 +147,7 @@ TEST_CASE("serialize and deserialize with binary", "[ut][conjugate_graph]") {
     }
 }
 
-TEST_CASE("serialize and deserialize with stream", "[ut][conjugate_graph]") {
+TEST_CASE("ConjugateGraph Serialize and Deserialize with Stream", "[ut][ConjugateGraph]") {
     auto allocator = vsag::SafeAllocator::FactoryDefaultAllocator();
     std::shared_ptr<vsag::ConjugateGraph> conjugate_graph =
         std::make_shared<vsag::ConjugateGraph>(allocator.get());
@@ -285,7 +285,7 @@ TEST_CASE("serialize and deserialize with stream", "[ut][conjugate_graph]") {
     }
 }
 
-TEST_CASE("update id", "[ut][conjugate_graph]") {
+TEST_CASE("ConjugateGraph Update ID Test", "[ut][ConjugateGraph]") {
     auto allocator = vsag::SafeAllocator::FactoryDefaultAllocator();
     std::shared_ptr<vsag::ConjugateGraph> conjugate_graph =
         std::make_shared<vsag::ConjugateGraph>(allocator.get());

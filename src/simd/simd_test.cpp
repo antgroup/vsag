@@ -57,7 +57,7 @@ InnerProductDistance(const void* pVect1, const void* pVect2, const void* qty_ptr
     return 1 - res;
 }
 
-TEST_CASE("test ip instructions", "[ut][simd]") {
+TEST_CASE("Test InnerProduct Instructions", "[ut][simd]") {
     std::random_device rd;
     std::mt19937 rng(rd());
     for (size_t dim = 1; dim < 1026; dim++) {
@@ -75,7 +75,7 @@ TEST_CASE("test ip instructions", "[ut][simd]") {
     }
 }
 
-TEST_CASE("test l2 instructions", "[ut][simd]") {
+TEST_CASE("Test L2 Instructions", "[ut][simd]") {
     std::random_device rd;
     std::mt19937 rng(rd());
     for (size_t dim = 1; dim < 1026; dim++) {

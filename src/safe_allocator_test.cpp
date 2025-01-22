@@ -19,7 +19,7 @@
 
 #include "allocator_wrapper.h"
 
-TEST_CASE("test safe allocator", "[ut][allocator]") {
+TEST_CASE("SafeAllocator Basic Test", "[ut][SafeAllocator]") {
     auto allocator = vsag::SafeAllocator::FactoryDefaultAllocator();
     REQUIRE(allocator->Name() == "DefaultAllocator_safewrapper");
     auto allocator2 = vsag::SafeAllocator::FactoryDefaultAllocator();

@@ -21,7 +21,7 @@
 
 using namespace vsag;
 
-TEST_CASE("fp32_quantizer_parameter", "[ut][fp32_quantizer_parameter]") {
+TEST_CASE("FP32 Quantizer Parameter ToJson Test", "[ut][FP32QuantizerParameter]") {
     std::string param_str = "{}";
     auto param = std::make_shared<FP32QuantizerParameter>();
     param->FromJson(param_str);

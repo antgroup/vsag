@@ -23,7 +23,7 @@
 
 using namespace std;
 
-TEST_CASE("Random Index Test", "[ft][random]") {
+TEST_CASE("Test Random Index", "[ft][random]") {
     std::random_device rd;
     std::mt19937 rng(rd());
 

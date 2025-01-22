@@ -24,7 +24,7 @@
 #include "typing.h"
 #include "vsag/errors.h"
 
-TEST_CASE("create index with full parameters", "[factory][ut]") {
+TEST_CASE("Create Index with Full Parameters", "[ut][factory]") {
     vsag::logger::set_level(vsag::logger::level::debug);
 
     SECTION("hnsw") {
@@ -64,7 +64,7 @@ TEST_CASE("create index with full parameters", "[factory][ut]") {
     }
 }
 
-TEST_CASE("create hnsw with incomplete parameters", "[factory][ut]") {
+TEST_CASE("Create HNSW with Incomplete Parameters", "[ut][factory]") {
     vsag::logger::set_level(vsag::logger::level::debug);
 
     auto standard_parameters = vsag::JsonType::parse(R"(
@@ -122,7 +122,7 @@ TEST_CASE("create hnsw with incomplete parameters", "[factory][ut]") {
     }
 }
 
-TEST_CASE("create diskann with incomplete parameters", "[factory][ut]") {
+TEST_CASE("Create Diskann with Incomplete Parameters", "[ut][factory]") {
     vsag::logger::set_level(vsag::logger::level::debug);
 
     auto standard_parameters = vsag::JsonType::parse(R"(

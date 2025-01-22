@@ -50,7 +50,7 @@ calculate_overlap(const std::vector<uint32_t>& vec1, vsag::Vector<uint32_t>& vec
     return intersection.size();
 }
 
-TEST_CASE("build nndescent", "[ut][odescent]") {
+TEST_CASE("ODescent Build Test", "[ut][ODescent]") {
     auto num_vectors = GENERATE(2, 4, 11, 2000);
     size_t dim = 128;
     int64_t max_degree = 32;

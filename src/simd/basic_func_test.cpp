@@ -45,7 +45,7 @@ using namespace vsag;
         }                                                                              \
     };
 
-TEST_CASE("L2Sqr & InnerProduct SIMD Compute", "[ut][simd][basic]") {
+TEST_CASE("L2Sqr & InnerProduct SIMD Compute", "[ut][simd]") {
     auto dims = fixtures::get_common_used_dims(8, 217);
     int64_t count = 100;
     for (const auto& dim2 : dims) {
@@ -60,7 +60,7 @@ TEST_CASE("L2Sqr & InnerProduct SIMD Compute", "[ut][simd][basic]") {
     }
 }
 
-TEST_CASE("Int8 SIMD Compute", "[ut][simd][basic]") {
+TEST_CASE("Int8 SIMD Compute", "[ut][simd]") {
     auto dims = fixtures::get_common_used_dims(8, 217);
     int64_t count = 100;
     for (const auto& dim2 : dims) {
@@ -74,7 +74,7 @@ TEST_CASE("Int8 SIMD Compute", "[ut][simd][basic]") {
     }
 }
 
-TEST_CASE("pq calculation", "[ut][simd][basic]") {
+TEST_CASE("PQ Calculation", "[ut][simd]") {
     size_t dim = 256;
     float single_dim_value = 0.571;
     float results_expected[256]{0.0f};
