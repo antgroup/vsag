@@ -19,6 +19,7 @@
 
 #include <cstdint>
 
+#include "buffer_wrapper.h"
 #include "io_parameter.h"
 #include "stream_reader.h"
 #include "stream_writer.h"
@@ -43,7 +44,7 @@ namespace vsag {
 template <typename IOTmpl>
 class BasicIO {
 public:
-    BasicIO<IOTmpl>() = default;
+    explicit BasicIO<IOTmpl>(Allocator* allocator) : allocator_(allocator){};
 
     virtual ~BasicIO() = default;
 
@@ -100,21 +101,28 @@ public:
 
     inline void
     Serialize(StreamWriter& writer) {
-        if constexpr (has_SerializeImpl<IOTmpl>::value) {
-            cast().SerializeImpl(writer);
-        } else {
-            throw std::runtime_error(
-                fmt::format("class {} have no func named SerializeImpl", typeid(IOTmpl).name()));
+        StreamWriter::WriteObj(writer, this->size_);
+        BufferWrapper buffer(BUFFER_SIZE, this->allocator_);
+        uint64_t offset = 0;
+        while (offset < this->size_) {
+            auto cur_size = std::min(BUFFER_SIZE, this->size_ - offset);
+            this->Read(cur_size, offset, buffer.data);
+            writer.Write(reinterpret_cast<const char*>(buffer.data), cur_size);
+            offset += cur_size;
         }
     }
 
     inline void
     Deserialize(StreamReader& reader) {
-        if constexpr (has_DeserializeImpl<IOTmpl>::value) {
-            cast().DeserializeImpl(reader);
-        } else {
-            throw std::runtime_error(
-                fmt::format("class {} have no func named DeserializeImpl", typeid(IOTmpl).name()));
+        uint64_t size;
+        StreamReader::ReadObj(reader, size);
+        BufferWrapper buffer(BUFFER_SIZE, this->allocator_);
+        uint64_t offset = 0;
+        while (offset < size) {
+            auto cur_size = std::min(BUFFER_SIZE, size - offset);
+            reader.Read(reinterpret_cast<char*>(buffer.data), cur_size);
+            this->Write(buffer.data, cur_size, offset);
+            offset += cur_size;
         }
     }
 
@@ -128,6 +136,12 @@ public:
         }
     }
 
+public:
+    uint64_t size_{0};
+
+protected:
+    Allocator* const allocator_{nullptr};
+
 private:
     inline IOTmpl&
     cast() {
@@ -139,14 +153,14 @@ private:
         return static_cast<const IOTmpl&>(*this);
     }
 
+    constexpr static uint64_t BUFFER_SIZE = 1024 * 1024 * 2;
+
 private:
     GENERATE_HAS_MEMBER_FUNC(WriteImpl, void (U::*)(const uint8_t*, uint64_t, uint64_t))
     GENERATE_HAS_MEMBER_FUNC(ReadImpl, bool (U::*)(uint64_t, uint64_t, uint8_t*))
     GENERATE_HAS_MEMBER_FUNC(DirectReadImpl, const uint8_t* (U::*)(uint64_t, uint64_t, bool&))
     GENERATE_HAS_MEMBER_FUNC(MultiReadImpl, bool (U::*)(uint8_t*, uint64_t*, uint64_t*, uint64_t))
     GENERATE_HAS_MEMBER_FUNC(PrefetchImpl, void (U::*)(uint64_t, uint64_t))
-    GENERATE_HAS_MEMBER_FUNC(SerializeImpl, void (U::*)(StreamWriter&))
-    GENERATE_HAS_MEMBER_FUNC(DeserializeImpl, void (U::*)(StreamReader&))
     GENERATE_HAS_MEMBER_FUNC(ReleaseImpl, void (U::*)(const uint8_t*))
 };
 }  // namespace vsag
