@@ -13,33 +13,38 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "flatten_datacell_parameter.h"
+#include "bucket_datacell_parameter.h"
 
 #include <fmt/format-inl.h>
 
 #include "inner_string_params.h"
 
 namespace vsag {
-FlattenDataCellParameter::FlattenDataCellParameter() = default;
+BucketDataCellParameter::BucketDataCellParameter() = default;
 
 void
-FlattenDataCellParameter::FromJson(const JsonType& json) {
+BucketDataCellParameter::FromJson(const JsonType& json) {
     CHECK_ARGUMENT(json.contains(IO_PARAMS_KEY),
-                   fmt::format("flatten interface parameters must contains {}", IO_PARAMS_KEY));
+                   fmt::format("bucket interface parameters must contains {}", IO_PARAMS_KEY));
     this->io_parameter_ = IOParameter::GetIOParameterByJson(json[IO_PARAMS_KEY]);
 
     CHECK_ARGUMENT(
         json.contains(QUANTIZATION_PARAMS_KEY),
-        fmt::format("flatten interface parameters must contains {}", QUANTIZATION_PARAMS_KEY));
+        fmt::format("bucket interface parameters must contains {}", QUANTIZATION_PARAMS_KEY));
     this->quantizer_parameter_ =
         QuantizerParameter::GetQuantizerParameterByJson(json[QUANTIZATION_PARAMS_KEY]);
+
+    if (json.contains(BUCKETS_COUNT_KEY)) {
+        this->buckets_count_ = json[BUCKETS_COUNT_KEY];
+    }
 }
 
 JsonType
-FlattenDataCellParameter::ToJson() {
+BucketDataCellParameter::ToJson() {
     JsonType json;
     json[IO_PARAMS_KEY] = this->io_parameter_->ToJson();
     json[QUANTIZATION_PARAMS_KEY] = this->quantizer_parameter_->ToJson();
+    json[BUCKETS_COUNT_KEY] = this->buckets_count_;
     return json;
 }
 }  // namespace vsag
