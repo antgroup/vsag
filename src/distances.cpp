@@ -87,7 +87,7 @@ range_search_recall(const float* base,
     if (groundtruth->Count() == 0) {
         return 1;
     }
-    return (float)(result_size) / groundtruth->Count();
+    return (float)(result_size) / static_cast<float>(groundtruth->Count());
 }
 
 }  // namespace vsag

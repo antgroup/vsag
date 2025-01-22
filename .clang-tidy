@@ -16,7 +16,8 @@
 
 Checks: >
     -*,
-    # bugprone-*,
+    bugprone-*,
+    -bugprone-easily-swappable-parameters,
     # clang-analyzer-*,
     # clang-diagnostic-*,
     -clang-diagnostic-deprecated-builtins,

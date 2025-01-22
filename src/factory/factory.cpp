@@ -59,8 +59,8 @@ public:
     virtual void
     Read(uint64_t offset, uint64_t len, void* dest) override {
         std::lock_guard<std::mutex> lock(mutex_);
-        file_.seekg(base_offset_ + offset, std::ios::beg);
-        file_.read((char*)dest, len);
+        file_.seekg(static_cast<int64_t>(base_offset_ + offset), std::ios::beg);
+        file_.read((char*)dest, static_cast<int64_t>(len));
     }
 
     virtual void

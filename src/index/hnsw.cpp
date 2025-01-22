@@ -246,7 +246,7 @@ HNSW::knn_search(const DatasetPtr& query,
         // update stats
         {
             std::lock_guard<std::mutex> lock(stats_mutex_);
-            result_queues_[STATSTIC_KNN_TIME].Push(time_cost);
+            result_queues_[STATSTIC_KNN_TIME].Push(static_cast<float>(time_cost));
         }
 
         // return result
@@ -274,14 +274,16 @@ HNSW::knn_search(const DatasetPtr& query,
             results.pop();
         }
 
-        result->Dim(results.size())->NumElements(1)->Owner(true, allocator_.get());
+        result->Dim(static_cast<int64_t>(results.size()))
+            ->NumElements(1)
+            ->Owner(true, allocator_.get());
 
         auto* ids = (int64_t*)allocator_->Allocate(sizeof(int64_t) * results.size());
         result->Ids(ids);
         auto* dists = (float*)allocator_->Allocate(sizeof(float) * results.size());
         result->Distances(dists);
 
-        for (int64_t j = results.size() - 1; j >= 0; --j) {
+        for (int64_t j = static_cast<int64_t>(results.size() - 1); j >= 0; --j) {
             dists[j] = results.top().first;
             ids[j] = results.top().second;
             results.pop();
@@ -373,7 +375,7 @@ HNSW::range_search(const DatasetPtr& query,
         // update stats
         {
             std::lock_guard<std::mutex> lock(stats_mutex_);
-            result_queues_[STATSTIC_KNN_TIME].Push(time_cost);
+            result_queues_[STATSTIC_KNN_TIME].Push(static_cast<float>(time_cost));
         }
 
         // return result
@@ -386,12 +388,14 @@ HNSW::range_search(const DatasetPtr& query,
         if (limited_size >= 1) {
             target_size = std::min((size_t)limited_size, target_size);
         }
-        result->Dim(target_size)->NumElements(1)->Owner(true, allocator_.get());
+        result->Dim(static_cast<int64_t>(target_size))
+            ->NumElements(1)
+            ->Owner(true, allocator_.get());
         auto* ids = (int64_t*)allocator_->Allocate(sizeof(int64_t) * target_size);
         result->Ids(ids);
         auto* dists = (float*)allocator_->Allocate(sizeof(float) * target_size);
         result->Distances(dists);
-        for (int64_t j = results.size() - 1; j >= 0; --j) {
+        for (int64_t j = static_cast<int64_t>(results.size() - 1); j >= 0; --j) {
             if (j < target_size) {
                 dists[j] = results.top().first;
                 ids[j] = results.top().second;
@@ -808,7 +812,7 @@ HNSW::brute_force(const DatasetPtr& query, int64_t k) {
             alg_hnsw_->bruteForce(vector, k);
         result->Dim(std::min(k, (int64_t)bf_result.size()));
 
-        for (int i = result->GetDim() - 1; i >= 0; i--) {
+        for (int32_t i = static_cast<int32_t>(result->GetDim() - 1); i >= 0; i--) {
             ids[i] = bf_result.top().second;
             dists[i] = bf_result.top().first;
             bf_result.pop();
@@ -891,8 +895,9 @@ HNSW::pretrain(const std::vector<int64_t>& base_tag_ids,
 
             for (int d = 0; d < dim_; d++) {
                 if (type_ == DataTypes::DATA_TYPE_INT8) {
-                    generated_data.get()[d] = vsag::GENERATE_OMEGA * (float)(base_data[d]) +
-                                              (1 - vsag::GENERATE_OMEGA) * (float)(topk_data[d]);
+                    generated_data.get()[d] =
+                        vsag::GENERATE_OMEGA * (float)(base_data[d]) +  // NOLINT
+                        (1 - vsag::GENERATE_OMEGA) * (float)(topk_data[d]);
                 } else {
                     ((float*)generated_data.get())[d] =
                         vsag::GENERATE_OMEGA * ((float*)base_data.get())[d] +

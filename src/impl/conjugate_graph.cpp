@@ -61,7 +61,7 @@ ConjugateGraph::EnhanceResult(std::priority_queue<std::pair<float, LabelType>>& 
         return 0;
     }
 
-    int64_t k = results.size();
+    auto k = static_cast<int64_t>(results.size());
     int64_t look_at_k = std::min(LOOK_AT_K, k);
     std::priority_queue<std::pair<float, LabelType>> old_results(results);
     std::vector<int64_t> to_be_visited(look_at_k);
@@ -70,7 +70,7 @@ ConjugateGraph::EnhanceResult(std::priority_queue<std::pair<float, LabelType>>& 
     float distance = 0;
 
     // initialize visited_set
-    for (int j = old_results.size() - 1; j >= 0; j--) {
+    for (int64_t j = static_cast<int64_t>(old_results.size() - 1); j >= 0; j--) {
         visited_set.insert(old_results.top().second);
         if (j < look_at_k) {
             to_be_visited[j] = old_results.top().second;
@@ -130,7 +130,7 @@ ConjugateGraph::Serialize() const {
     out_ss.seekg(0, std::ios_base::beg);
 
     std::shared_ptr<int8_t[]> data(new int8_t[size]);
-    out_ss.read(reinterpret_cast<char*>(data.get()), size);
+    out_ss.read(reinterpret_cast<char*>(data.get()), static_cast<int64_t>(size));
 
     Binary binary{.data = data, .size = size};
     return binary;

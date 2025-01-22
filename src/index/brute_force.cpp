@@ -34,7 +34,7 @@ BruteForce::~BruteForce() {
 
 int64_t
 BruteForce::GetMemoryUsage() const {
-    return this->cal_serialize_size();
+    return static_cast<int64_t>(this->cal_serialize_size());
 }
 
 uint64_t
@@ -95,13 +95,15 @@ BruteForce::knn_search(const DatasetPtr& query,
         }
     }
     auto dataset_results = Dataset::Make();
-    dataset_results->Dim(heap.size())->NumElements(1)->Owner(true, allocator_.get());
+    dataset_results->Dim(static_cast<int64_t>(heap.size()))
+        ->NumElements(1)
+        ->Owner(true, allocator_.get());
 
     auto* ids = (int64_t*)allocator_->Allocate(sizeof(int64_t) * heap.size());
     dataset_results->Ids(ids);
     auto* dists = (float*)allocator_->Allocate(sizeof(float) * heap.size());
     dataset_results->Distances(dists);
-    for (int64_t j = heap.size() - 1; j >= 0; --j) {
+    for (int64_t j = static_cast<int64_t>(heap.size() - 1); j >= 0; --j) {
         dists[j] = heap.top().first;
         ids[j] = this->label_table_->GetLabelById(heap.top().second);
         heap.pop();
@@ -136,13 +138,15 @@ BruteForce::range_search(const DatasetPtr& query,
         }
     }
     auto dataset_results = Dataset::Make();
-    dataset_results->Dim(heap.size())->NumElements(1)->Owner(true, allocator_.get());
+    dataset_results->Dim(static_cast<int64_t>(heap.size()))
+        ->NumElements(1)
+        ->Owner(true, allocator_.get());
 
     auto* ids = (int64_t*)allocator_->Allocate(sizeof(int64_t) * heap.size());
     dataset_results->Ids(ids);
     auto* dists = (float*)allocator_->Allocate(sizeof(float) * heap.size());
     dataset_results->Distances(dists);
-    for (int64_t j = heap.size() - 1; j >= 0; --j) {
+    for (int64_t j = static_cast<int64_t>(heap.size() - 1); j >= 0; --j) {
         dists[j] = heap.top().first;
         ids[j] = this->label_table_->GetLabelById(heap.top().second);
         heap.pop();
