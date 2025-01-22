@@ -20,28 +20,22 @@
 #include <memory>
 
 #include "fixtures.h"
+#include "safe_allocator.h"
 
-class WrongIO : public vsag::BasicIO<WrongIO> {};
+class WrongIO : public vsag::BasicIO<WrongIO> {
+public:
+    WrongIO(vsag::Allocator* allocator) : vsag::BasicIO<WrongIO>(allocator){};
+};
 
 TEST_CASE("wrong io", "[ut][basic io]") {
-    auto io = std::make_shared<WrongIO>();
+    auto allocator = vsag::SafeAllocator::FactoryDefaultAllocator();
+    auto io = std::make_shared<WrongIO>(allocator.get());
     std::vector<uint8_t> data(100);
     bool release;
-    fixtures::TempDir dirname("TestWrongIO");
-    std::string filename = dirname.GenerateRandomFile();
-    std::ofstream outfile(filename.c_str(), std::ios::binary);
-    IOStreamWriter writer(outfile);
-    REQUIRE_THROWS(io->Serialize(writer));
-    outfile.close();
 
-    std::ifstream infile(filename.c_str(), std::ios::binary);
-    IOStreamReader reader(infile);
     REQUIRE_THROWS(io->Read(1, 0, data.data()));
     REQUIRE_THROWS(io->Write(data.data(), 1, 0));
     REQUIRE_THROWS(io->Read(1, 0, release));
-    REQUIRE_THROWS(io->Deserialize(reader));
     REQUIRE_THROWS(io->Prefetch(1, 0));
     REQUIRE_THROWS(io->MultiRead(data.data(), nullptr, nullptr, 1));
-
-    infile.close();
 }

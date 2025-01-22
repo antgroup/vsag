@@ -28,9 +28,8 @@ namespace vsag {
 
 class MemoryIO : public BasicIO<MemoryIO> {
 public:
-    explicit MemoryIO(Allocator* allocator) : allocator_(allocator) {
-        start_ = reinterpret_cast<uint8_t*>(allocator_->Allocate(MIN_SIZE));
-        current_size_ = MIN_SIZE;
+    explicit MemoryIO(Allocator* allocator) : BasicIO<MemoryIO>(allocator) {
+        start_ = static_cast<uint8_t*>(allocator->Allocate(1));
     }
 
     explicit MemoryIO(const MemoryIOParamPtr& param, const IndexCommonParam& common_param)
@@ -42,7 +41,7 @@ public:
     }
 
     ~MemoryIO() override {
-        allocator_->Deallocate(start_);
+        this->allocator_->Deallocate(start_);
     }
 
     inline void
@@ -63,32 +62,18 @@ public:
     inline void
     PrefetchImpl(uint64_t offset, uint64_t cache_line = 64);
 
-    inline void
-    SerializeImpl(StreamWriter& writer);
-
-    inline void
-    DeserializeImpl(StreamReader& reader);
-
 private:
-    [[nodiscard]] inline bool
-    check_valid_offset(uint64_t size) const {
-        return size <= current_size_;
-    }
-
     void
     check_and_realloc(uint64_t size) {
-        if (check_valid_offset(size)) {
+        if (size <= this->size_) {
             return;
         }
-        start_ = reinterpret_cast<uint8_t*>(allocator_->Reallocate(start_, size));
-        current_size_ = size;
+        start_ = reinterpret_cast<uint8_t*>(this->allocator_->Reallocate(start_, size));
+        this->size_ = size;
     }
 
 private:
-    Allocator* const allocator_{nullptr};
     uint8_t* start_{nullptr};
-    uint64_t current_size_{0};
-    static const uint64_t MIN_SIZE = 1024;
 };
 
 void
@@ -127,18 +112,4 @@ void
 MemoryIO::PrefetchImpl(uint64_t offset, uint64_t cache_line) {
     PrefetchLines(this->start_ + offset, cache_line);
 }
-void
-MemoryIO::SerializeImpl(StreamWriter& writer) {
-    StreamWriter::WriteObj(writer, this->current_size_);
-    writer.Write(reinterpret_cast<char*>(this->start_), current_size_);
-}
-
-void
-MemoryIO::DeserializeImpl(StreamReader& reader) {
-    allocator_->Deallocate(this->start_);
-    StreamReader::ReadObj(reader, this->current_size_);
-    this->start_ = static_cast<uint8_t*>(allocator_->Allocate(this->current_size_));
-    reader.Read(reinterpret_cast<char*>(this->start_), current_size_);
-}
-
 }  // namespace vsag
