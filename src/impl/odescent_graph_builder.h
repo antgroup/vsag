@@ -22,6 +22,8 @@
 #include <vector>
 
 #include "data_cell/flatten_datacell.h"
+#include "data_cell/graph_datacell.h"
+#include "data_cell/sparse_graph_datacell.h"
 #include "logger.h"
 #include "safe_allocator.h"
 #include "simd/simd.h"
@@ -69,7 +71,6 @@ struct Linklist {
         : neighbors(allocator), greast_neighbor_distance(std::numeric_limits<float>::max()) {
     }
 };
-
 class ODescent {
 public:
     ODescent(int64_t max_degree,
@@ -93,17 +94,20 @@ public:
     }
 
     bool
-    Build();
+    Build(const uint32_t* valid_ids = nullptr, int64_t data_num = 0);
 
     void
     SaveGraph(std::stringstream& out);
 
-    Vector<Vector<uint32_t>>
-    GetGraph();
+    void
+    SaveGraph(GraphInterfacePtr& graph_storage);
 
 private:
     inline float
     get_distance(uint32_t loc1, uint32_t loc2) {
+        if (valid_ids_ != nullptr) {
+            return flatten_interface_->ComputePairVectors(valid_ids_[loc1], valid_ids_[loc2]);
+        }
         return flatten_interface_->ComputePairVectors(loc1, loc2);
     }
 
@@ -144,6 +148,8 @@ private:
     int64_t block_size_{10000};
     Vector<std::mutex> points_lock_;
     SafeThreadPool* thread_pool_;
+
+    const uint32_t* valid_ids_{nullptr};
 
     bool pruning_{true};
     float sample_rate_{0.3};
