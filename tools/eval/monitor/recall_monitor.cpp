@@ -20,7 +20,7 @@
 #include "../eval_dataset.h"
 namespace vsag::eval {
 
-static const double THRESHOLD_ERROR = 1e-5;
+static const double THRESHOLD_ERROR = 2e-6;
 
 static double
 get_recall(const float* distances,
