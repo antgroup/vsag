@@ -148,6 +148,11 @@ public:
         SAFE_CALL(return alg_hnsw_->getDistanceByLabel(id, vector));
     };
 
+    virtual tl::expected<DatasetPtr, Error>
+    CalDistanceById(const float* vector, const int64_t* ids, int64_t count) const override {
+        SAFE_CALL(return alg_hnsw_->getBatchDistanceByLabel(ids, vector, count));
+    };
+
     [[nodiscard]] bool
     CheckFeature(IndexFeature feature) const override;
 

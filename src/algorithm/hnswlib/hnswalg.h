@@ -38,6 +38,7 @@
 #include "algorithm_interface.h"
 #include "block_manager.h"
 #include "visited_list_pool.h"
+#include "vsag/dataset.h"
 namespace hnswlib {
 using InnerIdType = vsag::InnerIdType;
 using linklistsizeint = unsigned int;
@@ -145,6 +146,9 @@ public:
 
     float
     getDistanceByLabel(LabelType label, const void* data_point) override;
+
+    tl::expected<vsag::DatasetPtr, vsag::Error>
+    getBatchDistanceByLabel(const int64_t* ids, const void* data_point, int64_t count) override;
 
     bool
     isValidLabel(LabelType label) override;

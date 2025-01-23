@@ -262,6 +262,30 @@ public:
         return dist;
     }
 
+    tl::expected<vsag::DatasetPtr, vsag::Error>
+    getBatchDistanceByLabel(const int64_t* ids, const void* data_point, int64_t count) override {
+        std::unique_lock<std::mutex> lock_table(label_lookup_lock);
+        int64_t valid_cnt = 0;
+        auto result = vsag::Dataset::Make();
+        result->Owner(true, allocator_);
+        auto* distances = (float*)allocator_->Allocate(sizeof(float) * count);
+        result->Distances(distances);
+        for (int i = 0; i < count; i++) {
+            auto search = label_lookup_.find(ids[i]);
+            if (search == label_lookup_.end()) {
+                distances[i] = -1;
+            } else {
+                InnerIdType internal_id = search->second;
+                float dist =
+                    fstdistfunc_(data_point, getDataByInternalId(internal_id), dist_func_param_);
+                distances[i] = dist;
+                valid_cnt++;
+            }
+        }
+        result->NumElements(valid_cnt);
+        return std::move(result);
+    }
+
     void
     copyDataByLabel(LabelType label, void* data_point) override {
         std::unique_lock lock_table(label_lookup_lock);
