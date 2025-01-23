@@ -34,7 +34,7 @@ public:
 
     static std::vector<int> dims;
 
-    constexpr static uint64_t base_count = 1000;
+    constexpr static uint64_t base_count = 3000;
 
     constexpr static const char* search_param_tmp = R"(
         {{
@@ -82,5 +82,35 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
         auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type, /*with_path=*/true);
         TestContinueAdd(index, dataset, true);
         TestKnnSearch(index, dataset, search_param, 0.99, true);
+        TestFilterSearch(index, dataset, search_param, 0.99, true);
+        TestRangeSearch(index, dataset, search_param, 0.99, 10, true);
+        TestRangeSearch(index, dataset, search_param, 0.49, 5, true);
     }
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
+                             "Pyramid Serialize File",
+                             "[ft][pyramid]") {
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    auto size = GENERATE(1024 * 1024 * 2);
+    auto metric_type = GENERATE("l2", "ip", "cosine");
+    const std::string name = "pyramid";
+    auto search_param = fmt::format(search_param_tmp, 200);
+
+    for (auto& dim : dims) {
+        vsag::Options::Instance().set_block_size_limit(size);
+        auto param = GeneratePyramidBuildParametersString(metric_type, dim);
+        auto index = TestFactory(name, param, true);
+        auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type, /*with_path=*/true);
+        TestBuildIndex(index, dataset, true);
+        SECTION("serialize/deserialize by binary") {
+            auto index2 = TestFactory(name, param, true);
+            TestSerializeBinarySet(index, index2, dataset, search_param, true);
+        }
+        SECTION("serialize/deserialize by binary") {
+            auto index2 = TestFactory(name, param, true);
+            TestSerializeReaderSet(index, index2, dataset, search_param, name, true);
+        }
+    }
+    vsag::Options::Instance().set_block_size_limit(origin_size);
 }
