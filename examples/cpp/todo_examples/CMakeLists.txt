@@ -33,3 +33,9 @@ target_link_libraries(304_feature_enhance_graph vsag)
 
 add_executable (305_feature_remove 305_feature_remove.cpp)
 target_link_libraries (305_feature_remove vsag_static)
+
+add_executable (401_persistent_kv 401_persistent_kv.cpp)
+target_link_libraries (401_persistent_kv vsag)
+
+add_executable (402_persistent_streaming 402_persistent_streaming.cpp)
+target_link_libraries (402_persistent_streaming vsag)
