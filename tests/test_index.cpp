@@ -305,7 +305,7 @@ TestIndex::TestKnnSearch(const IndexPtr& index,
         if (!expected_success) {
             return;
         }
-        REQUIRE(res.value()->GetDim() == topk);
+        REQUIRE(res.value()->GetNumResults() == topk);
         auto result = res.value()->GetIds();
         auto gt = gts->GetIds() + gt_topK * i;
         auto val = Intersection(gt, gt_topK, result, topk);
@@ -345,11 +345,11 @@ TestIndex::TestRangeSearch(const IndexPtr& index,
             return;
         }
         if (limited_size > 0) {
-            REQUIRE(res.value()->GetDim() <= limited_size);
+            REQUIRE(res.value()->GetNumResults() <= limited_size);
         }
         auto result = res.value()->GetIds();
         auto gt = gts->GetIds() + gt_topK * i;
-        auto val = Intersection(gt, gt_topK, result, res.value()->GetDim());
+        auto val = Intersection(gt, gt_topK, result, res.value()->GetNumResults());
         cur_recall += static_cast<float>(val) / static_cast<float>(gt_topK);
     }
     if (cur_recall <= expected_recall * query_count) {
@@ -383,7 +383,7 @@ TestIndex::TestFilterSearch(const TestIndex::IndexPtr& index,
         if (!expected_success) {
             return;
         }
-        REQUIRE(res.value()->GetDim() == topk);
+        REQUIRE(res.value()->GetNumResults() == topk);
         auto result = res.value()->GetIds();
         auto gt = gts->GetIds() + gt_topK * i;
         auto val = Intersection(gt, gt_topK, result, topk);
@@ -452,7 +452,7 @@ TestIndex::TestSerializeFile(const IndexPtr& index_from,
         auto res_to = index_to->KnnSearch(query, topk, search_param);
         REQUIRE(res_from.has_value());
         REQUIRE(res_to.has_value());
-        REQUIRE(res_from.value()->GetDim() == res_to.value()->GetDim());
+        REQUIRE(res_from.value()->GetNumResults() == res_to.value()->GetNumResults());
         for (auto j = 0; j < topk; ++j) {
             REQUIRE(res_to.value()->GetIds()[j] == res_from.value()->GetIds()[j]);
         }
@@ -535,7 +535,7 @@ TestIndex::TestSerializeBinarySet(const IndexPtr& index_from,
         auto res_to = index_to->KnnSearch(query, topk, search_param);
         REQUIRE(res_from.has_value());
         REQUIRE(res_to.has_value());
-        REQUIRE(res_from.value()->GetDim() == res_to.value()->GetDim());
+        REQUIRE(res_from.value()->GetNumResults() == res_to.value()->GetNumResults());
         for (auto j = 0; j < topk; ++j) {
             REQUIRE(res_to.value()->GetIds()[j] == res_from.value()->GetIds()[j]);
         }
@@ -573,7 +573,7 @@ TestIndex::TestSerializeReaderSet(const IndexPtr& index_from,
         auto res_to = index_to->KnnSearch(query, topk, search_param);
         REQUIRE(res_from.has_value());
         REQUIRE(res_to.has_value());
-        REQUIRE(res_from.value()->GetDim() == res_to.value()->GetDim());
+        REQUIRE(res_from.value()->GetNumResults() == res_to.value()->GetNumResults());
         for (auto j = 0; j < topk; ++j) {
             REQUIRE(res_to.value()->GetIds()[j] == res_from.value()->GetIds()[j]);
         }
@@ -662,7 +662,7 @@ TestIndex::TestConcurrentKnnSearch(const TestIndex::IndexPtr& index,
         if (!expected_success) {
             return;
         }
-        REQUIRE(res.value()->GetDim() == topk);
+        REQUIRE(res.value()->GetNumResults() == topk);
         auto result = res.value()->GetIds();
         auto gt = gts->GetIds() + gt_topK * id;
         auto val = Intersection(gt, gt_topK, result, topk);

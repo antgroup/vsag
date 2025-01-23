@@ -106,6 +106,23 @@ public:
     GetDim() const = 0;
 
     /**
+     * @brief Sets the number of results to be retrieved from the dataset.
+     *
+     * @param num_results The number of results to retrieve.
+     * @return DatasetPtr A shared pointer to the dataset with updated number of results.
+     */
+    virtual DatasetPtr
+    NumResults(int64_t num_results) = 0;
+
+    /**
+     * @brief Retrieves the number of results currently set for the dataset.
+     *
+     * @return int64_t The number of results.
+     */
+    virtual int64_t
+    GetNumResults() const = 0;
+
+    /**
      * @brief Sets the ID array for the dataset.
      *
      * @param ids Pointer to the array of IDs.

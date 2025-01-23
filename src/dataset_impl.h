@@ -92,6 +92,8 @@ public:
 
     DatasetPtr
     Dim(int64_t dim) override {
+        // To maintain compatibility, we currently ensure that the values in NumResults and Dim are the same.
+        this->data_[NUM_RESULTS] = dim;
         this->data_[DIM] = dim;
         return shared_from_this();
     }
@@ -102,6 +104,22 @@ public:
             return std::get<int64_t>(iter->second);
         }
 
+        return 0;
+    }
+
+    DatasetPtr
+    NumResults(int64_t num_results) override {
+        // To maintain compatibility, we currently ensure that the values in NumResults and Dim are the same.
+        this->data_[NUM_RESULTS] = num_results;
+        this->data_[DIM] = num_results;
+        return shared_from_this();
+    }
+
+    int64_t
+    GetNumResults() const override {
+        if (auto iter = this->data_.find(NUM_RESULTS); iter != this->data_.end()) {
+            return std::get<int64_t>(iter->second);
+        }
         return 0;
     }
 
