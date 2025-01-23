@@ -117,10 +117,10 @@ reader_to_readerset(std::shared_ptr<Reader> reader) {
         reader->Read(offset, sizeof(size_t), &binary_size);
         offset += sizeof(size_t);
 
-        auto new_eader = std::make_shared<SubReader>(reader, offset, binary_size);
+        auto new_reader = std::make_shared<SubReader>(reader, offset, binary_size);
         offset += binary_size;
 
-        reader_set.Set(key, new_eader);
+        reader_set.Set(key, new_reader);
     }
 
     return reader_set;
