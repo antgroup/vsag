@@ -191,11 +191,24 @@ HNSW::knn_search_internal(const DatasetPtr& query,
     }
 };
 
+template <typename FilterType>
+tl::expected<DatasetPtr, Error>
+HNSW::knn_search_internal(const DatasetPtr& query,
+                          int64_t k,
+                          const std::string& parameters,
+                          const FilterType& filter_obj,
+                          const int64_t totalValid) const {
+    BitsetOrCallbackFilter filter(filter_obj);
+    return this->knn_search(query, k, parameters, &filter, totalValid);
+    
+};
+
 tl::expected<DatasetPtr, Error>
 HNSW::knn_search(const DatasetPtr& query,
                  int64_t k,
                  const std::string& parameters,
-                 BaseFilterFunctor* filter_ptr) const {
+                 BaseFilterFunctor* filter_ptr,
+                 const int64_t totalValid) const {
 #ifndef ENABLE_TESTS
     SlowTaskTimer t_total("hnsw knnsearch", 20);
 #endif
@@ -236,7 +249,7 @@ HNSW::knn_search(const DatasetPtr& query,
                 k = std::max(k, LOOK_AT_K);
             }
             results = alg_hnsw_->searchKnn(
-                (const void*)(vector), k, std::max(params.ef_search, k), filter_ptr);
+                (const void*)(vector), k, std::max(params.ef_search, k), filter_ptr, totalValid);
         } catch (const std::runtime_error& e) {
             LOG_ERROR_AND_RETURNS(ErrorType::INTERNAL_ERROR,
                                   "failed to perofrm knn_search(internalError): ",

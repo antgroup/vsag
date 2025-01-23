@@ -124,7 +124,8 @@ tl::expected<DatasetPtr, Error>
 SimpleFlat::KnnSearch(const DatasetPtr& query,
                       int64_t k,
                       const std::string& parameters,
-                      const std::function<bool(int64_t)>& filter) const {
+                      const std::function<bool(int64_t)>& filter,
+                      const int64_t totalValid) const {
     int64_t dim = query->GetDim();
     k = std::min(k, GetNumElements());
     int64_t num_elements = query->GetNumElements();

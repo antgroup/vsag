@@ -39,7 +39,8 @@ public:
     searchKnn(const void*,
               size_t,
               size_t,
-              vsag::BaseFilterFunctor* isIdAllowed = nullptr) const = 0;
+              vsag::BaseFilterFunctor* isIdAllowed = nullptr,
+              const int64_t totalValid = 0) const = 0;
 
     virtual std::priority_queue<std::pair<dist_t, LabelType>>
     searchRange(const void*,

@@ -205,6 +205,7 @@ public:
     std::priority_queue<std::pair<float, LabelType>>
     bruteForce(const void* data_point, int64_t k) override;
 
+
     int
     getRandomLevel(double reverse_size);
 
@@ -233,6 +234,14 @@ public:
                       size_t ef,
                       vsag::BaseFilterFunctor* isIdAllowed = nullptr) const;
 
+    template <bool has_deletions, bool collect_metrics = false>
+    MaxHeap
+    searchBaseLayerST(InnerIdType ep_id,
+                      const void* data_point,
+                      size_t ef,
+                      vsag::BaseFilterFunctor* isIdAllowed,
+                      const int64_t totalValid,
+                      const size_t k) const;
     template <bool has_deletions, bool collect_metrics = false>
     MaxHeap
     searchBaseLayerST(InnerIdType ep_id,
@@ -384,7 +393,11 @@ public:
     searchKnn(const void* query_data,
               size_t k,
               uint64_t ef,
-              vsag::BaseFilterFunctor* isIdAllowed = nullptr) const override;
+              vsag::BaseFilterFunctor* isIdAllowed = nullptr,
+              const int64_t totalValid = 0) const override;
+
+    std::priority_queue<std::pair<float, LabelType>>
+    searchKnnBF(const void* data_point, int64_t k, vsag::BaseFilterFunctor* isIdAllowed) const;
 
     std::priority_queue<std::pair<float, LabelType>>
     searchRange(const void* query_data,

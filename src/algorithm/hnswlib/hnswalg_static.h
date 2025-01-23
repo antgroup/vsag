@@ -1425,7 +1425,8 @@ public:
     searchKnn(const void* query_data,
               size_t k,
               uint64_t ef,
-              vsag::BaseFilterFunctor* isIdAllowed = nullptr) const override {
+              vsag::BaseFilterFunctor* isIdAllowed = nullptr,
+              const int64_t totalValid = 0) const override {
         std::priority_queue<std::pair<float, LabelType>> result;
         if (cur_element_count_ == 0)
             return result;
