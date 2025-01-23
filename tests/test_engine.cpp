@@ -20,7 +20,7 @@
 #include "fixtures/test_logger.h"
 #include "vsag/vsag.h"
 
-TEST_CASE("index params", "[ft][engine]") {
+TEST_CASE("Test Engine", "[ft][engine]") {
     int dim = 16;
     int max_elements = 1000;
     int max_degree = 16;

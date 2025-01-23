@@ -20,7 +20,7 @@
 
 #include "fixtures/test_logger.h"
 
-TEST_CASE("CPU info", "[ft][cpuinfo]") {
+TEST_CASE("Test CPU Info", "[ft][cpu_info]") {
     cpuinfo_initialize();
     fixtures::logger::debug << cpuinfo_get_processors_count() << std::endl;
     cpuinfo_deinitialize();

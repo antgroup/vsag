@@ -40,7 +40,7 @@ TestQuantizerEncodeDecodeMetricSQ4(uint64_t dim,
     TestQuantizerEncodeDecodeSame(quantizer, dim, count, 15, error_same);
 }
 
-TEST_CASE("Encode and Decode", "[ut][SQ4Quantizer]") {
+TEST_CASE("SQ4 Encode and Decode", "[ut][SQ4Quantizer]") {
     constexpr MetricType metrics[2] = {MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_IP};
     float error = 2 * 1.0f / 15.0f;
     for (auto dim : dims) {
@@ -61,7 +61,7 @@ TestComputeMetricSQ4(uint64_t dim, int count, float error = 1e-5) {
     TestComputer<SQ4Quantizer<metric>, metric>(quantizer, dim, count, error);
 }
 
-TEST_CASE("compute [ut][sq4_quantizer]") {
+TEST_CASE("SQ4 Compute", "[ut][SQ4Quantizer]") {
     constexpr MetricType metrics[3] = {
         MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_COSINE, MetricType::METRIC_TYPE_IP};
 
@@ -85,7 +85,7 @@ TestSerializeAndDeserializeMetricSQ4(uint64_t dim, int count, float error = 1e-5
         quantizer1, quantizer2, dim, count, error);
 }
 
-TEST_CASE("serialize&deserialize [ut][sq4_quantizer]") {
+TEST_CASE("SQ4 Serialize and Deserialize", "[ut][SQ4Quantizer]") {
     constexpr MetricType metrics[3] = {
         MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_COSINE, MetricType::METRIC_TYPE_IP};
     for (auto dim : dims) {

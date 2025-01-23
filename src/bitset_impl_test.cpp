@@ -22,7 +22,7 @@
 
 using namespace roaring;
 
-TEST_CASE("bitsetimpl", "[ut][bitset]") {
+TEST_CASE("BitsetImpl Test", "[ut][bitset]") {
     vsag::BitsetImpl bitset;
 
     // empty
@@ -49,7 +49,7 @@ TEST_CASE("bitsetimpl", "[ut][bitset]") {
     REQUIRE(dumped == "{100}");
 }
 
-TEST_CASE("roaringbitmap example", "[ut][bitset]") {
+TEST_CASE("Roaring Bitmap Test", "[ut][bitset]") {
     Roaring r1;
     for (uint32_t i = 100; i < 1000; i++) {
         r1.add(i);

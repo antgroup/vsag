@@ -18,7 +18,7 @@
 #include "index_common_param.h"
 #include "resource_owner_wrapper.h"
 
-TEST_CASE("create common parameter", "[ut]") {
+TEST_CASE("IndexCommonParam Basic Test", "[ut][IndexCommonParam]") {
     std::shared_ptr<vsag::Resource> resource =
         std::make_shared<vsag::ResourceOwnerWrapper>(new vsag::Resource(), true);
     SECTION("worng metric type") {

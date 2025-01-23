@@ -37,7 +37,7 @@ TestSparseGraphDataCell(const GraphInterfaceParamPtr& param, const IndexCommonPa
     test.BasicTest(max_id, count, other);
 }
 
-TEST_CASE("sparse graph basic test", "[ut][sparse_graph_datacell]") {
+TEST_CASE("SparseGraphDataCell Basic Test", "[ut][SparseGraphDataCell]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     auto dim = GENERATE(32, 64);
     auto max_degree = GENERATE(5, 12, 32, 64, 128);

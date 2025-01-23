@@ -21,7 +21,7 @@
 
 using namespace vsag;
 
-TEST_CASE("memory_io_parameter", "[ut][memory_io]") {
+TEST_CASE("MemoryIOParameter Test", "[ut][MemoryIOParameter]") {
     std::string param_str = "{}";
     auto param = std::make_shared<MemoryIOParameter>();
     param->FromJson(param_str);

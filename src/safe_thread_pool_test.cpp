@@ -17,7 +17,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
-TEST_CASE("test safe thread pool", "[ut][thread_pool]") {
+TEST_CASE("SafeThreadPool Basic Test", "[ut][SafeThreadPool]") {
     auto thread_pool = vsag::SafeThreadPool::FactoryDefaultThreadPool();
     int data = 0;
     std::mutex m;

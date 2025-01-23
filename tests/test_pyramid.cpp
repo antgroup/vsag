@@ -70,7 +70,7 @@ PyramidTestIndex::GeneratePyramidBuildParametersString(const std::string& metric
 }  // namespace fixtures
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
-                             "Pyramid Build  & ContinueAdd Test",
+                             "Pyramid Build & ContinueAdd Test",
                              "[ft][pyramid]") {
     auto metric_type = GENERATE("l2");
     std::string base_quantization_str = GENERATE("fp32");

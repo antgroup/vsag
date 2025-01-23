@@ -21,7 +21,7 @@
 
 using namespace vsag;
 
-TEST_CASE("sq4_quantizer_parameter", "[ut][sq4_quantizer_parameter]") {
+TEST_CASE("SQ4 Quantizer Parameter ToJson Test", "[ut][SQ4QuantizerParameter]") {
     std::string param_str = "{}";
     auto param = std::make_shared<SQ4QuantizerParameter>();
     param->FromJson(param_str);

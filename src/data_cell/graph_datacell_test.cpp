@@ -34,7 +34,7 @@ TestGraphDataCell(const GraphInterfaceParamPtr& param, const IndexCommonParam& c
     test.BasicTest(max_id, count, other);
 }
 
-TEST_CASE("graph basic test", "[ut][graph_datacell]") {
+TEST_CASE("GraphDataCell Basic Test", "[ut][GraphDataCell]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     auto dim = GENERATE(32, 64);
     auto max_degree = GENERATE(5, 32, 64, 128);

@@ -23,7 +23,7 @@
 #include "vsag/dataset.h"
 #include "vsag/vsag_ext.h"
 
-TEST_CASE("dataset handler", "[ft][ext]") {
+TEST_CASE("Test DatasetHandler", "[ft][ext]") {
     vsag::ext::DatasetHandler* dh = nullptr;
     SECTION("make") {
         dh = vsag::ext::DatasetHandler::Make();
@@ -58,7 +58,7 @@ TEST_CASE("dataset handler", "[ft][ext]") {
     delete dh;
 }
 
-TEST_CASE("bitset handler", "[ft][ext]") {
+TEST_CASE("Test BitsetHandler", "[ft][ext]") {
     vsag::ext::BitsetHandler* bh = vsag::ext::BitsetHandler::Make();
 
     CHECK_FALSE(bh->Test(12345678));
@@ -73,7 +73,7 @@ TEST_CASE("bitset handler", "[ft][ext]") {
     delete bh;
 }
 
-TEST_CASE("index handler", "[ft][ext]") {
+TEST_CASE("Test IndexHandler", "[ft][ext]") {
     int num_vectors = 100;
     int dim = 16;
     auto parameters = R"(

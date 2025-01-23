@@ -39,7 +39,7 @@ TestQuantizerEncodeDecodeMetricSQ8(uint64_t dim,
     TestQuantizerEncodeDecodeSame(quantizer, dim, count, 255, error_same);
 }
 
-TEST_CASE("encode&decode [SQ8Quantizer]") {
+TEST_CASE("SQ8 Encode and Decode", "[ut][SQ8Quantizer]") {
     auto dims = fixtures::get_common_used_dims();
     constexpr MetricType metrics[2] = {MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_IP};
     float error = 1e-2f;
@@ -61,7 +61,7 @@ TestComputeMetricSQ8(uint64_t dim, int count, float error = 1e-5) {
     TestComputer<SQ8Quantizer<metric>, metric>(quantizer, dim, count, error);
 }
 
-TEST_CASE("compute [ut][sq8_quantizer]") {
+TEST_CASE("SQ8 Compute", "[ut][SQ8Quantizer]") {
     auto dims = fixtures::get_common_used_dims();
     constexpr MetricType metrics[3] = {
         MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_COSINE, MetricType::METRIC_TYPE_IP};
@@ -85,7 +85,7 @@ TestSerializeAndDeserializeMetricSQ8(uint64_t dim, int count, float error = 1e-5
         quantizer1, quantizer2, dim, count, error);
 }
 
-TEST_CASE("serialize&deserialize [ut][sq8_quantizer]") {
+TEST_CASE("SQ8 Serialize and Deserialize", "[ut][SQ8Quantizer]") {
     auto dims = fixtures::get_common_used_dims();
     constexpr MetricType metrics[3] = {
         MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_COSINE, MetricType::METRIC_TYPE_IP};
