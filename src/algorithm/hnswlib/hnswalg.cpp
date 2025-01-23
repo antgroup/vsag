@@ -18,6 +18,11 @@
 
 #include <memory>
 namespace hnswlib {
+
+constexpr float kHnswSearchKnnBFFilterThreshold = 0.93f;
+constexpr float kHnswSearchRangeBFFilterThreshold = 0.97f;
+constexpr float kHnswSearchBFTopkThreshold = 0.5f;
+
 HierarchicalNSW::HierarchicalNSW(SpaceInterface* s,
                                  size_t max_elements,
                                  vsag::Allocator* allocator,
@@ -287,6 +292,25 @@ HierarchicalNSW::bruteForce(const void* data_point, int64_t k) {
     return results;
 }
 
+std::priority_queue<std::pair<float, LabelType>>
+HierarchicalNSW::searchKnnBF(const void* data_point, int64_t k, vsag::BaseFilterFunctor* isIdAllowed) const {
+    std::priority_queue<std::pair<float, LabelType>> results;
+    for (uint32_t i = 0; i < cur_element_count_; i++) {
+        if (!isIdAllowed) continue;
+        float dist = fstdistfunc_(data_point, getDataByInternalId(i), dist_func_param_);
+        if (results.size() < k) {
+            results.emplace(dist, this->getExternalLabel(i));
+        } else {
+            float current_max_dist = results.top().first;
+            if (dist < current_max_dist) {
+                results.pop();
+                results.emplace(dist, this->getExternalLabel(i));
+            }
+        }
+    }
+    return results;
+}
+
 int
 HierarchicalNSW::getRandomLevel(double reverse_size) {
     std::uniform_real_distribution<double> distribution(0.0, 1.0);
@@ -424,11 +448,8 @@ HierarchicalNSW::searchBaseLayerST(InnerIdType ep_id,
         for (size_t j = 1; j <= size; j++) {
             int candidate_id = *(data + j);
             size_t pre_l = std::min(j, size - 2);
-            vector_data_ptr =
-                data_level0_memory_->GetElementPtr((*(data + pre_l + 1)), offset_data_);
 #ifdef USE_SSE
             _mm_prefetch((char*)(visited_array + *(data + pre_l + 1)), _MM_HINT_T0);
-            _mm_prefetch(vector_data_ptr, _MM_HINT_T0);  ////////////
 #endif
             int status = Neighbor::kValid;
             if (visited_array[candidate_id] != visited_array_tag) {
@@ -1471,6 +1492,16 @@ HierarchicalNSW::searchKnn(const void* query_data,
 
     std::shared_ptr<float[]> normalize_query;
     normalizeVector(query_data, normalize_query);
+    const int64_t total_cnt = max_elements_;
+    float filter_rate = 1.0 - (float)totalValid / (float)total_cnt;
+    if (k >= (cur_element_count_ * kHnswSearchBFTopkThreshold)) {
+        return this->searchKnnBF(query_data, k, isIdAllowed);
+    }
+
+    if (filter_rate >= kHnswSearchKnnBFFilterThreshold) {
+        return this->searchKnnBF(query_data, k, isIdAllowed);
+    }
+
     int64_t currObj;
     {
         std::shared_lock data_loc(max_level_mutex_);

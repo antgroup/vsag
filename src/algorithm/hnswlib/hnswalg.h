@@ -205,6 +205,7 @@ public:
     std::priority_queue<std::pair<float, LabelType>>
     bruteForce(const void* data_point, int64_t k) override;
 
+
     int
     getRandomLevel(double reverse_size);
 
@@ -394,6 +395,9 @@ public:
               uint64_t ef,
               vsag::BaseFilterFunctor* isIdAllowed = nullptr,
               const int64_t totalValid = 0) const override;
+
+    std::priority_queue<std::pair<float, LabelType>>
+    searchKnnBF(const void* data_point, int64_t k, vsag::BaseFilterFunctor* isIdAllowed) const;
 
     std::priority_queue<std::pair<float, LabelType>>
     searchRange(const void* query_data,
