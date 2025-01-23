@@ -458,6 +458,56 @@ TestIndex::TestSerializeFile(const IndexPtr& index_from,
         }
     }
 }
+void
+TestIndex::TestSearchWithDirtyVector(const TestIndex::IndexPtr& index,
+                                     const TestDatasetPtr& dataset,
+                                     const std::string& search_param,
+                                     bool expected_success) {
+    auto queries = dataset->query_;
+    auto query_count = queries->GetNumElements();
+    auto dim = queries->GetDim();
+    auto gts = dataset->ground_truth_;
+    auto gt_topK = dataset->top_k;
+    auto topk = gt_topK;
+    int valid_query_count = static_cast<int64_t>(query_count * 0.9);
+    for (auto i = 0; i < valid_query_count; ++i) {
+        auto query = vsag::Dataset::Make();
+        query->NumElements(1)
+            ->Dim(dim)
+            ->Float32Vectors(queries->GetFloat32Vectors() + i * dim)
+            ->Owner(false);
+        auto res = index->KnnSearch(query, topk, search_param);
+        REQUIRE(res.has_value() == expected_success);
+        if (!expected_success) {
+            return;
+        }
+        REQUIRE(res.value()->GetDim() == topk);
+    }
+
+    const auto& radius = dataset->range_radius_;
+    for (auto i = 0; i < valid_query_count; ++i) {
+        auto query = vsag::Dataset::Make();
+        query->NumElements(1)
+            ->Dim(dim)
+            ->Float32Vectors(queries->GetFloat32Vectors() + i * dim)
+            ->Owner(false);
+        if (std::isnan(radius[i])) {
+            continue;
+        }
+        auto res = index->RangeSearch(query, radius[i], search_param);
+        REQUIRE(res.has_value() == expected_success);
+    }
+
+    for (auto i = valid_query_count; i < query_count; ++i) {
+        auto query = vsag::Dataset::Make();
+        query->NumElements(1)
+            ->Dim(dim)
+            ->Float32Vectors(queries->GetFloat32Vectors() + i * dim)
+            ->Owner(false);
+        auto res = index->KnnSearch(query, topk, search_param);
+        REQUIRE(res.has_value() == expected_success);
+    }
+}
 
 void
 TestIndex::TestSerializeBinarySet(const IndexPtr& index_from,
