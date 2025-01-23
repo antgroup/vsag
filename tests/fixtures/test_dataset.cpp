@@ -116,6 +116,37 @@ GenerateRandomDataset(uint64_t dim,
     return base;
 }
 
+static TestDataset::DatasetPtr
+GenerateNanRandomDataset(uint64_t dim, uint64_t count, std::string metric_str = "l2") {
+    auto base = vsag::Dataset::Make();
+    bool need_normalize = (metric_str != "cosine");
+
+    std::vector<float> vecs =
+        fixtures::generate_vectors(count, dim, need_normalize, fixtures::RandomValue(0, 564));
+    std::random_device rd;
+    std::mt19937 g(rd());
+    std::uniform_real_distribution real;
+    for (int i = 0; i < count; ++i) {
+        float r = real(g);
+        if (r < 0.01) {
+            vecs[i * dim] = std::numeric_limits<float>::quiet_NaN();
+        } else if (r < 0.02) {
+            for (int j = 0; j < dim; ++j) {
+                vecs[i * dim + j] = 0.0f;
+            }
+        }
+    }
+
+    std::vector<int64_t> ids(count);
+    std::iota(ids.begin(), ids.end(), 10086);
+    base->Dim(dim)
+        ->Ids(CopyVector(ids))
+        ->Float32Vectors(CopyVector(vecs))
+        ->NumElements(count)
+        ->Owner(true);
+    return base;
+}
+
 static std::pair<float*, int64_t*>
 CalDistanceFloatMetrix(const vsag::DatasetPtr query,
                        const vsag::DatasetPtr base,
@@ -238,35 +269,69 @@ CalGroundTruthWithPath(const std::pair<float*, int64_t*>& result,
     return gt;
 }
 
-TestDataset::TestDataset(uint64_t dim, uint64_t count, std::string metric_str, bool with_path)
-    : dim_(dim), count_(count) {
-    this->base_ = GenerateRandomDataset(dim, count, metric_str);
+TestDatasetPtr
+TestDataset::CreateTestDataset(uint64_t dim,
+                               uint64_t count,
+                               std::string metric_str,
+                               bool with_path) {
+    TestDatasetPtr dataset = std::shared_ptr<TestDataset>(new TestDataset);
+    dataset->dim_ = dim;
+    dataset->count_ = count;
+    dataset->base_ = GenerateRandomDataset(dim, count, metric_str);
     constexpr uint64_t query_count = 100;
-    this->query_ = GenerateRandomDataset(dim, query_count, metric_str, true);
-    this->filter_query_ = query_;
-    this->range_query_ = query_;
+    dataset->query_ = GenerateRandomDataset(dim, query_count, metric_str, true);
+    dataset->filter_query_ = dataset->query_;
+    dataset->range_query_ = dataset->query_;
     {
-        auto result = CalDistanceFloatMetrix(query_, base_, metric_str);
-        this->top_k = 10;
+        auto result = CalDistanceFloatMetrix(dataset->query_, dataset->base_, metric_str);
+        dataset->top_k = 10;
 
-        this->filter_function_ = [](int64_t id) -> bool { return id % 7 != 5; };
+        dataset->filter_function_ = [](int64_t id) -> bool { return id % 7 != 5; };
         if (with_path) {
-            this->ground_truth_ = CalGroundTruthWithPath(result, top_k, base_, query_);
-            this->filter_ground_truth_ =
-                CalGroundTruthWithPath(result, top_k, base_, query_, this->filter_function_);
+            dataset->ground_truth_ =
+                CalGroundTruthWithPath(result, dataset->top_k, dataset->base_, dataset->query_);
+            dataset->filter_ground_truth_ = CalGroundTruthWithPath(
+                result, dataset->top_k, dataset->base_, dataset->query_, dataset->filter_function_);
         } else {
-            this->ground_truth_ = CalTopKGroundTruth(result, top_k, count, query_count);
-            this->filter_ground_truth_ =
-                CalFilterGroundTruth(result, top_k, this->filter_function_, count, query_count);
+            dataset->ground_truth_ = CalTopKGroundTruth(result, dataset->top_k, count, query_count);
+            dataset->filter_ground_truth_ = CalFilterGroundTruth(
+                result, dataset->top_k, dataset->filter_function_, count, query_count);
         }
-        this->range_ground_truth_ = this->ground_truth_;
-        this->range_radius_.resize(query_count);
+        dataset->range_ground_truth_ = dataset->ground_truth_;
+        dataset->range_radius_.resize(query_count);
         for (uint64_t i = 0; i < query_count; ++i) {
-            this->range_radius_[i] =
-                0.5f * (result.first[i * count + top_k] + result.first[i * count + top_k - 1]);
+            dataset->range_radius_[i] = 0.5f * (result.first[i * count + dataset->top_k] +
+                                                result.first[i * count + dataset->top_k - 1]);
         }
         delete[] result.first;
         delete[] result.second;
     }
+    return dataset;
 }
+
+TestDatasetPtr
+TestDataset::CreateNanDataset(const std::string& metric_str) {
+    TestDatasetPtr dataset = std::shared_ptr<TestDataset>(new TestDataset);
+    dataset->dim_ = 64;
+    dataset->count_ = 1000;
+    constexpr uint64_t query_count = 100;
+    dataset->base_ = GenerateNanRandomDataset(dataset->dim_, dataset->count_, metric_str);
+    dataset->query_ = GenerateNanRandomDataset(dataset->dim_, query_count, metric_str);
+    {
+        auto result = CalDistanceFloatMetrix(dataset->query_, dataset->base_, metric_str);
+        dataset->top_k = 10;
+        dataset->ground_truth_ =
+            CalTopKGroundTruth(result, dataset->top_k, dataset->count_, query_count);
+        dataset->range_ground_truth_ = dataset->ground_truth_;
+        dataset->range_radius_.resize(query_count);
+        for (uint64_t i = 0; i < query_count; ++i) {
+            dataset->range_radius_[i] =
+                dataset->ground_truth_->GetDistances()[i * dataset->top_k + dataset->top_k - 1];
+        }
+        delete[] result.first;
+        delete[] result.second;
+    }
+    return dataset;
+}
+
 }  // namespace fixtures

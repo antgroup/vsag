@@ -143,6 +143,25 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::DiskANNTestIndex,
     vsag::Options::Instance().set_block_size_limit(origin_size);
 }
 
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::DiskANNTestIndex,
+                             "DiskANN Search with Dirty Vector",
+                             "[ft][diskann]") {
+    // bug issue #360
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    auto size = GENERATE(1024 * 1024 * 2);
+    auto metric_type = GENERATE("l2", "ip", "cosine");
+    auto dataset = pool.GetNanDataset(metric_type);
+    auto dim = dataset->dim_;
+    const std::string name = "diskann";
+
+    vsag::Options::Instance().set_block_size_limit(size);
+    auto param = GenerateDiskANNBuildParametersString(metric_type, dim);
+    auto index = TestFactory(name, param, true);
+    TestBuildIndex(index, dataset, true);
+    TestSearchWithDirtyVector(index, dataset, search_param, true);
+    vsag::Options::Instance().set_block_size_limit(origin_size);
+}
+
 /* FIXME: segmentation fault on some platform
 TEST_CASE("DiskAnn OPQ", "[ft][diskann]") {
     int dim = 128;            // Dimension of the elements

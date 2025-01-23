@@ -1906,16 +1906,25 @@ void generate_disk_quantized_data(const T* train_data, size_t train_size, size_t
     size_t sample_size = std::min(train_size, (size_t)(train_size * p_val));
     sample_size = std::max(sample_size, std::min(train_size, (size_t)MIN_SAMPLE_NUM));
     sample_size = std::min(sample_size, (size_t)MAX_SAMPLE_NUM);
-    auto sample_data = train_data;
-    std::shared_ptr<T[]> new_train_data;
-    if (compare_metric == diskann::Metric::COSINE) {
-        new_train_data.reset(new T[train_dim * sample_size]);
-        memcpy(new_train_data.get(), train_data, train_dim * sample_size * sizeof(T));
-        for (int i = 0; i < sample_size; ++i)
-        {
-            normalize(new_train_data.get() + i * train_dim, train_dim);
+    auto new_train_data = std::shared_ptr<T[]>(new T[train_dim * sample_size]);
+    size_t valid_size = 0;
+    for (int i = 0; i < sample_size; ++i)
+    {
+        auto norm = get_norm(train_data + i * train_dim, train_dim);
+        if (std::abs(norm) < 1e-6 || std::isnan(norm)) {
+            continue;
         }
-        sample_data = new_train_data.get();
+        memcpy(new_train_data.get() + valid_size * train_dim, train_data + i * train_dim, train_dim * sizeof(T));
+        if (compare_metric == diskann::Metric::COSINE) {
+            normalize(new_train_data.get() + valid_size * train_dim, train_dim);
+        }
+        valid_size ++;
+    }
+    auto sample_data = new_train_data.get();
+    sample_size = valid_size;
+    if (sample_size < 2) {
+        throw std::runtime_error("fail to train pq: sample_size " + std::to_string(sample_size) +
+                                 " is too small, while train_size is " + std::to_string(train_size));
     }
     
     // diskann::cout << "Training data with " << sample_size << " samples loaded." << std::endl;

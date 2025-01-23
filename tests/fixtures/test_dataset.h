@@ -25,10 +25,14 @@ class TestDataset {
 public:
     using DatasetPtr = vsag::DatasetPtr;
 
-    TestDataset(uint64_t dim,
-                uint64_t count,
-                std::string metric_str = "l2",
-                bool with_path = false);
+    static std::shared_ptr<TestDataset>
+    CreateTestDataset(uint64_t dim,
+                      uint64_t count,
+                      std::string metric_str = "l2",
+                      bool with_path = false);
+
+    static std::shared_ptr<TestDataset>
+    CreateNanDataset(const std::string& metric_str);
 
     DatasetPtr base_{nullptr};
 
@@ -44,8 +48,11 @@ public:
     DatasetPtr filter_ground_truth_{nullptr};
     std::function<bool(int64_t)> filter_function_{nullptr};
 
-    const uint64_t dim_;
-    const uint64_t count_;
+    uint64_t dim_{0};
+    uint64_t count_{0};
+
+private:
+    TestDataset() = default;
 };
 
 using TestDatasetPtr = std::shared_ptr<TestDataset>;
