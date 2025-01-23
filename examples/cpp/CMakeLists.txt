@@ -1,28 +1,44 @@
-add_executable (example_hnsw example_hnsw.cpp)
-target_link_libraries (example_hnsw vsag)
+add_executable(101_index_hnsw 101_index_hnsw.cpp)
+target_link_libraries(101_index_hnsw vsag)
 
-add_executable (example_fresh_hnsw example_fresh_hnsw.cpp)
-target_link_libraries (example_fresh_hnsw vsag)
+add_executable(102_index_diskann 102_index_diskann.cpp)
+target_link_libraries(102_index_diskann vsag)
 
-add_executable (example_diskann example_diskann.cpp)
-target_link_libraries (example_diskann vsag_static)
+add_executable (103_index_hgraph 103_index_hgraph.cpp)
+target_link_libraries (103_index_hgraph vsag_static)
 
-add_executable (example_engine example_engine.cpp)
-target_link_libraries (example_engine vsag_static)
+add_executable(104_index_fresh_hnsw 104_index_fresh_hnsw.cpp)
+target_link_libraries(104_index_fresh_hnsw vsag)
 
-add_executable (simple_hnsw simple_hnsw.cpp)
-target_link_libraries (simple_hnsw vsag_static)
+add_executable (105_index_brute_force 105_index_brute_force.cpp)
+target_link_libraries (105_index_brute_force vsag_static)
 
-add_executable (simple_pyramid simple_pyramid.cpp)
-target_link_libraries (simple_pyramid vsag_static)
+add_executable (201_custom_allocator 201_custom_allocator.cpp)
+target_link_libraries (201_custom_allocator vsag)
 
-add_executable (simple_hgraph_sq8 simple_hgraph_sq8.cpp)
-target_link_libraries (simple_hgraph_sq8 vsag_static)
+add_executable (202_custom_logger 202_custom_logger.cpp)
+target_link_libraries (202_custom_logger vsag)
 
-add_executable (example_conjugate_graph example_conjugate_graph.cpp)
-target_link_libraries(example_conjugate_graph vsag)
+add_executable (203_custom_thread_pool 203_custom_thread_pool.cpp)
+target_link_libraries (203_custom_thread_pool vsag)
 
-add_executable (vsag_ext_example vsag_ext_example.cpp)
-target_link_libraries(vsag_ext_example vsag)
+add_executable (301_feature_filter 301_feature_filter.cpp)
+target_link_libraries (301_feature_filter vsag_static)
 
-add_subdirectory (todo_examples)
+add_executable(302_feature_range_search 302_feature_range_search.cpp)
+target_link_libraries(302_feature_range_search vsag)
+
+add_executable (303_feature_remove 303_feature_remove.cpp)
+target_link_libraries (303_feature_remove vsag_static)
+
+add_executable(304_feature_enhance_graph 304_feature_enhance_graph.cpp)
+target_link_libraries(304_feature_enhance_graph vsag)
+
+add_executable(305_feature_update 305_feature_update.cpp)
+target_link_libraries(305_feature_update vsag)
+
+add_executable (401_persistent_kv 401_persistent_kv.cpp)
+target_link_libraries (401_persistent_kv vsag)
+
+add_executable (402_persistent_streaming 402_persistent_streaming.cpp)
+target_link_libraries (402_persistent_streaming vsag)
