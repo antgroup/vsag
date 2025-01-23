@@ -39,7 +39,7 @@ public:
 
     void
     AsyncRead(uint64_t offset, uint64_t len, void* dest, CallBack callback) override {
-        throw std::out_of_range("No support for SubReader AsyncRead");
+        throw std::runtime_error("No support for SubReader AsyncRead");
     }
 
     uint64_t
