@@ -22,6 +22,7 @@
 
 #include "H5Cpp.h"
 #include "nlohmann/json.hpp"
+#include "simd/basic_func.h"
 #include "vsag/constants.h"
 
 namespace vsag::eval {
@@ -42,6 +43,11 @@ public:
     [[nodiscard]] const void*
     GetTest() const {
         return test_.get();
+    }
+
+    [[nodiscard]] const void*
+    GetOneTrain(int64_t id) const {
+        return train_.get() + id * dim_ * train_data_size_;
     }
 
     [[nodiscard]] const void*
@@ -100,6 +106,10 @@ public:
     GetFilePath() {
         return this->file_path_;
     }
+    vsag::DistanceFuncType
+    GetDistanceFunc() {
+        return this->distance_func_;
+    }
 
     using JsonType = nlohmann::json;
     JsonType
@@ -146,6 +156,9 @@ private:
     to_string(const shape_t& shape) {
         return "[" + std::to_string(shape.first) + "," + std::to_string(shape.second) + "]";
     }
+
+private:
+    vsag::DistanceFuncType distance_func_;
 
 private:
     std::shared_ptr<char[]> train_;

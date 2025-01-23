@@ -73,6 +73,31 @@ EvalDataset::Load(const std::string& filename) {
         dataset.read(obj->train_.get(), type, dataspace);
     }
 
+    try {
+        H5::Attribute attr = file.openAttribute("distance");
+        H5::StrType str_type = attr.getStrType();
+        std::string metric;
+        attr.read(str_type, metric);
+        if (metric == "euclidean") {
+            obj->distance_func_ = vsag::L2Sqr;
+        } else if (metric == "ip") {
+            if (obj->train_data_type_ == vsag::DATATYPE_FLOAT32) {
+                obj->distance_func_ = vsag::InnerProductDistance;
+            } else if (obj->train_data_type_ == vsag::DATATYPE_INT8) {
+                obj->distance_func_ = vsag::INT8InnerProductDistance;
+            }
+        } else if (metric == "angular") {
+            obj->distance_func_ =
+                [](const void* query1, const void* query2, const void* qty_ptr) -> float {
+                return 1 - vsag::InnerProduct(query1, query2, qty_ptr) /
+                               std::sqrt(vsag::InnerProduct(query1, query1, qty_ptr) *
+                                         vsag::InnerProduct(query2, query2, qty_ptr));
+            };
+        }
+    } catch (H5::Exception& err) {
+        throw std::runtime_error("fail to read metric: there is no 'distance' in the dataset");
+    }
+
     {
         H5::DataSet dataset = file.openDataSet("/test");
         H5::DataSpace dataspace = dataset.getSpace();

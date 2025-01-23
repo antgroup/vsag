@@ -16,6 +16,7 @@
 #include "build_eval_case.h"
 
 #include <algorithm>
+#include <filesystem>
 #include <utility>
 
 #include "monitor/duration_monitor.h"
@@ -73,6 +74,11 @@ BuildEvalCase::do_build() {
 }
 void
 BuildEvalCase::serialize() {
+    std::filesystem::path dirPath(index_path_);
+    dirPath = dirPath.parent_path();
+    if (!std::filesystem::exists(dirPath)) {
+        std::filesystem::create_directories(dirPath);
+    }
     std::ofstream outfile(this->index_path_, std::ios::binary);
     this->index_->Serialize(outfile);
 }

@@ -17,18 +17,26 @@
 
 #include <unordered_set>
 
+#include "../eval_dataset.h"
 namespace vsag::eval {
 
+static const double THRESHOLD_ERROR = 2e-6;
+
 static double
-get_recall(const int64_t* neighbors, const int64_t* ground_truth, size_t recall_num, size_t top_k) {
-    std::unordered_set<int64_t> neighbors_set(neighbors, neighbors + recall_num);
-    std::unordered_set<int64_t> intersection;
-    for (size_t i = 0; i < top_k; ++i) {
-        if (i < top_k && neighbors_set.count(ground_truth[i])) {
-            intersection.insert(ground_truth[i]);
+get_recall(const float* distances,
+           const float* ground_truth_distances,
+           size_t recall_num,
+           size_t top_k) {
+    std::vector<float> gt_distances(ground_truth_distances, ground_truth_distances + top_k);
+    std::sort(gt_distances.begin(), gt_distances.end());
+    float threshold = gt_distances[top_k - 1];
+    size_t count = 0;
+    for (size_t i = 0; i < recall_num; ++i) {
+        if (distances[i] <= threshold + THRESHOLD_ERROR) {
+            ++count;
         }
     }
-    return static_cast<double>(intersection.size()) / static_cast<double>(top_k);
+    return static_cast<double>(count) / static_cast<double>(top_k);
 }
 
 RecallMonitor::RecallMonitor(uint64_t max_record_counts) : Monitor("recall_monitor") {
@@ -54,9 +62,16 @@ RecallMonitor::GetResult() {
 }
 void
 RecallMonitor::Record(void* input) {
-    auto [neighbors, gt, topk] =
-        *(reinterpret_cast<std::tuple<int64_t*, int64_t*, uint64_t>*>(input));
-    auto val = get_recall(neighbors, gt, topk, topk);
+    auto [neighbors, gt_distances, dataset, query_data, topk] =
+        *(reinterpret_cast<std::tuple<int64_t*, float*, EvalDataset*, const void*, uint64_t>*>(
+            input));
+    size_t dim = dataset->GetDim();
+    auto distance_func = dataset->GetDistanceFunc();
+    auto distances = std::shared_ptr<float[]>(new float[topk]);
+    for (int i = 0; i < topk; ++i) {
+        distances[i] = distance_func(query_data, dataset->GetOneTrain(neighbors[i]), &dim);
+    }
+    auto val = get_recall(distances.get(), gt_distances, topk, topk);
     this->recall_records_.emplace_back(val);
 }
 void
