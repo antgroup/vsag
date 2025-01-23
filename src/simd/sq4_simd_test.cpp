@@ -49,7 +49,7 @@ using namespace vsag;
         REQUIRE(fixtures::dist_t(gt) == fixtures::dist_t(avx512)); \
     }
 
-TEST_CASE("SQ4 SIMD Compute Codes", "[SQ4 SIMD]") {
+TEST_CASE("SQ4 SIMD Compute Codes", "[ut][simd]") {
     const std::vector<uint32_t> dims = {1, 8, 16, 32, 97, 129, 256};
     int64_t count = 100;
     for (const auto& dim : dims) {
@@ -65,7 +65,7 @@ TEST_CASE("SQ4 SIMD Compute Codes", "[SQ4 SIMD]") {
     }
 }
 
-TEST_CASE("SQ4 SIMD Compute", "[SQ4 SIMD]") {
+TEST_CASE("SQ4 SIMD Compute", "[ut][simd]") {
     const std::vector<int64_t> dims = {1, 8, 16, 32, 97, 129, 256};
     int64_t count = 100;
     for (const auto& dim : dims) {
@@ -93,7 +93,7 @@ TEST_CASE("SQ4 SIMD Compute", "[SQ4 SIMD]") {
         return;                                       \
     }
 
-TEST_CASE("SQ4 SIMD Compute Benchmark", "[simd][!benchmark]") {
+TEST_CASE("SQ4 SIMD Compute Benchmark", "[ut][simd][!benchmark]") {
     const std::vector<int64_t> dims = {256};
     int64_t count = 200;
     int64_t dim = 256;

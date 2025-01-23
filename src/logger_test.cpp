@@ -19,7 +19,7 @@
 
 #include "spdlog/spdlog.h"
 
-TEST_CASE("test logger", "[ut][logger]") {
+TEST_CASE("Logger Test", "[ut][logger]") {
     vsag::logger::set_level(vsag::logger::level::trace);
     vsag::logger::trace("this is a trace level message");
     vsag::logger::debug("this is a debug level message");
@@ -29,7 +29,7 @@ TEST_CASE("test logger", "[ut][logger]") {
     vsag::logger::critical("this is a critical level message");
 }
 
-TEST_CASE("spdlog usage", "[ut][log]") {
+TEST_CASE("spdlog usage test", "[ut][logger]") {
     spdlog::info("Welcome to spdlog!");
     spdlog::error("SomeError message with arg: {}", 1);
 

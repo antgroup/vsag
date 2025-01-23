@@ -21,9 +21,10 @@
 
 using namespace vsag;
 
-TEST_CASE("memory_block_io_parameter", "[ut][memory_block_io]") {
+TEST_CASE("MemoryBlockIOParameter Test", "[ut][MemoryBlockIOParameter]") {
     std::string param_str = "{}";
     auto param = std::make_shared<MemoryBlockIOParameter>();
-    param->FromJson(param_str);
+    auto json = JsonType::parse(param_str);
+    param->FromJson(json);
     ParameterTest::TestToJson(param);
 }

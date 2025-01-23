@@ -40,7 +40,7 @@ TestFlattenDataCell(FlattenDataCellParamPtr& param,
     test.TestSerializeAndDeserialize(common_param.dim_, other, error);
 }
 
-TEST_CASE("basic test", "[ut][flatten_data_cell] ") {
+TEST_CASE("FlattenDataCell Basic Test", "[ut][FlattenDataCell] ") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     auto dim = GENERATE(32, 64, 512);
     std::string io_type = GENERATE("memory_io", "block_memory_io");

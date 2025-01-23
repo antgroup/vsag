@@ -20,7 +20,7 @@
 #include "default_allocator.h"
 #include "vsag/dataset.h"
 
-TEST_CASE("test dataset", "[ut][dataset]") {
+TEST_CASE("Dataset Implement Test", "[ut][dataset]") {
     vsag::DefaultAllocator allocator;
     SECTION("allocator") {
         auto dataset = vsag::Dataset::Make();

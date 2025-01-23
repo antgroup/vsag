@@ -44,7 +44,7 @@ using namespace vsag;
         }                                                                                   \
     }
 
-TEST_CASE("SQ8 SIMD Compute Codes", "[SQ8 SIMD]") {
+TEST_CASE("SQ8 SIMD Compute Codes", "[ut][simd]") {
     auto dims = fixtures::get_common_used_dims();
     int64_t count = 100;
     std::vector<uint8_t> vec1, vec2;
@@ -67,7 +67,7 @@ TEST_CASE("SQ8 SIMD Compute Codes", "[SQ8 SIMD]") {
     }
 }
 
-TEST_CASE("SQ8 SIMD Compute", "[SQ8 SIMD]") {
+TEST_CASE("SQ8 SIMD Compute", "[ut][simd]") {
     auto dims = fixtures::get_common_used_dims();
     int64_t count = 100;
     for (const auto& dim : dims) {
@@ -93,7 +93,7 @@ TEST_CASE("SQ8 SIMD Compute", "[SQ8 SIMD]") {
         return;                                                                                    \
     }
 
-TEST_CASE("SQ8 SIMD Compute Benchmark", "[simd][!benchmark]") {
+TEST_CASE("SQ8 SIMD Compute Benchmark", "[ut][simd][!benchmark]") {
     const std::vector<int64_t> dims = {256};
     int64_t count = 200;
     int64_t dim = 256;

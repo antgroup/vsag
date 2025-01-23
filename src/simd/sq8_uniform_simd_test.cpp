@@ -44,7 +44,7 @@ using namespace vsag;
         }                                                                                        \
     }
 
-TEST_CASE("SQ8 Uniform SIMD Compute Codes", "[SQ8 Uniform SIMD]") {
+TEST_CASE("SQ8 Uniform SIMD Compute Codes", "[ut][simd]") {
     auto dims = fixtures::get_common_used_dims();
     int64_t count = 100;
     for (const auto& dim : dims) {
@@ -65,7 +65,7 @@ TEST_CASE("SQ8 Uniform SIMD Compute Codes", "[SQ8 Uniform SIMD]") {
         return;                                                                            \
     }
 
-TEST_CASE("SQ8 Uniform SIMD Compute Benchmark", "[simd][!benchmark]") {
+TEST_CASE("SQ8 Uniform SIMD Compute Benchmark", "[ut][simd][!benchmark]") {
     int64_t count = 100;
     int64_t dim = 256;
     uint32_t code_size = dim;

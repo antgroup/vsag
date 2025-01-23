@@ -15,7 +15,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <nlohmann/json.hpp>
 
-TEST_CASE("Json usage", "[ft][json]") {
+TEST_CASE("Test Json Usage", "[ft][json]") {
     nlohmann::json j{};
 
     j["name"] = "Alice";

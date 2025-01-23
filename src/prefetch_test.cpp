@@ -18,7 +18,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <memory>
 
-TEST_CASE("prefetch test", "[ut][prefetch]") {
+TEST_CASE("Prefetch Basic Test", "[ut][Prefetch]") {
     std::vector<int64_t> data(65536);
     for (int64_t i = 0; i < 500; ++i) {
         vsag::PrefetchLines(data.data(), i * 61);

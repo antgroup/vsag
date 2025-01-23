@@ -17,7 +17,7 @@
 
 #include "vsag/bitset.h"
 
-TEST_CASE("test bitset", "[ft][bitset]") {
+TEST_CASE("Test Bitset", "[ft][bitset]") {
     auto bitset = vsag::Bitset::Make();
 
     // empty
