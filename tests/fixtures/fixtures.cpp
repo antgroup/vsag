@@ -51,6 +51,36 @@ get_common_used_dims(uint64_t count, int seed) {
     return result;
 }
 
+vsag::SparseVectors
+GenerateSparseVectors(uint32_t count, uint32_t dim_limit, int seed) {
+    std::mt19937 rng(seed);
+    std::uniform_real_distribution<float> distrib_real;
+    std::uniform_int_distribution<int> distrib_int(0, dim_limit);
+
+    vsag::SparseVectors sparse_vectors;
+    sparse_vectors.num = count;
+    sparse_vectors.offsets = new uint32_t[count + 1];
+
+    uint32_t offset = 0;
+    sparse_vectors.offsets[0] = offset;
+    for (int i = 0; i < sparse_vectors.num; i++) {
+        offset += distrib_int(rng);
+        sparse_vectors.offsets[i + 1] = offset;
+    }
+
+    sparse_vectors.ids = new uint32_t[sparse_vectors.offsets[count]];
+    sparse_vectors.vals = new float[sparse_vectors.offsets[count]];
+
+    for (uint32_t i = 0; i < sparse_vectors.num; i++) {
+        for (uint32_t j = sparse_vectors.offsets[i]; j < sparse_vectors.offsets[i + 1]; j++) {
+            sparse_vectors.ids[j] = distrib_int(rng);
+            sparse_vectors.vals[j] = distrib_real(rng);
+        }
+    }
+
+    return sparse_vectors;
+}
+
 std::vector<float>
 generate_vectors(uint64_t count, uint32_t dim, bool need_normalize, int seed) {
     return std::move(GenerateVectors<float>(count, dim, seed, need_normalize));

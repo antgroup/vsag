@@ -30,8 +30,12 @@
 namespace vsag {
 
 class DatasetImpl : public Dataset {
-    using var =
-        std::variant<int64_t, const float*, const int8_t*, const int64_t*, const std::string*>;
+    using var = std::variant<int64_t,
+                             const float*,
+                             const int8_t*,
+                             const int64_t*,
+                             const std::string*,
+                             struct SparseVectors>;
 
 public:
     DatasetImpl() = default;
@@ -47,12 +51,20 @@ public:
             allocator_->Deallocate((void*)this->GetInt8Vectors());
             allocator_->Deallocate((void*)this->GetFloat32Vectors());
             allocator_->Deallocate((void*)this->GetPaths());
+
+            allocator_->Deallocate((void*)this->GetSparseVectors().offsets);
+            allocator_->Deallocate((void*)this->GetSparseVectors().ids);
+            allocator_->Deallocate((void*)this->GetSparseVectors().vals);
         } else {
             delete[] this->GetIds();
             delete[] this->GetDistances();
             delete[] this->GetInt8Vectors();
             delete[] this->GetFloat32Vectors();
             delete[] this->GetPaths();
+
+            delete[] this->GetSparseVectors().offsets;
+            delete[] this->GetSparseVectors().ids;
+            delete[] this->GetSparseVectors().vals;
         }
     }
 
@@ -163,6 +175,22 @@ public:
         }
 
         return nullptr;
+    }
+
+    DatasetPtr
+    SparseVectors(const struct SparseVectors sparse_vectors) override {
+        this->data_[SPARSE_VECTORS] = sparse_vectors;
+        return shared_from_this();
+    }
+
+    const struct SparseVectors
+    GetSparseVectors() const override {
+        if (auto iter = this->data_.find(SPARSE_VECTORS); iter != this->data_.end()) {
+            return std::get<struct SparseVectors>(iter->second);
+        }
+
+        struct SparseVectors null_sparse_vectors;
+        return null_sparse_vectors;
     }
 
     DatasetPtr

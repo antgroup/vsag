@@ -45,6 +45,7 @@ const char* const QUANTIZATION_TYPE_VALUE_SQ8_UNIFORM = "sq8_uniform";
 const char* const QUANTIZATION_TYPE_VALUE_SQ4 = "sq4";
 const char* const QUANTIZATION_TYPE_VALUE_SQ4_UNIFORM = "sq4_uniform";
 const char* const QUANTIZATION_TYPE_VALUE_FP32 = "fp32";
+const char* const QUANTIZATION_TYPE_VALUE_SPARSE = "fp32";
 const char* const QUANTIZATION_TYPE_VALUE_PQ = "pq";
 
 // graph param value
