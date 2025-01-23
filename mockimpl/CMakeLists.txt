@@ -15,12 +15,6 @@ target_link_libraries (vsag_mockimpl_static roaring)
 add_dependencies (vsag_mockimpl version_mockimpl roaring)
 add_dependencies (vsag_mockimpl_static version_mockimpl roaring)
 
-add_executable (example_diskann_mockimpl ../examples/cpp/example_diskann.cpp)
-target_link_libraries (example_diskann_mockimpl vsag_mockimpl)
-
-add_executable (example_hnsw_mockimpl ../examples/cpp/example_hnsw.cpp)
-target_link_libraries (example_hnsw_mockimpl vsag_mockimpl)
-
 set_target_properties(vsag_mockimpl_static PROPERTIES OUTPUT_NAME "vsag_mockimpl")
 install(TARGETS vsag_mockimpl vsag_mockimpl_static
 	LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}")
