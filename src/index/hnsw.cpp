@@ -23,12 +23,13 @@
 #include <nlohmann/json.hpp>
 #include <stdexcept>
 
-#include "../algorithm/hnswlib/hnswlib.h"
-#include "../common.h"
-#include "../logger.h"
-#include "../safe_allocator.h"
 #include "../utils.h"
-#include "./hnsw_zparameters.h"
+#include "algorithm/hnswlib/hnswlib.h"
+#include "common.h"
+#include "index/hnsw_zparameters.h"
+#include "logger.h"
+#include "merge_index.h"
+#include "safe_allocator.h"
 #include "vsag/binaryset.h"
 #include "vsag/constants.h"
 #include "vsag/errors.h"
@@ -993,6 +994,85 @@ HNSW::init_feature_list() {
         IndexFeature::SUPPORT_CAL_DISTANCE_BY_ID,
         IndexFeature::SUPPORT_CHECK_ID_EXIST,
     });
+}
+
+bool
+HNSW::ExtractDataAndGraph(const DatasetPtr& dataset, Vector<Vector<uint32_t>>& graph) {
+    if (use_static_) {
+        return false;
+    }
+    auto hnsw = std::static_pointer_cast<hnswlib::HierarchicalNSW>(alg_hnsw_);
+    int64_t cur_element_count = hnsw->getCurrentElementCount();
+    int64_t origin_data_num = dataset->GetNumElements();
+    int64_t origin_data_dim = dataset->GetDim();
+    auto dataset_vectors = dataset->GetFloat32Vectors();
+    auto dataset_ids = const_cast<int64_t*>(dataset->GetIds());
+    CHECK_ARGUMENT(
+        origin_data_dim == dim_,
+        fmt::format("origin_data_dim({}) is not equal to dim_({}) when extract data in hnsw",
+                    origin_data_dim,
+                    dim_));
+    for (int i = 0; i < cur_element_count; ++i) {
+        auto offset = i + origin_data_num;
+        char* vector_data = hnsw->getDataByInternalId(i);
+        std::memcpy((char*)(dataset_vectors + offset * dim_), vector_data, sizeof(float) * dim_);
+        int* data = (int*)hnsw->getLinklistAtLevel(i, 0);
+        size_t size = hnsw->getListCount((unsigned int*)data);
+        graph[offset].resize(size);
+        for (int j = 0; j < size; ++j) {
+            graph[offset][j] = origin_data_num + *(data + 1 + j);
+        }
+        dataset_ids[offset] = hnsw->getExternalLabel(i);
+    }
+    dataset->NumElements(origin_data_num + cur_element_count);
+    return true;
+}
+bool
+HNSW::SetDataAndGraph(const DatasetPtr& dataset, const Vector<Vector<uint32_t>>& graph) {
+    if (use_static_) {
+        return false;
+    }
+    auto hnsw = std::static_pointer_cast<hnswlib::HierarchicalNSW>(alg_hnsw_);
+    hnsw->setDataAndGraph(dataset->GetFloat32Vectors(),
+                          dataset->GetIds(),
+                          dataset->GetNumElements(),
+                          dataset->GetDim(),
+                          graph);
+    return true;
+}
+
+tl::expected<void, Error>
+HNSW::merge(const std::vector<std::shared_ptr<Index>>& sub_indexes) {
+    int64_t total_data_num = this->GetNumElements();
+    for (const auto& sub_index : sub_indexes) {
+        total_data_num += sub_index->GetNumElements();
+    }
+    DatasetPtr dataset = Dataset::Make();
+    auto& allocator = allocator_;
+    dataset->Owner(true, allocator.get());
+    auto vectors = (float*)allocator->Allocate(dim_ * total_data_num * sizeof(float*));
+    if (vectors == nullptr) {
+        LOG_ERROR_AND_RETURNS(ErrorType::NO_ENOUGH_MEMORY,
+                              "fail to allocate vectors in the process of merge index");
+    }
+    dataset->Float32Vectors(vectors);
+    auto ids = (int64_t*)allocator->Allocate(total_data_num * sizeof(int64_t*));
+    if (ids == nullptr) {
+        LOG_ERROR_AND_RETURNS(ErrorType::NO_ENOUGH_MEMORY,
+                              "fail to allocate ids in the process of merge index");
+    }
+    dataset->Ids(ids);
+    dataset->NumElements(0);
+    dataset->Dim(dim_);
+    Vector<Vector<uint32_t>> graph(
+        total_data_num, Vector<uint32_t>(allocator.get()), allocator.get());
+    // extract data and graph
+    ExtractDataAndGraph(dataset, graph);
+    extract_data_and_graph(sub_indexes, dataset, graph);
+    // TODO(inabao): merge graph
+    // set graph
+    SetDataAndGraph(dataset, graph);
+    return {};
 }
 
 }  // namespace vsag
