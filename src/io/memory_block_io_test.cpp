@@ -19,7 +19,6 @@
 #include <memory>
 
 #include "basic_io_test.h"
-#include "default_allocator.h"
 #include "safe_allocator.h"
 
 using namespace vsag;
