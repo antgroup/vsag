@@ -1490,4 +1490,10 @@ HierarchicalNSW::searchRange(const void* query_data,
     // std::cout << "hnswalg::result.size(): " << result.size() << std::endl;
     return result;
 }
+
+template MaxHeap
+HierarchicalNSW::searchBaseLayerST<false, false>(InnerIdType ep_id,
+                                                 const void* data_point,
+                                                 size_t ef,
+                                                 vsag::BaseFilterFunctor* isIdAllowed) const;
 }  // namespace hnswlib
