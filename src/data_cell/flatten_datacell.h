@@ -226,7 +226,18 @@ FlattenDataCell<QuantTmpl, IOTmpl>::query(float* result_dists,
                                           const std::shared_ptr<Computer<QuantTmpl>>& computer,
                                           const InnerIdType* idx,
                                           InnerIdType id_count) {
+    for (uint32_t i = 0; i < this->prefetch_jump_code_size_ and i < id_count; i++) {
+        this->io_->Prefetch(static_cast<uint64_t>(idx[i]) * static_cast<uint64_t>(code_size_),
+                            this->prefetch_cache_line_size_);
+    }
+
     for (int64_t i = 0; i < id_count; ++i) {
+        if (i + this->prefetch_jump_code_size_ < id_count) {
+            this->io_->Prefetch(static_cast<uint64_t>(idx[i + this->prefetch_jump_code_size_]) *
+                                    static_cast<uint64_t>(code_size_),
+                                this->prefetch_cache_line_size_);
+        }
+
         bool release = false;
         const auto* codes = this->GetCodesById(idx[i], release);
         computer->ComputeDist(codes, result_dists + i);
