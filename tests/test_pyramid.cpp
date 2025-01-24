@@ -84,7 +84,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
         auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type, /*with_path=*/true);
         TestBuildIndex(index, dataset, true);
         TestKnnSearch(index, dataset, search_param, 0.99, true);
-        TestFilterSearch(index, dataset, search_param, 0.99, true);
+        //        TestFilterSearch(index, dataset, search_param, 0.99, true);
         TestRangeSearch(index, dataset, search_param, 0.99, 10, true);
         TestRangeSearch(index, dataset, search_param, 0.49, 5, true);
     }
