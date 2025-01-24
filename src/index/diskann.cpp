@@ -226,7 +226,7 @@ DiskANN::build(const DatasetPtr& base) {
                        fmt::format("base.num_elements({}) must be greater than 1", data_num));
 
         std::vector<size_t> failed_locs;
-        if (diskann_params_.graph_type == DISKANN_GRAPH_TYPE_ODESCENT) {
+        if (diskann_params_.graph_type == GRAPH_TYPE_ODESCENT) {
             SlowTaskTimer t("odescent build full (graph)");
             FlattenDataCellParamPtr flatten_param =
                 std::make_shared<vsag::FlattenDataCellParameter>();

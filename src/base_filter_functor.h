@@ -75,4 +75,29 @@ private:
     const bool is_bitset_filter_{false};
 };
 
+class CommonInnerIdFilter : public Filter {
+public:
+    CommonInnerIdFilter(const FilterPtr filter_impl, const Vector<LabelType>& label_table)
+        : filter_impl_(filter_impl), label_table_(label_table){};
+
+    [[nodiscard]] bool
+    CheckValid(int64_t inner_id) const override {
+        return filter_impl_->CheckValid(label_table_[inner_id]);
+    }
+
+    [[nodiscard]] float
+    ValidRatio() const override {
+        return filter_impl_->ValidRatio();
+    }
+
+    [[nodiscard]] Distribution
+    FilterDistribution() const override {
+        return filter_impl_->FilterDistribution();
+    }
+
+private:
+    const FilterPtr filter_impl_;
+    const Vector<LabelType>& label_table_;
+};
+
 }  // namespace vsag
