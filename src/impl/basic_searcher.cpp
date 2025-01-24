@@ -122,9 +122,14 @@ BasicSearcher::Search(const GraphInterfacePtr& graph_data_cell,
             }
         }
     }
-
-    while (top_candidates.size() > inner_search_param.topk_) {
-        top_candidates.pop();
+    if (inner_search_param.topk_ > 0) {
+        while (top_candidates.size() > inner_search_param.topk_) {
+            top_candidates.pop();
+        }
+    } else if (inner_search_param.radius_ > 0) {
+        while (top_candidates.top().first > inner_search_param.radius_ + 2e-6) {
+            top_candidates.pop();
+        }
     }
 
     return top_candidates;
