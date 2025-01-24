@@ -43,11 +43,7 @@ private:
 };
 
 bool
-ODescent::Build(const uint32_t* valid_ids, int64_t data_num) {
-    if (is_build_) {
-        return false;
-    }
-    is_build_ = true;
+ODescent::Build(const uint32_t* valid_ids, uint64_t data_num) {
     valid_ids_ = valid_ids;
     if (valid_ids_ != nullptr) {
         data_num_ = data_num;
@@ -125,6 +121,7 @@ ODescent::init_graph() {
         for (int64_t i = start; i < end; ++i) {
             UnorderedSet<uint32_t> ids_set(allocator_);
             ids_set.insert(i);
+            graph[i].neighbors.clear();
             graph[i].neighbors.reserve(max_degree_);
             int64_t max_neighbors = std::min(data_num_ - 1, max_degree_);
             for (int j = 0; j < max_neighbors; ++j) {
