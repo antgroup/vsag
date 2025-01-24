@@ -69,6 +69,11 @@ public:
     inline void
     DeserializeImpl(StreamReader& reader);
 
+    static inline bool
+    InMemoryImpl() {
+        return true;
+    }
+
 private:
     [[nodiscard]] inline bool
     check_valid_offset(uint64_t size) const {

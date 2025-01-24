@@ -128,6 +128,16 @@ public:
         }
     }
 
+    inline bool
+    InMemory() const {
+        if constexpr (has_InMemoryImpl<IOTmpl>::value) {
+            return cast().InMemoryImpl();
+        } else {
+            throw std::runtime_error(
+                fmt::format("class {} have no func named InMemoryImpl", typeid(IOTmpl).name()));
+        }
+    }
+
 private:
     inline IOTmpl&
     cast() {
@@ -148,5 +158,6 @@ private:
     GENERATE_HAS_MEMBER_FUNC(SerializeImpl, void (U::*)(StreamWriter&))
     GENERATE_HAS_MEMBER_FUNC(DeserializeImpl, void (U::*)(StreamReader&))
     GENERATE_HAS_MEMBER_FUNC(ReleaseImpl, void (U::*)(const uint8_t*))
+    GENERATE_HAS_MEMBER_FUNC(InMemoryImpl, bool (U::*)())
 };
 }  // namespace vsag
