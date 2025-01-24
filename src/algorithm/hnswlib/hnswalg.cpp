@@ -171,6 +171,34 @@ HierarchicalNSW::getDistanceByLabel(LabelType label, const void* data_point) {
     return dist;
 }
 
+tl::expected<vsag::DatasetPtr, vsag::Error>
+HierarchicalNSW::getBatchDistanceByLabel(const int64_t* ids,
+                                         const void* data_point,
+                                         int64_t count) {
+    std::shared_lock lock_table(label_lookup_lock_);
+    int64_t valid_cnt = 0;
+    auto result = vsag::Dataset::Make();
+    result->Owner(true, allocator_);
+    auto* distances = (float*)allocator_->Allocate(sizeof(float) * count);
+    result->Distances(distances);
+    std::shared_ptr<float[]> normalize_query;
+    normalizeVector(data_point, normalize_query);
+    for (int i = 0; i < count; i++) {
+        auto search = label_lookup_.find(ids[i]);
+        if (search == label_lookup_.end()) {
+            distances[i] = -1;
+        } else {
+            InnerIdType internal_id = search->second;
+            float dist =
+                fstdistfunc_(data_point, getDataByInternalId(internal_id), dist_func_param_);
+            distances[i] = dist;
+            valid_cnt++;
+        }
+    }
+    result->NumElements(count);
+    return std::move(result);
+}
+
 bool
 HierarchicalNSW::isValidLabel(LabelType label) {
     std::shared_lock lock_table(label_lookup_lock_);

@@ -423,6 +423,30 @@ TestIndex::TestCalcDistanceById(const IndexPtr& index, const TestDatasetPtr& dat
 }
 
 void
+TestIndex::TestBatchCalcDistanceById(const IndexPtr& index,
+                                     const TestDatasetPtr& dataset,
+                                     float error) {
+    auto queries = dataset->query_;
+    auto query_count = queries->GetNumElements();
+    auto dim = queries->GetDim();
+    auto gts = dataset->ground_truth_;
+    auto gt_topK = dataset->top_k;
+    for (auto i = 0; i < query_count; ++i) {
+        auto query = vsag::Dataset::Make();
+        query->NumElements(1)
+            ->Dim(dim)
+            ->Float32Vectors(queries->GetFloat32Vectors() + i * dim)
+            ->Owner(false);
+        auto result = index->CalDistanceById(
+            query->GetFloat32Vectors(), gts->GetIds() + (i * gt_topK), gt_topK);
+        for (auto j = 0; j < gt_topK; ++j) {
+            REQUIRE(std::abs(gts->GetDistances()[i * gt_topK + j] -
+                             result.value()->GetDistances()[j]) < error);
+        }
+    }
+}
+
+void
 TestIndex::TestSerializeFile(const IndexPtr& index_from,
                              const IndexPtr& index_to,
                              const TestDatasetPtr& dataset,
