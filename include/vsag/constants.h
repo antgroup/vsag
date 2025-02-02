@@ -62,11 +62,11 @@ extern const char* const DISKANN_PARAMETER_USE_OPQ;
 extern const char* const DISKANN_PARAMETER_USE_ASYNC_IO;
 extern const char* const DISKANN_PARAMETER_USE_BSA;
 extern const char* const DISKANN_PARAMETER_GRAPH_TYPE;
-extern const char* const DISKANN_PARAMETER_ALPHA;
-extern const char* const DISKANN_PARAMETER_GRAPH_ITER_TURN;
-extern const char* const DISKANN_PARAMETER_NEIGHBOR_SAMPLE_RATE;
+extern const char* const ODESCENT_PARAMETER_ALPHA;
+extern const char* const ODESCENT_PARAMETER_GRAPH_ITER_TURN;
+extern const char* const ODESCENT_PARAMETER_NEIGHBOR_SAMPLE_RATE;
 extern const char* const DISKANN_GRAPH_TYPE_VAMANA;
-extern const char* const DISKANN_GRAPH_TYPE_ODESCENT;
+extern const char* const GRAPH_TYPE_ODESCENT;
 
 extern const char* const DISKANN_PARAMETER_BEAM_SEARCH;
 extern const char* const DISKANN_PARAMETER_IO_LIMIT;
@@ -79,9 +79,10 @@ extern const char* const HNSW_PARAMETER_CONSTRUCTION;
 extern const char* const HNSW_PARAMETER_USE_STATIC;
 extern const char* const HNSW_PARAMETER_REVERSED_EDGES;
 
+extern const char* const PYRAMID_PARAMETER_BASE_CODES;
+
 extern const char* const INDEX_PARAM;
 
-extern const char* const PYRAMID_PARAMETER_SUBINDEX_TYPE;
 extern const char PART_SLASH;
 
 // statstic key

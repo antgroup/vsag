@@ -73,7 +73,7 @@ struct Linklist {
 };
 class ODescent {
 public:
-    ODescent(int64_t max_degree,
+    ODescent(uint64_t max_degree,
              float alpha,
              int64_t turn,
              float sample_rate,
@@ -94,7 +94,7 @@ public:
     }
 
     bool
-    Build(const uint32_t* valid_ids = nullptr, int64_t data_num = 0);
+    Build(const uint32_t* valid_ids = nullptr, uint64_t data_num = 0);
 
     void
     SaveGraph(std::stringstream& out);
