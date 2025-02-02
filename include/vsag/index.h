@@ -28,6 +28,7 @@
 #include "vsag/dataset.h"
 #include "vsag/errors.h"
 #include "vsag/expected.hpp"
+#include "vsag/filter.h"
 #include "vsag/index_features.h"
 #include "vsag/readerset.h"
 
@@ -146,6 +147,24 @@ public:
               const std::function<bool(int64_t)>& filter) const = 0;
 
     /**
+      * @brief Performing single KNN search on index
+      *
+      * @param query should contains dim, num_elements and vectors
+      * @param k the result size of every query
+      * @param filter represents whether an element is filtered out by pre-filter
+      * @return result contains
+      *                - num_elements: 1
+      *                - ids, distances: length is (num_elements * k)
+      */
+    virtual tl::expected<DatasetPtr, Error>
+    KnnSearch(const DatasetPtr& query,
+              int64_t k,
+              const std::string& parameters,
+              const FilterPtr& filter) const {
+        throw std::runtime_error("Index doesn't support new filter");
+    }
+
+    /**
       * @brief Performing single range search on index
       *
       * @param query should contains dim, num_elements and vectors
@@ -208,6 +227,30 @@ public:
                 const std::string& parameters,
                 const std::function<bool(int64_t)>& filter,
                 int64_t limited_size = -1) const = 0;
+
+    /**
+      * @brief Performing single range search on index
+      *
+      * @param query should contains dim, num_elements and vectors
+      * @param radius of search, determines which results will be returned
+      * @param limited_size of search result size.
+      *                - limited_size <= 0 : no limit
+      *                - limited_size == 0 : error
+      *                - limited_size >= 1 : limit result size to limited_size
+      * @param filter represents whether an element is filtered out by pre-filter
+      * @return result contains
+      *                - num_elements: 1
+      *                - dim: the size of results
+      *                - ids, distances: length is dim
+      */
+    virtual tl::expected<DatasetPtr, Error>
+    RangeSearch(const DatasetPtr& query,
+                float radius,
+                const std::string& parameters,
+                const FilterPtr& filter,
+                int64_t limited_size = -1) const {
+        throw std::runtime_error("Index doesn't support new filter");
+    }
 
     /**
      * @brief Pretraining the conjugate graph involves searching with generated queries and providing feedback.

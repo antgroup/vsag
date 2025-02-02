@@ -84,6 +84,21 @@ main(int argc, char** argv) {
     /******************* Prepare Filter Function *****************/
     std::function<bool(int64_t)> filter_func = [](int64_t id) { return id % 2 == 0; };
 
+    /******************* Prepare Filter Object *****************/
+    class MyFilter : public vsag::Filter {
+    public:
+        bool
+        CheckValid(int64_t id) const override {
+            return id % 2;
+        }
+
+        float
+        ValidRatio() const override {
+            return 0.618f;
+        }
+    };
+    auto filter_object = std::make_shared<MyFilter>();
+
     /******************* HNSW Filter Search With Bitset *****************/
     auto hnsw_search_parameters = R"(
     {
@@ -118,6 +133,21 @@ main(int argc, char** argv) {
 
     // print result with filter, the result id is odd not even.
     std::cout << "function filter results: " << std::endl;
+    for (int64_t i = 0; i < result->GetDim(); ++i) {
+        std::cout << result->GetIds()[i] << ": " << result->GetDistances()[i] << std::endl;
+    }
+
+    /******************* HNSW Filter Search With Filter Object *****************/
+    search_result = index->KnnSearch(query, topk, hnsw_search_parameters, filter_object);
+    if (not search_result.has_value()) {
+        std::cerr << "Failed to search index with filter" << search_result.error().message
+                  << std::endl;
+        exit(-1);
+    }
+    result = search_result.value();
+
+    // print result with filter, the result id is odd not even.
+    std::cout << "object filter results: " << std::endl;
     for (int64_t i = 0; i < result->GetDim(); ++i) {
         std::cout << result->GetIds()[i] << ": " << result->GetDistances()[i] << std::endl;
     }
