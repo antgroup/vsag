@@ -140,7 +140,7 @@ HGraph::KnnSearch(const DatasetPtr& query,
         search_param.ep_ = this->entry_point_id_;
         search_param.ef_ = 1;
         search_param.is_id_allowed_ = nullptr;
-        for (int64_t i = static_cast<int64_t>(this->route_graphs_.size() - 1); i >= 0; --i) {
+        for (auto i = static_cast<int64_t>(this->route_graphs_.size() - 1); i >= 0; --i) {
             auto result = this->search_one_graph(query->GetFloat32Vectors(),
                                                  this->route_graphs_[i],
                                                  this->basic_flatten_codes_,
@@ -175,7 +175,7 @@ HGraph::KnnSearch(const DatasetPtr& query,
         auto* dists = (float*)allocator_->Allocate(sizeof(float) * search_result.size());
         dataset_results->Distances(dists);
 
-        for (int64_t j = static_cast<int64_t>(search_result.size() - 1); j >= 0; --j) {
+        for (auto j = static_cast<int64_t>(search_result.size() - 1); j >= 0; --j) {
             dists[j] = search_result.top().first;
             ids[j] = this->labels_.at(search_result.top().second);
             search_result.pop();
@@ -301,7 +301,7 @@ HGraph::hnsw_add(const DatasetPtr& data) {
             if (level >= int64_t(this->max_level_) || bottom_graph_->TotalCount() == 0) {
                 std::lock_guard<std::shared_mutex> wlock(this->global_mutex_);
                 // level maybe a negative number(-1)
-                for (int64_t j = static_cast<int64_t>(max_level_); j <= level; ++j) {
+                for (auto j = static_cast<int64_t>(max_level_); j <= level; ++j) {
                     this->route_graphs_.emplace_back(this->generate_one_route_graph());
                 }
                 max_level_ = level + 1;
@@ -397,7 +397,7 @@ HGraph::search_one_graph(const float* query,
 #endif
         }
         auto count_no_visited = 0;
-        for (uint64_t i = 0; i < neighbors.size(); ++i) {
+        for (uint64_t i = 0; i < neighbors.size(); ++i) {  // NOLINT(modernize-loop-convert)
             const auto& neighbor = neighbors[i];
 #if defined(USE_SSE)
             if (i + prefetch_neighbor_visit_num < neighbors.size()) {
@@ -465,7 +465,7 @@ HGraph::RangeSearch(const DatasetPtr& query,
         InnerSearchParam search_param;
         search_param.ep_ = this->entry_point_id_;
         search_param.ef_ = 1;
-        for (int64_t i = static_cast<int64_t>(this->route_graphs_.size() - 1); i >= 0; --i) {
+        for (auto i = static_cast<int64_t>(this->route_graphs_.size() - 1); i >= 0; --i) {
             auto result = this->search_one_graph(query->GetFloat32Vectors(),
                                                  this->route_graphs_[i],
                                                  this->basic_flatten_codes_,
@@ -502,7 +502,7 @@ HGraph::RangeSearch(const DatasetPtr& query,
         auto* dists = (float*)allocator_->Allocate(sizeof(float) * search_result.size());
         dataset_results->Distances(dists);
 
-        for (int64_t j = static_cast<int64_t>(search_result.size() - 1); j >= 0; --j) {
+        for (auto j = static_cast<int64_t>(search_result.size() - 1); j >= 0; --j) {
             dists[j] = search_result.top().first;
             ids[j] = this->labels_.at(search_result.top().second);
             search_result.pop();

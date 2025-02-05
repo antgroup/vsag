@@ -283,7 +283,7 @@ HNSW::knn_search(const DatasetPtr& query,
         auto* dists = (float*)allocator_->Allocate(sizeof(float) * results.size());
         result->Distances(dists);
 
-        for (int64_t j = static_cast<int64_t>(results.size() - 1); j >= 0; --j) {
+        for (auto j = static_cast<int64_t>(results.size() - 1); j >= 0; --j) {
             dists[j] = results.top().first;
             ids[j] = results.top().second;
             results.pop();
@@ -395,7 +395,7 @@ HNSW::range_search(const DatasetPtr& query,
         result->Ids(ids);
         auto* dists = (float*)allocator_->Allocate(sizeof(float) * target_size);
         result->Distances(dists);
-        for (int64_t j = static_cast<int64_t>(results.size() - 1); j >= 0; --j) {
+        for (auto j = static_cast<int64_t>(results.size() - 1); j >= 0; --j) {
             if (j < target_size) {
                 dists[j] = results.top().first;
                 ids[j] = results.top().second;
@@ -798,9 +798,9 @@ HNSW::brute_force(const DatasetPtr& query, int64_t k) {
 
         auto result = Dataset::Make();
         result->NumElements(k)->Owner(true, allocator_.get());
-        int64_t* ids = (int64_t*)allocator_->Allocate(sizeof(int64_t) * k);
+        auto* ids = (int64_t*)allocator_->Allocate(sizeof(int64_t) * k);
         result->Ids(ids);
-        float* dists = (float*)allocator_->Allocate(sizeof(float) * k);
+        auto* dists = (float*)allocator_->Allocate(sizeof(float) * k);
         result->Distances(dists);
 
         void* vector = nullptr;
@@ -812,7 +812,7 @@ HNSW::brute_force(const DatasetPtr& query, int64_t k) {
             alg_hnsw_->bruteForce(vector, k);
         result->Dim(std::min(k, (int64_t)bf_result.size()));
 
-        for (int32_t i = static_cast<int32_t>(result->GetDim() - 1); i >= 0; i--) {
+        for (auto i = static_cast<int32_t>(result->GetDim() - 1); i >= 0; i--) {
             ids[i] = bf_result.top().second;
             dists[i] = bf_result.top().first;
             bf_result.pop();

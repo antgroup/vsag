@@ -103,7 +103,7 @@ ODescent::SaveGraph(std::stringstream& out) {
         for (int j = 0; j < graph[i].neighbors.size(); ++j) {
             edges[j] = graph[i].neighbors[j].id;
         }
-        uint32_t gk = (uint32_t)edges.size();
+        auto gk = (uint32_t)edges.size();
         out.write((char*)&gk, sizeof(uint32_t));
         out.write((char*)edges.data(), static_cast<std::streamsize>(gk * sizeof(uint32_t)));
         max_degree = edges.size() > max_degree ? (uint32_t)edges.size() : max_degree;
@@ -155,8 +155,7 @@ ODescent::update_neighbors(Vector<UnorderedSet<uint32_t>>& old_neighbors,
         for (int64_t i = start; i < end; ++i) {
             Vector<uint32_t> new_neighbors_candidates(allocator_);
             for (uint32_t node_id : new_neighbors[i]) {
-                for (int k = 0; k < new_neighbors_candidates.size(); ++k) {
-                    auto neighbor_id = new_neighbors_candidates[k];
+                for (unsigned int neighbor_id : new_neighbors_candidates) {
                     float dist = get_distance(node_id, neighbor_id);
                     if (dist < graph[node_id].greast_neighbor_distance) {
                         std::lock_guard<std::mutex> lock(points_lock_[node_id]);
@@ -241,28 +240,28 @@ ODescent::sample_candidates(Vector<UnorderedSet<uint32_t>>& old_neighbors,
         LinearCongruentialGenerator r;
         for (int64_t i = start; i < end; ++i) {
             auto& neighbors = graph[i].neighbors;
-            for (int j = 0; j < neighbors.size(); ++j) {
+            for (auto& neighbor : neighbors) {
                 float current_state = r.NextFloat();
                 if (current_state < sample_rate) {
-                    if (neighbors[j].old) {
+                    if (neighbor.old) {
                         {
                             std::lock_guard<std::mutex> lock(points_lock_[i]);
-                            old_neighbors[i].insert(neighbors[j].id);
+                            old_neighbors[i].insert(neighbor.id);
                         }
                         {
-                            std::lock_guard<std::mutex> inner_lock(points_lock_[neighbors[j].id]);
-                            old_neighbors[neighbors[j].id].insert(i);
+                            std::lock_guard<std::mutex> inner_lock(points_lock_[neighbor.id]);
+                            old_neighbors[neighbor.id].insert(i);
                         }
                     } else {
                         {
                             std::lock_guard<std::mutex> lock(points_lock_[i]);
-                            new_neighbors[i].insert(neighbors[j].id);
+                            new_neighbors[i].insert(neighbor.id);
                         }
                         {
-                            std::lock_guard<std::mutex> inner_lock(points_lock_[neighbors[j].id]);
-                            new_neighbors[neighbors[j].id].insert(i);
+                            std::lock_guard<std::mutex> inner_lock(points_lock_[neighbor.id]);
+                            new_neighbors[neighbor.id].insert(i);
                         }
-                        neighbors[j].old = true;
+                        neighbor.old = true;
                     }
                 }
             }
@@ -314,8 +313,8 @@ void
 ODescent::prune_graph() {
     Vector<int> in_edges_count(data_num_, 0, allocator_);
     for (int i = 0; i < data_num_; ++i) {
-        for (int j = 0; j < graph[i].neighbors.size(); ++j) {
-            in_edges_count[graph[i].neighbors[j].id]++;
+        for (auto& neighbor : graph[i].neighbors) {
+            in_edges_count[neighbor.id]++;
         }
     }
 
@@ -326,28 +325,27 @@ ODescent::prune_graph() {
             neighbors.erase(std::unique(neighbors.begin(), neighbors.end()), neighbors.end());
             Vector<Node> candidates(allocator_);
             candidates.reserve(max_degree_);
-            for (int i = 0; i < neighbors.size(); ++i) {
+            for (auto& neighbor : neighbors) {
                 bool flag = true;
                 int cur_in_edge = 0;
                 {
-                    std::lock_guard<std::mutex> lock(points_lock_[neighbors[i].id]);
-                    cur_in_edge = in_edges_count[neighbors[i].id];
+                    std::lock_guard<std::mutex> lock(points_lock_[neighbor.id]);
+                    cur_in_edge = in_edges_count[neighbor.id];
                 }
                 if (cur_in_edge > min_in_degree_) {
-                    for (int j = 0; j < candidates.size(); ++j) {
-                        if (get_distance(neighbors[i].id, candidates[j].id) * alpha_ <
-                            neighbors[i].distance) {
+                    for (auto& candidate : candidates) {
+                        if (get_distance(neighbor.id, candidate.id) * alpha_ < neighbor.distance) {
                             flag = false;
                             {
-                                std::lock_guard<std::mutex> lock(points_lock_[neighbors[i].id]);
-                                in_edges_count[neighbors[i].id]--;
+                                std::lock_guard<std::mutex> lock(points_lock_[neighbor.id]);
+                                in_edges_count[neighbor.id]--;
                             }
                             break;
                         }
                     }
                 }
                 if (flag) {
-                    candidates.push_back(neighbors[i]);
+                    candidates.push_back(neighbor);
                 }
             }
             neighbors.swap(candidates);

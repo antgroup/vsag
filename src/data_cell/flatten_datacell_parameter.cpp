@@ -20,8 +20,7 @@
 #include "inner_string_params.h"
 
 namespace vsag {
-FlattenDataCellParameter::FlattenDataCellParameter() {
-}
+FlattenDataCellParameter::FlattenDataCellParameter() = default;
 
 void
 FlattenDataCellParameter::FromJson(const JsonType& json) {

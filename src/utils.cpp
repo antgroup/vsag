@@ -22,8 +22,8 @@ namespace vsag {
 
 const static int64_t DEFAULT_WATCH_WINDOW_SIZE = 20;
 
-SlowTaskTimer::SlowTaskTimer(const std::string& n, int64_t log_threshold_ms)
-    : name(n), threshold(log_threshold_ms) {
+SlowTaskTimer::SlowTaskTimer(std::string n, int64_t log_threshold_ms)
+    : name(std::move(n)), threshold(log_threshold_ms) {
     start = std::chrono::steady_clock::now();
 }
 

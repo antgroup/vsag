@@ -49,21 +49,21 @@ public:
           file_(std::ifstream(filename, std::ios::binary)),
           base_offset_(base_offset),
           size_(size),
-          pool_(pool) {
+          pool_(std::move(pool)) {
     }
 
-    ~LocalFileReader() {
+    ~LocalFileReader() override {
         file_.close();
     }
 
-    virtual void
+    void
     Read(uint64_t offset, uint64_t len, void* dest) override {
         std::lock_guard<std::mutex> lock(mutex_);
         file_.seekg(static_cast<int64_t>(base_offset_ + offset), std::ios::beg);
         file_.read((char*)dest, static_cast<int64_t>(len));
     }
 
-    virtual void
+    void
     AsyncRead(uint64_t offset, uint64_t len, void* dest, CallBack callback) override {
         if (pool_) {
             pool_->GeneralEnqueue([this, offset, len, dest, callback]() {
@@ -75,7 +75,7 @@ public:
         }
     }
 
-    virtual uint64_t
+    uint64_t
     Size() const override {
         return size_;
     }
