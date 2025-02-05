@@ -42,6 +42,7 @@ SparseGraphDataCell::InsertNeighborsById(InnerIdType id, const Vector<InnerIdTyp
     this->max_capacity_ = std::max(this->max_capacity_, id + 1);
     if (this->neighbors_.count(id) == 0) {
         this->neighbors_.emplace(id, std::make_unique<Vector<InnerIdType>>(allocator_));
+        this->total_count_ += 1;
     }
     this->neighbors_[id]->assign(neighbor_ids.begin(), neighbor_ids.begin() + size);
 }
@@ -88,6 +89,7 @@ SparseGraphDataCell::Deserialize(StreamReader& reader) {
         this->neighbors_[key] = std::make_unique<vsag::Vector<InnerIdType>>(allocator_);
         StreamReader::ReadVector(reader, *(this->neighbors_[key]));
     }
+    this->total_count_ = size;
 }
 void
 SparseGraphDataCell::Resize(InnerIdType new_size){};
