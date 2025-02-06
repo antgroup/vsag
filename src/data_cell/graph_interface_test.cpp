@@ -42,7 +42,6 @@ GraphInterfaceTest::BasicTest(uint64_t max_id, uint64_t count, const GraphInterf
 
     for (auto& [key, value] : maps) {
         this->graph_->InsertNeighborsById(key, *value);
-        this->graph_->IncreaseTotalCount(1);
     }
 
     // Test GetNeighborSize
