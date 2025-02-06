@@ -48,7 +48,7 @@ public:
 
         std::future<return_type> res = task->get_future();
         Enqueue([task]() { (*task)(); });
-        return res;
+        return res;  // NOLINT(clang-analyzer-cplusplus.NewDeleteLeaks)
     }
 
     std::future<void>

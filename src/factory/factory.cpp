@@ -66,7 +66,11 @@ public:
     void
     AsyncRead(uint64_t offset, uint64_t len, void* dest, CallBack callback) override {
         if (pool_) {
-            pool_->GeneralEnqueue([this, offset, len, dest, callback]() {
+            pool_->GeneralEnqueue([this,  // NOLINT(clang-analyzer-cplusplus.NewDeleteLeaks)
+                                   offset,
+                                   len,
+                                   dest,
+                                   callback]() {
                 this->Read(offset, len, dest);
                 callback(IOErrorCode::IO_SUCCESS, "success");
             });

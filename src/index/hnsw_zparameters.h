@@ -38,7 +38,7 @@ public:
     bool use_static{false};
     bool normalize{false};
     bool use_reversed_edges{false};
-    DataTypes type;
+    DataTypes type{DataTypes::DATA_TYPE_FLOAT};
 
 protected:
     HnswParameters() = default;

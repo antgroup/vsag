@@ -15,6 +15,8 @@
 
 #include "basic_searcher.h"
 
+#include <limits>
+
 namespace vsag {
 
 BasicSearcher::BasicSearcher(const IndexCommonParam& common_param) {
@@ -65,7 +67,7 @@ BasicSearcher::Search(const GraphInterfacePtr& graph_data_cell,
 
     auto computer = vector_data_cell->FactoryComputer(query);
 
-    float lower_bound;
+    float lower_bound = std::numeric_limits<float>::max();
     float dist;
     uint64_t candidate_id;
     uint32_t hops = 0;
