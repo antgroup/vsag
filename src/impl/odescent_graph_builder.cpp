@@ -378,8 +378,8 @@ ODescent::prune_graph() {
 void
 ODescent::parallelize_task(std::function<void(int64_t, int64_t)> task) {
     Vector<std::future<void>> futures(allocator_);
-    for (int64_t i = 0; i < data_num_; i += block_size_) {
-        int64_t end = std::min(i + block_size_, data_num_);
+    for (uint64_t i = 0; i < data_num_; i += block_size_) {
+        uint64_t end = std::min(i + block_size_, data_num_);
         futures.push_back(thread_pool_->GeneralEnqueue(task, i, end));
     }
     for (auto& future : futures) {
