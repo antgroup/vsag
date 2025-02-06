@@ -141,7 +141,7 @@ public:
         StreamReader::ReadObj(reader, this->dim_);
         StreamReader::ReadObj(reader, this->metric_);
         StreamReader::ReadObj(reader, this->code_size_);
-        StreamWriter::WriteObj(writer, this->is_trained_);
+        StreamWriter::ReadObj(writer, this->is_trained_);
         return cast().DeserializeImpl(reader);
     }
 
