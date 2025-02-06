@@ -31,7 +31,7 @@
 namespace vsag {
 
 struct SlowTaskTimer {
-    explicit SlowTaskTimer(const std::string& name, int64_t log_threshold_ms = 0);
+    explicit SlowTaskTimer(std::string name, int64_t log_threshold_ms = 0);
     ~SlowTaskTimer();
 
     std::string name;

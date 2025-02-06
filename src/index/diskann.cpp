@@ -82,16 +82,16 @@ public:
         size_ = file_.tellg();
     }
 
-    ~LocalMemoryReader() = default;
+    ~LocalMemoryReader() override = default;
 
-    virtual void
+    void
     Read(uint64_t offset, uint64_t len, void* dest) override {
         std::lock_guard<std::mutex> lock(mutex_);
         file_.seekg(static_cast<int64_t>(offset), std::ios::beg);
         file_.read((char*)dest, static_cast<int64_t>(len));
     }
 
-    virtual void
+    void
     AsyncRead(uint64_t offset, uint64_t len, void* dest, CallBack callback) override {
         if (pool_) {
             pool_->GeneralEnqueue([this, offset, len, dest, callback]() {
@@ -103,7 +103,7 @@ public:
         }
     }
 
-    virtual uint64_t
+    uint64_t
     Size() const override {
         return size_;
     }
@@ -580,7 +580,7 @@ DiskANN::range_search(const DatasetPtr& query,
                 ErrorType::INTERNAL_ERROR, "failed to perform range search on diskann: ", e.what());
         }
 
-        int64_t k = static_cast<int64_t>(labels.size());
+        auto k = static_cast<int64_t>(labels.size());
         size_t target_size = k;
 
         auto result = Dataset::Make();
@@ -854,7 +854,7 @@ template <typename T>
 Binary
 serialize_vector_to_binary(std::vector<T> data) {
     if (data.empty()) {
-        return Binary();
+        return {};
     }
     size_t total_size = data.size() * sizeof(T);
     std::shared_ptr<int8_t[]> raw_data(new int8_t[total_size], std::default_delete<int8_t[]>());
@@ -1026,7 +1026,7 @@ DiskANN::build_partial_graph(const DatasetPtr& base,
     }
     after_binary_set.Set(DISKANN_GRAPH, convert_stream_to_binary(graph_stream_));
     after_binary_set.Set(DISKANN_TAG_FILE, convert_stream_to_binary(tag_stream_));
-    return tl::expected<void, Error>();
+    return {};
 }
 
 tl::expected<void, Error>
@@ -1046,7 +1046,7 @@ DiskANN::load_disk_index(const BinarySet& binary_set) {
     } else {
         graph_stream_.str("");
     }
-    return tl::expected<void, Error>();
+    return {};
 }
 
 }  // namespace vsag
