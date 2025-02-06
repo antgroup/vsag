@@ -79,7 +79,7 @@ ConjugateGraph::EnhanceResult(std::priority_queue<std::pair<float, LabelType>>& 
     float distance = 0;
 
     // initialize visited_set
-    for (int64_t j = static_cast<int64_t>(old_results.size() - 1); j >= 0; j--) {
+    for (auto j = static_cast<int64_t>(old_results.size() - 1); j >= 0; j--) {
         visited_set.insert(old_results.top().second);
         if (j < look_at_k) {
             to_be_visited[j] = old_results.top().second;

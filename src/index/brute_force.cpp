@@ -103,7 +103,7 @@ BruteForce::knn_search(const DatasetPtr& query,
     dataset_results->Ids(ids);
     auto* dists = (float*)allocator_->Allocate(sizeof(float) * heap.size());
     dataset_results->Distances(dists);
-    for (int64_t j = static_cast<int64_t>(heap.size() - 1); j >= 0; --j) {
+    for (auto j = static_cast<int64_t>(heap.size() - 1); j >= 0; --j) {
         dists[j] = heap.top().first;
         ids[j] = this->label_table_->GetLabelById(heap.top().second);
         heap.pop();
@@ -146,7 +146,7 @@ BruteForce::range_search(const DatasetPtr& query,
     dataset_results->Ids(ids);
     auto* dists = (float*)allocator_->Allocate(sizeof(float) * heap.size());
     dataset_results->Distances(dists);
-    for (int64_t j = static_cast<int64_t>(heap.size() - 1); j >= 0; --j) {
+    for (auto j = static_cast<int64_t>(heap.size() - 1); j >= 0; --j) {
         dists[j] = heap.top().first;
         ids[j] = this->label_table_->GetLabelById(heap.top().second);
         heap.pop();

@@ -16,6 +16,7 @@
 #include "stream_writer.h"
 
 #include <cstring>
+#include <utility>
 
 BufferStreamWriter::BufferStreamWriter(char*& buffer) : buffer_(buffer), StreamWriter() {
 }
@@ -36,7 +37,7 @@ IOStreamWriter::Write(const char* data, uint64_t size) {
 
 WriteFuncStreamWriter::WriteFuncStreamWriter(
     std::function<void(uint64_t, uint64_t, void*)> writeFunc, uint64_t cursor)
-    : writeFunc_(writeFunc), cursor_(cursor), StreamWriter() {
+    : writeFunc_(std::move(writeFunc)), cursor_(cursor), StreamWriter() {
 }
 
 void
