@@ -986,10 +986,9 @@ HNSW::init_feature_list() {
                                IndexFeature::SUPPORT_SERIALIZE_BINARY_SET,
                                IndexFeature::SUPPORT_SERIALIZE_FILE});
     // other
-    feature_list_.SetFeatures({
-        IndexFeature::SUPPORT_CAL_DISTANCE_BY_ID,
-        IndexFeature::SUPPORT_CHECK_ID_EXIST,
-    });
+    feature_list_.SetFeatures({IndexFeature::SUPPORT_CAL_DISTANCE_BY_ID,
+                               IndexFeature::SUPPORT_CHECK_ID_EXIST,
+                               IndexFeature::SUPPORT_MERGE_INDEX});
 }
 
 bool
