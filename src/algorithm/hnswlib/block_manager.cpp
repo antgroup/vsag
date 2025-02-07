@@ -34,7 +34,6 @@ BlockManager::~BlockManager() {
 char*
 BlockManager::GetElementPtr(size_t index, size_t offset) {
     if (index >= max_elements_) {
-        abort();
         throw std::out_of_range("Index is out of range:" + std::to_string(index));
     }
 
