@@ -16,6 +16,8 @@
 #include "hnswalg.h"
 
 #include <memory>
+
+#include "data_cell/graph_interface.h"
 namespace hnswlib {
 HierarchicalNSW::HierarchicalNSW(SpaceInterface* s,
                                  size_t max_elements,
@@ -1520,20 +1522,24 @@ HierarchicalNSW::searchRange(const void* query_data,
 }
 
 void
-HierarchicalNSW::setDataAndGraph(const float* data,
-                                 const int64_t* ids,
-                                 int64_t data_num,
-                                 int64_t data_dim,
-                                 const vsag::Vector<vsag::Vector<uint32_t>>& graph) {
-    resizeIndex(data_num);
-    for (int i = 0; i < data_num; ++i) {
-        std::memcpy(getDataByInternalId(i), data + i * data_dim, data_size_);
-        setBatchNeigohbors(i, 0, graph[i].data(), graph[i].size());
+HierarchicalNSW::setDataAndGraph(vsag::FlattenInterfacePtr& data,
+                                 vsag::GraphInterfacePtr& graph,
+                                 vsag::Vector<LabelType>& ids) {
+    resizeIndex(data->total_count_);
+    std::shared_ptr<uint8_t[]> temp_vector =
+        std::shared_ptr<uint8_t[]>(new uint8_t[data->code_size_]);
+    for (int i = 0; i < data->total_count_; ++i) {
+        data->GetCodesById(i, temp_vector.get());
+        std::memcpy(
+            getDataByInternalId(i), reinterpret_cast<const char*>(temp_vector.get()), data_size_);
+        vsag::Vector<InnerIdType> edges(allocator_);
+        graph->GetNeighbors(i, edges);
+        setBatchNeigohbors(i, 0, edges.data(), edges.size());
         setExternalLabel(i, ids[i]);
         label_lookup_[ids[i]] = i;
         element_levels_[i] = 0;
     }
-    cur_element_count_ = data_num;
+    cur_element_count_ = data->total_count_;
     enterpoint_node_ = 0;
     max_level_ = 0;
 }

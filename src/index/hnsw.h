@@ -30,6 +30,8 @@
 #include "algorithm/hnswlib/hnswlib.h"
 #include "base_filter_functor.h"
 #include "common.h"
+#include "data_cell/flatten_interface.h"
+#include "data_cell/graph_interface.h"
 #include "data_type.h"
 #include "hnsw_zparameters.h"
 #include "impl/conjugate_graph.h"
@@ -217,12 +219,14 @@ public:
     InitMemorySpace();
 
     bool
-    ExtractDataAndGraph(const DatasetPtr& dataset,
-                        Vector<Vector<uint32_t>>& graph,
-                        IdMapFunction func);
+    ExtractDataAndGraph(FlattenInterfacePtr& data,
+                        GraphInterfacePtr& graph,
+                        Vector<LabelType>& ids,
+                        IdMapFunction func,
+                        Allocator* allocator);
 
     bool
-    SetDataAndGraph(const DatasetPtr& dataset, const Vector<Vector<uint32_t>>& graph);
+    SetDataAndGraph(FlattenInterfacePtr& data, GraphInterfacePtr& graph, Vector<LabelType>& ids);
 
 private:
     tl::expected<std::vector<int64_t>, Error>
@@ -325,6 +329,8 @@ private:
     bool empty_index_ = false;
     bool use_reversed_edges_ = false;
     bool is_init_memory_ = false;
+    int64_t max_degree_{0};
+
     DataTypes type_;
 
     std::shared_ptr<Allocator> allocator_;
@@ -335,6 +341,7 @@ private:
     mutable std::shared_mutex rw_mutex_;
 
     IndexFeatureList feature_list_{};
+    const IndexCommonParam& index_common_param_;
 };
 
 }  // namespace vsag

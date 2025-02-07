@@ -22,7 +22,10 @@
 
 #include "../data_type.h"
 #include "../logger.h"
+#include "data_cell/graph_datacell_parameter.h"
 #include "fixtures.h"
+#include "io/memory_io_parameter.h"
+#include "quantization/fp32_quantizer_parameter.h"
 #include "vsag/bitset.h"
 #include "vsag/errors.h"
 #include "vsag/options.h"
@@ -966,21 +969,26 @@ TEST_CASE("extract/set data and graph", "[ut][hnsw]") {
     auto result = index->Build(dataset);
     REQUIRE(result.has_value());
 
-    auto new_dataset = Dataset::Make();
-    auto new_ids = new int64_t[num_elements];
-    auto new_vectors = new float[num_elements * dim];
-    Vector<Vector<uint32_t>> graph(
-        num_elements, Vector<uint32_t>(allocator.get()), allocator.get());
-    new_dataset->NumElements(0)->Dim(dim)->Float32Vectors(new_vectors)->Ids(new_ids);
+    auto param = std::make_shared<FlattenDataCellParameter>();
+    param->io_parameter_ = std::make_shared<vsag::MemoryIOParameter>();
+    param->quantizer_parameter_ = std::make_shared<vsag::FP32QuantizerParameter>();
+    vsag::GraphDataCellParamPtr graph_param_ptr = std::make_shared<vsag::GraphDataCellParameter>();
+    graph_param_ptr->io_parameter_ = std::make_shared<vsag::MemoryIOParameter>();
+
+    FlattenInterfacePtr flatten_interface = FlattenInterface::MakeInstance(param, commom_param);
+    GraphInterfacePtr graph_interface =
+        GraphInterface::MakeInstance(graph_param_ptr, commom_param, false);
+    Vector<LabelType> ids_vector(allocator.get());
 
     IdMapFunction id_map = [](int64_t id) -> std::tuple<bool, int64_t> {
         return std::make_tuple(true, id);
     };
-    REQUIRE(index->ExtractDataAndGraph(new_dataset, graph, id_map));
+    REQUIRE(index->ExtractDataAndGraph(
+        flatten_interface, graph_interface, ids_vector, id_map, allocator.get()));
 
     auto another_index = std::make_shared<HNSW>(hnsw_obj, commom_param);
     another_index->InitMemorySpace();
-    REQUIRE(another_index->SetDataAndGraph(new_dataset, graph));
+    REQUIRE(another_index->SetDataAndGraph(flatten_interface, graph_interface, ids_vector));
 
     dataset->Dim(dim)
         ->NumElements(num_elements / 2)

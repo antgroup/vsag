@@ -23,11 +23,13 @@
 #include <nlohmann/json.hpp>
 #include <stdexcept>
 
-#include "../utils.h"
 #include "algorithm/hnswlib/hnswlib.h"
 #include "common.h"
+#include "data_cell/flatten_datacell.h"
+#include "data_cell/graph_datacell_parameter.h"
 #include "index/hnsw_zparameters.h"
-#include "logger.h"
+#include "io/memory_io_parameter.h"
+#include "quantization/fp32_quantizer_parameter.h"
 #include "safe_allocator.h"
 #include "vsag/binaryset.h"
 #include "vsag/constants.h"
@@ -52,7 +54,9 @@ HNSW::HNSW(HnswParameters hnsw_params, const IndexCommonParam& index_common_para
       use_conjugate_graph_(hnsw_params.use_conjugate_graph),
       use_reversed_edges_(hnsw_params.use_reversed_edges),
       type_(hnsw_params.type),
-      dim_(index_common_param.dim_) {
+      max_degree_(hnsw_params.max_degree),
+      dim_(index_common_param.dim_),
+      index_common_param_(index_common_param) {
     auto M = std::min(  // NOLINT(readability-identifier-naming)
         std::max((int)hnsw_params.max_degree, MINIMAL_M),
         MAXIMAL_M);
@@ -992,23 +996,17 @@ HNSW::init_feature_list() {
 }
 
 bool
-HNSW::ExtractDataAndGraph(const DatasetPtr& dataset,
-                          Vector<Vector<uint32_t>>& graph,
-                          IdMapFunction func) {
+HNSW::ExtractDataAndGraph(FlattenInterfacePtr& data,
+                          GraphInterfacePtr& graph,
+                          Vector<LabelType>& ids,
+                          IdMapFunction func,
+                          Allocator* allocator) {
     if (use_static_) {
         return false;
     }
     auto hnsw = std::static_pointer_cast<hnswlib::HierarchicalNSW>(alg_hnsw_);
     auto cur_element_count = hnsw->getCurrentElementCount();
-    int64_t origin_data_num = dataset->GetNumElements();
-    int64_t origin_data_dim = dataset->GetDim();
-    auto dataset_vectors = dataset->GetFloat32Vectors();
-    auto dataset_ids = const_cast<int64_t*>(dataset->GetIds());
-    CHECK_ARGUMENT(
-        origin_data_dim == dim_,
-        fmt::format("origin_data_dim({}) is not equal to dim_({}) when extract data in hnsw",
-                    origin_data_dim,
-                    dim_));
+    int64_t origin_data_num = data->total_count_;
     int64_t valid_id_count = 0;
     BitsetPtr bitset = std::make_shared<BitsetImpl>();
     for (auto i = 0; i < cur_element_count; ++i) {
@@ -1019,82 +1017,71 @@ HNSW::ExtractDataAndGraph(const DatasetPtr& dataset,
         }
         auto offset = valid_id_count + origin_data_num;
         char* vector_data = hnsw->getDataByInternalId(i);
-        std::memcpy((char*)(dataset_vectors + offset * dim_), vector_data, sizeof(float) * dim_);
-        int* data = (int*)hnsw->getLinklistAtLevel(i, 0);
-        size_t size = hnsw->getListCount((unsigned int*)data);
+        data->InsertVector(reinterpret_cast<float*>(vector_data));
+        int* link_data = (int*)hnsw->getLinklistAtLevel(i, 0);
+        size_t size = hnsw->getListCount((unsigned int*)link_data);
+        Vector<InnerIdType> edge(allocator);
         for (int j = 0; j < size; ++j) {
-            if (not bitset->Test(*(data + 1 + j))) {
-                graph[offset].push_back(origin_data_num + *(data + 1 + j));
+            if (not bitset->Test(*(link_data + 1 + j))) {
+                edge.push_back(origin_data_num + *(link_data + 1 + j));
             }
         }
-        dataset_ids[offset] = new_id;
+        graph->InsertNeighborsById(offset, edge);
+        graph->IncreaseTotalCount(1);
+        ids.push_back(new_id);
         valid_id_count++;
     }
-    dataset->NumElements(origin_data_num + valid_id_count);
     return true;
 }
 
 bool
-HNSW::SetDataAndGraph(const DatasetPtr& dataset, const Vector<Vector<uint32_t>>& graph) {
+HNSW::SetDataAndGraph(FlattenInterfacePtr& data, GraphInterfacePtr& graph, Vector<LabelType>& ids) {
     if (use_static_) {
         return false;
     }
     auto hnsw = std::static_pointer_cast<hnswlib::HierarchicalNSW>(alg_hnsw_);
-    hnsw->setDataAndGraph(dataset->GetFloat32Vectors(),
-                          dataset->GetIds(),
-                          dataset->GetNumElements(),
-                          dataset->GetDim(),
-                          graph);
+    hnsw->setDataAndGraph(data, graph, ids);
     return true;
 }
 
 void
 extract_data_and_graph(const std::vector<MergeUnit>& merge_units,
-                       const DatasetPtr& dataset,
-                       Vector<Vector<uint32_t>>& graph) {
+                       FlattenInterfacePtr& data,
+                       GraphInterfacePtr& graph,
+                       Vector<LabelType>& ids,
+                       Allocator* allocator) {
     for (const auto& merge_unit : merge_units) {
         auto stat_string = merge_unit.index->GetStats();
         auto stats = JsonType::parse(stat_string);
         std::string index_name = stats[STATSTIC_INDEX_NAME];
         auto hnsw = std::dynamic_pointer_cast<HNSW>(merge_unit.index);
-        hnsw->ExtractDataAndGraph(dataset, graph, merge_unit.id_map_func);
+        hnsw->ExtractDataAndGraph(data, graph, ids, merge_unit.id_map_func, allocator);
     }
 }
 
 tl::expected<void, Error>
 HNSW::merge(const std::vector<MergeUnit>& merge_units) {
-    int64_t total_data_num = this->GetNumElements();
-    for (const auto& merge_unit : merge_units) {
-        total_data_num += merge_unit.index->GetNumElements();
-    }
-    DatasetPtr dataset = Dataset::Make();
-    auto& allocator = allocator_;
-    dataset->Owner(true, allocator.get());
-    auto vectors = (float*)allocator->Allocate(dim_ * total_data_num * sizeof(float*));
-    if (vectors == nullptr) {
-        LOG_ERROR_AND_RETURNS(ErrorType::NO_ENOUGH_MEMORY,
-                              "fail to allocate vectors in the process of merge index");
-    }
-    dataset->Float32Vectors(vectors);
-    auto ids = (int64_t*)allocator->Allocate(total_data_num * sizeof(int64_t*));
-    if (ids == nullptr) {
-        LOG_ERROR_AND_RETURNS(ErrorType::NO_ENOUGH_MEMORY,
-                              "fail to allocate ids in the process of merge index");
-    }
-    dataset->Ids(ids);
-    dataset->NumElements(0);
-    dataset->Dim(dim_);
-    Vector<Vector<uint32_t>> graph(
-        total_data_num, Vector<uint32_t>(allocator.get()), allocator.get());
+    auto param = std::make_shared<FlattenDataCellParameter>();
+    param->io_parameter_ = std::make_shared<MemoryIOParameter>();
+    param->quantizer_parameter_ = std::make_shared<FP32QuantizerParameter>();
+    GraphDataCellParamPtr graph_param_ptr = std::make_shared<GraphDataCellParameter>();
+    graph_param_ptr->io_parameter_ = std::make_shared<vsag::MemoryIOParameter>();
+    graph_param_ptr->max_degree_ = max_degree_ * 2;
+
+    FlattenInterfacePtr flatten_interface =
+        FlattenInterface::MakeInstance(param, index_common_param_);
+    GraphInterfacePtr graph_interface =
+        GraphInterface::MakeInstance(graph_param_ptr, index_common_param_, false);
+    Vector<LabelType> ids(allocator_.get());
     // extract data and graph
     IdMapFunction id_map = [](int64_t id) -> std::tuple<bool, int64_t> {
         return std::make_tuple(true, id);
     };
-    this->ExtractDataAndGraph(dataset, graph, id_map);
-    extract_data_and_graph(merge_units, dataset, graph);
+    this->ExtractDataAndGraph(flatten_interface, graph_interface, ids, id_map, allocator_.get());
+    extract_data_and_graph(merge_units, flatten_interface, graph_interface, ids, allocator_.get());
     // TODO(inabao): merge graph
     // set graph
-    SetDataAndGraph(dataset, graph);
+    SetDataAndGraph(flatten_interface, graph_interface, ids);
     return {};
 }
 
