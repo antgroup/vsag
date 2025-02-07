@@ -973,7 +973,10 @@ TEST_CASE("extract/set data and graph", "[ut][hnsw]") {
         num_elements, Vector<uint32_t>(allocator.get()), allocator.get());
     new_dataset->NumElements(0)->Dim(dim)->Float32Vectors(new_vectors)->Ids(new_ids);
 
-    REQUIRE(index->ExtractDataAndGraph(new_dataset, graph));
+    IdMapFunction id_map = [](int64_t id) -> std::tuple<bool, int64_t> {
+        return std::make_tuple(true, id);
+    };
+    REQUIRE(index->ExtractDataAndGraph(new_dataset, graph, id_map));
 
     auto another_index = std::make_shared<HNSW>(hnsw_obj, commom_param);
     another_index->InitMemorySpace();

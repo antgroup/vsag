@@ -31,7 +31,6 @@
 #include "index/index_common_param.h"
 #include "index/pyramid.h"
 #include "index/pyramid_zparameters.h"
-#include "merge_index.h"
 #include "resource_owner_wrapper.h"
 #include "safe_thread_pool.h"
 #include "typing.h"

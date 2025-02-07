@@ -28,7 +28,6 @@
 #include "common.h"
 #include "index/hnsw_zparameters.h"
 #include "logger.h"
-#include "merge_index.h"
 #include "safe_allocator.h"
 #include "vsag/binaryset.h"
 #include "vsag/constants.h"
@@ -994,12 +993,14 @@ HNSW::init_feature_list() {
 }
 
 bool
-HNSW::ExtractDataAndGraph(const DatasetPtr& dataset, Vector<Vector<uint32_t>>& graph) {
+HNSW::ExtractDataAndGraph(const DatasetPtr& dataset,
+                          Vector<Vector<uint32_t>>& graph,
+                          IdMapFunction func) {
     if (use_static_) {
         return false;
     }
     auto hnsw = std::static_pointer_cast<hnswlib::HierarchicalNSW>(alg_hnsw_);
-    int64_t cur_element_count = hnsw->getCurrentElementCount();
+    auto cur_element_count = hnsw->getCurrentElementCount();
     int64_t origin_data_num = dataset->GetNumElements();
     int64_t origin_data_dim = dataset->GetDim();
     auto dataset_vectors = dataset->GetFloat32Vectors();
@@ -1009,21 +1010,31 @@ HNSW::ExtractDataAndGraph(const DatasetPtr& dataset, Vector<Vector<uint32_t>>& g
         fmt::format("origin_data_dim({}) is not equal to dim_({}) when extract data in hnsw",
                     origin_data_dim,
                     dim_));
-    for (int i = 0; i < cur_element_count; ++i) {
-        auto offset = i + origin_data_num;
+    int64_t valid_id_count = 0;
+    BitsetPtr bitset = std::make_shared<BitsetImpl>();
+    for (auto i = 0; i < cur_element_count; ++i) {
+        int64_t id = hnsw->getExternalLabel(i);
+        auto [is_exist, new_id] = func(id);
+        if (not is_exist) {
+            bitset->Set(i);
+        }
+        auto offset = valid_id_count + origin_data_num;
         char* vector_data = hnsw->getDataByInternalId(i);
         std::memcpy((char*)(dataset_vectors + offset * dim_), vector_data, sizeof(float) * dim_);
         int* data = (int*)hnsw->getLinklistAtLevel(i, 0);
         size_t size = hnsw->getListCount((unsigned int*)data);
-        graph[offset].resize(size);
         for (int j = 0; j < size; ++j) {
-            graph[offset][j] = origin_data_num + *(data + 1 + j);
+            if (not bitset->Test(*(data + 1 + j))) {
+                graph[offset].push_back(origin_data_num + *(data + 1 + j));
+            }
         }
-        dataset_ids[offset] = hnsw->getExternalLabel(i);
+        dataset_ids[offset] = new_id;
+        valid_id_count++;
     }
-    dataset->NumElements(origin_data_num + cur_element_count);
+    dataset->NumElements(origin_data_num + valid_id_count);
     return true;
 }
+
 bool
 HNSW::SetDataAndGraph(const DatasetPtr& dataset, const Vector<Vector<uint32_t>>& graph) {
     if (use_static_) {
@@ -1038,11 +1049,24 @@ HNSW::SetDataAndGraph(const DatasetPtr& dataset, const Vector<Vector<uint32_t>>&
     return true;
 }
 
+void
+extract_data_and_graph(const std::vector<MergeUnit>& merge_units,
+                       const DatasetPtr& dataset,
+                       Vector<Vector<uint32_t>>& graph) {
+    for (const auto& merge_unit : merge_units) {
+        auto stat_string = merge_unit.index->GetStats();
+        auto stats = JsonType::parse(stat_string);
+        std::string index_name = stats[STATSTIC_INDEX_NAME];
+        auto hnsw = std::dynamic_pointer_cast<HNSW>(merge_unit.index);
+        hnsw->ExtractDataAndGraph(dataset, graph, merge_unit.id_map_func);
+    }
+}
+
 tl::expected<void, Error>
-HNSW::merge(const std::vector<std::shared_ptr<Index>>& sub_indexes) {
+HNSW::merge(const std::vector<MergeUnit>& merge_units) {
     int64_t total_data_num = this->GetNumElements();
-    for (const auto& sub_index : sub_indexes) {
-        total_data_num += sub_index->GetNumElements();
+    for (const auto& merge_unit : merge_units) {
+        total_data_num += merge_unit.index->GetNumElements();
     }
     DatasetPtr dataset = Dataset::Make();
     auto& allocator = allocator_;
@@ -1064,8 +1088,11 @@ HNSW::merge(const std::vector<std::shared_ptr<Index>>& sub_indexes) {
     Vector<Vector<uint32_t>> graph(
         total_data_num, Vector<uint32_t>(allocator.get()), allocator.get());
     // extract data and graph
-    ExtractDataAndGraph(dataset, graph);
-    extract_data_and_graph(sub_indexes, dataset, graph);
+    IdMapFunction id_map = [](int64_t id) -> std::tuple<bool, int64_t> {
+        return std::make_tuple(true, id);
+    };
+    this->ExtractDataAndGraph(dataset, graph, id_map);
+    extract_data_and_graph(merge_units, dataset, graph);
     // TODO(inabao): merge graph
     // set graph
     SetDataAndGraph(dataset, graph);

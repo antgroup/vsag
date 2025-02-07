@@ -848,15 +848,18 @@ TestIndex::TestMergeIndex(const std::string& name,
     auto create_index_result = vsag::Factory::CreateIndex(name, build_param);
     REQUIRE(create_index_result.has_value() == expect_success);
     auto index = create_index_result.value();
-    std::vector<std::shared_ptr<vsag::Index>> sub_indexes;
+    std::vector<vsag::MergeUnit> merge_units;
     for (auto sub_dataset : sub_datasets) {
         auto new_index_result = vsag::Factory::CreateIndex(name, build_param);
         REQUIRE(new_index_result.has_value() == expect_success);
         auto new_index = new_index_result.value();
         new_index->Build(sub_dataset);
-        sub_indexes.push_back(new_index);
+        vsag::IdMapFunction id_map = [](int64_t id) -> std::tuple<bool, int64_t> {
+            return std::make_tuple(true, id);
+        };
+        merge_units.push_back({new_index, id_map});
     }
-    auto merge_result = index->Merge(sub_indexes);
+    auto merge_result = index->Merge(merge_units);
     REQUIRE(merge_result.has_value());
     return index;
 }

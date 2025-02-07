@@ -188,8 +188,8 @@ public:
     }
 
     tl::expected<void, Error>
-    Merge(const std::vector<std::shared_ptr<Index>>& sub_indexes) override {
-        SAFE_CALL(return this->merge(sub_indexes));
+    Merge(const std::vector<MergeUnit>& merge_units) override {
+        SAFE_CALL(return this->merge(merge_units));
     }
 
 public:
@@ -217,7 +217,9 @@ public:
     InitMemorySpace();
 
     bool
-    ExtractDataAndGraph(const DatasetPtr& dataset, Vector<Vector<uint32_t>>& graph);
+    ExtractDataAndGraph(const DatasetPtr& dataset,
+                        Vector<Vector<uint32_t>>& graph,
+                        IdMapFunction func);
 
     bool
     SetDataAndGraph(const DatasetPtr& dataset, const Vector<Vector<uint32_t>>& graph);
@@ -303,7 +305,7 @@ private:
     set_dataset(const DatasetPtr& base, const void* vectors_ptr, uint32_t num_element) const;
 
     tl::expected<void, Error>
-    merge(const std::vector<std::shared_ptr<Index>>& sub_indexes);
+    merge(const std::vector<MergeUnit>& merge_units);
 
     static BinarySet
     empty_binaryset();
