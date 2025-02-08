@@ -178,10 +178,10 @@ TEST_CASE("search with alg_hnsw", "[ut][basic_searcher]") {
 
     // search param
     InnerSearchParam search_param;
-    search_param.ep_ = fixed_entry_point_id;
-    search_param.ef_ = ef_search;
-    search_param.topk_ = k;
-    search_param.is_id_allowed_ = nullptr;
+    search_param.ep = fixed_entry_point_id;
+    search_param.ef = ef_search;
+    search_param.topk = k;
+    search_param.is_inner_id_allowed = nullptr;
     auto init_size = 10;
     auto pool = std::make_shared<VisitedListPool>(
         init_size, allocator.get(), vector_data_cell->TotalCount(), allocator.get());
@@ -214,8 +214,8 @@ TEST_CASE("search with alg_hnsw", "[ut][basic_searcher]") {
         auto valid_result = alg_hnsw->searchBaseLayerST<false, false>(
             fixed_entry_point_id, base_vectors.data() + i * dim, ef_search, nullptr);
         REQUIRE(result.size() == valid_result.size());
-
-        for (int j = 0; j < k - 1; j++) {
+        auto result_size = result.size();
+        for (int j = 0; j < result_size; j++) {
             valid_set.insert(valid_result.top().second);
             set.insert(result.top().second);
             result.pop();

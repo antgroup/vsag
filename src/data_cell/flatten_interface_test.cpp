@@ -26,7 +26,7 @@ void
 FlattenInterfaceTest::BasicTest(int64_t dim, uint64_t base_count, float error) {
     int64_t query_count = 100;
     auto vectors = fixtures::generate_vectors(base_count, dim);
-    auto querys = fixtures::generate_vectors(query_count, dim, random());
+    auto queries = fixtures::generate_vectors(query_count, dim, random());
 
     auto old_count = flatten_->TotalCount();
     InnerIdType last_one = base_count + old_count - 1;
@@ -40,15 +40,16 @@ FlattenInterfaceTest::BasicTest(int64_t dim, uint64_t base_count, float error) {
     std::shuffle(idx.begin(), idx.end(), std::mt19937(std::random_device()()));
     std::vector<float> dists(base_count);
     for (int64_t i = 0; i < query_count; ++i) {
-        auto computer = flatten_->FactoryComputer(querys.data() + i * dim);
+        auto computer = flatten_->FactoryComputer(queries.data() + i * dim);
         flatten_->Query(dists.data(), computer, idx.data(), base_count);
         float gt;
         for (int64_t j = 0; j < base_count; ++j) {
             if (metric_ == vsag::MetricType::METRIC_TYPE_IP ||
                 metric_ == vsag::MetricType::METRIC_TYPE_COSINE) {
-                gt = 1 - InnerProduct(vectors.data() + idx[j] * dim, querys.data() + i * dim, &dim);
+                gt =
+                    1 - InnerProduct(vectors.data() + idx[j] * dim, queries.data() + i * dim, &dim);
             } else if (metric_ == vsag::MetricType::METRIC_TYPE_L2SQR) {
-                gt = L2Sqr(vectors.data() + idx[j] * dim, querys.data() + i * dim, &dim);
+                gt = L2Sqr(vectors.data() + idx[j] * dim, queries.data() + i * dim, &dim);
             }
             REQUIRE(std::abs(gt - dists[j]) < error);
         }
@@ -85,7 +86,7 @@ FlattenInterfaceTest::TestSerializeAndDeserialize(int64_t dim,
     other->Deserialize(reader);
 
     int64_t query_count = 100;
-    auto querys = fixtures::generate_vectors(query_count, dim, random());
+    auto queries = fixtures::generate_vectors(query_count, dim, random());
 
     auto total_count = other->TotalCount();
     REQUIRE(total_count == this->flatten_->TotalCount());
@@ -97,7 +98,7 @@ FlattenInterfaceTest::TestSerializeAndDeserialize(int64_t dim,
         std::iota(idx.begin(), idx.end(), 0);
         std::shuffle(idx.begin(), idx.end(), std::mt19937(std::random_device()()));
         for (int64_t i = 0; i < query_count; ++i) {
-            auto computer = flatten_->FactoryComputer(querys.data() + i * dim);
+            auto computer = flatten_->FactoryComputer(queries.data() + i * dim);
             flatten_->Query(dists1.data(), computer, idx.data(), total_count);
             other->Query(dists2.data(), computer, idx.data(), total_count);
             for (int64_t j = 0; j < total_count; ++j) {
@@ -126,18 +127,18 @@ FlattenInterfaceTest::TestSerializeAndDeserialize(int64_t dim,
         std::iota(idx.begin(), idx.end(), total_count);
         std::vector<float> dists(base_count);
         for (int64_t i = 0; i < query_count; ++i) {
-            auto computer = other->FactoryComputer(querys.data() + i * dim);
+            auto computer = other->FactoryComputer(queries.data() + i * dim);
             other->Query(dists.data(), computer, idx.data(), base_count);
             float gt;
             for (int64_t j = 0; j < base_count; ++j) {
                 if (metric_ == vsag::MetricType::METRIC_TYPE_IP ||
                     metric_ == vsag::MetricType::METRIC_TYPE_COSINE) {
                     gt = 1 - InnerProduct(vectors.data() + (idx[j] - total_count) * dim,
-                                          querys.data() + i * dim,
+                                          queries.data() + i * dim,
                                           &dim);
                 } else if (metric_ == vsag::MetricType::METRIC_TYPE_L2SQR) {
                     gt = L2Sqr(vectors.data() + (idx[j] - total_count) * dim,
-                               querys.data() + i * dim,
+                               queries.data() + i * dim,
                                &dim);
                 }
                 REQUIRE(std::abs(gt - dists[j]) < error);
