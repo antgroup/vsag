@@ -1449,7 +1449,8 @@ public:
     searchKnn(const void* query_data,
               size_t k,
               uint64_t ef,
-              const vsag::FilterPtr is_id_allowed = nullptr) const override {
+              const vsag::FilterPtr is_id_allowed = nullptr,
+              const float skip_ratio = 0.9f) const override {
         std::priority_queue<std::pair<float, LabelType>> result;
         if (cur_element_count_ == 0)
             return result;
@@ -1590,9 +1591,14 @@ public:
     }
 
     std::priority_queue<std::pair<float, LabelType>>
-    bruteForce(const void* data_point, int64_t k) override {
+    bruteForce(const void* data_point,
+               int64_t k,
+               const vsag::FilterPtr is_id_allowed) const override {
         std::priority_queue<std::pair<float, LabelType>> results;
         for (uint32_t i = 0; i < cur_element_count_; i++) {
+            if (is_id_allowed && not is_id_allowed->CheckValid(getExternalLabel(i))) {
+                continue;
+            }
             float dist = fstdistfunc_(data_point, getDataByInternalId(i), dist_func_param_);
             if (results.size() < k) {
                 results.push({dist, getExternalLabel(i)});

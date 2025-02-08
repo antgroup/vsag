@@ -29,7 +29,8 @@ public:
     CreateTestDataset(uint64_t dim,
                       uint64_t count,
                       std::string metric_str = "l2",
-                      bool with_path = false);
+                      bool with_path = false,
+                      float valid_ratio = 0.8);
 
     static std::shared_ptr<TestDataset>
     CreateNanDataset(const std::string& metric_str);
@@ -50,6 +51,8 @@ public:
 
     uint64_t dim_{0};
     uint64_t count_{0};
+
+    float valid_ratio_{1.0F};
 
 private:
     TestDataset() = default;
