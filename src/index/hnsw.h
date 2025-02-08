@@ -341,7 +341,7 @@ private:
     mutable std::shared_mutex rw_mutex_;
 
     IndexFeatureList feature_list_{};
-    const IndexCommonParam& index_common_param_;
+    const IndexCommonParam index_common_param_;
 };
 
 }  // namespace vsag
