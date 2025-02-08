@@ -237,7 +237,7 @@ HGraph::Serialize() const {
     size_t num_bytes = this->cal_serialize_size();
     try {
         std::shared_ptr<int8_t[]> bin(new int8_t[num_bytes]);
-        auto buffer = reinterpret_cast<char*>(const_cast<int8_t*>(bin.get()));
+        auto* buffer = reinterpret_cast<char*>(const_cast<int8_t*>(bin.get()));
         BufferStreamWriter writer(buffer);
         this->Serialize(writer);
         Binary b{
@@ -279,8 +279,8 @@ HGraph::Deserialize(const ReaderSet& reader_set) {
 void
 HGraph::hnsw_add(const DatasetPtr& data) {
     uint64_t total = data->GetNumElements();
-    auto* ids = data->GetIds();
-    auto* datas = data->GetFloat32Vectors();
+    const auto* ids = data->GetIds();
+    const auto* datas = data->GetFloat32Vectors();
     auto cur_count = this->bottom_graph_->TotalCount();
     this->resize(total + cur_count);
 
@@ -353,7 +353,7 @@ HGraph::search_one_graph(const float* query,
 
     MaxHeap candidate_set(allocator_);
     MaxHeap cur_result(allocator_);
-    float dist = 0.0f;
+    float dist = 0.0F;
     auto lower_bound = std::numeric_limits<float>::max();
     flatten->Query(&dist, computer, &ep, 1);
     if (not is_id_allowed || (*is_id_allowed)(get_label_by_id(ep))) {
@@ -531,8 +531,9 @@ HGraph::select_edges_by_heuristic(MaxHeap& edges,
     }
 
     while (not queue_closest.empty()) {
-        if (return_list.size() >= max_size)
+        if (return_list.size() >= max_size) {
             break;
+        }
         std::pair<float, InnerIdType> curent_pair = queue_closest.top();
         float float_query = -curent_pair.first;
         queue_closest.pop();
@@ -563,9 +564,10 @@ HGraph::mutually_connect_new_element(InnerIdType cur_c,
                                      bool is_update) {
     const size_t max_size = graph->MaximumDegree();
     this->select_edges_by_heuristic(top_candidates, max_size, flatten);
-    if (top_candidates.size() > max_size)
+    if (top_candidates.size() > max_size) {
         throw std::runtime_error(
             "Should be not be more than max_size candidates returned by the heuristic");
+    }
 
     Vector<InnerIdType> selected_neighbors(allocator_);
     selected_neighbors.reserve(max_size);
@@ -593,10 +595,12 @@ HGraph::mutually_connect_new_element(InnerIdType cur_c,
 
         size_t sz_link_list_other = neighbors.size();
 
-        if (sz_link_list_other > max_size)
+        if (sz_link_list_other > max_size) {
             throw std::runtime_error("Bad value of sz_link_list_other");
-        if (selected_neighbor == cur_c)
+        }
+        if (selected_neighbor == cur_c) {
             throw std::runtime_error("Trying to connect an element to itself");
+        }
 
         bool is_cur_c_present = false;
         if (is_update) {
@@ -653,7 +657,7 @@ HGraph::serialize_basic_info(StreamWriter& writer) const {
 
     uint64_t size = this->label_lookup_.size();
     StreamWriter::WriteObj(writer, size);
-    for (auto& pair : this->label_lookup_) {
+    for (const auto& pair : this->label_lookup_) {
         auto key = pair.first;
         StreamWriter::WriteObj(writer, key);
         StreamWriter::WriteObj(writer, pair.second);
@@ -788,19 +792,18 @@ HGraph::CalculateDistanceById(const float* vector, int64_t id) const {
     if (use_reorder_) {
         flat = this->high_precise_codes_;
     }
-    float result = 0.0f;
+    float result = 0.0F;
     auto computer = flat->FactoryComputer(vector);
     {
         std::shared_lock<std::shared_mutex> lock(this->label_lookup_mutex_);
         auto iter = this->label_lookup_.find(id);
-        if (iter != this->label_lookup_.end()) {
-            auto new_id = iter->second;
-            flat->Query(&result, computer, &new_id, 1);
-            return result;
-        } else {
+        if (iter == this->label_lookup_.end()) {
             LOG_ERROR_AND_RETURNS(ErrorType::INVALID_ARGUMENT,
                                   fmt::format("failed to find id: {}", id));
         }
+        auto new_id = iter->second;
+        flat->Query(&result, computer, &new_id, 1);
+        return result;
     }
 }
 void
@@ -917,8 +920,8 @@ HGraph::split_dataset_by_duplicate_label(const DatasetPtr& dataset,
     Vector<DatasetPtr> return_datasets(0, this->allocator_);
     auto count = dataset->GetNumElements();
     auto dim = dataset->GetDim();
-    auto* labels = dataset->GetIds();
-    auto* vec = dataset->GetFloat32Vectors();
+    const auto* labels = dataset->GetIds();
+    const auto* vec = dataset->GetFloat32Vectors();
     UnorderedSet<LabelType> temp_labels(allocator_);
 
     for (uint64_t i = 0; i < count; ++i) {

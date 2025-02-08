@@ -31,11 +31,15 @@ GraphInterface::MakeInstance(const GraphInterfaceParamPtr& param,
 
     auto io_string =
         std::dynamic_pointer_cast<GraphDataCellParameter>(param)->io_parameter_->GetTypeName();
+
     if (io_string == IO_TYPE_VALUE_BLOCK_MEMORY_IO) {
         return std::make_shared<GraphDataCell<MemoryBlockIO, false>>(param, common_param);
-    } else if (io_string == IO_TYPE_VALUE_MEMORY_IO) {
+    }
+
+    if (io_string == IO_TYPE_VALUE_MEMORY_IO) {
         return std::make_shared<GraphDataCell<MemoryIO, false>>(param, common_param);
     }
+
     return nullptr;
 }
 }  // namespace vsag

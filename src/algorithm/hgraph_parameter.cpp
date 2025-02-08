@@ -55,7 +55,7 @@ HGraphParameter::FromJson(const JsonType& json) {
     this->bottom_graph_param_ = GraphInterfaceParameter::GetGraphParameterByJson(graph_json);
 
     if (json.contains(BUILD_PARAMS_KEY)) {
-        auto& build_params = json[BUILD_PARAMS_KEY];
+        const auto& build_params = json[BUILD_PARAMS_KEY];
         if (build_params.contains(BUILD_EF_CONSTRUCTION)) {
             this->ef_construction_ = build_params[BUILD_EF_CONSTRUCTION];
         }

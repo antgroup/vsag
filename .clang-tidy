@@ -23,14 +23,16 @@ Checks: >
     # clang-diagnostic-*,
     -clang-diagnostic-deprecated-builtins,
     # google-*,
-    # # misc-*,
+    # misc-*,
     modernize-*,
     -modernize-use-trailing-return-type,
     -modernize-avoid-c-arrays,
     # openmp-*,
     # performance-*,
-    # -readability-*,
-    readability-identifier-naming,
+    readability-*,
+    -readability-identifier-length,
+    -readability-magic-numbers,
+    -readability-function-cognitive-complexity, # enable after fix all
 
 
 HeaderFilterRegex: ''

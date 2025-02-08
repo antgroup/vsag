@@ -52,11 +52,10 @@ SerializationFooter::SetMetadata(const std::string& key, const std::string& valu
 std::string
 SerializationFooter::GetMetadata(const std::string& key) const {
     auto iter = json_.find(key);
-    if (iter != json_.end()) {
-        return iter->get<std::string>();
-    } else {
+    if (iter == json_.end()) {
         throw std::runtime_error(fmt::format("Footer doesn't contain key ({})", key));
     }
+    return iter->get<std::string>();
 }
 
 void

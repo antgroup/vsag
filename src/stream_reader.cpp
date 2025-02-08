@@ -21,7 +21,7 @@
 
 ReadFuncStreamReader::ReadFuncStreamReader(
     const std::function<void(uint64_t, uint64_t, void*)> read_func, uint64_t cursor)
-    : readFunc_(read_func), cursor_(cursor), StreamReader() {
+    : readFunc_(read_func), cursor_(cursor) {
 }
 
 void
@@ -40,7 +40,7 @@ ReadFuncStreamReader::GetCursor() const {
     return cursor_;
 }
 
-IOStreamReader::IOStreamReader(std::istream& istream) : istream_(istream), StreamReader() {
+IOStreamReader::IOStreamReader(std::istream& istream) : istream_(istream) {
 }
 
 void
@@ -67,7 +67,7 @@ IOStreamReader::GetCursor() const {
 BufferStreamReader::BufferStreamReader(StreamReader* reader,
                                        size_t max_size,
                                        vsag::Allocator* allocator)
-    : reader_impl_(reader), max_size_(max_size), allocator_(allocator), StreamReader() {
+    : reader_impl_(reader), max_size_(max_size), allocator_(allocator) {
     buffer_size_ = std::min(max_size_, vsag::Options::Instance().block_size_limit());
     buffer_cursor_ = buffer_size_;
     valid_size_ = buffer_size_;

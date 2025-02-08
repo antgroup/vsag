@@ -115,15 +115,15 @@ private:
     init_graph();
 
     void
-    update_neighbors(Vector<UnorderedSet<uint32_t>>& old_neigbors,
-                     Vector<UnorderedSet<uint32_t>>& new_neigbors);
+    update_neighbors(Vector<UnorderedSet<uint32_t>>& old_neighbors,
+                     Vector<UnorderedSet<uint32_t>>& new_neighbors);
 
     void
     add_reverse_edges();
 
     void
-    sample_candidates(Vector<UnorderedSet<uint32_t>>& old_neigbors,
-                      Vector<UnorderedSet<uint32_t>>& new_neigbors,
+    sample_candidates(Vector<UnorderedSet<uint32_t>>& old_neighbors,
+                      Vector<UnorderedSet<uint32_t>>& new_neighbors,
                       float sample_rate);
 
     void
@@ -138,7 +138,7 @@ private:
 
     size_t dim_;
     int64_t data_num_;
-    int64_t is_build_ = false;
+    bool is_build_ = false;
 
     int64_t max_degree_;
     float alpha_;

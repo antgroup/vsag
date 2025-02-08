@@ -163,11 +163,11 @@ Pyramid::Build(const DatasetPtr& base) {
 
 tl::expected<std::vector<int64_t>, Error>
 Pyramid::Add(const DatasetPtr& base) {
-    auto path = base->GetPaths();
+    const auto* path = base->GetPaths();
     int64_t data_num = base->GetNumElements();
     int64_t data_dim = base->GetDim();
-    auto data_ids = base->GetIds();
-    auto data_vectors = base->GetFloat32Vectors();
+    const auto* data_ids = base->GetIds();
+    const auto* data_vectors = base->GetFloat32Vectors();
     for (int i = 0; i < data_num; ++i) {
         std::string current_path = path[i];
         auto path_slices = split(current_path, PART_SLASH);
@@ -198,7 +198,7 @@ Pyramid::knn_search(const DatasetPtr& query,
                     int64_t k,
                     const std::string& parameters,
                     const SearchFunc& search_func) const {
-    auto path = query->GetPaths();  // TODO(inabao): provide different search modes.
+    const auto* path = query->GetPaths();  // TODO(inabao): provide different search modes.
 
     std::string current_path = path[0];
     auto path_slices = split(current_path, PART_SLASH);
@@ -215,9 +215,8 @@ Pyramid::knn_search(const DatasetPtr& query,
             auto ret = Dataset::Make();
             ret->Dim(0)->NumElements(1);
             return ret;
-        } else {
-            root = root_iter->second;
         }
+        root = root_iter->second;
     }
     Deque<std::shared_ptr<IndexNode>> candidate_indexes(commom_param_.allocator_.get());
 
@@ -250,7 +249,7 @@ Pyramid::knn_search(const DatasetPtr& query,
     // return result
     auto result = Dataset::Make();
     size_t target_size = results.size();
-    if (results.size() == 0) {
+    if (results.empty()) {
         result->Dim(0)->NumElements(1);
         return result;
     }

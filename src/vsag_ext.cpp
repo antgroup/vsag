@@ -126,15 +126,14 @@ IndexHandler::KnnSearch(DatasetHandler* query,
                         const std::string& parameters,
                         BitsetHandler* invalid) const {
     BitsetPtr invalid_bitset = nullptr;
-    if (invalid) {
+    if (invalid != nullptr) {
         invalid_bitset = invalid->bitset_;
     }
     auto ret = index_->KnnSearch(query->dataset_, k, parameters, invalid_bitset);
-    if (ret.has_value()) {
-        return DatasetHandler::Make(ret.value());
-    } else {
+    if (not ret.has_value()) {
         return tl::unexpected(ret.error());
     }
+    return DatasetHandler::Make(ret.value());
 }
 
 tl::expected<DatasetHandler*, Error>
@@ -144,16 +143,15 @@ IndexHandler::RangeSearch(DatasetHandler* query,
                           BitsetHandler* invalid,
                           int64_t limited_size) const {
     BitsetPtr invalid_bitset = nullptr;
-    if (invalid) {
+    if (invalid != nullptr) {
         invalid_bitset = invalid->bitset_;
     }
     auto ret =
         index_->RangeSearch(query->dataset_, radius, parameters, invalid_bitset, limited_size);
-    if (ret.has_value()) {
-        return DatasetHandler::Make(ret.value());
-    } else {
+    if (not ret.has_value()) {
         return tl::unexpected(ret.error());
     }
+    return DatasetHandler::Make(ret.value());
 }
 
 tl::expected<BinarySet, Error>

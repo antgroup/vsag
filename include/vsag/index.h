@@ -463,7 +463,7 @@ tl::expected<float, Error>
 estimate_search_time(const std::string& index_name,
                      int64_t data_num,
                      int64_t data_dim,
-                     const std::string& params);
+                     const std::string& parameters);
 
 /**
   * [experimental]
