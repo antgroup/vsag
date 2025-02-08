@@ -24,7 +24,7 @@ MemoryIOParameter::MemoryIOParameter() : IOParameter(IO_TYPE_VALUE_MEMORY_IO) {
 
 MemoryIOParameter::MemoryIOParameter(const vsag::JsonType& json)
     : IOParameter(IO_TYPE_VALUE_MEMORY_IO) {
-    this->FromJson(json);
+    this->FromJson(json);  // NOLINT(clang-analyzer-optin.cplusplus.VirtualCall)
 }
 
 void

@@ -30,12 +30,12 @@ public:
 
 public:
     // require vars
-    int64_t dim;
-    diskann::Metric metric;
-    int64_t max_degree;
-    int64_t ef_construction;
-    int64_t pq_dims;
-    float pq_sample_rate;
+    int64_t dim{-1};
+    diskann::Metric metric{diskann::Metric::L2};
+    int64_t max_degree{-1};
+    int64_t ef_construction{-1};
+    int64_t pq_dims{-1};
+    float pq_sample_rate{.0f};
 
     // optional vars with default value
     bool use_preload = false;
@@ -61,9 +61,9 @@ public:
 
 public:
     // required vars
-    int64_t ef_search;
-    uint64_t beam_search;
-    int64_t io_limit;
+    int64_t ef_search{-1};
+    uint64_t beam_search{0};
+    int64_t io_limit{-1};
 
     // optional vars with default value
     bool use_reorder = false;
