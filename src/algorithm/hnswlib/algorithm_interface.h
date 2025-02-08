@@ -49,7 +49,7 @@ public:
     searchKnnCloserFirst(const void* query_data,
                          size_t k,
                          size_t ef,
-                         const vsag::FilterPtr isIdAllowed = nullptr) const;
+                         const vsag::FilterPtr& isIdAllowed = nullptr) const;
 
     virtual void
     saveIndex(void* d) = 0;
