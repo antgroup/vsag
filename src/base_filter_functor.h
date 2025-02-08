@@ -20,6 +20,7 @@
 #include "bitset_impl.h"
 #include "common.h"
 #include "typing.h"
+#include "vsag/filter.h"
 
 namespace vsag {
 class BaseFilterFunctor {
@@ -37,6 +38,29 @@ public:
 
     bool
     operator()(LabelType id) override {
+        if (is_bitset_filter_) {
+            int64_t bit_index = id & ROW_ID_MASK;
+            return not bitset_->Test(bit_index);
+        } else {
+            return not func_(id);
+        }
+    }
+
+private:
+    std::function<bool(int64_t)> func_{nullptr};
+    const BitsetPtr bitset_{nullptr};
+    const bool is_bitset_filter_{false};
+};
+
+class UniqueFilter : public Filter {
+public:
+    UniqueFilter(const std::function<bool(int64_t)>& func)
+        : func_(func), is_bitset_filter_(false){};
+
+    UniqueFilter(const BitsetPtr& bitset) : bitset_(bitset), is_bitset_filter_(true){};
+
+    [[nodiscard]] bool
+    CheckValid(int64_t id) const override {
         if (is_bitset_filter_) {
             int64_t bit_index = id & ROW_ID_MASK;
             return not bitset_->Test(bit_index);

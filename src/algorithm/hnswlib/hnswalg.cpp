@@ -404,7 +404,7 @@ MaxHeap
 HierarchicalNSW::searchBaseLayerST(InnerIdType ep_id,
                                    const void* data_point,
                                    size_t ef,
-                                   vsag::BaseFilterFunctor* isIdAllowed) const {
+                                   const vsag::FilterPtr isIdAllowed) const {
     VisitedListPtr vl = visited_list_pool_->getFreeVisitedList();
     vl_type* visited_array = vl->mass;
     vl_type visited_array_tag = vl->curV;
@@ -414,7 +414,7 @@ HierarchicalNSW::searchBaseLayerST(InnerIdType ep_id,
 
     float lower_bound;
     if ((!has_deletions || !isMarkedDeleted(ep_id)) &&
-        ((!isIdAllowed) || (*isIdAllowed)(getExternalLabel(ep_id)))) {
+        ((!isIdAllowed) || isIdAllowed->CheckValid(getExternalLabel(ep_id)))) {
         float dist = fstdistfunc_(data_point, getDataByInternalId(ep_id), dist_func_param_);
         lower_bound = dist;
         top_candidates.emplace(dist, ep_id);
@@ -476,7 +476,7 @@ HierarchicalNSW::searchBaseLayerST(InnerIdType ep_id,
 #endif
 
                     if ((!has_deletions || !isMarkedDeleted(candidate_id)) &&
-                        ((!isIdAllowed) || (*isIdAllowed)(getExternalLabel(candidate_id))))
+                        ((!isIdAllowed) || isIdAllowed->CheckValid(getExternalLabel(candidate_id))))
                         top_candidates.emplace(dist, candidate_id);
 
                     if (top_candidates.size() > ef)
@@ -499,7 +499,7 @@ HierarchicalNSW::searchBaseLayerST(InnerIdType ep_id,
                                    const void* data_point,
                                    float radius,
                                    int64_t ef,
-                                   vsag::BaseFilterFunctor* isIdAllowed) const {
+                                   const vsag::FilterPtr isIdAllowed) const {
     VisitedListPtr vl = visited_list_pool_->getFreeVisitedList();
     vl_type* visited_array = vl->mass;
     vl_type visited_array_tag = vl->curV;
@@ -509,7 +509,7 @@ HierarchicalNSW::searchBaseLayerST(InnerIdType ep_id,
 
     float lower_bound;
     if ((!has_deletions || !isMarkedDeleted(ep_id)) &&
-        ((!isIdAllowed) || (*isIdAllowed)(getExternalLabel(ep_id)))) {
+        ((!isIdAllowed) || isIdAllowed->CheckValid(getExternalLabel(ep_id)))) {
         float dist = fstdistfunc_(data_point, getDataByInternalId(ep_id), dist_func_param_);
         lower_bound = dist;
         if (dist <= radius + THRESHOLD_ERROR)
@@ -571,7 +571,7 @@ HierarchicalNSW::searchBaseLayerST(InnerIdType ep_id,
 #endif
 
                     if ((!has_deletions || !isMarkedDeleted(candidate_id)) &&
-                        ((!isIdAllowed) || (*isIdAllowed)(getExternalLabel(candidate_id))))
+                        ((!isIdAllowed) || isIdAllowed->CheckValid(getExternalLabel(candidate_id))))
                         top_candidates.emplace(dist, candidate_id);
 
                     if (not top_candidates.empty())
@@ -1391,7 +1391,7 @@ std::priority_queue<std::pair<float, LabelType>>
 HierarchicalNSW::searchKnn(const void* query_data,
                            size_t k,
                            uint64_t ef,
-                           vsag::BaseFilterFunctor* isIdAllowed) const {
+                           const vsag::FilterPtr isIdAllowed) const {
     std::shared_lock resize_lock(resize_mutex_);
     std::priority_queue<std::pair<float, LabelType>> result;
     if (cur_element_count_ == 0)
@@ -1459,7 +1459,7 @@ std::priority_queue<std::pair<float, LabelType>>
 HierarchicalNSW::searchRange(const void* query_data,
                              float radius,
                              uint64_t ef,
-                             vsag::BaseFilterFunctor* isIdAllowed) const {
+                             const vsag::FilterPtr isIdAllowed) const {
     std::shared_lock resize_lock(resize_mutex_);
     std::priority_queue<std::pair<float, LabelType>> result;
     if (cur_element_count_ == 0)
@@ -1523,5 +1523,5 @@ template MaxHeap
 HierarchicalNSW::searchBaseLayerST<false, false>(InnerIdType ep_id,
                                                  const void* data_point,
                                                  size_t ef,
-                                                 vsag::BaseFilterFunctor* isIdAllowed) const;
+                                                 const vsag::FilterPtr isIdAllowed) const;
 }  // namespace hnswlib

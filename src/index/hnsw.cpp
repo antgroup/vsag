@@ -184,8 +184,8 @@ HNSW::knn_search_internal(const DatasetPtr& query,
                           const std::string& parameters,
                           const FilterType& filter_obj) const {
     if (filter_obj) {
-        BitsetOrCallbackFilter filter(filter_obj);
-        return this->knn_search(query, k, parameters, &filter);
+        auto filter = std::make_shared<UniqueFilter>(filter_obj);
+        return this->knn_search(query, k, parameters, filter);
     }
     return this->knn_search(query, k, parameters, nullptr);
 };
@@ -194,7 +194,7 @@ tl::expected<DatasetPtr, Error>
 HNSW::knn_search(const DatasetPtr& query,
                  int64_t k,
                  const std::string& parameters,
-                 BaseFilterFunctor* filter_ptr) const {
+                 const FilterPtr filter_ptr) const {
 #ifndef ENABLE_TESTS
     SlowTaskTimer t_total("hnsw knnsearch", 20);
 #endif
@@ -308,8 +308,8 @@ HNSW::range_search_internal(const DatasetPtr& query,
                             const FilterType& filter_obj,
                             int64_t limited_size) const {
     if (filter_obj) {
-        BitsetOrCallbackFilter filter(filter_obj);
-        return this->range_search(query, radius, parameters, &filter, limited_size);
+        auto filter = std::make_shared<UniqueFilter>(filter_obj);
+        return this->range_search(query, radius, parameters, filter, limited_size);
     }
     return this->range_search(query, radius, parameters, nullptr, limited_size);
 };
@@ -318,7 +318,7 @@ tl::expected<DatasetPtr, Error>
 HNSW::range_search(const DatasetPtr& query,
                    float radius,
                    const std::string& parameters,
-                   BaseFilterFunctor* filter_ptr,
+                   const FilterPtr filter_ptr,
                    int64_t limited_size) const {
 #ifndef ENABLE_TESTS
     SlowTaskTimer t("hnsw rangesearch", 20);
