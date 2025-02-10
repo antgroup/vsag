@@ -165,6 +165,13 @@ HGraph::KnnSearch(const DatasetPtr& query,
             search_result.pop();
         }
 
+        // return an empty dataset directly if searcher returns nothing
+        if (search_result.empty()) {
+            auto result = Dataset::Make();
+            result->Dim(0)->NumElements(1);
+            return result;
+        }
+
         auto dataset_results = Dataset::Make();
         dataset_results->Dim(static_cast<int64_t>(search_result.size()))
             ->NumElements(1)
