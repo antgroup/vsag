@@ -40,7 +40,7 @@ public:
                   const std::function<float(int64_t)>& distance_of_tag) const;
 
     tl::expected<bool, Error>
-    UpdateId(int64_t old_id, int64_t new_id);
+    UpdateId(int64_t old_tag_id, int64_t new_tag_id);
 
 public:
     tl::expected<Binary, Error>

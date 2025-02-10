@@ -205,8 +205,8 @@ private:
     tl::expected<void, Error>
     load_disk_index(const BinarySet& binary_set);
 
-    BinarySet
-    empty_binaryset() const;
+    static BinarySet
+    empty_binaryset();
 
 private:
     std::shared_ptr<LocalFileReader> reader_;

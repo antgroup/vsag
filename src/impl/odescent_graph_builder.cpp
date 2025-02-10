@@ -85,7 +85,7 @@ ODescent::Build(const uint32_t* valid_ids, int64_t data_num) {
 void
 ODescent::SaveGraph(std::stringstream& out) {
     std::streamoff file_offset = 0;  // we will use this if we want
-    out.seekp(file_offset, out.beg);
+    out.seekp(file_offset, std::stringstream::beg);
     size_t index_size = 24;
     uint32_t max_degree = 0;
     out.write((char*)&index_size, sizeof(uint64_t));
@@ -109,7 +109,7 @@ ODescent::SaveGraph(std::stringstream& out) {
         max_degree = edges.size() > max_degree ? (uint32_t)edges.size() : max_degree;
         index_size += (size_t)(sizeof(uint32_t) * (gk + 1));
     }
-    out.seekp(file_offset, out.beg);
+    out.seekp(file_offset, std::stringstream::beg);
     out.write((char*)&index_size, sizeof(uint64_t));
     out.write((char*)&max_degree, sizeof(uint32_t));
 }
@@ -373,14 +373,14 @@ void
 ODescent::SaveGraph(GraphInterfacePtr& graph_storage) {
     for (int i = 0; i < data_num_; ++i) {
         uint32_t id = i;
-        if (valid_ids_) {
+        if (valid_ids_ != nullptr) {
             id = valid_ids_[i];
         }
         Vector<uint32_t> edges(allocator_);
         edges.resize(graph[i].neighbors.size());
         for (int j = 0; j < graph[i].neighbors.size(); ++j) {
             edges[j] = graph[i].neighbors[j].id;
-            if (valid_ids_) {
+            if (valid_ids_ != nullptr) {
                 edges[j] = valid_ids_[graph[i].neighbors[j].id];
             }
         }

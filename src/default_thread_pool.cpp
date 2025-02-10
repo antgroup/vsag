@@ -22,8 +22,8 @@ DefaultThreadPool::DefaultThreadPool(std::size_t threads) {
 }
 
 std::future<void>
-DefaultThreadPool::Enqueue(std::function<void(void)> func) {
-    return pool_->enqueue(func);
+DefaultThreadPool::Enqueue(std::function<void(void)> task) {
+    return pool_->enqueue(task);
 }
 
 void

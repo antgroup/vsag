@@ -112,7 +112,7 @@ HNSW::build(const DatasetPtr& base) {
 
         std::unique_lock lock(rw_mutex_);
 
-        auto ids = base->GetIds();
+        const auto* ids = base->GetIds();
         void* vectors = nullptr;
         size_t data_size = 0;
         get_vectors(base, &vectors, &data_size);
@@ -156,7 +156,7 @@ HNSW::add(const DatasetPtr& base) {
                        fmt::format("base.dim({}) must be equal to index.dim({})", base_dim, dim_));
 
         int64_t num_elements = base->GetNumElements();
-        auto ids = base->GetIds();
+        const auto* ids = base->GetIds();
         void* vectors = nullptr;
         size_t data_size = 0;
         get_vectors(base, &vectors, &data_size);
@@ -186,9 +186,8 @@ HNSW::knn_search_internal(const DatasetPtr& query,
     if (filter_obj) {
         BitsetOrCallbackFilter filter(filter_obj);
         return this->knn_search(query, k, parameters, &filter);
-    } else {
-        return this->knn_search(query, k, parameters, nullptr);
     }
+    return this->knn_search(query, k, parameters, nullptr);
 };
 
 tl::expected<DatasetPtr, Error>
@@ -311,9 +310,8 @@ HNSW::range_search_internal(const DatasetPtr& query,
     if (filter_obj) {
         BitsetOrCallbackFilter filter(filter_obj);
         return this->range_search(query, radius, parameters, &filter, limited_size);
-    } else {
-        return this->range_search(query, radius, parameters, nullptr, limited_size);
     }
+    return this->range_search(query, radius, parameters, nullptr, limited_size);
 };
 
 tl::expected<DatasetPtr, Error>
@@ -416,7 +414,7 @@ HNSW::range_search(const DatasetPtr& query,
 }
 
 BinarySet
-HNSW::empty_binaryset() const {
+HNSW::empty_binaryset() {
     // version 0 pairs:
     // - hnsw_blank: b"EMPTY_HNSW"
     const std::string empty_str = "EMPTY_HNSW";
@@ -750,14 +748,13 @@ HNSW::feedback(const DatasetPtr& query,
     }
 
     auto result = this->knn_search(query, k, parameters, nullptr);
-    if (result.has_value()) {
-        std::unique_lock lock(rw_mutex_);
-        return this->feedback(*result, global_optimum_tag_id, k);
-    } else {
+    if (not result.has_value()) {
         LOG_ERROR_AND_RETURNS(ErrorType::INVALID_ARGUMENT,
                               "failed to feedback(invalid argument): ",
                               result.error().message);
     }
+    std::unique_lock lock(rw_mutex_);
+    return this->feedback(*result, global_optimum_tag_id, k);
 }
 
 tl::expected<uint32_t, Error>
@@ -768,7 +765,7 @@ HNSW::feedback(const DatasetPtr& result, int64_t global_optimum_tag_id, int64_t 
             "failed to feedback(invalid argument): global optimum tag id doesn't belong to index");
     }
 
-    auto tag_ids = result->GetIds();
+    const auto* tag_ids = result->GetIds();
     k = std::min(k, result->GetDim());
     uint32_t successfully_feedback = 0;
 

@@ -122,8 +122,9 @@ private:
 Binary
 convert_stream_to_binary(const std::stringstream& stream) {
     std::streambuf* buf = stream.rdbuf();
-    std::streamsize size = buf->pubseekoff(0, stream.end, stream.in);  // get the stream buffer size
-    buf->pubseekpos(0, stream.in);                                     // reset pointer pos
+    std::streamsize size = buf->pubseekoff(
+        0, std::stringstream::end, std::stringstream::in);  // get the stream buffer size
+    buf->pubseekpos(0, std::stringstream::in);              // reset pointer pos
     std::shared_ptr<int8_t[]> binary_data(new int8_t[size]);
     buf->sgetn((char*)binary_data.get(), size);
     Binary binary{
@@ -218,8 +219,8 @@ DiskANN::build(const DatasetPtr& base) {
             LOG_ERROR_AND_RETURNS(ErrorType::BUILD_TWICE, "failed to build index: build twice");
         }
 
-        auto vectors = base->GetFloat32Vectors();
-        auto ids = base->GetIds();
+        const auto* vectors = base->GetFloat32Vectors();
+        const auto* ids = base->GetIds();
         auto data_num = base->GetNumElements();
         CHECK_ARGUMENT(data_num > 1,
                        fmt::format("base.num_elements({}) must be greater than 1", data_num));
@@ -235,7 +236,7 @@ DiskANN::build(const DatasetPtr& base) {
                 vsag::FlattenInterface::MakeInstance(flatten_param, this->common_param_);
             flatten_interface_ptr->Train(vectors, data_num);
             flatten_interface_ptr->BatchInsertVector(vectors, data_num);
-            vsag::ODescent graph(2ll * R_,
+            vsag::ODescent graph(2LL * R_,
                                  diskann_params_.alpha,
                                  diskann_params_.turn,
                                  diskann_params_.sample_rate,
@@ -387,8 +388,8 @@ DiskANN::knn_search(const DatasetPtr& query,
         beam_search = std::max(beam_search, MINIMAL_BEAM_SEARCH);
 
         uint64_t labels[query_num * k];
-        auto distances = new float[query_num * k];
-        auto ids = new int64_t[query_num * k];
+        auto* distances = new float[query_num * k];
+        auto* ids = new int64_t[query_num * k];
         diskann::QueryStats query_stats[query_num];
         for (int i = 0; i < query_num; i++) {
             try {
@@ -595,8 +596,8 @@ DiskANN::range_search(const DatasetPtr& query,
             target_size = std::min((size_t)limited_size, target_size);
         }
 
-        auto dis = new float[target_size];
-        auto ids = new int64_t[target_size];
+        auto* dis = new float[target_size];
+        auto* ids = new int64_t[target_size];
         for (int i = 0; i < target_size; ++i) {
             ids[i] = static_cast<int64_t>(labels[i]);
             dis[i] = range_distances[i];
@@ -619,7 +620,7 @@ DiskANN::range_search(const DatasetPtr& query,
 }
 
 BinarySet
-DiskANN::empty_binaryset() const {
+DiskANN::empty_binaryset() {
     // version 0 pairs:
     // - hnsw_blank: b"EMPTY_DISKANN"
     const std::string empty_str = "EMPTY_DISKANN";
@@ -713,7 +714,10 @@ DiskANN::deserialize(const ReaderSet& reader_set) {
         return {};
     }
 
-    std::stringstream pq_pivots_stream, disk_pq_compressed_vectors, graph, tag_stream;
+    std::stringstream pq_pivots_stream;
+    std::stringstream disk_pq_compressed_vectors;
+    std::stringstream graph;
+    std::stringstream tag_stream;
 
     {
         auto pq_reader = reader_set.Get(DISKANN_PQ);
@@ -990,8 +994,8 @@ DiskANN::build_partial_graph(const DatasetPtr& base,
                              const BinarySet& binary_set,
                              BinarySet& after_binary_set,
                              int round) {
-    auto vectors = base->GetFloat32Vectors();
-    auto ids = base->GetIds();
+    const auto* vectors = base->GetFloat32Vectors();
+    const auto* ids = base->GetIds();
     auto data_num = base->GetNumElements();
     std::vector<int64_t> tags(ids, ids + data_num);
     {
@@ -1001,7 +1005,8 @@ DiskANN::build_partial_graph(const DatasetPtr& base,
 
         std::unordered_set<uint32_t> builded_nodes;
         if (round > 1) {
-            std::stringstream graph_stream, tag_stream;
+            std::stringstream graph_stream;
+            std::stringstream tag_stream;
             convert_binary_to_stream(binary_set.Get(DISKANN_GRAPH), graph_stream);
             convert_binary_to_stream(binary_set.Get(DISKANN_TAG_FILE), tag_stream);
 

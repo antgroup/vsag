@@ -21,10 +21,14 @@
 #include "index_common_param.h"
 #include "vsag/constants.h"
 
+// NOLINTBEGIN(readability-simplify-boolean-expr)
+
 namespace vsag {
 
 DiskannParameters
-DiskannParameters::FromJson(JsonType& diskann_param_obj, IndexCommonParam index_common_param) {
+DiskannParameters::FromJson(
+    JsonType& diskann_param_obj,  // NOLINT(readability-function-cognitive-complexity)
+    IndexCommonParam index_common_param) {
     DiskannParameters obj;
 
     CHECK_ARGUMENT(
@@ -188,3 +192,5 @@ DiskannSearchParameters::FromJson(const std::string& json_string) {
 }
 
 }  // namespace vsag
+
+// NOLINTEND(readability-simplify-boolean-expr)

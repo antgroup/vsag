@@ -118,23 +118,24 @@ generate_build_parameters(std::string metric_type,
     if (Number(num_elements).in_range(1, 2'000'000)) {
         return parameter_string(
             metric_type, dim, 12, 100, 12, 100, pq_dims, 0.1, use_conjugate_graph);
-    } else if (Number(num_elements).in_range(2'000'000, 5'000'000)) {
+    }
+    if (Number(num_elements).in_range(2'000'000, 5'000'000)) {
         return parameter_string(
             metric_type, dim, 16, 200, 16, 200, pq_dims, 0.1, use_conjugate_graph);
-    } else if (Number(num_elements).in_range(5'000'000, 10'000'000)) {
+    }
+    if (Number(num_elements).in_range(5'000'000, 10'000'000)) {
         return parameter_string(
             metric_type, dim, 24, 300, 24, 300, pq_dims, 0.1, use_conjugate_graph);
-    } else if (Number(num_elements).in_range(10'000'000, 17'000'000)) {
+    }
+    if (Number(num_elements).in_range(10'000'000, 17'000'000)) {
         return parameter_string(
             metric_type, dim, 48, 500, 48, 500, pq_dims, 0.1, use_conjugate_graph);
-    } else {
-        return tl::unexpected(
-            Error(ErrorType::INVALID_ARGUMENT,
-                  fmt::format(
-                      "failed to generate build parameter: unsupported num_elements({}) or dim({})",
-                      num_elements,
-                      dim)));
     }
+    return tl::unexpected(Error(
+        ErrorType::INVALID_ARGUMENT,
+        fmt::format("failed to generate build parameter: unsupported num_elements({}) or dim({})",
+                    num_elements,
+                    dim)));
 }
 tl::expected<float, Error>
 estimate_search_time(const std::string& index_name,
@@ -143,23 +144,23 @@ estimate_search_time(const std::string& index_name,
                      const std::string& parameters) {
     std::string name = index_name;
     transform(name.begin(), name.end(), name.begin(), ::tolower);
-    if (name == INDEX_HNSW) {
-        auto ret = try_parse_parameters<HnswSearchParameters>(parameters);
-        if (not ret.has_value()) {
-            LOG_ERROR_AND_RETURNS(ret.error().type, ret.error().message);
-        }
-        const auto& params = ret.value();
-        if (data_num < 100000 || data_dim < 2 || params.ef_search < 50) {
-            return 1.0f;
-        }
-        return (static_cast<double>(data_dim) / 128.0) *
-               (static_cast<double>(params.ef_search) / 100.0) *
-               (log10(static_cast<double>(data_num) / 100000.0));
-    } else {
+    if (name != INDEX_HNSW) {
         LOG_ERROR_AND_RETURNS(ErrorType::UNSUPPORTED_INDEX_OPERATION,
                               "cannot estimate search cost for unsupported index:",
                               index_name);
     }
+
+    auto ret = try_parse_parameters<HnswSearchParameters>(parameters);
+    if (not ret.has_value()) {
+        LOG_ERROR_AND_RETURNS(ret.error().type, ret.error().message);
+    }
+    const auto& params = ret.value();
+    if (data_num < 100000 || data_dim < 2 || params.ef_search < 50) {
+        return 1.0F;
+    }
+    return (static_cast<double>(data_dim) / 128.0) *
+           (static_cast<double>(params.ef_search) / 100.0) *
+           (log10(static_cast<double>(data_num) / 100000.0));
 }
 
 }  // namespace vsag
