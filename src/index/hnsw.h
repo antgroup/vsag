@@ -280,7 +280,7 @@ private:
     deserialize(const BinarySet& binary_set);
 
     tl::expected<void, Error>
-    deserialize(const ReaderSet& binary_set);
+    deserialize(const ReaderSet& reader_set);
 
     tl::expected<void, Error>
     deserialize(std::istream& in_stream);
@@ -291,8 +291,8 @@ private:
     void
     set_dataset(const DatasetPtr& base, const void* vectors_ptr, uint32_t num_element) const;
 
-    BinarySet
-    empty_binaryset() const;
+    static BinarySet
+    empty_binaryset();
 
     void
     init_feature_list();

@@ -21,6 +21,8 @@
 
 #include "vsag/constants.h"
 
+// NOLINTBEGIN(readability-simplify-boolean-expr)
+
 namespace vsag {
 
 HnswParameters
@@ -124,3 +126,5 @@ FreshHnswParameters::FromJson(JsonType& hnsw_param_obj, IndexCommonParam index_c
 }
 
 }  // namespace vsag
+
+// NOLINTEND(readability-simplify-boolean-expr)

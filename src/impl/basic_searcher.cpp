@@ -112,11 +112,13 @@ BasicSearcher::Search(const GraphInterfacePtr& graph_data_cell,
 
                 top_candidates.emplace(dist, candidate_id);
 
-                if (top_candidates.size() > inner_search_param.ef_)
+                if (top_candidates.size() > inner_search_param.ef_) {
                     top_candidates.pop();
+                }
 
-                if (!top_candidates.empty())
+                if (!top_candidates.empty()) {
                     lower_bound = top_candidates.top().first;
+                }
             }
         }
     }

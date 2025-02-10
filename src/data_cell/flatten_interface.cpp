@@ -39,13 +39,17 @@ make_instance(const FlattenDataCellParamPtr& param, const IndexCommonParam& comm
     std::string quantization_string = param->quantizer_parameter_->GetTypeName();
     if (quantization_string == QUANTIZATION_TYPE_VALUE_SQ8) {
         return make_instance<SQ8Quantizer<metric>, IOTemp>(param, common_param);
-    } else if (quantization_string == QUANTIZATION_TYPE_VALUE_FP32) {
+    }
+    if (quantization_string == QUANTIZATION_TYPE_VALUE_FP32) {
         return make_instance<FP32Quantizer<metric>, IOTemp>(param, common_param);
-    } else if (quantization_string == QUANTIZATION_TYPE_VALUE_SQ4) {
+    }
+    if (quantization_string == QUANTIZATION_TYPE_VALUE_SQ4) {
         return make_instance<SQ4Quantizer<metric>, IOTemp>(param, common_param);
-    } else if (quantization_string == QUANTIZATION_TYPE_VALUE_SQ4_UNIFORM) {
+    }
+    if (quantization_string == QUANTIZATION_TYPE_VALUE_SQ4_UNIFORM) {
         return make_instance<SQ4UniformQuantizer<metric>, IOTemp>(param, common_param);
-    } else if (quantization_string == QUANTIZATION_TYPE_VALUE_SQ8_UNIFORM) {
+    }
+    if (quantization_string == QUANTIZATION_TYPE_VALUE_SQ8_UNIFORM) {
         return make_instance<SQ8UniformQuantizer<metric>, IOTemp>(param, common_param);
     }
     return nullptr;

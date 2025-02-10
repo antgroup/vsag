@@ -43,24 +43,23 @@ ConjugateGraph::AddNeighbor(int64_t from_tag_id, int64_t to_tag_id) {
     auto insert_result = neighbor_set->insert(to_tag_id);
     if (!insert_result.second) {
         return false;
-    } else {
-        if (neighbor_set->size() == 1) {
-            memory_usage_ += sizeof(from_tag_id);
-            memory_usage_ += sizeof(neighbor_set->size());
-        }
-        memory_usage_ += sizeof(to_tag_id);
-        return true;
     }
+
+    if (neighbor_set->size() == 1) {
+        memory_usage_ += sizeof(from_tag_id);
+        memory_usage_ += sizeof(neighbor_set->size());
+    }
+    memory_usage_ += sizeof(to_tag_id);
+    return true;
 }
 
 std::shared_ptr<UnorderedSet<int64_t>>
 ConjugateGraph::get_neighbors(int64_t from_tag_id) const {
     auto iter = conjugate_graph_.find(from_tag_id);
-    if (iter != conjugate_graph_.end()) {
-        return iter->second;
-    } else {
+    if (iter == conjugate_graph_.end()) {
         return nullptr;
     }
+    return iter->second;
 }
 
 tl::expected<uint32_t, Error>
@@ -213,7 +212,7 @@ ConjugateGraph::Deserialize(StreamReader& in_stream) {
         in_stream.Seek(cur_pos + offset);
         while (offset != memory_usage_ - FOOTER_SIZE) {
             read_var_from_stream(in_stream, &offset, &from_tag_id);
-            if (not conjugate_graph_.count(from_tag_id)) {
+            if (conjugate_graph_.count(from_tag_id) == 0) {
                 conjugate_graph_.emplace(from_tag_id,
                                          std::make_shared<UnorderedSet<int64_t>>(allocator_));
             }
@@ -251,9 +250,8 @@ ConjugateGraph::UpdateId(int64_t old_tag_id, int64_t new_tag_id) {
         if (it_new_key != conjugate_graph_.end()) {
             // both two id exists in graph, note that this situation should be filtered out before use this function.
             return false;
-        } else {
-            conjugate_graph_[new_tag_id] = std::move(it_old_key->second);
         }
+        conjugate_graph_[new_tag_id] = std::move(it_old_key->second);
         conjugate_graph_.erase(it_old_key);
         updated = true;
     }

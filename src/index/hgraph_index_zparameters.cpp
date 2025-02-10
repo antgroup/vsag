@@ -24,6 +24,8 @@
 #include "inner_string_params.h"
 #include "vsag/constants.h"
 
+// NOLINTBEGIN(readability-simplify-boolean-expr)
+
 namespace vsag {
 
 static const std::unordered_map<std::string, std::vector<std::string>> EXTERNAL_MAPPING = {
@@ -148,3 +150,5 @@ HGraphSearchParameters::FromJson(const std::string& json_string) {
     return obj;
 }
 }  // namespace vsag
+
+// NOLINTEND(readability-simplify-boolean-expr)

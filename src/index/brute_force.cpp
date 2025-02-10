@@ -18,6 +18,7 @@
 #include "../utils.h"
 #include "data_cell/flatten_datacell.h"
 #include "inner_string_params.h"
+
 namespace vsag {
 
 BruteForce::BruteForce(const BruteForceParameter& param, const IndexCommonParam& common_param)
@@ -157,7 +158,7 @@ BruteForce::range_search(const DatasetPtr& query,
 float
 BruteForce::calculate_distance_by_id(const float* vector, int64_t id) const {
     auto computer = this->inner_codes_->FactoryComputer(vector);
-    float result = 0.0f;
+    float result = 0.0F;
     InnerIdType inner_id = this->label_table_->GetIdByLabel(id);
     this->inner_codes_->Query(&result, computer, &inner_id, 1);
     return result;
@@ -168,7 +169,7 @@ BruteForce::serialize() const {
     SlowTaskTimer t("brute force Serialize");
     size_t num_bytes = this->cal_serialize_size();
     std::shared_ptr<int8_t[]> bin(new int8_t[num_bytes]);
-    auto buffer = reinterpret_cast<char*>(const_cast<int8_t*>(bin.get()));
+    auto* buffer = reinterpret_cast<char*>(const_cast<int8_t*>(bin.get()));
     BufferStreamWriter writer(buffer);
     this->serialize(writer);
     Binary b{
@@ -249,8 +250,8 @@ BruteForce::split_dataset_by_duplicate_label(const DatasetPtr& dataset,
     Vector<DatasetPtr> return_datasets(0, this->allocator_.get());
     auto count = dataset->GetNumElements();
     auto dim = dataset->GetDim();
-    auto* labels = dataset->GetIds();
-    auto* vec = dataset->GetFloat32Vectors();
+    const auto* labels = dataset->GetIds();
+    const auto* vec = dataset->GetFloat32Vectors();
     UnorderedSet<LabelType> temp_labels(allocator_.get());
 
     for (uint64_t i = 0; i < count; ++i) {

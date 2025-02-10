@@ -141,7 +141,7 @@ private:
     MaxHeap
     search_one_graph(const float* query,
                      const GraphInterfacePtr& graph,
-                     const FlattenInterfacePtr& codes,
+                     const FlattenInterfacePtr& flatten,
                      InnerSearchParam& inner_search_param) const;
 
     void

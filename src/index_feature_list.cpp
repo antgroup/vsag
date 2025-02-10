@@ -37,23 +37,23 @@ IndexFeatureList::CheckFeature(IndexFeature feature) const {
     auto val = static_cast<uint32_t>(feature);
     if (val >= feature_count_ or val == 0) {
         throw std::invalid_argument(fmt::format("wrong feature value: {}", val));
-    } else {
-        auto [x, y] = get_pos(val);
-        return data_[x] & (1U << y);
     }
+
+    auto [x, y] = get_pos(val);
+    return (data_[x] & (1U << y)) != 0U;
 }
 
 void
 IndexFeatureList::SetFeature(vsag::IndexFeature feature, bool val) {
     if (static_cast<uint32_t>(feature) >= feature_count_) {
         throw std::runtime_error("wrong feature");
+    }
+
+    auto [x, y] = get_pos(static_cast<uint32_t>(feature));
+    if (val) {
+        data_[x] |= (1U << y);
     } else {
-        auto [x, y] = get_pos(static_cast<uint32_t>(feature));
-        if (val == true) {
-            data_[x] |= (1U << y);
-        } else {
-            data_[x] &= ~(1U << y);
-        }
+        data_[x] &= ~(1U << y);
     }
 }
 

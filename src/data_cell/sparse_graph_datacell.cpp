@@ -40,7 +40,7 @@ SparseGraphDataCell::InsertNeighborsById(InnerIdType id, const Vector<InnerIdTyp
     auto size = std::min(this->maximum_degree_, (uint32_t)(neighbor_ids.size()));
     std::unique_lock<std::shared_mutex> wlock(this->neighbors_map_mutex_);
     this->max_capacity_ = std::max(this->max_capacity_, id + 1);
-    if (not this->neighbors_.count(id)) {
+    if (this->neighbors_.count(id) == 0) {
         this->neighbors_.emplace(id, std::make_unique<Vector<InnerIdType>>(allocator_));
     }
     this->neighbors_[id]->assign(neighbor_ids.begin(), neighbor_ids.begin() + size);

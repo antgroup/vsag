@@ -28,7 +28,7 @@ Options::Instance() {
 Logger*
 Options::logger() {
     static std::shared_ptr<DefaultLogger> s_default_logger = std::make_shared<DefaultLogger>();
-    if (not logger_) {
+    if (logger_ == nullptr) {
         this->set_logger(s_default_logger.get());
     }
     return logger_;
@@ -36,7 +36,7 @@ Options::logger() {
 
 void
 Options::set_block_size_limit(size_t size) {
-    if (size < 2ull * 1024 * 1024) {
+    if (size < 2ULL * 1024 * 1024) {
         throw std::runtime_error(fmt::format("size ({}) should be greater than 2M.", size));
     }
     block_size_limit_.store(size, std::memory_order_release);

@@ -20,7 +20,7 @@
 namespace vsag {
 void*
 DefaultAllocator::Allocate(size_t size) {
-    auto ptr = malloc(size);
+    auto* ptr = malloc(size);
 #ifndef NDEBUG
     std::lock_guard<std::mutex> guard(set_mutex_);
     allocated_ptrs_.insert(ptr);
@@ -31,7 +31,7 @@ DefaultAllocator::Allocate(size_t size) {
 void
 DefaultAllocator::Deallocate(void* p) {
 #ifndef NDEBUG
-    if (!p) {
+    if (p == nullptr) {
         return;
     }
     std::lock_guard<std::mutex> guard(set_mutex_);
@@ -47,7 +47,7 @@ DefaultAllocator::Deallocate(void* p) {
 void*
 DefaultAllocator::Reallocate(void* p, size_t size) {
 #ifndef NDEBUG
-    if (!p) {
+    if (p == nullptr) {
         return Allocate(size);
     }
     std::lock_guard<std::mutex> guard(set_mutex_);
@@ -57,7 +57,7 @@ DefaultAllocator::Reallocate(void* p, size_t size) {
     }
     allocated_ptrs_.erase(p);
 #endif
-    auto ptr = realloc(p, size);
+    auto* ptr = realloc(p, size);
 #ifndef NDEBUG
     allocated_ptrs_.insert(ptr);
 #endif

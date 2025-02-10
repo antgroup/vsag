@@ -35,6 +35,8 @@
 #include "safe_thread_pool.h"
 #include "typing.h"
 
+// NOLINTBEGIN(readability-else-after-return )
+
 namespace vsag {
 
 Engine::Engine() {
@@ -140,3 +142,5 @@ Engine::CreateIndex(const std::string& origin_name, const std::string& parameter
     }
 }
 }  // namespace vsag
+
+// NOLINTEND(readability-else-after-return )
