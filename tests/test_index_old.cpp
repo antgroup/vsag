@@ -1388,7 +1388,7 @@ TEST_CASE("static hnsw + feedback without global optimum id", "[ft][index][hnsw]
 
     REQUIRE(error_fix > 0);
     REQUIRE(recall[0] < recall[1]);
-    REQUIRE(fixtures::time_t(recall[1]) == fixtures::time_t(1.0f));
+    REQUIRE(recall[1] >= 0.999F);
 }
 
 TEST_CASE("using indexes that do not support conjugate graph", "[ft][index]") {

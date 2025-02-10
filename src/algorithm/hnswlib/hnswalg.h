@@ -246,7 +246,7 @@ public:
     searchBaseLayerST(InnerIdType ep_id,
                       const void* data_point,
                       size_t ef,
-                      vsag::BaseFilterFunctor* isIdAllowed = nullptr) const;
+                      const vsag::FilterPtr is_id_allowed = nullptr) const;
 
     template <bool has_deletions, bool collect_metrics = false>
     MaxHeap
@@ -254,7 +254,7 @@ public:
                       const void* data_point,
                       float radius,
                       int64_t ef,
-                      vsag::BaseFilterFunctor* isIdAllowed = nullptr) const;
+                      const vsag::FilterPtr is_id_allowed = nullptr) const;
 
     void
     getNeighborsByHeuristic2(MaxHeap& top_candidates, size_t M);
@@ -343,14 +343,14 @@ public:
     * whereas maxM0_ has to be limited to the lower 16 bits, however, still large enough in almost all cases.
     */
     void
-    markDeletedInternal(InnerIdType internalId);
+    markDeletedInternal(InnerIdType internal_id);
 
     /*
     * Checks the first 16 bits of the memory to see if the element is marked deleted.
     */
     bool
-    isMarkedDeleted(InnerIdType internalId) const {
-        auto data = getLinklistAtLevelWithLock(internalId, 0);
+    isMarkedDeleted(InnerIdType internal_id) const {
+        auto data = getLinklistAtLevelWithLock(internal_id, 0);
         unsigned char* ll_cur = ((unsigned char*)data.get()) + 2;
         return *ll_cur & DELETE_MARK;
     }
@@ -399,13 +399,13 @@ public:
     searchKnn(const void* query_data,
               size_t k,
               uint64_t ef,
-              vsag::BaseFilterFunctor* isIdAllowed = nullptr) const override;
+              const vsag::FilterPtr is_id_allowed = nullptr) const override;
 
     std::priority_queue<std::pair<float, LabelType>>
     searchRange(const void* query_data,
                 float radius,
                 uint64_t ef,
-                vsag::BaseFilterFunctor* isIdAllowed = nullptr) const override;
+                const vsag::FilterPtr is_id_allowed = nullptr) const override;
 
     void
     reset();

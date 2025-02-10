@@ -238,7 +238,7 @@ private:
     knn_search(const DatasetPtr& query,
                int64_t k,
                const std::string& parameters,
-               BaseFilterFunctor* filter_ptr) const;
+               const FilterPtr filter_ptr) const;
 
     template <typename FilterType>
     tl::expected<DatasetPtr, Error>
@@ -252,7 +252,7 @@ private:
     range_search(const DatasetPtr& query,
                  float radius,
                  const std::string& parameters,
-                 BaseFilterFunctor* filter_ptr,
+                 const FilterPtr filter_ptr,
                  int64_t limited_size) const;
 
     tl::expected<uint32_t, Error>
