@@ -23,7 +23,7 @@
 #include <string>
 #include <unordered_set>
 
-#include "eval/eval_dataset.h"
+#include "../eval/eval_dataset.h"
 #include "nlohmann/json.hpp"
 #include "spdlog/spdlog.h"
 #include "vsag/vsag.h"

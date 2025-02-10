@@ -12,3 +12,16 @@ set (EVAL_SRC
         monitor/duration_monitor.cpp)
 add_library (eval_obj OBJECT ${EVAL_SRC})
 add_dependencies (eval_obj hdf5 spdlog yaml-cpp)
+
+add_executable (eval_performance main.cpp)
+target_link_libraries (eval_performance
+  PRIVATE
+  vsag
+  eval_obj
+  yaml-cpp
+  argparse::argparse
+  simd
+  libhdf5_cpp.a
+  libhdf5.a
+  z
+)
