@@ -88,6 +88,7 @@ SparseGraphDataCell::Deserialize(StreamReader& reader) {
         this->neighbors_[key] = std::make_unique<vsag::Vector<InnerIdType>>(allocator_);
         StreamReader::ReadVector(reader, *(this->neighbors_[key]));
     }
+    this->total_count_ = size;
 }
 void
 SparseGraphDataCell::Resize(InnerIdType new_size){};

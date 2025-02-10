@@ -96,7 +96,7 @@ TEST_CASE("ODescent Build Test", "[ut][ODescent]") {
             valid_ids[i] = 2 * i;
         }
     }
-    if (num_vectors <= 1) {
+    if (num_vectors <= 0) {
         REQUIRE_THROWS(graph.Build(valid_ids.get(), num_vectors));
         return;
     }
@@ -107,9 +107,16 @@ TEST_CASE("ODescent Build Test", "[ut][ODescent]") {
     graph_interface = vsag::GraphInterface::MakeInstance(graph_param_ptr, param, partial_data);
     graph.SaveGraph(graph_interface);
 
+    auto id_map = [&](uint32_t id) -> uint32_t { return partial_data ? valid_ids[id] : id; };
+
+    if (num_vectors == 1) {
+        REQUIRE(graph_interface->TotalCount() == 1);
+        REQUIRE(graph_interface->GetNeighborSize(id_map(0)) == 0);
+        return;
+    }
+
     float hit_edge_count = 0;
     int64_t indeed_max_degree = std::min(max_degree, (int64_t)num_vectors - 1);
-    auto id_map = [&](uint32_t id) -> uint32_t { return partial_data ? valid_ids[id] : id; };
     for (int i = 0; i < num_vectors; ++i) {
         std::vector<std::pair<float, uint32_t>> ground_truths;
         uint32_t i_id = id_map(i);

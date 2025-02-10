@@ -54,8 +54,12 @@ ODescent::Build(const uint32_t* valid_ids, int64_t data_num) {
     } else {
         data_num_ = flatten_interface_->TotalCount();
     }
-    if (data_num_ <= 1) {
-        throw std::runtime_error("ODescent cannot build a graph with data_num less than 1");
+    if (data_num_ <= 0) {
+        throw std::runtime_error("ODescent cannot build a graph with data_num less than 0");
+    }
+    if (data_num_ == 1) {
+        graph.push_back(Linklist(allocator_));
+        return true;
     }
     min_in_degree_ = std::min(min_in_degree_, data_num_ - 1);
     Vector<std::mutex>(data_num_, allocator_).swap(points_lock_);
@@ -377,15 +381,19 @@ ODescent::SaveGraph(GraphInterfacePtr& graph_storage) {
             id = valid_ids_[i];
         }
         Vector<uint32_t> edges(allocator_);
-        edges.resize(graph[i].neighbors.size());
-        for (int j = 0; j < graph[i].neighbors.size(); ++j) {
-            edges[j] = graph[i].neighbors[j].id;
-            if (valid_ids_ != nullptr) {
-                edges[j] = valid_ids_[graph[i].neighbors[j].id];
+        size_t size = graph[i].neighbors.size();
+        if (size > 0) {
+            edges.resize(size);
+            for (int j = 0; j < size; ++j) {
+                edges[j] = graph[i].neighbors[j].id;
+                if (valid_ids_ != nullptr) {
+                    edges[j] = valid_ids_[graph[i].neighbors[j].id];
+                }
             }
         }
         graph_storage->InsertNeighborsById(id, edges);
     }
+    graph_storage->IncreaseTotalCount(data_num_);
 }
 
 }  // namespace vsag
