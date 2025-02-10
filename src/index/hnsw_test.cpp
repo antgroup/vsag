@@ -943,18 +943,18 @@ TEST_CASE("extract/set data and graph", "[ut][hnsw]") {
     logger::set_level(logger::level::debug);
 
     int64_t dim = 128;
-    IndexCommonParam commom_param;
+    IndexCommonParam common_param;
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
 
-    commom_param.dim_ = dim;
-    commom_param.data_type_ = DataTypes::DATA_TYPE_FLOAT;
-    commom_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
-    commom_param.allocator_ = allocator;
+    common_param.dim_ = dim;
+    common_param.data_type_ = DataTypes::DATA_TYPE_FLOAT;
+    common_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
+    common_param.allocator_ = allocator;
 
-    HnswParameters hnsw_obj = parse_hnsw_params(commom_param);
+    HnswParameters hnsw_obj = parse_hnsw_params(common_param);
     hnsw_obj.max_degree = 12;
     hnsw_obj.ef_construction = 100;
-    auto index = std::make_shared<HNSW>(hnsw_obj, commom_param);
+    auto index = std::make_shared<HNSW>(hnsw_obj, common_param);
     index->InitMemorySpace();
 
     const int64_t num_elements = 2000;
@@ -975,9 +975,9 @@ TEST_CASE("extract/set data and graph", "[ut][hnsw]") {
     vsag::GraphDataCellParamPtr graph_param_ptr = std::make_shared<vsag::GraphDataCellParameter>();
     graph_param_ptr->io_parameter_ = std::make_shared<vsag::MemoryIOParameter>();
 
-    FlattenInterfacePtr flatten_interface = FlattenInterface::MakeInstance(param, commom_param);
+    FlattenInterfacePtr flatten_interface = FlattenInterface::MakeInstance(param, common_param);
     GraphInterfacePtr graph_interface =
-        GraphInterface::MakeInstance(graph_param_ptr, commom_param, false);
+        GraphInterface::MakeInstance(graph_param_ptr, common_param, false);
     Vector<LabelType> ids_vector(allocator.get());
 
     IdMapFunction id_map = [](int64_t id) -> std::tuple<bool, int64_t> {
@@ -986,7 +986,7 @@ TEST_CASE("extract/set data and graph", "[ut][hnsw]") {
     REQUIRE(index->ExtractDataAndGraph(
         flatten_interface, graph_interface, ids_vector, id_map, allocator.get()));
 
-    auto another_index = std::make_shared<HNSW>(hnsw_obj, commom_param);
+    auto another_index = std::make_shared<HNSW>(hnsw_obj, common_param);
     another_index->InitMemorySpace();
     REQUIRE(another_index->SetDataAndGraph(flatten_interface, graph_interface, ids_vector));
 

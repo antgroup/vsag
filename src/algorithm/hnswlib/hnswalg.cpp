@@ -1530,8 +1530,9 @@ HierarchicalNSW::setDataAndGraph(vsag::FlattenInterfacePtr& data,
         std::shared_ptr<uint8_t[]>(new uint8_t[data->code_size_]);
     for (int i = 0; i < data->total_count_; ++i) {
         data->GetCodesById(i, temp_vector.get());
-        std::memcpy(
-            getDataByInternalId(i), reinterpret_cast<const char*>(temp_vector.get()), data_size_);
+        std::memcpy(getDataByInternalId(i),
+                    reinterpret_cast<const char*>(temp_vector.get()),
+                    data->code_size_);
         vsag::Vector<InnerIdType> edges(allocator_);
         graph->GetNeighbors(i, edges);
         setBatchNeigohbors(i, 0, edges.data(), edges.size());
