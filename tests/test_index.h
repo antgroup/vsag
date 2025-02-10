@@ -154,7 +154,7 @@ protected:
     TestMergeIndex(const std::string& name,
                    const std::string& build_param,
                    const TestDatasetPtr& dataset,
-                   bool split_num = 1,
+                   int32_t split_num = 1,
                    bool expect_success = true);
 
     static void

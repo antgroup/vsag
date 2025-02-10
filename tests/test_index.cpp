@@ -819,7 +819,7 @@ TestIndex::IndexPtr
 TestIndex::TestMergeIndex(const std::string& name,
                           const std::string& build_param,
                           const TestDatasetPtr& dataset,
-                          bool split_num,
+                          int32_t split_num,
                           bool expect_success) {
     auto& raw_data = dataset->base_;
     std::vector<vsag::DatasetPtr> sub_datasets;

@@ -28,6 +28,7 @@
 #include "data_cell/flatten_datacell.h"
 #include "data_cell/graph_datacell_parameter.h"
 #include "index/hnsw_zparameters.h"
+#include "io/memory_block_io_parameter.h"
 #include "io/memory_io_parameter.h"
 #include "quantization/fp32_quantizer_parameter.h"
 #include "safe_allocator.h"
@@ -1062,10 +1063,10 @@ extract_data_and_graph(const std::vector<MergeUnit>& merge_units,
 tl::expected<void, Error>
 HNSW::merge(const std::vector<MergeUnit>& merge_units) {
     auto param = std::make_shared<FlattenDataCellParameter>();
-    param->io_parameter_ = std::make_shared<MemoryIOParameter>();
+    param->io_parameter_ = std::make_shared<MemoryBlockIOParameter>();
     param->quantizer_parameter_ = std::make_shared<FP32QuantizerParameter>();
     GraphDataCellParamPtr graph_param_ptr = std::make_shared<GraphDataCellParameter>();
-    graph_param_ptr->io_parameter_ = std::make_shared<vsag::MemoryIOParameter>();
+    graph_param_ptr->io_parameter_ = std::make_shared<vsag::MemoryBlockIOParameter>();
     graph_param_ptr->max_degree_ = max_degree_ * 2;
 
     FlattenInterfacePtr flatten_interface =
