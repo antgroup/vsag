@@ -114,7 +114,7 @@ private:
     vsag::UnorderedMap<LabelType, InnerIdType> label_lookup_;
 
     std::default_random_engine level_generator_;
-    std::default_random_engine update_probability_generator_;
+    mutable std::default_random_engine update_probability_generator_;
 
     vsag::Allocator* allocator_{nullptr};
 
@@ -220,7 +220,9 @@ public:
     }
 
     std::priority_queue<std::pair<float, LabelType>>
-    bruteForce(const void* data_point, int64_t k) override;
+    bruteForce(const void* data_point,
+               int64_t k,
+               const vsag::FilterPtr is_id_allowed = nullptr) const override;
 
     int
     getRandomLevel(double reverse_size);
@@ -248,7 +250,8 @@ public:
     searchBaseLayerST(InnerIdType ep_id,
                       const void* data_point,
                       size_t ef,
-                      const vsag::FilterPtr is_id_allowed = nullptr) const;
+                      const vsag::FilterPtr is_id_allowed = nullptr,
+                      const float skip_ratio = 0.9f) const;
 
     template <bool has_deletions, bool collect_metrics = false>
     MaxHeap
@@ -406,7 +409,8 @@ public:
     searchKnn(const void* query_data,
               size_t k,
               uint64_t ef,
-              const vsag::FilterPtr is_id_allowed = nullptr) const override;
+              const vsag::FilterPtr is_id_allowed = nullptr,
+              const float skip_ratio = 0.9f) const override;
 
     std::priority_queue<std::pair<float, LabelType>>
     searchRange(const void* query_data,

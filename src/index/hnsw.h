@@ -102,6 +102,14 @@ public:
     }
 
     tl::expected<DatasetPtr, Error>
+    KnnSearch(const DatasetPtr& query,
+              int64_t k,
+              const std::string& parameters,
+              const FilterPtr& filter) const override {
+        SAFE_CALL(return this->knn_search(query, k, parameters, filter));
+    }
+
+    tl::expected<DatasetPtr, Error>
     RangeSearch(const DatasetPtr& query,
                 float radius,
                 const std::string& parameters,

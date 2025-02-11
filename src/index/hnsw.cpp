@@ -239,8 +239,11 @@ HNSW::knn_search(const DatasetPtr& query,
             if (use_conjugate_graph_ and params.use_conjugate_graph_search) {
                 k = std::max(k, LOOK_AT_K);
             }
-            results = alg_hnsw_->searchKnn(
-                (const void*)(vector), k, std::max(params.ef_search, k), filter_ptr);
+            results = alg_hnsw_->searchKnn((const void*)(vector),
+                                           k,
+                                           std::max(params.ef_search, k),
+                                           filter_ptr,
+                                           params.skip_ratio);
         } catch (const std::runtime_error& e) {
             LOG_ERROR_AND_RETURNS(ErrorType::INTERNAL_ERROR,
                                   "failed to perofrm knn_search(internalError): ",

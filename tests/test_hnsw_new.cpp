@@ -36,18 +36,22 @@ public:
 
     static std::vector<int> dims;
 
+    static std::vector<float> valid_ratios;
+
     constexpr static uint64_t base_count = 1000;
 
     constexpr static const char* search_param_tmp = R"(
         {{
             "hnsw": {{
-                "ef_search": {}
+                "ef_search": {},
+                "skip_ratio": 0.7
             }}
         }})";
 };
 
 TestDatasetPool HNSWTestIndex::pool{};
 std::vector<int> HNSWTestIndex::dims = fixtures::get_common_used_dims(2, RandomValue(0, 999));
+std::vector<float> HNSWTestIndex::valid_ratios{0.01, 0.05, 0.99};
 
 std::string
 HNSWTestIndex::GenerateHNSWBuildParametersString(const std::string& metric_type,
@@ -280,6 +284,28 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex, "HNSW Merge", "[ft][hnsw]"
         TestKnnSearch(index, dataset, search_param, 0.99, true);
         TestRangeSearch(index, dataset, search_param, 0.49, 5, true);
         TestFilterSearch(index, dataset, search_param, 0.99, true);
+        if (index->CheckFeature(vsag::IndexFeature::SUPPORT_CHECK_ID_EXIST)) {
+            TestCheckIdExist(index, dataset);
+        }
+    }
+    vsag::Options::Instance().set_block_size_limit(origin_size);
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex, "HNSW Filter", "[ft][hnsw]") {
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    auto size = GENERATE(1024 * 1024 * 2);
+    auto metric_type = GENERATE("l2");
+    const std::string name = "hnsw";
+    auto search_param = fmt::format(search_param_tmp, 100);
+    auto dim = 32;
+    for (auto& valid_ratio : valid_ratios) {
+        vsag::Options::Instance().set_block_size_limit(size);
+        auto param = GenerateHNSWBuildParametersString(metric_type, dim);
+        auto index = TestFactory(name, param, true);
+        auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type, false, valid_ratio);
+
+        TestBuildIndex(index, dataset, true);
+        TestFilterSearch(index, dataset, search_param, 0.99, true, true);
         if (index->CheckFeature(vsag::IndexFeature::SUPPORT_CHECK_ID_EXIST)) {
             TestCheckIdExist(index, dataset);
         }

@@ -113,6 +113,10 @@ HnswSearchParameters::FromJson(const std::string& json_string) {
         obj.use_conjugate_graph_search = true;
     }
 
+    if (params[index_name].contains(HNSW_PARAMETER_SKIP_RATIO)) {
+        obj.skip_ratio = params[index_name][HNSW_PARAMETER_SKIP_RATIO];
+    }
+
     return obj;
 }
 
