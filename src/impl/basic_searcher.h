@@ -27,8 +27,8 @@ namespace vsag {
 
 class InnerSearchParam {
 public:
-    int topk_{0};
-    float radius_{0.0f};
+    int64_t topk_{0};
+    float radius_{-1.0f};
     InnerIdType ep_{0};
     uint64_t ef_{10};
     BaseFilterFunctor* is_id_allowed_{nullptr};

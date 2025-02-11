@@ -70,22 +70,21 @@ const char* const DISKANN_PARAMETER_IO_LIMIT = "io_limit";
 const char* const DISKANN_PARAMETER_EF_SEARCH = "ef_search";
 const char* const DISKANN_PARAMETER_REORDER = "use_reorder";
 const char* const DISKANN_PARAMETER_GRAPH_TYPE = "graph_type";
-const char* const DISKANN_PARAMETER_ALPHA = "alpha";
-const char* const DISKANN_PARAMETER_GRAPH_ITER_TURN = "graph_iter_turn";
-const char* const DISKANN_PARAMETER_NEIGHBOR_SAMPLE_RATE = "neighbor_sample_rate";
+const char* const ODESCENT_PARAMETER_ALPHA = "alpha";
+const char* const ODESCENT_PARAMETER_GRAPH_ITER_TURN = "graph_iter_turn";
+const char* const ODESCENT_PARAMETER_NEIGHBOR_SAMPLE_RATE = "neighbor_sample_rate";
 
 const char* const DISKANN_GRAPH_TYPE_VAMANA = "vamana";
-const char* const DISKANN_GRAPH_TYPE_ODESCENT = "odescent";
+const char* const GRAPH_TYPE_ODESCENT = "odescent";
 
 const char* const HNSW_PARAMETER_EF_RUNTIME = "ef_search";
 const char* const HNSW_PARAMETER_M = "max_degree";
 const char* const HNSW_PARAMETER_CONSTRUCTION = "ef_construction";
 const char* const HNSW_PARAMETER_USE_STATIC = "use_static";
 const char* const HNSW_PARAMETER_REVERSED_EDGES = "use_reversed_edges";
-
+const char* const PYRAMID_PARAMETER_BASE_CODES = "base_codes";
 const char* const INDEX_PARAM = "index_param";
 
-const char* const PYRAMID_PARAMETER_SUBINDEX_TYPE = "sub_index_type";
 const char PART_SLASH = '/';
 
 // statstic key

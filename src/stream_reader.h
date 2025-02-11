@@ -40,6 +40,15 @@ public:
         reader.Read(reinterpret_cast<char*>(&val), sizeof(val));
     }
 
+    static std::string
+    ReadString(StreamReader& reader) {
+        size_t length = 0;
+        StreamReader::ReadObj(reader, length);
+        std::vector<char> buffer(length);
+        reader.Read(buffer.data(), length);
+        return std::string(buffer.data(), length);
+    }
+
     template <typename T>
     static void
     ReadVector(StreamReader& reader, std::vector<T>& val) {
