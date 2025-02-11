@@ -61,6 +61,7 @@ public:
 public:
     // required vars
     int64_t ef_search;
+    float skip_ratio{0.9};
     bool use_conjugate_graph_search;
 
 private:

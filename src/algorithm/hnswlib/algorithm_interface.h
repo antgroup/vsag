@@ -42,7 +42,8 @@ public:
     searchKnn(const void* query_data,
               size_t k,
               size_t ef,
-              const vsag::FilterPtr is_id_allowed = nullptr) const = 0;
+              const vsag::FilterPtr is_id_allowed = nullptr,
+              float skip_ratio = 0.9f) const = 0;
 
     virtual std::priority_queue<std::pair<dist_t, LabelType>>
     searchRange(const void* query_data,
@@ -79,7 +80,9 @@ public:
     copyDataByLabel(LabelType label, void* data_point) = 0;
 
     virtual std::priority_queue<std::pair<float, LabelType>>
-    bruteForce(const void* data_point, int64_t k) = 0;
+    bruteForce(const void* data_point,
+               int64_t k,
+               const vsag::FilterPtr is_id_allowed = nullptr) const = 0;
 
     virtual void
     resizeIndex(size_t new_max_elements) = 0;

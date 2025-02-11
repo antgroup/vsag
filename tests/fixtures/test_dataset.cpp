@@ -270,10 +270,8 @@ CalGroundTruthWithPath(const std::pair<float*, int64_t*>& result,
 }
 
 TestDatasetPtr
-TestDataset::CreateTestDataset(uint64_t dim,
-                               uint64_t count,
-                               std::string metric_str,
-                               bool with_path) {
+TestDataset::CreateTestDataset(
+    uint64_t dim, uint64_t count, std::string metric_str, bool with_path, float valid_ratio) {
     TestDatasetPtr dataset = std::shared_ptr<TestDataset>(new TestDataset);
     dataset->dim_ = dim;
     dataset->count_ = count;
@@ -282,11 +280,14 @@ TestDataset::CreateTestDataset(uint64_t dim,
     dataset->query_ = GenerateRandomDataset(dim, query_count, metric_str, true);
     dataset->filter_query_ = dataset->query_;
     dataset->range_query_ = dataset->query_;
+    dataset->valid_ratio_ = valid_ratio;
     {
         auto result = CalDistanceFloatMetrix(dataset->query_, dataset->base_, metric_str);
         dataset->top_k = 10;
 
-        dataset->filter_function_ = [](int64_t id) -> bool { return id % 7 != 5; };
+        dataset->filter_function_ = [valid_ratio, count](int64_t id) -> bool {
+            return id - ID_BIAS > valid_ratio * count;
+        };
         if (with_path) {
             dataset->ground_truth_ =
                 CalGroundTruthWithPath(result, dataset->top_k, dataset->base_, dataset->query_);

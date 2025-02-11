@@ -30,7 +30,8 @@ public:
     GetDatasetAndCreate(uint64_t dim,
                         uint64_t count,
                         const std::string& metric_str = "l2",
-                        bool with_path = false);
+                        bool with_path = false,
+                        float valid_ratio = 0.8);
 
     TestDatasetPtr
     GetNanDataset(const std::string& metric_str);
@@ -40,7 +41,8 @@ private:
     key_gen(int64_t dim,
             uint64_t count,
             const std::string& metric_str = "l2",
-            bool with_path = false);
+            bool with_path = false,
+            float filter_ratio = 0.8);
 
 private:
     std::unordered_map<std::string, TestDatasetPtr> pool_;
