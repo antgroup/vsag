@@ -360,12 +360,35 @@ TestIndex::TestRangeSearch(const IndexPtr& index,
     }
     REQUIRE(cur_recall > expected_recall * query_count * RECALL_THRESHOLD);
 }
+
+class FilterObj : public vsag::Filter {
+public:
+    FilterObj(std::function<bool(int64_t)> filter_func, float valid_ratio)
+        : filter_func_(std::move(filter_func)), valid_ratio_(valid_ratio) {
+    }
+
+    bool
+    CheckValid(int64_t id) const override {
+        return not filter_func_(id);
+    }
+
+    float
+    ValidRatio() const override {
+        return valid_ratio_;
+    }
+
+private:
+    std::function<bool(int64_t)> filter_func_{nullptr};
+    float valid_ratio_{1.0F};
+};
+
 void
 TestIndex::TestFilterSearch(const TestIndex::IndexPtr& index,
                             const TestDatasetPtr& dataset,
                             const std::string& search_param,
                             float expected_recall,
-                            bool expected_success) {
+                            bool expected_success,
+                            bool support_filter_obj) {
     auto queries = dataset->filter_query_;
     auto query_count = queries->GetNumElements();
     auto dim = queries->GetDim();
@@ -380,7 +403,17 @@ TestIndex::TestFilterSearch(const TestIndex::IndexPtr& index,
             ->Float32Vectors(queries->GetFloat32Vectors() + i * dim)
             ->Paths(queries->GetPaths() + i)
             ->Owner(false);
-        auto res = index->KnnSearch(query, topk, search_param, dataset->filter_function_);
+        tl::expected<DatasetPtr, vsag::Error> res;
+        if (support_filter_obj) {
+            auto filter =
+                std::make_shared<FilterObj>(dataset->filter_function_, dataset->valid_ratio_);
+            res = index->KnnSearch(query, topk, search_param, filter);
+            if (res.value()->GetDim() != topk) {
+                res = index->KnnSearch(query, topk, search_param, filter);
+            }
+        } else {
+            res = index->KnnSearch(query, topk, search_param, dataset->filter_function_);
+        }
         REQUIRE(res.has_value() == expected_success);
         if (!expected_success) {
             return;
