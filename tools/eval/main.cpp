@@ -13,12 +13,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <argparse/argparse.hpp>
 #include <iostream>
 #include <string>
 
-#include "argparse/argparse.hpp"
-#include "eval/eval_case.h"
-#include "eval/eval_config.h"
+#include "eval_case.h"
+#include "eval_config.h"
 
 void
 CheckArgs(argparse::ArgumentParser& parser) {
