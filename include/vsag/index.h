@@ -36,6 +36,12 @@ namespace vsag {
 
 class Index;
 using IndexPtr = std::shared_ptr<Index>;
+using IdMapFunction = std::function<std::tuple<bool, int64_t>(int64_t)>;
+
+struct MergeUnit {
+    IndexPtr index = nullptr;
+    IdMapFunction id_map_func = nullptr;
+};
 
 class Index {
 public:
@@ -317,6 +323,24 @@ public:
     [[nodiscard]] virtual bool
     CheckFeature(IndexFeature feature) const {
         throw std::runtime_error("Index doesn't support check feature");
+    }
+
+    /**
+     * @brief Merges multiple graph indexes with ID mapping into the current index
+     *
+     * Processes MergeUnit entries to incorporate sub-indexes into this index. For each element:
+     * - id_map_func determines which IDs from the sub-index are retained
+     * - Specifies the ID remapping into the destination index space
+     *
+     * @param merge_units Vector containing:
+     *   - index: Source sub-index to merge from
+     *   - id_map_func: Filter+remap function that for each source ID (int64_t) returns:
+     *     * bool: true if the ID should be included in the merge
+     *     * int64_t: Target ID in destination index (only valid when bool is true)
+     */
+    virtual tl::expected<void, Error>
+    Merge(const std::vector<MergeUnit>& merge_units) {
+        throw std::runtime_error("Index doesn't support merge");
     }
 
 public:

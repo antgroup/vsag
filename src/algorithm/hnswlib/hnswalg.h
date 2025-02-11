@@ -32,11 +32,13 @@
 #include <unordered_map>
 #include <unordered_set>
 
-#include "../../default_allocator.h"
-#include "../../simd/simd.h"
 #include "../../utils.h"
 #include "algorithm_interface.h"
 #include "block_manager.h"
+#include "data_cell/flatten_interface.h"
+#include "data_cell/graph_interface.h"
+#include "default_allocator.h"
+#include "simd/simd.h"
 #include "visited_list_pool.h"
 #include "vsag/dataset.h"
 namespace hnswlib {
@@ -307,6 +309,11 @@ public:
 
     void
     resizeIndex(size_t new_max_elements) override;
+
+    void
+    setDataAndGraph(vsag::FlattenInterfacePtr& data,
+                    vsag::GraphInterfacePtr& graph,
+                    vsag::Vector<LabelType>& ids);
 
     size_t
     calcSerializeSize() override;

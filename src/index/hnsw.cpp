@@ -23,12 +23,15 @@
 #include <nlohmann/json.hpp>
 #include <stdexcept>
 
-#include "../algorithm/hnswlib/hnswlib.h"
-#include "../common.h"
-#include "../logger.h"
-#include "../safe_allocator.h"
-#include "../utils.h"
-#include "./hnsw_zparameters.h"
+#include "algorithm/hnswlib/hnswlib.h"
+#include "common.h"
+#include "data_cell/flatten_datacell.h"
+#include "data_cell/graph_datacell_parameter.h"
+#include "index/hnsw_zparameters.h"
+#include "io/memory_block_io_parameter.h"
+#include "io/memory_io_parameter.h"
+#include "quantization/fp32_quantizer_parameter.h"
+#include "safe_allocator.h"
 #include "vsag/binaryset.h"
 #include "vsag/constants.h"
 #include "vsag/errors.h"
@@ -52,7 +55,9 @@ HNSW::HNSW(HnswParameters hnsw_params, const IndexCommonParam& index_common_para
       use_conjugate_graph_(hnsw_params.use_conjugate_graph),
       use_reversed_edges_(hnsw_params.use_reversed_edges),
       type_(hnsw_params.type),
-      dim_(index_common_param.dim_) {
+      max_degree_(hnsw_params.max_degree),
+      dim_(index_common_param.dim_),
+      index_common_param_(index_common_param) {
     auto M = std::min(  // NOLINT(readability-identifier-naming)
         std::max((int)hnsw_params.max_degree, MINIMAL_M),
         MAXIMAL_M);
@@ -986,10 +991,99 @@ HNSW::init_feature_list() {
                                IndexFeature::SUPPORT_SERIALIZE_BINARY_SET,
                                IndexFeature::SUPPORT_SERIALIZE_FILE});
     // other
-    feature_list_.SetFeatures({
-        IndexFeature::SUPPORT_CAL_DISTANCE_BY_ID,
-        IndexFeature::SUPPORT_CHECK_ID_EXIST,
-    });
+    feature_list_.SetFeatures({IndexFeature::SUPPORT_CAL_DISTANCE_BY_ID,
+                               IndexFeature::SUPPORT_CHECK_ID_EXIST,
+                               IndexFeature::SUPPORT_MERGE_INDEX});
+}
+
+bool
+HNSW::ExtractDataAndGraph(FlattenInterfacePtr& data,
+                          GraphInterfacePtr& graph,
+                          Vector<LabelType>& ids,
+                          IdMapFunction func,
+                          Allocator* allocator) {
+    if (use_static_) {
+        return false;
+    }
+    auto hnsw = std::static_pointer_cast<hnswlib::HierarchicalNSW>(alg_hnsw_);
+    auto cur_element_count = hnsw->getCurrentElementCount();
+    int64_t origin_data_num = data->total_count_;
+    int64_t valid_id_count = 0;
+    BitsetPtr bitset = std::make_shared<BitsetImpl>();
+    for (auto i = 0; i < cur_element_count; ++i) {
+        int64_t id = hnsw->getExternalLabel(i);
+        auto [is_exist, new_id] = func(id);
+        if (not is_exist) {
+            bitset->Set(i);
+        }
+        auto offset = valid_id_count + origin_data_num;
+        char* vector_data = hnsw->getDataByInternalId(i);
+        data->InsertVector(reinterpret_cast<float*>(vector_data));
+        int* link_data = (int*)hnsw->getLinklistAtLevel(i, 0);
+        size_t size = hnsw->getListCount((unsigned int*)link_data);
+        Vector<InnerIdType> edge(allocator);
+        for (int j = 0; j < size; ++j) {
+            if (not bitset->Test(*(link_data + 1 + j))) {
+                edge.push_back(origin_data_num + *(link_data + 1 + j));
+            }
+        }
+        graph->InsertNeighborsById(offset, edge);
+        graph->IncreaseTotalCount(1);
+        ids.push_back(new_id);
+        valid_id_count++;
+    }
+    return true;
+}
+
+bool
+HNSW::SetDataAndGraph(FlattenInterfacePtr& data, GraphInterfacePtr& graph, Vector<LabelType>& ids) {
+    if (use_static_) {
+        return false;
+    }
+    auto hnsw = std::static_pointer_cast<hnswlib::HierarchicalNSW>(alg_hnsw_);
+    hnsw->setDataAndGraph(data, graph, ids);
+    return true;
+}
+
+void
+extract_data_and_graph(const std::vector<MergeUnit>& merge_units,
+                       FlattenInterfacePtr& data,
+                       GraphInterfacePtr& graph,
+                       Vector<LabelType>& ids,
+                       Allocator* allocator) {
+    for (const auto& merge_unit : merge_units) {
+        auto stat_string = merge_unit.index->GetStats();
+        auto stats = JsonType::parse(stat_string);
+        std::string index_name = stats[STATSTIC_INDEX_NAME];
+        auto hnsw = std::dynamic_pointer_cast<HNSW>(merge_unit.index);
+        hnsw->ExtractDataAndGraph(data, graph, ids, merge_unit.id_map_func, allocator);
+    }
+}
+
+tl::expected<void, Error>
+HNSW::merge(const std::vector<MergeUnit>& merge_units) {
+    auto param = std::make_shared<FlattenDataCellParameter>();
+    param->io_parameter_ = std::make_shared<MemoryBlockIOParameter>();
+    param->quantizer_parameter_ = std::make_shared<FP32QuantizerParameter>();
+    GraphDataCellParamPtr graph_param_ptr = std::make_shared<GraphDataCellParameter>();
+    graph_param_ptr->io_parameter_ = std::make_shared<vsag::MemoryBlockIOParameter>();
+    graph_param_ptr->max_degree_ = max_degree_ * 2;
+
+    FlattenInterfacePtr flatten_interface =
+        FlattenInterface::MakeInstance(param, index_common_param_);
+    GraphInterfacePtr graph_interface =
+        GraphInterface::MakeInstance(graph_param_ptr, index_common_param_, false);
+    Vector<LabelType> ids(allocator_.get());
+    // extract data and graph
+    IdMapFunction id_map = [](int64_t id) -> std::tuple<bool, int64_t> {
+        return std::make_tuple(true, id);
+    };
+    this->ExtractDataAndGraph(flatten_interface, graph_interface, ids, id_map, allocator_.get());
+    extract_data_and_graph(merge_units, flatten_interface, graph_interface, ids, allocator_.get());
+    // TODO(inabao): merge graph
+    // set graph
+    SetDataAndGraph(flatten_interface, graph_interface, ids);
+    return {};
 }
 
 }  // namespace vsag

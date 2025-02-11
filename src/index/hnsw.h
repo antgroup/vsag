@@ -30,6 +30,8 @@
 #include "algorithm/hnswlib/hnswlib.h"
 #include "base_filter_functor.h"
 #include "common.h"
+#include "data_cell/flatten_interface.h"
+#include "data_cell/graph_interface.h"
 #include "data_type.h"
 #include "hnsw_zparameters.h"
 #include "impl/conjugate_graph.h"
@@ -187,6 +189,11 @@ public:
         SAFE_CALL(return this->deserialize(in_stream));
     }
 
+    tl::expected<void, Error>
+    Merge(const std::vector<MergeUnit>& merge_units) override {
+        SAFE_CALL(return this->merge(merge_units));
+    }
+
 public:
     int64_t
     GetNumElements() const override {
@@ -210,6 +217,16 @@ public:
 
     tl::expected<bool, Error>
     InitMemorySpace();
+
+    bool
+    ExtractDataAndGraph(FlattenInterfacePtr& data,
+                        GraphInterfacePtr& graph,
+                        Vector<LabelType>& ids,
+                        IdMapFunction func,
+                        Allocator* allocator);
+
+    bool
+    SetDataAndGraph(FlattenInterfacePtr& data, GraphInterfacePtr& graph, Vector<LabelType>& ids);
 
 private:
     tl::expected<std::vector<int64_t>, Error>
@@ -291,6 +308,9 @@ private:
     void
     set_dataset(const DatasetPtr& base, const void* vectors_ptr, uint32_t num_element) const;
 
+    tl::expected<void, Error>
+    merge(const std::vector<MergeUnit>& merge_units);
+
     static BinarySet
     empty_binaryset();
 
@@ -309,6 +329,8 @@ private:
     bool empty_index_ = false;
     bool use_reversed_edges_ = false;
     bool is_init_memory_ = false;
+    int64_t max_degree_{0};
+
     DataTypes type_;
 
     std::shared_ptr<Allocator> allocator_;
@@ -319,6 +341,7 @@ private:
     mutable std::shared_mutex rw_mutex_;
 
     IndexFeatureList feature_list_{};
+    const IndexCommonParam index_common_param_;
 };
 
 }  // namespace vsag
