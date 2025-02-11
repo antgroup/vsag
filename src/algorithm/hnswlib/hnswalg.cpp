@@ -16,6 +16,8 @@
 #include "hnswalg.h"
 
 #include <memory>
+
+#include "data_cell/graph_interface.h"
 namespace hnswlib {
 HierarchicalNSW::HierarchicalNSW(SpaceInterface* s,
                                  size_t max_elements,
@@ -789,11 +791,11 @@ HierarchicalNSW::resizeIndex(size_t new_max_elements) {
     }
 
     // Reallocate all other layers
-    char** linkLists_new =
+    char** link_lists_new =
         (char**)allocator_->Reallocate(link_lists_, sizeof(void*) * new_max_elements);
-    if (linkLists_new == nullptr)
+    if (link_lists_new == nullptr)
         throw std::runtime_error("Not enough memory: resizeIndex failed to allocate other layers");
-    link_lists_ = linkLists_new;
+    link_lists_ = link_lists_new;
     memset(link_lists_ + max_elements_, 0, (new_max_elements - max_elements_) * sizeof(void*));
     max_elements_ = new_max_elements;
 }
@@ -1519,6 +1521,30 @@ HierarchicalNSW::searchRange(const void* query_data,
 
     // std::cout << "hnswalg::result.size(): " << result.size() << std::endl;
     return result;
+}
+
+void
+HierarchicalNSW::setDataAndGraph(vsag::FlattenInterfacePtr& data,
+                                 vsag::GraphInterfacePtr& graph,
+                                 vsag::Vector<LabelType>& ids) {
+    resizeIndex(data->total_count_);
+    std::shared_ptr<uint8_t[]> temp_vector =
+        std::shared_ptr<uint8_t[]>(new uint8_t[data->code_size_]);
+    for (int i = 0; i < data->total_count_; ++i) {
+        data->GetCodesById(i, temp_vector.get());
+        std::memcpy(getDataByInternalId(i),
+                    reinterpret_cast<const char*>(temp_vector.get()),
+                    data->code_size_);
+        vsag::Vector<InnerIdType> edges(allocator_);
+        graph->GetNeighbors(i, edges);
+        setBatchNeigohbors(i, 0, edges.data(), edges.size());
+        setExternalLabel(i, ids[i]);
+        label_lookup_[ids[i]] = i;
+        element_levels_[i] = 0;
+    }
+    cur_element_count_ = data->total_count_;
+    enterpoint_node_ = 0;
+    max_level_ = 0;
 }
 
 template MaxHeap

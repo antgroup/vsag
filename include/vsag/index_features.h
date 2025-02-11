@@ -61,6 +61,8 @@ enum IndexFeature {
 
     SUPPORT_CHECK_ID_EXIST, /**< Supports check whether given id exists in index */
 
+    SUPPORT_MERGE_INDEX, /**< Supports to merge indices of the same type */
+
     INDEX_FEATURE_COUNT /** must be last one */
 };
 }  // namespace vsag

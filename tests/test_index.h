@@ -150,6 +150,13 @@ protected:
                             float expected_recall = 0.99,
                             bool expected_success = true);
 
+    static IndexPtr
+    TestMergeIndex(const std::string& name,
+                   const std::string& build_param,
+                   const TestDatasetPtr& dataset,
+                   int32_t split_num = 1,
+                   bool expect_success = true);
+
     static void
     TestConcurrentAdd(const IndexPtr& index,
                       const TestDatasetPtr& dataset,

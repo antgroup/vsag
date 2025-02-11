@@ -22,7 +22,10 @@
 
 #include "../data_type.h"
 #include "../logger.h"
+#include "data_cell/graph_datacell_parameter.h"
 #include "fixtures.h"
+#include "io/memory_io_parameter.h"
+#include "quantization/fp32_quantizer_parameter.h"
 #include "vsag/bitset.h"
 #include "vsag/errors.h"
 #include "vsag/options.h"
@@ -934,4 +937,77 @@ TEST_CASE("get data by label", "[ut][hnsw]") {
         REQUIRE_THROWS(alg_hnsw_static->getDistanceByLabel(-1, base_vectors.data()));
         delete alg_hnsw_static;
     }
+}
+
+TEST_CASE("extract/set data and graph", "[ut][hnsw]") {
+    logger::set_level(logger::level::debug);
+
+    int64_t dim = 128;
+    IndexCommonParam common_param;
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+
+    common_param.dim_ = dim;
+    common_param.data_type_ = DataTypes::DATA_TYPE_FLOAT;
+    common_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
+    common_param.allocator_ = allocator;
+
+    HnswParameters hnsw_obj = parse_hnsw_params(common_param);
+    hnsw_obj.max_degree = 12;
+    hnsw_obj.ef_construction = 100;
+    auto index = std::make_shared<HNSW>(hnsw_obj, common_param);
+    index->InitMemorySpace();
+
+    const int64_t num_elements = 2000;
+    auto [ids, vectors] = fixtures::generate_ids_and_vectors(num_elements, dim);
+
+    auto dataset = Dataset::Make();
+    dataset->Dim(dim)
+        ->NumElements(num_elements / 2)
+        ->Ids(ids.data())
+        ->Float32Vectors(vectors.data())
+        ->Owner(false);
+    auto result = index->Build(dataset);
+    REQUIRE(result.has_value());
+
+    auto param = std::make_shared<FlattenDataCellParameter>();
+    param->io_parameter_ = std::make_shared<vsag::MemoryIOParameter>();
+    param->quantizer_parameter_ = std::make_shared<vsag::FP32QuantizerParameter>();
+    vsag::GraphDataCellParamPtr graph_param_ptr = std::make_shared<vsag::GraphDataCellParameter>();
+    graph_param_ptr->io_parameter_ = std::make_shared<vsag::MemoryIOParameter>();
+
+    FlattenInterfacePtr flatten_interface = FlattenInterface::MakeInstance(param, common_param);
+    GraphInterfacePtr graph_interface =
+        GraphInterface::MakeInstance(graph_param_ptr, common_param, false);
+    Vector<LabelType> ids_vector(allocator.get());
+
+    IdMapFunction id_map = [](int64_t id) -> std::tuple<bool, int64_t> {
+        return std::make_tuple(true, id);
+    };
+    REQUIRE(index->ExtractDataAndGraph(
+        flatten_interface, graph_interface, ids_vector, id_map, allocator.get()));
+
+    auto another_index = std::make_shared<HNSW>(hnsw_obj, common_param);
+    another_index->InitMemorySpace();
+    REQUIRE(another_index->SetDataAndGraph(flatten_interface, graph_interface, ids_vector));
+
+    dataset->Dim(dim)
+        ->NumElements(num_elements / 2)
+        ->Ids(ids.data() + num_elements / 2)
+        ->Float32Vectors(vectors.data() + num_elements / 2 * dim)
+        ->Owner(false);
+    another_index->Add(dataset);
+
+    JsonType search_parameters{
+        {"hnsw", {{"ef_search", 200}}},
+    };
+    int correct = 0;
+    for (int i = 0; i < num_elements; ++i) {
+        auto query = Dataset::Make();
+        query->Dim(dim)->Float32Vectors(vectors.data() + i * dim)->NumElements(1)->Owner(false);
+        auto query_result = another_index->KnnSearch(query, 10, search_parameters.dump());
+        REQUIRE(query_result.has_value());
+        correct += query_result.value()->GetIds()[0] == ids[i] ? 1 : 0;
+    }
+    float recall = correct / (float)num_elements;
+    REQUIRE(recall > 0.99);
 }
