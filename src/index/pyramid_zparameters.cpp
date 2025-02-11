@@ -77,7 +77,7 @@ PyramidSearchParameters::FromJson(const std::string& json_string) {
         params[INDEX_PYRAMID].contains(HNSW_PARAMETER_EF_RUNTIME),
         fmt::format("parameters[{}] must contains {}", INDEX_PYRAMID, HNSW_PARAMETER_EF_RUNTIME));
     obj.ef_search = params[INDEX_PYRAMID][HNSW_PARAMETER_EF_RUNTIME];
-    CHECK_ARGUMENT(obj.ef_search >= 1 && obj.ef_search <= 1000,
+    CHECK_ARGUMENT((1 <= obj.ef_search) and (obj.ef_search <= 1000),
                    fmt::format("ef_search({}) must in range[1, 1000]", obj.ef_search));
     return obj;
 }
