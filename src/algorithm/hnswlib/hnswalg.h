@@ -86,7 +86,7 @@ private:
     mutable std::shared_mutex
         label_lookup_lock_{};  // Ensures access safety for the global label lookup table.
 
-    int64_t enterpoint_node_{0};
+    InnerIdType enterpoint_node_{0};
 
     size_t size_links_level0_{0};
     size_t offset_data_{0};
