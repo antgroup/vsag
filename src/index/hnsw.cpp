@@ -1089,4 +1089,17 @@ HNSW::merge(const std::vector<MergeUnit>& merge_units) {
     return {};
 }
 
+template tl::expected<DatasetPtr, Error>
+HNSW::knn_search_internal<BitsetPtr>(const DatasetPtr& query,
+                                     int64_t k,
+                                     const std::string& parameters,
+                                     const BitsetPtr& filter_obj) const;
+
+template tl::expected<DatasetPtr, Error>
+HNSW::knn_search_internal<std::function<bool(int64_t)>>(
+    const DatasetPtr& query,
+    int64_t k,
+    const std::string& parameters,
+    const std::function<bool(int64_t)>& filter_obj) const;
+
 }  // namespace vsag
