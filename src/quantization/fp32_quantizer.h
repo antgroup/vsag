@@ -72,6 +72,12 @@ public:
                     float* dists) const;
 
     inline void
+    ComputeBatchDistImpl(Computer<FP32Quantizer<metric>>& computer,
+                         uint64_t count,
+                         const uint8_t* codes,
+                         float* dists) const;
+
+    inline void
     ReleaseComputerImpl(Computer<FP32Quantizer<metric>>& computer) const;
 
     [[nodiscard]] std::string
@@ -159,6 +165,18 @@ FP32Quantizer<metric>::ComputeImpl(const uint8_t* codes1, const uint8_t* codes2)
                                  this->dim_);  // TODO
     } else {
         return 0.0f;
+    }
+}
+
+template <MetricType metric>
+void
+FP32Quantizer<metric>::ComputeBatchDistImpl(Computer<FP32Quantizer<metric>>& computer,
+                                            uint64_t count,
+                                            const uint8_t* codes,
+                                            float* dists) const {
+    // TODO(LHT): Optimize batch for simd
+    for (uint64_t i = 0; i < count; ++i) {
+        this->ComputeDistImpl(computer, codes + i * this->code_size_, dists + i);
     }
 }
 

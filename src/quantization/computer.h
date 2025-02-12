@@ -50,6 +50,11 @@ public:
         quantizer_->ComputeDist(*this, codes, dists);
     }
 
+    inline void
+    ComputeBatchDists(uint64_t count, const uint8_t* codes, float* dists) {
+        quantizer_->ComputeBatchDists(*this, count, codes, dists);
+    }
+
 public:
     const T* quantizer_{nullptr};
     uint8_t* buf_{nullptr};

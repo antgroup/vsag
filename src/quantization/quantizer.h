@@ -168,6 +168,14 @@ public:
     }
 
     inline void
+    ComputeBatchDists(Computer<T>& computer,
+                      uint64_t count,
+                      const uint8_t* codes,
+                      float* dists) const {
+        return cast().ComputeBatchDistImpl(computer, count, codes, dists);
+    }
+
+    inline void
     ReleaseComputer(Computer<T>& computer) const {
         cast().ReleaseComputerImpl(computer);
     }
