@@ -175,31 +175,47 @@ TestComputer(
     if (retrain) {
         quant.ReTrain(vecs.data(), count);
     }
+
+    auto gt_func = [&](int base_idx, int query_idx) -> float {
+        if constexpr (metric == vsag::MetricType::METRIC_TYPE_IP) {
+            return 1 - InnerProduct(
+                           vecs.data() + base_idx * dim, querys.data() + query_idx * dim, &dim);
+        } else if constexpr (metric == vsag::MetricType::METRIC_TYPE_L2SQR) {
+            return L2Sqr(vecs.data() + base_idx * dim, querys.data() + query_idx * dim, &dim);
+        } else if constexpr (metric == vsag::MetricType::METRIC_TYPE_COSINE) {
+            std::vector<float> v1(dim);
+            std::vector<float> v2(dim);
+            Normalize(vecs.data() + base_idx * dim, v1.data(), dim);
+            Normalize(querys.data() + query_idx * dim, v2.data(), dim);
+            return 1 - InnerProduct(v1.data(), v2.data(), &dim);
+        }
+    };
+
     for (int i = 0; i < query_count; ++i) {
         std::shared_ptr<Computer<T>> computer;
         computer = quant.FactoryComputer();
         computer->SetQuery(querys.data() + i * dim);
+
+        // Test Compute One Dist;
         for (int j = 0; j < 100; ++j) {
             auto idx1 = random() % count;
             auto* codes1 = new uint8_t[quant.GetCodeSize()];
             quant.EncodeOne(vecs.data() + idx1 * dim, codes1);
-            float gt = 0.0f;
             float value = 0.0f;
             quant.ComputeDist(*computer, codes1, &value);
             REQUIRE(quant.ComputeDist(*computer, codes1) == value);
-            if constexpr (metric == vsag::MetricType::METRIC_TYPE_IP) {
-                gt = 1 - InnerProduct(vecs.data() + idx1 * dim, querys.data() + i * dim, &dim);
-            } else if constexpr (metric == vsag::MetricType::METRIC_TYPE_L2SQR) {
-                gt = L2Sqr(vecs.data() + idx1 * dim, querys.data() + i * dim, &dim);
-            } else if constexpr (metric == vsag::MetricType::METRIC_TYPE_COSINE) {
-                std::vector<float> v1(dim);
-                std::vector<float> v2(dim);
-                Normalize(vecs.data() + idx1 * dim, v1.data(), dim);
-                Normalize(querys.data() + i * dim, v2.data(), dim);
-                gt = 1 - InnerProduct(v1.data(), v2.data(), &dim);
-            }
+            auto gt = gt_func(idx1, i);
             REQUIRE(std::abs(gt - value) < error);
             delete[] codes1;
+        }
+
+        // Test Compute Batch
+        std::vector<uint8_t> codes2(quant.GetCodeSize() * count);
+        std::vector<float> dists(count);
+        quant.EncodeBatch(vecs.data(), codes2.data(), count);
+        quant.ComputeBatchDists(*computer, count, codes2.data(), dists.data());
+        for (int j = 0; j < count; ++j) {
+            REQUIRE(std::abs(gt_func(j, i) - dists[j]) < error);
         }
     }
 }
