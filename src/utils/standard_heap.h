@@ -59,8 +59,24 @@ private:
     typename std::conditional<max_heap, QueueMax, QueueMin>::type queue_;
 };
 
-template class StandardHeap<true, true>;
-template class StandardHeap<true, false>;
-template class StandardHeap<false, true>;
-template class StandardHeap<false, false>;
+template <bool max_heap, bool fixed_size>
+StandardHeap<max_heap, fixed_size>::StandardHeap(Allocator* allocator, int64_t max_size)
+    : DistanceHeap(allocator, max_size), queue_(allocator) {
+}
+
+template <bool max_heap, bool fixed_size>
+void
+StandardHeap<max_heap, fixed_size>::Push(float dist, InnerIdType id) {
+    if constexpr (fixed_size) {
+        if (this->queue_.size() < max_size_ or (dist < this->queue_.top().first) == max_heap) {
+            queue_.emplace(dist, id);
+            if (this->queue_.size() > this->max_size_) {
+                this->queue_.pop();
+            }
+        }
+    } else {
+        queue_.emplace(dist, id);
+    }
+}
+
 }  // namespace vsag
