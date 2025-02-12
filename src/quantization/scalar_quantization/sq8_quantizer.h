@@ -67,6 +67,12 @@ public:
     ComputeDistImpl(Computer<SQ8Quantizer>& computer, const uint8_t* codes, float* dists) const;
 
     inline void
+    ComputeBatchDistImpl(Computer<SQ8Quantizer<metric>>& computer,
+                         uint64_t count,
+                         const uint8_t* codes,
+                         float* dists) const;
+
+    inline void
     SerializeImpl(StreamWriter& writer);
 
     inline void
@@ -235,6 +241,18 @@ SQ8Quantizer<metric>::ComputeDistImpl(Computer<SQ8Quantizer>& computer,
                          query, codes, this->lower_bound_.data(), this->diff_.data(), this->dim_);
     } else {
         *dists = 0.0f;
+    }
+}
+
+template <MetricType metric>
+void
+SQ8Quantizer<metric>::ComputeBatchDistImpl(Computer<SQ8Quantizer<metric>>& computer,
+                                           uint64_t count,
+                                           const uint8_t* codes,
+                                           float* dists) const {
+    // TODO(LHT): Optimize batch for simd
+    for (uint64_t i = 0; i < count; ++i) {
+        this->ComputeDistImpl(computer, codes + i * this->code_size_, dists + i);
     }
 }
 
