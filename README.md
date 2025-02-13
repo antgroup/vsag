@@ -59,7 +59,7 @@ add_dependencies (vsag-cmake-example vsag)
 
 Currently Python and C++ examples are provided, please explore [examples](./examples/) directory for details.
 
-We suggest you start with [simple_hnsw.cpp](./examples/cpp/simple_hnsw.cpp) and [example_hnsw.py](./examples/python/example_hnsw.py).
+We suggest you start with [101_index_hnsw.cpp](./examples/cpp/101_index_hnsw.cpp) and [example_hnsw.py](./examples/python/example_hnsw.py).
 
 ## Building from Source
 Please read the [DEVELOPMENT](./DEVELOPMENT.md) guide for instructions on how to build.
