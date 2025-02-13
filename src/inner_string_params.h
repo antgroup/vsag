@@ -33,8 +33,11 @@ const char* const IO_PARAMS_KEY = "io_params";
 // IO type
 const char* const IO_TYPE_KEY = "type";
 const char* const IO_TYPE_VALUE_MEMORY_IO = "memory_io";
+const char* const IO_TYPE_VALUE_BUFFER_IO = "buffer_io";
 const char* const IO_TYPE_VALUE_BLOCK_MEMORY_IO = "block_memory_io";
 const char* const BLOCK_IO_BLOCK_SIZE_KEY = "block_size";
+const char* const IO_FILE_PATH = "file_path";
+const char* const DEFAULT_FILE_PATH_VALUE = "./default_file_path";
 
 // quantization params key
 const char* const QUANTIZATION_PARAMS_KEY = "quantization_params";
@@ -79,6 +82,9 @@ const std::unordered_map<std::string, std::string> DEFAULT_MAP = {
     {"BUILD_THREAD_COUNT", BUILD_THREAD_COUNT},
     {"BUILD_EF_CONSTRUCTION", BUILD_EF_CONSTRUCTION},
     {"BUCKETS_COUNT_KEY", BUCKETS_COUNT_KEY},
+    {"IO_TYPE_VALUE_BUFFER_IO", IO_TYPE_VALUE_BUFFER_IO},
+    {"IO_FILE_PATH", IO_FILE_PATH},
+    {"DEFAULT_FILE_PATH_VALUE", DEFAULT_FILE_PATH_VALUE},
 };
 
 }  // namespace vsag

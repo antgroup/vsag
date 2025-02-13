@@ -74,6 +74,11 @@ public:
     inline void
     PrefetchImpl(uint64_t offset, uint64_t cache_line = 64);
 
+    static inline bool
+    InMemoryImpl() {
+        return true;
+    }
+
 private:
     inline void
     update_by_block_size() {
