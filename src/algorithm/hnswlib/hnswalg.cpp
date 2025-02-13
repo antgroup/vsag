@@ -427,6 +427,9 @@ HierarchicalNSW::searchBaseLayerST(InnerIdType ep_id,
     MaxHeap top_candidates(allocator_);
     MaxHeap candidate_set(allocator_);
 
+    float valid_ratio = is_id_allowed ? is_id_allowed->ValidRatio() : 1.0F;
+    float skip_threshold = (1 - valid_ratio) * skip_ratio;
+
     float lower_bound;
     if ((!has_deletions || !isMarkedDeleted(ep_id)) &&
         ((!is_id_allowed) || is_id_allowed->CheckValid(getExternalLabel(ep_id)))) {
@@ -483,11 +486,11 @@ HierarchicalNSW::searchBaseLayerST(InnerIdType ep_id,
             if (visited_array[candidate_id] != visited_array_tag) {
                 visited_array[candidate_id] = visited_array_tag;
                 if (is_id_allowed && not candidate_set.empty() &&
-                    not is_id_allowed->CheckValid(getExternalLabel(candidate_id)) &&
-                    generator.NextFloat() < (1 - is_id_allowed->ValidRatio()) * skip_ratio) {
+                    generator.NextFloat() < skip_threshold &&
+                    not is_id_allowed->CheckValid(getExternalLabel(candidate_id))) {
                     continue;
                 }
-                char* currObj1 = (getDataByInternalId(candidate_id));
+                char* currObj1 = getDataByInternalId(candidate_id);
                 float dist = fstdistfunc_(data_point, currObj1, dist_func_param_);
                 if (top_candidates.size() < ef || lower_bound > dist) {
                     candidate_set.emplace(-dist, candidate_id);
