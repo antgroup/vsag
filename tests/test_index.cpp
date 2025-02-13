@@ -418,10 +418,7 @@ TestIndex::TestFilterSearch(const TestIndex::IndexPtr& index,
         if (!expected_success) {
             return;
         }
-        int64_t search_result_count = res.value()->GetDim();
-        if (res.value()->GetDim() != topk) {
-            WARN(fmt::format("search_result_count({}) != topk({})", search_result_count, topk));
-        }
+        REQUIRE(res.value()->GetDim() == topk);
         auto result = res.value()->GetIds();
         auto gt = gts->GetIds() + gt_topK * i;
         auto val = Intersection(gt, gt_topK, result, topk);
