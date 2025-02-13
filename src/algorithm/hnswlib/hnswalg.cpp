@@ -46,6 +46,7 @@ HierarchicalNSW::HierarchicalNSW(SpaceInterface* s,
     fstdistfunc_ = s->get_dist_func();
     dist_func_param_ = s->get_dist_func_param();
     dim_ = *((size_t*)dist_func_param_);
+    prefetch_jump_code_size_ = max(1, data_size_ / (64 * 2) - 1);
     M_ = M;
     maxM_ = M_;
     maxM0_ = M_ * 2;
@@ -462,19 +463,21 @@ HierarchicalNSW::searchBaseLayerST(InnerIdType ep_id,
 #ifdef USE_SSE
         _mm_prefetch((char*)(visited_array + *(data + 1)), _MM_HINT_T0);
         _mm_prefetch((char*)(visited_array + *(data + 1) + 64), _MM_HINT_T0);
-        _mm_prefetch(vector_data_ptr, _MM_HINT_T0);
+        PrefetchLines(vector_data_ptr, data_size_);
         _mm_prefetch((char*)(data + 2), _MM_HINT_T0);
 #endif
 
         for (size_t j = 1; j <= size; j++) {
             int candidate_id = *(data + j);
             size_t pre_l = std::min(j, size - 2);
-            vector_data_ptr =
-                data_level0_memory_->GetElementPtr((*(data + pre_l + 1)), offset_data_);
+            if (pre_l + prefetch_jump_code_size_ <= size) {
+                vector_data_ptr =
+                    data_level0_memory_->GetElementPtr((*(data + pre_l + prefetch_jump_code_size_)), offset_data_);
 #ifdef USE_SSE
-            _mm_prefetch((char*)(visited_array + *(data + pre_l + 1)), _MM_HINT_T0);
-            _mm_prefetch(vector_data_ptr, _MM_HINT_T0);  ////////////
+                _mm_prefetch((char*)(visited_array + *(data + pre_l + prefetch_jump_code_size_)), _MM_HINT_T0);
+                PrefetchLines(vector_data_ptr, data_size_);
 #endif
+            }
             if (visited_array[candidate_id] != visited_array_tag) {
                 visited_array[candidate_id] = visited_array_tag;
                 if (is_id_allowed && not candidate_set.empty() &&
