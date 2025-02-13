@@ -35,8 +35,8 @@ namespace vsag {
 class MemoryBlockIO : public BasicIO<MemoryBlockIO> {
 public:
     explicit MemoryBlockIO(Allocator* allocator, uint64_t block_size)
-        : block_size_(MemoryBlockIOParameter::NearestPowerOfTwo(block_size)),
-          allocator_(allocator),
+        : BasicIO<MemoryBlockIO>(allocator),
+          block_size_(MemoryBlockIOParameter::NearestPowerOfTwo(block_size)),
           blocks_(0, allocator) {
         this->update_by_block_size();
     }
@@ -49,7 +49,7 @@ public:
 
     ~MemoryBlockIO() override {
         for (auto* block : blocks_) {
-            allocator_->Deallocate(block);
+            this->allocator_->Deallocate(block);
         }
     }
 
@@ -65,7 +65,7 @@ public:
     inline void
     ReleaseImpl(const uint8_t* data) const {
         auto ptr = const_cast<uint8_t*>(data);
-        allocator_->Deallocate(ptr);
+        this->allocator_->Deallocate(ptr);
     };
 
     inline bool
@@ -74,18 +74,7 @@ public:
     inline void
     PrefetchImpl(uint64_t offset, uint64_t cache_line = 64);
 
-    inline void
-    SerializeImpl(StreamWriter& writer);
-
-    inline void
-    DeserializeImpl(StreamReader& reader);
-
 private:
-    [[nodiscard]] inline bool
-    check_valid_offset(uint64_t size) const {
-        return size <= (blocks_.size() << block_bit_);
-    }
-
     inline void
     update_by_block_size() {
         block_bit_ = std::__countr_zero(block_size_);
@@ -112,8 +101,6 @@ private:
 
     Vector<uint8_t*> blocks_;
 
-    Allocator* const allocator_{nullptr};
-
     static constexpr uint64_t DEFAULT_BLOCK_SIZE = 128 * 1024 * 1024;  // 128MB
 
     static constexpr uint64_t DEFAULT_BLOCK_BIT = 27;
@@ -138,6 +125,9 @@ MemoryBlockIO::WriteImpl(const uint8_t* data, uint64_t size, uint64_t offset) {
         max_size = block_size_;
         ++start_no;
         start_off = 0;
+    }
+    if (size + offset > this->size_) {
+        this->size_ = size + offset;
     }
 }
 
@@ -170,7 +160,7 @@ MemoryBlockIO::DirectReadImpl(uint64_t size, uint64_t offset, bool& need_release
             return this->get_data_ptr(offset);
         } else {
             need_release = true;
-            auto* ptr = reinterpret_cast<uint8_t*>(allocator_->Allocate(size));
+            auto* ptr = reinterpret_cast<uint8_t*>(this->allocator_->Allocate(size));
             this->ReadImpl(size, offset, ptr);
             return ptr;
         }
@@ -196,39 +186,15 @@ MemoryBlockIO::PrefetchImpl(uint64_t offset, uint64_t cache_line) {
 
 void
 MemoryBlockIO::check_and_realloc(uint64_t size) {
-    if (check_valid_offset(size)) {
+    if (size <= (blocks_.size() << block_bit_)) {
         return;
     }
     const uint64_t new_block_count = (size + this->block_size_ - 1) >> block_bit_;
     auto cur_block_size = this->blocks_.size();
     this->blocks_.reserve(new_block_count);
     while (cur_block_size < new_block_count) {
-        this->blocks_.emplace_back((uint8_t*)(allocator_->Allocate(block_size_)));
+        this->blocks_.emplace_back((uint8_t*)(this->allocator_->Allocate(block_size_)));
         ++cur_block_size;
-    }
-}
-void
-MemoryBlockIO::SerializeImpl(StreamWriter& writer) {
-    StreamWriter::WriteObj(writer, this->block_size_);
-    uint64_t block_count = this->blocks_.size();
-    StreamWriter::WriteObj(writer, block_count);
-    for (uint64_t i = 0; i < block_count; ++i) {
-        writer.Write(reinterpret_cast<char*>(this->blocks_[i]), block_size_);
-    }
-}
-
-void
-MemoryBlockIO::DeserializeImpl(StreamReader& reader) {
-    for (auto* block : blocks_) {
-        allocator_->Deallocate(block);
-    }
-    StreamReader::ReadObj(reader, this->block_size_);
-    uint64_t block_count;
-    StreamReader::ReadObj(reader, block_count);
-    this->blocks_.resize(block_count);
-    for (uint64_t i = 0; i < block_count; ++i) {
-        blocks_[i] = static_cast<unsigned char*>(allocator_->Allocate(this->block_size_));
-        reader.Read(reinterpret_cast<char*>(blocks_[i]), block_size_);
     }
 }
 
