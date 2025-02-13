@@ -222,7 +222,7 @@ public:
             auto filter = [&eval_dataset, i](int64_t base_id) {
                 return not eval_dataset->IsMatch(i, base_id);
             };
-            auto result = index->KnnSearch(query, top_k, search_parameters, filter);
+            auto result = index->KnnSearch(query, top_k, search_parameters);
             if (not result.has_value()) {
                 std::cerr << "query error: " << result.error().message << std::endl;
                 exit(-1);
