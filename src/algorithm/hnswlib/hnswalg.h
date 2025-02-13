@@ -38,6 +38,7 @@
 #include "data_cell/flatten_interface.h"
 #include "data_cell/graph_interface.h"
 #include "default_allocator.h"
+#include "prefetch.h"
 #include "simd/simd.h"
 #include "visited_list_pool.h"
 #include "vsag/dataset.h"
@@ -105,6 +106,7 @@ private:
     vsag::UnorderedMap<int, reverselinklist>** reversed_link_lists_{nullptr};
 
     size_t data_size_{0};
+    size_t prefetch_jump_code_size_{1};
 
     size_t data_element_per_block_{0};
 
