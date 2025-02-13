@@ -477,7 +477,7 @@ HierarchicalNSW::searchBaseLayerST(InnerIdType ep_id,
 #endif
             if (visited_array[candidate_id] != visited_array_tag) {
                 visited_array[candidate_id] = visited_array_tag;
-                if (is_id_allowed &&
+                if (is_id_allowed && not candidate_set.empty() &&
                     not is_id_allowed->CheckValid(getExternalLabel(candidate_id)) &&
                     generator.NextFloat() < (1 - is_id_allowed->ValidRatio()) * skip_ratio) {
                     continue;

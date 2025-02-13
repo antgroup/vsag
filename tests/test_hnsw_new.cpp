@@ -44,7 +44,7 @@ public:
         {{
             "hnsw": {{
                 "ef_search": {},
-                "skip_ratio": 0.7
+                "skip_ratio": 0.3
             }}
         }})";
 };
