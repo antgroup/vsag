@@ -4,53 +4,37 @@ The document introduces how to modify the `factory json` for HGraph Index.
 
 Different capabilities of HGraph Index can be enabled by configuring various parameter combinations.
 
-You can use `vsag::Factory::CreateIndex("hgraph", hgraph_json_string)` to factory HGraph Index
+You can use `vsag::Factory::CreateIndex("hgraph", hgraph_json_string)` to factory HGraph Index.
+If necessary, you can use `vsag::Engine` with resource manager to create index too.
 
 The following will introduce how to edit the `hgraph_json_string` like this
 
-### Template
+### Parameters
 
-The template of the `hgraph_json_string`.
+The example of the `hgraph_json_string`.
 ```json5
 {
   "dtype": "float32", // data_type: only support float32 for hgraph
   "metric_type": "l2", // metric_type only support "l2","ip" and "cosine"
   "dim": 23, // dim must integer in [1, 65536]
   "index_param": { // must give this key: "index_param"
-    "key": value,
-    ...
+    "base_quantization_type": "sq8", /* must, support "sq8", "fp32", "sq8_uniform", "sq4_uniform";
+                                        means the quantization type for origin vector data*/
+                                        
+    "use_reorder": false, /* optional, default false, if set true means use high precise code to reorder,
+                             the 'precise_quantization_type' must be set */
+                             
+    "precise_quantization_type": "fp32", /* optional, when 'use_reorder' is true, this key must be set, 
+                                            the value like 'base_quantization_type' by more precise */
+                                           
+    "max_degree": 32, /* optional, default is 64, means the max_degree for hgraph bottom graph */
+    
+    "ef_construction": 200,  /* optional, default is 400, means the ef_construct value for hgraph graph */
+    
+    "hgraph_init_capacity": 100, /* optional, default is 100, means the initial capacity 
+                                    when hgraph is created, not real size */
+                                    
+    "build_thread_count": 100 /* optional, default is 100, means how much thread will be used for hgraph build */
   }
 }
 ```
-### Index parameters
-
-We will introduce some terms
-
-- `[key]` means the string is a key.
-- `[value]` means the string is a value.
-- `[must]` means the key is must given.
-
-The following strings are the detail of the index_param config
-
-#### `"base_quantization_type"` [key] [must]
-- means the quantization of the base_code
-- the value of this key is a $string$
-- current support `"sq8"` and `"fp32"`
-- related keys: `"sq8"`,`"fp32"`
-
-#### `"use_reorder"` [key]
-- means enable use high precise codec to reorder the result
-- the value of this key is a $bool$
-- the default value is **true**
-
-#### `"sq8"` [value]
-- means use sq8 quantization
-- is the value of the `"base_quantization_type"`
-- related keys: `"base_quantization_type"`
-
-#### `"fp32"` [value]
-- means use fp32 quantization (actually the origin data_type)
-- is the value of the `"base_quantization_type"`
-- related keys: `"base_quantization_type"`
-
-
