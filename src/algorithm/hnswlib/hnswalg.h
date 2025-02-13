@@ -33,12 +33,12 @@
 #include <unordered_set>
 
 #include "../../utils.h"
-#include "prefetch.h"
 #include "algorithm_interface.h"
 #include "block_manager.h"
 #include "data_cell/flatten_interface.h"
 #include "data_cell/graph_interface.h"
 #include "default_allocator.h"
+#include "prefetch.h"
 #include "simd/simd.h"
 #include "visited_list_pool.h"
 #include "vsag/dataset.h"
