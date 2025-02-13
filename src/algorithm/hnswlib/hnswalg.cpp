@@ -1424,7 +1424,7 @@ HierarchicalNSW::searchKnn(const void* query_data,
         std::shared_lock data_loc(max_level_mutex_);
         currObj = enterpoint_node_;
     }
-    if (currObj < 0) {
+    if (currObj > cur_element_count_) {
         return result;
     }
 
