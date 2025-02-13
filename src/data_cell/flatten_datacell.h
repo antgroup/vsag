@@ -14,13 +14,16 @@
 // limitations under the License.
 
 #pragma once
+
 #include <algorithm>
 #include <limits>
 #include <memory>
 
+#include "byte_buffer.h"
 #include "flatten_interface.h"
 #include "io/basic_io.h"
 #include "quantization/quantizer.h"
+
 namespace vsag {
 /*
 * thread unsafe
@@ -160,30 +163,14 @@ FlattenDataCell<QuantTmpl, IOTmpl>::InsertVector(const float* vector, InnerIdTyp
     allocator_->Deallocate(codes);
 }
 
-struct BufferWrapper {
-public:
-    BufferWrapper(uint64_t size, Allocator* allocator) : allocator(allocator) {
-        data = static_cast<uint8_t*>(allocator->Allocate(size));
-    }
-
-    ~BufferWrapper() {
-        allocator->Deallocate(data);
-    }
-
-public:
-    uint8_t* data;
-
-    Allocator* allocator;
-};
-
 template <typename QuantTmpl, typename IOTmpl>
 void
 FlattenDataCell<QuantTmpl, IOTmpl>::BatchInsertVector(const float* vectors,
                                                       InnerIdType count,
                                                       InnerIdType* idx) {
     if (idx == nullptr) {
-        BufferWrapper codes(static_cast<uint64_t>(count) * static_cast<uint64_t>(code_size_),
-                            allocator_);
+        ByteBuffer codes(static_cast<uint64_t>(count) * static_cast<uint64_t>(code_size_),
+                         allocator_);
         quantizer_->EncodeBatch(vectors, codes.data, count);
         io_->Write(codes.data,
                    static_cast<uint64_t>(count) * static_cast<uint64_t>(code_size_),
