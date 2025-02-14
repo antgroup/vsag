@@ -228,6 +228,25 @@ public:
         }
     }
 
+    /**
+     * @brief Checks if the IO object is in-memory.
+     *
+     * This function checks if the IO object has an InMemoryImpl method.
+     * If it does, it calls the method and returns the result.
+     * Otherwise, it throws a runtime error.
+     *
+     * @return True if the IO object is in-memory, false otherwise.
+     */
+    inline bool
+    InMemory() const {
+        if constexpr (has_InMemoryImpl<IOTmpl>::value) {
+            return cast().InMemoryImpl();
+        } else {
+            throw std::runtime_error(
+                fmt::format("class {} have no func named InMemoryImpl", typeid(IOTmpl).name()));
+        }
+    }
+
 public:
     /**
      * @brief The size of the IO object.
@@ -299,5 +318,6 @@ private:
     GENERATE_HAS_MEMBER_FUNC(MultiReadImpl, bool (U::*)(uint8_t*, uint64_t*, uint64_t*, uint64_t))
     GENERATE_HAS_MEMBER_FUNC(PrefetchImpl, void (U::*)(uint64_t, uint64_t))
     GENERATE_HAS_MEMBER_FUNC(ReleaseImpl, void (U::*)(const uint8_t*))
+    GENERATE_HAS_MEMBER_FUNC(InMemoryImpl, bool (U::*)())
 };
 }  // namespace vsag

@@ -15,7 +15,25 @@
 
 #pragma once
 
-#include "basic_io.h"
-#include "buffer_io.h"
-#include "memory_block_io.h"
-#include "memory_io.h"
+#include "io_parameter.h"
+
+namespace vsag {
+class BufferIOParameter : public IOParameter {
+public:
+    BufferIOParameter();
+
+    explicit BufferIOParameter(const JsonType& json);
+
+    void
+    FromJson(const JsonType& json) override;
+
+    JsonType
+    ToJson() override;
+
+public:
+    std::string path_{};
+};
+
+using BufferIOParameterPtr = std::shared_ptr<BufferIOParameter>;
+
+}  // namespace vsag

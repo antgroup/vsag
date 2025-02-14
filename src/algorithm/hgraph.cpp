@@ -82,7 +82,16 @@ HGraph::HGraph(const HGraphParameter& hgraph_param, const vsag::IndexCommonParam
 
 tl::expected<std::vector<int64_t>, Error>
 HGraph::Build(const DatasetPtr& data) {
-    return this->Add(data);
+    this->basic_flatten_codes_->EnableForceInMemory();
+    if (use_reorder_) {
+        this->high_precise_codes_->EnableForceInMemory();
+    }
+    auto ret = this->Add(data);
+    this->basic_flatten_codes_->DisableForceInMemory();
+    if (use_reorder_) {
+        this->high_precise_codes_->DisableForceInMemory();
+    }
+    return ret;
 }
 
 tl::expected<std::vector<int64_t>, Error>
@@ -208,14 +217,18 @@ HGraph::EstimateMemory(uint64_t num_elements) const {
             static_cast<double>(block_size));
     };
 
-    auto base_memory = this->basic_flatten_codes_->code_size_ * element_count;
-    estimate_memory += block_memory_ceil(base_memory, block_size);
+    if (this->basic_flatten_codes_->InMemory()) {
+        auto base_memory = this->basic_flatten_codes_->code_size_ * element_count;
+        estimate_memory += block_memory_ceil(base_memory, block_size);
+    }
 
-    auto bottom_graph_memory =
-        (this->bottom_graph_->maximum_degree_ + 1) * sizeof(InnerIdType) * element_count;
-    estimate_memory += block_memory_ceil(bottom_graph_memory, block_size);
+    if (bottom_graph_->InMemory()) {
+        auto bottom_graph_memory =
+            (this->bottom_graph_->maximum_degree_ + 1) * sizeof(InnerIdType) * element_count;
+        estimate_memory += block_memory_ceil(bottom_graph_memory, block_size);
+    }
 
-    if (use_reorder_) {
+    if (use_reorder_ && this->high_precise_codes_->InMemory()) {
         auto precise_memory = this->high_precise_codes_->code_size_ * element_count;
         estimate_memory += block_memory_ceil(precise_memory, block_size);
     }

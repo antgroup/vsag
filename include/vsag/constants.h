@@ -116,6 +116,10 @@ extern const char* const HGRAPH_BUILD_EF_CONSTRUCTION;
 extern const char* const HGRAPH_INIT_CAPACITY;
 extern const char* const HGRAPH_BUILD_THREAD_COUNT;
 extern const char* const HGRAPH_PRECISE_QUANTIZATION_TYPE;
+extern const char* const HGRAPH_BASE_IO_TYPE;
+extern const char* const HGRAPH_BASE_FILE_PATH;
+extern const char* const HGRAPH_PRECISE_IO_TYPE;
+extern const char* const HGRAPH_PRECISE_FILE_PATH;
 
 extern const char* const BRUTE_FORCE_QUANTIZATION_TYPE;
 extern const char* const BRUTE_FORCE_IO_TYPE;

@@ -104,6 +104,11 @@ public:
         return this->max_capacity_;
     }
 
+    [[nodiscard]] virtual bool
+    InMemory() const {
+        return true;
+    }
+
     virtual void
     SetMaximumDegree(uint32_t maximum_degree) {
         this->maximum_degree_ = maximum_degree;
