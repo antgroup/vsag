@@ -83,6 +83,11 @@ public:
     void
     Deserialize(StreamReader& reader) override;
 
+    bool
+    InMemory() const override {
+        return this->io_->InMemory();
+    }
+
 private:
     std::shared_ptr<BasicIO<IOTmpl>> io_{nullptr};
 

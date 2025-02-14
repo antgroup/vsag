@@ -808,13 +808,21 @@ TestIndex::TestEstimateMemory(const std::string& index_name,
                               const TestDatasetPtr& dataset) {
     auto allocator = std::make_shared<fixtures::MemoryRecordAllocator>();
     {
-        auto index = vsag::Factory::CreateIndex(index_name, build_param, allocator.get()).value();
-        REQUIRE(index->GetNumElements() == 0);
-        if (index->CheckFeature(vsag::SUPPORT_ESTIMATE_MEMORY)) {
+        auto index1 = vsag::Factory::CreateIndex(index_name, build_param, allocator.get()).value();
+        REQUIRE(index1->GetNumElements() == 0);
+        auto index2 = vsag::Factory::CreateIndex(index_name, build_param).value();
+        REQUIRE(index2->GetNumElements() == 0);
+        fixtures::TempDir dir("index");
+        auto path = dir.GenerateRandomFile();
+        std::ofstream outf(path, std::ios::binary);
+        if (index1->CheckFeature(vsag::SUPPORT_ESTIMATE_MEMORY)) {
             auto data_size = dataset->base_->GetNumElements();
-            auto estimate_memory = index->EstimateMemory(data_size);
-            auto build_index = index->Build(dataset->base_);
+            auto estimate_memory = index1->EstimateMemory(data_size);
+            auto build_index = index2->Build(dataset->base_);
             REQUIRE(build_index.has_value());
+            index2->Serialize(outf);
+            std::ifstream inf(path, std::ios::binary);
+            index1->Deserialize(inf);
             auto real_memory = allocator->GetCurrentMemory();
             if (estimate_memory <= static_cast<uint64_t>(real_memory * 0.8) or
                 estimate_memory >= static_cast<uint64_t>(real_memory * 1.2)) {
@@ -823,7 +831,9 @@ TestIndex::TestEstimateMemory(const std::string& index_name,
 
             REQUIRE(estimate_memory >= static_cast<uint64_t>(real_memory * 0.5));
             REQUIRE(estimate_memory <= static_cast<uint64_t>(real_memory * 1.5));
+            inf.close();
         }
+        outf.close();
     }
 }
 
