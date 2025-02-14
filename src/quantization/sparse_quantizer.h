@@ -55,13 +55,7 @@ public:
     EncodeOne(const SDataType* data, uint8_t* codes) const;
 
     bool
-    EncodeBatch(const SDataType* data, uint8_t* codes, uint64_t count) const;
-
-    bool
     DecodeOne(const uint8_t* codes, SDataType* data) const;
-
-    bool
-    DecodeBatch(const uint8_t* codes, SDataType* data, uint64_t count);
 
     inline float
     Compute(const uint8_t* codes1, const uint8_t* codes2)const {
@@ -106,11 +100,11 @@ public:
     }
 
     inline uint64_t
-    GetCodeSize(int dim = -1, int count= 1) const {//dim is the number off non zero entries, count is the number of sparse vectors
+    GetCodeSize(int dim = -1) const {
         if (dim == -1)
             return this->code_size_;
         else {
-            return count * sizeof(uint32_t) + dim * (sizeof(uint32_t) + sizeof(float));
+            return sizeof(uint32_t) + dim * (sizeof(uint32_t) + sizeof(float));
             }
     }
 
