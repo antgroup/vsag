@@ -76,5 +76,6 @@ private:
 };
 
 using VisitedListPool = ResourceObjectPool<VisitedList>;
+using VisitedListPtr = std::shared_ptr<VisitedList>;
 
 }  // namespace vsag
