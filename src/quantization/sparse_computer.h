@@ -17,10 +17,11 @@
 
 #include <cstdint>
 #include <memory>
-
+#include "vsag/dataset.h"
 #include "metric_type.h"
 
 namespace vsag {
+using SDataType = SparseVectors;
 
 class SparseQuantizer;
 
@@ -38,20 +39,18 @@ public:
     explicit SparseComputer(const SparseQuantizer* quantizer) : quantizer_(quantizer){};
 
     void
-    SetQuery(int32_t nnz, const uint32_t* ids, const float* vals) {
-        quantizer_->ProcessQuery(nnz, ids, vals, *this);
+    SetQuery(const SDataType* query) {
+        quantizer_->ProcessQuery(query, *this);
     }
 
     inline void
-    ComputeDist(uint32_t u, float* dists) {//u是quant中存储的第u个稀疏向量
-        quantizer_->ComputeDist(*this, u, dists);
+    ComputeDist(const uint8_t* codes, float* dists) {
+        quantizer_->ComputeDist(*this, codes, dists);
     }
 
 public:
     const SparseQuantizer* quantizer_{nullptr};
-    int32_t nnz_ = 0;
-    const uint32_t* vals_{nullptr};
-    const float* ids_{nullptr};
+    uint8_t* buf_{nullptr};
 };
 
 using SparseComputerInterfacePtr = std::shared_ptr<SparseComputerInterface>;

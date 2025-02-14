@@ -188,8 +188,8 @@ public:
      * @return The code size in bytes.
      */
     inline uint64_t
-    GetCodeSize() const {
-        return this->code_size_;
+    GetCodeSize(int dim = -1) const {
+            return this->code_size_;
     }
 
     /**

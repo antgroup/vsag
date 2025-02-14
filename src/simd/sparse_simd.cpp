@@ -13,12 +13,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#pragma once
+#include "sparse_simd.h"
 
-#include "fp32_quantizer.h"
-#include "quantizer.h"
-#include "sparse_quantizer.h"
-#include "sq4_quantizer.h"
-#include "sq4_uniform_quantizer.h"
-#include "sq8_quantizer.h"
-#include "sq8_uniform_quantizer.h"
+#include "simd_status.h"
+
+namespace vsag {
+
+static SparseComputeType
+GetSparseComputeIP() {
+    return generic::SparseComputeIP;
+}
+SparseComputeType SparseComputeIP = GetSparseComputeIP();
+}  // namespace vsag

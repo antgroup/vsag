@@ -18,61 +18,82 @@
 #include <cstdint>
 #include <memory>
 #include <vector>
-#include <algorithm>
 
 #include "../logger.h"
-#include "sparse_computer.h"
+#include "inner_string_params.h"
 #include "metric_type.h"
 #include "stream_reader.h"
 #include "stream_writer.h"
-#include "dataset.h"
-#include "inner_string_params.h"
+#include "vsag/dataset.h"
 
 namespace vsag {
+using SDataType = SparseVectors;
+
+class SparseComputer;
 /**
  * @class SparseQuantizer
  * @brief This class is used for distance computation and encoding/decoding of data.
  */
 class SparseQuantizer {
 public:
-    explicit SparseQuantizer(Allocator* allocator)
-        : allocator_(allocator){};
+    explicit SparseQuantizer(Allocator* allocator) : allocator_(allocator){}
 
-    ~SparseQuantizer(){
-        this->allocator_->Deallocate(indptr_);
-        this->allocator_->Deallocate(indices_);
-        this->allocator_->Deallocate(data_);
+    ~SparseQuantizer() =default;
+
+    bool
+    Train(const SDataType* data, uint64_t count){
+        return this->TrainImpl(data, count);
     }
 
     bool
-    InsertAll(const SparseVectors& sv);
+    ReTrain(const SDataType* data, uint64_t count) {
+        this->is_trained_ = false;
+        return this->TrainImpl(data, count);
+    }
 
-    inline void
-    Serialize(StreamWriter& writer) {};
+    bool
+    EncodeOne(const SDataType* data, uint8_t* codes) const;
 
-    inline void
-    Deserialize(StreamReader& reader) {};
+    bool
+    EncodeBatch(const SDataType* data, uint8_t* codes, uint64_t count) const;
+
+    bool
+    DecodeOne(const uint8_t* codes, SDataType* data) const;
+
+    bool
+    DecodeBatch(const uint8_t* codes, SDataType* data, uint64_t count);
 
     inline float
-    Compute(int32_t nnz1, const uint32_t* ids1, const float* vals1, 
-            int32_t nnz2, const uint32_t* ids2, const float* vals2) {};
-
-    inline void
-    ComputeDist(SparseComputer& computer, int32_t nnz, const uint32_t* ids, const float* vals, float* dists) const {};
-
-    inline float
-    ComputeDist(SparseComputer& computer, int32_t nnz, const uint32_t* ids, const float* vals) const {};
-
-    std::shared_ptr<SparseComputer>
-    FactoryComputer() {
-        return std::make_shared<SparseComputer>(static_cast<SparseQuantizer*>(this));
+    Compute(const uint8_t* codes1, const uint8_t* codes2)const {
+        return this->ComputeDistImpl(codes1, codes2);
     }
 
     inline void
-    ReleaseComputer(SparseComputer& computer) const {};
+    Serialize(StreamWriter& writer) {
+        StreamWriter::WriteObj(writer, this->metric_);
+        StreamWriter::WriteObj(writer, this->is_trained_);
+    }
 
     inline void
-    ProcessQuery(int32_t nnz, const uint32_t* ids, const float* vals, SparseComputer& computer) const {};
+    Deserialize(StreamReader& reader) {
+        StreamReader::ReadObj(reader, this->metric_);
+        StreamReader::ReadObj(reader, this->is_trained_);
+    }
+
+    void
+    ComputeDist(SparseComputer& computer, const uint8_t* codes, float* dists) const;
+
+    float
+    ComputeDist(SparseComputer& computer, const uint8_t* codes) const;
+
+    std::shared_ptr<SparseComputer>
+    FactoryComputer();
+
+    void
+    ReleaseComputer(SparseComputer& computer) const;
+
+    void
+    ProcessQuery(const SDataType* query, SparseComputer& computer) const;
 
     [[nodiscard]] std::string
     Name() const {
@@ -84,224 +105,33 @@ public:
         return this->metric_;
     }
 
-private:
-    uint32_t *indptr_{nullptr};
-    uint32_t *indices_{nullptr};
-    float *data_{nullptr};
-    uint32_t num_ = 0;
-    Allocator* const allocator_{nullptr};
-    MetricType metric_{MetricType::METRIC_TYPE_IP};
+    inline uint64_t
+    GetCodeSize(int dim = -1, int count= 1) const {//dim is the number off non zero entries, count is the number of sparse vectors
+        if (dim == -1)
+            return this->code_size_;
+        else {
+            return count * sizeof(uint32_t) + dim * (sizeof(uint32_t) + sizeof(float));
+            }
+    }
 
-};
+private:
+    bool
+    TrainImpl(const SDataType* data, uint64_t count);
 
     bool
-    SparseQuantizer::InsertAll(const SparseVectors& sv) {
-    // 首先释放旧的内存
-    this->allocator_->Deallocate(indptr_);
-    this->allocator_->Deallocate(indices_);
-    this->allocator_->Deallocate(data_);
-    this.num_ = sv.num;
+    EncodeOneImpl(uint32_t nnz, const uint32_t* ids, const float* vals, uint8_t* codes) const;
 
-    // 定义所需要分配的内存大小
-    size_t indptr_size = (sv.num + 1) * sizeof(uint32_t);
-    size_t indices_size = sv.offsets[sv.num] * sizeof(uint32_t);
-    size_t data_size = sv.offsets[sv.num] * sizeof(float);
+    bool
+    DecodeOneImpl(uint32_t nnz, uint32_t* ids, float* vals, const uint8_t* codes) const;
 
-    try{
-    indptr_ = reinterpret_cast<uint32_t*>(allocator_->Allocate(indptr_size));
-    indices_ = reinterpret_cast<uint32_t*>(allocator_->Allocate(indices_size));
-    data_ = reinterpret_cast<float*>(allocator_->Allocate(data_size));
-    } catch (const std::bad_alloc& e) {
-        indptr_ = nullptr;
-        indices_ = nullptr;
-        data_ = nullptr;
-        logger::error("bad alloc when init computer buf");
-        throw std::bad_alloc();
-    }
+    float
+    ComputeDistImpl(const uint8_t* codes1, const uint8_t* codes2) const;
 
-    // 使用 memcpy 复制数据
-    std::memcpy(indptr_, sv.offsets, indptr_size);
-    std::memcpy(indices_, sv.ids, indices_size);
-    std::memcpy(data_, sv.vals, data_size);
-
-    return true;
-    }
-
-    inline float Compute(int32_t nnz1, const uint32_t* ids1, const float* vals1,
-                         int32_t nnz2, const uint32_t* ids2, const float* vals2) const {
-        
-        std::vector<std::pair<uint32_t, float>> vec1(nnz1), vec2(nnz2);
-
-        // Fill the vectors with the input data
-        for (int32_t i = 0; i < nnz1; ++i) {
-            vec1[i] = {ids1[i], vals1[i]};
-        }
-        for (int32_t i = 0; i < nnz2; ++i) {
-            vec2[i] = {ids2[i], vals2[i]};
-        }
-
-        // Sort both vectors by id
-        std::sort(vec1.begin(), vec1.end(), [](const auto& a, const auto& b) {
-            return a.first < b.first;
-        });
-        std::sort(vec2.begin(), vec2.end(), [](const auto& a, const auto& b) {
-            return a.first < b.first;
-        });
-
-        // Use double pointer technique to calculate inner product
-        float result = 0.0f;
-        int32_t i = 0, j = 0;
-        while (i < nnz1 && j < nnz2) {
-            if (vec1[i].first == vec2[j].first) {
-                result += vec1[i].second * vec2[j].second;
-                ++i;
-                ++j;
-            } else if (vec1[i].first < vec2[j].first) {
-                ++i;
-            } else {
-                ++j;
-            }
-        }
-
-        return result;
-    }
-
-    inline void
-    SparseQuantizer::Serialize(StreamWriter& writer) {
-        StreamWriter::WriteObj(writer, this->num_);
-        StreamWriter::WriteObj(writer, this->metric_);
-        StreamWriter::WriteObj(writer, this->indptr_);
-        StreamWriter::WriteObj(writer, this->indices_);
-        StreamWriter::WriteObj(writer, this->data_);
-    }
-
-    inline void
-    SparseQuantizer::Deserialize(StreamReader& reader) {
-        StreamReader::ReadObj(reader, this->num_);
-        StreamReader::ReadObj(reader, this->metric_);
-        StreamReader::ReadObj(reader, this->indptr_);
-        StreamReader::ReadObj(reader, this->indices_);
-        StreamReader::ReadObj(reader, this->data_);
-    }
-
-    inline void
-    SparseQuantizer::ComputeDist(SparseComputer& computer, uint32_t u, float* dists) const {
-
-        if (u >= num_) {
-            // Out of bounds, handle error appropriately
-            std::cerr << "Row index out of bounds!" << std::endl;
-            return;
-        }
-        std::vector<std::pair<uint32_t, float>> vec1(nnz1), vec2(nnz2);
-
-        uint32_t start = this->indptr[u];
-        uint32_t end = this->indptr[u+1];
-        int32_t nnz1 = end - start;
-        // Fill the vectors with the input data
-        for (int32_t i = start; i < end; ++i) {
-            vec1[i] = {this->indices_[i], this->data_[i]};
-        }
-
-        int32_t nnz2 = computer.nnz_; 
-        for (int32_t i = 0; i < computer.nnz_; ++i) {
-            vec2[i] = {computer.ids_[i], computer.vals_[i]};
-        }
-
-        // Sort both vectors by id
-        std::sort(vec1.begin(), vec1.end(), [](const auto& a, const auto& b) {
-            return a.first < b.first;
-        });
-        std::sort(vec2.begin(), vec2.end(), [](const auto& a, const auto& b) {
-            return a.first < b.first;
-        });
-
-        // Use double pointer technique to calculate inner product
-        float result = 0.0f;
-        int32_t i = 0, j = 0;
-        while (i < nnz1 && j < nnz2) {
-            if (vec1[i].first == vec2[j].first) {
-                result += vec1[i].second * vec2[j].second;
-                ++i;
-                ++j;
-            } else if (vec1[i].first < vec2[j].first) {
-                ++i;
-            } else {
-                ++j;
-            }
-        }
-
-        *dists = results;
-    }
-
-    inline float
-    SparseQuantizer::ComputeDist(SparseComputer& computer, uint32_t u) const {
-
-        if (u >= num_) {
-            // Out of bounds, handle error appropriately
-            std::cerr << "Row index out of bounds!" << std::endl;
-            return;
-        }
-        std::vector<std::pair<uint32_t, float>> vec1(nnz1), vec2(nnz2);
-
-        uint32_t start = this->indptr[u];
-        uint32_t end = this->indptr[u+1];
-        int32_t nnz1 = end - start;
-        // Fill the vectors with the input data
-        for (int32_t i = start; i < end; ++i) {
-            vec1[i] = {this->indices_[i], this->data_[i]};
-        }
-
-        int32_t nnz2 = computer.nnz_; 
-        for (int32_t i = 0; i < computer.nnz_; ++i) {
-            vec2[i] = {computer.ids_[i], computer.vals_[i]};
-        }
-
-        // Sort both vectors by id
-        std::sort(vec1.begin(), vec1.end(), [](const auto& a, const auto& b) {
-            return a.first < b.first;
-        });
-        std::sort(vec2.begin(), vec2.end(), [](const auto& a, const auto& b) {
-            return a.first < b.first;
-        });
-
-        // Use double pointer technique to calculate inner product
-        float result = 0.0f;
-        int32_t i = 0, j = 0;
-        while (i < nnz1 && j < nnz2) {
-            if (vec1[i].first == vec2[j].first) {
-                result += vec1[i].second * vec2[j].second;
-                ++i;
-                ++j;
-            } else if (vec1[i].first < vec2[j].first) {
-                ++i;
-            } else {
-                ++j;
-            }
-        }
-
-        return result;
-    }
-
-    inline void
-    SparseQuantizer::ProcessQuery(int32_t nnz, const uint32_t* ids, const float* vals, SparseComputer& computer) const {
-        computer.nnz_ = nnz;
-    try {
-        computer.ids_ = reinterpret_cast<uint32_t*>(this->allocator_->Allocate(nnz * sizeof(uint32_t)));
-        computer.vals_ = reinterpret_cast<float*>(this->allocator_->Allocate(nnz * sizeof(float)));
-    } catch (const std::bad_alloc& e) {
-        computer.ids_ = nullptr;
-        computer.vals_ = nullptr;
-        logger::error("bad alloc when init computer buf");
-        throw std::bad_alloc();
-    }
-        memcpy(computer.ids_, ids, nnz * sizeof(uint32_t));
-        memcpy(computer.vals_, vals, nnz * sizeof(float));
-    }
-
-    inline void
-    SparseQuantizer::ReleaseComputer(SparseComputer& computer) const {
-        this->allocator_->Deallocate(computer.ids_);
-        this->allocator_->Deallocate(computer.vals_);
-    }
+private:
+    uint64_t code_size_{0};
+    bool is_trained_{false};
+    MetricType metric_{MetricType::METRIC_TYPE_L2SQR};
+    Allocator* const allocator_{nullptr};
+};
 
 }  // namespace vsag

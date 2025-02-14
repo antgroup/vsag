@@ -75,6 +75,27 @@ PQDistanceFloat256(const void* single_dim_centers, float single_dim_val, void* r
     }
 }
 
+float SparseComputeIP(int32_t nnz1, const uint32_t* ids1, const float* vals1,
+                      int32_t nnz2, const uint32_t* ids2, const float* vals2) {
+    float sum = 0.0f;
+    int i = 0, j = 0;
+
+    while (i < nnz1 && j < nnz2) {
+        if (ids1[i] == ids2[j]) {
+            sum += vals1[i] * vals2[j];
+            i++;
+            j++;
+        } else if (ids1[i] < ids2[j]) {
+            // Increment pointer for the first vector
+            i++;
+        } else {
+            // Increment pointer for the second vector
+            j++;
+        }
+    }
+    return sum;
+}
+
 float
 FP32ComputeIP(const float* query, const float* codes, uint64_t dim) {
     float result = 0.0f;

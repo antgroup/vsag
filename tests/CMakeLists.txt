@@ -1,4 +1,3 @@
-
 #  unittests
 file (GLOB_RECURSE UNIT_TESTS "../src/*_test.cpp")
 add_executable (unittests ${UNIT_TESTS}

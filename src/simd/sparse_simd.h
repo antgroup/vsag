@@ -15,10 +15,18 @@
 
 #pragma once
 
-#include "fp32_quantizer.h"
-#include "quantizer.h"
-#include "sparse_quantizer.h"
-#include "sq4_quantizer.h"
-#include "sq4_uniform_quantizer.h"
-#include "sq8_quantizer.h"
-#include "sq8_uniform_quantizer.h"
+#include <cstdint>
+#include <string>
+
+namespace vsag {
+
+namespace generic {
+float
+SparseComputeIP(int32_t nnz1, const uint32_t* ids1, const float* vals1,
+                int32_t nnz2, const uint32_t* ids2, const float* vals2);
+}  // namespace generic
+
+using SparseComputeType = float (*)(int32_t nnz1, const uint32_t* ids1, const float* vals1,
+                      int32_t nnz2, const uint32_t* ids2, const float* vals2);
+extern SparseComputeType SparseComputeIP;
+}  // namespace vsag

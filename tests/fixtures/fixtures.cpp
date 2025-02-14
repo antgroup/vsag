@@ -70,8 +70,15 @@ GenerateSparseVectors(uint32_t count, uint32_t dim_limit, int seed) {
     sparse_vectors.vals = new float[sparse_vectors.offsets[count]];
 
     for (uint32_t i = 0; i < sparse_vectors.num; i++) {
+        std::unordered_set<uint32_t> used_ids;
         for (uint32_t j = sparse_vectors.offsets[i]; j < sparse_vectors.offsets[i + 1]; j++) {
-            sparse_vectors.ids[j] = distrib_int(rng);
+            uint32_t id;
+            // Generate a unique id for this sparse vector
+            do {
+                id = distrib_int(rng);
+            } while (used_ids.find(id) != used_ids.end());
+            used_ids.insert(id);
+            sparse_vectors.ids[j] = id;
             sparse_vectors.vals[j] = distrib_real(rng);
         }
     }
