@@ -81,6 +81,9 @@ FlattenInterface::MakeInstance(const FlattenDataCellParamPtr& param,
     if (io_type_name == IO_TYPE_VALUE_MEMORY_IO) {
         return make_instance<MemoryIO>(param, common_param);
     }
+    if (io_type_name == IO_TYPE_VALUE_BUFFER_IO) {
+        return make_instance<BufferIO>(param, common_param);
+    }
     return nullptr;
 }
 
