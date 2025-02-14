@@ -119,13 +119,12 @@ const char* const HGRAPH_BUILD_EF_CONSTRUCTION = "ef_construction";
 const char* const HGRAPH_INIT_CAPACITY = "hgraph_init_capacity";
 const char* const HGRAPH_BUILD_THREAD_COUNT = "build_thread_count";
 const char* const HGRAPH_PRECISE_QUANTIZATION_TYPE = "precise_quantization_type";
-
-const char* const BRUTE_FORCE_QUANTIZATION_TYPE = "quantization_type";
-const char* const BRUTE_FORCE_IO_TYPE = "io_type";
-
 const char* const HGRAPH_BASE_IO_TYPE = "base_io_type";
 const char* const HGRAPH_BASE_FILE_PATH = "base_file_path";
 const char* const HGRAPH_PRECISE_IO_TYPE = "precise_io_type";
 const char* const HGRAPH_PRECISE_FILE_PATH = "precise_file_path";
+
+const char* const BRUTE_FORCE_QUANTIZATION_TYPE = "quantization_type";
+const char* const BRUTE_FORCE_IO_TYPE = "io_type";
 
 };  // namespace vsag
