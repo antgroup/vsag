@@ -1567,9 +1567,6 @@ HierarchicalNSW::setDataAndGraph(vsag::FlattenInterfacePtr& data,
         vsag::Vector<InnerIdType> edges(allocator_);
         graph->GetNeighbors(i, edges);
         setBatchNeigohbors(i, 0, edges.data(), edges.size());
-        if (edges[0] < 0) {
-            int a = 1;
-        }
         setExternalLabel(i, ids[i]);
         label_lookup_[ids[i]] = i;
         element_levels_[i] = 0;
@@ -1577,8 +1574,6 @@ HierarchicalNSW::setDataAndGraph(vsag::FlattenInterfacePtr& data,
     cur_element_count_ = data->total_count_;
     enterpoint_node_ = 0;
     max_level_ = 0;
-    auto data_tmp = std::shared_ptr<char[]>(new char[data->code_size_]);
-    searchKnn(data_tmp.get(), 10, 100);
 }
 
 template MaxHeap
