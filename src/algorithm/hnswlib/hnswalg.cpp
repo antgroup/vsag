@@ -47,7 +47,7 @@ HierarchicalNSW::HierarchicalNSW(SpaceInterface* s,
     fstdistfunc_ = s->get_dist_func();
     dist_func_param_ = s->get_dist_func_param();
     dim_ = *((size_t*)dist_func_param_);
-    prefetch_jump_code_size_ = std::max((size_t)1, data_size_ / (64 * 2) - 1);
+    prefetch_jump_code_size_ = std::max(1, static_cast<int32_t>(data_size_ / (64 * 2)) - 1);
     M_ = M;
     maxM_ = M_;
     maxM0_ = M_ * 2;
