@@ -34,6 +34,13 @@ public:
         writer.Write(reinterpret_cast<const char*>(&val), sizeof(val));
     }
 
+    static void
+    WriteString(StreamWriter& writer, const std::string& str) {
+        size_t length = str.size();
+        StreamWriter::WriteObj(writer, length);
+        writer.Write(str.c_str(), length);
+    }
+
     template <typename T>
     static void
     WriteVector(StreamWriter& writer, const std::vector<T>& val) {

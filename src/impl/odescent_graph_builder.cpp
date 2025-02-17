@@ -21,11 +21,7 @@
 namespace vsag {
 
 bool
-ODescent::Build(const uint32_t* valid_ids, int64_t data_num) {
-    if (is_build_) {
-        return false;
-    }
-    is_build_ = true;
+ODescent::Build(const uint32_t* valid_ids, uint64_t data_num) {
     valid_ids_ = valid_ids;
     if (valid_ids_ != nullptr) {
         data_num_ = data_num;
@@ -102,14 +98,15 @@ ODescent::init_graph() {
 
     auto task = [&, this](int64_t start, int64_t end) {
         std::random_device rd;
-        std::uniform_int_distribution<int64_t> k_generate(0, data_num_ - 1);
+        std::uniform_int_distribution<uint64_t> k_generate(0, data_num_ - 1);
         std::mt19937 rng(rd());
         for (int64_t i = start; i < end; ++i) {
             UnorderedSet<uint32_t> ids_set(allocator_);
             ids_set.insert(i);
+            graph[i].neighbors.clear();
             graph[i].neighbors.reserve(max_degree_);
-            int64_t max_neighbors = std::min(data_num_ - 1, max_degree_);
-            for (int j = 0; j < max_neighbors; ++j) {
+            uint64_t max_neighbors = std::min(data_num_ - 1, max_degree_);
+            for (uint64_t j = 0; j < max_neighbors; ++j) {
                 uint32_t id = i;
                 if (data_num_ - 1 < max_degree_) {
                     id = (i + j + 1) % data_num_;
@@ -342,8 +339,8 @@ ODescent::prune_graph() {
 void
 ODescent::parallelize_task(std::function<void(int64_t, int64_t)> task) {
     Vector<std::future<void>> futures(allocator_);
-    for (int64_t i = 0; i < data_num_; i += block_size_) {
-        int64_t end = std::min(i + block_size_, data_num_);
+    for (uint64_t i = 0; i < data_num_; i += block_size_) {
+        uint64_t end = std::min(i + block_size_, data_num_);
         futures.push_back(thread_pool_->GeneralEnqueue(task, i, end));
     }
     for (auto& future : futures) {

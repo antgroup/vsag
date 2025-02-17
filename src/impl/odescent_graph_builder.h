@@ -73,7 +73,7 @@ struct Linklist {
 };
 class ODescent {
 public:
-    ODescent(int64_t max_degree,
+    ODescent(uint64_t max_degree,
              float alpha,
              int64_t turn,
              float sample_rate,
@@ -94,7 +94,7 @@ public:
     }
 
     bool
-    Build(const uint32_t* valid_ids = nullptr, int64_t data_num = 0);
+    Build(const uint32_t* valid_ids = nullptr, uint64_t data_num = 0);
 
     void
     SaveGraph(std::stringstream& out);
@@ -137,15 +137,15 @@ private:
     parallelize_task(std::function<void(int64_t i, int64_t end)> task);
 
     size_t dim_;
-    int64_t data_num_;
+    uint64_t data_num_;
     bool is_build_ = false;
 
-    int64_t max_degree_;
+    uint64_t max_degree_;
     float alpha_;
     int64_t turn_;
     Vector<Linklist> graph;
-    int64_t min_in_degree_ = 1;
-    int64_t block_size_{10000};
+    uint64_t min_in_degree_ = 1;
+    uint64_t block_size_{10000};
     Vector<std::mutex> points_lock_;
     SafeThreadPool* thread_pool_;
 

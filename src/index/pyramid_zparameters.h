@@ -17,24 +17,44 @@
 
 #include <functional>
 
+#include "algorithm/hgraph_parameter.h"
+#include "data_cell/flatten_interface.h"
+#include "data_cell/graph_datacell_parameter.h"
+#include "data_cell/graph_interface.h"
 #include "index_common_param.h"
 #include "typing.h"
 #include "vsag/index.h"
 
 namespace vsag {
 
-using IndexBuildFunction = std::function<std::shared_ptr<Index>()>;
-
-struct PyramidParameters {
+struct PyramidParameters : public Parameter {
 public:
-    static PyramidParameters
-    FromJson(JsonType& pyramid_param_obj, const IndexCommonParam& index_common_param);
+    void
+    FromJson(const JsonType& json) override;
+
+    JsonType
+    ToJson() override;
 
 public:
-    IndexBuildFunction index_builder{nullptr};
+    GraphInterfaceParamPtr graph_param{nullptr};
+    FlattenDataCellParamPtr flatten_data_cell_param{nullptr};
 
-protected:
-    PyramidParameters() = default;
+    float alpha{1.2};
+    float sample_rate{0.3};
+    int64_t turn{20};
+    uint64_t max_degree{0};
+};
+
+class PyramidSearchParameters {
+public:
+    static PyramidSearchParameters
+    FromJson(const std::string& json_string);
+
+public:
+    int64_t ef_search{100};
+
+private:
+    PyramidSearchParameters() = default;
 };
 
 }  // namespace vsag

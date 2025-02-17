@@ -125,8 +125,8 @@ Engine::CreateIndex(const std::string& origin_name, const std::string& parameter
             CHECK_ARGUMENT(parsed_params.contains(INDEX_PARAM),
                            fmt::format("parameters must contains {}", INDEX_PARAM));
             auto& pyramid_param_obj = parsed_params[INDEX_PARAM];
-            auto pyramid_params =
-                PyramidParameters::FromJson(pyramid_param_obj, index_common_params);
+            PyramidParameters pyramid_params;
+            pyramid_params.FromJson(pyramid_param_obj);
             logger::debug("created a pyramid index");
             return std::make_shared<Pyramid>(pyramid_params, index_common_params);
         } else {
