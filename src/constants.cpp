@@ -84,7 +84,6 @@ const char* const HNSW_PARAMETER_USE_STATIC = "use_static";
 const char* const HNSW_PARAMETER_REVERSED_EDGES = "use_reversed_edges";
 const char* const HNSW_PARAMETER_SKIP_RATIO = "skip_ratio";
 
-
 const char* const PYRAMID_PARAMETER_BASE_CODES = "base_codes";
 
 const char* const INDEX_PARAM = "index_param";
