@@ -217,7 +217,8 @@ HGraph::EstimateMemory(uint64_t num_elements) const {
                                (static_cast<double>(this->bottom_graph_->maximum_degree_) / 2 + 1);
     estimate_memory += static_cast<uint64_t>(sparse_graph_memory);
 
-    auto other_memory = element_count * (sizeof(LabelType) + sizeof(std::shared_mutex));
+    auto other_memory = element_count * (sizeof(LabelType) + sizeof(std::shared_mutex) +
+                                         sizeof(std::shared_ptr<std::shared_mutex>));
     estimate_memory += other_memory;
 
     return estimate_memory;
@@ -758,7 +759,7 @@ HGraph::init_features() {
 
     // About Train
     auto name = this->basic_flatten_codes_->GetQuantizerName();
-    if (name != QUANTIZATION_TYPE_VALUE_FP32) {
+    if (name != QUANTIZATION_TYPE_VALUE_FP32 and name != QUANTIZATION_TYPE_VALUE_BF16) {
         feature_list_.SetFeature(IndexFeature::NEED_TRAIN);
     } else {
         feature_list_.SetFeature(IndexFeature::SUPPORT_CAL_DISTANCE_BY_ID);

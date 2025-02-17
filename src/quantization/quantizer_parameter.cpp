@@ -42,6 +42,9 @@ QuantizerParameter::GetQuantizerParameterByJson(const JsonType& json) {
     } else if (type_name == QUANTIZATION_TYPE_VALUE_SQ4_UNIFORM) {
         quantizer_param = std::make_shared<SQ4UniformQuantizerParameter>();
         quantizer_param->FromJson(json);
+    } else if (type_name == QUANTIZATION_TYPE_VALUE_BF16) {
+        quantizer_param = std::make_shared<BF16QuantizerParameter>();
+        quantizer_param->FromJson(json);
     } else {
         throw std::invalid_argument(fmt::format("invalid quantizer name {}", type_name));
     }

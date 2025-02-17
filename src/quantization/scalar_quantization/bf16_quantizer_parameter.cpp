@@ -13,10 +13,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#pragma once
-
 #include "bf16_quantizer_parameter.h"
-#include "sq4_quantizer_parameter.h"
-#include "sq4_uniform_quantizer_parameter.h"
-#include "sq8_quantizer_parameter.h"
-#include "sq8_uniform_quantizer_parameter.h"
+
+#include "inner_string_params.h"
+
+namespace vsag {
+
+BF16QuantizerParameter::BF16QuantizerParameter()
+    : QuantizerParameter(QUANTIZATION_TYPE_VALUE_BF16) {
+}
+
+void
+BF16QuantizerParameter::FromJson(const JsonType& json) {
+}
+
+JsonType
+BF16QuantizerParameter::ToJson() {
+    JsonType json;
+    json[QUANTIZATION_TYPE_KEY] = QUANTIZATION_TYPE_VALUE_BF16;
+    return json;
+}
+}  // namespace vsag
