@@ -29,6 +29,7 @@
 #include "hgraph_parameter.h"
 #include "index/index_common_param.h"
 #include "index_feature_list.h"
+#include "lock_strategy.h"
 #include "typing.h"
 #include "vsag/index.h"
 #include "vsag/index_features.h"
@@ -143,19 +144,6 @@ private:
                      const GraphInterfacePtr& graph,
                      const FlattenInterfacePtr& flatten,
                      InnerSearchParam& inner_search_param) const;
-
-    void
-    select_edges_by_heuristic(MaxHeap& edges,
-                              uint64_t max_size,
-                              const FlattenInterfacePtr& flatten);
-
-    InnerIdType
-    mutually_connect_new_element(InnerIdType cur_c,
-                                 MaxHeap& top_candidates,
-                                 GraphInterfacePtr graph,
-                                 FlattenInterfacePtr flatten,
-                                 bool is_update);
-
     void
     serialize_basic_info(StreamWriter& writer) const;
 
@@ -218,7 +206,7 @@ private:
 
     std::shared_ptr<hnswlib::VisitedListPool> pool_{nullptr};
 
-    mutable vsag::Vector<std::shared_mutex> neighbors_mutex_;
+    mutable MutexStrategyPtr neighbors_mutex_;
 
     std::unique_ptr<progschj::ThreadPool> build_pool_{nullptr};
     uint64_t build_thread_count_{100};
