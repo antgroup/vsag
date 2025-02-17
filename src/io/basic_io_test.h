@@ -33,19 +33,31 @@ TestBasicReadWrite(BasicIO<T>& io) {
     for (auto count : counts) {
         for (auto max_length : max_lengths) {
             auto vecs = fixtures::GenTestItems(count, max_length);
+            std::vector<uint64_t> offs, sizes;
+            uint64_t total_size = 0;
             for (auto& item : vecs) {
                 io.Write(item.data_, item.length_, item.start_);
+                offs.emplace_back(item.start_);
+                sizes.emplace_back(item.length_);
+                total_size += item.length_;
             }
+            std::vector<uint8_t> datas(total_size);
+            io.MultiRead(datas.data(), sizes.data(), offs.data(), count);
+            uint8_t* cur = datas.data();
             for (auto& item : vecs) {
                 std::vector<uint8_t> data(item.length_);
                 io.Read(item.length_, item.start_, data.data());
+                REQUIRE(memcmp(item.data_, data.data(), item.length_) == 0);
+
                 bool need_release = false;
                 const auto* ptr = io.Read(item.length_, item.start_, need_release);
-                REQUIRE(memcmp(data.data(), ptr, item.length_) == 0);
-                REQUIRE(memcmp(data.data(), item.data_, item.length_) == 0);
+                REQUIRE(memcmp(item.data_, ptr, item.length_) == 0);
                 if (need_release) {
                     io.Release(ptr);
                 }
+
+                REQUIRE(memcmp(item.data_, cur, item.length_) == 0);
+                cur += item.length_;
             }
         }
     }
