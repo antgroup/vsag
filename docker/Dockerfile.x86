@@ -20,4 +20,4 @@ RUN apt install -y clang-15 clangd-15 clang-format-15 python3-pip
 RUN ln -s /usr/bin/clang-format-15 /usr/bin/clang-format
 
 # install vsag deps
-RUN apt install -y python3-dev libomp-15-dev
+RUN apt install -y python3-dev libomp-15-dev libaio-dev
