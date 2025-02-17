@@ -30,6 +30,7 @@ using InnerIdType = uint32_t;  // inner id's type; index's vector count may less
 using LabelType = int64_t;     // external id's type
 
 using JsonType = nlohmann::json;  // alias for nlohmann::json type
+using BucketIdType = int32_t;
 
 template <typename T>
 using UnorderedSet =
