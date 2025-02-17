@@ -66,6 +66,8 @@ extern const char* const DISKANN_PARAMETER_GRAPH_TYPE;
 extern const char* const ODESCENT_PARAMETER_ALPHA;
 extern const char* const ODESCENT_PARAMETER_GRAPH_ITER_TURN;
 extern const char* const ODESCENT_PARAMETER_NEIGHBOR_SAMPLE_RATE;
+extern const char* const ODESCENT_PARAMETER_MIN_IN_DEGREE;
+extern const char* const ODESCENT_PARAMETER_BUILD_BLOCK_SIZE;
 extern const char* const DISKANN_GRAPH_TYPE_VAMANA;
 extern const char* const GRAPH_TYPE_ODESCENT;
 
