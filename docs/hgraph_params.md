@@ -34,7 +34,24 @@ The example of the `hgraph_json_string`.
     "hgraph_init_capacity": 100, /* optional, default is 100, means the initial capacity 
                                     when hgraph is created, not real size */
                                     
-    "build_thread_count": 100 /* optional, default is 100, means how much thread will be used for hgraph build */
+    "build_thread_count": 100, /* optional, default is 100, means how much thread will be used for hgraph build */
+    
+    "base_io_type": "block_memory_io", /* optional, default is 'block_memory_io', 
+                                          support "memory_io", "block_memory_io", "buffer_io"
+                                          means the io type for 'base_quantization' codes 
+                                          the "memory_io" and "block_memory_io" mean store in memory,
+                                          "buffer_io" means on local SSD or local disk. */
+                                        
+    "base_file_path": "./default_file_path", /* optional, default is "./default_file_path", 
+                                                means the filepath for 'base_quantization' codes storage,
+                                                the parameter is meaningless 
+                                                when base_io_type is "memory_io" or "block_memory_io" */
+                                                
+    "precise_io_type": "block_memory_io", /* optional, default is 'block_memory_io', 
+                                             same as "base_io_type", but for precise codes */
+                                             
+    "precise_file_path": "./default_file_path" /* optional, default is './default_file_path', 
+                                                  same as "base_file_path", but for precise codes */
   }
 }
 ```
