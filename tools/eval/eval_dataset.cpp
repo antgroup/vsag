@@ -79,7 +79,12 @@ EvalDataset::Load(const std::string& filename) {
         std::string metric;
         attr.read(str_type, metric);
         if (metric == "euclidean") {
-            obj->distance_func_ = vsag::L2Sqr;
+            // the distance in the ground truth (provided by public datasets), is L2 distance,
+            // which cannot be compared with L2Sqr distance (from VSAG) directly
+            obj->distance_func_ =
+                [](const void* query1, const void* query2, const void* qty_ptr) -> float {
+                return sqrt(vsag::L2Sqr(query1, query2, qty_ptr));
+            };
         } else if (metric == "ip") {
             if (obj->train_data_type_ == vsag::DATATYPE_FLOAT32) {
                 obj->distance_func_ = vsag::InnerProductDistance;
