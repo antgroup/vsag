@@ -171,7 +171,7 @@ TestComputer(
         need_normalize = false;
     }
     auto vecs = fixtures::generate_vectors(count, dim, need_normalize);
-    auto querys = fixtures::generate_vectors(query_count, dim, need_normalize, 165);
+    auto queries = fixtures::generate_vectors(query_count, dim, need_normalize, 165);
     if (retrain) {
         quant.ReTrain(vecs.data(), count);
     }
@@ -179,14 +179,14 @@ TestComputer(
     auto gt_func = [&](int base_idx, int query_idx) -> float {
         if constexpr (metric == vsag::MetricType::METRIC_TYPE_IP) {
             return 1 - InnerProduct(
-                           vecs.data() + base_idx * dim, querys.data() + query_idx * dim, &dim);
+                           vecs.data() + base_idx * dim, queries.data() + query_idx * dim, &dim);
         } else if constexpr (metric == vsag::MetricType::METRIC_TYPE_L2SQR) {
-            return L2Sqr(vecs.data() + base_idx * dim, querys.data() + query_idx * dim, &dim);
+            return L2Sqr(vecs.data() + base_idx * dim, queries.data() + query_idx * dim, &dim);
         } else if constexpr (metric == vsag::MetricType::METRIC_TYPE_COSINE) {
             std::vector<float> v1(dim);
             std::vector<float> v2(dim);
             Normalize(vecs.data() + base_idx * dim, v1.data(), dim);
-            Normalize(querys.data() + query_idx * dim, v2.data(), dim);
+            Normalize(queries.data() + query_idx * dim, v2.data(), dim);
             return 1 - InnerProduct(v1.data(), v2.data(), &dim);
         }
     };
@@ -194,14 +194,14 @@ TestComputer(
     for (int i = 0; i < query_count; ++i) {
         std::shared_ptr<Computer<T>> computer;
         computer = quant.FactoryComputer();
-        computer->SetQuery(querys.data() + i * dim);
+        computer->SetQuery(queries.data() + i * dim);
 
         // Test Compute One Dist;
         for (int j = 0; j < 100; ++j) {
             auto idx1 = random() % count;
             auto* codes1 = new uint8_t[quant.GetCodeSize()];
             quant.EncodeOne(vecs.data() + idx1 * dim, codes1);
-            float value = 0.0f;
+            float value = 0.0F;
             quant.ComputeDist(*computer, codes1, &value);
             REQUIRE(quant.ComputeDist(*computer, codes1) == value);
             auto gt = gt_func(idx1, i);
