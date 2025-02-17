@@ -84,3 +84,5 @@ PyramidSearchParameters::FromJson(const std::string& json_string) {
     return obj;
 }
 }  // namespace vsag
+
+// NOLINTEND(readability-simplify-boolean-expr)
