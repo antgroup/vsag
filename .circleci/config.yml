@@ -29,7 +29,7 @@ workflows:
 jobs:
   pull-request-check:
     docker:
-      - image: vsaglib/vsag:ubuntu
+      - image: vsaglib/vsag:ci-x86
     resource_class: medium+
     steps:
       - checkout
@@ -66,7 +66,7 @@ jobs:
 
   main-branch-check:
     docker:
-      - image: vsaglib/vsag:ubuntu
+      - image: vsaglib/vsag:ci-x86
     resource_class: medium+
     steps:
       - checkout
