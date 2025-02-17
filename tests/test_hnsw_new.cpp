@@ -280,7 +280,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex, "HNSW Merge", "[ft][hnsw]"
         vsag::Options::Instance().set_block_size_limit(size);
         auto param = GenerateHNSWBuildParametersString(metric_type, dim);
         auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
-        auto index = TestMergeIndex(name, param, dataset, 1, true);
+        auto index = TestMergeIndex(name, param, dataset, 5, true);
         TestKnnSearch(index, dataset, search_param, 0.99, true);
         TestRangeSearch(index, dataset, search_param, 0.49, 5, true);
         TestFilterSearch(index, dataset, search_param, 0.99, true);
