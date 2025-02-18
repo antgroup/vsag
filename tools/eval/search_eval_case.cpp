@@ -139,9 +139,9 @@ SearchEvalCase::do_knn_search() {
                 exit(-1);
             }
             const int64_t* neighbors = result.value()->GetIds();
-            float* ground_truth_distances = dataset_ptr_->GetDistances(i);
+            int64_t* ground_truth_neighbors = dataset_ptr_->GetNeighbors(i);
             auto record = std::make_tuple(
-                neighbors, ground_truth_distances, dataset_ptr_.get(), query_vector, topk);
+                neighbors, ground_truth_neighbors, dataset_ptr_.get(), query_vector, topk);
             monitor->Record(&record);
         }
         monitor->Stop();
