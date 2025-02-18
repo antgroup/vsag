@@ -37,7 +37,7 @@ public:
 
     static fixtures::TempDir dir;
 
-    constexpr static uint64_t base_count = 1000;
+    constexpr static uint64_t base_count = 1200;
 
     constexpr static const char* search_param_tmp = R"(
         {{
