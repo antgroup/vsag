@@ -99,12 +99,12 @@ void
 ODescent::init_graph(const GraphInterfacePtr graph_storage) {
     graph_.resize(data_num_, Linklist(allocator_));
     UnorderedMap<uint32_t, uint32_t> inner_ids_to_locs(allocator_);
-    std::function<uint32_t(uint32_t)> id_map = nullptr;
+    std::function<uint32_t(uint32_t)> id_map_func = nullptr;
     if (valid_ids_ != nullptr) {
         for (uint32_t i = 0; i < data_num_; ++i) {
             inner_ids_to_locs[valid_ids_[i]] = i;
         }
-        id_map = [&](uint32_t id) -> uint32_t { return inner_ids_to_locs[id]; };
+        id_map_func = [&](uint32_t id) -> uint32_t { return inner_ids_to_locs[id]; };
     }
     auto task = [&, this](int64_t start, int64_t end) {
         std::random_device rd;
@@ -132,7 +132,7 @@ ODescent::init_graph(const GraphInterfacePtr graph_storage) {
                     }
                 } else {
                     for (j = 0; j < edges.size(); ++j) {
-                        uint32_t neighbor_loc = id_map(edges[j]);
+                        uint32_t neighbor_loc = id_map_func(edges[j]);
                         graph_[i].neighbors.emplace_back(neighbor_loc,
                                                          get_distance(neighbor_loc, i));
                         ids_set.insert(neighbor_loc);
@@ -145,11 +145,11 @@ ODescent::init_graph(const GraphInterfacePtr graph_storage) {
                 uint32_t id = i;
                 if (data_num_ - 1 < max_degree_) {
                     id = (i + j + 1) % data_num_;
-                    while (ids_set.find(id) != ids_set.end() && ids_set.size() <= max_neighbors) {
+                    while (ids_set.find(id) != ids_set.end()) {
                         id = (id + 1) % data_num_;
                     }
                 } else {
-                    while (ids_set.find(id) != ids_set.end() && ids_set.size() <= max_neighbors) {
+                    while (ids_set.find(id) != ids_set.end()) {
                         id = k_generate(rng);
                     }
                 }
