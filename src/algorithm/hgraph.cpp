@@ -22,6 +22,7 @@
 
 #include "common.h"
 #include "data_cell/sparse_graph_datacell.h"
+#include "impl/pruning_strategy.h"
 #include "index/hgraph_index_zparameters.h"
 #include "logger.h"
 
@@ -58,12 +59,12 @@ HGraph::HGraph(const HGraphParameter& hgraph_param, const vsag::IndexCommonParam
       metric_(common_param.metric_),
       allocator_(common_param.allocator_.get()),
       label_lookup_(common_param.allocator_.get()),
-      neighbors_mutex_(0, common_param.allocator_.get()),
       route_graphs_(common_param.allocator_.get()),
       labels_(common_param.allocator_.get()),
       use_reorder_(hgraph_param.use_reorder_),
       ef_construct_(hgraph_param.ef_construction_),
       build_thread_count_(hgraph_param.build_thread_count_) {
+    neighbors_mutex_ = std::make_shared<PointsMutex>(0, common_param.allocator_.get());
     this->basic_flatten_codes_ =
         FlattenInterface::MakeInstance(hgraph_param.base_codes_param_, common_param);
     if (use_reorder_) {
@@ -404,7 +405,7 @@ HGraph::search_one_graph(const float* query,
 
         auto current_node_id = current_node_pair.second;
         {
-            std::shared_lock<std::shared_mutex> lock(neighbors_mutex_[current_node_id]);
+            SharedLock lock(neighbors_mutex_, current_node_id);
             graph->GetNeighbors(current_node_id, neighbors);
         }
         if (!neighbors.empty()) {
@@ -533,134 +534,6 @@ HGraph::RangeSearch(const DatasetPtr& query,
                               "[HGraph] failed to knn_search(invalid argument): ",
                               e.what());
     }
-}
-
-void
-HGraph::select_edges_by_heuristic(MaxHeap& edges,
-                                  uint64_t max_size,
-                                  const FlattenInterfacePtr& flatten) {
-    if (edges.size() < max_size) {
-        return;
-    }
-
-    MaxHeap queue_closest(allocator_);
-    vsag::Vector<std::pair<float, InnerIdType>> return_list(allocator_);
-    while (not edges.empty()) {
-        queue_closest.emplace(-edges.top().first, edges.top().second);
-        edges.pop();
-    }
-
-    while (not queue_closest.empty()) {
-        if (return_list.size() >= max_size) {
-            break;
-        }
-        std::pair<float, InnerIdType> curent_pair = queue_closest.top();
-        float float_query = -curent_pair.first;
-        queue_closest.pop();
-        bool good = true;
-
-        for (const auto& second_pair : return_list) {
-            float curdist = flatten->ComputePairVectors(second_pair.second, curent_pair.second);
-            if (curdist < float_query) {
-                good = false;
-                break;
-            }
-        }
-        if (good) {
-            return_list.emplace_back(curent_pair);
-        }
-    }
-
-    for (const auto& curent_pair : return_list) {
-        edges.emplace(-curent_pair.first, curent_pair.second);
-    }
-}
-
-InnerIdType
-HGraph::mutually_connect_new_element(InnerIdType cur_c,
-                                     MaxHeap& top_candidates,
-                                     GraphInterfacePtr graph,
-                                     FlattenInterfacePtr flatten,
-                                     bool is_update) {
-    const size_t max_size = graph->MaximumDegree();
-    this->select_edges_by_heuristic(top_candidates, max_size, flatten);
-    if (top_candidates.size() > max_size) {
-        throw std::runtime_error(
-            "Should be not be more than max_size candidates returned by the heuristic");
-    }
-
-    Vector<InnerIdType> selected_neighbors(allocator_);
-    selected_neighbors.reserve(max_size);
-    while (not top_candidates.empty()) {
-        selected_neighbors.emplace_back(top_candidates.top().second);
-        top_candidates.pop();
-    }
-
-    InnerIdType next_closest_entry_point = selected_neighbors.back();
-
-    {
-        // because during the addition the lock for cur_c is already acquired
-        std::unique_lock<std::shared_mutex> lock(neighbors_mutex_[cur_c], std::defer_lock);
-        if (is_update) {
-            lock.lock();
-        }
-        graph->InsertNeighborsById(cur_c, selected_neighbors);
-    }
-
-    for (auto selected_neighbor : selected_neighbors) {
-        std::lock_guard<std::shared_mutex> lock(neighbors_mutex_[selected_neighbor]);
-
-        Vector<InnerIdType> neighbors(allocator_);
-        graph->GetNeighbors(selected_neighbor, neighbors);
-
-        size_t sz_link_list_other = neighbors.size();
-
-        if (sz_link_list_other > max_size) {
-            throw std::runtime_error("Bad value of sz_link_list_other");
-        }
-        if (selected_neighbor == cur_c) {
-            throw std::runtime_error("Trying to connect an element to itself");
-        }
-
-        bool is_cur_c_present = false;
-        if (is_update) {
-            for (size_t j = 0; j < sz_link_list_other; j++) {
-                if (neighbors[j] == cur_c) {
-                    is_cur_c_present = true;
-                    break;
-                }
-            }
-        }
-
-        // If cur_c is already present in the neighboring connections of `selected_neighbors[idx]` then no need to modify any connections or run the heuristics.
-        if (!is_cur_c_present) {
-            if (sz_link_list_other < max_size) {
-                neighbors.emplace_back(cur_c);
-                graph->InsertNeighborsById(selected_neighbor, neighbors);
-            } else {
-                // finding the "weakest" element to replace it with the new one
-                float d_max = flatten->ComputePairVectors(cur_c, selected_neighbor);
-
-                MaxHeap candidates(allocator_);
-                candidates.emplace(d_max, cur_c);
-
-                for (size_t j = 0; j < sz_link_list_other; j++) {
-                    candidates.emplace(flatten->ComputePairVectors(neighbors[j], selected_neighbor),
-                                       neighbors[j]);
-                }
-
-                this->select_edges_by_heuristic(candidates, max_size, flatten);
-
-                Vector<InnerIdType> cand_neighbors(allocator_);
-                while (not candidates.empty()) {
-                    cand_neighbors.emplace_back(candidates.top().second);
-                    candidates.pop();
-                }
-                graph->InsertNeighborsById(selected_neighbor, cand_neighbors);
-            }
-        }
-    }
-    return next_closest_entry_point;
 }
 
 void
@@ -836,7 +709,7 @@ HGraph::add_one_point(const float* data, int level, InnerIdType inner_id) {
         .is_id_allowed_ = nullptr,
     };
 
-    std::lock_guard cur_lock(this->neighbors_mutex_[inner_id]);
+    LockGuard cur_lock(neighbors_mutex_, inner_id);
     auto flatten_codes = basic_flatten_codes_;
     if (use_reorder_) {
         flatten_codes = high_precise_codes_;
@@ -850,8 +723,8 @@ HGraph::add_one_point(const float* data, int level, InnerIdType inner_id) {
     for (auto j = level; j >= 0; --j) {
         if (route_graphs_[j]->TotalCount() != 0) {
             result = search_one_graph(data, route_graphs_[j], flatten_codes, param);
-            param.ep_ = this->mutually_connect_new_element(
-                inner_id, result, route_graphs_[j], flatten_codes, false);
+            param.ep_ = mutually_connect_new_element(
+                inner_id, result, route_graphs_[j], flatten_codes, neighbors_mutex_, allocator_);
         } else {
             route_graphs_[j]->InsertNeighborsById(inner_id, Vector<InnerIdType>(allocator_));
         }
@@ -859,8 +732,8 @@ HGraph::add_one_point(const float* data, int level, InnerIdType inner_id) {
     }
     if (bottom_graph_->TotalCount() != 0) {
         result = search_one_graph(data, this->bottom_graph_, flatten_codes, param);
-        this->mutually_connect_new_element(
-            inner_id, result, this->bottom_graph_, flatten_codes, false);
+        mutually_connect_new_element(
+            inner_id, result, this->bottom_graph_, flatten_codes, neighbors_mutex_, allocator_);
     } else {
         bottom_graph_->InsertNeighborsById(inner_id, Vector<InnerIdType>(allocator_));
     }
@@ -869,11 +742,11 @@ HGraph::add_one_point(const float* data, int level, InnerIdType inner_id) {
 
 void
 HGraph::resize(uint64_t new_size) {
-    auto cur_size = this->neighbors_mutex_.size();
+    auto cur_size = this->max_capacity_;
     uint64_t new_size_power_2 =
         next_multiple_of_power_of_two(new_size, this->resize_increase_count_bit_);
     if (cur_size < new_size_power_2) {
-        vsag::Vector<std::shared_mutex>(new_size_power_2, allocator_).swap(this->neighbors_mutex_);
+        this->neighbors_mutex_->Resize(new_size_power_2);
         pool_ = std::make_shared<hnswlib::VisitedListPool>(new_size_power_2, allocator_);
         labels_.resize(new_size_power_2);
         bottom_graph_->Resize(new_size_power_2);
