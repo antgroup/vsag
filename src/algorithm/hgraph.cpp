@@ -586,7 +586,8 @@ HGraph::Deserialize(StreamReader& reader) {
     for (uint64_t i = 0; i < this->max_level_; ++i) {
         this->route_graphs_[i]->Deserialize(reader);
     }
-    resize(max_capacity_);
+    this->neighbors_mutex_->Resize(max_capacity_);
+    pool_ = std::make_shared<hnswlib::VisitedListPool>(max_capacity_, allocator_);
 }
 
 void
