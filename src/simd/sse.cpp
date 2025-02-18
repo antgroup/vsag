@@ -82,6 +82,12 @@ __inline __m128i __attribute__((__always_inline__)) load_4_char(const uint8_t* d
 }
 #endif
 
+#if defined(ENABLE_SSE)
+__inline __m128i __attribute__((__always_inline__)) load_4_short(const uint16_t* data) {
+    return _mm_set_epi16(data[3], 0, data[2], 0, data[1], 0, data[0], 0);
+}
+#endif
+
 float
 FP32ComputeIP(const float* query, const float* codes, uint64_t dim) {
 #if defined(ENABLE_SSE)
@@ -128,6 +134,79 @@ FP32ComputeL2Sqr(const float* query, const float* codes, uint64_t dim) {
     return l2;
 #else
     return vsag::generic::FP32ComputeL2Sqr(query, codes, dim);
+#endif
+}
+
+float
+BF16ComputeIP(const uint8_t* query, const uint8_t* codes, uint64_t dim) {
+#if defined(ENABLE_SSE)
+    // Initialize the sum to 0
+    __m128 sum = _mm_setzero_ps();
+    const auto* query_bf16 = (const uint16_t*)(query);
+    const auto* codes_bf16 = (const uint16_t*)(codes);
+    // Process the data in 128-bit chunks
+    uint64_t i = 0;
+    for (; i + 3 < dim; i += 4) {
+        // Load data into registers
+        __m128i query_vec = load_4_short(query_bf16 + i);
+        __m128 query_float = _mm_castsi128_ps(query_vec);
+
+        // Load data into registers
+        __m128i code_vec = load_4_short(codes_bf16 + i);
+        __m128 code_float = _mm_castsi128_ps(code_vec);
+
+        __m128 mul = _mm_mul_ps(query_float, code_float);
+        sum = _mm_add_ps(sum, mul);
+    }
+
+    // Horizontal addition
+    sum = _mm_hadd_ps(sum, sum);
+    sum = _mm_hadd_ps(sum, sum);
+
+    // Extract the result from the register
+    alignas(16) float result[4];
+    _mm_store_ps(result, sum);
+
+    return result[0] + generic::BF16ComputeIP(query + i * 2, codes + i * 2, dim - i);
+#else
+    return generic::BF16ComputeIP(query, codes, dim);
+#endif
+}
+
+float
+BF16ComputeL2Sqr(const uint8_t* query, const uint8_t* codes, uint64_t dim) {
+#if defined(ENABLE_SSE)
+    // Initialize the sum to 0
+    __m128 sum = _mm_setzero_ps();
+    const auto* query_bf16 = (const uint16_t*)(query);
+    const auto* codes_bf16 = (const uint16_t*)(codes);
+
+    // Process the data in 128-bit chunks
+    uint64_t i = 0;
+    for (; i + 3 < dim; i += 4) {
+        // Load data into registers
+        __m128i query_vec = load_4_short(query_bf16 + i);
+        __m128 query_float = _mm_castsi128_ps(query_vec);
+
+        // Load data into registers
+        __m128i code_vec = load_4_short(codes_bf16 + i);
+        __m128 code_float = _mm_castsi128_ps(code_vec);
+
+        __m128 diff = _mm_sub_ps(code_float, query_float);
+        sum = _mm_add_ps(sum, _mm_mul_ps(diff, diff));
+    }
+
+    // Horizontal addition
+    sum = _mm_hadd_ps(sum, sum);
+    sum = _mm_hadd_ps(sum, sum);
+
+    // Extract the result from the register
+    alignas(16) float result[4];
+    _mm_store_ps(result, sum);
+
+    return result[0] + generic::BF16ComputeL2Sqr(query + i * 2, codes + i * 2, dim - i);
+#else
+    return generic::BF16ComputeL2Sqr(query, codes, dim);
 #endif
 }
 

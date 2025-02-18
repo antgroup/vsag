@@ -19,6 +19,7 @@
 #include <cstdlib>
 
 #include "basic_func.h"
+#include "bf16_simd.h"
 #include "fp32_simd.h"
 #include "normalize.h"
 #include "simd_status.h"

@@ -131,6 +131,101 @@ FP32ComputeL2Sqr(const float* query, const float* codes, uint64_t dim) {
 #endif
 }
 
+#if defined(ENABLE_AVX512)
+__inline __m512i __attribute__((__always_inline__)) load_16_short(const uint16_t* data) {
+    return _mm512_set_epi16(data[15],
+                            0,
+                            data[14],
+                            0,
+                            data[13],
+                            0,
+                            data[12],
+                            0,
+                            data[11],
+                            0,
+                            data[10],
+                            0,
+                            data[9],
+                            0,
+                            data[8],
+                            0,
+                            data[7],
+                            0,
+                            data[6],
+                            0,
+                            data[5],
+                            0,
+                            data[4],
+                            0,
+                            data[3],
+                            0,
+                            data[2],
+                            0,
+                            data[1],
+                            0,
+                            data[0],
+                            0);
+}
+#endif
+
+float
+BF16ComputeIP(const uint8_t* query, const uint8_t* codes, uint64_t dim) {
+#if defined(ENABLE_AVX512)
+    // Initialize the sum to 0
+    __m512 sum = _mm512_setzero_ps();
+    const auto* query_bf16 = (const uint16_t*)(query);
+    const auto* codes_bf16 = (const uint16_t*)(codes);
+
+    // Process the data in 128-bit chunks
+    uint64_t i = 0;
+    for (; i + 15 < dim; i += 16) {
+        // Load data into registers
+        __m512i query_shift = load_16_short(query_bf16 + i);
+        __m512 query_float = _mm512_castsi512_ps(query_shift);
+
+        // Load data into registers
+        __m512i code_shift = load_16_short(codes_bf16 + i);
+        __m512 code_float = _mm512_castsi512_ps(code_shift);
+
+        sum = _mm512_fmadd_ps(code_float, query_float, sum);
+    }
+    float ip = _mm512_reduce_add_ps(sum);
+
+    return ip + avx2::BF16ComputeIP(query + i * 2, codes + i * 2, dim - i);
+#else
+    return avx2::BF16ComputeIP(query, codes, dim);
+#endif
+}
+
+float
+BF16ComputeL2Sqr(const uint8_t* query, const uint8_t* codes, uint64_t dim) {
+#if defined(ENABLE_AVX512)
+    // Initialize the sum to 0
+    __m512 sum = _mm512_setzero_ps();
+    const auto* query_bf16 = (const uint16_t*)(query);
+    const auto* codes_bf16 = (const uint16_t*)(codes);
+
+    // Process the data in 128-bit chunks
+    uint64_t i = 0;
+    for (; i + 15 < dim; i += 16) {
+        // Load data into registers
+        __m512i query_shift = load_16_short(query_bf16 + i);
+        __m512 query_float = _mm512_castsi512_ps(query_shift);
+
+        // Load data into registers
+        __m512i code_shift = load_16_short(codes_bf16 + i);
+        __m512 code_float = _mm512_castsi512_ps(code_shift);
+
+        __m512 diff = _mm512_sub_ps(code_float, query_float);
+        sum = _mm512_fmadd_ps(diff, diff, sum);
+    }
+    float l2 = _mm512_reduce_add_ps(sum);
+
+    return l2 + avx2::BF16ComputeL2Sqr(query + i * 2, codes + i * 2, dim - i);
+#else
+    return avx2::BF16ComputeL2Sqr(query, codes, dim);
+#endif
+}
 float
 SQ8ComputeIP(const float* query,
              const uint8_t* codes,

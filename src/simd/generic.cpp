@@ -95,6 +95,48 @@ FP32ComputeL2Sqr(const float* query, const float* codes, uint64_t dim) {
     return result;
 }
 
+union FP32Struct {
+    uint32_t int_value;
+    float float_value;
+};
+
+float
+BF16ToFloat(const uint16_t bf16_value) {
+    FP32Struct fp32;
+    fp32.int_value = (static_cast<uint32_t>(bf16_value) << 16);
+    return fp32.float_value;
+}
+
+uint16_t
+FloatToBF16(const float fp32_value) {
+    FP32Struct fp32;
+    fp32.float_value = fp32_value;
+    return static_cast<uint16_t>((fp32.int_value + 0x8000) >> 16);
+}
+
+float
+BF16ComputeIP(const uint8_t* query, const uint8_t* codes, uint64_t dim) {
+    float result = 0.0f;
+    auto* query_bf16 = reinterpret_cast<const uint16_t*>(query);
+    auto* codes_bf16 = reinterpret_cast<const uint16_t*>(codes);
+    for (uint64_t i = 0; i < dim; ++i) {
+        result += BF16ToFloat(query_bf16[i]) * BF16ToFloat(codes_bf16[i]);
+    }
+    return result;
+}
+
+float
+BF16ComputeL2Sqr(const uint8_t* query, const uint8_t* codes, uint64_t dim) {
+    float result = 0.0f;
+    auto* query_bf16 = reinterpret_cast<const uint16_t*>(query);
+    auto* codes_bf16 = reinterpret_cast<const uint16_t*>(codes);
+    for (uint64_t i = 0; i < dim; ++i) {
+        auto val = BF16ToFloat(query_bf16[i]) - BF16ToFloat(codes_bf16[i]);
+        result += val * val;
+    }
+    return result;
+}
+
 float
 SQ8ComputeIP(const float* query,
              const uint8_t* codes,
