@@ -22,8 +22,6 @@
 #include "prefetch.h"
 namespace hnswlib {
 
-constexpr float BRUTE_FORCE_RATIO = 0.03f;
-
 HierarchicalNSW::HierarchicalNSW(SpaceInterface* s,
                                  size_t max_elements,
                                  vsag::Allocator* allocator,
@@ -1434,10 +1432,6 @@ HierarchicalNSW::searchKnn(const void* query_data,
     }
     if (currObj > cur_element_count_) {
         return result;
-    }
-
-    if (is_id_allowed && is_id_allowed->ValidRatio() < BRUTE_FORCE_RATIO) {
-        return bruteForce(query_data, k, is_id_allowed);
     }
 
     float curdist = fstdistfunc_(query_data, getDataByInternalId(currObj), dist_func_param_);
