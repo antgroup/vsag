@@ -25,23 +25,27 @@
 
 namespace vsag {
 
+enum InnerSearchMode { KNN_SEARCH = 1, RANGE_SEARCH = 2 };
+
 class InnerSearchParam {
 public:
-    int topk_{0};
-    float radius_{0.0f};
-    InnerIdType ep_{0};
-    uint64_t ef_{10};
-    BaseFilterFunctor* is_id_allowed_{nullptr};
+    int topk{0};
+    float radius{0.0f};
+    InnerIdType ep{0};
+    uint64_t ef{10};
+    FilterPtr is_inner_id_allowed{nullptr};
+    InnerSearchMode search_mode{KNN_SEARCH};
+    int range_search_limit_size{-1};
 };
 
 class BasicSearcher {
 public:
-    BasicSearcher(const IndexCommonParam& common_param);
+    explicit BasicSearcher(const IndexCommonParam& common_param);
 
     virtual MaxHeap
-    Search(const GraphInterfacePtr& graph_data_cell,
-           const FlattenInterfacePtr& vector_data_cell,
-           const std::shared_ptr<VisitedList>& vl,
+    Search(const GraphInterfacePtr& graph,
+           const FlattenInterfacePtr& flatten,
+           const VisitedListPtr& vl,
            const float* query,
            const InnerSearchParam& inner_search_param) const;
 
@@ -49,11 +53,19 @@ private:
     // rid means the neighbor's rank (e.g., the first neighbor's rid == 0)
     //  id means the neighbor's  id  (e.g., the first neighbor's  id == 12345)
     uint32_t
-    visit(const GraphInterfacePtr& graph_data_cell,
-          const std::shared_ptr<VisitedList>& vl,
+    visit(const GraphInterfacePtr& graph,
+          const VisitedListPtr& vl,
           const std::pair<float, uint64_t>& current_node_pair,
           Vector<InnerIdType>& to_be_visited_rid,
           Vector<InnerIdType>& to_be_visited_id) const;
+
+    template <InnerSearchMode mode = KNN_SEARCH>
+    MaxHeap
+    search_impl(const GraphInterfacePtr& graph,
+                const FlattenInterfacePtr& flatten,
+                const VisitedListPtr& vl,
+                const float* query,
+                const InnerSearchParam& inner_search_param) const;
 
 private:
     Allocator* allocator_{nullptr};

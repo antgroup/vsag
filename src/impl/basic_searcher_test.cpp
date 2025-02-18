@@ -72,7 +72,7 @@ private:
     std::shared_ptr<hnswlib::HierarchicalNSW> alg_hnsw_;
 };
 
-TEST_CASE("basic usage for graph data cell (adapter of hnsw)", "[ut][GraphDataCell]") {
+TEST_CASE("Basic Usage for GraphDataCell (adapter of hnsw)", "[ut][GraphDataCell]") {
     uint32_t M = 32;
     uint32_t data_size = 1000;
     uint32_t ef_construction = 100;
@@ -115,7 +115,7 @@ TEST_CASE("basic usage for graph data cell (adapter of hnsw)", "[ut][GraphDataCe
     }
 }
 
-TEST_CASE("search with alg_hnsw", "[ut][basic_searcher]") {
+TEST_CASE("Search with HNSW", "[ut][BasicSearcher]") {
     // data attr
     uint32_t base_size = 1000;
     uint32_t query_size = 100;
@@ -176,58 +176,97 @@ TEST_CASE("search with alg_hnsw", "[ut][basic_searcher]") {
     vector_data_cell->Train(base_vectors.data(), base_size);
     vector_data_cell->BatchInsertVector(base_vectors.data(), base_size, ids.data());
 
-    // search param
-    InnerSearchParam search_param;
-    search_param.ep_ = fixed_entry_point_id;
-    search_param.ef_ = ef_search;
-    search_param.topk_ = k;
-    search_param.is_id_allowed_ = nullptr;
     auto init_size = 10;
     auto pool = std::make_shared<VisitedListPool>(
         init_size, allocator.get(), vector_data_cell->TotalCount(), allocator.get());
 
-    // init searcher
-    auto searcher = std::make_shared<BasicSearcher>(common);
-    {
-        // search with empty graph_data_cell
-        auto vl = pool->TakeOne();
-        auto failed_without_vector =
-            searcher->Search(graph_data_cell, nullptr, vl, base_vectors.data(), search_param);
-        pool->ReturnOne(vl);
-        REQUIRE(failed_without_vector.size() == 0);
-    }
-    {
-        // search with empty vector_data_cell
-        auto vl = pool->TakeOne();
-        auto failed_without_graph =
-            searcher->Search(nullptr, vector_data_cell, vl, base_vectors.data(), search_param);
-        pool->ReturnOne(vl);
-        REQUIRE(failed_without_graph.size() == 0);
-    }
+    auto exception_func = [&](const InnerSearchParam& search_param) -> void {
+        // init searcher
+        auto searcher = std::make_shared<BasicSearcher>(common);
+        {
+            // search with empty graph_data_cell
+            auto vl = pool->TakeOne();
+            auto failed_without_vector =
+                searcher->Search(graph_data_cell, nullptr, vl, base_vectors.data(), search_param);
+            pool->ReturnOne(vl);
+            REQUIRE(failed_without_vector.size() == 0);
+        }
+        {
+            // search with empty vector_data_cell
+            auto vl = pool->TakeOne();
+            auto failed_without_graph =
+                searcher->Search(nullptr, vector_data_cell, vl, base_vectors.data(), search_param);
+            pool->ReturnOne(vl);
+            REQUIRE(failed_without_graph.size() == 0);
+        }
+    };
 
-    for (int i = 0; i < query_size; i++) {
-        std::unordered_set<InnerIdType> valid_set, set;
-        auto vl = pool->TakeOne();
-        auto result = searcher->Search(
-            graph_data_cell, vector_data_cell, vl, base_vectors.data() + i * dim, search_param);
-        pool->ReturnOne(vl);
-        auto valid_result = alg_hnsw->searchBaseLayerST<false, false>(
-            fixed_entry_point_id, base_vectors.data() + i * dim, ef_search, nullptr);
-        REQUIRE(result.size() == valid_result.size());
+    auto filter_func = [](LabelType id) -> bool { return id % 2 == 0; };
+    float range = 0.1F;
+    auto f = std::make_shared<UniqueFilter>(filter_func);
 
-        for (int j = 0; j < k - 1; j++) {
-            valid_set.insert(valid_result.top().second);
-            set.insert(result.top().second);
-            result.pop();
-            valid_result.pop();
+    // search param
+    InnerSearchParam search_param_temp;
+    search_param_temp.ep = fixed_entry_point_id;
+    search_param_temp.ef = ef_search;
+    search_param_temp.topk = k;
+    search_param_temp.is_inner_id_allowed = nullptr;
+    search_param_temp.radius = range;
+
+    std::vector<InnerSearchParam> params(4);
+    params[0] = search_param_temp;
+    params[1] = search_param_temp;
+    params[1].is_inner_id_allowed = f;
+    params[2] = search_param_temp;
+    params[2].search_mode = RANGE_SEARCH;
+    params[3] = params[2];
+    params[3].is_inner_id_allowed = f;
+
+    for (const auto& search_param : params) {
+        exception_func(search_param);
+        auto searcher = std::make_shared<BasicSearcher>(common);
+        for (int i = 0; i < query_size; i++) {
+            std::unordered_set<InnerIdType> valid_set, set;
+            auto vl = pool->TakeOne();
+            auto result = searcher->Search(
+                graph_data_cell, vector_data_cell, vl, base_vectors.data() + i * dim, search_param);
+            pool->ReturnOne(vl);
+            auto result_size = result.size();
+            for (int j = 0; j < result_size; j++) {
+                set.insert(result.top().second);
+                result.pop();
+            }
+            if (search_param.search_mode == KNN_SEARCH) {
+                auto valid_result =
+                    alg_hnsw->searchBaseLayerST<false, false>(fixed_entry_point_id,
+                                                              base_vectors.data() + i * dim,
+                                                              ef_search,
+                                                              search_param.is_inner_id_allowed);
+                REQUIRE(result_size == valid_result.size());
+                for (int j = 0; j < result_size; j++) {
+                    valid_set.insert(valid_result.top().second);
+                    valid_result.pop();
+                }
+            } else if (search_param.search_mode == RANGE_SEARCH) {
+                auto valid_result =
+                    alg_hnsw->searchBaseLayerST<false, false>(fixed_entry_point_id,
+                                                              base_vectors.data() + i * dim,
+                                                              range,
+                                                              ef_search,
+                                                              search_param.is_inner_id_allowed);
+                REQUIRE(result_size == valid_result.size());
+                for (int j = 0; j < result_size; j++) {
+                    valid_set.insert(valid_result.top().second);
+                    valid_result.pop();
+                }
+            }
+
+            for (auto id : set) {
+                REQUIRE(valid_set.count(id) > 0);
+            }
+            for (auto id : valid_set) {
+                REQUIRE(set.count(id) > 0);
+            }
         }
-        for (auto id : set) {
-            REQUIRE(valid_set.find(id) != valid_set.end());
-        }
-        for (auto id : valid_set) {
-            REQUIRE(set.find(id) != set.end());
-        }
-        REQUIRE(result.top().second == valid_result.top().second);
-        REQUIRE(result.top().second == ids[i]);
     }
 }

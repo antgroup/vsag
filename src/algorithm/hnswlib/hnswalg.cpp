@@ -1576,4 +1576,11 @@ HierarchicalNSW::searchBaseLayerST<false, false>(InnerIdType ep_id,
                                                  size_t ef,
                                                  const vsag::FilterPtr is_id_allowed,
                                                  const float skip_ratio) const;
+
+template MaxHeap
+HierarchicalNSW::searchBaseLayerST<false, false>(InnerIdType ep_id,
+                                                 const void* data_point,
+                                                 float radius,
+                                                 int64_t ef,
+                                                 const vsag::FilterPtr is_id_allowed) const;
 }  // namespace hnswlib
