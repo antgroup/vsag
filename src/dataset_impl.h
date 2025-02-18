@@ -35,7 +35,7 @@ class DatasetImpl : public Dataset {
                              const int8_t*,
                              const int64_t*,
                              const std::string*,
-                             struct SparseVectors>;
+                             const struct SparseVector*>;
 
 public:
     DatasetImpl() = default;
@@ -52,9 +52,11 @@ public:
             allocator_->Deallocate((void*)this->GetFloat32Vectors());
             allocator_->Deallocate((void*)this->GetPaths());
 
-            allocator_->Deallocate((void*)this->GetSparseVectors().offsets);
-            allocator_->Deallocate((void*)this->GetSparseVectors().ids);
-            allocator_->Deallocate((void*)this->GetSparseVectors().vals);
+            for (int i = 0; i < this->GetNumElements(); i++) {
+                allocator_->Deallocate((void*)this->GetSparseVector()[i].ids_);
+                allocator_->Deallocate((void*)this->GetSparseVector()[i].vals_);
+            }
+            allocator_->Deallocate((void*)this->GetSparseVector());
         } else {
             delete[] this->GetIds();
             delete[] this->GetDistances();
@@ -62,9 +64,11 @@ public:
             delete[] this->GetFloat32Vectors();
             delete[] this->GetPaths();
 
-            delete[] this->GetSparseVectors().offsets;
-            delete[] this->GetSparseVectors().ids;
-            delete[] this->GetSparseVectors().vals;
+            for (int i = 0; i < this->GetNumElements(); i++) {
+                delete[] this->GetSparseVector()[i].ids_;
+                delete[] this->GetSparseVector()[i].vals_;
+            }
+            delete[] this->GetSparseVector();
         }
     }
 
@@ -178,19 +182,18 @@ public:
     }
 
     DatasetPtr
-    SparseVectors(const struct SparseVectors sparse_vectors) override {
+    SparseVector(const struct SparseVector* sparse_vectors) override {
         this->data_[SPARSE_VECTORS] = sparse_vectors;
         return shared_from_this();
     }
 
-    const struct SparseVectors
-    GetSparseVectors() const override {
+    const struct SparseVector*
+    GetSparseVector() const override {
         if (auto iter = this->data_.find(SPARSE_VECTORS); iter != this->data_.end()) {
-            return std::get<struct SparseVectors>(iter->second);
+            return std::get<const struct SparseVector*>(iter->second);
         }
 
-        struct SparseVectors null_sparse_vectors;
-        return null_sparse_vectors;
+        return nullptr;
     }
 
     DatasetPtr

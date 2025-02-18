@@ -43,8 +43,28 @@ TEST_CASE("Dataset Implement Test", "[ut][dataset]") {
     }
 
     SECTION("sparse vector") {
+        uint32_t size = 100;
+        uint32_t max_dim = 256;
+        uint32_t max_id = 1000000;
+        float min_val = -100;
+        float max_val = 100;
+
+        // generate data
+        std::vector<vsag::SparseVector> sparse_vectors =
+            fixtures::GenerateSparseVectors(size, max_dim, max_id, min_val, max_val);
         auto dataset = vsag::Dataset::Make();
-        vsag::SparseVectors sparse_vectors = fixtures::GenerateSparseVectors(100);
-        dataset->SparseVectors(sparse_vectors)->Owner(true);
+        dataset->SparseVector(fixtures::CopyVector(sparse_vectors))->NumElements(size)->Owner(true);
+
+        // validate data
+        auto* sparse_vectors_ptr = dataset->GetSparseVector();
+        for (int i = 0; i < dataset->GetNumElements(); i++) {
+            uint32_t dim = sparse_vectors_ptr[i].dim_;
+            REQUIRE(dim < max_dim);
+            for (int d = 0; d < dim; d++) {
+                REQUIRE(sparse_vectors_ptr[i].ids_[d] < max_id);
+                REQUIRE(min_val < sparse_vectors_ptr[i].vals_[d]);
+                REQUIRE(sparse_vectors_ptr[i].vals_[d] < max_val);
+            }
+        }
     }
 }

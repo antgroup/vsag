@@ -51,30 +51,23 @@ get_common_used_dims(uint64_t count, int seed) {
     return result;
 }
 
-vsag::SparseVectors
-GenerateSparseVectors(uint32_t count, uint32_t dim_limit, int seed) {
+std::vector<vsag::SparseVector>
+GenerateSparseVectors(
+    uint32_t count, uint32_t max_dim, uint32_t max_id, float min_val, float max_val, int seed) {
     std::mt19937 rng(seed);
-    std::uniform_real_distribution<float> distrib_real;
-    std::uniform_int_distribution<int> distrib_int(0, dim_limit);
+    std::uniform_real_distribution<float> distrib_real(min_val, max_val);
+    std::uniform_int_distribution<int> distrib_dim(0, max_dim);
+    std::uniform_int_distribution<int> distrib_id(0, max_id);
 
-    vsag::SparseVectors sparse_vectors;
-    sparse_vectors.num = count;
-    sparse_vectors.offsets = new uint32_t[count + 1];
+    std::vector<vsag::SparseVector> sparse_vectors(count);
 
-    uint32_t offset = 0;
-    sparse_vectors.offsets[0] = offset;
-    for (int i = 0; i < sparse_vectors.num; i++) {
-        offset += distrib_int(rng);
-        sparse_vectors.offsets[i + 1] = offset;
-    }
-
-    sparse_vectors.ids = new uint32_t[sparse_vectors.offsets[count]];
-    sparse_vectors.vals = new float[sparse_vectors.offsets[count]];
-
-    for (uint32_t i = 0; i < sparse_vectors.num; i++) {
-        for (uint32_t j = sparse_vectors.offsets[i]; j < sparse_vectors.offsets[i + 1]; j++) {
-            sparse_vectors.ids[j] = distrib_int(rng);
-            sparse_vectors.vals[j] = distrib_real(rng);
+    for (int i = 0; i < count; i++) {
+        sparse_vectors[i].dim_ = distrib_dim(rng);
+        sparse_vectors[i].ids_ = new uint32_t[sparse_vectors[i].dim_];
+        sparse_vectors[i].vals_ = new float[sparse_vectors[i].dim_];
+        for (int d = 0; d < sparse_vectors[i].dim_; d++) {
+            sparse_vectors[i].ids_[d] = distrib_id(rng);
+            sparse_vectors[i].vals_[d] = distrib_real(rng);
         }
     }
 
@@ -292,14 +285,6 @@ GenTestItems(uint64_t count, uint64_t max_length, uint64_t max_index) {
         auto vec = fixtures::generate_vectors(1, max_length, false, random());
         memcpy(item.data_, vec.data(), item.length_);
     }
-    return result;
-}
-
-template <typename T>
-static T*
-CopyVector(const std::vector<T>& vec) {
-    auto result = new T[vec.size()];
-    memcpy(result, vec.data(), vec.size() * sizeof(T));
     return result;
 }
 
