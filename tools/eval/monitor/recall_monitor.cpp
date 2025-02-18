@@ -62,16 +62,18 @@ RecallMonitor::GetResult() {
 }
 void
 RecallMonitor::Record(void* input) {
-    auto [neighbors, gt_distances, dataset, query_data, topk] =
-        *(reinterpret_cast<std::tuple<int64_t*, float*, EvalDataset*, const void*, uint64_t>*>(
+    auto [neighbors, gt_neighbors, dataset, query_data, topk] =
+        *(reinterpret_cast<std::tuple<int64_t*, int64_t*, EvalDataset*, const void*, uint64_t>*>(
             input));
     size_t dim = dataset->GetDim();
     auto distance_func = dataset->GetDistanceFunc();
+    auto gt_distances = std::shared_ptr<float[]>(new float[topk]);
     auto distances = std::shared_ptr<float[]>(new float[topk]);
     for (int i = 0; i < topk; ++i) {
         distances[i] = distance_func(query_data, dataset->GetOneTrain(neighbors[i]), &dim);
+        gt_distances[i] = distance_func(query_data, dataset->GetOneTrain(gt_neighbors[i]), &dim);
     }
-    auto val = get_recall(distances.get(), gt_distances, topk, topk);
+    auto val = get_recall(distances.get(), gt_distances.get(), topk, topk);
     this->recall_records_.emplace_back(val);
 }
 void
