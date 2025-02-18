@@ -35,7 +35,7 @@ class DatasetImpl : public Dataset {
                              const int8_t*,
                              const int64_t*,
                              const std::string*,
-                             const struct SparseVector*>;
+                             SparseVectorPtr>;
 
 public:
     DatasetImpl() = default;
@@ -182,15 +182,15 @@ public:
     }
 
     DatasetPtr
-    SparseVector(const struct SparseVector* sparse_vectors) override {
+    SparseVector(const SparseVectorPtr sparse_vectors) override {
         this->data_[SPARSE_VECTORS] = sparse_vectors;
         return shared_from_this();
     }
 
-    const struct SparseVector*
+    const SparseVectorPtr
     GetSparseVector() const override {
         if (auto iter = this->data_.find(SPARSE_VECTORS); iter != this->data_.end()) {
-            return std::get<const struct SparseVector*>(iter->second);
+            return std::get<SparseVectorPtr>(iter->second);
         }
 
         return nullptr;
