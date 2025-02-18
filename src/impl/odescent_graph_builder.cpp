@@ -115,7 +115,7 @@ ODescent::init_graph(const GraphInterfacePtr graph_storage) {
             ids_set.insert(i);
             graph_[i].neighbors.reserve(max_degree_);
             // extract graph from graph_storage
-            size_t j = 0;
+            size_t valid_id_count = 0;
             if (graph_storage != nullptr) {
                 Vector<InnerIdType> edges(allocator_);
                 InnerIdType id = i;
@@ -124,15 +124,15 @@ ODescent::init_graph(const GraphInterfacePtr graph_storage) {
                 }
                 graph_storage->GetNeighbors(id, edges);
                 if (valid_ids_ == nullptr) {
-                    for (j = 0; j < edges.size(); ++j) {
-                        uint32_t neighbor_loc = edges[j];
+                    for (valid_id_count = 0; valid_id_count < edges.size(); ++valid_id_count) {
+                        uint32_t neighbor_loc = edges[valid_id_count];
                         graph_[i].neighbors.emplace_back(neighbor_loc,
                                                          get_distance(neighbor_loc, i));
                         ids_set.insert(neighbor_loc);
                     }
                 } else {
-                    for (j = 0; j < edges.size(); ++j) {
-                        uint32_t neighbor_loc = id_map_func(edges[j]);
+                    for (valid_id_count = 0; valid_id_count < edges.size(); ++valid_id_count) {
+                        uint32_t neighbor_loc = id_map_func(edges[valid_id_count]);
                         graph_[i].neighbors.emplace_back(neighbor_loc,
                                                          get_distance(neighbor_loc, i));
                         ids_set.insert(neighbor_loc);
@@ -141,10 +141,10 @@ ODescent::init_graph(const GraphInterfacePtr graph_storage) {
             }
             // fill with random points
             int64_t max_neighbors = std::min(data_num_ - 1, max_degree_);
-            for (; j < max_neighbors; ++j) {
+            for (; valid_id_count < max_neighbors; ++valid_id_count) {
                 uint32_t id = i;
                 if (data_num_ - 1 < max_degree_) {
-                    id = (i + j + 1) % data_num_;
+                    id = (i + valid_id_count + 1) % data_num_;
                     while (ids_set.find(id) != ids_set.end()) {
                         id = (id + 1) % data_num_;
                     }
