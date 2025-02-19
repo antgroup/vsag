@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "buffer_io.h"
+#include "async_io.h"
 
 #include <catch2/catch_test_macros.hpp>
 #include <memory>
@@ -23,21 +23,21 @@
 
 using namespace vsag;
 
-TEST_CASE("BufferIO Read & Write", "[ut][BufferIO]") {
-    fixtures::TempDir dir("buffer_io");
+TEST_CASE("AsyncIO Read And Write", "[ut][AsyncIO]") {
+    fixtures::TempDir dir("async_io");
     auto path = dir.GenerateRandomFile();
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
-    auto io = std::make_unique<BufferIO>(path, allocator.get());
+    auto io = std::make_unique<AsyncIO>(path, allocator.get());
     TestBasicReadWrite(*io);
 }
 
-TEST_CASE("BufferIO Parameter", "[ut][BufferIO]") {
-    fixtures::TempDir dir("buffer_io");
+TEST_CASE("AsyncIO Parameter", "[ut][AsyncIO]") {
+    fixtures::TempDir dir("async_io");
     auto path = dir.GenerateRandomFile();
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
-    constexpr static const char* param_str = R"(
+    std::string param_str = R"(
     {{
-        "type": "buffer_io",
+        "type": "async_io",
         "file_path" : "{}"
     }}
     )";
@@ -45,16 +45,16 @@ TEST_CASE("BufferIO Parameter", "[ut][BufferIO]") {
     auto io_param = IOParameter::GetIOParameterByJson(json);
     IndexCommonParam common_param;
     common_param.allocator_ = allocator;
-    auto io = std::make_unique<BufferIO>(io_param, common_param);
+    auto io = std::make_unique<AsyncIO>(io_param, common_param);
     TestBasicReadWrite(*io);
 }
 
-TEST_CASE("BufferIO Serialize & Deserialize", "[ut][BufferIO]") {
+TEST_CASE("AsyncIO Serialize & Deserialize", "[ut][AsyncIO]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
-    fixtures::TempDir dir("buffer_io");
+    fixtures::TempDir dir("async_io");
     auto path1 = dir.GenerateRandomFile();
     auto path2 = dir.GenerateRandomFile();
-    auto wio = std::make_unique<BufferIO>(path1, allocator.get());
-    auto rio = std::make_unique<BufferIO>(path2, allocator.get());
+    auto wio = std::make_unique<AsyncIO>(path1, allocator.get());
+    auto rio = std::make_unique<AsyncIO>(path2, allocator.get());
     TestSerializeAndDeserialize(*wio, *rio);
 }
