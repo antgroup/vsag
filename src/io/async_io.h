@@ -127,12 +127,6 @@ public:
         int64_t all_count = count;
         while (all_count > 0) {
             count = std::min(IOContext::DEFAULT_REQUEST_COUNT, all_count);
-
-            context->Reset();
-            if (io_setup(count, &(context->ctx_)) < 0) {
-                io_context_pool->ReturnOne(context);
-                throw std::runtime_error("io setup failed");
-            }
             auto* cb = context->cb_;
             std::vector<DirectIOObject> objs(count);
             for (int64_t i = 0; i < count; ++i) {

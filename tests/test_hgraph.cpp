@@ -47,11 +47,13 @@ public:
         }})";
 
     const std::vector<std::pair<std::string, float>> test_cases = {
-        {"sq8_uniform,fp32,buffer_io", 0.98},
-        {"sq8_uniform,fp32", 0.98},
         {"sq8", 0.95},
         {"fp32", 0.99},
-        {"sq8_uniform", 0.95}};
+        {"sq8_uniform", 0.95},
+        {"sq8_uniform,fp32", 0.98},
+        {"sq8_uniform,fp32,buffer_io", 0.98},
+        {"sq8_uniform,fp32,async_io", 0.98},
+    };
 };
 
 TestDatasetPool HgraphTestIndex::pool{};
@@ -118,6 +120,7 @@ HgraphTestIndex::GenerateHGraphBuildParametersString(const std::string& metric_t
         build_parameters_str =
             fmt::format(parameter_temp_origin, metric_type, dim, base_quantizer_str, thread_count);
     }
+    INFO(build_parameters_str);
     return build_parameters_str;
 }
 }  // namespace fixtures
