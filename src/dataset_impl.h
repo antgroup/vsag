@@ -35,7 +35,7 @@ class DatasetImpl : public Dataset {
                              const int8_t*,
                              const int64_t*,
                              const std::string*,
-                             SparseVectorPtr>;
+                             const SparseVector*>;
 
 public:
     DatasetImpl() = default;
@@ -52,11 +52,14 @@ public:
             allocator_->Deallocate((void*)this->GetFloat32Vectors());
             allocator_->Deallocate((void*)this->GetPaths());
 
-            for (int i = 0; i < this->GetNumElements(); i++) {
-                allocator_->Deallocate((void*)this->GetSparseVector()[i].ids_);
-                allocator_->Deallocate((void*)this->GetSparseVector()[i].vals_);
+            if (this->GetSparseVectors()) {
+                for (int i = 0; i < this->GetNumElements(); i++) {
+                    allocator_->Deallocate((void*)this->GetSparseVectors()[i].ids_);
+                    allocator_->Deallocate((void*)this->GetSparseVectors()[i].vals_);
+                }
+                allocator_->Deallocate((void*)this->GetSparseVectors());
             }
-            allocator_->Deallocate((void*)this->GetSparseVector());
+
         } else {
             delete[] this->GetIds();
             delete[] this->GetDistances();
@@ -64,11 +67,13 @@ public:
             delete[] this->GetFloat32Vectors();
             delete[] this->GetPaths();
 
-            for (int i = 0; i < this->GetNumElements(); i++) {
-                delete[] this->GetSparseVector()[i].ids_;
-                delete[] this->GetSparseVector()[i].vals_;
+            if (this->GetSparseVectors()) {
+                for (int i = 0; i < this->GetNumElements(); i++) {
+                    delete[] this->GetSparseVectors()[i].ids_;
+                    delete[] this->GetSparseVectors()[i].vals_;
+                }
+                delete[] this->GetSparseVectors();
             }
-            delete[] this->GetSparseVector();
         }
     }
 
@@ -182,15 +187,15 @@ public:
     }
 
     DatasetPtr
-    SparseVector(const SparseVectorPtr sparse_vectors) override {
+    SparseVectors(const SparseVector* sparse_vectors) override {
         this->data_[SPARSE_VECTORS] = sparse_vectors;
         return shared_from_this();
     }
 
-    const SparseVectorPtr
-    GetSparseVector() const override {
+    const SparseVector*
+    GetSparseVectors() const override {
         if (auto iter = this->data_.find(SPARSE_VECTORS); iter != this->data_.end()) {
-            return std::get<SparseVectorPtr>(iter->second);
+            return std::get<const SparseVector*>(iter->second);
         }
 
         return nullptr;

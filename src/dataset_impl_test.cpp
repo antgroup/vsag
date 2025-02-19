@@ -53,10 +53,12 @@ TEST_CASE("Dataset Implement Test", "[ut][dataset]") {
         std::vector<vsag::SparseVector> sparse_vectors =
             fixtures::GenerateSparseVectors(size, max_dim, max_id, min_val, max_val);
         auto dataset = vsag::Dataset::Make();
-        dataset->SparseVector(fixtures::CopyVector(sparse_vectors))->NumElements(size)->Owner(true);
+        dataset->SparseVectors(fixtures::CopyVector(sparse_vectors))
+            ->NumElements(size)
+            ->Owner(true);
 
         // validate data
-        vsag::SparseVectorPtr sparse_vectors_ptr = dataset->GetSparseVector();
+        auto sparse_vectors_ptr = dataset->GetSparseVectors();
         for (int i = 0; i < dataset->GetNumElements(); i++) {
             uint32_t dim = sparse_vectors_ptr[i].dim_;
             REQUIRE(dim < max_dim);

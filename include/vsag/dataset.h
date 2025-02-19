@@ -36,7 +36,6 @@ struct SparseVector {
 
 class Dataset;
 using DatasetPtr = std::shared_ptr<Dataset>;
-using SparseVectorPtr = struct SparseVector*;
 
 /**
  * @class Dataset
@@ -190,15 +189,15 @@ public:
      * @return DatasetPtr A shared pointer to the dataset with updated sparse vectors.
      */
     virtual DatasetPtr
-    SparseVector(const SparseVectorPtr sparse_vectors) = 0;
+    SparseVectors(const SparseVector* sparse_vectors) = 0;
 
     /**
      * @brief Retrieves the sparse struct of the dataset.
      *
      * @return const SparseVector to the array of sparse vectors.
      */
-    virtual const SparseVectorPtr
-    GetSparseVector() const = 0;
+    virtual const SparseVector*
+    GetSparseVectors() const = 0;
 
     /**
      * @brief Sets the paths array for the dataset.
