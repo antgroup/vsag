@@ -29,7 +29,7 @@ enum InnerSearchMode { KNN_SEARCH = 1, RANGE_SEARCH = 2 };
 
 class InnerSearchParam {
 public:
-    int topk{0};
+    int64_t topk{0};
     float radius{0.0f};
     InnerIdType ep{0};
     uint64_t ef{10};
