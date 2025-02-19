@@ -715,6 +715,8 @@ HGraph::add_one_point(const float* data, int level, InnerIdType inner_id) {
 void
 HGraph::resize(uint64_t new_size) {
     auto cur_size = this->max_capacity_;
+    logger::debug(
+        "hgraph resize from ", std::to_string(cur_size), " to " + std::to_string(new_size));
     uint64_t new_size_power_2 =
         next_multiple_of_power_of_two(new_size, this->resize_increase_count_bit_);
     if (cur_size < new_size_power_2) {

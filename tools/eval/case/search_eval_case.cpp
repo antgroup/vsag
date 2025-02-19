@@ -13,14 +13,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "search_eval_case.h"
+#include "./search_eval_case.h"
 
+#include <cstdio>
 #include <fstream>
 #include <iostream>
 
-#include "monitor/latency_monitor.h"
-#include "monitor/memory_peak_monitor.h"
-#include "monitor/recall_monitor.h"
+#include "../monitor/latency_monitor.h"
+#include "../monitor/memory_peak_monitor.h"
+#include "../monitor/recall_monitor.h"
+#include "typing.h"
 #include "vsag/filter.h"
 
 namespace vsag::eval {
@@ -113,7 +115,7 @@ SearchEvalCase::init_memory_monitor() {
     }
 }
 
-void
+JsonType
 SearchEvalCase::Run() {
     this->deserialize();
     switch (this->search_type_) {
@@ -131,7 +133,10 @@ SearchEvalCase::Run() {
             break;
     }
     auto result = this->process_result();
-    eval::SearchEvalCase::PrintResult(result);
+    if (config_.delete_index_after_search) {
+        std::remove(this->index_path_.c_str());
+    }
+    return result;
 }
 void
 SearchEvalCase::deserialize() {
@@ -220,14 +225,14 @@ void
 SearchEvalCase::do_range_filter_search() {
 }
 
-SearchEvalCase::JsonType
+JsonType
 SearchEvalCase::process_result() {
     JsonType result;
     for (auto& monitor : this->monitors_) {
         const auto& one_result = monitor->GetResult();
         EvalCase::MergeJsonType(one_result, result);
     }
-    result["action"] = config_.action_type;
+    result["action"] = "search";
     result["search_mode"] = config_.search_mode;
     result["index_info"] = JsonType::parse(config_.build_param);
     result["search_param"] = config_.search_param;

@@ -15,24 +15,22 @@
 
 #pragma once
 
-#include "eval_config.h"
-#include "eval_dataset.h"
+#include "../eval_config.h"
+#include "../eval_dataset.h"
 #include "nlohmann/json.hpp"
 #include "vsag/index.h"
 #include "vsag/logger.h"
 
 namespace vsag::eval {
+using JsonType = nlohmann::json;
 
 class EvalCase;
 using EvalCasePtr = std::shared_ptr<EvalCase>;
 
 class EvalCase {
 public:
-    using JsonType = nlohmann::json;
-
-public:
     static EvalCasePtr
-    MakeInstance(const EvalConfig& parser);
+    MakeInstance(const EvalConfig& config, std::string type = "none");
 
     static void
     MergeJsonType(const JsonType& input, JsonType& output) {
@@ -51,7 +49,7 @@ public:
 
     virtual ~EvalCase() = default;
 
-    virtual void
+    virtual JsonType
     Run() = 0;
 
     using Logger = vsag::Logger*;

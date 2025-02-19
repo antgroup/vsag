@@ -18,8 +18,9 @@
 
 #include <utility>
 
-#include "build_eval_case.h"
-#include "search_eval_case.h"
+#include "./build_eval_case.h"
+#include "./build_search_eval_case.h"
+#include "./search_eval_case.h"
 #include "vsag/factory.h"
 #include "vsag/options.h"
 
@@ -33,7 +34,7 @@ EvalCase::EvalCase(std::string dataset_path, std::string index_path, vsag::Index
 }
 
 EvalCasePtr
-EvalCase::MakeInstance(const EvalConfig& config) {
+EvalCase::MakeInstance(const EvalConfig& config, std::string type) {
     auto dataset_path = config.dataset_path;
     auto index_path = config.index_path;
     auto index_name = config.index_name;
@@ -41,13 +42,21 @@ EvalCase::MakeInstance(const EvalConfig& config) {
 
     auto index = vsag::Factory::CreateIndex(index_name, create_params);
 
-    auto type = config.action_type;
+    // to support BuildSearch
+    if (type == "none") {
+        type = config.action_type;
+    }
+
     if (type == "build") {
         return std::make_shared<BuildEvalCase>(dataset_path, index_path, index.value(), config);
-    } else if (type == "search") {
-        return std::make_shared<SearchEvalCase>(dataset_path, index_path, index.value(), config);
-    } else {
-        return nullptr;
     }
+    if (type == "search") {
+        return std::make_shared<SearchEvalCase>(dataset_path, index_path, index.value(), config);
+    }
+    if (type == "build,search") {
+        return std::make_shared<BuildSearchEvalCase>(
+            dataset_path, index_path, index.value(), config);
+    }
+    return nullptr;
 }
 }  // namespace vsag::eval
