@@ -53,7 +53,7 @@ mapping_external_param_to_inner(const JsonType& external_json, JsonType& inner_j
             }
             *json = value;
         } else {
-            throw std::invalid_argument(fmt::format("HGraph have no config param: {}", key));
+            throw std::invalid_argument(fmt::format("BruteForce have no config param: {}", key));
         }
     }
 }
