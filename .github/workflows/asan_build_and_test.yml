@@ -22,7 +22,7 @@ jobs:
     name: Asan Build
     runs-on: ubuntu-latest
     container:
-      image: vsaglib/vsag:ubuntu
+      image: vsaglib/vsag:ci-x86
     steps:
       - uses: actions/checkout@v4
       - name: Load Cache
@@ -49,7 +49,7 @@ jobs:
       matrix:
         test_type: [ unittests, functests ]
     container:
-      image: vsaglib/vsag:ubuntu
+      image: vsaglib/vsag:ci-x86
     steps:
       - name: Clean Env
         run: rm -rf ./build

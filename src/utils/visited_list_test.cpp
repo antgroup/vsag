@@ -64,75 +64,78 @@ TEST_CASE("VisitedListPool Basic Test", "[ut][VisitedListPool]") {
     auto allocator = std::make_shared<DefaultAllocator>();
     auto init_size = 10;
     auto vl_size = 1000;
-    auto pool =
-        std::make_shared<VisitedListPool>(init_size, allocator.get(), vl_size, allocator.get());
+    std::vector<Allocator*> allocators = {allocator.get(), nullptr};
+    for (auto allocator_ptr : allocators) {
+        auto pool =
+            std::make_shared<VisitedListPool>(init_size, allocator_ptr, vl_size, allocator.get());
 
-    auto TestVL = [&](std::shared_ptr<VisitedList>& vl_ptr) {
-        int count = 500;
-        std::unordered_set<InnerIdType> ids;
-        for (int i = 0; i < count; ++i) {
-            auto id = random() % vl_size;
-            ids.insert(id);
-            vl_ptr->Set(id);
-        }
-        for (auto& id : ids) {
-            REQUIRE(vl_ptr->Get(id) == true);
-        }
-
-        for (InnerIdType i = 0; i < vl_size; ++i) {
-            if (ids.count(i) == 0) {
-                REQUIRE(vl_ptr->Get(i) == false);
-            }
-        }
-    };
-
-    SECTION("test basic") {
-        std::vector<std::shared_ptr<VisitedList>> lists;
-        REQUIRE(pool->GetSize() == init_size);
-        lists.reserve(init_size * 2);
-        for (auto i = 0; i < init_size * 2; ++i) {
-            lists.emplace_back(pool->TakeOne());
-        }
-        REQUIRE(pool->GetSize() == 0);
-        for (auto& ptr : lists) {
-            pool->ReturnOne(ptr);
-        }
-        REQUIRE(pool->GetSize() == init_size * 2);
-
-        auto ptr = pool->TakeOne();
-        REQUIRE(pool->GetSize() == init_size * 2 - 1);
-        TestVL(ptr);
-    }
-
-    SECTION("test concurrency") {
-        auto func = [&]() {
-            int count = 10;
-            int max_operators = 20;
-            std::vector<std::shared_ptr<VisitedList>> results;
+        auto TestVL = [&](std::shared_ptr<VisitedList>& vl_ptr) {
+            int count = 500;
+            std::unordered_set<InnerIdType> ids;
             for (int i = 0; i < count; ++i) {
-                auto opt = random() % max_operators + 1;
-                for (auto j = 0; j < opt; ++j) {
-                    results.emplace_back(pool->TakeOne());
+                auto id = random() % vl_size;
+                ids.insert(id);
+                vl_ptr->Set(id);
+            }
+            for (auto& id : ids) {
+                REQUIRE(vl_ptr->Get(id) == true);
+            }
+
+            for (InnerIdType i = 0; i < vl_size; ++i) {
+                if (ids.count(i) == 0) {
+                    REQUIRE(vl_ptr->Get(i) == false);
                 }
-                for (auto& result : results) {
-                    pool->ReturnOne(result);
-                }
-                results.clear();
             }
         };
-        std::vector<std::shared_ptr<std::thread>> ths;
-        auto thread_count = 5;
-        ths.reserve(thread_count);
-        for (auto i = 0; i < thread_count; ++i) {
-            ths.emplace_back((std::make_shared<std::thread>(func)));
+
+        SECTION("test basic") {
+            std::vector<std::shared_ptr<VisitedList>> lists;
+            REQUIRE(pool->GetSize() == init_size);
+            lists.reserve(init_size * 2);
+            for (auto i = 0; i < init_size * 2; ++i) {
+                lists.emplace_back(pool->TakeOne());
+            }
+            REQUIRE(pool->GetSize() == 0);
+            for (auto& ptr : lists) {
+                pool->ReturnOne(ptr);
+            }
+            REQUIRE(pool->GetSize() == init_size * 2);
+
+            auto ptr = pool->TakeOne();
+            REQUIRE(pool->GetSize() == init_size * 2 - 1);
+            TestVL(ptr);
         }
-        for (auto& thread : ths) {
-            thread->join();
-        }
-        for (int i = 0; i < 10; ++i) {
-            auto vl = pool->TakeOne();
-            TestVL(vl);
-            pool->ReturnOne(vl);
+
+        SECTION("test concurrency") {
+            auto func = [&]() {
+                int count = 10;
+                int max_operators = 20;
+                std::vector<std::shared_ptr<VisitedList>> results;
+                for (int i = 0; i < count; ++i) {
+                    auto opt = random() % max_operators + 1;
+                    for (auto j = 0; j < opt; ++j) {
+                        results.emplace_back(pool->TakeOne());
+                    }
+                    for (auto& result : results) {
+                        pool->ReturnOne(result);
+                    }
+                    results.clear();
+                }
+            };
+            std::vector<std::shared_ptr<std::thread>> ths;
+            auto thread_count = 5;
+            ths.reserve(thread_count);
+            for (auto i = 0; i < thread_count; ++i) {
+                ths.emplace_back((std::make_shared<std::thread>(func)));
+            }
+            for (auto& thread : ths) {
+                thread->join();
+            }
+            for (int i = 0; i < 10; ++i) {
+                auto vl = pool->TakeOne();
+                TestVL(vl);
+                pool->ReturnOne(vl);
+            }
         }
     }
 }

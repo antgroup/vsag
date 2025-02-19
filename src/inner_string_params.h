@@ -34,6 +34,7 @@ const char* const IO_PARAMS_KEY = "io_params";
 const char* const IO_TYPE_KEY = "type";
 const char* const IO_TYPE_VALUE_MEMORY_IO = "memory_io";
 const char* const IO_TYPE_VALUE_BUFFER_IO = "buffer_io";
+const char* const IO_TYPE_VALUE_ASYNC_IO = "async_io";
 const char* const IO_TYPE_VALUE_BLOCK_MEMORY_IO = "block_memory_io";
 const char* const BLOCK_IO_BLOCK_SIZE_KEY = "block_size";
 const char* const IO_FILE_PATH = "file_path";
