@@ -31,9 +31,9 @@ public:
     ToJson() override;
 
 public:
-    QuantizerParamPtr quantizer_parameter_{nullptr};
+    QuantizerParamPtr quantizer_parameter{nullptr};
 
-    IOParamPtr io_parameter_{nullptr};
+    IOParamPtr io_parameter{nullptr};
 };
 
 using FlattenDataCellParamPtr = std::shared_ptr<FlattenDataCellParameter>;

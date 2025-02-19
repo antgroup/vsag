@@ -34,15 +34,15 @@ public:
     ToJson() override;
 
 public:
-    FlattenDataCellParamPtr base_codes_param_{nullptr};
-    FlattenDataCellParamPtr precise_codes_param_{nullptr};
-    GraphInterfaceParamPtr bottom_graph_param_{nullptr};
+    FlattenDataCellParamPtr base_codes_param{nullptr};
+    FlattenDataCellParamPtr precise_codes_param{nullptr};
+    GraphInterfaceParamPtr bottom_graph_param{nullptr};
 
-    bool use_reorder_{false};
-    uint64_t ef_construction_{400};
-    uint64_t build_thread_count_{100};
+    bool use_reorder{false};
+    uint64_t ef_construction{400};
+    uint64_t build_thread_count{100};
 
-    std::string name_;
+    std::string name;
 };
 
 using HGraphParameterPtr = std::shared_ptr<HGraphParameter>;

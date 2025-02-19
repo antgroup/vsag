@@ -26,17 +26,17 @@ namespace vsag {
 template <typename QuantTemp, typename IOTemp>
 static BucketInterfacePtr
 make_instance(const BucketDataCellParamPtr& param, const IndexCommonParam& common_param) {
-    auto& io_param = param->io_parameter_;
-    auto& quantizer_param = param->quantizer_parameter_;
+    auto& io_param = param->io_parameter;
+    auto& quantizer_param = param->quantizer_parameter;
 
     return std::make_shared<BucketDataCell<QuantTemp, IOTemp>>(
-        quantizer_param, io_param, common_param, static_cast<BucketIdType>(param->buckets_count_));
+        quantizer_param, io_param, common_param, static_cast<BucketIdType>(param->buckets_count));
 }
 
 template <MetricType metric, typename IOTemp>
 static BucketInterfacePtr
 make_instance(const BucketDataCellParamPtr& param, const IndexCommonParam& common_param) {
-    std::string quantization_string = param->quantizer_parameter_->GetTypeName();
+    std::string quantization_string = param->quantizer_parameter->GetTypeName();
     if (quantization_string == QUANTIZATION_TYPE_VALUE_SQ8) {
         return make_instance<SQ8Quantizer<metric>, IOTemp>(param, common_param);
     }
@@ -51,6 +51,9 @@ make_instance(const BucketDataCellParamPtr& param, const IndexCommonParam& commo
     }
     if (quantization_string == QUANTIZATION_TYPE_VALUE_SQ8_UNIFORM) {
         return make_instance<SQ8UniformQuantizer<metric>, IOTemp>(param, common_param);
+    }
+    if (quantization_string == QUANTIZATION_TYPE_VALUE_BF16) {
+        return make_instance<BF16Quantizer<metric>, IOTemp>(param, common_param);
     }
     return nullptr;
 }
@@ -74,7 +77,7 @@ make_instance(const BucketDataCellParamPtr& param, const IndexCommonParam& commo
 BucketInterfacePtr
 BucketInterface::MakeInstance(const BucketDataCellParamPtr& param,
                               const IndexCommonParam& common_param) {
-    auto io_type_name = param->io_parameter_->GetTypeName();
+    auto io_type_name = param->io_parameter->GetTypeName();
     if (io_type_name == IO_TYPE_VALUE_BLOCK_MEMORY_IO) {
         return make_instance<MemoryBlockIO>(param, common_param);
     }

@@ -57,4 +57,6 @@ public:
     int64_t dim_{-1};
 };
 
+using IVFPartitionStrategyPtr = std::shared_ptr<IVFPartitionStrategy>;
+
 }  // namespace vsag

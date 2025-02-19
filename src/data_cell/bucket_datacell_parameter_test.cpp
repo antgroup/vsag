@@ -35,7 +35,7 @@ TEST_CASE("BucketDataCellParameter ToJson Test", "[ut][BucketDataCellParameter]"
     auto param = std::make_shared<BucketDataCellParameter>();
     auto json = JsonType::parse(param_str);
     param->FromJson(json);
-    REQUIRE(param->buckets_count_ == 10);
+    REQUIRE(param->buckets_count == 10);
     ParameterTest::TestToJson(param);
 }
 

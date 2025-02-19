@@ -39,8 +39,8 @@ PyramidParameters::FromJson(const JsonType& json) {
     if (json.contains(PYRAMID_PARAMETER_BASE_CODES)) {
         this->flatten_data_cell_param->FromJson(json[PYRAMID_PARAMETER_BASE_CODES]);
     } else {
-        this->flatten_data_cell_param->io_parameter_ = std::make_shared<MemoryIOParameter>();
-        this->flatten_data_cell_param->quantizer_parameter_ =
+        this->flatten_data_cell_param->io_parameter = std::make_shared<MemoryIOParameter>();
+        this->flatten_data_cell_param->quantizer_parameter =
             std::make_shared<FP32QuantizerParameter>();
     }
 }
