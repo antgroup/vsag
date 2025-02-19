@@ -45,6 +45,21 @@ public:
         return test_.get();
     }
 
+    [[nodiscard]] const std::shared_ptr<int64_t[]>
+    GetTrainLabels() const {
+        return train_labels_;
+    }
+
+    [[nodiscard]] const std::shared_ptr<int64_t[]>
+    GetTestLabels() const {
+        return test_labels_;
+    }
+
+    [[nodiscard]] float
+    GetValidRatio(int64_t label) const {
+        return valid_ratio_[label];
+    }
+
     [[nodiscard]] const void*
     GetOneTrain(int64_t id) const {
         return train_.get() + id * dim_ * train_data_size_;
@@ -165,13 +180,15 @@ private:
     std::shared_ptr<char[]> test_;
     std::shared_ptr<int64_t[]> neighbors_;
     std::shared_ptr<float[]> distances_;
-    std::shared_ptr<int64_t[]> train_labels_;
-    std::shared_ptr<int64_t[]> test_labels_;
+    std::shared_ptr<int64_t[]> train_labels_{nullptr};
+    std::shared_ptr<int64_t[]> test_labels_{nullptr};
+    std::shared_ptr<float[]> valid_ratio_;
     shape_t train_shape_;
     shape_t test_shape_;
     shape_t neighbors_shape_;
     int64_t number_of_base_{};
     int64_t number_of_query_{};
+    int64_t number_of_label_{};
     int64_t dim_{};
     size_t train_data_size_{};
     size_t test_data_size_{};
