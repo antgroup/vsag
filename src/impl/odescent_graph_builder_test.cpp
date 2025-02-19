@@ -28,7 +28,7 @@
 #include "safe_allocator.h"
 
 size_t
-calculate_overlap(const std::vector<uint32_t>& vec1, vsag::Vector<uint32_t>& vec2, int K) {
+calculate_overlap(const vsag::Vector<uint32_t>& vec1, const vsag::Vector<uint32_t>& vec2, int K) {
     int size1 = std::min(K, static_cast<int>(vec1.size()));
     int size2 = std::min(K, static_cast<int>(vec2.size()));
 
@@ -100,14 +100,30 @@ TEST_CASE("ODescent Build Test", "[ut][ODescent]") {
         REQUIRE_THROWS(graph.Build(valid_ids.get(), num_vectors));
         return;
     }
-    graph.Build(valid_ids.get(), num_vectors);
-
-    // check result
-    vsag::GraphInterfacePtr graph_interface = nullptr;
-    graph_interface = vsag::GraphInterface::MakeInstance(graph_param_ptr, param, partial_data);
-    graph.SaveGraph(graph_interface);
 
     auto id_map = [&](uint32_t id) -> uint32_t { return partial_data ? valid_ids[id] : id; };
+
+    // check result
+    vsag::GraphInterfacePtr graph_interface =
+        vsag::GraphInterface::MakeInstance(graph_param_ptr, param, partial_data);
+    vsag::GraphInterfacePtr half_graph_interface =
+        vsag::GraphInterface::MakeInstance(graph_param_ptr, param, partial_data);
+    vsag::GraphInterfacePtr merged_graph_interface =
+        vsag::GraphInterface::MakeInstance(graph_param_ptr, param, partial_data);
+
+    graph.Build(valid_ids.get(), num_vectors);
+    graph.SaveGraph(graph_interface);
+
+    for (int i = 0; i < num_vectors; ++i) {
+        auto id = id_map(i);
+        vsag::Vector<vsag::InnerIdType> edges(param.allocator_.get());
+        graph_interface->GetNeighbors(id, edges);
+        auto origin_size = edges.size();
+        edges.resize(origin_size / 2);
+        half_graph_interface->InsertNeighborsById(id, edges);
+    }
+    graph.Build(valid_ids.get(), num_vectors, half_graph_interface);
+    graph.SaveGraph(merged_graph_interface);
 
     if (num_vectors == 1) {
         REQUIRE(graph_interface->TotalCount() == 1);
@@ -116,6 +132,7 @@ TEST_CASE("ODescent Build Test", "[ut][ODescent]") {
     }
 
     float hit_edge_count = 0;
+    float hit_edge_count_merge = 0;
     int64_t indeed_max_degree = std::min(max_degree, (int64_t)num_vectors - 1);
     for (int i = 0; i < num_vectors; ++i) {
         std::vector<std::pair<float, uint32_t>> ground_truths;
@@ -128,13 +145,19 @@ TEST_CASE("ODescent Build Test", "[ut][ODescent]") {
             }
         }
         std::sort(ground_truths.begin(), ground_truths.end());
-        std::vector<uint32_t> truths_edges(indeed_max_degree);
+        vsag::Vector<uint32_t> truths_edges(indeed_max_degree, param.allocator_.get());
         for (int j = 0; j < indeed_max_degree; ++j) {
             truths_edges[j] = ground_truths[j].second;
         }
         vsag::Vector<uint32_t> edges(param.allocator_.get());
+        vsag::Vector<uint32_t> edges_merged(param.allocator_.get());
         graph_interface->GetNeighbors(i_id, edges);
+        merged_graph_interface->GetNeighbors(i_id, edges_merged);
+        REQUIRE(edges.size() == indeed_max_degree);
+        REQUIRE(edges_merged.size() == indeed_max_degree);
         hit_edge_count += calculate_overlap(truths_edges, edges, indeed_max_degree);
+        hit_edge_count_merge += calculate_overlap(truths_edges, edges, indeed_max_degree);
     }
     REQUIRE(hit_edge_count / (num_vectors * indeed_max_degree) > 0.95);
+    REQUIRE(hit_edge_count_merge >= hit_edge_count);
 }

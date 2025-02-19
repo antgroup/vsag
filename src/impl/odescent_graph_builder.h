@@ -55,6 +55,9 @@ struct Node {
         if (distance != other.distance) {
             return distance < other.distance;
         }
+        if (id != other.id) {
+            return id < other.id;
+        }
         return old && not other.old;
     }
 
@@ -88,13 +91,15 @@ public:
           flatten_interface_(flatten_interface),
           pruning_(pruning),
           allocator_(allocator),
-          graph(allocator),
+          graph_(allocator),
           points_lock_(allocator),
           thread_pool_(thread_pool) {
     }
 
     bool
-    Build(const uint32_t* valid_ids = nullptr, int64_t data_num = 0);
+    Build(const uint32_t* valid_ids = nullptr,
+          int64_t data_num = 0,
+          const GraphInterfacePtr graph_storage = nullptr);
 
     void
     SaveGraph(std::stringstream& out);
@@ -112,7 +117,7 @@ private:
     }
 
     void
-    init_graph();
+    init_graph(const GraphInterfacePtr graph_storage);
 
     void
     update_neighbors(Vector<UnorderedSet<uint32_t>>& old_neighbors,
@@ -138,12 +143,11 @@ private:
 
     size_t dim_;
     int64_t data_num_;
-    bool is_build_ = false;
 
     int64_t max_degree_;
     float alpha_;
     int64_t turn_;
-    Vector<Linklist> graph;
+    Vector<Linklist> graph_;
     int64_t min_in_degree_ = 1;
     int64_t block_size_{10000};
     Vector<std::mutex> points_lock_;
