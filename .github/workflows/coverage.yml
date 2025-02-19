@@ -11,7 +11,7 @@ jobs:
     name: Test Coverage
     runs-on: ubuntu-latest
     container:
-      image: vsaglib/vsag:ubuntu
+      image: vsaglib/vsag:ci-x86
     steps:
       - uses: actions/checkout@v4
       - name: Install lcov
