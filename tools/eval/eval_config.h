@@ -38,6 +38,7 @@ public:
     std::string search_mode{"knn"};
     int top_k{10};
     float radius{0.5f};
+    bool delete_index_after_search{false};
 
     bool enable_recall{true};
     bool enable_percent_recall{true};

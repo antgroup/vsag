@@ -13,12 +13,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <vsag/vsag.h>
+
 #include <argparse/argparse.hpp>
 #include <iostream>
 #include <string>
+#include <tabulate/table.hpp>
 
-#include "eval_case.h"
+#include "case/eval_case.h"
 #include "eval_config.h"
+#include "logger.h"
+#include "typing.h"
 
 void
 CheckArgs(argparse::ArgumentParser& parser) {
@@ -58,6 +63,9 @@ ParseArgs(argparse::ArgumentParser& parser, int argc, char** argv) {
         .help(
             "The mode supported while use 'search' type,"
             " choose from {\"knn\", \"range\", \"knn_filter\", \"range_filter\"}");
+    parser.add_argument("--delete-index-after-search")
+        .default_value(false)
+        .help("Delete index after search");
     parser.add_argument("--topk")
         .default_value(10)
         .help("The topk value for knn search or knn_filter search")
@@ -109,11 +117,12 @@ check_and_get_value(const YAML::Node& node, const std::string& key) {
     }
 };
 
-std::vector<YAML::Node>
+using name2config = std::pair<std::string, YAML::Node>;
+std::vector<name2config>
 ParseYamlFile(const std::string& yaml_file) {
     using Node = YAML::Node;
     Node config_all = YAML::LoadFile(yaml_file);
-    std::vector<YAML::Node> nodes;
+    std::vector<name2config> configs;
     for (auto it = config_all.begin(); it != config_all.end(); ++it) {
         auto config = it->second;
         try {
@@ -145,31 +154,93 @@ ParseYamlFile(const std::string& yaml_file) {
             std::cerr << "Error parsing YAML: " << e.what() << std::endl;
             exit(-1);
         }
-        nodes.emplace_back(config);
+        configs.emplace_back(std::make_pair<>(it->first.as<std::string>(), config));
     }
-    return nodes;
+    return configs;
+}
+
+#define JSON_GET(varname, jsonobj, defaultvalue) \
+    std::string varname;                         \
+    try {                                        \
+        varname = jsonobj;                       \
+    } catch (...) {                              \
+        varname = defaultvalue;                  \
+    }
+
+void
+print_as_table(vsag::eval::JsonType results) {
+    using namespace tabulate;
+    Table table;
+    table.add_row({"Name",
+                   "NumVectors",
+                   "Dim",
+                   "DataType",
+                   "MetricType",
+                   "IndexParam",
+                   "BuildTime",
+                   "TPS",
+                   "SearchParam",
+                   "QPS",
+                   "LatencyAvg(ms)",
+                   "RecallAvg"});
+    for (const auto& [key, value] : results.items()) {
+        JSON_GET(
+            num_vectors, std::to_string(value["dataset_info"]["base_count"].get<int>()), "N/A");
+        JSON_GET(dim, std::to_string(value["dataset_info"]["dim"].get<int>()), "N/A");
+        JSON_GET(data_type, value["dataset_info"]["data_type"], "N/A");
+        JSON_GET(metric_type, value["index_info"]["metric_type"], "N/A");
+        JSON_GET(index_param, value["index_info"]["index_param"].dump(), "N/A");
+        JSON_GET(build_time, std::to_string(value["duration(s)"].get<float>()), "N/A");
+        JSON_GET(tps, std::to_string(value["tps"].get<float>()), "N/A");
+        JSON_GET(search_param, value["search_param"], "N/A");
+        JSON_GET(qps, std::to_string(value["qps"].get<float>()), "N/A");
+        JSON_GET(latency_avg, std::to_string(value["latency_avg(ms)"].get<float>()), "N/A");
+        JSON_GET(recall_avg, std::to_string(value["recall_avg"].get<float>()), "N/A");
+
+        table.add_row({key,
+                       num_vectors,
+                       dim,
+                       data_type,
+                       metric_type,
+                       index_param,
+                       build_time,
+                       tps,
+                       search_param,
+                       qps,
+                       latency_avg,
+                       recall_avg});
+    }
+
+    table.column(5).format().width(40);
+
+    std::cout << table << std::endl;
 }
 
 int
 main(int argc, char** argv) {
+    vsag::Options::Instance().logger()->SetLevel(vsag::Logger::kOFF);
     vsag::eval::EvalConfig config;
     if (argc == 2) {
         std::string yaml_file = argv[1];
         auto nodes = ParseYamlFile(yaml_file);
+
+        vsag::eval::JsonType results;
         for (auto& node : nodes) {
-            config = vsag::eval::EvalConfig::Load(node);
+            config = vsag::eval::EvalConfig::Load(node.second);
             auto eval_case = vsag::eval::EvalCase::MakeInstance(config);
             if (eval_case != nullptr) {
-                eval_case->Run();
+                results[node.first] = eval_case->Run();
             }
         }
+
+        print_as_table(results);
     } else {
         argparse::ArgumentParser program("eval_performance");
         ParseArgs(program, argc, argv);
         config = vsag::eval::EvalConfig::Load(program);
         auto eval_case = vsag::eval::EvalCase::MakeInstance(config);
         if (eval_case != nullptr) {
-            eval_case->Run();
+            std::cout << eval_case->Run() << std::endl;
         }
     }
 }

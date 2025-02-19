@@ -40,6 +40,8 @@ EvalConfig::Load(argparse::ArgumentParser& parser) {
     config.top_k = parser.get<int>("--topk");
     config.radius = parser.get<float>("--range");
 
+    config.delete_index_after_search = parser.get<bool>("--delete-index-after-search");
+
     if (parser.get<bool>("--disable_recall")) {
         config.enable_recall = false;
     }
@@ -78,6 +80,9 @@ EvalConfig::Load(YAML::Node& yaml_node) {
     check_and_get_value<>(yaml_node, "index_path", config.index_path);
     check_and_get_value<int>(yaml_node, "topk", config.top_k);
     check_and_get_value<float>(yaml_node, "range", config.radius);
+
+    check_and_get_value<bool>(
+        yaml_node, "delete_index_after_search", config.delete_index_after_search);
 
     bool disable = false;
     check_and_get_value<bool>(yaml_node, "disable_recall", disable);

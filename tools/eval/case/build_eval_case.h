@@ -15,68 +15,38 @@
 
 #pragma once
 
-#include "eval_case.h"
-#include "monitor/monitor.h"
+#include "../monitor/monitor.h"
+#include "./eval_case.h"
 
 namespace vsag::eval {
 
-class SearchEvalCase : public EvalCase {
+class BuildEvalCase : public EvalCase {
 public:
-    using JsonType = Monitor::JsonType;
+    BuildEvalCase(const std::string& dataset_path,
+                  const std::string& index_path,
+                  vsag::IndexPtr index,
+                  EvalConfig config);
 
-public:
-    SearchEvalCase(const std::string& dataset_path,
-                   const std::string& index_path,
-                   vsag::IndexPtr index,
-                   EvalConfig config);
+    ~BuildEvalCase() override = default;
 
-    ~SearchEvalCase() override = default;
-
-    void
+    JsonType
     Run() override;
 
 private:
-    enum SearchType {
-        KNN,
-        RANGE,
-        KNN_FILTER,
-        RANGE_FILTER,
-    };
+    void
+    init_monitors();
 
     void
-    init_monitor();
+    do_build();
 
     void
-    init_latency_monitor();
-
-    void
-    init_recall_monitor();
-
-    void
-    init_memory_monitor();
-
-    void
-    deserialize();
-
-    void
-    do_knn_search();
-
-    void
-    do_range_search();
-
-    void
-    do_knn_filter_search();
-
-    void
-    do_range_filter_search();
+    serialize();
 
     JsonType
     process_result();
 
 private:
     std::vector<MonitorPtr> monitors_{};
-
-    SearchType search_type_{SearchType::KNN};
 
     EvalConfig config_;
 };
