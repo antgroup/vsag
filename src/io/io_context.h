@@ -24,6 +24,7 @@ class IOContext : ResourceObject {
 public:
     IOContext() {
         memset(&ctx_, 0, sizeof(ctx_));
+        io_setup(DEFAULT_REQUEST_COUNT, &this->ctx_);
         for (int i = 0; i < DEFAULT_REQUEST_COUNT; ++i) {
             this->cb_[i] = static_cast<iocb*>(malloc(sizeof(struct iocb)));
         }
@@ -37,9 +38,7 @@ public:
     };
 
     void
-    Reset() override {
-        memset(&ctx_, 0, sizeof(ctx_));
-    }
+    Reset() override{};
 
 public:
     static constexpr int64_t DEFAULT_REQUEST_COUNT = 100;
