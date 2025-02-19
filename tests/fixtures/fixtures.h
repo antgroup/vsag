@@ -18,11 +18,13 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <random>
 #include <tuple>
 #include <vector>
 
 #include "simd/normalize.h"
+#include "typing.h"
 #include "vsag/vsag.h"
 
 namespace fixtures {
@@ -34,6 +36,19 @@ template <typename T>
 T*
 CopyVector(const std::vector<T>& vec) {
     auto result = new T[vec.size()];
+    memcpy(result, vec.data(), vec.size() * sizeof(T));
+    return result;
+}
+
+template <typename T>
+T*
+CopyVector(const vsag::Vector<T>& vec, vsag::Allocator* allocator) {
+    T* result;
+    if (allocator) {
+        result = (T*)allocator->Allocate(sizeof(T) * vec.size());
+    } else {
+        result = new T[vec.size()];
+    }
     memcpy(result, vec.data(), vec.size() * sizeof(T));
     return result;
 }
@@ -73,6 +88,15 @@ GenerateVectors(uint64_t count, uint32_t dim, int seed = 47, bool need_normalize
 
 std::vector<vsag::SparseVector>
 GenerateSparseVectors(uint32_t count,
+                      uint32_t max_dim = 100,
+                      uint32_t max_id = 10000,
+                      float min_val = -1,
+                      float max_val = 1,
+                      int seed = 47);
+
+vsag::Vector<vsag::SparseVector>
+GenerateSparseVectors(vsag::Allocator* allocator,
+                      uint32_t count,
                       uint32_t max_dim = 100,
                       uint32_t max_id = 10000,
                       float min_val = -1,
