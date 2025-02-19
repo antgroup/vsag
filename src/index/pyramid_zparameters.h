@@ -42,7 +42,7 @@ public:
     float alpha{1.2};
     float sample_rate{0.3};
     int64_t turn{20};
-    uint64_t max_degree{0};
+    int64_t max_degree{0};
 };
 
 class PyramidSearchParameters {

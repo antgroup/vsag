@@ -74,7 +74,7 @@ void
 IndexNode::BuildGraph(ODescent& odescent) {
     if (not ids_.empty()) {
         entry_point_ = ids_[0];
-        odescent.Build(ids_.data(), ids_.size());
+        odescent.Build(ids_.data(), static_cast<int64_t>(ids_.size()));
         odescent.SaveGraph(graph_);
         Vector<InnerIdType>(common_param_->allocator_.get()).swap(ids_);
     }
