@@ -15,32 +15,75 @@
 
 #include "pyramid_zparameters.h"
 
+#include "common.h"
 #include "diskann_zparameters.h"
-#include "hnsw.h"
-#include "hnsw_zparameters.h"
+#include "io/memory_io_parameter.h"
+#include "quantization/fp32_quantizer_parameter.h"
+
+// NOLINTBEGIN(readability-simplify-boolean-expr)
 
 namespace vsag {
 
-PyramidParameters
-PyramidParameters::FromJson(JsonType& pyramid_param_obj,
-                            const IndexCommonParam& index_common_param) {
-    PyramidParameters obj;
-    CHECK_ARGUMENT(
-        pyramid_param_obj.contains(PYRAMID_PARAMETER_SUBINDEX_TYPE),
-        fmt::format(
-            "parameters[{}] must contains {}", INDEX_PYRAMID, PYRAMID_PARAMETER_SUBINDEX_TYPE));
-    if (pyramid_param_obj[PYRAMID_PARAMETER_SUBINDEX_TYPE] == INDEX_HNSW) {
-        auto hnsw_param_obj =
-            HnswParameters::FromJson(pyramid_param_obj[INDEX_PARAM], index_common_param);
-        obj.index_builder = [hnsw_param_obj, index_common_param]() {
-            auto index = std::make_shared<HNSW>(hnsw_param_obj, index_common_param);
-            if (auto result = index->InitMemorySpace(); not result.has_value()) {
-                throw std::runtime_error("create hnsw failed in pyramid");
-            }
-            return index;
-        };
+void
+PyramidParameters::FromJson(const JsonType& json) {
+    // init graph param
+    CHECK_ARGUMENT(json.contains(GRAPH_TYPE_ODESCENT),
+                   fmt::format("pyramid parameters must contains {}", GRAPH_TYPE_ODESCENT));
+    const auto& graph_json = json[GRAPH_TYPE_ODESCENT];
+    graph_param = GraphInterfaceParameter::GetGraphParameterByJson(graph_json);
+    // FIXME(inabao): This issue, where the edge length in the sparse graph defined in HGraph is half of the intended length, has been addressed here and will be revised in a subsequent PR.
+    max_degree = static_cast<int64_t>(
+        std::dynamic_pointer_cast<GraphDataCellParameter>(graph_param)->max_degree_);
+    std::dynamic_pointer_cast<GraphDataCellParameter>(graph_param)->max_degree_ *= 2;
+    if (graph_json.contains(ODESCENT_PARAMETER_ALPHA)) {
+        alpha = graph_json[ODESCENT_PARAMETER_ALPHA];
     }
-    return obj;
+    if (graph_json.contains(ODESCENT_PARAMETER_GRAPH_ITER_TURN)) {
+        turn = graph_json[ODESCENT_PARAMETER_GRAPH_ITER_TURN];
+    }
+    if (graph_json.contains(ODESCENT_PARAMETER_NEIGHBOR_SAMPLE_RATE)) {
+        sample_rate = graph_json[ODESCENT_PARAMETER_NEIGHBOR_SAMPLE_RATE];
+    }
+    this->flatten_data_cell_param = std::make_shared<FlattenDataCellParameter>();
+    if (json.contains(PYRAMID_PARAMETER_BASE_CODES)) {
+        this->flatten_data_cell_param->FromJson(json[PYRAMID_PARAMETER_BASE_CODES]);
+    } else {
+        this->flatten_data_cell_param->io_parameter_ = std::make_shared<MemoryIOParameter>();
+        this->flatten_data_cell_param->quantizer_parameter_ =
+            std::make_shared<FP32QuantizerParameter>();
+    }
+}
+JsonType
+PyramidParameters::ToJson() {
+    JsonType json;
+    json[GRAPH_TYPE_ODESCENT] = graph_param->ToJson();
+    json[GRAPH_TYPE_ODESCENT][GRAPH_PARAM_MAX_DEGREE] =
+        std::dynamic_pointer_cast<GraphDataCellParameter>(graph_param)->max_degree_ / 2;
+    json[GRAPH_TYPE_ODESCENT][ODESCENT_PARAMETER_ALPHA] = alpha;
+    json[GRAPH_TYPE_ODESCENT][ODESCENT_PARAMETER_GRAPH_ITER_TURN] = turn;
+    json[GRAPH_TYPE_ODESCENT][ODESCENT_PARAMETER_NEIGHBOR_SAMPLE_RATE] = sample_rate;
+    json[PYRAMID_PARAMETER_BASE_CODES] = flatten_data_cell_param->ToJson();
+    return json;
 }
 
+PyramidSearchParameters
+PyramidSearchParameters::FromJson(const std::string& json_string) {
+    JsonType params = JsonType::parse(json_string);
+
+    PyramidSearchParameters obj;
+
+    // set obj.ef_search
+    CHECK_ARGUMENT(params.contains(INDEX_PYRAMID),
+                   fmt::format("parameters must contains {}", INDEX_PYRAMID));
+
+    CHECK_ARGUMENT(
+        params[INDEX_PYRAMID].contains(HNSW_PARAMETER_EF_RUNTIME),
+        fmt::format("parameters[{}] must contains {}", INDEX_PYRAMID, HNSW_PARAMETER_EF_RUNTIME));
+    obj.ef_search = params[INDEX_PYRAMID][HNSW_PARAMETER_EF_RUNTIME];
+    CHECK_ARGUMENT((1 <= obj.ef_search) and (obj.ef_search <= 1000),
+                   fmt::format("ef_search({}) must in range[1, 1000]", obj.ef_search));
+    return obj;
+}
 }  // namespace vsag
+
+// NOLINTEND(readability-simplify-boolean-expr)
