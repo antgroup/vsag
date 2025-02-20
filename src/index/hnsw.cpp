@@ -202,7 +202,7 @@ tl::expected<DatasetPtr, Error>
 HNSW::knn_search(const DatasetPtr& query,
                  int64_t k,
                  const std::string& parameters,
-                 const FilterPtr filter_ptr) const {
+                 const FilterPtr& filter_ptr) const {
 #ifndef ENABLE_TESTS
     SlowTaskTimer t_total("hnsw knnsearch", 20);
 #endif
@@ -329,7 +329,7 @@ tl::expected<DatasetPtr, Error>
 HNSW::range_search(const DatasetPtr& query,
                    float radius,
                    const std::string& parameters,
-                   const FilterPtr filter_ptr,
+                   const FilterPtr& filter_ptr,
                    int64_t limited_size) const {
 #ifndef ENABLE_TESTS
     SlowTaskTimer t("hnsw rangesearch", 20);
@@ -988,7 +988,7 @@ bool
 HNSW::ExtractDataAndGraph(FlattenInterfacePtr& data,
                           GraphInterfacePtr& graph,
                           Vector<LabelType>& ids,
-                          IdMapFunction func,
+                          const IdMapFunction& func,
                           Allocator* allocator) {
     if (use_static_) {
         return false;

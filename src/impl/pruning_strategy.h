@@ -28,9 +28,9 @@ namespace vsag {
 InnerIdType
 mutually_connect_new_element(InnerIdType cur_c,
                              MaxHeap& top_candidates,
-                             GraphInterfacePtr graph,
-                             const FlattenInterfacePtr flatten,
-                             MutexArrayPtr neighbors_mutexs,
+                             const GraphInterfacePtr& graph,
+                             const FlattenInterfacePtr& flatten,
+                             const MutexArrayPtr& neighbors_mutexs,
                              Allocator* allocator);
 
 }  // namespace vsag

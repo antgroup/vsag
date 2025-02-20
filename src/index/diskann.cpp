@@ -162,8 +162,9 @@ DiskANN::DiskANN(DiskannParameters& diskann_params, const IndexCommonParam& inde
         pool_ = index_common_param_.thread_pool_;
     }
     status_ = IndexStatus::EMPTY;
-    batch_read_ =
-        [&](const std::vector<read_request>& requests, bool async, CallBack callBack) -> void {
+    batch_read_ = [&](const std::vector<read_request>& requests,
+                      bool async,
+                      const CallBack& callBack) -> void {
         if (async) {
             for (const auto& req : requests) {
                 auto [offset, len, dest] = req;
@@ -325,7 +326,7 @@ tl::expected<DatasetPtr, Error>
 DiskANN::knn_search(const DatasetPtr& query,
                     int64_t k,
                     const std::string& parameters,
-                    BitsetPtr invalid) const {
+                    const BitsetPtr& invalid) const {
     // check filter
     std::function<bool(int64_t)> filter = nullptr;
     if (invalid != nullptr) {
@@ -487,7 +488,7 @@ tl::expected<DatasetPtr, Error>
 DiskANN::range_search(const DatasetPtr& query,
                       float radius,
                       const std::string& parameters,
-                      BitsetPtr invalid,
+                      const BitsetPtr& invalid,
                       int64_t limited_size) const {
     // check filter
     std::function<bool(int64_t)> filter = nullptr;

@@ -28,7 +28,7 @@ namespace vsag {
 DiskannParameters
 DiskannParameters::FromJson(
     JsonType& diskann_param_obj,  // NOLINT(readability-function-cognitive-complexity)
-    IndexCommonParam index_common_param) {
+    const IndexCommonParam& index_common_param) {
     DiskannParameters obj;
 
     CHECK_ARGUMENT(

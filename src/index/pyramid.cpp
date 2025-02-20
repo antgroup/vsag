@@ -163,7 +163,7 @@ tl::expected<DatasetPtr, Error>
 Pyramid::knn_search(const DatasetPtr& query,
                     int64_t k,
                     const std::string& parameters,
-                    BitsetPtr invalid) const {
+                    const BitsetPtr& invalid) const {
     auto parsed_param = PyramidSearchParameters::FromJson(parameters);
     InnerSearchParam search_param;
     search_param.ef = parsed_param.ef_search;
@@ -237,7 +237,7 @@ tl::expected<DatasetPtr, Error>
 Pyramid::range_search(const DatasetPtr& query,
                       float radius,
                       const std::string& parameters,
-                      BitsetPtr invalid,
+                      const BitsetPtr& invalid,
                       int64_t limited_size) const {
     auto parsed_param = PyramidSearchParameters::FromJson(parameters);
     InnerSearchParam search_param;
