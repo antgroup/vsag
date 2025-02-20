@@ -404,21 +404,24 @@ TestIndex::TestFilterSearch(const TestIndex::IndexPtr& index,
             ->Paths(queries->GetPaths() + i)
             ->Owner(false);
         tl::expected<DatasetPtr, vsag::Error> res;
-        if (support_filter_obj) {
-            auto filter =
-                std::make_shared<FilterObj>(dataset->filter_function_, dataset->valid_ratio_);
-            res = index->KnnSearch(query, topk, search_param, filter);
-            if (res.value()->GetDim() != topk) {
-                res = index->KnnSearch(query, topk, search_param, filter);
-            }
-        } else {
-            res = index->KnnSearch(query, topk, search_param, dataset->filter_function_);
-        }
+        res = index->KnnSearch(query, topk, search_param, dataset->filter_function_);
         REQUIRE(res.has_value() == expected_success);
         if (!expected_success) {
             return;
         }
         REQUIRE(res.value()->GetDim() == topk);
+        if (support_filter_obj) {
+            auto filter =
+                std::make_shared<FilterObj>(dataset->filter_function_, dataset->valid_ratio_);
+            auto obj_res = index->KnnSearch(query, topk, search_param, filter);
+            for (int j = 0; j < topk; ++j) {
+                REQUIRE(obj_res.value()->GetIds()[j] == res.value()->GetIds()[j]);
+            }
+        }
+        auto threshold = res.value()->GetDistances()[topk - 1];
+        auto range_result =
+            index->RangeSearch(query, threshold, search_param, dataset->filter_function_);
+        REQUIRE(range_result.value()->GetDim() >= topk);
         auto result = res.value()->GetIds();
         auto gt = gts->GetIds() + gt_topK * i;
         auto val = Intersection(gt, gt_topK, result, topk);
