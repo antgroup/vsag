@@ -135,7 +135,6 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                 (mode == RANGE_SEARCH && dist <= inner_search_param.radius)) {
                 candidate_set.emplace(-dist, to_be_visited_id[i]);
                 flatten->Prefetch(candidate_set.top().second);
-
                 if (not is_id_allowed || is_id_allowed->CheckValid(to_be_visited_id[i])) {
                     top_candidates.emplace(dist, to_be_visited_id[i]);
                 }

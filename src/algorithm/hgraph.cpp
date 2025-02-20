@@ -657,8 +657,6 @@ HGraph::Deserialize(const BinarySet& binary_set) {
         this->Deserialize(reader);
     } catch (const std::runtime_error& e) {
         LOG_ERROR_AND_RETURNS(ErrorType::READ_ERROR, "failed to Deserialize: ", e.what());
-    } catch (const std::out_of_range& e) {
-        LOG_ERROR_AND_RETURNS(ErrorType::READ_ERROR, "failed to Deserialize: ", e.what());
     }
 
     return {};
