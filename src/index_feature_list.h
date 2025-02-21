@@ -16,6 +16,7 @@
 #pragma once
 
 #include <cstdint>
+#include <memory>
 #include <vector>
 
 #include "vsag/index_features.h"
@@ -39,4 +40,7 @@ private:
 
     const uint32_t feature_count_{0};
 };
+
+using IndexFeatureListPtr = std::shared_ptr<IndexFeatureList>;
+
 }  // namespace vsag

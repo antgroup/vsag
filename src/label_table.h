@@ -17,7 +17,10 @@
 
 #include <fmt/format-inl.h>
 
+#include "stream_reader.h"
+#include "stream_writer.h"
 #include "typing.h"
+
 namespace vsag {
 class LabelTable {
 public:
@@ -27,7 +30,9 @@ public:
     inline void
     Insert(InnerIdType id, LabelType label) {
         label_remap_[label] = id;
-        label_table_.resize(id + 1);
+        if (id + 1 > label_table_.size()) {
+            label_table_.resize(id + 1);
+        }
         label_table_[id] = label;
     }
 

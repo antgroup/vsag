@@ -23,27 +23,6 @@
 #include "typing.h"
 
 namespace vsag {
-class HGraphIndexParameter : public Parameter {
-public:
-    explicit HGraphIndexParameter(IndexCommonParam common_param);
-
-    void
-    FromJson(const JsonType& json) override;
-
-    JsonType
-    ToJson() override;
-
-public:
-    std::shared_ptr<HGraphParameter> hgraph_parameter_{nullptr};
-
-private:
-    void
-    check_common_param() const;
-
-private:
-    const IndexCommonParam common_param_;
-};
-
 class HGraphSearchParameters {
 public:
     static HGraphSearchParameters

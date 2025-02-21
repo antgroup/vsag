@@ -19,16 +19,16 @@
 
 #include <string>
 
+#include "algorithm/hgraph.h"
 #include "common.h"
 #include "index/brute_force.h"
 #include "index/brute_force_parameter.h"
 #include "index/diskann.h"
 #include "index/diskann_zparameters.h"
-#include "index/hgraph_index.h"
-#include "index/hgraph_index_zparameters.h"
 #include "index/hnsw.h"
 #include "index/hnsw_zparameters.h"
 #include "index/index_common_param.h"
+#include "index/index_impl.h"
 #include "index/pyramid.h"
 #include "index/pyramid_zparameters.h"
 #include "resource_owner_wrapper.h"
@@ -116,9 +116,8 @@ Engine::CreateIndex(const std::string& origin_name, const std::string& parameter
             if (parsed_params.contains(INDEX_PARAM)) {
                 hgraph_json = std::move(parsed_params[INDEX_PARAM]);
             }
-            auto hgraph_param = std::make_shared<HGraphIndexParameter>(index_common_params);
-            hgraph_param->FromJson(hgraph_json);
-            auto hgraph_index = std::make_shared<HGraphIndex>(*hgraph_param, index_common_params);
+            auto hgraph_index =
+                std::make_shared<IndexImpl<HGraph>>(hgraph_json, index_common_params);
             return hgraph_index;
         } else if (name == INDEX_PYRAMID) {
             // read parameters from json, throw exception if not exists
