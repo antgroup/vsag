@@ -516,7 +516,7 @@ Pyramid::add(const DatasetPtr& base) {
         std::string current_path = path[i];
         auto path_slices = split(current_path, PART_SLASH);
         std::shared_ptr<IndexNode> node = root_;
-        InnerIdType inner_id = static_cast<InnerIdType>(i + cur_element_count_);
+        auto inner_id = static_cast<InnerIdType>(i + cur_element_count_);
         for (auto& path_slice : path_slices) {
             node = node->GetChild(path_slice, true);
             // add one point
@@ -549,8 +549,8 @@ Pyramid::add(const DatasetPtr& base) {
 
 void
 Pyramid::resize(int64_t new_max_capacity) {
-    pool_.reset(new VisitedListPool(
-        1, common_param_.allocator_.get(), new_max_capacity, common_param_.allocator_.get()));
+    pool_ = std::make_unique<VisitedListPool>(
+        1, common_param_.allocator_.get(), new_max_capacity, common_param_.allocator_.get());
     labels_.resize(new_max_capacity);
     max_capacity_ = new_max_capacity;
 }
