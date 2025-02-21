@@ -28,6 +28,8 @@ namespace vsag {
 struct SparseVector {
     uint32_t len_;   // the length of the vector (i.e., the count of non-zero vals)
     uint32_t* ids_;  // contains ids with size of len_
+                     // (The ids_ will be sorted in ascending order inside the index.
+                     // it is recommended to sort them before putting them into VSAG.)
     float* vals_;    // contains vals with size of len_
 
     SparseVector() : len_{0}, ids_{nullptr}, vals_{nullptr} {
