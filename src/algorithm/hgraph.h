@@ -205,7 +205,7 @@ private:
 
     std::shared_ptr<hnswlib::VisitedListPool> pool_{nullptr};
 
-    mutable MutexStrategyPtr neighbors_mutex_;
+    mutable MutexArrayPtr neighbors_mutex_;
 
     std::unique_ptr<progschj::ThreadPool> build_pool_{nullptr};
     uint64_t build_thread_count_{100};

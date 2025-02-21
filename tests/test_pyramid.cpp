@@ -82,7 +82,24 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
         auto param = GeneratePyramidBuildParametersString(metric_type, dim);
         auto index = TestFactory(name, param, true);
         auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type, /*with_path=*/true);
-        TestBuildIndex(index, dataset, true);
+        TestContinueAdd(index, dataset, true);
+        TestKnnSearch(index, dataset, search_param, 0.99, true);
+        TestFilterSearch(index, dataset, search_param, 0.99, true);
+        TestRangeSearch(index, dataset, search_param, 0.99, 10, true);
+        TestRangeSearch(index, dataset, search_param, 0.49, 5, true);
+    }
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex, "Pyramid Add Test", "[ft][pyramid]") {
+    auto metric_type = GENERATE("l2");
+    std::string base_quantization_str = GENERATE("fp32");
+    const std::string name = "pyramid";
+    auto search_param = fmt::format(search_param_tmp, 100);
+    for (auto& dim : dims) {
+        auto param = GeneratePyramidBuildParametersString(metric_type, dim);
+        auto index = TestFactory(name, param, true);
+        auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type, /*with_path=*/true);
+        TestAddIndex(index, dataset, true);
         TestKnnSearch(index, dataset, search_param, 0.99, true);
         //        TestFilterSearch(index, dataset, search_param, 0.99, true);
         TestRangeSearch(index, dataset, search_param, 0.99, 10, true);
