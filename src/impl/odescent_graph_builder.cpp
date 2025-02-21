@@ -407,7 +407,6 @@ ODescent::SaveGraph(GraphInterfacePtr& graph_storage) {
         }
         graph_storage->InsertNeighborsById(id, edges);
     }
-    graph_storage->IncreaseTotalCount(data_num_);
 }
 
 }  // namespace vsag
