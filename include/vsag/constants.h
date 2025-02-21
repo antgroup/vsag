@@ -82,8 +82,6 @@ extern const char* const HNSW_PARAMETER_SKIP_RATIO;
 
 extern const char* const PYRAMID_PARAMETER_BASE_CODES;
 
-extern const char* const PYRAMID_PARAMETER_BASE_CODES;
-
 extern const char* const INDEX_PARAM;
 
 extern const char PART_SLASH;
