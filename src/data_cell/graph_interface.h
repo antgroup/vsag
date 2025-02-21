@@ -79,14 +79,11 @@ public:
     InsertNeighbors(const Vector<InnerIdType>& neighbor_ids) {
         this->max_capacity_ = std::max(this->max_capacity_, total_count_ + 1);
         this->InsertNeighborsById(total_count_ + 1, neighbor_ids);
-        IncreaseTotalCount(1);
+        {
+            std::unique_lock<std::mutex> lock(global_);
+            total_count_ += 1;
+        }
         return total_count_;
-    }
-
-    virtual void
-    IncreaseTotalCount(InnerIdType count) {
-        std::unique_lock<std::mutex> lock(global_);
-        total_count_ += count;
     }
 
     [[nodiscard]] virtual InnerIdType
@@ -125,11 +122,11 @@ public:
     };
 
 public:
-    InnerIdType total_count_{0};
-
     InnerIdType max_capacity_{1000000};
     uint32_t maximum_degree_{0};
 
+protected:
+    InnerIdType total_count_{0};
     std::mutex global_{};
 };
 
