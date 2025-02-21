@@ -38,14 +38,6 @@ using MaxHeap = std::priority_queue<std::pair<float, int64_t>,
                                     std::vector<std::pair<float, int64_t>>,
                                     CompareByFirst>;
 
-template <typename T>
-static T*
-CopyVector(const std::vector<T>& vec) {
-    auto result = new T[vec.size()];
-    memcpy(result, vec.data(), vec.size() * sizeof(T));
-    return result;
-}
-
 bool
 is_path_belong_to(const std::string& a, const std::string& b) {
     return b.compare(0, a.size(), a) == 0;

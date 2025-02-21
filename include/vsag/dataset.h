@@ -25,6 +25,17 @@
 
 namespace vsag {
 
+struct SparseVector {
+    uint32_t len_;   // the length of the vector (i.e., the count of non-zero vals)
+    uint32_t* ids_;  // contains ids with size of len_
+                     // (The ids_ will be sorted in ascending order inside the index.
+                     // it is recommended to sort them before putting them into VSAG.)
+    float* vals_;    // contains vals with size of len_
+
+    SparseVector() : len_{0}, ids_{nullptr}, vals_{nullptr} {
+    }
+};
+
 class Dataset;
 using DatasetPtr = std::shared_ptr<Dataset>;
 
@@ -172,6 +183,23 @@ public:
      */
     virtual const float*
     GetFloat32Vectors() const = 0;
+
+    /**
+     * @brief Sets the sparse vector array for the dataset.
+     *
+     * @param vectors Pointer to the struct of sparse vectors.
+     * @return DatasetPtr A shared pointer to the dataset with updated sparse vectors.
+     */
+    virtual DatasetPtr
+    SparseVectors(const SparseVector* sparse_vectors) = 0;
+
+    /**
+     * @brief Retrieves the sparse struct of the dataset.
+     *
+     * @return const SparseVector to the array of sparse vectors.
+     */
+    virtual const SparseVector*
+    GetSparseVectors() const = 0;
 
     /**
      * @brief Sets the paths array for the dataset.

@@ -51,6 +51,59 @@ get_common_used_dims(uint64_t count, int seed) {
     return result;
 }
 
+std::vector<vsag::SparseVector>
+GenerateSparseVectors(
+    uint32_t count, uint32_t max_dim, uint32_t max_id, float min_val, float max_val, int seed) {
+    std::mt19937 rng(seed);
+    std::uniform_real_distribution<float> distrib_real(min_val, max_val);
+    std::uniform_int_distribution<int> distrib_dim(0, max_dim);
+    std::uniform_int_distribution<int> distrib_id(0, max_id);
+
+    std::vector<vsag::SparseVector> sparse_vectors(count);
+
+    for (int i = 0; i < count; i++) {
+        sparse_vectors[i].len_ = distrib_dim(rng);
+        sparse_vectors[i].ids_ = new uint32_t[sparse_vectors[i].len_];
+        sparse_vectors[i].vals_ = new float[sparse_vectors[i].len_];
+        for (int d = 0; d < sparse_vectors[i].len_; d++) {
+            sparse_vectors[i].ids_[d] = distrib_id(rng);
+            sparse_vectors[i].vals_[d] = distrib_real(rng);
+        }
+    }
+
+    return sparse_vectors;
+}
+
+vsag::Vector<vsag::SparseVector>
+GenerateSparseVectors(vsag::Allocator* allocator,
+                      uint32_t count,
+                      uint32_t max_dim,
+                      uint32_t max_id,
+                      float min_val,
+                      float max_val,
+                      int seed) {
+    std::mt19937 rng(seed);
+    std::uniform_real_distribution<float> distrib_real(min_val, max_val);
+    std::uniform_int_distribution<int> distrib_dim(0, max_dim);
+    std::uniform_int_distribution<int> distrib_id(0, max_id);
+
+    vsag::Vector<vsag::SparseVector> sparse_vectors(count, allocator);
+
+    for (int i = 0; i < count; i++) {
+        sparse_vectors[i].len_ = distrib_dim(rng);
+        sparse_vectors[i].ids_ =
+            (uint32_t*)allocator->Allocate(sizeof(uint32_t) * sparse_vectors[i].len_);
+        sparse_vectors[i].vals_ =
+            (float*)allocator->Allocate(sizeof(float) * sparse_vectors[i].len_);
+        for (int d = 0; d < sparse_vectors[i].len_; d++) {
+            sparse_vectors[i].ids_[d] = distrib_id(rng);
+            sparse_vectors[i].vals_[d] = distrib_real(rng);
+        }
+    }
+
+    return sparse_vectors;
+}
+
 std::vector<float>
 generate_vectors(uint64_t count, uint32_t dim, bool need_normalize, int seed) {
     return std::move(GenerateVectors<float>(count, dim, seed, need_normalize));
@@ -262,14 +315,6 @@ GenTestItems(uint64_t count, uint64_t max_length, uint64_t max_index) {
         auto vec = fixtures::generate_vectors(1, max_length, false, random());
         memcpy(item.data_, vec.data(), item.length_);
     }
-    return result;
-}
-
-template <typename T>
-static T*
-CopyVector(const std::vector<T>& vec) {
-    auto result = new T[vec.size()];
-    memcpy(result, vec.data(), vec.size() * sizeof(T));
     return result;
 }
 

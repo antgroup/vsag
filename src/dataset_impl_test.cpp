@@ -18,6 +18,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "default_allocator.h"
+#include "fixtures.h"
 #include "vsag/dataset.h"
 
 TEST_CASE("Dataset Implement Test", "[ut][dataset]") {
@@ -39,5 +40,63 @@ TEST_CASE("Dataset Implement Test", "[ut][dataset]") {
         auto* data = new float[1];
         dataset->Float32Vectors(data)->Owner(false);
         delete[] data;
+    }
+
+    SECTION("sparse vector") {
+        uint32_t size = 100;
+        uint32_t max_dim = 256;
+        uint32_t max_id = 1000000;
+        float min_val = -100;
+        float max_val = 100;
+        int seed = 114514;
+
+        // generate data
+        std::vector<vsag::SparseVector> sparse_vectors =
+            fixtures::GenerateSparseVectors(size, max_dim, max_id, min_val, max_val, seed);
+        auto dataset = vsag::Dataset::Make();
+        dataset->SparseVectors(fixtures::CopyVector(sparse_vectors))
+            ->NumElements(size)
+            ->Owner(true);
+
+        // validate data
+        auto sparse_vectors_ptr = dataset->GetSparseVectors();
+        for (int i = 0; i < dataset->GetNumElements(); i++) {
+            uint32_t dim = sparse_vectors_ptr[i].len_;
+            REQUIRE(dim < max_dim);
+            for (int d = 0; d < dim; d++) {
+                REQUIRE(sparse_vectors_ptr[i].ids_[d] < max_id);
+                REQUIRE(min_val < sparse_vectors_ptr[i].vals_[d]);
+                REQUIRE(sparse_vectors_ptr[i].vals_[d] < max_val);
+            }
+        }
+    }
+
+    SECTION("sparse vector with allocator") {
+        uint32_t size = 100;
+        uint32_t max_dim = 256;
+        uint32_t max_id = 1000000;
+        float min_val = -100;
+        float max_val = 100;
+        int seed = 114514;
+
+        // generate data
+        vsag::Vector<vsag::SparseVector> sparse_vectors = fixtures::GenerateSparseVectors(
+            &allocator, size, max_dim, max_id, min_val, max_val, seed);
+        auto dataset = vsag::Dataset::Make();
+        dataset->SparseVectors(fixtures::CopyVector(sparse_vectors, &allocator))
+            ->NumElements(size)
+            ->Owner(true, &allocator);
+
+        // validate data
+        auto sparse_vectors_ptr = dataset->GetSparseVectors();
+        for (int i = 0; i < dataset->GetNumElements(); i++) {
+            uint32_t dim = sparse_vectors_ptr[i].len_;
+            REQUIRE(dim < max_dim);
+            for (int d = 0; d < dim; d++) {
+                REQUIRE(sparse_vectors_ptr[i].ids_[d] < max_id);
+                REQUIRE(min_val < sparse_vectors_ptr[i].vals_[d]);
+                REQUIRE(sparse_vectors_ptr[i].vals_[d] < max_val);
+            }
+        }
     }
 }
