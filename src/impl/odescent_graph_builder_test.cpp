@@ -80,10 +80,9 @@ TEST_CASE("ODescent Build Test", "[ut][ODescent]") {
     graph_param_ptr->io_parameter_ = std::make_shared<vsag::MemoryIOParameter>();
     graph_param_ptr->max_degree_ = partial_data ? 2 * max_degree : max_degree;
     // build graph
-    vsag::ODescent graph(max_degree,
-                         1,
-                         30,
-                         0.3,
+    auto odescent_param = std::make_shared<vsag::ODescentParameter>();
+    odescent_param->max_degree = max_degree;
+    vsag::ODescent graph(odescent_param,
                          flatten_interface_ptr,
                          param.allocator_.get(),
                          param.thread_pool_.get(),
@@ -96,8 +95,9 @@ TEST_CASE("ODescent Build Test", "[ut][ODescent]") {
             valid_ids[i] = 2 * i;
         }
     }
+    auto id_seq = std::make_shared<vsag::ODescent::IdsSequence>(valid_ids.get(), num_vectors);
     if (num_vectors <= 0) {
-        REQUIRE_THROWS(graph.Build(valid_ids.get(), num_vectors));
+        REQUIRE_THROWS(graph.Build(id_seq));
         return;
     }
 
@@ -110,8 +110,7 @@ TEST_CASE("ODescent Build Test", "[ut][ODescent]") {
         vsag::GraphInterface::MakeInstance(graph_param_ptr, param, partial_data);
     vsag::GraphInterfacePtr merged_graph_interface =
         vsag::GraphInterface::MakeInstance(graph_param_ptr, param, partial_data);
-
-    graph.Build(valid_ids.get(), num_vectors);
+    graph.Build(id_seq);
     graph.SaveGraph(graph_interface);
 
     for (int i = 0; i < num_vectors; ++i) {
@@ -122,7 +121,7 @@ TEST_CASE("ODescent Build Test", "[ut][ODescent]") {
         edges.resize(origin_size / 2);
         half_graph_interface->InsertNeighborsById(id, edges);
     }
-    graph.Build(valid_ids.get(), num_vectors, half_graph_interface);
+    graph.Build(id_seq, half_graph_interface);
     graph.SaveGraph(merged_graph_interface);
 
     if (num_vectors == 1) {
