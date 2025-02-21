@@ -62,10 +62,10 @@ GenerateSparseVectors(
     std::vector<vsag::SparseVector> sparse_vectors(count);
 
     for (int i = 0; i < count; i++) {
-        sparse_vectors[i].dim_ = distrib_dim(rng);
-        sparse_vectors[i].ids_ = new uint32_t[sparse_vectors[i].dim_];
-        sparse_vectors[i].vals_ = new float[sparse_vectors[i].dim_];
-        for (int d = 0; d < sparse_vectors[i].dim_; d++) {
+        sparse_vectors[i].len_ = distrib_dim(rng);
+        sparse_vectors[i].ids_ = new uint32_t[sparse_vectors[i].len_];
+        sparse_vectors[i].vals_ = new float[sparse_vectors[i].len_];
+        for (int d = 0; d < sparse_vectors[i].len_; d++) {
             sparse_vectors[i].ids_[d] = distrib_id(rng);
             sparse_vectors[i].vals_[d] = distrib_real(rng);
         }
@@ -90,12 +90,12 @@ GenerateSparseVectors(vsag::Allocator* allocator,
     vsag::Vector<vsag::SparseVector> sparse_vectors(count, allocator);
 
     for (int i = 0; i < count; i++) {
-        sparse_vectors[i].dim_ = distrib_dim(rng);
+        sparse_vectors[i].len_ = distrib_dim(rng);
         sparse_vectors[i].ids_ =
-            (uint32_t*)allocator->Allocate(sizeof(uint32_t) * sparse_vectors[i].dim_);
+            (uint32_t*)allocator->Allocate(sizeof(uint32_t) * sparse_vectors[i].len_);
         sparse_vectors[i].vals_ =
-            (float*)allocator->Allocate(sizeof(float) * sparse_vectors[i].dim_);
-        for (int d = 0; d < sparse_vectors[i].dim_; d++) {
+            (float*)allocator->Allocate(sizeof(float) * sparse_vectors[i].len_);
+        for (int d = 0; d < sparse_vectors[i].len_; d++) {
             sparse_vectors[i].ids_[d] = distrib_id(rng);
             sparse_vectors[i].vals_[d] = distrib_real(rng);
         }

@@ -26,11 +26,11 @@
 namespace vsag {
 
 struct SparseVector {
-    uint32_t dim_;   // dim of vector
+    uint32_t len_;   // dim of vector
     uint32_t* ids_;  // contains ids with size of dim_
     float* vals_;    // contains vals with size of dim_
 
-    SparseVector() : dim_{0}, ids_{nullptr}, vals_{nullptr} {
+    SparseVector() : len_{0}, ids_{nullptr}, vals_{nullptr} {
     }
 };
 

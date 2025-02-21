@@ -61,7 +61,7 @@ TEST_CASE("Dataset Implement Test", "[ut][dataset]") {
         // validate data
         auto sparse_vectors_ptr = dataset->GetSparseVectors();
         for (int i = 0; i < dataset->GetNumElements(); i++) {
-            uint32_t dim = sparse_vectors_ptr[i].dim_;
+            uint32_t dim = sparse_vectors_ptr[i].len_;
             REQUIRE(dim < max_dim);
             for (int d = 0; d < dim; d++) {
                 REQUIRE(sparse_vectors_ptr[i].ids_[d] < max_id);
@@ -90,7 +90,7 @@ TEST_CASE("Dataset Implement Test", "[ut][dataset]") {
         // validate data
         auto sparse_vectors_ptr = dataset->GetSparseVectors();
         for (int i = 0; i < dataset->GetNumElements(); i++) {
-            uint32_t dim = sparse_vectors_ptr[i].dim_;
+            uint32_t dim = sparse_vectors_ptr[i].len_;
             REQUIRE(dim < max_dim);
             for (int d = 0; d < dim; d++) {
                 REQUIRE(sparse_vectors_ptr[i].ids_[d] < max_id);
