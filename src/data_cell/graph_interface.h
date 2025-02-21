@@ -75,17 +75,6 @@ public:
         StreamReader::ReadObj(reader, this->maximum_degree_);
     }
 
-    virtual InnerIdType
-    InsertNeighbors(const Vector<InnerIdType>& neighbor_ids) {
-        this->max_capacity_ = std::max(this->max_capacity_, total_count_ + 1);
-        this->InsertNeighborsById(total_count_ + 1, neighbor_ids);
-        {
-            std::unique_lock<std::mutex> lock(global_);
-            total_count_ += 1;
-        }
-        return total_count_;
-    }
-
     [[nodiscard]] virtual InnerIdType
     TotalCount() const {
         return this->total_count_;
@@ -118,16 +107,15 @@ public:
 
     virtual void
     SetMaxCapacity(InnerIdType capacity) {
-        this->max_capacity_ = std::max(capacity, this->total_count_);
+        this->max_capacity_ = std::max(capacity, this->total_count_.load());
     };
 
 public:
-    InnerIdType max_capacity_{1000000};
+    InnerIdType max_capacity_{100};
     uint32_t maximum_degree_{0};
 
 protected:
-    InnerIdType total_count_{0};
-    std::mutex global_{};
+    std::atomic<InnerIdType> total_count_{0};
 };
 
 }  // namespace vsag
