@@ -28,6 +28,7 @@
 #include <utility>
 
 #include "data_cell/flatten_datacell.h"
+#include "empty_index_binary_set.h"
 #include "impl/odescent_graph_builder.h"
 #include "io/memory_io_parameter.h"
 #include "quantization/fp32_quantizer_parameter.h"
@@ -619,29 +620,11 @@ DiskANN::range_search(const DatasetPtr& query,
     }
 }
 
-BinarySet
-DiskANN::empty_binaryset() {
-    // version 0 pairs:
-    // - hnsw_blank: b"EMPTY_DISKANN"
-    const std::string empty_str = "EMPTY_DISKANN";
-    size_t num_bytes = empty_str.length();
-    std::shared_ptr<int8_t[]> bin(new int8_t[num_bytes]);
-    memcpy(bin.get(), empty_str.c_str(), empty_str.length());
-    Binary b{
-        .data = bin,
-        .size = num_bytes,
-    };
-    BinarySet bs;
-    bs.Set(BLANK_INDEX, b);
-
-    return bs;
-}
-
 tl::expected<BinarySet, Error>
 DiskANN::serialize() const {
     if (status_ == IndexStatus::EMPTY) {
         // return a special binaryset means empty
-        return empty_binaryset();
+        return EmptyIndexBinarySet::Make("EMPTY_DISKANN");
     }
 
     SlowTaskTimer t("diskann serialize");
