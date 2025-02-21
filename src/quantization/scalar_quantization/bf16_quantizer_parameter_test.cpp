@@ -13,10 +13,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#pragma once
-
 #include "bf16_quantizer_parameter.h"
-#include "sq4_quantizer_parameter.h"
-#include "sq4_uniform_quantizer_parameter.h"
-#include "sq8_quantizer_parameter.h"
-#include "sq8_uniform_quantizer_parameter.h"
+
+#include <catch2/catch_test_macros.hpp>
+
+#include "parameter_test.h"
+
+using namespace vsag;
+
+TEST_CASE("BF16 Quantizer Parameter ToJson Test", "[ut][BF16QuantizerParameter]") {
+    std::string param_str = "{}";
+    auto param = std::make_shared<BF16QuantizerParameter>();
+    param->FromJson(param_str);
+    ParameterTest::TestToJson(param);
+}
