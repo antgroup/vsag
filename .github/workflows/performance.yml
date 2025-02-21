@@ -1,0 +1,30 @@
+name: Performance
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  performance:
+    name: Performance
+    runs-on: ubuntu-latest
+    container:
+      image: vsaglib/vsag:ci-x86
+    env:
+      PERF_DINGDING_ACCESS_TOKEN: ${{ secrets.PERF_DINGDING_ACCESS_TOKEN }}
+      PERF_DINGDING_SERCRET: ${{ secrets.PERF_DINGDING_SERCRET }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Install Deps
+        run: pip3 install requests
+      - name: Download Datasets
+        run: bash ./scripts/download_annbench_datasets.sh
+      - name: Build Release
+        run: make release
+      - name: Run
+        run: ./build-release/tools/eval/eval_performance .github/eval-perf.yml | tee /tmp/eval-perf.log
+      - name: Send Report
+        run: python3 scripts/perf_reports/dingding.py /tmp/eval-perf.log || echo "send dingding message failed"

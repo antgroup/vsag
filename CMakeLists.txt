@@ -192,6 +192,7 @@ if (ENABLE_TOOLS AND ENABLE_CXX11_ABI)
     include (extern/hdf5/hdf5.cmake)
     include (extern/argparse/argparse.cmake)
     include (extern/yaml-cpp/yaml-cpp.cmake)
+    include (extern/tabulate/tabulate.cmake)
 endif ()
 
 set (CMAKE_CXX_STANDARD 17)

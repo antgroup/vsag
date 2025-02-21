@@ -1,8 +1,8 @@
 
 set (EVAL_SRC
-        eval_case.cpp
-        search_eval_case.cpp
-        build_eval_case.cpp
+        case/eval_case.cpp
+        case/search_eval_case.cpp
+        case/build_eval_case.cpp
         eval_dataset.cpp
         eval_config.cpp
         monitor/monitor.cpp
@@ -20,6 +20,7 @@ target_link_libraries (eval_performance
   eval_obj
   yaml-cpp
   argparse::argparse
+  tabulate
   simd
   libhdf5_cpp.a
   libhdf5.a
