@@ -330,9 +330,43 @@ SQ8UniformComputeCodesIP(const uint8_t* codes1, const uint8_t* codes2, uint64_t 
 }
 
 float
+RaBitQFloatBinaryIP(const float* vector, const uint8_t* bits, uint64_t dim) {
+    float inv_sqrt_d = 1.0f / std::sqrt(static_cast<float>(dim));
+    float result = 0.0f;
+
+    for (std::size_t d = 0; d < dim; ++d) {
+        bool bit = ((bits[d / 8] >> (d % 8)) & 1) != 0;
+        float b_i = bit ? inv_sqrt_d : -inv_sqrt_d;
+        result += b_i * vector[d];
+    }
+
+    return result;
+}
+
+float
 Normalize(const float* from, float* to, uint64_t dim) {
     float norm = std::sqrt(FP32ComputeIP(from, from, dim));
     generic::DivScalar(from, to, dim, norm);
+    return norm;
+}
+
+float
+NormalizeWithCentroid(const float* from, const float* centroid, float* to, uint64_t dim) {
+    float norm = 0;
+    for (uint64_t d = 0; d < dim; ++d) {
+        norm += (from[d] - centroid[d]) * (from[d] - centroid[d]);
+    }
+
+    if (norm == 0) {
+        norm = 1;
+    } else {
+        norm = std::sqrt(norm);
+    }
+
+    for (int d = 0; d < dim; d++) {
+        to[d] = (from[d] - centroid[d]) / norm;
+    }
+
     return norm;
 }
 
