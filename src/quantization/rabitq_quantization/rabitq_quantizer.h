@@ -271,6 +271,7 @@ void
 RaBitQuantizer<metric>::ProcessQueryImpl(const DataType* query,
                                          Computer<RaBitQuantizer>& computer) const {
     try {
+        // TODO(ZXY): allow process query with SQ4 or SQ8, implement in ComputeDist and Param
         size_t align_size = std::max(sizeof(error_type), sizeof(norm_type));
         size_t query_fp32_size = sizeof(DataType) * this->dim_;
 
