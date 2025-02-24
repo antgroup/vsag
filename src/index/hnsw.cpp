@@ -27,6 +27,7 @@
 #include "common.h"
 #include "data_cell/flatten_datacell.h"
 #include "data_cell/graph_datacell_parameter.h"
+#include "empty_index_binary_set.h"
 #include "index/hnsw_zparameters.h"
 #include "io/memory_block_io_parameter.h"
 #include "io/memory_io_parameter.h"
@@ -421,29 +422,11 @@ HNSW::range_search(const DatasetPtr& query,
     }
 }
 
-BinarySet
-HNSW::empty_binaryset() {
-    // version 0 pairs:
-    // - hnsw_blank: b"EMPTY_HNSW"
-    const std::string empty_str = "EMPTY_HNSW";
-    size_t num_bytes = empty_str.length();
-    std::shared_ptr<int8_t[]> bin(new int8_t[num_bytes]);
-    memcpy(bin.get(), empty_str.c_str(), empty_str.length());
-    Binary b{
-        .data = bin,
-        .size = num_bytes,
-    };
-    BinarySet bs;
-    bs.Set(BLANK_INDEX, b);
-
-    return bs;
-}
-
 tl::expected<BinarySet, Error>
 HNSW::serialize() const {
     if (GetNumElements() == 0) {
         // return a special binaryset means empty
-        return empty_binaryset();
+        return EmptyIndexBinarySet::Make("EMPTY_HNSW");
     }
 
     SlowTaskTimer t("hnsw serialize");
