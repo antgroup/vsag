@@ -22,26 +22,12 @@
 
 #include "common.h"
 #include "data_cell/sparse_graph_datacell.h"
+#include "empty_index_binary_set.h"
 #include "impl/pruning_strategy.h"
 #include "index/hgraph_index_zparameters.h"
 #include "logger.h"
 
 namespace vsag {
-static BinarySet
-empty_binaryset() {
-    const std::string empty_str = "EMPTY_INDEX";
-    size_t num_bytes = empty_str.length();
-    std::shared_ptr<int8_t[]> bin(new int8_t[num_bytes]);
-    memcpy(bin.get(), empty_str.c_str(), empty_str.length());
-    Binary b{
-        .data = bin,
-        .size = num_bytes,
-    };
-    BinarySet bs;
-    bs.Set(BLANK_INDEX, b);
-
-    return bs;
-}
 
 static uint64_t
 next_multiple_of_power_of_two(uint64_t x, uint64_t n) {
@@ -252,7 +238,7 @@ HGraph::EstimateMemory(uint64_t num_elements) const {
 tl::expected<BinarySet, Error>
 HGraph::Serialize() const {
     if (GetNumElements() == 0) {
-        return empty_binaryset();
+        return EmptyIndexBinarySet::Make("EMPTY_HGRAPH");
     }
     SlowTaskTimer t("hgraph Serialize");
     size_t num_bytes = this->cal_serialize_size();

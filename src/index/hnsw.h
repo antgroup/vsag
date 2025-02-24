@@ -319,9 +319,6 @@ private:
     tl::expected<void, Error>
     merge(const std::vector<MergeUnit>& merge_units);
 
-    static BinarySet
-    empty_binaryset();
-
     void
     init_feature_list();
 

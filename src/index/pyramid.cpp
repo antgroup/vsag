@@ -16,25 +16,11 @@
 #include "pyramid.h"
 
 #include "data_cell/flatten_interface.h"
+#include "empty_index_binary_set.h"
 #include "impl/odescent_graph_builder.h"
 #include "io/memory_io_parameter.h"
+
 namespace vsag {
-
-static BinarySet
-empty_binaryset() {
-    const std::string empty_str = "EMPTY_INDEX";
-    size_t num_bytes = empty_str.length();
-    std::shared_ptr<int8_t[]> bin(new int8_t[num_bytes]);
-    memcpy(bin.get(), empty_str.c_str(), empty_str.length());
-    Binary b{
-        .data = bin,
-        .size = num_bytes,
-    };
-    BinarySet bs;
-    bs.Set(BLANK_INDEX, b);
-
-    return bs;
-}
 
 std::vector<std::string>
 split(const std::string& str, char delimiter) {
@@ -346,7 +332,7 @@ Pyramid::search_impl(const DatasetPtr& query, int64_t limit, const SearchFunc& s
 tl::expected<BinarySet, Error>
 Pyramid::Serialize() const {
     if (GetNumElements() == 0) {
-        return empty_binaryset();
+        return EmptyIndexBinarySet::Make("EMPTY_PYRAMID");
     }
     SlowTaskTimer t("Pyramid Serialize");
     size_t num_bytes = this->cal_serialize_size();
