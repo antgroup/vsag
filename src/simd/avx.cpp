@@ -229,6 +229,76 @@ BF16ComputeL2Sqr(const uint8_t* query, const uint8_t* codes, uint64_t dim) {
     return sse::BF16ComputeL2Sqr(query, codes, dim);
 #endif
 }
+
+float
+FP16ComputeIP(const uint8_t* query, const uint8_t* codes, uint64_t dim) {
+#if defined(ENABLE_AVX)
+    // Initialize the sum to 0
+    __m256 sum = _mm256_setzero_ps();
+    const auto* query_fp16 = (const uint16_t*)(query);
+    const auto* codes_fp16 = (const uint16_t*)(codes);
+
+    // Process the data in 128-bit chunks
+    uint64_t i = 0;
+    for (; i + 7 < dim; i += 8) {
+        // Load data into registers
+        __m128i query_load = _mm_load_si128(reinterpret_cast<const __m128i*>(query_fp16 + i));
+        __m256 query_float = _mm256_cvtph_ps(query_load);
+
+        // Load data into registers
+        __m128i code_load = _mm_load_si128(reinterpret_cast<const __m128i*>(codes_fp16 + i));
+        __m256 code_float = _mm256_cvtph_ps(code_load);
+
+        __m256 val = _mm256_mul_ps(code_float, query_float);
+        sum = _mm256_add_ps(sum, val);
+    }
+
+    alignas(32) float result[8];
+    _mm256_store_ps(result, sum);  // store the accumulated result into an array
+    float ip = result[0] + result[1] + result[2] + result[3] + result[4] + result[5] + result[6] +
+               result[7];  // calculate the sum of the accumulated results
+
+    return ip + sse::FP16ComputeIP(query + i * 2, codes + i * 2, dim - i);
+#else
+    return sse::FP16ComputeIP(query, codes, dim);
+#endif
+}
+
+float
+FP16ComputeL2Sqr(const uint8_t* query, const uint8_t* codes, uint64_t dim) {
+#if defined(ENABLE_AVX)
+    // Initialize the sum to 0
+    __m256 sum = _mm256_setzero_ps();
+    const auto* query_fp16 = (const uint16_t*)(query);
+    const auto* codes_fp16 = (const uint16_t*)(codes);
+
+    // Process the data in 128-bit chunks
+    uint64_t i = 0;
+    for (; i + 7 < dim; i += 8) {
+        // Load data into registers
+        __m128i query_load = _mm_load_si128(reinterpret_cast<const __m128i*>(query_fp16 + i));
+        __m256 query_float = _mm256_cvtph_ps(query_load);
+
+        // Load data into registers
+        __m128i code_load = _mm_load_si128(reinterpret_cast<const __m128i*>(codes_fp16 + i));
+        __m256 code_float = _mm256_cvtph_ps(code_load);
+
+        __m256 diff = _mm256_sub_ps(code_float, query_float);
+        __m256 val = _mm256_mul_ps(diff, diff);
+        sum = _mm256_add_ps(sum, val);
+    }
+
+    alignas(32) float result[8];
+    _mm256_store_ps(result, sum);  // store the accumulated result into an array
+    float l2 = result[0] + result[1] + result[2] + result[3] + result[4] + result[5] + result[6] +
+               result[7];  // calculate the sum of the accumulated results
+
+    return l2 + sse::FP16ComputeL2Sqr(query + i * 2, codes + i * 2, dim - i);
+#else
+    return sse::FP16ComputeL2Sqr(query, codes, dim);
+#endif
+}
+
 float
 SQ8ComputeIP(const float* query,
              const uint8_t* codes,
