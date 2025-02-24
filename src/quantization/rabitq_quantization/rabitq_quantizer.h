@@ -238,7 +238,7 @@ template <MetricType metric>
 bool
 RaBitQuantizer<metric>::DecodeBatchImpl(const uint8_t* codes, DataType* data, uint64_t count) {
     for (uint64_t i = 0; i < count; ++i) {
-        // TODO(ZXY): use CBLAS to optimize
+        // TODO(ZXY): use batch optimize
         this->DecodeOneImpl(codes + i * this->code_size_, data + i * this->dim_);
     }
     return true;
@@ -308,7 +308,7 @@ RaBitQuantizer<metric>::ComputeBatchDistImpl(Computer<RaBitQuantizer<metric>>& c
                                              const uint8_t* codes,
                                              float* dists) const {
     for (uint64_t i = 0; i < count; ++i) {
-        // TODO(ZXY): use CBLAS to optimize
+        // TODO(ZXY): use batch optimize
         this->ComputeDistImpl(computer, codes + i * this->code_size_, dists + i);
     }
 }
