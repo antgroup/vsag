@@ -31,6 +31,7 @@ public:
     ToJson() override;
 
 public:
+    float trunc_rate_{0.05F};
 };
 
 using SQ4UniformQuantizerParamPtr = std::shared_ptr<SQ4UniformQuantizerParameter>;

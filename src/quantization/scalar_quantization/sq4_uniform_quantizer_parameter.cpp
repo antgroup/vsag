@@ -24,12 +24,16 @@ SQ4UniformQuantizerParameter::SQ4UniformQuantizerParameter()
 
 void
 SQ4UniformQuantizerParameter::FromJson(const JsonType& json) {
+    if (json.contains(SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE)) {
+        this->trunc_rate_ = json[SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE];  // TODO(LHT): Check value
+    }
 }
 
 JsonType
 SQ4UniformQuantizerParameter::ToJson() {
     JsonType json;
     json[QUANTIZATION_TYPE_KEY] = QUANTIZATION_TYPE_VALUE_SQ4_UNIFORM;
+    json[SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE] = this->trunc_rate_;
     return json;
 }
 }  // namespace vsag

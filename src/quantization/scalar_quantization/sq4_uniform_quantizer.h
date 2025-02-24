@@ -38,7 +38,7 @@ using sum_type = float;
 template <MetricType metric = MetricType::METRIC_TYPE_L2SQR>
 class SQ4UniformQuantizer : public Quantizer<SQ4UniformQuantizer<metric>> {
 public:
-    explicit SQ4UniformQuantizer(int dim, Allocator* allocator);
+    explicit SQ4UniformQuantizer(int dim, Allocator* allocator, float trunc_rate = 0.05F);
 
     explicit SQ4UniformQuantizer(const SQ4UniformQuantizerParamPtr& param,
                                  const IndexCommonParam& common_param);
@@ -104,11 +104,13 @@ private:
     uint64_t offset_code_{0};
     uint64_t offset_norm_{0};
     uint64_t offset_sum_{0};
+
+    float trunc_rate_{0.05F};
 };
 
 template <MetricType metric>
-SQ4UniformQuantizer<metric>::SQ4UniformQuantizer(int dim, Allocator* allocator)
-    : Quantizer<SQ4UniformQuantizer<metric>>(dim, allocator) {
+SQ4UniformQuantizer<metric>::SQ4UniformQuantizer(int dim, Allocator* allocator, float trunc_rate)
+    : Quantizer<SQ4UniformQuantizer<metric>>(dim, allocator), trunc_rate_(trunc_rate) {
     lower_bound_ = std::numeric_limits<DataType>::max();
     diff_ = std::numeric_limits<DataType>::lowest();
 
@@ -124,6 +126,7 @@ SQ4UniformQuantizer<metric>::SQ4UniformQuantizer(int dim, Allocator* allocator)
     this->code_size_ = 0;
 
     offset_code_ = this->code_size_;
+    dim = (dim + 1) / 2;
     this->code_size_ += ((dim + align_size - 1) / align_size) * align_size;
 
     if constexpr (metric == MetricType::METRIC_TYPE_L2SQR or
@@ -147,7 +150,8 @@ SQ4UniformQuantizer<metric>::SQ4UniformQuantizer(int dim, Allocator* allocator)
 template <MetricType metric>
 SQ4UniformQuantizer<metric>::SQ4UniformQuantizer(const SQ4UniformQuantizerParamPtr& param,
                                                  const IndexCommonParam& common_param)
-    : SQ4UniformQuantizer<metric>(common_param.dim_, common_param.allocator_.get()){};
+    : SQ4UniformQuantizer<metric>(
+          common_param.dim_, common_param.allocator_.get(), param->trunc_rate_){};
 
 template <MetricType metric>
 SQ4UniformQuantizer<metric>::SQ4UniformQuantizer(const QuantizerParamPtr& param,
@@ -171,6 +175,7 @@ SQ4UniformQuantizer<metric>::TrainImpl(const DataType* data, uint64_t count) {
     }
 
     ScalarQuantizationTrainer trainer(this->dim_, 4);
+    trainer.SetSQ4UniformTruncRate(this->trunc_rate_);
     trainer.TrainUniform(data, count, this->diff_, this->lower_bound_, need_normalize);
 
     this->diff_ -= this->lower_bound_;

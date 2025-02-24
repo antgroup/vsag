@@ -22,8 +22,13 @@
 using namespace vsag;
 
 TEST_CASE("SQ4 Uniform Quantizer Parameter ToJson Test", "[ut][SQ4UniformQuantizerParameter]") {
-    std::string param_str = "{}";
+    std::string param_str = R"(
+        {
+            "sq4_uniform_trunc_rate": 0.06
+        }
+    )";
     auto param = std::make_shared<SQ4UniformQuantizerParameter>();
-    param->FromJson(param_str);
+    param->FromJson(JsonType::parse(param_str));
+    REQUIRE(std::abs(param->trunc_rate_ - 0.06) < 1e-5F);
     ParameterTest::TestToJson(param);
 }
