@@ -32,6 +32,11 @@ using namespace vsag;
                 vec1.data() + i * dim, vec2.data() + i * dim, lb.data(), diff.data(), dim); \
             REQUIRE(fixtures::dist_t(gt) == fixtures::dist_t(sse));                         \
         }                                                                                   \
+        if (SimdStatus::SupportAVX()) {                                                     \
+            auto avx = avx::Func(                                                           \
+                vec1.data() + i * dim, vec2.data() + i * dim, lb.data(), diff.data(), dim); \
+            REQUIRE(fixtures::dist_t(gt) == fixtures::dist_t(avx));                         \
+        }                                                                                   \
         if (SimdStatus::SupportAVX2()) {                                                    \
             auto avx2 = avx2::Func(                                                         \
                 vec1.data() + i * dim, vec2.data() + i * dim, lb.data(), diff.data(), dim); \
@@ -107,6 +112,7 @@ TEST_CASE("SQ8 SIMD Compute Benchmark", "[ut][simd][!benchmark]") {
     auto diff = fixtures::generate_vectors(1, dim, true, 6217);
     BENCHMARK_SIMD_COMPUTE(generic, SQ8ComputeIP);
     BENCHMARK_SIMD_COMPUTE(sse, SQ8ComputeIP);
+    BENCHMARK_SIMD_COMPUTE(avx, SQ8ComputeIP);
     BENCHMARK_SIMD_COMPUTE(avx2, SQ8ComputeIP);
     BENCHMARK_SIMD_COMPUTE(avx512, SQ8ComputeIP);
 }
