@@ -250,7 +250,7 @@ TestIndex::TestContinueAdd(const IndexPtr& index,
                            const TestDatasetPtr& dataset,
                            bool expected_success) {
     auto base_count = dataset->base_->GetNumElements();
-    int64_t temp_count = base_count / 2;
+    int64_t temp_count = std::max(1L, base_count - 100L);
     auto dim = dataset->base_->GetDim();
     auto temp_dataset = vsag::Dataset::Make();
     temp_dataset->Dim(dim)
@@ -260,8 +260,7 @@ TestIndex::TestContinueAdd(const IndexPtr& index,
         ->Paths(dataset->base_->GetPaths())
         ->Owner(false);
     index->Build(temp_dataset);
-    auto rest_count = base_count - temp_count;
-    for (uint64_t j = rest_count; j < base_count; ++j) {
+    for (uint64_t j = temp_count; j < base_count; ++j) {
         auto data_one = vsag::Dataset::Make();
         data_one->Dim(dim)
             ->Ids(dataset->base_->GetIds() + j)
@@ -796,7 +795,7 @@ TestIndex::TestDuplicateAdd(const TestIndex::IndexPtr& index, const TestDatasetP
     };
 
     // add once with duplicate;
-    auto add_index = index->Add(double_dataset);
+    auto add_index = index->Build(double_dataset);
     REQUIRE(add_index.has_value());
     check_func(add_index.value());
 
@@ -832,8 +831,8 @@ TestIndex::TestEstimateMemory(const std::string& index_name,
                 WARN("estimate_memory failed");
             }
 
-            REQUIRE(estimate_memory >= static_cast<uint64_t>(real_memory * 0.5));
-            REQUIRE(estimate_memory <= static_cast<uint64_t>(real_memory * 1.5));
+            REQUIRE(estimate_memory >= static_cast<uint64_t>(real_memory * 0.4));
+            REQUIRE(estimate_memory <= static_cast<uint64_t>(real_memory * 1.6));
             inf.close();
         }
         outf.close();

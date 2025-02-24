@@ -15,6 +15,7 @@
 
 #pragma once
 
+#include "async_io.h"
 #include "basic_io.h"
 #include "buffer_io.h"
 #include "memory_block_io.h"
