@@ -19,7 +19,6 @@
 #include <random>
 #include <shared_mutex>
 
-#include "../utils.h"
 #include "ThreadPool.h"
 #include "algorithm/hnswlib/algorithm_interface.h"
 #include "algorithm/hnswlib/visited_list_pool.h"

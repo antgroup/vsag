@@ -17,9 +17,10 @@
 
 #include <memory>
 
-#include "../../utils.h"
 #include "data_cell/graph_interface.h"
 #include "prefetch.h"
+#include "utils/linear_congruential_generator.h"
+
 namespace hnswlib {
 
 HierarchicalNSW::HierarchicalNSW(SpaceInterface* s,

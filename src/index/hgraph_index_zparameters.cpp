@@ -19,9 +19,9 @@
 
 #include <utility>
 
-#include "../utils.h"
 #include "common.h"
 #include "inner_string_params.h"
+#include "utils/util_functions.h"
 #include "vsag/constants.h"
 
 // NOLINTBEGIN(readability-simplify-boolean-expr)

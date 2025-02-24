@@ -15,7 +15,6 @@
 
 #pragma once
 
-#include "../utils.h"
 #include "algorithm/hnswlib/algorithm_interface.h"
 #include "common.h"
 #include "data_cell/flatten_interface.h"
