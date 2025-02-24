@@ -205,9 +205,6 @@ private:
     tl::expected<void, Error>
     load_disk_index(const BinarySet& binary_set);
 
-    static BinarySet
-    empty_binaryset();
-
 private:
     std::shared_ptr<LocalFileReader> reader_;
     std::shared_ptr<diskann::PQFlashIndex<float, int64_t>> index_;
