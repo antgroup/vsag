@@ -35,7 +35,7 @@ TEST_CASE("AsyncIO Parameter", "[ut][AsyncIO]") {
     fixtures::TempDir dir("async_io");
     auto path = dir.GenerateRandomFile();
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
-    std::string param_str = R"(
+    constexpr auto param_str = R"(
     {{
         "type": "async_io",
         "file_path" : "{}"
