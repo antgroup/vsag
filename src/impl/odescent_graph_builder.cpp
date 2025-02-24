@@ -27,7 +27,7 @@ ODescent::Build(const uint32_t* valid_ids,
     graph_.clear();
     valid_ids_ = valid_ids;
     if (valid_ids_ != nullptr) {
-        data_num_ = static_cast<int64_t>(data_num);
+        data_num_ = data_num;
     } else {
         data_num_ = flatten_interface_->TotalCount();
     }
