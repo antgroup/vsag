@@ -45,9 +45,8 @@ SparseGraphDataCell::InsertNeighborsById(InnerIdType id, const Vector<InnerIdTyp
         iter =
             this->neighbors_.emplace(id, std::make_unique<Vector<InnerIdType>>(allocator_)).first;
         total_count_++;
-    } else {
-        iter->second->assign(neighbor_ids.begin(), neighbor_ids.begin() + size);
     }
+    iter->second->assign(neighbor_ids.begin(), neighbor_ids.begin() + size);
 }
 
 uint32_t
