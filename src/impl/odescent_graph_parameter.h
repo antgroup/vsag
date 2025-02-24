@@ -21,6 +21,8 @@ namespace vsag {
 
 struct ODescentParameter : public Parameter {
 public:
+    ODescentParameter() = default;
+
     void
     FromJson(const JsonType& json) override;
 
