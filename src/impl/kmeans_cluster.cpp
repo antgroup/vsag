@@ -31,7 +31,7 @@ KMeansCluster::~KMeansCluster() {
 }
 
 Vector<int>
-KMeansCluster::Run(uint32_t k, float* datas, uint64_t count, int iter) {
+KMeansCluster::Run(uint32_t k, const float* datas, uint64_t count, int iter) {
     // Allocate space for centroids
     if (k_centroids_ != nullptr) {
         allocator_->Deallocate(k_centroids_);
