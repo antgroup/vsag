@@ -79,7 +79,9 @@ public:
     ~Pyramid() = default;
 
     tl::expected<std::vector<int64_t>, Error>
-    Build(const DatasetPtr& base) override;
+    Build(const DatasetPtr& base) override {
+        SAFE_CALL(return this->build(base);)
+    }
 
     tl::expected<DatasetPtr, Error>
     KnnSearch(const DatasetPtr& query,
@@ -151,6 +153,9 @@ public:
     GetMemoryUsage() const override;
 
 private:
+    tl::expected<std::vector<int64_t>, Error>
+    build(const DatasetPtr& base);
+
     tl::expected<DatasetPtr, Error>
     knn_search(const DatasetPtr& query,
                int64_t k,
