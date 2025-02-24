@@ -33,7 +33,7 @@ namespace vsag {
 template <MetricType metric = MetricType::METRIC_TYPE_L2SQR>
 class RaBitQuantizer : public Quantizer<RaBitQuantizer<metric>> {
 public:
-    using norm_type = uint64_t;
+    using norm_type = float;
     using error_type = float;
 
     explicit RaBitQuantizer(int dim, Allocator* allocator);
@@ -153,7 +153,7 @@ RaBitQuantizer<metric>::TrainImpl(const DataType* data, uint64_t count) {
         return false;
     }
 
-    if (data == nullptr) {
+    if (count == 0 or data == nullptr) {
         return false;
     }
 
@@ -255,6 +255,9 @@ RaBitQuantizer<metric>::ComputeImpl(const uint8_t* codes1, const uint8_t* codes2
     }
 
     error_type base_error = *((error_type*)(codes2 + offset_error_));
+    if (base_error < 1e-5) {
+        base_error = 1.0f;
+    }
     norm_type base_norm = *((norm_type*)(codes2 + offset_norm_));
     norm_type query_norm = *((norm_type*)(codes1 + sizeof(DataType) * this->dim_));
 
@@ -287,9 +290,9 @@ RaBitQuantizer<metric>::ProcessQueryImpl(const DataType* query,
 
         // 3. store norm
         *(norm_type*)(computer.buf_ + query_fp32_size) = query_norm;
-    } catch (const std::bad_alloc& e) {
+    } catch (std::bad_alloc& e) {
         logger::error("bad alloc when init computer buf");
-        throw std::bad_alloc();
+        throw e;
     }
 }
 

@@ -21,6 +21,7 @@ static RaBitQFloatBinaryType
 GetRaBitQFloatBinaryIP() {
     return generic::RaBitQFloatBinaryIP;
 }
+
 RaBitQFloatBinaryType RaBitQFloatBinaryIP = GetRaBitQFloatBinaryIP();
 
 }  // namespace vsag

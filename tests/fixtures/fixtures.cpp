@@ -121,7 +121,7 @@ GenerateBinaryVectorsAndCodes(uint32_t count, uint32_t dim, int seed) {
                 codes[i * code_size + d / 8] |= (1 << (d % 8));
                 vectors[i * dim + d] = inv_sqrt_d;
             } else {
-                vectors[i + dim + d] = -inv_sqrt_d;
+                vectors[i * dim + d] = -inv_sqrt_d;
             }
         }
     }

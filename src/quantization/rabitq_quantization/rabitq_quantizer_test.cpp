@@ -76,35 +76,13 @@ TEST_CASE("RaBitQ Encode and Decode", "[ut][RaBitQuantizer]") {
 }
 
 TEST_CASE("RaBitQ Compute", "[ut][RaBitQuantizer]") {
-    float error = 1e-5;
-
     for (auto dim : dims) {
+        float numeric_error = 4.0 / std::sqrt(dim) * dim;
         for (auto count : counts) {
-            // Generate centroid and data
-            std::vector<float> vecs = fixtures::generate_vectors(count, dim);
-
-            // Init quantizer
             auto allocator = SafeAllocator::FactoryDefaultAllocator();
             RaBitQuantizer<MetricType::METRIC_TYPE_L2SQR> quantizer(dim, allocator.get());
-            quantizer.ReTrain(vecs.data(), count);
-
-            // Test ComputeDist
-            for (uint64_t i = 0; i < count; ++i) {
-                // Set query
-                std::shared_ptr<Computer<RaBitQuantizer<MetricType::METRIC_TYPE_L2SQR>>> computer;
-                auto* query = vecs.data() + i * dim;
-                computer = quantizer.FactoryComputer();
-                computer->SetQuery(query);
-
-                // Encode
-                std::vector<uint8_t> codes(quantizer.GetCodeSize());
-                quantizer.EncodeOne(query, codes.data());
-
-                // Compute Dist
-                float dist = 0.0f;
-                quantizer.ComputeDist(*computer, codes.data(), &dist);
-                REQUIRE(dist < error);
-            }
+            TestComputer<RaBitQuantizer<MetricType::METRIC_TYPE_L2SQR>,
+                         MetricType::METRIC_TYPE_L2SQR>(quantizer, dim, count, numeric_error);
         }
     }
 }
