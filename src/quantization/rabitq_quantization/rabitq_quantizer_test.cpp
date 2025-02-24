@@ -31,58 +31,39 @@ const auto counts = {10, 100};
 TEST_CASE("RaBitQ Encode and Decode", "[ut][RaBitQuantizer]") {
     for (auto dim : dims) {
         for (auto count : counts) {
-            // Generate centroid and data
-            assert(count % 2 == 0);
-            auto centroid = fixtures::generate_vectors(1, dim, false, 114514);
-            std::vector<float> vecs(dim * count);
-            for (int64_t i = 0; i < count; ++i) {
-                for (int64_t d = 0; d < dim; ++d) {
-                    vecs[i * dim + d] = centroid[d] + (i % 2 == 0 ? i + 1 : -i);
-                }
-            }
-
-            // Init quantizer
             auto allocator = SafeAllocator::FactoryDefaultAllocator();
             RaBitQuantizer<MetricType::METRIC_TYPE_L2SQR> quantizer(dim, allocator.get());
-            quantizer.ReTrain(vecs.data(), count);
 
-            // Test EncodeOne & DecodeOne
-            for (uint64_t i = 0; i < count; ++i) {
-                std::vector<uint8_t> codes(quantizer.GetCodeSize());
-                quantizer.EncodeOne(vecs.data() + i * dim, codes.data());
-                for (uint64_t d = 0; d < dim; ++d) {
-                    bool ge = vecs[i * dim + d] >= centroid[d];
-                    bool bit = ((codes[d / 8] >> (d % 8)) & 1) != 0;
-                    REQUIRE(ge == bit);
-                }
-
-                std::vector<float> out_vec(dim);
-                quantizer.DecodeOne(codes.data(), out_vec.data());
-                for (uint64_t d = 0; d < dim; ++d) {
-                    REQUIRE(vecs[i * dim + d] * out_vec[d] >= 0);
-                }
-            }
-
-            // Test EncodeBatch & DecodeBatch
-            std::vector<uint8_t> codes(quantizer.GetCodeSize() * count);
-            quantizer.EncodeBatch(vecs.data(), codes.data(), count);
-            std::vector<float> out_vec(dim * count);
-            quantizer.DecodeBatch(codes.data(), out_vec.data(), count);
-            for (int64_t i = 0; i < dim * count; ++i) {
-                REQUIRE(vecs[i] * out_vec[i] >= 0);
-            }
+            TestEncodeDecodeRaBitQ<RaBitQuantizer<MetricType::METRIC_TYPE_L2SQR>>(
+                quantizer, dim, count);
         }
     }
 }
 
 TEST_CASE("RaBitQ Compute", "[ut][RaBitQuantizer]") {
     for (auto dim : dims) {
+        for (auto count : counts) {
+            float numeric_error = 4.0 / std::sqrt(dim) * dim;
+            auto allocator = SafeAllocator::FactoryDefaultAllocator();
+            RaBitQuantizer<MetricType::METRIC_TYPE_L2SQR> quantizer(dim, allocator.get());
+
+            TestComputer<RaBitQuantizer<MetricType::METRIC_TYPE_L2SQR>,
+                         MetricType::METRIC_TYPE_L2SQR>(quantizer, dim, count, numeric_error);
+        }
+    }
+}
+
+TEST_CASE("RaBitQ Serialize and Deserialize", "[ut][RaBitQuantizer]") {
+    for (auto dim : dims) {
         float numeric_error = 4.0 / std::sqrt(dim) * dim;
         for (auto count : counts) {
             auto allocator = SafeAllocator::FactoryDefaultAllocator();
-            RaBitQuantizer<MetricType::METRIC_TYPE_L2SQR> quantizer(dim, allocator.get());
-            TestComputer<RaBitQuantizer<MetricType::METRIC_TYPE_L2SQR>,
-                         MetricType::METRIC_TYPE_L2SQR>(quantizer, dim, count, numeric_error);
+            RaBitQuantizer<MetricType::METRIC_TYPE_L2SQR> quantizer1(dim, allocator.get());
+            RaBitQuantizer<MetricType::METRIC_TYPE_L2SQR> quantizer2(dim, allocator.get());
+
+            TestSerializeAndDeserialize<RaBitQuantizer<MetricType::METRIC_TYPE_L2SQR>,
+                                        MetricType::METRIC_TYPE_L2SQR>(
+                quantizer1, quantizer2, dim, count, numeric_error, true);
         }
     }
 }
