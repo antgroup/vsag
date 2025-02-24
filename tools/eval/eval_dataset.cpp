@@ -30,7 +30,7 @@ EvalDataset::Load(const std::string& filename) {
         assert(datasets.count("neighbors"));
         assert(datasets.count("distances"));
         has_labels = datasets.count("train_labels") && datasets.count("test_labels");
-        has_valid_ratio = datasets.count("valid_ratios");
+        has_valid_ratio = datasets.count("valid_ratios") > 0;
     }
 
     // get and (should check shape)
