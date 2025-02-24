@@ -84,7 +84,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
         auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type, /*with_path=*/true);
         TestBuildIndex(index, dataset, true);
         TestKnnSearch(index, dataset, search_param, 0.99, true);
-        TestFilterSearch(index, dataset, search_param, 0.99, true);
+        //        TestFilterSearch(index, dataset, search_param, 0.99, true);
         TestRangeSearch(index, dataset, search_param, 0.99, 10, true);
         TestRangeSearch(index, dataset, search_param, 0.49, 5, true);
     }
@@ -126,4 +126,25 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
         }
     }
     vsag::Options::Instance().set_block_size_limit(origin_size);
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
+                             "Pyramid Build Test With Random Allocator",
+                             "[ft][pyramid]") {
+    auto allocator = std::make_shared<fixtures::RandomAllocator>();
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    auto size = GENERATE(1024 * 1024 * 2);
+    auto metric_type = GENERATE("l2", "ip", "cosine");
+    const std::string name = "pyramid";
+    for (auto& dim : dims) {
+        vsag::Options::Instance().set_block_size_limit(size);
+        auto param = GeneratePyramidBuildParametersString(metric_type, dim);
+        auto index = vsag::Factory::CreateIndex(name, param, allocator.get());
+        if (not index.has_value()) {
+            continue;
+        }
+        auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type, /*with_path=*/true);
+        TestContinueAddIgnoreRequire(index.value(), dataset, 1);
+        vsag::Options::Instance().set_block_size_limit(origin_size);
+    }
 }

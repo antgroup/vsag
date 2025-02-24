@@ -744,23 +744,25 @@ TestIndex::TestConcurrentKnnSearch(const TestIndex::IndexPtr& index,
 
 void
 TestIndex::TestContinueAddIgnoreRequire(const TestIndex::IndexPtr& index,
-                                        const TestDatasetPtr& dataset) {
+                                        const TestDatasetPtr& dataset,
+                                        float build_ratio) {
     auto base_count = dataset->base_->GetNumElements();
-    int64_t temp_count = base_count / 2;
+    int64_t temp_count = static_cast<int64_t>(base_count * build_ratio);
     auto dim = dataset->base_->GetDim();
     auto temp_dataset = vsag::Dataset::Make();
     temp_dataset->Dim(dim)
         ->Ids(dataset->base_->GetIds())
         ->NumElements(temp_count)
+        ->Paths(dataset->base_->GetPaths())
         ->Float32Vectors(dataset->base_->GetFloat32Vectors())
         ->Owner(false);
     index->Build(temp_dataset);
-    auto rest_count = base_count - temp_count;
-    for (uint64_t j = rest_count; j < base_count; ++j) {
+    for (uint64_t j = temp_count; j < base_count; ++j) {
         auto data_one = vsag::Dataset::Make();
         data_one->Dim(dim)
             ->Ids(dataset->base_->GetIds() + j)
             ->NumElements(1)
+            ->Paths(dataset->base_->GetPaths() + j)
             ->Float32Vectors(dataset->base_->GetFloat32Vectors() + j * dim)
             ->Owner(false);
         auto add_index = index->Add(data_one);

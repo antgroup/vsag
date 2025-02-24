@@ -83,7 +83,9 @@ protected:
                     bool expected_success = true);
 
     static void
-    TestContinueAddIgnoreRequire(const IndexPtr& index, const TestDatasetPtr& dataset);
+    TestContinueAddIgnoreRequire(const IndexPtr& index,
+                                 const TestDatasetPtr& dataset,
+                                 float build_ratio = 0.5);
 
     static void
     TestKnnSearch(const IndexPtr& index,

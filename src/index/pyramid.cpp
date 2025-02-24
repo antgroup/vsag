@@ -126,7 +126,7 @@ IndexNode::Serialize(StreamWriter& writer) const {
 }
 
 tl::expected<std::vector<int64_t>, Error>
-Pyramid::Build(const DatasetPtr& base) {
+Pyramid::build(const DatasetPtr& base) {
     const auto* path = base->GetPaths();
     int64_t data_num = base->GetNumElements();
     const auto* data_vectors = base->GetFloat32Vectors();
