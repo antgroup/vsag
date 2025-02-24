@@ -306,6 +306,17 @@ FlattenDataCell<QuantTmpl, IOTmpl>::query(float* result_dists,
                                 this->prefetch_cache_line_size_);
         }
     }
+    if (not force_in_memory_ and not this->io_->InMemory() and id_count > 1) {
+        ByteBuffer codes(id_count * this->code_size_, allocator_);
+        Vector<uint64_t> sizes(id_count, this->code_size_, allocator_);
+        Vector<uint64_t> offsets(id_count, this->code_size_, allocator_);
+        for (int64_t i = 0; i < id_count; ++i) {
+            offsets[i] = idx[i] * code_size_;
+        }
+        this->io_->MultiRead(codes.data, sizes.data(), offsets.data(), id_count);
+        computer->ComputeBatchDists(id_count, codes.data, result_dists);
+        return;
+    }
 
     for (int64_t i = 0; i < id_count; ++i) {
         if (i + this->prefetch_jump_code_size_ < id_count) {
