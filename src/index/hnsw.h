@@ -26,7 +26,6 @@
 #include <utility>
 #include <vector>
 
-#include "../utils.h"
 #include "algorithm/hnswlib/hnswlib.h"
 #include "base_filter_functor.h"
 #include "common.h"
@@ -40,6 +39,7 @@
 #include "logger.h"
 #include "safe_allocator.h"
 #include "typing.h"
+#include "utils/window_result_queue.h"
 #include "vsag/binaryset.h"
 #include "vsag/errors.h"
 #include "vsag/index.h"

@@ -15,9 +15,9 @@
 
 #include "brute_force.h"
 
-#include "../utils.h"
 #include "data_cell/flatten_datacell.h"
 #include "inner_string_params.h"
+#include "utils/slow_task_timer.h"
 
 namespace vsag {
 
