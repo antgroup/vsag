@@ -122,10 +122,7 @@ private:
 template <MetricType metric>
 RaBitQuantizer<metric>::RaBitQuantizer(int dim, Allocator* allocator)
     : Quantizer<RaBitQuantizer<metric>>(dim, allocator) {
-    if constexpr (metric != MetricType::METRIC_TYPE_L2SQR) {
-        logger::error("unsupported metric type");
-        return;
-    }
+    static_assert(metric == MetricType::METRIC_TYPE_L2SQR, "Unsupported metric type");
 
     centroid_.resize(dim, 0);
 
@@ -163,11 +160,6 @@ RaBitQuantizer<metric>::RaBitQuantizer(const QuantizerParamPtr& param,
 template <MetricType metric>
 bool
 RaBitQuantizer<metric>::TrainImpl(const DataType* data, uint64_t count) {
-    if constexpr (metric != MetricType::METRIC_TYPE_L2SQR) {
-        logger::error("unsupported metric type");
-        return false;
-    }
-
     if (count == 0 or data == nullptr) {
         return false;
     }
@@ -198,10 +190,6 @@ RaBitQuantizer<metric>::TrainImpl(const DataType* data, uint64_t count) {
 template <MetricType metric>
 bool
 RaBitQuantizer<metric>::EncodeOneImpl(const DataType* data, uint8_t* codes) const {
-    if constexpr (metric != MetricType::METRIC_TYPE_L2SQR) {
-        logger::error("unsupported metric type");
-        return false;
-    }
     // 0. init
     std::fill(codes, codes + this->code_size_, 0);
 
@@ -266,11 +254,6 @@ inline float
 RaBitQuantizer<metric>::ComputeImpl(const uint8_t* codes1, const uint8_t* codes2) const {
     // codes1 -> query (fp32, sq8, sq4...) + norm
     // codes2 -> base  (binary) + norm + error
-    if constexpr (metric != MetricType::METRIC_TYPE_L2SQR) {
-        logger::error("unsupported metric type");
-        return 0;
-    }
-
     error_type base_error = *((error_type*)(codes2 + offset_error_));
     if (base_error < 1e-5) {
         base_error = 1.0f;
