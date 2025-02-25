@@ -100,6 +100,9 @@ private:
 private:
     std::vector<float> centroid_;  // TODO(ZXY): use centroids (e.g., IVF or Graph) outside
 
+    uint64_t query_code_size_{0};  // TODO(ZXY): support various type of query (FP32, SQ4...)
+    uint64_t query_offset_norm_{0};
+
     /***
      * code layout: sq-code(required) + norm(required) + error(required)
      */
@@ -118,7 +121,7 @@ RaBitQuantizer<metric>::RaBitQuantizer(int dim, Allocator* allocator)
 
     centroid_.resize(dim, 0);
 
-    // code layout
+    // base code layout
     size_t align_size = std::max(sizeof(error_type), sizeof(norm_type));
     size_t code_original_size = (dim + 7) / 8;
 
@@ -132,6 +135,10 @@ RaBitQuantizer<metric>::RaBitQuantizer(int dim, Allocator* allocator)
 
     offset_error_ = this->code_size_;
     this->code_size_ += ((sizeof(error_type) + align_size - 1) / align_size) * align_size;
+
+    // query code layout
+    this->query_code_size_ = ((sizeof(DataType) * this->dim_) / align_size) * align_size;
+    query_offset_norm_ = this->query_code_size_;
 }
 
 template <MetricType metric>
@@ -187,6 +194,8 @@ RaBitQuantizer<metric>::EncodeOneImpl(const DataType* data, uint8_t* codes) cons
         logger::error("unsupported metric type");
         return false;
     }
+    // 0. init
+    std::fill(codes, codes + this->code_size_, 0);
 
     // 1. random projection
     // TODO(ZXY) use random projection
@@ -259,13 +268,17 @@ RaBitQuantizer<metric>::ComputeImpl(const uint8_t* codes1, const uint8_t* codes2
         base_error = 1.0f;
     }
     norm_type base_norm = *((norm_type*)(codes2 + offset_norm_));
-    norm_type query_norm = *((norm_type*)(codes1 + sizeof(DataType) * this->dim_));
+    norm_type query_norm = *((norm_type*)(codes1 + query_offset_norm_));
 
     float ip_bq_1_32 = RaBitQFloatBinaryIP((DataType*)codes1, codes2, this->dim_);
     float ip_bb_1_32 = base_error;
     float ip_est = ip_bq_1_32 / ip_bb_1_32;
 
     float result = L2_UBE(base_norm, query_norm, ip_est);
+
+    if (result < 0) {
+        result = 0;
+    }
     return result;
 }
 
@@ -276,10 +289,10 @@ RaBitQuantizer<metric>::ProcessQueryImpl(const DataType* query,
     try {
         // TODO(ZXY): allow process query with SQ4 or SQ8, implement in ComputeDist and Param
         size_t align_size = std::max(sizeof(error_type), sizeof(norm_type));
-        size_t query_fp32_size = sizeof(DataType) * this->dim_;
 
         computer.buf_ =
-            reinterpret_cast<uint8_t*>(this->allocator_->Allocate(query_fp32_size + align_size));
+            reinterpret_cast<uint8_t*>(this->allocator_->Allocate(query_code_size_ + align_size));
+        std::fill(computer.buf_, computer.buf_ + query_code_size_ + align_size, 0);
 
         // 1. transform
         // TODO(ZXY) use random projection
@@ -289,7 +302,7 @@ RaBitQuantizer<metric>::ProcessQueryImpl(const DataType* query,
             NormalizeWithCentroid(query, centroid_.data(), (DataType*)computer.buf_, this->dim_);
 
         // 3. store norm
-        *(norm_type*)(computer.buf_ + query_fp32_size) = query_norm;
+        *(norm_type*)(computer.buf_ + query_offset_norm_) = query_norm;
     } catch (std::bad_alloc& e) {
         logger::error("bad alloc when init computer buf");
         throw e;
@@ -328,6 +341,8 @@ RaBitQuantizer<metric>::SerializeImpl(StreamWriter& writer) {
     StreamWriter::WriteObj(writer, this->offset_code_);
     StreamWriter::WriteObj(writer, this->offset_norm_);
     StreamWriter::WriteObj(writer, this->offset_error_);
+    StreamWriter::WriteObj(writer, this->query_offset_norm_);
+    StreamWriter::WriteObj(writer, this->query_code_size_);
     StreamWriter::WriteVector(writer, this->centroid_);
 }
 
@@ -337,6 +352,8 @@ RaBitQuantizer<metric>::DeserializeImpl(StreamReader& reader) {
     StreamReader::ReadObj(reader, this->offset_code_);
     StreamReader::ReadObj(reader, this->offset_norm_);
     StreamReader::ReadObj(reader, this->offset_error_);
+    StreamReader::ReadObj(reader, this->query_offset_norm_);
+    StreamReader::ReadObj(reader, this->query_code_size_);
     StreamReader::ReadVector(reader, this->centroid_);
 }
 

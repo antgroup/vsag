@@ -17,6 +17,7 @@
 #include <fstream>
 
 #include "fixtures.h"
+#include "iostream"
 #include "quantizer.h"
 #include "simd/normalize.h"
 #include "simd/simd.h"
@@ -40,9 +41,10 @@ TestEncodeDecodeRaBitQ(Quantizer<T>& quantizer, uint64_t dim, int count) {
     quantizer.ReTrain(vecs.data(), count);
 
     // Test EncodeOne & DecodeOne
+    std::vector<uint8_t> codes1(quantizer.GetCodeSize() * count);
     for (uint64_t i = 0; i < count; ++i) {
-        std::vector<uint8_t> codes(quantizer.GetCodeSize());
-        quantizer.EncodeOne(vecs.data() + i * dim, codes.data());
+        uint8_t* codes = codes1.data() + i * quantizer.GetCodeSize();
+        quantizer.EncodeOne(vecs.data() + i * dim, codes);
         for (uint64_t d = 0; d < dim; ++d) {
             bool ge = vecs[i * dim + d] >= centroid[d];
             bool bit = ((codes[d / 8] >> (d % 8)) & 1) != 0;
@@ -50,17 +52,21 @@ TestEncodeDecodeRaBitQ(Quantizer<T>& quantizer, uint64_t dim, int count) {
         }
 
         std::vector<float> out_vec(dim);
-        quantizer.DecodeOne(codes.data(), out_vec.data());
+        quantizer.DecodeOne(codes, out_vec.data());
         for (uint64_t d = 0; d < dim; ++d) {
             REQUIRE(vecs[i * dim + d] * out_vec[d] >= 0);
         }
     }
 
     // Test EncodeBatch & DecodeBatch
-    std::vector<uint8_t> codes(quantizer.GetCodeSize() * count);
-    quantizer.EncodeBatch(vecs.data(), codes.data(), count);
+    std::vector<uint8_t> codes2(quantizer.GetCodeSize() * count);
+    quantizer.EncodeBatch(vecs.data(), codes2.data(), count);
+    for (int c = 0; c < quantizer.GetCodeSize() * count; c++) {
+        REQUIRE(codes1[c] == codes2[c]);
+    }
+
     std::vector<float> out_vec(dim * count);
-    quantizer.DecodeBatch(codes.data(), out_vec.data(), count);
+    quantizer.DecodeBatch(codes2.data(), out_vec.data(), count);
     for (int64_t i = 0; i < dim * count; ++i) {
         REQUIRE(vecs[i] * out_vec[i] >= 0);
     }
@@ -240,25 +246,24 @@ TestComputer(
         computer->SetQuery(querys.data() + i * dim);
 
         // Test Compute One Dist;
-        for (int j = 0; j < 100; ++j) {
-            auto idx1 = random() % count;
-            auto* codes1 = new uint8_t[quant.GetCodeSize()];
-            quant.EncodeOne(vecs.data() + idx1 * dim, codes1);
-            float value = 0.0f;
-            quant.ComputeDist(*computer, codes1, &value);
-            REQUIRE(quant.ComputeDist(*computer, codes1) == value);
-            auto gt = gt_func(idx1, i);
-            REQUIRE(std::abs(gt - value) < error);
-            delete[] codes1;
+        std::vector<uint8_t> codes1(quant.GetCodeSize() * count, 0);
+        std::vector<float> dists1(count);
+        for (int j = 0; j < count; ++j) {
+            uint8_t* code = codes1.data() + j * quant.GetCodeSize();
+            quant.EncodeOne(vecs.data() + j * dim, code);
+            quant.ComputeDist(*computer, code, dists1.data() + j);
+            REQUIRE(quant.ComputeDist(*computer, code) == dists1[j]);
+            REQUIRE(std::abs(gt_func(j, i) - dists1[j]) < error);
         }
 
         // Test Compute Batch
         std::vector<uint8_t> codes2(quant.GetCodeSize() * count);
-        std::vector<float> dists(count);
+        std::vector<float> dists2(count);
         quant.EncodeBatch(vecs.data(), codes2.data(), count);
-        quant.ComputeBatchDists(*computer, count, codes2.data(), dists.data());
+        quant.ComputeBatchDists(*computer, count, codes2.data(), dists2.data());
         for (int j = 0; j < count; ++j) {
-            REQUIRE(std::abs(gt_func(j, i) - dists[j]) < error);
+            REQUIRE(fixtures::dist_t(dists1[j]) == fixtures::dist_t(dists2[j]));
+            REQUIRE(std::abs(gt_func(j, i) - dists2[j]) < error);
         }
     }
 }

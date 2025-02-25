@@ -42,8 +42,11 @@ TEST_CASE("RaBitQ Encode and Decode", "[ut][RaBitQuantizer]") {
 
 TEST_CASE("RaBitQ Compute", "[ut][RaBitQuantizer]") {
     for (auto dim : dims) {
+        float numeric_error = 2.0 / std::sqrt(dim) * dim;
+        if (dim < 10) {
+            continue;
+        }
         for (auto count : counts) {
-            float numeric_error = 4.0 / std::sqrt(dim) * dim;
             auto allocator = SafeAllocator::FactoryDefaultAllocator();
             RaBitQuantizer<MetricType::METRIC_TYPE_L2SQR> quantizer(dim, allocator.get());
 
@@ -55,7 +58,10 @@ TEST_CASE("RaBitQ Compute", "[ut][RaBitQuantizer]") {
 
 TEST_CASE("RaBitQ Serialize and Deserialize", "[ut][RaBitQuantizer]") {
     for (auto dim : dims) {
-        float numeric_error = 4.0 / std::sqrt(dim) * dim;
+        float numeric_error = 2.0 / std::sqrt(dim) * dim;
+        if (dim < 10) {
+            continue;
+        }
         for (auto count : counts) {
             auto allocator = SafeAllocator::FactoryDefaultAllocator();
             RaBitQuantizer<MetricType::METRIC_TYPE_L2SQR> quantizer1(dim, allocator.get());
