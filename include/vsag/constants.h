@@ -110,6 +110,8 @@ extern const char* const MESSAGE_PARAMETER;
 extern const char* const SERIALIZE_MAGIC_NUM;
 extern const char* const SERIALIZE_VERSION;
 
+extern const char* const SQ4_UNIFORM_TRUNC_RATE;
+
 // hgraph params
 extern const char* const HGRAPH_USE_REORDER;
 extern const char* const HGRAPH_BASE_QUANTIZATION_TYPE;

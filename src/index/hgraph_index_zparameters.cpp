@@ -41,7 +41,10 @@ static const std::unordered_map<std::string, std::vector<std::string>> EXTERNAL_
     {HGRAPH_GRAPH_MAX_DEGREE, {HGRAPH_GRAPH_KEY, GRAPH_PARAM_MAX_DEGREE}},
     {HGRAPH_BUILD_EF_CONSTRUCTION, {BUILD_PARAMS_KEY, BUILD_EF_CONSTRUCTION}},
     {HGRAPH_INIT_CAPACITY, {HGRAPH_GRAPH_KEY, GRAPH_PARAM_INIT_MAX_CAPACITY}},
-    {HGRAPH_BUILD_THREAD_COUNT, {BUILD_PARAMS_KEY, BUILD_THREAD_COUNT}}};
+    {HGRAPH_BUILD_THREAD_COUNT, {BUILD_PARAMS_KEY, BUILD_THREAD_COUNT}},
+    {SQ4_UNIFORM_TRUNC_RATE,
+     {HGRAPH_BASE_CODES_KEY, QUANTIZATION_PARAMS_KEY, SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE}},
+};
 
 static const std::string HGRAPH_PARAMS_TEMPLATE =
     R"(
@@ -64,7 +67,7 @@ static const std::string HGRAPH_PARAMS_TEMPLATE =
             "codes_type": "flatten_codes",
             "{QUANTIZATION_PARAMS_KEY}": {
                 "{QUANTIZATION_TYPE_KEY}": "{QUANTIZATION_TYPE_VALUE_PQ}",
-                "subspace": 64,
+                "{SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE}": 0.05,
                 "nbits": 8
             }
         },

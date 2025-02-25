@@ -52,6 +52,11 @@ public:
         this->max_sample_count_ = sample;
     }
 
+    inline void
+    SetSQ4UniformTruncRate(float trunc_rate) {
+        this->trunc_rate_ = trunc_rate;
+    }
+
 private:
     void
     classic_train(const float* data, uint64_t count, float* upper_bound, float* lower_bound) const;
@@ -72,6 +77,8 @@ private:
     int dim_{0};
 
     int bits_{8};
+
+    float trunc_rate_{0.05F};
 
     uint64_t max_sample_count_{MAX_DEFAULT_SAMPLE};
 

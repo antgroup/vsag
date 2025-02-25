@@ -51,6 +51,8 @@ const char* const QUANTIZATION_TYPE_VALUE_SQ4_UNIFORM = "sq4_uniform";
 const char* const QUANTIZATION_TYPE_VALUE_FP32 = "fp32";
 const char* const QUANTIZATION_TYPE_VALUE_PQ = "pq";
 
+const char* const SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE = "sq4_uniform_trunc_rate";
+
 // graph param value
 const char* const GRAPH_PARAM_MAX_DEGREE = "max_degree";
 const char* const GRAPH_PARAM_INIT_MAX_CAPACITY = "init_capacity";
@@ -86,6 +88,7 @@ const std::unordered_map<std::string, std::string> DEFAULT_MAP = {
     {"BUCKETS_COUNT_KEY", BUCKETS_COUNT_KEY},
     {"IO_FILE_PATH", IO_FILE_PATH},
     {"DEFAULT_FILE_PATH_VALUE", DEFAULT_FILE_PATH_VALUE},
+    {"SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE", SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE},
 };
 
 }  // namespace vsag
