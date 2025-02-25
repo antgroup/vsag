@@ -29,6 +29,7 @@
 #include "simd/sq4_uniform_simd.h"
 #include "sq4_uniform_quantizer_parameter.h"
 #include "typing.h"
+#include "utils/util_functions.h"
 
 namespace vsag {
 
@@ -127,24 +128,22 @@ SQ4UniformQuantizer<metric>::SQ4UniformQuantizer(int dim, Allocator* allocator, 
 
     offset_code_ = this->code_size_;
     dim = (dim + 1) / 2;
-    this->code_size_ += ((dim + align_size - 1) / align_size) * align_size;
+    this->code_size_ += ceil_int(dim, align_size);
 
     if constexpr (metric == MetricType::METRIC_TYPE_L2SQR or
                   metric == MetricType::METRIC_TYPE_COSINE) {
         offset_norm_ = this->code_size_;
-        this->code_size_ +=
-            ((sizeof(norm_type) + align_size - 1) / align_size) * align_size;  // norm of vector
+        this->code_size_ += ceil_int(sizeof(norm_type), align_size);
     }
 
     if constexpr (metric == MetricType::METRIC_TYPE_IP or
                   metric == MetricType::METRIC_TYPE_COSINE) {
         offset_sum_ = this->code_size_;
-        this->code_size_ +=
-            ((sizeof(sum_type) + align_size - 1) / align_size) * align_size;  // sum of vector
+        this->code_size_ += ceil_int(sizeof(sum_type), align_size);
     }
 
     // align 64 bytes (512 bits) to avoid illegal memory access in SIMD
-    this->code_size_ = (this->code_size_ + (1 << 6) - 1) >> 6 << 6;
+    this->code_size_ = ceil_int(this->code_size_, 64);
 }
 
 template <MetricType metric>

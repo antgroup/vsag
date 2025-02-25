@@ -23,6 +23,7 @@
 #include "simd/sq8_uniform_simd.h"
 #include "sq8_uniform_quantizer_parameter.h"
 #include "typing.h"
+#include "utils/util_functions.h"
 
 namespace vsag {
 template <MetricType metric = MetricType::METRIC_TYPE_L2SQR>
@@ -117,17 +118,17 @@ SQ8UniformQuantizer<metric>::SQ8UniformQuantizer(int dim, Allocator* allocator)
     this->code_size_ = 0;
 
     offset_code_ = this->code_size_;
-    this->code_size_ += ((dim + align_size - 1) / align_size) * align_size;
+    this->code_size_ += ceil_int(dim, align_size);
 
     if constexpr (metric == MetricType::METRIC_TYPE_L2SQR) {
         offset_norm_ = this->code_size_;
-        this->code_size_ += ((sizeof(norm_type) + align_size - 1) / align_size) * align_size;
+        this->code_size_ += ceil_int(sizeof(norm_type), align_size);
     }
 
     if constexpr (metric == MetricType::METRIC_TYPE_IP or
                   metric == MetricType::METRIC_TYPE_COSINE) {
         offset_sum_ = this->code_size_;
-        this->code_size_ += ((sizeof(sum_type) + align_size - 1) / align_size) * align_size;
+        this->code_size_ += ceil_int(sizeof(sum_type), align_size);
     }
 }
 
