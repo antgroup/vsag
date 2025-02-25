@@ -18,13 +18,12 @@
 #include <catch2/catch_test_macros.hpp>
 #include <nlohmann/json.hpp>
 #include <tuple>
-#include <vector>
 
-#include "../logger.h"
 #include "diskann_zparameters.h"
 #include "distance.h"
 #include "fixtures.h"
 #include "index_common_param.h"
+#include "utils/timer.h"
 #include "vsag/errors.h"
 
 vsag::DiskannParameters

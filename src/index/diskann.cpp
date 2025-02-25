@@ -17,7 +17,6 @@
 
 #include <local_file_reader.h>
 
-#include <algorithm>
 #include <exception>
 #include <functional>
 #include <future>
@@ -32,6 +31,8 @@
 #include "impl/odescent_graph_builder.h"
 #include "io/memory_io_parameter.h"
 #include "quantization/fp32_quantizer_parameter.h"
+#include "utils/slow_task_timer.h"
+#include "utils/timer.h"
 #include "vsag/constants.h"
 #include "vsag/errors.h"
 #include "vsag/expected.hpp"

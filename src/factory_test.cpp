@@ -15,12 +15,10 @@
 
 #include "vsag/factory.h"
 
-#include <spdlog/spdlog-inl.h>
-
 #include <catch2/catch_test_macros.hpp>
 #include <nlohmann/json.hpp>
 
-#include "../logger.h"
+#include "logger.h"
 #include "typing.h"
 #include "vsag/errors.h"
 

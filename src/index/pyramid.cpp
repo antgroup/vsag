@@ -19,6 +19,7 @@
 #include "empty_index_binary_set.h"
 #include "impl/odescent_graph_builder.h"
 #include "io/memory_io_parameter.h"
+#include "utils/slow_task_timer.h"
 
 namespace vsag {
 

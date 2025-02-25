@@ -33,11 +33,11 @@
 #include <shared_mutex>
 #include <string>
 
-#include "../utils.h"
 #include "common.h"
 #include "diskann_zparameters.h"
 #include "logger.h"
 #include "typing.h"
+#include "utils/window_result_queue.h"
 #include "vsag/index.h"
 #include "vsag/options.h"
 #include "vsag/thread_pool.h"

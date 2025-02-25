@@ -26,6 +26,7 @@
 #include "impl/pruning_strategy.h"
 #include "index/hgraph_index_zparameters.h"
 #include "logger.h"
+#include "utils/slow_task_timer.h"
 
 namespace vsag {
 
