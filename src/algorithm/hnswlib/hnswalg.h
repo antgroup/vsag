@@ -32,7 +32,6 @@
 #include <unordered_map>
 #include <unordered_set>
 
-#include "../../utils.h"
 #include "algorithm_interface.h"
 #include "block_manager.h"
 #include "data_cell/flatten_interface.h"

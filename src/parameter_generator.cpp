@@ -19,7 +19,8 @@
 
 #include "index/hnsw_zparameters.h"
 #include "logger.h"
-#include "utils.h"
+#include "utils/number.h"
+#include "utils/util_functions.h"
 #include "vsag/errors.h"
 #include "vsag/expected.hpp"
 #include "vsag/index.h"

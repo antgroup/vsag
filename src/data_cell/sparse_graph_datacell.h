@@ -17,7 +17,6 @@
 
 #include <shared_mutex>
 
-#include "../utils.h"
 #include "graph_interface.h"
 #include "io/memory_block_io.h"
 

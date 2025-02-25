@@ -18,6 +18,8 @@
 #include <chrono>
 #include <ios>
 
+#include "utils/linear_congruential_generator.h"
+
 namespace vsag {
 
 bool
