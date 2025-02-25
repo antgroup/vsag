@@ -74,6 +74,8 @@ const char* const DISKANN_PARAMETER_GRAPH_TYPE = "graph_type";
 const char* const ODESCENT_PARAMETER_ALPHA = "alpha";
 const char* const ODESCENT_PARAMETER_GRAPH_ITER_TURN = "graph_iter_turn";
 const char* const ODESCENT_PARAMETER_NEIGHBOR_SAMPLE_RATE = "neighbor_sample_rate";
+const char* const ODESCENT_PARAMETER_MIN_IN_DEGREE = "min_in_degree";
+const char* const ODESCENT_PARAMETER_BUILD_BLOCK_SIZE = "build_block_size";
 
 const char* const DISKANN_GRAPH_TYPE_VAMANA = "vamana";
 const char* const GRAPH_TYPE_ODESCENT = "odescent";
