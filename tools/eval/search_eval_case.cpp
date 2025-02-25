@@ -21,15 +21,38 @@
 #include "monitor/latency_monitor.h"
 #include "monitor/memory_peak_monitor.h"
 #include "monitor/recall_monitor.h"
+#include "vsag/filter.h"
 
 namespace vsag::eval {
+
+class FilterObj : public vsag::Filter {
+public:
+    FilterObj(const std::shared_ptr<int64_t[]>& train_labels, int64_t test_label, float valid_ratio)
+        : train_labels_(train_labels), test_label_(test_label), valid_ratio_(valid_ratio) {
+    }
+
+    bool
+    CheckValid(int64_t id) const override {
+        return train_labels_[id] == test_label_;
+    }
+
+    float
+    ValidRatio() const override {
+        return valid_ratio_;
+    }
+
+private:
+    const std::shared_ptr<int64_t[]>& train_labels_;
+    int64_t test_label_;
+    float valid_ratio_;
+};
 
 SearchEvalCase::SearchEvalCase(const std::string& dataset_path,
                                const std::string& index_path,
                                vsag::IndexPtr index,
                                EvalConfig config)
     : EvalCase(dataset_path, index_path, index), config_(std::move(config)) {
-    auto search_mode = config.search_mode;
+    auto search_mode = config_.search_mode;
     if (search_mode == "knn") {
         this->search_type_ = SearchType::KNN;
     } else if (search_mode == "range") {
@@ -152,6 +175,46 @@ SearchEvalCase::do_range_search() {
 }
 void
 SearchEvalCase::do_knn_filter_search() {
+    uint64_t topk = config_.top_k;
+    auto query_count = this->dataset_ptr_->GetNumberOfQuery();
+    auto train_labels = this->dataset_ptr_->GetTrainLabels();
+    auto test_labels = this->dataset_ptr_->GetTestLabels();
+    if (train_labels == nullptr) {
+        this->logger_->Error("dataset does not contain train_labels");
+    }
+    if (test_labels == nullptr) {
+        this->logger_->Error("dataset does not contain test_labels");
+    }
+    this->logger_->Debug("query count is " + std::to_string(query_count));
+    auto min_query = std::max(query_count, 10000L);
+    for (auto& monitor : this->monitors_) {
+        monitor->Start();
+        for (int64_t id = 0; id < min_query; ++id) {
+            auto i = id % query_count;
+            auto query = vsag::Dataset::Make();
+            query->NumElements(1)->Dim(this->dataset_ptr_->GetDim())->Owner(false);
+            const void* query_vector = this->dataset_ptr_->GetOneTest(i);
+            if (this->dataset_ptr_->GetTestDataType() == vsag::DATATYPE_FLOAT32) {
+                query->Float32Vectors((const float*)query_vector);
+            } else if (this->dataset_ptr_->GetTestDataType() == vsag::DATATYPE_INT8) {
+                query->Int8Vectors((const int8_t*)query_vector);
+            }
+            auto test_label = test_labels[i];
+            auto filter = std::make_shared<FilterObj>(
+                train_labels, test_label, this->dataset_ptr_->GetValidRatio(test_label));
+            auto result = this->index_->KnnSearch(query, topk, config_.search_param, filter);
+            if (not result.has_value()) {
+                std::cerr << "query error: " << result.error().message << std::endl;
+                exit(-1);
+            }
+            const int64_t* neighbors = result.value()->GetIds();
+            int64_t* ground_truth_neighbors = dataset_ptr_->GetNeighbors(i);
+            auto record = std::make_tuple(
+                neighbors, ground_truth_neighbors, dataset_ptr_.get(), query_vector, topk);
+            monitor->Record(&record);
+        }
+        monitor->Stop();
+    }
 }
 void
 SearchEvalCase::do_range_filter_search() {
