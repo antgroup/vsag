@@ -22,6 +22,7 @@ EvalDataset::Load(const std::string& filename) {
 
     // check datasets exist
     bool has_labels = false;
+    bool has_valid_ratio = false;
     {
         auto datasets = get_datasets(file);
         assert(datasets.count("train"));
@@ -29,6 +30,7 @@ EvalDataset::Load(const std::string& filename) {
         assert(datasets.count("neighbors"));
         assert(datasets.count("distances"));
         has_labels = datasets.count("train_labels") && datasets.count("test_labels");
+        has_valid_ratio = datasets.count("valid_ratios") > 0;
     }
 
     // get and (should check shape)
@@ -153,6 +155,18 @@ EvalDataset::Load(const std::string& filename) {
         H5::DataSpace test_labels_dataspace = test_labels_dataset.getSpace();
         obj->test_labels_ = std::shared_ptr<int64_t[]>(new int64_t[obj->number_of_query_]);
         test_labels_dataset.read(obj->test_labels_.get(), datatype, test_labels_dataspace);
+
+        if (has_valid_ratio) {
+            H5::FloatType ratio_datatype(H5::PredType::NATIVE_FLOAT);
+            H5::DataSet valid_ratio_dataset = file.openDataSet("/valid_ratios");
+            H5::DataSpace valid_ratio_dataspace = valid_ratio_dataset.getSpace();
+            hsize_t dims_out[1];
+            int ndims = valid_ratio_dataspace.getSimpleExtentDims(dims_out, NULL);
+            obj->number_of_label_ = dims_out[0];
+            obj->valid_ratio_ = std::shared_ptr<float[]>(new float[obj->number_of_label_]);
+            valid_ratio_dataset.read(
+                obj->valid_ratio_.get(), ratio_datatype, valid_ratio_dataspace);
+        }
     }
 
     return obj;
