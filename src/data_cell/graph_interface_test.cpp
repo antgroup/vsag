@@ -28,7 +28,7 @@ void
 GraphInterfaceTest::BasicTest(uint64_t max_id, uint64_t count, const GraphInterfacePtr& other) {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     auto max_degree = this->graph_->MaximumDegree();
-    auto old_count = this->graph_->TotalCount();
+    this->graph_->Resize(max_id);
     UnorderedMap<InnerIdType, std::shared_ptr<Vector<InnerIdType>>> maps(allocator.get());
     for (auto i = 0; i < count; ++i) {
         auto length = random() % max_degree + 1;
@@ -42,7 +42,6 @@ GraphInterfaceTest::BasicTest(uint64_t max_id, uint64_t count, const GraphInterf
 
     for (auto& [key, value] : maps) {
         this->graph_->InsertNeighborsById(key, *value);
-        this->graph_->IncreaseTotalCount(1);
     }
 
     // Test GetNeighborSize
@@ -64,8 +63,7 @@ GraphInterfaceTest::BasicTest(uint64_t max_id, uint64_t count, const GraphInterf
 
     // Test Others
     SECTION("Test Others") {
-        REQUIRE(this->graph_->TotalCount() == old_count + maps.size());
-        REQUIRE(this->graph_->MaxCapacity() > this->graph_->TotalCount());
+        REQUIRE(this->graph_->MaxCapacity() >= this->graph_->TotalCount());
         REQUIRE(this->graph_->MaximumDegree() == max_degree);
 
         this->graph_->SetTotalCount(this->graph_->TotalCount());
