@@ -21,11 +21,11 @@
 namespace vsag {
 
 bool
-ODescent::Build(std::shared_ptr<IdsSequence> ids_sequence, const GraphInterfacePtr graph_storage) {
+ODescent::Build(const Vector<InnerIdType>& ids_sequence, const GraphInterfacePtr graph_storage) {
     graph_.clear();
-    if (ids_sequence != nullptr) {
-        data_num_ = ids_sequence->data_num;
-        valid_ids_ = ids_sequence->valid_ids;
+    if (not ids_sequence.empty()) {
+        data_num_ = static_cast<int64_t>(ids_sequence.size());
+        valid_ids_ = ids_sequence.data();
     } else {
         data_num_ = flatten_interface_->TotalCount();
     }
@@ -42,13 +42,13 @@ ODescent::Build(std::shared_ptr<IdsSequence> ids_sequence, const GraphInterfaceP
     old_neighbors.resize(data_num_, UnorderedSet<uint32_t>(allocator_));
     new_neighbors.resize(data_num_, UnorderedSet<uint32_t>(allocator_));
     for (int i = 0; i < data_num_; ++i) {
-        old_neighbors[i].reserve(odescent_parameter_->max_degree);
-        new_neighbors[i].reserve(odescent_parameter_->max_degree);
+        old_neighbors[i].reserve(odescent_param_->max_degree);
+        new_neighbors[i].reserve(odescent_param_->max_degree);
     }
     init_graph(graph_storage);
     {
-        for (int i = 0; i < odescent_parameter_->turn; ++i) {
-            sample_candidates(old_neighbors, new_neighbors, odescent_parameter_->sample_rate);
+        for (int i = 0; i < odescent_param_->turn; ++i) {
+            sample_candidates(old_neighbors, new_neighbors, odescent_param_->sample_rate);
             update_neighbors(old_neighbors, new_neighbors);
             repair_no_in_edge();
         }
@@ -161,8 +161,8 @@ ODescent::update_neighbors(Vector<UnorderedSet<uint32_t>>& old_neighbors,
             auto& neighbors = graph_[i].neighbors;
             std::sort(neighbors.begin(), neighbors.end());
             neighbors.erase(std::unique(neighbors.begin(), neighbors.end()), neighbors.end());
-            if (neighbors.size() > odescent_parameter_->max_degree) {
-                neighbors.resize(odescent_parameter_->max_degree);
+            if (neighbors.size() > odescent_param_->max_degree) {
+                neighbors.resize(odescent_param_->max_degree);
             }
             graph_[i].greast_neighbor_distance = neighbors.back().distance;
         }
@@ -175,7 +175,7 @@ ODescent::add_reverse_edges() {
     Vector<Linklist> reverse_graph(allocator_);
     reverse_graph.resize(data_num_, Linklist(allocator_));
     for (int i = 0; i < data_num_; ++i) {
-        reverse_graph[i].neighbors.reserve(odescent_parameter_->max_degree);
+        reverse_graph[i].neighbors.reserve(odescent_param_->max_degree);
     }
     for (int i = 0; i < data_num_; ++i) {
         for (const auto& node : graph_[i].neighbors) {
@@ -191,8 +191,8 @@ ODescent::add_reverse_edges() {
                              reverse_graph[i].neighbors.end());
             std::sort(neighbors.begin(), neighbors.end());
             neighbors.erase(std::unique(neighbors.begin(), neighbors.end()), neighbors.end());
-            if (neighbors.size() > odescent_parameter_->max_degree) {
-                neighbors.resize(odescent_parameter_->max_degree);
+            if (neighbors.size() > odescent_param_->max_degree) {
+                neighbors.resize(odescent_param_->max_degree);
             }
         }
     };
@@ -248,14 +248,14 @@ ODescent::repair_no_in_edge() {
 
     Vector<int> replace_pos(
         data_num_,
-        static_cast<int32_t>(std::min(data_num_ - 1, odescent_parameter_->max_degree) - 1),
+        static_cast<int32_t>(std::min(data_num_ - 1, odescent_param_->max_degree) - 1),
         allocator_);
-    auto min_in_degree = std::min(odescent_parameter_->min_in_degree, data_num_ - 1);
+    auto min_in_degree = std::min(odescent_param_->min_in_degree, data_num_ - 1);
     for (int i = 0; i < data_num_; ++i) {
         auto& link = graph_[i].neighbors;
         int need_replace_loc = 0;
         while (in_edges_count[i] < min_in_degree &&
-               need_replace_loc < odescent_parameter_->max_degree) {
+               need_replace_loc < odescent_param_->max_degree) {
             uint32_t need_replace_id = link[need_replace_loc].id;
             bool has_connect = false;
             for (auto& neigbor : graph_[need_replace_id].neighbors) {
@@ -290,14 +290,14 @@ ODescent::prune_graph() {
         }
     }
 
-    auto min_in_degree = std::min(odescent_parameter_->min_in_degree, data_num_ - 1);
+    auto min_in_degree = std::min(odescent_param_->min_in_degree, data_num_ - 1);
     auto task = [&, this](int64_t start, int64_t end) {
         for (int64_t loc = start; loc < end; ++loc) {
             auto& neighbors = graph_[loc].neighbors;
             std::sort(neighbors.begin(), neighbors.end());
             neighbors.erase(std::unique(neighbors.begin(), neighbors.end()), neighbors.end());
             Vector<Node> candidates(allocator_);
-            candidates.reserve(odescent_parameter_->max_degree);
+            candidates.reserve(odescent_param_->max_degree);
             for (auto& neighbor : neighbors) {
                 bool flag = true;
                 int cur_in_edge = 0;
@@ -307,7 +307,7 @@ ODescent::prune_graph() {
                 }
                 if (cur_in_edge > min_in_degree) {
                     for (auto& candidate : candidates) {
-                        if (get_distance(neighbor.id, candidate.id) * odescent_parameter_->alpha <
+                        if (get_distance(neighbor.id, candidate.id) * odescent_param_->alpha <
                             neighbor.distance) {
                             flag = false;
                             {
@@ -323,8 +323,8 @@ ODescent::prune_graph() {
                 }
             }
             neighbors.swap(candidates);
-            if (neighbors.size() > odescent_parameter_->max_degree) {
-                neighbors.resize(odescent_parameter_->max_degree);
+            if (neighbors.size() > odescent_param_->max_degree) {
+                neighbors.resize(odescent_param_->max_degree);
             }
         }
     };
@@ -334,8 +334,8 @@ ODescent::prune_graph() {
 void
 ODescent::parallelize_task(std::function<void(int64_t, int64_t)> task) {
     Vector<std::future<void>> futures(allocator_);
-    for (int64_t i = 0; i < data_num_; i += odescent_parameter_->block_size) {
-        int64_t end = std::min(i + odescent_parameter_->block_size, data_num_);
+    for (int64_t i = 0; i < data_num_; i += odescent_param_->block_size) {
+        int64_t end = std::min(i + odescent_param_->block_size, data_num_);
         futures.push_back(thread_pool_->GeneralEnqueue(task, i, end));
     }
     for (auto& future : futures) {
@@ -374,7 +374,7 @@ ODescent::init_one_edge(int64_t i,
                         std::mt19937& rng) {
     UnorderedSet<uint32_t> ids_set(allocator_);
     ids_set.insert(i);
-    graph_[i].neighbors.reserve(odescent_parameter_->max_degree);
+    graph_[i].neighbors.reserve(odescent_param_->max_degree);
     // extract graph from graph_storage
     size_t valid_id_count = 0;
     if (graph_storage != nullptr) {
@@ -399,10 +399,10 @@ ODescent::init_one_edge(int64_t i,
         }
     }
     // fill with random points
-    int64_t max_neighbors = std::min(data_num_ - 1, odescent_parameter_->max_degree);
+    int64_t max_neighbors = std::min(data_num_ - 1, odescent_param_->max_degree);
     for (; valid_id_count < max_neighbors; ++valid_id_count) {
         uint32_t id = i;
-        if (data_num_ - 1 < odescent_parameter_->max_degree) {
+        if (data_num_ - 1 < odescent_param_->max_degree) {
             id = (i + valid_id_count + 1) % data_num_;
             while (ids_set.find(id) != ids_set.end()) {
                 id = (id + 1) % data_num_;

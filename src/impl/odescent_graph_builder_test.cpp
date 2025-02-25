@@ -87,17 +87,16 @@ TEST_CASE("ODescent Build Test", "[ut][ODescent]") {
                          param.allocator_.get(),
                          param.thread_pool_.get(),
                          false);
-    std::shared_ptr<uint32_t[]> valid_ids = nullptr;
+    vsag::Vector<vsag::InnerIdType> valid_ids(param.allocator_.get());
     if (partial_data) {
         num_vectors /= 2;
-        valid_ids.reset(new uint32_t[num_vectors]);
+        valid_ids.resize(num_vectors);
         for (int i = 0; i < num_vectors; ++i) {
             valid_ids[i] = 2 * i;
         }
     }
-    auto id_seq = std::make_shared<vsag::ODescent::IdsSequence>(valid_ids.get(), num_vectors);
     if (num_vectors <= 0) {
-        REQUIRE_THROWS(graph.Build(id_seq));
+        REQUIRE_THROWS(graph.Build(valid_ids));
         return;
     }
 
@@ -110,7 +109,7 @@ TEST_CASE("ODescent Build Test", "[ut][ODescent]") {
         vsag::GraphInterface::MakeInstance(graph_param_ptr, param, partial_data);
     vsag::GraphInterfacePtr merged_graph_interface =
         vsag::GraphInterface::MakeInstance(graph_param_ptr, param, partial_data);
-    graph.Build(id_seq);
+    graph.Build(valid_ids);
     graph.SaveGraph(graph_interface);
 
     for (int i = 0; i < num_vectors; ++i) {
@@ -121,7 +120,7 @@ TEST_CASE("ODescent Build Test", "[ut][ODescent]") {
         edges.resize(origin_size / 2);
         half_graph_interface->InsertNeighborsById(id, edges);
     }
-    graph.Build(id_seq, half_graph_interface);
+    graph.Build(valid_ids, half_graph_interface);
     graph.SaveGraph(merged_graph_interface);
 
     if (num_vectors == 1) {

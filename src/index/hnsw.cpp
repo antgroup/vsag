@@ -1078,7 +1078,7 @@ HNSW::merge(const std::vector<MergeUnit>& merge_units) {
                        index_common_param_.allocator_.get(),
                        index_common_param_.thread_pool_.get());
 
-        graph.Build(nullptr, graph_interface);
+        graph.Build(graph_interface);
         graph.SaveGraph(graph_interface);
     }
     // set graph

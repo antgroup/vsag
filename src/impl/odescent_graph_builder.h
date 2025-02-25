@@ -78,20 +78,12 @@ struct Linklist {
 
 class ODescent {
 public:
-    struct IdsSequence {
-        IdsSequence(const InnerIdType* valid_ids, int64_t data_num)
-            : valid_ids(valid_ids), data_num(data_num) {
-        }
-        const InnerIdType* valid_ids;
-        int64_t data_num;
-    };
-
     ODescent(ODescentParameterPtr odescent_parameter,
              const FlattenInterfacePtr& flatten_interface,
              Allocator* allocator,
              SafeThreadPool* thread_pool,
              bool pruning = true)
-        : odescent_parameter_(std::move(odescent_parameter)),
+        : odescent_param_(std::move(odescent_parameter)),
           flatten_interface_(flatten_interface),
           pruning_(pruning),
           allocator_(allocator),
@@ -101,8 +93,12 @@ public:
     }
 
     bool
-    Build(std::shared_ptr<IdsSequence> ids_sequence = nullptr,
-          const GraphInterfacePtr graph_storage = nullptr);
+    Build(const GraphInterfacePtr graph_storage = nullptr) {
+        return Build(Vector<InnerIdType>(allocator_), graph_storage);
+    }
+
+    bool
+    Build(const Vector<InnerIdType>& ids_sequence, const GraphInterfacePtr graph_storage = nullptr);
 
     void
     SaveGraph(std::stringstream& out);
@@ -162,7 +158,7 @@ private:
     bool pruning_{true};
     Allocator* allocator_;
 
-    const ODescentParameterPtr odescent_parameter_;
+    const ODescentParameterPtr odescent_param_;
 
     const FlattenInterfacePtr& flatten_interface_;
 };

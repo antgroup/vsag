@@ -60,7 +60,7 @@ void
 IndexNode::BuildGraph(ODescent& odescent) {
     if (not ids_.empty()) {
         entry_point_ = ids_[0];
-        odescent.Build(std::make_shared<ODescent::IdsSequence>(ids_.data(), ids_.size()));
+        odescent.Build(ids_);
         odescent.SaveGraph(graph_);
         Vector<InnerIdType>(common_param_->allocator_.get()).swap(ids_);
     }
