@@ -15,20 +15,24 @@
 
 #pragma once
 
+#include "vsag_exception.h"
+
 #define SAFE_CALL(stmt)                                                              \
     try {                                                                            \
         stmt;                                                                        \
+    } catch (const vsag::VsagException& e) {                                         \
+        LOG_ERROR_AND_RETURNS(e.error_.type, e.error_.message);                      \
     } catch (const std::exception& e) {                                              \
         LOG_ERROR_AND_RETURNS(ErrorType::UNKNOWN_ERROR, "unknownError: ", e.what()); \
     } catch (...) {                                                                  \
         LOG_ERROR_AND_RETURNS(ErrorType::UNKNOWN_ERROR, "unknown error");            \
     }
 
-#define CHECK_ARGUMENT(expr, message)             \
-    do {                                          \
-        if (not(expr)) {                          \
-            throw std::invalid_argument(message); \
-        }                                         \
+#define CHECK_ARGUMENT(expr, message)                                        \
+    do {                                                                     \
+        if (not(expr)) {                                                     \
+            throw vsag::VsagException(ErrorType::INVALID_ARGUMENT, message); \
+        }                                                                    \
     } while (0);
 
 #define ROW_ID_MASK 0xFFFFFFFFLL
