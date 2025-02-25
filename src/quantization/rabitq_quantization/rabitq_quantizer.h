@@ -30,6 +30,14 @@
 #include "typing.h"
 
 namespace vsag {
+
+/** Implement of RaBitQ Quantization
+ *
+ *  Supports bit-level quantization
+ *
+ *  Reference:
+ *  Jianyang Gao and Cheng Long. 2024. RaBitQ: Quantizing High-Dimensional Vectors with a Theoretical Error Bound for Approximate Nearest Neighbor Search. Proc. ACM Manag. Data 2, 3, Article 167 (June 2024), 27 pages. https://doi.org/10.1145/3654970
+ */
 template <MetricType metric = MetricType::METRIC_TYPE_L2SQR>
 class RaBitQuantizer : public Quantizer<RaBitQuantizer<metric>> {
 public:
