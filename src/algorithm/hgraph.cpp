@@ -85,31 +85,27 @@ HGraph::Build(const DatasetPtr& data) {
 tl::expected<std::vector<int64_t>, Error>
 HGraph::Add(const DatasetPtr& data) {
     std::vector<int64_t> failed_ids;
-    try {
-        auto base_dim = data->GetDim();
-        CHECK_ARGUMENT(base_dim == dim_,
-                       fmt::format("base.dim({}) must be equal to index.dim({})", base_dim, dim_));
-        CHECK_ARGUMENT(data->GetFloat32Vectors() != nullptr, "base.float_vector is nullptr");
-        auto split_datasets = this->split_dataset_by_duplicate_label(data, failed_ids);
 
-        for (auto& data_ptr : split_datasets) {
-            this->basic_flatten_codes_->Train(data_ptr->GetFloat32Vectors(),
-                                              data_ptr->GetNumElements());
-            this->basic_flatten_codes_->BatchInsertVector(data_ptr->GetFloat32Vectors(),
-                                                          data_ptr->GetNumElements());
-            if (use_reorder_) {
-                this->high_precise_codes_->Train(data_ptr->GetFloat32Vectors(),
-                                                 data_ptr->GetNumElements());
-                this->high_precise_codes_->BatchInsertVector(data_ptr->GetFloat32Vectors(),
-                                                             data_ptr->GetNumElements());
-            }
-            this->hnsw_add(data_ptr);
+    auto base_dim = data->GetDim();
+    CHECK_ARGUMENT(base_dim == dim_,
+                   fmt::format("base.dim({}) must be equal to index.dim({})", base_dim, dim_));
+    CHECK_ARGUMENT(data->GetFloat32Vectors() != nullptr, "base.float_vector is nullptr");
+    auto split_datasets = this->split_dataset_by_duplicate_label(data, failed_ids);
+
+    for (auto& data_ptr : split_datasets) {
+        this->basic_flatten_codes_->Train(data_ptr->GetFloat32Vectors(),
+                                          data_ptr->GetNumElements());
+        this->basic_flatten_codes_->BatchInsertVector(data_ptr->GetFloat32Vectors(),
+                                                      data_ptr->GetNumElements());
+        if (use_reorder_) {
+            this->high_precise_codes_->Train(data_ptr->GetFloat32Vectors(),
+                                             data_ptr->GetNumElements());
+            this->high_precise_codes_->BatchInsertVector(data_ptr->GetFloat32Vectors(),
+                                                         data_ptr->GetNumElements());
         }
-        return failed_ids;
-    } catch (const std::invalid_argument& e) {
-        LOG_ERROR_AND_RETURNS(
-            ErrorType::INVALID_ARGUMENT, "failed to add(invalid argument): ", e.what());
+        this->hnsw_add(data_ptr);
     }
+    return failed_ids;
 }
 
 tl::expected<DatasetPtr, Error>
@@ -121,75 +117,66 @@ HGraph::KnnSearch(const DatasetPtr& query,
     if (filter != nullptr) {
         ft = std::make_unique<BitsetOrCallbackFilter>(filter);
     }
-    try {
-        int64_t query_dim = query->GetDim();
-        CHECK_ARGUMENT(
-            query_dim == dim_,
-            fmt::format("query.dim({}) must be equal to index.dim({})", query_dim, dim_));
-        // check k
-        CHECK_ARGUMENT(k > 0, fmt::format("k({}) must be greater than 0", k));
-        k = std::min(k, GetNumElements());
+    int64_t query_dim = query->GetDim();
+    CHECK_ARGUMENT(query_dim == dim_,
+                   fmt::format("query.dim({}) must be equal to index.dim({})", query_dim, dim_));
+    // check k
+    CHECK_ARGUMENT(k > 0, fmt::format("k({}) must be greater than 0", k));
+    k = std::min(k, GetNumElements());
 
-        // check query vector
-        CHECK_ARGUMENT(query->GetNumElements() == 1, "query dataset should contain 1 vector only");
+    // check query vector
+    CHECK_ARGUMENT(query->GetNumElements() == 1, "query dataset should contain 1 vector only");
 
-        InnerSearchParam search_param;
-        search_param.ep_ = this->entry_point_id_;
-        search_param.ef_ = 1;
-        search_param.is_id_allowed_ = nullptr;
-        for (auto i = static_cast<int64_t>(this->route_graphs_.size() - 1); i >= 0; --i) {
-            auto result = this->search_one_graph(query->GetFloat32Vectors(),
-                                                 this->route_graphs_[i],
-                                                 this->basic_flatten_codes_,
-                                                 search_param);
-            search_param.ep_ = result.top().second;
-        }
-
-        auto params = HGraphSearchParameters::FromJson(parameters);
-
-        search_param.ef_ = params.ef_search;
-        search_param.is_id_allowed_ = ft.get();
-        auto search_result = this->search_one_graph(query->GetFloat32Vectors(),
-                                                    this->bottom_graph_,
-                                                    this->basic_flatten_codes_,
-                                                    search_param);
-
-        if (use_reorder_) {
-            this->reorder(query->GetFloat32Vectors(), this->high_precise_codes_, search_result, k);
-        }
-
-        while (search_result.size() > k) {
-            search_result.pop();
-        }
-
-        // return an empty dataset directly if searcher returns nothing
-        if (search_result.empty()) {
-            auto result = Dataset::Make();
-            result->Dim(0)->NumElements(1);
-            return result;
-        }
-
-        auto dataset_results = Dataset::Make();
-        dataset_results->Dim(static_cast<int64_t>(search_result.size()))
-            ->NumElements(1)
-            ->Owner(true, allocator_);
-
-        auto* ids = (int64_t*)allocator_->Allocate(sizeof(int64_t) * search_result.size());
-        dataset_results->Ids(ids);
-        auto* dists = (float*)allocator_->Allocate(sizeof(float) * search_result.size());
-        dataset_results->Distances(dists);
-
-        for (auto j = static_cast<int64_t>(search_result.size() - 1); j >= 0; --j) {
-            dists[j] = search_result.top().first;
-            ids[j] = this->labels_.at(search_result.top().second);
-            search_result.pop();
-        }
-        return std::move(dataset_results);
-    } catch (const std::invalid_argument& e) {
-        LOG_ERROR_AND_RETURNS(ErrorType::INVALID_ARGUMENT,
-                              "[HGraph] failed to knn_search(invalid argument): ",
-                              e.what());
+    InnerSearchParam search_param;
+    search_param.ep_ = this->entry_point_id_;
+    search_param.ef_ = 1;
+    search_param.is_id_allowed_ = nullptr;
+    for (auto i = static_cast<int64_t>(this->route_graphs_.size() - 1); i >= 0; --i) {
+        auto result = this->search_one_graph(query->GetFloat32Vectors(),
+                                             this->route_graphs_[i],
+                                             this->basic_flatten_codes_,
+                                             search_param);
+        search_param.ep_ = result.top().second;
     }
+
+    auto params = HGraphSearchParameters::FromJson(parameters);
+
+    search_param.ef_ = params.ef_search;
+    search_param.is_id_allowed_ = ft.get();
+    auto search_result = this->search_one_graph(
+        query->GetFloat32Vectors(), this->bottom_graph_, this->basic_flatten_codes_, search_param);
+
+    if (use_reorder_) {
+        this->reorder(query->GetFloat32Vectors(), this->high_precise_codes_, search_result, k);
+    }
+
+    while (search_result.size() > k) {
+        search_result.pop();
+    }
+
+    // return an empty dataset directly if searcher returns nothing
+    if (search_result.empty()) {
+        auto result = Dataset::Make();
+        result->Dim(0)->NumElements(1);
+        return result;
+    }
+
+    auto dataset_results = Dataset::Make();
+    dataset_results->Dim(static_cast<int64_t>(search_result.size()))
+        ->NumElements(1)
+        ->Owner(true, allocator_);
+
+    auto* ids = (int64_t*)allocator_->Allocate(sizeof(int64_t) * search_result.size());
+    dataset_results->Ids(ids);
+    auto* dists = (float*)allocator_->Allocate(sizeof(float) * search_result.size());
+    dataset_results->Distances(dists);
+
+    for (auto j = static_cast<int64_t>(search_result.size() - 1); j >= 0; --j) {
+        dists[j] = search_result.top().first;
+        ids[j] = this->labels_.at(search_result.top().second);
+        search_result.pop();
+    }
+    return std::move(dataset_results);
 }
 
 uint64_t
@@ -257,8 +244,8 @@ HGraph::Serialize() const {
 
         return bs;
     } catch (const std::bad_alloc& e) {
-        LOG_ERROR_AND_RETURNS(
-            ErrorType::NO_ENOUGH_MEMORY, "failed to Serialize(bad alloc): ", e.what());
+        throw VsagException(
+            ErrorType::NO_ENOUGH_MEMORY, "failed to Serialize(bad alloc)", e.what());
     }
 }
 
