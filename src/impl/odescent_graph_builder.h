@@ -24,6 +24,7 @@
 #include "data_cell/flatten_datacell.h"
 #include "data_cell/graph_datacell.h"
 #include "data_cell/sparse_graph_datacell.h"
+#include "impl/odescent_graph_parameter.h"
 #include "logger.h"
 #include "safe_allocator.h"
 #include "simd/simd.h"
@@ -74,20 +75,15 @@ struct Linklist {
         : neighbors(allocator), greast_neighbor_distance(std::numeric_limits<float>::max()) {
     }
 };
+
 class ODescent {
 public:
-    ODescent(int64_t max_degree,
-             float alpha,
-             int64_t turn,
-             float sample_rate,
+    ODescent(ODescentParameterPtr odescent_parameter,
              const FlattenInterfacePtr& flatten_interface,
              Allocator* allocator,
              SafeThreadPool* thread_pool,
              bool pruning = true)
-        : max_degree_(max_degree),
-          alpha_(alpha),
-          turn_(turn),
-          sample_rate_(sample_rate),
+        : odescent_param_(std::move(odescent_parameter)),
           flatten_interface_(flatten_interface),
           pruning_(pruning),
           allocator_(allocator),
@@ -97,9 +93,12 @@ public:
     }
 
     bool
-    Build(const uint32_t* valid_ids = nullptr,
-          int64_t data_num = 0,
-          const GraphInterfacePtr graph_storage = nullptr);
+    Build(const GraphInterfacePtr graph_storage = nullptr) {
+        return Build(Vector<InnerIdType>(allocator_), graph_storage);
+    }
+
+    bool
+    Build(const Vector<InnerIdType>& ids_sequence, const GraphInterfacePtr graph_storage = nullptr);
 
     void
     SaveGraph(std::stringstream& out);
@@ -115,6 +114,13 @@ private:
         }
         return flatten_interface_->ComputePairVectors(loc1, loc2);
     }
+
+    void
+    init_one_edge(int64_t i,
+                  const GraphInterfacePtr graph_storage,
+                  std::function<uint32_t(uint32_t)> id_map_func,
+                  std::uniform_int_distribution<int64_t>& k_generate,
+                  std::mt19937& rng);
 
     void
     init_graph(const GraphInterfacePtr graph_storage);
@@ -143,21 +149,16 @@ private:
 
     size_t dim_;
     int64_t data_num_;
-
-    int64_t max_degree_;
-    float alpha_;
-    int64_t turn_;
     Vector<Linklist> graph_;
-    int64_t min_in_degree_ = 1;
-    int64_t block_size_{10000};
     Vector<std::mutex> points_lock_;
     SafeThreadPool* thread_pool_;
 
-    const uint32_t* valid_ids_{nullptr};
+    const InnerIdType* valid_ids_{nullptr};
 
     bool pruning_{true};
-    float sample_rate_{0.3};
     Allocator* allocator_;
+
+    const ODescentParameterPtr odescent_param_;
 
     const FlattenInterfacePtr& flatten_interface_;
 };

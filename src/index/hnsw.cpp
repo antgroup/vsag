@@ -28,6 +28,7 @@
 #include "data_cell/flatten_datacell.h"
 #include "data_cell/graph_datacell_parameter.h"
 #include "empty_index_binary_set.h"
+#include "impl/odescent_graph_builder.h"
 #include "index/hnsw_zparameters.h"
 #include "io/memory_block_io_parameter.h"
 #include "quantization/fp32_quantizer_parameter.h"
@@ -1048,6 +1049,7 @@ extract_data_and_graph(const std::vector<MergeUnit>& merge_units,
 
 tl::expected<void, Error>
 HNSW::merge(const std::vector<MergeUnit>& merge_units) {
+    SlowTaskTimer t0("hnsw merge");
     auto param = std::make_shared<FlattenDataCellParameter>();
     param->io_parameter_ = std::make_shared<MemoryBlockIOParameter>();
     param->quantizer_parameter_ = std::make_shared<FP32QuantizerParameter>();
@@ -1067,6 +1069,18 @@ HNSW::merge(const std::vector<MergeUnit>& merge_units) {
     this->ExtractDataAndGraph(flatten_interface, graph_interface, ids, id_map, allocator_.get());
     extract_data_and_graph(merge_units, flatten_interface, graph_interface, ids, allocator_.get());
     // TODO(inabao): merge graph
+    {
+        SlowTaskTimer t1("odescent build");
+        auto odescent_param = std::make_shared<ODescentParameter>();
+        odescent_param->max_degree = static_cast<int64_t>(2 * graph_param_ptr->max_degree_);
+        ODescent graph(odescent_param,
+                       flatten_interface,
+                       index_common_param_.allocator_.get(),
+                       index_common_param_.thread_pool_.get());
+
+        graph.Build(graph_interface);
+        graph.SaveGraph(graph_interface);
+    }
     // set graph
     SetDataAndGraph(flatten_interface, graph_interface, ids);
     return {};

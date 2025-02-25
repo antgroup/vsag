@@ -15,21 +15,14 @@
 
 #pragma once
 
-#include <functional>
-
-#include "algorithm/hgraph_parameter.h"
-#include "data_cell/flatten_interface.h"
-#include "data_cell/graph_datacell_parameter.h"
-#include "data_cell/graph_interface.h"
-#include "impl/odescent_graph_parameter.h"
-#include "index_common_param.h"
-#include "typing.h"
-#include "vsag/index.h"
+#include "parameter.h"
 
 namespace vsag {
 
-struct PyramidParameters : public Parameter {
+struct ODescentParameter : public Parameter {
 public:
+    ODescentParameter() = default;
+
     void
     FromJson(const JsonType& json) override;
 
@@ -37,21 +30,14 @@ public:
     ToJson() override;
 
 public:
-    GraphInterfaceParamPtr graph_param{nullptr};
-    FlattenDataCellParamPtr flatten_data_cell_param{nullptr};
-    ODescentParameterPtr odescent_param{nullptr};
+    int64_t turn{30};
+    float alpha{1};
+    float sample_rate{0.3};
+    int64_t min_in_degree{1};
+    int64_t max_degree{32};
+    int64_t block_size{10000};
 };
 
-class PyramidSearchParameters {
-public:
-    static PyramidSearchParameters
-    FromJson(const std::string& json_string);
-
-public:
-    int64_t ef_search{100};
-
-private:
-    PyramidSearchParameters() = default;
-};
+using ODescentParameterPtr = std::shared_ptr<ODescentParameter>;
 
 }  // namespace vsag

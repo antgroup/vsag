@@ -238,10 +238,12 @@ DiskANN::build(const DatasetPtr& base) {
                 vsag::FlattenInterface::MakeInstance(flatten_param, this->common_param_);
             flatten_interface_ptr->Train(vectors, data_num);
             flatten_interface_ptr->BatchInsertVector(vectors, data_num);
-            vsag::ODescent graph(2LL * R_,
-                                 diskann_params_.alpha,
-                                 diskann_params_.turn,
-                                 diskann_params_.sample_rate,
+            auto param = std::make_shared<ODescentParameter>();
+            param->max_degree = 2LL * R_;
+            param->alpha = diskann_params_.alpha;
+            param->turn = diskann_params_.turn;
+            param->sample_rate = diskann_params_.sample_rate;
+            vsag::ODescent graph(param,
                                  flatten_interface_ptr,
                                  common_param_.allocator_.get(),
                                  common_param_.thread_pool_.get());
