@@ -103,6 +103,9 @@ GenerateSparseVectors(vsag::Allocator* allocator,
                       float max_val = 1,
                       int seed = 47);
 
+std::pair<std::vector<float>, std::vector<uint8_t>>
+GenerateBinaryVectorsAndCodes(uint32_t count, uint32_t dim, int seed = 47);
+
 std::vector<float>
 generate_vectors(uint64_t count, uint32_t dim, bool need_normalize = true, int seed = 47);
 

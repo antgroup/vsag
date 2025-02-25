@@ -25,6 +25,54 @@ using namespace vsag;
 
 template <typename T>
 void
+TestEncodeDecodeRaBitQ(Quantizer<T>& quantizer, uint64_t dim, int count) {
+    // Generate centroid and data
+    assert(count % 2 == 0);
+    auto centroid = fixtures::generate_vectors(1, dim, false, 114514);
+    std::vector<float> vecs(dim * count);
+    for (int64_t i = 0; i < count; ++i) {
+        for (int64_t d = 0; d < dim; ++d) {
+            vecs[i * dim + d] = centroid[d] + (i % 2 == 0 ? i + 1 : -i);
+        }
+    }
+
+    // Init quantizer
+    quantizer.ReTrain(vecs.data(), count);
+
+    // Test EncodeOne & DecodeOne
+    std::vector<uint8_t> codes1(quantizer.GetCodeSize() * count);
+    for (uint64_t i = 0; i < count; ++i) {
+        uint8_t* codes = codes1.data() + i * quantizer.GetCodeSize();
+        quantizer.EncodeOne(vecs.data() + i * dim, codes);
+        for (uint64_t d = 0; d < dim; ++d) {
+            bool ge = vecs[i * dim + d] >= centroid[d];
+            bool bit = ((codes[d / 8] >> (d % 8)) & 1) != 0;
+            REQUIRE(ge == bit);
+        }
+
+        std::vector<float> out_vec(dim);
+        quantizer.DecodeOne(codes, out_vec.data());
+        for (uint64_t d = 0; d < dim; ++d) {
+            REQUIRE(vecs[i * dim + d] * out_vec[d] >= 0);
+        }
+    }
+
+    // Test EncodeBatch & DecodeBatch
+    std::vector<uint8_t> codes2(quantizer.GetCodeSize() * count);
+    quantizer.EncodeBatch(vecs.data(), codes2.data(), count);
+    for (int c = 0; c < quantizer.GetCodeSize() * count; c++) {
+        REQUIRE(codes1[c] == codes2[c]);
+    }
+
+    std::vector<float> out_vec(dim * count);
+    quantizer.DecodeBatch(codes2.data(), out_vec.data(), count);
+    for (int64_t i = 0; i < dim * count; ++i) {
+        REQUIRE(vecs[i] * out_vec[i] >= 0);
+    }
+}
+
+template <typename T>
+void
 TestQuantizerEncodeDecode(
     Quantizer<T>& quant, int64_t dim, int count, float error = 1e-5, bool retrain = true) {
     auto vecs = fixtures::generate_vectors(count, dim, true);
@@ -197,33 +245,36 @@ TestComputer(
         computer->SetQuery(querys.data() + i * dim);
 
         // Test Compute One Dist;
-        for (int j = 0; j < 100; ++j) {
-            auto idx1 = random() % count;
-            auto* codes1 = new uint8_t[quant.GetCodeSize()];
-            quant.EncodeOne(vecs.data() + idx1 * dim, codes1);
-            float value = 0.0f;
-            quant.ComputeDist(*computer, codes1, &value);
-            REQUIRE(quant.ComputeDist(*computer, codes1) == value);
-            auto gt = gt_func(idx1, i);
-            REQUIRE(std::abs(gt - value) < error);
-            delete[] codes1;
+        std::vector<uint8_t> codes1(quant.GetCodeSize() * count, 0);
+        std::vector<float> dists1(count);
+        for (int j = 0; j < count; ++j) {
+            uint8_t* code = codes1.data() + j * quant.GetCodeSize();
+            quant.EncodeOne(vecs.data() + j * dim, code);
+            quant.ComputeDist(*computer, code, dists1.data() + j);
+            REQUIRE(quant.ComputeDist(*computer, code) == dists1[j]);
+            REQUIRE(std::abs(gt_func(j, i) - dists1[j]) < error);
         }
 
         // Test Compute Batch
         std::vector<uint8_t> codes2(quant.GetCodeSize() * count);
-        std::vector<float> dists(count);
+        std::vector<float> dists2(count);
         quant.EncodeBatch(vecs.data(), codes2.data(), count);
-        quant.ComputeBatchDists(*computer, count, codes2.data(), dists.data());
+        quant.ComputeBatchDists(*computer, count, codes2.data(), dists2.data());
         for (int j = 0; j < count; ++j) {
-            REQUIRE(std::abs(gt_func(j, i) - dists[j]) < error);
+            REQUIRE(fixtures::dist_t(dists1[j]) == fixtures::dist_t(dists2[j]));
+            REQUIRE(std::abs(gt_func(j, i) - dists2[j]) < error);
         }
     }
 }
 
 template <typename T, MetricType metric, bool uniform = false>
 void
-TestSerializeAndDeserialize(
-    Quantizer<T>& quant1, Quantizer<T>& quant2, size_t dim, uint32_t count, float error = 1e-5f) {
+TestSerializeAndDeserialize(Quantizer<T>& quant1,
+                            Quantizer<T>& quant2,
+                            size_t dim,
+                            uint32_t count,
+                            float error = 1e-5f,
+                            bool is_rabitq = false) {
     auto vecs = fixtures::generate_vectors(count, dim);
     quant1.ReTrain(vecs.data(), count);
     std::string dirname = "/tmp/quantizer_TestSerializeAndDeserialize_" + std::to_string(random());
@@ -241,12 +292,17 @@ TestSerializeAndDeserialize(
     REQUIRE(quant1.GetCodeSize() == quant2.GetCodeSize());
     REQUIRE(quant1.GetDim() == quant2.GetDim());
 
-    TestQuantizerEncodeDecode<T>(quant2, dim, count, error, false);
-    if constexpr (uniform == false) {
-        TestComputer<T, metric>(quant2, dim, count, error, false);
-        TestComputeCodes<T, metric>(quant2, dim, count, error, false);
+    if (not is_rabitq) {
+        TestQuantizerEncodeDecode<T>(quant2, dim, count, error, false);
+        if constexpr (uniform == false) {
+            TestComputer<T, metric>(quant2, dim, count, error, false);
+            TestComputeCodes<T, metric>(quant2, dim, count, error, false);
+        } else {
+            TestComputeCodesSame<T, metric>(quant2, dim, count, error, false);
+        }
     } else {
-        TestComputeCodesSame<T, metric>(quant2, dim, count, error, false);
+        TestComputer<T, metric>(quant2, dim, count, error);
+        TestEncodeDecodeRaBitQ<T>(quant2, dim, count);
     }
 
     infile.close();
