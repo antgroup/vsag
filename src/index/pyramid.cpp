@@ -61,7 +61,7 @@ void
 IndexNode::BuildGraph(ODescent& odescent) {
     if (not ids_.empty()) {
         entry_point_ = ids_[0];
-        odescent.Build(ids_.data(), static_cast<int64_t>(ids_.size()));
+        odescent.Build(ids_);
         odescent.SaveGraph(graph_);
         Vector<InnerIdType>(common_param_->allocator_.get()).swap(ids_);
     }
@@ -137,10 +137,7 @@ Pyramid::build(const DatasetPtr& base) {
     flatten_interface_ptr_->Train(data_vectors, data_num);
     flatten_interface_ptr_->BatchInsertVector(data_vectors, data_num);
 
-    ODescent graph_builder(pyramid_param_.max_degree,
-                           pyramid_param_.alpha,
-                           pyramid_param_.turn,
-                           pyramid_param_.sample_rate,
+    ODescent graph_builder(pyramid_param_.odescent_param,
                            flatten_interface_ptr_,
                            common_param_.allocator_.get(),
                            common_param_.thread_pool_.get());
