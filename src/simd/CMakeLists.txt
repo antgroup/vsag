@@ -12,6 +12,7 @@ set (SIMD_SRCS
         sq4_simd.cpp
         sq4_uniform_simd.cpp
         sq8_uniform_simd.cpp
+        rabitq_simd.cpp
         normalize.cpp
 )
 if (DIST_CONTAINS_SSE)

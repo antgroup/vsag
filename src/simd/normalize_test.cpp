@@ -29,8 +29,16 @@ TEST_CASE("Normalize Compute", "[ut][simd]") {
     for (auto& dim : dims) {
         auto vec1 = fixtures::generate_vectors(count, dim);
         std::vector<float> tmp_value(dim * 4);
+        std::vector<float> zero_centroid(dim, 0);
         for (uint64_t i = 0; i < count; ++i) {
+            auto gt_self_centroid = generic::NormalizeWithCentroid(
+                vec1.data() + i * dim, vec1.data() + i * dim, tmp_value.data(), dim);
+            REQUIRE(std::abs(gt_self_centroid - 1) < 1e-5);
+            auto gt_zero_centroid = generic::NormalizeWithCentroid(
+                vec1.data() + i * dim, zero_centroid.data(), tmp_value.data(), dim);
             auto gt = generic::Normalize(vec1.data() + i * dim, tmp_value.data(), dim);
+            REQUIRE(gt_zero_centroid == gt);
+
             if (SimdStatus::SupportSSE()) {
                 auto sse = sse::Normalize(vec1.data() + i * dim, tmp_value.data() + dim, dim);
                 REQUIRE(fixtures::dist_t(gt) == fixtures::dist_t(sse));

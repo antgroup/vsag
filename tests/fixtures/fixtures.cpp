@@ -104,6 +104,31 @@ GenerateSparseVectors(vsag::Allocator* allocator,
     return sparse_vectors;
 }
 
+std::pair<std::vector<float>, std::vector<uint8_t>>
+GenerateBinaryVectorsAndCodes(uint32_t count, uint32_t dim, int seed) {
+    assert(count % 2 == 0);
+    std::mt19937 rng(seed);
+    std::uniform_real_distribution<float> distrib_real(-1, 1);
+    float inv_sqrt_d = 1.0f / std::sqrt(static_cast<float>(dim));
+
+    uint32_t code_size = (dim + 7) / 8;
+    std::vector<uint8_t> codes(count * code_size);
+    std::vector<float> vectors(count * dim);
+
+    for (uint32_t i = 0; i < count; i++) {
+        for (uint32_t d = 0; d < dim; d++) {
+            if (distrib_real(rng) >= 0.0f) {
+                codes[i * code_size + d / 8] |= (1 << (d % 8));
+                vectors[i * dim + d] = inv_sqrt_d;
+            } else {
+                vectors[i * dim + d] = -inv_sqrt_d;
+            }
+        }
+    }
+
+    return {vectors, codes};
+}
+
 std::vector<float>
 generate_vectors(uint64_t count, uint32_t dim, bool need_normalize, int seed) {
     return std::move(GenerateVectors<float>(count, dim, seed, need_normalize));

@@ -24,6 +24,9 @@ DivScalar(const float* from, float* to, uint64_t dim, float scalar);
 
 float
 Normalize(const float* from, float* to, uint64_t dim);
+
+float
+NormalizeWithCentroid(const float* from, const float* centroid, float* to, uint64_t dim);
 }  // namespace generic
 
 namespace sse {
@@ -60,6 +63,13 @@ Normalize(const float* from, float* to, uint64_t dim);
 
 using NormalizeType = float (*)(const float* from, float* to, uint64_t dim);
 extern NormalizeType Normalize;
+
+using NormalizeWithCentroidType = float (*)(const float* from,
+                                            const float* centroid,
+                                            float* to,
+                                            uint64_t dim);
+extern NormalizeWithCentroidType NormalizeWithCentroid;
+
 using DivScalarType = void (*)(const float* from, float* to, uint64_t dim, float scalar);
 extern DivScalarType DivScalar;
 

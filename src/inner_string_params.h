@@ -50,6 +50,7 @@ const char* const QUANTIZATION_TYPE_VALUE_SQ4 = "sq4";
 const char* const QUANTIZATION_TYPE_VALUE_SQ4_UNIFORM = "sq4_uniform";
 const char* const QUANTIZATION_TYPE_VALUE_FP32 = "fp32";
 const char* const QUANTIZATION_TYPE_VALUE_PQ = "pq";
+const char* const QUANTIZATION_TYPE_VALUE_RABITQ = "rabitq";
 
 const char* const SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE = "sq4_uniform_trunc_rate";
 
