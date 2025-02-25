@@ -222,7 +222,7 @@ template <MetricType metric>
 bool
 RaBitQuantizer<metric>::EncodeBatchImpl(const DataType* data, uint8_t* codes, uint64_t count) {
     for (uint64_t i = 0; i < count; ++i) {
-        // TODO(ZXY): use CBLAS to optimize
+        // TODO(ZXY): use batch optimize
         this->EncodeOneImpl(data + i * this->dim_, codes + i * this->code_size_);
     }
     return true;
