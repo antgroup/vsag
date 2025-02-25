@@ -83,7 +83,11 @@ ScalarQuantizationTrainer::trunc_bound_train(const float* data,
                                              uint64_t count,
                                              float* upper_bound,
                                              float* lower_bound) const {
-    auto ignore_count = static_cast<uint64_t>(static_cast<float>(count - 1) * 0.0001);
+    double ignore_rate = 0.001;
+    if (this->dim_ == 4) {
+        ignore_rate = this->trunc_rate_;
+    }
+    auto ignore_count = static_cast<uint64_t>(static_cast<double>(count - 1) * ignore_rate);
     for (uint64_t i = 0; i < dim_; ++i) {
         std::priority_queue<float, std::vector<float>, std::greater<>> heap_max;
         std::priority_queue<float, std::vector<float>, std::less<>> heap_min;
