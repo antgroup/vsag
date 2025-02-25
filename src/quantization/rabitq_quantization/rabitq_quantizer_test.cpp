@@ -28,6 +28,24 @@ using namespace vsag;
 const auto dims = fixtures::get_common_used_dims();
 const auto counts = {10, 100};
 
+TEST_CASE("RaBitQ Basic Test", "[ut][RaBitQuantizer]") {
+    for (auto dim : dims) {
+        for (auto count : counts) {
+            auto allocator = SafeAllocator::FactoryDefaultAllocator();
+            auto vecs = fixtures::generate_vectors(count, dim);
+            RaBitQuantizer<MetricType::METRIC_TYPE_L2SQR> quantizer(dim, allocator.get());
+
+            // name
+            REQUIRE(quantizer.NameImpl() == QUANTIZATION_TYPE_VALUE_RABITQ);
+
+            // train
+            REQUIRE(quantizer.TrainImpl(vecs.data(), 0) == false);
+            REQUIRE(quantizer.TrainImpl(vecs.data(), count) == true);
+            REQUIRE(quantizer.TrainImpl(vecs.data(), count) == true);
+        }
+    }
+}
+
 TEST_CASE("RaBitQ Encode and Decode", "[ut][RaBitQuantizer]") {
     for (auto dim : dims) {
         for (auto count : counts) {
