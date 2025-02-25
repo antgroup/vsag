@@ -17,7 +17,6 @@
 #include <fstream>
 
 #include "fixtures.h"
-#include "iostream"
 #include "quantizer.h"
 #include "simd/normalize.h"
 #include "simd/simd.h"
