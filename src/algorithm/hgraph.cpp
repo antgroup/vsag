@@ -701,7 +701,6 @@ HGraph::add_one_point(const float* data, int level, InnerIdType inner_id) {
         } else {
             route_graphs_[j]->InsertNeighborsById(inner_id, Vector<InnerIdType>(allocator_));
         }
-        route_graphs_[j]->IncreaseTotalCount(1);
     }
     if (bottom_graph_->TotalCount() != 0) {
         result = search_one_graph(data, this->bottom_graph_, flatten_codes, param);
@@ -710,7 +709,6 @@ HGraph::add_one_point(const float* data, int level, InnerIdType inner_id) {
     } else {
         bottom_graph_->InsertNeighborsById(inner_id, Vector<InnerIdType>(allocator_));
     }
-    bottom_graph_->IncreaseTotalCount(1);
 }
 
 void

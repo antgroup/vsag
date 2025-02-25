@@ -1015,7 +1015,6 @@ HNSW::ExtractDataAndGraph(FlattenInterfacePtr& data,
             }
         }
         graph->InsertNeighborsById(offset, edge);
-        graph->IncreaseTotalCount(1);
         ids.push_back(new_id);
         valid_id_count++;
     }
