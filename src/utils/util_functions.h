@@ -18,8 +18,10 @@
 #include <string>
 
 #include "index/index_common_param.h"
-#include "vsag/errors.h"
+#include "logger.h"
+#include "spdlog/spdlog.h"
 #include "vsag/expected.hpp"
+#include "vsag_exception.h"
 
 namespace vsag {
 
@@ -28,6 +30,8 @@ tl::expected<IndexOpParameters, Error>
 try_parse_parameters(const std::string& json_string) {
     try {
         return IndexOpParameters::FromJson(json_string);
+    } catch (const VsagException& e) {
+        return tl::unexpected<Error>(e.error_);
     } catch (const std::exception& e) {
         return tl::unexpected<Error>(ErrorType::INVALID_ARGUMENT, e.what());
     }
@@ -38,6 +42,8 @@ tl::expected<IndexOpParameters, Error>
 try_parse_parameters(JsonType& param_obj, IndexCommonParam index_common_param) {
     try {
         return IndexOpParameters::FromJson(param_obj, index_common_param);
+    } catch (const VsagException& e) {
+        return tl::unexpected<Error>(e.error_);
     } catch (const std::exception& e) {
         return tl::unexpected<Error>(ErrorType::INVALID_ARGUMENT, e.what());
     }

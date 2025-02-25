@@ -22,6 +22,7 @@
 #include "vsag/constants.h"
 #include "vsag/errors.h"
 #include "vsag/expected.hpp"
+#include "vsag_exception.h"
 
 namespace vsag {
 
@@ -34,8 +35,8 @@ check_diskann_hnsw_build_parameters(const std::string& json_string) {
     IndexCommonParam index_common_params;
     try {
         index_common_params = IndexCommonParam::CheckAndCreate(parsed_params, resource);
-    } catch (const std::exception& e) {
-        return tl::unexpected<Error>(ErrorType::INVALID_ARGUMENT, e.what());
+    } catch (const VsagException& e) {
+        return tl::unexpected<Error>(e.error_);
     }
 
     if (not parsed_params.contains(INDEX_HNSW)) {
