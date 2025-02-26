@@ -52,6 +52,9 @@ make_instance(const FlattenDataCellParamPtr& param, const IndexCommonParam& comm
     if (quantization_string == QUANTIZATION_TYPE_VALUE_SQ8_UNIFORM) {
         return make_instance<SQ8UniformQuantizer<metric>, IOTemp>(param, common_param);
     }
+    if (quantization_string == QUANTIZATION_TYPE_VALUE_BF16) {
+        return make_instance<BF16Quantizer<metric>, IOTemp>(param, common_param);
+    }
     return nullptr;
 }
 

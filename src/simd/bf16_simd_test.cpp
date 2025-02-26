@@ -97,11 +97,13 @@ TEST_CASE("BF16 Benchmark", "[ut][simd][!benchmark]") {
     auto vec2 = encode_bf16(vec2_fp32, count * dim);
     BENCHMARK_SIMD_COMPUTE(generic, BF16ComputeIP);
     BENCHMARK_SIMD_COMPUTE(sse, BF16ComputeIP);
+    BENCHMARK_SIMD_COMPUTE(avx, BF16ComputeIP);
     BENCHMARK_SIMD_COMPUTE(avx2, BF16ComputeIP);
     BENCHMARK_SIMD_COMPUTE(avx512, BF16ComputeIP);
 
     BENCHMARK_SIMD_COMPUTE(generic, BF16ComputeL2Sqr);
     BENCHMARK_SIMD_COMPUTE(sse, BF16ComputeL2Sqr);
+    BENCHMARK_SIMD_COMPUTE(avx, BF16ComputeL2Sqr);
     BENCHMARK_SIMD_COMPUTE(avx2, BF16ComputeL2Sqr);
     BENCHMARK_SIMD_COMPUTE(avx512, BF16ComputeL2Sqr);
 }
