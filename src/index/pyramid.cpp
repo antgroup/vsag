@@ -20,6 +20,7 @@
 #include "impl/odescent_graph_builder.h"
 #include "impl/pruning_strategy.h"
 #include "io/memory_io_parameter.h"
+#include "utils/slow_task_timer.h"
 
 namespace vsag {
 
@@ -64,7 +65,7 @@ void
 IndexNode::BuildGraph(ODescent& odescent) {
     if (not ids_.empty()) {
         entry_point_ = ids_[0];
-        odescent.Build(ids_.data(), static_cast<int64_t>(ids_.size()));
+        odescent.Build(ids_);
         odescent.SaveGraph(graph_);
         Vector<InnerIdType>(common_param_->allocator_.get()).swap(ids_);
     }
@@ -130,7 +131,7 @@ IndexNode::Serialize(StreamWriter& writer) const {
 }
 
 tl::expected<std::vector<int64_t>, Error>
-Pyramid::Build(const DatasetPtr& base) {
+Pyramid::build(const DatasetPtr& base) {
     const auto* path = base->GetPaths();
     int64_t data_num = base->GetNumElements();
     const auto* data_vectors = base->GetFloat32Vectors();
@@ -139,10 +140,8 @@ Pyramid::Build(const DatasetPtr& base) {
     std::memcpy(labels_.data(), data_ids, sizeof(LabelType) * data_num);
     flatten_interface_ptr_->Train(data_vectors, data_num);
     flatten_interface_ptr_->BatchInsertVector(data_vectors, data_num);
-    ODescent graph_builder(pyramid_param_.max_degree,
-                           pyramid_param_.alpha,
-                           pyramid_param_.turn,
-                           pyramid_param_.sample_rate,
+
+    ODescent graph_builder(pyramid_param_.odescent_param,
                            flatten_interface_ptr_,
                            common_param_.allocator_.get(),
                            common_param_.thread_pool_.get());
@@ -495,7 +494,7 @@ Pyramid::add(const DatasetPtr& base) {
 
     InnerSearchParam search_param;
     search_param.ef = 100;
-    search_param.topk = pyramid_param_.max_degree;
+    search_param.topk = pyramid_param_.odescent_param->max_degree;
     search_param.search_mode = KNN_SEARCH;
     auto empty_mutex = std::make_shared<EmptyMutex>();
     for (auto i = 0; i < data_num; ++i) {
@@ -526,7 +525,6 @@ Pyramid::add(const DatasetPtr& base) {
                                              empty_mutex,
                                              common_param_.allocator_.get());
             }
-            node->graph_->IncreaseTotalCount(1);
         }
     }
     cur_element_count_ += data_num;
