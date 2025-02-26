@@ -49,6 +49,11 @@ try_parse_parameters(JsonType& param_obj, IndexCommonParam index_common_param) {
     }
 }
 
+static inline __attribute__((always_inline)) int64_t
+ceil_int(const int64_t& value, int64_t base) {
+    return ((value + base - 1) / base) * base;
+}
+
 std::string
 format_map(const std::string& str, const std::unordered_map<std::string, std::string>& mappings);
 
