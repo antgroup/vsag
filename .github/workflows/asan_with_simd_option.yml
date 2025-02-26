@@ -1,0 +1,106 @@
+name: Asan Build & Test With Different Simd Option
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build_asan_simd:
+    name: Asan Build Simd
+    runs-on: ubuntu-22.04
+    container:
+      image: vsaglib/vsag:ci-x86
+    strategy:
+      matrix:
+        simd_option: [
+#          "avx2;-DDISABLE_AVX512_FORCE=1",
+          "avx;-DDISABLE_AVX2_FORCE=1",
+          "sse;-DDISABLE_AVX_FORCE=1",
+          "generic;-DDISABLE_SSE_FORCE=1",
+        ]
+    concurrency:
+      group: build-${{ matrix.simd_option }}-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Load Cache
+        uses: actions/cache@v4
+        with:
+          path: ./build/
+          key: build-${{ hashFiles('./CMakeLists.txt') }}-${{ hashFiles('./.circleci/fresh_ci_cache.commit') }}
+      - name: Make Asan
+        run: |
+          export EXTRA_DEFINED=`echo "${{ matrix.simd_option }}" | awk -F';' '{print $2}'`
+          export EXTRA_KEY=`echo "${{ matrix.simd_option }}" | awk -F';' '{print $1}'`
+          echo ${EXTRA_DEFINED}
+          echo ${EXTRA_KEY}
+          echo "SIMD_KEY=${EXTRA_KEY}" >> $GITHUB_ENV
+          make asan
+      - name: Save Test
+        uses: actions/upload-artifact@v4
+        with:
+          path: ./build
+          name: test-x86-${{ env.SIMD_KEY }}-${{ github.run_id }}
+          compression-level: 1
+          retention-days: 1
+          overwrite: 'true'
+
+  test_asan_simd:
+    name: Unit Test Simd
+    needs: build_asan_simd
+    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        test_type: [ unittests, functests ]
+        simd_key: [
+#          avx2,
+          avx,
+          sse,
+          generic
+        ]
+    concurrency:
+      group: test-${{ matrix.simd_key }}-${{ matrix.test_type }}-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+    container:
+      image: vsaglib/vsag:ci-x86
+    steps:
+      - uses: actions/checkout@v4
+      - name: Clean Env
+        run: rm -rf ./build
+      - name: Download Test
+        uses: actions/download-artifact@v4
+        with:
+          name: test-x86-${{ matrix.simd_key }}-${{ github.run_id }}
+          path: ./build/
+      - name: Do Asan Test In ${{ matrix.test_type }}
+        run: |
+          echo leak:libomp.so > omp.supp
+          export LSAN_OPTIONS=suppressions=omp.supp
+          chmod +x ./build/tests/${{ matrix.test_type }}
+          ./scripts/test_parallel_by_name.sh ${{ matrix.test_type }}
+
+  clean_up:
+    name: Clean Up
+    needs: test_asan_simd
+    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        simd_key: [
+#          avx2,
+          avx,
+          sse,
+          generic
+        ]
+    steps:
+      - name: Create Empty File
+        run: touch /tmp/clean_up
+      - name: Overwrite Test Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          path: /tmp/clean_up
+          name: test-x86-${{ matrix.simd_key }}-${{ github.run_id }}
+          compression-level: 1
+          retention-days: 1
+          overwrite: 'true'
