@@ -97,6 +97,11 @@ public:
         SAFE_CALL(return this->hgraph_->CalculateDistanceById(vector, id));
     };
 
+    tl::expected<DatasetPtr, Error>
+    CalDistanceById(const float* vector, const int64_t* ids, int64_t count) const override {
+        SAFE_CALL(return this->hgraph_->CalDistanceById(vector, ids, count));
+    };
+
     tl::expected<BinarySet, Error>
     Serialize() const override {
         SAFE_CALL(return this->hgraph_->Serialize());

@@ -95,6 +95,9 @@ public:
     tl::expected<float, Error>
     CalculateDistanceById(const float* vector, int64_t id) const;
 
+    tl::expected<DatasetPtr, Error>
+    CalDistanceById(const float* vector, const int64_t* ids, int64_t count) const;
+
     bool
     CheckFeature(IndexFeature feature) const;
 
