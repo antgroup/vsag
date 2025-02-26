@@ -1922,7 +1922,7 @@ void generate_disk_quantized_data(const T* train_data, size_t train_size, size_t
     }
     auto sample_data = new_train_data.get();
     sample_size = valid_size;
-    if (sample_size < 2) {
+    if (sample_size < 1) {
         throw std::runtime_error("fail to train pq: sample_size " + std::to_string(sample_size) +
                                  " is too small, while train_size is " + std::to_string(train_size));
     }
