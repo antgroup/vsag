@@ -28,8 +28,7 @@ TEST_CASE("Test Random Index", "[ft][random]") {
     std::mt19937 rng(rd());
 
     std::uniform_int_distribution<int> dim_generate(1, 500);
-    std::uniform_int_distribution<int> max_elements_generate(
-        1, 1000);
+    std::uniform_int_distribution<int> max_elements_generate(1, 1000);
     std::uniform_int_distribution<int> max_degree_generate(
         5, 64);  // When the number of edges is less than 5, connectivity cannot be guaranteed.
     std::uniform_int_distribution<int> construct_generate(1, 500);
