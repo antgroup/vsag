@@ -47,12 +47,14 @@ public:
         }})";
 
     const std::vector<std::pair<std::string, float>> test_cases = {
-        {"sq8", 0.95},
         {"fp32", 0.99},
+        {"bf16", 0.98},
+        {"sq8", 0.95},
         {"sq8_uniform", 0.95},
         {"sq8_uniform,fp32", 0.98},
-        {"sq8_uniform,fp32,buffer_io", 0.98},
-        {"sq8_uniform,fp32,async_io", 0.98},
+        {"sq8_uniform,bf16", 0.98},
+        {"sq8_uniform,bf16,buffer_io", 0.98},
+        {"sq8_uniform,bf16,async_io", 0.98},
     };
 };
 

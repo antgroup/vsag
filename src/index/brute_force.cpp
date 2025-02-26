@@ -294,7 +294,7 @@ void
 BruteForce::init_feature_list() {
     // About Train
     auto name = this->inner_codes_->GetQuantizerName();
-    if (name != QUANTIZATION_TYPE_VALUE_FP32) {
+    if (name != QUANTIZATION_TYPE_VALUE_FP32 and name != QUANTIZATION_TYPE_VALUE_BF16) {
         feature_list_.SetFeature(IndexFeature::NEED_TRAIN);
     } else {
         feature_list_.SetFeatures({
