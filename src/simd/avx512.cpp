@@ -133,38 +133,9 @@ FP32ComputeL2Sqr(const float* query, const float* codes, uint64_t dim) {
 
 #if defined(ENABLE_AVX512)
 __inline __m512i __attribute__((__always_inline__)) load_16_short(const uint16_t* data) {
-    return _mm512_set_epi16(data[15],
-                            0,
-                            data[14],
-                            0,
-                            data[13],
-                            0,
-                            data[12],
-                            0,
-                            data[11],
-                            0,
-                            data[10],
-                            0,
-                            data[9],
-                            0,
-                            data[8],
-                            0,
-                            data[7],
-                            0,
-                            data[6],
-                            0,
-                            data[5],
-                            0,
-                            data[4],
-                            0,
-                            data[3],
-                            0,
-                            data[2],
-                            0,
-                            data[1],
-                            0,
-                            data[0],
-                            0);
+    __m256i bf16 = _mm256_loadu_epi16(data);
+    __m512i bf32 = _mm512_cvtepu16_epi32(bf16);
+    return _mm512_slli_epi32(bf32, 16);
 }
 #endif
 
@@ -473,7 +444,7 @@ SQ8UniformComputeCodesIP(const uint8_t* codes1, const uint8_t* codes2, uint64_t 
 
 void
 DivScalar(const float* from, float* to, uint64_t dim, float scalar) {
-#if defined(ENABLE_AVX2)
+#if defined(ENABLE_AVX512)
     if (dim == 0) {
         return;
     }

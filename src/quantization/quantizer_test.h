@@ -219,7 +219,7 @@ TestComputer(
         need_normalize = false;
     }
     auto vecs = fixtures::generate_vectors(count, dim, need_normalize);
-    auto querys = fixtures::generate_vectors(query_count, dim, need_normalize, 165);
+    auto queries = fixtures::generate_vectors(query_count, dim, need_normalize, 165);
     if (retrain) {
         quant.ReTrain(vecs.data(), count);
     }
@@ -227,14 +227,14 @@ TestComputer(
     auto gt_func = [&](int base_idx, int query_idx) -> float {
         if constexpr (metric == vsag::MetricType::METRIC_TYPE_IP) {
             return 1 - InnerProduct(
-                           vecs.data() + base_idx * dim, querys.data() + query_idx * dim, &dim);
+                           vecs.data() + base_idx * dim, queries.data() + query_idx * dim, &dim);
         } else if constexpr (metric == vsag::MetricType::METRIC_TYPE_L2SQR) {
-            return L2Sqr(vecs.data() + base_idx * dim, querys.data() + query_idx * dim, &dim);
+            return L2Sqr(vecs.data() + base_idx * dim, queries.data() + query_idx * dim, &dim);
         } else if constexpr (metric == vsag::MetricType::METRIC_TYPE_COSINE) {
             std::vector<float> v1(dim);
             std::vector<float> v2(dim);
             Normalize(vecs.data() + base_idx * dim, v1.data(), dim);
-            Normalize(querys.data() + query_idx * dim, v2.data(), dim);
+            Normalize(queries.data() + query_idx * dim, v2.data(), dim);
             return 1 - InnerProduct(v1.data(), v2.data(), &dim);
         }
     };
@@ -242,7 +242,7 @@ TestComputer(
     for (int i = 0; i < query_count; ++i) {
         std::shared_ptr<Computer<T>> computer;
         computer = quant.FactoryComputer();
-        computer->SetQuery(querys.data() + i * dim);
+        computer->SetQuery(queries.data() + i * dim);
 
         // Test Compute One Dist;
         std::vector<uint8_t> codes1(quant.GetCodeSize() * count, 0);
@@ -277,9 +277,8 @@ TestSerializeAndDeserialize(Quantizer<T>& quant1,
                             bool is_rabitq = false) {
     auto vecs = fixtures::generate_vectors(count, dim);
     quant1.ReTrain(vecs.data(), count);
-    std::string dirname = "/tmp/quantizer_TestSerializeAndDeserialize_" + std::to_string(random());
-    std::filesystem::create_directory(dirname);
-    auto filename = dirname + "/file_" + std::to_string(random());
+    fixtures::TempDir dir("quantizer");
+    auto filename = dir.GenerateRandomFile();
     std::ofstream outfile(filename.c_str(), std::ios::binary);
     IOStreamWriter writer(outfile);
     quant1.Serialize(writer);
@@ -288,6 +287,7 @@ TestSerializeAndDeserialize(Quantizer<T>& quant1,
     std::ifstream infile(filename.c_str(), std::ios::binary);
     IOStreamReader reader(infile);
     quant2.Deserialize(reader);
+    infile.close();
 
     REQUIRE(quant1.GetCodeSize() == quant2.GetCodeSize());
     REQUIRE(quant1.GetDim() == quant2.GetDim());
@@ -304,7 +304,4 @@ TestSerializeAndDeserialize(Quantizer<T>& quant1,
         TestComputer<T, metric>(quant2, dim, count, error);
         TestEncodeDecodeRaBitQ<T>(quant2, dim, count);
     }
-
-    infile.close();
-    std::filesystem::remove_all(dirname);
 }
