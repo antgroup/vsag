@@ -66,7 +66,7 @@ RandomOrthogonalMatrix::GenerateRandomOrthogonalMatrix() {
     sgeqrf_result =
         LAPACKE_sgeqrf(LAPACK_ROW_MAJOR, dim_, dim_, orthogonal_matrix_, lda, tau.data());
     if (sgeqrf_result != 0) {
-        logger::error(fmt::format("Error in dgeqrf: {}", sgeqrf_result));
+        logger::error(fmt::format("Error in sgeqrf: {}", sgeqrf_result));
         return false;
     }
 
@@ -74,7 +74,7 @@ RandomOrthogonalMatrix::GenerateRandomOrthogonalMatrix() {
     sgeqrf_result =
         LAPACKE_sorgqr(LAPACK_ROW_MAJOR, dim_, dim_, dim_, orthogonal_matrix_, lda, tau.data());
     if (sgeqrf_result != 0) {
-        logger::error(fmt::format("Error in dorgqr: {}", sgeqrf_result));
+        logger::error(fmt::format("Error in sorgqr: {}", sgeqrf_result));
         return false;
     }
 
@@ -95,11 +95,11 @@ double
 RandomOrthogonalMatrix::ComputeDeterminant() const {
     // calculate determinants using LU decomposition
     // copy matrix
-    std::vector<float> mat(dim_ * dim_, orthogonal_matrix_, orthogonal_matrix_ + (dim_ * dim_);
+    std::vector<float> mat(orthogonal_matrix_, orthogonal_matrix_ + dim_ * dim_);
     std::vector<int> ipiv(dim_);
-    int sgeqrf_result = LAPACKE_dgetrf(LAPACK_ROW_MAJOR, dim_, dim_, mat.data(), dim_, ipiv.data());
+    int sgeqrf_result = LAPACKE_sgetrf(LAPACK_ROW_MAJOR, dim_, dim_, mat.data(), dim_, ipiv.data());
     if (sgeqrf_result != 0) {
-        logger::error(fmt::format("Error in dgetrf: {}", sgeqrf_result));
+        logger::error(fmt::format("Error in sgetrf: {}", sgeqrf_result));
         return 0;
     }
 
