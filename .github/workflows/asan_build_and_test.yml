@@ -7,20 +7,9 @@ on:
     branches: [ "main" ]
 
 jobs:
-  clang-format-check:
-    name: Format
+  build_asan_x86:
+    name: Asan Build X86
     runs-on: ubuntu-22.04
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-      - name: Install Clang format
-        run: sudo apt-get install clang-format
-      - name: Run Clang format check
-        run: ./scripts/check_format.sh
-
-  build_asan:
-    name: Asan Build
-    runs-on: ubuntu-latest
     container:
       image: vsaglib/vsag:ci-x86
     steps:
@@ -36,15 +25,33 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           path: ./build
-          name: test-${{ github.run_id }}
+          name: test_x86-${{ github.run_id }}
           compression-level: 1
           retention-days: 1
           overwrite: 'true'
 
-  test_asan:
-    name: Unit Test
-    needs: build_asan
-    runs-on: ubuntu-latest
+  build_asan_aarch64:
+    name: Asan Build Aarch64
+    runs-on: ubuntu-22.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare Env
+        run: sudo bash ./scripts/deps/install_deps_ubuntu.sh
+      - name: Make Asan
+        run: make asan
+      - name: Save Test
+        uses: actions/upload-artifact@v4
+        with:
+          path: ./build
+          name: test_aarch64-${{ github.run_id }}
+          compression-level: 1
+          retention-days: 1
+          overwrite: 'true'
+
+  test_asan_x86:
+    name: Test X86
+    needs: build_asan_x86
+    runs-on: ubuntu-22.04
     strategy:
       matrix:
         test_type: [ unittests, functests ]
@@ -56,7 +63,32 @@ jobs:
       - name: Download Test
         uses: actions/download-artifact@v4
         with:
-          name: test-${{ github.run_id }}
+          name: test_x86-${{ github.run_id }}
+          path: ./build/
+      - name: Do Asan Test In ${{ matrix.test_type }}
+        run: |
+          echo leak:libomp.so > omp.supp
+          export LSAN_OPTIONS=suppressions=omp.supp
+          chmod +x ./build/tests/${{ matrix.test_type }}
+          ./build/tests/${{ matrix.test_type }} -d yes ${UT_FILTER} -a --order rand --allow-running-no-tests -o log && cat log
+
+  test_asan_aarch64:
+    name: Test Aarch64
+    needs: build_asan_aarch64
+    runs-on: ubuntu-22.04-arm
+    strategy:
+      matrix:
+        test_type: [ unittests, functests ]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare Env
+        run: sudo bash ./scripts/deps/install_deps_ubuntu.sh
+      - name: Clean Build
+        run: rm -rf ./build
+      - name: Download Test
+        uses: actions/download-artifact@v4
+        with:
+          name: test_aarch64-${{ github.run_id }}
           path: ./build/
       - name: Do Asan Test In ${{ matrix.test_type }}
         run: |
@@ -67,16 +99,24 @@ jobs:
 
   clean_up:
     name: Clean Up
-    needs: test_asan
-    runs-on: ubuntu-latest
+    needs: [test_asan_x86, test_asan_aarch64]
+    runs-on: ubuntu-22.04
     steps:
       - name: Create Empty File
         run: touch /tmp/clean_up
-      - name: Overwrite Test Artifact
+      - name: Overwrite Test Artifact X86
         uses: actions/upload-artifact@v4
         with:
           path: /tmp/clean_up
-          name: test-${{ github.run_id }}
+          name: test_x86-${{ github.run_id }}
+          compression-level: 1
+          retention-days: 1
+          overwrite: 'true'
+      - name: Overwrite Test Artifact Aarch64
+        uses: actions/upload-artifact@v4
+        with:
+          path: /tmp/clean_up
+          name: test_aarch64-${{ github.run_id }}
           compression-level: 1
           retention-days: 1
           overwrite: 'true'

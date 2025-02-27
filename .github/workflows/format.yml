@@ -1,0 +1,19 @@
+name: Format Check
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  clang-format-check:
+    name: Format Check
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Install Clang format
+        run: sudo apt-get install clang-format
+      - name: Run Clang format check
+        run: ./scripts/check_format.sh
