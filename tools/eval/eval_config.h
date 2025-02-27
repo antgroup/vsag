@@ -19,6 +19,7 @@
 #include "yaml-cpp/yaml.h"
 
 namespace vsag::eval {
+
 class EvalConfig {
 public:
     static EvalConfig
@@ -26,6 +27,9 @@ public:
 
     static EvalConfig
     Load(YAML::Node& yaml_node);
+
+    static void
+    CheckKeyAndType(YAML::Node& yaml_node);
 
 public:
     std::string dataset_path;
@@ -38,6 +42,7 @@ public:
     std::string search_mode{"knn"};
     int top_k{10};
     float radius{0.5f};
+    bool delete_index_after_search{false};
 
     bool enable_recall{true};
     bool enable_percent_recall{true};
