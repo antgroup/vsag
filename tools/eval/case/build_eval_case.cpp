@@ -13,14 +13,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "build_eval_case.h"
+#include "./build_eval_case.h"
 
 #include <algorithm>
 #include <filesystem>
 #include <utility>
 
-#include "monitor/duration_monitor.h"
-#include "monitor/memory_peak_monitor.h"
+#include "../monitor/duration_monitor.h"
+#include "../monitor/memory_peak_monitor.h"
 
 namespace vsag::eval {
 
@@ -44,12 +44,12 @@ BuildEvalCase::init_monitors() {
     }
 }
 
-void
+JsonType
 BuildEvalCase::Run() {
     this->do_build();
     this->serialize();
     auto result = this->process_result();
-    PrintResult(result);
+    return result;
 }
 void
 BuildEvalCase::do_build() {
@@ -74,16 +74,16 @@ BuildEvalCase::do_build() {
 }
 void
 BuildEvalCase::serialize() {
-    std::filesystem::path dirPath(index_path_);
-    dirPath = dirPath.parent_path();
-    if (!std::filesystem::exists(dirPath)) {
-        std::filesystem::create_directories(dirPath);
+    std::filesystem::path dir_path(index_path_);
+    dir_path = dir_path.parent_path();
+    if (!std::filesystem::exists(dir_path)) {
+        std::filesystem::create_directories(dir_path);
     }
     std::ofstream outfile(this->index_path_, std::ios::binary);
     this->index_->Serialize(outfile);
 }
 
-EvalCase::JsonType
+JsonType
 BuildEvalCase::process_result() {
     JsonType result;
     JsonType eval_result;
