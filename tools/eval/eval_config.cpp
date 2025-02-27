@@ -13,7 +13,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "eval_config.h"
+#include "./eval_config.h"
+
+#include "./common.h"
 
 namespace vsag::eval {
 
@@ -39,6 +41,8 @@ EvalConfig::Load(argparse::ArgumentParser& parser) {
 
     config.top_k = parser.get<int>("--topk");
     config.radius = parser.get<float>("--range");
+
+    config.delete_index_after_search = parser.get<bool>("--delete-index-after-search");
 
     if (parser.get<bool>("--disable_recall")) {
         config.enable_recall = false;
@@ -78,6 +82,9 @@ EvalConfig::Load(YAML::Node& yaml_node) {
     check_and_get_value<>(yaml_node, "index_path", config.index_path);
     check_and_get_value<int>(yaml_node, "topk", config.top_k);
     check_and_get_value<float>(yaml_node, "range", config.radius);
+
+    check_and_get_value<bool>(
+        yaml_node, "delete_index_after_search", config.delete_index_after_search);
 
     bool disable = false;
     check_and_get_value<bool>(yaml_node, "disable_recall", disable);
@@ -120,6 +127,30 @@ EvalConfig::Load(YAML::Node& yaml_node) {
         config.enable_percent_latency = false;
         disable = false;
     }
+
     return config;
 }
+
+void
+EvalConfig::CheckKeyAndType(YAML::Node& yaml_node) {
+    check_exist_and_get_value<>(yaml_node, "datapath");
+    check_exist_and_get_value<>(yaml_node, "index_name");
+    check_exist_and_get_value<>(yaml_node, "create_params");
+    auto action = check_exist_and_get_value<>(yaml_node, "type");
+    if (action == "search") {
+        check_exist_and_get_value<>(yaml_node, "search_params");
+    }
+    check_and_get_value<>(yaml_node, "search_mode");
+    check_and_get_value<>(yaml_node, "index_path");
+    check_and_get_value<int>(yaml_node, "topk");
+    check_and_get_value<float>(yaml_node, "range");
+    check_and_get_value<bool>(yaml_node, "disable_recall");
+    check_and_get_value<bool>(yaml_node, "disable_percent_recall");
+    check_and_get_value<bool>(yaml_node, "disable_qps");
+    check_and_get_value<bool>(yaml_node, "disable_tps");
+    check_and_get_value<bool>(yaml_node, "disable_memory");
+    check_and_get_value<bool>(yaml_node, "disable_latency");
+    check_and_get_value<bool>(yaml_node, "disable_percent_latency");
+}
+
 }  // namespace vsag::eval

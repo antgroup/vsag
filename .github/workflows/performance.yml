@@ -1,0 +1,35 @@
+name: Performance
+
+on:
+  pull_request:             # remove later
+    branches: [ "main" ]
+  schedule:
+    - cron: "01 17 * * 1-5" # UTC 17:01 everyday
+  workflow_dispatch: {}
+
+jobs:
+  performance:
+    name: Performance
+    runs-on: ubuntu-latest
+    container:
+      image: vsaglib/vsag:ci-x86
+    env:
+      PERF_DINGDING_ACCESS_TOKEN: ${{ secrets.PERF_DINGDING_ACCESS_TOKEN }}
+      PERF_DINGDING_SERCRET: ${{ secrets.PERF_DINGDING_SERCRET }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Install Deps
+        run: pip3 install -r ./scripts/perf_reports/requirements.txt
+      - name: Download Datasets
+        run: bash ./scripts/download_annbench_datasets.sh
+      - name: Build Release
+        run: make release
+      - name: Run Perf - Recall 90%, 95%, 99%
+        run:  |
+          ./build-release/tools/eval/eval_performance .github/perf-90.yml
+          ./build-release/tools/eval/eval_performance .github/perf-95.yml
+          ./build-release/tools/eval/eval_performance .github/perf-99.yml
+      - name: Send Report
+        run:  |
+          python3 scripts/perf_reports/dingding.py /tmp/perf-90.json /tmp/perf-95.json /tmp/perf-99.json || echo "send report to dingding failed"
