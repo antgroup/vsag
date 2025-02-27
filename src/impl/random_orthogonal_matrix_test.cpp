@@ -23,9 +23,30 @@
 using namespace vsag;
 
 void
+TestRandomness(RandomOrthogonalMatrix& rom1, RandomOrthogonalMatrix& rom2, uint64_t dim) {
+    std::vector<float> mat1(dim * dim);
+    rom1.CopyOrthogonalMatrix(mat1.data());
+
+    std::vector<float> mat2(dim * dim);
+    rom2.CopyOrthogonalMatrix(mat2.data());
+
+    uint64_t count_same = 0, count_non_zero = 0;
+    for (uint64_t i = 0; i < dim * dim; i++) {
+        if (not(std::abs(mat1[i]) < 1e-3 and std::abs(mat2[i]) < 1e-3)) {
+            if (std::abs(mat1[i] - mat2[i]) < 1e-3) {
+                count_same++;
+            }
+            count_non_zero++;
+        }
+    }
+
+    REQUIRE(count_same <= (uint64_t)(0.1 * count_non_zero));
+}
+
+void
 TestOrthogonality(RandomOrthogonalMatrix& rom, uint64_t dim) {
     std::vector<float> Q(dim * dim);
-    rom.GetOrthogonalMatrix(Q.data());
+    rom.CopyOrthogonalMatrix(Q.data());
 
     // compute Q ^ T * Q
     std::vector<float> result(dim * dim, 0.0);
@@ -50,7 +71,7 @@ TestOrthogonality(RandomOrthogonalMatrix& rom, uint64_t dim) {
         identity[i * dim + i] = 1.0;
     }
 
-    // verify that Q^T * Q is close to the unit matrix
+    // verify that Q ^ T * Q is close to the unit matrix
     REQUIRE(result.size() == identity.size());
     for (size_t i = 0; i < result.size(); ++i) {
         REQUIRE(std::fabs(result[i] - identity[i]) < 1e-4);
@@ -62,7 +83,7 @@ TestTransform(RandomOrthogonalMatrix& rom, uint32_t dim) {
     std::vector<float> vec = fixtures::generate_vectors(1, dim);
     std::vector<float> original_vec = vec;
 
-    rom.Transform(vec.data());
+    rom.Transform(original_vec.data(), vec.data());
 
     // verify that the length remains constant (orthogonal matrix preserving length)
     double original_length = 0.0, transformed_length = 0.0;
@@ -85,9 +106,14 @@ TEST_CASE("Random Orthogonal Matrix Basic Test", "[ut][RandomOrthogonalMatrix]")
 
     for (auto dim : dims) {
         RandomOrthogonalMatrix rom(dim, allocator.get());
+        RandomOrthogonalMatrix rom_alter(dim, allocator.get());
+
         REQUIRE(rom.GenerateRandomOrthogonalMatrix() == true);
+        REQUIRE(rom_alter.GenerateRandomOrthogonalMatrix() == true);
+
         TestOrthogonality(rom, dim);
         TestTransform(rom, dim);
         TestDeterminant(rom);
+        TestRandomness(rom, rom_alter, dim);
     }
 }

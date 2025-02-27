@@ -18,15 +18,12 @@
 namespace vsag {
 
 void
-RandomOrthogonalMatrix::GetOrthogonalMatrix(float* out_matrix) const {
+RandomOrthogonalMatrix::CopyOrthogonalMatrix(float* out_matrix) const {
     std::copy(orthogonal_matrix_, orthogonal_matrix_ + dim_ * dim_, out_matrix);
 }
 
 void
-RandomOrthogonalMatrix::Transform(float* vec) const {
-    // random projection
-    std::vector<float> result(dim_, 0.0);
-
+RandomOrthogonalMatrix::Transform(const float* vec, float* out_vec) const {
     // perform matrix-vector multiplication: y = Q * x
     cblas_sgemv(CblasRowMajor,
                 CblasNoTrans,
@@ -38,13 +35,8 @@ RandomOrthogonalMatrix::Transform(float* vec) const {
                 vec,
                 1,
                 0.0F,
-                result.data(),
+                out_vec,
                 1);
-
-    // save result
-    for (uint64_t i = 0; i < dim_; ++i) {
-        vec[i] = static_cast<float>(result[i]);
-    }
 }
 
 bool
@@ -88,7 +80,7 @@ RandomOrthogonalMatrix::GenerateRandomOrthogonalMatrix() {
     }
 
     // make sure the determinant of the matrix is +1 (to avoid reflections)
-    double det = ComputeDeterminant();
+    double det = ComputeDeterminant();  // TODO(ZXY): use another way to compute det
     if (det < 0) {
         // invert the first column
         // TODO(ZXY): use SIMD to accelerate

@@ -28,9 +28,18 @@ namespace vsag {
 
 class RandomOrthogonalMatrix {
 public:
-    RandomOrthogonalMatrix(uint64_t dim, Allocator* allocator) : dim_(dim), allocator_(allocator) {
+    RandomOrthogonalMatrix(uint64_t dim, Allocator* allocator, uint64_t retries = 3)
+        : dim_(dim), allocator_(allocator) {
         orthogonal_matrix_ = (float*)allocator_->Allocate(sizeof(float) * dim_ * dim_);
-        GenerateRandomOrthogonalMatrix();
+        for (uint64_t i = 0; i < retries; i++) {
+            bool result_gen = GenerateRandomOrthogonalMatrix();
+            if (result_gen) {
+                break;
+            } else {
+                logger::error(
+                    fmt::format("Retrying generating random orthogonal matrix: {} times", i + 1));
+            }
+        }
     }
 
     ~RandomOrthogonalMatrix() {
@@ -38,10 +47,10 @@ public:
     }
 
     void
-    GetOrthogonalMatrix(float* out_matrix) const;
+    CopyOrthogonalMatrix(float* out_matrix) const;
 
     void
-    Transform(float* vec) const;
+    Transform(const float* vec, float* out_vec) const;
 
     bool
     GenerateRandomOrthogonalMatrix();
