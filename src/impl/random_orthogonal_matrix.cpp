@@ -61,25 +61,28 @@ RandomOrthogonalMatrix::GenerateRandomOrthogonalMatrix() {
     // QR decomposition with LAPACK
     std::vector<float> tau(dim_, 0.0);
     int lda = dim_;
-    int info;
+    int sgeqrf_result;
 
-    info = LAPACKE_sgeqrf(LAPACK_ROW_MAJOR, dim_, dim_, orthogonal_matrix_, lda, tau.data());
-    if (info != 0) {
-        logger::error(fmt::format("Error in dgeqrf: {}", info));
+    sgeqrf_result =
+        LAPACKE_sgeqrf(LAPACK_ROW_MAJOR, dim_, dim_, orthogonal_matrix_, lda, tau.data());
+    if (sgeqrf_result != 0) {
+        logger::error(fmt::format("Error in dgeqrf: {}", sgeqrf_result));
         return false;
     }
 
     // generate Q matrix
-    info = LAPACKE_sorgqr(LAPACK_ROW_MAJOR, dim_, dim_, dim_, orthogonal_matrix_, lda, tau.data());
-    if (info != 0) {
-        logger::error(fmt::format("Error in dorgqr: {}", info));
+    sgeqrf_result =
+        LAPACKE_sorgqr(LAPACK_ROW_MAJOR, dim_, dim_, dim_, orthogonal_matrix_, lda, tau.data());
+    if (sgeqrf_result != 0) {
+        logger::error(fmt::format("Error in dorgqr: {}", sgeqrf_result));
         return false;
     }
 
     // make sure the determinant of the matrix is +1 (to avoid reflections)
     double det = ComputeDeterminant();
     if (det < 0) {
-        // Invert the first column
+        // invert the first column
+        // TODO(ZXY): use SIMD to accelerate
         for (uint32_t i = 0; i < dim_; ++i) {
             orthogonal_matrix_[i * dim_] = -orthogonal_matrix_[i * dim_];
         }
@@ -91,14 +94,12 @@ RandomOrthogonalMatrix::GenerateRandomOrthogonalMatrix() {
 double
 RandomOrthogonalMatrix::ComputeDeterminant() const {
     // calculate determinants using LU decomposition
-    std::vector<double> mat(dim_ * dim_, 0);  // copy matrix
-    for (uint32_t i = 0; i < dim_ * dim_; i++) {
-        mat[i] = orthogonal_matrix_[i];
-    }
+    // copy matrix
+    std::vector<float> mat(dim_ * dim_, orthogonal_matrix_, orthogonal_matrix_ + (dim_ * dim_);
     std::vector<int> ipiv(dim_);
-    int info = LAPACKE_dgetrf(LAPACK_ROW_MAJOR, dim_, dim_, mat.data(), dim_, ipiv.data());
-    if (info != 0) {
-        logger::error(fmt::format("Error in dgetrf: {}", info));
+    int sgeqrf_result = LAPACKE_dgetrf(LAPACK_ROW_MAJOR, dim_, dim_, mat.data(), dim_, ipiv.data());
+    if (sgeqrf_result != 0) {
+        logger::error(fmt::format("Error in dgetrf: {}", sgeqrf_result));
         return 0;
     }
 
