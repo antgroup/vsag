@@ -23,7 +23,7 @@
 using namespace vsag;
 
 void
-TestOrthogonality(RandomOrthogonalMatrix& rom, uint32_t dim) {
+TestOrthogonality(RandomOrthogonalMatrix& rom, uint64_t dim) {
     std::vector<float> Q(dim * dim);
     rom.GetOrthogonalMatrix(Q.data());
 
