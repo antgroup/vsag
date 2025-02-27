@@ -39,7 +39,7 @@ public:
     Resize(uint32_t new_element_num) = 0;
 };
 
-using MutexStrategyPtr = std::shared_ptr<MutexArray>;
+using MutexArrayPtr = std::shared_ptr<MutexArray>;
 
 class PointsMutex : public MutexArray {
 public:
@@ -66,9 +66,32 @@ private:
     uint32_t element_num_{0};
 };
 
+class EmptyMutex : public MutexArray {
+public:
+    void
+    SharedLock(uint32_t i) override {
+    }
+
+    void
+    SharedUnlock(uint32_t i) override {
+    }
+
+    void
+    Lock(uint32_t i) override {
+    }
+
+    void
+    Unlock(uint32_t i) override {
+    }
+
+    void
+    Resize(uint32_t new_element_num) override {
+    }
+};
+
 class SharedLock {
 public:
-    SharedLock(MutexStrategyPtr mutex_impl, uint32_t locked_index)
+    SharedLock(MutexArrayPtr mutex_impl, uint32_t locked_index)
         : mutex_impl_(mutex_impl), locked_index_(locked_index) {
         mutex_impl_->SharedLock(locked_index_);
     }
@@ -78,12 +101,12 @@ public:
 
 private:
     uint32_t locked_index_;
-    MutexStrategyPtr mutex_impl_;
+    MutexArrayPtr mutex_impl_;
 };
 
 class LockGuard {
 public:
-    LockGuard(MutexStrategyPtr mutex_impl, uint32_t locked_index)
+    LockGuard(MutexArrayPtr mutex_impl, uint32_t locked_index)
         : mutex_impl_(mutex_impl), locked_index_(locked_index) {
         mutex_impl_->Lock(locked_index_);
     }
@@ -93,7 +116,7 @@ public:
 
 private:
     uint32_t locked_index_;
-    MutexStrategyPtr mutex_impl_;
+    MutexArrayPtr mutex_impl_;
 };
 
 }  // namespace vsag

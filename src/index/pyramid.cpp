@@ -18,10 +18,14 @@
 #include "data_cell/flatten_interface.h"
 #include "empty_index_binary_set.h"
 #include "impl/odescent_graph_builder.h"
+#include "impl/pruning_strategy.h"
 #include "io/memory_io_parameter.h"
 #include "utils/slow_task_timer.h"
 
 namespace vsag {
+
+constexpr static const int64_t INIT_CAPACITY = 10;
+constexpr static const int64_t MAX_CAPACITY_EXTEND = 10000;
 
 std::vector<std::string>
 split(const std::string& str, char delimiter) {
@@ -132,7 +136,7 @@ Pyramid::build(const DatasetPtr& base) {
     int64_t data_num = base->GetNumElements();
     const auto* data_vectors = base->GetFloat32Vectors();
     const auto* data_ids = base->GetIds();
-    labels_.resize(data_num);
+    resize(data_num);
     std::memcpy(labels_.data(), data_ids, sizeof(LabelType) * data_num);
     flatten_interface_ptr_->Train(data_vectors, data_num);
     flatten_interface_ptr_->BatchInsertVector(data_vectors, data_num);
@@ -141,8 +145,6 @@ Pyramid::build(const DatasetPtr& base) {
                            flatten_interface_ptr_,
                            common_param_.allocator_.get(),
                            common_param_.thread_pool_.get());
-    pool_ = std::make_unique<VisitedListPool>(
-        1, common_param_.allocator_.get(), data_num, common_param_.allocator_.get());
     for (int i = 0; i < data_num; ++i) {
         std::string current_path = path[i];
         auto path_slices = split(current_path, PART_SLASH);
@@ -153,6 +155,7 @@ Pyramid::build(const DatasetPtr& base) {
         }
     }
     root_->BuildGraph(graph_builder);
+    cur_element_count_ = data_num;
     return {};
 }
 
@@ -467,6 +470,73 @@ Pyramid::Deserialize(std::istream& in_stream) {
         LOG_ERROR_AND_RETURNS(
             ErrorType::NO_ENOUGH_MEMORY, "failed to Deserialize(bad alloc): ", e.what());
     }
+}
+tl::expected<std::vector<int64_t>, Error>
+Pyramid::add(const DatasetPtr& base) {
+    const auto* path = base->GetPaths();
+    int64_t data_num = base->GetNumElements();
+    const auto* data_vectors = base->GetFloat32Vectors();
+    const auto* data_ids = base->GetIds();
+    if (max_capacity_ == 0) {
+        auto new_capacity = std::max(INIT_CAPACITY, data_num);
+        resize(new_capacity);
+    }
+
+    if (max_capacity_ < data_num + cur_element_count_) {
+        auto new_capacity = std::min(MAX_CAPACITY_EXTEND, max_capacity_);
+        new_capacity =
+            std::max(data_num + cur_element_count_ - max_capacity_, new_capacity) + max_capacity_;
+        resize(new_capacity);
+    }
+
+    std::memcpy(labels_.data() + cur_element_count_, data_ids, sizeof(LabelType) * data_num);
+    flatten_interface_ptr_->BatchInsertVector(data_vectors, data_num);
+
+    InnerSearchParam search_param;
+    search_param.ef = 100;
+    search_param.topk = pyramid_param_.odescent_param->max_degree;
+    search_param.search_mode = KNN_SEARCH;
+    auto empty_mutex = std::make_shared<EmptyMutex>();
+    for (auto i = 0; i < data_num; ++i) {
+        std::string current_path = path[i];
+        auto path_slices = split(current_path, PART_SLASH);
+        std::shared_ptr<IndexNode> node = root_;
+        auto inner_id = static_cast<InnerIdType>(i + cur_element_count_);
+        for (auto& path_slice : path_slices) {
+            node = node->GetChild(path_slice, true);
+            // add one point
+            if (node->graph_->TotalCount() == 0) {
+                node->graph_->InsertNeighborsById(
+                    inner_id, Vector<InnerIdType>(common_param_.allocator_.get()));
+                node->entry_point_ = inner_id;
+            } else {
+                search_param.ep = node->entry_point_;
+                auto vl = pool_->TakeOne();
+                auto results = searcher_->Search(node->graph_,
+                                                 flatten_interface_ptr_,
+                                                 vl,
+                                                 data_vectors + common_param_.dim_ * i,
+                                                 search_param);
+                pool_->ReturnOne(vl);
+                mutually_connect_new_element(inner_id,
+                                             results,
+                                             node->graph_,
+                                             flatten_interface_ptr_,
+                                             empty_mutex,
+                                             common_param_.allocator_.get());
+            }
+        }
+    }
+    cur_element_count_ += data_num;
+    return {};
+}
+
+void
+Pyramid::resize(int64_t new_max_capacity) {
+    pool_ = std::make_unique<VisitedListPool>(
+        1, common_param_.allocator_.get(), new_max_capacity, common_param_.allocator_.get());
+    labels_.resize(new_max_capacity);
+    max_capacity_ = new_max_capacity;
 }
 
 }  // namespace vsag

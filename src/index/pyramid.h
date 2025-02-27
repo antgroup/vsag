@@ -83,6 +83,11 @@ public:
         SAFE_CALL(return this->build(base);)
     }
 
+    tl::expected<std::vector<int64_t>, Error>
+    Add(const DatasetPtr& base) override {
+        SAFE_CALL(return this->add(base);)
+    }
+
     tl::expected<DatasetPtr, Error>
     KnnSearch(const DatasetPtr& query,
               int64_t k,
@@ -188,6 +193,12 @@ private:
                  const std::function<bool(int64_t)>& filter,
                  int64_t limited_size = -1) const;
 
+    tl::expected<std::vector<int64_t>, Error>
+    add(const DatasetPtr& base);
+
+    void
+    resize(int64_t new_max_capacity);
+
     tl::expected<DatasetPtr, Error>
     search_impl(const DatasetPtr& query, int64_t limit, const SearchFunc& search_func) const;
 
@@ -202,6 +213,8 @@ private:
     Vector<LabelType> labels_;
     std::unique_ptr<VisitedListPool> pool_ = nullptr;
     std::unique_ptr<BasicSearcher> searcher_ = nullptr;
+    int64_t max_capacity_{0};
+    int64_t cur_element_count_{0};
 };
 
 }  // namespace vsag

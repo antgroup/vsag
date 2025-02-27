@@ -30,7 +30,7 @@ mutually_connect_new_element(InnerIdType cur_c,
                              MaxHeap& top_candidates,
                              GraphInterfacePtr graph,
                              const FlattenInterfacePtr flatten,
-                             MutexStrategyPtr neighbors_mutexs,
+                             MutexArrayPtr neighbors_mutexs,
                              Allocator* allocator);
 
 }  // namespace vsag
