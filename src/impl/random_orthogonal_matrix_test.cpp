@@ -23,29 +23,29 @@
 using namespace vsag;
 
 void
-TestOrthogonality(RandomOrthogonalMatrix& rom, int dim) {
-    std::vector<double> Q(dim * dim);
+TestOrthogonality(RandomOrthogonalMatrix& rom, uint32_t dim) {
+    std::vector<float> Q(dim * dim);
     rom.GetOrthogonalMatrix(Q.data());
 
     // compute Q ^ T * Q
-    std::vector<double> result(dim * dim, 0.0);
-    cblas_dgemm(CblasRowMajor,
+    std::vector<float> result(dim * dim, 0.0);
+    cblas_sgemm(CblasRowMajor,
                 CblasTrans,
                 CblasNoTrans,
                 dim,
                 dim,
                 dim,
-                1.0,
+                1.0f,
                 Q.data(),
                 dim,
                 Q.data(),
                 dim,
-                0.0,
+                0.0f,
                 result.data(),
                 dim);
 
     // constructing unit matrices
-    std::vector<double> identity(dim * dim, 0.0);
+    std::vector<float> identity(dim * dim, 0.0);
     for (int i = 0; i < dim; ++i) {
         identity[i * dim + i] = 1.0;
     }
@@ -53,12 +53,12 @@ TestOrthogonality(RandomOrthogonalMatrix& rom, int dim) {
     // verify that Q^T * Q is close to the unit matrix
     REQUIRE(result.size() == identity.size());
     for (size_t i = 0; i < result.size(); ++i) {
-        REQUIRE(std::fabs(result[i] - identity[i]) < 1e-5);
+        REQUIRE(std::fabs(result[i] - identity[i]) < 1e-4);
     }
 }
 
 void
-TestTransform(RandomOrthogonalMatrix& rom, int dim) {
+TestTransform(RandomOrthogonalMatrix& rom, uint32_t dim) {
     std::vector<float> vec = fixtures::generate_vectors(1, dim);
     std::vector<float> original_vec = vec;
 
@@ -66,17 +66,17 @@ TestTransform(RandomOrthogonalMatrix& rom, int dim) {
 
     // verify that the length remains constant (orthogonal matrix preserving length)
     double original_length = 0.0, transformed_length = 0.0;
-    for (int i = 0; i < dim; ++i) {
+    for (uint32_t i = 0; i < dim; ++i) {
         original_length += original_vec[i] * original_vec[i];
         transformed_length += vec[i] * vec[i];
     }
-    REQUIRE(std::fabs(original_length - transformed_length) < 1e-6);
+    REQUIRE(std::fabs(original_length - transformed_length) < 1e-4);
 }
 
 void
 TestDeterminant(RandomOrthogonalMatrix& rom) {
     double det = rom.ComputeDeterminant();
-    REQUIRE(std::fabs(det - 1) < 1e-5);
+    REQUIRE(std::fabs(det - 1) < 1e-4);
 }
 
 TEST_CASE("Random Orthogonal Matrix Basic Test", "[ut][RandomOrthogonalMatrix]") {

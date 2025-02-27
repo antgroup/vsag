@@ -18,31 +18,26 @@
 namespace vsag {
 
 void
-RandomOrthogonalMatrix::GetOrthogonalMatrix(double* out_matrix) const {
+RandomOrthogonalMatrix::GetOrthogonalMatrix(float* out_matrix) const {
     std::copy(orthogonal_matrix_, orthogonal_matrix_ + dim_ * dim_, out_matrix);
 }
 
 void
 RandomOrthogonalMatrix::Transform(float* vec) const {
     // random projection
-
-    std::vector<double> vec_double(dim_);  // OpenBLAS and LAPACK use double vector
-    for (uint32_t i = 0; i < dim_; ++i) {
-        vec_double[i] = static_cast<double>(vec[i]);
-    }
+    std::vector<float> result(dim_, 0.0);
 
     // perform matrix-vector multiplication: y = Q * x
-    std::vector<double> result(dim_, 0.0);
-    cblas_dgemv(CblasRowMajor,
+    cblas_sgemv(CblasRowMajor,
                 CblasNoTrans,
                 dim_,
                 dim_,
-                1.0,
+                1.0f,
                 orthogonal_matrix_,
                 dim_,
-                vec_double.data(),
+                vec,
                 1,
-                0.0,
+                0.0f,
                 result.data(),
                 1);
 
@@ -57,25 +52,25 @@ RandomOrthogonalMatrix::GenerateRandomOrthogonalMatrix() {
     // generate a random matrix with elements following a standard normal distribution
     std::random_device rd;
     std::mt19937 gen(rd());
-    std::normal_distribution<double> dist(0.0, 1.0);
+    std::normal_distribution<float> dist(0.0, 1.0);
 
     for (uint32_t i = 0; i < dim_ * dim_; ++i) {
         orthogonal_matrix_[i] = dist(gen);
     }
 
     // QR decomposition with LAPACK
-    std::vector<double> tau(dim_, 0.0);
+    std::vector<float> tau(dim_, 0.0);
     int lda = dim_;
     int info;
 
-    info = LAPACKE_dgeqrf(LAPACK_ROW_MAJOR, dim_, dim_, orthogonal_matrix_, lda, tau.data());
+    info = LAPACKE_sgeqrf(LAPACK_ROW_MAJOR, dim_, dim_, orthogonal_matrix_, lda, tau.data());
     if (info != 0) {
         logger::error(fmt::format("Error in dgeqrf: {}", info));
         return false;
     }
 
     // generate Q matrix
-    info = LAPACKE_dorgqr(LAPACK_ROW_MAJOR, dim_, dim_, dim_, orthogonal_matrix_, lda, tau.data());
+    info = LAPACKE_sorgqr(LAPACK_ROW_MAJOR, dim_, dim_, dim_, orthogonal_matrix_, lda, tau.data());
     if (info != 0) {
         logger::error(fmt::format("Error in dorgqr: {}", info));
         return false;
@@ -104,7 +99,7 @@ RandomOrthogonalMatrix::ComputeDeterminant() const {
     int info = LAPACKE_dgetrf(LAPACK_ROW_MAJOR, dim_, dim_, mat.data(), dim_, ipiv.data());
     if (info != 0) {
         logger::error(fmt::format("Error in dgetrf: {}", info));
-        return false;
+        return 0;
     }
 
     double det = 1.0;

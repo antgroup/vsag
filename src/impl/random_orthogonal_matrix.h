@@ -29,7 +29,7 @@ namespace vsag {
 class RandomOrthogonalMatrix {
 public:
     RandomOrthogonalMatrix(uint32_t dim, Allocator* allocator) : dim_(dim), allocator_(allocator) {
-        orthogonal_matrix_ = (double*)allocator_->Allocate(sizeof(double) * dim_ * dim_);
+        orthogonal_matrix_ = (float*)allocator_->Allocate(sizeof(float) * dim_ * dim_);
         GenerateRandomOrthogonalMatrix();
     }
 
@@ -38,7 +38,7 @@ public:
     }
 
     void
-    GetOrthogonalMatrix(double* out_matrix) const;
+    GetOrthogonalMatrix(float* out_matrix) const;
 
     void
     Transform(float* vec) const;
@@ -52,9 +52,9 @@ public:
 private:
     Allocator* const allocator_{nullptr};
 
-    const int32_t dim_{0};
+    const uint32_t dim_{0};
 
-    double* orthogonal_matrix_{nullptr};  // OpenBLAS and LAPACK use double vector
+    float* orthogonal_matrix_{nullptr};  // OpenBLAS and LAPACK use double vector
 };
 
 }  // namespace vsag
