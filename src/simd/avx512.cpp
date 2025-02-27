@@ -133,39 +133,7 @@ FP32ComputeL2Sqr(const float* query, const float* codes, uint64_t dim) {
 
 #if defined(ENABLE_AVX512)
 __inline __m512i __attribute__((__always_inline__)) load_16_short(const uint16_t* data) {
-    //        __m256i bf16 = _mm256_loadu_epi16(data);
-    __m256i bf16 = _mm256_set_epi8(31,
-                                   30,
-                                   29,
-                                   28,
-                                   27,
-                                   26,
-                                   25,
-                                   24,
-                                   23,
-                                   22,
-                                   21,
-                                   20,
-                                   19,
-                                   18,
-                                   17,
-                                   16,
-                                   15,
-                                   14,
-                                   13,
-                                   12,
-                                   11,
-                                   10,
-                                   9,
-                                   8,
-                                   7,
-                                   6,
-                                   5,
-                                   4,
-                                   3,
-                                   2,
-                                   1,
-                                   0);
+    __m256i bf16 = _mm256_loadu_epi16(data);
     __m512i bf32 = _mm512_cvtepu16_epi32(bf16);
     return _mm512_slli_epi32(bf32, 16);
 }
