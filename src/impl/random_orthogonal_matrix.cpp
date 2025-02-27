@@ -53,29 +53,28 @@ RandomOrthogonalMatrix::GenerateRandomOrthogonalMatrix() {
     // QR decomposition with LAPACK
     std::vector<float> tau(dim_, 0.0);
     auto lda = static_cast<blasint>(dim_);
-    int sgeqrf_result;
 
-    sgeqrf_result = LAPACKE_sgeqrf(LAPACK_ROW_MAJOR,
-                                   static_cast<blasint>(dim_),
-                                   static_cast<blasint>(dim_),
-                                   orthogonal_matrix_,
-                                   lda,
-                                   tau.data());
+    int sgeqrf_result = LAPACKE_sgeqrf(LAPACK_ROW_MAJOR,
+                                       static_cast<blasint>(dim_),
+                                       static_cast<blasint>(dim_),
+                                       orthogonal_matrix_,
+                                       lda,
+                                       tau.data());
     if (sgeqrf_result != 0) {
         logger::error(fmt::format("Error in sgeqrf: {}", sgeqrf_result));
         return false;
     }
 
     // generate Q matrix
-    sgeqrf_result = LAPACKE_sorgqr(LAPACK_ROW_MAJOR,
-                                   static_cast<blasint>(dim_),
-                                   static_cast<blasint>(dim_),
-                                   static_cast<blasint>(dim_),
-                                   orthogonal_matrix_,
-                                   lda,
-                                   tau.data());
-    if (sgeqrf_result != 0) {
-        logger::error(fmt::format("Error in sorgqr: {}", sgeqrf_result));
+    int sorgqr_result = LAPACKE_sorgqr(LAPACK_ROW_MAJOR,
+                                       static_cast<blasint>(dim_),
+                                       static_cast<blasint>(dim_),
+                                       static_cast<blasint>(dim_),
+                                       orthogonal_matrix_,
+                                       lda,
+                                       tau.data());
+    if (sorgqr_result != 0) {
+        logger::error(fmt::format("Error in sorgqr: {}", sorgqr_result));
         return false;
     }
 
@@ -98,14 +97,14 @@ RandomOrthogonalMatrix::ComputeDeterminant() const {
     // copy matrix
     std::vector<float> mat(orthogonal_matrix_, orthogonal_matrix_ + dim_ * dim_);
     std::vector<int> ipiv(dim_);
-    int sgeqrf_result = LAPACKE_sgetrf(LAPACK_ROW_MAJOR,
+    int sgetrf_result = LAPACKE_sgetrf(LAPACK_ROW_MAJOR,
                                        static_cast<blasint>(dim_),
                                        static_cast<blasint>(dim_),
                                        mat.data(),
                                        static_cast<blasint>(dim_),
                                        ipiv.data());
-    if (sgeqrf_result != 0) {
-        logger::error(fmt::format("Error in sgetrf: {}", sgeqrf_result));
+    if (sgetrf_result != 0) {
+        logger::error(fmt::format("Error in sgetrf: {}", sgetrf_result));
         return 0;
     }
 
