@@ -57,4 +57,9 @@ ceil_int(const int64_t& value, int64_t base) {
 std::string
 format_map(const std::string& str, const std::unordered_map<std::string, std::string>& mappings);
 
+void
+mapping_external_param_to_inner(const JsonType& external_json,
+                                ConstParamMap& param_map,
+                                JsonType& inner_json);
+
 }  // namespace vsag
