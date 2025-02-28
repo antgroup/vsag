@@ -657,6 +657,7 @@ TestIndex::TestConcurrentAdd(const TestIndex::IndexPtr& index,
     temp_dataset->Dim(dim)
         ->Ids(dataset->base_->GetIds())
         ->NumElements(temp_count)
+        ->Paths(dataset->base_->GetPaths())
         ->Float32Vectors(dataset->base_->GetFloat32Vectors())
         ->Owner(false);
     index->Build(temp_dataset);
@@ -670,6 +671,7 @@ TestIndex::TestConcurrentAdd(const TestIndex::IndexPtr& index,
         data_one->Dim(dim)
             ->Ids(dataset->base_->GetIds() + i)
             ->NumElements(1)
+            ->Paths(dataset->base_->GetPaths() + i)
             ->Float32Vectors(dataset->base_->GetFloat32Vectors() + i * dim)
             ->Owner(false);
         auto add_index = index->Add(data_one);
@@ -710,6 +712,7 @@ TestIndex::TestConcurrentKnnSearch(const TestIndex::IndexPtr& index,
         auto query = vsag::Dataset::Make();
         query->NumElements(1)
             ->Dim(dim)
+            ->Paths(queries->GetPaths() + i)
             ->Float32Vectors(queries->GetFloat32Vectors() + i * dim)
             ->Owner(false);
         auto res = index->KnnSearch(query, topk, search_param);

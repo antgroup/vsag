@@ -64,6 +64,7 @@ IndexNode::IndexNode(IndexCommonParam* common_param, GraphInterfaceParamPtr grap
 void
 IndexNode::BuildGraph(ODescent& odescent) {
     if (not ids_.empty()) {
+        std::lock_guard<std::mutex> lock(mutex_);
         entry_point_ = ids_[0];
         odescent.Build(ids_);
         odescent.SaveGraph(graph_);
@@ -178,6 +179,7 @@ Pyramid::knn_search(const DatasetPtr& query,
     }
     SearchFunc search_func = [&](const std::shared_ptr<IndexNode>& node) {
         search_param.ep = node->entry_point_;
+        std::lock_guard<std::mutex> lock(node->mutex_);
         auto vl = pool_->TakeOne();
         auto results = searcher_->Search(
             node->graph_, flatten_interface_ptr_, vl, query->GetFloat32Vectors(), search_param);
@@ -204,6 +206,7 @@ Pyramid::knn_search(const DatasetPtr& query,
     }
     SearchFunc search_func = [&](const std::shared_ptr<IndexNode>& node) {
         search_param.ep = node->entry_point_;
+        std::lock_guard<std::mutex> lock(node->mutex_);
         auto vl = pool_->TakeOne();
         auto results = searcher_->Search(
             node->graph_, flatten_interface_ptr_, vl, query->GetFloat32Vectors(), search_param);
@@ -225,6 +228,7 @@ Pyramid::range_search(const DatasetPtr& query,
     search_param.search_mode = RANGE_SEARCH;
     SearchFunc search_func = [&](const std::shared_ptr<IndexNode>& node) {
         search_param.ep = node->entry_point_;
+        std::lock_guard<std::mutex> lock(node->mutex_);
         auto vl = pool_->TakeOne();
         auto results = searcher_->Search(
             node->graph_, flatten_interface_ptr_, vl, query->GetFloat32Vectors(), search_param);
@@ -253,6 +257,7 @@ Pyramid::range_search(const DatasetPtr& query,
     }
     SearchFunc search_func = [&](const std::shared_ptr<IndexNode>& node) {
         search_param.ep = node->entry_point_;
+        std::lock_guard<std::mutex> lock(node->mutex_);
         auto vl = pool_->TakeOne();
         auto results = searcher_->Search(
             node->graph_, flatten_interface_ptr_, vl, query->GetFloat32Vectors(), search_param);
@@ -281,6 +286,7 @@ Pyramid::range_search(const DatasetPtr& query,
     }
     SearchFunc search_func = [&](const std::shared_ptr<IndexNode>& node) {
         search_param.ep = node->entry_point_;
+        std::lock_guard<std::mutex> lock(node->mutex_);
         auto vl = pool_->TakeOne();
         auto results = searcher_->Search(
             node->graph_, flatten_interface_ptr_, vl, query->GetFloat32Vectors(), search_param);
@@ -479,21 +485,25 @@ Pyramid::add(const DatasetPtr& base) {
     int64_t data_num = base->GetNumElements();
     const auto* data_vectors = base->GetFloat32Vectors();
     const auto* data_ids = base->GetIds();
-    if (max_capacity_ == 0) {
-        auto new_capacity = std::max(INIT_CAPACITY, data_num);
-        resize(new_capacity);
+    int64_t local_cur_element_count = 0;
+    {
+        std::lock_guard lock(cur_element_count_mutex_);
+        local_cur_element_count = cur_element_count_;
+        if (max_capacity_ == 0) {
+            auto new_capacity = std::max(INIT_CAPACITY, data_num);
+            resize(new_capacity);
+        } else if (max_capacity_ < data_num + cur_element_count_) {
+            auto new_capacity = std::min(MAX_CAPACITY_EXTEND, max_capacity_);
+            new_capacity =
+                std::max(data_num + cur_element_count_ - max_capacity_, new_capacity) + max_capacity_;
+            resize(new_capacity);
+        }
+        cur_element_count_ += data_num;
+        flatten_interface_ptr_->BatchInsertVector(data_vectors, data_num);
     }
+    std::shared_lock<std::shared_mutex> lock(resize_mutex_);
 
-    if (max_capacity_ < data_num + cur_element_count_) {
-        auto new_capacity = std::min(MAX_CAPACITY_EXTEND, max_capacity_);
-        new_capacity =
-            std::max(data_num + cur_element_count_ - max_capacity_, new_capacity) + max_capacity_;
-        resize(new_capacity);
-    }
-
-    std::memcpy(
-        labels_.label_table_.data() + cur_element_count_, data_ids, sizeof(LabelType) * data_num);
-    flatten_interface_ptr_->BatchInsertVector(data_vectors, data_num);
+    std::memcpy(labels_.label_table_.data() + local_cur_element_count, data_ids, sizeof(LabelType) * data_num);
 
     InnerSearchParam search_param;
     search_param.ef = 100;
@@ -504,9 +514,10 @@ Pyramid::add(const DatasetPtr& base) {
         std::string current_path = path[i];
         auto path_slices = split(current_path, PART_SLASH);
         std::shared_ptr<IndexNode> node = root_;
-        auto inner_id = static_cast<InnerIdType>(i + cur_element_count_);
+        auto inner_id = static_cast<InnerIdType>(i + local_cur_element_count);
         for (auto& path_slice : path_slices) {
             node = node->GetChild(path_slice, true);
+            std::lock_guard<std::mutex> graph_lock(node->mutex_);
             // add one point
             if (node->graph_->TotalCount() == 0) {
                 node->graph_->InsertNeighborsById(
@@ -530,15 +541,19 @@ Pyramid::add(const DatasetPtr& base) {
             }
         }
     }
-    cur_element_count_ += data_num;
     return {};
 }
 
 void
 Pyramid::resize(int64_t new_max_capacity) {
+    std::unique_lock<std::shared_mutex> lock(resize_mutex_);
+    if (new_max_capacity <= max_capacity_) {
+        return;
+    }
     pool_ = std::make_unique<VisitedListPool>(
         1, common_param_.allocator_.get(), new_max_capacity, common_param_.allocator_.get());
     labels_.label_table_.resize(new_max_capacity);
+    flatten_interface_ptr_->Resize(new_max_capacity);
     max_capacity_ = new_max_capacity;
 }
 

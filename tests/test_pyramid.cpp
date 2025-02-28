@@ -165,3 +165,17 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
         vsag::Options::Instance().set_block_size_limit(origin_size);
     }
 }
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
+                             "Pyramid Concurrent Test",
+                             "[ft][pyramid]") {
+    auto metric_type = GENERATE("l2", "ip", "cosine");
+    const std::string name = "pyramid";
+    auto search_param = fmt::format(search_param_tmp, 200);
+    for (auto& dim : dims) {
+        auto param = GeneratePyramidBuildParametersString(metric_type, dim);
+        auto index = TestFactory(name, param, true);
+        auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type, /*with_path=*/true);
+        TestConcurrentAdd(index, dataset, true);
+        TestConcurrentKnnSearch(index, dataset, search_param, 0.99, true);
+    }
+}
