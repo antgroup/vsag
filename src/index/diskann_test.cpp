@@ -166,7 +166,21 @@ TEST_CASE("build diskann index with one vector", "[ut][diskann]") {
         ->Float32Vectors(vectors.data())
         ->Owner(false);
     auto result = index->Build(one_vector);
-    REQUIRE(not result.has_value());
+    REQUIRE(result.has_value());
+    auto search_parameters = R"(
+    {
+        "diskann": {
+            "ef_search": 100,
+            "beam_search": 4,
+            "io_limit": 100,
+            "use_reorder": false
+        }
+    }
+    )";
+    auto knnsearch = index->KnnSearch(one_vector, 10, search_parameters);
+    REQUIRE(knnsearch.has_value());
+    REQUIRE(knnsearch.value()->GetDim() == 1);
+    REQUIRE(knnsearch.value()->GetIds()[0] == ids[0]);
 }
 
 TEST_CASE("diskann knn_search", "[ut][diskann]") {

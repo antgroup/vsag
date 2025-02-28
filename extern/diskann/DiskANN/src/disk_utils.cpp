@@ -419,7 +419,7 @@ int merge_shards(const std::string &vamana_prefix, const std::string &vamana_suf
         {
             // Gopal. random_shuffle() is deprecated.
             std::shuffle(final_nhood.begin(), final_nhood.end(), urng);
-            nnbrs = (uint32_t)(std::min)(final_nhood.size(), (uint64_t)max_degree);
+            nnbrs = (uint32_t)std::min(final_nhood.size(), (uint64_t)max_degree);
             // write into merged ofstream
             merged_vamana_writer.write((char *)&nnbrs, sizeof(uint32_t));
             merged_vamana_writer.write((char *)final_nhood.data(), nnbrs * sizeof(uint32_t));
@@ -458,7 +458,7 @@ int merge_shards(const std::string &vamana_prefix, const std::string &vamana_suf
 
     // Gopal. random_shuffle() is deprecated.
     std::shuffle(final_nhood.begin(), final_nhood.end(), urng);
-    nnbrs = (uint32_t)(std::min)(final_nhood.size(), (uint64_t)max_degree);
+    nnbrs = (uint32_t)std::min(final_nhood.size(), (uint64_t)max_degree);
     // write into merged ofstream
     merged_vamana_writer.write((char *)&nnbrs, sizeof(uint32_t));
     if (nnbrs > 0)
@@ -1131,11 +1131,12 @@ void create_disk_layout(const T *data, uint32_t npts, uint32_t ndims, const std:
                 vamana_reader.read((char *)&nnbrs, sizeof(uint32_t));
 
                 // sanity checks on nnbrs
-                assert(nnbrs > 0);
                 assert(nnbrs <= width_u32);
 
                 // read node's nhood
-                vamana_reader.read((char *)nhood_buf, (std::min)(nnbrs, width_u32) * sizeof(uint32_t));
+                if (nnbrs > 0 ) {
+                    vamana_reader.read((char *)nhood_buf, std::min(nnbrs, width_u32) * sizeof(uint32_t));
+                }
                 if (nnbrs > width_u32)
                 {
                     vamana_reader.seekg((nnbrs - width_u32) * sizeof(uint32_t), vamana_reader.cur);
@@ -1147,11 +1148,13 @@ void create_disk_layout(const T *data, uint32_t npts, uint32_t ndims, const std:
                     normalize((float *)node_buf.get(), ndims);
                 }
                 // write nnbrs
-                *(uint32_t *)(node_buf.get() + ndims_64 * sizeof(T)) = (std::min)(nnbrs, width_u32);
+                *(uint32_t *)(node_buf.get() + ndims_64 * sizeof(T)) = std::min(nnbrs, width_u32);
 
                 // write nhood next
-                memcpy(node_buf.get() + ndims_64 * sizeof(T) + sizeof(uint32_t), nhood_buf,
-                       (std::min)(nnbrs, width_u32) * sizeof(uint32_t));
+                if (nnbrs > 0) {
+                       memcpy(node_buf.get() + ndims_64 * sizeof(T) + sizeof(uint32_t), nhood_buf,
+                              std::min(nnbrs, width_u32) * sizeof(uint32_t));
+                }
 
                 // get offset into sector_buf
                 char *sector_node_buf = sector_buf.get() + (sector_node_id * max_node_len);
