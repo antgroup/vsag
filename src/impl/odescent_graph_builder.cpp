@@ -23,7 +23,7 @@
 namespace vsag {
 
 bool
-ODescent::Build(const Vector<InnerIdType>& ids_sequence, const GraphInterfacePtr graph_storage) {
+ODescent::Build(const Vector<InnerIdType>& ids_sequence, const GraphInterfacePtr& graph_storage) {
     graph_.clear();
     if (not ids_sequence.empty()) {
         data_num_ = static_cast<int64_t>(ids_sequence.size());
@@ -95,7 +95,7 @@ ODescent::SaveGraph(std::stringstream& out) {
 }
 
 void
-ODescent::init_graph(const GraphInterfacePtr graph_storage) {
+ODescent::init_graph(const GraphInterfacePtr& graph_storage) {
     graph_.resize(data_num_, Linklist(allocator_));
     UnorderedMap<uint32_t, uint32_t> inner_ids_to_locs(allocator_);
     std::function<uint32_t(uint32_t)> id_map_func = nullptr;
@@ -334,7 +334,7 @@ ODescent::prune_graph() {
 }
 
 void
-ODescent::parallelize_task(std::function<void(int64_t, int64_t)> task) {
+ODescent::parallelize_task(const std::function<void(int64_t, int64_t)>& task) {
     Vector<std::future<void>> futures(allocator_);
     for (int64_t i = 0; i < data_num_; i += odescent_param_->block_size) {
         int64_t end = std::min(i + odescent_param_->block_size, data_num_);
@@ -369,8 +369,8 @@ ODescent::SaveGraph(GraphInterfacePtr& graph_storage) {
 
 void
 ODescent::init_one_edge(int64_t i,
-                        const GraphInterfacePtr graph_storage,
-                        std::function<uint32_t(uint32_t)> id_map_func,
+                        const GraphInterfacePtr& graph_storage,
+                        const std::function<uint32_t(uint32_t)>& id_map_func,
                         std::uniform_int_distribution<int64_t>& k_generate,
                         std::mt19937& rng) {
     UnorderedSet<uint32_t> ids_set(allocator_);
