@@ -31,4 +31,24 @@ format_map(const std::string& str, const std::unordered_map<std::string, std::st
     return result;
 }
 
+void
+mapping_external_param_to_inner(const JsonType& external_json,
+                                ConstParamMap& param_map,
+                                JsonType& inner_json) {
+    for (const auto& [key, value] : external_json.items()) {
+        const auto& iter = param_map.find(key);
+
+        if (iter != param_map.end()) {
+            const auto& vec = iter->second;
+            auto* json = &inner_json;
+            for (const auto& str : vec) {
+                json = &(json->operator[](str));
+            }
+            *json = value;
+        } else {
+            throw std::invalid_argument(fmt::format("HGraph have no config param: {}", key));
+        }
+    }
+}
+
 }  // namespace vsag

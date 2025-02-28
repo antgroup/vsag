@@ -49,6 +49,8 @@ using UnorderedMap = std::unordered_map<KeyType,
                                         std::equal_to<KeyType>,
                                         vsag::AllocatorWrapper<std::pair<const KeyType, ValType>>>;
 
+using ConstParamMap = const std::unordered_map<std::string, std::vector<std::string>>;
+
 struct CompareByFirst {
     constexpr bool
     operator()(std::pair<float, InnerIdType> const& a,

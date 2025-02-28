@@ -53,4 +53,5 @@ public:
         return this->ToJson().dump(4);
     }
 };
+
 }  // namespace vsag

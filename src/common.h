@@ -20,6 +20,7 @@
 #define SAFE_CALL(stmt)                                                              \
     try {                                                                            \
         stmt;                                                                        \
+        return {};                                                                   \
     } catch (const vsag::VsagException& e) {                                         \
         LOG_ERROR_AND_RETURNS(e.error_.type, e.error_.message);                      \
     } catch (const std::exception& e) {                                              \

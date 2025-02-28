@@ -36,6 +36,7 @@
 #include "impl/conjugate_graph.h"
 #include "index_common_param.h"
 #include "index_feature_list.h"
+#include "index_impl.h"
 #include "logger.h"
 #include "safe_allocator.h"
 #include "typing.h"

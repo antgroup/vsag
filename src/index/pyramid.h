@@ -210,7 +210,7 @@ private:
     PyramidParameters pyramid_param_;
     std::shared_ptr<IndexNode> root_{nullptr};
     FlattenInterfacePtr flatten_interface_ptr_{nullptr};
-    Vector<LabelType> labels_;
+    LabelTable labels_;
     std::unique_ptr<VisitedListPool> pool_ = nullptr;
     std::unique_ptr<BasicSearcher> searcher_ = nullptr;
     int64_t max_capacity_{0};

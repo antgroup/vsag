@@ -45,4 +45,6 @@ public:
     std::string name_;
 };
 
+using HGraphParameterPtr = std::shared_ptr<HGraphParameter>;
+
 }  // namespace vsag
