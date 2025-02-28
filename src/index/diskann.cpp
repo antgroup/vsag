@@ -207,7 +207,7 @@ DiskANN::DiskANN(DiskannParameters& diskann_params, const IndexCommonParam& inde
 tl::expected<std::vector<int64_t>, Error>
 DiskANN::build(const DatasetPtr& base) {
     try {
-        if (base->GetNumElements() == 0) {
+        if (base->GetNumElements() <= 0) {
             empty_index_ = true;
             return std::vector<int64_t>();
         }
@@ -225,8 +225,6 @@ DiskANN::build(const DatasetPtr& base) {
         const auto* vectors = base->GetFloat32Vectors();
         const auto* ids = base->GetIds();
         auto data_num = base->GetNumElements();
-        CHECK_ARGUMENT(data_num > 1,
-                       fmt::format("base.num_elements({}) must be greater than 1", data_num));
 
         std::vector<size_t> failed_locs;
         if (diskann_params_.graph_type == GRAPH_TYPE_ODESCENT) {

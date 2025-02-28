@@ -1723,7 +1723,8 @@ size_t PQFlashIndex<T, LabelT>::load_graph(std::stringstream &in)
         graph_size += k;
         if (k == 0)
         {
-            throw diskann::ANNException("ERROR: Point found with no out-neighbors.", -1);
+            bytes_read += sizeof(uint32_t) * ((size_t)k + 1);
+            continue;
         }
         max_degree = std::max(max_degree, (uint64_t)k);
         cc += k;
