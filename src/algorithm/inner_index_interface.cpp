@@ -21,7 +21,8 @@
 
 namespace vsag {
 
-InnerIndexInterface::InnerIndexInterface(ParamPtr index_param, const IndexCommonParam& common_param)
+InnerIndexInterface::InnerIndexInterface(const ParamPtr& index_param,
+                                         const IndexCommonParam& common_param)
     : allocator_(common_param.allocator_.get()) {
     this->label_table_ = std::make_shared<LabelTable>(allocator_);
     this->index_feature_list_ = std::make_shared<IndexFeatureList>();
@@ -48,7 +49,7 @@ DatasetPtr
 InnerIndexInterface::KnnSearch(const DatasetPtr& query,
                                int64_t k,
                                const std::string& parameters,
-                               BitsetPtr invalid) const {
+                               const BitsetPtr& invalid) const {
     FilterPtr filter_ptr = nullptr;
     if (invalid != nullptr) {
         filter_ptr = std::make_shared<UniqueFilter>(invalid);
@@ -60,7 +61,7 @@ DatasetPtr
 InnerIndexInterface::RangeSearch(const DatasetPtr& query,
                                  float radius,
                                  const std::string& parameters,
-                                 BitsetPtr invalid,
+                                 const BitsetPtr& invalid,
                                  int64_t limited_size) const {
     FilterPtr filter_ptr = nullptr;
     if (invalid != nullptr) {
@@ -85,7 +86,7 @@ InnerIndexInterface::RangeSearch(const DatasetPtr& query,
 BinarySet
 InnerIndexInterface::Serialize() const {
     if (GetNumElements() == 0) {
-        return EmptyIndexBinarySet::Make();
+        return EmptyIndexBinarySet::Make(this->GetName());
     }
     std::string time_record_name = this->GetName() + " Serialize";
     SlowTaskTimer t(time_record_name);
