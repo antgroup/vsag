@@ -197,6 +197,66 @@ BF16ComputeL2Sqr(const uint8_t* query, const uint8_t* codes, uint64_t dim) {
     return avx2::BF16ComputeL2Sqr(query, codes, dim);
 #endif
 }
+
+float
+FP16ComputeIP(const uint8_t* query, const uint8_t* codes, uint64_t dim) {
+#if defined(ENABLE_AVX512)
+    // Initialize the sum to 0
+    __m512 sum = _mm512_setzero_ps();
+    const auto* query_fp16 = (const uint16_t*)(query);
+    const auto* codes_fp16 = (const uint16_t*)(codes);
+
+    // Process the data in 128-bit chunks
+    uint64_t i = 0;
+    for (; i + 15 < dim; i += 16) {
+        // Load data into registers
+        __m256i query_load = _mm256_loadu_epi32(query_fp16 + i);
+        __m512 query_float = _mm512_cvtph_ps(query_load);
+
+        // Load data into registers
+        __m256i code_load = _mm256_loadu_epi32(codes_fp16 + i);
+        __m512 code_float = _mm512_cvtph_ps(code_load);
+
+        sum = _mm512_fmadd_ps(code_float, query_float, sum);
+    }
+    float ip = _mm512_reduce_add_ps(sum);
+
+    return ip + avx2::FP16ComputeIP(query + i * 2, codes + i * 2, dim - i);
+#else
+    return avx2::FP16ComputeIP(query, codes, dim);
+#endif
+}
+
+float
+FP16ComputeL2Sqr(const uint8_t* query, const uint8_t* codes, uint64_t dim) {
+#if defined(ENABLE_AVX512)
+    // Initialize the sum to 0
+    __m512 sum = _mm512_setzero_ps();
+    const auto* query_fp16 = (const uint16_t*)(query);
+    const auto* codes_fp16 = (const uint16_t*)(codes);
+
+    // Process the data in 128-bit chunks
+    uint64_t i = 0;
+    for (; i + 15 < dim; i += 16) {
+        // Load data into registers
+        __m256i query_load = _mm256_loadu_epi32(query_fp16 + i);
+        __m512 query_float = _mm512_cvtph_ps(query_load);
+
+        // Load data into registers
+        __m256i code_load = _mm256_loadu_epi32(codes_fp16 + i);
+        __m512 code_float = _mm512_cvtph_ps(code_load);
+
+        __m512 diff = _mm512_sub_ps(code_float, query_float);
+        sum = _mm512_fmadd_ps(diff, diff, sum);
+    }
+    float l2 = _mm512_reduce_add_ps(sum);
+
+    return l2 + avx2::FP16ComputeL2Sqr(query + i * 2, codes + i * 2, dim - i);
+#else
+    return avx2::FP16ComputeL2Sqr(query, codes, dim);
+#endif
+}
+
 float
 SQ8ComputeIP(const float* query,
              const uint8_t* codes,

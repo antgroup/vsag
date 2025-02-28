@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "bf16_simd.h"
+#include "fp16_simd.h"
 
 #include <catch2/benchmark/catch_benchmark.hpp>
 #include <catch2/catch_all.hpp>
@@ -24,21 +24,26 @@
 using namespace vsag;
 
 std::vector<uint8_t>
-encode_bf16(const std::vector<float>& data, const int64_t count) {
+encode_fp16(const std::vector<float>& data, const int64_t count) {
     std::vector<uint8_t> result(count * 2);
-    auto* bf16 = reinterpret_cast<uint16_t*>(result.data());
+    auto* fp16 = reinterpret_cast<uint16_t*>(result.data());
     for (int64_t i = 0; i < count; ++i) {
-        bf16[i] = generic::FloatToBF16(data[i]);
+        fp16[i] = generic::FloatToFP16(data[i]);
     }
     return result;
 }
 
-TEST_CASE("Encode & Decode BF16", "[ut][simd]") {
+TEST_CASE("Encode & Decode FP16", "[ut][simd]") {
     auto vec_fp32 = fixtures::generate_vectors(10, 100);
-    for (int64_t i = 0; i < 1000; ++i) {
-        uint16_t bf16 = generic::FloatToBF16(vec_fp32[i]);
-        float decode_fp32 = generic::BF16ToFloat(bf16);
-        REQUIRE(std::abs(decode_fp32 - vec_fp32[i]) < 5e-4);
+    for (float item : vec_fp32) {
+        uint16_t fp16 = generic::FloatToFP16(item);
+        float decode_fp32 = generic::FP16ToFloat(fp16);
+        REQUIRE(std::abs(decode_fp32 - item) < 3e-4);
+    }
+    for (float item = -512.0F; item <= 512.0F; item += 1.0F) {
+        uint16_t fp16 = generic::FloatToFP16(item);
+        float decode_fp32 = generic::FP16ToFloat(fp16);
+        REQUIRE(std::abs(decode_fp32 - item) < 1);
     }
 }
 
@@ -64,18 +69,18 @@ TEST_CASE("Encode & Decode BF16", "[ut][simd]") {
         }                                                                             \
     };
 
-TEST_CASE("BF16 SIMD Compute", "[ut][simd]") {
+TEST_CASE("FP16 SIMD Compute", "[ut][simd]") {
     int64_t dim = GENERATE(1, 8, 16, 32, 256);
     int64_t count = 100;
 
     auto vec1_fp32 = fixtures::generate_vectors(count, dim, false, 39);
-    auto vec1 = encode_bf16(vec1_fp32, count * dim);
+    auto vec1 = encode_fp16(vec1_fp32, count * dim);
     auto vec2_fp32 = fixtures::generate_vectors(count, dim, false, 87);
-    auto vec2 = encode_bf16(vec2_fp32, count * dim);
+    auto vec2 = encode_fp16(vec2_fp32, count * dim);
     for (uint64_t j = 0; j < count; ++j) {
         auto i = j * 2;
-        TEST_ACCURACY(BF16ComputeIP);
-        TEST_ACCURACY(BF16ComputeL2Sqr);
+        TEST_ACCURACY(FP16ComputeIP);
+        TEST_ACCURACY(FP16ComputeL2Sqr);
     }
 }
 
@@ -87,22 +92,20 @@ TEST_CASE("BF16 SIMD Compute", "[ut][simd]") {
         return;                                                                    \
     }
 
-TEST_CASE("BF16 Benchmark", "[ut][simd][!benchmark]") {
+TEST_CASE("FP16 Benchmark", "[ut][simd][!benchmark]") {
     int64_t count = 500;
     int64_t dim = 128;
     auto vec1_fp32 = fixtures::generate_vectors(count, dim, false, 37);
-    auto vec1 = encode_bf16(vec1_fp32, count * dim);
+    auto vec1 = encode_fp16(vec1_fp32, count * dim);
     auto vec2_fp32 = fixtures::generate_vectors(count, dim, false, 86);
-    auto vec2 = encode_bf16(vec2_fp32, count * dim);
-    BENCHMARK_SIMD_COMPUTE(generic, BF16ComputeIP);
-    BENCHMARK_SIMD_COMPUTE(sse, BF16ComputeIP);
-    BENCHMARK_SIMD_COMPUTE(avx, BF16ComputeIP);
-    BENCHMARK_SIMD_COMPUTE(avx2, BF16ComputeIP);
-    BENCHMARK_SIMD_COMPUTE(avx512, BF16ComputeIP);
+    auto vec2 = encode_fp16(vec2_fp32, count * dim);
+    BENCHMARK_SIMD_COMPUTE(generic, FP16ComputeIP);
+    BENCHMARK_SIMD_COMPUTE(sse, FP16ComputeIP);
+    BENCHMARK_SIMD_COMPUTE(avx2, FP16ComputeIP);
+    BENCHMARK_SIMD_COMPUTE(avx512, FP16ComputeIP);
 
-    BENCHMARK_SIMD_COMPUTE(generic, BF16ComputeL2Sqr);
-    BENCHMARK_SIMD_COMPUTE(sse, BF16ComputeL2Sqr);
-    BENCHMARK_SIMD_COMPUTE(avx, BF16ComputeL2Sqr);
-    BENCHMARK_SIMD_COMPUTE(avx2, BF16ComputeL2Sqr);
-    BENCHMARK_SIMD_COMPUTE(avx512, BF16ComputeL2Sqr);
+    BENCHMARK_SIMD_COMPUTE(generic, FP16ComputeL2Sqr);
+    BENCHMARK_SIMD_COMPUTE(sse, FP16ComputeL2Sqr);
+    BENCHMARK_SIMD_COMPUTE(avx2, FP16ComputeL2Sqr);
+    BENCHMARK_SIMD_COMPUTE(avx512, FP16ComputeL2Sqr);
 }
