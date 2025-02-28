@@ -16,9 +16,11 @@
 #include "vsag/factory.h"
 
 #include <catch2/catch_test_macros.hpp>
+#include <fstream>
 #include <nlohmann/json.hpp>
 
 #include "logger.h"
+#include "safe_thread_pool.h"
 #include "typing.h"
 #include "vsag/errors.h"
 
@@ -60,6 +62,67 @@ TEST_CASE("Create Index with Full Parameters", "[ut][factory]") {
         auto index = vsag::Factory::CreateIndex("diskann", parameters.dump());
         REQUIRE(index.has_value());
     }
+}
+
+TEST_CASE("Create Local File Reader", "[ut][factory]") {
+    vsag::logger::set_level(vsag::logger::level::debug);
+
+    const std::string filename = "/tmp/test_local_file_reader.bin";
+    {
+        std::ofstream file(filename, std::ios::binary);
+        const std::string content = "HelloWorldTestData";
+        file.write(content.c_str(), content.size());
+        file.close();
+    }
+
+    SECTION("Sync read without offset") {
+        auto reader = vsag::Factory::CreateLocalFileReader(filename, 0, 18);
+        char buffer[6] = {0};
+
+        reader->Read(0, 5, buffer);
+        REQUIRE(std::string(buffer) == "Hello");
+
+        reader->Read(5, 5, buffer);
+        REQUIRE(std::string(buffer) == "World");
+    }
+
+    SECTION("Sync read with base offset") {
+        auto reader = vsag::Factory::CreateLocalFileReader(filename, 5, 5);
+        char buffer[6] = {0};
+
+        reader->Read(0, 5, buffer);
+        REQUIRE(std::string(buffer) == "World");
+    }
+
+    SECTION("Async read without explicit pool") {
+        auto reader = vsag::Factory::CreateLocalFileReader(filename, 10, 4);
+        char buffer[5] = {0};
+        std::promise<void> completion_promise;
+        auto completion_future = completion_promise.get_future();
+        bool callback_called = false;
+
+        reader->AsyncRead(0, 4, buffer, [&](vsag::IOErrorCode code, const std::string& msg) {
+            REQUIRE(code == vsag::IOErrorCode::IO_SUCCESS);
+            REQUIRE(msg == "success");
+            callback_called = true;
+            completion_promise.set_value();
+        });
+
+        auto status = completion_future.wait_for(std::chrono::seconds(1));
+        REQUIRE(status == std::future_status::ready);
+
+        REQUIRE(callback_called);
+        REQUIRE(std::string(buffer) == "Test");
+    }
+
+    SECTION("Check size calculation") {
+        auto reader1 = vsag::Factory::CreateLocalFileReader(filename, 0, 18);
+        REQUIRE(reader1->Size() == 18);
+
+        auto reader2 = vsag::Factory::CreateLocalFileReader(filename, 5, 5);
+        REQUIRE(reader2->Size() == 5);
+    }
+    std::remove(filename.c_str());
 }
 
 TEST_CASE("Create HNSW with Incomplete Parameters", "[ut][factory]") {
