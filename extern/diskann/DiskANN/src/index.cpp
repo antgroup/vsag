@@ -354,7 +354,7 @@ template <typename T, typename TagT, typename LabelT> size_t Index<T, TagT, Labe
     size_t file_offset = 0; // we will use this if we want
     out.seekp(file_offset, out.beg);
     size_t index_size = 24;
-    uint32_t max_degree = 0;
+    uint32_t max_degree = _indexingRange;
     out.write((char *)&index_size, sizeof(uint64_t));
     out.write((char *)&_max_observed_degree, sizeof(uint32_t));
     uint32_t ep_u32 = _start;
@@ -1524,7 +1524,10 @@ void Index<T, TagT, LabelT>::search_for_point_and_prune(int location, uint32_t L
 
     prune_neighbors(location, pool, pruned_list, scratch);
 
-    assert(!pruned_list.empty());
+    if (_final_graph.size() > 1 && pruned_list.empty())
+    {
+        throw diskann::ANNException("ERROR: pruned_list is empty", -1, __FUNCSIG__, __FILE__, __LINE__);
+    }
     assert(_final_graph.size() == _max_points + _num_frozen_pts);
 }
 
@@ -1675,8 +1678,6 @@ void Index<T, TagT, LabelT>::inter_insert(uint32_t n, std::vector<uint32_t> &pru
                                           InMemQueryScratch<T> *scratch)
 {
     const auto &src_pool = pruned_list;
-
-    assert(!src_pool.empty());
 
     for (auto des : src_pool)
     {
