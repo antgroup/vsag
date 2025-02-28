@@ -93,12 +93,13 @@ public:
     }
 
     bool
-    Build(const GraphInterfacePtr graph_storage = nullptr) {
+    Build(const GraphInterfacePtr& graph_storage = nullptr) {
         return Build(Vector<InnerIdType>(allocator_), graph_storage);
     }
 
     bool
-    Build(const Vector<InnerIdType>& ids_sequence, const GraphInterfacePtr graph_storage = nullptr);
+    Build(const Vector<InnerIdType>& ids_sequence,
+          const GraphInterfacePtr& graph_storage = nullptr);
 
     void
     SaveGraph(std::stringstream& out);
@@ -117,13 +118,13 @@ private:
 
     void
     init_one_edge(int64_t i,
-                  const GraphInterfacePtr graph_storage,
-                  std::function<uint32_t(uint32_t)> id_map_func,
+                  const GraphInterfacePtr& graph_storage,
+                  const std::function<uint32_t(uint32_t)>& id_map_func,
                   std::uniform_int_distribution<int64_t>& k_generate,
                   std::mt19937& rng);
 
     void
-    init_graph(const GraphInterfacePtr graph_storage);
+    init_graph(const GraphInterfacePtr& graph_storage);
 
     void
     update_neighbors(Vector<UnorderedSet<uint32_t>>& old_neighbors,
@@ -145,7 +146,7 @@ private:
 
 private:
     void
-    parallelize_task(std::function<void(int64_t i, int64_t end)> task);
+    parallelize_task(const std::function<void(int64_t i, int64_t end)>& task);
 
     size_t dim_;
     int64_t data_num_;

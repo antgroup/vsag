@@ -165,7 +165,7 @@ private:
     knn_search(const DatasetPtr& query,
                int64_t k,
                const std::string& parameters,
-               BitsetPtr invalid) const;
+               const BitsetPtr& invalid) const;
 
     tl::expected<DatasetPtr, Error>
     knn_search(const DatasetPtr& query,
@@ -184,7 +184,7 @@ private:
     range_search(const DatasetPtr& query,
                  float radius,
                  const std::string& parameters,
-                 BitsetPtr invalid,
+                 const BitsetPtr& invalid,
                  int64_t limited_size) const;
 
     tl::expected<BinarySet, Error>

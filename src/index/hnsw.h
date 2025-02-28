@@ -230,7 +230,7 @@ public:
     ExtractDataAndGraph(FlattenInterfacePtr& data,
                         GraphInterfacePtr& graph,
                         Vector<LabelType>& ids,
-                        IdMapFunction func,
+                        const IdMapFunction& func,
                         Allocator* allocator);
 
     bool
@@ -263,7 +263,7 @@ private:
     knn_search(const DatasetPtr& query,
                int64_t k,
                const std::string& parameters,
-               const FilterPtr filter_ptr) const;
+               const FilterPtr& filter_ptr) const;
 
     template <typename FilterType>
     tl::expected<DatasetPtr, Error>
@@ -277,7 +277,7 @@ private:
     range_search(const DatasetPtr& query,
                  float radius,
                  const std::string& parameters,
-                 const FilterPtr filter_ptr,
+                 const FilterPtr& filter_ptr,
                  int64_t limited_size) const;
 
     tl::expected<uint32_t, Error>

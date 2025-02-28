@@ -70,8 +70,7 @@ public:
 
 class ReadFuncStreamReader : public StreamReader {
 public:
-    ReadFuncStreamReader(const std::function<void(uint64_t, uint64_t, void*)> read_func,
-                         uint64_t cursor);
+    ReadFuncStreamReader(std::function<void(uint64_t, uint64_t, void*)> read_func, uint64_t cursor);
 
     void
     Read(char* data, uint64_t size) override;
