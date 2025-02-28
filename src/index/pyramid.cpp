@@ -503,7 +503,9 @@ Pyramid::add(const DatasetPtr& base) {
     }
     std::shared_lock<std::shared_mutex> lock(resize_mutex_);
 
-    std::memcpy(labels_.label_table_.data() + local_cur_element_count, data_ids, sizeof(LabelType) * data_num);
+    std::memcpy(labels_.label_table_.data() + local_cur_element_count,
+                data_ids,
+                sizeof(LabelType) * data_num);
 
     InnerSearchParam search_param;
     search_param.ef = 100;
