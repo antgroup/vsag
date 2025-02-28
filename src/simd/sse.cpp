@@ -211,6 +211,16 @@ BF16ComputeL2Sqr(const uint8_t* query, const uint8_t* codes, uint64_t dim) {
 }
 
 float
+FP16ComputeIP(const uint8_t* query, const uint8_t* codes, uint64_t dim) {
+    return generic::FP16ComputeIP(query, codes, dim);
+}
+
+float
+FP16ComputeL2Sqr(const uint8_t* query, const uint8_t* codes, uint64_t dim) {
+    return generic::FP16ComputeL2Sqr(query, codes, dim);
+}
+
+float
 SQ8ComputeIP(const float* query,
              const uint8_t* codes,
              const float* lower_bound,
