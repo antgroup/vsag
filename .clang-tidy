@@ -28,11 +28,12 @@ Checks: >
     -modernize-use-trailing-return-type,
     -modernize-avoid-c-arrays,
     # openmp-*,
-    # performance-*,
+    performance-*,
     readability-*,
     -readability-identifier-length,
     -readability-magic-numbers,
     -readability-function-cognitive-complexity, # enable after fix all
+    -readability-redundant-access-specifiers
 
 
 HeaderFilterRegex: ''

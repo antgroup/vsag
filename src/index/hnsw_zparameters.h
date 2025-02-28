@@ -27,7 +27,7 @@ namespace vsag {
 struct HnswParameters {
 public:
     static HnswParameters
-    FromJson(JsonType& hnsw_param_obj, IndexCommonParam index_common_param);
+    FromJson(JsonType& hnsw_param_obj, const IndexCommonParam& index_common_param);
 
 public:
     // required vars
@@ -47,7 +47,7 @@ protected:
 struct FreshHnswParameters : public HnswParameters {
 public:
     static HnswParameters
-    FromJson(JsonType& hnsw_param_obj, IndexCommonParam index_common_param);
+    FromJson(JsonType& hnsw_param_obj, const IndexCommonParam& index_common_param);
 
 private:
     FreshHnswParameters() = default;
