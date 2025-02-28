@@ -26,82 +26,76 @@
 #include "data_cell/flatten_interface.h"
 #include "data_cell/graph_interface.h"
 #include "hgraph_parameter.h"
+#include "impl/basic_searcher.h"
 #include "index/index_common_param.h"
 #include "index_feature_list.h"
+#include "inner_index_interface.h"
 #include "lock_strategy.h"
 #include "typing.h"
 #include "vsag/index.h"
 #include "vsag/index_features.h"
 
 namespace vsag {
-class HGraph {
+class HGraph : public InnerIndexInterface {
 public:
-    HGraph(const HGraphParameter& param, const IndexCommonParam& common_param);
+    static ParamPtr
+    MappingExternalParamAndCheck(const JsonType& external_param,
+                                 const IndexCommonParam& common_param);
 
-    tl::expected<std::vector<int64_t>, Error>
-    Build(const DatasetPtr& data);
+public:
+    HGraph(const HGraphParameterPtr& param, const IndexCommonParam& common_param);
 
-    tl::expected<std::vector<int64_t>, Error>
-    Add(const DatasetPtr& data);
+    HGraph(const ParamPtr& param, const IndexCommonParam& common_param)
+        : HGraph(std::dynamic_pointer_cast<HGraphParameter>(param), common_param){};
 
-    tl::expected<DatasetPtr, Error>
+    ~HGraph() override = default;
+
+    [[nodiscard]] std::string
+    GetName() const override {
+        return INDEX_TYPE_HGRAPH;
+    }
+
+    std::vector<int64_t>
+    Build(const DatasetPtr& data) override;
+
+    std::vector<int64_t>
+    Add(const DatasetPtr& data) override;
+
+    [[nodiscard]] DatasetPtr
     KnnSearch(const DatasetPtr& query,
               int64_t k,
               const std::string& parameters,
-              const std::function<bool(int64_t)>& filter) const;
+              const FilterPtr& filter) const override;
 
-    tl::expected<DatasetPtr, Error>
+    [[nodiscard]] DatasetPtr
     RangeSearch(const DatasetPtr& query,
                 float radius,
                 const std::string& parameters,
-                BaseFilterFunctor* filter_ptr,
-                int64_t limited_size) const;
-
-    tl::expected<void, Error>
-    Serialize(std::ostream& out_stream) const;
-
-    tl::expected<BinarySet, Error>
-    Serialize() const;
+                const FilterPtr& filter,
+                int64_t limited_size = -1) const override;
 
     void
-    Serialize(StreamWriter& writer) const;
-
-    tl::expected<void, Error>
-    Deserialize(const ReaderSet& reader_set);
-
-    tl::expected<void, Error>
-    Deserialize(const BinarySet& binary_set);
-
-    tl::expected<void, Error>
-    Deserialize(std::istream& in_stream);
+    Serialize(StreamWriter& writer) const override;
 
     void
-    Deserialize(StreamReader& reader);
+    Deserialize(StreamReader& reader) override;
 
-    inline int64_t
-    GetNumElements() const {
+    int64_t
+    GetNumElements() const override {
         return this->basic_flatten_codes_->TotalCount();
     }
 
     uint64_t
-    EstimateMemory(uint64_t num_elements) const;
+    EstimateMemory(uint64_t num_elements) const override;
 
     // TODO(LHT): implement
     inline int64_t
-    GetMemoryUsage() const {
+    GetMemoryUsage() const override {
         return 0;
     }
 
-    tl::expected<float, Error>
-    CalculateDistanceById(const float* vector, int64_t id) const;
-
-    bool
-    CheckFeature(IndexFeature feature) const;
-
-    bool
-    CheckIdExist(LabelType id) const {
-        return this->label_lookup_.find(id) != this->label_lookup_.end();
-    }
+    float
+    CalcDistanceById(const float* query, int64_t id) const override;
 
     inline void
     SetBuildThreadsCount(uint64_t count) {
@@ -110,17 +104,6 @@ public:
     }
 
 private:
-    class InnerSearchParam {
-    public:
-        int topk_{0};
-        float radius_{0.0f};
-        InnerIdType ep_{0};
-        uint64_t ef_{10};
-        BaseFilterFunctor* is_id_allowed_{nullptr};
-    };
-
-    enum InnerSearchMode { KNN_SEARCH_MODE = 1, RANGE_SEARCH_MODE = 2 };
-
     inline int
     get_random_level() {
         std::uniform_real_distribution<double> distribution(0.0, 1.0);
@@ -137,7 +120,7 @@ private:
     GraphInterfacePtr
     generate_one_route_graph();
 
-    template <InnerSearchMode mode = InnerSearchMode::KNN_SEARCH_MODE>
+    template <InnerSearchMode mode = InnerSearchMode::KNN_SEARCH>
     MaxHeap
     search_one_graph(const float* query,
                      const GraphInterfacePtr& graph,
@@ -149,14 +132,11 @@ private:
     void
     deserialize_basic_info(StreamReader& reader);
 
-    uint64_t
-    cal_serialize_size() const;
-
     inline LabelType
     get_label_by_id(InnerIdType inner_id) const {
         std::shared_lock<std::shared_mutex> lock(this->label_lookup_mutex_);
         // the inner_id is guarantee in label_lookup
-        return this->labels_[inner_id];
+        return this->label_table_->GetLabelById(inner_id);
     }
 
     void
@@ -186,16 +166,8 @@ private:
     int64_t dim_{0};
     MetricType metric_{MetricType::METRIC_TYPE_L2SQR};
 
-    const IndexCommonParam common_param_{};
-
     std::default_random_engine level_generator_{2021};
     double mult_{1.0};
-
-    Allocator* allocator_{nullptr};
-
-    UnorderedMap<LabelType, InnerIdType> label_lookup_;
-    Vector<LabelType> labels_;
-    mutable std::shared_mutex label_lookup_mutex_{};  // lock for label_lookup_ & labels_
 
     InnerIdType entry_point_id_{std::numeric_limits<InnerIdType>::max()};
     uint64_t max_level_{0};
@@ -211,8 +183,6 @@ private:
     uint64_t build_thread_count_{100};
 
     InnerIdType max_capacity_{0};
-
-    IndexFeatureList feature_list_{};
 
     const uint64_t resize_increase_count_bit_{10};  // 2^resize_increase_count_bit_ for resize count
 };
