@@ -7,6 +7,7 @@ set (SIMD_SRCS
         simd.cpp
         basic_func.cpp
         fp32_simd.cpp
+        fp16_simd.cpp
         bf16_simd.cpp
         sq8_simd.cpp
         sq4_simd.cpp
@@ -22,10 +23,10 @@ if (DIST_CONTAINS_SSE)
             "-msse -msse2 -msse3 -mssse3 -msse4 -msse4a -msse4.1 -msse4.2")
 endif ()
 if (DIST_CONTAINS_AVX)
-    set_source_files_properties (avx.cpp PROPERTIES COMPILE_FLAGS "-mavx")
+    set_source_files_properties (avx.cpp PROPERTIES COMPILE_FLAGS "-mavx -mf16c")
 endif ()
 if (DIST_CONTAINS_AVX2)
-    set_source_files_properties (avx2.cpp PROPERTIES COMPILE_FLAGS "-mavx2 -mfma")
+    set_source_files_properties (avx2.cpp PROPERTIES COMPILE_FLAGS "-mavx2 -mfma -mf16c")
 endif ()
 if (DIST_CONTAINS_AVX512)
     set_source_files_properties (

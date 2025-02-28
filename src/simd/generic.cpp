@@ -115,6 +115,32 @@ FloatToBF16(const float fp32_value) {
 }
 
 float
+FP16ToFloat(const uint16_t fp16_value) {
+    uint32_t sign = (fp16_value >> 15) & 0x1;
+    int32_t exp = ((fp16_value >> 10) & 0x1F) - 15;
+    uint32_t mantissa = (fp16_value & 0x3FF) << 13;
+    FP32Struct fp32;
+    fp32.int_value = (sign << 31) | ((exp + 127) << 23) | mantissa;
+    return fp32.float_value;
+}
+
+uint16_t
+FloatToFP16(const float fp32_value) {
+    FP32Struct fp32;
+    fp32.float_value = fp32_value;
+    uint16_t sign = (fp32.int_value >> 31) & 0x1;
+    int32_t exp = ((fp32.int_value >> 23) & 0xFF) - 127;
+    uint32_t mantissa = fp32.int_value & 0x007FFFFF;
+
+    if (exp > 15) {
+        exp = 15;
+    } else if (exp < -14) {
+        exp = -14;
+    }
+    return (sign << 15) | ((exp + 15) << 10) | (mantissa >> 13);
+}
+
+float
 BF16ComputeIP(const uint8_t* query, const uint8_t* codes, uint64_t dim) {
     float result = 0.0f;
     auto* query_bf16 = reinterpret_cast<const uint16_t*>(query);
@@ -132,6 +158,29 @@ BF16ComputeL2Sqr(const uint8_t* query, const uint8_t* codes, uint64_t dim) {
     auto* codes_bf16 = reinterpret_cast<const uint16_t*>(codes);
     for (uint64_t i = 0; i < dim; ++i) {
         auto val = BF16ToFloat(query_bf16[i]) - BF16ToFloat(codes_bf16[i]);
+        result += val * val;
+    }
+    return result;
+}
+
+float
+FP16ComputeIP(const uint8_t* query, const uint8_t* codes, uint64_t dim) {
+    float result = 0.0f;
+    auto* query_bf16 = reinterpret_cast<const uint16_t*>(query);
+    auto* codes_bf16 = reinterpret_cast<const uint16_t*>(codes);
+    for (uint64_t i = 0; i < dim; ++i) {
+        result += FP16ToFloat(query_bf16[i]) * FP16ToFloat(codes_bf16[i]);
+    }
+    return result;
+}
+
+float
+FP16ComputeL2Sqr(const uint8_t* query, const uint8_t* codes, uint64_t dim) {
+    float result = 0.0f;
+    auto* query_bf16 = reinterpret_cast<const uint16_t*>(query);
+    auto* codes_bf16 = reinterpret_cast<const uint16_t*>(codes);
+    for (uint64_t i = 0; i < dim; ++i) {
+        auto val = FP16ToFloat(query_bf16[i]) - FP16ToFloat(codes_bf16[i]);
         result += val * val;
     }
     return result;
