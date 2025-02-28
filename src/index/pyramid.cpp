@@ -494,8 +494,8 @@ Pyramid::add(const DatasetPtr& base) {
             resize(new_capacity);
         } else if (max_capacity_ < data_num + cur_element_count_) {
             auto new_capacity = std::min(MAX_CAPACITY_EXTEND, max_capacity_);
-            new_capacity =
-                std::max(data_num + cur_element_count_ - max_capacity_, new_capacity) + max_capacity_;
+            new_capacity = std::max(data_num + cur_element_count_ - max_capacity_, new_capacity) +
+                           max_capacity_;
             resize(new_capacity);
         }
         cur_element_count_ += data_num;
