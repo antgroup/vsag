@@ -97,6 +97,9 @@ public:
     float
     CalcDistanceById(const float* query, int64_t id) const override;
 
+    DatasetPtr
+    CalDistanceById(const float* query, const int64_t* ids, int64_t count) const override;
+
     inline void
     SetBuildThreadsCount(uint64_t count) {
         this->build_thread_count_ = count;
