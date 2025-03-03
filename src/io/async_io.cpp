@@ -17,6 +17,6 @@
 
 namespace vsag {
 std::unique_ptr<IOContextPool> AsyncIO::io_context_pool =
-    std::make_unique<IOContextPool>(100, nullptr);
+    std::make_unique<IOContextPool>(10, nullptr);
 
 }  // namespace vsag
