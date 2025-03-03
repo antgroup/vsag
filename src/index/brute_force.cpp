@@ -22,21 +22,18 @@
 
 namespace vsag {
 
-BruteForce::BruteForce(const BruteForceParameter& param, const IndexCommonParam& common_param)
-    : Index(), dim_(common_param.dim_), allocator_(common_param.allocator_) {
+BruteForce::BruteForce(const BruteForceParameterPtr& param, const IndexCommonParam& common_param)
+    : InnerIndexInterface(param, common_param),
+      dim_(common_param.dim_),
+      allocator_(common_param.allocator_.get()) {
     label_table_ = std::make_shared<LabelTable>(common_param.allocator_.get());
-    inner_codes_ = FlattenInterface::MakeInstance(param.flatten_param_, common_param);
+    inner_codes_ = FlattenInterface::MakeInstance(param->flatten_param_, common_param);
     this->init_feature_list();
-}
-
-BruteForce::~BruteForce() {
-    label_table_.reset();
-    inner_codes_.reset();
 }
 
 int64_t
 BruteForce::GetMemoryUsage() const {
-    return static_cast<int64_t>(this->cal_serialize_size());
+    return static_cast<int64_t>(this->CalSerializeSize());
 }
 
 uint64_t
@@ -45,18 +42,13 @@ BruteForce::EstimateMemory(uint64_t num_elements) const {
            (this->dim_ * sizeof(float) + sizeof(LabelType) * 2 + sizeof(InnerIdType));
 }
 
-bool
-BruteForce::CheckFeature(IndexFeature feature) const {
-    return feature_list_.CheckFeature(feature);
+std::vector<int64_t>
+BruteForce::Build(const vsag::DatasetPtr& data) {
+    return this->Add(data);
 }
 
 std::vector<int64_t>
-BruteForce::build(const DatasetPtr& data) {
-    return this->add(data);
-}
-
-std::vector<int64_t>
-BruteForce::add(const DatasetPtr& data) {
+BruteForce::Add(const DatasetPtr& data) {
     this->inner_codes_->Train(data->GetFloat32Vectors(), data->GetNumElements());
     std::vector<int64_t> failed_ids;
 
@@ -76,16 +68,16 @@ BruteForce::add(const DatasetPtr& data) {
 }
 
 DatasetPtr
-BruteForce::knn_search(const DatasetPtr& query,
-                       int64_t k,
-                       const std::string& parameters,
-                       const std::function<bool(int64_t)>& filter) const {
+BruteForce::KnnSearch(const DatasetPtr& query,
+                      int64_t k,
+                      const std::string& parameters,
+                      const FilterPtr& filter) const {
     auto computer = this->inner_codes_->FactoryComputer(query->GetFloat32Vectors());
-    MaxHeap heap(this->allocator_.get());
+    MaxHeap heap(this->allocator_);
     auto cur_heap_top = std::numeric_limits<float>::max();
     for (InnerIdType i = 0; i < total_count_; ++i) {
         float dist;
-        if (filter == nullptr or not filter(this->label_table_->GetLabelById(i))) {
+        if (filter == nullptr or filter->CheckValid(this->label_table_->GetLabelById(i))) {
             inner_codes_->Query(&dist, computer, &i, 1);
             if (heap.size() < k or dist < cur_heap_top) {
                 heap.emplace(dist, i);
@@ -97,7 +89,7 @@ BruteForce::knn_search(const DatasetPtr& query,
         }
     }
     auto [dataset_results, dists, ids] =
-        CreateFastDataset(static_cast<int64_t>(heap.size()), allocator_.get());
+        CreateFastDataset(static_cast<int64_t>(heap.size()), allocator_);
     for (auto j = static_cast<int64_t>(heap.size() - 1); j >= 0; --j) {
         dists[j] = heap.top().first;
         ids[j] = this->label_table_->GetLabelById(heap.top().second);
@@ -107,20 +99,19 @@ BruteForce::knn_search(const DatasetPtr& query,
 }
 
 DatasetPtr
-BruteForce::range_search(const DatasetPtr& query,
-                         float radius,
-                         const std::string& parameters,
-                         BaseFilterFunctor* filter_ptr,
-                         int64_t limited_size) const {
+BruteForce::RangeSearch(const vsag::DatasetPtr& query,
+                        float radius,
+                        const std::string& parameters,
+                        const vsag::FilterPtr& filter,
+                        int64_t limited_size) const {
     auto computer = this->inner_codes_->FactoryComputer(query->GetFloat32Vectors());
-    MaxHeap heap(this->allocator_.get());
-    auto cur_heap_top = radius;
+    MaxHeap heap(this->allocator_);
     if (limited_size < 0) {
         limited_size = std::numeric_limits<int64_t>::max();
     }
     for (InnerIdType i = 0; i < total_count_; ++i) {
         float dist;
-        if (filter_ptr == nullptr or (*filter_ptr)(this->label_table_->GetLabelById(i))) {
+        if (filter == nullptr or filter->CheckValid(this->label_table_->GetLabelById(i))) {
             inner_codes_->Query(&dist, computer, &i, 1);
             if (dist > radius) {
                 continue;
@@ -129,11 +120,11 @@ BruteForce::range_search(const DatasetPtr& query,
             if (heap.size() > limited_size) {
                 heap.pop();
             }
-            cur_heap_top = heap.top().first;
         }
     }
+
     auto [dataset_results, dists, ids] =
-        CreateFastDataset(static_cast<int64_t>(heap.size()), allocator_.get());
+        CreateFastDataset(static_cast<int64_t>(heap.size()), allocator_);
     for (auto j = static_cast<int64_t>(heap.size() - 1); j >= 0; --j) {
         dists[j] = heap.top().first;
         ids[j] = this->label_table_->GetLabelById(heap.top().second);
@@ -143,7 +134,7 @@ BruteForce::range_search(const DatasetPtr& query,
 }
 
 float
-BruteForce::calculate_distance_by_id(const float* vector, int64_t id) const {
+BruteForce::CalcDistanceById(const float* vector, int64_t id) const {
     auto computer = this->inner_codes_->FactoryComputer(vector);
     float result = 0.0F;
     InnerIdType inner_id = this->label_table_->GetIdByLabel(id);
@@ -151,33 +142,8 @@ BruteForce::calculate_distance_by_id(const float* vector, int64_t id) const {
     return result;
 }
 
-BinarySet
-BruteForce::serialize() const {
-    SlowTaskTimer t("brute force Serialize");
-    size_t num_bytes = this->cal_serialize_size();
-    std::shared_ptr<int8_t[]> bin(new int8_t[num_bytes]);
-    auto* buffer = reinterpret_cast<char*>(const_cast<int8_t*>(bin.get()));
-    BufferStreamWriter writer(buffer);
-    this->serialize(writer);
-    Binary b{
-        .data = bin,
-        .size = num_bytes,
-    };
-    BinarySet bs;
-    bs.Set(INDEX_BRUTE_FORCE, b);
-
-    return bs;
-}
-
 void
-BruteForce::serialize(std::ostream& out_stream) const {
-    SlowTaskTimer t("brute force Serialize");
-    IOStreamWriter writer(out_stream);
-    this->serialize(writer);
-}
-
-void
-BruteForce::serialize(StreamWriter& writer) const {
+BruteForce::Serialize(StreamWriter& writer) const {
     StreamWriter::WriteObj(writer, dim_);
     StreamWriter::WriteObj(writer, total_count_);
 
@@ -186,60 +152,22 @@ BruteForce::serialize(StreamWriter& writer) const {
 }
 
 void
-BruteForce::deserialize(std::istream& in_stream) {
-    SlowTaskTimer t("brute force Deserialize");
-    IOStreamReader reader(in_stream);
-    this->deserialize(reader);
-}
-
-void
-BruteForce::deserialize(const BinarySet& binary_set) {
-    SlowTaskTimer t("brute force Deserialize");
-    Binary b = binary_set.Get(INDEX_BRUTE_FORCE);
-    auto func = [&](uint64_t offset, uint64_t len, void* dest) -> void {
-        std::memcpy(dest, b.data.get() + offset, len);
-    };
-    uint64_t cursor = 0;
-    auto reader = ReadFuncStreamReader(func, cursor);
-    this->deserialize(reader);
-}
-
-void
-BruteForce::deserialize(const ReaderSet& reader_set) {
-    SlowTaskTimer t("brute force Deserialize");
-    auto func = [&](uint64_t offset, uint64_t len, void* dest) -> void {
-        reader_set.Get(INDEX_BRUTE_FORCE)->Read(offset, len, dest);
-    };
-    uint64_t cursor = 0;
-    auto reader = ReadFuncStreamReader(func, cursor);
-    this->deserialize(reader);
-}
-
-void
-BruteForce::deserialize(StreamReader& reader) {
+BruteForce::Deserialize(StreamReader& reader) {
     StreamReader::ReadObj(reader, dim_);
     StreamReader::ReadObj(reader, total_count_);
     this->inner_codes_->Deserialize(reader);
     this->label_table_->Deserialize(reader);
 }
 
-uint64_t
-BruteForce::cal_serialize_size() const {
-    auto cal_size_func = [](uint64_t cursor, uint64_t size, void* buf) { return; };
-    WriteFuncStreamWriter writer(cal_size_func, 0);
-    this->serialize(writer);
-    return writer.cursor_;
-}
-
 Vector<DatasetPtr>
 BruteForce::split_dataset_by_duplicate_label(const DatasetPtr& dataset,
                                              std::vector<LabelType>& failed_ids) const {
-    Vector<DatasetPtr> return_datasets(0, this->allocator_.get());
+    Vector<DatasetPtr> return_datasets(0, this->allocator_);
     auto count = dataset->GetNumElements();
     auto dim = dataset->GetDim();
     const auto* labels = dataset->GetIds();
     const auto* vec = dataset->GetFloat32Vectors();
-    UnorderedSet<LabelType> temp_labels(allocator_.get());
+    UnorderedSet<LabelType> temp_labels(allocator_);
 
     for (uint64_t i = 0; i < count; ++i) {
         if (label_table_->CheckLabel(labels[i]) or
@@ -282,9 +210,9 @@ BruteForce::init_feature_list() {
     // About Train
     auto name = this->inner_codes_->GetQuantizerName();
     if (name != QUANTIZATION_TYPE_VALUE_FP32 and name != QUANTIZATION_TYPE_VALUE_BF16) {
-        feature_list_.SetFeature(IndexFeature::NEED_TRAIN);
+        this->index_feature_list_->SetFeature(IndexFeature::NEED_TRAIN);
     } else {
-        feature_list_.SetFeatures({
+        this->index_feature_list_->SetFeatures({
             IndexFeature::SUPPORT_ADD_FROM_EMPTY,
             IndexFeature::SUPPORT_RANGE_SEARCH,
             IndexFeature::SUPPORT_CAL_DISTANCE_BY_ID,
@@ -292,22 +220,22 @@ BruteForce::init_feature_list() {
         });
     }
     // Add & Build
-    feature_list_.SetFeatures({
+    this->index_feature_list_->SetFeatures({
         IndexFeature::SUPPORT_BUILD,
         IndexFeature::SUPPORT_ADD_AFTER_BUILD,
     });
     // Search
-    feature_list_.SetFeatures({
+    this->index_feature_list_->SetFeatures({
         IndexFeature::SUPPORT_KNN_SEARCH,
         IndexFeature::SUPPORT_KNN_SEARCH_WITH_ID_FILTER,
     });
     // concurrency
-    feature_list_.SetFeatures({
+    this->index_feature_list_->SetFeatures({
         IndexFeature::SUPPORT_SEARCH_CONCURRENT,
     });
 
     // serialize
-    feature_list_.SetFeatures({
+    this->index_feature_list_->SetFeatures({
         IndexFeature::SUPPORT_DESERIALIZE_BINARY_SET,
         IndexFeature::SUPPORT_DESERIALIZE_FILE,
         IndexFeature::SUPPORT_DESERIALIZE_READER_SET,
@@ -315,14 +243,46 @@ BruteForce::init_feature_list() {
         IndexFeature::SUPPORT_SERIALIZE_FILE,
     });
     // others
-    feature_list_.SetFeatures({
+    this->index_feature_list_->SetFeatures({
         IndexFeature::SUPPORT_ESTIMATE_MEMORY,
         IndexFeature::SUPPORT_CHECK_ID_EXIST,
     });
 }
-bool
-BruteForce::CheckIdExist(int64_t id) const {
-    return this->label_table_->CheckLabel(id);
+
+static const std::unordered_map<std::string, std::vector<std::string>> EXTERNAL_MAPPING = {
+    {BRUTE_FORCE_QUANTIZATION_TYPE, {QUANTIZATION_PARAMS_KEY, QUANTIZATION_TYPE_KEY}},
+    {BRUTE_FORCE_IO_TYPE, {IO_PARAMS_KEY, IO_TYPE_KEY}}};
+
+static const std::string BRUTE_FORCE_PARAMS_TEMPLATE =
+    R"(
+    {
+        "type": "{INDEX_BRUTE_FORCE}",
+        "{IO_PARAMS_KEY}": {
+            "{IO_TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}"
+        },
+        "{QUANTIZATION_PARAMS_KEY}": {
+            "{QUANTIZATION_TYPE_KEY}": "{QUANTIZATION_TYPE_VALUE_FP32}",
+            "subspace": 64,
+            "nbits": 8
+        }
+    })";
+
+ParamPtr
+BruteForce::MappingExternalParamAndCheck(const JsonType& external_param,
+                                         const IndexCommonParam& common_param) {
+    if (common_param.data_type_ == DataTypes::DATA_TYPE_INT8) {
+        throw std::invalid_argument(
+            fmt::format("BruteForce not support {} datatype", DATATYPE_INT8));
+    }
+
+    std::string str = format_map(BRUTE_FORCE_PARAMS_TEMPLATE, DEFAULT_MAP);
+    auto inner_json = JsonType::parse(str);
+    mapping_external_param_to_inner(external_param, EXTERNAL_MAPPING, inner_json);
+
+    auto brute_force_parameter = std::make_shared<BruteForceParameter>();
+    brute_force_parameter->FromJson(inner_json);
+
+    return brute_force_parameter;
 }
 
 }  // namespace vsag
