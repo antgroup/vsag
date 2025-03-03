@@ -47,7 +47,7 @@ PyramidParameters::FromJson(const JsonType& json) {
     }
 
     if (json.contains(NO_BUILD_LEVELS)) {
-        auto& no_build_levels_json = json[NO_BUILD_LEVELS];
+        const auto& no_build_levels_json = json[NO_BUILD_LEVELS];
         CHECK_ARGUMENT(no_build_levels_json.is_array(),
                        fmt::format("build_without_levels must be a list of integers"));
         for (const auto& item : no_build_levels_json) {
