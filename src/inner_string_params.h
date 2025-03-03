@@ -63,6 +63,8 @@ const char* const BUILD_PARAMS_KEY = "build_params";
 const char* const BUILD_THREAD_COUNT = "build_thread_count";
 const char* const BUILD_EF_CONSTRUCTION = "ef_construction";
 
+const char* const NO_BUILD_LEVELS = "no_build_levels";
+
 const char* const BUCKETS_COUNT_KEY = "buckets_count";
 
 const std::unordered_map<std::string, std::string> DEFAULT_MAP = {
