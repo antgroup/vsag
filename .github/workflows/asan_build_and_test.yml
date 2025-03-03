@@ -18,7 +18,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Load Cache
-        uses: actions/cache@v4.1.2
+        uses: actions/cache@v4
         with:
           path: ./build/
           key: build-${{ hashFiles('./CMakeLists.txt') }}-${{ hashFiles('./.circleci/fresh_ci_cache.commit') }}
