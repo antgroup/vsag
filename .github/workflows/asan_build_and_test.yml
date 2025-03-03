@@ -12,6 +12,9 @@ jobs:
     runs-on: ubuntu-22.04
     container:
       image: vsaglib/vsag:ci-x86
+    concurrency:
+      group: asan_build_x86-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
     steps:
       - uses: actions/checkout@v4
       - name: Load Cache
@@ -33,6 +36,9 @@ jobs:
   build_asan_aarch64:
     name: Asan Build Aarch64
     runs-on: ubuntu-22.04-arm
+    concurrency:
+      group: asan_build_aarch-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
     steps:
       - uses: actions/checkout@v4
       - name: Prepare Env
@@ -52,12 +58,16 @@ jobs:
     name: Test X86
     needs: build_asan_x86
     runs-on: ubuntu-22.04
+    concurrency:
+      group: test_asan_x86-${{ matrix.test_type }}-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
     strategy:
       matrix:
         test_type: [ unittests, functests ]
     container:
       image: vsaglib/vsag:ci-x86
     steps:
+      - uses: actions/checkout@v4
       - name: Clean Env
         run: rm -rf ./build
       - name: Download Test
@@ -70,7 +80,15 @@ jobs:
           echo leak:libomp.so > omp.supp
           export LSAN_OPTIONS=suppressions=omp.supp
           chmod +x ./build/tests/${{ matrix.test_type }}
-          ./build/tests/${{ matrix.test_type }} -d yes ${UT_FILTER} -a --order rand --allow-running-no-tests -o log && cat log
+          ./scripts/test_parallel_by_name.sh ${{ matrix.test_type }}
+      - name: Upload Log
+        uses: actions/upload-artifact@v4
+        with:
+          path: ./log
+          name: log-x86-${{ matrix.test_type }}-${{ github.run_id }}
+          compression-level: 1
+          retention-days: 1
+          overwrite: 'true'
 
   test_asan_aarch64:
     name: Test Aarch64
@@ -79,6 +97,9 @@ jobs:
     strategy:
       matrix:
         test_type: [ unittests, functests ]
+    concurrency:
+      group: test_asan_aarch64-${{ matrix.test_type }}-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
     steps:
       - uses: actions/checkout@v4
       - name: Prepare Env
@@ -95,11 +116,19 @@ jobs:
           echo leak:libomp.so > omp.supp
           export LSAN_OPTIONS=suppressions=omp.supp
           chmod +x ./build/tests/${{ matrix.test_type }}
-          ./build/tests/${{ matrix.test_type }} -d yes ${UT_FILTER} -a --order rand --allow-running-no-tests -o log && cat log
+          ./scripts/test_parallel_by_name.sh ${{ matrix.test_type }}
+      - name: Upload Log
+        uses: actions/upload-artifact@v4
+        with:
+          path: ./log
+          name: log-aarch64-${{ matrix.test_type }}-${{ github.run_id }}
+          compression-level: 1
+          retention-days: 1
+          overwrite: 'true'
 
   clean_up:
     name: Clean Up
-    needs: [test_asan_x86, test_asan_aarch64]
+    needs: [ test_asan_x86, test_asan_aarch64 ]
     runs-on: ubuntu-22.04
     steps:
       - name: Create Empty File

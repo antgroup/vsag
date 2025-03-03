@@ -10,6 +10,9 @@ jobs:
   coverage:
     name: Test Coverage
     runs-on: ubuntu-latest
+    concurrency:
+      group: coverage-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
     container:
       image: vsaglib/vsag:ci-x86
     steps:
