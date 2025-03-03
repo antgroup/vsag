@@ -139,7 +139,7 @@ IndexNode::InitGraph() {
 
 MaxHeap
 IndexNode::SearchGraph(const SearchFunc& search_func) const {
-    if (graph_ != nullptr) {
+    if (graph_ != nullptr && graph_->TotalCount() > 0) {
         return search_func(this);
     } else {
         MaxHeap search_result(common_param_->allocator_.get());
