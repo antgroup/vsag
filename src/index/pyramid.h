@@ -31,7 +31,7 @@
 namespace vsag {
 
 class IndexNode;
-using SearchFunc = std::function<MaxHeap(const std::shared_ptr<IndexNode>&)>;
+using SearchFunc = std::function<MaxHeap(const IndexNode* node)>;
 
 class IndexNode {
 public:
@@ -39,6 +39,12 @@ public:
 
     void
     BuildGraph(ODescent& odescent);
+
+    void
+    InitGraph();
+
+    MaxHeap
+    SearchGraph(const SearchFunc& search_func) const;
 
     void
     AddChild(const std::string& key);
@@ -59,6 +65,7 @@ public:
     std::mutex mutex_;
 
     Vector<InnerIdType> ids_;
+    bool has_index_{false};
 
 private:
     UnorderedMap<std::string, std::shared_ptr<IndexNode>> children_;
