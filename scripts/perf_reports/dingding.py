@@ -67,7 +67,7 @@ try:
     table = tabulate(rows,
                      headers=["**Name**","**TPS**", "**QPS**", "**RT(ms)**", "**Recall**", "**Score**"],
                      tablefmt="github")
-    table = f"##VSAG Perf Report {date.today()}\n\n" + table
+    table = f"## VSAG Perf Report {date.today()}\n\n" + table
     print(table)
     send_message_to_dingtalk(access_token, table)
 except Exception as e:
