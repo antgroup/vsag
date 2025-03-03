@@ -1799,11 +1799,14 @@ int generate_pq_data_from_pivots(const T* data, size_t num_points, size_t dim, c
 
             for (int64_t j = 0; j < (int64_t)cur_blk_size; j++)
             {
-                block_compressed_base[j * num_pq_chunks + i] = closest_center[j];
-                if (use_bsa) {
-                    cur_errors[j] += math_utils::calc_distance(cur_data.get() + j * cur_chunk_size,
-                                                              cur_pivot_data.get() + closest_center[j] * cur_chunk_size,
-                                                              cur_chunk_size);
+                block_compressed_base[j * num_pq_chunks + i] = 0;
+                if (closest_center[j] < num_centers) {
+                    block_compressed_base[j * num_pq_chunks + i] = closest_center[j];
+                    if (use_bsa) {
+                        cur_errors[j] += math_utils::calc_distance(cur_data.get() + j * cur_chunk_size,
+                                                                   cur_pivot_data.get() + closest_center[j] * cur_chunk_size,
+                                                                   cur_chunk_size);
+                    }
                 }
 #ifdef SAVE_INFLATED_PQ
                 for (size_t k = 0; k < cur_chunk_size; k++)
