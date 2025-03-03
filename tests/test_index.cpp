@@ -417,10 +417,12 @@ TestIndex::TestFilterSearch(const TestIndex::IndexPtr& index,
                 REQUIRE(obj_res.value()->GetIds()[j] == res.value()->GetIds()[j]);
             }
         }
-        auto threshold = res.value()->GetDistances()[topk - 1];
-        auto range_result =
-            index->RangeSearch(query, threshold, search_param, dataset->filter_function_);
-        REQUIRE(range_result.value()->GetDim() >= topk);
+        if (index->CheckFeature(vsag::SUPPORT_RANGE_SEARCH_WITH_ID_FILTER)) {
+            auto threshold = res.value()->GetDistances()[topk - 1];
+            auto range_result =
+                index->RangeSearch(query, threshold, search_param, dataset->filter_function_);
+            REQUIRE(range_result.value()->GetDim() >= topk);
+        }
         auto result = res.value()->GetIds();
         auto gt = gts->GetIds() + gt_topK * i;
         auto val = Intersection(gt, gt_topK, result, topk);

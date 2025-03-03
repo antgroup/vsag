@@ -32,6 +32,7 @@
 #include "inner_index_interface.h"
 #include "lock_strategy.h"
 #include "typing.h"
+#include "utils/visited_list.h"
 #include "vsag/index.h"
 #include "vsag/index_features.h"
 
@@ -171,6 +172,8 @@ private:
 
     bool use_reorder_{false};
 
+    BasicSearcherPtr searcher_;
+
     int64_t dim_{0};
     MetricType metric_{MetricType::METRIC_TYPE_L2SQR};
 
@@ -183,7 +186,7 @@ private:
     uint64_t ef_construct_{400};
     mutable std::shared_mutex global_mutex_;
 
-    std::shared_ptr<hnswlib::VisitedListPool> pool_{nullptr};
+    std::shared_ptr<VisitedListPool> pool_{nullptr};
 
     mutable MutexArrayPtr neighbors_mutex_;
 

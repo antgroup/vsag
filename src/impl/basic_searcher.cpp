@@ -20,8 +20,8 @@
 namespace vsag {
 constexpr float THRESHOLD_ERROR = 2e-6;
 
-BasicSearcher::BasicSearcher(const IndexCommonParam& common_param) {
-    this->allocator_ = common_param.allocator_.get();
+BasicSearcher::BasicSearcher(const IndexCommonParam& common_param, MutexArrayPtr mutex_array)
+    : allocator_(common_param.allocator_.get()), mutex_array_(std::move(mutex_array)) {
 }
 
 uint32_t
@@ -33,7 +33,12 @@ BasicSearcher::visit(const GraphInterfacePtr& graph,
     uint32_t count_no_visited = 0;
     Vector<InnerIdType> neighbors(allocator_);
 
-    graph->GetNeighbors(current_node_pair.second, neighbors);
+    if (this->mutex_array_ != nullptr) {
+        SharedLock lock(this->mutex_array_, current_node_pair.second);
+        graph->GetNeighbors(current_node_pair.second, neighbors);
+    } else {
+        graph->GetNeighbors(current_node_pair.second, neighbors);
+    }
 
     for (uint32_t i = 0; i < prefetch_jump_visit_size_; i++) {
         vl->Prefetch(neighbors[i]);

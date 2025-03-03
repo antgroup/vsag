@@ -20,6 +20,7 @@
 #include "data_cell/flatten_interface.h"
 #include "data_cell/graph_interface.h"
 #include "index/index_common_param.h"
+#include "lock_strategy.h"
 #include "utils/visited_list.h"
 
 namespace vsag {
@@ -39,7 +40,8 @@ public:
 
 class BasicSearcher {
 public:
-    explicit BasicSearcher(const IndexCommonParam& common_param);
+    explicit BasicSearcher(const IndexCommonParam& common_param,
+                           MutexArrayPtr mutex_array = nullptr);
 
     virtual MaxHeap
     Search(const GraphInterfacePtr& graph,
@@ -69,7 +71,11 @@ private:
 private:
     Allocator* allocator_{nullptr};
 
+    MutexArrayPtr mutex_array_{nullptr};
+
     uint32_t prefetch_jump_visit_size_{1};
 };
+
+using BasicSearcherPtr = std::shared_ptr<BasicSearcher>;
 
 }  // namespace vsag
