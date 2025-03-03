@@ -1,8 +1,11 @@
 name: Update Docker Image
 
 on:
-  push:
-    branches: [ "main" ]
+  push: # refresh ci container
+    paths: [ 'docker/**' ]
+  pull_request: # to make sure dockerfile change correctly
+    branches: [ 'main' ]
+    paths: [ 'docker/**' ]
 
 jobs:
   docker:
