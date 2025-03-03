@@ -553,6 +553,33 @@ HGraph::CalcDistanceById(const float* query, int64_t id) const {
     }
 }
 
+DatasetPtr
+HGraph::CalDistanceById(const float* query, const int64_t* ids, int64_t count) const {
+    auto flat = this->basic_flatten_codes_;
+    if (use_reorder_) {
+        flat = this->high_precise_codes_;
+    }
+    auto result = Dataset::Make();
+    result->Owner(true, allocator_);
+    auto* distances = (float*)allocator_->Allocate(sizeof(float) * count);
+    result->Distances(distances);
+    auto computer = flat->FactoryComputer(query);
+    {
+        std::shared_lock<std::shared_mutex> lock(this->label_lookup_mutex_);
+        for (int64_t i = 0; i < count; ++i) {
+            auto iter = this->label_table_->label_remap_.find(ids[i]);
+            if (iter == this->label_table_->label_remap_.end()) {
+                logger::error(fmt::format("failed to find id: {}", ids[i]));
+                distances[i] = -1;
+                continue;
+            }
+            auto new_id = iter->second;
+            flat->Query(distances + i, computer, &new_id, 1);
+        }
+    }
+    return result;
+}
+
 void
 HGraph::add_one_point(const float* data, int level, InnerIdType inner_id) {
     MaxHeap result(allocator_);
@@ -644,7 +671,17 @@ HGraph::init_features() {
 
     if (name != QUANTIZATION_TYPE_VALUE_FP32 and name != QUANTIZATION_TYPE_VALUE_BF16) {
         this->index_feature_list_->SetFeature(IndexFeature::NEED_TRAIN);
-    } else {
+    }
+
+    bool have_fp32 = false;
+    if (name == QUANTIZATION_TYPE_VALUE_FP32) {
+        have_fp32 = true;
+    }
+    if (use_reorder_ and
+        this->high_precise_codes_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32) {
+        have_fp32 = true;
+    }
+    if (have_fp32) {
         this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_CAL_DISTANCE_BY_ID);
     }
 
@@ -883,5 +920,4 @@ HGraph::MappingExternalParamAndCheck(const JsonType& external_param,
 
     return hgraph_parameter;
 }
-
 }  // namespace vsag
