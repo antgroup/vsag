@@ -21,16 +21,20 @@
 #include <random>
 
 #include "../logger.h"
+#include "stream_reader.h"
+#include "stream_writer.h"
 #include "typing.h"
 #include "vsag/allocator.h"
 
 namespace vsag {
 
+static const uint64_t MAX_RETRIES = 3;
+
 class RandomOrthogonalMatrix {
 public:
-    RandomOrthogonalMatrix(uint64_t dim, Allocator* allocator, uint64_t retries = 3)
-        : dim_(dim), allocator_(allocator) {
-        orthogonal_matrix_ = (float*)allocator_->Allocate(sizeof(float) * dim_ * dim_);
+    RandomOrthogonalMatrix(uint64_t dim, Allocator* allocator, uint64_t retries = MAX_RETRIES)
+        : dim_(dim), allocator_(allocator), orthogonal_matrix_(allocator) {
+        orthogonal_matrix_.resize(dim * dim);
         for (uint64_t i = 0; i < retries; i++) {
             bool result_gen = GenerateRandomOrthogonalMatrix();
             if (result_gen) {
@@ -42,15 +46,14 @@ public:
         }
     }
 
-    ~RandomOrthogonalMatrix() {
-        allocator_->Deallocate(orthogonal_matrix_);
-    }
-
     void
     CopyOrthogonalMatrix(float* out_matrix) const;
 
     void
-    Transform(const float* vec, float* out_vec) const;
+    Transform(const float* original_vec, float* transformed_vec) const;
+
+    void
+    InverseTransform(const float* transformed_vec, float* original_vec) const;
 
     bool
     GenerateRandomOrthogonalMatrix();
@@ -58,12 +61,18 @@ public:
     double
     ComputeDeterminant() const;
 
+    void
+    Serialize(StreamWriter& writer);
+
+    void
+    Deserialize(StreamReader& reader);
+
 private:
     Allocator* const allocator_{nullptr};
 
     const uint64_t dim_{0};
 
-    float* orthogonal_matrix_{nullptr};  // OpenBLAS and LAPACK use double vector
+    vsag::Vector<float> orthogonal_matrix_;
 };
 
 }  // namespace vsag

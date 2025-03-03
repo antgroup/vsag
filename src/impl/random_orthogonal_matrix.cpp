@@ -19,23 +19,40 @@ namespace vsag {
 
 void
 RandomOrthogonalMatrix::CopyOrthogonalMatrix(float* out_matrix) const {
-    std::copy(orthogonal_matrix_, orthogonal_matrix_ + dim_ * dim_, out_matrix);
+    std::copy(orthogonal_matrix_.data(), orthogonal_matrix_.data() + dim_ * dim_, out_matrix);
 }
 
 void
-RandomOrthogonalMatrix::Transform(const float* vec, float* out_vec) const {
+RandomOrthogonalMatrix::Transform(const float* original_vec, float* transformed_vec) const {
     // perform matrix-vector multiplication: y = Q * x
     cblas_sgemv(CblasRowMajor,
                 CblasNoTrans,
                 static_cast<blasint>(dim_),
                 static_cast<blasint>(dim_),
                 1.0F,
-                orthogonal_matrix_,
+                orthogonal_matrix_.data(),
                 static_cast<blasint>(dim_),
-                vec,
+                original_vec,
                 1,
                 0.0F,
-                out_vec,
+                transformed_vec,
+                1);
+}
+
+void
+RandomOrthogonalMatrix::InverseTransform(const float* transformed_vec, float* original_vec) const {
+    // perform matrix-vector multiplication: x = Q^T * y
+    cblas_sgemv(CblasRowMajor,
+                CblasTrans,
+                static_cast<blasint>(dim_),
+                static_cast<blasint>(dim_),
+                1.0F,
+                orthogonal_matrix_.data(),
+                static_cast<blasint>(dim_),
+                transformed_vec,
+                1,
+                0.0F,
+                original_vec,
                 1);
 }
 
@@ -57,7 +74,7 @@ RandomOrthogonalMatrix::GenerateRandomOrthogonalMatrix() {
     int sgeqrf_result = LAPACKE_sgeqrf(LAPACK_ROW_MAJOR,
                                        static_cast<blasint>(dim_),
                                        static_cast<blasint>(dim_),
-                                       orthogonal_matrix_,
+                                       orthogonal_matrix_.data(),
                                        lda,
                                        tau.data());
     if (sgeqrf_result != 0) {
@@ -70,7 +87,7 @@ RandomOrthogonalMatrix::GenerateRandomOrthogonalMatrix() {
                                        static_cast<blasint>(dim_),
                                        static_cast<blasint>(dim_),
                                        static_cast<blasint>(dim_),
-                                       orthogonal_matrix_,
+                                       orthogonal_matrix_.data(),
                                        lda,
                                        tau.data());
     if (sorgqr_result != 0) {
@@ -95,7 +112,7 @@ double
 RandomOrthogonalMatrix::ComputeDeterminant() const {
     // calculate determinants using LU decomposition
     // copy matrix
-    std::vector<float> mat(orthogonal_matrix_, orthogonal_matrix_ + dim_ * dim_);
+    std::vector<float> mat(orthogonal_matrix_.data(), orthogonal_matrix_.data() + dim_ * dim_);
     std::vector<int> ipiv(dim_);
     int sgetrf_result = LAPACKE_sgetrf(LAPACK_ROW_MAJOR,
                                        static_cast<blasint>(dim_),
@@ -120,6 +137,16 @@ RandomOrthogonalMatrix::ComputeDeterminant() const {
         det = -det;
     }
     return det;
+}
+
+void
+RandomOrthogonalMatrix::Serialize(StreamWriter& writer) {
+    StreamWriter::WriteVector(writer, this->orthogonal_matrix_);
+}
+
+void
+RandomOrthogonalMatrix::Deserialize(StreamReader& reader) {
+    StreamReader::ReadVector(reader, this->orthogonal_matrix_);
 }
 
 }  // namespace vsag

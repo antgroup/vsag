@@ -48,6 +48,12 @@ GetNormalizeWithCentroid() {
 }
 NormalizeWithCentroidType NormalizeWithCentroid = GetNormalizeWithCentroid();
 
+static InverseNormalizeWithCentroidType
+GetInverseNormalizeWithCentroid() {
+    return generic::InverseNormalizeWithCentroid;
+}
+InverseNormalizeWithCentroidType InverseNormalizeWithCentroid = GetInverseNormalizeWithCentroid();
+
 static DivScalarType
 GetDivScalar() {
     if (SimdStatus::SupportAVX512()) {

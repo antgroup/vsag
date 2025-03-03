@@ -20,6 +20,7 @@
 #include <limits>
 
 #include "fixtures/test_dataset_pool.h"
+#include "inner_string_params.h"
 #include "test_index.h"
 #include "vsag/options.h"
 
@@ -31,6 +32,10 @@ public:
                                         int64_t dim,
                                         const std::string& quantization_str = "sq8",
                                         int thread_count = 5);
+
+    static bool
+    IsRaBitQ(const std::string& quantization_str);
+
     static TestDatasetPool pool;
 
     static std::vector<int> dims;
@@ -57,7 +62,8 @@ public:
         {"sq8_uniform,bf16", 0.98},
         {"sq8_uniform,bf16,buffer_io", 0.98},
         {"sq8_uniform,fp16,async_io", 0.98},
-    };
+        {"rabitq", 0.8},
+        {"rabitq,fp32", 0.9}};
 };
 
 TestDatasetPool HgraphTestIndex::pool{};
@@ -127,6 +133,12 @@ HgraphTestIndex::GenerateHGraphBuildParametersString(const std::string& metric_t
     INFO(build_parameters_str);
     return build_parameters_str;
 }
+
+bool
+HgraphTestIndex::IsRaBitQ(const std::string& quantization_str) {
+    return (quantization_str.find(vsag::QUANTIZATION_TYPE_VALUE_RABITQ) != std::string::npos);
+}
+
 }  // namespace fixtures
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex,
@@ -262,8 +274,16 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex,
 
     const std::string name = "hgraph";
     auto search_param = fmt::format(search_param_tmp, 200);
-    for (auto& dim : dims) {
+    for (auto dim : dims) {
         for (auto& [base_quantization_str, recall] : test_cases) {
+            if (IsRaBitQ(base_quantization_str)) {
+                if (std::string(metric_type) != "l2") {
+                    continue;
+                }
+                if (dim <= fixtures::RABITQ_MIN_RACALL_DIM) {
+                    dim += fixtures::RABITQ_MIN_RACALL_DIM;
+                }
+            }
             vsag::Options::Instance().set_block_size_limit(size);
             auto param =
                 GenerateHGraphBuildParametersString(metric_type, dim, base_quantization_str);
@@ -304,8 +324,16 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex, "HGraph Build", "[ft][hg
 
     const std::string name = "hgraph";
     auto search_param = fmt::format(search_param_tmp, 200);
-    for (auto& dim : dims) {
+    for (auto dim : dims) {
         for (auto& [base_quantization_str, recall] : test_cases) {
+            if (IsRaBitQ(base_quantization_str)) {
+                if (std::string(metric_type) != "l2") {
+                    continue;
+                }
+                if (dim <= fixtures::RABITQ_MIN_RACALL_DIM) {
+                    dim += fixtures::RABITQ_MIN_RACALL_DIM;
+                }
+            }
             vsag::Options::Instance().set_block_size_limit(size);
             auto param =
                 GenerateHGraphBuildParametersString(metric_type, dim, base_quantization_str);
@@ -342,8 +370,16 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex, "HGraph Add", "[ft][hgra
 
     const std::string name = "hgraph";
     auto search_param = fmt::format(search_param_tmp, 200);
-    for (auto& dim : dims) {
+    for (auto dim : dims) {
         for (auto& [base_quantization_str, recall] : test_cases) {
+            if (IsRaBitQ(base_quantization_str)) {
+                if (std::string(metric_type) != "l2") {
+                    continue;
+                }
+                if (dim <= fixtures::RABITQ_MIN_RACALL_DIM) {
+                    dim += fixtures::RABITQ_MIN_RACALL_DIM;
+                }
+            }
             vsag::Options::Instance().set_block_size_limit(size);
             auto param =
                 GenerateHGraphBuildParametersString(metric_type, dim, base_quantization_str);
@@ -388,6 +424,11 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex,
     const std::string name = "hgraph";
     auto search_param = fmt::format(search_param_tmp, 100);
     for (auto& [base_quantization_str, recall] : test_cases) {
+        if (IsRaBitQ(base_quantization_str)) {
+            if (std::string(metric_type) != "l2") {
+                continue;
+            }
+        }
         vsag::Options::Instance().set_block_size_limit(size);
         auto param = GenerateHGraphBuildParametersString(metric_type, dim, base_quantization_str);
         auto index = TestFactory(name, param, true);
@@ -404,8 +445,16 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex, "HGraph Concurrent Add",
 
     const std::string name = "hgraph";
     auto search_param = fmt::format(search_param_tmp, 200);
-    for (auto& dim : dims) {
+    for (auto dim : dims) {
         for (auto& [base_quantization_str, recall] : test_cases) {
+            if (IsRaBitQ(base_quantization_str)) {
+                if (std::string(metric_type) != "l2") {
+                    continue;
+                }
+                if (dim <= fixtures::RABITQ_MIN_RACALL_DIM) {
+                    dim += fixtures::RABITQ_MIN_RACALL_DIM;
+                }
+            }
             vsag::Options::Instance().set_block_size_limit(size);
             auto param =
                 GenerateHGraphBuildParametersString(metric_type, dim, base_quantization_str);
@@ -446,8 +495,16 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex, "HGraph Serialize File",
     const std::string name = "hgraph";
     auto search_param = fmt::format(search_param_tmp, 200);
 
-    for (auto& dim : dims) {
+    for (auto dim : dims) {
         for (auto& [base_quantization_str, recall] : test_cases) {
+            if (IsRaBitQ(base_quantization_str)) {
+                if (std::string(metric_type) != "l2") {
+                    continue;
+                }
+                if (dim <= fixtures::RABITQ_MIN_RACALL_DIM) {
+                    dim += fixtures::RABITQ_MIN_RACALL_DIM;
+                }
+            }
             vsag::Options::Instance().set_block_size_limit(size);
             auto param =
                 GenerateHGraphBuildParametersString(metric_type, dim, base_quantization_str);
@@ -485,8 +542,16 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex,
     auto size = GENERATE(1024 * 1024 * 2);
     auto metric_type = GENERATE("l2", "ip", "cosine");
     const std::string name = "hgraph";
-    for (auto& dim : dims) {
+    for (auto dim : dims) {
         for (auto& [base_quantization_str, recall] : test_cases) {
+            if (IsRaBitQ(base_quantization_str)) {
+                if (std::string(metric_type) != "l2") {
+                    continue;
+                }
+                if (dim <= fixtures::RABITQ_MIN_RACALL_DIM) {
+                    dim += fixtures::RABITQ_MIN_RACALL_DIM;
+                }
+            }
             vsag::Options::Instance().set_block_size_limit(size);
             auto param =
                 GenerateHGraphBuildParametersString(metric_type, dim, base_quantization_str, 1);
@@ -508,8 +573,16 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex, "HGraph Duplicate Build"
 
     const std::string name = "hgraph";
     auto search_param = fmt::format(search_param_tmp, 200);
-    for (auto& dim : dims) {
+    for (auto dim : dims) {
         for (auto& [base_quantization_str, recall] : test_cases) {
+            if (IsRaBitQ(base_quantization_str)) {
+                if (std::string(metric_type) != "l2") {
+                    continue;
+                }
+                if (dim <= fixtures::RABITQ_MIN_RACALL_DIM) {
+                    dim += fixtures::RABITQ_MIN_RACALL_DIM;
+                }
+            }
             vsag::Options::Instance().set_block_size_limit(size);
             auto param =
                 GenerateHGraphBuildParametersString(metric_type, dim, base_quantization_str);
@@ -551,8 +624,11 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex, "HGraph Estimate Memory"
     const std::string name = "hgraph";
     auto search_param = fmt::format(search_param_tmp, 200);
     uint64_t estimate_count = 1000;
-    for (auto& dim : dims) {
+    for (auto dim : dims) {
         for (auto& [base_quantization_str, recall] : test_cases) {
+            if (dim <= fixtures::RABITQ_MIN_RACALL_DIM and IsRaBitQ(base_quantization_str)) {
+                dim += fixtures::RABITQ_MIN_RACALL_DIM;
+            }
             vsag::Options::Instance().set_block_size_limit(size);
             auto param =
                 GenerateHGraphBuildParametersString(metric_type, dim, base_quantization_str);

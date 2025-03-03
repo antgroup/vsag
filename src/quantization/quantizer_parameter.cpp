@@ -19,6 +19,7 @@
 
 #include "fp32_quantizer_parameter.h"
 #include "inner_string_params.h"
+#include "rabitq_quantization/rabitq_quantizer_parameter.h"
 #include "scalar_quantization/sq_parameter_headers.h"
 
 namespace vsag {
@@ -47,6 +48,9 @@ QuantizerParameter::GetQuantizerParameterByJson(const JsonType& json) {
         quantizer_param->FromJson(json);
     } else if (type_name == QUANTIZATION_TYPE_VALUE_FP16) {
         quantizer_param = std::make_shared<FP16QuantizerParameter>();
+        quantizer_param->FromJson(json);
+    } else if (type_name == QUANTIZATION_TYPE_VALUE_RABITQ) {
+        quantizer_param = std::make_shared<RaBitQuantizerParameter>();
         quantizer_param->FromJson(json);
     } else {
         throw std::invalid_argument(fmt::format("invalid quantizer name {}", type_name));
