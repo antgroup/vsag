@@ -34,8 +34,8 @@ public:
     static std::string
     GenerateDiskANNBuildParametersString(const std::string& metric_type,
                                          int64_t dim,
-                                         bool use_async_io = true,
-                                         bool use_bsa = true);
+                                         bool use_async_io = false,
+                                         bool use_bsa = false);
     static constexpr auto search_param = R"(
         {
             "diskann": {
