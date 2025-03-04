@@ -158,18 +158,9 @@ HGraph::KnnSearch(const DatasetPtr& query,
         result->Dim(0)->NumElements(1);
         return result;
     }
-
-    auto dataset_results = Dataset::Make();
-    dataset_results->Dim(static_cast<int64_t>(search_result.size()))
-        ->NumElements(1)
-        ->Owner(true, allocator_);
-
-    auto* ids = (int64_t*)allocator_->Allocate(sizeof(int64_t) * search_result.size());
-    dataset_results->Ids(ids);
-    auto* dists = (float*)allocator_->Allocate(sizeof(float) * search_result.size());
-    dataset_results->Distances(dists);
-
-    for (auto j = static_cast<int64_t>(search_result.size() - 1); j >= 0; --j) {
+    auto count = static_cast<const int64_t>(search_result.size());
+    auto [dataset_results, dists, ids] = CreateFastDataset(count, allocator_);
+    for (int64_t j = count - 1; j >= 0; --j) {
         dists[j] = search_result.top().first;
         ids[j] = this->label_table_->GetLabelById(search_result.top().second);
         search_result.pop();
@@ -438,16 +429,9 @@ HGraph::RangeSearch(const DatasetPtr& query,
         }
     }
 
-    auto dataset_results = Dataset::Make();
-    dataset_results->Dim(static_cast<int64_t>(search_result.size()))
-        ->NumElements(1)
-        ->Owner(true, allocator_);
-    auto* ids = (int64_t*)allocator_->Allocate(sizeof(int64_t) * search_result.size());
-    dataset_results->Ids(ids);
-    auto* dists = (float*)allocator_->Allocate(sizeof(float) * search_result.size());
-    dataset_results->Distances(dists);
-
-    for (auto j = static_cast<int64_t>(search_result.size() - 1); j >= 0; --j) {
+    auto count = static_cast<const int64_t>(search_result.size());
+    auto [dataset_results, dists, ids] = CreateFastDataset(count, allocator_);
+    for (int64_t j = count - 1; j >= 0; --j) {
         dists[j] = search_result.top().first;
         ids[j] = this->label_table_->GetLabelById(search_result.top().second);
         search_result.pop();

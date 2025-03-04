@@ -51,4 +51,15 @@ mapping_external_param_to_inner(const JsonType& external_json,
     }
 }
 
+std::tuple<DatasetPtr, float*, int64_t*>
+CreateFastDataset(int64_t dim, Allocator* allocator) {
+    auto dataset = Dataset::Make();
+    dataset->Dim(static_cast<int64_t>(dim))->NumElements(1)->Owner(true, allocator);
+    auto* ids = reinterpret_cast<int64_t*>(allocator->Allocate(sizeof(int64_t) * dim));
+    dataset->Ids(ids);
+    auto* dists = reinterpret_cast<float*>(allocator->Allocate(sizeof(float) * dim));
+    dataset->Distances(dists);
+    return {dataset, dists, ids};
+}
+
 }  // namespace vsag
