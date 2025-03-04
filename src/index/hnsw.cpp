@@ -35,6 +35,7 @@
 #include "safe_allocator.h"
 #include "utils/slow_task_timer.h"
 #include "utils/timer.h"
+#include "utils/util_functions.h"
 #include "vsag/binaryset.h"
 #include "vsag/constants.h"
 #include "vsag/errors.h"
@@ -260,8 +261,8 @@ HNSW::knn_search(const DatasetPtr& query,
         }
 
         // return result
-        auto result = Dataset::Make();
         if (results.empty()) {
+            auto result = Dataset::Make();
             result->Dim(0)->NumElements(1);
             return result;
         }
@@ -283,15 +284,8 @@ HNSW::knn_search(const DatasetPtr& query,
         while (results.size() > k) {
             results.pop();
         }
-
-        result->Dim(static_cast<int64_t>(results.size()))
-            ->NumElements(1)
-            ->Owner(true, allocator_.get());
-
-        auto* ids = (int64_t*)allocator_->Allocate(sizeof(int64_t) * results.size());
-        result->Ids(ids);
-        auto* dists = (float*)allocator_->Allocate(sizeof(float) * results.size());
-        result->Distances(dists);
+        auto [dataset_results, dists, ids] =
+            CreateFastDataset(static_cast<int64_t>(results.size()), allocator_.get());
 
         for (auto j = static_cast<int64_t>(results.size() - 1); j >= 0; --j) {
             dists[j] = results.top().first;
@@ -299,7 +293,7 @@ HNSW::knn_search(const DatasetPtr& query,
             results.pop();
         }
 
-        return std::move(result);
+        return std::move(dataset_results);
     } catch (const std::invalid_argument& e) {
         LOG_ERROR_AND_RETURNS(ErrorType::INVALID_ARGUMENT,
                               "failed to perform knn_search(invalid argument): ",
@@ -388,22 +382,17 @@ HNSW::range_search(const DatasetPtr& query,
         }
 
         // return result
-        auto result = Dataset::Make();
-        size_t target_size = results.size();
+        auto target_size = static_cast<int64_t>(results.size());
         if (results.empty()) {
+            auto result = Dataset::Make();
             result->Dim(0)->NumElements(1);
             return result;
         }
         if (limited_size >= 1) {
-            target_size = std::min((size_t)limited_size, target_size);
+            target_size = std::min(limited_size, target_size);
         }
-        result->Dim(static_cast<int64_t>(target_size))
-            ->NumElements(1)
-            ->Owner(true, allocator_.get());
-        auto* ids = (int64_t*)allocator_->Allocate(sizeof(int64_t) * target_size);
-        result->Ids(ids);
-        auto* dists = (float*)allocator_->Allocate(sizeof(float) * target_size);
-        result->Distances(dists);
+        auto [dataset_results, dists, ids] = CreateFastDataset(target_size, allocator_.get());
+
         for (auto j = static_cast<int64_t>(results.size() - 1); j >= 0; --j) {
             if (j < target_size) {
                 dists[j] = results.top().first;
@@ -412,7 +401,7 @@ HNSW::range_search(const DatasetPtr& query,
             results.pop();
         }
 
-        return std::move(result);
+        return std::move(dataset_results);
     } catch (const std::invalid_argument& e) {
         LOG_ERROR_AND_RETURNS(ErrorType::INVALID_ARGUMENT,
                               "failed to perform range_search(invalid argument): ",

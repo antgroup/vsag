@@ -20,6 +20,7 @@
 #include "index/index_common_param.h"
 #include "logger.h"
 #include "spdlog/spdlog.h"
+#include "vsag/dataset.h"
 #include "vsag/expected.hpp"
 #include "vsag_exception.h"
 
@@ -61,5 +62,8 @@ void
 mapping_external_param_to_inner(const JsonType& external_json,
                                 ConstParamMap& param_map,
                                 JsonType& inner_json);
+
+std::tuple<DatasetPtr, float*, int64_t*>
+CreateFastDataset(int64_t dim, Allocator* allocator);
 
 }  // namespace vsag
