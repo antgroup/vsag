@@ -18,6 +18,7 @@
 #include "data_cell/flatten_datacell.h"
 #include "inner_string_params.h"
 #include "utils/slow_task_timer.h"
+#include "utils/util_functions.h"
 
 namespace vsag {
 
@@ -95,15 +96,8 @@ BruteForce::knn_search(const DatasetPtr& query,
             cur_heap_top = heap.top().first;
         }
     }
-    auto dataset_results = Dataset::Make();
-    dataset_results->Dim(static_cast<int64_t>(heap.size()))
-        ->NumElements(1)
-        ->Owner(true, allocator_.get());
-
-    auto* ids = (int64_t*)allocator_->Allocate(sizeof(int64_t) * heap.size());
-    dataset_results->Ids(ids);
-    auto* dists = (float*)allocator_->Allocate(sizeof(float) * heap.size());
-    dataset_results->Distances(dists);
+    auto [dataset_results, dists, ids] =
+        CreateFastDataset(static_cast<int64_t>(heap.size()), allocator_.get());
     for (auto j = static_cast<int64_t>(heap.size() - 1); j >= 0; --j) {
         dists[j] = heap.top().first;
         ids[j] = this->label_table_->GetLabelById(heap.top().second);
@@ -138,15 +132,8 @@ BruteForce::range_search(const DatasetPtr& query,
             cur_heap_top = heap.top().first;
         }
     }
-    auto dataset_results = Dataset::Make();
-    dataset_results->Dim(static_cast<int64_t>(heap.size()))
-        ->NumElements(1)
-        ->Owner(true, allocator_.get());
-
-    auto* ids = (int64_t*)allocator_->Allocate(sizeof(int64_t) * heap.size());
-    dataset_results->Ids(ids);
-    auto* dists = (float*)allocator_->Allocate(sizeof(float) * heap.size());
-    dataset_results->Distances(dists);
+    auto [dataset_results, dists, ids] =
+        CreateFastDataset(static_cast<int64_t>(heap.size()), allocator_.get());
     for (auto j = static_cast<int64_t>(heap.size() - 1); j >= 0; --j) {
         dists[j] = heap.top().first;
         ids[j] = this->label_table_->GetLabelById(heap.top().second);
