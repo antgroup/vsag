@@ -19,48 +19,11 @@
 
 #include "async_io_parameter.h"
 #include "basic_io.h"
+#include "direct_io_object.h"
 #include "index/index_common_param.h"
 #include "io_context.h"
 
 namespace vsag {
-
-class DirectIOObject {
-public:
-    DirectIOObject() = default;
-
-    DirectIOObject(uint64_t size, uint64_t offset) {
-        this->Set(size, offset);
-    }
-
-    void
-    Set(uint64_t size1, uint64_t offset1) {
-        this->size = size1;
-        this->offset = offset1;
-        if (align_data) {
-            free(align_data);
-        }
-        auto new_offset = (offset >> ALIGN_BIT) << ALIGN_BIT;
-        auto inner_offset = offset & ALIGN_MASK;
-        auto new_size = (((size + inner_offset) + ALIGN_MASK) >> ALIGN_BIT) << ALIGN_BIT;
-        this->align_data = static_cast<uint8_t*>(std::aligned_alloc(ALIGN_SIZE, new_size));
-        this->data = align_data + inner_offset;
-        this->size = new_size;
-        this->offset = new_offset;
-    }
-
-public:
-    uint8_t* data{nullptr};
-    uint64_t size;
-    uint64_t offset;
-    uint8_t* align_data{nullptr};
-
-    static constexpr int64_t ALIGN_BIT = 9;
-
-    static constexpr int64_t ALIGN_SIZE = 1 << ALIGN_BIT;
-
-    static constexpr int64_t ALIGN_MASK = (1 << ALIGN_BIT) - 1;
-};
-
 class AsyncIO : public BasicIO<AsyncIO> {
 public:
     AsyncIO(std::string filename, Allocator* allocator)
@@ -139,6 +102,9 @@ public:
             int submitted = io_submit(context->ctx_, count, cb);
             if (submitted < 0) {
                 io_context_pool->ReturnOne(context);
+                for (auto& obj : objs) {
+                    obj.Release();
+                }
                 throw std::runtime_error("io submit failed");
             }
 
@@ -146,6 +112,9 @@ public:
             auto num_events = io_getevents(context->ctx_, count, count, context->events_, &timeout);
             if (num_events != count) {
                 io_context_pool->ReturnOne(context);
+                for (auto& obj : objs) {
+                    obj.Release();
+                }
                 throw std::runtime_error("io async read failed");
             }
 
