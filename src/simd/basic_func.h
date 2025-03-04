@@ -105,9 +105,11 @@ extern DistanceFuncType InnerProductDistance;
 extern DistanceFuncType INT8InnerProduct;
 extern DistanceFuncType INT8InnerProductDistance;
 
-using PQDistanceFunc = void (*)(const void* single_dim_centers, float single_dim_val, void* result);
-extern PQDistanceFunc PQDistanceFloat256;
+using PQDistanceFuncType = void (*)(const void* single_dim_centers,
+                                    float single_dim_val,
+                                    void* result);
+extern PQDistanceFuncType PQDistanceFloat256;
 
-using PrefetchFunc = void (*)(const void* data);
-extern PrefetchFunc Prefetch;
+using PrefetchFuncType = void (*)(const void* data);
+extern PrefetchFuncType Prefetch;
 }  // namespace vsag

@@ -122,7 +122,7 @@ private:
     mutable std::atomic<uint64_t> metric_distance_computations_{0};
     mutable std::atomic<uint64_t> metric_hops_{0};
 
-    vsag::DistanceFunc ip_func_{nullptr};
+    vsag::DistanceFuncType ip_func_{nullptr};
 
     // flag to replace deleted elements (marked as deleted) during insertion
     bool allow_replace_deleted_{false};
