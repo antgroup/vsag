@@ -17,14 +17,20 @@
 
 // to suppress deprecated warning below(no better way found that works with clang-tidy-15):
 // - clang-diagnostic-deprecated-builtins
+#if defined(__clang__) && (__clang_major__ >= 15)
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-builtins"
+#endif
+
 #include <abstract_index.h>
 #include <disk_utils.h>
 #include <index.h>
 #include <omp.h>
 #include <pq_flash_index.h>
+
+#if defined(__clang__) && (__clang_major__ >= 15)
 #pragma clang diagnostic pop
+#endif
 
 #include <functional>
 #include <map>
