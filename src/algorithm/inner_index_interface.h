@@ -23,22 +23,11 @@
 #include "parameter.h"
 #include "stream_reader.h"
 #include "stream_writer.h"
+#include "utils/function_exists_check.h"
 #include "vsag/dataset.h"
 #include "vsag/index.h"
 
 namespace vsag {
-
-template <typename T, typename = void>
-struct has_mapping_external_param_to_internal : std::false_type {};
-
-template <typename T>
-struct has_mapping_external_param_to_internal<
-    T,
-    std::void_t<decltype(T::MappingExternalParamAndCheck(std::declval<const JsonType&>(),
-                                                         std::declval<const IndexCommonParam&>()))>>
-    : std::is_same<decltype(T::MappingExternalParamAndCheck(
-                       std::declval<const JsonType&>(), std::declval<const IndexCommonParam&>())),
-                   ParamPtr> {};
 
 class InnerIndexInterface {
 public:
