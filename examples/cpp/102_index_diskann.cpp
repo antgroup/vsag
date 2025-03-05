@@ -15,7 +15,10 @@
 
 #include <vsag/vsag.h>
 
+#include <fstream>
 #include <iostream>
+
+const std::string tmp_dir = "/tmp/";
 
 int
 main(int argc, char** argv) {
@@ -104,9 +107,60 @@ main(int argc, char** argv) {
     int64_t topk = 10;
     auto query = vsag::Dataset::Make();
     query->NumElements(1)->Dim(dim)->Float32Vectors(query_vector)->Owner(true);
-    auto knn_result = index->KnnSearch(query, topk, diskann_search_parameters);
 
     /******************* Print Search Result *****************/
+    auto knn_result = index->KnnSearch(query, topk, diskann_search_parameters);
+    if (knn_result.has_value()) {
+        auto result = knn_result.value();
+        std::cout << "results: " << std::endl;
+        for (int64_t i = 0; i < result->GetDim(); ++i) {
+            std::cout << result->GetIds()[i] << ": " << result->GetDistances()[i] << std::endl;
+        }
+    } else {
+        std::cerr << "Search Error: " << knn_result.error().message << std::endl;
+    }
+
+    /******************* Serialize and Clean Index *****************/
+    std::unordered_map<std::string, size_t> meta_info;
+    {
+        if (auto bs = index->Serialize(); bs.has_value()) {
+            index = nullptr;
+            auto keys = bs->GetKeys();
+            for (auto key : keys) {
+                vsag::Binary b = bs->Get(key);
+                std::ofstream file(tmp_dir + "diskann.index." + key, std::ios::binary);
+                file.write((const char*)b.data.get(), b.size);
+                file.close();
+                meta_info[key] = b.size;
+            }
+        } else if (bs.error().type == vsag::ErrorType::NO_ENOUGH_MEMORY) {
+            std::cerr << "no enough memory to serialize index" << std::endl;
+        }
+    }
+
+    // Through the Reader, disk-based DiskANN retrieval can be achieved, and the Reader can be customized.
+    // Here we provide an example of a Reader based on the local file system.
+    /******************* Deserialize with Reader *****************/
+    {
+        vsag::ReaderSet rs;
+        for (const auto& [key, size] : meta_info) {
+            auto reader =
+                vsag::Factory::CreateLocalFileReader(tmp_dir + "diskann.index." + key, 0, size);
+            rs.Set(key, reader);
+        }
+
+        if (auto result = vsag::Factory::CreateIndex("diskann", diskann_build_paramesters);
+            result.has_value()) {
+            index = result.value();
+        } else {
+            std::cout << "Build DiskANN Error" << std::endl;
+            exit(-1);
+        }
+        index->Deserialize(rs);
+    }
+
+    /******************* Print Search Result *****************/
+    knn_result = index->KnnSearch(query, topk, diskann_search_parameters);
     if (knn_result.has_value()) {
         auto result = knn_result.value();
         std::cout << "results: " << std::endl;
