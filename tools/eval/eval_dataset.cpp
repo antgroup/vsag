@@ -16,6 +16,69 @@
 #include "eval_dataset.h"
 
 namespace vsag::eval {
+
+void
+parse_sparse_vectors(const char* src_data,
+                     size_t data_size,
+                     std::vector<vsag::SparseVector>& parsed_vectors) {
+    size_t cur_index = 0;
+    const char* ptr = src_data;
+    const char* end = src_data + data_size;
+    while (ptr < end) {
+        SparseVector vec;
+
+        if (ptr + sizeof(uint32_t) > end)
+            break;
+        memcpy(&vec.len_, ptr, sizeof(uint32_t));
+        ptr += sizeof(uint32_t);
+
+        if (vec.len_ == 0) {
+            parsed_vectors.push_back(vec);
+            continue;
+        }
+
+        const size_t keys_size = vec.len_ * sizeof(uint32_t);
+        const size_t vals_size = vec.len_ * sizeof(float);
+
+        if (ptr + keys_size + vals_size > end)
+            break;
+
+        vec.ids_ = new uint32_t[vec.len_];
+        vec.vals_ = new float[vec.len_];
+
+        memcpy(vec.ids_, ptr, keys_size);
+        ptr += keys_size;
+
+        memcpy(vec.vals_, ptr, vals_size);
+        ptr += vals_size;
+
+        std::vector<uint32_t> indices(vec.len_);
+        for (uint32_t i = 0; i < vec.len_; ++i) indices[i] = i;
+
+        std::sort(indices.begin(), indices.end(), [&](uint32_t a, uint32_t b) {
+            return vec.ids_[a] < vec.ids_[b];
+        });
+
+        auto* sorted_ids = new uint32_t[vec.len_];
+        auto* sorted_vals = new float[vec.len_];
+
+        for (uint32_t i = 0; i < vec.len_; ++i) {
+            sorted_ids[i] = vec.ids_[indices[i]];
+            sorted_vals[i] = vec.vals_[indices[i]];
+        }
+
+        delete[] vec.ids_;
+        delete[] vec.vals_;
+        vec.ids_ = sorted_ids;
+        vec.vals_ = sorted_vals;
+
+        parsed_vectors.push_back(vec);
+    }
+    if (ptr != end) {
+        throw std::runtime_error("parse_sparse_vectors: fail to parse sparse vectors");
+    }
+}
+
 EvalDatasetPtr
 EvalDataset::Load(const std::string& filename) {
     H5::H5File file(filename, H5F_ACC_RDONLY);
@@ -51,30 +114,6 @@ EvalDataset::Load(const std::string& filename) {
     obj->number_of_base_ = train_shape.first;
     obj->number_of_query_ = test_shape.first;
 
-    // read from file
-    {
-        H5::DataSet dataset = file.openDataSet("/train");
-        H5::DataSpace dataspace = dataset.getSpace();
-        auto data_type = dataset.getDataType();
-        H5::PredType type = H5::PredType::ALPHA_I8;
-        if (data_type.getClass() == H5T_INTEGER && data_type.getSize() == 1) {
-            obj->train_data_type_ = vsag::DATATYPE_INT8;
-            type = H5::PredType::ALPHA_I8;
-            obj->train_data_size_ = 1;
-        } else if (data_type.getClass() == H5T_FLOAT) {
-            obj->train_data_type_ = vsag::DATATYPE_FLOAT32;
-            type = H5::PredType::NATIVE_FLOAT;
-            obj->train_data_size_ = 4;
-        } else {
-            throw std::runtime_error(fmt::format("wrong data type, data type ({}), data size ({})",
-                                                 (int)data_type.getClass(),
-                                                 data_type.getSize()));
-        }
-        obj->train_ = std::shared_ptr<char[]>(
-            new char[train_shape.first * train_shape.second * obj->train_data_size_]);
-        dataset.read(obj->train_.get(), type, dataspace);
-    }
-
     try {
         H5::Attribute attr = file.openAttribute("distance");
         H5::StrType str_type = attr.getStrType();
@@ -105,26 +144,89 @@ EvalDataset::Load(const std::string& filename) {
         throw std::runtime_error("fail to read metric: there is no 'distance' in the dataset");
     }
 
-    {
-        H5::DataSet dataset = file.openDataSet("/test");
-        H5::DataSpace dataspace = dataset.getSpace();
-        auto data_type = dataset.getDataType();
-        H5::PredType type = H5::PredType::ALPHA_I8;
-        if (data_type.getClass() == H5T_INTEGER && data_type.getSize() == 1) {
-            obj->test_data_type_ = vsag::DATATYPE_INT8;
-            type = H5::PredType::ALPHA_I8;
-            obj->test_data_size_ = 1;
-        } else if (data_type.getClass() == H5T_FLOAT) {
-            obj->test_data_type_ = vsag::DATATYPE_FLOAT32;
-            type = H5::PredType::NATIVE_FLOAT;
-            obj->test_data_size_ = 4;
-        } else {
-            throw std::runtime_error("wrong data type");
-        }
-        obj->test_ = std::shared_ptr<char[]>(
-            new char[test_shape.first * test_shape.second * obj->test_data_size_]);
-        dataset.read(obj->test_.get(), type, dataspace);
+    try {
+        H5::Attribute attr = file.openAttribute("type");
+        H5::StrType str_type = attr.getStrType();
+        std::string type;
+        attr.read(str_type, type);
+        obj->data_type_ = type;
+    } catch (H5::Exception& err) {
+        throw std::runtime_error("fail to read metric: there is no 'type' in the dataset");
     }
+
+    if (obj->data_type_ == "dense") {
+        // read from file
+        {
+            H5::DataSet dataset = file.openDataSet("/train");
+            H5::DataSpace dataspace = dataset.getSpace();
+            auto data_type = dataset.getDataType();
+            H5::PredType type = H5::PredType::ALPHA_I8;
+            if (data_type.getClass() == H5T_INTEGER && data_type.getSize() == 1) {
+                obj->train_data_type_ = vsag::DATATYPE_INT8;
+                type = H5::PredType::ALPHA_I8;
+                obj->train_data_size_ = 1;
+            } else if (data_type.getClass() == H5T_FLOAT) {
+                obj->train_data_type_ = vsag::DATATYPE_FLOAT32;
+                type = H5::PredType::NATIVE_FLOAT;
+                obj->train_data_size_ = 4;
+            } else {
+                throw std::runtime_error(
+                    fmt::format("wrong data type, data type ({}), data size ({})",
+                                (int)data_type.getClass(),
+                                data_type.getSize()));
+            }
+            obj->train_ = std::shared_ptr<char[]>(
+                new char[train_shape.first * train_shape.second * obj->train_data_size_]);
+            dataset.read(obj->train_.get(), type, dataspace);
+        }
+
+        {
+            H5::DataSet dataset = file.openDataSet("/test");
+            H5::DataSpace dataspace = dataset.getSpace();
+            auto data_type = dataset.getDataType();
+            H5::PredType type = H5::PredType::ALPHA_I8;
+            if (data_type.getClass() == H5T_INTEGER && data_type.getSize() == 1) {
+                obj->test_data_type_ = vsag::DATATYPE_INT8;
+                type = H5::PredType::ALPHA_I8;
+                obj->test_data_size_ = 1;
+            } else if (data_type.getClass() == H5T_FLOAT) {
+                obj->test_data_type_ = vsag::DATATYPE_FLOAT32;
+                type = H5::PredType::NATIVE_FLOAT;
+                obj->test_data_size_ = 4;
+            } else {
+                throw std::runtime_error("wrong data type");
+            }
+            obj->test_ = std::shared_ptr<char[]>(
+                new char[test_shape.first * test_shape.second * obj->test_data_size_]);
+            dataset.read(obj->test_.get(), type, dataspace);
+        }
+    } else {
+        {
+            H5::PredType type = H5::PredType::ALPHA_I8;
+            H5::DataSet dataset = file.openDataSet("/train");
+            H5::DataSpace dataspace = dataset.getSpace();
+            hsize_t dims_out[2];
+            dataspace.getSimpleExtentDims(dims_out, NULL);
+            obj->train_data_size_ = dims_out[1];
+            obj->train_.reset(new char[obj->train_data_size_]);
+            dataset.read(obj->train_.get(), type, dataspace);
+            parse_sparse_vectors(obj->train_.get(), obj->train_data_size_, obj->sparse_train_);
+            obj->train_.reset();
+        }
+        {
+            H5::PredType type = H5::PredType::ALPHA_I8;
+            H5::DataSet dataset = file.openDataSet("/test");
+            H5::DataSpace dataspace = dataset.getSpace();
+            hsize_t dims_out[2];
+            dataspace.getSimpleExtentDims(dims_out, NULL);
+            obj->test_data_size_ = dims_out[1];
+            obj->test_.reset(new char[obj->test_data_size_]);
+            dataset.read(obj->test_.get(), type, dataspace);
+            parse_sparse_vectors(obj->test_.get(), obj->test_data_size_, obj->sparse_test_);
+            obj->test_.reset();
+        }
+    }
+
     {
         obj->neighbors_ =
             std::shared_ptr<int64_t[]>(new int64_t[neighbors_shape.first * neighbors_shape.second]);

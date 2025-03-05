@@ -24,6 +24,7 @@
 #include "nlohmann/json.hpp"
 #include "simd/basic_func.h"
 #include "vsag/constants.h"
+#include "vsag/dataset.h"
 
 namespace vsag::eval {
 
@@ -140,6 +141,17 @@ public:
         return result;
     };
 
+    ~EvalDataset() {
+        for (auto& i : sparse_train_) {
+            delete[] i.ids_;
+            delete[] i.vals_;
+        }
+        for (auto& i : sparse_test_) {
+            delete[] i.ids_;
+            delete[] i.vals_;
+        }
+    }
+
 private:
     using shape_t = std::pair<int64_t, int64_t>;
     static std::unordered_set<std::string>
@@ -195,5 +207,10 @@ private:
     std::string train_data_type_;
     std::string test_data_type_;
     std::string file_path_;
+
+    std::vector<vsag::SparseVector> sparse_train_;
+    std::vector<vsag::SparseVector> sparse_test_;
+
+    std::string data_type_ = "dense";
 };
 }  // namespace vsag::eval
