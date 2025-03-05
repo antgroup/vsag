@@ -23,23 +23,9 @@
 #include "io_parameter.h"
 #include "stream_reader.h"
 #include "stream_writer.h"
+#include "utils/function_exists_check.h"
 
 namespace vsag {
-
-#define GENERATE_HAS_MEMBER_FUNC(funcName, ...)                              \
-    template <typename U>                                                    \
-    struct has_##funcName {                                                  \
-        template <typename T, T>                                             \
-        struct SFINAE;                                                       \
-        template <typename T>                                                \
-        static std::true_type                                                \
-        test(SFINAE<decltype(&T::funcName), &T::funcName>*);                 \
-        template <typename T>                                                \
-        static std::false_type                                               \
-        test(...);                                                           \
-        static constexpr bool value =                                        \
-            std::is_same<decltype(test<U>(nullptr)), std::true_type>::value; \
-    };
 
 /**
  * @brief A template class for basic input/output operations.
@@ -78,12 +64,8 @@ public:
      */
     inline void
     Write(const uint8_t* data, uint64_t size, uint64_t offset) {
-        if constexpr (has_WriteImpl<IOTmpl>::value) {
-            cast().WriteImpl(data, size, offset);
-        } else {
-            throw std::runtime_error(
-                fmt::format("class {} have no func named WriteImpl", typeid(IOTmpl).name()));
-        }
+        static_assert(has_WriteImpl<IOTmpl>::value);
+        cast().WriteImpl(data, size, offset);
     }
 
     /**
@@ -99,12 +81,8 @@ public:
      */
     inline bool
     Read(uint64_t size, uint64_t offset, uint8_t* data) const {
-        if constexpr (has_ReadImpl<IOTmpl>::value) {
-            return cast().ReadImpl(size, offset, data);
-        } else {
-            throw std::runtime_error(
-                fmt::format("class {} have no func named ReadImpl", typeid(IOTmpl).name()));
-        }
+        static_assert(has_ReadImpl<IOTmpl>::value);
+        return cast().ReadImpl(size, offset, data);
     }
 
     /**
@@ -120,13 +98,8 @@ public:
      */
     [[nodiscard]] inline const uint8_t*
     Read(uint64_t size, uint64_t offset, bool& need_release) const {
-        if constexpr (has_DirectReadImpl<IOTmpl>::value) {
-            return cast().DirectReadImpl(
-                size, offset, need_release);  // TODO(LHT129): use IOReadObject
-        } else {
-            throw std::runtime_error(
-                fmt::format("class {} have no func named DirectReadImpl", typeid(IOTmpl).name()));
-        }
+        static_assert(has_DirectReadImpl<IOTmpl>::value);
+        return cast().DirectReadImpl(size, offset, need_release);  // TODO(LHT129): use IOReadObject
     }
 
     /**
@@ -143,12 +116,8 @@ public:
      */
     inline bool
     MultiRead(uint8_t* datas, uint64_t* sizes, uint64_t* offsets, uint64_t count) const {
-        if constexpr (has_MultiReadImpl<IOTmpl>::value) {
-            return cast().MultiReadImpl(datas, sizes, offsets, count);
-        } else {
-            throw std::runtime_error(
-                fmt::format("class {} have no func named MultiReadImpl", typeid(IOTmpl).name()));
-        }
+        static_assert(has_MultiReadImpl<IOTmpl>::value);
+        return cast().MultiReadImpl(datas, sizes, offsets, count);
     }
 
     /**
@@ -162,12 +131,8 @@ public:
      */
     inline void
     Prefetch(uint64_t offset, uint64_t cache_line = 64) {
-        if constexpr (has_PrefetchImpl<IOTmpl>::value) {
-            cast().PrefetchImpl(offset, cache_line);
-        } else {
-            throw std::runtime_error(
-                fmt::format("class {} have no func named PrefetchImpl", typeid(IOTmpl).name()));
-        }
+        static_assert(has_PrefetchImpl<IOTmpl>::value);
+        return cast().PrefetchImpl(offset, cache_line);
     }
 
     /**
@@ -220,12 +185,8 @@ public:
 
     inline void
     Release(const uint8_t* data) const {
-        if constexpr (has_ReleaseImpl<IOTmpl>::value) {
-            cast().ReleaseImpl(data);
-        } else {
-            throw std::runtime_error(
-                fmt::format("class {} have no func named ReleaseImpl", typeid(IOTmpl).name()));
-        }
+        static_assert(has_ReleaseImpl<IOTmpl>::value);
+        return cast().ReleaseImpl(data);
     }
 
     /**
@@ -239,12 +200,8 @@ public:
      */
     inline bool
     InMemory() const {
-        if constexpr (has_InMemoryImpl<IOTmpl>::value) {
-            return cast().InMemoryImpl();
-        } else {
-            throw std::runtime_error(
-                fmt::format("class {} have no func named InMemoryImpl", typeid(IOTmpl).name()));
-        }
+        static_assert(has_InMemoryImpl<IOTmpl>::value);
+        return cast().InMemoryImpl();
     }
 
 public:
@@ -309,15 +266,33 @@ private:
     /**
      * @brief Generates a struct to check if a class has a member function with a specific signature.
      *
-     * @param funcName The name of the member function to check.
-     * @param ... The signature of the member function to check.
      */
-    GENERATE_HAS_MEMBER_FUNC(WriteImpl, void (U::*)(const uint8_t*, uint64_t, uint64_t))
-    GENERATE_HAS_MEMBER_FUNC(ReadImpl, bool (U::*)(uint64_t, uint64_t, uint8_t*))
-    GENERATE_HAS_MEMBER_FUNC(DirectReadImpl, const uint8_t* (U::*)(uint64_t, uint64_t, bool&))
-    GENERATE_HAS_MEMBER_FUNC(MultiReadImpl, bool (U::*)(uint8_t*, uint64_t*, uint64_t*, uint64_t))
-    GENERATE_HAS_MEMBER_FUNC(PrefetchImpl, void (U::*)(uint64_t, uint64_t))
-    GENERATE_HAS_MEMBER_FUNC(ReleaseImpl, void (U::*)(const uint8_t*))
-    GENERATE_HAS_MEMBER_FUNC(InMemoryImpl, bool (U::*)())
+    GENERATE_HAS_MEMBER_FUNCTION(WriteImpl,
+                                 void,
+                                 std::declval<const uint8_t*>(),
+                                 std::declval<uint64_t>(),
+                                 std::declval<uint64_t>())
+    GENERATE_HAS_MEMBER_FUNCTION(ReadImpl,
+                                 bool,
+                                 std::declval<uint64_t>(),
+                                 std::declval<uint64_t>(),
+                                 std::declval<uint8_t*>())
+    GENERATE_HAS_MEMBER_FUNCTION(DirectReadImpl,
+                                 const uint8_t*,
+                                 std::declval<uint64_t>(),
+                                 std::declval<uint64_t>(),
+                                 std::declval<bool&>())
+    GENERATE_HAS_MEMBER_FUNCTION(MultiReadImpl,
+                                 bool,
+                                 std::declval<uint8_t*>(),
+                                 std::declval<uint64_t*>(),
+                                 std::declval<uint64_t*>(),
+                                 std::declval<uint64_t>())
+    GENERATE_HAS_MEMBER_FUNCTION(PrefetchImpl,
+                                 void,
+                                 std::declval<uint64_t>(),
+                                 std::declval<uint64_t>())
+    GENERATE_HAS_MEMBER_FUNCTION(ReleaseImpl, void, std::declval<const uint8_t*>())
+    GENERATE_HAS_MEMBER_FUNCTION(InMemoryImpl, bool)
 };
 }  // namespace vsag
