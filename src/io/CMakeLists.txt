@@ -10,3 +10,4 @@ set (IO_SRC
 
 add_library (io OBJECT ${IO_SRC})
 target_link_libraries (io PUBLIC fmt::fmt-header-only aio)
+maybe_add_dependencies (io spdlog)
