@@ -68,7 +68,12 @@ vsag_add_shared_linker_flag (-fvisibility=hidden)
 
 if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
     set (CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -gdwarf-4")
-    set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -gdwarf-4 -Wno-deprecated-builtins")
+    set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -gdwarf-4")
+
+    if (CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 15.0.0)
+        set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-deprecated-builtins")
+        message (STATUS "Clang >=15 detected: -Wno-deprecated-builtins enabled")
+    endif ()
 else ()
     if (ENABLE_LIBCXX)
         message (FATAL_ERROR "gcc does not support using libc++")
