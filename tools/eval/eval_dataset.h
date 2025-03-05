@@ -21,6 +21,7 @@
 #include <unordered_set>
 
 #include "H5Cpp.h"
+#include "common.h"
 #include "nlohmann/json.hpp"
 #include "simd/basic_func.h"
 #include "vsag/constants.h"
@@ -38,12 +39,20 @@ public:
 public:
     [[nodiscard]] const void*
     GetTrain() const {
-        return train_.get();
+        if (vector_type_ == DENSE_VECTORS) {
+            return train_.get();
+        } else {
+            return sparse_train_.data();
+        }
     }
 
     [[nodiscard]] const void*
     GetTest() const {
-        return test_.get();
+        if (vector_type_ == DENSE_VECTORS) {
+            return test_.get();
+        } else {
+            return sparse_test_.data();
+        }
     }
 
     [[nodiscard]] const std::shared_ptr<int64_t[]>
@@ -63,12 +72,20 @@ public:
 
     [[nodiscard]] const void*
     GetOneTrain(int64_t id) const {
-        return train_.get() + id * dim_ * train_data_size_;
+        if (vector_type_ == DENSE_VECTORS) {
+            return train_.get() + id * dim_ * train_data_size_;
+        } else {
+            return sparse_train_.data() + id;
+        }
     }
 
     [[nodiscard]] const void*
     GetOneTest(int64_t id) const {
-        return test_.get() + id * dim_ * test_data_size_;
+        if (vector_type_ == DENSE_VECTORS) {
+            return test_.get() + id * dim_ * test_data_size_;
+        } else {
+            return sparse_test_.data() + id;
+        }
     }
 
     [[nodiscard]] int64_t
@@ -110,12 +127,9 @@ public:
         return test_data_type_;
     }
 
-    bool
-    IsMatch(int64_t query_id, int64_t base_id) {
-        if (this->test_labels_ == nullptr || this->train_labels_ == nullptr) {
-            return true;
-        }
-        return test_labels_[query_id] == train_labels_[base_id];
+    std::string
+    GetVectorType() const {
+        return vector_type_;
     }
 
     std::string
@@ -208,9 +222,9 @@ private:
     std::string test_data_type_;
     std::string file_path_;
 
-    std::vector<vsag::SparseVector> sparse_train_;
-    std::vector<vsag::SparseVector> sparse_test_;
+    std::vector<SparseVector> sparse_train_;
+    std::vector<SparseVector> sparse_test_;
 
-    std::string data_type_ = "dense";
+    std::string vector_type_ = DENSE_VECTORS;
 };
 }  // namespace vsag::eval

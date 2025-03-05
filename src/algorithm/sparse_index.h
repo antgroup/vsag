@@ -204,6 +204,16 @@ public:
         label_table_.Deserialize(reader);
     }
 
+    int64_t
+    GetNumElements() const override {
+        return 0;
+    }
+
+    DatasetPtr
+    CalDistanceById(const float* query, const int64_t* ids, int64_t count) const override {
+        return 0;
+    }
+
 private:
     Vector<uint32_t*> datas_;
     LabelTable label_table_;
