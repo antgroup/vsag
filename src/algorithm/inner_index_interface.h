@@ -63,6 +63,9 @@ public:
     Deserialize(StreamReader& reader) = 0;
 
 public:
+    virtual void
+    Train(const DatasetPtr& base){};
+
     virtual std::vector<int64_t>
     Build(const DatasetPtr& base);
 
@@ -197,6 +200,13 @@ public:
     CheckIdExist(int64_t id) const {
         return this->label_table_->CheckLabel(id);
     }
+
+public:
+    static Vector<DatasetPtr>
+    SplitDatasetByDuplicateLabel(const DatasetPtr& dataset,
+                                 const LabelTablePtr& label_table,
+                                 Allocator* allocator,
+                                 std::vector<LabelType>& failed_ids);
 
 public:
     LabelTablePtr label_table_{nullptr};
