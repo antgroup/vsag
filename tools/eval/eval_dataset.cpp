@@ -79,7 +79,8 @@ parse_sparse_vectors(const char* src_data,
     }
 }
 
-float get_distance(const SparseVector* vector1, const SparseVector* vector2, const void* qty_ptr) {
+float
+get_distance(const SparseVector* vector1, const SparseVector* vector2, const void* qty_ptr) {
     float sum = 0.0f;
     uint32_t i = 0, j = 0;
     while (i < vector1->len_ && j < vector2->len_) {
@@ -97,7 +98,6 @@ float get_distance(const SparseVector* vector1, const SparseVector* vector2, con
     }
     return sum;
 }
-
 
 EvalDatasetPtr
 EvalDataset::Load(const std::string& filename) {
@@ -184,7 +184,8 @@ EvalDataset::Load(const std::string& filename) {
                                             qty_ptr);
                 };
             } else {
-                throw std::runtime_error("no support for sparse vectors with " + metric + " distance");
+                throw std::runtime_error("no support for sparse vectors with " + metric +
+                                         " distance");
             }
         }
     } catch (H5::Exception& err) {

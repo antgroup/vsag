@@ -22,9 +22,8 @@
 
 namespace vsag::eval {
 
-constexpr static const char * DENSE_VECTORS = "dense_vectors";
-constexpr static const char * SPARSE_VECTORS = "sparse_vectors";
-
+constexpr static const char* DENSE_VECTORS = "dense_vectors";
+constexpr static const char* SPARSE_VECTORS = "sparse_vectors";
 
 template <class T = std::string>
 T

@@ -127,6 +127,14 @@ public:
         return test_data_type_;
     }
 
+    bool
+    IsMatch(int64_t query_id, int64_t base_id) {
+        if (this->test_labels_ == nullptr || this->train_labels_ == nullptr) {
+            return true;
+        }
+        return test_labels_[query_id] == train_labels_[base_id];
+    }
+
     std::string
     GetVectorType() const {
         return vector_type_;
