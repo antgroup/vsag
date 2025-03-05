@@ -19,7 +19,7 @@ namespace vsag {
 
 float
 get_distance(
-    uint32_t len1, uint32_t* ids1, float* vals1, uint32_t len2, uint32_t* ids2, float* vals2) {
+    uint32_t len1, const uint32_t* ids1, const float* vals1, uint32_t len2, const uint32_t* ids2, const float* vals2) {
     float sum = 0.0f;
     uint32_t i = 0, j = 0;
 
@@ -44,15 +44,15 @@ SparseIndex::MappingExternalParamAndCheck(const JsonType& external_param,
     return std::make_shared<SparseIndexParameters>();
 }
 
-std::tuple<std::vector<uint32_t>, std::vector<float>>
-sort_sparse_vector(const SparseVector vector) {
-    std::vector<uint32_t> indices(vector.len_);
+std::tuple<Vector<uint32_t>, Vector<float>>
+SparseIndex::sort_sparse_vector(const SparseVector& vector) const {
+    Vector<uint32_t> indices(vector.len_, allocator_);
     std::iota(indices.begin(), indices.end(), 0);
     std::sort(indices.begin(), indices.end(), [&](uint32_t a, uint32_t b) {
         return vector.ids_[a] < vector.ids_[b];
     });
-    std::vector<uint32_t> sorted_ids(vector.len_);
-    std::vector<float> sorted_vals(vector.len_);
+    Vector<uint32_t> sorted_ids(vector.len_, allocator_);
+    Vector<float> sorted_vals(vector.len_, allocator_);
     for (size_t j = 0; j < vector.len_; ++j) {
         sorted_ids[j] = vector.ids_[indices[j]];
         sorted_vals[j] = vector.vals_[indices[j]];
@@ -89,7 +89,7 @@ SparseIndex::KnnSearch(const DatasetPtr& query,
                        const FilterPtr& filter) const {
     auto sparse_vectors = query->GetSparseVectors();
     MaxHeap results(allocator_);
-    auto [sorted_ids, sorted_vals] = sort_sparse_vector(*sparse_vectors);
+    auto [sorted_ids, sorted_vals] = sort_sparse_vector(sparse_vectors[0]);
     for (int j = 0; j < datas_.size(); ++j) {
         auto distance = get_distance(sorted_ids.size(),
                                      sorted_ids.data(),
@@ -99,7 +99,7 @@ SparseIndex::KnnSearch(const DatasetPtr& query,
                                      (float*)datas_[j] + 1 + datas_[j][0]);
         auto id = label_table_.GetIdByLabel(j);
         if (not filter || filter->CheckValid(id)) {
-            results.push({distance, id});
+            results.emplace(distance, id);
             if (results.size() > k) {
                 results.pop();
             }
@@ -140,16 +140,17 @@ SparseIndex::RangeSearch(const DatasetPtr& query,
                          int64_t limited_size) const {
     auto sparse_vectors = query->GetSparseVectors();
     MaxHeap results(allocator_);
+    auto [sorted_ids, sorted_vals] = sort_sparse_vector(sparse_vectors[0]);
     for (int j = 0; j < datas_.size(); ++j) {
-        auto distance = get_distance(sparse_vectors[0].len_,
-                                     sparse_vectors[0].ids_,
-                                     sparse_vectors[0].vals_,
+        auto distance = get_distance(sorted_ids.size(),
+                                     sorted_ids.data(),
+                                     sorted_vals.data(),
                                      datas_[j][0],
                                      datas_[j] + 1,
                                      (float*)datas_[j] + 1 + datas_[j][0]);
         auto id = label_table_.GetIdByLabel(j);
         if ((not filter || filter->CheckValid(id)) && distance < radius) {
-            results.push({distance, id});
+            results.emplace(distance, id);
         }
     }
 

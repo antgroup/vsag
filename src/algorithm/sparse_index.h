@@ -34,9 +34,9 @@ public:
     SparseIndex(const ParamPtr& param, const IndexCommonParam& common_param)
         : SparseIndex(std::dynamic_pointer_cast<SparseIndexParameters>(param), common_param){};
 
-    virtual ~SparseIndex() {
-        for (int i = 0; i < datas_.size(); ++i) {
-            allocator_->Deallocate(datas_[i]);
+    ~SparseIndex() override {
+        for (auto & data : datas_) {
+            allocator_->Deallocate(data);
         }
     }
 
@@ -94,8 +94,11 @@ public:
 
     DatasetPtr
     CalDistanceById(const float* query, const int64_t* ids, int64_t count) const override {
-        return 0;
+        return nullptr;
     }
+private:
+    std::tuple<Vector<uint32_t>, Vector<float>>
+    sort_sparse_vector(const SparseVector& vector) const;
 
 private:
     Vector<uint32_t*> datas_;
