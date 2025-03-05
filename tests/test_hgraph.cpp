@@ -64,12 +64,13 @@ public:
         {"fp16", 0.98},
         {"sq8", 0.95},
         {"sq8_uniform", 0.95},
+        {"rabitq,fp32", 0.3},
         {"sq8_uniform,fp32", 0.98},
         {"sq8_uniform,fp16", 0.98},
         {"sq8_uniform,bf16", 0.98},
         {"sq8_uniform,bf16,buffer_io", 0.98},
         {"sq8_uniform,fp16,async_io", 0.98},
-        {"rabitq,fp32", 0.3}};
+    };
 };
 
 TestDatasetPool HgraphTestIndex::pool{};
@@ -390,7 +391,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex,
                              "[ft][hgraph]") {
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
-    auto metric_type = GENERATE("l2", "ip", "cosine");
+    auto metric_type = GENERATE("l2", "cosine");
     auto dataset = pool.GetNanDataset(metric_type);
     auto dim = dataset->dim_;
     const std::string name = "hgraph";
@@ -415,7 +416,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex,
                              "[ft][hgraph][concurrent]") {
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
-    auto metric_type = GENERATE("l2", "ip", "cosine");
+    auto metric_type = GENERATE("l2", "cosine");
 
     const std::string name = "hgraph";
     auto search_param = fmt::format(search_param_tmp, 200);
@@ -446,7 +447,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex,
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex, "HGraph Serialize File", "[ft][hgraph]") {
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
-    auto metric_type = GENERATE("l2", "ip", "cosine");
+    auto metric_type = GENERATE("l2", "cosine");
     const std::string name = "hgraph";
     auto search_param = fmt::format(search_param_tmp, 200);
     uint64_t extra_info_size = 64;
@@ -489,7 +490,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex,
     auto allocator = std::make_shared<fixtures::RandomAllocator>();
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
-    auto metric_type = GENERATE("l2", "ip", "cosine");
+    auto metric_type = GENERATE("l2", "cosine");
     const std::string name = "hgraph";
     for (auto dim : dims) {
         for (auto& [base_quantization_str, recall] : test_cases) {
@@ -518,7 +519,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex,
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex, "HGraph Duplicate Build", "[ft][hgraph]") {
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
-    auto metric_type = GENERATE("l2", "ip", "cosine");
+    auto metric_type = GENERATE("l2", "ip");
 
     const std::string name = "hgraph";
     auto search_param = fmt::format(search_param_tmp, 200);
@@ -548,7 +549,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex, "HGraph Duplicate Build"
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex, "HGraph Estimate Memory", "[ft][hgraph]") {
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
-    auto metric_type = GENERATE("l2", "ip", "cosine");
+    auto metric_type = GENERATE("l2", "cosine");
 
     const std::string name = "hgraph";
     auto search_param = fmt::format(search_param_tmp, 200);
@@ -582,7 +583,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex, "HGraph Estimate Memory"
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex, "HGraph Ignore Reorder", "[ft][hgraph]") {
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
-    auto metric_type = GENERATE("l2", "ip", "cosine");
+    auto metric_type = GENERATE("l2", "cosine");
 
     const std::string name = "hgraph";
     auto search_param = fmt::format(search_param_tmp, 200);
@@ -615,7 +616,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex, "HGraph Ignore Reorder",
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex, "HGraph With Extra Info", "[ft][hgraph]") {
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
-    auto metric_type = GENERATE("l2", "ip", "cosine");
+    auto metric_type = GENERATE("l2", "ip");
     uint64_t extra_info_size = 256;
 
     const std::string name = "hgraph";

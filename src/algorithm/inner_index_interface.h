@@ -63,6 +63,9 @@ public:
     Deserialize(StreamReader& reader) = 0;
 
 public:
+    virtual void
+    Train(const DatasetPtr& base){};
+
     virtual std::vector<int64_t>
     Build(const DatasetPtr& base);
 
