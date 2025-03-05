@@ -207,11 +207,12 @@ EvalDataset::Load(const std::string& filename) {
             H5::DataSpace dataspace = dataset.getSpace();
             hsize_t dims_out[2];
             dataspace.getSimpleExtentDims(dims_out, NULL);
-            obj->train_data_size_ = dims_out[1];
+            obj->train_data_size_ = dims_out[0];
             obj->train_.reset(new char[obj->train_data_size_]);
             dataset.read(obj->train_.get(), type, dataspace);
             parse_sparse_vectors(obj->train_.get(), obj->train_data_size_, obj->sparse_train_);
             obj->train_.reset();
+            obj->number_of_base_ = obj->sparse_train_.size();
         }
         {
             H5::PredType type = H5::PredType::ALPHA_I8;
@@ -219,11 +220,12 @@ EvalDataset::Load(const std::string& filename) {
             H5::DataSpace dataspace = dataset.getSpace();
             hsize_t dims_out[2];
             dataspace.getSimpleExtentDims(dims_out, NULL);
-            obj->test_data_size_ = dims_out[1];
+            obj->test_data_size_ = dims_out[0];
             obj->test_.reset(new char[obj->test_data_size_]);
             dataset.read(obj->test_.get(), type, dataspace);
             parse_sparse_vectors(obj->test_.get(), obj->test_data_size_, obj->sparse_test_);
             obj->test_.reset();
+            obj->number_of_query_ = obj->sparse_test_.size();
         }
     }
 
