@@ -34,18 +34,4 @@ namespace vsag {
 SimdStatus
 setup_simd();
 
-typedef float (*DistanceFunc)(const void* pVect1, const void* pVect2, const void* qty_ptr);
-DistanceFunc
-GetL2DistanceFunc(size_t dim);
-DistanceFunc
-GetInnerProductDistanceFunc(size_t dim);
-
-DistanceFunc
-GetINT8InnerProductDistanceFunc(size_t dim);
-
-typedef void (*PQDistanceFunc)(const void* single_dim_centers, float single_dim_val, void* result);
-
-PQDistanceFunc
-GetPQDistanceFunc();
-
 }  // namespace vsag

@@ -15,17 +15,14 @@
 #define MIN_SAMPLE_NUM 1000
 #define MAX_SAMPLE_NUM 131072
 namespace vsag {
-
-extern PQDistanceFunc
-GetPQDistanceFunc();
-
+extern PQDistanceFunc PQDistanceFloat256;
 }
 
 namespace diskann
 {
 FixedChunkPQTable::FixedChunkPQTable()
 {
-    func = vsag::GetPQDistanceFunc();
+    func = vsag::PQDistanceFloat256;
 }
 
 FixedChunkPQTable::~FixedChunkPQTable()
@@ -1929,7 +1926,7 @@ void generate_disk_quantized_data(const T* train_data, size_t train_size, size_t
         throw std::runtime_error("fail to train pq: sample_size " + std::to_string(sample_size) +
                                  " is too small, while train_size is " + std::to_string(train_size));
     }
-    
+
     // diskann::cout << "Training data with " << sample_size << " samples loaded." << std::endl;
     if (disk_pq_dims > train_dim)
         disk_pq_dims = train_dim;

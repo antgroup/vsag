@@ -27,18 +27,14 @@
 #include "logger.h"
 #include "ann_exception.h"
 
-#include <iostream>
+namespace vsag
+{
 
-namespace vsag {
+using DistanceFunc = float (*)(const void *pVect1, const void *pVect2, const void *qty_ptr);
+extern DistanceFunc InnerProductDistance;
+extern DistanceFunc L2Sqr;
 
-
-typedef float (*DistanceFunc)(const void* pVect1, const void* pVect2, const void* qty_ptr);
-extern DistanceFunc
-GetInnerProductDistanceFunc(size_t dim);
-extern DistanceFunc
-GetL2DistanceFunc(size_t dim);
-
-}  // namespace vsag
+} // namespace vsag
 
 namespace diskann
 {
@@ -367,9 +363,9 @@ template <typename T> float DistanceInnerProduct<T>::inner_product(const T *a, c
 #else
 #ifdef __SSE2__
 #define SSE_DOT(addr1, addr2, dest, tmp1, tmp2)                                                                        \
-    tmp1 = _mm_loadu_ps(addr1);                                                                                     \
-    tmp2 = _mm_loadu_ps(addr2);                                                                                     \
-    tmp1 = _mm_mul_ps(tmp1, tmp2);                                                                                  \
+    tmp1 = _mm_loadu_ps(addr1);                                                                                        \
+    tmp2 = _mm_loadu_ps(addr2);                                                                                        \
+    tmp1 = _mm_mul_ps(tmp1, tmp2);                                                                                     \
     dest = _mm_add_ps(dest, tmp1);
     __m128 sum;
     __m128 l0, l1, l2, l3;
@@ -479,8 +475,8 @@ template <typename T> float DistanceFastL2<T>::norm(const T *a, uint32_t size) c
 #else
 #ifdef __SSE2__
 #define SSE_L2NORM(addr, dest, tmp)                                                                                    \
-    tmp = _mm_loadu_ps(addr);                                                                                       \
-    tmp = _mm_mul_ps(tmp, tmp);                                                                                     \
+    tmp = _mm_loadu_ps(addr);                                                                                          \
+    tmp = _mm_mul_ps(tmp, tmp);                                                                                        \
     dest = _mm_add_ps(dest, tmp);
 
     __m128 sum;
@@ -627,7 +623,7 @@ void AVXNormalizedCosineDistanceFloat::normalize_and_copy(const float *query_vec
 
 VsagDistanceL2Float::VsagDistanceL2Float(size_t dim) : Distance<float>(diskann::Metric::L2)
 {
-    dist_func_ = vsag::GetL2DistanceFunc(dim);
+    dist_func_ = vsag::L2Sqr;
 }
 
 float VsagDistanceL2Float::compare(const float *a, const float *b, uint32_t size) const
@@ -636,9 +632,10 @@ float VsagDistanceL2Float::compare(const float *a, const float *b, uint32_t size
     return dist_func_(a, b, &dim);
 }
 
-VsagDistanceInnerProductFloat::VsagDistanceInnerProductFloat(size_t dim) : Distance<float>(diskann::Metric::INNER_PRODUCT)
+VsagDistanceInnerProductFloat::VsagDistanceInnerProductFloat(size_t dim)
+    : Distance<float>(diskann::Metric::INNER_PRODUCT)
 {
-    dist_func_ = vsag::GetInnerProductDistanceFunc(dim);
+    dist_func_ = vsag::InnerProductDistance;
 }
 
 float VsagDistanceInnerProductFloat::compare(const float *a, const float *b, uint32_t size) const
