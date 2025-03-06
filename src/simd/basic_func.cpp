@@ -134,7 +134,7 @@ GetINT8InnerProductDistance() {
 }
 DistanceFuncType INT8InnerProductDistance = GetINT8InnerProductDistance();
 
-static PQDistanceFunc
+static PQDistanceFuncType
 GetPQDistanceFloat256() {
     if (SimdStatus::SupportAVX512()) {
 #if defined(ENABLE_AVX512)
@@ -155,9 +155,9 @@ GetPQDistanceFloat256() {
     }
     return generic::PQDistanceFloat256;
 }
-PQDistanceFunc PQDistanceFloat256 = GetPQDistanceFloat256();
+PQDistanceFuncType PQDistanceFloat256 = GetPQDistanceFloat256();
 
-static PrefetchFunc
+static PrefetchFuncType
 GetPrefetch() {
     if (SimdStatus::SupportSSE()) {
 #if defined(ENABLE_SSE)
@@ -166,5 +166,5 @@ GetPrefetch() {
     }
     return generic::Prefetch;
 }
-PrefetchFunc Prefetch = GetPrefetch();
+PrefetchFuncType Prefetch = GetPrefetch();
 }  // namespace vsag

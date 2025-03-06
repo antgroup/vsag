@@ -26,7 +26,7 @@ class L2Space : public SpaceInterface {
 
 public:
     explicit L2Space(size_t dim) {
-        fstdistfunc_ = vsag::GetL2DistanceFunc(dim);
+        fstdistfunc_ = vsag::L2Sqr;
         dim_ = dim;
         data_size_ = dim * sizeof(float);
     }

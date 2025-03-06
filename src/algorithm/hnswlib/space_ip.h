@@ -29,10 +29,10 @@ public:
     explicit InnerProductSpace(size_t dim, vsag::DataTypes type) {
         dim_ = dim;
         if (type == vsag::DataTypes::DATA_TYPE_FLOAT) {
-            fstdistfunc_ = vsag::GetInnerProductDistanceFunc(dim);
+            fstdistfunc_ = vsag::InnerProductDistance;
             data_size_ = dim * sizeof(float);
         } else if (type == vsag::DataTypes::DATA_TYPE_INT8) {
-            fstdistfunc_ = vsag::GetINT8InnerProductDistanceFunc(dim);
+            fstdistfunc_ = vsag::INT8InnerProductDistance;
             data_size_ = dim * sizeof(int8_t);
         } else {
             throw std::invalid_argument(fmt::format("no support for this metric: {}", (int)type));
