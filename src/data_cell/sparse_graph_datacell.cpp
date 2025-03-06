@@ -26,9 +26,8 @@ SparseGraphDataCell::SparseGraphDataCell(Allocator* allocator, uint32_t max_degr
 
 SparseGraphDataCell::SparseGraphDataCell(const GraphInterfaceParamPtr& param,
                                          const IndexCommonParam& common_param)
-    : SparseGraphDataCell(
-          common_param.allocator_.get(),
-          std::dynamic_pointer_cast<GraphDataCellParameter>(param)->max_degree_ / 2) {
+    : SparseGraphDataCell(common_param.allocator_.get(),
+                          std::dynamic_pointer_cast<GraphDataCellParameter>(param)->max_degree_) {
 }
 
 void
