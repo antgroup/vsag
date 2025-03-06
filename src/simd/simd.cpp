@@ -68,24 +68,4 @@ setup_simd() {
     return ret;
 }
 
-DistanceFunc
-GetInnerProductDistanceFunc(size_t dim) {
-    return vsag::InnerProductDistance;
-}
-
-DistanceFunc
-GetINT8InnerProductDistanceFunc(size_t dim) {
-    return vsag::INT8InnerProductDistance;
-}
-
-PQDistanceFunc
-GetPQDistanceFunc() {
-    return vsag::PQDistanceFloat256;
-}
-
-DistanceFunc
-GetL2DistanceFunc(size_t dim) {
-    return vsag::L2Sqr;
-}
-
 }  // namespace vsag
