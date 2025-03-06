@@ -2,7 +2,7 @@ name: Performance
 
 on:
   schedule:
-    - cron: "01 17 * * 1-5" # UTC 17:01 everyday
+    - cron: "01 08 * * 1-5" # UTC 08:01 every weekday
   workflow_dispatch: {}
 
 jobs:
@@ -28,9 +28,7 @@ jobs:
         run: make release
       - name: Run Perf - Recall 90%, 95%, 99%
         run:  |
-          ./build-release/tools/eval/eval_performance .github/perf-90.yml
-          ./build-release/tools/eval/eval_performance .github/perf-95.yml
-          ./build-release/tools/eval/eval_performance .github/perf-99.yml
+          ./build-release/tools/eval/eval_performance .github/perf-mini.yml
       - name: Send Report
         run:  |
-          python3 scripts/perf_reports/dingding.py /tmp/perf-90.json /tmp/perf-95.json /tmp/perf-99.json || echo "send report to dingding failed"
+          python3 scripts/perf_reports/dingding.py /tmp/github-perf.json || echo "send report to dingding failed"
