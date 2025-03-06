@@ -19,6 +19,9 @@
 
 #include <random>
 
+#include "byte_buffer.h"
+#include "simd/fp32_simd.h"
+
 namespace vsag {
 
 KMeansCluster::KMeansCluster(int32_t dim, Allocator* allocator) : dim_(dim), allocator_(allocator) {
@@ -27,6 +30,7 @@ KMeansCluster::KMeansCluster(int32_t dim, Allocator* allocator) : dim_(dim), all
 KMeansCluster::~KMeansCluster() {
     if (k_centroids_ != nullptr) {
         allocator_->Deallocate(k_centroids_);
+        k_centroids_ = nullptr;
     }
 }
 
@@ -35,6 +39,7 @@ KMeansCluster::Run(uint32_t k, const float* datas, uint64_t count, int iter) {
     // Allocate space for centroids
     if (k_centroids_ != nullptr) {
         allocator_->Deallocate(k_centroids_);
+        k_centroids_ = nullptr;
     }
     uint64_t size = static_cast<uint64_t>(k) * static_cast<uint64_t>(dim_) * sizeof(float);
     k_centroids_ = static_cast<float*>(allocator_->Allocate(size));
@@ -50,27 +55,41 @@ KMeansCluster::Run(uint32_t k, const float* datas, uint64_t count, int iter) {
         }
     }
 
+    ByteBuffer y_sqr_buffer(static_cast<uint64_t>(k) * sizeof(float), allocator_);
+    ByteBuffer distances_buffer(static_cast<uint64_t>(k) * count * sizeof(float), allocator_);
+    auto* y_sqr = reinterpret_cast<float*>(y_sqr_buffer.data);
+    auto* distances = reinterpret_cast<float*>(distances_buffer.data);
+
     Vector<int> labels(count, -1, this->allocator_);
     bool have_empty = false;
     for (int it = 0; it < iter; ++it) {
         bool has_converged = true;
 
-        // Assign labels
+        for (int64_t i = 0; i < k; ++i) {
+            y_sqr[i] = FP32ComputeIP(k_centroids_ + i * dim_, k_centroids_ + i * dim_, dim_);
+        }
+
+        cblas_sgemm(CblasColMajor,
+                    CblasTrans,
+                    CblasNoTrans,
+                    static_cast<blasint>(k),
+                    static_cast<blasint>(count),
+                    dim_,
+                    -2.0F,
+                    k_centroids_,
+                    dim_,
+                    datas,
+                    dim_,
+                    0.0F,
+                    distances,
+                    static_cast<blasint>(k));
+
         for (uint64_t i = 0; i < count; ++i) {
-            float min_distance = std::numeric_limits<float>::max();
-            int32_t min_index = -1;
-            const float* x = datas + i * static_cast<uint64_t>(dim_);
-            for (int32_t j = 0; j < k; ++j) {
-                const float* y = k_centroids_ + j * static_cast<uint64_t>(dim_);
-                float dist = cblas_sdot(dim_, x, 1, x, 1) + cblas_sdot(dim_, y, 1, y, 1) -
-                             2 * cblas_sdot(dim_, x, 1, y, 1);
-                if (dist < min_distance) {
-                    min_distance = dist;
-                    min_index = j;
-                }
-            }
+            cblas_saxpy(static_cast<blasint>(k), 1.0, y_sqr, 1, distances + i * k, 1);
+            auto* min_elem = std::min_element(distances + i * k, distances + i * k + k);
+            auto min_index = std::distance(distances + i * k, min_elem);
             if (min_index != labels[i]) {
-                labels[i] = min_index;
+                labels[i] = static_cast<int>(min_index);
                 has_converged = false;
             }
         }
