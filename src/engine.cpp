@@ -96,10 +96,7 @@ Engine::CreateIndex(const std::string& origin_name, const std::string& parameter
             if (parsed_params.contains(INDEX_PARAM)) {
                 json = std::move(parsed_params[INDEX_PARAM]);
             }
-            BruteForceParameter param;
-            param.FromJson(json);
-            auto brute_force = std::make_shared<BruteForce>(param, index_common_params);
-
+            auto brute_force = std::make_shared<IndexImpl<BruteForce>>(json, index_common_params);
             return brute_force;
         } else if (name == INDEX_DISKANN) {
             // read parameters from json, throw exception if not exists
