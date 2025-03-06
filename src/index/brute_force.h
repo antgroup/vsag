@@ -15,6 +15,7 @@
 
 #pragma once
 
+#include "algorithm/inner_index_interface.h"
 #include "base_filter_functor.h"
 #include "brute_force_parameter.h"
 #include "common.h"
@@ -22,109 +23,54 @@
 #include "index_feature_list.h"
 #include "label_table.h"
 #include "typing.h"
-#include "vsag/index.h"
 
 namespace vsag {
-class BruteForce : public Index {
+class BruteForce : public InnerIndexInterface {
 public:
-    explicit BruteForce(const BruteForceParameter& param, const IndexCommonParam& common_param);
+    static ParamPtr
+    MappingExternalParamAndCheck(const JsonType& external_param,
+                                 const IndexCommonParam& common_param);
 
-    ~BruteForce() override;
+public:
+    explicit BruteForce(const BruteForceParameterPtr& param, const IndexCommonParam& common_param);
 
-    tl::expected<std::vector<int64_t>, Error>
-    Build(const DatasetPtr& data) override {
-        SAFE_CALL(return this->build(data));
+    explicit BruteForce(const ParamPtr& param, const IndexCommonParam& common_param)
+        : BruteForce(std::dynamic_pointer_cast<BruteForceParameter>(param), common_param){};
+
+    ~BruteForce() override = default;
+
+    [[nodiscard]] std::string
+    GetName() const override {
+        return INDEX_BRUTE_FORCE;
     }
 
-    tl::expected<std::vector<int64_t>, Error>
-    Add(const DatasetPtr& data) override {
-        SAFE_CALL(return this->add(data));
-    }
+    std::vector<int64_t>
+    Build(const DatasetPtr& data) override;
 
-    tl::expected<DatasetPtr, Error>
+    std::vector<int64_t>
+    Add(const DatasetPtr& data) override;
+
+    DatasetPtr
     KnnSearch(const DatasetPtr& query,
               int64_t k,
               const std::string& parameters,
-              BitsetPtr invalid = nullptr) const override {
-        std::function<bool(int64_t)> func = [&invalid](int64_t id) -> bool {
-            int64_t bit_index = id & ROW_ID_MASK;
-            return invalid->Test(bit_index);
-        };
-        if (invalid == nullptr) {
-            func = nullptr;
-        }
-        SAFE_CALL(return this->knn_search(query, k, parameters, func));
-    }
+              const FilterPtr& filter) const override;
 
-    tl::expected<DatasetPtr, Error>
-    KnnSearch(const DatasetPtr& query,
-              int64_t k,
-              const std::string& parameters,
-              const std::function<bool(int64_t)>& filter) const override {
-        SAFE_CALL(return this->knn_search(query, k, parameters, filter));
-    }
-
-    tl::expected<DatasetPtr, Error>
+    DatasetPtr
     RangeSearch(const DatasetPtr& query,
                 float radius,
                 const std::string& parameters,
-                int64_t limited_size = -1) const override {
-        SAFE_CALL(return this->range_search(query, radius, parameters, nullptr, limited_size));
-    }
+                const FilterPtr& filter,
+                int64_t limited_size = -1) const override;
 
-    tl::expected<DatasetPtr, Error>
-    RangeSearch(const DatasetPtr& query,
-                float radius,
-                const std::string& parameters,
-                BitsetPtr invalid,
-                int64_t limited_size = -1) const override {
-        BitsetOrCallbackFilter filter(invalid);
-        SAFE_CALL(return this->range_search(query, radius, parameters, &filter, limited_size));
-    }
+    float
+    CalcDistanceById(const float* vector, int64_t id) const override;
 
-    tl::expected<DatasetPtr, Error>
-    RangeSearch(const DatasetPtr& query,
-                float radius,
-                const std::string& parameters,
-                const std::function<bool(int64_t)>& filter,
-                int64_t limited_size) const override {
-        BitsetOrCallbackFilter callback(filter);
-        SAFE_CALL(return this->range_search(query, radius, parameters, &callback, limited_size));
-    }
+    void
+    Serialize(StreamWriter& writer) const override;
 
-    tl::expected<float, Error>
-    CalcDistanceById(const float* vector, int64_t id) const override {
-        SAFE_CALL(return this->calculate_distance_by_id(vector, id));
-    };
-
-    tl::expected<BinarySet, Error>
-    Serialize() const override {
-        SAFE_CALL(return this->serialize());
-    }
-
-    tl::expected<void, Error>
-    Serialize(std::ostream& out_stream) override {
-        SAFE_CALL(this->serialize(out_stream));
-        return {};
-    }
-
-    tl::expected<void, Error>
-    Deserialize(std::istream& in_stream) override {
-        SAFE_CALL(this->deserialize(in_stream));
-        return {};
-    }
-
-    tl::expected<void, Error>
-    Deserialize(const BinarySet& binary_set) override {
-        SAFE_CALL(this->deserialize(binary_set));
-        return {};
-    };
-
-    tl::expected<void, Error>
-    Deserialize(const ReaderSet& reader_set) override {
-        SAFE_CALL(this->deserialize(reader_set));
-        return {};
-    }
+    void
+    Deserialize(StreamReader& reader) override;
 
     [[nodiscard]] int64_t
     GetNumElements() const override {
@@ -137,59 +83,7 @@ public:
     [[nodiscard]] uint64_t
     EstimateMemory(uint64_t num_elements) const override;
 
-    [[nodiscard]] bool
-    CheckFeature(IndexFeature feature) const override;
-
-    [[nodiscard]] bool
-    CheckIdExist(int64_t id) const override;
-
 private:
-    std::vector<int64_t>
-    build(const DatasetPtr& data);
-
-    std::vector<int64_t>
-    add(const DatasetPtr& data);
-
-    DatasetPtr
-    knn_search(const DatasetPtr& query,
-               int64_t k,
-               const std::string& parameters,
-               const std::function<bool(int64_t)>& filter) const;
-
-    DatasetPtr
-    range_search(const DatasetPtr& query,
-                 float radius,
-                 const std::string& parameters,
-                 BaseFilterFunctor* filter_ptr,
-                 int64_t limited_size) const;
-
-    float
-    calculate_distance_by_id(const float* vector, int64_t id) const;
-
-    [[nodiscard]] BinarySet
-    serialize() const;
-
-    void
-    serialize(std::ostream& out_stream) const;
-
-    void
-    serialize(StreamWriter& writer) const;
-
-    void
-    deserialize(std::istream& in_stream);
-
-    void
-    deserialize(const BinarySet& binary_set);
-
-    void
-    deserialize(const ReaderSet& reader_set);
-
-    void
-    deserialize(StreamReader& reader);
-
-    uint64_t
-    cal_serialize_size() const;
-
     Vector<DatasetPtr>
     split_dataset_by_duplicate_label(const DatasetPtr& dataset,
                                      std::vector<LabelType>& failed_ids) const;
@@ -200,13 +94,10 @@ private:
 private:
     FlattenInterfacePtr inner_codes_{nullptr};
 
-    LabelTablePtr label_table_;
-    std::shared_ptr<Allocator> allocator_{nullptr};
+    Allocator* const allocator_{nullptr};
 
     int64_t dim_{0};
 
     uint64_t total_count_{0};
-
-    IndexFeatureList feature_list_{};
 };
 }  // namespace vsag
