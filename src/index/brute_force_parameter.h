@@ -33,4 +33,6 @@ public:
     FlattenDataCellParamPtr flatten_param_;
 };
 
+using BruteForceParameterPtr = std::shared_ptr<BruteForceParameter>;
+
 }  // namespace vsag
