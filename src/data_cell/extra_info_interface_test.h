@@ -23,8 +23,8 @@
 namespace vsag {
 class ExtraInfoInterfaceTest {
 public:
-    ExtraInfoInterfaceTest(ExtraInfoInterfacePtr extra_info)
-        : extra_info_(extra_info) {}
+    ExtraInfoInterfaceTest(ExtraInfoInterfacePtr extra_info) : extra_info_(extra_info) {
+    }
 
     void
     BasicTest(uint64_t base_count);

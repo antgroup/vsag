@@ -66,7 +66,8 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
     }
     this->init_features();
     if (extra_info_size_ > 0) {
-        this->extra_infos_ = ExtraInfoInterface::MakeInstance(hgraph_param->extra_info_param_, common_param);
+        this->extra_infos_ =
+            ExtraInfoInterface::MakeInstance(hgraph_param->extra_info_param_, common_param);
     }
 }
 
@@ -107,7 +108,8 @@ HGraph::Add(const DatasetPtr& data) {
         }
         this->hnsw_add(data_ptr);
         if (this->extra_info_size_ > 0) {
-            this->extra_infos_->BatchInsertExtraInfo(data_ptr->GetExtraInfos(), data_ptr->GetNumElements());
+            this->extra_infos_->BatchInsertExtraInfo(data_ptr->GetExtraInfos(),
+                                                     data_ptr->GetNumElements());
         }
     }
     return failed_ids;
@@ -178,9 +180,7 @@ HGraph::KnnSearch(const DatasetPtr& query,
         ids[j] = this->label_table_->GetLabelById(search_result.top().second);
         if (extra_infos != nullptr) {
             this->extra_infos_->GetExtraInfoById(search_result.top().second, tmp_extra_info.get());
-            memcpy(extra_infos + extra_info_size_ * j,
-                   tmp_extra_info.get(),
-                   extra_info_size_);
+            memcpy(extra_infos + extra_info_size_ * j, tmp_extra_info.get(), extra_info_size_);
         }
         search_result.pop();
     }
@@ -217,7 +217,8 @@ HGraph::EstimateMemory(uint64_t num_elements) const {
     }
 
     if (extra_info_size_ > 0 && this->extra_infos_->InMemory()) {
-        auto extra_info_memory = this->extra_infos_->ExtraInfoSize() * this->extra_infos_->TotalCount();
+        auto extra_info_memory =
+            this->extra_infos_->ExtraInfoSize() * this->extra_infos_->TotalCount();
         estimate_memory += block_memory_ceil(extra_info_memory, block_size);
     }
 
@@ -466,9 +467,7 @@ HGraph::RangeSearch(const DatasetPtr& query,
         ids[j] = this->label_table_->GetLabelById(search_result.top().second);
         if (extra_infos != nullptr) {
             this->extra_infos_->GetExtraInfoById(search_result.top().second, tmp_extra_info.get());
-            memcpy(extra_infos + extra_info_size_ * j,
-                   tmp_extra_info.get(),
-                   extra_info_size_);
+            memcpy(extra_infos + extra_info_size_ * j, tmp_extra_info.get(), extra_info_size_);
         }
         search_result.pop();
     }

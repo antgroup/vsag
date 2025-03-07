@@ -217,7 +217,7 @@ public:
 
     DatasetPtr
     ExtraInfos(const char* extra_info) override {
-        this->data_[EXTRA_INFOS] = reinterpret_cast<const int64_t *>(extra_info);
+        this->data_[EXTRA_INFOS] = reinterpret_cast<const int64_t*>(extra_info);
         return shared_from_this();
     }
 

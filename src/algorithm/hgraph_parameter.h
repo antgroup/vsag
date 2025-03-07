@@ -15,9 +15,9 @@
 
 #pragma once
 
+#include "data_cell/extra_info_datacell_parameter.h"
 #include "data_cell/flatten_datacell_parameter.h"
 #include "data_cell/graph_interface_parameter.h"
-#include "data_cell/extra_info_datacell_parameter.h"
 #include "parameter.h"
 
 namespace vsag {

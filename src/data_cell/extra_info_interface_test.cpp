@@ -36,7 +36,8 @@ ExtraInfoInterfaceTest::BasicTest(uint64_t base_count) {
     InnerIdType last_one = base_count + old_count - 1;
     extra_info_->InsertExtraInfo(extra_infos.data());
     extra_info_->BatchInsertExtraInfo(extra_infos.data() + extra_info_size, base_count - 2);
-    extra_info_->BatchInsertExtraInfo(extra_infos.data() + (base_count - 1) * extra_info_size, 1, &last_one);
+    extra_info_->BatchInsertExtraInfo(
+        extra_infos.data() + (base_count - 1) * extra_info_size, 1, &last_one);
     REQUIRE(extra_info_->TotalCount() == base_count + old_count);
 }
 void

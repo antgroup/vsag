@@ -41,7 +41,9 @@ public:
                     InnerIdType idx = std::numeric_limits<InnerIdType>::max()) = 0;
 
     virtual void
-    BatchInsertExtraInfo(const char* extra_infos, InnerIdType count, InnerIdType* idx = nullptr) = 0;
+    BatchInsertExtraInfo(const char* extra_infos,
+                         InnerIdType count,
+                         InnerIdType* idx = nullptr) = 0;
 
     virtual void
     Prefetch(InnerIdType id) = 0;
@@ -54,7 +56,7 @@ public:
 
     virtual const char*
     GetExtraInfoById(InnerIdType id, bool& need_release) const {
-      return nullptr;
+        return nullptr;
     }
 
     virtual bool

@@ -21,15 +21,14 @@
 #include <utility>
 
 #include "default_allocator.h"
-#include "fixtures.h"
 #include "extra_info_interface_test.h"
+#include "fixtures.h"
 #include "safe_allocator.h"
 
 using namespace vsag;
 
 void
-TestExtraInfoDataCell(ExtraInfoDataCellParamPtr& param,
-                    IndexCommonParam& common_param) {
+TestExtraInfoDataCell(ExtraInfoDataCellParamPtr& param, IndexCommonParam& common_param) {
     auto count = GENERATE(100, 1000);
     auto extra_info = ExtraInfoInterface::MakeInstance(param, common_param);
 

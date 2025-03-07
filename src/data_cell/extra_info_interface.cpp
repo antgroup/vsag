@@ -25,7 +25,7 @@
 namespace vsag {
 ExtraInfoInterfacePtr
 ExtraInfoInterface::MakeInstance(const ExtraInfoDataCellParamPtr& param,
-                               const IndexCommonParam& common_param) {
+                                 const IndexCommonParam& common_param) {
     return std::make_shared<ExtraInfoDataCell>(param, common_param);
 }
 

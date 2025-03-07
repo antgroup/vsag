@@ -40,10 +40,9 @@ ExtraInfoDataCell::InsertExtraInfo(const char* extra_info, InnerIdType idx) {
             extra_info_size_,
             static_cast<uint64_t>(idx) * static_cast<uint64_t>(extra_info_size_));
     } else {
-        io_->Write(
-            reinterpret_cast<const uint8_t*>(extra_info),
-            extra_info_size_,
-            static_cast<uint64_t>(idx) * static_cast<uint64_t>(extra_info_size_));
+        io_->Write(reinterpret_cast<const uint8_t*>(extra_info),
+                   extra_info_size_,
+                   static_cast<uint64_t>(idx) * static_cast<uint64_t>(extra_info_size_));
     }
 }
 
@@ -59,9 +58,10 @@ ExtraInfoDataCell::BatchInsertExtraInfo(const char* extra_infos,
                 static_cast<uint64_t>(count) * static_cast<uint64_t>(extra_info_size_),
                 static_cast<uint64_t>(total_count_) * static_cast<uint64_t>(extra_info_size_));
         } else {
-            io_->Write(reinterpret_cast<const uint8_t*>(extra_infos),
-                       static_cast<uint64_t>(count) * static_cast<uint64_t>(extra_info_size_),
-                       static_cast<uint64_t>(total_count_) * static_cast<uint64_t>(extra_info_size_));
+            io_->Write(
+                reinterpret_cast<const uint8_t*>(extra_infos),
+                static_cast<uint64_t>(count) * static_cast<uint64_t>(extra_info_size_),
+                static_cast<uint64_t>(total_count_) * static_cast<uint64_t>(extra_info_size_));
         }
         total_count_ += count;
     } else {
@@ -122,9 +122,10 @@ ExtraInfoDataCell::GetExtraInfoById(InnerIdType id, bool& need_release) const {
             static_cast<uint64_t>(id) * static_cast<uint64_t>(extra_info_size_),
             need_release));
     } else {
-        return reinterpret_cast<const char*>(io_->Read(extra_info_size_,
-                         static_cast<uint64_t>(id) * static_cast<uint64_t>(extra_info_size_),
-                         need_release));
+        return reinterpret_cast<const char*>(
+            io_->Read(extra_info_size_,
+                      static_cast<uint64_t>(id) * static_cast<uint64_t>(extra_info_size_),
+                      need_release));
     }
 }
 
@@ -136,10 +137,9 @@ ExtraInfoDataCell::GetExtraInfoById(InnerIdType id, char* extra_info) const {
             static_cast<uint64_t>(id) * static_cast<uint64_t>(extra_info_size_),
             reinterpret_cast<uint8_t*>(extra_info));
     } else {
-        return io_->Read(
-            extra_info_size_,
-            static_cast<uint64_t>(id) * static_cast<uint64_t>(extra_info_size_),
-            reinterpret_cast<uint8_t*>(extra_info));
+        return io_->Read(extra_info_size_,
+                         static_cast<uint64_t>(id) * static_cast<uint64_t>(extra_info_size_),
+                         reinterpret_cast<uint8_t*>(extra_info));
     }
 }
 
