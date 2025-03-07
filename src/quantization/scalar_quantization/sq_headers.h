@@ -16,6 +16,7 @@
 #pragma once
 
 #include "bf16_quantizer.h"
+#include "fp16_quantizer.h"
 #include "sq4_quantizer.h"
 #include "sq4_uniform_quantizer.h"
 #include "sq8_quantizer.h"

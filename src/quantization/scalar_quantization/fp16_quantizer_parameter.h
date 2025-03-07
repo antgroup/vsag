@@ -15,9 +15,24 @@
 
 #pragma once
 
-#include "bf16_quantizer_parameter.h"
-#include "fp16_quantizer_parameter.h"
-#include "sq4_quantizer_parameter.h"
-#include "sq4_uniform_quantizer_parameter.h"
-#include "sq8_quantizer_parameter.h"
-#include "sq8_uniform_quantizer_parameter.h"
+#include "quantization/quantizer_parameter.h"
+
+namespace vsag {
+class FP16QuantizerParameter : public QuantizerParameter {
+public:
+    FP16QuantizerParameter();
+
+    ~FP16QuantizerParameter() override = default;
+
+    void
+    FromJson(const JsonType& json) override;
+
+    JsonType
+    ToJson() override;
+
+public:
+};
+
+using FP16QuantizerParamPtr = std::shared_ptr<FP16QuantizerParameter>;
+
+}  // namespace vsag
