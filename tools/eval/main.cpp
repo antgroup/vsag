@@ -261,6 +261,10 @@ main(int argc, char** argv) {
                 }
             }
         }
+        // by default, eval output as text format
+        if (job.exporters.empty()) {
+            std::cout << json_to_table(results) << std::endl;
+        }
         pstr = nullptr;
     } else {
         argparse::ArgumentParser program("eval_performance");
