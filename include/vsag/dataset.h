@@ -217,6 +217,23 @@ public:
      */
     virtual const std::string*
     GetPaths() const = 0;
+
+    /**
+     * @brief Sets the extra info for the dataset.
+     *
+     * @param paths Pointer to extra info.
+     * @return DatasetPtr A shared pointer to the dataset with extra info.
+     */
+    virtual DatasetPtr
+    ExtraInfos(const char* extra_info) = 0;
+
+    /**
+     * @brief Retrieves the extra info of the dataset.
+     *
+     * @return const char* Pointer to the extra info.
+     */
+    virtual const char*
+    GetExtraInfos() const = 0;
 };
 
 };  // namespace vsag
