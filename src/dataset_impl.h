@@ -215,6 +215,20 @@ public:
         return nullptr;
     }
 
+    DatasetPtr
+    ExtraInfos(const char* extra_info) override {
+        this->data_[EXTRA_INFOS] = reinterpret_cast<const int64_t *>(extra_info);
+        return shared_from_this();
+    }
+
+    const char*
+    GetExtraInfos() const override {
+        if (auto iter = this->data_.find(EXTRA_INFOS); iter != this->data_.end()) {
+            return reinterpret_cast<const char*>(std::get<const int64_t*>(iter->second));
+        }
+        return nullptr;
+    }
+
 private:
     bool owner_ = true;
     std::unordered_map<std::string, var> data_;

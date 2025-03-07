@@ -15,18 +15,13 @@
 
 #pragma once
 
-#include "data_cell/flatten_datacell_parameter.h"
-#include "data_cell/graph_interface_parameter.h"
-#include "data_cell/extra_info_datacell_parameter.h"
+#include "io/io_parameter.h"
 #include "parameter.h"
-
 namespace vsag {
 
-class HGraphParameter : public Parameter {
+class ExtraInfoDataCellParameter : public Parameter {
 public:
-    explicit HGraphParameter(const JsonType& json);
-
-    HGraphParameter();
+    explicit ExtraInfoDataCellParameter();
 
     void
     FromJson(const JsonType& json) override;
@@ -35,18 +30,10 @@ public:
     ToJson() override;
 
 public:
-    FlattenDataCellParamPtr base_codes_param_{nullptr};
-    FlattenDataCellParamPtr precise_codes_param_{nullptr};
-    GraphInterfaceParamPtr bottom_graph_param_{nullptr};
-    ExtraInfoDataCellParamPtr extra_info_param_{nullptr};
-
-    bool use_reorder_{false};
-    uint64_t ef_construction_{400};
-    uint64_t build_thread_count_{100};
-
-    std::string name_;
+    IOParamPtr io_parameter_{nullptr};
+    uint64_t extra_info_size_{0};
 };
 
-using HGraphParameterPtr = std::shared_ptr<HGraphParameter>;
+using ExtraInfoDataCellParamPtr = std::shared_ptr<ExtraInfoDataCellParameter>;
 
 }  // namespace vsag

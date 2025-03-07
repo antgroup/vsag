@@ -63,6 +63,12 @@ HGraphParameter::FromJson(const JsonType& json) {
             this->build_thread_count_ = build_params[BUILD_THREAD_COUNT];
         }
     }
+
+    CHECK_ARGUMENT(json.contains(HGRAPH_EXTRA_INFO_KEY),
+                   fmt::format("hgraph parameters must contains {}", HGRAPH_EXTRA_INFO_KEY));
+    const auto& extra_info_json = json[HGRAPH_EXTRA_INFO_KEY];
+    this->extra_info_param_ = std::make_shared<ExtraInfoDataCellParameter>();
+    this->extra_info_param_->FromJson(extra_info_json);
 }
 
 JsonType
@@ -79,6 +85,7 @@ HGraphParameter::ToJson() {
 
     json[BUILD_PARAMS_KEY][BUILD_EF_CONSTRUCTION] = this->ef_construction_;
     json[BUILD_PARAMS_KEY][BUILD_THREAD_COUNT] = this->build_thread_count_;
+    json[HGRAPH_EXTRA_INFO_KEY] = this->extra_info_param_->ToJson();
     return json;
 }
 
