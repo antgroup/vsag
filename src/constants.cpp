@@ -24,6 +24,7 @@ const char* const INDEX_HNSW = "hnsw";
 const char* const INDEX_FRESH_HNSW = "fresh_hnsw";
 const char* const INDEX_PYRAMID = "pyramid";
 const char* const INDEX_BRUTE_FORCE = "brute_force";
+const char* const INDEX_IVF = "ivf";
 
 const char* const DIM = "dim";
 const char* const NUM_ELEMENTS = "num_elements";
@@ -132,5 +133,11 @@ const char* const HGRAPH_PRECISE_FILE_PATH = "precise_file_path";
 
 const char* const BRUTE_FORCE_QUANTIZATION_TYPE = "quantization_type";
 const char* const BRUTE_FORCE_IO_TYPE = "io_type";
+
+const char* const IVF_USE_RESIDUAL = "use_residual";
+const char* const IVF_BUCKETS_COUNT = "buckets_count";
+const char* const IVF_BASE_QUANTIZATION_TYPE = "base_quantization_type";
+const char* const IVF_BASE_IO_TYPE = "base_io_type";
+const char* const IVF_BASE_FILE_PATH = "base_file_path";
 
 };  // namespace vsag

@@ -28,7 +28,6 @@
 #include "vsag/index.h"
 
 namespace vsag {
-
 class InnerIndexInterface {
 public:
     explicit InnerIndexInterface(const ParamPtr& index_param, const IndexCommonParam& common_param);
@@ -38,10 +37,13 @@ public:
     [[nodiscard]] virtual std::string
     GetName() const = 0;
 
+    virtual void
+    InitFeatures() = 0;
+
     virtual std::vector<int64_t>
     Add(const DatasetPtr& base) = 0;
 
-    virtual DatasetPtr
+    [[nodiscard]] virtual DatasetPtr
     KnnSearch(const DatasetPtr& query,
               int64_t k,
               const std::string& parameters,

@@ -1040,8 +1040,8 @@ tl::expected<void, Error>
 HNSW::merge(const std::vector<MergeUnit>& merge_units) {
     SlowTaskTimer t0("hnsw merge");
     auto param = std::make_shared<FlattenDataCellParameter>();
-    param->io_parameter_ = std::make_shared<MemoryBlockIOParameter>();
-    param->quantizer_parameter_ = std::make_shared<FP32QuantizerParameter>();
+    param->io_parameter = std::make_shared<MemoryBlockIOParameter>();
+    param->quantizer_parameter = std::make_shared<FP32QuantizerParameter>();
     GraphDataCellParamPtr graph_param_ptr = std::make_shared<GraphDataCellParameter>();
     graph_param_ptr->io_parameter_ = std::make_shared<vsag::MemoryBlockIOParameter>();
     graph_param_ptr->max_degree_ = max_degree_ * 2;

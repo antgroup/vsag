@@ -46,24 +46,23 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
       dim_(common_param.dim_),
       metric_(common_param.metric_),
       route_graphs_(common_param.allocator_.get()),
-      use_reorder_(hgraph_param->use_reorder_),
-      ef_construct_(hgraph_param->ef_construction_),
-      build_thread_count_(hgraph_param->build_thread_count_) {
+      use_reorder_(hgraph_param->use_reorder),
+      ef_construct_(hgraph_param->ef_construction),
+      build_thread_count_(hgraph_param->build_thread_count) {
     neighbors_mutex_ = std::make_shared<PointsMutex>(0, common_param.allocator_.get());
     this->basic_flatten_codes_ =
-        FlattenInterface::MakeInstance(hgraph_param->base_codes_param_, common_param);
+        FlattenInterface::MakeInstance(hgraph_param->base_codes_param, common_param);
     if (use_reorder_) {
         this->high_precise_codes_ =
-            FlattenInterface::MakeInstance(hgraph_param->precise_codes_param_, common_param);
+            FlattenInterface::MakeInstance(hgraph_param->precise_codes_param, common_param);
     }
     this->bottom_graph_ =
-        GraphInterface::MakeInstance(hgraph_param->bottom_graph_param_, common_param);
+        GraphInterface::MakeInstance(hgraph_param->bottom_graph_param, common_param);
     mult_ = 1 / log(1.0 * static_cast<double>(this->bottom_graph_->MaximumDegree()));
     resize(bottom_graph_->max_capacity_);
     if (this->build_thread_count_ > 1) {
         this->build_pool_ = std::make_unique<progschj::ThreadPool>(this->build_thread_count_);
     }
-    this->init_features();
 }
 
 std::vector<int64_t>
@@ -889,7 +888,7 @@ static const std::string HGRAPH_PARAMS_TEMPLATE =
     })";
 
 ParamPtr
-HGraph::MappingExternalParamAndCheck(const JsonType& external_param,
+HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
                                      const IndexCommonParam& common_param) {
     if (common_param.data_type_ == DataTypes::DATA_TYPE_INT8) {
         throw std::invalid_argument(fmt::format("HGraph not support {} datatype", DATATYPE_INT8));
