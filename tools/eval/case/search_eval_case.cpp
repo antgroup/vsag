@@ -151,6 +151,8 @@ SearchEvalCase::do_knn_search() {
     auto min_query = std::max(query_count, 10000L);
     for (auto& monitor : this->monitors_) {
         monitor->Start();
+
+#pragma omp parallel for schedule(dynamic)
         for (int64_t id = 0; id < min_query; ++id) {
             auto i = id % query_count;
             auto query = vsag::Dataset::Make();
