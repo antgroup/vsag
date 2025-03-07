@@ -72,4 +72,6 @@ private:
     uint32_t prefetch_jump_visit_size_{1};
 };
 
+using BasicSearcherPtr = std::shared_ptr<BasicSearcher>;
+
 }  // namespace vsag
