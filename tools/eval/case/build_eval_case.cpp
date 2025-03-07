@@ -15,12 +15,15 @@
 
 #include "./build_eval_case.h"
 
+#include <omp.h>
+
 #include <algorithm>
 #include <filesystem>
 #include <utility>
 
 #include "../monitor/duration_monitor.h"
 #include "../monitor/memory_peak_monitor.h"
+#include "vsag/options.h"
 
 namespace vsag::eval {
 
