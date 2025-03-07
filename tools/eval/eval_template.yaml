@@ -10,5 +10,5 @@ eval_case1:
     search_mode: "knn" # ["knn", "range", "knn_filter", "range_filter"]
     range: 0.5
     delete_index_after_search: false # free up storage space used by index
-
-
+    num_threads_building: 16
+    num_threads_searching: 4

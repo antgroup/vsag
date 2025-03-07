@@ -15,6 +15,8 @@
 
 #include "latency_monitor.h"
 
+#include <mutex>
+
 namespace vsag::eval {
 
 LatencyMonitor::LatencyMonitor(uint64_t max_record_counts) : Monitor("latency_monitor") {
@@ -40,6 +42,7 @@ LatencyMonitor::GetResult() {
 }
 void
 LatencyMonitor::Record(void* input) {
+    std::lock_guard<std::mutex> lock(record_mutex_);
     auto end_time = Clock::now();
     double duration = std::chrono::duration<double, std::milli>(end_time - cur_time_).count();
     this->latency_records_.emplace_back(duration);

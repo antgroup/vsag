@@ -16,6 +16,7 @@
 #pragma once
 
 #include <memory>
+#include <mutex>
 #include <nlohmann/json.hpp>
 #include <string>
 #include <variant>
@@ -52,6 +53,7 @@ public:
 
 public:
     std::string name_{};
+    std::mutex record_mutex_;
 };
 
 using MonitorPtr = std::shared_ptr<Monitor>;

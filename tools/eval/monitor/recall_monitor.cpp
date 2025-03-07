@@ -15,6 +15,7 @@
 
 #include "recall_monitor.h"
 
+#include <mutex>
 #include <unordered_set>
 
 #include "../eval_dataset.h"
@@ -62,6 +63,8 @@ RecallMonitor::GetResult() {
 }
 void
 RecallMonitor::Record(void* input) {
+    std::lock_guard<std::mutex> lock(record_mutex_);
+
     auto [neighbors, gt_neighbors, dataset, query_data, topk] =
         *(reinterpret_cast<std::tuple<int64_t*, int64_t*, EvalDataset*, const void*, uint64_t>*>(
             input));
