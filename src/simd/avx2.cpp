@@ -236,11 +236,11 @@ FP16ComputeIP(const uint8_t* query, const uint8_t* codes, uint64_t dim) {
     uint64_t i = 0;
     for (; i + 7 < dim; i += 8) {
         // Load data into registers
-        __m128i query_load = _mm_load_si128(reinterpret_cast<const __m128i*>(query_fp16 + i));
+        __m128i query_load = _mm_loadu_si128(reinterpret_cast<const __m128i*>(query_fp16 + i));
         __m256 query_float = _mm256_cvtph_ps(query_load);
 
         // Load data into registers
-        __m128i code_load = _mm_load_si128(reinterpret_cast<const __m128i*>(codes_fp16 + i));
+        __m128i code_load = _mm_loadu_si128(reinterpret_cast<const __m128i*>(codes_fp16 + i));
         __m256 code_float = _mm256_cvtph_ps(code_load);
 
         sum = _mm256_fmadd_ps(code_float, query_float, sum);
@@ -269,11 +269,11 @@ FP16ComputeL2Sqr(const uint8_t* query, const uint8_t* codes, uint64_t dim) {
     uint64_t i = 0;
     for (; i + 7 < dim; i += 8) {
         // Load data into registers
-        __m128i query_load = _mm_load_si128(reinterpret_cast<const __m128i*>(query_fp16 + i));
+        __m128i query_load = _mm_loadu_si128(reinterpret_cast<const __m128i*>(query_fp16 + i));
         __m256 query_float = _mm256_cvtph_ps(query_load);
 
         // Load data into registers
-        __m128i code_load = _mm_load_si128(reinterpret_cast<const __m128i*>(codes_fp16 + i));
+        __m128i code_load = _mm_loadu_si128(reinterpret_cast<const __m128i*>(codes_fp16 + i));
         __m256 code_float = _mm256_cvtph_ps(code_load);
 
         __m256 diff = _mm256_sub_ps(code_float, query_float);
