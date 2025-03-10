@@ -31,8 +31,6 @@ PyramidParameters::FromJson(const JsonType& json) {
                    fmt::format("pyramid parameters must contains {}", GRAPH_TYPE_ODESCENT));
     const auto& graph_json = json[GRAPH_TYPE_ODESCENT];
     graph_param = GraphInterfaceParameter::GetGraphParameterByJson(graph_json);
-    // FIXME(inabao): This issue, where the edge length in the sparse graph defined in HGraph is half of the intended length, has been addressed here and will be revised in a subsequent PR.
-    std::dynamic_pointer_cast<GraphDataCellParameter>(graph_param)->max_degree_ *= 2;
     odescent_param = std::make_shared<ODescentParameter>();
     odescent_param->FromJson(graph_json);
     this->flatten_data_cell_param = std::make_shared<FlattenDataCellParameter>();
@@ -48,8 +46,6 @@ JsonType
 PyramidParameters::ToJson() {
     JsonType json;
     json[GRAPH_TYPE_ODESCENT] = graph_param->ToJson();
-    json[GRAPH_TYPE_ODESCENT][GRAPH_PARAM_MAX_DEGREE] =
-        std::dynamic_pointer_cast<GraphDataCellParameter>(graph_param)->max_degree_ / 2;
     json[GRAPH_TYPE_ODESCENT].update(odescent_param->ToJson());
     json[PYRAMID_PARAMETER_BASE_CODES] = flatten_data_cell_param->ToJson();
     return json;
