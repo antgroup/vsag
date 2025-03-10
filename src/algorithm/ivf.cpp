@@ -15,8 +15,9 @@
 
 #include "ivf.h"
 
+#include "impl/basic_searcher.h"
 #include "inner_string_params.h"
-#include "ivf_nearest_partition.h"
+#include "ivf_partition/ivf_nearest_partition.h"
 #include "utils/util_functions.h"
 
 namespace vsag {
@@ -217,7 +218,7 @@ IVF::RangeSearch(const vsag::DatasetPtr& query,
         bucket_->ScanBucketById(dist.data(), computer, bucket_id);
         for (int j = 0; j < bucket_size; ++j) {
             if (filter == nullptr or filter->CheckValid(labels[j])) {
-                if (dist[j] <= radius + 2e-6 and dist[j] < cur_heap_top) {
+                if (dist[j] <= radius + THRESHOLD_ERROR and dist[j] < cur_heap_top) {
                     heap.emplace(dist[j], labels[j]);
                 }
                 if (heap.size() > limited_size) {

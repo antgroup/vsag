@@ -47,4 +47,17 @@ public:
 
 using HGraphParameterPtr = std::shared_ptr<HGraphParameter>;
 
+class HGraphSearchParameters {
+public:
+    static HGraphSearchParameters
+    FromJson(const std::string& json_string);
+
+public:
+    int64_t ef_search{30};
+    bool use_reorder{false};
+
+private:
+    HGraphSearchParameters() = default;
+};
+
 }  // namespace vsag
