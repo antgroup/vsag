@@ -118,7 +118,7 @@ public:
 
 public:
     InnerIdType total_count_{0};
-    InnerIdType max_capacity_{0};
+    InnerIdType max_capacity_{2000};
     uint32_t code_size_{0};
     uint32_t prefetch_jump_code_size_{1};
     uint32_t prefetch_cache_line_size_{1};

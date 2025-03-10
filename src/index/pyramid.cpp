@@ -63,7 +63,12 @@ IndexNode::IndexNode(IndexCommonParam* common_param, GraphInterfaceParamPtr grap
 
 void
 IndexNode::BuildGraph(ODescent& odescent) {
-    if (not ids_.empty()) {
+    bool is_ids_empty;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        is_ids_empty = ids_.empty();
+    }
+    if (not is_ids_empty) {
         std::lock_guard<std::mutex> lock(mutex_);
         entry_point_ = ids_[0];
         odescent.Build(ids_);

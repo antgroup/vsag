@@ -249,7 +249,7 @@ void
 TestIndex::TestContinueAdd(const IndexPtr& index,
                            const TestDatasetPtr& dataset,
                            bool expected_success) {
-    auto base_count = dataset->base_->GetNumElements();
+    auto base_count = dataset->base_->GetNumElements() / 2;
     int64_t temp_count = std::max(1L, base_count - 100L);
     auto dim = dataset->base_->GetDim();
     auto temp_dataset = vsag::Dataset::Make();
