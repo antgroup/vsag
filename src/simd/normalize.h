@@ -27,6 +27,10 @@ Normalize(const float* from, float* to, uint64_t dim);
 
 float
 NormalizeWithCentroid(const float* from, const float* centroid, float* to, uint64_t dim);
+
+void
+InverseNormalizeWithCentroid(
+    const float* from, const float* centroid, float* to, uint64_t dim, float norm);
 }  // namespace generic
 
 namespace sse {
@@ -69,6 +73,10 @@ using NormalizeWithCentroidType = float (*)(const float* from,
                                             float* to,
                                             uint64_t dim);
 extern NormalizeWithCentroidType NormalizeWithCentroid;
+
+using InverseNormalizeWithCentroidType =
+    void (*)(const float* from, const float* centroid, float* to, uint64_t dim, float norm);
+extern InverseNormalizeWithCentroidType InverseNormalizeWithCentroid;
 
 using DivScalarType = void (*)(const float* from, float* to, uint64_t dim, float scalar);
 extern DivScalarType DivScalar;
