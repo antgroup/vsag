@@ -15,11 +15,11 @@
 
 #pragma once
 
-#include "algorithm/ivf_partition_strategy.h"
 #include "data_cell/bucket_datacell.h"
 #include "index/index_common_param.h"
 #include "inner_index_interface.h"
 #include "ivf_parameter.h"
+#include "ivf_partition/ivf_partition_strategy.h"
 #include "stream_reader.h"
 #include "stream_writer.h"
 #include "typing.h"
