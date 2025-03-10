@@ -18,7 +18,6 @@
 #include <limits>
 
 namespace vsag {
-constexpr float THRESHOLD_ERROR = 2e-6;
 
 BasicSearcher::BasicSearcher(const IndexCommonParam& common_param) {
     this->allocator_ = common_param.allocator_.get();

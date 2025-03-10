@@ -127,6 +127,7 @@ extern const char* const HGRAPH_BASE_IO_TYPE;
 extern const char* const HGRAPH_BASE_FILE_PATH;
 extern const char* const HGRAPH_PRECISE_IO_TYPE;
 extern const char* const HGRAPH_PRECISE_FILE_PATH;
+extern const char* const HGRAPH_PARAMETER_EF_RUNTIME;
 
 extern const char* const BRUTE_FORCE_QUANTIZATION_TYPE;
 extern const char* const BRUTE_FORCE_IO_TYPE;

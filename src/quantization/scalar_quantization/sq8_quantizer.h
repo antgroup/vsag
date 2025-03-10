@@ -193,10 +193,8 @@ SQ8Quantizer<metric>::ComputeImpl(const uint8_t* codes1, const uint8_t* codes2) 
     if constexpr (metric == MetricType::METRIC_TYPE_L2SQR) {
         return SQ8ComputeCodesL2Sqr(
             codes1, codes2, this->lower_bound_.data(), this->diff_.data(), this->dim_);
-    } else if constexpr (metric == MetricType::METRIC_TYPE_IP) {
-        return 1 - SQ8ComputeCodesIP(
-                       codes1, codes2, this->lower_bound_.data(), this->diff_.data(), this->dim_);
-    } else if constexpr (metric == MetricType::METRIC_TYPE_COSINE) {
+    } else if constexpr (metric == MetricType::METRIC_TYPE_IP or
+                         metric == MetricType::METRIC_TYPE_COSINE) {
         return 1 - SQ8ComputeCodesIP(
                        codes1, codes2, this->lower_bound_.data(), this->diff_.data(), this->dim_);
     } else {
@@ -233,10 +231,8 @@ SQ8Quantizer<metric>::ComputeDistImpl(Computer<SQ8Quantizer>& computer,
     if constexpr (metric == MetricType::METRIC_TYPE_L2SQR) {
         *dists = SQ8ComputeL2Sqr(
             query, codes, this->lower_bound_.data(), this->diff_.data(), this->dim_);
-    } else if constexpr (metric == MetricType::METRIC_TYPE_IP) {
-        *dists = 1 - SQ8ComputeIP(
-                         query, codes, this->lower_bound_.data(), this->diff_.data(), this->dim_);
-    } else if constexpr (metric == MetricType::METRIC_TYPE_COSINE) {
+    } else if constexpr (metric == MetricType::METRIC_TYPE_IP or
+                         metric == MetricType::METRIC_TYPE_COSINE) {
         *dists = 1 - SQ8ComputeIP(
                          query, codes, this->lower_bound_.data(), this->diff_.data(), this->dim_);
     } else {
