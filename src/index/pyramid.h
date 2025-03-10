@@ -21,6 +21,7 @@
 #include "data_cell/graph_interface.h"
 #include "impl/basic_searcher.h"
 #include "impl/odescent_graph_builder.h"
+#include "index_feature_list.h"
 #include "io/memory_io_parameter.h"
 #include "logger.h"
 #include "pyramid_zparameters.h"
@@ -56,7 +57,7 @@ public:
     InnerIdType entry_point_{0};
     uint32_t level_{0};
 
-    Vector<InnerIdType> ids_;  //
+    Vector<InnerIdType> ids_;
 
 private:
     UnorderedMap<std::string, std::shared_ptr<IndexNode>> children_;
@@ -74,6 +75,8 @@ public:
         flatten_interface_ptr_ =
             FlattenInterface::MakeInstance(pyramid_param_.flatten_data_cell_param, common_param_);
         root_ = std::make_shared<IndexNode>(&common_param_, pyramid_param_.graph_param);
+        this->feature_list_ = std::make_shared<IndexFeatureList>();
+        this->init_feature_list();
     }
 
     ~Pyramid() = default;
@@ -159,10 +162,7 @@ public:
 
     bool
     CheckFeature(IndexFeature feature) const override {
-        if (feature == SUPPORT_RANGE_SEARCH_WITH_ID_FILTER) {
-            return true;
-        }
-        return false;
+        return this->feature_list_->CheckFeature(feature);
     }
 
 private:
@@ -213,6 +213,9 @@ private:
     uint64_t
     cal_serialize_size() const;
 
+    void
+    init_feature_list();
+
 private:
     IndexCommonParam common_param_;
     PyramidParameters pyramid_param_;
@@ -223,6 +226,8 @@ private:
     std::unique_ptr<BasicSearcher> searcher_ = nullptr;
     int64_t max_capacity_{0};
     int64_t cur_element_count_{0};
+
+    IndexFeatureListPtr feature_list_{nullptr};
 };
 
 }  // namespace vsag
