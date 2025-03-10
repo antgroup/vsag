@@ -22,6 +22,7 @@ extern const char* const INDEX_HNSW;
 extern const char* const INDEX_FRESH_HNSW;
 extern const char* const INDEX_PYRAMID;
 extern const char* const INDEX_BRUTE_FORCE;
+extern const char* const INDEX_IVF;
 extern const char* const DIM;
 extern const char* const NUM_ELEMENTS;
 extern const char* const IDS;
@@ -129,5 +130,11 @@ extern const char* const HGRAPH_PRECISE_FILE_PATH;
 
 extern const char* const BRUTE_FORCE_QUANTIZATION_TYPE;
 extern const char* const BRUTE_FORCE_IO_TYPE;
+
+extern const char* const IVF_USE_RESIDUAL;
+extern const char* const IVF_BUCKETS_COUNT;
+extern const char* const IVF_BASE_QUANTIZATION_TYPE;
+extern const char* const IVF_BASE_IO_TYPE;
+extern const char* const IVF_BASE_FILE_PATH;
 
 }  // namespace vsag

@@ -22,18 +22,18 @@
 #include "vsag/constants.h"
 namespace vsag {
 
-BruteForceParameter::BruteForceParameter() : flatten_param_(nullptr) {
+BruteForceParameter::BruteForceParameter() : flatten_param(nullptr) {
 }
 
 void
 BruteForceParameter::FromJson(const JsonType& json) {
-    this->flatten_param_ = std::make_shared<FlattenDataCellParameter>();
-    this->flatten_param_->FromJson(json);
+    this->flatten_param = std::make_shared<FlattenDataCellParameter>();
+    this->flatten_param->FromJson(json);
 }
 
 JsonType
 BruteForceParameter::ToJson() {
-    auto json = this->flatten_param_->ToJson();
+    auto json = this->flatten_param->ToJson();
     json["type"] = INDEX_BRUTE_FORCE;
     return json;
 }

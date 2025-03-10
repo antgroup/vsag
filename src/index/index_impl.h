@@ -21,7 +21,7 @@
 
 namespace vsag {
 
-GENERATE_HAS_STATIC_CLASS_FUNCTION(MappingExternalParamAndCheck,
+GENERATE_HAS_STATIC_CLASS_FUNCTION(CheckAndMappingExternalParam,
                                    ParamPtr,
                                    std::declval<const JsonType&>(),
                                    std::declval<const IndexCommonParam&>());
@@ -29,13 +29,14 @@ GENERATE_HAS_STATIC_CLASS_FUNCTION(MappingExternalParamAndCheck,
 template <class T>
 class IndexImpl : public Index {
     static_assert(std::is_base_of<InnerIndexInterface, T>::value);
-    static_assert(has_static_MappingExternalParamAndCheck<T>::value);
+    static_assert(has_static_CheckAndMappingExternalParam<T>::value);
 
 public:
     IndexImpl(const JsonType& external_param, const IndexCommonParam& common_param)
         : Index(), allocator_(common_param.allocator_) {
-        auto param_ptr = T::MappingExternalParamAndCheck(external_param, common_param);
+        auto param_ptr = T::CheckAndMappingExternalParam(external_param, common_param);
         this->inner_index_ = std::make_shared<T>(param_ptr, common_param);
+        this->inner_index_->InitFeatures();
     }
 
     ~IndexImpl() override {

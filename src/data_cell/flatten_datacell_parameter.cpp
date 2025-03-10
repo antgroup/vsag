@@ -26,20 +26,20 @@ void
 FlattenDataCellParameter::FromJson(const JsonType& json) {
     CHECK_ARGUMENT(json.contains(IO_PARAMS_KEY),
                    fmt::format("flatten interface parameters must contains {}", IO_PARAMS_KEY));
-    this->io_parameter_ = IOParameter::GetIOParameterByJson(json[IO_PARAMS_KEY]);
+    this->io_parameter = IOParameter::GetIOParameterByJson(json[IO_PARAMS_KEY]);
 
     CHECK_ARGUMENT(
         json.contains(QUANTIZATION_PARAMS_KEY),
         fmt::format("flatten interface parameters must contains {}", QUANTIZATION_PARAMS_KEY));
-    this->quantizer_parameter_ =
+    this->quantizer_parameter =
         QuantizerParameter::GetQuantizerParameterByJson(json[QUANTIZATION_PARAMS_KEY]);
 }
 
 JsonType
 FlattenDataCellParameter::ToJson() {
     JsonType json;
-    json[IO_PARAMS_KEY] = this->io_parameter_->ToJson();
-    json[QUANTIZATION_PARAMS_KEY] = this->quantizer_parameter_->ToJson();
+    json[IO_PARAMS_KEY] = this->io_parameter->ToJson();
+    json[QUANTIZATION_PARAMS_KEY] = this->quantizer_parameter->ToJson();
     return json;
 }
 }  // namespace vsag

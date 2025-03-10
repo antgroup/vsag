@@ -27,8 +27,7 @@ BruteForce::BruteForce(const BruteForceParameterPtr& param, const IndexCommonPar
       dim_(common_param.dim_),
       allocator_(common_param.allocator_.get()) {
     label_table_ = std::make_shared<LabelTable>(common_param.allocator_.get());
-    inner_codes_ = FlattenInterface::MakeInstance(param->flatten_param_, common_param);
-    this->init_feature_list();
+    inner_codes_ = FlattenInterface::MakeInstance(param->flatten_param, common_param);
 }
 
 int64_t
@@ -159,6 +158,50 @@ BruteForce::Deserialize(StreamReader& reader) {
     this->label_table_->Deserialize(reader);
 }
 
+void
+BruteForce::InitFeatures() {
+    // About Train
+    auto name = this->inner_codes_->GetQuantizerName();
+    if (name != QUANTIZATION_TYPE_VALUE_FP32 and name != QUANTIZATION_TYPE_VALUE_BF16) {
+        this->index_feature_list_->SetFeature(IndexFeature::NEED_TRAIN);
+    } else {
+        this->index_feature_list_->SetFeatures({
+            IndexFeature::SUPPORT_ADD_FROM_EMPTY,
+            IndexFeature::SUPPORT_RANGE_SEARCH,
+            IndexFeature::SUPPORT_CAL_DISTANCE_BY_ID,
+            IndexFeature::SUPPORT_RANGE_SEARCH_WITH_ID_FILTER,
+        });
+    }
+    // Add & Build
+    this->index_feature_list_->SetFeatures({
+        IndexFeature::SUPPORT_BUILD,
+        IndexFeature::SUPPORT_ADD_AFTER_BUILD,
+    });
+    // Search
+    this->index_feature_list_->SetFeatures({
+        IndexFeature::SUPPORT_KNN_SEARCH,
+        IndexFeature::SUPPORT_KNN_SEARCH_WITH_ID_FILTER,
+    });
+    // concurrency
+    this->index_feature_list_->SetFeatures({
+        IndexFeature::SUPPORT_SEARCH_CONCURRENT,
+    });
+
+    // serialize
+    this->index_feature_list_->SetFeatures({
+        IndexFeature::SUPPORT_DESERIALIZE_BINARY_SET,
+        IndexFeature::SUPPORT_DESERIALIZE_FILE,
+        IndexFeature::SUPPORT_DESERIALIZE_READER_SET,
+        IndexFeature::SUPPORT_SERIALIZE_BINARY_SET,
+        IndexFeature::SUPPORT_SERIALIZE_FILE,
+    });
+    // others
+    this->index_feature_list_->SetFeatures({
+        IndexFeature::SUPPORT_ESTIMATE_MEMORY,
+        IndexFeature::SUPPORT_CHECK_ID_EXIST,
+    });
+}
+
 Vector<DatasetPtr>
 BruteForce::split_dataset_by_duplicate_label(const DatasetPtr& dataset,
                                              std::vector<LabelType>& failed_ids) const {
@@ -205,50 +248,6 @@ BruteForce::split_dataset_by_duplicate_label(const DatasetPtr& dataset,
     return return_datasets;
 }
 
-void
-BruteForce::init_feature_list() {
-    // About Train
-    auto name = this->inner_codes_->GetQuantizerName();
-    if (name != QUANTIZATION_TYPE_VALUE_FP32 and name != QUANTIZATION_TYPE_VALUE_BF16) {
-        this->index_feature_list_->SetFeature(IndexFeature::NEED_TRAIN);
-    } else {
-        this->index_feature_list_->SetFeatures({
-            IndexFeature::SUPPORT_ADD_FROM_EMPTY,
-            IndexFeature::SUPPORT_RANGE_SEARCH,
-            IndexFeature::SUPPORT_CAL_DISTANCE_BY_ID,
-            IndexFeature::SUPPORT_RANGE_SEARCH_WITH_ID_FILTER,
-        });
-    }
-    // Add & Build
-    this->index_feature_list_->SetFeatures({
-        IndexFeature::SUPPORT_BUILD,
-        IndexFeature::SUPPORT_ADD_AFTER_BUILD,
-    });
-    // Search
-    this->index_feature_list_->SetFeatures({
-        IndexFeature::SUPPORT_KNN_SEARCH,
-        IndexFeature::SUPPORT_KNN_SEARCH_WITH_ID_FILTER,
-    });
-    // concurrency
-    this->index_feature_list_->SetFeatures({
-        IndexFeature::SUPPORT_SEARCH_CONCURRENT,
-    });
-
-    // serialize
-    this->index_feature_list_->SetFeatures({
-        IndexFeature::SUPPORT_DESERIALIZE_BINARY_SET,
-        IndexFeature::SUPPORT_DESERIALIZE_FILE,
-        IndexFeature::SUPPORT_DESERIALIZE_READER_SET,
-        IndexFeature::SUPPORT_SERIALIZE_BINARY_SET,
-        IndexFeature::SUPPORT_SERIALIZE_FILE,
-    });
-    // others
-    this->index_feature_list_->SetFeatures({
-        IndexFeature::SUPPORT_ESTIMATE_MEMORY,
-        IndexFeature::SUPPORT_CHECK_ID_EXIST,
-    });
-}
-
 static const std::unordered_map<std::string, std::vector<std::string>> EXTERNAL_MAPPING = {
     {BRUTE_FORCE_QUANTIZATION_TYPE, {QUANTIZATION_PARAMS_KEY, QUANTIZATION_TYPE_KEY}},
     {BRUTE_FORCE_IO_TYPE, {IO_PARAMS_KEY, IO_TYPE_KEY}}};
@@ -268,7 +267,7 @@ static const std::string BRUTE_FORCE_PARAMS_TEMPLATE =
     })";
 
 ParamPtr
-BruteForce::MappingExternalParamAndCheck(const JsonType& external_param,
+BruteForce::CheckAndMappingExternalParam(const JsonType& external_param,
                                          const IndexCommonParam& common_param) {
     if (common_param.data_type_ == DataTypes::DATA_TYPE_INT8) {
         throw std::invalid_argument(

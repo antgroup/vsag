@@ -231,8 +231,8 @@ DiskANN::build(const DatasetPtr& base) {
             SlowTaskTimer t("odescent build full (graph)");
             FlattenDataCellParamPtr flatten_param =
                 std::make_shared<vsag::FlattenDataCellParameter>();
-            flatten_param->quantizer_parameter_ = std::make_shared<FP32QuantizerParameter>();
-            flatten_param->io_parameter_ = std::make_shared<MemoryIOParameter>();
+            flatten_param->quantizer_parameter = std::make_shared<FP32QuantizerParameter>();
+            flatten_param->io_parameter = std::make_shared<MemoryIOParameter>();
             vsag::FlattenInterfacePtr flatten_interface_ptr =
                 vsag::FlattenInterface::MakeInstance(flatten_param, this->common_param_);
             flatten_interface_ptr->Train(vectors, data_num);

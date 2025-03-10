@@ -68,8 +68,8 @@ TEST_CASE("ODescent Build Test", "[ut][ODescent]") {
     // prepare data param
     vsag::FlattenDataCellParamPtr flatten_param =
         std::make_shared<vsag::FlattenDataCellParameter>();
-    flatten_param->quantizer_parameter_ = std::make_shared<vsag::FP32QuantizerParameter>();
-    flatten_param->io_parameter_ = std::make_shared<vsag::MemoryIOParameter>();
+    flatten_param->quantizer_parameter = std::make_shared<vsag::FP32QuantizerParameter>();
+    flatten_param->io_parameter = std::make_shared<vsag::MemoryIOParameter>();
     vsag::FlattenInterfacePtr flatten_interface_ptr =
         vsag::FlattenInterface::MakeInstance(flatten_param, param);
     flatten_interface_ptr->Train(vectors.data(), num_vectors);

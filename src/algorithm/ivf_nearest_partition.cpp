@@ -71,6 +71,7 @@ IVFNearestPartition::Train(const DatasetPtr dataset) {
     if (not build_result.has_value()) {
         throw std::runtime_error("ivf train failed");
     }
+    this->is_trained_ = true;
 }
 
 Vector<BucketIdType>
