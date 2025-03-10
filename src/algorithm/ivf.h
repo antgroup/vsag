@@ -15,43 +15,44 @@
 
 #pragma once
 
-#include "algorithm/inner_index_interface.h"
-#include "base_filter_functor.h"
-#include "brute_force_parameter.h"
-#include "common.h"
-#include "data_cell/flatten_datacell.h"
-#include "index_feature_list.h"
-#include "label_table.h"
+#include "algorithm/ivf_partition_strategy.h"
+#include "data_cell/bucket_datacell.h"
+#include "index/index_common_param.h"
+#include "inner_index_interface.h"
+#include "ivf_parameter.h"
+#include "stream_reader.h"
+#include "stream_writer.h"
 #include "typing.h"
+#include "vsag/index.h"
 
 namespace vsag {
-class BruteForce : public InnerIndexInterface {
+class IVF : public InnerIndexInterface {
 public:
     static ParamPtr
     CheckAndMappingExternalParam(const JsonType& external_param,
                                  const IndexCommonParam& common_param);
 
 public:
-    explicit BruteForce(const BruteForceParameterPtr& param, const IndexCommonParam& common_param);
+    explicit IVF(const IVFParameterPtr& param, const IndexCommonParam& common_param);
 
-    explicit BruteForce(const ParamPtr& param, const IndexCommonParam& common_param)
-        : BruteForce(std::dynamic_pointer_cast<BruteForceParameter>(param), common_param){};
+    explicit IVF(const ParamPtr& param, const IndexCommonParam& common_param)
+        : IVF(std::dynamic_pointer_cast<IVFParameter>(param), common_param){};
 
-    ~BruteForce() override = default;
+    ~IVF() override = default;
 
     [[nodiscard]] std::string
     GetName() const override {
-        return INDEX_BRUTE_FORCE;
+        return INDEX_IVF;
     }
 
     void
     InitFeatures() override;
 
     std::vector<int64_t>
-    Build(const DatasetPtr& data) override;
+    Build(const DatasetPtr& base) override;
 
     std::vector<int64_t>
-    Add(const DatasetPtr& data) override;
+    Add(const DatasetPtr& base) override;
 
     DatasetPtr
     KnnSearch(const DatasetPtr& query,
@@ -66,41 +67,20 @@ public:
                 const FilterPtr& filter,
                 int64_t limited_size = -1) const override;
 
-    float
-    CalcDistanceById(const float* vector, int64_t id) const override;
-
     void
     Serialize(StreamWriter& writer) const override;
 
     void
     Deserialize(StreamReader& reader) override;
 
-    [[nodiscard]] int64_t
-    GetNumElements() const override {
-        return this->total_count_;
-    }
-
-    [[nodiscard]] int64_t
-    GetMemoryUsage() const override;
-
-    [[nodiscard]] uint64_t
-    EstimateMemory(uint64_t num_elements) const override;
+    int64_t
+    GetNumElements() const override;
 
 private:
-    Vector<DatasetPtr>
-    split_dataset_by_duplicate_label(const DatasetPtr& dataset,
-                                     std::vector<LabelType>& failed_ids) const;
+    BucketInterfacePtr bucket_{nullptr};
 
-    void
-    init_feature_list();
+    IVFPartitionStrategyPtr partition_strategy_{nullptr};
 
-private:
-    FlattenInterfacePtr inner_codes_{nullptr};
-
-    Allocator* const allocator_{nullptr};
-
-    int64_t dim_{0};
-
-    uint64_t total_count_{0};
+    int64_t total_elements_{0};
 };
 }  // namespace vsag

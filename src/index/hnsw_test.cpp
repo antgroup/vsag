@@ -970,8 +970,8 @@ TEST_CASE("extract/set data and graph", "[ut][hnsw]") {
     REQUIRE(result.has_value());
 
     auto param = std::make_shared<FlattenDataCellParameter>();
-    param->io_parameter_ = std::make_shared<vsag::MemoryIOParameter>();
-    param->quantizer_parameter_ = std::make_shared<vsag::FP32QuantizerParameter>();
+    param->io_parameter = std::make_shared<vsag::MemoryIOParameter>();
+    param->quantizer_parameter = std::make_shared<vsag::FP32QuantizerParameter>();
     vsag::GraphDataCellParamPtr graph_param_ptr = std::make_shared<vsag::GraphDataCellParameter>();
     graph_param_ptr->io_parameter_ = std::make_shared<vsag::MemoryIOParameter>();
 

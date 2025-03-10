@@ -13,32 +13,29 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#pragma once
+#include "ivf_parameter.h"
 
-#include "io/io_parameter.h"
-#include "parameter.h"
-#include "quantization/quantizer_parameter.h"
+#include <fmt/format-inl.h>
 
+#include "inner_string_params.h"
+#include "vsag/constants.h"
 namespace vsag {
 
-class BucketDataCellParameter : public Parameter {
-public:
-    explicit BucketDataCellParameter();
+IVFParameter::IVFParameter() = default;
 
-    void
-    FromJson(const JsonType& json) override;
+void
+IVFParameter::FromJson(const JsonType& json) {
+    this->bucket_param = std::make_shared<BucketDataCellParameter>();
+    CHECK_ARGUMENT(json.contains(BUCKET_PARAMS_KEY),
+                   fmt::format("ivf parameters must contains {}", BUCKET_PARAMS_KEY));
+    this->bucket_param->FromJson(json[BUCKET_PARAMS_KEY]);
+}
 
-    JsonType
-    ToJson() override;
-
-public:
-    QuantizerParamPtr quantizer_parameter{nullptr};
-
-    IOParamPtr io_parameter{nullptr};
-
-    int64_t buckets_count{1};
-};
-
-using BucketDataCellParamPtr = std::shared_ptr<BucketDataCellParameter>;
-
+JsonType
+IVFParameter::ToJson() {
+    JsonType json;
+    json["type"] = INDEX_IVF;
+    json[BUCKET_PARAMS_KEY] = this->bucket_param->ToJson();
+    return json;
+}
 }  // namespace vsag
