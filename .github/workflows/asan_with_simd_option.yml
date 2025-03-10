@@ -2,8 +2,12 @@ name: Asan Build & Test With Different Simd Option
 
 on:
   push:
+    paths:
+      - 'src/simd/**'
     branches: [ "main" ]
   pull_request:
+    paths:
+      - 'src/simd/**'
     branches: [ "main" ]
 
 jobs:
