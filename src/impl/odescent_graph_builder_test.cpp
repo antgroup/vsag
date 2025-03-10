@@ -78,7 +78,7 @@ TEST_CASE("ODescent Build Test", "[ut][ODescent]") {
     // prepare graph param
     vsag::GraphDataCellParamPtr graph_param_ptr = std::make_shared<vsag::GraphDataCellParameter>();
     graph_param_ptr->io_parameter_ = std::make_shared<vsag::MemoryIOParameter>();
-    graph_param_ptr->max_degree_ = partial_data ? 2 * max_degree : max_degree;
+    graph_param_ptr->max_degree_ = max_degree;
     // build graph
     auto odescent_param = std::make_shared<vsag::ODescentParameter>();
     odescent_param->max_degree = max_degree;
