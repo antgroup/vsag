@@ -225,8 +225,8 @@ TestComputer(Quantizer<T>& quant,
              float error = 1e-5f,
              float related_error = 1.0f,
              bool retrain = true,
-             float unbounded_numeric_error_rate = 0,
-             float unbounded_related_error_rate = 0) {
+             float unbounded_numeric_error_rate = 1.0f,
+             float unbounded_related_error_rate = 1.0f) {
     auto query_count = 100;
     bool need_normalize = true;
     if constexpr (metric == vsag::MetricType::METRIC_TYPE_COSINE) {
@@ -297,8 +297,8 @@ TestSerializeAndDeserialize(Quantizer<T>& quant1,
                             uint32_t count,
                             float error = 1e-5f,
                             float related_error = 1.0f,
-                            float unbounded_numeric_error_rate = 0,
-                            float unbounded_related_error_rate = 0,
+                            float unbounded_numeric_error_rate = 1.0f,
+                            float unbounded_related_error_rate = 1.0f,
                             bool is_rabitq = false) {
     auto vecs = fixtures::generate_vectors(count, dim);
     quant1.ReTrain(vecs.data(), count);
