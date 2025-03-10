@@ -56,6 +56,8 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
         this->high_precise_codes_ =
             FlattenInterface::MakeInstance(hgraph_param->precise_codes_param, common_param);
     }
+    this->searcher_ = std::make_shared<BasicSearcher>(common_param, neighbors_mutex_);
+
     this->bottom_graph_ =
         GraphInterface::MakeInstance(hgraph_param->bottom_graph_param, common_param);
     mult_ = 1 / log(1.0 * static_cast<double>(this->bottom_graph_->MaximumDegree()));
@@ -140,6 +142,7 @@ HGraph::KnnSearch(const DatasetPtr& query,
 
     search_param.ef = std::max(params.ef_search, k);
     search_param.is_inner_id_allowed = ft;
+    search_param.topk = k;
     auto search_result = this->search_one_graph(
         query->GetFloat32Vectors(), this->bottom_graph_, this->basic_flatten_codes_, search_param);
 
@@ -275,105 +278,10 @@ HGraph::search_one_graph(const float* query,
                          const GraphInterfacePtr& graph,
                          const FlattenInterfacePtr& flatten,
                          InnerSearchParam& inner_search_param) const {
-    auto visited_list = this->pool_->getFreeVisitedList();
-
-    auto* visited_array = visited_list->mass;
-    auto visited_array_tag = visited_list->curV;
-    auto computer = flatten->FactoryComputer(query);
-    auto prefetch_neighbor_visit_num = 1;  // TODO(LHT) Optimize the param;
-
-    auto& is_id_allowed = inner_search_param.is_inner_id_allowed;
-    auto ep = inner_search_param.ep;
-    auto ef = inner_search_param.ef;
-
-    MaxHeap candidate_set(allocator_);
-    MaxHeap cur_result(allocator_);
-    float dist = 0.0F;
-    auto lower_bound = std::numeric_limits<float>::max();
-    flatten->Query(&dist, computer, &ep, 1);
-    if (not is_id_allowed || is_id_allowed->CheckValid(ep)) {
-        cur_result.emplace(dist, ep);
-        lower_bound = cur_result.top().first;
-    }
-    if constexpr (mode == RANGE_SEARCH) {
-        if (dist > inner_search_param.radius) {
-            cur_result.pop();
-        }
-    }
-    candidate_set.emplace(-dist, ep);
-    visited_array[ep] = visited_array_tag;
-
-    Vector<InnerIdType> neighbors(allocator_);
-    Vector<InnerIdType> to_be_visited(graph->MaximumDegree(), allocator_);
-    Vector<float> tmp_result(graph->MaximumDegree(), allocator_);
-
-    while (not candidate_set.empty()) {
-        auto current_node_pair = candidate_set.top();
-
-        if constexpr (mode == InnerSearchMode::KNN_SEARCH) {
-            if ((-current_node_pair.first) > lower_bound && cur_result.size() == ef) {
-                break;
-            }
-        }
-        candidate_set.pop();
-
-        auto current_node_id = current_node_pair.second;
-        {
-            SharedLock lock(neighbors_mutex_, current_node_id);
-            graph->GetNeighbors(current_node_id, neighbors);
-        }
-        if (!neighbors.empty()) {
-            flatten->Prefetch(neighbors[0]);
-#ifdef USE_SSE
-            _mm_prefetch((char*)(visited_array + neighbors[0]), _MM_HINT_T0);
-            for (uint32_t i = 0; i < prefetch_neighbor_visit_num; i++) {
-                _mm_prefetch(visited_list->mass + neighbors[i], _MM_HINT_T0);
-            }
-#endif
-        }
-        auto count_no_visited = 0;
-        for (uint64_t i = 0; i < neighbors.size(); ++i) {  // NOLINT(modernize-loop-convert)
-            const auto& neighbor = neighbors[i];
-#if defined(USE_SSE)
-            if (i + prefetch_neighbor_visit_num < neighbors.size()) {
-                _mm_prefetch(visited_array + neighbors[i + prefetch_neighbor_visit_num],
-                             _MM_HINT_T0);
-            }
-#endif
-            if (visited_array[neighbor] != visited_array_tag) {
-                to_be_visited[count_no_visited] = neighbor;
-                count_no_visited++;
-                visited_array[neighbor] = visited_array_tag;
-            }
-        }
-
-        flatten->Query(tmp_result.data(), computer, to_be_visited.data(), count_no_visited);
-
-        for (auto i = 0; i < count_no_visited; ++i) {
-            dist = tmp_result[i];
-            if (cur_result.size() < ef || lower_bound > dist ||
-                (mode == RANGE_SEARCH && dist <= inner_search_param.radius)) {
-                candidate_set.emplace(-dist, to_be_visited[i]);
-                flatten->Prefetch(candidate_set.top().second);
-
-                if (not is_id_allowed || is_id_allowed->CheckValid(to_be_visited[i])) {
-                    cur_result.emplace(dist, to_be_visited[i]);
-                }
-
-                if constexpr (mode == KNN_SEARCH) {
-                    if (cur_result.size() > ef) {
-                        cur_result.pop();
-                    }
-                }
-
-                if (not cur_result.empty()) {
-                    lower_bound = cur_result.top().first;
-                }
-            }
-        }
-    }
-    this->pool_->releaseVisitedList(visited_list);
-    return cur_result;
+    auto visited_list = this->pool_->TakeOne();
+    auto result = this->searcher_->Search(graph, flatten, visited_list, query, inner_search_param);
+    this->pool_->ReturnOne(visited_list);
+    return result;
 }
 
 DatasetPtr
@@ -415,6 +323,8 @@ HGraph::RangeSearch(const DatasetPtr& query,
     search_param.ef = std::max(params.ef_search, limited_size);
     search_param.is_inner_id_allowed = ft;
     search_param.radius = radius;
+    search_param.search_mode = RANGE_SEARCH;
+    search_param.range_search_limit_size = static_cast<int>(limited_size);
     auto search_result = this->search_one_graph(
         query->GetFloat32Vectors(), this->bottom_graph_, this->basic_flatten_codes_, search_param);
     if (use_reorder_) {
@@ -489,7 +399,7 @@ HGraph::Deserialize(StreamReader& reader) {
         this->route_graphs_[i]->Deserialize(reader);
     }
     this->neighbors_mutex_->Resize(max_capacity_);
-    pool_ = std::make_shared<hnswlib::VisitedListPool>(max_capacity_, allocator_);
+    pool_ = std::make_shared<VisitedListPool>(1, allocator_, max_capacity_, allocator_);
 }
 
 void
@@ -568,6 +478,7 @@ HGraph::add_one_point(const float* data, int level, InnerIdType inner_id) {
     MaxHeap result(allocator_);
 
     InnerSearchParam param{
+        .topk = 1,
         .ep = this->entry_point_id_,
         .ef = 1,
         .is_inner_id_allowed = nullptr,
@@ -584,6 +495,7 @@ HGraph::add_one_point(const float* data, int level, InnerIdType inner_id) {
     }
 
     param.ef = this->ef_construct_;
+    param.topk = static_cast<int64_t>(ef_construct_);
     for (auto j = level; j >= 0; --j) {
         if (route_graphs_[j]->TotalCount() != 0) {
             result = search_one_graph(data, route_graphs_[j], flatten_codes, param);
@@ -611,7 +523,7 @@ HGraph::resize(uint64_t new_size) {
         next_multiple_of_power_of_two(new_size, this->resize_increase_count_bit_);
     if (cur_size < new_size_power_2) {
         this->neighbors_mutex_->Resize(new_size_power_2);
-        pool_ = std::make_shared<hnswlib::VisitedListPool>(new_size_power_2, allocator_);
+        pool_ = std::make_shared<VisitedListPool>(1, allocator_, new_size_power_2, allocator_);
         this->label_table_->label_table_.resize(new_size_power_2);
         bottom_graph_->Resize(new_size_power_2);
         this->max_capacity_ = new_size_power_2;
@@ -629,9 +541,7 @@ HGraph::init_features() {
     // search
     this->index_feature_list_->SetFeatures({
         IndexFeature::SUPPORT_KNN_SEARCH,
-        IndexFeature::SUPPORT_RANGE_SEARCH,
         IndexFeature::SUPPORT_KNN_SEARCH_WITH_ID_FILTER,
-        IndexFeature::SUPPORT_RANGE_SEARCH_WITH_ID_FILTER,
     });
     // concurrency
     this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_SEARCH_CONCURRENT);
@@ -654,6 +564,11 @@ HGraph::init_features() {
 
     if (name != QUANTIZATION_TYPE_VALUE_FP32 and name != QUANTIZATION_TYPE_VALUE_BF16) {
         this->index_feature_list_->SetFeature(IndexFeature::NEED_TRAIN);
+    } else {
+        this->index_feature_list_->SetFeatures({
+            IndexFeature::SUPPORT_RANGE_SEARCH,
+            IndexFeature::SUPPORT_RANGE_SEARCH_WITH_ID_FILTER,
+        });
     }
 
     bool have_fp32 = false;
