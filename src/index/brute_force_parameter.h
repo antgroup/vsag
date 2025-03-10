@@ -30,7 +30,7 @@ public:
     ToJson() override;
 
 public:
-    FlattenDataCellParamPtr flatten_param_;
+    FlattenDataCellParamPtr flatten_param;
 };
 
 using BruteForceParameterPtr = std::shared_ptr<BruteForceParameter>;

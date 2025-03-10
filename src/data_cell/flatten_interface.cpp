@@ -26,8 +26,8 @@ namespace vsag {
 template <typename QuantTemp, typename IOTemp>
 static FlattenInterfacePtr
 make_instance(const FlattenDataCellParamPtr& param, const IndexCommonParam& common_param) {
-    auto& io_param = param->io_parameter_;
-    auto& quantizer_param = param->quantizer_parameter_;
+    auto& io_param = param->io_parameter;
+    auto& quantizer_param = param->quantizer_parameter;
 
     return std::make_shared<FlattenDataCell<QuantTemp, IOTemp>>(
         quantizer_param, io_param, common_param);
@@ -36,7 +36,7 @@ make_instance(const FlattenDataCellParamPtr& param, const IndexCommonParam& comm
 template <MetricType metric, typename IOTemp>
 static FlattenInterfacePtr
 make_instance(const FlattenDataCellParamPtr& param, const IndexCommonParam& common_param) {
-    std::string quantization_string = param->quantizer_parameter_->GetTypeName();
+    std::string quantization_string = param->quantizer_parameter->GetTypeName();
     if (quantization_string == QUANTIZATION_TYPE_VALUE_SQ8) {
         return make_instance<SQ8Quantizer<metric>, IOTemp>(param, common_param);
     }
@@ -80,7 +80,7 @@ make_instance(const FlattenDataCellParamPtr& param, const IndexCommonParam& comm
 FlattenInterfacePtr
 FlattenInterface::MakeInstance(const FlattenDataCellParamPtr& param,
                                const IndexCommonParam& common_param) {
-    auto io_type_name = param->io_parameter_->GetTypeName();
+    auto io_type_name = param->io_parameter->GetTypeName();
     if (io_type_name == IO_TYPE_VALUE_BLOCK_MEMORY_IO) {
         return make_instance<MemoryBlockIO>(param, common_param);
     }

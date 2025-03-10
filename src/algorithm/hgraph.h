@@ -39,7 +39,7 @@ namespace vsag {
 class HGraph : public InnerIndexInterface {
 public:
     static ParamPtr
-    MappingExternalParamAndCheck(const JsonType& external_param,
+    CheckAndMappingExternalParam(const JsonType& external_param,
                                  const IndexCommonParam& common_param);
 
 public:
@@ -53,6 +53,11 @@ public:
     [[nodiscard]] std::string
     GetName() const override {
         return INDEX_TYPE_HGRAPH;
+    }
+
+    void
+    InitFeatures() override {
+        return this->init_features();
     }
 
     std::vector<int64_t>

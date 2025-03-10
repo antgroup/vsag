@@ -21,6 +21,7 @@
 namespace vsag {
 // Index Type
 const char* const INDEX_TYPE_HGRAPH = "hgraph";
+const char* const INDEX_TYPE_IVF = "ivf";
 
 // Parameter key for hgraph
 const char* const HGRAPH_USE_REORDER_KEY = "use_reorder";
@@ -64,10 +65,13 @@ const char* const BUILD_PARAMS_KEY = "build_params";
 const char* const BUILD_THREAD_COUNT = "build_thread_count";
 const char* const BUILD_EF_CONSTRUCTION = "ef_construction";
 
+const char* const BUCKET_PARAMS_KEY = "buckets_params";
 const char* const BUCKETS_COUNT_KEY = "buckets_count";
+const char* const IVF_SEARCH_PARAM_SCAN_BUCKETS_COUNT = "scan_buckets_count";
 
 const std::unordered_map<std::string, std::string> DEFAULT_MAP = {
     {"INDEX_TYPE_HGRAPH", INDEX_TYPE_HGRAPH},
+    {"INDEX_TYPE_IVF", INDEX_TYPE_IVF},
     {"HGRAPH_USE_REORDER_KEY", HGRAPH_USE_REORDER_KEY},
     {"HGRAPH_GRAPH_KEY", HGRAPH_GRAPH_KEY},
     {"HGRAPH_BASE_CODES_KEY", HGRAPH_BASE_CODES_KEY},
@@ -91,9 +95,11 @@ const std::unordered_map<std::string, std::string> DEFAULT_MAP = {
     {"BUILD_THREAD_COUNT", BUILD_THREAD_COUNT},
     {"BUILD_EF_CONSTRUCTION", BUILD_EF_CONSTRUCTION},
     {"BUCKETS_COUNT_KEY", BUCKETS_COUNT_KEY},
+    {"BUCKET_PARAMS_KEY", BUCKET_PARAMS_KEY},
     {"IO_FILE_PATH", IO_FILE_PATH},
     {"DEFAULT_FILE_PATH_VALUE", DEFAULT_FILE_PATH_VALUE},
     {"SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE", SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE},
+    {"IVF_SEARCH_PARAM_SCAN_BUCKETS_COUNT", IVF_SEARCH_PARAM_SCAN_BUCKETS_COUNT},
 };
 
 }  // namespace vsag

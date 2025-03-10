@@ -13,37 +13,28 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "pyramid_zparameters.h"
+#include "ivf_parameter.h"
 
 #include <catch2/catch_test_macros.hpp>
 
 #include "fixtures.h"
 #include "parameter_test.h"
 
-TEST_CASE("Pyramid Parameters Test", "[ut][PyramidParameters]") {
-    auto param_str = R"(
-        {
-            "odescent": {
-                "io_params": {
-                    "type": "memory_io"
-                },
-                "max_degree": 16,
-                "alpha": 1.5,
-                "graph_iter_turn": 10,
-                "neighbor_sample_rate": 0.5
+TEST_CASE("IVF Parameters Test", "[ut][IVFParameter]") {
+    auto param_str = R"({
+        "type": "ivf",
+        "buckets_params": {
+            "io_params": {
+                "type": "block_memory_io"
             },
-            "base_codes": {
-                "io_params": {
-                    "type": "memory_io"
-                },
-                "quantization_params": {
-                    "type": "fp32"
-                }
-            }
+            "quantization_params": {
+                "type": "fp32"
+            },
+            "buckets_count": 3
         }
-    )";
+    })";
     vsag::JsonType param_json = vsag::JsonType::parse(param_str);
-    auto param = std::make_shared<vsag::PyramidParameters>();
+    auto param = std::make_shared<vsag::IVFParameter>();
     param->FromJson(param_json);
-    vsag::ParameterTest::TestToJson(param);
+    REQUIRE(param->bucket_param->buckets_count == 3);
 }
