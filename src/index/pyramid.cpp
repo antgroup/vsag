@@ -561,4 +561,24 @@ Pyramid::resize(int64_t new_max_capacity) {
     max_capacity_ = new_max_capacity;
 }
 
+void
+Pyramid::init_feature_list() {
+    this->feature_list_->SetFeatures({
+        SUPPORT_BUILD,
+        SUPPORT_ADD_AFTER_BUILD,
+        SUPPORT_ADD_FROM_EMPTY,
+        SUPPORT_ADD_CONCURRENT,
+        SUPPORT_SERIALIZE_FILE,
+        SUPPORT_DESERIALIZE_FILE,
+        SUPPORT_SERIALIZE_BINARY_SET,
+        SUPPORT_DESERIALIZE_BINARY_SET,
+        SUPPORT_DESERIALIZE_BINARY_SET,
+        SUPPORT_SEARCH_CONCURRENT,
+        SUPPORT_KNN_SEARCH,
+        SUPPORT_KNN_SEARCH_WITH_ID_FILTER,
+        SUPPORT_RANGE_SEARCH,
+        SUPPORT_RANGE_SEARCH_WITH_ID_FILTER,
+    });
+}
+
 }  // namespace vsag
