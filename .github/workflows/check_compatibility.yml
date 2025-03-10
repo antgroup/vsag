@@ -1,0 +1,27 @@
+name: Check Compatibility
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  compatibility:
+    name: Check Compatibility
+    runs-on: ubuntu-latest
+    concurrency:
+      group: compatibility-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+    container:
+      image: vsaglib/vsag:ci-x86
+    steps:
+      - name: Prepare Data
+        run: |
+          git clone -b old_version_index https://github.com/antgroup/vsag.git
+          cp -r ./vsag/* /tmp/
+      - uses: actions/checkout@v4
+      - name: Compile Check Compatibility Tools
+        run: make release
+      - name: Run Check Compatibility
+        run: bash ./scripts/check_compatibility.sh
