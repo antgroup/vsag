@@ -157,6 +157,14 @@ public:
     int64_t
     GetMemoryUsage() const override;
 
+    bool
+    CheckFeature(IndexFeature feature) const override {
+        if (feature == SUPPORT_RANGE_SEARCH_WITH_ID_FILTER) {
+            return true;
+        }
+        return false;
+    }
+
 private:
     tl::expected<std::vector<int64_t>, Error>
     build(const DatasetPtr& base);
