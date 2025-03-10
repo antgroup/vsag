@@ -84,7 +84,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
                              "[ft][pyramid]") {
     auto metric_type = GENERATE("l2", "ip", "cosine");
     std::string base_quantization_str = GENERATE("fp32");
-    const std::vector<int> level{0};
+    const std::vector<int> level{0, 1, 2};
     const std::string name = "pyramid";
     auto search_param = fmt::format(search_param_tmp, 100);
     for (auto& dim : dims) {
@@ -102,7 +102,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex, "Pyramid Add Test", "[ft][pyramid]") {
     auto metric_type = GENERATE("l2");
     std::string base_quantization_str = GENERATE("fp32");
-    const std::vector<int> level{0};
+    const std::vector<int> level{0, 1, 2};
     const std::string name = "pyramid";
     auto search_param = fmt::format(search_param_tmp, 100);
     for (auto& dim : dims) {
@@ -144,7 +144,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
     auto metric_type = GENERATE("l2");
-    const std::vector<int> level{0};
+    const std::vector<int> level{0, 1, 2};
     const std::string name = "pyramid";
     auto search_param = fmt::format(search_param_tmp, 200);
 
@@ -184,7 +184,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
     auto metric_type = GENERATE("l2", "ip", "cosine");
-    const std::vector<int> level{0};
+    const std::vector<int> level{0, 1, 2};
     const std::string name = "pyramid";
     for (auto& dim : dims) {
         vsag::Options::Instance().set_block_size_limit(size);

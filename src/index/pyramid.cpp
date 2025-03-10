@@ -104,6 +104,7 @@ IndexNode::Deserialize(StreamReader& reader) {
     StreamReader::ReadObj(reader, has_index_);
     // deserialize `graph`
     if (has_index_) {
+        InitGraph();
         graph_->Deserialize(reader);
     }
     // deserialize `children`

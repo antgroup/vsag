@@ -63,7 +63,7 @@ public:
     uint32_t level_{0};
 
     Vector<InnerIdType> ids_;
-    bool has_index_{true};
+    bool has_index_{false};
 
 private:
     UnorderedMap<std::string, std::shared_ptr<IndexNode>> children_;
