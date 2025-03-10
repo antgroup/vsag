@@ -21,6 +21,7 @@ extern const char* const INDEX_DISKANN;
 extern const char* const INDEX_HNSW;
 extern const char* const INDEX_FRESH_HNSW;
 extern const char* const INDEX_PYRAMID;
+extern const char* const INDEX_SPARSE;
 extern const char* const INDEX_BRUTE_FORCE;
 extern const char* const INDEX_IVF;
 extern const char* const DIM;
