@@ -100,8 +100,12 @@ IndexNode::Deserialize(StreamReader& reader) {
     StreamReader::ReadObj(reader, entry_point_);
     // deserialize `level_`
     StreamReader::ReadObj(reader, level_);
+    // serialize `has_index_`
+    StreamReader::ReadObj(reader, has_index_);
     // deserialize `graph`
-    graph_->Deserialize(reader);
+    if (has_index_) {
+        graph_->Deserialize(reader);
+    }
     // deserialize `children`
     size_t children_size = 0;
     StreamReader::ReadObj(reader, children_size);
@@ -119,8 +123,12 @@ IndexNode::Serialize(StreamWriter& writer) const {
     StreamWriter::WriteObj(writer, entry_point_);
     // serialize `level_`
     StreamWriter::WriteObj(writer, level_);
+    // serialize `has_index_`
+    StreamWriter::WriteObj(writer, has_index_);
     // serialize `graph_`
-    graph_->Serialize(writer);
+    if (has_index_) {
+        graph_->Serialize(writer);
+    }
     // serialize `children`
     size_t children_size = children_.size();
     StreamWriter::WriteObj(writer, children_size);
