@@ -31,6 +31,7 @@
 #include "vsag/constants.h"
 #include "vsag/errors.h"
 #include "vsag/expected.hpp"
+#include "omp.h"
 
 namespace vsag {
 
@@ -151,8 +152,12 @@ HNSW::build(const DatasetPtr& base) {
         std::vector<int64_t> failed_ids;
         {
             SlowTaskTimer t("hnsw graph");
-#pragma omp parallel for
+//            omp_set_num_threads(32);
+//#pragma omp parallel for schedule(dynamic, 100)
             for (int64_t i = 0; i < num_elements; ++i) {
+                if (i % 100 == 0) {
+                    std::cout << i << " " << num_elements << std::endl;
+                }
                 // noexcept runtime
                 if (!alg_hnsw->addPoint((const void*)(vectors + i * dim_), ids[i])) {
                     logger::debug("duplicate point: {}", ids[i]);
@@ -168,16 +173,6 @@ HNSW::build(const DatasetPtr& base) {
             hnsw->encode_hnsw_data(pq_code_file);
         }
 
-        if (sq_num_bits_ != -1) {
-            SlowTaskTimer t(fmt::format("sq transform to () bits", sq_num_bits_), 10);
-            logger::info("start transform sq");
-            if (sq_num_bits_ == 8 or sq_num_bits_ == 4) {
-                alg_hnsw->transform_base_int4();
-                alg_hnsw->optimize();
-            } else {
-                throw std::invalid_argument(fmt::format("invalid sq_num_bits()", sq_num_bits_));
-            }
-        }
 
         return failed_ids;
     } catch (const std::invalid_argument& e) {

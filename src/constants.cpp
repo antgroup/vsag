@@ -16,6 +16,14 @@
 #include "vsag/constants.h"
 
 namespace vsag {
+bool USE_AUTO_PARAM = true;
+float m_s_ = 32;
+float a_s_ = 1.2;
+
+uint32_t BL = 300;
+uint32_t MAX_M = 64;
+std::string MAX_A = "2.0";
+
 
 const char* const INDEX_DISKANN = "diskann";
 const char* const INDEX_HNSW = "hnsw";

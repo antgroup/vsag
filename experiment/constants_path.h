@@ -24,7 +24,7 @@ inline std::string workspace = "/tbase-project";
 constexpr const char* BENCHMARK_GT_PATH_FMT = "/tbase-project/ann-benchmarks/data/{}/gt_N{}_K{}.fvecs";
 constexpr const char* BENCHMARK_QUERY_PATH_FMT = "/tbase-project/ann-benchmarks/data/{}/query.fvecs";
 constexpr const char* BENCHMARK_BASE_PATH_FMT = "/tbase-project/ann-benchmarks/data/{}/learn.fvecs";
-constexpr const char* INDEX_PATH_FMT = "{}/index/ann-benchmarks/{}_{}_N{}_BL{}_BR{}_{}.index";
+constexpr const char* INDEX_PATH_FMT = "{}/index/experimental/{}_{}_N{}_BL{}_BR{}_BA{}_{}.index";
 
 constexpr const char* BUILD_PARAM_FMT = R"(
     {{
@@ -33,6 +33,7 @@ constexpr const char* BUILD_PARAM_FMT = R"(
         "dim": {},
         "hnsw": {{
             "max_degree": {},
+            "alpha": {},
             "ef_construction": {},
             "use_conjugate_graph": false,
             "sq_num_bits": {},
@@ -60,5 +61,4 @@ constexpr const char* FAILED_BASE_TAG_PATH_FMT = "{}_failed_base_tag.fbin";
 constexpr const char* FAILED_BASE_ID_PATH_FMT = "{}_failed_base_id.fbin";
 
 inline std::string face_dataset_name = "face_b1t10q10_50000000_float";
-inline int BL = 500, BR = 36;
 inline int npts_index = 835770;

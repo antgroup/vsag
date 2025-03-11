@@ -177,7 +177,7 @@ void serialize(std::shared_ptr<vsag::Index> index, std::string index_path) {
 }
 
 void deserialize(std::shared_ptr<vsag::Index> index, std::string index_path) {
-    std::ifstream file(index_path, std::ios::in);
+    std::ifstream file(index_path, std::ios::in | std::ios::binary);
     file.seekg(-sizeof(uint64_t) * 2, std::ios::end);
     uint64_t num_keys, footer_offset;
     readBinaryPOD(file, num_keys);
@@ -208,6 +208,7 @@ void deserialize(std::shared_ptr<vsag::Index> index, std::string index_path) {
         file.read((char*)b.data.get(), b.size);
         bs.Set(keys[i], b);
     }
+    file.close();
 
     index->Deserialize(bs);
 }

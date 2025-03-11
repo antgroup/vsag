@@ -7,13 +7,14 @@
 #include "fmt/format.h"
 #include "data_loader.h"
 #include "omp.h"
+#include "vsag/constants.h"
 
-std::string dataset = "gist-960-euclidean";
-int target_npts = -1;
-bool use_static = false;
-int sq_num_bits = -1;
-int gt_dim = 100;
-float redundant_rate = 1.0;
+std::string dataset;
+int target_npts;
+bool use_static;
+int sq_num_bits;
+int gt_dim;
+float redundant_rate;
 
 void
 normalize(float* input_vector, int64_t dim) {
@@ -133,9 +134,10 @@ int build(bool is_recompute = false) {
     // index build
     std::string index_path = fmt::format(INDEX_PATH_FMT,
                                          workspace, algo_name, dataset_name,
-                                         base_npts, BL, BR,
-                                         use_static ? "static" : "pure");
-    auto build_parameters = fmt::format(BUILD_PARAM_FMT, metric_type, base_dim, BR, BL, sq_num_bits, use_static, 1.0);
+                                         base_npts, vsag::BL, vsag::MAX_M, vsag::MAX_A,
+                                         vsag::USE_AUTO_PARAM ? "auto" : "manual");
+    auto build_parameters = fmt::format(BUILD_PARAM_FMT, metric_type, base_dim, vsag::MAX_M,
+                                        std::stof(vsag::MAX_A), vsag::BL, sq_num_bits, use_static, 1.0);
     auto index = vsag::Factory::CreateIndex(algo_name, build_parameters).value();
     if (std::filesystem::exists(index_path) and not is_recompute) {
         logger->Debug(fmt::format("====Index Path Exists===="));
@@ -208,19 +210,6 @@ int calculate_gt(bool is_recompute = false) {
         base->NumElements(base_npts);
     }
 
-
-    // index load
-    logger->Debug(fmt::format("====Start create===="));
-    auto build_parameters = fmt::format(BUILD_PARAM_FMT, metric_type, expected_dim, BR, BL, sq_num_bits, false, 1.0);
-    auto index = vsag::Factory::CreateIndex(algo_name, build_parameters).value();
-    std::string index_path = fmt::format(INDEX_PATH_FMT,
-                                         workspace, algo_name, dataset_name,
-                                         base_npts, BL, BR,
-                                         "pure");
-
-    logger->Debug(fmt::format("====Start deserialize from {}====", index_path));
-    vsag::deserialize(index, index_path);
-
     // calculate and store
     bool validate_gt = false;
     auto gt_path = fmt::format(BENCHMARK_GT_PATH_FMT, dataset, base_npts, gt_dim);
@@ -243,6 +232,22 @@ int calculate_gt(bool is_recompute = false) {
 
     if (not validate_gt or is_recompute){
         logger->Debug(fmt::format("====GT calculation start===="));
+
+
+        // index load
+        logger->Debug(fmt::format("====Start create===="));
+        auto build_parameters = fmt::format(BUILD_PARAM_FMT, metric_type, expected_dim, vsag::MAX_M,
+                                            std::stof(vsag::MAX_A), vsag::BL, sq_num_bits, false, 1.0);
+        auto index = vsag::Factory::CreateIndex(algo_name, build_parameters).value();
+        std::string index_path = fmt::format(INDEX_PATH_FMT,
+                                             workspace, algo_name, dataset_name,
+                                             base_npts, vsag::BL, vsag::MAX_M, vsag::MAX_A,
+                                             vsag::USE_AUTO_PARAM ? "auto" : "manual");
+
+        logger->Debug(fmt::format("====Start deserialize from {}====", index_path));
+        vsag::deserialize(index, index_path);
+
+
         std::fstream out_file(gt_path, std::ios::out | std::ios::binary);
 
         std::vector<int32_t*> gt_results(query_npts);
@@ -339,14 +344,18 @@ int search(std::vector<uint32_t> efs, uint32_t k = 10) {
     {
         auto base = vsag::Dataset::Make();
         base_npts = get_data(base, expected_dim, BENCHMARK_BASE_PATH_FMT);
-        base->NumElements(base_npts);
+        if (target_npts > 0) {
+            base_npts = std::min(target_npts, base_npts);
+            logger->Debug(fmt::format("target npts: {}", base_npts));
+        }
     }
-    auto build_parameters = fmt::format(BUILD_PARAM_FMT, metric_type, expected_dim, BR, BL, sq_num_bits, use_static, redundant_rate);
+    auto build_parameters = fmt::format(BUILD_PARAM_FMT, metric_type, expected_dim, vsag::MAX_M,
+                                        std::stof(vsag::MAX_A), vsag::BL, sq_num_bits, use_static, redundant_rate);
     auto index = vsag::Factory::CreateIndex(algo_name, build_parameters).value();
     std::string index_path = fmt::format(INDEX_PATH_FMT,
                                          workspace, algo_name, dataset_name,
-                                         base_npts, BL, BR,
-                                         use_static ? "static" : "pure");
+                                         base_npts, vsag::BL, vsag::MAX_M, vsag::MAX_A,
+                                         vsag::USE_AUTO_PARAM ? "auto" : "manual");
 
     logger->Debug(fmt::format("====Start deserialize from {}====", index_path));
     vsag::deserialize(index, index_path);
@@ -451,28 +460,97 @@ int main(int argc, char** argv) {
     }
 
     if (argc > 4) {
-        rr = std::stof(argv[4]);
+        redundant_rate = std::stof(argv[4]);
+        assert (-0.0001 < redundant_rate < 1.005);
     } else {
-        rr = -1;
+        redundant_rate = 0;
     }
 
-    bool is_recompute = false;
-    // prepare index and ground_truth
-//    build(is_recompute);
-//    calculate_gt(is_recompute);
+    if (argc > 5) {
+        int tmp = std::stoi(argv[5]);
+        vsag::USE_AUTO_PARAM = (tmp != 0);
+    } else {
+        vsag::USE_AUTO_PARAM = false;
+    }
+
+    if (argc > 6) {
+        vsag::MAX_M = std::stoi(argv[6]);
+    } else {
+        vsag::MAX_M = 36;
+    }
+
+    if (argc > 7) {
+        vsag::MAX_A = argv[7];
+    } else {
+        vsag::MAX_A = "1.0";
+    }
+
+    if (argc > 8) {
+        vsag::m_s_ = std::stoi(argv[8]);
+    } else {
+        vsag::m_s_ = 36;
+    }
+
+    if (argc > 9) {
+        vsag::a_s_ = std::stof(argv[9]);
+    } else {
+        vsag::a_s_ = 1.0;
+    }
+
+    if (argc > 10) {
+        vsag::BL = std::stoi(argv[10]);
+    } else {
+        vsag::BL = 500;
+    }
 
     // search
-    std::vector<uint32_t> efs = {10, 20, 30, 40, 50, 60, 70, 80, 90, 100};
-    std::vector<float> redundant_rate_list = {1.0, 0};
+    std::vector<uint32_t> efs = {10, 20, 30, 40, 50, 60, 70, 80, 90, 100,
+                                 10, 20, 30, 40, 50, 60, 70, 80, 90, 100,
+                                 10, 20, 30, 40, 50, 60, 70, 80, 90, 100,
+                                 10, 20, 30, 40, 50, 60, 70, 80, 90, 100};
     if (ef_search != -1) {
         efs.assign(1000, ef_search);
     }
-    if (rr != -1) {
-        redundant_rate_list.assign({rr});
+
+
+    // prepare index and ground_truth
+    bool is_recompute = false;
+    build(is_recompute);
+    calculate_gt(is_recompute);
+
+
+//    // auto-param and search
+//    std::vector<float> m_c_s_;
+//    std::vector<float> a_c_s_;
+//    for (uint32_t m_c = 8; m_c <= vsag::MAX_M * 2; m_c += 8) {
+//        m_c_s_.push_back(m_c);
+//    }
+//
+//    for (float a_c = 1.0; a_c <= std::stof(vsag::MAX_A) + 0.05; a_c += 0.2) {
+//        a_c_s_.push_back(a_c);
+//    }
+//
+//    std::vector<std::pair<uint32_t, float>> config_s;
+//    if (vsag::USE_AUTO_PARAM) {
+//        for (auto m_c : m_c_s_) {
+//            for (auto a_c : a_c_s_) {
+//                config_s.push_back({m_c, a_c});
+//            }
+//        }
+//        for (auto config : config_s) {
+//            logger->Info(fmt::format("auto : m_s: {}, a_s: {}", config.first, config.second));
+//            search(efs);
+//        }
+//    } else {
+//        logger->Info(fmt::format("manual : m_s: {}, a_s: {}", config.first, config.second));
+//        search(efs);
+//    }
+
+    if (vsag::USE_AUTO_PARAM) {
+        logger->Info(fmt::format(" auto  : m_s: {}, a_s: {}", vsag::m_s_, vsag::a_s_));
+    } else {
+        logger->Info(fmt::format("manual : m_s: {}, a_s: {}", vsag::MAX_M * 2, vsag::MAX_A));
     }
-    for (auto rate : redundant_rate_list) {
-        redundant_rate = rate;
-        logger->Info(fmt::format("sq: {}, rr: {}", sq_num_bits, redundant_rate));
-        search(efs);
-    }
+    logger->Info(fmt::format("sq: {}, rr: {}", sq_num_bits, redundant_rate));
+    search(efs);
 }

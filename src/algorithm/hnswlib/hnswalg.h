@@ -37,6 +37,7 @@
 #include "hnswlib.h"
 #include "visited_list_pool.h"
 #include "../../simd/simd.h"
+#include "vsag/constants.h"
 
 namespace vsag {
 extern int32_t (*INT4_IP)(const void* p1_vec, const void* p2_vec, int dim);
@@ -82,6 +83,7 @@ private:
     mutable std::vector<std::mutex> label_op_locks_;
 
     std::mutex global;
+    std::mutex real_global;
     std::vector<std::recursive_mutex> link_list_locks_;
 
     tableint enterpoint_node_{0};
@@ -129,6 +131,12 @@ private:
     float redundant_rate_;
     mutable uint8_t* to_be_prefetch_;
 
+    std::vector<float> m_c_s_;
+    std::vector<float> a_c_s_;
+    std::vector<std::vector<float>> L;
+    std::vector<std::vector<float>> T;
+    std::vector<std::vector<uint32_t>> G;
+
 public:
     HierarchicalNSW(SpaceInterface* s) {
     }
@@ -173,6 +181,18 @@ public:
         M_ = M;
         maxM_ = M_;
         maxM0_ = M_ * 2;
+
+        std::cout << "===============CONFIG================"<< std::endl;
+        std::cout << "vsag::USE_AUTO_PARAM: " << vsag::USE_AUTO_PARAM << std::endl;
+        std::cout << "M: " << M << " A: " << alpha << " ef_construction: " << ef_construction << std::endl;
+
+        for (uint32_t m_c = 8; m_c <= maxM0_; m_c += 8) {
+            m_c_s_.push_back(m_c);
+        }
+
+        for (float a_c = 1.0; a_c <= alpha_ + 0.05; a_c += 0.2) {
+            a_c_s_.push_back(a_c);
+        }
 
         ef_construction_ = std::max(ef_construction, M_);
         ef_ = 10;
@@ -497,6 +517,10 @@ public:
         }
     };
 
+    using MaxHeap = std::priority_queue<std::pair<float, tableint>,
+                                        std::vector<std::pair<float, tableint>>,
+                                        CompareByFirst>;
+
     void
     setEf(size_t ef) override {
         ef_ = ef;
@@ -757,7 +781,19 @@ public:
     }
 
     void
+    optimize_index_param() {
+
+    }
+
+    void
     optimize() override {
+        G.resize(0);
+        T.resize(0);
+        optimize_index_param();
+        if (cur_element_count_ < 10000) {
+            return ;
+        }
+
         constexpr static size_t sample_points_num = 1000;
         constexpr static size_t k = 10;
         size_t dim = *(size_t*)dist_func_param_;
@@ -988,6 +1024,12 @@ public:
 
         uint32_t count_no_visited = 0;
         for (size_t j = 1; j <= size; j++) {
+            if (vsag::USE_AUTO_PARAM and
+                not (L[current_node_pair.second][j - 1] <= vsag::a_s_ and
+                    count_no_visited < vsag::m_s_)) {
+                continue;
+            }
+
             int candidate_id = *(data + j);
             if (!(visited_array[candidate_id] == visited_array_tag)) {
                 to_be_visited[count_no_visited++] = candidate_id;
@@ -1019,6 +1061,12 @@ public:
         size_t size = getListCount((linklistsizeint*)data);
 
         for (int j = 0; j < size; j++) {
+            if (vsag::USE_AUTO_PARAM and
+                not (L[current_node_pair.second][j] <= vsag::a_s_ and
+                    count_no_visited < vsag::m_s_)) {
+                continue;
+            }
+
             if (j + 4 < size) {
                 _mm_prefetch((char*)(code + (j + 4) * (code_size_aligned_) + code_size + 8),
                              _MM_HINT_T0);
@@ -1420,9 +1468,116 @@ public:
     }
 
     void
-    getNeighborsByHeuristic2(std::priority_queue<std::pair<float, tableint>,
-                                                 std::vector<std::pair<float, tableint>>,
-                                                 CompareByFirst>& top_candidates,
+    pruningBasedLabeling(uint32_t i,
+                         MaxHeap& top_candidates,
+                         uint32_t m_c,
+                         uint32_t r = 0) {
+        // 1. sort result
+        auto INVALID_ID = std::numeric_limits<uint32_t>::max();
+        auto INVALID_DISTANCE = std::numeric_limits<float>::max();
+        std::vector<uint32_t> ANN_i;
+        std::vector<float> T_i;
+        std::vector<float> L_i;
+
+        std::priority_queue<std::pair<float, tableint>> queue_closest;
+        while (top_candidates.size() > 0) {
+            queue_closest.emplace(-top_candidates.top().first, top_candidates.top().second);
+            top_candidates.pop();
+        }
+
+        while (queue_closest.size()) {
+            if (ANN_i.size() >= m_c) {
+                break;
+            }
+
+            std::pair<float, tableint> cur = queue_closest.top();
+            queue_closest.pop();
+
+            ANN_i.push_back(cur.second);
+            T_i.push_back(-1 * cur.first);
+            L_i.push_back(0);
+        }
+
+        // 2. init
+        std::unique_lock lock_global(real_global);
+        if (G.size() < i + 1) {
+            G.resize(i + 1);
+            T.resize(i + 1);
+            L.resize(i + 1);
+            lock_global.unlock();
+        }
+
+        G[i].resize(m_c, INVALID_ID);
+        T[i].resize(m_c, INVALID_DISTANCE);
+        L[i].resize(m_c, 0);
+
+        uint32_t original_m_c = m_c;
+        m_c = std::min((uint32_t)ANN_i.size(), m_c);
+        for (int j = r; j < m_c; j++) {
+            G[i][j] = ANN_i[j];
+            T[i][j] = T_i[j];
+            L[i][j] = L_i[j];
+        }
+
+        // 3. pruning
+        for (auto a_c : a_c_s_) {
+            for (int j = r; j < m_c; j++) {
+                if (G[i][j] == INVALID_ID) {
+                    break;
+                }
+                if (L[i][j] != 0) {
+                    continue ;
+                }
+                bool is_prune = false;
+                for (int k = 0; k < j; k++) {
+                    if (L[i][k] <= a_c) {
+                        float tau_j_k = fstdistfunc_(
+                            getDataByInternalId(G[i][j]),
+                            getDataByInternalId(G[i][k]),
+                            dist_func_param_);
+                        if (a_c * tau_j_k <= T[i][k]) {
+                            is_prune = true;
+                        }
+
+                    }
+                }
+                if (not is_prune) {
+                    L[i][j] = a_c;
+                }
+            }
+        }
+
+        std::vector<float> final_L_i;
+        std::vector<float> final_T_i;
+        std::vector<uint32_t> final_G_i;
+        final_G_i.reserve(maxM0_);
+        final_T_i.reserve(maxM0_);
+        final_L_i.reserve(maxM0_);
+
+        for (int j = 0; j < m_c; j++) {
+            if (L[i][j] != 0){
+                final_G_i.push_back(G[i][j]);
+                final_T_i.push_back(T[i][j]);
+                final_L_i.push_back(L[i][j]);
+                top_candidates.emplace(-1 * T[i][j], G[i][j]);  // reverse the neighbor
+            }
+        }
+        while (final_G_i.size() < original_m_c) {
+            final_G_i.push_back(INVALID_ID);
+            final_T_i.push_back(INVALID_DISTANCE);
+            final_L_i.push_back(0);
+        }
+
+        G[i] = final_G_i;
+        T[i] = final_T_i;
+        L[i] = final_L_i;
+
+        // shrink if no label
+        return ;
+    }
+
+    void
+    getNeighborsByHeuristic2(MaxHeap& top_candidates,
                              const size_t M) {
         if (top_candidates.size() < M) {
             return;
@@ -1481,19 +1636,19 @@ public:
     tableint
     mutuallyConnectNewElement(const void* data_point,
                               tableint cur_c,
-                              std::priority_queue<std::pair<float, tableint>,
-                                                  std::vector<std::pair<float, tableint>>,
-                                                  CompareByFirst>& top_candidates,
+                              MaxHeap& top_candidates,
                               int level,
                               bool isUpdate) {
         size_t m_curmax = level ? maxM_ : maxM0_;
-        getNeighborsByHeuristic2(top_candidates, M_);
-        if (top_candidates.size() > M_)
-            throw std::runtime_error(
-                "Should be not be more than M_ candidates returned by the heuristic");
+        if (vsag::USE_AUTO_PARAM and level == 0) {
+            std::unique_lock<std::recursive_mutex> lock(link_list_locks_[cur_c]);
+            pruningBasedLabeling(cur_c, top_candidates, maxM0_);
+        } else {
+            getNeighborsByHeuristic2(top_candidates, M_);
+        }
 
         std::vector<tableint> selectedNeighbors;
-        selectedNeighbors.reserve(M_);
+        selectedNeighbors.reserve(maxM0_);
         while (top_candidates.size() > 0) {
             selectedNeighbors.push_back(top_candidates.top().second);
             top_candidates.pop();
@@ -1543,7 +1698,7 @@ public:
 
             // If cur_c is already present in the neighboring connections of `selectedNeighbors[idx]` then no need to modify any connections or run the heuristics.
             if (!is_cur_c_present) {
-                if (sz_link_list_other < m_curmax) {
+                if (sz_link_list_other < m_curmax and not (vsag::USE_AUTO_PARAM and level == 0)) {
                     data[sz_link_list_other] = cur_c;
                     setListCount(ll_other, sz_link_list_other + 1);
                     if (use_reversed_edges_) {
@@ -1552,9 +1707,20 @@ public:
                     }
                 } else {
                     // finding the "weakest" element to replace it with the new one
-                    float d_max = fstdistfunc_(getDataByInternalId(cur_c),
-                                               getDataByInternalId(selectedNeighbors[idx]),
-                                               dist_func_param_);
+                    float d_max = 0;
+                    if (vsag::USE_AUTO_PARAM and level == 0) {
+//                        assert(d_max == T[cur_c][idx]);
+                        d_max = T[cur_c][idx];
+                        if (T[selectedNeighbors[idx]].size() != 0 and
+                            d_max > T[selectedNeighbors[idx]].back()) {
+                            continue;
+                        }
+                    } else {
+                        d_max = fstdistfunc_(getDataByInternalId(cur_c),
+                                     getDataByInternalId(selectedNeighbors[idx]),
+                                     dist_func_param_);
+                    }
+
                     // Heuristic:
                     std::priority_queue<std::pair<float, tableint>,
                                         std::vector<std::pair<float, tableint>>,
@@ -1562,14 +1728,29 @@ public:
                         candidates;
                     candidates.emplace(d_max, cur_c);
 
+                    int r = 0;
                     for (size_t j = 0; j < sz_link_list_other; j++) {
-                        candidates.emplace(fstdistfunc_(getDataByInternalId(data[j]),
-                                                        getDataByInternalId(selectedNeighbors[idx]),
-                                                        dist_func_param_),
-                                           data[j]);
+                        auto d_neighbor = 0;
+                        if (vsag::USE_AUTO_PARAM and level == 0) {
+//                            assert (d_neighbor == T[selectedNeighbors[idx]][j]);
+                            d_neighbor = T[selectedNeighbors[idx]][j];
+                        } else {
+                            d_neighbor = fstdistfunc_(getDataByInternalId(data[j]),
+                                                          getDataByInternalId(selectedNeighbors[idx]),
+                                                          dist_func_param_);
+                        }
+                        candidates.emplace(d_neighbor, data[j]);
+                        if (d_neighbor < d_max) {
+                            // compute r
+                            r++;
+                        }
                     }
 
-                    getNeighborsByHeuristic2(candidates, m_curmax);
+                    if (vsag::USE_AUTO_PARAM and level == 0) {
+                        pruningBasedLabeling(selectedNeighbors[idx], candidates, maxM0_, r);
+                    } else {
+                        getNeighborsByHeuristic2(candidates, m_curmax);
+                    }
 
                     std::vector<tableint> cand_neighbors;
                     while (candidates.size() > 0) {
@@ -1721,7 +1902,15 @@ public:
                 writeBinaryToMem(dest, link_lists_[i], link_list_size);
             }
         }
-        // output.close();
+
+        if (vsag::USE_AUTO_PARAM) {
+            for (size_t i = 0; i < cur_element_count_; i++) {
+                assert(maxM0_ == L[i].size());
+                uint32_t L_size = L[i].size() * sizeof(L[i][0]);
+                writeVarToMem(dest, L_size);
+                writeBinaryToMem(dest, (char *)L[i].data(), L_size);
+            }
+        }
     }
 
     size_t
@@ -1770,6 +1959,15 @@ public:
                 size += link_list_size;
             }
         }
+        if (vsag::USE_AUTO_PARAM) {
+            for (size_t i = 0; i < cur_element_count_; i++) {
+                assert(L[i].size() == maxM0_);
+                uint32_t L_size = L[i].size() * sizeof(float);
+                size += sizeof(L_size);
+                size += L_size;
+            }
+        }
+
         // output.close();
         return size;
     }
@@ -1957,6 +2155,17 @@ public:
                 // input.read(link_lists_[i], link_list_size);
                 read_func(cursor, link_list_size, link_lists_[i]);
                 cursor += link_list_size;
+            }
+        }
+        if (vsag::USE_AUTO_PARAM) {
+            L.resize(cur_element_count_);
+            for (size_t i = 0; i < cur_element_count_; i++) {
+                uint32_t L_size;
+                readFromReader(read_func, cursor, L_size);
+                assert(maxM0_ * sizeof(float) == L_size);
+                L[i].resize(maxM0_);
+                read_func(cursor, L_size, L[i].data());
+                cursor += L_size;
             }
         }
 
@@ -2635,6 +2844,11 @@ public:
             enterpoint_node_ = 0;
             maxlevel_ = curlevel;
         }
+
+//        if (vsag::USE_AUTO_PARAM) {
+//            G.resize(0);
+//            T.resize(0);
+//        }
 
         // Releasing lock for the maximum level
         if (curlevel > maxlevelcopy) {

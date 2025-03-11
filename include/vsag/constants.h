@@ -13,8 +13,15 @@
 // limitations under the License.
 
 #pragma once
+#include "string"
 
 namespace vsag {
+extern bool USE_AUTO_PARAM;
+extern float m_s_;
+extern float a_s_;
+extern uint32_t BL;
+extern uint32_t MAX_M;
+extern std::string MAX_A;
 
 extern const char* const INDEX_DISKANN;
 extern const char* const INDEX_HNSW;
