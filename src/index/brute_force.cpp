@@ -18,6 +18,7 @@
 #include "data_cell/flatten_datacell.h"
 #include "inner_string_params.h"
 #include "utils/slow_task_timer.h"
+#include "utils/standard_heap.h"
 #include "utils/util_functions.h"
 
 namespace vsag {
@@ -72,27 +73,20 @@ BruteForce::KnnSearch(const DatasetPtr& query,
                       const std::string& parameters,
                       const FilterPtr& filter) const {
     auto computer = this->inner_codes_->FactoryComputer(query->GetFloat32Vectors());
-    MaxHeap heap(this->allocator_);
-    auto cur_heap_top = std::numeric_limits<float>::max();
+    auto heap = std::make_shared<StandardHeap<true, true>>(this->allocator_, k);
     for (InnerIdType i = 0; i < total_count_; ++i) {
         float dist;
         if (filter == nullptr or filter->CheckValid(this->label_table_->GetLabelById(i))) {
             inner_codes_->Query(&dist, computer, &i, 1);
-            if (heap.size() < k or dist < cur_heap_top) {
-                heap.emplace(dist, i);
-            }
-            if (heap.size() > k) {
-                heap.pop();
-            }
-            cur_heap_top = heap.top().first;
+            heap->Push(dist, i);
         }
     }
     auto [dataset_results, dists, ids] =
-        CreateFastDataset(static_cast<int64_t>(heap.size()), allocator_);
-    for (auto j = static_cast<int64_t>(heap.size() - 1); j >= 0; --j) {
-        dists[j] = heap.top().first;
-        ids[j] = this->label_table_->GetLabelById(heap.top().second);
-        heap.pop();
+        CreateFastDataset(static_cast<int64_t>(heap->Size()), allocator_);
+    for (auto j = static_cast<int64_t>(heap->Size() - 1); j >= 0; --j) {
+        dists[j] = heap->Top().first;
+        ids[j] = this->label_table_->GetLabelById(heap->Top().second);
+        heap->Pop();
     }
     return std::move(dataset_results);
 }
@@ -104,10 +98,10 @@ BruteForce::RangeSearch(const vsag::DatasetPtr& query,
                         const vsag::FilterPtr& filter,
                         int64_t limited_size) const {
     auto computer = this->inner_codes_->FactoryComputer(query->GetFloat32Vectors());
-    MaxHeap heap(this->allocator_);
     if (limited_size < 0) {
         limited_size = std::numeric_limits<int64_t>::max();
     }
+    auto heap = std::make_shared<StandardHeap<true, true>>(this->allocator_, limited_size);
     for (InnerIdType i = 0; i < total_count_; ++i) {
         float dist;
         if (filter == nullptr or filter->CheckValid(this->label_table_->GetLabelById(i))) {
@@ -115,19 +109,16 @@ BruteForce::RangeSearch(const vsag::DatasetPtr& query,
             if (dist > radius) {
                 continue;
             }
-            heap.emplace(dist, i);
-            if (heap.size() > limited_size) {
-                heap.pop();
-            }
+            heap->Push(dist, i);
         }
     }
 
     auto [dataset_results, dists, ids] =
-        CreateFastDataset(static_cast<int64_t>(heap.size()), allocator_);
-    for (auto j = static_cast<int64_t>(heap.size() - 1); j >= 0; --j) {
-        dists[j] = heap.top().first;
-        ids[j] = this->label_table_->GetLabelById(heap.top().second);
-        heap.pop();
+        CreateFastDataset(static_cast<int64_t>(heap->Size()), allocator_);
+    for (auto j = static_cast<int64_t>(heap->Size() - 1); j >= 0; --j) {
+        dists[j] = heap->Top().first;
+        ids[j] = this->label_table_->GetLabelById(heap->Top().second);
+        heap->Pop();
     }
     return std::move(dataset_results);
 }
