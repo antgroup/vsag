@@ -43,7 +43,7 @@ BasicSearcher::visit(const GraphInterfacePtr& graph,
         graph->GetNeighbors(current_node_pair.second, neighbors);
     }
 
-    float skip_threshold = (1 - filter->ValidRatio()) * 0.8;
+    float skip_threshold = (filter != nullptr ? (1 - filter->ValidRatio()) * 0.8 : 0.0);
 
     for (uint32_t i = 0; i < prefetch_jump_visit_size_; i++) {
         vl->Prefetch(neighbors[i]);
@@ -54,7 +54,7 @@ BasicSearcher::visit(const GraphInterfacePtr& graph,
             vl->Prefetch(neighbors[i + prefetch_jump_visit_size_]);
         }
         if (not vl->Get(neighbors[i])) {
-            if (not filter || (generator.NextFloat() < skip_threshold && filter->CheckValid(neighbors[i]))) {
+            if (not filter || true || generator.NextFloat() > skip_threshold || filter->CheckValid(neighbors[i])) {
                 to_be_visited_rid[count_no_visited] = i;
                 to_be_visited_id[count_no_visited] = neighbors[i];
                 count_no_visited++;
