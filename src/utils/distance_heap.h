@@ -76,4 +76,6 @@ protected:
     int64_t max_size_{-1};
 };
 
+using DistHeapPtr = std::shared_ptr<DistanceHeap>;
+
 }  // namespace vsag
