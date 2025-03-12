@@ -133,7 +133,7 @@ FP32ComputeL2Sqr(const float* query, const float* codes, uint64_t dim) {
 
 #if defined(ENABLE_AVX512)
 __inline __m512i __attribute__((__always_inline__)) load_16_short(const uint16_t* data) {
-    __m256i bf16 = _mm256_loadu_epi16(data);
+    __m256i bf16 = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(data));
     __m512i bf32 = _mm512_cvtepu16_epi32(bf16);
     return _mm512_slli_epi32(bf32, 16);
 }
@@ -210,11 +210,11 @@ FP16ComputeIP(const uint8_t* query, const uint8_t* codes, uint64_t dim) {
     uint64_t i = 0;
     for (; i + 15 < dim; i += 16) {
         // Load data into registers
-        __m256i query_load = _mm256_loadu_epi32(query_fp16 + i);
+        __m256i query_load = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(query_fp16 + i));
         __m512 query_float = _mm512_cvtph_ps(query_load);
 
         // Load data into registers
-        __m256i code_load = _mm256_loadu_epi32(codes_fp16 + i);
+        __m256i code_load = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(codes_fp16 + i));
         __m512 code_float = _mm512_cvtph_ps(code_load);
 
         sum = _mm512_fmadd_ps(code_float, query_float, sum);
@@ -239,11 +239,11 @@ FP16ComputeL2Sqr(const uint8_t* query, const uint8_t* codes, uint64_t dim) {
     uint64_t i = 0;
     for (; i + 15 < dim; i += 16) {
         // Load data into registers
-        __m256i query_load = _mm256_loadu_epi32(query_fp16 + i);
+        __m256i query_load = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(query_fp16 + i));
         __m512 query_float = _mm512_cvtph_ps(query_load);
 
         // Load data into registers
-        __m256i code_load = _mm256_loadu_epi32(codes_fp16 + i);
+        __m256i code_load = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(codes_fp16 + i));
         __m512 code_float = _mm512_cvtph_ps(code_load);
 
         __m512 diff = _mm512_sub_ps(code_float, query_float);
