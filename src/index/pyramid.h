@@ -55,6 +55,7 @@ public:
     GraphInterfacePtr graph_{nullptr};
     InnerIdType entry_point_{0};
     uint32_t level_{0};
+    std::mutex mutex_;
 
     Vector<InnerIdType> ids_;  //
 
@@ -223,6 +224,8 @@ private:
     std::unique_ptr<BasicSearcher> searcher_ = nullptr;
     int64_t max_capacity_{0};
     int64_t cur_element_count_{0};
+    std::shared_mutex resize_mutex_;
+    std::mutex cur_element_count_mutex_;
 };
 
 }  // namespace vsag
