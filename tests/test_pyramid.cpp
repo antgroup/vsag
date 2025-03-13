@@ -19,6 +19,7 @@
 #include <catch2/generators/catch_generators.hpp>
 
 #include "fixtures/test_dataset_pool.h"
+#include "fixtures/test_logger.h"
 #include "test_index.h"
 #include "vsag/vsag.h"
 
@@ -32,7 +33,7 @@ public:
 
     static std::vector<int> dims;
 
-    constexpr static uint64_t base_count = 3000;
+    constexpr static uint64_t base_count = 1000;
 
     constexpr static const char* search_param_tmp = R"(
         {{
@@ -75,9 +76,10 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
                              "Pyramid Build & ContinueAdd Test",
                              "[ft][pyramid]") {
     auto metric_type = GENERATE("l2", "ip", "cosine");
+    std::string metric_type_str = metric_type;
     std::string base_quantization_str = GENERATE("fp32");
     const std::string name = "pyramid";
-    auto search_param = fmt::format(search_param_tmp, 100);
+    auto search_param = fmt::format(search_param_tmp, 20);
     for (auto& dim : dims) {
         auto param = GeneratePyramidBuildParametersString(metric_type, dim);
         auto index = TestFactory(name, param, true);
@@ -94,14 +96,14 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex, "Pyramid Add Test", "[f
     auto metric_type = GENERATE("l2");
     std::string base_quantization_str = GENERATE("fp32");
     const std::string name = "pyramid";
-    auto search_param = fmt::format(search_param_tmp, 100);
+    auto search_param = fmt::format(search_param_tmp, 20);
     for (auto& dim : dims) {
         auto param = GeneratePyramidBuildParametersString(metric_type, dim);
         auto index = TestFactory(name, param, true);
         auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type, /*with_path=*/true);
         TestAddIndex(index, dataset, true);
         TestKnnSearch(index, dataset, search_param, 0.99, true);
-        //        TestFilterSearch(index, dataset, search_param, 0.99, true);
+        TestFilterSearch(index, dataset, search_param, 0.99, true);
         TestRangeSearch(index, dataset, search_param, 0.99, 10, true);
         TestRangeSearch(index, dataset, search_param, 0.49, 5, true);
     }
@@ -114,7 +116,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
     auto size = GENERATE(1024 * 1024 * 2);
     auto metric_type = GENERATE("l2");
     const std::string name = "pyramid";
-    auto search_param = fmt::format(search_param_tmp, 200);
+    auto search_param = fmt::format(search_param_tmp, 20);
 
     for (auto& dim : dims) {
         vsag::Options::Instance().set_block_size_limit(size);
@@ -163,5 +165,19 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
         auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type, /*with_path=*/true);
         TestContinueAddIgnoreRequire(index.value(), dataset, 1);
         vsag::Options::Instance().set_block_size_limit(origin_size);
+    }
+}
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
+                             "Pyramid Concurrent Test",
+                             "[ft][pyramid]") {
+    auto metric_type = GENERATE("l2");
+    const std::string name = "pyramid";
+    auto search_param = fmt::format(search_param_tmp, 20);
+    for (auto& dim : dims) {
+        auto param = GeneratePyramidBuildParametersString(metric_type, dim);
+        auto index = TestFactory(name, param, true);
+        auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type, /*with_path=*/true);
+        TestConcurrentAdd(index, dataset, true);
+        TestConcurrentKnnSearch(index, dataset, search_param, 0.99, true);
     }
 }
