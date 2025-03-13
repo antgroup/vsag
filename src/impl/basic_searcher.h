@@ -34,6 +34,7 @@ public:
     InnerIdType ep{0};
     uint64_t ef{10};
     FilterPtr is_inner_id_allowed{nullptr};
+    float skip_ratio{0.8F};
     InnerSearchMode search_mode{KNN_SEARCH};
     int range_search_limit_size{-1};
 };
@@ -59,6 +60,8 @@ private:
     visit(const GraphInterfacePtr& graph,
           const VisitedListPtr& vl,
           const std::pair<float, uint64_t>& current_node_pair,
+          const FilterPtr& filter,
+          float skip_ratio,
           Vector<InnerIdType>& to_be_visited_rid,
           Vector<InnerIdType>& to_be_visited_id) const;
 
