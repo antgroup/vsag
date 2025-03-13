@@ -15,6 +15,7 @@
 
 #include "util_functions.h"
 
+#include <random>
 namespace vsag {
 
 std::string
@@ -60,6 +61,25 @@ CreateFastDataset(int64_t dim, Allocator* allocator) {
     auto* dists = reinterpret_cast<float*>(allocator->Allocate(sizeof(float) * dim));
     dataset->Distances(dists);
     return {dataset, dists, ids};
+}
+
+std::vector<int>
+select_k_numbers(int64_t n, int k) {
+    if (k > n || k <= 0) {
+        throw std::invalid_argument("Invalid values for N or K");
+    }
+
+    std::vector<int> numbers(n);
+    std::iota(numbers.begin(), numbers.end(), 0);
+
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    for (int i = 0; i < k; ++i) {
+        std::uniform_int_distribution<> dist(i, static_cast<int>(n - 1));
+        std::swap(numbers[i], numbers[dist(gen)]);
+    }
+    numbers.resize(k);
+    return numbers;
 }
 
 }  // namespace vsag
