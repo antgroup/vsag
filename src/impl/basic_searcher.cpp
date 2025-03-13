@@ -29,7 +29,7 @@ uint32_t
 BasicSearcher::visit(const GraphInterfacePtr& graph,
                      const VisitedListPtr& vl,
                      const std::pair<float, uint64_t>& current_node_pair,
-                     const FilterPtr & filter,
+                     const FilterPtr& filter,
                      Vector<InnerIdType>& to_be_visited_rid,
                      Vector<InnerIdType>& to_be_visited_id) const {
     LinearCongruentialGenerator generator;
@@ -54,7 +54,8 @@ BasicSearcher::visit(const GraphInterfacePtr& graph,
             vl->Prefetch(neighbors[i + prefetch_jump_visit_size_]);
         }
         if (not vl->Get(neighbors[i])) {
-            if (not filter || count_no_visited == 0 || generator.NextFloat() > skip_threshold || filter->CheckValid(neighbors[i])) {
+            if (not filter || count_no_visited == 0 || generator.NextFloat() > skip_threshold ||
+                filter->CheckValid(neighbors[i])) {
                 to_be_visited_rid[count_no_visited] = i;
                 to_be_visited_id[count_no_visited] = neighbors[i];
                 count_no_visited++;
@@ -135,7 +136,12 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
             graph->Prefetch(candidate_set.top().second, 0);
         }
 
-        count_no_visited = visit(graph, vl, current_node_pair, inner_search_param.is_inner_id_allowed, to_be_visited_rid, to_be_visited_id);
+        count_no_visited = visit(graph,
+                                 vl,
+                                 current_node_pair,
+                                 inner_search_param.is_inner_id_allowed,
+                                 to_be_visited_rid,
+                                 to_be_visited_id);
 
         dist_cmp += count_no_visited;
 

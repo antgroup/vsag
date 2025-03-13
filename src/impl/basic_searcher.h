@@ -59,7 +59,7 @@ private:
     visit(const GraphInterfacePtr& graph,
           const VisitedListPtr& vl,
           const std::pair<float, uint64_t>& current_node_pair,
-          const FilterPtr & filter,
+          const FilterPtr& filter,
           Vector<InnerIdType>& to_be_visited_rid,
           Vector<InnerIdType>& to_be_visited_id) const;
 
