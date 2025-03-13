@@ -24,8 +24,10 @@
 namespace vsag {
 class IVFPartitionStrategy {
 public:
-    explicit IVFPartitionStrategy(Allocator* allocator, BucketIdType bucket_count, int64_t dim)
-        : allocator_(allocator), bucket_count_(bucket_count), dim_(dim){};
+    explicit IVFPartitionStrategy(const IndexCommonParam& common_param, BucketIdType bucket_count)
+        : allocator_(common_param.allocator_.get()),
+          bucket_count_(bucket_count),
+          dim_(common_param.dim_){};
 
     virtual void
     Train(const DatasetPtr dataset) = 0;

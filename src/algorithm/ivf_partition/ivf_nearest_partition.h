@@ -15,6 +15,8 @@
 
 #pragma once
 
+#include "algorithm/inner_index_interface.h"
+#include "index/index_common_param.h"
 #include "ivf_partition_strategy.h"
 #include "vsag/index.h"
 namespace vsag {
@@ -26,9 +28,8 @@ enum class IVFNearestPartitionTrainerType {
 
 class IVFNearestPartition : public IVFPartitionStrategy {
 public:
-    explicit IVFNearestPartition(Allocator* allocator,
-                                 BucketIdType bucket_count,
-                                 int64_t dim,
+    explicit IVFNearestPartition(BucketIdType bucket_count,
+                                 const IndexCommonParam& common_param,
                                  IVFNearestPartitionTrainerType trainer_type =
                                      IVFNearestPartitionTrainerType::KMeansTrainer);
 
@@ -47,11 +48,11 @@ public:
 public:
     IVFNearestPartitionTrainerType trainer_type_{IVFNearestPartitionTrainerType::KMeansTrainer};
 
-    IndexPtr route_index_ptr_{nullptr};
+    InnerIndexPtr route_index_ptr_{nullptr};
 
 private:
     void
-    factory_router_index();
+    factory_router_index(const IndexCommonParam& common_param);
 };
 
 }  // namespace vsag

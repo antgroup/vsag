@@ -17,7 +17,11 @@
 
 #include <fmt/format-inl.h>
 
+#include "algorithm/brute_force.h"
+#include "algorithm/brute_force_parameter.h"
 #include "impl/kmeans_cluster.h"
+#include "inner_string_params.h"
+#include "safe_allocator.h"
 #include "vsag/factory.h"
 
 namespace vsag {
@@ -30,20 +34,11 @@ static constexpr const char* SEARCH_PARAM_TEMPLATE_STR = R"(
 }}
 )";
 
-static constexpr const char* BRUTE_FORCE_FACTORY_STR = R"(
-{{
-    "dtype": "float32",
-    "metric_type": "l2",
-    "dim": {}
-}}
-)";
-
-IVFNearestPartition::IVFNearestPartition(Allocator* allocator,
-                                         BucketIdType bucket_count,
-                                         int64_t dim,
+IVFNearestPartition::IVFNearestPartition(BucketIdType bucket_count,
+                                         const IndexCommonParam& common_param,
                                          IVFNearestPartitionTrainerType trainer_type)
-    : IVFPartitionStrategy(allocator, bucket_count, dim), trainer_type_(trainer_type) {
-    this->factory_router_index();
+    : IVFPartitionStrategy(common_param, bucket_count), trainer_type_(trainer_type) {
+    this->factory_router_index(common_param);
 }
 
 void
@@ -68,9 +63,6 @@ IVFNearestPartition::Train(const DatasetPtr dataset) {
     }
 
     auto build_result = this->route_index_ptr_->Build(centroids);
-    if (not build_result.has_value()) {
-        throw std::runtime_error("ivf train failed");
-    }
     this->is_trained_ = true;
 }
 
@@ -87,8 +79,9 @@ IVFNearestPartition::ClassifyDatas(const void* datas,
             ->Owner(false);
         auto search_param = fmt::format(
             SEARCH_PARAM_TEMPLATE_STR, std::max(10L, static_cast<int64_t>(buckets_per_data * 1.2)));
+        FilterPtr filter = nullptr;
         auto search_result =
-            this->route_index_ptr_->KnnSearch(query, buckets_per_data, search_param).value();
+            this->route_index_ptr_->KnnSearch(query, buckets_per_data, search_param, filter);
         const auto* result_ids = search_result->GetIds();
 
         for (int64_t j = 0; j < buckets_per_data; ++j) {
@@ -100,39 +93,27 @@ IVFNearestPartition::ClassifyDatas(const void* datas,
 void
 IVFNearestPartition::Serialize(StreamWriter& writer) {
     IVFPartitionStrategy::Serialize(writer);
-    auto binary = this->route_index_ptr_->Serialize().value();
-    auto keys = binary.GetKeys();
-    uint64_t key_count = keys.size();
-    StreamWriter::WriteObj(writer, key_count);
-    for (const auto& str : keys) {
-        StreamWriter::WriteString(writer, str);
-        auto data = binary.Get(str);
-        StreamWriter::WriteObj(writer, data.size);
-        writer.Write(reinterpret_cast<const char*>(data.data.get()), data.size);
-    }
+    this->route_index_ptr_->Serialize(writer);
 }
 void
 IVFNearestPartition::Deserialize(StreamReader& reader) {
     IVFPartitionStrategy::Deserialize(reader);
-    BinarySet binary;
-    uint64_t key_count;
-    StreamReader::ReadObj(reader, key_count);
-    for (int i = 0; i < key_count; ++i) {
-        auto key = StreamReader::ReadString(reader);
-        Binary b;
-        StreamReader::ReadObj(reader, b.size);
-        std::shared_ptr<int8_t[]> bin(new int8_t[b.size]);
-        b.data = bin;
-        reader.Read(reinterpret_cast<char*>(bin.get()), b.size);
-        binary.Set(key, b);
-    }
-    this->route_index_ptr_->Deserialize(binary);
+    this->route_index_ptr_->Deserialize(reader);
 }
 void
-IVFNearestPartition::factory_router_index() {
-    this->route_index_ptr_ =
-        Factory::CreateIndex(
-            INDEX_BRUTE_FORCE, fmt::format(BRUTE_FORCE_FACTORY_STR, this->dim_), this->allocator_)
-            .value();
+IVFNearestPartition::factory_router_index(const IndexCommonParam& common_param) {
+    auto param_ptr = std::make_shared<BruteForceParameter>();
+    param_ptr->flatten_param = std::make_shared<FlattenDataCellParameter>();
+    JsonType memory_json = {
+        {"type", IO_TYPE_VALUE_BLOCK_MEMORY_IO},
+    };
+    param_ptr->flatten_param->io_parameter = IOParameter::GetIOParameterByJson(memory_json);
+    JsonType quantizer_json = {
+        {"type", QUANTIZATION_TYPE_VALUE_FP32},
+    };
+    param_ptr->flatten_param->quantizer_parameter =
+        QuantizerParameter::GetQuantizerParameterByJson(quantizer_json);
+
+    this->route_index_ptr_ = std::make_shared<BruteForce>(param_ptr, common_param);
 }
 }  // namespace vsag
