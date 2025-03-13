@@ -17,7 +17,6 @@
 
 #include <catch2/catch_test_macros.hpp>
 
-#include "fixtures.h"
 #include "parameter_test.h"
 
 TEST_CASE("IVF Parameters Test", "[ut][IVFParameter]") {

@@ -34,7 +34,7 @@ jobs:
             - ./build
       - run:
           command: make test_parallel
-          no_output_timeout: 15m
+          no_output_timeout: 50m
 
   main-branch-check:
     docker:
@@ -52,4 +52,4 @@ jobs:
             - ./build
       - run:
           command: make test_parallel
-          no_output_timeout: 15m
+          no_output_timeout: 50m

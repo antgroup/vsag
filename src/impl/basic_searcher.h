@@ -38,6 +38,8 @@ public:
     int range_search_limit_size{-1};
 };
 
+constexpr float THRESHOLD_ERROR = 2e-6;
+
 class BasicSearcher {
 public:
     explicit BasicSearcher(const IndexCommonParam& common_param,

@@ -130,6 +130,7 @@ const char* const HGRAPH_BASE_IO_TYPE = "base_io_type";
 const char* const HGRAPH_BASE_FILE_PATH = "base_file_path";
 const char* const HGRAPH_PRECISE_IO_TYPE = "precise_io_type";
 const char* const HGRAPH_PRECISE_FILE_PATH = "precise_file_path";
+const char* const HGRAPH_PARAMETER_EF_RUNTIME = "ef_search";
 
 const char* const BRUTE_FORCE_QUANTIZATION_TYPE = "quantization_type";
 const char* const BRUTE_FORCE_IO_TYPE = "io_type";

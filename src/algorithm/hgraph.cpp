@@ -24,7 +24,6 @@
 #include "data_cell/sparse_graph_datacell.h"
 #include "empty_index_binary_set.h"
 #include "impl/pruning_strategy.h"
-#include "index/hgraph_index_zparameters.h"
 #include "logger.h"
 #include "utils/slow_task_timer.h"
 #include "utils/util_functions.h"
