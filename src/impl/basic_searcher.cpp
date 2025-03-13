@@ -30,6 +30,7 @@ BasicSearcher::visit(const GraphInterfacePtr& graph,
                      const VisitedListPtr& vl,
                      const std::pair<float, uint64_t>& current_node_pair,
                      const FilterPtr& filter,
+                     float skip_ratio,
                      Vector<InnerIdType>& to_be_visited_rid,
                      Vector<InnerIdType>& to_be_visited_id) const {
     LinearCongruentialGenerator generator;
@@ -43,7 +44,7 @@ BasicSearcher::visit(const GraphInterfacePtr& graph,
         graph->GetNeighbors(current_node_pair.second, neighbors);
     }
 
-    float skip_threshold = (filter != nullptr ? (1 - filter->ValidRatio()) * 0.8 : 0.0F);
+    float skip_threshold = (filter != nullptr ? (1 - filter->ValidRatio()) * skip_ratio : 0.0F);
 
     for (uint32_t i = 0; i < prefetch_jump_visit_size_; i++) {
         vl->Prefetch(neighbors[i]);
@@ -140,6 +141,7 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                                  vl,
                                  current_node_pair,
                                  inner_search_param.is_inner_id_allowed,
+                                 inner_search_param.skip_ratio,
                                  to_be_visited_rid,
                                  to_be_visited_id);
 
