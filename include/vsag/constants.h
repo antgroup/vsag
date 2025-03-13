@@ -117,6 +117,7 @@ extern const char* const SQ4_UNIFORM_TRUNC_RATE;
 
 // hgraph params
 extern const char* const HGRAPH_USE_REORDER;
+extern const char* const HGRAPH_IGNORE_REORDER;
 extern const char* const HGRAPH_BASE_QUANTIZATION_TYPE;
 extern const char* const HGRAPH_GRAPH_MAX_DEGREE;
 extern const char* const HGRAPH_BUILD_EF_CONSTRUCTION;
