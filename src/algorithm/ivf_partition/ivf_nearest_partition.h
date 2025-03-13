@@ -15,6 +15,7 @@
 
 #pragma once
 
+#include "algorithm/inner_index_interface.h"
 #include "ivf_partition_strategy.h"
 #include "vsag/index.h"
 namespace vsag {
@@ -47,7 +48,7 @@ public:
 public:
     IVFNearestPartitionTrainerType trainer_type_{IVFNearestPartitionTrainerType::KMeansTrainer};
 
-    IndexPtr route_index_ptr_{nullptr};
+    InnerIndexPtr route_index_ptr_{nullptr};
 
 private:
     void
