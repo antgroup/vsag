@@ -17,6 +17,8 @@
 
 #include <limits>
 
+#include "utils/linear_congruential_generator.h"
+
 namespace vsag {
 
 BasicSearcher::BasicSearcher(const IndexCommonParam& common_param, MutexArrayPtr mutex_array)
@@ -27,8 +29,11 @@ uint32_t
 BasicSearcher::visit(const GraphInterfacePtr& graph,
                      const VisitedListPtr& vl,
                      const std::pair<float, uint64_t>& current_node_pair,
+                     const FilterPtr& filter,
+                     float skip_ratio,
                      Vector<InnerIdType>& to_be_visited_rid,
                      Vector<InnerIdType>& to_be_visited_id) const {
+    LinearCongruentialGenerator generator;
     uint32_t count_no_visited = 0;
     Vector<InnerIdType> neighbors(allocator_);
 
@@ -39,6 +44,8 @@ BasicSearcher::visit(const GraphInterfacePtr& graph,
         graph->GetNeighbors(current_node_pair.second, neighbors);
     }
 
+    float skip_threshold = (filter != nullptr ? (1 - filter->ValidRatio()) * skip_ratio : 0.0F);
+
     for (uint32_t i = 0; i < prefetch_jump_visit_size_; i++) {
         vl->Prefetch(neighbors[i]);
     }
@@ -48,9 +55,12 @@ BasicSearcher::visit(const GraphInterfacePtr& graph,
             vl->Prefetch(neighbors[i + prefetch_jump_visit_size_]);
         }
         if (not vl->Get(neighbors[i])) {
-            to_be_visited_rid[count_no_visited] = i;
-            to_be_visited_id[count_no_visited] = neighbors[i];
-            count_no_visited++;
+            if (not filter || count_no_visited == 0 || generator.NextFloat() > skip_threshold ||
+                filter->CheckValid(neighbors[i])) {
+                to_be_visited_rid[count_no_visited] = i;
+                to_be_visited_id[count_no_visited] = neighbors[i];
+                count_no_visited++;
+            }
             vl->Set(neighbors[i]);
         }
     }
@@ -127,7 +137,13 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
             graph->Prefetch(candidate_set.top().second, 0);
         }
 
-        count_no_visited = visit(graph, vl, current_node_pair, to_be_visited_rid, to_be_visited_id);
+        count_no_visited = visit(graph,
+                                 vl,
+                                 current_node_pair,
+                                 inner_search_param.is_inner_id_allowed,
+                                 inner_search_param.skip_ratio,
+                                 to_be_visited_rid,
+                                 to_be_visited_id);
 
         dist_cmp += count_no_visited;
 
