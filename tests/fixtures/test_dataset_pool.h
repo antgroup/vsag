@@ -31,7 +31,8 @@ public:
                         uint64_t count,
                         const std::string& metric_str = "l2",
                         bool with_path = false,
-                        float valid_ratio = 0.8);
+                        float valid_ratio = 0.8,
+                        uint64_t extra_info_size = 0);
 
     TestDatasetPtr
     GetNanDataset(const std::string& metric_str);

@@ -23,6 +23,7 @@
 #include "algorithm/hnswlib/algorithm_interface.h"
 #include "algorithm/hnswlib/visited_list_pool.h"
 #include "common.h"
+#include "data_cell/extra_info_interface.h"
 #include "data_cell/flatten_interface.h"
 #include "data_cell/graph_interface.h"
 #include "hgraph_parameter.h"
@@ -196,5 +197,8 @@ private:
     InnerIdType max_capacity_{0};
 
     const uint64_t resize_increase_count_bit_{10};  // 2^resize_increase_count_bit_ for resize count
+
+    ExtraInfoInterfacePtr extra_infos_{nullptr};
+    uint64_t extra_info_size_{0};
 };
 }  // namespace vsag

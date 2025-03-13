@@ -30,7 +30,8 @@ public:
     GenerateHGraphBuildParametersString(const std::string& metric_type,
                                         int64_t dim,
                                         const std::string& quantization_str = "sq8",
-                                        int thread_count = 5);
+                                        int thread_count = 5,
+                                        int extra_info_size = 0);
     static TestDatasetPool pool;
 
     static std::vector<int> dims;
@@ -68,7 +69,8 @@ std::string
 HgraphTestIndex::GenerateHGraphBuildParametersString(const std::string& metric_type,
                                                      int64_t dim,
                                                      const std::string& quantization_str,
-                                                     int thread_count) {
+                                                     int thread_count,
+                                                     int extra_info_size) {
     std::string build_parameters_str;
 
     constexpr auto parameter_temp_reorder = R"(
@@ -84,7 +86,8 @@ HgraphTestIndex::GenerateHGraphBuildParametersString(const std::string& metric_t
             "build_thread_count": {},
             "precise_quantization_type": "{}",
             "precise_io_type": "{}",
-            "precise_file_path": "{}"
+            "precise_file_path": "{}",
+            "extra_info_size": {}
         }}
     }}
     )";
@@ -98,7 +101,8 @@ HgraphTestIndex::GenerateHGraphBuildParametersString(const std::string& metric_t
             "base_quantization_type": "{}",
             "max_degree": 96,
             "ef_construction": 500,
-            "build_thread_count": {}
+            "build_thread_count": {},
+            "extra_info_size": {}
         }}
     }}
     )";
@@ -119,10 +123,15 @@ HgraphTestIndex::GenerateHGraphBuildParametersString(const std::string& metric_t
                                            thread_count,
                                            high_quantizer_str,
                                            precise_io_type,
-                                           dir.GenerateRandomFile());
+                                           dir.GenerateRandomFile(),
+                                           extra_info_size);
     } else {
-        build_parameters_str =
-            fmt::format(parameter_temp_origin, metric_type, dim, base_quantizer_str, thread_count);
+        build_parameters_str = fmt::format(parameter_temp_origin,
+                                           metric_type,
+                                           dim,
+                                           base_quantizer_str,
+                                           thread_count,
+                                           extra_info_size);
     }
     INFO(build_parameters_str);
     return build_parameters_str;
@@ -558,6 +567,37 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex, "HGraph Estimate Memory"
                 GenerateHGraphBuildParametersString(metric_type, dim, base_quantization_str);
             auto dataset = pool.GetDatasetAndCreate(dim, estimate_count, metric_type);
             TestEstimateMemory(name, param, dataset);
+            vsag::Options::Instance().set_block_size_limit(origin_size);
+        }
+    }
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex, "HGraph With Extra Info", "[ft][hgraph]") {
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    auto size = GENERATE(1024 * 1024 * 2);
+    auto metric_type = GENERATE("l2", "ip", "cosine");
+    uint64_t extra_info_size = 256;
+
+    const std::string name = "hgraph";
+    auto search_param = fmt::format(search_param_tmp, 200);
+    for (auto& dim : dims) {
+        for (auto& [base_quantization_str, recall] : test_cases) {
+            vsag::Options::Instance().set_block_size_limit(size);
+            auto param = GenerateHGraphBuildParametersString(
+                metric_type, dim, base_quantization_str, 5 /*thread_count*/, extra_info_size);
+            auto index = TestFactory(name, param, true);
+            auto dataset = pool.GetDatasetAndCreate(dim,
+                                                    base_count,
+                                                    metric_type,
+                                                    false /*with_path*/,
+                                                    0.8 /*valid_ratio*/,
+                                                    extra_info_size);
+            if (index->CheckFeature(vsag::SUPPORT_BUILD)) {
+                TestBuildIndex(index, dataset, true);
+                if (index->CheckFeature(vsag::SUPPORT_KNN_SEARCH)) {
+                    TestSearchWithExtraInfo(index, dataset, search_param, extra_info_size, recall);
+                }
+            }
             vsag::Options::Instance().set_block_size_limit(origin_size);
         }
     }

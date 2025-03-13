@@ -10,12 +10,13 @@ TestDatasetPool::GetDatasetAndCreate(uint64_t dim,
                                      uint64_t count,
                                      const std::string& metric_str,
                                      bool with_path,
-                                     float valid_ratio) {
+                                     float valid_ratio,
+                                     uint64_t extra_info_size) {
     auto key = key_gen(dim, count, metric_str, with_path, valid_ratio);
     if (this->pool_.find(key) == this->pool_.end()) {
         this->dim_counts_.emplace_back(dim, count);
-        this->pool_[key] =
-            TestDataset::CreateTestDataset(dim, count, metric_str, with_path, valid_ratio);
+        this->pool_[key] = TestDataset::CreateTestDataset(
+            dim, count, metric_str, with_path, valid_ratio, extra_info_size);
     }
     return this->pool_.at(key);
 }

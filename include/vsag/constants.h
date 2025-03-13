@@ -46,6 +46,7 @@ extern const char* const METRIC_IP;
 extern const char* const DATATYPE_FLOAT32;
 extern const char* const DATATYPE_INT8;
 extern const char* const BLANK_INDEX;
+extern const char* const EXTRA_INFOS;
 
 // parameters
 extern const char* const PARAMETER_DTYPE;
@@ -128,6 +129,7 @@ extern const char* const HGRAPH_BASE_FILE_PATH;
 extern const char* const HGRAPH_PRECISE_IO_TYPE;
 extern const char* const HGRAPH_PRECISE_FILE_PATH;
 extern const char* const HGRAPH_PARAMETER_EF_RUNTIME;
+extern const char* const HGRAPH_EXTRA_INFO_SIZE;
 
 extern const char* const BRUTE_FORCE_QUANTIZATION_TYPE;
 extern const char* const BRUTE_FORCE_IO_TYPE;
