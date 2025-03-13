@@ -204,10 +204,11 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
                              "Pyramid Concurrent Test",
                              "[ft][pyramid]") {
     auto metric_type = GENERATE("l2");
+    const std::vector<int> level{0, 1, 2};
     const std::string name = "pyramid";
     auto search_param = fmt::format(search_param_tmp, 20);
     for (auto& dim : dims) {
-        auto param = GeneratePyramidBuildParametersString(metric_type, dim);
+        auto param = GeneratePyramidBuildParametersString(metric_type, dim, level);
         auto index = TestFactory(name, param, true);
         auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type, /*with_path=*/true);
         TestConcurrentAdd(index, dataset, true);

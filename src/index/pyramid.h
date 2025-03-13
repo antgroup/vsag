@@ -62,7 +62,7 @@ public:
     GraphInterfacePtr graph_{nullptr};
     InnerIdType entry_point_{0};
     uint32_t level_{0};
-    std::mutex mutex_;
+    mutable std::mutex mutex_;
 
     Vector<InnerIdType> ids_;
     bool has_index_{false};
