@@ -200,9 +200,8 @@ inline float
 SQ4Quantizer<metric>::ComputeImpl(const uint8_t* codes1, const uint8_t* codes2) {
     if constexpr (metric == MetricType::METRIC_TYPE_L2SQR) {
         return SQ4ComputeCodesL2Sqr(codes1, codes2, lower_bound_.data(), diff_.data(), this->dim_);
-    } else if constexpr (metric == MetricType::METRIC_TYPE_IP) {
-        return 1 - SQ4ComputeCodesIP(codes1, codes2, lower_bound_.data(), diff_.data(), this->dim_);
-    } else if constexpr (metric == MetricType::METRIC_TYPE_COSINE) {
+    } else if constexpr (metric == MetricType::METRIC_TYPE_IP or
+                         metric == MetricType::METRIC_TYPE_COSINE) {
         return 1 - SQ4ComputeCodesIP(codes1, codes2, lower_bound_.data(), diff_.data(), this->dim_);
     } else {
         return 0;
@@ -237,9 +236,8 @@ SQ4Quantizer<metric>::ComputeDistImpl(Computer<SQ4Quantizer>& computer,
     auto* buf = reinterpret_cast<float*>(computer.buf_);
     if constexpr (metric == MetricType::METRIC_TYPE_L2SQR) {
         dists[0] = SQ4ComputeL2Sqr(buf, codes, lower_bound_.data(), diff_.data(), this->dim_);
-    } else if constexpr (metric == MetricType::METRIC_TYPE_IP) {
-        dists[0] = 1 - SQ4ComputeIP(buf, codes, lower_bound_.data(), diff_.data(), this->dim_);
-    } else if constexpr (metric == MetricType::METRIC_TYPE_COSINE) {
+    } else if constexpr (metric == MetricType::METRIC_TYPE_IP or
+                         metric == MetricType::METRIC_TYPE_COSINE) {
         dists[0] = 1 - SQ4ComputeIP(buf, codes, lower_bound_.data(), diff_.data(), this->dim_);
     } else {
         logger::error("unsupported metric type");

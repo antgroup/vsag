@@ -18,6 +18,7 @@
 #include <memory>
 
 #include "data_cell/graph_interface.h"
+#include "impl/basic_searcher.h"
 #include "prefetch.h"
 #include "utils/linear_congruential_generator.h"
 
@@ -537,7 +538,7 @@ HierarchicalNSW::searchBaseLayerST(InnerIdType ep_id,
         ((!is_id_allowed) || is_id_allowed->CheckValid(getExternalLabel(ep_id)))) {
         float dist = fstdistfunc_(data_point, getDataByInternalId(ep_id), dist_func_param_);
         lower_bound = dist;
-        if (dist <= radius + THRESHOLD_ERROR)
+        if (dist <= radius + vsag::THRESHOLD_ERROR)
             top_candidates.emplace(dist, ep_id);
         candidate_set.emplace(-dist, ep_id);
     } else {
@@ -587,7 +588,8 @@ HierarchicalNSW::searchBaseLayerST(InnerIdType ep_id,
                 char* currObj1 = (getDataByInternalId(candidate_id));
                 float dist = fstdistfunc_(data_point, currObj1, dist_func_param_);
 
-                if (visited_count < ef || dist <= radius + THRESHOLD_ERROR || lower_bound > dist) {
+                if (visited_count < ef || dist <= radius + vsag::THRESHOLD_ERROR ||
+                    lower_bound > dist) {
                     candidate_set.emplace(-dist, candidate_id);
                     vector_data_ptr = data_level0_memory_->GetElementPtr(candidate_set.top().second,
                                                                          offsetLevel0_);
@@ -606,7 +608,8 @@ HierarchicalNSW::searchBaseLayerST(InnerIdType ep_id,
             }
         }
     }
-    while (not top_candidates.empty() && top_candidates.top().first > radius + THRESHOLD_ERROR) {
+    while (not top_candidates.empty() &&
+           top_candidates.top().first > radius + vsag::THRESHOLD_ERROR) {
         top_candidates.pop();
     }
 
