@@ -19,12 +19,12 @@
 #include <random>
 #include <shared_mutex>
 
-#include "ThreadPool.h"
 #include "algorithm/hnswlib/algorithm_interface.h"
 #include "algorithm/hnswlib/visited_list_pool.h"
 #include "common.h"
 #include "data_cell/flatten_interface.h"
 #include "data_cell/graph_interface.h"
+#include "default_thread_pool.h"
 #include "hgraph_parameter.h"
 #include "impl/basic_searcher.h"
 #include "index/index_common_param.h"
@@ -109,7 +109,7 @@ public:
     inline void
     SetBuildThreadsCount(uint64_t count) {
         this->build_thread_count_ = count;
-        this->build_pool_->set_pool_size(count);
+        this->build_pool_->SetPoolSize(count);
     }
 
 private:
@@ -190,7 +190,7 @@ private:
 
     mutable MutexArrayPtr neighbors_mutex_;
 
-    std::unique_ptr<progschj::ThreadPool> build_pool_{nullptr};
+    std::shared_ptr<SafeThreadPool> build_pool_{nullptr};
     uint64_t build_thread_count_{100};
 
     InnerIdType max_capacity_{0};

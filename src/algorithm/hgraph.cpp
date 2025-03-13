@@ -62,7 +62,7 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
     mult_ = 1 / log(1.0 * static_cast<double>(this->bottom_graph_->MaximumDegree()));
     resize(bottom_graph_->max_capacity_);
     if (this->build_thread_count_ > 1) {
-        this->build_pool_ = std::make_unique<progschj::ThreadPool>(this->build_thread_count_);
+        this->build_pool_ = SafeThreadPool::FactoryDefaultThreadPool();
     }
 }
 
@@ -257,9 +257,9 @@ HGraph::hnsw_add(const DatasetPtr& data) {
         auto task_size = (total + this->build_thread_count_ - 1) / this->build_thread_count_;
         for (uint64_t j = 0; j < this->build_thread_count_; ++j) {
             auto end = std::min(j * task_size + task_size, total);
-            this->build_pool_->enqueue(build_func, j * task_size, end);
+            this->build_pool_->GeneralEnqueue(build_func, j * task_size, end);
         }
-        this->build_pool_->wait_until_nothing_in_flight();
+        this->build_pool_->WaitUntilEmpty();
     } else {
         build_func(0, total);
     }
