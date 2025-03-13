@@ -196,10 +196,6 @@ SearchEvalCase::do_knn_filter_search() {
         monitor->Start();
         for (int64_t id = 0; id < min_query; ++id) {
             auto i = id % query_count;
-            auto test_label = test_labels[i];
-            if (test_label != 2) {
-                continue;
-            }
             auto query = vsag::Dataset::Make();
             query->NumElements(1)->Dim(this->dataset_ptr_->GetDim())->Owner(false);
             const void* query_vector = this->dataset_ptr_->GetOneTest(i);
@@ -208,6 +204,7 @@ SearchEvalCase::do_knn_filter_search() {
             } else if (this->dataset_ptr_->GetTestDataType() == vsag::DATATYPE_INT8) {
                 query->Int8Vectors((const int8_t*)query_vector);
             }
+            auto test_label = test_labels[i];
             auto filter = std::make_shared<FilterObj>(
                 train_labels, test_label, this->dataset_ptr_->GetValidRatio(test_label));
             auto result = this->index_->KnnSearch(query, topk, config_.search_param, filter);
