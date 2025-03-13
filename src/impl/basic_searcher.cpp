@@ -43,7 +43,7 @@ BasicSearcher::visit(const GraphInterfacePtr& graph,
         graph->GetNeighbors(current_node_pair.second, neighbors);
     }
 
-    float skip_threshold = (filter != nullptr ? (1 - filter->ValidRatio()) * 0.8 : 0.0);
+    float skip_threshold = (filter != nullptr ? (1 - filter->ValidRatio()) * 0.8 : 0.0F);
 
     for (uint32_t i = 0; i < prefetch_jump_visit_size_; i++) {
         vl->Prefetch(neighbors[i]);
