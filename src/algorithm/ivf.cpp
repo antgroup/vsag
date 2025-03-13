@@ -35,12 +35,17 @@ static const std::unordered_map<std::string, std::vector<std::string>> EXTERNAL_
         IVF_BUCKETS_COUNT,
         {BUCKET_PARAMS_KEY, BUCKETS_COUNT_KEY},
     },
+    {
+        IVF_TRAIN_TYPE,
+        {IVF_TRAIN_TYPE_KEY},
+    },
 };
 
 static constexpr const char* IVF_PARAMS_TEMPLATE =
     R"(
     {
         "type": "{INDEX_TYPE_IVF}",
+        "{IVF_TRAIN_TYPE_KEY}": "{IVF_TRAIN_TYPE_KMEANS}",
         "{BUCKET_PARAMS_KEY}": {
             "{IO_PARAMS_KEY}": {
                 "{IO_TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}"
@@ -72,11 +77,10 @@ IVF::CheckAndMappingExternalParam(const JsonType& external_param,
 IVF::IVF(const IVFParameterPtr& param, const IndexCommonParam& common_param)
     : InnerIndexInterface(param, common_param) {
     this->bucket_ = BucketInterface::MakeInstance(param->bucket_param, common_param);
-    this->partition_strategy_ =
-        std::make_shared<IVFNearestPartition>(common_param.allocator_.get(),
-                                              bucket_->bucket_count_,
-                                              common_param.dim_,
-                                              IVFNearestPartitionTrainerType::KMeansTrainer);
+    this->partition_strategy_ = std::make_shared<IVFNearestPartition>(common_param.allocator_.get(),
+                                                                      bucket_->bucket_count_,
+                                                                      common_param.dim_,
+                                                                      param->partition_train_type);
 }
 
 void
