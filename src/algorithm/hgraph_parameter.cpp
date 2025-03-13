@@ -36,6 +36,10 @@ HGraphParameter::FromJson(const JsonType& json) {
                    fmt::format("hgraph parameters must contains {}", HGRAPH_USE_REORDER_KEY));
     this->use_reorder = json[HGRAPH_USE_REORDER_KEY];
 
+    if (json.contains(HGRAPH_IGNORE_REORDER_KEY)) {
+        this->ignore_reorder = json[HGRAPH_IGNORE_REORDER_KEY];
+    }
+
     CHECK_ARGUMENT(json.contains(HGRAPH_BASE_CODES_KEY),
                    fmt::format("hgraph parameters must contains {}", HGRAPH_BASE_CODES_KEY));
     const auto& base_codes_json = json[HGRAPH_BASE_CODES_KEY];
