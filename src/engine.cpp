@@ -19,11 +19,10 @@
 
 #include <string>
 
+#include "algorithm/brute_force.h"
 #include "algorithm/hgraph.h"
 #include "algorithm/ivf.h"
 #include "common.h"
-#include "index/brute_force.h"
-#include "index/brute_force_parameter.h"
 #include "index/diskann.h"
 #include "index/diskann_zparameters.h"
 #include "index/hnsw.h"

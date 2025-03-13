@@ -151,7 +151,7 @@ FP32Quantizer<metric>::DecodeBatchImpl(const uint8_t* codes, DataType* data, uin
 template <MetricType metric>
 float
 FP32Quantizer<metric>::ComputeImpl(const uint8_t* codes1, const uint8_t* codes2) {
-    if (metric == MetricType::METRIC_TYPE_IP) {
+    if (metric == MetricType::METRIC_TYPE_IP or metric == MetricType::METRIC_TYPE_COSINE) {
         return 1 - FP32ComputeIP(reinterpret_cast<const float*>(codes1),
                                  reinterpret_cast<const float*>(codes2),
                                  this->dim_);
@@ -159,10 +159,6 @@ FP32Quantizer<metric>::ComputeImpl(const uint8_t* codes1, const uint8_t* codes2)
         return FP32ComputeL2Sqr(reinterpret_cast<const float*>(codes1),
                                 reinterpret_cast<const float*>(codes2),
                                 this->dim_);
-    } else if (metric == MetricType::METRIC_TYPE_COSINE) {
-        return 1 - FP32ComputeIP(reinterpret_cast<const float*>(codes1),
-                                 reinterpret_cast<const float*>(codes2),
-                                 this->dim_);  // TODO
     } else {
         return 0.0f;
     }
@@ -203,7 +199,7 @@ void
 FP32Quantizer<metric>::ComputeDistImpl(Computer<FP32Quantizer<metric>>& computer,
                                        const uint8_t* codes,
                                        float* dists) const {
-    if (metric == MetricType::METRIC_TYPE_IP) {
+    if (metric == MetricType::METRIC_TYPE_IP or metric == MetricType::METRIC_TYPE_COSINE) {
         *dists = 1 - FP32ComputeIP(reinterpret_cast<const float*>(codes),
                                    reinterpret_cast<const float*>(computer.buf_),
                                    this->dim_);
@@ -211,10 +207,6 @@ FP32Quantizer<metric>::ComputeDistImpl(Computer<FP32Quantizer<metric>>& computer
         *dists = FP32ComputeL2Sqr(reinterpret_cast<const float*>(codes),
                                   reinterpret_cast<const float*>(computer.buf_),
                                   this->dim_);
-    } else if (metric == MetricType::METRIC_TYPE_COSINE) {
-        *dists = 1 - FP32ComputeIP(reinterpret_cast<const float*>(codes),
-                                   reinterpret_cast<const float*>(computer.buf_),
-                                   this->dim_);  // TODO
     } else {
         *dists = 0.0f;
     }

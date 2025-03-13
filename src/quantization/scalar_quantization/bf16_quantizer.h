@@ -163,9 +163,8 @@ inline float
 BF16Quantizer<metric>::ComputeImpl(const uint8_t* codes1, const uint8_t* codes2) {
     if constexpr (metric == MetricType::METRIC_TYPE_L2SQR) {
         return BF16ComputeL2Sqr(codes1, codes2, this->dim_);
-    } else if constexpr (metric == MetricType::METRIC_TYPE_IP) {
-        return 1 - BF16ComputeIP(codes1, codes2, this->dim_);
-    } else if constexpr (metric == MetricType::METRIC_TYPE_COSINE) {
+    } else if constexpr (metric == MetricType::METRIC_TYPE_IP or
+                         metric == MetricType::METRIC_TYPE_COSINE) {
         return 1 - BF16ComputeIP(codes1, codes2, this->dim_);
     } else {
         return 0;
@@ -193,9 +192,8 @@ BF16Quantizer<metric>::ComputeDistImpl(Computer<BF16Quantizer>& computer,
     auto* buf = computer.buf_;
     if constexpr (metric == MetricType::METRIC_TYPE_L2SQR) {
         dists[0] = BF16ComputeL2Sqr(buf, codes, this->dim_);
-    } else if constexpr (metric == MetricType::METRIC_TYPE_IP) {
-        dists[0] = 1 - BF16ComputeIP(buf, codes, this->dim_);
-    } else if constexpr (metric == MetricType::METRIC_TYPE_COSINE) {
+    } else if constexpr (metric == MetricType::METRIC_TYPE_IP or
+                         metric == MetricType::METRIC_TYPE_COSINE) {
         dists[0] = 1 - BF16ComputeIP(buf, codes, this->dim_);
     } else {
         logger::error("unsupported metric type");

@@ -19,6 +19,7 @@
 
 #include "data_cell/graph_interface_parameter.h"
 #include "inner_string_params.h"
+#include "vsag/constants.h"
 
 namespace vsag {
 
@@ -82,4 +83,28 @@ HGraphParameter::ToJson() {
     return json;
 }
 
+// NOLINTBEGIN(readability-simplify-boolean-expr)
+
+HGraphSearchParameters
+HGraphSearchParameters::FromJson(const std::string& json_string) {
+    JsonType params = JsonType::parse(json_string);
+
+    HGraphSearchParameters obj;
+
+    // set obj.ef_search
+    CHECK_ARGUMENT(params.contains(INDEX_TYPE_HGRAPH),
+                   fmt::format("parameters must contains {}", INDEX_TYPE_HGRAPH));
+
+    CHECK_ARGUMENT(
+        params[INDEX_TYPE_HGRAPH].contains(HGRAPH_PARAMETER_EF_RUNTIME),
+        fmt::format(
+            "parameters[{}] must contains {}", INDEX_TYPE_HGRAPH, HGRAPH_PARAMETER_EF_RUNTIME));
+    obj.ef_search = params[INDEX_TYPE_HGRAPH][HGRAPH_PARAMETER_EF_RUNTIME];
+    CHECK_ARGUMENT((1 <= obj.ef_search) and (obj.ef_search <= 1000),
+                   fmt::format("ef_search({}) must in range[1, 1000]", obj.ef_search));
+
+    return obj;
+}
 }  // namespace vsag
+
+// NOLINTEND(readability-simplify-boolean-expr)
