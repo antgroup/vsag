@@ -50,6 +50,8 @@ typedef unsigned int linklistsizeint;
 
 const static float THRESHOLD_ERROR = 1e-6;
 
+const static bool valid_result = true;
+
 class HierarchicalNSW : public AlgorithmInterface<float> {
 private:
     float max_ = 0;
@@ -1486,9 +1488,9 @@ public:
         }
 
         while (queue_closest.size()) {
-            if (ANN_i.size() >= m_c) {
-                break;
-            }
+//            if (ANN_i.size() >= m_c) {
+//                break;
+//            }
 
             std::pair<float, tableint> cur = queue_closest.top();
             queue_closest.pop();
@@ -1507,12 +1509,14 @@ public:
             lock_global.unlock();
         }
 
+        uint32_t original_m_c = m_c;
+        uint32_t count = r;
+        m_c = ANN_i.size();
+
         G[i].resize(m_c, INVALID_ID);
         T[i].resize(m_c, INVALID_DISTANCE);
         L[i].resize(m_c, 0);
 
-        uint32_t original_m_c = m_c;
-        m_c = std::min((uint32_t)ANN_i.size(), m_c);
         for (int j = r; j < m_c; j++) {
             G[i][j] = ANN_i[j];
             T[i][j] = T_i[j];
@@ -1521,7 +1525,10 @@ public:
 
         // 3. pruning
         for (auto a_c : a_c_s_) {
-            for (int j = r; j < m_c; j++) {
+            if (count >= original_m_c) {
+                break;
+            }
+            for (int j = r; j < m_c and count < original_m_c; j++) {
                 if (G[i][j] == INVALID_ID) {
                     break;
                 }
@@ -1530,19 +1537,29 @@ public:
                 }
                 bool is_prune = false;
                 for (int k = 0; k < j; k++) {
-                    if (L[i][k] <= a_c) {
+                    if (L[i][k] != 0 and L[i][k] <= a_c) {
                         float tau_j_k = fstdistfunc_(
                             getDataByInternalId(G[i][j]),
                             getDataByInternalId(G[i][k]),
                             dist_func_param_);
-                        if (a_c * tau_j_k <= T[i][k]) {
+
+                        assert (G[i][j] != i);
+//                        float tau_i_j = fstdistfunc_(
+//                            getDataByInternalId(i),
+//                            getDataByInternalId(G[i][j]),
+//                            dist_func_param_);
+//                        assert (std::abs(tau_i_j - T[i][j]) < 1e-3);
+
+                        if (a_c * tau_j_k < T[i][j]) {
                             is_prune = true;
+                            break;
                         }
 
                     }
                 }
                 if (not is_prune) {
                     L[i][j] = a_c;
+                    count++;
                 }
             }
         }
@@ -1550,11 +1567,11 @@ public:
         std::vector<float> final_L_i;
         std::vector<float> final_T_i;
         std::vector<uint32_t> final_G_i;
-        final_G_i.reserve(maxM0_);
-        final_T_i.reserve(maxM0_);
-        final_L_i.reserve(maxM0_);
+        final_G_i.reserve(original_m_c);
+        final_T_i.reserve(original_m_c);
+        final_L_i.reserve(original_m_c);
 
-        for (int j = 0; j < m_c; j++) {
+        for (int j = 0; j < m_c and final_G_i.size() < original_m_c; j++) {
             if (L[i][j] != 0){
                 final_G_i.push_back(G[i][j]);
                 final_T_i.push_back(T[i][j]);
@@ -1579,8 +1596,10 @@ public:
     void
     getNeighborsByHeuristic2(MaxHeap& top_candidates,
                              const size_t M) {
-        if (top_candidates.size() < M) {
-            return;
+        if (not valid_result) {
+            if (top_candidates.size() < M) {
+                return;
+            }
         }
 
         std::priority_queue<std::pair<float, tableint>> queue_closest;
@@ -1633,6 +1652,34 @@ public:
         return level == 0 ? get_linklist0(internal_id) : get_linklist(internal_id, level);
     }
 
+    // 提取 priority_queue 的内容到 vector，并只保留 tableint 部分
+    std::vector<tableint> extractTableintContents(const MaxHeap& heap) {
+        std::vector<tableint> contents;
+        MaxHeap temp = heap; // 复制一份以避免修改原始堆
+        while (!temp.empty()) {
+            contents.push_back(temp.top().second); // 只提取 tableint 部分
+            temp.pop();
+        }
+        return contents;
+    }
+
+    // 计算两个 vector 的交集大小（基于 tableint）
+    std::vector<tableint> calculateIntersectionSize(const std::vector<tableint>& vec1,
+                              const std::vector<tableint>& vec2) {
+        // 对两个 vector 进行排序
+        std::vector<tableint> sortedVec1 = vec1;
+        std::vector<tableint> sortedVec2 = vec2;
+        std::sort(sortedVec1.begin(), sortedVec1.end());
+        std::sort(sortedVec2.begin(), sortedVec2.end());
+
+        // 使用 std::set_intersection 计算交集
+        std::vector<tableint> intersection;
+        std::set_intersection(sortedVec1.begin(), sortedVec1.end(),
+                              sortedVec2.begin(), sortedVec2.end(),
+                              std::back_inserter(intersection));
+        return intersection;
+    }
+
     tableint
     mutuallyConnectNewElement(const void* data_point,
                               tableint cur_c,
@@ -1642,7 +1689,37 @@ public:
         size_t m_curmax = level ? maxM_ : maxM0_;
         if (vsag::USE_AUTO_PARAM and level == 0) {
             std::unique_lock<std::recursive_mutex> lock(link_list_locks_[cur_c]);
-            pruningBasedLabeling(cur_c, top_candidates, maxM0_);
+
+            if (not valid_result) {
+                pruningBasedLabeling(cur_c, top_candidates, maxM0_);
+            } else {
+                std::vector<float> a_c_s_before = a_c_s_;
+                float alpha_before = alpha_;
+                alpha_ = 1;
+                a_c_s_ = {1};
+
+                MaxHeap top_candidates_back = top_candidates;
+
+                getNeighborsByHeuristic2(top_candidates_back, M_);
+                pruningBasedLabeling(cur_c, top_candidates, maxM0_);
+
+                MaxHeap ret_1 = top_candidates;
+                MaxHeap ret_2 = top_candidates_back;
+
+                auto vec_11 = extractTableintContents(ret_1);
+                auto vec_22 = extractTableintContents(ret_2);
+                auto intersection = calculateIntersectionSize(vec_11, vec_22);
+                if (intersection.size() != vec_22.size()) {
+                    std::cout << "warning: inter: " << intersection.size() << " "
+                              << " baseline: " << vec_22.size() << " "
+                              << " ours: " << vec_11.size() << std::endl;
+                }
+                assert(intersection.size() / (1.0 * vec_22.size()) > 0.9);
+
+                a_c_s_ = a_c_s_before;
+                alpha_ = alpha_before;
+            }
+
         } else {
             getNeighborsByHeuristic2(top_candidates, M_);
         }
@@ -1730,9 +1807,10 @@ public:
 
                     int r = 0;
                     for (size_t j = 0; j < sz_link_list_other; j++) {
-                        auto d_neighbor = 0;
+                        float d_neighbor = 0;
                         if (vsag::USE_AUTO_PARAM and level == 0) {
 //                            assert (d_neighbor == T[selectedNeighbors[idx]][j]);
+                            assert(data[j] == G[selectedNeighbors[idx]][j]);
                             d_neighbor = T[selectedNeighbors[idx]][j];
                         } else {
                             d_neighbor = fstdistfunc_(getDataByInternalId(data[j]),
