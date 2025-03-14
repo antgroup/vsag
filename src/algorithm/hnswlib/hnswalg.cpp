@@ -308,6 +308,7 @@ std::priority_queue<std::pair<float, LabelType>>
 HierarchicalNSW::bruteForce(const void* data_point,
                             int64_t k,
                             const vsag::FilterPtr is_id_allowed) const {
+    std::shared_lock resize_lock(resize_mutex_);
     std::priority_queue<std::pair<float, LabelType>> results;
     for (uint32_t i = 0; i < cur_element_count_; i++) {
         if (is_id_allowed && not is_id_allowed->CheckValid(getExternalLabel(i))) {
@@ -1171,6 +1172,7 @@ HierarchicalNSW::updateVector(LabelType label, const void* data_point) {
         // reset data
         std::shared_ptr<float[]> normalize_data;
         normalizeVector(data_point, normalize_data);
+        std::unique_lock resize_lock(resize_mutex_);
         memcpy(getDataByInternalId(internal_id), data_point, data_size_);
     }
 }
@@ -1190,6 +1192,7 @@ HierarchicalNSW::updateLabel(LabelType old_label, LabelType new_label) {
         // reset label
         label_lookup_.erase(iter_old);
         label_lookup_[new_label] = internal_id;
+        std::unique_lock resize_lock(resize_mutex_);
         setExternalLabel(internal_id, new_label);
     }
 }
@@ -1326,7 +1329,6 @@ HierarchicalNSW::addPoint(const void* data_point, LabelType label, int level) {
         }
 
         cur_c = cur_element_count_;
-        cur_element_count_++;
         label_lookup_[label] = cur_c;
 
         curlevel = getRandomLevel(mult_);
@@ -1338,6 +1340,7 @@ HierarchicalNSW::addPoint(const void* data_point, LabelType label, int level) {
         // Initialisation of the data and label
         setExternalLabel(cur_c, label);
         memcpy(getDataByInternalId(cur_c), data_point, data_size_);
+        cur_element_count_++;
     }
 
     std::shared_lock resize_lock(resize_mutex_);
