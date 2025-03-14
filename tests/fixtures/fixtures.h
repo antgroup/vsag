@@ -277,4 +277,7 @@ GetFileSize(const std::string& filename);
 
 std::vector<std::string>
 SplitString(const std::string& s, char delimiter);
+
+float
+GetSparseDistance(const vsag::SparseVector& vec1, const vsag::SparseVector& vec2);
 }  // Namespace fixtures
