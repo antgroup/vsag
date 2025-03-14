@@ -138,6 +138,7 @@ private:
     std::vector<std::vector<float>> L;
     std::vector<std::vector<float>> T;
     std::vector<std::vector<uint32_t>> G;
+    std::vector<bool> NO_PRUNE;
 
 public:
     HierarchicalNSW(SpaceInterface* s) {
@@ -1506,7 +1507,12 @@ public:
             G.resize(i + 1);
             T.resize(i + 1);
             L.resize(i + 1);
+            NO_PRUNE.resize(i + 1);
             lock_global.unlock();
+        }
+
+        if (NO_PRUNE[i]) {
+            r = 0;
         }
 
         uint32_t original_m_c = m_c;
@@ -1564,25 +1570,32 @@ public:
             }
         }
 
-        std::vector<float> final_L_i;
-        std::vector<float> final_T_i;
-        std::vector<uint32_t> final_G_i;
-        final_G_i.reserve(original_m_c);
-        final_T_i.reserve(original_m_c);
-        final_L_i.reserve(original_m_c);
+        std::vector<float> final_L_i(original_m_c, 0);
+        std::vector<float> final_T_i(original_m_c, INVALID_DISTANCE);
+        std::vector<uint32_t> final_G_i(original_m_c, INVALID_ID);
 
-        for (int j = 0; j < m_c and final_G_i.size() < original_m_c; j++) {
-            if (L[i][j] != 0){
-                final_G_i.push_back(G[i][j]);
-                final_T_i.push_back(T[i][j]);
-                final_L_i.push_back(L[i][j]);
+        int min_size = original_m_c / 2;
+        if (count < min_size) {
+            NO_PRUNE[i] = true;
+            for (int j = 0; j < m_c and j < min_size; j++) {
+                final_G_i[j] = G[i][j];
+                final_T_i[j] = T[i][j];
+                final_L_i[j] = 1.0;
                 top_candidates.emplace(-1 * T[i][j], G[i][j]);  // reverse the neighbor
             }
-        }
-        while (final_G_i.size() < original_m_c) {
-            final_G_i.push_back(INVALID_ID);
-            final_T_i.push_back(INVALID_DISTANCE);
-            final_L_i.push_back(0);
+        } else {
+            NO_PRUNE[i] = false;
+            int final_count = 0;
+            for (int j = 0; j < m_c and final_count < original_m_c; j++) {
+                if (L[i][j] != 0){
+                    final_G_i[final_count] = G[i][j];
+                    final_T_i[final_count] = T[i][j];
+                    final_L_i[final_count] = L[i][j];
+                    final_count++;
+                    top_candidates.emplace(-1 * T[i][j], G[i][j]);  // reverse the neighbor
+                }
+            }
+            assert(final_count == std::min(count, original_m_c));
         }
 
         G[i] = final_G_i;
@@ -1596,10 +1609,8 @@ public:
     void
     getNeighborsByHeuristic2(MaxHeap& top_candidates,
                              const size_t M) {
-        if (not valid_result) {
-            if (top_candidates.size() < M) {
-                return;
-            }
+        if (top_candidates.size() < M) {
+            return;
         }
 
         std::priority_queue<std::pair<float, tableint>> queue_closest;
