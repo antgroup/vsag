@@ -141,7 +141,7 @@ HGraph::KnnSearch(const DatasetPtr& query,
 
     search_param.ef = std::max(params.ef_search, k);
     search_param.is_inner_id_allowed = ft;
-    search_param.topk = k;
+    search_param.topk = static_cast<int64_t>(search_param.ef);
     auto search_result = this->search_one_graph(
         query->GetFloat32Vectors(), this->bottom_graph_, this->basic_flatten_codes_, search_param);
 

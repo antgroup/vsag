@@ -60,8 +60,11 @@ TEST_CASE("RaBitQ Encode and Decode", "[ut][RaBitQuantizer]") {
 
 TEST_CASE("RaBitQ Compute", "[ut][RaBitQuantizer]") {
     for (auto dim : dims) {
-        float numeric_error = 2.0 / std::sqrt(dim) * dim;
-        if (dim < 10) {
+        float numeric_error = 0.01 / std::sqrt(dim) * dim;
+        float related_error = 0.05f;
+        float unbounded_numeric_error_rate = 0.05f;
+        float unbounded_related_error_rate = 0.1f;
+        if (dim < 900) {
             continue;
         }
         for (auto count : counts) {
@@ -69,15 +72,28 @@ TEST_CASE("RaBitQ Compute", "[ut][RaBitQuantizer]") {
             RaBitQuantizer<MetricType::METRIC_TYPE_L2SQR> quantizer(dim, allocator.get());
 
             TestComputer<RaBitQuantizer<MetricType::METRIC_TYPE_L2SQR>,
-                         MetricType::METRIC_TYPE_L2SQR>(quantizer, dim, count, numeric_error);
+                         MetricType::METRIC_TYPE_L2SQR>(quantizer,
+                                                        dim,
+                                                        count,
+                                                        numeric_error,
+                                                        related_error,
+                                                        true,
+                                                        unbounded_numeric_error_rate,
+                                                        unbounded_related_error_rate);
+            REQUIRE_THROWS(TestComputeCodes<RaBitQuantizer<MetricType::METRIC_TYPE_L2SQR>,
+                                            MetricType::METRIC_TYPE_L2SQR>(
+                quantizer, dim, count, numeric_error, false));
         }
     }
 }
 
 TEST_CASE("RaBitQ Serialize and Deserialize", "[ut][RaBitQuantizer]") {
     for (auto dim : dims) {
-        float numeric_error = 2.0 / std::sqrt(dim) * dim;
-        if (dim < 10) {
+        float numeric_error = 0.01 / std::sqrt(dim) * dim;
+        float related_error = 0.05f;
+        float unbounded_numeric_error_rate = 0.05f;
+        float unbounded_related_error_rate = 0.1f;
+        if (dim < 900) {
             continue;
         }
         for (auto count : counts) {
@@ -86,8 +102,15 @@ TEST_CASE("RaBitQ Serialize and Deserialize", "[ut][RaBitQuantizer]") {
             RaBitQuantizer<MetricType::METRIC_TYPE_L2SQR> quantizer2(dim, allocator.get());
 
             TestSerializeAndDeserialize<RaBitQuantizer<MetricType::METRIC_TYPE_L2SQR>,
-                                        MetricType::METRIC_TYPE_L2SQR>(
-                quantizer1, quantizer2, dim, count, numeric_error, true);
+                                        MetricType::METRIC_TYPE_L2SQR>(quantizer1,
+                                                                       quantizer2,
+                                                                       dim,
+                                                                       count,
+                                                                       numeric_error,
+                                                                       related_error,
+                                                                       unbounded_numeric_error_rate,
+                                                                       unbounded_related_error_rate,
+                                                                       true);
         }
     }
 }

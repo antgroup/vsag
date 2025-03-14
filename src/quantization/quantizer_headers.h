@@ -17,4 +17,5 @@
 
 #include "fp32_quantizer.h"
 #include "quantizer.h"
+#include "rabitq_quantization/rabitq_quantizer.h"
 #include "scalar_quantization/sq_headers.h"
