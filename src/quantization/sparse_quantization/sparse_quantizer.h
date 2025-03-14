@@ -36,6 +36,8 @@ public:
                              const IndexCommonParam& common_param);
     explicit SparseQuantizer(Allocator* allocator);
 
+    explicit SparseQuantizer(size_t dim, Allocator* allocator);
+
     explicit SparseQuantizer(const QuantizerParamPtr& param, const IndexCommonParam& common_param);
 
     bool

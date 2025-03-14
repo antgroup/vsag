@@ -87,7 +87,7 @@ HgraphTestIndex::GenerateHGraphBuildParametersString(const std::string& metric_t
 
     constexpr auto parameter_temp_reorder = R"(
     {{
-        "dtype": "float32",
+        "dtype": "{}",
         "metric_type": "{}",
         "dim": {},
         "extra_info_size": {},
@@ -106,7 +106,7 @@ HgraphTestIndex::GenerateHGraphBuildParametersString(const std::string& metric_t
 
     constexpr auto parameter_temp_origin = R"(
     {{
-        "dtype": "float32",
+        "dtype": "{}",
         "metric_type": "{}",
         "dim": {},
         "extra_info_size": {},
@@ -128,6 +128,7 @@ HgraphTestIndex::GenerateHGraphBuildParametersString(const std::string& metric_t
             precise_io_type = strs[2];
         }
         build_parameters_str = fmt::format(parameter_temp_reorder,
+                                           data_type,
                                            metric_type,
                                            dim,
                                            extra_info_size,
@@ -437,6 +438,24 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex,
         TestBuildIndex(index, dataset, true);
         TestSearchWithDirtyVector(index, dataset, search_param, true);
     }
+    vsag::Options::Instance().set_block_size_limit(origin_size);
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex,
+                             "HGraph Search with Sparse Vector",
+                             "[ft][hgraph]") {
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    auto size = GENERATE(1024 * 1024 * 2);
+    auto metric_type = GENERATE("ip");
+    auto dataset = pool.GetSparseDatasetAndCreate(base_count, 0.8);
+    auto dim = dataset->dim_;
+    const std::string name = "hgraph";
+    auto search_param = fmt::format(search_param_tmp, 100);
+    vsag::Options::Instance().set_block_size_limit(size);
+    auto param = GenerateHGraphBuildParametersString(metric_type, dim, "sparse", 5, "sparse");
+    auto index = TestFactory(name, param, true);
+    TestBuildIndex(index, dataset, true);
+    TestKnnSearch(index, dataset, search_param, true);
     vsag::Options::Instance().set_block_size_limit(origin_size);
 }
 

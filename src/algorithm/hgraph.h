@@ -132,6 +132,16 @@ public:
     }
 
 private:
+    const void*
+    get_data(const DatasetPtr& dataset, uint32_t index = 0) const {
+        if (data_type_ == DataTypes::DATA_TYPE_FLOAT) {
+            return dataset->GetFloat32Vectors() + index * dim_;
+        } else if (data_type_ == DataTypes::DATA_TYPE_SPARSE) {
+            return dataset->GetSparseVectors() + index;
+        }
+        throw VsagException(ErrorType::INVALID_ARGUMENT, "invalid data_type in HGraph");
+    }
+
     int
     get_random_level() {
         std::uniform_real_distribution<double> distribution(0.0, 1.0);
@@ -165,7 +175,7 @@ private:
 
     template <InnerSearchMode mode = InnerSearchMode::KNN_SEARCH>
     MaxHeap
-    search_one_graph(const float* query,
+    search_one_graph(const void* query,
                      const GraphInterfacePtr& graph,
                      const FlattenInterfacePtr& flatten,
                      InnerSearchParam& inner_search_param) const;
@@ -184,11 +194,21 @@ private:
     void
     deserialize_basic_info(StreamReader& reader);
 
+    inline LabelType
+    get_label_by_id(InnerIdType inner_id) const {
+        std::shared_lock<std::shared_mutex> lock(this->label_lookup_mutex_);
+        // the inner_id is guarantee in label_lookup
+        return this->label_table_->GetLabelById(inner_id);
+    }
+
+    void
+    add_one_point(const void* data, int level, InnerIdType id);
+
     void
     init_features();
 
     void
-    reorder(const float* query,
+    reorder(const void* query,
             const FlattenInterfacePtr& flatten_interface,
             MaxHeap& candidate_heap,
             int64_t k) const;
@@ -203,6 +223,8 @@ private:
     bool ignore_reorder_{false};
 
     BasicSearcherPtr searcher_;
+
+    DataTypes data_type_{DataTypes::DATA_TYPE_FLOAT};
 
     int64_t dim_{0};
     MetricType metric_{MetricType::METRIC_TYPE_L2SQR};
