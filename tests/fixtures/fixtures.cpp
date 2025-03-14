@@ -28,6 +28,8 @@
 
 namespace fixtures {
 
+const int RABITQ_MIN_RACALL_DIM = 960;
+
 std::vector<int>
 get_common_used_dims(uint64_t count, int seed) {
     const std::vector<int> dims = {

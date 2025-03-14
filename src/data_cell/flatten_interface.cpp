@@ -58,6 +58,13 @@ make_instance(const FlattenDataCellParamPtr& param, const IndexCommonParam& comm
     if (quantization_string == QUANTIZATION_TYPE_VALUE_FP16) {
         return make_instance<FP16Quantizer<metric>, IOTemp>(param, common_param);
     }
+    if (quantization_string == QUANTIZATION_TYPE_VALUE_RABITQ) {
+        if constexpr (metric == MetricType::METRIC_TYPE_L2SQR) {
+            return make_instance<RaBitQuantizer<metric>, IOTemp>(param, common_param);
+        } else {
+            return nullptr;
+        }
+    }
     return nullptr;
 }
 

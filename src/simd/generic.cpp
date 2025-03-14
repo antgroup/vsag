@@ -406,7 +406,7 @@ NormalizeWithCentroid(const float* from, const float* centroid, float* to, uint6
         norm += (from[d] - centroid[d]) * (from[d] - centroid[d]);
     }
 
-    if (norm == 0) {
+    if (norm < 1e-5) {
         norm = 1;
     } else {
         norm = std::sqrt(norm);
@@ -417,6 +417,14 @@ NormalizeWithCentroid(const float* from, const float* centroid, float* to, uint6
     }
 
     return norm;
+}
+
+void
+InverseNormalizeWithCentroid(
+    const float* from, const float* centroid, float* to, uint64_t dim, float norm) {
+    for (int d = 0; d < dim; d++) {
+        to[d] = from[d] * norm + centroid[d];
+    }
 }
 
 void
