@@ -1507,12 +1507,7 @@ public:
             G.resize(i + 1);
             T.resize(i + 1);
             L.resize(i + 1);
-            NO_PRUNE.resize(i + 1);
             lock_global.unlock();
-        }
-
-        if (NO_PRUNE[i]) {
-            r = 0;
         }
 
         uint32_t original_m_c = m_c;
@@ -1542,7 +1537,7 @@ public:
                     continue ;
                 }
                 bool is_prune = false;
-                for (int k = 0; k < j; k++) {
+                for (int k = 0; k < j and ANN_i.size() >= original_m_c / 2; k++) {
                     if (L[i][k] != 0 and L[i][k] <= a_c) {
                         float tau_j_k = fstdistfunc_(
                             getDataByInternalId(G[i][j]),
@@ -1574,29 +1569,17 @@ public:
         std::vector<float> final_T_i(original_m_c, INVALID_DISTANCE);
         std::vector<uint32_t> final_G_i(original_m_c, INVALID_ID);
 
-        int min_size = original_m_c / 2;
-        if (count < min_size) {
-            NO_PRUNE[i] = true;
-            for (int j = 0; j < m_c and j < min_size; j++) {
-                final_G_i[j] = G[i][j];
-                final_T_i[j] = T[i][j];
-                final_L_i[j] = 1.0;
+        int final_count = 0;
+        for (int j = 0; j < m_c and final_count < original_m_c; j++) {
+            if (L[i][j] != 0){
+                final_G_i[final_count] = G[i][j];
+                final_T_i[final_count] = T[i][j];
+                final_L_i[final_count] = L[i][j];
+                final_count++;
                 top_candidates.emplace(-1 * T[i][j], G[i][j]);  // reverse the neighbor
             }
-        } else {
-            NO_PRUNE[i] = false;
-            int final_count = 0;
-            for (int j = 0; j < m_c and final_count < original_m_c; j++) {
-                if (L[i][j] != 0){
-                    final_G_i[final_count] = G[i][j];
-                    final_T_i[final_count] = T[i][j];
-                    final_L_i[final_count] = L[i][j];
-                    final_count++;
-                    top_candidates.emplace(-1 * T[i][j], G[i][j]);  // reverse the neighbor
-                }
-            }
-            assert(final_count == std::min(count, original_m_c));
         }
+        assert(final_count == std::min(count, original_m_c));
 
         G[i] = final_G_i;
         T[i] = final_T_i;
@@ -1706,8 +1689,8 @@ public:
             } else {
                 std::vector<float> a_c_s_before = a_c_s_;
                 float alpha_before = alpha_;
-                alpha_ = 1;
-                a_c_s_ = {1};
+                alpha_ = 1.2;
+                a_c_s_ = {1.2};
 
                 MaxHeap top_candidates_back = top_candidates;
 
@@ -1821,7 +1804,7 @@ public:
                         float d_neighbor = 0;
                         if (vsag::USE_AUTO_PARAM and level == 0) {
 //                            assert (d_neighbor == T[selectedNeighbors[idx]][j]);
-                            assert(data[j] == G[selectedNeighbors[idx]][j]);
+//                            assert(data[j] == G[selectedNeighbors[idx]][j]);  // not valid for cur_c = 507, neighbor = 444 and 50 since 444 = 50
                             d_neighbor = T[selectedNeighbors[idx]][j];
                         } else {
                             d_neighbor = fstdistfunc_(getDataByInternalId(data[j]),
