@@ -208,4 +208,6 @@ public:
     mutable std::shared_mutex label_lookup_mutex_{};  // lock for label_lookup_ & labels_
 };
 
+using InnerIndexPtr = std::shared_ptr<InnerIndexInterface>;
+
 }  // namespace vsag
