@@ -15,23 +15,24 @@
 
 #pragma once
 
-#include "flatten_interface_parameter.h"
 #include "io/io_parameter.h"
 #include "parameter.h"
 #include "quantization/quantizer_parameter.h"
+
 namespace vsag {
 
-class FlattenDataCellParameter : public FlattenInterfaceParameter {
+class FlattenInterfaceParameter : public Parameter {
 public:
-    explicit FlattenDataCellParameter();
+    FlattenInterfaceParameter(std::string name) : name(std::move(name)) {
+    }
 
-    void
-    FromJson(const JsonType& json) override;
+    QuantizerParamPtr quantizer_parameter{nullptr};
 
-    JsonType
-    ToJson() override;
+    IOParamPtr io_parameter{nullptr};
+
+    std::string name;
 };
 
-using FlattenDataCellParamPtr = std::shared_ptr<FlattenDataCellParameter>;
+using FlattenInterfaceParamPtr = std::shared_ptr<FlattenInterfaceParameter>;
 
 }  // namespace vsag
