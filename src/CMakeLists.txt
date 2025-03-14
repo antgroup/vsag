@@ -26,7 +26,8 @@ list (FILTER CPP_UTILS_SRCS EXCLUDE REGEX "_test.cpp")
 set (VSAG_SRCS ${CPP_SRCS} ${CPP_INDEX_SRCS} ${CPP_CONJUGATE_GRAPH_SRCS}
         ${CPP_DATA_CELL_SRCS} ${CPP_ALGORITHM_SRCS} ${CPP_UTILS_SRCS})
 
-add_library (vsag SHARED ${VSAG_SRCS})
+add_library (vsag SHARED ${VSAG_SRCS}
+        data_cell/sparse_vector_datacell.h)
 add_library (vsag_static STATIC ${VSAG_SRCS})
 
 set (VSAG_DEP_LIBS diskann pthread m dl simd io quantizer fmt::fmt-header-only nlohmann_json::nlohmann_json roaring)

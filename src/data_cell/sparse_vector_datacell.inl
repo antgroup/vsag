@@ -164,6 +164,7 @@ SparseVectorDataCell<QuantTmpl, IOTmpl>::SparseVectorDataCell(
         std::make_shared<MemoryBlockIO>(allocator_, Options::Instance().block_size_limit());
     this->max_code_size_ = (this->quantizer_->GetDim() * 2 + 1) * sizeof(uint32_t);
     this->max_capacity_ = 0;
+    this->code_size_ = this->quantizer_->GetCodeSize();
 }
 
 }

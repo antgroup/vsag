@@ -102,7 +102,7 @@ GenerateRandomDataset(uint64_t dim,
         ->Float32Vectors(CopyVector(vecs))
         ->Int8Vectors(CopyVector(vecs_int8))
         ->Paths(paths)
-        ->SparseVectors(CopyVector(GenerateSparseVectors(count)))
+        ->SparseVectors(CopyVector(GenerateSparseVectors(count, dim)))
         ->NumElements(count)
         ->Owner(true);
     if (extra_info_size != 0) {
