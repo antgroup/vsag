@@ -75,16 +75,25 @@ SparseIndex::Add(const DatasetPtr& base) {
     auto data_num = base->GetNumElements();
     CHECK_ARGUMENT(data_num > 0, "data_num is zero when add vectors");
     const auto* ids = base->GetIds();
-    auto cur_size = datas_.size();
-    datas_.resize(cur_size + data_num);
+    if (max_capacity_ == 0) {
+        auto new_capacity = std::max(INIT_CAPACITY, data_num);
+        resize(new_capacity);
+    }
+
+    if (max_capacity_ < data_num + cur_element_count_) {
+        auto new_capacity = std::min(MAX_CAPACITY_EXTEND, max_capacity_);
+        new_capacity =
+            std::max(data_num + cur_element_count_ - max_capacity_, new_capacity) + max_capacity_;
+        resize(new_capacity);
+    }
 
     for (int64_t i = 0; i < data_num; ++i) {
         const auto& vector = sparse_vectors[i];
-        datas_[i + cur_size] =
+        datas_[i + cur_element_count_] =
             (uint32_t*)allocator_->Allocate((2 * vector.len_ + 1) * sizeof(uint32_t));
-        datas_[i + cur_size][0] = vector.len_;
-        auto* data = datas_[i + cur_size] + 1;
-        label_table_->Insert(i + cur_size, ids[i]);
+        datas_[i + cur_element_count_][0] = vector.len_;
+        auto* data = datas_[i + cur_element_count_] + 1;
+        label_table_->Insert(i + cur_element_count_, ids[i]);
         if (need_sort_) {
             auto [sorted_ids, sorted_vals] = sort_sparse_vector(vector);
             std::memcpy(data, sorted_ids.data(), vector.len_ * sizeof(uint32_t));
@@ -94,6 +103,7 @@ SparseIndex::Add(const DatasetPtr& base) {
             std::memcpy(data + vector.len_, vector.vals_, vector.len_ * sizeof(float));
         }
     }
+    cur_element_count_ += data_num;
     return {};
 }
 
@@ -106,7 +116,7 @@ SparseIndex::KnnSearch(const DatasetPtr& query,
     CHECK_ARGUMENT(query->GetNumElements() == 1, "num of query should be 1");
     MaxHeap results(allocator_);
     auto [sorted_ids, sorted_vals] = sort_sparse_vector(sparse_vectors[0]);
-    for (int j = 0; j < datas_.size(); ++j) {
+    for (int j = 0; j < cur_element_count_; ++j) {
         auto distance = get_distance(sorted_ids.size(),
                                      sorted_ids.data(),
                                      sorted_vals.data(),
@@ -135,7 +145,7 @@ SparseIndex::RangeSearch(const DatasetPtr& query,
     CHECK_ARGUMENT(query->GetNumElements() == 1, "num of query should be 1");
     MaxHeap results(allocator_);
     auto [sorted_ids, sorted_vals] = sort_sparse_vector(sparse_vectors[0]);
-    for (int j = 0; j < datas_.size(); ++j) {
+    for (int j = 0; j < cur_element_count_; ++j) {
         auto distance = get_distance(sorted_ids.size(),
                                      sorted_ids.data(),
                                      sorted_vals.data(),

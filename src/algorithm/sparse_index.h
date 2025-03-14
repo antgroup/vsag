@@ -65,9 +65,8 @@ public:
 
     void
     Serialize(StreamWriter& writer) const override {
-        size_t data_num = datas_.size();
-        StreamWriter::WriteObj(writer, data_num);
-        for (int i = 0; i < data_num; ++i) {
+        StreamWriter::WriteObj(writer, cur_element_count_);
+        for (int i = 0; i < cur_element_count_; ++i) {
             uint32_t len = datas_[i][0];
             writer.Write((char*)datas_[i], (2 * len + 1) * sizeof(uint32_t));
         }
@@ -76,10 +75,10 @@ public:
 
     void
     Deserialize(StreamReader& reader) override {
-        size_t data_num;
-        StreamReader::ReadObj(reader, data_num);
-        datas_.resize(data_num);
-        for (int i = 0; i < data_num; ++i) {
+        StreamReader::ReadObj(reader, cur_element_count_);
+        datas_.resize(cur_element_count_);
+        max_capacity_ = cur_element_count_;
+        for (int i = 0; i < cur_element_count_; ++i) {
             uint32_t len;
             StreamReader::ReadObj(reader, len);
             datas_[i] = (uint32_t*)allocator_->Allocate((2 * len + 1) * sizeof(uint32_t));
@@ -91,7 +90,7 @@ public:
 
     int64_t
     GetNumElements() const override {
-        return datas_.size();
+        return cur_element_count_;
     }
 
     DatasetPtr
@@ -111,9 +110,20 @@ private:
     std::tuple<Vector<uint32_t>, Vector<float>>
     sort_sparse_vector(const SparseVector& vector) const;
 
+    void
+    resize(int64_t new_capacity) {
+        if (new_capacity <= max_capacity_) {
+            return;
+        }
+        datas_.resize(new_capacity);
+        max_capacity_ = new_capacity;
+    }
+
 private:
     Vector<uint32_t*> datas_;
     bool need_sort_;
+    int64_t cur_element_count_{0};
+    int64_t max_capacity_{0};
 };
 
 }  // namespace vsag
