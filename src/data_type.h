@@ -16,6 +16,11 @@
 #pragma once
 
 namespace vsag {
-enum class DataTypes { DATA_TYPE_FLOAT = 0, DATA_TYPE_INT8 = 1, DATA_TYPE_FP16 = 2 };
+enum class DataTypes {
+    DATA_TYPE_FLOAT = 0,
+    DATA_TYPE_INT8 = 1,
+    DATA_TYPE_FP16 = 2,
+    DATA_TYPE_SPARSE = 3
+};
 
 }  // namespace vsag

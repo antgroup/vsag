@@ -54,4 +54,4 @@ jobs:
             - ./build
       - run:
           command: make test_parallel
-          no_output_timeout: 50m
+          no_output_timeout: 60m

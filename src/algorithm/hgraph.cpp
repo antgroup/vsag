@@ -45,6 +45,8 @@ next_multiple_of_power_of_two(uint64_t x, uint64_t n) {
 HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonParam& common_param)
     : InnerIndexInterface(hgraph_param, common_param),
       route_graphs_(common_param.allocator_.get()),
+      dim_(common_param.dim_),
+      data_type_(common_param.data_type_),
       use_reorder_(hgraph_param->use_reorder),
       ignore_reorder_(hgraph_param->ignore_reorder),
       ef_construct_(hgraph_param->ef_construction),
@@ -86,9 +88,10 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
 }
 void
 HGraph::Train(const DatasetPtr& base) {
-    this->basic_flatten_codes_->Train(base->GetFloat32Vectors(), base->GetNumElements());
+    const auto* base_data = get_data(base);
+    this->basic_flatten_codes_->Train(base_data, base->GetNumElements());
     if (use_reorder_) {
-        this->high_precise_codes_->Train(base->GetFloat32Vectors(), base->GetNumElements());
+        this->high_precise_codes_->Train(base_data, base->GetNumElements());
     }
 }
 
@@ -102,11 +105,12 @@ HGraph::Build(const DatasetPtr& data) {
 std::vector<int64_t>
 HGraph::Add(const DatasetPtr& data) {
     std::vector<int64_t> failed_ids;
-
     auto base_dim = data->GetDim();
-    CHECK_ARGUMENT(base_dim == dim_,
-                   fmt::format("base.dim({}) must be equal to index.dim({})", base_dim, dim_));
-    CHECK_ARGUMENT(data->GetFloat32Vectors() != nullptr, "base.float_vector is nullptr");
+    if (data_type_ != DataTypes::DATA_TYPE_SPARSE) {
+        CHECK_ARGUMENT(base_dim == dim_,
+                       fmt::format("base.dim({}) must be equal to index.dim({})", base_dim, dim_));
+    }
+    CHECK_ARGUMENT(get_data(data) != nullptr, "base.float_vector is nullptr");
 
     {
         std::lock_guard lock(this->add_mutex_);
@@ -116,7 +120,7 @@ HGraph::Add(const DatasetPtr& data) {
     }
 
     auto add_func =
-        [&](const float* data, int level, InnerIdType inner_id, const char* extra_info) -> void {
+        [&](const void* data, int level, InnerIdType inner_id, const char* extra_info) -> void {
         if (this->extra_infos_ != nullptr) {
             this->extra_infos_->InsertExtraInfo(extra_info, inner_id);
         }
@@ -126,7 +130,6 @@ HGraph::Add(const DatasetPtr& data) {
     std::vector<std::future<void>> futures;
     auto total = data->GetNumElements();
     const auto* labels = data->GetIds();
-    const auto* vectors = data->GetFloat32Vectors();
     const auto* extra_infos = data->GetExtraInfos();
     Vector<std::pair<InnerIdType, LabelType>> inner_ids(allocator_);
     for (int64_t j = 0; j < total; ++j) {
@@ -157,10 +160,10 @@ HGraph::Add(const DatasetPtr& data) {
         const auto* extra_info = extra_infos + local_idx * extra_info_size_;
         if (this->build_pool_ != nullptr) {
             auto future = this->build_pool_->GeneralEnqueue(
-                add_func, vectors + local_idx * dim_, level, inner_id, extra_info);
+                add_func, get_data(data, local_idx), level, inner_id, extra_info);
             futures.emplace_back(std::move(future));
         } else {
-            add_func(vectors + local_idx * dim_, level, inner_id, extra_info);
+            add_func(get_data(data, local_idx), level, inner_id, extra_info);
         }
     }
     if (this->build_pool_ != nullptr) {
@@ -177,8 +180,11 @@ HGraph::KnnSearch(const DatasetPtr& query,
                   const std::string& parameters,
                   const FilterPtr& filter) const {
     int64_t query_dim = query->GetDim();
-    CHECK_ARGUMENT(query_dim == dim_,
-                   fmt::format("query.dim({}) must be equal to index.dim({})", query_dim, dim_));
+    if (data_type_ != DataTypes::DATA_TYPE_SPARSE) {
+        CHECK_ARGUMENT(
+            query_dim == dim_,
+            fmt::format("query.dim({}) must be equal to index.dim({})", query_dim, dim_));
+    }
     // check k
     CHECK_ARGUMENT(k > 0, fmt::format("k({}) must be greater than 0", k));
     k = std::min(k, GetNumElements());
@@ -191,11 +197,10 @@ HGraph::KnnSearch(const DatasetPtr& query,
     search_param.topk = 1;
     search_param.ef = 1;
     search_param.is_inner_id_allowed = nullptr;
+    const auto* raw_query = get_data(query);
     for (auto i = static_cast<int64_t>(this->route_graphs_.size() - 1); i >= 0; --i) {
-        auto result = this->search_one_graph(query->GetFloat32Vectors(),
-                                             this->route_graphs_[i],
-                                             this->basic_flatten_codes_,
-                                             search_param);
+        auto result = this->search_one_graph(
+            raw_query, this->route_graphs_[i], this->basic_flatten_codes_, search_param);
         search_param.ep = result.top().second;
     }
 
@@ -213,10 +218,10 @@ HGraph::KnnSearch(const DatasetPtr& query,
     search_param.is_inner_id_allowed = ft;
     search_param.topk = static_cast<int64_t>(search_param.ef);
     auto search_result = this->search_one_graph(
-        query->GetFloat32Vectors(), this->bottom_graph_, this->basic_flatten_codes_, search_param);
+        raw_query, this->bottom_graph_, this->basic_flatten_codes_, search_param);
 
     if (use_reorder_) {
-        this->reorder(query->GetFloat32Vectors(), this->high_precise_codes_, search_result, k);
+        this->reorder(raw_query, this->high_precise_codes_, search_result, k);
     }
 
     while (search_result.size() > k) {
@@ -257,8 +262,11 @@ HGraph::KnnSearch(const DatasetPtr& query,
         return DatasetImpl::MakeEmptyDataset();
     }
     int64_t query_dim = query->GetDim();
-    CHECK_ARGUMENT(query_dim == dim_,
-                   fmt::format("query.dim({}) must be equal to index.dim({})", query_dim, dim_));
+    if (data_type_ != DataTypes::DATA_TYPE_SPARSE) {
+        CHECK_ARGUMENT(
+            query_dim == dim_,
+            fmt::format("query.dim({}) must be equal to index.dim({})", query_dim, dim_));
+    }
     // check k
     CHECK_ARGUMENT(k > 0, fmt::format("k({}) must be greater than 0", k));
     k = std::min(k, GetNumElements());
@@ -290,6 +298,7 @@ HGraph::KnnSearch(const DatasetPtr& query,
 
     auto* iter_filter_ctx = static_cast<IteratorFilterContext*>(iter_ctx);
     MaxHeap search_result(allocator_);
+    const auto* query_data = get_data(query);
     if (is_last_filter) {
         while (!iter_filter_ctx->Empty()) {
             uint32_t cur_inner_id = iter_filter_ctx->GetTopID();
@@ -305,10 +314,8 @@ HGraph::KnnSearch(const DatasetPtr& query,
         search_param.is_inner_id_allowed = nullptr;
         if (iter_filter_ctx->IsFirstUsed()) {
             for (auto i = static_cast<int64_t>(this->route_graphs_.size() - 1); i >= 0; --i) {
-                auto result = this->search_one_graph(query->GetFloat32Vectors(),
-                                                     this->route_graphs_[i],
-                                                     this->basic_flatten_codes_,
-                                                     search_param);
+                auto result = this->search_one_graph(
+                    query_data, this->route_graphs_[i], this->basic_flatten_codes_, search_param);
                 search_param.ep = result.top().second;
             }
         }
@@ -316,7 +323,7 @@ HGraph::KnnSearch(const DatasetPtr& query,
         search_param.ef = std::max(params.ef_search, k);
         search_param.is_inner_id_allowed = ft;
         search_param.topk = static_cast<int64_t>(search_param.ef);
-        search_result = this->search_one_graph(query->GetFloat32Vectors(),
+        search_result = this->search_one_graph(query_data,
                                                this->bottom_graph_,
                                                this->basic_flatten_codes_,
                                                search_param,
@@ -324,7 +331,7 @@ HGraph::KnnSearch(const DatasetPtr& query,
     }
 
     if (use_reorder_) {
-        this->reorder(query->GetFloat32Vectors(), this->high_precise_codes_, search_result, k);
+        this->reorder(query_data, this->high_precise_codes_, search_result, k);
     }
 
     while (search_result.size() > k) {
@@ -416,7 +423,7 @@ HGraph::generate_one_route_graph() {
 
 template <InnerSearchMode mode>
 MaxHeap
-HGraph::search_one_graph(const float* query,
+HGraph::search_one_graph(const void* query,
                          const GraphInterfacePtr& graph,
                          const FlattenInterfacePtr& flatten,
                          InnerSearchParam& inner_search_param) const {
@@ -428,7 +435,7 @@ HGraph::search_one_graph(const float* query,
 
 template <InnerSearchMode mode>
 MaxHeap
-HGraph::search_one_graph(const float* query,
+HGraph::search_one_graph(const void* query,
                          const GraphInterfacePtr& graph,
                          const FlattenInterfacePtr& flatten,
                          InnerSearchParam& inner_search_param,
@@ -451,8 +458,11 @@ HGraph::RangeSearch(const DatasetPtr& query,
         ft = std::make_shared<CommonInnerIdFilter>(filter, *this->label_table_);
     }
     int64_t query_dim = query->GetDim();
-    CHECK_ARGUMENT(query_dim == dim_,
-                   fmt::format("query.dim({}) must be equal to index.dim({})", query_dim, dim_));
+    if (data_type_ != DataTypes::DATA_TYPE_SPARSE) {
+        CHECK_ARGUMENT(
+            query_dim == dim_,
+            fmt::format("query.dim({}) must be equal to index.dim({})", query_dim, dim_));
+    }
     // check radius
     CHECK_ARGUMENT(radius >= 0, fmt::format("radius({}) must be greater equal than 0", radius))
 
@@ -467,11 +477,10 @@ HGraph::RangeSearch(const DatasetPtr& query,
     search_param.ep = this->entry_point_id_;
     search_param.topk = 1;
     search_param.ef = 1;
+    const auto* raw_query = get_data(query);
     for (auto i = static_cast<int64_t>(this->route_graphs_.size() - 1); i >= 0; --i) {
-        auto result = this->search_one_graph(query->GetFloat32Vectors(),
-                                             this->route_graphs_[i],
-                                             this->basic_flatten_codes_,
-                                             search_param);
+        auto result = this->search_one_graph(
+            raw_query, this->route_graphs_[i], this->basic_flatten_codes_, search_param);
         search_param.ep = result.top().second;
     }
 
@@ -483,10 +492,9 @@ HGraph::RangeSearch(const DatasetPtr& query,
     search_param.search_mode = RANGE_SEARCH;
     search_param.range_search_limit_size = static_cast<int>(limited_size);
     auto search_result = this->search_one_graph(
-        query->GetFloat32Vectors(), this->bottom_graph_, this->basic_flatten_codes_, search_param);
+        raw_query, this->bottom_graph_, this->basic_flatten_codes_, search_param);
     if (use_reorder_) {
-        this->reorder(
-            query->GetFloat32Vectors(), this->high_precise_codes_, search_result, limited_size);
+        this->reorder(raw_query, this->high_precise_codes_, search_result, limited_size);
     }
 
     if (limited_size > 0) {
@@ -685,7 +693,7 @@ HGraph::GetExtraInfoByIds(const int64_t* ids, int64_t count, char* extra_infos) 
 }
 
 void
-HGraph::add_one_point(const float* data, int level, InnerIdType inner_id) {
+HGraph::add_one_point(const void* data, int level, InnerIdType inner_id) {
     this->basic_flatten_codes_->InsertVector(data, inner_id);
     if (use_reorder_) {
         this->high_precise_codes_->InsertVector(data, inner_id);
@@ -708,7 +716,7 @@ HGraph::add_one_point(const float* data, int level, InnerIdType inner_id) {
 }
 
 void
-HGraph::graph_add_one(const float* data, int level, InnerIdType inner_id) {
+HGraph::graph_add_one(const void* data, int level, InnerIdType inner_id) {
     MaxHeap result(allocator_);
     InnerSearchParam param{
         .topk = 1,
@@ -848,7 +856,7 @@ HGraph::InitFeatures() {
 }
 
 void
-HGraph::reorder(const float* query,
+HGraph::reorder(const void* query,
                 const FlattenInterfacePtr& flatten_interface,
                 MaxHeap& candidate_heap,
                 int64_t k) const {
@@ -1053,6 +1061,7 @@ HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
     mapping_external_param_to_inner(external_param, EXTERNAL_MAPPING, inner_json);
 
     auto hgraph_parameter = std::make_shared<HGraphParameter>();
+    hgraph_parameter->data_type = common_param.data_type_;
     hgraph_parameter->FromJson(inner_json);
 
     return hgraph_parameter;

@@ -48,7 +48,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::SparseTestIndex,
                              "SparseIndex Build and Search",
                              "[ft][sparse_index]") {
     auto index = TestFactory("sparse_index", build_param, true);
-    auto dataset = pool.GetSparseDatasetAndCreate(base_count, 0.8);
+    auto dataset = pool.GetSparseDatasetAndCreate(base_count, 128, 0.8);
     TestContinueAdd(index, dataset, true);
     TestKnnSearch(index, dataset, search_param, 0.99, true);
     TestRangeSearch(index, dataset, search_param, 0.99, 10, true);
@@ -72,7 +72,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::SparseTestIndex,
         auto deserialize_index = index2->Deserialize(serialize_binary.value());
         REQUIRE(deserialize_index.has_value());
     }
-    auto dataset = pool.GetSparseDatasetAndCreate(base_count, 0.8);
+    auto dataset = pool.GetSparseDatasetAndCreate(base_count, 128, 0.8);
     TestBuildIndex(index, dataset, true);
     SECTION("serialize/deserialize by binary") {
         auto index2 = TestFactory(name, build_param, true);

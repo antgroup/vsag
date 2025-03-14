@@ -62,7 +62,7 @@ public:
     InsertVector(const void* vector, InnerIdType idx) override;
 
     void
-    BatchInsertVector(const void* vectors, InnerIdType count, InnerIdType* idx) override;
+    BatchInsertVector(const void* vectors, InnerIdType count, InnerIdType* idx_vec) override;
 
     void
     SetMaxCapacity(InnerIdType capacity) override {
@@ -194,8 +194,8 @@ template <typename QuantTmpl, typename IOTmpl>
 void
 FlattenDataCell<QuantTmpl, IOTmpl>::BatchInsertVector(const void* vectors,
                                                       InnerIdType count,
-                                                      InnerIdType* idx) {
-    if (idx == nullptr) {
+                                                      InnerIdType* idx_vec) {
+    if (idx_vec == nullptr) {
         ByteBuffer codes(static_cast<uint64_t>(count) * static_cast<uint64_t>(code_size_),
                          allocator_);
         quantizer_->EncodeBatch((const float*)vectors, codes.data, count);
@@ -211,7 +211,7 @@ FlattenDataCell<QuantTmpl, IOTmpl>::BatchInsertVector(const void* vectors,
     } else {
         auto dim = quantizer_->GetDim();
         for (int64_t i = 0; i < count; ++i) {
-            this->InsertVector((const float*)vectors + dim * i, idx[i]);
+            this->InsertVector((const float*)vectors + dim * i, idx_vec[i]);
         }
     }
 }
