@@ -91,7 +91,7 @@ GenerateVectors(uint64_t count, uint32_t dim, int seed = 47, bool need_normalize
 std::vector<vsag::SparseVector>
 GenerateSparseVectors(uint32_t count,
                       uint32_t max_dim = 100,
-                      uint32_t max_id = 10000,
+                      uint32_t max_id = 1000,
                       float min_val = -1,
                       float max_val = 1,
                       int seed = 47);

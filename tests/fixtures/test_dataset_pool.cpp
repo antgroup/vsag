@@ -15,7 +15,7 @@ TestDatasetPool::GetDatasetAndCreate(uint64_t dim,
     if (this->pool_.find(key) == this->pool_.end()) {
         this->dim_counts_.emplace_back(dim, count);
         this->pool_[key] =
-            TestDataset::CreateTestDataset(dim, count, metric_str, with_path, valid_ratio);
+            TestDataset::CreateTestDataset(dim, count, metric_str, with_path, valid_ratio, "dense");
     }
     return this->pool_.at(key);
 }
@@ -37,4 +37,15 @@ TestDatasetPool::GetNanDataset(const std::string& metric_str) {
     }
     return this->pool_.at(key);
 }
+
+TestDatasetPtr
+TestDatasetPool::GetSparseDatasetAndCreate(uint64_t count, float valid_ratio) {
+    auto key = "sparse_" + std::to_string(count) + "_" + std::to_string(valid_ratio);
+    if (this->pool_.find(key) == this->pool_.end()) {
+        this->pool_[key] =
+            TestDataset::CreateTestDataset(2, count, "l2", false, valid_ratio, "sparse");
+    }
+    return this->pool_.at(key);
+}
+
 }  // namespace fixtures

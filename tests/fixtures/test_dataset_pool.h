@@ -36,6 +36,9 @@ public:
     TestDatasetPtr
     GetNanDataset(const std::string& metric_str);
 
+    TestDatasetPtr
+    GetSparseDatasetAndCreate(uint64_t count, float valid_ratio = 0.8);
+
 private:
     static std::string
     key_gen(int64_t dim,
