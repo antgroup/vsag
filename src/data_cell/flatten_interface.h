@@ -43,17 +43,16 @@ public:
           InnerIdType id_count) = 0;
 
     virtual ComputerInterfacePtr
-    FactoryComputer(const float* query) = 0;
+    FactoryComputer(const void* query) = 0;
 
     virtual void
-    Train(const float* data, uint64_t count) = 0;
+    Train(const void* data, uint64_t count) = 0;
 
     virtual void
-    InsertVector(const float* vector,
-                 InnerIdType idx = std::numeric_limits<InnerIdType>::max()) = 0;
+    InsertVector(const void* vector, InnerIdType idx = std::numeric_limits<InnerIdType>::max()) = 0;
 
     virtual void
-    BatchInsertVector(const float* vectors, InnerIdType count, InnerIdType* idx = nullptr) = 0;
+    BatchInsertVector(const void* vectors, InnerIdType count, InnerIdType* idx = nullptr) = 0;
 
     virtual float
     ComputePairVectors(InnerIdType id1, InnerIdType id2) = 0;
