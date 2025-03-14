@@ -58,13 +58,14 @@ IndexNode::IndexNode(IndexCommonParam* common_param, GraphInterfaceParamPtr grap
       children_(common_param->allocator_.get()),
       common_param_(common_param),
       graph_param_(std::move(graph_param)) {
-    graph_ = GraphInterface::MakeInstance(graph_param_, *common_param_, true);
 }
 
 void
 IndexNode::BuildGraph(ODescent& odescent) {
     std::lock_guard<std::mutex> lock(mutex_);
-    if (not ids_.empty()) {
+    // Build an index when the level corresponding to the current node requires indexing
+    if (has_index_ && not ids_.empty()) {
+        InitGraph();
         entry_point_ = ids_[0];
         odescent.Build(ids_);
         odescent.SaveGraph(graph_);
@@ -102,8 +103,13 @@ IndexNode::Deserialize(StreamReader& reader) {
     StreamReader::ReadObj(reader, entry_point_);
     // deserialize `level_`
     StreamReader::ReadObj(reader, level_);
+    // serialize `has_index_`
+    StreamReader::ReadObj(reader, has_index_);
     // deserialize `graph`
-    graph_->Deserialize(reader);
+    if (has_index_) {
+        InitGraph();
+        graph_->Deserialize(reader);
+    }
     // deserialize `children`
     size_t children_size = 0;
     StreamReader::ReadObj(reader, children_size);
@@ -112,6 +118,7 @@ IndexNode::Deserialize(StreamReader& reader) {
         AddChild(key);
         children_[key]->Deserialize(reader);
     }
+    StreamReader::ReadObj(reader, has_index_);
 }
 
 void
@@ -120,8 +127,12 @@ IndexNode::Serialize(StreamWriter& writer) const {
     StreamWriter::WriteObj(writer, entry_point_);
     // serialize `level_`
     StreamWriter::WriteObj(writer, level_);
+    // serialize `has_index_`
+    StreamWriter::WriteObj(writer, has_index_);
     // serialize `graph_`
-    graph_->Serialize(writer);
+    if (has_index_) {
+        graph_->Serialize(writer);
+    }
     // serialize `children`
     size_t children_size = children_.size();
     StreamWriter::WriteObj(writer, children_size);
@@ -131,6 +142,28 @@ IndexNode::Serialize(StreamWriter& writer) const {
         // calculate size of `content`
         item.second->Serialize(writer);
     }
+    StreamWriter::WriteObj(writer, has_index_);
+}
+void
+IndexNode::InitGraph() {
+    graph_ = GraphInterface::MakeInstance(graph_param_, *common_param_, true);
+}
+
+MaxHeap
+IndexNode::SearchGraph(const SearchFunc& search_func) const {
+    if (graph_ != nullptr && graph_->TotalCount() > 0) {
+        return search_func(this);
+    }
+    MaxHeap search_result(common_param_->allocator_.get());
+    for (const auto& [key, node] : children_) {
+        MaxHeap child_search_result = node->SearchGraph(search_func);
+        while (not child_search_result.empty()) {
+            auto result = child_search_result.top();
+            child_search_result.pop();
+            search_result.push(result);
+        }
+    }
+    return search_result;
 }
 
 tl::expected<std::vector<int64_t>, Error>
@@ -139,6 +172,7 @@ Pyramid::build(const DatasetPtr& base) {
     int64_t data_num = base->GetNumElements();
     const auto* data_vectors = base->GetFloat32Vectors();
     const auto* data_ids = base->GetIds();
+    const auto& no_build_levels = pyramid_param_.no_build_levels;
 
     resize(data_num);
     std::memcpy(labels_.label_table_.data(), data_ids, sizeof(LabelType) * data_num);
@@ -157,6 +191,9 @@ Pyramid::build(const DatasetPtr& base) {
         for (auto& path_slice : path_slices) {
             node = node->GetChild(path_slice, true);
             node->ids_.push_back(i);
+            node->has_index_ =
+                std::find(no_build_levels.begin(), no_build_levels.end(), node->level_) ==
+                no_build_levels.end();
         }
     }
     root_->BuildGraph(graph_builder);
@@ -179,7 +216,7 @@ Pyramid::knn_search(const DatasetPtr& query,
         search_param.is_inner_id_allowed =
             std::make_shared<CommonInnerIdFilter>(filter_adpater, labels_);
     }
-    SearchFunc search_func = [&](const std::shared_ptr<IndexNode>& node) {
+    SearchFunc search_func = [&](const IndexNode* node) {
         search_param.ep = node->entry_point_;
         std::lock_guard<std::mutex> lock(node->mutex_);
         auto vl = pool_->TakeOne();
@@ -206,7 +243,7 @@ Pyramid::knn_search(const DatasetPtr& query,
         search_param.is_inner_id_allowed =
             std::make_shared<CommonInnerIdFilter>(filter_adpater, labels_);
     }
-    SearchFunc search_func = [&](const std::shared_ptr<IndexNode>& node) {
+    SearchFunc search_func = [&](const IndexNode* node) {
         search_param.ep = node->entry_point_;
         std::lock_guard<std::mutex> lock(node->mutex_);
         auto vl = pool_->TakeOne();
@@ -228,7 +265,7 @@ Pyramid::range_search(const DatasetPtr& query,
     search_param.ef = parsed_param.ef_search;
     search_param.radius = radius;
     search_param.search_mode = RANGE_SEARCH;
-    SearchFunc search_func = [&](const std::shared_ptr<IndexNode>& node) {
+    SearchFunc search_func = [&](const IndexNode* node) {
         search_param.ep = node->entry_point_;
         std::lock_guard<std::mutex> lock(node->mutex_);
         auto vl = pool_->TakeOne();
@@ -257,7 +294,7 @@ Pyramid::range_search(const DatasetPtr& query,
         search_param.is_inner_id_allowed =
             std::make_shared<CommonInnerIdFilter>(filter_adpater, labels_);
     }
-    SearchFunc search_func = [&](const std::shared_ptr<IndexNode>& node) {
+    SearchFunc search_func = [&](const IndexNode* node) {
         search_param.ep = node->entry_point_;
         std::lock_guard<std::mutex> lock(node->mutex_);
         auto vl = pool_->TakeOne();
@@ -286,7 +323,7 @@ Pyramid::range_search(const DatasetPtr& query,
         search_param.is_inner_id_allowed =
             std::make_shared<CommonInnerIdFilter>(filter_adpater, labels_);
     }
-    SearchFunc search_func = [&](const std::shared_ptr<IndexNode>& node) {
+    SearchFunc search_func = [&](const IndexNode* node) {
         search_param.ep = node->entry_point_;
         std::lock_guard<std::mutex> lock(node->mutex_);
         auto vl = pool_->TakeOne();
@@ -301,7 +338,7 @@ Pyramid::range_search(const DatasetPtr& query,
 
 tl::expected<DatasetPtr, Error>
 Pyramid::search_impl(const DatasetPtr& query, int64_t limit, const SearchFunc& search_func) const {
-    const auto* path = query->GetPaths();  // TODO(inabao): provide different search modes.
+    const auto* path = query->GetPaths();
     std::string current_path = path[0];
     auto path_slices = split(current_path, PART_SLASH);
     std::shared_ptr<IndexNode> node = root_;
@@ -313,7 +350,7 @@ Pyramid::search_impl(const DatasetPtr& query, int64_t limit, const SearchFunc& s
             return ret;
         }
     }
-    auto search_result = search_func(node);
+    auto search_result = node->SearchGraph(search_func);
     while (search_result.size() > limit) {
         search_result.pop();
     }
@@ -487,6 +524,7 @@ Pyramid::add(const DatasetPtr& base) {
     int64_t data_num = base->GetNumElements();
     const auto* data_vectors = base->GetFloat32Vectors();
     const auto* data_ids = base->GetIds();
+    const auto& no_build_levels = pyramid_param_.no_build_levels;
     int64_t local_cur_element_count = 0;
     {
         std::lock_guard lock(cur_element_count_mutex_);
@@ -510,7 +548,7 @@ Pyramid::add(const DatasetPtr& base) {
                 sizeof(LabelType) * data_num);
 
     InnerSearchParam search_param;
-    search_param.ef = 100;
+    search_param.ef = pyramid_param_.ef_construction;
     search_param.topk = pyramid_param_.odescent_param->max_degree;
     search_param.search_mode = KNN_SEARCH;
     auto empty_mutex = std::make_shared<EmptyMutex>();
@@ -523,10 +561,18 @@ Pyramid::add(const DatasetPtr& base) {
             node = node->GetChild(path_slice, true);
             std::lock_guard<std::mutex> graph_lock(node->mutex_);
             // add one point
+            if (node->graph_ == nullptr) {
+                node->has_index_ =
+                    std::find(no_build_levels.begin(), no_build_levels.end(), node->level_) ==
+                    no_build_levels.end();
+                node->InitGraph();
+            }
             if (node->graph_->TotalCount() == 0) {
-                node->graph_->InsertNeighborsById(
-                    inner_id, Vector<InnerIdType>(common_param_.allocator_.get()));
-                node->entry_point_ = inner_id;
+                if (node->has_index_) {
+                    node->graph_->InsertNeighborsById(
+                        inner_id, Vector<InnerIdType>(common_param_.allocator_.get()));
+                    node->entry_point_ = inner_id;
+                }
             } else {
                 search_param.ep = node->entry_point_;
                 auto vl = pool_->TakeOne();
