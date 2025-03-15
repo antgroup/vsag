@@ -209,10 +209,9 @@ def plot_auto_with_manual_baselines(df_auto, baseline_files, dataset, filter_rec
                  marker='*', color="#03A9F4", markersize=10, markeredgecolor="black", linewidth=2, zorder=2)
 
     # 添加标题和轴标签
-    f_size = 12
+    f_size = 16
     plt.xlabel("Recall@10", fontsize=f_size)
     plt.ylabel("QPS", fontsize=f_size)
-    plt.title(f"Performance of Auto-Tuned-ILP ({NAME[dataset]})", fontsize=f_size)
     plt.grid(True, linestyle="--", alpha=0.6)
     plt.tight_layout()
 
@@ -242,20 +241,20 @@ def save_legend_as_image(dataset):
         dataset (str): 数据集名称，用于保存图片文件名。
     """
     # 创建一个空白图形
-    fig = plt.figure(figsize=(8, 0.5),dpi=600)  # 宽度较大，高度较小
+    fig = plt.figure(figsize=(4, 0.5),dpi=600)  # 宽度较大，高度较小
     ax = fig.add_subplot(111)
 
     # 定义图例内容
     handles = [
         plt.Line2D([0], [0], marker='s', color="#4CAF50", markersize=8, markeredgecolor="black", linewidth=2, linestyle="-", label="Auto Tuned Result"),
+        plt.Line2D([0], [0], color="lightblue", linestyle="", marker='o', markersize=5, alpha=0.5, label="All Running Cases"),
         plt.Line2D([0], [0], marker='^', color="#FFC107", markersize=8, markeredgecolor="black", linewidth=2, linestyle="-", label="Random Picked Config A"),
         plt.Line2D([0], [0], marker='*', color="#03A9F4", markersize=10, markeredgecolor="black", linewidth=2, linestyle="-", label="Random Picked Config B"),
-        plt.Line2D([0], [0], color="lightblue", linestyle="", marker='o', markersize=5, alpha=0.5, label="All Running Cases"),
     ]
 
     # 绘制图例
     f_size = 12
-    legend = ax.legend(handles=handles, loc="center", ncol=4, fontsize=f_size, frameon=False)
+    legend = ax.legend(handles=handles, loc="center", ncol=2, fontsize=f_size, frameon=False)
 
     # 隐藏坐标轴
     ax.axis("off")
