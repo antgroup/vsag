@@ -14,6 +14,7 @@
 // limitations under the License.
 
 #pragma once
+#include "algorithm/ivf_partition/ivf_nearest_partition.h"
 #include "data_cell/bucket_datacell_parameter.h"
 #include "fmt/format-inl.h"
 #include "inner_string_params.h"
@@ -35,6 +36,9 @@ public:
     BucketDataCellParamPtr bucket_param{nullptr};
 
     bool use_residual{false};
+
+    IVFNearestPartitionTrainerType partition_train_type{
+        IVFNearestPartitionTrainerType::KMeansTrainer};
 };
 
 using IVFParameterPtr = std::shared_ptr<IVFParameter>;
