@@ -797,6 +797,15 @@ public:
             return ;
         }
 
+        if (not vsag::USE_AUTO_PARAM) {
+            L.resize(cur_element_count_);
+            for (int i = 0; i < cur_element_count_; i++) {
+                for (int j = 0; j < M_ * 3; j++) {
+                    L[i].push_back(cur_element_count_ % (j + 1));
+                }
+            }
+        }
+
         constexpr static size_t sample_points_num = 1000;
         constexpr static size_t k = 10;
         size_t dim = *(size_t*)dist_func_param_;
@@ -1013,7 +1022,15 @@ public:
         }
     }
 
-    inline uint32_t
+#if defined(__GNUC__) || defined(__clang__)
+#define NOINLINE __attribute__((noinline))
+#elif defined(_MSC_VER)
+#define NOINLINE __declspec(noinline)
+#else
+#define NOINLINE
+#endif
+
+    NOINLINE uint32_t
     visit_naive(std::pair<float, tableint>& current_node_pair,
           std::pair<float, tableint>& next_node_pair,
           vl_type* visited_array,
@@ -1027,9 +1044,9 @@ public:
 
         uint32_t count_no_visited = 0;
         for (size_t j = 1; j <= size; j++) {
-            if (vsag::USE_AUTO_PARAM and
-                not (L[current_node_pair.second][j - 1] <= vsag::a_s_ and
-                    count_no_visited < vsag::m_s_)) {
+            if ((not (L[current_node_pair.second][j - 1] <= vsag::a_s_ and count_no_visited < vsag::m_s_))
+                and
+                vsag::USE_AUTO_PARAM) {
                 continue;
             }
 
