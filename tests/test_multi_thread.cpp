@@ -31,18 +31,11 @@ query_knn(std::shared_ptr<vsag::Index> index,
           int64_t id,
           int64_t k,
           const std::string& parameters,
-          vsag::BitsetPtr invalid) {
+          const vsag::BitsetPtr invalid) {
     if (auto result = index->KnnSearch(query, k, parameters, invalid); result.has_value()) {
         if (result.value()->GetDim() != 0 && result.value()->GetIds()[0] == id) {
             return 1.0;
-        } else {
-            fixtures::logger::debug << "recall failure: dim " << result.value()->GetDim() << ", id "
-                                    << result.value()->GetIds()[0] << ", expected_id " << id
-                                    << std::endl;
-            ;
         }
-    } else if (result.error().type == vsag::ErrorType::INTERNAL_ERROR) {
-        std::cerr << "failed to perform knn search on index" << std::endl;
     }
     return 0.0;
 }
@@ -121,7 +114,7 @@ TEST_CASE("Test DiskAnn Multi-threading", "[ft][diskann]") {
     REQUIRE(recall >= 0.99);
 }
 
-TEST_CASE("Test HNSW Multi-threading", "[ft][hnsw]") {
+TEST_CASE("Test HNSW Multi-threading", "[ft][hnsw][concurrent]") {
     fixtures::logger::LoggerReplacer _;
 
     int dim = 16;             // Dimension of the elements
@@ -192,7 +185,7 @@ TEST_CASE("Test HNSW Multi-threading", "[ft][hnsw]") {
     REQUIRE(recall > 0.96);
 }
 
-TEST_CASE("Test HNSW Multi-threading Read and Write", "[ft][hnsw]") {
+TEST_CASE("Test HNSW Multi-threading Read and Write", "[ft][hnsw][concurrent]") {
     fixtures::logger::LoggerReplacer _;
 
     // avoid too much slow task logs
@@ -279,7 +272,8 @@ TEST_CASE("Test HNSW Multi-threading Read and Write", "[ft][hnsw]") {
     }
 }
 
-TEST_CASE("Test HNSW Multi-threading read-write with Feedback and Pretrain", "[ft][hnsw]") {
+TEST_CASE("Test HNSW Multi-threading read-write with Feedback and Pretrain",
+          "[ft][hnsw][concurrent]") {
     fixtures::logger::LoggerReplacer _;
 
     // avoid too much slow task logs

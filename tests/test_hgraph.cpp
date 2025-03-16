@@ -437,7 +437,9 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex,
     vsag::Options::Instance().set_block_size_limit(origin_size);
 }
 
-TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex, "HGraph Concurrent Add", "[ft][hgraph]") {
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex,
+                             "HGraph Concurrent Add",
+                             "[ft][hgraph][concurrent]") {
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
     auto metric_type = GENERATE("l2", "ip", "cosine");

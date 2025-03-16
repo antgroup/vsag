@@ -269,7 +269,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::BruteForceTestIndex, "BruteForce Add", "[
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::BruteForceTestIndex,
                              "BruteForce Concurrent Add",
-                             "[ft][bruteforce]") {
+                             "[ft][bruteforce][concurrent]") {
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
     auto metric_type = GENERATE("l2", "ip", "cosine");
