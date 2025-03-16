@@ -1,0 +1,57 @@
+name: Tsan Build & Test Parallel
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+jobs:
+  build_tsan:
+    name: Build with TSAN
+    runs-on: ubuntu-22.04
+    concurrency:
+      group: test_tsan_x86-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+    container:
+      image: vsaglib/vsag:ci-x86
+    steps:
+      - uses: actions/checkout@v4
+      - name: Load Cache
+        uses: actions/cache@v4
+        with:
+          path: ./build/
+          key: build-${{ hashFiles('./CMakeLists.txt') }}-${{ hashFiles('./.circleci/fresh_ci_cache.commit') }}-tsan
+      - name: Make Tsan
+        run: make tsan
+      - name: Save Test
+        uses: actions/upload-artifact@v4
+        with:
+          path: ./build
+          name: test_x86-${{ github.run_id }}-tsan
+          compression-level: 1
+          retention-days: 1
+          overwrite: 'true'
+  test_tsan:
+    name: Run TSAN Tests
+    needs: build_tsan
+    runs-on: ubuntu-22.04
+    concurrency:
+      group: test_tsan_x86-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+    container:
+      image: vsaglib/vsag:ci-x86
+    steps:
+      - uses: actions/checkout@v4
+      - name: Clean Env
+        run: rm -rf ./build
+      - name: Download Test
+        uses: actions/download-artifact@v4
+        with:
+          name: test_x86-${{ github.run_id }}-tsan
+          path: ./build/
+      - name: Run TSAN tests
+        run: |
+          echo leak:libomp.so > omp.supp
+          export LSAN_OPTIONS=suppressions=omp.supp
+          chmod +x ./build/tests/functests
+          ./build/tests/functests "[concurrent]"
