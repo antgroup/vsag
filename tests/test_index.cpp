@@ -39,6 +39,9 @@ void
 TestIndex::TestBuildIndex(const IndexPtr& index,
                           const TestDatasetPtr& dataset,
                           bool expected_success) {
+    if (not index->CheckFeature(vsag::SUPPORT_BUILD)) {
+        return;
+    }
     auto build_index = index->Build(dataset->base_);
     if (expected_success) {
         REQUIRE(build_index.has_value());
@@ -53,6 +56,9 @@ void
 TestIndex::TestAddIndex(const IndexPtr& index,
                         const TestDatasetPtr& dataset,
                         bool expected_success) {
+    if (not index->CheckFeature(vsag::SUPPORT_ADD_FROM_EMPTY)) {
+        return;
+    }
     auto add_index = index->Add(dataset->base_);
     if (expected_success) {
         REQUIRE(add_index.has_value());
@@ -68,6 +74,9 @@ TestIndex::TestUpdateId(const IndexPtr& index,
                         const TestDatasetPtr& dataset,
                         const std::string& search_param,
                         bool expected_success) {
+    if (not index->CheckFeature(vsag::SUPPORT_UPDATE_ID_CONCURRENT)) {
+        return;
+    }
     auto ids = dataset->base_->GetIds();
     auto num_vectors = dataset->base_->GetNumElements();
     auto dim = dataset->base_->GetDim();
@@ -146,6 +155,9 @@ TestIndex::TestUpdateVector(const IndexPtr& index,
                             const TestDatasetPtr& dataset,
                             const std::string& search_param,
                             bool expected_success) {
+    if (not index->CheckFeature(vsag::SUPPORT_UPDATE_VECTOR_CONCURRENT)) {
+        return;
+    }
     auto ids = dataset->base_->GetIds();
     auto num_vectors = dataset->base_->GetNumElements();
     auto dim = dataset->base_->GetDim();
@@ -285,6 +297,9 @@ TestIndex::TestKnnSearch(const IndexPtr& index,
                          const std::string& search_param,
                          float expected_recall,
                          bool expected_success) {
+    if (not index->CheckFeature(vsag::SUPPORT_RANGE_SEARCH)) {
+        return;
+    }
     auto queries = dataset->query_;
     auto query_count = queries->GetNumElements();
     auto dim = queries->GetDim();
@@ -325,6 +340,9 @@ TestIndex::TestRangeSearch(const IndexPtr& index,
                            float expected_recall,
                            int64_t limited_size,
                            bool expected_success) {
+    if (not index->CheckFeature(vsag::SUPPORT_RANGE_SEARCH)) {
+        return;
+    }
     auto queries = dataset->range_query_;
     auto query_count = queries->GetNumElements();
     auto dim = queries->GetDim();
@@ -388,6 +406,9 @@ TestIndex::TestFilterSearch(const TestIndex::IndexPtr& index,
                             float expected_recall,
                             bool expected_success,
                             bool support_filter_obj) {
+    if (not index->CheckFeature(vsag::SUPPORT_KNN_SEARCH_WITH_ID_FILTER)) {
+        return;
+    }
     auto queries = dataset->filter_query_;
     auto query_count = queries->GetNumElements();
     auto dim = queries->GetDim();
@@ -438,6 +459,9 @@ TestIndex::TestFilterSearch(const TestIndex::IndexPtr& index,
 
 void
 TestIndex::TestCalcDistanceById(const IndexPtr& index, const TestDatasetPtr& dataset, float error) {
+    if (not index->CheckFeature(vsag::SUPPORT_CAL_DISTANCE_BY_ID)) {
+        return;
+    }
     auto queries = dataset->query_;
     auto query_count = queries->GetNumElements();
     auto dim = queries->GetDim();
@@ -463,6 +487,9 @@ void
 TestIndex::TestBatchCalcDistanceById(const IndexPtr& index,
                                      const TestDatasetPtr& dataset,
                                      float error) {
+    if (not index->CheckFeature(vsag::SUPPORT_CAL_DISTANCE_BY_ID)) {
+        return;
+    }
     auto queries = dataset->query_;
     auto query_count = queries->GetNumElements();
     auto dim = queries->GetDim();
@@ -489,6 +516,10 @@ TestIndex::TestSerializeFile(const IndexPtr& index_from,
                              const TestDatasetPtr& dataset,
                              const std::string& search_param,
                              bool expected_success) {
+    if (not index_from->CheckFeature(vsag::SUPPORT_SERIALIZE_FILE) or
+        not index_to->CheckFeature(vsag::SUPPORT_DESERIALIZE_FILE)) {
+        return;
+    }
     auto dir = fixtures::TempDir("serialize");
     auto path = dir.GenerateRandomFile();
     std::ofstream outfile(path, std::ios::out | std::ios::binary);
@@ -579,6 +610,10 @@ TestIndex::TestSerializeBinarySet(const IndexPtr& index_from,
                                   const TestDatasetPtr& dataset,
                                   const std::string& search_param,
                                   bool expected_success) {
+    if (not index_from->CheckFeature(vsag::SUPPORT_SERIALIZE_BINARY_SET) or
+        not index_to->CheckFeature(vsag::SUPPORT_DESERIALIZE_BINARY_SET)) {
+        return;
+    }
     auto serialize_binary = index_from->Serialize();
     REQUIRE(serialize_binary.has_value() == expected_success);
 
@@ -614,6 +649,10 @@ TestIndex::TestSerializeReaderSet(const IndexPtr& index_from,
                                   const std::string& search_param,
                                   const std::string& index_name,
                                   bool expected_success) {
+    if (not index_from->CheckFeature(vsag::SUPPORT_SERIALIZE_BINARY_SET) or
+        not index_to->CheckFeature(vsag::SUPPORT_DESERIALIZE_READER_SET)) {
+        return;
+    }
     vsag::ReaderSet rs;
     auto serialize_binary = index_from->Serialize();
     REQUIRE(serialize_binary.has_value() == expected_success);
@@ -650,6 +689,9 @@ void
 TestIndex::TestConcurrentAdd(const TestIndex::IndexPtr& index,
                              const TestDatasetPtr& dataset,
                              bool expected_success) {
+    if (not index->CheckFeature(vsag::SUPPORT_ADD_CONCURRENT)) {
+        return;
+    }
     fixtures::logger::LoggerReplacer _;
 
     auto base_count = dataset->base_->GetNumElements();
@@ -697,6 +739,9 @@ TestIndex::TestConcurrentKnnSearch(const TestIndex::IndexPtr& index,
                                    const std::string& search_param,
                                    float expected_recall,
                                    bool expected_success) {
+    if (not index->CheckFeature(vsag::SUPPORT_SEARCH_CONCURRENT)) {
+        return;
+    }
     fixtures::logger::LoggerReplacer _;
 
     auto queries = dataset->query_;
@@ -848,6 +893,9 @@ TestIndex::TestEstimateMemory(const std::string& index_name,
 
 void
 TestIndex::TestCheckIdExist(const TestIndex::IndexPtr& index, const TestDatasetPtr& dataset) {
+    if (not index->CheckFeature(vsag::SUPPORT_CHECK_ID_EXIST)) {
+        return;
+    }
     auto data_count = dataset->base_->GetNumElements();
     auto* ids = dataset->base_->GetIds();
     int N = 10;
@@ -873,6 +921,13 @@ TestIndex::TestMergeIndex(const std::string& name,
                           const TestDatasetPtr& dataset,
                           int32_t split_num,
                           bool expect_success) {
+    auto create_index_result = vsag::Factory::CreateIndex(name, build_param);
+    REQUIRE(create_index_result.has_value() == expect_success);
+    auto index = create_index_result.value();
+    if (not index->CheckFeature(vsag::SUPPORT_MERGE_INDEX)) {
+        return nullptr;
+    }
+
     auto& raw_data = dataset->base_;
     std::vector<vsag::DatasetPtr> sub_datasets;
     int64_t all_data_num = raw_data->GetNumElements();
@@ -897,9 +952,6 @@ TestIndex::TestMergeIndex(const std::string& name,
         start_index += current_subset_size;
     }
 
-    auto create_index_result = vsag::Factory::CreateIndex(name, build_param);
-    REQUIRE(create_index_result.has_value() == expect_success);
-    auto index = create_index_result.value();
     std::vector<vsag::MergeUnit> merge_units;
     for (auto sub_dataset : sub_datasets) {
         auto new_index_result = vsag::Factory::CreateIndex(name, build_param);

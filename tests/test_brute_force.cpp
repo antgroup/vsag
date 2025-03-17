@@ -31,6 +31,13 @@ public:
                                             int64_t dim,
                                             const std::string& quantization_str = "sq8",
                                             int thread_count = 5);
+
+    static void
+    TestGeneral(const IndexPtr& index,
+                const TestDatasetPtr& dataset,
+                const std::string& search_param,
+                float recall);
+
     static TestDatasetPool pool;
 
     static std::vector<int> dims;
@@ -69,6 +76,18 @@ BruteForceTestIndex::GenerateBruteForceBuildParametersString(const std::string& 
     build_parameters_str = fmt::format(parameter_temp, metric_type, dim, quantization_str);
 
     return build_parameters_str;
+}
+void
+BruteForceTestIndex::TestGeneral(const IndexPtr& index,
+                                 const TestDatasetPtr& dataset,
+                                 const std::string& search_param,
+                                 float recall) {
+    TestKnnSearch(index, dataset, search_param, recall, true);
+    TestConcurrentKnnSearch(index, dataset, search_param, recall, true);
+    TestRangeSearch(index, dataset, search_param, recall, 10, true);
+    TestRangeSearch(index, dataset, search_param, recall / 2.0, 5, true);
+    TestFilterSearch(index, dataset, search_param, recall, true);
+    TestCheckIdExist(index, dataset);
 }
 }  // namespace fixtures
 
@@ -164,28 +183,11 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::BruteForceTestIndex,
             auto param =
                 GenerateBruteForceBuildParametersString(metric_type, dim, base_quantization_str);
             auto index = TestFactory(name, param, true);
-            if (index->CheckFeature(vsag::SUPPORT_ADD_AFTER_BUILD)) {
-                auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
-                TestContinueAdd(index, dataset, true);
-                if (index->CheckFeature(vsag::SUPPORT_KNN_SEARCH)) {
-                    TestKnnSearch(index, dataset, search_param, recall, true);
-                    if (index->CheckFeature(vsag::SUPPORT_SEARCH_CONCURRENT)) {
-                        TestConcurrentKnnSearch(index, dataset, search_param, recall, true);
-                    }
-                }
-                if (index->CheckFeature(vsag::SUPPORT_RANGE_SEARCH)) {
-                    TestRangeSearch(index, dataset, search_param, recall, 10, true);
-                    TestRangeSearch(index, dataset, search_param, recall / 2.0, 5, true);
-                }
-                if (index->CheckFeature(vsag::SUPPORT_KNN_SEARCH_WITH_ID_FILTER)) {
-                    TestFilterSearch(index, dataset, search_param, recall, true);
-                }
-                if (index->CheckFeature(vsag::IndexFeature::SUPPORT_CHECK_ID_EXIST)) {
-                    TestCheckIdExist(index, dataset);
-                }
-            }
-            vsag::Options::Instance().set_block_size_limit(origin_size);
+            auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
+            TestContinueAdd(index, dataset, true);
+            TestGeneral(index, dataset, search_param, recall);
         }
+        vsag::Options::Instance().set_block_size_limit(origin_size);
     }
 }
 
@@ -205,25 +207,8 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::BruteForceTestIndex,
                 GenerateBruteForceBuildParametersString(metric_type, dim, base_quantization_str);
             auto index = TestFactory(name, param, true);
             auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
-            if (index->CheckFeature(vsag::SUPPORT_BUILD)) {
-                TestBuildIndex(index, dataset, true);
-                if (index->CheckFeature(vsag::SUPPORT_KNN_SEARCH)) {
-                    TestKnnSearch(index, dataset, search_param, recall, true);
-                    if (index->CheckFeature(vsag::SUPPORT_SEARCH_CONCURRENT)) {
-                        TestConcurrentKnnSearch(index, dataset, search_param, recall, true);
-                    }
-                }
-                if (index->CheckFeature(vsag::SUPPORT_RANGE_SEARCH)) {
-                    TestRangeSearch(index, dataset, search_param, recall, 10, true);
-                    TestRangeSearch(index, dataset, search_param, recall / 2.0, 5, true);
-                }
-                if (index->CheckFeature(vsag::SUPPORT_KNN_SEARCH_WITH_ID_FILTER)) {
-                    TestFilterSearch(index, dataset, search_param, recall, true);
-                }
-                if (index->CheckFeature(vsag::IndexFeature::SUPPORT_CHECK_ID_EXIST)) {
-                    TestCheckIdExist(index, dataset);
-                }
-            }
+            TestBuildIndex(index, dataset, true);
+            TestGeneral(index, dataset, search_param, recall);
             vsag::Options::Instance().set_block_size_limit(origin_size);
         }
     }
@@ -242,26 +227,12 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::BruteForceTestIndex, "BruteForce Add", "[
             auto param =
                 GenerateBruteForceBuildParametersString(metric_type, dim, base_quantization_str);
             auto index = TestFactory(name, param, true);
+            auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
+            TestAddIndex(index, dataset, true);
             if (index->CheckFeature(vsag::SUPPORT_ADD_FROM_EMPTY)) {
-                auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
-                TestAddIndex(index, dataset, true);
-                if (index->CheckFeature(vsag::SUPPORT_KNN_SEARCH)) {
-                    TestKnnSearch(index, dataset, search_param, recall, true);
-                    if (index->CheckFeature(vsag::SUPPORT_SEARCH_CONCURRENT)) {
-                        TestConcurrentKnnSearch(index, dataset, search_param, recall, true);
-                    }
-                }
-                if (index->CheckFeature(vsag::SUPPORT_RANGE_SEARCH)) {
-                    TestRangeSearch(index, dataset, search_param, recall, 10, true);
-                    TestRangeSearch(index, dataset, search_param, recall / 2.0, 5, true);
-                }
-                if (index->CheckFeature(vsag::SUPPORT_KNN_SEARCH_WITH_ID_FILTER)) {
-                    TestFilterSearch(index, dataset, search_param, recall, true);
-                }
-                if (index->CheckFeature(vsag::IndexFeature::SUPPORT_CHECK_ID_EXIST)) {
-                    TestCheckIdExist(index, dataset);
-                }
+                TestGeneral(index, dataset, search_param, recall);
             }
+
             vsag::Options::Instance().set_block_size_limit(origin_size);
         }
     }
@@ -282,25 +253,10 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::BruteForceTestIndex,
             auto param =
                 GenerateBruteForceBuildParametersString(metric_type, dim, base_quantization_str);
             auto index = TestFactory(name, param, true);
+            auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
+            TestConcurrentAdd(index, dataset, true);
             if (index->CheckFeature(vsag::SUPPORT_ADD_CONCURRENT)) {
-                auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
-                TestConcurrentAdd(index, dataset, true);
-                if (index->CheckFeature(vsag::SUPPORT_KNN_SEARCH)) {
-                    TestKnnSearch(index, dataset, search_param, recall, true);
-                    if (index->CheckFeature(vsag::SUPPORT_SEARCH_CONCURRENT)) {
-                        TestConcurrentKnnSearch(index, dataset, search_param, recall, true);
-                    }
-                }
-                if (index->CheckFeature(vsag::SUPPORT_RANGE_SEARCH)) {
-                    TestRangeSearch(index, dataset, search_param, recall, 10, true);
-                    TestRangeSearch(index, dataset, search_param, recall / 2.0, 5, true);
-                }
-                if (index->CheckFeature(vsag::SUPPORT_KNN_SEARCH_WITH_ID_FILTER)) {
-                    TestFilterSearch(index, dataset, search_param, recall, true);
-                }
-                if (index->CheckFeature(vsag::IndexFeature::SUPPORT_CHECK_ID_EXIST)) {
-                    TestCheckIdExist(index, dataset);
-                }
+                TestGeneral(index, dataset, search_param, recall);
             }
             vsag::Options::Instance().set_block_size_limit(origin_size);
         }
@@ -323,25 +279,14 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::BruteForceTestIndex,
                 GenerateBruteForceBuildParametersString(metric_type, dim, base_quantization_str);
             auto index = TestFactory(name, param, true);
 
-            if (index->CheckFeature(vsag::SUPPORT_BUILD)) {
-                auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
-                TestBuildIndex(index, dataset, true);
-                if (index->CheckFeature(vsag::SUPPORT_SERIALIZE_FILE) and
-                    index->CheckFeature(vsag::SUPPORT_DESERIALIZE_FILE)) {
-                    auto index2 = TestFactory(name, param, true);
-                    TestSerializeFile(index, index2, dataset, search_param, true);
-                }
-                if (index->CheckFeature(vsag::SUPPORT_SERIALIZE_BINARY_SET) and
-                    index->CheckFeature(vsag::SUPPORT_DESERIALIZE_BINARY_SET)) {
-                    auto index2 = TestFactory(name, param, true);
-                    TestSerializeBinarySet(index, index2, dataset, search_param, true);
-                }
-                if (index->CheckFeature(vsag::SUPPORT_SERIALIZE_FILE) and
-                    index->CheckFeature(vsag::SUPPORT_DESERIALIZE_READER_SET)) {
-                    auto index2 = TestFactory(name, param, true);
-                    TestSerializeReaderSet(index, index2, dataset, search_param, name, true);
-                }
-            }
+            auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
+            TestBuildIndex(index, dataset, true);
+            auto index2 = TestFactory(name, param, true);
+            TestSerializeFile(index, index2, dataset, search_param, true);
+            index2 = TestFactory(name, param, true);
+            TestSerializeBinarySet(index, index2, dataset, search_param, true);
+            index2 = TestFactory(name, param, true);
+            TestSerializeReaderSet(index, index2, dataset, search_param, name, true);
             vsag::Options::Instance().set_block_size_limit(origin_size);
         }
     }
@@ -385,12 +330,8 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::BruteForceTestIndex,
             GenerateBruteForceBuildParametersString(metric_type, dim, base_quantization_str, 1);
         auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
         auto index = TestFactory(name, param, true);
-        if (index->CheckFeature(vsag::SUPPORT_BUILD)) {
-            TestBuildIndex(index, dataset, true);
-            if (index->CheckFeature(vsag::SUPPORT_CAL_DISTANCE_BY_ID)) {
-                TestCalcDistanceById(index, dataset);
-            }
-        }
+        TestBuildIndex(index, dataset, true);
+        TestCalcDistanceById(index, dataset);
         vsag::Options::Instance().set_block_size_limit(origin_size);
     }
 }
@@ -410,26 +351,9 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::BruteForceTestIndex,
             auto param =
                 GenerateBruteForceBuildParametersString(metric_type, dim, base_quantization_str);
             auto index = TestFactory(name, param, true);
-            if (index->CheckFeature(vsag::SUPPORT_BUILD)) {
-                auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
-                TestDuplicateAdd(index, dataset);
-                if (index->CheckFeature(vsag::SUPPORT_KNN_SEARCH)) {
-                    TestKnnSearch(index, dataset, search_param, recall, true);
-                    if (index->CheckFeature(vsag::SUPPORT_SEARCH_CONCURRENT)) {
-                        TestConcurrentKnnSearch(index, dataset, search_param, recall, true);
-                    }
-                }
-                if (index->CheckFeature(vsag::SUPPORT_RANGE_SEARCH)) {
-                    TestRangeSearch(index, dataset, search_param, recall, 10, true);
-                    TestRangeSearch(index, dataset, search_param, recall / 2.0, 5, true);
-                }
-                if (index->CheckFeature(vsag::SUPPORT_KNN_SEARCH_WITH_ID_FILTER)) {
-                    TestFilterSearch(index, dataset, search_param, recall, true);
-                }
-                if (index->CheckFeature(vsag::IndexFeature::SUPPORT_CHECK_ID_EXIST)) {
-                    TestCheckIdExist(index, dataset);
-                }
-            }
+            auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
+            TestDuplicateAdd(index, dataset);
+            TestGeneral(index, dataset, search_param, recall);
             vsag::Options::Instance().set_block_size_limit(origin_size);
         }
     }
