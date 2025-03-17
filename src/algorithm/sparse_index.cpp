@@ -89,9 +89,9 @@ SparseIndex::Add(const DatasetPtr& base) {
 
     for (int64_t i = 0; i < data_num; ++i) {
         const auto& vector = sparse_vectors[i];
-        auto size = (vector.len_ + 1) * sizeof(uint32_t); // vector index + array size
-        size += (vector.len_) * sizeof(float); // vector value
-        datas_[i + cur_element_count_] = (uint32_t*) allocator_->Allocate(size);
+        auto size = (vector.len_ + 1) * sizeof(uint32_t);  // vector index + array size
+        size += (vector.len_) * sizeof(float);             // vector value
+        datas_[i + cur_element_count_] = (uint32_t*)allocator_->Allocate(size);
         datas_[i + cur_element_count_][0] = vector.len_;
         auto* data = datas_[i + cur_element_count_] + 1;
         label_table_->Insert(i + cur_element_count_, ids[i]);
