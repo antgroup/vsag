@@ -81,16 +81,17 @@ SparseIndex::Add(const DatasetPtr& base) {
     }
 
     if (max_capacity_ < data_num + cur_element_count_) {
-        auto new_capacity = std::min(MAX_CAPACITY_EXTEND, max_capacity_);
-        new_capacity =
-            std::max(data_num + cur_element_count_ - max_capacity_, new_capacity) + max_capacity_;
+        auto extend_size = std::min(MAX_CAPACITY_EXTEND, max_capacity_);
+        auto new_capacity =
+            std::max(data_num + cur_element_count_ - max_capacity_, extend_size) + max_capacity_;
         resize(new_capacity);
     }
 
     for (int64_t i = 0; i < data_num; ++i) {
         const auto& vector = sparse_vectors[i];
-        datas_[i + cur_element_count_] =
-            (uint32_t*)allocator_->Allocate((2 * vector.len_ + 1) * sizeof(uint32_t));
+        auto size = (vector.len_ + 1) * sizeof(uint32_t); // vector index + array size
+        size += (vector.len_) * sizeof(float); // vector value
+        datas_[i + cur_element_count_] = (uint32_t*) allocator_->Allocate(size);
         datas_[i + cur_element_count_][0] = vector.len_;
         auto* data = datas_[i + cur_element_count_] + 1;
         label_table_->Insert(i + cur_element_count_, ids[i]);
