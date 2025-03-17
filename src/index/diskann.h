@@ -41,6 +41,7 @@
 
 #include "common.h"
 #include "diskann_zparameters.h"
+#include "index_feature_list.h"
 #include "logger.h"
 #include "typing.h"
 #include "utils/window_result_queue.h"
@@ -161,12 +162,7 @@ public:
     GetStats() const override;
 
     bool
-    CheckFeature(IndexFeature feature) const override {
-        if (feature == SUPPORT_RANGE_SEARCH_WITH_ID_FILTER) {
-            return true;
-        }
-        return false;
-    }
+    CheckFeature(IndexFeature feature) const override;
 
 private:
     tl::expected<std::vector<int64_t>, Error>
@@ -219,6 +215,9 @@ private:
     tl::expected<void, Error>
     load_disk_index(const BinarySet& binary_set);
 
+    void
+    init_feature_list();
+
 private:
     std::shared_ptr<LocalFileReader> reader_;
     std::shared_ptr<diskann::PQFlashIndex<float, int64_t>> index_;
@@ -230,6 +229,8 @@ private:
     std::stringstream graph_stream_;
 
     const IndexCommonParam index_common_param_;
+
+    IndexFeatureListPtr feature_list_{nullptr};
 
     std::function<void(const std::vector<read_request>&, bool, CallBack)> batch_read_;
     diskann::Metric metric_;

@@ -202,6 +202,8 @@ DiskANN::DiskANN(DiskannParameters& diskann_params, const IndexCommonParam& inde
                  static_cast<uint64_t>(std::ceil(static_cast<float>(R_) * GRAPH_SLACK + 1)) *
                      sizeof(uint32_t)) *
             VECTOR_PER_BLOCK);
+    this->feature_list_ = std::make_shared<IndexFeatureList>();
+    this->init_feature_list();
 }
 
 tl::expected<std::vector<int64_t>, Error>
@@ -1041,6 +1043,25 @@ DiskANN::load_disk_index(const BinarySet& binary_set) {
         graph_stream_.str("");
     }
     return {};
+}
+
+bool
+DiskANN::CheckFeature(IndexFeature feature) const {
+    return this->feature_list_->CheckFeature(feature);
+}
+void
+DiskANN::init_feature_list() {
+    this->feature_list_->SetFeatures({
+        SUPPORT_BUILD,
+        SUPPORT_SERIALIZE_BINARY_SET,
+        SUPPORT_DESERIALIZE_BINARY_SET,
+        SUPPORT_DESERIALIZE_BINARY_SET,
+        SUPPORT_SEARCH_CONCURRENT,
+        SUPPORT_KNN_SEARCH,
+        SUPPORT_KNN_SEARCH_WITH_ID_FILTER,
+        SUPPORT_RANGE_SEARCH,
+        SUPPORT_RANGE_SEARCH_WITH_ID_FILTER,
+    });
 }
 
 }  // namespace vsag
