@@ -57,7 +57,9 @@ public:
     KnnSearch(const DatasetPtr& query,
               int64_t k,
               const std::string& parameters,
-              const FilterPtr& filter) const override;
+              const FilterPtr& filter,
+              vsag::IteratorContextPtr* filter_ctx = nullptr,
+              bool is_last_filter = false) const override;
 
     DatasetPtr
     RangeSearch(const DatasetPtr& query,

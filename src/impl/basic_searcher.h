@@ -22,6 +22,7 @@
 #include "index/index_common_param.h"
 #include "lock_strategy.h"
 #include "utils/visited_list.h"
+#include "vsag/iterator_context.h"
 
 namespace vsag {
 
@@ -51,7 +52,8 @@ public:
            const FlattenInterfacePtr& flatten,
            const VisitedListPtr& vl,
            const float* query,
-           const InnerSearchParam& inner_search_param) const;
+           const InnerSearchParam& inner_search_param,
+           vsag::IteratorContextPtr* iter_ctx = nullptr) const;
 
 private:
     // rid means the neighbor's rank (e.g., the first neighbor's rid == 0)
@@ -71,7 +73,8 @@ private:
                 const FlattenInterfacePtr& flatten,
                 const VisitedListPtr& vl,
                 const float* query,
-                const InnerSearchParam& inner_search_param) const;
+                const InnerSearchParam& inner_search_param,
+                vsag::IteratorContextPtr* iter_ctx = nullptr) const;
 
 private:
     Allocator* allocator_{nullptr};

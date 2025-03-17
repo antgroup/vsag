@@ -71,7 +71,9 @@ public:
     KnnSearch(const DatasetPtr& query,
               int64_t k,
               const std::string& parameters,
-              const FilterPtr& filter) const override;
+              const FilterPtr& filter,
+              vsag::IteratorContextPtr* filter_ctx = nullptr,
+              bool is_last_filter = false) const override;
 
     [[nodiscard]] DatasetPtr
     RangeSearch(const DatasetPtr& query,
@@ -102,6 +104,9 @@ public:
 
     float
     CalcDistanceById(const float* query, int64_t id) const override;
+
+    tl::expected<void, Error>
+    getMinAndMaxId(int64_t& min_id, int64_t& max_id) const;
 
     DatasetPtr
     CalDistanceById(const float* query, const int64_t* ids, int64_t count) const override;
@@ -134,7 +139,8 @@ private:
     search_one_graph(const float* query,
                      const GraphInterfacePtr& graph,
                      const FlattenInterfacePtr& flatten,
-                     InnerSearchParam& inner_search_param) const;
+                     InnerSearchParam& inner_search_param,
+                     vsag::IteratorContextPtr* iter_ctx = nullptr) const;
     void
     serialize_basic_info(StreamWriter& writer) const;
 

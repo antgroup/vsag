@@ -142,7 +142,9 @@ DatasetPtr
 IVF::KnnSearch(const vsag::DatasetPtr& query,
                int64_t k,
                const std::string& parameters,
-               const vsag::FilterPtr& filter) const {
+               const vsag::FilterPtr& filter,
+               vsag::IteratorContextPtr* filter_ctx,
+               bool is_last_filter) const {
     auto* allocator = allocator_;
     MaxHeap heap(allocator);
     auto param = IVFSearchParameters::FromJson(parameters);

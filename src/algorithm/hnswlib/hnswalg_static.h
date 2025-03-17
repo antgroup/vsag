@@ -33,6 +33,7 @@
 #include "../../default_allocator.h"
 #include "hnswlib.h"
 #include "visited_list_pool.h"
+#include "vsag/iterator_context.h"
 
 namespace hnswlib {
 using tableint = vsag::InnerIdType;
@@ -260,6 +261,11 @@ public:
 
         float dist = fstdistfunc_(data_point, getDataByInternalId(internal_id), dist_func_param_);
         return dist;
+    }
+
+    void
+    getMinAndMaxId(int64_t& min_id, int64_t& max_id) override {
+        // donothing
     }
 
     tl::expected<vsag::DatasetPtr, vsag::Error>
@@ -1450,7 +1456,9 @@ public:
               size_t k,
               uint64_t ef,
               const vsag::FilterPtr is_id_allowed = nullptr,
-              const float skip_ratio = 0.9f) const override {
+              const float skip_ratio = 0.9f,
+              vsag::IteratorContextPtr* iter_ctx = nullptr,
+              bool is_last_filter = false) const override {
         std::priority_queue<std::pair<float, LabelType>> result;
         if (cur_element_count_ == 0)
             return result;

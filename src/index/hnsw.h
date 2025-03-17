@@ -34,6 +34,7 @@
 #include "data_type.h"
 #include "hnsw_zparameters.h"
 #include "impl/conjugate_graph.h"
+#include "index/iterator_filter.h"
 #include "index_common_param.h"
 #include "index_feature_list.h"
 #include "index_impl.h"
@@ -44,6 +45,7 @@
 #include "vsag/binaryset.h"
 #include "vsag/errors.h"
 #include "vsag/index.h"
+#include "vsag/iterator_context.h"
 #include "vsag/readerset.h"
 
 namespace vsag {
@@ -111,6 +113,17 @@ public:
     }
 
     tl::expected<DatasetPtr, Error>
+    KnnSearch(const DatasetPtr& query,
+              int64_t k,
+              const std::string& parameters,
+              const FilterPtr& filter,
+              vsag::IteratorContextPtr* filter_ctx,
+              bool is_last_search) const override {
+        SAFE_CALL(
+            return this->knn_search(query, k, parameters, filter, filter_ctx, is_last_search));
+    }
+
+    tl::expected<DatasetPtr, Error>
     RangeSearch(const DatasetPtr& query,
                 float radius,
                 const std::string& parameters,
@@ -157,6 +170,12 @@ public:
     virtual tl::expected<float, Error>
     CalcDistanceById(const float* vector, int64_t id) const override {
         SAFE_CALL(return alg_hnsw_->getDistanceByLabel(id, vector));
+    };
+
+    virtual tl::expected<void, Error>
+    GetMinAndMaxId(int64_t& min_id, int64_t& max_id) const override {
+        SAFE_CALL(alg_hnsw_->getMinAndMaxId(min_id, max_id));
+        return {};
     };
 
     virtual tl::expected<DatasetPtr, Error>
@@ -264,7 +283,9 @@ private:
     knn_search(const DatasetPtr& query,
                int64_t k,
                const std::string& parameters,
-               const FilterPtr& filter_ptr) const;
+               const FilterPtr& filter_ptr,
+               vsag::IteratorContextPtr* iter_ctx = nullptr,
+               bool is_last_filter = false) const;
 
     template <typename FilterType>
     tl::expected<DatasetPtr, Error>
