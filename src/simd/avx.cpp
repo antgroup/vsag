@@ -527,6 +527,15 @@ SQ8UniformComputeCodesIP(const uint8_t* codes1, const uint8_t* codes2, uint64_t 
 #endif
 }
 
+float
+RaBitQFloatBinaryIP(const float* vector, const uint8_t* bits, uint64_t dim, float inv_sqrt_d) {
+#if defined(ENABLE_AVX)
+    return sse::RaBitQFloatBinaryIP(vector, bits, dim, inv_sqrt_d);
+#else
+    return sse::RaBitQFloatBinaryIP(vector, bits, dim, inv_sqrt_d);
+#endif
+}
+
 void
 DivScalar(const float* from, float* to, uint64_t dim, float scalar) {
 #if defined(ENABLE_AVX)

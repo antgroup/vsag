@@ -238,7 +238,8 @@ RaBitQuantizer<metric>::EncodeOneImpl(const DataType* data, uint8_t* codes) cons
     }
 
     // 4. compute encode error
-    error_type error = RaBitQFloatBinaryIP(normed_data.data(), codes + offset_code_, this->dim_);
+    error_type error = RaBitQFloatBinaryIP(
+        normed_data.data(), codes + offset_code_, this->dim_, 1.0f / sqrt(this->dim_));
 
     // 5. store norm and error
     *(norm_type*)(codes + offset_norm_) = norm;
@@ -308,7 +309,8 @@ RaBitQuantizer<metric>::ComputeQueryBaseImpl(const uint8_t* query_codes,
         base_error = (base_error > 0) ? 1.0f : -1.0f;
     }
 
-    float ip_bq_1_32 = RaBitQFloatBinaryIP((DataType*)query_codes, base_codes, this->dim_);
+    float ip_bq_1_32 = RaBitQFloatBinaryIP(
+        (DataType*)query_codes, base_codes, this->dim_, 1.0f / sqrt(this->dim_));
     float ip_bb_1_32 = base_error;
     float ip_est = ip_bq_1_32 / ip_bb_1_32;
 

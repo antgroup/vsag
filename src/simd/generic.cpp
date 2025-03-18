@@ -379,8 +379,11 @@ SQ8UniformComputeCodesIP(const uint8_t* codes1, const uint8_t* codes2, uint64_t 
 }
 
 float
-RaBitQFloatBinaryIP(const float* vector, const uint8_t* bits, uint64_t dim) {
-    float inv_sqrt_d = 1.0f / std::sqrt(static_cast<float>(dim));
+RaBitQFloatBinaryIP(const float* vector, const uint8_t* bits, uint64_t dim, float inv_sqrt_d) {
+    if (dim == 0) {
+        return 0.0f;
+    }
+
     float result = 0.0f;
 
     for (std::size_t d = 0; d < dim; ++d) {
