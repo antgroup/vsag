@@ -265,7 +265,14 @@ public:
 
     void
     getMinAndMaxId(int64_t& min_id, int64_t& max_id) override {
-        // donothing
+        min_id = INT64_MAX;
+        max_id = INT64_MIN;
+        std::unique_lock<std::mutex> lock_table(label_lookup_lock);
+        for (auto it = label_lookup_.begin(); it != label_lookup_.end(); ++it) {
+            max_id = it->first > max_id ? it->first : max_id;
+            min_id = it->first < min_id ? it->first : min_id;
+        }
+        lock_table.unlock();
     }
 
     tl::expected<vsag::DatasetPtr, vsag::Error>

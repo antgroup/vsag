@@ -378,6 +378,90 @@ TestIndex::TestRangeSearch(const IndexPtr& index,
     REQUIRE(cur_recall > expected_recall * query_count * RECALL_THRESHOLD);
 }
 
+void
+TestIndex::TestKnnSearchIter(const IndexPtr& index,
+                             const TestDatasetPtr& dataset,
+                             const std::string& search_param,
+                             float expected_recall,
+                             bool expected_success) {
+    if (not index->CheckFeature(vsag::SUPPORT_RANGE_SEARCH)) {
+        return;
+    }
+    auto queries = dataset->query_;
+    auto query_count = queries->GetNumElements();
+    auto dim = queries->GetDim();
+    auto gts = dataset->ground_truth_;
+    auto gt_topK = dataset->top_k;
+    float cur_recall = 0.0f;
+    auto topk = gt_topK;
+    class MyFilter : public vsag::Filter {
+    public:
+        bool
+        CheckValid(int64_t id) const override {
+            return true;
+        }
+
+        float
+        ValidRatio() const override {
+            return 0.618f;
+        }
+    };
+    int64_t first_top = topk / 3;
+    int64_t second_top = topk / 3;
+    int64_t third_top = topk - first_top - second_top;
+    int64_t* ids = new int64_t[topk];
+    auto filter_object = std::make_shared<MyFilter>();
+    for (auto i = 0; i < query_count; ++i) {
+        vsag::IteratorContextPtr filter_ctx = nullptr;
+        int64_t element_cnt = index->GetNumElements();
+        if (element_cnt < 30) {
+            continue;
+        }
+        auto query = vsag::Dataset::Make();
+        query->NumElements(1)
+            ->Dim(dim)
+            ->Float32Vectors(queries->GetFloat32Vectors() + i * dim)
+            ->Paths(queries->GetPaths() + i)
+            ->Owner(false);
+        auto res =
+            index->KnnSearch(query, first_top, search_param, filter_object, &filter_ctx, false);
+        REQUIRE(res.has_value() == expected_success);
+        if (!expected_success) {
+            return;
+        }
+        int64_t get_cnt = res.value()->GetDim();
+        REQUIRE(res.value()->GetDim() == first_top);
+        memcpy(ids, res.value()->GetIds(), sizeof(int64_t) * first_top);
+        auto res2 =
+            index->KnnSearch(query, second_top, search_param, filter_object, &filter_ctx, false);
+        REQUIRE(res2.has_value() == expected_success);
+        if (!expected_success) {
+            return;
+        }
+        REQUIRE(res2.value()->GetDim() == second_top);
+        memcpy(ids + first_top, res2.value()->GetIds(), sizeof(int64_t) * second_top);
+        auto res3 =
+            index->KnnSearch(query, third_top, search_param, filter_object, &filter_ctx, true);
+        REQUIRE(res3.has_value() == expected_success);
+        if (!expected_success) {
+            return;
+        }
+        REQUIRE(res3.value()->GetDim() == third_top);
+        memcpy(ids + first_top + second_top, res3.value()->GetIds(), sizeof(int64_t) * third_top);
+        // auto result = res.value()->GetIds();
+        auto gt = gts->GetIds() + gt_topK * i;
+        auto val = Intersection(gt, gt_topK, ids, topk);
+        cur_recall += static_cast<float>(val) / static_cast<float>(gt_topK);
+    }
+    delete[] ids;
+    if (cur_recall <= expected_recall * query_count) {
+        WARN(fmt::format("cur_result({}) <= expected_recall * query_count({})",
+                         cur_recall,
+                         expected_recall * query_count));
+    }
+    REQUIRE(cur_recall > expected_recall * query_count * RECALL_THRESHOLD);
+}
+
 class FilterObj : public vsag::Filter {
 public:
     FilterObj(std::function<bool(int64_t)> filter_func, float valid_ratio)
@@ -508,6 +592,26 @@ TestIndex::TestBatchCalcDistanceById(const IndexPtr& index,
                              result.value()->GetDistances()[j]) < error);
         }
     }
+}
+
+void
+TestIndex::TestGetMinAndMaxId(const IndexPtr& index, const TestDatasetPtr& dataset) {
+    auto base_count = dataset->base_->GetNumElements();
+    auto dim = dataset->base_->GetDim();
+    auto build_index = index->Build(dataset->base_);
+    int64_t res_max_id = INT64_MIN;
+    int64_t res_min_id = INT64_MAX;
+    for (uint64_t j = 0; j < base_count; ++j) {
+        res_max_id =
+            res_max_id > dataset->base_->GetIds()[j] ? res_max_id : dataset->base_->GetIds()[j];
+        res_min_id =
+            res_min_id < dataset->base_->GetIds()[j] ? res_min_id : dataset->base_->GetIds()[j];
+    }
+    int64_t min_id;
+    int64_t max_id;
+    index->GetMinAndMaxId(min_id, max_id);
+    REQUIRE(min_id == res_min_id);
+    REQUIRE(max_id == res_max_id);
 }
 
 void

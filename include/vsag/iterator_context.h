@@ -21,7 +21,7 @@ class IteratorContext {
 public:
     virtual ~IteratorContext() = default;
     virtual void
-    AddDiscardNode(float dis, uint32_t id) {};
+    AddDiscardNode(float dis, uint32_t id){};
     virtual uint32_t
     GetTopID() {
         return 0;
@@ -31,7 +31,7 @@ public:
         return 0;
     };
     virtual void
-    PopDiscard() {};
+    PopDiscard(){};
     virtual bool
     Empty() {
         return true;
@@ -41,9 +41,9 @@ public:
         return true;
     };
     virtual void
-    SetOFFFirstUsed() {};
+    SetOFFFirstUsed(){};
     virtual void
-    SetPoint(uint32_t id) {};
+    SetPoint(uint32_t id){};
     virtual bool
     CheckPoint(uint32_t id) {
         return false;
