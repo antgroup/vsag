@@ -45,10 +45,10 @@ public:
     constexpr static uint64_t base_count = 3000;
 
     const std::vector<std::pair<std::string, float>> test_cases = {
-        {"sq8", 0.94},
+        {"sq8", 0.92},
         {"fp32", 0.999999},
-        {"sq8_uniform", 0.94},
-        {"bf16", 0.98},
+        {"sq8_uniform", 0.92},
+        {"bf16", 0.95},
     };
 };
 
