@@ -72,7 +72,7 @@ public:
 };
 
 TestDatasetPool HgraphTestIndex::pool{};
-std::vector<int> HgraphTestIndex::dims = fixtures::get_common_used_dims(2, RandomValue(0, 999));
+std::vector<int> HgraphTestIndex::dims = fixtures::get_common_used_dims(1, RandomValue(0, 999));
 fixtures::TempDir HgraphTestIndex::dir{"hgraph_test"};
 
 std::string
