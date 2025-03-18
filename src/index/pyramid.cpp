@@ -118,7 +118,6 @@ IndexNode::Deserialize(StreamReader& reader) {
         AddChild(key);
         children_[key]->Deserialize(reader);
     }
-    StreamReader::ReadObj(reader, has_index_);
 }
 
 void
@@ -142,11 +141,10 @@ IndexNode::Serialize(StreamWriter& writer) const {
         // calculate size of `content`
         item.second->Serialize(writer);
     }
-    StreamWriter::WriteObj(writer, has_index_);
 }
 void
 IndexNode::InitGraph() {
-    graph_ = GraphInterface::MakeInstance(graph_param_, *common_param_, true);
+    graph_ = GraphInterface::MakeInstance(graph_param_, *common_param_, /*is_sparse=*/true);
 }
 
 MaxHeap
