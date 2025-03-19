@@ -22,6 +22,9 @@
 
 namespace vsag::eval {
 
+constexpr static const char* DENSE_VECTORS = "dense_vectors";
+constexpr static const char* SPARSE_VECTORS = "sparse_vectors";
+
 template <class T = std::string>
 T
 check_exist_and_get_value(const YAML::Node& node, const std::string& key) {

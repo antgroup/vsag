@@ -58,7 +58,7 @@ GenerateSparseVectors(
     uint32_t count, uint32_t max_dim, uint32_t max_id, float min_val, float max_val, int seed) {
     std::mt19937 rng(seed);
     std::uniform_real_distribution<float> distrib_real(min_val, max_val);
-    std::uniform_int_distribution<int> distrib_dim(0, max_dim);
+    std::uniform_int_distribution<int> distrib_dim(max_dim / 2, max_dim);
     std::uniform_int_distribution<int> distrib_id(0, max_id);
 
     std::vector<vsag::SparseVector> sparse_vectors(count);
@@ -67,8 +67,14 @@ GenerateSparseVectors(
         sparse_vectors[i].len_ = distrib_dim(rng);
         sparse_vectors[i].ids_ = new uint32_t[sparse_vectors[i].len_];
         sparse_vectors[i].vals_ = new float[sparse_vectors[i].len_];
+        std::unordered_set<uint32_t> unique_ids;
         for (int d = 0; d < sparse_vectors[i].len_; d++) {
-            sparse_vectors[i].ids_[d] = distrib_id(rng);
+            auto u_id = distrib_id(rng);
+            while (unique_ids.count(u_id) > 0) {
+                u_id = distrib_id(rng);
+            }
+            unique_ids.insert(u_id);
+            sparse_vectors[i].ids_[d] = u_id;
             sparse_vectors[i].vals_[d] = distrib_real(rng);
         }
     }

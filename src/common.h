@@ -37,3 +37,6 @@
     } while (0);
 
 #define ROW_ID_MASK 0xFFFFFFFFLL
+
+constexpr static const int64_t INIT_CAPACITY = 10;
+constexpr static const int64_t MAX_CAPACITY_EXTEND = 10000;

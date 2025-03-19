@@ -156,10 +156,14 @@ SearchEvalCase::do_knn_search() {
             auto query = vsag::Dataset::Make();
             query->NumElements(1)->Dim(this->dataset_ptr_->GetDim())->Owner(false);
             const void* query_vector = this->dataset_ptr_->GetOneTest(i);
-            if (this->dataset_ptr_->GetTestDataType() == vsag::DATATYPE_FLOAT32) {
-                query->Float32Vectors((const float*)query_vector);
-            } else if (this->dataset_ptr_->GetTestDataType() == vsag::DATATYPE_INT8) {
-                query->Int8Vectors((const int8_t*)query_vector);
+            if (this->dataset_ptr_->GetVectorType() == DENSE_VECTORS) {
+                if (this->dataset_ptr_->GetTestDataType() == vsag::DATATYPE_FLOAT32) {
+                    query->Float32Vectors((const float*)query_vector);
+                } else if (this->dataset_ptr_->GetTestDataType() == vsag::DATATYPE_INT8) {
+                    query->Int8Vectors((const int8_t*)query_vector);
+                }
+            } else {
+                query->SparseVectors((const SparseVector*)query_vector);
             }
             auto result = this->index_->KnnSearch(query, topk, config_.search_param);
             if (not result.has_value()) {

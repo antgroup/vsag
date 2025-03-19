@@ -58,10 +58,14 @@ BuildEvalCase::do_build() {
     std::vector<int64_t> ids(total_base);
     std::iota(ids.begin(), ids.end(), 0);
     base->NumElements(total_base)->Dim(this->dataset_ptr_->GetDim())->Ids(ids.data())->Owner(false);
-    if (this->dataset_ptr_->GetTrainDataType() == vsag::DATATYPE_FLOAT32) {
-        base->Float32Vectors((const float*)this->dataset_ptr_->GetTrain());
-    } else if (this->dataset_ptr_->GetTrainDataType() == vsag::DATATYPE_INT8) {
-        base->Int8Vectors((const int8_t*)this->dataset_ptr_->GetTrain());
+    if (this->dataset_ptr_->GetVectorType() == DENSE_VECTORS) {
+        if (this->dataset_ptr_->GetTrainDataType() == vsag::DATATYPE_FLOAT32) {
+            base->Float32Vectors((const float*)this->dataset_ptr_->GetTrain());
+        } else if (this->dataset_ptr_->GetTrainDataType() == vsag::DATATYPE_INT8) {
+            base->Int8Vectors((const int8_t*)this->dataset_ptr_->GetTrain());
+        }
+    } else {
+        base->SparseVectors((const SparseVector*)this->dataset_ptr_->GetTrain());
     }
     for (auto& monitor : monitors_) {
         monitor->Start();
