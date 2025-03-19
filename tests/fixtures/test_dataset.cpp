@@ -43,6 +43,28 @@ is_path_belong_to(const std::string& a, const std::string& b) {
     return b.compare(0, a.size(), a) == 0;
 }
 
+float
+get_sparse_distance(const vsag::SparseVector& vec1, const vsag::SparseVector& vec2) {
+    if (vec1.len_ == 0 || vec2.len_ == 0) {
+        return 0.0f;
+    }
+
+    std::unordered_map<uint32_t, float> id_to_val;
+    for (uint32_t i = 0; i < vec1.len_; ++i) {
+        id_to_val[vec1.ids_[i]] = vec1.vals_[i];
+    }
+
+    float distance = 0.0f;
+    for (uint32_t i = 0; i < vec2.len_; ++i) {
+        const auto& id = vec2.ids_[i];
+        auto it = id_to_val.find(id);
+        if (it != id_to_val.end()) {
+            distance += it->second * vec2.vals_[i];
+        }
+    }
+    return 1 - distance;
+}
+
 std::string
 create_random_string(bool is_full) {
     const std::vector<std::string> level1 = {"a", "b", "c"};
@@ -103,6 +125,7 @@ GenerateRandomDataset(uint64_t dim,
         ->Float32Vectors(CopyVector(vecs))
         ->Int8Vectors(CopyVector(vecs_int8))
         ->Paths(paths)
+        ->SparseVectors(CopyVector(GenerateSparseVectors(count)))
         ->NumElements(count)
         ->Owner(true);
     return base;
@@ -142,7 +165,8 @@ GenerateNanRandomDataset(uint64_t dim, uint64_t count, std::string metric_str = 
 static std::pair<float*, int64_t*>
 CalDistanceFloatMetrix(const vsag::DatasetPtr query,
                        const vsag::DatasetPtr base,
-                       std::string metric_str) {
+                       const std::string& metric_str,
+                       const std::string& vector_type = "dense") {
     uint64_t query_count = query->GetNumElements();
     uint64_t base_count = base->GetNumElements();
 
@@ -167,8 +191,16 @@ CalDistanceFloatMetrix(const vsag::DatasetPtr query,
     for (uint64_t i = 0; i < query_count; ++i) {
         MaxHeap heap;
         for (uint64_t j = 0; j < base_count; ++j) {
-            auto dist = dist_func(
-                query->GetFloat32Vectors() + dim * i, base->GetFloat32Vectors() + dim * j, dim);
+            float dist;
+            if (vector_type == "dense") {
+                dist = dist_func(
+                    query->GetFloat32Vectors() + dim * i, base->GetFloat32Vectors() + dim * j, dim);
+            } else if (vector_type == "sparse") {
+                dist =
+                    get_sparse_distance(query->GetSparseVectors()[i], base->GetSparseVectors()[j]);
+            } else {
+                throw std::runtime_error("no such vector type");
+            }
             heap.emplace(dist, base->GetIds()[j]);
         }
         auto idx = 0;
@@ -262,8 +294,12 @@ CalGroundTruthWithPath(const std::pair<float*, int64_t*>& result,
 }
 
 TestDatasetPtr
-TestDataset::CreateTestDataset(
-    uint64_t dim, uint64_t count, std::string metric_str, bool with_path, float valid_ratio) {
+TestDataset::CreateTestDataset(uint64_t dim,
+                               uint64_t count,
+                               std::string metric_str,
+                               bool with_path,
+                               float valid_ratio,
+                               std::string vector_type) {
     TestDatasetPtr dataset = std::shared_ptr<TestDataset>(new TestDataset);
     dataset->dim_ = dim;
     dataset->count_ = count;
@@ -274,7 +310,8 @@ TestDataset::CreateTestDataset(
     dataset->range_query_ = dataset->query_;
     dataset->valid_ratio_ = valid_ratio;
     {
-        auto result = CalDistanceFloatMetrix(dataset->query_, dataset->base_, metric_str);
+        auto result =
+            CalDistanceFloatMetrix(dataset->query_, dataset->base_, metric_str, vector_type);
         dataset->top_k = 10;
 
         dataset->filter_function_ = [valid_ratio, count](int64_t id) -> bool {

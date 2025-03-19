@@ -270,6 +270,7 @@ TestIndex::TestContinueAdd(const IndexPtr& index,
         ->NumElements(temp_count)
         ->Float32Vectors(dataset->base_->GetFloat32Vectors())
         ->Paths(dataset->base_->GetPaths())
+        ->SparseVectors(dataset->base_->GetSparseVectors())
         ->Owner(false);
     index->Build(temp_dataset);
     for (uint64_t j = temp_count; j < base_count; ++j) {
@@ -279,6 +280,7 @@ TestIndex::TestContinueAdd(const IndexPtr& index,
             ->NumElements(1)
             ->Float32Vectors(dataset->base_->GetFloat32Vectors() + j * dim)
             ->Paths(dataset->base_->GetPaths() + j)
+            ->SparseVectors(dataset->base_->GetSparseVectors() + j)
             ->Owner(false);
         auto add_index = index->Add(data_one);
         if (expected_success) {
@@ -312,6 +314,7 @@ TestIndex::TestKnnSearch(const IndexPtr& index,
         query->NumElements(1)
             ->Dim(dim)
             ->Float32Vectors(queries->GetFloat32Vectors() + i * dim)
+            ->SparseVectors(queries->GetSparseVectors() + i)
             ->Paths(queries->GetPaths() + i)
             ->Owner(false);
         auto res = index->KnnSearch(query, topk, search_param);
@@ -355,6 +358,7 @@ TestIndex::TestRangeSearch(const IndexPtr& index,
         query->NumElements(1)
             ->Dim(dim)
             ->Float32Vectors(queries->GetFloat32Vectors() + i * dim)
+            ->SparseVectors(queries->GetSparseVectors() + i)
             ->Paths(queries->GetPaths() + i)
             ->Owner(false);
         auto res = index->RangeSearch(query, radius[i], search_param, limited_size);
@@ -421,6 +425,7 @@ TestIndex::TestFilterSearch(const TestIndex::IndexPtr& index,
         query->NumElements(1)
             ->Dim(dim)
             ->Float32Vectors(queries->GetFloat32Vectors() + i * dim)
+            ->SparseVectors(queries->GetSparseVectors() + i)
             ->Paths(queries->GetPaths() + i)
             ->Owner(false);
         tl::expected<DatasetPtr, vsag::Error> res;
@@ -541,6 +546,7 @@ TestIndex::TestSerializeFile(const IndexPtr& index_from,
         query->NumElements(1)
             ->Dim(dim)
             ->Paths(queries->GetPaths() + i)
+            ->SparseVectors(queries->GetSparseVectors() + i)
             ->Float32Vectors(queries->GetFloat32Vectors() + i * dim)
             ->Owner(false);
         auto res_from = index_from->KnnSearch(query, topk, search_param);
@@ -629,6 +635,7 @@ TestIndex::TestSerializeBinarySet(const IndexPtr& index_from,
         query->NumElements(1)
             ->Dim(dim)
             ->Paths(queries->GetPaths() + i)
+            ->SparseVectors(queries->GetSparseVectors() + i)
             ->Float32Vectors(queries->GetFloat32Vectors() + i * dim)
             ->Owner(false);
         auto res_from = index_from->KnnSearch(query, topk, search_param);
@@ -672,6 +679,7 @@ TestIndex::TestSerializeReaderSet(const IndexPtr& index_from,
         query->NumElements(1)
             ->Dim(dim)
             ->Paths(queries->GetPaths() + i)
+            ->SparseVectors(queries->GetSparseVectors() + i)
             ->Float32Vectors(queries->GetFloat32Vectors() + i * dim)
             ->Owner(false);
         auto res_from = index_from->KnnSearch(query, topk, search_param);
