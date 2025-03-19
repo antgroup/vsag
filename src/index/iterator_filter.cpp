@@ -100,7 +100,7 @@ IteratorFilterContext::CheckPoint(InnerIdType id) {
 
 int64_t
 IteratorFilterContext::GetDiscardElementNum() {
-    return discard_->size();
+    return int64_t(discard_->size());
 }
 
 };  // namespace vsag

@@ -72,7 +72,7 @@ public:
               int64_t k,
               const std::string& parameters,
               const FilterPtr& filter,
-              vsag::IteratorContextPtr* filter_ctx = nullptr,
+              vsag::IteratorContextPtr* iter_ctx = nullptr,
               bool is_last_filter = false) const override;
 
     [[nodiscard]] DatasetPtr

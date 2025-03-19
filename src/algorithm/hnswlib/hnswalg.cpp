@@ -185,9 +185,9 @@ HierarchicalNSW::getMinAndMaxId(int64_t& min_id, int64_t& max_id) {
     min_id = INT64_MAX;
     max_id = INT64_MIN;
     std::shared_lock lock_table(label_lookup_lock_);
-    for (auto it = label_lookup_.begin(); it != label_lookup_.end(); ++it) {
-        max_id = it->first > max_id ? it->first : max_id;
-        min_id = it->first < min_id ? it->first : min_id;
+    for (auto& it : label_lookup_) {
+        max_id = it.first > max_id ? it.first : max_id;
+        min_id = it.first < min_id ? it.first : min_id;
     }
 }
 
@@ -442,7 +442,8 @@ HierarchicalNSW::searchBaseLayerST(InnerIdType ep_id,
     MaxHeap candidate_set(allocator_);
 
     float valid_ratio = is_id_allowed ? is_id_allowed->ValidRatio() : 1.0F;
-    float skip_threshold = 1 - ((1 - valid_ratio) * skip_ratio);
+    float skip_threshold = valid_ratio == 1.0f ? 0 : (1 - ((1 - valid_ratio) * skip_ratio));
+    ;
 
     float lower_bound;
     if (iter_ctx != nullptr && !(*iter_ctx)->IsFirstUsed()) {

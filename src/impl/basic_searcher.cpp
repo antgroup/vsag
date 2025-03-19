@@ -45,7 +45,9 @@ BasicSearcher::visit(const GraphInterfacePtr& graph,
     }
 
     float skip_threshold =
-        (filter != nullptr ? (1 - ((1 - filter->ValidRatio()) * skip_ratio)) : 0.0F);
+        (filter != nullptr
+             ? (filter->ValidRatio() == 1.0f ? 0 : (1 - ((1 - filter->ValidRatio()) * skip_ratio)))
+             : 0.0F);
 
     for (uint32_t i = 0; i < prefetch_jump_visit_size_; i++) {
         vl->Prefetch(neighbors[i]);
@@ -115,8 +117,9 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
     Vector<float> line_dists(graph->MaximumDegree(), allocator_);
 
     if (iter_ctx != nullptr && !(*iter_ctx)->IsFirstUsed()) {
-        if ((*iter_ctx)->Empty())
+        if ((*iter_ctx)->Empty()) {
             return top_candidates;
+        }
         while (!(*iter_ctx)->Empty()) {
             uint32_t cur_inner_id = (*iter_ctx)->GetTopID();
             float cur_dist = (*iter_ctx)->GetTopDist();

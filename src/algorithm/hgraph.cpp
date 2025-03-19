@@ -486,11 +486,9 @@ HGraph::GetMinAndMaxId(int64_t& min_id, int64_t& max_id) const {
     min_id = INT64_MAX;
     max_id = INT64_MIN;
     std::shared_lock<std::shared_mutex> lock(this->label_lookup_mutex_);
-    for (auto it = this->label_table_->label_remap_.begin();
-         it != this->label_table_->label_remap_.end();
-         ++it) {
-        max_id = it->first > max_id ? it->first : max_id;
-        min_id = it->first < min_id ? it->first : min_id;
+    for (auto& it : this->label_table_->label_remap_) {
+        max_id = it.first > max_id ? it.first : max_id;
+        min_id = it.first < min_id ? it.first : min_id;
     }
     return {};
 }
