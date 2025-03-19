@@ -46,6 +46,7 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
       metric_(common_param.metric_),
       route_graphs_(common_param.allocator_.get()),
       use_reorder_(hgraph_param->use_reorder),
+      ignore_reorder_(hgraph_param->ignore_reorder),
       ef_construct_(hgraph_param->ef_construction),
       build_thread_count_(hgraph_param->build_thread_count) {
     neighbors_mutex_ = std::make_shared<PointsMutex>(0, common_param.allocator_.get());
@@ -193,7 +194,7 @@ HGraph::EstimateMemory(uint64_t num_elements) const {
         estimate_memory += block_memory_ceil(bottom_graph_memory, block_size);
     }
 
-    if (use_reorder_ && this->high_precise_codes_->InMemory()) {
+    if (use_reorder_ && this->high_precise_codes_->InMemory() && not this->ignore_reorder_) {
         auto precise_memory = this->high_precise_codes_->code_size_ * element_count;
         estimate_memory += block_memory_ceil(precise_memory, block_size);
     }
@@ -370,6 +371,9 @@ HGraph::serialize_basic_info(StreamWriter& writer) const {
 
 void
 HGraph::Serialize(StreamWriter& writer) const {
+    if (this->ignore_reorder_) {
+        this->use_reorder_ = false;
+    }
     this->serialize_basic_info(writer);
     this->basic_flatten_codes_->Serialize(writer);
     this->bottom_graph_->Serialize(writer);
@@ -675,6 +679,12 @@ static const ConstParamMap EXTERNAL_MAPPING = {
         },
     },
     {
+        HGRAPH_IGNORE_REORDER,
+        {
+            HGRAPH_IGNORE_REORDER_KEY,
+        },
+    },
+    {
         HGRAPH_BASE_QUANTIZATION_TYPE,
         {
             HGRAPH_BASE_CODES_KEY,
@@ -765,6 +775,7 @@ static const std::string HGRAPH_PARAMS_TEMPLATE =
     {
         "type": "{INDEX_TYPE_HGRAPH}",
         "{HGRAPH_USE_REORDER_KEY}": false,
+        "{HGRAPH_IGNORE_REORDER_KEY}": false,
         "{HGRAPH_GRAPH_KEY}": {
             "{IO_PARAMS_KEY}": {
                 "{IO_TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",

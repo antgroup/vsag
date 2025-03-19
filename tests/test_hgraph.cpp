@@ -556,3 +556,36 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex, "HGraph Estimate Memory"
         }
     }
 }
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex, "HGraph Ignore Reorder", "[ft][hgraph]") {
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    auto size = GENERATE(1024 * 1024 * 2);
+    auto metric_type = GENERATE("l2", "ip", "cosine");
+
+    const std::string name = "hgraph";
+    auto search_param = fmt::format(search_param_tmp, 200);
+    constexpr auto parameter_temp_reorder = R"(
+    {{
+        "dtype": "float32",
+        "metric_type": "{}",
+        "dim": {},
+        "index_param": {{
+            "use_reorder": true,
+            "base_quantization_type": "sq8",
+            "max_degree": 96,
+            "ef_construction": 400,
+            "precise_quantization_type": "fp32",
+            "ignore_reorder": true
+        }}
+    }}
+    )";
+    for (auto dim : dims) {
+        vsag::Options::Instance().set_block_size_limit(size);
+        auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
+        std::string param = fmt::format(parameter_temp_reorder, metric_type, dim);
+        auto index = TestFactory(name, param, true);
+        TestBuildIndex(index, dataset);
+        TestGeneral(index, dataset, search_param, 0.95);
+        vsag::Options::Instance().set_block_size_limit(origin_size);
+    }
+}
