@@ -24,9 +24,6 @@
 
 namespace vsag {
 
-constexpr static const int64_t INIT_CAPACITY = 10;
-constexpr static const int64_t MAX_CAPACITY_EXTEND = 10000;
-
 std::vector<std::string>
 split(const std::string& str, char delimiter) {
     std::vector<std::string> tokens;

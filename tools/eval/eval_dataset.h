@@ -21,9 +21,11 @@
 #include <unordered_set>
 
 #include "H5Cpp.h"
+#include "common.h"
 #include "nlohmann/json.hpp"
 #include "simd/basic_func.h"
 #include "vsag/constants.h"
+#include "vsag/dataset.h"
 
 namespace vsag::eval {
 
@@ -37,12 +39,20 @@ public:
 public:
     [[nodiscard]] const void*
     GetTrain() const {
-        return train_.get();
+        if (vector_type_ == DENSE_VECTORS) {
+            return train_.get();
+        } else {
+            return sparse_train_.data();
+        }
     }
 
     [[nodiscard]] const void*
     GetTest() const {
-        return test_.get();
+        if (vector_type_ == DENSE_VECTORS) {
+            return test_.get();
+        } else {
+            return sparse_test_.data();
+        }
     }
 
     [[nodiscard]] const std::shared_ptr<int64_t[]>
@@ -62,12 +72,20 @@ public:
 
     [[nodiscard]] const void*
     GetOneTrain(int64_t id) const {
-        return train_.get() + id * dim_ * train_data_size_;
+        if (vector_type_ == DENSE_VECTORS) {
+            return train_.get() + id * dim_ * train_data_size_;
+        } else {
+            return sparse_train_.data() + id;
+        }
     }
 
     [[nodiscard]] const void*
     GetOneTest(int64_t id) const {
-        return test_.get() + id * dim_ * test_data_size_;
+        if (vector_type_ == DENSE_VECTORS) {
+            return test_.get() + id * dim_ * test_data_size_;
+        } else {
+            return sparse_test_.data() + id;
+        }
     }
 
     [[nodiscard]] int64_t
@@ -118,6 +136,11 @@ public:
     }
 
     std::string
+    GetVectorType() const {
+        return vector_type_;
+    }
+
+    std::string
     GetFilePath() {
         return this->file_path_;
     }
@@ -139,6 +162,17 @@ public:
         result["dataset_info"] = temp;
         return result;
     };
+
+    ~EvalDataset() {
+        for (auto& i : sparse_train_) {
+            delete[] i.ids_;
+            delete[] i.vals_;
+        }
+        for (auto& i : sparse_test_) {
+            delete[] i.ids_;
+            delete[] i.vals_;
+        }
+    }
 
 private:
     using shape_t = std::pair<int64_t, int64_t>;
@@ -195,5 +229,10 @@ private:
     std::string train_data_type_;
     std::string test_data_type_;
     std::string file_path_;
+
+    std::vector<SparseVector> sparse_train_;
+    std::vector<SparseVector> sparse_test_;
+
+    std::string vector_type_ = DENSE_VECTORS;
 };
 }  // namespace vsag::eval
