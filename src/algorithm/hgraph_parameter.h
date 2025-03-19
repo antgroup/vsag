@@ -39,6 +39,7 @@ public:
     GraphInterfaceParamPtr bottom_graph_param{nullptr};
 
     bool use_reorder{false};
+    bool ignore_reorder{false};
     uint64_t ef_construction{400};
     uint64_t build_thread_count{100};
 
