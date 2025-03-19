@@ -170,7 +170,8 @@ private:
     Vector<GraphInterfacePtr> route_graphs_;
     GraphInterfacePtr bottom_graph_{nullptr};
 
-    bool use_reorder_{false};
+    mutable bool use_reorder_{false};
+    bool ignore_reorder_{false};
 
     BasicSearcherPtr searcher_;
 
