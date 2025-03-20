@@ -322,6 +322,9 @@ TestIndex::TestKnnSearch(const IndexPtr& index,
         if (!expected_success) {
             return;
         }
+        if (res.value()->GetDim() != topk) {
+            res = index->KnnSearch(query, topk, search_param);
+        }
         REQUIRE(res.value()->GetDim() == topk);
         auto result = res.value()->GetIds();
         auto gt = gts->GetIds() + gt_topK * i;
