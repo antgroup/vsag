@@ -41,6 +41,21 @@ PyramidParameters::FromJson(const JsonType& json) {
         this->flatten_data_cell_param->quantizer_parameter =
             std::make_shared<FP32QuantizerParameter>();
     }
+
+    if (json.contains(BUILD_EF_CONSTRUCTION)) {
+        this->ef_construction = json[BUILD_EF_CONSTRUCTION];
+    }
+
+    if (json.contains(NO_BUILD_LEVELS)) {
+        const auto& no_build_levels_json = json[NO_BUILD_LEVELS];
+        CHECK_ARGUMENT(no_build_levels_json.is_array(),
+                       fmt::format("build_without_levels must be a list of integers"));
+        for (const auto& item : no_build_levels_json) {
+            CHECK_ARGUMENT(item.is_number_integer(),
+                           "build_without_levels must be a list of integers");
+        }
+        this->no_build_levels = no_build_levels_json.get<std::vector<int32_t>>();
+    }
 }
 JsonType
 PyramidParameters::ToJson() {
@@ -48,6 +63,7 @@ PyramidParameters::ToJson() {
     json[GRAPH_TYPE_ODESCENT] = graph_param->ToJson();
     json[GRAPH_TYPE_ODESCENT].update(odescent_param->ToJson());
     json[PYRAMID_PARAMETER_BASE_CODES] = flatten_data_cell_param->ToJson();
+    json[NO_BUILD_LEVELS] = no_build_levels;
     return json;
 }
 
