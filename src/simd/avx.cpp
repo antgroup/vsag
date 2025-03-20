@@ -548,7 +548,7 @@ RaBitQFloatBinaryIP(const float* vector, const uint8_t* bits, uint64_t dim, floa
         for (int j = 0; j < 8; ++j) {
             int bit = (bits[d / 8] >> j) & 1;
             __m256 val = _mm256_set1_ps(bit ? 1.0f : 0.0f);
-            mask = _mm256_blend_ps(mask, val, 1 << j);
+            mask = _mm256_add_ps(mask, _mm256_mul_ps(val, _mm256_set1_ps(1 << j)));
         }
 
         __m256 b_vec = _mm256_add_ps(
