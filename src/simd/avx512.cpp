@@ -510,6 +510,10 @@ RaBitQFloatBinaryIP(const float* vector, const uint8_t* bits, uint64_t dim, floa
         return 0.0f;
     }
 
+    if (dim < 16) {
+        return avx2::RaBitQFloatBinaryIP(vector, bits, dim, inv_sqrt_d);
+    }
+
     uint64_t d = 0;
     __m512 sum = _mm512_setzero_ps();
     const __m512 inv_sqrt_d_vec = _mm512_set1_ps(inv_sqrt_d);

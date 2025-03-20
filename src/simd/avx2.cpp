@@ -574,6 +574,10 @@ RaBitQFloatBinaryIP(const float* vector, const uint8_t* bits, uint64_t dim, floa
         return 0.0f;
     }
 
+    if (dim < 8) {
+        return sse::RaBitQFloatBinaryIP(vector, bits, dim, inv_sqrt_d);
+    }
+
     uint64_t d = 0;
     float result = 0.0f;
     alignas(32) float temp[8];
