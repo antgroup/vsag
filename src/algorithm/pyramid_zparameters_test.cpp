@@ -15,8 +15,8 @@
 
 #include "algorithm/pyramid_zparameters.h"
 
-#include "catch2/catch_test_macros.hpp"
-#include "fixtures.h"
+#include <catch2/catch_test_macros.hpp>
+
 #include "parameter_test.h"
 
 TEST_CASE("Pyramid Parameters Test", "[ut][PyramidParameters]") {
