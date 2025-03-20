@@ -260,7 +260,6 @@ private:
 
 private:  // Request Statistics
     mutable std::mutex stats_mutex_;
-    std::shared_ptr<SafeThreadPool> pool_;
 
     mutable std::map<std::string, WindowResultQueue> result_queues_;
 };
