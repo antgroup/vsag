@@ -563,9 +563,8 @@ RaBitQFloatBinaryIP(const float* vector, const uint8_t* bits, uint64_t dim, floa
     }
 
     _mm256_store_ps(temp, sum);
-
-    for (int j = 0; j < 8; ++j) {
-        result += temp[j];
+    for (float val : temp) {
+        result += val;
     }
 
     result += sse::RaBitQFloatBinaryIP(vector + d, bits + d / 8, dim - d, inv_sqrt_d);
