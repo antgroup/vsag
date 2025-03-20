@@ -570,7 +570,7 @@ SQ8UniformComputeCodesIP(const uint8_t* codes1, const uint8_t* codes2, uint64_t 
 float
 RaBitQFloatBinaryIP(const float* vector, const uint8_t* bits, uint64_t dim, float inv_sqrt_d) {
 #if defined(ENABLE_AVX2)
-    if (dim == 0 || vector == nullptr || bits == nullptr) {
+    if (dim == 0) {
         return 0.0f;
     }
 
@@ -602,6 +602,7 @@ RaBitQFloatBinaryIP(const float* vector, const uint8_t* bits, uint64_t dim, floa
     }
 
     result += avx::RaBitQFloatBinaryIP(vector + d, bits + d / 8, dim - d, inv_sqrt_d);
+
     return result;
 #else
     return avx::RaBitQFloatBinaryIP(vector, bits, dim, inv_sqrt_d);
