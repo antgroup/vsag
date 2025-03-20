@@ -28,15 +28,27 @@ TEST_CASE("RaBitQ FP32-BQ SIMD Compute Codes", "[ut][simd]") {
     int64_t count = 100;
     for (const auto& dim : dims) {
         uint32_t code_size = (dim + 7) / 8;
+        float inv_sqrt_d = 1.0f / sqrt(dim);
         std::vector<float> queries;
         std::vector<uint8_t> bases;
         std::tie(queries, bases) = fixtures::GenerateBinaryVectorsAndCodes(count, dim);
         for (uint64_t i = 0; i < count; ++i) {
             auto* query = queries.data() + i * dim;
             auto* base = bases.data() + i * code_size;
-            auto ip_32_1 = RaBitQFloatBinaryIP(query, base, dim, 1.0f / sqrt(dim));
+
+            auto ip_32_1_generic = generic::RaBitQFloatBinaryIP(query, base, dim, inv_sqrt_d);
+            auto ip_32_1_sse = sse::RaBitQFloatBinaryIP(query, base, dim, inv_sqrt_d);
+            auto ip_32_1_avx = avx::RaBitQFloatBinaryIP(query, base, dim, inv_sqrt_d);
+            auto ip_32_1_avx2 = avx2::RaBitQFloatBinaryIP(query, base, dim, inv_sqrt_d);
+            auto ip_32_1_avx512 = avx512::RaBitQFloatBinaryIP(query, base, dim, inv_sqrt_d);
+
             auto ip_32_32 = FP32ComputeIP(query, query, dim);
-            REQUIRE(std::abs(ip_32_1 - ip_32_32) < 1e-4);
+
+            REQUIRE(std::abs(ip_32_1_generic - ip_32_32) < 1e-4);
+            REQUIRE(std::abs(ip_32_1_sse - ip_32_32) < 1e-4);
+            REQUIRE(std::abs(ip_32_1_avx - ip_32_32) < 1e-4);
+            REQUIRE(std::abs(ip_32_1_avx2 - ip_32_32) < 1e-4);
+            REQUIRE(std::abs(ip_32_1_avx512 - ip_32_32) < 1e-4);
         }
     }
 }
