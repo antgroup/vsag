@@ -322,9 +322,6 @@ TestIndex::TestKnnSearch(const IndexPtr& index,
         if (!expected_success) {
             return;
         }
-        if (res.value()->GetDim() != topk) {
-            res = index->KnnSearch(query, topk, search_param);
-        }
         REQUIRE(res.value()->GetDim() == topk);
         auto result = res.value()->GetIds();
         auto gt = gts->GetIds() + gt_topK * i;
@@ -450,12 +447,6 @@ TestIndex::TestFilterSearch(const TestIndex::IndexPtr& index,
             auto threshold = res.value()->GetDistances()[topk - 1];
             auto range_result =
                 index->RangeSearch(query, threshold, search_param, dataset->filter_function_);
-            if (range_result.value()->GetDim() < topk) {
-                int a = 1;
-                res = index->KnnSearch(query, topk, search_param, dataset->filter_function_);
-                range_result =
-                    index->RangeSearch(query, threshold, search_param, dataset->filter_function_);
-            }
             REQUIRE(range_result.value()->GetDim() >= topk);
         }
         auto result = res.value()->GetIds();
