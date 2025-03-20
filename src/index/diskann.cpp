@@ -95,18 +95,17 @@ public:
 
     void
     AsyncRead(uint64_t offset, uint64_t len, void* dest, CallBack callback) override {
-        if (pool_) {
-            pool_->GeneralEnqueue([this,  // NOLINT(clang-analyzer-cplusplus.NewDeleteLeaks)
-                                   offset,
-                                   len,
-                                   dest,
-                                   callback]() {
-                this->Read(offset, len, dest);
-                callback(IOErrorCode::IO_SUCCESS, "success");
-            });
-        } else {
-            throw std::runtime_error("LocalMemoryReader does not support AsyncRead");
+        if (not pool_) {
+            pool_ = SafeThreadPool::FactoryDefaultThreadPool();
         }
+        pool_->GeneralEnqueue([this,  // NOLINT(clang-analyzer-cplusplus.NewDeleteLeaks)
+                               offset,
+                               len,
+                               dest,
+                               callback]() {
+            this->Read(offset, len, dest);
+            callback(IOErrorCode::IO_SUCCESS, "success");
+        });
     }
 
     uint64_t
@@ -158,9 +157,6 @@ DiskANN::DiskANN(DiskannParameters& diskann_params, const IndexCommonParam& inde
       use_async_io_(diskann_params.use_async_io),
       diskann_params_(diskann_params),
       common_param_(index_common_param) {
-    if (not use_async_io_) {
-        pool_ = index_common_param_.thread_pool_;
-    }
     status_ = IndexStatus::EMPTY;
     batch_read_ = [&](const std::vector<read_request>& requests,
                       bool async,
@@ -171,24 +167,9 @@ DiskANN::DiskANN(DiskannParameters& diskann_params, const IndexCommonParam& inde
                 disk_layout_reader_->AsyncRead(offset, len, dest, callBack);
             }
         } else {
-            if (not pool_) {
-                for (const auto& req : requests) {
-                    auto [offset, len, dest] = req;
-                    disk_layout_reader_->Read(offset, len, dest);
-                }
-            } else {
-                std::vector<std::future<void>> futures;
-                for (const auto& req : requests) {
-                    auto future = pool_->GeneralEnqueue([&]() {
-                        auto [offset, len, dest] = req;
-                        disk_layout_reader_->Read(offset, len, dest);
-                    });
-                    futures.push_back(std::move(future));
-                }
-
-                for (auto& fut : futures) {
-                    fut.get();
-                }
+            for (const auto& req : requests) {
+                auto [offset, len, dest] = req;
+                disk_layout_reader_->Read(offset, len, dest);
             }
         }
     };
