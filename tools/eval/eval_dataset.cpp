@@ -134,18 +134,23 @@ EvalDataset::Load(const std::string& filename) {
     obj->number_of_base_ = train_shape.first;
     obj->number_of_query_ = test_shape.first;
 
-    try {
-        H5::Attribute attr = file.openAttribute("type");
-        H5::StrType str_type = attr.getStrType();
-        std::string type;
-        attr.read(str_type, type);
-        if (type == "dense") {
-            obj->vector_type_ = DENSE_VECTORS;
-        } else if (type == "sparse") {
-            obj->vector_type_ = SPARSE_VECTORS;
+    // compatible with the hdf5 files from internet
+    if (not file.attrExists("type")) {
+        obj->vector_type_ = DENSE_VECTORS;
+    } else {
+        try {
+            H5::Attribute attr = file.openAttribute("type");
+            H5::StrType str_type = attr.getStrType();
+            std::string type;
+            attr.read(str_type, type);
+            if (type == "dense") {
+                obj->vector_type_ = DENSE_VECTORS;
+            } else if (type == "sparse") {
+                obj->vector_type_ = SPARSE_VECTORS;
+            }
+        } catch (H5::Exception& err) {
+            throw std::runtime_error("fail to read metric: there is no 'type' in the dataset");
         }
-    } catch (H5::Exception& err) {
-        throw std::runtime_error("fail to read metric: there is no 'type' in the dataset");
     }
 
     try {
