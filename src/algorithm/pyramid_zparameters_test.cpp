@@ -13,10 +13,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "pyramid_zparameters.h"
+#include "algorithm/pyramid_zparameters.h"
 
-#include <catch2/catch_test_macros.hpp>
-
+#include "catch2/catch_test_macros.hpp"
 #include "fixtures.h"
 #include "parameter_test.h"
 
