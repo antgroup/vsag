@@ -20,8 +20,6 @@
 
 #include "fixtures.h"
 #include "fp32_simd.h"
-#include "iostream"
-#include "simd_status.h"
 
 using namespace vsag;
 

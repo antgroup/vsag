@@ -494,7 +494,7 @@ SQ8UniformComputeCodesIP(const uint8_t* codes1, const uint8_t* codes2, uint64_t 
 float
 RaBitQFloatBinaryIP(const float* vector, const uint8_t* bits, uint64_t dim, float inv_sqrt_d) {
 #if defined(ENABLE_SSE)
-    return generic::RaBitQFloatBinaryIP(vector, bits, dim, inv_sqrt_d);
+    return generic::RaBitQFloatBinaryIP(vector, bits, dim, inv_sqrt_d);  // TODO(zxy): implement
 #else
     return generic::RaBitQFloatBinaryIP(vector, bits, dim, inv_sqrt_d);
 #endif

@@ -530,7 +530,42 @@ SQ8UniformComputeCodesIP(const uint8_t* codes1, const uint8_t* codes2, uint64_t 
 float
 RaBitQFloatBinaryIP(const float* vector, const uint8_t* bits, uint64_t dim, float inv_sqrt_d) {
 #if defined(ENABLE_AVX)
-    return sse::RaBitQFloatBinaryIP(vector, bits, dim, inv_sqrt_d);
+    if (dim == 0) {
+        return 0.0f;
+    }
+
+    uint64_t d = 0;
+    float result = 0.0f;
+    alignas(32) float temp[8];
+    __m256 sum = _mm256_setzero_ps();
+    const __m256 inv_sqrt_d_vec = _mm256_set1_ps(inv_sqrt_d);
+    const __m256 neg_inv_sqrt_d_vec = _mm256_set1_ps(-inv_sqrt_d);
+
+    for (; d + 8 <= dim; d += 8) {
+        __m256 vec = _mm256_loadu_ps(vector + d);
+
+        __m256 mask = _mm256_setzero_ps();
+        for (int j = 0; j < 8; ++j) {
+            int bit = (bits[d / 8] >> j) & 1;
+            __m256 val = _mm256_set1_ps(bit ? 1.0f : 0.0f);
+            mask = _mm256_blend_ps(mask, val, 1 << j);
+        }
+
+        __m256 b_vec = _mm256_add_ps(
+            _mm256_mul_ps(mask, inv_sqrt_d_vec),
+            _mm256_mul_ps(_mm256_sub_ps(_mm256_set1_ps(1.0f), mask), neg_inv_sqrt_d_vec));
+
+        sum = _mm256_add_ps(_mm256_mul_ps(b_vec, vec), sum);
+    }
+
+    _mm256_store_ps(temp, sum);
+    for (float val : temp) {
+        result += val;
+    }
+
+    result += sse::RaBitQFloatBinaryIP(vector + d, bits + d / 8, dim - d, inv_sqrt_d);
+
+    return result;
 #else
     return sse::RaBitQFloatBinaryIP(vector, bits, dim, inv_sqrt_d);
 #endif
