@@ -199,4 +199,52 @@ InnerIndexInterface::CalDistanceById(const float* query, const int64_t* ids, int
     return result;
 }
 
+Vector<DatasetPtr>
+InnerIndexInterface::SplitDatasetByDuplicateLabel(const DatasetPtr& dataset,
+                                                  const LabelTablePtr& label_table,
+                                                  Allocator* allocator,
+                                                  std::vector<LabelType>& failed_ids) {
+    Vector<DatasetPtr> return_datasets(0, allocator);
+    auto count = dataset->GetNumElements();
+    auto dim = dataset->GetDim();
+    const auto* labels = dataset->GetIds();
+    const auto* vec = dataset->GetFloat32Vectors();
+    UnorderedSet<LabelType> temp_labels(allocator);
+
+    for (uint64_t i = 0; i < count; ++i) {
+        if (label_table->CheckLabel(labels[i]) or
+            temp_labels.find(labels[i]) != temp_labels.end()) {
+            failed_ids.emplace_back(i);
+            continue;
+        }
+        temp_labels.emplace(labels[i]);
+    }
+    failed_ids.emplace_back(count);
+
+    if (failed_ids.size() == 1) {
+        return_datasets.emplace_back(dataset);
+        return return_datasets;
+    }
+    int64_t start = -1;
+    for (auto end : failed_ids) {
+        if (end - start == 1) {
+            start = end;
+            continue;
+        }
+        auto new_dataset = Dataset::Make();
+        new_dataset->NumElements(end - start - 1)
+            ->Dim(dim)
+            ->Ids(labels + start + 1)
+            ->Float32Vectors(vec + dim * (start + 1))
+            ->Owner(false);
+        return_datasets.emplace_back(new_dataset);
+        start = end;
+    }
+    failed_ids.pop_back();
+    for (auto& failed_id : failed_ids) {
+        failed_id = labels[failed_id];
+    }
+    return return_datasets;
+}
+
 }  // namespace vsag
