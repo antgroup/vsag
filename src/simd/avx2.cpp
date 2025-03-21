@@ -567,6 +567,52 @@ SQ8UniformComputeCodesIP(const uint8_t* codes1, const uint8_t* codes2, uint64_t 
 #endif
 }
 
+float
+RaBitQFloatBinaryIP(const float* vector, const uint8_t* bits, uint64_t dim, float inv_sqrt_d) {
+#if defined(ENABLE_AVX2)
+    if (dim == 0) {
+        return 0.0f;
+    }
+
+    if (dim < 8) {
+        return sse::RaBitQFloatBinaryIP(vector, bits, dim, inv_sqrt_d);
+    }
+
+    uint64_t d = 0;
+    float result = 0.0f;
+    alignas(32) float temp[8];
+    __m256 sum = _mm256_setzero_ps();
+    const __m256 inv_sqrt_d_vec = _mm256_set1_ps(inv_sqrt_d);
+    const __m256 neg_inv_sqrt_d_vec = _mm256_set1_ps(-inv_sqrt_d);
+
+    for (; d + 8 <= dim; d += 8) {
+        __m256 vec = _mm256_loadu_ps(vector + d);
+
+        __m256i mask = _mm256_set1_epi32(static_cast<int>(bits[d / 8]));
+        mask = _mm256_and_si256(mask,
+                                _mm256_setr_epi32(0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80));
+        mask = _mm256_cmpeq_epi32(mask, _mm256_setzero_si256());
+        mask = _mm256_andnot_si256(mask, _mm256_set1_epi32(0xFFFFFFFF));
+
+        __m256 b_vec =
+            _mm256_blendv_ps(neg_inv_sqrt_d_vec, inv_sqrt_d_vec, _mm256_castsi256_ps(mask));
+
+        sum = _mm256_fmadd_ps(b_vec, vec, sum);
+    }
+
+    _mm256_storeu_ps(temp, sum);
+    for (float val : temp) {
+        result += val;
+    }
+
+    result += avx::RaBitQFloatBinaryIP(vector + d, bits + d / 8, dim - d, inv_sqrt_d);
+
+    return result;
+#else
+    return avx::RaBitQFloatBinaryIP(vector, bits, dim, inv_sqrt_d);
+#endif
+}
+
 void
 DivScalar(const float* from, float* to, uint64_t dim, float scalar) {
 #if defined(ENABLE_AVX2)
