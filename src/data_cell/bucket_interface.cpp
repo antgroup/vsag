@@ -55,6 +55,9 @@ make_instance(const BucketDataCellParamPtr& param, const IndexCommonParam& commo
     if (quantization_string == QUANTIZATION_TYPE_VALUE_BF16) {
         return make_instance<BF16Quantizer<metric>, IOTemp>(param, common_param);
     }
+    if (quantization_string == QUANTIZATION_TYPE_VALUE_FP16) {
+        return make_instance<FP16Quantizer<metric>, IOTemp>(param, common_param);
+    }
     return nullptr;
 }
 
