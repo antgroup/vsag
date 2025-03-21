@@ -184,7 +184,7 @@ SparseQuantizer<metric>::ComputeImpl(const uint8_t* codes1, const uint8_t* codes
             j++;
         }
     }
-    return -inner_product;
+    return 1 - inner_product;
 }
 
 template <MetricType metric>
