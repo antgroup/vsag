@@ -64,7 +64,7 @@ DiskANNTestIndex::GenerateDiskANNBuildParametersString(const std::string& metric
             "diskann": {{
                 "max_degree": 16,
                 "ef_construction": 200,
-                "pq_dims": 32,
+                "pq_dims": 64,
                 "pq_sample_rate": 0.5,
                 "use_pq_search": true,
                 "use_async_io": {},
