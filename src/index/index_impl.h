@@ -98,6 +98,17 @@ public:
         SAFE_CALL(return this->inner_index_->KnnSearch(query, k, parameters, filter));
     }
 
+    tl::expected<DatasetPtr, Error>
+    KnnSearch(const DatasetPtr& query,
+              int64_t k,
+              const std::string& parameters,
+              const FilterPtr& filter,
+              vsag::IteratorContextPtr* iter_ctx,
+              bool is_last_search) const override {
+        SAFE_CALL(return this->inner_index_->KnnSearch(
+            query, k, parameters, filter, iter_ctx, is_last_search));
+    }
+
     [[nodiscard]] tl::expected<DatasetPtr, Error>
     RangeSearch(const DatasetPtr& query,
                 float radius,
@@ -159,6 +170,11 @@ public:
     tl::expected<DatasetPtr, Error>
     CalDistanceById(const float* query, const int64_t* ids, int64_t count) const override {
         SAFE_CALL(return this->inner_index_->CalDistanceById(query, ids, count));
+    }
+
+    tl::expected<void, Error>
+    GetMinAndMaxId(int64_t& min_id, int64_t& max_id) const override {
+        SAFE_CALL(return this->inner_index_->GetMinAndMaxId(min_id, max_id));
     }
 
     tl::expected<void, Error>

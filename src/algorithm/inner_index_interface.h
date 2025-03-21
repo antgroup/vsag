@@ -47,7 +47,9 @@ public:
     KnnSearch(const DatasetPtr& query,
               int64_t k,
               const std::string& parameters,
-              const FilterPtr& filter) const = 0;
+              const FilterPtr& filter,
+              vsag::IteratorContextPtr* filter_ctx = nullptr,
+              bool is_last_filter = false) const = 0;
 
     [[nodiscard]] virtual DatasetPtr
     RangeSearch(const DatasetPtr& query,
@@ -141,6 +143,11 @@ public:
 
     virtual DatasetPtr
     CalDistanceById(const float* query, const int64_t* ids, int64_t count) const;
+
+    virtual tl::expected<void, Error>
+    GetMinAndMaxId(int64_t& min_id, int64_t& max_id) const {
+        throw std::runtime_error("Index doesn't support GetMinAndMaxId");
+    }
 
     virtual void
     Merge(const std::vector<MergeUnit>& merge_units) {

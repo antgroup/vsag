@@ -71,7 +71,9 @@ DatasetPtr
 BruteForce::KnnSearch(const DatasetPtr& query,
                       int64_t k,
                       const std::string& parameters,
-                      const FilterPtr& filter) const {
+                      const FilterPtr& filter,
+                      vsag::IteratorContextPtr* filter_ctx,
+                      bool is_last_filter) const {
     auto computer = this->inner_codes_->FactoryComputer(query->GetFloat32Vectors());
     auto heap = std::make_shared<StandardHeap<true, true>>(this->allocator_, k);
     for (InnerIdType i = 0; i < total_count_; ++i) {

@@ -95,6 +95,13 @@ protected:
                   bool expected_success = true);
 
     static void
+    TestKnnSearchIter(const IndexPtr& index,
+                      const TestDatasetPtr& dataset,
+                      const std::string& search_param,
+                      float expected_recall = 0.99,
+                      bool expected_success = true);
+
+    static void
     TestSearchWithDirtyVector(const IndexPtr& index,
                               const TestDatasetPtr& dataset,
                               const std::string& search_param,
@@ -124,6 +131,8 @@ protected:
                               const TestDatasetPtr& dataset,
                               float error = 1e-5);
 
+    static void
+    TestGetMinAndMaxId(const IndexPtr& index, const TestDatasetPtr& dataset);
     static void
     TestSerializeFile(const IndexPtr& index_from,
                       const IndexPtr& index_to,

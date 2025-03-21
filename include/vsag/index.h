@@ -30,6 +30,7 @@
 #include "vsag/expected.hpp"
 #include "vsag/filter.h"
 #include "vsag/index_features.h"
+#include "vsag/iterator_context.h"
 #include "vsag/readerset.h"
 
 namespace vsag {
@@ -167,6 +168,27 @@ public:
               int64_t k,
               const std::string& parameters,
               const FilterPtr& filter) const {
+        throw std::runtime_error("Index doesn't support new filter");
+    }
+
+    /**
+      * @brief Performing single KNN search on index
+      *
+      * @param query should contains dim, num_elements and vectors
+      * @param k the result size of every query
+      * @param filter represents whether an element is filtered out by pre-filter
+      * @param iter_ctx iterative filter context
+      * @return result contains
+      *                - num_elements: 1
+      *                - ids, distances: length is (num_elements * k)
+      */
+    virtual tl::expected<DatasetPtr, Error>
+    KnnSearch(const DatasetPtr& query,
+              int64_t k,
+              const std::string& parameters,
+              const FilterPtr& filter,
+              vsag::IteratorContextPtr* iter_ctx,
+              bool is_last_search) const {
         throw std::runtime_error("Index doesn't support new filter");
     }
 
@@ -309,6 +331,18 @@ public:
     virtual tl::expected<DatasetPtr, Error>
     CalDistanceById(const float* query, const int64_t* ids, int64_t count) const {
         throw std::runtime_error("Index doesn't support get distance by id");
+    };
+
+    /**
+     * @brief Calculate the maximum and minimum labels.
+     *
+     * @param min_id The minimum id returned
+     * @param max_id The maximum id returned
+     * @param count is the count of ids
+     */
+    virtual tl::expected<void, Error>
+    GetMinAndMaxId(int64_t& min_id, int64_t& max_id) const {
+        throw std::runtime_error("Index doesn't support get Min and Max id");
     };
 
     /**

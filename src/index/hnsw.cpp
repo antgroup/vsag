@@ -30,6 +30,7 @@
 #include "empty_index_binary_set.h"
 #include "impl/odescent_graph_builder.h"
 #include "index/hnsw_zparameters.h"
+#include "index/iterator_filter.h"
 #include "io/memory_block_io_parameter.h"
 #include "quantization/fp32_quantizer_parameter.h"
 #include "safe_allocator.h"
@@ -203,7 +204,9 @@ tl::expected<DatasetPtr, Error>
 HNSW::knn_search(const DatasetPtr& query,
                  int64_t k,
                  const std::string& parameters,
-                 const FilterPtr& filter_ptr) const {
+                 const FilterPtr& filter_ptr,
+                 vsag::IteratorContextPtr* iter_ctx,
+                 bool is_last_filter) const {
 #ifndef ENABLE_TESTS
     SlowTaskTimer t_total("hnsw knnsearch", 20);
 #endif
@@ -234,6 +237,12 @@ HNSW::knn_search(const DatasetPtr& query,
         // check search parameters
         auto params = HnswSearchParameters::FromJson(parameters);
 
+        if (iter_ctx != nullptr && *iter_ctx == nullptr) {
+            auto filter_context = std::make_shared<IteratorFilterContext>();
+            filter_context->init(alg_hnsw_->getMaxElements(), params.ef_search, allocator_.get());
+            *iter_ctx = filter_context;
+        }
+
         // perform search
         int64_t original_k = k;
         std::priority_queue<std::pair<float, LabelType>> results;
@@ -247,7 +256,9 @@ HNSW::knn_search(const DatasetPtr& query,
                                            k,
                                            std::max(params.ef_search, k),
                                            filter_ptr,
-                                           params.skip_ratio);
+                                           params.skip_ratio,
+                                           iter_ctx,
+                                           is_last_filter);
         } catch (const std::runtime_error& e) {
             LOG_ERROR_AND_RETURNS(ErrorType::INTERNAL_ERROR,
                                   "failed to perofrm knn_search(internalError): ",

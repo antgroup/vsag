@@ -27,6 +27,7 @@
 #include "vsag/dataset.h"
 #include "vsag/errors.h"
 #include "vsag/expected.hpp"
+#include "vsag/iterator_context.h"
 
 namespace hnswlib {
 
@@ -43,7 +44,9 @@ public:
               size_t k,
               size_t ef,
               const vsag::FilterPtr is_id_allowed = nullptr,
-              float skip_ratio = 0.9f) const = 0;
+              float skip_ratio = 0.9f,
+              vsag::IteratorContextPtr* iter_ctx = nullptr,
+              bool is_last_filter = false) const = 0;
 
     virtual std::priority_queue<std::pair<dist_t, LabelType>>
     searchRange(const void* query_data,
@@ -69,6 +72,9 @@ public:
 
     virtual float
     getDistanceByLabel(LabelType label, const void* data_point) = 0;
+
+    virtual void
+    getMinAndMaxId(int64_t& min_id, int64_t& max_id) = 0;
 
     virtual tl::expected<vsag::DatasetPtr, vsag::Error>
     getBatchDistanceByLabel(const int64_t* ids, const void* data_point, int64_t count) = 0;
