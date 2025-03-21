@@ -22,6 +22,7 @@
 TEST_CASE("IVF Parameters Test", "[ut][IVFParameter]") {
     auto param_str = R"({
         "type": "ivf",
+        "ivf_train_type": "random",
         "buckets_params": {
             "io_params": {
                 "type": "block_memory_io"
@@ -36,4 +37,5 @@ TEST_CASE("IVF Parameters Test", "[ut][IVFParameter]") {
     auto param = std::make_shared<vsag::IVFParameter>();
     param->FromJson(param_json);
     REQUIRE(param->bucket_param->buckets_count == 3);
+    REQUIRE(param->partition_train_type == vsag::IVFNearestPartitionTrainerType::RandomTrainer);
 }

@@ -22,7 +22,7 @@
 #include "impl/kmeans_cluster.h"
 #include "inner_string_params.h"
 #include "safe_allocator.h"
-#include "vsag/factory.h"
+#include "utils/util_functions.h"
 
 namespace vsag {
 
@@ -59,7 +59,12 @@ IVFNearestPartition::Train(const DatasetPtr dataset) {
         cls.Run(this->bucket_count_, dataset->GetFloat32Vectors(), dataset->GetNumElements());
         memcpy(data.data(), cls.k_centroids_, dim * this->bucket_count_ * sizeof(float));
     } else if (trainer_type_ == IVFNearestPartitionTrainerType::RandomTrainer) {
-        // TODO(LHT) implement
+        auto selected = select_k_numbers(dataset->GetNumElements(), this->bucket_count_);
+        for (int i = 0; i < bucket_count_; ++i) {
+            memcpy(data.data() + i * dim,
+                   dataset->GetFloat32Vectors() + selected[i] * dim,
+                   dim * this->bucket_count_ * sizeof(float));
+        }
     }
 
     auto build_result = this->route_index_ptr_->Build(centroids);

@@ -35,12 +35,17 @@ static const std::unordered_map<std::string, std::vector<std::string>> EXTERNAL_
         IVF_BUCKETS_COUNT,
         {BUCKET_PARAMS_KEY, BUCKETS_COUNT_KEY},
     },
+    {
+        IVF_TRAIN_TYPE,
+        {IVF_TRAIN_TYPE_KEY},
+    },
 };
 
 static constexpr const char* IVF_PARAMS_TEMPLATE =
     R"(
     {
         "type": "{INDEX_TYPE_IVF}",
+        "{IVF_TRAIN_TYPE_KEY}": "{IVF_TRAIN_TYPE_KMEANS}",
         "{BUCKET_PARAMS_KEY}": {
             "{IO_PARAMS_KEY}": {
                 "{IO_TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}"
@@ -139,10 +144,10 @@ IVF::Add(const DatasetPtr& base) {
 }
 
 DatasetPtr
-IVF::KnnSearch(const vsag::DatasetPtr& query,
+IVF::KnnSearch(const DatasetPtr& query,
                int64_t k,
                const std::string& parameters,
-               const vsag::FilterPtr& filter) const {
+               const FilterPtr& filter) const {
     auto* allocator = allocator_;
     MaxHeap heap(allocator);
     auto param = IVFSearchParameters::FromJson(parameters);
@@ -188,10 +193,10 @@ IVF::KnnSearch(const vsag::DatasetPtr& query,
 }
 
 DatasetPtr
-IVF::RangeSearch(const vsag::DatasetPtr& query,
+IVF::RangeSearch(const DatasetPtr& query,
                  float radius,
                  const std::string& parameters,
-                 const vsag::FilterPtr& filter,
+                 const FilterPtr& filter,
                  int64_t limited_size) const {
     auto* allocator = allocator_;
     MaxHeap heap(allocator);
