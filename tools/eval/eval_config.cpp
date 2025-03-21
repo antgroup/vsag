@@ -70,8 +70,18 @@ EvalConfig::Load(argparse::ArgumentParser& parser) {
 }
 
 EvalConfig
-EvalConfig::Load(YAML::Node& yaml_node) {
+EvalConfig::Load(YAML::Node& yaml_node, const eval_job& global_options) {
     EvalConfig config;
+
+    // set global options at first
+    if (global_options.num_threads_building.has_value()) {
+        config.num_threads_building = global_options.num_threads_building.value();
+    }
+    if (global_options.num_threads_searching.has_value()) {
+        config.num_threads_searching = global_options.num_threads_searching.value();
+    }
+
+    // set options by case
     config.dataset_path = yaml_node["datapath"].as<std::string>();
     config.action_type = yaml_node["type"].as<std::string>();
     config.build_param = yaml_node["create_params"].as<std::string>();
@@ -85,6 +95,9 @@ EvalConfig::Load(YAML::Node& yaml_node) {
 
     check_and_get_value<bool>(
         yaml_node, "delete_index_after_search", config.delete_index_after_search);
+
+    check_and_get_value<int>(yaml_node, "num_threads_building", config.num_threads_building);
+    check_and_get_value<int>(yaml_node, "num_threads_searching", config.num_threads_searching);
 
     bool disable = false;
     check_and_get_value<bool>(yaml_node, "disable_recall", disable);

@@ -12,9 +12,11 @@ set (EVAL_SRC
         monitor/memory_peak_monitor.cpp
         monitor/duration_monitor.cpp)
 add_library (eval_obj OBJECT ${EVAL_SRC})
+target_compile_options (eval_obj PRIVATE -fopenmp)
 add_dependencies (eval_obj hdf5 spdlog yaml-cpp)
 
 add_executable (eval_performance main.cpp)
+target_compile_options (eval_performance PRIVATE -fopenmp)
 target_link_libraries (eval_performance
   PRIVATE
   vsag

@@ -17,10 +17,9 @@
 
 #include <yaml-cpp/yaml.h>
 
+#include <optional>
 #include <string>
 #include <vector>
-
-#include "./eval_config.h"
 
 namespace vsag::eval {
 
@@ -37,8 +36,12 @@ struct eval_job {
     using eval_case = YAML::Node;
     using name2case = std::pair<std::string, eval_case>;
 
-    std::vector<exporter> exporters;
     std::vector<name2case> cases;
+
+    // global options
+    std::vector<exporter> exporters;
+    std::optional<int32_t> num_threads_building;
+    std::optional<int32_t> num_threads_searching;
 };
 
 }  // namespace vsag::eval

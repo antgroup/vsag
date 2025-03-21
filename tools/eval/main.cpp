@@ -16,6 +16,7 @@
 #include <vsag/vsag.h>
 
 #include <argparse/argparse.hpp>
+#include <cstdint>
 #include <fstream>
 #include <iostream>
 #include <string>
@@ -28,6 +29,7 @@
 #include "common.h"
 #include "logger.h"
 #include "typing.h"
+#include "vsag/options.h"
 
 void
 check_args(argparse::ArgumentParser& parser) {
@@ -113,13 +115,25 @@ parse_yaml_file(const std::string& yaml_file) {
 
     vsag::eval::eval_job cac;
     try {
-        if (config_all["global"] && config_all["global"]["exporters"]) {
-            auto exporters_root = config_all["global"]["exporters"];
-            if (exporters_root.IsMap()) {
-                for (auto it = exporters_root.begin(); it != exporters_root.end(); ++it) {
-                    auto exporter = vsag::eval::exporter::Load(it->second);
-                    cac.exporters.emplace_back(exporter);
+        if (config_all["global"]) {
+            if (config_all["global"]["exporters"]) {
+                auto exporters_root = config_all["global"]["exporters"];
+                if (exporters_root.IsMap()) {
+                    for (auto it = exporters_root.begin(); it != exporters_root.end(); ++it) {
+                        auto exporter = vsag::eval::exporter::Load(it->second);
+                        cac.exporters.emplace_back(exporter);
+                    }
                 }
+            }
+
+            if (config_all["global"]["num_threads_building"]) {
+                cac.num_threads_building = vsag::eval::check_and_get_value<int32_t>(
+                    config_all["global"], "num_threads_building");
+            }
+
+            if (config_all["global"]["num_threads_searching"]) {
+                cac.num_threads_searching = vsag::eval::check_and_get_value<int32_t>(
+                    config_all["global"], "num_threads_searching");
             }
         }
     } catch (YAML::Exception& e) {
@@ -224,7 +238,8 @@ main(int argc, char** argv) {
 
         vsag::eval::JsonType results;
         for (auto& [name, case_yaml_node] : job.cases) {
-            config = vsag::eval::EvalConfig::Load(case_yaml_node);
+            config = vsag::eval::EvalConfig::Load(case_yaml_node, job);
+            vsag::Options::Instance().set_num_threads_building(config.num_threads_building);
             auto eval_case = vsag::eval::EvalCase::MakeInstance(config);
             if (eval_case != nullptr) {
                 results[name] = eval_case->Run();
