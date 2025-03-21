@@ -979,4 +979,48 @@ TestIndex::TestMergeIndex(const std::string& name,
     return index;
 }
 
+void
+TestIndex::TestSearchWithExtraInfo(const IndexPtr& index,
+                                   const TestDatasetPtr& dataset,
+                                   const std::string& search_param,
+                                   int64_t extra_info_size,
+                                   float expected_recall) {
+    auto queries = dataset->query_;
+    auto query_count = queries->GetNumElements();
+    auto dim = queries->GetDim();
+    auto gts = dataset->ground_truth_;
+    auto gt_topK = dataset->top_k;
+    float cur_recall = 0.0f;
+    auto topk = gt_topK;
+    for (auto i = 0; i < query_count; ++i) {
+        auto query = vsag::Dataset::Make();
+        query->NumElements(1)
+            ->Dim(dim)
+            ->Float32Vectors(queries->GetFloat32Vectors() + i * dim)
+            ->Paths(queries->GetPaths() + i)
+            ->Owner(false);
+        auto res = index->KnnSearch(query, topk, search_param);
+        REQUIRE(res.has_value() == true);
+        REQUIRE(res.value()->GetDim() == topk);
+        auto result = res.value()->GetIds();
+        if (extra_info_size > 0) {
+            const char* extra_infos = res.value()->GetExtraInfos();
+            REQUIRE(extra_infos != nullptr);
+            int64_t num = res.value()->GetNumElements();
+            for (int j = 0; j < num; ++j) {
+                REQUIRE((extra_infos + j * extra_info_size) != nullptr);
+            }
+        }
+        auto gt = gts->GetIds() + gt_topK * i;
+        auto val = Intersection(gt, gt_topK, result, topk);
+        cur_recall += static_cast<float>(val) / static_cast<float>(gt_topK);
+    }
+    if (cur_recall <= expected_recall * query_count) {
+        WARN(fmt::format("cur_result({}) <= expected_recall * query_count({})",
+                         cur_recall,
+                         expected_recall * query_count));
+    }
+    REQUIRE(cur_recall > expected_recall * query_count * RECALL_THRESHOLD);
+}
+
 }  // namespace fixtures
