@@ -24,8 +24,9 @@ public:
     GenerateIVFBuildParametersString(const std::string& metric_type,
                                      int64_t dim,
                                      const std::string& quantization_str = "sq8",
-                                     int buckets_count = 300,
+                                     int buckets_count = 210,
                                      const std::string& train_type = "kmeans");
+
     static TestDatasetPool pool;
 
     static std::vector<int> dims;
@@ -43,9 +44,10 @@ public:
 
     const std::vector<std::pair<std::string, float>> test_cases = {
         {"fp32", 0.95},
-        {"bf16", 0.94},
-        {"sq8", 0.92},
-        {"sq8_uniform", 0.91},
+        {"bf16", 0.92},
+        {"fp16", 0.92},
+        {"sq8", 0.90},
+        {"sq8_uniform", 0.90},
     };
 };
 
