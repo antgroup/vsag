@@ -1,4 +1,5 @@
 
+
 // Copyright 2024-present the vsag project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -65,5 +66,8 @@ mapping_external_param_to_inner(const JsonType& external_json,
 
 std::tuple<DatasetPtr, float*, int64_t*>
 CreateFastDataset(int64_t dim, Allocator* allocator);
+
+std::vector<int>
+select_k_numbers(int64_t n, int k);
 
 }  // namespace vsag

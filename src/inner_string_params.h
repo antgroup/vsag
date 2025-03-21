@@ -73,6 +73,9 @@ const char* const NO_BUILD_LEVELS = "no_build_levels";
 
 const char* const BUCKETS_COUNT_KEY = "buckets_count";
 const char* const IVF_SEARCH_PARAM_SCAN_BUCKETS_COUNT = "scan_buckets_count";
+const char* const IVF_TRAIN_TYPE_KEY = "ivf_train_type";
+const char* const IVF_TRAIN_TYPE_RANDOM = "random";
+const char* const IVF_TRAIN_TYPE_KMEANS = "kmeans";
 
 const std::unordered_map<std::string, std::string> DEFAULT_MAP = {
     {"INDEX_TYPE_HGRAPH", INDEX_TYPE_HGRAPH},
@@ -107,6 +110,7 @@ const std::unordered_map<std::string, std::string> DEFAULT_MAP = {
     {"DEFAULT_FILE_PATH_VALUE", DEFAULT_FILE_PATH_VALUE},
     {"SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE", SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE},
     {"IVF_SEARCH_PARAM_SCAN_BUCKETS_COUNT", IVF_SEARCH_PARAM_SCAN_BUCKETS_COUNT},
+    {"IVF_TRAIN_TYPE_KEY", IVF_TRAIN_TYPE_KEY},
 };
 
 }  // namespace vsag
