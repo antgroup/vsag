@@ -25,6 +25,11 @@ IVFParameter::IVFParameter() = default;
 
 void
 IVFParameter::FromJson(const JsonType& json) {
+    if (json[IVF_TRAIN_TYPE_KEY] == IVF_TRAIN_TYPE_KMEANS) {
+        this->partition_train_type = IVFNearestPartitionTrainerType::KMeansTrainer;
+    } else if (json[IVF_TRAIN_TYPE_KEY] == IVF_TRAIN_TYPE_RANDOM) {
+        this->partition_train_type = IVFNearestPartitionTrainerType::RandomTrainer;
+    }
     this->bucket_param = std::make_shared<BucketDataCellParameter>();
     CHECK_ARGUMENT(json.contains(BUCKET_PARAMS_KEY),
                    fmt::format("ivf parameters must contains {}", BUCKET_PARAMS_KEY));
