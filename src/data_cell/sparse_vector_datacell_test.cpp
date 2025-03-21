@@ -51,7 +51,7 @@ TEST_CASE("SparseDataCell Basic Test", "[ut][SparseDataCell] ") {
     auto data_cell = FlattenInterface::MakeInstance(param, index_common_param);
 
     size_t base_count = 1000;
-    auto sparse_vectors = fixtures::GenerateSparseVectors(base_count, 1000);
+    auto sparse_vectors = fixtures::GenerateSparseVectors(base_count, 100);
     std::vector<InnerIdType> idx(base_count);
     std::iota(idx.begin(), idx.end(), 0);
     std::shuffle(idx.begin(), idx.end(), std::mt19937(47));
@@ -66,8 +66,8 @@ TEST_CASE("SparseDataCell Basic Test", "[ut][SparseDataCell] ") {
         fixtures::dist_t distance = data_cell->ComputePairVectors(idx[0], idx[1]);
         REQUIRE(distance == fixtures::GetSparseDistance(sparse_vectors[0], sparse_vectors[1]));
     }
+    auto query_sparse_vectors = fixtures::GenerateSparseVectors(1, 100);
     SECTION("accuracy") {
-        auto query_sparse_vectors = fixtures::GenerateSparseVectors(1, 1000);
         auto computer = data_cell->FactoryComputer(query_sparse_vectors.data());
         std::shared_ptr<float[]> dist = std::shared_ptr<float[]>(new float[base_count]);
         data_cell->Query(dist.get(), computer, idx.data(), 1);
@@ -91,8 +91,7 @@ TEST_CASE("SparseDataCell Basic Test", "[ut][SparseDataCell] ") {
         std::ifstream infile(path.c_str(), std::ios::binary);
         IOStreamReader reader(infile);
         new_data_cell->Deserialize(reader);
-
-        auto query_sparse_vectors = fixtures::GenerateSparseVectors(1, 100);
+        infile.close();
         auto computer = new_data_cell->FactoryComputer(query_sparse_vectors.data());
         std::shared_ptr<float[]> dist = std::shared_ptr<float[]>(new float[base_count]);
         new_data_cell->Query(dist.get(), computer, idx.data(), 1);
@@ -102,6 +101,14 @@ TEST_CASE("SparseDataCell Basic Test", "[ut][SparseDataCell] ") {
                 fixtures::GetSparseDistance(query_sparse_vectors[0], sparse_vectors[i]);
             REQUIRE(distance == dist[i]);
         }
+    }
+    for (auto& item : sparse_vectors) {
+        delete[] item.vals_;
+        delete[] item.ids_;
+    }
+    for (auto& item : query_sparse_vectors) {
+        delete[] item.vals_;
+        delete[] item.ids_;
     }
 }
 
