@@ -164,6 +164,7 @@ IndexNode::SearchGraph(const SearchFunc& search_func) const {
 std::vector<int64_t>
 Pyramid::Build(const DatasetPtr& base) {
     const auto* path = base->GetPaths();
+    CHECK_ARGUMENT(path != nullptr, "path is required");
     int64_t data_num = base->GetNumElements();
     const auto* data_vectors = base->GetFloat32Vectors();
     const auto* data_ids = base->GetIds();
@@ -251,6 +252,8 @@ Pyramid::RangeSearch(const DatasetPtr& query,
 DatasetPtr
 Pyramid::search_impl(const DatasetPtr& query, int64_t limit, const SearchFunc& search_func) const {
     const auto* path = query->GetPaths();
+    CHECK_ARGUMENT(path != nullptr, "path is required");
+    CHECK_ARGUMENT(query->GetFloat32Vectors() != nullptr, "query vectors is required");
     std::string current_path = path[0];
     auto path_slices = split(current_path, PART_SLASH);
     std::shared_ptr<IndexNode> node = root_;
@@ -326,6 +329,7 @@ Pyramid::cal_serialize_size() const {
 std::vector<int64_t>
 Pyramid::Add(const DatasetPtr& base) {
     const auto* path = base->GetPaths();
+    CHECK_ARGUMENT(path != nullptr, "path is required");
     int64_t data_num = base->GetNumElements();
     const auto* data_vectors = base->GetFloat32Vectors();
     const auto* data_ids = base->GetIds();
@@ -411,7 +415,7 @@ Pyramid::resize(int64_t new_max_capacity) {
 }
 
 void
-Pyramid::InitFeatures() {
+Pyramid::init_features() {
     this->feature_list_->SetFeatures({
         SUPPORT_BUILD,
         SUPPORT_ADD_AFTER_BUILD,

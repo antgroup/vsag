@@ -92,7 +92,7 @@ public:
             FlattenInterface::MakeInstance(pyramid_param_->flatten_data_cell_param, common_param_);
         root_ = std::make_shared<IndexNode>(&common_param_, pyramid_param_->graph_param);
         this->feature_list_ = std::make_shared<IndexFeatureList>();
-        this->InitFeatures();
+        this->init_features();
     }
 
     explicit Pyramid(const ParamPtr& param, const IndexCommonParam& common_param)
@@ -141,11 +141,16 @@ public:
     }
 
     void
-    InitFeatures() override;
+    InitFeatures() override {
+        this->init_features();
+    }
 
 private:
     void
     resize(int64_t new_max_capacity);
+
+    void
+    init_features();
 
     DatasetPtr
     search_impl(const DatasetPtr& query, int64_t limit, const SearchFunc& search_func) const;
