@@ -13,10 +13,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "pyramid_zparameters.h"
+#include "algorithm/pyramid_zparameters.h"
 
 #include "common.h"
-#include "diskann_zparameters.h"
+#include "index/diskann_zparameters.h"
 #include "io/memory_io_parameter.h"
 #include "quantization/fp32_quantizer_parameter.h"
 
