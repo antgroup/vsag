@@ -157,6 +157,7 @@ HgraphTestIndex::TestGeneral(const TestIndex::IndexPtr& index,
     TestCheckIdExist(index, dataset);
     TestCalcDistanceById(index, dataset);
     TestBatchCalcDistanceById(index, dataset);
+    TestGetMinAndMaxId(index, dataset);
 }
 }  // namespace fixtures
 
