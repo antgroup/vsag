@@ -24,7 +24,7 @@ namespace vsag {
 
 class SparseVectorDataCellParameter : public FlattenInterfaceParameter {
 public:
-    explicit SparseVectorDataCellParameter() : FlattenInterfaceParameter(FLATTEN_DATA_CELL) {
+    explicit SparseVectorDataCellParameter() : FlattenInterfaceParameter(SPARSE_VECTOR_DATA_CELL) {
     }
 
     void
@@ -40,7 +40,6 @@ public:
         CHECK_ARGUMENT(
             this->quantizer_parameter->GetTypeName() == QUANTIZATION_TYPE_VALUE_SPARSE,
             fmt::format("sparse datacell only support {}", QUANTIZATION_TYPE_VALUE_SPARSE));
-        this->name = SPARSE_VECTOR_DATA_CELL;
     }
 
     JsonType
