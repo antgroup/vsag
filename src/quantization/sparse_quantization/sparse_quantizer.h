@@ -36,8 +36,6 @@ public:
                              const IndexCommonParam& common_param);
     explicit SparseQuantizer(Allocator* allocator);
 
-    explicit SparseQuantizer(size_t dim, Allocator* allocator);
-
     explicit SparseQuantizer(const QuantizerParamPtr& param, const IndexCommonParam& common_param);
 
     bool
@@ -124,11 +122,9 @@ SparseQuantizer<metric>::ComputeBatchDistImpl(Computer<SparseQuantizer<metric>>&
                                               uint64_t count,
                                               const uint8_t* codes,
                                               float* dists) const {
-    for (int i = 0; i < count; ++i) {
-        dists[i] = ComputeImpl(computer.buf_, codes);
-        const uint32_t len = *reinterpret_cast<const uint32_t*>(codes);
-        codes += sizeof(uint32_t) + len * sizeof(BufferEntry);
-    }
+    // it is impossible to get batch codes of sparse vector
+    throw VsagException(ErrorType::INTERNAL_ERROR,
+                        "no support for ComputeBatchDistImpl in sparse quantizer");
 }
 template <MetricType metric>
 void
@@ -202,17 +198,8 @@ SparseQuantizer<metric>::DecodeOneImpl(const uint8_t* codes, DataType* data) {
 template <MetricType metric>
 bool
 SparseQuantizer<metric>::EncodeBatchImpl(const DataType* data, uint8_t* codes, uint64_t count) {
-    uint8_t* current_code = codes;
-    const SparseVector* sparse_array = reinterpret_cast<const SparseVector*>(data);
-
-    for (uint64_t i = 0; i < count; ++i) {
-        const SparseVector* sparse_data = &sparse_array[i];
-        if (!EncodeOneImpl((const DataType*)sparse_data, current_code)) {
-            return false;
-        }
-        current_code += sizeof(uint32_t) + sparse_data->len_ * sizeof(BufferEntry);
-    }
-    return true;
+    throw VsagException(ErrorType::INTERNAL_ERROR,
+                        "no support for batch encode in sparse quantizer");
 }
 
 template <MetricType metric>

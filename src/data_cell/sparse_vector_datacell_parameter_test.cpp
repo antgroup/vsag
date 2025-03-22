@@ -13,30 +13,28 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#pragma once
+#include "sparse_vector_datacell_parameter.h"
 
-#include "quantization/quantizer_parameter.h"
-#include "typing.h"
+#include <catch2/catch_test_macros.hpp>
+
+#include "parameter_test.h"
 
 namespace vsag {
-class SparseQuantizerParameter : public QuantizerParameter {
-public:
-    SparseQuantizerParameter() : QuantizerParameter(QUANTIZATION_TYPE_VALUE_SPARSE) {
-    }
 
-    ~SparseQuantizerParameter() override = default;
+TEST_CASE("SparseVectorDataCellParameter ToJson Test", "[ut][SparseVectorDataCellParameter]") {
+    std::string param_str = R"(
+    {
+        "io_params": {
+            "type": "memory_io"
+        },
+        "quantization_params": {
+            "type": "sparse"
+        }
+    })";
+    auto param = std::make_shared<SparseVectorDataCellParameter>();
+    auto json = JsonType::parse(param_str);
+    param->FromJson(json);
+    ParameterTest::TestToJson(param);
+}
 
-    void
-    FromJson(const JsonType& json) override {
-    }
-
-    JsonType
-    ToJson() override {
-        JsonType json;
-        json[QUANTIZATION_TYPE_KEY] = this->GetTypeName();
-        return json;
-    }
-};
-
-using SparseQuantizerParamPtr = std::shared_ptr<SparseQuantizerParameter>;
 }  // namespace vsag

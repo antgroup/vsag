@@ -49,6 +49,7 @@ TEST_CASE("SparseDataCell Basic Test", "[ut][SparseDataCell] ") {
     index_common_param.allocator_ = SafeAllocator::FactoryDefaultAllocator();
     index_common_param.metric_ = MetricType::METRIC_TYPE_IP;
     auto data_cell = FlattenInterface::MakeInstance(param, index_common_param);
+    REQUIRE(data_cell->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_SPARSE);
 
     size_t base_count = 1000;
     auto sparse_vectors = fixtures::GenerateSparseVectors(base_count, 100);
@@ -56,6 +57,7 @@ TEST_CASE("SparseDataCell Basic Test", "[ut][SparseDataCell] ") {
     std::iota(idx.begin(), idx.end(), 0);
     std::shuffle(idx.begin(), idx.end(), std::mt19937(47));
     auto half_count = base_count / 2;
+    data_cell->Train(sparse_vectors.data(), base_count);
     for (int i = 0; i < half_count; ++i) {
         data_cell->InsertVector(sparse_vectors.data() + i, idx[i]);
     }
