@@ -15,10 +15,6 @@
 
 #include "basic_searcher.h"
 
-#include <limits>
-
-#include "utils/linear_congruential_generator.h"
-
 namespace vsag {
 
 BasicSearcher::BasicSearcher(const IndexCommonParam& common_param, MutexArrayPtr mutex_array)
@@ -46,13 +42,13 @@ BasicSearcher::visit(const GraphInterfacePtr& graph,
 
     float skip_threshold = (filter != nullptr ? (1 - filter->ValidRatio()) * skip_ratio : 0.0F);
 
-    for (uint32_t i = 0; i < prefetch_jump_visit_size_; i++) {
+    for (uint32_t i = 0; i < prefetch_stride_visit_; i++) {
         vl->Prefetch(neighbors[i]);
     }
 
     for (uint32_t i = 0; i < neighbors.size(); i++) {
-        if (i + prefetch_jump_visit_size_ < neighbors.size()) {
-            vl->Prefetch(neighbors[i + prefetch_jump_visit_size_]);
+        if (i + prefetch_stride_visit_ < neighbors.size()) {
+            vl->Prefetch(neighbors[i + prefetch_stride_visit_]);
         }
         if (not vl->Get(neighbors[i])) {
             if (not filter || count_no_visited == 0 || generator.NextFloat() > skip_threshold ||
@@ -189,6 +185,50 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
     }
 
     return top_candidates;
+}
+
+bool
+BasicSearcher::SetRuntimeParameters(const UnorderedMap<std::string, vsag::ParamValue>& new_params) {
+    auto iter = new_params.find(PREFETCH_STRIDE_VISIT);
+    if (iter != new_params.end()) {
+        prefetch_stride_visit_ = std::get<int>(iter->second);
+        return true;
+    }
+    return false;
+}
+
+void
+BasicSearcher::SetMockParameters(const GraphInterfacePtr& graph,
+                                 const FlattenInterfacePtr& flatten,
+                                 const std::shared_ptr<VisitedListPool>& vl_pool,
+                                 const InnerSearchParam& inner_search_param,
+                                 const uint64_t dim) {
+    mock_graph_ = graph;
+    mock_flatten_ = flatten;
+    mock_vl_pool_ = vl_pool;
+    mock_inner_search_param_ = inner_search_param;
+    mock_dim_ = dim;
+}
+
+double
+BasicSearcher::MockRun() const {
+    uint64_t sample_size = std::min(OPTIMIZE_SAMPLE_SIZE, mock_flatten_->TotalCount());
+
+    auto st = std::chrono::high_resolution_clock::now();
+    for (uint32_t i = 0; i < sample_size; ++i) {
+        // init param
+        bool release = false;
+        const auto* codes = mock_flatten_->GetCodesById(i, release);
+        Vector<float> raw_data(mock_dim_, allocator_);
+        mock_flatten_->Decode(codes, raw_data.data());
+        auto vl = mock_vl_pool_->TakeOne();
+
+        // mock run
+        Search(mock_graph_, mock_flatten_, vl, raw_data.data(), mock_inner_search_param_);
+    }
+    auto ed = std::chrono::high_resolution_clock::now();
+    double time_cost = std::chrono::duration<double>(ed - st).count();
+    return time_cost;
 }
 
 }  // namespace vsag

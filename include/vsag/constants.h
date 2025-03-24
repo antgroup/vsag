@@ -48,6 +48,11 @@ extern const char* const DATATYPE_FLOAT32;
 extern const char* const DATATYPE_INT8;
 extern const char* const BLANK_INDEX;
 
+// environment-level-parameters
+extern const char* const PREFETCH_STRIDE_VISIT;
+extern const char* const PREFETCH_STRIDE_CODE;
+extern const char* const PREFETCH_DEPTH_CODE;
+
 // parameters
 extern const char* const PARAMETER_DTYPE;
 extern const char* const PARAMETER_DIM;

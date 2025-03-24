@@ -20,6 +20,7 @@
 #include <memory>
 
 #include "byte_buffer.h"
+#include "common.h"
 #include "flatten_interface.h"
 #include "io/basic_io.h"
 #include "io/memory_block_io.h"
@@ -67,6 +68,11 @@ public:
     void
     SetMaxCapacity(InnerIdType capacity) override {
         this->max_capacity_ = std::max(capacity, this->total_count_);  // TODO(LHT): add warning
+    }
+
+    bool
+    Decode(const uint8_t* codes, DataType* data) override {
+        return this->quantizer_->DecodeOne(codes, data);
     }
 
     void
@@ -127,6 +133,9 @@ public:
     SetIO(std::shared_ptr<BasicIO<IOTmpl>> io) {
         this->io_ = io;
     }
+
+    double
+    MockRun() override;
 
 public:
     std::shared_ptr<Quantizer<QuantTmpl>> quantizer_{nullptr};
@@ -308,14 +317,14 @@ FlattenDataCell<QuantTmpl, IOTmpl>::query(float* result_dists,
                                           const std::shared_ptr<Computer<QuantTmpl>>& computer,
                                           const InnerIdType* idx,
                                           InnerIdType id_count) {
-    for (uint32_t i = 0; i < this->prefetch_jump_code_size_ and i < id_count; i++) {
+    for (uint32_t i = 0; i < this->prefetch_stride_code_ and i < id_count; i++) {
         if (force_in_memory_) {
             this->force_in_memory_io_->Prefetch(
                 static_cast<uint64_t>(idx[i]) * static_cast<uint64_t>(code_size_),
-                this->prefetch_cache_line_size_);
+                this->prefetch_depth_code_);
         } else {
             this->io_->Prefetch(static_cast<uint64_t>(idx[i]) * static_cast<uint64_t>(code_size_),
-                                this->prefetch_cache_line_size_);
+                                this->prefetch_depth_code_);
         }
     }
     if (not force_in_memory_ and not this->io_->InMemory() and id_count > 1) {
@@ -331,16 +340,16 @@ FlattenDataCell<QuantTmpl, IOTmpl>::query(float* result_dists,
     }
 
     for (int64_t i = 0; i < id_count; ++i) {
-        if (i + this->prefetch_jump_code_size_ < id_count) {
+        if (i + this->prefetch_stride_code_ < id_count) {
             if (force_in_memory_) {
                 this->force_in_memory_io_->Prefetch(
-                    static_cast<uint64_t>(idx[i + this->prefetch_jump_code_size_]) *
+                    static_cast<uint64_t>(idx[i + this->prefetch_stride_code_]) *
                         static_cast<uint64_t>(code_size_),
-                    this->prefetch_cache_line_size_);
+                    this->prefetch_depth_code_);
             } else {
-                this->io_->Prefetch(static_cast<uint64_t>(idx[i + this->prefetch_jump_code_size_]) *
+                this->io_->Prefetch(static_cast<uint64_t>(idx[i + this->prefetch_stride_code_]) *
                                         static_cast<uint64_t>(code_size_),
-                                    this->prefetch_cache_line_size_);
+                                    this->prefetch_depth_code_);
             }
         }
 
@@ -423,5 +432,39 @@ FlattenDataCell<QuantTmpl, IOTmpl>::Deserialize(StreamReader& reader) {
     FlattenInterface::Deserialize(reader);
     this->io_->Deserialize(reader);
     this->quantizer_->Deserialize(reader);
+}
+
+template <typename QuantTmpl, typename IOTmpl>
+double
+FlattenDataCell<QuantTmpl, IOTmpl>::MockRun() {
+    std::random_device rd;
+    std::mt19937 gen(rd());
+
+    uint32_t compute_size = std::min(OPTIMIZE_COMPUTE_SIZE, total_count_);
+    uint32_t sample_size = std::min(OPTIMIZE_SAMPLE_SIZE, total_count_);
+    std::uniform_int_distribution<InnerIdType> dist(0, sample_size - 1);
+
+    auto st = std::chrono::high_resolution_clock::now();
+    for (uint32_t i = 0; i < sample_size; ++i) {
+        // init computer
+        InnerIdType base_id = dist(gen);
+        bool release = false;
+        const auto* codes = this->GetCodesById(base_id, release);
+        Vector<float> query_raw_data(mock_dim_, allocator_);
+        this->Decode(codes, query_raw_data.data());
+
+        // init param
+        std::vector<InnerIdType> idx(compute_size, 0);
+        std::vector<float> dists(compute_size, 0);
+        for (uint32_t j = 0; j < compute_size; j++) {
+            idx[j] = dist(gen);
+        }
+
+        // mock run
+        this->query(dists.data(), query_raw_data.data(), idx.data(), compute_size);
+    }
+    auto ed = std::chrono::high_resolution_clock::now();
+    double time_cost = std::chrono::duration<double>(ed - st).count();
+    return time_cost;
 }
 }  // namespace vsag
