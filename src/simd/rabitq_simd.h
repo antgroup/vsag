@@ -17,6 +17,8 @@
 
 #include <cstdint>
 
+#include "simd_status.h"
+
 namespace vsag {
 namespace avx512 {
 float

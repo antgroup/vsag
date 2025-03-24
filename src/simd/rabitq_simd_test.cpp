@@ -36,19 +36,29 @@ TEST_CASE("RaBitQ FP32-BQ SIMD Compute Codes", "[ut][simd]") {
             auto* query = queries.data() + i * dim;
             auto* base = bases.data() + i * code_size;
 
-            auto ip_32_1_generic = generic::RaBitQFloatBinaryIP(query, base, dim, inv_sqrt_d);
-            auto ip_32_1_sse = sse::RaBitQFloatBinaryIP(query, base, dim, inv_sqrt_d);
-            auto ip_32_1_avx = avx::RaBitQFloatBinaryIP(query, base, dim, inv_sqrt_d);
-            auto ip_32_1_avx2 = avx2::RaBitQFloatBinaryIP(query, base, dim, inv_sqrt_d);
-            auto ip_32_1_avx512 = avx512::RaBitQFloatBinaryIP(query, base, dim, inv_sqrt_d);
-
             auto ip_32_32 = FP32ComputeIP(query, query, dim);
-
+            auto ip_32_1_generic = generic::RaBitQFloatBinaryIP(query, base, dim, inv_sqrt_d);
             REQUIRE(std::abs(ip_32_1_generic - ip_32_32) < 1e-4);
-            REQUIRE(std::abs(ip_32_1_sse - ip_32_32) < 1e-4);
-            REQUIRE(std::abs(ip_32_1_avx - ip_32_32) < 1e-4);
-            REQUIRE(std::abs(ip_32_1_avx2 - ip_32_32) < 1e-4);
-            REQUIRE(std::abs(ip_32_1_avx512 - ip_32_32) < 1e-4);
+
+            if (SimdStatus::SupportAVX512()) {
+                auto ip_32_1_avx512 = avx512::RaBitQFloatBinaryIP(query, base, dim, inv_sqrt_d);
+                REQUIRE(std::abs(ip_32_1_avx512 - ip_32_32) < 1e-4);
+            }
+
+            if (SimdStatus::SupportAVX2()) {
+                auto ip_32_1_avx2 = avx2::RaBitQFloatBinaryIP(query, base, dim, inv_sqrt_d);
+                REQUIRE(std::abs(ip_32_1_avx2 - ip_32_32) < 1e-4);
+            }
+
+            if (SimdStatus::SupportAVX()) {
+                auto ip_32_1_avx = avx::RaBitQFloatBinaryIP(query, base, dim, inv_sqrt_d);
+                REQUIRE(std::abs(ip_32_1_avx - ip_32_32) < 1e-4);
+            }
+
+            if (SimdStatus::SupportSSE()) {
+                auto ip_32_1_sse = sse::RaBitQFloatBinaryIP(query, base, dim, inv_sqrt_d);
+                REQUIRE(std::abs(ip_32_1_sse - ip_32_32) < 1e-4);
+            }
         }
     }
 }
