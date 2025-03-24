@@ -212,7 +212,7 @@ BasicSearcher::SetMockParameters(const GraphInterfacePtr& graph,
 
 double
 BasicSearcher::MockRun() const {
-    uint64_t sample_size = std::min(OPTIMIZE_SAMPLE_SIZE, mock_flatten_->TotalCount());
+    uint64_t sample_size = std::min(OPTIMIZE_SEARCHER_SAMPLE_SIZE, mock_flatten_->TotalCount());
 
     auto st = std::chrono::high_resolution_clock::now();
     for (uint32_t i = 0; i < sample_size; ++i) {

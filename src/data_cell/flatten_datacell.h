@@ -441,11 +441,10 @@ FlattenDataCell<QuantTmpl, IOTmpl>::MockRun() {
     std::mt19937 gen(rd());
 
     uint32_t compute_size = std::min(OPTIMIZE_COMPUTE_SIZE, total_count_);
-    uint32_t sample_size = std::min(OPTIMIZE_SAMPLE_SIZE, total_count_);
-    std::uniform_int_distribution<InnerIdType> dist(0, sample_size - 1);
+    std::uniform_int_distribution<InnerIdType> dist(0, total_count_ - 1);
 
     auto st = std::chrono::high_resolution_clock::now();
-    for (uint32_t i = 0; i < sample_size; ++i) {
+    for (uint32_t i = 0; i < OPTIMIZE_FLATTEN_SAMPLE_SIZE; ++i) {
         // init computer
         InnerIdType base_id = dist(gen);
         bool release = false;
