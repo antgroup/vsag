@@ -15,6 +15,8 @@
 
 #include "./search_eval_case.h"
 
+#include <omp.h>
+
 #include <cstdio>
 #include <fstream>
 #include <iostream>
@@ -148,9 +150,12 @@ SearchEvalCase::do_knn_search() {
     uint64_t topk = config_.top_k;
     auto query_count = this->dataset_ptr_->GetNumberOfQuery();
     this->logger_->Debug("query count is " + std::to_string(query_count));
-    auto min_query = std::max(query_count, 10000L);
+    auto min_query = std::max(query_count, 100'000L);
     for (auto& monitor : this->monitors_) {
         monitor->Start();
+
+        omp_set_num_threads(config_.num_threads_searching);
+#pragma omp parallel for schedule(dynamic)
         for (int64_t id = 0; id < min_query; ++id) {
             auto i = id % query_count;
             auto query = vsag::Dataset::Make();
