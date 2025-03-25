@@ -19,6 +19,23 @@ namespace vsag {
 
 static RaBitQFloatBinaryType
 GetRaBitQFloatBinaryIP() {
+    if (SimdStatus::SupportAVX512()) {
+#if defined(ENABLE_AVX512)
+        return avx512::RaBitQFloatBinaryIP;
+#endif
+    } else if (SimdStatus::SupportAVX2()) {
+#if defined(ENABLE_AVX2)
+        return avx2::RaBitQFloatBinaryIP;
+#endif
+    } else if (SimdStatus::SupportAVX()) {
+#if defined(ENABLE_AVX)
+        return avx::RaBitQFloatBinaryIP;
+#endif
+    } else if (SimdStatus::SupportSSE()) {
+#if defined(ENABLE_SSE)
+        return sse::RaBitQFloatBinaryIP;
+#endif
+    }
     return generic::RaBitQFloatBinaryIP;
 }
 

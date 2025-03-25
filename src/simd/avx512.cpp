@@ -16,6 +16,7 @@
 #include <immintrin.h>
 #endif
 
+#include <cassert>
 #include <cmath>
 
 #include "simd.h"
@@ -499,6 +500,42 @@ SQ8UniformComputeCodesIP(const uint8_t* codes1, const uint8_t* codes2, uint64_t 
     return static_cast<float>(result);
 #else
     return avx2::SQ8UniformComputeCodesIP(codes1, codes2, dim);
+#endif
+}
+
+float
+RaBitQFloatBinaryIP(const float* vector, const uint8_t* bits, uint64_t dim, float inv_sqrt_d) {
+#if defined(ENABLE_AVX512)
+    if (dim == 0) {
+        return 0.0f;
+    }
+
+    if (dim < 16) {
+        return avx2::RaBitQFloatBinaryIP(vector, bits, dim, inv_sqrt_d);
+    }
+
+    uint64_t d = 0;
+    __m512 sum = _mm512_setzero_ps();
+    const __m512 inv_sqrt_d_vec = _mm512_set1_ps(inv_sqrt_d);
+    const __m512 neg_inv_sqrt_d_vec = _mm512_set1_ps(-inv_sqrt_d);
+
+    for (; d + 16 <= dim; d += 16) {
+        __m512 vec = _mm512_loadu_ps(vector + d);
+
+        __mmask16 mask = static_cast<__mmask16>(bits[d / 8 + 1] << 8 | bits[d / 8]);
+
+        __m512 b_vec = _mm512_mask_blend_ps(mask, neg_inv_sqrt_d_vec, inv_sqrt_d_vec);
+
+        sum = _mm512_fmadd_ps(b_vec, vec, sum);
+    }
+
+    float result = _mm512_reduce_add_ps(sum);
+
+    result += avx2::RaBitQFloatBinaryIP(vector + d, bits + (d / 8), dim - d, inv_sqrt_d);
+
+    return result;
+#else
+    return avx2::RaBitQFloatBinaryIP(vector, bits, dim, inv_sqrt_d);
 #endif
 }
 
