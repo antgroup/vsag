@@ -46,6 +46,11 @@ public:
     virtual void
     InsertNeighborsById(InnerIdType id, const Vector<InnerIdType>& neighbor_ids) = 0;
 
+    virtual void
+    DeleteNeighborsById(InnerIdType id) {
+        throw VsagException(ErrorType::INTERNAL_ERROR, "DeleteNeighborsById is not implemented");
+    }
+
     virtual uint32_t
     GetNeighborSize(InnerIdType id) const = 0;
 
