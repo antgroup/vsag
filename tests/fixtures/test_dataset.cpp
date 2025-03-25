@@ -108,7 +108,8 @@ static TestDataset::DatasetPtr
 GenerateRandomDataset(uint64_t dim,
                       uint64_t count,
                       std::string metric_str = "l2",
-                      bool is_query = false) {
+                      bool is_query = false,
+                      uint64_t extra_info_size = 0) {
     auto base = vsag::Dataset::Make();
     bool need_normalize = (metric_str != "cosine");
     auto vecs =
@@ -128,6 +129,10 @@ GenerateRandomDataset(uint64_t dim,
         ->SparseVectors(CopyVector(GenerateSparseVectors(count)))
         ->NumElements(count)
         ->Owner(true);
+    if (extra_info_size != 0) {
+        auto extra_infos = fixtures::generate_extra_infos(count, extra_info_size);
+        base->ExtraInfos(CopyVector(extra_infos));
+    }
     return base;
 }
 
@@ -299,11 +304,13 @@ TestDataset::CreateTestDataset(uint64_t dim,
                                std::string metric_str,
                                bool with_path,
                                float valid_ratio,
-                               std::string vector_type) {
+                               std::string vector_type,
+                               uint64_t extra_info_size) {
     TestDatasetPtr dataset = std::shared_ptr<TestDataset>(new TestDataset);
     dataset->dim_ = dim;
     dataset->count_ = count;
-    dataset->base_ = GenerateRandomDataset(dim, count, metric_str);
+    dataset->base_ =
+        GenerateRandomDataset(dim, count, metric_str, false /*is_query*/, extra_info_size);
     constexpr uint64_t query_count = 100;
     dataset->query_ = GenerateRandomDataset(dim, query_count, metric_str, true);
     dataset->filter_query_ = dataset->query_;
