@@ -110,6 +110,8 @@ private:
     }
 
 private:
+    float inv_sqrt_d_{0};
+
     std::shared_ptr<RandomOrthogonalMatrix> rom_;
     std::vector<float> centroid_;  // TODO(ZXY): use centroids (e.g., IVF or Graph) outside
 
@@ -134,6 +136,9 @@ RaBitQuantizer<metric>::RaBitQuantizer(int dim, Allocator* allocator)
 
     // random orthogonal matrix
     rom_.reset(new RandomOrthogonalMatrix(dim, allocator));
+
+    // distance function related variable
+    inv_sqrt_d_ = 1.0f / sqrt(this->dim_);
 
     // base code layout
     size_t align_size = std::max(sizeof(error_type), sizeof(norm_type));
@@ -238,7 +243,8 @@ RaBitQuantizer<metric>::EncodeOneImpl(const DataType* data, uint8_t* codes) cons
     }
 
     // 4. compute encode error
-    error_type error = RaBitQFloatBinaryIP(normed_data.data(), codes + offset_code_, this->dim_);
+    error_type error =
+        RaBitQFloatBinaryIP(normed_data.data(), codes + offset_code_, this->dim_, inv_sqrt_d_);
 
     // 5. store norm and error
     *(norm_type*)(codes + offset_norm_) = norm;
@@ -263,12 +269,11 @@ RaBitQuantizer<metric>::DecodeOneImpl(const uint8_t* codes, DataType* data) {
     // 1. init
     Vector<DataType> normed_data(this->dim_, 0, this->allocator_);
     Vector<DataType> transformed_data(this->dim_, 0, this->allocator_);
-    float inv_sqrt_d = 1.0f / std::sqrt(static_cast<float>(this->dim_));
 
     // 2. decode with BQ
     for (uint64_t d = 0; d < this->dim_; ++d) {
         bool bit = ((codes[d / 8] >> (d % 8)) & 1) != 0;
-        normed_data[d] = bit ? inv_sqrt_d : -inv_sqrt_d;
+        normed_data[d] = bit ? inv_sqrt_d_ : -inv_sqrt_d_;
     }
 
     // 3. inverse normalize
@@ -308,7 +313,8 @@ RaBitQuantizer<metric>::ComputeQueryBaseImpl(const uint8_t* query_codes,
         base_error = (base_error > 0) ? 1.0f : -1.0f;
     }
 
-    float ip_bq_1_32 = RaBitQFloatBinaryIP((DataType*)query_codes, base_codes, this->dim_);
+    float ip_bq_1_32 =
+        RaBitQFloatBinaryIP((DataType*)query_codes, base_codes, this->dim_, inv_sqrt_d_);
     float ip_bb_1_32 = base_error;
     float ip_est = ip_bq_1_32 / ip_bb_1_32;
 
