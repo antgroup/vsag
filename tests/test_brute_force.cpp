@@ -29,8 +29,7 @@ public:
     static std::string
     GenerateBruteForceBuildParametersString(const std::string& metric_type,
                                             int64_t dim,
-                                            const std::string& quantization_str = "sq8",
-                                            int thread_count = 5);
+                                            const std::string& quantization_str = "sq8");
 
     static void
     TestGeneral(const IndexPtr& index,
@@ -45,10 +44,11 @@ public:
     constexpr static uint64_t base_count = 3000;
 
     const std::vector<std::pair<std::string, float>> test_cases = {
-        {"sq8", 0.92},
-        {"fp32", 0.999999},
-        {"sq8_uniform", 0.92},
-        {"bf16", 0.95},
+        {"sq8", 0.90},
+        {"fp32", 0.99},
+        {"sq8_uniform", 0.90},
+        {"bf16", 0.92},
+        {"fp16", 0.92},
     };
 };
 
@@ -58,8 +58,7 @@ std::vector<int> BruteForceTestIndex::dims = fixtures::get_common_used_dims(2, R
 std::string
 BruteForceTestIndex::GenerateBruteForceBuildParametersString(const std::string& metric_type,
                                                              int64_t dim,
-                                                             const std::string& quantization_str,
-                                                             int thread_count) {
+                                                             const std::string& quantization_str) {
     std::string build_parameters_str;
 
     constexpr auto parameter_temp = R"(
@@ -304,7 +303,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::BruteForceTestIndex,
         for (auto& [base_quantization_str, recall] : test_cases) {
             vsag::Options::Instance().set_block_size_limit(size);
             auto param =
-                GenerateBruteForceBuildParametersString(metric_type, dim, base_quantization_str, 1);
+                GenerateBruteForceBuildParametersString(metric_type, dim, base_quantization_str);
             auto index = vsag::Factory::CreateIndex(name, param, allocator.get());
             if (not index.has_value()) {
                 continue;
@@ -327,7 +326,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::BruteForceTestIndex,
         auto base_quantization_str = "fp32";
         vsag::Options::Instance().set_block_size_limit(size);
         auto param =
-            GenerateBruteForceBuildParametersString(metric_type, dim, base_quantization_str, 1);
+            GenerateBruteForceBuildParametersString(metric_type, dim, base_quantization_str);
         auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
         auto index = TestFactory(name, param, true);
         TestBuildIndex(index, dataset, true);

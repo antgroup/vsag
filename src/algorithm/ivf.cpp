@@ -77,6 +77,9 @@ IVF::CheckAndMappingExternalParam(const JsonType& external_param,
 IVF::IVF(const IVFParameterPtr& param, const IndexCommonParam& common_param)
     : InnerIndexInterface(param, common_param) {
     this->bucket_ = BucketInterface::MakeInstance(param->bucket_param, common_param);
+    if (this->bucket_ == nullptr) {
+        throw VsagException(ErrorType::INTERNAL_ERROR, "bucket init error");
+    }
     this->partition_strategy_ = std::make_shared<IVFNearestPartition>(
         bucket_->bucket_count_, common_param, IVFNearestPartitionTrainerType::KMeansTrainer);
 }
