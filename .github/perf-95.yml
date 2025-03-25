@@ -1,11 +1,13 @@
 global:
-  exporters:
-    e1: # give a name you like, will not be used
-      format: "text"
-      to: "stdout"
-    e2:
-      format: "json"
-      to: "/tmp/perf-95.json"
+    exporters:
+        e1: # give a name you like, will not be used
+            format: "text"
+            to: "stdout"
+        e2:
+            format: "json"
+            to: "/tmp/perf-95.json"
+    num_threads_building: 16
+    num_threads_searching: 4
 
 DEEP1B:
     datapath: "/tmp/data/deep-image-96-angular.hdf5"

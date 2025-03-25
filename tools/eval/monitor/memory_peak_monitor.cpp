@@ -15,6 +15,8 @@
 
 #include "memory_peak_monitor.h"
 
+#include <mutex>
+
 namespace vsag::eval {
 
 static std::string
@@ -41,6 +43,8 @@ MemoryPeakMonitor::GetResult() {
 }
 void
 MemoryPeakMonitor::Record(void* input) {
+    std::lock_guard<std::mutex> lock(record_mutex_);
+
     uint64_t val1, val2;
     this->infile_ >> val1 >> val2;
     this->infile_.clear();
