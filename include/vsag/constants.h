@@ -141,10 +141,14 @@ extern const char* const BRUTE_FORCE_QUANTIZATION_TYPE;
 extern const char* const BRUTE_FORCE_IO_TYPE;
 
 extern const char* const IVF_USE_RESIDUAL;
+extern const char* const IVF_USE_REORDER;
 extern const char* const IVF_TRAIN_TYPE;
 extern const char* const IVF_BUCKETS_COUNT;
 extern const char* const IVF_BASE_QUANTIZATION_TYPE;
 extern const char* const IVF_BASE_IO_TYPE;
 extern const char* const IVF_BASE_FILE_PATH;
+extern const char* const IVF_PRECISE_QUANTIZATION_TYPE;
+extern const char* const IVF_PRECISE_IO_TYPE;
+extern const char* const IVF_PRECISE_FILE_PATH;
 
 }  // namespace vsag

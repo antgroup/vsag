@@ -53,12 +53,12 @@ public:
     Train(const void* data, uint64_t count) override;
 
     void
-    InsertVector(const void* vector, BucketIdType bucket_id, LabelType label) override;
+    InsertVector(const void* vector, BucketIdType bucket_id, InnerIdType inner_id) override;
 
-    LabelType*
-    GetLabel(BucketIdType bucket_id) override {
+    InnerIdType*
+    GetInnerIds(BucketIdType bucket_id) override {
         check_valid_bucket_id(bucket_id);
-        return this->labels_[bucket_id].data();
+        return this->inner_ids_[bucket_id].data();
     }
 
     void
@@ -120,7 +120,7 @@ private:
 
     Vector<std::shared_mutex> bucket_mutexes_;
 
-    Vector<Vector<LabelType>> labels_;
+    Vector<Vector<InnerIdType>> inner_ids_;
 
     Allocator* const allocator_{nullptr};
 };
@@ -133,9 +133,9 @@ BucketDataCell<QuantTmpl, IOTmpl>::BucketDataCell(const QuantizerParamPtr& quant
     : BucketInterface(),
       datas_(common_param.allocator_.get()),
       bucket_sizes_(bucket_count, 0, common_param.allocator_.get()),
-      labels_(bucket_count,
-              Vector<LabelType>(common_param.allocator_.get()),
-              common_param.allocator_.get()),
+      inner_ids_(bucket_count,
+                 Vector<InnerIdType>(common_param.allocator_.get()),
+                 common_param.allocator_.get()),
       bucket_mutexes_(bucket_count, common_param.allocator_.get()),
       allocator_(common_param.allocator_.get()) {
     this->bucket_count_ = bucket_count;
@@ -211,14 +211,14 @@ template <typename QuantTmpl, typename IOTmpl>
 void
 BucketDataCell<QuantTmpl, IOTmpl>::InsertVector(const void* vector,
                                                 BucketIdType bucket_id,
-                                                LabelType label) {
+                                                InnerIdType inner_id) {
     check_valid_bucket_id(bucket_id);
     InnerIdType locate;
     {
         std::lock_guard lock(this->bucket_mutexes_[bucket_id]);
         locate = this->bucket_sizes_[bucket_id];
         this->bucket_sizes_[bucket_id]++;
-        labels_[bucket_id].emplace_back(label);
+        inner_ids_[bucket_id].emplace_back(inner_id);
     }
     this->insert_vector_with_locate(reinterpret_cast<const float*>(vector), bucket_id, locate);
 }
@@ -243,7 +243,7 @@ BucketDataCell<QuantTmpl, IOTmpl>::Serialize(StreamWriter& writer) {
     quantizer_->Serialize(writer);
     for (BucketIdType i = 0; i < this->bucket_count_; ++i) {
         datas_[i]->Serialize(writer);
-        StreamWriter::WriteVector(writer, labels_[i]);
+        StreamWriter::WriteVector(writer, inner_ids_[i]);
     }
     StreamWriter::WriteVector(writer, this->bucket_sizes_);
 }
@@ -255,7 +255,7 @@ BucketDataCell<QuantTmpl, IOTmpl>::Deserialize(StreamReader& reader) {
     quantizer_->Deserialize(reader);
     for (BucketIdType i = 0; i < this->bucket_count_; ++i) {
         datas_[i]->Deserialize(reader);
-        StreamReader::ReadVector(reader, labels_[i]);
+        StreamReader::ReadVector(reader, inner_ids_[i]);
     }
     StreamReader::ReadVector(reader, this->bucket_sizes_);
 }
