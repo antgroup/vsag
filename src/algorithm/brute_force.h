@@ -91,9 +91,6 @@ private:
     split_dataset_by_duplicate_label(const DatasetPtr& dataset,
                                      std::vector<LabelType>& failed_ids) const;
 
-    void
-    init_feature_list();
-
 private:
     FlattenInterfacePtr inner_codes_{nullptr};
 
