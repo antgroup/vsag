@@ -37,11 +37,11 @@ namespace vsag {
  * add neighbors and pruning
  * retrieve neighbors
  */
-template <typename IOTmpl, bool is_adapter>
+template <typename IOTmpl>
 class GraphDataCell;
 
 template <typename IOTmpl>
-class GraphDataCell<IOTmpl, false> : public GraphInterface {
+class GraphDataCell : public GraphInterface {
 public:
     explicit GraphDataCell(const GraphInterfaceParamPtr& graph_param,
                            const IndexCommonParam& common_param);
@@ -95,8 +95,8 @@ private:
 };
 
 template <typename IOTmpl>
-GraphDataCell<IOTmpl, false>::GraphDataCell(const GraphDataCellParamPtr& param,
-                                            const IndexCommonParam& common_param) {
+GraphDataCell<IOTmpl>::GraphDataCell(const GraphDataCellParamPtr& param,
+                                     const IndexCommonParam& common_param) {
     this->io_ = std::make_shared<IOTmpl>(param->io_parameter_, common_param);
     this->maximum_degree_ = param->max_degree_;
     this->max_capacity_ = param->init_max_capacity_;
@@ -104,16 +104,16 @@ GraphDataCell<IOTmpl, false>::GraphDataCell(const GraphDataCellParamPtr& param,
 }
 
 template <typename IOTmpl>
-GraphDataCell<IOTmpl, false>::GraphDataCell(const GraphInterfaceParamPtr& param,
-                                            const IndexCommonParam& common_param)
-    : GraphDataCell<IOTmpl, false>(std::dynamic_pointer_cast<GraphDataCellParameter>(param),
-                                   common_param) {
+GraphDataCell<IOTmpl>::GraphDataCell(const GraphInterfaceParamPtr& param,
+                                     const IndexCommonParam& common_param)
+    : GraphDataCell<IOTmpl>(std::dynamic_pointer_cast<GraphDataCellParameter>(param),
+                            common_param) {
 }
 
 template <typename IOTmpl>
 void
-GraphDataCell<IOTmpl, false>::InsertNeighborsById(InnerIdType id,
-                                                  const Vector<InnerIdType>& neighbor_ids) {
+GraphDataCell<IOTmpl>::InsertNeighborsById(InnerIdType id,
+                                           const Vector<InnerIdType>& neighbor_ids) {
     if (neighbor_ids.size() > this->maximum_degree_) {
         logger::warn(fmt::format(
             "insert neighbors count {} more than {}", neighbor_ids.size(), this->maximum_degree_));
@@ -133,7 +133,7 @@ GraphDataCell<IOTmpl, false>::InsertNeighborsById(InnerIdType id,
 
 template <typename IOTmpl>
 uint32_t
-GraphDataCell<IOTmpl, false>::GetNeighborSize(InnerIdType id) const {
+GraphDataCell<IOTmpl>::GetNeighborSize(InnerIdType id) const {
     auto start = static_cast<uint64_t>(id) * static_cast<uint64_t>(this->code_line_size_);
     uint32_t result = 0;
     this->io_->Read(sizeof(result), start, (uint8_t*)(&result));
@@ -142,8 +142,7 @@ GraphDataCell<IOTmpl, false>::GetNeighborSize(InnerIdType id) const {
 
 template <typename IOTmpl>
 void
-GraphDataCell<IOTmpl, false>::GetNeighbors(InnerIdType id,
-                                           Vector<InnerIdType>& neighbor_ids) const {
+GraphDataCell<IOTmpl>::GetNeighbors(InnerIdType id, Vector<InnerIdType>& neighbor_ids) const {
     auto start = static_cast<uint64_t>(id) * static_cast<uint64_t>(this->code_line_size_);
     uint32_t neighbor_count = 0;
     this->io_->Read(sizeof(neighbor_count), start, (uint8_t*)(&neighbor_count));
@@ -155,7 +154,7 @@ GraphDataCell<IOTmpl, false>::GetNeighbors(InnerIdType id,
 
 template <typename IOTmpl>
 void
-GraphDataCell<IOTmpl, false>::Resize(InnerIdType new_size) {
+GraphDataCell<IOTmpl>::Resize(InnerIdType new_size) {
     if (new_size < this->max_capacity_) {
         return;
     }
@@ -168,7 +167,7 @@ GraphDataCell<IOTmpl, false>::Resize(InnerIdType new_size) {
 
 template <typename IOTmpl>
 void
-GraphDataCell<IOTmpl, false>::Serialize(StreamWriter& writer) {
+GraphDataCell<IOTmpl>::Serialize(StreamWriter& writer) {
     GraphInterface::Serialize(writer);
     this->io_->Serialize(writer);
     StreamWriter::WriteObj(writer, this->code_line_size_);
@@ -176,7 +175,7 @@ GraphDataCell<IOTmpl, false>::Serialize(StreamWriter& writer) {
 
 template <typename IOTmpl>
 void
-GraphDataCell<IOTmpl, false>::Deserialize(StreamReader& reader) {
+GraphDataCell<IOTmpl>::Deserialize(StreamReader& reader) {
     GraphInterface::Deserialize(reader);
     this->io_->Deserialize(reader);
     StreamReader::ReadObj(reader, this->code_line_size_);
