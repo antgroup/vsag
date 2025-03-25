@@ -33,11 +33,11 @@ GraphInterface::MakeInstance(const GraphInterfaceParamPtr& param,
         std::dynamic_pointer_cast<GraphDataCellParameter>(param)->io_parameter_->GetTypeName();
 
     if (io_string == IO_TYPE_VALUE_BLOCK_MEMORY_IO) {
-        return std::make_shared<GraphDataCell<MemoryBlockIO, false>>(param, common_param);
+        return std::make_shared<GraphDataCell<MemoryBlockIO>>(param, common_param);
     }
 
     if (io_string == IO_TYPE_VALUE_MEMORY_IO) {
-        return std::make_shared<GraphDataCell<MemoryIO, false>>(param, common_param);
+        return std::make_shared<GraphDataCell<MemoryIO>>(param, common_param);
     }
 
     return nullptr;
