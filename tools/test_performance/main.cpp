@@ -33,6 +33,23 @@ using namespace spdlog;
 using namespace vsag;
 using namespace vsag::eval;
 
+static double
+get_recall(const float* distances,
+           const float* ground_truth_distances,
+           size_t recall_num,
+           size_t top_k) {
+    std::vector<float> gt_distances(ground_truth_distances, ground_truth_distances + top_k);
+    std::sort(gt_distances.begin(), gt_distances.end());
+    float threshold = gt_distances[top_k - 1];
+    size_t count = 0;
+    for (size_t i = 0; i < recall_num; ++i) {
+        if (distances[i] <= threshold + 2e-6) {
+            ++count;
+        }
+    }
+    return static_cast<double>(count) / static_cast<double>(top_k);
+}
+
 json
 run_test(const std::string& index_name,
          const std::string& process,
@@ -206,7 +223,7 @@ public:
 
         // search
         auto search_start = std::chrono::steady_clock::now();
-        int64_t correct = 0;
+        double correct = 0;
         int64_t total = eval_dataset->GetNumberOfQuery();
         spdlog::debug("total: " + std::to_string(total));
         std::vector<DatasetPtr> results;
@@ -231,16 +248,27 @@ public:
         }
         auto search_finish = std::chrono::steady_clock::now();
 
+        size_t dim = eval_dataset->GetDim();
         // calculate recall
         for (int64_t i = 0; i < total; ++i) {
             // k@k
-            int64_t* neighbors = eval_dataset->GetNeighbors(i);
-            const int64_t* ground_truth = results[i]->GetIds();
-            auto hit_result = get_intersection(neighbors, ground_truth, top_k, top_k);
-            correct += hit_result.size();
+            int64_t* ground_truth = eval_dataset->GetNeighbors(i);
+            const int64_t* neighbors = results[i]->GetIds();
+            auto distances_neighbors = std::shared_ptr<float[]>(new float[top_k]);
+            auto distances_gt = std::shared_ptr<float[]>(new float[top_k]);
+            auto dist_func = eval_dataset->GetDistanceFunc();
+            for (int j = 0; j < top_k; ++j) {
+                distances_neighbors[j] = dist_func(
+                    eval_dataset->GetOneTrain(neighbors[j]), eval_dataset->GetOneTest(i), &dim);
+                distances_gt[j] = dist_func(
+                    eval_dataset->GetOneTrain(ground_truth[j]), eval_dataset->GetOneTest(i), &dim);
+            }
+            auto hit_result =
+                get_recall(distances_neighbors.get(), distances_gt.get(), top_k, top_k);
+            correct += hit_result;
         }
         spdlog::debug("correct: " + std::to_string(correct));
-        float recall = 1.0 * correct / (total * top_k);
+        float recall = correct / total;
 
         json output;
         // input
