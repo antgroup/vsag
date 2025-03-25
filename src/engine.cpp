@@ -22,6 +22,8 @@
 #include "algorithm/brute_force.h"
 #include "algorithm/hgraph.h"
 #include "algorithm/ivf.h"
+#include "algorithm/pyramid.h"
+#include "algorithm/pyramid_zparameters.h"
 #include "algorithm/sparse_index.h"
 #include "common.h"
 #include "index/diskann.h"
@@ -30,8 +32,6 @@
 #include "index/hnsw_zparameters.h"
 #include "index/index_common_param.h"
 #include "index/index_impl.h"
-#include "index/pyramid.h"
-#include "index/pyramid_zparameters.h"
 #include "resource_owner_wrapper.h"
 #include "safe_thread_pool.h"
 #include "typing.h"
@@ -130,10 +130,10 @@ Engine::CreateIndex(const std::string& origin_name, const std::string& parameter
             CHECK_ARGUMENT(parsed_params.contains(INDEX_PARAM),
                            fmt::format("parameters must contains {}", INDEX_PARAM));
             auto& pyramid_param_obj = parsed_params[INDEX_PARAM];
-            PyramidParameters pyramid_params;
-            pyramid_params.FromJson(pyramid_param_obj);
             logger::debug("created a pyramid index");
-            return std::make_shared<Pyramid>(pyramid_params, index_common_params);
+            auto pyramid_index =
+                std::make_shared<IndexImpl<Pyramid>>(pyramid_param_obj, index_common_params);
+            return pyramid_index;
         } else if (name == INDEX_SPARSE) {
             logger::debug("created a sparse index");
             JsonType sparse_json;
