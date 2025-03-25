@@ -1889,18 +1889,20 @@ int64_t PQFlashIndex<T, LabelT>::cached_beam_search_memory(const T *query, const
             std::promise<bool> promise;
             auto future = promise.get_future();
             std::atomic<int> remaining_ops(sorted_read_reqs.size());
-            CallBack callBack = [&promise, &remaining_ops] (vsag::IOErrorCode code, const std::string& message){
-                if ((int) code == 0) {
-                    if (--remaining_ops == 0) {
-                        promise.set_value(true);
-                    }
-                } else {
-                    remaining_ops = 0;
-                    promise.set_value(false);
+            bool succeed = true;
+            CallBack callBack = [&succeed, &promise, &remaining_ops] (vsag::IOErrorCode code, const std::string& message) {
+                if ((int) code != 0) {
+                    succeed = false;
+                }
+                if (--remaining_ops == 0) {
+                    promise.set_value(succeed);
                 }
             };
             reader->read(sorted_read_reqs, true, callBack);
-            future.get();
+            bool final_success = future.get();
+            if (not final_success) {
+                continue;
+            }
 #ifndef NDEBUG
             if (stats != nullptr) {
                 stats->io_us += (float) io_times.elapsed();
