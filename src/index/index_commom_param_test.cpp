@@ -21,7 +21,7 @@
 TEST_CASE("IndexCommonParam Basic Test", "[ut][IndexCommonParam]") {
     std::shared_ptr<vsag::Resource> resource =
         std::make_shared<vsag::ResourceOwnerWrapper>(new vsag::Resource(), true);
-    SECTION("worng metric type") {
+    SECTION("wrong metric type") {
         auto build_parameter_json = R"(
         {
             "metric_type": "unknown type",
@@ -33,7 +33,7 @@ TEST_CASE("IndexCommonParam Basic Test", "[ut][IndexCommonParam]") {
         REQUIRE_THROWS(vsag::IndexCommonParam::CheckAndCreate(parsed_params, resource));
     }
 
-    SECTION("worng data type") {
+    SECTION("wrong data type") {
         auto build_parameter_json = R"(
         {
             "metric_type": "l2",
@@ -45,7 +45,7 @@ TEST_CASE("IndexCommonParam Basic Test", "[ut][IndexCommonParam]") {
         REQUIRE_THROWS(vsag::IndexCommonParam::CheckAndCreate(parsed_params, resource));
     }
 
-    SECTION("worng dim") {
+    SECTION("wrong dim") {
         auto build_parameter_json = R"(
         {
             "metric_type": "l2",
@@ -55,5 +55,22 @@ TEST_CASE("IndexCommonParam Basic Test", "[ut][IndexCommonParam]") {
         )";
         auto parsed_params = nlohmann::json::parse(build_parameter_json);
         REQUIRE_THROWS(vsag::IndexCommonParam::CheckAndCreate(parsed_params, resource));
+    }
+
+    SECTION("success") {
+        auto build_parameter_json = R"(
+        {
+            "metric_type": "l2",
+            "dtype": "float32",
+            "dim": 12,
+            "extra_info_size": 38
+        }
+        )";
+        auto parsed_params = nlohmann::json::parse(build_parameter_json);
+        auto param = vsag::IndexCommonParam::CheckAndCreate(parsed_params, resource);
+        REQUIRE(param.metric_ == vsag::MetricType::METRIC_TYPE_L2SQR);
+        REQUIRE(param.dim_ == 12);
+        REQUIRE(param.extra_info_size_ == 38);
+        REQUIRE(param.data_type_ == vsag::DataTypes::DATA_TYPE_FLOAT);
     }
 }

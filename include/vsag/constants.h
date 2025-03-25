@@ -32,6 +32,9 @@ extern const char* const FLOAT32_VECTORS;
 extern const char* const SPARSE_VECTORS;
 extern const char* const INT8_VECTORS;
 extern const char* const DATASET_PATHS;
+extern const char* const EXTRA_INFOS;
+extern const char* const EXTRA_INFO_SIZE;
+
 extern const char* const HNSW_DATA;
 extern const char* const CONJUGATE_GRAPH_DATA;
 extern const char* const DISKANN_PQ;
@@ -47,7 +50,6 @@ extern const char* const METRIC_IP;
 extern const char* const DATATYPE_FLOAT32;
 extern const char* const DATATYPE_INT8;
 extern const char* const BLANK_INDEX;
-extern const char* const EXTRA_INFOS;
 
 // parameters
 extern const char* const PARAMETER_DTYPE;

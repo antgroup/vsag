@@ -35,7 +35,6 @@ TestExtraInfoDataCell(ExtraInfoDataCellParamPtr& param, IndexCommonParam& common
 
     ExtraInfoInterfaceTest test(extra_info);
     test.TestForceInMemory(count);
-
     test.BasicTest(count);
 
     auto other = ExtraInfoInterface::MakeInstance(param, common_param);
@@ -48,18 +47,15 @@ TEST_CASE("ExtraInfoDataCell Basic Test", "[ut][ExtraInfoDataCell] ") {
     uint64_t extra_info_sizes[3] = {32, 128, 512};
     int dim = 512;
     MetricType metric = MetricType::METRIC_TYPE_L2SQR;
-    constexpr const char* param_temp =
+    constexpr const char* param_str =
         R"(
-        {{
-            "io_params": {{
+        {
+            "io_params": {
                 "type": "block_memory_io"
-            }},
-            "extra_info_size": {}
-        }}
+            }
+        }
         )";
     for (auto& extra_info_size : extra_info_sizes) {
-        auto param_str = fmt::format(param_temp, extra_info_size);
-        logger::debug("param_str: {}", param_str);
         auto param_json = JsonType::parse(param_str);
         logger::debug("param_json: {}", param_json.dump());
         auto param = std::make_shared<ExtraInfoDataCellParameter>();
@@ -71,6 +67,7 @@ TEST_CASE("ExtraInfoDataCell Basic Test", "[ut][ExtraInfoDataCell] ") {
         common_param.allocator_ = allocator;
         common_param.dim_ = dim;
         common_param.metric_ = metric;
+        common_param.extra_info_size_ = extra_info_size;
 
         TestExtraInfoDataCell(param, common_param);
     }

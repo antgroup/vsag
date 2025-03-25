@@ -42,6 +42,17 @@ TEST_CASE("Dataset Implement Test", "[ut][dataset]") {
         delete[] data;
     }
 
+    SECTION("extra_info") {
+        auto dataset = vsag::Dataset::Make();
+        std::string extra_info = "0123456789";
+        int64_t extra_info_size = 2;
+        dataset->ExtraInfoSize(extra_info_size)->ExtraInfos(extra_info.c_str())->Owner(false);
+
+        REQUIRE(dataset->GetExtraInfoSize() == extra_info_size);
+        auto* get_result = dataset->GetExtraInfos();
+        REQUIRE(get_result[6] == '6');
+    }
+
     SECTION("sparse vector") {
         uint32_t size = 100;
         uint32_t max_dim = 256;

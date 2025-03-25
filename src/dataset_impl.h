@@ -231,6 +231,20 @@ public:
         return nullptr;
     }
 
+    DatasetPtr
+    ExtraInfoSize(int64_t extra_info_size) override {
+        this->data_[EXTRA_INFO_SIZE] = extra_info_size;
+        return shared_from_this();
+    }
+
+    int64_t
+    GetExtraInfoSize() const override {
+        if (auto iter = this->data_.find(EXTRA_INFO_SIZE); iter != this->data_.end()) {
+            return std::get<int64_t>(iter->second);
+        }
+        return 0;
+    }
+
 private:
     bool owner_ = true;
     std::unordered_map<std::string, var> data_;
