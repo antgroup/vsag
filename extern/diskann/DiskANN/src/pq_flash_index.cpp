@@ -1901,7 +1901,7 @@ int64_t PQFlashIndex<T, LabelT>::cached_beam_search_memory(const T *query, const
             reader->read(sorted_read_reqs, true, callBack);
             bool final_success = future.get();
             if (not final_success) {
-                continue;
+                throw diskann::ANNException("io error in search proccess", -1);
             }
 #ifndef NDEBUG
             if (stats != nullptr) {
