@@ -223,7 +223,7 @@ public:
 
         // search
         auto search_start = std::chrono::steady_clock::now();
-        int64_t correct = 0;
+        double correct = 0;
         int64_t total = eval_dataset->GetNumberOfQuery();
         spdlog::debug("total: " + std::to_string(total));
         std::vector<DatasetPtr> results;
@@ -268,7 +268,7 @@ public:
             correct += hit_result;
         }
         spdlog::debug("correct: " + std::to_string(correct));
-        float recall = 1.0 * correct / total;
+        float recall = correct / total;
 
         json output;
         // input
