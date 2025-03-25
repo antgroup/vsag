@@ -48,7 +48,8 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
       use_reorder_(hgraph_param->use_reorder),
       ignore_reorder_(hgraph_param->ignore_reorder),
       ef_construct_(hgraph_param->ef_construction),
-      build_thread_count_(hgraph_param->build_thread_count) {
+      build_thread_count_(hgraph_param->build_thread_count),
+      extra_info_size_(hgraph_param->extra_info_param->extra_info_size) {
     neighbors_mutex_ = std::make_shared<PointsMutex>(0, common_param.allocator_.get());
     this->basic_flatten_codes_ =
         FlattenInterface::MakeInstance(hgraph_param->base_codes_param, common_param);
@@ -64,6 +65,11 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
     resize(bottom_graph_->max_capacity_);
     if (this->build_thread_count_ > 1) {
         this->build_pool_ = SafeThreadPool::FactoryDefaultThreadPool();
+    }
+    this->init_features();
+    if (extra_info_size_ > 0) {
+        this->extra_infos_ =
+            ExtraInfoInterface::MakeInstance(hgraph_param->extra_info_param, common_param);
     }
 }
 
@@ -103,6 +109,11 @@ HGraph::Add(const DatasetPtr& data) {
                                                          data_ptr->GetNumElements());
         }
         this->hnsw_add(data_ptr);
+        const auto* data_extra_info = data->GetExtraInfos();
+        if (this->extra_info_size_ > 0 && data_extra_info != nullptr) {
+            this->extra_infos_->BatchInsertExtraInfo(data_ptr->GetExtraInfos(),
+                                                     data_ptr->GetNumElements());
+        }
     }
     return failed_ids;
 }
@@ -162,9 +173,18 @@ HGraph::KnnSearch(const DatasetPtr& query,
     }
     auto count = static_cast<const int64_t>(search_result.size());
     auto [dataset_results, dists, ids] = CreateFastDataset(count, allocator_);
+    char* extra_infos = nullptr;
+    if (extra_info_size_ > 0) {
+        extra_infos = (char*)allocator_->Allocate(extra_info_size_ * search_result.size());
+        dataset_results->ExtraInfos(extra_infos);
+    }
     for (int64_t j = count - 1; j >= 0; --j) {
         dists[j] = search_result.top().first;
         ids[j] = this->label_table_->GetLabelById(search_result.top().second);
+        if (extra_infos != nullptr) {
+            this->extra_infos_->GetExtraInfoById(search_result.top().second,
+                                                 extra_infos + extra_info_size_ * j);
+        }
         search_result.pop();
     }
     return std::move(dataset_results);
@@ -197,6 +217,11 @@ HGraph::EstimateMemory(uint64_t num_elements) const {
     if (use_reorder_ && this->high_precise_codes_->InMemory() && not this->ignore_reorder_) {
         auto precise_memory = this->high_precise_codes_->code_size_ * element_count;
         estimate_memory += block_memory_ceil(precise_memory, block_size);
+    }
+
+    if (extra_info_size_ > 0 && this->extra_infos_ != nullptr && this->extra_infos_->InMemory()) {
+        auto extra_info_memory = this->extra_infos_->ExtraInfoSize() * element_count;
+        estimate_memory += block_memory_ceil(extra_info_memory, block_size);
     }
 
     auto label_map_memory =
@@ -340,9 +365,18 @@ HGraph::RangeSearch(const DatasetPtr& query,
 
     auto count = static_cast<const int64_t>(search_result.size());
     auto [dataset_results, dists, ids] = CreateFastDataset(count, allocator_);
+    char* extra_infos = nullptr;
+    if (extra_info_size_ > 0) {
+        extra_infos = (char*)allocator_->Allocate(extra_info_size_ * search_result.size());
+        dataset_results->ExtraInfos(extra_infos);
+    }
     for (int64_t j = count - 1; j >= 0; --j) {
         dists[j] = search_result.top().first;
         ids[j] = this->label_table_->GetLabelById(search_result.top().second);
+        if (extra_infos != nullptr) {
+            this->extra_infos_->GetExtraInfoById(search_result.top().second,
+                                                 extra_infos + extra_info_size_ * j);
+        }
         search_result.pop();
     }
     return std::move(dataset_results);
@@ -383,6 +417,9 @@ HGraph::Serialize(StreamWriter& writer) const {
     for (auto i = 0; i < this->max_level_; ++i) {
         this->route_graphs_[i]->Serialize(writer);
     }
+    if (this->extra_info_size_ > 0 && this->extra_infos_ != nullptr) {
+        this->extra_infos_->Serialize(writer);
+    }
 }
 
 void
@@ -403,6 +440,9 @@ HGraph::Deserialize(StreamReader& reader) {
     }
     this->neighbors_mutex_->Resize(max_capacity_);
     pool_ = std::make_shared<VisitedListPool>(1, allocator_, max_capacity_, allocator_);
+    if (this->extra_info_size_ > 0 && this->extra_infos_ != nullptr) {
+        this->extra_infos_->Deserialize(reader);
+    }
 }
 
 void
@@ -768,6 +808,13 @@ static const ConstParamMap EXTERNAL_MAPPING = {
             SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE,
         },
     },
+    {
+        HGRAPH_EXTRA_INFO_SIZE,
+        {
+            HGRAPH_EXTRA_INFO_KEY,
+            EXTRA_INFO_SIZE,
+        },
+    },
 };
 
 static const std::string HGRAPH_PARAMS_TEMPLATE =
@@ -809,6 +856,13 @@ static const std::string HGRAPH_PARAMS_TEMPLATE =
         "{BUILD_PARAMS_KEY}": {
             "{BUILD_EF_CONSTRUCTION}": 400,
             "{BUILD_THREAD_COUNT}": 100
+        },
+        "{HGRAPH_EXTRA_INFO_KEY}": {
+            "{IO_PARAMS_KEY}": {
+                "{IO_TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
+                "{IO_FILE_PATH}": "{DEFAULT_FILE_PATH_VALUE}"
+            },
+            "{EXTRA_INFO_SIZE}": 0
         }
     })";
 

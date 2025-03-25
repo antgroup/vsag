@@ -10,12 +10,13 @@ TestDatasetPool::GetDatasetAndCreate(uint64_t dim,
                                      uint64_t count,
                                      const std::string& metric_str,
                                      bool with_path,
-                                     float valid_ratio) {
-    auto key = key_gen(dim, count, metric_str, with_path, valid_ratio);
+                                     float valid_ratio,
+                                     uint64_t extra_info_size) {
+    auto key = key_gen(dim, count, metric_str, with_path, valid_ratio, extra_info_size);
     if (this->pool_.find(key) == this->pool_.end()) {
         this->dim_counts_.emplace_back(dim, count);
-        this->pool_[key] =
-            TestDataset::CreateTestDataset(dim, count, metric_str, with_path, valid_ratio, "dense");
+        this->pool_[key] = TestDataset::CreateTestDataset(
+            dim, count, metric_str, with_path, valid_ratio, "dense", extra_info_size);
     }
     return this->pool_.at(key);
 }
@@ -24,9 +25,11 @@ TestDatasetPool::key_gen(int64_t dim,
                          uint64_t count,
                          const std::string& metric_str,
                          bool with_path,
-                         float filter_ratio) {
+                         float filter_ratio,
+                         uint64_t extra_info_size) {
     return std::to_string(dim) + "_" + std::to_string(count) + "_" + metric_str + "_" +
-           std::to_string(with_path) + "_" + std::to_string(filter_ratio);
+           std::to_string(with_path) + "_" + std::to_string(filter_ratio) +
+           std::to_string(extra_info_size);
 }
 
 TestDatasetPtr

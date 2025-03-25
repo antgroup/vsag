@@ -29,6 +29,7 @@ const char* const HGRAPH_IGNORE_REORDER_KEY = "ignore_reorder";
 const char* const HGRAPH_GRAPH_KEY = "graph";
 const char* const HGRAPH_BASE_CODES_KEY = "base_codes";
 const char* const HGRAPH_PRECISE_CODES_KEY = "precise_codes";
+const char* const HGRAPH_EXTRA_INFO_KEY = "extra_info";
 
 // IO param key
 const char* const IO_PARAMS_KEY = "io_params";
@@ -65,6 +66,7 @@ const char* const GRAPH_PARAM_INIT_MAX_CAPACITY = "init_capacity";
 const char* const BUILD_PARAMS_KEY = "build_params";
 const char* const BUILD_THREAD_COUNT = "build_thread_count";
 const char* const BUILD_EF_CONSTRUCTION = "ef_construction";
+const char* const EXTRA_INFO_SIZE = "extra_info_size";
 
 const char* const SPARSE_NEED_SORT = "need_sort";
 
@@ -111,6 +113,8 @@ const std::unordered_map<std::string, std::string> DEFAULT_MAP = {
     {"SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE", SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE},
     {"IVF_SEARCH_PARAM_SCAN_BUCKETS_COUNT", IVF_SEARCH_PARAM_SCAN_BUCKETS_COUNT},
     {"IVF_TRAIN_TYPE_KEY", IVF_TRAIN_TYPE_KEY},
+    {"HGRAPH_EXTRA_INFO_KEY", HGRAPH_EXTRA_INFO_KEY},
+    {"EXTRA_INFO_SIZE", EXTRA_INFO_SIZE},
 };
 
 }  // namespace vsag

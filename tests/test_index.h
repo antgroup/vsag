@@ -175,6 +175,13 @@ protected:
     static void
     TestCheckIdExist(const IndexPtr& index, const TestDatasetPtr& dataset);
 
+    static void
+    TestSearchWithExtraInfo(const IndexPtr& index,
+                            const TestDatasetPtr& dataset,
+                            const std::string& search_param,
+                            int64_t extra_info_size,
+                            float expected_recall = 0.99);
+
     constexpr static float RECALL_THRESHOLD = 0.95;
 };
 
