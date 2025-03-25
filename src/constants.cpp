@@ -50,6 +50,7 @@ const char* const METRIC_IP = "ip";
 const char* const DATATYPE_FLOAT32 = "float32";
 const char* const DATATYPE_INT8 = "int8";
 const char* const BLANK_INDEX = "blank_index";
+const char* const EXTRA_INFOS = "extra_infos";
 
 // parameters
 const char* const PARAMETER_DTYPE = "dtype";
@@ -133,6 +134,7 @@ const char* const HGRAPH_BASE_FILE_PATH = "base_file_path";
 const char* const HGRAPH_PRECISE_IO_TYPE = "precise_io_type";
 const char* const HGRAPH_PRECISE_FILE_PATH = "precise_file_path";
 const char* const HGRAPH_PARAMETER_EF_RUNTIME = "ef_search";
+const char* const HGRAPH_EXTRA_INFO_SIZE = "extra_info_size";
 
 const char* const BRUTE_FORCE_QUANTIZATION_TYPE = "quantization_type";
 const char* const BRUTE_FORCE_IO_TYPE = "io_type";

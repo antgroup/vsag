@@ -135,6 +135,9 @@ generate_index(const std::string& name,
                std::vector<float>& vectors,
                bool use_conjugate_graph = false);
 
+std::vector<char>
+generate_extra_infos(uint64_t count, uint32_t size, int seed = 47);
+
 float
 test_knn_recall(const vsag::IndexPtr& index,
                 const std::string& search_parameters,

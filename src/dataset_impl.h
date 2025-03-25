@@ -51,6 +51,7 @@ public:
             allocator_->Deallocate((void*)this->GetInt8Vectors());
             allocator_->Deallocate((void*)this->GetFloat32Vectors());
             allocator_->Deallocate((void*)this->GetPaths());
+            allocator_->Deallocate((void*)this->GetExtraInfos());
 
             if (this->GetSparseVectors()) {
                 for (int i = 0; i < this->GetNumElements(); i++) {
@@ -66,6 +67,7 @@ public:
             delete[] this->GetInt8Vectors();
             delete[] this->GetFloat32Vectors();
             delete[] this->GetPaths();
+            delete[] this->GetExtraInfos();
 
             if (this->GetSparseVectors()) {
                 for (int i = 0; i < this->GetNumElements(); i++) {
@@ -211,6 +213,20 @@ public:
     GetPaths() const override {
         if (auto iter = this->data_.find(DATASET_PATHS); iter != this->data_.end()) {
             return std::get<const std::string*>(iter->second);
+        }
+        return nullptr;
+    }
+
+    DatasetPtr
+    ExtraInfos(const char* extra_info) override {
+        this->data_[EXTRA_INFOS] = reinterpret_cast<const int64_t*>(extra_info);
+        return shared_from_this();
+    }
+
+    const char*
+    GetExtraInfos() const override {
+        if (auto iter = this->data_.find(EXTRA_INFOS); iter != this->data_.end()) {
+            return reinterpret_cast<const char*>(std::get<const int64_t*>(iter->second));
         }
         return nullptr;
     }
