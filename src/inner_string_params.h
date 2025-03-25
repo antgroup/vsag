@@ -74,6 +74,9 @@ const char* const NO_BUILD_LEVELS = "no_build_levels";
 
 const char* const BUCKETS_COUNT_KEY = "buckets_count";
 const char* const IVF_SEARCH_PARAM_SCAN_BUCKETS_COUNT = "scan_buckets_count";
+const char* const IVF_SEARCH_PARAM_FACTOR = "factor";
+const char* const IVF_USE_REORDER_KEY = "use_reorder";
+const char* const IVF_PRECISE_CODES_KEY = "precise_codes";
 const char* const IVF_TRAIN_TYPE_KEY = "ivf_train_type";
 const char* const IVF_TRAIN_TYPE_RANDOM = "random";
 const char* const IVF_TRAIN_TYPE_KMEANS = "kmeans";
@@ -109,10 +112,13 @@ const std::unordered_map<std::string, std::string> DEFAULT_MAP = {
     {"BUCKET_PARAMS_KEY", BUCKET_PARAMS_KEY},
     {"IO_FILE_PATH", IO_FILE_PATH},
     {"DEFAULT_FILE_PATH_VALUE", DEFAULT_FILE_PATH_VALUE},
+    {"IVF_PRECISE_CODES_KEY", IVF_PRECISE_CODES_KEY},
+    {"IVF_USE_REORDER_KEY", IVF_USE_REORDER_KEY},
     {"SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE", SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE},
     {"IVF_SEARCH_PARAM_SCAN_BUCKETS_COUNT", IVF_SEARCH_PARAM_SCAN_BUCKETS_COUNT},
     {"IVF_TRAIN_TYPE_KEY", IVF_TRAIN_TYPE_KEY},
     {"HGRAPH_EXTRA_INFO_KEY", HGRAPH_EXTRA_INFO_KEY},
+    {"IVF_SEARCH_PARAM_FACTOR", IVF_SEARCH_PARAM_FACTOR},
 };
 
 }  // namespace vsag
