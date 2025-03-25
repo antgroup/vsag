@@ -161,13 +161,14 @@ IndexNode::SearchGraph(const SearchFunc& search_func) const {
     return search_result;
 }
 
-tl::expected<std::vector<int64_t>, Error>
-Pyramid::build(const DatasetPtr& base) {
+std::vector<int64_t>
+Pyramid::Build(const DatasetPtr& base) {
     const auto* path = base->GetPaths();
+    CHECK_ARGUMENT(path != nullptr, "path is required");
     int64_t data_num = base->GetNumElements();
     const auto* data_vectors = base->GetFloat32Vectors();
     const auto* data_ids = base->GetIds();
-    const auto& no_build_levels = pyramid_param_.no_build_levels;
+    const auto& no_build_levels = pyramid_param_->no_build_levels;
 
     resize(data_num);
     std::memcpy(labels_.label_table_.data(), data_ids, sizeof(LabelType) * data_num);
@@ -175,9 +176,9 @@ Pyramid::build(const DatasetPtr& base) {
     flatten_interface_ptr_->Train(data_vectors, data_num);
     flatten_interface_ptr_->BatchInsertVector(data_vectors, data_num);
 
-    ODescent graph_builder(pyramid_param_.odescent_param,
+    ODescent graph_builder(pyramid_param_->odescent_param,
                            flatten_interface_ptr_,
-                           common_param_.allocator_.get(),
+                           allocator_,
                            common_param_.thread_pool_.get());
     for (int i = 0; i < data_num; ++i) {
         std::string current_path = path[i];
@@ -196,47 +197,18 @@ Pyramid::build(const DatasetPtr& base) {
     return {};
 }
 
-tl::expected<DatasetPtr, Error>
-Pyramid::knn_search(const DatasetPtr& query,
-                    int64_t k,
-                    const std::string& parameters,
-                    const BitsetPtr& invalid) const {
-    auto parsed_param = PyramidSearchParameters::FromJson(parameters);
-    InnerSearchParam search_param;
-    search_param.ef = parsed_param.ef_search;
-    search_param.topk = k;
-    search_param.search_mode = KNN_SEARCH;
-    if (invalid != nullptr) {
-        auto filter_adpater = std::make_shared<UniqueFilter>(invalid);
-        search_param.is_inner_id_allowed =
-            std::make_shared<CommonInnerIdFilter>(filter_adpater, labels_);
-    }
-    SearchFunc search_func = [&](const IndexNode* node) {
-        search_param.ep = node->entry_point_;
-        std::lock_guard<std::mutex> lock(node->mutex_);
-        auto vl = pool_->TakeOne();
-        auto results = searcher_->Search(
-            node->graph_, flatten_interface_ptr_, vl, query->GetFloat32Vectors(), search_param);
-        pool_->ReturnOne(vl);
-        return results;
-    };
-    return this->search_impl(query, k, search_func);
-}
-
-tl::expected<DatasetPtr, Error>
-Pyramid::knn_search(const DatasetPtr& query,
-                    int64_t k,
-                    const std::string& parameters,
-                    const std::function<bool(int64_t)>& filter) const {
+DatasetPtr
+Pyramid::KnnSearch(const DatasetPtr& query,
+                   int64_t k,
+                   const std::string& parameters,
+                   const FilterPtr& filter) const {
     auto parsed_param = PyramidSearchParameters::FromJson(parameters);
     InnerSearchParam search_param;
     search_param.ef = parsed_param.ef_search;
     search_param.topk = k;
     search_param.search_mode = KNN_SEARCH;
     if (filter != nullptr) {
-        auto filter_adpater = std::make_shared<UniqueFilter>(filter);
-        search_param.is_inner_id_allowed =
-            std::make_shared<CommonInnerIdFilter>(filter_adpater, labels_);
+        search_param.is_inner_id_allowed = std::make_shared<CommonInnerIdFilter>(filter, labels_);
     }
     SearchFunc search_func = [&](const IndexNode* node) {
         search_param.ep = node->entry_point_;
@@ -250,44 +222,19 @@ Pyramid::knn_search(const DatasetPtr& query,
     return this->search_impl(query, k, search_func);
 }
 
-tl::expected<DatasetPtr, Error>
-Pyramid::range_search(const DatasetPtr& query,
-                      float radius,
-                      const std::string& parameters,
-                      int64_t limited_size) const {
+DatasetPtr
+Pyramid::RangeSearch(const DatasetPtr& query,
+                     float radius,
+                     const std::string& parameters,
+                     const FilterPtr& filter,
+                     int64_t limited_size) const {
     auto parsed_param = PyramidSearchParameters::FromJson(parameters);
     InnerSearchParam search_param;
     search_param.ef = parsed_param.ef_search;
     search_param.radius = radius;
     search_param.search_mode = RANGE_SEARCH;
-    SearchFunc search_func = [&](const IndexNode* node) {
-        search_param.ep = node->entry_point_;
-        std::lock_guard<std::mutex> lock(node->mutex_);
-        auto vl = pool_->TakeOne();
-        auto results = searcher_->Search(
-            node->graph_, flatten_interface_ptr_, vl, query->GetFloat32Vectors(), search_param);
-        pool_->ReturnOne(vl);
-        return results;
-    };
-    int64_t final_limit = limited_size == -1 ? std::numeric_limits<int64_t>::max() : limited_size;
-    SAFE_CALL(return this->search_impl(query, final_limit, search_func);)
-}
-
-tl::expected<DatasetPtr, Error>
-Pyramid::range_search(const DatasetPtr& query,
-                      float radius,
-                      const std::string& parameters,
-                      const BitsetPtr& invalid,
-                      int64_t limited_size) const {
-    auto parsed_param = PyramidSearchParameters::FromJson(parameters);
-    InnerSearchParam search_param;
-    search_param.ef = parsed_param.ef_search;
-    search_param.radius = radius;
-    search_param.search_mode = RANGE_SEARCH;
-    if (invalid != nullptr) {
-        auto filter_adpater = std::make_shared<UniqueFilter>(invalid);
-        search_param.is_inner_id_allowed =
-            std::make_shared<CommonInnerIdFilter>(filter_adpater, labels_);
+    if (filter != nullptr) {
+        search_param.is_inner_id_allowed = std::make_shared<CommonInnerIdFilter>(filter, labels_);
     }
     SearchFunc search_func = [&](const IndexNode* node) {
         search_param.ep = node->entry_point_;
@@ -302,38 +249,11 @@ Pyramid::range_search(const DatasetPtr& query,
     return this->search_impl(query, final_limit, search_func);
 }
 
-tl::expected<DatasetPtr, Error>
-Pyramid::range_search(const DatasetPtr& query,
-                      float radius,
-                      const std::string& parameters,
-                      const std::function<bool(int64_t)>& filter,
-                      int64_t limited_size) const {
-    auto parsed_param = PyramidSearchParameters::FromJson(parameters);
-    InnerSearchParam search_param;
-    search_param.ef = parsed_param.ef_search;
-    search_param.radius = radius;
-    search_param.search_mode = RANGE_SEARCH;
-    if (filter != nullptr) {
-        auto filter_adpater = std::make_shared<UniqueFilter>(filter);
-        search_param.is_inner_id_allowed =
-            std::make_shared<CommonInnerIdFilter>(filter_adpater, labels_);
-    }
-    SearchFunc search_func = [&](const IndexNode* node) {
-        search_param.ep = node->entry_point_;
-        std::lock_guard<std::mutex> lock(node->mutex_);
-        auto vl = pool_->TakeOne();
-        auto results = searcher_->Search(
-            node->graph_, flatten_interface_ptr_, vl, query->GetFloat32Vectors(), search_param);
-        pool_->ReturnOne(vl);
-        return results;
-    };
-    int64_t final_limit = limited_size == -1 ? std::numeric_limits<int64_t>::max() : limited_size;
-    return this->search_impl(query, final_limit, search_func);
-}
-
-tl::expected<DatasetPtr, Error>
+DatasetPtr
 Pyramid::search_impl(const DatasetPtr& query, int64_t limit, const SearchFunc& search_func) const {
     const auto* path = query->GetPaths();
+    CHECK_ARGUMENT(path != nullptr, "path is required");
+    CHECK_ARGUMENT(query->GetFloat32Vectors() != nullptr, "query vectors is required");
     std::string current_path = path[0];
     auto path_slices = split(current_path, PART_SLASH);
     std::shared_ptr<IndexNode> node = root_;
@@ -357,10 +277,10 @@ Pyramid::search_impl(const DatasetPtr& query, int64_t limit, const SearchFunc& s
         result->Dim(0)->NumElements(1);
         return result;
     }
-    result->Dim(target_size)->NumElements(1)->Owner(true, common_param_.allocator_.get());
-    auto* ids = (int64_t*)common_param_.allocator_->Allocate(sizeof(int64_t) * target_size);
+    result->Dim(target_size)->NumElements(1)->Owner(true, allocator_);
+    auto* ids = (int64_t*)allocator_->Allocate(sizeof(int64_t) * target_size);
     result->Ids(ids);
-    auto* dists = (float*)common_param_.allocator_->Allocate(sizeof(float) * target_size);
+    auto* dists = (float*)allocator_->Allocate(sizeof(float) * target_size);
     result->Distances(dists);
     for (auto j = target_size - 1; j >= 0; --j) {
         if (j < target_size) {
@@ -370,83 +290,6 @@ Pyramid::search_impl(const DatasetPtr& query, int64_t limit, const SearchFunc& s
         search_result.pop();
     }
     return result;
-}
-
-tl::expected<BinarySet, Error>
-Pyramid::Serialize() const {
-    if (GetNumElements() == 0) {
-        return EmptyIndexBinarySet::Make("EMPTY_PYRAMID");
-    }
-    SlowTaskTimer t("Pyramid Serialize");
-    size_t num_bytes = this->cal_serialize_size();
-    try {
-        std::shared_ptr<int8_t[]> bin(new int8_t[num_bytes]);
-        auto* buffer = reinterpret_cast<char*>(const_cast<int8_t*>(bin.get()));
-        BufferStreamWriter writer(buffer);
-        this->Serialize(writer);
-        Binary b{
-            .data = bin,
-            .size = num_bytes,
-        };
-        BinarySet bs;
-        bs.Set(INDEX_PYRAMID, b);
-
-        return bs;
-    } catch (const std::bad_alloc& e) {
-        LOG_ERROR_AND_RETURNS(
-            ErrorType::NO_ENOUGH_MEMORY, "failed to Serialize(bad alloc): ", e.what());
-    }
-}
-
-tl::expected<void, Error>
-Pyramid::Deserialize(const BinarySet& binary_set) {
-    SlowTaskTimer t("pyramid Deserialize");
-    if (this->GetNumElements() > 0) {
-        LOG_ERROR_AND_RETURNS(ErrorType::INDEX_NOT_EMPTY,
-                              "failed to Deserialize: index is not empty");
-    }
-
-    // check if binary set is an empty index
-    if (binary_set.Contains(BLANK_INDEX)) {
-        return {};
-    }
-
-    Binary b = binary_set.Get(INDEX_PYRAMID);
-    auto func = [&](uint64_t offset, uint64_t len, void* dest) -> void {
-        std::memcpy(dest, b.data.get() + offset, len);
-    };
-
-    try {
-        uint64_t cursor = 0;
-        auto reader = ReadFuncStreamReader(func, cursor);
-        this->Deserialize(reader);
-    } catch (const std::runtime_error& e) {
-        LOG_ERROR_AND_RETURNS(ErrorType::READ_ERROR, "failed to Deserialize: ", e.what());
-    }
-
-    return {};
-}
-
-tl::expected<void, Error>
-Pyramid::Deserialize(const ReaderSet& reader_set) {
-    SlowTaskTimer t("pyramid Deserialize");
-    if (this->GetNumElements() > 0) {
-        LOG_ERROR_AND_RETURNS(ErrorType::INDEX_NOT_EMPTY,
-                              "failed to Deserialize: index is not empty");
-    }
-
-    try {
-        auto func = [&](uint64_t offset, uint64_t len, void* dest) -> void {
-            reader_set.Get(INDEX_PYRAMID)->Read(offset, len, dest);
-        };
-        uint64_t cursor = 0;
-        auto reader = ReadFuncStreamReader(func, cursor);
-        this->Deserialize(reader);
-    } catch (const std::runtime_error& e) {
-        LOG_ERROR_AND_RETURNS(ErrorType::READ_ERROR, "failed to Deserialize: ", e.what());
-    }
-
-    return {};
 }
 
 int64_t
@@ -471,10 +314,8 @@ Pyramid::Deserialize(StreamReader& reader) {
     StreamReader::ReadVector(reader, labels_.label_table_);
     flatten_interface_ptr_->Deserialize(reader);
     root_->Deserialize(reader);
-    pool_ = std::make_unique<VisitedListPool>(1,
-                                              common_param_.allocator_.get(),
-                                              flatten_interface_ptr_->TotalCount(),
-                                              common_param_.allocator_.get());
+    pool_ = std::make_unique<VisitedListPool>(
+        1, allocator_, flatten_interface_ptr_->TotalCount(), allocator_);
 }
 
 uint64_t
@@ -485,41 +326,14 @@ Pyramid::cal_serialize_size() const {
     return writer.cursor_;
 }
 
-tl::expected<void, Error>
-Pyramid::Serialize(std::ostream& out_stream) {
-    try {
-        IOStreamWriter writer(out_stream);
-        this->Serialize(writer);
-        return {};
-    } catch (const std::bad_alloc& e) {
-        LOG_ERROR_AND_RETURNS(
-            ErrorType::NO_ENOUGH_MEMORY, "failed to Serialize(bad alloc): ", e.what());
-    }
-}
-
-tl::expected<void, Error>
-Pyramid::Deserialize(std::istream& in_stream) {
-    SlowTaskTimer t("pyramid Deserialize");
-    if (this->GetNumElements() > 0) {
-        LOG_ERROR_AND_RETURNS(ErrorType::INDEX_NOT_EMPTY,
-                              "failed to Deserialize: index is not empty");
-    }
-    try {
-        IOStreamReader reader(in_stream);
-        this->Deserialize(reader);
-        return {};
-    } catch (const std::bad_alloc& e) {
-        LOG_ERROR_AND_RETURNS(
-            ErrorType::NO_ENOUGH_MEMORY, "failed to Deserialize(bad alloc): ", e.what());
-    }
-}
-tl::expected<std::vector<int64_t>, Error>
-Pyramid::add(const DatasetPtr& base) {
+std::vector<int64_t>
+Pyramid::Add(const DatasetPtr& base) {
     const auto* path = base->GetPaths();
+    CHECK_ARGUMENT(path != nullptr, "path is required");
     int64_t data_num = base->GetNumElements();
     const auto* data_vectors = base->GetFloat32Vectors();
     const auto* data_ids = base->GetIds();
-    const auto& no_build_levels = pyramid_param_.no_build_levels;
+    const auto& no_build_levels = pyramid_param_->no_build_levels;
     int64_t local_cur_element_count = 0;
     {
         std::lock_guard lock(cur_element_count_mutex_);
@@ -543,8 +357,8 @@ Pyramid::add(const DatasetPtr& base) {
                 sizeof(LabelType) * data_num);
 
     InnerSearchParam search_param;
-    search_param.ef = pyramid_param_.ef_construction;
-    search_param.topk = pyramid_param_.odescent_param->max_degree;
+    search_param.ef = pyramid_param_->ef_construction;
+    search_param.topk = pyramid_param_->odescent_param->max_degree;
     search_param.search_mode = KNN_SEARCH;
     auto empty_mutex = std::make_shared<EmptyMutex>();
     for (auto i = 0; i < data_num; ++i) {
@@ -564,8 +378,7 @@ Pyramid::add(const DatasetPtr& base) {
             }
             if (node->graph_->TotalCount() == 0) {
                 if (node->has_index_) {
-                    node->graph_->InsertNeighborsById(
-                        inner_id, Vector<InnerIdType>(common_param_.allocator_.get()));
+                    node->graph_->InsertNeighborsById(inner_id, Vector<InnerIdType>(allocator_));
                     node->entry_point_ = inner_id;
                 }
             } else {
@@ -574,7 +387,7 @@ Pyramid::add(const DatasetPtr& base) {
                 auto results = searcher_->Search(node->graph_,
                                                  flatten_interface_ptr_,
                                                  vl,
-                                                 data_vectors + common_param_.dim_ * i,
+                                                 data_vectors + dim_ * i,
                                                  search_param);
                 pool_->ReturnOne(vl);
                 mutually_connect_new_element(inner_id,
@@ -582,7 +395,7 @@ Pyramid::add(const DatasetPtr& base) {
                                              node->graph_,
                                              flatten_interface_ptr_,
                                              empty_mutex,
-                                             common_param_.allocator_.get());
+                                             allocator_);
             }
         }
     }
@@ -595,15 +408,14 @@ Pyramid::resize(int64_t new_max_capacity) {
     if (new_max_capacity <= max_capacity_) {
         return;
     }
-    pool_ = std::make_unique<VisitedListPool>(
-        1, common_param_.allocator_.get(), new_max_capacity, common_param_.allocator_.get());
+    pool_ = std::make_unique<VisitedListPool>(1, allocator_, new_max_capacity, allocator_);
     labels_.label_table_.resize(new_max_capacity);
     flatten_interface_ptr_->Resize(new_max_capacity);
     max_capacity_ = new_max_capacity;
 }
 
 void
-Pyramid::init_feature_list() {
+Pyramid::init_features() {
     this->feature_list_->SetFeatures({
         SUPPORT_BUILD,
         SUPPORT_ADD_AFTER_BUILD,
@@ -620,6 +432,14 @@ Pyramid::init_feature_list() {
         SUPPORT_RANGE_SEARCH,
         SUPPORT_RANGE_SEARCH_WITH_ID_FILTER,
     });
+}
+
+ParamPtr
+Pyramid::CheckAndMappingExternalParam(const JsonType& external_param,
+                                      const IndexCommonParam& common_param) {
+    auto pyramid_params = std::make_shared<PyramidParameters>();
+    pyramid_params->FromJson(external_param);
+    return pyramid_params;
 }
 
 }  // namespace vsag

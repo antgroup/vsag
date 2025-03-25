@@ -202,7 +202,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
 }
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
                              "Pyramid Concurrent Test",
-                             "[ft][pyramid]") {
+                             "[ft][pyramid][concurrent]") {
     auto metric_type = GENERATE("l2");
     const std::vector<int> level{0, 1, 2};
     const std::string name = "pyramid";
