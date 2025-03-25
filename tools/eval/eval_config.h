@@ -16,6 +16,7 @@
 #pragma once
 
 #include "argparse/argparse.hpp"
+#include "eval_job.h"
 #include "yaml-cpp/yaml.h"
 
 namespace vsag::eval {
@@ -26,7 +27,7 @@ public:
     Load(argparse::ArgumentParser& parser);
 
     static EvalConfig
-    Load(YAML::Node& yaml_node);
+    Load(YAML::Node& yaml_node, const eval_job& global_options);
 
     static void
     CheckKeyAndType(YAML::Node& yaml_node);
@@ -41,8 +42,11 @@ public:
     std::string search_param;
     std::string search_mode{"knn"};
     int top_k{10};
-    float radius{0.5f};
+    float radius{0.5F};
     bool delete_index_after_search{false};
+
+    int32_t num_threads_building{1};
+    int32_t num_threads_searching{1};
 
     bool enable_recall{true};
     bool enable_percent_recall{true};
