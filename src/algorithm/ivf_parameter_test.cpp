@@ -28,9 +28,18 @@ TEST_CASE("IVF Parameters Test", "[ut][IVFParameter]") {
                 "type": "block_memory_io"
             },
             "quantization_params": {
-                "type": "fp32"
+                "type": "sq8"
             },
             "buckets_count": 3
+        },
+        "use_reorder": true,
+        "precise_codes": {
+            "io_params": {
+                "type": "block_memory_io"
+            },
+            "quantization_params": {
+                "type": "fp32"
+            }
         }
     })";
     vsag::JsonType param_json = vsag::JsonType::parse(param_str);
@@ -38,4 +47,6 @@ TEST_CASE("IVF Parameters Test", "[ut][IVFParameter]") {
     param->FromJson(param_json);
     REQUIRE(param->bucket_param->buckets_count == 3);
     REQUIRE(param->partition_train_type == vsag::IVFNearestPartitionTrainerType::RandomTrainer);
+    REQUIRE(param->use_reorder == true);
+    REQUIRE(param->flatten_param->quantizer_parameter->GetTypeName() == "fp32");
 }
