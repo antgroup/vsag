@@ -1655,4 +1655,11 @@ TestIndex::TestExportModel(const TestIndex::IndexPtr& index,
     REQUIRE(std::abs(recall1 - recall2) < 0.01F * query_count);
 }
 
+void
+TestIndex::TestRemoveIndex(const TestIndex::IndexPtr& index,
+                           const TestDatasetPtr& dataset,
+                           bool expected_success) {
+
+}
+
 }  // namespace fixtures

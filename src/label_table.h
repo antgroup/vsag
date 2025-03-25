@@ -40,6 +40,16 @@ public:
         label_table_[id] = label;
     }
 
+    inline bool
+    Remove(LabelType label) {
+        auto iter = label_remap_.find(label);
+        if (iter == label_remap_.end()) {
+            return false;
+        }
+        label_remap_.erase(iter);
+        return true;
+    }
+
     inline InnerIdType
     GetIdByLabel(LabelType label) const {
         if (this->label_remap_.count(label) == 0) {

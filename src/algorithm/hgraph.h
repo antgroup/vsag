@@ -77,6 +77,9 @@ public:
     std::vector<int64_t>
     Add(const DatasetPtr& data) override;
 
+    bool
+    Remove(int64_t id) override;
+
     [[nodiscard]] DatasetPtr
     KnnSearch(const DatasetPtr& query,
               int64_t k,
@@ -271,6 +274,8 @@ private:
     uint64_t extra_info_size_{0};
 
     static constexpr uint64_t DEFAULT_RESIZE_BIT = 10;
+
+    UnorderedSet<InnerIdType> deleted_ids_;
 
     std::shared_ptr<Optimizer<BasicSearcher>> optimizer_;
 };
