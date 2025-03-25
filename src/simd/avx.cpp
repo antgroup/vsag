@@ -527,6 +527,54 @@ SQ8UniformComputeCodesIP(const uint8_t* codes1, const uint8_t* codes2, uint64_t 
 #endif
 }
 
+float
+RaBitQFloatBinaryIP(const float* vector, const uint8_t* bits, uint64_t dim, float inv_sqrt_d) {
+#if defined(ENABLE_AVX)
+    if (dim == 0) {
+        return 0.0f;
+    }
+
+    if (dim < 8) {
+        return sse::RaBitQFloatBinaryIP(vector, bits, dim, inv_sqrt_d);
+    }
+
+    uint64_t d = 0;
+    float result = 0.0f;
+    alignas(32) float temp[8];
+    __m256 sum = _mm256_setzero_ps();
+    const __m256 inv_sqrt_d_vec = _mm256_set1_ps(inv_sqrt_d);
+
+    for (; d + 8 <= dim; d += 8) {
+        __m256 vec = _mm256_loadu_ps(vector + d);
+
+        uint8_t byte = bits[d / 8];
+        __m256 b_vec = _mm256_set_ps(((byte >> 7) & 1) ? 1.0f : -1.0f,
+                                     ((byte >> 6) & 1) ? 1.0f : -1.0f,
+                                     ((byte >> 5) & 1) ? 1.0f : -1.0f,
+                                     ((byte >> 4) & 1) ? 1.0f : -1.0f,
+                                     ((byte >> 3) & 1) ? 1.0f : -1.0f,
+                                     ((byte >> 2) & 1) ? 1.0f : -1.0f,
+                                     ((byte >> 1) & 1) ? 1.0f : -1.0f,
+                                     ((byte >> 0) & 1) ? 1.0f : -1.0f);
+
+        b_vec = _mm256_mul_ps(b_vec, inv_sqrt_d_vec);
+
+        sum = _mm256_add_ps(_mm256_mul_ps(b_vec, vec), sum);
+    }
+
+    _mm256_store_ps(temp, sum);
+    for (float val : temp) {
+        result += val;
+    }
+
+    result += sse::RaBitQFloatBinaryIP(vector + d, bits + d / 8, dim - d, inv_sqrt_d);
+
+    return result;
+#else
+    return sse::RaBitQFloatBinaryIP(vector, bits, dim, inv_sqrt_d);
+#endif
+}
+
 void
 DivScalar(const float* from, float* to, uint64_t dim, float scalar) {
 #if defined(ENABLE_AVX)

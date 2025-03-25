@@ -20,7 +20,6 @@
 
 #include "fixtures.h"
 #include "fp32_simd.h"
-#include "simd_status.h"
 
 using namespace vsag;
 
@@ -29,25 +28,48 @@ TEST_CASE("RaBitQ FP32-BQ SIMD Compute Codes", "[ut][simd]") {
     int64_t count = 100;
     for (const auto& dim : dims) {
         uint32_t code_size = (dim + 7) / 8;
+        float inv_sqrt_d = 1.0f / sqrt(dim);
         std::vector<float> queries;
         std::vector<uint8_t> bases;
         std::tie(queries, bases) = fixtures::GenerateBinaryVectorsAndCodes(count, dim);
         for (uint64_t i = 0; i < count; ++i) {
             auto* query = queries.data() + i * dim;
             auto* base = bases.data() + i * code_size;
-            auto ip_32_1 = RaBitQFloatBinaryIP(query, base, dim);
+
             auto ip_32_32 = FP32ComputeIP(query, query, dim);
-            REQUIRE(std::abs(ip_32_1 - ip_32_32) < 1e-4);
+            auto ip_32_1_generic = generic::RaBitQFloatBinaryIP(query, base, dim, inv_sqrt_d);
+            REQUIRE(std::abs(ip_32_1_generic - ip_32_32) < 1e-4);
+
+            if (SimdStatus::SupportAVX512()) {
+                auto ip_32_1_avx512 = avx512::RaBitQFloatBinaryIP(query, base, dim, inv_sqrt_d);
+                REQUIRE(std::abs(ip_32_1_avx512 - ip_32_32) < 1e-4);
+            }
+
+            if (SimdStatus::SupportAVX2()) {
+                auto ip_32_1_avx2 = avx2::RaBitQFloatBinaryIP(query, base, dim, inv_sqrt_d);
+                REQUIRE(std::abs(ip_32_1_avx2 - ip_32_32) < 1e-4);
+            }
+
+            if (SimdStatus::SupportAVX()) {
+                auto ip_32_1_avx = avx::RaBitQFloatBinaryIP(query, base, dim, inv_sqrt_d);
+                REQUIRE(std::abs(ip_32_1_avx - ip_32_32) < 1e-4);
+            }
+
+            if (SimdStatus::SupportSSE()) {
+                auto ip_32_1_sse = sse::RaBitQFloatBinaryIP(query, base, dim, inv_sqrt_d);
+                REQUIRE(std::abs(ip_32_1_sse - ip_32_32) < 1e-4);
+            }
         }
     }
 }
 
-#define BENCHMARK_SIMD_COMPUTE(Simd, Comp)                                           \
-    BENCHMARK_ADVANCED(#Simd #Comp) {                                                \
-        for (int i = 0; i < count; ++i) {                                            \
-            Simd::Comp(queries.data() + i * dim, bases.data() + i * code_size, dim); \
-        }                                                                            \
-        return;                                                                      \
+#define BENCHMARK_SIMD_COMPUTE(Simd, Comp)                                                      \
+    BENCHMARK_ADVANCED(#Simd #Comp) {                                                           \
+        for (int i = 0; i < count; ++i) {                                                       \
+            Simd::Comp(                                                                         \
+                queries.data() + i * dim, bases.data() + i * code_size, dim, 1.0f / sqrt(dim)); \
+        }                                                                                       \
+        return;                                                                                 \
     }
 
 TEST_CASE("RaBitQ FP32-BQ SIMD Compute Benchmark", "[ut][simd][!benchmark]") {
@@ -60,4 +82,8 @@ TEST_CASE("RaBitQ FP32-BQ SIMD Compute Benchmark", "[ut][simd][!benchmark]") {
     std::tie(queries, bases) = fixtures::GenerateBinaryVectorsAndCodes(count, dim);
 
     BENCHMARK_SIMD_COMPUTE(generic, RaBitQFloatBinaryIP);
+    BENCHMARK_SIMD_COMPUTE(sse, RaBitQFloatBinaryIP);
+    BENCHMARK_SIMD_COMPUTE(avx, RaBitQFloatBinaryIP);
+    BENCHMARK_SIMD_COMPUTE(avx2, RaBitQFloatBinaryIP);
+    BENCHMARK_SIMD_COMPUTE(avx512, RaBitQFloatBinaryIP);
 }

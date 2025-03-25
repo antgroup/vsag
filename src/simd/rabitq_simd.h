@@ -17,13 +17,38 @@
 
 #include <cstdint>
 
+#include "simd_status.h"
+
 namespace vsag {
+namespace avx512 {
+float
+RaBitQFloatBinaryIP(const float* vector, const uint8_t* bits, uint64_t dim, float inv_sqrt_d);
+}  // namespace avx512
+
+namespace avx2 {
+float
+RaBitQFloatBinaryIP(const float* vector, const uint8_t* bits, uint64_t dim, float inv_sqrt_d);
+}  // namespace avx2
+
+namespace avx {
+float
+RaBitQFloatBinaryIP(const float* vector, const uint8_t* bits, uint64_t dim, float inv_sqrt_d);
+}  // namespace avx
+
+namespace sse {
+float
+RaBitQFloatBinaryIP(const float* vector, const uint8_t* bits, uint64_t dim, float inv_sqrt_d);
+}  // namespace sse
+
 namespace generic {
 float
-RaBitQFloatBinaryIP(const float* vector, const uint8_t* bits, uint64_t dim);
+RaBitQFloatBinaryIP(const float* vector, const uint8_t* bits, uint64_t dim, float inv_sqrt_d);
 }  // namespace generic
 
-using RaBitQFloatBinaryType = float (*)(const float* vector, const uint8_t* bits, uint64_t dim);
+using RaBitQFloatBinaryType = float (*)(const float* vector,
+                                        const uint8_t* bits,
+                                        uint64_t dim,
+                                        float inv_sqrt_d);
 
 extern RaBitQFloatBinaryType RaBitQFloatBinaryIP;
 }  // namespace vsag
