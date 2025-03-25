@@ -34,6 +34,9 @@ public:
     void
     InsertNeighborsById(InnerIdType id, const Vector<InnerIdType>& neighbor_ids) override;
 
+    void
+    DeleteNeighborsById(InnerIdType id) override;
+
     uint32_t
     GetNeighborSize(InnerIdType id) const override;
 
@@ -64,6 +67,9 @@ private:
     Allocator* const allocator_{nullptr};
     UnorderedMap<InnerIdType, std::unique_ptr<Vector<InnerIdType>>> neighbors_;
     mutable std::shared_mutex neighbors_map_mutex_{};
+
+    bool is_support_delete_{true};
+    UnorderedMap<InnerIdType, uint8_t> node_version_;
 };
 
 }  // namespace vsag

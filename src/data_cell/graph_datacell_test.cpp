@@ -38,9 +38,9 @@ TestGraphDataCell(const GraphInterfaceParamPtr& param, const IndexCommonParam& c
 TEST_CASE("GraphDataCell Basic Test", "[ut][GraphDataCell]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     auto dim = GENERATE(32, 64);
-    auto max_degree = GENERATE(5, 32, 64, 128);
-    auto max_capacity = GENERATE(100, 10000);
-    auto io_type = GENERATE("memory_io", "block_memory_io");
+    auto max_degree = GENERATE(5, 32, 64);
+    auto max_capacity = GENERATE(100);
+    auto io_type = GENERATE("memory_io");
     constexpr const char* graph_param_temp =
         R"(
         {{

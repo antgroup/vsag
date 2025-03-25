@@ -20,7 +20,7 @@
 namespace vsag {
 
 SparseGraphDataCell::SparseGraphDataCell(Allocator* allocator, uint32_t max_degree)
-    : allocator_(allocator), neighbors_(allocator_) {
+    : allocator_(allocator), neighbors_(allocator_), node_version_(allocator_) {
     this->maximum_degree_ = max_degree;
 }
 
@@ -45,8 +45,18 @@ SparseGraphDataCell::InsertNeighborsById(InnerIdType id, const Vector<InnerIdTyp
         iter =
             this->neighbors_.emplace(id, std::make_unique<Vector<InnerIdType>>(allocator_)).first;
         total_count_++;
+        if (is_support_delete_) {
+            node_version_[id] = 0;
+        }
     }
-    iter->second->assign(neighbor_ids.begin(), neighbor_ids.begin() + size);
+    if (is_support_delete_) {
+        iter->second->resize(size);
+        for (int i = 0; i < size; ++i) {
+            iter->second->at(i) = (neighbor_ids[i] | (node_version_[neighbor_ids[i]] << 24));
+        }
+    } else {
+        iter->second->assign(neighbor_ids.begin(), neighbor_ids.begin() + size);
+    }
 }
 
 uint32_t
@@ -63,7 +73,21 @@ SparseGraphDataCell::GetNeighbors(InnerIdType id, Vector<InnerIdType>& neighbor_
     std::shared_lock<std::shared_mutex> rlock(this->neighbors_map_mutex_);
     auto iter = this->neighbors_.find(id);
     if (iter != this->neighbors_.end()) {
-        neighbor_ids.assign(iter->second->begin(), iter->second->end());
+        auto& ngbrs = iter->second;
+        if (is_support_delete_) {
+            neighbor_ids.clear();
+            neighbor_ids.reserve(iter->second->size());
+            for (int i = 0; i < ngbrs->size(); ++i) {
+                const auto& neighbor_id = ngbrs->at(i);
+                uint8_t cur_version = neighbor_id >> 24;
+                uint32_t real_id = neighbor_id & 0x00ffffff;
+                if (node_version_.at(real_id) == cur_version) {
+                    neighbor_ids.push_back(real_id);
+                }
+            }
+        } else {
+            neighbor_ids.assign(iter->second->begin(), iter->second->end());
+        }
     }
 }
 void
@@ -76,6 +100,10 @@ SparseGraphDataCell::Serialize(StreamWriter& writer) {
         auto key = pair.first;
         StreamWriter::WriteObj(writer, key);
         StreamWriter::WriteVector(writer, *(pair.second));
+    }
+    for (const auto& item : this->node_version_) {
+        StreamWriter::WriteObj(writer, item.first);
+        StreamWriter::WriteObj(writer, item.second);
     }
 }
 
@@ -92,7 +120,24 @@ SparseGraphDataCell::Deserialize(StreamReader& reader) {
         StreamReader::ReadVector(reader, *(this->neighbors_[key]));
     }
     this->total_count_ = size;
+    for (uint64_t i = 0; i < size; ++i) {
+        InnerIdType key;
+        StreamReader::ReadObj(reader, key);
+        uint8_t value;
+        StreamReader::ReadObj(reader, value);
+        this->node_version_[key] = value;
+    }
 }
+
 void
 SparseGraphDataCell::Resize(InnerIdType new_size){};
+
+void
+SparseGraphDataCell::DeleteNeighborsById(vsag::InnerIdType id) {
+    auto iter = node_version_.find(id);
+    if (iter != node_version_.end()) {
+        iter->second++;
+    }
+}
+
 }  // namespace vsag

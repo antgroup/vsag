@@ -52,6 +52,9 @@ public:
     void
     InsertNeighborsById(InnerIdType id, const Vector<InnerIdType>& neighbor_ids) override;
 
+    void
+    DeleteNeighborsById(vsag::InnerIdType id) override;
+
     [[nodiscard]] uint32_t
     GetNeighborSize(InnerIdType id) const override;
 
@@ -91,16 +94,22 @@ public:
 private:
     std::shared_ptr<BasicIO<IOTmpl>> io_{nullptr};
 
+    Vector<uint8_t> node_versions_;
+
+    bool is_support_delete_{true};
+
     uint32_t code_line_size_{0};
 };
 
 template <typename IOTmpl>
 GraphDataCell<IOTmpl>::GraphDataCell(const GraphDataCellParamPtr& param,
-                                     const IndexCommonParam& common_param) {
+                                     const IndexCommonParam& common_param)
+    : node_versions_(common_param.allocator_.get()) {
     this->io_ = std::make_shared<IOTmpl>(param->io_parameter_, common_param);
     this->maximum_degree_ = param->max_degree_;
     this->max_capacity_ = param->init_max_capacity_;
     this->code_line_size_ = this->maximum_degree_ * sizeof(InnerIdType) + sizeof(uint32_t);
+    node_versions_.resize(max_capacity_);
 }
 
 template <typename IOTmpl>
@@ -122,21 +131,36 @@ GraphDataCell<IOTmpl>::InsertNeighborsById(InnerIdType id,
     while (current < id + 1 && !total_count_.compare_exchange_weak(current, id + 1)) {
     }
     auto start = static_cast<uint64_t>(id) * static_cast<uint64_t>(this->code_line_size_);
-    uint32_t neighbor_count = std::min((uint32_t)(neighbor_ids.size()), this->maximum_degree_);
-    this->io_->Write((uint8_t*)(&neighbor_count), sizeof(neighbor_count), start);
-    start += sizeof(neighbor_count);
-    this->io_->Write((uint8_t*)(neighbor_ids.data()),
-                     static_cast<uint64_t>(neighbor_count) * sizeof(InnerIdType),
-                     start);
+    if (is_support_delete_) {
+        uint32_t neighbor_count = std::min((uint32_t)(neighbor_ids.size()), this->maximum_degree_);
+        this->io_->Write((uint8_t*)(&neighbor_count), sizeof(neighbor_count), start);
+        start += sizeof(neighbor_count);
+        auto neighbor_ids_ptr =
+            std::shared_ptr<InnerIdType[]>(new InnerIdType[neighbor_ids.size()]);
+        for (int i = 0; i < neighbor_ids.size(); ++i) {
+            auto neighbor_id = neighbor_ids[i];
+            neighbor_ids_ptr[i] = neighbor_id | (node_versions_[neighbor_id] << 24);
+        }
+        this->io_->Write((uint8_t*)(neighbor_ids_ptr.get()),
+                         static_cast<uint64_t>(neighbor_count) * sizeof(InnerIdType),
+                         start);
+    } else {
+        uint32_t neighbor_count = std::min((uint32_t)(neighbor_ids.size()), this->maximum_degree_);
+        this->io_->Write((uint8_t*)(&neighbor_count), sizeof(neighbor_count), start);
+        start += sizeof(neighbor_count);
+        this->io_->Write((uint8_t*)(neighbor_ids.data()),
+                         static_cast<uint64_t>(neighbor_count) * sizeof(InnerIdType),
+                         start);
+    }
 }
 
 template <typename IOTmpl>
 uint32_t
 GraphDataCell<IOTmpl>::GetNeighborSize(InnerIdType id) const {
     auto start = static_cast<uint64_t>(id) * static_cast<uint64_t>(this->code_line_size_);
-    uint32_t result = 0;
-    this->io_->Read(sizeof(result), start, (uint8_t*)(&result));
-    return result;
+    uint32_t neighbor_count = 0;
+    this->io_->Read(sizeof(neighbor_count), start, (uint8_t*)(&neighbor_count));
+    return neighbor_count;
 }
 
 template <typename IOTmpl>
@@ -145,10 +169,25 @@ GraphDataCell<IOTmpl>::GetNeighbors(InnerIdType id, Vector<InnerIdType>& neighbo
     auto start = static_cast<uint64_t>(id) * static_cast<uint64_t>(this->code_line_size_);
     uint32_t neighbor_count = 0;
     this->io_->Read(sizeof(neighbor_count), start, (uint8_t*)(&neighbor_count));
-    neighbor_ids.resize(neighbor_count);
+    neighbor_count &= 0x00ffffff;
     start += sizeof(neighbor_count);
-    this->io_->Read(
-        neighbor_ids.size() * sizeof(InnerIdType), start, (uint8_t*)(neighbor_ids.data()));
+    if (is_support_delete_) {
+        auto shared_neighbor_ids = std::shared_ptr<InnerIdType[]>(new InnerIdType[neighbor_count]);
+        this->io_->Read(
+            neighbor_count * sizeof(InnerIdType), start, (uint8_t*)(shared_neighbor_ids.get()));
+        neighbor_ids.clear();
+        neighbor_ids.reserve(neighbor_count);
+        for (int i = 0; i < neighbor_count; ++i) {
+            uint8_t neighbor_version = shared_neighbor_ids[i] >> 24;
+            InnerIdType neighbor_id = shared_neighbor_ids[i] & 0x00ffffff;
+            if (node_versions_[neighbor_id] == neighbor_version) {
+                neighbor_ids.push_back(neighbor_id);
+            }
+        }
+    } else {
+        this->io_->Read(
+            neighbor_ids.size() * sizeof(InnerIdType), start, (uint8_t*)(neighbor_ids.data()));
+    }
 }
 
 template <typename IOTmpl>
@@ -162,6 +201,7 @@ GraphDataCell<IOTmpl>::Resize(InnerIdType new_size) {
     uint8_t end_flag =
         127;  // the value is meaningless, only to occupy the position for io allocate
     this->io_->Write(&end_flag, 1, io_size);
+    node_versions_.resize(new_size);
 }
 
 template <typename IOTmpl>
@@ -170,6 +210,7 @@ GraphDataCell<IOTmpl>::Serialize(StreamWriter& writer) {
     GraphInterface::Serialize(writer);
     this->io_->Serialize(writer);
     StreamWriter::WriteObj(writer, this->code_line_size_);
+    StreamWriter::WriteVector(writer, node_versions_);
 }
 
 template <typename IOTmpl>
@@ -178,6 +219,13 @@ GraphDataCell<IOTmpl>::Deserialize(StreamReader& reader) {
     GraphInterface::Deserialize(reader);
     this->io_->Deserialize(reader);
     StreamReader::ReadObj(reader, this->code_line_size_);
+    StreamReader::ReadVector(reader, node_versions_);
+}
+
+template <typename IOTmpl>
+void
+GraphDataCell<IOTmpl>::DeleteNeighborsById(vsag::InnerIdType id) {
+    node_versions_[id]++;
 }
 
 }  // namespace vsag

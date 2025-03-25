@@ -40,7 +40,8 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
       ignore_reorder_(hgraph_param->ignore_reorder),
       ef_construct_(hgraph_param->ef_construction),
       build_thread_count_(hgraph_param->build_thread_count),
-      extra_info_size_(common_param.extra_info_size_) {
+      extra_info_size_(common_param.extra_info_size_),
+      deleted_ids_(allocator_) {
     neighbors_mutex_ = std::make_shared<PointsMutex>(0, common_param.allocator_.get());
     this->basic_flatten_codes_ =
         FlattenInterface::MakeInstance(hgraph_param->base_codes_param, common_param);
@@ -1121,4 +1122,44 @@ HGraph::ExportModel(const IndexCommonParam& param) const {
     }
     return index;
 }
+
+bool
+HGraph::Remove(int64_t id) {
+    // TODO(inbao): support thread safe remove
+    auto inner_id = this->label_table_->GetIdByLabel(id);
+    if (inner_id == this->entry_point_id_) {
+        InnerSearchParam search_param;
+        search_param.ep = this->entry_point_id_;
+        search_param.ef = 10;
+        search_param.is_inner_id_allowed = nullptr;
+        Vector<uint8_t> codes(this->basic_flatten_codes_->code_size_, allocator_);
+        auto query = (float*)this->basic_flatten_codes_->GetCodesById(inner_id, codes.data());
+        bool find_new_ep = false;
+        for (int level = route_graphs_.size() - 1; level >= 0; --level) {
+            auto result = this->search_one_graph(
+                query, this->route_graphs_[level], this->basic_flatten_codes_, search_param);
+            while (not result.empty()) {
+                if (inner_id == result.top().second) {
+                    result.pop();
+                    continue;
+                }
+                this->entry_point_id_ = result.top().second;
+                find_new_ep = true;
+                break;
+            }
+            if (find_new_ep) {
+                break;
+            }
+            route_graphs_.pop_back();
+        }
+    }
+    for (int level = route_graphs_.size() - 1; level >= 0; --level) {
+        this->route_graphs_[level]->DeleteNeighborsById(inner_id);
+    }
+    this->bottom_graph_->DeleteNeighborsById(inner_id);
+    this->label_table_->Remove(id);
+    this->deleted_ids_.insert(inner_id);
+    return true;
+}
+
 }  // namespace vsag

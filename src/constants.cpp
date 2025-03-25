@@ -131,6 +131,8 @@ const char* const SQ4_UNIFORM_TRUNC_RATE = "sq4_uniform_trunc_rate";
 const char* const RABITQ_PCA_DIM = "rabitq_pca_dim";
 const char* const RABITQ_BITS_PER_DIM_QUERY = "rabitq_bits_per_dim_query";
 
+const char* const SUPPORT_REMOVE = "support_remove";
+
 const char* const HGRAPH_USE_REORDER = HGRAPH_USE_REORDER_KEY;
 const char* const HGRAPH_USE_ELP_OPTIMIZER = HGRAPH_USE_ELP_OPTIMIZER_KEY;
 const char* const HGRAPH_IGNORE_REORDER = "ignore_reorder";

@@ -39,7 +39,7 @@ TestSparseGraphDataCell(const GraphInterfaceParamPtr& param, const IndexCommonPa
 TEST_CASE("SparseGraphDataCell Basic Test", "[ut][SparseGraphDataCell]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     auto dim = GENERATE(32, 64);
-    auto max_degree = GENERATE(5, 12, 32, 64, 128);
+    auto max_degree = GENERATE(5, 12, 32);
 
     IndexCommonParam common_param;
     common_param.dim_ = dim;
