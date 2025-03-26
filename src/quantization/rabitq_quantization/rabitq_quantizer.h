@@ -140,10 +140,6 @@ RaBitQuantizer<metric>::RaBitQuantizer(int dim, uint64_t pca_dim, Allocator* all
     : Quantizer<RaBitQuantizer<metric>>(dim, allocator) {
     static_assert(metric == MetricType::METRIC_TYPE_L2SQR, "Unsupported metric type");
 
-    if (dim > 500) {
-        pca_dim_ = dim / 2;  // TODO(ZXY): remove this, it's tmp modify for test
-    }
-
     pca_dim_ = pca_dim;
     original_dim_ = dim;
     if (0 < pca_dim_ and pca_dim_ < dim) {
