@@ -118,6 +118,7 @@ extern const char* const SERIALIZE_MAGIC_NUM;
 extern const char* const SERIALIZE_VERSION;
 
 extern const char* const SQ4_UNIFORM_TRUNC_RATE;
+extern const char* const RABITQ_PCA_DIM;
 
 // hgraph params
 extern const char* const HGRAPH_USE_REORDER;
