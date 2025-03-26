@@ -116,7 +116,9 @@ public:
           const std::string& build_parameters) {
         spdlog::debug("index_name: " + index_name);
         spdlog::debug("build_parameters: " + build_parameters);
-        Engine e;
+        auto allocator = vsag::Engine::CreateAllocator();
+        vsag::Resource resource(allocator->get(), nullptr);
+        vsag::Engine e(&resource);
         auto index = e.CreateIndex(index_name, build_parameters).value();
 
         spdlog::debug("dataset_path: " + dataset_path);

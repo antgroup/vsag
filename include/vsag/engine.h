@@ -17,9 +17,11 @@
 
 #include <memory>
 
+#include "allocator.h"
 #include "dataset.h"
 #include "index.h"
 #include "resource.h"
+#include "thread_pool.h"
 
 namespace vsag {
 /**
@@ -30,15 +32,6 @@ namespace vsag {
  */
 class Engine {
 public:
-    /**
-     * @brief Constructs an Engine with default settings.
-     *
-     * Initializes an `Engine` instance without explicitly set resources.
-     * Default Resource will be used and managed.
-     * User can use the resource safely until the engine shutdown or destruct.
-     */
-    explicit Engine();
-
     /**
      * @brief Constructs an Engine with a provided outside resource.
      *
@@ -74,6 +67,33 @@ public:
      */
     tl::expected<std::shared_ptr<Index>, Error>
     CreateIndex(const std::string& name, const std::string& parameters);
+
+    /**
+     * @brief Creates a memory allocator within the engine.
+     *
+     * This function attempts to create a memory allocator and returns a result which may either
+     * contain a shared pointer to the created `Allocator` or an `Error` object indicating failure
+     * conditions. This is typically used for custom memory management strategies.
+     *
+     * @return tl::expected<std::shared_ptr<Allocator>, Error> An expected value that contains either
+     * a shared pointer to the successfully created `Allocator` or an `Error` detailing
+     */
+    static tl::expected<std::shared_ptr<Allocator>, Error>
+    CreateAllocator();
+
+    /**
+     * @brief Creates a thread pool for concurrent task execution.
+     *
+     * This function attempts to create a thread pool with the specified number of worker threads.
+     * It returns a result which may either contain a shared pointer to the created `ThreadPool`
+     * or an `Error` object indicating failure conditions (e.g., invalid thread count).
+     *
+     * @param num_threads The number of worker threads to initialize in the thread pool.
+     * @return tl::expected<std::shared_ptr<ThreadPool>, Error> An expected value that contains either
+     * a shared pointer to the successfully created `ThreadPool` or an `Error` detailing
+     */
+    static tl::expected<std::shared_ptr<ThreadPool>, Error>
+    CreateThreadPool(uint32_t num_threads);
 
 private:
     std::shared_ptr<Resource> resource_;  ///< The resource used by this engine.
