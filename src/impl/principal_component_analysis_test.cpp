@@ -185,3 +185,50 @@ TEST_CASE("PCA Basic Test", "[ut][PCA]") {
         TestCentralize(pca, dim);
     }
 }
+
+TEST_CASE("PCA Serialize / Deserialize Test", "[ut][PCA]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    const auto dims = fixtures::get_common_used_dims();
+    uint32_t count = 1000;
+
+    for (auto dim : dims) {
+        // prepare pca1 and pca2
+        uint64_t target_dim = (dim + 1) / 2;
+        PrincipalComponentAnalysis pca1(dim, target_dim, allocator.get());
+        PrincipalComponentAnalysis pca2(dim, target_dim, allocator.get());
+        std::vector<float> vec = fixtures::generate_vectors(count, dim);
+        pca1.Train(vec.data(), count);
+
+        // copy pca1 -> pca2
+        fixtures::TempDir dir("pca");
+        auto filename = dir.GenerateRandomFile();
+        std::ofstream outfile(filename.c_str(), std::ios::binary);
+        IOStreamWriter writer(outfile);
+        pca1.Serialize(writer);
+        outfile.close();
+
+        std::ifstream infile(filename.c_str(), std::ios::binary);
+        IOStreamReader reader(infile);
+        pca2.Deserialize(reader);
+        infile.close();
+
+        // validate pca1 == pca2
+        std::vector<float> mean1(dim, 0);
+        std::vector<float> mean2(dim, 0);
+        std::vector<float> pca_matrix1(target_dim * dim, 0);
+        std::vector<float> pca_matrix2(target_dim * dim, 0);
+        pca1.CopyPCAMatrixForTest(pca_matrix1.data());
+        pca1.CopyMeanForTest(mean1.data());
+
+        pca2.CopyPCAMatrixForTest(pca_matrix2.data());
+        pca2.CopyMeanForTest(mean2.data());
+
+        for (auto i = 0; i < pca_matrix1.size(); i++) {
+            REQUIRE(std::abs(pca_matrix1[i] - pca_matrix2[i]) < 1e-5);
+        }
+
+        for (auto i = 0; i < mean1.size(); i++) {
+            REQUIRE(std::abs(mean1[i] - mean2[i]) < 1e-5);
+        }
+    }
+}

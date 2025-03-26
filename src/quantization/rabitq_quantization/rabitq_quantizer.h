@@ -269,25 +269,25 @@ RaBitQuantizer<metric>::EncodeOneImpl(const DataType* data, uint8_t* codes) cons
         pca_data.assign(data, data + original_dim_);
     }
 
-    // 1. random projection
+    // 2. random projection
     rom_->Transform(pca_data.data(), transformed_data.data());
 
-    // 2. normalize
+    // 3. normalize
     norm_type norm = NormalizeWithCentroid(
         transformed_data.data(), centroid_.data(), normed_data.data(), this->dim_);
 
-    // 3. encode with BQ
+    // 4. encode with BQ
     for (uint64_t d = 0; d < this->dim_; ++d) {
         if (normed_data[d] >= 0.0f) {
             codes[offset_code_ + d / 8] |= (1 << (d % 8));
         }
     }
 
-    // 4. compute encode error
+    // 5. compute encode error
     error_type error =
         RaBitQFloatBinaryIP(normed_data.data(), codes + offset_code_, this->dim_, inv_sqrt_d_);
 
-    // 5. store norm and error
+    // 6. store norm and error
     *(norm_type*)(codes + offset_norm_) = norm;
     *(error_type*)(codes + offset_error_) = error;
 
@@ -397,14 +397,14 @@ RaBitQuantizer<metric>::ProcessQueryImpl(const DataType* query,
             pca_data.assign(query, query + original_dim_);
         }
 
-        // 1. transform
+        // 2. random projection
         rom_->Transform(pca_data.data(), transformed_data.data());
 
-        // 2. norm
+        // 3. norm
         float query_norm = NormalizeWithCentroid(
             transformed_data.data(), centroid_.data(), (DataType*)computer.buf_, this->dim_);
 
-        // 3. store norm
+        // 4. store norm
         *(norm_type*)(computer.buf_ + query_offset_norm_) = query_norm;
     } catch (std::bad_alloc& e) {
         logger::error("bad alloc when init computer buf");
