@@ -66,7 +66,6 @@ const char* const GRAPH_PARAM_INIT_MAX_CAPACITY = "init_capacity";
 const char* const BUILD_PARAMS_KEY = "build_params";
 const char* const BUILD_THREAD_COUNT = "build_thread_count";
 const char* const BUILD_EF_CONSTRUCTION = "ef_construction";
-const char* const EXTRA_INFO_SIZE = "extra_info_size";
 
 const char* const SPARSE_NEED_SORT = "need_sort";
 
@@ -114,7 +113,6 @@ const std::unordered_map<std::string, std::string> DEFAULT_MAP = {
     {"IVF_SEARCH_PARAM_SCAN_BUCKETS_COUNT", IVF_SEARCH_PARAM_SCAN_BUCKETS_COUNT},
     {"IVF_TRAIN_TYPE_KEY", IVF_TRAIN_TYPE_KEY},
     {"HGRAPH_EXTRA_INFO_KEY", HGRAPH_EXTRA_INFO_KEY},
-    {"EXTRA_INFO_SIZE", EXTRA_INFO_SIZE},
 };
 
 }  // namespace vsag

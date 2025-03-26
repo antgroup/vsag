@@ -31,6 +31,7 @@ public:
     MetricType metric_{MetricType::METRIC_TYPE_L2SQR};
     DataTypes data_type_{DataTypes::DATA_TYPE_FLOAT};
     int64_t dim_{0};
+    int64_t extra_info_size_{0};
     std::shared_ptr<Allocator> allocator_{nullptr};
     std::shared_ptr<SafeThreadPool> thread_pool_{nullptr};
 

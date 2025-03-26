@@ -49,7 +49,7 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
       ignore_reorder_(hgraph_param->ignore_reorder),
       ef_construct_(hgraph_param->ef_construction),
       build_thread_count_(hgraph_param->build_thread_count),
-      extra_info_size_(hgraph_param->extra_info_param->extra_info_size) {
+      extra_info_size_(common_param.extra_info_size_) {
     neighbors_mutex_ = std::make_shared<PointsMutex>(0, common_param.allocator_.get());
     this->basic_flatten_codes_ =
         FlattenInterface::MakeInstance(hgraph_param->base_codes_param, common_param);
@@ -808,13 +808,6 @@ static const ConstParamMap EXTERNAL_MAPPING = {
             SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE,
         },
     },
-    {
-        HGRAPH_EXTRA_INFO_SIZE,
-        {
-            HGRAPH_EXTRA_INFO_KEY,
-            EXTRA_INFO_SIZE,
-        },
-    },
 };
 
 static const std::string HGRAPH_PARAMS_TEMPLATE =
@@ -861,8 +854,7 @@ static const std::string HGRAPH_PARAMS_TEMPLATE =
             "{IO_PARAMS_KEY}": {
                 "{IO_TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
                 "{IO_FILE_PATH}": "{DEFAULT_FILE_PATH_VALUE}"
-            },
-            "{EXTRA_INFO_SIZE}": 0
+            }
         }
     })";
 

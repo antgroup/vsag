@@ -234,6 +234,23 @@ public:
      */
     virtual const char*
     GetExtraInfos() const = 0;
+
+    /**
+     * @brief Sets the extra_info's size of the element of dataset.
+     *
+     * @param extra_info_size The extra_info's size value.
+     * @return DatasetPtr A shared pointer to the dataset.
+     */
+    virtual DatasetPtr
+    ExtraInfoSize(int64_t extra_info_size) = 0;
+
+    /**
+     * @brief Retrieves the extra_info's size of the element of dataset.
+     *
+     * @return int64_t The extra_info's size.
+     */
+    virtual int64_t
+    GetExtraInfoSize() const = 0;
 };
 
 };  // namespace vsag
