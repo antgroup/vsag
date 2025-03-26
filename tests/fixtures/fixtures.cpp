@@ -194,11 +194,11 @@ generate_index(const std::string& name,
 std::vector<char>
 generate_extra_infos(uint64_t count, uint32_t size, int seed) {
     std::mt19937 rng(seed);
-    std::uniform_int_distribution<char> distrib_real(std::numeric_limits<char>::lowest(),
-                                                     std::numeric_limits<char>::max());
+    std::uniform_int_distribution<int8_t> distrib_real(std::numeric_limits<int8_t>::lowest(),
+                                                       std::numeric_limits<int8_t>::max());
     std::vector<char> vectors(size * count);
     for (int64_t i = 0; i < size * count; ++i) {
-        vectors[i] = distrib_real(rng);
+        vectors[i] = static_cast<char>(distrib_real(rng));
     }
     return vectors;
 }

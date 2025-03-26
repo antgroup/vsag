@@ -35,6 +35,9 @@ const char* const FLOAT32_VECTORS = "f32_vectors";
 const char* const SPARSE_VECTORS = "sparse_vectors";
 const char* const INT8_VECTORS = "i8_vectors";
 const char* const DATASET_PATHS = "paths";
+const char* const EXTRA_INFOS = "extra_infos";
+const char* const EXTRA_INFO_SIZE = "extra_info_size";
+
 const char* const HNSW_DATA = "hnsw_data";
 const char* const CONJUGATE_GRAPH_DATA = "conjugate_graph_data";
 const char* const DISKANN_PQ = "diskann_qp";
@@ -50,7 +53,6 @@ const char* const METRIC_IP = "ip";
 const char* const DATATYPE_FLOAT32 = "float32";
 const char* const DATATYPE_INT8 = "int8";
 const char* const BLANK_INDEX = "blank_index";
-const char* const EXTRA_INFOS = "extra_infos";
 
 // parameters
 const char* const PARAMETER_DTYPE = "dtype";
