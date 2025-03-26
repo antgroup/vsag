@@ -517,6 +517,18 @@ HGraph::CalDistanceById(const float* query, const int64_t* ids, int64_t count) c
 }
 
 void
+HGraph::GetExtraInfoByIds(const int64_t* ids, int64_t count, char* extra_infos) const {
+    if (this->extra_infos_ == nullptr) {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION, "extra_info is NULL");
+    }
+    for (int64_t i = 0; i < count; ++i) {
+        std::shared_lock<std::shared_mutex> lock(this->label_lookup_mutex_);
+        auto inner_id = this->label_table_->GetIdByLabel(ids[i]);
+        this->extra_infos_->GetExtraInfoById(inner_id, extra_infos + i * extra_info_size_);
+    }
+}
+
+void
 HGraph::add_one_point(const float* data, int level, InnerIdType inner_id) {
     MaxHeap result(allocator_);
 
@@ -633,6 +645,10 @@ HGraph::init_features() {
         this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_METRIC_TYPE_L2);
     } else if (metric_ == MetricType::METRIC_TYPE_COSINE) {
         this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_METRIC_TYPE_COSINE);
+    }
+
+    if (this->extra_infos_ != nullptr) {
+        this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_GET_EXTRA_INFO_BY_ID);
     }
 }
 
