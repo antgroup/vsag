@@ -1891,7 +1891,7 @@ int64_t PQFlashIndex<T, LabelT>::cached_beam_search_memory(const T *query, const
             std::atomic<int> remaining_ops(sorted_read_reqs.size());
             bool succeed = true;
             CallBack callBack = [&succeed, &promise, &remaining_ops] (vsag::IOErrorCode code, const std::string& message) {
-                if ((int) code != 0) {
+                if (code != vsag::IOErrorCode::IO_SUCCESS) {
                     succeed = false;
                 }
                 if (--remaining_ops == 0) {
