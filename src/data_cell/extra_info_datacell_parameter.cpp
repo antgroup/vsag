@@ -27,17 +27,12 @@ ExtraInfoDataCellParameter::FromJson(const JsonType& json) {
     CHECK_ARGUMENT(json.contains(IO_PARAMS_KEY),
                    fmt::format("extra info interface parameters must contains {}", IO_PARAMS_KEY));
     this->io_parameter = IOParameter::GetIOParameterByJson(json[IO_PARAMS_KEY]);
-    CHECK_ARGUMENT(
-        json.contains(EXTRA_INFO_SIZE),
-        fmt::format("extra info interface parameters must contains {}", EXTRA_INFO_SIZE));
-    this->extra_info_size = json[EXTRA_INFO_SIZE];
 }
 
 JsonType
 ExtraInfoDataCellParameter::ToJson() {
     JsonType json;
     json[IO_PARAMS_KEY] = this->io_parameter->ToJson();
-    json[EXTRA_INFO_SIZE] = this->extra_info_size;
     return json;
 }
 }  // namespace vsag

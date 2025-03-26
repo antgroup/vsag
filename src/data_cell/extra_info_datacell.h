@@ -1,4 +1,3 @@
-
 // Copyright 2024-present the vsag project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -34,9 +33,7 @@ class ExtraInfoDataCell : public ExtraInfoInterface {
 public:
     ExtraInfoDataCell() = default;
 
-    explicit ExtraInfoDataCell(const IOParamPtr& io_param,
-                               const IndexCommonParam& common_param,
-                               uint64_t extra_info_size);
+    explicit ExtraInfoDataCell(const IOParamPtr& io_param, const IndexCommonParam& common_param);
 
     void
     InsertExtraInfo(const char* extra_info, InnerIdType idx) override;
@@ -104,10 +101,9 @@ private:
 
 template <typename IOTmpl>
 ExtraInfoDataCell<IOTmpl>::ExtraInfoDataCell(const IOParamPtr& io_param,
-                                             const IndexCommonParam& common_param,
-                                             uint64_t extra_info_size)
+                                             const IndexCommonParam& common_param)
     : allocator_(common_param.allocator_.get()) {
-    this->extra_info_size_ = extra_info_size;
+    this->extra_info_size_ = common_param.extra_info_size_;
     this->io_ = std::make_shared<IOTmpl>(io_param, common_param);
     this->force_in_memory_io_ =
         std::make_shared<MemoryBlockIO>(allocator_, Options::Instance().block_size_limit());

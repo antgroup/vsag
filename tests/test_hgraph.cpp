@@ -89,6 +89,7 @@ HgraphTestIndex::GenerateHGraphBuildParametersString(const std::string& metric_t
         "dtype": "float32",
         "metric_type": "{}",
         "dim": {},
+        "extra_info_size": {},
         "index_param": {{
             "use_reorder": {},
             "base_quantization_type": "{}",
@@ -97,8 +98,7 @@ HgraphTestIndex::GenerateHGraphBuildParametersString(const std::string& metric_t
             "build_thread_count": {},
             "precise_quantization_type": "{}",
             "precise_io_type": "{}",
-            "precise_file_path": "{}",
-            "extra_info_size": {}
+            "precise_file_path": "{}"
         }}
     }}
     )";
@@ -108,12 +108,12 @@ HgraphTestIndex::GenerateHGraphBuildParametersString(const std::string& metric_t
         "dtype": "float32",
         "metric_type": "{}",
         "dim": {},
+        "extra_info_size": {},
         "index_param": {{
             "base_quantization_type": "{}",
             "max_degree": 96,
             "ef_construction": 500,
-            "build_thread_count": {},
-            "extra_info_size": {}
+            "build_thread_count": {}
         }}
     }}
     )";
@@ -129,20 +129,20 @@ HgraphTestIndex::GenerateHGraphBuildParametersString(const std::string& metric_t
         build_parameters_str = fmt::format(parameter_temp_reorder,
                                            metric_type,
                                            dim,
+                                           extra_info_size,
                                            true, /* reorder */
                                            base_quantizer_str,
                                            thread_count,
                                            high_quantizer_str,
                                            precise_io_type,
-                                           dir.GenerateRandomFile(),
-                                           extra_info_size);
+                                           dir.GenerateRandomFile());
     } else {
         build_parameters_str = fmt::format(parameter_temp_origin,
                                            metric_type,
                                            dim,
+                                           extra_info_size,
                                            base_quantizer_str,
-                                           thread_count,
-                                           extra_info_size);
+                                           thread_count);
     }
     INFO(build_parameters_str);
     return build_parameters_str;

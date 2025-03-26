@@ -70,6 +70,14 @@ fill_dim(IndexCommonParam& result, JsonType::const_reference dim_obj) {
     result.dim_ = dim;
 }
 
+inline void
+fill_extra_info_size(IndexCommonParam& result, JsonType::const_reference extra_info_size_obj) {
+    CHECK_ARGUMENT(extra_info_size_obj.is_number_integer(),
+                   fmt::format("parameters[{}] must be integer type", EXTRA_INFO_SIZE));
+    int64_t extra_info_size = extra_info_size_obj.get<int64_t>();
+    result.extra_info_size_ = extra_info_size;
+}
+
 IndexCommonParam
 IndexCommonParam::CheckAndCreate(JsonType& params, const std::shared_ptr<Resource>& resource) {
     IndexCommonParam result;
@@ -93,6 +101,11 @@ IndexCommonParam::CheckAndCreate(JsonType& params, const std::shared_ptr<Resourc
                    fmt::format("parameters must contain {}", PARAMETER_DIM));
     const auto dim_obj = params[PARAMETER_DIM];
     fill_dim(result, dim_obj);
+
+    if (params.contains(EXTRA_INFO_SIZE)) {
+        const auto extra_info_size_obj = params[EXTRA_INFO_SIZE];
+        fill_extra_info_size(result, extra_info_size_obj);
+    }
 
     return result;
 }

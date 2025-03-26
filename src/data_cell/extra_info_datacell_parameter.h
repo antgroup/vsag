@@ -31,7 +31,6 @@ public:
 
 public:
     IOParamPtr io_parameter{nullptr};
-    uint64_t extra_info_size{0};
 };
 
 using ExtraInfoDataCellParamPtr = std::shared_ptr<ExtraInfoDataCellParameter>;
