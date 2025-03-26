@@ -87,8 +87,6 @@ private:
     const uint64_t original_dim_;
     const uint64_t target_dim_;
 
-    bool is_trained_{false};
-
     vsag::Vector<float> pca_matrix_;  // [target_dim_ * original_dim_]
     vsag::Vector<float> mean_;        // [original_dim_ * 1]
 };
