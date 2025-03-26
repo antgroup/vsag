@@ -57,6 +57,7 @@ const char* const QUANTIZATION_TYPE_VALUE_BF16 = "bf16";
 const char* const QUANTIZATION_TYPE_VALUE_PQ = "pq";
 const char* const QUANTIZATION_TYPE_VALUE_RABITQ = "rabitq";
 
+const char* const PCA_DIM = "pca_dim";
 const char* const SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE = "sq4_uniform_trunc_rate";
 
 // graph param value
