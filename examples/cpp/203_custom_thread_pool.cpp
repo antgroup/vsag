@@ -16,10 +16,8 @@
 #include <iostream>
 
 #include "default_thread_pool.h"
-#include "safe_allocator.h"
 #include "safe_thread_pool.h"
 #include "vsag/logger.h"
-#include "vsag/thread_pool.h"
 #include "vsag/vsag.h"
 
 int
