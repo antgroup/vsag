@@ -171,7 +171,7 @@ Pyramid::Build(const DatasetPtr& base) {
     const auto& no_build_levels = pyramid_param_->no_build_levels;
 
     resize(data_num);
-    std::memcpy(labels_.label_table_.data(), data_ids, sizeof(LabelType) * data_num);
+    std::memcpy(label_table_->label_table_.data(), data_ids, sizeof(LabelType) * data_num);
 
     flatten_interface_ptr_->Train(data_vectors, data_num);
     flatten_interface_ptr_->BatchInsertVector(data_vectors, data_num);
@@ -208,7 +208,8 @@ Pyramid::KnnSearch(const DatasetPtr& query,
     search_param.topk = k;
     search_param.search_mode = KNN_SEARCH;
     if (filter != nullptr) {
-        search_param.is_inner_id_allowed = std::make_shared<CommonInnerIdFilter>(filter, labels_);
+        search_param.is_inner_id_allowed =
+            std::make_shared<CommonInnerIdFilter>(filter, *label_table_);
     }
     SearchFunc search_func = [&](const IndexNode* node) {
         search_param.ep = node->entry_point_;
@@ -234,7 +235,8 @@ Pyramid::RangeSearch(const DatasetPtr& query,
     search_param.radius = radius;
     search_param.search_mode = RANGE_SEARCH;
     if (filter != nullptr) {
-        search_param.is_inner_id_allowed = std::make_shared<CommonInnerIdFilter>(filter, labels_);
+        search_param.is_inner_id_allowed =
+            std::make_shared<CommonInnerIdFilter>(filter, *label_table_);
     }
     SearchFunc search_func = [&](const IndexNode* node) {
         search_param.ep = node->entry_point_;
@@ -283,7 +285,7 @@ Pyramid::search_impl(const DatasetPtr& query, int64_t limit, const SearchFunc& s
     for (auto j = target_size - 1; j >= 0; --j) {
         if (j < target_size) {
             dists[j] = search_result.top().first;
-            ids[j] = labels_.GetLabelById(search_result.top().second);
+            ids[j] = label_table_->GetLabelById(search_result.top().second);
         }
         search_result.pop();
     }
@@ -302,26 +304,18 @@ Pyramid::GetMemoryUsage() const {
 
 void
 Pyramid::Serialize(StreamWriter& writer) const {
-    StreamWriter::WriteVector(writer, labels_.label_table_);
+    StreamWriter::WriteVector(writer, label_table_->label_table_);
     flatten_interface_ptr_->Serialize(writer);
     root_->Serialize(writer);
 }
 
 void
 Pyramid::Deserialize(StreamReader& reader) {
-    StreamReader::ReadVector(reader, labels_.label_table_);
+    StreamReader::ReadVector(reader, label_table_->label_table_);
     flatten_interface_ptr_->Deserialize(reader);
     root_->Deserialize(reader);
     pool_ = std::make_unique<VisitedListPool>(
         1, allocator_, flatten_interface_ptr_->TotalCount(), allocator_);
-}
-
-uint64_t
-Pyramid::cal_serialize_size() const {
-    auto cal_size_func = [](uint64_t cursor, uint64_t size, void* buf) { return; };
-    WriteFuncStreamWriter writer(cal_size_func, 0);
-    this->Serialize(writer);
-    return writer.cursor_;
 }
 
 std::vector<int64_t>
@@ -350,7 +344,7 @@ Pyramid::Add(const DatasetPtr& base) {
     }
     std::shared_lock<std::shared_mutex> lock(resize_mutex_);
 
-    std::memcpy(labels_.label_table_.data() + local_cur_element_count,
+    std::memcpy(label_table_->label_table_.data() + local_cur_element_count,
                 data_ids,
                 sizeof(LabelType) * data_num);
 
@@ -407,14 +401,14 @@ Pyramid::resize(int64_t new_max_capacity) {
         return;
     }
     pool_ = std::make_unique<VisitedListPool>(1, allocator_, new_max_capacity, allocator_);
-    labels_.label_table_.resize(new_max_capacity);
+    label_table_->label_table_.resize(new_max_capacity);
     flatten_interface_ptr_->Resize(new_max_capacity);
     max_capacity_ = new_max_capacity;
 }
 
 void
-Pyramid::init_features() {
-    this->feature_list_->SetFeatures({
+Pyramid::InitFeatures() {
+    this->index_feature_list_->SetFeatures({
         SUPPORT_BUILD,
         SUPPORT_ADD_AFTER_BUILD,
         SUPPORT_ADD_FROM_EMPTY,

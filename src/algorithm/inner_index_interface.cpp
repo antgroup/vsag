@@ -21,9 +21,12 @@
 
 namespace vsag {
 
-InnerIndexInterface::InnerIndexInterface(const ParamPtr& index_param,
-                                         const IndexCommonParam& common_param)
-    : allocator_(common_param.allocator_.get()) {
+InnerIndexInterface::InnerIndexInterface(ParamPtr index_param, const IndexCommonParam& common_param)
+    : allocator_(common_param.allocator_.get()),
+      create_param_ptr_(std::move(index_param)),
+      dim_(common_param.dim_),
+      metric_(common_param.metric_),
+      data_type_(common_param.data_type_) {
     this->label_table_ = std::make_shared<LabelTable>(allocator_);
     this->index_feature_list_ = std::make_shared<IndexFeatureList>();
 }
