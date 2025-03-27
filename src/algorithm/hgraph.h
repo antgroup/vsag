@@ -72,7 +72,19 @@ public:
     KnnSearch(const DatasetPtr& query,
               int64_t k,
               const std::string& parameters,
-              const FilterPtr& filter) const override;
+              const FilterPtr& filter) const override {
+        return this->knn_search(query, k, parameters, filter);
+    }
+
+    [[nodiscard]] DatasetPtr
+    KnnSearch(const DatasetPtr& query,
+              int64_t k,
+              const std::string& parameters,
+              const FilterPtr& filter,
+              vsag::IteratorContextPtr* iter_ctx,
+              bool is_last_filter) const override {
+        return this->knn_search(query, k, parameters, filter, iter_ctx, is_last_filter);
+    }
 
     [[nodiscard]] DatasetPtr
     RangeSearch(const DatasetPtr& query,
@@ -133,12 +145,20 @@ private:
     GraphInterfacePtr
     generate_one_route_graph();
 
+    DatasetPtr
+    knn_search(const DatasetPtr& query,
+              int64_t k,
+              const std::string& parameters,
+              const FilterPtr& filter,
+              vsag::IteratorContextPtr* iter_ctx = nullptr,
+              bool is_last_filter = false) const;
     template <InnerSearchMode mode = InnerSearchMode::KNN_SEARCH>
     MaxHeap
     search_one_graph(const float* query,
                      const GraphInterfacePtr& graph,
                      const FlattenInterfacePtr& flatten,
-                     InnerSearchParam& inner_search_param) const;
+                     InnerSearchParam& inner_search_param,
+                     vsag::IteratorContextPtr* iter_ctx = nullptr) const;
     void
     serialize_basic_info(StreamWriter& writer) const;
 

@@ -24,6 +24,7 @@
 #include "data_cell/sparse_graph_datacell.h"
 #include "empty_index_binary_set.h"
 #include "impl/pruning_strategy.h"
+#include "index/iterator_filter.h"
 #include "logger.h"
 #include "utils/slow_task_timer.h"
 #include "utils/util_functions.h"
@@ -119,10 +120,12 @@ HGraph::Add(const DatasetPtr& data) {
 }
 
 DatasetPtr
-HGraph::KnnSearch(const DatasetPtr& query,
+HGraph::knn_search(const DatasetPtr& query,
                   int64_t k,
                   const std::string& parameters,
-                  const FilterPtr& filter) const {
+                  const FilterPtr& filter,
+                  vsag::IteratorContextPtr* iter_ctx,
+                  bool is_last_filter) const {
     std::shared_ptr<CommonInnerIdFilter> ft = nullptr;
     if (filter != nullptr) {
         ft = std::make_shared<CommonInnerIdFilter>(filter, *this->label_table_);
@@ -137,31 +140,57 @@ HGraph::KnnSearch(const DatasetPtr& query,
     // check query vector
     CHECK_ARGUMENT(query->GetNumElements() == 1, "query dataset should contain 1 vector only");
 
-    InnerSearchParam search_param;
-    search_param.ep = this->entry_point_id_;
-    search_param.ef = 1;
-    search_param.is_inner_id_allowed = nullptr;
-    for (auto i = static_cast<int64_t>(this->route_graphs_.size() - 1); i >= 0; --i) {
-        auto result = this->search_one_graph(query->GetFloat32Vectors(),
-                                             this->route_graphs_[i],
-                                             this->basic_flatten_codes_,
-                                             search_param);
-        search_param.ep = result.top().second;
-    }
-
     auto params = HGraphSearchParameters::FromJson(parameters);
 
-    search_param.ef = std::max(params.ef_search, k);
-    search_param.is_inner_id_allowed = ft;
-    search_param.topk = static_cast<int64_t>(search_param.ef);
-    auto search_result = this->search_one_graph(
-        query->GetFloat32Vectors(), this->bottom_graph_, this->basic_flatten_codes_, search_param);
+    if (iter_ctx != nullptr && *iter_ctx == nullptr) {
+        auto cur_count = this->bottom_graph_->TotalCount();
+        auto filter_context = std::make_shared<IteratorFilterContext>();
+        filter_context->init(cur_count, params.ef_search, allocator_);
+        *iter_ctx = filter_context;
+    }
+
+    MaxHeap search_result(allocator_);
+    if (is_last_filter && iter_ctx != nullptr) {
+        while (!(*iter_ctx)->Empty()) {
+            uint32_t cur_inner_id = (*iter_ctx)->GetTopID();
+            float cur_dist = (*iter_ctx)->GetTopDist();
+            search_result.emplace(cur_dist, cur_inner_id);
+            (*iter_ctx)->PopDiscard();
+        }
+    } else {
+        InnerSearchParam search_param;
+        search_param.ep = this->entry_point_id_;
+        search_param.ef = 1;
+        search_param.is_inner_id_allowed = nullptr;
+        if (iter_ctx == nullptr || (iter_ctx != nullptr && (*iter_ctx)->IsFirstUsed())) {
+            for (auto i = static_cast<int64_t>(this->route_graphs_.size() - 1); i >= 0; --i) {
+                auto result = this->search_one_graph(query->GetFloat32Vectors(),
+                                                     this->route_graphs_[i],
+                                                     this->basic_flatten_codes_,
+                                                     search_param);
+                search_param.ep = result.top().second;
+            }
+        }
+
+        search_param.ef = std::max(params.ef_search, k);
+        search_param.is_inner_id_allowed = ft;
+        search_param.topk = static_cast<int64_t>(search_param.ef);
+        search_result = this->search_one_graph(query->GetFloat32Vectors(),
+                                               this->bottom_graph_,
+                                               this->basic_flatten_codes_,
+                                               search_param,
+                                               iter_ctx);
+    }
 
     if (use_reorder_) {
         this->reorder(query->GetFloat32Vectors(), this->high_precise_codes_, search_result, k);
     }
 
     while (search_result.size() > k) {
+        if (iter_ctx != nullptr) {
+            std::pair<float, InnerIdType> curr = search_result.top();
+            (*iter_ctx)->AddDiscardNode(curr.first, curr.second);
+        }
         search_result.pop();
     }
 
@@ -181,11 +210,17 @@ HGraph::KnnSearch(const DatasetPtr& query,
     for (int64_t j = count - 1; j >= 0; --j) {
         dists[j] = search_result.top().first;
         ids[j] = this->label_table_->GetLabelById(search_result.top().second);
+        if (iter_ctx != nullptr) {
+            (*iter_ctx)->SetPoint(search_result.top().second);
+        }
         if (extra_infos != nullptr) {
             this->extra_infos_->GetExtraInfoById(search_result.top().second,
                                                  extra_infos + extra_info_size_ * j);
         }
         search_result.pop();
+    }
+    if (iter_ctx != nullptr) {
+        (*iter_ctx)->SetOFFFirstUsed();
     }
     return std::move(dataset_results);
 }
@@ -302,9 +337,11 @@ MaxHeap
 HGraph::search_one_graph(const float* query,
                          const GraphInterfacePtr& graph,
                          const FlattenInterfacePtr& flatten,
-                         InnerSearchParam& inner_search_param) const {
+                         InnerSearchParam& inner_search_param,
+                         vsag::IteratorContextPtr* iter_ctx) const {
     auto visited_list = this->pool_->TakeOne();
-    auto result = this->searcher_->Search(graph, flatten, visited_list, query, inner_search_param);
+    auto result =
+        this->searcher_->Search(graph, flatten, visited_list, query, inner_search_param, iter_ctx);
     this->pool_->ReturnOne(visited_list);
     return result;
 }
@@ -597,6 +634,7 @@ HGraph::init_features() {
     this->index_feature_list_->SetFeatures({
         IndexFeature::SUPPORT_KNN_SEARCH,
         IndexFeature::SUPPORT_KNN_SEARCH_WITH_ID_FILTER,
+        IndexFeature::SUPPORT_KNN_ITERATOR_FILTER_SEARCH,
     });
     // concurrency
     this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_SEARCH_CONCURRENT);
