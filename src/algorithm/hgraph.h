@@ -147,11 +147,11 @@ private:
 
     DatasetPtr
     knn_search(const DatasetPtr& query,
-              int64_t k,
-              const std::string& parameters,
-              const FilterPtr& filter,
-              vsag::IteratorContextPtr* iter_ctx = nullptr,
-              bool is_last_filter = false) const;
+               int64_t k,
+               const std::string& parameters,
+               const FilterPtr& filter,
+               vsag::IteratorContextPtr* iter_ctx = nullptr,
+               bool is_last_filter = false) const;
     template <InnerSearchMode mode = InnerSearchMode::KNN_SEARCH>
     MaxHeap
     search_one_graph(const float* query,

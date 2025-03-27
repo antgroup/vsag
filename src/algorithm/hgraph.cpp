@@ -121,11 +121,11 @@ HGraph::Add(const DatasetPtr& data) {
 
 DatasetPtr
 HGraph::knn_search(const DatasetPtr& query,
-                  int64_t k,
-                  const std::string& parameters,
-                  const FilterPtr& filter,
-                  vsag::IteratorContextPtr* iter_ctx,
-                  bool is_last_filter) const {
+                   int64_t k,
+                   const std::string& parameters,
+                   const FilterPtr& filter,
+                   vsag::IteratorContextPtr* iter_ctx,
+                   bool is_last_filter) const {
     std::shared_ptr<CommonInnerIdFilter> ft = nullptr;
     if (filter != nullptr) {
         ft = std::make_shared<CommonInnerIdFilter>(filter, *this->label_table_);
