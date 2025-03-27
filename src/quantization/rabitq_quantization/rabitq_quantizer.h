@@ -21,6 +21,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "impl/principal_component_analysis.h"
 #include "impl/random_orthogonal_matrix.h"
 #include "index/index_common_param.h"
 #include "inner_string_params.h"
@@ -45,7 +46,7 @@ public:
     using norm_type = float;
     using error_type = float;
 
-    explicit RaBitQuantizer(int dim, Allocator* allocator);
+    explicit RaBitQuantizer(int dim, uint64_t pca_dim, Allocator* allocator);
 
     explicit RaBitQuantizer(const RaBitQuantizerParamPtr& param,
                             const IndexCommonParam& common_param);
@@ -110,11 +111,19 @@ private:
     }
 
 private:
+    // compute related
     float inv_sqrt_d_{0};
 
+    // random projection related
     std::shared_ptr<RandomOrthogonalMatrix> rom_;
     std::vector<float> centroid_;  // TODO(ZXY): use centroids (e.g., IVF or Graph) outside
 
+    // pca related
+    std::shared_ptr<PrincipalComponentAnalysis> pca_;
+    std::uint64_t original_dim_{0};
+    std::uint64_t pca_dim_{0};
+
+    // query layout
     uint64_t query_code_size_{0};  // TODO(ZXY): support various type of query (FP32, SQ4...)
     uint64_t query_offset_norm_{0};
 
@@ -127,22 +136,31 @@ private:
 };
 
 template <MetricType metric>
-RaBitQuantizer<metric>::RaBitQuantizer(int dim, Allocator* allocator)
+RaBitQuantizer<metric>::RaBitQuantizer(int dim, uint64_t pca_dim, Allocator* allocator)
     : Quantizer<RaBitQuantizer<metric>>(dim, allocator) {
     static_assert(metric == MetricType::METRIC_TYPE_L2SQR, "Unsupported metric type");
 
+    pca_dim_ = pca_dim;
+    original_dim_ = dim;
+    if (0 < pca_dim_ and pca_dim_ < dim) {
+        pca_.reset(new PrincipalComponentAnalysis(dim, pca_dim_, allocator));
+        this->dim_ = pca_dim_;
+    } else {
+        pca_dim_ = dim;
+    }
+
     // centroid
-    centroid_.resize(dim, 0);
+    centroid_.resize(this->dim_, 0);
 
     // random orthogonal matrix
-    rom_.reset(new RandomOrthogonalMatrix(dim, allocator));
+    rom_.reset(new RandomOrthogonalMatrix(this->dim_, allocator));
 
     // distance function related variable
     inv_sqrt_d_ = 1.0f / sqrt(this->dim_);
 
     // base code layout
     size_t align_size = std::max(sizeof(error_type), sizeof(norm_type));
-    size_t code_original_size = (dim + 7) / 8;
+    size_t code_original_size = (this->dim_ + 7) / 8;
 
     this->code_size_ = 0;
 
@@ -164,7 +182,7 @@ RaBitQuantizer<metric>::RaBitQuantizer(int dim, Allocator* allocator)
 template <MetricType metric>
 RaBitQuantizer<metric>::RaBitQuantizer(const RaBitQuantizerParamPtr& param,
                                        const IndexCommonParam& common_param)
-    : RaBitQuantizer<metric>(common_param.dim_, common_param.allocator_.get()){};
+    : RaBitQuantizer<metric>(common_param.dim_, param->pca_dim_, common_param.allocator_.get()){};
 
 template <MetricType metric>
 RaBitQuantizer<metric>::RaBitQuantizer(const QuantizerParamPtr& param,
@@ -183,13 +201,28 @@ RaBitQuantizer<metric>::TrainImpl(const DataType* data, uint64_t count) {
         return true;
     }
 
+    // pca
+    if (pca_dim_ != this->original_dim_) {
+        bool pca_result = pca_->Train(data, count);
+        if (not pca_result) {
+            return false;
+        }
+    }
+
     // get centroid
     for (int d = 0; d < this->dim_; d++) {
         centroid_[d] = 0;
     }
     for (uint64_t i = 0; i < count; ++i) {
+        Vector<DataType> pca_data(this->dim_, 0, this->allocator_);
+        if (pca_dim_ != this->original_dim_) {
+            pca_->Transform(data + i * original_dim_, pca_data.data());
+        } else {
+            pca_data.assign(data + i * original_dim_, data + (i + 1) * original_dim_);
+        }
+
         for (uint64_t d = 0; d < this->dim_; d++) {
-            centroid_[d] += data[d + i * this->dim_];
+            centroid_[d] += pca_data[d];
         }
     }
     for (uint64_t d = 0; d < this->dim_; d++) {
@@ -225,28 +258,36 @@ template <MetricType metric>
 bool
 RaBitQuantizer<metric>::EncodeOneImpl(const DataType* data, uint8_t* codes) const {
     // 0. init
+    Vector<DataType> pca_data(this->dim_, 0, this->allocator_);
     Vector<DataType> transformed_data(this->dim_, 0, this->allocator_);
     Vector<DataType> normed_data(this->dim_, 0, this->allocator_);
 
-    // 1. random projection
-    rom_->Transform(data, transformed_data.data());
+    // 1. pca
+    if (pca_dim_ != this->original_dim_) {
+        pca_->Transform(data, pca_data.data());
+    } else {
+        pca_data.assign(data, data + original_dim_);
+    }
 
-    // 2. normalize
+    // 2. random projection
+    rom_->Transform(pca_data.data(), transformed_data.data());
+
+    // 3. normalize
     norm_type norm = NormalizeWithCentroid(
         transformed_data.data(), centroid_.data(), normed_data.data(), this->dim_);
 
-    // 3. encode with BQ
+    // 4. encode with BQ
     for (uint64_t d = 0; d < this->dim_; ++d) {
         if (normed_data[d] >= 0.0f) {
             codes[offset_code_ + d / 8] |= (1 << (d % 8));
         }
     }
 
-    // 4. compute encode error
+    // 5. compute encode error
     error_type error =
         RaBitQFloatBinaryIP(normed_data.data(), codes + offset_code_, this->dim_, inv_sqrt_d_);
 
-    // 5. store norm and error
+    // 6. store norm and error
     *(norm_type*)(codes + offset_norm_) = norm;
     *(error_type*)(codes + offset_error_) = error;
 
@@ -258,7 +299,7 @@ bool
 RaBitQuantizer<metric>::EncodeBatchImpl(const DataType* data, uint8_t* codes, uint64_t count) {
     for (uint64_t i = 0; i < count; ++i) {
         // TODO(ZXY): use batch optimize
-        this->EncodeOneImpl(data + i * this->dim_, codes + i * this->code_size_);
+        this->EncodeOneImpl(data + i * this->original_dim_, codes + i * this->code_size_);
     }
     return true;
 }
@@ -266,6 +307,10 @@ RaBitQuantizer<metric>::EncodeBatchImpl(const DataType* data, uint8_t* codes, ui
 template <MetricType metric>
 bool
 RaBitQuantizer<metric>::DecodeOneImpl(const uint8_t* codes, DataType* data) {
+    if (pca_dim_ != this->original_dim_) {
+        return false;
+    }
+
     // 1. init
     Vector<DataType> normed_data(this->dim_, 0, this->allocator_);
     Vector<DataType> transformed_data(this->dim_, 0, this->allocator_);
@@ -292,6 +337,10 @@ RaBitQuantizer<metric>::DecodeOneImpl(const uint8_t* codes, DataType* data) {
 template <MetricType metric>
 bool
 RaBitQuantizer<metric>::DecodeBatchImpl(const uint8_t* codes, DataType* data, uint64_t count) {
+    if (pca_dim_ != this->original_dim_) {
+        return false;
+    }
+
     for (uint64_t i = 0; i < count; ++i) {
         // TODO(ZXY): use batch optimize
         this->DecodeOneImpl(codes + i * this->code_size_, data + i * this->dim_);
@@ -338,16 +387,24 @@ RaBitQuantizer<metric>::ProcessQueryImpl(const DataType* query,
         computer.buf_ = reinterpret_cast<uint8_t*>(this->allocator_->Allocate(query_code_size_));
         std::fill(computer.buf_, computer.buf_ + query_code_size_, 0);
 
+        Vector<DataType> pca_data(this->dim_, 0, this->allocator_);
         Vector<DataType> transformed_data(this->dim_, 0, this->allocator_);
 
-        // 1. transform
-        rom_->Transform(query, transformed_data.data());
+        // 1. pca
+        if (pca_dim_ != this->original_dim_) {
+            pca_->Transform(query, pca_data.data());
+        } else {
+            pca_data.assign(query, query + original_dim_);
+        }
 
-        // 2. norm
+        // 2. random projection
+        rom_->Transform(pca_data.data(), transformed_data.data());
+
+        // 3. norm
         float query_norm = NormalizeWithCentroid(
             transformed_data.data(), centroid_.data(), (DataType*)computer.buf_, this->dim_);
 
-        // 3. store norm
+        // 4. store norm
         *(norm_type*)(computer.buf_ + query_offset_norm_) = query_norm;
     } catch (std::bad_alloc& e) {
         logger::error("bad alloc when init computer buf");
@@ -384,25 +441,21 @@ RaBitQuantizer<metric>::ReleaseComputerImpl(Computer<RaBitQuantizer<metric>>& co
 template <MetricType metric>
 void
 RaBitQuantizer<metric>::SerializeImpl(StreamWriter& writer) {
-    StreamWriter::WriteObj(writer, this->offset_code_);
-    StreamWriter::WriteObj(writer, this->offset_norm_);
-    StreamWriter::WriteObj(writer, this->offset_error_);
-    StreamWriter::WriteObj(writer, this->query_offset_norm_);
-    StreamWriter::WriteObj(writer, this->query_code_size_);
     StreamWriter::WriteVector(writer, this->centroid_);
     this->rom_->Serialize(writer);
+    if (pca_dim_ != this->original_dim_) {
+        this->pca_->Serialize(writer);
+    }
 }
 
 template <MetricType metric>
 void
 RaBitQuantizer<metric>::DeserializeImpl(StreamReader& reader) {
-    StreamReader::ReadObj(reader, this->offset_code_);
-    StreamReader::ReadObj(reader, this->offset_norm_);
-    StreamReader::ReadObj(reader, this->offset_error_);
-    StreamReader::ReadObj(reader, this->query_offset_norm_);
-    StreamReader::ReadObj(reader, this->query_code_size_);
     StreamReader::ReadVector(reader, this->centroid_);
     this->rom_->Deserialize(reader);
+    if (pca_dim_ != this->original_dim_) {
+        this->pca_->Deserialize(reader);
+    }
 }
 
 }  // namespace vsag

@@ -31,6 +31,7 @@ public:
     ToJson() override;
 
 public:
+    uint64_t pca_dim_{0};
 };
 
 using RaBitQuantizerParamPtr = std::shared_ptr<RaBitQuantizerParameter>;
