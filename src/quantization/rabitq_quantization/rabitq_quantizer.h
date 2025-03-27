@@ -441,13 +441,6 @@ RaBitQuantizer<metric>::ReleaseComputerImpl(Computer<RaBitQuantizer<metric>>& co
 template <MetricType metric>
 void
 RaBitQuantizer<metric>::SerializeImpl(StreamWriter& writer) {
-    StreamWriter::WriteObj(writer, this->original_dim_);
-    StreamWriter::WriteObj(writer, this->pca_dim_);
-    StreamWriter::WriteObj(writer, this->offset_code_);
-    StreamWriter::WriteObj(writer, this->offset_norm_);
-    StreamWriter::WriteObj(writer, this->offset_error_);
-    StreamWriter::WriteObj(writer, this->query_offset_norm_);
-    StreamWriter::WriteObj(writer, this->query_code_size_);
     StreamWriter::WriteVector(writer, this->centroid_);
     this->rom_->Serialize(writer);
     if (pca_dim_ != this->original_dim_) {
@@ -458,13 +451,6 @@ RaBitQuantizer<metric>::SerializeImpl(StreamWriter& writer) {
 template <MetricType metric>
 void
 RaBitQuantizer<metric>::DeserializeImpl(StreamReader& reader) {
-    StreamReader::ReadObj(reader, this->original_dim_);
-    StreamReader::ReadObj(reader, this->pca_dim_);
-    StreamReader::ReadObj(reader, this->offset_code_);
-    StreamReader::ReadObj(reader, this->offset_norm_);
-    StreamReader::ReadObj(reader, this->offset_error_);
-    StreamReader::ReadObj(reader, this->query_offset_norm_);
-    StreamReader::ReadObj(reader, this->query_code_size_);
     StreamReader::ReadVector(reader, this->centroid_);
     this->rom_->Deserialize(reader);
     if (pca_dim_ != this->original_dim_) {
