@@ -182,6 +182,11 @@ protected:
                             int64_t extra_info_size,
                             float expected_recall = 0.99);
 
+    static void
+    TestGetExtraInfoById(const IndexPtr& index,
+                         const TestDatasetPtr& dataset,
+                         int64_t extra_info_size);
+
     constexpr static float RECALL_THRESHOLD = 0.95;
 };
 

@@ -25,6 +25,8 @@ class TestDataset {
 public:
     using DatasetPtr = vsag::DatasetPtr;
 
+    const static int ID_BIAS = 10086;
+
     static std::shared_ptr<TestDataset>
     CreateTestDataset(uint64_t dim,
                       uint64_t count,
