@@ -54,7 +54,7 @@ parse_args(argparse::ArgumentParser& parser, int argc, char** argv) {
         .help(R"(The eval method to select, choose from {"build", "search"})");
     parser.add_argument<std::string>("--index_name", "-n")
         .required()
-        .help("The name of index fot create index");
+        .help("The name of index for create index");
     parser.add_argument<std::string>("--create_params", "-c")
         .required()
         .help("The param for create index");
