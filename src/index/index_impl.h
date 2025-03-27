@@ -161,6 +161,11 @@ public:
         SAFE_CALL(return this->inner_index_->CalDistanceById(query, ids, count));
     }
 
+    virtual tl::expected<void, Error>
+    GetExtraInfoByIds(const int64_t* ids, int64_t count, char* extra_infos) const override {
+        SAFE_CALL(this->inner_index_->GetExtraInfoByIds(ids, count, extra_infos));
+    };
+
     tl::expected<void, Error>
     Merge(const std::vector<MergeUnit>& merge_units) override {
         SAFE_CALL(this->inner_index_->Merge(merge_units));
