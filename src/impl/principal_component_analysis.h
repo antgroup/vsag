@@ -28,6 +28,7 @@
 
 namespace vsag {
 
+// aka PCA
 class PrincipalComponentAnalysis {
 public:
     // interface
