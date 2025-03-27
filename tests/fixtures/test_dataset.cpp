@@ -24,8 +24,6 @@
 
 namespace fixtures {
 
-const static int ID_BIAS = 10086;
-
 struct CompareByFirst {
     constexpr bool
     operator()(std::pair<float, int64_t> const& a,
@@ -120,7 +118,7 @@ GenerateRandomDataset(uint64_t dim,
         paths[i] = create_random_string(!is_query);
     }
     std::vector<int64_t> ids(count);
-    std::iota(ids.begin(), ids.end(), ID_BIAS);
+    std::iota(ids.begin(), ids.end(), TestDataset::ID_BIAS);
     base->Dim(dim)
         ->Ids(CopyVector(ids))
         ->Float32Vectors(CopyVector(vecs))
@@ -283,7 +281,7 @@ CalGroundTruthWithPath(const std::pair<float*, int64_t*>& result,
         for (int j = 0; j < top_k; ++j) {
             while (start < base_count) {
                 auto base_id = result.second[i * base_count + start];
-                if (is_path_belong_to(query_paths[i], base_paths[base_id - ID_BIAS]) &&
+                if (is_path_belong_to(query_paths[i], base_paths[base_id - TestDataset::ID_BIAS]) &&
                     (not filter || not filter(base_id))) {
                     ids[i * top_k + j] = base_id;
                     dists[i * top_k + j] = result.first[i * base_count + start];

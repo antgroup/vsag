@@ -1020,4 +1020,26 @@ TestIndex::TestSearchWithExtraInfo(const IndexPtr& index,
     REQUIRE(cur_recall > expected_recall * query_count * RECALL_THRESHOLD);
 }
 
+void
+TestIndex::TestGetExtraInfoById(const TestIndex::IndexPtr& index,
+                                const TestDatasetPtr& dataset,
+                                int64_t extra_info_size) {
+    if (not index->CheckFeature(vsag::SUPPORT_GET_EXTRA_INFO_BY_ID)) {
+        return;
+    }
+    int64_t count = dataset->count_;
+    std::vector<int64_t> ids(count);
+    memcpy(ids.data(), dataset->base_->GetIds(), count * sizeof(int64_t));
+    std::random_shuffle(ids.begin(), ids.end());
+    std::vector<char> extra_infos(count * extra_info_size);
+    auto result = index->GetExtraInfoByIds(ids.data(), count, extra_infos.data());
+    REQUIRE(result.has_value());
+    for (int64_t i = 0; i < count; ++i) {
+        REQUIRE(
+            memcmp(extra_infos.data() + i * extra_info_size,
+                   dataset->base_->GetExtraInfos() + (ids[i] - dataset->ID_BIAS) * extra_info_size,
+                   extra_info_size) == 0);
+    }
+}
+
 }  // namespace fixtures

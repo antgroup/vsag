@@ -63,6 +63,8 @@ enum IndexFeature {
 
     SUPPORT_MERGE_INDEX, /**< Supports to merge indices of the same type */
 
+    SUPPORT_GET_EXTRA_INFO_BY_ID, /**< Supports get extra_info by id */
+
     INDEX_FEATURE_COUNT /** must be last one */
 };
 }  // namespace vsag

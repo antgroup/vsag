@@ -312,6 +312,26 @@ public:
     };
 
     /**
+     * @brief Retrieve additional data associated with vectors identified by given IDs.
+     *
+     * This method fetches non-vector metadata stored alongside the vectors in the index
+     * (e.g., timestamps, labels, or application-specific fields).
+     * The format and content of the extra data depend on how they were stored during index creation.
+     *
+     * @param ids Array of vector IDs for which extra information is requested.
+     * @param count Number of IDs in the 'ids' array.
+     * @param extra_infos A char* pointer to the retrieved extra data if successful
+     * (format is implementation-specific). Returns an error object
+     * if any retrieval failure occurs (e.g., invalid ID, out of memory).
+     * @throws std::runtime_error If the index implementation does not support this operation
+     * (default behavior for base class).
+     */
+    virtual tl::expected<void, Error>
+    GetExtraInfoByIds(const int64_t* ids, int64_t count, char* extra_infos) const {
+        throw std::runtime_error("Index doesn't support GetExtraInfoByIds");
+    };
+
+    /**
      * @brief Checks if the specified feature is supported by the index.
      *
      * This method checks whether the given `feature` is supported by the index.
