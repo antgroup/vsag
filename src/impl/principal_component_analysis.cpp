@@ -20,10 +20,10 @@ namespace vsag {
 bool
 PrincipalComponentAnalysis::Train(const float* data, uint64_t count) {
     vsag::Vector<float> centralized_data(allocator_);
-    centralized_data.resize(count * original_dim_, 0.0f);
+    centralized_data.resize(count * original_dim_, 0.0F);
 
     vsag::Vector<float> covariance_matrix(allocator_);
-    covariance_matrix.resize(original_dim_ * original_dim_, 0.0f);
+    covariance_matrix.resize(original_dim_ * original_dim_, 0.0F);
 
     // 1. compute mean (stored in mean_)
     ComputeColumnMean(data, count);
@@ -43,7 +43,7 @@ PrincipalComponentAnalysis::Train(const float* data, uint64_t count) {
 
 void
 PrincipalComponentAnalysis::ComputeColumnMean(const float* data, uint64_t count) {
-    std::fill(mean_.begin(), mean_.end(), 0.0f);
+    std::fill(mean_.begin(), mean_.end(), 0.0F);
 
     for (uint64_t i = 0; i < count; ++i) {
         for (uint64_t j = 0; j < original_dim_; ++j) {
@@ -79,7 +79,7 @@ PrincipalComponentAnalysis::ComputeCovarianceMatrix(const float* centralized_dat
     }
 
     // unbiased estimat
-    float scale = 1.0f / static_cast<float>(count - 1);
+    float scale = 1.0F / static_cast<float>(count - 1);
     for (uint64_t j = 0; j < original_dim_; ++j) {
         for (uint64_t k = 0; k < original_dim_; ++k) {
             covariance_matrix[j * original_dim_ + k] *= scale;
@@ -99,9 +99,9 @@ PrincipalComponentAnalysis::PerformEigenDecomposition(const float* covariance_ma
     int ssyev_result = LAPACKE_ssyev(LAPACK_ROW_MAJOR,
                                      'V',
                                      'U',
-                                     original_dim_,
+                                     static_cast<blasint>(original_dim_),
                                      eigen_vectors.data(),
-                                     original_dim_,
+                                     static_cast<blasint>(original_dim_),
                                      eigen_values.data());
 
     if (ssyev_result != 0) {
@@ -122,7 +122,7 @@ PrincipalComponentAnalysis::PerformEigenDecomposition(const float* covariance_ma
 void
 PrincipalComponentAnalysis::Transform(const float* original_vec, float* transformed_vec) const {
     vsag::Vector<float> centralized_vec(allocator_);
-    centralized_vec.resize(original_dim_, 0.0f);
+    centralized_vec.resize(original_dim_, 0.0F);
 
     // centralize
     this->CentralizeData(original_vec, centralized_vec.data());
@@ -134,14 +134,14 @@ PrincipalComponentAnalysis::Transform(const float* original_vec, float* transfor
     //                    [3 ]
     cblas_sgemv(CblasRowMajor,
                 CblasNoTrans,
-                target_dim_,
-                original_dim_,
-                1.0f,
+                static_cast<blasint>(target_dim_),
+                static_cast<blasint>(original_dim_),
+                1.0F,
                 pca_matrix_.data(),
-                original_dim_,
+                static_cast<blasint>(original_dim_),
                 centralized_vec.data(),
                 1,
-                0.0f,
+                0.0F,
                 transformed_vec,
                 1);
 }
