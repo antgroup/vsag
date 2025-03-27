@@ -107,6 +107,9 @@ public:
     DatasetPtr
     CalDistanceById(const float* query, const int64_t* ids, int64_t count) const override;
 
+    void
+    GetMinAndMaxId(int64_t& min_id, int64_t& max_id) const override;
+
     inline void
     SetBuildThreadsCount(uint64_t count) {
         this->build_thread_count_ = count;

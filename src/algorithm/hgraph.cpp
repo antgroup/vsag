@@ -517,6 +517,17 @@ HGraph::CalDistanceById(const float* query, const int64_t* ids, int64_t count) c
 }
 
 void
+HGraph::GetMinAndMaxId(int64_t& min_id, int64_t& max_id) const {
+    min_id = INT64_MAX;
+    max_id = INT64_MIN;
+    std::shared_lock<std::shared_mutex> lock(this->label_lookup_mutex_);
+    for (auto& it : this->label_table_->label_remap_) {
+        max_id = it.first > max_id ? it.first : max_id;
+        min_id = it.first < min_id ? it.first : min_id;
+    }
+}
+
+void
 HGraph::add_one_point(const float* data, int level, InnerIdType inner_id) {
     MaxHeap result(allocator_);
 
