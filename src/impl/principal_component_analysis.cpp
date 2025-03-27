@@ -67,7 +67,7 @@ PrincipalComponentAnalysis::CentralizeData(const float* original_data,
 void
 PrincipalComponentAnalysis::ComputeCovarianceMatrix(const float* centralized_data,
                                                     uint64_t count,
-                                                    float* covariance_matrix) {
+                                                    float* covariance_matrix) const {
     for (uint64_t i = 0; i < count; ++i) {
         for (uint64_t j = 0; j < original_dim_; ++j) {
             for (uint64_t k = 0; k < original_dim_; ++k) {

@@ -73,7 +73,7 @@ public:
     void
     ComputeCovarianceMatrix(const float* centralized_data,
                             uint64_t count,
-                            float* covariance_matrix);
+                            float* covariance_matrix) const;
 
     bool
     PerformEigenDecomposition(const float* covariance_matrix);
