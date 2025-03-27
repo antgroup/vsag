@@ -22,7 +22,11 @@
 using namespace vsag;
 
 TEST_CASE("RaBitQ Quantizer Parameter ToJson Test", "[ut][RaBitQuantizerParameter]") {
-    std::string param_str = "{}";
+    std::string param_str = R"(
+        {
+            "pca_dim": 256
+        }
+    )";
     auto param = std::make_shared<RaBitQuantizerParameter>();
     param->FromJson(param_str);
     ParameterTest::TestToJson(param);
