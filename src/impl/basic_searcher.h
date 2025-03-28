@@ -20,9 +20,9 @@
 #include "data_cell/flatten_interface.h"
 #include "data_cell/graph_interface.h"
 #include "index/index_common_param.h"
+#include "index/iterator_filter.h"
 #include "lock_strategy.h"
 #include "utils/visited_list.h"
-#include "index/iterator_filter.h"
 
 namespace vsag {
 
@@ -60,7 +60,7 @@ public:
            const VisitedListPtr& vl,
            const float* query,
            const InnerSearchParam& inner_search_param,
-           IteratorFilterContext *iter_ctx) const;
+           IteratorFilterContext* iter_ctx) const;
 
 private:
     // rid means the neighbor's rank (e.g., the first neighbor's rid == 0)
@@ -89,7 +89,7 @@ private:
                 const VisitedListPtr& vl,
                 const float* query,
                 const InnerSearchParam& inner_search_param,
-                IteratorFilterContext *iter_ctx) const;
+                IteratorFilterContext* iter_ctx) const;
 
 private:
     Allocator* allocator_{nullptr};

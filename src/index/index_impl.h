@@ -103,7 +103,7 @@ public:
               int64_t k,
               const std::string& parameters,
               const FilterPtr& filter,
-              vsag::IteratorContext* &iter_ctx,
+              vsag::IteratorContext*& iter_ctx,
               bool is_last_filter) const override {
         SAFE_CALL(return this->inner_index_->KnnSearch(
             query, k, parameters, filter, iter_ctx, is_last_filter));
