@@ -216,12 +216,12 @@ HGraph::KnnSearch(const DatasetPtr& query,
 
     if (iter_ctx == nullptr) {
         auto cur_count = this->bottom_graph_->TotalCount();
-        IteratorFilterContext* new_ctx = new IteratorFilterContext();
+        auto new_ctx = new IteratorFilterContext();
         new_ctx->init(cur_count, params.ef_search, allocator_);
         iter_ctx = new_ctx;
     }
 
-    IteratorFilterContext* iter_filter_ctx = static_cast<IteratorFilterContext*>(iter_ctx);
+    auto iter_filter_ctx = static_cast<IteratorFilterContext*>(iter_ctx);
     MaxHeap search_result(allocator_);
     if (is_last_filter) {
         while (!iter_filter_ctx->Empty()) {
@@ -260,10 +260,8 @@ HGraph::KnnSearch(const DatasetPtr& query,
     }
 
     while (search_result.size() > k) {
-        if (iter_ctx != nullptr) {
-            std::pair<float, InnerIdType> curr = search_result.top();
-            iter_filter_ctx->AddDiscardNode(curr.first, curr.second);
-        }
+        std::pair<float, InnerIdType> curr = search_result.top();
+        iter_filter_ctx->AddDiscardNode(curr.first, curr.second);
         search_result.pop();
     }
 
@@ -278,14 +276,10 @@ HGraph::KnnSearch(const DatasetPtr& query,
     for (int64_t j = count - 1; j >= 0; --j) {
         dists[j] = search_result.top().first;
         ids[j] = this->label_table_->GetLabelById(search_result.top().second);
-        if (iter_ctx != nullptr) {
-            iter_filter_ctx->SetPoint(search_result.top().second);
-        }
+        iter_filter_ctx->SetPoint(search_result.top().second);
         search_result.pop();
     }
-    if (iter_ctx != nullptr) {
-        iter_filter_ctx->SetOFFFirstUsed();
-    }
+    iter_filter_ctx->SetOFFFirstUsed();
     return std::move(dataset_results);
 }
 

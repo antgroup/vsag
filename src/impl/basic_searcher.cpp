@@ -124,7 +124,7 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
     Vector<InnerIdType> to_be_visited_id(graph->MaximumDegree(), allocator_);
     Vector<float> line_dists(graph->MaximumDegree(), allocator_);
 
-    if (iter_ctx != nullptr && !iter_ctx->IsFirstUsed()) {
+    if (!iter_ctx->IsFirstUsed()) {
         if (iter_ctx->Empty()) {
             return top_candidates;
         }
@@ -186,7 +186,7 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
             dist = line_dists[i];
             if (top_candidates.size() < ef || lower_bound > dist ||
                 (mode == RANGE_SEARCH && dist <= inner_search_param.radius)) {
-                if (iter_ctx != nullptr && !iter_ctx->CheckPoint(to_be_visited_id[i])) {
+                if (!iter_ctx->CheckPoint(to_be_visited_id[i])) {
                     continue;
                 }
                 candidate_set.emplace(-dist, to_be_visited_id[i]);
@@ -197,8 +197,7 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
 
                 if constexpr (mode == KNN_SEARCH) {
                     if (top_candidates.size() > ef) {
-                        if (iter_ctx != nullptr &&
-                            iter_ctx->CheckPoint(top_candidates.top().second)) {
+                        if (iter_ctx->CheckPoint(top_candidates.top().second)) {
                             auto cur_node_pair = top_candidates.top();
                             iter_ctx->AddDiscardNode(cur_node_pair.first, cur_node_pair.second);
                         }
@@ -216,7 +215,7 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
     if constexpr (mode == KNN_SEARCH) {
         while (top_candidates.size() > inner_search_param.topk) {
             auto cur_node_pair = top_candidates.top();
-            if (iter_ctx != nullptr && iter_ctx->CheckPoint(cur_node_pair.second)) {
+            if (iter_ctx->CheckPoint(cur_node_pair.second)) {
                 iter_ctx->AddDiscardNode(cur_node_pair.first, cur_node_pair.second);
             }
             top_candidates.pop();
