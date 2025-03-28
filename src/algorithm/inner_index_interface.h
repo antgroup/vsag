@@ -50,6 +50,16 @@ public:
               const FilterPtr& filter) const = 0;
 
     [[nodiscard]] virtual DatasetPtr
+    KnnSearch(const DatasetPtr& query,
+              int64_t k,
+              const std::string& parameters,
+              const FilterPtr& filter,
+              vsag::IteratorContextPtr* iter_ctx,
+              bool is_last_filter) const {
+        throw std::runtime_error("Index doesn't support new filter");
+    };
+
+    [[nodiscard]] virtual DatasetPtr
     RangeSearch(const DatasetPtr& query,
                 float radius,
                 const std::string& parameters,
