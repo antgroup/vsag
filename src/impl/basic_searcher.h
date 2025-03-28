@@ -22,6 +22,7 @@
 #include "index/index_common_param.h"
 #include "lock_strategy.h"
 #include "utils/visited_list.h"
+#include "index/iterator_filter.h"
 
 namespace vsag {
 
@@ -53,6 +54,14 @@ public:
            const float* query,
            const InnerSearchParam& inner_search_param) const;
 
+    virtual MaxHeap
+    Search(const GraphInterfacePtr& graph,
+           const FlattenInterfacePtr& flatten,
+           const VisitedListPtr& vl,
+           const float* query,
+           const InnerSearchParam& inner_search_param,
+           IteratorFilterContext *iter_ctx) const;
+
 private:
     // rid means the neighbor's rank (e.g., the first neighbor's rid == 0)
     //  id means the neighbor's  id  (e.g., the first neighbor's  id == 12345)
@@ -72,6 +81,15 @@ private:
                 const VisitedListPtr& vl,
                 const float* query,
                 const InnerSearchParam& inner_search_param) const;
+
+    template <InnerSearchMode mode = KNN_SEARCH>
+    MaxHeap
+    search_impl(const GraphInterfacePtr& graph,
+                const FlattenInterfacePtr& flatten,
+                const VisitedListPtr& vl,
+                const float* query,
+                const InnerSearchParam& inner_search_param,
+                IteratorFilterContext *iter_ctx) const;
 
 private:
     Allocator* allocator_{nullptr};

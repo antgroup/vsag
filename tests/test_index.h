@@ -117,6 +117,13 @@ protected:
                      bool support_filter_obj = false);
 
     static void
+    TestKnnSearchIter(const IndexPtr& index,
+                      const TestDatasetPtr& dataset,
+                      const std::string& search_param,
+                      float expected_recall = 0.99,
+                      bool expected_success = true);
+
+    static void
     TestCalcDistanceById(const IndexPtr& index, const TestDatasetPtr& dataset, float error = 1e-5);
 
     static void
