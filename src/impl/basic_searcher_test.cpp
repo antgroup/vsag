@@ -17,12 +17,14 @@
 
 #include "algorithm/hnswlib/hnswalg.h"
 #include "algorithm/hnswlib/space_l2.h"
+#include "basic_optimizer.h"
 #include "catch2/catch_template_test_macros.hpp"
 #include "data_cell/flatten_datacell.h"
 #include "fixtures.h"
 #include "io/memory_io.h"
 #include "quantization/fp32_quantizer.h"
 #include "safe_allocator.h"
+#include "test_logger.h"
 #include "utils/visited_list.h"
 
 using namespace vsag;
@@ -116,6 +118,10 @@ TEST_CASE("Basic Usage for GraphDataCell (adapter of hnsw)", "[ut][GraphDataCell
 }
 
 TEST_CASE("Search with HNSW", "[ut][BasicSearcher]") {
+    // avoid too much slow task logs
+    fixtures::logger::LoggerReplacer _;
+    vsag::Options::Instance().logger()->SetLevel(vsag::Logger::Level::kDEBUG);
+
     // data attr
     uint32_t base_size = 1000;
     uint32_t query_size = 100;
@@ -223,8 +229,37 @@ TEST_CASE("Search with HNSW", "[ut][BasicSearcher]") {
     params[3].is_inner_id_allowed = f;
 
     for (const auto& search_param : params) {
+        // init searcher
         exception_func(search_param);
         auto searcher = std::make_shared<BasicSearcher>(common);
+
+        // searcher-optimizer
+        searcher->SetMockParameters(graph_data_cell, vector_data_cell, pool, search_param, dim);
+        double loss1_before = searcher->MockRun();
+        auto optimizer1 = std::make_shared<Optimizer<BasicSearcher>>(common, 1);
+        optimizer1->RegisterParameter(
+            std::make_shared<IntRuntimeParameter>(PREFETCH_STRIDE_VISIT, 1, 10));
+        bool optimize_status = optimizer1->Optimize(searcher);
+        double loss1_after = searcher->MockRun();
+        if (optimize_status) {
+            REQUIRE(loss1_before > loss1_after);
+        }
+
+        // vector-optimizer
+        vector_data_cell->SetMockParameters(dim);
+        double loss2_before = searcher->MockRun();
+        auto optimizer2 = std::make_shared<Optimizer<FlattenInterface>>(common, 1);
+        optimizer2->RegisterParameter(
+            std::make_shared<IntRuntimeParameter>(PREFETCH_DEPTH_CODE, 1, 10));
+        optimizer2->RegisterParameter(
+            std::make_shared<IntRuntimeParameter>(PREFETCH_STRIDE_CODE, 1, 10));
+        optimize_status = optimizer2->Optimize(vector_data_cell);
+        double loss2_after = searcher->MockRun();
+        if (optimize_status) {
+            REQUIRE(loss2_before > loss2_after);
+        }
+
+        // search
         for (int i = 0; i < query_size; i++) {
             std::unordered_set<InnerIdType> valid_set, set;
             auto vl = pool->TakeOne();
