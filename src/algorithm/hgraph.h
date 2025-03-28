@@ -186,7 +186,6 @@ private:
     double mult_{1.0};
 
     InnerIdType entry_point_id_{std::numeric_limits<InnerIdType>::max()};
-    uint64_t max_level_{0};
 
     uint64_t ef_construct_{400};
     mutable std::shared_mutex global_mutex_;
