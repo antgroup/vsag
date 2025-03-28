@@ -312,10 +312,10 @@ FlattenDataCell<QuantTmpl, IOTmpl>::query(float* result_dists,
         if (force_in_memory_) {
             this->force_in_memory_io_->Prefetch(
                 static_cast<uint64_t>(idx[i]) * static_cast<uint64_t>(code_size_),
-                this->prefetch_cache_line_size_);
+                this->code_size_);
         } else {
             this->io_->Prefetch(static_cast<uint64_t>(idx[i]) * static_cast<uint64_t>(code_size_),
-                                this->prefetch_cache_line_size_);
+                                this->code_size_);
         }
     }
     if (not force_in_memory_ and not this->io_->InMemory() and id_count > 1) {
@@ -336,11 +336,11 @@ FlattenDataCell<QuantTmpl, IOTmpl>::query(float* result_dists,
                 this->force_in_memory_io_->Prefetch(
                     static_cast<uint64_t>(idx[i + this->prefetch_jump_code_size_]) *
                         static_cast<uint64_t>(code_size_),
-                    this->prefetch_cache_line_size_);
+                    this->code_size_);
             } else {
                 this->io_->Prefetch(static_cast<uint64_t>(idx[i + this->prefetch_jump_code_size_]) *
                                         static_cast<uint64_t>(code_size_),
-                                    this->prefetch_cache_line_size_);
+                                    this->code_size_);
             }
         }
 
