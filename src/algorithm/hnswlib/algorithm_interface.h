@@ -21,12 +21,14 @@
 #include <string>
 
 #include "base_filter_functor.h"
+#include "index/iterator_filter.h"
 #include "space_interface.h"
 #include "stream_reader.h"
 #include "typing.h"
 #include "vsag/dataset.h"
 #include "vsag/errors.h"
 #include "vsag/expected.hpp"
+#include "vsag/iterator_context.h"
 
 namespace hnswlib {
 
@@ -43,7 +45,9 @@ public:
               size_t k,
               size_t ef,
               const vsag::FilterPtr is_id_allowed = nullptr,
-              float skip_ratio = 0.9f) const = 0;
+              float skip_ratio = 0.9f,
+              vsag::IteratorFilterContext* iter_ctx = nullptr,
+              bool is_last_filter = false) const = 0;
 
     virtual std::priority_queue<std::pair<dist_t, LabelType>>
     searchRange(const void* query_data,
