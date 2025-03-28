@@ -2,6 +2,13 @@
 set(name openblas)
 set(source_dir ${CMAKE_CURRENT_BINARY_DIR}/${name}/source)
 set(install_dir ${CMAKE_CURRENT_BINARY_DIR}/${name}/install)
+
+if (CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64")
+    set (openblas_target "TARGET=GENERIC")
+else ()
+    set (openblas_target "")
+endif ()
+
 ExternalProject_Add(
     ${name}
     URL https://github.com/OpenMathLib/OpenBLAS/releases/download/v0.3.23/OpenBLAS-0.3.23.tar.gz
@@ -21,9 +28,9 @@ ExternalProject_Add(
         OMP_NUM_THREADS=1
         PATH=/usr/lib/ccache:$ENV{PATH}
         LD_LIBRARY_PATH=/opt/alibaba-cloud-compiler/lib64/:$ENV{LD_LIBRARY_PATH}
-        make USE_THREAD=0 USE_LOCKING=1 -j${NUM_BUILDING_JOBS}
+        make ${openblas_target} USE_THREAD=0 USE_LOCKING=1 -j${NUM_BUILDING_JOBS}
     INSTALL_COMMAND
-        make PREFIX=${install_dir} install
+        make ${openblas_target} PREFIX=${install_dir} install
     BUILD_IN_SOURCE 1
     LOG_CONFIGURE TRUE
     LOG_BUILD TRUE
