@@ -44,11 +44,11 @@ TEST_CASE("EliasFanoEncoder, original seq equal to decoded seq", "[ut][EliasFano
         }
         std::sort(values.begin(), values.end());
 
-        encoder->encode(values, max_id);
-        REQUIRE(encoder->size() == values.size());
+        encoder->Encode(values, max_id);
+        REQUIRE(encoder->Size() == values.size());
 
         // check if original seq equal to decoded seq
-        auto decompressed = encoder->decompress_all(allocator.get());
+        auto decompressed = encoder->DecompressAll(allocator.get());
         REQUIRE(decompressed.size() == values.size());
         for (size_t i = 0; i < values.size(); i++) {
             REQUIRE(decompressed[i] == values[i]);

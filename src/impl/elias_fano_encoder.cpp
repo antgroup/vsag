@@ -21,12 +21,13 @@
 namespace vsag {
 
 size_t
-EliasFanoEncoder::ctzll(uint64_t x) const {
+EliasFanoEncoder::ctzll(uint64_t x) {
 #ifdef __GNUC__
     return __builtin_ctzll(x);
 #else
-    if (x == 0)
+    if (x == 0) {
         return 64;
+    }
     int count = 0;
     while ((x & 1) == 0) {
         x >>= 1;
@@ -38,8 +39,9 @@ EliasFanoEncoder::ctzll(uint64_t x) const {
 
 void
 EliasFanoEncoder::set_low_bits(size_t index, InnerIdType value) {
-    if (low_bits_width_ == 0)
+    if (low_bits_width_ == 0) {
         return;
+    }
 
     size_t bit_pos = index * low_bits_width_;
     size_t word_pos = bit_pos >> 6;
@@ -58,8 +60,9 @@ EliasFanoEncoder::set_low_bits(size_t index, InnerIdType value) {
 
 InnerIdType
 EliasFanoEncoder::get_low_bits(size_t index) const {
-    if (low_bits_width_ == 0)
+    if (low_bits_width_ == 0) {
         return 0;
+    }
 
     size_t bit_pos = index * low_bits_width_;
     size_t word_pos = bit_pos >> 6;
@@ -76,17 +79,18 @@ EliasFanoEncoder::get_low_bits(size_t index) const {
 }
 
 void
-EliasFanoEncoder::encode(const Vector<InnerIdType>& values, InnerIdType max_value) {
-    clear();
-    if (values.empty())
+EliasFanoEncoder::Encode(const Vector<InnerIdType>& values, InnerIdType max_value) {
+    Clear();
+    if (values.empty()) {
         return;
+    }
 
     // Check if number of elements exceeds uint8_t maximum
-    if (values.size() > UINT8_MAX) {
+    if (values.size() <= UINT8_MAX) {
+        num_elements_ = static_cast<uint8_t>(values.size());
+    } else {
         num_elements_ = UINT8_MAX;
         throw std::runtime_error("Error: Elias-Fano encoder, number of elements exceeds 255.");
-    } else {
-        num_elements_ = static_cast<uint8_t>(values.size());
     }
 
     InnerIdType universe = max_value + 1;
@@ -100,7 +104,7 @@ EliasFanoEncoder::encode(const Vector<InnerIdType>& values, InnerIdType max_valu
     high_bits_.resize((high_bits_count + 63) / 64, 0);
 
     // Allocate space for low bits
-    size_t total_low_bits = num_elements_ * low_bits_width_;
+    size_t total_low_bits = static_cast<size_t>(num_elements_) * low_bits_width_;
     low_bits_.resize(std::max<size_t>(1, (total_low_bits + 63) / 64), 0);
 
     // Encode each value
@@ -115,7 +119,7 @@ EliasFanoEncoder::encode(const Vector<InnerIdType>& values, InnerIdType max_valu
 }
 
 Vector<InnerIdType>
-EliasFanoEncoder::decompress_all(Allocator* allocator) const {
+EliasFanoEncoder::DecompressAll(Allocator* allocator) const {
     Vector<InnerIdType> result(allocator);
     result.reserve(num_elements_);
 
@@ -126,7 +130,7 @@ EliasFanoEncoder::decompress_all(Allocator* allocator) const {
         uint64_t word = high_bits_[i];
 
         // Use ctzll to find position of 1
-        while (word && count < num_elements_) {
+        while (word != 0U && count < num_elements_) {
             size_t bit = ctzll(word);
             // Found 1, calculate corresponding value
             InnerIdType high = (i * 64 + bit) - count;
