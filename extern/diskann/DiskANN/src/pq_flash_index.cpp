@@ -1883,7 +1883,26 @@ int64_t PQFlashIndex<T, LabelT>::cached_beam_search_memory(const T *query, const
 #ifndef NDEBUG
             Timer io_times;
 #endif
-            reader->read(sorted_read_reqs);
+            if (sorted_read_reqs.size() == 0) {
+                continue;
+            }
+            std::promise<bool> promise;
+            auto future = promise.get_future();
+            std::atomic<int> remaining_ops(sorted_read_reqs.size());
+            bool succeed = true;
+            CallBack callBack = [&succeed, &promise, &remaining_ops] (vsag::IOErrorCode code, const std::string& message) {
+                if (code != vsag::IOErrorCode::IO_SUCCESS) {
+                    succeed = false;
+                }
+                if (--remaining_ops == 0) {
+                    promise.set_value(succeed);
+                }
+            };
+            reader->read(sorted_read_reqs, true, callBack);
+            bool final_success = future.get();
+            if (not final_success) {
+                throw diskann::ANNException("io error in search proccess", -1);
+            }
 #ifndef NDEBUG
             if (stats != nullptr) {
                 stats->io_us += (float) io_times.elapsed();

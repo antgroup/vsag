@@ -171,8 +171,8 @@ DiskannSearchParameters::FromJson(const std::string& json_string) {
         fmt::format(
             "parameters[{}] must contains {}", INDEX_DISKANN, DISKANN_PARAMETER_BEAM_SEARCH));
     obj.beam_search = params[INDEX_DISKANN][DISKANN_PARAMETER_BEAM_SEARCH];
-    CHECK_ARGUMENT((1 <= obj.beam_search) and (obj.beam_search <= 30),
-                   fmt::format("beam_search({}) must in range[1, 30]", obj.beam_search));
+    CHECK_ARGUMENT((1 <= obj.beam_search) and (obj.beam_search <= 64),
+                   fmt::format("beam_search({}) must in range[1, 64]", obj.beam_search));
 
     // set obj.io_limit
     CHECK_ARGUMENT(
