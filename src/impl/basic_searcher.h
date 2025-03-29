@@ -37,6 +37,10 @@ public:
     float skip_ratio{0.8F};
     InnerSearchMode search_mode{KNN_SEARCH};
     int range_search_limit_size{-1};
+
+    // for ivf
+    int scan_bucket_size{1};
+    float factor{2.0F};
 };
 
 constexpr float THRESHOLD_ERROR = 2e-6;

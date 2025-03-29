@@ -53,10 +53,10 @@ public:
     Train(const void* data, uint64_t count) = 0;
 
     virtual void
-    InsertVector(const void* vector, BucketIdType bucket_id, LabelType label) = 0;
+    InsertVector(const void* vector, BucketIdType bucket_id, InnerIdType inner_id) = 0;
 
-    virtual LabelType*
-    GetLabel(BucketIdType bucket_id) = 0;
+    virtual InnerIdType*
+    GetInnerIds(BucketIdType bucket_id) = 0;
 
     virtual void
     Prefetch(BucketIdType bucket_id, InnerIdType offset_id) = 0;
