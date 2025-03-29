@@ -69,9 +69,9 @@ public:
     GetDiscardElementNum();
 
 private:
-    int64_t ef_search_;
+    int64_t ef_search_{-1};
     bool is_first_used_{true};
-    uint32_t max_size_;
+    uint32_t max_size_{0};
     Allocator* allocator_{nullptr};
     VisitedListType* list_{nullptr};
     std::unique_ptr<std::priority_queue<std::pair<float, uint32_t>>> discard_;
