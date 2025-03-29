@@ -218,6 +218,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex,
         auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
         TestContinueAdd(index, dataset, true);
         TestKnnSearch(index, dataset, search_param, 0.99, true);
+        TestKnnSearchIter(index, dataset, search_param, 0.99, true);
         TestConcurrentKnnSearch(index, dataset, search_param, 0.99, true);
         TestRangeSearch(index, dataset, search_param, 0.99, 10, true);
         TestRangeSearch(index, dataset, search_param, 0.49, 5, true);
