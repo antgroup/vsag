@@ -237,7 +237,7 @@ HNSW::knn_search(const DatasetPtr& query,
         auto params = HnswSearchParameters::FromJson(parameters);
 
         if (iter_ctx != nullptr && *iter_ctx == nullptr) {
-            IteratorFilterContext* filter_context = new IteratorFilterContext();
+            auto* filter_context = new IteratorFilterContext();
             filter_context->init(alg_hnsw_->getMaxElements(), params.ef_search, allocator_.get());
             *iter_ctx = filter_context;
         }
