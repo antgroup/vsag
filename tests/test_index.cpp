@@ -1030,7 +1030,7 @@ TestIndex::TestGetExtraInfoById(const TestIndex::IndexPtr& index,
     int64_t count = dataset->count_;
     std::vector<int64_t> ids(count);
     memcpy(ids.data(), dataset->base_->GetIds(), count * sizeof(int64_t));
-    std::random_shuffle(ids.begin(), ids.end());
+    std::shuffle(ids.begin(), ids.end(), std::default_random_engine());
     std::vector<char> extra_infos(count * extra_info_size);
     auto result = index->GetExtraInfoByIds(ids.data(), count, extra_infos.data());
     REQUIRE(result.has_value());
