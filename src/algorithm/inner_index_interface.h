@@ -143,6 +143,11 @@ public:
     CalDistanceById(const float* query, const int64_t* ids, int64_t count) const;
 
     virtual void
+    GetMinAndMaxId(int64_t& min_id, int64_t& max_id) const {
+        throw std::runtime_error("Index doesn't support GetMinAndMaxId");
+    }
+
+    virtual void
     GetExtraInfoByIds(const int64_t* ids, int64_t count, char* extra_infos) const {
         throw std::runtime_error("Index doesn't support GetExtraInfoByIds");
     }
