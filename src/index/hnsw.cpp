@@ -954,7 +954,8 @@ HNSW::init_feature_list() {
     feature_list_.SetFeatures({IndexFeature::SUPPORT_KNN_SEARCH,
                                IndexFeature::SUPPORT_RANGE_SEARCH,
                                IndexFeature::SUPPORT_KNN_SEARCH_WITH_ID_FILTER,
-                               IndexFeature::SUPPORT_RANGE_SEARCH_WITH_ID_FILTER});
+                               IndexFeature::SUPPORT_RANGE_SEARCH_WITH_ID_FILTER,
+                               IndexFeature::SUPPORT_KNN_ITERATOR_FILTER_SEARCH});
     // concurrency
     feature_list_.SetFeatures({IndexFeature::SUPPORT_SEARCH_CONCURRENT,
                                IndexFeature::SUPPORT_ADD_SEARCH_CONCURRENT,

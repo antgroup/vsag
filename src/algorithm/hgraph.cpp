@@ -216,12 +216,12 @@ HGraph::KnnSearch(const DatasetPtr& query,
 
     if (iter_ctx == nullptr) {
         auto cur_count = this->bottom_graph_->TotalCount();
-        auto new_ctx = new IteratorFilterContext();
+        auto* new_ctx = new IteratorFilterContext();
         new_ctx->init(cur_count, params.ef_search, allocator_);
         iter_ctx = new_ctx;
     }
 
-    auto iter_filter_ctx = static_cast<IteratorFilterContext*>(iter_ctx);
+    auto* iter_filter_ctx = static_cast<IteratorFilterContext*>(iter_ctx);
     MaxHeap search_result(allocator_);
     if (is_last_filter) {
         while (!iter_filter_ctx->Empty()) {
