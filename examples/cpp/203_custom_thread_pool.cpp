@@ -18,7 +18,6 @@
 #include "default_thread_pool.h"
 #include "safe_thread_pool.h"
 #include "vsag/logger.h"
-#include "vsag/thread_pool.h"
 #include "vsag/vsag.h"
 
 int
@@ -27,7 +26,8 @@ main() {
 
     /******************* Customize Thread Pool *****************/
     auto pool = std::make_shared<vsag::SafeThreadPool>(new vsag::DefaultThreadPool(16), true);
-    vsag::Resource resource(nullptr, pool.get());
+    auto allocator = vsag::Engine::CreateAllocator().value();
+    vsag::Resource resource(allocator.get(), pool.get());
     vsag::Engine engine(&resource);
 
     vsag::init();
