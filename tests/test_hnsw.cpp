@@ -13,654 +13,525 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <spdlog/spdlog.h>
+
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
-#include <fstream>
-#include <iostream>
 #include <limits>
-#include <nlohmann/json.hpp>
-#include <numeric>
-#include <random>
 
-#include "fixtures/test_logger.h"
-#include "vsag/errors.h"
+#include "fixtures/test_dataset_pool.h"
+#include "test_index.h"
 #include "vsag/vsag.h"
 
-using namespace std;
+namespace fixtures {
+class HNSWTestIndex : public fixtures::TestIndex {
+public:
+    static std::string
+    GenerateHNSWBuildParametersString(const std::string& metric_type,
+                                      int64_t dim,
+                                      bool use_static = false);
 
-template <typename T>
-static void
-write_binary_pod(std::ostream& out, const T& podRef) {
-    out.write((char*)&podRef, sizeof(T));
+    static TestDatasetPool pool;
+
+    static std::vector<int> dims;
+
+    static std::vector<float> valid_ratios;
+
+    constexpr static uint64_t base_count = 1000;
+
+    constexpr static const char* search_param_tmp = R"(
+        {{
+            "hnsw": {{
+                "ef_search": {},
+                "skip_ratio": 0.3
+            }}
+        }})";
+};
+
+TestDatasetPool HNSWTestIndex::pool{};
+std::vector<int> HNSWTestIndex::dims = fixtures::get_common_used_dims(2, RandomValue(0, 999));
+std::vector<float> HNSWTestIndex::valid_ratios{0.01, 0.05, 0.99};
+
+std::string
+HNSWTestIndex::GenerateHNSWBuildParametersString(const std::string& metric_type,
+                                                 int64_t dim,
+                                                 bool use_static) {
+    constexpr auto parameter_temp = R"(
+    {{
+        "dtype": "float32",
+        "metric_type": "{}",
+        "dim": {},
+        "hnsw": {{
+            "max_degree": 64,
+            "ef_construction": 500,
+            "use_static": {}
+        }}
+    }}
+    )";
+    auto build_parameters_str = fmt::format(parameter_temp, metric_type, dim, use_static);
+    return build_parameters_str;
+}
+}  // namespace fixtures
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex,
+                             "HNSW Factory Test With Exceptions",
+                             "[ft][hnsw]") {
+    auto name = "hnsw";
+    SECTION("Empty parameters") {
+        auto param = "{}";
+        REQUIRE_THROWS(TestFactory(name, param, false));
+    }
+
+    SECTION("No dim param") {
+        auto param = R"(
+        {{
+            "dtype": "float32",
+            "metric_type": "l2",
+            "hnsw": {{
+                "max_degree": 64,
+                "ef_construction": 500
+            }}
+        }})";
+        REQUIRE_THROWS(TestFactory(name, param, false));
+    }
+
+    SECTION("Invalid param") {
+        auto metric = GENERATE("", "l4", "inner_product", "cosin", "hamming");
+        constexpr const char* param_tmp = R"(
+        {{
+            "dtype": "float32",
+            "metric_type": "{}",
+            "dim": 23,
+            "hnsw": {{
+                "max_degree": 64,
+                "ef_construction": 500
+            }}
+        }})";
+        auto param = fmt::format(param_tmp, metric);
+        REQUIRE_THROWS(TestFactory(name, param, false));
+    }
+
+    SECTION("Invalid datatype param") {
+        auto datatype = GENERATE("fp32", "uint8_t", "binary", "", "float");
+        constexpr const char* param_tmp = R"(
+        {{
+            "dtype": "{}",
+            "metric_type": "l2",
+            "dim": 23,
+            "hnsw": {{
+                "max_degree": 64,
+                "ef_construction": 500
+            }}
+        }})";
+        auto param = fmt::format(param_tmp, datatype);
+        REQUIRE_THROWS(TestFactory(name, param, false));
+    }
+    // TODO(lht)dim check
+    /*
+    SECTION("Invalid dim param") {
+        auto dim = GENERATE(-1, std::numeric_limits<uint64_t>::max(), 0, 8.6);
+        constexpr const char* param_tmp = R"(
+        {{
+            "dtype": "float32",
+            "metric_type": "l2",
+            "dim": {},
+            "hnsw": {{
+                "max_degree": 64,
+                "ef_construction": 500
+            }}
+        }})";
+        auto param = fmt::format(param_tmp, dim);
+        REQUIRE_THROWS(TestFactory(name, param, false));
+    }
+    */
+
+    SECTION("Miss hnsw param") {
+        auto param = GENERATE(
+            R"({{
+                "dtype": "float32",
+                "metric_type": "l2",
+                "dim": 35,
+                "hnsw": {{
+                    "ef_construction": 500
+                }}
+            }})",
+            R"({{
+                "dtype": "float32",
+                "metric_type": "l2",
+                "dim": 35,
+                "hnsw": {{
+                    "max_degree": 64,
+                }}
+            }})");
+        REQUIRE_THROWS(TestFactory(name, param, false));
+    }
+
+    SECTION("Invalid hnsw param max_degree") {
+        auto max_degree = GENERATE(-1, 0, 256, 3);
+        // TODO(LHT): test for float param
+        constexpr const char* param_temp =
+            R"({{
+                "dtype": "float32",
+                "metric_type": "l2",
+                "dim": 35,
+                "hnsw": {{
+                    "max_degree": {},
+                    "ef_construction": 500
+                }}
+            }})";
+        auto param = fmt::format(param_temp, max_degree);
+        REQUIRE_THROWS(TestFactory(name, param, false));
+    }
+
+    SECTION("Invalid hnsw param ef_construction") {
+        auto ef_construction = GENERATE(-1, 0, 100000, 31);
+        // TODO(LHT): test for float param
+        constexpr const char* param_temp =
+            R"({{
+                "dtype": "float32",
+                "metric_type": "l2",
+                "dim": 35,
+                "hnsw": {{
+                    "max_degree": 32,
+                    "ef_construction": {}
+                }}
+            }})";
+        auto param = fmt::format(param_temp, ef_construction);
+        REQUIRE_THROWS(TestFactory(name, param, false));
+    }
 }
 
-template <typename T>
-static void
-read_binary_pod(std::istream& in, T& podRef) {
-    in.read((char*)&podRef, sizeof(T));
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex,
+                             "HNSW Build & ContinueAdd Test",
+                             "[ft][hnsw]") {
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    auto size = GENERATE(1024 * 1024 * 2);
+    auto metric_type = GENERATE("l2", "ip", "cosine");
+    std::string base_quantization_str = GENERATE("sq8", "fp32");
+    const std::string name = "hnsw";
+    auto search_param = fmt::format(search_param_tmp, 100);
+    for (auto& dim : dims) {
+        vsag::Options::Instance().set_block_size_limit(size);
+        auto param = GenerateHNSWBuildParametersString(metric_type, dim);
+        auto index = TestFactory(name, param, true);
+        auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
+        TestContinueAdd(index, dataset, true);
+        TestKnnSearch(index, dataset, search_param, 0.99, true);
+        TestConcurrentKnnSearch(index, dataset, search_param, 0.99, true);
+        TestRangeSearch(index, dataset, search_param, 0.99, 10, true);
+        TestRangeSearch(index, dataset, search_param, 0.49, 5, true);
+        TestFilterSearch(index, dataset, search_param, 0.99, true);
+    }
+    vsag::Options::Instance().set_block_size_limit(origin_size);
 }
 
-TEST_CASE("HNSW range search", "[ft][hnsw]") {
-    int dim = 71;
-    int max_elements = 10000;
-    int max_degree = 16;
-    int ef_construction = 100;
-    int ef_search = 100;
-    // Initing index
-    nlohmann::json hnsw_parameters{
-        {"max_elements", max_elements},
-        {"max_degree", max_degree},
-        {"ef_construction", ef_construction},
-        {"ef_search", ef_search},
-    };
-    nlohmann::json index_parameters{
-        {"dtype", "float32"}, {"metric_type", "l2"}, {"dim", dim}, {"hnsw", hnsw_parameters}};
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex,
+                             "HNSW Search with Dirty Vector",
+                             "[ft][hnsw]") {
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    auto size = GENERATE(1024 * 1024 * 2);
+    auto metric_type = GENERATE("l2", "ip", "cosine");
+    auto dataset = pool.GetNanDataset(metric_type);
+    auto dim = dataset->dim_;
+    const std::string name = "hnsw";
+    auto search_param = fmt::format(search_param_tmp, 100);
 
-    std::shared_ptr<vsag::Index> hnsw;
-    auto index = vsag::Factory::CreateIndex("hnsw", index_parameters.dump());
-    REQUIRE(index.has_value());
-    hnsw = index.value();
-
-    // Generate random data
-    std::random_device rd;
-    std::mt19937 rng(rd());
-    std::uniform_real_distribution<> distrib_real;
-    std::uniform_int_distribution<int> seed_random;
-    int seed = seed_random(rng);
-    std::cout << "seed: " << seed << std::endl;
-    rng.seed(seed);
-    int64_t* ids = new int64_t[max_elements];
-    float* data = new float[dim * max_elements];
-    for (int64_t i = 0; i < max_elements; i++) {
-        ids[i] = i;
-    }
-    for (int64_t i = 0; i < dim * max_elements; ++i) {
-        data[i] = distrib_real(rng);
-    }
-
-    auto dataset = vsag::Dataset::Make();
-    dataset->Dim(dim)->NumElements(max_elements)->Ids(ids)->Float32Vectors(data);
-    hnsw->Build(dataset);
-
-    REQUIRE(hnsw->GetNumElements() == max_elements);
-
-    float radius = 12.0f;
-    float* query_data = new float[dim];
-    for (int64_t i = 0; i < dim; ++i) {
-        query_data[i] = distrib_real(rng);
-    }
-    auto query = vsag::Dataset::Make();
-    query->Dim(dim)->NumElements(1)->Float32Vectors(query_data);
-    nlohmann::json parameters{
-        {"hnsw", {{"ef_search", ef_search}}},
-    };
-    auto result = hnsw->RangeSearch(query, radius, parameters.dump());
-    REQUIRE(result.has_value());
-    REQUIRE(result.value()->GetNumElements() == 1);
-
-    auto expected = vsag::l2_and_filtering(dim, max_elements, data, query_data, radius);
-    if (expected->Count() != result.value()->GetDim()) {
-        std::cout << "not 100% recall: expect " << expected->Count() << " return "
-                  << result.value()->GetDim() << std::endl;
-    }
-
-    // check no false recall
-    for (int64_t i = 0; i < result.value()->GetDim(); ++i) {
-        auto offset = result.value()->GetIds()[i];
-        CHECK(expected->Test(offset));
-    }
-
-    // recall > 99%
-    CHECK((expected->Count() - result.value()->GetDim()) * 100 < max_elements);
+    vsag::Options::Instance().set_block_size_limit(size);
+    auto param = GenerateHNSWBuildParametersString(metric_type, dim);
+    auto index = TestFactory(name, param, true);
+    TestBuildIndex(index, dataset, true);
+    TestSearchWithDirtyVector(index, dataset, search_param, true);
+    vsag::Options::Instance().set_block_size_limit(origin_size);
 }
 
-TEST_CASE("HNSW Filtering Test", "[ft][hnsw]") {
-    int dim = 17;
-    int max_elements = 1000;
-    int max_degree = 16;
-    int ef_construction = 100;
-    int ef_search = 100;
-    // Initing index
-    nlohmann::json hnsw_parameters{
-        {"max_degree", max_degree},
-        {"ef_construction", ef_construction},
-        {"ef_search", ef_search},
-    };
-    nlohmann::json index_parameters{
-        {"dtype", "float32"}, {"metric_type", "l2"}, {"dim", dim}, {"hnsw", hnsw_parameters}};
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex, "HNSW Build", "[ft][hnsw]") {
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    auto size = GENERATE(1024 * 1024 * 2);
+    auto metric_type = GENERATE("l2", "ip", "cosine");
+    const std::string name = "hnsw";
+    auto search_param = fmt::format(search_param_tmp, 100);
+    for (auto& dim : dims) {
+        vsag::Options::Instance().set_block_size_limit(size);
+        auto param = GenerateHNSWBuildParametersString(metric_type, dim);
+        auto index = TestFactory(name, param, true);
+        auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
 
-    std::shared_ptr<vsag::Index> hnsw;
-    auto index = vsag::Factory::CreateIndex("hnsw", index_parameters.dump());
-    REQUIRE(index.has_value());
-    hnsw = index.value();
-
-    // Generate random data
-    std::random_device rd;
-    std::mt19937 rng(rd());
-    std::uniform_real_distribution<> distrib_real;
-    int64_t* ids = new int64_t[max_elements];
-    float* data = new float[dim * max_elements];
-    for (int64_t i = 0; i < max_elements; i++) {
-        ids[i] = max_elements - i - 1;
-    }
-    for (int64_t i = 0; i < dim * max_elements; ++i) {
-        data[i] = distrib_real(rng);
-    }
-
-    auto dataset = vsag::Dataset::Make();
-    dataset->Dim(dim)->NumElements(max_elements)->Ids(ids)->Float32Vectors(data);
-    hnsw->Build(dataset);
-
-    REQUIRE(hnsw->GetNumElements() == max_elements);
-
-    // Query the elements for themselves and measure recall 1@1
-    float correct_knn = 0.0f;
-    float recall_knn = 0.0f;
-    float correct_range = 0.0f;
-    float recall_range = 0.0f;
-    for (int i = 0; i < max_elements; i++) {
-        auto query = vsag::Dataset::Make();
-        query->NumElements(1)->Dim(dim)->Float32Vectors(data + i * dim)->Owner(false);
-        nlohmann::json parameters{
-            {"hnsw", {{"ef_search", ef_search}}},
-        };
-        float radius = 9.87f;
-        int64_t k = 10;
-
-        vsag::BitsetPtr filter = vsag::Bitset::Random(max_elements);
-        int64_t num_deleted = filter->Count();
-
-        if (auto result = hnsw->RangeSearch(query, radius, parameters.dump(), filter);
-            result.has_value()) {
-            REQUIRE(result.value()->GetDim() == max_elements - num_deleted);
-            for (int64_t j = 0; j < result.value()->GetDim(); ++j) {
-                // deleted ids NOT in result
-                REQUIRE(filter->Test(result.value()->GetIds()[j]) == false);
-            }
-        } else {
-            std::cerr << "failed to range search on index: internalError" << std::endl;
-            exit(-1);
-        }
-
-        if (auto result = hnsw->KnnSearch(query, k, parameters.dump(), filter);
-            result.has_value()) {
-            REQUIRE(result.has_value());
-            for (int64_t j = 0; j < result.value()->GetDim(); ++j) {
-                // deleted ids NOT in result
-                REQUIRE(filter->Test(result.value()->GetIds()[j]) == false);
-            }
-        } else {
-            std::cerr << "failed to knn search on index: internalError" << std::endl;
-            exit(-1);
-        }
-
-        vsag::BitsetPtr ones = vsag::Bitset::Make();
-        for (int64_t i = 0; i < max_elements; ++i) {
-            ones->Set(i, true);
-        }
-        if (auto result = hnsw->RangeSearch(query, radius, parameters.dump(), ones);
-            result.has_value()) {
-            REQUIRE(result.value()->GetDim() == 0);
-            REQUIRE(result.value()->GetDistances() == nullptr);
-            REQUIRE(result.value()->GetIds() == nullptr);
-        } else if (result.error().type == vsag::ErrorType::INTERNAL_ERROR) {
-            std::cerr << "failed to range search on index: internalError" << std::endl;
-            exit(-1);
-        }
-
-        if (auto result = hnsw->KnnSearch(query, k, parameters.dump(), ones); result.has_value()) {
-            REQUIRE(result.value()->GetDim() == 0);
-            REQUIRE(result.value()->GetDistances() == nullptr);
-            REQUIRE(result.value()->GetIds() == nullptr);
-        } else if (result.error().type == vsag::ErrorType::INTERNAL_ERROR) {
-            std::cerr << "failed to knn search on index: internalError" << std::endl;
-            exit(-1);
-        }
-
-        vsag::BitsetPtr zeros = vsag::Bitset::Make();
-
-        if (auto result = hnsw->KnnSearch(query, k, parameters.dump(), zeros); result.has_value()) {
-            correct_knn += vsag::knn_search_recall(data,
-                                                   ids,
-                                                   max_elements,
-                                                   data + i * dim,
-                                                   dim,
-                                                   result.value()->GetIds(),
-                                                   result.value()->GetDim());
-        } else if (result.error().type == vsag::ErrorType::INTERNAL_ERROR) {
-            std::cerr << "failed to knn search on index: internalError" << std::endl;
-            exit(-1);
-        }
-
-        if (auto result = hnsw->RangeSearch(query, radius, parameters.dump(), zeros);
-            result.has_value()) {
-            correct_range += vsag::range_search_recall(data,
-                                                       ids,
-                                                       max_elements,
-                                                       data + i * dim,
-                                                       dim,
-                                                       result.value()->GetIds(),
-                                                       result.value()->GetDim(),
-                                                       radius);
-        } else if (result.error().type == vsag::ErrorType::INTERNAL_ERROR) {
-            std::cerr << "failed to range search on index: internalError" << std::endl;
-            exit(-1);
+        TestBuildIndex(index, dataset, true);
+        TestKnnSearch(index, dataset, search_param, 0.99, true);
+        TestConcurrentKnnSearch(index, dataset, search_param, 0.99, true);
+        TestRangeSearch(index, dataset, search_param, 0.99, 10, true);
+        TestRangeSearch(index, dataset, search_param, 0.49, 5, true);
+        TestFilterSearch(index, dataset, search_param, 0.99, true);
+        if (index->CheckFeature(vsag::IndexFeature::SUPPORT_CHECK_ID_EXIST)) {
+            TestCheckIdExist(index, dataset);
         }
     }
-    recall_knn = correct_knn / max_elements;
-    recall_range = correct_range / max_elements;
-
-    REQUIRE(recall_range == 1);
-    REQUIRE(recall_knn == 1);
+    vsag::Options::Instance().set_block_size_limit(origin_size);
 }
 
-TEST_CASE("HNSW small dimension", "[ft][hnsw]") {
-    int dim = 3;
-    int max_elements = 1000;
-    int max_degree = 24;
-    int ef_construction = 100;
-    int ef_search = 100;
-    // Initing index
-    nlohmann::json hnsw_parameters{
-        {"max_degree", max_degree},
-        {"ef_construction", ef_construction},
-        {"ef_search", ef_search},
-    };
-    nlohmann::json index_parameters{
-        {"dtype", "float32"}, {"metric_type", "l2"}, {"dim", dim}, {"hnsw", hnsw_parameters}};
-
-    std::shared_ptr<vsag::Index> hnsw;
-    auto index = vsag::Factory::CreateIndex("hnsw", index_parameters.dump());
-    REQUIRE(index.has_value());
-    hnsw = index.value();
-
-    // Generate random data
-    std::mt19937 rng;
-    rng.seed(47);
-    std::uniform_real_distribution<> distrib_real;
-    int64_t* ids = new int64_t[max_elements];
-    float* data = new float[dim * max_elements];
-    for (int i = 0; i < max_elements; i++) {
-        ids[i] = i;
-    }
-    for (int i = 0; i < dim * max_elements; i++) {
-        data[i] = distrib_real(rng);
-    }
-
-    auto dataset = vsag::Dataset::Make();
-    dataset->Dim(dim)->NumElements(max_elements)->Ids(ids)->Float32Vectors(data);
-    hnsw->Add(dataset);
-    return;
-
-    // Query the elements for themselves and measure recall 1@1
-    float correct = 0;
-    for (int i = 0; i < max_elements; i++) {
-        auto query = vsag::Dataset::Make();
-        query->NumElements(1)->Dim(dim)->Float32Vectors(data + i * dim)->Owner(false);
-        nlohmann::json parameters{
-            {"hnsw", {{"ef_search", ef_search}}},
-        };
-        int64_t k = 10;
-        if (auto result = hnsw->KnnSearch(query, k, parameters.dump()); result.has_value()) {
-            if (result.value()->GetIds()[0] == i) {
-                correct++;
-            }
-            REQUIRE(result.value()->GetDim() == k);
-        } else if (result.error().type == vsag::ErrorType::INTERNAL_ERROR) {
-            std::cerr << "failed to perform knn search on index" << std::endl;
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex, "HNSW Merge", "[ft][hnsw]") {
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    auto size = GENERATE(1024 * 1024 * 2);
+    auto metric_type = GENERATE("l2");
+    const std::string name = "hnsw";
+    auto search_param = fmt::format(search_param_tmp, 100);
+    for (auto& dim : dims) {
+        vsag::Options::Instance().set_block_size_limit(size);
+        auto param = GenerateHNSWBuildParametersString(metric_type, dim);
+        auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
+        auto index = TestMergeIndex(name, param, dataset, 5, true);
+        TestKnnSearch(index, dataset, search_param, 0.99, true);
+        TestRangeSearch(index, dataset, search_param, 0.49, 5, true);
+        TestFilterSearch(index, dataset, search_param, 0.99, true);
+        if (index->CheckFeature(vsag::IndexFeature::SUPPORT_CHECK_ID_EXIST)) {
+            TestCheckIdExist(index, dataset);
         }
     }
-    float recall = correct / max_elements;
-
-    REQUIRE(recall == 1);
+    vsag::Options::Instance().set_block_size_limit(origin_size);
 }
 
-TEST_CASE("HNSW Random Id", "[ft][hnsw]") {
-    int dim = 128;
-    int max_elements = 1000;
-    int max_degree = 64;
-    int ef_construction = 200;
-    int ef_search = 200;
-    // Initing index
-    nlohmann::json hnsw_parameters{
-        {"max_degree", max_degree},
-        {"ef_construction", ef_construction},
-        {"ef_search", ef_search},
-    };
-    nlohmann::json index_parameters{
-        {"dtype", "float32"}, {"metric_type", "l2"}, {"dim", dim}, {"hnsw", hnsw_parameters}};
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex, "HNSW Filter", "[ft][hnsw]") {
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    auto size = GENERATE(1024 * 1024 * 2);
+    auto metric_type = GENERATE("l2");
+    const std::string name = "hnsw";
+    auto search_param = fmt::format(search_param_tmp, 100);
+    auto dim = 32;
+    for (auto& valid_ratio : valid_ratios) {
+        vsag::Options::Instance().set_block_size_limit(size);
+        auto param = GenerateHNSWBuildParametersString(metric_type, dim);
+        auto index = TestFactory(name, param, true);
+        auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type, false, valid_ratio);
 
-    std::shared_ptr<vsag::Index> hnsw;
-    auto index = vsag::Factory::CreateIndex("hnsw", index_parameters.dump());
-    REQUIRE(index.has_value());
-    hnsw = index.value();
-
-    // Generate random data
-    std::mt19937 rng;
-    std::uniform_real_distribution<> distrib_real;
-    std::uniform_int_distribution<> ids_random(0, max_elements - 1);
-    int64_t* ids = new int64_t[max_elements];
-    float* data = new float[dim * max_elements];
-    for (int i = 0; i < max_elements; i++) {
-        ids[i] = ids_random(rng);
-        if (i == 1 || i == 2) {
-            ids[i] = std::numeric_limits<int64_t>::max();
-        } else if (i == 3 || i == 4) {
-            ids[i] = std::numeric_limits<int64_t>::min();
-        } else if (i == 5 || i == 6) {
-            ids[i] = 1;
-        } else if (i == 7 || i == 8) {
-            ids[i] = -1;
-        } else if (i == 9 || i == 10) {
-            ids[i] = 0;
+        TestBuildIndex(index, dataset, true);
+        TestFilterSearch(index, dataset, search_param, 0.99, true, true);
+        if (index->CheckFeature(vsag::IndexFeature::SUPPORT_CHECK_ID_EXIST)) {
+            TestCheckIdExist(index, dataset);
         }
     }
-    for (int i = 0; i < dim * max_elements; i++) {
-        data[i] = distrib_real(rng);
+    vsag::Options::Instance().set_block_size_limit(origin_size);
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex, "HNSW Add", "[ft][hnsw]") {
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    auto size = GENERATE(1024 * 1024 * 2);
+    auto metric_type = GENERATE("l2", "ip", "cosine");
+    const std::string name = "hnsw";
+    auto search_param = fmt::format(search_param_tmp, 100);
+    for (auto& dim : dims) {
+        vsag::Options::Instance().set_block_size_limit(size);
+        auto param = GenerateHNSWBuildParametersString(metric_type, dim);
+        auto index = TestFactory(name, param, true);
+
+        auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
+        TestAddIndex(index, dataset, true);
+        TestKnnSearch(index, dataset, search_param, 0.99, true);
+        TestConcurrentKnnSearch(index, dataset, search_param, 0.99, true);
+        TestRangeSearch(index, dataset, search_param, 0.99, 10, true);
+        TestRangeSearch(index, dataset, search_param, 0.49, 5, true);
+        TestFilterSearch(index, dataset, search_param, 0.99, true);
+        if (index->CheckFeature(vsag::IndexFeature::SUPPORT_CHECK_ID_EXIST)) {
+            TestCheckIdExist(index, dataset);
+        }
+
+        vsag::Options::Instance().set_block_size_limit(origin_size);
     }
+}
 
-    auto dataset = vsag::Dataset::Make();
-    dataset->Dim(dim)->NumElements(max_elements)->Ids(ids)->Float32Vectors(data);
-    auto failed_ids = hnsw->Build(dataset);
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex, "HNSW Concurrent Add", "[ft][hnsw]") {
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    auto size = GENERATE(1024 * 1024 * 2);
+    auto metric_type = GENERATE("l2", "ip", "cosine");
+    const std::string name = "hnsw";
+    auto search_param = fmt::format(search_param_tmp, 100);
+    for (auto& dim : dims) {
+        vsag::Options::Instance().set_block_size_limit(size);
+        auto param = GenerateHNSWBuildParametersString(metric_type, dim);
+        auto index = TestFactory(name, param, true);
 
-    float rate = hnsw->GetNumElements() / (float)max_elements;
-    // 1 - 1 / e
-    REQUIRE((rate > 0.60 && rate < 0.65));
+        auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
+        TestConcurrentAdd(index, dataset, true);
+        TestKnnSearch(index, dataset, search_param, 0.95, true);
+        TestConcurrentKnnSearch(index, dataset, search_param, 0.95, true);
+        TestRangeSearch(index, dataset, search_param, 0.95, 10, true);
+        TestRangeSearch(index, dataset, search_param, 0.45, 5, true);
+        TestFilterSearch(index, dataset, search_param, 0.95, true);
+        if (index->CheckFeature(vsag::IndexFeature::SUPPORT_CHECK_ID_EXIST)) {
+            TestCheckIdExist(index, dataset);
+        }
 
-    REQUIRE(failed_ids->size() + hnsw->GetNumElements() == max_elements);
+        vsag::Options::Instance().set_block_size_limit(origin_size);
+    }
+}
 
-    // Query the elements for themselves and measure recall 1@1
-    float correct = 0;
-    std::set<int64_t> unique_ids;
-    for (int i = 0; i < max_elements; i++) {
-        if (unique_ids.find(ids[i]) != unique_ids.end()) {
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex, "HNSW Update Id", "[ft][hnsw]") {
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    auto size = GENERATE(1024 * 1024 * 2);
+    auto metric_type = GENERATE("l2", "ip", "cosine");
+    const std::string name = "hnsw";
+    auto search_param = fmt::format(search_param_tmp, 100);
+    for (auto& dim : dims) {
+        vsag::Options::Instance().set_block_size_limit(size);
+        auto param = GenerateHNSWBuildParametersString(metric_type, dim);
+        auto index = TestFactory(name, param, true);
+        auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
+        TestBuildIndex(index, dataset, true);
+        TestUpdateId(index, dataset, search_param, true);
+        vsag::Options::Instance().set_block_size_limit(origin_size);
+    }
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex, "HNSW Batch Calc Dis Id", "[ft][hnsw]") {
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    auto size = GENERATE(1024 * 1024 * 2);
+    auto metric_type = GENERATE("l2", "ip", "cosine");
+    const std::string name = "hnsw";
+    auto search_param = fmt::format(search_param_tmp, 100);
+    for (auto& dim : dims) {
+        vsag::Options::Instance().set_block_size_limit(size);
+        auto param = GenerateHNSWBuildParametersString(metric_type, dim);
+        auto index = TestFactory(name, param, true);
+        auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
+        TestBuildIndex(index, dataset, true);
+        TestBatchCalcDistanceById(index, dataset);
+        vsag::Options::Instance().set_block_size_limit(origin_size);
+    }
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex,
+                             "static HNSW Batch Calc Dis Id",
+                             "[ft][hnsw]") {
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    auto size = GENERATE(1024 * 1024 * 2);
+    auto metric_type = GENERATE("l2");
+    auto use_static = GENERATE(true);
+    const std::string name = "hnsw";
+    auto search_param = fmt::format(search_param_tmp, 100);
+    for (auto& dim : dims) {
+        if (dim % 4 != 0) {
+            dim = ((dim / 4) + 1) * 4;
+        }
+        vsag::Options::Instance().set_block_size_limit(size);
+        auto param = GenerateHNSWBuildParametersString(metric_type, dim, use_static);
+        auto index = TestFactory(name, param, true);
+        auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
+        TestBuildIndex(index, dataset, true);
+        TestBatchCalcDistanceById(index, dataset);
+        vsag::Options::Instance().set_block_size_limit(origin_size);
+    }
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex, "HNSW Update Vector", "[ft][hnsw]") {
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    auto size = GENERATE(1024 * 1024 * 2);
+    auto metric_type = GENERATE("l2");
+    const std::string name = "hnsw";
+    auto search_param = fmt::format(search_param_tmp, 100);
+    for (auto& dim : dims) {
+        vsag::Options::Instance().set_block_size_limit(size);
+        auto param = GenerateHNSWBuildParametersString(metric_type, dim);
+        auto index = TestFactory(name, param, true);
+        auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
+        TestBuildIndex(index, dataset, true);
+        TestUpdateVector(index, dataset, search_param, true);
+        vsag::Options::Instance().set_block_size_limit(origin_size);
+    }
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex, "HNSW Serialize File", "[ft][hnsw]") {
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    auto size = GENERATE(1024 * 1024 * 2);
+    auto metric_type = GENERATE("l2", "ip", "cosine");
+    const std::string name = "hnsw";
+    auto search_param = fmt::format(search_param_tmp, 100);
+
+    for (auto& dim : dims) {
+        vsag::Options::Instance().set_block_size_limit(size);
+        auto param = GenerateHNSWBuildParametersString(metric_type, dim);
+        auto index = TestFactory(name, param, true);
+
+        auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
+        TestBuildIndex(index, dataset, true);
+
+        auto index2 = TestFactory(name, param, true);
+        TestSerializeFile(index, index2, dataset, search_param, true);
+    }
+    vsag::Options::Instance().set_block_size_limit(origin_size);
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex, "static HNSW Serialize File", "[ft][hnsw]") {
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    auto size = GENERATE(1024 * 1024 * 2);
+    auto metric_type = "l2";
+    const std::string name = "hnsw";
+    auto search_param = fmt::format(search_param_tmp, 100);
+    auto dim = 128;
+    vsag::Options::Instance().set_block_size_limit(size);
+    auto param = GenerateHNSWBuildParametersString(metric_type, dim, true);
+    auto index = TestFactory(name, param, true);
+
+    auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
+    TestBuildIndex(index, dataset, true);
+    if (index->CheckFeature(vsag::SUPPORT_SERIALIZE_FILE) and
+        index->CheckFeature(vsag::SUPPORT_DESERIALIZE_FILE)) {
+        auto index2 = TestFactory(name, param, true);
+        TestSerializeFile(index, index2, dataset, search_param, true);
+    }
+    if (index->CheckFeature(vsag::SUPPORT_SERIALIZE_BINARY_SET) and
+        index->CheckFeature(vsag::SUPPORT_DESERIALIZE_BINARY_SET)) {
+        auto index2 = TestFactory(name, param, true);
+        TestSerializeBinarySet(index, index2, dataset, search_param, true);
+    }
+    if (index->CheckFeature(vsag::SUPPORT_SERIALIZE_FILE) and
+        index->CheckFeature(vsag::SUPPORT_DESERIALIZE_READER_SET)) {
+        auto index2 = TestFactory(name, param, true);
+        TestSerializeReaderSet(index, index2, dataset, search_param, name, true);
+    }
+    vsag::Options::Instance().set_block_size_limit(origin_size);
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex,
+                             "HNSW Build & ContinueAdd Test With Random Allocator",
+                             "[ft][hnsw]") {
+    auto allocator = std::make_shared<fixtures::RandomAllocator>();
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    auto size = GENERATE(1024 * 1024 * 2);
+    auto metric_type = GENERATE("l2", "ip", "cosine");
+    const std::string name = "hnsw";
+    for (auto& dim : dims) {
+        vsag::Options::Instance().set_block_size_limit(size);
+        auto param = GenerateHNSWBuildParametersString(metric_type, dim);
+        auto index = vsag::Factory::CreateIndex(name, param, allocator.get());
+        if (not index.has_value()) {
             continue;
         }
-        unique_ids.insert(ids[i]);
-        auto query = vsag::Dataset::Make();
-        query->NumElements(1)->Dim(dim)->Float32Vectors(data + i * dim)->Owner(false);
-        nlohmann::json parameters{
-            {"hnsw", {{"ef_search", ef_search}}},
-        };
-        int64_t k = 10;
-        if (auto result = hnsw->KnnSearch(query, k, parameters.dump()); result.has_value()) {
-            if (result.value()->GetIds()[0] == ids[i]) {
-                correct++;
-            }
-            REQUIRE(result.value()->GetDim() == k);
-        } else if (result.error().type == vsag::ErrorType::INTERNAL_ERROR) {
-            std::cerr << "failed to perform knn search on index" << std::endl;
-        }
+        auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
+        TestContinueAddIgnoreRequire(index.value(), dataset);
     }
-    float recall = correct / hnsw->GetNumElements();
-    REQUIRE(recall == 1);
+    vsag::Options::Instance().set_block_size_limit(origin_size);
 }
 
-TEST_CASE("pq infer knn search time recall", "[ft][hnsw]") {
-    int dim = 128;
-    int max_elements = 1000;
-    int max_degree = 64;
-    int ef_construction = 200;
-    int ef_search = 200;
-    // Initing index
-    nlohmann::json hnsw_parameters{
-        {"max_degree", max_degree},
-        {"ef_construction", ef_construction},
-        {"use_static", true},
-    };
-    nlohmann::json index_parameters{
-        {"dtype", "float32"}, {"metric_type", "l2"}, {"dim", dim}, {"hnsw", hnsw_parameters}};
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex,
+                             "HNSW Duplicate Add",
+                             "[ft][hnsw][concurrent]") {
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    auto size = GENERATE(1024 * 1024 * 2);
+    auto metric_type = GENERATE("l2", "ip", "cosine");
+    const std::string name = "hnsw";
+    auto search_param = fmt::format(search_param_tmp, 100);
+    for (auto& dim : dims) {
+        vsag::Options::Instance().set_block_size_limit(size);
+        auto param = GenerateHNSWBuildParametersString(metric_type, dim);
+        auto index = TestFactory(name, param, true);
 
-    std::shared_ptr<vsag::Index> hnsw;
-    auto index = vsag::Factory::CreateIndex("hnsw", index_parameters.dump());
-    REQUIRE(index.has_value());
-    hnsw = index.value();
+        auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
+        TestDuplicateAdd(index, dataset);
+        TestKnnSearch(index, dataset, search_param, 0.99, true);
+        TestConcurrentKnnSearch(index, dataset, search_param, 0.99, true);
+        TestRangeSearch(index, dataset, search_param, 0.99, 10, true);
+        TestRangeSearch(index, dataset, search_param, 0.49, 5, true);
+        TestFilterSearch(index, dataset, search_param, 0.99, true);
 
-    // Generate random data
-    std::mt19937 rng;
-    rng.seed(47);
-    std::uniform_real_distribution<> distrib_real;
-    int64_t* ids = new int64_t[max_elements];
-    float* data = new float[dim * max_elements];
-    for (int i = 0; i < max_elements; i++) {
-        ids[i] = i;
+        vsag::Options::Instance().set_block_size_limit(origin_size);
     }
-    for (int i = 0; i < dim * max_elements; i++) {
-        data[i] = distrib_real(rng);
-    }
-
-    auto dataset = vsag::Dataset::Make();
-    dataset->Dim(dim)->NumElements(max_elements)->Ids(ids)->Float32Vectors(data);
-    hnsw->Build(dataset);
-
-    // Query the elements for themselves and measure recall 1@1
-    float correct = 0;
-    for (int i = 0; i < max_elements; i++) {
-        auto query = vsag::Dataset::Make();
-        query->NumElements(1)->Dim(dim)->Float32Vectors(data + i * dim)->Owner(false);
-        nlohmann::json parameters{
-            {"hnsw", {{"ef_search", ef_search}}},
-        };
-        int64_t k = 10;
-        if (auto result = hnsw->KnnSearch(query, k, parameters.dump()); result.has_value()) {
-            if (result.value()->GetIds()[0] == i) {
-                correct++;
-            }
-            REQUIRE(result.value()->GetDim() == k);
-        } else if (result.error().type == vsag::ErrorType::INTERNAL_ERROR) {
-            std::cerr << "failed to perform knn search on index" << std::endl;
-        }
-    }
-    float recall = correct / max_elements;
-
-    REQUIRE(recall == 1);
-}
-
-TEST_CASE("hnsw serialize", "[ft][hnsw]") {
-    const std::string tmp_dir = "/tmp/";
-
-    int dim = 128;
-    int max_elements = 1000;
-    int max_degree = 64;
-    int ef_construction = 200;
-    int ef_search = 200;
-    auto metric_type = GENERATE("cosine", "l2");
-    auto use_static = GENERATE(false);
-    // Initing index
-    nlohmann::json hnsw_parameters{{"max_degree", max_degree},
-                                   {"ef_construction", ef_construction},
-                                   {"use_static", use_static},
-                                   {"use_conjugate_graph", true}};
-    nlohmann::json index_parameters{{"dtype", "float32"},
-                                    {"metric_type", metric_type},
-                                    {"dim", dim},
-                                    {"hnsw", hnsw_parameters}};
-
-    if (metric_type == std::string("cosine") && use_static) {
-        return;  // static hnsw only support the metric type of l2.
-    }
-    std::shared_ptr<vsag::Index> hnsw;
-    auto index = vsag::Factory::CreateIndex("hnsw", index_parameters.dump());
-    REQUIRE(index.has_value());
-    hnsw = index.value();
-
-    // Generate random data
-    std::mt19937 rng;
-    rng.seed(47);
-    std::uniform_real_distribution<> distrib_real;
-    int64_t* ids = new int64_t[max_elements];
-    float* data = new float[dim * max_elements];
-    for (int i = 0; i < max_elements; i++) {
-        ids[i] = i;
-    }
-    for (int i = 0; i < dim * max_elements; i++) {
-        data[i] = distrib_real(rng);
-    }
-
-    auto dataset = vsag::Dataset::Make();
-    dataset->Dim(dim)->NumElements(max_elements)->Ids(ids)->Float32Vectors(data);
-    hnsw->Build(dataset);
-
-    // Serialize(single-file)
-    {
-        if (auto bs = hnsw->Serialize(); bs.has_value()) {
-            hnsw = nullptr;
-            auto keys = bs->GetKeys();
-            std::vector<uint64_t> offsets;
-
-            std::ofstream file(tmp_dir + "hnsw.index", std::ios::binary);
-            uint64_t offset = 0;
-            for (auto key : keys) {
-                // [len][data...][len][data...]...
-                vsag::Binary b = bs->Get(key);
-                write_binary_pod(file, b.size);
-                file.write((const char*)b.data.get(), b.size);
-                offsets.push_back(offset);
-                offset += sizeof(b.size) + b.size;
-            }
-            // footer
-            for (uint64_t i = 0; i < keys.size(); ++i) {
-                // [len][key...][offset][len][key...][offset]...
-                const auto& key = keys[i];
-                int64_t len = key.length();
-                write_binary_pod(file, len);
-                file.write(key.c_str(), key.length());
-                write_binary_pod(file, offsets[i]);
-            }
-            // [num_keys][footer_offset]$
-            write_binary_pod(file, keys.size());
-            write_binary_pod(file, offset);
-            file.close();
-        } else if (bs.error().type == vsag::ErrorType::NO_ENOUGH_MEMORY) {
-            std::cerr << "no enough memory to serialize index" << std::endl;
-        }
-    }
-
-    // Deserialize(binaryset)
-    {
-        std::ifstream file(tmp_dir + "hnsw.index", std::ios::in);
-        file.seekg(-sizeof(uint64_t) * 2, std::ios::end);
-        uint64_t num_keys, footer_offset;
-        read_binary_pod(file, num_keys);
-        read_binary_pod(file, footer_offset);
-        // std::cout << "num_keys: " << num_keys << std::endl;
-        // std::cout << "footer_offset: " << footer_offset << std::endl;
-        file.seekg(footer_offset, std::ios::beg);
-
-        std::vector<std::string> keys;
-        std::vector<uint64_t> offsets;
-        for (uint64_t i = 0; i < num_keys; ++i) {
-            int64_t key_len;
-            read_binary_pod(file, key_len);
-            // std::cout << "key_len: " << key_len << std::endl;
-            char key_buf[key_len + 1];
-            memset(key_buf, 0, key_len + 1);
-            file.read(key_buf, key_len);
-            // std::cout << "key: " << key_buf << std::endl;
-            keys.push_back(key_buf);
-
-            uint64_t offset;
-            read_binary_pod(file, offset);
-            // std::cout << "offset: " << offset << std::endl;
-            offsets.push_back(offset);
-        }
-
-        vsag::BinarySet bs;
-        for (uint64_t i = 0; i < num_keys; ++i) {
-            file.seekg(offsets[i], std::ios::beg);
-            vsag::Binary b;
-            read_binary_pod(file, b.size);
-            // std::cout << "len: " << b.size << std::endl;
-            b.data.reset(new int8_t[b.size]);
-            file.read((char*)b.data.get(), b.size);
-            bs.Set(keys[i], b);
-        }
-
-        if (auto index = vsag::Factory::CreateIndex("hnsw", index_parameters.dump());
-            index.has_value()) {
-            hnsw = index.value();
-        } else {
-            std::cout << "Build HNSW Error" << std::endl;
-            return;
-        }
-        hnsw->Deserialize(bs);
-    }
-
-    // Deserialize(readerset)
-    {
-        std::ifstream file(tmp_dir + "hnsw.index", std::ios::in);
-        file.seekg(-sizeof(uint64_t) * 2, std::ios::end);
-        uint64_t num_keys, footer_offset;
-        read_binary_pod(file, num_keys);
-        read_binary_pod(file, footer_offset);
-        // std::cout << "num_keys: " << num_keys << std::endl;
-        // std::cout << "footer_offset: " << footer_offset << std::endl;
-        file.seekg(footer_offset, std::ios::beg);
-
-        std::vector<std::string> keys;
-        std::vector<uint64_t> offsets;
-        for (uint64_t i = 0; i < num_keys; ++i) {
-            int64_t key_len;
-            read_binary_pod(file, key_len);
-            // std::cout << "key_len: " << key_len << std::endl;
-            char key_buf[key_len + 1];
-            memset(key_buf, 0, key_len + 1);
-            file.read(key_buf, key_len);
-            // std::cout << "key: " << key_buf << std::endl;
-            keys.push_back(key_buf);
-
-            uint64_t offset;
-            read_binary_pod(file, offset);
-            // std::cout << "offset: " << offset << std::endl;
-            offsets.push_back(offset);
-        }
-
-        vsag::ReaderSet rs;
-        for (uint64_t i = 0; i < num_keys; ++i) {
-            int64_t size = 0;
-            if (i + 1 == num_keys) {
-                size = footer_offset;
-            } else {
-                size = offsets[i + 1];
-            }
-            size -= (offsets[i] + sizeof(uint64_t));
-            auto file_reader = vsag::Factory::CreateLocalFileReader(
-                tmp_dir + "hnsw.index", offsets[i] + sizeof(uint64_t), size);
-            rs.Set(keys[i], file_reader);
-        }
-
-        if (auto index = vsag::Factory::CreateIndex("hnsw", index_parameters.dump());
-            index.has_value()) {
-            hnsw = index.value();
-        } else {
-            std::cout << "Build HNSW Error" << std::endl;
-            return;
-        }
-        hnsw->Deserialize(rs);
-    }
-
-    // Query the elements for themselves and measure recall 1@10
-    float correct = 0;
-    for (int i = 0; i < max_elements; i++) {
-        auto query = vsag::Dataset::Make();
-        query->NumElements(1)->Dim(dim)->Float32Vectors(data + i * dim)->Owner(false);
-        nlohmann::json parameters{
-            {"hnsw", {{"ef_search", ef_search}}},
-        };
-        int64_t k = 10;
-        if (auto result = hnsw->KnnSearch(query, k, parameters.dump()); result.has_value()) {
-            correct += vsag::knn_search_recall(data,
-                                               ids,
-                                               max_elements,
-                                               data + i * dim,
-                                               dim,
-                                               result.value()->GetIds(),
-                                               result.value()->GetDim());
-        } else if (result.error().type == vsag::ErrorType::INTERNAL_ERROR) {
-            std::cerr << "failed to perform search on index" << std::endl;
-        }
-    }
-    float recall = correct / max_elements;
-
-    REQUIRE(recall == 1);
 }
