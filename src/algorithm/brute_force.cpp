@@ -24,10 +24,7 @@
 namespace vsag {
 
 BruteForce::BruteForce(const BruteForceParameterPtr& param, const IndexCommonParam& common_param)
-    : InnerIndexInterface(param, common_param),
-      dim_(common_param.dim_),
-      allocator_(common_param.allocator_.get()) {
-    label_table_ = std::make_shared<LabelTable>(common_param.allocator_.get());
+    : InnerIndexInterface(param, common_param) {
     inner_codes_ = FlattenInterface::MakeInstance(param->flatten_param, common_param);
 }
 

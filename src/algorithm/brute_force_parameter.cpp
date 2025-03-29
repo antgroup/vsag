@@ -17,9 +17,8 @@
 
 #include <fmt/format-inl.h>
 
-#include "inner_string_params.h"
-#include "utils/util_functions.h"
 #include "vsag/constants.h"
+
 namespace vsag {
 
 BruteForceParameter::BruteForceParameter() : flatten_param(nullptr) {
