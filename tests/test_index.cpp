@@ -404,6 +404,75 @@ private:
 };
 
 void
+TestIndex::TestKnnSearchIter(const IndexPtr& index,
+                             const TestDatasetPtr& dataset,
+                             const std::string& search_param,
+                             float expected_recall,
+                             bool expected_success) {
+    if (not index->CheckFeature(vsag::SUPPORT_KNN_ITERATOR_FILTER_SEARCH)) {
+        return;
+    }
+    auto queries = dataset->query_;
+    auto query_count = queries->GetNumElements();
+    auto dim = queries->GetDim();
+    auto gts = dataset->filter_ground_truth_;
+    auto gt_topK = dataset->top_k;
+    float cur_recall = 0.0f;
+    auto topk = gt_topK;
+    auto filter = std::make_shared<FilterObj>(dataset->filter_function_, dataset->valid_ratio_);
+    int64_t first_top = topk / 3;
+    int64_t second_top = topk / 3;
+    int64_t third_top = topk - first_top - second_top;
+    int64_t* ids = new int64_t[topk];
+    for (auto i = 0; i < query_count; ++i) {
+        vsag::IteratorContext* filter_ctx = nullptr;
+        int64_t element_cnt = index->GetNumElements();
+        if (element_cnt < 30) {
+            continue;
+        }
+        auto query = vsag::Dataset::Make();
+        query->NumElements(1)
+            ->Dim(dim)
+            ->Float32Vectors(queries->GetFloat32Vectors() + i * dim)
+            ->Paths(queries->GetPaths() + i)
+            ->Owner(false);
+        auto res = index->KnnSearch(query, first_top, search_param, filter, filter_ctx, false);
+        REQUIRE(res.has_value() == expected_success);
+        if (!expected_success) {
+            return;
+        }
+        int64_t get_cnt = res.value()->GetDim();
+        REQUIRE(res.value()->GetDim() == first_top);
+        memcpy(ids, res.value()->GetIds(), sizeof(int64_t) * first_top);
+        auto res2 = index->KnnSearch(query, second_top, search_param, filter, filter_ctx, false);
+        REQUIRE(res2.has_value() == expected_success);
+        if (!expected_success) {
+            return;
+        }
+        REQUIRE(res2.value()->GetDim() == second_top);
+        memcpy(ids + first_top, res2.value()->GetIds(), sizeof(int64_t) * second_top);
+        auto res3 = index->KnnSearch(query, third_top, search_param, filter, filter_ctx, true);
+        REQUIRE(res3.has_value() == expected_success);
+        if (!expected_success) {
+            return;
+        }
+        REQUIRE(res3.value()->GetDim() == third_top);
+        memcpy(ids + first_top + second_top, res3.value()->GetIds(), sizeof(int64_t) * third_top);
+        auto gt = gts->GetIds() + gt_topK * i;
+        auto val = Intersection(gt, gt_topK, ids, topk);
+        cur_recall += static_cast<float>(val) / static_cast<float>(gt_topK);
+        delete filter_ctx;
+    }
+    delete[] ids;
+    if (cur_recall <= expected_recall * query_count) {
+        WARN(fmt::format("cur_result({}) <= expected_recall * query_count({})",
+                         cur_recall,
+                         expected_recall * query_count));
+    }
+    REQUIRE(cur_recall > expected_recall * query_count * RECALL_THRESHOLD);
+}
+
+void
 TestIndex::TestFilterSearch(const TestIndex::IndexPtr& index,
                             const TestDatasetPtr& dataset,
                             const std::string& search_param,
