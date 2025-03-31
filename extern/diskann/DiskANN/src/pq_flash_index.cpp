@@ -1890,9 +1890,11 @@ int64_t PQFlashIndex<T, LabelT>::cached_beam_search_memory(const T *query, const
             auto future = promise.get_future();
             std::atomic<int> remaining_ops(sorted_read_reqs.size());
             bool succeed = true;
-            CallBack callBack = [&succeed, &promise, &remaining_ops] (vsag::IOErrorCode code, const std::string& message) {
+            std::string error_message;
+            CallBack callBack = [&succeed, &promise, &remaining_ops, &error_message] (vsag::IOErrorCode code, const std::string& message) {
                 if (code != vsag::IOErrorCode::IO_SUCCESS) {
                     succeed = false;
+                    error_message = message;
                 }
                 if (--remaining_ops == 0) {
                     promise.set_value(succeed);
@@ -1901,7 +1903,7 @@ int64_t PQFlashIndex<T, LabelT>::cached_beam_search_memory(const T *query, const
             reader->read(sorted_read_reqs, true, callBack);
             bool final_success = future.get();
             if (not final_success) {
-                throw diskann::ANNException("io error in search proccess", -1);
+                throw diskann::ANNException("io error in search proccess: " + error_message, -1);
             }
 #ifndef NDEBUG
             if (stats != nullptr) {
