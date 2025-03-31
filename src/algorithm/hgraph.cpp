@@ -196,7 +196,7 @@ HGraph::KnnSearch(const DatasetPtr& query,
                   int64_t k,
                   const std::string& parameters,
                   const FilterPtr& filter,
-                  vsag::IteratorContext*& iter_ctx,
+                  IteratorContext*& iter_ctx,
                   bool is_last_filter) const {
     std::shared_ptr<CommonInnerIdFilter> ft = nullptr;
     if (filter != nullptr) {
@@ -216,12 +216,12 @@ HGraph::KnnSearch(const DatasetPtr& query,
 
     if (iter_ctx == nullptr) {
         auto cur_count = this->bottom_graph_->TotalCount();
-        auto new_ctx = new IteratorFilterContext();
+        auto* new_ctx = new IteratorFilterContext();
         new_ctx->init(cur_count, params.ef_search, allocator_);
         iter_ctx = new_ctx;
     }
 
-    auto iter_filter_ctx = static_cast<IteratorFilterContext*>(iter_ctx);
+    auto* iter_filter_ctx = static_cast<IteratorFilterContext*>(iter_ctx);
     MaxHeap search_result(allocator_);
     if (is_last_filter) {
         while (!iter_filter_ctx->Empty()) {
@@ -704,6 +704,7 @@ HGraph::init_features() {
     this->index_feature_list_->SetFeatures({
         IndexFeature::SUPPORT_KNN_SEARCH,
         IndexFeature::SUPPORT_KNN_SEARCH_WITH_ID_FILTER,
+        IndexFeature::SUPPORT_KNN_ITERATOR_FILTER_SEARCH,
     });
     // concurrency
     this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_SEARCH_CONCURRENT);
