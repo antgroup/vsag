@@ -44,6 +44,7 @@
 #include "vsag/binaryset.h"
 #include "vsag/errors.h"
 #include "vsag/index.h"
+#include "vsag/iterator_context.h"
 #include "vsag/readerset.h"
 
 namespace vsag {
@@ -108,6 +109,17 @@ public:
               const std::string& parameters,
               const FilterPtr& filter) const override {
         SAFE_CALL(return this->knn_search(query, k, parameters, filter));
+    }
+
+    tl::expected<DatasetPtr, Error>
+    KnnSearch(const DatasetPtr& query,
+              int64_t k,
+              const std::string& parameters,
+              const FilterPtr& filter,
+              vsag::IteratorContext*& filter_ctx,
+              bool is_last_search) const override {
+        SAFE_CALL(
+            return this->knn_search(query, k, parameters, filter, &filter_ctx, is_last_search));
     }
 
     tl::expected<DatasetPtr, Error>
@@ -264,7 +276,9 @@ private:
     knn_search(const DatasetPtr& query,
                int64_t k,
                const std::string& parameters,
-               const FilterPtr& filter_ptr) const;
+               const FilterPtr& filter_ptr,
+               vsag::IteratorContext** iter_ctx = nullptr,
+               bool is_last_filter = false) const;
 
     template <typename FilterType>
     tl::expected<DatasetPtr, Error>

@@ -32,7 +32,6 @@ public:
 
 public:
     IteratorFilterContext() : is_first_used_(true){};
-
     ~IteratorFilterContext();
 
     tl::expected<void, Error>
