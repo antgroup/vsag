@@ -17,13 +17,14 @@
 
 #include "impl/basic_searcher.h"
 #include "inner_string_params.h"
+#include "ivf_partition/gno_imi_partition.h"
 #include "ivf_partition/ivf_nearest_partition.h"
 #include "utils/standard_heap.h"
 #include "utils/util_functions.h"
 
 namespace vsag {
 
-static const std::unordered_map<std::string, std::vector<std::string>> EXTERNAL_MAPPING = {
+static const std::unordered_map<std::string, std::vector<std::string> > EXTERNAL_MAPPING = {
     {
         IVF_BASE_QUANTIZATION_TYPE,
         {BUCKET_PARAMS_KEY, QUANTIZATION_PARAMS_KEY, QUANTIZATION_TYPE_KEY},
@@ -46,7 +47,31 @@ static const std::unordered_map<std::string, std::vector<std::string>> EXTERNAL_
     },
     {
         IVF_TRAIN_TYPE,
-        {IVF_TRAIN_TYPE_KEY},
+        {IVF_PARTITION_STRATEGY_PARAMS_KEY, IVF_TRAIN_TYPE_KEY},
+    },
+    {
+        IVF_TRAIN_TYPE,
+        {IVF_PARTITION_STRATEGY_PARAMS_KEY, IVF_TRAIN_TYPE_KEY},
+    },
+    {
+        IVF_PARTITION_STRATEGY_TYPE_KEY,
+        {IVF_PARTITION_STRATEGY_PARAMS_KEY, IVF_PARTITION_STRATEGY_TYPE_KEY},
+    },
+    {
+        GNO_IMI_FIRST_ORDER_BUCKETS_COUNT,
+        {IVF_PARTITION_STRATEGY_PARAMS_KEY,
+         IVF_PARTITION_STRATEGY_TYPE_GNO_IMI,
+         GNO_IMI_FIRST_ORDER_BUCKETS_COUNT_KEY},
+    },
+    {
+        GNO_IMI_SECOND_ORDER_BUCKETS_COUNT,
+        {IVF_PARTITION_STRATEGY_PARAMS_KEY,
+         IVF_PARTITION_STRATEGY_TYPE_GNO_IMI,
+         GNO_IMI_SECOND_ORDER_BUCKETS_COUNT_KEY},
+    },
+    {
+        BUCKET_PER_DATA_KEY,
+        {BUCKET_PER_DATA_KEY},
     },
     {
         IVF_USE_REORDER,
@@ -58,7 +83,6 @@ static constexpr const char* IVF_PARAMS_TEMPLATE =
     R"(
     {
         "type": "{INDEX_TYPE_IVF}",
-        "{IVF_TRAIN_TYPE_KEY}": "{IVF_TRAIN_TYPE_KMEANS}",
         "{BUCKET_PARAMS_KEY}": {
             "{IO_PARAMS_KEY}": {
                 "{IO_TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}"
@@ -68,6 +92,15 @@ static constexpr const char* IVF_PARAMS_TEMPLATE =
             },
             "{BUCKETS_COUNT_KEY}": 10
         },
+        "{IVF_PARTITION_STRATEGY_PARAMS_KEY}": {
+            "{IVF_PARTITION_STRATEGY_TYPE_KEY}": "{IVF_PARTITION_STRATEGY_TYPE_NEAREST}",
+            "{IVF_TRAIN_TYPE_KEY}": "{IVF_TRAIN_TYPE_KMEANS}",
+            "{IVF_PARTITION_STRATEGY_TYPE_GNO_IMI}": {
+                "{GNO_IMI_FIRST_ORDER_BUCKETS_COUNT_KEY}": 10,
+                "{GNO_IMI_SECOND_ORDER_BUCKETS_COUNT_KEY}": 10
+            }
+        },
+        "{BUCKET_PER_DATA_KEY}": 1,
         "{IVF_USE_REORDER_KEY}": false,
         "{IVF_PRECISE_CODES_KEY}": {
             "{IO_PARAMS_KEY}": {
@@ -99,13 +132,20 @@ IVF::CheckAndMappingExternalParam(const JsonType& external_param,
 }
 
 IVF::IVF(const IVFParameterPtr& param, const IndexCommonParam& common_param)
-    : InnerIndexInterface(param, common_param) {
+    : InnerIndexInterface(param, common_param), buckets_per_data_(param->buckets_per_data) {
     this->bucket_ = BucketInterface::MakeInstance(param->bucket_param, common_param);
     if (this->bucket_ == nullptr) {
         throw VsagException(ErrorType::INTERNAL_ERROR, "bucket init error");
     }
-    this->partition_strategy_ = std::make_shared<IVFNearestPartition>(
-        bucket_->bucket_count_, common_param, IVFNearestPartitionTrainerType::KMeansTrainer);
+    if (param->ivf_partition_strategy_parameter->partition_strategy_type ==
+        IVFPartitionStrategyType::IVF) {
+        this->partition_strategy_ = std::make_shared<IVFNearestPartition>(
+            bucket_->bucket_count_, common_param, param->ivf_partition_strategy_parameter);
+    } else if (param->ivf_partition_strategy_parameter->partition_strategy_type ==
+               IVFPartitionStrategyType::GNO_IMI) {
+        this->partition_strategy_ = std::make_shared<GNOIMIPartition>(
+            common_param, param->ivf_partition_strategy_parameter);
+    }
     this->use_reorder_ = param->use_reorder;
     if (this->use_reorder_) {
         this->reorder_codes_ = FlattenInterface::MakeInstance(param->flatten_param, common_param);
@@ -172,7 +212,7 @@ IVF::Add(const DatasetPtr& base) {
     auto num_element = base->GetNumElements();
     const auto* ids = base->GetIds();
     const auto* vectors = base->GetFloat32Vectors();
-    auto buckets = partition_strategy_->ClassifyDatas(vectors, num_element, 1);
+    auto buckets = partition_strategy_->ClassifyDatas(vectors, num_element, buckets_per_data_);
     for (int64_t i = 0; i < num_element; ++i) {
         bucket_->InsertVector(vectors + i * dim_, buckets[i], i + total_elements_);
         this->label_table_->Insert(i + total_elements_, ids[i]);
@@ -266,6 +306,7 @@ IVF::Deserialize(StreamReader& reader) {
         this->reorder_codes_->Deserialize(reader);
     }
 }
+
 InnerSearchParam
 IVF::create_search_param(const std::string& parameters, const FilterPtr& filter) const {
     InnerSearchParam param;
@@ -278,6 +319,8 @@ IVF::create_search_param(const std::string& parameters, const FilterPtr& filter)
     param.scan_bucket_size = std::min(static_cast<BucketIdType>(search_param.scan_buckets_count),
                                       bucket_->bucket_count_);
     param.factor = search_param.topk_factor;
+    param.ivf_partition_strategy_search_parameter =
+        search_param.ivf_partition_strategy_search_parameter;
     return std::move(param);
 }
 
@@ -305,7 +348,10 @@ MaxHeap
 IVF::search(const DatasetPtr& query, const InnerSearchParam& param) const {
     MaxHeap search_result(allocator_);
     auto candidate_buckets =
-        partition_strategy_->ClassifyDatas(query->GetFloat32Vectors(), 1, param.scan_bucket_size);
+        partition_strategy_->ClassifyDatasForSearch(query->GetFloat32Vectors(),
+                                                    1,
+                                                    param.scan_bucket_size,
+                                                    param.ivf_partition_strategy_search_parameter);
     auto computer = bucket_->FactoryComputer(query->GetFloat32Vectors());
     Vector<float> dist(allocator_);
     auto cur_heap_top = std::numeric_limits<float>::max();

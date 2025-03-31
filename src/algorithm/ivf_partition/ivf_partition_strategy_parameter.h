@@ -1,0 +1,82 @@
+
+// Copyright 2024-present the vsag project
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+#pragma once
+#include "data_cell/bucket_datacell_parameter.h"
+#include "fmt/format-inl.h"
+#include "gno_imi_parameter.h"
+#include "inner_string_params.h"
+#include "parameter.h"
+#include "typing.h"
+
+namespace vsag {
+
+enum class IVFNearestPartitionTrainerType {
+    RandomTrainer = 0,
+    KMeansTrainer = 1,
+};
+
+enum class IVFPartitionStrategyType {
+    IVF = 0,
+    GNO_IMI = 1,
+};
+
+class IVFPartitionStrategyParameters : public Parameter {
+public:
+    explicit IVFPartitionStrategyParameters();
+
+    void
+    FromJson(const JsonType& json) override;
+
+    JsonType
+    ToJson() override;
+
+public:
+    IVFNearestPartitionTrainerType partition_train_type{
+        IVFNearestPartitionTrainerType::KMeansTrainer};
+    IVFPartitionStrategyType partition_strategy_type{IVFPartitionStrategyType::IVF};
+    GNOIMIParameterPtr gnoimi_param{nullptr};
+};
+
+using IVFPartitionStrategyParametersPtr = std::shared_ptr<IVFPartitionStrategyParameters>;
+
+class IVFPartitionStrategySearchParameters {
+public:
+    static IVFPartitionStrategySearchParameters
+    FromString(const std::string& json_string) {
+        JsonType params = JsonType::parse(json_string);
+        return std::move(FromJson(params));
+    }
+
+    static IVFPartitionStrategySearchParameters
+    FromJson(const JsonType& params) {
+        IVFPartitionStrategySearchParameters obj;
+
+        if (params.contains("first_order_scan_ratio")) {
+            obj.first_order_scan_ratio = params["first_order_scan_ratio"];
+        }
+        return obj;
+    }
+
+public:
+    float first_order_scan_ratio{1.0f};
+
+private:
+    IVFPartitionStrategySearchParameters() = default;
+};
+using IVFPartitionStrategySearchParametersPtr =
+    std::shared_ptr<IVFPartitionStrategySearchParameters>;
+
+}  // namespace vsag

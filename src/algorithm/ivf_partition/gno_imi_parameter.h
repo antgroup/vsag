@@ -14,28 +14,28 @@
 // limitations under the License.
 
 #pragma once
-
+#include "data_cell/bucket_datacell_parameter.h"
+#include "fmt/format-inl.h"
+#include "inner_string_params.h"
+#include "parameter.h"
 #include "typing.h"
-#include "vsag/allocator.h"
 
 namespace vsag {
-
-class KMeansCluster {
+class GNOIMIParameter : public Parameter {
 public:
-    explicit KMeansCluster(int32_t dim, Allocator* allocator);
+    explicit GNOIMIParameter();
 
-    ~KMeansCluster();
+    void
+    FromJson(const JsonType& json) override;
 
-    Vector<int>
-    Run(uint32_t k, const float* datas, uint64_t count, int iter = 200, float* err = nullptr);
+    JsonType
+    ToJson() override;
 
 public:
-    float* k_centroids_{nullptr};
-
-private:
-    Allocator* const allocator_{nullptr};
-
-    const int32_t dim_{0};
+    uint64_t first_order_buckets_count{100};
+    uint64_t second_order_buckets_count{100};
 };
+
+using GNOIMIParameterPtr = std::shared_ptr<GNOIMIParameter>;
 
 }  // namespace vsag
