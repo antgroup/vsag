@@ -30,7 +30,7 @@ public:
     ~KMeansCluster();
 
     Vector<int>
-    Run(uint32_t k, const float* datas, uint64_t count, int iter = 25);
+    Run(uint32_t k, const float* datas, uint64_t count, int iter = 25, double* err = nullptr);
 
 public:
     float* k_centroids_{nullptr};
@@ -43,7 +43,8 @@ private:
                                const uint64_t query_count_bs,
                                float* y_sqr,
                                float* distances,
-                               Vector<int32_t>& labels);
+                               Vector<int32_t>& labels,
+                               float* errs);
 
 private:
     Allocator* const allocator_{nullptr};
