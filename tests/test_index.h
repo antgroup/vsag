@@ -95,6 +95,13 @@ protected:
                   bool expected_success = true);
 
     static void
+    TestKnnSearchIter(const IndexPtr& index,
+                      const TestDatasetPtr& dataset,
+                      const std::string& search_param,
+                      float expected_recall = 0.99,
+                      bool expected_success = true);
+
+    static void
     TestSearchWithDirtyVector(const IndexPtr& index,
                               const TestDatasetPtr& dataset,
                               const std::string& search_param,

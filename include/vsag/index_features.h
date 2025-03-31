@@ -27,6 +27,7 @@ enum IndexFeature {
     SUPPORT_KNN_SEARCH_WITH_ID_FILTER, /**< Supports K-nearest neighbor search with ID filtering */
     SUPPORT_RANGE_SEARCH,              /**< Supports range search */
     SUPPORT_RANGE_SEARCH_WITH_ID_FILTER, /**< Supports range search with ID filtering */
+    SUPPORT_KNN_ITERATOR_FILTER_SEARCH,  /**< Support iterator filter search **/
     SUPPORT_DELETE_BY_ID,                /**< Supports deleting elements by ID */
     SUPPORT_BATCH_SEARCH,                /**< Supports batch search */
     SUPPORT_METRIC_TYPE_L2,              /**< Supports L2 metric type */
