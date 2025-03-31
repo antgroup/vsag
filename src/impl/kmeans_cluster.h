@@ -48,14 +48,14 @@ private:
                                const uint64_t k,
                                float* y_sqr,
                                float* distances,
-                               Vector<int32_t>& labels,
-                               float* errs);
+                               Vector<int32_t>& labels);
 
     double
     find_nearest_one_with_hgraph(const float* query,
                                  const uint64_t query_count,
-                                 const uint64_t k,
+                                 const uint64_t k,      
                                  Vector<int32_t>& labels);
+
 
 private:
     Allocator* const allocator_{nullptr};

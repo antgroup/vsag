@@ -103,6 +103,5 @@ main(int argc, char** argv) {
         std::cout << result->GetIds()[i] << ": " << result->GetDistances()[i] << std::endl;
         std::cout << result2->GetIds()[i] << ": " << result2->GetDistances()[i] << std::endl;
     }
-
     return 0;
 }
