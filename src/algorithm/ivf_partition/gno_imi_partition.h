@@ -41,6 +41,9 @@ public:
                            const InnerSearchParam& param) override;
 
     void
+    GetCentroid(BucketIdType bucket_id, Vector<float>& centroid) override;
+
+    void
     Serialize(StreamWriter& writer) override;
 
     void

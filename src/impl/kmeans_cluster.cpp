@@ -85,11 +85,13 @@ KMeansCluster::Run(uint32_t k,
     }
 
     for (int it = 0; it < iter; ++it) {
+        /*
         logger::debug("[{}] KMeansCluster::Run iter: {}/{}, cur loss is {}",
                       get_current_time(),
                       it,
                       iter,
                       total_err);
+        */
         if (k < THRESHOLD_FOR_HGRAPH) {
             total_err = this->find_nearest_one_with_blas(datas, count, k, y_sqr, distances, labels);
         } else {
