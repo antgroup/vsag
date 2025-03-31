@@ -35,8 +35,9 @@ static constexpr const char* SEARCH_PARAM_TEMPLATE_STR = R"(
 
 IVFNearestPartition::IVFNearestPartition(BucketIdType bucket_count,
                                          const IndexCommonParam& common_param,
-                                         IVFNearestPartitionTrainerType trainer_type)
-    : IVFPartitionStrategy(common_param, bucket_count), trainer_type_(trainer_type) {
+                                         IVFPartitionStrategyParametersPtr param)
+    : IVFPartitionStrategy(common_param, bucket_count),
+      ivf_partition_strategy_param_(std::move(param)) {
     this->factory_router_index(common_param);
 }
 
@@ -53,7 +54,8 @@ IVFNearestPartition::Train(const DatasetPtr dataset) {
         ->NumElements(this->bucket_count_)
         ->Owner(false);
 
-    if (trainer_type_ == IVFNearestPartitionTrainerType::KMeansTrainer) {
+    if (ivf_partition_strategy_param_->partition_train_type ==
+        IVFNearestPartitionTrainerType::KMeansTrainer) {
         constexpr int32_t kmeans_iter_count = 25;
         KMeansCluster cls(static_cast<int32_t>(dim), this->allocator_);
         cls.Run(this->bucket_count_,
@@ -61,7 +63,8 @@ IVFNearestPartition::Train(const DatasetPtr dataset) {
                 dataset->GetNumElements(),
                 kmeans_iter_count);
         memcpy(data.data(), cls.k_centroids_, dim * this->bucket_count_ * sizeof(float));
-    } else if (trainer_type_ == IVFNearestPartitionTrainerType::RandomTrainer) {
+    } else if (ivf_partition_strategy_param_->partition_train_type ==
+               IVFNearestPartitionTrainerType::RandomTrainer) {
         auto selected = select_k_numbers(dataset->GetNumElements(), this->bucket_count_);
         for (int i = 0; i < bucket_count_; ++i) {
             memcpy(data.data() + i * dim,
