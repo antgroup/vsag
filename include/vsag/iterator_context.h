@@ -19,6 +19,9 @@
 
 namespace vsag {
 
-class IteratorContext {};
+class IteratorContext {
+public:
+    virtual ~IteratorContext() = default;
+};
 
 };  // namespace vsag
