@@ -188,7 +188,7 @@ public:
               int64_t k,
               const std::string& parameters,
               const FilterPtr& filter,
-              vsag::IteratorContext*& iter_ctx,
+              IteratorContext*& iter_ctx,
               bool is_last_search) const {
         throw std::runtime_error("Index doesn't support new filter");
     }
