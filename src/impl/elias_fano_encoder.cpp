@@ -20,8 +20,9 @@
 
 namespace vsag {
 
-size_t
-EliasFanoEncoder::ctzll(uint64_t x) {
+// Cross-platform implementation of ctzll (count trailing zeros)
+static inline size_t
+ctzll(uint64_t x) {
 #ifdef __GNUC__
     return __builtin_ctzll(x);
 #else
@@ -35,6 +36,11 @@ EliasFanoEncoder::ctzll(uint64_t x) {
     }
     return count;
 #endif
+}
+
+static inline void
+set_high_bit(Vector<uint64_t>& vec, size_t pos) {
+    vec[pos >> 6] |= (1ULL << (pos & 63));
 }
 
 void
@@ -89,7 +95,6 @@ EliasFanoEncoder::Encode(const Vector<InnerIdType>& values, InnerIdType max_valu
     if (values.size() <= UINT8_MAX) {
         num_elements_ = static_cast<uint8_t>(values.size());
     } else {
-        num_elements_ = UINT8_MAX;
         throw std::runtime_error("Error: Elias-Fano encoder, number of elements exceeds 255.");
     }
 
