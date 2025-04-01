@@ -451,7 +451,7 @@ TestIndex::TestKnnSearchIter(const IndexPtr& index,
         }
         REQUIRE(res2.value()->GetDim() == second_top);
         memcpy(ids + first_top, res2.value()->GetIds(), sizeof(int64_t) * second_top);
-        auto res3 = index->KnnSearch(query, third_top, search_param, filter, filter_ctx, true);
+        auto res3 = index->KnnSearch(query, third_top, search_param, filter, filter_ctx, false);
         REQUIRE(res3.has_value() == expected_success);
         if (!expected_success) {
             return;

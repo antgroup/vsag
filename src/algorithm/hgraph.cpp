@@ -24,6 +24,7 @@
 #include "data_cell/sparse_graph_datacell.h"
 #include "empty_index_binary_set.h"
 #include "impl/pruning_strategy.h"
+#include "index/iterator_filter.h"
 #include "logger.h"
 #include "utils/slow_task_timer.h"
 #include "utils/util_functions.h"
@@ -190,6 +191,98 @@ HGraph::KnnSearch(const DatasetPtr& query,
     return std::move(dataset_results);
 }
 
+DatasetPtr
+HGraph::KnnSearch(const DatasetPtr& query,
+                  int64_t k,
+                  const std::string& parameters,
+                  const FilterPtr& filter,
+                  IteratorContext*& iter_ctx,
+                  bool is_last_filter) const {
+    std::shared_ptr<CommonInnerIdFilter> ft = nullptr;
+    if (filter != nullptr) {
+        ft = std::make_shared<CommonInnerIdFilter>(filter, *this->label_table_);
+    }
+    int64_t query_dim = query->GetDim();
+    CHECK_ARGUMENT(query_dim == dim_,
+                   fmt::format("query.dim({}) must be equal to index.dim({})", query_dim, dim_));
+    // check k
+    CHECK_ARGUMENT(k > 0, fmt::format("k({}) must be greater than 0", k));
+    k = std::min(k, GetNumElements());
+
+    // check query vector
+    CHECK_ARGUMENT(query->GetNumElements() == 1, "query dataset should contain 1 vector only");
+
+    auto params = HGraphSearchParameters::FromJson(parameters);
+
+    if (iter_ctx == nullptr) {
+        auto cur_count = this->bottom_graph_->TotalCount();
+        auto* new_ctx = new IteratorFilterContext();
+        new_ctx->init(cur_count, params.ef_search, allocator_);
+        iter_ctx = new_ctx;
+    }
+
+    auto* iter_filter_ctx = static_cast<IteratorFilterContext*>(iter_ctx);
+    MaxHeap search_result(allocator_);
+    if (is_last_filter) {
+        while (!iter_filter_ctx->Empty()) {
+            uint32_t cur_inner_id = iter_filter_ctx->GetTopID();
+            float cur_dist = iter_filter_ctx->GetTopDist();
+            search_result.emplace(cur_dist, cur_inner_id);
+            iter_filter_ctx->PopDiscard();
+        }
+    } else {
+        InnerSearchParam search_param;
+        search_param.ep = this->entry_point_id_;
+        search_param.ef = 1;
+        search_param.is_inner_id_allowed = nullptr;
+        if (iter_filter_ctx->IsFirstUsed()) {
+            for (auto i = static_cast<int64_t>(this->route_graphs_.size() - 1); i >= 0; --i) {
+                auto result = this->search_one_graph(query->GetFloat32Vectors(),
+                                                     this->route_graphs_[i],
+                                                     this->basic_flatten_codes_,
+                                                     search_param);
+                search_param.ep = result.top().second;
+            }
+        }
+
+        search_param.ef = std::max(params.ef_search, k);
+        search_param.is_inner_id_allowed = ft;
+        search_param.topk = static_cast<int64_t>(search_param.ef);
+        search_result = this->search_one_graph(query->GetFloat32Vectors(),
+                                               this->bottom_graph_,
+                                               this->basic_flatten_codes_,
+                                               search_param,
+                                               iter_filter_ctx);
+    }
+
+    if (use_reorder_) {
+        this->reorder(query->GetFloat32Vectors(), this->high_precise_codes_, search_result, k);
+    }
+
+    while (search_result.size() > k) {
+        std::pair<float, InnerIdType> curr = search_result.top();
+        iter_filter_ctx->AddDiscardNode(curr.first, curr.second);
+        search_result.pop();
+    }
+
+    // return an empty dataset directly if searcher returns nothing
+    if (search_result.empty()) {
+        auto result = Dataset::Make();
+        result->Dim(0)->NumElements(1);
+        return result;
+    }
+    auto count = static_cast<const int64_t>(search_result.size());
+    auto [dataset_results, dists, ids] = CreateFastDataset(count, allocator_);
+    for (int64_t j = count - 1; j >= 0; --j) {
+        dists[j] = search_result.top().first;
+        ids[j] = this->label_table_->GetLabelById(search_result.top().second);
+        iter_filter_ctx->SetPoint(search_result.top().second);
+        search_result.pop();
+    }
+    iter_filter_ctx->SetOFFFirstUsed();
+    return std::move(dataset_results);
+}
+
 uint64_t
 HGraph::EstimateMemory(uint64_t num_elements) const {
     uint64_t estimate_memory = 0;
@@ -305,6 +398,20 @@ HGraph::search_one_graph(const float* query,
                          InnerSearchParam& inner_search_param) const {
     auto visited_list = this->pool_->TakeOne();
     auto result = this->searcher_->Search(graph, flatten, visited_list, query, inner_search_param);
+    this->pool_->ReturnOne(visited_list);
+    return result;
+}
+
+template <InnerSearchMode mode>
+MaxHeap
+HGraph::search_one_graph(const float* query,
+                         const GraphInterfacePtr& graph,
+                         const FlattenInterfacePtr& flatten,
+                         InnerSearchParam& inner_search_param,
+                         IteratorFilterContext* iter_ctx) const {
+    auto visited_list = this->pool_->TakeOne();
+    auto result =
+        this->searcher_->Search(graph, flatten, visited_list, query, inner_search_param, iter_ctx);
     this->pool_->ReturnOne(visited_list);
     return result;
 }
@@ -597,6 +704,7 @@ HGraph::init_features() {
     this->index_feature_list_->SetFeatures({
         IndexFeature::SUPPORT_KNN_SEARCH,
         IndexFeature::SUPPORT_KNN_SEARCH_WITH_ID_FILTER,
+        IndexFeature::SUPPORT_KNN_ITERATOR_FILTER_SEARCH,
     });
     // concurrency
     this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_SEARCH_CONCURRENT);
