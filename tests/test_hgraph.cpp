@@ -159,6 +159,7 @@ HgraphTestIndex::TestGeneral(const TestIndex::IndexPtr& index,
                              const std::string& search_param,
                              float recall) {
     TestKnnSearch(index, dataset, search_param, recall, true);
+    TestKnnSearchIter(index, dataset, search_param, recall, true);
     TestConcurrentKnnSearch(index, dataset, search_param, recall, true);
     TestRangeSearch(index, dataset, search_param, recall, 10, true);
     TestRangeSearch(index, dataset, search_param, recall / 2.0, 5, true);
