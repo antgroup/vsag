@@ -112,20 +112,55 @@ FP32ComputeIP(const float* query, const float* codes, uint64_t dim) {
 float
 FP32ComputeL2Sqr(const float* query, const float* codes, uint64_t dim) {
 #if defined(ENABLE_AVX512)
-    const int n = dim / 16;
-    if (n == 0) {
+    if (dim < 16) {
         return avx2::FP32ComputeL2Sqr(query, codes, dim);
     }
-    // process 16 floats at a time
-    __m512 sum = _mm512_setzero_ps();  // initialize to 0
-    for (int i = 0; i < n; ++i) {
-        __m512 a = _mm512_loadu_ps(query + i * 16);  // load 16 floats from memory
-        __m512 b = _mm512_loadu_ps(codes + i * 16);  // load 16 floats from memory
-        __m512 diff = _mm512_sub_ps(a, b);           // calculate the difference
-        sum = _mm512_fmadd_ps(diff, diff, sum);      // accumulate the squared difference
+
+    __m512 sum0 = _mm512_setzero_ps();
+    __m512 sum1 = _mm512_setzero_ps();
+    __m512 sum2 = _mm512_setzero_ps();
+    __m512 sum3 = _mm512_setzero_ps();
+
+    uint64_t i = 0;
+    for (; i + 63 < dim; i += 64) {
+        __m512 a0 = _mm512_loadu_ps(query + i);
+        __m512 b0 = _mm512_loadu_ps(codes + i);
+
+        __m512 a1 = _mm512_loadu_ps(query + i + 16);
+        __m512 b1 = _mm512_loadu_ps(codes + i + 16);
+
+        __m512 a2 = _mm512_loadu_ps(query + i + 32);
+        __m512 b2 = _mm512_loadu_ps(codes + i + 32);
+
+        __m512 a3 = _mm512_loadu_ps(query + i + 48);
+        __m512 b3 = _mm512_loadu_ps(codes + i + 48);
+
+        __m512 diff0 = _mm512_sub_ps(a0, b0);
+        __m512 diff1 = _mm512_sub_ps(a1, b1);
+        __m512 diff2 = _mm512_sub_ps(a2, b2);
+        __m512 diff3 = _mm512_sub_ps(a3, b3);
+
+        sum0 = _mm512_fmadd_ps(diff0, diff0, sum0);
+        sum1 = _mm512_fmadd_ps(diff1, diff1, sum1);
+        sum2 = _mm512_fmadd_ps(diff2, diff2, sum2);
+        sum3 = _mm512_fmadd_ps(diff3, diff3, sum3);
     }
+
+    __m512 sum = _mm512_add_ps(sum0, sum1);
+    sum = _mm512_add_ps(sum, sum2);
+    sum = _mm512_add_ps(sum, sum3);
+
+    for (; i + 15 < dim; i += 16) {
+        __m512 a = _mm512_loadu_ps(query + i);
+        __m512 b = _mm512_loadu_ps(codes + i);
+        __m512 diff = _mm512_sub_ps(a, b);
+        sum = _mm512_fmadd_ps(diff, diff, sum);
+    }
+
     float l2 = _mm512_reduce_add_ps(sum);
-    l2 += avx2::FP32ComputeL2Sqr(query + n * 16, codes + n * 16, dim - n * 16);
+    if (dim - i > 0) {
+        l2 += avx2::FP32ComputeL2Sqr(query + i, codes + i, dim - i);
+    }
     return l2;
 #else
     return avx2::FP32ComputeL2Sqr(query, codes, dim);
@@ -311,7 +346,7 @@ SQ8ComputeL2Sqr(const float* query,
         __m512 diff_values = _mm512_loadu_ps(diff + i);
 
         __m512i codes_512 = _mm512_cvtepu8_epi32(code_values);
-        __m512 code_floats = _mm512_div_ps(_mm512_cvtepi32_ps(codes_512), _mm512_set1_ps(255.0f));
+        __m512 code_floats = _mm512_div_ps(_mm512_cvtepi32_ps(codes_512), _mm512_set1_ps(255.0F));
         __m512 lower_bound_values = _mm512_loadu_ps(lower_bound + i);
         __m512 query_values = _mm512_loadu_ps(query + i);
 
