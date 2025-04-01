@@ -49,7 +49,7 @@ BasicSearcher::visit(const GraphInterfacePtr& graph,
              ? (filter->ValidRatio() == 1.0F ? 0 : (1 - ((1 - filter->ValidRatio()) * skip_ratio)))
              : 0.0F);
 
-    for (uint32_t i = 0; i < prefetch_jump_visit_size_; i++) {
+    for (uint32_t i = 0; i < prefetch_jump_visit_size_ and neighbors.size() > i; i++) {
         vl->Prefetch(neighbors[i]);
     }
 
@@ -157,7 +157,7 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
             if (top_candidates.size() < ef || lower_bound > dist ||
                 (mode == RANGE_SEARCH && dist <= inner_search_param.radius)) {
                 candidate_set.emplace(-dist, to_be_visited_id[i]);
-                flatten->Prefetch(candidate_set.top().second);
+                //                flatten->Prefetch(candidate_set.top().second);
                 if (not is_id_allowed || is_id_allowed->CheckValid(to_be_visited_id[i])) {
                     top_candidates.emplace(dist, to_be_visited_id[i]);
                 }

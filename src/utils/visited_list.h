@@ -17,6 +17,7 @@
 #include <cstring>
 #include <limits>
 
+#include "prefetch.h"
 #include "resource_object.h"
 #include "resource_object_pool.h"
 #include "typing.h"
@@ -53,7 +54,7 @@ public:
 
     inline void
     Prefetch(const InnerIdType& id) {
-        return;  // TODO(LHT) implement
+        PrefetchLines(this->list_ + id, 64);
     }
 
     void
