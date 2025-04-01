@@ -299,7 +299,7 @@ public:
             min_id = it->first < min_id ? it->first : min_id;
         }
         lock_table.unlock();
-        return std::pair<int64_t, int64_t>(min_id, max_id);
+        return {min_id, max_id};
     }
 
     void

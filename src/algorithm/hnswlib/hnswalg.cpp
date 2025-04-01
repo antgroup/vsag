@@ -219,7 +219,7 @@ HierarchicalNSW::getMinAndMaxId() {
         max_id = it.first > max_id ? it.first : max_id;
         min_id = it.first < min_id ? it.first : min_id;
     }
-    return std::pair<int64_t, int64_t>(min_id, max_id);
+    return {min_id, max_id};
 }
 
 bool
