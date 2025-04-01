@@ -908,9 +908,9 @@ TEST_CASE("get min and max id", "[ut][hnsw]") {
         alg_hnsw->init_memory_space();
         alg_hnsw->addPoint(base_vectors.data(), 0);
         alg_hnsw->addPoint(base_vectors.data(), 5);
-        int64_t min_id;
-        int64_t max_id;
-        alg_hnsw->getMinAndMaxId(min_id, max_id);
+        auto get_min_max_res = alg_hnsw->getMinAndMaxId();
+        int64_t min_id = get_min_max_res.first;
+        int64_t max_id = get_min_max_res.second;
 
         REQUIRE(min_id == 0);
         REQUIRE(max_id == 5);
@@ -923,9 +923,9 @@ TEST_CASE("get min and max id", "[ut][hnsw]") {
         alg_hnsw_static->init_memory_space();
         alg_hnsw_static->addPoint(base_vectors.data(), 0);
         alg_hnsw_static->addPoint(base_vectors.data(), 5);
-        int64_t min_id;
-        int64_t max_id;
-        alg_hnsw_static->getMinAndMaxId(min_id, max_id);
+        auto get_min_max_res = alg_hnsw_static->getMinAndMaxId();
+        int64_t min_id = get_min_max_res.first;
+        int64_t max_id = get_min_max_res.second;
 
         REQUIRE(min_id == 0);
         REQUIRE(max_id == 5);

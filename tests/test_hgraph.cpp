@@ -158,6 +158,7 @@ HgraphTestIndex::TestGeneral(const TestIndex::IndexPtr& index,
                              const TestDatasetPtr& dataset,
                              const std::string& search_param,
                              float recall) {
+    TestGetMinAndMaxId(index, dataset);
     TestKnnSearch(index, dataset, search_param, recall, true);
     TestConcurrentKnnSearch(index, dataset, search_param, recall, true);
     TestRangeSearch(index, dataset, search_param, recall, 10, true);
@@ -166,7 +167,6 @@ HgraphTestIndex::TestGeneral(const TestIndex::IndexPtr& index,
     TestCheckIdExist(index, dataset);
     TestCalcDistanceById(index, dataset);
     TestBatchCalcDistanceById(index, dataset);
-    TestGetMinAndMaxId(index, dataset);
 }
 }  // namespace fixtures
 

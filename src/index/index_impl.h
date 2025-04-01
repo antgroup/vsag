@@ -166,9 +166,9 @@ public:
         SAFE_CALL(this->inner_index_->GetExtraInfoByIds(ids, count, extra_infos));
     };
 
-    tl::expected<void, Error>
-    GetMinAndMaxId(int64_t& min_id, int64_t& max_id) const override {
-        SAFE_CALL(this->inner_index_->GetMinAndMaxId(min_id, max_id));
+    tl::expected<std::pair<int64_t, int64_t>, Error>
+    GetMinAndMaxId() const override {
+        SAFE_CALL(return this->inner_index_->GetMinAndMaxId());
     }
 
     tl::expected<void, Error>

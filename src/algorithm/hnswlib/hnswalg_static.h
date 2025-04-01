@@ -286,16 +286,20 @@ public:
         return std::move(result);
     }
 
-    void
-    getMinAndMaxId(int64_t& min_id, int64_t& max_id) override {
-        min_id = INT64_MAX;
-        max_id = INT64_MIN;
+    std::pair<int64_t, int64_t>
+    getMinAndMaxId() override {
+        int64_t min_id = INT64_MAX;
+        int64_t max_id = INT64_MIN;
         std::unique_lock<std::mutex> lock_table(label_lookup_lock);
+        if (label_lookup_.size() == 0) {
+            throw std::runtime_error("Label map size is zero");
+        }
         for (auto it = label_lookup_.begin(); it != label_lookup_.end(); ++it) {
             max_id = it->first > max_id ? it->first : max_id;
             min_id = it->first < min_id ? it->first : min_id;
         }
         lock_table.unlock();
+        return std::pair<int64_t, int64_t>(min_id, max_id);
     }
 
     void

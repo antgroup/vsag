@@ -317,8 +317,8 @@ public:
      * @param min_id The minimum id returned
      * @param max_id The maximum id returned
      */
-    virtual tl::expected<void, Error>
-    GetMinAndMaxId(int64_t& min_id, int64_t& max_id) const {
+    virtual tl::expected<std::pair<int64_t, int64_t>, Error>
+    GetMinAndMaxId() const {
         throw std::runtime_error("Index doesn't support get Min and Max id");
     }
 
