@@ -178,6 +178,7 @@ public:
       * @param k the result size of every query
       * @param filter represents whether an element is filtered out by pre-filter
       * @param iter_ctx iterative filter context
+      * @param is_last_search last iterator filter search flag
       * @return result contains
       *                - num_elements: 1
       *                - ids, distances: length is (num_elements * k)
@@ -187,7 +188,7 @@ public:
               int64_t k,
               const std::string& parameters,
               const FilterPtr& filter,
-              vsag::IteratorContext*& iter_ctx,
+              IteratorContext*& iter_ctx,
               bool is_last_search) const {
         throw std::runtime_error("Index doesn't support new filter");
     }

@@ -29,6 +29,7 @@
 #include "hgraph_parameter.h"
 #include "impl/basic_searcher.h"
 #include "index/index_common_param.h"
+#include "index/iterator_filter.h"
 #include "index_feature_list.h"
 #include "inner_index_interface.h"
 #include "lock_strategy.h"
@@ -73,6 +74,14 @@ public:
               int64_t k,
               const std::string& parameters,
               const FilterPtr& filter) const override;
+
+    [[nodiscard]] DatasetPtr
+    KnnSearch(const DatasetPtr& query,
+              int64_t k,
+              const std::string& parameters,
+              const FilterPtr& filter,
+              IteratorContext*& iter_ctx,
+              bool is_last_filter) const override;
 
     [[nodiscard]] DatasetPtr
     RangeSearch(const DatasetPtr& query,
@@ -139,6 +148,15 @@ private:
                      const GraphInterfacePtr& graph,
                      const FlattenInterfacePtr& flatten,
                      InnerSearchParam& inner_search_param) const;
+
+    template <InnerSearchMode mode = InnerSearchMode::KNN_SEARCH>
+    MaxHeap
+    search_one_graph(const float* query,
+                     const GraphInterfacePtr& graph,
+                     const FlattenInterfacePtr& flatten,
+                     InnerSearchParam& inner_search_param,
+                     IteratorFilterContext* iter_ctx) const;
+
     void
     serialize_basic_info(StreamWriter& writer) const;
 
