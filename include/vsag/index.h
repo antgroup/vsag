@@ -335,6 +335,17 @@ public:
     };
 
     /**
+     * @brief Calculate the maximum and minimum labels.
+     *
+     * @param min_id The minimum id returned
+     * @param max_id The maximum id returned
+     */
+    virtual tl::expected<std::pair<int64_t, int64_t>, Error>
+    GetMinAndMaxId() const {
+        throw std::runtime_error("Index doesn't support get Min and Max id");
+    }
+
+    /**
      * @brief Retrieve additional data associated with vectors identified by given IDs.
      *
      * This method fetches non-vector metadata stored alongside the vectors in the index
