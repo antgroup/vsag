@@ -177,6 +177,11 @@ public:
         SAFE_CALL(this->inner_index_->GetExtraInfoByIds(ids, count, extra_infos));
     };
 
+    tl::expected<std::pair<int64_t, int64_t>, Error>
+    GetMinAndMaxId() const override {
+        SAFE_CALL(return this->inner_index_->GetMinAndMaxId());
+    }
+
     tl::expected<void, Error>
     Merge(const std::vector<MergeUnit>& merge_units) override {
         SAFE_CALL(this->inner_index_->Merge(merge_units));

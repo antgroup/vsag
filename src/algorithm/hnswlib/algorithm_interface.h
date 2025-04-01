@@ -77,6 +77,9 @@ public:
     virtual tl::expected<vsag::DatasetPtr, vsag::Error>
     getBatchDistanceByLabel(const int64_t* ids, const void* data_point, int64_t count) = 0;
 
+    virtual std::pair<int64_t, int64_t>
+    getMinAndMaxId() = 0;
+
     virtual const float*
     getDataByLabel(LabelType label) const = 0;
 

@@ -116,6 +116,9 @@ public:
     DatasetPtr
     CalDistanceById(const float* query, const int64_t* ids, int64_t count) const override;
 
+    std::pair<int64_t, int64_t>
+    GetMinAndMaxId() const override;
+
     void
     GetExtraInfoByIds(const int64_t* ids, int64_t count, char* extra_infos) const override;
 

@@ -176,6 +176,11 @@ public:
         SAFE_CALL(return alg_hnsw_->getBatchDistanceByLabel(ids, vector, count));
     };
 
+    virtual tl::expected<std::pair<int64_t, int64_t>, Error>
+    GetMinAndMaxId() const override {
+        SAFE_CALL(return alg_hnsw_->getMinAndMaxId());
+    };
+
     [[nodiscard]] bool
     CheckFeature(IndexFeature feature) const override;
 
