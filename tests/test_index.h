@@ -132,6 +132,9 @@ protected:
                               float error = 1e-5);
 
     static void
+    TestGetMinAndMaxId(const IndexPtr& index, const TestDatasetPtr& dataset);
+
+    static void
     TestSerializeFile(const IndexPtr& index_from,
                       const IndexPtr& index_to,
                       const TestDatasetPtr& dataset,

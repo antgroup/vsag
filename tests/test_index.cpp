@@ -585,6 +585,30 @@ TestIndex::TestBatchCalcDistanceById(const IndexPtr& index,
 }
 
 void
+TestIndex::TestGetMinAndMaxId(const IndexPtr& index, const TestDatasetPtr& dataset) {
+    auto base_count = dataset->base_->GetNumElements();
+    auto dim = dataset->base_->GetDim();
+    auto get_min_max_res = index->GetMinAndMaxId();
+    REQUIRE(get_min_max_res.has_value() == (index->GetNumElements() > 0));
+    auto build_index = index->Build(dataset->base_);
+    int64_t res_max_id = INT64_MIN;
+    int64_t res_min_id = INT64_MAX;
+    for (uint64_t j = 0; j < base_count; ++j) {
+        res_max_id =
+            res_max_id > dataset->base_->GetIds()[j] ? res_max_id : dataset->base_->GetIds()[j];
+        res_min_id =
+            res_min_id < dataset->base_->GetIds()[j] ? res_min_id : dataset->base_->GetIds()[j];
+    }
+    get_min_max_res = index->GetMinAndMaxId();
+    REQUIRE(get_min_max_res.has_value() == true);
+    int64_t min_id = get_min_max_res.value().first;
+    int64_t max_id = get_min_max_res.value().second;
+
+    REQUIRE(min_id == res_min_id);
+    REQUIRE(max_id == res_max_id);
+}
+
+void
 TestIndex::TestSerializeFile(const IndexPtr& index_from,
                              const IndexPtr& index_to,
                              const TestDatasetPtr& dataset,

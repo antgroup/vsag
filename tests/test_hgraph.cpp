@@ -158,6 +158,7 @@ HgraphTestIndex::TestGeneral(const TestIndex::IndexPtr& index,
                              const TestDatasetPtr& dataset,
                              const std::string& search_param,
                              float recall) {
+    TestGetMinAndMaxId(index, dataset);
     TestKnnSearch(index, dataset, search_param, recall, true);
     TestKnnSearchIter(index, dataset, search_param, recall, true);
     TestConcurrentKnnSearch(index, dataset, search_param, recall, true);

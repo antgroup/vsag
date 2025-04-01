@@ -889,6 +889,50 @@ TEST_CASE("get distance by label", "[ut][hnsw]") {
     }
 }
 
+TEST_CASE("get min and max id", "[ut][hnsw]") {
+    Options::Instance().logger()->SetLevel(Logger::Level::kDEBUG);
+
+    // parameters
+    int dim = 128;
+    int64_t num_base = 1;
+
+    // data
+    auto [base_ids, base_vectors] = fixtures::generate_ids_and_vectors(num_base, dim);
+
+    // hnsw index
+    hnswlib::L2Space space(dim);
+
+    SECTION("hnsw test") {
+        DefaultAllocator allocator;
+        auto* alg_hnsw = new hnswlib::HierarchicalNSW(&space, 100, &allocator);
+        alg_hnsw->init_memory_space();
+        alg_hnsw->addPoint(base_vectors.data(), 0);
+        alg_hnsw->addPoint(base_vectors.data(), 5);
+        auto get_min_max_res = alg_hnsw->getMinAndMaxId();
+        int64_t min_id = get_min_max_res.first;
+        int64_t max_id = get_min_max_res.second;
+
+        REQUIRE(min_id == 0);
+        REQUIRE(max_id == 5);
+        delete alg_hnsw;
+    }
+
+    SECTION("static hnsw test") {
+        DefaultAllocator allocator;
+        auto* alg_hnsw_static = new hnswlib::StaticHierarchicalNSW(&space, 100, &allocator);
+        alg_hnsw_static->init_memory_space();
+        alg_hnsw_static->addPoint(base_vectors.data(), 0);
+        alg_hnsw_static->addPoint(base_vectors.data(), 5);
+        auto get_min_max_res = alg_hnsw_static->getMinAndMaxId();
+        int64_t min_id = get_min_max_res.first;
+        int64_t max_id = get_min_max_res.second;
+
+        REQUIRE(min_id == 0);
+        REQUIRE(max_id == 5);
+        delete alg_hnsw_static;
+    }
+}
+
 TEST_CASE("get data by label", "[ut][hnsw]") {
     Options::Instance().logger()->SetLevel(Logger::Level::kDEBUG);
 

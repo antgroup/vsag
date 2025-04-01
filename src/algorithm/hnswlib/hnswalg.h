@@ -153,7 +153,8 @@ public:
 
     tl::expected<vsag::DatasetPtr, vsag::Error>
     getBatchDistanceByLabel(const int64_t* ids, const void* data_point, int64_t count) override;
-
+    std::pair<int64_t, int64_t>
+    getMinAndMaxId() override;
     bool
     isValidLabel(LabelType label) override;
 

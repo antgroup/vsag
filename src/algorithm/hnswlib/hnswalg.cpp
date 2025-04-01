@@ -208,6 +208,21 @@ HierarchicalNSW::getBatchDistanceByLabel(const int64_t* ids,
     return std::move(result);
 }
 
+std::pair<int64_t, int64_t>
+HierarchicalNSW::getMinAndMaxId() {
+    int64_t min_id = INT64_MAX;
+    int64_t max_id = INT64_MIN;
+    std::shared_lock lock_table(label_lookup_lock_);
+    if (label_lookup_.size() == 0) {
+        throw std::runtime_error("Label map size is zero");
+    }
+    for (auto& it : label_lookup_) {
+        max_id = it.first > max_id ? it.first : max_id;
+        min_id = it.first < min_id ? it.first : min_id;
+    }
+    return {min_id, max_id};
+}
+
 bool
 HierarchicalNSW::isValidLabel(LabelType label) {
     std::shared_lock lock_table(label_lookup_lock_);
