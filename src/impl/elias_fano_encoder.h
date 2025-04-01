@@ -22,7 +22,11 @@ namespace vsag {
 /// @note Our adjacency list size is mostly no more than 255, so we use uint8_t to store the number of elements
 class EliasFanoEncoder {
 public:
-    EliasFanoEncoder(Allocator* allocator) : high_bits_(allocator), low_bits_(allocator) {
+    EliasFanoEncoder(Allocator* allocator) : allocator_(allocator) {
+    }
+
+    ~EliasFanoEncoder() {
+        Clear();
     }
 
     // Encode ordered sequence
@@ -35,16 +39,19 @@ public:
 
     void
     Clear() {
-        high_bits_.clear();
-        low_bits_.clear();
+        if (bits_ != nullptr) {
+            allocator_->Deallocate(bits_);
+            bits_ = nullptr;
+        }
         num_elements_ = 0;
         low_bits_width_ = 0;
+        low_bits_size_ = 0;
+        high_bits_size_ = 0;
     }
 
     [[nodiscard]] size_t
     SizeInBytes() const {
-        return sizeof(EliasFanoEncoder) + high_bits_.size() * sizeof(uint64_t) +
-               low_bits_.size() * sizeof(uint64_t);
+        return sizeof(EliasFanoEncoder) + (low_bits_size_ + high_bits_size_) * sizeof(uint64_t);
     }
 
     [[nodiscard]] uint8_t
@@ -59,10 +66,12 @@ private:
     [[nodiscard]] InnerIdType
     get_low_bits(size_t index) const;
 
-    Vector<uint64_t> high_bits_;  // Bitmap storage for high bits
-    Vector<uint64_t> low_bits_;   // Compressed storage for low bits
-    uint8_t num_elements_{0};     // Number of elements, max 255
-    uint8_t low_bits_width_{0};   // Width of low bits
+    Allocator* allocator_;
+    uint64_t* bits_{nullptr};    // Combined storage for low bits and high bits
+    uint8_t num_elements_{0};    // Number of elements, max 255
+    uint8_t low_bits_width_{0};  // Width of low bits
+    uint8_t low_bits_size_{0};   // Size of low_bits_ array
+    uint8_t high_bits_size_{0};  // Size of high_bits_ array
 };
 
 }  // namespace vsag

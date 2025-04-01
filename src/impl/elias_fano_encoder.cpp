@@ -39,8 +39,8 @@ ctzll(uint64_t x) {
 }
 
 static inline void
-set_high_bit(Vector<uint64_t>& vec, size_t pos) {
-    vec[pos >> 6] |= (1ULL << (pos & 63));
+set_high_bit(uint64_t* vec, size_t pos, size_t low_bits_size) {
+    vec[low_bits_size + (pos >> 6)] |= (1ULL << (pos & 63));
 }
 
 void
@@ -53,14 +53,14 @@ EliasFanoEncoder::set_low_bits(size_t index, InnerIdType value) {
     size_t word_pos = bit_pos >> 6;
     size_t shift = bit_pos & 63;
     uint64_t mask = ((1ULL << low_bits_width_) - 1) << shift;
-    low_bits_[word_pos] = (low_bits_[word_pos] & ~mask) | ((uint64_t)value << shift);
+    bits_[word_pos] = (bits_[word_pos] & ~mask) | ((uint64_t)value << shift);
 
     // Handle word boundary crossing
-    if (shift + low_bits_width_ > 64 && word_pos + 1 < low_bits_.size()) {
+    if (shift + low_bits_width_ > 64 && word_pos + 1 < low_bits_size_) {
         size_t remaining_bits = shift + low_bits_width_ - 64;
         mask = (1ULL << remaining_bits) - 1;
-        low_bits_[word_pos + 1] =
-            (low_bits_[word_pos + 1] & ~mask) | (value >> (low_bits_width_ - remaining_bits));
+        bits_[word_pos + 1] =
+            (bits_[word_pos + 1] & ~mask) | (value >> (low_bits_width_ - remaining_bits));
     }
 }
 
@@ -73,12 +73,12 @@ EliasFanoEncoder::get_low_bits(size_t index) const {
     size_t bit_pos = index * low_bits_width_;
     size_t word_pos = bit_pos >> 6;
     size_t shift = bit_pos & 63;
-    InnerIdType value = (low_bits_[word_pos] >> shift) & ((1ULL << low_bits_width_) - 1);
+    InnerIdType value = (bits_[word_pos] >> shift) & ((1ULL << low_bits_width_) - 1);
 
     // Handle word boundary crossing
-    if (shift + low_bits_width_ > 64 && word_pos + 1 < low_bits_.size()) {
+    if (shift + low_bits_width_ > 64 && word_pos + 1 < low_bits_size_) {
         size_t remaining_bits = shift + low_bits_width_ - 64;
-        value |= (low_bits_[word_pos + 1] & ((1ULL << remaining_bits) - 1))
+        value |= (bits_[word_pos + 1] & ((1ULL << remaining_bits) - 1))
                  << (low_bits_width_ - remaining_bits);
     }
     return value;
@@ -106,11 +106,16 @@ EliasFanoEncoder::Encode(const Vector<InnerIdType>& values, InnerIdType max_valu
 
     // Allocate space for high bits
     const size_t high_bits_count = (max_value >> low_bits_width_) + num_elements_ + 1;
-    high_bits_.resize((high_bits_count + 63) / 64, 0);
+    high_bits_size_ = (high_bits_count + 63) / 64;
 
     // Allocate space for low bits
     size_t total_low_bits = static_cast<size_t>(num_elements_) * low_bits_width_;
-    low_bits_.resize(std::max<size_t>(1, (total_low_bits + 63) / 64), 0);
+    low_bits_size_ = std::max<size_t>(1, (total_low_bits + 63) / 64);
+
+    // Allocate combined space for both low and high bits
+    bits_ = static_cast<uint64_t*>(
+        allocator_->Allocate((low_bits_size_ + high_bits_size_) * sizeof(uint64_t)));
+    std::fill(bits_, bits_ + low_bits_size_ + high_bits_size_, 0);
 
     // Encode each value
     for (size_t i = 0; i < num_elements_; ++i) {
@@ -118,7 +123,7 @@ EliasFanoEncoder::Encode(const Vector<InnerIdType>& values, InnerIdType max_valu
         InnerIdType high = x >> low_bits_width_;
         InnerIdType low = x & ((1U << low_bits_width_) - 1);
 
-        set_high_bit(high_bits_, i + high);
+        set_high_bit(bits_, i + high, low_bits_size_);
         set_low_bits(i, low);
     }
 }
@@ -131,8 +136,8 @@ EliasFanoEncoder::DecompressAll(Allocator* allocator) const {
     // Decompress all values at once
     size_t count = 0;
 
-    for (size_t i = 0; i < high_bits_.size() && count < num_elements_; ++i) {
-        uint64_t word = high_bits_[i];
+    for (size_t i = 0; i < high_bits_size_ && count < num_elements_; ++i) {
+        uint64_t word = bits_[low_bits_size_ + i];
 
         // Use ctzll to find position of 1
         while (word != 0U && count < num_elements_) {
