@@ -63,14 +63,23 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
     this->bottom_graph_ =
         GraphInterface::MakeInstance(hgraph_param->bottom_graph_param, common_param);
     mult_ = 1 / log(1.0 * static_cast<double>(this->bottom_graph_->MaximumDegree()));
+
+    if (extra_info_size_ > 0) {
+        this->extra_infos_ =
+            ExtraInfoInterface::MakeInstance(hgraph_param->extra_info_param, common_param);
+    }
+
     resize(bottom_graph_->max_capacity_);
     if (this->build_thread_count_ > 1) {
         this->build_pool_ = SafeThreadPool::FactoryDefaultThreadPool();
     }
     this->init_features();
-    if (extra_info_size_ > 0) {
-        this->extra_infos_ =
-            ExtraInfoInterface::MakeInstance(hgraph_param->extra_info_param, common_param);
+}
+void
+HGraph::Train(const DatasetPtr& base) {
+    this->basic_flatten_codes_->Train(base->GetFloat32Vectors(), base->GetNumElements());
+    if (use_reorder_) {
+        this->high_precise_codes_->Train(base->GetFloat32Vectors(), base->GetNumElements());
     }
 }
 
@@ -80,6 +89,8 @@ HGraph::Build(const DatasetPtr& data) {
     if (use_reorder_) {
         this->high_precise_codes_->EnableForceInMemory();
     }
+    this->Train(data);
+    this->resize(max_capacity_ + 1);
     auto ret = this->Add(data);
     this->basic_flatten_codes_->DisableForceInMemory();
     if (use_reorder_) {
@@ -96,24 +107,69 @@ HGraph::Add(const DatasetPtr& data) {
     CHECK_ARGUMENT(base_dim == dim_,
                    fmt::format("base.dim({}) must be equal to index.dim({})", base_dim, dim_));
     CHECK_ARGUMENT(data->GetFloat32Vectors() != nullptr, "base.float_vector is nullptr");
-    auto split_datasets = this->split_dataset_by_duplicate_label(data, failed_ids);
 
-    for (auto& data_ptr : split_datasets) {
-        this->basic_flatten_codes_->Train(data_ptr->GetFloat32Vectors(),
-                                          data_ptr->GetNumElements());
-        this->basic_flatten_codes_->BatchInsertVector(data_ptr->GetFloat32Vectors(),
-                                                      data_ptr->GetNumElements());
-        if (use_reorder_) {
-            this->high_precise_codes_->Train(data_ptr->GetFloat32Vectors(),
-                                             data_ptr->GetNumElements());
-            this->high_precise_codes_->BatchInsertVector(data_ptr->GetFloat32Vectors(),
-                                                         data_ptr->GetNumElements());
+    {
+        std::lock_guard lock(this->add_mutex_);
+        if (this->total_count_ == 0) {
+            this->Train(data);
         }
-        this->hnsw_add(data_ptr);
-        const auto* data_extra_info = data->GetExtraInfos();
-        if (this->extra_info_size_ > 0 && data_extra_info != nullptr) {
-            this->extra_infos_->BatchInsertExtraInfo(data_ptr->GetExtraInfos(),
-                                                     data_ptr->GetNumElements());
+    }
+
+    auto add_func =
+        [&](const float* data, int level, InnerIdType inner_id, const char* extra_info) -> void {
+        if (this->extra_infos_ != nullptr) {
+            this->extra_infos_->InsertExtraInfo(extra_info, inner_id);
+        }
+        this->add_one_point(data, level, inner_id);
+    };
+
+    std::vector<std::future<void>> futures;
+    auto total = data->GetNumElements();
+    const auto* labels = data->GetIds();
+    const auto* vectors = data->GetFloat32Vectors();
+    const auto* extra_infos = data->GetExtraInfos();
+    Vector<std::pair<InnerIdType, LabelType>> inner_ids(allocator_);
+    for (int64_t j = 0; j < total; ++j) {
+        auto label = labels[j];
+        InnerIdType inner_id;
+        {
+            std::lock_guard label_lock(this->label_lookup_mutex_);
+            if (this->label_table_->CheckLabel(label)) {
+                failed_ids.emplace_back(label);
+                continue;
+            }
+            {
+                std::lock_guard lock(this->add_mutex_);
+                inner_id = this->get_unique_inner_ids(1).at(0);
+            }
+            this->label_table_->Insert(inner_id, label);
+            inner_ids.emplace_back(inner_id, j);
+        }
+    }
+    uint64_t new_count;
+    {
+        std::shared_lock lock(this->add_mutex_);
+        new_count = total_count_;
+    }
+    this->resize(new_count);
+    for (auto& [inner_id, local_idx] : inner_ids) {
+        int level;
+        {
+            std::lock_guard label_lock(this->label_lookup_mutex_);
+            level = this->get_random_level() - 1;
+        }
+        const auto* extra_info = extra_infos + local_idx * extra_info_size_;
+        if (this->build_pool_ != nullptr) {
+            auto future = this->build_pool_->GeneralEnqueue(
+                add_func, vectors + local_idx * dim_, level, inner_id, extra_info);
+            futures.emplace_back(std::move(future));
+        } else {
+            add_func(vectors + local_idx * dim_, level, inner_id, extra_info);
+        }
+    }
+    if (this->build_pool_ != nullptr) {
+        for (auto& future : futures) {
+            future.get();
         }
     }
     return failed_ids;
@@ -333,57 +389,6 @@ HGraph::EstimateMemory(uint64_t num_elements) const {
     return estimate_memory;
 }
 
-void
-HGraph::hnsw_add(const DatasetPtr& data) {
-    uint64_t total = data->GetNumElements();
-    const auto* ids = data->GetIds();
-    const auto* datas = data->GetFloat32Vectors();
-    auto cur_count = this->bottom_graph_->TotalCount();
-    this->resize(total + cur_count);
-
-    std::mutex add_mutex;
-
-    auto build_func = [&](InnerIdType begin, InnerIdType end) -> void {
-        for (InnerIdType i = begin; i < end; ++i) {
-            int level = this->get_random_level() - 1;
-            auto label = ids[i];
-            auto inner_id = i + cur_count;
-            {
-                std::lock_guard<std::shared_mutex> lock(this->label_lookup_mutex_);
-                this->label_table_->Insert(inner_id, label);
-            }
-
-            std::unique_lock<std::mutex> add_lock(add_mutex);
-            if (level >= int64_t(this->max_level_) || bottom_graph_->TotalCount() == 0) {
-                std::lock_guard<std::shared_mutex> wlock(this->global_mutex_);
-                // level maybe a negative number(-1)
-                for (auto j = static_cast<int64_t>(max_level_); j <= level; ++j) {
-                    this->route_graphs_.emplace_back(this->generate_one_route_graph());
-                }
-                max_level_ = level + 1;
-                this->add_one_point(datas + i * dim_, level, inner_id);
-                entry_point_id_ = inner_id;
-                add_lock.unlock();
-            } else {
-                add_lock.unlock();
-                std::shared_lock<std::shared_mutex> rlock(this->global_mutex_);
-                this->add_one_point(datas + i * dim_, level, inner_id);
-            }
-        }
-    };
-
-    if (this->build_pool_ != nullptr) {
-        auto task_size = (total + this->build_thread_count_ - 1) / this->build_thread_count_;
-        for (uint64_t j = 0; j < this->build_thread_count_; ++j) {
-            auto end = std::min(j * task_size + task_size, total);
-            this->build_pool_->GeneralEnqueue(build_func, j * task_size, end);
-        }
-        this->build_pool_->WaitUntilEmpty();
-    } else {
-        build_func(0, total);
-    }
-}
-
 GraphInterfacePtr
 HGraph::generate_one_route_graph() {
     return std::make_shared<SparseGraphDataCell>(this->allocator_,
@@ -546,10 +551,13 @@ HGraph::Deserialize(StreamReader& reader) {
         this->route_graphs_[i]->Deserialize(reader);
     }
     this->neighbors_mutex_->Resize(max_capacity_);
+
     pool_ = std::make_shared<VisitedListPool>(1, allocator_, max_capacity_, allocator_);
+
     if (this->extra_info_size_ > 0 && this->extra_infos_ != nullptr) {
         this->extra_infos_->Deserialize(reader);
     }
+    this->total_count_ = this->basic_flatten_codes_->TotalCount();
 }
 
 void
@@ -652,8 +660,31 @@ HGraph::GetExtraInfoByIds(const int64_t* ids, int64_t count, char* extra_infos) 
 
 void
 HGraph::add_one_point(const float* data, int level, InnerIdType inner_id) {
-    MaxHeap result(allocator_);
+    std::unique_lock add_lock(add_mutex_);
+    this->basic_flatten_codes_->InsertVector(data, inner_id);
+    if (use_reorder_) {
+        this->high_precise_codes_->InsertVector(data, inner_id);
+    }
+    if (level >= int64_t(this->max_level_) || bottom_graph_->TotalCount() == 0) {
+        std::lock_guard<std::shared_mutex> wlock(this->global_mutex_);
+        // level maybe a negative number(-1)
+        for (auto j = static_cast<int64_t>(max_level_); j <= level; ++j) {
+            this->route_graphs_.emplace_back(this->generate_one_route_graph());
+        }
+        max_level_ = level + 1;
+        this->graph_add_one(data, level, inner_id);
+        entry_point_id_ = inner_id;
+        add_lock.unlock();
+    } else {
+        add_lock.unlock();
+        std::shared_lock<std::shared_mutex> rlock(this->global_mutex_);
+        this->graph_add_one(data, level, inner_id);
+    }
+}
 
+void
+HGraph::graph_add_one(const float* data, int level, InnerIdType inner_id) {
+    MaxHeap result(allocator_);
     InnerSearchParam param{
         .topk = 1,
         .ep = this->entry_point_id_,
@@ -673,15 +704,7 @@ HGraph::add_one_point(const float* data, int level, InnerIdType inner_id) {
 
     param.ef = this->ef_construct_;
     param.topk = static_cast<int64_t>(ef_construct_);
-    for (auto j = level; j >= 0; --j) {
-        if (route_graphs_[j]->TotalCount() != 0) {
-            result = search_one_graph(data, route_graphs_[j], flatten_codes, param);
-            param.ep = mutually_connect_new_element(
-                inner_id, result, route_graphs_[j], flatten_codes, neighbors_mutex_, allocator_);
-        } else {
-            route_graphs_[j]->InsertNeighborsById(inner_id, Vector<InnerIdType>(allocator_));
-        }
-    }
+
     if (bottom_graph_->TotalCount() != 0) {
         result = search_one_graph(data, this->bottom_graph_, flatten_codes, param);
         mutually_connect_new_element(
@@ -689,13 +712,22 @@ HGraph::add_one_point(const float* data, int level, InnerIdType inner_id) {
     } else {
         bottom_graph_->InsertNeighborsById(inner_id, Vector<InnerIdType>(allocator_));
     }
+
+    for (int64_t j = 0; j <= level; ++j) {
+        if (route_graphs_[j]->TotalCount() != 0) {
+            result = search_one_graph(data, route_graphs_[j], flatten_codes, param);
+            mutually_connect_new_element(
+                inner_id, result, route_graphs_[j], flatten_codes, neighbors_mutex_, allocator_);
+        } else {
+            route_graphs_[j]->InsertNeighborsById(inner_id, Vector<InnerIdType>(allocator_));
+        }
+    }
 }
 
 void
 HGraph::resize(uint64_t new_size) {
+    std::lock_guard lock(this->global_mutex_);
     auto cur_size = this->max_capacity_;
-    logger::debug(
-        "hgraph resize from ", std::to_string(cur_size), " to " + std::to_string(new_size));
     uint64_t new_size_power_2 =
         next_multiple_of_power_of_two(new_size, this->resize_increase_count_bit_);
     if (cur_size < new_size_power_2) {
@@ -704,6 +736,13 @@ HGraph::resize(uint64_t new_size) {
         this->label_table_->label_table_.resize(new_size_power_2);
         bottom_graph_->Resize(new_size_power_2);
         this->max_capacity_ = new_size_power_2;
+        this->basic_flatten_codes_->Resize(new_size_power_2);
+        if (use_reorder_) {
+            this->high_precise_codes_->Resize(new_size_power_2);
+        }
+        if (this->extra_infos_ != nullptr) {
+            this->extra_infos_->Resize(new_size_power_2);
+        }
     }
 }
 void
@@ -723,6 +762,7 @@ HGraph::init_features() {
     });
     // concurrency
     this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_SEARCH_CONCURRENT);
+    this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_ADD_CONCURRENT);
     // serialize
     this->index_feature_list_->SetFeatures({
         IndexFeature::SUPPORT_DESERIALIZE_BINARY_SET,
@@ -773,52 +813,6 @@ HGraph::init_features() {
     if (this->extra_infos_ != nullptr) {
         this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_GET_EXTRA_INFO_BY_ID);
     }
-}
-
-Vector<DatasetPtr>
-HGraph::split_dataset_by_duplicate_label(const DatasetPtr& dataset,
-                                         std::vector<LabelType>& failed_ids) const {
-    Vector<DatasetPtr> return_datasets(0, this->allocator_);
-    auto count = dataset->GetNumElements();
-    auto dim = dataset->GetDim();
-    const auto* labels = dataset->GetIds();
-    const auto* vec = dataset->GetFloat32Vectors();
-    UnorderedSet<LabelType> temp_labels(allocator_);
-
-    for (uint64_t i = 0; i < count; ++i) {
-        if (this->label_table_->CheckLabel(labels[i]) or
-            temp_labels.find(labels[i]) != temp_labels.end()) {
-            failed_ids.emplace_back(i);
-            continue;
-        }
-        temp_labels.emplace(labels[i]);
-    }
-    failed_ids.emplace_back(count);
-
-    if (failed_ids.size() == 1) {
-        return_datasets.emplace_back(dataset);
-        return return_datasets;
-    }
-    int64_t start = -1;
-    for (auto end : failed_ids) {
-        if (end - start == 1) {
-            start = end;
-            continue;
-        }
-        auto new_dataset = Dataset::Make();
-        new_dataset->NumElements(end - start - 1)
-            ->Dim(dim)
-            ->Ids(labels + start + 1)
-            ->Float32Vectors(vec + dim * (start + 1))
-            ->Owner(false);
-        return_datasets.emplace_back(new_dataset);
-        start = end;
-    }
-    failed_ids.pop_back();
-    for (auto& failed_id : failed_ids) {
-        failed_id = labels[failed_id];
-    }
-    return return_datasets;
 }
 
 void

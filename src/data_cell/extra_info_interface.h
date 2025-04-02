@@ -48,6 +48,9 @@ public:
     virtual void
     Prefetch(InnerIdType id) = 0;
 
+    virtual void
+    Resize(InnerIdType capacity) = 0;
+
 public:
     virtual void
     SetMaxCapacity(InnerIdType capacity) {

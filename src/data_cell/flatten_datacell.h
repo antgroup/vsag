@@ -79,6 +79,9 @@ public:
         uint8_t end_flag =
             127;  // the value is meaningless, only to occupy the position for io allocate
         this->io_->Write(&end_flag, 1, io_size);
+        if (force_in_memory_) {
+            this->force_in_memory_io_->Write(&end_flag, 1, io_size);
+        }
     }
 
     void
@@ -232,17 +235,15 @@ FlattenDataCell<QuantTmpl, IOTmpl>::InsertVector(const float* vector, InnerIdTyp
     } else {
         total_count_ = std::max(total_count_, idx + 1);
     }
-
-    auto* codes = reinterpret_cast<uint8_t*>(allocator_->Allocate(code_size_));
-    quantizer_->EncodeOne(vector, codes);
+    ByteBuffer codes(static_cast<uint64_t>(code_size_), allocator_);
+    quantizer_->EncodeOne(vector, codes.data);
     if (this->force_in_memory_) {
         force_in_memory_io_->Write(
-            codes, code_size_, static_cast<uint64_t>(idx) * static_cast<uint64_t>(code_size_));
+            codes.data, code_size_, static_cast<uint64_t>(idx) * static_cast<uint64_t>(code_size_));
     } else {
         io_->Write(
-            codes, code_size_, static_cast<uint64_t>(idx) * static_cast<uint64_t>(code_size_));
+            codes.data, code_size_, static_cast<uint64_t>(idx) * static_cast<uint64_t>(code_size_));
     }
-    allocator_->Deallocate(codes);
 }
 
 template <typename QuantTmpl, typename IOTmpl>
