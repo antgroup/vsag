@@ -25,13 +25,6 @@
 #include "version.h"
 
 namespace vsag {
-std::function<void(diskann::LogLevel, const char*)>
-vsag_get_logger() {
-    return [](diskann::LogLevel, const char* msg) { vsag::logger::debug(msg); };
-}
-}  // namespace vsag
-
-namespace vsag {
 
 std::string
 version() {

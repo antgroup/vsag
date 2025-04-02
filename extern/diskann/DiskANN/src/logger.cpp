@@ -9,8 +9,19 @@
 
 namespace vsag
 {
-extern std::function<void(diskann::LogLevel, const char*)>
-vsag_get_logger();
+
+namespace logger{
+
+extern void
+debug(const std::string& msg);
+
+} // namespace logger
+
+std::function<void(diskann::LogLevel, const char*)>
+vsag_get_logger() {
+    return [](diskann::LogLevel, const char* msg) { logger::debug(msg); };
+}
+
 } // namespace vsag
 
 namespace diskann
