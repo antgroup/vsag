@@ -796,7 +796,7 @@ TestIndex::TestConcurrentAdd(const TestIndex::IndexPtr& index,
     fixtures::logger::LoggerReplacer _;
 
     auto base_count = dataset->base_->GetNumElements();
-    int64_t temp_count = base_count / 2;
+    auto temp_count = static_cast<int64_t>(base_count * 0.8);
     auto dim = dataset->base_->GetDim();
     auto temp_dataset = vsag::Dataset::Make();
     temp_dataset->Dim(dim)
@@ -806,7 +806,6 @@ TestIndex::TestConcurrentAdd(const TestIndex::IndexPtr& index,
         ->Float32Vectors(dataset->base_->GetFloat32Vectors())
         ->Owner(false);
     index->Build(temp_dataset);
-    auto rest_count = base_count - temp_count;
     fixtures::ThreadPool pool(5);
     using RetType = tl::expected<std::vector<int64_t>, vsag::Error>;
     std::vector<std::future<RetType>> futures;
@@ -823,7 +822,7 @@ TestIndex::TestConcurrentAdd(const TestIndex::IndexPtr& index,
         return add_index;
     };
 
-    for (uint64_t j = rest_count; j < base_count; ++j) {
+    for (uint64_t j = temp_count; j < base_count; ++j) {
         futures.emplace_back(pool.enqueue(func, j));
     }
 

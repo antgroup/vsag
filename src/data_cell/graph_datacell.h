@@ -121,7 +121,6 @@ GraphDataCell<IOTmpl>::InsertNeighborsById(InnerIdType id,
     InnerIdType current = total_count_.load();
     while (current < id + 1 && !total_count_.compare_exchange_weak(current, id + 1)) {
     }
-    max_capacity_ = std::max(total_count_.load(), max_capacity_);
     auto start = static_cast<uint64_t>(id) * static_cast<uint64_t>(this->code_line_size_);
     uint32_t neighbor_count = std::min((uint32_t)(neighbor_ids.size()), this->maximum_degree_);
     this->io_->Write((uint8_t*)(&neighbor_count), sizeof(neighbor_count), start);
