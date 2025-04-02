@@ -16,6 +16,7 @@
 #include "stream_reader.h"
 
 #include <fmt/format-inl.h>
+
 #include <iostream>
 
 #include "vsag/options.h"
