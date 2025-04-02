@@ -39,8 +39,8 @@ ctzll(uint64_t x) {
 }
 
 static inline void
-set_high_bit(uint64_t* vec, size_t pos, size_t low_bits_size) {
-    vec[low_bits_size + (pos >> 6)] |= (1ULL << (pos & 63));
+set_high_bit(uint64_t* bits_array, size_t pos, size_t low_bits_size) {
+    bits_array[low_bits_size + (pos >> 6)] |= (1ULL << (pos & 63));
 }
 
 void
@@ -104,11 +104,11 @@ EliasFanoEncoder::Encode(const Vector<InnerIdType>& values, InnerIdType max_valu
     low_bits_width_ =
         static_cast<uint32_t>(std::floor(std::log2(static_cast<double>(universe) / num_elements_)));
 
-    // Allocate space for high bits
+    // Calculate the size of high bits
     const size_t high_bits_count = (max_value >> low_bits_width_) + num_elements_ + 1;
     high_bits_size_ = (high_bits_count + 63) / 64;
 
-    // Allocate space for low bits
+    // Calculate the size of low bits
     size_t total_low_bits = static_cast<size_t>(num_elements_) * low_bits_width_;
     low_bits_size_ = std::max<size_t>(1, (total_low_bits + 63) / 64);
 
