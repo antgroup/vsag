@@ -1,4 +1,4 @@
-
+name: Clang Asan Build & Test Parallel
 
 on:
   push:
@@ -13,7 +13,7 @@ jobs:
     container:
       image: vsaglib/vsag:ci-x86
     concurrency:
-      group: asan_build_x86-${{ github.event.pull_request.number }}
+      group: asan_build_x86-${{ github.event.pull_request.number }}-clang
       cancel-in-progress: true
     steps:
       - uses: actions/checkout@v4
