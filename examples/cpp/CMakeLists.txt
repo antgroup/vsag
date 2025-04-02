@@ -2,7 +2,7 @@ add_executable(101_index_hnsw 101_index_hnsw.cpp)
 target_link_libraries(101_index_hnsw vsag)
 
 add_executable(102_index_diskann 102_index_diskann.cpp)
-target_link_libraries(102_index_diskann vsag)
+target_link_libraries(102_index_diskann vsag_static)
 
 add_executable (103_index_hgraph 103_index_hgraph.cpp)
 target_link_libraries (103_index_hgraph vsag)
