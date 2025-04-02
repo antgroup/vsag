@@ -1,0 +1,73 @@
+
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build_clang_asan_x86:
+    name: Clang Asan Build X86
+    runs-on: ubuntu-22.04
+    container:
+      image: vsaglib/vsag:ci-x86
+    concurrency:
+      group: asan_build_x86-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Load Cache
+        uses: actions/cache@v4
+        with:
+          path: ./build/
+          key: build-${{ hashFiles('./CMakeLists.txt') }}-${{ hashFiles('./.circleci/fresh_ci_cache.commit') }}-clang
+      - name: Build with Clang
+        run: |
+          export CC=$(which clang-15)
+          export CXX=$(which clang++-15)
+          make asan
+      - name: Save Test
+        uses: actions/upload-artifact@v4
+        with:
+          path: ./build
+          name: test_x86-${{ github.run_id }}_clang
+          compression-level: 1
+          retention-days: 1
+          overwrite: 'true'
+
+  test_clang_asan_x86:
+    name: Clang Asan Test X86
+    needs: build_clang_asan_x86
+    runs-on: ubuntu-22.04
+    concurrency:
+      group: test_asan_x86-${{ matrix.test_type }}-${{ github.event.pull_request.number }}-clang
+      cancel-in-progress: true
+    strategy:
+      matrix:
+        test_type: [ unittests, functests ]
+    container:
+      image: vsaglib/vsag:ci-x86
+    steps:
+      - uses: actions/checkout@v4
+      - name: Clean Env
+        run: rm -rf ./build
+      - name: Download Test
+        uses: actions/download-artifact@v4
+        with:
+          name: test_x86-${{ github.run_id }}_clang
+          path: ./build/
+      - name: Do Asan Test In ${{ matrix.test_type }}
+        run: |
+          echo leak:libomp.so > omp.supp
+          export LSAN_OPTIONS=suppressions=omp.supp
+          chmod +x ./build/tests/${{ matrix.test_type }}
+          ./scripts/test_parallel_by_name.sh ${{ matrix.test_type }}
+      - name: Upload Log
+        uses: actions/upload-artifact@v4
+        with:
+          path: ./log
+          name: log-x86-${{ matrix.test_type }}-${{ github.run_id }}-clang
+          compression-level: 1
+          retention-days: 1
+          overwrite: 'true'
