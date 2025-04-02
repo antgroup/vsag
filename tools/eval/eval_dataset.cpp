@@ -153,50 +153,6 @@ EvalDataset::Load(const std::string& filename) {
         }
     }
 
-    try {
-        H5::Attribute attr = file.openAttribute("distance");
-        H5::StrType str_type = attr.getStrType();
-        std::string metric;
-        attr.read(str_type, metric);
-        if (obj->vector_type_ == DENSE_VECTORS) {
-            if (metric == "euclidean") {
-                // the distance in the ground truth (provided by public datasets), is L2 distance,
-                // which cannot be compared with L2Sqr distance (from VSAG) directly
-                obj->distance_func_ =
-                    [](const void* query1, const void* query2, const void* qty_ptr) -> float {
-                    return sqrt(vsag::L2Sqr(query1, query2, qty_ptr));
-                };
-            } else if (metric == "ip") {
-                if (obj->train_data_type_ == vsag::DATATYPE_FLOAT32) {
-                    obj->distance_func_ = vsag::InnerProductDistance;
-                } else if (obj->train_data_type_ == vsag::DATATYPE_INT8) {
-                    obj->distance_func_ = vsag::INT8InnerProductDistance;
-                }
-            } else if (metric == "angular") {
-                obj->distance_func_ =
-                    [](const void* query1, const void* query2, const void* qty_ptr) -> float {
-                    return 1 - vsag::InnerProduct(query1, query2, qty_ptr) /
-                                   std::sqrt(vsag::InnerProduct(query1, query1, qty_ptr) *
-                                             vsag::InnerProduct(query2, query2, qty_ptr));
-                };
-            }
-        } else {
-            if (metric == "ip") {
-                obj->distance_func_ =
-                    [](const void* query1, const void* query2, const void* qty_ptr) -> float {
-                    return 1 - get_distance((const SparseVector*)query1,
-                                            (const SparseVector*)query2,
-                                            qty_ptr);
-                };
-            } else {
-                throw std::runtime_error("no support for sparse vectors with " + metric +
-                                         " distance");
-            }
-        }
-    } catch (H5::Exception& err) {
-        throw std::runtime_error("fail to read metric: there is no 'distance' in the dataset");
-    }
-
     if (obj->vector_type_ == DENSE_VECTORS) {
         // read from file
         {
@@ -270,6 +226,50 @@ EvalDataset::Load(const std::string& filename) {
             obj->test_.reset();
             obj->number_of_query_ = obj->sparse_test_.size();
         }
+    }
+
+    try {
+        H5::Attribute attr = file.openAttribute("distance");
+        H5::StrType str_type = attr.getStrType();
+        std::string metric;
+        attr.read(str_type, metric);
+        if (obj->vector_type_ == DENSE_VECTORS) {
+            if (metric == "euclidean") {
+                // the distance in the ground truth (provided by public datasets), is L2 distance,
+                // which cannot be compared with L2Sqr distance (from VSAG) directly
+                obj->distance_func_ =
+                    [](const void* query1, const void* query2, const void* qty_ptr) -> float {
+                    return sqrt(vsag::L2Sqr(query1, query2, qty_ptr));
+                };
+            } else if (metric == "ip") {
+                if (obj->train_data_type_ == vsag::DATATYPE_FLOAT32) {
+                    obj->distance_func_ = vsag::InnerProductDistance;
+                } else if (obj->train_data_type_ == vsag::DATATYPE_INT8) {
+                    obj->distance_func_ = vsag::INT8InnerProductDistance;
+                }
+            } else if (metric == "angular") {
+                obj->distance_func_ =
+                    [](const void* query1, const void* query2, const void* qty_ptr) -> float {
+                    return 1 - vsag::InnerProduct(query1, query2, qty_ptr) /
+                                   std::sqrt(vsag::InnerProduct(query1, query1, qty_ptr) *
+                                             vsag::InnerProduct(query2, query2, qty_ptr));
+                };
+            }
+        } else {
+            if (metric == "ip") {
+                obj->distance_func_ =
+                    [](const void* query1, const void* query2, const void* qty_ptr) -> float {
+                    return 1 - get_distance((const SparseVector*)query1,
+                                            (const SparseVector*)query2,
+                                            qty_ptr);
+                };
+            } else {
+                throw std::runtime_error("no support for sparse vectors with " + metric +
+                                         " distance");
+            }
+        }
+    } catch (H5::Exception& err) {
+        throw std::runtime_error("fail to read metric: there is no 'distance' in the dataset");
     }
 
     {
