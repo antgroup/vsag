@@ -61,6 +61,21 @@ public:
         }
     };
 
+    void
+    Resize(InnerIdType new_capacity) override {
+        if (new_capacity <= this->max_capacity_) {
+            return;
+        }
+        this->max_capacity_ = new_capacity;
+        uint64_t io_size = new_capacity * extra_info_size_;
+        uint8_t end_flag =
+            127;  // the value is meaningless, only to occupy the position for io allocate
+        this->io_->Write(&end_flag, 1, io_size);
+        if (force_in_memory_) {
+            this->force_in_memory_io_->Write(&end_flag, 1, io_size);
+        }
+    }
+
     [[nodiscard]] bool
     InMemory() const override;
 
