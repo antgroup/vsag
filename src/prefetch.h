@@ -21,11 +21,12 @@
 namespace vsag {
 template <int N>
 __inline void __attribute__((__always_inline__)) PrefetchImpl(const void* data) {
-    if constexpr (N > 32) {
-        return PrefetchImpl<32>(data);
+    if constexpr (N > 24) {
+        return PrefetchImpl<24>(data);
     }
-    Prefetch(data);
-    PrefetchImpl<N - 1>(static_cast<const char*>(data) + 64);
+    for (int i = 0; i < N; ++i) {
+        __builtin_prefetch(static_cast<const char*>(data) + i * 64, 0, 3);
+    }
 }
 
 void
