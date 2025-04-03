@@ -204,9 +204,6 @@ private:
 
     BasicSearcherPtr searcher_;
 
-    int64_t dim_{0};
-    MetricType metric_{MetricType::METRIC_TYPE_L2SQR};
-
     std::default_random_engine level_generator_{2021};
     double mult_{1.0};
 
