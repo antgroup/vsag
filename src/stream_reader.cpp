@@ -48,7 +48,7 @@ IOStreamReader::IOStreamReader(std::istream& istream) : istream_(istream) {
 void
 IOStreamReader::Read(char* data, uint64_t size) {
     this->istream_.read(data, static_cast<int64_t>(size));
-    if (not istream_.eof() && istream_.fail()) {
+    if (istream_.fail()) {
         auto remaining = std::streamsize(this->istream_.gcount());
         throw std::runtime_error(fmt::format(
             "Attempted to read: {} bytes. Remaining content size: {} bytes.", size, remaining));
