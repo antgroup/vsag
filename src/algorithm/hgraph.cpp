@@ -196,6 +196,7 @@ HGraph::KnnSearch(const DatasetPtr& query,
 
     InnerSearchParam search_param;
     search_param.ep = this->entry_point_id_;
+    search_param.topk = 1;
     search_param.ef = 1;
     search_param.is_inner_id_allowed = nullptr;
     for (auto i = static_cast<int64_t>(this->route_graphs_.size() - 1); i >= 0; --i) {
@@ -289,6 +290,7 @@ HGraph::KnnSearch(const DatasetPtr& query,
     } else {
         InnerSearchParam search_param;
         search_param.ep = this->entry_point_id_;
+        search_param.topk = 1;
         search_param.ef = 1;
         search_param.is_inner_id_allowed = nullptr;
         if (iter_filter_ctx->IsFirstUsed()) {
@@ -446,6 +448,7 @@ HGraph::RangeSearch(const DatasetPtr& query,
 
     InnerSearchParam search_param;
     search_param.ep = this->entry_point_id_;
+    search_param.topk = 1;
     search_param.ef = 1;
     for (auto i = static_cast<int64_t>(this->route_graphs_.size() - 1); i >= 0; --i) {
         auto result = this->search_one_graph(query->GetFloat32Vectors(),
