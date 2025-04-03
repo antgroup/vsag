@@ -255,6 +255,11 @@ HGraph::KnnSearch(const DatasetPtr& query,
                   const FilterPtr& filter,
                   IteratorContext*& iter_ctx,
                   bool is_last_filter) const {
+    if (GetNumElements() == 0) {
+        auto result = Dataset::Make();
+        result->Dim(0)->NumElements(1);
+        return result;
+    }
     std::shared_ptr<CommonInnerIdFilter> ft = nullptr;
     if (filter != nullptr) {
         ft = std::make_shared<CommonInnerIdFilter>(filter, *this->label_table_);
