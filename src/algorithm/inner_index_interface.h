@@ -111,6 +111,11 @@ public:
                 const std::string& parameters,
                 int64_t limited_size = -1) const {
         FilterPtr filter = nullptr;
+        if (GetNumElements() == 0) {
+            auto result = Dataset::Make();
+            result->Dim(0)->NumElements(1);
+            return result;
+        }
         return this->RangeSearch(query, radius, parameters, filter, limited_size);
     }
 
