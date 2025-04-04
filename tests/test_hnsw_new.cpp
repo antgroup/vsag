@@ -434,6 +434,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex, "HNSW Get Min Max ID", "[f
         auto param = GenerateHNSWBuildParametersString(metric_type, dim);
         auto index = TestFactory(name, param, true);
         auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
+        TestBuildIndex(index, dataset, true);
         TestGetMinAndMaxId(index, dataset);
         vsag::Options::Instance().set_block_size_limit(origin_size);
     }
