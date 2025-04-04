@@ -25,7 +25,7 @@ main() {
     vsag::Options::Instance().logger()->SetLevel(vsag::Logger::kINFO);
 
     /******************* Customize Thread Pool *****************/
-    auto pool = std::make_shared<vsag::SafeThreadPool>(new vsag::DefaultThreadPool(16), true);
+    auto pool = vsag::Engine::CreateThreadPool(16).value();
     auto allocator = vsag::Engine::CreateAllocator().value();
     vsag::Resource resource(allocator.get(), pool.get());
     vsag::Engine engine(&resource);
