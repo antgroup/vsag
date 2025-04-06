@@ -55,6 +55,7 @@ TEST_CASE("ODescent Build Test", "[ut][ODescent]") {
     size_t dim = 128;
     int64_t max_degree = 32;
     auto partial_data = GENERATE(true, false);
+    auto use_thread_pool = GENERATE(true, false);
 
     auto [ids, vectors] = fixtures::generate_ids_and_vectors(num_vectors, dim);
     // prepare common param
@@ -63,8 +64,10 @@ TEST_CASE("ODescent Build Test", "[ut][ODescent]") {
     param.metric_ = vsag::MetricType::METRIC_TYPE_L2SQR;
     param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
     param.allocator_ = vsag::SafeAllocator::FactoryDefaultAllocator();
-    param.thread_pool_ =
-        std::dynamic_pointer_cast<vsag::SafeThreadPool>(vsag::Engine::CreateThreadPool(4).value());
+    if (use_thread_pool) {
+        param.thread_pool_ =
+            std::dynamic_pointer_cast<vsag::SafeThreadPool>(vsag::Engine::CreateThreadPool(4).value());
+    }
 
     // prepare data param
     vsag::FlattenDataCellParamPtr flatten_param =
