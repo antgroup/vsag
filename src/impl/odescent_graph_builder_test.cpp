@@ -65,8 +65,8 @@ TEST_CASE("ODescent Build Test", "[ut][ODescent]") {
     param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
     param.allocator_ = vsag::SafeAllocator::FactoryDefaultAllocator();
     if (use_thread_pool) {
-        param.thread_pool_ =
-            std::dynamic_pointer_cast<vsag::SafeThreadPool>(vsag::Engine::CreateThreadPool(4).value());
+        param.thread_pool_ = std::dynamic_pointer_cast<vsag::SafeThreadPool>(
+            vsag::Engine::CreateThreadPool(4).value());
     }
 
     // prepare data param
