@@ -63,7 +63,8 @@ TEST_CASE("ODescent Build Test", "[ut][ODescent]") {
     param.metric_ = vsag::MetricType::METRIC_TYPE_L2SQR;
     param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
     param.allocator_ = vsag::SafeAllocator::FactoryDefaultAllocator();
-    param.thread_pool_ = vsag::SafeThreadPool::FactoryDefaultThreadPool();
+    param.thread_pool_ =
+        std::dynamic_pointer_cast<vsag::SafeThreadPool>(vsag::Engine::CreateThreadPool(4).value());
 
     // prepare data param
     vsag::FlattenDataCellParamPtr flatten_param =
