@@ -67,6 +67,8 @@ TEST_CASE("ODescent Build Test", "[ut][ODescent]") {
     if (use_thread_pool) {
         param.thread_pool_ = std::dynamic_pointer_cast<vsag::SafeThreadPool>(
             vsag::Engine::CreateThreadPool(4).value());
+    } else {
+        param.thread_pool_ = nullptr;
     }
 
     // prepare data param
