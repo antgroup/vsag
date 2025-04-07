@@ -32,10 +32,10 @@ BasicSearcher::visit(const GraphInterfacePtr& graph,
                      const FilterPtr& filter,
                      float skip_ratio,
                      Vector<InnerIdType>& to_be_visited_rid,
-                     Vector<InnerIdType>& to_be_visited_id) const {
+                     Vector<InnerIdType>& to_be_visited_id,
+                     Vector<InnerIdType>& neighbors) const {
     LinearCongruentialGenerator generator;
     uint32_t count_no_visited = 0;
-    Vector<InnerIdType> neighbors(allocator_);
 
     if (this->mutex_array_ != nullptr) {
         SharedLock lock(this->mutex_array_, current_node_pair.second);
@@ -122,6 +122,7 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
     uint32_t count_no_visited = 0;
     Vector<InnerIdType> to_be_visited_rid(graph->MaximumDegree(), allocator_);
     Vector<InnerIdType> to_be_visited_id(graph->MaximumDegree(), allocator_);
+    Vector<InnerIdType> neighbors(graph->MaximumDegree(), allocator_);
     Vector<float> line_dists(graph->MaximumDegree(), allocator_);
 
     if (!iter_ctx->IsFirstUsed()) {
@@ -176,7 +177,8 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                                  inner_search_param.is_inner_id_allowed,
                                  inner_search_param.skip_ratio,
                                  to_be_visited_rid,
-                                 to_be_visited_id);
+                                 to_be_visited_id,
+                                 neighbors);
 
         dist_cmp += count_no_visited;
 
@@ -253,6 +255,7 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
     uint32_t count_no_visited = 0;
     Vector<InnerIdType> to_be_visited_rid(graph->MaximumDegree(), allocator_);
     Vector<InnerIdType> to_be_visited_id(graph->MaximumDegree(), allocator_);
+    Vector<InnerIdType> neighbors(graph->MaximumDegree(), allocator_);
     Vector<float> line_dists(graph->MaximumDegree(), allocator_);
 
     flatten->Query(&dist, computer, &ep, 1);
@@ -289,7 +292,8 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                                  inner_search_param.is_inner_id_allowed,
                                  inner_search_param.skip_ratio,
                                  to_be_visited_rid,
-                                 to_be_visited_id);
+                                 to_be_visited_id,
+                                 neighbors);
 
         dist_cmp += count_no_visited;
 
