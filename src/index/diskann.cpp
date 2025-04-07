@@ -75,10 +75,7 @@ from_binary(const Binary& binary) {
 
 class LocalMemoryReader : public Reader {
 public:
-    LocalMemoryReader(std::stringstream& file, bool support_async_io) {
-        if (support_async_io) {
-            pool_ = SafeThreadPool::FactoryDefaultThreadPool();
-        }
+    LocalMemoryReader(std::stringstream& file) {
         file_ << file.rdbuf();
         file_.seekg(0, std::ios::end);
         size_ = file_.tellg();
@@ -154,7 +151,6 @@ DiskANN::DiskANN(DiskannParameters& diskann_params, const IndexCommonParam& inde
       use_reference_(diskann_params.use_reference),
       use_opq_(diskann_params.use_opq),
       use_bsa_(diskann_params.use_bsa),
-      use_async_io_(diskann_params.use_async_io),
       diskann_params_(diskann_params),
       common_param_(index_common_param) {
     status_ = IndexStatus::EMPTY;
@@ -283,8 +279,7 @@ DiskANN::build(const DatasetPtr& base) {
                        std::back_inserter(failed_ids),
                        [&ids](const auto& index) { return ids[index]; });
 
-        disk_layout_reader_ =
-            std::make_shared<LocalMemoryReader>(disk_layout_stream_, use_async_io_);
+        disk_layout_reader_ = std::make_shared<LocalMemoryReader>(disk_layout_stream_);
         reader_.reset(new LocalFileReader(batch_read_));
         index_.reset(new diskann::PQFlashIndex<float, int64_t>(
             reader_, metric_, sector_len_, dim_, use_bsa_));
@@ -384,7 +379,7 @@ DiskANN::knn_search(const DatasetPtr& query,
                     std::shared_lock lock(rw_mutex_);
                     Timer timer(time_cost);
                     if (preload_) {
-                        if (use_async_io_) {
+                        if (params.use_async_io) {
                             k = index_->cached_beam_search_async(
                                 query->GetFloat32Vectors() + i * dim_,
                                 k,
@@ -553,6 +548,7 @@ DiskANN::range_search(const DatasetPtr& query,
                                      reorder,
                                      filter,
                                      preload_,
+                                     params.use_async_io,
                                      &query_stats);
             }
             {
@@ -1008,7 +1004,7 @@ DiskANN::build_partial_graph(const DatasetPtr& base,
 
 tl::expected<void, Error>
 DiskANN::load_disk_index(const BinarySet& binary_set) {
-    disk_layout_reader_ = std::make_shared<LocalMemoryReader>(disk_layout_stream_, use_async_io_);
+    disk_layout_reader_ = std::make_shared<LocalMemoryReader>(disk_layout_stream_);
     reader_.reset(new LocalFileReader(batch_read_));
     index_.reset(
         new diskann::PQFlashIndex<float, int64_t>(reader_, metric_, sector_len_, dim_, use_bsa_));

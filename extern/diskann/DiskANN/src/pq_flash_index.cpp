@@ -2169,7 +2169,7 @@ int64_t PQFlashIndex<T, LabelT>::range_search(const T *query, const double range
                                               const uint64_t max_l_search, std::vector<uint64_t> &indices,
                                               std::vector<float> &distances, const uint64_t min_beam_width,
                                               uint32_t io_limit, const bool reorder,
-                                              std::function<bool(int64_t)> filter, bool memory,
+                                              std::function<bool(int64_t)> filter, bool memory, bool use_async_io,
                                               QueryStats *stats)
 {
     int64_t res_count = 0;
@@ -2184,7 +2184,12 @@ int64_t PQFlashIndex<T, LabelT>::range_search(const T *query, const double range
             x = std::numeric_limits<float>::max();
         int64_t result_size = 0;
         if (memory) {
-            result_size = this->cached_beam_search_memory(query, l_search, l_search, indices.data(), distances.data(), min_beam_width, filter, io_limit, reorder, stats, true);
+            if (use_async_io) {
+                result_size = this->cached_beam_search_async(query, l_search, l_search, indices.data(), distances.data(),
+                                                            min_beam_width, filter, io_limit, reorder, stats);
+            } else {
+                result_size = this->cached_beam_search_memory(query, l_search, l_search, indices.data(), distances.data(), min_beam_width, filter, io_limit, reorder, stats, true);
+            }
         } else {
             result_size = this->cached_beam_search(query, l_search, l_search, indices.data(), distances.data(), min_beam_width, filter, io_limit, false, stats);
         }

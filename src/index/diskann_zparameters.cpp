@@ -94,11 +94,6 @@ DiskannParameters::FromJson(
         obj.use_bsa = diskann_param_obj[DISKANN_PARAMETER_USE_BSA];
     }
 
-    // set obj.use_async_io
-    if (diskann_param_obj.contains(DISKANN_PARAMETER_USE_ASYNC_IO)) {
-        obj.use_async_io = diskann_param_obj[DISKANN_PARAMETER_USE_ASYNC_IO];
-    }
-
     // set obj.graph_type
     if (diskann_param_obj.contains(DISKANN_PARAMETER_GRAPH_TYPE)) {
         obj.graph_type = diskann_param_obj[DISKANN_PARAMETER_GRAPH_TYPE];
@@ -186,6 +181,11 @@ DiskannSearchParameters::FromJson(const std::string& json_string) {
     // set obj.use_reorder
     if (params[INDEX_DISKANN].contains(DISKANN_PARAMETER_REORDER)) {
         obj.use_reorder = params[INDEX_DISKANN][DISKANN_PARAMETER_REORDER];
+    }
+
+    // set obj.use_async_io
+    if (params[INDEX_DISKANN].contains(DISKANN_PARAMETER_USE_ASYNC_IO)) {
+        obj.use_async_io = params[INDEX_DISKANN][DISKANN_PARAMETER_USE_ASYNC_IO];
     }
 
     return obj;

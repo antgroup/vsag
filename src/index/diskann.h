@@ -248,7 +248,6 @@ private:
     bool use_reference_ = true;
     bool use_opq_ = false;
     bool use_bsa_ = false;
-    bool use_async_io_ = false;
     bool preload_;
     IndexStatus status_;
     bool empty_index_ = false;
