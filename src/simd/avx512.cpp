@@ -185,7 +185,7 @@ FP32ComputeL2Sqr(const float* query, const float* codes, uint64_t dim) {
     }
 
     float l2 = _mm512_reduce_add_ps(sum);
-    if (dim - i > 0) {
+    if (dim > i) {
         l2 += avx2::FP32ComputeL2Sqr(query + i, codes + i, dim - i);
     }
     return l2;
@@ -224,8 +224,10 @@ BF16ComputeIP(const uint8_t* query, const uint8_t* codes, uint64_t dim) {
         sum = _mm512_fmadd_ps(code_float, query_float, sum);
     }
     float ip = _mm512_reduce_add_ps(sum);
-
-    return ip + avx2::BF16ComputeIP(query + i * 2, codes + i * 2, dim - i);
+    if (dim > i) {
+        ip += avx2::BF16ComputeIP(query + i * 2, codes + i * 2, dim - i);
+    }
+    return ip;
 #else
     return avx2::BF16ComputeIP(query, codes, dim);
 #endif
@@ -254,8 +256,10 @@ BF16ComputeL2Sqr(const uint8_t* query, const uint8_t* codes, uint64_t dim) {
         sum = _mm512_fmadd_ps(diff, diff, sum);
     }
     float l2 = _mm512_reduce_add_ps(sum);
-
-    return l2 + avx2::BF16ComputeL2Sqr(query + i * 2, codes + i * 2, dim - i);
+    if (dim > i) {
+        l2 += avx2::BF16ComputeL2Sqr(query + i * 2, codes + i * 2, dim - i);
+    }
+    return l2;
 #else
     return avx2::BF16ComputeL2Sqr(query, codes, dim);
 #endif
@@ -283,8 +287,10 @@ FP16ComputeIP(const uint8_t* query, const uint8_t* codes, uint64_t dim) {
         sum = _mm512_fmadd_ps(code_float, query_float, sum);
     }
     float ip = _mm512_reduce_add_ps(sum);
-
-    return ip + avx2::FP16ComputeIP(query + i * 2, codes + i * 2, dim - i);
+    if (dim > i) {
+        ip += avx2::FP16ComputeIP(query + i * 2, codes + i * 2, dim - i);
+    }
+    return ip;
 #else
     return avx2::FP16ComputeIP(query, codes, dim);
 #endif
@@ -313,8 +319,10 @@ FP16ComputeL2Sqr(const uint8_t* query, const uint8_t* codes, uint64_t dim) {
         sum = _mm512_fmadd_ps(diff, diff, sum);
     }
     float l2 = _mm512_reduce_add_ps(sum);
-
-    return l2 + avx2::FP16ComputeL2Sqr(query + i * 2, codes + i * 2, dim - i);
+    if (dim > i) {
+        l2 += avx2::FP16ComputeL2Sqr(query + i * 2, codes + i * 2, dim - i);
+    }
+    return l2;
 #else
     return avx2::FP16ComputeL2Sqr(query, codes, dim);
 #endif
@@ -332,26 +340,24 @@ SQ8ComputeIP(const float* query,
     uint64_t i = 0;
 
     for (; i + 15 < dim; i += 16) {
-        // Load data into registers
         __m128i code_values = _mm_loadu_si128(reinterpret_cast<const __m128i*>(codes + i));
         __m512i codes_512 = _mm512_cvtepu8_epi32(code_values);
-        __m512 code_floats = _mm512_cvtepi32_ps(codes_512);
         __m512 query_values = _mm512_loadu_ps(query + i);
         __m512 diff_values = _mm512_loadu_ps(diff + i);
         __m512 lower_bound_values = _mm512_loadu_ps(lower_bound + i);
 
-        // Perform calculations
-        __m512 scaled_codes =
-            _mm512_mul_ps(_mm512_div_ps(code_floats, _mm512_set1_ps(255.0f)), diff_values);
-        __m512 adjusted_codes = _mm512_add_ps(scaled_codes, lower_bound_values);
-        __m512 val = _mm512_mul_ps(query_values, adjusted_codes);
-        sum = _mm512_add_ps(sum, val);
+        __m512 normalized =
+            _mm512_mul_ps(_mm512_cvtepi32_ps(codes_512), _mm512_set1_ps(1.0F / 255.0F));
+        __m512 adjusted = _mm512_fmadd_ps(normalized, diff_values, lower_bound_values);
+        sum = _mm512_fmadd_ps(query_values, adjusted, sum);
     }
-    // Horizontal addition
-    float finalResult = _mm512_reduce_add_ps(sum);
-    // Process the remaining elements recursively
-    finalResult += avx2::SQ8ComputeIP(query + i, codes + i, lower_bound + i, diff + i, dim - i);
-    return finalResult;
+
+    float ip = _mm512_reduce_add_ps(sum);
+
+    if (dim > i) {
+        ip += avx2::SQ8ComputeIP(query + i, codes + i, lower_bound + i, diff + i, dim - i);
+    }
+    return ip;
 #else
     return avx2::SQ8ComputeIP(query, codes, lower_bound, diff, dim);
 #endif
@@ -368,28 +374,24 @@ SQ8ComputeL2Sqr(const float* query,
     uint64_t i = 0;
 
     for (; i + 15 < dim; i += 16) {
-        // Load data into registers
         __m128i code_values = _mm_loadu_si128(reinterpret_cast<const __m128i*>(codes + i));
-        __m512 diff_values = _mm512_loadu_ps(diff + i);
-
         __m512i codes_512 = _mm512_cvtepu8_epi32(code_values);
-        __m512 code_floats = _mm512_div_ps(_mm512_cvtepi32_ps(codes_512), _mm512_set1_ps(255.0F));
-        __m512 lower_bound_values = _mm512_loadu_ps(lower_bound + i);
         __m512 query_values = _mm512_loadu_ps(query + i);
+        __m512 diff_values = _mm512_loadu_ps(diff + i);
+        __m512 lower_bound_values = _mm512_loadu_ps(lower_bound + i);
 
-        // Perform calculations
-        __m512 scaled_codes = _mm512_mul_ps(code_floats, diff_values);
-        scaled_codes = _mm512_add_ps(scaled_codes, lower_bound_values);
-        __m512 val = _mm512_sub_ps(query_values, scaled_codes);
-        val = _mm512_mul_ps(val, val);
-        sum = _mm512_add_ps(sum, val);
+        __m512 normalized =
+            _mm512_mul_ps(_mm512_cvtepi32_ps(codes_512), _mm512_set1_ps(1.0f / 255.0f));
+        __m512 adjusted = _mm512_fmadd_ps(normalized, diff_values, lower_bound_values);
+        __m512 dist = _mm512_sub_ps(query_values, adjusted);
+        sum = _mm512_fmadd_ps(dist, dist, sum);
     }
 
-    // Horizontal addition
-    float result = _mm512_reduce_add_ps(sum);
-    // Process the remaining elements
-    result += avx2::SQ8ComputeL2Sqr(query + i, codes + i, lower_bound + i, diff + i, dim - i);
-    return result;
+    float l2 = _mm512_reduce_add_ps(sum);
+    if (dim > i) {
+        l2 += avx2::SQ8ComputeL2Sqr(query + i, codes + i, lower_bound + i, diff + i, dim - i);
+    }
+    return l2;
 #else
     return avx2::SQ8ComputeL2Sqr(query, codes, lower_bound, diff, dim);
 #endif
@@ -406,26 +408,26 @@ SQ8ComputeCodesIP(const uint8_t* codes1,
     uint64_t i = 0;
 
     for (; i + 15 < dim; i += 16) {
-        // Load data into registers
         __m128i code1_values = _mm_loadu_si128(reinterpret_cast<const __m128i*>(codes1 + i));
         __m128i code2_values = _mm_loadu_si128(reinterpret_cast<const __m128i*>(codes2 + i));
-        __m512i codes1_512 = _mm512_cvtepu8_epi32(code1_values);
-        __m512i codes2_512 = _mm512_cvtepu8_epi32(code2_values);
-        __m512 code1_floats = _mm512_div_ps(_mm512_cvtepi32_ps(codes1_512), _mm512_set1_ps(255.0f));
-        __m512 code2_floats = _mm512_div_ps(_mm512_cvtepi32_ps(codes2_512), _mm512_set1_ps(255.0f));
         __m512 diff_values = _mm512_loadu_ps(diff + i);
         __m512 lower_bound_values = _mm512_loadu_ps(lower_bound + i);
 
-        // Perform calculations
+        __m512 code1_floats = _mm512_mul_ps(_mm512_cvtepi32_ps(_mm512_cvtepu8_epi32(code1_values)),
+                                            _mm512_set1_ps(1.0f / 255.0f));
+        __m512 code2_floats = _mm512_mul_ps(_mm512_cvtepi32_ps(_mm512_cvtepu8_epi32(code2_values)),
+                                            _mm512_set1_ps(1.0f / 255.0f));
+
         __m512 scaled_codes1 = _mm512_fmadd_ps(code1_floats, diff_values, lower_bound_values);
         __m512 scaled_codes2 = _mm512_fmadd_ps(code2_floats, diff_values, lower_bound_values);
-        __m512 val = _mm512_mul_ps(scaled_codes1, scaled_codes2);
-        sum = _mm512_add_ps(sum, val);
+        sum = _mm512_fmadd_ps(scaled_codes1, scaled_codes2, sum);
     }
-    // Horizontal addition
     float result = _mm512_reduce_add_ps(sum);
-    // Process the remaining elements
-    result += avx2::SQ8ComputeCodesIP(codes1 + i, codes2 + i, lower_bound + i, diff + i, dim - i);
+
+    if (dim > i) {
+        result +=
+            avx2::SQ8ComputeCodesIP(codes1 + i, codes2 + i, lower_bound + i, diff + i, dim - i);
+    }
     return result;
 #else
     return avx2::SQ8ComputeCodesIP(codes1, codes2, lower_bound, diff, dim);
@@ -455,11 +457,12 @@ SQ8ComputeCodesL2Sqr(const uint8_t* codes1,
         sum = _mm512_fmadd_ps(val, val, sum);
     }
 
-    // Horizontal addition
     float result = _mm512_reduce_add_ps(sum);
-    // Process the remaining elements
-    result +=
-        avx2::SQ8ComputeCodesL2Sqr(codes1 + i, codes2 + i, lower_bound + i, diff + i, dim - i);
+
+    if (dim > i) {
+        result +=
+            avx2::SQ8ComputeCodesL2Sqr(codes1 + i, codes2 + i, lower_bound + i, diff + i, dim - i);
+    }
     return result;
 #else
     return avx2::SQ8ComputeCodesL2Sqr(codes1, codes2, lower_bound, diff, dim);
@@ -508,7 +511,6 @@ SQ4UniformComputeCodesIP(const uint8_t* codes1, const uint8_t* codes2, uint64_t 
     if (dim == 0) {
         return 0;
     }
-    alignas(512) int16_t temp[32];
     int32_t result = 0;
     uint64_t d = 0;
     __m512i sum = _mm512_setzero_si512();
@@ -524,11 +526,13 @@ SQ4UniformComputeCodesIP(const uint8_t* codes1, const uint8_t* codes2, uint64_t 
         sum = _mm512_add_epi16(sum, _mm512_maddubs_epi16(xx1, yy1));
         sum = _mm512_add_epi16(sum, _mm512_maddubs_epi16(xx2, yy2));
     }
-    _mm512_store_si512((__m512i*)temp, sum);
-    for (int i = 0; i < 32; ++i) {
-        result += temp[i];
+    auto sum1 = _mm512_cvtepi16_epi32(_mm512_castsi512_si256(sum));
+    auto sum2 = _mm512_cvtepi16_epi32(_mm512_extracti32x8_epi32(sum, 1));
+    result += _mm512_reduce_add_epi32(sum1);
+    result += _mm512_reduce_add_epi32(sum2);
+    if (d < dim) {
+        result += avx2::SQ4UniformComputeCodesIP(codes1 + (d >> 1), codes2 + (d >> 1), dim - d);
     }
-    result += avx2::SQ4UniformComputeCodesIP(codes1 + (d >> 1), codes2 + (d >> 1), dim - d);
     return result;
 #else
     return avx2::SQ4UniformComputeCodesIP(codes1, codes2, dim);
@@ -558,7 +562,9 @@ SQ8UniformComputeCodesIP(const uint8_t* codes1, const uint8_t* codes2, uint64_t 
         sum = _mm512_add_epi32(sum, _mm512_madd_epi16(xx2, yy2));
     }
     int32_t result = _mm512_reduce_add_epi32(sum);
-    result += static_cast<int32_t>(avx2::SQ8UniformComputeCodesIP(codes1 + d, codes2 + d, dim - d));
+    if (d < dim) {
+        result += avx2::SQ8UniformComputeCodesIP(codes1 + d, codes2 + d, dim - d);
+    }
     return static_cast<float>(result);
 #else
     return avx2::SQ8UniformComputeCodesIP(codes1, codes2, dim);
@@ -593,7 +599,9 @@ RaBitQFloatBinaryIP(const float* vector, const uint8_t* bits, uint64_t dim, floa
 
     float result = _mm512_reduce_add_ps(sum);
 
-    result += avx2::RaBitQFloatBinaryIP(vector + d, bits + (d / 8), dim - d, inv_sqrt_d);
+    if (d < dim) {
+        result += avx2::RaBitQFloatBinaryIP(vector + d, bits + (d / 8), dim - d, inv_sqrt_d);
+    }
 
     return result;
 #else
@@ -617,7 +625,9 @@ DivScalar(const float* from, float* to, uint64_t dim, float scalar) {
         vec = _mm512_div_ps(vec, scalarVec);
         _mm512_storeu_ps(to + i, vec);
     }
-    avx2::DivScalar(from + i, to + i, dim - i, scalar);
+    if (dim > i) {
+        avx2::DivScalar(from + i, to + i, dim - i, scalar);
+    }
 #else
     avx2::DivScalar(from, to, dim, scalar);
 #endif
