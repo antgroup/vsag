@@ -72,7 +72,8 @@ private:
           const FilterPtr& filter,
           float skip_ratio,
           Vector<InnerIdType>& to_be_visited_rid,
-          Vector<InnerIdType>& to_be_visited_id) const;
+          Vector<InnerIdType>& to_be_visited_id,
+          Vector<InnerIdType>& neighbors) const;
 
     template <InnerSearchMode mode = KNN_SEARCH>
     MaxHeap
