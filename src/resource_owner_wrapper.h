@@ -21,7 +21,7 @@ namespace vsag {
 class ResourceOwnerWrapper : public Resource {
 public:
     explicit ResourceOwnerWrapper(Resource* resource, bool owned = false)
-        : resource_(resource), owned_(owned) {
+        : Resource(nullptr, nullptr), resource_(resource), owned_(owned) {
     }
 
     std::shared_ptr<Allocator>

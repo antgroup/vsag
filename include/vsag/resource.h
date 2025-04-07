@@ -44,6 +44,21 @@ public:
     explicit Resource(Allocator* allocator, ThreadPool* thread_pool);
 
     /**
+     * @brief Constructs a Resource with an allocator and a thread pool using shared pointers.
+     *
+     * This constructor initializes a `Resource` with the given allocator and thread pool via shared pointers.
+     * If no allocator is provided (i.e., `allocator` is a null shared pointer), a default allocator will be created
+     * and managed by the Resource. If no thread pool is provided (i.e., `thread_pool` is a null shared pointer),
+     * the Resource will not use a thread pool for its operations.
+     *
+     * @param allocator A shared pointer to an external `Allocator` object. If null, a default allocator is created
+     *                  and owned by the Resource.
+     * @param thread_pool A shared pointer to a `ThreadPool` object. If null, the Resource will not use a thread pool.
+     */
+    explicit Resource(const std::shared_ptr<Allocator>& allocator,
+                      const std::shared_ptr<ThreadPool>& thread_pool);
+
+    /**
      * @brief Constructs a Resource without specifying an allocator.
      *
      * Default allocator will be created and owned.

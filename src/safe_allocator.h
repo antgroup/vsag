@@ -35,6 +35,10 @@ public:
         : raw_allocator_(raw_allocator), owned_(owned) {
     }
 
+    explicit SafeAllocator(const std::shared_ptr<Allocator>& raw_allocator)
+        : raw_allocator_shared_(raw_allocator), raw_allocator_(raw_allocator.get()) {
+    }
+
     std::string
     Name() override {
         return raw_allocator_->Name() + "_safewrapper";
@@ -76,6 +80,8 @@ public:
 
 private:
     Allocator* const raw_allocator_ = nullptr;
+
+    std::shared_ptr<Allocator> const raw_allocator_shared_;
 
     bool owned_{false};
 };
