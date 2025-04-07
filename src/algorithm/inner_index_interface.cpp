@@ -16,6 +16,7 @@
 #include "inner_index_interface.h"
 
 #include "base_filter_functor.h"
+#include "dataset_impl.h"
 #include "empty_index_binary_set.h"
 #include "utils/slow_task_timer.h"
 
@@ -43,9 +44,7 @@ InnerIndexInterface::KnnSearch(const DatasetPtr& query,
         filter_ptr = std::make_shared<UniqueFilter>(filter);
     }
     if (GetNumElements() == 0) {
-        auto result = Dataset::Make();
-        result->Dim(0)->NumElements(1);
-        return result;
+        return DatasetImpl::MakeEmptyDataset();
     }
     return this->KnnSearch(query, k, parameters, filter_ptr);
 }
@@ -60,9 +59,7 @@ InnerIndexInterface::KnnSearch(const DatasetPtr& query,
         filter_ptr = std::make_shared<UniqueFilter>(invalid);
     }
     if (GetNumElements() == 0) {
-        auto result = Dataset::Make();
-        result->Dim(0)->NumElements(1);
-        return result;
+        return DatasetImpl::MakeEmptyDataset();
     }
     return this->KnnSearch(query, k, parameters, filter_ptr);
 }
@@ -78,9 +75,7 @@ InnerIndexInterface::RangeSearch(const DatasetPtr& query,
         filter_ptr = std::make_shared<UniqueFilter>(invalid);
     }
     if (GetNumElements() == 0) {
-        auto result = Dataset::Make();
-        result->Dim(0)->NumElements(1);
-        return result;
+        return DatasetImpl::MakeEmptyDataset();
     }
     return this->RangeSearch(query, radius, parameters, filter_ptr, limited_size);
 }
@@ -96,9 +91,7 @@ InnerIndexInterface::RangeSearch(const DatasetPtr& query,
         filter_ptr = std::make_shared<UniqueFilter>(filter);
     }
     if (GetNumElements() == 0) {
-        auto result = Dataset::Make();
-        result->Dim(0)->NumElements(1);
-        return result;
+        return DatasetImpl::MakeEmptyDataset();
     }
     return this->RangeSearch(query, radius, parameters, filter_ptr, limited_size);
 }
