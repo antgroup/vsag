@@ -35,7 +35,7 @@ TEST_CASE("Test Engine", "[ft][engine]") {
     nlohmann::json index_parameters{
         {"dtype", "float32"}, {"metric_type", "l2"}, {"dim", dim}, {"hnsw", hnsw_parameters}};
 
-    vsag::Resource resource(vsag::Engine::CreateAllocator(), nullptr);
+    vsag::Resource resource(vsag::Engine::CreateDefaultAllocator(), nullptr);
     vsag::Engine engine(&resource);
 
     std::shared_ptr<vsag::Index> hnsw;

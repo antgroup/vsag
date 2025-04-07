@@ -26,7 +26,7 @@ main() {
 
     /******************* Customize Thread Pool *****************/
     auto pool = vsag::Engine::CreateThreadPool(16).value();
-    auto allocator = vsag::Engine::CreateAllocator();
+    auto allocator = vsag::Engine::CreateDefaultAllocator();
     vsag::Resource resource(allocator.get(), pool.get());
     vsag::Engine engine(&resource);
 

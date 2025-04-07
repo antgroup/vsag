@@ -36,7 +36,7 @@ Factory::CreateIndex(const std::string& origin_name,
                      Allocator* allocator) {
     std::shared_ptr<Resource> resource_{nullptr};
     if (allocator == nullptr) {
-        resource_ = std::make_shared<Resource>(Engine::CreateAllocator(), nullptr);
+        resource_ = std::make_shared<Resource>(Engine::CreateDefaultAllocator(), nullptr);
     } else {
         resource_ = std::make_shared<Resource>(allocator, nullptr);
     }

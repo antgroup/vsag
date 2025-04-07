@@ -155,7 +155,7 @@ Engine::CreateIndex(const std::string& origin_name, const std::string& parameter
 }
 
 std::shared_ptr<Allocator>
-Engine::CreateAllocator() {
+Engine::CreateDefaultAllocator() {
     return std::make_shared<DefaultAllocator>();
 }
 

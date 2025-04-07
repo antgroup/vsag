@@ -81,7 +81,7 @@ public:
      *         pointer if creation failed. The caller must check for null to handle allocation errors.
      */
     static std::shared_ptr<Allocator>
-    CreateAllocator();
+    CreateDefaultAllocator();
 
     /**
      * @brief Creates a thread pool for concurrent task execution.
