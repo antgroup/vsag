@@ -260,9 +260,7 @@ Pyramid::search_impl(const DatasetPtr& query, int64_t limit, const SearchFunc& s
     for (auto& path_slice : path_slices) {
         node = node->GetChild(path_slice, false);
         if (node == nullptr) {
-            auto ret = Dataset::Make();
-            ret->Dim(0)->NumElements(1);
-            return ret;
+            return DatasetImpl::MakeEmptyDataset();
         }
     }
     auto search_result = node->SearchGraph(search_func);

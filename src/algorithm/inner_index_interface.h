@@ -17,6 +17,7 @@
 #include <shared_mutex>
 #include <vector>
 
+#include "dataset_impl.h"
 #include "index/index_common_param.h"
 #include "index_feature_list.h"
 #include "label_table.h"
@@ -112,9 +113,7 @@ public:
                 int64_t limited_size = -1) const {
         FilterPtr filter = nullptr;
         if (GetNumElements() == 0) {
-            auto result = Dataset::Make();
-            result->Dim(0)->NumElements(1);
-            return result;
+            return DatasetImpl::MakeEmptyDataset();
         }
         return this->RangeSearch(query, radius, parameters, filter, limited_size);
     }

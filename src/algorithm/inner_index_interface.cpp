@@ -16,7 +16,6 @@
 #include "inner_index_interface.h"
 
 #include "base_filter_functor.h"
-#include "dataset_impl.h"
 #include "empty_index_binary_set.h"
 #include "utils/slow_task_timer.h"
 

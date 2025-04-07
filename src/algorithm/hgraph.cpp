@@ -22,6 +22,7 @@
 
 #include "common.h"
 #include "data_cell/sparse_graph_datacell.h"
+#include "dataset_impl.h"
 #include "empty_index_binary_set.h"
 #include "impl/pruning_strategy.h"
 #include "index/iterator_filter.h"
@@ -225,9 +226,7 @@ HGraph::KnnSearch(const DatasetPtr& query,
 
     // return an empty dataset directly if searcher returns nothing
     if (search_result.empty()) {
-        auto result = Dataset::Make();
-        result->Dim(0)->NumElements(1);
-        return result;
+        return DatasetImpl::MakeEmptyDataset();
     }
     auto count = static_cast<const int64_t>(search_result.size());
     auto [dataset_results, dists, ids] = CreateFastDataset(count, allocator_);
@@ -256,9 +255,7 @@ HGraph::KnnSearch(const DatasetPtr& query,
                   IteratorContext*& iter_ctx,
                   bool is_last_filter) const {
     if (GetNumElements() == 0) {
-        auto result = Dataset::Make();
-        result->Dim(0)->NumElements(1);
-        return result;
+        return DatasetImpl::MakeEmptyDataset();
     }
     std::shared_ptr<CommonInnerIdFilter> ft = nullptr;
     if (filter != nullptr) {
@@ -330,9 +327,7 @@ HGraph::KnnSearch(const DatasetPtr& query,
 
     // return an empty dataset directly if searcher returns nothing
     if (search_result.empty()) {
-        auto result = Dataset::Make();
-        result->Dim(0)->NumElements(1);
-        return result;
+        return DatasetImpl::MakeEmptyDataset();
     }
     auto count = static_cast<const int64_t>(search_result.size());
     auto [dataset_results, dists, ids] = CreateFastDataset(count, allocator_);

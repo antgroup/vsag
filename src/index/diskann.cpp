@@ -27,6 +27,7 @@
 #include <utility>
 
 #include "data_cell/flatten_datacell.h"
+#include "dataset_impl.h"
 #include "empty_index_binary_set.h"
 #include "impl/odescent_graph_builder.h"
 #include "io/memory_io_parameter.h"
@@ -349,9 +350,7 @@ DiskANN::knn_search(const DatasetPtr& query,
 
     // cannot perform search on empty index
     if (empty_index_) {
-        auto ret = Dataset::Make();
-        ret->Dim(0)->NumElements(1);
-        return ret;
+        return DatasetImpl::MakeEmptyDataset();
     }
 
     try {
