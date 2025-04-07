@@ -124,15 +124,21 @@ protected:
                      bool support_filter_obj = false);
 
     static void
-    TestCalcDistanceById(const IndexPtr& index, const TestDatasetPtr& dataset, float error = 1e-5);
+    TestCalcDistanceById(const IndexPtr& index,
+                         const TestDatasetPtr& dataset,
+                         float error = 1e-5,
+                         bool expected_success = true);
 
     static void
     TestBatchCalcDistanceById(const IndexPtr& index,
                               const TestDatasetPtr& dataset,
-                              float error = 1e-5);
+                              float error = 1e-5,
+                              bool expected_success = true);
 
     static void
-    TestGetMinAndMaxId(const IndexPtr& index, const TestDatasetPtr& dataset);
+    TestGetMinAndMaxId(const IndexPtr& index,
+                       const TestDatasetPtr& dataset,
+                       bool expected_success = true);
 
     static void
     TestSerializeFile(const IndexPtr& index_from,
@@ -183,7 +189,9 @@ protected:
                        const TestDatasetPtr& dataset);
 
     static void
-    TestCheckIdExist(const IndexPtr& index, const TestDatasetPtr& dataset);
+    TestCheckIdExist(const IndexPtr& index,
+                     const TestDatasetPtr& dataset,
+                     bool expected_success = true);
 
     static void
     TestSearchWithExtraInfo(const IndexPtr& index,

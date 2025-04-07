@@ -22,4 +22,11 @@ Dataset::Make() {
     return std::make_shared<DatasetImpl>();
 }
 
+DatasetPtr
+DatasetImpl::MakeEmptyDataset() {
+    auto result = std::make_shared<DatasetImpl>();
+    result->Dim(0)->NumElements(1);
+    return result;
+}
+
 };  // namespace vsag
