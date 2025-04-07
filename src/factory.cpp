@@ -34,13 +34,13 @@ tl::expected<std::shared_ptr<Index>, Error>
 Factory::CreateIndex(const std::string& origin_name,
                      const std::string& parameters,
                      Allocator* allocator) {
-    std::shared_ptr<Resource> resource_{nullptr};
+    std::shared_ptr<Resource> resource{nullptr};
     if (allocator == nullptr) {
-        resource_ = std::make_shared<Resource>(Engine::CreateDefaultAllocator(), nullptr);
+        resource = std::make_shared<Resource>(Engine::CreateDefaultAllocator(), nullptr);
     } else {
-        resource_ = std::make_shared<Resource>(allocator, nullptr);
+        resource = std::make_shared<Resource>(allocator, nullptr);
     }
-    Engine e(resource_.get());
+    Engine e(resource.get());
     return e.CreateIndex(origin_name, parameters);
 }
 
