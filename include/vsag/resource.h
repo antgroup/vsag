@@ -55,8 +55,8 @@ public:
      *                  and owned by the Resource.
      * @param thread_pool A shared pointer to a `ThreadPool` object. If null, the Resource will not use a thread pool.
      */
-    explicit Resource(std::shared_ptr<Allocator> allocator,
-                      std::shared_ptr<ThreadPool> thread_pool);
+    explicit Resource(const std::shared_ptr<Allocator>& allocator,
+                      const std::shared_ptr<ThreadPool>& thread_pool);
 
     /**
      * @brief Constructs a Resource without specifying an allocator.

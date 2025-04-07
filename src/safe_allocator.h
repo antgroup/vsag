@@ -35,7 +35,7 @@ public:
         : raw_allocator_(raw_allocator), owned_(owned) {
     }
 
-    explicit SafeAllocator(std::shared_ptr<Allocator> raw_allocator)
+    explicit SafeAllocator(const std::shared_ptr<Allocator>& raw_allocator)
         : raw_allocator_shared_(raw_allocator), raw_allocator_(raw_allocator.get()) {
     }
 

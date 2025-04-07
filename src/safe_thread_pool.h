@@ -32,7 +32,7 @@ public:
     SafeThreadPool(ThreadPool* thread_pool, bool owner) : pool_(thread_pool), owner_(owner) {
     }
 
-    SafeThreadPool(std::shared_ptr<ThreadPool> thread_pool)
+    SafeThreadPool(const std::shared_ptr<ThreadPool>& thread_pool)
         : pool_ptr_(thread_pool), pool_(thread_pool.get()) {
     }
 
