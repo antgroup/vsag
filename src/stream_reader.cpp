@@ -17,8 +17,6 @@
 
 #include <fmt/format-inl.h>
 
-#include <iostream>
-
 #include "vsag/options.h"
 
 ReadFuncStreamReader::ReadFuncStreamReader(std::function<void(uint64_t, uint64_t, void*)> read_func,
