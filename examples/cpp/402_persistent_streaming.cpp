@@ -45,7 +45,8 @@ main(int32_t argc, char** argv) {
     }
 
     /******************* Create an Index *****************/
-    vsag::Engine engine;
+    vsag::Resource resource(vsag::Engine::CreateDefaultAllocator(), nullptr);
+    vsag::Engine engine(&resource);
     auto index_paramesters = R"(
     {
         "dtype": "float32",

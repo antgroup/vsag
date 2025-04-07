@@ -31,6 +31,11 @@ public:
 public:
     SafeThreadPool(ThreadPool* thread_pool, bool owner) : pool_(thread_pool), owner_(owner) {
     }
+
+    SafeThreadPool(const std::shared_ptr<ThreadPool>& thread_pool)
+        : pool_ptr_(thread_pool), pool_(thread_pool.get()) {
+    }
+
     ~SafeThreadPool() override {
         if (owner_) {
             delete pool_;
@@ -77,6 +82,7 @@ public:
 
 private:
     ThreadPool* pool_{nullptr};
+    std::shared_ptr<ThreadPool> pool_ptr_{nullptr};
     bool owner_{false};
 };
 

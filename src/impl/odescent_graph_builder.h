@@ -152,7 +152,7 @@ private:
     int64_t data_num_;
     Vector<Linklist> graph_;
     Vector<std::mutex> points_lock_;
-    SafeThreadPool* thread_pool_;
+    SafeThreadPool* thread_pool_{nullptr};
 
     const InnerIdType* valid_ids_{nullptr};
 

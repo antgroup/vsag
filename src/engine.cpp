@@ -40,10 +40,6 @@
 
 namespace vsag {
 
-Engine::Engine() {
-    this->resource_ = std::make_shared<ResourceOwnerWrapper>(new Resource(), /*owned*/ true);
-}
-
 Engine::Engine(Resource* resource) {
     if (resource == nullptr) {
         this->resource_ = std::make_shared<ResourceOwnerWrapper>(new Resource(), /*owned*/ true);
@@ -157,6 +153,22 @@ Engine::CreateIndex(const std::string& origin_name, const std::string& parameter
         LOG_ERROR_AND_RETURNS(e.error_.type, "failed to create index: " + e.error_.message);
     }
 }
+
+std::shared_ptr<Allocator>
+Engine::CreateDefaultAllocator() {
+    return std::make_shared<DefaultAllocator>();
+}
+
+tl::expected<std::shared_ptr<ThreadPool>, Error>
+Engine::CreateThreadPool(uint32_t num_threads) {
+    if (num_threads <= 0 || num_threads > 512) {
+        LOG_ERROR_AND_RETURNS(ErrorType::INVALID_ARGUMENT,
+                              "failed to create thread pool: invalid number of threads:",
+                              std::to_string(num_threads));
+    }
+    return std::make_shared<DefaultThreadPool>(num_threads);
+}
+
 }  // namespace vsag
 
 // NOLINTEND(readability-else-after-return )
