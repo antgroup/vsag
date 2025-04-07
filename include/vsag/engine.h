@@ -69,16 +69,18 @@ public:
     CreateIndex(const std::string& name, const std::string& parameters);
 
     /**
-     * @brief Creates a memory allocator within the engine.
+     * @brief Creates a memory allocator instance managed by the engine.
      *
-     * This function attempts to create a memory allocator and returns a result which may either
-     * contain a shared pointer to the created `Allocator` or an `Error` object indicating failure
-     * conditions. This is typically used for custom memory management strategies.
+     * This function initializes and returns a shared pointer to a newly created `Allocator` object
+     * for memory management purposes within the engine. If the allocator cannot be created due to
+     * resource constraints or invalid configuration (e.g., out of memory), the function returns an
+     * empty `std::shared_ptr` and logs an error. This is commonly used to integrate custom memory
+     * allocation strategies into the system.
      *
-     * @return tl::expected<std::shared_ptr<Allocator>, Error> An expected value that contains either
-     * a shared pointer to the successfully created `Allocator` or an `Error` detailing
+     * @return std::shared_ptr<Allocator> A shared pointer to the created Allocator, or an empty
+     *         pointer if creation failed. The caller must check for null to handle allocation errors.
      */
-    static tl::expected<std::shared_ptr<Allocator>, Error>
+    static std::shared_ptr<Allocator>
     CreateAllocator();
 
     /**

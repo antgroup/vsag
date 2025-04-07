@@ -127,8 +127,7 @@ main(int32_t argc, char** argv) {
     }
 
     /******************* Create an Index *****************/
-    auto allocator = vsag::Engine::CreateAllocator();
-    vsag::Resource resource(allocator->get(), nullptr);
+    vsag::Resource resource(vsag::Engine::CreateAllocator(), nullptr);
     vsag::Engine engine(&resource);
     auto index_paramesters = R"(
     {

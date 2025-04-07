@@ -54,8 +54,7 @@ main(int argc, char** argv) {
         }
     }
     )";
-    auto allocator = vsag::Engine::CreateAllocator();
-    vsag::Resource resource(allocator->get(), nullptr);
+    vsag::Resource resource(vsag::Engine::CreateAllocator(), nullptr);
     vsag::Engine engine(&resource);
     auto index = engine.CreateIndex("hgraph", hgraph_build_parameters).value();
 

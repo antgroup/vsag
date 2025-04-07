@@ -154,7 +154,7 @@ Engine::CreateIndex(const std::string& origin_name, const std::string& parameter
     }
 }
 
-tl::expected<std::shared_ptr<Allocator>, Error>
+std::shared_ptr<Allocator>
 Engine::CreateAllocator() {
     return std::make_shared<DefaultAllocator>();
 }

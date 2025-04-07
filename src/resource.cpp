@@ -34,4 +34,13 @@ Resource::Resource(Allocator* allocator, ThreadPool* thread_pool) {
     }
 }
 
+Resource::Resource(std::shared_ptr<Allocator> allocator, std::shared_ptr<ThreadPool> thread_pool) {
+    if (allocator != nullptr) {
+        this->allocator = std::make_shared<SafeAllocator>(allocator);
+    }
+    if (thread_pool != nullptr) {
+        this->thread_pool = std::make_shared<SafeThreadPool>(thread_pool);
+    }
+}
+
 }  // namespace vsag
