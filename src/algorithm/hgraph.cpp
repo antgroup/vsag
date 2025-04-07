@@ -22,6 +22,7 @@
 
 #include "common.h"
 #include "data_cell/sparse_graph_datacell.h"
+#include "dataset_impl.h"
 #include "empty_index_binary_set.h"
 #include "impl/pruning_strategy.h"
 #include "index/iterator_filter.h"
@@ -196,6 +197,7 @@ HGraph::KnnSearch(const DatasetPtr& query,
 
     InnerSearchParam search_param;
     search_param.ep = this->entry_point_id_;
+    search_param.topk = 1;
     search_param.ef = 1;
     search_param.is_inner_id_allowed = nullptr;
     for (auto i = static_cast<int64_t>(this->route_graphs_.size() - 1); i >= 0; --i) {
@@ -224,9 +226,7 @@ HGraph::KnnSearch(const DatasetPtr& query,
 
     // return an empty dataset directly if searcher returns nothing
     if (search_result.empty()) {
-        auto result = Dataset::Make();
-        result->Dim(0)->NumElements(1);
-        return result;
+        return DatasetImpl::MakeEmptyDataset();
     }
     auto count = static_cast<const int64_t>(search_result.size());
     auto [dataset_results, dists, ids] = CreateFastDataset(count, allocator_);
@@ -254,6 +254,9 @@ HGraph::KnnSearch(const DatasetPtr& query,
                   const FilterPtr& filter,
                   IteratorContext*& iter_ctx,
                   bool is_last_filter) const {
+    if (GetNumElements() == 0) {
+        return DatasetImpl::MakeEmptyDataset();
+    }
     std::shared_ptr<CommonInnerIdFilter> ft = nullptr;
     if (filter != nullptr) {
         ft = std::make_shared<CommonInnerIdFilter>(filter, *this->label_table_);
@@ -289,6 +292,7 @@ HGraph::KnnSearch(const DatasetPtr& query,
     } else {
         InnerSearchParam search_param;
         search_param.ep = this->entry_point_id_;
+        search_param.topk = 1;
         search_param.ef = 1;
         search_param.is_inner_id_allowed = nullptr;
         if (iter_filter_ctx->IsFirstUsed()) {
@@ -323,9 +327,7 @@ HGraph::KnnSearch(const DatasetPtr& query,
 
     // return an empty dataset directly if searcher returns nothing
     if (search_result.empty()) {
-        auto result = Dataset::Make();
-        result->Dim(0)->NumElements(1);
-        return result;
+        return DatasetImpl::MakeEmptyDataset();
     }
     auto count = static_cast<const int64_t>(search_result.size());
     auto [dataset_results, dists, ids] = CreateFastDataset(count, allocator_);
@@ -446,6 +448,7 @@ HGraph::RangeSearch(const DatasetPtr& query,
 
     InnerSearchParam search_param;
     search_param.ep = this->entry_point_id_;
+    search_param.topk = 1;
     search_param.ef = 1;
     for (auto i = static_cast<int64_t>(this->route_graphs_.size() - 1); i >= 0; --i) {
         auto result = this->search_one_graph(query->GetFloat32Vectors(),

@@ -245,6 +245,9 @@ public:
         return 0;
     }
 
+    static DatasetPtr
+    MakeEmptyDataset();
+
 private:
     bool owner_ = true;
     std::unordered_map<std::string, var> data_;
