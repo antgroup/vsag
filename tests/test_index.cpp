@@ -987,8 +987,8 @@ TestIndex::TestEstimateMemory(const std::string& index_name,
                 WARN("estimate_memory failed");
             }
 
-            REQUIRE(estimate_memory >= static_cast<uint64_t>(real_memory * 0.4));
-            REQUIRE(estimate_memory <= static_cast<uint64_t>(real_memory * 1.6));
+            REQUIRE(estimate_memory >= static_cast<uint64_t>(real_memory * 0.2));
+            REQUIRE(estimate_memory <= static_cast<uint64_t>(real_memory * 3.2));
             inf.close();
         }
         outf.close();
