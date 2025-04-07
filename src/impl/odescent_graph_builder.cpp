@@ -335,13 +335,20 @@ ODescent::prune_graph() {
 
 void
 ODescent::parallelize_task(const std::function<void(int64_t, int64_t)>& task) {
-    Vector<std::future<void>> futures(allocator_);
-    for (int64_t i = 0; i < data_num_; i += odescent_param_->block_size) {
-        int64_t end = std::min(i + odescent_param_->block_size, data_num_);
-        futures.push_back(thread_pool_->GeneralEnqueue(task, i, end));
-    }
-    for (auto& future : futures) {
-        future.get();
+    if (this->thread_pool_ != nullptr) {
+        Vector<std::future<void>> futures(allocator_);
+        for (int64_t i = 0; i < data_num_; i += odescent_param_->block_size) {
+            int64_t end = std::min(i + odescent_param_->block_size, data_num_);
+            futures.push_back(thread_pool_->GeneralEnqueue(task, i, end));
+        }
+        for (auto& future : futures) {
+            future.get();
+        }
+    } else {
+        for (int64_t i = 0; i < data_num_; i += odescent_param_->block_size) {
+            int64_t end = std::min(i + odescent_param_->block_size, data_num_);
+            task(i, end);
+        }
     }
 }
 

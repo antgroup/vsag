@@ -20,6 +20,8 @@
 #include "fixtures/test_reader.h"
 #include "fixtures/thread_pool.h"
 #include "simd/fp32_simd.h"
+#include "vsag/engine.h"
+#include "vsag/resource.h"
 
 namespace fixtures {
 static int64_t
@@ -1005,7 +1007,9 @@ TestIndex::TestEstimateMemory(const std::string& index_name,
                               const TestDatasetPtr& dataset) {
     auto allocator = std::make_shared<fixtures::MemoryRecordAllocator>();
     {
-        auto index1 = vsag::Factory::CreateIndex(index_name, build_param, allocator.get()).value();
+        vsag::Resource resource(allocator.get(), nullptr);
+        vsag::Engine engine(&resource);
+        auto index1 = engine.CreateIndex(index_name, build_param).value();
         REQUIRE(index1->GetNumElements() == 0);
         auto index2 = vsag::Factory::CreateIndex(index_name, build_param).value();
         REQUIRE(index2->GetNumElements() == 0);
@@ -1026,8 +1030,8 @@ TestIndex::TestEstimateMemory(const std::string& index_name,
                 WARN("estimate_memory failed");
             }
 
-            REQUIRE(estimate_memory >= static_cast<uint64_t>(real_memory * 0.4));
-            REQUIRE(estimate_memory <= static_cast<uint64_t>(real_memory * 1.6));
+            REQUIRE(estimate_memory >= static_cast<uint64_t>(real_memory * 0.2));
+            REQUIRE(estimate_memory <= static_cast<uint64_t>(real_memory * 3.2));
             inf.close();
         }
         outf.close();

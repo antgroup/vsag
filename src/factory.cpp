@@ -34,8 +34,13 @@ tl::expected<std::shared_ptr<Index>, Error>
 Factory::CreateIndex(const std::string& origin_name,
                      const std::string& parameters,
                      Allocator* allocator) {
-    Resource resource(allocator, nullptr);
-    Engine e(&resource);
+    std::shared_ptr<Resource> resource{nullptr};
+    if (allocator == nullptr) {
+        resource = std::make_shared<Resource>(Engine::CreateDefaultAllocator(), nullptr);
+    } else {
+        resource = std::make_shared<Resource>(allocator, nullptr);
+    }
+    Engine e(resource.get());
     return e.CreateIndex(origin_name, parameters);
 }
 
