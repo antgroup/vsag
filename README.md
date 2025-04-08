@@ -7,6 +7,7 @@
 ![GitHub Release](https://img.shields.io/github/v/release/antgroup/vsag?label=last%20release)
 ![GitHub Contributors](https://img.shields.io/github/contributors/antgroup/vsag)
 [![arXiv](https://badgen.net/static/arXiv/2404.16322/red)](http://arxiv.org/abs/2404.16322)
+[![arXiv](https://badgen.net/static/arXiv/2503.17911/red)](http://arxiv.org/abs/2503.17911)
 
 ![PyPI - Version](https://img.shields.io/pypi/v/pyvsag)
 ![PyPI - Python Version](https://img.shields.io/pypi/pyversions/pyvsag)
@@ -87,10 +88,6 @@ Thrive together in VSAG community with users and developers from all around the 
 - Follow us on [Weixin Official Accounts](./docs/weixin-qr.jpg)（微信公众平台）to get the latest news.
 
 ## Roadmap
-- v0.13 (ETA: Jan. 2025)
-  - introduce new index AllScanIndex that supports brute force search and read raw vector
-  - support in-place update on HNSW
-  - support automatically optimization on Graph
 - v0.14 (ETA: Mar. 2025)
   - support inverted index(be like IVFFlat) based on datacell
   - support extrainfo storage within vector
@@ -98,6 +95,10 @@ Thrive together in VSAG community with users and developers from all around the 
 - v0.15 (ETA: Apr. 2025)
   - support sparse vector searching
   - introduce pluggable product quantization(known as PQ) in datacell
+- v0.16 (ETA: May 2025)
+  - support neon instruction acceleration on ARM platform
+  - support using GPU to accelerate index building
+  - provide an optimizer that supports optimizing search parameters by recall or latency
 
 ## Reference
 Reference to cite when you use VSAG in a research paper:
@@ -107,6 +108,13 @@ Reference to cite when you use VSAG in a research paper:
   author={Mingyu Yang and Wentao Li and Jiabao Jin and Xiaoyao Zhong and Xiangyu Wang and Zhitao Shen and Wei Jia and Wei Wang},
   year={2024},
   url={https://arxiv.org/abs/2404.16322}
+}
+
+@article{zhong2025vsag,
+  title={VSAG: An Optimized Search Framework for Graph-based Approximate Nearest Neighbor Search},
+  author={Zhong, Xiaoyao and Li, Haotian and Jin, Jiabao and Yang, Mingyu and Chu, Deming and Wang, Xiangyu and Shen, Zhitao and Jia, Wei and Gu, George and Xie, Yi and others},
+  journal={arXiv preprint arXiv:2503.17911},
+  year={2025}
 }
 ```
 
