@@ -58,7 +58,7 @@ public:
     Search(const GraphInterfacePtr& graph,
            const FlattenInterfacePtr& flatten,
            const VisitedListPtr& vl,
-           const float* query,
+           const void* query,
            const InnerSearchParam& inner_search_param,
            IteratorFilterContext* iter_ctx) const;
 
@@ -88,7 +88,7 @@ private:
     search_impl(const GraphInterfacePtr& graph,
                 const FlattenInterfacePtr& flatten,
                 const VisitedListPtr& vl,
-                const float* query,
+                const void* query,
                 const InnerSearchParam& inner_search_param,
                 IteratorFilterContext* iter_ctx) const;
 

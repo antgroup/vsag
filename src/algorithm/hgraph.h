@@ -162,10 +162,10 @@ private:
     }
 
     void
-    add_one_point(const float* data, int level, InnerIdType id);
+    add_one_point(const void* data, int level, InnerIdType id);
 
     void
-    graph_add_one(const float* data, int level, InnerIdType inner_id);
+    graph_add_one(const void* data, int level, InnerIdType inner_id);
 
     void
     resize(uint64_t new_size);
@@ -182,7 +182,7 @@ private:
 
     template <InnerSearchMode mode = InnerSearchMode::KNN_SEARCH>
     MaxHeap
-    search_one_graph(const float* query,
+    search_one_graph(const void* query,
                      const GraphInterfacePtr& graph,
                      const FlattenInterfacePtr& flatten,
                      InnerSearchParam& inner_search_param,
@@ -193,16 +193,6 @@ private:
 
     void
     deserialize_basic_info(StreamReader& reader);
-
-    inline LabelType
-    get_label_by_id(InnerIdType inner_id) const {
-        std::shared_lock<std::shared_mutex> lock(this->label_lookup_mutex_);
-        // the inner_id is guarantee in label_lookup
-        return this->label_table_->GetLabelById(inner_id);
-    }
-
-    void
-    add_one_point(const void* data, int level, InnerIdType id);
 
     void
     init_features();

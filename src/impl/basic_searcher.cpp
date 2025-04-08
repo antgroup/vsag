@@ -86,7 +86,7 @@ MaxHeap
 BasicSearcher::Search(const GraphInterfacePtr& graph,
                       const FlattenInterfacePtr& flatten,
                       const VisitedListPtr& vl,
-                      const float* query,
+                      const void* query,
                       const InnerSearchParam& inner_search_param,
                       IteratorFilterContext* iter_ctx) const {
     return this->search_impl<KNN_SEARCH>(graph, flatten, vl, query, inner_search_param, iter_ctx);
@@ -97,7 +97,7 @@ MaxHeap
 BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                            const FlattenInterfacePtr& flatten,
                            const VisitedListPtr& vl,
-                           const float* query,
+                           const void* query,
                            const InnerSearchParam& inner_search_param,
                            IteratorFilterContext* iter_ctx) const {
     MaxHeap top_candidates(allocator_);
