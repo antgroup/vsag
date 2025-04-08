@@ -277,6 +277,7 @@ RaBitQuantizer<metric>::EncodeOneImpl(const DataType* data, uint8_t* codes) cons
         transformed_data.data(), centroid_.data(), normed_data.data(), this->dim_);
 
     // 4. encode with BQ
+    memset(codes, 0, this->code_size_);
     for (uint64_t d = 0; d < this->dim_; ++d) {
         if (normed_data[d] >= 0.0f) {
             codes[offset_code_ + d / 8] |= (1 << (d % 8));
