@@ -15,13 +15,18 @@
 
 #pragma once
 
+#include <limits>
+
 #include "algorithm/hnswlib/algorithm_interface.h"
+#include "basic_optimizer.h"
 #include "common.h"
 #include "data_cell/flatten_interface.h"
 #include "data_cell/graph_interface.h"
 #include "index/index_common_param.h"
 #include "index/iterator_filter.h"
 #include "lock_strategy.h"
+#include "runtime_parameter.h"
+#include "utils/linear_congruential_generator.h"
 #include "utils/visited_list.h"
 
 namespace vsag {
@@ -38,6 +43,21 @@ public:
     float skip_ratio{0.8F};
     InnerSearchMode search_mode{KNN_SEARCH};
     int range_search_limit_size{-1};
+
+    InnerSearchParam&
+    operator=(const InnerSearchParam& other) {
+        if (this != &other) {
+            topk = other.topk;
+            radius = other.radius;
+            ep = other.ep;
+            ef = other.ef;
+            skip_ratio = other.skip_ratio;
+            search_mode = other.search_mode;
+            range_search_limit_size = other.range_search_limit_size;
+            is_inner_id_allowed = other.is_inner_id_allowed;
+        }
+        return *this;
+    }
 };
 
 constexpr float THRESHOLD_ERROR = 2e-6;
@@ -61,6 +81,19 @@ public:
            const float* query,
            const InnerSearchParam& inner_search_param,
            IteratorFilterContext* iter_ctx) const;
+
+    virtual bool
+    SetRuntimeParameters(const UnorderedMap<std::string, ParamValue>& new_params);
+
+    virtual void
+    SetMockParameters(const GraphInterfacePtr& graph,
+                      const FlattenInterfacePtr& flatten,
+                      const std::shared_ptr<VisitedListPool>& vl_pool,
+                      const InnerSearchParam& inner_search_param,
+                      const uint64_t dim);
+
+    virtual double
+    MockRun() const;
 
 private:
     // rid means the neighbor's rank (e.g., the first neighbor's rid == 0)
@@ -97,7 +130,15 @@ private:
 
     MutexArrayPtr mutex_array_{nullptr};
 
-    uint32_t prefetch_jump_visit_size_{3};
+    // mock run parameters
+    GraphInterfacePtr mock_graph_{nullptr};
+    FlattenInterfacePtr mock_flatten_{nullptr};
+    std::shared_ptr<VisitedListPool> mock_vl_pool_{nullptr};
+    InnerSearchParam mock_inner_search_param_;
+    uint64_t mock_dim_{0};
+
+    // runtime parameters
+    uint32_t prefetch_stride_visit_{3};
 };
 
 using BasicSearcherPtr = std::shared_ptr<BasicSearcher>;
