@@ -20,7 +20,6 @@
 #include <limits>
 
 #include "fixtures/test_dataset_pool.h"
-#include "simd/simd.h"
 #include "test_index.h"
 #include "vsag/vsag.h"
 
