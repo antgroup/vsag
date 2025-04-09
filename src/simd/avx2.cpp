@@ -79,22 +79,7 @@ PQDistanceFloat256(const void* single_dim_centers, float single_dim_val, void* r
 
 #if defined(ENABLE_AVX2)
 __inline __m128i __attribute__((__always_inline__)) load_8_char(const uint8_t* data) {
-    return _mm_set_epi8(0,
-                        0,
-                        0,
-                        0,
-                        0,
-                        0,
-                        0,
-                        0,
-                        data[7],
-                        data[6],
-                        data[5],
-                        data[4],
-                        data[3],
-                        data[2],
-                        data[1],
-                        data[0]);
+    return _mm_loadl_epi64(reinterpret_cast<const __m128i*>(data));
 }
 #endif
 
