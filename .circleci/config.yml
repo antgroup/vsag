@@ -8,6 +8,7 @@ workflows:
             branches:
               ignore:
                 - main
+                - ^0\.\d+
 
   main-branch-workflow:
     jobs:
@@ -16,6 +17,7 @@ workflows:
             branches:
               only:
                 - main
+                - ^0\.\d+
 
 jobs:
   pull-request-check:
