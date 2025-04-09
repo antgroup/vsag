@@ -636,7 +636,7 @@ HGraph::CalDistanceById(const float* query, const int64_t* ids, int64_t count) c
         for (int64_t i = 0; i < count; ++i) {
             auto iter = this->label_table_->label_remap_.find(ids[i]);
             if (iter == this->label_table_->label_remap_.end()) {
-                logger::error(fmt::format("failed to find id: {}", ids[i]));
+                logger::debug(fmt::format("failed to find id: {}", ids[i]));
                 distances[i] = -1;
                 continue;
             }
