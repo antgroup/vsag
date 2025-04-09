@@ -530,8 +530,8 @@ HGraph::Serialize(StreamWriter& writer) const {
     if (this->use_reorder_) {
         this->high_precise_codes_->Serialize(writer);
     }
-    for (auto i = 0; i < this->route_graphs_.size(); ++i) {
-        this->route_graphs_[i]->Serialize(writer);
+    for (const auto& route_graph : this->route_graphs_) {
+        route_graph->Serialize(writer);
     }
     if (this->extra_info_size_ > 0 && this->extra_infos_ != nullptr) {
         this->extra_infos_->Serialize(writer);
@@ -547,8 +547,8 @@ HGraph::Deserialize(StreamReader& reader) {
         this->high_precise_codes_->Deserialize(reader);
     }
 
-    for (uint64_t i = 0; i < this->route_graphs_.size(); ++i) {
-        this->route_graphs_[i]->Deserialize(reader);
+    for (auto& route_graph : this->route_graphs_) {
+        route_graph->Deserialize(reader);
     }
     this->neighbors_mutex_->Resize(max_capacity_);
 
