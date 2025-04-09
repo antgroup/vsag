@@ -517,8 +517,7 @@ TestIndex::TestFilterSearch(const TestIndex::IndexPtr& index,
         tl::expected<DatasetPtr, vsag::Error> res;
         res = index->KnnSearch(query, topk, search_param, dataset->filter_function_);
         if (support_filter_obj) {
-            auto filter =
-                std::make_shared<FilterObj>(dataset->filter_function_, 1.0F);
+            auto filter = std::make_shared<FilterObj>(dataset->filter_function_, 1.0F);
             auto obj_res = index->KnnSearch(query, topk, search_param, filter);
             if (expected_success) {
                 for (int j = 0; j < topk; ++j) {
