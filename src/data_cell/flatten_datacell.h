@@ -20,6 +20,7 @@
 #include <memory>
 
 #include "byte_buffer.h"
+#include "common.h"
 #include "flatten_interface.h"
 #include "io/basic_io.h"
 #include "io/memory_block_io.h"
@@ -69,6 +70,11 @@ public:
         this->max_capacity_ = std::max(capacity, this->total_count_);  // TODO(LHT): add warning
     }
 
+    bool
+    Decode(const uint8_t* codes, DataType* data) override {
+        return this->quantizer_->DecodeOne(codes, data);
+    }
+
     void
     Resize(InnerIdType new_capacity) override {
         if (new_capacity <= this->max_capacity_) {
@@ -86,11 +92,7 @@ public:
 
     void
     Prefetch(InnerIdType id) override {
-        if (this->force_in_memory_) {
-            force_in_memory_io_->Prefetch(id * code_size_, code_size_);
-        } else {
-            io_->Prefetch(id * code_size_, code_size_);
-        }
+        this->prefetch(id, code_size_);
     };
 
     [[nodiscard]] std::string
@@ -138,6 +140,9 @@ public:
     Allocator* const allocator_{nullptr};
 
 private:
+    inline void
+    prefetch(InnerIdType id, uint64_t data_size);
+
     inline void
     query(float* result_dists,
           const float* query_vector,
@@ -302,6 +307,16 @@ FlattenDataCell<QuantTmpl, IOTmpl>::InMemory() const {
 
 template <typename QuantTmpl, typename IOTmpl>
 void
+FlattenDataCell<QuantTmpl, IOTmpl>::prefetch(InnerIdType id, uint64_t data_size) {
+    if (this->force_in_memory_) {
+        force_in_memory_io_->Prefetch(id * code_size_, data_size);
+    } else {
+        io_->Prefetch(id * code_size_, data_size);
+    }
+}
+
+template <typename QuantTmpl, typename IOTmpl>
+void
 FlattenDataCell<QuantTmpl, IOTmpl>::query(float* result_dists,
                                           const float* query_vector,
                                           const InnerIdType* idx,
@@ -317,15 +332,10 @@ FlattenDataCell<QuantTmpl, IOTmpl>::query(float* result_dists,
                                           const std::shared_ptr<Computer<QuantTmpl>>& computer,
                                           const InnerIdType* idx,
                                           InnerIdType id_count) {
-    for (uint32_t i = 0; i < this->prefetch_jump_code_size_ and i < id_count; i++) {
-        if (force_in_memory_) {
-            this->force_in_memory_io_->Prefetch(
-                static_cast<uint64_t>(idx[i]) * static_cast<uint64_t>(code_size_),
-                this->code_size_);
-        } else {
-            this->io_->Prefetch(static_cast<uint64_t>(idx[i]) * static_cast<uint64_t>(code_size_),
-                                this->code_size_);
-        }
+    bool release = false;
+
+    for (uint32_t i = 0; i < this->prefetch_stride_code_ and i < id_count; i++) {
+        this->prefetch(idx[i], this->prefetch_depth_code_ * 64);
     }
     if (not force_in_memory_ and not this->io_->InMemory() and id_count > 1) {
         ByteBuffer codes(id_count * this->code_size_, allocator_);
@@ -340,20 +350,10 @@ FlattenDataCell<QuantTmpl, IOTmpl>::query(float* result_dists,
     }
 
     for (int64_t i = 0; i < id_count; ++i) {
-        if (i + this->prefetch_jump_code_size_ < id_count) {
-            if (force_in_memory_) {
-                this->force_in_memory_io_->Prefetch(
-                    static_cast<uint64_t>(idx[i + this->prefetch_jump_code_size_]) *
-                        static_cast<uint64_t>(code_size_),
-                    this->code_size_);
-            } else {
-                this->io_->Prefetch(static_cast<uint64_t>(idx[i + this->prefetch_jump_code_size_]) *
-                                        static_cast<uint64_t>(code_size_),
-                                    this->code_size_);
-            }
+        if (i + this->prefetch_stride_code_ < id_count) {
+            this->prefetch(idx[i + this->prefetch_stride_code_], this->prefetch_depth_code_ * 64);
         }
 
-        bool release = false;
         const auto* codes = this->GetCodesById(idx[i], release);
         computer->ComputeDist(codes, result_dists + i);
         if (release) {

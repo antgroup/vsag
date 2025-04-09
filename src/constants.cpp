@@ -54,6 +54,11 @@ const char* const DATATYPE_FLOAT32 = "float32";
 const char* const DATATYPE_INT8 = "int8";
 const char* const BLANK_INDEX = "blank_index";
 
+// environment-level-parameters
+const char* const PREFETCH_STRIDE_VISIT = "prefetch_stride_visit";
+const char* const PREFETCH_STRIDE_CODE = "prefetch_stride_codes";
+const char* const PREFETCH_DEPTH_CODE = "prefetch_depth_codes";
+
 // parameters
 const char* const PARAMETER_DTYPE = "dtype";
 const char* const PARAMETER_DIM = "dim";

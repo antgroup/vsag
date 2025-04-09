@@ -75,6 +75,8 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
         this->build_pool_ = SafeThreadPool::FactoryDefaultThreadPool();
     }
     this->init_features();
+
+    optimizer_ = std::make_shared<Optimizer<BasicSearcher>>(common_param, 1);
 }
 void
 HGraph::Train(const DatasetPtr& base) {
@@ -561,6 +563,21 @@ HGraph::Deserialize(StreamReader& reader) {
         this->extra_infos_->Deserialize(reader);
     }
     this->total_count_ = this->basic_flatten_codes_->TotalCount();
+
+    // optimize
+    InnerSearchParam param;
+    param.ep = 0;
+    param.ef = 80;
+    param.topk = 10;
+    param.is_inner_id_allowed = nullptr;
+    searcher_->SetMockParameters(bottom_graph_, basic_flatten_codes_, pool_, param, dim_);
+    optimizer_->RegisterParameter(
+        std::make_shared<IntRuntimeParameter>(PREFETCH_DEPTH_CODE, 1, 10));
+    optimizer_->RegisterParameter(
+        std::make_shared<IntRuntimeParameter>(PREFETCH_STRIDE_CODE, 1, 10));
+    optimizer_->RegisterParameter(
+        std::make_shared<IntRuntimeParameter>(PREFETCH_STRIDE_VISIT, 1, 10));
+    optimizer_->Optimize(searcher_);
 }
 
 void
