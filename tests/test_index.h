@@ -194,13 +194,6 @@ protected:
                      bool expected_success = true);
 
     static void
-    TestSearchWithExtraInfo(const IndexPtr& index,
-                            const TestDatasetPtr& dataset,
-                            const std::string& search_param,
-                            int64_t extra_info_size,
-                            float expected_recall = 0.99);
-
-    static void
     TestGetExtraInfoById(const IndexPtr& index,
                          const TestDatasetPtr& dataset,
                          int64_t extra_info_size);
