@@ -75,7 +75,6 @@ DiskANNTestIndex::GenerateDiskANNBuildParametersString(const std::string& metric
 }
 }  // namespace fixtures
 TEST_CASE_METHOD(fixtures::DiskANNTestIndex, "diskann build test", "[ft][index][diskann]") {
-    auto test_dim_count = 3;
     auto dims = fixtures::get_common_used_dims(3);
     auto metric_type = GENERATE("l2", "ip");
     const std::string name = "diskann";
