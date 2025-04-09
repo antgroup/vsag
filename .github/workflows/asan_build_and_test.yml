@@ -2,9 +2,9 @@ name: Asan Build & Test Parallel
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "main", "0.*" ]
   pull_request:
-    branches: [ "main" ]
+    branches: [ "main", "0.*" ]
 
 jobs:
   build_asan_x86:
