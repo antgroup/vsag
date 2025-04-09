@@ -145,7 +145,8 @@ SparseQuantizer<metric>::ProcessQueryImpl(const DataType* query,
     } catch (const std::bad_alloc& e) {
         computer.buf_ = nullptr;
         logger::error("bad alloc when init computer buf");
-        throw std::bad_alloc();
+        throw VsagException(ErrorType::NO_ENOUGH_MEMORY,
+                            "bad alloc when init computer buf in sparse quantizer");
     }
     if constexpr (metric == MetricType::METRIC_TYPE_IP) {
         EncodeOneImpl(query, computer.buf_);
