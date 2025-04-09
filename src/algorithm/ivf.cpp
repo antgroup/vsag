@@ -100,6 +100,7 @@ IVF::InitFeatures() {
     });
     // concurrency
     this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_SEARCH_CONCURRENT);
+
     // serialize
     this->index_feature_list_->SetFeatures({
         IndexFeature::SUPPORT_DESERIALIZE_BINARY_SET,
@@ -118,6 +119,9 @@ IVF::InitFeatures() {
             IndexFeature::SUPPORT_RANGE_SEARCH_WITH_ID_FILTER,
         });
     }
+    this->index_feature_list_->SetFeatures({
+        IndexFeature::SUPPORT_CLONE,
+    });
 }
 
 std::vector<int64_t>

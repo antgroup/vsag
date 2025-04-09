@@ -59,8 +59,11 @@ public:
     }
 
     void
-    InitFeatures() override {
-        return this->init_features();
+    InitFeatures() override;
+
+    [[nodiscard]] InnerIndexPtr
+    Fork(const IndexCommonParam& param) override {
+        return std::make_shared<HGraph>(this->create_param_ptr_, param);
     }
 
     void
@@ -183,9 +186,6 @@ private:
 
     void
     deserialize_basic_info(StreamReader& reader);
-
-    void
-    init_features();
 
     void
     reorder(const float* query,

@@ -68,6 +68,8 @@ enum IndexFeature {
 
     SUPPORT_KNN_SEARCH_WITH_EX_FILTER, /**< Supports K-nearest neighbor search with extra info filtering */
 
+    SUPPORT_CLONE, /**< Supports clone index */
+
     INDEX_FEATURE_COUNT /** must be last one */
 };
 }  // namespace vsag
