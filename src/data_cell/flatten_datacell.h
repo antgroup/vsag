@@ -222,7 +222,7 @@ FlattenDataCell<QuantTmpl, IOTmpl>::Train(const void* data, uint64_t count) {
 
 template <typename QuantTmpl, typename IOTmpl>
 void
-FlattenDataCell<QuantTmpl, IOTmpl>::InsertVector(const float* vector, InnerIdType idx) {
+FlattenDataCell<QuantTmpl, IOTmpl>::InsertVector(const void* vector, InnerIdType idx) {
     {
         std::lock_guard lock(mutex_);
         if (idx == std::numeric_limits<InnerIdType>::max()) {
