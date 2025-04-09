@@ -333,6 +333,52 @@ TestIndex::TestTrainAndAdd(const TestIndex::IndexPtr& index,
 }
 
 void
+TestIndex::TestKnnSearchCompare(const IndexPtr& index_weak,
+                                const IndexPtr& index_strong,
+                                const TestDatasetPtr& dataset,
+                                const std::string& search_param,
+                                bool expected_success) {
+    if (not index_weak->CheckFeature(vsag::SUPPORT_KNN_SEARCH) or
+        not index_strong->CheckFeature(vsag::SUPPORT_KNN_SEARCH)) {
+        return;
+    }
+
+    double time_cost_weak = 0;
+    double time_cost_strong = 0;
+
+    auto queries = dataset->query_;
+    auto query_count = queries->GetNumElements();
+    auto dim = queries->GetDim();
+    auto topk = dataset->top_k;
+    for (auto round = 0; round < 2; round++) {
+        for (auto i = 0; i < query_count; ++i) {
+            auto query = vsag::Dataset::Make();
+            query->NumElements(1)
+                ->Dim(dim)
+                ->Float32Vectors(queries->GetFloat32Vectors() + i * dim)
+                ->SparseVectors(queries->GetSparseVectors() + i)
+                ->Paths(queries->GetPaths() + i)
+                ->Owner(false);
+
+            if (round == 0) {
+                auto st = std::chrono::high_resolution_clock::now();
+                auto res = index_weak->KnnSearch(query, topk, search_param);
+                auto ed = std::chrono::high_resolution_clock::now();
+                time_cost_weak += std::chrono::duration<double>(ed - st).count();
+            } else {
+                auto st = std::chrono::high_resolution_clock::now();
+                auto res = index_strong->KnnSearch(query, topk, search_param);
+                auto ed = std::chrono::high_resolution_clock::now();
+                time_cost_strong += std::chrono::duration<double>(ed - st).count();
+            }
+        }
+    }
+    if (expected_success) {
+        REQUIRE(time_cost_weak > time_cost_strong);
+    }
+}
+
+void
 TestIndex::TestKnnSearch(const IndexPtr& index,
                          const TestDatasetPtr& dataset,
                          const std::string& search_param,

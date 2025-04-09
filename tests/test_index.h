@@ -100,6 +100,13 @@ protected:
                   bool expected_success = true);
 
     static void
+    TestKnnSearchCompare(const IndexPtr& index_weak,
+                         const IndexPtr& index_strong,
+                         const TestDatasetPtr& dataset,
+                         const std::string& search_param,
+                         bool expected_success = true);
+
+    static void
     TestKnnSearchIter(const IndexPtr& index,
                       const TestDatasetPtr& dataset,
                       const std::string& search_param,

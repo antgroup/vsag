@@ -55,6 +55,11 @@ const char* const DATATYPE_INT8 = "int8";
 const char* const DATATYPE_SPARSE = "sparse";
 const char* const BLANK_INDEX = "blank_index";
 
+// environment-level-parameters
+const char* const PREFETCH_STRIDE_VISIT = "prefetch_stride_visit";
+const char* const PREFETCH_STRIDE_CODE = "prefetch_stride_codes";
+const char* const PREFETCH_DEPTH_CODE = "prefetch_depth_codes";
+
 // parameters
 const char* const PARAMETER_DTYPE = "dtype";
 const char* const PARAMETER_DIM = "dim";
@@ -127,6 +132,7 @@ const char* const RABITQ_PCA_DIM = "rabitq_pca_dim";
 const char* const RABITQ_BITS_PER_DIM_QUERY = "rabitq_bits_per_dim_query";
 
 const char* const HGRAPH_USE_REORDER = HGRAPH_USE_REORDER_KEY;
+const char* const HGRAPH_USE_ELP_OPTIMIZER = HGRAPH_USE_ELP_OPTIMIZER_KEY;
 const char* const HGRAPH_IGNORE_REORDER = "ignore_reorder";
 const char* const HGRAPH_BASE_QUANTIZATION_TYPE = "base_quantization_type";
 const char* const HGRAPH_GRAPH_MAX_DEGREE = "max_degree";

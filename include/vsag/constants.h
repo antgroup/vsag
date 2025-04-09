@@ -52,6 +52,11 @@ extern const char* const DATATYPE_INT8;
 extern const char* const DATATYPE_SPARSE;
 extern const char* const BLANK_INDEX;
 
+// environment-level-parameters
+extern const char* const PREFETCH_STRIDE_VISIT;
+extern const char* const PREFETCH_STRIDE_CODE;
+extern const char* const PREFETCH_DEPTH_CODE;
+
 // parameters
 extern const char* const PARAMETER_DTYPE;
 extern const char* const PARAMETER_DIM;
@@ -124,6 +129,7 @@ extern const char* const RABITQ_BITS_PER_DIM_QUERY;
 
 // hgraph params
 extern const char* const HGRAPH_USE_REORDER;
+extern const char* const HGRAPH_USE_ELP_OPTIMIZER;
 extern const char* const HGRAPH_IGNORE_REORDER;
 extern const char* const HGRAPH_BASE_QUANTIZATION_TYPE;
 extern const char* const HGRAPH_GRAPH_MAX_DEGREE;
