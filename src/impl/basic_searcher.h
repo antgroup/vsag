@@ -97,7 +97,7 @@ private:
 
     MutexArrayPtr mutex_array_{nullptr};
 
-    uint32_t prefetch_jump_visit_size_{1};
+    uint32_t prefetch_jump_visit_size_{3};
 };
 
 using BasicSearcherPtr = std::shared_ptr<BasicSearcher>;

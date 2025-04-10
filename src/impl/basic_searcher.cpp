@@ -49,10 +49,6 @@ BasicSearcher::visit(const GraphInterfacePtr& graph,
              ? (filter->ValidRatio() == 1.0F ? 0 : (1 - ((1 - filter->ValidRatio()) * skip_ratio)))
              : 0.0F);
 
-    for (uint32_t i = 0; i < prefetch_jump_visit_size_ and neighbors.size() > i; i++) {
-        vl->Prefetch(neighbors[i]);
-    }
-
     for (uint32_t i = 0; i < neighbors.size(); i++) {
         if (i + prefetch_jump_visit_size_ < neighbors.size()) {
             vl->Prefetch(neighbors[i + prefetch_jump_visit_size_]);
