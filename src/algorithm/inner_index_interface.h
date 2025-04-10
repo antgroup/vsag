@@ -31,7 +31,7 @@
 namespace vsag {
 class InnerIndexInterface {
 public:
-    explicit InnerIndexInterface(const ParamPtr& index_param, const IndexCommonParam& common_param);
+    explicit InnerIndexInterface(ParamPtr index_param, const IndexCommonParam& common_param);
 
     virtual ~InnerIndexInterface() = default;
 
@@ -230,6 +230,14 @@ public:
     IndexFeatureListPtr index_feature_list_{nullptr};
 
     mutable std::shared_mutex label_lookup_mutex_{};  // lock for label_lookup_ & labels_
+
+    const ParamPtr create_param_ptr_{nullptr};
+
+    int64_t dim_{0};
+
+    MetricType metric_{MetricType::METRIC_TYPE_L2SQR};
+
+    DataTypes data_type_{DataTypes::DATA_TYPE_FLOAT};
 };
 
 using InnerIndexPtr = std::shared_ptr<InnerIndexInterface>;
