@@ -94,10 +94,6 @@ private:
 private:
     FlattenInterfacePtr inner_codes_{nullptr};
 
-    Allocator* const allocator_{nullptr};
-
-    int64_t dim_{0};
-
     uint64_t total_count_{0};
 };
 }  // namespace vsag

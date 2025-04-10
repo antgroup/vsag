@@ -83,16 +83,12 @@ public:
 public:
     Pyramid(const PyramidParamPtr& pyramid_param, const IndexCommonParam& common_param)
         : InnerIndexInterface(pyramid_param, common_param),
-          labels_(allocator_),
           pyramid_param_(pyramid_param),
-          dim_(common_param.dim_),
           common_param_(common_param) {
         searcher_ = std::make_unique<BasicSearcher>(common_param_);
         flatten_interface_ptr_ =
             FlattenInterface::MakeInstance(pyramid_param_->flatten_data_cell_param, common_param_);
         root_ = std::make_shared<IndexNode>(&common_param_, pyramid_param_->graph_param);
-        this->feature_list_ = std::make_shared<IndexFeatureList>();
-        this->init_features();
     }
 
     explicit Pyramid(const ParamPtr& param, const IndexCommonParam& common_param)
@@ -135,45 +131,28 @@ public:
     int64_t
     GetMemoryUsage() const override;
 
-    bool
-    CheckFeature(IndexFeature feature) const override {
-        return this->feature_list_->CheckFeature(feature);
-    }
-
     void
-    InitFeatures() override {
-        this->init_features();
-    }
+    InitFeatures() override;
 
 private:
     void
     resize(int64_t new_max_capacity);
 
-    void
-    init_features();
-
     DatasetPtr
     search_impl(const DatasetPtr& query, int64_t limit, const SearchFunc& search_func) const;
-
-    uint64_t
-    cal_serialize_size() const;
 
 private:
     IndexCommonParam common_param_;
     PyramidParamPtr pyramid_param_{nullptr};
     std::shared_ptr<IndexNode> root_{nullptr};
     FlattenInterfacePtr flatten_interface_ptr_{nullptr};
-    LabelTable labels_;
     std::unique_ptr<VisitedListPool> pool_ = nullptr;
     std::unique_ptr<BasicSearcher> searcher_ = nullptr;
     int64_t max_capacity_{0};
     int64_t cur_element_count_{0};
-    int64_t dim_{0};
 
     std::shared_mutex resize_mutex_;
     std::mutex cur_element_count_mutex_;
-
-    IndexFeatureListPtr feature_list_{nullptr};
 };
 
 }  // namespace vsag
