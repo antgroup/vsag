@@ -165,7 +165,7 @@ HgraphTestIndex::TestGeneral(const TestIndex::IndexPtr& index,
     TestConcurrentKnnSearch(index, dataset, search_param, recall, true);
     TestRangeSearch(index, dataset, search_param, recall, 10, true);
     TestRangeSearch(index, dataset, search_param, recall / 2.0, 5, true);
-    TestFilterSearch(index, dataset, search_param, recall, true);
+    TestFilterSearch(index, dataset, search_param, recall, true, true);
     TestCheckIdExist(index, dataset);
     TestCalcDistanceById(index, dataset);
     TestBatchCalcDistanceById(index, dataset);
@@ -348,7 +348,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex,
     TestConcurrentKnnSearch(index, dataset, search_param, recall, false);
     TestRangeSearch(index, dataset, search_param, recall, 10, false);
     TestRangeSearch(index, dataset, search_param, recall / 2.0, 5, false);
-    TestFilterSearch(index, dataset, search_param, recall, false);
+    TestFilterSearch(index, dataset, search_param, recall, false, true);
     TestCheckIdExist(index, dataset, false);
     TestCalcDistanceById(index, dataset, 2e-6, false);
     TestBatchCalcDistanceById(index, dataset, 2e-6, false);

@@ -112,9 +112,6 @@ public:
                 const std::string& parameters,
                 int64_t limited_size = -1) const {
         FilterPtr filter = nullptr;
-        if (GetNumElements() == 0) {
-            return DatasetImpl::MakeEmptyDataset();
-        }
         return this->RangeSearch(query, radius, parameters, filter, limited_size);
     }
 

@@ -42,9 +42,6 @@ InnerIndexInterface::KnnSearch(const DatasetPtr& query,
     if (filter != nullptr) {
         filter_ptr = std::make_shared<UniqueFilter>(filter);
     }
-    if (GetNumElements() == 0) {
-        return DatasetImpl::MakeEmptyDataset();
-    }
     return this->KnnSearch(query, k, parameters, filter_ptr);
 }
 
@@ -56,9 +53,6 @@ InnerIndexInterface::KnnSearch(const DatasetPtr& query,
     FilterPtr filter_ptr = nullptr;
     if (invalid != nullptr) {
         filter_ptr = std::make_shared<UniqueFilter>(invalid);
-    }
-    if (GetNumElements() == 0) {
-        return DatasetImpl::MakeEmptyDataset();
     }
     return this->KnnSearch(query, k, parameters, filter_ptr);
 }
@@ -73,9 +67,6 @@ InnerIndexInterface::RangeSearch(const DatasetPtr& query,
     if (invalid != nullptr) {
         filter_ptr = std::make_shared<UniqueFilter>(invalid);
     }
-    if (GetNumElements() == 0) {
-        return DatasetImpl::MakeEmptyDataset();
-    }
     return this->RangeSearch(query, radius, parameters, filter_ptr, limited_size);
 }
 
@@ -88,9 +79,6 @@ InnerIndexInterface::RangeSearch(const DatasetPtr& query,
     FilterPtr filter_ptr = nullptr;
     if (filter != nullptr) {
         filter_ptr = std::make_shared<UniqueFilter>(filter);
-    }
-    if (GetNumElements() == 0) {
-        return DatasetImpl::MakeEmptyDataset();
     }
     return this->RangeSearch(query, radius, parameters, filter_ptr, limited_size);
 }
