@@ -42,11 +42,11 @@ parse_diskann_params(vsag::IndexCommonParam index_common_param) {
 
 TEST_CASE("diskann build", "[ut][diskann]") {
     vsag::logger::set_level(vsag::logger::level::debug);
-    vsag::IndexCommonParam commom_param;
-    commom_param.dim_ = 128;
-    commom_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
-    commom_param.metric_ = vsag::MetricType::METRIC_TYPE_L2SQR;
-    vsag::DiskannParameters diskann_obj = parse_diskann_params(commom_param);
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 128;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    common_param.metric_ = vsag::MetricType::METRIC_TYPE_L2SQR;
+    vsag::DiskannParameters diskann_obj = parse_diskann_params(common_param);
     diskann_obj.metric = diskann::Metric::L2;
     diskann_obj.pq_sample_rate = 1.0f;
     diskann_obj.pq_dims = 16;
@@ -56,13 +56,13 @@ TEST_CASE("diskann build", "[ut][diskann]") {
     diskann_obj.use_reference = false;
     diskann_obj.use_preload = false;
 
-    auto index = std::make_shared<vsag::DiskANN>(diskann_obj, commom_param);
+    auto index = std::make_shared<vsag::DiskANN>(diskann_obj, common_param);
 
     int64_t num_elements = 10;
-    auto [ids, vectors] = fixtures::generate_ids_and_vectors(num_elements, commom_param.dim_);
+    auto [ids, vectors] = fixtures::generate_ids_and_vectors(num_elements, common_param.dim_);
 
     SECTION("build with incorrect dim") {
-        int64_t incorrect_dim = commom_param.dim_ - 1;
+        int64_t incorrect_dim = common_param.dim_ - 1;
         auto dataset = vsag::Dataset::Make();
         dataset->Dim(incorrect_dim)
             ->NumElements(num_elements)
@@ -76,7 +76,7 @@ TEST_CASE("diskann build", "[ut][diskann]") {
 
     SECTION("build twice") {
         auto dataset = vsag::Dataset::Make();
-        dataset->Dim(commom_param.dim_)
+        dataset->Dim(common_param.dim_)
             ->NumElements(10)
             ->Ids(ids.data())
             ->Float32Vectors(vectors.data())
@@ -91,11 +91,11 @@ TEST_CASE("diskann build", "[ut][diskann]") {
 
 TEST_CASE("build & search empty index for diskann", "[ut][diskann]") {
     vsag::logger::set_level(vsag::logger::level::debug);
-    vsag::IndexCommonParam commom_param;
-    commom_param.dim_ = 128;
-    commom_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
-    commom_param.metric_ = vsag::MetricType::METRIC_TYPE_L2SQR;
-    vsag::DiskannParameters diskann_obj = parse_diskann_params(commom_param);
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 128;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    common_param.metric_ = vsag::MetricType::METRIC_TYPE_L2SQR;
+    vsag::DiskannParameters diskann_obj = parse_diskann_params(common_param);
     diskann_obj.metric = diskann::Metric::L2;
     diskann_obj.pq_sample_rate = 1.0f;
     diskann_obj.pq_dims = 16;
@@ -105,17 +105,17 @@ TEST_CASE("build & search empty index for diskann", "[ut][diskann]") {
     diskann_obj.use_reference = false;
     diskann_obj.use_preload = false;
 
-    auto index = std::make_shared<vsag::DiskANN>(diskann_obj, commom_param);
+    auto index = std::make_shared<vsag::DiskANN>(diskann_obj, common_param);
 
     auto dataset = vsag::Dataset::Make();
     dataset->NumElements(0);
     auto result = index->Build(dataset);
     REQUIRE(result.has_value());
 
-    auto [ids, vectors] = fixtures::generate_ids_and_vectors(1, commom_param.dim_);
+    auto [ids, vectors] = fixtures::generate_ids_and_vectors(1, common_param.dim_);
     auto one_vector = vsag::Dataset::Make();
     one_vector->NumElements(1)
-        ->Dim(commom_param.dim_)
+        ->Dim(common_param.dim_)
         ->Ids(ids.data())
         ->Float32Vectors(vectors.data())
         ->Owner(false);
@@ -143,11 +143,11 @@ TEST_CASE("build & search empty index for diskann", "[ut][diskann]") {
 
 TEST_CASE("build diskann index with one vector", "[ut][diskann]") {
     vsag::logger::set_level(vsag::logger::level::debug);
-    vsag::IndexCommonParam commom_param;
-    commom_param.dim_ = 128;
-    commom_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
-    commom_param.metric_ = vsag::MetricType::METRIC_TYPE_L2SQR;
-    vsag::DiskannParameters diskann_obj = parse_diskann_params(commom_param);
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 128;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    common_param.metric_ = vsag::MetricType::METRIC_TYPE_L2SQR;
+    vsag::DiskannParameters diskann_obj = parse_diskann_params(common_param);
     diskann_obj.metric = diskann::Metric::L2;
     diskann_obj.pq_sample_rate = 1.0f;
     diskann_obj.pq_dims = 16;
@@ -157,11 +157,11 @@ TEST_CASE("build diskann index with one vector", "[ut][diskann]") {
     diskann_obj.use_reference = false;
     diskann_obj.use_preload = false;
 
-    auto index = std::make_shared<vsag::DiskANN>(diskann_obj, commom_param);
-    auto [ids, vectors] = fixtures::generate_ids_and_vectors(1, commom_param.dim_);
+    auto index = std::make_shared<vsag::DiskANN>(diskann_obj, common_param);
+    auto [ids, vectors] = fixtures::generate_ids_and_vectors(1, common_param.dim_);
     auto one_vector = vsag::Dataset::Make();
     one_vector->NumElements(1)
-        ->Dim(commom_param.dim_)
+        ->Dim(common_param.dim_)
         ->Ids(ids.data())
         ->Float32Vectors(vectors.data())
         ->Owner(false);
@@ -185,11 +185,11 @@ TEST_CASE("build diskann index with one vector", "[ut][diskann]") {
 
 TEST_CASE("diskann knn_search", "[ut][diskann]") {
     vsag::logger::set_level(vsag::logger::level::debug);
-    vsag::IndexCommonParam commom_param;
-    commom_param.dim_ = 128;
-    commom_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
-    commom_param.metric_ = vsag::MetricType::METRIC_TYPE_L2SQR;
-    vsag::DiskannParameters diskann_obj = parse_diskann_params(commom_param);
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 128;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    common_param.metric_ = vsag::MetricType::METRIC_TYPE_L2SQR;
+    vsag::DiskannParameters diskann_obj = parse_diskann_params(common_param);
     diskann_obj.metric = diskann::Metric::L2;
     diskann_obj.pq_sample_rate = 1.0f;
     diskann_obj.pq_dims = 16;
@@ -199,13 +199,13 @@ TEST_CASE("diskann knn_search", "[ut][diskann]") {
     diskann_obj.use_reference = false;
     diskann_obj.use_preload = false;
 
-    auto index = std::make_shared<vsag::DiskANN>(diskann_obj, commom_param);
+    auto index = std::make_shared<vsag::DiskANN>(diskann_obj, common_param);
 
     int64_t num_elements = 100;
-    auto [ids, vectors] = fixtures::generate_ids_and_vectors(num_elements, commom_param.dim_);
+    auto [ids, vectors] = fixtures::generate_ids_and_vectors(num_elements, common_param.dim_);
 
     auto dataset = vsag::Dataset::Make();
-    dataset->Dim(commom_param.dim_)
+    dataset->Dim(common_param.dim_)
         ->NumElements(num_elements)
         ->Ids(ids.data())
         ->Float32Vectors(vectors.data())
@@ -214,7 +214,7 @@ TEST_CASE("diskann knn_search", "[ut][diskann]") {
     REQUIRE(build_result.has_value());
 
     auto query = vsag::Dataset::Make();
-    query->Dim(commom_param.dim_)
+    query->Dim(common_param.dim_)
         ->NumElements(1)
         ->Ids(ids.data())
         ->Float32Vectors(vectors.data())
@@ -223,7 +223,7 @@ TEST_CASE("diskann knn_search", "[ut][diskann]") {
     vsag::JsonType params{{"diskann", {{"ef_search", 100}, {"beam_search", 4}, {"io_limit", 200}}}};
 
     SECTION("index empty") {
-        auto empty_index = std::make_shared<vsag::DiskANN>(diskann_obj, commom_param);
+        auto empty_index = std::make_shared<vsag::DiskANN>(diskann_obj, common_param);
         auto result = empty_index->KnnSearch(query, k, params.dump());
         REQUIRE_FALSE(result.has_value());
         REQUIRE(result.error().type == vsag::ErrorType::INDEX_EMPTY);
@@ -244,7 +244,7 @@ TEST_CASE("diskann knn_search", "[ut][diskann]") {
     SECTION("dimension not equal") {
         auto query2 = vsag::Dataset::Make();
         query2->NumElements(1)
-            ->Dim(commom_param.dim_ - 1)
+            ->Dim(common_param.dim_ - 1)
             ->Float32Vectors(vectors.data())
             ->Owner(false);
         auto result = index->KnnSearch(query2, k, params.dump());
@@ -286,11 +286,11 @@ TEST_CASE("diskann knn_search", "[ut][diskann]") {
 
 TEST_CASE("range_search", "[ut][diskann]") {
     vsag::logger::set_level(vsag::logger::level::debug);
-    vsag::IndexCommonParam commom_param;
-    commom_param.dim_ = 128;
-    commom_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
-    commom_param.metric_ = vsag::MetricType::METRIC_TYPE_L2SQR;
-    vsag::DiskannParameters diskann_obj = parse_diskann_params(commom_param);
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 128;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    common_param.metric_ = vsag::MetricType::METRIC_TYPE_L2SQR;
+    vsag::DiskannParameters diskann_obj = parse_diskann_params(common_param);
     diskann_obj.metric = diskann::Metric::L2;
     diskann_obj.pq_sample_rate = 1.0f;
     diskann_obj.pq_dims = 16;
@@ -300,13 +300,13 @@ TEST_CASE("range_search", "[ut][diskann]") {
     diskann_obj.use_reference = false;
     diskann_obj.use_preload = false;
 
-    auto index = std::make_shared<vsag::DiskANN>(diskann_obj, commom_param);
+    auto index = std::make_shared<vsag::DiskANN>(diskann_obj, common_param);
 
     int64_t num_elements = 100;
-    auto [ids, vectors] = fixtures::generate_ids_and_vectors(num_elements, commom_param.dim_);
+    auto [ids, vectors] = fixtures::generate_ids_and_vectors(num_elements, common_param.dim_);
 
     auto dataset = vsag::Dataset::Make();
-    dataset->Dim(commom_param.dim_)
+    dataset->Dim(common_param.dim_)
         ->NumElements(num_elements)
         ->Ids(ids.data())
         ->Float32Vectors(vectors.data())
@@ -315,7 +315,7 @@ TEST_CASE("range_search", "[ut][diskann]") {
     REQUIRE(build_result.has_value());
 
     auto query = vsag::Dataset::Make();
-    query->Dim(commom_param.dim_)
+    query->Dim(common_param.dim_)
         ->NumElements(1)
         ->Ids(ids.data())
         ->Float32Vectors(vectors.data())
@@ -352,7 +352,7 @@ TEST_CASE("range_search", "[ut][diskann]") {
     }
 
     SECTION("index empty") {
-        auto empty_index = std::make_shared<vsag::DiskANN>(diskann_obj, commom_param);
+        auto empty_index = std::make_shared<vsag::DiskANN>(diskann_obj, common_param);
         auto result = empty_index->RangeSearch(query, radius, params.dump());
         REQUIRE_FALSE(result.has_value());
         REQUIRE(result.error().type == vsag::ErrorType::INDEX_EMPTY);
@@ -361,7 +361,7 @@ TEST_CASE("range_search", "[ut][diskann]") {
     SECTION("invalid parameter radius equals to 0") {
         auto query2 = vsag::Dataset::Make();
         query2->NumElements(1)
-            ->Dim(commom_param.dim_)
+            ->Dim(common_param.dim_)
             ->Float32Vectors(vectors.data())
             ->Owner(false);
         auto result = index->RangeSearch(query2, 0, params.dump());
@@ -371,7 +371,7 @@ TEST_CASE("range_search", "[ut][diskann]") {
     SECTION("invalid parameter radius less than 0") {
         auto query2 = vsag::Dataset::Make();
         query2->NumElements(1)
-            ->Dim(commom_param.dim_)
+            ->Dim(common_param.dim_)
             ->Float32Vectors(vectors.data())
             ->Owner(false);
         auto result = index->RangeSearch(query2, -1, params.dump());
@@ -382,7 +382,7 @@ TEST_CASE("range_search", "[ut][diskann]") {
     SECTION("dimension not equal") {
         auto query2 = vsag::Dataset::Make();
         query2->NumElements(1)
-            ->Dim(commom_param.dim_ - 1)
+            ->Dim(common_param.dim_ - 1)
             ->Float32Vectors(vectors.data())
             ->Owner(false);
         auto result = index->RangeSearch(query2, radius, params.dump());
@@ -393,7 +393,7 @@ TEST_CASE("range_search", "[ut][diskann]") {
     SECTION("query length is not 1") {
         auto query2 = vsag::Dataset::Make();
         query2->NumElements(2)
-            ->Dim(commom_param.dim_)
+            ->Dim(common_param.dim_)
             ->Float32Vectors(vectors.data())
             ->Owner(false);
         auto result = index->RangeSearch(query2, radius, params.dump());
@@ -435,11 +435,11 @@ TEST_CASE("range_search", "[ut][diskann]") {
 
 TEST_CASE("serialize empty index", "[ut][diskann]") {
     vsag::logger::set_level(vsag::logger::level::debug);
-    vsag::IndexCommonParam commom_param;
-    commom_param.dim_ = 128;
-    commom_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
-    commom_param.metric_ = vsag::MetricType::METRIC_TYPE_L2SQR;
-    vsag::DiskannParameters diskann_obj = parse_diskann_params(commom_param);
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 128;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    common_param.metric_ = vsag::MetricType::METRIC_TYPE_L2SQR;
+    vsag::DiskannParameters diskann_obj = parse_diskann_params(common_param);
     diskann_obj.metric = diskann::Metric::L2;
     diskann_obj.pq_sample_rate = 1.0f;
     diskann_obj.pq_dims = 16;
@@ -449,7 +449,7 @@ TEST_CASE("serialize empty index", "[ut][diskann]") {
     diskann_obj.use_reference = false;
     diskann_obj.use_preload = false;
 
-    auto index = std::make_shared<vsag::DiskANN>(diskann_obj, commom_param);
+    auto index = std::make_shared<vsag::DiskANN>(diskann_obj, common_param);
 
     auto result = index->Serialize();
     REQUIRE(result.has_value());
@@ -457,11 +457,11 @@ TEST_CASE("serialize empty index", "[ut][diskann]") {
 
 TEST_CASE("deserialize on not empty index", "[ut][diskann]") {
     vsag::logger::set_level(vsag::logger::level::debug);
-    vsag::IndexCommonParam commom_param;
-    commom_param.dim_ = 128;
-    commom_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
-    commom_param.metric_ = vsag::MetricType::METRIC_TYPE_L2SQR;
-    vsag::DiskannParameters diskann_obj = parse_diskann_params(commom_param);
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 128;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    common_param.metric_ = vsag::MetricType::METRIC_TYPE_L2SQR;
+    vsag::DiskannParameters diskann_obj = parse_diskann_params(common_param);
     diskann_obj.metric = diskann::Metric::L2;
     diskann_obj.pq_sample_rate = 1.0f;
     diskann_obj.pq_dims = 16;
@@ -471,13 +471,13 @@ TEST_CASE("deserialize on not empty index", "[ut][diskann]") {
     diskann_obj.use_reference = false;
     diskann_obj.use_preload = false;
 
-    auto index = std::make_shared<vsag::DiskANN>(diskann_obj, commom_param);
+    auto index = std::make_shared<vsag::DiskANN>(diskann_obj, common_param);
 
     int64_t num_elements = 100;
-    auto [ids, vectors] = fixtures::generate_ids_and_vectors(num_elements, commom_param.dim_);
+    auto [ids, vectors] = fixtures::generate_ids_and_vectors(num_elements, common_param.dim_);
 
     auto dataset = vsag::Dataset::Make();
-    dataset->Dim(commom_param.dim_)
+    dataset->Dim(common_param.dim_)
         ->NumElements(num_elements)
         ->Ids(ids.data())
         ->Float32Vectors(vectors.data())
@@ -495,11 +495,11 @@ TEST_CASE("deserialize on not empty index", "[ut][diskann]") {
 
 TEST_CASE("split building process", "[ut][diskann]") {
     vsag::logger::set_level(vsag::logger::level::debug);
-    vsag::IndexCommonParam commom_param;
-    commom_param.dim_ = 128;
-    commom_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
-    commom_param.metric_ = vsag::MetricType::METRIC_TYPE_L2SQR;
-    vsag::DiskannParameters diskann_obj = parse_diskann_params(commom_param);
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 128;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    common_param.metric_ = vsag::MetricType::METRIC_TYPE_L2SQR;
+    vsag::DiskannParameters diskann_obj = parse_diskann_params(common_param);
     diskann_obj.metric = diskann::Metric::L2;
     diskann_obj.pq_sample_rate = 1.0f;
     diskann_obj.pq_dims = 16;
@@ -510,10 +510,10 @@ TEST_CASE("split building process", "[ut][diskann]") {
     diskann_obj.use_preload = false;
 
     int64_t num_elements = 1000;
-    auto [ids, vectors] = fixtures::generate_ids_and_vectors(num_elements, commom_param.dim_);
+    auto [ids, vectors] = fixtures::generate_ids_and_vectors(num_elements, common_param.dim_);
 
     auto dataset = vsag::Dataset::Make();
-    dataset->Dim(commom_param.dim_)
+    dataset->Dim(common_param.dim_)
         ->NumElements(num_elements)
         ->Ids(ids.data())
         ->Float32Vectors(vectors.data())
@@ -525,7 +525,7 @@ TEST_CASE("split building process", "[ut][diskann]") {
     {
         vsag::Timer timer(partial_time);
         while (not checkpoint.finish) {
-            partial_index = std::make_shared<vsag::DiskANN>(diskann_obj, commom_param);
+            partial_index = std::make_shared<vsag::DiskANN>(diskann_obj, common_param);
             checkpoint = partial_index->ContinueBuild(dataset, checkpoint.data).value();
         }
     }
@@ -536,8 +536,8 @@ TEST_CASE("split building process", "[ut][diskann]") {
     for (int i = 0; i < num_elements; i++) {
         auto query = vsag::Dataset::Make();
         query->NumElements(1)
-            ->Dim(commom_param.dim_)
-            ->Float32Vectors(vectors.data() + i * commom_param.dim_)
+            ->Dim(common_param.dim_)
+            ->Float32Vectors(vectors.data() + i * common_param.dim_)
             ->Owner(false);
         int64_t k = 2;
         if (auto result = partial_index->KnnSearch(query, k, parameters.dump());
@@ -559,15 +559,15 @@ TEST_CASE("split building process", "[ut][diskann]") {
     {
         vsag::Timer timer(full_time);
         std::shared_ptr<vsag::DiskANN> full_index =
-            std::make_shared<vsag::DiskANN>(diskann_obj, commom_param);
+            std::make_shared<vsag::DiskANN>(diskann_obj, common_param);
         full_index->Build(dataset);
     }
     correct = 0;
     for (int i = 0; i < num_elements; i++) {
         auto query = vsag::Dataset::Make();
         query->NumElements(1)
-            ->Dim(commom_param.dim_)
-            ->Float32Vectors(vectors.data() + i * commom_param.dim_)
+            ->Dim(common_param.dim_)
+            ->Float32Vectors(vectors.data() + i * common_param.dim_)
             ->Owner(false);
         int64_t k = 2;
         if (auto result = partial_index->KnnSearch(query, k, parameters.dump());

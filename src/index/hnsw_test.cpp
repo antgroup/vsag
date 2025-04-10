@@ -49,16 +49,16 @@ TEST_CASE("build & add", "[ut][hnsw]") {
     int64_t dim = 128;
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
 
-    IndexCommonParam commom_param;
-    commom_param.dim_ = dim;
-    commom_param.data_type_ = DataTypes::DATA_TYPE_FLOAT;
-    commom_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
-    commom_param.allocator_ = allocator;
+    IndexCommonParam common_param;
+    common_param.dim_ = dim;
+    common_param.data_type_ = DataTypes::DATA_TYPE_FLOAT;
+    common_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
+    common_param.allocator_ = allocator;
 
-    HnswParameters hnsw_obj = parse_hnsw_params(commom_param);
+    HnswParameters hnsw_obj = parse_hnsw_params(common_param);
     hnsw_obj.max_degree = 12;
     hnsw_obj.ef_construction = 100;
-    auto index = std::make_shared<HNSW>(hnsw_obj, commom_param);
+    auto index = std::make_shared<HNSW>(hnsw_obj, common_param);
 
     std::vector<int64_t> ids(1);
     int64_t incorrect_dim = 63;
@@ -88,18 +88,18 @@ TEST_CASE("build with allocator", "[ut][hnsw]") {
     logger::set_level(logger::level::debug);
 
     int64_t dim = 128;
-    IndexCommonParam commom_param;
+    IndexCommonParam common_param;
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
 
-    commom_param.dim_ = dim;
-    commom_param.data_type_ = DataTypes::DATA_TYPE_FLOAT;
-    commom_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
-    commom_param.allocator_ = allocator;
+    common_param.dim_ = dim;
+    common_param.data_type_ = DataTypes::DATA_TYPE_FLOAT;
+    common_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
+    common_param.allocator_ = allocator;
 
-    HnswParameters hnsw_obj = parse_hnsw_params(commom_param);
+    HnswParameters hnsw_obj = parse_hnsw_params(common_param);
     hnsw_obj.max_degree = 12;
     hnsw_obj.ef_construction = 100;
-    auto index = std::make_shared<HNSW>(hnsw_obj, commom_param);
+    auto index = std::make_shared<HNSW>(hnsw_obj, common_param);
     index->InitMemorySpace();
 
     const int64_t num_elements = 10;
@@ -119,16 +119,16 @@ TEST_CASE("knn_search", "[ut][hnsw]") {
     logger::set_level(logger::level::debug);
 
     int64_t dim = 128;
-    IndexCommonParam commom_param;
-    commom_param.dim_ = dim;
-    commom_param.data_type_ = DataTypes::DATA_TYPE_FLOAT;
-    commom_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
-    commom_param.allocator_ = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.dim_ = dim;
+    common_param.data_type_ = DataTypes::DATA_TYPE_FLOAT;
+    common_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
+    common_param.allocator_ = SafeAllocator::FactoryDefaultAllocator();
 
-    HnswParameters hnsw_obj = parse_hnsw_params(commom_param);
+    HnswParameters hnsw_obj = parse_hnsw_params(common_param);
     hnsw_obj.max_degree = 12;
     hnsw_obj.ef_construction = 100;
-    auto index = std::make_shared<HNSW>(hnsw_obj, commom_param);
+    auto index = std::make_shared<HNSW>(hnsw_obj, common_param);
     index->InitMemorySpace();
 
     const int64_t num_elements = 10;
@@ -199,16 +199,16 @@ TEST_CASE("range_search", "[ut][hnsw]") {
     logger::set_level(logger::level::debug);
 
     int64_t dim = 128;
-    IndexCommonParam commom_param;
-    commom_param.dim_ = dim;
-    commom_param.data_type_ = DataTypes::DATA_TYPE_FLOAT;
-    commom_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
-    commom_param.allocator_ = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.dim_ = dim;
+    common_param.data_type_ = DataTypes::DATA_TYPE_FLOAT;
+    common_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
+    common_param.allocator_ = SafeAllocator::FactoryDefaultAllocator();
 
-    HnswParameters hnsw_obj = parse_hnsw_params(commom_param);
+    HnswParameters hnsw_obj = parse_hnsw_params(common_param);
     hnsw_obj.max_degree = 12;
     hnsw_obj.ef_construction = 100;
-    auto index = std::make_shared<HNSW>(hnsw_obj, commom_param);
+    auto index = std::make_shared<HNSW>(hnsw_obj, common_param);
     index->InitMemorySpace();
 
     const int64_t num_elements = 10;
@@ -298,16 +298,16 @@ TEST_CASE("serialize empty index", "[ut][hnsw]") {
     logger::set_level(logger::level::debug);
 
     int64_t dim = 128;
-    IndexCommonParam commom_param;
-    commom_param.dim_ = dim;
-    commom_param.data_type_ = DataTypes::DATA_TYPE_FLOAT;
-    commom_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
-    commom_param.allocator_ = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.dim_ = dim;
+    common_param.data_type_ = DataTypes::DATA_TYPE_FLOAT;
+    common_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
+    common_param.allocator_ = SafeAllocator::FactoryDefaultAllocator();
 
-    HnswParameters hnsw_obj = parse_hnsw_params(commom_param);
+    HnswParameters hnsw_obj = parse_hnsw_params(common_param);
     hnsw_obj.max_degree = 12;
     hnsw_obj.ef_construction = 100;
-    auto index = std::make_shared<HNSW>(hnsw_obj, commom_param);
+    auto index = std::make_shared<HNSW>(hnsw_obj, common_param);
     index->InitMemorySpace();
 
     SECTION("serialize to binaryset") {
@@ -329,17 +329,17 @@ TEST_CASE("deserialize on not empty index", "[ut][hnsw]") {
     logger::set_level(logger::level::debug);
 
     int64_t dim = 128;
-    IndexCommonParam commom_param;
-    commom_param.dim_ = dim;
-    commom_param.data_type_ = DataTypes::DATA_TYPE_FLOAT;
-    commom_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
-    commom_param.allocator_ = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.dim_ = dim;
+    common_param.data_type_ = DataTypes::DATA_TYPE_FLOAT;
+    common_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
+    common_param.allocator_ = SafeAllocator::FactoryDefaultAllocator();
 
-    HnswParameters hnsw_obj = parse_hnsw_params(commom_param);
+    HnswParameters hnsw_obj = parse_hnsw_params(common_param);
     hnsw_obj.max_degree = 12;
     hnsw_obj.ef_construction = 100;
     hnsw_obj.use_conjugate_graph = true;
-    auto index = std::make_shared<HNSW>(hnsw_obj, commom_param);
+    auto index = std::make_shared<HNSW>(hnsw_obj, common_param);
     index->InitMemorySpace();
 
     const int64_t num_elements = 10;
@@ -361,7 +361,7 @@ TEST_CASE("deserialize on not empty index", "[ut][hnsw]") {
         auto voidresult = index->Deserialize(binary_set.value());
         REQUIRE_FALSE(voidresult.has_value());
         REQUIRE(voidresult.error().type == ErrorType::INDEX_NOT_EMPTY);
-        auto another_index = std::make_shared<HNSW>(hnsw_obj, commom_param);
+        auto another_index = std::make_shared<HNSW>(hnsw_obj, common_param);
         another_index->InitMemorySpace();
         auto deserialize_result = another_index->Deserialize(binary_set.value());
         REQUIRE(deserialize_result.has_value());
@@ -386,17 +386,17 @@ TEST_CASE("static hnsw", "[ut][hnsw]") {
     logger::set_level(logger::level::debug);
 
     int64_t dim = 128;
-    IndexCommonParam commom_param;
-    commom_param.dim_ = dim;
-    commom_param.data_type_ = DataTypes::DATA_TYPE_FLOAT;
-    commom_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
-    commom_param.allocator_ = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.dim_ = dim;
+    common_param.data_type_ = DataTypes::DATA_TYPE_FLOAT;
+    common_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
+    common_param.allocator_ = SafeAllocator::FactoryDefaultAllocator();
 
-    HnswParameters hnsw_obj = parse_hnsw_params(commom_param);
+    HnswParameters hnsw_obj = parse_hnsw_params(common_param);
     hnsw_obj.max_degree = 12;
     hnsw_obj.ef_construction = 100;
     hnsw_obj.use_static = true;
-    auto index = std::make_shared<HNSW>(hnsw_obj, commom_param);
+    auto index = std::make_shared<HNSW>(hnsw_obj, common_param);
     index->InitMemorySpace();
 
     const int64_t num_elements = 10;
@@ -433,15 +433,15 @@ TEST_CASE("static hnsw", "[ut][hnsw]") {
     REQUIRE(range_result.error().type == ErrorType::UNSUPPORTED_INDEX_OPERATION);
 
     SECTION("incorrect dim") {
-        IndexCommonParam incorrect_commom_param;
-        incorrect_commom_param.dim_ = 127;
-        incorrect_commom_param.data_type_ = DataTypes::DATA_TYPE_FLOAT;
-        incorrect_commom_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
-        HnswParameters incorrect_hnsw_obj = parse_hnsw_params(incorrect_commom_param);
+        IndexCommonParam incorrect_common_param;
+        incorrect_common_param.dim_ = 127;
+        incorrect_common_param.data_type_ = DataTypes::DATA_TYPE_FLOAT;
+        incorrect_common_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
+        HnswParameters incorrect_hnsw_obj = parse_hnsw_params(incorrect_common_param);
         incorrect_hnsw_obj.use_static = true;
         incorrect_hnsw_obj.max_degree = 12;
         incorrect_hnsw_obj.ef_construction = 100;
-        REQUIRE_THROWS(std::make_shared<HNSW>(incorrect_hnsw_obj, incorrect_commom_param));
+        REQUIRE_THROWS(std::make_shared<HNSW>(incorrect_hnsw_obj, incorrect_common_param));
     }
 
     auto remove_result = index->Remove(ids[0]);
@@ -453,16 +453,16 @@ TEST_CASE("hnsw add vector with duplicated id", "[ut][hnsw]") {
     logger::set_level(logger::level::debug);
     int64_t dim = 128;
 
-    IndexCommonParam commom_param;
-    commom_param.dim_ = dim;
-    commom_param.data_type_ = DataTypes::DATA_TYPE_FLOAT;
-    commom_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
-    commom_param.allocator_ = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.dim_ = dim;
+    common_param.data_type_ = DataTypes::DATA_TYPE_FLOAT;
+    common_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
+    common_param.allocator_ = SafeAllocator::FactoryDefaultAllocator();
 
-    HnswParameters hnsw_obj = parse_hnsw_params(commom_param);
+    HnswParameters hnsw_obj = parse_hnsw_params(common_param);
     hnsw_obj.max_degree = 12;
     hnsw_obj.ef_construction = 100;
-    auto index = std::make_shared<HNSW>(hnsw_obj, commom_param);
+    auto index = std::make_shared<HNSW>(hnsw_obj, common_param);
     index->InitMemorySpace();
 
     std::vector<int64_t> ids{1};
@@ -476,7 +476,7 @@ TEST_CASE("hnsw add vector with duplicated id", "[ut][hnsw]") {
         ->Owner(false);
     auto result = index->Add(first_time);
     REQUIRE(result.has_value());
-    // expect failed id list emtpy
+    // expect failed id list empty
     REQUIRE(result.value().empty());
 
     auto second_time = Dataset::Make();
@@ -495,17 +495,17 @@ TEST_CASE("hnsw add vector with duplicated id", "[ut][hnsw]") {
 TEST_CASE("build with reversed edges", "[ut][hnsw]") {
     logger::set_level(logger::level::debug);
     int64_t dim = 128;
-    IndexCommonParam commom_param;
-    commom_param.dim_ = dim;
-    commom_param.data_type_ = DataTypes::DATA_TYPE_FLOAT;
-    commom_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
-    commom_param.allocator_ = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.dim_ = dim;
+    common_param.data_type_ = DataTypes::DATA_TYPE_FLOAT;
+    common_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
+    common_param.allocator_ = SafeAllocator::FactoryDefaultAllocator();
 
-    HnswParameters hnsw_obj = parse_hnsw_params(commom_param);
+    HnswParameters hnsw_obj = parse_hnsw_params(common_param);
     hnsw_obj.max_degree = 12;
     hnsw_obj.ef_construction = 100;
     hnsw_obj.use_reversed_edges = true;
-    auto index = std::make_shared<HNSW>(hnsw_obj, commom_param);
+    auto index = std::make_shared<HNSW>(hnsw_obj, common_param);
     index->InitMemorySpace();
 
     const int64_t num_elements = 1000;
@@ -536,7 +536,7 @@ TEST_CASE("build with reversed edges", "[ut][hnsw]") {
         in_file.seekg(0, std::ios::end);
         int64_t length = in_file.tellg();
         in_file.seekg(0, std::ios::beg);
-        auto new_index = std::make_shared<HNSW>(hnsw_obj, commom_param);
+        auto new_index = std::make_shared<HNSW>(hnsw_obj, common_param);
         new_index->InitMemorySpace();
         REQUIRE(new_index->Deserialize(in_file).has_value());
         REQUIRE(new_index->CheckGraphIntegrity());
@@ -583,7 +583,7 @@ TEST_CASE("build with reversed edges", "[ut][hnsw]") {
             bs.Set(key, b);
         }
 
-        auto new_index = std::make_shared<HNSW>(hnsw_obj, commom_param);
+        auto new_index = std::make_shared<HNSW>(hnsw_obj, common_param);
         new_index->InitMemorySpace();
         REQUIRE(new_index->Deserialize(bs).has_value());
         REQUIRE(new_index->CheckGraphIntegrity());
@@ -596,17 +596,17 @@ TEST_CASE("feedback with invalid argument", "[ut][hnsw]") {
     int64_t num_vectors = 1000;
     int64_t k = 10;
     int64_t dim = 128;
-    IndexCommonParam commom_param;
-    commom_param.dim_ = dim;
-    commom_param.data_type_ = DataTypes::DATA_TYPE_FLOAT;
-    commom_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
-    commom_param.allocator_ = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.dim_ = dim;
+    common_param.data_type_ = DataTypes::DATA_TYPE_FLOAT;
+    common_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
+    common_param.allocator_ = SafeAllocator::FactoryDefaultAllocator();
 
-    HnswParameters hnsw_obj = parse_hnsw_params(commom_param);
+    HnswParameters hnsw_obj = parse_hnsw_params(common_param);
     hnsw_obj.max_degree = 16;
     hnsw_obj.ef_construction = 200;
     hnsw_obj.use_conjugate_graph = true;
-    auto index = std::make_shared<HNSW>(hnsw_obj, commom_param);
+    auto index = std::make_shared<HNSW>(hnsw_obj, common_param);
     index->InitMemorySpace();
     JsonType search_parameters{
         {"hnsw", {{"ef_search", 200}}},
@@ -638,17 +638,17 @@ TEST_CASE("redundant feedback and empty enhancement", "[ut][hnsw]") {
     int64_t k = 10;
     int64_t dim = 128;
 
-    IndexCommonParam commom_param;
-    commom_param.dim_ = 128;
-    commom_param.data_type_ = DataTypes::DATA_TYPE_FLOAT;
-    commom_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
-    commom_param.allocator_ = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.dim_ = 128;
+    common_param.data_type_ = DataTypes::DATA_TYPE_FLOAT;
+    common_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
+    common_param.allocator_ = SafeAllocator::FactoryDefaultAllocator();
 
-    HnswParameters hnsw_obj = parse_hnsw_params(commom_param);
+    HnswParameters hnsw_obj = parse_hnsw_params(common_param);
     hnsw_obj.max_degree = 16;
     hnsw_obj.ef_construction = 200;
     hnsw_obj.use_conjugate_graph = true;
-    auto index = std::make_shared<HNSW>(hnsw_obj, commom_param);
+    auto index = std::make_shared<HNSW>(hnsw_obj, common_param);
     index->InitMemorySpace();
 
     auto [base_ids, base_vectors] = fixtures::generate_ids_and_vectors(num_base, dim);
@@ -702,16 +702,16 @@ TEST_CASE("feedback and pretrain without use conjugate graph", "[ut][hnsw]") {
     int64_t k = 10;
     int64_t dim = 128;
 
-    IndexCommonParam commom_param;
-    commom_param.dim_ = dim;
-    commom_param.data_type_ = DataTypes::DATA_TYPE_FLOAT;
-    commom_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
-    commom_param.allocator_ = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.dim_ = dim;
+    common_param.data_type_ = DataTypes::DATA_TYPE_FLOAT;
+    common_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
+    common_param.allocator_ = SafeAllocator::FactoryDefaultAllocator();
 
-    HnswParameters hnsw_obj = parse_hnsw_params(commom_param);
+    HnswParameters hnsw_obj = parse_hnsw_params(common_param);
     hnsw_obj.max_degree = 16;
     hnsw_obj.ef_construction = 200;
-    auto index = std::make_shared<HNSW>(hnsw_obj, commom_param);
+    auto index = std::make_shared<HNSW>(hnsw_obj, common_param);
     index->InitMemorySpace();
     auto [base_ids, base_vectors] = fixtures::generate_ids_and_vectors(num_base, dim);
     auto base = Dataset::Make();
@@ -750,17 +750,17 @@ TEST_CASE("feedback and pretrain on empty index", "[ut][hnsw]") {
     int64_t num_query = 1;
     int64_t k = 100;
 
-    IndexCommonParam commom_param;
-    commom_param.dim_ = dim;
-    commom_param.data_type_ = DataTypes::DATA_TYPE_FLOAT;
-    commom_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
-    commom_param.allocator_ = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.dim_ = dim;
+    common_param.data_type_ = DataTypes::DATA_TYPE_FLOAT;
+    common_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
+    common_param.allocator_ = SafeAllocator::FactoryDefaultAllocator();
 
-    HnswParameters hnsw_obj = parse_hnsw_params(commom_param);
+    HnswParameters hnsw_obj = parse_hnsw_params(common_param);
     hnsw_obj.max_degree = 16;
     hnsw_obj.ef_construction = 200;
     hnsw_obj.use_conjugate_graph = true;
-    auto index = std::make_shared<HNSW>(hnsw_obj, commom_param);
+    auto index = std::make_shared<HNSW>(hnsw_obj, common_param);
     index->InitMemorySpace();
 
     auto [base_ids, base_vectors] = fixtures::generate_ids_and_vectors(num_base, dim);
@@ -800,17 +800,17 @@ TEST_CASE("invalid pretrain", "[ut][hnsw]") {
     int64_t k = 100;
     int64_t dim = 128;
 
-    IndexCommonParam commom_param;
-    commom_param.dim_ = dim;
-    commom_param.data_type_ = DataTypes::DATA_TYPE_FLOAT;
-    commom_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
-    commom_param.allocator_ = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.dim_ = dim;
+    common_param.data_type_ = DataTypes::DATA_TYPE_FLOAT;
+    common_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
+    common_param.allocator_ = SafeAllocator::FactoryDefaultAllocator();
 
-    HnswParameters hnsw_obj = parse_hnsw_params(commom_param);
+    HnswParameters hnsw_obj = parse_hnsw_params(common_param);
     hnsw_obj.max_degree = 16;
     hnsw_obj.ef_construction = 200;
     hnsw_obj.use_conjugate_graph = true;
-    auto index = std::make_shared<HNSW>(hnsw_obj, commom_param);
+    auto index = std::make_shared<HNSW>(hnsw_obj, common_param);
     index->InitMemorySpace();
 
     auto [base_ids, base_vectors] = fixtures::generate_ids_and_vectors(num_base, dim);
