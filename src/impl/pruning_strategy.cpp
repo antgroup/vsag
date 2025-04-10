@@ -37,25 +37,25 @@ select_edges_by_heuristic(MaxHeap& edges,
         if (return_list.size() >= max_size) {
             break;
         }
-        std::pair<float, InnerIdType> curent_pair = queue_closest.top();
-        float float_query = -curent_pair.first;
+        std::pair<float, InnerIdType> current_pair = queue_closest.top();
+        float float_query = -current_pair.first;
         queue_closest.pop();
         bool good = true;
 
         for (const auto& second_pair : return_list) {
-            float curdist = flatten->ComputePairVectors(second_pair.second, curent_pair.second);
+            float curdist = flatten->ComputePairVectors(second_pair.second, current_pair.second);
             if (curdist < float_query) {
                 good = false;
                 break;
             }
         }
         if (good) {
-            return_list.emplace_back(curent_pair);
+            return_list.emplace_back(current_pair);
         }
     }
 
-    for (const auto& curent_pair : return_list) {
-        edges.emplace(-curent_pair.first, curent_pair.second);
+    for (const auto& current_pair : return_list) {
+        edges.emplace(-current_pair.first, current_pair.second);
     }
 }
 
@@ -64,7 +64,7 @@ mutually_connect_new_element(InnerIdType cur_c,
                              MaxHeap& top_candidates,
                              const GraphInterfacePtr& graph,
                              const FlattenInterfacePtr& flatten,
-                             const MutexArrayPtr& neighbors_mutexs,
+                             const MutexArrayPtr& neighbors_mutexes,
                              Allocator* allocator) {
     const size_t max_size = graph->MaximumDegree();
     select_edges_by_heuristic(top_candidates, max_size, flatten, allocator);
@@ -89,7 +89,7 @@ mutually_connect_new_element(InnerIdType cur_c,
             throw std::runtime_error("Trying to connect an element to itself");
         }
 
-        LockGuard lock(neighbors_mutexs, selected_neighbor);
+        LockGuard lock(neighbors_mutexes, selected_neighbor);
 
         Vector<InnerIdType> neighbors(allocator);
         graph->GetNeighbors(selected_neighbor, neighbors);

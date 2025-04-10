@@ -20,10 +20,10 @@
 #include "index_common_param.h"
 
 TEST_CASE("create diskann with correct parameter", "[ut][diskann]") {
-    vsag::IndexCommonParam commom_param;
-    commom_param.dim_ = 128;
-    commom_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
-    commom_param.metric_ = vsag::MetricType::METRIC_TYPE_L2SQR;
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 128;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    common_param.metric_ = vsag::MetricType::METRIC_TYPE_L2SQR;
     auto build_parameter_json = R"(
         {
             "max_degree": 16,
@@ -33,5 +33,5 @@ TEST_CASE("create diskann with correct parameter", "[ut][diskann]") {
         }
         )";
     nlohmann::json parsed_params = nlohmann::json::parse(build_parameter_json);
-    vsag::DiskannParameters::FromJson(parsed_params, commom_param);
+    vsag::DiskannParameters::FromJson(parsed_params, common_param);
 }

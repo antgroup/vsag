@@ -800,14 +800,14 @@ public:
         while (queue_closest.size()) {
             if (return_list.size() >= M)
                 break;
-            std::pair<float, tableint> curent_pair = queue_closest.top();
-            float floato_query = -curent_pair.first;
+            std::pair<float, tableint> current_pair = queue_closest.top();
+            float floato_query = -current_pair.first;
             queue_closest.pop();
             bool good = true;
 
             for (std::pair<float, tableint> second_pair : return_list) {
                 float curdist = fstdistfunc_(getDataByInternalId(second_pair.second),
-                                             getDataByInternalId(curent_pair.second),
+                                             getDataByInternalId(current_pair.second),
                                              dist_func_param_);
                 if (curdist < floato_query) {
                     good = false;
@@ -815,12 +815,12 @@ public:
                 }
             }
             if (good) {
-                return_list.push_back(curent_pair);
+                return_list.push_back(current_pair);
             }
         }
 
-        for (std::pair<float, tableint> curent_pair : return_list) {
-            top_candidates.emplace(-curent_pair.first, curent_pair.second);
+        for (std::pair<float, tableint> current_pair : return_list) {
+            top_candidates.emplace(-current_pair.first, current_pair.second);
         }
     }
 

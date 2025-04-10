@@ -614,7 +614,7 @@ DiskANN::range_search(const DatasetPtr& query,
         return std::move(result);
     } catch (const std::invalid_argument& e) {
         LOG_ERROR_AND_RETURNS(ErrorType::INVALID_ARGUMENT,
-                              "falied to perform range_search(invalid argument): ",
+                              "failed to perform range_search(invalid argument): ",
                               e.what());
     } catch (const std::bad_alloc& e) {
         LOG_ERROR_AND_RETURNS(ErrorType::NO_ENOUGH_MEMORY,
@@ -802,7 +802,7 @@ DiskANN::GetEstimateBuildMemory(const int64_t num_elements) const {
     // Memory usage of the compressed PQ vectors.
     estimate_memory_usage +=
         static_cast<int64_t>(disk_pq_dims_ * num_elements * sizeof(uint8_t) * 2);
-    // Memory usage of the PQ centers and chunck offsets.
+    // Memory usage of the PQ centers and chunk offsets.
     estimate_memory_usage +=
         static_cast<int64_t>(256 * dim_ * sizeof(float) * (3 + 1) + dim_ * sizeof(uint32_t));
     return estimate_memory_usage;

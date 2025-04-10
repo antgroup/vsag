@@ -676,14 +676,14 @@ HierarchicalNSW::getNeighborsByHeuristic2(MaxHeap& top_candidates, size_t M) {
     while (not queue_closest.empty()) {
         if (return_list.size() >= M)
             break;
-        std::pair<float, InnerIdType> curent_pair = queue_closest.top();
-        float float_query = -curent_pair.first;
+        std::pair<float, InnerIdType> current_pair = queue_closest.top();
+        float float_query = -current_pair.first;
         queue_closest.pop();
         bool good = true;
 
         for (std::pair<float, InnerIdType> second_pair : return_list) {
             float curdist = fstdistfunc_(getDataByInternalId(second_pair.second),
-                                         getDataByInternalId(curent_pair.second),
+                                         getDataByInternalId(current_pair.second),
                                          dist_func_param_);
             if (curdist < float_query) {
                 good = false;
@@ -691,12 +691,12 @@ HierarchicalNSW::getNeighborsByHeuristic2(MaxHeap& top_candidates, size_t M) {
             }
         }
         if (good) {
-            return_list.emplace_back(curent_pair);
+            return_list.emplace_back(current_pair);
         }
     }
 
-    for (std::pair<float, InnerIdType> curent_pair : return_list) {
-        top_candidates.emplace(-curent_pair.first, curent_pair.second);
+    for (std::pair<float, InnerIdType> current_pair : return_list) {
+        top_candidates.emplace(-current_pair.first, current_pair.second);
     }
 }
 
@@ -1122,11 +1122,11 @@ HierarchicalNSW::modifyInEdges(InnerIdType right_internal_id,
         size_t link_size = getListCount(data);
         auto* links = (InnerIdType*)(data + 1);
         for (int i = 0; i < link_size; ++i) {
-            auto& in_egdes = getEdges(links[i], level);
+            auto& in_edges = getEdges(links[i], level);
             if (is_erase) {
-                in_egdes.erase(wrong_internal_id);
+                in_edges.erase(wrong_internal_id);
             } else {
-                in_egdes.insert(right_internal_id);
+                in_edges.insert(right_internal_id);
             }
         }
     }
