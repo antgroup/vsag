@@ -19,11 +19,13 @@
 #include <string>
 
 #include "flatten_datacell_parameter.h"
+#include "impl/runtime_parameter.h"
 #include "index/index_common_param.h"
 #include "quantization/computer.h"
 #include "stream_reader.h"
 #include "stream_writer.h"
 #include "typing.h"
+#include "vsag/constants.h"
 
 namespace vsag {
 class FlattenInterface;
@@ -72,10 +74,33 @@ public:
     Resize(InnerIdType capacity) = 0;
 
 public:
+    virtual bool
+    SetRuntimeParameters(const UnorderedMap<std::string, ParamValue>& new_params) {
+        bool ret = false;
+        auto iter = new_params.find(PREFETCH_STRIDE_CODE);
+        if (iter != new_params.end()) {
+            prefetch_stride_code_ = std::get<int>(iter->second);
+            ret = true;
+        }
+
+        iter = new_params.find(PREFETCH_DEPTH_CODE);
+        if (iter != new_params.end()) {
+            prefetch_depth_code_ = std::get<int>(iter->second);
+            ret = true;
+        }
+
+        return ret;
+    }
+
     virtual void
     SetMaxCapacity(InnerIdType capacity) {
         this->max_capacity_ = capacity;
     };
+
+    virtual bool
+    Decode(const uint8_t* codes, DataType* vector) {
+        return false;
+    }
 
     [[nodiscard]] virtual const uint8_t*
     GetCodesById(InnerIdType id, bool& need_release) const {
@@ -123,8 +148,8 @@ public:
     InnerIdType total_count_{0};
     InnerIdType max_capacity_{800};
     uint32_t code_size_{0};
-    uint32_t prefetch_jump_code_size_{1};
-    uint32_t prefetch_cache_line_size_{1};
+    uint32_t prefetch_stride_code_{1};
+    uint32_t prefetch_depth_code_{1};
 };
 
 }  // namespace vsag

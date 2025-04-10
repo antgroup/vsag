@@ -229,5 +229,7 @@ private:
 
     ExtraInfoInterfacePtr extra_infos_{nullptr};
     uint64_t extra_info_size_{0};
+
+    std::shared_ptr<Optimizer<BasicSearcher>> optimizer_;
 };
 }  // namespace vsag
