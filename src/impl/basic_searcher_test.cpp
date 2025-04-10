@@ -353,9 +353,9 @@ TEST_CASE("Optimize SQ4", "[ut][BasicOptimizer]") {
     auto searcher = std::make_shared<BasicSearcher>(common);
 
     // searcher-optimizer
-    searcher->SetMockParameters(graph_data_cell, vector_data_cell, pool, search_param, dim);
+    searcher->SetMockParameters(graph_data_cell, vector_data_cell, pool, search_param, dim, 1000);
     auto loss_before = searcher->MockRun();
-    auto optimizer_searcher = std::make_shared<Optimizer<BasicSearcher>>(common, 1);
+    auto optimizer_searcher = std::make_shared<Optimizer<BasicSearcher>>(common);
     optimizer_searcher->RegisterParameter(
         std::make_shared<IntRuntimeParameter>(PREFETCH_DEPTH_CODE, 1, 10));
     optimizer_searcher->RegisterParameter(

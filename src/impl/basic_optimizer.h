@@ -29,7 +29,7 @@ namespace vsag {
 template <typename OptimizableOBJ>
 class Optimizer {
 public:
-    Optimizer(const IndexCommonParam& common_param, uint32_t trials = OPTIMIZE_TRIALS)
+    Optimizer(const IndexCommonParam& common_param)
         : parameters_(common_param.allocator_.get()), best_params_(common_param.allocator_.get()) {
         allocator_ = common_param.allocator_.get();
         std::random_device rd;
@@ -42,11 +42,6 @@ public:
     void
     RegisterParameter(const std::shared_ptr<RuntimeParameter>& runtime_parameter) {
         parameters_.push_back(runtime_parameter);
-    }
-
-    UnorderedMap<std::string, ParamValue>
-    GetBestParameters() const {
-        return best_params_;
     }
 
 private:

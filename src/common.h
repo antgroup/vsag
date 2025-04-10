@@ -40,6 +40,3 @@
 
 constexpr static const int64_t INIT_CAPACITY = 10;
 constexpr static const int64_t MAX_CAPACITY_EXTEND = 10000;
-
-static const uint32_t OPTIMIZE_TRIALS = 1;
-static const uint32_t OPTIMIZE_SEARCHER_SAMPLE_SIZE = 1000;

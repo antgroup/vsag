@@ -351,20 +351,22 @@ BasicSearcher::SetMockParameters(const GraphInterfacePtr& graph,
                                  const FlattenInterfacePtr& flatten,
                                  const std::shared_ptr<VisitedListPool>& vl_pool,
                                  const InnerSearchParam& inner_search_param,
-                                 const uint64_t dim) {
+                                 const uint64_t dim,
+                                 const uint32_t n_trials) {
     mock_graph_ = graph;
     mock_flatten_ = flatten;
     mock_vl_pool_ = vl_pool;
     mock_inner_search_param_ = inner_search_param;
     mock_dim_ = dim;
+    mock_n_trials_ = n_trials;
 }
 
 double
 BasicSearcher::MockRun() const {
-    uint64_t sample_size = std::min(OPTIMIZE_SEARCHER_SAMPLE_SIZE, mock_flatten_->TotalCount());
+    uint64_t n_trials = std::min(mock_n_trials_, mock_flatten_->TotalCount());
 
     double time_cost = 0;
-    for (uint32_t i = 0; i < sample_size; ++i) {
+    for (uint32_t i = 0; i < n_trials; ++i) {
         // init param
         bool release = false;
         const auto* codes = mock_flatten_->GetCodesById(i, release);
