@@ -134,15 +134,14 @@ IVF::Add(const DatasetPtr& base) {
     if (not partition_strategy_->is_trained_) {
         throw VsagException(ErrorType::INTERNAL_ERROR, "ivf index add without train error");
     }
-    auto dim = partition_strategy_->dim_;
     auto num_element = base->GetNumElements();
     const auto* ids = base->GetIds();
     const auto* vectors = base->GetFloat32Vectors();
     auto labels = partition_strategy_->ClassifyDatas(vectors, num_element, 1);
     for (int64_t i = 0; i < num_element; ++i) {
-        bucket_->InsertVector(vectors + i * dim, labels[i], ids[i]);
+        bucket_->InsertVector(vectors + i * dim_, labels[i], ids[i]);
     }
-    this->total_elements_ += num_element;
+    this->total_count_ += num_element;
     return {};
 }
 
@@ -252,12 +251,12 @@ IVF::RangeSearch(const DatasetPtr& query,
 
 int64_t
 IVF::GetNumElements() const {
-    return this->total_elements_;
+    return this->total_count_;
 }
 
 void
 IVF::Serialize(StreamWriter& writer) const {
-    StreamWriter::WriteObj(writer, this->total_elements_);
+    StreamWriter::WriteObj(writer, this->total_count_);
     this->bucket_->Serialize(writer);
     this->partition_strategy_->Serialize(writer);
     this->label_table_->Serialize(writer);
@@ -265,7 +264,7 @@ IVF::Serialize(StreamWriter& writer) const {
 
 void
 IVF::Deserialize(StreamReader& reader) {
-    StreamReader::ReadObj(reader, this->total_elements_);
+    StreamReader::ReadObj(reader, this->total_count_);
     this->bucket_->Deserialize(reader);
     this->partition_strategy_->Deserialize(reader);
     this->label_table_->Deserialize(reader);

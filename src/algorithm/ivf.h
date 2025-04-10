@@ -81,6 +81,6 @@ private:
 
     IVFPartitionStrategyPtr partition_strategy_{nullptr};
 
-    int64_t total_elements_{0};
+    int64_t total_count_{0};
 };
 }  // namespace vsag
