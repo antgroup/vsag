@@ -122,13 +122,13 @@ TEST_CASE("VisitedListPool Basic Test", "[ut][VisitedListPool]") {
                     results.clear();
                 }
             };
-            std::vector<std::shared_ptr<std::thread>> ths;
+            std::vector<std::shared_ptr<std::thread>> threads;
             auto thread_count = 5;
-            ths.reserve(thread_count);
+            threads.reserve(thread_count);
             for (auto i = 0; i < thread_count; ++i) {
-                ths.emplace_back((std::make_shared<std::thread>(func)));
+                threads.emplace_back((std::make_shared<std::thread>(func)));
             }
-            for (auto& thread : ths) {
+            for (auto& thread : threads) {
                 thread->join();
             }
             for (int i = 0; i < 10; ++i) {

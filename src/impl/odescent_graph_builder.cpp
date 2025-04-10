@@ -243,8 +243,8 @@ void
 ODescent::repair_no_in_edge() {
     Vector<int> in_edges_count(data_num_, 0, allocator_);
     for (int i = 0; i < data_num_; ++i) {
-        for (auto& neigbor : graph_[i].neighbors) {
-            in_edges_count[neigbor.id]++;
+        for (auto& neighbor : graph_[i].neighbors) {
+            in_edges_count[neighbor.id]++;
         }
     }
 
@@ -260,8 +260,8 @@ ODescent::repair_no_in_edge() {
                need_replace_loc < odescent_param_->max_degree) {
             uint32_t need_replace_id = link[need_replace_loc].id;
             bool has_connect = false;
-            for (auto& neigbor : graph_[need_replace_id].neighbors) {
-                if (neigbor.id == i) {
+            for (auto& neighbor : graph_[need_replace_id].neighbors) {
+                if (neighbor.id == i) {
                     has_connect = true;
                     break;
                 }
