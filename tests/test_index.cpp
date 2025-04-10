@@ -516,6 +516,15 @@ TestIndex::TestFilterSearch(const TestIndex::IndexPtr& index,
             ->Owner(false);
         tl::expected<DatasetPtr, vsag::Error> res;
         res = index->KnnSearch(query, topk, search_param, dataset->filter_function_);
+        if (support_filter_obj) {
+            auto filter = std::make_shared<FilterObj>(dataset->filter_function_, 1.0F);
+            auto obj_res = index->KnnSearch(query, topk, search_param, filter);
+            if (expected_success) {
+                for (int j = 0; j < topk; ++j) {
+                    REQUIRE(obj_res.value()->GetIds()[j] == res.value()->GetIds()[j]);
+                }
+            }
+        }
         if (not expected_success) {
             if (res.has_value()) {
                 REQUIRE(res.value()->GetDim() == 0);
@@ -527,14 +536,6 @@ TestIndex::TestFilterSearch(const TestIndex::IndexPtr& index,
             return;
         }
         REQUIRE(res.value()->GetDim() == topk);
-        if (support_filter_obj) {
-            auto filter =
-                std::make_shared<FilterObj>(dataset->filter_function_, dataset->valid_ratio_);
-            auto obj_res = index->KnnSearch(query, topk, search_param, filter);
-            for (int j = 0; j < topk; ++j) {
-                REQUIRE(obj_res.value()->GetIds()[j] == res.value()->GetIds()[j]);
-            }
-        }
         if (index->CheckFeature(vsag::SUPPORT_RANGE_SEARCH_WITH_ID_FILTER)) {
             auto threshold = res.value()->GetDistances()[topk - 1];
             auto range_result =
