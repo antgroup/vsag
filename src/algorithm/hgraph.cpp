@@ -276,7 +276,11 @@ HGraph::KnnSearch(const DatasetPtr& query,
     if (iter_ctx == nullptr) {
         auto cur_count = this->bottom_graph_->TotalCount();
         auto* new_ctx = new IteratorFilterContext();
-        new_ctx->init(cur_count, params.ef_search, allocator_);
+        if (auto ret = new_ctx->init(cur_count, params.ef_search, allocator_);
+            not ret.has_value()) {
+            throw vsag::VsagException(ErrorType::INTERNAL_ERROR,
+                                      "failed to init IteratorFilterContext");
+        }
         iter_ctx = new_ctx;
     }
 
@@ -331,10 +335,19 @@ HGraph::KnnSearch(const DatasetPtr& query,
     }
     auto count = static_cast<const int64_t>(search_result.size());
     auto [dataset_results, dists, ids] = CreateFastDataset(count, allocator_);
+    char* extra_infos = nullptr;
+    if (extra_info_size_ > 0) {
+        extra_infos = (char*)allocator_->Allocate(extra_info_size_ * search_result.size());
+        dataset_results->ExtraInfos(extra_infos);
+    }
     for (int64_t j = count - 1; j >= 0; --j) {
         dists[j] = search_result.top().first;
         ids[j] = this->label_table_->GetLabelById(search_result.top().second);
         iter_filter_ctx->SetPoint(search_result.top().second);
+        if (extra_infos != nullptr) {
+            this->extra_infos_->GetExtraInfoById(search_result.top().second,
+                                                 extra_infos + extra_info_size_ * j);
+        }
         search_result.pop();
     }
     iter_filter_ctx->SetOFFFirstUsed();
@@ -623,7 +636,7 @@ HGraph::CalDistanceById(const float* query, const int64_t* ids, int64_t count) c
         for (int64_t i = 0; i < count; ++i) {
             auto iter = this->label_table_->label_remap_.find(ids[i]);
             if (iter == this->label_table_->label_remap_.end()) {
-                logger::error(fmt::format("failed to find id: {}", ids[i]));
+                logger::debug(fmt::format("failed to find id: {}", ids[i]));
                 distances[i] = -1;
                 continue;
             }
