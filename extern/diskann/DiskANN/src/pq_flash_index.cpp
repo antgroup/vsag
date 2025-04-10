@@ -1892,6 +1892,7 @@ int64_t PQFlashIndex<T, LabelT>::cached_beam_search_memory(const T *query, const
             bool succeed = true;
             std::mutex mutex;
             std::string error_message;
+
             CallBack callBack = [&succeed, &promise, &remaining_ops, &error_message, &mutex] (vsag::IOErrorCode code, const std::string& message) {
                 std::lock_guard<std::mutex> lock(mutex);
                 if (code != vsag::IOErrorCode::IO_SUCCESS) {
@@ -1902,6 +1903,7 @@ int64_t PQFlashIndex<T, LabelT>::cached_beam_search_memory(const T *query, const
                     promise.set_value(succeed);
                 }
             };
+            
             reader->read(sorted_read_reqs, true, callBack);
             bool final_success = future.get();
             if (not final_success) {
