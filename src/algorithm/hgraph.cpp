@@ -76,7 +76,7 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
     }
     this->init_features();
 
-    optimizer_ = std::make_shared<Optimizer<BasicSearcher>>(common_param, 1);
+    optimizer_ = std::make_shared<Optimizer<BasicSearcher>>(common_param);
 }
 void
 HGraph::Train(const DatasetPtr& base) {

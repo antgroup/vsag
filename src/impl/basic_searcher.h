@@ -31,6 +31,8 @@
 
 namespace vsag {
 
+static const uint32_t OPTIMIZE_SEARCHER_SAMPLE_SIZE = 10000;
+
 enum InnerSearchMode { KNN_SEARCH = 1, RANGE_SEARCH = 2 };
 
 class InnerSearchParam {
@@ -90,7 +92,8 @@ public:
                       const FlattenInterfacePtr& flatten,
                       const std::shared_ptr<VisitedListPool>& vl_pool,
                       const InnerSearchParam& inner_search_param,
-                      const uint64_t dim);
+                      const uint64_t dim,
+                      const uint32_t n_trials = OPTIMIZE_SEARCHER_SAMPLE_SIZE);
 
     virtual double
     MockRun() const;
@@ -136,6 +139,7 @@ private:
     std::shared_ptr<VisitedListPool> mock_vl_pool_{nullptr};
     InnerSearchParam mock_inner_search_param_;
     uint64_t mock_dim_{0};
+    uint32_t mock_n_trials_{1};
 
     // runtime parameters
     uint32_t prefetch_stride_visit_{3};
