@@ -1890,11 +1890,9 @@ int64_t PQFlashIndex<T, LabelT>::cached_beam_search_memory(const T *query, const
             auto future = promise.get_future();
             std::atomic<int> remaining_ops(sorted_read_reqs.size());
             bool succeed = true;
-            std::mutex mutex;
             std::string error_message;
 
-            CallBack callBack = [&succeed, &promise, &remaining_ops, &error_message, &mutex] (vsag::IOErrorCode code, const std::string& message) {
-                std::lock_guard<std::mutex> lock(mutex);
+            CallBack callBack = [&succeed, &promise, &remaining_ops, &error_message] (vsag::IOErrorCode code, const std::string& message) {
                 if (code != vsag::IOErrorCode::IO_SUCCESS) {
                     succeed = false;
                     error_message = message;
