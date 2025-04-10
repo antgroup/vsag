@@ -263,7 +263,8 @@ HierarchicalNSW::updateConnections(InnerIdType internal_id,
                                    const vsag::Vector<InnerIdType>& cand_neighbors,
                                    int level,
                                    bool is_update) {
-    auto link_data = getLinklistAtLevelWithLock(internal_id, level);
+    std::shared_ptr<char[]> link_data = std::shared_ptr<char[]>(new char[size_links_level0_]);
+    getLinklistAtLevel(internal_id, level, link_data.get());
     linklistsizeint* ll_cur = (linklistsizeint*)link_data.get();
 
     auto cur_size = getListCount(ll_cur);
@@ -291,9 +292,10 @@ bool
 HierarchicalNSW::checkReverseConnection() {
     int edge_count = 0;
     uint64_t reversed_edge_count = 0;
+    std::shared_ptr<char[]> link_data = std::shared_ptr<char[]>(new char[size_links_level0_]);
     for (int internal_id = 0; internal_id < cur_element_count_; ++internal_id) {
         for (int level = 0; level <= element_levels_[internal_id]; ++level) {
-            auto link_data = getLinklistAtLevelWithLock(internal_id, level);
+            getLinklistAtLevel(internal_id, level, link_data.get());
             unsigned int* data = (unsigned int*)link_data.get();
             auto link_list = data + 1;
             auto size = getListCount(data);
@@ -372,6 +374,7 @@ HierarchicalNSW::searchBaseLayer(InnerIdType ep_id, const void* data_point, int 
     }
     visited_array[ep_id] = visited_array_tag;
 
+    std::shared_ptr<char[]> link_data = std::shared_ptr<char[]>(new char[size_links_level0_]);
     while (not candidateSet.empty()) {
         std::pair<float, InnerIdType> curr_el_pair = candidateSet.top();
         if ((-curr_el_pair.first) > lower_bound && top_candidates.size() == ef_construction_) {
@@ -381,7 +384,7 @@ HierarchicalNSW::searchBaseLayer(InnerIdType ep_id, const void* data_point, int 
 
         InnerIdType curNodeNum = curr_el_pair.second;
 
-        auto link_data = getLinklistAtLevelWithLock(curNodeNum, layer);
+        getLinklistAtLevel(curNodeNum, layer, link_data.get());
         int* data =
             (int*)
                 link_data.get();  // = (int *)(linkList0_ + curNodeNum * size_links_per_element0_);
@@ -477,6 +480,7 @@ HierarchicalNSW::searchBaseLayerST(InnerIdType ep_id,
         visited_array[ep_id] = visited_array_tag;
     }
 
+    std::shared_ptr<char[]> link_data = std::shared_ptr<char[]>(new char[size_links_level0_]);
     while (not candidate_set.empty()) {
         std::pair<float, InnerIdType> current_node_pair = candidate_set.top();
 
@@ -487,7 +491,7 @@ HierarchicalNSW::searchBaseLayerST(InnerIdType ep_id,
         candidate_set.pop();
 
         InnerIdType current_node_id = current_node_pair.second;
-        auto link_data = getLinklistAtLevelWithLock(current_node_id, 0);
+        getLinklistAtLevel(current_node_id, 0, link_data.get());
         int* data = (int*)link_data.get();
         size_t size = getListCount((linklistsizeint*)data);
         //                bool cur_node_deleted = isMarkedDeleted(current_node_id);
@@ -592,13 +596,14 @@ HierarchicalNSW::searchBaseLayerST(InnerIdType ep_id,
     visited_array[ep_id] = visited_array_tag;
     uint64_t visited_count = 0;
 
+    std::shared_ptr<char[]> link_data = std::shared_ptr<char[]>(new char[size_links_level0_]);
     while (not candidate_set.empty()) {
         std::pair<float, InnerIdType> current_node_pair = candidate_set.top();
 
         candidate_set.pop();
 
         InnerIdType current_node_id = current_node_pair.second;
-        auto link_data = getLinklistAtLevelWithLock(current_node_id, 0);
+        getLinklistAtLevel(current_node_id, 0, link_data.get());
         int* data = (int*)link_data.get();
         size_t size = getListCount((linklistsizeint*)data);
         //                bool cur_node_deleted = isMarkedDeleted(current_node_id);
@@ -722,8 +727,9 @@ HierarchicalNSW::mutuallyConnectNewElement(InnerIdType cur_c,
 
     updateConnections(cur_c, selectedNeighbors, level, isUpdate);
 
+    std::shared_ptr<char[]> ll_other_data = std::shared_ptr<char[]>(new char[size_links_level0_]);
     for (unsigned int selectedNeighbor : selectedNeighbors) {
-        auto ll_other_data = getLinklistAtLevelWithLock(selectedNeighbor, level);
+        getLinklistAtLevel(selectedNeighbor, level, ll_other_data.get());
         linklistsizeint* ll_other = (linklistsizeint*)ll_other_data.get();
 
         size_t sz_link_list_other = getListCount(ll_other);
@@ -997,7 +1003,9 @@ HierarchicalNSW::DeserializeImpl(StreamReader& reader, SpaceInterface* s, size_t
     if (use_reversed_edges_) {
         for (int internal_id = 0; internal_id < cur_element_count_; ++internal_id) {
             for (int level = 0; level <= element_levels_[internal_id]; ++level) {
-                auto link_data = getLinklistAtLevelWithLock(internal_id, level);
+                std::shared_ptr<char[]> link_data =
+                    std::shared_ptr<char[]>(new char[size_links_level0_]);
+                getLinklistAtLevel(internal_id, level, link_data.get());
                 unsigned int* data = (unsigned int*)link_data.get();
                 auto link_list = data + 1;
                 auto size = getListCount(data);
@@ -1406,11 +1414,13 @@ HierarchicalNSW::addPoint(const void* data_point, LabelType label, int level) {
         if (curlevel < maxlevelcopy) {
             float curdist =
                 fstdistfunc_(data_point, getDataByInternalId(currObj), dist_func_param_);
+            std::shared_ptr<char[]> link_data =
+                std::shared_ptr<char[]>(new char[size_links_level0_]);
             for (int lev = maxlevelcopy; lev > curlevel; lev--) {
                 bool changed = true;
                 while (changed) {
                     changed = false;
-                    auto link_data = getLinklistAtLevelWithLock(currObj, lev);
+                    getLinklistAtLevel(currObj, lev, link_data.get());
                     auto* data = (unsigned int*)link_data.get();
                     int size = getListCount(data);
 
@@ -1506,11 +1516,12 @@ HierarchicalNSW::searchKnn(const void* query_data,
         }
 
         float curdist = fstdistfunc_(query_data, getDataByInternalId(currObj), dist_func_param_);
+        std::shared_ptr<char[]> link_data = std::shared_ptr<char[]>(new char[size_links_level0_]);
         for (int level = max_level_; level > 0; level--) {
             bool changed = true;
             while (changed) {
                 changed = false;
-                auto link_data = getLinklistAtLevelWithLock(currObj, level);
+                getLinklistAtLevel(currObj, level, link_data.get());
                 auto* data = (unsigned int*)link_data.get();
                 int size = getListCount(data);
                 //            metric_hops_++;
@@ -1581,11 +1592,12 @@ HierarchicalNSW::searchRange(const void* query_data,
     }
     float curdist = fstdistfunc_(query_data, getDataByInternalId(currObj), dist_func_param_);
 
+    std::shared_ptr<char[]> link_data = std::shared_ptr<char[]>(new char[size_links_level0_]);
     for (int level = max_level_; level > 0; level--) {
         bool changed = true;
         while (changed) {
             changed = false;
-            auto link_data = getLinklistAtLevelWithLock(currObj, level);
+            getLinklistAtLevel(currObj, level, link_data.get());
             auto* data = (unsigned int*)link_data.get();
             int size = getListCount(data);
             metric_hops_++;
