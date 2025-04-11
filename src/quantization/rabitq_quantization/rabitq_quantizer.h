@@ -26,6 +26,7 @@
 #include "index/index_common_param.h"
 #include "inner_string_params.h"
 #include "quantization/quantizer.h"
+#include "quantization/scalar_quantization/sq4_uniform_quantizer.h"
 #include "rabitq_quantizer_parameter.h"
 #include "simd/normalize.h"
 #include "simd/rabitq_simd.h"
@@ -46,7 +47,10 @@ public:
     using norm_type = float;
     using error_type = float;
 
-    explicit RaBitQuantizer(int dim, uint64_t pca_dim, Allocator* allocator);
+    explicit RaBitQuantizer(int dim,
+                            uint64_t pca_dim,
+                            uint64_t num_bits_per_dim_query,
+                            Allocator* allocator);
 
     explicit RaBitQuantizer(const RaBitQuantizerParamPtr& param,
                             const IndexCommonParam& common_param);
@@ -100,6 +104,13 @@ public:
         return QUANTIZATION_TYPE_VALUE_RABITQ;
     }
 
+public:
+    void
+    ReOrderSQ4(const uint8_t* input, uint8_t* output) const;
+
+    void
+    RecoverOrderSQ4(const uint8_t* output, uint8_t* input) const;
+
 private:
     inline float
     L2_UBE(float norm_base_raw, float norm_query_raw, float est_ip_norm) const {
@@ -124,7 +135,8 @@ private:
     std::uint64_t pca_dim_{0};
 
     // query layout
-    uint64_t query_code_size_{0};  // TODO(ZXY): support various type of query (FP32, SQ4...)
+    uint64_t num_bits_per_dim_query_{32};
+    uint64_t query_code_size_{0};
     uint64_t query_offset_norm_{0};
 
     /***
@@ -136,7 +148,10 @@ private:
 };
 
 template <MetricType metric>
-RaBitQuantizer<metric>::RaBitQuantizer(int dim, uint64_t pca_dim, Allocator* allocator)
+RaBitQuantizer<metric>::RaBitQuantizer(int dim,
+                                       uint64_t pca_dim,
+                                       uint64_t num_bits_per_dim_query,
+                                       Allocator* allocator)
     : Quantizer<RaBitQuantizer<metric>>(dim, allocator) {
     static_assert(metric == MetricType::METRIC_TYPE_L2SQR, "Unsupported metric type");
 
@@ -174,7 +189,17 @@ RaBitQuantizer<metric>::RaBitQuantizer(int dim, uint64_t pca_dim, Allocator* all
     this->code_size_ += ((sizeof(error_type) + align_size - 1) / align_size) * align_size;
 
     // query code layout
-    this->query_code_size_ = ((sizeof(DataType) * this->dim_) / align_size) * align_size;
+    num_bits_per_dim_query_ = num_bits_per_dim_query;
+    if (num_bits_per_dim_query_ == 4) {
+        // Re-order the SQ4U Code Layout (align with 8 bits)
+        // e.g., for a float query with dim == 4:   [1, 2, 4, 8]
+        //       suppose original SQ4U code is:     [0001 0010, 0100 1000]  (0001 is 4)
+        //       then, the re-ordered code is:      [1000 0100, 0010 0001]
+        auto sq_code_size = (this->dim_ + 7) / 8 * num_bits_per_dim_query_;
+        this->query_code_size_ = (sq_code_size / align_size) * align_size;
+    } else {
+        this->query_code_size_ = ((sizeof(DataType) * this->dim_) / align_size) * align_size;
+    }
     query_offset_norm_ = this->query_code_size_;
     this->query_code_size_ += ((sizeof(norm_type) + align_size - 1) / align_size) * align_size;
 }
@@ -182,7 +207,10 @@ RaBitQuantizer<metric>::RaBitQuantizer(int dim, uint64_t pca_dim, Allocator* all
 template <MetricType metric>
 RaBitQuantizer<metric>::RaBitQuantizer(const RaBitQuantizerParamPtr& param,
                                        const IndexCommonParam& common_param)
-    : RaBitQuantizer<metric>(common_param.dim_, param->pca_dim_, common_param.allocator_.get()){};
+    : RaBitQuantizer<metric>(common_param.dim_,
+                             param->pca_dim_,
+                             param->num_bits_per_dim_query_,
+                             common_param.allocator_.get()){};
 
 template <MetricType metric>
 RaBitQuantizer<metric>::RaBitQuantizer(const QuantizerParamPtr& param,
@@ -381,6 +409,60 @@ RaBitQuantizer<metric>::ComputeImpl(const uint8_t* codes1, const uint8_t* codes2
 
 template <MetricType metric>
 void
+RaBitQuantizer<metric>::ReOrderSQ4(const uint8_t* input, uint8_t* output) const {
+    // note that the codesize of input is different from output
+    std::memset(output, 0, query_code_size_);
+
+    // output: align dim bits with 8 bits (1 byte)
+    uint64_t aligned_block_size = (this->dim_ + 7) / 8 * 8;
+
+    for (uint64_t bit_pos = 0; bit_pos < num_bits_per_dim_query_; ++bit_pos) {
+        for (uint64_t d = 0; d < this->dim_; d++) {
+            // extract the bit
+            uint8_t bit_value = (input[d / 2] >> (((d + 1) % 2) * 4 + bit_pos)) & 0x1;
+
+            // calculate the position
+            uint64_t output_bit_pos = bit_pos * aligned_block_size + d;
+            uint64_t output_byte_i = output_bit_pos / 8;
+            uint64_t output_bit_i = output_bit_pos % 8;
+
+            // set the bit
+            output[output_byte_i] |= (bit_value << (7 - output_bit_i));
+        }
+    }
+}
+
+template <MetricType metric>
+void
+RaBitQuantizer<metric>::RecoverOrderSQ4(const uint8_t* output, uint8_t* input) const {
+    // note that the codesize of input is different from output
+    std::memset(input, 0, (this->dim_ + 1) / 2);
+
+    // output: align dim bits with 8 bits (1 byte)
+    uint64_t aligned_block_size = (this->dim_ + 7) / 8 * 8;
+
+    for (uint64_t d = 0; d < this->dim_; ++d) {
+        for (uint64_t bit_pos = 0; bit_pos < num_bits_per_dim_query_; ++bit_pos) {
+            // calculate the position in the reordered output
+            uint64_t output_bit_pos = bit_pos * aligned_block_size + d;
+            uint64_t output_byte_i = output_bit_pos / 8;
+            uint64_t output_bit_i = output_bit_pos % 8;
+
+            // extract the bit
+            uint8_t bit_value = (output[output_byte_i] >> (7 - output_bit_i)) & 0x1;
+
+            // calculate the position
+            uint64_t input_byte_i = d / 2;
+            uint64_t input_bit_i = ((d + 1) % 2) * 4 + bit_pos;
+
+            // set the bit
+            input[input_byte_i] |= (bit_value << input_bit_i);
+        }
+    }
+}
+
+template <MetricType metric>
+void
 RaBitQuantizer<metric>::ProcessQueryImpl(const DataType* query,
                                          Computer<RaBitQuantizer>& computer) const {
     try {
@@ -390,6 +472,7 @@ RaBitQuantizer<metric>::ProcessQueryImpl(const DataType* query,
 
         Vector<DataType> pca_data(this->dim_, 0, this->allocator_);
         Vector<DataType> transformed_data(this->dim_, 0, this->allocator_);
+        Vector<DataType> normed_data(this->dim_, 0, this->allocator_);
 
         // 1. pca
         if (pca_dim_ != this->original_dim_) {
@@ -403,10 +486,24 @@ RaBitQuantizer<metric>::ProcessQueryImpl(const DataType* query,
 
         // 3. norm
         float query_norm = NormalizeWithCentroid(
-            transformed_data.data(), centroid_.data(), (DataType*)computer.buf_, this->dim_);
+            transformed_data.data(), centroid_.data(), normed_data.data(), this->dim_);
 
         // 4. store norm
         *(norm_type*)(computer.buf_ + query_offset_norm_) = query_norm;
+
+        // 5. query quantization
+        if (num_bits_per_dim_query_ == 4) {
+            // sq4 quantization
+            Vector<uint8_t> tmp_codes(this->query_code_size_, 0, this->allocator_);
+            SQ4UniformQuantizer<metric> sq4_quantizer(this->dim_, this->allocator_);
+            sq4_quantizer.Train(query, 1);
+            sq4_quantizer.EncodeOneImpl(query, tmp_codes.data());
+
+            // re-order
+            ReOrderSQ4(tmp_codes.data(), computer.buf_);
+        } else {
+            memcpy(computer.buf_, normed_data.data(), query_code_size_);
+        }
     } catch (std::bad_alloc& e) {
         logger::error("bad alloc when init computer buf");
         throw e;
