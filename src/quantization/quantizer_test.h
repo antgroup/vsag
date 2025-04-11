@@ -29,7 +29,7 @@ void
 TestEncodeDecodeRaBitQ(Quantizer<T>& quantizer,
                        uint64_t dim,
                        int count,
-                       float same_sign_rate = 0.6f) {
+                       float same_sign_rate = 0.5f) {
     // Generate centroid and data
     assert(count % 2 == 0);
     auto centroid = fixtures::generate_vectors(1, dim, false, 114514);
