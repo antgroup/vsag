@@ -37,7 +37,8 @@ TEST_CASE("RaBitQ Basic Test", "[ut][RaBitQuantizer]") {
         for (auto count : counts) {
             auto allocator = SafeAllocator::FactoryDefaultAllocator();
             auto vecs = fixtures::generate_vectors(count, dim);
-            RaBitQuantizer<MetricType::METRIC_TYPE_L2SQR> quantizer(dim, pca_dim, allocator.get());
+            RaBitQuantizer<MetricType::METRIC_TYPE_L2SQR> quantizer(
+                dim, pca_dim, 32, allocator.get());
 
             // name
             REQUIRE(quantizer.NameImpl() == QUANTIZATION_TYPE_VALUE_RABITQ);
@@ -54,7 +55,7 @@ TEST_CASE("RaBitQ Encode and Decode", "[ut][RaBitQuantizer]") {
     for (auto dim : dims) {
         for (auto count : counts) {
             auto allocator = SafeAllocator::FactoryDefaultAllocator();
-            RaBitQuantizer<MetricType::METRIC_TYPE_L2SQR> quantizer(dim, dim, allocator.get());
+            RaBitQuantizer<MetricType::METRIC_TYPE_L2SQR> quantizer(dim, dim, 32, allocator.get());
 
             TestEncodeDecodeRaBitQ<RaBitQuantizer<MetricType::METRIC_TYPE_L2SQR>>(
                 quantizer, dim, count);
@@ -73,7 +74,7 @@ TEST_CASE("RaBitQ Compute", "[ut][RaBitQuantizer]") {
         }
         for (auto count : counts) {
             auto allocator = SafeAllocator::FactoryDefaultAllocator();
-            RaBitQuantizer<MetricType::METRIC_TYPE_L2SQR> quantizer(dim, dim, allocator.get());
+            RaBitQuantizer<MetricType::METRIC_TYPE_L2SQR> quantizer(dim, dim, 32, allocator.get());
 
             TestComputer<RaBitQuantizer<MetricType::METRIC_TYPE_L2SQR>,
                          MetricType::METRIC_TYPE_L2SQR>(quantizer,
@@ -102,8 +103,8 @@ TEST_CASE("RaBitQ Serialize and Deserialize", "[ut][RaBitQuantizer]") {
         }
         for (auto count : counts) {
             auto allocator = SafeAllocator::FactoryDefaultAllocator();
-            RaBitQuantizer<MetricType::METRIC_TYPE_L2SQR> quantizer1(dim, dim, allocator.get());
-            RaBitQuantizer<MetricType::METRIC_TYPE_L2SQR> quantizer2(dim, dim, allocator.get());
+            RaBitQuantizer<MetricType::METRIC_TYPE_L2SQR> quantizer1(dim, dim, 32, allocator.get());
+            RaBitQuantizer<MetricType::METRIC_TYPE_L2SQR> quantizer2(dim, dim, 32, allocator.get());
 
             TestSerializeAndDeserialize<RaBitQuantizer<MetricType::METRIC_TYPE_L2SQR>,
                                         MetricType::METRIC_TYPE_L2SQR>(quantizer1,
@@ -117,4 +118,34 @@ TEST_CASE("RaBitQ Serialize and Deserialize", "[ut][RaBitQuantizer]") {
                                                                        true);
         }
     }
+}
+
+TEST_CASE("RaBitQ Query SQ4 Transform", "[ut][RaBitQuantizer]") {
+    int dim = 5;
+    uint64_t num_bits_per_dim_query = 4;
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+
+    RaBitQuantizer<MetricType::METRIC_TYPE_L2SQR> quantizer(
+        dim, dim, num_bits_per_dim_query, allocator.get());
+
+    // input  [0001 0010, 0100 1000, 1111 0000]
+    // padding 1 for dim 6
+    std::vector<uint8_t> input = {0x12, 0x48, 0xf0};
+
+    // output [1000 1000, 0100 1000, 0010 1000, 0001 1000],
+    // align with 8 bits (padding 0 for resident 3 dim)
+    // then, will padding 4 bytes for storing norm
+    std::vector<uint8_t> expected_output = {0x88, 0x48, 0x28, 0x18};
+    std::vector<uint8_t> output(8, 0);
+    std::vector<uint8_t> recovered_input(3, 0);
+
+    // reorder the input
+    quantizer.ReOrderSQ4(input.data(), output.data());
+    auto is_consistent = std::memcmp(expected_output.data(), output.data(), expected_output.size());
+    REQUIRE(is_consistent == 0);
+
+    // recover the original order
+    quantizer.RecoverOrderSQ4(output.data(), recovered_input.data());
+    is_consistent = std::memcmp(recovered_input.data(), input.data(), input.size());
+    REQUIRE(is_consistent == 0);
 }
