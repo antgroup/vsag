@@ -179,10 +179,6 @@ HGraph::KnnSearch(const DatasetPtr& query,
                   int64_t k,
                   const std::string& parameters,
                   const FilterPtr& filter) const {
-    std::shared_ptr<CommonInnerIdFilter> ft = nullptr;
-    if (filter != nullptr) {
-        ft = std::make_shared<CommonInnerIdFilter>(filter, *this->label_table_);
-    }
     int64_t query_dim = query->GetDim();
     CHECK_ARGUMENT(query_dim == dim_,
                    fmt::format("query.dim({}) must be equal to index.dim({})", query_dim, dim_));
@@ -207,6 +203,14 @@ HGraph::KnnSearch(const DatasetPtr& query,
     }
 
     auto params = HGraphSearchParameters::FromJson(parameters);
+    FilterPtr ft = nullptr;
+    if (filter != nullptr) {
+        if (params.use_extra_info_filter) {
+            ft = std::make_shared<CommonExtraInfoFilter>(filter, this->extra_infos_);
+        } else {
+            ft = std::make_shared<CommonInnerIdFilter>(filter, *this->label_table_);
+        }
+    }
 
     search_param.ef = std::max(params.ef_search, k);
     search_param.is_inner_id_allowed = ft;
@@ -255,10 +259,6 @@ HGraph::KnnSearch(const DatasetPtr& query,
     if (GetNumElements() == 0) {
         return DatasetImpl::MakeEmptyDataset();
     }
-    std::shared_ptr<CommonInnerIdFilter> ft = nullptr;
-    if (filter != nullptr) {
-        ft = std::make_shared<CommonInnerIdFilter>(filter, *this->label_table_);
-    }
     int64_t query_dim = query->GetDim();
     CHECK_ARGUMENT(query_dim == dim_,
                    fmt::format("query.dim({}) must be equal to index.dim({})", query_dim, dim_));
@@ -270,6 +270,15 @@ HGraph::KnnSearch(const DatasetPtr& query,
     CHECK_ARGUMENT(query->GetNumElements() == 1, "query dataset should contain 1 vector only");
 
     auto params = HGraphSearchParameters::FromJson(parameters);
+
+    FilterPtr ft = nullptr;
+    if (filter != nullptr) {
+        if (params.use_extra_info_filter) {
+            ft = std::make_shared<CommonExtraInfoFilter>(filter, this->extra_infos_);
+        } else {
+            ft = std::make_shared<CommonInnerIdFilter>(filter, *this->label_table_);
+        }
+    }
 
     if (iter_ctx == nullptr) {
         auto cur_count = this->bottom_graph_->TotalCount();
@@ -826,6 +835,7 @@ HGraph::init_features() {
 
     if (this->extra_infos_ != nullptr) {
         this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_GET_EXTRA_INFO_BY_ID);
+        this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_KNN_SEARCH_WITH_EX_FILTER);
     }
 }
 
