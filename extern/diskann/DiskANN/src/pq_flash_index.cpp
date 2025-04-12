@@ -1889,19 +1889,21 @@ int64_t PQFlashIndex<T, LabelT>::cached_beam_search_memory(const T *query, const
             std::promise<bool> promise;
             auto future = promise.get_future();
             std::atomic<int> remaining_ops(sorted_read_reqs.size());
-            bool succeed = true;
+            std::atomic<bool> succeed(true);
             std::string error_message;
 
             CallBack callBack = [&succeed, &promise, &remaining_ops, &error_message] (vsag::IOErrorCode code, const std::string& message) {
                 if (code != vsag::IOErrorCode::IO_SUCCESS) {
-                    succeed = false;
-                    error_message = message;
+                    bool expected = true;
+                    if (succeed.compare_exchange_strong(expected, false)) {
+                        error_message = message;
+                    }
                 }
                 if (--remaining_ops == 0) {
-                    promise.set_value(succeed);
+                    promise.set_value(succeed.load());
                 }
             };
-            
+
             reader->read(sorted_read_reqs, true, callBack);
             bool final_success = future.get();
             if (not final_success) {
