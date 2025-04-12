@@ -513,7 +513,8 @@ HGraph::serialize_basic_info(StreamWriter& writer) const {
     StreamWriter::WriteObj(writer, this->use_reorder_);
     StreamWriter::WriteObj(writer, this->dim_);
     StreamWriter::WriteObj(writer, this->metric_);
-    StreamWriter::WriteObj(writer, this->max_level_);
+    uint64_t max_level = this->route_graphs_.size();
+    StreamWriter::WriteObj(writer, max_level);
     StreamWriter::WriteObj(writer, this->entry_point_id_);
     StreamWriter::WriteObj(writer, this->ef_construct_);
     StreamWriter::WriteObj(writer, this->mult_);
@@ -540,8 +541,8 @@ HGraph::Serialize(StreamWriter& writer) const {
     if (this->use_reorder_) {
         this->high_precise_codes_->Serialize(writer);
     }
-    for (auto i = 0; i < this->max_level_; ++i) {
-        this->route_graphs_[i]->Serialize(writer);
+    for (const auto& route_graph : this->route_graphs_) {
+        route_graph->Serialize(writer);
     }
     if (this->extra_info_size_ > 0 && this->extra_infos_ != nullptr) {
         this->extra_infos_->Serialize(writer);
@@ -557,12 +558,8 @@ HGraph::Deserialize(StreamReader& reader) {
         this->high_precise_codes_->Deserialize(reader);
     }
 
-    for (uint64_t i = 0; i < this->max_level_; ++i) {
-        this->route_graphs_.emplace_back(this->generate_one_route_graph());
-    }
-
-    for (uint64_t i = 0; i < this->max_level_; ++i) {
-        this->route_graphs_[i]->Deserialize(reader);
+    for (auto& route_graph : this->route_graphs_) {
+        route_graph->Deserialize(reader);
     }
     this->neighbors_mutex_->Resize(max_capacity_);
 
@@ -579,7 +576,11 @@ HGraph::deserialize_basic_info(StreamReader& reader) {
     StreamReader::ReadObj(reader, this->use_reorder_);
     StreamReader::ReadObj(reader, this->dim_);
     StreamReader::ReadObj(reader, this->metric_);
-    StreamReader::ReadObj(reader, this->max_level_);
+    uint64_t max_level;
+    StreamReader::ReadObj(reader, max_level);
+    for (uint64_t i = 0; i < max_level; ++i) {
+        this->route_graphs_.emplace_back(this->generate_one_route_graph());
+    }
     StreamReader::ReadObj(reader, this->entry_point_id_);
     StreamReader::ReadObj(reader, this->ef_construct_);
     StreamReader::ReadObj(reader, this->mult_);
@@ -679,13 +680,12 @@ HGraph::add_one_point(const float* data, int level, InnerIdType inner_id) {
         this->high_precise_codes_->InsertVector(data, inner_id);
     }
     std::unique_lock add_lock(add_mutex_);
-    if (level >= int64_t(this->max_level_) || bottom_graph_->TotalCount() == 0) {
+    if (level >= this->route_graphs_.size() || bottom_graph_->TotalCount() == 0) {
         std::lock_guard<std::shared_mutex> wlock(this->global_mutex_);
         // level maybe a negative number(-1)
-        for (auto j = static_cast<int64_t>(max_level_); j <= level; ++j) {
+        for (auto j = static_cast<int>(this->route_graphs_.size()); j <= level; ++j) {
             this->route_graphs_.emplace_back(this->generate_one_route_graph());
         }
-        max_level_ = level + 1;
         this->graph_add_one(data, level, inner_id);
         entry_point_id_ = inner_id;
         add_lock.unlock();
@@ -711,7 +711,7 @@ HGraph::graph_add_one(const float* data, int level, InnerIdType inner_id) {
     if (use_reorder_) {
         flatten_codes = high_precise_codes_;
     }
-    for (auto j = max_level_ - 1; j > level; --j) {
+    for (auto j = this->route_graphs_.size() - 1; j > level; --j) {
         result = search_one_graph(data, route_graphs_[j], flatten_codes, param);
         param.ep = result.top().second;
     }
