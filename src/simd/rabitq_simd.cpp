@@ -39,6 +39,12 @@ GetRaBitQFloatBinaryIP() {
     return generic::RaBitQFloatBinaryIP;
 }
 
+static RaBitQSQ4UBinaryType
+GetRaBitQSQ4UBinaryIP() {
+    return generic::RaBitQSQ4UBinaryIP;
+}
+
 RaBitQFloatBinaryType RaBitQFloatBinaryIP = GetRaBitQFloatBinaryIP();
+RaBitQSQ4UBinaryType RaBitQSQ4UBinaryIP = GetRaBitQSQ4UBinaryIP();
 
 }  // namespace vsag

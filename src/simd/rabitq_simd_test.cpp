@@ -23,6 +23,29 @@
 
 using namespace vsag;
 
+TEST_CASE("RaBitQ SQ4U-BQ Compute Codes", "[ut][simd]") {
+    std::vector<uint8_t> codes = {0xFF,
+                                  0xFF,  // [1111 1111, 1111 1111]
+                                  0x0F,
+                                  0x0F,  // [0000 1111, 0000 1111]
+                                  0xF0,
+                                  0xF0,  // [1111 0000, 1111 0000]
+                                  0x00,
+                                  0x00};       // [0000 0000, 0000 0000]
+    std::vector<uint8_t> bits = {0xAA, 0x55};  // [1010 1010, 0101 0101]
+
+    for (auto dim = 0; dim < 17; dim++) {
+        uint32_t result = RaBitQSQ4UBinaryIP(codes.data(), bits.data(), dim);
+        if (dim == 0) {
+            REQUIRE(result == 0);
+        } else if (dim <= 8) {
+            REQUIRE(result == 12);
+        } else {
+            REQUIRE(result == 16);
+        }
+    }
+}
+
 TEST_CASE("RaBitQ FP32-BQ SIMD Compute Codes", "[ut][simd]") {
     auto dims = fixtures::get_common_used_dims();
     int64_t count = 100;

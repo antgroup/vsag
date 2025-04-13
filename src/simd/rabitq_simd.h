@@ -43,6 +43,9 @@ RaBitQFloatBinaryIP(const float* vector, const uint8_t* bits, uint64_t dim, floa
 namespace generic {
 float
 RaBitQFloatBinaryIP(const float* vector, const uint8_t* bits, uint64_t dim, float inv_sqrt_d);
+
+uint32_t
+RaBitQSQ4UBinaryIP(const uint8_t* codes, const uint8_t* bits, uint64_t dim);
 }  // namespace generic
 
 using RaBitQFloatBinaryType = float (*)(const float* vector,
@@ -50,5 +53,8 @@ using RaBitQFloatBinaryType = float (*)(const float* vector,
                                         uint64_t dim,
                                         float inv_sqrt_d);
 
+using RaBitQSQ4UBinaryType = uint32_t (*)(const uint8_t* codes, const uint8_t* bits, uint64_t dim);
+
 extern RaBitQFloatBinaryType RaBitQFloatBinaryIP;
+extern RaBitQSQ4UBinaryType RaBitQSQ4UBinaryIP;
 }  // namespace vsag

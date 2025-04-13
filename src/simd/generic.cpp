@@ -395,6 +395,27 @@ RaBitQFloatBinaryIP(const float* vector, const uint8_t* bits, uint64_t dim, floa
     return result;
 }
 
+uint32_t
+RaBitQSQ4UBinaryIP(const uint8_t* codes, const uint8_t* bits, uint64_t dim) {
+    // note that this func requiere the redident part in codes and bits is 0
+    // e.g., suppose dim = 10, then the value of bit pos = 11 to 15 should be 0
+    if (dim == 0) {
+        return 0.0f;
+    }
+
+    uint32_t result = 0;
+    size_t num_bytes = (dim + 7) / 8;
+
+    for (uint64_t bit_pos = 0; bit_pos < 4; ++bit_pos) {
+        for (size_t i = 0; i < num_bytes; ++i) {
+            uint8_t bitwise_and = codes[bit_pos * num_bytes + i] & bits[i];
+            result += __builtin_popcount(bitwise_and);
+        }
+    }
+
+    return result;
+}
+
 float
 Normalize(const float* from, float* to, uint64_t dim) {
     float norm = std::sqrt(FP32ComputeIP(from, from, dim));
