@@ -409,7 +409,7 @@ RaBitQSQ4UBinaryIP(const uint8_t* codes, const uint8_t* bits, uint64_t dim) {
     for (uint64_t bit_pos = 0; bit_pos < 4; ++bit_pos) {
         for (size_t i = 0; i < num_bytes; ++i) {
             uint8_t bitwise_and = codes[bit_pos * num_bytes + i] & bits[i];
-            result += __builtin_popcount(bitwise_and);
+            result += pow(2, bit_pos) * __builtin_popcount(bitwise_and);
         }
     }
 

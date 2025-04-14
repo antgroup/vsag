@@ -39,9 +39,11 @@ TEST_CASE("RaBitQ SQ4U-BQ Compute Codes", "[ut][simd]") {
         if (dim == 0) {
             REQUIRE(result == 0);
         } else if (dim <= 8) {
-            REQUIRE(result == 12);
+            // 4 * 1 + 4 * 2 + 2 * 4 + 2 * 8
+            REQUIRE(result == 36);
         } else {
-            REQUIRE(result == 16);
+            // 8 * 1 + 4 * 2 + 4 * 4 + 0 * 8
+            REQUIRE(result == 32);
         }
     }
 }
