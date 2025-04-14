@@ -46,6 +46,7 @@ class RaBitQuantizer : public Quantizer<RaBitQuantizer<metric>> {
 public:
     using norm_type = float;
     using error_type = float;
+    using sum_type = float;
 
     explicit RaBitQuantizer(int dim,
                             uint64_t pca_dim,
@@ -111,13 +112,24 @@ public:
     void
     RecoverOrderSQ4(const uint8_t* output, uint8_t* input) const;
 
-private:
     inline float
     L2_UBE(float norm_base_raw, float norm_query_raw, float est_ip_norm) const {
         float p1 = norm_base_raw * norm_base_raw;
         float p2 = norm_query_raw * norm_query_raw;
         float p3 = -2 * norm_base_raw * norm_query_raw * est_ip_norm;
         float ret = p1 + p2 + p3;
+        return ret;
+    }
+
+    inline float
+    RecoverDistBetweenSQ4UandFP32(
+        uint32_t ip_bq_1_4, float base_sum, float query_sum, float lower_bound, float delta) const {
+        // reference: RaBitQ equation 19-20
+        float p1 = 2 * inv_sqrt_d_ * delta * ip_bq_1_4;
+        float p2 = 2 * inv_sqrt_d_ * lower_bound * base_sum;
+        float p3 = inv_sqrt_d_ * delta * query_sum;
+        float p4 = lower_bound / inv_sqrt_d_;
+        float ret = p1 + p2 - p3 - p4;
         return ret;
     }
 
@@ -134,17 +146,23 @@ private:
     std::uint64_t original_dim_{0};
     std::uint64_t pca_dim_{0};
 
-    // query layout
+    /***
+     * query layout: sq-code(required) + lower_bound(sq4) + delta(sq4) + norm(required)
+     */
     uint64_t num_bits_per_dim_query_{32};
     uint64_t query_code_size_{0};
+    uint64_t query_offset_lb_{0};
+    uint64_t query_offset_delta_{0};
+    uint64_t query_offset_sum_{0};
     uint64_t query_offset_norm_{0};
 
     /***
-     * code layout: sq-code(required) + norm(required) + error(required)
+     * code layout: bq-code(required) + norm(required) + error(required) + sum(sq4)
      */
     uint64_t offset_code_{0};
     uint64_t offset_norm_{0};
     uint64_t offset_error_{0};
+    uint64_t offset_sum_{0};
 };
 
 template <MetricType metric>
@@ -174,7 +192,7 @@ RaBitQuantizer<metric>::RaBitQuantizer(int dim,
     inv_sqrt_d_ = 1.0f / sqrt(this->dim_);
 
     // base code layout
-    size_t align_size = std::max(sizeof(error_type), sizeof(norm_type));
+    size_t align_size = std::max(std::max(sizeof(error_type), sizeof(norm_type)), sizeof(DataType));
     size_t code_original_size = (this->dim_ + 7) / 8;
 
     this->code_size_ = 0;
@@ -188,6 +206,11 @@ RaBitQuantizer<metric>::RaBitQuantizer(int dim,
     offset_error_ = this->code_size_;
     this->code_size_ += ((sizeof(error_type) + align_size - 1) / align_size) * align_size;
 
+    if (num_bits_per_dim_query != 32) {
+        offset_sum_ = this->code_size_;
+        this->code_size_ += ((sizeof(sum_type) + align_size - 1) / align_size) * align_size;
+    }
+
     // query code layout
     num_bits_per_dim_query_ = num_bits_per_dim_query;
     if (num_bits_per_dim_query_ == 4) {
@@ -197,9 +220,19 @@ RaBitQuantizer<metric>::RaBitQuantizer(int dim,
         //       then, the re-ordered code is:      [1000 0100, 0010 0001]
         auto sq_code_size = (this->dim_ + 7) / 8 * num_bits_per_dim_query_;
         this->query_code_size_ = (sq_code_size / align_size) * align_size;
+
+        query_offset_lb_ = this->query_code_size_;
+        this->query_code_size_ += ((sizeof(DataType) + align_size - 1) / align_size) * align_size;
+
+        query_offset_delta_ = this->query_code_size_;
+        this->query_code_size_ += ((sizeof(DataType) + align_size - 1) / align_size) * align_size;
+
+        query_offset_sum_ = this->query_code_size_;
+        this->query_code_size_ += ((sizeof(sum_type) + align_size - 1) / align_size) * align_size;
     } else {
         this->query_code_size_ = ((sizeof(DataType) * this->dim_) / align_size) * align_size;
     }
+
     query_offset_norm_ = this->query_code_size_;
     this->query_code_size_ += ((sizeof(norm_type) + align_size - 1) / align_size) * align_size;
 }
@@ -305,9 +338,11 @@ RaBitQuantizer<metric>::EncodeOneImpl(const DataType* data, uint8_t* codes) cons
         transformed_data.data(), centroid_.data(), normed_data.data(), this->dim_);
 
     // 4. encode with BQ
+    sum_type sum = 0;
     memset(codes, 0, this->code_size_);
     for (uint64_t d = 0; d < this->dim_; ++d) {
         if (normed_data[d] >= 0.0f) {
+            sum += 1;
             codes[offset_code_ + d / 8] |= (1 << (d % 8));
         }
     }
@@ -316,9 +351,13 @@ RaBitQuantizer<metric>::EncodeOneImpl(const DataType* data, uint8_t* codes) cons
     error_type error =
         RaBitQFloatBinaryIP(normed_data.data(), codes + offset_code_, this->dim_, inv_sqrt_d_);
 
-    // 6. store norm and error
+    // 6. store norm, error, sum
     *(norm_type*)(codes + offset_norm_) = norm;
     *(error_type*)(codes + offset_error_) = error;
+
+    if (num_bits_per_dim_query_ != 32) {
+        *(sum_type*)(codes + offset_sum_) = sum;
+    }
 
     return true;
 }
@@ -391,10 +430,23 @@ RaBitQuantizer<metric>::ComputeQueryBaseImpl(const uint8_t* query_codes,
         base_error = (base_error > 0) ? 1.0f : -1.0f;
     }
 
-    float ip_bq_1_32 =
-        RaBitQFloatBinaryIP((DataType*)query_codes, base_codes, this->dim_, inv_sqrt_d_);
+    float ip_bq_estimate;
+    if (num_bits_per_dim_query_ == 4) {
+        sum_type base_sum = *((sum_type*)(base_codes + offset_sum_));
+        sum_type query_sum = *((sum_type*)(query_codes + query_offset_sum_));
+        DataType lower_bound = *((DataType*)(query_codes + query_offset_lb_));
+        DataType delta = *((DataType*)(query_codes + query_offset_delta_));
+
+        ip_bq_estimate = RaBitQSQ4UBinaryIP(query_codes, base_codes, this->dim_);
+
+        ip_bq_estimate =
+            RecoverDistBetweenSQ4UandFP32(ip_bq_estimate, base_sum, query_sum, lower_bound, delta);
+    } else {
+        ip_bq_estimate =
+            RaBitQFloatBinaryIP((DataType*)query_codes, base_codes, this->dim_, inv_sqrt_d_);
+    }
     float ip_bb_1_32 = base_error;
-    float ip_est = ip_bq_1_32 / ip_bb_1_32;
+    float ip_est = ip_bq_estimate / ip_bb_1_32;
 
     float result = L2_UBE(base_norm, query_norm, ip_est);
 
@@ -411,8 +463,6 @@ template <MetricType metric>
 void
 RaBitQuantizer<metric>::ReOrderSQ4(const uint8_t* input, uint8_t* output) const {
     // note that the codesize of input is different from output
-    std::memset(output, 0, query_code_size_);
-
     // output: align dim bits with 8 bits (1 byte)
     uint64_t aligned_block_size = (this->dim_ + 7) / 8 * 8;
 
@@ -436,8 +486,6 @@ template <MetricType metric>
 void
 RaBitQuantizer<metric>::RecoverOrderSQ4(const uint8_t* output, uint8_t* input) const {
     // note that the codesize of input is different from output
-    std::memset(input, 0, (this->dim_ + 1) / 2);
-
     // output: align dim bits with 8 bits (1 byte)
     uint64_t aligned_block_size = (this->dim_ + 7) / 8 * 8;
 
@@ -495,9 +543,17 @@ RaBitQuantizer<metric>::ProcessQueryImpl(const DataType* query,
         if (num_bits_per_dim_query_ == 4) {
             // sq4 quantization
             Vector<uint8_t> tmp_codes(this->query_code_size_, 0, this->allocator_);
-            SQ4UniformQuantizer<metric> sq4_quantizer(this->dim_, this->allocator_);
+            SQ4UniformQuantizer<MetricType::METRIC_TYPE_IP> sq4_quantizer(
+                this->dim_, this->allocator_, 0.0f);
             sq4_quantizer.Train(query, 1);
             sq4_quantizer.EncodeOneImpl(query, tmp_codes.data());
+            auto lb_and_diff = sq4_quantizer.GetLBandDiff();
+            DataType lower_bound = lb_and_diff.first;
+            DataType delta = lb_and_diff.second / 15.0;
+            *(DataType*)(computer.buf_ + query_offset_lb_) = lower_bound;
+            *(DataType*)(computer.buf_ + query_offset_delta_) = delta;
+            *(sum_type*)(computer.buf_ + query_offset_sum_) =
+                sq4_quantizer.GetCodesSum(tmp_codes.data());
 
             // re-order
             ReOrderSQ4(tmp_codes.data(), computer.buf_);
