@@ -16,7 +16,6 @@
 #pragma once
 
 #include <algorithm>
-#include <bit>
 #include <cmath>
 #include <cstring>
 #include <nlohmann/json.hpp>
