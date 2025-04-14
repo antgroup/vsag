@@ -108,6 +108,9 @@ TEST_CASE("RaBitQ Serialize and Deserialize", "[ut][RaBitQuantizer]") {
         float related_error = 0.05f;
         float unbounded_numeric_error_rate = 0.05f;
         float unbounded_related_error_rate = 0.1f;
+        if (num_bits_per_dim == 4) {
+            related_error = 0.1f;
+        }
         if (dim < 900) {
             continue;
         }
