@@ -97,6 +97,7 @@ SparseQuantizer<metric>::SparseQuantizer(const SparseQuantizerParamPtr& param,
 template <MetricType metric>
 SparseQuantizer<metric>::SparseQuantizer(Allocator* allocator)
     : Quantizer<SparseQuantizer<metric>>(0, allocator) {
+    this->metric_ = metric;
     this->is_trained_ = false;
 }
 

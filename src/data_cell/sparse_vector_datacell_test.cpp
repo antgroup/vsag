@@ -13,16 +13,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "sparse_vector_datacell.h"
-
 #include <catch2/catch_template_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
 
 #include "data_cell/sparse_vector_datacell_parameter.h"
 #include "fixtures.h"
 #include "index/index_common_param.h"
-#include "io/memory_block_io.h"
-#include "quantization/sparse_quantization/sparse_quantizer.h"
 #include "quantization/sparse_quantization/sparse_quantizer_parameter.h"
 #include "safe_allocator.h"
 
@@ -50,6 +46,7 @@ TEST_CASE("SparseDataCell Basic Test", "[ut][SparseDataCell] ") {
     index_common_param.metric_ = MetricType::METRIC_TYPE_IP;
     auto data_cell = FlattenInterface::MakeInstance(param, index_common_param);
     REQUIRE(data_cell->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_SPARSE);
+    REQUIRE(data_cell->GetMetricType() == MetricType::METRIC_TYPE_IP);
 
     size_t base_count = 1000;
     auto sparse_vectors = fixtures::GenerateSparseVectors(base_count, 100);
@@ -62,7 +59,10 @@ TEST_CASE("SparseDataCell Basic Test", "[ut][SparseDataCell] ") {
         data_cell->InsertVector(sparse_vectors.data() + i, idx[i]);
     }
     data_cell->BatchInsertVector(
-        sparse_vectors.data() + half_count, half_count, idx.data() + half_count);
+        sparse_vectors.data() + half_count, half_count / 2, idx.data() + half_count);
+    data_cell->BatchInsertVector(sparse_vectors.data() + half_count + half_count / 2,
+                                 half_count / 2,
+                                 idx.data() + half_count + half_count / 2);
 
     for (int i = 0; i < base_count - 1; ++i) {
         fixtures::dist_t distance = data_cell->ComputePairVectors(idx[0], idx[1]);

@@ -15,14 +15,12 @@
 
 #include "flatten_interface.h"
 
-#include <fmt/format-inl.h>
-
 #include "flatten_datacell.h"
 #include "inner_string_params.h"
 #include "io/io_headers.h"
 #include "quantization/quantizer_headers.h"
 #include "quantization/sparse_quantization/sparse_quantizer.h"
-#include "sparse_vector_datacell.h"
+#include "sparse_vector_datacell.inl"
 
 namespace vsag {
 template <typename QuantTemp, typename IOTemp>
