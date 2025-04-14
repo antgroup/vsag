@@ -147,7 +147,7 @@ private:
     std::uint64_t pca_dim_{0};
 
     /***
-     * query layout: sq-code(required) + lower_bound(sq4) + delta(sq4) + norm(required)
+     * query layout: sq-code(required) + lower_bound(sq4) + delta(sq4) + sum(sq4) + norm(required)
      */
     uint64_t num_bits_per_dim_query_{32};
     uint64_t query_code_size_{0};
@@ -173,6 +173,7 @@ RaBitQuantizer<metric>::RaBitQuantizer(int dim,
     : Quantizer<RaBitQuantizer<metric>>(dim, allocator) {
     static_assert(metric == MetricType::METRIC_TYPE_L2SQR, "Unsupported metric type");
 
+    // dim
     pca_dim_ = pca_dim;
     original_dim_ = dim;
     if (0 < pca_dim_ and pca_dim_ < dim) {
@@ -181,6 +182,9 @@ RaBitQuantizer<metric>::RaBitQuantizer(int dim,
     } else {
         pca_dim_ = dim;
     }
+
+    // bits query
+    num_bits_per_dim_query_ = num_bits_per_dim_query;
 
     // centroid
     centroid_.resize(this->dim_, 0);
@@ -206,13 +210,12 @@ RaBitQuantizer<metric>::RaBitQuantizer(int dim,
     offset_error_ = this->code_size_;
     this->code_size_ += ((sizeof(error_type) + align_size - 1) / align_size) * align_size;
 
-    if (num_bits_per_dim_query != 32) {
+    if (num_bits_per_dim_query_ != 32) {
         offset_sum_ = this->code_size_;
         this->code_size_ += ((sizeof(sum_type) + align_size - 1) / align_size) * align_size;
     }
 
     // query code layout
-    num_bits_per_dim_query_ = num_bits_per_dim_query;
     if (num_bits_per_dim_query_ == 4) {
         // Re-order the SQ4U Code Layout (align with 8 bits)
         // e.g., for a float query with dim == 4:   [1, 2, 4, 8]
@@ -536,10 +539,7 @@ RaBitQuantizer<metric>::ProcessQueryImpl(const DataType* query,
         float query_norm = NormalizeWithCentroid(
             transformed_data.data(), centroid_.data(), normed_data.data(), this->dim_);
 
-        // 4. store norm
-        *(norm_type*)(computer.buf_ + query_offset_norm_) = query_norm;
-
-        // 5. query quantization
+        // 4. query quantization
         if (num_bits_per_dim_query_ == 4) {
             // sq4 quantization
             Vector<uint8_t> tmp_codes(this->query_code_size_, 0, this->allocator_);
@@ -547,6 +547,11 @@ RaBitQuantizer<metric>::ProcessQueryImpl(const DataType* query,
                 this->dim_, this->allocator_, 0.0f);
             sq4_quantizer.Train(query, 1);
             sq4_quantizer.EncodeOneImpl(query, tmp_codes.data());
+
+            // re-order and store codes
+            ReOrderSQ4(tmp_codes.data(), computer.buf_);
+
+            // store info
             auto lb_and_diff = sq4_quantizer.GetLBandDiff();
             DataType lower_bound = lb_and_diff.first;
             DataType delta = lb_and_diff.second / 15.0;
@@ -554,12 +559,13 @@ RaBitQuantizer<metric>::ProcessQueryImpl(const DataType* query,
             *(DataType*)(computer.buf_ + query_offset_delta_) = delta;
             *(sum_type*)(computer.buf_ + query_offset_sum_) =
                 sq4_quantizer.GetCodesSum(tmp_codes.data());
-
-            // re-order
-            ReOrderSQ4(tmp_codes.data(), computer.buf_);
         } else {
+            // store codes
             memcpy(computer.buf_, normed_data.data(), query_code_size_);
         }
+
+        // 5. store norm
+        *(norm_type*)(computer.buf_ + query_offset_norm_) = query_norm;
     } catch (std::bad_alloc& e) {
         logger::error("bad alloc when init computer buf");
         throw e;
