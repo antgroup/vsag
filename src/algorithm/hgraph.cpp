@@ -597,8 +597,8 @@ HGraph::Deserialize(StreamReader& reader) {
     param.topk = 10;
     param.is_inner_id_allowed = nullptr;
     searcher_->SetMockParameters(bottom_graph_, basic_flatten_codes_, pool_, param, dim_);
-    optimizer_->RegisterParameter(
-        std::make_shared<IntRuntimeParameter>(PREFETCH_DEPTH_CODE, 1, 10));
+    optimizer_->RegisterParameter(std::make_shared<IntRuntimeParameter>(
+        PREFETCH_DEPTH_CODE, 1, (basic_flatten_codes_->code_size_ + 63.0) / 64.0));
     optimizer_->RegisterParameter(
         std::make_shared<IntRuntimeParameter>(PREFETCH_STRIDE_CODE, 1, 10));
     optimizer_->RegisterParameter(
