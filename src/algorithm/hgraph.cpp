@@ -680,7 +680,7 @@ HGraph::add_one_point(const float* data, int level, InnerIdType inner_id) {
         this->high_precise_codes_->InsertVector(data, inner_id);
     }
     std::unique_lock add_lock(add_mutex_);
-    if (level >= this->route_graphs_.size() || bottom_graph_->TotalCount() == 0) {
+    if (level >= static_cast<int>(this->route_graphs_.size()) || bottom_graph_->TotalCount() == 0) {
         std::lock_guard<std::shared_mutex> wlock(this->global_mutex_);
         // level maybe a negative number(-1)
         for (auto j = static_cast<int>(this->route_graphs_.size()); j <= level; ++j) {
