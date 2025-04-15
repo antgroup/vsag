@@ -79,7 +79,7 @@ double
 LatencyMonitor::cal_qps() {
     double sum =
         std::accumulate(this->latency_records_.begin(), this->latency_records_.end(), double(0));
-    return static_cast<double>(latency_records_.size()) * 1000.0 / sum;
+    return static_cast<double>(latency_records_.size()) * cur_time_.size() * 1000.0 / sum;
 }
 
 double
