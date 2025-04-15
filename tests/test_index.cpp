@@ -398,13 +398,25 @@ TestIndex::TestRangeSearch(const IndexPtr& index,
 
 class FilterObj : public vsag::Filter {
 public:
-    FilterObj(std::function<bool(int64_t)> filter_func, float valid_ratio)
-        : filter_func_(std::move(filter_func)), valid_ratio_(valid_ratio) {
+    FilterObj(std::function<bool(int64_t)> filter_func,
+              std::function<bool(const char*)> ex_filter_func,
+              float valid_ratio)
+        : filter_func_(std::move(filter_func)),
+          ex_filter_func_(std::move(ex_filter_func)),
+          valid_ratio_(valid_ratio) {
     }
 
     bool
     CheckValid(int64_t id) const override {
         return not filter_func_(id);
+    }
+
+    bool
+    CheckValid(const char* data) const override {
+        if (not ex_filter_func_)
+            return vsag::Filter::CheckValid(data);
+        else
+            return not ex_filter_func_(data);
     }
 
     float
@@ -414,6 +426,7 @@ public:
 
 private:
     std::function<bool(int64_t)> filter_func_{nullptr};
+    std::function<bool(const char*)> ex_filter_func_{nullptr};
     float valid_ratio_{1.0F};
 };
 
@@ -422,18 +435,23 @@ TestIndex::TestKnnSearchIter(const IndexPtr& index,
                              const TestDatasetPtr& dataset,
                              const std::string& search_param,
                              float expected_recall,
-                             bool expected_success) {
+                             bool expected_success,
+                             bool use_ex_filter) {
     if (not index->CheckFeature(vsag::SUPPORT_KNN_ITERATOR_FILTER_SEARCH)) {
+        return;
+    }
+    if (use_ex_filter && not index->CheckFeature(vsag::SUPPORT_KNN_SEARCH_WITH_EX_FILTER)) {
         return;
     }
     auto queries = dataset->query_;
     auto query_count = queries->GetNumElements();
     auto dim = queries->GetDim();
-    auto gts = dataset->filter_ground_truth_;
+    auto gts = use_ex_filter ? dataset->ex_filter_ground_truth_ : dataset->filter_ground_truth_;
     auto gt_topK = dataset->top_k;
     float cur_recall = 0.0f;
     auto topk = gt_topK;
-    auto filter = std::make_shared<FilterObj>(dataset->filter_function_, dataset->valid_ratio_);
+    auto filter = std::make_shared<FilterObj>(
+        dataset->filter_function_, dataset->ex_filter_function_, dataset->valid_ratio_);
     int64_t first_top = topk / 3;
     int64_t second_top = topk / 3;
     int64_t third_top = topk - first_top - second_top;
@@ -517,7 +535,8 @@ TestIndex::TestFilterSearch(const TestIndex::IndexPtr& index,
         tl::expected<DatasetPtr, vsag::Error> res;
         res = index->KnnSearch(query, topk, search_param, dataset->filter_function_);
         if (support_filter_obj) {
-            auto filter = std::make_shared<FilterObj>(dataset->filter_function_, 1.0F);
+            auto filter = std::make_shared<FilterObj>(
+                dataset->filter_function_, dataset->ex_filter_function_, 1.0F);
             auto obj_res = index->KnnSearch(query, topk, search_param, filter);
             if (expected_success) {
                 for (int j = 0; j < topk; ++j) {
@@ -1138,6 +1157,69 @@ TestIndex::TestGetExtraInfoById(const TestIndex::IndexPtr& index,
                    dataset->base_->GetExtraInfos() + (ids[i] - dataset->ID_BIAS) * extra_info_size,
                    extra_info_size) == 0);
     }
+}
+
+void
+TestIndex::TestKnnSearchExFilter(const IndexPtr& index,
+                                 const TestDatasetPtr& dataset,
+                                 const std::string& search_param,
+                                 float expected_recall,
+                                 bool expected_success) {
+    if (not index->CheckFeature(vsag::SUPPORT_KNN_SEARCH_WITH_EX_FILTER)) {
+        return;
+    }
+    auto queries = dataset->filter_query_;
+    auto query_count = queries->GetNumElements();
+    auto dim = queries->GetDim();
+    auto gts = dataset->ex_filter_ground_truth_;
+    auto gt_topK = dataset->top_k;
+    auto extra_info_size = dataset->base_->GetExtraInfoSize();
+    float cur_recall = 0.0f;
+    auto topk = gt_topK;
+    auto f = std::make_shared<FilterObj>(dataset->filter_function_, nullptr, dataset->valid_ratio_);
+    auto filter = std::make_shared<FilterObj>(
+        dataset->filter_function_, dataset->ex_filter_function_, dataset->valid_ratio_);
+    for (auto i = 0; i < query_count; ++i) {
+        auto query_recall = 0.0f;
+        auto query = vsag::Dataset::Make();
+        query->NumElements(1)
+            ->Dim(dim)
+            ->Float32Vectors(queries->GetFloat32Vectors() + i * dim)
+            ->Paths(queries->GetPaths() + i)
+            ->Owner(false);
+        auto res = index->KnnSearch(query, topk, search_param, filter);
+        if (not expected_success) {
+            if (res.has_value()) {
+                REQUIRE(res.value()->GetDim() == 0);
+            }
+        } else {
+            REQUIRE(res.has_value() == expected_success);
+        }
+        if (!expected_success) {
+            return;
+        }
+        REQUIRE(res.has_value() == true);
+        REQUIRE(res.value()->GetDim() == topk);
+        auto result = res.value()->GetIds();
+        if (extra_info_size > 0) {
+            const char* extra_infos = res.value()->GetExtraInfos();
+            REQUIRE(f->CheckValid(extra_infos) == true);
+            REQUIRE(extra_infos != nullptr);
+            int64_t num = res.value()->GetNumElements();
+            for (int j = 0; j < num; ++j) {
+                REQUIRE((extra_infos + j * extra_info_size) != nullptr);
+            }
+        }
+        auto gt = gts->GetIds() + gt_topK * i;
+        auto val = Intersection(gt, gt_topK, result, topk);
+        cur_recall += static_cast<float>(val) / static_cast<float>(gt_topK);
+    }
+    if (cur_recall <= expected_recall * query_count) {
+        WARN(fmt::format("cur_result({}) <= expected_recall * query_count({})",
+                         cur_recall,
+                         expected_recall * query_count));
+    }
+    REQUIRE(cur_recall > expected_recall * query_count * RECALL_THRESHOLD);
 }
 
 }  // namespace fixtures
