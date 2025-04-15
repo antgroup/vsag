@@ -68,6 +68,16 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
             ExtraInfoInterface::MakeInstance(hgraph_param->extra_info_param, common_param);
     }
 
+    auto step_block_size = Options::Instance().block_size_limit();
+    auto block_size_per_vector = this->basic_flatten_codes_->code_size_;
+    if (use_reorder_) {
+        block_size_per_vector =
+            std::max(block_size_per_vector, this->high_precise_codes_->code_size_);
+    }
+    auto increase_count = step_block_size / block_size_per_vector;
+    this->resize_increase_count_bit_ = std::max(
+        DEFAULT_RESIZE_BIT, static_cast<uint64_t>(log2(static_cast<double>(increase_count))));
+
     resize(bottom_graph_->max_capacity_);
     if (this->build_thread_count_ > 1) {
         this->build_pool_ = SafeThreadPool::FactoryDefaultThreadPool();
@@ -740,10 +750,13 @@ HGraph::graph_add_one(const float* data, int level, InnerIdType inner_id) {
 
 void
 HGraph::resize(uint64_t new_size) {
-    std::lock_guard lock(this->global_mutex_);
     auto cur_size = this->max_capacity_;
     uint64_t new_size_power_2 =
         next_multiple_of_power_of_two(new_size, this->resize_increase_count_bit_);
+    if (cur_size >= new_size_power_2) {
+        return;
+    }
+    std::lock_guard lock(this->global_mutex_);
     if (cur_size < new_size_power_2) {
         this->neighbors_mutex_->Resize(new_size_power_2);
         pool_ = std::make_shared<VisitedListPool>(1, allocator_, new_size_power_2, allocator_);
