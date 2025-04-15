@@ -24,14 +24,14 @@ LatencyMonitor::LatencyMonitor(uint64_t max_record_counts) : Monitor("latency_mo
         this->latency_records_.reserve(max_record_counts);
     }
 }
+
 void
 LatencyMonitor::Start() {
-    this->cur_time_ = Clock::now();
 }
 void
 LatencyMonitor::Stop() {
-    this->cur_time_ = Clock::now();
 }
+
 Monitor::JsonType
 LatencyMonitor::GetResult() {
     JsonType result;
@@ -43,10 +43,16 @@ LatencyMonitor::GetResult() {
 void
 LatencyMonitor::Record(void* input) {
     std::lock_guard<std::mutex> lock(record_mutex_);
+    std::thread::id thread_id = std::this_thread::get_id();
+    if (cur_time_.find(thread_id) == cur_time_.end()) {
+        cur_time_[thread_id] = Clock::now();
+        return;
+    }
     auto end_time = Clock::now();
-    double duration = std::chrono::duration<double, std::milli>(end_time - cur_time_).count();
+    double duration =
+        std::chrono::duration<double, std::milli>(end_time - cur_time_[thread_id]).count();
     this->latency_records_.emplace_back(duration);
-    this->cur_time_ = Clock::now();
+    this->cur_time_[thread_id] = Clock::now();
 }
 void
 LatencyMonitor::SetMetrics(std::string metric) {
