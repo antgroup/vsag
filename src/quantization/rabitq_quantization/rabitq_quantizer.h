@@ -125,10 +125,10 @@ public:
     RecoverDistBetweenSQ4UandFP32(
         uint32_t ip_bq_1_4, float base_sum, float query_sum, float lower_bound, float delta) const {
         // reference: RaBitQ equation 19-20
-        float p1 = 2 * inv_sqrt_d_ * delta * ip_bq_1_4;
-        float p2 = 2 * inv_sqrt_d_ * lower_bound * base_sum;
+        float p1 = inv_sqrt_d_ * delta * 2 * ip_bq_1_4;
+        float p2 = inv_sqrt_d_ * lower_bound * 2 * base_sum;
         float p3 = inv_sqrt_d_ * delta * query_sum;
-        float p4 = lower_bound / inv_sqrt_d_;
+        float p4 = inv_sqrt_d_ * lower_bound * this->dim_;
         float ret = p1 + p2 - p3 - p4;
         return ret;
     }
@@ -517,7 +517,6 @@ void
 RaBitQuantizer<metric>::ProcessQueryImpl(const DataType* query,
                                          Computer<RaBitQuantizer>& computer) const {
     try {
-        // TODO(ZXY): allow process query with SQ4 or SQ8, implement in ComputeDist and Param
         computer.buf_ = reinterpret_cast<uint8_t*>(this->allocator_->Allocate(query_code_size_));
         std::fill(computer.buf_, computer.buf_ + query_code_size_, 0);
 
@@ -545,8 +544,8 @@ RaBitQuantizer<metric>::ProcessQueryImpl(const DataType* query,
             Vector<uint8_t> tmp_codes(this->query_code_size_, 0, this->allocator_);
             SQ4UniformQuantizer<MetricType::METRIC_TYPE_IP> sq4_quantizer(
                 this->dim_, this->allocator_, 0.0f);
-            sq4_quantizer.Train(query, 1);
-            sq4_quantizer.EncodeOneImpl(query, tmp_codes.data());
+            sq4_quantizer.Train(normed_data.data(), 1);
+            sq4_quantizer.EncodeOneImpl(normed_data.data(), tmp_codes.data());
 
             // re-order and store codes
             ReOrderSQ4(tmp_codes.data(), computer.buf_);
@@ -561,7 +560,7 @@ RaBitQuantizer<metric>::ProcessQueryImpl(const DataType* query,
                 sq4_quantizer.GetCodesSum(tmp_codes.data());
         } else {
             // store codes
-            memcpy(computer.buf_, normed_data.data(), query_code_size_);
+            memcpy(computer.buf_, normed_data.data(), normed_data.size() * sizeof(DataType));
         }
 
         // 5. store norm
