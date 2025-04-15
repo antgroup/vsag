@@ -2192,10 +2192,12 @@ int64_t PQFlashIndex<T, LabelT>::range_search(const T *query, const double range
                 result_size = this->cached_beam_search_async(query, l_search, l_search, indices.data(), distances.data(),
                                                             min_beam_width, filter, io_limit, reorder, stats);
             } else {
-                result_size = this->cached_beam_search_memory(query, l_search, l_search, indices.data(), distances.data(), min_beam_width, filter, io_limit, reorder, stats, true);
+                result_size = this->cached_beam_search_memory(query, l_search, l_search, indices.data(), distances.data(),
+                                                              min_beam_width, filter, io_limit, reorder, stats, true);
             }
         } else {
-            result_size = this->cached_beam_search(query, l_search, l_search, indices.data(), distances.data(), min_beam_width, filter, io_limit, false, stats);
+            result_size = this->cached_beam_search(query, l_search, l_search, indices.data(), distances.data(),
+                                                   min_beam_width, filter, io_limit, false, stats);
         }
         for (uint32_t i = 0; i < result_size; i++)
         {
