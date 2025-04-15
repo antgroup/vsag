@@ -224,9 +224,12 @@ private:
 
     InnerIdType max_capacity_{0};
 
-    const uint64_t resize_increase_count_bit_{10};  // 2^resize_increase_count_bit_ for resize count
+    uint64_t resize_increase_count_bit_{
+        DEFAULT_RESIZE_BIT};  // 2^resize_increase_count_bit_ for resize count
 
     ExtraInfoInterfacePtr extra_infos_{nullptr};
     uint64_t extra_info_size_{0};
+
+    static constexpr uint64_t DEFAULT_RESIZE_BIT = 10;
 };
 }  // namespace vsag
