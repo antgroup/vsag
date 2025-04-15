@@ -159,8 +159,9 @@ TEST_CASE("RaBitQ Query SQ4 Transform", "[ut][RaBitQuantizer]") {
     REQUIRE(std::abs(*(float*)(&sq_data[8]) - 30) < 1e-5);
 
     // test reorder
-    std::vector<uint8_t> expected_output = {0x88, 0x48, 0x28, 0x18};
-    std::vector<uint8_t> output(8, 0);
+    // output  [0001 0001, 0001 0010, 0001 0100, 0001 1000]
+    std::vector<uint8_t> expected_output = {0x11, 0x12, 0x14, 0x18};
+    std::vector<uint8_t> output(4, 0);
     std::vector<uint8_t> recovered_input(3, 0);
 
     // reorder the input

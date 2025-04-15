@@ -480,7 +480,7 @@ RaBitQuantizer<metric>::ReOrderSQ4(const uint8_t* input, uint8_t* output) const 
             uint64_t output_bit_i = output_bit_pos % 8;
 
             // set the bit
-            output[output_byte_i] |= (bit_value << (7 - output_bit_i));
+            output[output_byte_i] |= (bit_value << output_bit_i);
         }
     }
 }
@@ -500,7 +500,7 @@ RaBitQuantizer<metric>::RecoverOrderSQ4(const uint8_t* output, uint8_t* input) c
             uint64_t output_bit_i = output_bit_pos % 8;
 
             // extract the bit
-            uint8_t bit_value = (output[output_byte_i] >> (7 - output_bit_i)) & 0x1;
+            uint8_t bit_value = (output[output_byte_i] >> output_bit_i) & 0x1;
 
             // calculate the position
             uint64_t input_byte_i = d / 2;
