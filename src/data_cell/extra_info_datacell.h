@@ -76,6 +76,18 @@ public:
         }
     }
 
+    void
+    Release(const char* extra_info) override {
+        if (extra_info == nullptr) {
+            return;
+        }
+        if (this->force_in_memory_) {
+            force_in_memory_io_->Release(reinterpret_cast<const uint8_t*>(extra_info));
+        } else {
+            io_->Release(reinterpret_cast<const uint8_t*>(extra_info));
+        }
+    }
+
     [[nodiscard]] bool
     InMemory() const override;
 
@@ -87,6 +99,9 @@ public:
 
     bool
     GetExtraInfoById(InnerIdType id, char* extra_info) const override;
+
+    const char*
+    GetExtraInfoById(InnerIdType id, bool& need_release) const override;
 
     void
     Serialize(StreamWriter& writer) override;
@@ -231,6 +246,22 @@ ExtraInfoDataCell<IOTmpl>::GetExtraInfoById(InnerIdType id, char* extra_info) co
         return io_->Read(extra_info_size_,
                          static_cast<uint64_t>(id) * static_cast<uint64_t>(extra_info_size_),
                          reinterpret_cast<uint8_t*>(extra_info));
+    }
+}
+
+template <typename IOTmpl>
+const char*
+ExtraInfoDataCell<IOTmpl>::GetExtraInfoById(InnerIdType id, bool& need_release) const {
+    if (force_in_memory_) {
+        return reinterpret_cast<const char*>(force_in_memory_io_->Read(
+            extra_info_size_,
+            static_cast<uint64_t>(id) * static_cast<uint64_t>(extra_info_size_),
+            need_release));
+    } else {
+        return reinterpret_cast<const char*>(
+            io_->Read(extra_info_size_,
+                      static_cast<uint64_t>(id) * static_cast<uint64_t>(extra_info_size_),
+                      need_release));
     }
 }
 

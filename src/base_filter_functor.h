@@ -19,6 +19,7 @@
 
 #include "bitset_impl.h"
 #include "common.h"
+#include "data_cell/extra_info_interface.h"
 #include "label_table.h"
 #include "typing.h"
 #include "vsag/filter.h"
@@ -71,6 +72,37 @@ public:
 private:
     const FilterPtr filter_impl_;
     const LabelTable& label_table_;
+};
+
+class CommonExtraInfoFilter : public Filter {
+public:
+    CommonExtraInfoFilter(const FilterPtr filter_impl, const ExtraInfoInterfacePtr& extra_infos)
+        : filter_impl_(filter_impl), extra_infos_(extra_infos){};
+
+    [[nodiscard]] bool
+    CheckValid(int64_t inner_id) const override {
+        bool need_release = false;
+        const char* extra_info = extra_infos_->GetExtraInfoById(inner_id, need_release);
+        bool valid = filter_impl_->CheckValid(extra_info);
+        if (need_release) {
+            extra_infos_->Release(extra_info);
+        }
+        return valid;
+    }
+
+    [[nodiscard]] float
+    ValidRatio() const override {
+        return filter_impl_->ValidRatio();
+    }
+
+    [[nodiscard]] Distribution
+    FilterDistribution() const override {
+        return filter_impl_->FilterDistribution();
+    }
+
+private:
+    const FilterPtr filter_impl_;
+    const ExtraInfoInterfacePtr& extra_infos_;
 };
 
 }  // namespace vsag

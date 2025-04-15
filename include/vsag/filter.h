@@ -39,6 +39,19 @@ public:
     CheckValid(int64_t id) const = 0;
 
     /**
+      * @brief Check if a vector is filtered out by pre-filter, true means
+      * not been filtered out, false means have been filtered out, the result
+      * of KnnSearch/RangeSearch will only contain non-filtered-out vectors
+      * 
+      * @param data extra info of the vector
+      * @return true if vector is valid, otherwise false
+      */
+    [[nodiscard]] virtual bool
+    CheckValid(const char* data) const {
+        return true;
+    }
+
+    /**
       * @brief Get valid ratio of pre-filter, 1.0 means all the vectors valid, 
       * none of them have been filter out.
       * 

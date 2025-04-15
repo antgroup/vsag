@@ -58,6 +58,7 @@ public:
 public:
     int64_t ef_search{30};
     bool use_reorder{false};
+    bool use_extra_info_filter{false};
 
 private:
     HGraphSearchParameters() = default;
