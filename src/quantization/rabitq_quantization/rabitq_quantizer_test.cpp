@@ -19,6 +19,7 @@
 #include <catch2/generators/catch_generators.hpp>
 #include <vector>
 
+#include "../scalar_quantization/sq4_uniform_quantizer.h"
 #include "default_allocator.h"
 #include "fixtures.h"
 #include "quantization/quantizer_test.h"
@@ -143,20 +144,28 @@ TEST_CASE("RaBitQ Query SQ4 Transform", "[ut][RaBitQuantizer]") {
     RaBitQuantizer<MetricType::METRIC_TYPE_L2SQR> quantizer(
         dim, dim, num_bits_per_dim_query, allocator.get());
 
-    // input  [0001 0010, 0100 1000, 1111 0000]
-    // padding 1 for dim 6
-    std::vector<uint8_t> input = {0x12, 0x48, 0xf0};
+    std::vector<float> original_data = {1, 2, 4, 8, 15, 0};
+    // input  [0010 0001, 1000 0100, 0000 1111]
+    std::vector<uint8_t> input = {0x21, 0x84, 0x0f};
+    std::vector<uint8_t> sq_data(4 + 4 + 4, 0);
 
-    // output [1000 1000, 0100 1000, 0010 1000, 0001 1000],
-    // align with 8 bits (padding 0 for resident 3 dim)
-    // then, will padding 4 bytes for storing norm
+    // test sq
+    SQ4UniformQuantizer<MetricType::METRIC_TYPE_IP> sq4_quantizer(6, allocator.get(), 0.0f);
+    sq4_quantizer.Train(original_data.data(), 1);
+    sq4_quantizer.EncodeOneImpl(original_data.data(), sq_data.data());
+    auto is_consistent = std::memcmp(sq_data.data(), input.data(), input.size());
+    REQUIRE(is_consistent == 0);
+    REQUIRE(std::abs(*(float*)(&sq_data[4]) - 30) < 1e-5);
+    REQUIRE(std::abs(*(float*)(&sq_data[8]) - 30) < 1e-5);
+
+    // test reorder
     std::vector<uint8_t> expected_output = {0x88, 0x48, 0x28, 0x18};
     std::vector<uint8_t> output(8, 0);
     std::vector<uint8_t> recovered_input(3, 0);
 
     // reorder the input
     quantizer.ReOrderSQ4(input.data(), output.data());
-    auto is_consistent = std::memcmp(expected_output.data(), output.data(), expected_output.size());
+    is_consistent = std::memcmp(expected_output.data(), output.data(), expected_output.size());
     REQUIRE(is_consistent == 0);
 
     // recover the original order

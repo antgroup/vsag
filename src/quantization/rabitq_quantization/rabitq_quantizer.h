@@ -472,7 +472,7 @@ RaBitQuantizer<metric>::ReOrderSQ4(const uint8_t* input, uint8_t* output) const 
     for (uint64_t bit_pos = 0; bit_pos < num_bits_per_dim_query_; ++bit_pos) {
         for (uint64_t d = 0; d < this->dim_; d++) {
             // extract the bit
-            uint8_t bit_value = (input[d / 2] >> (((d + 1) % 2) * 4 + bit_pos)) & 0x1;
+            uint8_t bit_value = (input[d / 2] >> ((d % 2) * 4 + bit_pos)) & 0x1;
 
             // calculate the position
             uint64_t output_bit_pos = bit_pos * aligned_block_size + d;
@@ -504,7 +504,7 @@ RaBitQuantizer<metric>::RecoverOrderSQ4(const uint8_t* output, uint8_t* input) c
 
             // calculate the position
             uint64_t input_byte_i = d / 2;
-            uint64_t input_bit_i = ((d + 1) % 2) * 4 + bit_pos;
+            uint64_t input_bit_i = (d % 2) * 4 + bit_pos;
 
             // set the bit
             input[input_byte_i] |= (bit_value << input_bit_i);
