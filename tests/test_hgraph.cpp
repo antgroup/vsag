@@ -54,10 +54,10 @@ public:
     constexpr static const char* search_param_tmp = R"(
         {{
             "hgraph": {{
-                "ef_search": {}
+                "ef_search": {},
+                "use_extra_info_filter": {}
             }}
         }})";
-
     const std::vector<std::pair<std::string, float>> test_cases = {
         {"fp32", 0.99},
         {"bf16", 0.98},
@@ -304,7 +304,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex,
     auto metric_type = GENERATE("l2", "ip", "cosine");
 
     const std::string name = "hgraph";
-    auto search_param = fmt::format(search_param_tmp, 200);
+    auto search_param = fmt::format(search_param_tmp, 200, false);
     for (auto dim : dims) {
         for (auto& [base_quantization_str, recall] : test_cases) {
             if (IsRaBitQ(base_quantization_str)) {
@@ -335,7 +335,8 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex,
     auto metric_type = GENERATE("l2");
 
     const std::string name = "hgraph";
-    auto search_param = fmt::format(search_param_tmp, 200);
+    auto search_param = fmt::format(search_param_tmp, 200, false);
+    auto ex_search_param = fmt::format(search_param_tmp, 200, true);
     auto dim = dims[0];
     auto& [base_quantization_str, recall] = test_cases[0];
     vsag::Options::Instance().set_block_size_limit(size);
@@ -352,6 +353,16 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex,
     TestCheckIdExist(index, dataset, false);
     TestCalcDistanceById(index, dataset, 2e-6, false);
     TestBatchCalcDistanceById(index, dataset, 2e-6, false);
+    TestKnnSearchExFilter(index, dataset, ex_search_param, recall, false);
+    TestKnnSearchIter(index, dataset, ex_search_param, recall, false, true);
+    // with ex info empty index
+    auto extra_info_size = 256;
+    auto ex_param = GenerateHGraphBuildParametersString(
+        metric_type, dim, base_quantization_str, 5, extra_info_size);
+    auto ex_index = TestFactory(name, param, true);
+    auto ex_dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type, 0.8, extra_info_size);
+    TestKnnSearchExFilter(ex_index, ex_dataset, ex_search_param, recall, false);
+    TestKnnSearchIter(ex_index, ex_dataset, ex_search_param, recall, false, true);
     vsag::Options::Instance().set_block_size_limit(origin_size);
 }
 
@@ -361,7 +372,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex, "HGraph Build", "[ft][hg
     auto metric_type = GENERATE("l2", "ip", "cosine");
 
     const std::string name = "hgraph";
-    auto search_param = fmt::format(search_param_tmp, 200);
+    auto search_param = fmt::format(search_param_tmp, 200, false);
     for (auto dim : dims) {
         for (auto& [base_quantization_str, recall] : test_cases) {
             if (IsRaBitQ(base_quantization_str)) {
@@ -390,7 +401,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex, "HGraph Add", "[ft][hgra
     auto metric_type = GENERATE("l2", "ip", "cosine");
 
     const std::string name = "hgraph";
-    auto search_param = fmt::format(search_param_tmp, 200);
+    auto search_param = fmt::format(search_param_tmp, 200, false);
     for (auto dim : dims) {
         for (auto& [base_quantization_str, recall] : test_cases) {
             if (IsRaBitQ(base_quantization_str)) {
@@ -424,7 +435,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex,
     auto dataset = pool.GetNanDataset(metric_type);
     auto dim = dataset->dim_;
     const std::string name = "hgraph";
-    auto search_param = fmt::format(search_param_tmp, 100);
+    auto search_param = fmt::format(search_param_tmp, 100, false);
     for (auto& [base_quantization_str, recall] : test_cases) {
         if (IsRaBitQ(base_quantization_str)) {
             if (std::string(metric_type) != "l2") {
@@ -448,7 +459,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex,
     auto metric_type = GENERATE("l2", "cosine");
 
     const std::string name = "hgraph";
-    auto search_param = fmt::format(search_param_tmp, 200);
+    auto search_param = fmt::format(search_param_tmp, 200, false);
     for (auto dim : dims) {
         for (auto& [base_quantization_str, recall] : test_cases) {
             if (IsRaBitQ(base_quantization_str)) {
@@ -478,7 +489,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex, "HGraph Serialize File",
     auto size = GENERATE(1024 * 1024 * 2);
     auto metric_type = GENERATE("l2", "cosine");
     const std::string name = "hgraph";
-    auto search_param = fmt::format(search_param_tmp, 200);
+    auto search_param = fmt::format(search_param_tmp, 200, false);
     uint64_t extra_info_size = 64;
 
     for (auto dim : dims) {
@@ -551,7 +562,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex, "HGraph Duplicate Build"
     auto metric_type = GENERATE("l2", "ip");
 
     const std::string name = "hgraph";
-    auto search_param = fmt::format(search_param_tmp, 200);
+    auto search_param = fmt::format(search_param_tmp, 200, false);
     for (auto dim : dims) {
         for (auto& [base_quantization_str, recall] : test_cases) {
             if (IsRaBitQ(base_quantization_str)) {
@@ -581,7 +592,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex, "HGraph Estimate Memory"
     auto metric_type = GENERATE("l2", "cosine");
 
     const std::string name = "hgraph";
-    auto search_param = fmt::format(search_param_tmp, 200);
+    auto search_param = fmt::format(search_param_tmp, 200, false);
     uint64_t estimate_count = 1000;
     uint64_t extra_info_size = 64;
     for (auto dim : dims) {
@@ -615,7 +626,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex, "HGraph Ignore Reorder",
     auto metric_type = GENERATE("l2", "cosine");
 
     const std::string name = "hgraph";
-    auto search_param = fmt::format(search_param_tmp, 200);
+    auto search_param = fmt::format(search_param_tmp, 200, false);
     constexpr auto parameter_temp_reorder = R"(
     {{
         "dtype": "float32",
@@ -649,7 +660,8 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex, "HGraph With Extra Info"
     uint64_t extra_info_size = 256;
 
     const std::string name = "hgraph";
-    auto search_param = fmt::format(search_param_tmp, 200);
+    auto search_param = fmt::format(search_param_tmp, 200, false);
+    auto search_ex_filter_param = fmt::format(search_param_tmp, 500, true);
     for (auto& dim : dims) {
         for (auto& [base_quantization_str, recall] : test_cases) {
             if (IsRaBitQ(base_quantization_str)) {
@@ -675,6 +687,8 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex, "HGraph With Extra Info"
             TestKnnSearchIter(index, dataset, search_param, recall, true);
             TestRangeSearch(index, dataset, search_param, recall, 10, true);
             TestGetExtraInfoById(index, dataset, extra_info_size);
+            TestKnnSearchExFilter(index, dataset, search_ex_filter_param, recall, true);
+            TestKnnSearchIter(index, dataset, search_ex_filter_param, recall, true, true);
             vsag::Options::Instance().set_block_size_limit(origin_size);
         }
     }

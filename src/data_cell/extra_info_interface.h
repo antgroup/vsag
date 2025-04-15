@@ -51,6 +51,9 @@ public:
     virtual void
     Resize(InnerIdType capacity) = 0;
 
+    virtual void
+    Release(const char* extra_info) = 0;
+
 public:
     virtual void
     SetMaxCapacity(InnerIdType capacity) {

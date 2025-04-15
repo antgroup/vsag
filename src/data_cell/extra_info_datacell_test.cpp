@@ -29,8 +29,10 @@
 using namespace vsag;
 
 void
-TestExtraInfoDataCell(ExtraInfoDataCellParamPtr& param, IndexCommonParam& common_param) {
-    auto count = GENERATE(100, 1000);
+TestExtraInfoDataCell(ExtraInfoDataCellParamPtr& param,
+                      IndexCommonParam& common_param,
+                      uint64_t spec_count) {
+    auto count = spec_count > 0 ? spec_count : GENERATE(100, 1000);
     auto extra_info = ExtraInfoInterface::MakeInstance(param, common_param);
 
     ExtraInfoInterfaceTest test(extra_info);
@@ -44,7 +46,8 @@ TestExtraInfoDataCell(ExtraInfoDataCellParamPtr& param, IndexCommonParam& common
 TEST_CASE("ExtraInfoDataCell Basic Test", "[ut][ExtraInfoDataCell] ") {
     logger::set_level(logger::level::debug);
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
-    uint64_t extra_info_sizes[3] = {32, 128, 512};
+    uint64_t extra_info_sizes[4] = {32, 128, 512, 3 * 1024 * 1024};
+    uint64_t counts[4] = {0, 0, 0, 50};
     int dim = 512;
     MetricType metric = MetricType::METRIC_TYPE_L2SQR;
     constexpr const char* param_str =
@@ -55,6 +58,7 @@ TEST_CASE("ExtraInfoDataCell Basic Test", "[ut][ExtraInfoDataCell] ") {
             }
         }
         )";
+    int i = 0;
     for (auto& extra_info_size : extra_info_sizes) {
         auto param_json = JsonType::parse(param_str);
         logger::debug("param_json: {}", param_json.dump());
@@ -69,6 +73,7 @@ TEST_CASE("ExtraInfoDataCell Basic Test", "[ut][ExtraInfoDataCell] ") {
         common_param.metric_ = metric;
         common_param.extra_info_size_ = extra_info_size;
 
-        TestExtraInfoDataCell(param, common_param);
+        TestExtraInfoDataCell(param, common_param, counts[i]);
+        i++;
     }
 }
