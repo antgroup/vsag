@@ -35,8 +35,8 @@ public:
     Encode(const Vector<InnerIdType>& values, InnerIdType max_value);
 
     // Decompress all values
-    Vector<InnerIdType>
-    DecompressAll(Allocator* allocator) const;
+    void
+    DecompressAll(Vector<InnerIdType>& neighbors) const;
 
     void
     Clear() {
@@ -60,19 +60,20 @@ public:
         return num_elements_;
     }
 
-private:
-    void
-    set_low_bits(size_t index, InnerIdType value);
-
-    [[nodiscard]] InnerIdType
-    get_low_bits(size_t index) const;
-
-    Allocator* allocator_;
     uint64_t* bits_{nullptr};    // Combined storage for low bits and high bits
     uint8_t num_elements_{0};    // Number of elements, max 255
     uint8_t low_bits_width_{0};  // Width of low bits
     uint8_t low_bits_size_{0};   // Size of low_bits_ array
     uint8_t high_bits_size_{0};  // Size of high_bits_ array
+
+private:
+    void
+    set_low_bits(size_t index, InnerIdType value) const;
+
+    [[nodiscard]] InnerIdType
+    get_low_bits(size_t index) const;
+
+    Allocator* allocator_;
 };
 
 }  // namespace vsag

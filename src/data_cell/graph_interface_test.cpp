@@ -39,6 +39,11 @@ GraphInterfaceTest::BasicTest(uint64_t max_id, uint64_t count, const GraphInterf
         auto cur_id = random() % max_id;
         maps[cur_id] = ids;
     }
+    if (require_sorted_) {
+        for (auto& [key, value] : maps) {
+            std::sort(value->begin(), value->end());
+        }
+    }
 
     for (auto& [key, value] : maps) {
         this->graph_->InsertNeighborsById(key, *value);

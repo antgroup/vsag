@@ -15,6 +15,7 @@
 
 #include "graph_interface.h"
 
+#include "compressed_graph_datacell.h"
 #include "graph_datacell.h"
 #include "io/io_headers.h"
 #include "sparse_graph_datacell.h"
@@ -25,6 +26,12 @@ GraphInterfacePtr
 GraphInterface::MakeInstance(const GraphInterfaceParamPtr& param,
                              const IndexCommonParam& common_param,
                              bool is_sparse) {
+    auto graph_storage_type =
+        std::dynamic_pointer_cast<GraphDataCellParameter>(param)->graph_storage_type_;
+    if (graph_storage_type == GraphStorageTypes::GRAPH_STORAGE_TYPE_COMPRESSED) {
+        return std::make_shared<CompressedGraphDataCell>(param, common_param);
+    }
+
     if (is_sparse) {
         return std::make_shared<SparseGraphDataCell>(param, common_param);
     }
