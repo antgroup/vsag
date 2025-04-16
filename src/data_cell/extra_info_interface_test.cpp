@@ -53,6 +53,16 @@ ExtraInfoInterfaceTest::BasicTest(uint64_t base_count) {
         REQUIRE(extra_info != nullptr);
     }
 
+    for (InnerIdType i = first_one; i <= last_one; ++i) {
+        bool need_release = false;
+        extra_info_->Prefetch(i);
+        const char* ex_info = extra_info_->GetExtraInfoById(i, need_release);
+        REQUIRE(ex_info != nullptr);
+        if (need_release) {
+            extra_info_->Release(ex_info);
+        }
+    }
+
     // test SetMaxCapacity and GetMaxCapacity
     auto origin_capacity = extra_info_->GetMaxCapacity();
     extra_info_->SetMaxCapacity(origin_capacity * 2);
@@ -85,6 +95,16 @@ ExtraInfoInterfaceTest::TestForceInMemory(uint64_t force_count) {
         extra_info_->Prefetch(i);
         extra_info_->GetExtraInfoById(i, extra_info);
         REQUIRE(extra_info != nullptr);
+    }
+
+    for (InnerIdType i = first_one; i <= last_one; ++i) {
+        bool need_release = false;
+        extra_info_->Prefetch(i);
+        const char* ex_info = extra_info_->GetExtraInfoById(i, need_release);
+        REQUIRE(ex_info != nullptr);
+        if (need_release) {
+            extra_info_->Release(ex_info);
+        }
     }
 
     extra_info_->DisableForceInMemory();

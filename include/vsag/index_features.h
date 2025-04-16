@@ -66,6 +66,8 @@ enum IndexFeature {
 
     SUPPORT_GET_EXTRA_INFO_BY_ID, /**< Supports get extra_info by id */
 
+    SUPPORT_KNN_SEARCH_WITH_EX_FILTER, /**< Supports K-nearest neighbor search with extra info filtering */
+
     INDEX_FEATURE_COUNT /** must be last one */
 };
 }  // namespace vsag

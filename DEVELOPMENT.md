@@ -19,7 +19,21 @@ There are two ways to build and develop the VSAG project now.
 docker pull vsaglib/vsag:ubuntu
 ```
 
-### or Install Dependencies
+### or Install Development Requirements
+
+- Operating System:
+  - Ubuntu 20.04 or later
+  - or CentOS 7 or later
+- Compiler:
+  - GCC version 9.4.0 or later
+  - or Clang version 13.0.0 or later
+- Build Tools: CMake version 3.18.0 or later
+- Additional Dependencies:
+  - gfortran
+  - python 3.6+
+  - omp
+  - aio
+
 ```bash
 # for Debian/Ubuntu
 $ ./scripts/deps/install_deps_ubuntu.sh

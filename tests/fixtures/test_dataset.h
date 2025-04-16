@@ -51,7 +51,9 @@ public:
 
     DatasetPtr filter_query_{nullptr};
     DatasetPtr filter_ground_truth_{nullptr};
+    DatasetPtr ex_filter_ground_truth_{nullptr};
     std::function<bool(int64_t)> filter_function_{nullptr};
+    std::function<bool(const char*)> ex_filter_function_{nullptr};
 
     uint64_t dim_{0};
     uint64_t count_{0};

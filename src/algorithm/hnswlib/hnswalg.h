@@ -292,22 +292,17 @@ public:
         return level == 0 ? getLinklist0(internal_id) : getLinklist(internal_id, level);
     }
 
-    inline std::shared_ptr<char[]>
-    getLinklistAtLevelWithLock(InnerIdType internal_id, int level) const {
+    inline void
+    getLinklistAtLevel(InnerIdType internal_id, int level, void* neighbors) const {
         if (level == 0) {
             std::shared_lock lock(points_locks_[internal_id]);
-            std::shared_ptr<char[]> data = std::shared_ptr<char[]>(new char[size_links_level0_]);
             auto src = data_level0_memory_->GetElementPtr(internal_id, offsetLevel0_);
-            std::memcpy(data.get(), src, size_links_level0_);
-            return data;
+            std::memcpy(neighbors, src, size_links_level0_);
         } else {
             std::shared_lock lock(points_locks_[internal_id]);
-            std::shared_ptr<char[]> data =
-                std::shared_ptr<char[]>(new char[size_links_per_element_]);
-            std::memcpy(data.get(),
+            std::memcpy(neighbors,
                         link_lists_[internal_id] + (level - 1) * size_links_per_element_,
                         size_links_per_element_);
-            return data;
         }
     }
 
@@ -364,7 +359,8 @@ public:
     */
     bool
     isMarkedDeleted(InnerIdType internal_id) const {
-        auto data = getLinklistAtLevelWithLock(internal_id, 0);
+        std::shared_ptr<char[]> data = std::shared_ptr<char[]>(new char[size_links_level0_]);
+        getLinklistAtLevel(internal_id, 0, data.get());
         unsigned char* ll_cur = ((unsigned char*)data.get()) + 2;
         return *ll_cur & DELETE_MARK;
     }

@@ -68,6 +68,16 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
             ExtraInfoInterface::MakeInstance(hgraph_param->extra_info_param, common_param);
     }
 
+    auto step_block_size = Options::Instance().block_size_limit();
+    auto block_size_per_vector = this->basic_flatten_codes_->code_size_;
+    if (use_reorder_) {
+        block_size_per_vector =
+            std::max(block_size_per_vector, this->high_precise_codes_->code_size_);
+    }
+    auto increase_count = step_block_size / block_size_per_vector;
+    this->resize_increase_count_bit_ = std::max(
+        DEFAULT_RESIZE_BIT, static_cast<uint64_t>(log2(static_cast<double>(increase_count))));
+
     resize(bottom_graph_->max_capacity_);
     if (this->build_thread_count_ > 1) {
         this->build_pool_ = SafeThreadPool::FactoryDefaultThreadPool();
@@ -179,10 +189,6 @@ HGraph::KnnSearch(const DatasetPtr& query,
                   int64_t k,
                   const std::string& parameters,
                   const FilterPtr& filter) const {
-    std::shared_ptr<CommonInnerIdFilter> ft = nullptr;
-    if (filter != nullptr) {
-        ft = std::make_shared<CommonInnerIdFilter>(filter, *this->label_table_);
-    }
     int64_t query_dim = query->GetDim();
     CHECK_ARGUMENT(query_dim == dim_,
                    fmt::format("query.dim({}) must be equal to index.dim({})", query_dim, dim_));
@@ -207,6 +213,14 @@ HGraph::KnnSearch(const DatasetPtr& query,
     }
 
     auto params = HGraphSearchParameters::FromJson(parameters);
+    FilterPtr ft = nullptr;
+    if (filter != nullptr) {
+        if (params.use_extra_info_filter) {
+            ft = std::make_shared<CommonExtraInfoFilter>(filter, this->extra_infos_);
+        } else {
+            ft = std::make_shared<CommonInnerIdFilter>(filter, *this->label_table_);
+        }
+    }
 
     search_param.ef = std::max(params.ef_search, k);
     search_param.is_inner_id_allowed = ft;
@@ -255,10 +269,6 @@ HGraph::KnnSearch(const DatasetPtr& query,
     if (GetNumElements() == 0) {
         return DatasetImpl::MakeEmptyDataset();
     }
-    std::shared_ptr<CommonInnerIdFilter> ft = nullptr;
-    if (filter != nullptr) {
-        ft = std::make_shared<CommonInnerIdFilter>(filter, *this->label_table_);
-    }
     int64_t query_dim = query->GetDim();
     CHECK_ARGUMENT(query_dim == dim_,
                    fmt::format("query.dim({}) must be equal to index.dim({})", query_dim, dim_));
@@ -270,6 +280,15 @@ HGraph::KnnSearch(const DatasetPtr& query,
     CHECK_ARGUMENT(query->GetNumElements() == 1, "query dataset should contain 1 vector only");
 
     auto params = HGraphSearchParameters::FromJson(parameters);
+
+    FilterPtr ft = nullptr;
+    if (filter != nullptr) {
+        if (params.use_extra_info_filter) {
+            ft = std::make_shared<CommonExtraInfoFilter>(filter, this->extra_infos_);
+        } else {
+            ft = std::make_shared<CommonInnerIdFilter>(filter, *this->label_table_);
+        }
+    }
 
     if (iter_ctx == nullptr) {
         auto cur_count = this->bottom_graph_->TotalCount();
@@ -513,7 +532,8 @@ HGraph::serialize_basic_info(StreamWriter& writer) const {
     StreamWriter::WriteObj(writer, this->use_reorder_);
     StreamWriter::WriteObj(writer, this->dim_);
     StreamWriter::WriteObj(writer, this->metric_);
-    StreamWriter::WriteObj(writer, this->max_level_);
+    uint64_t max_level = this->route_graphs_.size();
+    StreamWriter::WriteObj(writer, max_level);
     StreamWriter::WriteObj(writer, this->entry_point_id_);
     StreamWriter::WriteObj(writer, this->ef_construct_);
     StreamWriter::WriteObj(writer, this->mult_);
@@ -540,8 +560,8 @@ HGraph::Serialize(StreamWriter& writer) const {
     if (this->use_reorder_) {
         this->high_precise_codes_->Serialize(writer);
     }
-    for (auto i = 0; i < this->max_level_; ++i) {
-        this->route_graphs_[i]->Serialize(writer);
+    for (const auto& route_graph : this->route_graphs_) {
+        route_graph->Serialize(writer);
     }
     if (this->extra_info_size_ > 0 && this->extra_infos_ != nullptr) {
         this->extra_infos_->Serialize(writer);
@@ -557,12 +577,8 @@ HGraph::Deserialize(StreamReader& reader) {
         this->high_precise_codes_->Deserialize(reader);
     }
 
-    for (uint64_t i = 0; i < this->max_level_; ++i) {
-        this->route_graphs_.emplace_back(this->generate_one_route_graph());
-    }
-
-    for (uint64_t i = 0; i < this->max_level_; ++i) {
-        this->route_graphs_[i]->Deserialize(reader);
+    for (auto& route_graph : this->route_graphs_) {
+        route_graph->Deserialize(reader);
     }
     this->neighbors_mutex_->Resize(max_capacity_);
 
@@ -579,7 +595,11 @@ HGraph::deserialize_basic_info(StreamReader& reader) {
     StreamReader::ReadObj(reader, this->use_reorder_);
     StreamReader::ReadObj(reader, this->dim_);
     StreamReader::ReadObj(reader, this->metric_);
-    StreamReader::ReadObj(reader, this->max_level_);
+    uint64_t max_level;
+    StreamReader::ReadObj(reader, max_level);
+    for (uint64_t i = 0; i < max_level; ++i) {
+        this->route_graphs_.emplace_back(this->generate_one_route_graph());
+    }
     StreamReader::ReadObj(reader, this->entry_point_id_);
     StreamReader::ReadObj(reader, this->ef_construct_);
     StreamReader::ReadObj(reader, this->mult_);
@@ -679,13 +699,12 @@ HGraph::add_one_point(const float* data, int level, InnerIdType inner_id) {
         this->high_precise_codes_->InsertVector(data, inner_id);
     }
     std::unique_lock add_lock(add_mutex_);
-    if (level >= int64_t(this->max_level_) || bottom_graph_->TotalCount() == 0) {
+    if (level >= static_cast<int>(this->route_graphs_.size()) || bottom_graph_->TotalCount() == 0) {
         std::lock_guard<std::shared_mutex> wlock(this->global_mutex_);
         // level maybe a negative number(-1)
-        for (auto j = static_cast<int64_t>(max_level_); j <= level; ++j) {
+        for (auto j = static_cast<int>(this->route_graphs_.size()); j <= level; ++j) {
             this->route_graphs_.emplace_back(this->generate_one_route_graph());
         }
-        max_level_ = level + 1;
         this->graph_add_one(data, level, inner_id);
         entry_point_id_ = inner_id;
         add_lock.unlock();
@@ -711,7 +730,7 @@ HGraph::graph_add_one(const float* data, int level, InnerIdType inner_id) {
     if (use_reorder_) {
         flatten_codes = high_precise_codes_;
     }
-    for (auto j = max_level_ - 1; j > level; --j) {
+    for (auto j = this->route_graphs_.size() - 1; j > level; --j) {
         result = search_one_graph(data, route_graphs_[j], flatten_codes, param);
         param.ep = result.top().second;
     }
@@ -740,10 +759,13 @@ HGraph::graph_add_one(const float* data, int level, InnerIdType inner_id) {
 
 void
 HGraph::resize(uint64_t new_size) {
-    std::lock_guard lock(this->global_mutex_);
     auto cur_size = this->max_capacity_;
     uint64_t new_size_power_2 =
         next_multiple_of_power_of_two(new_size, this->resize_increase_count_bit_);
+    if (cur_size >= new_size_power_2) {
+        return;
+    }
+    std::lock_guard lock(this->global_mutex_);
     if (cur_size < new_size_power_2) {
         this->neighbors_mutex_->Resize(new_size_power_2);
         pool_ = std::make_shared<VisitedListPool>(1, allocator_, new_size_power_2, allocator_);
@@ -826,6 +848,7 @@ HGraph::init_features() {
 
     if (this->extra_infos_ != nullptr) {
         this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_GET_EXTRA_INFO_BY_ID);
+        this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_KNN_SEARCH_WITH_EX_FILTER);
     }
 }
 

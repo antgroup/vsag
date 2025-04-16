@@ -67,12 +67,25 @@ public:
             return;
         }
         this->max_capacity_ = new_capacity;
-        uint64_t io_size = new_capacity * extra_info_size_;
+        uint64_t io_size =
+            static_cast<uint64_t>(new_capacity) * static_cast<uint64_t>(extra_info_size_);
         uint8_t end_flag =
             127;  // the value is meaningless, only to occupy the position for io allocate
         this->io_->Write(&end_flag, 1, io_size);
         if (force_in_memory_) {
             this->force_in_memory_io_->Write(&end_flag, 1, io_size);
+        }
+    }
+
+    void
+    Release(const char* extra_info) override {
+        if (extra_info == nullptr) {
+            return;
+        }
+        if (this->force_in_memory_) {
+            force_in_memory_io_->Release(reinterpret_cast<const uint8_t*>(extra_info));
+        } else {
+            io_->Release(reinterpret_cast<const uint8_t*>(extra_info));
         }
     }
 
@@ -87,6 +100,9 @@ public:
 
     bool
     GetExtraInfoById(InnerIdType id, char* extra_info) const override;
+
+    const char*
+    GetExtraInfoById(InnerIdType id, bool& need_release) const override;
 
     void
     Serialize(StreamWriter& writer) override;
@@ -231,6 +247,22 @@ ExtraInfoDataCell<IOTmpl>::GetExtraInfoById(InnerIdType id, char* extra_info) co
         return io_->Read(extra_info_size_,
                          static_cast<uint64_t>(id) * static_cast<uint64_t>(extra_info_size_),
                          reinterpret_cast<uint8_t*>(extra_info));
+    }
+}
+
+template <typename IOTmpl>
+const char*
+ExtraInfoDataCell<IOTmpl>::GetExtraInfoById(InnerIdType id, bool& need_release) const {
+    if (force_in_memory_) {
+        return reinterpret_cast<const char*>(force_in_memory_io_->Read(
+            extra_info_size_,
+            static_cast<uint64_t>(id) * static_cast<uint64_t>(extra_info_size_),
+            need_release));
+    } else {
+        return reinterpret_cast<const char*>(
+            io_->Read(extra_info_size_,
+                      static_cast<uint64_t>(id) * static_cast<uint64_t>(extra_info_size_),
+                      need_release));
     }
 }
 
