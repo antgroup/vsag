@@ -15,30 +15,11 @@
 
 #pragma once
 
-#include "data_cell/graph_storage_type.h"
-#include "graph_interface_parameter.h"
-#include "io/io_parameter.h"
-
 namespace vsag {
-class GraphDataCellParameter : public GraphInterfaceParameter {
-public:
-    GraphDataCellParameter() = default;
-
-    void
-    FromJson(const JsonType& json) override;
-
-    JsonType
-    ToJson() override;
-
-public:
-    IOParamPtr io_parameter_{nullptr};
-
-    uint64_t max_degree_{64};
-
-    uint64_t init_max_capacity_{100};
-
-    GraphStorageTypes graph_storage_type_{GraphStorageTypes::GRAPH_STORAGE_TYPE_FLAT};
+enum class GraphStorageTypes {
+    GRAPH_STORAGE_TYPE_FLAT = 0,
+    GRAPH_STORAGE_TYPE_SPARSE = 1,
+    GRAPH_STORAGE_TYPE_COMPRESSED = 2
 };
 
-using GraphDataCellParamPtr = std::shared_ptr<GraphDataCellParameter>;
 }  // namespace vsag
