@@ -163,10 +163,20 @@ DiskANN::DiskANN(DiskannParameters& diskann_params, const IndexCommonParam& inde
                 disk_layout_reader_->AsyncRead(offset, len, dest, callBack);
             }
         } else {
+            std::atomic<int> counter(requests.size());
+            std::promise<void> total_promise;
+            auto total_future = total_promise.get_future();
             for (const auto& req : requests) {
                 auto [offset, len, dest] = req;
-                disk_layout_reader_->Read(offset, len, dest);
+                auto callback = [&counter, &total_promise](IOErrorCode code,
+                                                           const std::string& message) {
+                    if (--counter == 0) {
+                        total_promise.set_value();
+                    }
+                };
+                disk_layout_reader_->AsyncRead(offset, len, dest, callback);
             }
+            total_future.wait();
         }
     };
 
