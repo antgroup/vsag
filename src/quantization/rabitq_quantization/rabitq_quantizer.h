@@ -221,7 +221,7 @@ RaBitQuantizer<metric>::RaBitQuantizer(int dim,
         // e.g., for a float query with dim == 4:   [1, 2, 4, 8]
         //       suppose original SQ4U code is:     [0001 0010, 0100 1000]  (0001 is 4)
         //       then, the re-ordered code is:      [1000 0100, 0010 0001]
-        auto sq_code_size = (this->dim_ + 7) / 8 * num_bits_per_dim_query_;
+        auto sq_code_size = ((this->dim_ + 511) / 512) * 512 / 8 * num_bits_per_dim_query_;
         this->query_code_size_ = (sq_code_size / align_size) * align_size;
 
         query_offset_lb_ = this->query_code_size_;
@@ -440,7 +440,11 @@ RaBitQuantizer<metric>::ComputeQueryBaseImpl(const uint8_t* query_codes,
         DataType lower_bound = *((DataType*)(query_codes + query_offset_lb_));
         DataType delta = *((DataType*)(query_codes + query_offset_delta_));
 
-        ip_bq_estimate = RaBitQSQ4UBinaryIP(query_codes, base_codes, this->dim_);
+        auto align_dim = (this->dim_ + 511) / 512 * 512;
+        std::vector<uint8_t> tmp(align_dim / 8, 0);
+        memcpy(tmp.data(), base_codes, offset_norm_);
+
+        ip_bq_estimate = RaBitQSQ4UBinaryIP(query_codes, tmp.data(), align_dim);
 
         ip_bq_estimate =
             RecoverDistBetweenSQ4UandFP32(ip_bq_estimate, base_sum, query_sum, lower_bound, delta);
@@ -467,7 +471,7 @@ void
 RaBitQuantizer<metric>::ReOrderSQ4(const uint8_t* input, uint8_t* output) const {
     // note that the codesize of input is different from output
     // output: align dim bits with 8 bits (1 byte)
-    uint64_t aligned_block_size = (this->dim_ + 7) / 8 * 8;
+    uint64_t aligned_block_size = (this->dim_ + 511) / 512 * 512;
 
     for (uint64_t bit_pos = 0; bit_pos < num_bits_per_dim_query_; ++bit_pos) {
         for (uint64_t d = 0; d < this->dim_; d++) {
@@ -490,7 +494,7 @@ void
 RaBitQuantizer<metric>::RecoverOrderSQ4(const uint8_t* output, uint8_t* input) const {
     // note that the codesize of input is different from output
     // output: align dim bits with 8 bits (1 byte)
-    uint64_t aligned_block_size = (this->dim_ + 7) / 8 * 8;
+    uint64_t aligned_block_size = (this->dim_ + 511) / 512 * 512;
 
     for (uint64_t d = 0; d < this->dim_; ++d) {
         for (uint64_t bit_pos = 0; bit_pos < num_bits_per_dim_query_; ++bit_pos) {

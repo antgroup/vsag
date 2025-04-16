@@ -35,7 +35,9 @@ TEST_CASE("RaBitQ SQ4U-BQ Compute Codes", "[ut][simd]") {
     std::vector<uint8_t> bits = {0xAA, 0x55};  // [1010 1010, 0101 0101]
 
     for (auto dim = 0; dim < 17; dim++) {
-        uint32_t result = RaBitQSQ4UBinaryIP(codes.data(), bits.data(), dim);
+        uint32_t result = generic::RaBitQSQ4UBinaryIP(codes.data(), bits.data(), dim);
+        uint32_t result_avx512 = avx512::RaBitQSQ4UBinaryIP(codes.data(), bits.data(), dim);
+        REQUIRE(result == result_avx512);
         if (dim == 0) {
             REQUIRE(result == 0);
         } else if (dim <= 8) {

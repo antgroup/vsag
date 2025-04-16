@@ -41,6 +41,11 @@ GetRaBitQFloatBinaryIP() {
 
 static RaBitQSQ4UBinaryType
 GetRaBitQSQ4UBinaryIP() {
+    if (SimdStatus::SupportAVX512()) {
+#if defined(ENABLE_AVX512)
+        return avx512::RaBitQSQ4UBinaryIP;
+#endif
+    }
     return generic::RaBitQSQ4UBinaryIP;
 }
 
