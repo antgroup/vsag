@@ -31,7 +31,7 @@ TEST_CASE("RaBitQ SQ4U-BQ Compute Codes", "[ut][simd]") {
                                   0xF0,
                                   0xF0,  // [1111 0000, 1111 0000]
                                   0x00,
-                                  0x00};       // [0000 0000, 0000 0000]
+                                  0x00};  // [0000 0000, 0000 0000]
     codes.resize(64);
     std::vector<uint8_t> bits = {0xAA, 0x55};  // [1010 1010, 0101 0101]
     bits.resize(64);

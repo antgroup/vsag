@@ -425,26 +425,18 @@ RaBitQuantizer<metric>::ComputeQueryBaseImpl(const uint8_t* query_codes,
                                              const uint8_t* base_codes) const {
     // codes1 -> query (fp32, sq8, sq4...) + norm
     // codes2 -> base  (binary) + norm + error
-    norm_type base_norm = *((norm_type*)(base_codes + offset_norm_));
-    norm_type query_norm = *((norm_type*)(query_codes + query_offset_norm_));
-
-    error_type base_error = *((error_type*)(base_codes + offset_error_));
-    if (std::abs(base_error) < 1e-5) {
-        base_error = (base_error > 0) ? 1.0f : -1.0f;
-    }
-
     float ip_bq_estimate;
     if (num_bits_per_dim_query_ == 4) {
-        sum_type base_sum = *((sum_type*)(base_codes + offset_sum_));
-        sum_type query_sum = *((sum_type*)(query_codes + query_offset_sum_));
-        DataType lower_bound = *((DataType*)(query_codes + query_offset_lb_));
-        DataType delta = *((DataType*)(query_codes + query_offset_delta_));
-
         auto align_dim = (this->dim_ + 511) / 512 * 512;
         std::vector<uint8_t> tmp(align_dim / 8, 0);
         memcpy(tmp.data(), base_codes, offset_norm_);
 
         ip_bq_estimate = RaBitQSQ4UBinaryIP(query_codes, tmp.data(), align_dim);
+
+        sum_type base_sum = *((sum_type*)(base_codes + offset_sum_));
+        sum_type query_sum = *((sum_type*)(query_codes + query_offset_sum_));
+        DataType lower_bound = *((DataType*)(query_codes + query_offset_lb_));
+        DataType delta = *((DataType*)(query_codes + query_offset_delta_));
 
         ip_bq_estimate =
             RecoverDistBetweenSQ4UandFP32(ip_bq_estimate, base_sum, query_sum, lower_bound, delta);
@@ -452,6 +444,14 @@ RaBitQuantizer<metric>::ComputeQueryBaseImpl(const uint8_t* query_codes,
         ip_bq_estimate =
             RaBitQFloatBinaryIP((DataType*)query_codes, base_codes, this->dim_, inv_sqrt_d_);
     }
+
+    norm_type query_norm = *((norm_type*)(query_codes + query_offset_norm_));
+    norm_type base_norm = *((norm_type*)(base_codes + offset_norm_));
+    error_type base_error = *((error_type*)(base_codes + offset_error_));
+    if (std::abs(base_error) < 1e-5) {
+        base_error = (base_error > 0) ? 1.0f : -1.0f;
+    }
+
     float ip_bb_1_32 = base_error;
     float ip_est = ip_bq_estimate / ip_bb_1_32;
 
