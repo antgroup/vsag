@@ -88,10 +88,6 @@ Thrive together in VSAG community with users and developers from all around the 
 - Follow us on [Weixin Official Accounts](./docs/weixin-qr.jpg)（微信公众平台）to get the latest news.
 
 ## Roadmap
-- v0.14 (ETA: Mar. 2025)
-  - support inverted index(be like IVFFlat) based on datacell
-  - support extrainfo storage within vector
-  - implement a new MultiIndex that supports efficient pre-filtering on enumerable tags
 - v0.15 (ETA: Apr. 2025)
   - support sparse vector searching
   - introduce pluggable product quantization(known as PQ) in datacell
@@ -99,6 +95,10 @@ Thrive together in VSAG community with users and developers from all around the 
   - support neon instruction acceleration on ARM platform
   - support using GPU to accelerate index building
   - provide an optimizer that supports optimizing search parameters by recall or latency
+- v0.17 (ETA: Jun. 2025)
+  - support amx instruction acceleration on Intel CPU
+  - support attributes stored in vector index
+  - support graph structure compression
 
 ## Reference
 Reference to cite when you use VSAG in a research paper:
