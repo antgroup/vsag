@@ -18,8 +18,7 @@
 namespace vsag {
 enum class GraphStorageTypes {
     GRAPH_STORAGE_TYPE_FLAT = 0,
-    GRAPH_STORAGE_TYPE_SPARSE = 1,
-    GRAPH_STORAGE_TYPE_COMPRESSED = 2
+    GRAPH_STORAGE_TYPE_COMPRESSED = 1
 };
 
 }  // namespace vsag
