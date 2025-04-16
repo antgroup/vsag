@@ -48,7 +48,7 @@ test:                    ## Build and run unit tests.
 
 .PHONY: asan
 asan:                    ## Build with AddressSanitizer option.
-	cmake ${VSAG_CMAKE_ARGS} -B${DEBUG_BUILD_DIR} -DCMAKE_BUILD_TYPE=Debug -DENABLE_ASAN=ON -DENABLE_TSAN=OFF -DENABLE_CCACHE=ON
+	cmake ${VSAG_CMAKE_ARGS} -B${DEBUG_BUILD_DIR} -DCMAKE_BUILD_TYPE=Sanitize -DENABLE_ASAN=ON -DENABLE_TSAN=OFF -DENABLE_CCACHE=ON
 	cmake --build ${DEBUG_BUILD_DIR} --parallel ${COMPILE_JOBS}
 
 .PHONY: test_asan
@@ -59,7 +59,7 @@ test_asan: asan          ## Run unit tests with AddressSanitizer option.
 
 .PHONY: tsan
 tsan:                    ## Build with ThreadSanitizer option.
-	cmake ${VSAG_CMAKE_ARGS} -B${DEBUG_BUILD_DIR} -DCMAKE_BUILD_TYPE=Debug -DENABLE_ASAN=OFF -DENABLE_TSAN=ON -DENABLE_CCACHE=ON
+	cmake ${VSAG_CMAKE_ARGS} -B${DEBUG_BUILD_DIR} -DCMAKE_BUILD_TYPE=Sanitize -DENABLE_ASAN=OFF -DENABLE_TSAN=ON -DENABLE_CCACHE=ON
 	cmake --build ${DEBUG_BUILD_DIR} --parallel ${COMPILE_JOBS}
 
 .PHONY: test_tsan
