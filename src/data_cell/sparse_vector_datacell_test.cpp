@@ -165,8 +165,7 @@ TEST_CASE("SparseDataCell Concurrent Test", "[ut][SparseDataCell][concurrent] ")
 
     for (int i = 0; i < base_count - 1; ++i) {
         fixtures::dist_t distance = data_cell->ComputePairVectors(idx[i], idx[i + 1]);
-        auto d = fixtures::GetSparseDistance(sparse_vectors[i], sparse_vectors[i + 1]);
-        REQUIRE(distance == d);
+        REQUIRE(distance == fixtures::GetSparseDistance(sparse_vectors[i], sparse_vectors[i + 1]));
     }
     auto query_sparse_vectors = fixtures::GenerateSparseVectors(1, 100);
     SECTION("accuracy") {
