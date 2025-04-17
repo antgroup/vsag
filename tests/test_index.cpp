@@ -1256,4 +1256,50 @@ TestIndex::TestClone(const TestIndex::IndexPtr& index,
     }
 }
 
+void
+TestIndex::TestExportModel(const TestIndex::IndexPtr& index,
+                           const TestDatasetPtr& dataset,
+                           const std::string& search_param) {
+    if (not index->CheckFeature(vsag::SUPPORT_EXPORT_MODEL)) {
+        return;
+    }
+    auto index_model_result = index->ExportModel();
+    REQUIRE(index_model_result.has_value() == true);
+    auto& index_model = index_model_result.value();
+
+    TestBuildIndex(index_model, dataset, true);
+
+    const auto& queries = dataset->query_;
+    auto query_count = queries->GetNumElements();
+    auto dim = queries->GetDim();
+    auto gts = dataset->ground_truth_;
+    auto gt_topK = dataset->top_k;
+    float recall1 = 0.0F;
+    float recall2 = 0.0F;
+    auto topk = gt_topK;
+    for (auto i = 0; i < query_count; ++i) {
+        auto query = vsag::Dataset::Make();
+        query->NumElements(1)
+            ->Dim(dim)
+            ->Paths(queries->GetPaths() + i)
+            ->SparseVectors(queries->GetSparseVectors() + i)
+            ->Float32Vectors(queries->GetFloat32Vectors() + i * dim)
+            ->Owner(false);
+        auto res1 = index->KnnSearch(query, topk, search_param);
+        REQUIRE(res1.has_value());
+        auto result1 = res1.value()->GetIds();
+        auto gt = gts->GetIds() + gt_topK * i;
+        auto val = Intersection(gt, gt_topK, result1, topk);
+        recall1 += static_cast<float>(val) / static_cast<float>(gt_topK);
+
+        auto res2 = index_model->KnnSearch(query, topk, search_param);
+        REQUIRE(res2.has_value());
+        auto result2 = res2.value()->GetIds();
+        val = Intersection(gt, gt_topK, result2, topk);
+        recall2 += static_cast<float>(val) / static_cast<float>(gt_topK);
+    }
+
+    REQUIRE(std::abs(recall1 - recall2) < 0.01F * query_count);
+}
+
 }  // namespace fixtures

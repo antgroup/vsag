@@ -70,6 +70,8 @@ enum IndexFeature {
 
     SUPPORT_CLONE, /**< Supports clone index */
 
+    SUPPORT_EXPORT_MODEL, /**< Supports export model */
+
     INDEX_FEATURE_COUNT /** must be last one */
 };
 }  // namespace vsag
