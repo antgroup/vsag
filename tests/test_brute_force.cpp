@@ -292,6 +292,30 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::BruteForceTestIndex,
 }
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::BruteForceTestIndex,
+                             "BruteForce Clone",
+                             "[ft][bruteforce]") {
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    auto size = GENERATE(1024 * 1024 * 2);
+    auto metric_type = GENERATE("l2", "ip", "cosine");
+    const std::string name = "brute_force";
+    auto search_param = "";
+
+    for (auto& dim : dims) {
+        for (auto& [base_quantization_str, recall] : test_cases) {
+            vsag::Options::Instance().set_block_size_limit(size);
+            auto param =
+                GenerateBruteForceBuildParametersString(metric_type, dim, base_quantization_str);
+            auto index = TestFactory(name, param, true);
+
+            auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
+            TestBuildIndex(index, dataset, true);
+            TestClone(index, dataset, search_param);
+            vsag::Options::Instance().set_block_size_limit(origin_size);
+        }
+    }
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::BruteForceTestIndex,
                              "BruteForce Build & ContinueAdd Test With Random Allocator",
                              "[ft][bruteforce]") {
     auto allocator = std::make_shared<fixtures::RandomAllocator>();

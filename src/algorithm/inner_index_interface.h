@@ -29,6 +29,10 @@
 #include "vsag/index.h"
 
 namespace vsag {
+
+class InnerIndexInterface;
+using InnerIndexPtr = std::shared_ptr<InnerIndexInterface>;
+
 class InnerIndexInterface {
 public:
     explicit InnerIndexInterface(ParamPtr index_param, const IndexCommonParam& common_param);
@@ -62,6 +66,9 @@ public:
 
     virtual void
     Deserialize(StreamReader& reader) = 0;
+
+    [[nodiscard]] virtual InnerIndexPtr
+    Fork(const IndexCommonParam& param) = 0;
 
 public:
     virtual void
@@ -171,6 +178,9 @@ public:
         throw std::runtime_error("Index doesn't support Merge");
     }
 
+    virtual InnerIndexPtr
+    Clone(const IndexCommonParam& param);
+
     [[nodiscard]] virtual BinarySet
     Serialize() const;
 
@@ -239,7 +249,5 @@ public:
 
     DataTypes data_type_{DataTypes::DATA_TYPE_FLOAT};
 };
-
-using InnerIndexPtr = std::shared_ptr<InnerIndexInterface>;
 
 }  // namespace vsag

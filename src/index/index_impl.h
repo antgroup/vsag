@@ -33,11 +33,14 @@ class IndexImpl : public Index {
 
 public:
     IndexImpl(const JsonType& external_param, const IndexCommonParam& common_param)
-        : Index(), allocator_(common_param.allocator_) {
+        : Index(), common_param_(common_param) {
         auto param_ptr = T::CheckAndMappingExternalParam(external_param, common_param);
         this->inner_index_ = std::make_shared<T>(param_ptr, common_param);
         this->inner_index_->InitFeatures();
     }
+
+    IndexImpl(InnerIndexPtr inner_index, const IndexCommonParam& common_param)
+        : inner_index_(std::move(inner_index)), common_param_(common_param){};
 
     ~IndexImpl() override {
         this->inner_index_.reset();
@@ -211,6 +214,15 @@ public:
         SAFE_CALL(this->inner_index_->Merge(merge_units));
     }
 
+    tl::expected<IndexPtr, Error>
+    Clone() const override {
+        auto clone_value = this->clone_inner_index();
+        if (not clone_value.has_value()) {
+            LOG_ERROR_AND_RETURNS(clone_value.error().type, clone_value.error().message);
+        }
+        return std::make_shared<IndexImpl<T>>(clone_value.value(), this->common_param_);
+    }
+
     [[nodiscard]] tl::expected<BinarySet, Error>
     Serialize() const override {
         SAFE_CALL(return this->inner_index_->Serialize());
@@ -272,9 +284,15 @@ public:
     }
 
 private:
-    std::shared_ptr<InnerIndexInterface> inner_index_{nullptr};
+    tl::expected<InnerIndexPtr, Error>
+    clone_inner_index() const {
+        SAFE_CALL(return this->inner_index_->Clone(this->common_param_));
+    }
 
-    std::shared_ptr<Allocator> allocator_{nullptr};
+private:
+    InnerIndexPtr inner_index_{nullptr};
+
+    IndexCommonParam common_param_{};
 };
 
 }  // namespace vsag

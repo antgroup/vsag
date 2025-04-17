@@ -47,6 +47,11 @@ public:
         return INDEX_SPARSE;
     }
 
+    [[nodiscard]] InnerIndexPtr
+    Fork(const IndexCommonParam& param) override {
+        return std::make_shared<SparseIndex>(this->create_param_ptr_, param);
+    }
+
     std::vector<int64_t>
     Add(const DatasetPtr& base) override;
 

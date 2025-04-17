@@ -45,6 +45,11 @@ public:
         return INDEX_IVF;
     }
 
+    [[nodiscard]] InnerIndexPtr
+    Fork(const IndexCommonParam& param) override {
+        return std::make_shared<IVF>(this->create_param_ptr_, param);
+    }
+
     void
     InitFeatures() override;
 

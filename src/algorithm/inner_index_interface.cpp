@@ -202,4 +202,18 @@ InnerIndexInterface::CalDistanceById(const float* query, const int64_t* ids, int
     return result;
 }
 
+InnerIndexPtr
+InnerIndexInterface::Clone(const IndexCommonParam& param) {
+    std::stringstream ss;
+    IOStreamWriter writer(ss);
+    this->Serialize(writer);
+    ss.seekg(0, std::ios::beg);
+    IOStreamReader reader(ss);
+    auto max_size = this->CalSerializeSize();
+    BufferStreamReader buffer_reader(&reader, max_size, this->allocator_);
+    auto index = this->Fork(param);
+    index->Deserialize(buffer_reader);
+    return index;
+}
+
 }  // namespace vsag

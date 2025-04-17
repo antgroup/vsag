@@ -205,6 +205,11 @@ protected:
                           const std::string& search_param,
                           float expected_recall = 0.99,
                           bool expected_success = true);
+    static void
+    TestClone(const IndexPtr& index,
+              const TestDatasetPtr& dataset,
+              const std::string& search_param);
+
     constexpr static float RECALL_THRESHOLD = 0.95;
 };
 

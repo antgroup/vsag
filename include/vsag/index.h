@@ -397,6 +397,18 @@ public:
         throw std::runtime_error("Index doesn't support merge");
     }
 
+    /**
+     * @brief Clones the index.
+     *
+     * Creates a new index that is a deep copy of the current index.
+     *
+     * @return IndexPtr A pointer to the cloned index.
+     */
+    virtual tl::expected<IndexPtr, Error>
+    Clone() const {
+        throw std::runtime_error("Index doesn't support Clone");
+    }
+
 public:
     // [serialize/deserialize with binaryset]
 
