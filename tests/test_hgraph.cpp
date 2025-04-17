@@ -360,7 +360,8 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex,
     auto ex_param = GenerateHGraphBuildParametersString(
         metric_type, dim, base_quantization_str, 5, extra_info_size);
     auto ex_index = TestFactory(name, param, true);
-    auto ex_dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type, 0.8, extra_info_size);
+    auto ex_dataset =
+        pool.GetDatasetAndCreate(dim, base_count, metric_type, false, 0.8, extra_info_size);
     TestKnnSearchExFilter(ex_index, ex_dataset, ex_search_param, recall, false);
     TestKnnSearchIter(ex_index, ex_dataset, ex_search_param, recall, false, true);
     vsag::Options::Instance().set_block_size_limit(origin_size);
