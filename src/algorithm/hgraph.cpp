@@ -82,7 +82,6 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
     if (this->build_thread_count_ > 1) {
         this->build_pool_ = SafeThreadPool::FactoryDefaultThreadPool();
     }
-    this->init_features();
 }
 void
 HGraph::Train(const DatasetPtr& base) {
@@ -782,7 +781,7 @@ HGraph::resize(uint64_t new_size) {
     }
 }
 void
-HGraph::init_features() {
+HGraph::InitFeatures() {
     // Common Init
     // Build & Add
     this->index_feature_list_->SetFeatures({
@@ -811,6 +810,7 @@ HGraph::init_features() {
     this->index_feature_list_->SetFeatures({
         IndexFeature::SUPPORT_ESTIMATE_MEMORY,
         IndexFeature::SUPPORT_CHECK_ID_EXIST,
+        IndexFeature::SUPPORT_CLONE,
     });
 
     // About Train

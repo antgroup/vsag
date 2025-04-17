@@ -99,6 +99,11 @@ public:
         return INDEX_PYRAMID;
     }
 
+    [[nodiscard]] InnerIndexPtr
+    Fork(const IndexCommonParam& param) override {
+        return std::make_shared<Pyramid>(this->create_param_ptr_, param);
+    }
+
     ~Pyramid() = default;
 
     std::vector<int64_t>

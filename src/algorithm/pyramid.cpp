@@ -423,6 +423,7 @@ Pyramid::InitFeatures() {
         SUPPORT_KNN_SEARCH_WITH_ID_FILTER,
         SUPPORT_RANGE_SEARCH,
         SUPPORT_RANGE_SEARCH_WITH_ID_FILTER,
+        IndexFeature::SUPPORT_CLONE,
     });
 }
 

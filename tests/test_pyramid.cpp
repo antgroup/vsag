@@ -179,6 +179,25 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
     vsag::Options::Instance().set_block_size_limit(origin_size);
 }
 
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex, "Pyramid Clone", "[ft][pyramid]") {
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    auto size = GENERATE(1024 * 1024 * 2);
+    auto metric_type = GENERATE("l2");
+    const std::vector<int> level{0, 1, 2};
+    const std::string name = "pyramid";
+    auto search_param = fmt::format(search_param_tmp, 20);
+
+    for (auto& dim : dims) {
+        vsag::Options::Instance().set_block_size_limit(size);
+        auto param = GeneratePyramidBuildParametersString(metric_type, dim, level);
+        auto index = TestFactory(name, param, true);
+        auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type, /*with_path=*/true);
+        TestBuildIndex(index, dataset, true);
+        TestClone(index, dataset, search_param);
+    }
+    vsag::Options::Instance().set_block_size_limit(origin_size);
+}
+
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
                              "Pyramid Build Test With Random Allocator",
                              "[ft][pyramid]") {
