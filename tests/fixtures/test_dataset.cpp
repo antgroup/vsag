@@ -234,8 +234,7 @@ CalDistanceFloatMetrixWithExFilter(const vsag::DatasetPtr query,
                 dist = dist_func(
                     query->GetFloat32Vectors() + dim * i, base->GetFloat32Vectors() + dim * j, dim);
             } else if (vector_type == "sparse") {
-                dist =
-                    get_sparse_distance(query->GetSparseVectors()[i], base->GetSparseVectors()[j]);
+                dist = GetSparseDistance(query->GetSparseVectors()[i], base->GetSparseVectors()[j]);
             } else {
                 throw std::runtime_error("no such vector type");
             }
