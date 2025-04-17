@@ -21,6 +21,7 @@
 #include "index/index_common_param.h"
 #include "quantization/sparse_quantization/sparse_quantizer_parameter.h"
 #include "safe_allocator.h"
+#include "thread_pool.h"
 
 namespace vsag {
 
@@ -37,6 +38,7 @@ TEST_CASE("SparseDataCell Basic Test", "[ut][SparseDataCell] ") {
             }}
         }}
         )";
+    int64_t max_dim = 100;
     auto param_str = fmt::format(param_temp, io_type);
     JsonType parsed_json = JsonType::parse(param_str);
     auto param = std::make_shared<SparseVectorDataCellParameter>();
@@ -44,12 +46,13 @@ TEST_CASE("SparseDataCell Basic Test", "[ut][SparseDataCell] ") {
     IndexCommonParam index_common_param;
     index_common_param.allocator_ = SafeAllocator::FactoryDefaultAllocator();
     index_common_param.metric_ = MetricType::METRIC_TYPE_IP;
+    index_common_param.dim_ = max_dim;
     auto data_cell = FlattenInterface::MakeInstance(param, index_common_param);
     REQUIRE(data_cell->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_SPARSE);
     REQUIRE(data_cell->GetMetricType() == MetricType::METRIC_TYPE_IP);
 
     size_t base_count = 1000;
-    auto sparse_vectors = fixtures::GenerateSparseVectors(base_count, 100);
+    auto sparse_vectors = fixtures::GenerateSparseVectors(base_count, max_dim);
     std::vector<InnerIdType> idx(base_count);
     std::iota(idx.begin(), idx.end(), 0);
     std::shuffle(idx.begin(), idx.end(), std::mt19937(47));
@@ -65,8 +68,8 @@ TEST_CASE("SparseDataCell Basic Test", "[ut][SparseDataCell] ") {
                                  idx.data() + half_count + half_count / 2);
 
     for (int i = 0; i < base_count - 1; ++i) {
-        fixtures::dist_t distance = data_cell->ComputePairVectors(idx[0], idx[1]);
-        REQUIRE(distance == fixtures::GetSparseDistance(sparse_vectors[0], sparse_vectors[1]));
+        fixtures::dist_t distance = data_cell->ComputePairVectors(idx[i], idx[i + 1]);
+        REQUIRE(distance == fixtures::GetSparseDistance(sparse_vectors[i], sparse_vectors[i + 1]));
     }
     auto query_sparse_vectors = fixtures::GenerateSparseVectors(1, 100);
     SECTION("accuracy") {
@@ -98,6 +101,79 @@ TEST_CASE("SparseDataCell Basic Test", "[ut][SparseDataCell] ") {
         std::shared_ptr<float[]> dist = std::shared_ptr<float[]>(new float[base_count]);
         new_data_cell->Query(dist.get(), computer, idx.data(), 1);
         new_data_cell->Query(dist.get() + 1, computer, idx.data() + 1, base_count - 1);
+        for (int i = 0; i < base_count; ++i) {
+            fixtures::dist_t distance =
+                fixtures::GetSparseDistance(query_sparse_vectors[0], sparse_vectors[i]);
+            REQUIRE(distance == dist[i]);
+        }
+    }
+    for (auto& item : sparse_vectors) {
+        delete[] item.vals_;
+        delete[] item.ids_;
+    }
+    for (auto& item : query_sparse_vectors) {
+        delete[] item.vals_;
+        delete[] item.ids_;
+    }
+}
+
+TEST_CASE("SparseDataCell Concurrent Test", "[ut][SparseDataCell][concurrent] ") {
+    std::string io_type = GENERATE("memory_io", "block_memory_io");
+    constexpr const char* param_temp =
+        R"(
+        {{
+            "io_params": {{
+                "type": "{}"
+            }},
+            "quantization_params": {{
+                "type": "sparse"
+            }}
+        }}
+        )";
+    int64_t max_dim = 100;
+    auto param_str = fmt::format(param_temp, io_type);
+    JsonType parsed_json = JsonType::parse(param_str);
+    auto param = std::make_shared<SparseVectorDataCellParameter>();
+    param->FromJson(parsed_json);
+    IndexCommonParam index_common_param;
+    index_common_param.allocator_ = SafeAllocator::FactoryDefaultAllocator();
+    index_common_param.metric_ = MetricType::METRIC_TYPE_IP;
+    index_common_param.dim_ = max_dim;
+    auto data_cell = FlattenInterface::MakeInstance(param, index_common_param);
+    REQUIRE(data_cell->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_SPARSE);
+    REQUIRE(data_cell->GetMetricType() == MetricType::METRIC_TYPE_IP);
+
+    size_t base_count = 1000;
+    auto sparse_vectors = fixtures::GenerateSparseVectors(base_count, max_dim);
+    std::vector<InnerIdType> idx(base_count);
+    std::iota(idx.begin(), idx.end(), 0);
+    std::shuffle(idx.begin(), idx.end(), std::mt19937(47));
+    data_cell->Train(sparse_vectors.data(), base_count);
+    data_cell->Resize(base_count);
+    fixtures::ThreadPool thread_pool(4);
+    std::vector<std::future<void>> futures;
+    futures.push_back(thread_pool.enqueue([&]() {
+        data_cell->BatchInsertVector(sparse_vectors.data(), base_count / 2, idx.data());
+    }));
+    for (int i = base_count / 2; i < base_count; ++i) {
+        futures.push_back(thread_pool.enqueue(
+            [&, i]() { data_cell->InsertVector(sparse_vectors.data() + i, idx[i]); }));
+    }
+    for (auto& future : futures) {
+        future.get();
+    }
+
+    for (int i = 0; i < base_count - 1; ++i) {
+        fixtures::dist_t distance = data_cell->ComputePairVectors(idx[i], idx[i + 1]);
+        auto d = fixtures::GetSparseDistance(sparse_vectors[i], sparse_vectors[i + 1]);
+        REQUIRE(distance == d);
+    }
+    auto query_sparse_vectors = fixtures::GenerateSparseVectors(1, 100);
+    SECTION("accuracy") {
+        auto computer = data_cell->FactoryComputer(query_sparse_vectors.data());
+        std::shared_ptr<float[]> dist = std::shared_ptr<float[]>(new float[base_count]);
+        data_cell->Query(dist.get(), computer, idx.data(), 1);
+        data_cell->Query(dist.get() + 1, computer, idx.data() + 1, base_count - 1);
         for (int i = 0; i < base_count; ++i) {
             fixtures::dist_t distance =
                 fixtures::GetSparseDistance(query_sparse_vectors[0], sparse_vectors[i]);

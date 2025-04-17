@@ -83,12 +83,20 @@ SparseVectorDataCell<QuantTmpl, IOTmpl>::InsertVector(const void* vector, InnerI
     total_count_ = std::max(total_count_, idx + 1);
     auto sparse_vector = (const SparseVector*)vector;
     size_t code_size = (sparse_vector->len_ * 2 + 1) * sizeof(uint32_t);
+    if (code_size > max_code_size_) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT, fmt::format("code size ({}) of sparse vector more than max code size ({})", code_size, max_code_size_));
+    }
     auto* codes = reinterpret_cast<uint8_t*>(allocator_->Allocate(code_size));
     quantizer_->EncodeOne((const float*)vector, codes);
-    io_->Write(codes, code_size, current_offset_);
+    uint32_t now_current_offset = 0;
+    {
+        std::lock_guard lock(current_offset_mutex_);
+        now_current_offset = current_offset_;
+        current_offset_ += code_size;
+    }
     offset_io_->Write(
-        (uint8_t*)&current_offset_, sizeof(current_offset_), idx * sizeof(current_offset_));
-    current_offset_ += code_size;
+        (uint8_t*)&now_current_offset, sizeof(current_offset_), idx * sizeof(current_offset_));
+    io_->Write(codes, code_size, now_current_offset);
     allocator_->Deallocate(codes);
 }
 
@@ -152,6 +160,8 @@ SparseVectorDataCell<QuantTmpl, IOTmpl>::SparseVectorDataCell(
     this->io_ = std::make_shared<IOTmpl>(io_param, common_param);
     this->offset_io_ =
         std::make_shared<MemoryBlockIO>(allocator_, Options::Instance().block_size_limit());
+    this->max_code_size_ = (this->quantizer_->GetDim() * 2 + 1) * sizeof(uint32_t);
+    this->max_capacity_ = 0;
 }
 
 }
