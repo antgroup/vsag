@@ -160,13 +160,27 @@ TEST_CASE("RaBitQ Query SQ4 Transform", "[ut][RaBitQuantizer]") {
 
     // test reorder
     // output  [0001 0001, 0001 0010, 0001 0100, 0001 1000]
-    std::vector<uint8_t> expected_output = {0x11, 0x12, 0x14, 0x18};
-    std::vector<uint8_t> output(4, 0);
+    std::vector<uint8_t> expected_output;
+    expected_output.reserve(64 * 4);
+    for (auto i = 0; i < 64 * 4; i++) {
+        if (i == 0) {
+            expected_output.push_back(0x11);
+        } else if (i == 64) {
+            expected_output.push_back(0x12);
+        } else if (i == 128) {
+            expected_output.push_back(0x14);
+        } else if (i == 192) {
+            expected_output.push_back(0x18);
+        } else {
+            expected_output.push_back(0);
+        }
+    }
+    std::vector<uint8_t> output(64 * 4, 0);
     std::vector<uint8_t> recovered_input(3, 0);
 
     // reorder the input
     quantizer.ReOrderSQ4(input.data(), output.data());
-    is_consistent = std::memcmp(expected_output.data(), output.data(), expected_output.size());
+    is_consistent = std::memcmp(expected_output.data(), output.data(), output.size());
     REQUIRE(is_consistent == 0);
 
     // recover the original order
