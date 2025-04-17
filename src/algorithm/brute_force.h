@@ -44,6 +44,11 @@ public:
         return INDEX_BRUTE_FORCE;
     }
 
+    [[nodiscard]] InnerIndexPtr
+    Fork(const IndexCommonParam& param) override {
+        return std::make_shared<BruteForce>(this->create_param_ptr_, param);
+    }
+
     void
     InitFeatures() override;
 

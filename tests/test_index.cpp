@@ -1222,4 +1222,38 @@ TestIndex::TestKnnSearchExFilter(const IndexPtr& index,
     REQUIRE(cur_recall > expected_recall * query_count * RECALL_THRESHOLD);
 }
 
+void
+TestIndex::TestClone(const TestIndex::IndexPtr& index,
+                     const TestDatasetPtr& dataset,
+                     const std::string& search_param) {
+    if (not index->CheckFeature(vsag::SUPPORT_CLONE)) {
+        return;
+    }
+    auto index_clone_result = index->Clone();
+    REQUIRE(index_clone_result.has_value() == true);
+    auto& index_clone = index_clone_result.value();
+
+    const auto& queries = dataset->query_;
+    auto query_count = queries->GetNumElements();
+    auto dim = queries->GetDim();
+    auto topk = 10;
+    for (auto i = 0; i < query_count; ++i) {
+        auto query = vsag::Dataset::Make();
+        query->NumElements(1)
+            ->Dim(dim)
+            ->Paths(queries->GetPaths() + i)
+            ->SparseVectors(queries->GetSparseVectors() + i)
+            ->Float32Vectors(queries->GetFloat32Vectors() + i * dim)
+            ->Owner(false);
+        auto res_from = index->KnnSearch(query, topk, search_param);
+        auto res_to = index_clone->KnnSearch(query, topk, search_param);
+        REQUIRE(res_from.has_value());
+        REQUIRE(res_to.has_value());
+        REQUIRE(res_from.value()->GetDim() == res_to.value()->GetDim());
+        for (auto j = 0; j < topk; ++j) {
+            REQUIRE(res_to.value()->GetIds()[j] == res_from.value()->GetIds()[j]);
+        }
+    }
+}
+
 }  // namespace fixtures
