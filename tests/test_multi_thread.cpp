@@ -284,7 +284,7 @@ TEST_CASE("Test HNSW Multi-threading read-write with Feedback and Pretrain",
     int max_elements = 1000;
     int max_degree = 16;
     int ef_construction = 50;
-    int ef_search = 10;
+    int ef_search = 100;
     int k = 10;
     nlohmann::json hnsw_parameters{{"max_degree", max_degree},
                                    {"ef_construction", ef_construction},
@@ -313,7 +313,9 @@ TEST_CASE("Test HNSW Multi-threading read-write with Feedback and Pretrain",
     std::vector<std::future<bool>> feedback_results;
     std::vector<std::future<bool>> pretrain_results;
     std::vector<std::future<bool>> update_id_results;
-    std::vector<std::future<bool>> search_results;
+    std::vector<std::future<bool>> update_vector_results;
+    std::vector<std::future<bool>> delete_re_insert_results;
+    std::vector<std::future<int64_t>> search_results;
 
     for (int64_t i = 0; i < max_elements / 2; ++i) {
         // insert
@@ -330,6 +332,17 @@ TEST_CASE("Test HNSW Multi-threading read-write with Feedback and Pretrain",
     }
 
     for (int64_t i = 0; i < max_elements / 2; ++i) {
+        insert_results[i].wait();
+    }
+
+    REQUIRE(index->GetNumElements() == max_elements / 2);
+
+    for (int64_t i = 0; i < max_elements / 2; ++i) {
+        auto dist_res = index->CalcDistanceById((const float*)(data.get() + i * dim), ids[i]);
+        REQUIRE(dist_res.has_value());
+    }
+
+    for (int64_t i = 0; i < max_elements / 2; ++i) {
         // insert
         int64_t insert_i = i + max_elements / 2;
         insert_results.push_back(pool.enqueue([&ids, &data, &index, dim, insert_i]() -> int64_t {
@@ -343,10 +356,30 @@ TEST_CASE("Test HNSW Multi-threading read-write with Feedback and Pretrain",
             return add_res.value().size();
         }));
 
-        // update id
-        update_id_results.push_back(pool.enqueue([&ids, &index, i, max_elements]() -> bool {
-            auto res = index->UpdateId(ids[i], ids[i] + 2 * max_elements);
-            return res.has_value();
+        // update vector
+        update_vector_results.push_back(
+            pool.enqueue([&ids, &data, &index, dim, insert_i]() -> bool {
+                auto dataset = vsag::Dataset::Make();
+                dataset->Dim(dim)
+                    ->NumElements(1)
+                    ->Ids(ids.get() + insert_i)
+                    ->Int8Vectors(data.get() + insert_i * dim)
+                    ->Owner(false);
+                auto res = index->UpdateVector(ids[insert_i], dataset, false);
+                return res.has_value();
+            }));
+
+        // delete and insert
+        delete_re_insert_results.push_back(pool.enqueue([&ids, &data, &index, dim, i]() -> bool {
+            auto del_res = index->Remove(ids[i]);
+            auto dataset = vsag::Dataset::Make();
+            dataset->Dim(dim)
+                ->NumElements(1)
+                ->Ids(ids.get() + i)
+                ->Int8Vectors(data.get() + i * dim)
+                ->Owner(false);
+            auto add_res = index->Add(dataset);
+            return del_res.has_value() and add_res.has_value();
         }));
 
         // feedback
@@ -369,15 +402,16 @@ TEST_CASE("Test HNSW Multi-threading read-write with Feedback and Pretrain",
             }));
 
         // search
-        search_results.push_back(pool.enqueue([&index, &data, i, dim, k, str_parameters]() -> bool {
-            auto query = vsag::Dataset::Make();
-            query->Dim(dim)->NumElements(1)->Int8Vectors(data.get() + i * dim)->Owner(false);
-            auto result = index->KnnSearch(query, k, str_parameters);
-            return result.has_value();
-        }));
+        search_results.push_back(
+            pool.enqueue([&index, &data, i, dim, k, str_parameters]() -> int64_t {
+                auto query = vsag::Dataset::Make();
+                query->Dim(dim)->NumElements(1)->Int8Vectors(data.get() + i * dim)->Owner(false);
+                auto result = index->KnnSearch(query, k, str_parameters);
+                return result.value()->GetIds()[0];
+            }));
     }
 
-    uint32_t succ_feedback = 0, succ_pretrain = 0;
+    uint32_t succ_feedback = 0, succ_pretrain = 0, succ_search = 0;
     for (int64_t i = 0; i < max_elements; ++i) {
         REQUIRE(insert_results[i].get() == 0);
         if (i < max_elements / 2) {
@@ -387,11 +421,13 @@ TEST_CASE("Test HNSW Multi-threading read-write with Feedback and Pretrain",
             if (pretrain_results[i].get()) {
                 succ_pretrain++;
             }
-            REQUIRE(update_id_results[i].get() == true);
-            REQUIRE(search_results[i].get() >= 0);
+            succ_search += (search_results[i].get() == ids[i]);
+            REQUIRE(update_vector_results[i].get() == true);
+            REQUIRE(delete_re_insert_results[i].get() == true);
         }
     }
 
+    REQUIRE(succ_search > 0.9 * max_elements / 2);
     REQUIRE(succ_feedback > 0);
     REQUIRE(succ_pretrain > 0);
 }

@@ -1169,11 +1169,12 @@ TEST_CASE("int8 + freshhnsw + feedback + update", "[ft][index][hnsw]") {
     REQUIRE(fixtures::time_t(recall[1]) == fixtures::time_t(1.0f));
 }
 
-TEST_CASE("hnsw + feedback with global optimum id", "[ft][index][hnsw]") {
+TEST_CASE("hnsw + feedback with global optimum id + remove", "[ft][index][hnsw]") {
     auto logger = vsag::Options::Instance().logger();
     logger->SetLevel(vsag::Logger::Level::kDEBUG);
 
     // parameters
+    auto is_remove = GENERATE(true, false);
     int dim = 128;
     int num_base = 1000;
     int num_query = 1000;
@@ -1224,6 +1225,7 @@ TEST_CASE("hnsw + feedback with global optimum id", "[ft][index][hnsw]") {
     int correct;
     uint32_t error_fix = 0;
     bool use_conjugate_graph_search = false;
+    std::vector<int64_t> removed_id;
     for (int round = 0; round < 2; round++) {
         correct = 0;
 
@@ -1262,6 +1264,10 @@ TEST_CASE("hnsw + feedback with global optimum id", "[ft][index][hnsw]") {
             if (local_optimum != global_optimum and round == 0) {
                 error_fix += *index->Feedback(query, k, search_parameters, global_optimum);
                 REQUIRE(*index->Feedback(query, k, search_parameters) == 0);
+                if (is_remove) {
+                    index->Remove(global_optimum);
+                    removed_id.push_back(global_optimum);
+                }
             }
 
             if (local_optimum == global_optimum) {
@@ -1276,8 +1282,10 @@ TEST_CASE("hnsw + feedback with global optimum id", "[ft][index][hnsw]") {
     logger->Debug(fmt::format(R"(Error fix: {})", error_fix));
 
     REQUIRE(error_fix > 0);
-    REQUIRE(recall[0] < recall[1]);
-    REQUIRE(fixtures::time_t(recall[1]) == fixtures::time_t(1.0f));
+    if (not is_remove) {
+        REQUIRE(recall[0] < recall[1]);
+        REQUIRE(fixtures::time_t(recall[1]) == fixtures::time_t(1.0f));
+    }
 }
 
 TEST_CASE("static hnsw + feedback without global optimum id", "[ft][index][hnsw]") {
