@@ -368,10 +368,11 @@ BasicSearcher::MockRun() const {
     double time_cost = 0;
     for (uint32_t i = 0; i < n_trials; ++i) {
         // init param
-        bool release = false;
-        const auto* codes = mock_flatten_->GetCodesById(i, release);
+        Vector<uint8_t> codes(mock_flatten_->code_size_, allocator_);
+        mock_flatten_->GetCodesById(i, codes.data());
+
         Vector<float> raw_data(mock_dim_, allocator_);
-        mock_flatten_->Decode(codes, raw_data.data());
+        mock_flatten_->Decode(codes.data(), raw_data.data());
         auto vl = mock_vl_pool_->TakeOne();
 
         // mock run
