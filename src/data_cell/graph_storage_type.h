@@ -16,9 +16,6 @@
 #pragma once
 
 namespace vsag {
-enum class GraphStorageTypes {
-    GRAPH_STORAGE_TYPE_FLAT = 0,
-    GRAPH_STORAGE_TYPE_COMPRESSED = 1
-};
+enum class GraphStorageTypes { GRAPH_STORAGE_TYPE_FLAT = 0, GRAPH_STORAGE_TYPE_COMPRESSED = 1 };
 
 }  // namespace vsag
