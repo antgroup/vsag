@@ -288,7 +288,11 @@ HNSW::knn_search(const DatasetPtr& query,
             Timer t(time_cost);
 
             auto func = [this, vector](int64_t label) {
-                return this->alg_hnsw_->getDistanceByLabel(label, vector);
+                try {
+                    return this->alg_hnsw_->getDistanceByLabel(label, vector);
+                } catch (const std::runtime_error& e) {
+                    return std::numeric_limits<float>::max();
+                }
             };
             conjugate_graph_->EnhanceResult(results, func);
             k = original_k;
@@ -672,12 +676,22 @@ HNSW::update_vector(int64_t id, const DatasetPtr& new_base, bool force_update) {
                                                nullptr);
 
             // check whether the neighborhood relationship is same
-            float self_dist = std::reinterpret_pointer_cast<hnswlib::HierarchicalNSW>(alg_hnsw_)
-                                  ->getDistanceByLabel(id, new_base_vec);
+            float self_dist = 0;
+            try {
+                self_dist = std::reinterpret_pointer_cast<hnswlib::HierarchicalNSW>(alg_hnsw_)
+                                ->getDistanceByLabel(id, new_base_vec);
+            } catch (const std::runtime_error& e) {
+                self_dist = std::numeric_limits<float>::max();
+            }
             for (int i = 0; i < neighbors->GetDim(); i++) {
-                float neighbor_dist =
-                    std::reinterpret_pointer_cast<hnswlib::HierarchicalNSW>(alg_hnsw_)
-                        ->getDistanceByLabel(neighbors->GetIds()[i], new_base_vec);
+                float neighbor_dist = 0;
+                try {
+                    neighbor_dist =
+                        std::reinterpret_pointer_cast<hnswlib::HierarchicalNSW>(alg_hnsw_)
+                            ->getDistanceByLabel(neighbors->GetIds()[i], new_base_vec);
+                } catch (const std::runtime_error& e) {
+                    neighbor_dist = self_dist = std::numeric_limits<float>::max();
+                }
                 if (neighbor_dist < self_dist) {
                     return false;
                 }
