@@ -77,16 +77,19 @@ LatencyMonitor::cal_and_set_result(const std::string& metric, Monitor::JsonType&
 
 double
 LatencyMonitor::cal_qps() {
-    double sum =
+    double total_time_cost =
         std::accumulate(this->latency_records_.begin(), this->latency_records_.end(), double(0));
-    return static_cast<double>(latency_records_.size()) * cur_time_.size() * 1000.0 / sum;
+    auto thread_num = cur_time_.size();
+    auto query_num = latency_records_.size();
+    return static_cast<double>(query_num) * thread_num * 1000.0 / total_time_cost;
 }
 
 double
 LatencyMonitor::cal_avg_latency() {
-    double sum =
+    double total_time_cost =
         std::accumulate(this->latency_records_.begin(), this->latency_records_.end(), double(0));
-    return sum / static_cast<double>(latency_records_.size());
+    auto query_num = latency_records_.size();
+    return total_time_cost / static_cast<double>(query_num);
 }
 double
 LatencyMonitor::cal_latency_rate(double rate) {
