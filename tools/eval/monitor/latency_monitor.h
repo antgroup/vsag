@@ -16,6 +16,8 @@
 #pragma once
 
 #include <chrono>
+#include <thread>
+#include <unordered_map>
 
 #include "monitor.h"
 namespace vsag::eval {
@@ -58,7 +60,7 @@ private:
     std::vector<double> latency_records_;
 
     using Clock = std::chrono::high_resolution_clock;
-    decltype(Clock::now()) cur_time_;
+    std::unordered_map<std::thread::id, decltype(Clock::now())> cur_time_;
 
     std::vector<std::string> metrics_;
 };
