@@ -31,7 +31,6 @@ add_dependencies (vsag_mockimpl_static version_mockimpl)
 
 if (ENABLE_TESTS)
     add_executable (tests_mockimpl
-            ../tests/test_hnsw.cpp
             ../tests/test_factory.cpp
     )
     target_include_directories(tests_mockimpl PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/spdlog/install/include)
