@@ -560,6 +560,41 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex, "HGraph Clone", "[ft][hg
     }
 }
 
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex, "HGraph Export Model", "[ft][hgraph]") {
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    auto size = GENERATE(1024 * 1024 * 2);
+    auto metric_type = GENERATE("l2", "cosine");
+    const std::string name = "hgraph";
+    auto search_param = fmt::format(search_param_tmp, 200, false);
+    uint64_t extra_info_size = 64;
+
+    for (auto dim : dims) {
+        for (auto& [base_quantization_str, recall] : test_cases) {
+            if (IsRaBitQ(base_quantization_str)) {
+                if (std::string(metric_type) != "l2") {
+                    continue;
+                }
+                if (dim <= fixtures::RABITQ_MIN_RACALL_DIM) {
+                    dim += fixtures::RABITQ_MIN_RACALL_DIM;
+                }
+            }
+            vsag::Options::Instance().set_block_size_limit(size);
+            auto param = GenerateHGraphBuildParametersString(
+                metric_type, dim, base_quantization_str, 5 /*thread_count*/, extra_info_size);
+            auto index = TestFactory(name, param, true);
+            auto dataset = pool.GetDatasetAndCreate(dim,
+                                                    base_count,
+                                                    metric_type,
+                                                    false /*with_path*/,
+                                                    0.8 /*valid_ratio*/,
+                                                    extra_info_size);
+            TestBuildIndex(index, dataset, true);
+            TestExportModel(index, dataset, search_param);
+            vsag::Options::Instance().set_block_size_limit(origin_size);
+        }
+    }
+}
+
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex,
                              "HGraph Build & ContinueAdd Test With Random Allocator",
                              "[ft][hgraph]") {
