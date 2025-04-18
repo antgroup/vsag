@@ -34,6 +34,18 @@ IVFParameter::FromJson(const JsonType& json) {
     CHECK_ARGUMENT(json.contains(BUCKET_PARAMS_KEY),
                    fmt::format("ivf parameters must contains {}", BUCKET_PARAMS_KEY));
     this->bucket_param->FromJson(json[BUCKET_PARAMS_KEY]);
+
+    if (json.contains(IVF_USE_REORDER_KEY)) {
+        this->use_reorder = json[IVF_USE_REORDER_KEY];
+    }
+
+    if (this->use_reorder) {
+        CHECK_ARGUMENT(json.contains(IVF_PRECISE_CODES_KEY),
+                       fmt::format("ivf parameters must contains {} when enable reorder",
+                                   IVF_PRECISE_CODES_KEY));
+        this->flatten_param = std::make_shared<FlattenDataCellParameter>();
+        this->flatten_param->FromJson(json[IVF_PRECISE_CODES_KEY]);
+    }
 }
 
 JsonType
@@ -41,6 +53,10 @@ IVFParameter::ToJson() {
     JsonType json;
     json["type"] = INDEX_IVF;
     json[BUCKET_PARAMS_KEY] = this->bucket_param->ToJson();
+    json[IVF_USE_REORDER_KEY] = this->use_reorder;
+    if (use_reorder) {
+        json[IVF_PRECISE_CODES_KEY] = this->flatten_param->ToJson();
+    }
     return json;
 }
 }  // namespace vsag

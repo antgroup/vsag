@@ -66,7 +66,7 @@ BucketInterfaceTest::BasicTest(int64_t dim, uint64_t base_count, float error) {
             // Test ScanBucketById
             bucket_->ScanBucketById(dist, computer, bucket_id);
             auto bucket_size = bucket_->GetBucketSize(bucket_id);
-            const auto* labels = bucket_->GetLabel(bucket_id);
+            const auto* labels = bucket_->GetInnerIds(bucket_id);
 
             float gt;
             for (int64_t j = 0; j < bucket_size; ++j) {
@@ -116,8 +116,8 @@ BucketInterfaceTest::TestSerializeAndDeserialize(int64_t dim, const BucketInterf
     for (BucketIdType bucket_id = 0; bucket_id < bucket_count; ++bucket_id) {
         auto bucket_size = this->bucket_->GetBucketSize(bucket_id);
         REQUIRE(bucket_size == other->GetBucketSize(bucket_id));
-        const auto* labels = this->bucket_->GetLabel(bucket_id);
-        const auto* other_labels = this->bucket_->GetLabel(bucket_id);
+        const auto* labels = this->bucket_->GetInnerIds(bucket_id);
+        const auto* other_labels = this->bucket_->GetInnerIds(bucket_id);
         for (int64_t i = 0; i < bucket_size; ++i) {
             REQUIRE(labels[i] == other_labels[i]);
         }
