@@ -144,10 +144,13 @@ const char* const BRUTE_FORCE_QUANTIZATION_TYPE = "quantization_type";
 const char* const BRUTE_FORCE_IO_TYPE = "io_type";
 
 const char* const IVF_USE_RESIDUAL = "use_residual";
+const char* const IVF_USE_REORDER = "use_reorder";
 const char* const IVF_TRAIN_TYPE = "ivf_train_type";
 const char* const IVF_BUCKETS_COUNT = "buckets_count";
 const char* const IVF_BASE_QUANTIZATION_TYPE = "base_quantization_type";
 const char* const IVF_BASE_IO_TYPE = "base_io_type";
 const char* const IVF_BASE_FILE_PATH = "base_file_path";
-
+const char* const IVF_PRECISE_QUANTIZATION_TYPE = "precise_quantization_type";
+const char* const IVF_PRECISE_IO_TYPE = "precise_io_type";
+const char* const IVF_PRECISE_FILE_PATH = "precise_file_path";
 };  // namespace vsag

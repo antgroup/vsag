@@ -50,6 +50,7 @@ public:
         {"fp16", 0.88},
         {"sq8", 0.84},
         {"sq8_uniform", 0.83},
+        {"sq8_uniform,fp32", 0.89},
     };
 };
 
@@ -73,13 +74,28 @@ IVFTestIndex::GenerateIVFBuildParametersString(const std::string& metric_type,
         "index_param": {{
             "buckets_count": {},
             "base_quantization_type": "{}",
-            "ivf_train_type": "{}"
+            "ivf_train_type": "{}",
+            "use_reorder": {},
+            "precise_quantization_type": "{}"
         }}
     }}
     )";
-
-    build_parameters_str =
-        fmt::format(parameter_temp, metric_type, dim, buckets_count, quantization_str, train_type);
+    auto strs = fixtures::SplitString(quantization_str, ',');
+    std::string basic_quantizer_str = strs[0];
+    bool use_reorder = false;
+    std::string precise_quantizer_str = "fp32";
+    if (strs.size() == 2) {
+        use_reorder = true;
+        precise_quantizer_str = strs[1];
+    }
+    build_parameters_str = fmt::format(parameter_temp,
+                                       metric_type,
+                                       dim,
+                                       buckets_count,
+                                       basic_quantizer_str,
+                                       train_type,
+                                       use_reorder,
+                                       precise_quantizer_str);
 
     INFO(build_parameters_str);
     return build_parameters_str;
