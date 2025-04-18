@@ -71,6 +71,9 @@ public:
     virtual void
     Resize(InnerIdType capacity) = 0;
 
+    virtual void
+    ExportModel(const FlattenInterfacePtr& other) const = 0;
+
 public:
     virtual void
     SetMaxCapacity(InnerIdType capacity) {
