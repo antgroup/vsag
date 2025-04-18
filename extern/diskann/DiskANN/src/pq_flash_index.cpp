@@ -1883,7 +1883,32 @@ int64_t PQFlashIndex<T, LabelT>::cached_beam_search_memory(const T *query, const
 #ifndef NDEBUG
             Timer io_times;
 #endif
-            reader->read(sorted_read_reqs);
+            if (sorted_read_reqs.size() == 0) {
+                continue;
+            }
+            std::promise<bool> promise;
+            auto future = promise.get_future();
+            std::atomic<int> remaining_ops(sorted_read_reqs.size());
+            std::atomic<bool> succeed(true);
+            std::string error_message;
+
+            CallBack callBack = [&succeed, &promise, &remaining_ops, &error_message] (vsag::IOErrorCode code, const std::string& message) {
+                if (code != vsag::IOErrorCode::IO_SUCCESS) {
+                    bool expected = true;
+                    if (succeed.compare_exchange_strong(expected, false)) {
+                        error_message = message;
+                    }
+                }
+                if (--remaining_ops == 0) {
+                    promise.set_value(succeed.load());
+                }
+            };
+
+            reader->read(sorted_read_reqs, true, callBack);
+            bool final_success = future.get();
+            if (not final_success) {
+                throw diskann::ANNException("io error in search proccess: " + error_message, -1);
+            }
 #ifndef NDEBUG
             if (stats != nullptr) {
                 stats->io_us += (float) io_times.elapsed();
@@ -2148,7 +2173,7 @@ int64_t PQFlashIndex<T, LabelT>::range_search(const T *query, const double range
                                               const uint64_t max_l_search, std::vector<uint64_t> &indices,
                                               std::vector<float> &distances, const uint64_t min_beam_width,
                                               uint32_t io_limit, const bool reorder,
-                                              std::function<bool(int64_t)> filter, bool memory,
+                                              std::function<bool(int64_t)> filter, bool memory, bool use_async_io,
                                               QueryStats *stats)
 {
     int64_t res_count = 0;
@@ -2163,9 +2188,16 @@ int64_t PQFlashIndex<T, LabelT>::range_search(const T *query, const double range
             x = std::numeric_limits<float>::max();
         int64_t result_size = 0;
         if (memory) {
-            result_size = this->cached_beam_search_memory(query, l_search, l_search, indices.data(), distances.data(), min_beam_width, filter, io_limit, reorder, stats, true);
+            if (use_async_io) {
+                result_size = this->cached_beam_search_async(query, l_search, l_search, indices.data(), distances.data(),
+                                                            min_beam_width, filter, io_limit, reorder, stats);
+            } else {
+                result_size = this->cached_beam_search_memory(query, l_search, l_search, indices.data(), distances.data(),
+                                                              min_beam_width, filter, io_limit, reorder, stats, true);
+            }
         } else {
-            result_size = this->cached_beam_search(query, l_search, l_search, indices.data(), distances.data(), min_beam_width, filter, io_limit, false, stats);
+            result_size = this->cached_beam_search(query, l_search, l_search, indices.data(), distances.data(),
+                                                   min_beam_width, filter, io_limit, false, stats);
         }
         for (uint32_t i = 0; i < result_size; i++)
         {

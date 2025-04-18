@@ -76,10 +76,7 @@ from_binary(const Binary& binary) {
 
 class LocalMemoryReader : public Reader {
 public:
-    LocalMemoryReader(std::stringstream& file, bool support_async_io) {
-        if (support_async_io) {
-            pool_ = SafeThreadPool::FactoryDefaultThreadPool();
-        }
+    LocalMemoryReader(std::stringstream& file) {
         file_ << file.rdbuf();
         file_.seekg(0, std::ios::end);
         size_ = file_.tellg();
@@ -96,18 +93,17 @@ public:
 
     void
     AsyncRead(uint64_t offset, uint64_t len, void* dest, CallBack callback) override {
-        if (pool_) {
-            pool_->GeneralEnqueue([this,  // NOLINT(clang-analyzer-cplusplus.NewDeleteLeaks)
-                                   offset,
-                                   len,
-                                   dest,
-                                   callback]() {
-                this->Read(offset, len, dest);
-                callback(IOErrorCode::IO_SUCCESS, "success");
-            });
-        } else {
-            throw std::runtime_error("LocalMemoryReader does not support AsyncRead");
+        if (not pool_) {
+            pool_ = SafeThreadPool::FactoryDefaultThreadPool();
         }
+        pool_->GeneralEnqueue([this,  // NOLINT(clang-analyzer-cplusplus.NewDeleteLeaks)
+                               offset,
+                               len,
+                               dest,
+                               callback]() {
+            this->Read(offset, len, dest);
+            callback(IOErrorCode::IO_SUCCESS, "success");
+        });
     }
 
     uint64_t
@@ -156,12 +152,8 @@ DiskANN::DiskANN(DiskannParameters& diskann_params, const IndexCommonParam& inde
       use_reference_(diskann_params.use_reference),
       use_opq_(diskann_params.use_opq),
       use_bsa_(diskann_params.use_bsa),
-      use_async_io_(diskann_params.use_async_io),
       diskann_params_(diskann_params),
       common_param_(index_common_param) {
-    if (not use_async_io_) {
-        pool_ = index_common_param_.thread_pool_;
-    }
     status_ = IndexStatus::EMPTY;
     batch_read_ = [&](const std::vector<read_request>& requests,
                       bool async,
@@ -172,24 +164,30 @@ DiskANN::DiskANN(DiskannParameters& diskann_params, const IndexCommonParam& inde
                 disk_layout_reader_->AsyncRead(offset, len, dest, callBack);
             }
         } else {
-            if (not pool_) {
-                for (const auto& req : requests) {
-                    auto [offset, len, dest] = req;
-                    disk_layout_reader_->Read(offset, len, dest);
-                }
-            } else {
-                std::vector<std::future<void>> futures;
-                for (const auto& req : requests) {
-                    auto future = pool_->GeneralEnqueue([&]() {
-                        auto [offset, len, dest] = req;
-                        disk_layout_reader_->Read(offset, len, dest);
-                    });
-                    futures.push_back(std::move(future));
-                }
-
-                for (auto& fut : futures) {
-                    fut.get();
-                }
+            std::atomic<bool> succeed(true);
+            std::string error_message;
+            std::atomic<int> counter(static_cast<int>(requests.size()));
+            std::promise<void> total_promise;
+            auto total_future = total_promise.get_future();
+            for (const auto& req : requests) {
+                auto [offset, len, dest] = req;
+                auto callback = [&counter, &total_promise, &succeed, &error_message](
+                                    IOErrorCode code, const std::string& message) {
+                    if (code != vsag::IOErrorCode::IO_SUCCESS) {
+                        bool expected = true;
+                        if (succeed.compare_exchange_strong(expected, false)) {
+                            error_message = message;
+                        }
+                    }
+                    if (--counter == 0) {
+                        total_promise.set_value();
+                    }
+                };
+                disk_layout_reader_->AsyncRead(offset, len, dest, callback);
+            }
+            total_future.wait();
+            if (not succeed) {
+                throw VsagException(ErrorType::READ_ERROR, "failed to read diskann index");
             }
         }
     };
@@ -303,8 +301,7 @@ DiskANN::build(const DatasetPtr& base) {
                        std::back_inserter(failed_ids),
                        [&ids](const auto& index) { return ids[index]; });
 
-        disk_layout_reader_ =
-            std::make_shared<LocalMemoryReader>(disk_layout_stream_, use_async_io_);
+        disk_layout_reader_ = std::make_shared<LocalMemoryReader>(disk_layout_stream_);
         reader_.reset(new LocalFileReader(batch_read_));
         index_.reset(new diskann::PQFlashIndex<float, int64_t>(
             reader_, metric_, sector_len_, dim_, use_bsa_));
@@ -402,7 +399,7 @@ DiskANN::knn_search(const DatasetPtr& query,
                     std::shared_lock lock(rw_mutex_);
                     Timer timer(time_cost);
                     if (preload_) {
-                        if (use_async_io_) {
+                        if (params.use_async_io) {
                             k = index_->cached_beam_search_async(
                                 query->GetFloat32Vectors() + i * dim_,
                                 k,
@@ -571,6 +568,7 @@ DiskANN::range_search(const DatasetPtr& query,
                                      reorder,
                                      filter,
                                      preload_,
+                                     params.use_async_io,
                                      &query_stats);
             }
             {
@@ -1026,7 +1024,7 @@ DiskANN::build_partial_graph(const DatasetPtr& base,
 
 tl::expected<void, Error>
 DiskANN::load_disk_index(const BinarySet& binary_set) {
-    disk_layout_reader_ = std::make_shared<LocalMemoryReader>(disk_layout_stream_, use_async_io_);
+    disk_layout_reader_ = std::make_shared<LocalMemoryReader>(disk_layout_stream_);
     reader_.reset(new LocalFileReader(batch_read_));
     index_.reset(
         new diskann::PQFlashIndex<float, int64_t>(reader_, metric_, sector_len_, dim_, use_bsa_));
