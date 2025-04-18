@@ -67,6 +67,7 @@ public:
 
     // optional vars with default value
     bool use_reorder = false;
+    bool use_async_io = false;
 
 private:
     DiskannSearchParameters() = default;
