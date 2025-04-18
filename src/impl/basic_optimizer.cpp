@@ -52,7 +52,10 @@ Optimizer<OptimizableOBJ>::Optimize(std::shared_ptr<OptimizableOBJ> obj) {
                             improvement));
 
             // update
-            if (loss < best_loss and improvement > 2.0) {
+            // overall principle: choose smaller param
+            if (loss < best_loss and                  // condition1. has improvement
+                improvement - best_improve > 0.2 and  // condition2. improvement is noteworthy
+                improvement > 2.0) {                  // condition3. improvement is valid
                 successful_optimized = true;
                 ret = true;
                 best_loss = loss;
