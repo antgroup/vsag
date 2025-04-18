@@ -78,6 +78,7 @@ OPENAI:
     index_path: "/tmp/openai-1536-500k-angular/index/hgraph_index"
     topk: 10
     search_mode: "knn"
+    delete_index_after_search: false
 
 COHERE:
     datapath: "/tmp/data/cohere-768-1m-angular.hdf5"
@@ -88,3 +89,4 @@ COHERE:
     index_path: "/tmp/cohere-768-1m-angular/index/hgraph_index"
     topk: 10
     search_mode: "knn"
+    delete_index_after_search: false
