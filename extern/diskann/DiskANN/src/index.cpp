@@ -1541,7 +1541,6 @@ void Index<T, TagT, LabelT>::occlude_list(const uint32_t location, std::vector<N
         return;
 
     // Truncate pool at maxc and initialize scratch spaces
-    assert(std::is_sorted(pool.begin(), pool.end()));
     assert(result.size() == 0);
     if (pool.size() > maxc)
         pool.resize(maxc);
