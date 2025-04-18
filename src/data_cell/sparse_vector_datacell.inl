@@ -25,10 +25,12 @@ SparseVectorDataCell<QuantTmpl, IOTmpl>::query(float* result_dists,
                                                const InnerIdType* idx,
                                                InnerIdType id_count) {
     for (int i = 0; i < id_count; ++i) {
-        bool need_release;
+        bool need_release{true};
         auto codes = this->GetCodesById(idx[i], need_release);
         result_dists[i] = this->quantizer_->ComputeDist(*computer, codes);
-        allocator_->Deallocate((void*)codes);
+        if (need_release) {
+            allocator_->Deallocate((void*)codes);
+        }
     }
 }
 template <typename QuantTmpl, typename IOTmpl>
