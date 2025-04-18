@@ -163,13 +163,21 @@ DiskANN::DiskANN(DiskannParameters& diskann_params, const IndexCommonParam& inde
                 disk_layout_reader_->AsyncRead(offset, len, dest, callBack);
             }
         } else {
+            std::atomic<bool> succeed(true);
+            std::string error_message;
             std::atomic<int> counter(static_cast<int>(requests.size()));
             std::promise<void> total_promise;
             auto total_future = total_promise.get_future();
             for (const auto& req : requests) {
                 auto [offset, len, dest] = req;
-                auto callback = [&counter, &total_promise](IOErrorCode code,
-                                                           const std::string& message) {
+                auto callback = [&counter, &total_promise, &succeed, &error_message](
+                                    IOErrorCode code, const std::string& message) {
+                    if (code != vsag::IOErrorCode::IO_SUCCESS) {
+                        bool expected = true;
+                        if (succeed.compare_exchange_strong(expected, false)) {
+                            error_message = message;
+                        }
+                    }
                     if (--counter == 0) {
                         total_promise.set_value();
                     }
@@ -177,6 +185,9 @@ DiskANN::DiskANN(DiskannParameters& diskann_params, const IndexCommonParam& inde
                 disk_layout_reader_->AsyncRead(offset, len, dest, callback);
             }
             total_future.wait();
+            if (not succeed) {
+                throw VsagException(ErrorType::READ_ERROR, "failed to read diskann index");
+            }
         }
     };
 
