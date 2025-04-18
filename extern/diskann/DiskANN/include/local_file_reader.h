@@ -10,11 +10,7 @@
 #include "tsl/robin_map.h"
 #include "utils.h"
 #include <functional>
-
-namespace vsag {
-enum class IOErrorCode;
-};
-
+#include "vsag/readerset.h"
 typedef std::function<void(vsag::IOErrorCode code, const std::string& message)> CallBack;
 typedef std::vector<std::tuple<uint64_t, uint64_t, void*>> batch_request;
 typedef std::function<void(batch_request, bool, CallBack)> reader_function;

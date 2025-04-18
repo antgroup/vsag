@@ -94,11 +94,6 @@ DiskannParameters::FromJson(
         obj.use_bsa = diskann_param_obj[DISKANN_PARAMETER_USE_BSA];
     }
 
-    // set obj.use_async_io
-    if (diskann_param_obj.contains(DISKANN_PARAMETER_USE_ASYNC_IO)) {
-        obj.use_async_io = diskann_param_obj[DISKANN_PARAMETER_USE_ASYNC_IO];
-    }
-
     // set obj.graph_type
     if (diskann_param_obj.contains(DISKANN_PARAMETER_GRAPH_TYPE)) {
         obj.graph_type = diskann_param_obj[DISKANN_PARAMETER_GRAPH_TYPE];
@@ -171,8 +166,8 @@ DiskannSearchParameters::FromJson(const std::string& json_string) {
         fmt::format(
             "parameters[{}] must contains {}", INDEX_DISKANN, DISKANN_PARAMETER_BEAM_SEARCH));
     obj.beam_search = params[INDEX_DISKANN][DISKANN_PARAMETER_BEAM_SEARCH];
-    CHECK_ARGUMENT((1 <= obj.beam_search) and (obj.beam_search <= 30),
-                   fmt::format("beam_search({}) must in range[1, 30]", obj.beam_search));
+    CHECK_ARGUMENT((1 <= obj.beam_search) and (obj.beam_search <= 64),
+                   fmt::format("beam_search({}) must in range[1, 64]", obj.beam_search));
 
     // set obj.io_limit
     CHECK_ARGUMENT(
@@ -186,6 +181,11 @@ DiskannSearchParameters::FromJson(const std::string& json_string) {
     // set obj.use_reorder
     if (params[INDEX_DISKANN].contains(DISKANN_PARAMETER_REORDER)) {
         obj.use_reorder = params[INDEX_DISKANN][DISKANN_PARAMETER_REORDER];
+    }
+
+    // set obj.use_async_io
+    if (params[INDEX_DISKANN].contains(DISKANN_PARAMETER_USE_ASYNC_IO)) {
+        obj.use_async_io = params[INDEX_DISKANN][DISKANN_PARAMETER_USE_ASYNC_IO];
     }
 
     return obj;

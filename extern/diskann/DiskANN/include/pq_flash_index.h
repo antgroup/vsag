@@ -90,7 +90,7 @@ template <typename T, typename LabelT = uint32_t> class PQFlashIndex
                                            const uint64_t max_l_search, std::vector<uint64_t> &indices,
                                            std::vector<float> &distances, const uint64_t min_beam_width,
                                            uint32_t io_limit,  const bool reorder,
-                                           std::function<bool(int64_t)> filter, bool memory,
+                                           std::function<bool(int64_t)> filter, bool memory, bool use_async_io,
                                            QueryStats *stats = nullptr);
 
     DISKANN_DLLEXPORT uint64_t get_data_dim();
