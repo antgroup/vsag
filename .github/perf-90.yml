@@ -68,3 +68,25 @@ NYTimes:
     search_mode: "knn" # ["knn", "range", "knn_filter", "range_filter"]
     range: 0.5
     delete_index_after_search: false
+
+OPENAI:
+    datapath: "/tmp/data/openai-1536-500k-angular.hdf5"
+    type: "build,search" # build, search
+    index_name: "hgraph"
+    create_params: '{"dim":1536,"dtype":"float32","metric_type":"cosine","index_param":{"base_quantization_type":"fp32","max_degree":96,"ef_construction":400}}'
+    search_params: '{"hgraph":{"ef_search":15}}'
+    index_path: "/tmp/openai-1536-500k-angular/index/hgraph_index"
+    topk: 10
+    search_mode: "knn"
+    delete_index_after_search: false
+
+COHERE:
+    datapath: "/tmp/data/cohere-768-1m-angular.hdf5"
+    type: "build,search" # build, search
+    index_name: "hgraph"
+    create_params: '{"dim":768,"dtype":"float32","metric_type":"cosine","index_param":{"base_quantization_type":"sq8_uniform","max_degree":64,"ef_construction":400, "precise_quantization_type":"fp32", "use_reorder":true}}'
+    search_params: '{"hgraph":{"ef_search":29}}'
+    index_path: "/tmp/cohere-768-1m-angular/index/hgraph_index"
+    topk: 10
+    search_mode: "knn"
+    delete_index_after_search: false
