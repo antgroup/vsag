@@ -98,7 +98,8 @@ HGraph::Build(const DatasetPtr& data) {
         this->high_precise_codes_->EnableForceInMemory();
     }
     this->Train(data);
-    this->resize(max_capacity_ + 1);
+    auto new_size = this->max_capacity_.load() + 1;
+    this->resize(new_size);
     auto ret = this->Add(data);
     this->basic_flatten_codes_->DisableForceInMemory();
     if (use_reorder_) {
@@ -149,17 +150,13 @@ HGraph::Add(const DatasetPtr& data) {
             {
                 std::lock_guard lock(this->add_mutex_);
                 inner_id = this->get_unique_inner_ids(1).at(0);
+                uint64_t new_count = total_count_;
+                this->resize(new_count);
             }
             this->label_table_->Insert(inner_id, label);
             inner_ids.emplace_back(inner_id, j);
         }
     }
-    uint64_t new_count;
-    {
-        std::shared_lock lock(this->add_mutex_);
-        new_count = total_count_;
-    }
-    this->resize(new_count);
     for (auto& [inner_id, local_idx] : inner_ids) {
         int level;
         {
@@ -536,7 +533,8 @@ HGraph::serialize_basic_info(StreamWriter& writer) const {
     StreamWriter::WriteObj(writer, this->entry_point_id_);
     StreamWriter::WriteObj(writer, this->ef_construct_);
     StreamWriter::WriteObj(writer, this->mult_);
-    StreamWriter::WriteObj(writer, this->max_capacity_);
+    auto capacity = this->max_capacity_.load();
+    StreamWriter::WriteObj(writer, capacity);
     StreamWriter::WriteVector(writer, this->label_table_->label_table_);
 
     uint64_t size = this->label_table_->label_remap_.size();
@@ -579,9 +577,10 @@ HGraph::Deserialize(StreamReader& reader) {
     for (auto& route_graph : this->route_graphs_) {
         route_graph->Deserialize(reader);
     }
-    this->neighbors_mutex_->Resize(max_capacity_);
+    auto new_size = max_capacity_.load();
+    this->neighbors_mutex_->Resize(new_size);
 
-    pool_ = std::make_shared<VisitedListPool>(1, allocator_, max_capacity_, allocator_);
+    pool_ = std::make_shared<VisitedListPool>(1, allocator_, new_size, allocator_);
 
     if (this->extra_info_size_ > 0 && this->extra_infos_ != nullptr) {
         this->extra_infos_->Deserialize(reader);
@@ -602,7 +601,9 @@ HGraph::deserialize_basic_info(StreamReader& reader) {
     StreamReader::ReadObj(reader, this->entry_point_id_);
     StreamReader::ReadObj(reader, this->ef_construct_);
     StreamReader::ReadObj(reader, this->mult_);
-    StreamReader::ReadObj(reader, this->max_capacity_);
+    InnerIdType capacity;
+    StreamReader::ReadObj(reader, capacity);
+    this->max_capacity_.store(capacity);
     StreamReader::ReadVector(reader, this->label_table_->label_table_);
 
     uint64_t size;
@@ -758,19 +759,20 @@ HGraph::graph_add_one(const float* data, int level, InnerIdType inner_id) {
 
 void
 HGraph::resize(uint64_t new_size) {
-    auto cur_size = this->max_capacity_;
+    auto cur_size = this->max_capacity_.load();
     uint64_t new_size_power_2 =
         next_multiple_of_power_of_two(new_size, this->resize_increase_count_bit_);
     if (cur_size >= new_size_power_2) {
         return;
     }
     std::lock_guard lock(this->global_mutex_);
+    cur_size = this->max_capacity_.load();
     if (cur_size < new_size_power_2) {
         this->neighbors_mutex_->Resize(new_size_power_2);
         pool_ = std::make_shared<VisitedListPool>(1, allocator_, new_size_power_2, allocator_);
         this->label_table_->label_table_.resize(new_size_power_2);
         bottom_graph_->Resize(new_size_power_2);
-        this->max_capacity_ = new_size_power_2;
+        this->max_capacity_.store(new_size_power_2);
         this->basic_flatten_codes_->Resize(new_size_power_2);
         if (use_reorder_) {
             this->high_precise_codes_->Resize(new_size_power_2);
