@@ -34,17 +34,17 @@ public:
     static std::string
     GenerateDiskANNBuildParametersString(const std::string& metric_type,
                                          int64_t dim,
-                                         bool use_async_io = false,
                                          bool use_bsa = false);
-    static constexpr auto search_param = R"(
-        {
-            "diskann": {
+    static constexpr auto search_param_template = R"(
+        {{
+            "diskann": {{
                 "ef_search": 200,
                 "io_limit": 200,
-                "beam_search": 4,
+                "beam_search": {},
+                "use_async_io": {},
                 "use_reorder": true
-            }
-        }
+            }}
+        }}
     )";
 
     constexpr static uint64_t base_count = 1000;
@@ -54,7 +54,6 @@ TestDatasetPool DiskANNTestIndex::pool{};
 std::string
 DiskANNTestIndex::GenerateDiskANNBuildParametersString(const std::string& metric_type,
                                                        int64_t dim,
-                                                       bool use_async_io,
                                                        bool use_bsa) {
     constexpr auto build_parameter_json = R"(
         {{
@@ -64,21 +63,18 @@ DiskANNTestIndex::GenerateDiskANNBuildParametersString(const std::string& metric
             "diskann": {{
                 "max_degree": 16,
                 "ef_construction": 200,
-                "pq_dims": 32,
+                "pq_dims": 64,
                 "pq_sample_rate": 0.5,
                 "use_pq_search": true,
-                "use_async_io": {},
                 "use_bsa": {}
             }}
         }}
     )";
-    auto build_parameters_str =
-        fmt::format(build_parameter_json, metric_type, dim, use_async_io, use_bsa);
+    auto build_parameters_str = fmt::format(build_parameter_json, metric_type, dim, use_bsa);
     return build_parameters_str;
 }
 }  // namespace fixtures
 TEST_CASE_METHOD(fixtures::DiskANNTestIndex, "diskann build test", "[ft][index][diskann]") {
-    auto test_dim_count = 3;
     auto dims = fixtures::get_common_used_dims(3);
     auto metric_type = GENERATE("l2", "ip");
     const std::string name = "diskann";
@@ -116,6 +112,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::DiskANNTestIndex,
             }}
         }}
     )";
+    auto search_param = fmt::format(search_param_template, 4, true);
     for (auto dim : dims) {
         auto param = fmt::format(build_parameter_json, metric_type, dim, graph_type);
         auto index = TestFactory(name, param, true);
@@ -137,12 +134,34 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::DiskANNTestIndex,
     auto use_async_io = GENERATE(true, false);
     auto use_bsa = GENERATE(true, false);
     const std::string name = "diskann";
+    auto search_param = fmt::format(search_param_template, 4, use_async_io);
     for (auto dim : dims) {
-        auto param = GenerateDiskANNBuildParametersString(metric_type, dim, use_async_io, use_bsa);
+        auto param = GenerateDiskANNBuildParametersString(metric_type, dim, use_bsa);
         auto index = TestFactory(name, param, true);
         auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
         TestBuildIndex(index, dataset, true);
         TestKnnSearch(index, dataset, search_param, 0.99, true);
+        TestRangeSearch(index, dataset, search_param, 0.99, 10, true);
+    }
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::DiskANNTestIndex,
+                             "diskann beam_with test",
+                             "[ft][index][diskann]") {
+    vsag::Options::Instance().logger()->SetLevel(vsag::Logger::Level::kDEBUG);
+    auto dims = fixtures::get_common_used_dims(1);
+    auto metric_type = GENERATE("l2");
+    auto use_async_io = GENERATE(true, false);
+    auto beam_with = GENERATE(4, 16, 32, 64);
+    const std::string name = "diskann";
+    auto search_param = fmt::format(search_param_template, beam_with, use_async_io);
+    for (auto dim : dims) {
+        auto param = GenerateDiskANNBuildParametersString(metric_type, dim, true);
+        auto index = TestFactory(name, param, true);
+        auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
+        TestBuildIndex(index, dataset, true);
+        TestKnnSearch(index, dataset, search_param, 0.99, true);
+        TestRangeSearch(index, dataset, search_param, 0.99, 10, true);
     }
 }
 
@@ -156,6 +175,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::DiskANNTestIndex,
     auto dim = 128;
     vsag::Options::Instance().set_block_size_limit(size);
     auto param = GenerateDiskANNBuildParametersString(metric_type, dim);
+    auto search_param = fmt::format(search_param_template, 4, true);
     auto index = TestFactory(name, param, true);
 
     auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
@@ -181,6 +201,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::DiskANNTestIndex,
     auto dataset = pool.GetNanDataset(metric_type);
     auto dim = dataset->dim_;
     const std::string name = "diskann";
+    auto search_param = fmt::format(search_param_template, 4, true);
 
     vsag::Options::Instance().set_block_size_limit(size);
     auto param = GenerateDiskANNBuildParametersString(metric_type, dim);
