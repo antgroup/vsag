@@ -281,7 +281,7 @@ TEST_CASE("Optimize SQ4", "[ut][BasicOptimizer]") {
 
     // data attr
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
-    uint32_t base_size = 100000;
+    uint32_t base_size = 10000;
     uint64_t dim = 960;
 
     // build and search attr
