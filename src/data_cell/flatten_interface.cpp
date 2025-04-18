@@ -20,7 +20,7 @@
 #include "io/io_headers.h"
 #include "quantization/quantizer_headers.h"
 #include "quantization/sparse_quantization/sparse_quantizer.h"
-#include "sparse_vector_datacell.inl"
+#include "sparse_vector_datacell.h"
 
 namespace vsag {
 template <typename QuantTemp, typename IOTemp>

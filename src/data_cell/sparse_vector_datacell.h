@@ -142,3 +142,5 @@ private:
 };
 
 }  // namespace vsag
+
+#include "sparse_vector_datacell.inl"
