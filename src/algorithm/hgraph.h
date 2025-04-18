@@ -231,5 +231,7 @@ private:
     uint64_t extra_info_size_{0};
 
     static constexpr uint64_t DEFAULT_RESIZE_BIT = 10;
+
+    std::shared_ptr<Optimizer<BasicSearcher>> optimizer_;
 };
 }  // namespace vsag
