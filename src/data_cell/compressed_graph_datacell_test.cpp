@@ -31,9 +31,9 @@ TestCompressedGraphDataCell(const GraphInterfaceParamPtr& param,
     auto count = GENERATE(1000, 2000);
     auto max_id = 10000;
 
-    auto graph = std::make_shared<CompressedGraphDataCell>(param, common_param);
+    auto graph = GraphInterface::MakeInstance(param, common_param);
     GraphInterfaceTest test(graph, true);
-    auto other = std::make_shared<CompressedGraphDataCell>(param, common_param);
+    auto other = GraphInterface::MakeInstance(param, common_param);
     test.BasicTest(max_id, count, other);
 }
 

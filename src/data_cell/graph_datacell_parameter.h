@@ -15,7 +15,6 @@
 
 #pragma once
 
-#include "data_cell/graph_storage_type.h"
 #include "graph_interface_parameter.h"
 #include "io/io_parameter.h"
 
@@ -36,8 +35,6 @@ public:
     uint64_t max_degree_{64};
 
     uint64_t init_max_capacity_{100};
-
-    GraphStorageTypes graph_storage_type_{GraphStorageTypes::GRAPH_STORAGE_TYPE_FLAT};
 };
 
 using GraphDataCellParamPtr = std::shared_ptr<GraphDataCellParameter>;

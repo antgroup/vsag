@@ -15,6 +15,7 @@
 
 #pragma once
 
+#include "data_cell/graph_storage_type.h"
 #include "parameter.h"
 
 namespace vsag {
@@ -26,6 +27,9 @@ class GraphInterfaceParameter : public Parameter {
 public:
     static GraphInterfaceParamPtr
     GetGraphParameterByJson(const JsonType& json);
+
+public:
+    GraphStorageTypes graph_storage_type_{GraphStorageTypes::GRAPH_STORAGE_TYPE_FLAT};
 
 protected:
     explicit GraphInterfaceParameter() = default;
