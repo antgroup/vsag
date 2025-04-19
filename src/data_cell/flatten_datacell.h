@@ -48,21 +48,21 @@ public:
     }
 
     ComputerInterfacePtr
-    FactoryComputer(const float* query) override {
-        return this->factory_computer(query);
+    FactoryComputer(const void* query) override {
+        return this->factory_computer((const float*)query);
     }
 
     float
     ComputePairVectors(InnerIdType id1, InnerIdType id2) override;
 
     void
-    Train(const float* data, uint64_t count) override;
+    Train(const void* data, uint64_t count) override;
 
     void
-    InsertVector(const float* vector, InnerIdType idx) override;
+    InsertVector(const void* vector, InnerIdType idx) override;
 
     void
-    BatchInsertVector(const float* vectors, InnerIdType count, InnerIdType* idx) override;
+    BatchInsertVector(const void* vectors, InnerIdType count, InnerIdType* idx) override;
 
     void
     SetMaxCapacity(InnerIdType capacity) override {
@@ -140,12 +140,6 @@ public:
 private:
     inline void
     query(float* result_dists,
-          const float* query_vector,
-          const InnerIdType* idx,
-          InnerIdType id_count);
-
-    inline void
-    query(float* result_dists,
           const std::shared_ptr<Computer<QuantTmpl>>& computer,
           const InnerIdType* idx,
           InnerIdType id_count);
@@ -220,15 +214,15 @@ FlattenDataCell<QuantTmpl, IOTmpl>::FlattenDataCell(const QuantizerParamPtr& qua
 
 template <typename QuantTmpl, typename IOTmpl>
 void
-FlattenDataCell<QuantTmpl, IOTmpl>::Train(const float* data, uint64_t count) {
+FlattenDataCell<QuantTmpl, IOTmpl>::Train(const void* data, uint64_t count) {
     if (this->quantizer_) {
-        this->quantizer_->Train(data, count);
+        this->quantizer_->Train((const float*)data, count);
     }
 }
 
 template <typename QuantTmpl, typename IOTmpl>
 void
-FlattenDataCell<QuantTmpl, IOTmpl>::InsertVector(const float* vector, InnerIdType idx) {
+FlattenDataCell<QuantTmpl, IOTmpl>::InsertVector(const void* vector, InnerIdType idx) {
     {
         std::lock_guard lock(mutex_);
         if (idx == std::numeric_limits<InnerIdType>::max()) {
@@ -239,7 +233,7 @@ FlattenDataCell<QuantTmpl, IOTmpl>::InsertVector(const float* vector, InnerIdTyp
         }
     }
     ByteBuffer codes(static_cast<uint64_t>(code_size_), allocator_);
-    quantizer_->EncodeOne(vector, codes.data);
+    quantizer_->EncodeOne((const float*)vector, codes.data);
     if (this->force_in_memory_) {
         force_in_memory_io_->Write(
             codes.data, code_size_, static_cast<uint64_t>(idx) * static_cast<uint64_t>(code_size_));
@@ -251,13 +245,13 @@ FlattenDataCell<QuantTmpl, IOTmpl>::InsertVector(const float* vector, InnerIdTyp
 
 template <typename QuantTmpl, typename IOTmpl>
 void
-FlattenDataCell<QuantTmpl, IOTmpl>::BatchInsertVector(const float* vectors,
+FlattenDataCell<QuantTmpl, IOTmpl>::BatchInsertVector(const void* vectors,
                                                       InnerIdType count,
                                                       InnerIdType* idx) {
     if (idx == nullptr) {
         ByteBuffer codes(static_cast<uint64_t>(count) * static_cast<uint64_t>(code_size_),
                          allocator_);
-        quantizer_->EncodeBatch(vectors, codes.data, count);
+        quantizer_->EncodeBatch((const float*)vectors, codes.data, count);
         uint64_t cur_count;
         {
             std::lock_guard lock(mutex_);
@@ -277,7 +271,7 @@ FlattenDataCell<QuantTmpl, IOTmpl>::BatchInsertVector(const float* vectors,
     } else {
         auto dim = quantizer_->GetDim();
         for (int64_t i = 0; i < count; ++i) {
-            this->InsertVector(vectors + dim * i, idx[i]);
+            this->InsertVector((const float*)vectors + dim * i, idx[i]);
         }
     }
 }
@@ -298,17 +292,6 @@ template <typename QuantTmpl, typename IOTmpl>
 bool
 FlattenDataCell<QuantTmpl, IOTmpl>::InMemory() const {
     return this->io_->InMemory();
-}
-
-template <typename QuantTmpl, typename IOTmpl>
-void
-FlattenDataCell<QuantTmpl, IOTmpl>::query(float* result_dists,
-                                          const float* query_vector,
-                                          const InnerIdType* idx,
-                                          InnerIdType id_count) {
-    auto computer = quantizer_->FactoryComputer();
-    computer->SetQuery(query_vector);
-    this->Query(result_dists, computer, idx, id_count);
 }
 
 template <typename QuantTmpl, typename IOTmpl>
