@@ -15,27 +15,33 @@
 
 #include "flatten_interface.h"
 
-#include <fmt/format-inl.h>
-
 #include "flatten_datacell.h"
 #include "inner_string_params.h"
 #include "io/io_headers.h"
 #include "quantization/quantizer_headers.h"
+#include "quantization/sparse_quantization/sparse_quantizer.h"
+#include "sparse_vector_datacell.h"
 
 namespace vsag {
 template <typename QuantTemp, typename IOTemp>
 static FlattenInterfacePtr
-make_instance(const FlattenDataCellParamPtr& param, const IndexCommonParam& common_param) {
+make_instance(const FlattenInterfaceParamPtr& param, const IndexCommonParam& common_param) {
     auto& io_param = param->io_parameter;
     auto& quantizer_param = param->quantizer_parameter;
-
-    return std::make_shared<FlattenDataCell<QuantTemp, IOTemp>>(
-        quantizer_param, io_param, common_param);
+    if (param->name == SPARSE_VECTOR_DATA_CELL) {
+        return std::make_shared<SparseVectorDataCell<QuantTemp, IOTemp>>(
+            quantizer_param, io_param, common_param);
+    }
+    if (param->name == FLATTEN_DATA_CELL) {
+        return std::make_shared<FlattenDataCell<QuantTemp, IOTemp>>(
+            quantizer_param, io_param, common_param);
+    }
+    return nullptr;
 }
 
 template <MetricType metric, typename IOTemp>
 static FlattenInterfacePtr
-make_instance(const FlattenDataCellParamPtr& param, const IndexCommonParam& common_param) {
+make_instance(const FlattenInterfaceParamPtr& param, const IndexCommonParam& common_param) {
     std::string quantization_string = param->quantizer_parameter->GetTypeName();
     if (quantization_string == QUANTIZATION_TYPE_VALUE_SQ8) {
         return make_instance<SQ8Quantizer<metric>, IOTemp>(param, common_param);
@@ -65,12 +71,15 @@ make_instance(const FlattenDataCellParamPtr& param, const IndexCommonParam& comm
             return nullptr;
         }
     }
+    if (quantization_string == QUANTIZATION_TYPE_VALUE_SPARSE) {
+        return make_instance<SparseQuantizer<metric>, IOTemp>(param, common_param);
+    }
     return nullptr;
 }
 
 template <typename IOTemp>
 static FlattenInterfacePtr
-make_instance(const FlattenDataCellParamPtr& param, const IndexCommonParam& common_param) {
+make_instance(const FlattenInterfaceParamPtr& param, const IndexCommonParam& common_param) {
     auto metric = common_param.metric_;
     if (metric == MetricType::METRIC_TYPE_L2SQR) {
         return make_instance<MetricType::METRIC_TYPE_L2SQR, IOTemp>(param, common_param);
@@ -85,7 +94,7 @@ make_instance(const FlattenDataCellParamPtr& param, const IndexCommonParam& comm
 }
 
 FlattenInterfacePtr
-FlattenInterface::MakeInstance(const FlattenDataCellParamPtr& param,
+FlattenInterface::MakeInstance(const FlattenInterfaceParamPtr& param,
                                const IndexCommonParam& common_param) {
     auto io_type_name = param->io_parameter->GetTypeName();
     if (io_type_name == IO_TYPE_VALUE_BLOCK_MEMORY_IO) {

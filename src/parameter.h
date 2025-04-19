@@ -16,6 +16,7 @@
 #pragma once
 
 #include "common.h"
+#include "inner_string_params.h"
 #include "typing.h"
 
 namespace vsag {

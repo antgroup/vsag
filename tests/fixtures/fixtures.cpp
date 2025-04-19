@@ -393,4 +393,27 @@ SplitString(const std::string& s, char delimiter) {
 
     return tokens;
 }
+
+float
+GetSparseDistance(const vsag::SparseVector& vec1, const vsag::SparseVector& vec2) {
+    if (vec1.len_ == 0 || vec2.len_ == 0) {
+        return 0.0f;
+    }
+
+    std::unordered_map<uint32_t, float> id_to_val;
+    for (uint32_t i = 0; i < vec1.len_; ++i) {
+        id_to_val[vec1.ids_[i]] = vec1.vals_[i];
+    }
+
+    float distance = 0.0f;
+    for (uint32_t i = 0; i < vec2.len_; ++i) {
+        const auto& id = vec2.ids_[i];
+        auto it = id_to_val.find(id);
+        if (it != id_to_val.end()) {
+            distance += it->second * vec2.vals_[i];
+        }
+    }
+    return 1 - distance;
+}
+
 }  // namespace fixtures

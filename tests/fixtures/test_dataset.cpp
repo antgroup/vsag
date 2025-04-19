@@ -41,28 +41,6 @@ is_path_belong_to(const std::string& a, const std::string& b) {
     return b.compare(0, a.size(), a) == 0;
 }
 
-float
-get_sparse_distance(const vsag::SparseVector& vec1, const vsag::SparseVector& vec2) {
-    if (vec1.len_ == 0 || vec2.len_ == 0) {
-        return 0.0f;
-    }
-
-    std::unordered_map<uint32_t, float> id_to_val;
-    for (uint32_t i = 0; i < vec1.len_; ++i) {
-        id_to_val[vec1.ids_[i]] = vec1.vals_[i];
-    }
-
-    float distance = 0.0f;
-    for (uint32_t i = 0; i < vec2.len_; ++i) {
-        const auto& id = vec2.ids_[i];
-        auto it = id_to_val.find(id);
-        if (it != id_to_val.end()) {
-            distance += it->second * vec2.vals_[i];
-        }
-    }
-    return 1 - distance;
-}
-
 std::string
 create_random_string(bool is_full) {
     const std::vector<std::string> level1 = {"a", "b", "c"};
@@ -200,8 +178,7 @@ CalDistanceFloatMetrix(const vsag::DatasetPtr query,
                 dist = dist_func(
                     query->GetFloat32Vectors() + dim * i, base->GetFloat32Vectors() + dim * j, dim);
             } else if (vector_type == "sparse") {
-                dist =
-                    get_sparse_distance(query->GetSparseVectors()[i], base->GetSparseVectors()[j]);
+                dist = GetSparseDistance(query->GetSparseVectors()[i], base->GetSparseVectors()[j]);
             } else {
                 throw std::runtime_error("no such vector type");
             }
@@ -257,8 +234,7 @@ CalDistanceFloatMetrixWithExFilter(const vsag::DatasetPtr query,
                 dist = dist_func(
                     query->GetFloat32Vectors() + dim * i, base->GetFloat32Vectors() + dim * j, dim);
             } else if (vector_type == "sparse") {
-                dist =
-                    get_sparse_distance(query->GetSparseVectors()[i], base->GetSparseVectors()[j]);
+                dist = GetSparseDistance(query->GetSparseVectors()[i], base->GetSparseVectors()[j]);
             } else {
                 throw std::runtime_error("no such vector type");
             }
