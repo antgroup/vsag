@@ -130,7 +130,7 @@ EvalDataset::Load(const std::string& filename) {
     obj->train_shape_ = train_shape;
     obj->test_shape_ = test_shape;
     obj->neighbors_shape_ = neighbors_shape;
-    obj->dim_ = train_shape.second;
+    obj->dim_ = 500;
     obj->number_of_base_ = train_shape.first;
     obj->number_of_query_ = test_shape.first;
 

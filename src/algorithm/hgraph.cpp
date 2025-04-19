@@ -116,7 +116,7 @@ HGraph::Add(const DatasetPtr& data) {
     auto base_dim = data->GetDim();
     CHECK_ARGUMENT(base_dim == dim_,
                    fmt::format("base.dim({}) must be equal to index.dim({})", base_dim, dim_));
-    CHECK_ARGUMENT(data->GetFloat32Vectors() != nullptr, "base.float_vector is nullptr");
+    CHECK_ARGUMENT(get_data(data) != nullptr, "base.float_vector is nullptr");
 
     {
         std::lock_guard lock(this->add_mutex_);
