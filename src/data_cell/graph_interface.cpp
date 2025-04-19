@@ -15,6 +15,7 @@
 
 #include "graph_interface.h"
 
+#include "compressed_graph_datacell.h"
 #include "graph_datacell.h"
 #include "io/io_headers.h"
 #include "sparse_graph_datacell.h"
@@ -22,22 +23,27 @@
 namespace vsag {
 
 GraphInterfacePtr
-GraphInterface::MakeInstance(const GraphInterfaceParamPtr& param,
+GraphInterface::MakeInstance(const GraphInterfaceParamPtr& graph_param,
                              const IndexCommonParam& common_param,
                              bool is_sparse) {
-    if (is_sparse) {
-        return std::make_shared<SparseGraphDataCell>(param, common_param);
+    auto graph_storage_type = graph_param->graph_storage_type_;
+    if (graph_storage_type == GraphStorageTypes::GRAPH_STORAGE_TYPE_COMPRESSED) {
+        return std::make_shared<CompressedGraphDataCell>(graph_param, common_param);
     }
 
-    auto io_string =
-        std::dynamic_pointer_cast<GraphDataCellParameter>(param)->io_parameter_->GetTypeName();
+    if (is_sparse) {
+        return std::make_shared<SparseGraphDataCell>(graph_param, common_param);
+    }
+
+    auto io_string = std::dynamic_pointer_cast<GraphDataCellParameter>(graph_param)
+                         ->io_parameter_->GetTypeName();
 
     if (io_string == IO_TYPE_VALUE_BLOCK_MEMORY_IO) {
-        return std::make_shared<GraphDataCell<MemoryBlockIO>>(param, common_param);
+        return std::make_shared<GraphDataCell<MemoryBlockIO>>(graph_param, common_param);
     }
 
     if (io_string == IO_TYPE_VALUE_MEMORY_IO) {
-        return std::make_shared<GraphDataCell<MemoryIO>>(param, common_param);
+        return std::make_shared<GraphDataCell<MemoryIO>>(graph_param, common_param);
     }
 
     return nullptr;

@@ -45,7 +45,7 @@ set_high_bit(uint64_t* bits_array, size_t pos, size_t low_bits_size) {
 }
 
 void
-EliasFanoEncoder::set_low_bits(size_t index, InnerIdType value) {
+EliasFanoEncoder::set_low_bits(size_t index, InnerIdType value) const {
     if (low_bits_width_ == 0) {
         return;
     }
@@ -129,14 +129,12 @@ EliasFanoEncoder::Encode(const Vector<InnerIdType>& values, InnerIdType max_valu
     }
 }
 
-Vector<InnerIdType>
-EliasFanoEncoder::DecompressAll(Allocator* allocator) const {
-    Vector<InnerIdType> result(allocator);
-    result.reserve(num_elements_);
+void
+EliasFanoEncoder::DecompressAll(Vector<InnerIdType>& neighbors) const {
+    neighbors.resize(num_elements_);
 
     // Decompress all values at once
     size_t count = 0;
-
     for (size_t i = 0; i < high_bits_size_ && count < num_elements_; ++i) {
         uint64_t word = bits_[low_bits_size_ + i];
 
@@ -146,14 +144,12 @@ EliasFanoEncoder::DecompressAll(Allocator* allocator) const {
             // Found 1, calculate corresponding value
             InnerIdType high = (i * 64 + bit) - count;
             InnerIdType low = get_low_bits(count);
-            result.push_back((high << low_bits_width_) | low);
+            neighbors[count] = ((high << low_bits_width_) | low);
             count++;
             // Delete lowest 1
             word &= (word - 1);
         }
     }
-
-    return result;
 }
 
 }  // namespace vsag
