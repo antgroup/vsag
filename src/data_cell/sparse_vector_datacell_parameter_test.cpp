@@ -13,25 +13,28 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#pragma once
+#include "sparse_vector_datacell_parameter.h"
 
-#include "flatten_interface_parameter.h"
-#include "io/io_parameter.h"
-#include "parameter.h"
-#include "quantization/quantizer_parameter.h"
+#include <catch2/catch_test_macros.hpp>
+
+#include "parameter_test.h"
+
 namespace vsag {
 
-class FlattenDataCellParameter : public FlattenInterfaceParameter {
-public:
-    explicit FlattenDataCellParameter();
-
-    void
-    FromJson(const JsonType& json) override;
-
-    JsonType
-    ToJson() override;
-};
-
-using FlattenDataCellParamPtr = std::shared_ptr<FlattenDataCellParameter>;
+TEST_CASE("SparseVectorDataCellParameter ToJson Test", "[ut][SparseVectorDataCellParameter]") {
+    std::string param_str = R"(
+    {
+        "io_params": {
+            "type": "memory_io"
+        },
+        "quantization_params": {
+            "type": "sparse"
+        }
+    })";
+    auto param = std::make_shared<SparseVectorDataCellParameter>();
+    auto json = JsonType::parse(param_str);
+    param->FromJson(json);
+    ParameterTest::TestToJson(param);
+}
 
 }  // namespace vsag

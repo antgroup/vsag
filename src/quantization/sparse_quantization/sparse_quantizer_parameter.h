@@ -15,23 +15,28 @@
 
 #pragma once
 
-#include "flatten_interface_parameter.h"
-#include "io/io_parameter.h"
-#include "parameter.h"
 #include "quantization/quantizer_parameter.h"
-namespace vsag {
+#include "typing.h"
 
-class FlattenDataCellParameter : public FlattenInterfaceParameter {
+namespace vsag {
+class SparseQuantizerParameter : public QuantizerParameter {
 public:
-    explicit FlattenDataCellParameter();
+    SparseQuantizerParameter() : QuantizerParameter(QUANTIZATION_TYPE_VALUE_SPARSE) {
+    }
+
+    ~SparseQuantizerParameter() override = default;
 
     void
-    FromJson(const JsonType& json) override;
+    FromJson(const JsonType& json) override {
+    }
 
     JsonType
-    ToJson() override;
+    ToJson() override {
+        JsonType json;
+        json[QUANTIZATION_TYPE_KEY] = this->GetTypeName();
+        return json;
+    }
 };
 
-using FlattenDataCellParamPtr = std::shared_ptr<FlattenDataCellParameter>;
-
+using SparseQuantizerParamPtr = std::shared_ptr<SparseQuantizerParameter>;
 }  // namespace vsag
