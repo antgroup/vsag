@@ -45,7 +45,7 @@ set_high_bit(uint64_t* bits_array, size_t pos, size_t low_bits_size) {
 }
 
 void
-EliasFanoEncoder::set_low_bits(size_t index, InnerIdType value) const {
+EliasFanoEncoder::set_low_bits(size_t index, InnerIdType value) {
     if (low_bits_width_ == 0) {
         return;
     }

@@ -68,7 +68,7 @@ public:
 
 private:
     void
-    set_low_bits(size_t index, InnerIdType value) const;
+    set_low_bits(size_t index, InnerIdType value);
 
     [[nodiscard]] InnerIdType
     get_low_bits(size_t index) const;
