@@ -36,18 +36,11 @@ void
 CompressedGraphDataCell::InsertNeighborsById(InnerIdType id,
                                              const Vector<InnerIdType>& neighbor_ids) {
     if (neighbor_ids.size() > this->maximum_degree_) {
-        logger::warn(fmt::format(
+        throw std::invalid_argument(fmt::format(
             "insert neighbors count {} more than {}", neighbor_ids.size(), this->maximum_degree_));
     }
 
-    Vector<InnerIdType> tmp(allocator_);
-    if (neighbor_sets_[id]) {
-        neighbor_sets_[id]->DecompressAll(tmp);
-    }
-    tmp.reserve(neighbor_ids.size() + GetNeighborSize(id));
-    for (auto nbr_id : neighbor_ids) {
-        tmp.push_back(nbr_id);
-    }
+    Vector<InnerIdType> tmp(neighbor_ids.begin(), neighbor_ids.end(), allocator_);
     std::sort(tmp.begin(), tmp.end());
 
     if (not tmp.empty()) {

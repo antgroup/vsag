@@ -33,7 +33,7 @@ SparseGraphDataCell::SparseGraphDataCell(const GraphInterfaceParamPtr& param,
 void
 SparseGraphDataCell::InsertNeighborsById(InnerIdType id, const Vector<InnerIdType>& neighbor_ids) {
     if (neighbor_ids.size() > this->maximum_degree_) {
-        logger::warn(fmt::format(
+        throw std::invalid_argument(fmt::format(
             "insert neighbors count {} more than {}", neighbor_ids.size(), this->maximum_degree_));
     }
     auto size = std::min(this->maximum_degree_, (uint32_t)(neighbor_ids.size()));
