@@ -43,6 +43,9 @@ target_link_libraries(304_feature_enhance_graph vsag)
 add_executable(305_feature_update 305_feature_update.cpp)
 target_link_libraries(305_feature_update vsag)
 
+add_executable(309_feature_clone 309_feature_clone.cpp)
+target_link_libraries(309_feature_clone vsag)
+
 add_executable (401_persistent_kv 401_persistent_kv.cpp)
 target_link_libraries (401_persistent_kv vsag)
 
