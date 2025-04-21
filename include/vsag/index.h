@@ -409,6 +409,17 @@ public:
         throw std::runtime_error("Index doesn't support Clone");
     }
 
+    /**
+     * @brief Export the index's model as an empty index.
+     * 
+     * @return IndexPtr A pointer to the exported model index.
+     * @throws std::runtime_error If the index does not support exporting the model.
+     */
+    virtual tl::expected<IndexPtr, Error>
+    ExportModel() const {
+        throw std::runtime_error("Index doesn't support ExportModel");
+    }
+
 public:
     // [serialize/deserialize with binaryset]
 

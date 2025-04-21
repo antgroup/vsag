@@ -181,6 +181,11 @@ public:
     virtual InnerIndexPtr
     Clone(const IndexCommonParam& param);
 
+    virtual InnerIndexPtr
+    ExportModel(const IndexCommonParam& param) const {
+        throw std::runtime_error("Index doesn't support ExportModel");
+    }
+
     [[nodiscard]] virtual BinarySet
     Serialize() const;
 
