@@ -24,7 +24,7 @@ if(NOT cpuinfo_POPULATED)
   add_subdirectory(${cpuinfo_SOURCE_DIR} ${cpuinfo_BINARY_DIR} EXCLUDE_FROM_ALL)
 endif()
 
-include_directories(${cpuinfo_SOURCE_DIR}/include)
+include_directories (${cpuinfo_SOURCE_DIR}/include)
 
 install (
   TARGETS cpuinfo

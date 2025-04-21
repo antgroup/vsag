@@ -27,6 +27,8 @@
 #include "./eval_job.h"
 #include "case/eval_case.h"
 #include "common.h"
+#include "exporter/exporter.h"
+#include "exporter/formatter.h"
 #include "logger.h"
 #include "typing.h"
 #include "vsag/options.h"
@@ -165,71 +167,13 @@ parse_yaml_file(const std::string& yaml_file) {
     return cac;
 }
 
-#define JSON_GET(varname, jsonobj, defaultvalue) \
-    std::string varname;                         \
-    try {                                        \
-        varname = jsonobj;                       \
-    } catch (...) {                              \
-        varname = defaultvalue;                  \
-    }
-
-std::string
-json_to_table(vsag::eval::JsonType results) {
-    using namespace tabulate;
-    Table table;
-    table.add_row({"Name",
-                   "NumVectors",
-                   "Dim",
-                   "DataType",
-                   "MetricType",
-                   "IndexParam",
-                   "BuildTime",
-                   "TPS",
-                   "SearchParam",
-                   "QPS",
-                   "LatencyAvg(ms)",
-                   "RecallAvg"});
-    for (const auto& [key, value] : results.items()) {
-        JSON_GET(
-            num_vectors, std::to_string(value["dataset_info"]["base_count"].get<int>()), "N/A");
-        JSON_GET(dim, std::to_string(value["dataset_info"]["dim"].get<int>()), "N/A");
-        JSON_GET(data_type, value["dataset_info"]["data_type"], "N/A");
-        JSON_GET(metric_type, value["index_info"]["metric_type"], "N/A");
-        JSON_GET(index_param, value["index_info"]["index_param"].dump(), "N/A");
-        JSON_GET(build_time, std::to_string(value["duration(s)"].get<float>()), "N/A");
-        JSON_GET(tps, std::to_string(value["tps"].get<float>()), "N/A");
-        JSON_GET(search_param, value["search_param"], "N/A");
-        JSON_GET(qps, std::to_string(value["qps"].get<float>()), "N/A");
-        JSON_GET(latency_avg, std::to_string(value["latency_avg(ms)"].get<float>()), "N/A");
-        JSON_GET(recall_avg, std::to_string(value["recall_avg"].get<float>()), "N/A");
-
-        table.add_row({key,
-                       num_vectors,
-                       dim,
-                       data_type,
-                       metric_type,
-                       index_param,
-                       build_time,
-                       tps,
-                       search_param,
-                       qps,
-                       latency_avg,
-                       recall_avg});
-    }
-
-    table.column(5).format().width(40);
-    return table.str();
-
-    // maybe support later
-    /*
-    MarkdownExporter exporter;
-    auto markdown = exporter.dump(table);
-    std::cout << markdown << std::endl;
-    */
-}
-
 int
 main(int argc, char** argv) {
+    using vsag::eval::EvalCase;
+    using vsag::eval::EvalConfig;
+    using vsag::eval::Exporter;
+    using vsag::eval::Formatter;
+
     vsag::Options::Instance().logger()->SetLevel(vsag::Logger::kOFF);
     vsag::eval::EvalConfig config;
     if (argc == 2) {
@@ -238,49 +182,34 @@ main(int argc, char** argv) {
 
         vsag::eval::JsonType results;
         for (auto& [name, case_yaml_node] : job.cases) {
-            config = vsag::eval::EvalConfig::Load(case_yaml_node, job);
+            config = EvalConfig::Load(case_yaml_node, job);
             vsag::Options::Instance().set_num_threads_building(config.num_threads_building);
-            auto eval_case = vsag::eval::EvalCase::MakeInstance(config);
+
+            auto eval_case = EvalCase::MakeInstance(config);
             if (eval_case != nullptr) {
                 results[name] = eval_case->Run();
             }
         }
 
-        std::string json_string;
-        std::string text_string;
-        std::string empty;
-        std::string* pstr = &empty;
+        // <format, formatted_results>
+        std::unordered_map<std::string, std::string> cached_strings;
         for (const auto& exporter : job.exporters) {
-            if (exporter.format == "json") {
-                if (json_string.empty()) {
-                    json_string = results.dump();
-                }
-                pstr = &json_string;
-            } else if (exporter.format == "text") {
-                if (text_string.empty()) {
-                    text_string = json_to_table(results);
-                }
-                pstr = &text_string;
-            }
+            // std::cout << "export to " << exporter.to << " in " << exporter.format << std::endl;
 
-            if (exporter.to == "stdout") {
-                std::cout << *pstr << std::endl;
-            } else {
-                std::ofstream output_file(exporter.to);
-                if (output_file.is_open()) {
-                    output_file << *pstr;
-                    output_file.close();
-                } else {
-                    std::cerr << "unable to open file: " << exporter.to << std::endl;
-                    abort();
-                }
+            // convert at first time
+            if (cached_strings.find(exporter.format) == cached_strings.end()) {
+                cached_strings[exporter.format] =
+                    Formatter::Create(exporter.format)->Format(results);
             }
+            std::string formatted_string = cached_strings[exporter.format];
+
+            Exporter::Create(exporter.to, exporter.vars)->Export(formatted_string);
         }
-        // by default, eval output as text format
+
+        // by default, eval output as table/text format
         if (job.exporters.empty()) {
-            std::cout << json_to_table(results) << std::endl;
+            std::cout << Formatter::Create("table")->Format(results) << std::endl;
         }
-        pstr = nullptr;
     } else {
         argparse::ArgumentParser program("eval_performance");
         parse_args(program, argc, argv);

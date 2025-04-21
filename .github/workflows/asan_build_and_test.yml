@@ -72,7 +72,11 @@ jobs:
         test_type: [ unittests, functests ]
     container:
       image: vsaglib/vsag:ci-x86
+      volumes:
+        - /opt:/useless
     steps:
+      - name: Free Disk Space
+        run: rm -rf /opt/hostedtoolcache
       - uses: actions/checkout@v4
       - name: Clean Env
         run: rm -rf ./build
@@ -107,6 +111,8 @@ jobs:
       group: test_asan_aarch64-${{ matrix.test_type }}-${{ github.event.pull_request.number }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     steps:
+      - name: Free Disk Space
+        run: rm -rf /opt/hostedtoolcache
       - uses: actions/checkout@v4
       - name: Prepare Env
         run: sudo bash ./scripts/deps/install_deps_ubuntu.sh
