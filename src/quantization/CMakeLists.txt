@@ -10,6 +10,7 @@ set (QUANTIZER_SRC
         scalar_quantization/scalar_quantization_trainer.cpp
         scalar_quantization/fp16_quantizer_parameter.cpp
         rabitq_quantization/rabitq_quantizer_parameter.cpp
+        product_quantization/product_quantizer_parameter.cpp
 )
 
 add_library (quantizer OBJECT ${QUANTIZER_SRC})
