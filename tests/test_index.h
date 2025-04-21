@@ -210,6 +210,11 @@ protected:
               const TestDatasetPtr& dataset,
               const std::string& search_param);
 
+    static void
+    TestExportModel(const IndexPtr& index,
+                    const TestDatasetPtr& dataset,
+                    const std::string& search_param);
+
     constexpr static float RECALL_THRESHOLD = 0.95;
 };
 
