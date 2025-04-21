@@ -222,7 +222,7 @@ private:
     std::shared_ptr<SafeThreadPool> build_pool_{nullptr};
     uint64_t build_thread_count_{100};
 
-    InnerIdType max_capacity_{0};
+    std::atomic<InnerIdType> max_capacity_{0};
 
     uint64_t resize_increase_count_bit_{
         DEFAULT_RESIZE_BIT};  // 2^resize_increase_count_bit_ for resize count
