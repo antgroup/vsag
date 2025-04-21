@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "rabitq_quantizer_parameter.h"
+#include "product_quantizer_parameter.h"
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -21,13 +21,16 @@
 
 using namespace vsag;
 
-TEST_CASE("RaBitQ Quantizer Parameter ToJson Test", "[ut][RaBitQuantizerParameter]") {
+TEST_CASE("Product Quantizer Parameter ToJson Test", "[ut][ProductQuantizerParameter]") {
     std::string param_str = R"(
         {
-            "pca_dim": 256
+            "pq_dim": 64,
+            "pq_bits": 8
         }
     )";
-    auto param = std::make_shared<RaBitQuantizerParameter>();
+    auto param = std::make_shared<ProductQuantizerParameter>();
     param->FromJson(JsonType::parse(param_str));
     ParameterTest::TestToJson(param);
+    REQUIRE(param->pq_bits_ == 8);
+    REQUIRE(param->pq_dim_ == 64);
 }

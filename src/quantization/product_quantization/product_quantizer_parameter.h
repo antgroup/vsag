@@ -13,21 +13,28 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "rabitq_quantizer_parameter.h"
+#pragma once
 
-#include <catch2/catch_test_macros.hpp>
+#include "quantization/quantizer_parameter.h"
 
-#include "parameter_test.h"
+namespace vsag {
+class ProductQuantizerParameter : public QuantizerParameter {
+public:
+    ProductQuantizerParameter();
 
-using namespace vsag;
+    ~ProductQuantizerParameter() override = default;
 
-TEST_CASE("RaBitQ Quantizer Parameter ToJson Test", "[ut][RaBitQuantizerParameter]") {
-    std::string param_str = R"(
-        {
-            "pca_dim": 256
-        }
-    )";
-    auto param = std::make_shared<RaBitQuantizerParameter>();
-    param->FromJson(JsonType::parse(param_str));
-    ParameterTest::TestToJson(param);
-}
+    void
+    FromJson(const JsonType& json) override;
+
+    JsonType
+    ToJson() override;
+
+public:
+    int64_t pq_dim_{1};
+    int64_t pq_bits_{8};
+};
+
+using ProductQuantizerParamPtr = std::shared_ptr<ProductQuantizerParameter>;
+
+}  // namespace vsag
