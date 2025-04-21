@@ -813,6 +813,7 @@ HGraph::InitFeatures() {
         IndexFeature::SUPPORT_ESTIMATE_MEMORY,
         IndexFeature::SUPPORT_CHECK_ID_EXIST,
         IndexFeature::SUPPORT_CLONE,
+        IndexFeature::SUPPORT_EXPORT_MODEL,
     });
 
     // About Train
@@ -1054,5 +1055,14 @@ HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
     hgraph_parameter->FromJson(inner_json);
 
     return hgraph_parameter;
+}
+InnerIndexPtr
+HGraph::ExportModel(const IndexCommonParam& param) const {
+    auto index = std::make_shared<HGraph>(this->create_param_ptr_, param);
+    this->basic_flatten_codes_->ExportModel(index->basic_flatten_codes_);
+    if (use_reorder_) {
+        this->high_precise_codes_->ExportModel(index->high_precise_codes_);
+    }
+    return index;
 }
 }  // namespace vsag

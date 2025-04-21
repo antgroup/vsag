@@ -40,7 +40,9 @@ public:
     }
 
     IndexImpl(InnerIndexPtr inner_index, const IndexCommonParam& common_param)
-        : inner_index_(std::move(inner_index)), common_param_(common_param){};
+        : inner_index_(std::move(inner_index)), common_param_(common_param) {
+        this->inner_index_->InitFeatures();
+    }
 
     ~IndexImpl() override {
         this->inner_index_.reset();
@@ -223,6 +225,15 @@ public:
         return std::make_shared<IndexImpl<T>>(clone_value.value(), this->common_param_);
     }
 
+    tl::expected<IndexPtr, Error>
+    ExportModel() const override {
+        auto model_value = this->export_model_inner();
+        if (not model_value.has_value()) {
+            LOG_ERROR_AND_RETURNS(model_value.error().type, model_value.error().message);
+        }
+        return std::make_shared<IndexImpl<T>>(model_value.value(), this->common_param_);
+    }
+
     [[nodiscard]] tl::expected<BinarySet, Error>
     Serialize() const override {
         SAFE_CALL(return this->inner_index_->Serialize());
@@ -287,6 +298,11 @@ private:
     tl::expected<InnerIndexPtr, Error>
     clone_inner_index() const {
         SAFE_CALL(return this->inner_index_->Clone(this->common_param_));
+    }
+
+    tl::expected<InnerIndexPtr, Error>
+    export_model_inner() const {
+        SAFE_CALL(return this->inner_index_->ExportModel(this->common_param_));
     }
 
 private:

@@ -93,6 +93,21 @@ public:
         }
     };
 
+    void
+    ExportModel(const FlattenInterfacePtr& other) const override {
+        std::stringstream ss;
+        IOStreamWriter writer(ss);
+        this->quantizer_->Serialize(writer);
+        ss.seekg(0, std::ios::beg);
+        IOStreamReader reader(ss);
+        auto ptr = std::dynamic_pointer_cast<FlattenDataCell<QuantTmpl, IOTmpl>>(other);
+        if (ptr == nullptr) {
+            throw VsagException(ErrorType::INTERNAL_ERROR,
+                                "Export model's flatten datacell failed");
+        }
+        ptr->quantizer_->Deserialize(reader);
+    }
+
     [[nodiscard]] std::string
     GetQuantizerName() override;
 
