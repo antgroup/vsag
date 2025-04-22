@@ -14,7 +14,9 @@
 // limitations under the License.
 
 #include "gno_imi_partition.h"
+
 #include <catch2/catch_test_macros.hpp>
+
 #include "fixtures.h"
 #include "safe_allocator.h"
 

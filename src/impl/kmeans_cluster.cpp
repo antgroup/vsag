@@ -16,6 +16,7 @@
 #include "kmeans_cluster.h"
 
 #include <cblas.h>
+
 #include <iostream>
 #include <random>
 

@@ -14,6 +14,7 @@
 // limitations under the License.
 
 #include <vsag/vsag.h>
+
 #include <fstream>
 #include <iostream>
 

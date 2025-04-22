@@ -13,11 +13,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "ivf_partition_strategy_parameter.h"
+
 #include <fmt/format-inl.h>
+
 #include <iostream>
 
 #include "inner_string_params.h"
-#include "ivf_partition_strategy_parameter.h"
 #include "vsag/constants.h"
 
 namespace vsag {

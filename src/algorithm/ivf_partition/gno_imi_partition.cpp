@@ -16,9 +16,9 @@
 #include "gno_imi_partition.h"
 
 #include <fmt/format-inl.h>
+
 #include <fstream>
 
-#include "data_cell/flatten_bucket_datacell.h"
 #include "impl/kmeans_cluster.h"
 #include "inner_string_params.h"
 #include "safe_allocator.h"
@@ -150,14 +150,14 @@ GNOIMIPartition::Train(const DatasetPtr dataset) {
         norms_S_[i] = norm_sqr / 2;
     }
 
-    Vector<std::pair<float, BucketIdType> > norms_T(bucket_count_T_, this->allocator_);
+    Vector<std::pair<float, BucketIdType>> norms_T(bucket_count_T_, this->allocator_);
     for (size_t i = 0; i < bucket_count_T_; ++i) {
         auto norm_sqr = FP32ComputeIP(
             data_centroids_T_.data() + i * dim_, data_centroids_T_.data() + i * dim_, dim_);
         norms_T[i].first = norm_sqr / 2;
         norms_T[i].second = i;
     }
-    std::sort(norms_T.begin(), norms_T.end(), std::greater<std::pair<float, BucketIdType> >());
+    std::sort(norms_T.begin(), norms_T.end(), std::greater<std::pair<float, BucketIdType>>());
     std::vector<float> temp_data(bucket_count_T_ * dim_, 0.0f);
     for (size_t i = 0; i < bucket_count_T_; ++i) {
         BucketIdType src_idx = norms_T[i].second;
@@ -346,7 +346,7 @@ GNOIMIPartition::inner_joint_classify_datas(const float* datas,
                                             BucketIdType* result) {
     Vector<float> dist_to_S(bucket_count_S_ * count, this->allocator_);
     Vector<float> dist_to_T(bucket_count_T_ * count, this->allocator_);
-    Vector<std::pair<float, BucketIdType> > precomputed_terms_S(bucket_count_S_, this->allocator_);
+    Vector<std::pair<float, BucketIdType>> precomputed_terms_S(bucket_count_S_, this->allocator_);
 
     matmul(datas, data_centroids_S_.data(), dist_to_S.data(), count, bucket_count_S_, dim_);
     matmul(datas, data_centroids_T_.data(), dist_to_T.data(), count, bucket_count_T_, dim_);

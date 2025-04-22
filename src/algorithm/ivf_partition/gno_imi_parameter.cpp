@@ -13,10 +13,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "gno_imi_parameter.h"
+
 #include <fmt/format-inl.h>
+
 #include <iostream>
 
-#include "gno_imi_parameter.h"
 #include "inner_string_params.h"
 #include "vsag/constants.h"
 

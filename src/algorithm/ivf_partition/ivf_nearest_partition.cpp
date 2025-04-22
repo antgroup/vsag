@@ -16,6 +16,7 @@
 #include "ivf_nearest_partition.h"
 
 #include <fmt/format-inl.h>
+
 #include "algorithm/brute_force.h"
 #include "algorithm/brute_force_parameter.h"
 #include "impl/kmeans_cluster.h"

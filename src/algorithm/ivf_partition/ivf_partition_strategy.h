@@ -16,8 +16,10 @@
 #pragma once
 
 #include <cblas.h>
+
 #include <iostream>
 #include <vector>
+
 #include "ivf_partition_strategy_parameter.h"
 #include "stream_reader.h"
 #include "stream_writer.h"

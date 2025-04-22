@@ -24,7 +24,7 @@
 
 namespace vsag {
 
-static const std::unordered_map<std::string, std::vector<std::string> > EXTERNAL_MAPPING = {
+static const std::unordered_map<std::string, std::vector<std::string>> EXTERNAL_MAPPING = {
     {
         IVF_BASE_QUANTIZATION_TYPE,
         {BUCKET_PARAMS_KEY, QUANTIZATION_PARAMS_KEY, QUANTIZATION_TYPE_KEY},
