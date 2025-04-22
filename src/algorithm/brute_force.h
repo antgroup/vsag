@@ -55,6 +55,9 @@ public:
     std::vector<int64_t>
     Build(const DatasetPtr& data) override;
 
+    void
+    Train(const DatasetPtr& data) override;
+
     std::vector<int64_t>
     Add(const DatasetPtr& data) override;
 

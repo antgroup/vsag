@@ -296,6 +296,43 @@ TestIndex::TestContinueAdd(const IndexPtr& index,
 }
 
 void
+TestIndex::TestTrainAndAdd(const TestIndex::IndexPtr& index,
+                           const TestDatasetPtr& dataset,
+                           bool expected_success) {
+    auto base_count = dataset->base_->GetNumElements();
+    int64_t temp_count = std::max(1L, static_cast<int64_t>(dataset->base_->GetNumElements() * 0.8));
+    auto dim = dataset->base_->GetDim();
+    auto temp_dataset = vsag::Dataset::Make();
+    temp_dataset->Dim(dim)
+        ->Ids(dataset->base_->GetIds())
+        ->NumElements(temp_count)
+        ->Float32Vectors(dataset->base_->GetFloat32Vectors())
+        ->Paths(dataset->base_->GetPaths())
+        ->SparseVectors(dataset->base_->GetSparseVectors())
+        ->Owner(false);
+    index->Train(dataset->base_);
+    index->Add(temp_dataset);
+    for (uint64_t j = temp_count; j < base_count; ++j) {
+        auto data_one = vsag::Dataset::Make();
+        data_one->Dim(dim)
+            ->Ids(dataset->base_->GetIds() + j)
+            ->NumElements(1)
+            ->Float32Vectors(dataset->base_->GetFloat32Vectors() + j * dim)
+            ->Paths(dataset->base_->GetPaths() + j)
+            ->SparseVectors(dataset->base_->GetSparseVectors() + j)
+            ->Owner(false);
+        auto add_index = index->Add(data_one);
+        if (expected_success) {
+            REQUIRE(add_index.has_value());
+            // check the number of vectors in index
+            REQUIRE(index->GetNumElements() == (j + 1));
+        } else {
+            REQUIRE(not add_index.has_value());
+        }
+    }
+}
+
+void
 TestIndex::TestKnnSearch(const IndexPtr& index,
                          const TestDatasetPtr& dataset,
                          const std::string& search_param,

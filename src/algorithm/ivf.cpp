@@ -154,13 +154,18 @@ IVF::InitFeatures() {
 
 std::vector<int64_t>
 IVF::Build(const DatasetPtr& base) {
+    this->Train(base);
     // TODO(LHT): duplicate
-    partition_strategy_->Train(base);
-    this->bucket_->Train(base->GetFloat32Vectors(), base->GetNumElements());
-    if (use_reorder_) {
-        this->reorder_codes_->Train(base->GetFloat32Vectors(), base->GetNumElements());
-    }
     return this->Add(base);
+}
+
+void
+IVF::Train(const DatasetPtr& data) {
+    partition_strategy_->Train(data);
+    this->bucket_->Train(data->GetFloat32Vectors(), data->GetNumElements());
+    if (use_reorder_) {
+        this->reorder_codes_->Train(data->GetFloat32Vectors(), data->GetNumElements());
+    }
 }
 
 std::vector<int64_t>
