@@ -1,0 +1,11 @@
+
+    {
+        "dtype": "float32",
+        "metric_type": "l2",
+        "dim": 512,
+        "hnsw": {
+            "max_degree": 32,
+            "ef_construction": 300
+        }
+    }
+    
