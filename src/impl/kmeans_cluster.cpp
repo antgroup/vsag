@@ -17,6 +17,7 @@
 
 #include <cblas.h>
 
+#include <iostream>
 #include <random>
 
 #include "byte_buffer.h"
@@ -35,7 +36,7 @@ KMeansCluster::~KMeansCluster() {
 }
 
 Vector<int>
-KMeansCluster::Run(uint32_t k, const float* datas, uint64_t count, int iter) {
+KMeansCluster::Run(uint32_t k, const float* datas, uint64_t count, int iter, float* err) {
     // Allocate space for centroids
     if (k_centroids_ != nullptr) {
         allocator_->Deallocate(k_centroids_);
@@ -54,48 +55,72 @@ KMeansCluster::Run(uint32_t k, const float* datas, uint64_t count, int iter) {
             k_centroids_[i * dim_ + j] = datas[index * dim_ + j];
         }
     }
-
     ByteBuffer y_sqr_buffer(static_cast<uint64_t>(k) * sizeof(float), allocator_);
     ByteBuffer distances_buffer(static_cast<uint64_t>(k) * count * sizeof(float), allocator_);
+    ByteBuffer errs_buffer(count * sizeof(float), allocator_);
     auto* y_sqr = reinterpret_cast<float*>(y_sqr_buffer.data);
     auto* distances = reinterpret_cast<float*>(distances_buffer.data);
+    auto* errs = reinterpret_cast<float*>(errs_buffer.data);
 
+    float total_err = 0;
+    float last_err = 0;
     Vector<int> labels(count, -1, this->allocator_);
     bool have_empty = false;
+
     for (int it = 0; it < iter; ++it) {
+        total_err = 0;
         bool has_converged = true;
 
         for (int64_t i = 0; i < k; ++i) {
             y_sqr[i] = FP32ComputeIP(k_centroids_ + i * dim_, k_centroids_ + i * dim_, dim_);
         }
 
-        cblas_sgemm(CblasColMajor,
-                    CblasTrans,
-                    CblasNoTrans,
-                    static_cast<blasint>(k),
-                    static_cast<blasint>(count),
-                    dim_,
-                    -2.0F,
-                    k_centroids_,
-                    dim_,
-                    datas,
-                    dim_,
-                    0.0F,
-                    distances,
-                    static_cast<blasint>(k));
+        size_t chunk_size = 10000;
+        int num_chunks = (count + chunk_size - 1) / chunk_size;
+        for (int chunk_idx = 0; chunk_idx < num_chunks; ++chunk_idx) {
+            int64_t start = chunk_idx * chunk_size;
+            int64_t cur_count = std::min(chunk_size, count - start);
+            if (cur_count <= 0) {
+                continue;
+            }
+            cblas_sgemm(CblasColMajor,
+                        CblasTrans,
+                        CblasNoTrans,
+                        static_cast<blasint>(k),
+                        static_cast<blasint>(cur_count),
+                        dim_,
+                        -2.0F,
+                        k_centroids_,
+                        dim_,
+                        datas + start * dim_,
+                        dim_,
+                        0.0F,
+                        distances + start * k,
+                        static_cast<blasint>(k));
+        }
 
         for (uint64_t i = 0; i < count; ++i) {
             cblas_saxpy(static_cast<blasint>(k), 1.0, y_sqr, 1, distances + i * k, 1);
             auto* min_elem = std::min_element(distances + i * k, distances + i * k + k);
             auto min_index = std::distance(distances + i * k, min_elem);
+            auto x_sqr = FP32ComputeIP(datas + i * dim_, datas + i * dim_, dim_);
+            errs[i] = *min_elem + x_sqr;
             if (min_index != labels[i]) {
                 labels[i] = static_cast<int>(min_index);
                 has_converged = false;
             }
         }
 
+        for (uint64_t i = 0; i < count; ++i) {
+            total_err += errs[i];
+        }
+
         if (has_converged and not have_empty) {
             break;
+        }
+        if (it > 0 && std::fabs(last_err - total_err) / count < 1e-6) {
+            // break;
+            // TODO: Replace has_converged
         }
 
         // Update centroids
@@ -131,6 +156,10 @@ KMeansCluster::Run(uint32_t k, const float* datas, uint64_t count, int iter) {
                 }
             }
         }
+        last_err = total_err;
+    }
+    if (err != nullptr) {
+        *err = total_err;
     }
     return labels;
 }

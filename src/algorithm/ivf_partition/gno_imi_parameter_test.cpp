@@ -13,29 +13,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#pragma once
+#include "gno_imi_parameter.h"
 
-#include "typing.h"
-#include "vsag/allocator.h"
+#include <catch2/catch_test_macros.hpp>
 
-namespace vsag {
+#include "parameter_test.h"
 
-class KMeansCluster {
-public:
-    explicit KMeansCluster(int32_t dim, Allocator* allocator);
-
-    ~KMeansCluster();
-
-    Vector<int>
-    Run(uint32_t k, const float* datas, uint64_t count, int iter = 200, float* err = nullptr);
-
-public:
-    float* k_centroids_{nullptr};
-
-private:
-    Allocator* const allocator_{nullptr};
-
-    const int32_t dim_{0};
-};
-
-}  // namespace vsag
+TEST_CASE("GNO-IMI Parameters Test", "[ut][GNOIMIParameter]") {
+    auto param_str = R"({
+        "first_order_buckets_count": 200,
+        "second_order_buckets_count": 50
+    })";
+    vsag::JsonType param_json = vsag::JsonType::parse(param_str);
+    auto param = std::make_shared<vsag::GNOIMIParameter>();
+    param->FromJson(param_json);
+    REQUIRE(param->first_order_buckets_count == 200);
+    REQUIRE(param->second_order_buckets_count == 50);
+}
