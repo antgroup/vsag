@@ -75,12 +75,12 @@ CompressedGraphDataCell::Serialize(StreamWriter& writer) {
             StreamWriter::WriteObj(writer, zero);
         } else {
             const EliasFanoEncoder& encoder = *neighbor_sets_[id];
-            StreamWriter::WriteObj(writer, encoder.num_elements_);
-            StreamWriter::WriteObj(writer, encoder.low_bits_width_);
-            StreamWriter::WriteObj(writer, encoder.low_bits_size_);
-            StreamWriter::WriteObj(writer, encoder.high_bits_size_);
-            for (size_t j = 0; j < encoder.low_bits_size_ + encoder.high_bits_size_; j++) {
-                StreamWriter::WriteObj(writer, encoder.bits_[j]);
+            StreamWriter::WriteObj(writer, encoder.num_elements);
+            StreamWriter::WriteObj(writer, encoder.low_bits_width);
+            StreamWriter::WriteObj(writer, encoder.low_bits_size);
+            StreamWriter::WriteObj(writer, encoder.high_bits_size);
+            for (size_t j = 0; j < encoder.low_bits_size + encoder.high_bits_size; j++) {
+                StreamWriter::WriteObj(writer, encoder.bits[j]);
             }
         }
     }
@@ -98,15 +98,15 @@ CompressedGraphDataCell::Deserialize(StreamReader& reader) {
         if (num_elements > 0) {
             this->neighbor_sets_[id] = std::make_unique<EliasFanoEncoder>(allocator_);
             EliasFanoEncoder& encoder = *this->neighbor_sets_[id];
-            encoder.num_elements_ = num_elements;
-            StreamReader::ReadObj(reader, encoder.low_bits_width_);
-            StreamReader::ReadObj(reader, encoder.low_bits_size_);
-            StreamReader::ReadObj(reader, encoder.high_bits_size_);
+            encoder.num_elements = num_elements;
+            StreamReader::ReadObj(reader, encoder.low_bits_width);
+            StreamReader::ReadObj(reader, encoder.low_bits_size);
+            StreamReader::ReadObj(reader, encoder.high_bits_size);
 
-            encoder.bits_ = static_cast<uint64_t*>(allocator_->Allocate(
-                (encoder.low_bits_size_ + encoder.high_bits_size_) * sizeof(uint64_t)));
-            for (size_t j = 0; j < encoder.low_bits_size_ + encoder.high_bits_size_; j++) {
-                StreamReader::ReadObj(reader, encoder.bits_[j]);
+            encoder.bits = static_cast<uint64_t*>(allocator_->Allocate(
+                (encoder.low_bits_size + encoder.high_bits_size) * sizeof(uint64_t)));
+            for (size_t j = 0; j < encoder.low_bits_size + encoder.high_bits_size; j++) {
+                StreamReader::ReadObj(reader, encoder.bits[j]);
             }
         }
     }
