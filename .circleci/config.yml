@@ -29,13 +29,15 @@ jobs:
       - restore_cache:
           keys:
             - fork-cache-{{ checksum "CMakeLists.txt" }}-{{ checksum ".circleci/fresh_ci_cache.commit" }}
-      - run: make debug
+      - run: make sanitize
       - save_cache:
           key: fork-cache-{{ checksum "CMakeLists.txt" }}-{{ checksum ".circleci/fresh_ci_cache.commit" }}
           paths:
             - ./build
       - run:
-          command: make test_parallel
+          command: |
+            ./scripts/test_parallel_bg.sh
+            ./build/mockimpl/tests_mockimpl -d yes ${UT_FILTER} --allow-running-no-tests ${UT_SHARD}
           no_output_timeout: 50m
 
   main-branch-check:
@@ -47,11 +49,13 @@ jobs:
       - restore_cache:
           keys:
             - main-ccache-{{ checksum "CMakeLists.txt" }}-{{ checksum ".circleci/fresh_ci_cache.commit" }}
-      - run: make debug
+      - run: make sanitize
       - save_cache:
           key: main-ccache-{{ checksum "CMakeLists.txt" }}-{{ checksum ".circleci/fresh_ci_cache.commit" }}
           paths:
             - ./build
       - run:
-          command: make test_parallel
+          command: |
+            ./scripts/test_parallel_bg.sh
+            ./build/mockimpl/tests_mockimpl -d yes ${UT_FILTER} --allow-running-no-tests ${UT_SHARD}
           no_output_timeout: 50m
