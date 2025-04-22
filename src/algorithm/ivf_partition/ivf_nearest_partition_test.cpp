@@ -44,11 +44,11 @@ TEST_CASE("IVF Nearest Partition Basic Test", "[ut][IVFNearestPartition]") {
 
     auto index = partition->route_index_ptr_;
     std::string route_search_param = R"(
-    {{
-        "hnsw": {{
+    {
+        "hgraph": {
             "ef_search": 20
-        }}
-    }}
+        }
+    }
     )";
     FilterPtr filter = nullptr;
     for (int64_t i = 0; i < data_count; ++i) {
@@ -96,11 +96,11 @@ TEST_CASE("IVF Nearest Partition Serialize Test", "[ut][IVFNearestPartition]") {
 
     auto index = partition->route_index_ptr_;
     std::string route_search_param = R"(
-    {{
-        "hnsw": {{
+    {
+        "hgraph": {
             "ef_search": 20
-        }}
-    }}
+        }
+    }
     )";
     FilterPtr filter = nullptr;
 
