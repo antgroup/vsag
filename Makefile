@@ -113,13 +113,18 @@ release:                 ## Build vsag with release options.
 	cmake ${VSAG_CMAKE_ARGS} -B${RELEASE_BUILD_DIR} -DCMAKE_BUILD_TYPE=Release
 	cmake --build ${RELEASE_BUILD_DIR} --parallel ${COMPILE_JOBS}
 
-.PHONY: distribution
-distribution:            ## Build vsag with distribution options.
-	cmake ${VSAG_CMAKE_ARGS} -B${RELEASE_BUILD_DIR} -DCMAKE_BUILD_TYPE=Release -DENABLE_CXX11_ABI=off -DENABLE_LIBCXX=off
+.PHONY: dist-old-abi
+dist-old-abi:            ## Build vsag with distribution options.
+	cmake ${VSAG_CMAKE_ARGS} -B${RELEASE_BUILD_DIR} -DCMAKE_BUILD_TYPE=Release -DENABLE_INTEL_MKL=off -DENABLE_CXX11_ABI=off -DENABLE_LIBCXX=off
 	cmake --build ${RELEASE_BUILD_DIR} --parallel ${COMPILE_JOBS}
 
-.PHONY: libcxx
-libcxx:                  ## Build vsag using libc++.
+.PHONY: dist-cxx11-abi
+dist-cxx11-abi:          ## Build vsag with distribution options.
+	cmake ${VSAG_CMAKE_ARGS} -B${RELEASE_BUILD_DIR} -DCMAKE_BUILD_TYPE=Release -DENABLE_INTEL_MKL=off -DENABLE_CXX11_ABI=on -DENABLE_LIBCXX=off
+	cmake --build ${RELEASE_BUILD_DIR} --parallel ${COMPILE_JOBS}
+
+.PHONY: dist-libcxx
+dist-libcxx:             ## Build vsag using libc++.
 	cmake ${VSAG_CMAKE_ARGS} -B${RELEASE_BUILD_DIR} -DCMAKE_BUILD_TYPE=Release -DENABLE_LIBCXX=on
 	cmake --build ${RELEASE_BUILD_DIR} --parallel ${COMPILE_JOBS}
 
