@@ -22,7 +22,22 @@
 #include "vsag/dataset.h"
 
 namespace vsag {
+
+class IVFPartitionStrategy;
+using IVFPartitionStrategyPtr = std::shared_ptr<IVFPartitionStrategy>;
+
 class IVFPartitionStrategy {
+public:
+    static void
+    Clone(const IVFPartitionStrategyPtr& from, const IVFPartitionStrategyPtr& to) {
+        std::stringstream ss;
+        IOStreamWriter writer(ss);
+        from->Serialize(writer);
+        ss.seekg(0, std::ios::beg);
+        IOStreamReader reader(ss);
+        to->Deserialize(reader);
+    }
+
 public:
     explicit IVFPartitionStrategy(const IndexCommonParam& common_param, BucketIdType bucket_count)
         : allocator_(common_param.allocator_.get()),
@@ -58,7 +73,5 @@ public:
 
     int64_t dim_{-1};
 };
-
-using IVFPartitionStrategyPtr = std::shared_ptr<IVFPartitionStrategy>;
 
 }  // namespace vsag

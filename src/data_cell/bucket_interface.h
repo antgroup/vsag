@@ -70,6 +70,9 @@ public:
     [[nodiscard]] virtual InnerIdType
     GetBucketSize(BucketIdType bucket_id) = 0;
 
+    virtual void
+    ExportModel(const BucketInterfacePtr& other) const = 0;
+
 public:
     virtual void
     Prefetch(BucketIdType bucket_id) {
