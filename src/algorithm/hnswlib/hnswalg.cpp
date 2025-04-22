@@ -959,9 +959,26 @@ HierarchicalNSW::DeserializeImpl(StreamReader& reader, SpaceInterface* s, size_t
     ReadOne(reader, label_offset_);
     ReadOne(reader, offset_data_);
     ReadOne(reader, max_level_);
-    ReadOne(reader, enterpoint_node_);
 
-    ReadOne(reader, maxM_);
+    // fix the issue of loading index with different type of entrypoint_node
+    auto buffer_size = sizeof(int64_t) + sizeof(size_t);
+    auto read_size = sizeof(InnerIdType) + sizeof(size_t);
+    vsag::Vector<char> buffer(buffer_size, allocator_);
+    reader.Read(buffer.data(), read_size);
+    enterpoint_node_ = *(InnerIdType*)(buffer.data() + 0);
+    maxM_ = *(size_t*)(buffer.data() + sizeof(InnerIdType));
+    bool pass_check = (M_ == maxM_);
+    if (not pass_check) {
+        reader.Read(buffer.data() + read_size, buffer_size - read_size);
+        enterpoint_node_ = *(int64_t*)(buffer.data() + 0);
+        maxM_ = *(size_t*)(buffer.data() + sizeof(int64_t));
+        if (M_ != maxM_) {
+            throw vsag::VsagException(
+                vsag::ErrorType::INTERNAL_ERROR,
+                "The index was saved with different M_ value, please use the same M_ value");
+        }
+    }
+
     ReadOne(reader, maxM0_);
     ReadOne(reader, M_);
     ReadOne(reader, mult_);
