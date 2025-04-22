@@ -1,0 +1,22 @@
+# .github/workflows/release.yml
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Build
+        run: bash ./scripts/release/dist.sh
+      - name: Upload vsag distributions
+        uses: softprops/action-gh-release@2
+        if: github.ref_type == 'tag'
+        with:
+          files: |
+            dist/*.tar.gz
