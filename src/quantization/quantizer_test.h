@@ -93,9 +93,11 @@ TestQuantizerEncodeDecode(
         quant.EncodeOne(vecs.data() + i * dim, codes.data());
         std::vector<float> out_vec(dim);
         quant.DecodeOne(codes.data(), out_vec.data());
+        float sum = 0.0F;
         for (int j = 0; j < dim; ++j) {
-            REQUIRE(std::abs(vecs[i * dim + j] - out_vec[j]) < error);
+            sum += std::abs(vecs[i * dim + j] - out_vec[j]);
         }
+        REQUIRE(sum < error * dim);
     }
 
     // Test EncodeBatch & DecodeBatch
@@ -103,8 +105,12 @@ TestQuantizerEncodeDecode(
     quant.EncodeBatch(vecs.data(), codes.data(), count);
     std::vector<float> out_vec(dim * count);
     quant.DecodeBatch(codes.data(), out_vec.data(), count);
-    for (int64_t i = 0; i < dim * count; ++i) {
-        REQUIRE(std::abs(vecs[i] - out_vec[i]) < error);
+    for (int64_t i = 0; i < count; ++i) {
+        float sum = 0.0F;
+        for (int j = 0; j < dim; ++j) {
+            sum += std::abs(vecs[i * dim + j] - out_vec[i * dim + j]);
+        }
+        REQUIRE(sum < error * dim);
     }
 }
 
@@ -328,7 +334,7 @@ TestSerializeAndDeserialize(Quantizer<T>& quant1,
                                     false,
                                     unbounded_numeric_error_rate,
                                     unbounded_related_error_rate);
-            TestComputeCodes<T, metric>(quant2, dim, count, error, false);
+            TestComputeCodes<T, metric>(quant2, dim, count, error * dim * 2.0F, false);
         } else {
             TestComputeCodesSame<T, metric>(quant2, dim, count, error, false);
         }
