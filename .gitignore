@@ -187,3 +187,4 @@ data/
 /coverage-report/
 /coverage/
 *.gcov
+/dist/
