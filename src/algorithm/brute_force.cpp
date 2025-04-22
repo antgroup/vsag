@@ -41,14 +41,18 @@ BruteForce::EstimateMemory(uint64_t num_elements) const {
 
 std::vector<int64_t>
 BruteForce::Build(const vsag::DatasetPtr& data) {
+    this->Train(data);
     return this->Add(data);
+}
+
+void
+BruteForce::Train(const DatasetPtr& data) {
+    this->inner_codes_->Train(data->GetFloat32Vectors(), data->GetNumElements());
 }
 
 std::vector<int64_t>
 BruteForce::Add(const DatasetPtr& data) {
-    this->inner_codes_->Train(data->GetFloat32Vectors(), data->GetNumElements());
     std::vector<int64_t> failed_ids;
-
     const auto& datasets = this->split_dataset_by_duplicate_label(data, failed_ids);
     for (const auto& per_dataset : datasets) {
         auto start_id = this->GetNumElements();

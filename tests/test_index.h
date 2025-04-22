@@ -83,6 +83,11 @@ protected:
                     bool expected_success = true);
 
     static void
+    TestTrainAndAdd(const IndexPtr& index,
+                    const TestDatasetPtr& dataset,
+                    bool expected_success = true);
+
+    static void
     TestContinueAddIgnoreRequire(const IndexPtr& index,
                                  const TestDatasetPtr& dataset,
                                  float build_ratio = 0.5);

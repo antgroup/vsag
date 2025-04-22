@@ -57,6 +57,17 @@ public:
     virtual tl::expected<std::vector<int64_t>, Error>
     Build(const DatasetPtr& base) = 0;
 
+    /**
+      * @brief Training index with given vectors
+      *
+      * @param datas should contains dim, num_elements, ids and vectors
+      * @return result indicates whether the train operation is successful.
+      */
+    virtual tl::expected<void, Error>
+    Train(const DatasetPtr& data) {
+        throw std::runtime_error("Index not support Train");
+    }
+
     struct Checkpoint {
         BinarySet data;
         bool finish = false;

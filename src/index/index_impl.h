@@ -54,6 +54,11 @@ public:
         SAFE_CALL(return this->inner_index_->Build(base));
     }
 
+    tl::expected<void, Error>
+    Train(const DatasetPtr& data) override {
+        SAFE_CALL(this->inner_index_->Train(data));
+    }
+
     tl::expected<Checkpoint, Error>
     ContinueBuild(const DatasetPtr& base, const BinarySet& binary_set) override {
         SAFE_CALL(return this->inner_index_->ContinueBuild(base, binary_set));
