@@ -990,6 +990,14 @@ static const ConstParamMap EXTERNAL_MAPPING = {
             RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY,
         },
     },
+    {
+        HGRAPH_BASE_PQ_DIM,
+        {
+            HGRAPH_BASE_CODES_KEY,
+            QUANTIZATION_PARAMS_KEY,
+            PRODUCT_QUANTIZATION_DIM,
+        },
+    },
 };
 
 static const std::string HGRAPH_PARAMS_TEMPLATE =
@@ -1017,7 +1025,8 @@ static const std::string HGRAPH_PARAMS_TEMPLATE =
                 "{SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE}": 0.05,
                 "{PCA_DIM}": 0,
                 "{RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY}": 32,
-                "nbits": 8
+                "nbits": 8,
+                "{PRODUCT_QUANTIZATION_DIM}": 0
             }
         },
         "{HGRAPH_PRECISE_CODES_KEY}": {
@@ -1027,7 +1036,10 @@ static const std::string HGRAPH_PARAMS_TEMPLATE =
             },
             "codes_type": "flatten_codes",
             "{QUANTIZATION_PARAMS_KEY}": {
-                "{QUANTIZATION_TYPE_KEY}": "{QUANTIZATION_TYPE_VALUE_FP32}"
+                "{QUANTIZATION_TYPE_KEY}": "{QUANTIZATION_TYPE_VALUE_FP32}",
+                "{SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE}": 0.05,
+                "{PCA_DIM}": 0,
+                "{PRODUCT_QUANTIZATION_DIM}": 0
             }
         },
         "{BUILD_PARAMS_KEY}": {
