@@ -650,6 +650,7 @@ HGraph::CalDistanceById(const float* query, const int64_t* ids, int64_t count) c
     auto* distances = (float*)allocator_->Allocate(sizeof(float) * count);
     result->Distances(distances);
     auto computer = flat->FactoryComputer(query);
+    Vector<InnerIdType> inner_ids(count, 0, allocator_);
     {
         std::shared_lock<std::shared_mutex> lock(this->label_lookup_mutex_);
         for (int64_t i = 0; i < count; ++i) {
@@ -659,9 +660,9 @@ HGraph::CalDistanceById(const float* query, const int64_t* ids, int64_t count) c
                 distances[i] = -1;
                 continue;
             }
-            auto new_id = iter->second;
-            flat->Query(distances + i, computer, &new_id, 1);
+            inner_ids[i] = iter->second;
         }
+        flat->Query(distances, computer, inner_ids.data(), count);
     }
     return result;
 }
