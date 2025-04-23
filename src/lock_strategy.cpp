@@ -51,7 +51,7 @@ PointsMutex::Resize(uint32_t new_element_num) {
     neighbors_mutex_.resize(new_element_num);
     if (new_element_num > element_num_) {
         for (auto i = element_num_; i < new_element_num; ++i) {
-            neighbors_mutex_[i] = std::make_shared<std::shared_mutex>();
+            neighbors_mutex_[i] = AllocateShared<std::shared_mutex>(allocator_);
         }
     }
     element_num_ = new_element_num;
