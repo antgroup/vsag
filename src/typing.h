@@ -49,6 +49,12 @@ using UnorderedMap = std::unordered_map<KeyType,
                                         std::equal_to<KeyType>,
                                         vsag::AllocatorWrapper<std::pair<const KeyType, ValType>>>;
 
+template <typename T, typename... Args>
+inline auto
+AllocateShared(Allocator* allocator, Args&&... args) {
+    return std::allocate_shared<T>(AllocatorWrapper<T>(allocator), std::forward<Args>(args)...);
+}
+
 using ConstParamMap = const std::unordered_map<std::string, std::vector<std::string>>;
 
 struct CompareByFirst {
