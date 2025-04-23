@@ -33,6 +33,7 @@ docker pull vsaglib/vsag:ubuntu
   - python 3.6+
   - omp
   - aio
+  - curl
 
 ```bash
 # for Debian/Ubuntu
