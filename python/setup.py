@@ -11,7 +11,7 @@ long_description="""VSAG is a vector indexing library used for similarity search
 
 setup(
     name='pyvsag',
-    version='0.0.10',
+    version='0.0.11',
     description='vsag is a vector indexing library used for similarity search',
     long_description=long_description,
     url='https://github.com/alipay/vsag',

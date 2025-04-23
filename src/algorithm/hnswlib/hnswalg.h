@@ -1113,6 +1113,7 @@ public:
         top_candidates.emplace(curdist, ep_id);
         candidate_set.emplace(-curdist, ep_id);
         tableint currObj = ep_id;
+        visited_array[ep_id] = visited_array_tag;
 
         for (int level = maxlevel_; level > 0; level--) {
             bool changed = true;
