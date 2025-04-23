@@ -64,6 +64,9 @@ public:
     void
     Train(const DatasetPtr& data) override;
 
+    InnerIndexPtr
+    ExportModel(const IndexCommonParam& param) const override;
+
     DatasetPtr
     KnnSearch(const DatasetPtr& query,
               int64_t k,

@@ -68,6 +68,20 @@ public:
     }
 
     void
+    ExportModel(const BucketInterfacePtr& other) const override {
+        std::stringstream ss;
+        IOStreamWriter writer(ss);
+        this->quantizer_->Serialize(writer);
+        ss.seekg(0, std::ios::beg);
+        IOStreamReader reader(ss);
+        auto ptr = std::dynamic_pointer_cast<BucketDataCell<QuantTmpl, IOTmpl>>(other);
+        if (ptr == nullptr) {
+            throw VsagException(ErrorType::INTERNAL_ERROR, "Export model's bucket datacell failed");
+        }
+        ptr->quantizer_->Deserialize(reader);
+    }
+
+    void
     Serialize(StreamWriter& writer) override;
 
     void
