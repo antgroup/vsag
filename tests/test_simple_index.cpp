@@ -117,4 +117,7 @@ TEST_CASE("Test Simple Index", "[ft][simple_index]") {
     REQUIRE_THROWS(index->Pretrain(pretrain_ids, 10, ""));
     REQUIRE_THROWS(index->CheckIdExist(0));
     REQUIRE_THROWS(index->CalcDistanceById(dataset->base_->GetFloat32Vectors(), 1));
+    REQUIRE_THROWS(index->Clone());
+    REQUIRE_THROWS(index->ExportModel());
+    REQUIRE_THROWS(index->Train(dataset->base_));
 }
