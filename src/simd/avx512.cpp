@@ -548,14 +548,14 @@ SQ8UniformComputeCodesIP(const uint8_t* codes1, const uint8_t* codes2, uint64_t 
 
     uint64_t d = 0;
     __m512i sum = _mm512_setzero_si512();
-    __m512i mask = _mm512_set1_epi16(0xff);
+    const __m512i mask = _mm512_set1_epi16(0xff);
     for (; d + 63 < dim; d += 64) {
         auto xx = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(codes1 + d));
         auto yy = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(codes2 + d));
 
         auto xx1 = _mm512_and_si512(xx, mask);
-        auto xx2 = _mm512_srli_epi16(xx, 8);
         auto yy1 = _mm512_and_si512(yy, mask);
+        auto xx2 = _mm512_srli_epi16(xx, 8);
         auto yy2 = _mm512_srli_epi16(yy, 8);
 
         sum = _mm512_add_epi32(sum, _mm512_madd_epi16(xx1, yy1));
