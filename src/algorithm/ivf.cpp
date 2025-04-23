@@ -149,6 +149,7 @@ IVF::InitFeatures() {
     }
     this->index_feature_list_->SetFeatures({
         IndexFeature::SUPPORT_CLONE,
+        IndexFeature::SUPPORT_EXPORT_MODEL,
     });
 }
 
@@ -303,6 +304,17 @@ IVF::reorder(int64_t topk, MaxHeap& input, const float* query) const {
         reorder_heap.Pop();
     }
     return std::move(dataset_results);
+}
+
+InnerIndexPtr
+IVF::ExportModel(const IndexCommonParam& param) const {
+    auto index = std::make_shared<IVF>(this->create_param_ptr_, param);
+    IVFPartitionStrategy::Clone(this->partition_strategy_, index->partition_strategy_);
+    this->bucket_->ExportModel(index->bucket_);
+    if (use_reorder_) {
+        this->reorder_codes_->ExportModel(index->reorder_codes_);
+    }
+    return index;
 }
 
 template <InnerSearchMode mode>

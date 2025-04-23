@@ -1304,7 +1304,8 @@ TestIndex::TestExportModel(const TestIndex::IndexPtr& index,
     REQUIRE(index_model_result.has_value() == true);
     auto& index_model = index_model_result.value();
 
-    TestBuildIndex(index_model, dataset, true);
+    auto add_index = index_model->Add(dataset->base_);
+    REQUIRE(add_index.has_value());
 
     const auto& queries = dataset->query_;
     auto query_count = queries->GetNumElements();
