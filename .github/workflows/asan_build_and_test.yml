@@ -12,10 +12,14 @@ jobs:
     runs-on: ubuntu-22.04
     container:
       image: vsaglib/vsag:ci-x86
+      volumes:
+        - /opt:/useless
     concurrency:
       group: asan_build_x86-${{ github.event.pull_request.number }}
       cancel-in-progress: true
     steps:
+      - name: Free Disk Space
+        run: rm -rf /useless/hostedtoolcache
       - uses: actions/checkout@v4
       - name: Load Cache
         uses: actions/cache@v4
@@ -40,6 +44,8 @@ jobs:
       group: asan_build_aarch-${{ github.event.pull_request.number }}
       cancel-in-progress: true
     steps:
+      - name: Free Disk Space
+        run: rm -rf /opt/hostedtoolcache
       - uses: actions/checkout@v4
       - name: Prepare Env
         run: sudo bash ./scripts/deps/install_deps_ubuntu.sh
