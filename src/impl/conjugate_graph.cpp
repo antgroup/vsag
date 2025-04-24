@@ -15,6 +15,8 @@
 
 #include "conjugate_graph.h"
 
+#include "vsag_exception.h"
+
 namespace vsag {
 
 ConjugateGraph::ConjugateGraph(Allocator* allocator)
@@ -226,6 +228,9 @@ ConjugateGraph::Deserialize(StreamReader& in_stream) {
 
         return {};
     } catch (const std::runtime_error& e) {
+        clear();
+        LOG_ERROR_AND_RETURNS(ErrorType::READ_ERROR, "failed to deserialize: ", e.what());
+    } catch (const vsag::VsagException& e) {
         clear();
         LOG_ERROR_AND_RETURNS(ErrorType::READ_ERROR, "failed to deserialize: ", e.what());
     }

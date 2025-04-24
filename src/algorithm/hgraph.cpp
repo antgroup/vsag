@@ -680,7 +680,7 @@ HGraph::GetMinAndMaxId() const {
     int64_t max_id = INT64_MIN;
     std::shared_lock<std::shared_mutex> lock(this->label_lookup_mutex_);
     if (this->label_table_->label_remap_.empty()) {
-        throw std::runtime_error("Label map size is zero");
+        throw VsagException(ErrorType::INTERNAL_ERROR, "Label map size is zero");
     }
     for (auto& it : this->label_table_->label_remap_) {
         max_id = it.first > max_id ? it.first : max_id;
@@ -1099,7 +1099,8 @@ ParamPtr
 HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
                                      const IndexCommonParam& common_param) {
     if (common_param.data_type_ == DataTypes::DATA_TYPE_INT8) {
-        throw std::invalid_argument(fmt::format("HGraph not support {} datatype", DATATYPE_INT8));
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            fmt::format("HGraph not support {} datatype", DATATYPE_INT8));
     }
 
     std::string str = format_map(HGRAPH_PARAMS_TEMPLATE, DEFAULT_MAP);

@@ -32,7 +32,8 @@ ODescent::Build(const Vector<InnerIdType>& ids_sequence, const GraphInterfacePtr
         data_num_ = flatten_interface_->TotalCount();
     }
     if (data_num_ <= 0) {
-        throw std::runtime_error("ODescent cannot build a graph with data_num less than 0");
+        throw VsagException(ErrorType::INTERNAL_ERROR,
+                            "ODescent cannot build a graph with data_num less than 0");
     }
     if (data_num_ == 1) {
         graph_.push_back(Linklist(allocator_));

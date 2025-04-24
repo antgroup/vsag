@@ -107,7 +107,7 @@ private:
     inline void
     check_valid_bucket_id(BucketIdType bucket_id) {
         if (bucket_id >= this->bucket_count_ or bucket_id < 0) {
-            throw std::runtime_error("visited invalid bucket id");
+            throw VsagException(ErrorType::INTERNAL_ERROR, "visited invalid bucket id");
         }
     }
 
@@ -169,7 +169,7 @@ BucketDataCell<QuantTmpl, IOTmpl>::query_one_by_id(
     const InnerIdType& offset_id) {
     this->check_valid_bucket_id(bucket_id);
     if (offset_id >= this->bucket_sizes_[bucket_id]) {
-        throw std::runtime_error("invalid offset id for bucket");
+        throw VsagException(ErrorType::INTERNAL_ERROR, "invalid offset id for bucket");
     }
     float ret;
     bool need_release = false;

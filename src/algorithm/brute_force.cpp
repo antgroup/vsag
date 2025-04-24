@@ -270,8 +270,8 @@ ParamPtr
 BruteForce::CheckAndMappingExternalParam(const JsonType& external_param,
                                          const IndexCommonParam& common_param) {
     if (common_param.data_type_ == DataTypes::DATA_TYPE_INT8) {
-        throw std::invalid_argument(
-            fmt::format("BruteForce not support {} datatype", DATATYPE_INT8));
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            fmt::format("BruteForce not support {} datatype", DATATYPE_INT8));
     }
 
     std::string str = format_map(BRUTE_FORCE_PARAMS_TEMPLATE, DEFAULT_MAP);
