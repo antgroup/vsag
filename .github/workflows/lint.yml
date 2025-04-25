@@ -9,7 +9,8 @@ on:
 jobs:
   clang-tidy-check:
     name: Lint
-    runs-on: ubuntu-latest
+    # runs-on: ubuntu-latest
+    runs-on: self-hosted
     container:
       image: vsaglib/vsag:ci-x86
     concurrency:
