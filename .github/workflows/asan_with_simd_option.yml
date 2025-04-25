@@ -26,7 +26,7 @@ jobs:
         ]
     concurrency:
       group: build-${{ matrix.simd_option }}-${{ github.event.pull_request.number }}
-      cancel-in-progress: true
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     steps:
       - uses: actions/checkout@v4
       - name: Load Cache
@@ -66,7 +66,7 @@ jobs:
         ]
     concurrency:
       group: test-${{ matrix.simd_key }}-${{ matrix.test_type }}-${{ github.event.pull_request.number }}
-      cancel-in-progress: true
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     container:
       image: vsaglib/vsag:ci-x86
     steps:
