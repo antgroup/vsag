@@ -960,19 +960,25 @@ HierarchicalNSW::DeserializeImpl(StreamReader& reader, SpaceInterface* s, size_t
     ReadOne(reader, offset_data_);
     ReadOne(reader, max_level_);
 
-    // fix the issue of loading index with different type of entrypoint_node
+    // Fixes #623: Unified entrypoint_node type during index loading (old: int64_t → new: InnerIdType)
+    // to resolve compatibility issues
     auto buffer_size = sizeof(int64_t) + sizeof(size_t);
-    auto read_size = sizeof(InnerIdType) + sizeof(size_t);
+    auto newer_format_size = sizeof(InnerIdType) + sizeof(size_t);
     vsag::Vector<char> buffer(buffer_size, allocator_);
-    reader.Read(buffer.data(), read_size);
-    enterpoint_node_ = *(InnerIdType*)(buffer.data() + 0);
-    maxM_ = *(size_t*)(buffer.data() + sizeof(InnerIdType));
-    bool pass_check = (M_ == maxM_);
-    if (not pass_check) {
-        reader.Read(buffer.data() + read_size, buffer_size - read_size);
-        enterpoint_node_ = *(int64_t*)(buffer.data() + 0);
-        maxM_ = *(size_t*)(buffer.data() + sizeof(int64_t));
+    char* raw_buffer = buffer.data();
+    // step 1, try to parse/read with the newer serial format
+    reader.Read(raw_buffer, newer_format_size);
+    enterpoint_node_ = *(InnerIdType*)(raw_buffer);
+    maxM_ = *(size_t*)(raw_buffer + sizeof(InnerIdType));
+    bool is_newer_format = (M_ == maxM_);
+    if (not is_newer_format) {
+        // step 2, try to read with the older serial format
+        reader.Read(raw_buffer + newer_format_size, buffer_size - newer_format_size);
+        enterpoint_node_ = *(int64_t*)(raw_buffer);
+        maxM_ = *(size_t*)(raw_buffer + sizeof(int64_t));
         if (M_ != maxM_) {
+            // this condition will be true only when the parameter used in create_index is not equal
+            // to the parameter of the serialized index
             throw vsag::VsagException(
                 vsag::ErrorType::INTERNAL_ERROR,
                 "The index was saved with different M_ value, please use the same M_ value");
