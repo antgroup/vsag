@@ -101,13 +101,11 @@ int32_t
 GENERIC_SQ4UniformComputeCodesIP(const uint8_t* codes1, const uint8_t* codes2, uint64_t dim);
 
 int32_t
-INT4_L2_precompute(
-    int32_t norm1, int32_t norm2, const void* p1_vec, const void* p2_vec, int dim);
+INT4_L2_precompute(int32_t norm1, int32_t norm2, const void* p1_vec, const void* p2_vec, int dim);
 
 double
 INT8_L2_precompute(
     int64_t norm1, double norm2, const void* pVect1v, const void* pVect2v, size_t qty);
-
 
 float
 L2Sqr(const void* pVect1v, const void* pVect2v, const void* qty_ptr);

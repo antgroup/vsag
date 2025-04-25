@@ -11,7 +11,8 @@ list (FILTER CPP_CONJUGATE_GRAPH_SRCS EXCLUDE REGEX "_test.cpp")
 list (FILTER CPP_INDEX_SRCS EXCLUDE REGEX "_test.cpp")
 
 set (VSAG_SRCS ${CPP_SRCS} ${CPP_FACTORY_SRCS} ${CPP_INDEX_SRCS} ${CPP_CONJUGATE_GRAPH_SRCS})
-add_library (vsag SHARED ${VSAG_SRCS})
+add_library (vsag SHARED ${VSAG_SRCS}
+        impl/odescent.h)
 add_library (vsag_static STATIC ${VSAG_SRCS})
 
 set (VSAG_DEP_LIBS diskann pthread m dl simd fmt::fmt-header-only nlohmann_json::nlohmann_json roaring)

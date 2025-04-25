@@ -134,7 +134,7 @@ public:
         size_t ids_shape[2]{count, k};
         size_t ids_strides[2]{k * sizeof(int64_t), sizeof(int64_t)};
         size_t dists_shape[2]{count, k};
-        size_t dists_strides[2]{k *sizeof(float), sizeof(float)};
+        size_t dists_strides[2]{k * sizeof(float), sizeof(float)};
 
         auto ids = py::array_t<int64_t>(ids_shape, ids_strides);
         auto dists = py::array_t<float>(dists_shape, dists_strides);

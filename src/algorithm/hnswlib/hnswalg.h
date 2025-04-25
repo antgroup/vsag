@@ -33,15 +33,16 @@
 #include <unordered_set>
 
 #include "../../default_allocator.h"
+#include "../../impl/odescent.h"
 #include "../../logger.h"
+#include "../../simd/simd.h"
 #include "hnswlib.h"
 #include "visited_list_pool.h"
-#include "../../simd/simd.h"
 
 namespace vsag {
 extern int32_t (*INT4_IP)(const void* p1_vec, const void* p2_vec, int dim);
 extern double (*INT8_IP)(const void* pVect1v, const void* pVect2v, size_t qty);
-}
+}  // namespace vsag
 
 namespace hnswlib {
 typedef unsigned int tableint;
@@ -251,9 +252,6 @@ public:
         delete visited_list_pool_;
     }
 
-
-
-
     void
     compute_sq_interval() override {
         int sample_num = std::min(10000, (int)cur_element_count_);
@@ -369,13 +367,14 @@ public:
             uint64_t size = getListCount((linklistsizeint*)data);
             avg_degree += size;
         }
-        vsag::logger::info(fmt::format("====avg_degree: {} ====", 1.0 * avg_degree / cur_element_count_));
+        vsag::logger::info(
+            fmt::format("====avg_degree: {} ====", 1.0 * avg_degree / cur_element_count_));
         cut_num_ = cur_element_count_ * redundant_rate_;
         vsag::logger::info(fmt::format("====redundant size: {} ====", cut_num_));
 
         offset_code_ = new uint64_t[cur_element_count_];
         memset(offset_code_, cur_element_count_, 999);
-        code_size_aligned_ = ((code_size + 16) + (1 << 9) - 1) >> 9 << 9;   // 512 aligned
+        code_size_aligned_ = ((code_size + 16) + (1 << 9) - 1) >> 9 << 9;  // 512 aligned
 
         // original encoded data
         uint64_t sz_close = 0;
@@ -395,7 +394,7 @@ public:
             if (sq_num_bits_ == 4) {
                 transform_to_int4((float*)getDataByInternalId(i), code);
                 norm = vsag::INT4_IP(code, code, dim);
-            } else if (sq_num_bits_ == 8){
+            } else if (sq_num_bits_ == 8) {
                 transform_to_int8((float*)getDataByInternalId(i), code);
                 norm = vsag::INT8_IP(code, code, dim);
             }
@@ -414,7 +413,7 @@ public:
             query_fp[d] = query[d] / (double)cur_element_count_;
         }
         centroid_ = enterpoint_node_;
-//        centroid_ = searchKnn(query_fp.data(), 1).top().second;
+        //        centroid_ = searchKnn(query_fp.data(), 1).top().second;
 
         // redundant neighbors
         if (cut_num_ > 0) {
@@ -426,10 +425,12 @@ public:
                 uint64_t size = getListCount((linklistsizeint*)data);
                 sz_redundant += (code_size_aligned_ * size);
             }
-            void* ptr_redundant = std::aligned_alloc(1 << 21, (sz_redundant + (1 << 21) - 1) >> 21 << 21);
+            void* ptr_redundant =
+                std::aligned_alloc(1 << 21, (sz_redundant + (1 << 21) - 1) >> 21 << 21);
             madvise(ptr_redundant, sz_redundant, MADV_HUGEPAGE);
-            std::memset(ptr_redundant, 0, sz_redundant);    // TODO: huge physic mem alloc
-            redundant_data_int8 = std::shared_ptr<int8_t[]>(static_cast<int8_t*>(ptr_redundant), AlignedDeleter());
+            std::memset(ptr_redundant, 0, sz_redundant);  // TODO: huge physic mem alloc
+            redundant_data_int8 =
+                std::shared_ptr<int8_t[]>(static_cast<int8_t*>(ptr_redundant), AlignedDeleter());
 
             // assign
             for (uint64_t i = 0; i < cut_num_; i++) {
@@ -451,8 +452,8 @@ public:
                 uint64_t size = getListCount((linklistsizeint*)data);
                 auto* code = get_redundant_data(i, code_size_aligned_);
 
-//                uint64_t size_valid = code;
-//                assert(size_valid == size);
+                //                uint64_t size_valid = code;
+                //                assert(size_valid == size);
 
                 for (uint64_t j = 0; j < size; j++) {
                     uint64_t candidate_id = *(data + j + 1);
@@ -460,7 +461,8 @@ public:
                     for (int k = 0; k < code_size + 8; k++) {
                         assert((code + j * (code_size_aligned_))[k] == neighbor_code[k]);
                     }
-                    assert(*(uint64_t*)(code + j * (code_size_aligned_) + code_size + 8) == candidate_id);
+                    assert(*(uint64_t*)(code + j * (code_size_aligned_) + code_size + 8) ==
+                           candidate_id);
                 }
             }
         }
@@ -820,18 +822,18 @@ public:
                     best_po = try_po;
                     best_pl = try_pl;
                 }
-                vsag::logger::info(fmt::format("test on neighbor = {}, line = {}, improving {:.2f}%",
-                       try_po,
-                       try_pl,
-                       100.0 * (baseline_ela / ela - 1)));
+                vsag::logger::info(
+                    fmt::format("test on neighbor = {}, line = {}, improving {:.2f}%",
+                                try_po,
+                                try_pl,
+                                100.0 * (baseline_ela / ela - 1)));
             }
         }
 
-        vsag::logger::info(fmt::format(
-            "set best neighbor = {}, line = {}, improving {:.2f}%",
-            best_po,
-            best_pl,
-            100.0 * (baseline_ela / min_ela - 1)));
+        vsag::logger::info(fmt::format("set best neighbor = {}, line = {}, improving {:.2f}%",
+                                       best_po,
+                                       best_pl,
+                                       100.0 * (baseline_ela / min_ela - 1)));
         this->po_ = best_po;
         this->pl_ = best_pl;
 
@@ -976,10 +978,10 @@ public:
 
     inline uint32_t
     visit_naive(std::pair<float, tableint>& current_node_pair,
-          std::pair<float, tableint>& next_node_pair,
-          vl_type* visited_array,
-          vl_type visited_array_tag,
-          std::vector<int>& to_be_visited) const {
+                std::pair<float, tableint>& next_node_pair,
+                vl_type* visited_array,
+                vl_type visited_array_tag,
+                std::vector<int>& to_be_visited) const {
         int* data2 = (int*)get_linklist0(next_node_pair.second);
         _mm_prefetch(visited_array + *(data2 + 1), _MM_HINT_T0);
 
@@ -999,10 +1001,10 @@ public:
 
     inline uint32_t
     visit_redundant(std::pair<float, tableint>& current_node_pair,
-          std::pair<float, tableint>& next_node_pair,
-          vl_type* visited_array,
-          vl_type visited_array_tag,
-          std::vector<int>& to_be_visited) const {
+                    std::pair<float, tableint>& next_node_pair,
+                    vl_type* visited_array,
+                    vl_type visited_array_tag,
+                    std::vector<int>& to_be_visited) const {
         int* data2 = (int*)get_linklist0(next_node_pair.second);
         _mm_prefetch(visited_array + *(data2 + 1), _MM_HINT_T0);
 
@@ -1024,7 +1026,8 @@ public:
                              _MM_HINT_T0);
             }
             if (j + 8 < size) {
-                _mm_prefetch(&visited_array[*(int64_t*)(code + (j + 8) * (code_size_aligned_) + code_size + 8)],
+                _mm_prefetch(&visited_array[*(int64_t*)(code + (j + 8) * (code_size_aligned_) +
+                                                        code_size + 8)],
                              _MM_HINT_T0);
             }
             uint64_t candidate_id = *(int64_t*)(code + j * (code_size_aligned_) + code_size + 8);
@@ -1033,18 +1036,18 @@ public:
             }
             visited_array[candidate_id] = visited_array_tag;
 
-//            auto* neighbor_code = get_encoded_data(candidate_id, code_size_aligned_);
-//            for (int k = 0; k < code_size + 8; k++) {
-//                assert((code + j * (code_size_aligned_))[k] == neighbor_code[k]);
-//            }
+            //            auto* neighbor_code = get_encoded_data(candidate_id, code_size_aligned_);
+            //            for (int k = 0; k < code_size + 8; k++) {
+            //                assert((code + j * (code_size_aligned_))[k] == neighbor_code[k]);
+            //            }
         }
-//        for (size_t j = 1; j <= size; j++) {
-//            int candidate_id = *(data + j);
-//            if (!(visited_array[candidate_id] == visited_array_tag)) {
-//                to_be_visited[count_no_visited++] = candidate_id;
-//            }
-//            visited_array[candidate_id] = visited_array_tag;
-//        }
+        //        for (size_t j = 1; j <= size; j++) {
+        //            int candidate_id = *(data + j);
+        //            if (!(visited_array[candidate_id] == visited_array_tag)) {
+        //                to_be_visited[count_no_visited++] = candidate_id;
+        //            }
+        //            visited_array[candidate_id] = visited_array_tag;
+        //        }
         return count_no_visited;
     }
 
@@ -1128,14 +1131,17 @@ public:
 
                 if (sq_num_bits_ == 4 or sq_num_bits_ == 8) {
                     for (int i = 0; i < po_; i++) {
-                        mem_prefetch((uint8_t*)get_encoded_data(datal[i], code_size_aligned_), this->pl_);
+                        mem_prefetch((uint8_t*)get_encoded_data(datal[i], code_size_aligned_),
+                                     this->pl_);
                     }
                 }
 
                 for (int i = 0; i < size; i++) {
                     if (sq_num_bits_ == 4 or sq_num_bits_ == 8) {
                         if (i + po_ < size) {
-                            mem_prefetch((uint8_t*)get_encoded_data(datal[i + po_], code_size_aligned_), this->pl_);
+                            mem_prefetch(
+                                (uint8_t*)get_encoded_data(datal[i + po_], code_size_aligned_),
+                                this->pl_);
                         }
                     }
                     tableint cand = datal[i];
@@ -1153,10 +1159,10 @@ public:
                     } else if (sq_num_bits_ == 8) {
                         codes_top = get_encoded_data(cand, code_size_aligned_);
                         d = vsag::INT8_L2_precompute(*((int64_t*)(codes_top + code_size)),
-                                               norm2,
-                                               codes_top,
-                                               transformed_query,
-                                               dim);
+                                                     norm2,
+                                                     codes_top,
+                                                     transformed_query,
+                                                     dim);
                     } else {
                         d = fstdistfunc_(data_point, getDataByInternalId(cand), dist_func_param_);
                     }
@@ -1223,32 +1229,40 @@ public:
 
                     if (sq_num_bits_ == 4 or sq_num_bits_ == 8) {
                         if (j + this->po_ < count_no_visited) {
-                            vector_data_ptr =
-                                (uint8_t*)get_encoded_data(to_be_visited[j + this->po_], code_size_aligned_);
+                            vector_data_ptr = (uint8_t*)get_encoded_data(
+                                to_be_visited[j + this->po_], code_size_aligned_);
                             mem_prefetch_head(vector_data_ptr);
                         }
 
                         auto* codes = get_encoded_data(candidate_id, code_size_aligned_);
                         if (sq_num_bits_ == 4) {
-                            dist = vsag::INT4_L2_precompute(
-                                *((int64_t*)(codes + code_size)), norm2, codes, transformed_query, dim);
+                            dist = vsag::INT4_L2_precompute(*((int64_t*)(codes + code_size)),
+                                                            norm2,
+                                                            codes,
+                                                            transformed_query,
+                                                            dim);
                         } else {
-                            dist = vsag::INT8_L2_precompute(
-                                *((int64_t*)(codes + code_size)), norm2, codes, transformed_query, dim);
+                            dist = vsag::INT8_L2_precompute(*((int64_t*)(codes + code_size)),
+                                                            norm2,
+                                                            codes,
+                                                            transformed_query,
+                                                            dim);
                         }
 
                         if (j + this->po_ < count_no_visited) {
-                            vector_data_ptr =
-                                (uint8_t*)get_encoded_data(to_be_visited[j + this->po_], code_size_aligned_);
+                            vector_data_ptr = (uint8_t*)get_encoded_data(
+                                to_be_visited[j + this->po_], code_size_aligned_);
                             mem_prefetch(vector_data_ptr + 64, this->pl_);
                         }
                     } else {
                         if (j + this->po_ < count_no_visited) {
-                            mem_prefetch((unsigned char*)getDataByInternalId(to_be_visited[j + this->po_]), this->pl_);
+                            mem_prefetch(
+                                (unsigned char*)getDataByInternalId(to_be_visited[j + this->po_]),
+                                this->pl_);
                         }
-                        dist = fstdistfunc_(data_point, getDataByInternalId(candidate_id), dist_func_param_);
+                        dist = fstdistfunc_(
+                            data_point, getDataByInternalId(candidate_id), dist_func_param_);
                     }
-
 
                     if (top_candidates.size() < ef || lowerBound > dist) {
                         candidate_set.emplace(-dist, candidate_id);
@@ -1285,14 +1299,16 @@ public:
                     to_be_prefetch_ = nullptr;
                     if (sq_num_bits_ == 4) {
                         dist = vsag::INT4_L2_precompute(
-                            *((int64_t*)(code + to_be_visited[j] * (code_size_aligned_) + code_size)),
+                            *((int64_t*)(code + to_be_visited[j] * (code_size_aligned_) +
+                                         code_size)),
                             norm2,
                             code + to_be_visited[j] * (code_size_aligned_),
                             transformed_query,
                             dim);
                     } else if (sq_num_bits_ == 8) {
                         dist = vsag::INT8_L2_precompute(
-                            *((int64_t*)(code + to_be_visited[j] * (code_size_aligned_) + code_size)),
+                            *((int64_t*)(code + to_be_visited[j] * (code_size_aligned_) +
+                                         code_size)),
                             norm2,
                             code + to_be_visited[j] * (code_size_aligned_),
                             transformed_query,
@@ -1300,8 +1316,9 @@ public:
                     }
 
                     if (top_candidates.size() < ef || lowerBound > dist) {
-                        auto candidate_id = *(
-                            uint64_t*)(code + to_be_visited[j] * (code_size_aligned_) + code_size + 8);
+                        auto candidate_id =
+                            *(uint64_t*)(code + to_be_visited[j] * (code_size_aligned_) +
+                                         code_size + 8);
                         candidate_set.emplace(-dist, candidate_id);
 
                         top_candidates.emplace(dist, candidate_id);
@@ -2645,6 +2662,120 @@ public:
         return cur_c;
     }
 
+    void
+    set_graph(vsag::DatasetPtr dataset, vsag::Graph& graph) override {
+        auto data_num = dataset->GetNumElements();
+        auto vectors = dataset->GetFloat32Vectors();
+        auto dim = dataset->GetDim();
+        auto ids = dataset->GetIds();
+        if (data_num > max_elements_) {
+            resizeIndex(data_num);
+        }
+        cur_element_count_ = data_num;
+        //
+        auto edges = graph.GetGraph();
+        //
+        //        int hnsw_edge_count = 0;
+        //        float hnsw_loss = 0;
+        //        int nndescent_edge_count = 0;
+        //        float nndescen_loss = 0;
+        //        std::vector<int> hnsw_edge_counts;
+        //        std::vector<int> nndescent_edge_counts;
+        //        for (int i = 0; i < cur_element_count_; ++i) {
+        //            memcpy(getDataByInternalId(i), vectors + i * dim, dim * sizeof(float));
+        //            auto link = get_linklist0(i);
+        //            float size = getListCount(link);
+        //            link += 1;
+        //            if (i > 5000 and i < 5010) {
+        //
+        //            std::cout << "hnsw graph " << size << ": ";
+        //            }
+        //            for (int j = size - 1; j >= 0; --j) {
+        //                auto single_loss = fstdistfunc_(getDataByInternalId(i), getDataByInternalId(link[j]), dist_func_param_);
+        //                if (i > 5000 and i < 5010) {
+        //
+        //                std::cout << link[j] << ":" << single_loss << " ";
+        //                }
+        //                hnsw_loss += single_loss;
+        //            }
+        //            hnsw_edge_counts.push_back(size);
+        //            hnsw_edge_count += size;
+        //            if (i > 5000 and i < 5010) {
+        //
+        //            std::cout << std::endl;
+        //
+        //            std::cout << "nndescent graph " << edges[i].size() << ": ";
+        //            }
+        //            for (int j = 0; j < edges[i].size(); ++j) {
+        //                auto single_loss = fstdistfunc_(getDataByInternalId(i), getDataByInternalId(edges[i][j]), dist_func_param_);
+        //                if (i > 5000 and i < 5010) {
+        //
+        //                std::cout << edges[i][j] << ":" << single_loss << " ";
+        //                }
+        //                nndescen_loss += single_loss;
+        //            }
+        //            nndescent_edge_counts.push_back(edges[i].size());
+        //            nndescent_edge_count += edges[i].size();
+        //            if (i > 5000 and i < 5010) {
+        //
+        //            std::cout << std::endl;
+        //
+        //            std::cout << std::endl;
+        //            }
+        //        }
+        //        std::cout << "hnsw: " <<  hnsw_loss / hnsw_edge_count << " " << hnsw_edge_count << std::endl;
+        //        printStatistics(hnsw_edge_counts);
+        //        std::cout << "nndesent: " <<  nndescen_loss / nndescent_edge_count << " " << nndescent_edge_count << std::endl;
+        //        printStatistics(nndescent_edge_counts);
+        //        exit(0);
+
+        std::vector<int> in_degree(cur_element_count_, 0);
+        for (int i = 0; i < cur_element_count_; ++i) {
+            labeltype label = ids[i];
+            memcpy(getExternalLabeLp(i), &label, sizeof(labeltype));
+            memcpy(getDataByInternalId(i), vectors + i * dim, dim * sizeof(float));
+            element_levels_[i] = 0;
+            auto link = get_linklist0(i);
+            setListCount(link, std::min(M_ * 2, edges[i].size()));
+            //            if (edges[i].size() > M_ * 2) {
+            //                std::cout << "edges[i].size() is too large:" << i << std::endl;
+            //            }
+            link += 1;
+            for (int j = 0; j < edges[i].size() && j < M_ * 2; ++j) {
+                link[j] = edges[i][j];
+                in_degree[link[j]] += 1;
+            }
+        }
+        for (int i = 0; i < cur_element_count_; ++i) {
+            if (in_degree[i] == 0) {
+                std::cout << "no in edge:" << i << std::endl;
+            }
+        }
+        maxlevel_ = graph.GetLevel() - 1;
+        for (int level = maxlevel_; level > 0; --level) {
+            auto level_graph = graph.GetHGraph(level);
+            for (int i = 0; i < level_graph.size(); ++i) {
+                if (link_lists_[i] == nullptr) {
+                    auto new_link_lists =
+                        (char*)allocator_->Allocate(size_links_per_element_ * level + 1);
+                    if (new_link_lists == nullptr)
+                        throw std::runtime_error(
+                            "Not enough memory: addPoint failed to allocate linklist");
+                    link_lists_[i] = new_link_lists;
+                    memset(link_lists_[i], 0, size_links_per_element_ * level + 1);
+                }
+                auto link = get_linklist_at_level(i, level);
+                setListCount(link, std::min(M_, level_graph[i].size()));
+                link += 1;
+                for (int j = 0; j < level_graph[i].size() && j < M_; ++j) {
+                    link[j] = level_graph[i][j];
+                }
+                element_levels_[i] = std::max(element_levels_[i], level);
+                enterpoint_node_ = i;
+            }
+        }
+    }
+
     std::priority_queue<std::pair<float, labeltype>>
     searchKnn(const void* query_data,
               size_t k,
@@ -2659,8 +2790,8 @@ public:
             top_candidates;
         std::pair<uint32_t, uint32_t> counts;
         if (num_deleted_) {
-            std::tie(top_candidates, counts) =
-                searchBaseLayerST<true, true>(enterpoint_node_, query_data, std::max(ef_, k), isIdAllowed);
+            std::tie(top_candidates, counts) = searchBaseLayerST<true, true>(
+                enterpoint_node_, query_data, std::max(ef_, k), isIdAllowed);
         } else {
             std::tie(top_candidates, counts) = searchBaseLayerST<false, true>(
                 enterpoint_node_, query_data, std::max(ef_, k), isIdAllowed);

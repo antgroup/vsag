@@ -28,7 +28,7 @@ normalize(float* input_vector, int64_t dim) {
     }
 }
 
-int get_data(vsag::DatasetPtr& data, uint32_t expected_dim, std::string data_path_fmt, bool need_norm = false)
+int get_data(vsag::DatasetPtr& data, uint32_t expected_dim, std::string base_path, bool need_norm = false)
 {
     auto logger = vsag::Options::Instance().logger();
     logger->SetLevel(vsag::Logger::Level::kDEBUG);
@@ -36,7 +36,6 @@ int get_data(vsag::DatasetPtr& data, uint32_t expected_dim, std::string data_pat
     int64_t *base_id;
     float *base_vec;
     uint32_t base_npts, base_dim;
-    auto base_path = fmt::format(data_path_fmt, dataset);
     if (not std::filesystem::exists(base_path)) {
         logger->Debug(fmt::format("Error: file not exist({})", base_path));
         return -1;
@@ -200,8 +199,10 @@ int calculate_gt(bool is_recompute = false) {
     logger->Debug(fmt::format("====Start load data===="));
     auto base = vsag::Dataset::Make();
     auto query = vsag::Dataset::Make();
-    int base_npts = get_data(base, expected_dim, BENCHMARK_BASE_PATH_FMT, need_norm);
-    int query_npts = get_data(query, expected_dim, BENCHMARK_QUERY_PATH_FMT, need_norm);
+    auto base_path = fmt::format(BENCHMARK_BASE_PATH_FMT, dataset);
+    auto query_path = fmt::format(BENCHMARK_QUERY_PATH_FMT, dataset);
+    int base_npts = get_data(base, expected_dim, base_path, need_norm);
+    int query_npts = get_data(query, expected_dim, query_path, need_norm);
     if (target_npts > 0) {
         base_npts = std::min(target_npts, base_npts);
         logger->Debug(fmt::format("target npts: {}", base_npts));
@@ -338,7 +339,8 @@ int search(std::vector<uint32_t> efs, uint32_t k = 10) {
     int base_npts = 0;
     {
         auto base = vsag::Dataset::Make();
-        base_npts = get_data(base, expected_dim, BENCHMARK_BASE_PATH_FMT);
+        auto base_path = fmt::format(BENCHMARK_BASE_PATH_FMT, dataset);
+        base_npts = get_data(base, expected_dim, base_path);
         base->NumElements(base_npts);
     }
     auto build_parameters = fmt::format(BUILD_PARAM_FMT, metric_type, expected_dim, BR, BL, sq_num_bits, use_static, redundant_rate);
@@ -354,7 +356,8 @@ int search(std::vector<uint32_t> efs, uint32_t k = 10) {
     // query and gt
     logger->Debug(fmt::format("====Load query and GT===="));
     auto query = vsag::Dataset::Make();
-    int query_npts = get_data(query, expected_dim, BENCHMARK_QUERY_PATH_FMT, need_norm);
+    auto query_path = fmt::format(BENCHMARK_QUERY_PATH_FMT, dataset);
+    int query_npts = get_data(query, expected_dim, query_path, need_norm);
 
     auto gt_path = fmt::format(BENCHMARK_GT_PATH_FMT, dataset, base_npts, gt_dim);
     int32_t* gt_data;

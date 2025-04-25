@@ -138,6 +138,9 @@ AVX512Capable() {
 #include <queue>
 #include <vector>
 
+#include "../../impl/odescent.h"
+#include "vsag/dataset.h"
+
 namespace hnswlib {
 typedef size_t labeltype;
 
@@ -346,6 +349,10 @@ public:
     virtual void
     transform_base_int4() {
         throw std::runtime_error("un-support int4 transform");
+    }
+
+    virtual void
+    set_graph(vsag::DatasetPtr dataset, vsag::Graph& graph) {
     }
 
     virtual ~AlgorithmInterface() {

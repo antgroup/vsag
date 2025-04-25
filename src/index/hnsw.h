@@ -221,6 +221,7 @@ private:
     std::shared_ptr<ConjugateGraph> conjugate_graph_;
 
     int64_t dim_;
+    int64_t M_;
     bool use_static_ = false;
     bool empty_index_ = false;
     bool use_reversed_edges_ = false;

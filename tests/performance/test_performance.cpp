@@ -13,6 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <omp.h>
 #include <sys/stat.h>
 
 #include <chrono>
@@ -21,7 +22,6 @@
 #include <memory>
 #include <string>
 #include <unordered_set>
-#include <omp.h>
 
 #include "H5Cpp.h"
 #include "nlohmann/json.hpp"
@@ -264,26 +264,26 @@ public:
         }
         auto build_finish = std::chrono::steady_clock::now();
 
-//        if (not serialize_result.has_value()) {
-//            throw std::runtime_error("serialize error: " + serialize_result.error().message);
-//        }
-//        vsag::BinarySet& binary_set = serialize_result.value();
+        //        if (not serialize_result.has_value()) {
+        //            throw std::runtime_error("serialize error: " + serialize_result.error().message);
+        //        }
+        //        vsag::BinarySet& binary_set = serialize_result.value();
         std::filesystem::path dir(DIR_NAME);
-//        std::map<std::string, size_t> file_sizes;
-//        for (const auto& key : binary_set.GetKeys()) {
-//            std::filesystem::path file_path(key);
-//            std::filesystem::path full_path = dir / file_path;
-//            vsag::Binary binary = binary_set.Get(key);
-//            std::ofstream file(full_path.string(), std::ios::binary);
-//            file.write(reinterpret_cast<char*>(binary.data.get()), binary.size);
-//            file_sizes[key] = binary.size;
-//            file.close();
-//        }
+        //        std::map<std::string, size_t> file_sizes;
+        //        for (const auto& key : binary_set.GetKeys()) {
+        //            std::filesystem::path file_path(key);
+        //            std::filesystem::path full_path = dir / file_path;
+        //            vsag::Binary binary = binary_set.Get(key);
+        //            std::ofstream file(full_path.string(), std::ios::binary);
+        //            file.write(reinterpret_cast<char*>(binary.data.get()), binary.size);
+        //            file_sizes[key] = binary.size;
+        //            file.close();
+        //        }
 
         std::ofstream outfile(dir / "hnsw", std::ios::binary);
-//        for (const auto& pair : file_sizes) {
-//            outfile << pair.first << " " << pair.second << std::endl;
-//        }
+        //        for (const auto& pair : file_sizes) {
+        //            outfile << pair.first << " " << pair.second << std::endl;
+        //        }
         index->Serialize(outfile);
         outfile.close();
         //        index = nullptr;
@@ -351,7 +351,7 @@ public:
                     std::cerr << "query error: " << result.error().message << std::endl;
                     exit(-1);
                 }
-//                results.emplace_back(result.value());
+                //                results.emplace_back(result.value());
             }
         }
         auto search_finish = std::chrono::steady_clock::now();
