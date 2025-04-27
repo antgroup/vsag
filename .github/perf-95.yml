@@ -7,9 +7,9 @@ global:
             format: "json"
             to: "/tmp/perf-95.json"
     num_threads_building: 16
-    num_threads_searching: 4
+    num_threads_searching: 16
 
-DEEP1B:
+95/DEEP1B:
     datapath: "/tmp/data/deep-image-96-angular.hdf5"
     type: "build,search" # build, search
     index_name: "hgraph"
@@ -21,7 +21,7 @@ DEEP1B:
     range: 0.5
     delete_index_after_search: false
 
-GIST:
+95/GIST:
     datapath: "/tmp/data/gist-960-euclidean.hdf5"
     type: "build,search" # build, search
     index_name: "hgraph"
@@ -33,7 +33,7 @@ GIST:
     range: 0.5
     delete_index_after_search: false
 
-SIFT:
+95/SIFT:
     datapath: "/tmp/data/sift-128-euclidean.hdf5"
     type: "build,search" # build, search
     index_name: "hgraph"
@@ -45,7 +45,7 @@ SIFT:
     range: 0.5
     delete_index_after_search: false
 
-GloVe-100:
+95/GloVe-100:
     datapath: "/tmp/data/glove-100-angular.hdf5"
     type: "build,search" # build, search
     index_name: "hgraph"
@@ -57,7 +57,7 @@ GloVe-100:
     range: 0.5
     delete_index_after_search: false
 
-NYTimes:
+95/NYTimes:
     datapath: "/tmp/data/nytimes-256-angular.hdf5"
     type: "build,search" # build, search
     index_name: "hgraph"
@@ -69,7 +69,7 @@ NYTimes:
     range: 0.5
     delete_index_after_search: false
 
-OPENAI:
+95/OPENAI:
     datapath: "/tmp/data/openai-1536-500k-angular.hdf5"
     type: "build,search" # build, search
     index_name: "hgraph"
@@ -80,7 +80,7 @@ OPENAI:
     search_mode: "knn"
     delete_index_after_search: false
 
-COHERE:
+95/COHERE:
     datapath: "/tmp/data/cohere-768-1m-angular.hdf5"
     type: "build,search" # build, search
     index_name: "hgraph"
