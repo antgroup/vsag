@@ -49,6 +49,9 @@ target_link_libraries(309_feature_clone vsag)
 add_executable(310_feature_export_model 310_feature_export_model.cpp)
 target_link_libraries(310_feature_export_model vsag)
 
+add_executable(311_feature_train 311_feature_train.cpp)
+target_link_libraries(311_feature_train vsag)
+
 add_executable (401_persistent_kv 401_persistent_kv.cpp)
 target_link_libraries (401_persistent_kv vsag)
 
