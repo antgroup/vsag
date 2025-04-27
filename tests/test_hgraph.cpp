@@ -68,8 +68,6 @@ public:
         {"sq8_uniform,fp32", 0.98},
         {"sq8_uniform,fp16", 0.98},
         {"sq8_uniform,bf16", 0.98},
-        {"sq8_uniform,bf16,buffer_io", 0.98},
-        {"sq8_uniform,fp16,async_io", 0.98},
     };
 };
 
@@ -145,7 +143,6 @@ HgraphTestIndex::GenerateHGraphBuildParametersString(const std::string& metric_t
                                            base_quantizer_str,
                                            thread_count);
     }
-    INFO(build_parameters_str);
     return build_parameters_str;
 }
 
@@ -302,12 +299,10 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex,
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
     auto metric_type = GENERATE("l2", "ip", "cosine");
-    auto test_case_without_async_io = test_cases;
-    test_case_without_async_io.pop_back();
     const std::string name = "hgraph";
     auto search_param = fmt::format(search_param_tmp, 200, false);
     for (auto dim : dims) {
-        for (auto& [base_quantization_str, recall] : test_case_without_async_io) {
+        for (auto& [base_quantization_str, recall] : test_cases) {
             if (IsRaBitQ(base_quantization_str)) {
                 if (std::string(metric_type) != "l2") {
                     continue;
@@ -332,12 +327,10 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex, "HGraph Train & Add Test
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
     auto metric_type = GENERATE("l2", "ip", "cosine");
-    auto test_case_without_async_io = test_cases;
-    test_case_without_async_io.pop_back();
     const std::string name = "hgraph";
     auto search_param = fmt::format(search_param_tmp, 200, false);
     for (auto dim : dims) {
-        for (auto& [base_quantization_str, recall] : test_case_without_async_io) {
+        for (auto& [base_quantization_str, recall] : test_cases) {
             if (IsRaBitQ(base_quantization_str)) {
                 if (std::string(metric_type) != "l2") {
                     continue;
@@ -431,12 +424,10 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex, "HGraph Add", "[ft][hgra
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
     auto metric_type = GENERATE("l2", "ip", "cosine");
-    auto test_case_without_async_io = test_cases;
-    test_case_without_async_io.pop_back();
     const std::string name = "hgraph";
     auto search_param = fmt::format(search_param_tmp, 200, false);
     for (auto dim : dims) {
-        for (auto& [base_quantization_str, recall] : test_case_without_async_io) {
+        for (auto& [base_quantization_str, recall] : test_cases) {
             if (IsRaBitQ(base_quantization_str)) {
                 if (std::string(metric_type) != "l2") {
                     continue;
@@ -599,10 +590,8 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex, "HGraph Export Model", "
     const std::string name = "hgraph";
     auto search_param = fmt::format(search_param_tmp, 200, false);
     uint64_t extra_info_size = 64;
-    auto test_case_without_async_io = test_cases;
-    test_case_without_async_io.pop_back();
     for (auto dim : dims) {
-        for (auto& [base_quantization_str, recall] : test_case_without_async_io) {
+        for (auto& [base_quantization_str, recall] : test_cases) {
             if (IsRaBitQ(base_quantization_str)) {
                 if (std::string(metric_type) != "l2") {
                     continue;
@@ -793,6 +782,44 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex, "HGraph With Extra Info"
             TestGetExtraInfoById(index, dataset, extra_info_size);
             TestKnnSearchExFilter(index, dataset, search_ex_filter_param, recall, true);
             TestKnnSearchIter(index, dataset, search_ex_filter_param, recall, true, true);
+            vsag::Options::Instance().set_block_size_limit(origin_size);
+        }
+    }
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex,
+                             "HGraph Disk IO Type Index",
+                             "[ft][hgraph]") {
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    auto size = GENERATE(1024 * 1024 * 2);
+    auto metric_type = GENERATE("l2", "ip", "cosine");
+    const std::string name = "hgraph";
+    auto search_param = fmt::format(search_param_tmp, 200, false);
+    float recall = 0.98;
+    const std::vector<std::pair<std::string, std::string>> io_cases = {
+        {"sq8_uniform,bf16", "sq8_uniform,bf16,buffer_io"},
+        {"sq8_uniform,fp16", "sq8_uniform,fp16,async_io"},
+    };
+    for (auto dim : dims) {
+        for (auto& [memory_io_str, disk_io_str] : io_cases) {
+            if (IsRaBitQ(memory_io_str)) {
+                if (std::string(metric_type) != "l2") {
+                    continue;
+                }
+                if (dim <= fixtures::RABITQ_MIN_RACALL_DIM) {
+                    dim += fixtures::RABITQ_MIN_RACALL_DIM;
+                }
+            }
+            vsag::Options::Instance().set_block_size_limit(size);
+            auto param = GenerateHGraphBuildParametersString(metric_type, dim, memory_io_str);
+            auto index = TestFactory(name, param, true);
+            auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
+            TestBuildIndex(index, dataset, true);
+
+            param = GenerateHGraphBuildParametersString(metric_type, dim, disk_io_str);
+            auto disk_index = TestFactory(name, param, true);
+            TestSerializeFile(index, disk_index, dataset, search_param, true);
+            TestGeneral(disk_index, dataset, search_param, recall);
             vsag::Options::Instance().set_block_size_limit(origin_size);
         }
     }

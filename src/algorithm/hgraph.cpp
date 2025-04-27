@@ -94,18 +94,8 @@ HGraph::Train(const DatasetPtr& base) {
 
 std::vector<int64_t>
 HGraph::Build(const DatasetPtr& data) {
-    this->basic_flatten_codes_->EnableForceInMemory();
-    if (use_reorder_) {
-        this->high_precise_codes_->EnableForceInMemory();
-    }
     this->Train(data);
-    auto new_size = this->max_capacity_.load() + 1;
-    this->resize(new_size);
     auto ret = this->Add(data);
-    this->basic_flatten_codes_->DisableForceInMemory();
-    if (use_reorder_) {
-        this->high_precise_codes_->DisableForceInMemory();
-    }
     return ret;
 }
 
