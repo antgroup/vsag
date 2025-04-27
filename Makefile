@@ -85,10 +85,12 @@ cov:                     ## Build unit tests with code coverage enabled.
 
 .PHONEY: lint
 lint:                    ## Check coding styles defined in `.clang-tidy`.
+	cmake ${VSAG_CMAKE_ARGS} -B${DEBUG_BUILD_DIR} -DCMAKE_BUILD_TYPE=Debug -DENABLE_ASAN=OFF -DENABLE_CCACHE=ON
 	@./scripts/linters/run-clang-tidy.py -p build/ -use-color -source-filter '^.*vsag\/src.*(?<!_test)\.cpp$$' -j ${COMPILE_JOBS}
 
 .PHONEY: fix-lint
 fix-lint:                ## Fix coding style issues in-place via clang-apply-replacements, use it be careful!!!
+	cmake ${VSAG_CMAKE_ARGS} -B${DEBUG_BUILD_DIR} -DCMAKE_BUILD_TYPE=Debug -DENABLE_ASAN=OFF -DENABLE_CCACHE=ON
 	@./scripts/linters/run-clang-tidy.py -p build/ -use-color -source-filter '^.*vsag\/src.*(?<!_test)\.cpp$$' -j ${COMPILE_JOBS} -fix
 
 .PHONY: test_parallel
