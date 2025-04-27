@@ -13,25 +13,27 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "./eval_job.h"
+#pragma once
 
-#include "./common.h"
+#include <memory>
+#include <unordered_map>
 
 namespace vsag::eval {
 
-exporter
-exporter::Load(YAML::Node& node) {
-    exporter ret;
-    ret.format = check_and_get_value(node, "format");
-    ret.to = check_and_get_value(node, "to");
-    if (not node["vars"].IsDefined()) {
-        return ret;
-    }
+class Exporter;
+using ExporterPtr = std::shared_ptr<Exporter>;
 
-    // optional fields
-    ret.vars = check_and_get_map(node, "vars");
+class Exporter {
+public:
+    static ExporterPtr
+    Create(const std::string& to, const std::unordered_map<std::string, std::string>& vars);
 
-    return ret;
-}
+    virtual bool
+    Export(const std::string& result) = 0;
+
+protected:
+    Exporter() = default;
+    virtual ~Exporter() = default;
+};
 
 }  // namespace vsag::eval

@@ -16,6 +16,8 @@ jobs:
     runs-on: ubuntu-22.04
     container:
       image: vsaglib/vsag:ci-x86
+      volumes:
+        - /opt:/useless
     strategy:
       matrix:
         simd_option: [
@@ -28,6 +30,8 @@ jobs:
       group: build-${{ matrix.simd_option }}-${{ github.event.pull_request.number }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     steps:
+      - name: Free Disk Space
+        run: rm -rf /useless/hostedtoolcache
       - uses: actions/checkout@v4
       - name: Load Cache
         uses: actions/cache@v4
@@ -69,7 +73,11 @@ jobs:
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     container:
       image: vsaglib/vsag:ci-x86
+      volumes:
+        - /opt:/useless
     steps:
+      - name: Free Disk Space
+        run: rm -rf /useless/hostedtoolcache
       - uses: actions/checkout@v4
       - name: Clean Env
         run: rm -rf ./build
