@@ -900,6 +900,7 @@ TestIndex::TestConcurrentAdd(const TestIndex::IndexPtr& index,
         ->NumElements(temp_count)
         ->Paths(dataset->base_->GetPaths())
         ->Float32Vectors(dataset->base_->GetFloat32Vectors())
+        ->SparseVectors(dataset->base_->GetSparseVectors())
         ->Owner(false);
     index->Build(temp_dataset);
     fixtures::ThreadPool pool(5);
@@ -913,6 +914,7 @@ TestIndex::TestConcurrentAdd(const TestIndex::IndexPtr& index,
             ->NumElements(1)
             ->Paths(dataset->base_->GetPaths() + i)
             ->Float32Vectors(dataset->base_->GetFloat32Vectors() + i * dim)
+            ->SparseVectors(dataset->base_->GetSparseVectors() + i)
             ->Owner(false);
         auto add_index = index->Add(data_one);
         return add_index;

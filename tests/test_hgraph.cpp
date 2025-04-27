@@ -481,7 +481,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex,
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex,
                              "HGraph Search with Sparse Vector",
-                             "[ft][hgraph]") {
+                             "[ft][hgraph][concurrent]") {
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
     auto metric_type = GENERATE("ip");
@@ -492,7 +492,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex,
     vsag::Options::Instance().set_block_size_limit(size);
     auto param = GenerateHGraphBuildParametersString(metric_type, dim, "sparse", 5, 0, "sparse");
     auto index = TestFactory(name, param, true);
-    TestBuildIndex(index, dataset, true);
+    TestConcurrentAdd(index, dataset, true);
     TestKnnSearch(index, dataset, search_param, true);
     vsag::Options::Instance().set_block_size_limit(origin_size);
 }

@@ -82,7 +82,10 @@ SparseVectorDataCell<QuantTmpl, IOTmpl>::BatchInsertVector(const void* vectors,
 template <typename QuantTmpl, typename IOTmpl>
 void
 SparseVectorDataCell<QuantTmpl, IOTmpl>::InsertVector(const void* vector, InnerIdType idx) {
-    total_count_ = std::max(total_count_, idx + 1);
+    {
+        std::lock_guard lock(mutex_);
+        total_count_ = std::max(total_count_, idx + 1);
+    }
     auto sparse_vector = (const SparseVector*)vector;
     size_t code_size = (sparse_vector->len_ * 2 + 1) * sizeof(uint32_t);
     if (code_size > max_code_size_) {
