@@ -116,10 +116,19 @@ public:
               int64_t k,
               const std::string& parameters,
               const FilterPtr& filter,
+              Allocator *allocator) const override {
+        SAFE_CALL(return this->knn_search(query, k, parameters, filter, allocator));
+    }
+
+    tl::expected<DatasetPtr, Error>
+    KnnSearch(const DatasetPtr& query,
+              int64_t k,
+              const std::string& parameters,
+              const FilterPtr& filter,
               vsag::IteratorContext*& filter_ctx,
               bool is_last_search) const override {
         SAFE_CALL(
-            return this->knn_search(query, k, parameters, filter, &filter_ctx, is_last_search));
+            return this->knn_search(query, k, parameters, filter, nullptr, &filter_ctx, is_last_search));
     }
 
     tl::expected<DatasetPtr, Error>
@@ -282,6 +291,7 @@ private:
                int64_t k,
                const std::string& parameters,
                const FilterPtr& filter_ptr,
+               vsag::Allocator *allocator = nullptr,
                vsag::IteratorContext** iter_ctx = nullptr,
                bool is_last_filter = false) const;
 

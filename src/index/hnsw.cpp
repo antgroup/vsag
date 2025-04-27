@@ -204,6 +204,7 @@ HNSW::knn_search(const DatasetPtr& query,
                  int64_t k,
                  const std::string& parameters,
                  const FilterPtr& filter_ptr,
+                 vsag::Allocator *allocator,
                  vsag::IteratorContext** iter_ctx,
                  bool is_last_filter) const {
 #ifndef ENABLE_TESTS
@@ -216,6 +217,7 @@ HNSW::knn_search(const DatasetPtr& query,
             ret->Dim(0)->NumElements(1);
             return ret;
         }
+        vsag::Allocator *search_alloctor = allocator == nullptr ? allocator_.get() : allocator;
 
         // check query vector
         CHECK_ARGUMENT(query->GetNumElements() == 1, "query dataset should contain 1 vector only");
@@ -238,7 +240,7 @@ HNSW::knn_search(const DatasetPtr& query,
 
         if (iter_ctx != nullptr && *iter_ctx == nullptr) {
             auto* filter_context = new IteratorFilterContext();
-            filter_context->init(alg_hnsw_->getMaxElements(), params.ef_search, allocator_.get());
+            filter_context->init(alg_hnsw_->getMaxElements(), params.ef_search, search_alloctor);
             *iter_ctx = filter_context;
         }
         IteratorFilterContext* iter_filter_ctx = nullptr;
@@ -260,6 +262,7 @@ HNSW::knn_search(const DatasetPtr& query,
                                            std::max(params.ef_search, k),
                                            filter_ptr,
                                            params.skip_ratio,
+                                           allocator,
                                            iter_filter_ctx,
                                            is_last_filter);
         } catch (const std::runtime_error& e) {
@@ -299,7 +302,7 @@ HNSW::knn_search(const DatasetPtr& query,
             results.pop();
         }
         auto [dataset_results, dists, ids] =
-            CreateFastDataset(static_cast<int64_t>(results.size()), allocator_.get());
+            CreateFastDataset(static_cast<int64_t>(results.size()), search_alloctor);
 
         for (auto j = static_cast<int64_t>(results.size() - 1); j >= 0; --j) {
             dists[j] = results.top().first;

@@ -171,6 +171,15 @@ public:
         throw std::runtime_error("Index doesn't support new filter");
     }
 
+    virtual tl::expected<DatasetPtr, Error>
+    KnnSearch(const DatasetPtr& query,
+              int64_t k,
+              const std::string& parameters,
+              const FilterPtr& filter,
+              Allocator *allocator) const {
+        throw std::runtime_error("Index doesn't support new filter");
+    }
+
     /**
       * @brief Performing single KNN search on index
       *
