@@ -960,7 +960,7 @@ HierarchicalNSW::DeserializeImpl(StreamReader& reader, SpaceInterface* s, size_t
     ReadOne(reader, offset_data_);
     ReadOne(reader, max_level_);
 
-    // Fixes #623: Unified entrypoint_node type during index loading (old: int64_t → new: InnerIdType)
+    // Fixes #623: Unified entrypoint_node type during index loading (old: int64_t → new: InnerIdType (i.e., uint32))
     // to resolve compatibility issues
     auto buffer_size = sizeof(int64_t) + sizeof(size_t);
     auto newer_format_size = sizeof(InnerIdType) + sizeof(size_t);
