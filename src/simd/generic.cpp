@@ -488,4 +488,26 @@ DivScalar(const float* from, float* to, uint64_t dim, float scalar) {
 void
 Prefetch(const void* data){};
 
+void
+PQFastScanLookUp32(const uint8_t* lookup_table,
+                   const uint8_t* codes,
+                   uint64_t pq_dim,
+                   int32_t* result) {
+    for (size_t i = 0; i < pq_dim; i++) {
+        const auto* dict = lookup_table;
+        lookup_table += 16;
+        const auto* code = codes;
+        codes += 16;
+        for (size_t j = 0; j < 16; j++) {
+            if (j % 2 == 0) {
+                result[j / 2] += static_cast<uint32_t>(dict[code[j] & 0x0F]);
+                result[16 + j / 2] += static_cast<uint32_t>(dict[(code[j] >> 4)]);
+            } else {
+                result[8 + j / 2] += static_cast<uint32_t>(dict[code[j] & 0x0F]);
+                result[24 + j / 2] += static_cast<uint32_t>(dict[(code[j] >> 4)]);
+            }
+        }
+    }
+}
+
 }  // namespace vsag::generic

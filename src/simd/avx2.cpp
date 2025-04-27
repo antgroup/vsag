@@ -627,4 +627,49 @@ Normalize(const float* from, float* to, uint64_t dim) {
     return norm;
 }
 
+void
+PQFastScanLookUp32(const uint8_t* lookup_table,
+                   const uint8_t* codes,
+                   uint64_t pq_dim,
+                   int32_t* result) {
+#if defined(ENABLE_AVX2)
+    if (pq_dim == 0) {
+        return;
+    }
+    __m256i sum[4];
+    for (size_t i = 0; i < 4; i++) {
+        sum[i] = _mm256_setzero_si256();
+    }
+    const auto sign4 = _mm256_set1_epi8(0x0F);
+    const auto sign8 = _mm256_set1_epi16(0xFF);
+    uint64_t i = 0;
+    for (; i + 1 < pq_dim; i += 2) {
+        auto dict = _mm256_loadu_si256((__m256i*)(lookup_table));
+        lookup_table += 32;
+        auto code = _mm256_loadu_si256((__m256i*)(codes));
+        codes += 32;
+        auto code1 = _mm256_and_si256(code, sign4);
+        auto code2 = _mm256_and_si256(_mm256_srli_epi16(code, 4), sign4);
+        auto res1 = _mm256_shuffle_epi8(dict, code1);
+        auto res2 = _mm256_shuffle_epi8(dict, code2);
+        sum[0] = _mm256_add_epi16(sum[0], _mm256_and_si256(res1, sign8));
+        sum[1] = _mm256_add_epi16(sum[1], _mm256_srli_epi16(res1, 8));
+        sum[2] = _mm256_add_epi16(sum[2], _mm256_and_si256(res2, sign8));
+        sum[3] = _mm256_add_epi16(sum[3], _mm256_srli_epi16(res2, 8));
+    }
+    alignas(256) uint16_t temp[16];
+    for (int64_t idx = 0; idx < 4; idx++) {
+        _mm256_store_si256((__m256i*)(temp), sum[idx]);
+        for (int64_t j = 0; j < 8; j++) {
+            result[idx * 8 + j] += temp[j] + temp[j + 8];
+        }
+    }
+    if (pq_dim > i) {
+        avx::PQFastScanLookUp32(lookup_table, codes, pq_dim - i, result);
+    }
+#else
+    avx::PQFastScanLookUp32(lookup_table, codes, pq_dim, result);
+#endif
+}
+
 }  // namespace vsag::avx2

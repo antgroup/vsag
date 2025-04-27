@@ -714,4 +714,49 @@ Normalize(const float* from, float* to, uint64_t dim) {
     return norm;
 }
 
+void
+PQFastScanLookUp32(const uint8_t* lookup_table,
+                   const uint8_t* codes,
+                   uint64_t pq_dim,
+                   int32_t* result) {
+#if defined(ENABLE_AVX512)
+    if (pq_dim == 0) {
+        return;
+    }
+    __m512i sum[4];
+    for (size_t i = 0; i < 4; i++) {
+        sum[i] = _mm512_setzero_si512();
+    }
+    const auto sign4 = _mm512_set1_epi8(0x0F);
+    const auto sign8 = _mm512_set1_epi16(0xFF);
+    uint64_t i = 0;
+    for (; i + 3 < pq_dim; i += 4) {
+        auto dict = _mm512_loadu_si512((__m512i*)(lookup_table));
+        lookup_table += 64;
+        auto code = _mm512_loadu_si512((__m512i*)(codes));
+        codes += 64;
+        auto code1 = _mm512_and_si512(code, sign4);
+        auto code2 = _mm512_and_si512(_mm512_srli_epi16(code, 4), sign4);
+        auto res1 = _mm512_shuffle_epi8(dict, code1);
+        auto res2 = _mm512_shuffle_epi8(dict, code2);
+        sum[0] = _mm512_add_epi16(sum[0], _mm512_and_si512(res1, sign8));
+        sum[1] = _mm512_add_epi16(sum[1], _mm512_srli_epi16(res1, 8));
+        sum[2] = _mm512_add_epi16(sum[2], _mm512_and_si512(res2, sign8));
+        sum[3] = _mm512_add_epi16(sum[3], _mm512_srli_epi16(res2, 8));
+    }
+    alignas(512) uint16_t temp[32];
+    for (int64_t idx = 0; idx < 4; idx++) {
+        _mm512_store_si512((__m512i*)(temp), sum[idx]);
+        for (int64_t j = 0; j < 8; j++) {
+            result[idx * 8 + j] += temp[j] + temp[j + 8] + temp[j + 16] + temp[j + 24];
+        }
+    }
+    if (pq_dim > i) {
+        avx2::PQFastScanLookUp32(lookup_table, codes, pq_dim - i, result);
+    }
+#else
+    avx2::PQFastScanLookUp32(lookup_table, codes, pq_dim, result);
+#endif
+}
+
 }  // namespace vsag::avx512

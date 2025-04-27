@@ -604,4 +604,16 @@ Normalize(const float* from, float* to, uint64_t dim) {
     return norm;
 }
 
+void
+PQFastScanLookUp32(const uint8_t* lookup_table,
+                   const uint8_t* codes,
+                   uint64_t pq_dim,
+                   int32_t* result) {
+#if defined(ENABLE_AVX)
+    sse::PQFastScanLookUp32(lookup_table, codes, pq_dim, result);
+#else
+    sse::PQFastScanLookUp32(lookup_table, codes, pq_dim, result);
+#endif
+}
+
 }  // namespace vsag::avx
