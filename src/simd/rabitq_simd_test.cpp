@@ -64,6 +64,25 @@ using namespace vsag;
         return;                                         \
     }
 
+TEST_CASE("RaBitQ SQ4U-BQ Compute Benchmark", "[ut][simd][!benchmark]") {
+    std::vector<uint8_t> codes = {0xFF,
+                                  0xFF,  // [1111 1111, 1111 1111]
+                                  0x0F,
+                                  0x0F,  // [0000 1111, 0000 1111]
+                                  0xF0,
+                                  0xF0,  // [1111 0000, 1111 0000]
+                                  0x00,
+                                  0x00};  // [0000 0000, 0000 0000]
+    codes.resize(64);
+    std::vector<uint8_t> bits = {0xAA, 0x55};  // [1010 1010, 0101 0101]
+    bits.resize(64);
+
+    int count = 10000;
+    int dim = 32;
+    BENCHMARK_SIMD_COMPUTE_SQ4(generic, RaBitQSQ4UBinaryIP);
+    BENCHMARK_SIMD_COMPUTE_SQ4(avx512, RaBitQSQ4UBinaryIP);
+}
+
 TEST_CASE("RaBitQ SQ4U-BQ Compute Codes", "[ut][simd]") {
     std::vector<uint8_t> codes = {0xFF,
                                   0xFF,  // [1111 1111, 1111 1111]
@@ -90,11 +109,6 @@ TEST_CASE("RaBitQ SQ4U-BQ Compute Codes", "[ut][simd]") {
             REQUIRE(result == 32);
         }
     }
-
-    int count = 10000;
-    int dim = 32;
-    BENCHMARK_SIMD_COMPUTE_SQ4(generic, RaBitQSQ4UBinaryIP);
-    BENCHMARK_SIMD_COMPUTE_SQ4(avx512, RaBitQSQ4UBinaryIP);
 }
 
 TEST_CASE("RaBitQ FP32-BQ SIMD Compute Codes", "[ut][simd]") {
