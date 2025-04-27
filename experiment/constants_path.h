@@ -21,10 +21,10 @@
 inline std::string algo_name = "hnsw";
 inline std::string workspace = "/tbase-project";
 
-constexpr const char* BENCHMARK_GT_PATH_FMT = "/tbase-project/ann-benchmarks/data/{}/gt_N{}_K{}.fvecs";
-constexpr const char* BENCHMARK_QUERY_PATH_FMT = "/tbase-project/ann-benchmarks/data/{}/query.fvecs";
-constexpr const char* BENCHMARK_BASE_PATH_FMT = "/tbase-project/ann-benchmarks/data/{}/learn.fvecs";
-constexpr const char* INDEX_PATH_FMT = "{}/index/ann-benchmarks/{}_{}_N{}_BL{}_BR{}_{}.index";
+constexpr const char* BENCHMARK_GT_PATH_FMT = "/tbase-project/vsag/data/{}/gt_N{}_K{}.fvecs";
+constexpr const char* BENCHMARK_QUERY_PATH_FMT = "/tbase-project/vsag/data/{}/query.fvecs";
+constexpr const char* BENCHMARK_BASE_PATH_FMT = "/tbase-project/vsag/data/{}/learn.fvecs";
+constexpr const char* INDEX_PATH_FMT = "{}/vsag/data/{}_{}_N{}_BL{}_BR{}_{}.index";
 
 constexpr const char* BUILD_PARAM_FMT = R"(
     {{

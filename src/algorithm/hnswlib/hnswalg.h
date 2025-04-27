@@ -369,6 +369,17 @@ public:
         }
         vsag::logger::info(
             fmt::format("====avg_degree: {} ====", 1.0 * avg_degree / cur_element_count_));
+        avg_degree = 0;
+        for (uint64_t i = 0; i < cur_element_count_; i++) {
+            for (int j = 1; j <= element_levels_[i]; ++j) {
+                int* data = (int*)get_linklist(i, j);
+                uint64_t size = getListCount((linklistsizeint*)data);
+                avg_degree += size;
+            }
+        }
+        vsag::logger::info(
+            fmt::format("====high_level_avg_degree: {} ====", 1.0 * avg_degree / cur_element_count_));
+
         cut_num_ = cur_element_count_ * redundant_rate_;
         vsag::logger::info(fmt::format("====redundant size: {} ====", cut_num_));
 
@@ -2771,7 +2782,9 @@ public:
                     link[j] = level_graph[i][j];
                 }
                 element_levels_[i] = std::max(element_levels_[i], level);
-                enterpoint_node_ = i;
+                if (maxlevel_ == level) {
+                    enterpoint_node_ = i;
+                }
             }
         }
     }

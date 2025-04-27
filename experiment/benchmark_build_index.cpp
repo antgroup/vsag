@@ -461,7 +461,7 @@ int main(int argc, char** argv) {
 
     bool is_recompute = false;
     // prepare index and ground_truth
-//    build(is_recompute);
+    build(is_recompute);
 //    calculate_gt(is_recompute);
 
     // search

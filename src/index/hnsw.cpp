@@ -150,17 +150,17 @@ HNSW::build(const DatasetPtr& base) {
         auto ids = base->GetIds();
         auto vectors = base->GetFloat32Vectors();
         std::vector<int64_t> failed_ids;
-        //        {
-        //            SlowTaskTimer t("hnsw graph");
-        //#pragma omp parallel for
-        //            for (int64_t i = 0; i < num_elements; ++i) {
-        //                // noexcept runtime
-        //                if (!alg_hnsw->addPoint((const void*)(vectors + i * dim_), ids[i])) {
-        //                    logger::debug("duplicate point: {}", ids[i]);
-        //                    failed_ids.emplace_back(ids[i]);
-        //                }
-        //            }
-        //        }
+//                {
+//                    SlowTaskTimer t("hnsw graph");
+//        #pragma omp parallel for
+//                    for (int64_t i = 0; i < num_elements; ++i) {
+//                        // noexcept runtime
+//                        if (!alg_hnsw->addPoint((const void*)(vectors + i * dim_), ids[i])) {
+//                            logger::debug("duplicate point: {}", ids[i]);
+//                            failed_ids.emplace_back(ids[i]);
+//                        }
+//                    }
+//                }
         {
             SlowTaskTimer t("hnsw graph");
             vsag::HierarchicalGraph graph(M_, 15, space->get_dist_func());
