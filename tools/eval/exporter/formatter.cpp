@@ -13,25 +13,30 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "./eval_job.h"
+#include "formatter.h"
 
-#include "./common.h"
+#include <memory>
+#include <string>
+
+#include "../common.h"
+#include "formatter_json.h"
+#include "formatter_lineproto.h"
+#include "formatter_table.h"
 
 namespace vsag::eval {
 
-exporter
-exporter::Load(YAML::Node& node) {
-    exporter ret;
-    ret.format = check_and_get_value(node, "format");
-    ret.to = check_and_get_value(node, "to");
-    if (not node["vars"].IsDefined()) {
-        return ret;
+FormatterPtr
+Formatter::Create(const std::string& format) {
+    if (format == "json") {
+        return std::make_shared<JsonFormatter>();
     }
-
-    // optional fields
-    ret.vars = check_and_get_map(node, "vars");
-
-    return ret;
+    if (format == "text" or format == "table") {
+        return std::make_shared<TableFormatter>();
+    }
+    if (format == "line_protocol") {
+        return std::make_shared<LineProtocolFormatter>();
+    }
+    abort();
 }
 
 }  // namespace vsag::eval

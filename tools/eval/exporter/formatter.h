@@ -13,25 +13,33 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "./eval_job.h"
+#pragma once
 
-#include "./common.h"
+#include <memory>
+#include <string>
+
+#include "../common.h"
 
 namespace vsag::eval {
 
-exporter
-exporter::Load(YAML::Node& node) {
-    exporter ret;
-    ret.format = check_and_get_value(node, "format");
-    ret.to = check_and_get_value(node, "to");
-    if (not node["vars"].IsDefined()) {
-        return ret;
+class Formatter;
+using FormatterPtr = std::shared_ptr<Formatter>;
+
+class Formatter {
+public:
+    static FormatterPtr
+    Create(const std::string& format);
+
+    virtual std::string
+    Format(vsag::eval::JsonType& results) = 0;
+};
+
+#define JSON_GET(varname, jsonobj, defaultvalue) \
+    std::string varname;                         \
+    try {                                        \
+        (varname) = jsonobj;                     \
+    } catch (...) {                              \
+        (varname) = defaultvalue;                \
     }
-
-    // optional fields
-    ret.vars = check_and_get_map(node, "vars");
-
-    return ret;
-}
 
 }  // namespace vsag::eval

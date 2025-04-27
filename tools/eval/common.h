@@ -17,10 +17,13 @@
 
 #include <yaml-cpp/yaml.h>
 
+#include <nlohmann/json.hpp>
 #include <string>
 #include <vector>
 
 namespace vsag::eval {
+
+using JsonType = nlohmann::json;
 
 constexpr static const char* DENSE_VECTORS = "dense_vectors";
 constexpr static const char* SPARSE_VECTORS = "sparse_vectors";
@@ -43,5 +46,22 @@ check_and_get_value(const YAML::Node& node, const std::string& key) {
 
     return T();
 };
+
+inline std::unordered_map<std::string, std::string>
+check_and_get_map(const YAML::Node& node, const std::string& key) {
+    std::unordered_map<std::string, std::string> ret;
+    if (not node[key].IsDefined()) {
+        return ret;
+    }
+    auto subnode = node[key];
+    if (not subnode.IsMap()) {
+        return ret;
+    }
+
+    for (auto it = subnode.begin(); it != subnode.end(); ++it) {
+        ret[it->first.as<std::string>()] = it->second.as<std::string>();
+    }
+    return ret;
+}
 
 }  // namespace vsag::eval
