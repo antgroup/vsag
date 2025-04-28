@@ -114,12 +114,6 @@ public:
         return true;
     }
 
-    virtual void
-    EnableForceInMemory(){};
-
-    virtual void
-    DisableForceInMemory(){};
-
 public:
     std::shared_mutex mutex_;
 
