@@ -213,7 +213,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex,
     }
 
     SECTION("Invalid ivf param base_quantization_type") {
-        auto base_quantization_types = GENERATE("pq", "fsa");
+        auto base_quantization_types = GENERATE("fsa", "aq");
         constexpr const char* param_temp =
             R"({{
                 "dtype": "float32",
