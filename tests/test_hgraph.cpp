@@ -65,6 +65,7 @@ public:
         {"sq8", 0.95},
         {"sq8_uniform", 0.95},
         {"rabitq,fp32", 0.3},
+        {"pq,fp32", 0.95},
         {"sq8_uniform,fp32", 0.98},
         {"sq8_uniform,fp16", 0.98},
         {"sq8_uniform,bf16", 0.98},
@@ -95,6 +96,7 @@ HgraphTestIndex::GenerateHGraphBuildParametersString(const std::string& metric_t
             "max_degree": 96,
             "ef_construction": 500,
             "build_thread_count": {},
+            "base_pq_dim": {},
             "precise_quantization_type": "{}",
             "precise_io_type": "{}",
             "precise_file_path": "{}"
@@ -111,11 +113,17 @@ HgraphTestIndex::GenerateHGraphBuildParametersString(const std::string& metric_t
         "index_param": {{
             "base_quantization_type": "{}",
             "max_degree": 96,
+            "base_pq_dim": {},
             "ef_construction": 500,
             "build_thread_count": {}
         }}
     }}
     )";
+
+    int pq_dim = dim;
+    if (pq_dim % 2 == 0) {
+        pq_dim /= 2;
+    }
 
     auto strs = fixtures::SplitString(quantization_str, ',');
     std::string high_quantizer_str, precise_io_type = "block_memory_io";
@@ -132,6 +140,7 @@ HgraphTestIndex::GenerateHGraphBuildParametersString(const std::string& metric_t
                                            true, /* reorder */
                                            base_quantizer_str,
                                            thread_count,
+                                           pq_dim,
                                            high_quantizer_str,
                                            precise_io_type,
                                            dir.GenerateRandomFile());
@@ -141,6 +150,7 @@ HgraphTestIndex::GenerateHGraphBuildParametersString(const std::string& metric_t
                                            dim,
                                            extra_info_size,
                                            base_quantizer_str,
+                                           pq_dim,
                                            thread_count);
     }
     return build_parameters_str;
@@ -263,7 +273,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex,
     }
 
     SECTION("Invalid hgraph param base_quantization_type") {
-        auto base_quantization_types = GENERATE("pq", "fsa");
+        auto base_quantization_types = GENERATE("fsa");
         constexpr const char* param_temp =
             R"({{
                 "dtype": "float32",
