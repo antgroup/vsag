@@ -93,6 +93,17 @@ public:
         return QUANTIZATION_TYPE_VALUE_SQ4_UNIFORM;
     }
 
+public:
+    [[nodiscard]] std::pair<DataType, DataType>
+    GetLBandDiff() const {
+        return {lower_bound_, diff_};
+    }
+
+    DataType
+    GetCodesSum(const uint8_t* codes) const {
+        return *(sum_type*)(codes + offset_codes_sum_);
+    }
+
 private:
     DataType lower_bound_{0};
     DataType diff_{0};
@@ -105,6 +116,7 @@ private:
     uint64_t offset_code_{0};
     uint64_t offset_norm_{0};
     uint64_t offset_sum_{0};
+    uint64_t offset_codes_sum_{0};
 
     float trunc_rate_{0.05F};
 };
@@ -139,6 +151,9 @@ SQ4UniformQuantizer<metric>::SQ4UniformQuantizer(int dim, Allocator* allocator, 
     if constexpr (metric == MetricType::METRIC_TYPE_IP or
                   metric == MetricType::METRIC_TYPE_COSINE) {
         offset_sum_ = this->code_size_;
+        this->code_size_ += ceil_int(sizeof(sum_type), align_size);
+
+        offset_codes_sum_ = this->code_size_;
         this->code_size_ += ceil_int(sizeof(sum_type), align_size);
     }
 
@@ -190,6 +205,7 @@ SQ4UniformQuantizer<metric>::EncodeOneImpl(const DataType* data, uint8_t* codes)
     uint8_t scaled = 0;
     norm_type norm = 0;
     sum_type sum = 0;
+    sum_type codes_sum = 0;
 
     Vector<DataType> norm_data(this->allocator_);
     if constexpr (metric == MetricType::METRIC_TYPE_COSINE) {
@@ -215,6 +231,7 @@ SQ4UniformQuantizer<metric>::EncodeOneImpl(const DataType* data, uint8_t* codes)
         }
         norm += scaled * scaled;
         sum += data[d];
+        codes_sum += scaled;
     }
 
     if constexpr (metric == MetricType::METRIC_TYPE_L2SQR) {
@@ -224,6 +241,7 @@ SQ4UniformQuantizer<metric>::EncodeOneImpl(const DataType* data, uint8_t* codes)
     if constexpr (metric == MetricType::METRIC_TYPE_IP or
                   metric == MetricType::METRIC_TYPE_COSINE) {
         *(sum_type*)(codes + offset_sum_) = sum;
+        *(sum_type*)(codes + offset_codes_sum_) = codes_sum;
     }
 
     return true;
@@ -339,6 +357,7 @@ SQ4UniformQuantizer<metric>::SerializeImpl(StreamWriter& writer) {
     StreamWriter::WriteObj(writer, this->offset_code_);
     StreamWriter::WriteObj(writer, this->offset_norm_);
     StreamWriter::WriteObj(writer, this->offset_sum_);
+    StreamWriter::WriteObj(writer, this->offset_codes_sum_);
 }
 
 template <MetricType metric>
@@ -349,6 +368,7 @@ SQ4UniformQuantizer<metric>::DeserializeImpl(StreamReader& reader) {
     StreamReader::ReadObj(reader, this->offset_code_);
     StreamReader::ReadObj(reader, this->offset_norm_);
     StreamReader::ReadObj(reader, this->offset_sum_);
+    StreamReader::ReadObj(reader, this->offset_codes_sum_);
 }
 
 }  // namespace vsag

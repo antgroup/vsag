@@ -609,6 +609,80 @@ RaBitQFloatBinaryIP(const float* vector, const uint8_t* bits, uint64_t dim, floa
 #endif
 }
 
+uint32_t
+RaBitQSQ4UBinaryIP(const uint8_t* codes, const uint8_t* bits, uint64_t dim) {
+    // require dim align with 512
+#if defined(ENABLE_AVX512)
+    if (dim == 0) {
+        return 0;
+    }
+
+    // LUT has size of 2^8, lookup[i] = pop_count(i), where len(i) == 8
+    const __m512i lookup = _mm512_setr_epi64(0x0302020102010100llu,
+                                             0x0403030203020201llu,
+                                             0x0302020102010100llu,
+                                             0x0403030203020201llu,
+                                             0x0302020102010100llu,
+                                             0x0403030203020201llu,
+                                             0x0302020102010100llu,
+                                             0x0403030203020201llu);
+
+    uint32_t result = 0;
+    size_t num_bytes = (dim + 7) / 8;
+
+    const __m512i low_mask = _mm512_set1_epi8(0x0F);
+
+    for (uint64_t bit_pos = 0; bit_pos < 4; ++bit_pos) {
+        size_t i = 0;
+
+        __m512i acc = _mm512_setzero_si512();
+
+        for (; i + 64 <= num_bytes; i += 64) {
+            __m512i vec_codes = _mm512_loadu_si512(
+                reinterpret_cast<const __m512i*>(codes + bit_pos * num_bytes + i));
+            __m512i vec_bits = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(bits + i));
+
+            __m512i and_result = _mm512_and_si512(vec_codes, vec_bits);
+
+            // 64 * 8
+            __m512i lo = _mm512_and_si512(and_result, low_mask);
+            __m512i hi = _mm512_and_si512(_mm512_srli_epi32(and_result, 4), low_mask);
+
+            __m512i popcnt1 = _mm512_shuffle_epi8(lookup, lo);
+            __m512i popcnt2 = _mm512_shuffle_epi8(lookup, hi);
+
+            __m512i local = _mm512_add_epi8(popcnt1, popcnt2);
+
+            // 8 * 64
+            acc = _mm512_add_epi64(acc, _mm512_sad_epu8(local, _mm512_setzero_si512()));
+        }
+
+        __m256i t0 = _mm512_extracti64x4_epi64(acc, 0);
+        __m256i t1 = _mm512_extracti64x4_epi64(acc, 1);
+
+        uint64_t p0 = _mm256_extract_epi64(t0, 0) + _mm256_extract_epi64(t0, 1) +
+                      _mm256_extract_epi64(t0, 2) + _mm256_extract_epi64(t0, 3);
+
+        uint64_t p1 = _mm256_extract_epi64(t1, 0) + _mm256_extract_epi64(t1, 1) +
+                      _mm256_extract_epi64(t1, 2) + _mm256_extract_epi64(t1, 3);
+
+        uint64_t sum = p0 + p1;
+
+        for (; i < num_bytes; ++i) {
+            uint8_t bitwise_and = codes[bit_pos * num_bytes + i] & bits[i];
+            sum += __builtin_popcount(bitwise_and);
+        }
+
+        result += sum << bit_pos;
+    }
+
+    return result;
+
+#else
+    return generic::RaBitQSQ4UBinaryIP(codes, bits, dim);
+#endif
+}
+
 void
 DivScalar(const float* from, float* to, uint64_t dim, float scalar) {
 #if defined(ENABLE_AVX512)

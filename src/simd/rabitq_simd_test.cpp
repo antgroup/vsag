@@ -23,6 +23,94 @@
 
 using namespace vsag;
 
+#define TEST_ACCURACY_FP32(Func)                                 \
+    {                                                            \
+        float generic, sse, avx, avx2, avx512;                   \
+        generic = generic::Func(query, base, dim, inv_sqrt_d);   \
+        REQUIRE(std::abs(gt - generic) < 1e-4);                  \
+        if (SimdStatus::SupportSSE()) {                          \
+            sse = sse::Func(query, base, dim, inv_sqrt_d);       \
+            REQUIRE(std::abs(gt - sse) < 1e-4);                  \
+        }                                                        \
+        if (SimdStatus::SupportAVX()) {                          \
+            avx = avx::Func(query, base, dim, inv_sqrt_d);       \
+            REQUIRE(std::abs(gt - avx) < 1e-4);                  \
+        }                                                        \
+        if (SimdStatus::SupportAVX2()) {                         \
+            avx2 = avx2::Func(query, base, dim, inv_sqrt_d);     \
+            REQUIRE(std::abs(gt - avx2) < 1e-4);                 \
+        }                                                        \
+        if (SimdStatus::SupportAVX512()) {                       \
+            avx512 = avx512::Func(query, base, dim, inv_sqrt_d); \
+            REQUIRE(std::abs(gt - avx512) < 1e-4);               \
+        }                                                        \
+    };
+
+#define TEST_ACCURACY_SQ4(Func)                                        \
+    {                                                                  \
+        float gt, avx512;                                              \
+        gt = generic::Func(codes.data(), bits.data(), dim);            \
+        if (SimdStatus::SupportAVX512()) {                             \
+            avx512 = avx512::Func(codes.data(), bits.data(), dim);     \
+            REQUIRE(fixtures::dist_t(gt) == fixtures::dist_t(avx512)); \
+        }                                                              \
+    };
+
+#define BENCHMARK_SIMD_COMPUTE_SQ4(Simd, Comp)          \
+    BENCHMARK_ADVANCED(#Simd #Comp) {                   \
+        for (int i = 0; i < count; ++i) {               \
+            Simd::Comp(codes.data(), bits.data(), dim); \
+        }                                               \
+        return;                                         \
+    }
+
+TEST_CASE("RaBitQ SQ4U-BQ Compute Benchmark", "[ut][simd][!benchmark]") {
+    std::vector<uint8_t> codes = {0xFF,
+                                  0xFF,  // [1111 1111, 1111 1111]
+                                  0x0F,
+                                  0x0F,  // [0000 1111, 0000 1111]
+                                  0xF0,
+                                  0xF0,  // [1111 0000, 1111 0000]
+                                  0x00,
+                                  0x00};  // [0000 0000, 0000 0000]
+    codes.resize(64);
+    std::vector<uint8_t> bits = {0xAA, 0x55};  // [1010 1010, 0101 0101]
+    bits.resize(64);
+
+    int count = 10000;
+    int dim = 32;
+    BENCHMARK_SIMD_COMPUTE_SQ4(generic, RaBitQSQ4UBinaryIP);
+    BENCHMARK_SIMD_COMPUTE_SQ4(avx512, RaBitQSQ4UBinaryIP);
+}
+
+TEST_CASE("RaBitQ SQ4U-BQ Compute Codes", "[ut][simd]") {
+    std::vector<uint8_t> codes = {0xFF,
+                                  0xFF,  // [1111 1111, 1111 1111]
+                                  0x0F,
+                                  0x0F,  // [0000 1111, 0000 1111]
+                                  0xF0,
+                                  0xF0,  // [1111 0000, 1111 0000]
+                                  0x00,
+                                  0x00};  // [0000 0000, 0000 0000]
+    codes.resize(64);
+    std::vector<uint8_t> bits = {0xAA, 0x55};  // [1010 1010, 0101 0101]
+    bits.resize(64);
+
+    for (auto dim = 0; dim < 17; dim++) {
+        uint32_t result = generic::RaBitQSQ4UBinaryIP(codes.data(), bits.data(), dim);
+        TEST_ACCURACY_SQ4(RaBitQSQ4UBinaryIP);
+        if (dim == 0) {
+            REQUIRE(result == 0);
+        } else if (dim <= 8) {
+            // 4 * 1 + 4 * 2 + 2 * 4 + 2 * 8
+            REQUIRE(result == 36);
+        } else {
+            // 8 * 1 + 4 * 2 + 4 * 4 + 0 * 8
+            REQUIRE(result == 32);
+        }
+    }
+}
+
 TEST_CASE("RaBitQ FP32-BQ SIMD Compute Codes", "[ut][simd]") {
     auto dims = fixtures::get_common_used_dims();
     int64_t count = 100;
@@ -36,29 +124,8 @@ TEST_CASE("RaBitQ FP32-BQ SIMD Compute Codes", "[ut][simd]") {
             auto* query = queries.data() + i * dim;
             auto* base = bases.data() + i * code_size;
 
-            auto ip_32_32 = FP32ComputeIP(query, query, dim);
-            auto ip_32_1_generic = generic::RaBitQFloatBinaryIP(query, base, dim, inv_sqrt_d);
-            REQUIRE(std::abs(ip_32_1_generic - ip_32_32) < 1e-4);
-
-            if (SimdStatus::SupportAVX512()) {
-                auto ip_32_1_avx512 = avx512::RaBitQFloatBinaryIP(query, base, dim, inv_sqrt_d);
-                REQUIRE(std::abs(ip_32_1_avx512 - ip_32_32) < 1e-4);
-            }
-
-            if (SimdStatus::SupportAVX2()) {
-                auto ip_32_1_avx2 = avx2::RaBitQFloatBinaryIP(query, base, dim, inv_sqrt_d);
-                REQUIRE(std::abs(ip_32_1_avx2 - ip_32_32) < 1e-4);
-            }
-
-            if (SimdStatus::SupportAVX()) {
-                auto ip_32_1_avx = avx::RaBitQFloatBinaryIP(query, base, dim, inv_sqrt_d);
-                REQUIRE(std::abs(ip_32_1_avx - ip_32_32) < 1e-4);
-            }
-
-            if (SimdStatus::SupportSSE()) {
-                auto ip_32_1_sse = sse::RaBitQFloatBinaryIP(query, base, dim, inv_sqrt_d);
-                REQUIRE(std::abs(ip_32_1_sse - ip_32_32) < 1e-4);
-            }
+            auto gt = FP32ComputeIP(query, query, dim);
+            TEST_ACCURACY_FP32(RaBitQFloatBinaryIP);
         }
     }
 }
