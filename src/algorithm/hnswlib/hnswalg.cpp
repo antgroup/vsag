@@ -966,13 +966,15 @@ HierarchicalNSW::DeserializeImpl(StreamReader& reader, SpaceInterface* s, size_t
     auto newer_format_size = sizeof(InnerIdType) + sizeof(size_t);
     vsag::Vector<char> buffer(buffer_size, allocator_);
     char* raw_buffer = buffer.data();
+
     // step 1, try to parse/read with the newer serial format
     reader.Read(raw_buffer, newer_format_size);
     enterpoint_node_ = *(InnerIdType*)(raw_buffer);
     maxM_ = *(size_t*)(raw_buffer + sizeof(InnerIdType));
     bool is_newer_format = (M_ == maxM_);
+
+    // step 2, try to read with the older serial format
     if (not is_newer_format) {
-        // step 2, try to read with the older serial format
         reader.Read(raw_buffer + newer_format_size, buffer_size - newer_format_size);
         enterpoint_node_ = *(int64_t*)(raw_buffer);
         maxM_ = *(size_t*)(raw_buffer + sizeof(int64_t));
