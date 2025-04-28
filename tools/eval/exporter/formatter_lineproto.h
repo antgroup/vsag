@@ -62,7 +62,7 @@ public:
             // JSON_GET(recall_p50, std::to_string(value["recall_detail"]["p50"].get<float>()), "-1");
             // JSON_GET(recall_p90, std::to_string(value["recall_detail"]["p90"].get<float>()), "-1");
 
-            std::string row_template =
+            constexpr static const char* row_template =
                 "performance,case_name={0},index_name={1},dtype={2}"
                 " "
                 "num_vectors={3},dim={4},build_time={5},tps={6},qps={7}"

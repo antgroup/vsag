@@ -85,7 +85,8 @@ GenerateRandomDataset(uint64_t dim,
                       uint64_t count,
                       std::string metric_str = "l2",
                       bool is_query = false,
-                      uint64_t extra_info_size = 0) {
+                      uint64_t extra_info_size = 0,
+                      std::string vector_type = "dense") {
     auto base = vsag::Dataset::Make();
     bool need_normalize = (metric_str != "cosine");
     auto vecs =
@@ -102,9 +103,11 @@ GenerateRandomDataset(uint64_t dim,
         ->Float32Vectors(CopyVector(vecs))
         ->Int8Vectors(CopyVector(vecs_int8))
         ->Paths(paths)
-        ->SparseVectors(CopyVector(GenerateSparseVectors(count, dim)))
         ->NumElements(count)
         ->Owner(true);
+    if (vector_type == "sparse") {
+        base->SparseVectors(CopyVector(GenerateSparseVectors(count, dim)));
+    }
     if (extra_info_size != 0) {
         auto extra_infos = fixtures::generate_extra_infos(count, extra_info_size);
         base->ExtraInfos(CopyVector(extra_infos));
