@@ -82,6 +82,7 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
     this->build_pool_ = common_param.thread_pool_;
     if (this->build_thread_count_ > 1 && this->build_pool_ == nullptr) {
         this->build_pool_ = SafeThreadPool::FactoryDefaultThreadPool();
+        this->build_pool_->SetPoolSize(build_thread_count_);
     }
 }
 void
