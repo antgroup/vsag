@@ -90,6 +90,7 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
     resize(bottom_graph_->max_capacity_);
     if (this->build_thread_count_ > 1) {
         this->build_pool_ = SafeThreadPool::FactoryDefaultThreadPool();
+        this->build_pool_->SetPoolSize(build_thread_count_);
     }
     this->init_features();
 }
