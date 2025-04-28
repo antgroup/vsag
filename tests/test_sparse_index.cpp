@@ -28,7 +28,7 @@ public:
     constexpr static const char* build_param = R"(
         {
             "dim": 16,
-            "dtype": "float32",
+            "dtype": "sparse",
             "metric_type": "l2",
             "index_param": {
                 "need_sort": true
@@ -58,7 +58,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::SparseTestIndex,
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::SparseTestIndex,
                              "Sparse Index Serialize File",
-                             "[ft][pyramid]") {
+                             "[ft][sparse_index]") {
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
     auto metric_type = GENERATE("l2");

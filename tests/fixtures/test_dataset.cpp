@@ -346,10 +346,11 @@ TestDataset::CreateTestDataset(uint64_t dim,
     TestDatasetPtr dataset = std::shared_ptr<TestDataset>(new TestDataset);
     dataset->dim_ = dim;
     dataset->count_ = count;
-    dataset->base_ =
-        GenerateRandomDataset(dim, count, metric_str, false /*is_query*/, extra_info_size);
+    dataset->base_ = GenerateRandomDataset(
+        dim, count, metric_str, false /*is_query*/, extra_info_size, vector_type);
     constexpr uint64_t query_count = 100;
-    dataset->query_ = GenerateRandomDataset(dim, query_count, metric_str, true);
+    dataset->query_ =
+        GenerateRandomDataset(dim, query_count, metric_str, true, extra_info_size, vector_type);
     dataset->filter_query_ = dataset->query_;
     dataset->range_query_ = dataset->query_;
     dataset->valid_ratio_ = valid_ratio;
