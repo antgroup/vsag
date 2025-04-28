@@ -395,6 +395,48 @@ RaBitQFloatBinaryIP(const float* vector, const uint8_t* bits, uint64_t dim, floa
     return result;
 }
 
+uint32_t
+RaBitQSQ4UBinaryIP(const uint8_t* codes, const uint8_t* bits, uint64_t dim) {
+    // note that this func requiere the redident part in codes and bits is 0
+    // e.g., suppose dim = 10, then the value of bit pos = 11 to 15 should be 0
+    if (dim == 0) {
+        return 0.0f;
+    }
+
+    uint32_t result = 0;
+    size_t num_bytes = (dim + 7) / 8;
+    size_t num_blocks = num_bytes / 8;
+    size_t remainder = num_bytes % 8;
+
+    for (uint64_t bit_pos = 0; bit_pos < 4; ++bit_pos) {
+        const uint64_t* codes_block =
+            reinterpret_cast<const uint64_t*>(codes + bit_pos * num_bytes);
+        const uint64_t* bits_block = reinterpret_cast<const uint64_t*>(bits);
+
+        for (size_t i = 0; i < num_blocks; ++i) {
+            uint64_t bitwise_and = codes_block[i] & bits_block[i];
+            result += __builtin_popcountll(bitwise_and) << bit_pos;
+        }
+
+        if (remainder > 0) {
+            uint64_t leftover_code = 0;
+            uint64_t leftover_bits = 0;
+
+            for (size_t i = 0; i < remainder; ++i) {
+                leftover_code |=
+                    static_cast<uint64_t>(codes[bit_pos * num_bytes + num_blocks * 8 + i])
+                    << (i * 8);
+                leftover_bits |= static_cast<uint64_t>(bits[num_blocks * 8 + i]) << (i * 8);
+            }
+
+            uint64_t bitwise_and = leftover_code & leftover_bits;
+            result += __builtin_popcountll(bitwise_and) << bit_pos;
+        }
+    }
+
+    return result;
+}
+
 float
 Normalize(const float* from, float* to, uint64_t dim) {
     float norm = std::sqrt(FP32ComputeIP(from, from, dim));
