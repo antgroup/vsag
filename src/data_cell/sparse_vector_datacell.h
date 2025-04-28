@@ -105,14 +105,6 @@ public:
     [[nodiscard]] bool
     InMemory() const override;
 
-    void
-    EnableForceInMemory() override {
-    }
-
-    void
-    DisableForceInMemory() override {
-    }
-
     bool
     GetCodesById(InnerIdType id, uint8_t* codes) const override;
 
