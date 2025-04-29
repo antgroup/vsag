@@ -54,8 +54,12 @@ IVFNearestPartition::Train(const DatasetPtr dataset) {
         ->Owner(false);
 
     if (trainer_type_ == IVFNearestPartitionTrainerType::KMeansTrainer) {
+        constexpr int32_t kmeans_iter_count = 25;
         KMeansCluster cls(static_cast<int32_t>(dim), this->allocator_);
-        cls.Run(this->bucket_count_, dataset->GetFloat32Vectors(), dataset->GetNumElements());
+        cls.Run(this->bucket_count_,
+                dataset->GetFloat32Vectors(),
+                dataset->GetNumElements(),
+                kmeans_iter_count);
         memcpy(data.data(), cls.k_centroids_, dim * this->bucket_count_ * sizeof(float));
     } else if (trainer_type_ == IVFNearestPartitionTrainerType::RandomTrainer) {
         auto selected = select_k_numbers(dataset->GetNumElements(), this->bucket_count_);
