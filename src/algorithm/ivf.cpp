@@ -105,7 +105,7 @@ IVF::IVF(const IVFParameterPtr& param, const IndexCommonParam& common_param)
         throw VsagException(ErrorType::INTERNAL_ERROR, "bucket init error");
     }
     this->partition_strategy_ = std::make_shared<IVFNearestPartition>(
-        bucket_->bucket_count_, common_param, IVFNearestPartitionTrainerType::KMeansTrainer);
+        bucket_->bucket_count_, common_param, param->partition_train_type);
     this->use_reorder_ = param->use_reorder;
     if (this->use_reorder_) {
         this->reorder_codes_ = FlattenInterface::MakeInstance(param->flatten_param, common_param);
