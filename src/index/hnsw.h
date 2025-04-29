@@ -30,6 +30,7 @@
 #include "../impl/conjugate_graph.h"
 #include "../logger.h"
 #include "../utils.h"
+#include "hnsw_zparameters.h"
 #include "vsag/binaryset.h"
 #include "vsag/errors.h"
 #include "vsag/index.h"
@@ -49,6 +50,7 @@ public:
          float alpha = 1.0,
          float redundant_rate = 1.0,
          std::string extra_file = "",
+         ODesentParametersPtr odesent_parameters = nullptr,
          Allocator* allocator = nullptr);
 
     ~HNSW();
@@ -219,6 +221,8 @@ private:
 
     bool use_conjugate_graph_;
     std::shared_ptr<ConjugateGraph> conjugate_graph_;
+
+    ODesentParametersPtr odesent_parameters_ = nullptr;
 
     int64_t dim_;
     int64_t M_;

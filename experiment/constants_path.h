@@ -38,7 +38,12 @@ constexpr const char* BUILD_PARAM_FMT = R"(
             "sq_num_bits": {},
             "use_static": {},
             "redundant_rate": {},
-            "extra_file": "123"
+            "extra_file": "123",
+            "graph_type": "{}",
+            "sample_rate": {},
+            "alpha": {},
+            "graph_iter_turn": {},
+            "use_thread": {}
         }}
     }}
     )";

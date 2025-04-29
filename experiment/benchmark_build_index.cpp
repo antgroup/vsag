@@ -14,6 +14,12 @@ bool use_static = false;
 int sq_num_bits = -1;
 int gt_dim = 100;
 float redundant_rate = 1.0;
+std::string graph_type = "odescent";
+bool use_thread = true;
+float alpha = 1;
+float sample_rate = 0.2;
+float graph_iter_turn = 20;
+
 
 void
 normalize(float* input_vector, int64_t dim) {
@@ -134,7 +140,7 @@ int build(bool is_recompute = false) {
                                          workspace, algo_name, dataset_name,
                                          base_npts, BL, BR,
                                          use_static ? "static" : "pure");
-    auto build_parameters = fmt::format(BUILD_PARAM_FMT, metric_type, base_dim, BR, BL, sq_num_bits, use_static, 1.0);
+    auto build_parameters = fmt::format(BUILD_PARAM_FMT, metric_type, base_dim, BR, BL, sq_num_bits, use_static, 1.0, graph_type, sample_rate, alpha, graph_iter_turn, use_thread);
     auto index = vsag::Factory::CreateIndex(algo_name, build_parameters).value();
     if (std::filesystem::exists(index_path) and not is_recompute) {
         logger->Debug(fmt::format("====Index Path Exists===="));
@@ -212,7 +218,7 @@ int calculate_gt(bool is_recompute = false) {
 
     // index load
     logger->Debug(fmt::format("====Start create===="));
-    auto build_parameters = fmt::format(BUILD_PARAM_FMT, metric_type, expected_dim, BR, BL, sq_num_bits, false, 1.0);
+    auto build_parameters = fmt::format(BUILD_PARAM_FMT, metric_type, expected_dim, BR, BL, sq_num_bits, false, 1.0, graph_type, sample_rate, alpha, graph_iter_turn, use_thread);
     auto index = vsag::Factory::CreateIndex(algo_name, build_parameters).value();
     std::string index_path = fmt::format(INDEX_PATH_FMT,
                                          workspace, algo_name, dataset_name,
@@ -343,7 +349,7 @@ int search(std::vector<uint32_t> efs, uint32_t k = 10) {
         base_npts = get_data(base, expected_dim, base_path);
         base->NumElements(base_npts);
     }
-    auto build_parameters = fmt::format(BUILD_PARAM_FMT, metric_type, expected_dim, BR, BL, sq_num_bits, use_static, redundant_rate);
+    auto build_parameters = fmt::format(BUILD_PARAM_FMT, metric_type, expected_dim, BR, BL, sq_num_bits, use_static, redundant_rate, graph_type, sample_rate, alpha, graph_iter_turn, use_thread);
     auto index = vsag::Factory::CreateIndex(algo_name, build_parameters).value();
     std::string index_path = fmt::format(INDEX_PATH_FMT,
                                          workspace, algo_name, dataset_name,
@@ -459,7 +465,7 @@ int main(int argc, char** argv) {
         rr = -1;
     }
 
-    bool is_recompute = false;
+    bool is_recompute = true;
     // prepare index and ground_truth
     build(is_recompute);
 //    calculate_gt(is_recompute);

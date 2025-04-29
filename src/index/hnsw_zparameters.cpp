@@ -18,9 +18,9 @@
 
 #include <nlohmann/json.hpp>
 
+#include "../algorithm/hnswlib/hnswlib.h"
 #include "../common.h"
 #include "vsag/constants.h"
-
 namespace vsag {
 
 CreateHnswParameters
@@ -110,6 +110,23 @@ CreateHnswParameters::FromJson(const std::string& json_string) {
                        fmt::format("alpha({}) must in range[0, 1.0]", obj.redundant_rate));
     } else {
         obj.redundant_rate = 1;
+    }
+
+    if (params[INDEX_HNSW].contains("graph_type")) {
+        std::string graph_type = params[INDEX_HNSW]["graph_type"];
+        if (graph_type == "odescent") {
+            obj.odesent_parameters = std::make_shared<ODesentParameters>();
+            obj.odesent_parameters->alpha = obj.alpha;
+            if (params[INDEX_HNSW].contains("sample_rate")) {
+                obj.odesent_parameters->sample_rate = params[INDEX_HNSW]["sample_rate"];
+            }
+            if (params[INDEX_HNSW].contains("graph_iter_turn")) {
+                obj.odesent_parameters->graph_iter_turn = params[INDEX_HNSW]["graph_iter_turn"];
+            }
+            if (params[INDEX_HNSW].contains("use_thread")) {
+                obj.odesent_parameters->use_thread = params[INDEX_HNSW]["use_thread"];
+            }
+        }
     }
 
     return obj;

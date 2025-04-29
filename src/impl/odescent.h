@@ -14,6 +14,8 @@
 
 #pragma once
 
+#include <ThreadPool.h>
+
 #include <iostream>
 #include <queue>
 #include <random>
@@ -21,14 +23,13 @@
 #include <unordered_set>
 #include <vector>
 
+#include "../index/hnsw_zparameters.h"
 #include "../logger.h"
 #include "../simd/simd.h"
 #include "../utils.h"
 #include "vsag/dataset.h"
-#include <ThreadPool.h>
 
 namespace vsag {
-
 
 class LinearCongruentialGenerator {
 public:
@@ -51,8 +52,6 @@ private:
     static const uint32_t C = 1013904223;
     static const uint32_t M = 4294967295;  // 2^32 - 1
 };
-
-
 
 struct Node {
     bool old = false;
@@ -115,8 +114,13 @@ public:
 
 class NNdescent : public Graph {
 public:
-    NNdescent(int64_t max_degree, int64_t turn, DistanceFunc distance)
-        : max_degree_(max_degree), turn_(turn), distance_(distance) {
+    NNdescent(int64_t max_degree, ODesentParametersPtr parameters, DistanceFunc distance)
+        : max_degree_(max_degree),
+          turn_(parameters->graph_iter_turn),
+          alpha_(parameters->alpha),
+          sample_rate_(parameters->sample_rate),
+          use_thread_pool_(parameters->use_thread),
+          distance_(distance) {
     }
 
     bool
@@ -125,7 +129,9 @@ public:
             return false;
         }
         is_build_ = true;
-        this->thread_pool_ = std::make_shared<progschj::ThreadPool>(16);
+        if (use_thread_pool_) {
+            this->thread_pool_ = std::make_shared<progschj::ThreadPool>(16);
+        }
         dim_ = dataset->GetDim();
         data_num_ = dataset->GetNumElements();
         data_ = dataset->GetFloat32Vectors();
@@ -145,14 +151,13 @@ public:
         check_turn();
         {
             for (int i = 0; i < turn_; ++i) {
-                sample_candidates(old_neighbors, new_neighbors, 0.3);
+                sample_candidates(old_neighbors, new_neighbors, sample_rate_);
                 update_neighbors(old_neighbors, new_neighbors);
                 repair_no_in_edge();
                 check_turn();
             }
             prune_graph();
             add_reverse_edges();
-            repair_no_in_edge();
             check_turn();
         }
         return true;
@@ -335,7 +340,6 @@ private:
         parallelize_task(task);
     }
 
-
     void
     repair_no_in_edge() {
         std::vector<int> in_edges_count(data_num_, 0);
@@ -346,14 +350,12 @@ private:
         }
 
         std::vector<int> replace_pos(
-            data_num_,
-            static_cast<int32_t>(std::min(data_num_ - 1, max_degree_) - 1));
+            data_num_, static_cast<int32_t>(std::min(data_num_ - 1, max_degree_) - 1));
         auto min_in_degree = std::min(min_in_degree_, data_num_ - 1);
         for (int i = 0; i < data_num_; ++i) {
             auto& link = graph[i].neighbors;
             int need_replace_loc = 0;
-            while (in_edges_count[i] < min_in_degree &&
-                   need_replace_loc < max_degree_) {
+            while (in_edges_count[i] < min_in_degree && need_replace_loc < max_degree_) {
                 uint32_t need_replace_id = link[need_replace_loc].id;
                 bool has_connect = false;
                 for (auto& neighbor : graph[need_replace_id].neighbors) {
@@ -377,7 +379,6 @@ private:
                 need_replace_loc++;
             }
         }
-
     }
 
     void
@@ -476,12 +477,11 @@ private:
             connect_count++;
         }
         loss /= edge_count;
-        logger::info(
-            fmt::format("loss:{} edge_count:{} no_in_edge_count:{}  connections:{} ",
-                        loss,
-                        edge_count,
-                        no_in_edge_count,
-                        connect_count));
+        logger::info(fmt::format("loss:{} edge_count:{} no_in_edge_count:{}  connections:{} ",
+                                 loss,
+                                 edge_count,
+                                 no_in_edge_count,
+                                 connect_count));
     }
 
 private:
@@ -515,10 +515,8 @@ private:
     std::vector<bool> visited_;
     int64_t min_in_degree_ = 3;
     float alpha_ = 1.3;
-
-    float all_calculate_ = 0;
-    float valid_calculate_ = 0;
-    float duplicate_rate = 0;
+    float sample_rate_ = 0.2;
+    bool use_thread_pool_ = false;
     int64_t block_size_ = 10000;
     std::vector<std::mutex> points_lock_;
     std::vector<std::vector<Node>> new_candidates_;
@@ -530,8 +528,8 @@ private:
 
 class HierarchicalGraph : public Graph {
 public:
-    HierarchicalGraph(int64_t max_degree, int64_t turn, DistanceFunc distance)
-        : max_degree_(max_degree), turn_(turn), distance_(distance) {
+    HierarchicalGraph(int64_t max_degree, ODesentParametersPtr parameters, DistanceFunc distance)
+        : max_degree_(max_degree), parameters_(parameters), distance_(distance) {
     }
 
     bool
@@ -545,8 +543,8 @@ public:
         int current_size = dataset->GetNumElements();
         while (current_size) {
             std::cout << "build level:" << level_ << " has nodes:" << current_size << std::endl;
-            h_graph_[level_] =
-                std::make_shared<NNdescent>(max_degree_ * (level_ == 0 ? 2 : 1), turn_, distance_);
+            h_graph_[level_] = std::make_shared<NNdescent>(
+                max_degree_ * (level_ == 0 ? 2 : 1), parameters_, distance_);
             h_graph_[level_]->Build(sub_dataset);
             current_size /= max_degree_;
             sub_dataset->NumElements(current_size);
@@ -585,6 +583,7 @@ private:
     std::vector<bool> visited_;
 
     DistanceFunc distance_;
+    ODesentParametersPtr parameters_;
 
     std::unordered_map<int, std::shared_ptr<NNdescent>> h_graph_;
     int level_ = 0;

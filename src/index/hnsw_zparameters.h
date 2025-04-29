@@ -17,9 +17,20 @@
 #include <memory>
 #include <string>
 
-#include "../algorithm/hnswlib/hnswlib.h"
+namespace hnswlib {
+class SpaceInterface;
+}
 
 namespace vsag {
+
+struct ODesentParameters {
+    float alpha{1.2};
+    float sample_rate{0.2};
+    int64_t graph_iter_turn{30};
+    bool use_thread{false};
+};
+
+using ODesentParametersPtr = std::shared_ptr<ODesentParameters>;
 
 struct CreateHnswParameters {
 public:
@@ -37,6 +48,7 @@ public:
     int sq_num_bits;
     float redundant_rate;
     float alpha;
+    ODesentParametersPtr odesent_parameters{nullptr};
 
 protected:
     CreateHnswParameters() = default;

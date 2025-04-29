@@ -377,8 +377,8 @@ public:
                 avg_degree += size;
             }
         }
-        vsag::logger::info(
-            fmt::format("====high_level_avg_degree: {} ====", 1.0 * avg_degree / cur_element_count_));
+        vsag::logger::info(fmt::format("====high_level_avg_degree: {} ====",
+                                       1.0 * avg_degree / cur_element_count_));
 
         cut_num_ = cur_element_count_ * redundant_rate_;
         vsag::logger::info(fmt::format("====redundant size: {} ====", cut_num_));

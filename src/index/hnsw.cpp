@@ -67,6 +67,7 @@ HNSW::HNSW(std::shared_ptr<hnswlib::SpaceInterface> space_interface,
            float alpha,
            float redundant_rate,
            std::string extra_file,
+           ODesentParametersPtr odesent_parameters,
            Allocator* allocator)
     : space(std::move(space_interface)),
       use_static_(use_static),
@@ -74,7 +75,8 @@ HNSW::HNSW(std::shared_ptr<hnswlib::SpaceInterface> space_interface,
       use_reversed_edges_(use_reversed_edges),
       pq_code_file(std::move(extra_file)),
       sq_num_bits_(sq_num_bits),
-      redundant_rate_(redundant_rate) {
+      redundant_rate_(redundant_rate),
+      odesent_parameters_(odesent_parameters) {
     dim_ = *((size_t*)space->get_dist_func_param());
 
     M = std::min(std::max(M, MINIMAL_M), MAXIMAL_M);
@@ -150,20 +152,19 @@ HNSW::build(const DatasetPtr& base) {
         auto ids = base->GetIds();
         auto vectors = base->GetFloat32Vectors();
         std::vector<int64_t> failed_ids;
-//                {
-//                    SlowTaskTimer t("hnsw graph");
-//        #pragma omp parallel for
-//                    for (int64_t i = 0; i < num_elements; ++i) {
-//                        // noexcept runtime
-//                        if (!alg_hnsw->addPoint((const void*)(vectors + i * dim_), ids[i])) {
-//                            logger::debug("duplicate point: {}", ids[i]);
-//                            failed_ids.emplace_back(ids[i]);
-//                        }
-//                    }
-//                }
-        {
+        if (odesent_parameters_ == nullptr) {
             SlowTaskTimer t("hnsw graph");
-            vsag::HierarchicalGraph graph(M_, 15, space->get_dist_func());
+#pragma omp parallel for
+            for (int64_t i = 0; i < num_elements; ++i) {
+                // noexcept runtime
+                if (!alg_hnsw->addPoint((const void*)(vectors + i * dim_), ids[i])) {
+                    logger::debug("duplicate point: {}", ids[i]);
+                    failed_ids.emplace_back(ids[i]);
+                }
+            }
+        } else {
+            SlowTaskTimer t("hnsw graph");
+            vsag::HierarchicalGraph graph(M_, odesent_parameters_, space->get_dist_func());
             graph.Build(base);
             alg_hnsw->set_graph(base, graph);
         }
