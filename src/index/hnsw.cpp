@@ -52,6 +52,7 @@ const static uint32_t UPDATE_CHECK_SEARCH_K = 10;
 const static uint32_t GENERATE_SEARCH_L = 400;
 const static uint32_t UPDATE_CHECK_SEARCH_L = 100;
 const static float GENERATE_OMEGA = 0.51;
+const static int64_t AMPLIFICATION_FACTOR = 10;
 
 HNSW::HNSW(HnswParameters hnsw_params, const IndexCommonParam& index_common_param)
     : space_(std::move(hnsw_params.space)),
@@ -254,6 +255,9 @@ HNSW::knn_search(const DatasetPtr& query,
         // check search parameters
         auto params = HnswSearchParameters::FromJson(parameters);
 
+        CHECK_ARGUMENT(params.ef_search < AMPLIFICATION_FACTOR * k,
+                       fmt::format("ef_search({}) is too large", params.ef_search));
+
         if (iter_ctx != nullptr && *iter_ctx == nullptr) {
             auto* filter_context = new IteratorFilterContext();
             filter_context->init(alg_hnsw_->getMaxElements(), params.ef_search, allocator_.get());
@@ -402,6 +406,9 @@ HNSW::range_search(const DatasetPtr& query,
         // check search parameters
         auto params = HnswSearchParameters::FromJson(parameters);
 
+        params.ef_search = std::max(1L, params.ef_search);
+        CHECK_ARGUMENT(params.ef_search <= 1000,
+                       fmt::format("ef_search({}) is too large", params.ef_search));
         // perform search
         std::priority_queue<std::pair<float, LabelType>> results;
         double time_cost;

@@ -103,8 +103,6 @@ HnswSearchParameters::FromJson(const std::string& json_string) {
         params[index_name].contains(HNSW_PARAMETER_EF_RUNTIME),
         fmt::format("parameters[{}] must contains {}", index_name, HNSW_PARAMETER_EF_RUNTIME));
     obj.ef_search = params[index_name][HNSW_PARAMETER_EF_RUNTIME];
-    CHECK_ARGUMENT((1 <= obj.ef_search) and (obj.ef_search <= 1000),
-                   fmt::format("ef_search({}) must in range[1, 1000]", obj.ef_search));
 
     // set obj.use_conjugate_graph search
     if (params[index_name].contains(PARAMETER_USE_CONJUGATE_GRAPH_SEARCH)) {
