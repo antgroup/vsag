@@ -9,6 +9,28 @@ FetchContent_Declare (
   INACTIVITY_TIMEOUT 5
   TIMEOUT 30
   )
-set (CPR_USE_SYSTEM_CURL ON)
+
+FetchContent_GetProperties(cpr)
+if(NOT cpr_POPULATED)
+  FetchContent_Populate(cpr)
+endif()
+
+set(PATCH_FILE "${CMAKE_SOURCE_DIR}/extern/cpr/fix_curl.patch")
+
+find_package(Git REQUIRED)
+execute_process(
+        COMMAND ${GIT_EXECUTABLE} apply --ignore-whitespace --whitespace=fix ${PATCH_FILE}
+        WORKING_DIRECTORY ${cpr_SOURCE_DIR}
+        RESULT_VARIABLE PATCH_RESULT
+)
+
+if(NOT PATCH_RESULT EQUAL 0)
+  message(WARNING "Failed to apply CURL modification patch to CPR CMakeLists.txt")
+else()
+  message(STATUS "CURL Modification Patch applied successfully")
+endif()
+
+set (CPR_USE_SYSTEM_CURL OFF)
 set (CPR_ENABLE_SSL OFF)
-FetchContent_MakeAvailable (cpr)
+
+add_subdirectory(${cpr_SOURCE_DIR} ${cpr_BINARY_DIR})
