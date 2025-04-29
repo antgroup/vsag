@@ -40,7 +40,7 @@ public:
     virtual ~GraphInterface() = default;
 
     static GraphInterfacePtr
-    MakeInstance(const GraphInterfaceParamPtr& graph_interface_param,
+    MakeInstance(const GraphInterfaceParamPtr& graph_param,
                  const IndexCommonParam& common_param,
                  bool is_sparse = false);
 

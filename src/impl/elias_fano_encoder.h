@@ -35,44 +35,47 @@ public:
     Encode(const Vector<InnerIdType>& values, InnerIdType max_value);
 
     // Decompress all values
-    Vector<InnerIdType>
-    DecompressAll(Allocator* allocator) const;
+    void
+    DecompressAll(Vector<InnerIdType>& neighbors) const;
 
     void
     Clear() {
-        if (bits_ != nullptr) {
-            allocator_->Deallocate(bits_);
-            bits_ = nullptr;
+        if (bits != nullptr) {
+            allocator_->Deallocate(bits);
+            bits = nullptr;
         }
-        num_elements_ = 0;
-        low_bits_width_ = 0;
-        low_bits_size_ = 0;
-        high_bits_size_ = 0;
+        num_elements = 0;
+        low_bits_width = 0;
+        low_bits_size = 0;
+        high_bits_size = 0;
     }
 
     [[nodiscard]] size_t
     SizeInBytes() const {
-        return sizeof(EliasFanoEncoder) + (low_bits_size_ + high_bits_size_) * sizeof(uint64_t);
+        return sizeof(EliasFanoEncoder) + (low_bits_size + high_bits_size) * sizeof(uint64_t);
     }
 
     [[nodiscard]] uint8_t
     Size() const {
-        return num_elements_;
+        return num_elements;
     }
 
+    uint64_t* bits{nullptr};    // Combined storage for low bits and high bits
+    uint8_t num_elements{0};    // Number of elements, max 255
+    uint8_t low_bits_width{0};  // Width of low bits
+    uint8_t low_bits_size{0};   // Size of low_bits_ array
+    uint8_t high_bits_size{0};  // Size of high_bits_ array
+
 private:
+    // requires "const" to pass lint check
+    // set_low_bits modifies the values pointed by ${bits}, but not the pointer itself
     void
-    set_low_bits(size_t index, InnerIdType value);
+    set_low_bits(size_t index, InnerIdType value) const;
 
     [[nodiscard]] InnerIdType
     get_low_bits(size_t index) const;
 
     Allocator* allocator_;
-    uint64_t* bits_{nullptr};    // Combined storage for low bits and high bits
-    uint8_t num_elements_{0};    // Number of elements, max 255
-    uint8_t low_bits_width_{0};  // Width of low bits
-    uint8_t low_bits_size_{0};   // Size of low_bits_ array
-    uint8_t high_bits_size_{0};  // Size of high_bits_ array
 };
 
 }  // namespace vsag

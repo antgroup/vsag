@@ -115,7 +115,7 @@ void
 GraphDataCell<IOTmpl>::InsertNeighborsById(InnerIdType id,
                                            const Vector<InnerIdType>& neighbor_ids) {
     if (neighbor_ids.size() > this->maximum_degree_) {
-        logger::warn(fmt::format(
+        throw std::invalid_argument(fmt::format(
             "insert neighbors count {} more than {}", neighbor_ids.size(), this->maximum_degree_));
     }
     InnerIdType current = total_count_.load();
