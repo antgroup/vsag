@@ -56,6 +56,7 @@ public:
         {"sq8", 0.84},
         {"sq8_uniform", 0.83},
         {"sq8_uniform,fp32", 0.89},
+        {"pq,fp32", 0.85},
     };
 };
 
@@ -81,10 +82,15 @@ IVFTestIndex::GenerateIVFBuildParametersString(const std::string& metric_type,
             "base_quantization_type": "{}",
             "ivf_train_type": "{}",
             "use_reorder": {},
+            "base_pq_dim": {},
             "precise_quantization_type": "{}"
         }}
     }}
     )";
+    auto pq_dim = dim;
+    if (dim % 2 == 0) {
+        pq_dim = dim / 2;
+    }
     auto strs = fixtures::SplitString(quantization_str, ',');
     std::string basic_quantizer_str = strs[0];
     bool use_reorder = false;
@@ -100,6 +106,7 @@ IVFTestIndex::GenerateIVFBuildParametersString(const std::string& metric_type,
                                        basic_quantizer_str,
                                        train_type,
                                        use_reorder,
+                                       pq_dim,
                                        precise_quantizer_str);
 
     INFO(build_parameters_str);
