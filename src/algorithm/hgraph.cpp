@@ -74,6 +74,10 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
         block_size_per_vector =
             std::max(block_size_per_vector, this->high_precise_codes_->code_size_);
     }
+    if (extra_infos_ != nullptr) {
+        block_size_per_vector =
+            std::max(block_size_per_vector, static_cast<uint32_t>(this->extra_info_size_));
+    }
     auto increase_count = step_block_size / block_size_per_vector;
     this->resize_increase_count_bit_ = std::max(
         DEFAULT_RESIZE_BIT, static_cast<uint64_t>(log2(static_cast<double>(increase_count))));
