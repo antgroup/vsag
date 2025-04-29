@@ -961,6 +961,35 @@ HierarchicalNSW::DeserializeImpl(StreamReader& reader, SpaceInterface* s, size_t
     ReadOne(reader, max_level_);
 
     // Fixes #623: Unified entrypoint_node type during index loading (old: int64_t → new: InnerIdType (i.e., uint32))
+    /*
+     * Header Format Diagram for enterpoint_node_ and maxM_
+     *
+     * This diagram illustrates the serialization format differences between old and new versions.
+     * The code handles backward compatibility by trying both formats during index loading.
+     */
+    // New Format (v2) Header Layout
+    // -----------------------------
+    // | Field              | Type       | Size (bytes) | Description                  |
+    // |--------------------|------------|--------------|------------------------------|
+    // | enterpoint_node_   | InnerIdType| 4            | 32-bit unsigned integer      |
+    // | maxM_              | size_t     | 8            | Maximum connections count    |
+    // ----------------------------- 4 + 8 = 12 bytes total -----------------------------------
+
+    // Old Format (v1) Header Layout
+    // -----------------------------
+    // | Field              | Type       | Size (bytes) | Description                  |
+    // |--------------------|------------|--------------|------------------------------|
+    // | enterpoint_node_   | int64_t    | 8            | 64-bit signed integer        |
+    // | maxM_              | size_t     | 8            | Maximum connections count    |
+    // ----------------------------- 8 + 8 = 16 bytes total -----------------------------------
+
+    /*
+     * Compatibility Logic Flow:
+     * 1. Try reading newer format (12 bytes)
+     * 2. If validation fails (M_ != maxM_),
+     * 3. Read older format (16 bytes) as fallback
+     */
+
     // to resolve compatibility issues
     auto buffer_size = sizeof(int64_t) + sizeof(size_t);
     auto newer_format_size = sizeof(InnerIdType) + sizeof(size_t);
