@@ -9,6 +9,7 @@ set (SIMD_SRCS
         fp32_simd.cpp
         fp16_simd.cpp
         bf16_simd.cpp
+        pqfs_simd.cpp
         sq8_simd.cpp
         sq4_simd.cpp
         sq4_uniform_simd.cpp

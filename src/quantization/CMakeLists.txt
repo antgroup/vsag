@@ -11,6 +11,7 @@ set (QUANTIZER_SRC
         scalar_quantization/fp16_quantizer_parameter.cpp
         rabitq_quantization/rabitq_quantizer_parameter.cpp
         product_quantization/product_quantizer_parameter.cpp
+        product_quantization/pq_fastscan_quantizer_parameter.cpp
 )
 
 add_library (quantizer OBJECT ${QUANTIZER_SRC})

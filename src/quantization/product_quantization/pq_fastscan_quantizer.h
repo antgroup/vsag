@@ -26,24 +26,27 @@
 #include "impl/kmeans_cluster.h"
 #include "index/index_common_param.h"
 #include "inner_string_params.h"
+#include "pq_fastscan_quantizer_parameter.h"
 #include "prefetch.h"
-#include "product_quantizer_parameter.h"
 #include "quantization/quantizer.h"
+#include "quantization/scalar_quantization/scalar_quantization_trainer.h"
 #include "simd/fp32_simd.h"
 #include "simd/normalize.h"
+#include "simd/pqfs_simd.h"
 
 namespace vsag {
 
 template <MetricType metric = MetricType::METRIC_TYPE_L2SQR>
-class ProductQuantizer : public Quantizer<ProductQuantizer<metric>> {
+class PQFastScanQuantizer : public Quantizer<PQFastScanQuantizer<metric>> {
 public:
-    explicit ProductQuantizer(int dim, int64_t pq_dim, Allocator* allocator);
+    explicit PQFastScanQuantizer(int dim, int64_t pq_dim, Allocator* allocator);
 
-    ProductQuantizer(const ProductQuantizerParamPtr& param, const IndexCommonParam& common_param);
+    PQFastScanQuantizer(const PQFastScanQuantizerParamPtr& param,
+                        const IndexCommonParam& common_param);
 
-    ProductQuantizer(const QuantizerParamPtr& param, const IndexCommonParam& common_param);
+    PQFastScanQuantizer(const QuantizerParamPtr& param, const IndexCommonParam& common_param);
 
-    ~ProductQuantizer() = default;
+    ~PQFastScanQuantizer() = default;
 
     bool
     TrainImpl(const DataType* data, uint64_t count);
@@ -64,13 +67,15 @@ public:
     ComputeImpl(const uint8_t* codes1, const uint8_t* codes2);
 
     inline void
-    ProcessQueryImpl(const DataType* query, Computer<ProductQuantizer>& computer) const;
+    ProcessQueryImpl(const DataType* query, Computer<PQFastScanQuantizer>& computer) const;
 
     inline void
-    ComputeDistImpl(Computer<ProductQuantizer>& computer, const uint8_t* codes, float* dists) const;
+    ComputeDistImpl(Computer<PQFastScanQuantizer>& computer,
+                    const uint8_t* codes,
+                    float* dists) const;
 
     inline void
-    ComputeBatchDistImpl(Computer<ProductQuantizer<metric>>& computer,
+    ComputeBatchDistImpl(Computer<PQFastScanQuantizer<metric>>& computer,
                          uint64_t count,
                          const uint8_t* codes,
                          float* dists) const;
@@ -82,12 +87,15 @@ public:
     DeserializeImpl(StreamReader& reader);
 
     inline void
-    ReleaseComputerImpl(Computer<ProductQuantizer<metric>>& computer) const;
+    ReleaseComputerImpl(Computer<PQFastScanQuantizer<metric>>& computer) const;
 
     [[nodiscard]] inline std::string
     NameImpl() const {
-        return QUANTIZATION_TYPE_VALUE_PQ;
+        return QUANTIZATION_TYPE_VALUE_PQFS;
     }
+
+    inline void
+    Package32(const uint8_t* codes, uint8_t* packaged_codes) const;
 
 private:
     [[nodiscard]] inline const float*
@@ -97,8 +105,9 @@ private:
     }
 
 public:
-    constexpr static int64_t PQ_BITS = 8L;
-    constexpr static int64_t CENTROIDS_PER_SUBSPACE = 256L;
+    constexpr static int64_t PQ_BITS = 4L;
+    constexpr static int64_t CENTROIDS_PER_SUBSPACE = 16L;
+    constexpr static int64_t BLOCK_SIZE_PACKAGE = 32L;
 
 public:
     int64_t pq_dim_{1};
@@ -108,34 +117,37 @@ public:
 };
 
 template <MetricType Metric>
-ProductQuantizer<Metric>::ProductQuantizer(int dim, int64_t pq_dim, Allocator* allocator)
-    : Quantizer<ProductQuantizer<Metric>>(dim, allocator), pq_dim_(pq_dim), codebooks_(allocator) {
+PQFastScanQuantizer<Metric>::PQFastScanQuantizer(int dim, int64_t pq_dim, Allocator* allocator)
+    : Quantizer<PQFastScanQuantizer<Metric>>(dim, allocator),
+      pq_dim_(pq_dim),
+      codebooks_(allocator) {
     if (dim % pq_dim != 0) {
         throw VsagException(
             ErrorType::INVALID_ARGUMENT,
             fmt::format("pq_dim({}) does not divide evenly into dim({})", pq_dim, dim));
     }
-    this->code_size_ = this->pq_dim_;
+    this->code_size_ = (this->pq_dim_ + 1) / 2;
     this->subspace_dim_ = this->dim_ / pq_dim;
     codebooks_.resize(this->dim_ * CENTROIDS_PER_SUBSPACE);
 }
 
 template <MetricType metric>
-ProductQuantizer<metric>::ProductQuantizer(const ProductQuantizerParamPtr& param,
-                                           const IndexCommonParam& common_param)
-    : ProductQuantizer<metric>(common_param.dim_, param->pq_dim_, common_param.allocator_.get()) {
+PQFastScanQuantizer<metric>::PQFastScanQuantizer(const PQFastScanQuantizerParamPtr& param,
+                                                 const IndexCommonParam& common_param)
+    : PQFastScanQuantizer<metric>(
+          common_param.dim_, param->pq_dim_, common_param.allocator_.get()) {
 }
 
 template <MetricType metric>
-ProductQuantizer<metric>::ProductQuantizer(const QuantizerParamPtr& param,
-                                           const IndexCommonParam& common_param)
-    : ProductQuantizer<metric>(std::dynamic_pointer_cast<ProductQuantizerParameter>(param),
-                               common_param) {
+PQFastScanQuantizer<metric>::PQFastScanQuantizer(const QuantizerParamPtr& param,
+                                                 const IndexCommonParam& common_param)
+    : PQFastScanQuantizer<metric>(std::dynamic_pointer_cast<PQFastScanQuantizerParameter>(param),
+                                  common_param) {
 }
 
 template <MetricType metric>
 bool
-ProductQuantizer<metric>::TrainImpl(const vsag::DataType* data, uint64_t count) {
+PQFastScanQuantizer<metric>::TrainImpl(const vsag::DataType* data, uint64_t count) {
     if (this->is_trained_) {
         return true;
     }
@@ -171,7 +183,7 @@ ProductQuantizer<metric>::TrainImpl(const vsag::DataType* data, uint64_t count) 
 
 template <MetricType metric>
 bool
-ProductQuantizer<metric>::EncodeOneImpl(const DataType* data, uint8_t* codes) {
+PQFastScanQuantizer<metric>::EncodeOneImpl(const DataType* data, uint8_t* codes) {
     const DataType* cur = data;
     Vector<float> tmp(this->allocator_);
     if constexpr (metric == MetricType::METRIC_TYPE_COSINE) {
@@ -179,6 +191,7 @@ ProductQuantizer<metric>::EncodeOneImpl(const DataType* data, uint8_t* codes) {
         Normalize(data, tmp.data(), this->dim_);
         cur = tmp.data();
     }
+    memset(codes, 0, this->code_size_);
     for (int i = 0; i < pq_dim_; ++i) {
         // TODO(LHT): use blas
         float nearest_dis = std::numeric_limits<float>::max();
@@ -192,14 +205,17 @@ ProductQuantizer<metric>::EncodeOneImpl(const DataType* data, uint8_t* codes) {
                 nearest_id = static_cast<uint8_t>(j);
             }
         }
-        codes[i] = nearest_id;
+        if (i % 2 == 1) {
+            nearest_id <<= 4L;
+        }
+        codes[i / 2] |= nearest_id;
     }
     return true;
 }
 
 template <MetricType metric>
 bool
-ProductQuantizer<metric>::EncodeBatchImpl(const DataType* data, uint8_t* codes, uint64_t count) {
+PQFastScanQuantizer<metric>::EncodeBatchImpl(const DataType* data, uint8_t* codes, uint64_t count) {
     for (uint64_t i = 0; i < count; ++i) {
         this->EncodeOneImpl(data + i * this->dim_, codes + i * this->code_size_);
     }
@@ -208,7 +224,7 @@ ProductQuantizer<metric>::EncodeBatchImpl(const DataType* data, uint8_t* codes, 
 
 template <MetricType metric>
 bool
-ProductQuantizer<metric>::DecodeBatchImpl(const uint8_t* codes, DataType* data, uint64_t count) {
+PQFastScanQuantizer<metric>::DecodeBatchImpl(const uint8_t* codes, DataType* data, uint64_t count) {
     for (uint64_t i = 0; i < count; ++i) {
         this->DecodeOneImpl(codes + i * this->code_size_, data + i * this->dim_);
     }
@@ -217,9 +233,14 @@ ProductQuantizer<metric>::DecodeBatchImpl(const uint8_t* codes, DataType* data, 
 
 template <MetricType metric>
 bool
-ProductQuantizer<metric>::DecodeOneImpl(const uint8_t* codes, DataType* data) {
+PQFastScanQuantizer<metric>::DecodeOneImpl(const uint8_t* codes, DataType* data) {
     for (int i = 0; i < pq_dim_; ++i) {
-        auto idx = codes[i];
+        auto idx = codes[i / 2];
+        if (i % 2 == 0) {
+            idx &= 0x0F;
+        } else {
+            idx >>= 4L;
+        }
         memcpy(data + i * subspace_dim_,
                this->get_codebook_data(i, idx),
                subspace_dim_ * sizeof(float));
@@ -229,25 +250,14 @@ ProductQuantizer<metric>::DecodeOneImpl(const uint8_t* codes, DataType* data) {
 
 template <MetricType metric>
 inline float
-ProductQuantizer<metric>::ComputeImpl(const uint8_t* codes1, const uint8_t* codes2) {
-    float dist = 0.0F;
-    for (int i = 0; i < pq_dim_; ++i) {
-        const auto* vec1 = get_codebook_data(i, codes1[i]);
-        const auto* vec2 = get_codebook_data(i, codes2[i]);
-        if constexpr (metric == MetricType::METRIC_TYPE_L2SQR) {
-            dist += FP32ComputeL2Sqr(vec1, vec2, subspace_dim_);
-        } else if constexpr (metric == MetricType::METRIC_TYPE_IP or
-                             metric == MetricType::METRIC_TYPE_COSINE) {
-            dist += FP32ComputeIP(vec1, vec2, subspace_dim_);
-        }
-    }
-    return dist;
+PQFastScanQuantizer<metric>::ComputeImpl(const uint8_t* codes1, const uint8_t* codes2) {
+    throw VsagException(ErrorType::INTERNAL_ERROR, "PQFastScan doesn't support ComputeCodes");
 }
 
 template <MetricType metric>
 void
-ProductQuantizer<metric>::ProcessQueryImpl(const DataType* query,
-                                           Computer<ProductQuantizer>& computer) const {
+PQFastScanQuantizer<metric>::ProcessQueryImpl(const DataType* query,
+                                              Computer<PQFastScanQuantizer>& computer) const {
     try {
         const float* cur_query = query;
         Vector<float> norm_vec(this->allocator_);
@@ -256,13 +266,13 @@ ProductQuantizer<metric>::ProcessQueryImpl(const DataType* query,
             Normalize(query, norm_vec.data(), this->dim_);
             cur_query = norm_vec.data();
         }
-        auto* lookup_table = reinterpret_cast<float*>(
-            this->allocator_->Allocate(this->pq_dim_ * CENTROIDS_PER_SUBSPACE * sizeof(float)));
-
+        Vector<float> lookup_table(this->pq_dim_ * CENTROIDS_PER_SUBSPACE, this->allocator_);
+        computer.buf_ = reinterpret_cast<uint8_t*>(this->allocator_->Allocate(
+            this->pq_dim_ * CENTROIDS_PER_SUBSPACE * sizeof(uint8_t) + 2 * sizeof(float)));
         for (int i = 0; i < pq_dim_; ++i) {
             const auto* per_query = cur_query + i * subspace_dim_;
             const auto* per_code_book = get_codebook_data(i, 0);
-            auto* per_result = lookup_table + i * CENTROIDS_PER_SUBSPACE;
+            auto* per_result = lookup_table.data() + i * CENTROIDS_PER_SUBSPACE;
             if constexpr (metric == MetricType::METRIC_TYPE_IP or
                           metric == MetricType::METRIC_TYPE_COSINE) {
                 cblas_sgemv(CblasRowMajor,
@@ -285,8 +295,19 @@ ProductQuantizer<metric>::ProcessQueryImpl(const DataType* query,
                 }
             }
         }
-        computer.buf_ = reinterpret_cast<uint8_t*>(lookup_table);
 
+        ScalarQuantizationTrainer trainer(CENTROIDS_PER_SUBSPACE, 8);
+        float upper, lower;
+        trainer.TrainUniform(
+            lookup_table.data(), pq_dim_, upper, lower, false, SQTrainMode::CLASSIC);
+        auto diff = upper - lower;
+        int64_t j = 0;
+        for (; j < this->pq_dim_ * CENTROIDS_PER_SUBSPACE; ++j) {
+            computer.buf_[j] = (lookup_table[j] - lower) / diff * 255;
+        }
+        auto* sq_info = reinterpret_cast<float*>(computer.buf_ + j);
+        sq_info[0] = diff;
+        sq_info[1] = lower;
     } catch (const std::bad_alloc& e) {
         if (computer.buf_ != nullptr) {
             this->allocator_->Deallocate(computer.buf_);
@@ -298,49 +319,48 @@ ProductQuantizer<metric>::ProcessQueryImpl(const DataType* query,
 
 template <MetricType metric>
 void
-ProductQuantizer<metric>::ComputeDistImpl(Computer<ProductQuantizer>& computer,
-                                          const uint8_t* codes,
-                                          float* dists) const {
-    auto* lut = reinterpret_cast<float*>(computer.buf_);
-    dists[0] = 0.0F;
-    int64_t i = 0;
-    for (; i + 4 < pq_dim_; i += 4) {
-        float dism = 0;
-        dism = lut[*codes++];
-        lut += CENTROIDS_PER_SUBSPACE;
-        dism += lut[*codes++];
-        lut += CENTROIDS_PER_SUBSPACE;
-        dism += lut[*codes++];
-        lut += CENTROIDS_PER_SUBSPACE;
-        dism += lut[*codes++];
-        lut += CENTROIDS_PER_SUBSPACE;
-        dists[0] += dism;
+PQFastScanQuantizer<metric>::ComputeDistImpl(Computer<PQFastScanQuantizer>& computer,
+                                             const uint8_t* codes,
+                                             float* dists) const {
+    throw VsagException(ErrorType::INTERNAL_ERROR,
+                        "PQFastScan doesn't support ComputeDist, only support ComputeBatchDist");
+}
+
+template <MetricType metric>
+void
+PQFastScanQuantizer<metric>::ComputeBatchDistImpl(Computer<PQFastScanQuantizer<metric>>& computer,
+                                                  uint64_t count,
+                                                  const uint8_t* codes,
+                                                  float* dists) const {
+    auto* sq_info =
+        reinterpret_cast<float*>(computer.buf_ + this->pq_dim_ * CENTROIDS_PER_SUBSPACE);
+    auto diff = sq_info[0];
+    auto lower = sq_info[1];
+    auto map_int32_to_float = [&](int32_t* from, float* to, int64_t map_count) {
+        for (int j = 0; j < map_count; ++j) {
+            to[j] = from[j] / 255.0F * diff + lower;
+        }
+    };
+
+    uint64_t block_count = count / BLOCK_SIZE_PACKAGE;
+    Vector<int32_t> tmp_dist(BLOCK_SIZE_PACKAGE, 0, this->allocator_);
+    for (int64_t i = 0; i < block_count; ++i) {
+        PQFastScanLookUp32(computer.buf_, codes, this->pq_dim_, tmp_dist.data());
+        map_int32_to_float(tmp_dist.data(), dists, BLOCK_SIZE_PACKAGE);
+        codes += BLOCK_SIZE_PACKAGE * this->code_size_;
+        dists += BLOCK_SIZE_PACKAGE;
+        memset(tmp_dist.data(), 0, BLOCK_SIZE_PACKAGE * sizeof(int32_t));
     }
-    for (; i < pq_dim_; ++i) {
-        dists[0] += lut[*codes++];
-        lut += CENTROIDS_PER_SUBSPACE;
-    }
-    if constexpr (metric == MetricType::METRIC_TYPE_COSINE or
-                  metric == MetricType::METRIC_TYPE_IP) {
-        dists[0] = 1.0F - dists[0];
+
+    if (count > block_count * BLOCK_SIZE_PACKAGE) {
+        PQFastScanLookUp32(computer.buf_, codes, this->pq_dim_, tmp_dist.data());
+        map_int32_to_float(tmp_dist.data(), dists, count - block_count * BLOCK_SIZE_PACKAGE);
     }
 }
 
 template <MetricType metric>
 void
-ProductQuantizer<metric>::ComputeBatchDistImpl(Computer<ProductQuantizer<metric>>& computer,
-                                               uint64_t count,
-                                               const uint8_t* codes,
-                                               float* dists) const {
-    // TODO(LHT): Optimize batch for simd
-    for (uint64_t i = 0; i < count; ++i) {
-        this->ComputeDistImpl(computer, codes + i * this->code_size_, dists + i);
-    }
-}
-
-template <MetricType metric>
-void
-ProductQuantizer<metric>::SerializeImpl(StreamWriter& writer) {
+PQFastScanQuantizer<metric>::SerializeImpl(StreamWriter& writer) {
     StreamWriter::WriteObj(writer, this->pq_dim_);
     StreamWriter::WriteObj(writer, this->subspace_dim_);
     StreamWriter::WriteVector(writer, this->codebooks_);
@@ -348,7 +368,7 @@ ProductQuantizer<metric>::SerializeImpl(StreamWriter& writer) {
 
 template <MetricType metric>
 void
-ProductQuantizer<metric>::DeserializeImpl(StreamReader& reader) {
+PQFastScanQuantizer<metric>::DeserializeImpl(StreamReader& reader) {
     StreamReader::ReadObj(reader, this->pq_dim_);
     StreamReader::ReadObj(reader, this->subspace_dim_);
     StreamReader::ReadVector(reader, this->codebooks_);
@@ -356,8 +376,30 @@ ProductQuantizer<metric>::DeserializeImpl(StreamReader& reader) {
 
 template <MetricType metric>
 void
-ProductQuantizer<metric>::ReleaseComputerImpl(Computer<ProductQuantizer<metric>>& computer) const {
+PQFastScanQuantizer<metric>::ReleaseComputerImpl(
+    Computer<PQFastScanQuantizer<metric>>& computer) const {
     this->allocator_->Deallocate(computer.buf_);
+}
+
+template <MetricType metric>
+void
+PQFastScanQuantizer<metric>::Package32(const uint8_t* codes, uint8_t* packaged_codes) const {
+    constexpr int32_t mapper[32] = {0, 16, 8,  24, 1, 17, 9,  25, 2, 18, 10, 26, 3, 19, 11, 27,
+                                    4, 20, 12, 28, 5, 21, 13, 29, 6, 22, 14, 30, 7, 23, 15, 31};
+
+    auto get_code = [&](int64_t vector_index, int64_t space_index) -> uint8_t {
+        auto code = codes[vector_index * this->code_size_ + space_index / 2];
+        if (space_index % 2 == 0) {
+            return code & 0x0F;
+        }
+        return code & 0xF0;
+    };
+    memset(packaged_codes, 0, this->code_size_ * BLOCK_SIZE_PACKAGE);
+    for (int i = 0; i < this->pq_dim_; ++i) {
+        for (int j = 0; j < BLOCK_SIZE_PACKAGE; ++j) {
+            packaged_codes[i * BLOCK_SIZE_PACKAGE / 2 + j / 2] |= get_code(mapper[j], i);
+        }
+    }
 }
 
 }  // namespace vsag
