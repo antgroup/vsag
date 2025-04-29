@@ -13,27 +13,32 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#pragma once
-
-#include <cmath>
-#include <cstdlib>
-
-#include "basic_func.h"
-#include "bf16_simd.h"
-#include "fp16_simd.h"
-#include "fp32_simd.h"
-#include "normalize.h"
 #include "pqfs_simd.h"
-#include "rabitq_simd.h"
+
 #include "simd_status.h"
-#include "sq4_simd.h"
-#include "sq4_uniform_simd.h"
-#include "sq8_simd.h"
-#include "sq8_uniform_simd.h"
 
 namespace vsag {
 
-SimdStatus
-setup_simd();
-
+static PQFastScanLookUp32Type
+GetPQFastScanLookUp32() {
+    if (SimdStatus::SupportAVX512()) {
+#if defined(ENABLE_AVX512)
+        return avx512::PQFastScanLookUp32;
+#endif
+    } else if (SimdStatus::SupportAVX2()) {
+#if defined(ENABLE_AVX2)
+        return avx2::PQFastScanLookUp32;
+#endif
+    } else if (SimdStatus::SupportAVX()) {
+#if defined(ENABLE_AVX)
+        return avx::PQFastScanLookUp32;
+#endif
+    } else if (SimdStatus::SupportSSE()) {
+#if defined(ENABLE_SSE)
+        return sse::PQFastScanLookUp32;
+#endif
+    }
+    return generic::PQFastScanLookUp32;
+}
+PQFastScanLookUp32Type PQFastScanLookUp32 = GetPQFastScanLookUp32();
 }  // namespace vsag
