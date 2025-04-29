@@ -48,7 +48,8 @@ TEST_CASE("EliasFanoEncoder, original seq equal to decoded seq", "[ut][EliasFano
         REQUIRE(encoder->Size() == values.size());
 
         // check if original seq equal to decoded seq
-        auto decompressed = encoder->DecompressAll(allocator.get());
+        Vector<InnerIdType> decompressed(allocator.get());
+        encoder->DecompressAll(decompressed);
         REQUIRE(decompressed.size() == values.size());
         for (size_t i = 0; i < values.size(); i++) {
             REQUIRE(decompressed[i] == values[i]);
