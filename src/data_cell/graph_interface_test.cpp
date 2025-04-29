@@ -29,17 +29,27 @@ GraphInterfaceTest::BasicTest(uint64_t max_id, uint64_t count, const GraphInterf
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     auto max_degree = this->graph_->MaximumDegree();
     this->graph_->Resize(max_id);
-    UnorderedMap<InnerIdType, std::shared_ptr<Vector<InnerIdType>>> maps(allocator.get());
-    for (auto i = 0; i < count; ++i) {
-        auto length = random() % max_degree + 1;
-        auto ids = std::make_shared<Vector<InnerIdType>>(length, allocator.get());
-        for (auto& id : *ids) {
-            id = random() % max_id;
-        }
-        auto cur_id = random() % max_id;
-        maps[cur_id] = ids;
-    }
 
+    auto generate_graph = [&]() {
+        UnorderedMap<InnerIdType, std::shared_ptr<Vector<InnerIdType>>> cur_map(allocator.get());
+        for (auto i = 0; i < count; ++i) {
+            auto length = random() % max_degree + 1;
+            auto ids = std::make_shared<Vector<InnerIdType>>(length, allocator.get());
+            for (auto& id : *ids) {
+                id = random() % max_id;
+            }
+            auto cur_id = random() % max_id;
+            cur_map[cur_id] = ids;
+        }
+        if (require_sorted_) {
+            for (auto& [key, value] : cur_map) {
+                std::sort(value->begin(), value->end());
+            }
+        }
+        return cur_map;
+    };
+
+    UnorderedMap<InnerIdType, std::shared_ptr<Vector<InnerIdType>>> maps = generate_graph();
     for (auto& [key, value] : maps) {
         this->graph_->InsertNeighborsById(key, *value);
     }
@@ -95,5 +105,21 @@ GraphInterfaceTest::BasicTest(uint64_t max_id, uint64_t count, const GraphInterf
         }
 
         infile.close();
+    }
+
+    maps = generate_graph();
+    for (auto& [key, value] : maps) {
+        this->graph_->InsertNeighborsById(key, *value);
+    }
+    SECTION("Test Update Graph") {
+        for (auto& [key, value] : maps) {
+            REQUIRE(this->graph_->GetNeighborSize(key) == value->size());
+        }
+        for (auto& [key, value] : maps) {
+            Vector<InnerIdType> neighbors(allocator.get());
+            this->graph_->GetNeighbors(key, neighbors);
+            REQUIRE(memcmp(neighbors.data(), value->data(), value->size() * sizeof(InnerIdType)) ==
+                    0);
+        }
     }
 }
