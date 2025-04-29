@@ -536,4 +536,42 @@ Prefetch(const void* data) {
 #endif
 };
 
+void
+PQFastScanLookUp32(const uint8_t* lookup_table,
+                   const uint8_t* codes,
+                   uint64_t pq_dim,
+                   int32_t* result) {
+#if defined(ENABLE_SSE)
+    __m128i sum[4];
+    for (size_t i = 0; i < 4; i++) {
+        sum[i] = _mm_setzero_si128();
+    }
+    const auto sign4 = _mm_set1_epi8(0x0F);
+    const auto sign8 = _mm_set1_epi16(0xFF);
+    for (size_t i = 0; i < pq_dim; i++) {
+        auto dict = _mm_loadu_si128((__m128i*)(lookup_table));
+        lookup_table += 16;
+        auto code = _mm_loadu_si128((__m128i*)(codes));
+        codes += 16;
+        auto code1 = _mm_and_si128(code, sign4);
+        auto code2 = _mm_and_si128(_mm_srli_epi16(code, 4), sign4);
+        auto res1 = _mm_shuffle_epi8(dict, code1);
+        auto res2 = _mm_shuffle_epi8(dict, code2);
+        sum[0] = _mm_add_epi32(sum[0], _mm_and_si128(res1, sign8));
+        sum[1] = _mm_add_epi32(sum[1], _mm_srli_epi16(res1, 8));
+        sum[2] = _mm_add_epi32(sum[2], _mm_and_si128(res2, sign8));
+        sum[3] = _mm_add_epi32(sum[3], _mm_srli_epi16(res2, 8));
+    }
+    alignas(128) uint16_t temp[8];
+    for (int64_t i = 0; i < 4; i++) {
+        _mm_store_si128((__m128i*)(temp), sum[i]);
+        for (int64_t j = 0; j < 8; j++) {
+            result[i * 8 + j] += temp[j];
+        }
+    }
+#else
+    generic::PQFastScanLookUp32(lookup_table, codes, pq_dim, result);
+#endif
+}
+
 }  // namespace vsag::sse
