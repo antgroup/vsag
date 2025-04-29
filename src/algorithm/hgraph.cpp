@@ -45,8 +45,6 @@ next_multiple_of_power_of_two(uint64_t x, uint64_t n) {
 HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonParam& common_param)
     : InnerIndexInterface(hgraph_param, common_param),
       route_graphs_(common_param.allocator_.get()),
-      dim_(common_param.dim_),
-      data_type_(common_param.data_type_),
       use_reorder_(hgraph_param->use_reorder),
       ignore_reorder_(hgraph_param->ignore_reorder),
       ef_construct_(hgraph_param->ef_construction),

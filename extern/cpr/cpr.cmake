@@ -9,6 +9,6 @@ FetchContent_Declare (
   INACTIVITY_TIMEOUT 5
   TIMEOUT 30
   )
-set (CPR_USE_SYSTEM_CURL OFF)
+set (CPR_USE_SYSTEM_CURL ON)
 set (CPR_ENABLE_SSL OFF)
 FetchContent_MakeAvailable (cpr)
