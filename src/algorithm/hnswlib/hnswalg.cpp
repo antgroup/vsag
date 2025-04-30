@@ -959,9 +959,63 @@ HierarchicalNSW::DeserializeImpl(StreamReader& reader, SpaceInterface* s, size_t
     ReadOne(reader, label_offset_);
     ReadOne(reader, offset_data_);
     ReadOne(reader, max_level_);
-    ReadOne(reader, enterpoint_node_);
 
-    ReadOne(reader, maxM_);
+    // Fixes #623: Unified entrypoint_node type during index loading (old: int64_t → new: InnerIdType (i.e., uint32))
+    /*
+     * Header Format Diagram for enterpoint_node_ and maxM_
+     *
+     * This diagram illustrates the serialization format differences between old and new versions.
+     * The code handles backward compatibility by trying both formats during index loading.
+     */
+    // New Format (v2) Header Layout
+    // -----------------------------
+    // | Field              | Type       | Size (bytes) | Description                  |
+    // |--------------------|------------|--------------|------------------------------|
+    // | enterpoint_node_   | InnerIdType| 4            | 32-bit unsigned integer      |
+    // | maxM_              | size_t     | 8            | Maximum connections count    |
+    // ----------------------------- 4 + 8 = 12 bytes total -----------------------------------
+
+    // Old Format (v1) Header Layout
+    // -----------------------------
+    // | Field              | Type       | Size (bytes) | Description                  |
+    // |--------------------|------------|--------------|------------------------------|
+    // | enterpoint_node_   | int64_t    | 8            | 64-bit signed integer        |
+    // | maxM_              | size_t     | 8            | Maximum connections count    |
+    // ----------------------------- 8 + 8 = 16 bytes total -----------------------------------
+
+    /*
+     * Compatibility Logic Flow:
+     * 1. Try reading newer format (12 bytes)
+     * 2. If validation fails (M_ != maxM_),
+     * 3. Read older format (16 bytes) as fallback
+     */
+
+    // to resolve compatibility issues
+    auto buffer_size = sizeof(int64_t) + sizeof(size_t);
+    auto newer_format_size = sizeof(InnerIdType) + sizeof(size_t);
+    vsag::Vector<char> buffer(buffer_size, allocator_);
+    char* raw_buffer = buffer.data();
+
+    // step 1, try to parse/read with the newer serial format
+    reader.Read(raw_buffer, newer_format_size);
+    enterpoint_node_ = *(InnerIdType*)(raw_buffer);
+    maxM_ = *(size_t*)(raw_buffer + sizeof(InnerIdType));
+    bool is_newer_format = (M_ == maxM_);
+
+    // step 2, try to read with the older serial format
+    if (not is_newer_format) {
+        reader.Read(raw_buffer + newer_format_size, buffer_size - newer_format_size);
+        enterpoint_node_ = *(int64_t*)(raw_buffer);
+        maxM_ = *(size_t*)(raw_buffer + sizeof(int64_t));
+        if (M_ != maxM_) {
+            // this condition will be true only when the parameter used in create_index is not equal
+            // to the parameter of the serialized index
+            throw vsag::VsagException(
+                vsag::ErrorType::INTERNAL_ERROR,
+                "The index was saved with different M_ value, please use the same M_ value");
+        }
+    }
+
     ReadOne(reader, maxM0_);
     ReadOne(reader, M_);
     ReadOne(reader, mult_);
