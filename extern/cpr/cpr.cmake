@@ -1,5 +1,9 @@
 
 include (FetchContent)
+
+file(REMOVE_RECURSE "${CMAKE_BINARY_DIR}/_deps/cpr-src")
+file(REMOVE_RECURSE "${CMAKE_BINARY_DIR}/_deps/cpr-subbuild")
+
 FetchContent_Declare (
   cpr
   URL https://github.com/libcpr/cpr/archive/refs/tags/1.11.2.tar.gz
@@ -10,10 +14,8 @@ FetchContent_Declare (
   TIMEOUT 30
   )
 
+FetchContent_Populate(cpr)
 FetchContent_GetProperties(cpr)
-if(NOT cpr_POPULATED)
-  FetchContent_Populate(cpr)
-endif()
 
 set(PATCH_FILE "${CMAKE_SOURCE_DIR}/extern/cpr/fix_curl.patch")
 
@@ -25,12 +27,11 @@ execute_process(
 )
 
 if(NOT PATCH_RESULT EQUAL 0)
-  message(WARNING "Failed to apply CURL modification patch to CPR CMakeLists.txt")
+  message(FATAL_ERROR "Failed to apply CURL modification patch to CPR CMakeLists.txt")
 else()
   message(STATUS "CURL Modification Patch applied successfully")
 endif()
 
-set (CPR_USE_SYSTEM_CURL OFF)
 set (CPR_ENABLE_SSL OFF)
 
 add_subdirectory(${cpr_SOURCE_DIR} ${cpr_BINARY_DIR})
