@@ -209,6 +209,10 @@ HGraph::KnnSearch(const DatasetPtr& query,
     }
 
     auto params = HGraphSearchParameters::FromJson(parameters);
+
+    CHECK_ARGUMENT(params.ef_search <= AMPLIFICATION_FACTOR * k,
+                   fmt::format("ef_search({}) is too large", params.ef_search));
+
     FilterPtr ft = nullptr;
     if (filter != nullptr) {
         if (params.use_extra_info_filter) {
@@ -490,6 +494,9 @@ HGraph::RangeSearch(const DatasetPtr& query,
 
     auto params = HGraphSearchParameters::FromJson(parameters);
 
+    params.ef_search = std::max(1L, params.ef_search);
+    CHECK_ARGUMENT(params.ef_search <= 1000,
+                   fmt::format("ef_search({}) is too large", params.ef_search));
     search_param.ef = std::max(params.ef_search, limited_size);
     search_param.is_inner_id_allowed = ft;
     search_param.radius = radius;

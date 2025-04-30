@@ -52,7 +52,6 @@ const static uint32_t UPDATE_CHECK_SEARCH_K = 10;
 const static uint32_t GENERATE_SEARCH_L = 400;
 const static uint32_t UPDATE_CHECK_SEARCH_L = 100;
 const static float GENERATE_OMEGA = 0.51;
-const static int64_t AMPLIFICATION_FACTOR = 10;
 
 HNSW::HNSW(HnswParameters hnsw_params, const IndexCommonParam& index_common_param)
     : space_(std::move(hnsw_params.space)),
@@ -149,6 +148,8 @@ HNSW::build(const DatasetPtr& base) {
             auto* hnsw = static_cast<hnswlib::StaticHierarchicalNSW*>(alg_hnsw_.get());
             hnsw->encode_hnsw_data();
         }
+        std::cout << static_cast<hnswlib::HierarchicalNSW*>(alg_hnsw_.get())->enterpoint_node_
+                  << std::endl;
 
         return failed_ids;
     } catch (const std::invalid_argument& e) {
@@ -255,7 +256,7 @@ HNSW::knn_search(const DatasetPtr& query,
         // check search parameters
         auto params = HnswSearchParameters::FromJson(parameters);
 
-        CHECK_ARGUMENT(params.ef_search < AMPLIFICATION_FACTOR * k,
+        CHECK_ARGUMENT(params.ef_search <= AMPLIFICATION_FACTOR * k,
                        fmt::format("ef_search({}) is too large", params.ef_search));
 
         if (iter_ctx != nullptr && *iter_ctx == nullptr) {
