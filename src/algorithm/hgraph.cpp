@@ -210,7 +210,7 @@ HGraph::KnnSearch(const DatasetPtr& query,
 
     auto params = HGraphSearchParameters::FromJson(parameters);
 
-    CHECK_ARGUMENT(params.ef_search <= AMPLIFICATION_FACTOR * k,
+    CHECK_ARGUMENT(params.ef_search <= std::max(AMPLIFICATION_FACTOR * k, 1000L),
                    fmt::format("ef_search({}) is too large", params.ef_search));
 
     FilterPtr ft = nullptr;
