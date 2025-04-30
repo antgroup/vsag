@@ -148,8 +148,6 @@ HNSW::build(const DatasetPtr& base) {
             auto* hnsw = static_cast<hnswlib::StaticHierarchicalNSW*>(alg_hnsw_.get());
             hnsw->encode_hnsw_data();
         }
-        std::cout << static_cast<hnswlib::HierarchicalNSW*>(alg_hnsw_.get())->enterpoint_node_
-                  << std::endl;
 
         return failed_ids;
     } catch (const std::invalid_argument& e) {
