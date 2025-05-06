@@ -32,7 +32,8 @@ public:
                                         int64_t dim,
                                         const std::string& quantization_str = "sq8",
                                         int thread_count = 5,
-                                        int extra_info_size = 0);
+                                        int extra_info_size = 0,
+                                        const std::string& data_type = "float32");
 
     static bool
     IsRaBitQ(const std::string& quantization_str);
@@ -81,12 +82,13 @@ HgraphTestIndex::GenerateHGraphBuildParametersString(const std::string& metric_t
                                                      int64_t dim,
                                                      const std::string& quantization_str,
                                                      int thread_count,
-                                                     int extra_info_size) {
+                                                     int extra_info_size,
+                                                     const std::string& data_type) {
     std::string build_parameters_str;
 
     constexpr auto parameter_temp_reorder = R"(
     {{
-        "dtype": "float32",
+        "dtype": "{}",
         "metric_type": "{}",
         "dim": {},
         "extra_info_size": {},
@@ -106,7 +108,7 @@ HgraphTestIndex::GenerateHGraphBuildParametersString(const std::string& metric_t
 
     constexpr auto parameter_temp_origin = R"(
     {{
-        "dtype": "float32",
+        "dtype": "{}",
         "metric_type": "{}",
         "dim": {},
         "extra_info_size": {},
@@ -134,6 +136,7 @@ HgraphTestIndex::GenerateHGraphBuildParametersString(const std::string& metric_t
             precise_io_type = strs[2];
         }
         build_parameters_str = fmt::format(parameter_temp_reorder,
+                                           data_type,
                                            metric_type,
                                            dim,
                                            extra_info_size,
@@ -146,6 +149,7 @@ HgraphTestIndex::GenerateHGraphBuildParametersString(const std::string& metric_t
                                            dir.GenerateRandomFile());
     } else {
         build_parameters_str = fmt::format(parameter_temp_origin,
+                                           data_type,
                                            metric_type,
                                            dim,
                                            extra_info_size,
@@ -482,6 +486,24 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex,
         TestBuildIndex(index, dataset, true);
         TestSearchWithDirtyVector(index, dataset, search_param, true);
     }
+    vsag::Options::Instance().set_block_size_limit(origin_size);
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex,
+                             "HGraph Search with Sparse Vector",
+                             "[ft][hgraph][concurrent]") {
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    auto size = GENERATE(1024 * 1024 * 2);
+    auto metric_type = GENERATE("ip");
+    auto dim = 128;
+    auto dataset = pool.GetSparseDatasetAndCreate(base_count, dim, 0.8);
+    const std::string name = "hgraph";
+    auto search_param = fmt::format(search_param_tmp, 100, false);
+    vsag::Options::Instance().set_block_size_limit(size);
+    auto param = GenerateHGraphBuildParametersString(metric_type, dim, "sparse", 5, 0, "sparse");
+    auto index = TestFactory(name, param, true);
+    TestConcurrentAdd(index, dataset, true);
+    TestKnnSearch(index, dataset, search_param, true);
     vsag::Options::Instance().set_block_size_limit(origin_size);
 }
 

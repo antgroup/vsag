@@ -31,11 +31,14 @@ fill_datatype(IndexCommonParam& result, JsonType::const_reference datatype_obj) 
         result.data_type_ = DataTypes::DATA_TYPE_FLOAT;
     } else if (datatype == DATATYPE_INT8) {
         result.data_type_ = DataTypes::DATA_TYPE_INT8;
+    } else if (datatype == DATATYPE_SPARSE) {
+        result.data_type_ = DataTypes::DATA_TYPE_SPARSE;
     } else {
-        throw std::invalid_argument(fmt::format("parameters[{}] must in [{}, {}], now is {}",
+        throw std::invalid_argument(fmt::format("parameters[{}] must in [{}, {}, {}], now is {}",
                                                 PARAMETER_DTYPE,
                                                 DATATYPE_FLOAT32,
                                                 DATATYPE_INT8,
+                                                DATATYPE_SPARSE,
                                                 datatype));
     }
 }
