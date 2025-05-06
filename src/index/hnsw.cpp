@@ -255,7 +255,7 @@ HNSW::knn_search(const DatasetPtr& query,
         auto params = HnswSearchParameters::FromJson(parameters);
         auto ef_search_threshold = std::max(AMPLIFICATION_FACTOR * k, 1000L);
         CHECK_ARGUMENT(
-            (1 <= params.ef_search) and (params.ef_search <= ef_search_threshold),
+            (1 <= params.ef_search) and (params.ef_search <= ef_search_threshold),  // NOLINT
             fmt::format(
                 "ef_search({}) must in range[1, {}]", params.ef_search, ef_search_threshold));
         if (iter_ctx != nullptr && *iter_ctx == nullptr) {
@@ -406,7 +406,7 @@ HNSW::range_search(const DatasetPtr& query,
         // check search parameters
         auto params = HnswSearchParameters::FromJson(parameters);
 
-        CHECK_ARGUMENT((1 <= params.ef_search) and (params.ef_search <= 1000),
+        CHECK_ARGUMENT((1 <= params.ef_search) and (params.ef_search <= 1000),  // NOLINT
                        fmt::format("ef_search({}) must in range[1, 1000]", params.ef_search));
         // perform search
         std::priority_queue<std::pair<float, LabelType>> results;
