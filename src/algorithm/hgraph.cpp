@@ -911,137 +911,139 @@ HGraph::reorder(const void* query,
     }
 }
 
-static const ConstParamMap EXTERNAL_MAPPING = {
-    {
-        HGRAPH_USE_REORDER,
+ParamPtr
+HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
+                                     const IndexCommonParam& common_param) {
+    const ConstParamMap EXTERNAL_MAPPING = {
         {
-            HGRAPH_USE_REORDER_KEY,
+            HGRAPH_USE_REORDER,
+            {
+                HGRAPH_USE_REORDER_KEY,
+            },
         },
-    },
-    {
-        HGRAPH_USE_ELP_OPTIMIZER,
         {
-            HGRAPH_USE_ELP_OPTIMIZER_KEY,
+            HGRAPH_USE_ELP_OPTIMIZER,
+            {
+                HGRAPH_USE_ELP_OPTIMIZER_KEY,
+            },
         },
-    },
-    {
-        HGRAPH_IGNORE_REORDER,
         {
-            HGRAPH_IGNORE_REORDER_KEY,
+            HGRAPH_IGNORE_REORDER,
+            {
+                HGRAPH_IGNORE_REORDER_KEY,
+            },
         },
-    },
-    {
-        HGRAPH_BASE_QUANTIZATION_TYPE,
         {
-            HGRAPH_BASE_CODES_KEY,
-            QUANTIZATION_PARAMS_KEY,
-            QUANTIZATION_TYPE_KEY,
+            HGRAPH_BASE_QUANTIZATION_TYPE,
+            {
+                HGRAPH_BASE_CODES_KEY,
+                QUANTIZATION_PARAMS_KEY,
+                QUANTIZATION_TYPE_KEY,
+            },
         },
-    },
-    {
-        HGRAPH_BASE_IO_TYPE,
         {
-            HGRAPH_BASE_CODES_KEY,
-            IO_PARAMS_KEY,
-            IO_TYPE_KEY,
+            HGRAPH_BASE_IO_TYPE,
+            {
+                HGRAPH_BASE_CODES_KEY,
+                IO_PARAMS_KEY,
+                IO_TYPE_KEY,
+            },
         },
-    },
-    {
-        HGRAPH_PRECISE_IO_TYPE,
         {
-            HGRAPH_PRECISE_CODES_KEY,
-            IO_PARAMS_KEY,
-            IO_TYPE_KEY,
+            HGRAPH_PRECISE_IO_TYPE,
+            {
+                HGRAPH_PRECISE_CODES_KEY,
+                IO_PARAMS_KEY,
+                IO_TYPE_KEY,
+            },
         },
-    },
-    {
-        HGRAPH_BASE_FILE_PATH,
         {
-            HGRAPH_BASE_CODES_KEY,
-            IO_PARAMS_KEY,
-            IO_FILE_PATH,
+            HGRAPH_BASE_FILE_PATH,
+            {
+                HGRAPH_BASE_CODES_KEY,
+                IO_PARAMS_KEY,
+                IO_FILE_PATH,
+            },
         },
-    },
-    {
-        HGRAPH_PRECISE_FILE_PATH,
         {
-            HGRAPH_PRECISE_CODES_KEY,
-            IO_PARAMS_KEY,
-            IO_FILE_PATH,
+            HGRAPH_PRECISE_FILE_PATH,
+            {
+                HGRAPH_PRECISE_CODES_KEY,
+                IO_PARAMS_KEY,
+                IO_FILE_PATH,
+            },
         },
-    },
-    {
-        HGRAPH_PRECISE_QUANTIZATION_TYPE,
         {
-            HGRAPH_PRECISE_CODES_KEY,
-            QUANTIZATION_PARAMS_KEY,
-            QUANTIZATION_TYPE_KEY,
+            HGRAPH_PRECISE_QUANTIZATION_TYPE,
+            {
+                HGRAPH_PRECISE_CODES_KEY,
+                QUANTIZATION_PARAMS_KEY,
+                QUANTIZATION_TYPE_KEY,
+            },
         },
-    },
-    {
-        HGRAPH_GRAPH_MAX_DEGREE,
         {
-            HGRAPH_GRAPH_KEY,
-            GRAPH_PARAM_MAX_DEGREE,
+            HGRAPH_GRAPH_MAX_DEGREE,
+            {
+                HGRAPH_GRAPH_KEY,
+                GRAPH_PARAM_MAX_DEGREE,
+            },
         },
-    },
-    {
-        HGRAPH_BUILD_EF_CONSTRUCTION,
         {
-            BUILD_PARAMS_KEY,
-            BUILD_EF_CONSTRUCTION,
+            HGRAPH_BUILD_EF_CONSTRUCTION,
+            {
+                BUILD_PARAMS_KEY,
+                BUILD_EF_CONSTRUCTION,
+            },
         },
-    },
-    {
-        HGRAPH_INIT_CAPACITY,
         {
-            HGRAPH_GRAPH_KEY,
-            GRAPH_PARAM_INIT_MAX_CAPACITY,
+            HGRAPH_INIT_CAPACITY,
+            {
+                HGRAPH_GRAPH_KEY,
+                GRAPH_PARAM_INIT_MAX_CAPACITY,
+            },
         },
-    },
-    {
-        HGRAPH_BUILD_THREAD_COUNT,
         {
-            BUILD_PARAMS_KEY,
-            BUILD_THREAD_COUNT,
+            HGRAPH_BUILD_THREAD_COUNT,
+            {
+                BUILD_PARAMS_KEY,
+                BUILD_THREAD_COUNT,
+            },
         },
-    },
-    {
-        SQ4_UNIFORM_TRUNC_RATE,
         {
-            HGRAPH_BASE_CODES_KEY,
-            QUANTIZATION_PARAMS_KEY,
-            SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE,
+            SQ4_UNIFORM_TRUNC_RATE,
+            {
+                HGRAPH_BASE_CODES_KEY,
+                QUANTIZATION_PARAMS_KEY,
+                SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE,
+            },
         },
-    },
-    {
-        RABITQ_PCA_DIM,
         {
-            HGRAPH_BASE_CODES_KEY,
-            QUANTIZATION_PARAMS_KEY,
-            PCA_DIM,
+            RABITQ_PCA_DIM,
+            {
+                HGRAPH_BASE_CODES_KEY,
+                QUANTIZATION_PARAMS_KEY,
+                PCA_DIM,
+            },
         },
-    },
-    {
-        RABITQ_BITS_PER_DIM_QUERY,
         {
-            HGRAPH_BASE_CODES_KEY,
-            QUANTIZATION_PARAMS_KEY,
-            RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY,
+            RABITQ_BITS_PER_DIM_QUERY,
+            {
+                HGRAPH_BASE_CODES_KEY,
+                QUANTIZATION_PARAMS_KEY,
+                RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY,
+            },
         },
-    },
-    {
-        HGRAPH_BASE_PQ_DIM,
         {
-            HGRAPH_BASE_CODES_KEY,
-            QUANTIZATION_PARAMS_KEY,
-            PRODUCT_QUANTIZATION_DIM,
+            HGRAPH_BASE_PQ_DIM,
+            {
+                HGRAPH_BASE_CODES_KEY,
+                QUANTIZATION_PARAMS_KEY,
+                PRODUCT_QUANTIZATION_DIM,
+            },
         },
-    },
-};
+    };
 
-static const std::string HGRAPH_PARAMS_TEMPLATE =
-    R"(
+    const std::string HGRAPH_PARAMS_TEMPLATE = R"(
     {
         "type": "{INDEX_TYPE_HGRAPH}",
         "{HGRAPH_USE_REORDER_KEY}": false,
@@ -1094,10 +1096,6 @@ static const std::string HGRAPH_PARAMS_TEMPLATE =
             }
         }
     })";
-
-ParamPtr
-HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
-                                     const IndexCommonParam& common_param) {
     if (common_param.data_type_ == DataTypes::DATA_TYPE_INT8) {
         throw std::invalid_argument(fmt::format("HGraph not support {} datatype", DATATYPE_INT8));
     }

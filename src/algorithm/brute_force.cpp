@@ -248,12 +248,15 @@ BruteForce::InitFeatures() {
     });
 }
 
-static const std::unordered_map<std::string, std::vector<std::string>> EXTERNAL_MAPPING = {
-    {BRUTE_FORCE_QUANTIZATION_TYPE, {QUANTIZATION_PARAMS_KEY, QUANTIZATION_TYPE_KEY}},
-    {BRUTE_FORCE_IO_TYPE, {IO_PARAMS_KEY, IO_TYPE_KEY}}};
+ParamPtr
+BruteForce::CheckAndMappingExternalParam(const JsonType& external_param,
+                                         const IndexCommonParam& common_param) {
+    const std::unordered_map<std::string, std::vector<std::string>> EXTERNAL_MAPPING = {
+        {BRUTE_FORCE_QUANTIZATION_TYPE, {QUANTIZATION_PARAMS_KEY, QUANTIZATION_TYPE_KEY}},
+        {BRUTE_FORCE_IO_TYPE, {IO_PARAMS_KEY, IO_TYPE_KEY}}};
 
-static const std::string BRUTE_FORCE_PARAMS_TEMPLATE =
-    R"(
+    const std::string BRUTE_FORCE_PARAMS_TEMPLATE =
+        R"(
     {
         "type": "{INDEX_BRUTE_FORCE}",
         "{IO_PARAMS_KEY}": {
@@ -266,9 +269,6 @@ static const std::string BRUTE_FORCE_PARAMS_TEMPLATE =
         }
     })";
 
-ParamPtr
-BruteForce::CheckAndMappingExternalParam(const JsonType& external_param,
-                                         const IndexCommonParam& common_param) {
     if (common_param.data_type_ == DataTypes::DATA_TYPE_INT8) {
         throw std::invalid_argument(
             fmt::format("BruteForce not support {} datatype", DATATYPE_INT8));
