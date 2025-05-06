@@ -52,6 +52,7 @@ const char* const METRIC_COSINE = "cosine";
 const char* const METRIC_IP = "ip";
 const char* const DATATYPE_FLOAT32 = "float32";
 const char* const DATATYPE_INT8 = "int8";
+const char* const DATATYPE_SPARSE = "sparse";
 const char* const BLANK_INDEX = "blank_index";
 
 // parameters

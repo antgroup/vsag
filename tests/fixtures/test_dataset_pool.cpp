@@ -42,11 +42,12 @@ TestDatasetPool::GetNanDataset(const std::string& metric_str) {
 }
 
 TestDatasetPtr
-TestDatasetPool::GetSparseDatasetAndCreate(uint64_t count, float valid_ratio) {
-    auto key = "sparse_" + std::to_string(count) + "_" + std::to_string(valid_ratio);
+TestDatasetPool::GetSparseDatasetAndCreate(uint64_t count, uint64_t dim, float valid_ratio) {
+    auto key = "sparse_" + std::to_string(count) + "_" + std::to_string(dim) + "_" +
+               std::to_string(valid_ratio);
     if (this->pool_.find(key) == this->pool_.end()) {
         this->pool_[key] =
-            TestDataset::CreateTestDataset(2, count, "l2", false, valid_ratio, "sparse");
+            TestDataset::CreateTestDataset(dim, count, "l2", false, valid_ratio, "sparse");
     }
     return this->pool_.at(key);
 }

@@ -54,7 +54,7 @@ public:
     InsertVector(const void* vector, InnerIdType idx = std::numeric_limits<InnerIdType>::max()) = 0;
 
     virtual void
-    BatchInsertVector(const void* vectors, InnerIdType count, InnerIdType* idx = nullptr) = 0;
+    BatchInsertVector(const void* vectors, InnerIdType count, InnerIdType* idx_vec = nullptr) = 0;
 
     virtual float
     ComputePairVectors(InnerIdType id1, InnerIdType id2) = 0;

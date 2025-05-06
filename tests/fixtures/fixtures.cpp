@@ -62,6 +62,9 @@ GenerateSparseVectors(
     std::uniform_int_distribution<int> distrib_id(0, max_id);
 
     std::vector<vsag::SparseVector> sparse_vectors(count);
+    if (max_dim > max_id) {
+        throw std::runtime_error("generate sparse vectors failed, max_dim > max_id");
+    }
 
     for (int i = 0; i < count; i++) {
         sparse_vectors[i].len_ = distrib_dim(rng);

@@ -138,6 +138,16 @@ public:
     }
 
 private:
+    const void*
+    get_data(const DatasetPtr& dataset, uint32_t index = 0) const {
+        if (data_type_ == DataTypes::DATA_TYPE_FLOAT) {
+            return dataset->GetFloat32Vectors() + index * dim_;
+        } else if (data_type_ == DataTypes::DATA_TYPE_SPARSE) {
+            return dataset->GetSparseVectors() + index;
+        }
+        throw VsagException(ErrorType::INVALID_ARGUMENT, "invalid data_type in HGraph");
+    }
+
     int
     get_random_level() {
         std::uniform_real_distribution<double> distribution(0.0, 1.0);
@@ -158,10 +168,10 @@ private:
     }
 
     void
-    add_one_point(const float* data, int level, InnerIdType id);
+    add_one_point(const void* data, int level, InnerIdType id);
 
     void
-    graph_add_one(const float* data, int level, InnerIdType inner_id);
+    graph_add_one(const void* data, int level, InnerIdType inner_id);
 
     void
     resize(uint64_t new_size);
@@ -171,14 +181,14 @@ private:
 
     template <InnerSearchMode mode = InnerSearchMode::KNN_SEARCH>
     MaxHeap
-    search_one_graph(const float* query,
+    search_one_graph(const void* query,
                      const GraphInterfacePtr& graph,
                      const FlattenInterfacePtr& flatten,
                      InnerSearchParam& inner_search_param) const;
 
     template <InnerSearchMode mode = InnerSearchMode::KNN_SEARCH>
     MaxHeap
-    search_one_graph(const float* query,
+    search_one_graph(const void* query,
                      const GraphInterfacePtr& graph,
                      const FlattenInterfacePtr& flatten,
                      InnerSearchParam& inner_search_param,
@@ -191,7 +201,7 @@ private:
     deserialize_basic_info(StreamReader& reader);
 
     void
-    reorder(const float* query,
+    reorder(const void* query,
             const FlattenInterfacePtr& flatten_interface,
             MaxHeap& candidate_heap,
             int64_t k) const;
