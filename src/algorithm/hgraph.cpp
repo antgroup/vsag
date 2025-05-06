@@ -211,8 +211,8 @@ HGraph::KnnSearch(const DatasetPtr& query,
     auto params = HGraphSearchParameters::FromJson(parameters);
 
     auto ef_search_threshold = std::max(AMPLIFICATION_FACTOR * k, 1000L);
-    CHECK_ARGUMENT(
-        (1 <= params.ef_search) and (params.ef_search <= ef_search_threshold),  // NOLINT
+    CHECK_ARGUMENT(  // NOLINT
+        (1 <= params.ef_search) and (params.ef_search <= ef_search_threshold),
         fmt::format("ef_search({}) must in range[1, {}]", params.ef_search, ef_search_threshold));
 
     FilterPtr ft = nullptr;
