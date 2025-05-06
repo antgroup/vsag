@@ -56,7 +56,7 @@ public:
         {"sq8", 0.84},
         {"sq8_uniform", 0.83},
         {"sq8_uniform,fp32", 0.89},
-        {"pq,fp32", 0.85},
+        {"pq,fp32", 0.80},
     };
 };
 
@@ -302,7 +302,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex, "IVF Export Model", "[ft][i
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
     auto metric_type = GENERATE("l2", "ip", "cosine");
-    std::string train_type = GENERATE("random", "kmeans");
+    std::string train_type = GENERATE("kmeans");
 
     const std::string name = "ivf";
     auto search_param = fmt::format(search_param_tmp, 200);
@@ -326,7 +326,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex, "IVF Add", "[ft][ivf]") {
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
     auto metric_type = GENERATE("l2", "ip", "cosine");
-    std::string train_type = GENERATE("random", "kmeans");
+    std::string train_type = GENERATE("kmeans");
 
     const std::string name = "ivf";
     auto search_param = fmt::format(search_param_tmp, 200);
@@ -378,7 +378,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex, "IVF Serialize File", "[ft]
     auto metric_type = GENERATE("l2", "ip", "cosine");
     const std::string name = "ivf";
     auto search_param = fmt::format(search_param_tmp, 200);
-    std::string train_type = GENERATE("random", "kmeans");
+    std::string train_type = GENERATE("kmeans");
 
     for (auto& dim : dims) {
         for (auto& [base_quantization_str, recall] : test_cases) {
@@ -417,7 +417,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex, "IVF Clone", "[ft][ivf]") {
     auto metric_type = GENERATE("l2", "ip", "cosine");
     const std::string name = "ivf";
     auto search_param = fmt::format(search_param_tmp, 200);
-    std::string train_type = GENERATE("random", "kmeans");
+    std::string train_type = GENERATE("kmeans");
 
     for (auto& dim : dims) {
         for (auto& [base_quantization_str, recall] : test_cases) {

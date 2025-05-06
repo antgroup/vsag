@@ -23,35 +23,33 @@ jobs:
   pull-request-check:
     docker:
       - image: vsaglib/vsag:ci-x86
-    resource_class: medium+
+    resource_class: large
     steps:
       - checkout
       - restore_cache:
           keys:
             - fork-cache-{{ checksum "CMakeLists.txt" }}-{{ checksum ".circleci/fresh_ci_cache.commit" }}
-      - run: make debug
+      - run:
+          command: export CMAKE_GENERATOR="Ninja" && make test_parallel
+          no_output_timeout: 50m
       - save_cache:
           key: fork-cache-{{ checksum "CMakeLists.txt" }}-{{ checksum ".circleci/fresh_ci_cache.commit" }}
           paths:
             - ./build
-      - run:
-          command: make test_parallel
-          no_output_timeout: 50m
 
   main-branch-check:
     docker:
       - image: vsaglib/vsag:ci-x86
-    resource_class: medium+
+    resource_class: large
     steps:
       - checkout
       - restore_cache:
           keys:
             - main-ccache-{{ checksum "CMakeLists.txt" }}-{{ checksum ".circleci/fresh_ci_cache.commit" }}
-      - run: make debug
+      - run:
+          command: export CMAKE_GENERATOR="Ninja" && make test_parallel
+          no_output_timeout: 50m
       - save_cache:
           key: main-ccache-{{ checksum "CMakeLists.txt" }}-{{ checksum ".circleci/fresh_ci_cache.commit" }}
           paths:
             - ./build
-      - run:
-          command: make test_parallel
-          no_output_timeout: 50m
