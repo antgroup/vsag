@@ -465,7 +465,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex, "HGraph ODescent Build",
                 }
             }
             auto param = GenerateHGraphBuildParametersString(
-                metric_type, dim, base_quantization_str, 0, 0, "odescent");
+                metric_type, dim, base_quantization_str, 0, 0, "float32", "odescent");
             vsag::Options::Instance().set_block_size_limit(size);
             auto index = TestFactory(name, param, true);
             auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
