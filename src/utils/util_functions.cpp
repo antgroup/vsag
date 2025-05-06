@@ -82,4 +82,14 @@ select_k_numbers(int64_t n, int k) {
     return numbers;
 }
 
+uint64_t
+next_multiple_of_power_of_two(uint64_t x, uint64_t n) {
+    if (n > 63) {
+        throw std::runtime_error(fmt::format("n is larger than 63, n is {}", n));
+    }
+    uint64_t y = 1 << n;
+    auto result = (x + y - 1) & ~(y - 1);
+    return result;
+}
+
 }  // namespace vsag

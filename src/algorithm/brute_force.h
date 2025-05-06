@@ -95,13 +95,26 @@ public:
     EstimateMemory(uint64_t num_elements) const override;
 
 private:
-    Vector<DatasetPtr>
-    split_dataset_by_duplicate_label(const DatasetPtr& dataset,
-                                     std::vector<LabelType>& failed_ids) const;
+    void
+    resize(uint64_t new_size);
+
+    void
+    add_one(const float* data, InnerIdType inner_id);
 
 private:
     FlattenInterfacePtr inner_codes_{nullptr};
 
     uint64_t total_count_{0};
+
+    uint64_t resize_increase_count_bit_{DEFAULT_RESIZE_BIT};
+
+    std::shared_ptr<SafeThreadPool> build_pool_{nullptr};
+
+    mutable std::shared_mutex global_mutex_;
+    mutable std::shared_mutex add_mutex_;
+
+    std::atomic<InnerIdType> max_capacity_{0};
+
+    static constexpr uint64_t DEFAULT_RESIZE_BIT = 10;
 };
 }  // namespace vsag
