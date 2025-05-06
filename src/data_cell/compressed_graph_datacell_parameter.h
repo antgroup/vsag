@@ -15,7 +15,31 @@
 
 #pragma once
 
-namespace vsag {
-enum class GraphStorageTypes { GRAPH_STORAGE_TYPE_FLAT = 0, GRAPH_STORAGE_TYPE_COMPRESSED = 1 };
 
+#include "graph_interface_parameter.h"
+
+namespace vsag {
+class CompressedGraphDatacellParameter : public GraphInterfaceParameter {
+public:
+    CompressedGraphDatacellParameter() = default;
+
+    void
+    FromJson(const JsonType& json) override {
+        if (json.contains(GRAPH_PARAM_MAX_DEGREE)) {
+            this->max_degree_ = json[GRAPH_PARAM_MAX_DEGREE];
+        }
+    }
+
+    JsonType
+    ToJson() override {
+        JsonType json;
+        json[GRAPH_PARAM_MAX_DEGREE] = this->max_degree_;
+        return json;
+    }
+
+public:
+    uint64_t max_degree_{64};
+};
+
+using CompressedGraphDatacellParamPtr = std::shared_ptr<CompressedGraphDatacellParameter>;
 }  // namespace vsag

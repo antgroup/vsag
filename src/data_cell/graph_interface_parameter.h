@@ -15,7 +15,6 @@
 
 #pragma once
 
-#include "data_cell/graph_storage_type.h"
 #include "parameter.h"
 
 namespace vsag {
@@ -23,10 +22,12 @@ namespace vsag {
 class GraphInterfaceParameter;
 using GraphInterfaceParamPtr = std::shared_ptr<GraphInterfaceParameter>;
 
+enum class GraphStorageTypes { GRAPH_STORAGE_TYPE_FLAT = 0, GRAPH_STORAGE_TYPE_COMPRESSED = 1, GRAPH_STORAGE_TYPE_SPARSE = 2 };
+
 class GraphInterfaceParameter : public Parameter {
 public:
     static GraphInterfaceParamPtr
-    GetGraphParameterByJson(const JsonType& json);
+    GetGraphParameterByJson(GraphStorageTypes graph_type, const JsonType& json);
 
 public:
     GraphStorageTypes graph_storage_type_{GraphStorageTypes::GRAPH_STORAGE_TYPE_FLAT};

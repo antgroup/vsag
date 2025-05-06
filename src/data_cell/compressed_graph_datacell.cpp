@@ -29,7 +29,7 @@ CompressedGraphDataCell::CompressedGraphDataCell(const GraphDataCellParamPtr& gr
                                                  const IndexCommonParam& common_param)
     : allocator_(common_param.allocator_.get()), neighbor_sets_(allocator_) {
     this->maximum_degree_ = graph_param->max_degree_;
-    this->max_capacity_ = graph_param->init_max_capacity_;
+    this->max_capacity_ = 0;
 }
 
 void
