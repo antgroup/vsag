@@ -34,7 +34,7 @@
         if (not(expr)) {                                                     \
             throw vsag::VsagException(ErrorType::INVALID_ARGUMENT, message); \
         }                                                                    \
-    } while (0);
+    } while (0);  // NOLINT
 
 #define ROW_ID_MASK 0xFFFFFFFFLL
 

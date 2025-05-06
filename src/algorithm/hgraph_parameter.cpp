@@ -108,8 +108,6 @@ HGraphParameter::ToJson() {
     return json;
 }
 
-// NOLINTBEGIN(readability-simplify-boolean-expr)
-
 HGraphSearchParameters
 HGraphSearchParameters::FromJson(const std::string& json_string) {
     JsonType params = JsonType::parse(json_string);
@@ -132,5 +130,3 @@ HGraphSearchParameters::FromJson(const std::string& json_string) {
     return obj;
 }
 }  // namespace vsag
-
-// NOLINTEND(readability-simplify-boolean-expr)
