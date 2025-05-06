@@ -26,6 +26,14 @@ namespace vsag {
 BruteForce::BruteForce(const BruteForceParameterPtr& param, const IndexCommonParam& common_param)
     : InnerIndexInterface(param, common_param) {
     inner_codes_ = FlattenInterface::MakeInstance(param->flatten_param, common_param);
+    auto code_size = this->inner_codes_->code_size_;
+    auto increase_count = Options::Instance().block_size_limit() / code_size;
+    this->resize_increase_count_bit_ = std::max(
+        DEFAULT_RESIZE_BIT, static_cast<uint64_t>(log2(static_cast<double>(increase_count))));
+    this->build_pool_ = common_param.thread_pool_;
+    if (this->build_pool_ == nullptr) {
+        this->build_pool_ = SafeThreadPool::FactoryDefaultThreadPool();
+    }
 }
 
 int64_t
@@ -53,18 +61,60 @@ BruteForce::Train(const DatasetPtr& data) {
 std::vector<int64_t>
 BruteForce::Add(const DatasetPtr& data) {
     std::vector<int64_t> failed_ids;
-    const auto& datasets = this->split_dataset_by_duplicate_label(data, failed_ids);
-    for (const auto& per_dataset : datasets) {
-        auto start_id = this->GetNumElements();
-        this->inner_codes_->BatchInsertVector(per_dataset->GetFloat32Vectors(),
-                                              per_dataset->GetNumElements());
-        for (uint64_t i = 0; i < per_dataset->GetNumElements(); ++i) {
-            const auto& label = per_dataset->GetIds()[i];
-            this->label_table_->Insert(start_id + i, label);
+    auto base_dim = data->GetDim();
+    CHECK_ARGUMENT(base_dim == dim_,
+                   fmt::format("base.dim({}) must be equal to index.dim({})", base_dim, dim_));
+    CHECK_ARGUMENT(data->GetFloat32Vectors() != nullptr, "base.float_vector is nullptr");
+
+    {
+        std::lock_guard lock(this->add_mutex_);
+        if (this->total_count_ == 0) {
+            this->Train(data);
         }
-        this->total_count_ += per_dataset->GetNumElements();
     }
 
+    auto add_func = [&](const float* data, InnerIdType inner_id) -> void {
+        this->add_one(data, inner_id);
+    };
+
+    std::vector<std::future<void>> futures;
+    auto total = data->GetNumElements();
+    const auto* labels = data->GetIds();
+    const auto* vectors = data->GetFloat32Vectors();
+    Vector<std::pair<InnerIdType, LabelType>> inner_ids(allocator_);
+    for (int64_t j = 0; j < total; ++j) {
+        auto label = labels[j];
+        InnerIdType inner_id;
+        {
+            std::lock_guard label_lock(this->label_lookup_mutex_);
+            if (this->label_table_->CheckLabel(label)) {
+                failed_ids.emplace_back(label);
+                continue;
+            }
+            {
+                std::lock_guard lock(this->add_mutex_);
+                inner_id = this->total_count_;
+                total_count_++;
+                this->resize(total_count_);
+            }
+            this->label_table_->Insert(inner_id, label);
+            inner_ids.emplace_back(inner_id, j);
+        }
+    }
+    for (auto& [inner_id, local_idx] : inner_ids) {
+        if (this->build_pool_ != nullptr) {
+            auto future =
+                this->build_pool_->GeneralEnqueue(add_func, vectors + local_idx * dim_, inner_id);
+            futures.emplace_back(std::move(future));
+        } else {
+            add_func(vectors + local_idx * dim_, inner_id);
+        }
+    }
+    if (this->build_pool_ != nullptr) {
+        for (auto& future : futures) {
+            future.get();
+        }
+    }
     return failed_ids;
 }
 
@@ -73,6 +123,7 @@ BruteForce::KnnSearch(const DatasetPtr& query,
                       int64_t k,
                       const std::string& parameters,
                       const FilterPtr& filter) const {
+    std::shared_lock read_lock(this->global_mutex_);
     auto computer = this->inner_codes_->FactoryComputer(query->GetFloat32Vectors());
     auto heap = std::make_shared<StandardHeap<true, true>>(this->allocator_, k);
     for (InnerIdType i = 0; i < total_count_; ++i) {
@@ -98,6 +149,7 @@ BruteForce::RangeSearch(const vsag::DatasetPtr& query,
                         const std::string& parameters,
                         const vsag::FilterPtr& filter,
                         int64_t limited_size) const {
+    std::shared_lock read_lock(this->global_mutex_);
     auto computer = this->inner_codes_->FactoryComputer(query->GetFloat32Vectors());
     if (limited_size < 0) {
         limited_size = std::numeric_limits<int64_t>::max();
@@ -177,6 +229,7 @@ BruteForce::InitFeatures() {
     // concurrency
     this->index_feature_list_->SetFeatures({
         IndexFeature::SUPPORT_SEARCH_CONCURRENT,
+        IndexFeature::SUPPORT_ADD_CONCURRENT,
     });
 
     // serialize
@@ -193,52 +246,6 @@ BruteForce::InitFeatures() {
         IndexFeature::SUPPORT_CHECK_ID_EXIST,
         IndexFeature::SUPPORT_CLONE,
     });
-}
-
-Vector<DatasetPtr>
-BruteForce::split_dataset_by_duplicate_label(const DatasetPtr& dataset,
-                                             std::vector<LabelType>& failed_ids) const {
-    Vector<DatasetPtr> return_datasets(0, this->allocator_);
-    auto count = dataset->GetNumElements();
-    auto dim = dataset->GetDim();
-    const auto* labels = dataset->GetIds();
-    const auto* vec = dataset->GetFloat32Vectors();
-    UnorderedSet<LabelType> temp_labels(allocator_);
-
-    for (uint64_t i = 0; i < count; ++i) {
-        if (label_table_->CheckLabel(labels[i]) or
-            temp_labels.find(labels[i]) != temp_labels.end()) {
-            failed_ids.emplace_back(i);
-            continue;
-        }
-        temp_labels.emplace(labels[i]);
-    }
-    failed_ids.emplace_back(count);
-
-    if (failed_ids.size() == 1) {
-        return_datasets.emplace_back(dataset);
-        return return_datasets;
-    }
-    int64_t start = -1;
-    for (auto end : failed_ids) {
-        if (end - start == 1) {
-            start = end;
-            continue;
-        }
-        auto new_dataset = Dataset::Make();
-        new_dataset->NumElements(end - start - 1)
-            ->Dim(dim)
-            ->Ids(labels + start + 1)
-            ->Float32Vectors(vec + dim * (start + 1))
-            ->Owner(false);
-        return_datasets.emplace_back(new_dataset);
-        start = end;
-    }
-    failed_ids.pop_back();
-    for (auto& failed_id : failed_ids) {
-        failed_id = labels[failed_id];
-    }
-    return return_datasets;
 }
 
 static const std::unordered_map<std::string, std::vector<std::string>> EXTERNAL_MAPPING = {
@@ -275,6 +282,26 @@ BruteForce::CheckAndMappingExternalParam(const JsonType& external_param,
     brute_force_parameter->FromJson(inner_json);
 
     return brute_force_parameter;
+}
+
+void
+BruteForce::resize(uint64_t new_size) {
+    uint64_t new_size_power_2 =
+        next_multiple_of_power_of_two(new_size, this->resize_increase_count_bit_);
+    auto cur_size = this->max_capacity_.load();
+    if (cur_size >= new_size_power_2) {
+        return;
+    }
+    std::lock_guard lock(this->global_mutex_);
+    cur_size = this->max_capacity_.load();
+    if (cur_size < new_size_power_2) {
+        this->inner_codes_->Resize(new_size_power_2);
+    }
+}
+
+void
+BruteForce::add_one(const float* data, InnerIdType inner_id) {
+    this->inner_codes_->InsertVector(data, inner_id);
 }
 
 }  // namespace vsag
