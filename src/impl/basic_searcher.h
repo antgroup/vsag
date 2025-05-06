@@ -26,6 +26,7 @@
 #include "index/iterator_filter.h"
 #include "lock_strategy.h"
 #include "runtime_parameter.h"
+#include "utils/distance_heap.h"
 #include "utils/linear_congruential_generator.h"
 #include "utils/visited_list.h"
 
@@ -75,14 +76,14 @@ public:
     explicit BasicSearcher(const IndexCommonParam& common_param,
                            MutexArrayPtr mutex_array = nullptr);
 
-    virtual MaxHeap
+    virtual DistHeapPtr
     Search(const GraphInterfacePtr& graph,
            const FlattenInterfacePtr& flatten,
            const VisitedListPtr& vl,
            const void* query,
            const InnerSearchParam& inner_search_param) const;
 
-    virtual MaxHeap
+    virtual DistHeapPtr
     Search(const GraphInterfacePtr& graph,
            const FlattenInterfacePtr& flatten,
            const VisitedListPtr& vl,
@@ -118,7 +119,7 @@ private:
           Vector<InnerIdType>& neighbors) const;
 
     template <InnerSearchMode mode = KNN_SEARCH>
-    MaxHeap
+    DistHeapPtr
     search_impl(const GraphInterfacePtr& graph,
                 const FlattenInterfacePtr& flatten,
                 const VisitedListPtr& vl,
@@ -126,7 +127,7 @@ private:
                 const InnerSearchParam& inner_search_param) const;
 
     template <InnerSearchMode mode = KNN_SEARCH>
-    MaxHeap
+    DistHeapPtr
     search_impl(const GraphInterfacePtr& graph,
                 const FlattenInterfacePtr& flatten,
                 const VisitedListPtr& vl,
