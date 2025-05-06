@@ -52,6 +52,14 @@ static const std::unordered_map<std::string, std::vector<std::string>> EXTERNAL_
         IVF_USE_REORDER,
         {IVF_USE_REORDER_KEY},
     },
+    {
+        IVF_BASE_PQ_DIM,
+        {
+            BUCKET_PARAMS_KEY,
+            QUANTIZATION_PARAMS_KEY,
+            PRODUCT_QUANTIZATION_DIM,
+        },
+    },
 };
 
 static constexpr const char* IVF_PARAMS_TEMPLATE =
@@ -64,7 +72,11 @@ static constexpr const char* IVF_PARAMS_TEMPLATE =
                 "{IO_TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}"
             },
             "{QUANTIZATION_PARAMS_KEY}": {
-                "{QUANTIZATION_TYPE_KEY}": "{QUANTIZATION_TYPE_VALUE_FP32}"
+                "{QUANTIZATION_TYPE_KEY}": "{QUANTIZATION_TYPE_VALUE_FP32}",
+                "{SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE}": 0.05,
+                "{PCA_DIM}": 0,
+                "{RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY}": 32,
+                "{PRODUCT_QUANTIZATION_DIM}": 0
             },
             "{BUCKETS_COUNT_KEY}": 10
         },
@@ -76,7 +88,8 @@ static constexpr const char* IVF_PARAMS_TEMPLATE =
             },
             "codes_type": "flatten_codes",
             "{QUANTIZATION_PARAMS_KEY}": {
-                "{QUANTIZATION_TYPE_KEY}": "{QUANTIZATION_TYPE_VALUE_FP32}"
+                "{QUANTIZATION_TYPE_KEY}": "{QUANTIZATION_TYPE_VALUE_FP32}",
+                "{PRODUCT_QUANTIZATION_DIM}": 0
             }
         }
     })";

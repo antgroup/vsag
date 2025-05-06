@@ -152,6 +152,7 @@ const char* const IVF_TRAIN_TYPE = "ivf_train_type";
 const char* const IVF_BUCKETS_COUNT = "buckets_count";
 const char* const IVF_BASE_QUANTIZATION_TYPE = "base_quantization_type";
 const char* const IVF_BASE_IO_TYPE = "base_io_type";
+const char* const IVF_BASE_PQ_DIM = "base_pq_dim";
 const char* const IVF_BASE_FILE_PATH = "base_file_path";
 const char* const IVF_PRECISE_QUANTIZATION_TYPE = "precise_quantization_type";
 const char* const IVF_PRECISE_IO_TYPE = "precise_io_type";
