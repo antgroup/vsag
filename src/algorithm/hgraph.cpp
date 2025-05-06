@@ -60,6 +60,9 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
 
     auto step_block_size = Options::Instance().block_size_limit();
     auto block_size_per_vector = this->basic_flatten_codes_->code_size_;
+    block_size_per_vector =
+        std::max(block_size_per_vector,
+                 static_cast<uint32_t>(this->bottom_graph_->maximum_degree_ * sizeof(InnerIdType)));
     if (use_reorder_) {
         block_size_per_vector =
             std::max(block_size_per_vector, this->high_precise_codes_->code_size_);
