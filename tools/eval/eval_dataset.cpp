@@ -20,7 +20,8 @@ namespace vsag::eval {
 void
 parse_sparse_vectors(const char* src_data,
                      size_t data_size,
-                     std::vector<SparseVector>& parsed_vectors) {
+                     std::vector<SparseVector>& parsed_vectors,
+                     int64_t& max_len) {
     // parse the sparse vectors with ordered keys
     const char* ptr = src_data;
     const char* end = src_data + data_size;
@@ -36,6 +37,7 @@ parse_sparse_vectors(const char* src_data,
             parsed_vectors.push_back(vec);
             continue;
         }
+        max_len = std::max(max_len, static_cast<int64_t>(vec.len_));
 
         const size_t keys_size = vec.len_ * sizeof(uint32_t);
         const size_t vals_size = vec.len_ * sizeof(float);
@@ -200,6 +202,7 @@ EvalDataset::Load(const std::string& filename) {
             dataset.read(obj->test_.get(), type, dataspace);
         }
     } else {
+        obj->dim_ = 0;
         {
             H5::PredType type = H5::PredType::ALPHA_I8;
             H5::DataSet dataset = file.openDataSet("/train");
@@ -209,7 +212,8 @@ EvalDataset::Load(const std::string& filename) {
             obj->train_data_size_ = dims_out[0];
             obj->train_.reset(new char[obj->train_data_size_]);
             dataset.read(obj->train_.get(), type, dataspace);
-            parse_sparse_vectors(obj->train_.get(), obj->train_data_size_, obj->sparse_train_);
+            parse_sparse_vectors(
+                obj->train_.get(), obj->train_data_size_, obj->sparse_train_, obj->dim_);
             obj->train_.reset();
             obj->number_of_base_ = obj->sparse_train_.size();
         }
@@ -222,7 +226,8 @@ EvalDataset::Load(const std::string& filename) {
             obj->test_data_size_ = dims_out[0];
             obj->test_.reset(new char[obj->test_data_size_]);
             dataset.read(obj->test_.get(), type, dataspace);
-            parse_sparse_vectors(obj->test_.get(), obj->test_data_size_, obj->sparse_test_);
+            parse_sparse_vectors(
+                obj->test_.get(), obj->test_data_size_, obj->sparse_test_, obj->dim_);
             obj->test_.reset();
             obj->number_of_query_ = obj->sparse_test_.size();
         }

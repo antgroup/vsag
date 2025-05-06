@@ -35,6 +35,7 @@ FlattenDataCellParameter::FromJson(const JsonType& json) {
         fmt::format("flatten interface parameters must contains {}", QUANTIZATION_PARAMS_KEY));
     this->quantizer_parameter =
         QuantizerParameter::GetQuantizerParameterByJson(json[QUANTIZATION_PARAMS_KEY]);
+    this->name = FLATTEN_DATA_CELL;
 }
 
 JsonType

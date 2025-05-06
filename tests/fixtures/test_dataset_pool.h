@@ -38,7 +38,7 @@ public:
     GetNanDataset(const std::string& metric_str);
 
     TestDatasetPtr
-    GetSparseDatasetAndCreate(uint64_t count, float valid_ratio = 0.8);
+    GetSparseDatasetAndCreate(uint64_t count, uint64_t dim, float valid_ratio = 0.8);
 
 private:
     static std::string
