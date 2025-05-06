@@ -23,11 +23,9 @@
 #include "common.h"
 #include "data_cell/sparse_graph_datacell.h"
 #include "dataset_impl.h"
-#include "empty_index_binary_set.h"
 #include "impl/pruning_strategy.h"
 #include "index/iterator_filter.h"
-#include "logger.h"
-#include "utils/slow_task_timer.h"
+#include "utils/standard_heap.h"
 #include "utils/util_functions.h"
 
 namespace vsag {
@@ -205,7 +203,7 @@ HGraph::KnnSearch(const DatasetPtr& query,
     for (auto i = static_cast<int64_t>(this->route_graphs_.size() - 1); i >= 0; --i) {
         auto result = this->search_one_graph(
             raw_query, this->route_graphs_[i], this->basic_flatten_codes_, search_param);
-        search_param.ep = result.top().second;
+        search_param.ep = result->Top().second;
     }
 
     auto params = HGraphSearchParameters::FromJson(parameters);
@@ -228,29 +226,29 @@ HGraph::KnnSearch(const DatasetPtr& query,
         this->reorder(raw_query, this->high_precise_codes_, search_result, k);
     }
 
-    while (search_result.size() > k) {
-        search_result.pop();
+    while (search_result->Size() > k) {
+        search_result->Pop();
     }
 
     // return an empty dataset directly if searcher returns nothing
-    if (search_result.empty()) {
+    if (search_result->Empty()) {
         return DatasetImpl::MakeEmptyDataset();
     }
-    auto count = static_cast<const int64_t>(search_result.size());
+    auto count = static_cast<const int64_t>(search_result->Size());
     auto [dataset_results, dists, ids] = CreateFastDataset(count, allocator_);
     char* extra_infos = nullptr;
     if (extra_info_size_ > 0) {
-        extra_infos = (char*)allocator_->Allocate(extra_info_size_ * search_result.size());
+        extra_infos = (char*)allocator_->Allocate(extra_info_size_ * search_result->Size());
         dataset_results->ExtraInfos(extra_infos);
     }
     for (int64_t j = count - 1; j >= 0; --j) {
-        dists[j] = search_result.top().first;
-        ids[j] = this->label_table_->GetLabelById(search_result.top().second);
+        dists[j] = search_result->Top().first;
+        ids[j] = this->label_table_->GetLabelById(search_result->Top().second);
         if (extra_infos != nullptr) {
-            this->extra_infos_->GetExtraInfoById(search_result.top().second,
+            this->extra_infos_->GetExtraInfoById(search_result->Top().second,
                                                  extra_infos + extra_info_size_ * j);
         }
-        search_result.pop();
+        search_result->Pop();
     }
     return std::move(dataset_results);
 }
@@ -301,13 +299,13 @@ HGraph::KnnSearch(const DatasetPtr& query,
     }
 
     auto* iter_filter_ctx = static_cast<IteratorFilterContext*>(iter_ctx);
-    MaxHeap search_result(allocator_);
+    DistHeapPtr search_result = std::make_shared<StandardHeap<true, false>>(allocator_, -1);
     const auto* query_data = get_data(query);
     if (is_last_filter) {
         while (!iter_filter_ctx->Empty()) {
             uint32_t cur_inner_id = iter_filter_ctx->GetTopID();
             float cur_dist = iter_filter_ctx->GetTopDist();
-            search_result.emplace(cur_dist, cur_inner_id);
+            search_result->Push(cur_dist, cur_inner_id);
             iter_filter_ctx->PopDiscard();
         }
     } else {
@@ -320,7 +318,7 @@ HGraph::KnnSearch(const DatasetPtr& query,
             for (auto i = static_cast<int64_t>(this->route_graphs_.size() - 1); i >= 0; --i) {
                 auto result = this->search_one_graph(
                     query_data, this->route_graphs_[i], this->basic_flatten_codes_, search_param);
-                search_param.ep = result.top().second;
+                search_param.ep = result->Top().second;
             }
         }
 
@@ -338,32 +336,32 @@ HGraph::KnnSearch(const DatasetPtr& query,
         this->reorder(query_data, this->high_precise_codes_, search_result, k);
     }
 
-    while (search_result.size() > k) {
-        std::pair<float, InnerIdType> curr = search_result.top();
+    while (search_result->Size() > k) {
+        auto curr = search_result->Top();
         iter_filter_ctx->AddDiscardNode(curr.first, curr.second);
-        search_result.pop();
+        search_result->Pop();
     }
 
     // return an empty dataset directly if searcher returns nothing
-    if (search_result.empty()) {
+    if (search_result->Empty()) {
         return DatasetImpl::MakeEmptyDataset();
     }
-    auto count = static_cast<const int64_t>(search_result.size());
+    auto count = static_cast<const int64_t>(search_result->Size());
     auto [dataset_results, dists, ids] = CreateFastDataset(count, allocator_);
     char* extra_infos = nullptr;
     if (extra_info_size_ > 0) {
-        extra_infos = (char*)allocator_->Allocate(extra_info_size_ * search_result.size());
+        extra_infos = (char*)allocator_->Allocate(extra_info_size_ * search_result->Size());
         dataset_results->ExtraInfos(extra_infos);
     }
     for (int64_t j = count - 1; j >= 0; --j) {
-        dists[j] = search_result.top().first;
-        ids[j] = this->label_table_->GetLabelById(search_result.top().second);
-        iter_filter_ctx->SetPoint(search_result.top().second);
+        dists[j] = search_result->Top().first;
+        ids[j] = this->label_table_->GetLabelById(search_result->Top().second);
+        iter_filter_ctx->SetPoint(search_result->Top().second);
         if (extra_infos != nullptr) {
-            this->extra_infos_->GetExtraInfoById(search_result.top().second,
+            this->extra_infos_->GetExtraInfoById(search_result->Top().second,
                                                  extra_infos + extra_info_size_ * j);
         }
-        search_result.pop();
+        search_result->Pop();
     }
     iter_filter_ctx->SetOFFFirstUsed();
     return std::move(dataset_results);
@@ -426,7 +424,7 @@ HGraph::generate_one_route_graph() {
 }
 
 template <InnerSearchMode mode>
-MaxHeap
+DistHeapPtr
 HGraph::search_one_graph(const void* query,
                          const GraphInterfacePtr& graph,
                          const FlattenInterfacePtr& flatten,
@@ -438,7 +436,7 @@ HGraph::search_one_graph(const void* query,
 }
 
 template <InnerSearchMode mode>
-MaxHeap
+DistHeapPtr
 HGraph::search_one_graph(const void* query,
                          const GraphInterfacePtr& graph,
                          const FlattenInterfacePtr& flatten,
@@ -485,7 +483,7 @@ HGraph::RangeSearch(const DatasetPtr& query,
     for (auto i = static_cast<int64_t>(this->route_graphs_.size() - 1); i >= 0; --i) {
         auto result = this->search_one_graph(
             raw_query, this->route_graphs_[i], this->basic_flatten_codes_, search_param);
-        search_param.ep = result.top().second;
+        search_param.ep = result->Top().second;
     }
 
     auto params = HGraphSearchParameters::FromJson(parameters);
@@ -502,26 +500,26 @@ HGraph::RangeSearch(const DatasetPtr& query,
     }
 
     if (limited_size > 0) {
-        while (search_result.size() > limited_size) {
-            search_result.pop();
+        while (search_result->Size() > limited_size) {
+            search_result->Pop();
         }
     }
 
-    auto count = static_cast<const int64_t>(search_result.size());
+    auto count = static_cast<const int64_t>(search_result->Size());
     auto [dataset_results, dists, ids] = CreateFastDataset(count, allocator_);
     char* extra_infos = nullptr;
     if (extra_info_size_ > 0) {
-        extra_infos = (char*)allocator_->Allocate(extra_info_size_ * search_result.size());
+        extra_infos = (char*)allocator_->Allocate(extra_info_size_ * search_result->Size());
         dataset_results->ExtraInfos(extra_infos);
     }
     for (int64_t j = count - 1; j >= 0; --j) {
-        dists[j] = search_result.top().first;
-        ids[j] = this->label_table_->GetLabelById(search_result.top().second);
+        dists[j] = search_result->Top().first;
+        ids[j] = this->label_table_->GetLabelById(search_result->Top().second);
         if (extra_infos != nullptr) {
-            this->extra_infos_->GetExtraInfoById(search_result.top().second,
+            this->extra_infos_->GetExtraInfoById(search_result->Top().second,
                                                  extra_infos + extra_info_size_ * j);
         }
-        search_result.pop();
+        search_result->Pop();
     }
     return std::move(dataset_results);
 }
@@ -726,7 +724,7 @@ HGraph::add_one_point(const void* data, int level, InnerIdType inner_id) {
 
 void
 HGraph::graph_add_one(const void* data, int level, InnerIdType inner_id) {
-    MaxHeap result(allocator_);
+    DistHeapPtr result = nullptr;
     InnerSearchParam param{
         .topk = 1,
         .ep = this->entry_point_id_,
@@ -741,7 +739,7 @@ HGraph::graph_add_one(const void* data, int level, InnerIdType inner_id) {
     }
     for (auto j = this->route_graphs_.size() - 1; j > level; --j) {
         result = search_one_graph(data, route_graphs_[j], flatten_codes, param);
-        param.ep = result.top().second;
+        param.ep = result->Top().second;
     }
 
     param.ef = this->ef_construct_;
@@ -885,28 +883,28 @@ HGraph::elp_optimize() {
 void
 HGraph::reorder(const void* query,
                 const FlattenInterfacePtr& flatten_interface,
-                MaxHeap& candidate_heap,
+                const DistHeapPtr& candidate_heap,
                 int64_t k) const {
-    uint64_t size = candidate_heap.size();
+    uint64_t size = candidate_heap->Size();
     if (k <= 0) {
         k = static_cast<int64_t>(size);
     }
     Vector<InnerIdType> ids(size, allocator_);
     Vector<float> dists(size, allocator_);
     uint64_t idx = 0;
-    while (not candidate_heap.empty()) {
-        ids[idx] = candidate_heap.top().second;
+    while (not candidate_heap->Empty()) {
+        ids[idx] = candidate_heap->Top().second;
         ++idx;
-        candidate_heap.pop();
+        candidate_heap->Pop();
     }
     auto computer = flatten_interface->FactoryComputer(query);
     flatten_interface->Query(dists.data(), computer, ids.data(), size);
     for (uint64_t i = 0; i < size; ++i) {
-        if (candidate_heap.size() < k or dists[i] <= candidate_heap.top().first) {
-            candidate_heap.emplace(dists[i], ids[i]);
+        if (candidate_heap->Size() < k or dists[i] <= candidate_heap->Top().first) {
+            candidate_heap->Push(dists[i], ids[i]);
         }
-        if (candidate_heap.size() > k) {
-            candidate_heap.pop();
+        if (candidate_heap->Size() > k) {
+            candidate_heap->Pop();
         }
     }
 }

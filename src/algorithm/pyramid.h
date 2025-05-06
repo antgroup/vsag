@@ -28,11 +28,12 @@
 #include "pyramid_zparameters.h"
 #include "quantization/fp32_quantizer_parameter.h"
 #include "safe_allocator.h"
+#include "utils/distance_heap.h"
 
 namespace vsag {
 
 class IndexNode;
-using SearchFunc = std::function<MaxHeap(const IndexNode* node)>;
+using SearchFunc = std::function<DistHeapPtr(const IndexNode* node)>;
 
 class IndexNode {
 public:
@@ -44,7 +45,7 @@ public:
     void
     InitGraph();
 
-    MaxHeap
+    DistHeapPtr
     SearchGraph(const SearchFunc& search_func) const;
 
     void

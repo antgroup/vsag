@@ -21,13 +21,14 @@
 #include "data_cell/graph_interface.h"
 #include "lock_strategy.h"
 #include "typing.h"
+#include "utils/distance_heap.h"
 #include "vsag/allocator.h"
 
 namespace vsag {
 
 InnerIdType
 mutually_connect_new_element(InnerIdType cur_c,
-                             MaxHeap& top_candidates,
+                             const DistHeapPtr& top_candidates,
                              const GraphInterfacePtr& graph,
                              const FlattenInterfacePtr& flatten,
                              const MutexArrayPtr& neighbors_mutexes,

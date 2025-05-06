@@ -21,6 +21,7 @@
 #include "impl/pruning_strategy.h"
 #include "io/memory_io_parameter.h"
 #include "utils/slow_task_timer.h"
+#include "utils/standard_heap.h"
 
 namespace vsag {
 
@@ -144,18 +145,19 @@ IndexNode::InitGraph() {
     graph_ = GraphInterface::MakeInstance(graph_param_, *common_param_);
 }
 
-MaxHeap
+DistHeapPtr
 IndexNode::SearchGraph(const SearchFunc& search_func) const {
     if (graph_ != nullptr && graph_->TotalCount() > 0) {
         return search_func(this);
     }
-    MaxHeap search_result(common_param_->allocator_.get());
+    auto search_result =
+        std::make_shared<StandardHeap<true, false>>(common_param_->allocator_.get(), -1);
     for (const auto& [key, node] : children_) {
-        MaxHeap child_search_result = node->SearchGraph(search_func);
-        while (not child_search_result.empty()) {
-            auto result = child_search_result.top();
-            child_search_result.pop();
-            search_result.push(result);
+        DistHeapPtr child_search_result = node->SearchGraph(search_func);
+        while (not child_search_result->Empty()) {
+            auto result = child_search_result->Top();
+            child_search_result->Pop();
+            search_result->Push(result.first, result.second);
         }
     }
     return search_result;
@@ -266,13 +268,13 @@ Pyramid::search_impl(const DatasetPtr& query, int64_t limit, const SearchFunc& s
         }
     }
     auto search_result = node->SearchGraph(search_func);
-    while (search_result.size() > limit) {
-        search_result.pop();
+    while (search_result->Size() > limit) {
+        search_result->Pop();
     }
 
     // return result
     auto result = Dataset::Make();
-    auto target_size = static_cast<int64_t>(search_result.size());
+    auto target_size = static_cast<int64_t>(search_result->Size());
     if (target_size == 0) {
         result->Dim(0)->NumElements(1);
         return result;
@@ -284,10 +286,10 @@ Pyramid::search_impl(const DatasetPtr& query, int64_t limit, const SearchFunc& s
     result->Distances(dists);
     for (auto j = target_size - 1; j >= 0; --j) {
         if (j < target_size) {
-            dists[j] = search_result.top().first;
-            ids[j] = label_table_->GetLabelById(search_result.top().second);
+            dists[j] = search_result->Top().first;
+            ids[j] = label_table_->GetLabelById(search_result->Top().second);
         }
-        search_result.pop();
+        search_result->Pop();
     }
     return result;
 }
