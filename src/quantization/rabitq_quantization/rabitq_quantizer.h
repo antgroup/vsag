@@ -295,6 +295,9 @@ RaBitQuantizer<metric>::TrainImpl(const DataType* data, uint64_t count) {
         centroid_[d] = centroid_[d] / (float)count;
     }
 
+    // generate rom
+    rom_->GenerateRandomOrthogonalMatrixWithRetry();
+
     // validate rom
     int retries = MAX_RETRIES;
     bool successful_gen = true;

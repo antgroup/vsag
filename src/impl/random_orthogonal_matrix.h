@@ -33,17 +33,11 @@ static const uint64_t MAX_RETRIES = 3;
 class RandomOrthogonalMatrix {
 public:
     RandomOrthogonalMatrix(uint64_t dim, Allocator* allocator, uint64_t retries = MAX_RETRIES)
-        : dim_(dim), allocator_(allocator), orthogonal_matrix_(allocator) {
+        : dim_(dim),
+          allocator_(allocator),
+          orthogonal_matrix_(allocator),
+          generate_retries_(retries) {
         orthogonal_matrix_.resize(dim * dim);
-        for (uint64_t i = 0; i < retries; i++) {
-            bool result_gen = GenerateRandomOrthogonalMatrix();
-            if (result_gen) {
-                break;
-            } else {
-                logger::error(
-                    fmt::format("Retrying generating random orthogonal matrix: {} times", i + 1));
-            }
-        }
     }
 
     void
@@ -57,6 +51,9 @@ public:
 
     bool
     GenerateRandomOrthogonalMatrix();
+
+    void
+    GenerateRandomOrthogonalMatrixWithRetry();
 
     double
     ComputeDeterminant() const;
@@ -73,6 +70,7 @@ private:
     const uint64_t dim_{0};
 
     vsag::Vector<float> orthogonal_matrix_;
+    const uint64_t generate_retries_{0};
 };
 
 }  // namespace vsag

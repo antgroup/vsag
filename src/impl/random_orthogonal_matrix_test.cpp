@@ -150,6 +150,9 @@ TEST_CASE("Random Orthogonal Matrix Serialize / Deserialize Test", "[ut][RandomO
         RandomOrthogonalMatrix rom1(dim, allocator.get());
         RandomOrthogonalMatrix rom2(dim, allocator.get());
 
+        REQUIRE(rom1.GenerateRandomOrthogonalMatrix() == true);
+        REQUIRE(rom2.GenerateRandomOrthogonalMatrix() == true);
+
         fixtures::TempDir dir("rom");
         auto filename = dir.GenerateRandomFile();
         std::ofstream outfile(filename.c_str(), std::ios::binary);
