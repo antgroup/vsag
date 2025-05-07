@@ -206,6 +206,9 @@ private:
             MaxHeap& candidate_heap,
             int64_t k) const;
 
+    void
+    elp_optimize();
+
 private:
     FlattenInterfacePtr basic_flatten_codes_{nullptr};
     FlattenInterfacePtr high_precise_codes_{nullptr};
@@ -213,6 +216,7 @@ private:
     GraphInterfacePtr bottom_graph_{nullptr};
 
     mutable bool use_reorder_{false};
+    bool use_elp_optimizer_{false};
     bool ignore_reorder_{false};
 
     BasicSearcherPtr searcher_;
@@ -244,5 +248,7 @@ private:
     uint64_t extra_info_size_{0};
 
     static constexpr uint64_t DEFAULT_RESIZE_BIT = 10;
+
+    std::shared_ptr<Optimizer<BasicSearcher>> optimizer_;
 };
 }  // namespace vsag

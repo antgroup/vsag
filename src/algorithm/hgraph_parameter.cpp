@@ -37,6 +37,10 @@ HGraphParameter::FromJson(const JsonType& json) {
                    fmt::format("hgraph parameters must contains {}", HGRAPH_USE_REORDER_KEY));
     this->use_reorder = json[HGRAPH_USE_REORDER_KEY];
 
+    if (json.contains(HGRAPH_USE_ELP_OPTIMIZER_KEY)) {
+        this->use_elp_optimizer = json[HGRAPH_USE_ELP_OPTIMIZER_KEY];
+    }
+
     if (json.contains(HGRAPH_IGNORE_REORDER_KEY)) {
         this->ignore_reorder = json[HGRAPH_IGNORE_REORDER_KEY];
     }
@@ -91,6 +95,7 @@ HGraphParameter::ToJson() {
     json["type"] = INDEX_TYPE_HGRAPH;
 
     json[HGRAPH_USE_REORDER_KEY] = this->use_reorder;
+    json[HGRAPH_USE_ELP_OPTIMIZER_KEY] = this->use_elp_optimizer;
     json[HGRAPH_BASE_CODES_KEY] = this->base_codes_param->ToJson();
     if (use_reorder) {
         json[HGRAPH_PRECISE_CODES_KEY] = this->precise_codes_param->ToJson();

@@ -36,6 +36,7 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
     : InnerIndexInterface(hgraph_param, common_param),
       route_graphs_(common_param.allocator_.get()),
       use_reorder_(hgraph_param->use_reorder),
+      use_elp_optimizer_(hgraph_param->use_elp_optimizer),
       ignore_reorder_(hgraph_param->ignore_reorder),
       ef_construct_(hgraph_param->ef_construction),
       build_thread_count_(hgraph_param->build_thread_count),
@@ -81,6 +82,10 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
         this->build_pool_ = SafeThreadPool::FactoryDefaultThreadPool();
         this->build_pool_->SetPoolSize(build_thread_count_);
     }
+
+    if (use_elp_optimizer_) {
+        optimizer_ = std::make_shared<Optimizer<BasicSearcher>>(common_param);
+    }
 }
 void
 HGraph::Train(const DatasetPtr& base) {
@@ -95,6 +100,9 @@ std::vector<int64_t>
 HGraph::Build(const DatasetPtr& data) {
     this->Train(data);
     auto ret = this->Add(data);
+    if (use_elp_optimizer_) {
+        elp_optimize();
+    }
     return ret;
 }
 
@@ -581,6 +589,11 @@ HGraph::Deserialize(StreamReader& reader) {
         this->extra_infos_->Deserialize(reader);
     }
     this->total_count_ = this->basic_flatten_codes_->TotalCount();
+
+    // optimize
+    if (use_elp_optimizer_) {
+        elp_optimize();
+    }
 }
 
 void
@@ -852,6 +865,24 @@ HGraph::InitFeatures() {
 }
 
 void
+HGraph::elp_optimize() {
+    InnerSearchParam param;
+    param.ep = 0;
+    param.ef = 80;
+    param.topk = 10;
+    param.is_inner_id_allowed = nullptr;
+    searcher_->SetMockParameters(bottom_graph_, basic_flatten_codes_, pool_, param, dim_);
+    optimizer_->RegisterParameter(
+        RuntimeParameter(PREFETCH_DEPTH_CODE,
+                         1,
+                         (static_cast<float>(basic_flatten_codes_->code_size_) + 63.0F) / 64.0F + 2,
+                         1));
+    optimizer_->RegisterParameter(RuntimeParameter(PREFETCH_STRIDE_CODE, 1, 10, 1));
+    optimizer_->RegisterParameter(RuntimeParameter(PREFETCH_STRIDE_VISIT, 1, 10, 1));
+    optimizer_->Optimize(searcher_);
+}
+
+void
 HGraph::reorder(const void* query,
                 const FlattenInterfacePtr& flatten_interface,
                 MaxHeap& candidate_heap,
@@ -885,6 +916,12 @@ static const ConstParamMap EXTERNAL_MAPPING = {
         HGRAPH_USE_REORDER,
         {
             HGRAPH_USE_REORDER_KEY,
+        },
+    },
+    {
+        HGRAPH_USE_ELP_OPTIMIZER,
+        {
+            HGRAPH_USE_ELP_OPTIMIZER_KEY,
         },
     },
     {
@@ -1008,6 +1045,7 @@ static const std::string HGRAPH_PARAMS_TEMPLATE =
     {
         "type": "{INDEX_TYPE_HGRAPH}",
         "{HGRAPH_USE_REORDER_KEY}": false,
+        "{HGRAPH_USE_ENV_OPTIMIZER}": false,
         "{HGRAPH_IGNORE_REORDER_KEY}": false,
         "{HGRAPH_GRAPH_KEY}": {
             "{IO_PARAMS_KEY}": {

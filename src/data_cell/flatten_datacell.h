@@ -20,6 +20,7 @@
 #include <memory>
 
 #include "byte_buffer.h"
+#include "common.h"
 #include "flatten_interface.h"
 #include "io/basic_io.h"
 #include "io/memory_block_io.h"
@@ -67,6 +68,11 @@ public:
     void
     SetMaxCapacity(InnerIdType capacity) override {
         this->max_capacity_ = std::max(capacity, this->total_count_);  // TODO(LHT): add warning
+    }
+
+    bool
+    Decode(const uint8_t* codes, DataType* data) override {
+        return this->quantizer_->DecodeOne(codes, data);
     }
 
     void
@@ -140,6 +146,9 @@ public:
     Allocator* const allocator_{nullptr};
 
 private:
+    inline void
+    prefetch(InnerIdType id, uint64_t data_size);
+
     inline void
     query(float* result_dists,
           const std::shared_ptr<Computer<QuantTmpl>>& computer,
@@ -240,9 +249,9 @@ FlattenDataCell<QuantTmpl, IOTmpl>::query(float* result_dists,
                                           const std::shared_ptr<Computer<QuantTmpl>>& computer,
                                           const InnerIdType* idx,
                                           InnerIdType id_count) {
-    for (uint32_t i = 0; i < this->prefetch_jump_code_size_ and i < id_count; i++) {
+    for (uint32_t i = 0; i < this->prefetch_stride_code_ and i < id_count; i++) {
         this->io_->Prefetch(static_cast<uint64_t>(idx[i]) * static_cast<uint64_t>(code_size_),
-                            this->code_size_);
+                            this->prefetch_depth_code_ * 64);
     }
     if (not this->io_->InMemory() and id_count > 1) {
         ByteBuffer codes(id_count * this->code_size_, allocator_);
@@ -257,10 +266,10 @@ FlattenDataCell<QuantTmpl, IOTmpl>::query(float* result_dists,
     }
 
     for (int64_t i = 0; i < id_count; ++i) {
-        if (i + this->prefetch_jump_code_size_ < id_count) {
-            this->io_->Prefetch(static_cast<uint64_t>(idx[i + this->prefetch_jump_code_size_]) *
+        if (i + this->prefetch_stride_code_ < id_count) {
+            this->io_->Prefetch(static_cast<uint64_t>(idx[i + this->prefetch_stride_code_]) *
                                     static_cast<uint64_t>(code_size_),
-                                this->code_size_);
+                                this->prefetch_depth_code_ * 64);
         }
 
         bool release = false;

@@ -20,6 +20,7 @@
 #include <limits>
 
 #include "fixtures/test_dataset_pool.h"
+#include "fixtures/test_logger.h"
 #include "inner_string_params.h"
 #include "test_index.h"
 #include "vsag/options.h"
@@ -743,6 +744,50 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex, "HGraph Estimate Memory"
             vsag::Options::Instance().set_block_size_limit(origin_size);
         }
     }
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex, "HGraph ELP Optimizer", "[ft][hgraph]") {
+    fixtures::logger::LoggerReplacer _;
+    vsag::Options::Instance().logger()->SetLevel(vsag::Logger::Level::kDEBUG);
+
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    auto size = GENERATE(1024 * 1024 * 2);
+    auto metric_type = GENERATE("l2", "cosine");
+
+    const std::string name = "hgraph";
+    auto search_param = fmt::format(search_param_tmp, 200, false);
+    constexpr auto parameter_temp = R"(
+    {{
+        "dtype": "float32",
+        "metric_type": "{}",
+        "dim": {},
+        "index_param": {{
+            "use_reorder": true,
+            "use_elp_optimizer": {},
+            "base_quantization_type": "sq4_uniform",
+            "max_degree": 64,
+            "ef_construction": 200,
+            "precise_quantization_type": "fp32",
+            "ignore_reorder": true
+        }}
+    }}
+    )";
+
+    auto dim = 960;
+    vsag::Options::Instance().set_block_size_limit(size);
+    auto base = pool.GetDatasetAndCreate(dim, 10000, metric_type);
+    std::string param_weak = fmt::format(parameter_temp, metric_type, dim, false);
+    std::string param_strong = fmt::format(parameter_temp, metric_type, dim, true);
+
+    auto index_weak = TestFactory(name, param_weak, true);
+    TestBuildIndex(index_weak, base);
+
+    auto index_strong = TestFactory(name, param_strong, true);
+    TestBuildIndex(index_strong, base);
+
+    auto query = pool.GetDatasetAndCreate(dim, 1000, metric_type);
+    TestKnnSearchCompare(index_weak, index_strong, query, search_param, false);
+    vsag::Options::Instance().set_block_size_limit(origin_size);
 }
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex, "HGraph Ignore Reorder", "[ft][hgraph]") {
