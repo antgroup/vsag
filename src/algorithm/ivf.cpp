@@ -297,7 +297,7 @@ IVF::create_search_param(const std::string& parameters, const FilterPtr& filter)
     param.scan_bucket_size = std::min(static_cast<BucketIdType>(search_param.scan_buckets_count),
                                       bucket_->bucket_count_);
     param.factor = search_param.topk_factor;
-    return std::move(param);
+    return param;
 }
 
 DatasetPtr
