@@ -21,6 +21,7 @@
 #include <stdexcept>
 
 #include "common.h"
+#include "data_cell/graph_datacell_parameter.h"
 #include "data_cell/sparse_graph_datacell.h"
 #include "dataset_impl.h"
 #include "empty_index_binary_set.h"
@@ -1118,6 +1119,20 @@ HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
     hgraph_parameter->data_type = common_param.data_type_;
     hgraph_parameter->FromJson(inner_json);
 
+    auto max_degree =
+        std::dynamic_pointer_cast<GraphDataCellParameter>(hgraph_parameter->bottom_graph_param)
+            ->max_degree_;
+    CHECK_ARGUMENT(  // NOLINT
+        (4 <= max_degree) and (max_degree <= common_param.dim_),
+        fmt::format("max_degree({}) must in range[4, dim ({})]", max_degree, common_param.dim_));
+
+    auto construction_threshold = std::max(1000UL, AMPLIFICATION_FACTOR * max_degree);
+    CHECK_ARGUMENT((max_degree <= hgraph_parameter->ef_construction) and  // NOLINT
+                       (hgraph_parameter->ef_construction <= construction_threshold),
+                   fmt::format("ef_construction({}) must in range[$max_degree({}), {}]",
+                               hgraph_parameter->ef_construction,
+                               max_degree,
+                               construction_threshold));
     return hgraph_parameter;
 }
 InnerIndexPtr
