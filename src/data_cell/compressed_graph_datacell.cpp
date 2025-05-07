@@ -21,11 +21,11 @@ namespace vsag {
 
 CompressedGraphDataCell::CompressedGraphDataCell(const GraphInterfaceParamPtr& graph_param,
                                                  const IndexCommonParam& common_param)
-    : CompressedGraphDataCell(std::dynamic_pointer_cast<GraphDataCellParameter>(graph_param),
-                              common_param) {
+    : CompressedGraphDataCell(
+          std::dynamic_pointer_cast<CompressedGraphDatacellParameter>(graph_param), common_param) {
 }
 
-CompressedGraphDataCell::CompressedGraphDataCell(const GraphDataCellParamPtr& graph_param,
+CompressedGraphDataCell::CompressedGraphDataCell(const CompressedGraphDatacellParamPtr& graph_param,
                                                  const IndexCommonParam& common_param)
     : allocator_(common_param.allocator_.get()), neighbor_sets_(allocator_) {
     this->maximum_degree_ = graph_param->max_degree_;

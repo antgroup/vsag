@@ -141,7 +141,7 @@ IndexNode::Serialize(StreamWriter& writer) const {
 }
 void
 IndexNode::InitGraph() {
-    graph_ = GraphInterface::MakeInstance(graph_param_, *common_param_, /*is_sparse=*/true);
+    graph_ = GraphInterface::MakeInstance(graph_param_, *common_param_);
 }
 
 MaxHeap

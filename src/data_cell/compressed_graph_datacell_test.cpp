@@ -46,9 +46,8 @@ TEST_CASE("CompressedGraphDataCell Basic Test", "[ut][CompressedGraphDataCell]")
     IndexCommonParam common_param;
     common_param.dim_ = dim;
     common_param.allocator_ = allocator;
-    auto graph_param = std::make_shared<GraphDataCellParameter>();
+    auto graph_param = std::make_shared<CompressedGraphDatacellParameter>();
     graph_param->max_degree_ = max_degree;
-    graph_param->init_max_capacity_ = max_capacity;
     graph_param->graph_storage_type_ = GraphStorageTypes::GRAPH_STORAGE_TYPE_COMPRESSED;
     TestCompressedGraphDataCell(graph_param, common_param);
 }

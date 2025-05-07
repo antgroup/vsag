@@ -15,13 +15,14 @@
 
 #pragma once
 
-
 #include "graph_interface_parameter.h"
 
 namespace vsag {
-class CompressedGraphDatacellParameter : public GraphInterfaceParameter {
+class SparseGraphDatacellParameter : public GraphInterfaceParameter {
 public:
-    CompressedGraphDatacellParameter() = default;
+    SparseGraphDatacellParameter()
+        : GraphInterfaceParameter(GraphStorageTypes::GRAPH_STORAGE_TYPE_SPARSE) {
+    }
 
     void
     FromJson(const JsonType& json) override {
@@ -41,5 +42,5 @@ public:
     uint64_t max_degree_{64};
 };
 
-using CompressedGraphDatacellParamPtr = std::shared_ptr<CompressedGraphDatacellParameter>;
-} // namespace vsag
+using SparseGraphDatacellParamPtr = std::shared_ptr<SparseGraphDatacellParameter>;
+}  // namespace vsag

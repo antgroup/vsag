@@ -21,7 +21,8 @@
 namespace vsag {
 class GraphDataCellParameter : public GraphInterfaceParameter {
 public:
-    GraphDataCellParameter() = default;
+    GraphDataCellParameter() : GraphInterfaceParameter(GraphStorageTypes::GRAPH_STORAGE_TYPE_FLAT) {
+    }
 
     void
     FromJson(const JsonType& json) override;
