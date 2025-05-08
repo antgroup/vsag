@@ -52,10 +52,10 @@ HnswParameters::FromJson(JsonType& hnsw_param_obj, const IndexCommonParam& index
     CHECK_ARGUMENT(hnsw_param_obj[HNSW_PARAMETER_M].is_number_integer(),
                    fmt::format("parameters[{}] must be integer type", HNSW_PARAMETER_M));
     obj.max_degree = hnsw_param_obj[HNSW_PARAMETER_M];
+    auto max_degree_threshold = std::max(index_common_param.dim_, 128L);
     CHECK_ARGUMENT(  // NOLINT
-        (4 <= obj.max_degree) and (obj.max_degree <= index_common_param.dim_),
-        fmt::format(
-            "max_degree({}) must in range[4, dim ({})]", obj.max_degree, index_common_param.dim_));
+        (4 <= obj.max_degree) and (obj.max_degree <= max_degree_threshold),
+        fmt::format("max_degree({}) must in range[4, {}]", obj.max_degree, max_degree_threshold));
 
     // set obj.ef_construction
     CHECK_ARGUMENT(

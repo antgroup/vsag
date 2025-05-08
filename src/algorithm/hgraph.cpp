@@ -1122,9 +1122,10 @@ HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
     auto max_degree =
         std::dynamic_pointer_cast<GraphDataCellParameter>(hgraph_parameter->bottom_graph_param)
             ->max_degree_;
+    auto max_degree_threshold = std::max(common_param.dim_, 128L);
     CHECK_ARGUMENT(  // NOLINT
-        (4 <= max_degree) and (max_degree <= common_param.dim_),
-        fmt::format("max_degree({}) must in range[4, dim ({})]", max_degree, common_param.dim_));
+        (4 <= max_degree) and (max_degree <= max_degree_threshold),
+        fmt::format("max_degree({}) must in range[4, {}]", max_degree, max_degree_threshold));
 
     auto construction_threshold = std::max(1000UL, AMPLIFICATION_FACTOR * max_degree);
     CHECK_ARGUMENT((max_degree <= hgraph_parameter->ef_construction) and  // NOLINT
