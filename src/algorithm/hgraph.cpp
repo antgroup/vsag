@@ -998,6 +998,14 @@ static const ConstParamMap EXTERNAL_MAPPING = {
             PCA_DIM,
         },
     },
+    {
+        RABITQ_USE_ROM,
+        {
+            HGRAPH_BASE_CODES_KEY,
+            QUANTIZATION_PARAMS_KEY,
+            USE_ROM,
+        },
+    },
 };
 
 static const std::string HGRAPH_PARAMS_TEMPLATE =
@@ -1024,7 +1032,8 @@ static const std::string HGRAPH_PARAMS_TEMPLATE =
                 "{QUANTIZATION_TYPE_KEY}": "{QUANTIZATION_TYPE_VALUE_PQ}",
                 "{SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE}": 0.05,
                 "{PCA_DIM}": 0,
-                "nbits": 8
+                "nbits": 8,
+                "{USE_ROM}": true
             }
         },
         "{HGRAPH_PRECISE_CODES_KEY}": {

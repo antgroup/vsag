@@ -28,6 +28,9 @@ RaBitQuantizerParameter::FromJson(const JsonType& json) {
     if (json.contains(PCA_DIM)) {
         this->pca_dim_ = json[PCA_DIM];
     }
+    if (json.contains(USE_ROM)) {
+        this->use_rom_ = json[USE_ROM];
+    }
 }
 
 JsonType
@@ -35,6 +38,7 @@ RaBitQuantizerParameter::ToJson() {
     JsonType json;
     json[QUANTIZATION_TYPE_KEY] = QUANTIZATION_TYPE_VALUE_RABITQ;
     json[PCA_DIM] = this->pca_dim_;
+    json[USE_ROM] = this->use_rom_;
     return json;
 }
 }  // namespace vsag
