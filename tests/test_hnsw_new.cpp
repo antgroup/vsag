@@ -227,6 +227,30 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex,
 }
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex,
+                             "HNSW Continue Destruct V.S. All Test",
+                             "[ft][hnsw]") {
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    auto size = GENERATE(1024 * 1024 * 2);
+    auto metric_type = GENERATE("l2");
+    std::string base_quantization_str = GENERATE("fp32");
+    const std::string name = "hnsw";
+    auto search_param = fmt::format(search_param_tmp, 100);
+
+    vsag::Options::Instance().set_block_size_limit(size);
+    auto dims_ = fixtures::get_common_used_dims(20);
+    for (auto& dim : dims_) {
+        std::cout << dim << std::endl;
+        auto param = GenerateHNSWBuildParametersString(metric_type, dim);
+        auto index = TestFactory(name, param, true);
+        auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
+        TestBuildIndex(index, dataset, true);
+        TestConcurrentDestruct(index, dataset, search_param);
+    }
+
+    vsag::Options::Instance().set_block_size_limit(origin_size);
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex,
                              "HNSW Search with Dirty Vector",
                              "[ft][hnsw]") {
     auto origin_size = vsag::Options::Instance().block_size_limit();
