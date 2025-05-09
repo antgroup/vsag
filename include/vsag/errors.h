@@ -29,6 +29,7 @@ enum class ErrorType {
     INVALID_ARGUMENT,   // invalid argument
 
     // [behavior errors]
+    WRONG_STATUS,                 // index is at wrong status (e.g., destruct)
     BUILD_TWICE,                  // index has been build, cannot build again
     INDEX_NOT_EMPTY,              // index object is NOT empty so that should not deserialize on it
     UNSUPPORTED_INDEX,            // trying to create an unsupported index

@@ -105,6 +105,12 @@ HNSW::HNSW(HnswParameters hnsw_params, const IndexCommonParam& index_common_para
 
 tl::expected<std::vector<int64_t>, Error>
 HNSW::build(const DatasetPtr& base) {
+    std::shared_lock status_lock(index_status_mutex_);
+    if (not this->IsValidStatus()) {
+        LOG_ERROR_AND_RETURNS(
+            ErrorType::WRONG_STATUS, "index is in the wrong status({})", PrintStatus());
+    }
+
     try {
         if (base->GetNumElements() == 0) {
             empty_index_ = true;
@@ -152,6 +158,12 @@ HNSW::build(const DatasetPtr& base) {
 
 tl::expected<std::vector<int64_t>, Error>
 HNSW::add(const DatasetPtr& base) {
+    std::shared_lock status_lock(index_status_mutex_);
+    if (not this->IsValidStatus()) {
+        LOG_ERROR_AND_RETURNS(
+            ErrorType::WRONG_STATUS, "index is in the wrong status({})", PrintStatus());
+    }
+
 #ifndef ENABLE_TESTS
     SlowTaskTimer t("hnsw add", 20);
 #endif
@@ -192,6 +204,12 @@ HNSW::knn_search_internal(const DatasetPtr& query,
                           int64_t k,
                           const std::string& parameters,
                           const FilterType& filter_obj) const {
+    std::shared_lock status_lock(index_status_mutex_);
+    if (not this->IsValidStatus()) {
+        LOG_ERROR_AND_RETURNS(
+            ErrorType::WRONG_STATUS, "index is in the wrong status({})", PrintStatus());
+    }
+
     if (filter_obj) {
         auto filter = std::make_shared<UniqueFilter>(filter_obj);
         return this->knn_search(query, k, parameters, filter);
@@ -283,7 +301,6 @@ HNSW::knn_search(const DatasetPtr& query,
 
         // perform conjugate graph enhancement
         if (use_conjugate_graph_ and params.use_conjugate_graph_search) {
-            std::shared_lock lock(rw_mutex_);
             time_cost = 0;
             Timer t(time_cost);
 
@@ -330,6 +347,12 @@ HNSW::range_search_internal(const DatasetPtr& query,
                             const std::string& parameters,
                             const FilterType& filter_obj,
                             int64_t limited_size) const {
+    std::shared_lock status_lock(index_status_mutex_);
+    if (not this->IsValidStatus()) {
+        LOG_ERROR_AND_RETURNS(
+            ErrorType::WRONG_STATUS, "index is in the wrong status({})", PrintStatus());
+    }
+
     if (filter_obj) {
         auto filter = std::make_shared<UniqueFilter>(filter_obj);
         return this->range_search(query, radius, parameters, filter, limited_size);
@@ -433,6 +456,12 @@ HNSW::range_search(const DatasetPtr& query,
 
 tl::expected<BinarySet, Error>
 HNSW::serialize() const {
+    std::shared_lock status_lock(index_status_mutex_);
+    if (not this->IsValidStatus()) {
+        LOG_ERROR_AND_RETURNS(
+            ErrorType::WRONG_STATUS, "index is in the wrong status({})", PrintStatus());
+    }
+
     if (GetNumElements() == 0) {
         // return a special binaryset means empty
         return EmptyIndexBinarySet::Make("EMPTY_HNSW");
@@ -465,6 +494,12 @@ HNSW::serialize() const {
 
 tl::expected<void, Error>
 HNSW::serialize(std::ostream& out_stream) {
+    std::shared_lock status_lock(index_status_mutex_);
+    if (not this->IsValidStatus()) {
+        LOG_ERROR_AND_RETURNS(
+            ErrorType::WRONG_STATUS, "index is in the wrong status({})", PrintStatus());
+    }
+
     if (GetNumElements() == 0) {
         LOG_ERROR_AND_RETURNS(ErrorType::INDEX_EMPTY, "failed to serialize: hnsw index is empty");
 
@@ -492,6 +527,12 @@ HNSW::serialize(std::ostream& out_stream) {
 
 tl::expected<void, Error>
 HNSW::deserialize(const BinarySet& binary_set) {
+    std::shared_lock status_lock(index_status_mutex_);
+    if (not this->IsValidStatus()) {
+        LOG_ERROR_AND_RETURNS(
+            ErrorType::WRONG_STATUS, "index is in the wrong status({})", PrintStatus());
+    }
+
     SlowTaskTimer t("hnsw deserialize");
     if (this->alg_hnsw_->getCurrentElementCount() > 0) {
         LOG_ERROR_AND_RETURNS(ErrorType::INDEX_NOT_EMPTY,
@@ -536,6 +577,12 @@ HNSW::deserialize(const BinarySet& binary_set) {
 
 tl::expected<void, Error>
 HNSW::deserialize(const ReaderSet& reader_set) {
+    std::shared_lock status_lock(index_status_mutex_);
+    if (not this->IsValidStatus()) {
+        LOG_ERROR_AND_RETURNS(
+            ErrorType::WRONG_STATUS, "index is in the wrong status({})", PrintStatus());
+    }
+
     SlowTaskTimer t("hnsw deserialize");
     if (this->alg_hnsw_->getCurrentElementCount() > 0) {
         LOG_ERROR_AND_RETURNS(ErrorType::INDEX_NOT_EMPTY,
@@ -574,6 +621,12 @@ HNSW::deserialize(const ReaderSet& reader_set) {
 
 tl::expected<void, Error>
 HNSW::deserialize(std::istream& in_stream) {
+    std::shared_lock status_lock(index_status_mutex_);
+    if (not this->IsValidStatus()) {
+        LOG_ERROR_AND_RETURNS(
+            ErrorType::WRONG_STATUS, "index is in the wrong status({})", PrintStatus());
+    }
+
     SlowTaskTimer t("hnsw deserialize");
     if (this->alg_hnsw_->getCurrentElementCount() > 0) {
         LOG_ERROR_AND_RETURNS(ErrorType::INDEX_NOT_EMPTY,
@@ -613,12 +666,20 @@ HNSW::GetStats() const {
 
 tl::expected<bool, Error>
 HNSW::update_id(int64_t old_id, int64_t new_id) {
+    std::shared_lock status_lock(index_status_mutex_);
+    if (not this->IsValidStatus()) {
+        LOG_ERROR_AND_RETURNS(
+            ErrorType::WRONG_STATUS, "index is in the wrong status({})", PrintStatus());
+    }
+
     if (use_static_) {
         LOG_ERROR_AND_RETURNS(ErrorType::UNSUPPORTED_INDEX_OPERATION,
                               "static hnsw does not support update");
     }
 
     try {
+        std::unique_lock lock(rw_mutex_);
+
         if (old_id == new_id) {
             return true;
         }
@@ -627,7 +688,6 @@ HNSW::update_id(int64_t old_id, int64_t new_id) {
         std::reinterpret_pointer_cast<hnswlib::HierarchicalNSW>(alg_hnsw_)->updateLabel(old_id,
                                                                                         new_id);
         if (use_conjugate_graph_) {
-            std::unique_lock lock(rw_mutex_);
             conjugate_graph_->UpdateId(old_id, new_id);
         }
     } catch (const std::runtime_error& e) {
@@ -713,6 +773,12 @@ HNSW::update_vector(int64_t id, const DatasetPtr& new_base, bool force_update) {
 
 tl::expected<bool, Error>
 HNSW::remove(int64_t id) {
+    std::shared_lock status_lock(index_status_mutex_);
+    if (not this->IsValidStatus()) {
+        LOG_ERROR_AND_RETURNS(
+            ErrorType::WRONG_STATUS, "index is in the wrong status({})", PrintStatus());
+    }
+
     if (use_static_) {
         LOG_ERROR_AND_RETURNS(ErrorType::UNSUPPORTED_INDEX_OPERATION,
                               "static hnsw does not support remove");
@@ -720,6 +786,7 @@ HNSW::remove(int64_t id) {
 
     try {
         std::unique_lock lock(rw_mutex_);
+
         if (use_reversed_edges_) {
             std::reinterpret_pointer_cast<hnswlib::HierarchicalNSW>(alg_hnsw_)->removePoint(id);
         } else {
@@ -738,6 +805,12 @@ HNSW::feedback(const DatasetPtr& query,
                int64_t k,
                const std::string& parameters,
                int64_t global_optimum_tag_id) {
+    std::shared_lock status_lock(index_status_mutex_);
+    if (not this->IsValidStatus()) {
+        LOG_ERROR_AND_RETURNS(
+            ErrorType::WRONG_STATUS, "index is in the wrong status({})", PrintStatus());
+    }
+
     if (not use_conjugate_graph_) {
         LOG_ERROR_AND_RETURNS(ErrorType::UNSUPPORTED_INDEX_OPERATION,
                               "no conjugate graph used for feedback");
@@ -763,7 +836,9 @@ HNSW::feedback(const DatasetPtr& query,
                               "failed to feedback(invalid argument): ",
                               result.error().message);
     }
+
     std::unique_lock lock(rw_mutex_);
+
     return this->feedback(*result, global_optimum_tag_id, k);
 }
 
@@ -795,6 +870,12 @@ HNSW::feedback(const DatasetPtr& result, int64_t global_optimum_tag_id, int64_t 
 
 tl::expected<DatasetPtr, Error>
 HNSW::brute_force(const DatasetPtr& query, int64_t k) {
+    std::shared_lock status_lock(index_status_mutex_);
+    if (not this->IsValidStatus()) {
+        LOG_ERROR_AND_RETURNS(
+            ErrorType::WRONG_STATUS, "index is in the wrong status({})", PrintStatus());
+    }
+
     try {
         CHECK_ARGUMENT(k > 0, fmt::format("k({}) must be greater than 0", k));
         CHECK_ARGUMENT(query->GetNumElements() == 1,
@@ -815,6 +896,7 @@ HNSW::brute_force(const DatasetPtr& query, int64_t k) {
         get_vectors(query, &vector, &data_size);
 
         std::shared_lock lock(rw_mutex_);
+
         std::priority_queue<std::pair<float, LabelType>> bf_result =
             alg_hnsw_->bruteForce(vector, k);
         result->Dim(std::min(k, (int64_t)bf_result.size()));
@@ -843,6 +925,12 @@ tl::expected<uint32_t, Error>
 HNSW::pretrain(const std::vector<int64_t>& base_tag_ids,
                uint32_t k,
                const std::string& parameters) {
+    std::shared_lock status_lock(index_status_mutex_);
+    if (not this->IsValidStatus()) {
+        LOG_ERROR_AND_RETURNS(
+            ErrorType::WRONG_STATUS, "index is in the wrong status({})", PrintStatus());
+    }
+
     if (not use_conjugate_graph_) {
         LOG_ERROR_AND_RETURNS(ErrorType::UNSUPPORTED_INDEX_OPERATION,
                               "no conjugate graph used for pretrain");
@@ -968,6 +1056,11 @@ HNSW::set_dataset(const DatasetPtr& base, const void* vectors_ptr, uint32_t num_
 }
 bool
 HNSW::CheckFeature(IndexFeature feature) const {
+    std::shared_lock status_lock(index_status_mutex_);
+    if (not this->IsValidStatus()) {
+        return false;
+    }
+
     return this->feature_list_.CheckFeature(feature);
 }
 
@@ -1067,6 +1160,16 @@ extract_data_and_graph(const std::vector<MergeUnit>& merge_units,
 
 tl::expected<void, Error>
 HNSW::merge(const std::vector<MergeUnit>& merge_units) {
+    std::shared_lock status_lock(index_status_mutex_);
+    if (not this->IsValidStatus()) {
+        LOG_ERROR_AND_RETURNS(
+            ErrorType::WRONG_STATUS, "index is in the wrong status({})", PrintStatus());
+    }
+
+    if (merge_units.empty()) {
+        return {};
+    }
+
     SlowTaskTimer t0("hnsw merge");
     auto param = std::make_shared<FlattenDataCellParameter>();
     param->io_parameter = std::make_shared<MemoryBlockIOParameter>();
@@ -1102,6 +1205,73 @@ HNSW::merge(const std::vector<MergeUnit>& merge_units) {
     // set graph
     SetDataAndGraph(flatten_interface, graph_interface, ids);
     return {};
+}
+
+tl::expected<float, Error>
+HNSW::calc_distance_by_id(const float* vector, int64_t id) const {
+    std::shared_lock status_lock(index_status_mutex_);
+    if (not this->IsValidStatus()) {
+        LOG_ERROR_AND_RETURNS(
+            ErrorType::WRONG_STATUS, "index is in the wrong status({})", PrintStatus());
+    }
+    return alg_hnsw_->getDistanceByLabel(id, vector);
+}
+
+tl::expected<DatasetPtr, Error>
+HNSW::calc_distance_by_id(const float* vector, const int64_t* ids, int64_t count) const {
+    std::shared_lock status_lock(index_status_mutex_);
+    if (not this->IsValidStatus()) {
+        LOG_ERROR_AND_RETURNS(
+            ErrorType::WRONG_STATUS, "index is in the wrong status({})", PrintStatus());
+    }
+
+    return alg_hnsw_->getBatchDistanceByLabel(ids, vector, count);
+}
+
+tl::expected<std::pair<int64_t, int64_t>, Error>
+HNSW::get_min_and_max_id() const {
+    std::shared_lock status_lock(index_status_mutex_);
+    if (not this->IsValidStatus()) {
+        LOG_ERROR_AND_RETURNS(
+            ErrorType::WRONG_STATUS, "index is in the wrong status({})", PrintStatus());
+    }
+
+    return alg_hnsw_->getMinAndMaxId();
+}
+
+bool
+HNSW::check_id_exist(int64_t id) const {
+    std::shared_lock status_lock(index_status_mutex_);
+    if (not this->IsValidStatus()) {
+        return false;
+    }
+
+    return this->alg_hnsw_->isValidLabel(id);
+}
+
+int64_t
+HNSW::get_num_elements() const {
+    std::shared_lock status_lock(index_status_mutex_);
+    if (not this->IsValidStatus()) {
+        return 0;
+    }
+
+    return static_cast<int64_t>(alg_hnsw_->getCurrentElementCount() - alg_hnsw_->getDeletedCount());
+}
+
+int64_t
+HNSW::get_memory_usage() const {
+    std::shared_lock status_lock(index_status_mutex_);
+    if (not this->IsValidStatus()) {
+        return 0;
+    }
+
+    if (use_conjugate_graph_) {
+        return static_cast<int64_t>(alg_hnsw_->calcSerializeSize() +
+                                    conjugate_graph_->GetMemoryUsage());
+    }
+
+    return static_cast<int64_t>(alg_hnsw_->calcSerializeSize());
 }
 
 template tl::expected<DatasetPtr, Error>
