@@ -1,5 +1,5 @@
-include (FetchContent)
-FetchContent_Declare (
+include(FetchContent)
+FetchContent_Declare(
         cpr
         URL https://github.com/libcpr/cpr/archive/refs/tags/1.11.2.tar.gz
         https://vsagcache.oss-rg-china-mainland.aliyuncs.com/cpr/1.11.2.tar.gz
@@ -28,4 +28,4 @@ if (NOT cpr_POPULATED)
 endif ()
 
 set(CPR_ENABLE_SSL OFF)
-FetchContent_MakeAvailable(cpr)
+add_subdirectory(${cpr_SOURCE_DIR} ${cpr_BINARY_DIR})
