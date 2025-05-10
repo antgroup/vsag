@@ -18,6 +18,7 @@
 #include <catch2/catch_template_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
 
+#include "graph_interface_parameter.h"
 #include "graph_interface_test.h"
 #include "safe_allocator.h"
 
@@ -56,6 +57,7 @@ TEST_CASE("GraphDataCell Basic Test", "[ut][GraphDataCell]") {
     common_param.allocator_ = allocator;
     auto param_str = fmt::format(graph_param_temp, io_type, max_degree, max_capacity);
     auto param_json = JsonType::parse(param_str);
-    auto graph_param = GraphInterfaceParameter::GetGraphParameterByJson(param_json);
+    auto graph_param = GraphInterfaceParameter::GetGraphParameterByJson(
+        GraphStorageTypes::GRAPH_STORAGE_TYPE_FLAT, param_json);
     TestGraphDataCell(graph_param, common_param);
 }

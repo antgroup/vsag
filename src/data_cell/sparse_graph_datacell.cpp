@@ -15,7 +15,7 @@
 
 #include "sparse_graph_datacell.h"
 
-#include "graph_datacell_parameter.h"
+#include "sparse_graph_datacell_parameter.h"
 
 namespace vsag {
 
@@ -26,8 +26,9 @@ SparseGraphDataCell::SparseGraphDataCell(Allocator* allocator, uint32_t max_degr
 
 SparseGraphDataCell::SparseGraphDataCell(const GraphInterfaceParamPtr& param,
                                          const IndexCommonParam& common_param)
-    : SparseGraphDataCell(common_param.allocator_.get(),
-                          std::dynamic_pointer_cast<GraphDataCellParameter>(param)->max_degree_) {
+    : SparseGraphDataCell(
+          common_param.allocator_.get(),
+          std::dynamic_pointer_cast<SparseGraphDatacellParameter>(param)->max_degree_) {
 }
 
 void
