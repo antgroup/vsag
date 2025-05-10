@@ -63,6 +63,7 @@ const char* const QUANTIZATION_TYPE_VALUE_SPARSE = "sparse";
 // quantization param
 const char* const PCA_DIM = "pca_dim";
 const char* const RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY = "rabitq_bits_per_dim_query";
+const char* const USE_ROM = "use_rom";
 const char* const SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE = "sq4_uniform_trunc_rate";
 const char* const PRODUCT_QUANTIZATION_DIM = "pq_dim";
 const char* const PRODUCT_QUANTIZATION_BITS = "pq_bits";

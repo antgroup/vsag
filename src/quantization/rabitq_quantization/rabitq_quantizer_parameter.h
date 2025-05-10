@@ -33,6 +33,7 @@ public:
 public:
     uint64_t pca_dim_{0};
     uint64_t num_bits_per_dim_query_{32};
+    bool use_rom_{true};
 };
 
 using RaBitQuantizerParamPtr = std::shared_ptr<RaBitQuantizerParameter>;

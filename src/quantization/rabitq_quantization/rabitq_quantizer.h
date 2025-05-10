@@ -51,6 +51,7 @@ public:
     explicit RaBitQuantizer(int dim,
                             uint64_t pca_dim,
                             uint64_t num_bits_per_dim_query,
+                            bool use_rom,
                             Allocator* allocator);
 
     explicit RaBitQuantizer(const RaBitQuantizerParamPtr& param,
@@ -164,13 +165,13 @@ private:
     uint64_t offset_norm_{0};
     uint64_t offset_error_{0};
     uint64_t offset_sum_{0};
+
+    bool use_rom_{true};
 };
 
 template <MetricType metric>
-RaBitQuantizer<metric>::RaBitQuantizer(int dim,
-                                       uint64_t pca_dim,
-                                       uint64_t num_bits_per_dim_query,
-                                       Allocator* allocator)
+RaBitQuantizer<metric>::RaBitQuantizer(
+    int dim, uint64_t pca_dim, uint64_t num_bits_per_dim_query, bool use_rom, Allocator* allocator)
     : Quantizer<RaBitQuantizer<metric>>(dim, allocator) {
     static_assert(metric == MetricType::METRIC_TYPE_L2SQR, "Unsupported metric type");
 
@@ -191,6 +192,8 @@ RaBitQuantizer<metric>::RaBitQuantizer(int dim,
     centroid_.resize(this->dim_, 0);
 
     // random orthogonal matrix
+    use_rom_ = use_rom;
+    // NOTICE: always init rom
     rom_.reset(new RandomOrthogonalMatrix(this->dim_, allocator));
 
     // distance function related variable
@@ -248,6 +251,7 @@ RaBitQuantizer<metric>::RaBitQuantizer(const RaBitQuantizerParamPtr& param,
     : RaBitQuantizer<metric>(common_param.dim_,
                              param->pca_dim_,
                              param->num_bits_per_dim_query_,
+                             param->use_rom_,
                              common_param.allocator_.get()){};
 
 template <MetricType metric>
@@ -296,29 +300,30 @@ RaBitQuantizer<metric>::TrainImpl(const DataType* data, uint64_t count) {
     }
 
     // generate rom
-    rom_->GenerateRandomOrthogonalMatrixWithRetry();
+    if (use_rom_) {
+        rom_->GenerateRandomOrthogonalMatrixWithRetry();
 
-    // validate rom
-    int retries = MAX_RETRIES;
-    bool successful_gen = true;
-    double det = rom_->ComputeDeterminant();
-    if (std::fabs(det - 1) > 1e-4) {
-        for (uint64_t i = 0; i < retries; i++) {
-            successful_gen = rom_->GenerateRandomOrthogonalMatrix();
-            if (successful_gen) {
-                break;
+        // validate rom
+        int retries = MAX_RETRIES;
+        bool successful_gen = true;
+        double det = rom_->ComputeDeterminant();
+        if (std::fabs(det - 1) > 1e-4) {
+            for (uint64_t i = 0; i < retries; i++) {
+                successful_gen = rom_->GenerateRandomOrthogonalMatrix();
+                if (successful_gen) {
+                    break;
+                }
             }
         }
-    }
-    if (not successful_gen) {
-        return false;
-    }
+        if (not successful_gen) {
+            return false;
+        }
 
-    // transform centroid
-    Vector<DataType> rp_centroids(this->dim_, 0, this->allocator_);
-    rom_->Transform(centroid_.data(), rp_centroids.data());
-    centroid_.assign(rp_centroids.begin(), rp_centroids.end());
-
+        // transform centroid
+        Vector<DataType> rp_centroids(this->dim_, 0, this->allocator_);
+        rom_->Transform(centroid_.data(), rp_centroids.data());
+        centroid_.assign(rp_centroids.begin(), rp_centroids.end());
+    }
     this->is_trained_ = true;
     return true;
 }
@@ -339,7 +344,11 @@ RaBitQuantizer<metric>::EncodeOneImpl(const DataType* data, uint8_t* codes) cons
     }
 
     // 2. random projection
-    rom_->Transform(pca_data.data(), transformed_data.data());
+    if (use_rom_) {
+        rom_->Transform(pca_data.data(), transformed_data.data());
+    } else {
+        transformed_data.assign(pca_data.begin(), pca_data.end());
+    }
 
     // 3. normalize
     norm_type norm = NormalizeWithCentroid(
@@ -406,7 +415,13 @@ RaBitQuantizer<metric>::DecodeOneImpl(const uint8_t* codes, DataType* data) {
 
     // 4. inverse random projection
     // Note that the value may be much different between original since inv_sqrt_d is small
-    rom_->InverseTransform(transformed_data.data(), data);
+    if (use_rom_) {
+        rom_->InverseTransform(transformed_data.data(), data);
+    } else {
+        for (uint64_t d = 0; d < this->dim_; ++d) {
+            data[d] = transformed_data[d];
+        }
+    }
     return true;
 }
 
@@ -536,7 +551,11 @@ RaBitQuantizer<metric>::ProcessQueryImpl(const DataType* query,
         }
 
         // 2. random projection
-        rom_->Transform(pca_data.data(), transformed_data.data());
+        if (use_rom_) {
+            rom_->Transform(pca_data.data(), transformed_data.data());
+        } else {
+            transformed_data.assign(pca_data.begin(), pca_data.end());
+        }
 
         // 3. norm
         float query_norm = NormalizeWithCentroid(
@@ -609,6 +628,7 @@ RaBitQuantizer<metric>::SerializeImpl(StreamWriter& writer) {
     if (pca_dim_ != this->original_dim_) {
         this->pca_->Serialize(writer);
     }
+    StreamWriter::WriteObj(writer, this->use_rom_);
 }
 
 template <MetricType metric>
@@ -619,6 +639,7 @@ RaBitQuantizer<metric>::DeserializeImpl(StreamReader& reader) {
     if (pca_dim_ != this->original_dim_) {
         this->pca_->Deserialize(reader);
     }
+    StreamReader::ReadObj(reader, this->use_rom_);
 }
 
 }  // namespace vsag
