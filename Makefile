@@ -93,7 +93,9 @@ fix-lint:                ## Fix coding style issues in-place via clang-apply-rep
 	@./scripts/linters/run-clang-tidy.py -p build/ -use-color -source-filter '^.*vsag\/src.*(?<!_test)\.cpp$$' -j ${COMPILE_JOBS} -fix
 
 .PHONY: test_parallel
-test_parallel: debug     ## Run all tests parallel (used in CI).
+test_parallel:           ## Run all tests parallel (used in CI).
+	cmake ${VSAG_CMAKE_ARGS} -B${DEBUG_BUILD_DIR} -DCMAKE_BUILD_TYPE=Sanitize -DENABLE_ASAN=OFF -DENABLE_CCACHE=OFF
+	cmake --build ${DEBUG_BUILD_DIR} --parallel ${COMPILE_JOBS}
 	@./scripts/test_parallel_bg.sh
 	./build/mockimpl/tests_mockimpl -d yes ${UT_FILTER} --allow-running-no-tests ${UT_SHARD}
 

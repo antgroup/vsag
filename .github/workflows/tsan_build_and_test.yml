@@ -23,7 +23,7 @@ jobs:
           path: ./build/
           key: build-${{ hashFiles('./CMakeLists.txt') }}-${{ hashFiles('./.circleci/fresh_ci_cache.commit') }}-tsan
       - name: Make Tsan
-        run: make tsan
+        run: export CMAKE_GENERATOR="Ninja"; make tsan
       - name: Save Test
         uses: actions/upload-artifact@v4
         with:
