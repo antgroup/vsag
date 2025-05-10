@@ -16,7 +16,6 @@
 #include <immintrin.h>
 #endif
 
-#include <cassert>
 #include <cmath>
 
 #include "simd.h"
@@ -191,6 +190,121 @@ FP32ComputeL2Sqr(const float* query, const float* codes, uint64_t dim) {
     return l2;
 #else
     return avx2::FP32ComputeL2Sqr(query, codes, dim);
+#endif
+}
+
+void
+FP32ComputeIPBatch4(const float* query,
+                    uint64_t dim,
+                    const float* codes1,
+                    const float* codes2,
+                    const float* codes3,
+                    const float* codes4,
+                    float& result1,
+                    float& result2,
+                    float& result3,
+                    float& result4) {
+#if defined(ENABLE_AVX512)
+    if (dim < 16) {
+        return avx2::FP32ComputeIPBatch4(
+            query, dim, codes1, codes2, codes3, codes4, result1, result2, result3, result4);
+    }
+
+    __m512 sum1 = _mm512_setzero_ps();
+    __m512 sum2 = _mm512_setzero_ps();
+    __m512 sum3 = _mm512_setzero_ps();
+    __m512 sum4 = _mm512_setzero_ps();
+    uint64_t i = 0;
+    for (; i + 15 < dim; i += 16) {
+        __m512 q = _mm512_loadu_ps(query + i);
+        __m512 c1 = _mm512_loadu_ps(codes1 + i);
+        __m512 c2 = _mm512_loadu_ps(codes2 + i);
+        __m512 c3 = _mm512_loadu_ps(codes3 + i);
+        __m512 c4 = _mm512_loadu_ps(codes4 + i);
+
+        sum1 = _mm512_fmadd_ps(q, c1, sum1);
+        sum2 = _mm512_fmadd_ps(q, c2, sum2);
+        sum3 = _mm512_fmadd_ps(q, c3, sum3);
+        sum4 = _mm512_fmadd_ps(q, c4, sum4);
+    }
+    result1 += _mm512_reduce_add_ps(sum1);
+    result2 += _mm512_reduce_add_ps(sum2);
+    result3 += _mm512_reduce_add_ps(sum3);
+    result4 += _mm512_reduce_add_ps(sum4);
+    if (dim - i > 0) {
+        avx2::FP32ComputeIPBatch4(query + i,
+                                  dim - i,
+                                  codes1 + i,
+                                  codes2 + i,
+                                  codes3 + i,
+                                  codes4 + i,
+                                  result1,
+                                  result2,
+                                  result3,
+                                  result4);
+    }
+
+#else
+    return avx2::FP32ComputeIPBatch4(
+        query, dim, codes1, codes2, codes3, codes4, result1, result2, result3, result4);
+#endif
+}
+
+void
+FP32ComputeL2SqrBatch4(const float* query,
+                       uint64_t dim,
+                       const float* codes1,
+                       const float* codes2,
+                       const float* codes3,
+                       const float* codes4,
+                       float& result1,
+                       float& result2,
+                       float& result3,
+                       float& result4) {
+#if defined(ENABLE_AVX2)
+    if (dim < 16) {
+        return avx2::FP32ComputeL2SqrBatch4(
+            query, dim, codes1, codes2, codes3, codes4, result1, result2, result3, result4);
+    }
+    __m512 sum1 = _mm512_setzero_ps();
+    __m512 sum2 = _mm512_setzero_ps();
+    __m512 sum3 = _mm512_setzero_ps();
+    __m512 sum4 = _mm512_setzero_ps();
+    uint64_t i = 0;
+    for (; i + 15 < dim; i += 16) {
+        __m512 q = _mm512_loadu_ps(query + i);
+        __m512 c1 = _mm512_loadu_ps(codes1 + i);
+        __m512 c2 = _mm512_loadu_ps(codes2 + i);
+        __m512 c3 = _mm512_loadu_ps(codes3 + i);
+        __m512 c4 = _mm512_loadu_ps(codes4 + i);
+        __m512 diff1 = _mm512_sub_ps(q, c1);
+        __m512 diff2 = _mm512_sub_ps(q, c2);
+        __m512 diff3 = _mm512_sub_ps(q, c3);
+        __m512 diff4 = _mm512_sub_ps(q, c4);
+        sum1 = _mm512_fmadd_ps(diff1, diff1, sum1);
+        sum2 = _mm512_fmadd_ps(diff2, diff2, sum2);
+        sum3 = _mm512_fmadd_ps(diff3, diff3, sum3);
+        sum4 = _mm512_fmadd_ps(diff4, diff4, sum4);
+    }
+    result1 += _mm512_reduce_add_ps(sum1);
+    result2 += _mm512_reduce_add_ps(sum2);
+    result3 += _mm512_reduce_add_ps(sum3);
+    result4 += _mm512_reduce_add_ps(sum4);
+    if (dim - i > 0) {
+        avx2::FP32ComputeL2SqrBatch4(query + i,
+                                     dim - i,
+                                     codes1 + i,
+                                     codes2 + i,
+                                     codes3 + i,
+                                     codes4 + i,
+                                     result1,
+                                     result2,
+                                     result3,
+                                     result4);
+    }
+#else
+    return avx::FP32ComputeL2SqrBatch4(
+        query, dim, codes1, codes2, codes3, codes4, result1, result2, result3, result4);
 #endif
 }
 
