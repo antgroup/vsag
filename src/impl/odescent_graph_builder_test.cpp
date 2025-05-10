@@ -72,6 +72,18 @@ TEST_CASE("ODescent Build Test", "[ut][ODescent]") {
     }
 
     // prepare data param
+    constexpr const char* graph_param_temp =
+        R"(
+        {{
+            "io_params": {{
+                "type": "block_memory_io"
+            }},
+            "max_degree": {}
+        }}
+        )";
+    auto param_str = fmt::format(graph_param_temp, max_degree);
+    auto graph_param_json = vsag::JsonType::parse(param_str);
+
     vsag::FlattenDataCellParamPtr flatten_param =
         std::make_shared<vsag::FlattenDataCellParameter>();
     flatten_param->quantizer_parameter = std::make_shared<vsag::FP32QuantizerParameter>();
@@ -82,9 +94,10 @@ TEST_CASE("ODescent Build Test", "[ut][ODescent]") {
     flatten_interface_ptr->BatchInsertVector(vectors.data(), num_vectors);
 
     // prepare graph param
-    vsag::GraphDataCellParamPtr graph_param_ptr = std::make_shared<vsag::GraphDataCellParameter>();
-    graph_param_ptr->io_parameter_ = std::make_shared<vsag::MemoryIOParameter>();
-    graph_param_ptr->max_degree_ = max_degree;
+    auto graph_type = partial_data ? vsag::GraphStorageTypes::GRAPH_STORAGE_TYPE_SPARSE
+                                   : vsag::GraphStorageTypes::GRAPH_STORAGE_TYPE_FLAT;
+    vsag::GraphInterfaceParamPtr graph_param_ptr =
+        vsag::GraphInterfaceParameter::GetGraphParameterByJson(graph_type, graph_param_json);
     // build graph
     auto odescent_param = std::make_shared<vsag::ODescentParameter>();
     odescent_param->max_degree = max_degree;
@@ -110,11 +123,11 @@ TEST_CASE("ODescent Build Test", "[ut][ODescent]") {
 
     // check result
     vsag::GraphInterfacePtr graph_interface =
-        vsag::GraphInterface::MakeInstance(graph_param_ptr, param, partial_data);
+        vsag::GraphInterface::MakeInstance(graph_param_ptr, param);
     vsag::GraphInterfacePtr half_graph_interface =
-        vsag::GraphInterface::MakeInstance(graph_param_ptr, param, partial_data);
+        vsag::GraphInterface::MakeInstance(graph_param_ptr, param);
     vsag::GraphInterfacePtr merged_graph_interface =
-        vsag::GraphInterface::MakeInstance(graph_param_ptr, param, partial_data);
+        vsag::GraphInterface::MakeInstance(graph_param_ptr, param);
     graph.Build(valid_ids);
     graph.SaveGraph(graph_interface);
 

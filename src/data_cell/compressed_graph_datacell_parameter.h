@@ -16,27 +16,31 @@
 #pragma once
 
 #include "graph_interface_parameter.h"
-#include "io/io_parameter.h"
 
 namespace vsag {
-class GraphDataCellParameter : public GraphInterfaceParameter {
+class CompressedGraphDatacellParameter : public GraphInterfaceParameter {
 public:
-    GraphDataCellParameter() : GraphInterfaceParameter(GraphStorageTypes::GRAPH_STORAGE_TYPE_FLAT) {
+    CompressedGraphDatacellParameter()
+        : GraphInterfaceParameter(GraphStorageTypes::GRAPH_STORAGE_TYPE_COMPRESSED) {
     }
 
     void
-    FromJson(const JsonType& json) override;
+    FromJson(const JsonType& json) override {
+        if (json.contains(GRAPH_PARAM_MAX_DEGREE)) {
+            this->max_degree_ = json[GRAPH_PARAM_MAX_DEGREE];
+        }
+    }
 
     JsonType
-    ToJson() override;
+    ToJson() override {
+        JsonType json;
+        json[GRAPH_PARAM_MAX_DEGREE] = this->max_degree_;
+        return json;
+    }
 
 public:
-    IOParamPtr io_parameter_{nullptr};
-
     uint64_t max_degree_{64};
-
-    uint64_t init_max_capacity_{100};
 };
 
-using GraphDataCellParamPtr = std::shared_ptr<GraphDataCellParameter>;
+using CompressedGraphDatacellParamPtr = std::shared_ptr<CompressedGraphDatacellParameter>;
 }  // namespace vsag

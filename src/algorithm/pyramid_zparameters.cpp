@@ -30,7 +30,8 @@ PyramidParameters::FromJson(const JsonType& json) {
     CHECK_ARGUMENT(json.contains(GRAPH_TYPE_ODESCENT),
                    fmt::format("pyramid parameters must contains {}", GRAPH_TYPE_ODESCENT));
     const auto& graph_json = json[GRAPH_TYPE_ODESCENT];
-    graph_param = GraphInterfaceParameter::GetGraphParameterByJson(graph_json);
+    graph_param = GraphInterfaceParameter::GetGraphParameterByJson(
+        GraphStorageTypes::GRAPH_STORAGE_TYPE_SPARSE, graph_json);
     odescent_param = std::make_shared<ODescentParameter>();
     odescent_param->FromJson(graph_json);
     this->flatten_data_cell_param = std::make_shared<FlattenDataCellParameter>();
