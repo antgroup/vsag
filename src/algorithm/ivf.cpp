@@ -23,10 +23,42 @@
 
 namespace vsag {
 
+static constexpr const char* IVF_PARAMS_TEMPLATE =
+    R"(
+    {
+        "type": "{INDEX_TYPE_IVF}",
+        "{IVF_TRAIN_TYPE_KEY}": "{IVF_TRAIN_TYPE_KMEANS}",
+        "{BUCKET_PARAMS_KEY}": {
+            "{IO_PARAMS_KEY}": {
+                "{IO_TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}"
+            },
+            "{QUANTIZATION_PARAMS_KEY}": {
+                "{QUANTIZATION_TYPE_KEY}": "{QUANTIZATION_TYPE_VALUE_FP32}",
+                "{SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE}": 0.05,
+                "{PCA_DIM}": 0,
+                "{RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY}": 32,
+                "{PRODUCT_QUANTIZATION_DIM}": 0
+            },
+            "{BUCKETS_COUNT_KEY}": 10
+        },
+        "{IVF_USE_REORDER_KEY}": false,
+        "{IVF_PRECISE_CODES_KEY}": {
+            "{IO_PARAMS_KEY}": {
+                "{IO_TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
+                "{IO_FILE_PATH}": "{DEFAULT_FILE_PATH_VALUE}"
+            },
+            "codes_type": "flatten_codes",
+            "{QUANTIZATION_PARAMS_KEY}": {
+                "{QUANTIZATION_TYPE_KEY}": "{QUANTIZATION_TYPE_VALUE_FP32}",
+                "{PRODUCT_QUANTIZATION_DIM}": 0
+            }
+        }
+    })";
+
 ParamPtr
 IVF::CheckAndMappingExternalParam(const JsonType& external_param,
                                   const IndexCommonParam& common_param) {
-    const std::unordered_map<std::string, std::vector<std::string>> EXTERNAL_MAPPING = {
+    const std::unordered_map<std::string, std::vector<std::string>> external_mapping = {
         {
             IVF_BASE_QUANTIZATION_TYPE,
             {BUCKET_PARAMS_KEY, QUANTIZATION_PARAMS_KEY, QUANTIZATION_TYPE_KEY},
@@ -65,44 +97,13 @@ IVF::CheckAndMappingExternalParam(const JsonType& external_param,
         },
     };
 
-    constexpr const char* IVF_PARAMS_TEMPLATE = R"(
-    {
-        "type": "{INDEX_TYPE_IVF}",
-        "{IVF_TRAIN_TYPE_KEY}": "{IVF_TRAIN_TYPE_KMEANS}",
-        "{BUCKET_PARAMS_KEY}": {
-            "{IO_PARAMS_KEY}": {
-                "{IO_TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}"
-            },
-            "{QUANTIZATION_PARAMS_KEY}": {
-                "{QUANTIZATION_TYPE_KEY}": "{QUANTIZATION_TYPE_VALUE_FP32}",
-                "{SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE}": 0.05,
-                "{PCA_DIM}": 0,
-                "{RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY}": 32,
-                "{PRODUCT_QUANTIZATION_DIM}": 0
-            },
-            "{BUCKETS_COUNT_KEY}": 10
-        },
-        "{IVF_USE_REORDER_KEY}": false,
-        "{IVF_PRECISE_CODES_KEY}": {
-            "{IO_PARAMS_KEY}": {
-                "{IO_TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
-                "{IO_FILE_PATH}": "{DEFAULT_FILE_PATH_VALUE}"
-            },
-            "codes_type": "flatten_codes",
-            "{QUANTIZATION_PARAMS_KEY}": {
-                "{QUANTIZATION_TYPE_KEY}": "{QUANTIZATION_TYPE_VALUE_FP32}",
-                "{PRODUCT_QUANTIZATION_DIM}": 0
-            }
-        }
-    })";
-
     if (common_param.data_type_ == DataTypes::DATA_TYPE_INT8) {
         throw std::invalid_argument(fmt::format("IVF not support {} datatype", DATATYPE_INT8));
     }
 
     std::string str = format_map(IVF_PARAMS_TEMPLATE, DEFAULT_MAP);
     auto inner_json = JsonType::parse(str);
-    mapping_external_param_to_inner(external_param, EXTERNAL_MAPPING, inner_json);
+    mapping_external_param_to_inner(external_param, external_mapping, inner_json);
 
     auto ivf_parameter = std::make_shared<IVFParameter>();
     ivf_parameter->FromJson(inner_json);

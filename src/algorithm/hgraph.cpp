@@ -911,10 +911,65 @@ HGraph::reorder(const void* query,
     }
 }
 
+static const std::string HGRAPH_PARAMS_TEMPLATE =
+    R"(
+    {
+        "type": "{INDEX_TYPE_HGRAPH}",
+        "{HGRAPH_USE_REORDER_KEY}": false,
+        "{HGRAPH_USE_ENV_OPTIMIZER}": false,
+        "{HGRAPH_IGNORE_REORDER_KEY}": false,
+        "{HGRAPH_GRAPH_KEY}": {
+            "{IO_PARAMS_KEY}": {
+                "{IO_TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
+                "{IO_FILE_PATH}": "{DEFAULT_FILE_PATH_VALUE}"
+            },
+            "{GRAPH_PARAM_MAX_DEGREE}": 64,
+            "{GRAPH_PARAM_INIT_MAX_CAPACITY}": 100
+        },
+        "{HGRAPH_BASE_CODES_KEY}": {
+            "{IO_PARAMS_KEY}": {
+                "{IO_TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
+                "{IO_FILE_PATH}": "{DEFAULT_FILE_PATH_VALUE}"
+            },
+            "codes_type": "flatten_codes",
+            "{QUANTIZATION_PARAMS_KEY}": {
+                "{QUANTIZATION_TYPE_KEY}": "{QUANTIZATION_TYPE_VALUE_PQ}",
+                "{SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE}": 0.05,
+                "{PCA_DIM}": 0,
+                "{RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY}": 32,
+                "nbits": 8,
+                "{PRODUCT_QUANTIZATION_DIM}": 0
+            }
+        },
+        "{HGRAPH_PRECISE_CODES_KEY}": {
+            "{IO_PARAMS_KEY}": {
+                "{IO_TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
+                "{IO_FILE_PATH}": "{DEFAULT_FILE_PATH_VALUE}"
+            },
+            "codes_type": "flatten_codes",
+            "{QUANTIZATION_PARAMS_KEY}": {
+                "{QUANTIZATION_TYPE_KEY}": "{QUANTIZATION_TYPE_VALUE_FP32}",
+                "{SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE}": 0.05,
+                "{PCA_DIM}": 0,
+                "{PRODUCT_QUANTIZATION_DIM}": 0
+            }
+        },
+        "{BUILD_PARAMS_KEY}": {
+            "{BUILD_EF_CONSTRUCTION}": 400,
+            "{BUILD_THREAD_COUNT}": 100
+        },
+        "{HGRAPH_EXTRA_INFO_KEY}": {
+            "{IO_PARAMS_KEY}": {
+                "{IO_TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
+                "{IO_FILE_PATH}": "{DEFAULT_FILE_PATH_VALUE}"
+            }
+        }
+    })";
+
 ParamPtr
 HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
                                      const IndexCommonParam& common_param) {
-    const ConstParamMap EXTERNAL_MAPPING = {
+    const ConstParamMap external_mapping = {
         {
             HGRAPH_USE_REORDER,
             {
@@ -1043,66 +1098,13 @@ HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
         },
     };
 
-    const std::string HGRAPH_PARAMS_TEMPLATE = R"(
-    {
-        "type": "{INDEX_TYPE_HGRAPH}",
-        "{HGRAPH_USE_REORDER_KEY}": false,
-        "{HGRAPH_USE_ENV_OPTIMIZER}": false,
-        "{HGRAPH_IGNORE_REORDER_KEY}": false,
-        "{HGRAPH_GRAPH_KEY}": {
-            "{IO_PARAMS_KEY}": {
-                "{IO_TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
-                "{IO_FILE_PATH}": "{DEFAULT_FILE_PATH_VALUE}"
-            },
-            "{GRAPH_PARAM_MAX_DEGREE}": 64,
-            "{GRAPH_PARAM_INIT_MAX_CAPACITY}": 100
-        },
-        "{HGRAPH_BASE_CODES_KEY}": {
-            "{IO_PARAMS_KEY}": {
-                "{IO_TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
-                "{IO_FILE_PATH}": "{DEFAULT_FILE_PATH_VALUE}"
-            },
-            "codes_type": "flatten_codes",
-            "{QUANTIZATION_PARAMS_KEY}": {
-                "{QUANTIZATION_TYPE_KEY}": "{QUANTIZATION_TYPE_VALUE_PQ}",
-                "{SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE}": 0.05,
-                "{PCA_DIM}": 0,
-                "{RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY}": 32,
-                "nbits": 8,
-                "{PRODUCT_QUANTIZATION_DIM}": 0
-            }
-        },
-        "{HGRAPH_PRECISE_CODES_KEY}": {
-            "{IO_PARAMS_KEY}": {
-                "{IO_TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
-                "{IO_FILE_PATH}": "{DEFAULT_FILE_PATH_VALUE}"
-            },
-            "codes_type": "flatten_codes",
-            "{QUANTIZATION_PARAMS_KEY}": {
-                "{QUANTIZATION_TYPE_KEY}": "{QUANTIZATION_TYPE_VALUE_FP32}",
-                "{SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE}": 0.05,
-                "{PCA_DIM}": 0,
-                "{PRODUCT_QUANTIZATION_DIM}": 0
-            }
-        },
-        "{BUILD_PARAMS_KEY}": {
-            "{BUILD_EF_CONSTRUCTION}": 400,
-            "{BUILD_THREAD_COUNT}": 100
-        },
-        "{HGRAPH_EXTRA_INFO_KEY}": {
-            "{IO_PARAMS_KEY}": {
-                "{IO_TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
-                "{IO_FILE_PATH}": "{DEFAULT_FILE_PATH_VALUE}"
-            }
-        }
-    })";
     if (common_param.data_type_ == DataTypes::DATA_TYPE_INT8) {
         throw std::invalid_argument(fmt::format("HGraph not support {} datatype", DATATYPE_INT8));
     }
 
     std::string str = format_map(HGRAPH_PARAMS_TEMPLATE, DEFAULT_MAP);
     auto inner_json = JsonType::parse(str);
-    mapping_external_param_to_inner(external_param, EXTERNAL_MAPPING, inner_json);
+    mapping_external_param_to_inner(external_param, external_mapping, inner_json);
 
     auto hgraph_parameter = std::make_shared<HGraphParameter>();
     hgraph_parameter->data_type = common_param.data_type_;
