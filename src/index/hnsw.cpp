@@ -570,6 +570,8 @@ HNSW::deserialize(const BinarySet& binary_set) {
         LOG_ERROR_AND_RETURNS(ErrorType::READ_ERROR, "failed to deserialize: ", e.what());
     } catch (const std::out_of_range& e) {
         LOG_ERROR_AND_RETURNS(ErrorType::READ_ERROR, "failed to deserialize: ", e.what());
+    } catch (const VsagException& e) {
+        LOG_ERROR_AND_RETURNS(ErrorType::READ_ERROR, "failed to deserialize: ", e.what());
     }
 
     return {};
@@ -614,6 +616,8 @@ HNSW::deserialize(const ReaderSet& reader_set) {
         alg_hnsw_->loadIndex(buffer_reader, this->space_.get());
     } catch (const std::runtime_error& e) {
         LOG_ERROR_AND_RETURNS(ErrorType::READ_ERROR, "failed to deserialize: ", e.what());
+    } catch (const VsagException& e) {
+        LOG_ERROR_AND_RETURNS(ErrorType::READ_ERROR, "failed to deserialize: ", e.what());
     }
 
     return {};
@@ -642,6 +646,8 @@ HNSW::deserialize(std::istream& in_stream) {
             throw std::runtime_error("error in deserialize conjugate graph");
         }
     } catch (const std::runtime_error& e) {
+        LOG_ERROR_AND_RETURNS(ErrorType::READ_ERROR, "failed to deserialize: ", e.what());
+    } catch (const VsagException& e) {
         LOG_ERROR_AND_RETURNS(ErrorType::READ_ERROR, "failed to deserialize: ", e.what());
     }
 

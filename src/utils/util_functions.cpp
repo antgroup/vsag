@@ -47,7 +47,8 @@ mapping_external_param_to_inner(const JsonType& external_json,
             }
             *json = value;
         } else {
-            throw std::invalid_argument(fmt::format("HGraph have no config param: {}", key));
+            throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                fmt::format("invalid config param: {}", key));
         }
     }
 }
@@ -66,7 +67,7 @@ CreateFastDataset(int64_t dim, Allocator* allocator) {
 std::vector<int>
 select_k_numbers(int64_t n, int k) {
     if (k > n || k <= 0) {
-        throw std::invalid_argument("Invalid values for N or K");
+        throw VsagException(ErrorType::INVALID_ARGUMENT, "Invalid values for N or K");
     }
 
     std::vector<int> numbers(n);
