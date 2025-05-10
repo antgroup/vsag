@@ -109,8 +109,6 @@ HGraphParameter::ToJson() {
     return json;
 }
 
-// NOLINTBEGIN(readability-simplify-boolean-expr)
-
 HGraphSearchParameters
 HGraphSearchParameters::FromJson(const std::string& json_string) {
     JsonType params = JsonType::parse(json_string);
@@ -129,11 +127,7 @@ HGraphSearchParameters::FromJson(const std::string& json_string) {
     if (params[INDEX_TYPE_HGRAPH].contains(HGRAPH_USE_EXTRA_INFO_FILTER)) {
         obj.use_extra_info_filter = params[INDEX_TYPE_HGRAPH][HGRAPH_USE_EXTRA_INFO_FILTER];
     }
-    CHECK_ARGUMENT((1 <= obj.ef_search) and (obj.ef_search <= 1000),
-                   fmt::format("ef_search({}) must in range[1, 1000]", obj.ef_search));
 
     return obj;
 }
 }  // namespace vsag
-
-// NOLINTEND(readability-simplify-boolean-expr)
