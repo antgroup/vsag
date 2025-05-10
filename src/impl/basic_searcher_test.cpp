@@ -312,7 +312,7 @@ TEST_CASE("Optimize SQ4", "[ut][BasicOptimizer]") {
     common.metric_ = vsag::MetricType::METRIC_TYPE_L2SQR;
 
     FlattenInterfacePtr vector_data_cell;
-    if (quantizer_type == "sq4_uniform") {
+    if (quantizer_type == std::string("sq4_uniform")) {
         vector_data_cell = std::make_shared<
             FlattenDataCell<SQ4UniformQuantizer<vsag::MetricType::METRIC_TYPE_L2SQR>, MemoryIO>>(
             quantizer_param, io_param, common);
