@@ -1181,7 +1181,7 @@ HNSW::merge(const std::vector<MergeUnit>& merge_units) {
     FlattenInterfacePtr flatten_interface =
         FlattenInterface::MakeInstance(param, index_common_param_);
     GraphInterfacePtr graph_interface =
-        GraphInterface::MakeInstance(graph_param_ptr, index_common_param_, false);
+        GraphInterface::MakeInstance(graph_param_ptr, index_common_param_);
     Vector<LabelType> ids(allocator_.get());
     // extract data and graph
     IdMapFunction id_map = [](int64_t id) -> std::tuple<bool, int64_t> {

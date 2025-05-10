@@ -17,7 +17,7 @@
 
 #include <shared_mutex>
 
-#include "graph_datacell_parameter.h"
+#include "compressed_graph_datacell_parameter.h"
 #include "graph_interface.h"
 #include "impl/elias_fano_encoder.h"
 #include "io/memory_block_io.h"
@@ -29,7 +29,7 @@ public:
     explicit CompressedGraphDataCell(const GraphInterfaceParamPtr& graph_param,
                                      const IndexCommonParam& common_param);
 
-    explicit CompressedGraphDataCell(const GraphDataCellParamPtr& graph_param,
+    explicit CompressedGraphDataCell(const CompressedGraphDatacellParamPtr& graph_param,
                                      const IndexCommonParam& common_param);
 
     void

@@ -1020,8 +1020,7 @@ TEST_CASE("extract/set data and graph", "[ut][hnsw]") {
     graph_param_ptr->io_parameter_ = std::make_shared<vsag::MemoryIOParameter>();
 
     FlattenInterfacePtr flatten_interface = FlattenInterface::MakeInstance(param, common_param);
-    GraphInterfacePtr graph_interface =
-        GraphInterface::MakeInstance(graph_param_ptr, common_param, false);
+    GraphInterfacePtr graph_interface = GraphInterface::MakeInstance(graph_param_ptr, common_param);
     Vector<LabelType> ids_vector(allocator.get());
 
     IdMapFunction id_map = [](int64_t id) -> std::tuple<bool, int64_t> {

@@ -20,20 +20,19 @@
 #include <catch2/catch_template_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
 
-#include "graph_datacell_parameter.h"
 #include "graph_interface_test.h"
 #include "safe_allocator.h"
+#include "sparse_graph_datacell_parameter.h"
 using namespace vsag;
 
 void
 TestSparseGraphDataCell(const GraphInterfaceParamPtr& param, const IndexCommonParam& common_param) {
     auto count = GENERATE(1000, 2000);
     auto max_id = 10000;
-    bool is_sparse = true;
 
-    auto graph = GraphInterface::MakeInstance(param, common_param, is_sparse);
+    auto graph = GraphInterface::MakeInstance(param, common_param);
     GraphInterfaceTest test(graph);
-    auto other = GraphInterface::MakeInstance(param, common_param, is_sparse);
+    auto other = GraphInterface::MakeInstance(param, common_param);
     test.BasicTest(max_id, count, other);
 }
 
@@ -45,7 +44,7 @@ TEST_CASE("SparseGraphDataCell Basic Test", "[ut][SparseGraphDataCell]") {
     IndexCommonParam common_param;
     common_param.dim_ = dim;
     common_param.allocator_ = allocator;
-    auto graph_param = std::make_shared<GraphDataCellParameter>();
+    auto graph_param = std::make_shared<SparseGraphDatacellParameter>();
     graph_param->max_degree_ = max_degree;
     TestSparseGraphDataCell(graph_param, common_param);
 }

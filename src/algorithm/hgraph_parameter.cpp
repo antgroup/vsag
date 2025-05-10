@@ -70,7 +70,8 @@ HGraphParameter::FromJson(const JsonType& json) {
     CHECK_ARGUMENT(json.contains(HGRAPH_GRAPH_KEY),
                    fmt::format("hgraph parameters must contains {}", HGRAPH_GRAPH_KEY));
     const auto& graph_json = json[HGRAPH_GRAPH_KEY];
-    this->bottom_graph_param = GraphInterfaceParameter::GetGraphParameterByJson(graph_json);
+    this->bottom_graph_param = GraphInterfaceParameter::GetGraphParameterByJson(
+        GraphStorageTypes::GRAPH_STORAGE_TYPE_FLAT, graph_json);
 
     if (json.contains(BUILD_PARAMS_KEY)) {
         const auto& build_params = json[BUILD_PARAMS_KEY];
