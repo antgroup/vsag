@@ -34,6 +34,7 @@
 #include "inner_index_interface.h"
 #include "lock_strategy.h"
 #include "typing.h"
+#include "utils/distance_heap.h"
 #include "utils/visited_list.h"
 #include "vsag/index.h"
 #include "vsag/index_features.h"
@@ -180,14 +181,14 @@ private:
     generate_one_route_graph();
 
     template <InnerSearchMode mode = InnerSearchMode::KNN_SEARCH>
-    MaxHeap
+    DistHeapPtr
     search_one_graph(const void* query,
                      const GraphInterfacePtr& graph,
                      const FlattenInterfacePtr& flatten,
                      InnerSearchParam& inner_search_param) const;
 
     template <InnerSearchMode mode = InnerSearchMode::KNN_SEARCH>
-    MaxHeap
+    DistHeapPtr
     search_one_graph(const void* query,
                      const GraphInterfacePtr& graph,
                      const FlattenInterfacePtr& flatten,
@@ -203,7 +204,7 @@ private:
     void
     reorder(const void* query,
             const FlattenInterfacePtr& flatten_interface,
-            MaxHeap& candidate_heap,
+            const DistHeapPtr& candidate_heap,
             int64_t k) const;
 
     void
