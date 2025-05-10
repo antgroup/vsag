@@ -22,6 +22,6 @@ jobs:
           cp -r ./vsag/* /tmp/
       - uses: actions/checkout@v4
       - name: Compile Check Compatibility Tools
-        run: make release
+        run: export CMAKE_GENERATOR="Ninja"; make release
       - name: Run Check Compatibility
         run: bash ./scripts/check_compatibility.sh

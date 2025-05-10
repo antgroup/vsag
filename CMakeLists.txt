@@ -217,7 +217,7 @@ if (CMAKE_BUILD_TYPE STREQUAL "Debug")
 elseif (CMAKE_BUILD_TYPE STREQUAL "Release")
     set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -Ofast")
 elseif (CMAKE_BUILD_TYPE STREQUAL "Sanitize")
-    set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -O1")
+    set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -O2")
 endif ()
 
 if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
