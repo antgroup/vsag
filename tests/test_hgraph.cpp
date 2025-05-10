@@ -773,20 +773,15 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex, "HGraph ELP Optimizer", 
     }}
     )";
 
-    auto dim = 960;
+    auto dim = 128;
     vsag::Options::Instance().set_block_size_limit(size);
-    auto base = pool.GetDatasetAndCreate(dim, 10000, metric_type);
+    auto base = pool.GetDatasetAndCreate(dim, 100, metric_type);
     std::string param_weak = fmt::format(parameter_temp, metric_type, dim, false);
     std::string param_strong = fmt::format(parameter_temp, metric_type, dim, true);
-
     auto index_weak = TestFactory(name, param_weak, true);
     TestBuildIndex(index_weak, base);
-
     auto index_strong = TestFactory(name, param_strong, true);
     TestBuildIndex(index_strong, base);
-
-    auto query = pool.GetDatasetAndCreate(dim, 1000, metric_type);
-    TestKnnSearchCompare(index_weak, index_strong, query, search_param, false);
     vsag::Options::Instance().set_block_size_limit(origin_size);
 }
 

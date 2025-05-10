@@ -22,4 +22,4 @@ jobs:
       - name: Install clang-tidy
         run: sudo apt install clang-tidy-15 -y && sudo ln -s /usr/bin/clang-tidy-15 /usr/bin/clang-tidy
       - name: Run lint
-        run: make debug && make lint
+        run: export CMAKE_GENERATOR="Ninja" && make debug && make lint

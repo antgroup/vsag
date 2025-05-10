@@ -24,8 +24,13 @@ jobs:
           git clone https://github.com/linux-test-project/lcov.git
           cd lcov && git checkout v2.3 && make install
           lcov --version
+      - name: Load Cache
+        uses: actions/cache@v4
+        with:
+          path: ./build/
+          key: build-cov-${{ hashFiles('./CMakeLists.txt') }}-${{ hashFiles('./.circleci/fresh_ci_cache.commit') }}
       - name: Compile with Coverage Flags
-        run: make cov
+        run: export CMAKE_GENERATOR="Ninja"; make cov
       - name: Run Test
         run: |
           ./scripts/test_parallel_bg.sh
