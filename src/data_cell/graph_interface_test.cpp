@@ -142,7 +142,7 @@ GraphInterfaceTest::BasicTest(uint64_t max_id,
                 this->graph_->InsertNeighborsById(key, *maps[key]);
             }
             for (const auto& [key, value] : maps) {
-                if (keys_to_delete.find(key) != keys_to_delete.end()) {
+                if (keys_to_delete.find(key) == keys_to_delete.end()) {
                     Vector<InnerIdType> neighbors(allocator.get());
                     this->graph_->GetNeighbors(key, neighbors);
                     for (const auto& neighbor_id : neighbors) {

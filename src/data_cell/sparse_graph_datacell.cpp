@@ -84,12 +84,11 @@ SparseGraphDataCell::GetNeighbors(InnerIdType id, Vector<InnerIdType>& neighbor_
     std::shared_lock<std::shared_mutex> rlock(this->neighbors_map_mutex_);
     auto iter = this->neighbors_.find(id);
     if (iter != this->neighbors_.end()) {
-        auto& ngbrs = iter->second;
+        const auto& ngbrs = iter->second;
         if (is_support_delete_) {
             neighbor_ids.clear();
             neighbor_ids.reserve(iter->second->size());
-            for (int i = 0; i < ngbrs->size(); ++i) {
-                const auto& neighbor_id = ngbrs->at(i);
+            for (unsigned int& neighbor_id : *ngbrs) {
                 uint8_t cur_version = neighbor_id >> id_bit_;
                 uint32_t real_id = neighbor_id & remove_flag_mask_;
                 if (node_version_.at(real_id) == cur_version) {
