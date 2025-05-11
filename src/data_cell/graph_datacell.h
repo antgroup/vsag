@@ -244,8 +244,9 @@ void
 GraphDataCell<IOTmpl>::DeleteNeighborsById(vsag::InnerIdType id) {
     if (is_support_delete_) {
         if (node_versions_[id] + 1 == 0) {
-            throw VsagException(ErrorType::INTERNAL_ERROR,
-                                "remove point too many times in GraphDatacell, please rebuild index");
+            throw VsagException(
+                ErrorType::INTERNAL_ERROR,
+                "remove point too many times in GraphDatacell, please rebuild index");
         }
         node_versions_[id]++;
     } else {
