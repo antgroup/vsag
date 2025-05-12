@@ -81,6 +81,11 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
         this->build_pool_->SetPoolSize(build_thread_count_);
     }
 
+    UnorderedMap<std::string, float> default_param(common_param.allocator_.get());
+    default_param.insert(
+        {PREFETCH_DEPTH_CODE, (this->basic_flatten_codes_->code_size_ + 63.0) / 64.0});
+    this->basic_flatten_codes_->SetRuntimeParameters(default_param);
+
     if (use_elp_optimizer_) {
         optimizer_ = std::make_shared<Optimizer<BasicSearcher>>(common_param);
     }
