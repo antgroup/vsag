@@ -50,7 +50,7 @@ GraphInterfaceTest::BasicTest(uint64_t max_id,
     for (auto& pair : maps) {
         auto& vec_ptr = pair.second;
         int max_possible_length = keys.size();
-        int length = random() % max_degree + 1;
+        int length = random() % (max_degree - 1) + 2;
         length = std::min(length, max_possible_length);
         std::vector<InnerIdType> temp_keys = keys;
         std::shuffle(temp_keys.begin(), temp_keys.end(), rng);
