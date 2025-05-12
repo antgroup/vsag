@@ -467,7 +467,8 @@ RaBitQuantizer<metric>::ComputeQueryBaseImpl(const uint8_t* query_codes,
 template <MetricType metric>
 inline float
 RaBitQuantizer<metric>::ComputeImpl(const uint8_t* codes1, const uint8_t* codes2) const {
-    throw std::runtime_error("building the index is not supported using RabbitQ alone");
+    throw VsagException(ErrorType::INTERNAL_ERROR,
+                        "building the index is not supported using RabbitQ alone");
 }
 
 template <MetricType metric>

@@ -18,6 +18,7 @@
 #include <fmt/format-inl.h>
 
 #include "vsag/options.h"
+#include "vsag_exception.h"
 
 ReadFuncStreamReader::ReadFuncStreamReader(std::function<void(uint64_t, uint64_t, void*)> read_func,
                                            uint64_t cursor)
@@ -48,8 +49,10 @@ IOStreamReader::Read(char* data, uint64_t size) {
     this->istream_.read(data, static_cast<int64_t>(size));
     if (istream_.fail()) {
         auto remaining = std::streamsize(this->istream_.gcount());
-        throw std::runtime_error(fmt::format(
-            "Attempted to read: {} bytes. Remaining content size: {} bytes.", size, remaining));
+        throw vsag::VsagException(
+            vsag::ErrorType::READ_ERROR,
+            fmt::format(
+                "Attempted to read: {} bytes. Remaining content size: {} bytes.", size, remaining));
     }
 }
 
@@ -85,7 +88,8 @@ BufferStreamReader::Read(char* data, uint64_t size) {
     if (buffer_ == nullptr) {
         buffer_ = (char*)allocator_->Allocate(buffer_size_);
         if (buffer_ == nullptr) {
-            throw std::runtime_error("fail to allocate buffer in BufferStreamReader");
+            throw vsag::VsagException(vsag::ErrorType::NO_ENOUGH_MEMORY,
+                                      "fail to allocate buffer in BufferStreamReader");
         }
     }
     // Loop to read until read_size is satisfied
@@ -109,7 +113,8 @@ BufferStreamReader::Read(char* data, uint64_t size) {
         buffer_cursor_ = 0;  // Reset cursor to overwrite buffer_'s content
         valid_size_ = std::min(max_size_ - cursor_, buffer_size_);
         if (valid_size_ == 0) {
-            throw std::runtime_error(
+            throw vsag::VsagException(
+                vsag::ErrorType::READ_ERROR,
                 "BufferStreamReader: The file size is smaller than the memory you want to read.");
         }
         reader_impl_->Read(buffer_, valid_size_);
