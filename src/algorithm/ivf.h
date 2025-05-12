@@ -25,6 +25,7 @@
 #include "stream_reader.h"
 #include "stream_writer.h"
 #include "typing.h"
+#include "utils/distance_heap.h"
 #include "vsag/index.h"
 
 namespace vsag {
@@ -94,11 +95,11 @@ private:
     create_search_param(const std::string& parameters, const FilterPtr& filter) const;
 
     template <InnerSearchMode mode = KNN_SEARCH>
-    MaxHeap
+    DistHeapPtr
     search(const DatasetPtr& query, const InnerSearchParam& param) const;
 
     DatasetPtr
-    reorder(int64_t topk, MaxHeap& input, const float* query) const;
+    reorder(int64_t topk, DistHeapPtr& input, const float* query) const;
 
 private:
     BucketInterfacePtr bucket_{nullptr};

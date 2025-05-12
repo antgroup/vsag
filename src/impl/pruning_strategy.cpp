@@ -15,31 +15,33 @@
 
 #include "pruning_strategy.h"
 
+#include "utils/standard_heap.h"
+
 namespace vsag {
 
 void
-select_edges_by_heuristic(MaxHeap& edges,
+select_edges_by_heuristic(const DistHeapPtr& edges,
                           uint64_t max_size,
                           const FlattenInterfacePtr& flatten,
                           Allocator* allocator) {
-    if (edges.size() < max_size) {
+    if (edges->Size() < max_size) {
         return;
     }
 
-    MaxHeap queue_closest(allocator);
-    vsag::Vector<std::pair<float, InnerIdType>> return_list(allocator);
-    while (not edges.empty()) {
-        queue_closest.emplace(-edges.top().first, edges.top().second);
-        edges.pop();
+    auto queue_closest = std::make_shared<StandardHeap<true, false>>(allocator, -1);
+    Vector<std::pair<float, InnerIdType>> return_list(allocator);
+    while (not edges->Empty()) {
+        queue_closest->Push(-edges->Top().first, edges->Top().second);
+        edges->Pop();
     }
 
-    while (not queue_closest.empty()) {
+    while (not queue_closest->Empty()) {
         if (return_list.size() >= max_size) {
             break;
         }
-        std::pair<float, InnerIdType> current_pair = queue_closest.top();
+        std::pair<float, InnerIdType> current_pair = queue_closest->Top();
         float float_query = -current_pair.first;
-        queue_closest.pop();
+        queue_closest->Pop();
         bool good = true;
 
         for (const auto& second_pair : return_list) {
@@ -55,20 +57,20 @@ select_edges_by_heuristic(MaxHeap& edges,
     }
 
     for (const auto& current_pair : return_list) {
-        edges.emplace(-current_pair.first, current_pair.second);
+        edges->Push(-current_pair.first, current_pair.second);
     }
 }
 
 InnerIdType
 mutually_connect_new_element(InnerIdType cur_c,
-                             MaxHeap& top_candidates,
+                             const DistHeapPtr& top_candidates,
                              const GraphInterfacePtr& graph,
                              const FlattenInterfacePtr& flatten,
                              const MutexArrayPtr& neighbors_mutexes,
                              Allocator* allocator) {
     const size_t max_size = graph->MaximumDegree();
     select_edges_by_heuristic(top_candidates, max_size, flatten, allocator);
-    if (top_candidates.size() > max_size) {
+    if (top_candidates->Size() > max_size) {
         throw VsagException(
             ErrorType::INTERNAL_ERROR,
             "Should be not be more than max_size candidates returned by the heuristic");
@@ -76,9 +78,9 @@ mutually_connect_new_element(InnerIdType cur_c,
 
     Vector<InnerIdType> selected_neighbors(allocator);
     selected_neighbors.reserve(max_size);
-    while (not top_candidates.empty()) {
-        selected_neighbors.emplace_back(top_candidates.top().second);
-        top_candidates.pop();
+    while (not top_candidates->Empty()) {
+        selected_neighbors.emplace_back(top_candidates->Top().second);
+        top_candidates->Pop();
     }
 
     InnerIdType next_closest_entry_point = selected_neighbors.back();
@@ -109,20 +111,20 @@ mutually_connect_new_element(InnerIdType cur_c,
             // finding the "weakest" element to replace it with the new one
             float d_max = flatten->ComputePairVectors(cur_c, selected_neighbor);
 
-            MaxHeap candidates(allocator);
-            candidates.emplace(d_max, cur_c);
+            auto candidates = std::make_shared<StandardHeap<true, false>>(allocator, -1);
+            candidates->Push(d_max, cur_c);
 
             for (size_t j = 0; j < sz_link_list_other; j++) {
-                candidates.emplace(flatten->ComputePairVectors(neighbors[j], selected_neighbor),
-                                   neighbors[j]);
+                candidates->Push(flatten->ComputePairVectors(neighbors[j], selected_neighbor),
+                                 neighbors[j]);
             }
 
             select_edges_by_heuristic(candidates, max_size, flatten, allocator);
 
             Vector<InnerIdType> cand_neighbors(allocator);
-            while (not candidates.empty()) {
-                cand_neighbors.emplace_back(candidates.top().second);
-                candidates.pop();
+            while (not candidates->Empty()) {
+                cand_neighbors.emplace_back(candidates->Top().second);
+                candidates->Pop();
             }
             graph->InsertNeighborsById(selected_neighbor, cand_neighbors);
         }
