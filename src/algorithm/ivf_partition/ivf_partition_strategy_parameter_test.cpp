@@ -35,17 +35,4 @@ TEST_CASE("IVF Partition Strategy Parameters Test", "[ut][IVFPartitionStrategyPa
     REQUIRE(param->partition_train_type == vsag::IVFNearestPartitionTrainerType::RandomTrainer);
     REQUIRE(param->gnoimi_param->first_order_buckets_count == 200);
     REQUIRE(param->gnoimi_param->second_order_buckets_count == 50);
-
-    param_str = R"({
-        "scan_buckets_count": 10
-    })";
-    auto search_param = vsag::IVFPartitionStrategySearchParameters::FromString(param_str);
-    REQUIRE(search_param.first_order_scan_ratio == 1.0f);
-
-    param_str = R"({
-        "scan_buckets_count": 15,
-        "first_order_scan_ratio": 0.5
-    })";
-    search_param = vsag::IVFPartitionStrategySearchParameters::FromString(param_str);
-    REQUIRE(search_param.first_order_scan_ratio == 0.5f);
 }

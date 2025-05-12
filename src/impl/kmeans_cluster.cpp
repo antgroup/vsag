@@ -66,10 +66,10 @@ KMeansCluster::Run(uint32_t k, const float* datas, uint64_t count, int iter, flo
     float last_err = 0;
     Vector<int> labels(count, -1, this->allocator_);
     bool have_empty = false;
+    bool has_converged = false;
 
     for (int it = 0; it < iter; ++it) {
         total_err = 0;
-        bool has_converged = true;
 
         for (int64_t i = 0; i < k; ++i) {
             y_sqr[i] = FP32ComputeIP(k_centroids_ + i * dim_, k_centroids_ + i * dim_, dim_);
@@ -107,7 +107,6 @@ KMeansCluster::Run(uint32_t k, const float* datas, uint64_t count, int iter, flo
             errs[i] = *min_elem + x_sqr;
             if (min_index != labels[i]) {
                 labels[i] = static_cast<int>(min_index);
-                has_converged = false;
             }
         }
 
@@ -115,12 +114,12 @@ KMeansCluster::Run(uint32_t k, const float* datas, uint64_t count, int iter, flo
             total_err += errs[i];
         }
 
+        if (it > 0 && std::fabs(last_err - total_err) / count < 1e-6) {
+            has_converged = true;
+        }
+
         if (has_converged and not have_empty) {
             break;
-        }
-        if (it > 0 && std::fabs(last_err - total_err) / count < 1e-6) {
-            // break;
-            // TODO: Replace has_converged
         }
 
         // Update centroids

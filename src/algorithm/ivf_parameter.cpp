@@ -63,7 +63,7 @@ IVFParameter::ToJson() {
     JsonType json;
     json["type"] = INDEX_IVF;
     json[BUCKET_PARAMS_KEY] = this->bucket_param->ToJson();
-    json[IVF_PARTITION_STRATEGY_PARAMS_KEY] = this->bucket_param->ToJson();
+    json[IVF_PARTITION_STRATEGY_PARAMS_KEY] = this->ivf_partition_strategy_parameter->ToJson();
     json[BUCKET_PER_DATA_KEY] = this->buckets_per_data;
     json[IVF_USE_REORDER_KEY] = this->use_reorder;
     if (use_reorder) {

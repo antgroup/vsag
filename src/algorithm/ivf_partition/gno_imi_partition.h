@@ -39,8 +39,7 @@ public:
     ClassifyDatasForSearch(
         const void* datas,
         int64_t count,
-        BucketIdType buckets_per_data,
-        IVFPartitionStrategySearchParametersPtr search_params = nullptr) override;
+        const InnerSearchParam& param) override;
 
     void
     Serialize(StreamWriter& writer) override;

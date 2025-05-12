@@ -24,7 +24,7 @@ main(int argc, char** argv) {
 
     /******************* Prepare Base Dataset *****************/
     int64_t num_vectors = 10000;
-    int64_t dim = 960;
+    int64_t dim = 128;
     std::vector<int64_t> ids(num_vectors);
     std::vector<float> datas(num_vectors * dim);
     std::mt19937 rng(47);

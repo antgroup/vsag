@@ -61,6 +61,9 @@ public:
     std::vector<int64_t>
     Add(const DatasetPtr& base) override;
 
+    void
+    Train(const DatasetPtr& data) override;
+
     DatasetPtr
     KnnSearch(const DatasetPtr& query,
               int64_t k,

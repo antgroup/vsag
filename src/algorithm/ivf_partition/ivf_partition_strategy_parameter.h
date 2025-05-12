@@ -51,32 +51,4 @@ public:
 };
 
 using IVFPartitionStrategyParametersPtr = std::shared_ptr<IVFPartitionStrategyParameters>;
-
-class IVFPartitionStrategySearchParameters {
-public:
-    static IVFPartitionStrategySearchParameters
-    FromString(const std::string& json_string) {
-        JsonType params = JsonType::parse(json_string);
-        return std::move(FromJson(params));
-    }
-
-    static IVFPartitionStrategySearchParameters
-    FromJson(const JsonType& params) {
-        IVFPartitionStrategySearchParameters obj;
-
-        if (params.contains("first_order_scan_ratio")) {
-            obj.first_order_scan_ratio = params["first_order_scan_ratio"];
-        }
-        return obj;
-    }
-
-public:
-    float first_order_scan_ratio{1.0f};
-
-private:
-    IVFPartitionStrategySearchParameters() = default;
-};
-using IVFPartitionStrategySearchParametersPtr =
-    std::shared_ptr<IVFPartitionStrategySearchParameters>;
-
 }  // namespace vsag

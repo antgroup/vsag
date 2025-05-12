@@ -13,6 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <set>
 #include "ivf.h"
 
 #include "impl/basic_searcher.h"
@@ -24,7 +25,7 @@
 
 namespace vsag {
 
-static const std::unordered_map<std::string, std::vector<std::string>> EXTERNAL_MAPPING = {
+static const std::unordered_map<std::string, std::vector<std::string> > EXTERNAL_MAPPING = {
     {
         IVF_BASE_QUANTIZATION_TYPE,
         {BUCKET_PARAMS_KEY, QUANTIZATION_PARAMS_KEY, QUANTIZATION_TYPE_KEY},
@@ -44,10 +45,6 @@ static const std::unordered_map<std::string, std::vector<std::string>> EXTERNAL_
     {
         IVF_BUCKETS_COUNT,
         {BUCKET_PARAMS_KEY, BUCKETS_COUNT_KEY},
-    },
-    {
-        IVF_TRAIN_TYPE,
-        {IVF_PARTITION_STRATEGY_PARAMS_KEY, IVF_TRAIN_TYPE_KEY},
     },
     {
         IVF_TRAIN_TYPE,
@@ -194,13 +191,18 @@ IVF::InitFeatures() {
 
 std::vector<int64_t>
 IVF::Build(const DatasetPtr& base) {
+    this->Train(base);
     // TODO(LHT): duplicate
-    partition_strategy_->Train(base);
-    this->bucket_->Train(base->GetFloat32Vectors(), base->GetNumElements());
-    if (use_reorder_) {
-        this->reorder_codes_->Train(base->GetFloat32Vectors(), base->GetNumElements());
-    }
     return this->Add(base);
+}
+
+void
+IVF::Train(const DatasetPtr& data) {
+    partition_strategy_->Train(data);
+    this->bucket_->Train(data->GetFloat32Vectors(), data->GetNumElements());
+    if (use_reorder_) {
+        this->reorder_codes_->Train(data->GetFloat32Vectors(), data->GetNumElements());
+    }
 }
 
 std::vector<int64_t>
@@ -213,9 +215,9 @@ IVF::Add(const DatasetPtr& base) {
     const auto* ids = base->GetIds();
     const auto* vectors = base->GetFloat32Vectors();
     auto buckets = partition_strategy_->ClassifyDatas(vectors, num_element, buckets_per_data_);
-    for (int64_t i = 0; i < num_element; ++i) {
-        bucket_->InsertVector(vectors + i * dim_, buckets[i], i + total_elements_);
-        this->label_table_->Insert(i + total_elements_, ids[i]);
+    for (int64_t i = 0; i < num_element * buckets_per_data_; ++i) {
+        bucket_->InsertVector(vectors + i * dim_, buckets[i], i + total_elements_ * buckets_per_data_);
+        this->label_table_->Insert(i + total_elements_ * buckets_per_data_, ids[i]);
     }
     if (use_reorder_) {
         this->reorder_codes_->BatchInsertVector(base->GetFloat32Vectors(), base->GetNumElements());
@@ -319,8 +321,7 @@ IVF::create_search_param(const std::string& parameters, const FilterPtr& filter)
     param.scan_bucket_size = std::min(static_cast<BucketIdType>(search_param.scan_buckets_count),
                                       bucket_->bucket_count_);
     param.factor = search_param.topk_factor;
-    param.ivf_partition_strategy_search_parameter =
-        search_param.ivf_partition_strategy_search_parameter;
+    param.first_order_scan_ratio = search_param.first_order_scan_ratio;
     return std::move(param);
 }
 
@@ -348,10 +349,7 @@ MaxHeap
 IVF::search(const DatasetPtr& query, const InnerSearchParam& param) const {
     MaxHeap search_result(allocator_);
     auto candidate_buckets =
-        partition_strategy_->ClassifyDatasForSearch(query->GetFloat32Vectors(),
-                                                    1,
-                                                    param.scan_bucket_size,
-                                                    param.ivf_partition_strategy_search_parameter);
+        partition_strategy_->ClassifyDatasForSearch(query->GetFloat32Vectors(), 1, param);
     auto computer = bucket_->FactoryComputer(query->GetFloat32Vectors());
     Vector<float> dist(allocator_);
     auto cur_heap_top = std::numeric_limits<float>::max();
@@ -363,6 +361,7 @@ IVF::search(const DatasetPtr& query, const InnerSearchParam& param) const {
         }
     }
     const auto& ft = param.is_inner_id_allowed;
+    std::unordered_set<InnerIdType> visitedIds;
     for (auto& bucket_id : candidate_buckets) {
         auto bucket_size = bucket_->GetBucketSize(bucket_id);
         const auto* ids = bucket_->GetInnerIds(bucket_id);
@@ -371,7 +370,8 @@ IVF::search(const DatasetPtr& query, const InnerSearchParam& param) const {
         }
         bucket_->ScanBucketById(dist.data(), computer, bucket_id);
         for (int j = 0; j < bucket_size; ++j) {
-            if (ft == nullptr or ft->CheckValid(ids[j])) {
+            bool has_visited = buckets_per_data_ > 1 and visitedIds.find(ids[j]) != visitedIds.end();
+            if ((ft == nullptr or ft->CheckValid(ids[j])) and not has_visited) {
                 if constexpr (mode == KNN_SEARCH) {
                     if (search_result.size() < topk or dist[j] < cur_heap_top) {
                         search_result.emplace(dist[j], ids[j]);

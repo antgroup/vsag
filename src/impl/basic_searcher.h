@@ -43,7 +43,7 @@ public:
     // for ivf
     int scan_bucket_size{1};
     float factor{2.0F};
-    IVFPartitionStrategySearchParametersPtr ivf_partition_strategy_search_parameter{nullptr};
+    float first_order_scan_ratio{1.0F};
 };
 
 constexpr float THRESHOLD_ERROR = 2e-6;

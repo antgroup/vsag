@@ -97,7 +97,7 @@ TEST_CASE("IVF Parameters Test", "[ut][IVFParameter]") {
     })";
     auto search_param = vsag::IVFSearchParameters::FromJson(param_str);
     REQUIRE(search_param.scan_buckets_count == 10);
-    REQUIRE(search_param.ivf_partition_strategy_search_parameter->first_order_scan_ratio == 1.0f);
+    REQUIRE(search_param.first_order_scan_ratio == 1.0f);
 
     param_str = R"(
     {
@@ -108,5 +108,5 @@ TEST_CASE("IVF Parameters Test", "[ut][IVFParameter]") {
     })";
     search_param = vsag::IVFSearchParameters::FromJson(param_str);
     REQUIRE(search_param.scan_buckets_count == 20);
-    REQUIRE(search_param.ivf_partition_strategy_search_parameter->first_order_scan_ratio == 0.1f);
+    REQUIRE(search_param.first_order_scan_ratio == 0.1f);
 }

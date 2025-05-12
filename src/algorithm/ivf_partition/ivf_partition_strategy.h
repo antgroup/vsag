@@ -20,6 +20,7 @@
 #include <iostream>
 #include <vector>
 
+#include "impl/basic_searcher.h"
 #include "ivf_partition_strategy_parameter.h"
 #include "stream_reader.h"
 #include "stream_writer.h"
@@ -41,11 +42,8 @@ public:
     ClassifyDatas(const void* datas, int64_t count, BucketIdType buckets_per_data) = 0;
 
     virtual Vector<BucketIdType>
-    ClassifyDatasForSearch(const void* datas,
-                           int64_t count,
-                           BucketIdType buckets_per_data,
-                           IVFPartitionStrategySearchParametersPtr search_params = nullptr) {
-        return std::move(ClassifyDatas(datas, count, buckets_per_data));
+    ClassifyDatasForSearch(const void* datas, int64_t count, const InnerSearchParam& param) {
+        return std::move(ClassifyDatas(datas, count, param.scan_bucket_size));
     }
 
     virtual void

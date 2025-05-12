@@ -17,8 +17,7 @@
 
 #include <fmt/format-inl.h>
 
-#include "algorithm/brute_force.h"
-#include "algorithm/brute_force_parameter.h"
+#include "algorithm/hgraph.h"
 #include "impl/kmeans_cluster.h"
 #include "inner_string_params.h"
 #include "safe_allocator.h"
@@ -28,7 +27,7 @@ namespace vsag {
 
 static constexpr const char* SEARCH_PARAM_TEMPLATE_STR = R"(
 {{
-    "hnsw": {{
+    "hgraph": {{
         "ef_search": {}
     }}
 }}
@@ -65,7 +64,7 @@ IVFNearestPartition::Train(const DatasetPtr dataset) {
         for (int i = 0; i < bucket_count_; ++i) {
             memcpy(data.data() + i * dim,
                    dataset->GetFloat32Vectors() + selected[i] * dim,
-                   dim * this->bucket_count_ * sizeof(float));
+                   dim * sizeof(float));
         }
     }
 
@@ -90,12 +89,12 @@ IVFNearestPartition::ClassifyDatas(const void* datas,
         auto search_result =
             this->route_index_ptr_->KnnSearch(query, buckets_per_data, search_param, filter);
         const auto* result_ids = search_result->GetIds();
-        const auto* result_dists = search_result->GetDistances();
-        for (int64_t j = 0; j < buckets_per_data; ++j) {
+
+        for (int64_t j = 0; j < search_result->GetDim(); ++j) {
             result[i * buckets_per_data + j] = static_cast<BucketIdType>(result_ids[j]);
         }
     }
-    return result;
+    return std::move(result);
 }
 void
 IVFNearestPartition::Serialize(StreamWriter& writer) {
@@ -109,18 +108,14 @@ IVFNearestPartition::Deserialize(StreamReader& reader) {
 }
 void
 IVFNearestPartition::factory_router_index(const IndexCommonParam& common_param) {
-    auto param_ptr = std::make_shared<BruteForceParameter>();
-    param_ptr->flatten_param = std::make_shared<FlattenDataCellParameter>();
-    JsonType memory_json = {
-        {"type", IO_TYPE_VALUE_BLOCK_MEMORY_IO},
-    };
-    param_ptr->flatten_param->io_parameter = IOParameter::GetIOParameterByJson(memory_json);
-    JsonType quantizer_json = {
-        {"type", QUANTIZATION_TYPE_VALUE_FP32},
-    };
-    param_ptr->flatten_param->quantizer_parameter =
-        QuantizerParameter::GetQuantizerParameterByJson(quantizer_json);
+    ParamPtr param_ptr;
 
-    this->route_index_ptr_ = std::make_shared<BruteForce>(param_ptr, common_param);
+    JsonType hgraph_json = {
+        {"base_quantization_type", "fp32"},
+        {"max_degree", 64},
+        {"ef_construction", 300},
+    };
+    param_ptr = HGraph::CheckAndMappingExternalParam(hgraph_json, common_param);
+    this->route_index_ptr_ = std::make_shared<HGraph>(param_ptr, common_param);
 }
 }  // namespace vsag

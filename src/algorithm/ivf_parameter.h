@@ -64,21 +64,21 @@ public:
                                    INDEX_TYPE_IVF,
                                    IVF_SEARCH_PARAM_SCAN_BUCKETS_COUNT));
         obj.scan_buckets_count = params[INDEX_TYPE_IVF][IVF_SEARCH_PARAM_SCAN_BUCKETS_COUNT];
-        obj.ivf_partition_strategy_search_parameter =
-            std::make_shared<IVFPartitionStrategySearchParameters>(
-                IVFPartitionStrategySearchParameters::FromJson(params[INDEX_TYPE_IVF]));
 
         if (params[INDEX_TYPE_IVF].contains(IVF_SEARCH_PARAM_FACTOR)) {
             obj.topk_factor = params[INDEX_TYPE_IVF][IVF_SEARCH_PARAM_FACTOR];
+        }
+
+        if (params[INDEX_TYPE_IVF].contains(GNO_IMI_SEARCH_PARAM_FIRST_ORDER_SCAN_RATIO)) {
+            obj.first_order_scan_ratio = params[INDEX_TYPE_IVF][GNO_IMI_SEARCH_PARAM_FIRST_ORDER_SCAN_RATIO];
         }
         return obj;
     }
 
 public:
     int64_t scan_buckets_count{30};
-    IVFPartitionStrategySearchParametersPtr ivf_partition_strategy_search_parameter{nullptr};
-
     float topk_factor{2.0F};
+    float first_order_scan_ratio{1.0F};
 
 private:
     IVFSearchParameters() = default;

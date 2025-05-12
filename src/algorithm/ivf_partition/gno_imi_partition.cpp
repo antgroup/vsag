@@ -34,7 +34,7 @@ static constexpr const char* SEARCH_PARAM_TEMPLATE_STR = R"(
 }}
 )";
 
-// C = A * B
+// C = A * B^T
 void
 matmul(const float* A, const float* B, float* C, int32_t M, int32_t N, int32_t K) {
     cblas_sgemm(CblasColMajor,
@@ -119,22 +119,22 @@ GNOIMIPartition::Train(const DatasetPtr dataset) {
         memcpy(data_centroids, cls.k_centroids_, dim * centroids->GetNumElements() * sizeof(float));
         BruteForce route_index(param_ptr_, common_param_);
         auto build_result = route_index.Build(centroids);
-        // std::cout << "GetNumElements(): " << route_index.GetNumElements() << std::endl;
         auto assign = this->inner_classify_datas(route_index, residuals.data(), num_element);
         this->GetResidual(num_element, vectors, residuals.data(), data_centroids, assign.data());
-        // std::cout << "assign: " << assign[0] << std::endl;
     };
 
     // train loop
     float min_err = std::numeric_limits<float>::max();
     for (size_t i = 0; i < 2; ++i) {
-        float err = 0.0f;
-        train_and_get_residual(centroidsS, data_centroids_S_tmp.data(), &err);
-        std::cout << "iter: " << i << ", err of centroidsS: " << err << std::endl;
-        train_and_get_residual(centroidsT, data_centroids_T_tmp.data(), &err);
-        std::cout << "iter: " << i << ", err of centroidsT: " << err << std::endl;
-        if (err < min_err) {
-            min_err = err;
+        float err_to_S = 0.0f, err_to_T = 0.0f;
+        train_and_get_residual(centroidsS, data_centroids_S_tmp.data(), &err_to_S);
+        logger::info("gnoimi train iter: {}, err of centroidsS: {}", i, err_to_S);
+
+        train_and_get_residual(centroidsT, data_centroids_T_tmp.data(), &err_to_T);
+        logger::info("gnoimi train iter: {}, err of centroidsT: {}", i, err_to_T);
+        
+        if (err_to_T < min_err) {
+            min_err = err_to_T;
             std::copy(data_centroids_S_tmp.begin(),
                       data_centroids_S_tmp.end(),
                       data_centroids_S_.begin());
@@ -157,17 +157,18 @@ GNOIMIPartition::Train(const DatasetPtr dataset) {
         norms_T[i].first = norm_sqr / 2;
         norms_T[i].second = i;
     }
+
+    // Rearrange data_centroids_T_ based on ascending order of their norms.
     std::sort(norms_T.begin(), norms_T.end(), std::greater<std::pair<float, BucketIdType>>());
     std::vector<float> temp_data(bucket_count_T_ * dim_, 0.0f);
     for (size_t i = 0; i < bucket_count_T_; ++i) {
         BucketIdType src_idx = norms_T[i].second;
         size_t src_offset = src_idx * dim_;
         size_t dst_offset = i * dim_;
-        std::copy(data_centroids_T_.data() + src_offset,         // src begin
-                  data_centroids_T_.data() + src_offset + dim_,  // src end
-                  temp_data.data() + dst_offset);                // dst begin
+        std::copy(data_centroids_T_.data() + src_offset,
+                  data_centroids_T_.data() + src_offset + dim_,
+                  temp_data.data() + dst_offset);
         norms_T_[i] = norms_T[i].first;
-        //std::cout << "norms_T_[i]: " << i << " " << norms_T_[i] << std::endl;
     }
     std::copy(temp_data.begin(), temp_data.end(), data_centroids_T_.data());
 
@@ -191,15 +192,14 @@ GNOIMIPartition::ClassifyDatas(const void* datas, int64_t count, BucketIdType bu
     Vector<BucketIdType> result(buckets_per_data * count, this->allocator_);
     inner_joint_classify_datas(
         reinterpret_cast<const float*>(datas), count, buckets_per_data, result.data());
-
     return result;
 }
 
 Vector<BucketIdType>
 GNOIMIPartition::ClassifyDatasForSearch(const void* datas,
                                         int64_t count,
-                                        BucketIdType buckets_per_data,
-                                        IVFPartitionStrategySearchParametersPtr search_params) {
+                                        const InnerSearchParam& param) {
+    auto buckets_per_data = param.scan_bucket_size;
     Vector<BucketIdType> result(buckets_per_data * count, this->allocator_);
     auto candidate_count_S = bucket_count_S_;
     Vector<BucketIdType> candidate_S_id(candidate_count_S, this->allocator_);
@@ -247,7 +247,7 @@ GNOIMIPartition::ClassifyDatasForSearch(const void* datas,
         CHECK_ARGUMENT(heap.empty(), fmt::format("Unexpected non-empty heap after pop candidates"));
 
         BucketIdType scan_bucket_count_S = static_cast<BucketIdType>(
-            std::floor(bucket_count_S_ * search_params->first_order_scan_ratio));
+            std::floor(bucket_count_S_ * param.first_order_scan_ratio));
         scan_bucket_count_S = std::max(scan_bucket_count_S, 1);
         for (size_t j = 0; j < scan_bucket_count_S; ++j) {
             for (size_t k = 0; k < bucket_count_T_; ++k) {
@@ -270,7 +270,6 @@ GNOIMIPartition::ClassifyDatasForSearch(const void* datas,
         BucketIdType size = std::min((BucketIdType)heap.size(), buckets_per_data);
         for (auto j = static_cast<int64_t>(size - 1); j >= 0 && !heap.empty(); --j) {
             result[i * buckets_per_data + j] = heap.top().second;
-            // std::cout << j << " " << heap.top().second << " " << heap.top().first << std::endl;
             heap.pop();
         }
     }
@@ -312,8 +311,6 @@ GNOIMIPartition::factory_router_index(const IndexCommonParam& common_param) {
     };
     param_ptr->flatten_param->quantizer_parameter =
         QuantizerParameter::GetQuantizerParameterByJson(quantizer_json);
-
-    //this->route_index_ptr_ = std::make_shared<BruteForce>(param_ptr, common_param);
 }
 
 Vector<BucketIdType>
@@ -361,7 +358,6 @@ GNOIMIPartition::inner_joint_classify_datas(const float* datas,
                 norms_S_[j] - dist_to_S[i * bucket_count_S_ + j] + data_norm / 2;
             precomputed_terms_S[j].second = j;
         }
-        // std::cout << "data_norm: " << data_norm << std::endl;
         std::sort(precomputed_terms_S.begin(), precomputed_terms_S.end());
 
         MaxHeap heap(this->allocator_);
@@ -398,7 +394,6 @@ GNOIMIPartition::inner_joint_classify_datas(const float* datas,
             heap.pop();
         }
     }
-    std::cout << "total_err: " << total_err << std::endl;
 }
 
 }  // namespace vsag

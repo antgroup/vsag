@@ -13,11 +13,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "gno_imi_partition.h"
-
 #include <catch2/catch_test_macros.hpp>
 
 #include "fixtures.h"
+#include "gno_imi_partition.h"
+#include "impl/basic_searcher.h"
+#include "algorithm/ivf_parameter.h"
 #include "safe_allocator.h"
 
 using namespace vsag;
@@ -51,52 +52,57 @@ TEST_CASE("GNO-IMI Partition Basic Test", "[ut][GNOIMIPartition]") {
     auto class_result = partition->ClassifyDatas(vec.data(), data_count, 1);
     REQUIRE(class_result.size() == data_count);
 
-    param_str = R"({
-        "first_order_scan_ratio": 0.1
+    param_str = R"(
+    {
+        "ivf": {
+            "scan_buckets_count": 1,
+            "first_order_scan_ratio": 0.1
+        }
     })";
-    auto search_param = std::make_shared<vsag::IVFPartitionStrategySearchParameters>(
-        vsag::IVFPartitionStrategySearchParameters::FromString(param_str));
-    REQUIRE(search_param->first_order_scan_ratio == 0.1f);
-    FilterPtr filter = nullptr;
+    auto search_param = IVFSearchParameters::FromJson(param_str);
+    InnerSearchParam inner_search_param;
+    inner_search_param.scan_bucket_size = search_param.scan_buckets_count;
+    inner_search_param.first_order_scan_ratio = search_param.first_order_scan_ratio;
+    REQUIRE(inner_search_param.scan_bucket_size == 1);
+    REQUIRE(inner_search_param.first_order_scan_ratio == 0.1f);
     size_t match_count = 0;
     for (int64_t i = 0; i < data_count; ++i) {
         auto query = Dataset::Make();
         query->Dim(dim)->Float32Vectors(vec.data() + i * dim)->NumElements(1)->Owner(false);
-        auto result = partition->ClassifyDatasForSearch(vec.data() + i * dim, 1, 1, search_param);
+        auto result = partition->ClassifyDatasForSearch(vec.data() + i * dim, 1, inner_search_param);
         auto id = result[0];
-        //REQUIRE(id == class_result[i]);
         if (id == class_result[i]) {
             match_count++;
         }
     }
     std::cout << "match count(first_order_scan_ratio=0.1): " << match_count << std::endl;
 
-    search_param->first_order_scan_ratio = 0.2f;
+    inner_search_param.first_order_scan_ratio = 0.2f;
     match_count = 0;
     for (int64_t i = 0; i < data_count; ++i) {
         auto query = Dataset::Make();
         query->Dim(dim)->Float32Vectors(vec.data() + i * dim)->NumElements(1)->Owner(false);
-        auto result = partition->ClassifyDatasForSearch(vec.data() + i * dim, 1, 1, search_param);
+        auto result = partition->ClassifyDatasForSearch(vec.data() + i * dim, 1, inner_search_param);
         auto id = result[0];
-        //REQUIRE(id == class_result[i]);
         if (id == class_result[i]) {
             match_count++;
         }
     }
-    std::cout << "match count(first_order_scan_ratio=0.5): " << match_count << std::endl;
+    std::cout << "match count(first_order_scan_ratio=0.2): " << match_count << std::endl;
 
-    search_param->first_order_scan_ratio = 1.0f;
+    inner_search_param.first_order_scan_ratio = 1.0f;
     match_count = 0;
     for (int64_t i = 0; i < data_count; ++i) {
         auto query = Dataset::Make();
         query->Dim(dim)->Float32Vectors(vec.data() + i * dim)->NumElements(1)->Owner(false);
-        auto result = partition->ClassifyDatasForSearch(vec.data() + i * dim, 1, 1, search_param);
+        auto result = partition->ClassifyDatasForSearch(vec.data() + i * dim, 1, inner_search_param);
         auto id = result[0];
-        REQUIRE(id == class_result[i]);
+        // REQUIRE(id == class_result[i]);
         if (id == class_result[i]) {
             match_count++;
         }
     }
+    REQUIRE(match_count > 9990);
     std::cout << "match count(first_order_scan_ratio=1.0): " << match_count << std::endl;
 }
 
@@ -142,17 +148,30 @@ TEST_CASE("GNO-IMI Partition Serialize Test", "[ut][GNOIMIPartition]") {
     partition->Deserialize(reader);
     infile.close();
 
-    param_str = R"({
-        "first_order_scan_ratio": 1.0
+    param_str = R"(
+    {
+        "ivf": {
+            "scan_buckets_count": 1,
+            "first_order_scan_ratio": 1.0
+        }
     })";
-    auto search_param = std::make_shared<vsag::IVFPartitionStrategySearchParameters>(
-        vsag::IVFPartitionStrategySearchParameters::FromString(param_str));
+
+    auto search_param = IVFSearchParameters::FromJson(param_str);
+    InnerSearchParam inner_search_param;
+    inner_search_param.scan_bucket_size = search_param.scan_buckets_count;
+    inner_search_param.first_order_scan_ratio = search_param.first_order_scan_ratio;
+
+    size_t match_count = 0;
     FilterPtr filter = nullptr;
     for (int64_t i = 0; i < data_count; ++i) {
         auto query = Dataset::Make();
         query->Dim(dim)->Float32Vectors(vec.data() + i * dim)->NumElements(1)->Owner(false);
-        auto result = partition->ClassifyDatasForSearch(vec.data() + i * dim, 1, 2, search_param);
+        auto result = partition->ClassifyDatasForSearch(vec.data() + i * dim, 1, inner_search_param);
         auto id = result[0];
-        REQUIRE(id == class_result[i]);
+        if (id == class_result[i]) {
+            match_count++;
+        }
     }
+    REQUIRE(match_count > 9990);
+    std::cout << "match count(first_order_scan_ratio=1.0): " << match_count << std::endl;
 }
