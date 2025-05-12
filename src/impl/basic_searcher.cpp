@@ -15,6 +15,10 @@
 
 #include "basic_searcher.h"
 
+#include <limits>
+
+#include "utils/linear_congruential_generator.h"
+#include "utils/standard_heap.h"
 namespace vsag {
 
 BasicSearcher::BasicSearcher(const IndexCommonParam& common_param, MutexArrayPtr mutex_array)
@@ -62,7 +66,7 @@ BasicSearcher::visit(const GraphInterfacePtr& graph,
     return count_no_visited;
 }
 
-MaxHeap
+DistHeapPtr
 BasicSearcher::Search(const GraphInterfacePtr& graph,
                       const FlattenInterfacePtr& flatten,
                       const VisitedListPtr& vl,
@@ -74,7 +78,7 @@ BasicSearcher::Search(const GraphInterfacePtr& graph,
     return this->search_impl<RANGE_SEARCH>(graph, flatten, vl, query, inner_search_param);
 }
 
-MaxHeap
+DistHeapPtr
 BasicSearcher::Search(const GraphInterfacePtr& graph,
                       const FlattenInterfacePtr& flatten,
                       const VisitedListPtr& vl,
@@ -85,15 +89,15 @@ BasicSearcher::Search(const GraphInterfacePtr& graph,
 }
 
 template <InnerSearchMode mode>
-MaxHeap
+DistHeapPtr
 BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                            const FlattenInterfacePtr& flatten,
                            const VisitedListPtr& vl,
                            const void* query,
                            const InnerSearchParam& inner_search_param,
                            IteratorFilterContext* iter_ctx) const {
-    MaxHeap top_candidates(allocator_);
-    MaxHeap candidate_set(allocator_);
+    auto top_candidates = std::make_shared<StandardHeap<true, false>>(allocator_, -1);
+    auto candidate_set = std::make_shared<StandardHeap<true, false>>(allocator_, -1);
 
     if (not graph or not flatten) {
         return top_candidates;
@@ -128,11 +132,11 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                 vl->Set(cur_inner_id);
                 lower_bound = std::max(lower_bound, cur_dist);
                 flatten->Query(&cur_dist, computer, &cur_inner_id, 1);
-                top_candidates.emplace(cur_dist, cur_inner_id);
-                candidate_set.emplace(cur_dist, cur_inner_id);
+                top_candidates->Push(cur_dist, cur_inner_id);
+                candidate_set->Push(cur_dist, cur_inner_id);
                 if constexpr (mode == InnerSearchMode::RANGE_SEARCH) {
-                    if (cur_dist > inner_search_param.radius and not top_candidates.empty()) {
-                        top_candidates.pop();
+                    if (cur_dist > inner_search_param.radius and not top_candidates->Empty()) {
+                        top_candidates->Pop();
                     }
                 }
             }
@@ -141,26 +145,26 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
     } else {
         flatten->Query(&dist, computer, &ep, 1);
         if (not is_id_allowed || is_id_allowed->CheckValid(ep)) {
-            top_candidates.emplace(dist, ep);
-            lower_bound = top_candidates.top().first;
+            top_candidates->Push(dist, ep);
+            lower_bound = top_candidates->Top().first;
         }
-        candidate_set.emplace(-dist, ep);
+        candidate_set->Push(-dist, ep);
         vl->Set(ep);
     }
 
-    while (not candidate_set.empty()) {
+    while (not candidate_set->Empty()) {
         hops++;
-        auto current_node_pair = candidate_set.top();
+        auto current_node_pair = candidate_set->Top();
 
         if constexpr (mode == InnerSearchMode::KNN_SEARCH) {
-            if ((-current_node_pair.first) > lower_bound && top_candidates.size() == ef) {
+            if ((-current_node_pair.first) > lower_bound && top_candidates->Size() == ef) {
                 break;
             }
         }
-        candidate_set.pop();
+        candidate_set->Pop();
 
-        if (not candidate_set.empty()) {
-            graph->Prefetch(candidate_set.top().second, 0);
+        if (not candidate_set->Empty()) {
+            graph->Prefetch(candidate_set->Top().second, 0);
         }
 
         count_no_visited = visit(graph,
@@ -178,41 +182,41 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
 
         for (uint32_t i = 0; i < count_no_visited; i++) {
             dist = line_dists[i];
-            if (top_candidates.size() < ef || lower_bound > dist ||
+            if (top_candidates->Size() < ef || lower_bound > dist ||
                 (mode == RANGE_SEARCH && dist <= inner_search_param.radius)) {
                 if (!iter_ctx->CheckPoint(to_be_visited_id[i])) {
                     continue;
                 }
-                candidate_set.emplace(-dist, to_be_visited_id[i]);
-                flatten->Prefetch(candidate_set.top().second);
+                candidate_set->Push(-dist, to_be_visited_id[i]);
+                flatten->Prefetch(candidate_set->Top().second);
                 if (not is_id_allowed || is_id_allowed->CheckValid(to_be_visited_id[i])) {
-                    top_candidates.emplace(dist, to_be_visited_id[i]);
+                    top_candidates->Push(dist, to_be_visited_id[i]);
                 }
 
                 if constexpr (mode == KNN_SEARCH) {
-                    if (top_candidates.size() > ef) {
-                        if (iter_ctx->CheckPoint(top_candidates.top().second)) {
-                            auto cur_node_pair = top_candidates.top();
+                    if (top_candidates->Size() > ef) {
+                        if (iter_ctx->CheckPoint(top_candidates->Top().second)) {
+                            auto cur_node_pair = top_candidates->Top();
                             iter_ctx->AddDiscardNode(cur_node_pair.first, cur_node_pair.second);
                         }
-                        top_candidates.pop();
+                        top_candidates->Pop();
                     }
                 }
 
-                if (not top_candidates.empty()) {
-                    lower_bound = top_candidates.top().first;
+                if (not top_candidates->Empty()) {
+                    lower_bound = top_candidates->Top().first;
                 }
             }
         }
     }
 
     if constexpr (mode == KNN_SEARCH) {
-        while (top_candidates.size() > inner_search_param.topk) {
-            auto cur_node_pair = top_candidates.top();
+        while (top_candidates->Size() > inner_search_param.topk) {
+            auto cur_node_pair = top_candidates->Top();
             if (iter_ctx->CheckPoint(cur_node_pair.second)) {
                 iter_ctx->AddDiscardNode(cur_node_pair.first, cur_node_pair.second);
             }
-            top_candidates.pop();
+            top_candidates->Pop();
         }
     }
 
@@ -220,14 +224,14 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
 }
 
 template <InnerSearchMode mode>
-MaxHeap
+DistHeapPtr
 BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                            const FlattenInterfacePtr& flatten,
                            const VisitedListPtr& vl,
                            const void* query,
                            const InnerSearchParam& inner_search_param) const {
-    MaxHeap top_candidates(allocator_);
-    MaxHeap candidate_set(allocator_);
+    auto top_candidates = std::make_shared<StandardHeap<true, false>>(allocator_, -1);
+    auto candidate_set = std::make_shared<StandardHeap<true, false>>(allocator_, -1);
 
     if (not graph or not flatten) {
         return top_candidates;
@@ -252,30 +256,30 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
 
     flatten->Query(&dist, computer, &ep, 1);
     if (not is_id_allowed || is_id_allowed->CheckValid(ep)) {
-        top_candidates.emplace(dist, ep);
-        lower_bound = top_candidates.top().first;
+        top_candidates->Push(dist, ep);
+        lower_bound = top_candidates->Top().first;
     }
     if constexpr (mode == InnerSearchMode::RANGE_SEARCH) {
-        if (dist > inner_search_param.radius and not top_candidates.empty()) {
-            top_candidates.pop();
+        if (dist > inner_search_param.radius and not top_candidates->Empty()) {
+            top_candidates->Pop();
         }
     }
-    candidate_set.emplace(-dist, ep);
+    candidate_set->Push(-dist, ep);
     vl->Set(ep);
 
-    while (not candidate_set.empty()) {
+    while (not candidate_set->Empty()) {
         hops++;
-        auto current_node_pair = candidate_set.top();
+        auto current_node_pair = candidate_set->Top();
 
         if constexpr (mode == InnerSearchMode::KNN_SEARCH) {
-            if ((-current_node_pair.first) > lower_bound && top_candidates.size() == ef) {
+            if ((-current_node_pair.first) > lower_bound && top_candidates->Size() == ef) {
                 break;
             }
         }
-        candidate_set.pop();
+        candidate_set->Pop();
 
-        if (not candidate_set.empty()) {
-            graph->Prefetch(candidate_set.top().second, 0);
+        if (not candidate_set->Empty()) {
+            graph->Prefetch(candidate_set->Top().second, 0);
         }
 
         count_no_visited = visit(graph,
@@ -293,40 +297,40 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
 
         for (uint32_t i = 0; i < count_no_visited; i++) {
             dist = line_dists[i];
-            if (top_candidates.size() < ef || lower_bound > dist ||
+            if (top_candidates->Size() < ef || lower_bound > dist ||
                 (mode == RANGE_SEARCH && dist <= inner_search_param.radius)) {
-                candidate_set.emplace(-dist, to_be_visited_id[i]);
-                //                flatten->Prefetch(candidate_set.top().second);
+                candidate_set->Push(-dist, to_be_visited_id[i]);
+                //                flatten->Prefetch(candidate_set->Top().second);
                 if (not is_id_allowed || is_id_allowed->CheckValid(to_be_visited_id[i])) {
-                    top_candidates.emplace(dist, to_be_visited_id[i]);
+                    top_candidates->Push(dist, to_be_visited_id[i]);
                 }
 
                 if constexpr (mode == KNN_SEARCH) {
-                    if (top_candidates.size() > ef) {
-                        top_candidates.pop();
+                    if (top_candidates->Size() > ef) {
+                        top_candidates->Pop();
                     }
                 }
 
-                if (not top_candidates.empty()) {
-                    lower_bound = top_candidates.top().first;
+                if (not top_candidates->Empty()) {
+                    lower_bound = top_candidates->Top().first;
                 }
             }
         }
     }
 
     if constexpr (mode == KNN_SEARCH) {
-        while (top_candidates.size() > inner_search_param.topk) {
-            top_candidates.pop();
+        while (top_candidates->Size() > inner_search_param.topk) {
+            top_candidates->Pop();
         }
     } else if constexpr (mode == RANGE_SEARCH) {
         if (inner_search_param.range_search_limit_size > 0) {
-            while (top_candidates.size() > inner_search_param.range_search_limit_size) {
-                top_candidates.pop();
+            while (top_candidates->Size() > inner_search_param.range_search_limit_size) {
+                top_candidates->Pop();
             }
         }
-        while (not top_candidates.empty() &&
-               top_candidates.top().first > inner_search_param.radius + THRESHOLD_ERROR) {
-            top_candidates.pop();
+        while (not top_candidates->Empty() &&
+               top_candidates->Top().first > inner_search_param.radius + THRESHOLD_ERROR) {
+            top_candidates->Pop();
         }
     }
 

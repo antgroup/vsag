@@ -219,12 +219,12 @@ IVF::KnnSearch(const DatasetPtr& query,
     if (use_reorder_) {
         return reorder(k, search_result, query->GetFloat32Vectors());
     }
-    auto count = static_cast<const int64_t>(search_result.size());
+    auto count = static_cast<const int64_t>(search_result->Size());
     auto [dataset_results, dists, labels] = CreateFastDataset(count, allocator_);
     for (int64_t j = count - 1; j >= 0; --j) {
-        dists[j] = search_result.top().first;
-        labels[j] = label_table_->GetLabelById(search_result.top().second);
-        search_result.pop();
+        dists[j] = search_result->Top().first;
+        labels[j] = label_table_->GetLabelById(search_result->Top().second);
+        search_result->Pop();
     }
     return std::move(dataset_results);
 }
@@ -245,15 +245,15 @@ IVF::RangeSearch(const DatasetPtr& query,
     }
     auto search_result = this->search<RANGE_SEARCH>(query, param);
     if (use_reorder_) {
-        int64_t k = (limited_size > 0) ? limited_size : static_cast<int64_t>(search_result.size());
+        int64_t k = (limited_size > 0) ? limited_size : static_cast<int64_t>(search_result->Size());
         return reorder(k, search_result, query->GetFloat32Vectors());
     }
-    auto count = static_cast<const int64_t>(search_result.size());
+    auto count = static_cast<const int64_t>(search_result->Size());
     auto [dataset_results, dists, labels] = CreateFastDataset(count, allocator_);
     for (int64_t j = count - 1; j >= 0; --j) {
-        dists[j] = search_result.top().first;
-        labels[j] = label_table_->GetLabelById(search_result.top().second);
-        search_result.pop();
+        dists[j] = search_result->Top().first;
+        labels[j] = label_table_->GetLabelById(search_result->Top().second);
+        search_result->Pop();
     }
     return std::move(dataset_results);
 }
@@ -302,15 +302,15 @@ IVF::create_search_param(const std::string& parameters, const FilterPtr& filter)
 }
 
 DatasetPtr
-IVF::reorder(int64_t topk, MaxHeap& input, const float* query) const {
+IVF::reorder(int64_t topk, DistHeapPtr& input, const float* query) const {
     auto [dataset_results, dists, labels] = CreateFastDataset(topk, allocator_);
     StandardHeap<true, true> reorder_heap(allocator_, topk);
     auto computer = this->reorder_codes_->FactoryComputer(query);
-    while (not input.empty()) {
-        auto [dist, id] = input.top();
+    while (not input->Empty()) {
+        auto [dist, id] = input->Top();
         this->reorder_codes_->Query(&dist, computer, &id, 1);
         reorder_heap.Push(dist, id);
-        input.pop();
+        input->Pop();
     }
     for (int64_t j = topk - 1; j >= 0; --j) {
         dists[j] = reorder_heap.Top().first;
@@ -332,9 +332,9 @@ IVF::ExportModel(const IndexCommonParam& param) const {
 }
 
 template <InnerSearchMode mode>
-MaxHeap
+DistHeapPtr
 IVF::search(const DatasetPtr& query, const InnerSearchParam& param) const {
-    MaxHeap search_result(allocator_);
+    auto search_result = std::make_shared<StandardHeap<true, false>>(allocator_, -1);
     auto candidate_buckets =
         partition_strategy_->ClassifyDatas(query->GetFloat32Vectors(), 1, param.scan_bucket_size);
     auto computer = bucket_->FactoryComputer(query->GetFloat32Vectors());
@@ -358,19 +358,19 @@ IVF::search(const DatasetPtr& query, const InnerSearchParam& param) const {
         for (int j = 0; j < bucket_size; ++j) {
             if (ft == nullptr or ft->CheckValid(ids[j])) {
                 if constexpr (mode == KNN_SEARCH) {
-                    if (search_result.size() < topk or dist[j] < cur_heap_top) {
-                        search_result.emplace(dist[j], ids[j]);
+                    if (search_result->Size() < topk or dist[j] < cur_heap_top) {
+                        search_result->Push(dist[j], ids[j]);
                     }
                 } else if constexpr (mode == RANGE_SEARCH) {
                     if (dist[j] <= param.radius + THRESHOLD_ERROR and dist[j] < cur_heap_top) {
-                        search_result.emplace(dist[j], ids[j]);
+                        search_result->Push(dist[j], ids[j]);
                     }
                 }
-                if (search_result.size() > topk) {
-                    search_result.pop();
+                if (search_result->Size() > topk) {
+                    search_result->Pop();
                 }
-                if (not search_result.empty() and search_result.size() == topk) {
-                    cur_heap_top = search_result.top().first;
+                if (not search_result->Empty() and search_result->Size() == topk) {
+                    cur_heap_top = search_result->Top().first;
                 }
             }
         }
