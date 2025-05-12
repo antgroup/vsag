@@ -147,9 +147,6 @@ public:
 
 private:
     inline void
-    prefetch(InnerIdType id, uint64_t data_size);
-
-    inline void
     query(float* result_dists,
           const std::shared_ptr<Computer<QuantTmpl>>& computer,
           const InnerIdType* idx,

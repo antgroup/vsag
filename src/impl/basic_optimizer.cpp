@@ -93,7 +93,11 @@ Optimizer<OptimizableOBJ>::Optimize(std::shared_ptr<OptimizableOBJ> obj) {
         for (auto& param : best_params_) {
             vsag::logger::info(fmt::format("setting {} -> {:.1f}", param.first, param.second));
         }
-        vsag::logger::info(fmt::format("improving: {:.3f}%", end2end_improvement));
+        vsag::logger::info(
+            fmt::format("get new loss = {:.3f}, from original = {:.3f}, improving: {:.3f}%",
+                        optimized_loss,
+                        original_loss,
+                        end2end_improvement));
     } else {
         vsag::logger::info(fmt::format("no improvement"));
     }
