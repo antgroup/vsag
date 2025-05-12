@@ -96,7 +96,8 @@ public:
               const FilterPtr& filter,
               IteratorContext*& iter_ctx,
               bool is_last_filter) const {
-        throw std::runtime_error("Index doesn't support new filter");
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "Index doesn't support new filter");
     };
 
     [[nodiscard]] virtual DatasetPtr
@@ -124,27 +125,31 @@ public:
 
     virtual Index::Checkpoint
     ContinueBuild(const DatasetPtr& base, const BinarySet& binary_set) {
-        throw std::runtime_error("Index doesn't support ContinueBuild");
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "Index doesn't support ContinueBuild");
     }
 
     virtual bool
     Remove(int64_t id) {
-        throw std::runtime_error("Index doesn't support Remove");
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION, "Index doesn't support Remove");
     }
 
     virtual bool
     UpdateId(int64_t old_id, int64_t new_id) {
-        throw std::runtime_error("Index doesn't support UpdateId");
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "Index doesn't support UpdateId");
     }
 
     virtual bool
     UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update = false) {
-        throw std::runtime_error("Index doesn't support UpdateVector");
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "Index doesn't support UpdateVector");
     }
 
     virtual uint32_t
     Pretrain(const std::vector<int64_t>& base_tag_ids, uint32_t k, const std::string& parameters) {
-        throw std::runtime_error("Index doesn't support Pretrain");
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "Index doesn't support Pretrain");
     }
 
     virtual uint32_t
@@ -152,12 +157,14 @@ public:
              int64_t k,
              const std::string& parameters,
              int64_t global_optimum_tag_id = std::numeric_limits<int64_t>::max()) {
-        throw std::runtime_error("Index doesn't support Feedback");
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "Index doesn't support Feedback");
     }
 
     virtual float
     CalcDistanceById(const float* query, int64_t id) const {
-        throw std::runtime_error("Index doesn't support calculate distance by id");
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "Index doesn't support calculate distance by id");
     }
 
     virtual DatasetPtr
@@ -165,17 +172,19 @@ public:
 
     virtual std::pair<int64_t, int64_t>
     GetMinAndMaxId() const {
-        throw std::runtime_error("Index doesn't support GetMinAndMaxId");
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "Index doesn't support GetMinAndMaxId");
     }
 
     virtual void
     GetExtraInfoByIds(const int64_t* ids, int64_t count, char* extra_infos) const {
-        throw std::runtime_error("Index doesn't support GetExtraInfoByIds");
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "Index doesn't support GetExtraInfoByIds");
     }
 
     virtual void
     Merge(const std::vector<MergeUnit>& merge_units) {
-        throw std::runtime_error("Index doesn't support Merge");
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION, "Index doesn't support Merge");
     }
 
     virtual InnerIndexPtr
@@ -183,7 +192,8 @@ public:
 
     virtual InnerIndexPtr
     ExportModel(const IndexCommonParam& param) const {
-        throw std::runtime_error("Index doesn't support ExportModel");
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "Index doesn't support ExportModel");
     }
 
     [[nodiscard]] virtual BinarySet
@@ -214,22 +224,26 @@ public:
 
     [[nodiscard]] virtual int64_t
     GetMemoryUsage() const {
-        throw std::runtime_error("Index doesn't support GetMemoryUsage");
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "Index doesn't support GetMemoryUsage");
     }
 
     [[nodiscard]] virtual uint64_t
     EstimateMemory(uint64_t num_elements) const {
-        throw std::runtime_error("Index doesn't support EstimateMemory");
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "Index doesn't support EstimateMemory");
     }
 
     [[nodiscard]] virtual int64_t
     GetEstimateBuildMemory(const int64_t num_elements) const {
-        throw std::runtime_error("Index doesn't support GetEstimateBuildMemory");
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "Index doesn't support GetEstimateBuildMemory");
     }
 
     [[nodiscard]] virtual std::string
     GetStats() const {
-        throw std::runtime_error("Index doesn't support GetStats");
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "Index doesn't support GetStats");
     }
 
     [[nodiscard]] virtual bool

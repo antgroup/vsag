@@ -19,6 +19,8 @@
 
 #include <stdexcept>
 
+#include "vsag_exception.h"
+
 namespace vsag {
 
 static std::pair<uint32_t, uint32_t>
@@ -36,7 +38,8 @@ bool
 IndexFeatureList::CheckFeature(IndexFeature feature) const {
     auto val = static_cast<uint32_t>(feature);
     if (val >= feature_count_ or val == 0) {
-        throw std::invalid_argument(fmt::format("wrong feature value: {}", val));
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            fmt::format("wrong feature value: {}", val));
     }
 
     auto [x, y] = get_pos(val);
@@ -46,7 +49,7 @@ IndexFeatureList::CheckFeature(IndexFeature feature) const {
 void
 IndexFeatureList::SetFeature(vsag::IndexFeature feature, bool val) {
     if (static_cast<uint32_t>(feature) >= feature_count_) {
-        throw std::runtime_error("wrong feature");
+        throw VsagException(ErrorType::INVALID_ARGUMENT, "wrong feature");
     }
 
     auto [x, y] = get_pos(static_cast<uint32_t>(feature));

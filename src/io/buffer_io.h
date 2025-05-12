@@ -42,7 +42,8 @@ public:
     WriteImpl(const uint8_t* data, uint64_t size, uint64_t offset) {
         auto ret = pwrite64(this->fd_, data, size, offset);
         if (ret != size) {
-            throw std::runtime_error(fmt::format("write bytes {} less than {}", ret, size));
+            throw VsagException(ErrorType::INTERNAL_ERROR,
+                                fmt::format("write bytes {} less than {}", ret, size));
         }
         if (size + offset > this->size_) {
             this->size_ = size + offset;
@@ -56,7 +57,8 @@ public:
         }
         auto ret = pread64(this->fd_, data, size, offset);
         if (ret != size) {
-            throw std::runtime_error(fmt::format("read bytes {} less than {}", ret, size));
+            throw VsagException(ErrorType::INTERNAL_ERROR,
+                                fmt::format("read bytes {} less than {}", ret, size));
         }
         return true;
     }
