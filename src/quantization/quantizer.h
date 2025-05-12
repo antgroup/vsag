@@ -212,6 +212,9 @@ public:
         return this->metric_;
     }
 
+    virtual void
+    Package32(const uint8_t* codes, uint8_t* packaged_codes) const {};
+
     /**
      * @brief Get the size of the encoded code in bytes.
      *

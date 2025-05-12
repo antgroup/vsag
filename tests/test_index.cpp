@@ -264,6 +264,9 @@ void
 TestIndex::TestContinueAdd(const IndexPtr& index,
                            const TestDatasetPtr& dataset,
                            bool expected_success) {
+    if (not index->CheckFeature(vsag::SUPPORT_ADD_AFTER_BUILD)) {
+        return;
+    }
     auto base_count = dataset->base_->GetNumElements();
     int64_t temp_count = std::max(1L, dataset->base_->GetNumElements() / 2);
     auto dim = dataset->base_->GetDim();
@@ -385,7 +388,7 @@ TestIndex::TestKnnSearch(const IndexPtr& index,
                          const std::string& search_param,
                          float expected_recall,
                          bool expected_success) {
-    if (not index->CheckFeature(vsag::SUPPORT_RANGE_SEARCH)) {
+    if (not index->CheckFeature(vsag::SUPPORT_KNN_SEARCH)) {
         return;
     }
     auto queries = dataset->query_;
@@ -1503,9 +1506,16 @@ TestIndex::TestExportModel(const TestIndex::IndexPtr& index,
     auto index_model_result = index->ExportModel();
     REQUIRE(index_model_result.has_value() == true);
     auto& index_model = index_model_result.value();
-
-    auto add_index = index_model->Add(dataset->base_);
-    REQUIRE(add_index.has_value());
+    tl::expected<std::vector<int64_t>, vsag::Error> add_index;
+    if (index->CheckFeature(vsag::SUPPORT_ADD_AFTER_BUILD)) {
+        add_index = index_model->Add(dataset->base_);
+        REQUIRE(add_index.has_value());
+    } else if (index->CheckFeature(vsag::SUPPORT_BUILD)) {
+        add_index = index_model->Build(dataset->base_);
+        REQUIRE(add_index.has_value());
+    } else {
+        return;
+    }
 
     const auto& queries = dataset->query_;
     auto query_count = queries->GetNumElements();

@@ -99,6 +99,9 @@ public:
         StreamReader::ReadObj(reader, this->code_size_);
     }
 
+    virtual void
+    Package(){};
+
 public:
     BucketIdType bucket_count_{0};
     uint32_t code_size_{0};
