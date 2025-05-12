@@ -18,7 +18,6 @@
 #include <type_traits>
 
 namespace vsag {
-
 template <typename...>
 using void_t = void;
 
@@ -26,7 +25,9 @@ template <template <typename...> class Op, typename, typename... Args>
 struct detector : std::false_type {};
 
 template <template <typename...> class Op, typename... Args>
-struct detector<Op, void_t<Op<Args...>>, Args...> : std::true_type {};
+struct detector<Op, void_t<Op<Args...>>, Args...> : std::true_type {
+    using type = Op<Args...>;
+};
 
 template <template <typename...> class Op, typename... Args>
 constexpr bool is_detected_v = detector<Op, void, Args...>::value;
@@ -37,21 +38,19 @@ constexpr bool is_detected_v = detector<Op, void, Args...>::value;
                                                                                   \
     template <typename T>                                                         \
     struct has_##FuncName                                                         \
-        : std::integral_constant<                                                 \
-              bool,                                                               \
-              is_detected_v<has_##FuncName##_t, T> &&                             \
-                  std::is_same<decltype(std::declval<T>().FuncName(__VA_ARGS__)), \
-                               ReturnType>::value> {};
+        : std::conjunction<                                                       \
+              detector<has_##FuncName##_t, void, T>,                              \
+              std::is_same<typename detector<has_##FuncName##_t, void, T>::type, ReturnType>> {};
 
-#define GENERATE_HAS_STATIC_CLASS_FUNCTION(FuncName, ReturnType, ...)                    \
-    template <typename T>                                                                \
-    using has_static_##FuncName##_t = decltype(std::declval<T>().FuncName(__VA_ARGS__)); \
-                                                                                         \
-    template <typename T>                                                                \
-    struct has_static_##FuncName                                                         \
-        : std::integral_constant<                                                        \
-              bool,                                                                      \
-              is_detected_v<has_static_##FuncName##_t, T> &&                             \
-                  std::is_same<decltype(T::FuncName(__VA_ARGS__)), ReturnType>::value> {};
+#define GENERATE_HAS_STATIC_CLASS_FUNCTION(FuncName, ReturnType, ...)                   \
+    template <typename T>                                                               \
+    using has_static_##FuncName##_t = decltype(T::FuncName(__VA_ARGS__));               \
+                                                                                        \
+    template <typename T>                                                               \
+    struct has_static_##FuncName                                                        \
+        : std::conjunction<                                                             \
+              detector<has_static_##FuncName##_t, void, T>,                             \
+              std::is_same<typename detector<has_static_##FuncName##_t, void, T>::type, \
+                           ReturnType>> {};
 
 }  // namespace vsag
