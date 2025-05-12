@@ -95,6 +95,44 @@ FP32ComputeL2Sqr(const float* query, const float* codes, uint64_t dim) {
     return result;
 }
 
+void
+FP32ComputeIPBatch4(const float* query,
+                    uint64_t dim,
+                    const float* codes1,
+                    const float* codes2,
+                    const float* codes3,
+                    const float* codes4,
+                    float& result1,
+                    float& result2,
+                    float& result3,
+                    float& result4) {
+    for (uint64_t i = 0; i < dim; ++i) {
+        result1 += query[i] * codes1[i];
+        result2 += query[i] * codes2[i];
+        result3 += query[i] * codes3[i];
+        result4 += query[i] * codes4[i];
+    }
+}
+
+void
+FP32ComputeL2SqrBatch4(const float* query,
+                       uint64_t dim,
+                       const float* codes1,
+                       const float* codes2,
+                       const float* codes3,
+                       const float* codes4,
+                       float& result1,
+                       float& result2,
+                       float& result3,
+                       float& result4) {
+    for (uint64_t i = 0; i < dim; ++i) {
+        result1 += (query[i] - codes1[i]) * (query[i] - codes1[i]);
+        result2 += (query[i] - codes2[i]) * (query[i] - codes2[i]);
+        result3 += (query[i] - codes3[i]) * (query[i] - codes3[i]);
+        result4 += (query[i] - codes4[i]) * (query[i] - codes4[i]);
+    }
+}
+
 union FP32Struct {
     uint32_t int_value;
     float float_value;
