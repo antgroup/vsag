@@ -194,7 +194,7 @@ TEST_CASE("Search with HNSW", "[ut][BasicSearcher]") {
             auto failed_without_vector =
                 searcher->Search(graph_data_cell, nullptr, vl, base_vectors.data(), search_param);
             pool->ReturnOne(vl);
-            REQUIRE(failed_without_vector.size() == 0);
+            REQUIRE(failed_without_vector->Size() == 0);
         }
         {
             // search with empty vector_data_cell
@@ -202,7 +202,7 @@ TEST_CASE("Search with HNSW", "[ut][BasicSearcher]") {
             auto failed_without_graph =
                 searcher->Search(nullptr, vector_data_cell, vl, base_vectors.data(), search_param);
             pool->ReturnOne(vl);
-            REQUIRE(failed_without_graph.size() == 0);
+            REQUIRE(failed_without_graph->Size() == 0);
         }
     };
 
@@ -236,10 +236,10 @@ TEST_CASE("Search with HNSW", "[ut][BasicSearcher]") {
             auto result = searcher->Search(
                 graph_data_cell, vector_data_cell, vl, base_vectors.data() + i * dim, search_param);
             pool->ReturnOne(vl);
-            auto result_size = result.size();
+            auto result_size = result->Size();
             for (int j = 0; j < result_size; j++) {
-                set.insert(result.top().second);
-                result.pop();
+                set.insert(result->Top().second);
+                result->Pop();
             }
             if (search_param.search_mode == KNN_SEARCH) {
                 auto valid_result =

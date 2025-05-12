@@ -15,6 +15,7 @@
 
 #include "sparse_index.h"
 
+#include "utils/standard_heap.h"
 #include "utils/util_functions.h"
 
 namespace vsag {
@@ -115,7 +116,8 @@ SparseIndex::KnnSearch(const DatasetPtr& query,
                        const FilterPtr& filter) const {
     const auto* sparse_vectors = query->GetSparseVectors();
     CHECK_ARGUMENT(query->GetNumElements() == 1, "num of query should be 1");
-    MaxHeap results(allocator_);
+    auto results = std::make_shared<StandardHeap<true, false>>(allocator_, -1);
+
     auto [sorted_ids, sorted_vals] = sort_sparse_vector(sparse_vectors[0]);
     for (int j = 0; j < cur_element_count_; ++j) {
         auto distance = get_distance(sorted_ids.size(),
@@ -126,9 +128,9 @@ SparseIndex::KnnSearch(const DatasetPtr& query,
                                      (float*)(datas_[j] + 1 + datas_[j][0]));
         auto label = label_table_->GetLabelById(j);
         if (not filter || filter->CheckValid(label)) {
-            results.emplace(distance, label);
-            if (results.size() > k) {
-                results.pop();
+            results->Push(distance, label);
+            if (results->Size() > k) {
+                results->Pop();
             }
         }
     }
@@ -144,7 +146,7 @@ SparseIndex::RangeSearch(const DatasetPtr& query,
                          int64_t limited_size) const {
     const auto* sparse_vectors = query->GetSparseVectors();
     CHECK_ARGUMENT(query->GetNumElements() == 1, "num of query should be 1");
-    MaxHeap results(allocator_);
+    auto results = std::make_shared<StandardHeap<true, false>>(allocator_, -1);
     auto [sorted_ids, sorted_vals] = sort_sparse_vector(sparse_vectors[0]);
     for (int j = 0; j < cur_element_count_; ++j) {
         auto distance = get_distance(sorted_ids.size(),
@@ -155,12 +157,12 @@ SparseIndex::RangeSearch(const DatasetPtr& query,
                                      (float*)(datas_[j] + 1 + datas_[j][0]));
         auto label = label_table_->GetLabelById(j);
         if ((not filter || filter->CheckValid(label)) && distance <= radius + 2e-6) {
-            results.emplace(distance, label);
+            results->Push(distance, label);
         }
     }
 
-    while (results.size() > limited_size) {
-        results.pop();
+    while (results->Size() > limited_size) {
+        results->Pop();
     }
 
     // return result
@@ -168,17 +170,18 @@ SparseIndex::RangeSearch(const DatasetPtr& query,
 }
 
 DatasetPtr
-SparseIndex::collect_results(MaxHeap& results) const {
-    auto [result, dists, ids] = CreateFastDataset(static_cast<int64_t>(results.size()), allocator_);
-    if (results.empty()) {
+SparseIndex::collect_results(const DistHeapPtr& results) const {
+    auto [result, dists, ids] =
+        CreateFastDataset(static_cast<int64_t>(results->Size()), allocator_);
+    if (results->Empty()) {
         result->Dim(0)->NumElements(1);
         return result;
     }
 
-    for (auto j = static_cast<int64_t>(results.size() - 1); j >= 0; --j) {
-        dists[j] = results.top().first;
-        ids[j] = results.top().second;
-        results.pop();
+    for (auto j = static_cast<int64_t>(results->Size() - 1); j >= 0; --j) {
+        dists[j] = results->Top().first;
+        ids[j] = results->Top().second;
+        results->Pop();
     }
     return result;
 }
