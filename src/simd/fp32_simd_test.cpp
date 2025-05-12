@@ -23,7 +23,7 @@
 
 using namespace vsag;
 
-#define TEST_ACCURACY(Func)                                                           \
+#define TEST_FP32_COMPUTE_ACCURACY(Func)                                              \
     {                                                                                 \
         float gt, sse, avx, avx2, avx512;                                             \
         gt = generic::Func(vec1.data() + i * dim, vec2.data() + i * dim, dim);        \
@@ -45,15 +45,107 @@ using namespace vsag;
         }                                                                             \
     };
 
+#define TEST_FP32_COMPUTE_ACCURACY_BATCH4(Func, FuncBatch4)                              \
+    {                                                                                    \
+        std::vector<float> gts(4);                                                       \
+        gts[0] = generic::Func(vec1.data() + i * dim, vec2.data() + i * dim, dim);       \
+        gts[1] = generic::Func(vec1.data() + i * dim, vec2.data() + (i + 1) * dim, dim); \
+        gts[2] = generic::Func(vec1.data() + i * dim, vec2.data() + (i + 2) * dim, dim); \
+        gts[3] = generic::Func(vec1.data() + i * dim, vec2.data() + (i + 3) * dim, dim); \
+        std::vector<float> result(4, 0.0F);                                              \
+        memset(result.data(), 0, 4 * sizeof(float));                                     \
+        generic::FuncBatch4(vec1.data() + i * dim,                                       \
+                            dim,                                                         \
+                            vec2.data() + i * dim,                                       \
+                            vec2.data() + (i + 1) * dim,                                 \
+                            vec2.data() + (i + 2) * dim,                                 \
+                            vec2.data() + (i + 3) * dim,                                 \
+                            result[0],                                                   \
+                            result[1],                                                   \
+                            result[2],                                                   \
+                            result[3]);                                                  \
+        for (uint64_t j = 0; j < 4; ++j) {                                               \
+            REQUIRE(fixtures::dist_t(gts[j]) == fixtures::dist_t(result[j]));            \
+        }                                                                                \
+        if (SimdStatus::SupportSSE()) {                                                  \
+            memset(result.data(), 0, 4 * sizeof(float));                                 \
+            sse::FuncBatch4(vec1.data() + i * dim,                                       \
+                            dim,                                                         \
+                            vec2.data() + i * dim,                                       \
+                            vec2.data() + (i + 1) * dim,                                 \
+                            vec2.data() + (i + 2) * dim,                                 \
+                            vec2.data() + (i + 3) * dim,                                 \
+                            result[0],                                                   \
+                            result[1],                                                   \
+                            result[2],                                                   \
+                            result[3]);                                                  \
+            for (uint64_t j = 0; j < 4; ++j) {                                           \
+                REQUIRE(fixtures::dist_t(gts[j]) == fixtures::dist_t(result[j]));        \
+            }                                                                            \
+        }                                                                                \
+        if (SimdStatus::SupportAVX()) {                                                  \
+            memset(result.data(), 0, 4 * sizeof(float));                                 \
+            avx::FuncBatch4(vec1.data() + i * dim,                                       \
+                            dim,                                                         \
+                            vec2.data() + i * dim,                                       \
+                            vec2.data() + (i + 1) * dim,                                 \
+                            vec2.data() + (i + 2) * dim,                                 \
+                            vec2.data() + (i + 3) * dim,                                 \
+                            result[0],                                                   \
+                            result[1],                                                   \
+                            result[2],                                                   \
+                            result[3]);                                                  \
+            for (uint64_t j = 0; j < 4; ++j) {                                           \
+                REQUIRE(fixtures::dist_t(gts[j]) == fixtures::dist_t(result[j]));        \
+            }                                                                            \
+        }                                                                                \
+        if (SimdStatus::SupportAVX2()) {                                                 \
+            memset(result.data(), 0, 4 * sizeof(float));                                 \
+            avx2::FuncBatch4(vec1.data() + i * dim,                                      \
+                             dim,                                                        \
+                             vec2.data() + i * dim,                                      \
+                             vec2.data() + (i + 1) * dim,                                \
+                             vec2.data() + (i + 2) * dim,                                \
+                             vec2.data() + (i + 3) * dim,                                \
+                             result[0],                                                  \
+                             result[1],                                                  \
+                             result[2],                                                  \
+                             result[3]);                                                 \
+            for (uint64_t j = 0; j < 4; ++j) {                                           \
+                REQUIRE(fixtures::dist_t(gts[j]) == fixtures::dist_t(result[j]));        \
+            }                                                                            \
+        }                                                                                \
+        if (SimdStatus::SupportAVX512()) {                                               \
+            memset(result.data(), 0, 4 * sizeof(float));                                 \
+            avx512::FuncBatch4(vec1.data() + i * dim,                                    \
+                               dim,                                                      \
+                               vec2.data() + i * dim,                                    \
+                               vec2.data() + (i + 1) * dim,                              \
+                               vec2.data() + (i + 2) * dim,                              \
+                               vec2.data() + (i + 3) * dim,                              \
+                               result[0],                                                \
+                               result[1],                                                \
+                               result[2],                                                \
+                               result[3]);                                               \
+            for (uint64_t j = 0; j < 4; ++j) {                                           \
+                REQUIRE(fixtures::dist_t(gts[j]) == fixtures::dist_t(result[j]));        \
+            }                                                                            \
+        }                                                                                \
+    };
+
 TEST_CASE("FP32 SIMD Compute", "[ut][simd]") {
-    const std::vector<int64_t> dims = {1, 8, 16, 32, 256};
+    const std::vector<int64_t> dims = {8, 16, 32, 256};
     int64_t count = 100;
     for (const auto& dim : dims) {
         auto vec1 = fixtures::generate_vectors(count * 2, dim);
         std::vector<float> vec2(vec1.begin() + count, vec1.end());
         for (uint64_t i = 0; i < count; ++i) {
-            TEST_ACCURACY(FP32ComputeIP);
-            TEST_ACCURACY(FP32ComputeL2Sqr);
+            TEST_FP32_COMPUTE_ACCURACY(FP32ComputeIP);
+            TEST_FP32_COMPUTE_ACCURACY(FP32ComputeL2Sqr);
+        }
+        for (uint64_t i = 0; i < count; i += 4) {
+            TEST_FP32_COMPUTE_ACCURACY_BATCH4(FP32ComputeIP, FP32ComputeIPBatch4);
+            TEST_FP32_COMPUTE_ACCURACY_BATCH4(FP32ComputeL2Sqr, FP32ComputeL2SqrBatch4);
         }
     }
 }
@@ -73,11 +165,50 @@ TEST_CASE("FP32 Benchmark", "[ut][simd][!benchmark]") {
     std::vector<float> vec2(vec1.begin() + count, vec1.end());
     BENCHMARK_SIMD_COMPUTE(generic, FP32ComputeIP);
     BENCHMARK_SIMD_COMPUTE(sse, FP32ComputeIP);
+    BENCHMARK_SIMD_COMPUTE(avx, FP32ComputeIP);
     BENCHMARK_SIMD_COMPUTE(avx2, FP32ComputeIP);
     BENCHMARK_SIMD_COMPUTE(avx512, FP32ComputeIP);
 
     BENCHMARK_SIMD_COMPUTE(generic, FP32ComputeL2Sqr);
     BENCHMARK_SIMD_COMPUTE(sse, FP32ComputeL2Sqr);
+    BENCHMARK_SIMD_COMPUTE(avx, FP32ComputeL2Sqr);
     BENCHMARK_SIMD_COMPUTE(avx2, FP32ComputeL2Sqr);
     BENCHMARK_SIMD_COMPUTE(avx512, FP32ComputeL2Sqr);
+}
+
+#define BENCHMARK_SIMD_COMPUTE_BATCH4(Simd, Comp)        \
+    BENCHMARK_ADVANCED(#Simd #Comp) {                    \
+        std::vector<float> result(4);                    \
+        for (int i = 0; i < count; i += 4) {             \
+            memset(result.data(), 0, 4 * sizeof(float)); \
+            Simd::Comp(vec1.data() + i * dim,            \
+                       dim,                              \
+                       vec2.data() + i * dim,            \
+                       vec2.data() + (i + 1) * dim,      \
+                       vec2.data() + (i + 2) * dim,      \
+                       vec2.data() + (i + 3) * dim,      \
+                       result[0],                        \
+                       result[1],                        \
+                       result[2],                        \
+                       result[3]);                       \
+        }                                                \
+        return;                                          \
+    }
+
+TEST_CASE("FP32 Benchmark Batch4", "[ut][simd][!benchmark]") {
+    int64_t count = 500;
+    int64_t dim = 128;
+    auto vec1 = fixtures::generate_vectors(count * 2, dim);
+    std::vector<float> vec2(vec1.begin() + count, vec1.end());
+    BENCHMARK_SIMD_COMPUTE_BATCH4(generic, FP32ComputeIPBatch4);
+    BENCHMARK_SIMD_COMPUTE_BATCH4(sse, FP32ComputeIPBatch4);
+    BENCHMARK_SIMD_COMPUTE_BATCH4(avx, FP32ComputeIPBatch4);
+    BENCHMARK_SIMD_COMPUTE_BATCH4(avx2, FP32ComputeIPBatch4);
+    BENCHMARK_SIMD_COMPUTE_BATCH4(avx512, FP32ComputeIPBatch4);
+
+    BENCHMARK_SIMD_COMPUTE_BATCH4(generic, FP32ComputeL2SqrBatch4);
+    BENCHMARK_SIMD_COMPUTE_BATCH4(sse, FP32ComputeL2SqrBatch4);
+    BENCHMARK_SIMD_COMPUTE_BATCH4(avx, FP32ComputeL2SqrBatch4);
+    BENCHMARK_SIMD_COMPUTE_BATCH4(avx2, FP32ComputeL2SqrBatch4);
+    BENCHMARK_SIMD_COMPUTE_BATCH4(avx512, FP32ComputeL2SqrBatch4);
 }

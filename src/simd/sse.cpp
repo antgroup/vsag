@@ -137,6 +137,128 @@ FP32ComputeL2Sqr(const float* query, const float* codes, uint64_t dim) {
 #endif
 }
 
+void
+FP32ComputeIPBatch4(const float* query,
+                    uint64_t dim,
+                    const float* codes1,
+                    const float* codes2,
+                    const float* codes3,
+                    const float* codes4,
+                    float& result1,
+                    float& result2,
+                    float& result3,
+                    float& result4) {
+#if defined(ENABLE_SSE)
+    if (dim < 4) {
+        return generic::FP32ComputeIPBatch4(
+            query, dim, codes1, codes2, codes3, codes4, result1, result2, result3, result4);
+    }
+    __m128 sum1 = _mm_setzero_ps();
+    __m128 sum2 = _mm_setzero_ps();
+    __m128 sum3 = _mm_setzero_ps();
+    __m128 sum4 = _mm_setzero_ps();
+    int i = 0;
+    for (; i + 3 < dim; i += 4) {
+        __m128 q = _mm_loadu_ps(query + i);
+        __m128 c1 = _mm_loadu_ps(codes1 + i);
+        __m128 c2 = _mm_loadu_ps(codes2 + i);
+        __m128 c3 = _mm_loadu_ps(codes3 + i);
+        __m128 c4 = _mm_loadu_ps(codes4 + i);
+        sum1 = _mm_add_ps(sum1, _mm_mul_ps(q, c1));
+        sum2 = _mm_add_ps(sum2, _mm_mul_ps(q, c2));
+        sum3 = _mm_add_ps(sum3, _mm_mul_ps(q, c3));
+        sum4 = _mm_add_ps(sum4, _mm_mul_ps(q, c4));
+    }
+    alignas(16) float result[4];
+    _mm_store_ps(result, sum1);
+    result1 += result[0] + result[1] + result[2] + result[3];
+    _mm_store_ps(result, sum2);
+    result2 += result[0] + result[1] + result[2] + result[3];
+    _mm_store_ps(result, sum3);
+    result3 += result[0] + result[1] + result[2] + result[3];
+    _mm_store_ps(result, sum4);
+    result4 += result[0] + result[1] + result[2] + result[3];
+    if (i < dim) {
+        generic::FP32ComputeIPBatch4(query + i,
+                                     dim - i,
+                                     codes1 + i,
+                                     codes2 + i,
+                                     codes3 + i,
+                                     codes4 + i,
+                                     result1,
+                                     result2,
+                                     result3,
+                                     result4);
+    }
+#else
+    return generic::FP32ComputeIPBatch4(
+        query, dim, codes1, codes2, codes3, codes4, result1, result2, result3, result4);
+#endif
+}
+
+void
+FP32ComputeL2SqrBatch4(const float* query,
+                       uint64_t dim,
+                       const float* codes1,
+                       const float* codes2,
+                       const float* codes3,
+                       const float* codes4,
+                       float& result1,
+                       float& result2,
+                       float& result3,
+                       float& result4) {
+#if defined(ENABLE_SSE)
+    if (dim < 4) {
+        return generic::FP32ComputeL2SqrBatch4(
+            query, dim, codes1, codes2, codes3, codes4, result1, result2, result3, result4);
+    }
+    __m128 sum1 = _mm_setzero_ps();
+    __m128 sum2 = _mm_setzero_ps();
+    __m128 sum3 = _mm_setzero_ps();
+    __m128 sum4 = _mm_setzero_ps();
+    int i = 0;
+    for (; i + 3 < dim; i += 4) {
+        __m128 q = _mm_loadu_ps(query + i);
+        __m128 c1 = _mm_loadu_ps(codes1 + i);
+        __m128 c2 = _mm_loadu_ps(codes2 + i);
+        __m128 c3 = _mm_loadu_ps(codes3 + i);
+        __m128 c4 = _mm_loadu_ps(codes4 + i);
+        __m128 diff1 = _mm_sub_ps(q, c1);
+        __m128 diff2 = _mm_sub_ps(q, c2);
+        __m128 diff3 = _mm_sub_ps(q, c3);
+        __m128 diff4 = _mm_sub_ps(q, c4);
+        sum1 = _mm_add_ps(sum1, _mm_mul_ps(diff1, diff1));
+        sum2 = _mm_add_ps(sum2, _mm_mul_ps(diff2, diff2));
+        sum3 = _mm_add_ps(sum3, _mm_mul_ps(diff3, diff3));
+        sum4 = _mm_add_ps(sum4, _mm_mul_ps(diff4, diff4));
+    }
+    alignas(16) float result[4];
+    _mm_store_ps(result, sum1);
+    result1 += result[0] + result[1] + result[2] + result[3];
+    _mm_store_ps(result, sum2);
+    result2 += result[0] + result[1] + result[2] + result[3];
+    _mm_store_ps(result, sum3);
+    result3 += result[0] + result[1] + result[2] + result[3];
+    _mm_store_ps(result, sum4);
+    result4 += result[0] + result[1] + result[2] + result[3];
+    if (i < dim) {
+        generic::FP32ComputeL2SqrBatch4(query + i,
+                                        dim - i,
+                                        codes1 + i,
+                                        codes2 + i,
+                                        codes3 + i,
+                                        codes4 + i,
+                                        result1,
+                                        result2,
+                                        result3,
+                                        result4);
+    }
+#else
+    return generic::FP32ComputeL2SqrBatch4(
+        query, dim, codes1, codes2, codes3, codes4, result1, result2, result3, result4);
+#endif
+}
+
 float
 BF16ComputeIP(const uint8_t* query, const uint8_t* codes, uint64_t dim) {
 #if defined(ENABLE_SSE)
