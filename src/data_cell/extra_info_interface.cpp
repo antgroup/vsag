@@ -37,7 +37,8 @@ ExtraInfoInterface::MakeInstance(const ExtraInfoDataCellParamPtr& param,
     if (io_type_name == IO_TYPE_VALUE_BLOCK_MEMORY_IO) {
         return make_instance<MemoryBlockIO>(param, common_param);
     }
-    throw std::invalid_argument(fmt::format("Extra Info not support {} IO type", io_type_name));
+    throw VsagException(ErrorType::INVALID_ARGUMENT,
+                        fmt::format("Extra Info not support {} IO type", io_type_name));
 }
 
 }  // namespace vsag

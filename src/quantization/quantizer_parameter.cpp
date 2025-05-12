@@ -61,7 +61,8 @@ QuantizerParameter::GetQuantizerParameterByJson(const JsonType& json) {
         quantizer_param = std::make_shared<SparseQuantizerParameter>();
         quantizer_param->FromJson(json);
     } else {
-        throw std::invalid_argument(fmt::format("invalid quantizer name {}", type_name));
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            fmt::format("invalid quantizer name {}", type_name));
     }
 
     return quantizer_param;
