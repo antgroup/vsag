@@ -115,7 +115,7 @@ private:
 
     vsag::UnorderedMap<LabelType, InnerIdType> label_lookup_;
 
-    std::default_random_engine level_generator_;
+    std::default_random_engine level_generator_{2021};
     mutable std::default_random_engine update_probability_generator_;
 
     vsag::Allocator* allocator_{nullptr};
