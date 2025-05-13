@@ -248,10 +248,6 @@ BruteForce::InitFeatures() {
     });
 }
 
-static const std::unordered_map<std::string, std::vector<std::string>> EXTERNAL_MAPPING = {
-    {BRUTE_FORCE_QUANTIZATION_TYPE, {QUANTIZATION_PARAMS_KEY, QUANTIZATION_TYPE_KEY}},
-    {BRUTE_FORCE_IO_TYPE, {IO_PARAMS_KEY, IO_TYPE_KEY}}};
-
 static const std::string BRUTE_FORCE_PARAMS_TEMPLATE =
     R"(
     {
@@ -269,6 +265,10 @@ static const std::string BRUTE_FORCE_PARAMS_TEMPLATE =
 ParamPtr
 BruteForce::CheckAndMappingExternalParam(const JsonType& external_param,
                                          const IndexCommonParam& common_param) {
+    const std::unordered_map<std::string, std::vector<std::string>> external_mapping = {
+        {BRUTE_FORCE_QUANTIZATION_TYPE, {QUANTIZATION_PARAMS_KEY, QUANTIZATION_TYPE_KEY}},
+        {BRUTE_FORCE_IO_TYPE, {IO_PARAMS_KEY, IO_TYPE_KEY}}};
+
     if (common_param.data_type_ == DataTypes::DATA_TYPE_INT8) {
         throw VsagException(ErrorType::INVALID_ARGUMENT,
                             fmt::format("BruteForce not support {} datatype", DATATYPE_INT8));
@@ -276,7 +276,7 @@ BruteForce::CheckAndMappingExternalParam(const JsonType& external_param,
 
     std::string str = format_map(BRUTE_FORCE_PARAMS_TEMPLATE, DEFAULT_MAP);
     auto inner_json = JsonType::parse(str);
-    mapping_external_param_to_inner(external_param, EXTERNAL_MAPPING, inner_json);
+    mapping_external_param_to_inner(external_param, external_mapping, inner_json);
 
     auto brute_force_parameter = std::make_shared<BruteForceParameter>();
     brute_force_parameter->FromJson(inner_json);
