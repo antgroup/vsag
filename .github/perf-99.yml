@@ -5,7 +5,7 @@ global:
             to: "stdout"
         e2:
             format: "json"
-            to: "/tmp/perf-99.json"
+            to: "file://tmp/perf-99.json"
     num_threads_building: 16
     num_threads_searching: 16
 
