@@ -8,7 +8,7 @@ global:
       to: "stdout"
     e2:
       format: "json"
-      to: "/tmp/github-perf.json"
+      to: "file://tmp/github-perf.json"
 
 SIFT:
     datapath: "/tmp/data/sift-128-euclidean.hdf5"
