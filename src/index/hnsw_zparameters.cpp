@@ -21,8 +21,6 @@
 
 #include "vsag/constants.h"
 
-// NOLINTBEGIN(readability-simplify-boolean-expr)
-
 namespace vsag {
 
 HnswParameters
@@ -54,8 +52,10 @@ HnswParameters::FromJson(JsonType& hnsw_param_obj, const IndexCommonParam& index
     CHECK_ARGUMENT(hnsw_param_obj[HNSW_PARAMETER_M].is_number_integer(),
                    fmt::format("parameters[{}] must be integer type", HNSW_PARAMETER_M));
     obj.max_degree = hnsw_param_obj[HNSW_PARAMETER_M];
-    CHECK_ARGUMENT((5 <= obj.max_degree) and (obj.max_degree <= 128),
-                   fmt::format("max_degree({}) must in range[5, 128]", obj.max_degree));
+    auto max_degree_threshold = std::max(index_common_param.dim_, 128L);
+    CHECK_ARGUMENT(  // NOLINT
+        (4 <= obj.max_degree) and (obj.max_degree <= max_degree_threshold),
+        fmt::format("max_degree({}) must in range[4, {}]", obj.max_degree, max_degree_threshold));
 
     // set obj.ef_construction
     CHECK_ARGUMENT(
@@ -64,10 +64,13 @@ HnswParameters::FromJson(JsonType& hnsw_param_obj, const IndexCommonParam& index
     CHECK_ARGUMENT(hnsw_param_obj[HNSW_PARAMETER_CONSTRUCTION].is_number_integer(),
                    fmt::format("parameters[{}] must be integer type", HNSW_PARAMETER_CONSTRUCTION));
     obj.ef_construction = hnsw_param_obj[HNSW_PARAMETER_CONSTRUCTION];
-    CHECK_ARGUMENT((obj.max_degree <= obj.ef_construction) and (obj.ef_construction <= 1000),
-                   fmt::format("ef_construction({}) must in range[$max_degree({}), 64]",
+    auto construction_threshold = std::max(1000L, AMPLIFICATION_FACTOR * obj.max_degree);
+    CHECK_ARGUMENT((obj.max_degree <= obj.ef_construction) and  // NOLINT
+                       (obj.ef_construction <= construction_threshold),
+                   fmt::format("ef_construction({}) must in range[$max_degree({}), {}]",
                                obj.ef_construction,
-                               obj.max_degree));
+                               obj.max_degree,
+                               construction_threshold));
 
     // set obj.use_static
     obj.use_static = hnsw_param_obj.contains(HNSW_PARAMETER_USE_STATIC) &&
@@ -103,8 +106,6 @@ HnswSearchParameters::FromJson(const std::string& json_string) {
         params[index_name].contains(HNSW_PARAMETER_EF_RUNTIME),
         fmt::format("parameters[{}] must contains {}", index_name, HNSW_PARAMETER_EF_RUNTIME));
     obj.ef_search = params[index_name][HNSW_PARAMETER_EF_RUNTIME];
-    CHECK_ARGUMENT((1 <= obj.ef_search) and (obj.ef_search <= 1000),
-                   fmt::format("ef_search({}) must in range[1, 1000]", obj.ef_search));
 
     // set obj.use_conjugate_graph search
     if (params[index_name].contains(PARAMETER_USE_CONJUGATE_GRAPH_SEARCH)) {
@@ -131,5 +132,3 @@ FreshHnswParameters::FromJson(JsonType& hnsw_param_obj,
 }
 
 }  // namespace vsag
-
-// NOLINTEND(readability-simplify-boolean-expr)

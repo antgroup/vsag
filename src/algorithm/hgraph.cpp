@@ -21,6 +21,7 @@
 #include <stdexcept>
 
 #include "common.h"
+#include "data_cell/graph_datacell_parameter.h"
 #include "data_cell/sparse_graph_datacell.h"
 #include "dataset_impl.h"
 #include "impl/pruning_strategy.h"
@@ -212,6 +213,12 @@ HGraph::KnnSearch(const DatasetPtr& query,
     }
 
     auto params = HGraphSearchParameters::FromJson(parameters);
+
+    auto ef_search_threshold = std::max(AMPLIFICATION_FACTOR * k, 1000L);
+    CHECK_ARGUMENT(  // NOLINT
+        (1 <= params.ef_search) and (params.ef_search <= ef_search_threshold),
+        fmt::format("ef_search({}) must in range[1, {}]", params.ef_search, ef_search_threshold));
+
     FilterPtr ft = nullptr;
     if (filter != nullptr) {
         if (params.use_extra_info_filter) {
@@ -493,6 +500,8 @@ HGraph::RangeSearch(const DatasetPtr& query,
 
     auto params = HGraphSearchParameters::FromJson(parameters);
 
+    CHECK_ARGUMENT((1 <= params.ef_search) and (params.ef_search <= 1000),  // NOLINT
+                   fmt::format("ef_search({}) must in range[1, 1000]", params.ef_search));
     search_param.ef = std::max(params.ef_search, limited_size);
     search_param.is_inner_id_allowed = ft;
     search_param.radius = radius;
@@ -1114,6 +1123,21 @@ HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
     hgraph_parameter->data_type = common_param.data_type_;
     hgraph_parameter->FromJson(inner_json);
 
+    auto max_degree =
+        std::dynamic_pointer_cast<GraphDataCellParameter>(hgraph_parameter->bottom_graph_param)
+            ->max_degree_;
+    auto max_degree_threshold = std::max(common_param.dim_, 128L);
+    CHECK_ARGUMENT(  // NOLINT
+        (4 <= max_degree) and (max_degree <= max_degree_threshold),
+        fmt::format("max_degree({}) must in range[4, {}]", max_degree, max_degree_threshold));
+
+    auto construction_threshold = std::max(1000UL, AMPLIFICATION_FACTOR * max_degree);
+    CHECK_ARGUMENT((max_degree <= hgraph_parameter->ef_construction) and  // NOLINT
+                       (hgraph_parameter->ef_construction <= construction_threshold),
+                   fmt::format("ef_construction({}) must in range[$max_degree({}), {}]",
+                               hgraph_parameter->ef_construction,
+                               max_degree,
+                               construction_threshold));
     return hgraph_parameter;
 }
 InnerIndexPtr

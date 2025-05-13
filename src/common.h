@@ -40,3 +40,4 @@
 
 constexpr static const int64_t INIT_CAPACITY = 10;
 constexpr static const int64_t MAX_CAPACITY_EXTEND = 10000;
+constexpr static const int64_t AMPLIFICATION_FACTOR = 10;
