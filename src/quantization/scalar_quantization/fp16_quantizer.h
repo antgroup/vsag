@@ -65,10 +65,10 @@ public:
     ComputeDistImpl(Computer<FP16Quantizer>& computer, const uint8_t* codes, float* dists) const;
 
     inline void
-    ComputeBatchDistImpl(Computer<FP16Quantizer<metric>>& computer,
-                         uint64_t count,
-                         const uint8_t* codes,
-                         float* dists) const;
+    ScanBatchDistImpl(Computer<FP16Quantizer<metric>>& computer,
+                      uint64_t count,
+                      const uint8_t* codes,
+                      float* dists) const;
 
     inline void
     ReleaseComputerImpl(Computer<FP16Quantizer<metric>>& computer) const;
@@ -202,10 +202,10 @@ FP16Quantizer<metric>::ComputeDistImpl(Computer<FP16Quantizer>& computer,
 
 template <MetricType metric>
 void
-FP16Quantizer<metric>::ComputeBatchDistImpl(Computer<FP16Quantizer<metric>>& computer,
-                                            uint64_t count,
-                                            const uint8_t* codes,
-                                            float* dists) const {
+FP16Quantizer<metric>::ScanBatchDistImpl(Computer<FP16Quantizer<metric>>& computer,
+                                         uint64_t count,
+                                         const uint8_t* codes,
+                                         float* dists) const {
     // TODO(LHT): Optimize batch for simd
     for (uint64_t i = 0; i < count; ++i) {
         this->ComputeDistImpl(computer, codes + i * this->code_size_, dists + i);

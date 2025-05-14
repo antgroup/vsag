@@ -75,10 +75,10 @@ public:
                     float* dists) const;
 
     inline void
-    ComputeBatchDistImpl(Computer<PQFastScanQuantizer<metric>>& computer,
-                         uint64_t count,
-                         const uint8_t* codes,
-                         float* dists) const;
+    ScanBatchDistImpl(Computer<PQFastScanQuantizer<metric>>& computer,
+                      uint64_t count,
+                      const uint8_t* codes,
+                      float* dists) const;
 
     inline void
     SerializeImpl(StreamWriter& writer);
@@ -328,10 +328,10 @@ PQFastScanQuantizer<metric>::ComputeDistImpl(Computer<PQFastScanQuantizer>& comp
 
 template <MetricType metric>
 void
-PQFastScanQuantizer<metric>::ComputeBatchDistImpl(Computer<PQFastScanQuantizer<metric>>& computer,
-                                                  uint64_t count,
-                                                  const uint8_t* codes,
-                                                  float* dists) const {
+PQFastScanQuantizer<metric>::ScanBatchDistImpl(Computer<PQFastScanQuantizer<metric>>& computer,
+                                               uint64_t count,
+                                               const uint8_t* codes,
+                                               float* dists) const {
     auto* sq_info =
         reinterpret_cast<float*>(computer.buf_ + this->pq_dim_ * CENTROIDS_PER_SUBSPACE);
     auto diff = sq_info[0];

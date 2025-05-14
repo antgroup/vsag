@@ -286,7 +286,7 @@ TestComputer(Quantizer<T>& quant,
         std::vector<uint8_t> codes2(quant.GetCodeSize() * count);
         std::vector<float> dists2(count);
         quant.EncodeBatch(vecs.data(), codes2.data(), count);
-        quant.ComputeBatchDists(*computer, count, codes2.data(), dists2.data());
+        quant.ScanBatchDists(*computer, count, codes2.data(), dists2.data());
         for (int j = 0; j < count; ++j) {
             REQUIRE(fixtures::dist_t(dists1[j]) == fixtures::dist_t(dists2[j]));
         }

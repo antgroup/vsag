@@ -51,8 +51,21 @@ public:
     }
 
     inline void
-    ComputeBatchDists(uint64_t count, const uint8_t* codes, float* dists) {
-        quantizer_->ComputeBatchDists(*this, count, codes, dists);
+    ScanBatchDists(uint64_t count, const uint8_t* codes, float* dists) {
+        quantizer_->ScanBatchDists(*this, count, codes, dists);
+    }
+
+    inline void
+    ComputeDistsBatch4(const uint8_t* codes1,
+                       const uint8_t* codes2,
+                       const uint8_t* codes3,
+                       const uint8_t* codes4,
+                       float& dists1,
+                       float& dists2,
+                       float& dists3,
+                       float& dists4) {
+        quantizer_->ComputeDistsBatch4(
+            *this, codes1, codes2, codes3, codes4, dists1, dists2, dists3, dists4);
     }
 
 public:
