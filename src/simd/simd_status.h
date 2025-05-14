@@ -17,6 +17,7 @@
 
 #include <cpuinfo.h>
 
+#include <iostream>
 #include <string>
 
 namespace vsag {
@@ -38,8 +39,19 @@ public:
     bool runtime_has_avx512bw = false;
     bool runtime_has_avx512vl = false;
 
+    static bool is_inited;
+
+    static inline void
+    Init() {
+        if (is_inited) {
+            return;
+        }
+        is_inited = cpuinfo_initialize();
+    }
+
     static inline bool
     SupportAVX512() {
+        Init();
         bool ret = false;
 #if defined(ENABLE_AVX512)
         ret = true;
@@ -51,6 +63,7 @@ public:
 
     static inline bool
     SupportAVX2() {
+        Init();
         bool ret = false;
 #if defined(ENABLE_AVX2)
         ret = true;
@@ -61,6 +74,7 @@ public:
 
     static inline bool
     SupportAVX() {
+        Init();
         bool ret = false;
 #if defined(ENABLE_AVX)
         ret = true;
@@ -71,6 +85,7 @@ public:
 
     static inline bool
     SupportSSE() {
+        Init();
         bool ret = false;
 #if defined(ENABLE_SSE)
         ret = true;
