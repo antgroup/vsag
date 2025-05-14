@@ -86,4 +86,6 @@ private:
     bool owner_{false};
 };
 
+using SafeThreadPoolPtr = std::shared_ptr<SafeThreadPool>;
+
 }  // namespace vsag

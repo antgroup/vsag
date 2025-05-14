@@ -16,6 +16,7 @@
 #include "kmeans_cluster.h"
 
 #include <cblas.h>
+#include <omp.h>
 
 #include <random>
 
@@ -24,7 +25,12 @@
 
 namespace vsag {
 
-KMeansCluster::KMeansCluster(int32_t dim, Allocator* allocator) : dim_(dim), allocator_(allocator) {
+KMeansCluster::KMeansCluster(int32_t dim, Allocator* allocator, SafeThreadPoolPtr thread_pool)
+    : dim_(dim), allocator_(allocator), thread_pool_(std::move(thread_pool)) {
+    if (thread_pool_ == nullptr) {
+        this->thread_pool_ = SafeThreadPool::FactoryDefaultThreadPool();
+        //        this->thread_pool_->SetPoolSize(10);
+    }
 }
 
 KMeansCluster::~KMeansCluster() {
@@ -62,12 +68,25 @@ KMeansCluster::Run(uint32_t k, const float* datas, uint64_t count, int iter) {
 
     Vector<int> labels(count, -1, this->allocator_);
     bool have_empty = false;
+    std::vector<std::mutex> mutexes(k);
     for (int it = 0; it < iter; ++it) {
-        bool has_converged = true;
+        std::atomic<bool> has_converged = true;
+        std::vector<std::future<void>> futures;
 
-        for (int64_t i = 0; i < k; ++i) {
-            y_sqr[i] = FP32ComputeIP(k_centroids_ + i * dim_, k_centroids_ + i * dim_, dim_);
+        auto compute_ip_func = [&](uint64_t start, uint64_t end) -> void {
+            for (uint64_t i = start; i < end; ++i) {
+                y_sqr[i] = FP32ComputeIP(k_centroids_ + i * dim_, k_centroids_ + i * dim_, dim_);
+            }
+        };
+        auto bs = 1024;
+        for (uint64_t i = 0; i < static_cast<uint64_t>(k); i += bs) {
+            futures.emplace_back(thread_pool_->GeneralEnqueue(
+                compute_ip_func, i, std::min(i + bs, static_cast<uint64_t>(k))));
         }
+        for (auto& future : futures) {
+            future.wait();
+        }
+        futures.clear();
 
         cblas_sgemm(CblasColMajor,
                     CblasTrans,
@@ -84,17 +103,29 @@ KMeansCluster::Run(uint32_t k, const float* datas, uint64_t count, int iter) {
                     distances,
                     static_cast<blasint>(k));
 
-        for (uint64_t i = 0; i < count; ++i) {
-            cblas_saxpy(static_cast<blasint>(k), 1.0, y_sqr, 1, distances + i * k, 1);
-            auto* min_elem = std::min_element(distances + i * k, distances + i * k + k);
-            auto min_index = std::distance(distances + i * k, min_elem);
-            if (min_index != labels[i]) {
-                labels[i] = static_cast<int>(min_index);
-                has_converged = false;
+        // Assign labels to each data point
+        auto assign_labels_func = [&](uint64_t start, uint64_t end) {
+            omp_set_num_threads(1);
+            for (uint64_t i = start; i < end; ++i) {
+                cblas_saxpy(static_cast<blasint>(k), 1.0, y_sqr, 1, distances + i * k, 1);
+                auto* min_elem = std::min_element(distances + i * k, distances + i * k + k);
+                auto min_index = std::distance(distances + i * k, min_elem);
+                if (min_index != labels[i]) {
+                    labels[i] = static_cast<int>(min_index);
+                    has_converged.store(false);
+                }
             }
+        };
+        for (uint64_t i = 0; i < count; i += bs) {
+            futures.emplace_back(
+                thread_pool_->GeneralEnqueue(assign_labels_func, i, std::min(i + bs, count)));
         }
+        for (auto& future : futures) {
+            future.wait();
+        }
+        futures.clear();
 
-        if (has_converged and not have_empty) {
+        if (has_converged.load() and not have_empty) {
             break;
         }
 
@@ -102,16 +133,31 @@ KMeansCluster::Run(uint32_t k, const float* datas, uint64_t count, int iter) {
         Vector<int> counts(k, 0, allocator_);
         Vector<float> new_centroids(static_cast<uint64_t>(k) * dim_, 0.0F, allocator_);
         have_empty = false;
-        for (uint64_t i = 0; i < count; ++i) {
-            uint32_t label = labels[i];
-            counts[label]++;
-            cblas_saxpy(dim_,
-                        1.0F,
-                        datas + i * dim_,
-                        1,
-                        new_centroids.data() + label * static_cast<uint64_t>(dim_),
-                        1);
+
+        auto update_centroids_func = [&](uint64_t start, uint64_t end) {
+            omp_set_num_threads(1);
+            for (uint64_t i = start; i < end; ++i) {
+                uint32_t label = labels[i];
+                {
+                    std::lock_guard<std::mutex> lock(mutexes[label]);
+                    counts[label]++;
+                    cblas_saxpy(dim_,
+                                1.0F,
+                                datas + i * dim_,
+                                1,
+                                new_centroids.data() + label * static_cast<uint64_t>(dim_),
+                                1);
+                }
+            }
+        };
+        for (uint64_t i = 0; i < count; i += bs) {
+            futures.emplace_back(
+                thread_pool_->GeneralEnqueue(update_centroids_func, i, std::min(i + bs, count)));
         }
+        for (auto& future : futures) {
+            future.wait();
+        }
+        futures.clear();
 
         for (int j = 0; j < k; ++j) {
             if (counts[j] > 0) {
