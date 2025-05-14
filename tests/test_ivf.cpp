@@ -346,6 +346,32 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex, "IVF Add", "[ft][ivf]") {
     }
 }
 
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex, "IVF Merge", "[ft][ivf]") {
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    auto size = GENERATE(1024 * 1024 * 2);
+    auto metric_type = GENERATE("l2", "cosine");
+    std::string train_type = GENERATE("kmeans");
+
+    const std::string name = "ivf";
+    auto search_param = fmt::format(search_param_tmp, 200);
+    for (auto& dim : dims) {
+        for (auto& [base_quantization_str, recall] : test_cases) {
+            vsag::Options::Instance().set_block_size_limit(size);
+            auto param = GenerateIVFBuildParametersString(
+                metric_type, dim, base_quantization_str, 300, train_type);
+            auto model = TestFactory(name, param, true);
+            auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
+            auto ret = model->Train(dataset->base_);
+            REQUIRE(ret.has_value() == true);
+            auto merge_index = TestMergeIndexWithSameModel(model, dataset, 5, true);
+            if (model->CheckFeature(vsag::SUPPORT_MERGE_INDEX)) {
+                TestGeneral(merge_index, dataset, search_param, recall);
+            }
+            vsag::Options::Instance().set_block_size_limit(origin_size);
+        }
+    }
+}
+
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex,
                              "IVF Concurrent Add",
                              "[ft][ivf][concurrent]") {
