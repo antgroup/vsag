@@ -16,7 +16,7 @@
 namespace diskann
 {
 
-#if defined(__i386__) || defined(__x86_64__)
+#if defined ENABLE_AVX && (defined(__i386__) || defined(__x86_64__))
 static inline __m256 _mm256_mul_epi8(__m256i X)
 {
     __m256i zero = _mm256_setzero_si256();
