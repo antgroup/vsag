@@ -1467,7 +1467,7 @@ int64_t PQFlashIndex<T, LabelT>::cached_beam_search(const T *query1, const uint6
     }
 
     // FIXME: alternative instruction on aarch64
-#if defined(__i386__) || defined(__x86_64__)
+#if defined ENABLE_AVX && (defined(__i386__) || defined(__x86_64__))
     _mm_prefetch((char *)aligned_query_T.get(), _MM_HINT_T1);
 #endif
 
@@ -1771,7 +1771,7 @@ int64_t PQFlashIndex<T, LabelT>::cached_beam_search_memory(const T *query, const
     }
 
     // FIXME: alternative instruction on aarch64
-#if defined(__i386__) || defined(__x86_64__)
+#if defined ENABLE_AVX && (defined(__i386__) || defined(__x86_64__))
     _mm_prefetch((char *)aligned_query_T.get(), _MM_HINT_T1);
 #endif
 
@@ -1982,7 +1982,7 @@ int64_t PQFlashIndex<T, LabelT>::cached_beam_search_async(const T *query, const 
     }
 
     // FIXME: alternative instruction on aarch64
-#if defined(__i386__) || defined(__x86_64__)
+#if defined ENABLE_AVX && (defined(__i386__) || defined(__x86_64__))
     _mm_prefetch((char *)aligned_query_T.get(), _MM_HINT_T1);
 #endif
 
