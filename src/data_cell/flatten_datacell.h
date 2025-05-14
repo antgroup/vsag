@@ -107,6 +107,9 @@ public:
         ptr->quantizer_->Deserialize(reader);
     }
 
+    void
+    MergeOther(const FlattenInterfacePtr& other, InnerIdType bias) override;
+
     [[nodiscard]] std::string
     GetQuantizerName() override;
 
@@ -358,5 +361,31 @@ FlattenDataCell<QuantTmpl, IOTmpl>::Deserialize(StreamReader& reader) {
     FlattenInterface::Deserialize(reader);
     this->io_->Deserialize(reader);
     this->quantizer_->Deserialize(reader);
+}
+
+template <typename QuantTmpl, typename IOTmpl>
+void
+FlattenDataCell<QuantTmpl, IOTmpl>::MergeOther(const FlattenInterfacePtr& other, InnerIdType bias) {
+    auto ptr = std::dynamic_pointer_cast<FlattenDataCell<QuantTmpl, IOTmpl>>(other);
+    if (ptr == nullptr) {
+        throw VsagException(ErrorType::INTERNAL_ERROR,
+                            "Merge flatten datacell failed: not match type");
+    }
+    constexpr uint64_t BUFFER_SIZE = 1024 * 1024 * 10;
+    uint64_t total_count = ptr->total_count_;
+    uint64_t offset = bias * code_size_;
+    uint64_t read_count = 0;
+    while (read_count < total_count) {
+        bool need_release = false;
+        uint64_t count = std::min(BUFFER_SIZE, total_count - read_count);
+        uint64_t size = count * this->code_size_;
+        auto* buffer = ptr->io_->Read(size, read_count * this->code_size_, need_release);
+        this->io_->Write(buffer, size, offset);
+        if (need_release) {
+            ptr->io_->Release(buffer);
+        }
+        offset += size;
+        read_count += count;
+    }
 }
 }  // namespace vsag

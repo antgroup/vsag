@@ -194,6 +194,12 @@ protected:
                    int32_t split_num = 1,
                    bool expect_success = true);
 
+    static IndexPtr
+    TestMergeIndexWithSameModel(const IndexPtr model,
+                                const TestDatasetPtr& dataset,
+                                int32_t split_num = 1,
+                                bool expect_success = true);
+
     static void
     TestConcurrentAdd(const IndexPtr& index,
                       const TestDatasetPtr& dataset,

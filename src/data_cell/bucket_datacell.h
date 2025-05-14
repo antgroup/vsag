@@ -68,18 +68,10 @@ public:
     }
 
     void
-    ExportModel(const BucketInterfacePtr& other) const override {
-        std::stringstream ss;
-        IOStreamWriter writer(ss);
-        this->quantizer_->Serialize(writer);
-        ss.seekg(0, std::ios::beg);
-        IOStreamReader reader(ss);
-        auto ptr = std::dynamic_pointer_cast<BucketDataCell<QuantTmpl, IOTmpl>>(other);
-        if (ptr == nullptr) {
-            throw VsagException(ErrorType::INTERNAL_ERROR, "Export model's bucket datacell failed");
-        }
-        ptr->quantizer_->Deserialize(reader);
-    }
+    ExportModel(const BucketInterfacePtr& other) const override;
+
+    void
+    MergeOther(const BucketInterfacePtr& other, InnerIdType bias) override;
 
     void
     Serialize(StreamWriter& writer) override;
@@ -272,6 +264,49 @@ BucketDataCell<QuantTmpl, IOTmpl>::Deserialize(StreamReader& reader) {
         StreamReader::ReadVector(reader, inner_ids_[i]);
     }
     StreamReader::ReadVector(reader, this->bucket_sizes_);
+}
+
+template <typename QuantTmpl, typename IOTmpl>
+void
+BucketDataCell<QuantTmpl, IOTmpl>::ExportModel(const BucketInterfacePtr& other) const {
+    std::stringstream ss;
+    IOStreamWriter writer(ss);
+    this->quantizer_->Serialize(writer);
+    ss.seekg(0, std::ios::beg);
+    IOStreamReader reader(ss);
+    auto ptr = std::dynamic_pointer_cast<BucketDataCell<QuantTmpl, IOTmpl>>(other);
+    if (ptr == nullptr) {
+        throw VsagException(ErrorType::INTERNAL_ERROR, "Export model's bucket datacell failed");
+    }
+    ptr->quantizer_->Deserialize(reader);
+}
+
+template <typename QuantTmpl, typename IOTmpl>
+void
+BucketDataCell<QuantTmpl, IOTmpl>::MergeOther(const BucketInterfacePtr& other, InnerIdType bias) {
+    auto ptr = std::dynamic_pointer_cast<BucketDataCell<QuantTmpl, IOTmpl>>(other);
+    if (ptr == nullptr) {
+        throw VsagException(ErrorType::INTERNAL_ERROR, "Merge other's bucket datacell failed");
+    }
+    for (int i = 0; i < ptr->bucket_count_; ++i) {
+        bool need_release = false;
+        if (ptr->bucket_sizes_[i] == 0) {
+            continue;
+        }
+        auto* other_data =
+            ptr->datas_[i]->Read(ptr->bucket_sizes_[i] * this->code_size_, 0, need_release);
+        this->datas_[i]->Write(other_data,
+                               ptr->bucket_sizes_[i] * this->code_size_,
+                               this->bucket_sizes_[i] * this->code_size_);
+        if (need_release) {
+            ptr->datas_[i]->Release(other_data);
+        }
+        this->bucket_sizes_[i] += ptr->bucket_sizes_[i];
+        this->inner_ids_[i].reserve(this->bucket_sizes_[i]);
+        for (auto id : ptr->inner_ids_[i]) {
+            this->inner_ids_[i].emplace_back(id + bias);
+        }
+    }
 }
 
 }  // namespace vsag
