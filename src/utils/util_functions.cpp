@@ -100,9 +100,9 @@ check_equal_on_string_stream(std::stringstream& s1, std::stringstream& s2) {
     }
 
     auto get_length = [](std::stringstream& s) -> std::streamoff {
-        s.seekg(std::ios::end);
+        s.seekg(0, std::ios::end);
         std::streamoff len = s.tellg();
-        s.seekg(std::ios::beg);
+        s.seekg(0, std::ios::beg);
         return len;
     };
 
@@ -117,7 +117,7 @@ check_equal_on_string_stream(std::stringstream& s1, std::stringstream& s2) {
         return true;
     }
 
-    constexpr int64_t chunk_size = 1024L * 1024L * 2L;
+    constexpr int64_t chunk_size = 1024L * 2L;
     char buffer1[chunk_size];
     char buffer2[chunk_size];
 
