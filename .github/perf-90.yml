@@ -35,7 +35,7 @@ global:
  
 90/SIFT:
     datapath: "/tmp/data/sift-128-euclidean.hdf5"
-    type: "search" # build, search
+    type: "build,search" # build, search
     index_name: "hgraph"
     create_params: '{"dim":128,"dtype":"float32","metric_type":"l2","index_param":{"base_quantization_type":"sq8_uniform", "graph_type":"odescent","max_degree":64, "alpha": 1.2, "graph_iter_turn": 50, "neighbor_sample_rate": 0.2}}'
     search_params: '{"hgraph":{"ef_search":17}}'
