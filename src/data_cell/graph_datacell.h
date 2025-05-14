@@ -181,9 +181,9 @@ GraphDataCell<IOTmpl>::GetNeighbors(InnerIdType id, Vector<InnerIdType>& neighbo
     if (is_support_delete_) {
         neighbor_count &= remove_flag_mask_;
         start += sizeof(neighbor_count);
-        auto shared_neighbor_ids = std::shared_ptr<InnerIdType[]>(new InnerIdType[neighbor_count]);
+        Vector<InnerIdType> shared_neighbor_ids(this->allocator_);
         this->io_->Read(
-            neighbor_count * sizeof(InnerIdType), start, (uint8_t*)(shared_neighbor_ids.get()));
+            neighbor_count * sizeof(InnerIdType), start, (uint8_t*)(shared_neighbor_ids.data()));
         neighbor_ids.clear();
         neighbor_ids.reserve(neighbor_count);
         for (int i = 0; i < neighbor_count; ++i) {
@@ -207,14 +207,19 @@ GraphDataCell<IOTmpl>::Resize(InnerIdType new_size) {
     if (new_size < this->max_capacity_) {
         return;
     }
+    if (is_support_delete_) {
+        if (new_size > remove_flag_mask_) {
+            // remove_flag_mask_ exactly matches the maximum size of the graph in dynamic mode.
+            throw VsagException(ErrorType::INTERNAL_ERROR,
+                                fmt::format("the size of graph is limit ({})", remove_flag_mask_));
+        }
+        node_versions_.resize(new_size);
+    }
     this->max_capacity_ = new_size;
     uint64_t io_size = static_cast<uint64_t>(new_size) * static_cast<uint64_t>(code_line_size_);
     uint8_t end_flag =
         127;  // the value is meaningless, only to occupy the position for io allocate
     this->io_->Write(&end_flag, 1, io_size);
-    if (is_support_delete_) {
-        node_versions_.resize(new_size);
-    }
 }
 
 template <typename IOTmpl>
