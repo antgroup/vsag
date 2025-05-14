@@ -197,7 +197,7 @@ BucketDataCell<QuantTmpl, IOTmpl>::scan_bucket_by_id(
         bool need_release = false;
         const auto* codes = this->datas_[bucket_id]->Read(
             code_size_ * compute_count, offset * code_size_, need_release);
-        computer->ComputeBatchDists(compute_count, codes, result_dists + offset);
+        computer->ScanBatchDists(compute_count, codes, result_dists + offset);
         if (need_release) {
             this->datas_[bucket_id]->Release(codes);
         }
