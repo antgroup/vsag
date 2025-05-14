@@ -139,6 +139,11 @@ public:
         return true;
     }
 
+    virtual void
+    MergeOther(const FlattenInterfacePtr& other, InnerIdType bias) {
+        throw VsagException(ErrorType::INTERNAL_ERROR, "MergeOther not implemented");
+    }
+
 public:
     std::shared_mutex mutex_;
 

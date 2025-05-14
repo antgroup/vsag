@@ -22,6 +22,10 @@
 #include "typing.h"
 
 namespace vsag {
+
+class LabelTable;
+using LabelTablePtr = std::shared_ptr<LabelTable>;
+
 class LabelTable {
 public:
     explicit LabelTable(Allocator* allocator)
@@ -71,13 +75,14 @@ public:
         }
     }
 
+    void
+    MergeOther(const LabelTablePtr& other, InnerIdType bias);
+
 public:
     Vector<LabelType> label_table_;
     UnorderedMap<LabelType, InnerIdType> label_remap_;
 
     Allocator* allocator_{nullptr};
 };
-
-using LabelTablePtr = std::shared_ptr<LabelTable>;
 
 }  // namespace vsag

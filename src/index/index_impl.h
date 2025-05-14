@@ -299,6 +299,16 @@ public:
         return this->inner_index_->CheckIdExist(id);
     }
 
+    [[nodiscard]] inline InnerIndexPtr
+    GetInnerIndex() const {
+        return this->inner_index_;
+    }
+
+    [[nodiscard]] inline const IndexCommonParam&
+    GetCommonParam() const {
+        return this->common_param_;
+    }
+
 private:
     tl::expected<InnerIndexPtr, Error>
     clone_inner_index() const {

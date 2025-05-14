@@ -82,6 +82,9 @@ public:
                 int64_t limited_size = -1) const override;
 
     void
+    Merge(const std::vector<MergeUnit>& merge_units) override;
+
+    void
     Serialize(StreamWriter& writer) const override;
 
     void
@@ -100,6 +103,12 @@ private:
 
     DatasetPtr
     reorder(int64_t topk, DistHeapPtr& input, const float* query) const;
+
+    void
+    merge_one_unit(const MergeUnit& unit);
+
+    void
+    check_merge_illegal(const MergeUnit& unit) const;
 
 private:
     BucketInterfacePtr bucket_{nullptr};
