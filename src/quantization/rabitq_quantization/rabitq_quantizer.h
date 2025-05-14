@@ -86,10 +86,10 @@ public:
     ComputeDistImpl(Computer<RaBitQuantizer>& computer, const uint8_t* codes, float* dists) const;
 
     inline void
-    ComputeBatchDistImpl(Computer<RaBitQuantizer<metric>>& computer,
-                         uint64_t count,
-                         const uint8_t* codes,
-                         float* dists) const;
+    ScanBatchDistImpl(Computer<RaBitQuantizer<metric>>& computer,
+                      uint64_t count,
+                      const uint8_t* codes,
+                      float* dists) const;
 
     inline void
     ReleaseComputerImpl(Computer<RaBitQuantizer<metric>>& computer) const;
@@ -586,10 +586,10 @@ RaBitQuantizer<metric>::ComputeDistImpl(Computer<RaBitQuantizer>& computer,
 
 template <MetricType metric>
 void
-RaBitQuantizer<metric>::ComputeBatchDistImpl(Computer<RaBitQuantizer<metric>>& computer,
-                                             uint64_t count,
-                                             const uint8_t* codes,
-                                             float* dists) const {
+RaBitQuantizer<metric>::ScanBatchDistImpl(Computer<RaBitQuantizer<metric>>& computer,
+                                          uint64_t count,
+                                          const uint8_t* codes,
+                                          float* dists) const {
     for (uint64_t i = 0; i < count; ++i) {
         // TODO(ZXY): use batch optimize
         this->ComputeDistImpl(computer, codes + i * this->code_size_, dists + i);

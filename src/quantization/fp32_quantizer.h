@@ -72,10 +72,20 @@ public:
                     float* dists) const;
 
     inline void
-    ComputeBatchDistImpl(Computer<FP32Quantizer<metric>>& computer,
-                         uint64_t count,
-                         const uint8_t* codes,
-                         float* dists) const;
+    ScanBatchDistImpl(Computer<FP32Quantizer<metric>>& computer,
+                      uint64_t count,
+                      const uint8_t* codes,
+                      float* dists) const;
+    inline void
+    ComputeDistsBatch4Impl(Computer<FP32Quantizer<metric>>& computer,
+                           const uint8_t* codes1,
+                           const uint8_t* codes2,
+                           const uint8_t* codes3,
+                           const uint8_t* codes4,
+                           float& dists1,
+                           float& dists2,
+                           float& dists3,
+                           float& dists4) const;
 
     inline void
     ReleaseComputerImpl(Computer<FP32Quantizer<metric>>& computer) const;
@@ -152,24 +162,24 @@ template <MetricType metric>
 float
 FP32Quantizer<metric>::ComputeImpl(const uint8_t* codes1, const uint8_t* codes2) {
     if (metric == MetricType::METRIC_TYPE_IP or metric == MetricType::METRIC_TYPE_COSINE) {
-        return 1 - FP32ComputeIP(reinterpret_cast<const float*>(codes1),
-                                 reinterpret_cast<const float*>(codes2),
-                                 this->dim_);
+        return 1.0F - FP32ComputeIP(reinterpret_cast<const float*>(codes1),
+                                    reinterpret_cast<const float*>(codes2),
+                                    this->dim_);
     } else if (metric == MetricType::METRIC_TYPE_L2SQR) {
         return FP32ComputeL2Sqr(reinterpret_cast<const float*>(codes1),
                                 reinterpret_cast<const float*>(codes2),
                                 this->dim_);
     } else {
-        return 0.0f;
+        return 0.0F;
     }
 }
 
 template <MetricType metric>
 void
-FP32Quantizer<metric>::ComputeBatchDistImpl(Computer<FP32Quantizer<metric>>& computer,
-                                            uint64_t count,
-                                            const uint8_t* codes,
-                                            float* dists) const {
+FP32Quantizer<metric>::ScanBatchDistImpl(Computer<FP32Quantizer<metric>>& computer,
+                                         uint64_t count,
+                                         const uint8_t* codes,
+                                         float* dists) const {
     // TODO(LHT): Optimize batch for simd
     for (uint64_t i = 0; i < count; ++i) {
         this->ComputeDistImpl(computer, codes + i * this->code_size_, dists + i);
@@ -199,15 +209,61 @@ FP32Quantizer<metric>::ComputeDistImpl(Computer<FP32Quantizer<metric>>& computer
                                        const uint8_t* codes,
                                        float* dists) const {
     if (metric == MetricType::METRIC_TYPE_IP or metric == MetricType::METRIC_TYPE_COSINE) {
-        *dists = 1 - FP32ComputeIP(reinterpret_cast<const float*>(codes),
-                                   reinterpret_cast<const float*>(computer.buf_),
-                                   this->dim_);
+        *dists = 1.0F - FP32ComputeIP(reinterpret_cast<const float*>(codes),
+                                      reinterpret_cast<const float*>(computer.buf_),
+                                      this->dim_);
     } else if (metric == MetricType::METRIC_TYPE_L2SQR) {
         *dists = FP32ComputeL2Sqr(reinterpret_cast<const float*>(codes),
                                   reinterpret_cast<const float*>(computer.buf_),
                                   this->dim_);
     } else {
-        *dists = 0.0f;
+        *dists = 0.0F;
+    }
+}
+
+template <MetricType metric>
+void
+FP32Quantizer<metric>::ComputeDistsBatch4Impl(Computer<FP32Quantizer<metric>>& computer,
+                                              const uint8_t* codes1,
+                                              const uint8_t* codes2,
+                                              const uint8_t* codes3,
+                                              const uint8_t* codes4,
+                                              float& dists1,
+                                              float& dists2,
+                                              float& dists3,
+                                              float& dists4) const {
+    if constexpr (metric == MetricType::METRIC_TYPE_IP or
+                  metric == MetricType::METRIC_TYPE_COSINE) {
+        FP32ComputeIPBatch4(reinterpret_cast<const float*>(computer.buf_),
+                            this->dim_,
+                            reinterpret_cast<const float*>(codes1),
+                            reinterpret_cast<const float*>(codes2),
+                            reinterpret_cast<const float*>(codes3),
+                            reinterpret_cast<const float*>(codes4),
+                            dists1,
+                            dists2,
+                            dists3,
+                            dists4);
+        dists1 = 1.0F - dists1;
+        dists2 = 1.0F - dists2;
+        dists3 = 1.0F - dists3;
+        dists4 = 1.0F - dists4;
+    } else if constexpr (metric == MetricType::METRIC_TYPE_L2SQR) {
+        FP32ComputeL2SqrBatch4(reinterpret_cast<const float*>(computer.buf_),
+                               this->dim_,
+                               reinterpret_cast<const float*>(codes1),
+                               reinterpret_cast<const float*>(codes2),
+                               reinterpret_cast<const float*>(codes3),
+                               reinterpret_cast<const float*>(codes4),
+                               dists1,
+                               dists2,
+                               dists3,
+                               dists4);
+    } else {
+        dists1 = 0.0F;
+        dists2 = 0.0F;
+        dists3 = 0.0F;
+        dists4 = 0.0F;
     }
 }
 

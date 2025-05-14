@@ -63,10 +63,10 @@ public:
     ComputeDistImpl(Computer<SparseQuantizer>& computer, const uint8_t* codes, float* dists) const;
 
     inline void
-    ComputeBatchDistImpl(Computer<SparseQuantizer<metric>>& computer,
-                         uint64_t count,
-                         const uint8_t* codes,
-                         float* dists) const;
+    ScanBatchDistImpl(Computer<SparseQuantizer<metric>>& computer,
+                      uint64_t count,
+                      const uint8_t* codes,
+                      float* dists) const;
 
     inline void
     ReleaseComputerImpl(Computer<SparseQuantizer<metric>>& computer) const;
@@ -121,13 +121,13 @@ SparseQuantizer<metric>::ReleaseComputerImpl(Computer<SparseQuantizer<metric>>& 
 
 template <MetricType metric>
 void
-SparseQuantizer<metric>::ComputeBatchDistImpl(Computer<SparseQuantizer<metric>>& computer,
-                                              uint64_t count,
-                                              const uint8_t* codes,
-                                              float* dists) const {
+SparseQuantizer<metric>::ScanBatchDistImpl(Computer<SparseQuantizer<metric>>& computer,
+                                           uint64_t count,
+                                           const uint8_t* codes,
+                                           float* dists) const {
     // it is impossible to get batch codes of sparse vector
     throw VsagException(ErrorType::INTERNAL_ERROR,
-                        "no support for ComputeBatchDistImpl in sparse quantizer");
+                        "no support for ScanBatchDistImpl in sparse quantizer");
 }
 template <MetricType metric>
 void
