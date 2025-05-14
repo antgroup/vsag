@@ -119,6 +119,7 @@ public:
 
 protected:
     std::atomic<InnerIdType> total_count_{0};
+    Allocator* allocator_{nullptr};
 };
 
 }  // namespace vsag

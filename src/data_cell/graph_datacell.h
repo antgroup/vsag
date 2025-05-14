@@ -116,6 +116,7 @@ GraphDataCell<IOTmpl>::GraphDataCell(const GraphDataCellParamPtr& param,
     this->id_bit_ = sizeof(InnerIdType) * 8 - this->remove_flag_bit_;
     this->remove_flag_mask_ = (1 << this->id_bit_) - 1;
     this->code_line_size_ = this->maximum_degree_ * sizeof(InnerIdType) + sizeof(uint32_t);
+    this->allocator_ = common_param.allocator_.get();
     if (this->is_support_delete_) {
         node_versions_.resize(max_capacity_);
     }
@@ -144,13 +145,12 @@ GraphDataCell<IOTmpl>::InsertNeighborsById(InnerIdType id,
         uint32_t neighbor_count = std::min((uint32_t)(neighbor_ids.size()), this->maximum_degree_);
         this->io_->Write((uint8_t*)(&neighbor_count), sizeof(neighbor_count), start);
         start += sizeof(neighbor_count);
-        auto neighbor_ids_ptr =
-            std::shared_ptr<InnerIdType[]>(new InnerIdType[neighbor_ids.size()]);
+        Vector<InnerIdType> neighbor_ids_ptr(neighbor_ids.size(), 0, this->allocator_);
         for (int i = 0; i < neighbor_ids.size(); ++i) {
             auto neighbor_id = neighbor_ids[i];
             neighbor_ids_ptr[i] = neighbor_id | (node_versions_[neighbor_id] << id_bit_);
         }
-        this->io_->Write((uint8_t*)(neighbor_ids_ptr.get()),
+        this->io_->Write((uint8_t*)(neighbor_ids_ptr.data()),
                          static_cast<uint64_t>(neighbor_count) * sizeof(InnerIdType),
                          start);
     } else {
