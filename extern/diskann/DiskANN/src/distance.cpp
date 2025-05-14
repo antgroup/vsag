@@ -10,7 +10,7 @@
 
 #else
 
-#if defined(__i386__) || defined(__x86_64__)
+#if defined ENABLE_AVX && (defined(__i386__) || defined(__x86_64__))
 #include <immintrin.h>
 #elif defined(__ARM_FEATURE_SIMD32) || defined(__ARM_NEON)
 #include <arm_neon.h>
@@ -536,7 +536,7 @@ template <typename T> float DistanceFastL2<T>::norm(const T *a, uint32_t size) c
     return result;
 }
 
-#if defined(__i386__) || defined(__x86_64__)
+#if defined ENABLE_AVX && (defined(__i386__) || defined(__x86_64__))
 float AVXDistanceInnerProductFloat::compare(const float *a, const float *b, uint32_t size) const
 {
     float result = 0.0f;

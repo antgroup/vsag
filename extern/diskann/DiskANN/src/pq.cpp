@@ -385,7 +385,7 @@ void pq_dist_lookup(const uint8_t *pq_ids, const size_t n_pts, const size_t pq_n
 {
     //_mm_prefetch((char*) dists_out, _MM_HINT_T0);
     // FIXME: alternative instruction on aarch64
-#if defined(__i386__) || defined(__x86_64__)
+#if defined ENABLE_AVX && (defined(__i386__) || defined(__x86_64__))
     _mm_prefetch((char *)pq_ids, _MM_HINT_T0);
     _mm_prefetch((char *)(pq_ids + 64), _MM_HINT_T0);
     _mm_prefetch((char *)(pq_ids + 128), _MM_HINT_T0);
@@ -398,7 +398,7 @@ void pq_dist_lookup(const uint8_t *pq_ids, const size_t n_pts, const size_t pq_n
         if (chunk < pq_nchunks - 1)
         {
 	    // FIXME: alternative instruction on aarch64
-#if defined(__i386__) || defined(__x86_64__)
+#if defined ENABLE_AVX && (defined(__i386__) || defined(__x86_64__))
             _mm_prefetch((char *)(chunk_dists + 256), _MM_HINT_T0);
 #endif
         }
@@ -425,7 +425,7 @@ void pq_dist_lookup(const uint8_t *pq_ids, const size_t n_pts, const size_t pq_n
                     float *dists_out)
 {
     // FIXME: alternative instruction on aarch64
-#if defined(__i386__) || defined(__x86_64__)
+#if defined ENABLE_AVX && (defined(__i386__) || defined(__x86_64__))
     _mm_prefetch((char *)dists_out, _MM_HINT_T0);
     _mm_prefetch((char *)pq_ids, _MM_HINT_T0);
     _mm_prefetch((char *)(pq_ids + 64), _MM_HINT_T0);
@@ -438,7 +438,7 @@ void pq_dist_lookup(const uint8_t *pq_ids, const size_t n_pts, const size_t pq_n
         if (chunk < pq_nchunks - 1)
         {
 	    // FIXME: alternative instruction on aarch64
-#if defined(__i386__) || defined(__x86_64__)
+#if defined ENABLE_AVX && (defined(__i386__) || defined(__x86_64__))
             _mm_prefetch((char *)(chunk_dists + 256), _MM_HINT_T0);
 #endif
         }
