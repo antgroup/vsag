@@ -181,7 +181,7 @@ GraphDataCell<IOTmpl>::GetNeighbors(InnerIdType id, Vector<InnerIdType>& neighbo
     if (is_support_delete_) {
         neighbor_count &= remove_flag_mask_;
         start += sizeof(neighbor_count);
-        Vector<InnerIdType> shared_neighbor_ids(this->allocator_);
+        Vector<InnerIdType> shared_neighbor_ids(neighbor_count, this->allocator_);
         this->io_->Read(
             neighbor_count * sizeof(InnerIdType), start, (uint8_t*)(shared_neighbor_ids.data()));
         neighbor_ids.clear();
