@@ -426,5 +426,8 @@ public:
 
     bool
     init_memory_space() override;
+
+    uint64_t
+    estimateMemory(uint64_t num_elements) override;
 };
 }  // namespace hnswlib

@@ -133,6 +133,25 @@ HierarchicalNSW::init_memory_space() {
     return true;
 }
 
+uint64_t
+HierarchicalNSW::estimateMemory(uint64_t num_elements) {
+    size_t size = 0;
+    size += sizeof(unsigned short int) * num_elements;  // visited_list_pool_
+    size += sizeof(int) * num_elements;                 // element_levels_
+    size += num_elements * size_data_per_element_;      // data_level0_memory_
+    if (use_reversed_edges_) {
+        size += sizeof(reverselinklist*) * num_elements;  // reversed_level0_link_list_
+        size += sizeof(vsag::UnorderedMap<int, reverselinklist>*) *
+                num_elements;  // reversed_link_lists_
+    }
+    if (normalize_) {
+        size += sizeof(float) * num_elements;  // molds_
+    }
+    size += sizeof(void*) * num_elements;              // link_lists_
+    size += sizeof(std::shared_mutex) * num_elements;  // points_locks_
+    return size;
+}
+
 HierarchicalNSW::~HierarchicalNSW() {
     if (link_lists_ != nullptr) {
         for (InnerIdType i = 0; i < max_elements_; i++) {

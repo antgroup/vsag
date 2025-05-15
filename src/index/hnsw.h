@@ -265,6 +265,11 @@ public:
         return this->get_memory_usage();
     }
 
+    uint64_t
+    EstimateMemory(uint64_t num_elements) const override {
+        return this->estimate_memory(num_elements);
+    }
+
     std::string
     GetStats() const override;
 
@@ -390,6 +395,9 @@ private:
 
     void
     init_feature_list();
+
+    uint64_t
+    estimate_memory(uint64_t num_elements) const;
 
 private:
     std::shared_ptr<hnswlib::AlgorithmInterface<float>> alg_hnsw_;

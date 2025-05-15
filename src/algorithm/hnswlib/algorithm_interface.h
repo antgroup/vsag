@@ -112,6 +112,11 @@ public:
     virtual bool
     init_memory_space() = 0;
 
+    virtual uint64_t
+    estimateMemory(uint64_t num_elements) {
+        return 0;
+    }
+
     virtual ~AlgorithmInterface() {
     }
 };
