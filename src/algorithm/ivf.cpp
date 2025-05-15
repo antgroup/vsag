@@ -403,7 +403,7 @@ IVF::merge_one_unit(const MergeUnit& unit) {
 }
 
 void
-IVF::check_merge_illegal(const MergeUnit& unit) const {
+IVF::check_merge_illegal(const vsag::MergeUnit& unit) const {
     auto index = std::dynamic_pointer_cast<IndexImpl<IVF>>(unit.index);
     if (index == nullptr) {
         throw VsagException(

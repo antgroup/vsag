@@ -377,7 +377,7 @@ FlattenDataCell<QuantTmpl, IOTmpl>::MergeOther(const FlattenInterfacePtr& other,
     uint64_t read_count = 0;
     while (read_count < total_count) {
         bool need_release = false;
-        uint64_t count = std::min(BUFFER_SIZE, total_count - read_count);
+        uint64_t count = std::min(BUFFER_SIZE / this->code_size_, total_count - read_count);
         uint64_t size = count * this->code_size_;
         auto* buffer = ptr->io_->Read(size, read_count * this->code_size_, need_release);
         this->io_->Write(buffer, size, offset);
@@ -387,5 +387,6 @@ FlattenDataCell<QuantTmpl, IOTmpl>::MergeOther(const FlattenInterfacePtr& other,
         offset += size;
         read_count += count;
     }
+    this->total_count_ += total_count;
 }
 }  // namespace vsag
