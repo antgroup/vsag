@@ -168,6 +168,9 @@ private:
         return ret;
     }
 
+    std::vector<int64_t>
+    build_by_odescent(const DatasetPtr& data);
+
     void
     add_one_point(const void* data, int level, InnerIdType id);
 
@@ -226,6 +229,9 @@ private:
     double mult_{1.0};
 
     InnerIdType entry_point_id_{std::numeric_limits<InnerIdType>::max()};
+
+    ODescentParameterPtr odescent_param_{nullptr};
+    std::string graph_type_{GRAPH_TYPE_NSW};
 
     uint64_t ef_construct_{400};
 
