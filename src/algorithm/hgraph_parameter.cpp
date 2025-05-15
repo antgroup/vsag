@@ -83,6 +83,14 @@ HGraphParameter::FromJson(const JsonType& json) {
         }
     }
 
+    if (graph_json.contains(GRAPH_TYPE_KEY)) {
+        graph_type = graph_json[GRAPH_TYPE_KEY];
+        if (graph_type == GRAPH_TYPE_ODESCENT) {
+            odescent_param = std::make_shared<ODescentParameter>();
+            odescent_param->FromJson(graph_json);
+        }
+    }
+
     CHECK_ARGUMENT(json.contains(HGRAPH_EXTRA_INFO_KEY),
                    fmt::format("hgraph parameters must contains {}", HGRAPH_EXTRA_INFO_KEY));
     const auto& extra_info_json = json[HGRAPH_EXTRA_INFO_KEY];

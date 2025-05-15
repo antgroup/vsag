@@ -81,6 +81,7 @@ extern const char* const ODESCENT_PARAMETER_MIN_IN_DEGREE;
 extern const char* const ODESCENT_PARAMETER_BUILD_BLOCK_SIZE;
 extern const char* const DISKANN_GRAPH_TYPE_VAMANA;
 extern const char* const GRAPH_TYPE_ODESCENT;
+extern const char* const GRAPH_TYPE_NSW;
 
 extern const char* const DISKANN_PARAMETER_BEAM_SEARCH;
 extern const char* const DISKANN_PARAMETER_IO_LIMIT;
@@ -135,6 +136,7 @@ extern const char* const HGRAPH_BASE_QUANTIZATION_TYPE;
 extern const char* const HGRAPH_GRAPH_MAX_DEGREE;
 extern const char* const HGRAPH_BUILD_EF_CONSTRUCTION;
 extern const char* const HGRAPH_INIT_CAPACITY;
+extern const char* const HGRAPH_GRAPH_TYPE;
 extern const char* const HGRAPH_BUILD_THREAD_COUNT;
 extern const char* const HGRAPH_PRECISE_QUANTIZATION_TYPE;
 extern const char* const HGRAPH_BASE_IO_TYPE;

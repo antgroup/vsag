@@ -19,7 +19,9 @@
 #include "data_cell/flatten_datacell_parameter.h"
 #include "data_cell/graph_interface_parameter.h"
 #include "data_type.h"
+#include "impl/odescent_graph_parameter.h"
 #include "parameter.h"
+#include "vsag/constants.h"
 
 namespace vsag {
 
@@ -40,6 +42,9 @@ public:
     FlattenInterfaceParamPtr precise_codes_param{nullptr};
     GraphInterfaceParamPtr bottom_graph_param{nullptr};
     ExtraInfoDataCellParamPtr extra_info_param{nullptr};
+    ODescentParameterPtr odescent_param{nullptr};
+
+    std::string graph_type{GRAPH_TYPE_NSW};
 
     bool use_reorder{false};
     bool use_elp_optimizer{false};

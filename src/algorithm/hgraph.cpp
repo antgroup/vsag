@@ -24,6 +24,7 @@
 #include "data_cell/graph_datacell_parameter.h"
 #include "data_cell/sparse_graph_datacell.h"
 #include "dataset_impl.h"
+#include "impl/odescent_graph_builder.h"
 #include "impl/pruning_strategy.h"
 #include "index/iterator_filter.h"
 #include "utils/standard_heap.h"
@@ -39,6 +40,8 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
       ignore_reorder_(hgraph_param->ignore_reorder),
       ef_construct_(hgraph_param->ef_construction),
       build_thread_count_(hgraph_param->build_thread_count),
+      odescent_param_(hgraph_param->odescent_param),
+      graph_type_(hgraph_param->graph_type),
       extra_info_size_(common_param.extra_info_size_) {
     neighbors_mutex_ = std::make_shared<PointsMutex>(0, common_param.allocator_.get());
     this->basic_flatten_codes_ =
@@ -102,12 +105,75 @@ HGraph::Train(const DatasetPtr& base) {
 
 std::vector<int64_t>
 HGraph::Build(const DatasetPtr& data) {
+    CHECK_ARGUMENT(GetNumElements() == 0, "index is not empty");
     this->Train(data);
-    auto ret = this->Add(data);
+    std::vector<int64_t> ret;
+    if (graph_type_ == GRAPH_TYPE_NSW) {
+        ret = this->Add(data);
+    } else {
+        ret = this->build_by_odescent(data);
+    }
     if (use_elp_optimizer_) {
         elp_optimize();
     }
     return ret;
+}
+
+std::vector<int64_t>
+HGraph::build_by_odescent(const DatasetPtr& data) {
+    std::vector<int64_t> failed_ids;
+
+    auto total = data->GetNumElements();
+    const auto* labels = data->GetIds();
+    const auto* vectors = data->GetFloat32Vectors();
+    const auto* extra_infos = data->GetExtraInfos();
+    auto inner_ids = this->get_unique_inner_ids(total);
+    Vector<Vector<InnerIdType>> route_graph_ids(allocator_);
+    InnerIdType cur_size = 0;
+    for (int64_t i = 0; i < total; ++i) {
+        auto label = labels[i];
+        if (this->label_table_->CheckLabel(label)) {
+            failed_ids.emplace_back(label);
+            continue;
+        }
+        InnerIdType inner_id = inner_ids.at(cur_size);
+        cur_size++;
+        this->label_table_->Insert(inner_id, label);
+        this->basic_flatten_codes_->InsertVector(vectors + dim_ * i, inner_id);
+        if (use_reorder_) {
+            this->high_precise_codes_->InsertVector(vectors + dim_ * i, inner_id);
+        }
+        auto level = this->get_random_level() - 1;
+        if (level >= 0) {
+            if (level >= static_cast<int>(route_graph_ids.size()) || route_graph_ids.empty()) {
+                for (auto k = static_cast<int>(route_graph_ids.size()); k <= level; ++k) {
+                    route_graph_ids.emplace_back(Vector<InnerIdType>(allocator_));
+                }
+                entry_point_id_ = inner_id;
+            }
+            for (int j = 0; j <= level; ++j) {
+                route_graph_ids[j].emplace_back(inner_id);
+            }
+        }
+    }
+    this->resize(total_count_);
+    auto build_data = use_reorder_ ? this->high_precise_codes_ : this->basic_flatten_codes_;
+    {
+        odescent_param_->max_degree = bottom_graph_->MaximumDegree();
+        ODescent odescent_builder(odescent_param_, build_data, allocator_, this->build_pool_.get());
+        odescent_builder.Build();
+        odescent_builder.SaveGraph(bottom_graph_);
+    }
+    for (auto& route_graph_id : route_graph_ids) {
+        odescent_param_->max_degree = bottom_graph_->MaximumDegree() / 2;
+        ODescent sparse_odescent_builder(
+            odescent_param_, build_data, allocator_, this->build_pool_.get());
+        auto graph = this->generate_one_route_graph();
+        sparse_odescent_builder.Build(route_graph_id);
+        sparse_odescent_builder.SaveGraph(graph);
+        this->route_graphs_.emplace_back(graph);
+    }
+    return failed_ids;
 }
 
 std::vector<int64_t>
@@ -935,6 +1001,13 @@ static const std::string HGRAPH_PARAMS_TEMPLATE =
                 "{IO_TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
                 "{IO_FILE_PATH}": "{DEFAULT_FILE_PATH_VALUE}"
             },
+            "{GRAPH_TYPE_KEY}": "{GRAPH_TYPE_NSW}",
+            "{ODESCENT_PARAMETER_BUILD_BLOCK_SIZE}": 10000,
+            "{ODESCENT_PARAMETER_MIN_IN_DEGREE}": 1,
+            "{ODESCENT_PARAMETER_ALPHA}": 1.2,
+            "{ODESCENT_PARAMETER_GRAPH_ITER_TURN}": 30,
+            "{ODESCENT_PARAMETER_NEIGHBOR_SAMPLE_RATE}": 0.2,
+            "{GRAPH_PARAM_MAX_DEGREE}": 64,
             "{GRAPH_PARAM_MAX_DEGREE}": 64,
             "{GRAPH_PARAM_INIT_MAX_CAPACITY}": 100
         },
@@ -1070,6 +1143,48 @@ HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
             },
         },
         {
+            HGRAPH_GRAPH_TYPE,
+            {
+                HGRAPH_GRAPH_KEY,
+                GRAPH_TYPE_KEY,
+            },
+        },
+        {
+            ODESCENT_PARAMETER_ALPHA,
+            {
+                HGRAPH_GRAPH_KEY,
+                ODESCENT_PARAMETER_ALPHA,
+            },
+        },
+        {
+            ODESCENT_PARAMETER_GRAPH_ITER_TURN,
+            {
+                HGRAPH_GRAPH_KEY,
+                ODESCENT_PARAMETER_GRAPH_ITER_TURN,
+            },
+        },
+        {
+            ODESCENT_PARAMETER_NEIGHBOR_SAMPLE_RATE,
+            {
+                HGRAPH_GRAPH_KEY,
+                ODESCENT_PARAMETER_NEIGHBOR_SAMPLE_RATE,
+            },
+        },
+        {
+            ODESCENT_PARAMETER_MIN_IN_DEGREE,
+            {
+                HGRAPH_GRAPH_KEY,
+                ODESCENT_PARAMETER_MIN_IN_DEGREE,
+            },
+        },
+        {
+            ODESCENT_PARAMETER_BUILD_BLOCK_SIZE,
+            {
+                HGRAPH_GRAPH_KEY,
+                ODESCENT_PARAMETER_BUILD_BLOCK_SIZE,
+            },
+        },
+        {
             HGRAPH_BUILD_THREAD_COUNT,
             {
                 BUILD_PARAMS_KEY,
@@ -1109,7 +1224,6 @@ HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
             },
         },
     };
-
     if (common_param.data_type_ == DataTypes::DATA_TYPE_INT8) {
         throw VsagException(ErrorType::INVALID_ARGUMENT,
                             fmt::format("HGraph not support {} datatype", DATATYPE_INT8));
