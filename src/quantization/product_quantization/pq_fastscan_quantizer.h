@@ -94,8 +94,8 @@ public:
         return QUANTIZATION_TYPE_VALUE_PQFS;
     }
 
-    inline void
-    Package32(const uint8_t* codes, uint8_t* packaged_codes) const;
+    void
+    Package32(const uint8_t* codes, uint8_t* packaged_codes) const override;
 
 private:
     [[nodiscard]] inline const float*
@@ -339,6 +339,10 @@ PQFastScanQuantizer<metric>::ScanBatchDistImpl(Computer<PQFastScanQuantizer<metr
     auto map_int32_to_float = [&](int32_t* from, float* to, int64_t map_count) {
         for (int j = 0; j < map_count; ++j) {
             to[j] = from[j] / 255.0F * diff + lower;
+            if constexpr (metric == MetricType::METRIC_TYPE_COSINE or
+                          metric == MetricType::METRIC_TYPE_IP) {
+                to[j] = 1.0F - to[j];
+            }
         }
     };
 
@@ -388,16 +392,20 @@ PQFastScanQuantizer<metric>::Package32(const uint8_t* codes, uint8_t* packaged_c
                                     4, 20, 12, 28, 5, 21, 13, 29, 6, 22, 14, 30, 7, 23, 15, 31};
 
     auto get_code = [&](int64_t vector_index, int64_t space_index) -> uint8_t {
-        auto code = codes[vector_index * this->code_size_ + space_index / 2];
+        uint8_t code = codes[vector_index * this->code_size_ + space_index / 2];
         if (space_index % 2 == 0) {
             return code & 0x0F;
         }
-        return code & 0xF0;
+        return code >> 4L;
     };
     memset(packaged_codes, 0, this->code_size_ * BLOCK_SIZE_PACKAGE);
     for (int i = 0; i < this->pq_dim_; ++i) {
         for (int j = 0; j < BLOCK_SIZE_PACKAGE; ++j) {
-            packaged_codes[i * BLOCK_SIZE_PACKAGE / 2 + j / 2] |= get_code(mapper[j], i);
+            auto code = get_code(mapper[j], i);
+            if (j % 2 == 1) {
+                code <<= 4L;
+            }
+            packaged_codes[i * BLOCK_SIZE_PACKAGE / 2 + j / 2] |= code;
         }
     }
 }
