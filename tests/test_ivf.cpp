@@ -56,7 +56,8 @@ public:
         {"sq8", 0.84},
         {"sq8_uniform", 0.83},
         {"sq8_uniform,fp32", 0.89},
-        {"pq,fp32", 0.80},
+        {"pq,fp32", 0.82},
+        {"pqfs,fp32", 0.82},
     };
 };
 
@@ -87,14 +88,15 @@ IVFTestIndex::GenerateIVFBuildParametersString(const std::string& metric_type,
         }}
     }}
     )";
-    auto pq_dim = dim;
-    if (dim % 2 == 0) {
-        pq_dim = dim / 2;
-    }
+
     auto strs = fixtures::SplitString(quantization_str, ',');
     std::string basic_quantizer_str = strs[0];
     bool use_reorder = false;
     std::string precise_quantizer_str = "fp32";
+    auto pq_dim = dim;
+    if (dim % 2 == 0 && basic_quantizer_str == "pq") {
+        pq_dim = dim / 2;
+    }
     if (strs.size() == 2) {
         use_reorder = true;
         precise_quantizer_str = strs[1];

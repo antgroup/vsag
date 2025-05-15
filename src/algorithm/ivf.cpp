@@ -167,22 +167,36 @@ IVF::InitFeatures() {
         IndexFeature::SUPPORT_EXPORT_MODEL,
         IndexFeature::SUPPORT_MERGE_INDEX,
     });
+
+    if (this->bucket_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_PQFS) {
+        this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_ADD_AFTER_BUILD, false);
+        // TODO(LHT): merge on ivfpqfs
+        this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_MERGE_INDEX, false);
+    }
 }
 
 std::vector<int64_t>
 IVF::Build(const DatasetPtr& base) {
     this->Train(base);
     // TODO(LHT): duplicate
-    return this->Add(base);
+    auto result = this->Add(base);
+    if (this->bucket_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_PQFS) {
+        this->bucket_->Package();
+    }
+    return result;
 }
 
 void
 IVF::Train(const DatasetPtr& data) {
+    if (this->is_trained_) {
+        return;
+    }
     partition_strategy_->Train(data);
     this->bucket_->Train(data->GetFloat32Vectors(), data->GetNumElements());
     if (use_reorder_) {
         this->reorder_codes_->Train(data->GetFloat32Vectors(), data->GetNumElements());
     }
+    this->is_trained_ = true;
 }
 
 std::vector<int64_t>
@@ -276,6 +290,8 @@ void
 IVF::Serialize(StreamWriter& writer) const {
     StreamWriter::WriteObj(writer, this->total_elements_);
     StreamWriter::WriteObj(writer, this->use_reorder_);
+    StreamWriter::WriteObj(writer, this->is_trained_);
+
     this->bucket_->Serialize(writer);
     this->partition_strategy_->Serialize(writer);
     this->label_table_->Serialize(writer);
@@ -288,6 +304,8 @@ void
 IVF::Deserialize(StreamReader& reader) {
     StreamReader::ReadObj(reader, this->total_elements_);
     StreamReader::ReadObj(reader, this->use_reorder_);
+    StreamReader::ReadObj(reader, this->is_trained_);
+
     this->bucket_->Deserialize(reader);
     this->partition_strategy_->Deserialize(reader);
     this->label_table_->Deserialize(reader);
@@ -337,6 +355,7 @@ IVF::ExportModel(const IndexCommonParam& param) const {
     if (use_reorder_) {
         this->reorder_codes_->ExportModel(index->reorder_codes_);
     }
+    index->is_trained_ = this->is_trained_;
     return index;
 }
 

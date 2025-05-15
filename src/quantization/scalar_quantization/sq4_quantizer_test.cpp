@@ -66,7 +66,7 @@ TEST_CASE("SQ4 Compute", "[ut][SQ4Quantizer]") {
         MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_COSINE, MetricType::METRIC_TYPE_IP};
 
     for (auto dim : dims) {
-        float error = 0.1f * dim;
+        float error = 0.1F * dim;
         for (auto count : counts) {
             TestComputeMetricSQ4<metrics[0]>(dim, count, error);
             TestComputeMetricSQ4<metrics[1]>(dim, count, error);

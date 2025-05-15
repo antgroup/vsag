@@ -42,9 +42,7 @@ TEST_CASE("ProductQuantizer Encode and Decode", "[ut][ProductQuantizer]") {
     float error = 8.0F / 255.0F;
     int64_t pq_dim;
     for (auto dim : dims) {
-        if (dim % 4 == 0) {
-            pq_dim = dim / 4;
-        } else if (dim % 2 == 0) {
+        if (dim % 2 == 0) {
             pq_dim = dim / 2;
         } else {
             pq_dim = dim;
@@ -64,8 +62,8 @@ void
 TestComputeMetricPQ(uint64_t dim, int64_t pq_dim, int count, float error = 1e-5) {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     ProductQuantizer<metric> quantizer(dim, pq_dim, allocator.get());
-    TestComputer<ProductQuantizer<metric>, metric>(quantizer, dim, count, error * dim);
-    TestComputeCodes<ProductQuantizer<metric>, metric>(quantizer, dim, count, error * 2.0F * dim);
+    TestComputer<ProductQuantizer<metric>, metric>(quantizer, dim, count, error);
+    TestComputeCodes<ProductQuantizer<metric>, metric>(quantizer, dim, count, error * dim);
 }
 
 TEST_CASE("ProductQuantizer Compute", "[ut][ProductQuantizer]") {
@@ -77,9 +75,7 @@ TEST_CASE("ProductQuantizer Compute", "[ut][ProductQuantizer]") {
     float error = 8.0F / 255.0F;
     int64_t pq_dim;
     for (auto dim : dims) {
-        if (dim % 4 == 0) {
-            pq_dim = dim / 4;
-        } else if (dim % 2 == 0) {
+        if (dim % 2 == 0) {
             pq_dim = dim / 2;
         } else {
             pq_dim = dim;
