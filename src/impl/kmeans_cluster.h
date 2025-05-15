@@ -15,6 +15,7 @@
 
 #pragma once
 
+#include "safe_thread_pool.h"
 #include "typing.h"
 #include "vsag/allocator.h"
 
@@ -22,7 +23,9 @@ namespace vsag {
 
 class KMeansCluster {
 public:
-    explicit KMeansCluster(int32_t dim, Allocator* allocator);
+    explicit KMeansCluster(int32_t dim,
+                           Allocator* allocator,
+                           SafeThreadPoolPtr thread_pool = nullptr);
 
     ~KMeansCluster();
 
@@ -34,6 +37,8 @@ public:
 
 private:
     Allocator* const allocator_{nullptr};
+
+    SafeThreadPoolPtr thread_pool_{nullptr};
 
     const int32_t dim_{0};
 };
