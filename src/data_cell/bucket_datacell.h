@@ -19,6 +19,7 @@
 
 #include "bucket_interface.h"
 #include "byte_buffer.h"
+#include "quantization/product_quantization/pq_fastscan_quantizer.h"
 
 namespace vsag {
 
@@ -65,6 +66,13 @@ public:
     Prefetch(BucketIdType bucket_id, InnerIdType offset_id) override {
         this->check_valid_bucket_id(bucket_id);
         this->datas_[bucket_id]->Prefetch(offset_id * code_size_, code_size_);
+    }
+
+    void
+    Package() override {
+        if (GetQuantizerName() == QUANTIZATION_TYPE_VALUE_PQFS) {
+            this->package_fastscan();
+        }
     }
 
     void
@@ -116,6 +124,9 @@ private:
     insert_vector_with_locate(const float* vector,
                               const BucketIdType& bucket_id,
                               const InnerIdType& offset_id);
+
+    inline void
+    package_fastscan();
 
 private:
     std::shared_ptr<QuantTmpl> quantizer_{nullptr};
@@ -264,6 +275,29 @@ BucketDataCell<QuantTmpl, IOTmpl>::Deserialize(StreamReader& reader) {
         StreamReader::ReadVector(reader, inner_ids_[i]);
     }
     StreamReader::ReadVector(reader, this->bucket_sizes_);
+}
+
+template <typename QuantTmpl, typename IOTmpl>
+void
+BucketDataCell<QuantTmpl, IOTmpl>::package_fastscan() {
+    ByteBuffer buffer(code_size_ * 32, this->allocator_);
+    for (int64_t i = 0; i < this->bucket_count_; ++i) {
+        auto bucket_size = this->bucket_sizes_[i];
+        if (bucket_size == 0) {
+            continue;
+        }
+        bool need_release = false;
+        const auto* codes = this->datas_[i]->Read(code_size_ * bucket_size, 0, need_release);
+        InnerIdType begin = 0;
+        while (begin < bucket_size) {
+            quantizer_->Package32(codes + begin * code_size_, buffer.data);
+            this->datas_[i]->Write(buffer.data, code_size_ * 32, begin * code_size_);
+            begin += 32;
+        }
+        if (need_release) {
+            this->datas_[i]->Release(codes);
+        }
+    }
 }
 
 template <typename QuantTmpl, typename IOTmpl>
