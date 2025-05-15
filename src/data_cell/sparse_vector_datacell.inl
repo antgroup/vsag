@@ -98,6 +98,7 @@ SparseVectorDataCell<QuantTmpl, IOTmpl>::InsertVector(const void* vector, InnerI
         std::lock_guard lock(current_offset_mutex_);
         old_offset = current_offset_;
         current_offset_ += code_size;
+        total_count_ = std::max(total_count_, idx + 1);
     }
     offset_io_->Write(
         (uint8_t*)&old_offset, sizeof(current_offset_), idx * sizeof(current_offset_));
