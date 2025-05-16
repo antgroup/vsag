@@ -17,11 +17,25 @@ jobs:
       image: vsaglib/vsag:ci-x86
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: '0'
+      - name: Change Time
+        run: |
+          git config --global --add safe.directory /__w/vsag/vsag
+          sh -x ./scripts/change_mtime.sh
       - name: Load Cache
         uses: actions/cache@v4
         with:
-          path: ./build/
-          key: build-${{ hashFiles('./CMakeLists.txt') }}-${{ hashFiles('./.circleci/fresh_ci_cache.commit') }}-tsan
+          path: ./build.tar.gz
+          key: build-tsan-${{ hashFiles('./CMakeLists.txt') }}-${{ hashFiles('./.circleci/fresh_ci_cache.commit') }}
+      - name: Extract
+        run: |
+          if [ -f build.tar.gz ]; then
+            tar -xzvf build.tar.gz;
+            rm -rf build.tar.gz;
+          else
+            mkdir -p build;
+          fi
       - name: Make Tsan
         run: export CMAKE_GENERATOR="Ninja"; make tsan
       - name: Save Test
@@ -32,6 +46,11 @@ jobs:
           compression-level: 1
           retention-days: 1
           overwrite: 'true'
+      - name: Compress
+        run: |
+          sudo apt install pigz -y;
+          tar -cf - ./build | pigz -p 4 > build.tar.gz
+
   test_tsan:
     name: Run TSAN Tests
     needs: build_tsan
