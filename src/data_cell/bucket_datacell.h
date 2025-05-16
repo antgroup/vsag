@@ -19,6 +19,7 @@
 
 #include "bucket_interface.h"
 #include "byte_buffer.h"
+#include "quantization/product_quantization/pq_fastscan_quantizer.h"
 
 namespace vsag {
 
@@ -68,18 +69,17 @@ public:
     }
 
     void
-    ExportModel(const BucketInterfacePtr& other) const override {
-        std::stringstream ss;
-        IOStreamWriter writer(ss);
-        this->quantizer_->Serialize(writer);
-        ss.seekg(0, std::ios::beg);
-        IOStreamReader reader(ss);
-        auto ptr = std::dynamic_pointer_cast<BucketDataCell<QuantTmpl, IOTmpl>>(other);
-        if (ptr == nullptr) {
-            throw VsagException(ErrorType::INTERNAL_ERROR, "Export model's bucket datacell failed");
+    Package() override {
+        if (GetQuantizerName() == QUANTIZATION_TYPE_VALUE_PQFS) {
+            this->package_fastscan();
         }
-        ptr->quantizer_->Deserialize(reader);
     }
+
+    void
+    ExportModel(const BucketInterfacePtr& other) const override;
+
+    void
+    MergeOther(const BucketInterfacePtr& other, InnerIdType bias) override;
 
     void
     Serialize(StreamWriter& writer) override;
@@ -124,6 +124,9 @@ private:
     insert_vector_with_locate(const float* vector,
                               const BucketIdType& bucket_id,
                               const InnerIdType& offset_id);
+
+    inline void
+    package_fastscan();
 
 private:
     std::shared_ptr<QuantTmpl> quantizer_{nullptr};
@@ -197,7 +200,7 @@ BucketDataCell<QuantTmpl, IOTmpl>::scan_bucket_by_id(
         bool need_release = false;
         const auto* codes = this->datas_[bucket_id]->Read(
             code_size_ * compute_count, offset * code_size_, need_release);
-        computer->ComputeBatchDists(compute_count, codes, result_dists + offset);
+        computer->ScanBatchDists(compute_count, codes, result_dists + offset);
         if (need_release) {
             this->datas_[bucket_id]->Release(codes);
         }
@@ -272,6 +275,72 @@ BucketDataCell<QuantTmpl, IOTmpl>::Deserialize(StreamReader& reader) {
         StreamReader::ReadVector(reader, inner_ids_[i]);
     }
     StreamReader::ReadVector(reader, this->bucket_sizes_);
+}
+
+template <typename QuantTmpl, typename IOTmpl>
+void
+BucketDataCell<QuantTmpl, IOTmpl>::package_fastscan() {
+    ByteBuffer buffer(code_size_ * 32, this->allocator_);
+    for (int64_t i = 0; i < this->bucket_count_; ++i) {
+        auto bucket_size = this->bucket_sizes_[i];
+        if (bucket_size == 0) {
+            continue;
+        }
+        bool need_release = false;
+        const auto* codes = this->datas_[i]->Read(code_size_ * bucket_size, 0, need_release);
+        InnerIdType begin = 0;
+        while (begin < bucket_size) {
+            quantizer_->Package32(codes + begin * code_size_, buffer.data);
+            this->datas_[i]->Write(buffer.data, code_size_ * 32, begin * code_size_);
+            begin += 32;
+        }
+        if (need_release) {
+            this->datas_[i]->Release(codes);
+        }
+    }
+}
+
+template <typename QuantTmpl, typename IOTmpl>
+void
+BucketDataCell<QuantTmpl, IOTmpl>::ExportModel(const BucketInterfacePtr& other) const {
+    std::stringstream ss;
+    IOStreamWriter writer(ss);
+    this->quantizer_->Serialize(writer);
+    ss.seekg(0, std::ios::beg);
+    IOStreamReader reader(ss);
+    auto ptr = std::dynamic_pointer_cast<BucketDataCell<QuantTmpl, IOTmpl>>(other);
+    if (ptr == nullptr) {
+        throw VsagException(ErrorType::INTERNAL_ERROR, "Export model's bucket datacell failed");
+    }
+    ptr->quantizer_->Deserialize(reader);
+}
+
+template <typename QuantTmpl, typename IOTmpl>
+void
+BucketDataCell<QuantTmpl, IOTmpl>::MergeOther(const BucketInterfacePtr& other, InnerIdType bias) {
+    auto ptr = std::dynamic_pointer_cast<BucketDataCell<QuantTmpl, IOTmpl>>(other);
+    if (ptr == nullptr) {
+        throw VsagException(ErrorType::INTERNAL_ERROR, "Merge other's bucket datacell failed");
+    }
+    for (int i = 0; i < ptr->bucket_count_; ++i) {
+        bool need_release = false;
+        if (ptr->bucket_sizes_[i] == 0) {
+            continue;
+        }
+        auto* other_data =
+            ptr->datas_[i]->Read(ptr->bucket_sizes_[i] * this->code_size_, 0, need_release);
+        this->datas_[i]->Write(other_data,
+                               ptr->bucket_sizes_[i] * this->code_size_,
+                               this->bucket_sizes_[i] * this->code_size_);
+        if (need_release) {
+            ptr->datas_[i]->Release(other_data);
+        }
+        this->bucket_sizes_[i] += ptr->bucket_sizes_[i];
+        this->inner_ids_[i].reserve(this->bucket_sizes_[i]);
+        for (auto id : ptr->inner_ids_[i]) {
+            this->inner_ids_[i].emplace_back(id + bias);
+        }
+    }
 }
 
 }  // namespace vsag

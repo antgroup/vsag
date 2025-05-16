@@ -264,6 +264,9 @@ void
 TestIndex::TestContinueAdd(const IndexPtr& index,
                            const TestDatasetPtr& dataset,
                            bool expected_success) {
+    if (not index->CheckFeature(vsag::SUPPORT_ADD_AFTER_BUILD)) {
+        return;
+    }
     auto base_count = dataset->base_->GetNumElements();
     int64_t temp_count = std::max(1L, dataset->base_->GetNumElements() / 2);
     auto dim = dataset->base_->GetDim();
@@ -385,7 +388,7 @@ TestIndex::TestKnnSearch(const IndexPtr& index,
                          const std::string& search_param,
                          float expected_recall,
                          bool expected_success) {
-    if (not index->CheckFeature(vsag::SUPPORT_RANGE_SEARCH)) {
+    if (not index->CheckFeature(vsag::SUPPORT_KNN_SEARCH)) {
         return;
     }
     auto queries = dataset->query_;
@@ -1322,6 +1325,58 @@ TestIndex::TestMergeIndex(const std::string& name,
     return index;
 }
 
+TestIndex::IndexPtr
+TestIndex::TestMergeIndexWithSameModel(const TestIndex::IndexPtr model,
+                                       const TestDatasetPtr& dataset,
+                                       int32_t split_num,
+                                       bool expect_success) {
+    if (not model->CheckFeature(vsag::SUPPORT_MERGE_INDEX)) {
+        return nullptr;
+    }
+    if (not model->CheckFeature(vsag::SUPPORT_CLONE)) {
+        return nullptr;
+    }
+    auto& raw_data = dataset->base_;
+    std::vector<vsag::DatasetPtr> sub_datasets;
+    int64_t all_data_num = raw_data->GetNumElements();
+    int64_t data_dim = raw_data->GetDim();
+    const float* vectors = raw_data->GetFloat32Vectors();  // shape = (all_data_num, data_dim)
+    const int64_t* ids = raw_data->GetIds();               // shape = (all_data_num)
+    int64_t subset_size = all_data_num / split_num;
+    int64_t remaining = all_data_num % split_num;
+
+    int64_t start_index = 0;
+
+    for (int64_t i = 0; i < split_num; ++i) {
+        int64_t current_subset_size = subset_size + (i < remaining ? 1 : 0);
+        auto subset = vsag::Dataset::Make();
+        subset->Float32Vectors(vectors + start_index * data_dim);
+        subset->Ids(ids + start_index);
+        subset->NumElements(current_subset_size);
+        subset->Dim(data_dim);
+        subset->Owner(false);
+        sub_datasets.push_back(subset);
+        start_index += current_subset_size;
+    }
+    std::vector<vsag::MergeUnit> merge_units;
+    for (auto sub_dataset : sub_datasets) {
+        auto new_index_result = model->Clone();
+        REQUIRE(new_index_result.has_value() == expect_success);
+        auto new_index = new_index_result.value();
+        new_index->Add(sub_dataset);
+        vsag::IdMapFunction id_map = [](int64_t id) -> std::tuple<bool, int64_t> {
+            return std::make_tuple(true, id);
+        };
+        merge_units.push_back({new_index, id_map});
+    }
+    auto index_result = model->Clone();
+    REQUIRE(index_result.has_value() == expect_success);
+    auto index = index_result.value();
+    auto merge_result = index->Merge(merge_units);
+    REQUIRE(merge_result.has_value());
+    return index;
+}
+
 void
 TestIndex::TestGetExtraInfoById(const TestIndex::IndexPtr& index,
                                 const TestDatasetPtr& dataset,
@@ -1451,9 +1506,16 @@ TestIndex::TestExportModel(const TestIndex::IndexPtr& index,
     auto index_model_result = index->ExportModel();
     REQUIRE(index_model_result.has_value() == true);
     auto& index_model = index_model_result.value();
-
-    auto add_index = index_model->Add(dataset->base_);
-    REQUIRE(add_index.has_value());
+    tl::expected<std::vector<int64_t>, vsag::Error> add_index;
+    if (index->CheckFeature(vsag::SUPPORT_ADD_AFTER_BUILD)) {
+        add_index = index_model->Add(dataset->base_);
+        REQUIRE(add_index.has_value());
+    } else if (index->CheckFeature(vsag::SUPPORT_BUILD)) {
+        add_index = index_model->Build(dataset->base_);
+        REQUIRE(add_index.has_value());
+    } else {
+        return;
+    }
 
     const auto& queries = dataset->query_;
     auto query_count = queries->GetNumElements();

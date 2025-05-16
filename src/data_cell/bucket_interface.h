@@ -73,6 +73,9 @@ public:
     virtual void
     ExportModel(const BucketInterfacePtr& other) const = 0;
 
+    virtual void
+    MergeOther(const BucketInterfacePtr& other, InnerIdType bias) = 0;
+
 public:
     virtual void
     Prefetch(BucketIdType bucket_id) {
@@ -95,6 +98,9 @@ public:
         StreamReader::ReadObj(reader, this->bucket_count_);
         StreamReader::ReadObj(reader, this->code_size_);
     }
+
+    virtual void
+    Package(){};
 
 public:
     BucketIdType bucket_count_{0};

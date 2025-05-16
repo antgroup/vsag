@@ -13,34 +13,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#pragma once
-
-#include "safe_thread_pool.h"
-#include "typing.h"
-#include "vsag/allocator.h"
+#include "label_table.h"
 
 namespace vsag {
 
-class KMeansCluster {
-public:
-    explicit KMeansCluster(int32_t dim,
-                           Allocator* allocator,
-                           SafeThreadPoolPtr thread_pool = nullptr);
-
-    ~KMeansCluster();
-
-    Vector<int>
-    Run(uint32_t k, const float* datas, uint64_t count, int iter = 25, double* err = nullptr);
-
-public:
-    float* k_centroids_{nullptr};
-
-private:
-    Allocator* const allocator_{nullptr};
-
-    SafeThreadPoolPtr thread_pool_{nullptr};
-
-    const int32_t dim_{0};
-};
-
+void
+LabelTable::MergeOther(const LabelTablePtr& other, InnerIdType bias) {
+    this->label_table_.reserve(this->label_table_.size() + other->label_table_.size());
+    std::copy(other->label_table_.begin(),
+              other->label_table_.end(),
+              std::back_inserter(this->label_table_));
+    for (auto& [label, id] : other->label_remap_) {
+        this->label_remap_[label] = id + bias;
+    }
+}
 }  // namespace vsag

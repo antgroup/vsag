@@ -25,6 +25,7 @@
 #include "stream_reader.h"
 #include "stream_writer.h"
 #include "typing.h"
+#include "utils/distance_heap.h"
 #include "vsag/index.h"
 
 namespace vsag {
@@ -81,6 +82,9 @@ public:
                 int64_t limited_size = -1) const override;
 
     void
+    Merge(const std::vector<MergeUnit>& merge_units) override;
+
+    void
     Serialize(StreamWriter& writer) const override;
 
     void
@@ -94,11 +98,17 @@ private:
     create_search_param(const std::string& parameters, const FilterPtr& filter) const;
 
     template <InnerSearchMode mode = KNN_SEARCH>
-    MaxHeap
+    DistHeapPtr
     search(const DatasetPtr& query, const InnerSearchParam& param) const;
 
     DatasetPtr
-    reorder(int64_t topk, MaxHeap& input, const float* query) const;
+    reorder(int64_t topk, DistHeapPtr& input, const float* query) const;
+
+    void
+    merge_one_unit(const MergeUnit& unit);
+
+    void
+    check_merge_illegal(const MergeUnit& unit) const;
 
 private:
     BucketInterfacePtr bucket_{nullptr};
@@ -109,6 +119,8 @@ private:
     int64_t total_elements_{0};
 
     bool use_reorder_{false};
+
+    bool is_trained_{false};
 
     FlattenInterfacePtr reorder_codes_{nullptr};
 };

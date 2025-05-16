@@ -17,6 +17,7 @@
 
 #include "inner_index_interface.h"
 #include "sparse_index_parameters.h"
+#include "utils/distance_heap.h"
 
 namespace vsag {
 
@@ -110,7 +111,7 @@ public:
 
 private:
     DatasetPtr
-    collect_results(MaxHeap& results) const;
+    collect_results(const DistHeapPtr& results) const;
 
     std::tuple<Vector<uint32_t>, Vector<float>>
     sort_sparse_vector(const SparseVector& vector) const;

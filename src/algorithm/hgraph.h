@@ -34,6 +34,7 @@
 #include "inner_index_interface.h"
 #include "lock_strategy.h"
 #include "typing.h"
+#include "utils/distance_heap.h"
 #include "utils/visited_list.h"
 #include "vsag/index.h"
 #include "vsag/index_features.h"
@@ -167,6 +168,9 @@ private:
         return ret;
     }
 
+    std::vector<int64_t>
+    build_by_odescent(const DatasetPtr& data);
+
     void
     add_one_point(const void* data, int level, InnerIdType id);
 
@@ -180,14 +184,14 @@ private:
     generate_one_route_graph();
 
     template <InnerSearchMode mode = InnerSearchMode::KNN_SEARCH>
-    MaxHeap
+    DistHeapPtr
     search_one_graph(const void* query,
                      const GraphInterfacePtr& graph,
                      const FlattenInterfacePtr& flatten,
                      InnerSearchParam& inner_search_param) const;
 
     template <InnerSearchMode mode = InnerSearchMode::KNN_SEARCH>
-    MaxHeap
+    DistHeapPtr
     search_one_graph(const void* query,
                      const GraphInterfacePtr& graph,
                      const FlattenInterfacePtr& flatten,
@@ -203,7 +207,7 @@ private:
     void
     reorder(const void* query,
             const FlattenInterfacePtr& flatten_interface,
-            MaxHeap& candidate_heap,
+            const DistHeapPtr& candidate_heap,
             int64_t k) const;
 
     void
@@ -225,6 +229,9 @@ private:
     double mult_{1.0};
 
     InnerIdType entry_point_id_{std::numeric_limits<InnerIdType>::max()};
+
+    ODescentParameterPtr odescent_param_{nullptr};
+    std::string graph_type_{GRAPH_TYPE_NSW};
 
     uint64_t ef_construct_{400};
 

@@ -13,34 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#pragma once
-
-#include "safe_thread_pool.h"
-#include "typing.h"
-#include "vsag/allocator.h"
+#include "simd_status.h"
 
 namespace vsag {
-
-class KMeansCluster {
-public:
-    explicit KMeansCluster(int32_t dim,
-                           Allocator* allocator,
-                           SafeThreadPoolPtr thread_pool = nullptr);
-
-    ~KMeansCluster();
-
-    Vector<int>
-    Run(uint32_t k, const float* datas, uint64_t count, int iter = 25, double* err = nullptr);
-
-public:
-    float* k_centroids_{nullptr};
-
-private:
-    Allocator* const allocator_{nullptr};
-
-    SafeThreadPoolPtr thread_pool_{nullptr};
-
-    const int32_t dim_{0};
-};
-
-}  // namespace vsag
+bool SimdStatus::is_inited = false;
+}

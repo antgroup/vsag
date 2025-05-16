@@ -21,13 +21,13 @@
 #include <stdexcept>
 
 #include "common.h"
+#include "data_cell/graph_datacell_parameter.h"
 #include "data_cell/sparse_graph_datacell.h"
 #include "dataset_impl.h"
-#include "empty_index_binary_set.h"
+#include "impl/odescent_graph_builder.h"
 #include "impl/pruning_strategy.h"
 #include "index/iterator_filter.h"
-#include "logger.h"
-#include "utils/slow_task_timer.h"
+#include "utils/standard_heap.h"
 #include "utils/util_functions.h"
 
 namespace vsag {
@@ -40,6 +40,8 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
       ignore_reorder_(hgraph_param->ignore_reorder),
       ef_construct_(hgraph_param->ef_construction),
       build_thread_count_(hgraph_param->build_thread_count),
+      odescent_param_(hgraph_param->odescent_param),
+      graph_type_(hgraph_param->graph_type),
       extra_info_size_(common_param.extra_info_size_) {
     neighbors_mutex_ = std::make_shared<PointsMutex>(0, common_param.allocator_.get());
     this->basic_flatten_codes_ =
@@ -83,6 +85,11 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
         this->build_pool_->SetPoolSize(build_thread_count_);
     }
 
+    UnorderedMap<std::string, float> default_param(common_param.allocator_.get());
+    default_param.insert(
+        {PREFETCH_DEPTH_CODE, (this->basic_flatten_codes_->code_size_ + 63.0) / 64.0});
+    this->basic_flatten_codes_->SetRuntimeParameters(default_param);
+
     if (use_elp_optimizer_) {
         optimizer_ = std::make_shared<Optimizer<BasicSearcher>>(common_param);
     }
@@ -98,12 +105,75 @@ HGraph::Train(const DatasetPtr& base) {
 
 std::vector<int64_t>
 HGraph::Build(const DatasetPtr& data) {
+    CHECK_ARGUMENT(GetNumElements() == 0, "index is not empty");
     this->Train(data);
-    auto ret = this->Add(data);
+    std::vector<int64_t> ret;
+    if (graph_type_ == GRAPH_TYPE_NSW) {
+        ret = this->Add(data);
+    } else {
+        ret = this->build_by_odescent(data);
+    }
     if (use_elp_optimizer_) {
         elp_optimize();
     }
     return ret;
+}
+
+std::vector<int64_t>
+HGraph::build_by_odescent(const DatasetPtr& data) {
+    std::vector<int64_t> failed_ids;
+
+    auto total = data->GetNumElements();
+    const auto* labels = data->GetIds();
+    const auto* vectors = data->GetFloat32Vectors();
+    const auto* extra_infos = data->GetExtraInfos();
+    auto inner_ids = this->get_unique_inner_ids(total);
+    Vector<Vector<InnerIdType>> route_graph_ids(allocator_);
+    InnerIdType cur_size = 0;
+    for (int64_t i = 0; i < total; ++i) {
+        auto label = labels[i];
+        if (this->label_table_->CheckLabel(label)) {
+            failed_ids.emplace_back(label);
+            continue;
+        }
+        InnerIdType inner_id = inner_ids.at(cur_size);
+        cur_size++;
+        this->label_table_->Insert(inner_id, label);
+        this->basic_flatten_codes_->InsertVector(vectors + dim_ * i, inner_id);
+        if (use_reorder_) {
+            this->high_precise_codes_->InsertVector(vectors + dim_ * i, inner_id);
+        }
+        auto level = this->get_random_level() - 1;
+        if (level >= 0) {
+            if (level >= static_cast<int>(route_graph_ids.size()) || route_graph_ids.empty()) {
+                for (auto k = static_cast<int>(route_graph_ids.size()); k <= level; ++k) {
+                    route_graph_ids.emplace_back(Vector<InnerIdType>(allocator_));
+                }
+                entry_point_id_ = inner_id;
+            }
+            for (int j = 0; j <= level; ++j) {
+                route_graph_ids[j].emplace_back(inner_id);
+            }
+        }
+    }
+    this->resize(total_count_);
+    auto build_data = use_reorder_ ? this->high_precise_codes_ : this->basic_flatten_codes_;
+    {
+        odescent_param_->max_degree = bottom_graph_->MaximumDegree();
+        ODescent odescent_builder(odescent_param_, build_data, allocator_, this->build_pool_.get());
+        odescent_builder.Build();
+        odescent_builder.SaveGraph(bottom_graph_);
+    }
+    for (auto& route_graph_id : route_graph_ids) {
+        odescent_param_->max_degree = bottom_graph_->MaximumDegree() / 2;
+        ODescent sparse_odescent_builder(
+            odescent_param_, build_data, allocator_, this->build_pool_.get());
+        auto graph = this->generate_one_route_graph();
+        sparse_odescent_builder.Build(route_graph_id);
+        sparse_odescent_builder.SaveGraph(graph);
+        this->route_graphs_.emplace_back(graph);
+    }
+    return failed_ids;
 }
 
 std::vector<int64_t>
@@ -205,10 +275,16 @@ HGraph::KnnSearch(const DatasetPtr& query,
     for (auto i = static_cast<int64_t>(this->route_graphs_.size() - 1); i >= 0; --i) {
         auto result = this->search_one_graph(
             raw_query, this->route_graphs_[i], this->basic_flatten_codes_, search_param);
-        search_param.ep = result.top().second;
+        search_param.ep = result->Top().second;
     }
 
     auto params = HGraphSearchParameters::FromJson(parameters);
+
+    auto ef_search_threshold = std::max(AMPLIFICATION_FACTOR * k, 1000L);
+    CHECK_ARGUMENT(  // NOLINT
+        (1 <= params.ef_search) and (params.ef_search <= ef_search_threshold),
+        fmt::format("ef_search({}) must in range[1, {}]", params.ef_search, ef_search_threshold));
+
     FilterPtr ft = nullptr;
     if (filter != nullptr) {
         if (params.use_extra_info_filter) {
@@ -228,29 +304,29 @@ HGraph::KnnSearch(const DatasetPtr& query,
         this->reorder(raw_query, this->high_precise_codes_, search_result, k);
     }
 
-    while (search_result.size() > k) {
-        search_result.pop();
+    while (search_result->Size() > k) {
+        search_result->Pop();
     }
 
     // return an empty dataset directly if searcher returns nothing
-    if (search_result.empty()) {
+    if (search_result->Empty()) {
         return DatasetImpl::MakeEmptyDataset();
     }
-    auto count = static_cast<const int64_t>(search_result.size());
+    auto count = static_cast<const int64_t>(search_result->Size());
     auto [dataset_results, dists, ids] = CreateFastDataset(count, allocator_);
     char* extra_infos = nullptr;
     if (extra_info_size_ > 0) {
-        extra_infos = (char*)allocator_->Allocate(extra_info_size_ * search_result.size());
+        extra_infos = (char*)allocator_->Allocate(extra_info_size_ * search_result->Size());
         dataset_results->ExtraInfos(extra_infos);
     }
     for (int64_t j = count - 1; j >= 0; --j) {
-        dists[j] = search_result.top().first;
-        ids[j] = this->label_table_->GetLabelById(search_result.top().second);
+        dists[j] = search_result->Top().first;
+        ids[j] = this->label_table_->GetLabelById(search_result->Top().second);
         if (extra_infos != nullptr) {
-            this->extra_infos_->GetExtraInfoById(search_result.top().second,
+            this->extra_infos_->GetExtraInfoById(search_result->Top().second,
                                                  extra_infos + extra_info_size_ * j);
         }
-        search_result.pop();
+        search_result->Pop();
     }
     return std::move(dataset_results);
 }
@@ -301,13 +377,13 @@ HGraph::KnnSearch(const DatasetPtr& query,
     }
 
     auto* iter_filter_ctx = static_cast<IteratorFilterContext*>(iter_ctx);
-    MaxHeap search_result(allocator_);
+    DistHeapPtr search_result = std::make_shared<StandardHeap<true, false>>(allocator_, -1);
     const auto* query_data = get_data(query);
     if (is_last_filter) {
         while (!iter_filter_ctx->Empty()) {
             uint32_t cur_inner_id = iter_filter_ctx->GetTopID();
             float cur_dist = iter_filter_ctx->GetTopDist();
-            search_result.emplace(cur_dist, cur_inner_id);
+            search_result->Push(cur_dist, cur_inner_id);
             iter_filter_ctx->PopDiscard();
         }
     } else {
@@ -320,7 +396,7 @@ HGraph::KnnSearch(const DatasetPtr& query,
             for (auto i = static_cast<int64_t>(this->route_graphs_.size() - 1); i >= 0; --i) {
                 auto result = this->search_one_graph(
                     query_data, this->route_graphs_[i], this->basic_flatten_codes_, search_param);
-                search_param.ep = result.top().second;
+                search_param.ep = result->Top().second;
             }
         }
 
@@ -338,32 +414,32 @@ HGraph::KnnSearch(const DatasetPtr& query,
         this->reorder(query_data, this->high_precise_codes_, search_result, k);
     }
 
-    while (search_result.size() > k) {
-        std::pair<float, InnerIdType> curr = search_result.top();
+    while (search_result->Size() > k) {
+        auto curr = search_result->Top();
         iter_filter_ctx->AddDiscardNode(curr.first, curr.second);
-        search_result.pop();
+        search_result->Pop();
     }
 
     // return an empty dataset directly if searcher returns nothing
-    if (search_result.empty()) {
+    if (search_result->Empty()) {
         return DatasetImpl::MakeEmptyDataset();
     }
-    auto count = static_cast<const int64_t>(search_result.size());
+    auto count = static_cast<const int64_t>(search_result->Size());
     auto [dataset_results, dists, ids] = CreateFastDataset(count, allocator_);
     char* extra_infos = nullptr;
     if (extra_info_size_ > 0) {
-        extra_infos = (char*)allocator_->Allocate(extra_info_size_ * search_result.size());
+        extra_infos = (char*)allocator_->Allocate(extra_info_size_ * search_result->Size());
         dataset_results->ExtraInfos(extra_infos);
     }
     for (int64_t j = count - 1; j >= 0; --j) {
-        dists[j] = search_result.top().first;
-        ids[j] = this->label_table_->GetLabelById(search_result.top().second);
-        iter_filter_ctx->SetPoint(search_result.top().second);
+        dists[j] = search_result->Top().first;
+        ids[j] = this->label_table_->GetLabelById(search_result->Top().second);
+        iter_filter_ctx->SetPoint(search_result->Top().second);
         if (extra_infos != nullptr) {
-            this->extra_infos_->GetExtraInfoById(search_result.top().second,
+            this->extra_infos_->GetExtraInfoById(search_result->Top().second,
                                                  extra_infos + extra_info_size_ * j);
         }
-        search_result.pop();
+        search_result->Pop();
     }
     iter_filter_ctx->SetOFFFirstUsed();
     return std::move(dataset_results);
@@ -426,7 +502,7 @@ HGraph::generate_one_route_graph() {
 }
 
 template <InnerSearchMode mode>
-MaxHeap
+DistHeapPtr
 HGraph::search_one_graph(const void* query,
                          const GraphInterfacePtr& graph,
                          const FlattenInterfacePtr& flatten,
@@ -438,7 +514,7 @@ HGraph::search_one_graph(const void* query,
 }
 
 template <InnerSearchMode mode>
-MaxHeap
+DistHeapPtr
 HGraph::search_one_graph(const void* query,
                          const GraphInterfacePtr& graph,
                          const FlattenInterfacePtr& flatten,
@@ -485,11 +561,13 @@ HGraph::RangeSearch(const DatasetPtr& query,
     for (auto i = static_cast<int64_t>(this->route_graphs_.size() - 1); i >= 0; --i) {
         auto result = this->search_one_graph(
             raw_query, this->route_graphs_[i], this->basic_flatten_codes_, search_param);
-        search_param.ep = result.top().second;
+        search_param.ep = result->Top().second;
     }
 
     auto params = HGraphSearchParameters::FromJson(parameters);
 
+    CHECK_ARGUMENT((1 <= params.ef_search) and (params.ef_search <= 1000),  // NOLINT
+                   fmt::format("ef_search({}) must in range[1, 1000]", params.ef_search));
     search_param.ef = std::max(params.ef_search, limited_size);
     search_param.is_inner_id_allowed = ft;
     search_param.radius = radius;
@@ -502,26 +580,26 @@ HGraph::RangeSearch(const DatasetPtr& query,
     }
 
     if (limited_size > 0) {
-        while (search_result.size() > limited_size) {
-            search_result.pop();
+        while (search_result->Size() > limited_size) {
+            search_result->Pop();
         }
     }
 
-    auto count = static_cast<const int64_t>(search_result.size());
+    auto count = static_cast<const int64_t>(search_result->Size());
     auto [dataset_results, dists, ids] = CreateFastDataset(count, allocator_);
     char* extra_infos = nullptr;
     if (extra_info_size_ > 0) {
-        extra_infos = (char*)allocator_->Allocate(extra_info_size_ * search_result.size());
+        extra_infos = (char*)allocator_->Allocate(extra_info_size_ * search_result->Size());
         dataset_results->ExtraInfos(extra_infos);
     }
     for (int64_t j = count - 1; j >= 0; --j) {
-        dists[j] = search_result.top().first;
-        ids[j] = this->label_table_->GetLabelById(search_result.top().second);
+        dists[j] = search_result->Top().first;
+        ids[j] = this->label_table_->GetLabelById(search_result->Top().second);
         if (extra_infos != nullptr) {
-            this->extra_infos_->GetExtraInfoById(search_result.top().second,
+            this->extra_infos_->GetExtraInfoById(search_result->Top().second,
                                                  extra_infos + extra_info_size_ * j);
         }
-        search_result.pop();
+        search_result->Pop();
     }
     return std::move(dataset_results);
 }
@@ -726,7 +804,7 @@ HGraph::add_one_point(const void* data, int level, InnerIdType inner_id) {
 
 void
 HGraph::graph_add_one(const void* data, int level, InnerIdType inner_id) {
-    MaxHeap result(allocator_);
+    DistHeapPtr result = nullptr;
     InnerSearchParam param{
         .topk = 1,
         .ep = this->entry_point_id_,
@@ -741,7 +819,7 @@ HGraph::graph_add_one(const void* data, int level, InnerIdType inner_id) {
     }
     for (auto j = this->route_graphs_.size() - 1; j > level; --j) {
         result = search_one_graph(data, route_graphs_[j], flatten_codes, param);
-        param.ep = result.top().second;
+        param.ep = result->Top().second;
     }
 
     param.ef = this->ef_construct_;
@@ -885,160 +963,31 @@ HGraph::elp_optimize() {
 void
 HGraph::reorder(const void* query,
                 const FlattenInterfacePtr& flatten_interface,
-                MaxHeap& candidate_heap,
+                const DistHeapPtr& candidate_heap,
                 int64_t k) const {
-    uint64_t size = candidate_heap.size();
+    uint64_t size = candidate_heap->Size();
     if (k <= 0) {
         k = static_cast<int64_t>(size);
     }
     Vector<InnerIdType> ids(size, allocator_);
     Vector<float> dists(size, allocator_);
     uint64_t idx = 0;
-    while (not candidate_heap.empty()) {
-        ids[idx] = candidate_heap.top().second;
+    while (not candidate_heap->Empty()) {
+        ids[idx] = candidate_heap->Top().second;
         ++idx;
-        candidate_heap.pop();
+        candidate_heap->Pop();
     }
     auto computer = flatten_interface->FactoryComputer(query);
     flatten_interface->Query(dists.data(), computer, ids.data(), size);
     for (uint64_t i = 0; i < size; ++i) {
-        if (candidate_heap.size() < k or dists[i] <= candidate_heap.top().first) {
-            candidate_heap.emplace(dists[i], ids[i]);
+        if (candidate_heap->Size() < k or dists[i] <= candidate_heap->Top().first) {
+            candidate_heap->Push(dists[i], ids[i]);
         }
-        if (candidate_heap.size() > k) {
-            candidate_heap.pop();
+        if (candidate_heap->Size() > k) {
+            candidate_heap->Pop();
         }
     }
 }
-
-static const ConstParamMap EXTERNAL_MAPPING = {
-    {
-        HGRAPH_USE_REORDER,
-        {
-            HGRAPH_USE_REORDER_KEY,
-        },
-    },
-    {
-        HGRAPH_USE_ELP_OPTIMIZER,
-        {
-            HGRAPH_USE_ELP_OPTIMIZER_KEY,
-        },
-    },
-    {
-        HGRAPH_IGNORE_REORDER,
-        {
-            HGRAPH_IGNORE_REORDER_KEY,
-        },
-    },
-    {
-        HGRAPH_BASE_QUANTIZATION_TYPE,
-        {
-            HGRAPH_BASE_CODES_KEY,
-            QUANTIZATION_PARAMS_KEY,
-            QUANTIZATION_TYPE_KEY,
-        },
-    },
-    {
-        HGRAPH_BASE_IO_TYPE,
-        {
-            HGRAPH_BASE_CODES_KEY,
-            IO_PARAMS_KEY,
-            IO_TYPE_KEY,
-        },
-    },
-    {
-        HGRAPH_PRECISE_IO_TYPE,
-        {
-            HGRAPH_PRECISE_CODES_KEY,
-            IO_PARAMS_KEY,
-            IO_TYPE_KEY,
-        },
-    },
-    {
-        HGRAPH_BASE_FILE_PATH,
-        {
-            HGRAPH_BASE_CODES_KEY,
-            IO_PARAMS_KEY,
-            IO_FILE_PATH,
-        },
-    },
-    {
-        HGRAPH_PRECISE_FILE_PATH,
-        {
-            HGRAPH_PRECISE_CODES_KEY,
-            IO_PARAMS_KEY,
-            IO_FILE_PATH,
-        },
-    },
-    {
-        HGRAPH_PRECISE_QUANTIZATION_TYPE,
-        {
-            HGRAPH_PRECISE_CODES_KEY,
-            QUANTIZATION_PARAMS_KEY,
-            QUANTIZATION_TYPE_KEY,
-        },
-    },
-    {
-        HGRAPH_GRAPH_MAX_DEGREE,
-        {
-            HGRAPH_GRAPH_KEY,
-            GRAPH_PARAM_MAX_DEGREE,
-        },
-    },
-    {
-        HGRAPH_BUILD_EF_CONSTRUCTION,
-        {
-            BUILD_PARAMS_KEY,
-            BUILD_EF_CONSTRUCTION,
-        },
-    },
-    {
-        HGRAPH_INIT_CAPACITY,
-        {
-            HGRAPH_GRAPH_KEY,
-            GRAPH_PARAM_INIT_MAX_CAPACITY,
-        },
-    },
-    {
-        HGRAPH_BUILD_THREAD_COUNT,
-        {
-            BUILD_PARAMS_KEY,
-            BUILD_THREAD_COUNT,
-        },
-    },
-    {
-        SQ4_UNIFORM_TRUNC_RATE,
-        {
-            HGRAPH_BASE_CODES_KEY,
-            QUANTIZATION_PARAMS_KEY,
-            SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE,
-        },
-    },
-    {
-        RABITQ_PCA_DIM,
-        {
-            HGRAPH_BASE_CODES_KEY,
-            QUANTIZATION_PARAMS_KEY,
-            PCA_DIM,
-        },
-    },
-    {
-        RABITQ_BITS_PER_DIM_QUERY,
-        {
-            HGRAPH_BASE_CODES_KEY,
-            QUANTIZATION_PARAMS_KEY,
-            RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY,
-        },
-    },
-    {
-        HGRAPH_BASE_PQ_DIM,
-        {
-            HGRAPH_BASE_CODES_KEY,
-            QUANTIZATION_PARAMS_KEY,
-            PRODUCT_QUANTIZATION_DIM,
-        },
-    },
-};
 
 static const std::string HGRAPH_PARAMS_TEMPLATE =
     R"(
@@ -1052,6 +1001,13 @@ static const std::string HGRAPH_PARAMS_TEMPLATE =
                 "{IO_TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
                 "{IO_FILE_PATH}": "{DEFAULT_FILE_PATH_VALUE}"
             },
+            "{GRAPH_TYPE_KEY}": "{GRAPH_TYPE_NSW}",
+            "{ODESCENT_PARAMETER_BUILD_BLOCK_SIZE}": 10000,
+            "{ODESCENT_PARAMETER_MIN_IN_DEGREE}": 1,
+            "{ODESCENT_PARAMETER_ALPHA}": 1.2,
+            "{ODESCENT_PARAMETER_GRAPH_ITER_TURN}": 30,
+            "{ODESCENT_PARAMETER_NEIGHBOR_SAMPLE_RATE}": 0.2,
+            "{GRAPH_PARAM_MAX_DEGREE}": 64,
             "{GRAPH_PARAM_MAX_DEGREE}": 64,
             "{GRAPH_PARAM_INIT_MAX_CAPACITY}": 100
         },
@@ -1098,6 +1054,176 @@ static const std::string HGRAPH_PARAMS_TEMPLATE =
 ParamPtr
 HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
                                      const IndexCommonParam& common_param) {
+    const ConstParamMap external_mapping = {
+        {
+            HGRAPH_USE_REORDER,
+            {
+                HGRAPH_USE_REORDER_KEY,
+            },
+        },
+        {
+            HGRAPH_USE_ELP_OPTIMIZER,
+            {
+                HGRAPH_USE_ELP_OPTIMIZER_KEY,
+            },
+        },
+        {
+            HGRAPH_IGNORE_REORDER,
+            {
+                HGRAPH_IGNORE_REORDER_KEY,
+            },
+        },
+        {
+            HGRAPH_BASE_QUANTIZATION_TYPE,
+            {
+                HGRAPH_BASE_CODES_KEY,
+                QUANTIZATION_PARAMS_KEY,
+                QUANTIZATION_TYPE_KEY,
+            },
+        },
+        {
+            HGRAPH_BASE_IO_TYPE,
+            {
+                HGRAPH_BASE_CODES_KEY,
+                IO_PARAMS_KEY,
+                IO_TYPE_KEY,
+            },
+        },
+        {
+            HGRAPH_PRECISE_IO_TYPE,
+            {
+                HGRAPH_PRECISE_CODES_KEY,
+                IO_PARAMS_KEY,
+                IO_TYPE_KEY,
+            },
+        },
+        {
+            HGRAPH_BASE_FILE_PATH,
+            {
+                HGRAPH_BASE_CODES_KEY,
+                IO_PARAMS_KEY,
+                IO_FILE_PATH,
+            },
+        },
+        {
+            HGRAPH_PRECISE_FILE_PATH,
+            {
+                HGRAPH_PRECISE_CODES_KEY,
+                IO_PARAMS_KEY,
+                IO_FILE_PATH,
+            },
+        },
+        {
+            HGRAPH_PRECISE_QUANTIZATION_TYPE,
+            {
+                HGRAPH_PRECISE_CODES_KEY,
+                QUANTIZATION_PARAMS_KEY,
+                QUANTIZATION_TYPE_KEY,
+            },
+        },
+        {
+            HGRAPH_GRAPH_MAX_DEGREE,
+            {
+                HGRAPH_GRAPH_KEY,
+                GRAPH_PARAM_MAX_DEGREE,
+            },
+        },
+        {
+            HGRAPH_BUILD_EF_CONSTRUCTION,
+            {
+                BUILD_PARAMS_KEY,
+                BUILD_EF_CONSTRUCTION,
+            },
+        },
+        {
+            HGRAPH_INIT_CAPACITY,
+            {
+                HGRAPH_GRAPH_KEY,
+                GRAPH_PARAM_INIT_MAX_CAPACITY,
+            },
+        },
+        {
+            HGRAPH_GRAPH_TYPE,
+            {
+                HGRAPH_GRAPH_KEY,
+                GRAPH_TYPE_KEY,
+            },
+        },
+        {
+            ODESCENT_PARAMETER_ALPHA,
+            {
+                HGRAPH_GRAPH_KEY,
+                ODESCENT_PARAMETER_ALPHA,
+            },
+        },
+        {
+            ODESCENT_PARAMETER_GRAPH_ITER_TURN,
+            {
+                HGRAPH_GRAPH_KEY,
+                ODESCENT_PARAMETER_GRAPH_ITER_TURN,
+            },
+        },
+        {
+            ODESCENT_PARAMETER_NEIGHBOR_SAMPLE_RATE,
+            {
+                HGRAPH_GRAPH_KEY,
+                ODESCENT_PARAMETER_NEIGHBOR_SAMPLE_RATE,
+            },
+        },
+        {
+            ODESCENT_PARAMETER_MIN_IN_DEGREE,
+            {
+                HGRAPH_GRAPH_KEY,
+                ODESCENT_PARAMETER_MIN_IN_DEGREE,
+            },
+        },
+        {
+            ODESCENT_PARAMETER_BUILD_BLOCK_SIZE,
+            {
+                HGRAPH_GRAPH_KEY,
+                ODESCENT_PARAMETER_BUILD_BLOCK_SIZE,
+            },
+        },
+        {
+            HGRAPH_BUILD_THREAD_COUNT,
+            {
+                BUILD_PARAMS_KEY,
+                BUILD_THREAD_COUNT,
+            },
+        },
+        {
+            SQ4_UNIFORM_TRUNC_RATE,
+            {
+                HGRAPH_BASE_CODES_KEY,
+                QUANTIZATION_PARAMS_KEY,
+                SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE,
+            },
+        },
+        {
+            RABITQ_PCA_DIM,
+            {
+                HGRAPH_BASE_CODES_KEY,
+                QUANTIZATION_PARAMS_KEY,
+                PCA_DIM,
+            },
+        },
+        {
+            RABITQ_BITS_PER_DIM_QUERY,
+            {
+                HGRAPH_BASE_CODES_KEY,
+                QUANTIZATION_PARAMS_KEY,
+                RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY,
+            },
+        },
+        {
+            HGRAPH_BASE_PQ_DIM,
+            {
+                HGRAPH_BASE_CODES_KEY,
+                QUANTIZATION_PARAMS_KEY,
+                PRODUCT_QUANTIZATION_DIM,
+            },
+        },
+    };
     if (common_param.data_type_ == DataTypes::DATA_TYPE_INT8) {
         throw VsagException(ErrorType::INVALID_ARGUMENT,
                             fmt::format("HGraph not support {} datatype", DATATYPE_INT8));
@@ -1105,12 +1231,27 @@ HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
 
     std::string str = format_map(HGRAPH_PARAMS_TEMPLATE, DEFAULT_MAP);
     auto inner_json = JsonType::parse(str);
-    mapping_external_param_to_inner(external_param, EXTERNAL_MAPPING, inner_json);
+    mapping_external_param_to_inner(external_param, external_mapping, inner_json);
 
     auto hgraph_parameter = std::make_shared<HGraphParameter>();
     hgraph_parameter->data_type = common_param.data_type_;
     hgraph_parameter->FromJson(inner_json);
 
+    auto max_degree =
+        std::dynamic_pointer_cast<GraphDataCellParameter>(hgraph_parameter->bottom_graph_param)
+            ->max_degree_;
+    auto max_degree_threshold = std::max(common_param.dim_, 128L);
+    CHECK_ARGUMENT(  // NOLINT
+        (4 <= max_degree) and (max_degree <= max_degree_threshold),
+        fmt::format("max_degree({}) must in range[4, {}]", max_degree, max_degree_threshold));
+
+    auto construction_threshold = std::max(1000UL, AMPLIFICATION_FACTOR * max_degree);
+    CHECK_ARGUMENT((max_degree <= hgraph_parameter->ef_construction) and  // NOLINT
+                       (hgraph_parameter->ef_construction <= construction_threshold),
+                   fmt::format("ef_construction({}) must in range[$max_degree({}), {}]",
+                               hgraph_parameter->ef_construction,
+                               max_degree,
+                               construction_threshold));
     return hgraph_parameter;
 }
 InnerIndexPtr

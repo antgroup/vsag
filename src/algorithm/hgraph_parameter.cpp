@@ -83,6 +83,14 @@ HGraphParameter::FromJson(const JsonType& json) {
         }
     }
 
+    if (graph_json.contains(GRAPH_TYPE_KEY)) {
+        graph_type = graph_json[GRAPH_TYPE_KEY];
+        if (graph_type == GRAPH_TYPE_ODESCENT) {
+            odescent_param = std::make_shared<ODescentParameter>();
+            odescent_param->FromJson(graph_json);
+        }
+    }
+
     CHECK_ARGUMENT(json.contains(HGRAPH_EXTRA_INFO_KEY),
                    fmt::format("hgraph parameters must contains {}", HGRAPH_EXTRA_INFO_KEY));
     const auto& extra_info_json = json[HGRAPH_EXTRA_INFO_KEY];
@@ -109,8 +117,6 @@ HGraphParameter::ToJson() {
     return json;
 }
 
-// NOLINTBEGIN(readability-simplify-boolean-expr)
-
 HGraphSearchParameters
 HGraphSearchParameters::FromJson(const std::string& json_string) {
     JsonType params = JsonType::parse(json_string);
@@ -129,11 +135,7 @@ HGraphSearchParameters::FromJson(const std::string& json_string) {
     if (params[INDEX_TYPE_HGRAPH].contains(HGRAPH_USE_EXTRA_INFO_FILTER)) {
         obj.use_extra_info_filter = params[INDEX_TYPE_HGRAPH][HGRAPH_USE_EXTRA_INFO_FILTER];
     }
-    CHECK_ARGUMENT((1 <= obj.ef_search) and (obj.ef_search <= 1000),
-                   fmt::format("ef_search({}) must in range[1, 1000]", obj.ef_search));
 
     return obj;
 }
 }  // namespace vsag
-
-// NOLINTEND(readability-simplify-boolean-expr)

@@ -107,6 +107,9 @@ public:
         ptr->quantizer_->Deserialize(reader);
     }
 
+    void
+    MergeOther(const FlattenInterfacePtr& other, InnerIdType bias) override;
+
     [[nodiscard]] std::string
     GetQuantizerName() override;
 
@@ -146,9 +149,6 @@ public:
     Allocator* const allocator_{nullptr};
 
 private:
-    inline void
-    prefetch(InnerIdType id, uint64_t data_size);
-
     inline void
     query(float* result_dists,
           const std::shared_ptr<Computer<QuantTmpl>>& computer,
@@ -261,17 +261,52 @@ FlattenDataCell<QuantTmpl, IOTmpl>::query(float* result_dists,
             offsets[i] = idx[i] * code_size_;
         }
         this->io_->MultiRead(codes.data, sizes.data(), offsets.data(), id_count);
-        computer->ComputeBatchDists(id_count, codes.data, result_dists);
+        computer->ScanBatchDists(id_count, codes.data, result_dists);
         return;
     }
 
-    for (int64_t i = 0; i < id_count; ++i) {
-        if (i + this->prefetch_stride_code_ < id_count) {
-            this->io_->Prefetch(static_cast<uint64_t>(idx[i + this->prefetch_stride_code_]) *
-                                    static_cast<uint64_t>(code_size_),
-                                this->prefetch_depth_code_ * 64);
+    memset(result_dists, 0, sizeof(float) * id_count);
+    int64_t i = 0;
+    for (; i + 3 < id_count; i += 4) {
+        for (int64_t j = 0; j < 4; ++j) {
+            if (i + j + this->prefetch_stride_code_ < id_count) {
+                this->io_->Prefetch(
+                    static_cast<uint64_t>(idx[i + j + this->prefetch_stride_code_]) *
+                        static_cast<uint64_t>(code_size_),
+                    this->prefetch_depth_code_ * 64);
+            }
         }
+        bool release1 = false;
+        const auto* codes1 = this->GetCodesById(idx[i], release1);
+        bool release2 = false;
+        const auto* codes2 = this->GetCodesById(idx[i + 1], release2);
+        bool release3 = false;
+        const auto* codes3 = this->GetCodesById(idx[i + 2], release3);
+        bool release4 = false;
+        const auto* codes4 = this->GetCodesById(idx[i + 3], release4);
+        computer->ComputeDistsBatch4(codes1,
+                                     codes2,
+                                     codes3,
+                                     codes4,
+                                     result_dists[i],
+                                     result_dists[i + 1],
+                                     result_dists[i + 2],
+                                     result_dists[i + 3]);
 
+        if (release1) {
+            this->io_->Release(codes1);
+        }
+        if (release2) {
+            this->io_->Release(codes2);
+        }
+        if (release3) {
+            this->io_->Release(codes3);
+        }
+        if (release4) {
+            this->io_->Release(codes4);
+        }
+    }
+    for (; i < id_count; ++i) {
         bool release = false;
         const auto* codes = this->GetCodesById(idx[i], release);
         computer->ComputeDist(codes, result_dists + i);
@@ -326,5 +361,32 @@ FlattenDataCell<QuantTmpl, IOTmpl>::Deserialize(StreamReader& reader) {
     FlattenInterface::Deserialize(reader);
     this->io_->Deserialize(reader);
     this->quantizer_->Deserialize(reader);
+}
+
+template <typename QuantTmpl, typename IOTmpl>
+void
+FlattenDataCell<QuantTmpl, IOTmpl>::MergeOther(const FlattenInterfacePtr& other, InnerIdType bias) {
+    auto ptr = std::dynamic_pointer_cast<FlattenDataCell<QuantTmpl, IOTmpl>>(other);
+    if (ptr == nullptr) {
+        throw VsagException(ErrorType::INTERNAL_ERROR,
+                            "Merge flatten datacell failed: not match type");
+    }
+    constexpr uint64_t BUFFER_SIZE = 1024 * 1024 * 10;
+    uint64_t total_count = ptr->total_count_;
+    uint64_t offset = bias * code_size_;
+    uint64_t read_count = 0;
+    while (read_count < total_count) {
+        bool need_release = false;
+        uint64_t count = std::min(BUFFER_SIZE / this->code_size_, total_count - read_count);
+        uint64_t size = count * this->code_size_;
+        auto* buffer = ptr->io_->Read(size, read_count * this->code_size_, need_release);
+        this->io_->Write(buffer, size, offset);
+        if (need_release) {
+            ptr->io_->Release(buffer);
+        }
+        offset += size;
+        read_count += count;
+    }
+    this->total_count_ += total_count;
 }
 }  // namespace vsag

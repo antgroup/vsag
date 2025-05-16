@@ -23,6 +23,7 @@
 #include "metric_type.h"
 #include "stream_reader.h"
 #include "stream_writer.h"
+#include "utils/function_exists_check.h"
 
 namespace vsag {
 using DataType = float;
@@ -31,10 +32,10 @@ using DataType = float;
  * @class Quantizer
  * @brief This class is used for quantization and encoding/decoding of data.
  */
-template <typename T>
+template <typename QuantT>
 class Quantizer {
 public:
-    explicit Quantizer<T>(int dim, Allocator* allocator)
+    explicit Quantizer<QuantT>(int dim, Allocator* allocator)
         : dim_(dim), code_size_(dim * sizeof(DataType)), allocator_(allocator){};
 
     ~Quantizer() = default;
@@ -145,38 +146,59 @@ public:
         return cast().DeserializeImpl(reader);
     }
 
-    std::shared_ptr<Computer<T>>
+    std::shared_ptr<Computer<QuantT>>
     FactoryComputer() {
-        return std::make_shared<Computer<T>>(static_cast<T*>(this));
+        return std::make_shared<Computer<QuantT>>(static_cast<QuantT*>(this));
     }
 
     inline void
-    ProcessQuery(const DataType* query, Computer<T>& computer) const {
+    ProcessQuery(const DataType* query, Computer<QuantT>& computer) const {
         return cast().ProcessQueryImpl(query, computer);
     }
 
     inline void
-    ComputeDist(Computer<T>& computer, const uint8_t* codes, float* dists) const {
+    ComputeDist(Computer<QuantT>& computer, const uint8_t* codes, float* dists) const {
         return cast().ComputeDistImpl(computer, codes, dists);
     }
 
     inline float
-    ComputeDist(Computer<T>& computer, const uint8_t* codes) const {
+    ComputeDist(Computer<QuantT>& computer, const uint8_t* codes) const {
         float dist = 0.0f;
         cast().ComputeDistImpl(computer, codes, &dist);
         return dist;
     }
 
     inline void
-    ComputeBatchDists(Computer<T>& computer,
-                      uint64_t count,
-                      const uint8_t* codes,
-                      float* dists) const {
-        return cast().ComputeBatchDistImpl(computer, count, codes, dists);
+    ScanBatchDists(Computer<QuantT>& computer,
+                   uint64_t count,
+                   const uint8_t* codes,
+                   float* dists) const {
+        return cast().ScanBatchDistImpl(computer, count, codes, dists);
     }
 
     inline void
-    ReleaseComputer(Computer<T>& computer) const {
+    ComputeDistsBatch4(Computer<QuantT>& computer,
+                       const uint8_t* codes1,
+                       const uint8_t* codes2,
+                       const uint8_t* codes3,
+                       const uint8_t* codes4,
+                       float& dists1,
+                       float& dists2,
+                       float& dists3,
+                       float& dists4) const {
+        if constexpr (has_ComputeDistsBatch4Impl<QuantT>::value) {
+            cast().ComputeDistsBatch4Impl(
+                computer, codes1, codes2, codes3, codes4, dists1, dists2, dists3, dists4);
+        } else {
+            cast().ComputeDistImpl(computer, codes1, &dists1);
+            cast().ComputeDistImpl(computer, codes2, &dists2);
+            cast().ComputeDistImpl(computer, codes3, &dists3);
+            cast().ComputeDistImpl(computer, codes4, &dists4);
+        }
+    }
+
+    inline void
+    ReleaseComputer(Computer<QuantT>& computer) const {
         cast().ReleaseComputerImpl(computer);
     }
 
@@ -189,6 +211,9 @@ public:
     Metric() const {
         return this->metric_;
     }
+
+    virtual void
+    Package32(const uint8_t* codes, uint8_t* packaged_codes) const {};
 
     /**
      * @brief Get the size of the encoded code in bytes.
@@ -211,17 +236,17 @@ public:
     }
 
 private:
-    inline T&
+    inline QuantT&
     cast() {
-        return static_cast<T&>(*this);
+        return static_cast<QuantT&>(*this);
     }
 
-    inline const T&
+    inline const QuantT&
     cast() const {
-        return static_cast<const T&>(*this);
+        return static_cast<const QuantT&>(*this);
     }
 
-    friend T;
+    friend QuantT;
 
 private:
     uint64_t dim_{0};
@@ -229,6 +254,18 @@ private:
     bool is_trained_{false};
     MetricType metric_{MetricType::METRIC_TYPE_L2SQR};
     Allocator* const allocator_{nullptr};
+
+    GENERATE_HAS_MEMBER_FUNCTION(ComputeDistsBatch4Impl,
+                                 void,
+                                 std::declval<Computer<QuantT>&>(),
+                                 std::declval<const uint8_t*>(),
+                                 std::declval<const uint8_t*>(),
+                                 std::declval<const uint8_t*>(),
+                                 std::declval<const uint8_t*>(),
+                                 std::declval<float&>(),
+                                 std::declval<float&>(),
+                                 std::declval<float&>(),
+                                 std::declval<float&>())
 };
 
 }  // namespace vsag

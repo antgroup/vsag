@@ -56,7 +56,8 @@ public:
         {"sq8", 0.84},
         {"sq8_uniform", 0.83},
         {"sq8_uniform,fp32", 0.89},
-        {"pq,fp32", 0.80},
+        {"pq,fp32", 0.82},
+        {"pqfs,fp32", 0.82},
     };
 };
 
@@ -87,14 +88,15 @@ IVFTestIndex::GenerateIVFBuildParametersString(const std::string& metric_type,
         }}
     }}
     )";
-    auto pq_dim = dim;
-    if (dim % 2 == 0) {
-        pq_dim = dim / 2;
-    }
+
     auto strs = fixtures::SplitString(quantization_str, ',');
     std::string basic_quantizer_str = strs[0];
     bool use_reorder = false;
     std::string precise_quantizer_str = "fp32";
+    auto pq_dim = dim;
+    if (dim % 2 == 0 && basic_quantizer_str == "pq") {
+        pq_dim = dim / 2;
+    }
     if (strs.size() == 2) {
         use_reorder = true;
         precise_quantizer_str = strs[1];
@@ -340,6 +342,32 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex, "IVF Add", "[ft][ivf]") {
             TestAddIndex(index, dataset, true);
             if (index->CheckFeature(vsag::SUPPORT_ADD_FROM_EMPTY)) {
                 TestGeneral(index, dataset, search_param, recall);
+            }
+            vsag::Options::Instance().set_block_size_limit(origin_size);
+        }
+    }
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex, "IVF Merge", "[ft][ivf]") {
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    auto size = GENERATE(1024 * 1024 * 2);
+    auto metric_type = GENERATE("l2", "cosine");
+    std::string train_type = GENERATE("kmeans");
+
+    const std::string name = "ivf";
+    auto search_param = fmt::format(search_param_tmp, 200);
+    for (auto& dim : dims) {
+        for (auto& [base_quantization_str, recall] : test_cases) {
+            vsag::Options::Instance().set_block_size_limit(size);
+            auto param = GenerateIVFBuildParametersString(
+                metric_type, dim, base_quantization_str, 300, train_type);
+            auto model = TestFactory(name, param, true);
+            auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
+            auto ret = model->Train(dataset->base_);
+            REQUIRE(ret.has_value() == true);
+            auto merge_index = TestMergeIndexWithSameModel(model, dataset, 5, true);
+            if (model->CheckFeature(vsag::SUPPORT_MERGE_INDEX)) {
+                TestGeneral(merge_index, dataset, search_param, recall);
             }
             vsag::Options::Instance().set_block_size_limit(origin_size);
         }
