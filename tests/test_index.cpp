@@ -1233,7 +1233,10 @@ TestIndex::TestEstimateMemory(const std::string& index_name,
             auto real_memory = allocator->GetCurrentMemory();
             if (estimate_memory <= static_cast<uint64_t>(real_memory * 0.8) or
                 estimate_memory >= static_cast<uint64_t>(real_memory * 1.2)) {
-                WARN("estimate_memory failed");
+                WARN(fmt::format("estimate_memory({}) is not in range [{}, {}]",
+                                 estimate_memory,
+                                 static_cast<uint64_t>(real_memory * 0.8),
+                                 static_cast<uint64_t>(real_memory * 1.2)));
             }
 
             REQUIRE(estimate_memory >= static_cast<uint64_t>(real_memory * 0.2));
