@@ -95,6 +95,9 @@ const char* const IVF_TRAIN_TYPE_KMEANS = "kmeans";
 const char* const FLATTEN_DATA_CELL = "flatten_data_cell";
 const char* const SPARSE_VECTOR_DATA_CELL = "sparse_vector_data_cell";
 
+const char* const GRAPH_SUPPORT_REMOVE = "support_remove";
+const char* const REMOVE_FLAG_BIT = "remove_flag_bit";
+
 const std::unordered_map<std::string, std::string> DEFAULT_MAP = {
     {"INDEX_TYPE_HGRAPH", INDEX_TYPE_HGRAPH},
     {"INDEX_TYPE_IVF", INDEX_TYPE_IVF},

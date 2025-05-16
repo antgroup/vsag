@@ -16,6 +16,7 @@
 #pragma once
 
 #include "graph_interface_parameter.h"
+#include "vsag/constants.h"
 
 namespace vsag {
 class SparseGraphDatacellParameter : public GraphInterfaceParameter {
@@ -29,17 +30,27 @@ public:
         if (json.contains(GRAPH_PARAM_MAX_DEGREE)) {
             this->max_degree_ = json[GRAPH_PARAM_MAX_DEGREE];
         }
+        if (json.contains(GRAPH_SUPPORT_REMOVE)) {
+            this->support_delete_ = json[GRAPH_SUPPORT_REMOVE];
+        }
+        if (json.contains(REMOVE_FLAG_BIT)) {
+            this->remove_flag_bit_ = json[REMOVE_FLAG_BIT];
+        }
     }
 
     JsonType
     ToJson() override {
         JsonType json;
         json[GRAPH_PARAM_MAX_DEGREE] = this->max_degree_;
+        json[GRAPH_SUPPORT_REMOVE] = support_delete_;
+        json[REMOVE_FLAG_BIT] = remove_flag_bit_;
         return json;
     }
 
 public:
     uint64_t max_degree_{64};
+    bool support_delete_{false};
+    uint32_t remove_flag_bit_{8};
 };
 
 using SparseGraphDatacellParamPtr = std::shared_ptr<SparseGraphDatacellParameter>;

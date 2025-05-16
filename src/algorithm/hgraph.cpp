@@ -54,6 +54,16 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
 
     this->bottom_graph_ =
         GraphInterface::MakeInstance(hgraph_param->bottom_graph_param, common_param);
+    auto graph_param =
+        std::dynamic_pointer_cast<GraphDataCellParameter>(hgraph_param->bottom_graph_param);
+    if (graph_param == nullptr) {
+        throw VsagException(ErrorType::INTERNAL_ERROR,
+                            fmt::format("transform the graph_param failed"));
+    }
+    sparse_datacell_param_ = std::make_shared<SparseGraphDatacellParameter>();
+    sparse_datacell_param_->max_degree_ = graph_param->max_degree_ / 2;
+    sparse_datacell_param_->remove_flag_bit_ = graph_param->remove_flag_bit_;
+    sparse_datacell_param_->support_delete_ = graph_param->support_remove_;
     mult_ = 1 / log(1.0 * static_cast<double>(this->bottom_graph_->MaximumDegree()));
 
     if (extra_info_size_ > 0) {
@@ -497,8 +507,7 @@ HGraph::EstimateMemory(uint64_t num_elements) const {
 
 GraphInterfacePtr
 HGraph::generate_one_route_graph() {
-    return std::make_shared<SparseGraphDataCell>(this->allocator_,
-                                                 bottom_graph_->MaximumDegree() / 2);
+    return std::make_shared<SparseGraphDataCell>(sparse_datacell_param_, this->allocator_);
 }
 
 template <InnerSearchMode mode>

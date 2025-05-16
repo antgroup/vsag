@@ -18,6 +18,7 @@
 #include <fmt/format-inl.h>
 
 #include "inner_string_params.h"
+#include "vsag/constants.h"
 namespace vsag {
 
 void
@@ -31,6 +32,12 @@ GraphDataCellParameter::FromJson(const JsonType& json) {
     if (json.contains(GRAPH_PARAM_INIT_MAX_CAPACITY)) {
         this->init_max_capacity_ = json[GRAPH_PARAM_INIT_MAX_CAPACITY];
     }
+    if (json.contains(GRAPH_SUPPORT_REMOVE)) {
+        this->support_remove_ = json[GRAPH_SUPPORT_REMOVE];
+    }
+    if (json.contains(REMOVE_FLAG_BIT)) {
+        this->remove_flag_bit_ = json[REMOVE_FLAG_BIT];
+    }
 }
 JsonType
 GraphDataCellParameter::ToJson() {
@@ -38,6 +45,8 @@ GraphDataCellParameter::ToJson() {
     json[IO_PARAMS_KEY] = this->io_parameter_->ToJson();
     json[GRAPH_PARAM_MAX_DEGREE] = this->max_degree_;
     json[GRAPH_PARAM_INIT_MAX_CAPACITY] = this->init_max_capacity_;
+    json[GRAPH_SUPPORT_REMOVE] = this->support_remove_;
+    json[REMOVE_FLAG_BIT] = this->remove_flag_bit_;
     return json;
 }
 
