@@ -749,8 +749,8 @@ HGraph::CalDistanceById(const float* query, const int64_t* ids, int64_t count) c
             inner_ids[i] = iter->second;
         }
         flat->Query(distances, computer, inner_ids.data(), count);
-        for (auto i = 0; i < invalid_id_loc.size(); ++i) {
-            distances[invalid_id_loc[i]] = -1;
+        for (unsigned int i : invalid_id_loc) {
+            distances[i] = -1;
         }
     }
     return result;
