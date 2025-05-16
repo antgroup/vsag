@@ -66,4 +66,25 @@ BitsetImpl::Dump() {
     return r_.toString();
 }
 
+void
+BitsetImpl::Or(const Bitset& another) {
+    const auto* another_ptr = reinterpret_cast<const BitsetImpl*>(&another);
+    std::lock_guard<std::mutex> lock(mutex_);
+    r_ |= another_ptr->r_;
+}
+
+void
+BitsetImpl::And(const Bitset& another) {
+    const auto* another_ptr = reinterpret_cast<const BitsetImpl*>(&another);
+    std::lock_guard<std::mutex> lock(mutex_);
+    r_ &= another_ptr->r_;
+}
+
+void
+BitsetImpl::Xor(const Bitset& another) {
+    const auto* another_ptr = reinterpret_cast<const BitsetImpl*>(&another);
+    std::lock_guard<std::mutex> lock(mutex_);
+    r_ ^= another_ptr->r_;
+}
+
 }  // namespace vsag
