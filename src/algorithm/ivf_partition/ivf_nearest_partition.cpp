@@ -35,8 +35,9 @@ static constexpr const char* SEARCH_PARAM_TEMPLATE_STR = R"(
 
 IVFNearestPartition::IVFNearestPartition(BucketIdType bucket_count,
                                          const IndexCommonParam& common_param,
-                                        IVFPartitionStrategyParametersPtr param)
-    : IVFPartitionStrategy(common_param, bucket_count), ivf_partition_strategy_param_(std::move(param)) {
+                                         IVFPartitionStrategyParametersPtr param)
+    : IVFPartitionStrategy(common_param, bucket_count),
+      ivf_partition_strategy_param_(std::move(param)) {
     this->factory_router_index(common_param);
 }
 

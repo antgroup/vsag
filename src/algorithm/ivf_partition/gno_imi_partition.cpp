@@ -114,8 +114,9 @@ GNOIMIPartition::Train(const DatasetPtr dataset) {
     KMeansCluster cls(static_cast<int32_t>(dim), this->allocator_);
     Vector<float> residuals(vectors, vectors + num_element * dim, allocator_);
 
-    auto train_and_get_residual = [&, this](
-                                      const DatasetPtr& centroids, float* data_centroids, double* err) {
+    auto train_and_get_residual = [&, this](const DatasetPtr& centroids,
+                                            float* data_centroids,
+                                            double* err) {
         cls.Run(centroids->GetNumElements(), residuals.data(), num_element, 30, err);
         memcpy(data_centroids, cls.k_centroids_, dim * centroids->GetNumElements() * sizeof(float));
         BruteForce route_index(param_ptr_, common_param_);
@@ -208,10 +209,10 @@ GNOIMIPartition::ClassifyDatasForSearch(const void* datas,
     Vector<float> candidate_s_dist(candidate_count_s, this->allocator_);
     Vector<float> dist_to_s(bucket_count_s_ * count, this->allocator_);
     Vector<float> dist_to_t(bucket_count_t_ * count, this->allocator_);
-    auto *dist_to_s_data = dist_to_s.data();
-    auto *dist_to_t_data = dist_to_t.data();
-    auto *candidate_s_id_data = candidate_s_id.data();
-    auto *candidate_s_dist_data = candidate_s_dist.data();
+    auto* dist_to_s_data = dist_to_s.data();
+    auto* dist_to_t_data = dist_to_t.data();
+    auto* candidate_s_id_data = candidate_s_id.data();
+    auto* candidate_s_dist_data = candidate_s_dist.data();
 
     matmul(reinterpret_cast<const float*>(datas),
            data_centroids_s_.data(),
@@ -248,19 +249,21 @@ GNOIMIPartition::ClassifyDatasForSearch(const void* datas,
         }
         CHECK_ARGUMENT(heap.empty(), fmt::format("Unexpected non-empty heap after pop candidates"));
 
-        auto scan_bucket_count_s =
-            static_cast<BucketIdType>(std::floor(static_cast<float>(bucket_count_s_) * param.first_order_scan_ratio));
+        auto scan_bucket_count_s = static_cast<BucketIdType>(
+            std::floor(static_cast<float>(bucket_count_s_) * param.first_order_scan_ratio));
         scan_bucket_count_s = std::max(scan_bucket_count_s, 1);
         for (size_t j = 0; j < scan_bucket_count_s; ++j) {
             for (size_t k = 0; k < bucket_count_t_; ++k) {
                 auto cur_bucket_id_s = candidate_s_id_data[j];
                 auto cur_bucket_id_t = k;
-                float dist_term_st =
-                    candidate_s_dist_data[j] +
-                    precomputed_terms_st_[static_cast<unsigned long>(cur_bucket_id_s * bucket_count_t_) + cur_bucket_id_t] -
-                    dist_to_t_data[i * bucket_count_t_ + cur_bucket_id_t];
+                float dist_term_st = candidate_s_dist_data[j] +
+                                     precomputed_terms_st_[static_cast<unsigned long>(
+                                                               cur_bucket_id_s * bucket_count_t_) +
+                                                           cur_bucket_id_t] -
+                                     dist_to_t_data[i * bucket_count_t_ + cur_bucket_id_t];
 
-                auto cur_bucket_id_global = static_cast<long>(cur_bucket_id_s) * bucket_count_t_ + cur_bucket_id_t;
+                auto cur_bucket_id_global =
+                    static_cast<long>(cur_bucket_id_s) * bucket_count_t_ + cur_bucket_id_t;
                 if (heap.size() < buckets_per_data || dist_term_st < heap.top().first) {
                     heap.emplace(dist_term_st, cur_bucket_id_global);
                 }
