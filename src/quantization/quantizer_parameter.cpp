@@ -19,6 +19,7 @@
 
 #include "fp32_quantizer_parameter.h"
 #include "inner_string_params.h"
+#include "product_quantization/product_quantizer_parameter.h"
 #include "rabitq_quantization/rabitq_quantizer_parameter.h"
 #include "scalar_quantization/sq_parameter_headers.h"
 #include "sparse_quantization/sparse_quantizer_parameter.h"
@@ -37,6 +38,9 @@ QuantizerParameter::GetQuantizerParameterByJson(const JsonType& json) {
         quantizer_param->FromJson(json);
     } else if (type_name == QUANTIZATION_TYPE_VALUE_SQ8_UNIFORM) {
         quantizer_param = std::make_shared<SQ8UniformQuantizerParameter>();
+        quantizer_param->FromJson(json);
+    } else if (type_name == QUANTIZATION_TYPE_VALUE_PQ) {
+        quantizer_param = std::make_shared<ProductQuantizerParameter>();
         quantizer_param->FromJson(json);
     } else if (type_name == QUANTIZATION_TYPE_VALUE_SQ4) {
         quantizer_param = std::make_shared<SQ4QuantizerParameter>();
@@ -57,7 +61,8 @@ QuantizerParameter::GetQuantizerParameterByJson(const JsonType& json) {
         quantizer_param = std::make_shared<SparseQuantizerParameter>();
         quantizer_param->FromJson(json);
     } else {
-        throw std::invalid_argument(fmt::format("invalid quantizer name {}", type_name));
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            fmt::format("invalid quantizer name {}", type_name));
     }
 
     return quantizer_param;

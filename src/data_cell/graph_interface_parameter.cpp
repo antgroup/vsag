@@ -15,12 +15,26 @@
 
 #include "graph_interface_parameter.h"
 
+#include "compressed_graph_datacell_parameter.h"
 #include "graph_datacell_parameter.h"
+#include "sparse_graph_datacell_parameter.h"
 
 namespace vsag {
 GraphInterfaceParamPtr
-GraphInterfaceParameter::GetGraphParameterByJson(const JsonType& json) {
-    auto param = std::make_shared<GraphDataCellParameter>();
+GraphInterfaceParameter::GetGraphParameterByJson(GraphStorageTypes graph_type,
+                                                 const JsonType& json) {
+    GraphInterfaceParamPtr param{nullptr};
+    switch (graph_type) {
+        case GraphStorageTypes::GRAPH_STORAGE_TYPE_FLAT:
+            param = std::make_shared<GraphDataCellParameter>();
+            break;
+        case GraphStorageTypes::GRAPH_STORAGE_TYPE_COMPRESSED:
+            param = std::make_shared<CompressedGraphDatacellParameter>();
+            break;
+        case GraphStorageTypes::GRAPH_STORAGE_TYPE_SPARSE:
+            param = std::make_shared<SparseGraphDatacellParameter>();
+            break;
+    }
     param->FromJson(json);
     return param;
 }

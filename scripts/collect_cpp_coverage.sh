@@ -30,6 +30,7 @@ lcov --remove ${COVERAGE_DIR}/coverage.info \
      '*_test.cpp' \
      '*/avx512.cpp' \
      --ignore-errors inconsistent,inconsistent \
+     --ignore-errors unused,unused \
      --output-file ${COVERAGE_DIR}/coverage.info
 lcov --list ${COVERAGE_DIR}/coverage.info \
      --ignore-errors inconsistent,inconsistent

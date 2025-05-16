@@ -15,10 +15,6 @@
 
 #include "basic_searcher.h"
 
-#include <limits>
-
-#include "utils/linear_congruential_generator.h"
-
 namespace vsag {
 
 BasicSearcher::BasicSearcher(const IndexCommonParam& common_param, MutexArrayPtr mutex_array)
@@ -50,8 +46,8 @@ BasicSearcher::visit(const GraphInterfacePtr& graph,
              : 0.0F);
 
     for (uint32_t i = 0; i < neighbors.size(); i++) {
-        if (i + prefetch_jump_visit_size_ < neighbors.size()) {
-            vl->Prefetch(neighbors[i + prefetch_jump_visit_size_]);
+        if (i + prefetch_stride_visit_ < neighbors.size()) {
+            vl->Prefetch(neighbors[i + prefetch_stride_visit_]);
         }
         if (not vl->Get(neighbors[i])) {
             if (not filter || count_no_visited == 0 || generator.NextFloat() > skip_threshold ||
@@ -70,7 +66,7 @@ MaxHeap
 BasicSearcher::Search(const GraphInterfacePtr& graph,
                       const FlattenInterfacePtr& flatten,
                       const VisitedListPtr& vl,
-                      const float* query,
+                      const void* query,
                       const InnerSearchParam& inner_search_param) const {
     if (inner_search_param.search_mode == KNN_SEARCH) {
         return this->search_impl<KNN_SEARCH>(graph, flatten, vl, query, inner_search_param);
@@ -82,7 +78,7 @@ MaxHeap
 BasicSearcher::Search(const GraphInterfacePtr& graph,
                       const FlattenInterfacePtr& flatten,
                       const VisitedListPtr& vl,
-                      const float* query,
+                      const void* query,
                       const InnerSearchParam& inner_search_param,
                       IteratorFilterContext* iter_ctx) const {
     return this->search_impl<KNN_SEARCH>(graph, flatten, vl, query, inner_search_param, iter_ctx);
@@ -93,7 +89,7 @@ MaxHeap
 BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                            const FlattenInterfacePtr& flatten,
                            const VisitedListPtr& vl,
-                           const float* query,
+                           const void* query,
                            const InnerSearchParam& inner_search_param,
                            IteratorFilterContext* iter_ctx) const {
     MaxHeap top_candidates(allocator_);
@@ -228,7 +224,7 @@ MaxHeap
 BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                            const FlattenInterfacePtr& flatten,
                            const VisitedListPtr& vl,
-                           const float* query,
+                           const void* query,
                            const InnerSearchParam& inner_search_param) const {
     MaxHeap top_candidates(allocator_);
     MaxHeap candidate_set(allocator_);
@@ -335,6 +331,59 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
     }
 
     return top_candidates;
+}
+
+bool
+BasicSearcher::SetRuntimeParameters(const UnorderedMap<std::string, float>& new_params) {
+    bool ret = false;
+    auto iter = new_params.find(PREFETCH_STRIDE_VISIT);
+    if (iter != new_params.end()) {
+        prefetch_stride_visit_ = static_cast<uint32_t>(iter->second);
+        ret = true;
+    }
+
+    ret |= this->mock_flatten_->SetRuntimeParameters(new_params);
+    return ret;
+}
+
+void
+BasicSearcher::SetMockParameters(const GraphInterfacePtr& graph,
+                                 const FlattenInterfacePtr& flatten,
+                                 const std::shared_ptr<VisitedListPool>& vl_pool,
+                                 const InnerSearchParam& inner_search_param,
+                                 const uint64_t dim,
+                                 const uint32_t n_trials) {
+    mock_graph_ = graph;
+    mock_flatten_ = flatten;
+    mock_vl_pool_ = vl_pool;
+    mock_inner_search_param_ = inner_search_param;
+    mock_dim_ = dim;
+    mock_n_trials_ = n_trials;
+}
+
+double
+BasicSearcher::MockRun() const {
+    uint64_t n_trials = std::min(mock_n_trials_, mock_flatten_->TotalCount());
+
+    double time_cost = 0;
+    for (uint32_t i = 0; i < n_trials; ++i) {
+        // init param
+        Vector<uint8_t> codes(mock_flatten_->code_size_, allocator_);
+        mock_flatten_->GetCodesById(i, codes.data());
+
+        Vector<float> raw_data(mock_dim_, allocator_);
+        mock_flatten_->Decode(codes.data(), raw_data.data());
+        auto vl = mock_vl_pool_->TakeOne();
+
+        // mock run
+        auto st = std::chrono::high_resolution_clock::now();
+        Search(mock_graph_, mock_flatten_, vl, raw_data.data(), mock_inner_search_param_);
+        auto ed = std::chrono::high_resolution_clock::now();
+        time_cost += std::chrono::duration<double>(ed - st).count();
+
+        mock_vl_pool_->ReturnOne(vl);
+    }
+    return time_cost;
 }
 
 }  // namespace vsag

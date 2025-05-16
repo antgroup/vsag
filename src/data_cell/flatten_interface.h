@@ -20,11 +20,13 @@
 
 #include "flatten_datacell_parameter.h"
 #include "flatten_interface_parameter.h"
+#include "impl/runtime_parameter.h"
 #include "index/index_common_param.h"
 #include "quantization/computer.h"
 #include "stream_reader.h"
 #include "stream_writer.h"
 #include "typing.h"
+#include "vsag/constants.h"
 
 namespace vsag {
 class FlattenInterface;
@@ -54,7 +56,7 @@ public:
     InsertVector(const void* vector, InnerIdType idx = std::numeric_limits<InnerIdType>::max()) = 0;
 
     virtual void
-    BatchInsertVector(const void* vectors, InnerIdType count, InnerIdType* idx = nullptr) = 0;
+    BatchInsertVector(const void* vectors, InnerIdType count, InnerIdType* idx_vec = nullptr) = 0;
 
     virtual float
     ComputePairVectors(InnerIdType id1, InnerIdType id2) = 0;
@@ -75,10 +77,33 @@ public:
     ExportModel(const FlattenInterfacePtr& other) const = 0;
 
 public:
+    virtual bool
+    SetRuntimeParameters(const UnorderedMap<std::string, float>& new_params) {
+        bool ret = false;
+        auto iter = new_params.find(PREFETCH_STRIDE_CODE);
+        if (iter != new_params.end()) {
+            prefetch_stride_code_ = static_cast<uint32_t>(iter->second);
+            ret = true;
+        }
+
+        iter = new_params.find(PREFETCH_DEPTH_CODE);
+        if (iter != new_params.end()) {
+            prefetch_depth_code_ = static_cast<uint32_t>(iter->second);
+            ret = true;
+        }
+
+        return ret;
+    }
+
     virtual void
     SetMaxCapacity(InnerIdType capacity) {
         this->max_capacity_ = capacity;
     };
+
+    virtual bool
+    Decode(const uint8_t* codes, DataType* vector) {
+        return false;
+    }
 
     [[nodiscard]] virtual const uint8_t*
     GetCodesById(InnerIdType id, bool& need_release) const {
@@ -114,20 +139,14 @@ public:
         return true;
     }
 
-    virtual void
-    EnableForceInMemory(){};
-
-    virtual void
-    DisableForceInMemory(){};
-
 public:
     std::shared_mutex mutex_;
 
     InnerIdType total_count_{0};
     InnerIdType max_capacity_{800};
     uint32_t code_size_{0};
-    uint32_t prefetch_jump_code_size_{1};
-    uint32_t prefetch_cache_line_size_{1};
+    uint32_t prefetch_stride_code_{1};
+    uint32_t prefetch_depth_code_{1};
 };
 
 }  // namespace vsag

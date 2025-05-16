@@ -46,8 +46,23 @@ target_link_libraries(304_feature_enhance_graph vsag)
 add_executable(305_feature_update 305_feature_update.cpp)
 target_link_libraries(305_feature_update vsag)
 
+add_executable(306_feature_calculate_distance_by_id 306_feature_calculate_distance_by_id.cpp)
+target_link_libraries(306_feature_calculate_distance_by_id vsag)
+
+add_executable(307_feature_check_features 307_feature_check_features.cpp)
+target_link_libraries(307_feature_check_features vsag)
+
+add_executable(308_feature_estimate_memory 308_feature_estimate_memory.cpp)
+target_link_libraries(308_feature_estimate_memory vsag)
+
 add_executable(309_feature_clone 309_feature_clone.cpp)
 target_link_libraries(309_feature_clone vsag)
+
+add_executable(310_feature_export_model 310_feature_export_model.cpp)
+target_link_libraries(310_feature_export_model vsag)
+
+add_executable(311_feature_train 311_feature_train.cpp)
+target_link_libraries(311_feature_train vsag)
 
 add_executable (401_persistent_kv 401_persistent_kv.cpp)
 target_link_libraries (401_persistent_kv vsag)

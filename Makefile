@@ -12,7 +12,8 @@ endif
 
 VSAG_CMAKE_ARGS := -DCMAKE_EXPORT_COMPILE_COMMANDS=1
 VSAG_CMAKE_ARGS := ${VSAG_CMAKE_ARGS} -DCMAKE_INSTALL_PREFIX=${CMAKE_INSTALL_PREFIX} -DNUM_BUILDING_JOBS=${COMPILE_JOBS}
-VSAG_CMAKE_ARGS := ${VSAG_CMAKE_ARGS} -DENABLE_TESTS=1 -DENABLE_PYBINDS=1 ${OTHER_DEFINE} -G ${CMAKE_GENERATOR} -S.
+VSAG_CMAKE_ARGS := ${VSAG_CMAKE_ARGS} -DENABLE_TESTS=ON -DENABLE_PYBINDS=ON -DENABLE_TOOLS=ON
+VSAG_CMAKE_ARGS := ${VSAG_CMAKE_ARGS} ${OTHER_DEFINE} -G ${CMAKE_GENERATOR} -S.
 
 UT_FILTER = ""
 ifdef CASE
@@ -92,7 +93,9 @@ fix-lint:                ## Fix coding style issues in-place via clang-apply-rep
 	@./scripts/linters/run-clang-tidy.py -p build/ -use-color -source-filter '^.*vsag\/src.*(?<!_test)\.cpp$$' -j ${COMPILE_JOBS} -fix
 
 .PHONY: test_parallel
-test_parallel: debug     ## Run all tests parallel (used in CI).
+test_parallel:           ## Run all tests parallel (used in CI).
+	cmake ${VSAG_CMAKE_ARGS} -B${DEBUG_BUILD_DIR} -DCMAKE_BUILD_TYPE=Sanitize -DENABLE_ASAN=OFF -DENABLE_CCACHE=OFF
+	cmake --build ${DEBUG_BUILD_DIR} --parallel ${COMPILE_JOBS}
 	@./scripts/test_parallel_bg.sh
 	./build/mockimpl/tests_mockimpl -d yes ${UT_FILTER} --allow-running-no-tests ${UT_SHARD}
 
@@ -113,13 +116,18 @@ release:                 ## Build vsag with release options.
 	cmake ${VSAG_CMAKE_ARGS} -B${RELEASE_BUILD_DIR} -DCMAKE_BUILD_TYPE=Release
 	cmake --build ${RELEASE_BUILD_DIR} --parallel ${COMPILE_JOBS}
 
-.PHONY: distribution
-distribution:            ## Build vsag with distribution options.
-	cmake ${VSAG_CMAKE_ARGS} -B${RELEASE_BUILD_DIR} -DCMAKE_BUILD_TYPE=Release -DENABLE_CXX11_ABI=off -DENABLE_LIBCXX=off
+.PHONY: dist-old-abi
+dist-old-abi:            ## Build vsag with distribution options.
+	cmake ${VSAG_CMAKE_ARGS} -B${RELEASE_BUILD_DIR} -DCMAKE_BUILD_TYPE=Release -DENABLE_INTEL_MKL=off -DENABLE_CXX11_ABI=off -DENABLE_LIBCXX=off
 	cmake --build ${RELEASE_BUILD_DIR} --parallel ${COMPILE_JOBS}
 
-.PHONY: libcxx
-libcxx:                  ## Build vsag using libc++.
+.PHONY: dist-cxx11-abi
+dist-cxx11-abi:          ## Build vsag with distribution options.
+	cmake ${VSAG_CMAKE_ARGS} -B${RELEASE_BUILD_DIR} -DCMAKE_BUILD_TYPE=Release -DENABLE_INTEL_MKL=off -DENABLE_CXX11_ABI=on -DENABLE_LIBCXX=off
+	cmake --build ${RELEASE_BUILD_DIR} --parallel ${COMPILE_JOBS}
+
+.PHONY: dist-libcxx
+dist-libcxx:             ## Build vsag using libc++.
 	cmake ${VSAG_CMAKE_ARGS} -B${RELEASE_BUILD_DIR} -DCMAKE_BUILD_TYPE=Release -DENABLE_LIBCXX=on
 	cmake --build ${RELEASE_BUILD_DIR} --parallel ${COMPILE_JOBS}
 

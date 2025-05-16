@@ -36,10 +36,9 @@ public:
     ClassifyDatas(const void* datas, int64_t count, BucketIdType buckets_per_data) override;
 
     Vector<BucketIdType>
-    ClassifyDatasForSearch(
-        const void* datas,
-        int64_t count,
-        const InnerSearchParam& param) override;
+    ClassifyDatasForSearch(const void* datas,
+                           int64_t count,
+                           const InnerSearchParam& param) override;
 
     void
     Serialize(StreamWriter& writer) override;
@@ -51,19 +50,16 @@ public:
     IVFNearestPartitionTrainerType trainer_type_{IVFNearestPartitionTrainerType::KMeansTrainer};
     IndexCommonParam common_param_;
     std::shared_ptr<BruteForceParameter> param_ptr_{nullptr};
-    BucketIdType bucket_count_S_{0};
-    BucketIdType bucket_count_T_{0};
-    Vector<float> data_centroids_S_;
-    Vector<float> data_centroids_T_;
+    BucketIdType bucket_count_s_{0};
+    BucketIdType bucket_count_t_{0};
+    Vector<float> data_centroids_s_;
+    Vector<float> data_centroids_t_;
     // precomputed terms for S and T to speed up the distance computation
-    Vector<float> norms_S_;
-    Vector<float> norms_T_;
-    Vector<float> precomputed_terms_ST_;
+    Vector<float> norms_s_;
+    Vector<float> norms_t_;
+    Vector<float> precomputed_terms_st_;
 
 private:
-    void
-    factory_router_index(const IndexCommonParam& common_param);
-
     Vector<BucketIdType>
     inner_classify_datas(BruteForce& route_index, const float* datas, int64_t count);
 

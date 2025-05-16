@@ -15,14 +15,19 @@
 
 #include "basic_searcher.h"
 
+#include <catch2/generators/catch_generators.hpp>
+
 #include "algorithm/hnswlib/hnswalg.h"
 #include "algorithm/hnswlib/space_l2.h"
+#include "basic_optimizer.h"
 #include "catch2/catch_template_test_macros.hpp"
 #include "data_cell/flatten_datacell.h"
 #include "fixtures.h"
 #include "io/memory_io.h"
 #include "quantization/fp32_quantizer.h"
+#include "quantization/scalar_quantization/sq4_uniform_quantizer.h"
 #include "safe_allocator.h"
+#include "test_logger.h"
 #include "utils/visited_list.h"
 
 using namespace vsag;
@@ -269,4 +274,97 @@ TEST_CASE("Search with HNSW", "[ut][BasicSearcher]") {
             }
         }
     }
+}
+
+TEST_CASE("Optimize SQ4", "[ut][BasicOptimizer]") {
+    // avoid too much slow task logs
+    fixtures::logger::LoggerReplacer _;
+    vsag::Options::Instance().logger()->SetLevel(vsag::Logger::Level::kDEBUG);
+
+    // data attr
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    uint32_t base_size = 10000;
+    uint64_t dim = 960;
+    auto quantizer_type = GENERATE("fp32", "sq4_uniform");
+
+    // build and search attr
+    uint32_t M = 32;
+    uint32_t ef_construction = 100;
+    uint32_t ef_search = 300;
+    uint32_t k = ef_search;
+    InnerIdType fixed_entry_point_id = 0;
+    uint64_t DEFAULT_MAX_ELEMENT = 1;
+
+    // data preparation
+    auto base_vectors = fixtures::generate_vectors(base_size, dim, true);
+    std::vector<InnerIdType> ids(base_size);
+    std::iota(ids.begin(), ids.end(), 0);
+
+    // vector data cell
+    constexpr const char* param_temp = R"({{"type": "{}"}})";
+    auto quantizer_param = QuantizerParameter::GetQuantizerParameterByJson(
+        JsonType::parse(fmt::format(param_temp, quantizer_type)));
+    auto io_param =
+        IOParameter::GetIOParameterByJson(JsonType::parse(fmt::format(param_temp, "memory_io")));
+    IndexCommonParam common;
+    common.dim_ = dim;
+    common.allocator_ = allocator;
+    common.metric_ = vsag::MetricType::METRIC_TYPE_L2SQR;
+
+    FlattenInterfacePtr vector_data_cell;
+    if (quantizer_type == "sq4_uniform") {
+        vector_data_cell = std::make_shared<
+            FlattenDataCell<SQ4UniformQuantizer<vsag::MetricType::METRIC_TYPE_L2SQR>, MemoryIO>>(
+            quantizer_param, io_param, common);
+    } else {
+        vector_data_cell = std::make_shared<
+            FlattenDataCell<FP32Quantizer<vsag::MetricType::METRIC_TYPE_L2SQR>, MemoryIO>>(
+            quantizer_param, io_param, common);
+    }
+
+    vector_data_cell->Train(base_vectors.data(), base_size);
+    vector_data_cell->BatchInsertVector(base_vectors.data(), base_size, ids.data());
+
+    // hnswlib build
+    auto space = std::make_shared<hnswlib::L2Space>(dim);
+    auto io = std::make_shared<MemoryIO>(allocator.get());
+    auto alg_hnsw =
+        std::make_shared<hnswlib::HierarchicalNSW>(space.get(),
+                                                   DEFAULT_MAX_ELEMENT,
+                                                   allocator.get(),
+                                                   M / 2,
+                                                   ef_construction,
+                                                   Options::Instance().block_size_limit());
+    alg_hnsw->init_memory_space();
+
+    for (int64_t i = 0; i < base_size; ++i) {
+        alg_hnsw->addPoint((const void*)(base_vectors.data() + i * dim), ids[i]);
+    }
+
+    // graph data cell
+    auto graph_data_cell = std::make_shared<AdaptGraphDataCell>(alg_hnsw);
+
+    // pool
+    auto init_size = 10;
+    auto pool = std::make_shared<VisitedListPool>(
+        init_size, allocator.get(), vector_data_cell->TotalCount(), allocator.get());
+
+    // search param
+    InnerSearchParam search_param;
+    search_param.ep = fixed_entry_point_id;
+    search_param.ef = ef_search;
+    search_param.topk = k;
+
+    // init searcher
+    auto searcher = std::make_shared<BasicSearcher>(common);
+
+    // searcher-optimizer
+    searcher->SetMockParameters(graph_data_cell, vector_data_cell, pool, search_param, dim, 1000);
+    auto loss_before = searcher->MockRun();
+    auto optimizer_searcher = std::make_shared<Optimizer<BasicSearcher>>(common);
+    optimizer_searcher->RegisterParameter(RuntimeParameter(PREFETCH_DEPTH_CODE, 1, 10, 1));
+    optimizer_searcher->RegisterParameter(RuntimeParameter(PREFETCH_STRIDE_CODE, 1, 10, 1));
+    optimizer_searcher->RegisterParameter(RuntimeParameter(PREFETCH_STRIDE_VISIT, 1, 10, 1));
+    float end2end_improvement = optimizer_searcher->Optimize(searcher);
+    auto loss_after = searcher->MockRun();
 }

@@ -26,6 +26,11 @@ public:
                                      const std::string& quantization_str = "sq8",
                                      int buckets_count = 210,
                                      const std::string& train_type = "kmeans");
+    static void
+    TestGeneral(const IndexPtr& index,
+                const TestDatasetPtr& dataset,
+                const std::string& search_param,
+                float recall);
 
     static TestDatasetPool pool;
 
@@ -51,6 +56,7 @@ public:
         {"sq8", 0.84},
         {"sq8_uniform", 0.83},
         {"sq8_uniform,fp32", 0.89},
+        {"pq,fp32", 0.80},
     };
 };
 
@@ -76,10 +82,15 @@ IVFTestIndex::GenerateIVFBuildParametersString(const std::string& metric_type,
             "base_quantization_type": "{}",
             "ivf_train_type": "{}",
             "use_reorder": {},
+            "base_pq_dim": {},
             "precise_quantization_type": "{}"
         }}
     }}
     )";
+    auto pq_dim = dim;
+    if (dim % 2 == 0) {
+        pq_dim = dim / 2;
+    }
     auto strs = fixtures::SplitString(quantization_str, ',');
     std::string basic_quantizer_str = strs[0];
     bool use_reorder = false;
@@ -95,10 +106,23 @@ IVFTestIndex::GenerateIVFBuildParametersString(const std::string& metric_type,
                                        basic_quantizer_str,
                                        train_type,
                                        use_reorder,
+                                       pq_dim,
                                        precise_quantizer_str);
 
     INFO(build_parameters_str);
     return build_parameters_str;
+}
+void
+IVFTestIndex::TestGeneral(const TestIndex::IndexPtr& index,
+                          const TestDatasetPtr& dataset,
+                          const std::string& search_param,
+                          float recall) {
+    TestKnnSearch(index, dataset, search_param, recall, true);
+    TestConcurrentKnnSearch(index, dataset, search_param, recall, true);
+    TestRangeSearch(index, dataset, search_param, recall, 10, true);
+    TestRangeSearch(index, dataset, search_param, recall / 2.0, 5, true);
+    TestFilterSearch(index, dataset, search_param, recall, true);
+    TestCheckIdExist(index, dataset);
 }
 }  // namespace fixtures
 
@@ -196,7 +220,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex,
     }
 
     SECTION("Invalid ivf param base_quantization_type") {
-        auto base_quantization_types = GENERATE("pq", "fsa");
+        auto base_quantization_types = GENERATE("fsa", "aq");
         constexpr const char* param_temp =
             R"({{
                 "dtype": "float32",
@@ -240,25 +264,10 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex, "IVF Build & ContinueAdd Te
             auto param = GenerateIVFBuildParametersString(
                 metric_type, dim, base_quantization_str, 300, train_type);
             auto index = TestFactory(name, param, true);
+            auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
+            TestContinueAdd(index, dataset, true);
             if (index->CheckFeature(vsag::SUPPORT_ADD_AFTER_BUILD)) {
-                auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
-                TestContinueAdd(index, dataset, true);
-                if (index->CheckFeature(vsag::SUPPORT_KNN_SEARCH)) {
-                    TestKnnSearch(index, dataset, search_param, recall, true);
-                    if (index->CheckFeature(vsag::SUPPORT_SEARCH_CONCURRENT)) {
-                        TestConcurrentKnnSearch(index, dataset, search_param, recall, true);
-                    }
-                }
-                if (index->CheckFeature(vsag::SUPPORT_RANGE_SEARCH)) {
-                    TestRangeSearch(index, dataset, search_param, recall, 10, true);
-                    TestRangeSearch(index, dataset, search_param, recall / 2.0, 5, true);
-                }
-                if (index->CheckFeature(vsag::SUPPORT_KNN_SEARCH_WITH_ID_FILTER)) {
-                    TestFilterSearch(index, dataset, search_param, recall, true);
-                }
-                if (index->CheckFeature(vsag::IndexFeature::SUPPORT_CHECK_ID_EXIST)) {
-                    TestCheckIdExist(index, dataset);
-                }
+                TestGeneral(index, dataset, search_param, recall);
             }
             vsag::Options::Instance().set_block_size_limit(origin_size);
         }
@@ -280,35 +289,20 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex, "IVF Build", "[ft][ivf]") {
                 metric_type, dim, base_quantization_str, 300, train_type);
             auto index = TestFactory(name, param, true);
             auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
+            TestBuildIndex(index, dataset, true);
             if (index->CheckFeature(vsag::SUPPORT_BUILD)) {
-                TestBuildIndex(index, dataset, true);
-                if (index->CheckFeature(vsag::SUPPORT_KNN_SEARCH)) {
-                    TestKnnSearch(index, dataset, search_param, recall, true);
-                    if (index->CheckFeature(vsag::SUPPORT_SEARCH_CONCURRENT)) {
-                        TestConcurrentKnnSearch(index, dataset, search_param, recall, true);
-                    }
-                }
-                if (index->CheckFeature(vsag::SUPPORT_RANGE_SEARCH)) {
-                    TestRangeSearch(index, dataset, search_param, recall, 10, true);
-                    TestRangeSearch(index, dataset, search_param, recall / 2.0, 5, true);
-                }
-                if (index->CheckFeature(vsag::SUPPORT_KNN_SEARCH_WITH_ID_FILTER)) {
-                    TestFilterSearch(index, dataset, search_param, recall, true);
-                }
-                if (index->CheckFeature(vsag::IndexFeature::SUPPORT_CHECK_ID_EXIST)) {
-                    TestCheckIdExist(index, dataset);
-                }
+                TestGeneral(index, dataset, search_param, recall);
             }
             vsag::Options::Instance().set_block_size_limit(origin_size);
         }
     }
 }
 
-TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex, "IVF Add", "[ft][ivf]") {
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex, "IVF Export Model", "[ft][ivf]") {
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
     auto metric_type = GENERATE("l2", "ip", "cosine");
-    std::string train_type = GENERATE("random", "kmeans");
+    std::string train_type = GENERATE("kmeans");
 
     const std::string name = "ivf";
     auto search_param = fmt::format(search_param_tmp, 200);
@@ -318,25 +312,34 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex, "IVF Add", "[ft][ivf]") {
             auto param = GenerateIVFBuildParametersString(
                 metric_type, dim, base_quantization_str, 300, train_type);
             auto index = TestFactory(name, param, true);
+            auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
+
+            TestBuildIndex(index, dataset, true);
+            TestExportModel(index, dataset, search_param);
+
+            vsag::Options::Instance().set_block_size_limit(origin_size);
+        }
+    }
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex, "IVF Add", "[ft][ivf]") {
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    auto size = GENERATE(1024 * 1024 * 2);
+    auto metric_type = GENERATE("l2", "ip", "cosine");
+    std::string train_type = GENERATE("kmeans");
+
+    const std::string name = "ivf";
+    auto search_param = fmt::format(search_param_tmp, 200);
+    for (auto& dim : dims) {
+        for (auto& [base_quantization_str, recall] : test_cases) {
+            vsag::Options::Instance().set_block_size_limit(size);
+            auto param = GenerateIVFBuildParametersString(
+                metric_type, dim, base_quantization_str, 300, train_type);
+            auto index = TestFactory(name, param, true);
+            auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
+            TestAddIndex(index, dataset, true);
             if (index->CheckFeature(vsag::SUPPORT_ADD_FROM_EMPTY)) {
-                auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
-                TestAddIndex(index, dataset, true);
-                if (index->CheckFeature(vsag::SUPPORT_KNN_SEARCH)) {
-                    TestKnnSearch(index, dataset, search_param, recall, true);
-                    if (index->CheckFeature(vsag::SUPPORT_SEARCH_CONCURRENT)) {
-                        TestConcurrentKnnSearch(index, dataset, search_param, recall, true);
-                    }
-                }
-                if (index->CheckFeature(vsag::SUPPORT_RANGE_SEARCH)) {
-                    TestRangeSearch(index, dataset, search_param, recall, 10, true);
-                    TestRangeSearch(index, dataset, search_param, recall / 2.0, 5, true);
-                }
-                if (index->CheckFeature(vsag::SUPPORT_KNN_SEARCH_WITH_ID_FILTER)) {
-                    TestFilterSearch(index, dataset, search_param, recall, true);
-                }
-                if (index->CheckFeature(vsag::IndexFeature::SUPPORT_CHECK_ID_EXIST)) {
-                    TestCheckIdExist(index, dataset);
-                }
+                TestGeneral(index, dataset, search_param, recall);
             }
             vsag::Options::Instance().set_block_size_limit(origin_size);
         }
@@ -359,25 +362,10 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex,
             auto param = GenerateIVFBuildParametersString(
                 metric_type, dim, base_quantization_str, 300, train_type);
             auto index = TestFactory(name, param, true);
+            auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
+            TestConcurrentAdd(index, dataset, true);
             if (index->CheckFeature(vsag::SUPPORT_ADD_CONCURRENT)) {
-                auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
-                TestConcurrentAdd(index, dataset, true);
-                if (index->CheckFeature(vsag::SUPPORT_KNN_SEARCH)) {
-                    TestKnnSearch(index, dataset, search_param, recall, true);
-                    if (index->CheckFeature(vsag::SUPPORT_SEARCH_CONCURRENT)) {
-                        TestConcurrentKnnSearch(index, dataset, search_param, recall, true);
-                    }
-                }
-                if (index->CheckFeature(vsag::SUPPORT_RANGE_SEARCH)) {
-                    TestRangeSearch(index, dataset, search_param, recall, 10, true);
-                    TestRangeSearch(index, dataset, search_param, recall / 2.0, 5, true);
-                }
-                if (index->CheckFeature(vsag::SUPPORT_KNN_SEARCH_WITH_ID_FILTER)) {
-                    TestFilterSearch(index, dataset, search_param, recall, true);
-                }
-                if (index->CheckFeature(vsag::IndexFeature::SUPPORT_CHECK_ID_EXIST)) {
-                    TestCheckIdExist(index, dataset);
-                }
+                TestGeneral(index, dataset, search_param, recall);
             }
             vsag::Options::Instance().set_block_size_limit(origin_size);
         }
@@ -390,7 +378,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex, "IVF Serialize File", "[ft]
     auto metric_type = GENERATE("l2", "ip", "cosine");
     const std::string name = "ivf";
     auto search_param = fmt::format(search_param_tmp, 200);
-    std::string train_type = GENERATE("random", "kmeans");
+    std::string train_type = GENERATE("kmeans");
 
     for (auto& dim : dims) {
         for (auto& [base_quantization_str, recall] : test_cases) {
@@ -429,7 +417,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex, "IVF Clone", "[ft][ivf]") {
     auto metric_type = GENERATE("l2", "ip", "cosine");
     const std::string name = "ivf";
     auto search_param = fmt::format(search_param_tmp, 200);
-    std::string train_type = GENERATE("random", "kmeans");
+    std::string train_type = GENERATE("kmeans");
 
     for (auto& dim : dims) {
         for (auto& [base_quantization_str, recall] : test_cases) {

@@ -26,6 +26,7 @@ const char* const INDEX_TYPE_GNO_IMI = "gno_imi";
 
 // Parameter key for hgraph
 const char* const HGRAPH_USE_REORDER_KEY = "use_reorder";
+const char* const HGRAPH_USE_ELP_OPTIMIZER_KEY = "use_elp_optimizer";
 const char* const HGRAPH_IGNORE_REORDER_KEY = "ignore_reorder";
 const char* const HGRAPH_GRAPH_KEY = "graph";
 const char* const HGRAPH_BASE_CODES_KEY = "base_codes";
@@ -56,10 +57,13 @@ const char* const QUANTIZATION_TYPE_VALUE_FP32 = "fp32";
 const char* const QUANTIZATION_TYPE_VALUE_FP16 = "fp16";
 const char* const QUANTIZATION_TYPE_VALUE_BF16 = "bf16";
 const char* const QUANTIZATION_TYPE_VALUE_PQ = "pq";
+const char* const QUANTIZATION_TYPE_VALUE_PQFS = "pqfs";
 const char* const QUANTIZATION_TYPE_VALUE_RABITQ = "rabitq";
 const char* const QUANTIZATION_TYPE_VALUE_SPARSE = "sparse";
 
+// quantization param
 const char* const PCA_DIM = "pca_dim";
+const char* const RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY = "rabitq_bits_per_dim_query";
 const char* const SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE = "sq4_uniform_trunc_rate";
 const char* const PRODUCT_QUANTIZATION_DIM = "pq_dim";
 const char* const PRODUCT_QUANTIZATION_BITS = "pq_bits";
@@ -104,6 +108,7 @@ const std::unordered_map<std::string, std::string> DEFAULT_MAP = {
     {"INDEX_TYPE_IVF", INDEX_TYPE_IVF},
     {"INDEX_TYPE_GNO_IMI", INDEX_TYPE_GNO_IMI},
     {"HGRAPH_USE_REORDER_KEY", HGRAPH_USE_REORDER_KEY},
+    {"HGRAPH_USE_ELP_OPTIMIZER_KEY", HGRAPH_USE_ELP_OPTIMIZER_KEY},
     {"HGRAPH_IGNORE_REORDER_KEY", HGRAPH_IGNORE_REORDER_KEY},
     {"HGRAPH_GRAPH_KEY", HGRAPH_GRAPH_KEY},
     {"HGRAPH_BASE_CODES_KEY", HGRAPH_BASE_CODES_KEY},
@@ -118,6 +123,7 @@ const std::unordered_map<std::string, std::string> DEFAULT_MAP = {
     {"QUANTIZATION_TYPE_VALUE_SQ8", QUANTIZATION_TYPE_VALUE_SQ8},
     {"QUANTIZATION_TYPE_VALUE_FP32", QUANTIZATION_TYPE_VALUE_FP32},
     {"QUANTIZATION_TYPE_VALUE_PQ", QUANTIZATION_TYPE_VALUE_PQ},
+    {"QUANTIZATION_TYPE_VALUE_PQFS", QUANTIZATION_TYPE_VALUE_PQFS},
     {"QUANTIZATION_TYPE_VALUE_FP16", QUANTIZATION_TYPE_VALUE_FP16},
     {"QUANTIZATION_TYPE_VALUE_BF16", QUANTIZATION_TYPE_VALUE_BF16},
     {"QUANTIZATION_TYPE_VALUE_RABITQ", QUANTIZATION_TYPE_VALUE_RABITQ},

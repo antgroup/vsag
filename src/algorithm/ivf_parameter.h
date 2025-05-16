@@ -70,7 +70,8 @@ public:
         }
 
         if (params[INDEX_TYPE_IVF].contains(GNO_IMI_SEARCH_PARAM_FIRST_ORDER_SCAN_RATIO)) {
-            obj.first_order_scan_ratio = params[INDEX_TYPE_IVF][GNO_IMI_SEARCH_PARAM_FIRST_ORDER_SCAN_RATIO];
+            obj.first_order_scan_ratio =
+                params[INDEX_TYPE_IVF][GNO_IMI_SEARCH_PARAM_FIRST_ORDER_SCAN_RATIO];
         }
         return obj;
     }

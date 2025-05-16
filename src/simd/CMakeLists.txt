@@ -9,6 +9,7 @@ set (SIMD_SRCS
         fp32_simd.cpp
         fp16_simd.cpp
         bf16_simd.cpp
+        pqfs_simd.cpp
         sq8_simd.cpp
         sq4_simd.cpp
         sq4_uniform_simd.cpp
@@ -59,5 +60,5 @@ simd_add_definitions (DIST_CONTAINS_AVX -DENABLE_AVX=1)
 simd_add_definitions (DIST_CONTAINS_AVX2 -DENABLE_AVX2=1)
 simd_add_definitions (DIST_CONTAINS_AVX512 -DENABLE_AVX512=1)
 
-target_link_libraries (simd PRIVATE cpuinfo coverage_config)
+target_link_libraries (simd INTERFACE cpuinfo coverage_config)
 install (TARGETS simd ARCHIVE DESTINATION lib)

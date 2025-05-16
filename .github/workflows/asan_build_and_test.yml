@@ -12,10 +12,14 @@ jobs:
     runs-on: ubuntu-22.04
     container:
       image: vsaglib/vsag:ci-x86
+      volumes:
+        - /opt:/useless
     concurrency:
       group: asan_build_x86-${{ github.event.pull_request.number }}
-      cancel-in-progress: true
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     steps:
+      - name: Free Disk Space
+        run: rm -rf /useless/hostedtoolcache
       - uses: actions/checkout@v4
       - name: Load Cache
         uses: actions/cache@v4
@@ -23,7 +27,7 @@ jobs:
           path: ./build/
           key: build-${{ hashFiles('./CMakeLists.txt') }}-${{ hashFiles('./.circleci/fresh_ci_cache.commit') }}
       - name: Make Asan
-        run: make asan
+        run: export CMAKE_GENERATOR="Ninja"; make asan
       - name: Save Test
         uses: actions/upload-artifact@v4
         with:
@@ -38,13 +42,20 @@ jobs:
     runs-on: ubuntu-22.04-arm
     concurrency:
       group: asan_build_aarch-${{ github.event.pull_request.number }}
-      cancel-in-progress: true
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     steps:
+      - name: Free Disk Space
+        run: rm -rf /opt/hostedtoolcache
       - uses: actions/checkout@v4
       - name: Prepare Env
         run: sudo bash ./scripts/deps/install_deps_ubuntu.sh
+      - name: Load Cache
+        uses: actions/cache@v4
+        with:
+          path: ./build/
+          key: build-aarch-${{ hashFiles('./CMakeLists.txt') }}-${{ hashFiles('./.circleci/fresh_ci_cache.commit') }}
       - name: Make Asan
-        run: make asan
+        run: export CMAKE_GENERATOR="Ninja"; make asan
       - name: Save Test
         uses: actions/upload-artifact@v4
         with:
@@ -60,13 +71,17 @@ jobs:
     runs-on: ubuntu-22.04
     concurrency:
       group: test_asan_x86-${{ matrix.test_type }}-${{ github.event.pull_request.number }}
-      cancel-in-progress: true
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     strategy:
       matrix:
         test_type: [ unittests, functests ]
     container:
       image: vsaglib/vsag:ci-x86
+      volumes:
+        - /opt:/useless
     steps:
+      - name: Free Disk Space
+        run: rm -rf /opt/hostedtoolcache
       - uses: actions/checkout@v4
       - name: Clean Env
         run: rm -rf ./build
@@ -99,8 +114,10 @@ jobs:
         test_type: [ unittests, functests ]
     concurrency:
       group: test_asan_aarch64-${{ matrix.test_type }}-${{ github.event.pull_request.number }}
-      cancel-in-progress: true
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     steps:
+      - name: Free Disk Space
+        run: rm -rf /opt/hostedtoolcache
       - uses: actions/checkout@v4
       - name: Prepare Env
         run: sudo bash ./scripts/deps/install_deps_ubuntu.sh

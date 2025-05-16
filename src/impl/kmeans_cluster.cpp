@@ -36,7 +36,7 @@ KMeansCluster::~KMeansCluster() {
 }
 
 Vector<int>
-KMeansCluster::Run(uint32_t k, const float* datas, uint64_t count, int iter, float* err) {
+KMeansCluster::Run(uint32_t k, const float* datas, uint64_t count, int iter, double* err) {
     // Allocate space for centroids
     if (k_centroids_ != nullptr) {
         allocator_->Deallocate(k_centroids_);
@@ -62,8 +62,8 @@ KMeansCluster::Run(uint32_t k, const float* datas, uint64_t count, int iter, flo
     auto* distances = reinterpret_cast<float*>(distances_buffer.data);
     auto* errs = reinterpret_cast<float*>(errs_buffer.data);
 
-    float total_err = 0;
-    float last_err = 0;
+    double total_err = 0;
+    double last_err = 0;
     Vector<int> labels(count, -1, this->allocator_);
     bool have_empty = false;
     bool has_converged = false;
@@ -75,11 +75,11 @@ KMeansCluster::Run(uint32_t k, const float* datas, uint64_t count, int iter, flo
             y_sqr[i] = FP32ComputeIP(k_centroids_ + i * dim_, k_centroids_ + i * dim_, dim_);
         }
 
-        size_t chunk_size = 10000;
-        int num_chunks = (count + chunk_size - 1) / chunk_size;
-        for (int chunk_idx = 0; chunk_idx < num_chunks; ++chunk_idx) {
-            int64_t start = chunk_idx * chunk_size;
-            int64_t cur_count = std::min(chunk_size, count - start);
+        uint64_t chunk_size = 10000;
+        uint64_t num_chunks = (count + chunk_size - 1) / chunk_size;
+        for (uint64_t chunk_idx = 0; chunk_idx < num_chunks; ++chunk_idx) {
+            uint64_t start = chunk_idx * chunk_size;
+            uint64_t cur_count = std::min(chunk_size, count - start);
             if (cur_count <= 0) {
                 continue;
             }
@@ -114,7 +114,7 @@ KMeansCluster::Run(uint32_t k, const float* datas, uint64_t count, int iter, flo
             total_err += errs[i];
         }
 
-        if (it > 0 && std::fabs(last_err - total_err) / count < 1e-6) {
+        if (it > 0 && std::fabs(last_err - total_err) / static_cast<double>(count) < 1e-6) {
             has_converged = true;
         }
 

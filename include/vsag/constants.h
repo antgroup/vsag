@@ -49,7 +49,13 @@ extern const char* const METRIC_COSINE;
 extern const char* const METRIC_IP;
 extern const char* const DATATYPE_FLOAT32;
 extern const char* const DATATYPE_INT8;
+extern const char* const DATATYPE_SPARSE;
 extern const char* const BLANK_INDEX;
+
+// environment-level-parameters
+extern const char* const PREFETCH_STRIDE_VISIT;
+extern const char* const PREFETCH_STRIDE_CODE;
+extern const char* const PREFETCH_DEPTH_CODE;
 
 // parameters
 extern const char* const PARAMETER_DTYPE;
@@ -119,9 +125,11 @@ extern const char* const SERIALIZE_VERSION;
 
 extern const char* const SQ4_UNIFORM_TRUNC_RATE;
 extern const char* const RABITQ_PCA_DIM;
+extern const char* const RABITQ_BITS_PER_DIM_QUERY;
 
 // hgraph params
 extern const char* const HGRAPH_USE_REORDER;
+extern const char* const HGRAPH_USE_ELP_OPTIMIZER;
 extern const char* const HGRAPH_IGNORE_REORDER;
 extern const char* const HGRAPH_BASE_QUANTIZATION_TYPE;
 extern const char* const HGRAPH_GRAPH_MAX_DEGREE;
@@ -130,6 +138,7 @@ extern const char* const HGRAPH_INIT_CAPACITY;
 extern const char* const HGRAPH_BUILD_THREAD_COUNT;
 extern const char* const HGRAPH_PRECISE_QUANTIZATION_TYPE;
 extern const char* const HGRAPH_BASE_IO_TYPE;
+extern const char* const HGRAPH_BASE_PQ_DIM;
 extern const char* const HGRAPH_BASE_FILE_PATH;
 extern const char* const HGRAPH_PRECISE_IO_TYPE;
 extern const char* const HGRAPH_PRECISE_FILE_PATH;
@@ -146,6 +155,7 @@ extern const char* const IVF_TRAIN_TYPE;
 extern const char* const IVF_BUCKETS_COUNT;
 extern const char* const IVF_BASE_QUANTIZATION_TYPE;
 extern const char* const IVF_BASE_IO_TYPE;
+extern const char* const IVF_BASE_PQ_DIM;
 extern const char* const IVF_BASE_FILE_PATH;
 extern const char* const IVF_PRECISE_QUANTIZATION_TYPE;
 extern const char* const IVF_PRECISE_IO_TYPE;

@@ -32,8 +32,8 @@ public:
     ToJson() override;
 
 public:
-    uint64_t first_order_buckets_count{100};
-    uint64_t second_order_buckets_count{100};
+    BucketIdType first_order_buckets_count{100};
+    BucketIdType second_order_buckets_count{100};
 };
 
 using GNOIMIParameterPtr = std::shared_ptr<GNOIMIParameter>;

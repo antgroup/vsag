@@ -24,6 +24,7 @@
 #include <fstream>
 #include <iostream>
 #include <nlohmann/json.hpp>
+#include <shared_mutex>
 #include <unordered_set>
 #include <utility>
 
@@ -100,6 +101,13 @@ protected:
                   bool expected_success = true);
 
     static void
+    TestKnnSearchCompare(const IndexPtr& index_weak,
+                         const IndexPtr& index_strong,
+                         const TestDatasetPtr& dataset,
+                         const std::string& search_param,
+                         bool expected_success = true);
+
+    static void
     TestKnnSearchIter(const IndexPtr& index,
                       const TestDatasetPtr& dataset,
                       const std::string& search_param,
@@ -174,6 +182,10 @@ protected:
                             const std::string& search_param,
                             float expected_recall = 0.99,
                             bool expected_success = true);
+    static void
+    TestConcurrentDestruct(TestIndex::IndexPtr& index,
+                           const TestDatasetPtr& dataset,
+                           const std::string& search_param);
 
     static IndexPtr
     TestMergeIndex(const std::string& name,

@@ -24,6 +24,12 @@ exporter::Load(YAML::Node& node) {
     exporter ret;
     ret.format = check_and_get_value(node, "format");
     ret.to = check_and_get_value(node, "to");
+    if (not node["vars"].IsDefined()) {
+        return ret;
+    }
+
+    // optional fields
+    ret.vars = check_and_get_map(node, "vars");
 
     return ret;
 }

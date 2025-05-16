@@ -184,8 +184,7 @@ FP32Quantizer<metric>::ProcessQueryImpl(const DataType* query,
         computer.buf_ = reinterpret_cast<uint8_t*>(this->allocator_->Allocate(this->code_size_));
     } catch (const std::bad_alloc& e) {
         computer.buf_ = nullptr;
-        logger::error("bad alloc when init computer buf");
-        throw std::bad_alloc();
+        throw VsagException(ErrorType::NO_ENOUGH_MEMORY, "bad alloc when init computer buf");
     }
     if constexpr (metric == MetricType::METRIC_TYPE_COSINE) {
         Normalize(query, reinterpret_cast<float*>(computer.buf_), this->dim_);

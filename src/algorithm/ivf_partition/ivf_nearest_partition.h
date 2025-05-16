@@ -26,7 +26,7 @@ class IVFNearestPartition : public IVFPartitionStrategy {
 public:
     explicit IVFNearestPartition(BucketIdType bucket_count,
                                  const IndexCommonParam& common_param,
-                                 const IVFPartitionStrategyParametersPtr& param);
+                                 IVFPartitionStrategyParametersPtr param);
 
     void
     Train(const DatasetPtr dataset) override;

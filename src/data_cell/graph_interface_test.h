@@ -23,12 +23,15 @@
 namespace vsag {
 class GraphInterfaceTest {
 public:
-    explicit GraphInterfaceTest(GraphInterfacePtr graph) : graph_(std::move(graph)){};
+    explicit GraphInterfaceTest(GraphInterfacePtr graph, const bool require_sorted = false)
+        : graph_(std::move(graph)), require_sorted_(require_sorted) {
+    }
 
     void
     BasicTest(uint64_t max_id, uint64_t count, const GraphInterfacePtr& other);
 
 public:
     GraphInterfacePtr graph_{nullptr};
+    bool require_sorted_{false};
 };
 }  // namespace vsag

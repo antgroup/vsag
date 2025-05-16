@@ -134,6 +134,137 @@ FP32ComputeL2Sqr(const float* query, const float* codes, uint64_t dim) {
 #endif
 }
 
+void
+FP32ComputeIPBatch4(const float* query,
+                    uint64_t dim,
+                    const float* codes1,
+                    const float* codes2,
+                    const float* codes3,
+                    const float* codes4,
+                    float& result1,
+                    float& result2,
+                    float& result3,
+                    float& result4) {
+#if defined(ENABLE_AVX2)
+    if (dim < 8) {
+        return avx::FP32ComputeIPBatch4(
+            query, dim, codes1, codes2, codes3, codes4, result1, result2, result3, result4);
+    }
+
+    __m256 sum1 = _mm256_setzero_ps();
+    __m256 sum2 = _mm256_setzero_ps();
+    __m256 sum3 = _mm256_setzero_ps();
+    __m256 sum4 = _mm256_setzero_ps();
+    int i = 0;
+    for (; i + 7 < dim; i += 8) {
+        __m256 q = _mm256_loadu_ps(query + i);
+        __m256 c1 = _mm256_loadu_ps(codes1 + i);
+        __m256 c2 = _mm256_loadu_ps(codes2 + i);
+        __m256 c3 = _mm256_loadu_ps(codes3 + i);
+        __m256 c4 = _mm256_loadu_ps(codes4 + i);
+        sum1 = _mm256_fmadd_ps(q, c1, sum1);
+        sum2 = _mm256_fmadd_ps(q, c2, sum2);
+        sum3 = _mm256_fmadd_ps(q, c3, sum3);
+        sum4 = _mm256_fmadd_ps(q, c4, sum4);
+    }
+    alignas(32) float result[8];
+    _mm256_store_ps(result, sum1);
+    result1 += result[0] + result[1] + result[2] + result[3] + result[4] + result[5] + result[6] +
+               result[7];
+    _mm256_store_ps(result, sum2);
+    result2 += result[0] + result[1] + result[2] + result[3] + result[4] + result[5] + result[6] +
+               result[7];
+    _mm256_store_ps(result, sum3);
+    result3 += result[0] + result[1] + result[2] + result[3] + result[4] + result[5] + result[6] +
+               result[7];
+    _mm256_store_ps(result, sum4);
+    result4 += result[0] + result[1] + result[2] + result[3] + result[4] + result[5] + result[6] +
+               result[7];
+    if (i < dim) {
+        avx::FP32ComputeIPBatch4(query + i,
+                                 dim - i,
+                                 codes1 + i,
+                                 codes2 + i,
+                                 codes3 + i,
+                                 codes4 + i,
+                                 result1,
+                                 result2,
+                                 result3,
+                                 result4);
+    }
+#else
+    return avx::FP32ComputeIPBatch4(
+        query, dim, codes1, codes2, codes3, codes4, result1, result2, result3, result4);
+#endif
+}
+
+void
+FP32ComputeL2SqrBatch4(const float* query,
+                       uint64_t dim,
+                       const float* codes1,
+                       const float* codes2,
+                       const float* codes3,
+                       const float* codes4,
+                       float& result1,
+                       float& result2,
+                       float& result3,
+                       float& result4) {
+#if defined(ENABLE_AVX2)
+    if (dim < 8) {
+        return sse::FP32ComputeL2SqrBatch4(
+            query, dim, codes1, codes2, codes3, codes4, result1, result2, result3, result4);
+    }
+    __m256 sum1 = _mm256_setzero_ps();
+    __m256 sum2 = _mm256_setzero_ps();
+    __m256 sum3 = _mm256_setzero_ps();
+    __m256 sum4 = _mm256_setzero_ps();
+    int i = 0;
+    for (; i + 7 < dim; i += 8) {
+        __m256 q = _mm256_loadu_ps(query + i);
+        __m256 c1 = _mm256_loadu_ps(codes1 + i);
+        __m256 c2 = _mm256_loadu_ps(codes2 + i);
+        __m256 c3 = _mm256_loadu_ps(codes3 + i);
+        __m256 c4 = _mm256_loadu_ps(codes4 + i);
+        __m256 diff1 = _mm256_sub_ps(q, c1);
+        __m256 diff2 = _mm256_sub_ps(q, c2);
+        __m256 diff3 = _mm256_sub_ps(q, c3);
+        __m256 diff4 = _mm256_sub_ps(q, c4);
+        sum1 = _mm256_fmadd_ps(diff1, diff1, sum1);
+        sum2 = _mm256_fmadd_ps(diff2, diff2, sum2);
+        sum3 = _mm256_fmadd_ps(diff3, diff3, sum3);
+        sum4 = _mm256_fmadd_ps(diff4, diff4, sum4);
+    }
+    alignas(32) float result[8];
+    _mm256_store_ps(result, sum1);
+    result1 += result[0] + result[1] + result[2] + result[3] + result[4] + result[5] + result[6] +
+               result[7];
+    _mm256_store_ps(result, sum2);
+    result2 += result[0] + result[1] + result[2] + result[3] + result[4] + result[5] + result[6] +
+               result[7];
+    _mm256_store_ps(result, sum3);
+    result3 += result[0] + result[1] + result[2] + result[3] + result[4] + result[5] + result[6] +
+               result[7];
+    _mm256_store_ps(result, sum4);
+    result4 += result[0] + result[1] + result[2] + result[3] + result[4] + result[5] + result[6] +
+               result[7];
+    if (i < dim) {
+        avx::FP32ComputeL2SqrBatch4(query + i,
+                                    dim - i,
+                                    codes1 + i,
+                                    codes2 + i,
+                                    codes3 + i,
+                                    codes4 + i,
+                                    result1,
+                                    result2,
+                                    result3,
+                                    result4);
+    }
+#else
+    return avx::FP32ComputeL2SqrBatch4(
+        query, dim, codes1, codes2, codes3, codes4, result1, result2, result3, result4);
+#endif
+}
+
 #if defined(ENABLE_AVX2)
 __inline __m256i __attribute__((__always_inline__)) load_8_short(const uint16_t* data) {
     __m128i bf16 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(data));
@@ -625,6 +756,51 @@ Normalize(const float* from, float* to, uint64_t dim) {
     float norm = std::sqrt(FP32ComputeIP(from, from, dim));
     avx2::DivScalar(from, to, dim, norm);
     return norm;
+}
+
+void
+PQFastScanLookUp32(const uint8_t* lookup_table,
+                   const uint8_t* codes,
+                   uint64_t pq_dim,
+                   int32_t* result) {
+#if defined(ENABLE_AVX2)
+    if (pq_dim == 0) {
+        return;
+    }
+    __m256i sum[4];
+    for (size_t i = 0; i < 4; i++) {
+        sum[i] = _mm256_setzero_si256();
+    }
+    const auto sign4 = _mm256_set1_epi8(0x0F);
+    const auto sign8 = _mm256_set1_epi16(0xFF);
+    uint64_t i = 0;
+    for (; i + 1 < pq_dim; i += 2) {
+        auto dict = _mm256_loadu_si256((__m256i*)(lookup_table));
+        lookup_table += 32;
+        auto code = _mm256_loadu_si256((__m256i*)(codes));
+        codes += 32;
+        auto code1 = _mm256_and_si256(code, sign4);
+        auto code2 = _mm256_and_si256(_mm256_srli_epi16(code, 4), sign4);
+        auto res1 = _mm256_shuffle_epi8(dict, code1);
+        auto res2 = _mm256_shuffle_epi8(dict, code2);
+        sum[0] = _mm256_add_epi16(sum[0], _mm256_and_si256(res1, sign8));
+        sum[1] = _mm256_add_epi16(sum[1], _mm256_srli_epi16(res1, 8));
+        sum[2] = _mm256_add_epi16(sum[2], _mm256_and_si256(res2, sign8));
+        sum[3] = _mm256_add_epi16(sum[3], _mm256_srli_epi16(res2, 8));
+    }
+    alignas(256) uint16_t temp[16];
+    for (int64_t idx = 0; idx < 4; idx++) {
+        _mm256_store_si256((__m256i*)(temp), sum[idx]);
+        for (int64_t j = 0; j < 8; j++) {
+            result[idx * 8 + j] += temp[j] + temp[j + 8];
+        }
+    }
+    if (pq_dim > i) {
+        avx::PQFastScanLookUp32(lookup_table, codes, pq_dim - i, result);
+    }
+#else
+    avx::PQFastScanLookUp32(lookup_table, codes, pq_dim, result);
+#endif
 }
 
 }  // namespace vsag::avx2

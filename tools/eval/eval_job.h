@@ -27,8 +27,9 @@ struct exporter {
     static exporter
     Load(YAML::Node&);
 
-    std::string format{"json"};  // json, or text
-    std::string to{"stdout"};    // stdout, or /path/to/file
+    std::string format{"json"};  // json, text/table, line_protocol
+    std::string to{"stdout"};    // stdout, file://path/to/file or influxdb://endpoint
+    std::unordered_map<std::string, std::string> vars;  // environment variables, like cookies
 };
 
 // a eval_job contains multiple eval cases

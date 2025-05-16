@@ -23,6 +23,7 @@
 #include "fp16_simd.h"
 #include "fp32_simd.h"
 #include "normalize.h"
+#include "pqfs_simd.h"
 #include "rabitq_simd.h"
 #include "simd_status.h"
 #include "sq4_simd.h"

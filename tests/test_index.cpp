@@ -19,6 +19,7 @@
 #include "fixtures/test_logger.h"
 #include "fixtures/test_reader.h"
 #include "fixtures/thread_pool.h"
+#include "index/hnsw.h"
 #include "simd/fp32_simd.h"
 #include "vsag/engine.h"
 #include "vsag/resource.h"
@@ -329,6 +330,52 @@ TestIndex::TestTrainAndAdd(const TestIndex::IndexPtr& index,
         } else {
             REQUIRE(not add_index.has_value());
         }
+    }
+}
+
+void
+TestIndex::TestKnnSearchCompare(const IndexPtr& index_weak,
+                                const IndexPtr& index_strong,
+                                const TestDatasetPtr& dataset,
+                                const std::string& search_param,
+                                bool expected_success) {
+    if (not index_weak->CheckFeature(vsag::SUPPORT_KNN_SEARCH) or
+        not index_strong->CheckFeature(vsag::SUPPORT_KNN_SEARCH)) {
+        return;
+    }
+
+    double time_cost_weak = 0;
+    double time_cost_strong = 0;
+
+    auto queries = dataset->query_;
+    auto query_count = queries->GetNumElements();
+    auto dim = queries->GetDim();
+    auto topk = dataset->top_k;
+    for (auto round = 0; round < 2; round++) {
+        for (auto i = 0; i < query_count; ++i) {
+            auto query = vsag::Dataset::Make();
+            query->NumElements(1)
+                ->Dim(dim)
+                ->Float32Vectors(queries->GetFloat32Vectors() + i * dim)
+                ->SparseVectors(queries->GetSparseVectors() + i)
+                ->Paths(queries->GetPaths() + i)
+                ->Owner(false);
+
+            if (round == 0) {
+                auto st = std::chrono::high_resolution_clock::now();
+                auto res = index_weak->KnnSearch(query, topk, search_param);
+                auto ed = std::chrono::high_resolution_clock::now();
+                time_cost_weak += std::chrono::duration<double>(ed - st).count();
+            } else {
+                auto st = std::chrono::high_resolution_clock::now();
+                auto res = index_strong->KnnSearch(query, topk, search_param);
+                auto ed = std::chrono::high_resolution_clock::now();
+                time_cost_strong += std::chrono::duration<double>(ed - st).count();
+            }
+        }
+    }
+    if (expected_success) {
+        REQUIRE(time_cost_weak > time_cost_strong);
     }
 }
 
@@ -900,6 +947,7 @@ TestIndex::TestConcurrentAdd(const TestIndex::IndexPtr& index,
         ->NumElements(temp_count)
         ->Paths(dataset->base_->GetPaths())
         ->Float32Vectors(dataset->base_->GetFloat32Vectors())
+        ->SparseVectors(dataset->base_->GetSparseVectors())
         ->Owner(false);
     index->Build(temp_dataset);
     fixtures::ThreadPool pool(5);
@@ -913,6 +961,7 @@ TestIndex::TestConcurrentAdd(const TestIndex::IndexPtr& index,
             ->NumElements(1)
             ->Paths(dataset->base_->GetPaths() + i)
             ->Float32Vectors(dataset->base_->GetFloat32Vectors() + i * dim)
+            ->SparseVectors(dataset->base_->GetSparseVectors() + i)
             ->Owner(false);
         auto add_index = index->Add(data_one);
         return add_index;
@@ -992,6 +1041,105 @@ TestIndex::TestConcurrentKnnSearch(const TestIndex::IndexPtr& index,
                          expected_recall * query_count));
     }
     REQUIRE(cur_recall > expected_recall * query_count * RECALL_THRESHOLD);
+}
+
+void
+TestIndex::TestConcurrentDestruct(TestIndex::IndexPtr& index,
+                                  const TestDatasetPtr& dataset,
+                                  const std::string& search_param) {
+    std::vector<std::future<bool>> futures;
+    fixtures::ThreadPool pool(32);
+    std::shared_mutex index_mutex;
+
+    auto func = [&](uint64_t i) -> bool {
+        auto base = vsag::Dataset::Make();
+        base->NumElements(1)
+            ->Ids(dataset->base_->GetIds() + i)
+            ->Dim(dataset->base_->GetDim())
+            ->Float32Vectors(dataset->base_->GetFloat32Vectors() + i * dataset->base_->GetDim())
+            ->Owner(false);
+
+        if (i == (dataset->base_->GetNumElements() * 3) / 4) {
+            std::unique_lock status_lock(index_mutex);
+            std::dynamic_pointer_cast<vsag::HNSW>(index)->SetStatus(vsag::VSAGIndexStatus::ALIVE);
+            index.reset();
+            return true;
+        }
+
+        std::shared_lock status_lock(index_mutex);
+        if (not index) {
+            return false;
+        }
+
+        switch (random() % 22) {
+            case 0:
+                return index->Build(base).has_value();
+            case 1:
+                return index->Add(base).has_value();
+            case 2:
+                return index->Remove(*base->GetIds()).has_value();
+            case 3:
+                return index->UpdateId(*base->GetIds(), *base->GetIds() + 1).has_value();
+            case 4:
+                return index->UpdateVector(*base->GetIds(), base).has_value();
+            case 5:
+                return index->KnnSearch(base, 100, search_param).has_value();
+            case 6:
+                return index->RangeSearch(base, 100, search_param).has_value();
+            case 7:
+                return index->Feedback(base, 100, search_param).has_value();
+            case 8:
+                return index->Pretrain({*base->GetIds()}, 100, search_param).has_value();
+            case 9:
+                return index->CalcDistanceById(base->GetFloat32Vectors(), *base->GetIds())
+                    .has_value();
+            case 10:
+                return index->CalDistanceById(base->GetFloat32Vectors(), base->GetIds(), 1)
+                    .has_value();
+            case 11:
+                return index->GetMinAndMaxId().has_value();
+            case 12:
+                return index->Serialize().has_value();
+            case 13: {
+                std::ostringstream oss;
+                std::ostream& out = oss;
+                return index->Serialize(out).has_value();
+            }
+            case 14: {
+                vsag::BinarySet bs;
+                return index->Deserialize(bs).has_value();
+            }
+            case 15: {
+                vsag::ReaderSet rs;
+                return index->Deserialize(rs).has_value();
+            }
+            case 16: {
+                std::istringstream iss;
+                std::istream& in = iss;
+                return index->Deserialize(in).has_value();
+            }
+            case 17:
+                return index->Merge({}).has_value();
+            case 18:
+                return index->CheckFeature(vsag::IndexFeature::SUPPORT_BUILD);
+            case 19:
+                return index->CheckIdExist(*base->GetIds());
+            case 20:
+                return index->GetMemoryUsage() > 0;
+            case 21:
+                std::dynamic_pointer_cast<vsag::HNSW>(index)->SetStatus(
+                    vsag::VSAGIndexStatus::DESTROYED);
+                return true;
+            default:
+                std::dynamic_pointer_cast<vsag::HNSW>(index)->SetStatus(
+                    vsag::VSAGIndexStatus::ALIVE);
+                return true;
+        }
+    };
+
+    for (uint64_t i = 0; i < dataset->base_->GetNumElements(); i++) {
+        futures.emplace_back(pool.enqueue(func, i));
+    }
 }
 
 void
@@ -1304,7 +1452,8 @@ TestIndex::TestExportModel(const TestIndex::IndexPtr& index,
     REQUIRE(index_model_result.has_value() == true);
     auto& index_model = index_model_result.value();
 
-    TestBuildIndex(index_model, dataset, true);
+    auto add_index = index_model->Add(dataset->base_);
+    REQUIRE(add_index.has_value());
 
     const auto& queries = dataset->query_;
     auto query_count = queries->GetNumElements();

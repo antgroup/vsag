@@ -18,6 +18,7 @@
 #include <fmt/format-inl.h>
 
 #include "data_cell/graph_interface_parameter.h"
+#include "data_cell/sparse_vector_datacell_parameter.h"
 #include "inner_string_params.h"
 #include "vsag/constants.h"
 
@@ -36,6 +37,10 @@ HGraphParameter::FromJson(const JsonType& json) {
                    fmt::format("hgraph parameters must contains {}", HGRAPH_USE_REORDER_KEY));
     this->use_reorder = json[HGRAPH_USE_REORDER_KEY];
 
+    if (json.contains(HGRAPH_USE_ELP_OPTIMIZER_KEY)) {
+        this->use_elp_optimizer = json[HGRAPH_USE_ELP_OPTIMIZER_KEY];
+    }
+
     if (json.contains(HGRAPH_IGNORE_REORDER_KEY)) {
         this->ignore_reorder = json[HGRAPH_IGNORE_REORDER_KEY];
     }
@@ -43,21 +48,30 @@ HGraphParameter::FromJson(const JsonType& json) {
     CHECK_ARGUMENT(json.contains(HGRAPH_BASE_CODES_KEY),
                    fmt::format("hgraph parameters must contains {}", HGRAPH_BASE_CODES_KEY));
     const auto& base_codes_json = json[HGRAPH_BASE_CODES_KEY];
-    this->base_codes_param = std::make_shared<FlattenDataCellParameter>();
+    if (data_type == DataTypes::DATA_TYPE_SPARSE) {
+        this->base_codes_param = std::make_shared<SparseVectorDataCellParameter>();
+    } else {
+        this->base_codes_param = std::make_shared<FlattenDataCellParameter>();
+    }
     this->base_codes_param->FromJson(base_codes_json);
 
     if (use_reorder) {
         CHECK_ARGUMENT(json.contains(HGRAPH_PRECISE_CODES_KEY),
                        fmt::format("hgraph parameters must contains {}", HGRAPH_PRECISE_CODES_KEY));
         const auto& precise_codes_json = json[HGRAPH_PRECISE_CODES_KEY];
-        this->precise_codes_param = std::make_shared<FlattenDataCellParameter>();
+        if (data_type == DataTypes::DATA_TYPE_SPARSE) {
+            this->precise_codes_param = std::make_shared<SparseVectorDataCellParameter>();
+        } else {
+            this->precise_codes_param = std::make_shared<FlattenDataCellParameter>();
+        }
         this->precise_codes_param->FromJson(precise_codes_json);
     }
 
     CHECK_ARGUMENT(json.contains(HGRAPH_GRAPH_KEY),
                    fmt::format("hgraph parameters must contains {}", HGRAPH_GRAPH_KEY));
     const auto& graph_json = json[HGRAPH_GRAPH_KEY];
-    this->bottom_graph_param = GraphInterfaceParameter::GetGraphParameterByJson(graph_json);
+    this->bottom_graph_param = GraphInterfaceParameter::GetGraphParameterByJson(
+        GraphStorageTypes::GRAPH_STORAGE_TYPE_FLAT, graph_json);
 
     if (json.contains(BUILD_PARAMS_KEY)) {
         const auto& build_params = json[BUILD_PARAMS_KEY];
@@ -82,6 +96,7 @@ HGraphParameter::ToJson() {
     json["type"] = INDEX_TYPE_HGRAPH;
 
     json[HGRAPH_USE_REORDER_KEY] = this->use_reorder;
+    json[HGRAPH_USE_ELP_OPTIMIZER_KEY] = this->use_elp_optimizer;
     json[HGRAPH_BASE_CODES_KEY] = this->base_codes_param->ToJson();
     if (use_reorder) {
         json[HGRAPH_PRECISE_CODES_KEY] = this->precise_codes_param->ToJson();

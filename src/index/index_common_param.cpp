@@ -31,12 +31,16 @@ fill_datatype(IndexCommonParam& result, JsonType::const_reference datatype_obj) 
         result.data_type_ = DataTypes::DATA_TYPE_FLOAT;
     } else if (datatype == DATATYPE_INT8) {
         result.data_type_ = DataTypes::DATA_TYPE_INT8;
+    } else if (datatype == DATATYPE_SPARSE) {
+        result.data_type_ = DataTypes::DATA_TYPE_SPARSE;
     } else {
-        throw std::invalid_argument(fmt::format("parameters[{}] must in [{}, {}], now is {}",
-                                                PARAMETER_DTYPE,
-                                                DATATYPE_FLOAT32,
-                                                DATATYPE_INT8,
-                                                datatype));
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            fmt::format("parameters[{}] must in [{}, {}, {}], now is {}",
+                                        PARAMETER_DTYPE,
+                                        DATATYPE_FLOAT32,
+                                        DATATYPE_INT8,
+                                        DATATYPE_SPARSE,
+                                        datatype));
     }
 }
 
@@ -52,12 +56,13 @@ fill_metrictype(IndexCommonParam& result, JsonType::const_reference metric_obj) 
     } else if (metric == METRIC_COSINE) {
         result.metric_ = MetricType::METRIC_TYPE_COSINE;
     } else {
-        throw std::invalid_argument(fmt::format("parameters[{}] must in [{}, {}, {}], now is {}",
-                                                PARAMETER_METRIC_TYPE,
-                                                METRIC_L2,
-                                                METRIC_IP,
-                                                METRIC_COSINE,
-                                                metric));
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            fmt::format("parameters[{}] must in [{}, {}, {}], now is {}",
+                                        PARAMETER_METRIC_TYPE,
+                                        METRIC_L2,
+                                        METRIC_IP,
+                                        METRIC_COSINE,
+                                        metric));
     }
 }
 
