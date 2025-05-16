@@ -62,8 +62,8 @@ HNSWTestIndex::GenerateHNSWBuildParametersString(const std::string& metric_type,
         "metric_type": "{}",
         "dim": {},
         "hnsw": {{
-            "max_degree": 64,
-            "ef_construction": 500,
+            "max_degree": 16,
+            "ef_construction": 200,
             "use_static": {}
         }}
     }}
@@ -88,8 +88,8 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex,
             "dtype": "float32",
             "metric_type": "l2",
             "hnsw": {{
-                "max_degree": 64,
-                "ef_construction": 500
+                "max_degree": 32,
+                "ef_construction": 200
             }}
         }})";
         REQUIRE_THROWS(TestFactory(name, param, false));
@@ -103,8 +103,8 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex,
             "metric_type": "{}",
             "dim": 23,
             "hnsw": {{
-                "max_degree": 64,
-                "ef_construction": 500
+                "max_degree": 32,
+                "ef_construction": 300
             }}
         }})";
         auto param = fmt::format(param_tmp, metric);
@@ -119,8 +119,8 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex,
             "metric_type": "l2",
             "dim": 23,
             "hnsw": {{
-                "max_degree": 64,
-                "ef_construction": 500
+                "max_degree": 32,
+                "ef_construction": 300
             }}
         }})";
         auto param = fmt::format(param_tmp, datatype);
@@ -152,7 +152,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex,
                 "metric_type": "l2",
                 "dim": 35,
                 "hnsw": {{
-                    "ef_construction": 500
+                    "ef_construction": 300
                 }}
             }})",
             R"({{
@@ -160,7 +160,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex,
                 "metric_type": "l2",
                 "dim": 35,
                 "hnsw": {{
-                    "max_degree": 64,
+                    "max_degree": 32,
                 }}
             }})");
         REQUIRE_THROWS(TestFactory(name, param, false));
@@ -176,7 +176,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex,
                 "dim": 35,
                 "hnsw": {{
                     "max_degree": {},
-                    "ef_construction": 500
+                    "ef_construction": 300
                 }}
             }})";
         auto param = fmt::format(param_temp, max_degree);
@@ -239,7 +239,6 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex,
     vsag::Options::Instance().set_block_size_limit(size);
     auto dims_ = fixtures::get_common_used_dims(20);
     for (auto& dim : dims_) {
-        std::cout << dim << std::endl;
         auto param = GenerateHNSWBuildParametersString(metric_type, dim);
         auto index = TestFactory(name, param, true);
         auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
