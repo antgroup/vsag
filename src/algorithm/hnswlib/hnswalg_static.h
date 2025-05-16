@@ -1467,6 +1467,7 @@ public:
               uint64_t ef,
               const vsag::FilterPtr is_id_allowed = nullptr,
               const float skip_ratio = 0.9f,
+              vsag::Allocator* allocator = nullptr,
               vsag::IteratorFilterContext* iter_ctx = nullptr,
               bool is_last_filter = false) const override {
         std::priority_queue<std::pair<float, LabelType>> result;
