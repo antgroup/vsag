@@ -149,6 +149,7 @@ SparseGraphDataCell::Resize(InnerIdType new_size){};
 void
 SparseGraphDataCell::DeleteNeighborsById(vsag::InnerIdType id) {
     if (is_support_delete_) {
+        std::unique_lock<std::shared_mutex> wlock(this->neighbors_map_mutex_);
         auto iter = node_version_.find(id);
         if (iter != node_version_.end()) {
             if (iter->second + 1 == 0) {
@@ -157,6 +158,10 @@ SparseGraphDataCell::DeleteNeighborsById(vsag::InnerIdType id) {
                     "remove point too many times in SparseGraphDatacell, please rebuild index");
             }
             iter->second++;
+        } else {
+            throw VsagException(
+                ErrorType::INTERNAL_ERROR,
+                fmt::format("remove point {} not exist in SparseGraphDatacell", id));
         }
     } else {
         throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,

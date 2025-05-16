@@ -53,6 +53,10 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
         GraphInterface::MakeInstance(hgraph_param->bottom_graph_param, common_param);
     auto graph_param =
         std::dynamic_pointer_cast<GraphDataCellParameter>(hgraph_param->bottom_graph_param);
+    if (graph_param == nullptr) {
+        throw VsagException(ErrorType::INTERNAL_ERROR,
+                            fmt::format("transform the graph_param failed"));
+    }
     sparse_datacell_param_ = std::make_shared<SparseGraphDatacellParameter>();
     sparse_datacell_param_->max_degree_ = graph_param->max_degree_ / 2;
     sparse_datacell_param_->remove_flag_bit_ = graph_param->remove_flag_bit_;

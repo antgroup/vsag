@@ -248,10 +248,15 @@ template <typename IOTmpl>
 void
 GraphDataCell<IOTmpl>::DeleteNeighborsById(vsag::InnerIdType id) {
     if (is_support_delete_) {
-        if (node_versions_[id] + 1 == 0) {
-            throw VsagException(
-                ErrorType::INTERNAL_ERROR,
-                "remove point too many times in GraphDatacell, please rebuild index");
+        if (id > max_capacity_) {
+            if (node_versions_[id] + 1 == 0) {
+                throw VsagException(
+                    ErrorType::INTERNAL_ERROR,
+                    "remove point too many times in GraphDatacell, please rebuild index");
+            }
+        } else {
+            throw VsagException(ErrorType::INTERNAL_ERROR,
+                                fmt::format("remove point {} not exist in GraphDatacell", id));
         }
         node_versions_[id]++;
     } else {
