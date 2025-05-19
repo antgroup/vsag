@@ -88,14 +88,7 @@ BlockManager::Resize(size_t new_max_elements) {
 }
 
 bool
-BlockManager::Serialize(char*& buffer, size_t cur_element_count) {
-    BufferStreamWriter writer(buffer);
-    return this->SerializeImpl(writer, cur_element_count);
-}
-
-bool
-BlockManager::Serialize(std::ostream& ofs, size_t cur_element_count) {
-    IOStreamWriter writer(ofs);
+BlockManager::Serialize(StreamWriter& writer, size_t cur_element_count) {
     return this->SerializeImpl(writer, cur_element_count);
 }
 

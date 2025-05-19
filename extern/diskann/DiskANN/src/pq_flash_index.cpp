@@ -1433,16 +1433,16 @@ int PQFlashIndex<T, LabelT>::load_from_separate_paths(std::stringstream &pivots_
                       << ". Will not output it at search time." << std::endl;
     }
 
-    // diskann::cout << "Disk-Index File Meta-data: ";
-    // diskann::cout << "# nodes per sector: " << nnodes_per_sector;
-    // diskann::cout << ", max node len (bytes): " << max_node_len;
-    // diskann::cout << ", max node degree: " << max_degree << std::endl;
+    diskann::cout << "Disk-Index File Meta-data: ";
+    diskann::cout << "# nodes per sector: " << nnodes_per_sector;
+    diskann::cout << ", max node len (bytes): " << max_node_len;
+    diskann::cout << ", max node degree: " << max_degree << std::endl;
     num_medoids = 1;
     medoids = new uint32_t[1];
     medoids[0] = (uint32_t)(medoid_id_on_file);
 
     use_medoids_data_as_centroids();
-    // diskann::cout << "done.." << std::endl;
+    diskann::cout << "done.." << std::endl;
     return 0;
 }
 

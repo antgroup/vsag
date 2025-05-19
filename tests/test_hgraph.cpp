@@ -647,7 +647,9 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex,
     }
 }
 
-TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex, "HGraph Serialize File", "[ft][hgraph]") {
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex,
+                             "HGraph Serialize File",
+                             "[ft][hgraph][serialization]") {
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
     auto metric_type = GENERATE("l2", "cosine");
@@ -967,7 +969,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex, "HGraph With Extra Info"
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex,
                              "HGraph Disk IO Type Index",
-                             "[ft][hgraph]") {
+                             "[ft][hgraph][serialization]") {
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
     auto metric_type = GENERATE("l2", "ip", "cosine");

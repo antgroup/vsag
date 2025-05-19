@@ -69,15 +69,15 @@ KMeansCluster::Run(uint32_t k, const float* datas, uint64_t count, int iter) {
     auto* distances = reinterpret_cast<float*>(distances_buffer.data);
     double error = std::numeric_limits<double>::max();
 
-    logger::debug("KMeansCluster::Run k: {}, count: {}, iter: {}", k, count, iter);
+    logger::trace("KMeansCluster::Run k: {}, count: {}, iter: {}", k, count, iter);
     if (k < THRESHOLD_FOR_HGRAPH) {
-        logger::debug("KMeansCluster::Run use blas");
+        logger::trace("KMeansCluster::Run use blas");
     } else {
-        logger::debug("KMeansCluster::Run use hgraph");
+        logger::trace("KMeansCluster::Run use hgraph");
     }
 
     for (int it = 0; it < iter; ++it) {
-        logger::debug("[{}] KMeansCluster::Run iter: {}/{}, cur loss is {}",
+        logger::trace("[{}] KMeansCluster::Run iter: {}/{}, cur loss is {}",
                       get_current_time(),
                       it,
                       iter,

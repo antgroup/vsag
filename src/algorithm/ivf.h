@@ -29,6 +29,8 @@
 #include "vsag/index.h"
 
 namespace vsag {
+
+// introduce since v0.14
 class IVF : public InnerIndexInterface {
 public:
     static ParamPtr

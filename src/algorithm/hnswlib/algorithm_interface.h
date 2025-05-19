@@ -65,10 +65,7 @@ public:
                          const vsag::FilterPtr& is_id_allowed = nullptr) const;
 
     virtual void
-    saveIndex(void* d) = 0;
-
-    virtual void
-    saveIndex(std::ostream& out_stream) = 0;
+    saveIndex(StreamWriter& writer) = 0;
 
     virtual size_t
     getMaxElements() = 0;

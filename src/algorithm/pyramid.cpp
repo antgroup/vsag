@@ -410,21 +410,38 @@ Pyramid::resize(int64_t new_max_capacity) {
 
 void
 Pyramid::InitFeatures() {
+    // add & build
     this->index_feature_list_->SetFeatures({
-        SUPPORT_BUILD,
-        SUPPORT_ADD_AFTER_BUILD,
-        SUPPORT_ADD_FROM_EMPTY,
-        SUPPORT_ADD_CONCURRENT,
-        SUPPORT_SERIALIZE_FILE,
-        SUPPORT_DESERIALIZE_FILE,
-        SUPPORT_SERIALIZE_BINARY_SET,
-        SUPPORT_DESERIALIZE_BINARY_SET,
-        SUPPORT_DESERIALIZE_BINARY_SET,
-        SUPPORT_SEARCH_CONCURRENT,
-        SUPPORT_KNN_SEARCH,
-        SUPPORT_KNN_SEARCH_WITH_ID_FILTER,
-        SUPPORT_RANGE_SEARCH,
-        SUPPORT_RANGE_SEARCH_WITH_ID_FILTER,
+        IndexFeature::SUPPORT_BUILD,
+        IndexFeature::SUPPORT_ADD_AFTER_BUILD,
+        IndexFeature::SUPPORT_ADD_FROM_EMPTY,
+    });
+
+    // search
+    this->index_feature_list_->SetFeatures({
+        IndexFeature::SUPPORT_KNN_SEARCH,
+        IndexFeature::SUPPORT_KNN_SEARCH_WITH_ID_FILTER,
+        IndexFeature::SUPPORT_RANGE_SEARCH,
+        IndexFeature::SUPPORT_RANGE_SEARCH_WITH_ID_FILTER,
+    });
+
+    // concurrency
+    this->index_feature_list_->SetFeatures({
+        IndexFeature::SUPPORT_SEARCH_CONCURRENT,
+        IndexFeature::SUPPORT_ADD_CONCURRENT,
+    });
+
+    // serialize
+    this->index_feature_list_->SetFeatures({
+        IndexFeature::SUPPORT_SERIALIZE_FILE,
+        IndexFeature::SUPPORT_DESERIALIZE_FILE,
+        IndexFeature::SUPPORT_SERIALIZE_BINARY_SET,
+        IndexFeature::SUPPORT_DESERIALIZE_BINARY_SET,
+        IndexFeature::SUPPORT_DESERIALIZE_BINARY_SET,
+    });
+
+    // other
+    this->index_feature_list_->SetFeatures({
         IndexFeature::SUPPORT_CLONE,
     });
 }
