@@ -391,18 +391,18 @@ HierarchicalNSW::searchBaseLayer(InnerIdType ep_id, const void* data_point, int 
         size_t size = getListCount((linklistsizeint*)data);
         auto* datal = (InnerIdType*)(data + 1);
 #ifdef USE_SSE
-        _mm_prefetch((char*)(visited_array + *(data + 1)), _MM_HINT_T0);
-        _mm_prefetch((char*)(visited_array + *(data + 1) + 64), _MM_HINT_T0);
-        _mm_prefetch(getDataByInternalId(*datal), _MM_HINT_T0);
-        _mm_prefetch(getDataByInternalId(*(datal + 1)), _MM_HINT_T0);
+        vsag::PrefetchLines((char*)(visited_array + *(data + 1)), 64);
+        vsag::PrefetchLines((char*)(visited_array + *(data + 1) + 64), 64);
+        vsag::PrefetchLines(getDataByInternalId(*datal), 64);
+        vsag::PrefetchLines(getDataByInternalId(*(datal + 1)), 64);
 #endif
 
         for (size_t j = 0; j < size; j++) {
             InnerIdType candidate_id = *(datal + j);
 #ifdef USE_SSE
             size_t pre_l = std::min(j, size - 2);
-            _mm_prefetch((char*)(visited_array + *(datal + pre_l + 1)), _MM_HINT_T0);
-            _mm_prefetch(getDataByInternalId(*(datal + pre_l + 1)), _MM_HINT_T0);
+            vsag::PrefetchLines((char*)(visited_array + *(datal + pre_l + 1)), 64);
+            vsag::PrefetchLines(getDataByInternalId(*(datal + pre_l + 1)), 64);
 #endif
             if (visited_array[candidate_id] == visited_array_tag)
                 continue;
@@ -413,7 +413,7 @@ HierarchicalNSW::searchBaseLayer(InnerIdType ep_id, const void* data_point, int 
             if (top_candidates.size() < ef_construction_ || lower_bound > dist1) {
                 candidateSet.emplace(-dist1, candidate_id);
 #ifdef USE_SSE
-                _mm_prefetch(getDataByInternalId(candidateSet.top().second), _MM_HINT_T0);
+                vsag::PrefetchLines(getDataByInternalId(candidateSet.top().second), 64);
 #endif
 
                 if (not isMarkedDeleted(candidate_id))
@@ -502,10 +502,10 @@ HierarchicalNSW::searchBaseLayerST(InnerIdType ep_id,
 
         auto vector_data_ptr = data_level0_memory_->GetElementPtr((*(data + 1)), offset_data_);
 #ifdef ENABLE_SSE
-        _mm_prefetch((char*)(visited_array + *(data + 1)), _MM_HINT_T0);
-        _mm_prefetch((char*)(visited_array + *(data + 1) + 64), _MM_HINT_T0);
+        vsag::PrefetchLines((char*)(visited_array + *(data + 1)), 64);
+        vsag::PrefetchLines((char*)(visited_array + *(data + 1) + 64), 64);
         vsag::PrefetchLines(vector_data_ptr, data_size_);
-        _mm_prefetch((char*)(data + 2), _MM_HINT_T0);
+        vsag::PrefetchLines((char*)(data + 2), 64);
 #endif
 
         for (size_t j = 1; j <= size; j++) {
@@ -515,8 +515,8 @@ HierarchicalNSW::searchBaseLayerST(InnerIdType ep_id,
                 vector_data_ptr = data_level0_memory_->GetElementPtr(
                     (*(data + pre_l + prefetch_jump_code_size_)), offset_data_);
 #ifdef ENABLE_SSE
-                _mm_prefetch((char*)(visited_array + *(data + pre_l + prefetch_jump_code_size_)),
-                             _MM_HINT_T0);
+                vsag::PrefetchLines(
+                    (char*)(visited_array + *(data + pre_l + prefetch_jump_code_size_)), 64);
                 vsag::PrefetchLines(vector_data_ptr, data_size_);
 #endif
             }
@@ -535,7 +535,7 @@ HierarchicalNSW::searchBaseLayerST(InnerIdType ep_id,
                     vector_data_ptr = data_level0_memory_->GetElementPtr(candidate_set.top().second,
                                                                          offsetLevel0_);
 #ifdef ENABLE_SSE
-                    _mm_prefetch(vector_data_ptr, _MM_HINT_T0);
+                    vsag::PrefetchLines(vector_data_ptr, 64);
 #endif
 
                     if ((!has_deletions || !isMarkedDeleted(candidate_id)) &&
@@ -614,10 +614,10 @@ HierarchicalNSW::searchBaseLayerST(InnerIdType ep_id,
 
         auto vector_data_ptr = data_level0_memory_->GetElementPtr((*(data + 1)), offset_data_);
 #ifdef USE_SSE
-        _mm_prefetch((char*)(visited_array + *(data + 1)), _MM_HINT_T0);
-        _mm_prefetch((char*)(visited_array + *(data + 1) + 64), _MM_HINT_T0);
-        _mm_prefetch(vector_data_ptr, _MM_HINT_T0);
-        _mm_prefetch((char*)(data + 2), _MM_HINT_T0);
+        vsag::PrefetchLines((char*)(visited_array + *(data + 1)), 64);
+        vsag::PrefetchLines((char*)(visited_array + *(data + 1) + 64), 64);
+        vsag::PrefetchLines(vector_data_ptr, 64);
+        vsag::PrefetchLines((char*)(data + 2), 64);
 #endif
 
         for (size_t j = 1; j <= size; j++) {
@@ -626,8 +626,8 @@ HierarchicalNSW::searchBaseLayerST(InnerIdType ep_id,
             vector_data_ptr =
                 data_level0_memory_->GetElementPtr((*(data + pre_l + 1)), offset_data_);
 #ifdef USE_SSE
-            _mm_prefetch((char*)(visited_array + *(data + pre_l + 1)), _MM_HINT_T0);
-            _mm_prefetch(vector_data_ptr, _MM_HINT_T0);  ////////////
+            vsag::PrefetchLines((char*)(visited_array + *(data + pre_l + 1)), 64);
+            vsag::PrefetchLines(vector_data_ptr, 64);  ////////////
 #endif
             if (visited_array[candidate_id] != visited_array_tag) {
                 visited_array[candidate_id] = visited_array_tag;
@@ -642,7 +642,7 @@ HierarchicalNSW::searchBaseLayerST(InnerIdType ep_id,
                     vector_data_ptr = data_level0_memory_->GetElementPtr(candidate_set.top().second,
                                                                          offsetLevel0_);
 #ifdef USE_SSE
-                    _mm_prefetch(vector_data_ptr, _MM_HINT_T0);  ////////////////////////
+                    vsag::PrefetchLines(vector_data_ptr, 64);  ////////////////////////
 #endif
 
                     if ((!has_deletions || !isMarkedDeleted(candidate_id)) &&

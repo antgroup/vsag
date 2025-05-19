@@ -15,27 +15,20 @@
 
 #pragma once
 
-#include <cstdint>
-#include <memory>
-#include <mutex>
-#include <roaring.hh>
-#include <vector>
+#include <shared_mutex>
 
-#include "vsag/bitset.h"
+#include "computable_bitset.h"
+#include "safe_allocator.h"
+#include "typing.h"
 
 namespace vsag {
-
-class BitsetImpl : public Bitset {
+class FastBitset : public ComputableBitset {
 public:
-    BitsetImpl() = default;
-    ~BitsetImpl() override = default;
+    explicit FastBitset(Allocator* allocator)
+        : ComputableBitset(), allocator_(allocator), data_(allocator){};
 
-    BitsetImpl(const BitsetImpl&) = delete;
-    BitsetImpl&
-    operator=(const BitsetImpl&) = delete;
-    BitsetImpl(BitsetImpl&&) = delete;
+    ~FastBitset() override = default;
 
-public:
     void
     Set(int64_t pos, bool value) override;
 
@@ -44,9 +37,6 @@ public:
 
     uint64_t
     Count() override;
-
-    std::string
-    Dump() override;
 
     void
     Or(const Bitset& another) override;
@@ -57,9 +47,21 @@ public:
     void
     Xor(const Bitset& another) override;
 
-private:
-    mutable std::mutex mutex_;
-    roaring::Roaring r_;
-};
+    void
+    Not() override;
 
-}  //namespace vsag
+    void
+    Serialize(StreamWriter& writer) const override;
+
+    void
+    Deserialize(StreamReader& reader) override;
+
+    std::string
+    Dump() override;
+
+private:
+    Vector<uint64_t> data_;
+    mutable std::shared_mutex mutex_;
+    Allocator* const allocator_{nullptr};
+};
+}  // namespace vsag
