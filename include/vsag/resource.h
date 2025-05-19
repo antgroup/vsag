@@ -94,7 +94,7 @@ public:
         return this->thread_pool;
     }
 
-public:
+private:
     ///< Shared pointer to the allocator associated with this resource.
     std::shared_ptr<Allocator> allocator;
 
