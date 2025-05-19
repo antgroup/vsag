@@ -13,7 +13,7 @@ global:
     datapath: "/tmp/data/deep-image-96-angular.hdf5"
     type: "build,search" # build, search
     index_name: "hgraph"
-    create_params: '{"dim":96,"dtype":"float32","metric_type":"cosine","index_param":{"base_quantization_type":"fp32","max_degree":32,"ef_construction":100}}'
+    create_params: '{"dim":96,"dtype":"float32","metric_type":"cosine","index_param":{"base_quantization_type":"fp32","max_degree":48, "graph_type":"odescent", "alpha": 1.2, "graph_iter_turn": 40, "neighbor_sample_rate": 0.2}}'
     search_params: '{"hgraph":{"ef_search":66}}'
     index_path: "/tmp/deep-image-96-angular/index/hgraph_index"
     topk: 10
@@ -49,8 +49,8 @@ global:
     datapath: "/tmp/data/glove-100-angular.hdf5"
     type: "build,search" # build, search
     index_name: "hgraph"
-    create_params: '{"dim":100,"dtype":"float32","metric_type":"cosine","index_param":{"base_quantization_type":"fp32","max_degree":64,"ef_construction":400}}'
-    search_params: '{"hgraph":{"ef_search":120}}'
+    create_params: '{"dim":100,"dtype":"float32","metric_type":"cosine","index_param":{"base_quantization_type":"fp32", "graph_type":"odescent","max_degree":96, "alpha": 1.2, "graph_iter_turn": 30, "neighbor_sample_rate": 0.2}}'
+    search_params: '{"hgraph":{"ef_search":88}}'
     index_path: "/tmp/glove-100-angular/index/hgraph_index"
     topk: 10
     search_mode: "knn" # ["knn", "range", "knn_filter", "range_filter"]
@@ -73,10 +73,10 @@ global:
     datapath: "/tmp/data/openai-1536-500k-angular.hdf5"
     type: "build,search" # build, search
     index_name: "hgraph"
-    create_params: '{"dim":1536,"dtype":"float32","metric_type":"cosine","index_param":{"base_quantization_type":"fp32","max_degree":96,"ef_construction":400}}'
-    search_params: '{"hgraph":{"ef_search":15}}'
+    create_params: '{"dim":1536,"dtype":"float32","metric_type":"cosine","index_param":{"base_quantization_type":"fp32","max_degree":64, "graph_type":"odescent", "alpha": 1.2, "graph_iter_turn": 30, "neighbor_sample_rate": 0.1}}'
+    search_params: '{"hgraph":{"ef_search":10}}'
     index_path: "/tmp/openai-1536-500k-angular/index/hgraph_index"
-    topk: 10
+    topk: 15
     search_mode: "knn"
     delete_index_after_search: false
 
