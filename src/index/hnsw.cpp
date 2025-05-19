@@ -563,7 +563,7 @@ HNSW::deserialize(const BinarySet& binary_set) {
     try {
         std::unique_lock lock(rw_mutex_);
         int64_t cursor = 0;
-        ReadFuncStreamReader reader(func, cursor);
+        ReadFuncStreamReader reader(func, cursor, b.size);
         BufferStreamReader buffer_reader(&reader, b.size, allocator_.get());
         alg_hnsw_->loadIndex(buffer_reader, this->space_.get());
         if (use_conjugate_graph_) {
@@ -617,7 +617,7 @@ HNSW::deserialize(const ReaderSet& reader_set) {
         std::unique_lock lock(rw_mutex_);
 
         int64_t cursor = 0;
-        ReadFuncStreamReader reader(func, cursor);
+        ReadFuncStreamReader reader(func, cursor, hnsw_data->Size());
         BufferStreamReader buffer_reader(&reader, hnsw_data->Size(), allocator_.get());
         alg_hnsw_->loadIndex(buffer_reader, this->space_.get());
     } catch (const std::runtime_error& e) {

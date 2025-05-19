@@ -27,8 +27,13 @@
 #include "impl/odescent_graph_builder.h"
 #include "impl/pruning_strategy.h"
 #include "index/iterator_filter.h"
+#include "logger.h"
+#include "serialization.h"
+#include "stream_reader.h"
+#include "typing.h"
 #include "utils/standard_heap.h"
 #include "utils/util_functions.h"
+#include "vsag/options.h"
 
 namespace vsag {
 
@@ -607,7 +612,7 @@ HGraph::RangeSearch(const DatasetPtr& query,
 }
 
 void
-HGraph::serialize_basic_info(StreamWriter& writer) const {
+HGraph::serialize_basic_info_v0_14(StreamWriter& writer) const {
     StreamWriter::WriteObj(writer, this->use_reorder_);
     StreamWriter::WriteObj(writer, this->dim_);
     StreamWriter::WriteObj(writer, this->metric_);
@@ -630,54 +635,7 @@ HGraph::serialize_basic_info(StreamWriter& writer) const {
 }
 
 void
-HGraph::Serialize(StreamWriter& writer) const {
-    if (this->ignore_reorder_) {
-        this->use_reorder_ = false;
-    }
-    this->serialize_basic_info(writer);
-    this->basic_flatten_codes_->Serialize(writer);
-    this->bottom_graph_->Serialize(writer);
-    if (this->use_reorder_) {
-        this->high_precise_codes_->Serialize(writer);
-    }
-    for (const auto& route_graph : this->route_graphs_) {
-        route_graph->Serialize(writer);
-    }
-    if (this->extra_info_size_ > 0 && this->extra_infos_ != nullptr) {
-        this->extra_infos_->Serialize(writer);
-    }
-}
-
-void
-HGraph::Deserialize(StreamReader& reader) {
-    this->deserialize_basic_info(reader);
-    this->basic_flatten_codes_->Deserialize(reader);
-    this->bottom_graph_->Deserialize(reader);
-    if (this->use_reorder_) {
-        this->high_precise_codes_->Deserialize(reader);
-    }
-
-    for (auto& route_graph : this->route_graphs_) {
-        route_graph->Deserialize(reader);
-    }
-    auto new_size = max_capacity_.load();
-    this->neighbors_mutex_->Resize(new_size);
-
-    pool_ = std::make_shared<VisitedListPool>(1, allocator_, new_size, allocator_);
-
-    if (this->extra_info_size_ > 0 && this->extra_infos_ != nullptr) {
-        this->extra_infos_->Deserialize(reader);
-    }
-    this->total_count_ = this->basic_flatten_codes_->TotalCount();
-
-    // optimize
-    if (use_elp_optimizer_) {
-        elp_optimize();
-    }
-}
-
-void
-HGraph::deserialize_basic_info(StreamReader& reader) {
+HGraph::deserialize_basic_info_v0_14(StreamReader& reader) {
     StreamReader::ReadObj(reader, this->use_reorder_);
     StreamReader::ReadObj(reader, this->dim_);
     StreamReader::ReadObj(reader, this->metric_);
@@ -702,6 +660,153 @@ HGraph::deserialize_basic_info(StreamReader& reader) {
         InnerIdType value;
         StreamReader::ReadObj(reader, value);
         this->label_table_->label_remap_.emplace(key, value);
+    }
+}
+
+#define TO_JSON(json_obj, var) json_obj[#var] = this->var##_;
+
+#define TO_JSON_BASE64(json_obj, var) json_obj[#var] = base64_encode_obj(this->var##_);
+
+#define TO_JSON_ATOMIC(json_obj, var) json_obj[#var] = this->var##_.load();
+
+JsonType
+HGraph::serialize_basic_info() const {
+    JsonType jsonify_basic_info;
+    TO_JSON(jsonify_basic_info, use_reorder);
+    TO_JSON(jsonify_basic_info, dim);
+    TO_JSON(jsonify_basic_info, metric);
+    TO_JSON(jsonify_basic_info, entry_point_id);
+    TO_JSON(jsonify_basic_info, ef_construct);
+    // logger::debug("mult: {}", this->mult_);
+    TO_JSON_BASE64(jsonify_basic_info, mult);
+    TO_JSON_ATOMIC(jsonify_basic_info, max_capacity);
+    jsonify_basic_info["max_level"] = this->route_graphs_.size();
+
+    return jsonify_basic_info;
+}
+
+#define FROM_JSON(json_obj, var) this->var##_ = (json_obj)[#var];
+
+#define FROM_JSON_BASE64(json_obj, var) base64_decode_obj((json_obj)[#var], this->var##_);
+
+#define FROM_JSON_ATOMIC(json_obj, var) this->var##_.store((json_obj)[#var]);
+
+void
+HGraph::deserialize_basic_info(JsonType jsonify_basic_info) {
+    FROM_JSON(jsonify_basic_info, use_reorder);
+    FROM_JSON(jsonify_basic_info, dim);
+    FROM_JSON(jsonify_basic_info, metric);
+    FROM_JSON(jsonify_basic_info, entry_point_id);
+    FROM_JSON(jsonify_basic_info, ef_construct);
+    FROM_JSON_BASE64(jsonify_basic_info, mult);
+    // logger::debug("mult: {}", this->mult_);
+    FROM_JSON_ATOMIC(jsonify_basic_info, max_capacity);
+
+    uint64_t max_level = jsonify_basic_info["max_level"];
+    for (uint64_t i = 0; i < max_level; ++i) {
+        this->route_graphs_.emplace_back(this->generate_one_route_graph());
+    }
+}
+
+void
+HGraph::serialize_label_info(StreamWriter& writer) const {
+    StreamWriter::WriteVector(writer, this->label_table_->label_table_);
+    uint64_t size = this->label_table_->label_remap_.size();
+    StreamWriter::WriteObj(writer, size);
+    for (const auto& pair : this->label_table_->label_remap_) {
+        auto key = pair.first;
+        StreamWriter::WriteObj(writer, key);
+        StreamWriter::WriteObj(writer, pair.second);
+    }
+}
+
+void
+HGraph::deserialize_label_info(StreamReader& reader) const {
+    StreamReader::ReadVector(reader, this->label_table_->label_table_);
+    uint64_t size;
+    StreamReader::ReadObj(reader, size);
+    for (uint64_t i = 0; i < size; ++i) {
+        LabelType key;
+        StreamReader::ReadObj(reader, key);
+        InnerIdType value;
+        StreamReader::ReadObj(reader, value);
+        this->label_table_->label_remap_.emplace(key, value);
+    }
+}
+
+void
+HGraph::Serialize(StreamWriter& writer) const {
+    if (this->ignore_reorder_) {
+        this->use_reorder_ = false;
+    }
+
+    // basic info moved to metadata since version 0.15
+    // only for test
+    if (Options::Instance().new_version()) {
+        this->serialize_label_info(writer);
+    } else {
+        this->serialize_basic_info_v0_14(writer);
+    }
+
+    this->basic_flatten_codes_->Serialize(writer);
+    this->bottom_graph_->Serialize(writer);
+    if (this->use_reorder_) {
+        this->high_precise_codes_->Serialize(writer);
+    }
+    for (const auto& route_graph : this->route_graphs_) {
+        route_graph->Serialize(writer);
+    }
+    if (this->extra_info_size_ > 0 && this->extra_infos_ != nullptr) {
+        this->extra_infos_->Serialize(writer);
+    }
+
+    // serialize footer (introduce since v0.15)
+    if (Options::Instance().new_version()) {
+        auto metadata = std::make_shared<Metadata>();
+        auto jsonify_basic_info = this->serialize_basic_info();
+        metadata->Set("basic_info", jsonify_basic_info);
+        logger::debug(jsonify_basic_info.dump());
+        auto footer = std::make_shared<Footer>(metadata);
+        footer->Write(writer);
+    }
+}
+
+void
+HGraph::Deserialize(StreamReader& reader) {
+    // try to deserialize footer (only in new version)
+    auto footer = Footer::Parse(reader);
+    if (footer != nullptr) {
+        logger::debug("parse with new version format");
+        auto metadata = footer->GetMetadata();
+        this->deserialize_basic_info(metadata->Get("basic_info"));
+        this->deserialize_label_info(reader);
+    } else {
+        logger::debug("parse with v0.14 version format");
+        this->deserialize_basic_info_v0_14(reader);
+    }
+
+    this->basic_flatten_codes_->Deserialize(reader);
+    this->bottom_graph_->Deserialize(reader);
+    if (this->use_reorder_) {
+        this->high_precise_codes_->Deserialize(reader);
+    }
+
+    for (auto& route_graph : this->route_graphs_) {
+        route_graph->Deserialize(reader);
+    }
+    auto new_size = max_capacity_.load();
+    this->neighbors_mutex_->Resize(new_size);
+
+    pool_ = std::make_shared<VisitedListPool>(1, allocator_, new_size, allocator_);
+
+    if (this->extra_info_size_ > 0 && this->extra_infos_ != nullptr) {
+        this->extra_infos_->Deserialize(reader);
+    }
+    this->total_count_ = this->basic_flatten_codes_->TotalCount();
+
+    // optimize
+    if (use_elp_optimizer_) {
+        elp_optimize();
     }
 }
 

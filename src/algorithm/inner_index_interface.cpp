@@ -140,7 +140,7 @@ InnerIndexInterface::Deserialize(const BinarySet& binary_set) {
 
     try {
         uint64_t cursor = 0;
-        auto reader = ReadFuncStreamReader(func, cursor);
+        auto reader = ReadFuncStreamReader(func, cursor, b.size);
         this->Deserialize(reader);
     } catch (const std::runtime_error& e) {
         throw VsagException(ErrorType::READ_ERROR, "failed to Deserialize: ", e.what());
@@ -161,7 +161,7 @@ InnerIndexInterface::Deserialize(const ReaderSet& reader_set) {
             index_reader->Read(offset, len, dest);
         };
         uint64_t cursor = 0;
-        auto reader = ReadFuncStreamReader(func, cursor);
+        auto reader = ReadFuncStreamReader(func, cursor, index_reader->Size());
         this->Deserialize(reader);
         return;
     } catch (const std::bad_alloc& e) {

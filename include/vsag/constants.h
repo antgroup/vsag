@@ -165,4 +165,8 @@ extern const char* const IVF_PRECISE_QUANTIZATION_TYPE;
 extern const char* const IVF_PRECISE_IO_TYPE;
 extern const char* const IVF_PRECISE_FILE_PATH;
 
+// serialization
+extern const char* const SERIAL_MAGIC_BEGIN;
+extern const char* const SERIAL_MAGIC_END;
+
 }  // namespace vsag
