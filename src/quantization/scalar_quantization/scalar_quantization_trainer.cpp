@@ -18,6 +18,7 @@
 #include <queue>
 #include <random>
 
+#include "iostream"
 #include "simd/normalize.h"
 
 namespace vsag {
@@ -58,8 +59,9 @@ ScalarQuantizationTrainer::TrainUniform(const float* data,
     } else if (mode == TRUNC_BOUND) {
         this->trunc_bound_train(sample_datas.data(), sample_count, upper.data(), lower.data());
     }
-    upper_bound = *std::max_element(upper.begin(), upper.end());
-    lower_bound = *std::min_element(lower.begin(), lower.end());
+    upper_bound = *std::min_element(upper.begin(), upper.end());
+    lower_bound = *std::max_element(lower.begin(), lower.end());
+    std::cout << upper_bound << " " << lower_bound << std::endl;
 }
 
 void
@@ -84,7 +86,7 @@ ScalarQuantizationTrainer::trunc_bound_train(const float* data,
                                              float* upper_bound,
                                              float* lower_bound) const {
     double ignore_rate = 0.001;
-    if (this->dim_ == 4) {
+    if (this->bits_ == 4) {
         ignore_rate = this->trunc_rate_;
     }
     auto ignore_count = static_cast<uint64_t>(static_cast<double>(count - 1) * ignore_rate);
