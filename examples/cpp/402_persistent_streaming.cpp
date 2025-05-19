@@ -25,6 +25,7 @@
 #include <unordered_set>
 
 #include "vsag/binaryset.h"
+#include "vsag/options.h"
 
 int
 main(int32_t argc, char** argv) {
@@ -52,14 +53,19 @@ main(int32_t argc, char** argv) {
         "dtype": "float32",
         "metric_type": "l2",
         "dim": 128,
-        "hnsw": {
+        "diskann": {
             "max_degree": 16,
-            "ef_construction": 100
+            "ef_construction": 100,
+            "pq_sample_rate": 0.5,
+            "pq_dims": 9,
+            "use_pq_search": true,
+            "use_async_io": true,
+            "use_bsa": true
         }
     }
     )";
     vsag::IndexPtr index = nullptr;
-    if (auto create_index = engine.CreateIndex("hnsw", index_paramesters);
+    if (auto create_index = engine.CreateIndex("diskann", index_paramesters);
         not create_index.has_value()) {
         std::cout << "create index failed: " << create_index.error().message << std::endl;
         abort();
@@ -76,6 +82,7 @@ main(int32_t argc, char** argv) {
     std::cout << "index contains vectors: " << index->GetNumElements() << std::endl;
 
     /******************* Save Index to OStream *****************/
+    vsag::Options::Instance().set_new_version(false);
     std::ofstream out_stream("/tmp/vsag-persistent-streaming.index");
     auto serialize_result = index->Serialize(out_stream);
     out_stream.close();
@@ -86,13 +93,14 @@ main(int32_t argc, char** argv) {
 
     /******************* Load Index from IStream *****************/
     index = nullptr;
-    if (auto create_index = engine.CreateIndex("hnsw", index_paramesters);
+    if (auto create_index = engine.CreateIndex("diskann", index_paramesters);
         not create_index.has_value()) {
         std::cout << "create index failed: " << create_index.error().message << std::endl;
         abort();
     } else {
         index = *create_index;
     }
+
     std::ifstream in_stream("/tmp/vsag-persistent-streaming.index");
     if (auto deserialize = index->Deserialize(in_stream); not deserialize.has_value()) {
         std::cerr << "load index failed: " << deserialize.error().message << std::endl;
@@ -108,11 +116,16 @@ main(int32_t argc, char** argv) {
     auto query = vsag::Dataset::Make();
     query->NumElements(1)->Dim(dim)->Float32Vectors(query_vector)->Owner(false);
     auto search_parameters = R"(
+    
     {
-        "hnsw": {
-            "ef_search": 100
+        "diskann": {
+            "ef_search": 100,
+            "beam_search": 4,
+            "io_limit": 50,
+            "use_reorder": true
         }
     }
+
     )";
     if (auto knn_search = index->KnnSearch(query, topk, search_parameters);
         not knn_search.has_value()) {

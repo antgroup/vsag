@@ -17,12 +17,20 @@
 
 #include <fmt/format-inl.h>
 
+#include <cstdint>
+
 #include "vsag/options.h"
 #include "vsag_exception.h"
 
 ReadFuncStreamReader::ReadFuncStreamReader(std::function<void(uint64_t, uint64_t, void*)> read_func,
-                                           uint64_t cursor)
-    : readFunc_(std::move(read_func)), cursor_(cursor) {
+                                           uint64_t cursor,
+                                           uint64_t length)
+    : readFunc_(std::move(read_func)), cursor_(cursor), length_(length) {
+}
+
+uint64_t
+ReadFuncStreamReader::Length() {
+    return length_;
 }
 
 void
@@ -42,6 +50,15 @@ ReadFuncStreamReader::GetCursor() const {
 }
 
 IOStreamReader::IOStreamReader(std::istream& istream) : istream_(istream) {
+    auto cur_pos = istream.tellg();
+    istream.seekg(0, std::ios::end);
+    length_ = istream.tellg() - cur_pos;
+    istream.seekg(cur_pos);
+}
+
+uint64_t
+IOStreamReader::Length() {
+    return length_;
 }
 
 void
@@ -78,6 +95,11 @@ BufferStreamReader::BufferStreamReader(StreamReader* reader,
 
 BufferStreamReader::~BufferStreamReader() {
     allocator_->Deallocate(buffer_);
+}
+
+uint64_t
+BufferStreamReader::Length() {
+    return reader_impl_->Length();
 }
 
 void

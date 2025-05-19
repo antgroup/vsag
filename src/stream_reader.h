@@ -18,6 +18,7 @@
 #include <cstdint>
 #include <functional>
 #include <istream>
+#include <stack>
 
 #include "typing.h"
 
@@ -25,15 +26,32 @@ class StreamReader {
 public:
     StreamReader() = default;
 
+    [[nodiscard]] virtual uint64_t
+    Length() = 0;
+
     virtual void
     Read(char* data, uint64_t size) = 0;
 
     virtual void
     Seek(uint64_t cursor) = 0;
 
-    virtual uint64_t
+    [[nodiscard]] virtual uint64_t
     GetCursor() const = 0;
 
+public:
+    void
+    PushSeek(uint64_t cursor) {
+        positions_.push(this->GetCursor());
+        this->Seek(cursor);
+    }
+
+    void
+    PopSeek() {
+        this->Seek(positions_.top());
+        positions_.pop();
+    }
+
+public:
     template <typename T>
     static void
     ReadObj(StreamReader& reader, T& val) {
@@ -46,7 +64,7 @@ public:
         StreamReader::ReadObj(reader, length);
         std::vector<char> buffer(length);
         reader.Read(buffer.data(), length);
-        return std::string(buffer.data(), length);
+        return {buffer.data(), length};
     }
 
     template <typename T>
@@ -66,11 +84,19 @@ public:
         val.resize(size);
         reader.Read(reinterpret_cast<char*>(val.data()), size * sizeof(T));
     }
+
+private:
+    std::stack<uint64_t> positions_;
 };
 
 class ReadFuncStreamReader : public StreamReader {
 public:
-    ReadFuncStreamReader(std::function<void(uint64_t, uint64_t, void*)> read_func, uint64_t cursor);
+    ReadFuncStreamReader(std::function<void(uint64_t, uint64_t, void*)> read_func,
+                         uint64_t cursor,
+                         uint64_t length);
+
+    [[nodiscard]] uint64_t
+    Length() override;
 
     void
     Read(char* data, uint64_t size) override;
@@ -78,29 +104,34 @@ public:
     void
     Seek(uint64_t cursor) override;
 
-    uint64_t
+    [[nodiscard]] uint64_t
     GetCursor() const override;
 
 private:
     const std::function<void(uint64_t, uint64_t, void*)> readFunc_;
     uint64_t cursor_;
+    uint64_t length_;
 };
 
 class IOStreamReader : public StreamReader {
 public:
     explicit IOStreamReader(std::istream& istream);
 
+    [[nodiscard]] uint64_t
+    Length() override;
+
     void
     Read(char* data, uint64_t size) override;
 
     void
     Seek(uint64_t cursor) override;
 
-    uint64_t
+    [[nodiscard]] uint64_t
     GetCursor() const override;
 
 private:
     std::istream& istream_;
+    uint64_t length_;
 };
 
 class BufferStreamReader : public StreamReader {
@@ -109,13 +140,16 @@ public:
 
     ~BufferStreamReader();
 
+    [[nodiscard]] uint64_t
+    Length() override;
+
     void
     Read(char* data, uint64_t size) override;
 
     void
     Seek(uint64_t cursor) override;
 
-    uint64_t
+    [[nodiscard]] uint64_t
     GetCursor() const override;
 
 private:
