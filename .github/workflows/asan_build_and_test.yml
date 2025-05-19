@@ -10,12 +10,15 @@ jobs:
   build_asan_x86:
     name: Asan Build X86
     runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        test_type: [ unittests, functests ]
     container:
       image: vsaglib/vsag:ci-x86
       volumes:
         - /opt:/useless
     concurrency:
-      group: asan_build_x86-${{ github.event.pull_request.number }}
+      group: asan_build_x86-${{ github.event.pull_request.number }}-${{ matrix.test_type }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     steps:
       - name: Free Disk Space
@@ -26,30 +29,32 @@ jobs:
       - name: Load Cache
         uses: actions/cache@v4
         with:
-          path: ./build.tar.gz
+          path: ./build
           key: build-${{ hashFiles('./CMakeLists.txt') }}-${{ hashFiles('./.circleci/fresh_ci_cache.commit') }}
-      - name: Extract
-        run: |
-          if [ -f build.tar.gz ]; then
-            tar -xzvf build.tar.gz;
-            rm -rf build.tar.gz;
-          else
-            mkdir -p build;
-          fi
       - name: Make Asan
         run: export CMAKE_GENERATOR="Ninja"; make asan
-      - name: Save Test
+      - name: Do Asan Test In ${{ matrix.test_type }}
+        run: |
+          echo leak:libomp.so > omp.supp
+          export LSAN_OPTIONS=suppressions=omp.supp
+          chmod +x ./build/tests/${{ matrix.test_type }}
+          ./scripts/test_parallel_by_name.sh ${{ matrix.test_type }}
+      - name: Upload Log
         uses: actions/upload-artifact@v4
         with:
-          path: ./build
-          name: test_x86-${{ github.run_id }}
+          path: ./log
+          name: log-x86-${{ matrix.test_type }}-${{ github.run_id }}
           compression-level: 1
           retention-days: 1
           overwrite: 'true'
-      - name: Compress
-        run: |
-          sudo apt install pigz -y;
-          tar -cf - ./build | pigz -p 4 > build.tar.gz
+#      - name: Save Test
+#        uses: actions/upload-artifact@v4
+#        with:
+#          path: ./build
+#          name: test_x86-${{ github.run_id }}
+#          compression-level: 1
+#          retention-days: 1
+#          overwrite: 'true'
 
   build_asan_aarch64:
     name: Asan Build Aarch64
@@ -68,16 +73,8 @@ jobs:
       - name: Load Cache
         uses: actions/cache@v4
         with:
-          path: ./build.tar.gz
+          path: ./build
           key: build-aarch-${{ hashFiles('./CMakeLists.txt') }}-${{ hashFiles('./.circleci/fresh_ci_cache.commit') }}
-      - name: Extract
-        run: |
-          if [ -f build.tar.gz ]; then
-            tar -xzvf build.tar.gz;
-            rm -rf build.tar.gz;
-          else
-            mkdir -p build;
-          fi
       - name: Make Asan
         run: export CMAKE_GENERATOR="Ninja"; make asan
       - name: Save Test
@@ -88,10 +85,6 @@ jobs:
           compression-level: 1
           retention-days: 1
           overwrite: 'true'
-      - name: Compress
-        run: |
-          sudo apt install pigz -y;
-          tar -cf - ./build | pigz -p 4 > build.tar.gz
 
   test_asan_x86:
     name: Test X86
@@ -113,25 +106,25 @@ jobs:
       - uses: actions/checkout@v4
       - name: Clean Env
         run: rm -rf ./build
-      - name: Download Test
-        uses: actions/download-artifact@v4
-        with:
-          name: test_x86-${{ github.run_id }}
-          path: ./build/
-      - name: Do Asan Test In ${{ matrix.test_type }}
-        run: |
-          echo leak:libomp.so > omp.supp
-          export LSAN_OPTIONS=suppressions=omp.supp
-          chmod +x ./build/tests/${{ matrix.test_type }}
-          ./scripts/test_parallel_by_name.sh ${{ matrix.test_type }}
-      - name: Upload Log
-        uses: actions/upload-artifact@v4
-        with:
-          path: ./log
-          name: log-x86-${{ matrix.test_type }}-${{ github.run_id }}
-          compression-level: 1
-          retention-days: 1
-          overwrite: 'true'
+#      - name: Download Test
+#        uses: actions/download-artifact@v4
+#        with:
+#          name: test_x86-${{ github.run_id }}
+#          path: ./build/
+#      - name: Do Asan Test In ${{ matrix.test_type }}
+#        run: |
+#          echo leak:libomp.so > omp.supp
+#          export LSAN_OPTIONS=suppressions=omp.supp
+#          chmod +x ./build/tests/${{ matrix.test_type }}
+#          ./scripts/test_parallel_by_name.sh ${{ matrix.test_type }}
+#      - name: Upload Log
+#        uses: actions/upload-artifact@v4
+#        with:
+#          path: ./log
+#          name: log-x86-${{ matrix.test_type }}-${{ github.run_id }}
+#          compression-level: 1
+#          retention-days: 1
+#          overwrite: 'true'
 
   test_asan_aarch64:
     name: Test Aarch64
