@@ -18,7 +18,6 @@
 #include <queue>
 #include <random>
 
-#include "iostream"
 #include "simd/normalize.h"
 
 namespace vsag {
@@ -61,7 +60,6 @@ ScalarQuantizationTrainer::TrainUniform(const float* data,
     }
     upper_bound = *std::min_element(upper.begin(), upper.end());
     lower_bound = *std::max_element(lower.begin(), lower.end());
-    std::cout << upper_bound << " " << lower_bound << std::endl;
 }
 
 void
