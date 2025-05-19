@@ -13,6 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <dirent.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <vsag/vsag.h>
@@ -28,11 +29,11 @@
 
 class LocalKvStore {
 public:
-    LocalKvStore(const std::string& path) : path_(path), meta_filename_(path + "/" + "_meta") {
+    LocalKvStore(const std::string& path) : path_(path), keys_filename_(path + "/" + "_keys") {
         struct stat info;
         if (stat(path.c_str(), &info) != 0) {
             if (mkdir(path.c_str(), 0755) != 0) {
-                std::cerr << "create example directory failed" << std::endl;
+                std::cerr << "create index directory failed" << std::endl;
                 abort();
             }
         }
@@ -50,19 +51,6 @@ public:
         }
         value_file.write(value.c_str(), value.length());
         value_file.close();
-
-        // update metadata if it's a new key
-        auto keys = GetKeys();
-        if (not keys.count(key)) {
-            keys.insert(key);
-            std::ofstream new_meta_file(meta_filename_);
-            while (not keys.empty()) {
-                auto key = *keys.begin();
-                new_meta_file << key << std::endl;
-                keys.erase(key);
-            }
-            new_meta_file.close();
-        }
     }
 
     std::string
@@ -87,23 +75,27 @@ public:
         return content;
     }
 
+    // get all keys via scanning with a prefix
     std::unordered_set<std::string>
     GetKeys() {
-        std::ifstream meta_file(meta_filename_);
-        if (not meta_file.is_open()) {
-            return {};
-        }
         std::unordered_set<std::string> keys;
-        std::string line;
-        while (std::getline(meta_file, line)) {
-            keys.insert(line);
+
+        // the path belong to the index
+        DIR* dir = opendir(path_.c_str());
+        if (dir != nullptr) {
+            struct dirent* ent;
+            while ((ent = readdir(dir)) != nullptr) {
+                if (ent->d_type == DT_REG) {
+                    keys.insert(ent->d_name);
+                }
+            }
+            closedir(dir);
         }
-        meta_file.close();
         return keys;
     }
 
 private:
-    const std::string meta_filename_;
+    const std::string keys_filename_;
     const std::string path_;
     std::mutex mutex_;
 };
@@ -134,14 +126,14 @@ main(int32_t argc, char** argv) {
         "dtype": "float32",
         "metric_type": "l2",
         "dim": 128,
-        "hnsw": {
-            "max_degree": 16,
-            "ef_construction": 100
+        "index_param": {
+            "buckets_count": 50,
+            "base_quantization_type": "fp32"
         }
     }
     )";
     vsag::IndexPtr index = nullptr;
-    if (auto create_index = engine.CreateIndex("hnsw", index_paramesters);
+    if (auto create_index = engine.CreateIndex("ivf", index_paramesters);
         not create_index.has_value()) {
         std::cout << "create index failed: " << create_index.error().message << std::endl;
         abort();
@@ -175,7 +167,7 @@ main(int32_t argc, char** argv) {
 
     /******************* Load Index from KVStore *****************/
     index = nullptr;
-    if (auto create_index = engine.CreateIndex("hnsw", index_paramesters);
+    if (auto create_index = engine.CreateIndex("ivf", index_paramesters);
         not create_index.has_value()) {
         std::cout << "create index failed: " << create_index.error().message << std::endl;
         abort();
@@ -211,8 +203,8 @@ main(int32_t argc, char** argv) {
     query->NumElements(1)->Dim(dim)->Float32Vectors(query_vector)->Owner(false);
     auto search_parameters = R"(
     {
-        "hnsw": {
-            "ef_search": 100
+        "ivf": {
+            "scan_buckets_count": 10
         }
     }
     )";

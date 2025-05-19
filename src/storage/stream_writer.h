@@ -28,6 +28,12 @@ public:
     virtual void
     Write(const char* data, uint64_t size) = 0;
 
+    [[nodiscard]] uint64_t
+    GetCursor() const {
+        return bytes_written_;
+    }
+
+public:
     template <typename T>
     static void
     WriteObj(StreamWriter& writer, const T& val) {
@@ -56,6 +62,9 @@ public:
         WriteObj(writer, size);
         writer.Write(reinterpret_cast<const char*>(val.data()), size * sizeof(T));
     }
+
+protected:
+    uint64_t bytes_written_{0};
 };
 
 class BufferStreamWriter : public StreamWriter {
@@ -65,6 +74,7 @@ public:
     void
     Write(const char* data, uint64_t size) override;
 
+private:
     char*& buffer_;
 };
 
@@ -75,7 +85,9 @@ public:
     void
     Write(const char* data, uint64_t size) override;
 
+private:
     std::ostream& ostream_;
+    uint64_t written_bytes_{0};
 };
 
 class WriteFuncStreamWriter : public StreamWriter {
@@ -90,4 +102,5 @@ public:
 
 public:
     uint64_t cursor_{0};
+    uint64_t written_bytes_{0};
 };

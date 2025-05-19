@@ -15,6 +15,7 @@
 
 #include <vsag/vsag.h>
 
+#include <fstream>
 #include <iostream>
 
 int
@@ -127,6 +128,35 @@ main(int argc, char** argv) {
             error_fixed += *hnsw->Feedback(query, 1, before_enhance_parameters, item.second);
         }
         std::cout << "Fixed queries num: " << error_fixed << std::endl;
+    }
+
+    auto& index = hnsw;
+    vsag::Resource resource(vsag::Engine::CreateDefaultAllocator(), nullptr);
+    vsag::Engine engine(&resource);
+    /******************* Save Index to OStream *****************/
+    vsag::Options::Instance().set_new_version(true);
+    std::ofstream out_stream("/tmp/vsag-persistent-streaming.index");
+    auto serialize_result = index->Serialize(out_stream);
+    out_stream.close();
+    if (not serialize_result.has_value()) {
+        std::cerr << serialize_result.error().message << std::endl;
+        abort();
+    }
+
+    /******************* Load Index from IStream *****************/
+    index = nullptr;
+    if (auto create_index = engine.CreateIndex("hnsw", hnsw_build_paramesters);
+        not create_index.has_value()) {
+        std::cout << "create index failed: " << create_index.error().message << std::endl;
+        abort();
+    } else {
+        index = *create_index;
+    }
+
+    std::ifstream in_stream("/tmp/vsag-persistent-streaming.index");
+    if (auto deserialize = index->Deserialize(in_stream); not deserialize.has_value()) {
+        std::cerr << "load index failed: " << deserialize.error().message << std::endl;
+        abort();
     }
 
     /******************* Search Hnsw Index with Conjugate Graph *****************/

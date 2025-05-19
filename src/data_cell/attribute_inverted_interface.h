@@ -18,8 +18,8 @@
 #include <memory>
 
 #include "impl/bitset/computable_bitset.h"
-#include "stream_reader.h"
-#include "stream_writer.h"
+#include "storage/stream_reader.h"
+#include "storage/stream_writer.h"
 #include "typing.h"
 #include "vsag/attribute.h"
 

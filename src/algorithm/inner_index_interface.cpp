@@ -15,10 +15,13 @@
 
 #include "inner_index_interface.h"
 
+#include <fmt/format-inl.h>
+
 #include "base_filter_functor.h"
 #include "brute_force.h"
 #include "empty_index_binary_set.h"
 #include "hgraph.h"
+#include "storage/serialization.h"
 #include "utils/slow_task_timer.h"
 #include "utils/util_functions.h"
 
@@ -98,11 +101,23 @@ InnerIndexInterface::RangeSearch(const DatasetPtr& query,
 
 BinarySet
 InnerIndexInterface::Serialize() const {
-    if (GetNumElements() == 0) {
-        return EmptyIndexBinarySet::Make(this->GetName());
-    }
     std::string time_record_name = this->GetName() + " Serialize";
     SlowTaskTimer t(time_record_name);
+
+    if (GetNumElements() == 0) {
+        // TODO(wxyu): remove this if condition
+        if (Options::Instance().new_version()) {
+            auto metadata = std::make_shared<Metadata>();
+            metadata->SetEmptyIndex(true);
+
+            BinarySet bs;
+            bs.Set(SERIAL_META_KEY, metadata->ToBinary());
+            return bs;
+        }
+
+        return EmptyIndexBinarySet::Make(this->GetName());
+    }
+
     uint64_t num_bytes = this->CalSerializeSize();
     // TODO(LHT): use try catch
 
@@ -120,34 +135,45 @@ InnerIndexInterface::Serialize() const {
     return bs;
 }
 
-void
-InnerIndexInterface::Serialize(std::ostream& out_stream) const {
-    IOStreamWriter writer(out_stream);
-    this->Serialize(writer);
-}
+#define CHECK_SELF_EMPTY                                                  \
+    if (this->GetNumElements() > 0) {                                     \
+        throw VsagException(ErrorType::INDEX_NOT_EMPTY,                   \
+                            "failed to Deserialize: index is not empty"); \
+    }
 
 void
 InnerIndexInterface::Deserialize(const BinarySet& binary_set) {
+    CHECK_SELF_EMPTY;
+
     std::string time_record_name = this->GetName() + " Deserialize";
     SlowTaskTimer t(time_record_name);
-    if (this->GetNumElements() > 0) {
-        throw VsagException(ErrorType::INDEX_NOT_EMPTY,
-                            "failed to Deserialize: index is not empty");
-    }
 
-    // check if binary set is an empty index
-    if (binary_set.Contains(BLANK_INDEX)) {
-        return;
+    // new version serialization will contains the META_KEY
+    if (binary_set.Contains(SERIAL_META_KEY)) {
+        logger::debug("parse with new version format");
+        auto metadata = std::make_shared<Metadata>(binary_set.Get(SERIAL_META_KEY));
+
+        if (metadata->EmptyIndex()) {
+            return;
+        }
+    } else {
+        logger::debug("parse with v0.11 version format");
+
+        // check if binary set is an empty index
+        if (binary_set.Contains(BLANK_INDEX)) {
+            return;
+        }
     }
 
     Binary b = binary_set.Get(this->GetName());
     auto func = [&](uint64_t offset, uint64_t len, void* dest) -> void {
+        // logger::debug("read offset {} len {}", offset, len);
         std::memcpy(dest, b.data.get() + offset, len);
     };
 
     try {
         uint64_t cursor = 0;
-        auto reader = ReadFuncStreamReader(func, cursor);
+        auto reader = ReadFuncStreamReader(func, cursor, b.size);
         this->Deserialize(reader);
     } catch (const std::runtime_error& e) {
         throw VsagException(ErrorType::READ_ERROR, "failed to Deserialize: ", e.what());
@@ -156,19 +182,18 @@ InnerIndexInterface::Deserialize(const BinarySet& binary_set) {
 
 void
 InnerIndexInterface::Deserialize(const ReaderSet& reader_set) {
+    CHECK_SELF_EMPTY;
+
     std::string time_record_name = this->GetName() + " Deserialize";
     SlowTaskTimer t(time_record_name);
-    if (this->GetNumElements() > 0) {
-        throw VsagException(ErrorType::INDEX_NOT_EMPTY,
-                            "failed to Deserialize: index is not empty");
-    }
+
     try {
         auto index_reader = reader_set.Get(this->GetName());
         auto func = [&](uint64_t offset, uint64_t len, void* dest) -> void {
             index_reader->Read(offset, len, dest);
         };
         uint64_t cursor = 0;
-        auto reader = ReadFuncStreamReader(func, cursor);
+        auto reader = ReadFuncStreamReader(func, cursor, index_reader->Size());
         this->Deserialize(reader);
         return;
     } catch (const std::bad_alloc& e) {
@@ -177,13 +202,32 @@ InnerIndexInterface::Deserialize(const ReaderSet& reader_set) {
 }
 
 void
-InnerIndexInterface::Deserialize(std::istream& in_stream) {
+InnerIndexInterface::Serialize(std::ostream& out_stream) const {
     std::string time_record_name = this->GetName() + " Deserialize";
     SlowTaskTimer t(time_record_name);
-    if (this->GetNumElements() > 0) {
-        throw VsagException(ErrorType::INDEX_NOT_EMPTY,
-                            "failed to Deserialize: index is not empty");
+
+    if (GetNumElements() == 0) {
+        // TODO(wxyu): remove this if condition
+        if (Options::Instance().new_version()) {
+            auto metadata = std::make_shared<Metadata>();
+            metadata->SetEmptyIndex(true);
+            auto footer = std::make_shared<Footer>(metadata);
+            IOStreamWriter writer(out_stream);
+            footer->Write(writer);
+            return;
+        }
     }
+
+    IOStreamWriter writer(out_stream);
+    this->Serialize(writer);
+}
+
+void
+InnerIndexInterface::Deserialize(std::istream& in_stream) {
+    CHECK_SELF_EMPTY;
+
+    std::string time_record_name = this->GetName() + " Deserialize";
+    SlowTaskTimer t(time_record_name);
     try {
         IOStreamReader reader(in_stream);
         this->Deserialize(reader);
@@ -192,6 +236,7 @@ InnerIndexInterface::Deserialize(std::istream& in_stream) {
         throw VsagException(ErrorType::READ_ERROR, "failed to Deserialize: ", e.what());
     }
 }
+
 uint64_t
 InnerIndexInterface::CalSerializeSize() const {
     auto cal_size_func = [](uint64_t cursor, uint64_t size, void* buf) { return; };
