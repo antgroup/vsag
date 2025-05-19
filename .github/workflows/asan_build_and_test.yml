@@ -14,10 +14,50 @@ jobs:
       image: vsaglib/vsag:ci-x86
       volumes:
         - /opt:/useless
+      options: |
+        --cap-add=SYS_ADMIN
+        --cap-add=SYS_RESOURCE
     concurrency:
       group: asan_build_x86-${{ github.event.pull_request.number }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     steps:
+      - name: Prepare CoreDump Env
+        run: |
+          mount -o remount,rw /sys
+          mkdir -p /tmp/core_file/
+          mkdir -p /var/lib/systemd/coredump/
+          chown root:root /var/lib/systemd/coredump/
+          chmod 755 /var/lib/systemd/coredump/
+          apt install systemd-coredump -y
+          cd /tmp/core_file
+          ulimit -c unlimited
+          cat /proc/sys/kernel/core_pattern
+          echo "/tmp/core_file/" > /proc/sys/kernel/core_pattern
+          cat << 'EOF' > segfault.c
+          #include <signal.h>
+          #include <unistd.h>
+
+          int main() {
+            raise(SIGSEGV);
+            return 0;
+          }
+          EOF
+
+          gcc -o segfault segfault.c
+          ./segfault || true
+          ls -lh
+          ls -l /var/lib/systemd/coredump/
+          coredumpctl list
+          dmesg
+
+      - name: Find Core File
+        if: always()
+        run: |
+          cd /tmp/core_file
+          ls -lh
+          mkdir -p /var/lib/systemd/coredump/
+          cd /var/lib/systemd/coredump/
+          ls -lh
       - name: Free Disk Space
         run: rm -rf /useless/hostedtoolcache
       - uses: actions/checkout@v4
@@ -90,6 +130,11 @@ jobs:
         with:
           name: test_x86-${{ github.run_id }}
           path: ./build/
+      - name: Prepare CoreDump Env
+        run: |
+          mkdir -p /tmp/core_file/
+          ulimit -c unlimited
+          cat /proc/sys/kernel/core_pattern
       - name: Do Asan Test In ${{ matrix.test_type }}
         run: |
           echo leak:libomp.so > omp.supp
@@ -101,6 +146,22 @@ jobs:
         with:
           path: ./log
           name: log-x86-${{ matrix.test_type }}-${{ github.run_id }}
+          compression-level: 1
+          retention-days: 1
+          overwrite: 'true'
+      - name: Find Core File
+        if: always()
+        run: |
+          corefile_path=`find . -name "core.*"`
+          echo $corefile_path
+          mv corefile_path /tmp/core_file/
+          mkdir -p /var/lib/systemd/coredump/
+          find /var/lib/systemd/coredump/ -name "core.*"
+      - name: Upload Core File
+        uses: actions/upload-artifact@v4
+        with:
+          path: /tmp/core_file/core*, ./build/test/${{ matrix.test_type }}
+          name: corefile-x86-${{ matrix.test_type }}-${{ github.run_id }}
           compression-level: 1
           retention-days: 1
           overwrite: 'true'
