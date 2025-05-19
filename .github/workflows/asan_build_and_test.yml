@@ -43,7 +43,7 @@ jobs:
         with:
           path: ./build
           name: test_x86-${{ github.run_id }}
-          compression-level: 1
+          compression-level: 6
           retention-days: 1
           overwrite: 'true'
       - name: Compress

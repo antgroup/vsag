@@ -21,19 +21,19 @@
 #include <roaring.hh>
 #include <vector>
 
-#include "vsag/bitset.h"
+#include "computable_bitset.h"
 
 namespace vsag {
 
-class BitsetImpl : public Bitset {
+class SparseBitset : public ComputableBitset {
 public:
-    BitsetImpl() = default;
-    ~BitsetImpl() override = default;
+    SparseBitset() = default;
+    ~SparseBitset() override = default;
 
-    BitsetImpl(const BitsetImpl&) = delete;
-    BitsetImpl&
-    operator=(const BitsetImpl&) = delete;
-    BitsetImpl(BitsetImpl&&) = delete;
+    SparseBitset(const SparseBitset&) = delete;
+    SparseBitset&
+    operator=(const SparseBitset&) = delete;
+    SparseBitset(SparseBitset&&) = delete;
 
 public:
     void
@@ -56,6 +56,15 @@ public:
 
     void
     Xor(const Bitset& another) override;
+
+    void
+    Not() override;
+
+    void
+    Serialize(StreamWriter& writer) const override;
+
+    void
+    Deserialize(StreamReader& reader) override;
 
 private:
     mutable std::mutex mutex_;
