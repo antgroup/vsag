@@ -47,6 +47,8 @@ FP32ComputeL2SqrBatch4(const float* query,
                        float& result2,
                        float& result3,
                        float& result4);
+void
+FP32Sub(const float* x, const float* y, float* z, uint64_t dim);
 }  // namespace generic
 
 namespace sse {
@@ -76,6 +78,8 @@ FP32ComputeL2SqrBatch4(const float* query,
                        float& result2,
                        float& result3,
                        float& result4);
+void
+FP32Sub(const float* x, const float* y, float* z, uint64_t dim);
 }  // namespace sse
 
 namespace avx {
@@ -105,6 +109,8 @@ FP32ComputeL2SqrBatch4(const float* query,
                        float& result2,
                        float& result3,
                        float& result4);
+void
+FP32Sub(const float* x, const float* y, float* z, uint64_t dim);
 }  // namespace avx
 
 namespace avx2 {
@@ -134,6 +140,8 @@ FP32ComputeL2SqrBatch4(const float* query,
                        float& result2,
                        float& result3,
                        float& result4);
+void
+FP32Sub(const float* x, const float* y, float* z, uint64_t dim);
 }  // namespace avx2
 
 namespace avx512 {
@@ -163,6 +171,8 @@ FP32ComputeL2SqrBatch4(const float* query,
                        float& result2,
                        float& result3,
                        float& result4);
+void
+FP32Sub(const float* x, const float* y, float* z, uint64_t dim);
 }  // namespace avx512
 
 using FP32ComputeType = float (*)(const float* query, const float* codes, uint64_t dim);
@@ -182,4 +192,6 @@ using FP32ComputeBatch4Type = void (*)(const float* query,
 extern FP32ComputeBatch4Type FP32ComputeIPBatch4;
 extern FP32ComputeBatch4Type FP32ComputeL2SqrBatch4;
 
+using FP32SubType = void (*)(const float* x, const float* y, float* z, uint64_t dim);
+extern FP32SubType FP32Sub;
 }  // namespace vsag
