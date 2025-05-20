@@ -1205,7 +1205,7 @@ HNSW::merge(const std::vector<MergeUnit>& merge_units) {
     {
         SlowTaskTimer t1("odescent build");
         auto odescent_param = std::make_shared<ODescentParameter>();
-        odescent_param->max_degree = static_cast<int64_t>(2 * graph_param_ptr->max_degree_);
+        odescent_param->max_degree = static_cast<int64_t>(graph_param_ptr->max_degree_);
         ODescent graph(odescent_param,
                        flatten_interface,
                        index_common_param_.allocator_.get(),
