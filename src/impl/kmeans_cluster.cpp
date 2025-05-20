@@ -76,7 +76,8 @@ KMeansCluster::Run(uint32_t k, const float* datas, uint64_t count, int iter, dou
 
     for (int it = 0; it < iter; ++it) {
         total_err = 0;
-        this->find_nearest_one_with_blas(datas, count, k, query_count_bs, y_sqr, distances, labels, errs);
+        this->find_nearest_one_with_blas(
+            datas, count, k, query_count_bs, y_sqr, distances, labels, errs);
         constexpr uint64_t bs = 1024;
 
         Vector<int> counts(k, 0, allocator_);
