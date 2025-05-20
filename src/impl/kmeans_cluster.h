@@ -36,6 +36,16 @@ public:
     float* k_centroids_{nullptr};
 
 private:
+    void
+    find_nearest_one_with_blas(const float* query,
+                               const uint64_t query_count,
+                               const uint64_t k,
+                               const uint64_t query_count_bs,
+                               float* y_sqr,
+                               float* distances,
+                               Vector<int32_t>& labels);
+
+private:
     Allocator* const allocator_{nullptr};
 
     SafeThreadPoolPtr thread_pool_{nullptr};

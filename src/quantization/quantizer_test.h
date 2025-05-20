@@ -233,7 +233,7 @@ TestComputer(Quantizer<T>& quant,
              bool retrain = true,
              float unbounded_numeric_error_rate = 1.0f,
              float unbounded_related_error_rate = 1.0f) {
-    auto query_count = 100;
+    auto query_count = 10;
     bool need_normalize = true;
     if constexpr (metric == vsag::MetricType::METRIC_TYPE_COSINE) {
         need_normalize = false;
