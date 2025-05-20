@@ -271,6 +271,27 @@ FP32ComputeL2SqrBatch4(const float* query,
 #endif
 }
 
+void
+FP32Sub(const float* x, const float* y, float* z, uint64_t dim) {
+#if defined(ENABLE_AVX)
+    if (dim < 8) {
+        return sse::FP32Sub(x, y, z, dim);
+    }
+    int i = 0;
+    for (; i + 7 < dim; i += 8) {
+        __m256 a = _mm256_loadu_ps(x + i);
+        __m256 b = _mm256_loadu_ps(y + i);
+        __m256 c = _mm256_sub_ps(a, b);
+        _mm256_storeu_ps(z + i, c);
+    }
+    if (i < dim) {
+        sse::FP32Sub(x + i, y + i, z + i, dim - i);
+    }
+#else
+    sse::FP32Sub(x, y, z, dim);
+#endif
+}
+
 #if defined(ENABLE_AVX)
 __inline __m256i __attribute__((__always_inline__)) load_8_short(const uint16_t* data) {
     return _mm256_set_epi16(data[7],

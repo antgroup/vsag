@@ -45,6 +45,40 @@ using namespace vsag;
         }                                                                             \
     };
 
+#define TEST_FP32_SUB_ACCURACY(Func)                                                           \
+    {                                                                                          \
+        std::vector<float> gt(dim, 0.0F);                                                      \
+        generic::Func(vec1.data() + i * dim, vec2.data() + i * dim, gt.data(), dim);           \
+        std::vector<float> sse_gt(dim, 0.0F);                                                  \
+        if (SimdStatus::SupportSSE()) {                                                        \
+            sse::Func(vec1.data() + i * dim, vec2.data() + i * dim, sse_gt.data(), dim);       \
+            for (uint64_t j = 0; j < dim; ++j) {                                               \
+                REQUIRE(fixtures::dist_t(gt[j]) == fixtures::dist_t(sse_gt[j]));               \
+            }                                                                                  \
+        }                                                                                      \
+        std::vector<float> avx_gt(dim, 0.0F);                                                  \
+        if (SimdStatus::SupportAVX()) {                                                        \
+            avx::Func(vec1.data() + i * dim, vec2.data() + i * dim, avx_gt.data(), dim);       \
+            for (uint64_t j = 0; j < dim; ++j) {                                               \
+                REQUIRE(fixtures::dist_t(gt[j]) == fixtures::dist_t(avx_gt[j]));               \
+            }                                                                                  \
+        }                                                                                      \
+        std::vector<float> avx2_gt(dim, 0.0F);                                                 \
+        if (SimdStatus::SupportAVX2()) {                                                       \
+            avx2::Func(vec1.data() + i * dim, vec2.data() + i * dim, avx2_gt.data(), dim);     \
+            for (uint64_t j = 0; j < dim; ++j) {                                               \
+                REQUIRE(fixtures::dist_t(gt[j]) == fixtures::dist_t(avx2_gt[j]));              \
+            }                                                                                  \
+        }                                                                                      \
+        std::vector<float> avx512_gt(dim, 0.0F);                                               \
+        if (SimdStatus::SupportAVX512()) {                                                     \
+            avx512::Func(vec1.data() + i * dim, vec2.data() + i * dim, avx512_gt.data(), dim); \
+            for (uint64_t j = 0; j < dim; ++j) {                                               \
+                REQUIRE(fixtures::dist_t(gt[j]) == fixtures::dist_t(avx512_gt[j]));            \
+            }                                                                                  \
+        }                                                                                      \
+    };
+
 #define TEST_FP32_COMPUTE_ACCURACY_BATCH4(Func, FuncBatch4)                              \
     {                                                                                    \
         std::vector<float> gts(4);                                                       \
@@ -142,6 +176,7 @@ TEST_CASE("FP32 SIMD Compute", "[ut][simd]") {
         for (uint64_t i = 0; i < count; ++i) {
             TEST_FP32_COMPUTE_ACCURACY(FP32ComputeIP);
             TEST_FP32_COMPUTE_ACCURACY(FP32ComputeL2Sqr);
+            TEST_FP32_SUB_ACCURACY(FP32Sub);
         }
         for (uint64_t i = 0; i < count; i += 4) {
             TEST_FP32_COMPUTE_ACCURACY_BATCH4(FP32ComputeIP, FP32ComputeIPBatch4);
