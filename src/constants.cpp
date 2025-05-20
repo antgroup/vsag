@@ -34,6 +34,7 @@ const char* const DISTS = "dists";
 const char* const FLOAT32_VECTORS = "f32_vectors";
 const char* const SPARSE_VECTORS = "sparse_vectors";
 const char* const INT8_VECTORS = "i8_vectors";
+const char* const ATTRIBUTE_SETS = "attribute_sets";
 const char* const DATASET_PATHS = "paths";
 const char* const EXTRA_INFOS = "extra_infos";
 const char* const EXTRA_INFO_SIZE = "extra_info_size";

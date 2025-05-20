@@ -32,6 +32,7 @@
 #include "vsag/index_features.h"
 #include "vsag/iterator_context.h"
 #include "vsag/readerset.h"
+#include "vsag/search_request.h"
 
 namespace vsag {
 
@@ -180,6 +181,19 @@ public:
               const std::string& parameters,
               const FilterPtr& filter) const {
         throw std::runtime_error("Index doesn't support new filter");
+    }
+
+    /**
+      * @brief Performing search with request on index
+      * 
+      * @param request @see SearchRequest
+      * @return result contains 
+      *                - num_elements: 1
+      *                - ids, distances: length is (num_elements * k)               
+      */
+    virtual tl::expected<DatasetPtr, Error>
+    SearchWithRequest(const SearchRequest& request) const {
+        throw std::runtime_error("Index doesn't support Search With Request");
     }
 
     /**

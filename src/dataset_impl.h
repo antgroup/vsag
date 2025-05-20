@@ -35,7 +35,8 @@ class DatasetImpl : public Dataset {
                              const int8_t*,
                              const int64_t*,
                              const std::string*,
-                             const SparseVector*>;
+                             const SparseVector*,
+                             const AttributeSet*>;
 
 public:
     DatasetImpl() = default;
@@ -200,6 +201,20 @@ public:
             return std::get<const SparseVector*>(iter->second);
         }
 
+        return nullptr;
+    }
+
+    DatasetPtr
+    AttributeSets(const AttributeSet* attr_sets) override {
+        this->data_[ATTRIBUTE_SETS] = attr_sets;
+        return shared_from_this();
+    }
+
+    const AttributeSet*
+    GetAttributeSets() const override {
+        if (auto iter = this->data_.find(ATTRIBUTE_SETS); iter != this->data_.end()) {
+            return std::get<const AttributeSet*>(iter->second);
+        }
         return nullptr;
     }
 
