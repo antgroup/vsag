@@ -48,8 +48,17 @@ public:
     std::string
     Dump() override;
 
+    void
+    Or(const Bitset& another) override;
+
+    void
+    And(const Bitset& another) override;
+
+    void
+    Xor(const Bitset& another) override;
+
 private:
-    std::mutex mutex_;
+    mutable std::mutex mutex_;
     roaring::Roaring r_;
 };
 
