@@ -105,9 +105,7 @@ TEST_CASE("ProductQuantizer Serialize and Deserialize", "[ut][ProductQuantizer]"
     float error = 8.0F / 255.0F;
     int64_t pq_dim;
     for (auto dim : dims) {
-        if (dim % 4 == 0) {
-            pq_dim = dim / 4;
-        } else if (dim % 2 == 0) {
+        if (dim % 2 == 0) {
             pq_dim = dim / 2;
         } else {
             pq_dim = dim;
