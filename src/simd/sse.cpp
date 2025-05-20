@@ -259,6 +259,27 @@ FP32ComputeL2SqrBatch4(const float* query,
 #endif
 }
 
+void
+FP32Sub(const float* x, const float* y, float* z, uint64_t dim) {
+#if defined(ENABLE_SSE)
+    if (dim < 4) {
+        return generic::FP32Sub(x, y, z, dim);
+    }
+    int64_t i = 0;
+    for (; i + 3 < dim; i += 4) {
+        __m128 a = _mm_loadu_ps(x + i);
+        __m128 b = _mm_loadu_ps(y + i);
+        __m128 c = _mm_sub_ps(a, b);
+        _mm_storeu_ps(z + i, c);
+    }
+    if (i < dim) {
+        generic::FP32Sub(x + i, y + i, z + i, dim - i);
+    }
+#else
+    return generic::FP32Sub(x, y, z, dim);
+#endif
+}
+
 float
 BF16ComputeIP(const uint8_t* query, const uint8_t* codes, uint64_t dim) {
 #if defined(ENABLE_SSE)
