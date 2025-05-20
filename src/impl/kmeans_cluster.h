@@ -30,7 +30,13 @@ public:
     ~KMeansCluster();
 
     Vector<int>
-    Run(uint32_t k, const float* datas, uint64_t count, int iter = 25, double* err = nullptr);
+    Run(uint32_t k,
+        const float* datas,
+        uint64_t count,
+        int iter = 25,
+        double* err = nullptr,
+        bool use_mse_for_convergence = true,
+        float threshold = 1e-6F);
 
 public:
     float* k_centroids_{nullptr};
