@@ -17,6 +17,12 @@ jobs:
       image: vsaglib/vsag:ci-x86
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: '0'
+      - name: Change Time
+        run: |
+          git config --global --add safe.directory /__w/vsag/vsag
+          sh -x ./scripts/change_mtime.sh
       - name: Install lcov
         run: |
           apt update
@@ -27,8 +33,16 @@ jobs:
       - name: Load Cache
         uses: actions/cache@v4
         with:
-          path: ./build/
+          path: ./build.tar.gz
           key: build-cov-${{ hashFiles('./CMakeLists.txt') }}-${{ hashFiles('./.circleci/fresh_ci_cache.commit') }}
+      - name: Extract
+        run: |
+          if [ -f build.tar.gz ]; then
+            tar -xzvf build.tar.gz;
+            rm -rf build.tar.gz;
+          else
+            mkdir -p build;
+          fi
       - name: Compile with Coverage Flags
         run: export CMAKE_GENERATOR="Ninja"; make cov
       - name: Run Test
@@ -48,3 +62,7 @@ jobs:
           flags: cpp
           token: ${{ secrets.CODECOV_TOKEN }}
           verbose: true
+      - name: Compress
+        run: |
+          sudo apt install pigz -y;
+          tar -cf - ./build | pigz -p 4 > build.tar.gz
