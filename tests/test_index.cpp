@@ -637,6 +637,19 @@ TestIndex::TestBatchCalcDistanceById(const IndexPtr& index,
                              result.value()->GetDistances()[j]) < error);
         }
     }
+    SECTION("test non-existing id") {
+        int64_t test_num = 10;
+        std::vector<int64_t> no_exist_ids(test_num);
+        for (int i = 0; i < test_num; ++i) {
+            no_exist_ids[i] = -i - 1;
+        }
+        auto result =
+            index->CalDistanceById(queries->GetFloat32Vectors(), no_exist_ids.data(), test_num);
+        for (int i = 0; i < test_num; ++i) {
+            fixtures::dist_t dist = result.value()->GetDistances()[i];
+            REQUIRE(dist == -1);
+        }
+    }
 }
 
 void

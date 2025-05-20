@@ -659,18 +659,22 @@ HGraph::CalDistanceById(const float* query, const int64_t* ids, int64_t count) c
     result->Distances(distances);
     auto computer = flat->FactoryComputer(query);
     Vector<InnerIdType> inner_ids(count, 0, allocator_);
+    Vector<InnerIdType> invalid_id_loc(allocator_);
     {
         std::shared_lock<std::shared_mutex> lock(this->label_lookup_mutex_);
         for (int64_t i = 0; i < count; ++i) {
             auto iter = this->label_table_->label_remap_.find(ids[i]);
             if (iter == this->label_table_->label_remap_.end()) {
                 logger::debug(fmt::format("failed to find id: {}", ids[i]));
-                distances[i] = -1;
+                invalid_id_loc.push_back(i);
                 continue;
             }
             inner_ids[i] = iter->second;
         }
         flat->Query(distances, computer, inner_ids.data(), count);
+        for (unsigned int i : invalid_id_loc) {
+            distances[i] = -1;
+        }
     }
     return result;
 }
