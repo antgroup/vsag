@@ -193,6 +193,7 @@ HgraphTestIndex::TestGeneral(const TestIndex::IndexPtr& index,
     TestCheckIdExist(index, dataset);
     TestCalcDistanceById(index, dataset);
     TestBatchCalcDistanceById(index, dataset);
+    TestSearchAllocator(index, dataset, search_param, recall, true);
 }
 }  // namespace fixtures
 

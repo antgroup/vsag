@@ -439,14 +439,16 @@ HierarchicalNSW::searchBaseLayerST(InnerIdType ep_id,
                                    size_t ef,
                                    const vsag::FilterPtr is_id_allowed,
                                    const float skip_ratio,
+                                   vsag::Allocator* allocator,
                                    vsag::IteratorFilterContext* iter_ctx) const {
     vsag::LinearCongruentialGenerator generator;
     VisitedListPtr vl = visited_list_pool_->getFreeVisitedList();
     vl_type* visited_array = vl->mass;
     vl_type visited_array_tag = vl->curV;
+    vsag::Allocator* search_allocator = allocator == nullptr ? allocator_ : allocator;
 
-    MaxHeap top_candidates(allocator_);
-    MaxHeap candidate_set(allocator_);
+    MaxHeap top_candidates(search_allocator);
+    MaxHeap candidate_set(search_allocator);
 
     float valid_ratio = is_id_allowed ? is_id_allowed->ValidRatio() : 1.0F;
     float skip_threshold = valid_ratio == 1.0F ? 0 : (1 - ((1 - valid_ratio) * skip_ratio));
@@ -1531,6 +1533,7 @@ HierarchicalNSW::searchKnn(const void* query_data,
                            uint64_t ef,
                            const vsag::FilterPtr is_id_allowed,
                            const float skip_ratio,
+                           vsag::Allocator* allocator,
                            vsag::IteratorFilterContext* iter_ctx,
                            bool is_last_filter) const {
     std::shared_lock resize_lock(resize_mutex_);
@@ -1538,9 +1541,10 @@ HierarchicalNSW::searchKnn(const void* query_data,
     if (cur_element_count_ == 0)
         return result;
 
+    vsag::Allocator* search_allocator = allocator == nullptr ? allocator_ : allocator;
     std::shared_ptr<float[]> normalize_query;
     normalizeVector(query_data, normalize_query);
-    MaxHeap top_candidates(allocator_);
+    MaxHeap top_candidates(search_allocator);
     if (iter_ctx != nullptr && !iter_ctx->IsFirstUsed()) {
         if (iter_ctx->Empty())
             return result;
@@ -1558,6 +1562,7 @@ HierarchicalNSW::searchKnn(const void* query_data,
                                                         std::max(ef, k),
                                                         is_id_allowed,
                                                         skip_ratio,
+                                                        allocator,
                                                         iter_ctx);
     } else {
         int64_t currObj;
@@ -1598,11 +1603,21 @@ HierarchicalNSW::searchKnn(const void* query_data,
         }
 
         if (num_deleted_ == 0) {
-            top_candidates = searchBaseLayerST<false, true>(
-                currObj, query_data, std::max(ef, k), is_id_allowed, skip_ratio, iter_ctx);
+            top_candidates = searchBaseLayerST<false, true>(currObj,
+                                                            query_data,
+                                                            std::max(ef, k),
+                                                            is_id_allowed,
+                                                            skip_ratio,
+                                                            allocator,
+                                                            iter_ctx);
         } else {
-            top_candidates = searchBaseLayerST<true, true>(
-                currObj, query_data, std::max(ef, k), is_id_allowed, skip_ratio, iter_ctx);
+            top_candidates = searchBaseLayerST<true, true>(currObj,
+                                                           query_data,
+                                                           std::max(ef, k),
+                                                           is_id_allowed,
+                                                           skip_ratio,
+                                                           allocator,
+                                                           iter_ctx);
         }
     }
 
@@ -1723,6 +1738,7 @@ HierarchicalNSW::searchBaseLayerST<false, false>(
     size_t ef,
     const vsag::FilterPtr is_id_allowed,
     const float skip_ratio,
+    vsag::Allocator* allocator,
     vsag::IteratorFilterContext* iter_ctx = nullptr) const;
 
 template MaxHeap

@@ -130,8 +130,24 @@ public:
               const FilterPtr& filter,
               vsag::IteratorContext*& filter_ctx,
               bool is_last_search) const override {
-        SAFE_CALL(
-            return this->knn_search(query, k, parameters, filter, &filter_ctx, is_last_search));
+        SAFE_CALL(return this->knn_search(
+            query, k, parameters, filter, nullptr, &filter_ctx, is_last_search));
+    }
+
+    tl::expected<DatasetPtr, Error>
+    KnnSearch(const DatasetPtr& query, int64_t k, SearchParam& search_param) const override {
+        if (search_param.is_iter_filter) {
+            SAFE_CALL(return this->knn_search(query,
+                                              k,
+                                              search_param.parameters,
+                                              search_param.filter,
+                                              search_param.allocator,
+                                              &search_param.iter_ctx,
+                                              search_param.is_last_search));
+        } else {
+            SAFE_CALL(return this->knn_search(
+                query, k, search_param.parameters, search_param.filter, search_param.allocator));
+        }
     }
 
     tl::expected<DatasetPtr, Error>
@@ -313,6 +329,7 @@ private:
                int64_t k,
                const std::string& parameters,
                const FilterPtr& filter_ptr,
+               vsag::Allocator* allocator = nullptr,
                vsag::IteratorContext** iter_ctx = nullptr,
                bool is_last_filter = false) const;
 
