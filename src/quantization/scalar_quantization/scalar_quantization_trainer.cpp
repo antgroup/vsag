@@ -60,6 +60,10 @@ ScalarQuantizationTrainer::TrainUniform(const float* data,
     }
     upper_bound = *std::min_element(upper.begin(), upper.end());
     lower_bound = *std::max_element(lower.begin(), lower.end());
+    if (lower_bound > upper_bound) {
+        // case for count == 1 or trunc_rate > 0.5
+        std::swap(lower_bound, upper_bound);
+    }
 }
 
 void
@@ -88,6 +92,7 @@ ScalarQuantizationTrainer::trunc_bound_train(const float* data,
         ignore_rate = this->trunc_rate_;
     }
     auto ignore_count = static_cast<uint64_t>(static_cast<double>(count - 1) * ignore_rate);
+    ignore_count = ignore_count < 1 ? 1 : ignore_count;
     for (uint64_t i = 0; i < dim_; ++i) {
         std::priority_queue<float, std::vector<float>, std::greater<>> heap_max;
         std::priority_queue<float, std::vector<float>, std::less<>> heap_min;
