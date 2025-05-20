@@ -19,8 +19,10 @@
 #include <string>
 #include <unordered_map>
 #include <variant>
+#include <vector>
 
 #include "allocator.h"
+#include "attribute.h"
 #include "constants.h"
 
 namespace vsag {
@@ -200,6 +202,23 @@ public:
      */
     virtual const SparseVector*
     GetSparseVectors() const = 0;
+
+    /**
+     * @brief Sets the attribute sets for the dataset.
+     * @param attr_sets Pointer to the attribute sets.
+     * 
+     * @return DatasetPtr A shared pointer to the dataset with updated attribute sets.
+     */
+    virtual DatasetPtr
+    AttributeSets(const AttributeSet* attr_sets) = 0;
+
+    /**
+     * @brief Retrieves the attribute sets of the dataset.
+     * 
+     * @return const AttributeSet* Pointer to the attribute sets.
+     */
+    virtual const AttributeSet*
+    GetAttributeSets() const = 0;
 
     /**
      * @brief Sets the paths array for the dataset.
