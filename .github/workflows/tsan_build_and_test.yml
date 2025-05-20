@@ -19,10 +19,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: '0'
-      - name: Change Time
-        run: |
-          git config --global --add safe.directory /__w/vsag/vsag
-          sh -x ./scripts/change_mtime.sh
       - name: Load Cache
         uses: actions/cache@v4
         with:
