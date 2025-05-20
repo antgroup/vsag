@@ -110,4 +110,27 @@ GetFP32ComputeL2SqrBatch4() {
     return generic::FP32ComputeL2SqrBatch4;
 }
 FP32ComputeBatch4Type FP32ComputeL2SqrBatch4 = GetFP32ComputeL2SqrBatch4();
+
+static FP32SubType
+GetFP32Sub() {
+    if (SimdStatus::SupportAVX512()) {
+#if defined(ENABLE_AVX512)
+        return avx512::FP32Sub;
+#endif
+    } else if (SimdStatus::SupportAVX2()) {
+#if defined(ENABLE_AVX2)
+        return avx2::FP32Sub;
+#endif
+    } else if (SimdStatus::SupportAVX()) {
+#if defined(ENABLE_AVX)
+        return avx::FP32Sub;
+#endif
+    } else if (SimdStatus::SupportSSE()) {
+#if defined(ENABLE_SSE)
+        return sse::FP32Sub;
+#endif
+    }
+    return generic::FP32Sub;
+}
+FP32SubType FP32Sub = GetFP32Sub();
 }  // namespace vsag

@@ -133,6 +133,13 @@ FP32ComputeL2SqrBatch4(const float* query,
     }
 }
 
+void
+FP32Sub(const float* x, const float* y, float* z, uint64_t dim) {
+    for (uint64_t i = 0; i < dim; ++i) {
+        z[i] = x[i] - y[i];
+    }
+}
+
 union FP32Struct {
     uint32_t int_value;
     float float_value;
