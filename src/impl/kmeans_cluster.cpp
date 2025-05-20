@@ -42,7 +42,13 @@ KMeansCluster::~KMeansCluster() {
 }
 
 Vector<int>
-KMeansCluster::Run(uint32_t k, const float* datas, uint64_t count, int iter, double* err) {
+KMeansCluster::Run(uint32_t k,
+                   const float* datas,
+                   uint64_t count,
+                   int iter,
+                   double* err,
+                   bool use_mse_for_convergence,
+                   float threshold) {
     if (k_centroids_ != nullptr) {
         allocator_->Deallocate(k_centroids_);
         k_centroids_ = nullptr;
@@ -112,7 +118,8 @@ KMeansCluster::Run(uint32_t k, const float* datas, uint64_t count, int iter, dou
             total_err += errs[i];
         }
 
-        if (it > 0 && std::fabs(last_err - total_err) / static_cast<double>(count) < 1e-6) {
+        if (it > 0 && use_mse_for_convergence &&
+            std::fabs(last_err - total_err) / static_cast<double>(count) < threshold) {
             break;
         }
 
