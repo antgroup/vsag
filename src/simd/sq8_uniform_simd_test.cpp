@@ -46,7 +46,7 @@ using namespace vsag;
             auto avx512 =                                                                        \
                 avx512::Func(codes1.data() + i * code_size, codes2.data() + i * code_size, dim); \
             REQUIRE(fixtures::dist_t(gt) == fixtures::dist_t(avx512));                           \
-        }
+        }                                                                                        \
         if (SimdStatus::SupportNEON()) {                                                         \
             auto neon =                                                                          \
                 neon::Func(codes1.data() + i * code_size, codes2.data() + i * code_size, dim);   \
