@@ -67,7 +67,7 @@ public:
         if (new_capacity <= this->max_capacity_) {
             return;
         }
-        size_t io_size = (new_capacity - this->max_capacity_) * max_code_size_ + current_offset_;
+        size_t io_size = (new_capacity - total_count_) * max_code_size_ + current_offset_;
         this->max_capacity_ = new_capacity;
         uint8_t end_flag =
             127;  // the value is meaingless, only to occupy the position for io allocate
