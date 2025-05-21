@@ -55,14 +55,16 @@ ScalarQuantizationTrainer::TrainUniform(const float* data,
     std::vector<float> lower(dim_);
     if (mode == CLASSIC) {
         this->classic_train(sample_datas.data(), sample_count, upper.data(), lower.data());
+        upper_bound = *std::max_element(upper.begin(), upper.end());
+        lower_bound = *std::min_element(lower.begin(), lower.end());
     } else if (mode == TRUNC_BOUND) {
         this->trunc_bound_train(sample_datas.data(), sample_count, upper.data(), lower.data());
-    }
-    upper_bound = *std::min_element(upper.begin(), upper.end());
-    lower_bound = *std::max_element(lower.begin(), lower.end());
-    if (lower_bound > upper_bound) {
-        // case for count == 1 or trunc_rate > 0.5
-        std::swap(lower_bound, upper_bound);
+        upper_bound = *std::min_element(upper.begin(), upper.end());
+        lower_bound = *std::max_element(lower.begin(), lower.end());
+        if (lower_bound > upper_bound) {
+            // case for count == 1 or trunc_rate > 0.5
+            std::swap(lower_bound, upper_bound);
+        }
     }
 }
 
