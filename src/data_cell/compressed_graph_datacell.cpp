@@ -48,6 +48,8 @@ CompressedGraphDataCell::InsertNeighborsById(InnerIdType id,
             neighbor_sets_[id] = std::make_unique<EliasFanoEncoder>(allocator_);
         }
         neighbor_sets_[id]->Encode(tmp, max_capacity_);
+    } else {
+        neighbor_sets_[id].reset();
     }
 }
 
