@@ -16,8 +16,11 @@
 #include "inner_index_interface.h"
 
 #include "base_filter_functor.h"
+#include "brute_force.h"
 #include "empty_index_binary_set.h"
+#include "hgraph.h"
 #include "utils/slow_task_timer.h"
+#include "utils/util_functions.h"
 
 namespace vsag {
 
@@ -214,6 +217,57 @@ InnerIndexInterface::Clone(const IndexCommonParam& param) {
     auto index = this->Fork(param);
     index->Deserialize(buffer_reader);
     return index;
+}
+
+InnerIndexPtr
+InnerIndexInterface::FastCreateIndex(const std::string& index_fast_str,
+                                     const IndexCommonParam& common_param) {
+    auto strs = split_string(index_fast_str, fast_string_delimiter);
+    if (strs.size() < 2) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT, "fast str is too short");
+    }
+    if (strs[0] == INDEX_TYPE_HGRAPH) {
+        if (strs.size() < 3) {
+            throw VsagException(ErrorType::INVALID_ARGUMENT, "fast str(hgraph) is too short");
+        }
+        constexpr const char* build_string_temp = R"(
+        {{
+            "max_degree": {},
+            "base_quantization_type": "{}",
+            "use_reorder": {},
+            "precise_quantization_type": "{}"
+        }}
+        )";
+        auto max_degree = std::stoi(strs[1]);
+        auto base_quantization_type = strs[2];
+        bool use_reorder = false;
+        std::string precise_quantization_type = "fp32";
+        if (strs.size() == 4) {
+            use_reorder = true;
+            precise_quantization_type = strs[3];
+        }
+        JsonType json = JsonType::parse(fmt::format(build_string_temp,
+                                                    max_degree,
+                                                    base_quantization_type,
+                                                    use_reorder,
+                                                    precise_quantization_type));
+        auto param_ptr = HGraph::CheckAndMappingExternalParam(json, common_param);
+        return std::make_shared<HGraph>(param_ptr, common_param);
+    }
+    if (strs[0] == INDEX_BRUTE_FORCE) {
+        constexpr const char* build_string_temp = R"(
+        {{
+            "quantization_type": "{}"
+        }}
+        )";
+        JsonType json = JsonType::parse(fmt::format(build_string_temp, strs[1]));
+        auto param_ptr = BruteForce::CheckAndMappingExternalParam(json, common_param);
+        return std::make_shared<BruteForce>(param_ptr, common_param);
+    }
+    throw VsagException(ErrorType::INVALID_ARGUMENT,
+                        fmt::format("not support fast string create type: {},"
+                                    " only support bruteforce and hgraph",
+                                    strs[0]));
 }
 
 }  // namespace vsag
