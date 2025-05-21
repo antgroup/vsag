@@ -133,6 +133,7 @@ extern const char* const RABITQ_BITS_PER_DIM_QUERY;
 extern const char* const HGRAPH_USE_REORDER;
 extern const char* const HGRAPH_USE_ELP_OPTIMIZER;
 extern const char* const HGRAPH_IGNORE_REORDER;
+extern const char* const HGRAPH_BUILD_BY_BASE_QUANTIZATION;
 extern const char* const HGRAPH_BASE_QUANTIZATION_TYPE;
 extern const char* const HGRAPH_GRAPH_MAX_DEGREE;
 extern const char* const HGRAPH_BUILD_EF_CONSTRUCTION;

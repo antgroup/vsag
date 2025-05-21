@@ -136,6 +136,7 @@ const char* const RABITQ_BITS_PER_DIM_QUERY = "rabitq_bits_per_dim_query";
 const char* const HGRAPH_USE_REORDER = HGRAPH_USE_REORDER_KEY;
 const char* const HGRAPH_USE_ELP_OPTIMIZER = HGRAPH_USE_ELP_OPTIMIZER_KEY;
 const char* const HGRAPH_IGNORE_REORDER = "ignore_reorder";
+const char* const HGRAPH_BUILD_BY_BASE_QUANTIZATION = "build_by_base";
 const char* const HGRAPH_BASE_QUANTIZATION_TYPE = "base_quantization_type";
 const char* const HGRAPH_GRAPH_MAX_DEGREE = "max_degree";
 const char* const HGRAPH_BUILD_EF_CONSTRUCTION = "ef_construction";
