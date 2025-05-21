@@ -38,6 +38,7 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
       use_reorder_(hgraph_param->use_reorder),
       use_elp_optimizer_(hgraph_param->use_elp_optimizer),
       ignore_reorder_(hgraph_param->ignore_reorder),
+      build_by_base_(hgraph_param->build_by_base),
       ef_construct_(hgraph_param->ef_construction),
       build_thread_count_(hgraph_param->build_thread_count),
       odescent_param_(hgraph_param->odescent_param),
@@ -157,7 +158,8 @@ HGraph::build_by_odescent(const DatasetPtr& data) {
         }
     }
     this->resize(total_count_);
-    auto build_data = use_reorder_ ? this->high_precise_codes_ : this->basic_flatten_codes_;
+    auto build_data = (use_reorder_ and not build_by_base_) ? this->high_precise_codes_
+                                                            : this->basic_flatten_codes_;
     {
         odescent_param_->max_degree = bottom_graph_->MaximumDegree();
         ODescent odescent_builder(odescent_param_, build_data, allocator_, this->build_pool_.get());
@@ -818,7 +820,7 @@ HGraph::graph_add_one(const void* data, int level, InnerIdType inner_id) {
 
     LockGuard cur_lock(neighbors_mutex_, inner_id);
     auto flatten_codes = basic_flatten_codes_;
-    if (use_reorder_) {
+    if (use_reorder_ and not build_by_base_) {
         flatten_codes = high_precise_codes_;
     }
     for (auto j = this->route_graphs_.size() - 1; j > level; --j) {
@@ -1000,6 +1002,7 @@ static const std::string HGRAPH_PARAMS_TEMPLATE =
         "{HGRAPH_USE_REORDER_KEY}": false,
         "{HGRAPH_USE_ENV_OPTIMIZER}": false,
         "{HGRAPH_IGNORE_REORDER_KEY}": false,
+        "{HGRAPH_BUILD_BY_BASE_QUANTIZATION_KEY}": false,
         "{HGRAPH_GRAPH_KEY}": {
             "{IO_PARAMS_KEY}": {
                 "{IO_TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
@@ -1075,6 +1078,12 @@ HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
             HGRAPH_IGNORE_REORDER,
             {
                 HGRAPH_IGNORE_REORDER_KEY,
+            },
+        },
+        {
+            HGRAPH_BUILD_BY_BASE_QUANTIZATION,
+            {
+                HGRAPH_BUILD_BY_BASE_QUANTIZATION_KEY,
             },
         },
         {
