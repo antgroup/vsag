@@ -35,9 +35,16 @@ using InnerIndexPtr = std::shared_ptr<InnerIndexInterface>;
 
 class InnerIndexInterface {
 public:
+    InnerIndexInterface() = default;
+
     explicit InnerIndexInterface(ParamPtr index_param, const IndexCommonParam& common_param);
 
     virtual ~InnerIndexInterface() = default;
+
+    constexpr static char fast_string_delimiter = '|';
+
+    static InnerIndexPtr
+    FastCreateIndex(const std::string& index_fast_str, const IndexCommonParam& common_param);
 
     [[nodiscard]] virtual std::string
     GetName() const = 0;

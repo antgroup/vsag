@@ -136,4 +136,15 @@ check_equal_on_string_stream(std::stringstream& s1, std::stringstream& s2) {
     return true;
 }
 
+std::vector<std::string>
+split_string(const std::string& str, const char delimiter) {
+    std::vector<std::string> tokens;
+    std::stringstream ss(str);
+    std::string token;
+    while (std::getline(ss, token, delimiter)) {
+        tokens.push_back(token);
+    }
+    return tokens;
+}
+
 }  // namespace vsag

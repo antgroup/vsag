@@ -266,8 +266,20 @@ ParamPtr
 BruteForce::CheckAndMappingExternalParam(const JsonType& external_param,
                                          const IndexCommonParam& common_param) {
     const std::unordered_map<std::string, std::vector<std::string>> external_mapping = {
-        {BRUTE_FORCE_QUANTIZATION_TYPE, {QUANTIZATION_PARAMS_KEY, QUANTIZATION_TYPE_KEY}},
-        {BRUTE_FORCE_IO_TYPE, {IO_PARAMS_KEY, IO_TYPE_KEY}}};
+        {
+            BRUTE_FORCE_QUANTIZATION_TYPE,
+            {
+                QUANTIZATION_PARAMS_KEY,
+                QUANTIZATION_TYPE_KEY,
+            },
+        },
+        {
+            BRUTE_FORCE_IO_TYPE,
+            {
+                IO_PARAMS_KEY,
+                IO_TYPE_KEY,
+            },
+        }};
 
     if (common_param.data_type_ == DataTypes::DATA_TYPE_INT8) {
         throw VsagException(ErrorType::INVALID_ARGUMENT,
