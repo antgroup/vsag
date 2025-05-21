@@ -30,6 +30,9 @@ public:
     bool dist_support_avx512dq = false;
     bool dist_support_avx512bw = false;
     bool dist_support_avx512vl = false;
+    bool dist_support_neon = false;
+    bool dist_support_sve = false;
+    bool dist_support_sve2 = false;
     bool runtime_has_sse = false;
     bool runtime_has_avx = false;
     bool runtime_has_avx2 = false;
@@ -37,6 +40,9 @@ public:
     bool runtime_has_avx512dq = false;
     bool runtime_has_avx512bw = false;
     bool runtime_has_avx512vl = false;
+    bool runtime_has_neon = false;
+    bool runtime_has_sve = false;
+    bool runtime_has_sve2 = false;
 
     static inline bool
     SupportAVX512() {
@@ -79,6 +85,36 @@ public:
         return ret;
     }
 
+    static inline bool
+    SupportNEON() {
+        bool ret = false;
+#if defined(ENABLE_NEON)
+        ret = true;
+#endif
+        ret &= cpuinfo_has_arm_neon();
+        return ret;
+    }
+
+    static inline bool
+    SupportSVE() {
+        bool ret = false;
+#if defined(ENABLE_SVE)
+        ret = true;
+#endif
+        ret &= cpuinfo_has_arm_sve();
+        return ret;
+    }
+
+    static inline bool
+    SupportSVE2() {
+        bool ret = false;
+#if defined(ENABLE_SVE2)
+        ret = true;
+#endif
+        ret &= cpuinfo_has_arm_sve2();
+        return ret;
+    }
+
     [[nodiscard]] std::string
     sse() const {
         return status_to_string(dist_support_sse, runtime_has_sse);
@@ -112,6 +148,21 @@ public:
     [[nodiscard]] std::string
     avx512vl() const {
         return status_to_string(dist_support_avx512vl, runtime_has_avx512vl);
+    }
+
+    [[nodiscard]] std::string
+    neon() const {
+        return status_to_string(dist_support_neon, runtime_has_neon);
+    }
+
+    [[nodiscard]] std::string
+    sve() const {
+        return status_to_string(dist_support_sve, runtime_has_sve);
+    }
+
+    [[nodiscard]] std::string
+    sve2() const {
+        return status_to_string(dist_support_sve2, runtime_has_sve2);
     }
 
     static std::string

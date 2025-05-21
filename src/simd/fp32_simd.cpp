@@ -37,6 +37,10 @@ GetFP32ComputeIP() {
 #if defined(ENABLE_SSE)
         return sse::FP32ComputeIP;
 #endif
+    } else if (SimdStatus::SupportNEON()) {
+#if defined(ENABLE_NEON)
+        return neon::FP32ComputeIP;
+#endif
     }
     return generic::FP32ComputeIP;
 }
@@ -59,6 +63,10 @@ GetFP32ComputeL2Sqr() {
     } else if (SimdStatus::SupportSSE()) {
 #if defined(ENABLE_SSE)
         return sse::FP32ComputeL2Sqr;
+#endif
+    } else if (SimdStatus::SupportNEON()) {
+#if defined(ENABLE_NEON)
+        return neon::FP32ComputeL2Sqr;
 #endif
     }
     return generic::FP32ComputeL2Sqr;

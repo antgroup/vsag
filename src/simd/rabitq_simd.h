@@ -45,6 +45,11 @@ float
 RaBitQFloatBinaryIP(const float* vector, const uint8_t* bits, uint64_t dim, float inv_sqrt_d);
 }  // namespace generic
 
+namespace neon {
+float
+RaBitQFloatBinaryIP(const float* vector, const uint8_t* bits, uint64_t dim, float inv_sqrt_d);
+}  // namespace neon
+
 using RaBitQFloatBinaryType = float (*)(const float* vector,
                                         const uint8_t* bits,
                                         uint64_t dim,

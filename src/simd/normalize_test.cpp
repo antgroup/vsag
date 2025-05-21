@@ -64,6 +64,15 @@ TEST_CASE("Normalize Compute", "[ut][simd]") {
                             fixtures::dist_t(tmp_value[j + dim * 3]));
                 }
             }
+            if (SimdStatus::SupportNEON()) {
+                auto neon =
+                    neon::Normalize(vec1.data() + i * dim, tmp_value.data() + dim * 3, dim);
+                REQUIRE(fixtures::dist_t(gt) == fixtures::dist_t(neon));
+                for (int j = 0; j < dim; ++j) {
+                    REQUIRE(fixtures::dist_t(tmp_value[j]) ==
+                            fixtures::dist_t(tmp_value[j + dim * 3]));
+                }
+            }
         }
     }
 }
@@ -85,4 +94,5 @@ TEST_CASE("Normalize Benchmark", "[ut][simd][!benchmark]") {
     BENCHMARK_SIMD_COMPUTE(sse, Normalize);
     BENCHMARK_SIMD_COMPUTE(avx2, Normalize);
     BENCHMARK_SIMD_COMPUTE(avx512, Normalize);
+    BENCHMARK_SIMD_COMPUTE(neon, Normalize);
 }

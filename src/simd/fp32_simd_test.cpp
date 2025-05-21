@@ -25,7 +25,7 @@ using namespace vsag;
 
 #define TEST_ACCURACY(Func)                                                           \
     {                                                                                 \
-        float gt, sse, avx, avx2, avx512;                                             \
+        float gt, sse, avx, avx2, avx512, neon;                                       \
         gt = generic::Func(vec1.data() + i * dim, vec2.data() + i * dim, dim);        \
         if (SimdStatus::SupportSSE()) {                                               \
             sse = sse::Func(vec1.data() + i * dim, vec2.data() + i * dim, dim);       \
@@ -42,6 +42,10 @@ using namespace vsag;
         if (SimdStatus::SupportAVX512()) {                                            \
             avx512 = avx512::Func(vec1.data() + i * dim, vec2.data() + i * dim, dim); \
             REQUIRE(fixtures::dist_t(gt) == fixtures::dist_t(avx512));                \
+        }                                                                             \
+        if (SimdStatus::SupportNEON()) {                                              \
+            neon = neon::Func(vec1.data() + i * dim, vec2.data() + i * dim, dim);     \
+            REQUIRE(fixtures::dist_t(gt) == fixtures::dist_t(neon));                  \
         }                                                                             \
     };
 
@@ -75,9 +79,11 @@ TEST_CASE("FP32 Benchmark", "[ut][simd][!benchmark]") {
     BENCHMARK_SIMD_COMPUTE(sse, FP32ComputeIP);
     BENCHMARK_SIMD_COMPUTE(avx2, FP32ComputeIP);
     BENCHMARK_SIMD_COMPUTE(avx512, FP32ComputeIP);
+    BENCHMARK_SIMD_COMPUTE(neon, FP32ComputeIP);
 
     BENCHMARK_SIMD_COMPUTE(generic, FP32ComputeL2Sqr);
     BENCHMARK_SIMD_COMPUTE(sse, FP32ComputeL2Sqr);
     BENCHMARK_SIMD_COMPUTE(avx2, FP32ComputeL2Sqr);
     BENCHMARK_SIMD_COMPUTE(avx512, FP32ComputeL2Sqr);
+    BENCHMARK_SIMD_COMPUTE(neon, FP32ComputeL2Sqr);
 }

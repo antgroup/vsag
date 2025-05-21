@@ -55,6 +55,13 @@ float
 FP32ComputeL2Sqr(const float* query, const float* codes, uint64_t dim);
 }  // namespace avx512
 
+namespace neon {
+float
+FP32ComputeIP(const float* query, const float* codes, uint64_t dim);
+float
+FP32ComputeL2Sqr(const float* query, const float* codes, uint64_t dim);
+} // namespace neon
+
 using FP32ComputeType = float (*)(const float* query, const float* codes, uint64_t dim);
 extern FP32ComputeType FP32ComputeIP;
 extern FP32ComputeType FP32ComputeL2Sqr;
