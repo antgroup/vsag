@@ -82,7 +82,7 @@ const char* const SPARSE_NEED_SORT = "need_sort";
 const char* const GRAPH_TYPE_KEY = "graph_type";
 
 const char* const GRAPH_STORAGE_TYPE_KEY = "graph_storage_type";
-const char* const GRAPH_STORAGE_TYPE_COMPRESS = "compress";
+const char* const GRAPH_STORAGE_TYPE_COMPRESSED = "compressed";
 const char* const GRAPH_STORAGE_TYPE_FLAT = "flat";
 
 const char* const BUCKET_PARAMS_KEY = "buckets_params";
@@ -129,7 +129,7 @@ const std::unordered_map<std::string, std::string> DEFAULT_MAP = {
     {"GRAPH_TYPE_NSW", GRAPH_TYPE_NSW},
     {"GRAPH_STORAGE_TYPE_KEY", GRAPH_STORAGE_TYPE_KEY},
     {"GRAPH_STORAGE_TYPE_FLAT", GRAPH_STORAGE_TYPE_FLAT},
-    {"GRAPH_STORAGE_TYPE_COMPRESS", GRAPH_STORAGE_TYPE_COMPRESS},
+    {"GRAPH_STORAGE_TYPE_COMPRESSED", GRAPH_STORAGE_TYPE_COMPRESSED},
     {"QUANTIZATION_PARAMS_KEY", QUANTIZATION_PARAMS_KEY},
     {"GRAPH_PARAM_MAX_DEGREE", GRAPH_PARAM_MAX_DEGREE},
     {"GRAPH_PARAM_INIT_MAX_CAPACITY", GRAPH_PARAM_INIT_MAX_CAPACITY},

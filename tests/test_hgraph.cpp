@@ -518,7 +518,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex,
             }
             vsag::Options::Instance().set_block_size_limit(size);
             auto param = GenerateHGraphBuildParametersString(
-                metric_type, dim, base_quantization_str, 0, 0, "float32", "nsw", "compress");
+                metric_type, dim, base_quantization_str, 0, 0, "float32", "nsw", "compressed");
             auto index = TestFactory(name, param, true);
             auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
             TestBuildIndex(index, dataset, true);

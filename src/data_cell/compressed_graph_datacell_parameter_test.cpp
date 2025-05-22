@@ -26,7 +26,7 @@ TEST_CASE("CompressedGraphDatacellParameter ToJson Test",
     std::string param_str = R"(
         {
             "max_degree": 100,
-            "graph_storage_type": "compress"
+            "graph_storage_type": "compressed"
         }
         )";
     auto param = std::make_shared<CompressedGraphDatacellParameter>();
