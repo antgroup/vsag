@@ -61,12 +61,11 @@ INT8InnerProductDistance(const void* pVect1v, const void* pVect2v, const void* q
 }
 
 #if defined(ENABLE_NEON)
-__inline float32x4x4_t __attribute__((__always_inline__)) vcvt4_f32_f16(const float16x4x4_t a) {
-    float32x4x4_t c;
+__inline float32x4x3_t __attribute__((__always_inline__)) vcvt3_f32_f16(const float16x4x3_t a) {
+    float32x4x3_t c;
     c.val[0] = vcvt_f32_f16(a.val[0]);
     c.val[1] = vcvt_f32_f16(a.val[1]);
     c.val[2] = vcvt_f32_f16(a.val[2]);
-    c.val[3] = vcvt_f32_f16(a.val[3]);
     return c;
 }
 
@@ -77,12 +76,11 @@ __inline float32x4x2_t __attribute__((__always_inline__)) vcvt2_f32_f16(const fl
     return c;
 }
 
-__inline float32x4x4_t __attribute__((__always_inline__)) vcvt4_f32_half(const uint16x4x4_t x) {
-    float32x4x4_t c;
+__inline float32x4x3_t __attribute__((__always_inline__)) vcvt3_f32_half(const uint16x4x3_t x) {
+    float32x4x3_t c;
     c.val[0] = vreinterpretq_f32_u32(vshlq_n_u32(vmovl_u16(x.val[0]), 16));
     c.val[1] = vreinterpretq_f32_u32(vshlq_n_u32(vmovl_u16(x.val[1]), 16));
     c.val[2] = vreinterpretq_f32_u32(vshlq_n_u32(vmovl_u16(x.val[2]), 16));
-    c.val[3] = vreinterpretq_f32_u32(vshlq_n_u32(vmovl_u16(x.val[3]), 16));
     return c;
 }
 
@@ -103,28 +101,24 @@ __inline float32x4_t __attribute__((__always_inline__)) vcvt_f32_half(const uint
 void
 PQDistanceFloat256(const void* single_dim_centers, float single_dim_val, void* result) {
 #if defined (ENABLE_NEON)
-    std::printf("PQDistanceFloat256\n");  
     const auto* float_centers = (const float*)single_dim_centers;
     auto* float_result = (float*)result;
-    for (size_t idx = 0; idx < 256; idx += 16) {
-        float32x4x4_t v_centers_dim = vld1q_f32_x4(float_centers + idx);
-        float32x4x4_t v_query_vec = {vdupq_n_f32(single_dim_val), vdupq_n_f32(single_dim_val), vdupq_n_f32(single_dim_val), vdupq_n_f32(single_dim_val)};
-        float32x4x4_t v_diff;
+    for (size_t idx = 0; idx < 256; idx += 8) {
+        float32x4x2_t v_centers_dim = vld1q_f32_x2(float_centers + idx);
+        float32x4x2_t v_query_vec = {vdupq_n_f32(single_dim_val), vdupq_n_f32(single_dim_val)};
+
+        float32x4x2_t v_diff;
         v_diff.val[0] = vsubq_f32(v_centers_dim.val[0], v_query_vec.val[0]);
         v_diff.val[1] = vsubq_f32(v_centers_dim.val[1], v_query_vec.val[1]);
-        v_diff.val[2] = vsubq_f32(v_centers_dim.val[2], v_query_vec.val[2]);
-        v_diff.val[3] = vsubq_f32(v_centers_dim.val[3], v_query_vec.val[3]);
-        float32x4x4_t v_diff_sq;
+
+        float32x4x2_t v_diff_sq;
         v_diff_sq.val[0] = vmulq_f32(v_diff.val[0], v_diff.val[0]);
         v_diff_sq.val[1] = vmulq_f32(v_diff.val[1], v_diff.val[1]);
-        v_diff_sq.val[2] = vmulq_f32(v_diff.val[2], v_diff.val[2]);
-        v_diff_sq.val[3] = vmulq_f32(v_diff.val[3], v_diff.val[3]);
-        float32x4x4_t v_chunk_dists = vld1q_f32_x4(&float_result[idx]);
+
+        float32x4x2_t v_chunk_dists = vld1q_f32_x2(&float_result[idx]);
         v_chunk_dists.val[0] = vaddq_f32(v_chunk_dists.val[0], v_diff_sq.val[0]);
         v_chunk_dists.val[1] = vaddq_f32(v_chunk_dists.val[1], v_diff_sq.val[1]);
-        v_chunk_dists.val[2] = vaddq_f32(v_chunk_dists.val[2], v_diff_sq.val[2]);
-        v_chunk_dists.val[3] = vaddq_f32(v_chunk_dists.val[3], v_diff_sq.val[3]);
-        vst1q_f32_x4(&float_result[idx], v_chunk_dists);
+        vst1q_f32_x2(&float_result[idx], v_chunk_dists);
     }
 #else
     return generic::PQDistanceFloat256(single_dim_centers, single_dim_val, result);
@@ -134,24 +128,21 @@ PQDistanceFloat256(const void* single_dim_centers, float single_dim_val, void* r
 float
 FP32ComputeIP(const float* query, const float* codes, uint64_t dim) {
 #if defined (ENABLE_NEON)
-    std::printf("FP32ComputeIP\n"); 
     float32x4_t sum_ = vdupq_n_f32(0.0f);
     auto d = dim;
-    while (d >= 16) {
-        float32x4x4_t a = vld1q_f32_x4(query + dim - d);
-        float32x4x4_t b = vld1q_f32_x4(codes + dim - d);
-        float32x4x4_t c;
+    while (d >= 12) {
+        float32x4x3_t a = vld1q_f32_x3(query + dim - d);
+        float32x4x3_t b = vld1q_f32_x3(codes + dim - d);
+        float32x4x3_t c;
         c.val[0] = vmulq_f32(a.val[0], b.val[0]);
         c.val[1] = vmulq_f32(a.val[1], b.val[1]);
         c.val[2] = vmulq_f32(a.val[2], b.val[2]);
-        c.val[3] = vmulq_f32(a.val[3], b.val[3]);
 
         c.val[0] = vaddq_f32(c.val[0], c.val[1]);
-        c.val[2] = vaddq_f32(c.val[2], c.val[3]);
         c.val[0] = vaddq_f32(c.val[0], c.val[2]);
 
         sum_ = vaddq_f32(sum_, c.val[0]);
-        d -= 16;
+        d -= 12;
     }
 
     if (d >= 8) {
@@ -205,27 +196,24 @@ FP32ComputeL2Sqr(const float* query, const float* codes, uint64_t dim) {
 #if defined (ENABLE_NEON)
     float32x4_t sum_ = vdupq_n_f32(0.0f);
     auto d = dim;
-    while (d >= 16) {
-        float32x4x4_t a = vld1q_f32_x4(query + dim - d);
-        float32x4x4_t b = vld1q_f32_x4(codes + dim - d);
-        float32x4x4_t c;
+    while (d >= 12) {
+        float32x4x3_t a = vld1q_f32_x3(query + dim - d);
+        float32x4x3_t b = vld1q_f32_x3(codes + dim - d);
+        float32x4x3_t c;
 
         c.val[0] = vsubq_f32(a.val[0], b.val[0]);
         c.val[1] = vsubq_f32(a.val[1], b.val[1]);
         c.val[2] = vsubq_f32(a.val[2], b.val[2]);
-        c.val[3] = vsubq_f32(a.val[3], b.val[3]);
 
         c.val[0] = vmulq_f32(c.val[0], c.val[0]);
         c.val[1] = vmulq_f32(c.val[1], c.val[1]);
         c.val[2] = vmulq_f32(c.val[2], c.val[2]);
-        c.val[3] = vmulq_f32(c.val[3], c.val[3]);
 
         c.val[0] = vaddq_f32(c.val[0], c.val[1]);
-        c.val[2] = vaddq_f32(c.val[2], c.val[3]);
         c.val[0] = vaddq_f32(c.val[0], c.val[2]);
 
         sum_ = vaddq_f32(sum_, c.val[0]);
-        d -= 16;
+        d -= 12;
     }
 
     if (d >= 8) {
@@ -291,23 +279,21 @@ __inline uint16x8_t __attribute__((__always_inline__)) load_4_short(const uint16
 float
 BF16ComputeIP(const uint8_t* query, const uint8_t* codes, uint64_t dim) {
 #if defined(ENABLE_NEON)
-    float32x4x4_t res = {vdupq_n_f32(0.0f), vdupq_n_f32(0.0f), vdupq_n_f32(0.0f), vdupq_n_f32(0.0f)};
+    float32x4x3_t res = {vdupq_n_f32(0.0f), vdupq_n_f32(0.0f), vdupq_n_f32(0.0f)};
     const auto* query_bf16 = (const uint16_t*)(query);
     const auto* codes_bf16 = (const uint16_t*)(codes);
-    while (dim >= 16) {
-        float32x4x4_t a = vcvt4_f32_half(vld4_u16((const uint16_t*)query_bf16));
-        float32x4x4_t b = vcvt4_f32_half(vld4_u16((const uint16_t*)codes_bf16));
+    while (dim >= 12) {
+        float32x4x3_t a = vcvt3_f32_half(vld3_u16((const uint16_t*)query_bf16));
+        float32x4x3_t b = vcvt3_f32_half(vld3_u16((const uint16_t*)codes_bf16));
 
         res.val[0] = vmlaq_f32(res.val[0], a.val[0], b.val[0]);
         res.val[1] = vmlaq_f32(res.val[1], a.val[1], b.val[1]);
         res.val[2] = vmlaq_f32(res.val[2], a.val[2], b.val[2]);
-        res.val[3] = vmlaq_f32(res.val[3], a.val[3], b.val[3]);
-        dim -= 16;
-        query_bf16 += 16;
-        codes_bf16 += 16;
+        dim -= 12;
+        query_bf16 += 12;
+        codes_bf16 += 12;
     }
     res.val[0] = vaddq_f32(res.val[0], res.val[1]);
-    res.val[2] = vaddq_f32(res.val[2], res.val[3]);
     if (dim >= 8) {
         float32x4x2_t a = vcvt2_f32_half(vld2_u16((const uint16_t*)query_bf16));
         float32x4x2_t b = vcvt2_f32_half(vld2_u16((const uint16_t*)codes_bf16));
@@ -360,13 +346,13 @@ BF16ComputeIP(const uint8_t* query, const uint8_t* codes, uint64_t dim) {
 float
 BF16ComputeL2Sqr(const uint8_t* query, const uint8_t* codes, uint64_t dim) {
 #if defined(ENABLE_NEON)
-    float32x4x4_t res = {vdupq_n_f32(0.0f), vdupq_n_f32(0.0f), vdupq_n_f32(0.0f), vdupq_n_f32(0.0f)};
+    float32x4x3_t res = {vdupq_n_f32(0.0f), vdupq_n_f32(0.0f), vdupq_n_f32(0.0f)};
     const auto* query_bf16 = (const uint16_t*)(query);
     const auto* codes_bf16 = (const uint16_t*)(codes);
 
-    while (dim >= 16) {
-        float32x4x4_t a = vcvt4_f32_half(vld4_u16((const uint16_t*)query_bf16));
-        float32x4x4_t b = vcvt4_f32_half(vld4_u16((const uint16_t*)codes_bf16));
+    while (dim >= 12) {
+        float32x4x3_t a = vcvt3_f32_half(vld3_u16((const uint16_t*)query_bf16));
+        float32x4x3_t b = vcvt3_f32_half(vld3_u16((const uint16_t*)codes_bf16));
         a.val[0] = vsubq_f32(a.val[0], b.val[0]);
         a.val[1] = vsubq_f32(a.val[1], b.val[1]);
         a.val[2] = vsubq_f32(a.val[2], b.val[2]);
@@ -442,18 +428,17 @@ FP16ComputeIP(const uint8_t* query, const uint8_t* codes, uint64_t dim) {
     const auto* query_fp16 = (const uint16_t*)(query);
     const auto* codes_fp16 = (const uint16_t*)(codes);
 
-    float32x4x4_t res = {vdupq_n_f32(0.0f), vdupq_n_f32(0.0f), vdupq_n_f32(0.0f), vdupq_n_f32(0.0f)};
-    while (dim >= 16) {
-        float32x4x4_t a = vcvt4_f32_f16(vld4_f16((const __fp16*)query_fp16));
-        float32x4x4_t b = vcvt4_f32_f16(vld4_f16((const __fp16*)codes_fp16));
+    float32x4x3_t res = {vdupq_n_f32(0.0f), vdupq_n_f32(0.0f), vdupq_n_f32(0.0f)};
+    while (dim >= 12) {
+        float32x4x3_t a = vcvt3_f32_f16(vld3_f16((const __fp16*)query_fp16));
+        float32x4x3_t b = vcvt3_f32_f16(vld3_f16((const __fp16*)codes_fp16));
 
         res.val[0] = vmlaq_f32(res.val[0], a.val[0], b.val[0]);
         res.val[1] = vmlaq_f32(res.val[1], a.val[1], b.val[1]);
         res.val[2] = vmlaq_f32(res.val[2], a.val[2], b.val[2]);
-        res.val[3] = vmlaq_f32(res.val[3], a.val[3], b.val[3]);
-        dim -= 16;
-        query_fp16 += 16;
-        codes_fp16 += 16;
+        dim -= 12;
+        query_fp16 += 12;
+        codes_fp16 += 12;
     }
     res.val[0] = vaddq_f32(res.val[0], res.val[1]);
     res.val[2] = vaddq_f32(res.val[2], res.val[3]);
@@ -509,29 +494,26 @@ FP16ComputeIP(const uint8_t* query, const uint8_t* codes, uint64_t dim) {
 float
 FP16ComputeL2Sqr(const uint8_t* query, const uint8_t* codes, uint64_t dim) {
 #if defined (ENABLE_NEON)
-    float32x4x4_t res = {vdupq_n_f32(0.0f), vdupq_n_f32(0.0f), vdupq_n_f32(0.0f), vdupq_n_f32(0.0f)};
+    float32x4x3_t res = {vdupq_n_f32(0.0f), vdupq_n_f32(0.0f), vdupq_n_f32(0.0f)};
    
     const auto* query_fp16 = (const uint16_t*)(query);
     const auto* codes_fp16 = (const uint16_t*)(codes);
 
-    while (dim >= 16) {
-        float32x4x4_t a = vcvt4_f32_f16(vld4_f16((const __fp16*)query_fp16));
-        float32x4x4_t b = vcvt4_f32_f16(vld4_f16((const __fp16*)codes_fp16));
+    while (dim >= 12) {
+        float32x4x3_t a = vcvt3_f32_f16(vld3_f16((const __fp16*)query_fp16));
+        float32x4x3_t b = vcvt3_f32_f16(vld3_f16((const __fp16*)codes_fp16));
         a.val[0] = vsubq_f32(a.val[0], b.val[0]);
         a.val[1] = vsubq_f32(a.val[1], b.val[1]);
         a.val[2] = vsubq_f32(a.val[2], b.val[2]);
-        a.val[3] = vsubq_f32(a.val[3], b.val[3]);
 
         res.val[0] = vmlaq_f32(res.val[0], a.val[0], a.val[0]);
         res.val[1] = vmlaq_f32(res.val[1], a.val[1], a.val[1]);
         res.val[2] = vmlaq_f32(res.val[2], a.val[2], a.val[2]);
-        res.val[3] = vmlaq_f32(res.val[3], a.val[3], a.val[3]);
-        dim -= 16;
-        query_fp16 += 16;
-        codes_fp16 += 16;
+        dim -= 12;
+        query_fp16 += 12;
+        codes_fp16 += 12;
     }
     res.val[0] = vaddq_f32(res.val[0], res.val[1]);
-    res.val[2] = vaddq_f32(res.val[2], res.val[3]);
     if (dim >= 8) {
         float32x4x2_t a = vcvt2_f32_f16(vld2_f16((const __fp16*)query_fp16));
         float32x4x2_t b = vcvt2_f32_f16(vld2_f16((const __fp16*)codes_fp16));
@@ -744,7 +726,6 @@ SQ8ComputeCodesL2Sqr(const uint8_t* codes1,
         float32x4_t diff_values = vld1q_f32(diff + i);
         float32x4_t lower_bound_values = vld1q_f32(lower_bound + i);
 
-        // Perform Calculations
         float32x4_t scaled_codes1 = vaddq_f32(vmulq_f32(code1_floats, diff_values), lower_bound_values);
         float32x4_t scaled_codes2 = vaddq_f32(vmulq_f32(code2_floats, diff_values), lower_bound_values);
         float32x4_t val = vsubq_f32(scaled_codes1, scaled_codes2);
@@ -947,7 +928,6 @@ RaBitQFloatBinaryIP(const float* vector, const uint8_t* bits, uint64_t dim, floa
 void
 DivScalar(const float* from, float* to, uint64_t dim, float scalar) {
 #if defined(ENABLE_NEON)
-    std::printf("DivScalar\n");
     if (dim == 0) return;
     if (scalar == 0) scalar = 1.0f;
     int i = 0;
@@ -978,58 +958,6 @@ Prefetch(const void* data) {
 #endif
 };
 
-#if defined(ENABLE_NEON)
-#define uint8x16_to_8x8x2(v) ((uint8x8x2_t) { vget_low_u8(v), vget_high_u8(v) }) 
-#endif
-
-void
-PQFastScanLookUp32(const uint8_t* lookup_table,
-                   const uint8_t* codes,
-                   uint64_t pq_dim,
-                   int32_t* result) {
-#if defined(ENABLE_NEON)
-    std::printf("PQFastScanLookUp32\n");
-    uint16x8_t sum[8];
-    for (size_t i = 0; i < 8; ++i) {
-        sum[i] = vdupq_n_u16(0);
-    }
-    const auto sign4 = vdupq_n_u8(0x0F);
-    const auto sign8 = vdupq_n_u16(0xFF);
-    for (size_t i = 0; i < pq_dim; ++i) {
-        auto dict = vld1q_u8(lookup_table);
-        lookup_table += 16;
-        auto code = vld1q_u8(codes);
-        codes += 16;
-        
-        uint8x16_t code1 = vandq_u8(code, sign4);
-        uint8x16_t code2 = vandq_u8(vshrq_n_u8(code, 4), sign4);
-
-        uint8x16_t res1 = vcombine_u8(vtbl2_u8(uint8x16_to_8x8x2(dict),vget_low_u8(code1)), vtbl2_u8(uint8x16_to_8x8x2(dict), vget_high_u8(code1)));
-        uint8x16_t res2 = vcombine_u8(vtbl2_u8(uint8x16_to_8x8x2(dict),vget_low_u8(code2)), vtbl2_u8(uint8x16_to_8x8x2(dict), vget_high_u8(code2)));
-
-        uint16x8_t res1_low = vmovl_u8(vtbl2_u8(uint8x16_to_8x8x2(dict),vget_low_u8(code1)));
-        uint16x8_t res1_high = vmovl_u8(vtbl2_u8(uint8x16_to_8x8x2(dict),vget_high_u8(code1)));
-        uint16x8_t res2_low = vmovl_u8(vtbl2_u8(uint8x16_to_8x8x2(dict),vget_low_u8(code2)));
-        uint16x8_t res2_high = vmovl_u8(vtbl2_u8(uint8x16_to_8x8x2(dict),vget_high_u8(code2)));       
-
-        sum[0] = vaddq_u16(sum[0], vandq_u16(res1_low, sign8));
-        sum[1] = vaddq_u16(sum[1], vandq_u16(vshrq_n_u16(res1_low, 8), sign8));
-        sum[2] = vaddq_u16(sum[2], vandq_u16(res1_high, sign8));
-        sum[3] = vaddq_u16(sum[3], vandq_u16(vshrq_n_u16(res1_high, 8), sign8));
-        sum[4] = vaddq_u16(sum[4], vandq_u16(res2_low, sign8));
-        sum[5] = vaddq_u16(sum[5], vandq_u16(vshrq_n_u16(res2_low, 8), sign8));
-        sum[6] = vaddq_u16(sum[6], vandq_u16(res2_high, sign8));
-        sum[7] = vaddq_u16(sum[7], vandq_u16(vshrq_n_u16(res2_high, 8), sign8)); 
-    }
-
-    for (int64_t i = 0; i < 8; i++) {
-        for (int64_t j = 0; j < 8; j++) {
-            result[i * 8 + j] += vaddvq_u16(sum[j]);
-        }
-    }
-#else
-    // generic::PQFastScanLookUp32(lookup_table, codes, pq_dim, result);
-#endif
-}
 
 } // namespace vasg::neon
+
