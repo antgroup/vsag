@@ -78,6 +78,12 @@ HGraphParameter::FromJson(const JsonType& json) {
         const auto& graph_storage_type_str = graph_json[GRAPH_STORAGE_TYPE_KEY];
         if (graph_storage_type_str == GRAPH_STORAGE_TYPE_COMPRESS) {
             graph_storage_type = GraphStorageTypes::GRAPH_STORAGE_TYPE_COMPRESSED;
+        } else if (graph_storage_type_str == GRAPH_STORAGE_TYPE_FLAT) {
+            ;
+        } else {
+            throw VsagException(
+                ErrorType::INVALID_ARGUMENT,
+                fmt::format("invalid graph_storage_type: {}", graph_storage_type_str.dump()));
         }
     }
     this->bottom_graph_param =

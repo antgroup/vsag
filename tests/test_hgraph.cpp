@@ -324,6 +324,21 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex,
         auto param = fmt::format(param_temp, param_keys);
         REQUIRE_THROWS(TestFactory(name, param, false));
     }
+
+    SECTION("Invalid hgraph param graph_storage_type") {
+        auto graph_storage_type = "fsa";
+        constexpr const char* param_temp =
+            R"({{
+                "dtype": "float32",
+                "metric_type": "l2",
+                "dim": 35,
+                "index_param": {{
+                    "graph_storage_type": "{}"
+                }}
+            }})";
+        auto param = fmt::format(param_temp, graph_storage_type);
+        REQUIRE_THROWS(TestFactory(name, param, false));
+    }
 }
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex,
