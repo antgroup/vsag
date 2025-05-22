@@ -1262,11 +1262,13 @@ HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
     uint64_t max_degree = 0;
     auto graph_storage = hgraph_parameter->bottom_graph_param->graph_storage_type_;
     if (graph_storage == GraphStorageTypes::GRAPH_STORAGE_TYPE_COMPRESSED) {
-        max_degree = std::dynamic_pointer_cast<CompressedGraphDatacellParameter>(hgraph_parameter->bottom_graph_param)
-            ->max_degree_;
+        max_degree = std::dynamic_pointer_cast<CompressedGraphDatacellParameter>(
+                         hgraph_parameter->bottom_graph_param)
+                         ->max_degree_;
     } else {
-        max_degree = std::dynamic_pointer_cast<GraphDataCellParameter>(hgraph_parameter->bottom_graph_param)
-            ->max_degree_;
+        max_degree =
+            std::dynamic_pointer_cast<GraphDataCellParameter>(hgraph_parameter->bottom_graph_param)
+                ->max_degree_;
     }
     auto max_degree_threshold = std::max(common_param.dim_, 128L);
     CHECK_ARGUMENT(  // NOLINT

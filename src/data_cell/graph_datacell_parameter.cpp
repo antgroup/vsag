@@ -33,8 +33,7 @@ GraphDataCellParameter::FromJson(const JsonType& json) {
     }
     CHECK_ARGUMENT(
         this->graph_storage_type_ == GraphStorageTypes::GRAPH_STORAGE_TYPE_FLAT,
-        fmt::format("GraphDatacell only support graph storage type: {}",
-                    GRAPH_STORAGE_TYPE_FLAT));
+        fmt::format("GraphDatacell only support graph storage type: {}", GRAPH_STORAGE_TYPE_FLAT));
 }
 JsonType
 GraphDataCellParameter::ToJson() {
