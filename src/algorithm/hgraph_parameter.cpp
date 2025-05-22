@@ -73,15 +73,15 @@ HGraphParameter::FromJson(const JsonType& json) {
                    fmt::format("hgraph parameters must contains {}", HGRAPH_GRAPH_KEY));
     const auto& graph_json = json[HGRAPH_GRAPH_KEY];
 
-    GraphStorageTypes graph_storage = GraphStorageTypes::GRAPH_STORAGE_TYPE_FLAT;
+    GraphStorageTypes graph_storage_type = GraphStorageTypes::GRAPH_STORAGE_TYPE_FLAT;
     if (graph_json.contains(GRAPH_STORAGE_TYPE_KEY)) {
-        const auto& graph_storage_str = graph_json[GRAPH_STORAGE_TYPE_KEY];
-        if (graph_storage_str == GRAPH_STORAGE_TYPE_COMPRESS) {
-            graph_storage = GraphStorageTypes::GRAPH_STORAGE_TYPE_COMPRESSED;
+        const auto& graph_storage_type_str = graph_json[GRAPH_STORAGE_TYPE_KEY];
+        if (graph_storage_type_str == GRAPH_STORAGE_TYPE_COMPRESS) {
+            graph_storage_type = GraphStorageTypes::GRAPH_STORAGE_TYPE_COMPRESSED;
         }
     }
     this->bottom_graph_param =
-        GraphInterfaceParameter::GetGraphParameterByJson(graph_storage, graph_json);
+        GraphInterfaceParameter::GetGraphParameterByJson(graph_storage_type, graph_json);
 
     if (json.contains(BUILD_PARAMS_KEY)) {
         const auto& build_params = json[BUILD_PARAMS_KEY];

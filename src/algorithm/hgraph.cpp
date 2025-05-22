@@ -1260,8 +1260,8 @@ HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
     hgraph_parameter->FromJson(inner_json);
 
     uint64_t max_degree = 0;
-    auto graph_storage = hgraph_parameter->bottom_graph_param->graph_storage_type_;
-    if (graph_storage == GraphStorageTypes::GRAPH_STORAGE_TYPE_COMPRESSED) {
+    auto graph_storage_type = hgraph_parameter->bottom_graph_param->graph_storage_type_;
+    if (graph_storage_type == GraphStorageTypes::GRAPH_STORAGE_TYPE_COMPRESSED) {
         max_degree = std::dynamic_pointer_cast<CompressedGraphDatacellParameter>(
                          hgraph_parameter->bottom_graph_param)
                          ->max_degree_;

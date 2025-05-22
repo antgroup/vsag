@@ -108,7 +108,7 @@ HgraphTestIndex::GenerateHGraphBuildParametersString(const std::string& metric_t
             "precise_io_type": "{}",
             "precise_file_path": "{}",
             "graph_type": "{}",
-            "graph_storage": "{}",
+            "graph_storage_type": "{}",
             "graph_iter_turn": 10,
             "neighbor_sample_rate": 0.3,
             "alpha": 1.2
@@ -129,7 +129,7 @@ HgraphTestIndex::GenerateHGraphBuildParametersString(const std::string& metric_t
             "ef_construction": 500,
             "build_thread_count": {},
             "graph_type": "{}",
-            "graph_storage": "{}",
+            "graph_storage_type": "{}",
             "graph_iter_turn": 10,
             "neighbor_sample_rate": 0.3,
             "alpha": 1.2

@@ -81,7 +81,7 @@ const char* const BUILD_EF_CONSTRUCTION = "ef_construction";
 const char* const SPARSE_NEED_SORT = "need_sort";
 const char* const GRAPH_TYPE_KEY = "graph_type";
 
-const char* const GRAPH_STORAGE_TYPE_KEY = "graph_storage";
+const char* const GRAPH_STORAGE_TYPE_KEY = "graph_storage_type";
 const char* const GRAPH_STORAGE_TYPE_COMPRESS = "compress";
 const char* const GRAPH_STORAGE_TYPE_FLAT = "flat";
 

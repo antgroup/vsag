@@ -57,7 +57,7 @@ TEST_CASE("CompressedGraphDataCell Basic Test", "[ut][CompressedGraphDataCell]")
         R"(
         {{
             "max_degree": {},
-            "graph_storage": "{}"
+            "graph_storage_type": "{}"
         }}
         )";
 
