@@ -31,10 +31,6 @@ public:
         if (json.contains(GRAPH_PARAM_MAX_DEGREE)) {
             this->max_degree_ = json[GRAPH_PARAM_MAX_DEGREE];
         }
-        CHECK_ARGUMENT(
-            this->graph_storage_type_ == GraphStorageTypes::GRAPH_STORAGE_TYPE_COMPRESSED,
-            fmt::format("Compressed GraphDatacell only support graph storage type: {}",
-                        GRAPH_STORAGE_TYPE_COMPRESS));
     }
 
     JsonType
