@@ -45,12 +45,21 @@ private:
                                float* distances,
                                Vector<int32_t>& labels);
 
+    void
+    find_nearest_one_with_hgraph(const float* query,
+                                 const uint64_t query_count,
+                                 const uint64_t k,
+                                 const uint64_t query_count_bs,
+                                 Vector<int32_t>& labels);
+
 private:
     Allocator* const allocator_{nullptr};
 
     SafeThreadPoolPtr thread_pool_{nullptr};
 
     const int32_t dim_{0};
+
+    static constexpr uint64_t THRESHOLD_FOR_HGRAPH = 10000ULL;
 };
 
 }  // namespace vsag

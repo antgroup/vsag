@@ -20,16 +20,16 @@
 
 #include <random>
 
+#include "algorithm/inner_index_interface.h"
 #include "byte_buffer.h"
+#include "safe_allocator.h"
 #include "simd/fp32_simd.h"
 
 namespace vsag {
-
 KMeansCluster::KMeansCluster(int32_t dim, Allocator* allocator, SafeThreadPoolPtr thread_pool)
     : dim_(dim), allocator_(allocator), thread_pool_(std::move(thread_pool)) {
     if (thread_pool_ == nullptr) {
         this->thread_pool_ = SafeThreadPool::FactoryDefaultThreadPool();
-        //        this->thread_pool_->SetPoolSize(10);
     }
 }
 
@@ -69,7 +69,12 @@ KMeansCluster::Run(uint32_t k, const float* datas, uint64_t count, int iter) {
     auto* y_sqr = reinterpret_cast<float*>(y_sqr_buffer.data);
     auto* distances = reinterpret_cast<float*>(distances_buffer.data);
     for (int it = 0; it < iter; ++it) {
-        this->find_nearest_one_with_blas(datas, count, k, query_count_bs, y_sqr, distances, labels);
+        if (k < THRESHOLD_FOR_HGRAPH) {
+            this->find_nearest_one_with_blas(
+                datas, count, k, query_count_bs, y_sqr, distances, labels);
+        } else {
+            this->find_nearest_one_with_hgraph(datas, count, k, query_count_bs, labels);
+        }
         constexpr uint64_t bs = 1024;
 
         Vector<int> counts(k, 0, allocator_);
@@ -189,6 +194,51 @@ KMeansCluster::find_nearest_one_with_blas(const float* query,
                 assign_labels_func, j, std::min(j + bs, cur_query_count)));
         }
         wait_futures_and_clear();
+    }
+}
+
+void
+KMeansCluster::find_nearest_one_with_hgraph(const float* query,
+                                            const uint64_t query_count,
+                                            const uint64_t k,
+                                            const uint64_t query_count_bs,
+                                            Vector<int32_t>& labels) {
+    IndexCommonParam param;
+    param.dim_ = dim_;
+    param.allocator_ = std::make_shared<SafeAllocator>(this->allocator_);
+    param.thread_pool_ = this->thread_pool_;
+    param.metric_ = MetricType::METRIC_TYPE_L2SQR;
+
+    auto hgraph = InnerIndexInterface::FastCreateIndex("hgraph|32|fp32", param);
+    auto base = Dataset::Make();
+    Vector<int64_t> ids(k, allocator_);
+    std::iota(ids.begin(), ids.end(), 0);
+    base->Dim(dim_)
+        ->NumElements(static_cast<int64_t>(k))
+        ->Float32Vectors(this->k_centroids_)
+        ->Ids(ids.data())
+        ->Owner(false);
+    hgraph->Build(base);
+    FilterPtr filter = nullptr;
+    constexpr const char* search_param = R"({"hgraph":{"ef_search":10}})";
+    auto func = [&](const uint64_t begin, const uint64_t end) -> void {
+        for (uint64_t j = begin; j < end; ++j) {
+            auto q = Dataset::Make();
+            q->Owner(false)
+                ->Float32Vectors(query + j * this->dim_)
+                ->NumElements(1)
+                ->Dim(this->dim_);
+            auto ret = hgraph->KnnSearch(q, 1, search_param, filter);
+            labels[j] = static_cast<int32_t>(ret->GetIds()[0]);
+        }
+    };
+    std::vector<std::future<void>> futures;
+    for (uint64_t i = 0; i < query_count; i += query_count_bs) {
+        futures.emplace_back(
+            thread_pool_->GeneralEnqueue(func, i, std::min(i + query_count_bs, query_count)));
+    }
+    for (auto& future : futures) {
+        future.wait();
     }
 }
 
