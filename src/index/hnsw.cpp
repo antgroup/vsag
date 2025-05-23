@@ -472,8 +472,17 @@ HNSW::serialize() const {
             ErrorType::WRONG_STATUS, "index is in the wrong status({})", PrintStatus());
     }
 
+    auto metadata = std::make_shared<Metadata>();
+
     if (GetNumElements() == 0) {
+        // TODO(wxyu): remove this if condition
         if (Options::Instance().new_version()) {
+            metadata->SetEmpty(true);
+
+            BinarySet bs;
+
+            bs.Set("_meta", metadata->ToBinary());
+            return bs;
         }
         // return a special binaryset means empty
         return EmptyIndexBinarySet::Make("EMPTY_HNSW");
@@ -497,8 +506,10 @@ HNSW::serialize() const {
         if (use_conjugate_graph_) {
             Binary b_cg = *conjugate_graph_->Serialize();
             bs.Set(CONJUGATE_GRAPH_DATA, b_cg);
+            metadata->Set("has_conjugate_graph", true);
         }
 
+        bs.Set("_meta", metadata->ToBinary());
         return bs;
     } catch (const std::bad_alloc& e) {
         LOG_ERROR_AND_RETURNS(

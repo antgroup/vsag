@@ -26,6 +26,7 @@
 #include "stream_writer.h"
 #include "typing.h"
 #include "utils/function_exists_check.h"
+#include "vsag/binaryset.h"
 #include "vsag/constants.h"
 
 namespace vsag {
@@ -73,8 +74,22 @@ public:
 
 public:
     std::string
-    Dump() {
+    ToString() {
         return metadata_.dump();
+    }
+
+    Binary
+    ToBinary() {
+        auto str = this->ToString();
+
+        std::shared_ptr<int8_t[]> bin(new int8_t[str.length()]);
+        Binary b{
+            .data = bin,
+            .size = str.length(),
+        };
+        memcpy(bin.get(), str.c_str(), str.length());
+
+        return b;
     }
 
 public:
@@ -152,7 +167,7 @@ public:
         writer.Write(magic.c_str(), 8);
         length += 8;
 
-        auto metadata_string = metadata_->Dump();
+        auto metadata_string = metadata_->ToString();
         logger::debug("serial metadata: {}", metadata_string);
         StreamWriter::WriteString(writer, metadata_string);
         length += (8 + metadata_string.length());
