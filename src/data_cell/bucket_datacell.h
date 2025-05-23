@@ -76,6 +76,13 @@ public:
     }
 
     void
+    Unpack() override {
+        if (GetQuantizerName() == QUANTIZATION_TYPE_VALUE_PQFS) {
+            this->unpack_fastscan();
+        }
+    }
+
+    void
     ExportModel(const BucketInterfacePtr& other) const override;
 
     void
@@ -127,6 +134,9 @@ private:
 
     inline void
     package_fastscan();
+
+    inline void
+    unpack_fastscan();
 
 private:
     std::shared_ptr<QuantTmpl> quantizer_{nullptr};
@@ -291,6 +301,30 @@ BucketDataCell<QuantTmpl, IOTmpl>::package_fastscan() {
         InnerIdType begin = 0;
         while (begin < bucket_size) {
             quantizer_->Package32(codes + begin * code_size_, buffer.data);
+            this->datas_[i]->Write(buffer.data, code_size_ * 32, begin * code_size_);
+            begin += 32;
+        }
+        if (need_release) {
+            this->datas_[i]->Release(codes);
+        }
+    }
+}
+
+template <typename QuantTmpl, typename IOTmpl>
+void
+BucketDataCell<QuantTmpl, IOTmpl>::unpack_fastscan() {
+    ByteBuffer buffer(code_size_ * 32, this->allocator_);
+    for (int64_t i = 0; i < this->bucket_count_; ++i) {
+        auto bucket_size = (this->bucket_sizes_[i] + 31) / 32 * 32;
+        if (bucket_size == 0) {
+            continue;
+        }
+        bool need_release = false;
+        const auto* codes = this->datas_[i]->Read(code_size_ * bucket_size, 0, need_release);
+        InnerIdType begin = 0;
+        while (begin < bucket_size) {
+            const uint8_t* src_block = codes + begin * code_size_;
+            quantizer_->Unpack32(src_block, buffer.data);
             this->datas_[i]->Write(buffer.data, code_size_ * 32, begin * code_size_);
             begin += 32;
         }
