@@ -97,6 +97,9 @@ public:
     void
     Package32(const uint8_t* codes, uint8_t* packaged_codes) const override;
 
+    void
+    Unpack32(const uint8_t* packaged_codes, uint8_t* codes) const override;
+
 private:
     [[nodiscard]] inline const float*
     get_codebook_data(int64_t subspace_idx, int64_t centroid_num) const {
@@ -406,6 +409,36 @@ PQFastScanQuantizer<metric>::Package32(const uint8_t* codes, uint8_t* packaged_c
                 code <<= 4L;
             }
             packaged_codes[i * BLOCK_SIZE_PACKAGE / 2 + j / 2] |= code;
+        }
+    }
+}
+
+template <MetricType metric>
+void
+PQFastScanQuantizer<metric>::Unpack32(const uint8_t* packaged_codes, uint8_t* codes) const {
+    constexpr int32_t mapper[32] = {0, 16, 8,  24, 1, 17, 9,  25, 2, 18, 10, 26, 3, 19, 11, 27,
+                                    4, 20, 12, 28, 5, 21, 13, 29, 6, 22, 14, 30, 7, 23, 15, 31};
+
+    for (int i = 0; i < this->pq_dim_; ++i) {
+        for (int j = 0; j < BLOCK_SIZE_PACKAGE; ++j) {
+            int block_base = i * (BLOCK_SIZE_PACKAGE / 2) + (j / 2);
+            uint8_t byte = packaged_codes[block_base];
+
+            uint8_t code;
+            if (j % 2 == 0) {
+                code = byte & 0x0F;
+            } else {
+                code = byte >> 4;
+            }
+            int64_t vector_index = mapper[j];
+
+            int64_t code_offset = vector_index * this->code_size_ + (i / 2);
+
+            if (i % 2 == 0) {
+                codes[code_offset] = (codes[code_offset] & 0xF0) | code;
+            } else {
+                codes[code_offset] = (codes[code_offset] & 0x0F) | (code << 4);
+            }
         }
     }
 }
