@@ -473,6 +473,8 @@ HNSW::serialize() const {
     }
 
     if (GetNumElements() == 0) {
+        if (Options::Instance().new_version()) {
+        }
         // return a special binaryset means empty
         return EmptyIndexBinarySet::Make("EMPTY_HNSW");
     }
@@ -502,49 +504,6 @@ HNSW::serialize() const {
         LOG_ERROR_AND_RETURNS(
             ErrorType::NO_ENOUGH_MEMORY, "failed to serialize(bad alloc): ", e.what());
     }
-}
-
-tl::expected<void, Error>
-HNSW::serialize(std::ostream& out_stream) {
-    std::shared_lock status_lock(index_status_mutex_);
-    if (not this->IsValidStatus()) {
-        LOG_ERROR_AND_RETURNS(
-            ErrorType::WRONG_STATUS, "index is in the wrong status({})", PrintStatus());
-    }
-
-    if (GetNumElements() == 0) {
-        LOG_ERROR_AND_RETURNS(ErrorType::INDEX_EMPTY, "failed to serialize: hnsw index is empty");
-
-        // FIXME(wxyu): cannot support serialize empty index by stream
-        // auto bs = empty_binaryset();
-        // for (const auto& key : bs.GetKeys()) {
-        //     auto b = bs.Get(key);
-        //     out_stream.write((char*)b.data.get(), b.size);
-        // }
-        // return {};
-    }
-
-    SlowTaskTimer t("hnsw serialize");
-
-    IOStreamWriter writer(out_stream);
-
-    // no expected exception
-    std::shared_lock lock(rw_mutex_);
-    alg_hnsw_->saveIndex(writer);
-
-    if (use_conjugate_graph_) {
-        conjugate_graph_->Serialize(out_stream);
-    }
-
-    if (Options::Instance().new_version()) {
-        auto metadata = std::make_shared<Metadata>();
-        JsonType test;
-        metadata->Set("", test);
-        auto footer = std::make_shared<Footer>(metadata);
-        footer->Write(writer);
-    }
-
-    return {};
 }
 
 tl::expected<void, Error>
@@ -646,6 +605,55 @@ HNSW::deserialize(const ReaderSet& reader_set) {
 }
 
 tl::expected<void, Error>
+HNSW::serialize(std::ostream& out_stream) {
+    std::shared_lock status_lock(index_status_mutex_);
+    if (not this->IsValidStatus()) {
+        LOG_ERROR_AND_RETURNS(
+            ErrorType::WRONG_STATUS, "index is in the wrong status({})", PrintStatus());
+    }
+
+    auto metadata = std::make_shared<Metadata>();
+
+    if (GetNumElements() == 0) {
+        // TODO(wxyu): remove this if condition
+        if (Options::Instance().new_version()) {
+            metadata->SetEmpty(true);
+
+            auto footer = std::make_shared<Footer>(metadata);
+            IOStreamWriter writer(out_stream);
+            footer->Write(writer);
+
+            return {};
+        }
+    }
+
+    SlowTaskTimer t("hnsw serialize");
+
+    // no expected exception
+    std::shared_lock lock(rw_mutex_);
+
+    IOStreamWriter writer(out_stream);
+
+    alg_hnsw_->saveIndex(writer);
+
+    if (use_conjugate_graph_) {
+        // TODO(wxyu): remove this if condition
+        if (Options::Instance().new_version()) {
+            metadata->Set("has_conjugate_graph", true);
+        }
+        conjugate_graph_->Serialize(out_stream);
+    }
+
+    // TODO(wxyu): remove this if condition
+    if (Options::Instance().new_version()) {
+        auto footer = std::make_shared<Footer>(metadata);
+        footer->Write(writer);
+    }
+
+    return {};
+}
+
+tl::expected<void, Error>
 HNSW::deserialize(std::istream& in_stream) {
     std::shared_lock status_lock(index_status_mutex_);
     if (not this->IsValidStatus()) {
@@ -663,9 +671,22 @@ HNSW::deserialize(std::istream& in_stream) {
         std::unique_lock lock(rw_mutex_);
 
         IOStreamReader reader(in_stream);
+        auto footer = Footer::Parse(reader);
+        if (footer == nullptr) {
+            logger::debug("parse with new version format");
+            if (footer->GetMetadata()->Empty()) {
+                return {};
+            }
+        } else {
+            logger::debug("parse with v0.11 version format");
+        }
+
         alg_hnsw_->loadIndex(reader, this->space_.get());
-        if (use_conjugate_graph_ and not conjugate_graph_->Deserialize(reader).has_value()) {
-            throw std::runtime_error("error in deserialize conjugate graph");
+
+        if (use_conjugate_graph_ and footer->GetMetadata()->Get("has_conjugate_graph")) {
+            if (not conjugate_graph_->Deserialize(reader).has_value()) {
+                throw std::runtime_error("error in deserialize conjugate graph");
+            }
         }
     } catch (const std::runtime_error& e) {
         LOG_ERROR_AND_RETURNS(ErrorType::READ_ERROR, "failed to deserialize: ", e.what());

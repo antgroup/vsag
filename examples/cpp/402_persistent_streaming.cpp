@@ -53,15 +53,16 @@ main(int32_t argc, char** argv) {
         "dtype": "float32",
         "metric_type": "l2",
         "dim": 128,
-        "index_param": {
+        "hnsw": {
             "base_quantization_type": "fp32",
             "max_degree": 16,
-            "ef_construction": 100
+            "ef_construction": 100,
+            "use_conjugate_graph": true
         }
     }
     )";
     vsag::IndexPtr index = nullptr;
-    if (auto create_index = engine.CreateIndex("hgraph", index_paramesters);
+    if (auto create_index = engine.CreateIndex("hnsw", index_paramesters);
         not create_index.has_value()) {
         std::cout << "create index failed: " << create_index.error().message << std::endl;
         abort();
@@ -89,7 +90,7 @@ main(int32_t argc, char** argv) {
 
     /******************* Load Index from IStream *****************/
     index = nullptr;
-    if (auto create_index = engine.CreateIndex("hgraph", index_paramesters);
+    if (auto create_index = engine.CreateIndex("hnsw", index_paramesters);
         not create_index.has_value()) {
         std::cout << "create index failed: " << create_index.error().message << std::endl;
         abort();
@@ -113,7 +114,7 @@ main(int32_t argc, char** argv) {
     query->NumElements(1)->Dim(dim)->Float32Vectors(query_vector)->Owner(false);
     auto search_parameters = R"(
     {
-        "hgraph": {
+        "hnsw": {
             "ef_search": 100
         }
     }

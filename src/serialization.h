@@ -60,6 +60,17 @@ public:
         metadata_["_version"] = version;
     }
 
+    [[nodiscard]] bool
+    Empty() const {
+        return metadata_["_empty"];
+    }
+
+    void
+    SetEmpty(bool empty) {
+        metadata_["_empty"] = empty;
+    }
+
+
 public:
     std::string
     Dump() {
