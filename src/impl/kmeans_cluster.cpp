@@ -18,6 +18,7 @@
 #include <cblas.h>
 #include <omp.h>
 
+#include <iostream>
 #include <random>
 
 #include "byte_buffer.h"
@@ -41,7 +42,13 @@ KMeansCluster::~KMeansCluster() {
 }
 
 Vector<int>
-KMeansCluster::Run(uint32_t k, const float* datas, uint64_t count, int iter) {
+KMeansCluster::Run(uint32_t k,
+                   const float* datas,
+                   uint64_t count,
+                   int iter,
+                   double* err,
+                   bool use_mse_for_convergence,
+                   float threshold) {
     if (k_centroids_ != nullptr) {
         allocator_->Deallocate(k_centroids_);
         k_centroids_ = nullptr;
@@ -59,6 +66,8 @@ KMeansCluster::Run(uint32_t k, const float* datas, uint64_t count, int iter) {
         }
     }
 
+    double total_err = 0;
+    double last_err = 0;
     Vector<int32_t> labels(count, -1, this->allocator_);
     std::vector<std::mutex> mutexes(k);
     std::vector<std::future<void>> futures;
@@ -66,10 +75,15 @@ KMeansCluster::Run(uint32_t k, const float* datas, uint64_t count, int iter) {
     ByteBuffer y_sqr_buffer(static_cast<uint64_t>(k) * sizeof(float), allocator_);
     ByteBuffer distances_buffer(static_cast<uint64_t>(k) * query_count_bs * sizeof(float),
                                 allocator_);
+    ByteBuffer errs_buffer(count * sizeof(float), allocator_);
     auto* y_sqr = reinterpret_cast<float*>(y_sqr_buffer.data);
     auto* distances = reinterpret_cast<float*>(distances_buffer.data);
+    auto* errs = reinterpret_cast<float*>(errs_buffer.data);
+
     for (int it = 0; it < iter; ++it) {
-        this->find_nearest_one_with_blas(datas, count, k, query_count_bs, y_sqr, distances, labels);
+        total_err = 0;
+        this->find_nearest_one_with_blas(
+            datas, count, k, query_count_bs, y_sqr, distances, labels, errs);
         constexpr uint64_t bs = 1024;
 
         Vector<int> counts(k, 0, allocator_);
@@ -100,6 +114,15 @@ KMeansCluster::Run(uint32_t k, const float* datas, uint64_t count, int iter) {
         }
         futures.clear();
 
+        for (uint64_t i = 0; i < count; ++i) {
+            total_err += errs[i];
+        }
+
+        if (it > 0 && use_mse_for_convergence &&
+            std::fabs(last_err - total_err) / static_cast<double>(count) < threshold) {
+            break;
+        }
+
         for (int j = 0; j < k; ++j) {
             if (counts[j] > 0) {
                 cblas_sscal(dim_,
@@ -116,6 +139,10 @@ KMeansCluster::Run(uint32_t k, const float* datas, uint64_t count, int iter) {
                 }
             }
         }
+        last_err = total_err;
+    }
+    if (err != nullptr) {
+        *err = total_err;
     }
     return labels;
 }
@@ -127,7 +154,8 @@ KMeansCluster::find_nearest_one_with_blas(const float* query,
                                           const uint64_t query_count_bs,
                                           float* y_sqr,
                                           float* distances,
-                                          Vector<int32_t>& labels) {
+                                          Vector<int32_t>& labels,
+                                          float* errs) {
     if (k_centroids_ == nullptr) {
         return;
     }
@@ -178,6 +206,8 @@ KMeansCluster::find_nearest_one_with_blas(const float* query,
             for (uint64_t i = start; i < end; ++i) {
                 cblas_saxpy(static_cast<blasint>(k), 1.0, y_sqr, 1, distances + i * k, 1);
                 auto* min_elem = std::min_element(distances + i * k, distances + i * k + k);
+                auto x_sqr = FP32ComputeIP(query + i * dim_, query + i * dim_, dim_);
+                errs[i] = *min_elem + x_sqr;
                 auto min_index = std::distance(distances + i * k, min_elem);
                 if (min_index != cur_label[i]) {
                     cur_label[i] = static_cast<int>(min_index);
