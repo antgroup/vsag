@@ -19,6 +19,7 @@
 
 #include <cstdint>
 #include <exception>
+#include <memory>
 #include <new>
 #include <nlohmann/json.hpp>
 #include <stdexcept>
@@ -33,6 +34,8 @@
 #include "io/memory_block_io_parameter.h"
 #include "quantization/fp32_quantizer_parameter.h"
 #include "safe_allocator.h"
+#include "serialization.h"
+#include "stream_writer.h"
 #include "utils/slow_task_timer.h"
 #include "utils/timer.h"
 #include "utils/util_functions.h"
@@ -40,6 +43,7 @@
 #include "vsag/constants.h"
 #include "vsag/errors.h"
 #include "vsag/expected.hpp"
+#include "vsag/options.h"
 
 namespace vsag {
 
@@ -478,7 +482,9 @@ HNSW::serialize() const {
     try {
         std::shared_ptr<int8_t[]> bin(new int8_t[num_bytes]);
         std::shared_lock lock(rw_mutex_);
-        alg_hnsw_->saveIndex(bin.get());
+        auto* buffer = (char*)bin.get();
+        BufferStreamWriter writer(buffer);
+        alg_hnsw_->saveIndex(writer);
         Binary b{
             .data = bin,
             .size = num_bytes,
@@ -520,12 +526,22 @@ HNSW::serialize(std::ostream& out_stream) {
 
     SlowTaskTimer t("hnsw serialize");
 
+    IOStreamWriter writer(out_stream);
+
     // no expected exception
     std::shared_lock lock(rw_mutex_);
-    alg_hnsw_->saveIndex(out_stream);
+    alg_hnsw_->saveIndex(writer);
 
     if (use_conjugate_graph_) {
         conjugate_graph_->Serialize(out_stream);
+    }
+
+    if (Options::Instance().new_version()) {
+        auto metadata = std::make_shared<Metadata>();
+        JsonType test;
+        metadata->Set("", test);
+        auto footer = std::make_shared<Footer>(metadata);
+        footer->Write(writer);
     }
 
     return {};
