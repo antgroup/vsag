@@ -170,8 +170,6 @@ IVF::InitFeatures() {
 
     if (this->bucket_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_PQFS) {
         this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_ADD_AFTER_BUILD, false);
-        // TODO(LHT): merge on ivfpqfs
-        this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_MERGE_INDEX, false);
     }
 }
 
@@ -180,9 +178,6 @@ IVF::Build(const DatasetPtr& base) {
     this->Train(base);
     // TODO(LHT): duplicate
     auto result = this->Add(base);
-    if (this->bucket_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_PQFS) {
-        this->bucket_->Package();
-    }
     return result;
 }
 
@@ -205,6 +200,7 @@ IVF::Add(const DatasetPtr& base) {
     if (not partition_strategy_->is_trained_) {
         throw VsagException(ErrorType::INTERNAL_ERROR, "ivf index add without train error");
     }
+    this->bucket_->Unpack();
     auto num_element = base->GetNumElements();
     const auto* ids = base->GetIds();
     const auto* vectors = base->GetFloat32Vectors();
@@ -213,6 +209,7 @@ IVF::Add(const DatasetPtr& base) {
         bucket_->InsertVector(vectors + i * dim_, buckets[i], i + total_elements_);
         this->label_table_->Insert(i + total_elements_, ids[i]);
     }
+    this->bucket_->Package();
     if (use_reorder_) {
         this->reorder_codes_->BatchInsertVector(base->GetFloat32Vectors(), base->GetNumElements());
     }
@@ -281,9 +278,11 @@ IVF::GetNumElements() const {
 
 void
 IVF::Merge(const std::vector<MergeUnit>& merge_units) {
+    this->bucket_->Unpack();
     for (const auto& unit : merge_units) {
         this->merge_one_unit(unit);
     }
+    this->bucket_->Package();
 }
 
 void
@@ -413,7 +412,9 @@ IVF::merge_one_unit(const MergeUnit& unit) {
         std::dynamic_pointer_cast<IndexImpl<IVF>>(unit.index)->GetInnerIndex());
     auto bias = this->total_elements_;
     this->label_table_->MergeOther(other_index->label_table_, bias);
+    other_index->bucket_->Unpack();
     this->bucket_->MergeOther(other_index->bucket_, bias);
+    other_index->bucket_->Package();
 
     if (this->use_reorder_) {
         this->reorder_codes_->MergeOther(other_index->reorder_codes_, bias);
