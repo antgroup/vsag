@@ -170,4 +170,6 @@ const char* const IVF_PRECISE_FILE_PATH = "precise_file_path";
 
 const char* const SERIAL_MAGIC_BEGIN = "vsag0000";
 const char* const SERIAL_MAGIC_END = "0000gasv";
+const char* const SERIAL_META_KEY = "_meta";
+
 };  // namespace vsag

@@ -168,5 +168,6 @@ extern const char* const IVF_PRECISE_FILE_PATH;
 // serialization
 extern const char* const SERIAL_MAGIC_BEGIN;
 extern const char* const SERIAL_MAGIC_END;
+extern const char* const SERIAL_META_KEY;
 
 }  // namespace vsag

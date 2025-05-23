@@ -477,11 +477,11 @@ HNSW::serialize() const {
     if (GetNumElements() == 0) {
         // TODO(wxyu): remove this if condition
         if (Options::Instance().new_version()) {
-            metadata->SetEmpty(true);
+            metadata->SetEmptyIndex(true);
 
             BinarySet bs;
 
-            bs.Set("_meta", metadata->ToBinary());
+            bs.Set(SERIAL_META_KEY, metadata->ToBinary());
             return bs;
         }
         // return a special binaryset means empty
@@ -509,7 +509,7 @@ HNSW::serialize() const {
             metadata->Set("has_conjugate_graph", true);
         }
 
-        bs.Set("_meta", metadata->ToBinary());
+        bs.Set(SERIAL_META_KEY, metadata->ToBinary());
         return bs;
     } catch (const std::bad_alloc& e) {
         LOG_ERROR_AND_RETURNS(
@@ -525,16 +525,28 @@ HNSW::deserialize(const BinarySet& binary_set) {
             ErrorType::WRONG_STATUS, "index is in the wrong status({})", PrintStatus());
     }
 
-    SlowTaskTimer t("hnsw deserialize");
     if (this->alg_hnsw_->getCurrentElementCount() > 0) {
         LOG_ERROR_AND_RETURNS(ErrorType::INDEX_NOT_EMPTY,
                               "failed to deserialize: index is not empty");
     }
 
-    // check if binaryset is a empty index
-    if (binary_set.Contains(BLANK_INDEX)) {
-        empty_index_ = true;
-        return {};
+    SlowTaskTimer t("hnsw deserialize");
+    if (binary_set.Contains(SERIAL_META_KEY)) {
+        logger::debug("parse with new version format");
+        auto metadata = std::make_shared<Metadata>(binary_set.Get(SERIAL_META_KEY));
+
+        if (metadata->EmptyIndex()) {
+            empty_index_ = true;
+            return {};
+        }
+    } else {
+        logger::debug("parse with v0.11 version format");
+
+        // check if binaryset is a empty index
+        if (binary_set.Contains(BLANK_INDEX)) {
+            empty_index_ = true;
+            return {};
+        }
     }
 
     Binary b = binary_set.Get(HNSW_DATA);
@@ -628,7 +640,7 @@ HNSW::serialize(std::ostream& out_stream) {
     if (GetNumElements() == 0) {
         // TODO(wxyu): remove this if condition
         if (Options::Instance().new_version()) {
-            metadata->SetEmpty(true);
+            metadata->SetEmptyIndex(true);
 
             auto footer = std::make_shared<Footer>(metadata);
             IOStreamWriter writer(out_stream);
@@ -683,9 +695,9 @@ HNSW::deserialize(std::istream& in_stream) {
 
         IOStreamReader reader(in_stream);
         auto footer = Footer::Parse(reader);
-        if (footer == nullptr) {
+        if (footer != nullptr) {
             logger::debug("parse with new version format");
-            if (footer->GetMetadata()->Empty()) {
+            if (footer->GetMetadata()->EmptyIndex()) {
                 return {};
             }
         } else {

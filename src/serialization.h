@@ -17,6 +17,7 @@
 
 #include <cstdint>
 #include <cstring>
+#include <ctime>
 #include <iostream>
 #include <memory>
 #include <string>
@@ -53,7 +54,10 @@ public:
 public:
     [[nodiscard]] std::string
     Version() const {
-        return metadata_["_version"];
+        if (metadata_.contains("_version")) {
+            return metadata_["_version"];
+        }
+        return "";
     }
 
     void
@@ -62,19 +66,19 @@ public:
     }
 
     [[nodiscard]] bool
-    Empty() const {
-        return metadata_["_empty"];
+    EmptyIndex() const {
+        return metadata_.contains("_empty") && metadata_["_empty"];
     }
 
     void
-    SetEmpty(bool empty) {
+    SetEmptyIndex(bool empty) {
         metadata_["_empty"] = empty;
     }
-
 
 public:
     std::string
     ToString() {
+        make_sure_metadata_not_null();
         return metadata_.dump();
     }
 
@@ -93,10 +97,37 @@ public:
     }
 
 public:
+    Metadata(const Binary& binary) {
+        auto str = std::string((char*)binary.data.get(), binary.size);
+        std::cout << str << std::endl;
+        metadata_ = JsonType::parse(str);
+    }
     Metadata(JsonType metadata) : metadata_(std::move(metadata)) {
     }
     Metadata() = default;
     ~Metadata() = default;
+
+private:
+    void
+    make_sure_metadata_not_null() {
+        time_t now = time(nullptr);
+        tm* ltm = localtime(&now);
+
+        int32_t year = 1900 + ltm->tm_year;
+        int32_t month = 1 + ltm->tm_mon;
+        int32_t day = ltm->tm_mday;
+        int32_t hour = ltm->tm_hour;
+        int32_t min = ltm->tm_min;
+        int32_t sec = ltm->tm_sec;
+
+        std::stringstream ss;
+        ss << year << "-" << (month < 10 ? "0" : "") << month << "-" << (day < 10 ? "0" : "") << day
+           << " " << (hour < 10 ? "0" : "") << hour << ":" << (min < 10 ? "0" : "") << min << ":"
+           << (sec < 10 ? "0" : "") << sec;
+        std::string formatted_datetime = ss.str();
+
+        metadata_["_update_time"] = formatted_datetime;
+    }
 
 private:
     JsonType metadata_;
