@@ -27,7 +27,9 @@ namespace vsag {
 
 class SparseBitset : public ComputableBitset {
 public:
-    SparseBitset() = default;
+    SparseBitset() {
+        this->type_ = ComputableBitsetType::SparseBitset;
+    }
     ~SparseBitset() override = default;
 
     SparseBitset(const SparseBitset&) = delete;
