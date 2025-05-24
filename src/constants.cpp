@@ -167,4 +167,9 @@ const char* const IVF_BASE_FILE_PATH = "base_file_path";
 const char* const IVF_PRECISE_QUANTIZATION_TYPE = "precise_quantization_type";
 const char* const IVF_PRECISE_IO_TYPE = "precise_io_type";
 const char* const IVF_PRECISE_FILE_PATH = "precise_file_path";
+
+const char* const SERIAL_MAGIC_BEGIN = "vsag0000";
+const char* const SERIAL_MAGIC_END = "0000gasv";
+const char* const SERIAL_META_KEY = "_meta";
+
 };  // namespace vsag

@@ -198,11 +198,25 @@ private:
                      InnerSearchParam& inner_search_param,
                      IteratorFilterContext* iter_ctx) const;
 
+    // since v0.12
     void
-    serialize_basic_info(StreamWriter& writer) const;
+    serialize_basic_info_v0_14(StreamWriter& writer) const;
 
     void
-    deserialize_basic_info(StreamReader& reader);
+    deserialize_basic_info_v0_14(StreamReader& reader);
+
+    // since v0.15
+    JsonType
+    serialize_basic_info() const;
+
+    void
+    deserialize_basic_info(JsonType jsonify_basic_info);
+
+    void
+    serialize_label_info(StreamWriter& writer) const;
+
+    void
+    deserialize_label_info(StreamReader& reader) const;
 
     void
     reorder(const void* query,

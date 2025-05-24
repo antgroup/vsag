@@ -25,6 +25,7 @@
 #include <unordered_set>
 
 #include "vsag/binaryset.h"
+#include "vsag/options.h"
 
 int
 main(int32_t argc, char** argv) {
@@ -53,8 +54,10 @@ main(int32_t argc, char** argv) {
         "metric_type": "l2",
         "dim": 128,
         "hnsw": {
+            "base_quantization_type": "fp32",
             "max_degree": 16,
-            "ef_construction": 100
+            "ef_construction": 100,
+            "use_conjugate_graph": true
         }
     }
     )";
@@ -76,6 +79,7 @@ main(int32_t argc, char** argv) {
     std::cout << "index contains vectors: " << index->GetNumElements() << std::endl;
 
     /******************* Save Index to OStream *****************/
+    vsag::Options::Instance().set_new_version(true);
     std::ofstream out_stream("/tmp/vsag-persistent-streaming.index");
     auto serialize_result = index->Serialize(out_stream);
     out_stream.close();
@@ -93,6 +97,7 @@ main(int32_t argc, char** argv) {
     } else {
         index = *create_index;
     }
+
     std::ifstream in_stream("/tmp/vsag-persistent-streaming.index");
     if (auto deserialize = index->Deserialize(in_stream); not deserialize.has_value()) {
         std::cerr << "load index failed: " << deserialize.error().message << std::endl;
