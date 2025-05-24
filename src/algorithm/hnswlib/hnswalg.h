@@ -43,6 +43,7 @@
 #include "visited_list_pool.h"
 #include "vsag/dataset.h"
 #include "vsag/iterator_context.h"
+
 namespace hnswlib {
 using InnerIdType = vsag::InnerIdType;
 using linklistsizeint = unsigned int;
