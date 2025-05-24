@@ -956,11 +956,7 @@ HGraph::elp_optimize() {
     param.topk = 10;
     param.is_inner_id_allowed = nullptr;
     searcher_->SetMockParameters(bottom_graph_, basic_flatten_codes_, pool_, param, dim_);
-    optimizer_->RegisterParameter(
-        RuntimeParameter(PREFETCH_DEPTH_CODE,
-                         1,
-                         (static_cast<float>(basic_flatten_codes_->code_size_) + 63.0F) / 64.0F + 2,
-                         1));
+    // TODO(ZXY): optimize PREFETCH_DEPTH_CODE and add default value for the others
     optimizer_->RegisterParameter(RuntimeParameter(PREFETCH_STRIDE_CODE, 1, 10, 1));
     optimizer_->RegisterParameter(RuntimeParameter(PREFETCH_STRIDE_VISIT, 1, 10, 1));
     optimizer_->Optimize(searcher_);
