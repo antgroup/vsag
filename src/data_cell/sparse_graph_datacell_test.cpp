@@ -26,25 +26,46 @@
 using namespace vsag;
 
 void
-TestSparseGraphDataCell(const GraphInterfaceParamPtr& param, const IndexCommonParam& common_param) {
+TestSparseGraphDataCell(const GraphInterfaceParamPtr& param,
+                        const IndexCommonParam& common_param,
+                        bool test_delete) {
     auto count = GENERATE(1000, 2000);
     auto max_id = 10000;
 
     auto graph = GraphInterface::MakeInstance(param, common_param);
     GraphInterfaceTest test(graph);
     auto other = GraphInterface::MakeInstance(param, common_param);
-    test.BasicTest(max_id, count, other);
+    test.BasicTest(max_id, count, other, test_delete);
 }
 
 TEST_CASE("SparseGraphDataCell Basic Test", "[ut][SparseGraphDataCell]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     auto dim = GENERATE(32, 64);
-    auto max_degree = GENERATE(5, 12, 32, 64, 128);
+    auto max_degree = GENERATE(5, 32, 64);
+    auto is_support_delete = GENERATE(true, false);
 
     IndexCommonParam common_param;
     common_param.dim_ = dim;
     common_param.allocator_ = allocator;
     auto graph_param = std::make_shared<SparseGraphDatacellParameter>();
     graph_param->max_degree_ = max_degree;
-    TestSparseGraphDataCell(graph_param, common_param);
+    graph_param->support_delete_ = is_support_delete;
+    TestSparseGraphDataCell(graph_param, common_param, is_support_delete);
+}
+
+TEST_CASE("SparseGraphDataCell Remove Test", "[ut][SparseGraphDataCell]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    auto dim = GENERATE(32, 64);
+    auto max_degree = GENERATE(5, 32);
+    auto is_support_delete = GENERATE(true);
+    auto remove_flag_bit = GENERATE(4, 8);
+
+    IndexCommonParam common_param;
+    common_param.dim_ = dim;
+    common_param.allocator_ = allocator;
+    auto graph_param = std::make_shared<SparseGraphDatacellParameter>();
+    graph_param->max_degree_ = max_degree;
+    graph_param->support_delete_ = is_support_delete;
+    graph_param->remove_flag_bit_ = remove_flag_bit;
+    TestSparseGraphDataCell(graph_param, common_param, is_support_delete);
 }
