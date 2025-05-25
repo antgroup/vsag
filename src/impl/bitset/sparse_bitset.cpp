@@ -13,35 +13,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "bitset_impl.h"
+#include "sparse_bitset.h"
 
 #include <cstdint>
-#include <functional>
 #include <mutex>
-#include <random>
-#include <sstream>
 
 namespace vsag {
 
-BitsetPtr
-Bitset::Random(int64_t length) {
-    auto bitset = std::make_shared<BitsetImpl>();
-    static auto gen =
-        std::bind(std::uniform_int_distribution<>(0, 1),  // NOLINT(modernize-avoid-bind)
-                  std::default_random_engine());
-    for (int64_t i = 0; i < length; ++i) {
-        bitset->Set(i, gen() != 0);
-    }
-    return bitset;
-}
-
-BitsetPtr
-Bitset::Make() {
-    return std::make_shared<BitsetImpl>();
-}
-
 void
-BitsetImpl::Set(int64_t pos, bool value) {
+SparseBitset::Set(int64_t pos, bool value) {
     std::lock_guard<std::mutex> lock(mutex_);
     if (value) {
         r_.add(pos);
@@ -51,24 +31,24 @@ BitsetImpl::Set(int64_t pos, bool value) {
 }
 
 bool
-BitsetImpl::Test(int64_t pos) {
+SparseBitset::Test(int64_t pos) {
     std::lock_guard<std::mutex> lock(mutex_);
     return r_.contains(pos);
 }
 
 uint64_t
-BitsetImpl::Count() {
+SparseBitset::Count() {
     return r_.cardinality();
 }
 
 std::string
-BitsetImpl::Dump() {
+SparseBitset::Dump() {
     return r_.toString();
 }
 
 void
-BitsetImpl::Or(const Bitset& another) {
-    const auto* another_ptr = reinterpret_cast<const BitsetImpl*>(&another);
+SparseBitset::Or(const Bitset& another) {
+    const auto* another_ptr = reinterpret_cast<const SparseBitset*>(&another);
     std::lock(mutex_, another_ptr->mutex_);
     std::lock_guard<std::mutex> lock(mutex_, std::adopt_lock);
     std::lock_guard<std::mutex> lock_other(another_ptr->mutex_, std::adopt_lock);
@@ -76,8 +56,8 @@ BitsetImpl::Or(const Bitset& another) {
 }
 
 void
-BitsetImpl::And(const Bitset& another) {
-    const auto* another_ptr = reinterpret_cast<const BitsetImpl*>(&another);
+SparseBitset::And(const Bitset& another) {
+    const auto* another_ptr = reinterpret_cast<const SparseBitset*>(&another);
     std::lock(mutex_, another_ptr->mutex_);
     std::lock_guard<std::mutex> lock(mutex_, std::adopt_lock);
     std::lock_guard<std::mutex> lock_other(another_ptr->mutex_, std::adopt_lock);
@@ -85,12 +65,38 @@ BitsetImpl::And(const Bitset& another) {
 }
 
 void
-BitsetImpl::Xor(const Bitset& another) {
-    const auto* another_ptr = reinterpret_cast<const BitsetImpl*>(&another);
+SparseBitset::Xor(const Bitset& another) {
+    const auto* another_ptr = reinterpret_cast<const SparseBitset*>(&another);
     std::lock(mutex_, another_ptr->mutex_);
     std::lock_guard<std::mutex> lock(mutex_, std::adopt_lock);
     std::lock_guard<std::mutex> lock_other(another_ptr->mutex_, std::adopt_lock);
     r_ ^= another_ptr->r_;
+}
+
+void
+SparseBitset::Not() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    r_.flipClosed(r_.minimum(), r_.maximum());
+}
+
+void
+SparseBitset::Serialize(StreamWriter& writer) const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    uint64_t size = r_.getSizeInBytes();
+    StreamWriter::WriteObj(writer, size);
+    std::vector<char> buffer(size);
+    r_.write(buffer.data());
+    writer.Write(buffer.data(), size);
+}
+
+void
+SparseBitset::Deserialize(StreamReader& reader) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    uint64_t size;
+    StreamReader::ReadObj(reader, size);
+    std::vector<char> buffer(size);
+    reader.Read(buffer.data(), size);
+    r_ = roaring::Roaring::readSafe(buffer.data(), size);
 }
 
 }  // namespace vsag

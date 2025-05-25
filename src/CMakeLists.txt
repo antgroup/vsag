@@ -6,8 +6,10 @@ add_subdirectory (quantization)
 file (GLOB CPP_SRCS "*.cpp")
 list (FILTER CPP_SRCS EXCLUDE REGEX "_test.cpp")
 
-file (GLOB CPP_CONJUGATE_GRAPH_SRCS "impl/*.cpp")
-list (FILTER CPP_CONJUGATE_GRAPH_SRCS EXCLUDE REGEX "_test.cpp")
+file (GLOB CPP_IMPL_SRCS "impl/*.cpp")
+file (GLOB CPP_IMPL_EXTRA_SRCS "impl/**/*.cpp")
+list (APPEND CPP_IMPL_SRCS ${CPP_IMPL_EXTRA_SRCS})
+list (FILTER CPP_IMPL_SRCS EXCLUDE REGEX "_test.cpp")
 
 file (GLOB CPP_INDEX_SRCS "index/*.cpp")
 list (FILTER CPP_INDEX_SRCS EXCLUDE REGEX "_test.cpp")
@@ -23,7 +25,7 @@ list (FILTER CPP_ALGORITHM_SRCS EXCLUDE REGEX "_test.cpp")
 file (GLOB CPP_UTILS_SRCS "utils/*.cpp")
 list (FILTER CPP_UTILS_SRCS EXCLUDE REGEX "_test.cpp")
 
-set (VSAG_SRCS ${CPP_SRCS} ${CPP_INDEX_SRCS} ${CPP_CONJUGATE_GRAPH_SRCS}
+set (VSAG_SRCS ${CPP_SRCS} ${CPP_INDEX_SRCS} ${CPP_IMPL_SRCS}
         ${CPP_DATA_CELL_SRCS} ${CPP_ALGORITHM_SRCS} ${CPP_UTILS_SRCS})
 
 add_library (vsag SHARED ${VSAG_SRCS})
