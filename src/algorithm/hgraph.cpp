@@ -1279,4 +1279,12 @@ HGraph::ExportModel(const IndexCommonParam& param) const {
     }
     return index;
 }
+void
+HGraph::GetRawData(vsag::InnerIdType inner_id, uint8_t* data) const {
+    if (use_reorder_) {
+        high_precise_codes_->GetCodesById(inner_id, data);
+    } else {
+        basic_flatten_codes_->GetCodesById(inner_id, data);
+    }
+}
 }  // namespace vsag
