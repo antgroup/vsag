@@ -1120,7 +1120,7 @@ HNSW::ExtractDataAndGraph(FlattenInterfacePtr& data,
     auto cur_element_count = hnsw->getCurrentElementCount();
     int64_t origin_data_num = data->total_count_;
     int64_t valid_id_count = 0;
-    BitsetPtr bitset = std::make_shared<BitsetImpl>();
+    auto bitset = Bitset::Make();
     for (auto i = 0; i < cur_element_count; ++i) {
         int64_t id = hnsw->getExternalLabel(i);
         auto [is_exist, new_id] = func(id);

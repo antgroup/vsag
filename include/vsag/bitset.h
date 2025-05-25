@@ -86,33 +86,6 @@ public:
     virtual uint64_t
     Count() = 0;
 
-    /**
-     * @brief Performs a bitwise OR operation on the current bitset with another bitset.
-     *
-     * @param another The bitset to perform the OR operation with.
-     * @return void
-     */
-    virtual void
-    Or(const Bitset& another) = 0;
-
-    /**
-     * @brief Performs a bitwise AND operation on the current bitset with another bitset.
-     *
-     * @param another The bitset to perform the AND operation with.
-     * @return void
-     */
-    virtual void
-    And(const Bitset& another) = 0;
-
-    /**
-     * @brief Performs a bitwise XOR operation on the current bitset with another bitset.
-     *
-     * @param another The bitset to perform the XOR operation with.
-     * @return void
-     */
-    virtual void
-    Xor(const Bitset& another) = 0;
-
 public:
     /**
       * For debugging

@@ -21,8 +21,6 @@ jobs:
       - name: Free Disk Space
         run: rm -rf /useless/hostedtoolcache
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: '0'
       - name: Load Cache
         uses: actions/cache@v4
         with:
@@ -38,6 +36,12 @@ jobs:
           fi
       - name: Make Asan
         run: export CMAKE_GENERATOR="Ninja"; make asan
+      - name: Compress
+        run: |
+          sudo apt install pigz -y;
+          tar -cf - ./build | pigz -p 4 > build.tar.gz
+      - name: Clean
+        run: find ./build -type f -name "*.o" -exec rm -f {} +
       - name: Save Test
         uses: actions/upload-artifact@v4
         with:
@@ -46,10 +50,6 @@ jobs:
           compression-level: 1
           retention-days: 1
           overwrite: 'true'
-      - name: Compress
-        run: |
-          sudo apt install pigz -y;
-          tar -cf - ./build | pigz -p 4 > build.tar.gz
 
   build_asan_aarch64:
     name: Asan Build Aarch64
@@ -61,8 +61,6 @@ jobs:
       - name: Free Disk Space
         run: rm -rf /opt/hostedtoolcache
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: '0'
       - name: Prepare Env
         run: sudo bash ./scripts/deps/install_deps_ubuntu.sh
       - name: Load Cache
@@ -80,18 +78,20 @@ jobs:
           fi
       - name: Make Asan
         run: export CMAKE_GENERATOR="Ninja"; make asan
-      - name: Save Test
-        uses: actions/upload-artifact@v4
-        with:
-          path: ./build
-          name: test_aarch64-${{ github.run_id }}
-          compression-level: 1
-          retention-days: 1
-          overwrite: 'true'
       - name: Compress
         run: |
           sudo apt install pigz -y;
           tar -cf - ./build | pigz -p 4 > build.tar.gz
+      - name: Clean
+        run: find ./build -type f -name "*.o" -exec rm -f {} +
+      - name: Save Test
+        uses: actions/upload-artifact@v4
+        with:
+          path: ./build/
+          name: test_aarch64-${{ github.run_id }}
+          compression-level: 1
+          retention-days: 1
+          overwrite: 'true'
 
   test_asan_x86:
     name: Test X86
@@ -117,7 +117,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: test_x86-${{ github.run_id }}
-          path: ./build/
+          path: ./build
       - name: Do Asan Test In ${{ matrix.test_type }}
         run: |
           echo leak:libomp.so > omp.supp
@@ -155,7 +155,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: test_aarch64-${{ github.run_id }}
-          path: ./build/
+          path: ./build
       - name: Do Asan Test In ${{ matrix.test_type }}
         run: |
           echo leak:libomp.so > omp.supp

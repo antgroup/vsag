@@ -17,11 +17,11 @@
 
 #include <functional>
 
-#include "bitset_impl.h"
 #include "common.h"
 #include "data_cell/extra_info_interface.h"
 #include "label_table.h"
 #include "typing.h"
+#include "vsag/bitset.h"
 #include "vsag/filter.h"
 
 namespace vsag {
