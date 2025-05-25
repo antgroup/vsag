@@ -13,18 +13,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "bitset_impl.h"
+#include "sparse_bitset.h"
 
 #include <catch2/catch_message.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <iostream>
 #include <roaring.hh>
 
+#include "fixtures.h"
+
 using namespace roaring;
+using namespace vsag;
 
-TEST_CASE("BitsetImpl Test", "[ut][bitset]") {
-    vsag::BitsetImpl bitset;
-
+TEST_CASE("SparseBitset Test", "[ut][bitset]") {
+    SparseBitset bitset;
     // empty
     REQUIRE(bitset.Count() == 0);
 
@@ -47,20 +49,35 @@ TEST_CASE("BitsetImpl Test", "[ut][bitset]") {
     bitset.Set(100, true);
     auto dumped = bitset.Dump();
     REQUIRE(dumped == "{100}");
+
+    fixtures::TempDir dir("sparse_bitset");
+    auto path = dir.GenerateRandomFile();
+    std::ofstream ofs(path, std::ios::binary);
+    IOStreamWriter writer(ofs);
+    bitset.Serialize(writer);
+    ofs.close();
+
+    std::ifstream ifs(path, std::ios::binary);
+    IOStreamReader reader(ifs);
+    SparseBitset bitset2;
+    bitset2.Deserialize(reader);
+    ifs.close();
+    dumped = bitset.Dump();
+    REQUIRE(dumped == "{100}");
 }
 
-TEST_CASE("BitsetImpl Or Test", "[ut][bitset]") {
+TEST_CASE("SparseBitset Or Test", "[ut][bitset]") {
     SECTION("both empty") {
-        vsag::BitsetImpl bitset1;
-        vsag::BitsetImpl bitset2;
+        SparseBitset bitset1;
+        SparseBitset bitset2;
         bitset1.Or(bitset2);
         REQUIRE(bitset1.Count() == 0);
         REQUIRE(bitset1.Dump() == "{}");
     }
 
     SECTION("empty and non-empty") {
-        vsag::BitsetImpl bitset1;
-        vsag::BitsetImpl bitset2;
+        SparseBitset bitset1;
+        SparseBitset bitset2;
         bitset2.Set(100, true);
         bitset1.Or(bitset2);
         REQUIRE(bitset1.Test(100));
@@ -69,8 +86,8 @@ TEST_CASE("BitsetImpl Or Test", "[ut][bitset]") {
     }
 
     SECTION("disjoint sets") {
-        vsag::BitsetImpl bitset1;
-        vsag::BitsetImpl bitset2;
+        SparseBitset bitset1;
+        SparseBitset bitset2;
         bitset1.Set(100, true);
         bitset2.Set(200, true);
         bitset1.Or(bitset2);
@@ -81,8 +98,8 @@ TEST_CASE("BitsetImpl Or Test", "[ut][bitset]") {
     }
 
     SECTION("overlapping sets") {
-        vsag::BitsetImpl bitset1;
-        vsag::BitsetImpl bitset2;
+        SparseBitset bitset1;
+        SparseBitset bitset2;
         bitset1.Set(100, true);
         bitset2.Set(100, true);
         bitset1.Or(bitset2);
@@ -91,26 +108,26 @@ TEST_CASE("BitsetImpl Or Test", "[ut][bitset]") {
     }
 }
 
-TEST_CASE("BitsetImpl And Test", "[ut][bitset]") {
+TEST_CASE("SparseBitset And Test", "[ut][bitset]") {
     SECTION("both empty") {
-        vsag::BitsetImpl bitset1;
-        vsag::BitsetImpl bitset2;
+        SparseBitset bitset1;
+        SparseBitset bitset2;
         bitset1.And(bitset2);
         REQUIRE(bitset1.Count() == 0);
         REQUIRE(bitset1.Dump() == "{}");
     }
 
     SECTION("empty and non-empty") {
-        vsag::BitsetImpl bitset1;
-        vsag::BitsetImpl bitset2;
+        SparseBitset bitset1;
+        SparseBitset bitset2;
         bitset2.Set(100, true);
         bitset1.And(bitset2);
         REQUIRE(bitset1.Count() == 0);
     }
 
     SECTION("common elements") {
-        vsag::BitsetImpl bitset1;
-        vsag::BitsetImpl bitset2;
+        SparseBitset bitset1;
+        SparseBitset bitset2;
         bitset1.Set(100, true);
         bitset1.Set(200, true);
         bitset2.Set(200, true);
@@ -124,8 +141,8 @@ TEST_CASE("BitsetImpl And Test", "[ut][bitset]") {
     }
 
     SECTION("no common elements") {
-        vsag::BitsetImpl bitset1;
-        vsag::BitsetImpl bitset2;
+        SparseBitset bitset1;
+        SparseBitset bitset2;
         bitset1.Set(100, true);
         bitset2.Set(200, true);
         bitset1.And(bitset2);
@@ -134,18 +151,18 @@ TEST_CASE("BitsetImpl And Test", "[ut][bitset]") {
     }
 }
 
-TEST_CASE("BitsetImpl Xor Test", "[ut][bitset]") {
+TEST_CASE("SparseBitset Xor Test", "[ut][bitset]") {
     SECTION("both empty") {
-        vsag::BitsetImpl bitset1;
-        vsag::BitsetImpl bitset2;
+        SparseBitset bitset1;
+        SparseBitset bitset2;
         bitset1.Xor(bitset2);
         REQUIRE(bitset1.Count() == 0);
         REQUIRE(bitset1.Dump() == "{}");
     }
 
     SECTION("empty and non-empty") {
-        vsag::BitsetImpl bitset1;
-        vsag::BitsetImpl bitset2;
+        SparseBitset bitset1;
+        SparseBitset bitset2;
         bitset2.Set(100, true);
         bitset1.Xor(bitset2);
         REQUIRE(bitset1.Test(100));
@@ -154,8 +171,8 @@ TEST_CASE("BitsetImpl Xor Test", "[ut][bitset]") {
     }
 
     SECTION("partial overlap") {
-        vsag::BitsetImpl bitset1;
-        vsag::BitsetImpl bitset2;
+        SparseBitset bitset1;
+        SparseBitset bitset2;
         bitset1.Set(100, true);
         bitset1.Set(200, true);
         bitset2.Set(200, true);
@@ -169,8 +186,8 @@ TEST_CASE("BitsetImpl Xor Test", "[ut][bitset]") {
     }
 
     SECTION("identical sets") {
-        vsag::BitsetImpl bitset1;
-        vsag::BitsetImpl bitset2;
+        SparseBitset bitset1;
+        SparseBitset bitset2;
         bitset1.Set(100, true);
         bitset2.Set(100, true);
         bitset1.Xor(bitset2);
