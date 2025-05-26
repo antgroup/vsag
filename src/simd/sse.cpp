@@ -717,4 +717,98 @@ PQFastScanLookUp32(const uint8_t* lookup_table,
 #endif
 }
 
+void
+BitAnd(const uint8_t* x, const uint8_t* y, const uint64_t num_byte, uint8_t* result) {
+#if defined(ENABLE_SSE)
+    if (num_byte == 0) {
+        return;
+    }
+    if (num_byte < 16) {
+        return generic::BitAnd(x, y, num_byte, result);
+    }
+    int64_t i = 0;
+    for (; i + 15 < num_byte; i += 16) {
+        __m128i x_vec = _mm_loadu_si128(reinterpret_cast<const __m128i*>(x + i));
+        __m128i y_vec = _mm_loadu_si128(reinterpret_cast<const __m128i*>(y + i));
+        __m128i result_vec = _mm_and_si128(x_vec, y_vec);
+        _mm_storeu_si128(reinterpret_cast<__m128i*>(result + i), result_vec);
+    }
+    if (i < num_byte) {
+        generic::BitAnd(x + i, y + i, num_byte - i, result + i);
+    }
+#else
+    return generic::BitAnd(x, y, num_byte, result);
+#endif
+}
+
+void
+BitOr(const uint8_t* x, const uint8_t* y, const uint64_t num_byte, uint8_t* result) {
+#if defined(ENABLE_SSE)
+    if (num_byte == 0) {
+        return;
+    }
+    if (num_byte < 16) {
+        return generic::BitOr(x, y, num_byte, result);
+    }
+    int64_t i = 0;
+    for (; i + 15 < num_byte; i += 16) {
+        __m128i x_vec = _mm_loadu_si128(reinterpret_cast<const __m128i*>(x + i));
+        __m128i y_vec = _mm_loadu_si128(reinterpret_cast<const __m128i*>(y + i));
+        __m128i result_vec = _mm_or_si128(x_vec, y_vec);
+        _mm_storeu_si128(reinterpret_cast<__m128i*>(result + i), result_vec);
+    }
+    if (i < num_byte) {
+        generic::BitOr(x + i, y + i, num_byte - i, result + i);
+    }
+#else
+    return generic::BitOr(x, y, num_byte, result);
+#endif
+}
+
+void
+BitXor(const uint8_t* x, const uint8_t* y, const uint64_t num_byte, uint8_t* result) {
+#if defined(ENABLE_SSE)
+    if (num_byte == 0) {
+        return;
+    }
+    if (num_byte < 16) {
+        return generic::BitXor(x, y, num_byte, result);
+    }
+    int64_t i = 0;
+    for (; i + 15 < num_byte; i += 16) {
+        __m128i x_vec = _mm_loadu_si128(reinterpret_cast<const __m128i*>(x + i));
+        __m128i y_vec = _mm_loadu_si128(reinterpret_cast<const __m128i*>(y + i));
+        __m128i result_vec = _mm_xor_si128(x_vec, y_vec);
+        _mm_storeu_si128(reinterpret_cast<__m128i*>(result + i), result_vec);
+    }
+    if (i < num_byte) {
+        generic::BitXor(x + i, y + i, num_byte - i, result + i);
+    }
+#else
+    return generic::BitXor(x, y, num_byte, result);
+#endif
+}
+
+void
+BitNot(const uint8_t* x, const uint64_t num_byte, uint8_t* result) {
+#if defined(ENABLE_SSE)
+    if (num_byte == 0) {
+        return;
+    }
+    if (num_byte < 16) {
+        return generic::BitNot(x, num_byte, result);
+    }
+    int64_t i = 0;
+    for (; i + 15 < num_byte; i += 16) {
+        __m128i x_vec = _mm_loadu_si128(reinterpret_cast<const __m128i*>(x + i));
+        __m128i result_vec = _mm_xor_si128(x_vec, _mm_set1_epi8(0xFF));
+        _mm_storeu_si128(reinterpret_cast<__m128i*>(result + i), result_vec);
+    }
+    if (i < num_byte) {
+        generic::BitNot(x + i, num_byte - i, result + i);
+    }
+#else
+    return generic::BitNot(x, num_byte, result);
+#endif
+}
 }  // namespace vsag::sse
