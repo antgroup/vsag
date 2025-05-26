@@ -33,8 +33,6 @@ public:
 public:
     IOParamPtr io_parameter_{nullptr};
 
-    uint64_t max_degree_{64};
-
     uint64_t init_max_capacity_{100};
 };
 

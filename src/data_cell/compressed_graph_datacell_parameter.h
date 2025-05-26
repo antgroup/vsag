@@ -40,9 +40,6 @@ public:
         json[GRAPH_STORAGE_TYPE_KEY] = GRAPH_STORAGE_TYPE_COMPRESSED;
         return json;
     }
-
-public:
-    uint64_t max_degree_{64};
 };
 
 using CompressedGraphDatacellParamPtr = std::shared_ptr<CompressedGraphDatacellParameter>;
