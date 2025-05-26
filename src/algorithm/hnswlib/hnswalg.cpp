@@ -1302,14 +1302,18 @@ HierarchicalNSW::updateLabel(LabelType old_label, LabelType new_label) {
             throw std::runtime_error(fmt::format("no old label {} in HNSW", old_label));
         }
 
+        // 4. update label to id
         internal_id = iter_mark_delete->second;
+        deleted_elements_.erase(iter_mark_delete);
+        deleted_elements_.insert({new_label, internal_id});
     } else {
+        // 4. update label to id
         internal_id = iter_old->second;
+        label_lookup_.erase(iter_old);
+        label_lookup_[new_label] = internal_id;
     }
 
-    // 4. reset label
-    label_lookup_.erase(iter_old);
-    label_lookup_[new_label] = internal_id;
+    // 5. reset id to label
     std::unique_lock resize_lock(resize_mutex_);
     setExternalLabel(internal_id, new_label);
 }

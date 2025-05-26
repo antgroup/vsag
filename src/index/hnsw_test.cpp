@@ -1060,14 +1060,14 @@ TEST_CASE("update mark-deleted vector", "[ut][hnsw]") {
 
     // parameters
     int dim = 128;
-    int base_size = 1000;
-    int delete_size = 500;
-    int update_size = 500;
+    int base_size = 100;
+    int delete_size = 50;
+    int update_size = 50;
 
     // create hnsw
     hnswlib::L2Space space(dim);
-    DefaultAllocator allocator;
-    auto* alg_hnsw = new hnswlib::HierarchicalNSW(&space, 100, &allocator);
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    auto* alg_hnsw = new hnswlib::HierarchicalNSW(&space, 100, allocator.get());
     alg_hnsw->init_memory_space();
 
     // data and build index
@@ -1091,11 +1091,12 @@ TEST_CASE("update mark-deleted vector", "[ut][hnsw]") {
     for (auto i = 0; i < update_size; i++) {
         auto old_label = base_ids[i] + delete_size / 2;
         auto new_label = old_label + base_size;
-        bool is_deleted = alg_hnsw->isMarkedDeleted(i);
+        bool is_deleted = alg_hnsw->isMarkedDeleted(old_label);
         alg_hnsw->updateLabel(old_label, new_label);
         if (is_deleted) {
             REQUIRE(alg_hnsw->getDeletedElements().count(old_label) == 0);
             REQUIRE(alg_hnsw->getDeletedElements().count(new_label) != 0);
+            REQUIRE(alg_hnsw->getDeletedElements()[new_label] == old_label);
         } else {
             REQUIRE(not alg_hnsw->isValidLabel(old_label));
             REQUIRE(alg_hnsw->isValidLabel(new_label));
