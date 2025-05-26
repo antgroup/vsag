@@ -50,13 +50,11 @@ InnerProductDistance(const void* pVect1, const void* pVect2, const void* qty_ptr
 
 float
 INT8InnerProduct(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
-    std::printf("INT8InnerProduct\n");  
     return generic::INT8InnerProduct(pVect1v, pVect2v, qty_ptr); 
 }
 
 float
 INT8InnerProductDistance(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
-    std::printf("INT8InnerProductDistance\n");  
     return -neon::INT8InnerProduct(pVect1v, pVect2v, qty_ptr);
 }
 
@@ -564,7 +562,6 @@ FP16ComputeL2Sqr(const uint8_t* query, const uint8_t* codes, uint64_t dim) {
     }
     return vaddvq_f32(res.val[0]);
 #else
-    std::printf("FP16ComputeL2Sqr\n"); 
     return generic::FP16ComputeL2Sqr(query, codes, dim);
 #endif
 }
@@ -744,7 +741,6 @@ SQ4ComputeIP(const float* query,
              const float* lower_bound,
              const float* diff,
              uint64_t dim) {
-    std::printf("SQ4ComputeIP\n");
     return generic::SQ4ComputeIP(query, codes, lower_bound, diff, dim);
 }
 
@@ -754,7 +750,6 @@ SQ4ComputeL2Sqr(const float* query,
                 const float* lower_bound,
                 const float* diff,
                 uint64_t dim) {
-    std::printf("SQ4ComputeL2Sqr\n");
     return generic::SQ4ComputeL2Sqr(query, codes, lower_bound, diff, dim);
 }
 
@@ -764,7 +759,6 @@ SQ4ComputeCodesIP(const uint8_t* codes1,
                   const float* lower_bound,
                   const float* diff,
                   uint64_t dim) {
-    std::printf("SQ4ComputeCodesIP\n");
     return generic::SQ4ComputeCodesIP(codes1, codes2, lower_bound, diff, dim);
 }
 
@@ -774,7 +768,6 @@ SQ4ComputeCodesL2Sqr(const uint8_t* codes1,
                      const float* lower_bound,
                      const float* diff,
                      uint64_t dim) {
-    std::printf("SQ4ComputeCodesL2Sqr\n");
     return generic::SQ4ComputeCodesL2Sqr(codes1, codes2, lower_bound, diff, dim);
 }
 
