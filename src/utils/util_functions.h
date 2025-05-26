@@ -79,4 +79,7 @@ check_equal_on_string_stream(std::stringstream& s1, std::stringstream& s2);
 std::vector<std::string>
 split_string(const std::string& str, const char delimiter);
 
+std::string
+get_current_time();
+
 }  // namespace vsag
