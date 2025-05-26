@@ -555,4 +555,32 @@ PQFastScanLookUp32(const uint8_t* lookup_table,
     }
 }
 
+void
+BitAnd(const uint8_t* x, const uint8_t* y, const uint64_t num_byte, uint8_t* result) {
+    for (uint64_t i = 0; i < num_byte; i++) {
+        result[i] = x[i] & y[i];
+    }
+}
+
+void
+BitOr(const uint8_t* x, const uint8_t* y, const uint64_t num_byte, uint8_t* result) {
+    for (uint64_t i = 0; i < num_byte; i++) {
+        result[i] = x[i] | y[i];
+    }
+}
+
+void
+BitXor(const uint8_t* x, const uint8_t* y, const uint64_t num_byte, uint8_t* result) {
+    for (uint64_t i = 0; i < num_byte; i++) {
+        result[i] = x[i] ^ y[i];
+    }
+}
+
+void
+BitNot(const uint8_t* x, const uint64_t num_byte, uint8_t* result) {
+    for (uint64_t i = 0; i < num_byte; i++) {
+        result[i] = ~x[i];
+    }
+}
+
 }  // namespace vsag::generic

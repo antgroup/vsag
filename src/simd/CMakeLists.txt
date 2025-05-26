@@ -7,6 +7,7 @@ set (SIMD_SRCS
         simd.cpp
         simd_status.cpp
         basic_func.cpp
+        bit_simd.cpp
         fp32_simd.cpp
         fp16_simd.cpp
         bf16_simd.cpp

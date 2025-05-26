@@ -894,4 +894,98 @@ PQFastScanLookUp32(const uint8_t* lookup_table,
 #endif
 }
 
+void
+BitAnd(const uint8_t* x, const uint8_t* y, const uint64_t num_byte, uint8_t* result) {
+#if defined(ENABLE_AVX512)
+    if (num_byte == 0) {
+        return;
+    }
+    if (num_byte < 64) {
+        return avx2::BitAnd(x, y, num_byte, result);
+    }
+    int64_t i = 0;
+    for (; i + 63 < num_byte; i += 64) {
+        __m512i x_vec = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(x + i));
+        __m512i y_vec = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(y + i));
+        __m512i z_vec = _mm512_and_si512(x_vec, y_vec);
+        _mm512_storeu_si512(reinterpret_cast<__m512i*>(result + i), z_vec);
+    }
+    if (i < num_byte) {
+        avx2::BitAnd(x + i, y + i, num_byte - i, result + i);
+    }
+#else
+    return avx2::BitAnd(x, y, num_byte, result);
+#endif
+}
+
+void
+BitOr(const uint8_t* x, const uint8_t* y, const uint64_t num_byte, uint8_t* result) {
+#if defined(ENABLE_AVX512)
+    if (num_byte == 0) {
+        return;
+    }
+    if (num_byte < 64) {
+        return avx2::BitOr(x, y, num_byte, result);
+    }
+    int64_t i = 0;
+    for (; i + 63 < num_byte; i += 64) {
+        __m512i x_vec = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(x + i));
+        __m512i y_vec = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(y + i));
+        __m512i z_vec = _mm512_or_si512(x_vec, y_vec);
+        _mm512_storeu_si512(reinterpret_cast<__m512i*>(result + i), z_vec);
+    }
+    if (i < num_byte) {
+        avx2::BitOr(x + i, y + i, num_byte - i, result + i);
+    }
+#else
+    return avx2::BitOr(x, y, num_byte, result);
+#endif
+}
+
+void
+BitXor(const uint8_t* x, const uint8_t* y, const uint64_t num_byte, uint8_t* result) {
+#if defined(ENABLE_AVX512)
+    if (num_byte == 0) {
+        return;
+    }
+    if (num_byte < 64) {
+        return avx2::BitXor(x, y, num_byte, result);
+    }
+    int64_t i = 0;
+    for (; i + 63 < num_byte; i += 64) {
+        __m512i x_vec = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(x + i));
+        __m512i y_vec = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(y + i));
+        __m512i z_vec = _mm512_xor_si512(x_vec, y_vec);
+        _mm512_storeu_si512(reinterpret_cast<__m512i*>(result + i), z_vec);
+    }
+    if (i < num_byte) {
+        avx2::BitXor(x + i, y + i, num_byte - i, result + i);
+    }
+#else
+    return avx2::BitXor(x, y, num_byte, result);
+#endif
+}
+
+void
+BitNot(const uint8_t* x, const uint64_t num_byte, uint8_t* result) {
+#if defined(ENABLE_AVX512)
+    if (num_byte == 0) {
+        return;
+    }
+    if (num_byte < 64) {
+        return avx2::BitNot(x, num_byte, result);
+    }
+    int64_t i = 0;
+    for (; i + 63 < num_byte; i += 64) {
+        __m512i x_vec = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(x + i));
+        __m512i z_vec = _mm512_xor_si512(x_vec, _mm512_set1_epi8(0xFF));
+        _mm512_storeu_si512(reinterpret_cast<__m512i*>(result + i), z_vec);
+    }
+    if (i < num_byte) {
+        avx2::BitNot(x + i, num_byte - i, result + i);
+    }
+#else
+    return avx2::BitNot(x, num_byte, result);
+#endif
+}
 }  // namespace vsag::avx512
