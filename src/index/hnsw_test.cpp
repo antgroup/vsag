@@ -1054,3 +1054,53 @@ TEST_CASE("extract/set data and graph", "[ut][hnsw]") {
     float recall = correct / (float)num_elements;
     REQUIRE(recall > 0.99);
 }
+
+TEST_CASE("update mark-deleted vector", "[ut][hnsw]") {
+    logger::set_level(logger::level::debug);
+
+    // parameters
+    int dim = 128;
+    int base_size = 1000;
+    int delete_size = 500;
+    int update_size = 500;
+
+    // create hnsw
+    hnswlib::L2Space space(dim);
+    DefaultAllocator allocator;
+    auto* alg_hnsw = new hnswlib::HierarchicalNSW(&space, 100, &allocator);
+    alg_hnsw->init_memory_space();
+
+    // data and build index
+    auto [base_ids, base_vectors] = fixtures::generate_ids_and_vectors(base_size, dim);
+    for (auto i = 0; i < base_size; i++) {
+        alg_hnsw->addPoint(base_vectors.data() + i * dim, base_ids[i]);
+    }
+
+    // start remove
+    for (auto i = 0; i < delete_size; i++) {
+        REQUIRE(alg_hnsw->getCurrentElementCount() == base_size);
+        REQUIRE(alg_hnsw->getDeletedCount() == i);
+        REQUIRE(alg_hnsw->getDeletedElements().size() == i);
+
+        alg_hnsw->markDelete(base_ids[i]);
+
+        REQUIRE(alg_hnsw->getDeletedElements().count(base_ids[i]) != 0);
+    }
+
+    // update
+    for (auto i = 0; i < update_size; i++) {
+        auto old_label = base_ids[i] + delete_size / 2;
+        auto new_label = old_label + base_size;
+        bool is_deleted = alg_hnsw->isMarkedDeleted(i);
+        alg_hnsw->updateLabel(old_label, new_label);
+        if (is_deleted) {
+            REQUIRE(alg_hnsw->getDeletedElements().count(old_label) == 0);
+            REQUIRE(alg_hnsw->getDeletedElements().count(new_label) != 0);
+        } else {
+            REQUIRE(not alg_hnsw->isValidLabel(old_label));
+            REQUIRE(alg_hnsw->isValidLabel(new_label));
+        }
+    }
+
+    delete alg_hnsw;
+}

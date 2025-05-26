@@ -44,7 +44,6 @@
 #include "vsag/dataset.h"
 #include "vsag/iterator_context.h"
 namespace hnswlib {
-using InnerIdType = vsag::InnerIdType;
 using linklistsizeint = unsigned int;
 using reverselinklist = vsag::UnorderedSet<uint32_t>;
 struct CompareByFirst {
@@ -128,8 +127,9 @@ private:
     // flag to replace deleted elements (marked as deleted) during insertion
     bool allow_replace_deleted_{false};
 
-    std::mutex deleted_elements_lock_{};                // lock for deleted_elements_
-    vsag::UnorderedSet<InnerIdType> deleted_elements_;  // contains internal ids of deleted elements
+    std::mutex deleted_elements_lock_{};  // lock for deleted_elements_
+    vsag::UnorderedMap<LabelType, InnerIdType>
+        deleted_elements_;  // contains labels and internal ids of deleted elements
 
 public:
     HierarchicalNSW(SpaceInterface* s,
@@ -141,7 +141,7 @@ public:
                     bool normalize = false,
                     size_t block_size_limit = 128 * 1024 * 1024,
                     size_t random_seed = 100,
-                    bool allow_replace_deleted = false);
+                    bool allow_replace_deleted = true);
 
     ~HierarchicalNSW() override;
 
@@ -243,6 +243,11 @@ public:
     size_t
     getDeletedCount() override {
         return num_deleted_;
+    }
+
+    vsag::UnorderedMap<LabelType, InnerIdType>
+    getDeletedElements() override {
+        return deleted_elements_;
     }
 
     MaxHeap
