@@ -260,7 +260,7 @@ KMeansCluster::find_nearest_one_with_hgraph(const float* query,
                 ->Dim(this->dim_);
             auto ret = hgraph->KnnSearch(q, 1, search_param, filter);
             labels[j] = static_cast<int32_t>(ret->GetIds()[0]);
-            errs[j] = static_cast<int32_t>(ret->GetDistances()[0]);
+            errs[j] = ret->GetDistances()[0];
         }
     };
     std::vector<std::future<void>> futures;
