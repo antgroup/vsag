@@ -2,7 +2,10 @@
 set (MOCK_SRCS
   vsag/simpleflat.cpp
   vsag/factory.cpp
-  ../src/bitset_impl.cpp
+  ../src/impl/bitset/bitset.cpp
+  ../src/impl/bitset/computable_bitset.cpp
+  ../src/impl/bitset/sparse_bitset.cpp
+  ../src/impl/bitset/fast_bitset.cpp
   ../src/constants.cpp
   ../src/dataset_impl.cpp
 )
@@ -10,8 +13,8 @@ set (MOCK_SRCS
 add_library (vsag_mockimpl SHARED ${MOCK_SRCS})
 add_library (vsag_mockimpl_static STATIC ${MOCK_SRCS})
 
-target_link_libraries (vsag_mockimpl roaring)
-target_link_libraries (vsag_mockimpl_static roaring)
+target_link_libraries (vsag_mockimpl roaring fmt::fmt-header-only)
+target_link_libraries (vsag_mockimpl_static roaring fmt::fmt-header-only)
 add_dependencies (vsag_mockimpl version_mockimpl roaring)
 add_dependencies (vsag_mockimpl_static version_mockimpl roaring)
 

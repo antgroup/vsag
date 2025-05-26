@@ -13,19 +13,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "bitset_impl.h"
+#include "vsag/bitset.h"
 
 #include <cstdint>
 #include <functional>
-#include <mutex>
 #include <random>
-#include <sstream>
+
+#include "computable_bitset.h"
 
 namespace vsag {
 
 BitsetPtr
 Bitset::Random(int64_t length) {
-    auto bitset = std::make_shared<BitsetImpl>();
+    auto bitset = ComputableBitset::MakeInstance(ComputableBitsetType::SparseBitset);
     static auto gen =
         std::bind(std::uniform_int_distribution<>(0, 1),  // NOLINT(modernize-avoid-bind)
                   std::default_random_engine());
@@ -37,33 +37,6 @@ Bitset::Random(int64_t length) {
 
 BitsetPtr
 Bitset::Make() {
-    return std::make_shared<BitsetImpl>();
+    return ComputableBitset::MakeInstance(ComputableBitsetType::SparseBitset);
 }
-
-void
-BitsetImpl::Set(int64_t pos, bool value) {
-    std::lock_guard<std::mutex> lock(mutex_);
-    if (value) {
-        r_.add(pos);
-    } else {
-        r_.remove(pos);
-    }
-}
-
-bool
-BitsetImpl::Test(int64_t pos) {
-    std::lock_guard<std::mutex> lock(mutex_);
-    return r_.contains(pos);
-}
-
-uint64_t
-BitsetImpl::Count() {
-    return r_.cardinality();
-}
-
-std::string
-BitsetImpl::Dump() {
-    return r_.toString();
-}
-
 }  // namespace vsag

@@ -222,6 +222,7 @@ private:
     mutable bool use_reorder_{false};
     bool use_elp_optimizer_{false};
     bool ignore_reorder_{false};
+    bool build_by_base_{false};
 
     BasicSearcherPtr searcher_;
 
