@@ -768,4 +768,99 @@ PQFastScanLookUp32(const uint8_t* lookup_table,
 #endif
 }
 
+void
+BitAnd(const uint8_t* x, const uint8_t* y, const uint64_t num_byte, uint8_t* result) {
+#if defined(ENABLE_AVX)
+    if (num_byte == 0) {
+        return;
+    }
+    if (num_byte < 32) {
+        return sse::BitAnd(x, y, num_byte, result);
+    }
+    int64_t i = 0;
+    for (; i + 31 < num_byte; i += 32) {
+        __m256 x_vec = _mm256_loadu_ps(reinterpret_cast<const float*>(x + i));
+        __m256 y_vec = _mm256_loadu_ps(reinterpret_cast<const float*>(y + i));
+        __m256 z_vec = _mm256_and_ps(x_vec, y_vec);
+        _mm256_storeu_ps(reinterpret_cast<float*>(result + i), z_vec);
+    }
+    if (i < num_byte) {
+        sse::BitAnd(x + i, y + i, num_byte - i, result + i);
+    }
+#else
+    return sse::BitAnd(x, y, num_byte, result);
+#endif
+}
+
+void
+BitOr(const uint8_t* x, const uint8_t* y, const uint64_t num_byte, uint8_t* result) {
+#if defined(ENABLE_AVX)
+    if (num_byte == 0) {
+        return;
+    }
+    if (num_byte < 32) {
+        return sse::BitOr(x, y, num_byte, result);
+    }
+    int64_t i = 0;
+    for (; i + 31 < num_byte; i += 32) {
+        __m256 x_vec = _mm256_loadu_ps(reinterpret_cast<const float*>(x + i));
+        __m256 y_vec = _mm256_loadu_ps(reinterpret_cast<const float*>(y + i));
+        __m256 z_vec = _mm256_or_ps(x_vec, y_vec);
+        _mm256_storeu_ps(reinterpret_cast<float*>(result + i), z_vec);
+    }
+    if (i < num_byte) {
+        sse::BitOr(x + i, y + i, num_byte - i, result + i);
+    }
+#else
+    return sse::BitOr(x, y, num_byte, result);
+#endif
+}
+
+void
+BitXor(const uint8_t* x, const uint8_t* y, const uint64_t num_byte, uint8_t* result) {
+#if defined(ENABLE_AVX)
+    if (num_byte == 0) {
+        return;
+    }
+    if (num_byte < 32) {
+        return sse::BitXor(x, y, num_byte, result);
+    }
+    int64_t i = 0;
+    for (; i + 31 < num_byte; i += 32) {
+        __m256 x_vec = _mm256_loadu_ps(reinterpret_cast<const float*>(x + i));
+        __m256 y_vec = _mm256_loadu_ps(reinterpret_cast<const float*>(y + i));
+        __m256 z_vec = _mm256_xor_ps(x_vec, y_vec);
+        _mm256_storeu_ps(reinterpret_cast<float*>(result + i), z_vec);
+    }
+    if (i < num_byte) {
+        sse::BitXor(x + i, y + i, num_byte - i, result + i);
+    }
+#else
+    return sse::BitXor(x, y, num_byte, result);
+#endif
+}
+
+void
+BitNot(const uint8_t* x, const uint64_t num_byte, uint8_t* result) {
+#if defined(ENABLE_AVX)
+    if (num_byte == 0) {
+        return;
+    }
+    if (num_byte < 32) {
+        return sse::BitNot(x, num_byte, result);
+    }
+    int64_t i = 0;
+    __m256 all_one = _mm256_castsi256_ps(_mm256_set1_epi32(-1));
+    for (; i + 31 < num_byte; i += 32) {
+        __m256 x_vec = _mm256_loadu_ps(reinterpret_cast<const float*>(x + i));
+        __m256 z_vec = _mm256_xor_ps(x_vec, all_one);
+        _mm256_storeu_ps(reinterpret_cast<float*>(result + i), z_vec);
+    }
+    if (i < num_byte) {
+        sse::BitNot(x + i, num_byte - i, result + i);
+    }
+#else
+    return sse::BitNot(x, num_byte, result);
+#endif
+}
 }  // namespace vsag::avx
