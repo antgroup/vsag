@@ -37,6 +37,10 @@ GetBitAnd() {
 #if defined(ENABLE_SSE)
         return sse::BitAnd;
 #endif
+    } else if (SimdStatus::SupportNEON()) {
+#if defined(ENABLE_NEON)
+        return neon::BitAnd;
+#endif
     }
     return generic::BitAnd;
 }
@@ -59,6 +63,10 @@ GetBitOr() {
     } else if (SimdStatus::SupportSSE()) {
 #if defined(ENABLE_SSE)
         return sse::BitOr;
+#endif
+    } else if (SimdStatus::SupportNEON()) {
+#if defined(ENABLE_NEON)
+        return neon::BitOr;
 #endif
     }
     return generic::BitOr;
@@ -83,6 +91,10 @@ GetBitXor() {
 #if defined(ENABLE_SSE)
         return sse::BitXor;
 #endif
+    } else if (SimdStatus::SupportNEON()) {
+#if defined(ENABLE_NEON)
+        return neon::BitXor;
+#endif
     }
     return generic::BitXor;
 }
@@ -105,6 +117,10 @@ GetBitNot() {
     } else if (SimdStatus::SupportSSE()) {
 #if defined(ENABLE_SSE)
         return sse::BitNot;
+#endif
+    } else if (SimdStatus::SupportNEON()) {
+#if defined(ENABLE_NEON)
+        return neon::BitNot;
 #endif
     }
     return generic::BitNot;
