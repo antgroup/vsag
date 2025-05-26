@@ -35,7 +35,7 @@ public:
         uint64_t count,
         int iter = 25,
         double* err = nullptr,
-        bool use_mse_for_convergence = true,
+        bool use_mse_for_convergence = false,
         float threshold = 1e-6F);
 
 public:
