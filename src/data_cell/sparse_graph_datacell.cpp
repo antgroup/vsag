@@ -63,6 +63,14 @@ SparseGraphDataCell::InsertNeighborsById(InnerIdType id, const Vector<InnerIdTyp
     if (is_support_delete_) {
         iter->second->resize(size);
         for (int i = 0; i < size; ++i) {
+#if defined(_DEBUG) || defined(DEBUG)
+            if (neighbor_ids[i] >= node_version_.size()) {
+                throw VsagException(ErrorType::INTERNAL_ERROR,
+                                    "incorrect id {} >= node_version.size()",
+                                    neighbor_ids[i],
+                                    node_version_.size());
+            }
+#endif
             iter->second->at(i) = (neighbor_ids[i] | (node_version_[neighbor_ids[i]] << id_bit_));
         }
     } else {
