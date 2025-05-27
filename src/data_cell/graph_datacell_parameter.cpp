@@ -32,6 +32,7 @@ GraphDataCellParameter::FromJson(const JsonType& json) {
         this->init_max_capacity_ = json[GRAPH_PARAM_INIT_MAX_CAPACITY];
     }
 }
+
 JsonType
 GraphDataCellParameter::ToJson() {
     JsonType json;
