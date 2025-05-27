@@ -33,6 +33,7 @@
 namespace hnswlib {
 
 using LabelType = vsag::LabelType;
+using InnerIdType = vsag::InnerIdType;
 
 template <typename dist_t>
 class AlgorithmInterface {
@@ -105,6 +106,9 @@ public:
 
     virtual size_t
     getDeletedCount() = 0;
+
+    virtual vsag::UnorderedMap<LabelType, InnerIdType>
+    getDeletedElements() = 0;
 
     virtual bool
     isValidLabel(LabelType label) = 0;
