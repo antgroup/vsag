@@ -13,28 +13,26 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#pragma once
+#include "compressed_graph_datacell_parameter.h"
 
-#include "graph_interface_parameter.h"
-#include "io/io_parameter.h"
+#include <catch2/catch_test_macros.hpp>
+
+#include "parameter_test.h"
 
 namespace vsag {
-class GraphDataCellParameter : public GraphInterfaceParameter {
-public:
-    GraphDataCellParameter() : GraphInterfaceParameter(GraphStorageTypes::GRAPH_STORAGE_TYPE_FLAT) {
-    }
 
-    void
-    FromJson(const JsonType& json) override;
+TEST_CASE("CompressedGraphDatacellParameter ToJson Test",
+          "[ut][CompressedGraphDatacellParameter]") {
+    std::string param_str = R"(
+        {
+            "max_degree": 100,
+            "graph_storage_type": "compressed"
+        }
+        )";
+    auto param = std::make_shared<CompressedGraphDatacellParameter>();
+    auto json = JsonType::parse(param_str);
+    param->FromJson(json);
+    ParameterTest::TestToJson(param);
+}
 
-    JsonType
-    ToJson() override;
-
-public:
-    IOParamPtr io_parameter_{nullptr};
-
-    uint64_t init_max_capacity_{100};
-};
-
-using GraphDataCellParamPtr = std::shared_ptr<GraphDataCellParameter>;
 }  // namespace vsag

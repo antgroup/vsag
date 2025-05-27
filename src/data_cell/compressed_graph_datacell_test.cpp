@@ -41,13 +41,29 @@ TEST_CASE("CompressedGraphDataCell Basic Test", "[ut][CompressedGraphDataCell]")
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     auto dim = GENERATE(32, 64);
     auto max_degree = GENERATE(5, 12, 32, 64, 128);
-    auto max_capacity = 10000;
 
+    // raw construction
     IndexCommonParam common_param;
     common_param.dim_ = dim;
     common_param.allocator_ = allocator;
+
     auto graph_param = std::make_shared<CompressedGraphDatacellParameter>();
     graph_param->max_degree_ = max_degree;
     graph_param->graph_storage_type_ = GraphStorageTypes::GRAPH_STORAGE_TYPE_COMPRESSED;
+    TestCompressedGraphDataCell(graph_param, common_param);
+
+    // parameter construction
+    constexpr const char* graph_param_temp =
+        R"(
+        {{
+            "max_degree": {},
+            "graph_storage_type": "{}"
+        }}
+        )";
+
+    auto param_str = fmt::format(graph_param_temp, max_degree, GRAPH_STORAGE_TYPE_COMPRESSED);
+    auto param_json = JsonType::parse(param_str);
+    graph_param->FromJson(param_json);
+    REQUIRE(graph_param->graph_storage_type_ == GraphStorageTypes::GRAPH_STORAGE_TYPE_COMPRESSED);
     TestCompressedGraphDataCell(graph_param, common_param);
 }
