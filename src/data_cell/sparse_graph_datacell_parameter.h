@@ -37,9 +37,6 @@ public:
         json[GRAPH_PARAM_MAX_DEGREE] = this->max_degree_;
         return json;
     }
-
-public:
-    uint64_t max_degree_{64};
 };
 
 using SparseGraphDatacellParamPtr = std::shared_ptr<SparseGraphDatacellParameter>;

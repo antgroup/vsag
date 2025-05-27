@@ -36,6 +36,8 @@ public:
 public:
     GraphStorageTypes graph_storage_type_{GraphStorageTypes::GRAPH_STORAGE_TYPE_FLAT};
 
+    uint64_t max_degree_{64};
+
 protected:
     explicit GraphInterfaceParameter(GraphStorageTypes graph_type)
         : graph_storage_type_(graph_type){};

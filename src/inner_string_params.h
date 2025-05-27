@@ -81,6 +81,10 @@ const char* const BUILD_EF_CONSTRUCTION = "ef_construction";
 const char* const SPARSE_NEED_SORT = "need_sort";
 const char* const GRAPH_TYPE_KEY = "graph_type";
 
+const char* const GRAPH_STORAGE_TYPE_KEY = "graph_storage_type";
+const char* const GRAPH_STORAGE_TYPE_COMPRESSED = "compressed";
+const char* const GRAPH_STORAGE_TYPE_FLAT = "flat";
+
 const char* const BUCKET_PARAMS_KEY = "buckets_params";
 const char* const NO_BUILD_LEVELS = "no_build_levels";
 
@@ -123,6 +127,9 @@ const std::unordered_map<std::string, std::string> DEFAULT_MAP = {
     {"PRODUCT_QUANTIZATION_DIM", PRODUCT_QUANTIZATION_DIM},
     {"PRODUCT_QUANTIZATION_BITS", PRODUCT_QUANTIZATION_BITS},
     {"GRAPH_TYPE_NSW", GRAPH_TYPE_NSW},
+    {"GRAPH_STORAGE_TYPE_KEY", GRAPH_STORAGE_TYPE_KEY},
+    {"GRAPH_STORAGE_TYPE_FLAT", GRAPH_STORAGE_TYPE_FLAT},
+    {"GRAPH_STORAGE_TYPE_COMPRESSED", GRAPH_STORAGE_TYPE_COMPRESSED},
     {"QUANTIZATION_PARAMS_KEY", QUANTIZATION_PARAMS_KEY},
     {"GRAPH_PARAM_MAX_DEGREE", GRAPH_PARAM_MAX_DEGREE},
     {"GRAPH_PARAM_INIT_MAX_CAPACITY", GRAPH_PARAM_INIT_MAX_CAPACITY},

@@ -15,6 +15,7 @@
 
 #include "hgraph.h"
 
+#include <data_cell/compressed_graph_datacell_parameter.h>
 #include <fmt/format-inl.h>
 
 #include <memory>
@@ -1005,6 +1006,7 @@ static const std::string HGRAPH_PARAMS_TEMPLATE =
                 "{IO_FILE_PATH}": "{DEFAULT_FILE_PATH_VALUE}"
             },
             "{GRAPH_TYPE_KEY}": "{GRAPH_TYPE_NSW}",
+            "{GRAPH_STORAGE_TYPE_KEY}": "{GRAPH_STORAGE_TYPE_FLAT}",
             "{ODESCENT_PARAMETER_BUILD_BLOCK_SIZE}": 10000,
             "{ODESCENT_PARAMETER_MIN_IN_DEGREE}": 1,
             "{ODESCENT_PARAMETER_ALPHA}": 1.2,
@@ -1159,6 +1161,13 @@ HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
             },
         },
         {
+            HGRAPH_GRAPH_STORAGE_TYPE,
+            {
+                HGRAPH_GRAPH_KEY,
+                GRAPH_STORAGE_TYPE_KEY,
+            },
+        },
+        {
             ODESCENT_PARAMETER_ALPHA,
             {
                 HGRAPH_GRAPH_KEY,
@@ -1245,10 +1254,8 @@ HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
     auto hgraph_parameter = std::make_shared<HGraphParameter>();
     hgraph_parameter->data_type = common_param.data_type_;
     hgraph_parameter->FromJson(inner_json);
+    uint64_t max_degree = hgraph_parameter->bottom_graph_param->max_degree_;
 
-    auto max_degree =
-        std::dynamic_pointer_cast<GraphDataCellParameter>(hgraph_parameter->bottom_graph_param)
-            ->max_degree_;
     auto max_degree_threshold = std::max(common_param.dim_, 128L);
     CHECK_ARGUMENT(  // NOLINT
         (4 <= max_degree) and (max_degree <= max_degree_threshold),
