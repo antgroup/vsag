@@ -22,10 +22,8 @@
 #include "utils/standard_heap.h"
 #include "utils/util_functions.h"
 
-#define MAX_TRAIN_SIZE 65536L
-
 namespace vsag {
-
+static constexpr const int64_t MAX_TRAIN_SIZE = 65536L;
 static constexpr const char* IVF_PARAMS_TEMPLATE =
     R"(
     {
@@ -192,7 +190,7 @@ IVF::Train(const DatasetPtr& data) {
         return;
     }
     partition_strategy_->Train(data);
-    auto data_ptr = data->GetFloat32Vectors();
+    const auto* data_ptr = data->GetFloat32Vectors();
     Vector<float> train_data_buffer(allocator_);
     auto num_element = std::min(data->GetNumElements(), MAX_TRAIN_SIZE);
     if (use_residual_) {
@@ -235,7 +233,7 @@ IVF::Add(const DatasetPtr& base) {
     Vector<float> residual_data(dim_, allocator_);
     Vector<float> centroid(dim_, allocator_);
     for (int64_t i = 0; i < num_element; ++i) {
-        auto data_ptr = vectors + i * dim_;
+        const auto* data_ptr = vectors + i * dim_;
         if (use_residual_) {
             partition_strategy_->GetCentroid(buckets[i], centroid);
             if (metric_ == MetricType::METRIC_TYPE_COSINE) {
@@ -403,7 +401,7 @@ template <InnerSearchMode mode>
 DistHeapPtr
 IVF::search(const DatasetPtr& query, const InnerSearchParam& param) const {
     auto search_result = std::make_shared<StandardHeap<true, false>>(allocator_, -1);
-    auto query_data = query->GetFloat32Vectors();
+    const auto* query_data = query->GetFloat32Vectors();
     Vector<float> normalize_data(dim_, allocator_);
     if (use_residual_ && metric_ == MetricType::METRIC_TYPE_COSINE) {
         Normalize(query_data, normalize_data.data(), dim_);
