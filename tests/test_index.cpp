@@ -1236,26 +1236,29 @@ TestIndex::TestEstimateMemory(const std::string& index_name,
         REQUIRE(index2->GetNumElements() == 0);
         fixtures::TempDir dir("index");
         auto path = dir.GenerateRandomFile();
-        std::ofstream outf(path, std::ios::binary);
         if (index1->CheckFeature(vsag::SUPPORT_ESTIMATE_MEMORY)) {
             auto data_size = dataset->base_->GetNumElements();
             auto estimate_memory = index1->EstimateMemory(data_size);
             auto build_index = index2->Build(dataset->base_);
             REQUIRE(build_index.has_value());
+            std::ofstream outf(path, std::ios::binary);
             index2->Serialize(outf);
+            outf.close();
             std::ifstream inf(path, std::ios::binary);
             index1->Deserialize(inf);
             auto real_memory = allocator->GetCurrentMemory();
             if (estimate_memory <= static_cast<uint64_t>(real_memory * 0.8) or
                 estimate_memory >= static_cast<uint64_t>(real_memory * 1.2)) {
-                WARN("estimate_memory failed");
+                WARN(fmt::format("estimate_memory({}) is not in range [{}, {}]",
+                                 estimate_memory,
+                                 static_cast<uint64_t>(real_memory * 0.8),
+                                 static_cast<uint64_t>(real_memory * 1.2)));
             }
 
             REQUIRE(estimate_memory >= static_cast<uint64_t>(real_memory * 0.2));
             REQUIRE(estimate_memory <= static_cast<uint64_t>(real_memory * 3.2));
             inf.close();
         }
-        outf.close();
     }
 }
 
