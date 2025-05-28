@@ -1104,7 +1104,8 @@ HNSW::init_feature_list() {
     // other
     feature_list_.SetFeatures({IndexFeature::SUPPORT_CAL_DISTANCE_BY_ID,
                                IndexFeature::SUPPORT_CHECK_ID_EXIST,
-                               IndexFeature::SUPPORT_MERGE_INDEX});
+                               IndexFeature::SUPPORT_MERGE_INDEX,
+                               IndexFeature::SUPPORT_ESTIMATE_MEMORY});
 }
 
 bool
@@ -1284,6 +1285,11 @@ HNSW::get_memory_usage() const {
     }
 
     return static_cast<int64_t>(alg_hnsw_->calcSerializeSize());
+}
+
+uint64_t
+HNSW::estimate_memory(uint64_t num_elements) const {
+    return alg_hnsw_->estimateMemory(num_elements);
 }
 
 template tl::expected<DatasetPtr, Error>
