@@ -111,7 +111,7 @@ GetFP32ComputeL2SqrBatch4() {
 }
 FP32ComputeBatch4Type FP32ComputeL2SqrBatch4 = GetFP32ComputeL2SqrBatch4();
 
-static FP32SubType
+static FP32ArithmeticType
 GetFP32Sub() {
     if (SimdStatus::SupportAVX512()) {
 #if defined(ENABLE_AVX512)
@@ -132,5 +132,98 @@ GetFP32Sub() {
     }
     return generic::FP32Sub;
 }
-FP32SubType FP32Sub = GetFP32Sub();
+FP32ArithmeticType FP32Sub = GetFP32Sub();
+
+static FP32ArithmeticType
+GetFP32Add() {
+    if (SimdStatus::SupportAVX512()) {
+#if defined(ENABLE_AVX512)
+        return avx512::FP32Add;
+#endif
+    } else if (SimdStatus::SupportAVX2()) {
+#if defined(ENABLE_AVX2)
+        return avx2::FP32Add;
+#endif
+    } else if (SimdStatus::SupportAVX()) {
+#if defined(ENABLE_AVX)
+        return avx::FP32Add;
+#endif
+    } else if (SimdStatus::SupportSSE()) {
+#if defined(ENABLE_SSE)
+        return sse::FP32Add;
+#endif
+    }
+    return generic::FP32Add;
+}
+FP32ArithmeticType FP32Add = GetFP32Add();
+
+static FP32ArithmeticType
+GetFP32Mul() {
+    if (SimdStatus::SupportAVX512()) {
+#if defined(ENABLE_AVX512)
+        return avx512::FP32Mul;
+#endif
+    } else if (SimdStatus::SupportAVX2()) {
+#if defined(ENABLE_AVX2)
+        return avx2::FP32Mul;
+#endif
+    } else if (SimdStatus::SupportAVX()) {
+#if defined(ENABLE_AVX)
+        return avx::FP32Mul;
+#endif
+    } else if (SimdStatus::SupportSSE()) {
+#if defined(ENABLE_SSE)
+        return sse::FP32Mul;
+#endif
+    }
+    return generic::FP32Mul;
+}
+FP32ArithmeticType FP32Mul = GetFP32Mul();
+
+static FP32ArithmeticType
+GetFP32Div() {
+    if (SimdStatus::SupportAVX512()) {
+#if defined(ENABLE_AVX512)
+        return avx512::FP32Div;
+#endif
+    } else if (SimdStatus::SupportAVX2()) {
+#if defined(ENABLE_AVX2)
+        return avx2::FP32Div;
+#endif
+    } else if (SimdStatus::SupportAVX()) {
+#if defined(ENABLE_AVX)
+        return avx::FP32Div;
+#endif
+    } else if (SimdStatus::SupportSSE()) {
+#if defined(ENABLE_SSE)
+        return sse::FP32Div;
+#endif
+    }
+    return generic::FP32Div;
+}
+FP32ArithmeticType FP32Div = GetFP32Div();
+
+static FP32ReduceType
+GetFP32ReduceAdd() {
+    if (SimdStatus::SupportAVX512()) {
+#if defined(ENABLE_AVX512)
+        return avx512::FP32ReduceAdd;
+#endif
+    } else if (SimdStatus::SupportAVX2()) {
+#if defined(ENABLE_AVX2)
+        return avx2::FP32ReduceAdd;
+#endif
+    } else if (SimdStatus::SupportAVX()) {
+#if defined(ENABLE_AVX)
+        return avx::FP32ReduceAdd;
+#endif
+    } else if (SimdStatus::SupportSSE()) {
+#if defined(ENABLE_SSE)
+        return sse::FP32ReduceAdd;
+#endif
+    }
+    return generic::FP32ReduceAdd;
+}
+FP32ReduceType FP32ReduceAdd = GetFP32ReduceAdd();
+
 }  // namespace vsag
