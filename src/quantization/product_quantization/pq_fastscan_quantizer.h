@@ -119,9 +119,9 @@ public:
     Vector<float> codebooks_;
 };
 
-template <MetricType Metric>
-PQFastScanQuantizer<Metric>::PQFastScanQuantizer(int dim, int64_t pq_dim, Allocator* allocator)
-    : Quantizer<PQFastScanQuantizer<Metric>>(dim, allocator),
+template <MetricType metric>
+PQFastScanQuantizer<metric>::PQFastScanQuantizer(int dim, int64_t pq_dim, Allocator* allocator)
+    : Quantizer<PQFastScanQuantizer<metric>>(dim, allocator),
       pq_dim_(pq_dim),
       codebooks_(allocator) {
     if (dim % pq_dim != 0) {
@@ -131,6 +131,7 @@ PQFastScanQuantizer<Metric>::PQFastScanQuantizer(int dim, int64_t pq_dim, Alloca
     }
     this->code_size_ = (this->pq_dim_ + 1) / 2;
     this->subspace_dim_ = this->dim_ / pq_dim;
+    this->metric_ = metric;
     codebooks_.resize(this->dim_ * CENTROIDS_PER_SUBSPACE);
 }
 

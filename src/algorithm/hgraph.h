@@ -138,6 +138,9 @@ public:
         this->build_pool_->SetPoolSize(count);
     }
 
+    void
+    GetRawData(vsag::InnerIdType inner_id, uint8_t* data) const override;
+
 private:
     const void*
     get_data(const DatasetPtr& dataset, uint32_t index = 0) const {

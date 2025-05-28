@@ -112,9 +112,9 @@ public:
     Vector<float> reverse_codebooks_;
 };
 
-template <MetricType Metric>
-ProductQuantizer<Metric>::ProductQuantizer(int dim, int64_t pq_dim, Allocator* allocator)
-    : Quantizer<ProductQuantizer<Metric>>(dim, allocator),
+template <MetricType metric>
+ProductQuantizer<metric>::ProductQuantizer(int dim, int64_t pq_dim, Allocator* allocator)
+    : Quantizer<ProductQuantizer<metric>>(dim, allocator),
       pq_dim_(pq_dim),
       codebooks_(allocator),
       reverse_codebooks_(allocator) {
@@ -124,6 +124,7 @@ ProductQuantizer<Metric>::ProductQuantizer(int dim, int64_t pq_dim, Allocator* a
             fmt::format("pq_dim({}) does not divide evenly into dim({})", pq_dim, dim));
     }
     this->code_size_ = this->pq_dim_;
+    this->metric_ = metric;
     this->subspace_dim_ = this->dim_ / pq_dim;
     codebooks_.resize(this->dim_ * CENTROIDS_PER_SUBSPACE);
     reverse_codebooks_.resize(this->dim_ * CENTROIDS_PER_SUBSPACE);
