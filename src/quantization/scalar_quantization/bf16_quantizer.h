@@ -89,6 +89,7 @@ template <MetricType metric>
 BF16Quantizer<metric>::BF16Quantizer(int dim, Allocator* allocator)
     : Quantizer<BF16Quantizer<metric>>(dim, allocator) {
     this->code_size_ = dim * 2;
+    this->metric_ = metric;
 }
 
 template <MetricType metric>
