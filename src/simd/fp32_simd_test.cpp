@@ -45,7 +45,7 @@ using namespace vsag;
         }                                                                             \
     };
 
-#define TEST_FP32_SUB_ACCURACY(Func)                                                           \
+#define TEST_FP32_ARTHIMETIC_ACCURACY(Func)                                                    \
     {                                                                                          \
         std::vector<float> gt(dim, 0.0F);                                                      \
         generic::Func(vec1.data() + i * dim, vec2.data() + i * dim, gt.data(), dim);           \
@@ -176,7 +176,10 @@ TEST_CASE("FP32 SIMD Compute", "[ut][simd]") {
         for (uint64_t i = 0; i < count; ++i) {
             TEST_FP32_COMPUTE_ACCURACY(FP32ComputeIP);
             TEST_FP32_COMPUTE_ACCURACY(FP32ComputeL2Sqr);
-            TEST_FP32_SUB_ACCURACY(FP32Sub);
+            TEST_FP32_ARTHIMETIC_ACCURACY(FP32Sub);
+            TEST_FP32_ARTHIMETIC_ACCURACY(FP32Add);
+            TEST_FP32_ARTHIMETIC_ACCURACY(FP32Mul);
+            TEST_FP32_ARTHIMETIC_ACCURACY(FP32Div);
         }
         for (uint64_t i = 0; i < count; i += 4) {
             TEST_FP32_COMPUTE_ACCURACY_BATCH4(FP32ComputeIP, FP32ComputeIPBatch4);
