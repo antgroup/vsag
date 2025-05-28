@@ -292,6 +292,74 @@ FP32Sub(const float* x, const float* y, float* z, uint64_t dim) {
 #endif
 }
 
+void
+FP32Add(const float* x, const float* y, float* z, uint64_t dim) {
+#if defined(ENABLE_AVX)
+    if (dim < 8) {
+        return sse::FP32Add(x, y, z, dim);
+    }
+    int i = 0;
+    for (; i + 7 < dim; i += 8) {
+        __m256 a = _mm256_loadu_ps(x + i);
+        __m256 b = _mm256_loadu_ps(y + i);
+        __m256 c = _mm256_add_ps(a, b);
+        _mm256_storeu_ps(z + i, c);
+    }
+    if (i < dim) {
+        sse::FP32Add(x + i, y + i, z + i, dim - i);
+    }
+#else
+    sse::FP32Add(x, y, z, dim);
+#endif
+}
+
+void
+FP32Mul(const float* x, const float* y, float* z, uint64_t dim) {
+#if defined(ENABLE_AVX)
+    if (dim < 8) {
+        return sse::FP32Mul(x, y, z, dim);
+    }
+    int i = 0;
+    for (; i + 7 < dim; i += 8) {
+        __m256 a = _mm256_loadu_ps(x + i);
+        __m256 b = _mm256_loadu_ps(y + i);
+        __m256 c = _mm256_mul_ps(a, b);
+        _mm256_storeu_ps(z + i, c);
+    }
+    if (i < dim) {
+        sse::FP32Mul(x + i, y + i, z + i, dim - i);
+    }
+#else
+    sse::FP32Mul(x, y, z, dim);
+#endif
+}
+
+void
+FP32Div(const float* x, const float* y, float* z, uint64_t dim) {
+#if defined(ENABLE_AVX)
+    if (dim < 8) {
+        return sse::FP32Div(x, y, z, dim);
+    }
+    int i = 0;
+    for (; i + 7 < dim; i += 8) {
+        __m256 a = _mm256_loadu_ps(x + i);
+        __m256 b = _mm256_loadu_ps(y + i);
+        __m256 c = _mm256_div_ps(a, b);
+        _mm256_storeu_ps(z + i, c);
+    }
+    if (i < dim) {
+        sse::FP32Div(x + i, y + i, z + i, dim - i);
+    }
+#else
+    sse::FP32Div(x, y, z, dim);
+#endif
+}
+
+float
+FP32ReduceAdd(const float* x, uint64_t dim) {
+    return sse::FP32ReduceAdd(x, dim);
+}
+
 #if defined(ENABLE_AVX)
 __inline __m256i __attribute__((__always_inline__)) load_8_short(const uint16_t* data) {
     return _mm256_set_epi16(data[7],

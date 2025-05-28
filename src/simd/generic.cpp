@@ -140,6 +140,36 @@ FP32Sub(const float* x, const float* y, float* z, uint64_t dim) {
     }
 }
 
+void
+FP32Add(const float* x, const float* y, float* z, uint64_t dim) {
+    for (uint64_t i = 0; i < dim; ++i) {
+        z[i] = x[i] + y[i];
+    }
+}
+
+void
+FP32Mul(const float* x, const float* y, float* z, uint64_t dim) {
+    for (uint64_t i = 0; i < dim; ++i) {
+        z[i] = x[i] * y[i];
+    }
+}
+
+void
+FP32Div(const float* x, const float* y, float* z, uint64_t dim) {
+    for (uint64_t i = 0; i < dim; ++i) {
+        z[i] = x[i] / y[i];
+    }
+}
+
+float
+FP32ReduceAdd(const float* x, uint64_t dim) {
+    float result = 0.0F;
+    for (uint64_t i = 0; i < dim; ++i) {
+        result += x[i];
+    }
+    return result;
+}
+
 union FP32Struct {
     uint32_t int_value;
     float float_value;

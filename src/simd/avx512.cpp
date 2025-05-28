@@ -329,6 +329,74 @@ FP32Sub(const float* x, const float* y, float* z, uint64_t dim) {
 #endif
 }
 
+void
+FP32Add(const float* x, const float* y, float* z, uint64_t dim) {
+#if defined(ENABLE_AVX512)
+    if (dim < 16) {
+        return avx2::FP32Add(x, y, z, dim);
+    }
+    uint64_t i = 0;
+    for (; i + 15 < dim; i += 16) {
+        __m512 x_vec = _mm512_loadu_ps(x + i);
+        __m512 y_vec = _mm512_loadu_ps(y + i);
+        __m512 sum_vec = _mm512_add_ps(x_vec, y_vec);
+        _mm512_storeu_ps(z + i, sum_vec);
+    }
+    if (dim > i) {
+        avx2::FP32Add(x + i, y + i, z + i, dim - i);
+    }
+#else
+    return avx2::FP32Add(x, y, z, dim);
+#endif
+}
+
+void
+FP32Mul(const float* x, const float* y, float* z, uint64_t dim) {
+#if defined(ENABLE_AVX512)
+    if (dim < 16) {
+        return avx2::FP32Mul(x, y, z, dim);
+    }
+    uint64_t i = 0;
+    for (; i + 15 < dim; i += 16) {
+        __m512 x_vec = _mm512_loadu_ps(x + i);
+        __m512 y_vec = _mm512_loadu_ps(y + i);
+        __m512 mul_vec = _mm512_mul_ps(x_vec, y_vec);
+        _mm512_storeu_ps(z + i, mul_vec);
+    }
+    if (dim > i) {
+        avx2::FP32Mul(x + i, y + i, z + i, dim - i);
+    }
+#else
+    return avx2::FP32Mul(x, y, z, dim);
+#endif
+}
+
+void
+FP32Div(const float* x, const float* y, float* z, uint64_t dim) {
+#if defined(ENABLE_AVX512)
+    if (dim < 16) {
+        return avx2::FP32Div(x, y, z, dim);
+    }
+    uint64_t i = 0;
+    for (; i + 15 < dim; i += 16) {
+        __m512 x_vec = _mm512_loadu_ps(x + i);
+        __m512 y_vec = _mm512_loadu_ps(y + i);
+        __m512 div_vec = _mm512_div_ps(x_vec, y_vec);
+        _mm512_storeu_ps(z + i, div_vec);
+    }
+    if (dim > i) {
+        avx2::FP32Div(x + i, y + i, z + i, dim - i);
+    }
+#else
+    return avx2::FP32Div(x, y, z, dim);
+#endif
+}
+
+float
+FP32ReduceAdd(const float* x, uint64_t dim) {
+    return sse::FP32ReduceAdd(x, dim);
+}
+
 #if defined(ENABLE_AVX512)
 __inline __m512i __attribute__((__always_inline__)) load_16_short(const uint16_t* data) {
     __m256i bf16 = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(data));

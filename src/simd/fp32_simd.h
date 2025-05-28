@@ -49,6 +49,15 @@ FP32ComputeL2SqrBatch4(const float* query,
                        float& result4);
 void
 FP32Sub(const float* x, const float* y, float* z, uint64_t dim);
+void
+FP32Add(const float* x, const float* y, float* z, uint64_t dim);
+void
+FP32Mul(const float* x, const float* y, float* z, uint64_t dim);
+void
+FP32Div(const float* x, const float* y, float* z, uint64_t dim);
+
+float
+FP32ReduceAdd(const float* x, uint64_t dim);
 }  // namespace generic
 
 namespace sse {
@@ -80,6 +89,15 @@ FP32ComputeL2SqrBatch4(const float* query,
                        float& result4);
 void
 FP32Sub(const float* x, const float* y, float* z, uint64_t dim);
+void
+FP32Add(const float* x, const float* y, float* z, uint64_t dim);
+void
+FP32Mul(const float* x, const float* y, float* z, uint64_t dim);
+void
+FP32Div(const float* x, const float* y, float* z, uint64_t dim);
+
+float
+FP32ReduceAdd(const float* x, uint64_t dim);
 }  // namespace sse
 
 namespace avx {
@@ -111,6 +129,15 @@ FP32ComputeL2SqrBatch4(const float* query,
                        float& result4);
 void
 FP32Sub(const float* x, const float* y, float* z, uint64_t dim);
+void
+FP32Add(const float* x, const float* y, float* z, uint64_t dim);
+void
+FP32Mul(const float* x, const float* y, float* z, uint64_t dim);
+void
+FP32Div(const float* x, const float* y, float* z, uint64_t dim);
+
+float
+FP32ReduceAdd(const float* x, uint64_t dim);
 }  // namespace avx
 
 namespace avx2 {
@@ -142,6 +169,15 @@ FP32ComputeL2SqrBatch4(const float* query,
                        float& result4);
 void
 FP32Sub(const float* x, const float* y, float* z, uint64_t dim);
+void
+FP32Add(const float* x, const float* y, float* z, uint64_t dim);
+void
+FP32Mul(const float* x, const float* y, float* z, uint64_t dim);
+void
+FP32Div(const float* x, const float* y, float* z, uint64_t dim);
+
+float
+FP32ReduceAdd(const float* x, uint64_t dim);
 }  // namespace avx2
 
 namespace avx512 {
@@ -173,6 +209,15 @@ FP32ComputeL2SqrBatch4(const float* query,
                        float& result4);
 void
 FP32Sub(const float* x, const float* y, float* z, uint64_t dim);
+void
+FP32Add(const float* x, const float* y, float* z, uint64_t dim);
+void
+FP32Mul(const float* x, const float* y, float* z, uint64_t dim);
+void
+FP32Div(const float* x, const float* y, float* z, uint64_t dim);
+
+float
+FP32ReduceAdd(const float* x, uint64_t dim);
 }  // namespace avx512
 
 using FP32ComputeType = float (*)(const float* query, const float* codes, uint64_t dim);
@@ -192,6 +237,12 @@ using FP32ComputeBatch4Type = void (*)(const float* query,
 extern FP32ComputeBatch4Type FP32ComputeIPBatch4;
 extern FP32ComputeBatch4Type FP32ComputeL2SqrBatch4;
 
-using FP32SubType = void (*)(const float* x, const float* y, float* z, uint64_t dim);
-extern FP32SubType FP32Sub;
+using FP32ArithmeticType = void (*)(const float* x, const float* y, float* z, uint64_t dim);
+extern FP32ArithmeticType FP32Sub;
+extern FP32ArithmeticType FP32Add;
+extern FP32ArithmeticType FP32Mul;
+extern FP32ArithmeticType FP32Div;
+
+using FP32ReduceType = float (*)(const float* x, uint64_t dim);
+extern FP32ReduceType FP32ReduceAdd;
 }  // namespace vsag
