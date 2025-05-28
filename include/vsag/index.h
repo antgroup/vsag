@@ -15,13 +15,12 @@
 
 #pragma once
 
-#include "typing.h"
-
 #include <cstdint>
 #include <limits>
 #include <stdexcept>
 
 #include "bitset.h"
+#include "typing.h"
 #include "vsag/binaryset.h"
 #include "vsag/dataset.h"
 #include "vsag/errors.h"
