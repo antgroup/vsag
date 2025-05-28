@@ -89,6 +89,7 @@ const char* const BUCKET_PARAMS_KEY = "buckets_params";
 const char* const NO_BUILD_LEVELS = "no_build_levels";
 
 const char* const BUCKETS_COUNT_KEY = "buckets_count";
+const char* const BUCKET_USE_RESIDUAL = "use_residual";
 const char* const IVF_SEARCH_PARAM_SCAN_BUCKETS_COUNT = "scan_buckets_count";
 const char* const IVF_SEARCH_PARAM_FACTOR = "factor";
 const char* const IVF_USE_REORDER_KEY = "use_reorder";

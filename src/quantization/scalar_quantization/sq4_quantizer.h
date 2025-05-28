@@ -92,6 +92,7 @@ template <MetricType metric>
 SQ4Quantizer<metric>::SQ4Quantizer(int dim, Allocator* allocator)
     : Quantizer<SQ4Quantizer<metric>>(dim, allocator) {
     this->code_size_ = (dim + (1 << 6) - 1) >> 6 << 6;
+    this->metric_ = metric;
     lower_bound_.resize(dim, std::numeric_limits<DataType>::max());
     diff_.resize(dim, std::numeric_limits<DataType>::lowest());
 }

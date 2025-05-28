@@ -258,6 +258,12 @@ public:
         return this->label_table_->CheckLabel(id);
     }
 
+    virtual void
+    GetRawData(InnerIdType inner_id, uint8_t* data) const {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "Index doesn't support GetRawData");
+    }
+
 public:
     LabelTablePtr label_table_{nullptr};
 

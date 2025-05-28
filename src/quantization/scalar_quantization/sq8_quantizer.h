@@ -91,11 +91,12 @@ public:
     Vector<DataType> lower_bound_;
 };
 
-template <MetricType Metric>
-SQ8Quantizer<Metric>::SQ8Quantizer(int dim, Allocator* allocator)
-    : Quantizer<SQ8Quantizer<Metric>>(dim, allocator), diff_(allocator), lower_bound_(allocator) {
+template <MetricType metric>
+SQ8Quantizer<metric>::SQ8Quantizer(int dim, Allocator* allocator)
+    : Quantizer<SQ8Quantizer<metric>>(dim, allocator), diff_(allocator), lower_bound_(allocator) {
     // align 64 bytes (512 bits) to avoid illegal memory access in SIMD
     this->code_size_ = this->dim_;
+    this->metric_ = metric;
     this->diff_.resize(dim, 0);
     this->lower_bound_.resize(dim, std::numeric_limits<DataType>::max());
 }

@@ -53,7 +53,10 @@ public:
     Train(const void* data, uint64_t count) = 0;
 
     virtual void
-    InsertVector(const void* vector, BucketIdType bucket_id, InnerIdType inner_id) = 0;
+    InsertVector(const void* vector,
+                 BucketIdType bucket_id,
+                 InnerIdType inner_id,
+                 const float* centroid = nullptr) = 0;
 
     virtual InnerIdType*
     GetInnerIds(BucketIdType bucket_id) = 0;

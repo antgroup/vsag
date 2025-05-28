@@ -100,6 +100,7 @@ template <MetricType metric>
 FP32Quantizer<metric>::FP32Quantizer(int dim, Allocator* allocator)
     : Quantizer<FP32Quantizer<metric>>(dim, allocator) {
     this->code_size_ = dim * sizeof(float);
+    this->metric_ = metric;
 }
 
 template <MetricType metric>

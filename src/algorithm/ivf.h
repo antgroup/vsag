@@ -121,6 +121,8 @@ private:
 
     bool is_trained_{false};
 
+    bool use_residual_{false};
+
     FlattenInterfacePtr reorder_codes_{nullptr};
 };
 }  // namespace vsag

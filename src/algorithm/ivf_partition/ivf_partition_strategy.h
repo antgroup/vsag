@@ -51,6 +51,9 @@ public:
     ClassifyDatas(const void* datas, int64_t count, BucketIdType buckets_per_data) = 0;
 
     virtual void
+    GetCentroid(BucketIdType bucket_id, Vector<float>& centroid) = 0;
+
+    virtual void
     Serialize(StreamWriter& writer) {
         StreamWriter::WriteObj(writer, this->is_trained_);
         StreamWriter::WriteObj(writer, this->bucket_count_);
