@@ -37,7 +37,8 @@ IVFNearestPartition::IVFNearestPartition(BucketIdType bucket_count,
                                          const IndexCommonParam& common_param,
                                          IVFPartitionStrategyParametersPtr param)
     : IVFPartitionStrategy(common_param, bucket_count),
-      ivf_partition_strategy_param_(std::move(param)) {
+      ivf_partition_strategy_param_(std::move(param)),
+      metric_type_(common_param.metric_) {
     this->factory_router_index(common_param);
 }
 
@@ -70,6 +71,11 @@ IVFNearestPartition::Train(const DatasetPtr dataset) {
             memcpy(data.data() + i * dim,
                    dataset->GetFloat32Vectors() + selected[i] * dim,
                    dim * sizeof(float));
+        }
+    }
+    if (metric_type_ == MetricType::METRIC_TYPE_COSINE) {
+        for (int i = 0; i < bucket_count_; ++i) {
+            Normalize(data.data() + i * dim_, data.data() + i * dim_, dim_);
         }
     }
 
@@ -122,5 +128,12 @@ IVFNearestPartition::factory_router_index(const IndexCommonParam& common_param) 
     };
     param_ptr = HGraph::CheckAndMappingExternalParam(hgraph_json, common_param);
     this->route_index_ptr_ = std::make_shared<HGraph>(param_ptr, common_param);
+}
+void
+IVFNearestPartition::GetCentroid(BucketIdType bucket_id, Vector<float>& centroid) {
+    if (!is_trained_ || bucket_id >= bucket_count_) {
+        throw std::runtime_error("Invalid bucket_id or partition not trained");
+    }
+    this->route_index_ptr_->GetRawData(bucket_id, (uint8_t*)centroid.data());
 }
 }  // namespace vsag

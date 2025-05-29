@@ -61,6 +61,9 @@ public:
     }
 
     virtual void
+    GetCentroid(BucketIdType bucket_id, Vector<float>& centroid) = 0;
+
+    virtual void
     Serialize(StreamWriter& writer) {
         StreamWriter::WriteObj(writer, this->is_trained_);
         StreamWriter::WriteObj(writer, this->bucket_count_);

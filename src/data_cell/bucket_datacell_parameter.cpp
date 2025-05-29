@@ -37,12 +37,17 @@ BucketDataCellParameter::FromJson(const JsonType& json) {
     if (json.contains(BUCKETS_COUNT_KEY)) {
         this->buckets_count = json[BUCKETS_COUNT_KEY];
     }
+
+    if (json.contains(BUCKET_USE_RESIDUAL)) {
+        this->use_residual_ = json[BUCKET_USE_RESIDUAL];
+    }
 }
 
 JsonType
 BucketDataCellParameter::ToJson() {
     JsonType json;
     json[IO_PARAMS_KEY] = this->io_parameter->ToJson();
+    json[BUCKET_USE_RESIDUAL] = this->use_residual_;
     json[QUANTIZATION_PARAMS_KEY] = this->quantizer_parameter->ToJson();
     json[BUCKETS_COUNT_KEY] = this->buckets_count;
     return json;

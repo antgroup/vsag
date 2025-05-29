@@ -387,4 +387,17 @@ GNOIMIPartition::inner_joint_classify_datas(const float* datas,
     }
 }
 
+void
+GNOIMIPartition::GetCentroid(BucketIdType bucket_id, Vector<float>& centroid) {
+    if (!is_trained_ || bucket_id >= bucket_count_) {
+        throw std::runtime_error("Invalid bucket_id or partition not trained");
+    }
+    auto bucket_id_s = bucket_id / bucket_count_t_;
+    auto bucket_id_t = bucket_id % bucket_count_t_;
+    FP32Add(data_centroids_s_.data() + bucket_id_s * dim_,
+            data_centroids_t_.data() + bucket_id_t * dim_,
+            centroid.data(),
+            dim_);
+}
+
 }  // namespace vsag

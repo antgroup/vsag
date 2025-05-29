@@ -35,6 +35,9 @@ public:
     ClassifyDatas(const void* datas, int64_t count, BucketIdType buckets_per_data) override;
 
     void
+    GetCentroid(BucketIdType bucket_id, Vector<float>& centroid) override;
+
+    void
     Serialize(StreamWriter& writer) override;
 
     void
@@ -44,6 +47,8 @@ public:
     IVFPartitionStrategyParametersPtr ivf_partition_strategy_param_{nullptr};
 
     InnerIndexPtr route_index_ptr_{nullptr};
+
+    MetricType metric_type_{MetricType::METRIC_TYPE_L2SQR};
 
 private:
     void

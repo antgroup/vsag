@@ -133,6 +133,25 @@ HierarchicalNSW::init_memory_space() {
     return true;
 }
 
+uint64_t
+HierarchicalNSW::estimateMemory(uint64_t num_elements) {
+    size_t size = 0;
+    size += sizeof(unsigned short int) * num_elements;  // visited_list_pool_
+    size += sizeof(int) * num_elements;                 // element_levels_
+    size += num_elements * size_data_per_element_;      // data_level0_memory_
+    if (use_reversed_edges_) {
+        size += sizeof(reverselinklist*) * num_elements;  // reversed_level0_link_list_
+        size += sizeof(vsag::UnorderedMap<int, reverselinklist>*) *
+                num_elements;  // reversed_link_lists_
+    }
+    if (normalize_) {
+        size += sizeof(float) * num_elements;  // molds_
+    }
+    size += sizeof(void*) * num_elements;              // link_lists_
+    size += sizeof(std::shared_mutex) * num_elements;  // points_locks_
+    return size;
+}
+
 HierarchicalNSW::~HierarchicalNSW() {
     if (link_lists_ != nullptr) {
         for (InnerIdType i = 0; i < max_elements_; i++) {
@@ -1075,8 +1094,9 @@ HierarchicalNSW::DeserializeImpl(StreamReader& reader, SpaceInterface* s, size_t
     for (size_t i = 0; i < cur_element_count_; i++) {
         if (isMarkedDeleted(i)) {
             num_deleted_ += 1;
-            if (allow_replace_deleted_)
-                deleted_elements_.insert(i);
+            if (allow_replace_deleted_) {
+                deleted_elements_.insert({getExternalLabel(i), i});
+            }
         }
     }
 }
@@ -1139,7 +1159,7 @@ HierarchicalNSW::markDeletedInternal(InnerIdType internalId) {
         num_deleted_ += 1;
         if (allow_replace_deleted_) {
             std::unique_lock<std::mutex> lock_deleted_elements(deleted_elements_lock_);
-            deleted_elements_.insert(internalId);
+            deleted_elements_.insert({getExternalLabel(internalId), internalId});
         }
     } else {
         throw std::runtime_error("The requested to delete element is already deleted");
@@ -1284,21 +1304,37 @@ HierarchicalNSW::updateVector(LabelType label, const void* data_point) {
 void
 HierarchicalNSW::updateLabel(LabelType old_label, LabelType new_label) {
     std::unique_lock lock(label_lookup_lock_);
-    auto iter_old = label_lookup_.find(old_label);
-    auto iter_new = label_lookup_.find(new_label);
-    if (iter_old == label_lookup_.end()) {
-        throw std::runtime_error(fmt::format("no old label {} in HNSW", old_label));
-    } else if (iter_new != label_lookup_.end()) {
-        throw std::runtime_error(fmt::format("new label {} has been in HNSW", new_label));
-    } else {
-        InnerIdType internal_id = iter_old->second;
 
-        // reset label
+    // 1. check whether new_label is occupied
+    auto iter_new = label_lookup_.find(new_label);
+    if (iter_new != label_lookup_.end()) {
+        throw std::runtime_error(fmt::format("new label {} has been in HNSW", new_label));
+    }
+
+    // 2. check whether old_label exists
+    InnerIdType internal_id = 0;
+    auto iter_old = label_lookup_.find(old_label);
+    if (iter_old == label_lookup_.end()) {
+        // 3. deal the situation of mark delete
+        auto iter_mark_delete = deleted_elements_.find(old_label);
+        if (iter_mark_delete == deleted_elements_.end()) {
+            throw std::runtime_error(fmt::format("no old label {} in HNSW", old_label));
+        }
+
+        // 4. update label to id
+        internal_id = iter_mark_delete->second;
+        deleted_elements_.erase(iter_mark_delete);
+        deleted_elements_.insert({new_label, internal_id});
+    } else {
+        // 4. update label to id
+        internal_id = iter_old->second;
         label_lookup_.erase(iter_old);
         label_lookup_[new_label] = internal_id;
-        std::unique_lock resize_lock(resize_mutex_);
-        setExternalLabel(internal_id, new_label);
     }
+
+    // 5. reset id to label
+    std::unique_lock resize_lock(resize_mutex_);
+    setExternalLabel(internal_id, new_label);
 }
 
 void

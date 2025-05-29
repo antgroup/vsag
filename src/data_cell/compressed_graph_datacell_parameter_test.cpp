@@ -13,34 +13,26 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#pragma once
+#include "compressed_graph_datacell_parameter.h"
 
-#include "io/io_parameter.h"
-#include "parameter.h"
-#include "quantization/quantizer_parameter.h"
+#include <catch2/catch_test_macros.hpp>
+
+#include "parameter_test.h"
 
 namespace vsag {
 
-class BucketDataCellParameter : public Parameter {
-public:
-    explicit BucketDataCellParameter();
-
-    void
-    FromJson(const JsonType& json) override;
-
-    JsonType
-    ToJson() override;
-
-public:
-    QuantizerParamPtr quantizer_parameter{nullptr};
-
-    IOParamPtr io_parameter{nullptr};
-
-    bool use_residual_{false};
-
-    int64_t buckets_count{1};
-};
-
-using BucketDataCellParamPtr = std::shared_ptr<BucketDataCellParameter>;
+TEST_CASE("CompressedGraphDatacellParameter ToJson Test",
+          "[ut][CompressedGraphDatacellParameter]") {
+    std::string param_str = R"(
+        {
+            "max_degree": 100,
+            "graph_storage_type": "compressed"
+        }
+        )";
+    auto param = std::make_shared<CompressedGraphDatacellParameter>();
+    auto json = JsonType::parse(param_str);
+    param->FromJson(json);
+    ParameterTest::TestToJson(param);
+}
 
 }  // namespace vsag

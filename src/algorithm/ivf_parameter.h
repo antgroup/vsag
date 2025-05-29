@@ -38,7 +38,6 @@ public:
     BucketDataCellParamPtr bucket_param{nullptr};
     IVFPartitionStrategyParametersPtr ivf_partition_strategy_parameter{nullptr};
     BucketIdType buckets_per_data{1};
-    bool use_residual{false};
 
     bool use_reorder{false};
 
