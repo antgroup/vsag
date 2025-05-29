@@ -23,6 +23,8 @@ main(int argc, char** argv) {
     // your setup ...
     vsag::Options::Instance().set_logger(&fixtures::logger::test_logger);
 
+    fixtures::logger::test_logger.SetLevel(vsag::Logger::Level::kWARN);
+
     int result = Catch::Session().run(argc, argv);
 
     // your clean-up...
