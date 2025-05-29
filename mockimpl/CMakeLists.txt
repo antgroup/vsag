@@ -13,8 +13,8 @@ set (MOCK_SRCS
 add_library (vsag_mockimpl SHARED ${MOCK_SRCS})
 add_library (vsag_mockimpl_static STATIC ${MOCK_SRCS})
 
-target_link_libraries (vsag_mockimpl roaring fmt::fmt-header-only)
-target_link_libraries (vsag_mockimpl_static roaring fmt::fmt-header-only)
+target_link_libraries (vsag_mockimpl roaring fmt::fmt-header-only simd)
+target_link_libraries (vsag_mockimpl_static roaring fmt::fmt-header-only simd)
 add_dependencies (vsag_mockimpl version_mockimpl roaring)
 add_dependencies (vsag_mockimpl_static version_mockimpl roaring)
 
