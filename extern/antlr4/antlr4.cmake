@@ -5,8 +5,7 @@ set(install_dir ${CMAKE_CURRENT_BINARY_DIR}/${name}/install)
 
 ExternalProject_Add(
         ${name}
-        URL http://aivolvo-dev.cn-hangzhou-alipay-b.oss-cdn.aliyun-inc.com/tbase/third-party/antlr4_4.13.2.tar.gz
-        #https://github.com/antlr/antlr4/archive/refs/tags/4.13.2.tar.gz
+        URL https://github.com/antlr/antlr4/archive/refs/tags/4.13.2.tar.gz
         URL_HASH MD5=3b75610fc8a827119258cba09a068be5
         DOWNLOAD_NAME antlr4_4.13.2.tar.gz
         PREFIX ${CMAKE_CURRENT_BINARY_DIR}/${name}
@@ -26,28 +25,17 @@ ExternalProject_Add(
         LOG_INSTALL TRUE
         DOWNLOAD_NO_PROGRESS 1
         INACTIVITY_TIMEOUT 5
-        TIMEOUT 30
+        TIMEOUT 60
 )
-# http://www.antlr.org/download/antlr-4.13.2-complete.jar
-if (NOT EXISTS "${install_dir}/antlr-4.13.2-complete.jar")
-    file(DOWNLOAD
-            http://aivolvo-dev.cn-hangzhou-alipay-b.oss-cdn.aliyun-inc.com/tbase/third-party/antlr-4.13.2-complete.jar
-            ${install_dir}/antlr-4.13.2-complete.jar
-            TIMEOUT 60
-            STATUS status
-            TLS_VERIFY OFF
-    )
-
-    list(GET status 0 error_code)
-    list(GET status 1 error_msg)
-
-    if (error_code)
-        message(FATAL_ERROR "Failed to download antlr-4.13.2-complete.jar: ${error_msg}")
-    else ()
-        message(STATUS "Downloaded antlr-4.13.2-complete.jar successfully")
-    endif ()
-endif ()
 
 include_directories(${install_dir}/include/antlr4-runtime)
 link_directories(${install_dir}/lib)
 link_directories(${install_dir}/lib64)
+
+include_directories(extern/antlr4/fc)
+file(GLOB ANTLR4_GEN_SRC "extern/antlr4/fc/*.cpp")
+add_library(antlr4-autogen SHARED ${ANTLR4_GEN_SRC})
+add_dependencies(antlr4-autogen antlr4)
+target_compile_options(antlr4-autogen PRIVATE ${common_cmake_args})
+set_property(TARGET antlr4-autogen PROPERTY CXX_STANDARD 17)
+target_link_libraries(antlr4-autogen antlr4-runtime)
