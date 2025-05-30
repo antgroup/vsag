@@ -37,6 +37,10 @@ GetL2Sqr() {
 #if defined(ENABLE_SSE)
         return sse::L2Sqr;
 #endif
+    } else if (SimdStatus::SupportNEON()) {
+#if defined(ENABLE_NEON)
+        return neon::L2Sqr;
+#endif
     }
     return generic::L2Sqr;
 }
@@ -59,6 +63,10 @@ GetInnerProduct() {
     } else if (SimdStatus::SupportSSE()) {
 #if defined(ENABLE_SSE)
         return sse::InnerProduct;
+#endif
+    } else if (SimdStatus::SupportNEON()) {
+#if defined(ENABLE_NEON)
+        return neon::InnerProduct;
 #endif
     }
     return generic::InnerProduct;
@@ -83,6 +91,10 @@ GetInnerProductDistance() {
 #if defined(ENABLE_SSE)
         return sse::InnerProductDistance;
 #endif
+    } else if (SimdStatus::SupportNEON()) {
+#if defined(ENABLE_NEON)
+        return neon::InnerProductDistance;
+#endif
     }
     return generic::InnerProductDistance;
 }
@@ -105,6 +117,10 @@ GetINT8InnerProduct() {
     } else if (SimdStatus::SupportSSE()) {
 #if defined(ENABLE_SSE)
         return sse::INT8InnerProduct;
+#endif
+    } else if (SimdStatus::SupportNEON()) {
+#if defined(ENABLE_NEON)
+        return neon::INT8InnerProduct;
 #endif
     }
     return generic::INT8InnerProduct;
@@ -129,6 +145,10 @@ GetINT8InnerProductDistance() {
 #if defined(ENABLE_SSE)
         return sse::INT8InnerProductDistance;
 #endif
+    } else if (SimdStatus::SupportNEON()) {
+#if defined(ENABLE_NEON)
+        return neon::INT8InnerProductDistance;
+#endif
     }
     return generic::INT8InnerProductDistance;
 }
@@ -151,6 +171,10 @@ GetPQDistanceFloat256() {
     } else if (SimdStatus::SupportSSE()) {
 #if defined(ENABLE_SSE)
         return sse::PQDistanceFloat256;
+#endif
+    } else if (SimdStatus::SupportNEON()) {
+#if defined(ENABLE_NEON)
+        return neon::PQDistanceFloat256;
 #endif
     }
     return generic::PQDistanceFloat256;

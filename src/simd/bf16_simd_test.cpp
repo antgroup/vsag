@@ -44,7 +44,7 @@ TEST_CASE("Encode & Decode BF16", "[ut][simd]") {
 
 #define TEST_ACCURACY(Func)                                                           \
     {                                                                                 \
-        float gt, sse, avx, avx2, avx512;                                             \
+        float gt, sse, avx, avx2, avx512, neon;                                       \
         gt = generic::Func(vec1.data() + i * dim, vec2.data() + i * dim, dim);        \
         if (SimdStatus::SupportSSE()) {                                               \
             sse = sse::Func(vec1.data() + i * dim, vec2.data() + i * dim, dim);       \
@@ -61,6 +61,10 @@ TEST_CASE("Encode & Decode BF16", "[ut][simd]") {
         if (SimdStatus::SupportAVX512()) {                                            \
             avx512 = avx512::Func(vec1.data() + i * dim, vec2.data() + i * dim, dim); \
             REQUIRE(fixtures::dist_t(gt) == fixtures::dist_t(avx512));                \
+        }                                                                             \
+        if (SimdStatus::SupportNEON()) {                                              \
+            neon = neon::Func(vec1.data() + i * dim, vec2.data() + i * dim, dim);     \
+            REQUIRE(fixtures::dist_t(gt) == fixtures::dist_t(neon));                  \
         }                                                                             \
     };
 
@@ -99,10 +103,12 @@ TEST_CASE("BF16 Benchmark", "[ut][simd][!benchmark]") {
     BENCHMARK_SIMD_COMPUTE(avx, BF16ComputeIP);
     BENCHMARK_SIMD_COMPUTE(avx2, BF16ComputeIP);
     BENCHMARK_SIMD_COMPUTE(avx512, BF16ComputeIP);
+    BENCHMARK_SIMD_COMPUTE(neon, BF16ComputeIP);
 
     BENCHMARK_SIMD_COMPUTE(generic, BF16ComputeL2Sqr);
     BENCHMARK_SIMD_COMPUTE(sse, BF16ComputeL2Sqr);
     BENCHMARK_SIMD_COMPUTE(avx, BF16ComputeL2Sqr);
     BENCHMARK_SIMD_COMPUTE(avx2, BF16ComputeL2Sqr);
     BENCHMARK_SIMD_COMPUTE(avx512, BF16ComputeL2Sqr);
+    BENCHMARK_SIMD_COMPUTE(neon, BF16ComputeL2Sqr);
 }

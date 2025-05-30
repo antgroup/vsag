@@ -37,6 +37,10 @@ GetSQ8UniformComputeCodesIP() {
 #if defined(ENABLE_SSE)
         return sse::SQ8UniformComputeCodesIP;
 #endif
+    } else if (SimdStatus::SupportNEON()) {
+#if defined(ENABLE_NEON)
+        return neon::SQ8UniformComputeCodesIP;
+#endif
     }
     return generic::SQ8UniformComputeCodesIP;
 }

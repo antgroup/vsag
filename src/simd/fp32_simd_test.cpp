@@ -25,7 +25,7 @@ using namespace vsag;
 
 #define TEST_FP32_COMPUTE_ACCURACY(Func)                                              \
     {                                                                                 \
-        float gt, sse, avx, avx2, avx512;                                             \
+        float gt, sse, avx, avx2, avx512, neon;                                       \
         gt = generic::Func(vec1.data() + i * dim, vec2.data() + i * dim, dim);        \
         if (SimdStatus::SupportSSE()) {                                               \
             sse = sse::Func(vec1.data() + i * dim, vec2.data() + i * dim, dim);       \
@@ -42,6 +42,10 @@ using namespace vsag;
         if (SimdStatus::SupportAVX512()) {                                            \
             avx512 = avx512::Func(vec1.data() + i * dim, vec2.data() + i * dim, dim); \
             REQUIRE(fixtures::dist_t(gt) == fixtures::dist_t(avx512));                \
+        }                                                                             \
+        if (SimdStatus::SupportNEON()) {                                              \
+            neon = neon::Func(vec1.data() + i * dim, vec2.data() + i * dim, dim);     \
+            REQUIRE(fixtures::dist_t(gt) == fixtures::dist_t(neon));                  \
         }                                                                             \
     };
 
@@ -75,6 +79,13 @@ using namespace vsag;
             avx512::Func(vec1.data() + i * dim, vec2.data() + i * dim, avx512_gt.data(), dim); \
             for (uint64_t j = 0; j < dim; ++j) {                                               \
                 REQUIRE(fixtures::dist_t(gt[j]) == fixtures::dist_t(avx512_gt[j]));            \
+            }                                                                                  \
+        }                                                                                      \
+        std::vector<float> neon(dim, 0.0F);                                                    \
+        if (SimdStatus::SupportNEON()) {                                                       \
+            neon::Func(vec1.data() + i * dim, vec2.data() + i * dim, neon.data(), dim);        \
+            for (uint64_t j = 0; j < dim; ++j) {                                               \
+                REQUIRE(fixtures::dist_t(gt[j]) == fixtures::dist_t(neon[j]));                 \
             }                                                                                  \
         }                                                                                      \
     };
@@ -165,6 +176,22 @@ using namespace vsag;
                 REQUIRE(fixtures::dist_t(gts[j]) == fixtures::dist_t(result[j]));        \
             }                                                                            \
         }                                                                                \
+        if (SimdStatus::SupportNEON()) {                                                 \
+            memset(result.data(), 0, 4 * sizeof(float));                                 \
+            neon::FuncBatch4(vec1.data() + i * dim,                                      \
+                             dim,                                                        \
+                             vec2.data() + i * dim,                                      \
+                             vec2.data() + (i + 1) * dim,                                \
+                             vec2.data() + (i + 2) * dim,                                \
+                             vec2.data() + (i + 3) * dim,                                \
+                             result[0],                                                  \
+                             result[1],                                                  \
+                             result[2],                                                  \
+                             result[3]);                                                 \
+            for (uint64_t j = 0; j < 4; ++j) {                                           \
+                REQUIRE(fixtures::dist_t(gts[j]) == fixtures::dist_t(result[j]));        \
+            }                                                                            \
+        }                                                                                \
     };
 
 TEST_CASE("FP32 SIMD Compute", "[ut][simd]") {
@@ -206,12 +233,14 @@ TEST_CASE("FP32 Benchmark", "[ut][simd][!benchmark]") {
     BENCHMARK_SIMD_COMPUTE(avx, FP32ComputeIP);
     BENCHMARK_SIMD_COMPUTE(avx2, FP32ComputeIP);
     BENCHMARK_SIMD_COMPUTE(avx512, FP32ComputeIP);
+    BENCHMARK_SIMD_COMPUTE(neon, FP32ComputeIP);
 
     BENCHMARK_SIMD_COMPUTE(generic, FP32ComputeL2Sqr);
     BENCHMARK_SIMD_COMPUTE(sse, FP32ComputeL2Sqr);
     BENCHMARK_SIMD_COMPUTE(avx, FP32ComputeL2Sqr);
     BENCHMARK_SIMD_COMPUTE(avx2, FP32ComputeL2Sqr);
     BENCHMARK_SIMD_COMPUTE(avx512, FP32ComputeL2Sqr);
+    BENCHMARK_SIMD_COMPUTE(neon, FP32ComputeL2Sqr);
 }
 
 #define BENCHMARK_SIMD_COMPUTE_BATCH4(Simd, Comp)        \
@@ -243,10 +272,12 @@ TEST_CASE("FP32 Benchmark Batch4", "[ut][simd][!benchmark]") {
     BENCHMARK_SIMD_COMPUTE_BATCH4(avx, FP32ComputeIPBatch4);
     BENCHMARK_SIMD_COMPUTE_BATCH4(avx2, FP32ComputeIPBatch4);
     BENCHMARK_SIMD_COMPUTE_BATCH4(avx512, FP32ComputeIPBatch4);
+    BENCHMARK_SIMD_COMPUTE_BATCH4(neon, FP32ComputeIPBatch4);
 
     BENCHMARK_SIMD_COMPUTE_BATCH4(generic, FP32ComputeL2SqrBatch4);
     BENCHMARK_SIMD_COMPUTE_BATCH4(sse, FP32ComputeL2SqrBatch4);
     BENCHMARK_SIMD_COMPUTE_BATCH4(avx, FP32ComputeL2SqrBatch4);
     BENCHMARK_SIMD_COMPUTE_BATCH4(avx2, FP32ComputeL2SqrBatch4);
     BENCHMARK_SIMD_COMPUTE_BATCH4(avx512, FP32ComputeL2SqrBatch4);
+    BENCHMARK_SIMD_COMPUTE_BATCH4(neon, FP32ComputeL2SqrBatch4);
 }
