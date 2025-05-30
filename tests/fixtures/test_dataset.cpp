@@ -92,6 +92,7 @@ GenerateRandomDataset(uint64_t dim,
     auto vecs =
         fixtures::generate_vectors(count, dim, need_normalize, fixtures::RandomValue(0, 564));
     auto vecs_int8 = fixtures::generate_int8_codes(count, dim, fixtures::RandomValue(0, 564));
+    auto attr_sets = fixtures::generate_attributes(count);
     auto paths = new std::string[count];
     for (int i = 0; i < count; ++i) {
         paths[i] = create_random_string(!is_query);
@@ -103,6 +104,7 @@ GenerateRandomDataset(uint64_t dim,
         ->Float32Vectors(CopyVector(vecs))
         ->Int8Vectors(CopyVector(vecs_int8))
         ->Paths(paths)
+        ->AttributeSets(attr_sets)
         ->NumElements(count)
         ->Owner(true);
     if (vector_type == "sparse") {

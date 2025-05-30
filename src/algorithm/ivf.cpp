@@ -29,6 +29,8 @@ static constexpr const char* IVF_PARAMS_TEMPLATE =
     {
         "type": "{INDEX_TYPE_IVF}",
         "{IVF_TRAIN_TYPE_KEY}": "{IVF_TRAIN_TYPE_KMEANS}",
+        "{IVF_USE_ATTRIBUTE_FILTER_KEY}": false,
+        "{IVF_USE_REORDER_KEY}": false,
         "{BUCKET_PARAMS_KEY}": {
             "{IO_PARAMS_KEY}": {
                 "{IO_TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}"
@@ -43,7 +45,6 @@ static constexpr const char* IVF_PARAMS_TEMPLATE =
             "{BUCKETS_COUNT_KEY}": 10,
             "{BUCKET_USE_RESIDUAL}": false
         },
-        "{IVF_USE_REORDER_KEY}": false,
         "{IVF_PRECISE_CODES_KEY}": {
             "{IO_PARAMS_KEY}": {
                 "{IO_TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
@@ -91,6 +92,10 @@ IVF::CheckAndMappingExternalParam(const JsonType& external_param,
         },
         {IVF_USE_RESIDUAL, {BUCKET_PARAMS_KEY, BUCKET_USE_RESIDUAL}},
         {
+            IVF_USE_ATTRIBUTE_FILTER,
+            {IVF_USE_ATTRIBUTE_FILTER_KEY},
+        },
+        {
             IVF_BASE_PQ_DIM,
             {
                 BUCKET_PARAMS_KEY,
@@ -128,6 +133,11 @@ IVF::IVF(const IVFParameterPtr& param, const IndexCommonParam& common_param)
         this->reorder_codes_ = FlattenInterface::MakeInstance(param->flatten_param, common_param);
     }
     this->use_residual_ = param->bucket_param->use_residual_;
+    this->use_attribute_filter_ = param->use_attribute_filter;
+    if (this->use_attribute_filter_) {
+        this->attr_filter_index_ =
+            AttributeInvertedInterface::MakeInstance(allocator_, true /*have_bucket*/);
+    }
 }
 
 void
@@ -228,6 +238,7 @@ IVF::Add(const DatasetPtr& base) {
     auto num_element = base->GetNumElements();
     const auto* ids = base->GetIds();
     const auto* vectors = base->GetFloat32Vectors();
+    const auto* attr_sets = base->GetAttributeSets();
     auto buckets = partition_strategy_->ClassifyDatas(vectors, num_element, 1);
     Vector<float> normalize_data(dim_, allocator_);
     Vector<float> residual_data(dim_, allocator_);
@@ -251,6 +262,21 @@ IVF::Add(const DatasetPtr& base) {
     this->bucket_->Package();
     if (use_reorder_) {
         this->reorder_codes_->BatchInsertVector(base->GetFloat32Vectors(), base->GetNumElements());
+    }
+    if (use_attribute_filter_ and this->attr_filter_index_ != nullptr and attr_sets != nullptr) {
+        for (uint64_t i = 0; i < this->bucket_->bucket_count_; ++i) {
+            auto bucket_id = static_cast<BucketIdType>(i);
+            auto bucket_size = this->bucket_->GetBucketSize(bucket_id);
+            if (bucket_size == 0) {
+                continue;
+            }
+            auto* inner_ids = this->bucket_->GetInnerIds(bucket_id);
+            for (InnerIdType j = 0; j < bucket_size; ++j) {
+                auto inner_id = inner_ids[j];
+                const auto& attr_set = attr_sets[inner_id - this->total_elements_];
+                this->attr_filter_index_->InsertWithBucket(attr_set, j, bucket_id);
+            }
+        }
     }
     this->total_elements_ += num_element;
     return {};
@@ -336,6 +362,9 @@ IVF::Serialize(StreamWriter& writer) const {
     if (use_reorder_) {
         this->reorder_codes_->Serialize(writer);
     }
+    if (use_attribute_filter_) {
+        this->attr_filter_index_->Serialize(writer);
+    }
 }
 
 void
@@ -349,6 +378,9 @@ IVF::Deserialize(StreamReader& reader) {
     this->label_table_->Deserialize(reader);
     if (use_reorder_) {
         this->reorder_codes_->Deserialize(reader);
+    }
+    if (use_attribute_filter_) {
+        this->attr_filter_index_->Deserialize(reader);
     }
 }
 InnerSearchParam

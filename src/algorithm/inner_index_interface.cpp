@@ -48,6 +48,7 @@ InnerIndexInterface::KnnSearch(const DatasetPtr& query,
     if (filter != nullptr) {
         filter_ptr = std::make_shared<UniqueFilter>(filter);
     }
+
     return this->KnnSearch(query, k, parameters, filter_ptr);
 }
 

@@ -26,7 +26,8 @@ public:
                                      const std::string& quantization_str = "sq8",
                                      int buckets_count = 210,
                                      const std::string& train_type = "kmeans",
-                                     bool use_residual = false);
+                                     bool use_residual = false,
+                                     bool use_attr_filter = false);
     static void
     TestGeneral(const IndexPtr& index,
                 const TestDatasetPtr& dataset,
@@ -72,7 +73,8 @@ IVFTestIndex::GenerateIVFBuildParametersString(const std::string& metric_type,
                                                const std::string& quantization_str,
                                                int buckets_count,
                                                const std::string& train_type,
-                                               bool use_residual) {
+                                               bool use_residual,
+                                               bool use_attr_filter) {
     std::string build_parameters_str;
 
     constexpr auto parameter_temp = R"(
@@ -87,7 +89,8 @@ IVFTestIndex::GenerateIVFBuildParametersString(const std::string& metric_type,
             "use_reorder": {},
             "base_pq_dim": {},
             "precise_quantization_type": "{}",
-            "use_residual": {}
+            "use_residual": {},
+            "use_attribute_filter": {}
         }}
     }}
     )";
@@ -113,8 +116,8 @@ IVFTestIndex::GenerateIVFBuildParametersString(const std::string& metric_type,
                                        use_reorder,
                                        pq_dim,
                                        precise_quantizer_str,
-                                       use_residual);
-
+                                       use_residual,
+                                       use_attr_filter);
     INFO(build_parameters_str);
     return build_parameters_str;
 }
@@ -333,6 +336,33 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex, "IVF Build", "[ft][ivf]") {
             if (index->CheckFeature(vsag::SUPPORT_BUILD)) {
                 TestGeneral(index, dataset, search_param, recall);
             }
+            vsag::Options::Instance().set_block_size_limit(origin_size);
+        }
+    }
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex, "IVF Build With Attribute", "[ft][ivf]") {
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    auto size = GENERATE(1024 * 1024 * 2);
+    auto metric_type = GENERATE("l2", "cosine");
+    std::string train_type = GENERATE("kmeans");
+
+    const std::string name = "ivf";
+    auto search_param = fmt::format(search_param_tmp, 200);
+    bool use_attribute_filter = true;
+    for (auto& dim : dims) {
+        for (auto& [base_quantization_str, recall] : test_cases) {
+            vsag::Options::Instance().set_block_size_limit(size);
+            auto param = GenerateIVFBuildParametersString(metric_type,
+                                                          dim,
+                                                          base_quantization_str,
+                                                          300,
+                                                          train_type,
+                                                          false,
+                                                          use_attribute_filter);
+            auto index = TestFactory(name, param, true);
+            auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
+            TestBuildWithAttr(index, dataset);
             vsag::Options::Instance().set_block_size_limit(origin_size);
         }
     }
