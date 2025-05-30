@@ -192,6 +192,7 @@ BucketDataCell<QuantTmpl, IOTmpl>::query_one_by_id(
     const std::shared_ptr<Computer<QuantTmpl>>& computer,
     const BucketIdType& bucket_id,
     const InnerIdType& offset_id) {
+    std::shared_lock lock(this->bucket_mutexes_[bucket_id]);
     this->check_valid_bucket_id(bucket_id);
     if (offset_id >= this->bucket_sizes_[bucket_id]) {
         throw VsagException(ErrorType::INTERNAL_ERROR, "invalid offset id for bucket");
@@ -213,6 +214,7 @@ BucketDataCell<QuantTmpl, IOTmpl>::scan_bucket_by_id(
     float* result_dists,
     const std::shared_ptr<Computer<QuantTmpl>>& computer,
     const BucketIdType& bucket_id) {
+    std::shared_lock lock(this->bucket_mutexes_[bucket_id]);
     constexpr InnerIdType scan_block_size = 32;
     InnerIdType offset = 0;
     this->check_valid_bucket_id(bucket_id);
@@ -258,8 +260,13 @@ BucketDataCell<QuantTmpl, IOTmpl>::InsertVector(const void* vector,
     check_valid_bucket_id(bucket_id);
     InnerIdType locate;
     {
-        std::lock_guard lock(this->bucket_mutexes_[bucket_id]);
+        std::unique_lock lock(this->bucket_mutexes_[bucket_id]);
         locate = this->bucket_sizes_[bucket_id];
+        uint8_t data_flag = 1;
+        this->datas_[bucket_id]->Write(
+            &data_flag,
+            sizeof(data_flag),
+            static_cast<uint64_t>(locate + 1) * static_cast<uint64_t>(code_size_));
         this->bucket_sizes_[bucket_id]++;
         inner_ids_[bucket_id].emplace_back(inner_id);
         if (use_residual_ && this->quantizer_->Metric() == MetricType::METRIC_TYPE_L2SQR) {
@@ -276,6 +283,7 @@ BucketDataCell<QuantTmpl, IOTmpl>::insert_vector_with_locate(const float* vector
                                                              const BucketIdType& bucket_id,
                                                              const InnerIdType& offset_id,
                                                              const float* centroid) {
+    std::shared_lock lock(this->bucket_mutexes_[bucket_id]);
     ByteBuffer codes(static_cast<uint64_t>(code_size_), this->allocator_);
     this->quantizer_->EncodeOne(vector, codes.data);
     this->datas_[bucket_id]->Write(

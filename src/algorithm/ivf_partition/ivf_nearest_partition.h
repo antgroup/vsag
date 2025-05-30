@@ -32,7 +32,7 @@ public:
     Train(const DatasetPtr dataset) override;
 
     Vector<BucketIdType>
-    ClassifyDatas(const void* datas, int64_t count, BucketIdType buckets_per_data) override;
+    ClassifyDatas(const void* datas, int64_t count, BucketIdType buckets_per_data) const override;
 
     void
     GetCentroid(BucketIdType bucket_id, Vector<float>& centroid) override;
