@@ -33,7 +33,7 @@ IteratorFilterContext::init(InnerIdType max_size, int64_t ef_search, Allocator* 
         ef_search_ = ef_search;
         allocator_ = allocator;
         max_size_ = max_size;
-        discard_ = std::make_unique<std::priority_queue<std::pair<float, InnerIdType>>>();
+        discard_ = std::make_unique<MaxHeap>(allocator);
         list_ = reinterpret_cast<VisitedListType*>(
             allocator_->Allocate((uint64_t)max_size * sizeof(VisitedListType)));
         memset(list_, 0, max_size * sizeof(VisitedListType));

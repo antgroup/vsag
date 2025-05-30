@@ -87,6 +87,14 @@ public:
               int64_t k,
               const std::string& parameters,
               const FilterPtr& filter,
+              Allocator* allocator) const override;
+
+    [[nodiscard]] DatasetPtr
+    KnnSearch(const DatasetPtr& query,
+              int64_t k,
+              const std::string& parameters,
+              const FilterPtr& filter,
+              Allocator* allocator,
               IteratorContext*& iter_ctx,
               bool is_last_filter) const override;
 
