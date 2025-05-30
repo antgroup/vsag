@@ -75,6 +75,7 @@ private:
     GraphInterfaceParamPtr graph_param_{nullptr};
 };
 
+// introduce since v0.14
 class Pyramid : public InnerIndexInterface {
 public:
     static ParamPtr

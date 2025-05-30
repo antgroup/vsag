@@ -40,6 +40,8 @@
 #include "vsag/index_features.h"
 
 namespace vsag {
+
+// introduce since v0.12
 class HGraph : public InnerIndexInterface {
 public:
     static ParamPtr
