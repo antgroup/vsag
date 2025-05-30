@@ -125,20 +125,11 @@ main(int32_t argc, char** argv) {
     {
         "dtype": "float32",
         "metric_type": "l2",
-        "dim": 128,
-        "diskann": {
-            "max_degree": 16,
-            "ef_construction": 100,
-            "pq_sample_rate": 0.5,
-            "pq_dims": 9,
-            "use_pq_search": true,
-            "use_async_io": true,
-            "use_bsa": true
-        }
+        "dim": 128
     }
     )";
     vsag::IndexPtr index = nullptr;
-    if (auto create_index = engine.CreateIndex("diskann", index_paramesters);
+    if (auto create_index = engine.CreateIndex("brute_force", index_paramesters);
         not create_index.has_value()) {
         std::cout << "create index failed: " << create_index.error().message << std::endl;
         abort();
@@ -172,7 +163,7 @@ main(int32_t argc, char** argv) {
 
     /******************* Load Index from KVStore *****************/
     index = nullptr;
-    if (auto create_index = engine.CreateIndex("diskann", index_paramesters);
+    if (auto create_index = engine.CreateIndex("brute_force", index_paramesters);
         not create_index.has_value()) {
         std::cout << "create index failed: " << create_index.error().message << std::endl;
         abort();
@@ -207,14 +198,7 @@ main(int32_t argc, char** argv) {
     auto query = vsag::Dataset::Make();
     query->NumElements(1)->Dim(dim)->Float32Vectors(query_vector)->Owner(false);
     auto search_parameters = R"(
-    {
-        "diskann": {
-            "ef_search": 100,
-            "beam_search": 4,
-            "io_limit": 50,
-            "use_reorder": true
-        }
-    }
+    {}
     )";
     if (auto knn_search = index->KnnSearch(query, topk, search_parameters);
         not knn_search.has_value()) {
