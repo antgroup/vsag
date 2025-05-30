@@ -15,6 +15,7 @@
 
 #include "brute_force.h"
 
+#include "serialization.h"
 #include "data_cell/flatten_datacell.h"
 #include "inner_string_params.h"
 #include "utils/slow_task_timer.h"
@@ -187,17 +188,47 @@ BruteForce::CalcDistanceById(const float* vector, int64_t id) const {
 
 void
 BruteForce::Serialize(StreamWriter& writer) const {
-    StreamWriter::WriteObj(writer, dim_);
-    StreamWriter::WriteObj(writer, total_count_);
+    // basic info moved to metadata since version 0.15
+    // only for test
+    if (Options::Instance().new_version()) {
+        // do nothing
+    } else {
+        StreamWriter::WriteObj(writer, dim_);
+        StreamWriter::WriteObj(writer, total_count_);
+    }
 
     this->inner_codes_->Serialize(writer);
     this->label_table_->Serialize(writer);
+
+    // serialize footer (introduce since v0.15)
+    if (Options::Instance().new_version()) {
+        auto metadata = std::make_shared<Metadata>();
+        JsonType basic_info;
+        basic_info["dim"] = dim_;
+        basic_info["total_count"] = total_count_;
+        metadata->Set("basic_info", basic_info);
+        auto footer = std::make_shared<Footer>(metadata);
+        footer->Write(writer);
+    }
 }
 
 void
 BruteForce::Deserialize(StreamReader& reader) {
-    StreamReader::ReadObj(reader, dim_);
-    StreamReader::ReadObj(reader, total_count_);
+    // try to deserialize footer (only in new version)
+    auto footer = Footer::Parse(reader);
+    if (footer != nullptr) {
+        logger::debug("parse with new version format");
+        auto metadata = footer->GetMetadata();
+        auto basic_info = metadata->Get("basic_info");
+        dim_ = basic_info["dim"];
+        total_count_ = basic_info["total_count"];
+    } else {
+        logger::debug("parse with v0.13 version format");
+
+        StreamReader::ReadObj(reader, dim_);
+        StreamReader::ReadObj(reader, total_count_);
+    }
+
     this->inner_codes_->Deserialize(reader);
     this->label_table_->Deserialize(reader);
 }

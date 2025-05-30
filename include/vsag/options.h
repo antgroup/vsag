@@ -19,6 +19,7 @@
 #include <mutex>
 #include <string>
 
+#include "utils/function_exists_check.h"
 #include "vsag/allocator.h"
 #include "vsag/logger.h"
 
@@ -42,6 +43,20 @@ public:
      */
     static Options&
     Instance();
+
+public:
+    inline bool
+    new_version() const {
+        return new_version_;
+    }
+
+    inline void
+    set_new_version(bool new_version) {
+        new_version_ = new_version;
+    }
+
+private:
+    bool new_version_ = true;
 
 public:
     /**
