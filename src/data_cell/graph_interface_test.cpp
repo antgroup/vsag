@@ -25,31 +25,48 @@
 using namespace vsag;
 
 void
-GraphInterfaceTest::BasicTest(uint64_t max_id, uint64_t count, const GraphInterfacePtr& other) {
+GraphInterfaceTest::BasicTest(uint64_t max_id,
+                              uint64_t count,
+                              const GraphInterfacePtr& other,
+                              bool test_delete) {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     auto max_degree = this->graph_->MaximumDegree();
     this->graph_->Resize(max_id);
+    UnorderedMap<InnerIdType, std::shared_ptr<Vector<InnerIdType>>> maps(allocator.get());
+    std::unordered_set<InnerIdType> unique_keys;
+    while (unique_keys.size() < count) {
+        InnerIdType new_key = random() % max_id;
+        unique_keys.insert(new_key);
+    }
 
-    auto generate_graph = [&]() {
-        UnorderedMap<InnerIdType, std::shared_ptr<Vector<InnerIdType>>> cur_map(allocator.get());
-        for (auto i = 0; i < count; ++i) {
-            auto length = random() % max_degree + 1;
-            auto ids = std::make_shared<Vector<InnerIdType>>(length, allocator.get());
-            for (auto& id : *ids) {
-                id = random() % max_id;
-            }
-            auto cur_id = random() % max_id;
-            cur_map[cur_id] = ids;
-        }
-        if (require_sorted_) {
-            for (auto& [key, value] : cur_map) {
-                std::sort(value->begin(), value->end());
-            }
-        }
-        return cur_map;
-    };
+    std::vector<InnerIdType> keys(unique_keys.begin(), unique_keys.end());
+    for (auto key : keys) {
+        maps[key] = std::make_shared<Vector<InnerIdType>>(allocator.get());
+    }
 
-    UnorderedMap<InnerIdType, std::shared_ptr<Vector<InnerIdType>>> maps = generate_graph();
+    std::random_device rd;
+    std::mt19937 rng(rd());
+
+    for (auto& pair : maps) {
+        auto& vec_ptr = pair.second;
+        int max_possible_length = keys.size();
+        int length = random() % (max_degree - 1) + 2;
+        length = std::min(length, max_possible_length);
+        std::vector<InnerIdType> temp_keys = keys;
+        std::shuffle(temp_keys.begin(), temp_keys.end(), rng);
+
+        vec_ptr->resize(length);
+        for (int i = 0; i < length; ++i) {
+            (*vec_ptr)[i] = temp_keys[i];
+        }
+    }
+
+    if (require_sorted_) {
+        for (auto& [key, value] : maps) {
+            std::sort(value->begin(), value->end());
+        }
+    }
+
     for (auto& [key, value] : maps) {
         this->graph_->InsertNeighborsById(key, *value);
     }
@@ -96,7 +113,6 @@ GraphInterfaceTest::BasicTest(uint64_t max_id, uint64_t count, const GraphInterf
         REQUIRE(this->graph_->TotalCount() == other->TotalCount());
         REQUIRE(this->graph_->MaxCapacity() == other->MaxCapacity());
         REQUIRE(this->graph_->MaximumDegree() == other->MaximumDegree());
-
         for (auto& [key, value] : maps) {
             Vector<InnerIdType> neighbors(allocator.get());
             other->GetNeighbors(key, neighbors);
@@ -107,8 +123,44 @@ GraphInterfaceTest::BasicTest(uint64_t max_id, uint64_t count, const GraphInterf
         infile.close();
     }
 
-    maps = generate_graph();
+    if (test_delete) {
+        SECTION("Delete") {
+            std::unordered_set<InnerIdType> keys_to_delete;
+            for (const auto& item : maps) {
+                if (keys_to_delete.size() > count / 2) {
+                    Vector<InnerIdType> neighbors(allocator.get());
+                    this->graph_->GetNeighbors(item.first, neighbors);
+                    for (const auto& neighbor_id : neighbors) {
+                        REQUIRE(keys_to_delete.count(neighbor_id) == 0);
+                    }
+                } else {
+                    this->graph_->DeleteNeighborsById(item.first);
+                    keys_to_delete.insert(item.first);
+                }
+            }
+            for (const auto& key : keys_to_delete) {
+                this->graph_->InsertNeighborsById(key, *maps[key]);
+            }
+            for (const auto& [key, value] : maps) {
+                if (keys_to_delete.find(key) == keys_to_delete.end()) {
+                    Vector<InnerIdType> neighbors(allocator.get());
+                    this->graph_->GetNeighbors(key, neighbors);
+                    for (const auto& neighbor_id : neighbors) {
+                        REQUIRE(keys_to_delete.count(neighbor_id) == 0);
+                    }
+                    this->graph_->InsertNeighborsById(key, *value);
+                    this->graph_->GetNeighbors(key, neighbors);
+                    REQUIRE(neighbors.size() == value->size());
+                    REQUIRE(memcmp(neighbors.data(),
+                                   value->data(),
+                                   value->size() * sizeof(InnerIdType)) == 0);
+                }
+            }
+        }
+    }
+
     for (auto& [key, value] : maps) {
+        value->resize(value->size() / 2);
         this->graph_->InsertNeighborsById(key, *value);
     }
     SECTION("Test Update Graph") {
