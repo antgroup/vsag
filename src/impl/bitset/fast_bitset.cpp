@@ -15,6 +15,7 @@
 
 #include "fast_bitset.h"
 
+#include "simd/bit_simd.h"
 #include "vsag_exception.h"
 
 namespace vsag {
@@ -67,10 +68,10 @@ FastBitset::Or(const Bitset& another) {
     std::lock_guard<std::shared_mutex> lock2(fast_another->mutex_, std::adopt_lock);
     auto max_size = std::max(data_.size(), fast_another->data_.size());
     data_.resize(max_size, 0);
-    // TODO(LHT): use SIMD
-    for (uint64_t i = 0; i < max_size; ++i) {
-        data_[i] |= fast_another->data_[i];
-    }
+    BitOr(reinterpret_cast<const uint8_t*>(data_.data()),
+          reinterpret_cast<const uint8_t*>(fast_another->data_.data()),
+          max_size * sizeof(uint64_t),
+          reinterpret_cast<uint8_t*>(data_.data()));
 }
 
 void
@@ -84,10 +85,10 @@ FastBitset::And(const Bitset& another) {
     std::lock_guard<std::shared_mutex> lock2(fast_another->mutex_, std::adopt_lock);
     auto max_size = std::max(data_.size(), fast_another->data_.size());
     data_.resize(max_size, 0);
-    // TODO(LHT): use SIMD
-    for (uint64_t i = 0; i < max_size; ++i) {
-        data_[i] &= fast_another->data_[i];
-    }
+    BitAnd(reinterpret_cast<const uint8_t*>(data_.data()),
+           reinterpret_cast<const uint8_t*>(fast_another->data_.data()),
+           max_size * sizeof(uint64_t),
+           reinterpret_cast<uint8_t*>(data_.data()));
 }
 
 void
@@ -101,10 +102,10 @@ FastBitset::Xor(const Bitset& another) {
     std::lock_guard<std::shared_mutex> lock2(fast_another->mutex_, std::adopt_lock);
     auto max_size = std::max(data_.size(), fast_another->data_.size());
     data_.resize(max_size, 0);
-    // TODO(LHT): use SIMD
-    for (uint64_t i = 0; i < max_size; ++i) {
-        data_[i] ^= fast_another->data_[i];
-    }
+    BitXor(reinterpret_cast<const uint8_t*>(data_.data()),
+           reinterpret_cast<const uint8_t*>(fast_another->data_.data()),
+           max_size * sizeof(uint64_t),
+           reinterpret_cast<uint8_t*>(data_.data()));
 }
 
 std::string
@@ -130,9 +131,9 @@ FastBitset::Dump() {
 void
 FastBitset::Not() {
     std::lock_guard<std::shared_mutex> lock(mutex_);
-    for (auto& word : data_) {
-        word = ~word;
-    }
+    BitNot(reinterpret_cast<const uint8_t*>(data_.data()),
+           data_.size() * sizeof(uint64_t),
+           reinterpret_cast<uint8_t*>(data_.data()));
 }
 
 void

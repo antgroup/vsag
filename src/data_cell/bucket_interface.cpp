@@ -30,7 +30,11 @@ make_instance(const BucketDataCellParamPtr& param, const IndexCommonParam& commo
     auto& quantizer_param = param->quantizer_parameter;
 
     return std::make_shared<BucketDataCell<QuantTemp, IOTemp>>(
-        quantizer_param, io_param, common_param, static_cast<BucketIdType>(param->buckets_count));
+        quantizer_param,
+        io_param,
+        common_param,
+        static_cast<BucketIdType>(param->buckets_count),
+        param->use_residual_);
 }
 
 template <MetricType metric, typename IOTemp>
@@ -78,6 +82,9 @@ make_instance(const BucketDataCellParamPtr& param, const IndexCommonParam& commo
         return make_instance<MetricType::METRIC_TYPE_IP, IOTemp>(param, common_param);
     }
     if (metric == MetricType::METRIC_TYPE_COSINE) {
+        if (param->use_residual_) {
+            return make_instance<MetricType::METRIC_TYPE_IP, IOTemp>(param, common_param);
+        }
         return make_instance<MetricType::METRIC_TYPE_COSINE, IOTemp>(param, common_param);
     }
     return nullptr;
