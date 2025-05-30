@@ -23,6 +23,7 @@
 
 #include "impl/principal_component_analysis.h"
 #include "impl/random_orthogonal_matrix.h"
+#include "impl/hadamard_matrix.h"
 #include "index/index_common_param.h"
 #include "inner_string_params.h"
 #include "quantization/quantizer.h"
@@ -138,7 +139,8 @@ private:
     float inv_sqrt_d_{0};
 
     // random projection related
-    std::shared_ptr<RandomOrthogonalMatrix> rom_;
+    // std::shared_ptr<RandomOrthogonalMatrix> rom_;
+    std::shared_ptr<HadamardMatrix> HM_;
     std::vector<float> centroid_;  // TODO(ZXY): use centroids (e.g., IVF or Graph) outside
 
     // pca related
@@ -191,7 +193,8 @@ RaBitQuantizer<metric>::RaBitQuantizer(int dim,
     centroid_.resize(this->dim_, 0);
 
     // random orthogonal matrix
-    rom_.reset(new RandomOrthogonalMatrix(this->dim_, allocator));
+    // rom_.reset(new RandomOrthogonalMatrix(this->dim_, allocator));//todo
+    HM_.reset(new HadamardMatrix(this->dim_,allocator));
 
     // distance function related variable
     inv_sqrt_d_ = 1.0f / sqrt(this->dim_);
@@ -296,27 +299,29 @@ RaBitQuantizer<metric>::TrainImpl(const DataType* data, uint64_t count) {
     }
 
     // generate rom
-    rom_->GenerateRandomOrthogonalMatrixWithRetry();
+    // rom_->GenerateRandomOrthogonalMatrixWithRetry();//不用生成
 
     // validate rom
-    int retries = MAX_RETRIES;
-    bool successful_gen = true;
-    double det = rom_->ComputeDeterminant();
-    if (std::fabs(det - 1) > 1e-4) {
-        for (uint64_t i = 0; i < retries; i++) {
-            successful_gen = rom_->GenerateRandomOrthogonalMatrix();
-            if (successful_gen) {
-                break;
-            }
-        }
-    }
-    if (not successful_gen) {
-        return false;
-    }
+    // int retries = MAX_RETRIES;
+    // bool successful_gen = true;
+    // double det = rom_->ComputeDeterminant();
+    // if (std::fabs(det - 1) > 1e-4) {
+    //     for (uint64_t i = 0; i < retries; i++) {
+    //         successful_gen = rom_->GenerateRandomOrthogonalMatrix();
+    //         if (successful_gen) {
+    //             break;
+    //         }
+    //     }
+    // }
+    // if (not successful_gen) {
+    //     return false;
+    // }
 
     // transform centroid
     Vector<DataType> rp_centroids(this->dim_, 0, this->allocator_);
-    rom_->Transform(centroid_.data(), rp_centroids.data());
+    // rom_->Transform(centroid_.data(), rp_centroids.data());
+    HM_->Transform(centroid_.data(), rp_centroids.data());
+
     centroid_.assign(rp_centroids.begin(), rp_centroids.end());
 
     this->is_trained_ = true;
@@ -339,7 +344,8 @@ RaBitQuantizer<metric>::EncodeOneImpl(const DataType* data, uint8_t* codes) cons
     }
 
     // 2. random projection
-    rom_->Transform(pca_data.data(), transformed_data.data());
+    // rom_->Transform(pca_data.data(), transformed_data.data());
+    HM_->Transform(pca_data.data(), transformed_data.data());
 
     // 3. normalize
     norm_type norm = NormalizeWithCentroid(
@@ -406,7 +412,8 @@ RaBitQuantizer<metric>::DecodeOneImpl(const uint8_t* codes, DataType* data) {
 
     // 4. inverse random projection
     // Note that the value may be much different between original since inv_sqrt_d is small
-    rom_->InverseTransform(transformed_data.data(), data);
+    // rom_->InverseTransform(transformed_data.data(), data);
+    HM_->InverseTransform(transformed_data.data(), data);
     return true;
 }
 
@@ -537,7 +544,8 @@ RaBitQuantizer<metric>::ProcessQueryImpl(const DataType* query,
         }
 
         // 2. random projection
-        rom_->Transform(pca_data.data(), transformed_data.data());
+        // rom_->Transform(pca_data.data(), transformed_data.data());
+        HM_->Transform(pca_data.data(), transformed_data.data());
 
         // 3. norm
         float query_norm = NormalizeWithCentroid(
@@ -605,21 +613,21 @@ RaBitQuantizer<metric>::ReleaseComputerImpl(Computer<RaBitQuantizer<metric>>& co
 template <MetricType metric>
 void
 RaBitQuantizer<metric>::SerializeImpl(StreamWriter& writer) {
-    StreamWriter::WriteVector(writer, this->centroid_);
-    this->rom_->Serialize(writer);
-    if (pca_dim_ != this->original_dim_) {
-        this->pca_->Serialize(writer);
-    }
+    // StreamWriter::WriteVector(writer, this->centroid_);
+    // this->rom_->Serialize(writer);
+    // if (pca_dim_ != this->original_dim_) {
+    //     this->pca_->Serialize(writer);
+    // }
 }
 
 template <MetricType metric>
 void
 RaBitQuantizer<metric>::DeserializeImpl(StreamReader& reader) {
-    StreamReader::ReadVector(reader, this->centroid_);
-    this->rom_->Deserialize(reader);
-    if (pca_dim_ != this->original_dim_) {
-        this->pca_->Deserialize(reader);
-    }
+    // StreamReader::ReadVector(reader, this->centroid_);
+    // this->rom_->Deserialize(reader);
+    // if (pca_dim_ != this->original_dim_) {
+    //     this->pca_->Deserialize(reader);
+    // }
 }
 
 }  // namespace vsag
