@@ -1365,12 +1365,12 @@ HGraph::Remove(int64_t id) {
         for (int level = route_graphs_.size() - 1; level >= 0; --level) {
             auto result = this->search_one_graph(
                 query, this->route_graphs_[level], this->basic_flatten_codes_, search_param);
-            while (not result.empty()) {
-                if (inner_id == result.top().second) {
-                    result.pop();
+            while (not result->Empty()) {
+                if (inner_id == result->Top().second) {
+                    result->Pop();
                     continue;
                 }
-                this->entry_point_id_ = result.top().second;
+                this->entry_point_id_ = result->Top().second;
                 find_new_ep = true;
                 break;
             }
