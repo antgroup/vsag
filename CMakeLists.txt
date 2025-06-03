@@ -192,6 +192,14 @@ include_directories (${CMAKE_CURRENT_BINARY_DIR}/spdlog/install/include)
 include_directories (include)
 include_directories (src)
 
+# thirdparties of tools, cannot compile with _GLIBCXX_USE_CXX11_ABI=0
+if (ENABLE_TOOLS AND ENABLE_CXX11_ABI)
+    include (extern/hdf5/hdf5.cmake)
+    include (extern/argparse/argparse.cmake)
+    include (extern/yaml-cpp/yaml-cpp.cmake)
+    include (extern/tabulate/tabulate.cmake)
+    include (extern/cpr/cpr.cmake)
+endif ()
 
 set (CMAKE_CXX_STANDARD 17)
 set (CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -262,6 +270,9 @@ if (ENABLE_EXAMPLES)
     add_subdirectory (examples/cpp)
 endif ()
 
+if (ENABLE_TOOLS AND ENABLE_CXX11_ABI)
+    add_subdirectory (tools)
+endif ()
 
 
 # tests
