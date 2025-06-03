@@ -34,6 +34,9 @@ public:
     IOParamPtr io_parameter_{nullptr};
 
     uint64_t init_max_capacity_{100};
+
+    bool support_remove_{false};
+    uint32_t remove_flag_bit_{8};
 };
 
 using GraphDataCellParamPtr = std::shared_ptr<GraphDataCellParameter>;

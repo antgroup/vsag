@@ -43,6 +43,7 @@ CompressedGraphDataCell::InsertNeighborsById(InnerIdType id,
     Vector<InnerIdType> tmp(neighbor_ids.begin(), neighbor_ids.end(), allocator_);
     std::sort(tmp.begin(), tmp.end());
 
+    // TODO(deming): reset the size of neighbor_sets_[id] while tmp is empty
     if (not tmp.empty()) {
         if (neighbor_sets_[id] == nullptr) {
             neighbor_sets_[id] = std::make_unique<EliasFanoEncoder>(allocator_);
