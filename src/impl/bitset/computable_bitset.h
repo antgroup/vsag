@@ -23,10 +23,7 @@ namespace vsag {
 class ComputableBitset;
 using ComputableBitsetPtr = std::shared_ptr<ComputableBitset>;
 
-enum class ComputableBitsetType {
-    SparseBitset,
-    FastBitset,
-};
+enum class ComputableBitsetType { SparseBitset, FastBitset };
 
 /**
  * @brief ComputableBitset is a base class for bitsets that can be computed.
@@ -98,6 +95,9 @@ public:
      */
     virtual void
     Deserialize(StreamReader& reader) = 0;
+
+public:
+    ComputableBitsetType type_{ComputableBitsetType::SparseBitset};
 };
 
 }  // namespace vsag
