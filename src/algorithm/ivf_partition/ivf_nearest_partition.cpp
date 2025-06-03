@@ -87,7 +87,7 @@ Vector<BucketIdType>
 IVFNearestPartition::ClassifyDatas(const void* datas,
                                    int64_t count,
                                    BucketIdType buckets_per_data) {
-    Vector<BucketIdType> result(buckets_per_data * count, this->allocator_);
+    Vector<BucketIdType> result(buckets_per_data * count, -1, this->allocator_);
     for (int64_t i = 0; i < count; ++i) {
         auto query = Dataset::Make();
         query->Dim(this->dim_)

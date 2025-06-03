@@ -290,10 +290,10 @@ IVF::Add(const DatasetPtr& base) {
                 bucket_->InsertVector(
                     data_ptr, buckets[idx], idx + total_elements_ * buckets_per_data_);
             }
-
-            this->label_table_->Insert(idx + total_elements_ * buckets_per_data_, ids[i]);
         }
+        this->label_table_->Insert(i + total_elements_, ids[i]);
     }
+
     this->bucket_->Package();
     if (use_reorder_) {
         this->reorder_codes_->BatchInsertVector(base->GetFloat32Vectors(), base->GetNumElements());
@@ -467,7 +467,6 @@ IVF::search(const DatasetPtr& query, const InnerSearchParam& param) const {
             topk = std::numeric_limits<int64_t>::max();
         }
     }
-
     // Scale topk to ensure sufficient candidates after deduplication when buckets_per_data_ > 1
     int64_t origin_topk = topk;
     if (buckets_per_data_ > 1) {
@@ -480,7 +479,11 @@ IVF::search(const DatasetPtr& query, const InnerSearchParam& param) const {
 
     const auto& ft = param.is_inner_id_allowed;
     Vector<float> centroid(dim_, allocator_);
+
     for (auto& bucket_id : candidate_buckets) {
+        if (bucket_id == -1) {
+            break;
+        }
         auto bucket_size = bucket_->GetBucketSize(bucket_id);
         const auto* ids = bucket_->GetInnerIds(bucket_id);
         if (bucket_size > dist.size()) {
@@ -497,7 +500,8 @@ IVF::search(const DatasetPtr& query, const InnerSearchParam& param) const {
 
         bucket_->ScanBucketById(dist.data(), computer, bucket_id);
         for (int j = 0; j < bucket_size; ++j) {
-            if (ft == nullptr or ft->CheckValid(ids[j])) {
+            auto origin_id = ids[j] / buckets_per_data_;
+            if (ft == nullptr or ft->CheckValid(origin_id)) {
                 dist[j] -= ip_distance;
                 if constexpr (mode == KNN_SEARCH) {
                     if (search_result->Size() < topk or dist[j] < cur_heap_top) {
@@ -522,18 +526,20 @@ IVF::search(const DatasetPtr& query, const InnerSearchParam& param) const {
     if (buckets_per_data_ > 1) {
         std::unordered_map<InnerIdType, float> id_to_min_dist;
         while (!search_result->Empty()) {
-            auto [dist_val, id] = search_result->Top();
-            search_result->Pop();
+            const auto& [dist_val, id] = search_result->Top();
+            auto origin_id = id / buckets_per_data_;
             // Keep the smallest distance for each id
-            if (id_to_min_dist.find(id) == id_to_min_dist.end() || dist_val < id_to_min_dist[id]) {
-                id_to_min_dist[id] = dist_val;
+            if (id_to_min_dist.find(origin_id) == id_to_min_dist.end() ||
+                dist_val < id_to_min_dist[origin_id]) {
+                id_to_min_dist[origin_id] = dist_val;
             }
+            search_result->Pop();
         }
 
         auto cur_heap_top = std::numeric_limits<float>::max();
-        for (const auto& [id, dist_val] : id_to_min_dist) {
+        for (const auto& [origin_id, dist_val] : id_to_min_dist) {
             if (dist_val < cur_heap_top) {
-                search_result->Push(dist_val, id);
+                search_result->Push(dist_val, origin_id);
             }
             if (search_result->Size() > origin_topk) {
                 search_result->Pop();
