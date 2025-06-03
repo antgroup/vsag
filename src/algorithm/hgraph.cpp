@@ -1291,17 +1291,11 @@ HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
         },
         {
             HGRAPH_SUPPORT_REMOVE,
-            {
-                HGRAPH_GRAPH_KEY,
-                GRAPH_SUPPORT_REMOVE
-            },
+            {HGRAPH_GRAPH_KEY, GRAPH_SUPPORT_REMOVE},
         },
         {
             HGRAPH_REMOVE_FLAG_BIT,
-            {
-                HGRAPH_GRAPH_KEY,
-                REMOVE_FLAG_BIT
-            },
+            {HGRAPH_GRAPH_KEY, REMOVE_FLAG_BIT},
         },
     };
     if (common_param.data_type_ == DataTypes::DATA_TYPE_INT8) {

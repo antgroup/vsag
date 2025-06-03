@@ -66,7 +66,8 @@ protected:
                  const TestDatasetPtr& dataset,
                  bool expected_success = true);
 
-    static void TestRemoveIndex(const IndexPtr& index,
+    static void
+    TestRemoveIndex(const IndexPtr& index,
                     const TestDatasetPtr& dataset,
                     bool expected_success = true);
 
