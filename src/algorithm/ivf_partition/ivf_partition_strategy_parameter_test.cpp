@@ -35,4 +35,6 @@ TEST_CASE("IVF Partition Strategy Parameters Test", "[ut][IVFPartitionStrategyPa
     REQUIRE(param->partition_train_type == vsag::IVFNearestPartitionTrainerType::RandomTrainer);
     REQUIRE(param->gnoimi_param->first_order_buckets_count == 200);
     REQUIRE(param->gnoimi_param->second_order_buckets_count == 50);
+
+    vsag::ParameterTest::TestToJson(param);
 }
