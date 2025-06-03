@@ -19,6 +19,7 @@
 
 #include "graph_interface.h"
 #include "io/memory_block_io.h"
+#include "sparse_graph_datacell_parameter.h"
 
 namespace vsag {
 
@@ -28,11 +29,15 @@ public:
 
     SparseGraphDataCell(const GraphInterfaceParamPtr& graph_param,
                         const IndexCommonParam& common_param);
-
-    explicit SparseGraphDataCell(Allocator* allocator = nullptr, uint32_t max_degree = 32);
+    SparseGraphDataCell(const SparseGraphDatacellParamPtr& graph_param,
+                        const IndexCommonParam& common_param);
+    SparseGraphDataCell(const SparseGraphDatacellParamPtr& graph_param, Allocator* allocator);
 
     void
     InsertNeighborsById(InnerIdType id, const Vector<InnerIdType>& neighbor_ids) override;
+
+    void
+    DeleteNeighborsById(InnerIdType id) override;
 
     uint32_t
     GetNeighborSize(InnerIdType id) const override;
@@ -64,6 +69,12 @@ private:
     Allocator* const allocator_{nullptr};
     UnorderedMap<InnerIdType, std::unique_ptr<Vector<InnerIdType>>> neighbors_;
     mutable std::shared_mutex neighbors_map_mutex_{};
+
+    bool is_support_delete_{true};
+    uint32_t remove_flag_bit_{8};
+    uint32_t id_bit_{24};
+    uint32_t remove_flag_mask_{0x00ffffff};
+    UnorderedMap<InnerIdType, uint8_t> node_version_;
 };
 
 }  // namespace vsag
