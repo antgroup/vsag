@@ -52,6 +52,9 @@ public:
     void
     InsertNeighborsById(InnerIdType id, const Vector<InnerIdType>& neighbor_ids) override;
 
+    void
+    DeleteNeighborsById(vsag::InnerIdType id) override;
+
     [[nodiscard]] uint32_t
     GetNeighborSize(InnerIdType id) const override;
 
@@ -91,16 +94,32 @@ public:
 private:
     std::shared_ptr<BasicIO<IOTmpl>> io_{nullptr};
 
+    Vector<uint8_t> node_versions_;
+
+    bool is_support_delete_{true};
+    uint32_t remove_flag_bit_{8};
+    uint32_t id_bit_{24};
+    uint32_t remove_flag_mask_{0x00ffffff};
+
     uint32_t code_line_size_{0};
 };
 
 template <typename IOTmpl>
 GraphDataCell<IOTmpl>::GraphDataCell(const GraphDataCellParamPtr& param,
-                                     const IndexCommonParam& common_param) {
+                                     const IndexCommonParam& common_param)
+    : node_versions_(common_param.allocator_.get()) {
     this->io_ = std::make_shared<IOTmpl>(param->io_parameter_, common_param);
     this->maximum_degree_ = param->max_degree_;
     this->max_capacity_ = param->init_max_capacity_;
+    this->is_support_delete_ = param->support_remove_;
+    this->remove_flag_bit_ = param->remove_flag_bit_;
+    this->id_bit_ = sizeof(InnerIdType) * 8 - this->remove_flag_bit_;
+    this->remove_flag_mask_ = (1 << this->id_bit_) - 1;
     this->code_line_size_ = this->maximum_degree_ * sizeof(InnerIdType) + sizeof(uint32_t);
+    this->allocator_ = common_param.allocator_.get();
+    if (this->is_support_delete_) {
+        node_versions_.resize(max_capacity_);
+    }
 }
 
 template <typename IOTmpl>
@@ -122,21 +141,35 @@ GraphDataCell<IOTmpl>::InsertNeighborsById(InnerIdType id,
     while (current < id + 1 && !total_count_.compare_exchange_weak(current, id + 1)) {
     }
     auto start = static_cast<uint64_t>(id) * static_cast<uint64_t>(this->code_line_size_);
-    uint32_t neighbor_count = std::min((uint32_t)(neighbor_ids.size()), this->maximum_degree_);
-    this->io_->Write((uint8_t*)(&neighbor_count), sizeof(neighbor_count), start);
-    start += sizeof(neighbor_count);
-    this->io_->Write((uint8_t*)(neighbor_ids.data()),
-                     static_cast<uint64_t>(neighbor_count) * sizeof(InnerIdType),
-                     start);
+    if (is_support_delete_) {
+        uint32_t neighbor_count = std::min((uint32_t)(neighbor_ids.size()), this->maximum_degree_);
+        this->io_->Write((uint8_t*)(&neighbor_count), sizeof(neighbor_count), start);
+        start += sizeof(neighbor_count);
+        Vector<InnerIdType> neighbor_ids_ptr(neighbor_ids.size(), 0, this->allocator_);
+        for (int i = 0; i < neighbor_ids.size(); ++i) {
+            auto neighbor_id = neighbor_ids[i];
+            neighbor_ids_ptr[i] = neighbor_id | (node_versions_[neighbor_id] << id_bit_);
+        }
+        this->io_->Write((uint8_t*)(neighbor_ids_ptr.data()),
+                         static_cast<uint64_t>(neighbor_count) * sizeof(InnerIdType),
+                         start);
+    } else {
+        uint32_t neighbor_count = std::min((uint32_t)(neighbor_ids.size()), this->maximum_degree_);
+        this->io_->Write((uint8_t*)(&neighbor_count), sizeof(neighbor_count), start);
+        start += sizeof(neighbor_count);
+        this->io_->Write((uint8_t*)(neighbor_ids.data()),
+                         static_cast<uint64_t>(neighbor_count) * sizeof(InnerIdType),
+                         start);
+    }
 }
 
 template <typename IOTmpl>
 uint32_t
 GraphDataCell<IOTmpl>::GetNeighborSize(InnerIdType id) const {
     auto start = static_cast<uint64_t>(id) * static_cast<uint64_t>(this->code_line_size_);
-    uint32_t result = 0;
-    this->io_->Read(sizeof(result), start, (uint8_t*)(&result));
-    return result;
+    uint32_t neighbor_count = 0;
+    this->io_->Read(sizeof(neighbor_count), start, (uint8_t*)(&neighbor_count));
+    return neighbor_count;
 }
 
 template <typename IOTmpl>
@@ -145,10 +178,27 @@ GraphDataCell<IOTmpl>::GetNeighbors(InnerIdType id, Vector<InnerIdType>& neighbo
     auto start = static_cast<uint64_t>(id) * static_cast<uint64_t>(this->code_line_size_);
     uint32_t neighbor_count = 0;
     this->io_->Read(sizeof(neighbor_count), start, (uint8_t*)(&neighbor_count));
-    neighbor_ids.resize(neighbor_count);
-    start += sizeof(neighbor_count);
-    this->io_->Read(
-        neighbor_ids.size() * sizeof(InnerIdType), start, (uint8_t*)(neighbor_ids.data()));
+    if (is_support_delete_) {
+        neighbor_count &= remove_flag_mask_;
+        start += sizeof(neighbor_count);
+        Vector<InnerIdType> shared_neighbor_ids(neighbor_count, this->allocator_);
+        this->io_->Read(
+            neighbor_count * sizeof(InnerIdType), start, (uint8_t*)(shared_neighbor_ids.data()));
+        neighbor_ids.clear();
+        neighbor_ids.reserve(neighbor_count);
+        for (int i = 0; i < neighbor_count; ++i) {
+            uint8_t neighbor_version = shared_neighbor_ids[i] >> id_bit_;
+            InnerIdType neighbor_id = shared_neighbor_ids[i] & remove_flag_mask_;
+            if (node_versions_[neighbor_id] == neighbor_version) {
+                neighbor_ids.push_back(neighbor_id);
+            }
+        }
+    } else {
+        start += sizeof(neighbor_count);
+        neighbor_ids.resize(neighbor_count);
+        this->io_->Read(
+            neighbor_ids.size() * sizeof(InnerIdType), start, (uint8_t*)(neighbor_ids.data()));
+    }
 }
 
 template <typename IOTmpl>
@@ -156,6 +206,14 @@ void
 GraphDataCell<IOTmpl>::Resize(InnerIdType new_size) {
     if (new_size < this->max_capacity_) {
         return;
+    }
+    if (is_support_delete_) {
+        if (new_size > remove_flag_mask_) {
+            // remove_flag_mask_ exactly matches the maximum size of the graph in dynamic mode.
+            throw VsagException(ErrorType::INTERNAL_ERROR,
+                                fmt::format("the size of graph is limit ({})", remove_flag_mask_));
+        }
+        node_versions_.resize(new_size);
     }
     this->max_capacity_ = new_size;
     uint64_t io_size = static_cast<uint64_t>(new_size) * static_cast<uint64_t>(code_line_size_);
@@ -170,6 +228,9 @@ GraphDataCell<IOTmpl>::Serialize(StreamWriter& writer) {
     GraphInterface::Serialize(writer);
     this->io_->Serialize(writer);
     StreamWriter::WriteObj(writer, this->code_line_size_);
+    if (is_support_delete_) {
+        StreamWriter::WriteVector(writer, node_versions_);
+    }
 }
 
 template <typename IOTmpl>
@@ -178,6 +239,30 @@ GraphDataCell<IOTmpl>::Deserialize(StreamReader& reader) {
     GraphInterface::Deserialize(reader);
     this->io_->Deserialize(reader);
     StreamReader::ReadObj(reader, this->code_line_size_);
+    if (is_support_delete_) {
+        StreamReader::ReadVector(reader, node_versions_);
+    }
+}
+
+template <typename IOTmpl>
+void
+GraphDataCell<IOTmpl>::DeleteNeighborsById(vsag::InnerIdType id) {
+    if (is_support_delete_) {
+        if (id <= max_capacity_) {
+            if (node_versions_[id] + 1 == 0) {
+                throw VsagException(
+                    ErrorType::INTERNAL_ERROR,
+                    "remove point too many times in GraphDatacell, please rebuild index");
+            }
+        } else {
+            throw VsagException(ErrorType::INTERNAL_ERROR,
+                                fmt::format("remove point {} not exist in GraphDatacell", id));
+        }
+        node_versions_[id]++;
+    } else {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "disable delete in graph datacell");
+    }
 }
 
 }  // namespace vsag
