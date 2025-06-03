@@ -29,4 +29,5 @@ TEST_CASE("GNO-IMI Parameters Test", "[ut][GNOIMIParameter]") {
     param->FromJson(param_json);
     REQUIRE(param->first_order_buckets_count == 200);
     REQUIRE(param->second_order_buckets_count == 50);
+    vsag::ParameterTest::TestToJson(param);
 }
