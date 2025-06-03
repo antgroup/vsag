@@ -28,7 +28,7 @@ public:
     }
 
     void
-    BasicTest(uint64_t max_id, uint64_t count, const GraphInterfacePtr& other);
+    BasicTest(uint64_t max_id, uint64_t count, const GraphInterfacePtr& other, bool test_delete);
 
 public:
     GraphInterfacePtr graph_{nullptr};
