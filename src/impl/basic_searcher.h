@@ -50,6 +50,7 @@ public:
     // for ivf
     int scan_bucket_size{1};
     float factor{2.0F};
+    Allocator* search_alloc{nullptr};
 
     InnerSearchParam&
     operator=(const InnerSearchParam& other) {
