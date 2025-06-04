@@ -96,8 +96,10 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                            const void* query,
                            const InnerSearchParam& inner_search_param,
                            IteratorFilterContext* iter_ctx) const {
-    auto top_candidates = std::make_shared<StandardHeap<true, false>>(allocator_, -1);
-    auto candidate_set = std::make_shared<StandardHeap<true, false>>(allocator_, -1);
+    Allocator* alloc =
+        inner_search_param.search_alloc == nullptr ? allocator_ : inner_search_param.search_alloc;
+    auto top_candidates = std::make_shared<StandardHeap<true, false>>(alloc, -1);
+    auto candidate_set = std::make_shared<StandardHeap<true, false>>(alloc, -1);
 
     if (not graph or not flatten) {
         return top_candidates;
@@ -116,10 +118,10 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
     uint32_t hops = 0;
     uint32_t dist_cmp = 0;
     uint32_t count_no_visited = 0;
-    Vector<InnerIdType> to_be_visited_rid(graph->MaximumDegree(), allocator_);
-    Vector<InnerIdType> to_be_visited_id(graph->MaximumDegree(), allocator_);
-    Vector<InnerIdType> neighbors(graph->MaximumDegree(), allocator_);
-    Vector<float> line_dists(graph->MaximumDegree(), allocator_);
+    Vector<InnerIdType> to_be_visited_rid(graph->MaximumDegree(), alloc);
+    Vector<InnerIdType> to_be_visited_id(graph->MaximumDegree(), alloc);
+    Vector<InnerIdType> neighbors(graph->MaximumDegree(), alloc);
+    Vector<float> line_dists(graph->MaximumDegree(), alloc);
 
     if (!iter_ctx->IsFirstUsed()) {
         if (iter_ctx->Empty()) {
@@ -131,7 +133,7 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
             if (!vl->Get(cur_inner_id) && iter_ctx->CheckPoint(cur_inner_id)) {
                 vl->Set(cur_inner_id);
                 lower_bound = std::max(lower_bound, cur_dist);
-                flatten->Query(&cur_dist, computer, &cur_inner_id, 1);
+                flatten->Query(&cur_dist, computer, &cur_inner_id, 1, alloc);
                 top_candidates->Push(cur_dist, cur_inner_id);
                 candidate_set->Push(cur_dist, cur_inner_id);
                 if constexpr (mode == InnerSearchMode::RANGE_SEARCH) {
@@ -143,7 +145,7 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
             iter_ctx->PopDiscard();
         }
     } else {
-        flatten->Query(&dist, computer, &ep, 1);
+        flatten->Query(&dist, computer, &ep, 1, alloc);
         if (not is_id_allowed || is_id_allowed->CheckValid(ep)) {
             top_candidates->Push(dist, ep);
             lower_bound = top_candidates->Top().first;
@@ -178,7 +180,8 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
 
         dist_cmp += count_no_visited;
 
-        flatten->Query(line_dists.data(), computer, to_be_visited_id.data(), count_no_visited);
+        flatten->Query(
+            line_dists.data(), computer, to_be_visited_id.data(), count_no_visited, alloc);
 
         for (uint32_t i = 0; i < count_no_visited; i++) {
             dist = line_dists[i];
@@ -230,8 +233,10 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                            const VisitedListPtr& vl,
                            const void* query,
                            const InnerSearchParam& inner_search_param) const {
-    auto top_candidates = std::make_shared<StandardHeap<true, false>>(allocator_, -1);
-    auto candidate_set = std::make_shared<StandardHeap<true, false>>(allocator_, -1);
+    Allocator* alloc =
+        inner_search_param.search_alloc == nullptr ? allocator_ : inner_search_param.search_alloc;
+    auto top_candidates = std::make_shared<StandardHeap<true, false>>(alloc, -1);
+    auto candidate_set = std::make_shared<StandardHeap<true, false>>(alloc, -1);
 
     if (not graph or not flatten) {
         return top_candidates;
@@ -249,12 +254,12 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
     uint32_t hops = 0;
     uint32_t dist_cmp = 0;
     uint32_t count_no_visited = 0;
-    Vector<InnerIdType> to_be_visited_rid(graph->MaximumDegree(), allocator_);
-    Vector<InnerIdType> to_be_visited_id(graph->MaximumDegree(), allocator_);
-    Vector<InnerIdType> neighbors(graph->MaximumDegree(), allocator_);
-    Vector<float> line_dists(graph->MaximumDegree(), allocator_);
+    Vector<InnerIdType> to_be_visited_rid(graph->MaximumDegree(), alloc);
+    Vector<InnerIdType> to_be_visited_id(graph->MaximumDegree(), alloc);
+    Vector<InnerIdType> neighbors(graph->MaximumDegree(), alloc);
+    Vector<float> line_dists(graph->MaximumDegree(), alloc);
 
-    flatten->Query(&dist, computer, &ep, 1);
+    flatten->Query(&dist, computer, &ep, 1, alloc);
     if (not is_id_allowed || is_id_allowed->CheckValid(ep)) {
         top_candidates->Push(dist, ep);
         lower_bound = top_candidates->Top().first;
@@ -293,7 +298,8 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
 
         dist_cmp += count_no_visited;
 
-        flatten->Query(line_dists.data(), computer, to_be_visited_id.data(), count_no_visited);
+        flatten->Query(
+            line_dists.data(), computer, to_be_visited_id.data(), count_no_visited, alloc);
 
         for (uint32_t i = 0; i < count_no_visited; i++) {
             dist = line_dists[i];
