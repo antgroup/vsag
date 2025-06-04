@@ -266,7 +266,17 @@ HGraph::KnnSearch(const DatasetPtr& query,
                   int64_t k,
                   const std::string& parameters,
                   const FilterPtr& filter) const {
+    return KnnSearch(query, k, parameters, filter, nullptr);
+}
+
+DatasetPtr
+HGraph::KnnSearch(const DatasetPtr& query,
+                  int64_t k,
+                  const std::string& parameters,
+                  const FilterPtr& filter,
+                  Allocator* allocator) const {
     int64_t query_dim = query->GetDim();
+    Allocator* search_allocator = allocator == nullptr ? allocator_ : allocator;
     if (data_type_ != DataTypes::DATA_TYPE_SPARSE) {
         CHECK_ARGUMENT(
             query_dim == dim_,
@@ -284,6 +294,7 @@ HGraph::KnnSearch(const DatasetPtr& query,
     search_param.topk = 1;
     search_param.ef = 1;
     search_param.is_inner_id_allowed = nullptr;
+    search_param.search_alloc = search_allocator;
     const auto* raw_query = get_data(query);
     for (auto i = static_cast<int64_t>(this->route_graphs_.size() - 1); i >= 0; --i) {
         auto result = this->search_one_graph(
@@ -326,10 +337,10 @@ HGraph::KnnSearch(const DatasetPtr& query,
         return DatasetImpl::MakeEmptyDataset();
     }
     auto count = static_cast<const int64_t>(search_result->Size());
-    auto [dataset_results, dists, ids] = CreateFastDataset(count, allocator_);
+    auto [dataset_results, dists, ids] = CreateFastDataset(count, search_allocator);
     char* extra_infos = nullptr;
     if (extra_info_size_ > 0) {
-        extra_infos = (char*)allocator_->Allocate(extra_info_size_ * search_result->Size());
+        extra_infos = (char*)search_allocator->Allocate(extra_info_size_ * search_result->Size());
         dataset_results->ExtraInfos(extra_infos);
     }
     for (int64_t j = count - 1; j >= 0; --j) {
@@ -349,8 +360,10 @@ HGraph::KnnSearch(const DatasetPtr& query,
                   int64_t k,
                   const std::string& parameters,
                   const FilterPtr& filter,
+                  Allocator* allocator,
                   IteratorContext*& iter_ctx,
                   bool is_last_filter) const {
+    Allocator* search_allocator = allocator == nullptr ? allocator_ : allocator;
     if (GetNumElements() == 0) {
         return DatasetImpl::MakeEmptyDataset();
     }
@@ -381,7 +394,7 @@ HGraph::KnnSearch(const DatasetPtr& query,
     if (iter_ctx == nullptr) {
         auto cur_count = this->bottom_graph_->TotalCount();
         auto* new_ctx = new IteratorFilterContext();
-        if (auto ret = new_ctx->init(cur_count, params.ef_search, allocator_);
+        if (auto ret = new_ctx->init(cur_count, params.ef_search, search_allocator);
             not ret.has_value()) {
             throw vsag::VsagException(ErrorType::INTERNAL_ERROR,
                                       "failed to init IteratorFilterContext");
@@ -390,7 +403,7 @@ HGraph::KnnSearch(const DatasetPtr& query,
     }
 
     auto* iter_filter_ctx = static_cast<IteratorFilterContext*>(iter_ctx);
-    DistHeapPtr search_result = std::make_shared<StandardHeap<true, false>>(allocator_, -1);
+    DistHeapPtr search_result = std::make_shared<StandardHeap<true, false>>(search_allocator, -1);
     const auto* query_data = get_data(query);
     if (is_last_filter) {
         while (!iter_filter_ctx->Empty()) {
@@ -405,6 +418,7 @@ HGraph::KnnSearch(const DatasetPtr& query,
         search_param.topk = 1;
         search_param.ef = 1;
         search_param.is_inner_id_allowed = nullptr;
+        search_param.search_alloc = search_allocator;
         if (iter_filter_ctx->IsFirstUsed()) {
             for (auto i = static_cast<int64_t>(this->route_graphs_.size() - 1); i >= 0; --i) {
                 auto result = this->search_one_graph(
@@ -438,10 +452,10 @@ HGraph::KnnSearch(const DatasetPtr& query,
         return DatasetImpl::MakeEmptyDataset();
     }
     auto count = static_cast<const int64_t>(search_result->Size());
-    auto [dataset_results, dists, ids] = CreateFastDataset(count, allocator_);
+    auto [dataset_results, dists, ids] = CreateFastDataset(count, search_allocator);
     char* extra_infos = nullptr;
     if (extra_info_size_ > 0) {
-        extra_infos = (char*)allocator_->Allocate(extra_info_size_ * search_result->Size());
+        extra_infos = (char*)search_allocator->Allocate(extra_info_size_ * search_result->Size());
         dataset_results->ExtraInfos(extra_infos);
     }
     for (int64_t j = count - 1; j >= 0; --j) {

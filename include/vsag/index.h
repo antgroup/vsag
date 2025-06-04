@@ -32,6 +32,7 @@
 #include "vsag/index_features.h"
 #include "vsag/iterator_context.h"
 #include "vsag/readerset.h"
+#include "vsag/search_param.h"
 #include "vsag/search_request.h"
 
 namespace vsag {
@@ -215,6 +216,21 @@ public:
               const FilterPtr& filter,
               IteratorContext*& iter_ctx,
               bool is_last_search) const {
+        throw std::runtime_error("Index doesn't support new filter");
+    }
+
+    /**
+      * @brief Performing single KNN search on index
+      *
+      * @param query should contains dim, num_elements and vectors
+      * @param k the result size of every query
+      * @param search_param search param contains filter, iter_ctx and allocator
+      * @return result contains
+      *                - num_elements: 1
+      *                - ids, distances: length is (num_elements * k)
+      */
+    virtual tl::expected<DatasetPtr, Error>
+    KnnSearch(const DatasetPtr& query, int64_t k, SearchParam& search_param) const {
         throw std::runtime_error("Index doesn't support new filter");
     }
 

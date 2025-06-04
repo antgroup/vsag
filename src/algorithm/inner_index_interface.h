@@ -101,11 +101,26 @@ public:
               int64_t k,
               const std::string& parameters,
               const FilterPtr& filter,
+              Allocator* allocator) const {
+        throw std::runtime_error("Index doesn't support new filter");
+    };
+
+    [[nodiscard]] virtual DatasetPtr
+    KnnSearch(const DatasetPtr& query,
+              int64_t k,
+              const std::string& parameters,
+              const FilterPtr& filter,
+              Allocator* allocator,
               IteratorContext*& iter_ctx,
               bool is_last_filter) const {
         throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
                             "Index doesn't support new filter");
     };
+
+    [[nodiscard]] virtual DatasetPtr
+    KnnSearch(const DatasetPtr& query, int64_t k, SearchParam& search_param) const {
+        throw std::runtime_error("Index doesn't support new filter");
+    }
 
     [[nodiscard]] virtual DatasetPtr
     RangeSearch(const DatasetPtr& query,

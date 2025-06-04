@@ -35,7 +35,8 @@ public:
     Query(float* result_dists,
           const ComputerInterfacePtr& computer,
           const InnerIdType* idx,
-          InnerIdType id_count) override {
+          InnerIdType id_count,
+          Allocator* allocator = nullptr) override {
         auto comp = std::static_pointer_cast<Computer<QuantTmpl>>(computer);
         this->query(result_dists, comp, idx, id_count);
     }
