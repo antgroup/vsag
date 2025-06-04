@@ -116,6 +116,13 @@ protected:
                       bool use_ex_filter = false);
 
     static void
+    TestSearchAllocator(const IndexPtr& index,
+                        const TestDatasetPtr& dataset,
+                        const std::string& search_param,
+                        float expected_recall = 0.99,
+                        bool expected_success = true);
+
+    static void
     TestSearchWithDirtyVector(const IndexPtr& index,
                               const TestDatasetPtr& dataset,
                               const std::string& search_param,

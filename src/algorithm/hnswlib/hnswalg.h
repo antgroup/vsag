@@ -261,6 +261,7 @@ public:
                       size_t ef,
                       const vsag::FilterPtr is_id_allowed = nullptr,
                       const float skip_ratio = 0.9f,
+                      vsag::Allocator* allocator = nullptr,
                       vsag::IteratorFilterContext* iter_ctx = nullptr) const;
 
     template <bool has_deletions, bool collect_metrics = false>
@@ -417,6 +418,7 @@ public:
               uint64_t ef,
               const vsag::FilterPtr is_id_allowed = nullptr,
               const float skip_ratio = 0.9f,
+              vsag::Allocator* allocator = nullptr,
               vsag::IteratorFilterContext* iter_ctx = nullptr,
               bool is_last_filter = false) const override;
 

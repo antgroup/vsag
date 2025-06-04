@@ -23,6 +23,7 @@
 #include "simd/fp32_simd.h"
 #include "vsag/engine.h"
 #include "vsag/resource.h"
+#include "vsag/search_param.h"
 
 namespace fixtures {
 static int64_t
@@ -652,6 +653,94 @@ TestIndex::TestFilterSearch(const TestIndex::IndexPtr& index,
         auto gt = gts->GetIds() + gt_topK * i;
         auto val = Intersection(gt, gt_topK, result, topk);
         cur_recall += static_cast<float>(val) / static_cast<float>(gt_topK);
+    }
+    if (cur_recall <= expected_recall * query_count) {
+        WARN(fmt::format("cur_result({}) <= expected_recall * query_count({})",
+                         cur_recall,
+                         expected_recall * query_count));
+    }
+    REQUIRE(cur_recall > expected_recall * query_count * RECALL_THRESHOLD);
+}
+
+void
+TestIndex::TestSearchAllocator(const TestIndex::IndexPtr& index,
+                               const TestDatasetPtr& dataset,
+                               const std::string& search_param,
+                               float expected_recall,
+                               bool expected_success) {
+    if (not index->CheckFeature(vsag::SUPPORT_KNN_SEARCH)) {
+        return;
+    }
+    auto queries = dataset->query_;
+    auto query_count = queries->GetNumElements();
+    auto dim = queries->GetDim();
+    auto gts = dataset->ground_truth_;
+    auto gt_topK = dataset->top_k;
+    float cur_recall = 0.0f;
+    auto topk = gt_topK;
+    class ExampleAllocator : public vsag::Allocator {
+    public:
+        std::string
+        Name() override {
+            return "example-allocator";
+        }
+
+        void*
+        Allocate(size_t size) override {
+            auto addr = (void*)malloc(size);
+            sizes_[addr] = size;
+            return addr;
+        }
+
+        void
+        Deallocate(void* p) override {
+            if (sizes_.find(p) == sizes_.end())
+                return;
+            sizes_.erase(p);
+            return free(p);
+        }
+
+        void*
+        Reallocate(void* p, size_t size) override {
+            auto addr = (void*)realloc(p, size);
+            sizes_.erase(p);
+            sizes_[addr] = size;
+            return addr;
+        }
+
+    private:
+        std::unordered_map<void*, size_t> sizes_;
+    };
+
+    for (auto i = 0; i < query_count; ++i) {
+        auto query = vsag::Dataset::Make();
+        query->NumElements(1)
+            ->Dim(dim)
+            ->Float32Vectors(queries->GetFloat32Vectors() + i * dim)
+            ->SparseVectors(queries->GetSparseVectors() + i)
+            ->Paths(queries->GetPaths() + i)
+            ->Owner(false);
+        ExampleAllocator allocator;
+        vsag::SearchParam search_params(false, search_param, nullptr, &allocator);
+        auto res = index->KnnSearch(query, topk, search_params);
+        if (not expected_success) {
+            if (res.has_value()) {
+                REQUIRE(res.value()->GetDim() == 0);
+            }
+        } else {
+            REQUIRE(res.has_value() == expected_success);
+        }
+        if (!expected_success) {
+            return;
+        }
+        REQUIRE(res.value()->GetDim() == topk);
+        auto result = res.value()->GetIds();
+        auto dis = res.value()->GetDistances();
+        auto gt = gts->GetIds() + gt_topK * i;
+        auto val = Intersection(gt, gt_topK, result, topk);
+        cur_recall += static_cast<float>(val) / static_cast<float>(gt_topK);
+        allocator.Deallocate((void*)result);
+        allocator.Deallocate((void*)dis);
     }
     if (cur_recall <= expected_recall * query_count) {
         WARN(fmt::format("cur_result({}) <= expected_recall * query_count({})",
