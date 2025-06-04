@@ -25,6 +25,7 @@
 #include "data_cell/extra_info_interface.h"
 #include "data_cell/flatten_interface.h"
 #include "data_cell/graph_interface.h"
+#include "data_cell/sparse_graph_datacell_parameter.h"
 #include "default_thread_pool.h"
 #include "hgraph_parameter.h"
 #include "impl/basic_searcher.h"
@@ -87,6 +88,14 @@ public:
               int64_t k,
               const std::string& parameters,
               const FilterPtr& filter,
+              Allocator* allocator) const override;
+
+    [[nodiscard]] DatasetPtr
+    KnnSearch(const DatasetPtr& query,
+              int64_t k,
+              const std::string& parameters,
+              const FilterPtr& filter,
+              Allocator* allocator,
               IteratorContext*& iter_ctx,
               bool is_last_filter) const override;
 
@@ -223,6 +232,7 @@ private:
     FlattenInterfacePtr high_precise_codes_{nullptr};
     Vector<GraphInterfacePtr> route_graphs_;
     GraphInterfacePtr bottom_graph_{nullptr};
+    SparseGraphDatacellParamPtr sparse_datacell_param_{nullptr};
 
     mutable bool use_reorder_{false};
     bool use_elp_optimizer_{false};

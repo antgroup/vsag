@@ -118,6 +118,25 @@ public:
     }
 
     tl::expected<DatasetPtr, Error>
+    KnnSearch(const DatasetPtr& query, int64_t k, SearchParam& search_param) const override {
+        if (GetNumElements() == 0) {
+            return DatasetImpl::MakeEmptyDataset();
+        }
+        if (search_param.is_iter_filter) {
+            SAFE_CALL(return this->inner_index_->KnnSearch(query,
+                                                           k,
+                                                           search_param.parameters,
+                                                           search_param.filter,
+                                                           search_param.allocator,
+                                                           search_param.iter_ctx,
+                                                           search_param.is_last_search));
+        } else {
+            SAFE_CALL(return this->inner_index_->KnnSearch(
+                query, k, search_param.parameters, search_param.filter, search_param.allocator));
+        }
+    }
+
+    tl::expected<DatasetPtr, Error>
     KnnSearch(const DatasetPtr& query,
               int64_t k,
               const std::string& parameters,
@@ -128,7 +147,7 @@ public:
             return DatasetImpl::MakeEmptyDataset();
         }
         SAFE_CALL(return this->inner_index_->KnnSearch(
-            query, k, parameters, filter, iter_ctx, is_last_filter));
+            query, k, parameters, filter, nullptr, iter_ctx, is_last_filter));
     }
 
     [[nodiscard]] tl::expected<DatasetPtr, Error>

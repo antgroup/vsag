@@ -34,7 +34,7 @@ TestCompressedGraphDataCell(const GraphInterfaceParamPtr& param,
     auto graph = GraphInterface::MakeInstance(param, common_param);
     GraphInterfaceTest test(graph, true);
     auto other = GraphInterface::MakeInstance(param, common_param);
-    test.BasicTest(max_id, count, other);
+    test.BasicTest(max_id, count, other, false);
 }
 
 TEST_CASE("CompressedGraphDataCell Basic Test", "[ut][CompressedGraphDataCell]") {
