@@ -298,6 +298,11 @@ public:
         return this->inner_index_->GetMemoryUsage();
     }
 
+    [[nodiscard]] JsonType
+    GetMemoryUsageDetail() const override {
+        return this->inner_index_->GetMemoryUsageDetail();
+    }
+
     [[nodiscard]] uint64_t
     EstimateMemory(uint64_t num_elements) const override {
         return this->inner_index_->EstimateMemory(num_elements);
