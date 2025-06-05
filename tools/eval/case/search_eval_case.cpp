@@ -246,6 +246,12 @@ SearchEvalCase::process_result() {
     result["index_info"] = JsonType::parse(config_.build_param);
     result["search_param"] = config_.search_param;
     result["index"] = config_.index_name;
+    // TODO(deming): remove try-catch after implement GetMemoryUsageDetail
+    try {
+        result["memory_detail(B)"] = this->index_->GetMemoryUsageDetail();
+    } catch (std::exception& e) {
+        logger_->Debug(e.what());
+    }
     EvalCase::MergeJsonType(this->basic_info_, result);
     return result;
 }
