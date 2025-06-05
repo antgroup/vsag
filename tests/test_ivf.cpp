@@ -414,6 +414,35 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex, "IVF Build", "[ft][ivf]") {
     }
 }
 
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex, "IVF Build With Large K", "[ft][ivf]") {
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    auto size = GENERATE(1024 * 1024 * 2);
+    auto metric_type = GENERATE("l2");
+    std::string train_type = GENERATE("kmeans");
+
+    std::vector<std::pair<std::string, float>> tmp_test_cases = {
+        {"fp32", 0.84},
+    };
+
+    const std::string name = "ivf";
+    auto search_param = fmt::format(search_param_tmp, 100);
+    std::vector<int> dims_tmp = {32};
+    for (auto& dim : dims_tmp) {
+        for (auto& [base_quantization_str, recall] : tmp_test_cases) {
+            vsag::Options::Instance().set_block_size_limit(size);
+            auto param = GenerateIVFBuildParametersString(
+                metric_type, dim, base_quantization_str, 10000, train_type);
+            auto index = TestFactory(name, param, true);
+            auto dataset = pool.GetDatasetAndCreate(dim, 20000, metric_type);
+            TestBuildIndex(index, dataset, true);
+            if (index->CheckFeature(vsag::SUPPORT_BUILD)) {
+                TestGeneral(index, dataset, search_param, recall);
+            }
+            vsag::Options::Instance().set_block_size_limit(origin_size);
+        }
+    }
+}
+
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex, "IVF Export Model", "[ft][ivf]") {
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
