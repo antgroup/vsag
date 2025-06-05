@@ -1659,13 +1659,8 @@ void
 TestIndex::TestRemoveIndex(const TestIndex::IndexPtr& index,
                            const TestDatasetPtr& dataset,
                            bool expected_success) {
-    auto build_index = index->Build(dataset->base_);
-    if (expected_success) {
-        REQUIRE(build_index.has_value());
-        REQUIRE(index->GetNumElements() == dataset->base_->GetNumElements());
-    } else {
-        REQUIRE(build_index.has_value() == expected_success);
-    }
+    auto train_result = index->Train(dataset->base_);
+    REQUIRE(train_result.has_value());
     auto base_num = dataset->base_->GetNumElements();
     auto base_dim = dataset->base_->GetDim();
     for (int64_t i = 0; i < base_num; ++i) {
@@ -1673,6 +1668,16 @@ TestIndex::TestRemoveIndex(const TestIndex::IndexPtr& index,
         new_data->NumElements(1)
             ->Dim(base_dim)
             ->Ids(&i)
+            ->Float32Vectors(dataset->base_->GetFloat32Vectors() + i * base_dim)
+            ->Owner(false);
+        auto add_results = index->Add(new_data);
+        REQUIRE(add_results.has_value());
+    }
+    for (int64_t i = 0; i < base_num; ++i) {
+        auto new_data = vsag::Dataset::Make();
+        new_data->NumElements(1)
+            ->Dim(base_dim)
+            ->Ids(dataset->base_->GetIds() + i)
             ->Float32Vectors(dataset->base_->GetFloat32Vectors() + i * base_dim)
             ->Owner(false);
         auto add_results = index->Add(new_data);

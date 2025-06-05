@@ -1349,22 +1349,16 @@ HGraph::Remove(int64_t id) {
     // TODO(inbao): support thread safe remove
     auto inner_id = this->label_table_->GetIdByLabel(id);
     if (inner_id == this->entry_point_id_) {
-        InnerSearchParam search_param;
-        search_param.ep = this->entry_point_id_;
-        search_param.ef = 10;
-        search_param.is_inner_id_allowed = nullptr;
-        Vector<uint8_t> codes(this->basic_flatten_codes_->code_size_, allocator_);
-        auto query = (float*)this->basic_flatten_codes_->GetCodesById(inner_id, codes.data());
         bool find_new_ep = false;
-        for (int level = route_graphs_.size() - 1; level >= 0; --level) {
-            auto result = this->search_one_graph(
-                query, this->route_graphs_[level], this->basic_flatten_codes_, search_param);
-            while (not result->Empty()) {
-                if (inner_id == result->Top().second) {
-                    result->Pop();
+        while (not route_graphs_.empty()) {
+            auto& upper_graph = route_graphs_.back();
+            Vector<InnerIdType> neighbors(allocator_);
+            upper_graph->GetNeighbors(this->entry_point_id_, neighbors);
+            for (const auto& nb_id : neighbors) {
+                if (inner_id == nb_id) {
                     continue;
                 }
-                this->entry_point_id_ = result->Top().second;
+                this->entry_point_id_ = nb_id;
                 find_new_ep = true;
                 break;
             }
@@ -1374,12 +1368,13 @@ HGraph::Remove(int64_t id) {
             route_graphs_.pop_back();
         }
     }
-    for (int level = route_graphs_.size() - 1; level >= 0; --level) {
+    for (int level = static_cast<int>(route_graphs_.size()) - 1; level >= 0; --level) {
         this->route_graphs_[level]->DeleteNeighborsById(inner_id);
     }
     this->bottom_graph_->DeleteNeighborsById(inner_id);
     this->label_table_->Remove(id);
     this->deleted_ids_.insert(inner_id);
+    delete_count_++;
     return true;
 }
 
