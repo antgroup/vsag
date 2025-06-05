@@ -700,6 +700,29 @@ HGraph::Deserialize(StreamReader& reader) {
     }
 }
 
+JsonType
+HGraph::GetMemoryUsageDetail() const {
+    JsonType memory_usage;
+    if (this->ignore_reorder_) {
+        this->use_reorder_ = false;
+    }
+    memory_usage["basic_flatten_codes"] = this->basic_flatten_codes_->CalcSerializeSize();
+    memory_usage["bottom_graph"] = this->bottom_graph_->CalcSerializeSize();
+    if (this->use_reorder_) {
+        memory_usage["high_precise_codes"] = this->high_precise_codes_->CalcSerializeSize();
+    }
+    size_t route_graph_size = 0;
+    for (const auto& route_graph : this->route_graphs_) {
+        route_graph_size += route_graph->CalcSerializeSize();
+    }
+    memory_usage["route_graph"] = route_graph_size;
+    if (this->extra_info_size_ > 0 && this->extra_infos_ != nullptr) {
+        memory_usage["extra_infos"] = this->extra_infos_->CalcSerializeSize();
+    }
+    memory_usage["__total_size__"] = this->CalSerializeSize();
+    return memory_usage;
+}
+
 void
 HGraph::deserialize_basic_info(StreamReader& reader) {
     StreamReader::ReadObj(reader, this->use_reorder_);
