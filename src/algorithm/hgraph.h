@@ -25,6 +25,7 @@
 #include "data_cell/extra_info_interface.h"
 #include "data_cell/flatten_interface.h"
 #include "data_cell/graph_interface.h"
+#include "data_cell/sparse_graph_datacell_parameter.h"
 #include "default_thread_pool.h"
 #include "hgraph_parameter.h"
 #include "impl/basic_searcher.h"
@@ -87,6 +88,14 @@ public:
               int64_t k,
               const std::string& parameters,
               const FilterPtr& filter,
+              Allocator* allocator) const override;
+
+    [[nodiscard]] DatasetPtr
+    KnnSearch(const DatasetPtr& query,
+              int64_t k,
+              const std::string& parameters,
+              const FilterPtr& filter,
+              Allocator* allocator,
               IteratorContext*& iter_ctx,
               bool is_last_filter) const override;
 
@@ -105,17 +114,19 @@ public:
 
     int64_t
     GetNumElements() const override {
-        return this->total_count_;
+        return static_cast<int64_t>(this->total_count_);
     }
 
     uint64_t
     EstimateMemory(uint64_t num_elements) const override;
 
-    // TODO(LHT): implement
-    inline int64_t
+    int64_t
     GetMemoryUsage() const override {
-        return 0;
+        return static_cast<int64_t>(this->CalSerializeSize());
     }
+
+    JsonType
+    GetMemoryUsageDetail() const override;
 
     float
     CalcDistanceById(const float* query, int64_t id) const override;
@@ -221,6 +232,7 @@ private:
     FlattenInterfacePtr high_precise_codes_{nullptr};
     Vector<GraphInterfacePtr> route_graphs_;
     GraphInterfacePtr bottom_graph_{nullptr};
+    SparseGraphDatacellParamPtr sparse_datacell_param_{nullptr};
 
     mutable bool use_reorder_{false};
     bool use_elp_optimizer_{false};

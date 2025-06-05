@@ -73,7 +73,7 @@ private:
     uint32_t max_size_{0};
     Allocator* allocator_{nullptr};
     VisitedListType* list_{nullptr};
-    std::unique_ptr<std::priority_queue<std::pair<float, uint32_t>>> discard_;
+    std::unique_ptr<MaxHeap> discard_;
 };
 
 };  // namespace vsag

@@ -43,9 +43,10 @@ public:
     Query(float* result_dists,
           const ComputerInterfacePtr& computer,
           const InnerIdType* idx,
-          InnerIdType id_count) override {
+          InnerIdType id_count,
+          Allocator* allocator = nullptr) override {
         auto comp = std::static_pointer_cast<Computer<QuantTmpl>>(computer);
-        this->query(result_dists, comp, idx, id_count);
+        this->query(result_dists, comp, idx, id_count, allocator);
     }
 
     ComputerInterfacePtr
@@ -153,7 +154,8 @@ private:
     query(float* result_dists,
           const std::shared_ptr<Computer<QuantTmpl>>& computer,
           const InnerIdType* idx,
-          InnerIdType id_count);
+          InnerIdType id_count,
+          Allocator* allocator);
 
     ComputerInterfacePtr
     factory_computer(const float* query) {
@@ -248,15 +250,17 @@ void
 FlattenDataCell<QuantTmpl, IOTmpl>::query(float* result_dists,
                                           const std::shared_ptr<Computer<QuantTmpl>>& computer,
                                           const InnerIdType* idx,
-                                          InnerIdType id_count) {
+                                          InnerIdType id_count,
+                                          Allocator* allocator) {
+    Allocator* search_alloc = allocator == nullptr ? allocator_ : allocator;
     for (uint32_t i = 0; i < this->prefetch_stride_code_ and i < id_count; i++) {
         this->io_->Prefetch(static_cast<uint64_t>(idx[i]) * static_cast<uint64_t>(code_size_),
                             this->prefetch_depth_code_ * 64);
     }
     if (not this->io_->InMemory() and id_count > 1) {
-        ByteBuffer codes(static_cast<uint64_t>(id_count) * this->code_size_, allocator_);
-        Vector<uint64_t> sizes(id_count, this->code_size_, allocator_);
-        Vector<uint64_t> offsets(id_count, this->code_size_, allocator_);
+        ByteBuffer codes(id_count * this->code_size_, search_alloc);
+        Vector<uint64_t> sizes(id_count, this->code_size_, search_alloc);
+        Vector<uint64_t> offsets(id_count, this->code_size_, search_alloc);
         for (int64_t i = 0; i < id_count; ++i) {
             offsets[i] = static_cast<uint64_t>(idx[i]) * this->code_size_;
         }

@@ -44,7 +44,8 @@ public:
     Query(float* result_dists,
           const ComputerInterfacePtr& computer,
           const InnerIdType* idx,
-          InnerIdType id_count) = 0;
+          InnerIdType id_count,
+          Allocator* allocator = nullptr) = 0;
 
     virtual ComputerInterfacePtr
     FactoryComputer(const void* query) = 0;
@@ -132,6 +133,14 @@ public:
         StreamReader::ReadObj(reader, this->total_count_);
         StreamReader::ReadObj(reader, this->max_capacity_);
         StreamReader::ReadObj(reader, this->code_size_);
+    }
+
+    uint64_t
+    CalcSerializeSize() {
+        auto calSizeFunc = [](uint64_t cursor, uint64_t size, void* buf) { return; };
+        WriteFuncStreamWriter writer(calSizeFunc, 0);
+        this->Serialize(writer);
+        return writer.cursor_;
     }
 
     [[nodiscard]] virtual bool
