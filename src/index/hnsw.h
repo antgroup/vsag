@@ -130,8 +130,24 @@ public:
               const FilterPtr& filter,
               vsag::IteratorContext*& filter_ctx,
               bool is_last_search) const override {
-        SAFE_CALL(
-            return this->knn_search(query, k, parameters, filter, &filter_ctx, is_last_search));
+        SAFE_CALL(return this->knn_search(
+            query, k, parameters, filter, nullptr, &filter_ctx, is_last_search));
+    }
+
+    tl::expected<DatasetPtr, Error>
+    KnnSearch(const DatasetPtr& query, int64_t k, SearchParam& search_param) const override {
+        if (search_param.is_iter_filter) {
+            SAFE_CALL(return this->knn_search(query,
+                                              k,
+                                              search_param.parameters,
+                                              search_param.filter,
+                                              search_param.allocator,
+                                              &search_param.iter_ctx,
+                                              search_param.is_last_search));
+        } else {
+            SAFE_CALL(return this->knn_search(
+                query, k, search_param.parameters, search_param.filter, search_param.allocator));
+        }
     }
 
     tl::expected<DatasetPtr, Error>
@@ -265,6 +281,11 @@ public:
         return this->get_memory_usage();
     }
 
+    uint64_t
+    EstimateMemory(uint64_t num_elements) const override {
+        return this->estimate_memory(num_elements);
+    }
+
     std::string
     GetStats() const override;
 
@@ -313,6 +334,7 @@ private:
                int64_t k,
                const std::string& parameters,
                const FilterPtr& filter_ptr,
+               vsag::Allocator* allocator = nullptr,
                vsag::IteratorContext** iter_ctx = nullptr,
                bool is_last_filter = false) const;
 
@@ -390,6 +412,9 @@ private:
 
     void
     init_feature_list();
+
+    uint64_t
+    estimate_memory(uint64_t num_elements) const;
 
 private:
     std::shared_ptr<hnswlib::AlgorithmInterface<float>> alg_hnsw_;

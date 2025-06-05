@@ -15,6 +15,7 @@
 
 #include "hgraph.h"
 
+#include <data_cell/compressed_graph_datacell_parameter.h>
 #include <fmt/format-inl.h>
 
 #include <memory>
@@ -55,6 +56,16 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
 
     this->bottom_graph_ =
         GraphInterface::MakeInstance(hgraph_param->bottom_graph_param, common_param);
+    auto graph_param =
+        std::dynamic_pointer_cast<GraphDataCellParameter>(hgraph_param->bottom_graph_param);
+    sparse_datacell_param_ = std::make_shared<SparseGraphDatacellParameter>();
+    sparse_datacell_param_->max_degree_ = hgraph_param->bottom_graph_param->max_degree_ / 2;
+    if (graph_param != nullptr) {
+        sparse_datacell_param_->remove_flag_bit_ = graph_param->remove_flag_bit_;
+        sparse_datacell_param_->support_delete_ = graph_param->support_remove_;
+    } else {
+        sparse_datacell_param_->support_delete_ = false;
+    }
     mult_ = 1 / log(1.0 * static_cast<double>(this->bottom_graph_->MaximumDegree()));
 
     if (extra_info_size_ > 0) {
@@ -255,7 +266,17 @@ HGraph::KnnSearch(const DatasetPtr& query,
                   int64_t k,
                   const std::string& parameters,
                   const FilterPtr& filter) const {
+    return KnnSearch(query, k, parameters, filter, nullptr);
+}
+
+DatasetPtr
+HGraph::KnnSearch(const DatasetPtr& query,
+                  int64_t k,
+                  const std::string& parameters,
+                  const FilterPtr& filter,
+                  Allocator* allocator) const {
     int64_t query_dim = query->GetDim();
+    Allocator* search_allocator = allocator == nullptr ? allocator_ : allocator;
     if (data_type_ != DataTypes::DATA_TYPE_SPARSE) {
         CHECK_ARGUMENT(
             query_dim == dim_,
@@ -273,6 +294,7 @@ HGraph::KnnSearch(const DatasetPtr& query,
     search_param.topk = 1;
     search_param.ef = 1;
     search_param.is_inner_id_allowed = nullptr;
+    search_param.search_alloc = search_allocator;
     const auto* raw_query = get_data(query);
     for (auto i = static_cast<int64_t>(this->route_graphs_.size() - 1); i >= 0; --i) {
         auto result = this->search_one_graph(
@@ -315,10 +337,10 @@ HGraph::KnnSearch(const DatasetPtr& query,
         return DatasetImpl::MakeEmptyDataset();
     }
     auto count = static_cast<const int64_t>(search_result->Size());
-    auto [dataset_results, dists, ids] = CreateFastDataset(count, allocator_);
+    auto [dataset_results, dists, ids] = CreateFastDataset(count, search_allocator);
     char* extra_infos = nullptr;
     if (extra_info_size_ > 0) {
-        extra_infos = (char*)allocator_->Allocate(extra_info_size_ * search_result->Size());
+        extra_infos = (char*)search_allocator->Allocate(extra_info_size_ * search_result->Size());
         dataset_results->ExtraInfos(extra_infos);
     }
     for (int64_t j = count - 1; j >= 0; --j) {
@@ -338,8 +360,10 @@ HGraph::KnnSearch(const DatasetPtr& query,
                   int64_t k,
                   const std::string& parameters,
                   const FilterPtr& filter,
+                  Allocator* allocator,
                   IteratorContext*& iter_ctx,
                   bool is_last_filter) const {
+    Allocator* search_allocator = allocator == nullptr ? allocator_ : allocator;
     if (GetNumElements() == 0) {
         return DatasetImpl::MakeEmptyDataset();
     }
@@ -370,7 +394,7 @@ HGraph::KnnSearch(const DatasetPtr& query,
     if (iter_ctx == nullptr) {
         auto cur_count = this->bottom_graph_->TotalCount();
         auto* new_ctx = new IteratorFilterContext();
-        if (auto ret = new_ctx->init(cur_count, params.ef_search, allocator_);
+        if (auto ret = new_ctx->init(cur_count, params.ef_search, search_allocator);
             not ret.has_value()) {
             throw vsag::VsagException(ErrorType::INTERNAL_ERROR,
                                       "failed to init IteratorFilterContext");
@@ -379,7 +403,7 @@ HGraph::KnnSearch(const DatasetPtr& query,
     }
 
     auto* iter_filter_ctx = static_cast<IteratorFilterContext*>(iter_ctx);
-    DistHeapPtr search_result = std::make_shared<StandardHeap<true, false>>(allocator_, -1);
+    DistHeapPtr search_result = std::make_shared<StandardHeap<true, false>>(search_allocator, -1);
     const auto* query_data = get_data(query);
     if (is_last_filter) {
         while (!iter_filter_ctx->Empty()) {
@@ -394,6 +418,7 @@ HGraph::KnnSearch(const DatasetPtr& query,
         search_param.topk = 1;
         search_param.ef = 1;
         search_param.is_inner_id_allowed = nullptr;
+        search_param.search_alloc = search_allocator;
         if (iter_filter_ctx->IsFirstUsed()) {
             for (auto i = static_cast<int64_t>(this->route_graphs_.size() - 1); i >= 0; --i) {
                 auto result = this->search_one_graph(
@@ -427,10 +452,10 @@ HGraph::KnnSearch(const DatasetPtr& query,
         return DatasetImpl::MakeEmptyDataset();
     }
     auto count = static_cast<const int64_t>(search_result->Size());
-    auto [dataset_results, dists, ids] = CreateFastDataset(count, allocator_);
+    auto [dataset_results, dists, ids] = CreateFastDataset(count, search_allocator);
     char* extra_infos = nullptr;
     if (extra_info_size_ > 0) {
-        extra_infos = (char*)allocator_->Allocate(extra_info_size_ * search_result->Size());
+        extra_infos = (char*)search_allocator->Allocate(extra_info_size_ * search_result->Size());
         dataset_results->ExtraInfos(extra_infos);
     }
     for (int64_t j = count - 1; j >= 0; --j) {
@@ -499,8 +524,7 @@ HGraph::EstimateMemory(uint64_t num_elements) const {
 
 GraphInterfacePtr
 HGraph::generate_one_route_graph() {
-    return std::make_shared<SparseGraphDataCell>(this->allocator_,
-                                                 bottom_graph_->MaximumDegree() / 2);
+    return std::make_shared<SparseGraphDataCell>(sparse_datacell_param_, this->allocator_);
 }
 
 template <InnerSearchMode mode>
@@ -674,6 +698,29 @@ HGraph::Deserialize(StreamReader& reader) {
     if (use_elp_optimizer_) {
         elp_optimize();
     }
+}
+
+JsonType
+HGraph::GetMemoryUsageDetail() const {
+    JsonType memory_usage;
+    if (this->ignore_reorder_) {
+        this->use_reorder_ = false;
+    }
+    memory_usage["basic_flatten_codes"] = this->basic_flatten_codes_->CalcSerializeSize();
+    memory_usage["bottom_graph"] = this->bottom_graph_->CalcSerializeSize();
+    if (this->use_reorder_) {
+        memory_usage["high_precise_codes"] = this->high_precise_codes_->CalcSerializeSize();
+    }
+    size_t route_graph_size = 0;
+    for (const auto& route_graph : this->route_graphs_) {
+        route_graph_size += route_graph->CalcSerializeSize();
+    }
+    memory_usage["route_graph"] = route_graph_size;
+    if (this->extra_info_size_ > 0 && this->extra_infos_ != nullptr) {
+        memory_usage["extra_infos"] = this->extra_infos_->CalcSerializeSize();
+    }
+    memory_usage["__total_size__"] = this->CalSerializeSize();
+    return memory_usage;
 }
 
 void
@@ -1005,6 +1052,7 @@ static const std::string HGRAPH_PARAMS_TEMPLATE =
                 "{IO_FILE_PATH}": "{DEFAULT_FILE_PATH_VALUE}"
             },
             "{GRAPH_TYPE_KEY}": "{GRAPH_TYPE_NSW}",
+            "{GRAPH_STORAGE_TYPE_KEY}": "{GRAPH_STORAGE_TYPE_FLAT}",
             "{ODESCENT_PARAMETER_BUILD_BLOCK_SIZE}": 10000,
             "{ODESCENT_PARAMETER_MIN_IN_DEGREE}": 1,
             "{ODESCENT_PARAMETER_ALPHA}": 1.2,
@@ -1159,6 +1207,13 @@ HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
             },
         },
         {
+            HGRAPH_GRAPH_STORAGE_TYPE,
+            {
+                HGRAPH_GRAPH_KEY,
+                GRAPH_STORAGE_TYPE_KEY,
+            },
+        },
+        {
             ODESCENT_PARAMETER_ALPHA,
             {
                 HGRAPH_GRAPH_KEY,
@@ -1245,10 +1300,8 @@ HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
     auto hgraph_parameter = std::make_shared<HGraphParameter>();
     hgraph_parameter->data_type = common_param.data_type_;
     hgraph_parameter->FromJson(inner_json);
+    uint64_t max_degree = hgraph_parameter->bottom_graph_param->max_degree_;
 
-    auto max_degree =
-        std::dynamic_pointer_cast<GraphDataCellParameter>(hgraph_parameter->bottom_graph_param)
-            ->max_degree_;
     auto max_degree_threshold = std::max(common_param.dim_, 128L);
     CHECK_ARGUMENT(  // NOLINT
         (4 <= max_degree) and (max_degree <= max_degree_threshold),
@@ -1271,5 +1324,13 @@ HGraph::ExportModel(const IndexCommonParam& param) const {
         this->high_precise_codes_->ExportModel(index->high_precise_codes_);
     }
     return index;
+}
+void
+HGraph::GetRawData(vsag::InnerIdType inner_id, uint8_t* data) const {
+    if (use_reorder_) {
+        high_precise_codes_->GetCodesById(inner_id, data);
+    } else {
+        basic_flatten_codes_->GetCodesById(inner_id, data);
+    }
 }
 }  // namespace vsag

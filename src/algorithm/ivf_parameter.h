@@ -36,8 +36,6 @@ public:
 public:
     BucketDataCellParamPtr bucket_param{nullptr};
 
-    bool use_residual{false};
-
     bool use_reorder{false};
 
     FlattenDataCellParamPtr flatten_param{nullptr};

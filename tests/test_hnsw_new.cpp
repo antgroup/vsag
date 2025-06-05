@@ -201,6 +201,28 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex,
     }
 }
 
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex, "HNSW Estimate Memory", "[ft][hnsw]") {
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    auto size = GENERATE(1024 * 1024 * 2);
+    auto metric_type = GENERATE("l2", "cosine");
+
+    const std::string name = "hnsw";
+    auto search_param = fmt::format(search_param_tmp, 200, false);
+    uint64_t estimate_count = 1000;
+    for (auto dim : dims) {
+        vsag::Options::Instance().set_block_size_limit(size);
+        auto param = GenerateHNSWBuildParametersString(metric_type, dim);
+        auto dataset = pool.GetDatasetAndCreate(dim,
+                                                estimate_count,
+                                                metric_type,
+                                                false /*with_path*/,
+                                                0.8 /*valid_ratio*/,
+                                                0 /*extro_info_size*/);
+        TestEstimateMemory(name, param, dataset);
+        vsag::Options::Instance().set_block_size_limit(origin_size);
+    }
+}
+
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex,
                              "HNSW Build & ContinueAdd Test",
                              "[ft][hnsw]") {
@@ -222,6 +244,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex,
         TestRangeSearch(index, dataset, search_param, 0.99, 10, true);
         TestRangeSearch(index, dataset, search_param, 0.49, 5, true);
         TestFilterSearch(index, dataset, search_param, 0.99, true);
+        TestSearchAllocator(index, dataset, search_param, 0.99, true);
     }
     vsag::Options::Instance().set_block_size_limit(origin_size);
 }

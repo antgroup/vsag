@@ -43,11 +43,18 @@ CompressedGraphDataCell::InsertNeighborsById(InnerIdType id,
     Vector<InnerIdType> tmp(neighbor_ids.begin(), neighbor_ids.end(), allocator_);
     std::sort(tmp.begin(), tmp.end());
 
+    // TODO(deming): reset the size of neighbor_sets_[id] while tmp is empty
     if (not tmp.empty()) {
         if (neighbor_sets_[id] == nullptr) {
             neighbor_sets_[id] = std::make_unique<EliasFanoEncoder>(allocator_);
         }
         neighbor_sets_[id]->Encode(tmp, max_capacity_);
+    } else {
+        neighbor_sets_[id].reset();
+    }
+
+    InnerIdType current = total_count_.load();
+    while (current < id + 1 && !total_count_.compare_exchange_weak(current, id + 1)) {
     }
 }
 
@@ -120,7 +127,6 @@ CompressedGraphDataCell::Resize(InnerIdType new_size) {
     }
     neighbor_sets_.resize(new_size);
     this->max_capacity_ = new_size;
-    this->total_count_ = new_size;
 }
 
 }  // namespace vsag

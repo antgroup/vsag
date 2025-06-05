@@ -15,8 +15,6 @@
 
 #include "hgraph_parameter.h"
 
-#include <fmt/format-inl.h>
-
 #include "data_cell/graph_interface_parameter.h"
 #include "data_cell/sparse_vector_datacell_parameter.h"
 #include "inner_string_params.h"
@@ -74,8 +72,23 @@ HGraphParameter::FromJson(const JsonType& json) {
     CHECK_ARGUMENT(json.contains(HGRAPH_GRAPH_KEY),
                    fmt::format("hgraph parameters must contains {}", HGRAPH_GRAPH_KEY));
     const auto& graph_json = json[HGRAPH_GRAPH_KEY];
-    this->bottom_graph_param = GraphInterfaceParameter::GetGraphParameterByJson(
-        GraphStorageTypes::GRAPH_STORAGE_TYPE_FLAT, graph_json);
+
+    GraphStorageTypes graph_storage_type = GraphStorageTypes::GRAPH_STORAGE_TYPE_FLAT;
+    if (graph_json.contains(GRAPH_STORAGE_TYPE_KEY)) {
+        const auto& graph_storage_type_str = graph_json[GRAPH_STORAGE_TYPE_KEY];
+        if (graph_storage_type_str == GRAPH_STORAGE_TYPE_COMPRESSED) {
+            graph_storage_type = GraphStorageTypes::GRAPH_STORAGE_TYPE_COMPRESSED;
+        }
+
+        if (graph_storage_type_str != GRAPH_STORAGE_TYPE_COMPRESSED &&
+            graph_storage_type_str != GRAPH_STORAGE_TYPE_FLAT) {
+            throw VsagException(
+                ErrorType::INVALID_ARGUMENT,
+                fmt::format("invalid graph_storage_type: {}", graph_storage_type_str.dump()));
+        }
+    }
+    this->bottom_graph_param =
+        GraphInterfaceParameter::GetGraphParameterByJson(graph_storage_type, graph_json);
 
     if (json.contains(BUILD_PARAMS_KEY)) {
         const auto& build_params = json[BUILD_PARAMS_KEY];

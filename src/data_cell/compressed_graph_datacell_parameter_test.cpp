@@ -13,28 +13,26 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#pragma once
+#include "compressed_graph_datacell_parameter.h"
 
-#include <cmath>
-#include <cstdlib>
+#include <catch2/catch_test_macros.hpp>
 
-#include "basic_func.h"
-#include "bf16_simd.h"
-#include "bit_simd.h"
-#include "fp16_simd.h"
-#include "fp32_simd.h"
-#include "normalize.h"
-#include "pqfs_simd.h"
-#include "rabitq_simd.h"
-#include "simd_status.h"
-#include "sq4_simd.h"
-#include "sq4_uniform_simd.h"
-#include "sq8_simd.h"
-#include "sq8_uniform_simd.h"
+#include "parameter_test.h"
 
 namespace vsag {
 
-SimdStatus
-setup_simd();
+TEST_CASE("CompressedGraphDatacellParameter ToJson Test",
+          "[ut][CompressedGraphDatacellParameter]") {
+    std::string param_str = R"(
+        {
+            "max_degree": 100,
+            "graph_storage_type": "compressed"
+        }
+        )";
+    auto param = std::make_shared<CompressedGraphDatacellParameter>();
+    auto json = JsonType::parse(param_str);
+    param->FromJson(json);
+    ParameterTest::TestToJson(param);
+}
 
 }  // namespace vsag

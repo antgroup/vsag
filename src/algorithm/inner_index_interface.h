@@ -101,11 +101,26 @@ public:
               int64_t k,
               const std::string& parameters,
               const FilterPtr& filter,
+              Allocator* allocator) const {
+        throw std::runtime_error("Index doesn't support new filter");
+    };
+
+    [[nodiscard]] virtual DatasetPtr
+    KnnSearch(const DatasetPtr& query,
+              int64_t k,
+              const std::string& parameters,
+              const FilterPtr& filter,
+              Allocator* allocator,
               IteratorContext*& iter_ctx,
               bool is_last_filter) const {
         throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
                             "Index doesn't support new filter");
     };
+
+    [[nodiscard]] virtual DatasetPtr
+    KnnSearch(const DatasetPtr& query, int64_t k, SearchParam& search_param) const {
+        throw std::runtime_error("Index doesn't support new filter");
+    }
 
     [[nodiscard]] virtual DatasetPtr
     RangeSearch(const DatasetPtr& query,
@@ -235,6 +250,13 @@ public:
                             "Index doesn't support GetMemoryUsage");
     }
 
+    [[nodiscard]] virtual JsonType
+    GetMemoryUsageDetail() const {
+        // TODO(deming): implement func for every types of inner index
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "Index doesn't support GetMemoryUsageDetail");
+    }
+
     [[nodiscard]] virtual uint64_t
     EstimateMemory(uint64_t num_elements) const {
         throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
@@ -256,6 +278,12 @@ public:
     [[nodiscard]] virtual bool
     CheckIdExist(int64_t id) const {
         return this->label_table_->CheckLabel(id);
+    }
+
+    virtual void
+    GetRawData(InnerIdType inner_id, uint8_t* data) const {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "Index doesn't support GetRawData");
     }
 
 public:
