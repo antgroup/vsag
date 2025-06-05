@@ -1301,7 +1301,7 @@ BitXor(const uint8_t* x, const uint8_t* y, const uint64_t num_byte, uint8_t* res
 
 void
 BitNot(const uint8_t* x, const uint64_t num_byte, uint8_t* result) {
-#if defined(ENABLE_SSE)
+#if defined(ENABLE_NEON)
     if (num_byte == 0) {
         return;
     }
