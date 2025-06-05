@@ -78,6 +78,14 @@ public:
         StreamReader::ReadObj(reader, this->maximum_degree_);
     }
 
+    uint64_t
+    CalcSerializeSize() {
+        auto calSizeFunc = [](uint64_t cursor, uint64_t size, void* buf) { return; };
+        WriteFuncStreamWriter writer(calSizeFunc, 0);
+        this->Serialize(writer);
+        return writer.cursor_;
+    }
+
     [[nodiscard]] virtual InnerIdType
     TotalCount() const {
         return this->total_count_;

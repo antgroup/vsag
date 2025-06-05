@@ -114,17 +114,19 @@ public:
 
     int64_t
     GetNumElements() const override {
-        return this->total_count_;
+        return static_cast<int64_t>(this->total_count_);
     }
 
     uint64_t
     EstimateMemory(uint64_t num_elements) const override;
 
-    // TODO(LHT): implement
-    inline int64_t
+    int64_t
     GetMemoryUsage() const override {
-        return 0;
+        return static_cast<int64_t>(this->CalSerializeSize());
     }
+
+    JsonType
+    GetMemoryUsageDetail() const override;
 
     float
     CalcDistanceById(const float* query, int64_t id) const override;
