@@ -249,6 +249,15 @@ FP32ComputeL2SqrBatch4(const float* query,
                        float& result4);
 void
 FP32Sub(const float* x, const float* y, float* z, uint64_t dim);
+void
+FP32Add(const float* x, const float* y, float* z, uint64_t dim);
+void
+FP32Mul(const float* x, const float* y, float* z, uint64_t dim);
+void
+FP32Div(const float* x, const float* y, float* z, uint64_t dim);
+
+float
+FP32ReduceAdd(const float* x, uint64_t dim);
 }  // namespace neon
 
 using FP32ComputeType = float (*)(const float* query, const float* codes, uint64_t dim);

@@ -402,6 +402,90 @@ FP32Sub(const float* x, const float* y, float* z, uint64_t dim) {
 #endif
 }
 
+void
+FP32Add(const float* x, const float* y, float* z, uint64_t dim) {
+#if defined(ENABLE_NEON)
+    if (dim < 4) {
+        return generic::FP32Add(x, y, z, dim);
+    }
+    int64_t i = 0;
+    for (; i + 3 < dim; i += 4) {
+        float32x4_t a = vld1q_f32(x + i);
+        float32x4_t b = vld1q_f32(y + i);
+        float32x4_t c = vaddq_f32(a, b);
+        vst1q_f32(z + i, c);
+    }
+    if (i < dim) {
+        generic::FP32Add(x + i, y + i, z + i, dim - i);
+    }
+#else
+    return generic::FP32Add(x, y, z, dim);
+#endif
+}
+
+void
+FP32Mul(const float* x, const float* y, float* z, uint64_t dim) {
+#if defined(ENABLE_NEON)
+    if (dim < 4) {
+        return generic::FP32Mul(x, y, z, dim);
+    }
+    int64_t i = 0;
+    for (; i + 3 < dim; i += 4) {
+        float32x4_t a = vld1q_f32(x + i);
+        float32x4_t b = vld1q_f32(y + i);
+        float32x4_t c = vmulq_f32(a, b);
+        vst1q_f32(z + i, c);
+    }
+    if (i < dim) {
+        generic::FP32Mul(x + i, y + i, z + i, dim - i);
+    }
+#else
+    return generic::FP32Mul(x, y, z, dim);
+#endif
+}
+
+void
+FP32Div(const float* x, const float* y, float* z, uint64_t dim) {
+#if defined(ENABLE_NEON)
+    if (dim < 4) {
+        return generic::FP32Div(x, y, z, dim);
+    }
+    int64_t i = 0;
+    for (; i + 3 < dim; i += 4) {
+        float32x4_t a = vld1q_f32(x + i);
+        float32x4_t b = vld1q_f32(y + i);
+        float32x4_t c = vdivq_f32(a, b);
+        vst1q_f32(z + i, c);
+    }
+    if (i < dim) {
+        generic::FP32Div(x + i, y + i, z + i, dim - i);
+    }
+#else
+    return generic::FP32Div(x, y, z, dim);
+#endif
+}
+
+float
+FP32ReduceAdd(const float* x, uint64_t dim) {
+#if defined(ENABLE_NEON)
+    if (dim < 4) {
+        return generic::FP32ReduceAdd(x, dim);
+    }
+    int i = 0;
+    float32x4_t sum = vdupq_n_f32(0.0f);
+    for (; i + 3 < dim; i += 4) {
+        float32x4_t a = vst1q_f32(x + i);
+        sum = vaddq_f32(sum, a);
+    }
+    float result = vaddvq_f32(sum);
+    if (i < dim) {
+        result += generic::FP32ReduceAdd(x + i, dim - i);
+    }
+#else
+    return generic::FP32ReduceAdd(x, dim);
+#endif
+}
+
 #if defined(ENABLE_NEON)
 __inline uint16x8_t __attribute__((__always_inline__)) load_4_short(const uint16_t* data) {
     uint16_t tmp[] = {data[3], 0, data[2], 0, data[1], 0, data[0], 0};
@@ -1140,6 +1224,101 @@ PQFastScanLookUp32(const uint8_t* lookup_table,
     }
 #else
     generic::PQFastScanLookUp32(lookup_table, codes, pq_dim, result);
+#endif
+}
+
+void
+BitAnd(const uint8_t* x, const uint8_t* y, const uint64_t num_byte, uint8_t* result) {
+#if defined(ENABLE_NEON)
+    if (num_byte == 0) {
+        return;
+    }
+    if (num_byte < 16) {
+        return generic::BitAnd(x, y, num_byte, result);
+    }
+    int64_t i = 0;
+    for (; i + 15 < num_byte; i += 16) {
+        uint8x16_t x_vec = vld1q_u8(x + i);
+        uint8x16_t y_vec = vld1q_u8(y + i);
+        uint8x16_t result_vec = vandq_u8(x_vec, y_vec);
+        vst1q_u8(result + i, result_vec);
+    }
+    if (i < num_byte) {
+        generic::BitAnd(x + i, y + i, num_byte - i, result + i);
+    }
+#else
+    return generic::BitAnd(x, y, num_byte, result);
+#endif
+}
+
+void
+BitOr(const uint8_t* x, const uint8_t* y, const uint64_t num_byte, uint8_t* result) {
+#if defined(ENABLE_NEON)
+    if (num_byte == 0) {
+        return;
+    }
+    if (num_byte < 16) {
+        return generic::BitOr(x, y, num_byte, result);
+    }
+    int64_t i = 0;
+    for (; i + 15 < num_byte; i += 16) {
+        uint8x16_t x_vec = vld1q_u8(x + i);
+        uint8x16_t y_vec = vld1q_u8(y + i);
+        uint8x16_t result_vec = vorrq_u8(x_vec, y_vec);
+        vst1q_u8(result + i, result_vec);
+    }
+    if (i < num_byte) {
+        generic::BitOr(x + i, y + i, num_byte - i, result + i);
+    }
+#else
+    return generic::BitOr(x, y, num_byte, result);
+#endif
+}
+
+void
+BitXor(const uint8_t* x, const uint8_t* y, const uint64_t num_byte, uint8_t* result) {
+#if defined(ENABLE_NEON)
+    if (num_byte == 0) {
+        return;
+    }
+    if (num_byte < 16) {
+        return generic::BitXor(x, y, num_byte, result);
+    }
+    int64_t i = 0;
+    for (; i + 15 < num_byte; i += 16) {
+        uint8x16_t x_vec = vld1q_u8(x + i);
+        uint8x16_t y_vec = vld1q_u8(y + i);
+        uint8x16_t result_vec = veorq_u8(x_vec, y_vec);
+        vst1q_u8(result + i, result_vec);
+    }
+    if (i < num_byte) {
+        generic::BitXor(x + i, y + i, num_byte - i, result + i);
+    }
+#else
+    return generic::BitXor(x, y, num_byte, result);
+#endif
+}
+
+void
+BitNot(const uint8_t* x, const uint64_t num_byte, uint8_t* result) {
+#if defined(ENABLE_SSE)
+    if (num_byte == 0) {
+        return;
+    }
+    if (num_byte < 16) {
+        return generic::BitNot(x, num_byte, result);
+    }
+    int64_t i = 0;
+    for (; i + 15 < num_byte; i += 16) {
+        uint8x16_t x_vec = vld1q_u8(x + i);
+        uint8x16_t result_vec = veorq_u8(x_vec, vdupq_n_u8(0xFF));
+        vst1q_u8(result + i, result_vec);
+    }
+    if (i < num_byte) {
+        generic::BitNot(x + i, num_byte - i, result + i);
+    }
+#else
+    return generic::BitNot(x, num_byte, result);
 #endif
 }
 

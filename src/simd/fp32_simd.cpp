@@ -172,6 +172,10 @@ GetFP32Add() {
 #if defined(ENABLE_SSE)
         return sse::FP32Add;
 #endif
+    } else if (SimdStatus::SupportNEON()) {
+#if defined(ENABLE_NEON)
+        return neon::FP32Add;
+#endif
     }
     return generic::FP32Add;
 }
@@ -194,6 +198,10 @@ GetFP32Mul() {
     } else if (SimdStatus::SupportSSE()) {
 #if defined(ENABLE_SSE)
         return sse::FP32Mul;
+#endif
+    } else if (SimdStatus::SupportNEON()) {
+#if defined(ENABLE_NEON)
+        return neon::FP32Mul;
 #endif
     }
     return generic::FP32Mul;
@@ -218,6 +226,10 @@ GetFP32Div() {
 #if defined(ENABLE_SSE)
         return sse::FP32Div;
 #endif
+    } else if (SimdStatus::SupportNEON()) {
+#if defined(ENABLE_NEON)
+        return neon::FP32Div;
+#endif
     }
     return generic::FP32Div;
 }
@@ -240,6 +252,10 @@ GetFP32ReduceAdd() {
     } else if (SimdStatus::SupportSSE()) {
 #if defined(ENABLE_SSE)
         return sse::FP32ReduceAdd;
+#endif
+    } else if (SimdStatus::SupportNEON()) {
+#if defined(ENABLE_NEON)
+        return neon::FP32ReduceAdd;
 #endif
     }
     return generic::FP32ReduceAdd;
