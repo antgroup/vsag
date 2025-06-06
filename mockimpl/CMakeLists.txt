@@ -15,8 +15,8 @@ add_library (vsag_mockimpl_static STATIC ${MOCK_SRCS})
 
 target_link_libraries (vsag_mockimpl roaring fmt::fmt-header-only simd)
 target_link_libraries (vsag_mockimpl_static roaring fmt::fmt-header-only simd)
-add_dependencies (vsag_mockimpl version_mockimpl roaring)
-add_dependencies (vsag_mockimpl_static version_mockimpl roaring)
+add_dependencies (vsag_mockimpl version_mockimpl roaring spdlog)
+add_dependencies (vsag_mockimpl_static version_mockimpl roaring spdlog)
 
 set_target_properties(vsag_mockimpl_static PROPERTIES OUTPUT_NAME "vsag_mockimpl")
 install(TARGETS vsag_mockimpl vsag_mockimpl_static
