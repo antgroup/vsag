@@ -116,6 +116,7 @@ private:
     IVFPartitionStrategyPtr partition_strategy_{nullptr};
 
     int64_t total_elements_{0};
+    std::mutex size_lock_;
 
     bool use_reorder_{false};
 

@@ -280,6 +280,41 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex, "IVF Build & ContinueAdd Te
     }
 }
 
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex,
+                             "IVF ConcurrentAdd Test",
+                             "[ft][ivf][concurrent]") {
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    auto size = GENERATE(1024 * 1024 * 2);
+    auto metric_type = GENERATE("l2", "ip", "cosine");
+    std::string train_type = GENERATE("random", "kmeans");
+
+    const std::string name = "ivf";
+    auto search_param = fmt::format(search_param_tmp, 200);
+    const std::vector<std::pair<std::string, float>> test_cases = {
+        {"fp32", 0.90},
+        {"bf16", 0.88},
+        {"fp16", 0.88},
+        {"sq8", 0.84},
+        {"sq8_uniform", 0.83},
+        {"sq8_uniform,fp32", 0.89},
+        {"pq,fp32", 0.82},
+    };
+    for (auto& dim : dims) {
+        for (auto& [base_quantization_str, recall] : test_cases) {
+            vsag::Options::Instance().set_block_size_limit(size);
+            auto param = GenerateIVFBuildParametersString(
+                metric_type, dim, base_quantization_str, 300, train_type);
+            auto index = TestFactory(name, param, true);
+            auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
+            TestConcurrentAdd(index, dataset, true);
+            if (index->CheckFeature(vsag::SUPPORT_ADD_AFTER_BUILD)) {
+                TestGeneral(index, dataset, search_param, recall);
+            }
+            vsag::Options::Instance().set_block_size_limit(origin_size);
+        }
+    }
+}
+
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex, "IVF Build with Residual", "[ft][ivf]") {
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
