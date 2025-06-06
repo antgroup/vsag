@@ -474,13 +474,14 @@ FP32ReduceAdd(const float* x, uint64_t dim) {
     int i = 0;
     float32x4_t sum = vdupq_n_f32(0.0f);
     for (; i + 3 < dim; i += 4) {
-        float32x4_t a = vst1q_f32(x + i);
+        float32x4_t a = vld1q_f32(x + i);
         sum = vaddq_f32(sum, a);
     }
     float result = vaddvq_f32(sum);
     if (i < dim) {
         result += generic::FP32ReduceAdd(x + i, dim - i);
     }
+    return result;
 #else
     return generic::FP32ReduceAdd(x, dim);
 #endif

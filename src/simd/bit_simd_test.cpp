@@ -71,9 +71,9 @@ using namespace vsag;
         std::vector<uint8_t> neon_gt(num_bytes, 0);                                          \
         if (SimdStatus::SupportNEON()) {                                                     \
             neon::Func(vec1.data() + i * num_bytes,                                          \
-                         vec2.data() + i * num_bytes,                                        \
-                         num_bytes,                                                          \
-                         neon_gt.data());                                                    \
+                       vec2.data() + i * num_bytes,                                          \
+                       num_bytes,                                                            \
+                       neon_gt.data());                                                      \
             for (uint64_t j = 0; j < num_bytes; ++j) {                                       \
                 REQUIRE(fixtures::dist_t(gt[j]) == fixtures::dist_t(neon_gt[j]));            \
             }                                                                                \
