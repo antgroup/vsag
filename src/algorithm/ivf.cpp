@@ -15,9 +15,12 @@
 
 #include "ivf.h"
 
+#include <set>
+
 #include "impl/basic_searcher.h"
 #include "index/index_impl.h"
 #include "inner_string_params.h"
+#include "ivf_partition/gno_imi_partition.h"
 #include "ivf_partition/ivf_nearest_partition.h"
 #include "utils/standard_heap.h"
 #include "utils/util_functions.h"
@@ -28,7 +31,6 @@ static constexpr const char* IVF_PARAMS_TEMPLATE =
     R"(
     {
         "type": "{INDEX_TYPE_IVF}",
-        "{IVF_TRAIN_TYPE_KEY}": "{IVF_TRAIN_TYPE_KMEANS}",
         "{BUCKET_PARAMS_KEY}": {
             "{IO_PARAMS_KEY}": {
                 "{IO_TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}"
@@ -43,6 +45,15 @@ static constexpr const char* IVF_PARAMS_TEMPLATE =
             "{BUCKETS_COUNT_KEY}": 10,
             "{BUCKET_USE_RESIDUAL}": false
         },
+        "{IVF_PARTITION_STRATEGY_PARAMS_KEY}": {
+            "{IVF_PARTITION_STRATEGY_TYPE_KEY}": "{IVF_PARTITION_STRATEGY_TYPE_NEAREST}",
+            "{IVF_TRAIN_TYPE_KEY}": "{IVF_TRAIN_TYPE_KMEANS}",
+            "{IVF_PARTITION_STRATEGY_TYPE_GNO_IMI}": {
+                "{GNO_IMI_FIRST_ORDER_BUCKETS_COUNT_KEY}": 10,
+                "{GNO_IMI_SECOND_ORDER_BUCKETS_COUNT_KEY}": 10
+            }
+        },
+        "{BUCKET_PER_DATA_KEY}": 1,
         "{IVF_USE_REORDER_KEY}": false,
         "{IVF_PRECISE_CODES_KEY}": {
             "{IO_PARAMS_KEY}": {
@@ -83,7 +94,27 @@ IVF::CheckAndMappingExternalParam(const JsonType& external_param,
         },
         {
             IVF_TRAIN_TYPE,
-            {IVF_TRAIN_TYPE_KEY},
+            {IVF_PARTITION_STRATEGY_PARAMS_KEY, IVF_TRAIN_TYPE_KEY},
+        },
+        {
+            IVF_PARTITION_STRATEGY_TYPE_KEY,
+            {IVF_PARTITION_STRATEGY_PARAMS_KEY, IVF_PARTITION_STRATEGY_TYPE_KEY},
+        },
+        {
+            GNO_IMI_FIRST_ORDER_BUCKETS_COUNT,
+            {IVF_PARTITION_STRATEGY_PARAMS_KEY,
+             IVF_PARTITION_STRATEGY_TYPE_GNO_IMI,
+             GNO_IMI_FIRST_ORDER_BUCKETS_COUNT_KEY},
+        },
+        {
+            GNO_IMI_SECOND_ORDER_BUCKETS_COUNT,
+            {IVF_PARTITION_STRATEGY_PARAMS_KEY,
+             IVF_PARTITION_STRATEGY_TYPE_GNO_IMI,
+             GNO_IMI_SECOND_ORDER_BUCKETS_COUNT_KEY},
+        },
+        {
+            BUCKET_PER_DATA_KEY,
+            {BUCKET_PER_DATA_KEY},
         },
         {
             IVF_USE_REORDER,
@@ -116,13 +147,20 @@ IVF::CheckAndMappingExternalParam(const JsonType& external_param,
 }
 
 IVF::IVF(const IVFParameterPtr& param, const IndexCommonParam& common_param)
-    : InnerIndexInterface(param, common_param) {
+    : InnerIndexInterface(param, common_param), buckets_per_data_(param->buckets_per_data) {
     this->bucket_ = BucketInterface::MakeInstance(param->bucket_param, common_param);
     if (this->bucket_ == nullptr) {
         throw VsagException(ErrorType::INTERNAL_ERROR, "bucket init error");
     }
-    this->partition_strategy_ = std::make_shared<IVFNearestPartition>(
-        bucket_->bucket_count_, common_param, param->partition_train_type);
+    if (param->ivf_partition_strategy_parameter->partition_strategy_type ==
+        IVFPartitionStrategyType::IVF) {
+        this->partition_strategy_ = std::make_shared<IVFNearestPartition>(
+            bucket_->bucket_count_, common_param, param->ivf_partition_strategy_parameter);
+    } else if (param->ivf_partition_strategy_parameter->partition_strategy_type ==
+               IVFPartitionStrategyType::GNO_IMI) {
+        this->partition_strategy_ = std::make_shared<GNOIMIPartition>(
+            common_param, param->ivf_partition_strategy_parameter);
+    }
     this->use_reorder_ = param->use_reorder;
     if (this->use_reorder_) {
         this->reorder_codes_ = FlattenInterface::MakeInstance(param->flatten_param, common_param);
@@ -228,26 +266,34 @@ IVF::Add(const DatasetPtr& base) {
     auto num_element = base->GetNumElements();
     const auto* ids = base->GetIds();
     const auto* vectors = base->GetFloat32Vectors();
-    auto buckets = partition_strategy_->ClassifyDatas(vectors, num_element, 1);
+    auto buckets = partition_strategy_->ClassifyDatas(vectors, num_element, buckets_per_data_);
     Vector<float> normalize_data(dim_, allocator_);
     Vector<float> residual_data(dim_, allocator_);
     Vector<float> centroid(dim_, allocator_);
     for (int64_t i = 0; i < num_element; ++i) {
         const auto* data_ptr = vectors + i * dim_;
-        if (use_residual_) {
-            partition_strategy_->GetCentroid(buckets[i], centroid);
-            if (metric_ == MetricType::METRIC_TYPE_COSINE) {
-                Normalize(data_ptr, normalize_data.data(), dim_);
-                data_ptr = normalize_data.data();
+        for (int64_t j = 0; j < buckets_per_data_; ++j) {
+            auto idx = i * buckets_per_data_ + j;
+
+            if (use_residual_) {
+                partition_strategy_->GetCentroid(buckets[idx], centroid);
+                if (metric_ == MetricType::METRIC_TYPE_COSINE) {
+                    Normalize(data_ptr, normalize_data.data(), dim_);
+                    data_ptr = normalize_data.data();
+                }
+                FP32Sub(data_ptr, centroid.data(), residual_data.data(), dim_);
+                bucket_->InsertVector(residual_data.data(),
+                                      buckets[idx],
+                                      idx + total_elements_ * buckets_per_data_,
+                                      centroid.data());
+            } else {
+                bucket_->InsertVector(
+                    data_ptr, buckets[idx], idx + total_elements_ * buckets_per_data_);
             }
-            FP32Sub(data_ptr, centroid.data(), residual_data.data(), dim_);
-            bucket_->InsertVector(
-                residual_data.data(), buckets[i], i + total_elements_, centroid.data());
-        } else {
-            bucket_->InsertVector(data_ptr, buckets[i], i + total_elements_);
         }
         this->label_table_->Insert(i + total_elements_, ids[i]);
     }
+
     this->bucket_->Package();
     if (use_reorder_) {
         this->reorder_codes_->BatchInsertVector(base->GetFloat32Vectors(), base->GetNumElements());
@@ -351,6 +397,7 @@ IVF::Deserialize(StreamReader& reader) {
         this->reorder_codes_->Deserialize(reader);
     }
 }
+
 InnerSearchParam
 IVF::create_search_param(const std::string& parameters, const FilterPtr& filter) const {
     InnerSearchParam param;
@@ -363,6 +410,7 @@ IVF::create_search_param(const std::string& parameters, const FilterPtr& filter)
     param.scan_bucket_size = std::min(static_cast<BucketIdType>(search_param.scan_buckets_count),
                                       bucket_->bucket_count_);
     param.factor = search_param.topk_factor;
+    param.first_order_scan_ratio = search_param.first_order_scan_ratio;
     return param;
 }
 
@@ -407,9 +455,9 @@ IVF::search(const DatasetPtr& query, const InnerSearchParam& param) const {
         Normalize(query_data, normalize_data.data(), dim_);
         query_data = normalize_data.data();
     }
-    auto candidate_buckets =
-        partition_strategy_->ClassifyDatas(query_data, 1, param.scan_bucket_size);
+    auto candidate_buckets = partition_strategy_->ClassifyDatasForSearch(query_data, 1, param);
     auto computer = bucket_->FactoryComputer(query_data);
+
     Vector<float> dist(allocator_);
     auto cur_heap_top = std::numeric_limits<float>::max();
     int64_t topk = param.topk;
@@ -419,9 +467,23 @@ IVF::search(const DatasetPtr& query, const InnerSearchParam& param) const {
             topk = std::numeric_limits<int64_t>::max();
         }
     }
+    // Scale topk to ensure sufficient candidates after deduplication when buckets_per_data_ > 1
+    int64_t origin_topk = topk;
+    if (buckets_per_data_ > 1) {
+        if (topk <= std::numeric_limits<int64_t>::max() / buckets_per_data_) {
+            topk *= buckets_per_data_;
+        } else {
+            topk = std::numeric_limits<int64_t>::max();
+        }
+    }
+
     const auto& ft = param.is_inner_id_allowed;
     Vector<float> centroid(dim_, allocator_);
+
     for (auto& bucket_id : candidate_buckets) {
+        if (bucket_id == -1) {
+            break;
+        }
         auto bucket_size = bucket_->GetBucketSize(bucket_id);
         const auto* ids = bucket_->GetInnerIds(bucket_id);
         if (bucket_size > dist.size()) {
@@ -438,7 +500,8 @@ IVF::search(const DatasetPtr& query, const InnerSearchParam& param) const {
 
         bucket_->ScanBucketById(dist.data(), computer, bucket_id);
         for (int j = 0; j < bucket_size; ++j) {
-            if (ft == nullptr or ft->CheckValid(ids[j])) {
+            auto origin_id = ids[j] / buckets_per_data_;
+            if (ft == nullptr or ft->CheckValid(origin_id)) {
                 dist[j] -= ip_distance;
                 if constexpr (mode == KNN_SEARCH) {
                     if (search_result->Size() < topk or dist[j] < cur_heap_top) {
@@ -458,6 +521,35 @@ IVF::search(const DatasetPtr& query, const InnerSearchParam& param) const {
             }
         }
     }
+
+    // Deduplicate ids when buckets_per_data_ > 1
+    if (buckets_per_data_ > 1) {
+        std::unordered_map<InnerIdType, float> id_to_min_dist;
+        while (!search_result->Empty()) {
+            const auto& [dist_val, id] = search_result->Top();
+            auto origin_id = id / buckets_per_data_;
+            // Keep the smallest distance for each id
+            if (id_to_min_dist.find(origin_id) == id_to_min_dist.end() ||
+                dist_val < id_to_min_dist[origin_id]) {
+                id_to_min_dist[origin_id] = dist_val;
+            }
+            search_result->Pop();
+        }
+
+        auto cur_heap_top = std::numeric_limits<float>::max();
+        for (const auto& [origin_id, dist_val] : id_to_min_dist) {
+            if (dist_val < cur_heap_top) {
+                search_result->Push(dist_val, origin_id);
+            }
+            if (search_result->Size() > origin_topk) {
+                search_result->Pop();
+            }
+            if (not search_result->Empty() and search_result->Size() == origin_topk) {
+                cur_heap_top = search_result->Top().first;
+            }
+        }
+    }
+
     return search_result;
 }
 
