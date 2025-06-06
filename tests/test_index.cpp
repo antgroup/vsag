@@ -1655,4 +1655,13 @@ TestIndex::TestExportModel(const TestIndex::IndexPtr& index,
     REQUIRE(std::abs(recall1 - recall2) < 0.01F * query_count);
 }
 
+void
+TestIndex::TestBuildWithAttr(const IndexPtr& index, const TestDatasetPtr& dataset) {
+    if (not index->CheckFeature(vsag::SUPPORT_BUILD)) {
+        return;
+    }
+    auto build_result = index->Build(dataset->base_);
+    REQUIRE(build_result.has_value());
+}
+
 }  // namespace fixtures

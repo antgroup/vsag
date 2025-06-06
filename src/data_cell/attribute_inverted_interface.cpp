@@ -1,3 +1,4 @@
+
 // Copyright 2024-present the vsag project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -12,42 +13,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#pragma once
+#include "attribute_inverted_interface.h"
 
-#include <string>
-
+#include "attribute_bucket_inverted_datacell.h"
+#include "attribute_inverted_datacell.h"
 namespace vsag {
 
-/**
-  * @brief Get the version based on git revision
-  * 
-  * @return the version text
-  */
-extern std::string
-version();
-
-/**
-  * @brief Init the vsag library
-  * 
-  * @return true always
-  */
-extern bool
-init();
-
+AttrInvertedInterfacePtr
+AttributeInvertedInterface::MakeInstance(Allocator* allocator, bool have_bucket) {
+    if (not have_bucket) {
+        return std::make_shared<AttributeInvertedDataCell>(allocator);
+    }
+    return std::make_shared<AttributeBucketInvertedDataCell>(allocator);
+}
 }  // namespace vsag
-
-#include "allocator.h"
-#include "attribute.h"
-#include "binaryset.h"
-#include "bitset.h"
-#include "constants.h"
-#include "dataset.h"
-#include "engine.h"
-#include "errors.h"
-#include "expected.hpp"
-#include "factory.h"
-#include "index.h"
-#include "logger.h"
-#include "options.h"
-#include "readerset.h"
-#include "utils.h"
