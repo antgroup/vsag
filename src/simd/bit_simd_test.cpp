@@ -68,6 +68,16 @@ using namespace vsag;
                 REQUIRE(fixtures::dist_t(gt[j]) == fixtures::dist_t(avx512_gt[j]));          \
             }                                                                                \
         }                                                                                    \
+        std::vector<uint8_t> neon_gt(num_bytes, 0);                                          \
+        if (SimdStatus::SupportNEON()) {                                                     \
+            neon::Func(vec1.data() + i * num_bytes,                                          \
+                       vec2.data() + i * num_bytes,                                          \
+                       num_bytes,                                                            \
+                       neon_gt.data());                                                      \
+            for (uint64_t j = 0; j < num_bytes; ++j) {                                       \
+                REQUIRE(fixtures::dist_t(gt[j]) == fixtures::dist_t(neon_gt[j]));            \
+            }                                                                                \
+        }                                                                                    \
     };
 
 #define TEST_BIT_NOT_ACCURACY(Func)                                                 \
@@ -100,6 +110,13 @@ using namespace vsag;
             avx512::Func(vec1.data() + i * num_bytes, num_bytes, avx512_gt.data()); \
             for (uint64_t j = 0; j < num_bytes; ++j) {                              \
                 REQUIRE(fixtures::dist_t(gt[j]) == fixtures::dist_t(avx512_gt[j])); \
+            }                                                                       \
+        }                                                                           \
+        std::vector<uint8_t> neon_gt(num_bytes, 0);                                 \
+        if (SimdStatus::SupportNEON()) {                                            \
+            neon::Func(vec1.data() + i * num_bytes, num_bytes, neon_gt.data());     \
+            for (uint64_t j = 0; j < num_bytes; ++j) {                              \
+                REQUIRE(fixtures::dist_t(gt[j]) == fixtures::dist_t(neon_gt[j]));   \
             }                                                                       \
         }                                                                           \
     };
@@ -159,6 +176,7 @@ TEST_CASE("Bit Operator (AND, OR, XOR, NOT)", "[!benchmark][simd]") {
         BENCHMARK_BIT_OPERATOR_COMPUTE(avx, BitAnd);
         BENCHMARK_BIT_OPERATOR_COMPUTE(avx2, BitAnd);
         BENCHMARK_BIT_OPERATOR_COMPUTE(avx512, BitAnd);
+        BENCHMARK_BIT_OPERATOR_COMPUTE(neon, BitAnd);
     }
 
     SECTION("Bit Operator Or") {
@@ -167,6 +185,7 @@ TEST_CASE("Bit Operator (AND, OR, XOR, NOT)", "[!benchmark][simd]") {
         BENCHMARK_BIT_OPERATOR_COMPUTE(avx, BitOr);
         BENCHMARK_BIT_OPERATOR_COMPUTE(avx2, BitOr);
         BENCHMARK_BIT_OPERATOR_COMPUTE(avx512, BitOr);
+        BENCHMARK_BIT_OPERATOR_COMPUTE(neon, BitOr);
     }
 
     SECTION("Bit Operator Xor") {
@@ -175,6 +194,7 @@ TEST_CASE("Bit Operator (AND, OR, XOR, NOT)", "[!benchmark][simd]") {
         BENCHMARK_BIT_OPERATOR_COMPUTE(avx, BitXor);
         BENCHMARK_BIT_OPERATOR_COMPUTE(avx2, BitXor);
         BENCHMARK_BIT_OPERATOR_COMPUTE(avx512, BitXor);
+        BENCHMARK_BIT_OPERATOR_COMPUTE(neon, BitXor);
     }
 
     SECTION("Bit Operator Not") {
@@ -183,5 +203,6 @@ TEST_CASE("Bit Operator (AND, OR, XOR, NOT)", "[!benchmark][simd]") {
         BENCHMARK_BIT_NOT_COMPUTE(avx, BitNot);
         BENCHMARK_BIT_NOT_COMPUTE(avx2, BitNot);
         BENCHMARK_BIT_NOT_COMPUTE(avx512, BitNot);
+        BENCHMARK_BIT_NOT_COMPUTE(neon, BitNot);
     }
 }

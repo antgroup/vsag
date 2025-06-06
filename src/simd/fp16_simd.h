@@ -59,6 +59,13 @@ float
 FP16ComputeL2Sqr(const uint8_t* query, const uint8_t* codes, uint64_t dim);
 }  // namespace avx512
 
+namespace neon {
+float
+FP16ComputeIP(const uint8_t* query, const uint8_t* codes, uint64_t dim);
+float
+FP16ComputeL2Sqr(const uint8_t* query, const uint8_t* codes, uint64_t dim);
+}  // namespace neon
+
 using FP16ComputeType = float (*)(const uint8_t* query, const uint8_t* codes, uint64_t dim);
 extern FP16ComputeType FP16ComputeIP;
 extern FP16ComputeType FP16ComputeL2Sqr;
