@@ -68,7 +68,7 @@ public:
     }
 
     void
-    Deserialize(StreamReader& reader) {
+    Deserialize(lvalue_or_rvalue<StreamReader> reader) {
         StreamReader::ReadVector(reader, label_table_);
         for (InnerIdType id = 0; id < label_table_.size(); ++id) {
             this->label_remap_[label_table_[id]] = id;

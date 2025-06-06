@@ -24,6 +24,7 @@ main(int argc, char** argv) {
     vsag::Options::Instance().set_logger(&fixtures::logger::test_logger);
 
     fixtures::logger::test_logger.SetLevel(vsag::Logger::Level::kWARN);
+    fixtures::logger::test_logger.OutputDirectly(false);
 
     int result = Catch::Session().run(argc, argv);
 

@@ -97,7 +97,7 @@ public:
     }
 
     virtual void
-    Deserialize(StreamReader& reader) {
+    Deserialize(lvalue_or_rvalue<StreamReader> reader) {
         StreamReader::ReadObj(reader, this->bucket_count_);
         StreamReader::ReadObj(reader, this->code_size_);
     }
