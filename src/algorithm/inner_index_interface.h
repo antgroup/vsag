@@ -250,7 +250,7 @@ public:
                             "Index doesn't support GetMemoryUsage");
     }
 
-    [[nodiscard]] virtual JsonType
+    [[nodiscard]] virtual std::string
     GetMemoryUsageDetail() const {
         // TODO(deming): implement func for every types of inner index
         throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,

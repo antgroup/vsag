@@ -298,7 +298,7 @@ public:
         return this->inner_index_->GetMemoryUsage();
     }
 
-    [[nodiscard]] JsonType
+    [[nodiscard]] std::string
     GetMemoryUsageDetail() const override {
         return this->inner_index_->GetMemoryUsageDetail();
     }

@@ -23,6 +23,7 @@
 #include "fixtures/test_logger.h"
 #include "inner_string_params.h"
 #include "test_index.h"
+#include "typing.h"
 #include "vsag/options.h"
 
 namespace fixtures {
@@ -208,7 +209,7 @@ HgraphTestIndex::TestGeneral(const TestIndex::IndexPtr& index,
 
 void
 HgraphTestIndex::TestMemoryUsageDetail(const IndexPtr& index) {
-    auto memory_detail = index->GetMemoryUsageDetail();
+    auto memory_detail = vsag::JsonType::parse(index->GetMemoryUsageDetail());
     REQUIRE(memory_detail.contains("basic_flatten_codes"));
     REQUIRE(memory_detail.contains("bottom_graph"));
     REQUIRE(memory_detail.contains("route_graph"));
