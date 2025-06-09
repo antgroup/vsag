@@ -26,6 +26,7 @@ public:
                                      const std::string& quantization_str = "sq8",
                                      int buckets_count = 210,
                                      const std::string& train_type = "kmeans",
+<<<<<<< HEAD
                                      bool use_residual = false,
                                      int buckets_per_data = 1);
 
@@ -39,6 +40,9 @@ public:
                                         bool use_residual = false,
                                         int buckets_per_data = 1);
 
+=======
+                                     bool use_residual = false);
+>>>>>>> upstream/main
     static void
     TestGeneral(const IndexPtr& index,
                 const TestDatasetPtr& dataset,
@@ -84,8 +88,12 @@ IVFTestIndex::GenerateIVFBuildParametersString(const std::string& metric_type,
                                                const std::string& quantization_str,
                                                int buckets_count,
                                                const std::string& train_type,
+<<<<<<< HEAD
                                                bool use_residual,
                                                int buckets_per_data) {
+=======
+                                               bool use_residual) {
+>>>>>>> upstream/main
     std::string build_parameters_str;
 
     constexpr auto parameter_temp = R"(
@@ -100,8 +108,12 @@ IVFTestIndex::GenerateIVFBuildParametersString(const std::string& metric_type,
             "use_reorder": {},
             "base_pq_dim": {},
             "precise_quantization_type": "{}",
+<<<<<<< HEAD
             "use_residual": {},
             "buckets_per_data": {}
+=======
+            "use_residual": {}
+>>>>>>> upstream/main
         }}
     }}
     )";
@@ -127,6 +139,7 @@ IVFTestIndex::GenerateIVFBuildParametersString(const std::string& metric_type,
                                        use_reorder,
                                        pq_dim,
                                        precise_quantizer_str,
+<<<<<<< HEAD
                                        use_residual,
                                        buckets_per_data);
 
@@ -189,6 +202,9 @@ IVFTestIndex::GenerateGNOIMIBuildParametersString(const std::string& metric_type
                                        precise_quantizer_str,
                                        use_residual,
                                        buckets_per_data);
+=======
+                                       use_residual);
+>>>>>>> upstream/main
 
     INFO(build_parameters_str);
     return build_parameters_str;
