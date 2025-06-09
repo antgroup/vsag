@@ -17,6 +17,7 @@
 #include <cmath>
 #include <cstring>
 #include <nlohmann/json.hpp>
+#include <queue>
 
 #include "vsag/errors.h"
 #include "vsag/expected.hpp"
