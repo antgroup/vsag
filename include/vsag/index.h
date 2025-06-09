@@ -19,9 +19,8 @@
 #include <limits>
 #include <stdexcept>
 
-#include "bitset.h"
-#include "typing.h"
 #include "vsag/binaryset.h"
+#include "vsag/bitset.h"
 #include "vsag/dataset.h"
 #include "vsag/errors.h"
 #include "vsag/expected.hpp"
@@ -537,7 +536,7 @@ public:
     // TODO(deming): implement func for every types of index
     // [[nodiscard]] virtual JsonType
     // GetMemoryUsageDetail() const = 0;
-    [[nodiscard]] virtual JsonType
+    [[nodiscard]] virtual std::string
     GetMemoryUsageDetail() const {
         throw std::runtime_error("Index not support GetMemoryUsageDetail");
     }

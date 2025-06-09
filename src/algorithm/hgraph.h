@@ -18,6 +18,7 @@
 #include <nlohmann/json.hpp>
 #include <random>
 #include <shared_mutex>
+#include <string>
 
 #include "algorithm/hnswlib/algorithm_interface.h"
 #include "algorithm/hnswlib/visited_list_pool.h"
@@ -125,7 +126,7 @@ public:
         return static_cast<int64_t>(this->CalSerializeSize());
     }
 
-    JsonType
+    std::string
     GetMemoryUsageDetail() const override;
 
     float
