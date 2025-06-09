@@ -700,7 +700,7 @@ HGraph::Deserialize(StreamReader& reader) {
     }
 }
 
-JsonType
+std::string
 HGraph::GetMemoryUsageDetail() const {
     JsonType memory_usage;
     if (this->ignore_reorder_) {
@@ -720,7 +720,7 @@ HGraph::GetMemoryUsageDetail() const {
         memory_usage["extra_infos"] = this->extra_infos_->CalcSerializeSize();
     }
     memory_usage["__total_size__"] = this->CalSerializeSize();
-    return memory_usage;
+    return memory_usage.dump();
 }
 
 void
