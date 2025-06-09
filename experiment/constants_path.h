@@ -24,7 +24,7 @@ inline std::string workspace = "/tbase-project";
 constexpr const char* BENCHMARK_GT_PATH_FMT = "/tbase-project/ann-benchmarks/data/{}/gt_N{}_K{}.fvecs";
 constexpr const char* BENCHMARK_QUERY_PATH_FMT = "/tbase-project/ann-benchmarks/data/{}/query.fvecs";
 constexpr const char* BENCHMARK_BASE_PATH_FMT = "/tbase-project/ann-benchmarks/data/{}/learn.fvecs";
-constexpr const char* INDEX_PATH_FMT = "{}/index/tmp/{}_{}_N{}_BL{}_BR{}_BA{}_{}.index";
+constexpr const char* INDEX_PATH_FMT = "{}/index/experimental/{}_{}_N{}_BL{}_BR{}_BA{}_{}.index";
 
 constexpr const char* BUILD_PARAM_FMT = R"(
     {{

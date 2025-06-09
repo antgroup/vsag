@@ -389,41 +389,57 @@ int search(std::vector<uint32_t> efs, uint32_t k = 10) {
     vsag::DatasetPtr ann_result;
     single_query->Float32Vectors(query->GetFloat32Vectors() + 100 * expected_dim);
 
-    for (auto ef_search : efs) {
-        logger->Debug(fmt::format("====Search with ef {}====", ef_search));
-        auto search_parameters = fmt::format(search_parameters_json, ef_search);
+    std::vector<float> A_S = {1.0, 1.2, 1.4, 1.6, 1.8, 2.0};
+    std::vector<float> M_S = {8, 12, 16, 20, 24, 28, 32};
 
+    {
+        logger->Debug(fmt::format("====Start Tuning===="));
+        vsag::SlowTaskTimer t("Tuning Cost", 1000);
+        query_npts = std::min(1000, query_npts);
+        for (auto a : A_S) {
+            for (auto m : M_S) {
+                vsag::a_s_ = a;
+                vsag::m_s_ = m;
+                logger->Debug(fmt::format("====Tuning at a_s: {}, m_s: {}====", a, m));
 
-        double total_time_cost = 0;
-        double recall = 0;
-        double avg_dist_cmp = 0, avg_hop = 0;
-        for (int i = 0; i < query_npts; i++) {
-            auto single_query = vsag::Dataset::Make();
-            single_query->NumElements(1)->Dim(expected_dim)->Owner(false);
-            double time_cost = 0;
-            vsag::DatasetPtr ann_result;
-            single_query->Float32Vectors(query->GetFloat32Vectors() + i * expected_dim);
-            {
-                vsag::Timer t(time_cost);
-                ann_result = *index->KnnSearch(single_query, k, search_parameters);
+                for (auto ef_search : efs) {
+                    logger->Debug(fmt::format("====Search with ef {}====", ef_search));
+                    auto search_parameters = fmt::format(search_parameters_json, ef_search);
+
+                    double total_time_cost = 0;
+                    double recall = 0;
+                    double avg_dist_cmp = 0, avg_hop = 0;
+                    for (int i = 0; i < query_npts; i++) {
+                        auto single_query = vsag::Dataset::Make();
+                        single_query->NumElements(1)->Dim(expected_dim)->Owner(false);
+                        double time_cost = 0;
+                        vsag::DatasetPtr ann_result;
+                        single_query->Float32Vectors(query->GetFloat32Vectors() + i * expected_dim);
+                        {
+                            vsag::Timer t(time_cost);
+                            ann_result = *index->KnnSearch(single_query, k, search_parameters);
+                        }
+                        total_time_cost += time_cost;
+                        recall += calculate_recall(ann_result, gt_data + i * gt_dim, k);
+                        assert(ann_result->GetDim() == k + 2);
+                        assert(ann_result->GetDistances()[k] - 10000000 < 1e4);
+                        assert(ann_result->GetDistances()[k + 1] - 20000000 < 1e4);
+                        avg_dist_cmp += ann_result->GetIds()[k];
+                        avg_hop += ann_result->GetIds()[k + 1];
+                    }
+                    recall /= query_npts;
+                    logger->Info(
+                        fmt::format("recall: {:.4f}, QPS: {:.1f}, time cost: {:.2f} ms, "
+                                    "avg_dist_cmp: {:.2f}, avg_hop: {:.2f}",
+                                    recall,
+                                    query_npts / (total_time_cost / 1000),
+                                    total_time_cost / query_npts,
+                                    avg_dist_cmp / query_npts,
+                                    avg_hop / query_npts));
+                }
             }
-            total_time_cost += time_cost;
-            recall += calculate_recall(ann_result, gt_data + i * gt_dim, k);
-            assert(ann_result->GetDim() == k + 2);
-            assert(ann_result->GetDistances()[k] - 10000000 < 1e4);
-            assert(ann_result->GetDistances()[k + 1] - 20000000 < 1e4);
-            avg_dist_cmp += ann_result->GetIds()[k];
-            avg_hop += ann_result->GetIds()[k + 1];
         }
-        recall /= query_npts;
-        logger->Info(fmt::format("recall: {:.4f}, QPS: {:.1f}, time cost: {:.2f} ms, avg_dist_cmp: {:.2f}, avg_hop: {:.2f}",
-                                 recall,
-                                 query_npts / (total_time_cost / 1000),
-                                 total_time_cost / query_npts,
-                                 avg_dist_cmp / query_npts,
-                                 avg_hop / query_npts));
     }
-
 
     delete[] gt_data;
 
@@ -504,10 +520,7 @@ int main(int argc, char** argv) {
     }
 
     // search
-    std::vector<uint32_t> efs = {10, 20, 30, 40, 50, 60, 70, 80, 90, 100,
-                                 10, 20, 30, 40, 50, 60, 70, 80, 90, 100,
-                                 10, 20, 30, 40, 50, 60, 70, 80, 90, 100,
-                                 10, 20, 30, 40, 50, 60, 70, 80, 90, 100};
+    std::vector<uint32_t> efs = {10, 20, 30, 40, 50, 60, 70, 80, 90, 100};
     if (ef_search != -1) {
         efs.assign(1000, ef_search);
     }

@@ -151,7 +151,7 @@ HNSW::build(const DatasetPtr& base) {
         auto vectors = base->GetFloat32Vectors();
         std::vector<int64_t> failed_ids;
         {
-            SlowTaskTimer t("hnsw graph");
+            SlowTaskTimer t("hnsw graph", 60 * 1000);
 //            omp_set_num_threads(32);
 //#pragma omp parallel for schedule(dynamic, 100)
             for (int64_t i = 0; i < num_elements; ++i) {
@@ -519,7 +519,10 @@ HNSW::deserialize(const BinarySet& binary_set) {
             if (sq_num_bits_ == 8 or sq_num_bits_ == 4) {
                 alg_hnsw->transform_base_int4();
             }
-            alg_hnsw->optimize();
+            {
+                SlowTaskTimer t_optimize("====optimize cost====", 1000);
+                alg_hnsw->optimize();
+            }
         }
     } catch (const std::runtime_error& e) {
         LOG_ERROR_AND_RETURNS(ErrorType::READ_ERROR, "failed to deserialize: ", e.what());
@@ -575,7 +578,10 @@ HNSW::deserialize(std::istream& in_stream) {
             if (sq_num_bits_ == 8 or sq_num_bits_ == 4) {
                 alg_hnsw->transform_base_int4();
             }
-            alg_hnsw->optimize();
+            {
+                SlowTaskTimer t_optimize("====optimize cost====", 1000);
+                alg_hnsw->optimize();
+            }
         }
     } catch (const std::runtime_error& e) {
         LOG_ERROR_AND_RETURNS(ErrorType::READ_ERROR, "failed to deserialize: ", e.what());
