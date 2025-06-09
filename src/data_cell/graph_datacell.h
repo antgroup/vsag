@@ -91,6 +91,8 @@ public:
         return this->io_->InMemory();
     }
 
+    void MergeOther(GraphInterfacePtr other, int64_t bias) override;
+
 private:
     std::shared_ptr<BasicIO<IOTmpl>> io_{nullptr};
 
@@ -103,6 +105,26 @@ private:
 
     uint32_t code_line_size_{0};
 };
+
+template <typename IOTmpl>
+void
+GraphDataCell<IOTmpl>::MergeOther(GraphInterfacePtr other, int64_t bias) {
+    auto other_graph = std::dynamic_pointer_cast<GraphDataCell<IOTmpl>>(other);
+    if (!other_graph) {
+            throw VsagException(ErrorType::INTERNAL_ERROR,
+                            "GraphDataCell can only merge with GraphDataCell");
+    }
+    if (this->maximum_degree_ != other_graph->maximum_degree_) {
+            throw VsagException(ErrorType::INTERNAL_ERROR,
+                            fmt::format("GraphDataCell maximum degree mismatch: {} vs {}",
+                                            this->maximum_degree_,
+                                            other_graph->maximum_degree_));
+    }
+    Vector<InnerIdType> neighbor_ids;
+    for (int i = 0; i < other_graph->total_count_; ++i) {
+
+    }
+}
 
 template <typename IOTmpl>
 GraphDataCell<IOTmpl>::GraphDataCell(const GraphDataCellParamPtr& param,

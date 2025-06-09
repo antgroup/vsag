@@ -30,6 +30,7 @@
 #include "index/iterator_filter.h"
 #include "utils/standard_heap.h"
 #include "utils/util_functions.h"
+#include "index/index_impl.h"
 
 namespace vsag {
 
@@ -1407,4 +1408,59 @@ HGraph::Remove(int64_t id) {
     return true;
 }
 
+void
+HGraph::Merge(const std::vector<MergeUnit>& merge_units) {
+    int64_t total_count = 0;
+    for (auto& unit : merge_units) {
+        check_merge_illegal(unit);
+        total_count += unit.index->GetNumElements();
+    }
+    if (max_capacity_ < total_count) {
+        this->resize(total_count);
+    }
+    for (int i = 0; i < merge_units.size(); ++i) {
+        const auto other_index = std::dynamic_pointer_cast<HGraph>(
+            std::dynamic_pointer_cast<IndexImpl<HGraph>>(merge_units[i].index)->GetInnerIndex());
+        basic_flatten_codes_->MergeOther(other_index->basic_flatten_codes_, this->total_count_);
+        label_table_->MergeOther(other_index->label_table_, this->total_count_);
+        if (use_reorder_) {
+            high_precise_codes_->MergeOther(other_index->high_precise_codes_, this->total_count_);
+        }
+    }
+}
+
+void
+HGraph::check_merge_illegal(const MergeUnit& unit) {
+    auto index = std::dynamic_pointer_cast<IndexImpl<HGraph>>(unit.index);
+    if (index == nullptr) {
+        throw VsagException(
+            ErrorType::INVALID_ARGUMENT,
+            "Merge Failed: index type not match, try to merge a non-hgraph index to an hgraph index");
+    }
+    auto other_ivf_index = std::dynamic_pointer_cast<HGraph>(
+        std::dynamic_pointer_cast<IndexImpl<HGraph>>(unit.index)->GetInnerIndex());
+    if (other_ivf_index->use_reorder_ != this->use_reorder_) {
+        throw VsagException(
+            ErrorType::INVALID_ARGUMENT,
+            fmt::format(
+                "Merge Failed: hgraph use_reorder not match, current index is {}, other index is {}",
+                this->use_reorder_,
+                other_ivf_index->use_reorder_));
+    }
+    auto cur_model = this->ExportModel(index->GetCommonParam());
+    std::stringstream ss1;
+    std::stringstream ss2;
+    IOStreamWriter writer1(ss1);
+    cur_model->Serialize(writer1);
+    cur_model.reset();
+    auto other_model = other_ivf_index->ExportModel(index->GetCommonParam());
+    IOStreamWriter writer2(ss2);
+    other_model->Serialize(writer2);
+    other_model.reset();
+    if (not check_equal_on_string_stream(ss1, ss2)) {
+        throw VsagException(
+            ErrorType::INVALID_ARGUMENT,
+            "Merge Failed: hgraph model not match, try to merge a different model hgraph index");
+    }
+}
 }  // namespace vsag
