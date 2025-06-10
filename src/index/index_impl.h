@@ -85,6 +85,14 @@ public:
     }
 
     [[nodiscard]] tl::expected<DatasetPtr, Error>
+    SearchWithRequest(const SearchRequest& request) const override {
+        if (GetNumElements() == 0) {
+            return DatasetImpl::MakeEmptyDataset();
+        }
+        SAFE_CALL(return this->inner_index_->SearchWithRequest(request));
+    }
+
+    [[nodiscard]] tl::expected<DatasetPtr, Error>
     KnnSearch(const DatasetPtr& query,
               int64_t k,
               const std::string& parameters,
