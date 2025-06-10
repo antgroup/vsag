@@ -21,7 +21,7 @@ int
 main(int argc, char** argv) {
     vsag::init();
     /******************* Prepare Base Dataset *****************/
-    int64_t num_vectors = 10000;
+    int64_t num_vectors = 2000;
     int64_t dim = 128;
     std::vector<int64_t> ids(num_vectors);
     std::vector<float> datas(num_vectors * dim);
@@ -40,23 +40,26 @@ main(int argc, char** argv) {
         ->Float32Vectors(datas.data())
         ->Owner(false);
 
-    /******************* Create HNSW Index *****************/
-    auto hnsw_build_paramesters = R"(
+    /******************* Create HGraph Index *****************/
+    auto hgraph_build_paramesters = R"(
     {
         "dtype": "float32",
         "metric_type": "l2",
         "dim": 128,
-        "hnsw": {
+        "index_param": {
+            "base_quantization_type": "sq8",
             "max_degree": 16,
-            "ef_construction": 100
+            "ef_construction": 100,
+            "support_remove": true
         }
     }
     )";
-    auto index = vsag::Factory::CreateIndex("hnsw", hnsw_build_paramesters).value();
+    auto index = vsag::Factory::CreateIndex("hgraph", hgraph_build_paramesters).value();
 
-    /******************* Build HNSW Index *****************/
+    /******************* Build HGraph Index *****************/
     if (auto build_result = index->Build(base); build_result.has_value()) {
-        std::cout << "After Build(), Index Hnsw contains: " << index->GetNumElements() << std::endl;
+        std::cout << "After Build(), Index HGraph contains: " << index->GetNumElements()
+                  << std::endl;
     } else {
         std::cerr << "Failed to build index: " << build_result.error().message << std::endl;
         exit(-1);
@@ -70,16 +73,16 @@ main(int argc, char** argv) {
     auto query = vsag::Dataset::Make();
     query->NumElements(1)->Dim(dim)->Float32Vectors(query_vector.data())->Owner(false);
 
-    /******************* HNSW Origin KnnSearch *****************/
-    auto hnsw_search_parameters = R"(
+    /******************* HGraph Origin KnnSearch *****************/
+    auto hgraph_search_parameters = R"(
     {
-        "hnsw": {
+        "hgraph": {
             "ef_search": 100
         }
     }
     )";
     int64_t topk = 10;
-    auto search_result = index->KnnSearch(query, topk, hnsw_search_parameters);
+    auto search_result = index->KnnSearch(query, topk, hgraph_search_parameters);
     if (not search_result.has_value()) {
         std::cerr << "Failed to search index" << search_result.error().message << std::endl;
         exit(-1);
@@ -91,13 +94,13 @@ main(int argc, char** argv) {
         std::cout << result->GetIds()[i] << ": " << result->GetDistances()[i] << std::endl;
     }
 
-    /******************* HNSW Remove Some result ids *****************/
+    /******************* HGraph Remove Some result ids *****************/
     for (int64_t i = 0; i < 5; ++i) {
         index->Remove(result->GetIds()[i]);
     }
 
-    /******************* HNSW KnnSearch After Remove *****************/
-    search_result = index->KnnSearch(query, topk, hnsw_search_parameters);
+    /******************* HGraph KnnSearch After Remove *****************/
+    search_result = index->KnnSearch(query, topk, hgraph_search_parameters);
     if (not search_result.has_value()) {
         std::cerr << "Failed to search index" << search_result.error().message << std::endl;
         exit(-1);

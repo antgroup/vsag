@@ -1655,4 +1655,39 @@ TestIndex::TestExportModel(const TestIndex::IndexPtr& index,
     REQUIRE(std::abs(recall1 - recall2) < 0.01F * query_count);
 }
 
+void
+TestIndex::TestRemoveIndex(const TestIndex::IndexPtr& index,
+                           const TestDatasetPtr& dataset,
+                           bool expected_success) {
+    auto train_result = index->Train(dataset->base_);
+    REQUIRE(train_result.has_value());
+    auto base_num = dataset->base_->GetNumElements();
+    auto base_dim = dataset->base_->GetDim();
+    for (int64_t i = 0; i < base_num; ++i) {
+        auto new_data = vsag::Dataset::Make();
+        new_data->NumElements(1)
+            ->Dim(base_dim)
+            ->Ids(&i)
+            ->Float32Vectors(dataset->base_->GetFloat32Vectors() + i * base_dim)
+            ->Owner(false);
+        auto add_results = index->Add(new_data);
+        REQUIRE(add_results.has_value());
+    }
+    for (int64_t i = 0; i < base_num; ++i) {
+        auto new_data = vsag::Dataset::Make();
+        new_data->NumElements(1)
+            ->Dim(base_dim)
+            ->Ids(dataset->base_->GetIds() + i)
+            ->Float32Vectors(dataset->base_->GetFloat32Vectors() + i * base_dim)
+            ->Owner(false);
+        auto add_results = index->Add(new_data);
+        REQUIRE(add_results.has_value());
+        auto remove_results = index->Remove(i);
+        REQUIRE(remove_results.has_value());
+        remove_results = index->Remove(i);
+        REQUIRE_FALSE(remove_results.has_value());
+        REQUIRE(index->GetNumElements() == dataset->base_->GetNumElements());
+    }
+}
+
 }  // namespace fixtures
