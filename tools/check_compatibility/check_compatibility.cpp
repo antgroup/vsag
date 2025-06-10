@@ -64,7 +64,6 @@ main(int argc, char** argv) {
     auto index = vsag::Factory::CreateIndex(algo_name, build_json);
     if (not index.has_value()) {
         log_error();
-
         return -1;
     }
     auto algo = index.value();

@@ -22,6 +22,7 @@
 #include "stream_writer.h"
 #include "typing.h"
 #include "vsag/attribute.h"
+#include "vsag_exception.h"
 
 namespace vsag {
 class AttributeInvertedInterface;
@@ -33,7 +34,8 @@ public:
     MakeInstance(Allocator* allocator, bool have_bucket = false);
 
 public:
-    AttributeInvertedInterface(Allocator* allocator) : allocator_(allocator){};
+    AttributeInvertedInterface(Allocator* allocator)
+        : allocator_(allocator), field_type_map_(allocator){};
     virtual ~AttributeInvertedInterface() = default;
 
     virtual void
@@ -58,7 +60,18 @@ public:
     Deserialize(StreamReader& reader) {
     }
 
+    AttrValueType
+    GetTypeOfField(const std::string& field_name) {
+        auto iter = this->field_type_map_.find(field_name);
+        if (iter == this->field_type_map_.end()) {
+            throw VsagException(ErrorType::INTERNAL_ERROR, "field not found");
+        }
+        return iter->second;
+    }
+
 public:
     Allocator* const allocator_{nullptr};
+
+    UnorderedMap<std::string, AttrValueType> field_type_map_;
 };
 }  // namespace vsag

@@ -45,6 +45,7 @@ AttributeBucketInvertedDataCell::InsertWithBucket(const AttributeSet& attr_set,
         }
         auto& value_map = (*cur_bucket)[attr->name_];
         auto value_type = attr->GetValueType();
+        this->field_type_map_[attr->name_] = value_type;
         if (value_type == AttrValueType::INT32) {
             this->insert_by_type<int32_t>(value_map, attr, inner_id);
         } else if (value_type == AttrValueType::INT64) {

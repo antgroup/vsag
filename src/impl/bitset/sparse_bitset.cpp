@@ -47,7 +47,7 @@ SparseBitset::Dump() {
 }
 
 void
-SparseBitset::Or(const Bitset& another) {
+SparseBitset::Or(const ComputableBitset& another) {
     const auto* another_ptr = reinterpret_cast<const SparseBitset*>(&another);
     std::lock(mutex_, another_ptr->mutex_);
     std::lock_guard<std::mutex> lock(mutex_, std::adopt_lock);
@@ -56,7 +56,7 @@ SparseBitset::Or(const Bitset& another) {
 }
 
 void
-SparseBitset::And(const Bitset& another) {
+SparseBitset::And(const ComputableBitset& another) {
     const auto* another_ptr = reinterpret_cast<const SparseBitset*>(&another);
     std::lock(mutex_, another_ptr->mutex_);
     std::lock_guard<std::mutex> lock(mutex_, std::adopt_lock);
@@ -65,12 +65,36 @@ SparseBitset::And(const Bitset& another) {
 }
 
 void
-SparseBitset::Xor(const Bitset& another) {
+SparseBitset::Xor(const ComputableBitset& another) {
     const auto* another_ptr = reinterpret_cast<const SparseBitset*>(&another);
     std::lock(mutex_, another_ptr->mutex_);
     std::lock_guard<std::mutex> lock(mutex_, std::adopt_lock);
     std::lock_guard<std::mutex> lock_other(another_ptr->mutex_, std::adopt_lock);
     r_ ^= another_ptr->r_;
+}
+
+void
+SparseBitset::Or(const ComputableBitsetPtr& another) {
+    if (another == nullptr) {
+        return;
+    }
+    this->Or(*another);
+}
+
+void
+SparseBitset::And(const ComputableBitsetPtr& another) {
+    if (another == nullptr) {
+        this->Clear();
+    }
+    this->And(*another);
+}
+
+void
+SparseBitset::Xor(const ComputableBitsetPtr& another) {
+    if (another == nullptr) {
+        return;
+    }
+    this->Xor(*another);
 }
 
 void
@@ -100,6 +124,11 @@ SparseBitset::Deserialize(StreamReader& reader) {
     std::vector<char> buffer(size);
     reader.Read(buffer.data(), size);
     r_ = roaring::Roaring::readSafe(buffer.data(), size);
+}
+
+void
+SparseBitset::Clear() {
+    this->r_ = std::move(roaring::Roaring());
 }
 
 }  // namespace vsag
