@@ -50,6 +50,7 @@ public:
     // for ivf
     int scan_bucket_size{1};
     float factor{2.0F};
+    float first_order_scan_ratio{1.0F};
     Allocator* search_alloc{nullptr};
 
     InnerSearchParam&
@@ -65,6 +66,7 @@ public:
             is_inner_id_allowed = other.is_inner_id_allowed;
             scan_bucket_size = other.scan_bucket_size;
             factor = other.factor;
+            first_order_scan_ratio = other.first_order_scan_ratio;
         }
         return *this;
     }

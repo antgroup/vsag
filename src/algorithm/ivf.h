@@ -114,6 +114,7 @@ private:
     BucketInterfacePtr bucket_{nullptr};
 
     IVFPartitionStrategyPtr partition_strategy_{nullptr};
+    BucketIdType buckets_per_data_;
 
     int64_t total_elements_{0};
 
