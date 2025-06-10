@@ -169,4 +169,6 @@ extern const char* const IVF_PRECISE_QUANTIZATION_TYPE;
 extern const char* const IVF_PRECISE_IO_TYPE;
 extern const char* const IVF_PRECISE_FILE_PATH;
 
+extern const char* const GNO_IMI_FIRST_ORDER_BUCKETS_COUNT;
+extern const char* const GNO_IMI_SECOND_ORDER_BUCKETS_COUNT;
 }  // namespace vsag
