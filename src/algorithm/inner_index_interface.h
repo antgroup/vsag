@@ -77,6 +77,9 @@ public:
     [[nodiscard]] virtual InnerIndexPtr
     Fork(const IndexCommonParam& param) = 0;
 
+    [[nodiscard]] virtual int64_t
+    GetNumElements() const = 0;
+
 public:
     virtual void
     Train(const DatasetPtr& base){};
@@ -243,9 +246,6 @@ public:
     CheckFeature(IndexFeature feature) const {
         return this->index_feature_list_->CheckFeature(feature);
     }
-
-    [[nodiscard]] virtual int64_t
-    GetNumElements() const = 0;
 
     [[nodiscard]] virtual int64_t
     GetMemoryUsage() const {
