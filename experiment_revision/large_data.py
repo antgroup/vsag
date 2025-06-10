@@ -1,12 +1,10 @@
 import matplotlib.pyplot as plt
 import json
+import os
+from matplotlib.lines import Line2D
 
 data_hnswlib = """
-{"QPS":1594.8963623046875,"RT":0.0006270000012591481,"Recall":0.8076000213623047,"ef_search":10}
-{"QPS":1592.356689453125,"RT":0.0006280000088736415,"Recall":0.8978999853134155,"ef_search":20}
 {"QPS":1290.3226318359375,"RT":0.0007749999640509486,"Recall":0.9235000014305115,"ef_search":30}
-{"QPS":1077.586181640625,"RT":0.000927999964915216,"Recall":0.9384999871253967,"ef_search":40}
-{"QPS":931.0986938476563,"RT":0.0010740000288933516,"Recall":0.9483000040054321,"ef_search":50}
 {"QPS":814.3322143554688,"RT":0.0012280000373721123,"Recall":0.9577000141143799,"ef_search":60}
 {"QPS":723.5889892578125,"RT":0.0013819999294355512,"Recall":0.9627000093460083,"ef_search":70}
 {"QPS":643.0868530273438,"RT":0.001554999966174364,"Recall":0.9678000211715698,"ef_search":80}
@@ -43,27 +41,87 @@ recall_values1 = [item["Recall"] for item in data_list1]
 qps_values2 = [item["QPS"] for item in data_list2]
 recall_values2 = [item["Recall"] for item in data_list2]
 
+# 定义样式
+LINE_STYLES = {
+    "vsag": {"color": "#03A9F4", "marker": "o"},  # 清新蓝色 + 圆形
+    "hnswlib": {"color": "#FF5722", "marker": "s"},  # 清新橙色 + 方形
+    "faiss-ivfpqfs": {"color": "red", "marker": ">"},  # 红色 + 三角形
+}
+
 # 绘制曲线
-plt.figure(figsize=(12, 8))
+plt.figure(figsize=(5, 4), dpi=600)
 
 # 数据集 1 的 QPS vs Recall 曲线
-plt.plot(recall_values1, qps_values1, label="hnswlib", marker='o', color='blue')
+style1 = LINE_STYLES["hnswlib"]
+plt.plot(recall_values1, qps_values1,
+         label="hnswlib", marker=style1["marker"], color=style1["color"],
+         markersize=8, markeredgecolor="black", linewidth=2, zorder=2)
 
 # 数据集 2 的 QPS vs Recall 曲线
-plt.plot(recall_values2, qps_values2, label="VSAG", marker='s', color='red', linestyle='--')
+style2 = LINE_STYLES["vsag"]
+plt.plot(recall_values2, qps_values2,
+         label="vsag", marker=style2["marker"], color=style2["color"],
+         markersize=8, markeredgecolor="black", linewidth=2, zorder=2)
 
-# 添加标题和标签
-plt.title("QPS vs Recall (Two Datasets)", fontsize=16)
-plt.xlabel("Recall", fontsize=14)
-plt.ylabel("QPS", fontsize=14)
+# 设置图形属性
+f_size = 16
+plt.xlabel("Recall@10", fontsize=f_size)
+plt.ylabel("QPS", fontsize=f_size)
+plt.grid(True, linestyle="--", alpha=0.6)  # 添加网格线，使用浅灰色虚线
+plt.tight_layout()
 
-# 添加图例
-plt.legend(fontsize=12)
+# 设置 y 轴为对数刻度，并调整范围使曲线差距更明显
+plt.yscale("log")
+plt.ylim(10**2, 10**4)  # 调整 QPS 轴范围
+plt.yticks([10**2, 10**3, 10**4], ["$10^2$", "$10^3$", "$10^4$"], fontsize=f_size)
+plt.xticks(fontsize=f_size)
 
-# 显示网格
-plt.grid(True)
+# 保存图表为 PNG
+output_dir = "./fig"
+os.makedirs(output_dir, exist_ok=True)
+plt.savefig(os.path.join(output_dir, "100m_recall@10.pdf"), format="pdf")
 
 # 显示图形
 plt.show()
 
-plt.savefig("recall@100.png")
+# 单独绘制图例
+def draw_legend(output_dir):
+    """
+    绘制单独的图例并保存为 PDF 文件。
+    """
+    # 创建一个新的画布用于绘制图例
+    fig, ax = plt.subplots(figsize=(3, 0.1), dpi=600)  # 图例画布大小
+    ax.axis("off")  # 关闭坐标轴
+
+    # 创建图例项
+    legend_elements = [
+        Line2D([0], [0], marker=LINE_STYLES["hnswlib"]["marker"], color="w",
+               label="hnswlib", markerfacecolor=LINE_STYLES["hnswlib"]["color"],
+               markersize=10, markeredgecolor="black"),
+        Line2D([0], [0], marker=LINE_STYLES["vsag"]["marker"], color="w",
+               label="vsag", markerfacecolor=LINE_STYLES["vsag"]["color"],
+               markersize=10, markeredgecolor="black"),
+        Line2D([0], [0], marker=LINE_STYLES["faiss-ivfpqfs"]["marker"], color="w",
+               label="faiss-ivfpqfs", markerfacecolor=LINE_STYLES["faiss-ivfpqfs"]["color"],
+               markersize=10, markeredgecolor="black"),
+    ]
+
+    # 绘制图例
+    legend = ax.legend(
+        handles=legend_elements,
+        loc="center",  # 图例位置
+        ncol=3,  # 每排两个图例项
+        fontsize=16,  # 字体大小
+        frameon=False,  # 不显示边框
+        handlelength=1.0,  # 标记长度
+        handletextpad=0.3,  # 标记与文本之间的间距
+        columnspacing=0.5,  # 列与列之间的间距
+        borderpad=0.2  # 内边距（如果有边框）
+    )
+
+    # 保存图例为 PDF 文件
+    plt.savefig(os.path.join(output_dir, "legend.pdf"), format="pdf", bbox_inches="tight")
+    plt.close()  # 关闭图形以释放内存
+
+# 调用绘制图例函数
+draw_legend(output_dir)
