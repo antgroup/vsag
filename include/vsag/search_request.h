@@ -17,6 +17,7 @@
 #include <cstdint>
 #include <string>
 
+#include "dataset.h"
 #include "filter.h"
 
 namespace vsag {
@@ -27,8 +28,10 @@ enum class SearchMode {
 
 class SearchRequest {
 public:
+    DatasetPtr query_{nullptr};
     SearchMode mode_{SearchMode::KNN_SEARCH};
     int64_t topk_;
+    std::string params_str_;
 
     bool enable_attribute_filter_{false};
     std::string attribute_filter_str_;

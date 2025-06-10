@@ -85,6 +85,9 @@ public:
     Build(const DatasetPtr& base);
 
     [[nodiscard]] virtual DatasetPtr
+    SearchWithRequest(const SearchRequest& request) const;
+
+    [[nodiscard]] virtual DatasetPtr
     KnnSearch(const DatasetPtr& query,
               int64_t k,
               const std::string& parameters,
