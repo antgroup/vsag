@@ -78,6 +78,9 @@ public:
     std::vector<int64_t>
     Add(const DatasetPtr& data) override;
 
+    bool
+    Remove(int64_t id) override;
+
     [[nodiscard]] DatasetPtr
     KnnSearch(const DatasetPtr& query,
               int64_t k,
@@ -115,7 +118,7 @@ public:
 
     int64_t
     GetNumElements() const override {
-        return static_cast<int64_t>(this->total_count_);
+        return static_cast<int64_t>(this->total_count_) - delete_count_;
     }
 
     uint64_t
@@ -272,6 +275,9 @@ private:
     uint64_t extra_info_size_{0};
 
     static constexpr uint64_t DEFAULT_RESIZE_BIT = 10;
+
+    UnorderedSet<InnerIdType> deleted_ids_;
+    std::atomic<int64_t> delete_count_{0};
 
     std::shared_ptr<Optimizer<BasicSearcher>> optimizer_;
 };

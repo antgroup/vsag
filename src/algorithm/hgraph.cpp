@@ -44,7 +44,8 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
       build_thread_count_(hgraph_param->build_thread_count),
       odescent_param_(hgraph_param->odescent_param),
       graph_type_(hgraph_param->graph_type),
-      extra_info_size_(common_param.extra_info_size_) {
+      extra_info_size_(common_param.extra_info_size_),
+      deleted_ids_(allocator_) {
     neighbors_mutex_ = std::make_shared<PointsMutex>(0, common_param.allocator_.get());
     this->basic_flatten_codes_ =
         FlattenInterface::MakeInstance(hgraph_param->base_codes_param, common_param);
@@ -1059,8 +1060,9 @@ static const std::string HGRAPH_PARAMS_TEMPLATE =
             "{ODESCENT_PARAMETER_GRAPH_ITER_TURN}": 30,
             "{ODESCENT_PARAMETER_NEIGHBOR_SAMPLE_RATE}": 0.2,
             "{GRAPH_PARAM_MAX_DEGREE}": 64,
-            "{GRAPH_PARAM_MAX_DEGREE}": 64,
-            "{GRAPH_PARAM_INIT_MAX_CAPACITY}": 100
+            "{GRAPH_PARAM_INIT_MAX_CAPACITY}": 100,
+            "{GRAPH_SUPPORT_REMOVE}": false,
+            "{REMOVE_FLAG_BIT}": 8
         },
         "{HGRAPH_BASE_CODES_KEY}": {
             "{IO_PARAMS_KEY}": {
@@ -1287,6 +1289,14 @@ HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
                 PRODUCT_QUANTIZATION_DIM,
             },
         },
+        {
+            HGRAPH_SUPPORT_REMOVE,
+            {HGRAPH_GRAPH_KEY, GRAPH_SUPPORT_REMOVE},
+        },
+        {
+            HGRAPH_REMOVE_FLAG_BIT,
+            {HGRAPH_GRAPH_KEY, REMOVE_FLAG_BIT},
+        },
     };
     if (common_param.data_type_ == DataTypes::DATA_TYPE_INT8) {
         throw VsagException(ErrorType::INVALID_ARGUMENT,
@@ -1333,4 +1343,39 @@ HGraph::GetRawData(vsag::InnerIdType inner_id, uint8_t* data) const {
         basic_flatten_codes_->GetCodesById(inner_id, data);
     }
 }
+
+bool
+HGraph::Remove(int64_t id) {
+    // TODO(inbao): support thread safe remove
+    auto inner_id = this->label_table_->GetIdByLabel(id);
+    if (inner_id == this->entry_point_id_) {
+        bool find_new_ep = false;
+        while (not route_graphs_.empty()) {
+            auto& upper_graph = route_graphs_.back();
+            Vector<InnerIdType> neighbors(allocator_);
+            upper_graph->GetNeighbors(this->entry_point_id_, neighbors);
+            for (const auto& nb_id : neighbors) {
+                if (inner_id == nb_id) {
+                    continue;
+                }
+                this->entry_point_id_ = nb_id;
+                find_new_ep = true;
+                break;
+            }
+            if (find_new_ep) {
+                break;
+            }
+            route_graphs_.pop_back();
+        }
+    }
+    for (int level = static_cast<int>(route_graphs_.size()) - 1; level >= 0; --level) {
+        this->route_graphs_[level]->DeleteNeighborsById(inner_id);
+    }
+    this->bottom_graph_->DeleteNeighborsById(inner_id);
+    this->label_table_->Remove(id);
+    this->deleted_ids_.insert(inner_id);
+    delete_count_++;
+    return true;
+}
+
 }  // namespace vsag

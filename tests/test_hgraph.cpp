@@ -37,7 +37,8 @@ public:
                                         int extra_info_size = 0,
                                         const std::string& data_type = "float32",
                                         std::string graph_type = "nsw",
-                                        std::string graph_storage = "flat");
+                                        std::string graph_storage = "flat",
+                                        bool support_remove = false);
 
     static bool
     IsRaBitQ(const std::string& quantization_str);
@@ -92,7 +93,8 @@ HgraphTestIndex::GenerateHGraphBuildParametersString(const std::string& metric_t
                                                      int extra_info_size,
                                                      const std::string& data_type,
                                                      std::string graph_type,
-                                                     std::string graph_storage) {
+                                                     std::string graph_storage,
+                                                     bool support_remove) {
     std::string build_parameters_str;
 
     constexpr auto parameter_temp_reorder = R"(
@@ -115,7 +117,8 @@ HgraphTestIndex::GenerateHGraphBuildParametersString(const std::string& metric_t
             "graph_storage_type": "{}",
             "graph_iter_turn": 10,
             "neighbor_sample_rate": 0.3,
-            "alpha": 1.2
+            "alpha": 1.2,
+            "support_remove": {}
         }}
     }}
     )";
@@ -136,7 +139,8 @@ HgraphTestIndex::GenerateHGraphBuildParametersString(const std::string& metric_t
             "graph_storage_type": "{}",
             "graph_iter_turn": 10,
             "neighbor_sample_rate": 0.3,
-            "alpha": 1.2
+            "alpha": 1.2,
+            "support_remove": {}
         }}
     }}
     )";
@@ -167,7 +171,8 @@ HgraphTestIndex::GenerateHGraphBuildParametersString(const std::string& metric_t
                                            precise_io_type,
                                            dir.GenerateRandomFile(),
                                            graph_type,
-                                           graph_storage);
+                                           graph_storage,
+                                           support_remove);
     } else {
         build_parameters_str = fmt::format(parameter_temp_origin,
                                            data_type,
@@ -178,7 +183,8 @@ HgraphTestIndex::GenerateHGraphBuildParametersString(const std::string& metric_t
                                            pq_dim,
                                            thread_count,
                                            graph_type,
-                                           graph_storage);
+                                           graph_storage,
+                                           support_remove);
     }
     return build_parameters_str;
 }
@@ -505,6 +511,35 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex, "HGraph ODescent Build",
             auto index = TestFactory(name, param, true);
             auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
             TestBuildIndex(index, dataset, true);
+            TestGeneral(index, dataset, search_param, recall);
+            vsag::Options::Instance().set_block_size_limit(origin_size);
+        }
+    }
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex, "HGraph Remove", "[ft][hgraph]") {
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    auto size = GENERATE(1024 * 1024 * 2);
+    auto metric_type = GENERATE("l2", "ip", "cosine");
+
+    const std::string name = "hgraph";
+    auto search_param = fmt::format(search_param_tmp, 200, false);
+    for (auto dim : dims) {
+        for (auto& [base_quantization_str, recall] : test_cases) {
+            if (IsRaBitQ(base_quantization_str)) {
+                if (std::string(metric_type) != "l2") {
+                    continue;
+                }
+                if (dim <= fixtures::RABITQ_MIN_RACALL_DIM) {
+                    dim += fixtures::RABITQ_MIN_RACALL_DIM;
+                }
+            }
+            vsag::Options::Instance().set_block_size_limit(size);
+            auto param = GenerateHGraphBuildParametersString(
+                metric_type, dim, base_quantization_str, 5, 0, "float32", "nsw", "flat", true);
+            auto index = TestFactory(name, param, true);
+            auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
+            TestRemoveIndex(index, dataset, true);
             TestGeneral(index, dataset, search_param, recall);
             vsag::Options::Instance().set_block_size_limit(origin_size);
         }
