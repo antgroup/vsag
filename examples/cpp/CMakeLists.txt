@@ -19,6 +19,9 @@ target_link_libraries (106_index_ivf vsag)
 add_executable (107_index_pyramid 107_index_pyramid.cpp)
 target_link_libraries (107_index_pyramid vsag)
 
+add_executable (108_index_gno_imi 108_index_gno_imi.cpp)
+target_link_libraries (108_index_gno_imi vsag)
+
 add_executable (201_custom_allocator 201_custom_allocator.cpp)
 target_link_libraries (201_custom_allocator vsag)
 

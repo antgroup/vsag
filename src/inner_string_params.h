@@ -24,6 +24,7 @@ namespace vsag {
 // Index Type
 const char* const INDEX_TYPE_HGRAPH = "hgraph";
 const char* const INDEX_TYPE_IVF = "ivf";
+const char* const INDEX_TYPE_GNO_IMI = "gno_imi";
 
 // Parameter key for hgraph
 const char* const HGRAPH_USE_REORDER_KEY = "use_reorder";
@@ -86,6 +87,7 @@ const char* const GRAPH_STORAGE_TYPE_COMPRESSED = "compressed";
 const char* const GRAPH_STORAGE_TYPE_FLAT = "flat";
 
 const char* const BUCKET_PARAMS_KEY = "buckets_params";
+const char* const BUCKET_PER_DATA_KEY = "buckets_per_data";
 const char* const NO_BUILD_LEVELS = "no_build_levels";
 
 const char* const BUCKETS_COUNT_KEY = "buckets_count";
@@ -98,6 +100,15 @@ const char* const IVF_TRAIN_TYPE_KEY = "ivf_train_type";
 const char* const IVF_TRAIN_TYPE_RANDOM = "random";
 const char* const IVF_TRAIN_TYPE_KMEANS = "kmeans";
 
+const char* const IVF_PARTITION_STRATEGY_PARAMS_KEY = "partition_strategy";
+const char* const IVF_PARTITION_STRATEGY_TYPE_KEY = "partition_strategy_type";
+const char* const IVF_PARTITION_STRATEGY_TYPE_NEAREST = "ivf";
+const char* const IVF_PARTITION_STRATEGY_TYPE_GNO_IMI = "gno_imi";
+
+const char* const GNO_IMI_FIRST_ORDER_BUCKETS_COUNT_KEY = "first_order_buckets_count";
+const char* const GNO_IMI_SECOND_ORDER_BUCKETS_COUNT_KEY = "second_order_buckets_count";
+
+const char* const GNO_IMI_SEARCH_PARAM_FIRST_ORDER_SCAN_RATIO = "first_order_scan_ratio";
 const char* const FLATTEN_DATA_CELL = "flatten_data_cell";
 const char* const SPARSE_VECTOR_DATA_CELL = "sparse_vector_data_cell";
 
@@ -107,6 +118,7 @@ const char* const REMOVE_FLAG_BIT = "remove_flag_bit";
 const std::unordered_map<std::string, std::string> DEFAULT_MAP = {
     {"INDEX_TYPE_HGRAPH", INDEX_TYPE_HGRAPH},
     {"INDEX_TYPE_IVF", INDEX_TYPE_IVF},
+    {"INDEX_TYPE_GNO_IMI", INDEX_TYPE_GNO_IMI},
     {"HGRAPH_USE_REORDER_KEY", HGRAPH_USE_REORDER_KEY},
     {"HGRAPH_USE_ELP_OPTIMIZER_KEY", HGRAPH_USE_ELP_OPTIMIZER_KEY},
     {"HGRAPH_IGNORE_REORDER_KEY", HGRAPH_IGNORE_REORDER_KEY},
@@ -149,9 +161,17 @@ const std::unordered_map<std::string, std::string> DEFAULT_MAP = {
     {"SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE", SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE},
     {"PCA_DIM", PCA_DIM},
     {"IVF_SEARCH_PARAM_SCAN_BUCKETS_COUNT", IVF_SEARCH_PARAM_SCAN_BUCKETS_COUNT},
+    {"GNO_IMI_FIRST_ORDER_BUCKETS_COUNT_KEY", GNO_IMI_FIRST_ORDER_BUCKETS_COUNT_KEY},
+    {"GNO_IMI_SECOND_ORDER_BUCKETS_COUNT_KEY", GNO_IMI_SECOND_ORDER_BUCKETS_COUNT_KEY},
+    {"BUCKETS_COUNT_KEY", BUCKETS_COUNT_KEY},
     {"IVF_TRAIN_TYPE_KEY", IVF_TRAIN_TYPE_KEY},
     {"HGRAPH_EXTRA_INFO_KEY", HGRAPH_EXTRA_INFO_KEY},
     {"IVF_SEARCH_PARAM_FACTOR", IVF_SEARCH_PARAM_FACTOR},
-};
+    {"BUCKET_PER_DATA_KEY", BUCKET_PER_DATA_KEY},
+    {"IVF_PARTITION_STRATEGY_PARAMS_KEY", IVF_PARTITION_STRATEGY_PARAMS_KEY},
+    {"IVF_PARTITION_STRATEGY_TYPE_KEY", IVF_PARTITION_STRATEGY_TYPE_KEY},
+    {"IVF_PARTITION_STRATEGY_TYPE_NEAREST", IVF_PARTITION_STRATEGY_TYPE_NEAREST},
+    {"IVF_TRAIN_TYPE_KMEANS", IVF_TRAIN_TYPE_KMEANS},
+    {"IVF_PARTITION_STRATEGY_TYPE_GNO_IMI", IVF_PARTITION_STRATEGY_TYPE_GNO_IMI}};
 
 }  // namespace vsag

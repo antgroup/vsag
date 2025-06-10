@@ -18,6 +18,7 @@
 #include <cblas.h>
 #include <omp.h>
 
+#include <iostream>
 #include <random>
 
 #include "algorithm/inner_index_interface.h"
@@ -42,7 +43,13 @@ KMeansCluster::~KMeansCluster() {
 }
 
 Vector<int>
-KMeansCluster::Run(uint32_t k, const float* datas, uint64_t count, int iter) {
+KMeansCluster::Run(uint32_t k,
+                   const float* datas,
+                   uint64_t count,
+                   int iter,
+                   double* err,
+                   bool use_mse_for_convergence,
+                   float threshold) {
     if (k_centroids_ != nullptr) {
         allocator_->Deallocate(k_centroids_);
         k_centroids_ = nullptr;
@@ -60,6 +67,8 @@ KMeansCluster::Run(uint32_t k, const float* datas, uint64_t count, int iter) {
         }
     }
 
+    double total_err = std::numeric_limits<double>::max();
+    double last_err = std::numeric_limits<double>::max();
     Vector<int32_t> labels(count, -1, this->allocator_);
     std::vector<std::mutex> mutexes(k);
     std::vector<std::future<void>> futures;
@@ -67,7 +76,6 @@ KMeansCluster::Run(uint32_t k, const float* datas, uint64_t count, int iter) {
     ByteBuffer distances_buffer(static_cast<uint64_t>(k) * QUERY_BS * sizeof(float), allocator_);
     auto* y_sqr = reinterpret_cast<float*>(y_sqr_buffer.data);
     auto* distances = reinterpret_cast<float*>(distances_buffer.data);
-    double error = std::numeric_limits<double>::max();
 
     logger::debug("KMeansCluster::Run k: {}, count: {}, iter: {}", k, count, iter);
     if (k < THRESHOLD_FOR_HGRAPH) {
@@ -77,15 +85,17 @@ KMeansCluster::Run(uint32_t k, const float* datas, uint64_t count, int iter) {
     }
 
     for (int it = 0; it < iter; ++it) {
+        /*
         logger::debug("[{}] KMeansCluster::Run iter: {}/{}, cur loss is {}",
                       get_current_time(),
                       it,
                       iter,
-                      error);
+                      total_err);
+        */
         if (k < THRESHOLD_FOR_HGRAPH) {
-            error = this->find_nearest_one_with_blas(datas, count, k, y_sqr, distances, labels);
+            total_err = this->find_nearest_one_with_blas(datas, count, k, y_sqr, distances, labels);
         } else {
-            error = this->find_nearest_one_with_hgraph(datas, count, k, labels);
+            total_err = this->find_nearest_one_with_hgraph(datas, count, k, labels);
         }
         constexpr uint64_t bs = 1024;
 
@@ -117,6 +127,11 @@ KMeansCluster::Run(uint32_t k, const float* datas, uint64_t count, int iter) {
         }
         futures.clear();
 
+        if (it > 0 && use_mse_for_convergence &&
+            std::fabs(last_err - total_err) / static_cast<double>(count) < threshold) {
+            break;
+        }
+
         for (int j = 0; j < k; ++j) {
             if (counts[j] > 0) {
                 cblas_sscal(dim_,
@@ -133,6 +148,10 @@ KMeansCluster::Run(uint32_t k, const float* datas, uint64_t count, int iter) {
                 }
             }
         }
+        last_err = total_err;
+    }
+    if (err != nullptr) {
+        *err = total_err;
     }
     return labels;
 }
@@ -145,7 +164,7 @@ KMeansCluster::find_nearest_one_with_blas(const float* query,
                                           float* distances,
                                           Vector<int32_t>& labels) {
     double error = 0.0;
-
+    std::mutex error_mutex;
     if (k_centroids_ == nullptr) {
         throw VsagException(ErrorType::INTERNAL_ERROR, "k_centroids_ is nullptr");
     }
@@ -194,14 +213,20 @@ KMeansCluster::find_nearest_one_with_blas(const float* query,
 
         auto assign_labels_func = [&](uint64_t start, uint64_t end) -> void {
             omp_set_num_threads(1);
+            double thread_local_error = 0.0;
             for (uint64_t i = start; i < end; ++i) {
                 cblas_saxpy(static_cast<blasint>(k), 1.0, y_sqr, 1, distances + i * k, 1);
                 auto* min_elem = std::min_element(distances + i * k, distances + i * k + k);
+                auto x_sqr = FP32ComputeIP(query + i * dim_, query + i * dim_, dim_);
                 auto min_index = std::distance(distances + i * k, min_elem);
-                error += static_cast<double>(*min_elem);
+                thread_local_error += static_cast<double>(*min_elem + x_sqr);
                 if (min_index != cur_label[i]) {
                     cur_label[i] = static_cast<int>(min_index);
                 }
+            }
+            {
+                std::lock_guard<std::mutex> lock(error_mutex);
+                error += thread_local_error;
             }
         };
         for (uint64_t j = 0; j < cur_query_count; j += bs) {
@@ -222,6 +247,7 @@ KMeansCluster::find_nearest_one_with_hgraph(const float* query,
         throw VsagException(ErrorType::INTERNAL_ERROR, "k_centroids_ is nullptr");
     }
     double error = 0.0;
+    std::mutex error_mutex;
 
     IndexCommonParam param;
     param.dim_ = dim_;
@@ -242,6 +268,7 @@ KMeansCluster::find_nearest_one_with_hgraph(const float* query,
     FilterPtr filter = nullptr;
     constexpr const char* search_param = R"({"hgraph":{"ef_search":10}})";
     auto func = [&](const uint64_t begin, const uint64_t end) -> void {
+        double thread_local_error = 0.0;
         for (uint64_t j = begin; j < end; ++j) {
             auto q = Dataset::Make();
             q->Owner(false)
@@ -250,7 +277,11 @@ KMeansCluster::find_nearest_one_with_hgraph(const float* query,
                 ->Dim(this->dim_);
             auto ret = hgraph->KnnSearch(q, 1, search_param, filter);
             labels[j] = static_cast<int32_t>(ret->GetIds()[0]);
-            error += static_cast<double>(ret->GetDistances()[0]);
+            thread_local_error += static_cast<double>(ret->GetDistances()[0]);
+        }
+        {
+            std::lock_guard<std::mutex> lock(error_mutex);
+            error += thread_local_error;
         }
     };
     std::vector<std::future<void>> futures;
