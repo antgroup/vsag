@@ -140,6 +140,8 @@ keywords = {Johnson-Lindenstrauss transformation, approximate nearest neighbor s
 }
 ```
 
+Here is the official implementation of RabitQ: https://github.com/VectorDB-NTU/RaBitQ-Library.
+
 ## Star History
 
 [![Star History Chart](https://api.star-history.com/svg?repos=antgroup/vsag&type=Date)](https://star-history.com/#antgroup/vsag&Date)
