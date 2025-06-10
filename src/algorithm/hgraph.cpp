@@ -1223,14 +1223,6 @@ HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
                 PRODUCT_QUANTIZATION_DIM,
             },
         },
-        {
-            RABITQ_USE_FHT,
-            {
-                HGRAPH_BASE_CODES_KEY,
-                QUANTIZATION_PARAMS_KEY,
-                USE_FHT,
-            },
-        },
     };
     if (common_param.data_type_ == DataTypes::DATA_TYPE_INT8) {
         throw VsagException(ErrorType::INVALID_ARGUMENT,

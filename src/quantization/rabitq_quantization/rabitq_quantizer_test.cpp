@@ -41,7 +41,7 @@ TEST_CASE("RaBitQ Basic Test", "[ut][RaBitQuantizer]") {
             auto allocator = SafeAllocator::FactoryDefaultAllocator();
             auto vecs = fixtures::generate_vectors(count, dim);
             RaBitQuantizer<MetricType::METRIC_TYPE_L2SQR> quantizer(
-                dim, pca_dim, num_bits_per_dim, false, allocator.get());
+                dim, pca_dim, num_bits_per_dim, allocator.get());
 
             // name
             REQUIRE(quantizer.NameImpl() == QUANTIZATION_TYPE_VALUE_RABITQ);
@@ -60,7 +60,7 @@ TEST_CASE("RaBitQ Encode and Decode", "[ut][RaBitQuantizer]") {
         for (auto count : counts) {
             auto allocator = SafeAllocator::FactoryDefaultAllocator();
             RaBitQuantizer<MetricType::METRIC_TYPE_L2SQR> quantizer(
-                dim, dim, num_bits_per_dim, false, allocator.get());
+                dim, dim, num_bits_per_dim, allocator.get());
 
             TestEncodeDecodeRaBitQ<RaBitQuantizer<MetricType::METRIC_TYPE_L2SQR>>(
                 quantizer, dim, count);
@@ -84,7 +84,7 @@ TEST_CASE("RaBitQ Compute", "[ut][RaBitQuantizer]") {
         for (auto count : counts) {
             auto allocator = SafeAllocator::FactoryDefaultAllocator();
             RaBitQuantizer<MetricType::METRIC_TYPE_L2SQR> quantizer(
-                dim, dim, num_bits_per_dim, false, allocator.get());
+                dim, dim, num_bits_per_dim, allocator.get());
 
             TestComputer<RaBitQuantizer<MetricType::METRIC_TYPE_L2SQR>,
                          MetricType::METRIC_TYPE_L2SQR>(quantizer,
@@ -118,9 +118,9 @@ TEST_CASE("RaBitQ Serialize and Deserialize", "[ut][RaBitQuantizer]") {
         for (auto count : counts) {
             auto allocator = SafeAllocator::FactoryDefaultAllocator();
             RaBitQuantizer<MetricType::METRIC_TYPE_L2SQR> quantizer1(
-                dim, dim, num_bits_per_dim, false, allocator.get());
+                dim, dim, num_bits_per_dim, allocator.get());
             RaBitQuantizer<MetricType::METRIC_TYPE_L2SQR> quantizer2(
-                dim, dim, num_bits_per_dim, false, allocator.get());
+                dim, dim, num_bits_per_dim, allocator.get());
 
             TestSerializeAndDeserialize<RaBitQuantizer<MetricType::METRIC_TYPE_L2SQR>,
                                         MetricType::METRIC_TYPE_L2SQR>(quantizer1,
@@ -142,7 +142,7 @@ TEST_CASE("RaBitQ Query SQ4 Transform", "[ut][RaBitQuantizer]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
 
     RaBitQuantizer<MetricType::METRIC_TYPE_L2SQR> quantizer(
-        dim, dim, num_bits_per_dim_query, false, allocator.get());
+        dim, dim, num_bits_per_dim_query, allocator.get());
 
     std::vector<float> original_data = {1, 2, 4, 8, 15, 0};
     // input  [0010 0001, 1000 0100, 0000 1111]

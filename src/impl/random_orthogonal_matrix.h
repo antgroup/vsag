@@ -19,7 +19,7 @@
 #include <lapacke.h>
 
 #include <random>
-#include "matrix_rotator.h"
+
 #include "../logger.h"
 #include "stream_reader.h"
 #include "stream_writer.h"
@@ -30,7 +30,7 @@ namespace vsag {
 
 static const uint64_t MAX_RETRIES = 3;
 
-class RandomOrthogonalMatrix : public MatrixRotator{
+class RandomOrthogonalMatrix {
 public:
     RandomOrthogonalMatrix(uint64_t dim, Allocator* allocator, uint64_t retries = MAX_RETRIES)
         : dim_(dim),
@@ -40,31 +40,29 @@ public:
         orthogonal_matrix_.resize(dim * dim);
     }
 
-    virtual ~RandomOrthogonalMatrix() {}
-
     void
     CopyOrthogonalMatrix(float* out_matrix) const;
 
     void
-    Transform(const float* original_vec, float* transformed_vec) const override; 
+    Transform(const float* original_vec, float* transformed_vec) const;
 
     void
-    InverseTransform(const float* transformed_vec, float* original_vec) const override;
+    InverseTransform(const float* transformed_vec, float* original_vec) const;
 
     bool
-    GenerateRandomOrthogonalMatrix() override;
+    GenerateRandomOrthogonalMatrix();
 
     void
-    GenerateRandomOrthogonalMatrixWithRetry() override;
+    GenerateRandomOrthogonalMatrixWithRetry();
 
     double
-    ComputeDeterminant() const override;
+    ComputeDeterminant() const;
 
     void
-    Serialize(StreamWriter& writer) override;
+    Serialize(StreamWriter& writer);
 
     void
-    Deserialize(StreamReader& reader) override;
+    Deserialize(StreamReader& reader);
 
 private:
     Allocator* const allocator_{nullptr};

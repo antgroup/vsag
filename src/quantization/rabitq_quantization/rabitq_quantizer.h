@@ -20,7 +20,6 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
-#include "impl/FhtKacRotator.h"
 
 #include "impl/principal_component_analysis.h"
 #include "impl/random_orthogonal_matrix.h"
@@ -52,7 +51,6 @@ public:
     explicit RaBitQuantizer(int dim,
                             uint64_t pca_dim,
                             uint64_t num_bits_per_dim_query,
-                            bool use_fht,
                             Allocator* allocator);
 
     explicit RaBitQuantizer(const RaBitQuantizerParamPtr& param,
@@ -140,8 +138,7 @@ private:
     float inv_sqrt_d_{0};
 
     // random projection related
-    bool use_fht_{false};
-    std::shared_ptr<MatrixRotator> rom_;
+    std::shared_ptr<RandomOrthogonalMatrix> rom_;
     std::vector<float> centroid_;  // TODO(ZXY): use centroids (e.g., IVF or Graph) outside
 
     // pca related
@@ -173,7 +170,6 @@ template <MetricType metric>
 RaBitQuantizer<metric>::RaBitQuantizer(int dim,
                                        uint64_t pca_dim,
                                        uint64_t num_bits_per_dim_query,
-                                        bool use_fht,
                                        Allocator* allocator)
     : Quantizer<RaBitQuantizer<metric>>(dim, allocator) {
     static_assert(metric == MetricType::METRIC_TYPE_L2SQR, "Unsupported metric type");
@@ -195,12 +191,7 @@ RaBitQuantizer<metric>::RaBitQuantizer(int dim,
     centroid_.resize(this->dim_, 0);
 
     // random orthogonal matrix
-    use_fht_ = use_fht;
-    if (use_fht_) {
-      rom_.reset(new FhtKacRotator(this->dim_, allocator));
-    } else {
-      rom_.reset(new RandomOrthogonalMatrix(this->dim_, allocator));
-    }
+    rom_.reset(new RandomOrthogonalMatrix(this->dim_, allocator));
 
     // distance function related variable
     inv_sqrt_d_ = 1.0f / sqrt(this->dim_);
@@ -257,7 +248,6 @@ RaBitQuantizer<metric>::RaBitQuantizer(const RaBitQuantizerParamPtr& param,
     : RaBitQuantizer<metric>(common_param.dim_,
                              param->pca_dim_,
                              param->num_bits_per_dim_query_,
-                             param->use_fht_,
                              common_param.allocator_.get()){};
 
 template <MetricType metric>
