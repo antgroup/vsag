@@ -593,7 +593,7 @@ IVF::merge_one_unit(const MergeUnit& unit) {
     const auto other_index = std::dynamic_pointer_cast<IVF>(
         std::dynamic_pointer_cast<IndexImpl<IVF>>(unit.index)->GetInnerIndex());
     auto bias = this->total_elements_;
-    this->label_table_->MergeOther(other_index->label_table_, bias);
+    this->label_table_->MergeOther(other_index->label_table_, unit.id_map_func);
     other_index->bucket_->Unpack();
     this->bucket_->MergeOther(other_index->bucket_, bias);
     other_index->bucket_->Package();
