@@ -41,6 +41,8 @@ public:
 
     bool use_reorder{false};
 
+    bool use_attribute_filter{false};
+
     FlattenDataCellParamPtr flatten_param{nullptr};
 };
 

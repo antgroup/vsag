@@ -94,6 +94,9 @@ SparseBitset::Deserialize(StreamReader& reader) {
     std::lock_guard<std::mutex> lock(mutex_);
     uint64_t size;
     StreamReader::ReadObj(reader, size);
+    if (size == 0) {
+        return;
+    }
     std::vector<char> buffer(size);
     reader.Read(buffer.data(), size);
     r_ = roaring::Roaring::readSafe(buffer.data(), size);

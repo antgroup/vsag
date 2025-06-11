@@ -23,6 +23,7 @@
 #include "algorithm/hnswlib/algorithm_interface.h"
 #include "algorithm/hnswlib/visited_list_pool.h"
 #include "common.h"
+#include "data_cell/attribute_inverted_interface.h"
 #include "data_cell/extra_info_interface.h"
 #include "data_cell/flatten_interface.h"
 #include "data_cell/graph_interface.h"
@@ -242,6 +243,7 @@ private:
     bool use_elp_optimizer_{false};
     bool ignore_reorder_{false};
     bool build_by_base_{false};
+    bool use_attribute_filter_{false};
 
     BasicSearcherPtr searcher_;
 
@@ -280,5 +282,7 @@ private:
     std::atomic<int64_t> delete_count_{0};
 
     std::shared_ptr<Optimizer<BasicSearcher>> optimizer_;
+
+    AttrInvertedInterfacePtr attr_filter_index_{nullptr};
 };
 }  // namespace vsag

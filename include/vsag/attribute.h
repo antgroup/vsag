@@ -28,19 +28,55 @@ enum AttrValueType {
     UINT64 = 4,
     INT8 = 5,
     UINT8 = 6,
-    STRING = 7,
-    FIXSIZE_STRING = 8,
+    INT16 = 7,
+    UINT16 = 8,
+    STRING = 9,
 };
 
 class Attribute {
 public:
     std::string name_{};
+
+    virtual ~Attribute() = default;
+
     virtual AttrValueType
-    GetValueType() = 0;
+    GetValueType() const = 0;
+
+    virtual uint64_t
+    GetValueCount() const = 0;
 };
 
 template <class T>
 class AttributeValue : public Attribute {
+public:
+    AttrValueType
+    GetValueType() const override {
+        if constexpr (std::is_same_v<T, int32_t>) {
+            return AttrValueType::INT32;
+        } else if constexpr (std::is_same_v<T, uint32_t>) {
+            return AttrValueType::UINT32;
+        } else if constexpr (std::is_same_v<T, int64_t>) {
+            return AttrValueType::INT64;
+        } else if constexpr (std::is_same_v<T, uint64_t>) {
+            return AttrValueType::UINT64;
+        } else if constexpr (std::is_same_v<T, int8_t>) {
+            return AttrValueType::INT8;
+        } else if constexpr (std::is_same_v<T, uint8_t>) {
+            return AttrValueType::UINT8;
+        } else if constexpr (std::is_same_v<T, int16_t>) {
+            return AttrValueType::INT16;
+        } else if constexpr (std::is_same_v<T, uint16_t>) {
+            return AttrValueType::UINT16;
+        } else if constexpr (std::is_same_v<T, std::string>) {
+            return AttrValueType::STRING;
+        }
+    }
+
+    uint64_t
+    GetValueCount() const override {
+        return value_.size();
+    }
+
 public:
     std::vector<T> value_{};
 };
