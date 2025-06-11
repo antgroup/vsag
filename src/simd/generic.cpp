@@ -133,6 +133,43 @@ FP32ComputeL2SqrBatch4(const float* query,
     }
 }
 
+void
+FP32Sub(const float* x, const float* y, float* z, uint64_t dim) {
+    for (uint64_t i = 0; i < dim; ++i) {
+        z[i] = x[i] - y[i];
+    }
+}
+
+void
+FP32Add(const float* x, const float* y, float* z, uint64_t dim) {
+    for (uint64_t i = 0; i < dim; ++i) {
+        z[i] = x[i] + y[i];
+    }
+}
+
+void
+FP32Mul(const float* x, const float* y, float* z, uint64_t dim) {
+    for (uint64_t i = 0; i < dim; ++i) {
+        z[i] = x[i] * y[i];
+    }
+}
+
+void
+FP32Div(const float* x, const float* y, float* z, uint64_t dim) {
+    for (uint64_t i = 0; i < dim; ++i) {
+        z[i] = x[i] / y[i];
+    }
+}
+
+float
+FP32ReduceAdd(const float* x, uint64_t dim) {
+    float result = 0.0F;
+    for (uint64_t i = 0; i < dim; ++i) {
+        result += x[i];
+    }
+    return result;
+}
+
 union FP32Struct {
     uint32_t int_value;
     float float_value;
@@ -545,6 +582,34 @@ PQFastScanLookUp32(const uint8_t* lookup_table,
                 result[24 + j / 2] += static_cast<uint32_t>(dict[(code[j] >> 4)]);
             }
         }
+    }
+}
+
+void
+BitAnd(const uint8_t* x, const uint8_t* y, const uint64_t num_byte, uint8_t* result) {
+    for (uint64_t i = 0; i < num_byte; i++) {
+        result[i] = x[i] & y[i];
+    }
+}
+
+void
+BitOr(const uint8_t* x, const uint8_t* y, const uint64_t num_byte, uint8_t* result) {
+    for (uint64_t i = 0; i < num_byte; i++) {
+        result[i] = x[i] | y[i];
+    }
+}
+
+void
+BitXor(const uint8_t* x, const uint8_t* y, const uint64_t num_byte, uint8_t* result) {
+    for (uint64_t i = 0; i < num_byte; i++) {
+        result[i] = x[i] ^ y[i];
+    }
+}
+
+void
+BitNot(const uint8_t* x, const uint64_t num_byte, uint8_t* result) {
+    for (uint64_t i = 0; i < num_byte; i++) {
+        result[i] = ~x[i];
     }
 }
 

@@ -46,6 +46,11 @@ public:
     virtual void
     InsertNeighborsById(InnerIdType id, const Vector<InnerIdType>& neighbor_ids) = 0;
 
+    virtual void
+    DeleteNeighborsById(InnerIdType id) {
+        throw VsagException(ErrorType::INTERNAL_ERROR, "DeleteNeighborsById is not implemented");
+    }
+
     virtual uint32_t
     GetNeighborSize(InnerIdType id) const = 0;
 
@@ -71,6 +76,14 @@ public:
         StreamReader::ReadObj(reader, this->total_count_);
         StreamReader::ReadObj(reader, this->max_capacity_);
         StreamReader::ReadObj(reader, this->maximum_degree_);
+    }
+
+    uint64_t
+    CalcSerializeSize() {
+        auto calSizeFunc = [](uint64_t cursor, uint64_t size, void* buf) { return; };
+        WriteFuncStreamWriter writer(calSizeFunc, 0);
+        this->Serialize(writer);
+        return writer.cursor_;
     }
 
     [[nodiscard]] virtual InnerIdType
@@ -114,6 +127,7 @@ public:
 
 protected:
     std::atomic<InnerIdType> total_count_{0};
+    Allocator* allocator_{nullptr};
 };
 
 }  // namespace vsag

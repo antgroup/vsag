@@ -18,20 +18,15 @@
 #include "algorithm/inner_index_interface.h"
 #include "index/index_common_param.h"
 #include "ivf_partition_strategy.h"
+#include "ivf_partition_strategy_parameter.h"
 #include "vsag/index.h"
 namespace vsag {
-
-enum class IVFNearestPartitionTrainerType {
-    RandomTrainer = 0,
-    KMeansTrainer = 1,
-};
 
 class IVFNearestPartition : public IVFPartitionStrategy {
 public:
     explicit IVFNearestPartition(BucketIdType bucket_count,
                                  const IndexCommonParam& common_param,
-                                 IVFNearestPartitionTrainerType trainer_type =
-                                     IVFNearestPartitionTrainerType::KMeansTrainer);
+                                 IVFPartitionStrategyParametersPtr param);
 
     void
     Train(const DatasetPtr dataset) override;
@@ -40,15 +35,20 @@ public:
     ClassifyDatas(const void* datas, int64_t count, BucketIdType buckets_per_data) override;
 
     void
+    GetCentroid(BucketIdType bucket_id, Vector<float>& centroid) override;
+
+    void
     Serialize(StreamWriter& writer) override;
 
     void
     Deserialize(StreamReader& reader) override;
 
 public:
-    IVFNearestPartitionTrainerType trainer_type_{IVFNearestPartitionTrainerType::KMeansTrainer};
+    IVFPartitionStrategyParametersPtr ivf_partition_strategy_param_{nullptr};
 
     InnerIndexPtr route_index_ptr_{nullptr};
+
+    MetricType metric_type_{MetricType::METRIC_TYPE_L2SQR};
 
 private:
     void

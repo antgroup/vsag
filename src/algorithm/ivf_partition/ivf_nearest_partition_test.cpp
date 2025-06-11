@@ -30,8 +30,9 @@ TEST_CASE("IVF Nearest Partition Basic Test", "[ut][IVFNearestPartition]") {
     param.dim_ = 128;
     param.metric_ = MetricType::METRIC_TYPE_L2SQR;
     param.allocator_ = allocator;
-    auto partition = std::make_unique<IVFNearestPartition>(
-        bucket_count, param, IVFNearestPartitionTrainerType::KMeansTrainer);
+    IVFPartitionStrategyParametersPtr strategy_param =
+        std::make_shared<IVFPartitionStrategyParameters>();
+    auto partition = std::make_unique<IVFNearestPartition>(bucket_count, param, strategy_param);
 
     auto dataset = Dataset::Make();
     int64_t data_count = 1000L;
@@ -68,8 +69,9 @@ TEST_CASE("IVF Nearest Partition Serialize Test", "[ut][IVFNearestPartition]") {
     param.dim_ = 128;
     param.metric_ = MetricType::METRIC_TYPE_L2SQR;
     param.allocator_ = allocator;
-    auto partition = std::make_unique<IVFNearestPartition>(
-        bucket_count, param, IVFNearestPartitionTrainerType::KMeansTrainer);
+    IVFPartitionStrategyParametersPtr strategy_param =
+        std::make_shared<IVFPartitionStrategyParameters>();
+    auto partition = std::make_unique<IVFNearestPartition>(bucket_count, param, strategy_param);
 
     auto dataset = Dataset::Make();
     int64_t data_count = 1000L;
@@ -86,8 +88,7 @@ TEST_CASE("IVF Nearest Partition Serialize Test", "[ut][IVFNearestPartition]") {
     IOStreamWriter writer(outfile);
     partition->Serialize(writer);
     outfile.close();
-    partition = std::make_unique<IVFNearestPartition>(
-        bucket_count, param, IVFNearestPartitionTrainerType::KMeansTrainer);
+    partition = std::make_unique<IVFNearestPartition>(bucket_count, param, strategy_param);
 
     std::ifstream infile(path, std::ios::in | std::ios::binary);
     IOStreamReader reader(infile);

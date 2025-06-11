@@ -114,12 +114,15 @@ private:
     BucketInterfacePtr bucket_{nullptr};
 
     IVFPartitionStrategyPtr partition_strategy_{nullptr};
+    BucketIdType buckets_per_data_;
 
     int64_t total_elements_{0};
 
     bool use_reorder_{false};
 
     bool is_trained_{false};
+
+    bool use_residual_{false};
 
     FlattenInterfacePtr reorder_codes_{nullptr};
 };

@@ -247,6 +247,11 @@ public:
         return num_deleted_;
     }
 
+    vsag::UnorderedMap<LabelType, InnerIdType>
+    getDeletedElements() override {
+        throw std::runtime_error("Static HNSW doesn't support delete");
+    };
+
     float
     getDistanceByLabel(LabelType label, const void* data_point) override {
         std::unique_lock<std::mutex> lock_table(label_lookup_lock);
@@ -1467,6 +1472,7 @@ public:
               uint64_t ef,
               const vsag::FilterPtr is_id_allowed = nullptr,
               const float skip_ratio = 0.9f,
+              vsag::Allocator* allocator = nullptr,
               vsag::IteratorFilterContext* iter_ctx = nullptr,
               bool is_last_filter = false) const override {
         std::priority_queue<std::pair<float, LabelType>> result;

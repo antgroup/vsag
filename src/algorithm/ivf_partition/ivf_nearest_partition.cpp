@@ -35,8 +35,10 @@ static constexpr const char* SEARCH_PARAM_TEMPLATE_STR = R"(
 
 IVFNearestPartition::IVFNearestPartition(BucketIdType bucket_count,
                                          const IndexCommonParam& common_param,
-                                         IVFNearestPartitionTrainerType trainer_type)
-    : IVFPartitionStrategy(common_param, bucket_count), trainer_type_(trainer_type) {
+                                         IVFPartitionStrategyParametersPtr param)
+    : IVFPartitionStrategy(common_param, bucket_count),
+      ivf_partition_strategy_param_(std::move(param)),
+      metric_type_(common_param.metric_) {
     this->factory_router_index(common_param);
 }
 
@@ -53,7 +55,8 @@ IVFNearestPartition::Train(const DatasetPtr dataset) {
         ->NumElements(this->bucket_count_)
         ->Owner(false);
 
-    if (trainer_type_ == IVFNearestPartitionTrainerType::KMeansTrainer) {
+    if (ivf_partition_strategy_param_->partition_train_type ==
+        IVFNearestPartitionTrainerType::KMeansTrainer) {
         constexpr int32_t kmeans_iter_count = 25;
         KMeansCluster cls(static_cast<int32_t>(dim), this->allocator_);
         cls.Run(this->bucket_count_,
@@ -61,12 +64,18 @@ IVFNearestPartition::Train(const DatasetPtr dataset) {
                 dataset->GetNumElements(),
                 kmeans_iter_count);
         memcpy(data.data(), cls.k_centroids_, dim * this->bucket_count_ * sizeof(float));
-    } else if (trainer_type_ == IVFNearestPartitionTrainerType::RandomTrainer) {
+    } else if (ivf_partition_strategy_param_->partition_train_type ==
+               IVFNearestPartitionTrainerType::RandomTrainer) {
         auto selected = select_k_numbers(dataset->GetNumElements(), this->bucket_count_);
         for (int i = 0; i < bucket_count_; ++i) {
             memcpy(data.data() + i * dim,
                    dataset->GetFloat32Vectors() + selected[i] * dim,
                    dim * sizeof(float));
+        }
+    }
+    if (metric_type_ == MetricType::METRIC_TYPE_COSINE) {
+        for (int i = 0; i < bucket_count_; ++i) {
+            Normalize(data.data() + i * dim_, data.data() + i * dim_, dim_);
         }
     }
 
@@ -78,7 +87,7 @@ Vector<BucketIdType>
 IVFNearestPartition::ClassifyDatas(const void* datas,
                                    int64_t count,
                                    BucketIdType buckets_per_data) {
-    Vector<BucketIdType> result(buckets_per_data * count, this->allocator_);
+    Vector<BucketIdType> result(buckets_per_data * count, -1, this->allocator_);
     for (int64_t i = 0; i < count; ++i) {
         auto query = Dataset::Make();
         query->Dim(this->dim_)
@@ -119,5 +128,12 @@ IVFNearestPartition::factory_router_index(const IndexCommonParam& common_param) 
     };
     param_ptr = HGraph::CheckAndMappingExternalParam(hgraph_json, common_param);
     this->route_index_ptr_ = std::make_shared<HGraph>(param_ptr, common_param);
+}
+void
+IVFNearestPartition::GetCentroid(BucketIdType bucket_id, Vector<float>& centroid) {
+    if (!is_trained_ || bucket_id >= bucket_count_) {
+        throw std::runtime_error("Invalid bucket_id or partition not trained");
+    }
+    this->route_index_ptr_->GetRawData(bucket_id, (uint8_t*)centroid.data());
 }
 }  // namespace vsag

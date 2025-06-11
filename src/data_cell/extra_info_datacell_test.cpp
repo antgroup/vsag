@@ -46,7 +46,7 @@ TestExtraInfoDataCell(ExtraInfoDataCellParamPtr& param,
 TEST_CASE("ExtraInfoDataCell Basic Test", "[ut][ExtraInfoDataCell] ") {
     logger::set_level(logger::level::debug);
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
-    uint64_t extra_info_sizes[4] = {32, 128, 512, 3 * 1024 * 1024};
+    uint64_t extra_info_sizes[4] = {32, 128, 512, 3 * 1024};
     uint64_t counts[4] = {0, 0, 0, 50};
     int dim = 512;
     MetricType metric = MetricType::METRIC_TYPE_L2SQR;

@@ -99,6 +99,14 @@ public:
         StreamReader::ReadObj(reader, this->extra_info_size_);
     }
 
+    uint64_t
+    CalcSerializeSize() {
+        auto calSizeFunc = [](uint64_t cursor, uint64_t size, void* buf) { return; };
+        WriteFuncStreamWriter writer(calSizeFunc, 0);
+        this->Serialize(writer);
+        return writer.cursor_;
+    }
+
     [[nodiscard]] virtual bool
     InMemory() const {
         return true;

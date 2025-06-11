@@ -49,7 +49,9 @@ main(int argc, char** argv) {
         "dim": 128,
         "index_param": {
             "buckets_count": 50,
-            "base_quantization_type": "fp32"
+            "base_quantization_type": "fp32",
+            "partition_strategy_type": "ivf",
+            "ivf_train_type": "kmeans"
         }
     }
     )";

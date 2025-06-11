@@ -67,6 +67,11 @@ protected:
                  bool expected_success = true);
 
     static void
+    TestRemoveIndex(const IndexPtr& index,
+                    const TestDatasetPtr& dataset,
+                    bool expected_success = true);
+
+    static void
     TestUpdateId(const IndexPtr& index,
                  const TestDatasetPtr& dataset,
                  const std::string& search_param,
@@ -114,6 +119,13 @@ protected:
                       float expected_recall = 0.99,
                       bool expected_success = true,
                       bool use_ex_filter = false);
+
+    static void
+    TestSearchAllocator(const IndexPtr& index,
+                        const TestDatasetPtr& dataset,
+                        const std::string& search_param,
+                        float expected_recall = 0.99,
+                        bool expected_success = true);
 
     static void
     TestSearchWithDirtyVector(const IndexPtr& index,

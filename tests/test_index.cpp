@@ -23,6 +23,7 @@
 #include "simd/fp32_simd.h"
 #include "vsag/engine.h"
 #include "vsag/resource.h"
+#include "vsag/search_param.h"
 
 namespace fixtures {
 static int64_t
@@ -662,6 +663,94 @@ TestIndex::TestFilterSearch(const TestIndex::IndexPtr& index,
 }
 
 void
+TestIndex::TestSearchAllocator(const TestIndex::IndexPtr& index,
+                               const TestDatasetPtr& dataset,
+                               const std::string& search_param,
+                               float expected_recall,
+                               bool expected_success) {
+    if (not index->CheckFeature(vsag::SUPPORT_KNN_SEARCH)) {
+        return;
+    }
+    auto queries = dataset->query_;
+    auto query_count = queries->GetNumElements();
+    auto dim = queries->GetDim();
+    auto gts = dataset->ground_truth_;
+    auto gt_topK = dataset->top_k;
+    float cur_recall = 0.0f;
+    auto topk = gt_topK;
+    class ExampleAllocator : public vsag::Allocator {
+    public:
+        std::string
+        Name() override {
+            return "example-allocator";
+        }
+
+        void*
+        Allocate(size_t size) override {
+            auto addr = (void*)malloc(size);
+            sizes_[addr] = size;
+            return addr;
+        }
+
+        void
+        Deallocate(void* p) override {
+            if (sizes_.find(p) == sizes_.end())
+                return;
+            sizes_.erase(p);
+            return free(p);
+        }
+
+        void*
+        Reallocate(void* p, size_t size) override {
+            auto addr = (void*)realloc(p, size);
+            sizes_.erase(p);
+            sizes_[addr] = size;
+            return addr;
+        }
+
+    private:
+        std::unordered_map<void*, size_t> sizes_;
+    };
+
+    for (auto i = 0; i < query_count; ++i) {
+        auto query = vsag::Dataset::Make();
+        query->NumElements(1)
+            ->Dim(dim)
+            ->Float32Vectors(queries->GetFloat32Vectors() + i * dim)
+            ->SparseVectors(queries->GetSparseVectors() + i)
+            ->Paths(queries->GetPaths() + i)
+            ->Owner(false);
+        ExampleAllocator allocator;
+        vsag::SearchParam search_params(false, search_param, nullptr, &allocator);
+        auto res = index->KnnSearch(query, topk, search_params);
+        if (not expected_success) {
+            if (res.has_value()) {
+                REQUIRE(res.value()->GetDim() == 0);
+            }
+        } else {
+            REQUIRE(res.has_value() == expected_success);
+        }
+        if (!expected_success) {
+            return;
+        }
+        REQUIRE(res.value()->GetDim() == topk);
+        auto result = res.value()->GetIds();
+        auto dis = res.value()->GetDistances();
+        auto gt = gts->GetIds() + gt_topK * i;
+        auto val = Intersection(gt, gt_topK, result, topk);
+        cur_recall += static_cast<float>(val) / static_cast<float>(gt_topK);
+        allocator.Deallocate((void*)result);
+        allocator.Deallocate((void*)dis);
+    }
+    if (cur_recall <= expected_recall * query_count) {
+        WARN(fmt::format("cur_result({}) <= expected_recall * query_count({})",
+                         cur_recall,
+                         expected_recall * query_count));
+    }
+    REQUIRE(cur_recall > expected_recall * query_count * RECALL_THRESHOLD);
+}
+
+void
 TestIndex::TestCalcDistanceById(const IndexPtr& index,
                                 const TestDatasetPtr& dataset,
                                 float error,
@@ -721,6 +810,19 @@ TestIndex::TestBatchCalcDistanceById(const IndexPtr& index,
         for (auto j = 0; j < gt_topK; ++j) {
             REQUIRE(std::abs(gts->GetDistances()[i * gt_topK + j] -
                              result.value()->GetDistances()[j]) < error);
+        }
+    }
+    SECTION("test non-existing id") {
+        int64_t test_num = 10;
+        std::vector<int64_t> no_exist_ids(test_num);
+        for (int i = 0; i < test_num; ++i) {
+            no_exist_ids[i] = -i - 1;
+        }
+        auto result =
+            index->CalDistanceById(queries->GetFloat32Vectors(), no_exist_ids.data(), test_num);
+        for (int i = 0; i < test_num; ++i) {
+            fixtures::dist_t dist = result.value()->GetDistances()[i];
+            REQUIRE(dist == -1);
         }
     }
 }
@@ -1223,26 +1325,29 @@ TestIndex::TestEstimateMemory(const std::string& index_name,
         REQUIRE(index2->GetNumElements() == 0);
         fixtures::TempDir dir("index");
         auto path = dir.GenerateRandomFile();
-        std::ofstream outf(path, std::ios::binary);
         if (index1->CheckFeature(vsag::SUPPORT_ESTIMATE_MEMORY)) {
             auto data_size = dataset->base_->GetNumElements();
             auto estimate_memory = index1->EstimateMemory(data_size);
             auto build_index = index2->Build(dataset->base_);
             REQUIRE(build_index.has_value());
+            std::ofstream outf(path, std::ios::binary);
             index2->Serialize(outf);
+            outf.close();
             std::ifstream inf(path, std::ios::binary);
             index1->Deserialize(inf);
             auto real_memory = allocator->GetCurrentMemory();
             if (estimate_memory <= static_cast<uint64_t>(real_memory * 0.8) or
                 estimate_memory >= static_cast<uint64_t>(real_memory * 1.2)) {
-                WARN("estimate_memory failed");
+                WARN(fmt::format("estimate_memory({}) is not in range [{}, {}]",
+                                 estimate_memory,
+                                 static_cast<uint64_t>(real_memory * 0.8),
+                                 static_cast<uint64_t>(real_memory * 1.2)));
             }
 
             REQUIRE(estimate_memory >= static_cast<uint64_t>(real_memory * 0.2));
             REQUIRE(estimate_memory <= static_cast<uint64_t>(real_memory * 3.2));
             inf.close();
         }
-        outf.close();
     }
 }
 
@@ -1548,6 +1653,41 @@ TestIndex::TestExportModel(const TestIndex::IndexPtr& index,
     }
 
     REQUIRE(std::abs(recall1 - recall2) < 0.01F * query_count);
+}
+
+void
+TestIndex::TestRemoveIndex(const TestIndex::IndexPtr& index,
+                           const TestDatasetPtr& dataset,
+                           bool expected_success) {
+    auto train_result = index->Train(dataset->base_);
+    REQUIRE(train_result.has_value());
+    auto base_num = dataset->base_->GetNumElements();
+    auto base_dim = dataset->base_->GetDim();
+    for (int64_t i = 0; i < base_num; ++i) {
+        auto new_data = vsag::Dataset::Make();
+        new_data->NumElements(1)
+            ->Dim(base_dim)
+            ->Ids(&i)
+            ->Float32Vectors(dataset->base_->GetFloat32Vectors() + i * base_dim)
+            ->Owner(false);
+        auto add_results = index->Add(new_data);
+        REQUIRE(add_results.has_value());
+    }
+    for (int64_t i = 0; i < base_num; ++i) {
+        auto new_data = vsag::Dataset::Make();
+        new_data->NumElements(1)
+            ->Dim(base_dim)
+            ->Ids(dataset->base_->GetIds() + i)
+            ->Float32Vectors(dataset->base_->GetFloat32Vectors() + i * base_dim)
+            ->Owner(false);
+        auto add_results = index->Add(new_data);
+        REQUIRE(add_results.has_value());
+        auto remove_results = index->Remove(i);
+        REQUIRE(remove_results.has_value());
+        remove_results = index->Remove(i);
+        REQUIRE_FALSE(remove_results.has_value());
+        REQUIRE(index->GetNumElements() == dataset->base_->GetNumElements());
+    }
 }
 
 }  // namespace fixtures

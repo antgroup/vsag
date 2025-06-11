@@ -43,8 +43,8 @@
 #include "visited_list_pool.h"
 #include "vsag/dataset.h"
 #include "vsag/iterator_context.h"
+
 namespace hnswlib {
-using InnerIdType = vsag::InnerIdType;
 using linklistsizeint = unsigned int;
 using reverselinklist = vsag::UnorderedSet<uint32_t>;
 struct CompareByFirst {
@@ -128,8 +128,9 @@ private:
     // flag to replace deleted elements (marked as deleted) during insertion
     bool allow_replace_deleted_{false};
 
-    std::mutex deleted_elements_lock_{};                // lock for deleted_elements_
-    vsag::UnorderedSet<InnerIdType> deleted_elements_;  // contains internal ids of deleted elements
+    std::mutex deleted_elements_lock_{};  // lock for deleted_elements_
+    vsag::UnorderedMap<LabelType, InnerIdType>
+        deleted_elements_;  // contains labels and internal ids of deleted elements
 
 public:
     HierarchicalNSW(SpaceInterface* s,
@@ -141,7 +142,7 @@ public:
                     bool normalize = false,
                     size_t block_size_limit = 128 * 1024 * 1024,
                     size_t random_seed = 100,
-                    bool allow_replace_deleted = false);
+                    bool allow_replace_deleted = true);
 
     ~HierarchicalNSW() override;
 
@@ -245,6 +246,11 @@ public:
         return num_deleted_;
     }
 
+    vsag::UnorderedMap<LabelType, InnerIdType>
+    getDeletedElements() override {
+        return deleted_elements_;
+    }
+
     MaxHeap
     searchBaseLayer(InnerIdType ep_id, const void* data_point, int layer) const;
 
@@ -255,6 +261,7 @@ public:
                       size_t ef,
                       const vsag::FilterPtr is_id_allowed = nullptr,
                       const float skip_ratio = 0.9f,
+                      vsag::Allocator* allocator = nullptr,
                       vsag::IteratorFilterContext* iter_ctx = nullptr) const;
 
     template <bool has_deletions, bool collect_metrics = false>
@@ -411,6 +418,7 @@ public:
               uint64_t ef,
               const vsag::FilterPtr is_id_allowed = nullptr,
               const float skip_ratio = 0.9f,
+              vsag::Allocator* allocator = nullptr,
               vsag::IteratorFilterContext* iter_ctx = nullptr,
               bool is_last_filter = false) const override;
 
@@ -425,5 +433,8 @@ public:
 
     bool
     init_memory_space() override;
+
+    uint64_t
+    estimateMemory(uint64_t num_elements) override;
 };
 }  // namespace hnswlib

@@ -159,7 +159,8 @@ SQ8UniformQuantizer<metric>::TrainImpl(const DataType* data, uint64_t count) {
     }
 
     ScalarQuantizationTrainer trainer(this->dim_, 8);
-    trainer.TrainUniform(data, count, this->diff_, this->lower_bound_, need_normalize);
+    trainer.TrainUniform(
+        data, count, this->diff_, this->lower_bound_, need_normalize, SQTrainMode::CLASSIC);
 
     this->diff_ -= this->lower_bound_;
 

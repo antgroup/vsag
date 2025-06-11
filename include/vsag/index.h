@@ -15,14 +15,10 @@
 
 #pragma once
 
-#include <cstddef>
 #include <cstdint>
 #include <limits>
-#include <queue>
 #include <stdexcept>
 
-#include "bitset.h"
-#include "features.h"
 #include "vsag/binaryset.h"
 #include "vsag/bitset.h"
 #include "vsag/dataset.h"
@@ -32,6 +28,8 @@
 #include "vsag/index_features.h"
 #include "vsag/iterator_context.h"
 #include "vsag/readerset.h"
+#include "vsag/search_param.h"
+#include "vsag/search_request.h"
 
 namespace vsag {
 
@@ -183,6 +181,19 @@ public:
     }
 
     /**
+      * @brief Performing search with request on index
+      * 
+      * @param request @see SearchRequest
+      * @return result contains 
+      *                - num_elements: 1
+      *                - ids, distances: length is (num_elements * k)               
+      */
+    virtual tl::expected<DatasetPtr, Error>
+    SearchWithRequest(const SearchRequest& request) const {
+        throw std::runtime_error("Index doesn't support Search With Request");
+    }
+
+    /**
       * @brief Performing single KNN search on index
       *
       * @param query should contains dim, num_elements and vectors
@@ -201,6 +212,21 @@ public:
               const FilterPtr& filter,
               IteratorContext*& iter_ctx,
               bool is_last_search) const {
+        throw std::runtime_error("Index doesn't support new filter");
+    }
+
+    /**
+      * @brief Performing single KNN search on index
+      *
+      * @param query should contains dim, num_elements and vectors
+      * @param k the result size of every query
+      * @param search_param search param contains filter, iter_ctx and allocator
+      * @return result contains
+      *                - num_elements: 1
+      *                - ids, distances: length is (num_elements * k)
+      */
+    virtual tl::expected<DatasetPtr, Error>
+    KnnSearch(const DatasetPtr& query, int64_t k, SearchParam& search_param) const {
         throw std::runtime_error("Index doesn't support new filter");
     }
 
@@ -501,6 +527,19 @@ public:
       */
     [[nodiscard]] virtual int64_t
     GetMemoryUsage() const = 0;
+
+    /**
+  * @brief Return the memory usage of every component in the index
+  *
+  * @return a json object that contains the memory usage of every component in the index
+  */
+    // TODO(deming): implement func for every types of index
+    // [[nodiscard]] virtual JsonType
+    // GetMemoryUsageDetail() const = 0;
+    [[nodiscard]] virtual std::string
+    GetMemoryUsageDetail() const {
+        throw std::runtime_error("Index not support GetMemoryUsageDetail");
+    }
 
     /**
       * @brief estimate the memory used by the index with given element counts

@@ -33,6 +33,7 @@
 namespace hnswlib {
 
 using LabelType = vsag::LabelType;
+using InnerIdType = vsag::InnerIdType;
 
 template <typename dist_t>
 class AlgorithmInterface {
@@ -46,6 +47,7 @@ public:
               size_t ef,
               const vsag::FilterPtr is_id_allowed = nullptr,
               float skip_ratio = 0.9f,
+              vsag::Allocator* allocator = nullptr,
               vsag::IteratorFilterContext* iter_ctx = nullptr,
               bool is_last_filter = false) const = 0;
 
@@ -106,11 +108,19 @@ public:
     virtual size_t
     getDeletedCount() = 0;
 
+    virtual vsag::UnorderedMap<LabelType, InnerIdType>
+    getDeletedElements() = 0;
+
     virtual bool
     isValidLabel(LabelType label) = 0;
 
     virtual bool
     init_memory_space() = 0;
+
+    virtual uint64_t
+    estimateMemory(uint64_t num_elements) {
+        return 0;
+    }
 
     virtual ~AlgorithmInterface() {
     }

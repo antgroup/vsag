@@ -19,6 +19,9 @@ target_link_libraries (106_index_ivf vsag)
 add_executable (107_index_pyramid 107_index_pyramid.cpp)
 target_link_libraries (107_index_pyramid vsag)
 
+add_executable (108_index_gno_imi 108_index_gno_imi.cpp)
+target_link_libraries (108_index_gno_imi vsag)
+
 add_executable (201_custom_allocator 201_custom_allocator.cpp)
 target_link_libraries (201_custom_allocator vsag)
 
@@ -60,6 +63,12 @@ target_link_libraries(310_feature_export_model vsag)
 
 add_executable(311_feature_train 311_feature_train.cpp)
 target_link_libraries(311_feature_train vsag)
+
+add_executable(313_feature_search_allocator 313_feature_search_allocator.cpp)
+target_link_libraries(313_feature_search_allocator vsag)
+
+add_executable(314_feature_hgraph_search_allocator 314_feature_hgraph_search_allocator.cpp)
+target_link_libraries(314_feature_hgraph_search_allocator vsag)
 
 add_executable (401_persistent_kv 401_persistent_kv.cpp)
 target_link_libraries (401_persistent_kv vsag)
