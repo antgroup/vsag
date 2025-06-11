@@ -44,7 +44,6 @@ jobs:
       - name: Run Test
         run: |
           ./scripts/test_parallel_bg.sh
-          ./build/mockimpl/tests_mockimpl -d yes ${UT_FILTER} --allow-running-no-tests ${UT_SHARD}
       - name: Collect Coverage Info
         run: |
           bash scripts/collect_cpp_coverage.sh
