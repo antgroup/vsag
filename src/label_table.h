@@ -25,6 +25,7 @@ namespace vsag {
 
 class LabelTable;
 using LabelTablePtr = std::shared_ptr<LabelTable>;
+using IdMapFunction = std::function<std::tuple<bool, int64_t>(int64_t)>;
 
 class LabelTable {
 public:
@@ -86,7 +87,7 @@ public:
     }
 
     void
-    MergeOther(const LabelTablePtr& other, InnerIdType bias);
+    MergeOther(const LabelTablePtr& other, const IdMapFunction& id_map = nullptr);
 
 public:
     Vector<LabelType> label_table_;
