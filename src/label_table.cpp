@@ -18,13 +18,14 @@
 namespace vsag {
 
 void
-LabelTable::MergeOther(const LabelTablePtr& other, InnerIdType bias) {
-    this->label_table_.reserve(this->label_table_.size() + other->label_table_.size());
-    std::copy(other->label_table_.begin(),
-              other->label_table_.end(),
-              std::back_inserter(this->label_table_));
-    for (auto& [label, id] : other->label_remap_) {
-        this->label_remap_[label] = id + bias;
+LabelTable::MergeOther(const LabelTablePtr& other, const IdMapFunction& id_map) {
+    auto cur_size = this->label_table_.size();
+    auto other_size = other->label_table_.size();
+    this->label_table_.resize(this->label_table_.size() + other->label_table_.size());
+    for (int64_t i = 0; i < other_size; ++i) {
+        auto new_label = std::get<1>(id_map(other->label_table_[i]));
+        this->label_table_[i + cur_size] = new_label;
+        this->label_remap_[new_label] = i + cur_size;
     }
 }
 }  // namespace vsag
