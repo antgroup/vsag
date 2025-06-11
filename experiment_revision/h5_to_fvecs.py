@@ -41,6 +41,11 @@ def read_fvecs(file_path):
             # 读取向量数据 (d * 4 字节，小端格式)
             vector_data = f.read(dim * 4)
             vector = np.frombuffer(vector_data, dtype=np.float32)
+            if dim == 512:
+                norm = np.linalg.norm(vector)
+                if np.abs(norm - 1.0) > 1e-3:
+                    raise ValueError(f"norm is {norm}")
+
             vectors.append(vector)
 
         return np.array(vectors)
@@ -81,20 +86,27 @@ if __name__ == "__main__":
 
         for dataset_name in list(f.keys()):
             vectors = f[dataset_name][()]
-
-            # 处理不同数据集类型
-            if dataset_name == "neighbors":
-                vectors = vectors.astype(np.int32)
-                print(f"Dataset '{dataset_name}' is of type int32. Skipping conversion to .fvecs.")
-                continue  # 跳过非浮点数数据集
+            if dataset_name == "train":
+                dataset_name = "learn"
+            elif dataset_name == "test":
+                dataset_name = "query"
             else:
-                vectors = vectors.astype(np.float32)
+                continue
 
-            # 写入 .fvecs 文件
-            fvecs_file_path = f"/tbase-project/ann-benchmarks/data/security-512-5m-ip/{dataset_name}.fvecs"
-            write_fvecs(fvecs_file_path, vectors)
-
-            # 校验 .fvecs 文件
+            #
+            # # 处理不同数据集类型
+            # if dataset_name == "neighbors":
+            #     vectors = vectors.astype(np.int32)
+            #     print(f"Dataset '{dataset_name}' is of type int32. Skipping conversion to .fvecs.")
+            #     continue  # 跳过非浮点数数据集
+            # else:
+            #     vectors = vectors.astype(np.float32)
+            #
+            # # 写入 .fvecs 文件
+            fvecs_file_path = f"/tbase-project/ann-benchmarks/data/security-512-euclidean/{dataset_name}.fvecs"
+            # write_fvecs(fvecs_file_path, vectors)
+            #
+            # # 校验 .fvecs 文件
             expected_num_vectors, expected_dim = vectors.shape
-            print(f"Dataset '{dataset_name}' shape: {vectors.shape}")
+            # print(f"Dataset '{dataset_name}' shape: {vectors.shape}")
             validate_fvecs(fvecs_file_path, expected_num_vectors, expected_dim)
