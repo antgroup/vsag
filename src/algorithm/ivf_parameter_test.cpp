@@ -89,6 +89,8 @@ TEST_CASE("IVF Parameters Test", "[ut][IVFParameter]") {
             50);
     REQUIRE(param->buckets_per_data == 2);
 
+    vsag::ParameterTest::TestToJson(param);
+
     param_str = R"(
     {
         "ivf": {
