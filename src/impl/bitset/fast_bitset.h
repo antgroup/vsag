@@ -63,7 +63,9 @@ public:
 
 private:
     Vector<uint64_t> data_;
+
     mutable std::shared_mutex mutex_;
+
     Allocator* const allocator_{nullptr};
 };
 }  // namespace vsag

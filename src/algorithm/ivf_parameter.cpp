@@ -49,6 +49,10 @@ IVFParameter::FromJson(const JsonType& json) {
         this->use_reorder = json[IVF_USE_REORDER_KEY];
     }
 
+    if (json.contains(IVF_USE_ATTRIBUTE_FILTER_KEY)) {
+        this->use_attribute_filter = json[IVF_USE_ATTRIBUTE_FILTER_KEY];
+    }
+
     if (this->use_reorder) {
         CHECK_ARGUMENT(json.contains(IVF_PRECISE_CODES_KEY),
                        fmt::format("ivf parameters must contains {} when enable reorder",

@@ -78,6 +78,15 @@ public:
                 delete[] this->GetSparseVectors();
             }
         }
+        if (this->GetAttributeSets()) {
+            auto* attrsets = this->GetAttributeSets();
+            for (int i = 0; i < this->GetNumElements(); ++i) {
+                for (auto* attr : attrsets[i].attrs_) {
+                    delete attr;
+                }
+            }
+            delete[] attrsets;
+        }
     }
 
     DatasetImpl(const DatasetImpl&) = delete;

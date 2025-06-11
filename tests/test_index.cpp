@@ -1689,5 +1689,13 @@ TestIndex::TestRemoveIndex(const TestIndex::IndexPtr& index,
         REQUIRE(index->GetNumElements() == dataset->base_->GetNumElements());
     }
 }
+void
+TestIndex::TestBuildWithAttr(const IndexPtr& index, const TestDatasetPtr& dataset) {
+    if (not index->CheckFeature(vsag::SUPPORT_BUILD)) {
+        return;
+    }
+    auto build_result = index->Build(dataset->base_);
+    REQUIRE(build_result.has_value());
+}
 
 }  // namespace fixtures
