@@ -40,6 +40,7 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
       use_elp_optimizer_(hgraph_param->use_elp_optimizer),
       ignore_reorder_(hgraph_param->ignore_reorder),
       build_by_base_(hgraph_param->build_by_base),
+      use_attribute_filter_(hgraph_param->use_attribute_filter),
       ef_construct_(hgraph_param->ef_construction),
       build_thread_count_(hgraph_param->build_thread_count),
       odescent_param_(hgraph_param->odescent_param),
@@ -105,6 +106,10 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
 
     if (use_elp_optimizer_) {
         optimizer_ = std::make_shared<Optimizer<BasicSearcher>>(common_param);
+    }
+    if (use_attribute_filter_) {
+        this->attr_filter_index_ =
+            AttributeInvertedInterface::MakeInstance(allocator_, false /*have_bucket*/);
     }
 }
 void
@@ -207,10 +212,16 @@ HGraph::Add(const DatasetPtr& data) {
         }
     }
 
-    auto add_func =
-        [&](const void* data, int level, InnerIdType inner_id, const char* extra_info) -> void {
+    auto add_func = [&](const void* data,
+                        int level,
+                        InnerIdType inner_id,
+                        const char* extra_info,
+                        const AttributeSet* attrs) -> void {
         if (this->extra_infos_ != nullptr) {
             this->extra_infos_->InsertExtraInfo(extra_info, inner_id);
+        }
+        if (attrs != nullptr and this->use_attribute_filter_) {
+            this->attr_filter_index_->Insert(*attrs, inner_id);
         }
         this->add_one_point(data, level, inner_id);
     };
@@ -219,6 +230,7 @@ HGraph::Add(const DatasetPtr& data) {
     auto total = data->GetNumElements();
     const auto* labels = data->GetIds();
     const auto* extra_infos = data->GetExtraInfos();
+    const auto* attr_sets = data->GetAttributeSets();
     Vector<std::pair<InnerIdType, LabelType>> inner_ids(allocator_);
     for (int64_t j = 0; j < total; ++j) {
         auto label = labels[j];
@@ -246,12 +258,16 @@ HGraph::Add(const DatasetPtr& data) {
             level = this->get_random_level() - 1;
         }
         const auto* extra_info = extra_infos + local_idx * extra_info_size_;
+        const AttributeSet* cur_attr_set = nullptr;
+        if (attr_sets != nullptr) {
+            cur_attr_set = attr_sets + local_idx;
+        }
         if (this->build_pool_ != nullptr) {
             auto future = this->build_pool_->GeneralEnqueue(
-                add_func, get_data(data, local_idx), level, inner_id, extra_info);
+                add_func, get_data(data, local_idx), level, inner_id, extra_info, cur_attr_set);
             futures.emplace_back(std::move(future));
         } else {
-            add_func(get_data(data, local_idx), level, inner_id, extra_info);
+            add_func(get_data(data, local_idx), level, inner_id, extra_info, cur_attr_set);
         }
     }
     if (this->build_pool_ != nullptr) {
@@ -671,6 +687,9 @@ HGraph::Serialize(StreamWriter& writer) const {
     if (this->extra_info_size_ > 0 && this->extra_infos_ != nullptr) {
         this->extra_infos_->Serialize(writer);
     }
+    if (this->use_attribute_filter_ and this->attr_filter_index_ != nullptr) {
+        this->attr_filter_index_->Serialize(writer);
+    }
 }
 
 void
@@ -698,6 +717,9 @@ HGraph::Deserialize(StreamReader& reader) {
     // optimize
     if (use_elp_optimizer_) {
         elp_optimize();
+    }
+    if (this->use_attribute_filter_ and this->attr_filter_index_ != nullptr) {
+        this->attr_filter_index_->Deserialize(reader);
     }
 }
 
@@ -1047,6 +1069,7 @@ static const std::string HGRAPH_PARAMS_TEMPLATE =
         "{HGRAPH_USE_ENV_OPTIMIZER}": false,
         "{HGRAPH_IGNORE_REORDER_KEY}": false,
         "{HGRAPH_BUILD_BY_BASE_QUANTIZATION_KEY}": false,
+        "{HGRAPH_USE_ATTRIBUTE_FILTER_KEY}": false,
         "{HGRAPH_GRAPH_KEY}": {
             "{IO_PARAMS_KEY}": {
                 "{IO_TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
@@ -1130,6 +1153,12 @@ HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
             HGRAPH_BUILD_BY_BASE_QUANTIZATION,
             {
                 HGRAPH_BUILD_BY_BASE_QUANTIZATION_KEY,
+            },
+        },
+        {
+            HGRAPH_USE_ATTRIBUTE_FILTER,
+            {
+                HGRAPH_USE_ATTRIBUTE_FILTER_KEY,
             },
         },
         {

@@ -38,8 +38,8 @@ public:
                                         const std::string& data_type = "float32",
                                         std::string graph_type = "nsw",
                                         std::string graph_storage = "flat",
-                                        bool support_remove = false);
-
+                                        bool support_remove = false,
+                                        bool use_attr_filter = false);
     static bool
     IsRaBitQ(const std::string& quantization_str);
 
@@ -94,7 +94,8 @@ HgraphTestIndex::GenerateHGraphBuildParametersString(const std::string& metric_t
                                                      const std::string& data_type,
                                                      std::string graph_type,
                                                      std::string graph_storage,
-                                                     bool support_remove) {
+                                                     bool support_remove,
+                                                     bool use_attr_filter) {
     std::string build_parameters_str;
 
     constexpr auto parameter_temp_reorder = R"(
@@ -118,7 +119,8 @@ HgraphTestIndex::GenerateHGraphBuildParametersString(const std::string& metric_t
             "graph_iter_turn": 10,
             "neighbor_sample_rate": 0.3,
             "alpha": 1.2,
-            "support_remove": {}
+            "support_remove": {},
+            "use_attribute_filter": {}
         }}
     }}
     )";
@@ -140,7 +142,8 @@ HgraphTestIndex::GenerateHGraphBuildParametersString(const std::string& metric_t
             "graph_iter_turn": 10,
             "neighbor_sample_rate": 0.3,
             "alpha": 1.2,
-            "support_remove": {}
+            "support_remove": {},
+            "use_attribute_filter": {}
         }}
     }}
     )";
@@ -172,7 +175,8 @@ HgraphTestIndex::GenerateHGraphBuildParametersString(const std::string& metric_t
                                            dir.GenerateRandomFile(),
                                            graph_type,
                                            graph_storage,
-                                           support_remove);
+                                           support_remove,
+                                           use_attr_filter);
     } else {
         build_parameters_str = fmt::format(parameter_temp_origin,
                                            data_type,
@@ -184,7 +188,8 @@ HgraphTestIndex::GenerateHGraphBuildParametersString(const std::string& metric_t
                                            thread_count,
                                            graph_type,
                                            graph_storage,
-                                           support_remove);
+                                           support_remove,
+                                           use_attr_filter);
     }
     return build_parameters_str;
 }
@@ -315,7 +320,9 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex,
         REQUIRE_THROWS(TestFactory(name, param, false));
     }
 
-    SECTION("Invalid hgraph param base_quantization_type") {
+    SECTION(
+        "Invalid hgraph param "
+        "base_quantization_type") {
         auto base_quantization_types = GENERATE("fsa");
         constexpr const char* param_temp =
             R"({{
@@ -345,7 +352,9 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex,
         REQUIRE_THROWS(TestFactory(name, param, false));
     }
 
-    SECTION("Invalid hgraph param graph_storage_type") {
+    SECTION(
+        "Invalid hgraph param "
+        "graph_storage_type") {
         auto graph_storage_type = "fsa";
         constexpr const char* param_temp =
             R"({{
@@ -483,6 +492,42 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex, "HGraph Build", "[ft][hg
             auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
             TestBuildIndex(index, dataset, true);
             TestGeneral(index, dataset, search_param, recall);
+            vsag::Options::Instance().set_block_size_limit(origin_size);
+        }
+    }
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex, "HGraph Build With Attr", "[ft][hgraph]") {
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    auto size = GENERATE(1024 * 1024 * 2);
+    auto metric_type = GENERATE("l2", "cosine");
+
+    const std::string name = "hgraph";
+    auto search_param = fmt::format(search_param_tmp, 200, false);
+    for (auto dim : dims) {
+        for (auto& [base_quantization_str, recall] : test_cases) {
+            if (IsRaBitQ(base_quantization_str)) {
+                if (std::string(metric_type) != "l2") {
+                    continue;
+                }
+                if (dim <= fixtures::RABITQ_MIN_RACALL_DIM) {
+                    dim += fixtures::RABITQ_MIN_RACALL_DIM;
+                }
+            }
+            vsag::Options::Instance().set_block_size_limit(size);
+            auto param = GenerateHGraphBuildParametersString(metric_type,
+                                                             dim,
+                                                             base_quantization_str,
+                                                             /*thread_count*/ 5,
+                                                             /*extra_info_size*/ 0,
+                                                             /*data_type*/ "float32",
+                                                             /*graph_type*/ "nsw",
+                                                             /*graph_storage*/ "flat",
+                                                             /*support_remove*/ false,
+                                                             /*use_attr_filter*/ true);
+            auto index = TestFactory(name, param, true);
+            auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
+            TestBuildWithAttr(index, dataset);
             vsag::Options::Instance().set_block_size_limit(origin_size);
         }
     }

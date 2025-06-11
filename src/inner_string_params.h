@@ -35,6 +35,7 @@ const char* const HGRAPH_GRAPH_KEY = "graph";
 const char* const HGRAPH_BASE_CODES_KEY = "base_codes";
 const char* const HGRAPH_PRECISE_CODES_KEY = "precise_codes";
 const char* const HGRAPH_EXTRA_INFO_KEY = "extra_info";
+const char* const HGRAPH_USE_ATTRIBUTE_FILTER_KEY = "use_attribute_filter";
 
 // IO param key
 const char* const IO_PARAMS_KEY = "io_params";
@@ -96,6 +97,7 @@ const char* const IVF_SEARCH_PARAM_SCAN_BUCKETS_COUNT = "scan_buckets_count";
 const char* const IVF_SEARCH_PARAM_FACTOR = "factor";
 const char* const IVF_USE_REORDER_KEY = "use_reorder";
 const char* const IVF_PRECISE_CODES_KEY = "precise_codes";
+const char* const IVF_USE_ATTRIBUTE_FILTER_KEY = "use_attribute_filter";
 const char* const IVF_TRAIN_TYPE_KEY = "ivf_train_type";
 const char* const IVF_TRAIN_TYPE_RANDOM = "random";
 const char* const IVF_TRAIN_TYPE_KMEANS = "kmeans";
@@ -126,6 +128,7 @@ const std::unordered_map<std::string, std::string> DEFAULT_MAP = {
     {"HGRAPH_GRAPH_KEY", HGRAPH_GRAPH_KEY},
     {"HGRAPH_BASE_CODES_KEY", HGRAPH_BASE_CODES_KEY},
     {"HGRAPH_PRECISE_CODES_KEY", HGRAPH_PRECISE_CODES_KEY},
+    {"HGRAPH_USE_ATTRIBUTE_FILTER_KEY", HGRAPH_USE_ATTRIBUTE_FILTER_KEY},
     {"IO_TYPE_KEY", IO_TYPE_KEY},
     {"IO_TYPE_VALUE_MEMORY_IO", IO_TYPE_VALUE_MEMORY_IO},
     {"IO_TYPE_VALUE_BLOCK_MEMORY_IO", IO_TYPE_VALUE_BLOCK_MEMORY_IO},
@@ -158,6 +161,7 @@ const std::unordered_map<std::string, std::string> DEFAULT_MAP = {
     {"DEFAULT_FILE_PATH_VALUE", DEFAULT_FILE_PATH_VALUE},
     {"IVF_PRECISE_CODES_KEY", IVF_PRECISE_CODES_KEY},
     {"IVF_USE_REORDER_KEY", IVF_USE_REORDER_KEY},
+    {"IVF_USE_ATTRIBUTE_FILTER_KEY", IVF_USE_ATTRIBUTE_FILTER_KEY},
     {"SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE", SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE},
     {"PCA_DIM", PCA_DIM},
     {"IVF_SEARCH_PARAM_SCAN_BUCKETS_COUNT", IVF_SEARCH_PARAM_SCAN_BUCKETS_COUNT},

@@ -250,6 +250,9 @@ protected:
                     const TestDatasetPtr& dataset,
                     const std::string& search_param);
 
+    static void
+    TestBuildWithAttr(const IndexPtr& index, const TestDatasetPtr& dataset);
+
     constexpr static float RECALL_THRESHOLD = 0.95;
 };
 

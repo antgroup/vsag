@@ -47,6 +47,10 @@ HGraphParameter::FromJson(const JsonType& json) {
         this->build_by_base = json[HGRAPH_BUILD_BY_BASE_QUANTIZATION_KEY];
     }
 
+    if (json.contains(HGRAPH_USE_ATTRIBUTE_FILTER_KEY)) {
+        this->use_attribute_filter = json[HGRAPH_USE_ATTRIBUTE_FILTER_KEY];
+    }
+
     CHECK_ARGUMENT(json.contains(HGRAPH_BASE_CODES_KEY),
                    fmt::format("hgraph parameters must contains {}", HGRAPH_BASE_CODES_KEY));
     const auto& base_codes_json = json[HGRAPH_BASE_CODES_KEY];

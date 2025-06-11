@@ -206,6 +206,133 @@ generate_extra_infos(uint64_t count, uint32_t size, int seed) {
     return vectors;
 }
 
+template <typename T, typename Gen>
+void
+FillIntegerValues(vsag::AttributeValue<T>* attr, uint32_t count, Gen& gen) {
+    using Limits = std::numeric_limits<T>;
+    std::uniform_int_distribution<int64_t> dist(Limits::min(), Limits::max());
+    for (uint32_t i = 0; i < count; ++i) {
+        attr->value_.emplace_back(static_cast<T>(dist(gen)));
+    }
+}
+
+template <typename Gen>
+void
+FillStringValues(vsag::AttributeValue<std::string>* attr,
+                 uint32_t count,
+                 uint32_t max_len,
+                 Gen& gen) {
+    std::uniform_int_distribution<uint32_t> len_dist(1, max_len);
+    std::uniform_int_distribution<char> char_dist('a', 'z');
+    for (uint32_t i = 0; i < count; ++i) {
+        uint32_t len = len_dist(gen);
+        std::string str;
+        str.reserve(len);
+        for (uint32_t c = 0; c < len; ++c) {
+            str += char_dist(gen);
+        }
+        attr->value_.emplace_back(str);
+    }
+}
+
+template <typename Gen>
+vsag::Attribute*
+CreateAttribute(std::string term_name,
+                vsag::AttrValueType type,
+                uint32_t term_count,
+                uint32_t max_str_len,
+                Gen& gen) {
+    switch (type) {
+        case vsag::AttrValueType::INT32: {
+            auto attr = new vsag::AttributeValue<int32_t>();
+            attr->name_ = term_name;
+            FillIntegerValues(attr, term_count, gen);
+            return attr;
+        }
+        case vsag::AttrValueType::UINT32: {
+            auto attr = new vsag::AttributeValue<uint32_t>();
+            attr->name_ = term_name;
+            FillIntegerValues(attr, term_count, gen);
+            return attr;
+        }
+        case vsag::AttrValueType::INT64: {
+            auto attr = new vsag::AttributeValue<int64_t>();
+            attr->name_ = term_name;
+            FillIntegerValues(attr, term_count, gen);
+            return attr;
+        }
+        case vsag::AttrValueType::UINT64: {
+            auto attr = new vsag::AttributeValue<uint64_t>();
+            attr->name_ = term_name;
+            FillIntegerValues(attr, term_count, gen);
+            return attr;
+        }
+        case vsag::AttrValueType::INT8: {
+            auto attr = new vsag::AttributeValue<int8_t>();
+            attr->name_ = term_name;
+            FillIntegerValues(attr, term_count, gen);
+            return attr;
+        }
+        case vsag::AttrValueType::UINT8: {
+            auto attr = new vsag::AttributeValue<uint8_t>();
+            attr->name_ = term_name;
+            FillIntegerValues(attr, term_count, gen);
+            return attr;
+        }
+        case vsag::AttrValueType::INT16: {
+            auto attr = new vsag::AttributeValue<int16_t>();
+            attr->name_ = term_name;
+            FillIntegerValues(attr, term_count, gen);
+            return attr;
+        }
+        case vsag::AttrValueType::UINT16: {
+            auto attr = new vsag::AttributeValue<uint16_t>();
+            attr->name_ = term_name;
+            FillIntegerValues(attr, term_count, gen);
+            return attr;
+        }
+        case vsag::AttrValueType::STRING: {
+            auto attr = new vsag::AttributeValue<std::string>();
+            attr->name_ = term_name;
+            FillStringValues(attr, term_count, max_str_len, gen);
+            return attr;
+        }
+        default:
+            return nullptr;
+    }
+}
+
+vsag::AttributeSet*
+generate_attributes(uint64_t count, uint32_t max_term_count, uint32_t max_value_count, int seed) {
+    auto* results = new vsag::AttributeSet[count];
+    std::mt19937 gen(seed);
+    std::uniform_int_distribution<int> term_count_dist(1, max_term_count);
+    auto term_count = term_count_dist(gen);
+    std::vector<std::pair<std::string, vsag::AttrValueType>> terms(term_count);
+
+    std::uniform_int_distribution<int> type_dist(1, 9);
+    std::uniform_int_distribution<int> value_count_dist(1, max_value_count);
+
+    for (uint64_t i = 0; i < term_count; ++i) {
+        std::string term_name = fmt::format("term_{}", i);
+        auto term_type = static_cast<vsag::AttrValueType>(type_dist(gen));
+        terms[i] = {term_name, term_type};
+    }
+
+    for (uint32_t i = 0; i < count; ++i) {
+        auto cur_term_count = term_count_dist(gen) % term_count;
+        results[i].attrs_.reserve(cur_term_count);
+        for (uint32_t j = 0; j < cur_term_count; ++j) {
+            auto term_id = term_count_dist(gen) % term_count;
+            auto& term_name = terms[term_id].first;
+            auto& term_type = terms[term_id].second;
+            auto attr = CreateAttribute(term_name, term_type, value_count_dist(gen), 10, gen);
+            results[i].attrs_.emplace_back(attr);
+        }
+    }
+    return results;
+}
+
 float
 test_knn_recall(const vsag::IndexPtr& index,
                 const std::string& search_parameters,

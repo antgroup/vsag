@@ -153,6 +153,7 @@ extern const char* const HGRAPH_PRECISE_FILE_PATH;
 extern const char* const HGRAPH_PARAMETER_EF_RUNTIME;
 extern const char* const HGRAPH_EXTRA_INFO_SIZE;
 extern const char* const HGRAPH_USE_EXTRA_INFO_FILTER;
+extern const char* const HGRAPH_USE_ATTRIBUTE_FILTER;
 
 extern const char* const BRUTE_FORCE_QUANTIZATION_TYPE;
 extern const char* const BRUTE_FORCE_IO_TYPE;
@@ -168,6 +169,7 @@ extern const char* const IVF_BASE_FILE_PATH;
 extern const char* const IVF_PRECISE_QUANTIZATION_TYPE;
 extern const char* const IVF_PRECISE_IO_TYPE;
 extern const char* const IVF_PRECISE_FILE_PATH;
+extern const char* const IVF_USE_ATTRIBUTE_FILTER;
 
 extern const char* const GNO_IMI_FIRST_ORDER_BUCKETS_COUNT;
 extern const char* const GNO_IMI_SECOND_ORDER_BUCKETS_COUNT;

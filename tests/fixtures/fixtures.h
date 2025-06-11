@@ -138,6 +138,12 @@ generate_index(const std::string& name,
 std::vector<char>
 generate_extra_infos(uint64_t count, uint32_t size, int seed = 47);
 
+vsag::AttributeSet*
+generate_attributes(uint64_t count,
+                    uint32_t max_term_count = 100,
+                    uint32_t max_value_count = 100,
+                    int seed = 97);
+
 float
 test_knn_recall(const vsag::IndexPtr& index,
                 const std::string& search_parameters,
