@@ -16,7 +16,6 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "fixtures/test_dataset_pool.h"
-#include "metric_type.h"
 #include "vsag/index.h"
 
 using namespace vsag;
