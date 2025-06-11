@@ -80,9 +80,9 @@ public:
     void
     Deserialize(StreamReader& reader) {
         StreamReader::ReadVector(reader, label_table_);
-        for (InnerIdType id = 0; id < label_table_.size(); ++id) {
-            this->label_remap_[label_table_[id]] = id;
-        }
+//        for (InnerIdType id = 0; id < label_table_.size(); ++id) {
+//            this->label_remap_[label_table_[id]] = id;
+//        }
     }
 
     void

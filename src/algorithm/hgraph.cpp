@@ -46,7 +46,7 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
       graph_type_(hgraph_param->graph_type),
       extra_info_size_(common_param.extra_info_size_),
       deleted_ids_(allocator_) {
-    neighbors_mutex_ = std::make_shared<PointsMutex>(0, common_param.allocator_.get());
+    neighbors_mutex_ = std::make_shared<EmptyMutex>();
     this->basic_flatten_codes_ =
         FlattenInterface::MakeInstance(hgraph_param->base_codes_param, common_param);
     if (use_reorder_) {

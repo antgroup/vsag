@@ -1,5 +1,8 @@
+
+find_package(OpenMP REQUIRED)
+
 add_executable(101_index_hnsw 101_index_hnsw.cpp)
-target_link_libraries(101_index_hnsw vsag)
+target_link_libraries(101_index_hnsw vsag OpenMP::OpenMP_CXX)
 
 add_executable(102_index_diskann 102_index_diskann.cpp)
 target_link_libraries(102_index_diskann vsag_static)

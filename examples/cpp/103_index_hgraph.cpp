@@ -16,6 +16,7 @@
 #include <vsag/vsag.h>
 
 #include <iostream>
+#include <fstream>
 
 int
 main(int argc, char** argv) {
@@ -66,6 +67,32 @@ main(int argc, char** argv) {
         std::cerr << "Failed to build index: internalError" << std::endl;
         exit(-1);
     }
+
+    {
+        std::fstream file("hgraph_index.vsag", std::ios::out | std::ios::binary);
+        index->Serialize(file);
+    }
+
+    std::string hgraph_build_compress_parameters = R"(
+    {
+        "dtype": "float32",
+        "metric_type": "l2",
+        "dim": 128,
+        "index_param": {
+            "base_quantization_type": "sq8",
+            "max_degree": 26,
+            "ef_construction": 100,
+            "graph_storage_type": "compressed"
+        }
+    }
+    )";
+
+    {
+        index = engine.CreateIndex("hgraph", hgraph_build_compress_parameters).value();
+        std::fstream file("hgraph_index.vsag", std::ios::in | std::ios::binary);
+        index->Deserialize(file);
+    }
+
 
     /******************* Prepare Query Dataset *****************/
     std::vector<float> query_vector(dim);

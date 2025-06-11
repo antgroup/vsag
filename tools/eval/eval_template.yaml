@@ -1,27 +1,34 @@
 global:
     exporters:
-      print-directly:
-        format: "table"
-        to: "stdout"
-      save-to-file:
-        format: "json"
-        to: "file://tmp/eval_example_output.json"
-      send-to-influxdb:
-        format: "line_protocol"
-        to: "influxdb://127.0.0.1:8086/api/v2/write?org=7d71a0eb85deafbe&bucket=583a2fd8dd85e66c&precision=ns"
-        vars:
-          token: "Token mlIiP-zVfcooHhMbGG9Yk-KfrkHyDc2h-rphnIBda8UMe_6Qocy8tNmV323yxOPEAsC8uIs6_nb-XUSMEAO76A=="
+        e1: # give a name you like, will not be used
+            format: "text"
+            to: "stdout"
+        e2:
+            format: "json"
+            to: "file://tmp/perf-90.json"
+    num_threads_building: 16
+    num_threads_searching: 2
 
-eval_case1:
-    datapath: "/tmp/sift-128-euclidean.hdf5"
+#BUILD/INTERNET:
+#    datapath: "/tmp/dataset/internetsearch-qa-768-10m-euclidean.hdf5"
+#    type: "build" # `build` or `search` or `build,search`
+#    index_name: "hgraph"
+#    create_params: '{"dim":768,"dtype":"float32","metric_type":"l2","index_param":{"base_quantization_type":"sq4_uniform", "max_degree":64,"ef_construction":200, "precise_quantization_type":"fp32", "graph_storage_type": "flat", "use_reorder":true}}'
+#    search_params: '{"hgraph":{"ef_search":100}}' # 100, 165, 400, 800
+#    index_path: "/tmp/internetsearch-qa-768-10m-euclidean/index/hgraph_index"
+#    search_mode: "knn" # ["knn", "range", "knn_filter", "range_filter"]
+#    topk: 100
+#    range: 0.5
+#    delete_index_after_search: false # free up storage space used by index
+
+SEARCH/INTERNET:
+    datapath: "/tmp/dataset/internetsearch-qa-768-10m-euclidean.hdf5"
     type: "search" # `build` or `search` or `build,search`
     index_name: "hgraph"
-    create_params: '{"dim":128,"dtype":"float32","metric_type":"l2","index_param":{"base_quantization_type":"fp32","max_degree":32,"ef_construction":300}}'
-    search_params: '{"hgraph":{"ef_search":60}}'
-    index_path: "/tmp/sift-128-euclidean/index/hgraph_index"
+    create_params: '{"dim":768,"dtype":"float32","metric_type":"l2","index_param":{"base_quantization_type":"sq4_uniform", "max_degree":64,"ef_construction":200, "precise_quantization_type":"fp32", "precise_io_type":"async_io", "precise_file_path": "tmp_file","graph_storage_type": "compressed", "use_reorder":true}}'
+    search_params: '{"hgraph":{"ef_search":1000}}' # 100, 165, 400, 800
+    index_path: "/tmp/internetsearch-qa-768-10m-euclidean/index/hgraph_index"
     search_mode: "knn" # ["knn", "range", "knn_filter", "range_filter"]
-    topk: 10
+    topk: 100
     range: 0.5
     delete_index_after_search: false # free up storage space used by index
-    num_threads_building: 16
-    num_threads_searching: 16

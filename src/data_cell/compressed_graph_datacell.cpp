@@ -94,9 +94,27 @@ CompressedGraphDataCell::Serialize(StreamWriter& writer) {
 void
 CompressedGraphDataCell::Deserialize(StreamReader& reader) {
     GraphInterface::Deserialize(reader);
+    uint64_t size;
+    StreamReader::ReadObj(reader, size);
+    neighbor_sets_.resize(this->total_count_);
+    uint32_t code_line_size_ = this->maximum_degree_ * sizeof(InnerIdType) + sizeof(uint32_t);
+    Vector<char> buffer(code_line_size_, allocator_);
+    Vector<InnerIdType> neighbors(this->maximum_degree_, allocator_);
+    for (int i = 0; i < this->total_count_; ++i) {
+        reader.Read(buffer.data(), code_line_size_);
+        uint32_t neighbor_size = *reinterpret_cast<uint32_t*>(buffer.data());
+        neighbors.resize(neighbor_size);
+        memcpy(neighbors.data(), buffer.data() + sizeof(uint32_t), neighbor_size * sizeof(InnerIdType));
+        InsertNeighborsById(i, neighbors);
+    }
+    uint64_t cursor = this->total_count_ * code_line_size_;
+    uint64_t remain_size = size - cursor;
+    Vector<char> remain_buffer(remain_size, allocator_);
+    reader.Read(remain_buffer.data(), remain_size);
+    StreamReader::ReadObj(reader, code_line_size_);
+    return;
     uint64_t vertex_num;
     StreamReader::ReadObj(reader, vertex_num);
-    Resize(vertex_num);
     for (uint64_t id = 0; id < vertex_num; ++id) {
         uint8_t num_elements = 0;
         StreamReader::ReadObj(reader, num_elements);
