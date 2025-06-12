@@ -20,20 +20,15 @@ jobs:
         with:
           fetch-depth: '0'
       - name: Load Cache
-        uses: actions/cache@v4
+        uses: hendrikmuhs/ccache-action@v1.2
         with:
-          path: ./build.tar.gz
+          max-size: "5G"
+          save: ${{ github.event_name != 'pull_request' }}
           key: build-tsan-${{ hashFiles('./CMakeLists.txt') }}-${{ hashFiles('./.circleci/fresh_ci_cache.commit') }}
-      - name: Extract
-        run: |
-          if [ -f build.tar.gz ]; then
-            tar -xzvf build.tar.gz;
-            rm -rf build.tar.gz;
-          else
-            mkdir -p build;
-          fi
       - name: Make Tsan
         run: export CMAKE_GENERATOR="Ninja"; make tsan
+      - name: Clean
+        run: find ./build -type f -name "*.o" -exec rm -f {} +
       - name: Save Test
         uses: actions/upload-artifact@v4
         with:
@@ -42,10 +37,6 @@ jobs:
           compression-level: 1
           retention-days: 1
           overwrite: 'true'
-      - name: Compress
-        run: |
-          sudo apt install pigz -y;
-          tar -cf - ./build | pigz -p 4 > build.tar.gz
 
   test_tsan:
     name: Run TSAN Tests
