@@ -244,6 +244,7 @@ private:
     bool build_by_base_{false};
 
     BasicSearcherPtr searcher_;
+    vsag::IndexCommonParam common_param_;
 
     std::default_random_engine level_generator_{2021};
     double mult_{1.0};

@@ -53,6 +53,7 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
         this->high_precise_codes_ =
             FlattenInterface::MakeInstance(hgraph_param->precise_codes_param, common_param);
     }
+    common_param_ = common_param;
     this->searcher_ = std::make_shared<BasicSearcher>(common_param, neighbors_mutex_);
 
     this->bottom_graph_ =
@@ -688,6 +689,7 @@ HGraph::Deserialize(StreamReader& reader) {
     auto new_size = max_capacity_.load();
     neighbors_mutex_ = std::make_shared<EmptyMutex>();
     this->neighbors_mutex_->Resize(new_size);
+    this->searcher_ = std::make_shared<BasicSearcher>(common_param_, neighbors_mutex_);
 
     pool_ = std::make_shared<VisitedListPool>(1, allocator_, new_size, allocator_);
 
