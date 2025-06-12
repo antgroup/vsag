@@ -27,13 +27,13 @@
 #include <vector>
 
 #include "algorithm/hnswlib/hnswlib.h"
-#include "base_filter_functor.h"
 #include "common.h"
 #include "data_cell/flatten_interface.h"
 #include "data_cell/graph_interface.h"
 #include "data_type.h"
 #include "hnsw_zparameters.h"
 #include "impl/conjugate_graph.h"
+#include "impl/filter/filter_headers.h"
 #include "index_common_param.h"
 #include "index_feature_list.h"
 #include "index_impl.h"
