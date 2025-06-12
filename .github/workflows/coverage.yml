@@ -27,18 +27,11 @@ jobs:
           cd lcov && git checkout v2.3 && make install
           lcov --version
       - name: Load Cache
-        uses: actions/cache@v4
+        uses: hendrikmuhs/ccache-action@v1.2
         with:
-          path: ./build.tar.gz
+          max-size: "5G"
+          save: ${{ github.event_name != 'pull_request' }}
           key: build-cov-${{ hashFiles('./CMakeLists.txt') }}-${{ hashFiles('./.circleci/fresh_ci_cache.commit') }}
-      - name: Extract
-        run: |
-          if [ -f build.tar.gz ]; then
-            tar -xzvf build.tar.gz;
-            rm -rf build.tar.gz;
-          else
-            mkdir -p build;
-          fi
       - name: Compile with Coverage Flags
         run: export CMAKE_GENERATOR="Ninja"; make cov
       - name: Run Test
@@ -57,7 +50,3 @@ jobs:
           flags: cpp
           token: ${{ secrets.CODECOV_TOKEN }}
           verbose: true
-      - name: Compress
-        run: |
-          sudo apt install pigz -y;
-          tar -cf - ./build | pigz -p 4 > build.tar.gz
