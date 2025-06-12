@@ -22,24 +22,13 @@ jobs:
         run: rm -rf /useless/hostedtoolcache
       - uses: actions/checkout@v4
       - name: Load Cache
-        uses: actions/cache@v4
+        uses: hendrikmuhs/ccache-action@v1.2
         with:
-          path: ./build.tar.gz
+          max-size: "5G"
+          save: ${{ github.event_name != 'pull_request' }}
           key: build-${{ hashFiles('./CMakeLists.txt') }}-${{ hashFiles('./.circleci/fresh_ci_cache.commit') }}
-      - name: Extract
-        run: |
-          if [ -f build.tar.gz ]; then
-            tar -xzvf build.tar.gz;
-            rm -rf build.tar.gz;
-          else
-            mkdir -p build;
-          fi
       - name: Make Asan
         run: export CMAKE_GENERATOR="Ninja"; make asan
-      - name: Compress
-        run: |
-          sudo apt install pigz -y;
-          tar -cf - ./build | pigz -p 4 > build.tar.gz
       - name: Clean
         run: find ./build -type f -name "*.o" -exec rm -f {} +
       - name: Save Test
@@ -64,24 +53,13 @@ jobs:
       - name: Prepare Env
         run: sudo bash ./scripts/deps/install_deps_ubuntu.sh
       - name: Load Cache
-        uses: actions/cache@v4
+        uses: hendrikmuhs/ccache-action@v1.2
         with:
-          path: ./build.tar.gz
+          max-size: "5G"
+          save: ${{ github.event_name != 'pull_request' }}
           key: build-aarch-${{ hashFiles('./CMakeLists.txt') }}-${{ hashFiles('./.circleci/fresh_ci_cache.commit') }}
-      - name: Extract
-        run: |
-          if [ -f build.tar.gz ]; then
-            tar -xzvf build.tar.gz;
-            rm -rf build.tar.gz;
-          else
-            mkdir -p build;
-          fi
       - name: Make Asan
         run: export CMAKE_GENERATOR="Ninja"; make asan
-      - name: Compress
-        run: |
-          sudo apt install pigz -y;
-          tar -cf - ./build | pigz -p 4 > build.tar.gz
       - name: Clean
         run: find ./build -type f -name "*.o" -exec rm -f {} +
       - name: Save Test

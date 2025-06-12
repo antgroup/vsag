@@ -34,9 +34,10 @@ jobs:
         run: rm -rf /useless/hostedtoolcache
       - uses: actions/checkout@v4
       - name: Load Cache
-        uses: actions/cache@v4
+        uses: hendrikmuhs/ccache-action@v1.2
         with:
-          path: ./build/
+          max-size: "5G"
+          save: ${{ github.event_name != 'pull_request' }}
           key: build-${{ hashFiles('./CMakeLists.txt') }}-${{ hashFiles('./.circleci/fresh_ci_cache.commit') }}
       - name: Make Asan
         run: |
@@ -46,6 +47,8 @@ jobs:
           echo ${EXTRA_KEY}
           echo "SIMD_KEY=${EXTRA_KEY}" >> $GITHUB_ENV
           export CMAKE_GENERATOR="Ninja"; make asan
+      - name: Clean
+        run: find ./build -type f -name "*.o" -exec rm -f {} +
       - name: Save Test
         uses: actions/upload-artifact@v4
         with:
