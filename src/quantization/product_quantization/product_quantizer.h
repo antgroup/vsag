@@ -75,6 +75,17 @@ public:
                       const uint8_t* codes,
                       float* dists) const;
 
+    void
+    ComputeDistsBatch4Impl(Computer<ProductQuantizer<metric>>& computer,
+                           const uint8_t* codes1,
+                           const uint8_t* codes2,
+                           const uint8_t* codes3,
+                           const uint8_t* codes4,
+                           float& dists1,
+                           float& dists2,
+                           float& dists3,
+                           float& dists4) const;
+
     inline void
     SerializeImpl(StreamWriter& writer);
 
@@ -359,6 +370,76 @@ ProductQuantizer<metric>::ComputeDistImpl(Computer<ProductQuantizer>& computer,
         dists[0] = 1.0F - dist;
     } else if constexpr (metric == MetricType::METRIC_TYPE_L2SQR) {
         dists[0] = dist;
+    }
+}
+
+template <MetricType metric>
+void
+ProductQuantizer<metric>::ComputeDistsBatch4Impl(Computer<ProductQuantizer<metric>>& computer,
+                                                 const uint8_t* codes1,
+                                                 const uint8_t* codes2,
+                                                 const uint8_t* codes3,
+                                                 const uint8_t* codes4,
+                                                 float& dists1,
+                                                 float& dists2,
+                                                 float& dists3,
+                                                 float& dists4) const {
+    auto* lut = reinterpret_cast<float*>(computer.buf_);
+
+    float d0 = 0.0F, d1 = 0.0F, d2 = 0.0F, d3 = 0.0F;
+
+    int64_t i = 0;
+
+    // Main loop: process 4 PQ dimensions per iteration
+    for (; i + 3 < pq_dim_; i += 4) {
+        const float* l0 = lut + (i + 0) * CENTROIDS_PER_SUBSPACE;
+        const float* l1 = lut + (i + 1) * CENTROIDS_PER_SUBSPACE;
+        const float* l2 = lut + (i + 2) * CENTROIDS_PER_SUBSPACE;
+        const float* l3 = lut + (i + 3) * CENTROIDS_PER_SUBSPACE;
+
+        d0 += l0[codes1[i + 0]];
+        d1 += l0[codes2[i + 0]];
+        d2 += l0[codes3[i + 0]];
+        d3 += l0[codes4[i + 0]];
+
+        d0 += l1[codes1[i + 1]];
+        d1 += l1[codes2[i + 1]];
+        d2 += l1[codes3[i + 1]];
+        d3 += l1[codes4[i + 1]];
+
+        d0 += l2[codes1[i + 2]];
+        d1 += l2[codes2[i + 2]];
+        d2 += l2[codes3[i + 2]];
+        d3 += l2[codes4[i + 2]];
+
+        d0 += l3[codes1[i + 3]];
+        d1 += l3[codes2[i + 3]];
+        d2 += l3[codes3[i + 3]];
+        d3 += l3[codes4[i + 3]];
+    }
+
+    // Tail loop: handle remaining dimensions
+    for (; i < pq_dim_; ++i) {
+        const float* li = lut + i * CENTROIDS_PER_SUBSPACE;
+
+        d0 += li[codes1[i]];
+        d1 += li[codes2[i]];
+        d2 += li[codes3[i]];
+        d3 += li[codes4[i]];
+    }
+
+    // Apply final distance transformation based on metric type
+    if constexpr (metric == MetricType::METRIC_TYPE_COSINE ||
+                  metric == MetricType::METRIC_TYPE_IP) {
+        dists1 = 1.0F - d0;
+        dists2 = 1.0F - d1;
+        dists3 = 1.0F - d2;
+        dists4 = 1.0F - d3;
+    } else if constexpr (metric == MetricType::METRIC_TYPE_L2SQR) {
+        dists1 = d0;
+        dists2 = d1;
+        dists3 = d2;
+        dists4 = d3;
     }
 }
 
