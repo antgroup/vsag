@@ -13,7 +13,6 @@ static size_t ceil_log2(size_t val) {
     }
     return 1 << res;
 }
-
 static inline void flip_sign(const uint8_t* flip, float* data, size_t dim) {//翻转符号
     constexpr size_t kFloatsPerChunk = 64;  // Process 64 floats per iteration
     // constexpr size_t bits_per_chunk = floats_per_chunk;  // 64 bits = 8 bytes
@@ -85,10 +84,8 @@ static inline void flip_sign(const uint8_t* flip, float* data, size_t dim) {//�
     FhtKacRotator::FhtKacRotator(uint64_t dim, Allocator* allocator)
     :dim_(dim), pad_dim_(0), allocator_(allocator)
     {
-        pad_dim_ = round_up_to_multiple_of(dim, 64);//修改了这里
-        // pad_dim_ = dim;
+        pad_dim_ = round_up_to_multiple_of(dim, 64);
         flip_.resize(round_ * (pad_dim_ / kByteLen_));//原作者中round_ = 4
-        // random_swap_idx(dim_, swap_);
         std::random_device rd;   // Seed
         std::mt19937 gen(rd());  // Mersenne Twister RNG
 
@@ -247,5 +244,14 @@ static inline void flip_sign(const uint8_t* flip, float* data, size_t dim) {//�
         flip_sign(flip_.data() + 0 * (pad_dim_ / kByteLen_),rotated_vec, pad_dim_);
 
     }
+
+    void FhtKacRotator::Serialize(StreamWriter& writer) {
+        StreamWriter::WriteVector(writer, this->flip_);
+    }
+
+    void FhtKacRotator::Deserialize(StreamReader& reader) {
+        StreamReader::ReadVector(reader, this->flip_);
+    }
+
 
 }

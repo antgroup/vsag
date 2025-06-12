@@ -23,9 +23,9 @@ namespace vsag{
 
         double ComputeDeterminant() const override { return 1.0; }
 
-        void Serialize(StreamWriter& writer) override {}
+        void Serialize(StreamWriter& writer) override;
 
-        void Deserialize(StreamReader& reader) override {}
+        void Deserialize(StreamReader& reader) override ;
 
         void fht_float_(float *data) const;
         void calculate() const;
