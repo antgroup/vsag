@@ -31,6 +31,14 @@ try_compile(COMPILER_SSE_SUPPORTED
     OUTPUT_VARIABLE COMPILE_OUTPUT
     )
 
+file(WRITE ${CMAKE_BINARY_DIR}/instructions_test_neon.cpp "#include <arm_neon.h>\nint main() { float32x4_t a, b; a = vdupq_n_f32(1.0f); b = vdupq_n_f32(2.0f); a = vaddq_f32(a, b); return 0; }")
+try_compile(COMPILER_NEON_SUPPORTED
+    ${CMAKE_BINARY_DIR}/instructions_test_neon
+    ${CMAKE_BINARY_DIR}/instructions_test_neon.cpp
+    COMPILE_DEFINITIONS "-march=armv8-a"
+    OUTPUT_VARIABLE COMPILE_OUTPUT
+    )
+
 file(WRITE ${CMAKE_BINARY_DIR}/instructions_test_avx512.cpp "#include <immintrin.h>\nint main() { __m512 a, b; a = _mm512_sub_ps(a, b); return 0; }")
 try_compile(RUNTIME_AVX512_SUPPORTED
     ${CMAKE_BINARY_DIR}/instructions_test_avx512
@@ -63,6 +71,14 @@ try_compile(RUNTIME_SSE_SUPPORTED
     OUTPUT_VARIABLE COMPILE_OUTPUT
     )
 
+file(WRITE ${CMAKE_BINARY_DIR}/instructions_test_neon.cpp "#include <arm_neon.h>\nint main() { float32x4_t a, b; a = vdupq_n_f32(1.0f); b = vdupq_n_f32(2.0f); a = vaddq_f32(a, b); return 0; }")
+try_compile(RUNTIME_NEON_SUPPORTED
+    ${CMAKE_BINARY_DIR}/instructions_test_neon
+    ${CMAKE_BINARY_DIR}/instructions_test_neon.cpp
+    COMPILE_DEFINITIONS "-march=armv8-a"
+    OUTPUT_VARIABLE COMPILE_OUTPUT
+    )
+
 # determine which instructions can be package into distribution
 set (COMPILER_SUPPORTED "compiler support instructions: ")
 if (COMPILER_SSE_SUPPORTED)
@@ -76,6 +92,9 @@ if (COMPILER_AVX2_SUPPORTED)
 endif ()
 if (COMPILER_AVX512_SUPPORTED)
   set (COMPILER_SUPPORTED "${COMPILER_SUPPORTED} AVX512")
+endif ()
+if (COMPILER_NEON_SUPPORTED)
+  set (COMPILER_SUPPORTED "${COMPILER_SUPPORTED} NEON")
 endif ()
 message (${COMPILER_SUPPORTED})
 
@@ -92,6 +111,9 @@ if (RUNTIME_AVX2_SUPPORTED)
 endif ()
 if (RUNTIME_AVX512_SUPPORTED)
   set (RUNTIME_SUPPORTED "${RUNTIME_SUPPORTED} AVX512")
+endif ()
+if (RUNTIME_NEON_SUPPORTED)
+  set (RUNTIME_SUPPORTED "${RUNTIME_SUPPORTED} NEON")
 endif ()
 message (${RUNTIME_SUPPORTED})
 
@@ -113,5 +135,9 @@ endif ()
 if (NOT DISABLE_AVX512_FORCE AND COMPILER_AVX512_SUPPORTED AND DIST_CONTAINS_AVX2)
   set (DIST_CONTAINS_AVX512 ON)
   set (DIST_CONTAINS_INSTRUCTIONS "${DIST_CONTAINS_INSTRUCTIONS} AVX512")
+endif ()
+if (NOT DISABLE_NEON_FORCE AND COMPILER_NEON_SUPPORTED)
+  set (DIST_CONTAINS_NEON ON)
+  set (DIST_CONTAINS_INSTRUCTIONS "${DIST_CONTAINS_INSTRUCTIONS} NEON")
 endif ()
 message (${DIST_CONTAINS_INSTRUCTIONS})

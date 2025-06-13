@@ -49,7 +49,7 @@ TEST_CASE("Encode & Decode FP16", "[ut][simd]") {
 
 #define TEST_ACCURACY(Func)                                                           \
     {                                                                                 \
-        float gt, sse, avx, avx2, avx512;                                             \
+        float gt, sse, avx, avx2, avx512, neon;                                       \
         gt = generic::Func(vec1.data() + i * dim, vec2.data() + i * dim, dim);        \
         if (SimdStatus::SupportSSE()) {                                               \
             sse = sse::Func(vec1.data() + i * dim, vec2.data() + i * dim, dim);       \
@@ -66,6 +66,10 @@ TEST_CASE("Encode & Decode FP16", "[ut][simd]") {
         if (SimdStatus::SupportAVX512()) {                                            \
             avx512 = avx512::Func(vec1.data() + i * dim, vec2.data() + i * dim, dim); \
             REQUIRE(fixtures::dist_t(gt) == fixtures::dist_t(avx512));                \
+        }                                                                             \
+        if (SimdStatus::SupportNEON()) {                                              \
+            neon = neon::Func(vec1.data() + i * dim, vec2.data() + i * dim, dim);     \
+            REQUIRE(fixtures::dist_t(gt) == fixtures::dist_t(neon));                  \
         }                                                                             \
     };
 
@@ -103,9 +107,11 @@ TEST_CASE("FP16 Benchmark", "[ut][simd][!benchmark]") {
     BENCHMARK_SIMD_COMPUTE(sse, FP16ComputeIP);
     BENCHMARK_SIMD_COMPUTE(avx2, FP16ComputeIP);
     BENCHMARK_SIMD_COMPUTE(avx512, FP16ComputeIP);
+    BENCHMARK_SIMD_COMPUTE(neon, FP16ComputeIP);
 
     BENCHMARK_SIMD_COMPUTE(generic, FP16ComputeL2Sqr);
     BENCHMARK_SIMD_COMPUTE(sse, FP16ComputeL2Sqr);
     BENCHMARK_SIMD_COMPUTE(avx2, FP16ComputeL2Sqr);
     BENCHMARK_SIMD_COMPUTE(avx512, FP16ComputeL2Sqr);
+    BENCHMARK_SIMD_COMPUTE(neon, FP16ComputeL2Sqr);
 }

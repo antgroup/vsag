@@ -37,6 +37,10 @@ GetSQ4ComputeIP() {
 #if defined(ENABLE_SSE)
         return sse::SQ4ComputeIP;
 #endif
+    } else if (SimdStatus::SupportNEON()) {
+#if defined(ENABLE_NEON)
+        return neon::SQ4ComputeIP;
+#endif
     }
     return generic::SQ4ComputeIP;
 }
@@ -59,6 +63,10 @@ GetSQ4ComputeL2Sqr() {
     } else if (SimdStatus::SupportSSE()) {
 #if defined(ENABLE_SSE)
         return sse::SQ4ComputeL2Sqr;
+#endif
+    } else if (SimdStatus::SupportNEON()) {
+#if defined(ENABLE_NEON)
+        return neon::SQ4ComputeL2Sqr;
 #endif
     }
     return generic::SQ4ComputeL2Sqr;
@@ -83,6 +91,10 @@ GetSQ4ComputeCodesIP() {
 #if defined(ENABLE_SSE)
         return sse::SQ4ComputeCodesIP;
 #endif
+    } else if (SimdStatus::SupportNEON()) {
+#if defined(ENABLE_NEON)
+        return neon::SQ4ComputeCodesIP;
+#endif
     }
     return generic::SQ4ComputeCodesIP;
 }
@@ -105,6 +117,10 @@ GetSQ4ComputeCodesL2Sqr() {
     } else if (SimdStatus::SupportSSE()) {
 #if defined(ENABLE_SSE)
         return sse::SQ4ComputeCodesL2Sqr;
+#endif
+    } else if (SimdStatus::SupportNEON()) {
+#if defined(ENABLE_NEON)
+        return neon::SQ4ComputeCodesL2Sqr;
 #endif
     }
     return generic::SQ4ComputeCodesL2Sqr;

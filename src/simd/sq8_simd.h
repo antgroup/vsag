@@ -153,6 +153,33 @@ SQ8ComputeCodesL2Sqr(const uint8_t* codes1,
                      uint64_t dim);
 }  // namespace avx512
 
+namespace neon {
+float
+SQ8ComputeIP(const float* query,
+             const uint8_t* codes,
+             const float* lower_bound,
+             const float* diff,
+             uint64_t dim);
+float
+SQ8ComputeL2Sqr(const float* query,
+                const uint8_t* codes,
+                const float* lower_bound,
+                const float* diff,
+                uint64_t dim);
+float
+SQ8ComputeCodesIP(const uint8_t* codes1,
+                  const uint8_t* codes2,
+                  const float* lower_bound,
+                  const float* diff,
+                  uint64_t dim);
+float
+SQ8ComputeCodesL2Sqr(const uint8_t* codes1,
+                     const uint8_t* codes2,
+                     const float* lower_bound,
+                     const float* diff,
+                     uint64_t dim);
+}  // namespace neon
+
 using SQ8ComputeType = float (*)(const float* query,
                                  const uint8_t* codes,
                                  const float* lower_bound,

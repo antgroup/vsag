@@ -51,6 +51,11 @@ uint32_t
 RaBitQSQ4UBinaryIP(const uint8_t* codes, const uint8_t* bits, uint64_t dim);
 }  // namespace generic
 
+namespace neon {
+float
+RaBitQFloatBinaryIP(const float* vector, const uint8_t* bits, uint64_t dim, float inv_sqrt_d);
+}  // namespace neon
+
 using RaBitQFloatBinaryType = float (*)(const float* vector,
                                         const uint8_t* bits,
                                         uint64_t dim,

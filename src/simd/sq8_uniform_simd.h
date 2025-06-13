@@ -43,6 +43,11 @@ float
 SQ8UniformComputeCodesIP(const uint8_t* codes1, const uint8_t* codes2, uint64_t dim);
 }  // namespace avx512
 
+namespace neon {
+float
+SQ8UniformComputeCodesIP(const uint8_t* codes1, const uint8_t* codes2, uint64_t dim);
+}  // namespace neon
+
 using SQ8UniformComputeCodesType = float (*)(const uint8_t* codes1,
                                              const uint8_t* codes2,
                                              uint64_t dim);
