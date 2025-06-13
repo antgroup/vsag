@@ -17,9 +17,9 @@
 
 #include <utility>
 
-#include "base_filter_functor.h"
 #include "data_cell/graph_interface.h"
 #include "impl/basic_searcher.h"
+#include "impl/filter/filter_headers.h"
 #include "impl/odescent_graph_builder.h"
 #include "index_feature_list.h"
 #include "inner_index_interface.h"

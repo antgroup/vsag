@@ -15,10 +15,10 @@
 
 #include "inner_index_interface.h"
 
-#include "base_filter_functor.h"
 #include "brute_force.h"
 #include "empty_index_binary_set.h"
 #include "hgraph.h"
+#include "impl/filter/filter_headers.h"
 #include "utils/slow_task_timer.h"
 #include "utils/util_functions.h"
 
@@ -52,7 +52,7 @@ InnerIndexInterface::KnnSearch(const DatasetPtr& query,
                                const std::function<bool(int64_t)>& filter) const {
     FilterPtr filter_ptr = nullptr;
     if (filter != nullptr) {
-        filter_ptr = std::make_shared<UniqueFilter>(filter);
+        filter_ptr = std::make_shared<BlackListFilter>(filter);
     }
 
     return this->KnnSearch(query, k, parameters, filter_ptr);
@@ -65,7 +65,7 @@ InnerIndexInterface::KnnSearch(const DatasetPtr& query,
                                const BitsetPtr& invalid) const {
     FilterPtr filter_ptr = nullptr;
     if (invalid != nullptr) {
-        filter_ptr = std::make_shared<UniqueFilter>(invalid);
+        filter_ptr = std::make_shared<BlackListFilter>(invalid);
     }
     return this->KnnSearch(query, k, parameters, filter_ptr);
 }
@@ -78,7 +78,7 @@ InnerIndexInterface::RangeSearch(const DatasetPtr& query,
                                  int64_t limited_size) const {
     FilterPtr filter_ptr = nullptr;
     if (invalid != nullptr) {
-        filter_ptr = std::make_shared<UniqueFilter>(invalid);
+        filter_ptr = std::make_shared<BlackListFilter>(invalid);
     }
     return this->RangeSearch(query, radius, parameters, filter_ptr, limited_size);
 }
@@ -91,7 +91,7 @@ InnerIndexInterface::RangeSearch(const DatasetPtr& query,
                                  int64_t limited_size) const {
     FilterPtr filter_ptr = nullptr;
     if (filter != nullptr) {
-        filter_ptr = std::make_shared<UniqueFilter>(filter);
+        filter_ptr = std::make_shared<BlackListFilter>(filter);
     }
     return this->RangeSearch(query, radius, parameters, filter_ptr, limited_size);
 }
