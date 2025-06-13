@@ -22,12 +22,15 @@ jobs:
         run: rm -rf /useless/hostedtoolcache
       - uses: actions/checkout@v4
       - name: Load Cache
-        uses: actions/cache@v4
+        uses: hendrikmuhs/ccache-action@v1.2
         with:
-          path: ./build/
+          max-size: "5G"
+          save: ${{ github.event_name != 'pull_request' }}
           key: build-${{ hashFiles('./CMakeLists.txt') }}-${{ hashFiles('./.circleci/fresh_ci_cache.commit') }}
       - name: Make Asan
         run: export CMAKE_GENERATOR="Ninja"; make asan
+      - name: Clean
+        run: find ./build -type f -name "*.o" -exec rm -f {} +
       - name: Save Test
         uses: actions/upload-artifact@v4
         with:
@@ -50,16 +53,19 @@ jobs:
       - name: Prepare Env
         run: sudo bash ./scripts/deps/install_deps_ubuntu.sh
       - name: Load Cache
-        uses: actions/cache@v4
+        uses: hendrikmuhs/ccache-action@v1.2
         with:
-          path: ./build/
+          max-size: "5G"
+          save: ${{ github.event_name != 'pull_request' }}
           key: build-aarch-${{ hashFiles('./CMakeLists.txt') }}-${{ hashFiles('./.circleci/fresh_ci_cache.commit') }}
       - name: Make Asan
         run: export CMAKE_GENERATOR="Ninja"; make asan
+      - name: Clean
+        run: find ./build -type f -name "*.o" -exec rm -f {} +
       - name: Save Test
         uses: actions/upload-artifact@v4
         with:
-          path: ./build
+          path: ./build/
           name: test_aarch64-${{ github.run_id }}
           compression-level: 1
           retention-days: 1
@@ -89,7 +95,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: test_x86-${{ github.run_id }}
-          path: ./build/
+          path: ./build
       - name: Do Asan Test In ${{ matrix.test_type }}
         run: |
           echo leak:libomp.so > omp.supp
@@ -127,7 +133,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: test_aarch64-${{ github.run_id }}
-          path: ./build/
+          path: ./build
       - name: Do Asan Test In ${{ matrix.test_type }}
         run: |
           echo leak:libomp.so > omp.supp

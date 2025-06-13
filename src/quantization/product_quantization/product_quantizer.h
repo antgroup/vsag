@@ -75,6 +75,17 @@ public:
                       const uint8_t* codes,
                       float* dists) const;
 
+    void
+    ComputeDistsBatch4Impl(Computer<ProductQuantizer<metric>>& computer,
+                           const uint8_t* codes1,
+                           const uint8_t* codes2,
+                           const uint8_t* codes3,
+                           const uint8_t* codes4,
+                           float& dists1,
+                           float& dists2,
+                           float& dists3,
+                           float& dists4) const;
+
     inline void
     SerializeImpl(StreamWriter& writer);
 
@@ -96,6 +107,9 @@ private:
                centroid_num * subspace_dim_;
     }
 
+    void
+    transpose_codebooks();
+
 public:
     constexpr static int64_t PQ_BITS = 8L;
     constexpr static int64_t CENTROIDS_PER_SUBSPACE = 256L;
@@ -105,19 +119,26 @@ public:
     int64_t subspace_dim_{1};  // equal to dim/pq_dim_;
 
     Vector<float> codebooks_;
+
+    Vector<float> reverse_codebooks_;
 };
 
-template <MetricType Metric>
-ProductQuantizer<Metric>::ProductQuantizer(int dim, int64_t pq_dim, Allocator* allocator)
-    : Quantizer<ProductQuantizer<Metric>>(dim, allocator), pq_dim_(pq_dim), codebooks_(allocator) {
+template <MetricType metric>
+ProductQuantizer<metric>::ProductQuantizer(int dim, int64_t pq_dim, Allocator* allocator)
+    : Quantizer<ProductQuantizer<metric>>(dim, allocator),
+      pq_dim_(pq_dim),
+      codebooks_(allocator),
+      reverse_codebooks_(allocator) {
     if (dim % pq_dim != 0) {
         throw VsagException(
             ErrorType::INVALID_ARGUMENT,
             fmt::format("pq_dim({}) does not divide evenly into dim({})", pq_dim, dim));
     }
     this->code_size_ = this->pq_dim_;
+    this->metric_ = metric;
     this->subspace_dim_ = this->dim_ / pq_dim;
     codebooks_.resize(this->dim_ * CENTROIDS_PER_SUBSPACE);
+    reverse_codebooks_.resize(this->dim_ * CENTROIDS_PER_SUBSPACE);
 }
 
 template <MetricType metric>
@@ -164,6 +185,7 @@ ProductQuantizer<metric>::TrainImpl(const vsag::DataType* data, uint64_t count) 
                cluster.k_centroids_,
                CENTROIDS_PER_SUBSPACE * subspace_dim_ * sizeof(float));
     }
+    this->transpose_codebooks();
 
     this->is_trained_ = true;
     return true;
@@ -258,30 +280,53 @@ ProductQuantizer<metric>::ProcessQueryImpl(const DataType* query,
         }
         auto* lookup_table = reinterpret_cast<float*>(
             this->allocator_->Allocate(this->pq_dim_ * CENTROIDS_PER_SUBSPACE * sizeof(float)));
-
-        for (int i = 0; i < pq_dim_; ++i) {
-            const auto* per_query = cur_query + i * subspace_dim_;
-            const auto* per_code_book = get_codebook_data(i, 0);
-            auto* per_result = lookup_table + i * CENTROIDS_PER_SUBSPACE;
-            if constexpr (metric == MetricType::METRIC_TYPE_IP or
-                          metric == MetricType::METRIC_TYPE_COSINE) {
-                cblas_sgemv(CblasRowMajor,
-                            CblasNoTrans,
-                            CENTROIDS_PER_SUBSPACE,
-                            subspace_dim_,
-                            1.0F,
-                            per_code_book,
-                            subspace_dim_,
-                            per_query,
-                            1,
-                            0.0F,
-                            per_result,
-                            1);
-            } else if constexpr (metric == MetricType::METRIC_TYPE_L2SQR) {
-                // TODO(LHT): use blas opt
-                for (int64_t j = 0; j < CENTROIDS_PER_SUBSPACE; ++j) {
-                    per_result[j] = FP32ComputeL2Sqr(
-                        per_query, per_code_book + j * subspace_dim_, subspace_dim_);
+        if (true) {
+            for (int i = 0; i < pq_dim_; ++i) {
+                const auto* per_query = cur_query + i * subspace_dim_;
+                const auto* per_code_book = get_codebook_data(i, 0);
+                auto* per_result = lookup_table + i * CENTROIDS_PER_SUBSPACE;
+                if constexpr (metric == MetricType::METRIC_TYPE_IP or
+                              metric == MetricType::METRIC_TYPE_COSINE) {
+                    cblas_sgemv(CblasRowMajor,
+                                CblasNoTrans,
+                                CENTROIDS_PER_SUBSPACE,
+                                subspace_dim_,
+                                1.0F,
+                                per_code_book,
+                                subspace_dim_,
+                                per_query,
+                                1,
+                                0.0F,
+                                per_result,
+                                1);
+                } else if constexpr (metric == MetricType::METRIC_TYPE_L2SQR) {
+                    // TODO(LHT): use blas opt
+                    for (int64_t j = 0; j < CENTROIDS_PER_SUBSPACE; ++j) {
+                        per_result[j] = FP32ComputeL2Sqr(
+                            per_query, per_code_book + j * subspace_dim_, subspace_dim_);
+                    }
+                }
+            }
+        } else {
+            Vector<float> tmp(this->allocator_);
+            tmp.resize(this->dim_);
+            for (int i = 0; i < CENTROIDS_PER_SUBSPACE; ++i) {
+                if constexpr (metric == MetricType::METRIC_TYPE_IP or
+                              metric == MetricType::METRIC_TYPE_COSINE) {
+                    FP32Mul(reverse_codebooks_.data() + i * this->dim_,
+                            cur_query,
+                            tmp.data(),
+                            this->dim_);
+                } else if constexpr (metric == MetricType::METRIC_TYPE_L2SQR) {
+                    FP32Sub(reverse_codebooks_.data() + i * this->dim_,
+                            cur_query,
+                            tmp.data(),
+                            this->dim_);
+                    FP32Mul(tmp.data(), tmp.data(), tmp.data(), this->dim_);
+                }
+                for (int j = 0; j < pq_dim_; ++j) {
+                    lookup_table[j * CENTROIDS_PER_SUBSPACE + i] =
+                        FP32ReduceAdd(tmp.data() + j * subspace_dim_, subspace_dim_);
                 }
             }
         }
@@ -302,7 +347,7 @@ ProductQuantizer<metric>::ComputeDistImpl(Computer<ProductQuantizer>& computer,
                                           const uint8_t* codes,
                                           float* dists) const {
     auto* lut = reinterpret_cast<float*>(computer.buf_);
-    dists[0] = 0.0F;
+    float dist = 0.0F;
     int64_t i = 0;
     for (; i + 4 < pq_dim_; i += 4) {
         float dism = 0;
@@ -314,15 +359,87 @@ ProductQuantizer<metric>::ComputeDistImpl(Computer<ProductQuantizer>& computer,
         lut += CENTROIDS_PER_SUBSPACE;
         dism += lut[*codes++];
         lut += CENTROIDS_PER_SUBSPACE;
-        dists[0] += dism;
+        dist += dism;
     }
     for (; i < pq_dim_; ++i) {
-        dists[0] += lut[*codes++];
+        dist += lut[*codes++];
         lut += CENTROIDS_PER_SUBSPACE;
     }
     if constexpr (metric == MetricType::METRIC_TYPE_COSINE or
                   metric == MetricType::METRIC_TYPE_IP) {
-        dists[0] = 1.0F - dists[0];
+        dists[0] = 1.0F - dist;
+    } else if constexpr (metric == MetricType::METRIC_TYPE_L2SQR) {
+        dists[0] = dist;
+    }
+}
+
+template <MetricType metric>
+void
+ProductQuantizer<metric>::ComputeDistsBatch4Impl(Computer<ProductQuantizer<metric>>& computer,
+                                                 const uint8_t* codes1,
+                                                 const uint8_t* codes2,
+                                                 const uint8_t* codes3,
+                                                 const uint8_t* codes4,
+                                                 float& dists1,
+                                                 float& dists2,
+                                                 float& dists3,
+                                                 float& dists4) const {
+    auto* lut = reinterpret_cast<float*>(computer.buf_);
+
+    float d0 = 0.0F, d1 = 0.0F, d2 = 0.0F, d3 = 0.0F;
+
+    int64_t i = 0;
+
+    // Main loop: process 4 PQ dimensions per iteration
+    for (; i + 3 < pq_dim_; i += 4) {
+        const float* l0 = lut + (i + 0) * CENTROIDS_PER_SUBSPACE;
+        const float* l1 = lut + (i + 1) * CENTROIDS_PER_SUBSPACE;
+        const float* l2 = lut + (i + 2) * CENTROIDS_PER_SUBSPACE;
+        const float* l3 = lut + (i + 3) * CENTROIDS_PER_SUBSPACE;
+
+        d0 += l0[codes1[i + 0]];
+        d1 += l0[codes2[i + 0]];
+        d2 += l0[codes3[i + 0]];
+        d3 += l0[codes4[i + 0]];
+
+        d0 += l1[codes1[i + 1]];
+        d1 += l1[codes2[i + 1]];
+        d2 += l1[codes3[i + 1]];
+        d3 += l1[codes4[i + 1]];
+
+        d0 += l2[codes1[i + 2]];
+        d1 += l2[codes2[i + 2]];
+        d2 += l2[codes3[i + 2]];
+        d3 += l2[codes4[i + 2]];
+
+        d0 += l3[codes1[i + 3]];
+        d1 += l3[codes2[i + 3]];
+        d2 += l3[codes3[i + 3]];
+        d3 += l3[codes4[i + 3]];
+    }
+
+    // Tail loop: handle remaining dimensions
+    for (; i < pq_dim_; ++i) {
+        const float* li = lut + i * CENTROIDS_PER_SUBSPACE;
+
+        d0 += li[codes1[i]];
+        d1 += li[codes2[i]];
+        d2 += li[codes3[i]];
+        d3 += li[codes4[i]];
+    }
+
+    // Apply final distance transformation based on metric type
+    if constexpr (metric == MetricType::METRIC_TYPE_COSINE ||
+                  metric == MetricType::METRIC_TYPE_IP) {
+        dists1 = 1.0F - d0;
+        dists2 = 1.0F - d1;
+        dists3 = 1.0F - d2;
+        dists4 = 1.0F - d3;
+    } else if constexpr (metric == MetricType::METRIC_TYPE_L2SQR) {
+        dists1 = d0;
+        dists2 = d1;
+        dists3 = d2;
+        dists4 = d3;
     }
 }
 
@@ -352,12 +469,26 @@ ProductQuantizer<metric>::DeserializeImpl(StreamReader& reader) {
     StreamReader::ReadObj(reader, this->pq_dim_);
     StreamReader::ReadObj(reader, this->subspace_dim_);
     StreamReader::ReadVector(reader, this->codebooks_);
+    this->transpose_codebooks();
 }
 
 template <MetricType metric>
 void
 ProductQuantizer<metric>::ReleaseComputerImpl(Computer<ProductQuantizer<metric>>& computer) const {
     this->allocator_->Deallocate(computer.buf_);
+}
+
+template <MetricType metric>
+void
+ProductQuantizer<metric>::transpose_codebooks() {
+    for (int64_t i = 0; i < this->pq_dim_; ++i) {
+        for (int64_t j = 0; j < CENTROIDS_PER_SUBSPACE; ++j) {
+            memcpy(this->reverse_codebooks_.data() + j * this->dim_ + i * subspace_dim_,
+                   this->codebooks_.data() + i * CENTROIDS_PER_SUBSPACE * subspace_dim_ +
+                       j * subspace_dim_,
+                   subspace_dim_ * sizeof(float));
+        }
+    }
 }
 
 }  // namespace vsag

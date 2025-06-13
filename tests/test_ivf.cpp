@@ -25,7 +25,20 @@ public:
                                      int64_t dim,
                                      const std::string& quantization_str = "sq8",
                                      int buckets_count = 210,
-                                     const std::string& train_type = "kmeans");
+                                     const std::string& train_type = "kmeans",
+                                     bool use_residual = false,
+                                     int buckets_per_data = 1,
+                                     bool use_attr_filter = false);
+
+    static std::string
+    GenerateGNOIMIBuildParametersString(const std::string& metric_type,
+                                        int64_t dim,
+                                        const std::string& quantization_str = "sq8",
+                                        int first_order_buckets_count = 15,
+                                        int second_order_buckets_count = 15,
+                                        const std::string& train_type = "kmeans",
+                                        bool use_residual = false,
+                                        int buckets_per_data = 1);
     static void
     TestGeneral(const IndexPtr& index,
                 const TestDatasetPtr& dataset,
@@ -70,7 +83,10 @@ IVFTestIndex::GenerateIVFBuildParametersString(const std::string& metric_type,
                                                int64_t dim,
                                                const std::string& quantization_str,
                                                int buckets_count,
-                                               const std::string& train_type) {
+                                               const std::string& train_type,
+                                               bool use_residual,
+                                               int buckets_per_data,
+                                               bool use_attr_filter) {
     std::string build_parameters_str;
 
     constexpr auto parameter_temp = R"(
@@ -84,7 +100,10 @@ IVFTestIndex::GenerateIVFBuildParametersString(const std::string& metric_type,
             "ivf_train_type": "{}",
             "use_reorder": {},
             "base_pq_dim": {},
-            "precise_quantization_type": "{}"
+            "precise_quantization_type": "{}",
+            "use_residual": {},
+            "buckets_per_data": {},
+            "use_attribute_filter": {}
         }}
     }}
     )";
@@ -109,11 +128,74 @@ IVFTestIndex::GenerateIVFBuildParametersString(const std::string& metric_type,
                                        train_type,
                                        use_reorder,
                                        pq_dim,
-                                       precise_quantizer_str);
+                                       precise_quantizer_str,
+                                       use_residual,
+                                       buckets_per_data,
+                                       use_attr_filter);
+    INFO(build_parameters_str);
+    return build_parameters_str;
+}
+
+std::string
+IVFTestIndex::GenerateGNOIMIBuildParametersString(const std::string& metric_type,
+                                                  int64_t dim,
+                                                  const std::string& quantization_str,
+                                                  int first_order_buckets_count,
+                                                  int second_order_buckets_count,
+                                                  const std::string& train_type,
+                                                  bool use_residual,
+                                                  int buckets_per_data) {
+    std::string build_parameters_str;
+
+    constexpr auto parameter_temp = R"(
+    {{
+        "dtype": "float32",
+        "metric_type": "{}",
+        "dim": {},
+        "index_param": {{
+            "first_order_buckets_count": {},
+            "second_order_buckets_count": {},
+            "base_quantization_type": "{}",
+            "ivf_train_type": "{}",
+            "use_reorder": {},
+            "base_pq_dim": {},
+            "precise_quantization_type": "{}",
+            "use_residual": {},
+            "buckets_per_data": {},
+            "partition_strategy_type": "gno_imi"
+        }}
+    }}
+    )";
+
+    auto strs = fixtures::SplitString(quantization_str, ',');
+    std::string basic_quantizer_str = strs[0];
+    bool use_reorder = false;
+    std::string precise_quantizer_str = "fp32";
+    auto pq_dim = dim;
+    if (dim % 2 == 0 && basic_quantizer_str == "pq") {
+        pq_dim = dim / 2;
+    }
+    if (strs.size() == 2) {
+        use_reorder = true;
+        precise_quantizer_str = strs[1];
+    }
+    build_parameters_str = fmt::format(parameter_temp,
+                                       metric_type,
+                                       dim,
+                                       first_order_buckets_count,
+                                       second_order_buckets_count,
+                                       basic_quantizer_str,
+                                       train_type,
+                                       use_reorder,
+                                       pq_dim,
+                                       precise_quantizer_str,
+                                       use_residual,
+                                       buckets_per_data);
 
     INFO(build_parameters_str);
     return build_parameters_str;
 }
+
 void
 IVFTestIndex::TestGeneral(const TestIndex::IndexPtr& index,
                           const TestDatasetPtr& dataset,
@@ -276,6 +358,40 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex, "IVF Build & ContinueAdd Te
     }
 }
 
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex, "IVF Build with Residual", "[ft][ivf]") {
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    auto size = GENERATE(1024 * 1024 * 2);
+    auto metric_type = GENERATE("l2", "ip", "cosine");
+    std::string train_type = GENERATE("kmeans");
+
+    const std::string name = "ivf";
+    auto search_param = fmt::format(search_param_tmp, 200);
+    std::vector<std::pair<std::string, float>> tmp_test_cases = {
+        {"fp32", 0.90},
+        {"bf16", 0.88},
+        {"fp16", 0.88},
+        {"sq8", 0.84},
+        //        {"sq8_uniform", 0.83},
+        //        {"sq8_uniform,fp32", 0.89},
+        {"pq,fp32", 0.82},
+        {"pqfs,fp32", 0.82},
+    };
+    for (auto& dim : dims) {
+        for (auto& [base_quantization_str, recall] : tmp_test_cases) {
+            vsag::Options::Instance().set_block_size_limit(size);
+            auto param = GenerateIVFBuildParametersString(
+                metric_type, dim, base_quantization_str, 300, train_type, true);
+            auto index = TestFactory(name, param, true);
+            auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
+            TestContinueAdd(index, dataset, true);
+            if (index->CheckFeature(vsag::SUPPORT_ADD_AFTER_BUILD)) {
+                TestGeneral(index, dataset, search_param, recall);
+            }
+            vsag::Options::Instance().set_block_size_limit(origin_size);
+        }
+    }
+}
+
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex, "IVF Build", "[ft][ivf]") {
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
@@ -295,6 +411,63 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex, "IVF Build", "[ft][ivf]") {
             if (index->CheckFeature(vsag::SUPPORT_BUILD)) {
                 TestGeneral(index, dataset, search_param, recall);
             }
+            vsag::Options::Instance().set_block_size_limit(origin_size);
+        }
+    }
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex, "IVF Build With Large K", "[ft][ivf]") {
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    auto size = GENERATE(1024 * 1024 * 2);
+    auto metric_type = GENERATE("l2");
+    std::string train_type = GENERATE("kmeans");
+
+    std::vector<std::pair<std::string, float>> tmp_test_cases = {
+        {"fp32", 0.84},
+    };
+
+    const std::string name = "ivf";
+    auto search_param = fmt::format(search_param_tmp, 100);
+    std::vector<int> dims_tmp = {32};
+    for (auto& dim : dims_tmp) {
+        for (auto& [base_quantization_str, recall] : tmp_test_cases) {
+            vsag::Options::Instance().set_block_size_limit(size);
+            auto param = GenerateIVFBuildParametersString(
+                metric_type, dim, base_quantization_str, 10000, train_type);
+            auto index = TestFactory(name, param, true);
+            auto dataset = pool.GetDatasetAndCreate(dim, 20000, metric_type);
+            TestBuildIndex(index, dataset, true);
+            if (index->CheckFeature(vsag::SUPPORT_BUILD)) {
+                TestGeneral(index, dataset, search_param, recall);
+            }
+            vsag::Options::Instance().set_block_size_limit(origin_size);
+        }
+    }
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex, "IVF Build With Attribute", "[ft][ivf]") {
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    auto size = GENERATE(1024 * 1024 * 2);
+    auto metric_type = GENERATE("l2", "cosine");
+    std::string train_type = GENERATE("kmeans");
+
+    const std::string name = "ivf";
+    auto search_param = fmt::format(search_param_tmp, 200);
+    bool use_attribute_filter = true;
+    for (auto& dim : dims) {
+        for (auto& [base_quantization_str, recall] : test_cases) {
+            vsag::Options::Instance().set_block_size_limit(size);
+            auto param = GenerateIVFBuildParametersString(metric_type,
+                                                          dim,
+                                                          base_quantization_str,
+                                                          300,
+                                                          train_type,
+                                                          false,
+                                                          1,
+                                                          use_attribute_filter);
+            auto index = TestFactory(name, param, true);
+            auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
+            TestBuildWithAttr(index, dataset);
             vsag::Options::Instance().set_block_size_limit(origin_size);
         }
     }
@@ -503,6 +676,89 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex, "IVF Estimate Memory", "[ft
                 metric_type, dim, base_quantization_str, 300, train_type);
             auto dataset = pool.GetDatasetAndCreate(dim, estimate_count, metric_type);
             TestEstimateMemory(name, param, dataset);
+            vsag::Options::Instance().set_block_size_limit(origin_size);
+        }
+    }
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex,
+                             "IVF Build Multi Buckets Per Data",
+                             "[ft][ivf]") {
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    auto size = GENERATE(1024 * 1024 * 2);
+    auto metric_type = GENERATE("l2", "ip", "cosine");
+    std::string train_type = GENERATE("random", "kmeans");
+
+    const std::string name = "ivf";
+    auto search_param = fmt::format(search_param_tmp, 200);
+    for (auto& dim : dims) {
+        for (auto& [base_quantization_str, recall] : test_cases) {
+            vsag::Options::Instance().set_block_size_limit(size);
+            auto param = GenerateIVFBuildParametersString(
+                metric_type, dim, base_quantization_str, 300, train_type, false, 2);
+            auto index = TestFactory(name, param, true);
+            auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
+            TestBuildIndex(index, dataset, true);
+            if (index->CheckFeature(vsag::SUPPORT_BUILD)) {
+                TestGeneral(index, dataset, search_param, recall);
+            }
+            vsag::Options::Instance().set_block_size_limit(origin_size);
+        }
+    }
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex, "GNO-IMI Build", "[ft][ivf]") {
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    auto size = GENERATE(1024 * 1024 * 2);
+    auto metric_type = GENERATE("l2");
+    std::string train_type = GENERATE("kmeans");
+
+    const std::string name = "ivf";
+    auto search_param = fmt::format(search_param_tmp, 250);
+    for (auto& dim : dims) {
+        for (auto& [base_quantization_str, recall] : test_cases) {
+            vsag::Options::Instance().set_block_size_limit(size);
+            auto param = GenerateGNOIMIBuildParametersString(
+                metric_type, dim, base_quantization_str, 20, 20, train_type, false, 1);
+            auto index = TestFactory(name, param, true);
+            auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
+            TestBuildIndex(index, dataset, true);
+            if (index->CheckFeature(vsag::SUPPORT_BUILD)) {
+                TestGeneral(index, dataset, search_param, recall);
+            }
+            vsag::Options::Instance().set_block_size_limit(origin_size);
+        }
+    }
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex, "GNO-IMI Build with Residual", "[ft][ivf]") {
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    auto size = GENERATE(1024 * 1024 * 2);
+    auto metric_type = GENERATE("l2");
+    std::string train_type = GENERATE("kmeans");
+
+    std::vector<std::pair<std::string, float>> tmp_test_cases = {
+        {"fp32", 0.90},
+        {"bf16", 0.88},
+        {"fp16", 0.88},
+        {"sq8", 0.84},
+        {"pq,fp32", 0.82},
+        {"pqfs,fp32", 0.82},
+    };
+
+    const std::string name = "ivf";
+    auto search_param = fmt::format(search_param_tmp, 300);
+    for (auto& dim : dims) {
+        for (auto& [base_quantization_str, recall] : tmp_test_cases) {
+            vsag::Options::Instance().set_block_size_limit(size);
+            auto param = GenerateGNOIMIBuildParametersString(
+                metric_type, dim, base_quantization_str, 20, 20, train_type, true, 1);
+            auto index = TestFactory(name, param, true);
+            auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
+            TestBuildIndex(index, dataset, true);
+            if (index->CheckFeature(vsag::SUPPORT_BUILD)) {
+                TestGeneral(index, dataset, search_param, recall);
+            }
             vsag::Options::Instance().set_block_size_limit(origin_size);
         }
     }

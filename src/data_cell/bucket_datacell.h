@@ -29,7 +29,8 @@ public:
     explicit BucketDataCell(const QuantizerParamPtr& quantization_param,
                             const IOParamPtr& io_param,
                             const IndexCommonParam& common_param,
-                            BucketIdType bucket_count);
+                            BucketIdType bucket_count,
+                            bool use_residual = false);
 
     void
     ScanBucketById(float* result_dists,
@@ -54,7 +55,10 @@ public:
     Train(const void* data, uint64_t count) override;
 
     void
-    InsertVector(const void* vector, BucketIdType bucket_id, InnerIdType inner_id) override;
+    InsertVector(const void* vector,
+                 BucketIdType bucket_id,
+                 InnerIdType inner_id,
+                 const float* centroid = nullptr) override;
 
     InnerIdType*
     GetInnerIds(BucketIdType bucket_id) override {
@@ -72,6 +76,13 @@ public:
     Package() override {
         if (GetQuantizerName() == QUANTIZATION_TYPE_VALUE_PQFS) {
             this->package_fastscan();
+        }
+    }
+
+    void
+    Unpack() override {
+        if (GetQuantizerName() == QUANTIZATION_TYPE_VALUE_PQFS) {
+            this->unpack_fastscan();
         }
     }
 
@@ -123,10 +134,14 @@ private:
     inline void
     insert_vector_with_locate(const float* vector,
                               const BucketIdType& bucket_id,
-                              const InnerIdType& offset_id);
+                              const InnerIdType& offset_id,
+                              const float* centroid);
 
     inline void
     package_fastscan();
+
+    inline void
+    unpack_fastscan();
 
 private:
     std::shared_ptr<QuantTmpl> quantizer_{nullptr};
@@ -140,13 +155,18 @@ private:
     Vector<Vector<InnerIdType>> inner_ids_;
 
     Allocator* const allocator_{nullptr};
+
+    bool use_residual_{false};
+
+    Vector<Vector<float>> residual_bias_;
 };
 
 template <typename QuantTmpl, typename IOTmpl>
 BucketDataCell<QuantTmpl, IOTmpl>::BucketDataCell(const QuantizerParamPtr& quantization_param,
                                                   const IOParamPtr& io_param,
                                                   const IndexCommonParam& common_param,
-                                                  BucketIdType bucket_count)
+                                                  BucketIdType bucket_count,
+                                                  bool use_residual)
     : BucketInterface(),
       datas_(common_param.allocator_.get()),
       bucket_sizes_(bucket_count, 0, common_param.allocator_.get()),
@@ -154,7 +174,9 @@ BucketDataCell<QuantTmpl, IOTmpl>::BucketDataCell(const QuantizerParamPtr& quant
                  Vector<InnerIdType>(common_param.allocator_.get()),
                  common_param.allocator_.get()),
       bucket_mutexes_(bucket_count, common_param.allocator_.get()),
-      allocator_(common_param.allocator_.get()) {
+      allocator_(common_param.allocator_.get()),
+      residual_bias_(bucket_count, Vector<float>(allocator_), allocator_),
+      use_residual_(use_residual) {
     this->bucket_count_ = bucket_count;
     this->quantizer_ = std::make_shared<QuantTmpl>(quantization_param, common_param);
     this->code_size_ = quantizer_->GetCodeSize();
@@ -207,6 +229,9 @@ BucketDataCell<QuantTmpl, IOTmpl>::scan_bucket_by_id(
         data_count -= compute_count;
         offset += compute_count;
     }
+    if (use_residual_ && this->quantizer_->Metric() == MetricType::METRIC_TYPE_L2SQR) {
+        FP32Sub(result_dists, residual_bias_[bucket_id].data(), result_dists, offset);
+    }
 }
 
 template <typename QuantTmpl, typename IOTmpl>
@@ -228,7 +253,8 @@ template <typename QuantTmpl, typename IOTmpl>
 void
 BucketDataCell<QuantTmpl, IOTmpl>::InsertVector(const void* vector,
                                                 BucketIdType bucket_id,
-                                                InnerIdType inner_id) {
+                                                InnerIdType inner_id,
+                                                const float* centroid) {
     check_valid_bucket_id(bucket_id);
     InnerIdType locate;
     {
@@ -236,21 +262,33 @@ BucketDataCell<QuantTmpl, IOTmpl>::InsertVector(const void* vector,
         locate = this->bucket_sizes_[bucket_id];
         this->bucket_sizes_[bucket_id]++;
         inner_ids_[bucket_id].emplace_back(inner_id);
+        if (use_residual_ && this->quantizer_->Metric() == MetricType::METRIC_TYPE_L2SQR) {
+            residual_bias_[bucket_id].emplace_back(0.0F);
+        }
     }
-    this->insert_vector_with_locate(reinterpret_cast<const float*>(vector), bucket_id, locate);
+    this->insert_vector_with_locate(
+        reinterpret_cast<const float*>(vector), bucket_id, locate, centroid);
 }
 
 template <typename QuantTmpl, typename IOTmpl>
 void
 BucketDataCell<QuantTmpl, IOTmpl>::insert_vector_with_locate(const float* vector,
                                                              const BucketIdType& bucket_id,
-                                                             const InnerIdType& offset_id) {
+                                                             const InnerIdType& offset_id,
+                                                             const float* centroid) {
     ByteBuffer codes(static_cast<uint64_t>(code_size_), this->allocator_);
     this->quantizer_->EncodeOne(vector, codes.data);
     this->datas_[bucket_id]->Write(
         codes.data,
         code_size_,
         static_cast<uint64_t>(offset_id) * static_cast<uint64_t>(code_size_));
+    if (use_residual_ && this->quantizer_->Metric() == MetricType::METRIC_TYPE_L2SQR && centroid) {
+        Vector<float> compress_vector(this->quantizer_->GetDim(), this->allocator_);
+        this->quantizer_->DecodeOne(codes.data, compress_vector.data());
+        residual_bias_[bucket_id][offset_id] =
+            -2 * FP32ComputeIP(centroid, compress_vector.data(), this->quantizer_->GetDim()) -
+            FP32ComputeIP(centroid, centroid, this->quantizer_->GetDim());
+    }
 }
 
 template <typename QuantTmpl, typename IOTmpl>
@@ -261,6 +299,9 @@ BucketDataCell<QuantTmpl, IOTmpl>::Serialize(StreamWriter& writer) {
     for (BucketIdType i = 0; i < this->bucket_count_; ++i) {
         datas_[i]->Serialize(writer);
         StreamWriter::WriteVector(writer, inner_ids_[i]);
+        if (use_residual_) {
+            StreamWriter::WriteVector(writer, residual_bias_[i]);
+        }
     }
     StreamWriter::WriteVector(writer, this->bucket_sizes_);
 }
@@ -273,6 +314,9 @@ BucketDataCell<QuantTmpl, IOTmpl>::Deserialize(StreamReader& reader) {
     for (BucketIdType i = 0; i < this->bucket_count_; ++i) {
         datas_[i]->Deserialize(reader);
         StreamReader::ReadVector(reader, inner_ids_[i]);
+        if (use_residual_) {
+            StreamReader::ReadVector(reader, residual_bias_[i]);
+        }
     }
     StreamReader::ReadVector(reader, this->bucket_sizes_);
 }
@@ -291,6 +335,30 @@ BucketDataCell<QuantTmpl, IOTmpl>::package_fastscan() {
         InnerIdType begin = 0;
         while (begin < bucket_size) {
             quantizer_->Package32(codes + begin * code_size_, buffer.data);
+            this->datas_[i]->Write(buffer.data, code_size_ * 32, begin * code_size_);
+            begin += 32;
+        }
+        if (need_release) {
+            this->datas_[i]->Release(codes);
+        }
+    }
+}
+
+template <typename QuantTmpl, typename IOTmpl>
+void
+BucketDataCell<QuantTmpl, IOTmpl>::unpack_fastscan() {
+    ByteBuffer buffer(code_size_ * 32, this->allocator_);
+    for (int64_t i = 0; i < this->bucket_count_; ++i) {
+        auto bucket_size = (this->bucket_sizes_[i] + 31) / 32 * 32;
+        if (bucket_size == 0) {
+            continue;
+        }
+        bool need_release = false;
+        const auto* codes = this->datas_[i]->Read(code_size_ * bucket_size, 0, need_release);
+        InnerIdType begin = 0;
+        while (begin < bucket_size) {
+            const uint8_t* src_block = codes + begin * code_size_;
+            quantizer_->Unpack32(src_block, buffer.data);
             this->datas_[i]->Write(buffer.data, code_size_ * 32, begin * code_size_);
             begin += 32;
         }

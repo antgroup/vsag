@@ -62,8 +62,8 @@ HNSWTestIndex::GenerateHNSWBuildParametersString(const std::string& metric_type,
         "metric_type": "{}",
         "dim": {},
         "hnsw": {{
-            "max_degree": 64,
-            "ef_construction": 500,
+            "max_degree": 16,
+            "ef_construction": 200,
             "use_static": {}
         }}
     }}
@@ -88,8 +88,8 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex,
             "dtype": "float32",
             "metric_type": "l2",
             "hnsw": {{
-                "max_degree": 64,
-                "ef_construction": 500
+                "max_degree": 32,
+                "ef_construction": 200
             }}
         }})";
         REQUIRE_THROWS(TestFactory(name, param, false));
@@ -103,8 +103,8 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex,
             "metric_type": "{}",
             "dim": 23,
             "hnsw": {{
-                "max_degree": 64,
-                "ef_construction": 500
+                "max_degree": 32,
+                "ef_construction": 300
             }}
         }})";
         auto param = fmt::format(param_tmp, metric);
@@ -119,8 +119,8 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex,
             "metric_type": "l2",
             "dim": 23,
             "hnsw": {{
-                "max_degree": 64,
-                "ef_construction": 500
+                "max_degree": 32,
+                "ef_construction": 300
             }}
         }})";
         auto param = fmt::format(param_tmp, datatype);
@@ -152,7 +152,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex,
                 "metric_type": "l2",
                 "dim": 35,
                 "hnsw": {{
-                    "ef_construction": 500
+                    "ef_construction": 300
                 }}
             }})",
             R"({{
@@ -160,7 +160,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex,
                 "metric_type": "l2",
                 "dim": 35,
                 "hnsw": {{
-                    "max_degree": 64,
+                    "max_degree": 32,
                 }}
             }})");
         REQUIRE_THROWS(TestFactory(name, param, false));
@@ -176,7 +176,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex,
                 "dim": 35,
                 "hnsw": {{
                     "max_degree": {},
-                    "ef_construction": 500
+                    "ef_construction": 300
                 }}
             }})";
         auto param = fmt::format(param_temp, max_degree);
@@ -201,6 +201,28 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex,
     }
 }
 
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex, "HNSW Estimate Memory", "[ft][hnsw]") {
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    auto size = GENERATE(1024 * 1024 * 2);
+    auto metric_type = GENERATE("l2", "cosine");
+
+    const std::string name = "hnsw";
+    auto search_param = fmt::format(search_param_tmp, 200, false);
+    uint64_t estimate_count = 1000;
+    for (auto dim : dims) {
+        vsag::Options::Instance().set_block_size_limit(size);
+        auto param = GenerateHNSWBuildParametersString(metric_type, dim);
+        auto dataset = pool.GetDatasetAndCreate(dim,
+                                                estimate_count,
+                                                metric_type,
+                                                false /*with_path*/,
+                                                0.8 /*valid_ratio*/,
+                                                0 /*extro_info_size*/);
+        TestEstimateMemory(name, param, dataset);
+        vsag::Options::Instance().set_block_size_limit(origin_size);
+    }
+}
+
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex,
                              "HNSW Build & ContinueAdd Test",
                              "[ft][hnsw]") {
@@ -222,6 +244,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex,
         TestRangeSearch(index, dataset, search_param, 0.99, 10, true);
         TestRangeSearch(index, dataset, search_param, 0.49, 5, true);
         TestFilterSearch(index, dataset, search_param, 0.99, true);
+        TestSearchAllocator(index, dataset, search_param, 0.99, true);
     }
     vsag::Options::Instance().set_block_size_limit(origin_size);
 }
@@ -239,7 +262,6 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex,
     vsag::Options::Instance().set_block_size_limit(size);
     auto dims_ = fixtures::get_common_used_dims(20);
     for (auto& dim : dims_) {
-        std::cout << dim << std::endl;
         auto param = GenerateHNSWBuildParametersString(metric_type, dim);
         auto index = TestFactory(name, param, true);
         auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);

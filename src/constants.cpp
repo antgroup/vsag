@@ -26,6 +26,7 @@ const char* const INDEX_PYRAMID = "pyramid";
 const char* const INDEX_SPARSE = "sparse_index";
 const char* const INDEX_BRUTE_FORCE = "brute_force";
 const char* const INDEX_IVF = "ivf";
+const char* const INDEX_GNO_IMI = "gno_imi";
 
 const char* const DIM = "dim";
 const char* const NUM_ELEMENTS = "num_elements";
@@ -34,6 +35,7 @@ const char* const DISTS = "dists";
 const char* const FLOAT32_VECTORS = "f32_vectors";
 const char* const SPARSE_VECTORS = "sparse_vectors";
 const char* const INT8_VECTORS = "i8_vectors";
+const char* const ATTRIBUTE_SETS = "attribute_sets";
 const char* const DATASET_PATHS = "paths";
 const char* const EXTRA_INFOS = "extra_infos";
 const char* const EXTRA_INFO_SIZE = "extra_info_size";
@@ -133,16 +135,19 @@ const char* const RABITQ_PCA_DIM = "rabitq_pca_dim";
 const char* const RABITQ_BITS_PER_DIM_QUERY = "rabitq_bits_per_dim_query";
 
 const char* const RABITQ_USE_FHT = "rabitq_use_fht";
-
+const char* const HGRAPH_SUPPORT_REMOVE = "support_remove";
+const char* const HGRAPH_REMOVE_FLAG_BIT = "remove_flag_bit";
 
 const char* const HGRAPH_USE_REORDER = HGRAPH_USE_REORDER_KEY;
 const char* const HGRAPH_USE_ELP_OPTIMIZER = HGRAPH_USE_ELP_OPTIMIZER_KEY;
 const char* const HGRAPH_IGNORE_REORDER = "ignore_reorder";
+const char* const HGRAPH_BUILD_BY_BASE_QUANTIZATION = "build_by_base";
 const char* const HGRAPH_BASE_QUANTIZATION_TYPE = "base_quantization_type";
 const char* const HGRAPH_GRAPH_MAX_DEGREE = "max_degree";
 const char* const HGRAPH_BUILD_EF_CONSTRUCTION = "ef_construction";
 const char* const HGRAPH_INIT_CAPACITY = "hgraph_init_capacity";
 const char* const HGRAPH_GRAPH_TYPE = "graph_type";
+const char* const HGRAPH_GRAPH_STORAGE_TYPE = "graph_storage_type";
 const char* const HGRAPH_BUILD_THREAD_COUNT = "build_thread_count";
 const char* const HGRAPH_PRECISE_QUANTIZATION_TYPE = "precise_quantization_type";
 const char* const HGRAPH_BASE_IO_TYPE = "base_io_type";
@@ -153,6 +158,7 @@ const char* const HGRAPH_PRECISE_FILE_PATH = "precise_file_path";
 const char* const HGRAPH_PARAMETER_EF_RUNTIME = "ef_search";
 const char* const HGRAPH_EXTRA_INFO_SIZE = "extra_info_size";
 const char* const HGRAPH_USE_EXTRA_INFO_FILTER = "use_extra_info_filter";
+const char* const HGRAPH_USE_ATTRIBUTE_FILTER = "use_attribute_filter";
 
 const char* const BRUTE_FORCE_QUANTIZATION_TYPE = "quantization_type";
 const char* const BRUTE_FORCE_IO_TYPE = "io_type";
@@ -165,7 +171,13 @@ const char* const IVF_BASE_QUANTIZATION_TYPE = "base_quantization_type";
 const char* const IVF_BASE_IO_TYPE = "base_io_type";
 const char* const IVF_BASE_PQ_DIM = "base_pq_dim";
 const char* const IVF_BASE_FILE_PATH = "base_file_path";
+
+const char* const GNO_IMI_FIRST_ORDER_BUCKETS_COUNT = "first_order_buckets_count";
+const char* const GNO_IMI_SECOND_ORDER_BUCKETS_COUNT = "second_order_buckets_count";
+
 const char* const IVF_PRECISE_QUANTIZATION_TYPE = "precise_quantization_type";
 const char* const IVF_PRECISE_IO_TYPE = "precise_io_type";
 const char* const IVF_PRECISE_FILE_PATH = "precise_file_path";
+const char* const IVF_USE_ATTRIBUTE_FILTER = "use_attribute_filter";
+
 };  // namespace vsag

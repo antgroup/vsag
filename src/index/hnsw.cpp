@@ -222,6 +222,7 @@ HNSW::knn_search(const DatasetPtr& query,
                  int64_t k,
                  const std::string& parameters,
                  const FilterPtr& filter_ptr,
+                 vsag::Allocator* allocator,
                  vsag::IteratorContext** iter_ctx,
                  bool is_last_filter) const {
 #ifndef ENABLE_TESTS
@@ -234,6 +235,7 @@ HNSW::knn_search(const DatasetPtr& query,
             ret->Dim(0)->NumElements(1);
             return ret;
         }
+        vsag::Allocator* search_allocator = allocator == nullptr ? allocator_.get() : allocator;
 
         // check query vector
         CHECK_ARGUMENT(query->GetNumElements() == 1, "query dataset should contain 1 vector only");
@@ -260,7 +262,7 @@ HNSW::knn_search(const DatasetPtr& query,
                 "ef_search({}) must in range[1, {}]", params.ef_search, ef_search_threshold));
         if (iter_ctx != nullptr && *iter_ctx == nullptr) {
             auto* filter_context = new IteratorFilterContext();
-            filter_context->init(alg_hnsw_->getMaxElements(), params.ef_search, allocator_.get());
+            filter_context->init(alg_hnsw_->getMaxElements(), params.ef_search, search_allocator);
             *iter_ctx = filter_context;
         }
         IteratorFilterContext* iter_filter_ctx = nullptr;
@@ -282,6 +284,7 @@ HNSW::knn_search(const DatasetPtr& query,
                                            std::max(params.ef_search, k),
                                            filter_ptr,
                                            params.skip_ratio,
+                                           allocator,
                                            iter_filter_ctx,
                                            is_last_filter);
         } catch (const std::runtime_error& e) {
@@ -324,7 +327,7 @@ HNSW::knn_search(const DatasetPtr& query,
             results.pop();
         }
         auto [dataset_results, dists, ids] =
-            CreateFastDataset(static_cast<int64_t>(results.size()), allocator_.get());
+            CreateFastDataset(static_cast<int64_t>(results.size()), search_allocator);
 
         for (auto j = static_cast<int64_t>(results.size() - 1); j >= 0; --j) {
             dists[j] = results.top().first;
@@ -1104,7 +1107,8 @@ HNSW::init_feature_list() {
     // other
     feature_list_.SetFeatures({IndexFeature::SUPPORT_CAL_DISTANCE_BY_ID,
                                IndexFeature::SUPPORT_CHECK_ID_EXIST,
-                               IndexFeature::SUPPORT_MERGE_INDEX});
+                               IndexFeature::SUPPORT_MERGE_INDEX,
+                               IndexFeature::SUPPORT_ESTIMATE_MEMORY});
 }
 
 bool
@@ -1120,7 +1124,7 @@ HNSW::ExtractDataAndGraph(FlattenInterfacePtr& data,
     auto cur_element_count = hnsw->getCurrentElementCount();
     int64_t origin_data_num = data->total_count_;
     int64_t valid_id_count = 0;
-    BitsetPtr bitset = std::make_shared<BitsetImpl>();
+    auto bitset = Bitset::Make();
     for (auto i = 0; i < cur_element_count; ++i) {
         int64_t id = hnsw->getExternalLabel(i);
         auto [is_exist, new_id] = func(id);
@@ -1205,7 +1209,7 @@ HNSW::merge(const std::vector<MergeUnit>& merge_units) {
     {
         SlowTaskTimer t1("odescent build");
         auto odescent_param = std::make_shared<ODescentParameter>();
-        odescent_param->max_degree = static_cast<int64_t>(2 * graph_param_ptr->max_degree_);
+        odescent_param->max_degree = static_cast<int64_t>(graph_param_ptr->max_degree_);
         ODescent graph(odescent_param,
                        flatten_interface,
                        index_common_param_.allocator_.get(),
@@ -1284,6 +1288,11 @@ HNSW::get_memory_usage() const {
     }
 
     return static_cast<int64_t>(alg_hnsw_->calcSerializeSize());
+}
+
+uint64_t
+HNSW::estimate_memory(uint64_t num_elements) const {
+    return alg_hnsw_->estimateMemory(num_elements);
 }
 
 template tl::expected<DatasetPtr, Error>

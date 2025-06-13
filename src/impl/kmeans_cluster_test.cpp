@@ -49,7 +49,7 @@ TEST_CASE("Kmeans Basic Test", "[ut][KMeansCluster]") {
     auto allocator = vsag::SafeAllocator::FactoryDefaultAllocator();
 
     vsag::KMeansCluster cluster(dim, allocator.get());
-    auto pos = cluster.Run(k, datas.data(), count);
+    auto pos = cluster.Run(k, datas.data(), count, 25, nullptr, false);
     std::vector<int> new_labels(k, 0);
     for (int i = 0; i < count; ++i) {
         new_labels[pos[i]]++;

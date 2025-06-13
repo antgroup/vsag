@@ -37,6 +37,7 @@ init();
 }  // namespace vsag
 
 #include "allocator.h"
+#include "attribute.h"
 #include "binaryset.h"
 #include "bitset.h"
 #include "constants.h"

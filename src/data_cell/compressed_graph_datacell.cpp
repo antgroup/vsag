@@ -43,11 +43,15 @@ CompressedGraphDataCell::InsertNeighborsById(InnerIdType id,
     Vector<InnerIdType> tmp(neighbor_ids.begin(), neighbor_ids.end(), allocator_);
     std::sort(tmp.begin(), tmp.end());
 
+    std::unique_ptr<EliasFanoEncoder> new_node;
     if (not tmp.empty()) {
-        if (neighbor_sets_[id] == nullptr) {
-            neighbor_sets_[id] = std::make_unique<EliasFanoEncoder>(allocator_);
-        }
-        neighbor_sets_[id]->Encode(tmp, max_capacity_);
+        new_node = std::make_unique<EliasFanoEncoder>(allocator_);
+        new_node->Encode(tmp, max_capacity_);
+    }
+    neighbor_sets_[id] = std::move(new_node);
+
+    InnerIdType current = total_count_.load();
+    while (current < id + 1 && !total_count_.compare_exchange_weak(current, id + 1)) {
     }
 }
 
@@ -58,6 +62,7 @@ CompressedGraphDataCell::GetNeighborSize(InnerIdType id) const {
 
 void
 CompressedGraphDataCell::GetNeighbors(InnerIdType id, Vector<InnerIdType>& neighbor_ids) const {
+    neighbor_ids.clear();
     if (GetNeighborSize(id) > 0) {
         neighbor_sets_[id]->DecompressAll(neighbor_ids);
     }
@@ -120,7 +125,6 @@ CompressedGraphDataCell::Resize(InnerIdType new_size) {
     }
     neighbor_sets_.resize(new_size);
     this->max_capacity_ = new_size;
-    this->total_count_ = new_size;
 }
 
 }  // namespace vsag

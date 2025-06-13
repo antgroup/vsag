@@ -136,4 +136,25 @@ check_equal_on_string_stream(std::stringstream& s1, std::stringstream& s2) {
     return true;
 }
 
+std::vector<std::string>
+split_string(const std::string& str, const char delimiter) {
+    std::vector<std::string> tokens;
+    std::stringstream ss(str);
+    std::string token;
+    while (std::getline(ss, token, delimiter)) {
+        tokens.push_back(token);
+    }
+    return tokens;
+}
+
+std::string
+get_current_time() {
+    auto now = std::chrono::system_clock::now();
+    auto now_c = std::chrono::system_clock::to_time_t(now);
+    std::tm* now_tm = std::localtime(&now_c);
+    std::ostringstream oss;
+    oss << std::put_time(now_tm, "%Y-%m-%d %H:%M:%S");
+    return oss.str();
+}
+
 }  // namespace vsag

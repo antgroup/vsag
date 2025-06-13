@@ -15,6 +15,8 @@
 
 #pragma once
 
+#include <fmt/format-inl.h>
+
 #include "graph_interface_parameter.h"
 
 namespace vsag {
@@ -35,11 +37,9 @@ public:
     ToJson() override {
         JsonType json;
         json[GRAPH_PARAM_MAX_DEGREE] = this->max_degree_;
+        json[GRAPH_STORAGE_TYPE_KEY] = GRAPH_STORAGE_TYPE_COMPRESSED;
         return json;
     }
-
-public:
-    uint64_t max_degree_{64};
 };
 
 using CompressedGraphDatacellParamPtr = std::shared_ptr<CompressedGraphDatacellParameter>;

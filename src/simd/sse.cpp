@@ -259,6 +259,114 @@ FP32ComputeL2SqrBatch4(const float* query,
 #endif
 }
 
+void
+FP32Sub(const float* x, const float* y, float* z, uint64_t dim) {
+#if defined(ENABLE_SSE)
+    if (dim < 4) {
+        return generic::FP32Sub(x, y, z, dim);
+    }
+    int64_t i = 0;
+    for (; i + 3 < dim; i += 4) {
+        __m128 a = _mm_loadu_ps(x + i);
+        __m128 b = _mm_loadu_ps(y + i);
+        __m128 c = _mm_sub_ps(a, b);
+        _mm_storeu_ps(z + i, c);
+    }
+    if (i < dim) {
+        generic::FP32Sub(x + i, y + i, z + i, dim - i);
+    }
+#else
+    return generic::FP32Sub(x, y, z, dim);
+#endif
+}
+
+void
+FP32Add(const float* x, const float* y, float* z, uint64_t dim) {
+#if defined(ENABLE_SSE)
+    if (dim < 4) {
+        return generic::FP32Add(x, y, z, dim);
+    }
+    int64_t i = 0;
+    for (; i + 3 < dim; i += 4) {
+        __m128 a = _mm_loadu_ps(x + i);
+        __m128 b = _mm_loadu_ps(y + i);
+        __m128 c = _mm_add_ps(a, b);
+        _mm_storeu_ps(z + i, c);
+    }
+    if (i < dim) {
+        generic::FP32Add(x + i, y + i, z + i, dim - i);
+    }
+#else
+    return generic::FP32Add(x, y, z, dim);
+#endif
+}
+
+void
+FP32Mul(const float* x, const float* y, float* z, uint64_t dim) {
+#if defined(ENABLE_SSE)
+    if (dim < 4) {
+        return generic::FP32Mul(x, y, z, dim);
+    }
+    int64_t i = 0;
+    for (; i + 3 < dim; i += 4) {
+        __m128 a = _mm_loadu_ps(x + i);
+        __m128 b = _mm_loadu_ps(y + i);
+        __m128 c = _mm_mul_ps(a, b);
+        _mm_storeu_ps(z + i, c);
+    }
+    if (i < dim) {
+        generic::FP32Mul(x + i, y + i, z + i, dim - i);
+    }
+#else
+    return generic::FP32Mul(x, y, z, dim);
+#endif
+}
+
+void
+FP32Div(const float* x, const float* y, float* z, uint64_t dim) {
+#if defined(ENABLE_SSE)
+    if (dim < 4) {
+        return generic::FP32Div(x, y, z, dim);
+    }
+    int64_t i = 0;
+    for (; i + 3 < dim; i += 4) {
+        __m128 a = _mm_loadu_ps(x + i);
+        __m128 b = _mm_loadu_ps(y + i);
+        __m128 c = _mm_div_ps(a, b);
+        _mm_storeu_ps(z + i, c);
+    }
+    if (i < dim) {
+        generic::FP32Div(x + i, y + i, z + i, dim - i);
+    }
+#else
+    return generic::FP32Div(x, y, z, dim);
+#endif
+}
+
+float
+FP32ReduceAdd(const float* x, uint64_t dim) {
+#if defined(ENABLE_SSE)
+    if (dim < 4) {
+        return generic::FP32ReduceAdd(x, dim);
+    }
+    __m128 sum = _mm_setzero_ps();
+    int i = 0;
+    for (; i + 3 < dim; i += 4) {
+        __m128 a = _mm_loadu_ps(x + i);
+        sum = _mm_add_ps(sum, a);
+    }
+    sum = _mm_hadd_ps(sum, sum);
+    sum = _mm_hadd_ps(sum, sum);
+    float result = _mm_cvtss_f32(sum);
+    if (i < dim) {
+        result += generic::FP32ReduceAdd(x + i, dim - i);
+    }
+    return result;
+#else
+    return generic::FP32ReduceAdd(x, dim);
+#endif
+}
+
 float
 BF16ComputeIP(const uint8_t* query, const uint8_t* codes, uint64_t dim) {
 #if defined(ENABLE_SSE)
@@ -696,4 +804,98 @@ PQFastScanLookUp32(const uint8_t* lookup_table,
 #endif
 }
 
+void
+BitAnd(const uint8_t* x, const uint8_t* y, const uint64_t num_byte, uint8_t* result) {
+#if defined(ENABLE_SSE)
+    if (num_byte == 0) {
+        return;
+    }
+    if (num_byte < 16) {
+        return generic::BitAnd(x, y, num_byte, result);
+    }
+    int64_t i = 0;
+    for (; i + 15 < num_byte; i += 16) {
+        __m128i x_vec = _mm_loadu_si128(reinterpret_cast<const __m128i*>(x + i));
+        __m128i y_vec = _mm_loadu_si128(reinterpret_cast<const __m128i*>(y + i));
+        __m128i result_vec = _mm_and_si128(x_vec, y_vec);
+        _mm_storeu_si128(reinterpret_cast<__m128i*>(result + i), result_vec);
+    }
+    if (i < num_byte) {
+        generic::BitAnd(x + i, y + i, num_byte - i, result + i);
+    }
+#else
+    return generic::BitAnd(x, y, num_byte, result);
+#endif
+}
+
+void
+BitOr(const uint8_t* x, const uint8_t* y, const uint64_t num_byte, uint8_t* result) {
+#if defined(ENABLE_SSE)
+    if (num_byte == 0) {
+        return;
+    }
+    if (num_byte < 16) {
+        return generic::BitOr(x, y, num_byte, result);
+    }
+    int64_t i = 0;
+    for (; i + 15 < num_byte; i += 16) {
+        __m128i x_vec = _mm_loadu_si128(reinterpret_cast<const __m128i*>(x + i));
+        __m128i y_vec = _mm_loadu_si128(reinterpret_cast<const __m128i*>(y + i));
+        __m128i result_vec = _mm_or_si128(x_vec, y_vec);
+        _mm_storeu_si128(reinterpret_cast<__m128i*>(result + i), result_vec);
+    }
+    if (i < num_byte) {
+        generic::BitOr(x + i, y + i, num_byte - i, result + i);
+    }
+#else
+    return generic::BitOr(x, y, num_byte, result);
+#endif
+}
+
+void
+BitXor(const uint8_t* x, const uint8_t* y, const uint64_t num_byte, uint8_t* result) {
+#if defined(ENABLE_SSE)
+    if (num_byte == 0) {
+        return;
+    }
+    if (num_byte < 16) {
+        return generic::BitXor(x, y, num_byte, result);
+    }
+    int64_t i = 0;
+    for (; i + 15 < num_byte; i += 16) {
+        __m128i x_vec = _mm_loadu_si128(reinterpret_cast<const __m128i*>(x + i));
+        __m128i y_vec = _mm_loadu_si128(reinterpret_cast<const __m128i*>(y + i));
+        __m128i result_vec = _mm_xor_si128(x_vec, y_vec);
+        _mm_storeu_si128(reinterpret_cast<__m128i*>(result + i), result_vec);
+    }
+    if (i < num_byte) {
+        generic::BitXor(x + i, y + i, num_byte - i, result + i);
+    }
+#else
+    return generic::BitXor(x, y, num_byte, result);
+#endif
+}
+
+void
+BitNot(const uint8_t* x, const uint64_t num_byte, uint8_t* result) {
+#if defined(ENABLE_SSE)
+    if (num_byte == 0) {
+        return;
+    }
+    if (num_byte < 16) {
+        return generic::BitNot(x, num_byte, result);
+    }
+    int64_t i = 0;
+    for (; i + 15 < num_byte; i += 16) {
+        __m128i x_vec = _mm_loadu_si128(reinterpret_cast<const __m128i*>(x + i));
+        __m128i result_vec = _mm_xor_si128(x_vec, _mm_set1_epi8(0xFF));
+        _mm_storeu_si128(reinterpret_cast<__m128i*>(result + i), result_vec);
+    }
+    if (i < num_byte) {
+        generic::BitNot(x + i, num_byte - i, result + i);
+    }
+#else
+    return generic::BitNot(x, num_byte, result);
+#endif
+}
 }  // namespace vsag::sse

@@ -35,9 +35,16 @@ using InnerIndexPtr = std::shared_ptr<InnerIndexInterface>;
 
 class InnerIndexInterface {
 public:
+    InnerIndexInterface() = default;
+
     explicit InnerIndexInterface(ParamPtr index_param, const IndexCommonParam& common_param);
 
     virtual ~InnerIndexInterface() = default;
+
+    constexpr static char fast_string_delimiter = '|';
+
+    static InnerIndexPtr
+    FastCreateIndex(const std::string& index_fast_str, const IndexCommonParam& common_param);
 
     [[nodiscard]] virtual std::string
     GetName() const = 0;
@@ -70,12 +77,18 @@ public:
     [[nodiscard]] virtual InnerIndexPtr
     Fork(const IndexCommonParam& param) = 0;
 
+    [[nodiscard]] virtual int64_t
+    GetNumElements() const = 0;
+
 public:
     virtual void
     Train(const DatasetPtr& base){};
 
     virtual std::vector<int64_t>
     Build(const DatasetPtr& base);
+
+    [[nodiscard]] virtual DatasetPtr
+    SearchWithRequest(const SearchRequest& request) const;
 
     [[nodiscard]] virtual DatasetPtr
     KnnSearch(const DatasetPtr& query,
@@ -94,11 +107,26 @@ public:
               int64_t k,
               const std::string& parameters,
               const FilterPtr& filter,
+              Allocator* allocator) const {
+        throw std::runtime_error("Index doesn't support new filter");
+    };
+
+    [[nodiscard]] virtual DatasetPtr
+    KnnSearch(const DatasetPtr& query,
+              int64_t k,
+              const std::string& parameters,
+              const FilterPtr& filter,
+              Allocator* allocator,
               IteratorContext*& iter_ctx,
               bool is_last_filter) const {
         throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
                             "Index doesn't support new filter");
     };
+
+    [[nodiscard]] virtual DatasetPtr
+    KnnSearch(const DatasetPtr& query, int64_t k, SearchParam& search_param) const {
+        throw std::runtime_error("Index doesn't support new filter");
+    }
 
     [[nodiscard]] virtual DatasetPtr
     RangeSearch(const DatasetPtr& query,
@@ -220,12 +248,16 @@ public:
     }
 
     [[nodiscard]] virtual int64_t
-    GetNumElements() const = 0;
-
-    [[nodiscard]] virtual int64_t
     GetMemoryUsage() const {
         throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
                             "Index doesn't support GetMemoryUsage");
+    }
+
+    [[nodiscard]] virtual std::string
+    GetMemoryUsageDetail() const {
+        // TODO(deming): implement func for every types of inner index
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "Index doesn't support GetMemoryUsageDetail");
     }
 
     [[nodiscard]] virtual uint64_t
@@ -249,6 +281,12 @@ public:
     [[nodiscard]] virtual bool
     CheckIdExist(int64_t id) const {
         return this->label_table_->CheckLabel(id);
+    }
+
+    virtual void
+    GetRawData(InnerIdType inner_id, uint8_t* data) const {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "Index doesn't support GetRawData");
     }
 
 public:

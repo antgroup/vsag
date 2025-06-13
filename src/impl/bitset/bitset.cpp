@@ -13,44 +13,30 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#pragma once
+#include "vsag/bitset.h"
 
 #include <cstdint>
-#include <memory>
-#include <mutex>
-#include <roaring.hh>
-#include <vector>
+#include <functional>
+#include <random>
 
-#include "vsag/bitset.h"
+#include "computable_bitset.h"
 
 namespace vsag {
 
-class BitsetImpl : public Bitset {
-public:
-    BitsetImpl() = default;
-    ~BitsetImpl() override = default;
+BitsetPtr
+Bitset::Random(int64_t length) {
+    auto bitset = ComputableBitset::MakeInstance(ComputableBitsetType::SparseBitset);
+    static auto gen =
+        std::bind(std::uniform_int_distribution<>(0, 1),  // NOLINT(modernize-avoid-bind)
+                  std::default_random_engine());
+    for (int64_t i = 0; i < length; ++i) {
+        bitset->Set(i, gen() != 0);
+    }
+    return bitset;
+}
 
-    BitsetImpl(const BitsetImpl&) = delete;
-    BitsetImpl&
-    operator=(const BitsetImpl&) = delete;
-    BitsetImpl(BitsetImpl&&) = delete;
-
-public:
-    void
-    Set(int64_t pos, bool value) override;
-
-    bool
-    Test(int64_t pos) override;
-
-    uint64_t
-    Count() override;
-
-    std::string
-    Dump() override;
-
-private:
-    std::mutex mutex_;
-    roaring::Roaring r_;
-};
-
-}  //namespace vsag
+BitsetPtr
+Bitset::Make() {
+    return ComputableBitset::MakeInstance(ComputableBitsetType::SparseBitset);
+}
+}  // namespace vsag

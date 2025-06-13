@@ -31,6 +31,7 @@ extern const char* const DISTS;
 extern const char* const FLOAT32_VECTORS;
 extern const char* const SPARSE_VECTORS;
 extern const char* const INT8_VECTORS;
+extern const char* const ATTRIBUTE_SETS;
 extern const char* const DATASET_PATHS;
 extern const char* const EXTRA_INFOS;
 extern const char* const EXTRA_INFO_SIZE;
@@ -128,18 +129,25 @@ extern const char* const SQ4_UNIFORM_TRUNC_RATE;
 extern const char* const RABITQ_PCA_DIM;
 extern const char* const RABITQ_BITS_PER_DIM_QUERY;
 
+<<<<<<< fht
 extern const char* const RABITQ_USE_FHT;
 
+=======
+extern const char* const HGRAPH_SUPPORT_REMOVE;
+extern const char* const HGRAPH_REMOVE_FLAG_BIT;
+>>>>>>> main
 
 // hgraph params
 extern const char* const HGRAPH_USE_REORDER;
 extern const char* const HGRAPH_USE_ELP_OPTIMIZER;
 extern const char* const HGRAPH_IGNORE_REORDER;
+extern const char* const HGRAPH_BUILD_BY_BASE_QUANTIZATION;
 extern const char* const HGRAPH_BASE_QUANTIZATION_TYPE;
 extern const char* const HGRAPH_GRAPH_MAX_DEGREE;
 extern const char* const HGRAPH_BUILD_EF_CONSTRUCTION;
 extern const char* const HGRAPH_INIT_CAPACITY;
 extern const char* const HGRAPH_GRAPH_TYPE;
+extern const char* const HGRAPH_GRAPH_STORAGE_TYPE;
 extern const char* const HGRAPH_BUILD_THREAD_COUNT;
 extern const char* const HGRAPH_PRECISE_QUANTIZATION_TYPE;
 extern const char* const HGRAPH_BASE_IO_TYPE;
@@ -150,6 +158,7 @@ extern const char* const HGRAPH_PRECISE_FILE_PATH;
 extern const char* const HGRAPH_PARAMETER_EF_RUNTIME;
 extern const char* const HGRAPH_EXTRA_INFO_SIZE;
 extern const char* const HGRAPH_USE_EXTRA_INFO_FILTER;
+extern const char* const HGRAPH_USE_ATTRIBUTE_FILTER;
 
 extern const char* const BRUTE_FORCE_QUANTIZATION_TYPE;
 extern const char* const BRUTE_FORCE_IO_TYPE;
@@ -165,5 +174,8 @@ extern const char* const IVF_BASE_FILE_PATH;
 extern const char* const IVF_PRECISE_QUANTIZATION_TYPE;
 extern const char* const IVF_PRECISE_IO_TYPE;
 extern const char* const IVF_PRECISE_FILE_PATH;
+extern const char* const IVF_USE_ATTRIBUTE_FILTER;
 
+extern const char* const GNO_IMI_FIRST_ORDER_BUCKETS_COUNT;
+extern const char* const GNO_IMI_SECOND_ORDER_BUCKETS_COUNT;
 }  // namespace vsag
