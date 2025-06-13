@@ -37,6 +37,10 @@ GetSQ8ComputeIP() {
 #if defined(ENABLE_SSE)
         return sse::SQ8ComputeIP;
 #endif
+    } else if (SimdStatus::SupportNEON()) {
+#if defined(ENABLE_NEON)
+        return neon::SQ8ComputeIP;
+#endif
     }
     return generic::SQ8ComputeIP;
 }
@@ -59,6 +63,10 @@ GetSQ8ComputeL2Sqr() {
     } else if (SimdStatus::SupportSSE()) {
 #if defined(ENABLE_SSE)
         return sse::SQ8ComputeL2Sqr;
+#endif
+    } else if (SimdStatus::SupportNEON()) {
+#if defined(ENABLE_NEON)
+        return neon::SQ8ComputeL2Sqr;
 #endif
     }
     return generic::SQ8ComputeL2Sqr;
@@ -83,6 +91,10 @@ GetSQ8ComputeCodesIP() {
 #if defined(ENABLE_SSE)
         return sse::SQ8ComputeCodesIP;
 #endif
+    } else if (SimdStatus::SupportNEON()) {
+#if defined(ENABLE_NEON)
+        return neon::SQ8ComputeCodesIP;
+#endif
     }
     return generic::SQ8ComputeCodesIP;
 }
@@ -105,6 +117,10 @@ GetSQ8ComputeCodesL2Sqr() {
     } else if (SimdStatus::SupportSSE()) {
 #if defined(ENABLE_SSE)
         return sse::SQ8ComputeCodesL2Sqr;
+#endif
+    } else if (SimdStatus::SupportNEON()) {
+#if defined(ENABLE_NEON)
+        return neon::SQ8ComputeCodesL2Sqr;
 #endif
     }
     return generic::SQ8ComputeCodesL2Sqr;

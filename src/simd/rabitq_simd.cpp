@@ -35,6 +35,10 @@ GetRaBitQFloatBinaryIP() {
 #if defined(ENABLE_SSE)
         return sse::RaBitQFloatBinaryIP;
 #endif
+    } else if (SimdStatus::SupportNEON()) {
+#if defined(ENABLE_NEON)
+        return neon::RaBitQFloatBinaryIP;
+#endif
     }
     return generic::RaBitQFloatBinaryIP;
 }
