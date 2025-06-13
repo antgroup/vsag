@@ -42,8 +42,6 @@ namespace vsag{
 
         private:
             const uint64_t dim_{0};
-            uint64_t pad_dim_{0};
-
             size_t flip_offset_ = 0;
             Allocator* const allocator_{nullptr};
 

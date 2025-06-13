@@ -92,10 +92,9 @@ static inline void flip_sign(const uint8_t* flip, float* data, size_t dim) {//�
     }
 
     FhtKacRotator::FhtKacRotator(uint64_t dim, Allocator* allocator)
-    :dim_(dim), pad_dim_(0), allocator_(allocator)
+    :dim_(dim),  allocator_(allocator)
     {
-        pad_dim_ = dim;
-        flip_offset_ = (pad_dim_ + 7) / kByteLen_;
+        flip_offset_ = (dim_ + 7) / kByteLen_;
         flip_.resize(round_ * flip_offset_);//原作者中round_ = 4
         std::random_device rd;   // Seed
         std::mt19937 gen(rd());  // Mersenne Twister RNG
@@ -193,102 +192,102 @@ static inline void flip_sign(const uint8_t* flip, float* data, size_t dim) {//�
 
     void FhtKacRotator::Transform(const float* data, float* rotated_vec) const{
         std::memcpy(rotated_vec, data, sizeof(float) * dim_);
-        std::fill(rotated_vec + dim_, rotated_vec + pad_dim_, 0);
-        if (trunc_dim_ == pad_dim_) {
-            flip_array(flip_.data() + 0 * flip_offset_, rotated_vec, pad_dim_);
+        std::fill(rotated_vec + dim_, rotated_vec + dim_, 0);
+        if (trunc_dim_ == dim_) {
+            flip_array(flip_.data() + 0 * flip_offset_, rotated_vec, dim_);
             fht_float_(rotated_vec);
             vec_rescale(rotated_vec, trunc_dim_, fac_);
 
-            flip_array(flip_.data()+ 1 * flip_offset_, rotated_vec, pad_dim_);
+            flip_array(flip_.data()+ 1 * flip_offset_, rotated_vec, dim_);
             fht_float_(rotated_vec);
             vec_rescale(rotated_vec, trunc_dim_, fac_);
 
-            flip_array(flip_.data()+ 2 * flip_offset_, rotated_vec, pad_dim_);
+            flip_array(flip_.data()+ 2 * flip_offset_, rotated_vec, dim_);
             fht_float_(rotated_vec);
             vec_rescale(rotated_vec, trunc_dim_, fac_);
 
-            flip_array(flip_.data()+ 3 * flip_offset_, rotated_vec, pad_dim_);
+            flip_array(flip_.data()+ 3 * flip_offset_, rotated_vec, dim_);
             fht_float_(rotated_vec);
             vec_rescale(rotated_vec, trunc_dim_, fac_);
 
             return;
         }
 
-        size_t start = pad_dim_ - trunc_dim_;
+        size_t start = dim_ - trunc_dim_;
 
-        flip_array(flip_.data() + 0 * flip_offset_, rotated_vec, pad_dim_);
+        flip_array(flip_.data() + 0 * flip_offset_, rotated_vec, dim_);
         fht_float_(rotated_vec);
         vec_rescale(rotated_vec, trunc_dim_, fac_);
-        kacs_walk_generic(rotated_vec, pad_dim_);
-        vec_rescale(rotated_vec, pad_dim_, sqrt(0.5));
+        kacs_walk_generic(rotated_vec, dim_);
+        vec_rescale(rotated_vec, dim_, sqrt(0.5));
 
-        flip_array(flip_.data() + flip_offset_, rotated_vec, pad_dim_);
+        flip_array(flip_.data() + flip_offset_, rotated_vec, dim_);
         fht_float_(rotated_vec + start);
         vec_rescale(rotated_vec + start, trunc_dim_, fac_);
-        kacs_walk_generic(rotated_vec, pad_dim_);
-        vec_rescale(rotated_vec, pad_dim_, sqrt(0.5));
+        kacs_walk_generic(rotated_vec, dim_);
+        vec_rescale(rotated_vec, dim_, sqrt(0.5));
 
-        flip_array(flip_.data() + 2 * flip_offset_, rotated_vec, pad_dim_);
+        flip_array(flip_.data() + 2 * flip_offset_, rotated_vec, dim_);
         fht_float_(rotated_vec);
         vec_rescale(rotated_vec, trunc_dim_, fac_);
-        kacs_walk_generic(rotated_vec, pad_dim_);
-        vec_rescale(rotated_vec, pad_dim_, sqrt(0.5));
+        kacs_walk_generic(rotated_vec, dim_);
+        vec_rescale(rotated_vec, dim_, sqrt(0.5));
 
-        flip_array(flip_.data() + 3 * flip_offset_, rotated_vec, pad_dim_);
+        flip_array(flip_.data() + 3 * flip_offset_, rotated_vec, dim_);
         fht_float_(rotated_vec + start);
         vec_rescale(rotated_vec + start, trunc_dim_, fac_);
-        kacs_walk_generic(rotated_vec, pad_dim_);
-        vec_rescale(rotated_vec, pad_dim_, sqrt(0.5));
+        kacs_walk_generic(rotated_vec, dim_);
+        vec_rescale(rotated_vec, dim_, sqrt(0.5));
 
     }
     void FhtKacRotator::InverseTransform(float const*data, float*rotated_vec) const{
         std::memcpy(rotated_vec, data, sizeof(float) * dim_);
-        std::fill(rotated_vec + dim_, rotated_vec + pad_dim_, 0);
-        if (trunc_dim_ == pad_dim_) {
+        std::fill(rotated_vec + dim_, rotated_vec + dim_, 0);
+        if (trunc_dim_ == dim_) {
             fht_float_(rotated_vec);
             vec_rescale(rotated_vec, trunc_dim_, fac_);
-            flip_array(flip_.data() + 3 * flip_offset_, rotated_vec, pad_dim_);
+            flip_array(flip_.data() + 3 * flip_offset_, rotated_vec, dim_);
             
             fht_float_(rotated_vec);
             vec_rescale(rotated_vec, trunc_dim_, fac_);
-            flip_array(flip_.data()+ 2 * flip_offset_, rotated_vec, pad_dim_);
+            flip_array(flip_.data()+ 2 * flip_offset_, rotated_vec, dim_);
 
             fht_float_(rotated_vec);
             vec_rescale(rotated_vec, trunc_dim_, fac_);
-            flip_array(flip_.data()+ 1 * flip_offset_, rotated_vec, pad_dim_);
+            flip_array(flip_.data()+ 1 * flip_offset_, rotated_vec, dim_);
 
             fht_float_(rotated_vec);
             vec_rescale(rotated_vec, trunc_dim_, fac_);
-            flip_array(flip_.data() + 0 * flip_offset_, rotated_vec, pad_dim_);
+            flip_array(flip_.data() + 0 * flip_offset_, rotated_vec, dim_);
 
             return;
         }
 
-        size_t start = pad_dim_ - trunc_dim_;
+        size_t start = dim_ - trunc_dim_;
 
-        kacs_walk_generic(rotated_vec,pad_dim_);
-        vec_rescale(rotated_vec, pad_dim_, sqrt(0.5));
+        kacs_walk_generic(rotated_vec,dim_);
+        vec_rescale(rotated_vec, dim_, sqrt(0.5));
         fht_float_(rotated_vec + start);
         vec_rescale(rotated_vec + start, trunc_dim_, fac_);
-        flip_array(flip_.data() + 3 * flip_offset_,rotated_vec, pad_dim_);
+        flip_array(flip_.data() + 3 * flip_offset_,rotated_vec, dim_);
 
-        kacs_walk_generic(rotated_vec, pad_dim_);
-        vec_rescale(rotated_vec, pad_dim_, sqrt(0.5));
+        kacs_walk_generic(rotated_vec, dim_);
+        vec_rescale(rotated_vec, dim_, sqrt(0.5));
         fht_float_(rotated_vec);
         vec_rescale(rotated_vec, trunc_dim_, fac_);
-        flip_array(flip_.data() + 2 * flip_offset_,rotated_vec, pad_dim_);
+        flip_array(flip_.data() + 2 * flip_offset_,rotated_vec, dim_);
 
-        kacs_walk_generic(rotated_vec,pad_dim_);
-        vec_rescale(rotated_vec, pad_dim_, sqrt(0.5));
+        kacs_walk_generic(rotated_vec,dim_);
+        vec_rescale(rotated_vec, dim_, sqrt(0.5));
         fht_float_(rotated_vec + start);
         vec_rescale(rotated_vec + start, trunc_dim_, fac_);
-        flip_array(flip_.data() + 1 * flip_offset_,rotated_vec, pad_dim_);
+        flip_array(flip_.data() + 1 * flip_offset_,rotated_vec, dim_);
 
-        kacs_walk_generic(rotated_vec, pad_dim_);
-        vec_rescale(rotated_vec, pad_dim_, sqrt(0.5));
+        kacs_walk_generic(rotated_vec, dim_);
+        vec_rescale(rotated_vec, dim_, sqrt(0.5));
         fht_float_(rotated_vec);
         vec_rescale(rotated_vec, trunc_dim_, fac_);
-        flip_array(flip_.data() + 0 * flip_offset_,rotated_vec, pad_dim_);
+        flip_array(flip_.data() + 0 * flip_offset_,rotated_vec, dim_);
 
     }
 

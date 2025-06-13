@@ -1319,21 +1319,20 @@ HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
             },
         },
         {
-<<<<<<< fht
             RABITQ_USE_FHT,
             {
                 HGRAPH_BASE_CODES_KEY,
                 QUANTIZATION_PARAMS_KEY,
                 USE_FHT,
             },
-=======
+        },
+        {
             HGRAPH_SUPPORT_REMOVE,
             {HGRAPH_GRAPH_KEY, GRAPH_SUPPORT_REMOVE},
         },
         {
             HGRAPH_REMOVE_FLAG_BIT,
             {HGRAPH_GRAPH_KEY, REMOVE_FLAG_BIT},
->>>>>>> main
         },
     };
     if (common_param.data_type_ == DataTypes::DATA_TYPE_INT8) {

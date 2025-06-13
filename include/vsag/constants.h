@@ -129,13 +129,10 @@ extern const char* const SQ4_UNIFORM_TRUNC_RATE;
 extern const char* const RABITQ_PCA_DIM;
 extern const char* const RABITQ_BITS_PER_DIM_QUERY;
 
-<<<<<<< fht
 extern const char* const RABITQ_USE_FHT;
 
-=======
 extern const char* const HGRAPH_SUPPORT_REMOVE;
 extern const char* const HGRAPH_REMOVE_FLAG_BIT;
->>>>>>> main
 
 // hgraph params
 extern const char* const HGRAPH_USE_REORDER;
