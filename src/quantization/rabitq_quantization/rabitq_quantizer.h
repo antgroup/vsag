@@ -20,8 +20,7 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
-#include "impl/FhtKacRotator.h"
-
+#include "impl/fht_kac_rotator.h"
 #include "impl/principal_component_analysis.h"
 #include "impl/random_orthogonal_matrix.h"
 #include "index/index_common_param.h"
