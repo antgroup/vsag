@@ -286,4 +286,18 @@ SplitString(const std::string& s, char delimiter);
 
 float
 GetSparseDistance(const vsag::SparseVector& vec1, const vsag::SparseVector& vec2);
+
+template <typename T>
+std::vector<T>
+RandomSelect(const std::vector<T>& vec, int64_t count = 1) {
+    std::vector<T> selected;
+    count = std::min(count, static_cast<int64_t>(vec.size()));
+    std::sample(vec.begin(),
+                vec.end(),
+                std::back_inserter(selected),
+                count,
+                std::mt19937(RandomValue(0, 10000)));
+    return selected;
+}
+
 }  // Namespace fixtures
