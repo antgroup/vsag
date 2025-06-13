@@ -13,7 +13,7 @@ static size_t ceil_log2(size_t val) {
     }
     return 1 << res;
 }
-static inline void flip_array(const uint8_t* flip, float* data, size_t dim) {//翻转符号
+static inline void flip_array(const uint8_t* flip, float* data, size_t dim) {//generic
     for (size_t i = 0; i < dim; i ++) {
         bool mask = flip[i/8] & (1 << (i%8));
         if (mask) {
@@ -21,19 +21,6 @@ static inline void flip_array(const uint8_t* flip, float* data, size_t dim) {//�
         }
     }
 }
-//  static inline void flip_array(const uint8_t* flip, float* data, size_t dim){
-//     for(int idx = 0; idx < (dim + 7) / 8; idx++){
-//         uint8_t current_flip = flip[idx];
-//         for (int i = 0; i < 8; ++i) {
-//             if ((current_flip >> i) & 1) {
-//                 int index = idx * 8 + i;
-//                 if (index >= 0 && index < dim) {
-//                     data[index] = -data[index];  // 翻转符号
-//                 }
-//             }
-//         }
-//     }
-// }
 static inline void flip_sign(const uint8_t* flip, float* data, size_t dim) {//翻转符号
     constexpr size_t kFloatsPerChunk = 64;  // Process 64 floats per iteration
     // constexpr size_t bits_per_chunk = floats_per_chunk;  // 64 bits = 8 bytes
@@ -114,7 +101,7 @@ static inline void flip_sign(const uint8_t* flip, float* data, size_t dim) {//�
         std::mt19937 gen(rd());  // Mersenne Twister RNG
 
         // Uniform distribution in the range [0, 255]
-        std::uniform_int_distribution<int> dist(0, 255);//n个double对于一个数
+        std::uniform_int_distribution<int> dist(0, 255);
 
         // Generate a single random uint8_t value
         for (auto& i : flip_) {

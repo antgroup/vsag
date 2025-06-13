@@ -23,22 +23,42 @@
 using namespace vsag;
 
 void
-
-TestSame(FhtKacRotator& rom1, FhtKacRotator& rom2, uint64_t dim) {
-    std::vector<uint8_t> mat1(rom1.round_ * (dim / rom1.kByteLen_));
+TestRandomness(FhtKacRotator& rom1, FhtKacRotator& rom2, int dim) {
+    size_t flip_len = rom1.round_ * (dim + 7 )/ rom1.kByteLen_;
+    std::vector<uint8_t> mat1(flip_len);
     rom1.CopyFlip(mat1.data());
 
-    std::vector<uint8_t> mat2(rom2.round_ * (dim / rom2.kByteLen_));
+    std::vector<uint8_t> mat2(flip_len);
     rom2.CopyFlip(mat2.data());
 
+    uint64_t count_same = 0, count_non_zero = 0;
+    for (uint64_t i = 0; i < flip_len; i++) {
+        if (not(std::abs(mat1[i]) < 1e-3 and std::abs(mat2[i]) < 1e-3)) {
+            if (std::abs(mat1[i] - mat2[i]) < 1e-3) {
+                count_same++;
+            }
+            count_non_zero++;
+        }
+    }
+
+    REQUIRE(count_same <= (uint64_t)(0.1 * count_non_zero));
+}
+
+void
+TestSame(FhtKacRotator& rom1, FhtKacRotator& rom2, uint64_t dim) {
+    size_t flip_len = rom1.round_ * (dim + 7 )/ rom1.kByteLen_;
+    std::vector<uint8_t> mat1(flip_len);
+    rom1.CopyFlip(mat1.data());
+    std::vector<uint8_t> mat2(flip_len);
+    rom2.CopyFlip(mat2.data());
     uint64_t count_same = 0;
-    for (uint64_t i = 0; i < dim; i++) {
+    for (uint64_t i = 0; i < flip_len; i++) {
         if (std::abs(mat1[i] - mat2[i]) < 1e-3) {
             count_same++;
         }
     }
 
-    REQUIRE(count_same == dim * dim);
+    REQUIRE(count_same == flip_len);
 }
 
 void
@@ -69,7 +89,9 @@ TEST_CASE("Basic Hadamard Test", "[ut][FhtKacRotator]") {
     const auto dims = fixtures::get_common_used_dims();
     for (auto dim : dims) {
         FhtKacRotator rom(dim, allocator.get());
-        TestTransform(rom, dim);//只需要测这个就好
+        FhtKacRotator rom_alter(dim, allocator.get());
+        TestTransform(rom, dim);
+        TestRandomness(rom, rom_alter, dim);
     }
 }
 
@@ -87,12 +109,12 @@ TEST_CASE("Hadamard Matrix Serialize / Deserialize Test", "[ut][FhtKacRotator]")
         IOStreamWriter writer(outfile);
         rom1.Serialize(writer);
         outfile.close();
-
         std::ifstream infile(filename.c_str(), std::ios::binary);
         IOStreamReader reader(infile);
         rom2.Deserialize(reader);
         infile.close();
 
         TestSame(rom1, rom2, dim);
+
     }
 }
