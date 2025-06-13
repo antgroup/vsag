@@ -6,6 +6,9 @@ set(install_dir ${CMAKE_CURRENT_BINARY_DIR}/${name}/install)
 ExternalProject_Add(
         ${name}
         URL https://github.com/antlr/antlr4/archive/refs/tags/4.13.2.tar.gz
+        # this url is maintained by the vsag project, if it's broken, please try
+        #  the latest commit or contact the vsag project
+        https://vsagcache.oss-rg-china-mainland.aliyuncs.com/antlr4/v4.13.2.tar.gz
         URL_HASH MD5=3b75610fc8a827119258cba09a068be5
         DOWNLOAD_NAME antlr4_4.13.2.tar.gz
         PREFIX ${CMAKE_CURRENT_BINARY_DIR}/${name}
@@ -25,7 +28,7 @@ ExternalProject_Add(
         LOG_INSTALL TRUE
         DOWNLOAD_NO_PROGRESS 1
         INACTIVITY_TIMEOUT 5
-        TIMEOUT 60
+        TIMEOUT 30
 )
 
 include_directories(${install_dir}/include/antlr4-runtime)
