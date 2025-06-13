@@ -16,7 +16,7 @@
 #pragma once
 #include "fmt/format.h"
 #include "nlohmann/json.hpp"
-#include "stream_reader.h"
+#include "storage/stream_reader.h"
 #include "typing.h"
 #include "vsag/constants.h"
 

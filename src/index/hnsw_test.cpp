@@ -26,6 +26,7 @@
 #include "fixtures.h"
 #include "io/memory_io_parameter.h"
 #include "quantization/fp32_quantizer_parameter.h"
+#include "storage/serialization.h"
 #include "vsag/bitset.h"
 #include "vsag/errors.h"
 #include "vsag/options.h"
@@ -313,15 +314,21 @@ TEST_CASE("serialize empty index", "[ut][hnsw]") {
     SECTION("serialize to binaryset") {
         auto result = index->Serialize();
         REQUIRE(result.has_value());
-        REQUIRE(result.value().Contains(BLANK_INDEX));
+        REQUIRE(result.value().Contains(SERIAL_META_KEY));
+        auto metadata = std::make_shared<Metadata>(result.value().Get(SERIAL_META_KEY));
+        REQUIRE(metadata->EmptyIndex());
     }
 
     SECTION("serialize to fstream") {
         fixtures::TempDir dir("hnsw_test_serialize_empty_index");
         std::fstream out_stream(dir.path + "empty_index.bin", std::ios::out | std::ios::binary);
         auto result = index->Serialize(out_stream);
-        REQUIRE_FALSE(result.has_value());
-        REQUIRE(result.error().type == ErrorType::INDEX_EMPTY);
+        REQUIRE(result.has_value());
+        out_stream.close();
+        std::fstream in_stream(dir.path + "empty_index.bin", std::ios::in | std::ios::binary);
+        IOStreamReader reader(in_stream);
+        auto footer = Footer::Parse(reader);
+        REQUIRE(footer->GetMetadata()->EmptyIndex());
     }
 }
 
@@ -554,7 +561,7 @@ TEST_CASE("build with reversed edges", "[ut][hnsw]") {
                 file.write((const char*)b.data.get(), b.size);
                 file.close();
             }
-            std::ofstream metafile(dir.path + "hnsw.index._meta", std::ios::out);
+            std::ofstream metafile(dir.path + "hnsw.index._metafile", std::ios::out);
             for (auto key : keys) {
                 metafile << key << std::endl;
             }
@@ -563,7 +570,7 @@ TEST_CASE("build with reversed edges", "[ut][hnsw]") {
             std::cerr << "no enough memory to serialize index" << std::endl;
         }
 
-        std::ifstream metafile(dir.path + "hnsw.index._meta", std::ios::in);
+        std::ifstream metafile(dir.path + "hnsw.index._metafile", std::ios::in);
         std::vector<std::string> keys;
         std::string line;
         while (std::getline(metafile, line)) {
