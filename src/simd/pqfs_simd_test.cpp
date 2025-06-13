@@ -44,6 +44,7 @@ compare_vector(std::vector<T>& v1, std::vector<T>& v2) {
         std::vector<int32_t> avx_data(32, 0);                                                   \
         std::vector<int32_t> avx2_data(32, 0);                                                  \
         std::vector<int32_t> avx512_data(32, 0);                                                \
+        std::vector<int32_t> neon_data(32, 0);                                                  \
         generic::Func(lut.data() + i * dim, codes.data() + i * dim, pq_dim, gt.data());         \
         if (SimdStatus::SupportSSE()) {                                                         \
             sse::Func(lut.data() + i * dim, codes.data() + i * dim, pq_dim, sse_data.data());   \
@@ -61,6 +62,10 @@ compare_vector(std::vector<T>& v1, std::vector<T>& v2) {
             avx512::Func(                                                                       \
                 lut.data() + i * dim, codes.data() + i * dim, pq_dim, avx512_data.data());      \
             REQUIRE(compare_vector(gt, avx512_data) == true);                                   \
+        }                                                                                       \
+        if (SimdStatus::SupportNEON()) {                                                        \
+            neon::Func(lut.data() + i * dim, codes.data() + i * dim, pq_dim, neon_data.data()); \
+            REQUIRE(compare_vector(gt, neon_data) == true);                                     \
         }                                                                                       \
     };
 
@@ -100,4 +105,5 @@ TEST_CASE("PQFastScan Benchmark", "[ut][simd][!benchmark]") {
     BENCHMARK_SIMD_COMPUTE(avx, PQFastScanLookUp32);
     BENCHMARK_SIMD_COMPUTE(avx2, PQFastScanLookUp32);
     BENCHMARK_SIMD_COMPUTE(avx512, PQFastScanLookUp32);
+    BENCHMARK_SIMD_COMPUTE(neon, PQFastScanLookUp32);
 }

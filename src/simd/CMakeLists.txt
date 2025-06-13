@@ -4,6 +4,7 @@ set (SIMD_SRCS
         avx.cpp
         avx2.cpp
         avx512.cpp
+        neon.cpp
         simd.cpp
         simd_status.cpp
         basic_func.cpp
@@ -39,6 +40,9 @@ if (DIST_CONTAINS_AVX512)
             "-mavx512f -mavx512pf -mavx512er -mavx512cd -mavx512vl -mavx512bw -mavx512dq -mavx512ifma -mavx512vbmi"
     )
 endif ()
+if (DIST_CONTAINS_NEON)
+    set_source_files_properties (neon.cpp PROPERTIES COMPILE_FLAGS "-march=armv8-a")
+endif ()
 
 set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3")
 set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -ftree-vectorize")
@@ -61,6 +65,7 @@ simd_add_definitions (DIST_CONTAINS_SSE -DENABLE_SSE=1)
 simd_add_definitions (DIST_CONTAINS_AVX -DENABLE_AVX=1)
 simd_add_definitions (DIST_CONTAINS_AVX2 -DENABLE_AVX2=1)
 simd_add_definitions (DIST_CONTAINS_AVX512 -DENABLE_AVX512=1)
+simd_add_definitions (DIST_CONTAINS_NEON -DENABLE_NEON=1)
 
 target_link_libraries (simd INTERFACE cpuinfo coverage_config)
 install (TARGETS simd ARCHIVE DESTINATION lib)

@@ -25,7 +25,7 @@ using namespace vsag;
 
 #define TEST_ACCURACY_FP32(Func)                                 \
     {                                                            \
-        float generic, sse, avx, avx2, avx512;                   \
+        float generic, sse, avx, avx2, avx512, neon;             \
         generic = generic::Func(query, base, dim, inv_sqrt_d);   \
         REQUIRE(std::abs(gt - generic) < 1e-4);                  \
         if (SimdStatus::SupportSSE()) {                          \
@@ -43,6 +43,10 @@ using namespace vsag;
         if (SimdStatus::SupportAVX512()) {                       \
             avx512 = avx512::Func(query, base, dim, inv_sqrt_d); \
             REQUIRE(std::abs(gt - avx512) < 1e-4);               \
+        }                                                        \
+        if (SimdStatus::SupportNEON()) {                         \
+            neon = neon::Func(query, base, dim, inv_sqrt_d);     \
+            REQUIRE(std::abs(gt - neon) < 1e-4);                 \
         }                                                        \
     };
 
@@ -153,4 +157,5 @@ TEST_CASE("RaBitQ FP32-BQ SIMD Compute Benchmark", "[ut][simd][!benchmark]") {
     BENCHMARK_SIMD_COMPUTE(avx, RaBitQFloatBinaryIP);
     BENCHMARK_SIMD_COMPUTE(avx2, RaBitQFloatBinaryIP);
     BENCHMARK_SIMD_COMPUTE(avx512, RaBitQFloatBinaryIP);
+    BENCHMARK_SIMD_COMPUTE(neon, RaBitQFloatBinaryIP);
 }

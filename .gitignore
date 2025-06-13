@@ -180,6 +180,7 @@ data/
 /lcov_cobertura.py
 /testresult/
 *.index
+.ccls-cache/
 
 /build-release/
 *.so.[0-9]*

@@ -53,6 +53,7 @@ init() {
     ss << "\ncpu avx512dq >> " << simd_status.avx512dq();
     ss << "\ncpu avx512bw >> " << simd_status.avx512bw();
     ss << "\ncpu avx512vl >> " << simd_status.avx512vl();
+    ss << "\ncpu neon >> " << simd_status.neon();
     ss << "\n====vsag init done====";
     logger::debug(ss.str());
 

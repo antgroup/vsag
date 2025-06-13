@@ -60,6 +60,14 @@ PQFastScanLookUp32(const uint8_t* lookup_table,
                    int32_t* result);
 }  // namespace avx512
 
+namespace neon {
+void
+PQFastScanLookUp32(const uint8_t* lookup_table,
+                   const uint8_t* codes,
+                   uint64_t pq_dim,
+                   int32_t* result);
+}  // namespace neon
+
 using PQFastScanLookUp32Type = void (*)(const uint8_t* lookup_table,
                                         const uint8_t* codes,
                                         uint64_t pq_dim,

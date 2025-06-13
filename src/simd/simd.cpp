@@ -65,6 +65,16 @@ setup_simd() {
     ret.dist_support_avx512bw = true;
     ret.dist_support_avx512vl = true;
 #endif
+
+    if (cpuinfo_has_arm_neon()) {
+        ret.runtime_has_neon = true;
+#ifndef ENABLE_NEON
+    }
+#else
+    }
+    ret.dist_support_neon = true;
+#endif
+
     return ret;
 }
 
