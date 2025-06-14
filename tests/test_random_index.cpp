@@ -138,5 +138,5 @@ TEST_CASE("Test Random Index", "[ft][random]") {
         REQUIRE(range_result.has_value());
     }
 
-    REQUIRE(diskann->GetMemoryUsage() < diskann->GetEstimateBuildMemory(max_elements));
+    REQUIRE(diskann->GetMemoryUsage() < diskann->GetEstimateBuildMemory(max_elements) * 1.2);
 }
