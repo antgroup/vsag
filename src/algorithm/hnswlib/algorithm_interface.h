@@ -20,7 +20,7 @@
 #include <queue>
 #include <string>
 
-#include "base_filter_functor.h"
+#include "impl/filter/filter_headers.h"
 #include "index/iterator_filter.h"
 #include "space_interface.h"
 #include "stream_reader.h"
