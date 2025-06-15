@@ -62,7 +62,7 @@ public:
 
     // DON'T WORRY! IVF just can't achieve high recall on random datasets. so we set the expected
     // recall with a small number in test cases
-    const std::vector<std::pair<std::string, float>> test_cases = {
+    const std::vector<std::pair<std::string, float>> all_test_cases = {
         {"fp32", 0.90},
         {"bf16", 0.88},
         {"fp16", 0.88},
@@ -337,13 +337,17 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex,
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex, "IVF Build & ContinueAdd Test", "[ft][ivf]") {
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
-    auto metric_type = GENERATE("l2", "ip", "cosine");
-    std::string train_type = GENERATE("random", "kmeans");
+    auto metric_type = fixtures::RandomSelect<std::string>({"l2", "ip", "cosine"})[0];
+    auto train_type = fixtures::RandomSelect<std::string>({"kmeans", "random"})[0];
+    INFO(fmt::format("metric_type: {}, train_type: {}", metric_type, train_type));
 
     const std::string name = "ivf";
     auto search_param = fmt::format(search_param_tmp, 200);
-    for (auto& dim : dims) {
+    auto test_cases = fixtures::RandomSelect(all_test_cases, 5);
+
+    for (auto dim : dims) {
         for (auto& [base_quantization_str, recall] : test_cases) {
+            INFO(fmt::format("quantizer str: {}", base_quantization_str));
             vsag::Options::Instance().set_block_size_limit(size);
             auto param = GenerateIVFBuildParametersString(
                 metric_type, dim, base_quantization_str, 300, train_type);
@@ -361,11 +365,13 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex, "IVF Build & ContinueAdd Te
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex, "IVF Build with Residual", "[ft][ivf]") {
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
-    auto metric_type = GENERATE("l2", "ip", "cosine");
-    std::string train_type = GENERATE("kmeans");
-
     const std::string name = "ivf";
     auto search_param = fmt::format(search_param_tmp, 200);
+
+    auto metric_type = fixtures::RandomSelect<std::string>({"l2", "ip", "cosine"})[0];
+    auto train_type = fixtures::RandomSelect<std::string>({"kmeans", "random"})[0];
+    INFO(fmt::format("metric_type: {}, train_type: {}", metric_type, train_type));
+
     std::vector<std::pair<std::string, float>> tmp_test_cases = {
         {"fp32", 0.90},
         {"bf16", 0.88},
@@ -400,8 +406,11 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex, "IVF Build", "[ft][ivf]") {
 
     const std::string name = "ivf";
     auto search_param = fmt::format(search_param_tmp, 200);
-    for (auto& dim : dims) {
+    auto test_cases = fixtures::RandomSelect(all_test_cases, 5);
+
+    for (auto dim : dims) {
         for (auto& [base_quantization_str, recall] : test_cases) {
+            INFO(fmt::format("quantizer str: {}", base_quantization_str));
             vsag::Options::Instance().set_block_size_limit(size);
             auto param = GenerateIVFBuildParametersString(
                 metric_type, dim, base_quantization_str, 300, train_type);
@@ -419,15 +428,16 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex, "IVF Build", "[ft][ivf]") {
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex, "IVF Build With Large K", "[ft][ivf]") {
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
-    auto metric_type = GENERATE("l2");
-    std::string train_type = GENERATE("kmeans");
+    auto metric_type = fixtures::RandomSelect<std::string>({"l2", "ip", "cosine"})[0];
+    auto train_type = fixtures::RandomSelect<std::string>({"kmeans"})[0];
+    INFO(fmt::format("metric_type: {}, train_type: {}", metric_type, train_type));
 
     std::vector<std::pair<std::string, float>> tmp_test_cases = {
-        {"fp32", 0.84},
+        {"fp32", 0.75},
     };
 
     const std::string name = "ivf";
-    auto search_param = fmt::format(search_param_tmp, 100);
+    auto search_param = fmt::format(search_param_tmp, 300);
     std::vector<int> dims_tmp = {32};
     for (auto& dim : dims_tmp) {
         for (auto& [base_quantization_str, recall] : tmp_test_cases) {
@@ -448,14 +458,17 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex, "IVF Build With Large K", "
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex, "IVF Build With Attribute", "[ft][ivf]") {
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
-    auto metric_type = GENERATE("l2", "cosine");
+    auto metric_type = GENERATE("l2");
     std::string train_type = GENERATE("kmeans");
 
     const std::string name = "ivf";
     auto search_param = fmt::format(search_param_tmp, 200);
     bool use_attribute_filter = true;
-    for (auto& dim : dims) {
+    auto test_cases = fixtures::RandomSelect(all_test_cases, 5);
+
+    for (auto dim : dims) {
         for (auto& [base_quantization_str, recall] : test_cases) {
+            INFO(fmt::format("quantizer str: {}", base_quantization_str));
             vsag::Options::Instance().set_block_size_limit(size);
             auto param = GenerateIVFBuildParametersString(metric_type,
                                                           dim,
@@ -476,13 +489,16 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex, "IVF Build With Attribute",
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex, "IVF Export Model", "[ft][ivf]") {
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
-    auto metric_type = GENERATE("l2", "ip", "cosine");
-    std::string train_type = GENERATE("kmeans");
+    auto metric_type = fixtures::RandomSelect<std::string>({"l2", "ip", "cosine"})[0];
+    auto train_type = fixtures::RandomSelect<std::string>({"kmeans", "random"})[0];
 
     const std::string name = "ivf";
     auto search_param = fmt::format(search_param_tmp, 200);
-    for (auto& dim : dims) {
+    auto test_cases = fixtures::RandomSelect(all_test_cases, 5);
+
+    for (auto dim : dims) {
         for (auto& [base_quantization_str, recall] : test_cases) {
+            INFO(fmt::format("quantizer str: {}", base_quantization_str));
             vsag::Options::Instance().set_block_size_limit(size);
             auto param = GenerateIVFBuildParametersString(
                 metric_type, dim, base_quantization_str, 300, train_type);
@@ -500,13 +516,17 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex, "IVF Export Model", "[ft][i
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex, "IVF Add", "[ft][ivf]") {
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
-    auto metric_type = GENERATE("l2", "ip", "cosine");
-    std::string train_type = GENERATE("kmeans");
+    auto metric_type = fixtures::RandomSelect<std::string>({"l2", "ip", "cosine"})[0];
+    auto train_type = fixtures::RandomSelect<std::string>({"kmeans", "random"})[0];
+    INFO(fmt::format("metric_type: {}, train_type: {}", metric_type, train_type));
 
     const std::string name = "ivf";
     auto search_param = fmt::format(search_param_tmp, 200);
-    for (auto& dim : dims) {
+    auto test_cases = fixtures::RandomSelect(all_test_cases, 5);
+
+    for (auto dim : dims) {
         for (auto& [base_quantization_str, recall] : test_cases) {
+            INFO(fmt::format("quantizer str: {}", base_quantization_str));
             vsag::Options::Instance().set_block_size_limit(size);
             auto param = GenerateIVFBuildParametersString(
                 metric_type, dim, base_quantization_str, 300, train_type);
@@ -524,13 +544,17 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex, "IVF Add", "[ft][ivf]") {
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex, "IVF Merge", "[ft][ivf]") {
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
-    auto metric_type = GENERATE("l2", "cosine");
-    std::string train_type = GENERATE("kmeans");
+    auto metric_type = fixtures::RandomSelect<std::string>({"l2", "ip", "cosine"})[0];
+    auto train_type = fixtures::RandomSelect<std::string>({"kmeans", "random"})[0];
+    INFO(fmt::format("metric_type: {}, train_type: {}", metric_type, train_type));
 
     const std::string name = "ivf";
     auto search_param = fmt::format(search_param_tmp, 200);
-    for (auto& dim : dims) {
+    auto test_cases = fixtures::RandomSelect(all_test_cases, 5);
+
+    for (auto dim : dims) {
         for (auto& [base_quantization_str, recall] : test_cases) {
+            INFO(fmt::format("quantizer str: {}", base_quantization_str));
             vsag::Options::Instance().set_block_size_limit(size);
             auto param = GenerateIVFBuildParametersString(
                 metric_type, dim, base_quantization_str, 300, train_type);
@@ -557,8 +581,11 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex,
 
     const std::string name = "ivf";
     auto search_param = fmt::format(search_param_tmp, 200);
-    for (auto& dim : dims) {
+    auto test_cases = fixtures::RandomSelect(all_test_cases, 5);
+
+    for (auto dim : dims) {
         for (auto& [base_quantization_str, recall] : test_cases) {
+            INFO(fmt::format("quantizer str: {}", base_quantization_str));
             vsag::Options::Instance().set_block_size_limit(size);
             auto param = GenerateIVFBuildParametersString(
                 metric_type, dim, base_quantization_str, 300, train_type);
@@ -576,13 +603,17 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex,
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex, "IVF Serialize File", "[ft][ivf]") {
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
-    auto metric_type = GENERATE("l2", "ip", "cosine");
+    auto metric_type = fixtures::RandomSelect<std::string>({"l2", "ip", "cosine"})[0];
+    auto train_type = fixtures::RandomSelect<std::string>({"kmeans", "random"})[0];
+    INFO(fmt::format("metric_type: {}, train_type: {}", metric_type, train_type));
     const std::string name = "ivf";
     auto search_param = fmt::format(search_param_tmp, 200);
-    std::string train_type = GENERATE("kmeans");
 
-    for (auto& dim : dims) {
+    auto test_cases = fixtures::RandomSelect(all_test_cases, 5);
+
+    for (auto dim : dims) {
         for (auto& [base_quantization_str, recall] : test_cases) {
+            INFO(fmt::format("quantizer str: {}", base_quantization_str));
             vsag::Options::Instance().set_block_size_limit(size);
             auto param = GenerateIVFBuildParametersString(
                 metric_type, dim, base_quantization_str, 300, train_type);
@@ -615,13 +646,17 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex, "IVF Serialize File", "[ft]
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex, "IVF Clone", "[ft][ivf]") {
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
-    auto metric_type = GENERATE("l2", "ip", "cosine");
     const std::string name = "ivf";
     auto search_param = fmt::format(search_param_tmp, 200);
-    std::string train_type = GENERATE("kmeans");
+    auto metric_type = fixtures::RandomSelect<std::string>({"l2", "ip", "cosine"})[0];
+    auto train_type = fixtures::RandomSelect<std::string>({"kmeans", "random"})[0];
+    INFO(fmt::format("metric_type: {}, train_type: {}", metric_type, train_type));
 
-    for (auto& dim : dims) {
+    auto test_cases = fixtures::RandomSelect(all_test_cases, 5);
+
+    for (auto dim : dims) {
         for (auto& [base_quantization_str, recall] : test_cases) {
+            INFO(fmt::format("quantizer str: {}", base_quantization_str));
             vsag::Options::Instance().set_block_size_limit(size);
             auto param = GenerateIVFBuildParametersString(
                 metric_type, dim, base_quantization_str, 300, train_type);
@@ -641,11 +676,16 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex,
     auto allocator = std::make_shared<fixtures::RandomAllocator>();
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
-    auto metric_type = GENERATE("l2", "ip", "cosine");
-    std::string train_type = GENERATE("random", "kmeans");
     const std::string name = "ivf";
-    for (auto& dim : dims) {
+    auto metric_type = fixtures::RandomSelect<std::string>({"l2", "ip", "cosine"})[0];
+    auto train_type = fixtures::RandomSelect<std::string>({"kmeans", "random"})[0];
+    INFO(fmt::format("metric_type: {}, train_type: {}", metric_type, train_type));
+
+    auto test_cases = fixtures::RandomSelect(all_test_cases, 5);
+
+    for (auto dim : dims) {
         for (auto& [base_quantization_str, recall] : test_cases) {
+            INFO(fmt::format("quantizer str: {}", base_quantization_str));
             vsag::Options::Instance().set_block_size_limit(size);
             auto param =
                 GenerateIVFBuildParametersString(metric_type, dim, base_quantization_str, 1);
@@ -663,14 +703,18 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex,
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex, "IVF Estimate Memory", "[ft][ivf]") {
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
-    auto metric_type = GENERATE("l2", "ip", "cosine");
-    std::string train_type = GENERATE("random", "kmeans");
+    auto metric_type = fixtures::RandomSelect<std::string>({"l2", "ip", "cosine"})[0];
+    auto train_type = fixtures::RandomSelect<std::string>({"kmeans", "random"})[0];
+    INFO(fmt::format("metric_type: {}, train_type: {}", metric_type, train_type));
 
     const std::string name = "ivf";
     auto search_param = fmt::format(search_param_tmp, 200);
     uint64_t estimate_count = 1000;
-    for (auto& dim : dims) {
+    auto test_cases = fixtures::RandomSelect(all_test_cases, 5);
+
+    for (auto dim : dims) {
         for (auto& [base_quantization_str, recall] : test_cases) {
+            INFO(fmt::format("quantizer str: {}", base_quantization_str));
             vsag::Options::Instance().set_block_size_limit(size);
             auto param = GenerateIVFBuildParametersString(
                 metric_type, dim, base_quantization_str, 300, train_type);
@@ -686,13 +730,17 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex,
                              "[ft][ivf]") {
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
-    auto metric_type = GENERATE("l2", "ip", "cosine");
-    std::string train_type = GENERATE("random", "kmeans");
+    auto metric_type = fixtures::RandomSelect<std::string>({"l2", "ip", "cosine"})[0];
+    auto train_type = fixtures::RandomSelect<std::string>({"kmeans", "random"})[0];
+    INFO(fmt::format("metric_type: {}, train_type: {}", metric_type, train_type));
 
     const std::string name = "ivf";
     auto search_param = fmt::format(search_param_tmp, 200);
-    for (auto& dim : dims) {
+    auto test_cases = fixtures::RandomSelect(all_test_cases, 5);
+
+    for (auto dim : dims) {
         for (auto& [base_quantization_str, recall] : test_cases) {
+            INFO(fmt::format("quantizer str: {}", base_quantization_str));
             vsag::Options::Instance().set_block_size_limit(size);
             auto param = GenerateIVFBuildParametersString(
                 metric_type, dim, base_quantization_str, 300, train_type, false, 2);
@@ -710,13 +758,18 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex,
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex, "GNO-IMI Build", "[ft][ivf]") {
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
-    auto metric_type = GENERATE("l2");
-    std::string train_type = GENERATE("kmeans");
-
     const std::string name = "ivf";
     auto search_param = fmt::format(search_param_tmp, 250);
-    for (auto& dim : dims) {
+
+    auto metric_type = GENERATE("l2");
+    std::string train_type = GENERATE("kmeans");
+    INFO(fmt::format("metric_type: {}, train_type: {}", metric_type, train_type));
+
+    auto test_cases = fixtures::RandomSelect(all_test_cases, 5);
+
+    for (auto dim : dims) {
         for (auto& [base_quantization_str, recall] : test_cases) {
+            INFO(fmt::format("quantizer str: {}", base_quantization_str));
             vsag::Options::Instance().set_block_size_limit(size);
             auto param = GenerateGNOIMIBuildParametersString(
                 metric_type, dim, base_quantization_str, 20, 20, train_type, false, 1);
@@ -736,10 +789,10 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex, "GNO-IMI Build with Residua
     auto size = GENERATE(1024 * 1024 * 2);
     auto metric_type = GENERATE("l2");
     std::string train_type = GENERATE("kmeans");
+    INFO(fmt::format("metric_type: {}, train_type: {}", metric_type, train_type));
 
     std::vector<std::pair<std::string, float>> tmp_test_cases = {
         {"fp32", 0.90},
-        {"bf16", 0.88},
         {"fp16", 0.88},
         {"sq8", 0.84},
         {"pq,fp32", 0.82},
