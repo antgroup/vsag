@@ -113,7 +113,7 @@ IVFNearestPartition::Serialize(StreamWriter& writer) {
     this->route_index_ptr_->Serialize(writer);
 }
 void
-IVFNearestPartition::Deserialize(StreamReader& reader) {
+IVFNearestPartition::Deserialize(lvalue_or_rvalue<StreamReader> reader) {
     IVFPartitionStrategy::Deserialize(reader);
     this->route_index_ptr_->Deserialize(reader);
 }

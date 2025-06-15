@@ -44,6 +44,20 @@ public:
     Instance();
 
 public:
+    inline bool
+    new_version() const {
+        return new_version_;
+    }
+
+    inline void
+    set_new_version(bool new_version) {
+        new_version_ = new_version;
+    }
+
+private:
+    bool new_version_ = true;
+
+public:
     /**
      * @brief Gets the number of threads for IO operations.
      *

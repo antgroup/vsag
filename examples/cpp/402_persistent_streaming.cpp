@@ -25,6 +25,7 @@
 #include <unordered_set>
 
 #include "vsag/binaryset.h"
+#include "vsag/options.h"
 
 int
 main(int32_t argc, char** argv) {
@@ -52,14 +53,14 @@ main(int32_t argc, char** argv) {
         "dtype": "float32",
         "metric_type": "l2",
         "dim": 128,
-        "hnsw": {
-            "max_degree": 16,
-            "ef_construction": 100
+        "index_param": {
+            "buckets_count": 50,
+            "base_quantization_type": "fp32"
         }
     }
     )";
     vsag::IndexPtr index = nullptr;
-    if (auto create_index = engine.CreateIndex("hnsw", index_paramesters);
+    if (auto create_index = engine.CreateIndex("ivf", index_paramesters);
         not create_index.has_value()) {
         std::cout << "create index failed: " << create_index.error().message << std::endl;
         abort();
@@ -76,6 +77,7 @@ main(int32_t argc, char** argv) {
     std::cout << "index contains vectors: " << index->GetNumElements() << std::endl;
 
     /******************* Save Index to OStream *****************/
+    vsag::Options::Instance().set_new_version(true);
     std::ofstream out_stream("/tmp/vsag-persistent-streaming.index");
     auto serialize_result = index->Serialize(out_stream);
     out_stream.close();
@@ -86,13 +88,14 @@ main(int32_t argc, char** argv) {
 
     /******************* Load Index from IStream *****************/
     index = nullptr;
-    if (auto create_index = engine.CreateIndex("hnsw", index_paramesters);
+    if (auto create_index = engine.CreateIndex("ivf", index_paramesters);
         not create_index.has_value()) {
         std::cout << "create index failed: " << create_index.error().message << std::endl;
         abort();
     } else {
         index = *create_index;
     }
+
     std::ifstream in_stream("/tmp/vsag-persistent-streaming.index");
     if (auto deserialize = index->Deserialize(in_stream); not deserialize.has_value()) {
         std::cerr << "load index failed: " << deserialize.error().message << std::endl;
@@ -109,8 +112,8 @@ main(int32_t argc, char** argv) {
     query->NumElements(1)->Dim(dim)->Float32Vectors(query_vector)->Owner(false);
     auto search_parameters = R"(
     {
-        "hnsw": {
-            "ef_search": 100
+        "ivf": {
+            "scan_buckets_count": 10
         }
     }
     )";

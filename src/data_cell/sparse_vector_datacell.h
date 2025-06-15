@@ -113,7 +113,7 @@ public:
     Serialize(StreamWriter& writer) override;
 
     void
-    Deserialize(StreamReader& reader) override;
+    Deserialize(lvalue_or_rvalue<StreamReader> reader) override;
 
     inline void
     SetQuantizer(std::shared_ptr<Quantizer<QuantTmpl>> quantizer) {
