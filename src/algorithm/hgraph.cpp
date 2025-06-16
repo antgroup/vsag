@@ -329,9 +329,9 @@ HGraph::KnnSearch(const DatasetPtr& query,
     FilterPtr ft = nullptr;
     if (filter != nullptr) {
         if (params.use_extra_info_filter) {
-            ft = std::make_shared<CommonExtraInfoFilter>(filter, this->extra_infos_);
+            ft = std::make_shared<ExtraInfoWrapperFilter>(filter, this->extra_infos_);
         } else {
-            ft = std::make_shared<CommonInnerIdFilter>(filter, *this->label_table_);
+            ft = std::make_shared<InnerIdWrapperFilter>(filter, *this->label_table_);
         }
     }
 
@@ -402,9 +402,9 @@ HGraph::KnnSearch(const DatasetPtr& query,
     FilterPtr ft = nullptr;
     if (filter != nullptr) {
         if (params.use_extra_info_filter) {
-            ft = std::make_shared<CommonExtraInfoFilter>(filter, this->extra_infos_);
+            ft = std::make_shared<ExtraInfoWrapperFilter>(filter, this->extra_infos_);
         } else {
-            ft = std::make_shared<CommonInnerIdFilter>(filter, *this->label_table_);
+            ft = std::make_shared<InnerIdWrapperFilter>(filter, *this->label_table_);
         }
     }
 
@@ -576,9 +576,9 @@ HGraph::RangeSearch(const DatasetPtr& query,
                     const std::string& parameters,
                     const FilterPtr& filter,
                     int64_t limited_size) const {
-    std::shared_ptr<CommonInnerIdFilter> ft = nullptr;
+    std::shared_ptr<InnerIdWrapperFilter> ft = nullptr;
     if (filter != nullptr) {
-        ft = std::make_shared<CommonInnerIdFilter>(filter, *this->label_table_);
+        ft = std::make_shared<InnerIdWrapperFilter>(filter, *this->label_table_);
     }
     int64_t query_dim = query->GetDim();
     if (data_type_ != DataTypes::DATA_TYPE_SPARSE) {
