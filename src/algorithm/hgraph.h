@@ -235,8 +235,6 @@ private:
     void
     elp_optimize();
 
-    void check_merge_illegal(const vsag::MergeUnit& unit);
-
 private:
     FlattenInterfacePtr basic_flatten_codes_{nullptr};
     FlattenInterfacePtr high_precise_codes_{nullptr};

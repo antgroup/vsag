@@ -640,11 +640,42 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex,
             }
             vsag::Options::Instance().set_block_size_limit(size);
             auto param = GenerateHGraphBuildParametersString(
-                metric_type, dim, base_quantization_str, 0, 0, "float32", "nsw", "compressed");
+                metric_type, dim, base_quantization_str, 0, 0, "float32", "nsw");
             auto index = TestFactory(name, param, true);
             auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
             TestBuildIndex(index, dataset, true);
             TestGeneral(index, dataset, search_param, recall);
+            vsag::Options::Instance().set_block_size_limit(origin_size);
+        }
+    }
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex, "HGraph Graph Merge", "[ft][hgraph]") {
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    auto size = GENERATE(1024 * 1024 * 2);
+    auto metric_type = GENERATE("l2", "ip", "cosine");
+
+    const std::string name = "hgraph";
+    auto search_param = fmt::format(search_param_tmp, 200, false);
+    for (auto dim : dims) {
+        for (auto& [base_quantization_str, recall] : test_cases) {
+            if (IsRaBitQ(base_quantization_str)) {
+                if (std::string(metric_type) != "l2") {
+                    continue;
+                }
+                if (dim <= fixtures::RABITQ_MIN_RACALL_DIM) {
+                    dim += fixtures::RABITQ_MIN_RACALL_DIM;
+                }
+            }
+            vsag::Options::Instance().set_block_size_limit(size);
+            auto param =
+                GenerateHGraphBuildParametersString(metric_type, dim, base_quantization_str);
+            auto model = TestFactory(name, param, true);
+            auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
+            auto ret = model->Train(dataset->base_);
+            REQUIRE(ret.has_value() == true);
+            auto merge_index = TestMergeIndexWithSameModel(model, dataset, 5, true);
+            TestGeneral(merge_index, dataset, search_param, recall);
             vsag::Options::Instance().set_block_size_limit(origin_size);
         }
     }

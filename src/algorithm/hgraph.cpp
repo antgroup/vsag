@@ -27,10 +27,10 @@
 #include "dataset_impl.h"
 #include "impl/odescent_graph_builder.h"
 #include "impl/pruning_strategy.h"
+#include "index/index_impl.h"
 #include "index/iterator_filter.h"
 #include "utils/standard_heap.h"
 #include "utils/util_functions.h"
-#include "index/index_impl.h"
 
 namespace vsag {
 
@@ -934,7 +934,7 @@ HGraph::resize(uint64_t new_size) {
     if (cur_size < new_size_power_2) {
         this->neighbors_mutex_->Resize(new_size_power_2);
         pool_ = std::make_shared<VisitedListPool>(1, allocator_, new_size_power_2, allocator_);
-        this->label_table_->label_table_.resize(new_size_power_2);
+        this->label_table_->Resize(new_size_power_2);
         bottom_graph_->Resize(new_size_power_2);
         this->max_capacity_.store(new_size_power_2);
         this->basic_flatten_codes_->Resize(new_size_power_2);
@@ -954,6 +954,7 @@ HGraph::InitFeatures() {
         IndexFeature::SUPPORT_BUILD,
         IndexFeature::SUPPORT_BUILD_WITH_MULTI_THREAD,
         IndexFeature::SUPPORT_ADD_AFTER_BUILD,
+        IndexFeature::SUPPORT_MERGE_INDEX,
     });
     // search
     this->index_feature_list_->SetFeatures({
@@ -1410,9 +1411,8 @@ HGraph::Remove(int64_t id) {
 
 void
 HGraph::Merge(const std::vector<MergeUnit>& merge_units) {
-    int64_t total_count = 0;
+    int64_t total_count = this->GetNumElements();
     for (auto& unit : merge_units) {
-        check_merge_illegal(unit);
         total_count += unit.index->GetNumElements();
     }
     if (max_capacity_ < total_count) {
@@ -1421,46 +1421,41 @@ HGraph::Merge(const std::vector<MergeUnit>& merge_units) {
     for (int i = 0; i < merge_units.size(); ++i) {
         const auto other_index = std::dynamic_pointer_cast<HGraph>(
             std::dynamic_pointer_cast<IndexImpl<HGraph>>(merge_units[i].index)->GetInnerIndex());
+        if (total_count_ == 0) {
+            this->entry_point_id_ = other_index->entry_point_id_;
+        }
         basic_flatten_codes_->MergeOther(other_index->basic_flatten_codes_, this->total_count_);
-        label_table_->MergeOther(other_index->label_table_, this->total_count_);
+        label_table_->MergeOther(other_index->label_table_, merge_units[i].id_map_func);
         if (use_reorder_) {
             high_precise_codes_->MergeOther(other_index->high_precise_codes_, this->total_count_);
         }
+        bottom_graph_->MergeOther(other_index->bottom_graph_, this->total_count_);
+        auto min_level = std::min(route_graphs_.size(), other_index->route_graphs_.size());
+        for (int j = 0; j < min_level; ++j) {
+            route_graphs_[j]->MergeOther(other_index->route_graphs_[j], this->total_count_);
+        }
+        this->total_count_ += other_index->GetNumElements();
     }
-}
+    if (this->odescent_param_ == nullptr) {
+        odescent_param_ = std::make_shared<ODescentParameter>();
+    }
 
-void
-HGraph::check_merge_illegal(const MergeUnit& unit) {
-    auto index = std::dynamic_pointer_cast<IndexImpl<HGraph>>(unit.index);
-    if (index == nullptr) {
-        throw VsagException(
-            ErrorType::INVALID_ARGUMENT,
-            "Merge Failed: index type not match, try to merge a non-hgraph index to an hgraph index");
+    auto build_data = (use_reorder_ and not build_by_base_) ? this->high_precise_codes_
+                                                            : this->basic_flatten_codes_;
+    {
+        odescent_param_->max_degree = bottom_graph_->MaximumDegree();
+        ODescent odescent_builder(odescent_param_, build_data, allocator_, this->build_pool_.get());
+        odescent_builder.Build(bottom_graph_);
+        odescent_builder.SaveGraph(bottom_graph_);
     }
-    auto other_ivf_index = std::dynamic_pointer_cast<HGraph>(
-        std::dynamic_pointer_cast<IndexImpl<HGraph>>(unit.index)->GetInnerIndex());
-    if (other_ivf_index->use_reorder_ != this->use_reorder_) {
-        throw VsagException(
-            ErrorType::INVALID_ARGUMENT,
-            fmt::format(
-                "Merge Failed: hgraph use_reorder not match, current index is {}, other index is {}",
-                this->use_reorder_,
-                other_ivf_index->use_reorder_));
-    }
-    auto cur_model = this->ExportModel(index->GetCommonParam());
-    std::stringstream ss1;
-    std::stringstream ss2;
-    IOStreamWriter writer1(ss1);
-    cur_model->Serialize(writer1);
-    cur_model.reset();
-    auto other_model = other_ivf_index->ExportModel(index->GetCommonParam());
-    IOStreamWriter writer2(ss2);
-    other_model->Serialize(writer2);
-    other_model.reset();
-    if (not check_equal_on_string_stream(ss1, ss2)) {
-        throw VsagException(
-            ErrorType::INVALID_ARGUMENT,
-            "Merge Failed: hgraph model not match, try to merge a different model hgraph index");
+    for (auto& graph : route_graphs_) {
+        odescent_param_->max_degree = bottom_graph_->MaximumDegree() / 2;
+        ODescent sparse_odescent_builder(
+            odescent_param_, build_data, allocator_, this->build_pool_.get());
+        auto ids = graph->GetIds();
+        sparse_odescent_builder.Build(ids, graph);
+        sparse_odescent_builder.SaveGraph(graph);
+        this->entry_point_id_ = ids.back();
     }
 }
 }  // namespace vsag

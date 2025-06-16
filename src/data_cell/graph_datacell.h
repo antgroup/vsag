@@ -91,7 +91,8 @@ public:
         return this->io_->InMemory();
     }
 
-    void MergeOther(GraphInterfacePtr other, int64_t bias) override;
+    void
+    MergeOther(GraphInterfacePtr other, int64_t bias) override;
 
 private:
     std::shared_ptr<BasicIO<IOTmpl>> io_{nullptr};
@@ -111,18 +112,27 @@ void
 GraphDataCell<IOTmpl>::MergeOther(GraphInterfacePtr other, int64_t bias) {
     auto other_graph = std::dynamic_pointer_cast<GraphDataCell<IOTmpl>>(other);
     if (!other_graph) {
-            throw VsagException(ErrorType::INTERNAL_ERROR,
+        throw VsagException(ErrorType::INTERNAL_ERROR,
                             "GraphDataCell can only merge with GraphDataCell");
     }
     if (this->maximum_degree_ != other_graph->maximum_degree_) {
-            throw VsagException(ErrorType::INTERNAL_ERROR,
+        throw VsagException(ErrorType::INTERNAL_ERROR,
                             fmt::format("GraphDataCell maximum degree mismatch: {} vs {}",
-                                            this->maximum_degree_,
-                                            other_graph->maximum_degree_));
+                                        this->maximum_degree_,
+                                        other_graph->maximum_degree_));
     }
-    Vector<InnerIdType> neighbor_ids;
+    Vector<InnerIdType> neighbor_ids(allocator_);
+    if (is_support_delete_) {
+        for (int i = 0; i < other_graph->total_count_; ++i) {
+            node_versions_[i + bias] = other_graph->node_versions_[i];
+        }
+    }
     for (int i = 0; i < other_graph->total_count_; ++i) {
-
+        other_graph->GetNeighbors(i, neighbor_ids);
+        for (auto& neighbor_id : neighbor_ids) {
+            neighbor_id += bias;
+        }
+        this->InsertNeighborsById(i + bias, neighbor_ids);
     }
 }
 

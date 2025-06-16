@@ -70,6 +70,9 @@ target_link_libraries(313_feature_search_allocator vsag)
 add_executable(314_feature_hgraph_search_allocator 314_feature_hgraph_search_allocator.cpp)
 target_link_libraries(314_feature_hgraph_search_allocator vsag)
 
+add_executable(315_feature_hgraph_merge 315_feature_hgraph_merge.cpp)
+target_link_libraries(315_feature_hgraph_merge vsag)
+
 add_executable (401_persistent_kv 401_persistent_kv.cpp)
 target_link_libraries (401_persistent_kv vsag)
 
