@@ -208,7 +208,7 @@ TEST_CASE("Search with HNSW", "[ut][BasicSearcher]") {
 
     auto filter_func = [](LabelType id) -> bool { return id % 2 == 0; };
     float range = 0.1F;
-    auto f = std::make_shared<UniqueFilter>(filter_func);
+    auto f = std::make_shared<BlackListFilter>(filter_func);
 
     // search param
     InnerSearchParam search_param_temp;

@@ -211,7 +211,7 @@ Pyramid::KnnSearch(const DatasetPtr& query,
     search_param.search_mode = KNN_SEARCH;
     if (filter != nullptr) {
         search_param.is_inner_id_allowed =
-            std::make_shared<CommonInnerIdFilter>(filter, *label_table_);
+            std::make_shared<InnerIdWrapperFilter>(filter, *label_table_);
     }
     SearchFunc search_func = [&](const IndexNode* node) {
         search_param.ep = node->entry_point_;
@@ -238,7 +238,7 @@ Pyramid::RangeSearch(const DatasetPtr& query,
     search_param.search_mode = RANGE_SEARCH;
     if (filter != nullptr) {
         search_param.is_inner_id_allowed =
-            std::make_shared<CommonInnerIdFilter>(filter, *label_table_);
+            std::make_shared<InnerIdWrapperFilter>(filter, *label_table_);
     }
     SearchFunc search_func = [&](const IndexNode* node) {
         search_param.ep = node->entry_point_;

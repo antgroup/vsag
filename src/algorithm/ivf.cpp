@@ -435,9 +435,9 @@ IVF::Deserialize(StreamReader& reader) {
 InnerSearchParam
 IVF::create_search_param(const std::string& parameters, const FilterPtr& filter) const {
     InnerSearchParam param;
-    std::shared_ptr<CommonInnerIdFilter> ft = nullptr;
+    std::shared_ptr<InnerIdWrapperFilter> ft = nullptr;
     if (filter != nullptr) {
-        ft = std::make_shared<CommonInnerIdFilter>(filter, *this->label_table_);
+        ft = std::make_shared<InnerIdWrapperFilter>(filter, *this->label_table_);
     }
     param.is_inner_id_allowed = ft;
     auto search_param = IVFSearchParameters::FromJson(parameters);

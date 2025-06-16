@@ -211,7 +211,7 @@ HNSW::knn_search_internal(const DatasetPtr& query,
     }
 
     if (filter_obj) {
-        auto filter = std::make_shared<UniqueFilter>(filter_obj);
+        auto filter = std::make_shared<BlackListFilter>(filter_obj);
         return this->knn_search(query, k, parameters, filter);
     }
     return this->knn_search(query, k, parameters, nullptr);
@@ -361,7 +361,7 @@ HNSW::range_search_internal(const DatasetPtr& query,
     }
 
     if (filter_obj) {
-        auto filter = std::make_shared<UniqueFilter>(filter_obj);
+        auto filter = std::make_shared<BlackListFilter>(filter_obj);
         return this->range_search(query, radius, parameters, filter, limited_size);
     }
     return this->range_search(query, radius, parameters, nullptr, limited_size);
