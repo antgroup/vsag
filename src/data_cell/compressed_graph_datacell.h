@@ -32,6 +32,8 @@ public:
     explicit CompressedGraphDataCell(const CompressedGraphDatacellParamPtr& graph_param,
                                      const IndexCommonParam& common_param);
 
+    ~CompressedGraphDataCell();
+
     void
     InsertNeighborsById(InnerIdType id, const Vector<InnerIdType>& neighbor_ids) override;
 
