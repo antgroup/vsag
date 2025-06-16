@@ -16,10 +16,10 @@
 #pragma once
 
 #include "algorithm/inner_index_interface.h"
-#include "base_filter_functor.h"
 #include "brute_force_parameter.h"
 #include "common.h"
 #include "data_cell/flatten_datacell.h"
+#include "impl/filter/filter_headers.h"
 #include "index_feature_list.h"
 #include "label_table.h"
 #include "typing.h"
