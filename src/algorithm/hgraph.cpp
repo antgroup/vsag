@@ -1412,20 +1412,20 @@ HGraph::Remove(int64_t id) {
 void
 HGraph::Merge(const std::vector<MergeUnit>& merge_units) {
     int64_t total_count = this->GetNumElements();
-    for (auto& unit : merge_units) {
+    for (const auto& unit : merge_units) {
         total_count += unit.index->GetNumElements();
     }
     if (max_capacity_ < total_count) {
         this->resize(total_count);
     }
-    for (int i = 0; i < merge_units.size(); ++i) {
+    for (const auto& merge_unit : merge_units) {
         const auto other_index = std::dynamic_pointer_cast<HGraph>(
-            std::dynamic_pointer_cast<IndexImpl<HGraph>>(merge_units[i].index)->GetInnerIndex());
+            std::dynamic_pointer_cast<IndexImpl<HGraph>>(merge_unit.index)->GetInnerIndex());
         if (total_count_ == 0) {
             this->entry_point_id_ = other_index->entry_point_id_;
         }
         basic_flatten_codes_->MergeOther(other_index->basic_flatten_codes_, this->total_count_);
-        label_table_->MergeOther(other_index->label_table_, merge_units[i].id_map_func);
+        label_table_->MergeOther(other_index->label_table_, merge_unit.id_map_func);
         if (use_reorder_) {
             high_precise_codes_->MergeOther(other_index->high_precise_codes_, this->total_count_);
         }

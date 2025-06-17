@@ -90,7 +90,7 @@ public:
     }
 
     void
-    Resize(int64_t new_size) {
+    Resize(uint64_t new_size) {
         if (new_size < total_count_) {
             return;
         }
