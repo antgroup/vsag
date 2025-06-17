@@ -49,6 +49,18 @@ RaBitQFloatBinaryIP(const float* vector, const uint8_t* bits, uint64_t dim, floa
 
 uint32_t
 RaBitQSQ4UBinaryIP(const uint8_t* codes, const uint8_t* bits, uint64_t dim);
+
+void
+KacsWalk(float* data, std::size_t len);
+
+void
+VecRescale(float* data, std::size_t dim, float val);
+
+void
+FHTRotate(float* data, std::size_t dim_);
+
+void
+FlipSign(const uint8_t* flip, float* data, std::size_t dim);
 }  // namespace generic
 
 namespace neon {
@@ -63,6 +75,17 @@ using RaBitQFloatBinaryType = float (*)(const float* vector,
 
 using RaBitQSQ4UBinaryType = uint32_t (*)(const uint8_t* codes, const uint8_t* bits, uint64_t dim);
 
+using FHTRotateType = void (*)(float* data, size_t dim_);
+
+using KacsWalkType = void (*)(float* data, size_t len);
+
+using VecRescaleType = void (*)(float* data, size_t dim, float val);
+
+using FlipSignType = void (*)(const uint8_t* flip, float* data, size_t dim);
 extern RaBitQFloatBinaryType RaBitQFloatBinaryIP;
 extern RaBitQSQ4UBinaryType RaBitQSQ4UBinaryIP;
+extern FHTRotateType FHTRotate;
+extern KacsWalkType KacsWalk;
+extern VecRescaleType VecRescale;
+extern FlipSignType FlipSign;
 }  // namespace vsag

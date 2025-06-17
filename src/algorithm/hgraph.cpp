@@ -1319,6 +1319,14 @@ HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
             },
         },
         {
+            RABITQ_USE_FHT,
+            {
+                HGRAPH_BASE_CODES_KEY,
+                QUANTIZATION_PARAMS_KEY,
+                USE_FHT,
+            },
+        },
+        {
             HGRAPH_SUPPORT_REMOVE,
             {HGRAPH_GRAPH_KEY, GRAPH_SUPPORT_REMOVE},
         },

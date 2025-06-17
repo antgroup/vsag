@@ -21,6 +21,7 @@
 #include <random>
 
 #include "../logger.h"
+#include "matrix_rotator.h"
 #include "stream_reader.h"
 #include "stream_writer.h"
 #include "typing.h"
@@ -30,7 +31,7 @@ namespace vsag {
 
 static const uint64_t MAX_RETRIES = 3;
 
-class RandomOrthogonalMatrix {
+class RandomOrthogonalMatrix : public MatrixRotator {
 public:
     RandomOrthogonalMatrix(uint64_t dim, Allocator* allocator, uint64_t retries = MAX_RETRIES)
         : dim_(dim),
@@ -40,14 +41,16 @@ public:
         orthogonal_matrix_.resize(dim * dim);
     }
 
+    virtual ~RandomOrthogonalMatrix() = default;
+
     void
     CopyOrthogonalMatrix(float* out_matrix) const;
 
     void
-    Transform(const float* original_vec, float* transformed_vec) const;
+    Transform(const float* original_vec, float* transformed_vec) const override;
 
     void
-    InverseTransform(const float* transformed_vec, float* original_vec) const;
+    InverseTransform(const float* transformed_vec, float* original_vec) const override;
 
     bool
     GenerateRandomOrthogonalMatrix();
@@ -59,10 +62,13 @@ public:
     ComputeDeterminant() const;
 
     void
-    Serialize(StreamWriter& writer);
+    Serialize(StreamWriter& writer) override;
 
     void
-    Deserialize(StreamReader& reader);
+    Deserialize(StreamReader& reader) override;
+
+    bool
+    Build() override;
 
 private:
     Allocator* const allocator_{nullptr};

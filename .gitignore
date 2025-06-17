@@ -18,7 +18,7 @@
 *.exe
 *.out
 *.app
-
+.ccls-cache/
 # python
 __pycache__/
 *.py[cod]
