@@ -110,6 +110,8 @@ main(int argc, char** argv) {
     WriteJson(dirname + version + "_hnsw_search.json", hnsw_search_paramesters);
     WriteJson(dirname + version + "_hgraph_search.json", hgraph_search_paramesters);
 
+    vsag::Options::Instance().set_block_size_limit(2 * 1024 * 1024);
+
     auto hnsw_index = vsag::Factory::CreateIndex("hnsw", hnsw_build_paramesters).value();
     hnsw_index->Build(base);
     std::ofstream hnsw_file(dirname + version + "_hnsw.index", std::ios::binary);
