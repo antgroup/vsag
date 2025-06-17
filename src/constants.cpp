@@ -134,6 +134,7 @@ const char* const SQ4_UNIFORM_TRUNC_RATE = "sq4_uniform_trunc_rate";
 const char* const RABITQ_PCA_DIM = "rabitq_pca_dim";
 const char* const RABITQ_BITS_PER_DIM_QUERY = "rabitq_bits_per_dim_query";
 
+const char* const RABITQ_USE_FHT = "rabitq_use_fht";
 const char* const HGRAPH_SUPPORT_REMOVE = "support_remove";
 const char* const HGRAPH_REMOVE_FLAG_BIT = "remove_flag_bit";
 

@@ -53,7 +53,29 @@ GetRaBitQSQ4UBinaryIP() {
     return generic::RaBitQSQ4UBinaryIP;
 }
 
+static FHTRotateType
+GetFHTRotate() {
+    return generic::FHTRotate;
+}
+
+static KacsWalkType
+GetKacsWalk() {
+    return generic::KacsWalk;
+}
+
+static VecRescaleType
+GetVecRescale() {
+    return generic::VecRescale;
+}
+
+static FlipSignType
+GetFlipSign() {
+    return generic::FlipSign;
+}
 RaBitQFloatBinaryType RaBitQFloatBinaryIP = GetRaBitQFloatBinaryIP();
 RaBitQSQ4UBinaryType RaBitQSQ4UBinaryIP = GetRaBitQSQ4UBinaryIP();
-
+FHTRotateType FHTRotate = GetFHTRotate();
+KacsWalkType KacsWalk = GetKacsWalk();
+VecRescaleType VecRescale = GetVecRescale();
+FlipSignType FlipSign = GetFlipSign();
 }  // namespace vsag

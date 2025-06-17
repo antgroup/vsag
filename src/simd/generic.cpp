@@ -613,4 +613,55 @@ BitNot(const uint8_t* x, const uint64_t num_byte, uint8_t* result) {
     }
 }
 
+void
+KacsWalk(float* data, size_t len) {
+    size_t base = len % 2;
+    size_t offset = base + (len / 2);  // for odd dim
+    for (size_t i = 0; i < len / 2; i++) {
+        float add = data[i] + data[i + offset];
+        float sub = data[i] - data[i + offset];
+        data[i] = add;
+        data[i + offset] = sub;
+    }
+    if (base != 0) {
+        data[len / 2] *= std::sqrt(2.0F);
+        //In odd condition, we operate the prev len/2 items and the post len/2 items, the No.len/2 item stay still,
+        //As we need to resize the while sequence in the next step, so we increase the val of No.len/2 item to eliminate the impact of the following resize.
+    }
+}
+
+void
+FlipSign(const uint8_t* flip, float* data, size_t dim) {
+    for (size_t i = 0; i < dim; i++) {
+        bool mask = (flip[i / 8] & (1 << (i % 8))) != 0;
+        if (mask) {
+            data[i] = -data[i];
+        }
+    }
+}
+
+void
+VecRescale(float* data, size_t dim, float val) {
+    for (int i = 0; i < dim; i++) {
+        data[i] *= val;
+    }
+}
+
+void
+FHTRotate(float* data, size_t dim_) {
+    size_t n = dim_;
+    size_t step = 1;
+    while (step < n) {
+        for (size_t i = 0; i < n; i += step * 2) {
+            for (int j = 0; j < step; j++) {
+                float even = data[i + j];
+                float odd = data[i + j + step];
+                data[i + j] = even + odd;
+                data[i + j + step] = even - odd;
+            }
+        }
+        step *= 2;
+    }
+}
+
 }  // namespace vsag::generic
