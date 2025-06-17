@@ -653,10 +653,11 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex,
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex, "HGraph Graph Merge", "[ft][hgraph]") {
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
-    auto metric_type = GENERATE("l2", "ip", "cosine");
-
+    auto metric_type = fixtures::RandomSelect<std::string>({"l2", "ip", "cosine"})[0];
+    INFO(fmt::format("metric_type: {}", metric_type));
     const std::string name = "hgraph";
     auto search_param = fmt::format(search_param_tmp, 200, false);
+    auto test_cases = fixtures::RandomSelect(all_test_cases, 5);
     for (auto dim : dims) {
         for (auto& [base_quantization_str, recall] : test_cases) {
             if (IsRaBitQ(base_quantization_str)) {

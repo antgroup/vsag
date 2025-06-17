@@ -118,8 +118,10 @@ main(int argc, char** argv) {
     /******************* Merge HGraph Index *****************/
     std::vector<vsag::MergeUnit> merge_units;
     for (int i = 1; i < index_count; ++i) {
-        merge_units.emplace_back(indexes[i],
-                                 [](int64_t id) { return std::tuple<bool, int64_t>(true, id); });
+        vsag::MergeUnit merge_unit{.index = indexes[i], .id_map_func = [](int64_t id) {
+                                       return std::tuple<bool, int64_t>(true, id);
+                                   }};
+        merge_units.push_back(merge_unit);
     }
     indexes[0]->Merge(merge_units);
 
