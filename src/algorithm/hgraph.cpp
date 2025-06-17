@@ -1430,8 +1430,10 @@ HGraph::Merge(const std::vector<MergeUnit>& merge_units) {
             high_precise_codes_->MergeOther(other_index->high_precise_codes_, this->total_count_);
         }
         bottom_graph_->MergeOther(other_index->bottom_graph_, this->total_count_);
-        auto min_level = std::min(route_graphs_.size(), other_index->route_graphs_.size());
-        for (int j = 0; j < min_level; ++j) {
+        if (route_graphs_.size() < other_index->route_graphs_.size()) {
+            route_graphs_.push_back(this->generate_one_route_graph());
+        }
+        for (int j = 0; j < other_index->route_graphs_.size(); ++j) {
             route_graphs_[j]->MergeOther(other_index->route_graphs_[j], this->total_count_);
         }
         this->total_count_ += other_index->GetNumElements();

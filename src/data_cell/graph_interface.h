@@ -64,7 +64,7 @@ public:
     Prefetch(InnerIdType id, uint32_t neighbor_i) = 0;
 
     virtual void
-    MergeOther(GraphInterfacePtr other, int64_t bias) {
+    MergeOther(GraphInterfacePtr other, uint64_t bias) {
         throw VsagException(ErrorType::INTERNAL_ERROR,
                             "MergeOther in GraphInterface is not implemented");
     }

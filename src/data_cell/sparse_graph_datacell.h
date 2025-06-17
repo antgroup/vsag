@@ -65,7 +65,7 @@ public:
     Deserialize(StreamReader& reader) override;
 
     void
-    MergeOther(GraphInterfacePtr other, int64_t bias) override;
+    MergeOther(GraphInterfacePtr other, uint64_t bias) override;
 
     Vector<InnerIdType>
     GetIds() const override;

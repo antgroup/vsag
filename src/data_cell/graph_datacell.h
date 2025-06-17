@@ -92,7 +92,7 @@ public:
     }
 
     void
-    MergeOther(GraphInterfacePtr other, int64_t bias) override;
+    MergeOther(GraphInterfacePtr other, uint64_t bias) override;
 
 private:
     std::shared_ptr<BasicIO<IOTmpl>> io_{nullptr};
@@ -109,7 +109,7 @@ private:
 
 template <typename IOTmpl>
 void
-GraphDataCell<IOTmpl>::MergeOther(GraphInterfacePtr other, int64_t bias) {
+GraphDataCell<IOTmpl>::MergeOther(GraphInterfacePtr other, uint64_t bias) {
     auto other_graph = std::dynamic_pointer_cast<GraphDataCell<IOTmpl>>(other);
     if (!other_graph) {
         throw VsagException(ErrorType::INTERNAL_ERROR,

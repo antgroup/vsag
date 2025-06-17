@@ -672,7 +672,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex, "HGraph Graph Merge", "[
             auto param =
                 GenerateHGraphBuildParametersString(metric_type, dim, base_quantization_str);
             auto model = TestFactory(name, param, true);
-            auto dataset = pool.GetDatasetAndCreate(dim, 5000, metric_type);
+            auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
             auto ret = model->Train(dataset->base_);
             REQUIRE(ret.has_value() == true);
             auto merge_index = TestMergeIndexWithSameModel(model, dataset, 5, true);

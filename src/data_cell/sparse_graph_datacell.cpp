@@ -174,7 +174,7 @@ SparseGraphDataCell::DeleteNeighborsById(vsag::InnerIdType id) {
 }
 
 void
-SparseGraphDataCell::MergeOther(GraphInterfacePtr other, int64_t bias) {
+SparseGraphDataCell::MergeOther(GraphInterfacePtr other, uint64_t bias) {
     auto other_graph = std::dynamic_pointer_cast<SparseGraphDataCell>(other);
     if (!other_graph) {
         throw VsagException(ErrorType::INTERNAL_ERROR,
