@@ -28,7 +28,7 @@ TEST_CASE("AttributeInvertedDataCell insert single attribute", "[ut][AttributeIn
 
     AttributeValue<int32_t>* attr = new AttributeValue<int32_t>();
     attr->name_ = "age";
-    attr->value_.emplace_back(30);
+    attr->GetValue().emplace_back(30);
 
     AttributeSet attrSet;
     attrSet.attrs_.emplace_back(attr);
@@ -50,7 +50,7 @@ TEST_CASE("AttributeInvertedDataCell insert multiple values", "[ut][AttributeInv
 
     AttributeValue<int32_t>* attr = new AttributeValue<int32_t>();
     attr->name_ = "scores";
-    attr->value_ = {85, 90, 95};
+    attr->GetValue() = {85, 90, 95};
 
     AttributeSet attrSet;
     attrSet.attrs_.emplace_back(attr);
@@ -74,15 +74,15 @@ TEST_CASE("AttributeInvertedDataCell insert various types", "[ut][AttributeInver
 
     auto attr_i8 = std::make_unique<AttributeValue<int8_t>>();
     attr_i8->name_ = "i8";
-    attr_i8->value_.emplace_back(-10);
+    attr_i8->GetValue().emplace_back(-10);
 
     auto attr_u16 = std::make_unique<AttributeValue<uint16_t>>();
     attr_u16->name_ = "u16";
-    attr_u16->value_.emplace_back(1000);
+    attr_u16->GetValue().emplace_back(1000);
 
     auto attr_str = std::make_unique<AttributeValue<std::string>>();
     attr_str->name_ = "str";
-    attr_str->value_.emplace_back("test");
+    attr_str->GetValue().emplace_back("test");
 
     AttributeSet attrSet;
     attrSet.attrs_.emplace_back(attr_i8.get());

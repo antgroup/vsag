@@ -212,7 +212,7 @@ FillIntegerValues(vsag::AttributeValue<T>* attr, uint32_t count, Gen& gen) {
     using Limits = std::numeric_limits<T>;
     std::uniform_int_distribution<int64_t> dist(Limits::min(), Limits::max());
     for (uint32_t i = 0; i < count; ++i) {
-        attr->value_.emplace_back(static_cast<T>(dist(gen)));
+        attr->GetValue().emplace_back(static_cast<T>(dist(gen)));
     }
 }
 
@@ -231,7 +231,7 @@ FillStringValues(vsag::AttributeValue<std::string>* attr,
         for (uint32_t c = 0; c < len; ++c) {
             str += char_dist(gen);
         }
-        attr->value_.emplace_back(str);
+        attr->GetValue().emplace_back(str);
     }
 }
 
