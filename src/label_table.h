@@ -74,7 +74,7 @@ public:
         if (result == label_table_.end()) {
             throw std::runtime_error(fmt::format("label {} is not exists", label));
         }
-        return *result;
+        return result - label_table_.begin();
     }
 
     inline bool
