@@ -18,13 +18,15 @@
 #include <cstdint>
 #include <string>
 
+#include "simd_marco.h"
+
 namespace vsag {
 
 namespace generic {
 float
-BF16ComputeIP(const uint8_t* query, const uint8_t* codes, uint64_t dim);
+BF16ComputeIP(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim);
 float
-BF16ComputeL2Sqr(const uint8_t* query, const uint8_t* codes, uint64_t dim);
+BF16ComputeL2Sqr(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim);
 float
 BF16ToFloat(const uint16_t bf16_value);
 uint16_t
@@ -33,40 +35,42 @@ FloatToBF16(const float fp32_value);
 
 namespace sse {
 float
-BF16ComputeIP(const uint8_t* query, const uint8_t* codes, uint64_t dim);
+BF16ComputeIP(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim);
 float
-BF16ComputeL2Sqr(const uint8_t* query, const uint8_t* codes, uint64_t dim);
+BF16ComputeL2Sqr(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim);
 }  // namespace sse
 
 namespace avx {
 float
-BF16ComputeIP(const uint8_t* query, const uint8_t* codes, uint64_t dim);
+BF16ComputeIP(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim);
 float
-BF16ComputeL2Sqr(const uint8_t* query, const uint8_t* codes, uint64_t dim);
+BF16ComputeL2Sqr(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim);
 }  // namespace avx
 
 namespace avx2 {
 float
-BF16ComputeIP(const uint8_t* query, const uint8_t* codes, uint64_t dim);
+BF16ComputeIP(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim);
 float
-BF16ComputeL2Sqr(const uint8_t* query, const uint8_t* codes, uint64_t dim);
+BF16ComputeL2Sqr(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim);
 }  // namespace avx2
 
 namespace avx512 {
 float
-BF16ComputeIP(const uint8_t* query, const uint8_t* codes, uint64_t dim);
+BF16ComputeIP(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim);
 float
-BF16ComputeL2Sqr(const uint8_t* query, const uint8_t* codes, uint64_t dim);
+BF16ComputeL2Sqr(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim);
 }  // namespace avx512
 
 namespace neon {
 float
-BF16ComputeIP(const uint8_t* query, const uint8_t* codes, uint64_t dim);
+BF16ComputeIP(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim);
 float
-BF16ComputeL2Sqr(const uint8_t* query, const uint8_t* codes, uint64_t dim);
+BF16ComputeL2Sqr(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim);
 }  // namespace neon
 
-using BF16ComputeType = float (*)(const uint8_t* query, const uint8_t* codes, uint64_t dim);
+using BF16ComputeType = float (*)(const uint8_t* RESTRICT query,
+                                  const uint8_t* RESTRICT codes,
+                                  uint64_t dim);
 extern BF16ComputeType BF16ComputeIP;
 extern BF16ComputeType BF16ComputeL2Sqr;
 

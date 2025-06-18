@@ -90,7 +90,7 @@ __inline __m256i __attribute__((__always_inline__)) load_8_char_and_convert(cons
 #endif
 
 float
-FP32ComputeIP(const float* query, const float* codes, uint64_t dim) {
+FP32ComputeIP(const float* RESTRICT query, const float* RESTRICT codes, uint64_t dim) {
 #if defined(ENABLE_AVX)
     const uint32_t n = dim / 8;
     if (n == 0) {
@@ -115,7 +115,7 @@ FP32ComputeIP(const float* query, const float* codes, uint64_t dim) {
 }
 
 float
-FP32ComputeL2Sqr(const float* query, const float* codes, uint64_t dim) {
+FP32ComputeL2Sqr(const float* RESTRICT query, const float* RESTRICT codes, uint64_t dim) {
 #if defined(ENABLE_AVX)
     const int n = dim / 8;
     if (n == 0) {
@@ -141,12 +141,12 @@ FP32ComputeL2Sqr(const float* query, const float* codes, uint64_t dim) {
 }
 
 void
-FP32ComputeIPBatch4(const float* query,
+FP32ComputeIPBatch4(const float* RESTRICT query,
                     uint64_t dim,
-                    const float* codes1,
-                    const float* codes2,
-                    const float* codes3,
-                    const float* codes4,
+                    const float* RESTRICT codes1,
+                    const float* RESTRICT codes2,
+                    const float* RESTRICT codes3,
+                    const float* RESTRICT codes4,
                     float& result1,
                     float& result2,
                     float& result3,
@@ -205,12 +205,12 @@ FP32ComputeIPBatch4(const float* query,
 }
 
 void
-FP32ComputeL2SqrBatch4(const float* query,
+FP32ComputeL2SqrBatch4(const float* RESTRICT query,
                        uint64_t dim,
-                       const float* codes1,
-                       const float* codes2,
-                       const float* codes3,
-                       const float* codes4,
+                       const float* RESTRICT codes1,
+                       const float* RESTRICT codes2,
+                       const float* RESTRICT codes3,
+                       const float* RESTRICT codes4,
                        float& result1,
                        float& result2,
                        float& result3,
@@ -382,7 +382,7 @@ __inline __m256i __attribute__((__always_inline__)) load_8_short(const uint16_t*
 #endif
 
 float
-BF16ComputeIP(const uint8_t* query, const uint8_t* codes, uint64_t dim) {
+BF16ComputeIP(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim) {
 #if defined(ENABLE_AVX)
     // Initialize the sum to 0
     __m256 sum = _mm256_setzero_ps();
@@ -416,7 +416,7 @@ BF16ComputeIP(const uint8_t* query, const uint8_t* codes, uint64_t dim) {
 }
 
 float
-BF16ComputeL2Sqr(const uint8_t* query, const uint8_t* codes, uint64_t dim) {
+BF16ComputeL2Sqr(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim) {
 #if defined(ENABLE_AVX)
     // Initialize the sum to 0
     __m256 sum = _mm256_setzero_ps();
@@ -451,7 +451,7 @@ BF16ComputeL2Sqr(const uint8_t* query, const uint8_t* codes, uint64_t dim) {
 }
 
 float
-FP16ComputeIP(const uint8_t* query, const uint8_t* codes, uint64_t dim) {
+FP16ComputeIP(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim) {
 #if defined(ENABLE_AVX)
     // Initialize the sum to 0
     __m256 sum = _mm256_setzero_ps();
@@ -485,7 +485,7 @@ FP16ComputeIP(const uint8_t* query, const uint8_t* codes, uint64_t dim) {
 }
 
 float
-FP16ComputeL2Sqr(const uint8_t* query, const uint8_t* codes, uint64_t dim) {
+FP16ComputeL2Sqr(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim) {
 #if defined(ENABLE_AVX)
     // Initialize the sum to 0
     __m256 sum = _mm256_setzero_ps();
@@ -520,10 +520,10 @@ FP16ComputeL2Sqr(const uint8_t* query, const uint8_t* codes, uint64_t dim) {
 }
 
 float
-SQ8ComputeIP(const float* query,
-             const uint8_t* codes,
-             const float* lower_bound,
-             const float* diff,
+SQ8ComputeIP(const float* RESTRICT query,
+             const uint8_t* RESTRICT codes,
+             const float* RESTRICT lower_bound,
+             const float* RESTRICT diff,
              uint64_t dim) {
 #if defined(ENABLE_AVX)
     __m256 sum = _mm256_setzero_ps();
@@ -560,10 +560,10 @@ SQ8ComputeIP(const float* query,
 }
 
 float
-SQ8ComputeL2Sqr(const float* query,
-                const uint8_t* codes,
-                const float* lower_bound,
-                const float* diff,
+SQ8ComputeL2Sqr(const float* RESTRICT query,
+                const uint8_t* RESTRICT codes,
+                const float* RESTRICT lower_bound,
+                const float* RESTRICT diff,
                 uint64_t dim) {
 #if defined(ENABLE_AVX)
     __m256 sum = _mm256_setzero_ps();
@@ -605,10 +605,10 @@ SQ8ComputeL2Sqr(const float* query,
 }
 
 float
-SQ8ComputeCodesIP(const uint8_t* codes1,
-                  const uint8_t* codes2,
-                  const float* lower_bound,
-                  const float* diff,
+SQ8ComputeCodesIP(const uint8_t* RESTRICT codes1,
+                  const uint8_t* RESTRICT codes2,
+                  const float* RESTRICT lower_bound,
+                  const float* RESTRICT diff,
                   uint64_t dim) {
 #if defined(ENABLE_AVX)
     __m256 sum = _mm256_setzero_ps();
@@ -649,10 +649,10 @@ SQ8ComputeCodesIP(const uint8_t* codes1,
 }
 
 float
-SQ8ComputeCodesL2Sqr(const uint8_t* codes1,
-                     const uint8_t* codes2,
-                     const float* lower_bound,
-                     const float* diff,
+SQ8ComputeCodesL2Sqr(const uint8_t* RESTRICT codes1,
+                     const uint8_t* RESTRICT codes2,
+                     const float* RESTRICT lower_bound,
+                     const float* RESTRICT diff,
                      uint64_t dim) {
 #if defined(ENABLE_AVX)
     __m256 sum = _mm256_setzero_ps();
@@ -694,43 +694,45 @@ SQ8ComputeCodesL2Sqr(const uint8_t* codes1,
 }
 
 float
-SQ4ComputeIP(const float* query,
-             const uint8_t* codes,
-             const float* lower_bound,
-             const float* diff,
+SQ4ComputeIP(const float* RESTRICT query,
+             const uint8_t* RESTRICT codes,
+             const float* RESTRICT lower_bound,
+             const float* RESTRICT diff,
              uint64_t dim) {
     return sse::SQ4ComputeIP(query, codes, lower_bound, diff, dim);
 }
 
 float
-SQ4ComputeL2Sqr(const float* query,
-                const uint8_t* codes,
-                const float* lower_bound,
-                const float* diff,
+SQ4ComputeL2Sqr(const float* RESTRICT query,
+                const uint8_t* RESTRICT codes,
+                const float* RESTRICT lower_bound,
+                const float* RESTRICT diff,
                 uint64_t dim) {
     return sse::SQ4ComputeL2Sqr(query, codes, lower_bound, diff, dim);
 }
 
 float
-SQ4ComputeCodesIP(const uint8_t* codes1,
-                  const uint8_t* codes2,
-                  const float* lower_bound,
-                  const float* diff,
+SQ4ComputeCodesIP(const uint8_t* RESTRICT codes1,
+                  const uint8_t* RESTRICT codes2,
+                  const float* RESTRICT lower_bound,
+                  const float* RESTRICT diff,
                   uint64_t dim) {
     return sse::SQ4ComputeCodesIP(codes1, codes2, lower_bound, diff, dim);
 }
 
 float
-SQ4ComputeCodesL2Sqr(const uint8_t* codes1,
-                     const uint8_t* codes2,
-                     const float* lower_bound,
-                     const float* diff,
+SQ4ComputeCodesL2Sqr(const uint8_t* RESTRICT codes1,
+                     const uint8_t* RESTRICT codes2,
+                     const float* RESTRICT lower_bound,
+                     const float* RESTRICT diff,
                      uint64_t dim) {
     return sse::SQ4ComputeCodesL2Sqr(codes1, codes2, lower_bound, diff, dim);
 }
 
 float
-SQ4UniformComputeCodesIP(const uint8_t* codes1, const uint8_t* codes2, uint64_t dim) {
+SQ4UniformComputeCodesIP(const uint8_t* RESTRICT codes1,
+                         const uint8_t* RESTRICT codes2,
+                         uint64_t dim) {
 #if defined(ENABLE_AVX)
     return sse::SQ4UniformComputeCodesIP(codes1, codes2, dim);  // TODO(LHT): implement
 #else
@@ -739,7 +741,9 @@ SQ4UniformComputeCodesIP(const uint8_t* codes1, const uint8_t* codes2, uint64_t 
 }
 
 float
-SQ8UniformComputeCodesIP(const uint8_t* codes1, const uint8_t* codes2, uint64_t dim) {
+SQ8UniformComputeCodesIP(const uint8_t* RESTRICT codes1,
+                         const uint8_t* RESTRICT codes2,
+                         uint64_t dim) {
 #if defined(ENABLE_AVX)
     return sse::SQ8UniformComputeCodesIP(codes1, codes2, dim);  // TODO(LHT): implement
 #else
@@ -825,10 +829,10 @@ Normalize(const float* from, float* to, uint64_t dim) {
 }
 
 void
-PQFastScanLookUp32(const uint8_t* lookup_table,
-                   const uint8_t* codes,
+PQFastScanLookUp32(const uint8_t* RESTRICT lookup_table,
+                   const uint8_t* RESTRICT codes,
                    uint64_t pq_dim,
-                   int32_t* result) {
+                   int32_t* RESTRICT result) {
 #if defined(ENABLE_AVX)
     sse::PQFastScanLookUp32(lookup_table, codes, pq_dim, result);
 #else

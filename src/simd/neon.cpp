@@ -266,12 +266,12 @@ FP32ComputeL2Sqr(const float* query, const float* codes, uint64_t dim) {
 }
 
 void
-FP32ComputeIPBatch4(const float* query,
+FP32ComputeIPBatch4(const float* RESTRICT query,
                     uint64_t dim,
-                    const float* codes1,
-                    const float* codes2,
-                    const float* codes3,
-                    const float* codes4,
+                    const float* RESTRICT codes1,
+                    const float* RESTRICT codes2,
+                    const float* RESTRICT codes3,
+                    const float* RESTRICT codes4,
                     float& result1,
                     float& result2,
                     float& result3,
@@ -322,12 +322,12 @@ FP32ComputeIPBatch4(const float* query,
 }
 
 void
-FP32ComputeL2SqrBatch4(const float* query,
+FP32ComputeL2SqrBatch4(const float* RESTRICT query,
                        uint64_t dim,
-                       const float* codes1,
-                       const float* codes2,
-                       const float* codes3,
-                       const float* codes4,
+                       const float* RESTRICT codes1,
+                       const float* RESTRICT codes2,
+                       const float* RESTRICT codes3,
+                       const float* RESTRICT codes4,
                        float& result1,
                        float& result2,
                        float& result3,
@@ -495,7 +495,7 @@ __inline uint16x8_t __attribute__((__always_inline__)) load_4_short(const uint16
 #endif
 
 float
-BF16ComputeIP(const uint8_t* query, const uint8_t* codes, uint64_t dim) {
+BF16ComputeIP(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim) {
 #if defined(ENABLE_NEON)
     float32x4x3_t res = {vdupq_n_f32(0.0f), vdupq_n_f32(0.0f), vdupq_n_f32(0.0f)};
     const auto* query_bf16 = (const uint16_t*)(query);
@@ -562,7 +562,7 @@ BF16ComputeIP(const uint8_t* query, const uint8_t* codes, uint64_t dim) {
 }
 
 float
-BF16ComputeL2Sqr(const uint8_t* query, const uint8_t* codes, uint64_t dim) {
+BF16ComputeL2Sqr(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim) {
 #if defined(ENABLE_NEON)
     float32x4x3_t res = {vdupq_n_f32(0.0f), vdupq_n_f32(0.0f), vdupq_n_f32(0.0f)};
     const auto* query_bf16 = (const uint16_t*)(query);
@@ -637,7 +637,7 @@ BF16ComputeL2Sqr(const uint8_t* query, const uint8_t* codes, uint64_t dim) {
 }
 
 float
-FP16ComputeIP(const uint8_t* query, const uint8_t* codes, uint64_t dim) {
+FP16ComputeIP(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim) {
 #if defined(ENABLE_NEON)
     const auto* query_fp16 = (const uint16_t*)(query);
     const auto* codes_fp16 = (const uint16_t*)(codes);
@@ -705,7 +705,7 @@ FP16ComputeIP(const uint8_t* query, const uint8_t* codes, uint64_t dim) {
 }
 
 float
-FP16ComputeL2Sqr(const uint8_t* query, const uint8_t* codes, uint64_t dim) {
+FP16ComputeL2Sqr(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim) {
 #if defined(ENABLE_NEON)
     float32x4x3_t res = {vdupq_n_f32(0.0f), vdupq_n_f32(0.0f), vdupq_n_f32(0.0f)};
 
@@ -802,10 +802,10 @@ __inline float32x4_t __attribute__((__always_inline__)) get_4_float(uint8x16_t* 
 #endif
 
 float
-SQ8ComputeIP(const float* query,
-             const uint8_t* codes,
-             const float* lower_bound,
-             const float* diff,
+SQ8ComputeIP(const float* RESTRICT query,
+             const uint8_t* RESTRICT codes,
+             const float* RESTRICT lower_bound,
+             const float* RESTRICT diff,
              uint64_t dim) {
 #if defined(ENABLE_NEON)
     float32x4_t sum_ = vdupq_n_f32(0.0f);
@@ -838,10 +838,10 @@ SQ8ComputeIP(const float* query,
 }
 
 float
-SQ8ComputeL2Sqr(const float* query,
-                const uint8_t* codes,
-                const float* lower_bound,
-                const float* diff,
+SQ8ComputeL2Sqr(const float* RESTRICT query,
+                const uint8_t* RESTRICT codes,
+                const float* RESTRICT lower_bound,
+                const float* RESTRICT diff,
                 uint64_t dim) {
 #if defined(ENABLE_NEON)
     float32x4_t sum = vdupq_n_f32(0.0f);
@@ -872,10 +872,10 @@ SQ8ComputeL2Sqr(const float* query,
 }
 
 float
-SQ8ComputeCodesIP(const uint8_t* codes1,
-                  const uint8_t* codes2,
-                  const float* lower_bound,
-                  const float* diff,
+SQ8ComputeCodesIP(const uint8_t* RESTRICT codes1,
+                  const uint8_t* RESTRICT codes2,
+                  const float* RESTRICT lower_bound,
+                  const float* RESTRICT diff,
                   uint64_t dim) {
 #if defined(ENABLE_NEON)
     float32x4_t sum = vdupq_n_f32(0.0f);
@@ -910,10 +910,10 @@ SQ8ComputeCodesIP(const uint8_t* codes1,
 }
 
 float
-SQ8ComputeCodesL2Sqr(const uint8_t* codes1,
-                     const uint8_t* codes2,
-                     const float* lower_bound,
-                     const float* diff,
+SQ8ComputeCodesL2Sqr(const uint8_t* RESTRICT codes1,
+                     const uint8_t* RESTRICT codes2,
+                     const float* RESTRICT lower_bound,
+                     const float* RESTRICT diff,
                      uint64_t dim) {
 #if defined(ENABLE_NEON)
 
@@ -950,37 +950,37 @@ SQ8ComputeCodesL2Sqr(const uint8_t* codes1,
 }
 
 float
-SQ4ComputeIP(const float* query,
-             const uint8_t* codes,
-             const float* lower_bound,
-             const float* diff,
+SQ4ComputeIP(const float* RESTRICT query,
+             const uint8_t* RESTRICT codes,
+             const float* RESTRICT lower_bound,
+             const float* RESTRICT diff,
              uint64_t dim) {
     return generic::SQ4ComputeIP(query, codes, lower_bound, diff, dim);
 }
 
 float
-SQ4ComputeL2Sqr(const float* query,
-                const uint8_t* codes,
-                const float* lower_bound,
-                const float* diff,
+SQ4ComputeL2Sqr(const float* RESTRICT query,
+                const uint8_t* RESTRICT codes,
+                const float* RESTRICT lower_bound,
+                const float* RESTRICT diff,
                 uint64_t dim) {
     return generic::SQ4ComputeL2Sqr(query, codes, lower_bound, diff, dim);
 }
 
 float
-SQ4ComputeCodesIP(const uint8_t* codes1,
-                  const uint8_t* codes2,
-                  const float* lower_bound,
-                  const float* diff,
+SQ4ComputeCodesIP(const uint8_t* RESTRICT codes1,
+                  const uint8_t* RESTRICT codes2,
+                  const float* RESTRICT lower_bound,
+                  const float* RESTRICT diff,
                   uint64_t dim) {
     return generic::SQ4ComputeCodesIP(codes1, codes2, lower_bound, diff, dim);
 }
 
 float
-SQ4ComputeCodesL2Sqr(const uint8_t* codes1,
-                     const uint8_t* codes2,
-                     const float* lower_bound,
-                     const float* diff,
+SQ4ComputeCodesL2Sqr(const uint8_t* RESTRICT codes1,
+                     const uint8_t* RESTRICT codes2,
+                     const float* RESTRICT lower_bound,
+                     const float* RESTRICT diff,
                      uint64_t dim) {
     return generic::SQ4ComputeCodesL2Sqr(codes1, codes2, lower_bound, diff, dim);
 }
@@ -1005,7 +1005,9 @@ compute_part(const uint8x16_t& a_vec, const uint8x16_t& b_vec, uint32x4_t& sum) 
 #endif
 
 float
-SQ4UniformComputeCodesIP(const uint8_t* codes1, const uint8_t* codes2, uint64_t dim) {
+SQ4UniformComputeCodesIP(const uint8_t* RESTRICT codes1,
+                         const uint8_t* RESTRICT codes2,
+                         uint64_t dim) {
 #if defined(ENABLE_NEON)
     if (dim == 0) {
         return 0.0f;
@@ -1171,10 +1173,10 @@ Prefetch(const void* data) {
 };
 
 void
-PQFastScanLookUp32(const uint8_t* lookup_table,
-                   const uint8_t* codes,
+PQFastScanLookUp32(const uint8_t* RESTRICT lookup_table,
+                   const uint8_t* RESTRICT codes,
                    uint64_t pq_dim,
-                   int32_t* result) {
+                   int32_t* RESTRICT result) {
 #if defined(ENABLE_NEON)
     uint32x4_t sum[4];
     for (size_t i = 0; i < 4; ++i) {
