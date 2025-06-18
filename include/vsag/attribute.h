@@ -39,45 +39,29 @@ public:
 
     virtual ~Attribute() = default;
 
-    virtual AttrValueType
+    [[nodiscard]] virtual AttrValueType
     GetValueType() const = 0;
 
-    virtual uint64_t
+    [[nodiscard]] virtual uint64_t
     GetValueCount() const = 0;
 };
 
 template <class T>
 class AttributeValue : public Attribute {
 public:
-    AttrValueType
-    GetValueType() const override {
-        if constexpr (std::is_same_v<T, int32_t>) {
-            return AttrValueType::INT32;
-        } else if constexpr (std::is_same_v<T, uint32_t>) {
-            return AttrValueType::UINT32;
-        } else if constexpr (std::is_same_v<T, int64_t>) {
-            return AttrValueType::INT64;
-        } else if constexpr (std::is_same_v<T, uint64_t>) {
-            return AttrValueType::UINT64;
-        } else if constexpr (std::is_same_v<T, int8_t>) {
-            return AttrValueType::INT8;
-        } else if constexpr (std::is_same_v<T, uint8_t>) {
-            return AttrValueType::UINT8;
-        } else if constexpr (std::is_same_v<T, int16_t>) {
-            return AttrValueType::INT16;
-        } else if constexpr (std::is_same_v<T, uint16_t>) {
-            return AttrValueType::UINT16;
-        } else if constexpr (std::is_same_v<T, std::string>) {
-            return AttrValueType::STRING;
-        }
-    }
+    [[nodiscard]] AttrValueType
+    GetValueType() const override;
 
-    uint64_t
-    GetValueCount() const override {
-        return value_.size();
-    }
+    [[nodiscard]] uint64_t
+    GetValueCount() const override;
 
-public:
+    std::vector<T>&
+    GetValue();
+
+    const std::vector<T>&
+    GetValue() const;
+
+private:
     std::vector<T> value_{};
 };
 

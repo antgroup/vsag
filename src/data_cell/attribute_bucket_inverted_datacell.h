@@ -80,7 +80,7 @@ AttributeBucketInvertedDataCell::insert_by_type(ValueMapPtr& value_map,
     if (attr_value == nullptr) {
         throw VsagException(ErrorType::INTERNAL_ERROR, "Invalid attribute type");
     }
-    for (auto& value : attr_value->value_) {
+    for (auto& value : attr_value->GetValue()) {
         value_map->Insert(value, inner_id);
     }
 }
@@ -94,7 +94,7 @@ AttributeBucketInvertedDataCell::get_bitsets_by_type(const ValueMapPtr& value_ma
     if (attr_value == nullptr) {
         throw VsagException(ErrorType::INTERNAL_ERROR, "Invalid attribute type");
     }
-    for (auto& value : attr_value->value_) {
+    for (auto& value : attr_value->GetValue()) {
         auto bitset = value_map->GetBitsetByValue(value);
         bitsets.emplace_back(bitset);
     }
