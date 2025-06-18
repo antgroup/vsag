@@ -23,6 +23,7 @@
 #include "inner_string_params.h"
 #include "ivf_partition/gno_imi_partition.h"
 #include "ivf_partition/ivf_nearest_partition.h"
+#include "storage/serializable.h"
 #include "storage/serialization.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
@@ -705,7 +706,7 @@ IVF::check_merge_illegal(const vsag::MergeUnit& unit) const {
     std::stringstream ss1;
     std::stringstream ss2;
     IOStreamWriter writer1(ss1);
-    cur_model->Serialize(writer1);
+    static_cast<serializable_ptr>(cur_model)->Serialize(writer1);
 
     // std::ofstream of1("/tmp/vsag-f1.index", std::ios::binary | std::ios::out);
     // IOStreamWriter os1(of1);
@@ -715,7 +716,7 @@ IVF::check_merge_illegal(const vsag::MergeUnit& unit) const {
     cur_model.reset();
     auto other_model = other_ivf_index->ExportModel(index->GetCommonParam());
     IOStreamWriter writer2(ss2);
-    other_model->Serialize(writer2);
+    static_cast<serializable_ptr>(other_model)->Serialize(writer2);
 
     // std::ofstream of2("/tmp/vsag-f2.index", std::ios::binary | std::ios::out);
     // IOStreamWriter os2(of2);

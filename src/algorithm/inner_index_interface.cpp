@@ -124,7 +124,7 @@ InnerIndexInterface::Serialize() const {
     std::shared_ptr<int8_t[]> bin(new int8_t[num_bytes]);
     auto* buffer = reinterpret_cast<char*>(const_cast<int8_t*>(bin.get()));
     BufferStreamWriter writer(buffer);
-    this->Serialize(writer);
+    serialize_impl(writer);
     Binary b{
         .data = bin,
         .size = num_bytes,
@@ -174,7 +174,7 @@ InnerIndexInterface::Deserialize(const BinarySet& binary_set) {
     try {
         uint64_t cursor = 0;
         auto reader = ReadFuncStreamReader(func, cursor, b.size);
-        this->Deserialize(reader);
+        deserialize_impl(reader);
     } catch (const std::runtime_error& e) {
         throw VsagException(ErrorType::READ_ERROR, "failed to Deserialize: ", e.what());
     }
@@ -194,7 +194,7 @@ InnerIndexInterface::Deserialize(const ReaderSet& reader_set) {
         };
         uint64_t cursor = 0;
         auto reader = ReadFuncStreamReader(func, cursor, index_reader->Size());
-        this->Deserialize(reader);
+        deserialize_impl(reader);
         return;
     } catch (const std::bad_alloc& e) {
         throw VsagException(ErrorType::READ_ERROR, "failed to Deserialize: ", e.what());
@@ -219,7 +219,7 @@ InnerIndexInterface::Serialize(std::ostream& out_stream) const {
     }
 
     IOStreamWriter writer(out_stream);
-    this->Serialize(writer);
+    serialize_impl(writer);
 }
 
 void
@@ -230,7 +230,7 @@ InnerIndexInterface::Deserialize(std::istream& in_stream) {
     SlowTaskTimer t(time_record_name);
     try {
         IOStreamReader reader(in_stream);
-        this->Deserialize(reader);
+        deserialize_impl(reader);
         return;
     } catch (const std::bad_alloc& e) {
         throw VsagException(ErrorType::READ_ERROR, "failed to Deserialize: ", e.what());
@@ -241,7 +241,7 @@ uint64_t
 InnerIndexInterface::CalSerializeSize() const {
     auto cal_size_func = [](uint64_t cursor, uint64_t size, void* buf) { return; };
     WriteFuncStreamWriter writer(cal_size_func, 0);
-    this->Serialize(writer);
+    serialize_impl(writer);
     return writer.cursor_;
 }
 
@@ -261,13 +261,13 @@ InnerIndexPtr
 InnerIndexInterface::Clone(const IndexCommonParam& param) {
     std::stringstream ss;
     IOStreamWriter writer(ss);
-    this->Serialize(writer);
+    serialize_impl(writer);
     ss.seekg(0, std::ios::beg);
     IOStreamReader reader(ss);
     auto max_size = this->CalSerializeSize();
     BufferStreamReader buffer_reader(&reader, max_size, this->allocator_);
     auto index = this->Fork(param);
-    index->Deserialize(buffer_reader);
+    deserialize_impl(buffer_reader);
     return index;
 }
 

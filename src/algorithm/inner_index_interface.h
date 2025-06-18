@@ -14,6 +14,7 @@
 // limitations under the License.
 
 #pragma once
+#include <memory>
 #include <shared_mutex>
 #include <vector>
 
@@ -22,6 +23,7 @@
 #include "index_feature_list.h"
 #include "label_table.h"
 #include "parameter.h"
+#include "storage/serializable.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
 #include "utils/function_exists_check.h"
@@ -33,7 +35,7 @@ namespace vsag {
 class InnerIndexInterface;
 using InnerIndexPtr = std::shared_ptr<InnerIndexInterface>;
 
-class InnerIndexInterface {
+class InnerIndexInterface : public std::enable_shared_from_this<InnerIndexInterface>, public virtual serializable {
 public:
     InnerIndexInterface() = default;
 
@@ -67,12 +69,6 @@ public:
                 const std::string& parameters,
                 const FilterPtr& filter,
                 int64_t limited_size = -1) const = 0;
-
-    virtual void
-    Serialize(StreamWriter& writer) const = 0;
-
-    virtual void
-    Deserialize(StreamReader& reader) = 0;
 
     [[nodiscard]] virtual InnerIndexPtr
     Fork(const IndexCommonParam& param) = 0;
@@ -287,6 +283,27 @@ public:
     GetRawData(InnerIdType inner_id, uint8_t* data) const {
         throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
                             "Index doesn't support GetRawData");
+    }
+
+private:
+    void
+    serialize_impl(StreamWriter& writer) const {
+        auto serializable_index = std::dynamic_pointer_cast<const serializable>(shared_from_this());
+        if (not serializable_index) {
+            throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                                "Index doesn't support serialize");
+        }
+        serializable_index->Serialize(writer);
+    }
+
+    void
+    deserialize_impl(StreamReader& reader) {
+        auto serializable_index = std::dynamic_pointer_cast<serializable>(shared_from_this());
+        if (not serializable_index) {
+            throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                                "Index doesn't support deserialize");
+        }
+        serializable_index->Deserialize(reader);
     }
 
 public:

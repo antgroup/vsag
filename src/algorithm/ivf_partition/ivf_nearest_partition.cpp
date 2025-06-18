@@ -21,6 +21,7 @@
 #include "impl/kmeans_cluster.h"
 #include "inner_string_params.h"
 #include "safe_allocator.h"
+#include "storage/serializable.h"
 #include "utils/util_functions.h"
 
 namespace vsag {
@@ -110,12 +111,12 @@ IVFNearestPartition::ClassifyDatas(const void* datas,
 void
 IVFNearestPartition::Serialize(StreamWriter& writer) {
     IVFPartitionStrategy::Serialize(writer);
-    this->route_index_ptr_->Serialize(writer);
+    ((std::shared_ptr<serializable>)this->route_index_ptr_)->Serialize(writer);
 }
 void
 IVFNearestPartition::Deserialize(lvalue_or_rvalue<StreamReader> reader) {
     IVFPartitionStrategy::Deserialize(reader);
-    this->route_index_ptr_->Deserialize(reader);
+    static_cast<serializable_ptr>(route_index_ptr_)->Deserialize(reader);
 }
 void
 IVFNearestPartition::factory_router_index(const IndexCommonParam& common_param) {
