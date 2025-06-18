@@ -13,9 +13,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "fht_kac_rotator.h"
+#include "fht_kac_rotate_transformer.h"
 
-#include <iostream>
+#include <random>
+
+#include "simd/rabitq_simd.h"
+
 namespace vsag {
 
 inline size_t
@@ -33,84 +36,92 @@ FhtKacRotator::CopyFlip(uint8_t* out_flip) const {
     std::copy(flip_.data(), flip_.data() + flip_.size(), out_flip);
 }
 
-FhtKacRotator::FhtKacRotator(uint64_t dim, Allocator* allocator)
-    : dim_(dim), allocator_(allocator) {
-    flip_offset_ = (dim_ + 7) / kByteLen_;
-    flip_.resize(round_ * flip_offset_);
+FhtKacRotator::FhtKacRotator(Allocator* allocator, int64_t dim)
+    : VectorTransformer(allocator, dim) {
+    this->type_ = VectorTransformerType::FHT;
+    flip_offset_ = (this->input_dim_ + 7) / BYTE_LEN;
+    flip_.resize(ROUND * flip_offset_);
     size_t bottom_log_dim = floor_log2(dim);
     trunc_dim_ = 1 << bottom_log_dim;
     fac_ = 1.0F / std::sqrt(static_cast<float>(trunc_dim_));
 }
 
-bool
-FhtKacRotator::Build() {
+void
+FhtKacRotator::Train() {
     std::random_device rd;   // Seed
     std::mt19937 gen(rd());  // Mersenne Twister RNG
     std::uniform_int_distribution<int> dist(0, 255);
     for (auto& i : flip_) {
         i = static_cast<uint8_t>(dist(gen));
     }
-    return true;
+}
+
+void
+FhtKacRotator::Train(const float* data, uint64_t count) {
+    this->Train();
 }
 
 void
 FhtKacRotator::Transform(const float* data, float* rotated_vec) const {
-    std::memcpy(rotated_vec, data, sizeof(float) * dim_);
-    if (trunc_dim_ == dim_) {
-        for (int flip_time = 0; flip_time < round_; flip_time++) {
-            FlipSign(flip_.data() + flip_time * flip_offset_, rotated_vec, dim_);
+    auto dim = static_cast<uint64_t>(this->input_dim_);
+    std::memcpy(rotated_vec, data, sizeof(float) * dim);
+    if (trunc_dim_ == dim) {
+        for (int flip_time = 0; flip_time < ROUND; flip_time++) {
+            FlipSign(flip_.data() + flip_time * flip_offset_, rotated_vec, dim);
             FHTRotate(rotated_vec, trunc_dim_);
             VecRescale(rotated_vec, trunc_dim_, fac_);
         }
         return;
     }
 
-    size_t start = dim_ - trunc_dim_;
+    size_t start = dim - trunc_dim_;
 
-    for (int flip_time = 0; flip_time < round_; flip_time += 2) {
-        FlipSign(flip_.data() + flip_time * flip_offset_, rotated_vec, dim_);
+    for (int flip_time = 0; flip_time < ROUND; flip_time += 2) {
+        FlipSign(flip_.data() + flip_time * flip_offset_, rotated_vec, dim);
         FHTRotate(rotated_vec, trunc_dim_);
         VecRescale(rotated_vec, trunc_dim_, fac_);
-        KacsWalk(rotated_vec, dim_);
+        KacsWalk(rotated_vec, dim);
 
-        FlipSign(flip_.data() + (flip_time + 1) * flip_offset_, rotated_vec, dim_);
+        FlipSign(flip_.data() + (flip_time + 1) * flip_offset_, rotated_vec, dim);
         FHTRotate(rotated_vec + start, trunc_dim_);
         VecRescale(rotated_vec + start, trunc_dim_, fac_);
-        KacsWalk(rotated_vec, dim_);
+        KacsWalk(rotated_vec, dim);
     }
-    VecRescale(rotated_vec, dim_, 0.25F);
+    VecRescale(rotated_vec, dim, 0.25F);
     //origin vec(x,y), after kacs_walk_generic() -> (x+y, x-y),should be resize by sqrt(0.5) for each KacsWalk() to make the len of vector consistent
 }
 void
 FhtKacRotator::InverseTransform(float const* data, float* rotated_vec) const {
-    std::memcpy(rotated_vec, data, sizeof(float) * dim_);
-    if (trunc_dim_ == dim_) {
-        for (int flip_time = round_ - 1; flip_time >= 0; flip_time--) {
+    auto dim = static_cast<uint64_t>(this->input_dim_);
+
+    std::memcpy(rotated_vec, data, sizeof(float) * dim);
+    if (trunc_dim_ == dim) {
+        for (int flip_time = ROUND - 1; flip_time >= 0; flip_time--) {
             FHTRotate(rotated_vec, trunc_dim_);
             VecRescale(rotated_vec, trunc_dim_, fac_);
-            FlipSign(flip_.data() + flip_time * flip_offset_, rotated_vec, dim_);
+            FlipSign(flip_.data() + flip_time * flip_offset_, rotated_vec, dim);
         }
         return;
     }
 
-    size_t start = dim_ - trunc_dim_;
+    size_t start = dim - trunc_dim_;
 
-    VecRescale(rotated_vec, dim_, 0.25F);
-    for (int flip_time = round_ - 1; flip_time > 0; flip_time -= 2) {
-        KacsWalk(rotated_vec, dim_);
+    VecRescale(rotated_vec, dim, 0.25F);
+    for (int flip_time = ROUND - 1; flip_time > 0; flip_time -= 2) {
+        KacsWalk(rotated_vec, dim);
         FHTRotate(rotated_vec + start, trunc_dim_);
         VecRescale(rotated_vec + start, trunc_dim_, fac_);
-        FlipSign(flip_.data() + flip_time * flip_offset_, rotated_vec, dim_);
+        FlipSign(flip_.data() + flip_time * flip_offset_, rotated_vec, dim);
 
-        KacsWalk(rotated_vec, dim_);
+        KacsWalk(rotated_vec, dim);
         FHTRotate(rotated_vec, trunc_dim_);
         VecRescale(rotated_vec, trunc_dim_, fac_);
-        FlipSign(flip_.data() + (flip_time - 1) * flip_offset_, rotated_vec, dim_);
+        FlipSign(flip_.data() + (flip_time - 1) * flip_offset_, rotated_vec, dim);
     }
 }
 
 void
-FhtKacRotator::Serialize(StreamWriter& writer) {
+FhtKacRotator::Serialize(StreamWriter& writer) const {
     StreamWriter::WriteVector(writer, this->flip_);
 }
 

@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "principal_component_analysis.h"
+#include "pca_transformer.h"
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -23,7 +23,7 @@
 using namespace vsag;
 
 void
-TestCentralize(PrincipalComponentAnalysis& pca, uint64_t dim) {
+TestCentralize(PCATransformer& pca, uint64_t dim) {
     uint32_t count = 1000;
     std::vector<float> mean(dim, 0);
     std::vector<float> vec = fixtures::generate_vectors(count, dim);
@@ -73,7 +73,7 @@ TestPerformEigenDecomposition() {
         1.0f  // eigen_vec[0] = [0, 0, 1]
     };
 
-    vsag::PrincipalComponentAnalysis pca(original_dim, target_dim, allocator.get());
+    vsag::PCATransformer pca(allocator.get(), original_dim, target_dim);
 
     pca.PerformEigenDecomposition(covariance_matrix.data());
 
@@ -100,7 +100,7 @@ TestComputeCovarianceMatrix() {
 
     std::vector<float> covariance_matrix(original_dim * original_dim, 0.0f);
 
-    vsag::PrincipalComponentAnalysis pca(original_dim, 1, allocator.get());
+    vsag::PCATransformer pca(allocator.get(), original_dim, 1);
 
     pca.ComputeCovarianceMatrix(centralized_data.data(), count, covariance_matrix.data());
 
@@ -124,8 +124,7 @@ TestTransform() {
                                      0.0f,
                                      0.0f,
                                      1.0f};  // eigen_vec[-2]
-
-    PrincipalComponentAnalysis pca(original_dim, target_dim, allocator.get());
+    PCATransformer pca(allocator.get(), original_dim, target_dim);
     pca.SetMeanForTest(mean.data());
     pca.SetPCAMatrixForText(pca_matrix.data());
 
@@ -158,9 +157,8 @@ TestTrain() {
         0.0f  // second dim has small var
     };
 
-    vsag::PrincipalComponentAnalysis pca(original_dim, target_dim, allocator.get());
-    bool train_result = pca.Train(data.data(), sample_count);
-    REQUIRE(train_result);
+    PCATransformer pca(allocator.get(), original_dim, target_dim);
+    pca.Train(data.data(), sample_count);
 
     std::vector<float> pca_matrix(target_dim * original_dim);
     pca.CopyPCAMatrixForTest(pca_matrix.data());
@@ -181,7 +179,7 @@ TEST_CASE("PCA Basic Test", "[ut][PCA]") {
     TestTrain();
 
     for (auto dim : dims) {
-        PrincipalComponentAnalysis pca(dim, dim, allocator.get());
+        PCATransformer pca(allocator.get(), dim, dim);
         TestCentralize(pca, dim);
     }
 }
@@ -194,8 +192,8 @@ TEST_CASE("PCA Serialize / Deserialize Test", "[ut][PCA]") {
     for (auto dim : dims) {
         // prepare pca1 and pca2
         uint64_t target_dim = (dim + 1) / 2;
-        PrincipalComponentAnalysis pca1(dim, target_dim, allocator.get());
-        PrincipalComponentAnalysis pca2(dim, target_dim, allocator.get());
+        PCATransformer pca1(allocator.get(), dim, target_dim);
+        PCATransformer pca2(allocator.get(), dim, target_dim);
         std::vector<float> vec = fixtures::generate_vectors(count, dim);
         pca1.Train(vec.data(), count);
 
