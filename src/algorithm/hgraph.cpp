@@ -838,6 +838,9 @@ HGraph::GetMinAndMaxId() const {
         throw VsagException(ErrorType::INTERNAL_ERROR, "Label map size is zero");
     }
     for (int i = 0; i < this->total_count_; ++i) {
+        if (not deleted_ids_.empty() && deleted_ids_.count(i) != 0) {
+            continue;
+        }
         auto label = this->label_table_->label_table_[i];
         max_id = std::max(label, max_id);
         min_id = std::min(label, min_id);
@@ -1357,7 +1360,7 @@ HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
     hgraph_parameter->FromJson(inner_json);
     uint64_t max_degree = hgraph_parameter->bottom_graph_param->max_degree_;
     if (hgraph_parameter->is_static &&
-        (hgraph_parameter->build_thread_count || common_param.thread_pool_ != nullptr)) {
+        (hgraph_parameter->build_thread_count != 0 || common_param.thread_pool_ != nullptr)) {
         throw VsagException(
             ErrorType::INVALID_ARGUMENT,
             "HGraph static mode not support build_thread_count != 0 or thread_pool != nullptr");
