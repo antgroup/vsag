@@ -15,26 +15,7 @@
 
 #pragma once
 
-#include "stream_reader.h"
-#include "stream_writer.h"
-
-class MatrixRotator {
-public:
-    MatrixRotator() = default;
-    virtual ~MatrixRotator() = default;
-
-    virtual void
-    Transform(const float* original_vec, float* transformed_vec) const = 0;
-
-    virtual void
-    InverseTransform(const float* transformed_vec, float* original_vec) const = 0;
-
-    virtual bool
-    Build() = 0;
-
-    virtual void
-    Serialize(StreamWriter& writer) = 0;
-
-    virtual void
-    Deserialize(StreamReader& reader) = 0;
-};
+#include "fht_kac_rotate_transformer.h"
+#include "pca_transformer.h"
+#include "random_orthogonal_transformer.h"
+#include "vector_transformer.h"
