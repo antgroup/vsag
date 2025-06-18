@@ -706,7 +706,7 @@ IVF::check_merge_illegal(const vsag::MergeUnit& unit) const {
     std::stringstream ss1;
     std::stringstream ss2;
     IOStreamWriter writer1(ss1);
-    static_cast<serializable_ptr>(cur_model)->Serialize(writer1);
+    cur_model->Serialize(writer1);
 
     // std::ofstream of1("/tmp/vsag-f1.index", std::ios::binary | std::ios::out);
     // IOStreamWriter os1(of1);
@@ -716,7 +716,7 @@ IVF::check_merge_illegal(const vsag::MergeUnit& unit) const {
     cur_model.reset();
     auto other_model = other_ivf_index->ExportModel(index->GetCommonParam());
     IOStreamWriter writer2(ss2);
-    static_cast<serializable_ptr>(other_model)->Serialize(writer2);
+    other_model->Serialize(writer2);
 
     // std::ofstream of2("/tmp/vsag-f2.index", std::ios::binary | std::ios::out);
     // IOStreamWriter os2(of2);

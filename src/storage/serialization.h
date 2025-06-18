@@ -166,6 +166,13 @@ private:
     uint64_t length_{0};
 };
 
-};  // namespace vsag
+class Serialization {
+public:
+    StreamWriter&
+    Write(std::string_view name);
 
-// namespace vsag
+    StreamReader&
+    Read(std::string_view name);
+};
+
+};  // namespace vsag

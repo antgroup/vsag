@@ -111,12 +111,12 @@ IVFNearestPartition::ClassifyDatas(const void* datas,
 void
 IVFNearestPartition::Serialize(StreamWriter& writer) {
     IVFPartitionStrategy::Serialize(writer);
-    ((std::shared_ptr<serializable>)this->route_index_ptr_)->Serialize(writer);
+    this->route_index_ptr_->Serialize(writer);
 }
 void
 IVFNearestPartition::Deserialize(lvalue_or_rvalue<StreamReader> reader) {
     IVFPartitionStrategy::Deserialize(reader);
-    static_cast<serializable_ptr>(route_index_ptr_)->Deserialize(reader);
+    route_index_ptr_->Deserialize(reader);
 }
 void
 IVFNearestPartition::factory_router_index(const IndexCommonParam& common_param) {

@@ -19,6 +19,7 @@
 
 #include "./stream_reader.h"
 #include "./stream_writer.h"
+#include "./serialization.h"
 #include "vsag/binaryset.h"
 #include "vsag/readerset.h"
 

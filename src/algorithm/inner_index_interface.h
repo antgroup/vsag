@@ -35,7 +35,7 @@ namespace vsag {
 class InnerIndexInterface;
 using InnerIndexPtr = std::shared_ptr<InnerIndexInterface>;
 
-class InnerIndexInterface : public std::enable_shared_from_this<InnerIndexInterface>, public virtual serializable {
+class InnerIndexInterface : public std::enable_shared_from_this<InnerIndexInterface> {
 public:
     InnerIndexInterface() = default;
 
@@ -75,6 +75,12 @@ public:
 
     [[nodiscard]] virtual int64_t
     GetNumElements() const = 0;
+
+    virtual void
+    Serialize(StreamWriter& writer) const = 0;
+
+    virtual void
+    Deserialize(StreamReader& reader) = 0;
 
 public:
     virtual void
