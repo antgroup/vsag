@@ -17,6 +17,8 @@
 
 #include <fmt/format-inl.h>
 
+#include <atomic>
+
 #include "stream_reader.h"
 #include "stream_writer.h"
 #include "typing.h"
@@ -39,6 +41,7 @@ public:
             label_table_.resize(id + 1);
         }
         label_table_[id] = label;
+        total_count_++;
     }
 
     inline bool
@@ -87,6 +90,19 @@ public:
     }
 
     void
+    Resize(uint64_t new_size) {
+        if (new_size < total_count_) {
+            return;
+        }
+        label_table_.resize(new_size);
+    }
+
+    int64_t
+    GetTotalCount() {
+        return total_count_;
+    }
+
+    void
     MergeOther(const LabelTablePtr& other, const IdMapFunction& id_map = nullptr);
 
 public:
@@ -94,6 +110,7 @@ public:
     UnorderedMap<LabelType, InnerIdType> label_remap_;
 
     Allocator* allocator_{nullptr};
+    std::atomic<int64_t> total_count_{0L};
 };
 
 }  // namespace vsag

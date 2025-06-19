@@ -17,6 +17,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <fstream>
+#include <random>
 
 #include "default_allocator.h"
 #include "fixtures.h"
@@ -167,6 +168,74 @@ GraphInterfaceTest::BasicTest(uint64_t max_id,
         for (auto& [key, value] : maps) {
             REQUIRE(this->graph_->GetNeighborSize(key) == value->size());
         }
+        for (auto& [key, value] : maps) {
+            Vector<InnerIdType> neighbors(allocator.get());
+            this->graph_->GetNeighbors(key, neighbors);
+            REQUIRE(memcmp(neighbors.data(), value->data(), value->size() * sizeof(InnerIdType)) ==
+                    0);
+        }
+    }
+}
+
+std::unordered_map<InnerIdType, std::shared_ptr<Vector<InnerIdType>>>
+generate_graph(int count, int max_degree, Allocator* allocator) {
+    std::unordered_map<InnerIdType, std::shared_ptr<Vector<InnerIdType>>> maps;
+    for (int i = 0; i < count; ++i) {
+        std::unordered_set<InnerIdType> unique_ids;
+        unique_ids.insert(i);
+        maps[i] = std::make_shared<Vector<InnerIdType>>(allocator);
+        while (unique_ids.size() < max_degree + 1) {
+            InnerIdType new_neighbor = random() % count;
+            auto iter = unique_ids.insert(new_neighbor);
+            if (iter.second) {
+                maps[i]->push_back(new_neighbor);
+            }
+        }
+    }
+    return maps;
+}
+
+void
+GraphInterfaceTest::MergeTest(GraphInterfacePtr& other, int count) {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    auto max_degree = this->graph_->MaximumDegree();
+
+    std::random_device rd;
+    std::unordered_map<InnerIdType, std::shared_ptr<Vector<InnerIdType>>> maps =
+        generate_graph(count, max_degree, allocator.get());
+    std::unordered_map<InnerIdType, std::shared_ptr<Vector<InnerIdType>>> other_maps =
+        generate_graph(count, max_degree, allocator.get());
+    this->graph_->Resize(count);
+    other->Resize(count);
+
+    for (auto& [key, value] : maps) {
+        this->graph_->InsertNeighborsById(key, *value);
+    }
+
+    for (auto& [key, value] : other_maps) {
+        other->InsertNeighborsById(key, *value);
+    }
+
+    for (const auto& item : other_maps) {
+        maps[item.first + count] = std::make_shared<Vector<InnerIdType>>(allocator.get());
+        for (auto& nb_id : (*item.second)) {
+            nb_id += count;
+        }
+        maps[item.first + count]->swap(*item.second);
+    }
+
+    this->graph_->Resize(2 * count);
+    this->graph_->MergeOther(other, count);
+
+    // Test GetNeighborSize
+    SECTION("Test GetNeighborSize") {
+        for (auto& [key, value] : maps) {
+            REQUIRE(this->graph_->GetNeighborSize(key) == value->size());
+        }
+    }
+
+    // Test GetNeighbors
+    SECTION("Test GetNeighbors") {
         for (auto& [key, value] : maps) {
             Vector<InnerIdType> neighbors(allocator.get());
             this->graph_->GetNeighbors(key, neighbors);

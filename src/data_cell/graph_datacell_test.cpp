@@ -95,3 +95,37 @@ TEST_CASE("GraphDataCell Remove Test", "[ut][GraphDataCell]") {
         GraphStorageTypes::GRAPH_STORAGE_TYPE_FLAT, param_json);
     TestGraphDataCell(graph_param, common_param, is_support_delete);
 }
+
+TEST_CASE("GraphDataCell Merge", "[ut][GraphDataCell]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    auto dim = GENERATE(32);
+    auto max_degree = GENERATE(5, 32, 64);
+    auto max_capacity = GENERATE(100);
+    auto io_type = GENERATE("memory_io", "block_memory_io");
+    auto is_support_delete = GENERATE(true, false);
+    constexpr const char* graph_param_temp =
+        R"(
+    {{
+        "io_params": {{
+            "type": "{}"
+        }},
+        "max_degree": {},
+        "init_capacity": {},
+        "support_remove": {}
+    }}
+    )";
+
+    IndexCommonParam common_param;
+    common_param.dim_ = dim;
+    common_param.allocator_ = allocator;
+    auto param_str =
+        fmt::format(graph_param_temp, io_type, max_degree, max_capacity, is_support_delete);
+    auto param_json = JsonType::parse(param_str);
+    auto graph_param = GraphInterfaceParameter::GetGraphParameterByJson(
+        GraphStorageTypes::GRAPH_STORAGE_TYPE_FLAT, param_json);
+
+    auto graph = GraphInterface::MakeInstance(graph_param, common_param);
+    GraphInterfaceTest test(graph);
+    auto other = GraphInterface::MakeInstance(graph_param, common_param);
+    test.MergeTest(other, 1000);
+}
