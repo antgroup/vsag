@@ -18,59 +18,61 @@
 #include <cstdint>
 #include <string>
 
+#include "simd_marco.h"
+
 namespace vsag {
 
 namespace generic {
 void
-PQFastScanLookUp32(const uint8_t* lookup_table,
-                   const uint8_t* codes,
+PQFastScanLookUp32(const uint8_t* RESTRICT lookup_table,
+                   const uint8_t* RESTRICT codes,
                    uint64_t pq_dim,
-                   int32_t* result);
+                   int32_t* RESTRICT result);
 }  // namespace generic
 
 namespace sse {
 void
-PQFastScanLookUp32(const uint8_t* lookup_table,
-                   const uint8_t* codes,
+PQFastScanLookUp32(const uint8_t* RESTRICT lookup_table,
+                   const uint8_t* RESTRICT codes,
                    uint64_t pq_dim,
-                   int32_t* result);
+                   int32_t* RESTRICT result);
 }  // namespace sse
 
 namespace avx {
 void
-PQFastScanLookUp32(const uint8_t* lookup_table,
-                   const uint8_t* codes,
+PQFastScanLookUp32(const uint8_t* RESTRICT lookup_table,
+                   const uint8_t* RESTRICT codes,
                    uint64_t pq_dim,
-                   int32_t* result);
+                   int32_t* RESTRICT result);
 }  // namespace avx
 
 namespace avx2 {
 void
-PQFastScanLookUp32(const uint8_t* lookup_table,
-                   const uint8_t* codes,
+PQFastScanLookUp32(const uint8_t* RESTRICT lookup_table,
+                   const uint8_t* RESTRICT codes,
                    uint64_t pq_dim,
-                   int32_t* result);
+                   int32_t* RESTRICT result);
 }  // namespace avx2
 
 namespace avx512 {
 void
-PQFastScanLookUp32(const uint8_t* lookup_table,
-                   const uint8_t* codes,
+PQFastScanLookUp32(const uint8_t* RESTRICT lookup_table,
+                   const uint8_t* RESTRICT codes,
                    uint64_t pq_dim,
-                   int32_t* result);
+                   int32_t* RESTRICT result);
 }  // namespace avx512
 
 namespace neon {
 void
-PQFastScanLookUp32(const uint8_t* lookup_table,
-                   const uint8_t* codes,
+PQFastScanLookUp32(const uint8_t* RESTRICT lookup_table,
+                   const uint8_t* RESTRICT codes,
                    uint64_t pq_dim,
-                   int32_t* result);
+                   int32_t* RESTRICT result);
 }  // namespace neon
 
-using PQFastScanLookUp32Type = void (*)(const uint8_t* lookup_table,
-                                        const uint8_t* codes,
+using PQFastScanLookUp32Type = void (*)(const uint8_t* RESTRICT lookup_table,
+                                        const uint8_t* RESTRICT codes,
                                         uint64_t pq_dim,
-                                        int32_t* result);
+                                        int32_t* RESTRICT result);
 extern PQFastScanLookUp32Type PQFastScanLookUp32;
 }  // namespace vsag
