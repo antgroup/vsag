@@ -30,6 +30,9 @@ public:
     void
     BasicTest(uint64_t max_id, uint64_t count, const GraphInterfacePtr& other, bool test_delete);
 
+    void
+    MergeTest(GraphInterfacePtr& other, int count);
+
 public:
     GraphInterfacePtr graph_{nullptr};
     bool require_sorted_{false};

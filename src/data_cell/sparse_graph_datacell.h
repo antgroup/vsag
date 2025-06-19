@@ -64,6 +64,12 @@ public:
     void
     Deserialize(StreamReader& reader) override;
 
+    void
+    MergeOther(GraphInterfacePtr other, uint64_t bias) override;
+
+    Vector<InnerIdType>
+    GetIds() const override;
+
 private:
     uint32_t code_line_size_{0};
     Allocator* const allocator_{nullptr};
