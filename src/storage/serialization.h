@@ -166,13 +166,40 @@ private:
     uint64_t length_{0};
 };
 
-class Serialization {
+// serial is a serialzation framework, provide steps and functions
+class Serial;
+using SerialPtr = std::shared_ptr<Serial>;
+class Serial {
 public:
     StreamWriter&
-    Write(std::string_view name);
+    GetWriter(std::string_view name) {
+    }
 
     StreamReader&
-    Read(std::string_view name);
+    GetReader(std::string_view name);
+
+public:
+    enum class Format : int {
+        NONE = 0,
+        COMPONENTIZED,
+        ALL_IN_ONE,
+    };
+
+    enum class Method : int {
+        NONE = 0,
+        ONE_SHOT,
+        STREAMING,
+    };
+
+public:
+    Serial(Format format, Method method, BinarySet& bs)
+        : format_(format), method_(method), bs_(bs) {
+    }
+
+private:
+    const Format format_{0};
+    const Method method_{0};
+    BinarySet& bs_;
 };
 
 };  // namespace vsag

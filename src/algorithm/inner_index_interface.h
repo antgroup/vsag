@@ -24,6 +24,7 @@
 #include "label_table.h"
 #include "parameter.h"
 #include "storage/serializable.h"
+#include "storage/serialization.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
 #include "utils/function_exists_check.h"
@@ -76,6 +77,7 @@ public:
     [[nodiscard]] virtual int64_t
     GetNumElements() const = 0;
 
+    // TODO(wxyu): remove these two function after refactoring
     virtual void
     Serialize(StreamWriter& writer) const = 0;
 
@@ -293,23 +295,23 @@ public:
 
 private:
     void
-    serialize_impl(StreamWriter& writer) const {
+    serialize_impl(Serial& serial) const {
         auto serializable_index = std::dynamic_pointer_cast<const serializable>(shared_from_this());
         if (not serializable_index) {
             throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
                                 "Index doesn't support serialize");
         }
-        serializable_index->Serialize(writer);
+        // serializable_index->Serialize(writer);
     }
 
     void
-    deserialize_impl(StreamReader& reader) {
+    deserialize_impl(Serial& serial) {
         auto serializable_index = std::dynamic_pointer_cast<serializable>(shared_from_this());
         if (not serializable_index) {
             throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
                                 "Index doesn't support deserialize");
         }
-        serializable_index->Deserialize(reader);
+        // serializable_index->Deserialize(reader);
     }
 
 public:

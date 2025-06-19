@@ -104,6 +104,7 @@ InnerIndexInterface::Serialize() const {
     std::string time_record_name = this->GetName() + " Serialize";
     SlowTaskTimer t(time_record_name);
 
+    // return a special BinarySet directly, if this index is EMPTY
     if (GetNumElements() == 0) {
         // TODO(wxyu): remove this if condition
         if (Options::Instance().new_version()) {
@@ -118,19 +119,12 @@ InnerIndexInterface::Serialize() const {
         return EmptyIndexBinarySet::Make(this->GetName());
     }
 
-    uint64_t num_bytes = this->CalSerializeSize();
-    // TODO(LHT): use try catch
-
-    std::shared_ptr<int8_t[]> bin(new int8_t[num_bytes]);
-    auto* buffer = reinterpret_cast<char*>(const_cast<int8_t*>(bin.get()));
-    BufferStreamWriter writer(buffer);
-    serialize_impl(writer);
-    Binary b{
-        .data = bin,
-        .size = num_bytes,
-    };
+    // use the Serial framework to fill the BinarySet and return
     BinarySet bs;
-    bs.Set(this->GetName(), b);
+    Serial serial(/*format=*/Serial::Format::COMPONENTIZED,
+                  /*method=*/Serial::Method::ONE_SHOT,
+                  /*bs=*/bs);
+    serialize_impl(serial);
 
     return bs;
 }
@@ -174,7 +168,10 @@ InnerIndexInterface::Deserialize(const BinarySet& binary_set) {
     try {
         uint64_t cursor = 0;
         auto reader = ReadFuncStreamReader(func, cursor, b.size);
-        deserialize_impl(reader);
+
+        auto serial = std::make_shared<Serial>();
+        deserialize_impl(serial);
+
     } catch (const std::runtime_error& e) {
         throw VsagException(ErrorType::READ_ERROR, "failed to Deserialize: ", e.what());
     }
@@ -194,7 +191,10 @@ InnerIndexInterface::Deserialize(const ReaderSet& reader_set) {
         };
         uint64_t cursor = 0;
         auto reader = ReadFuncStreamReader(func, cursor, index_reader->Size());
-        deserialize_impl(reader);
+
+        auto serial = std::make_shared<Serial>();
+        deserialize_impl(serial);
+
         return;
     } catch (const std::bad_alloc& e) {
         throw VsagException(ErrorType::READ_ERROR, "failed to Deserialize: ", e.what());
@@ -219,7 +219,9 @@ InnerIndexInterface::Serialize(std::ostream& out_stream) const {
     }
 
     IOStreamWriter writer(out_stream);
-    serialize_impl(writer);
+
+    auto serial = std::make_shared<Serial>();
+    serialize_impl(serial);
 }
 
 void
@@ -230,7 +232,8 @@ InnerIndexInterface::Deserialize(std::istream& in_stream) {
     SlowTaskTimer t(time_record_name);
     try {
         IOStreamReader reader(in_stream);
-        deserialize_impl(reader);
+        auto serial = std::make_shared<Serial>();
+        deserialize_impl(serial);
         return;
     } catch (const std::bad_alloc& e) {
         throw VsagException(ErrorType::READ_ERROR, "failed to Deserialize: ", e.what());
@@ -241,7 +244,8 @@ uint64_t
 InnerIndexInterface::CalSerializeSize() const {
     auto cal_size_func = [](uint64_t cursor, uint64_t size, void* buf) { return; };
     WriteFuncStreamWriter writer(cal_size_func, 0);
-    serialize_impl(writer);
+    auto serial = std::make_shared<Serial>();
+    serialize_impl(serial);
     return writer.cursor_;
 }
 
@@ -261,13 +265,15 @@ InnerIndexPtr
 InnerIndexInterface::Clone(const IndexCommonParam& param) {
     std::stringstream ss;
     IOStreamWriter writer(ss);
-    serialize_impl(writer);
+    auto serial = std::make_shared<Serial>();
+    serialize_impl(serial);
     ss.seekg(0, std::ios::beg);
     IOStreamReader reader(ss);
     auto max_size = this->CalSerializeSize();
     BufferStreamReader buffer_reader(&reader, max_size, this->allocator_);
     auto index = this->Fork(param);
-    deserialize_impl(buffer_reader);
+    auto serial2 = std::make_shared<Serial>();
+    deserialize_impl(serial2);
     return index;
 }
 

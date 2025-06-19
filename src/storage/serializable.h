@@ -17,9 +17,9 @@
 
 #include <memory>
 
+#include "./serialization.h"
 #include "./stream_reader.h"
 #include "./stream_writer.h"
-#include "./serialization.h"
 #include "vsag/binaryset.h"
 #include "vsag/readerset.h"
 
@@ -38,15 +38,16 @@ protected:
     ~non_copyable() = default;
 };
 
+// internal serialize interfaces
 struct serializable;
 using serializable_ptr = std::shared_ptr<serializable>;
 struct serializable : public non_copyable<serializable> {
 public:
     virtual void
-    Serialize(StreamWriter& writer) const = 0;
+    Serialize(Serial& serial) const = 0;
 
     virtual void
-    Deserialize(StreamReader& reader) = 0;
+    Deserialize(Serial& serial) = 0;
 };
 
 };  // namespace vsag

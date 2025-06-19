@@ -782,31 +782,43 @@ HGraph::Serialize(StreamWriter& writer) const {
         this->use_reorder_ = false;
     }
 
-    // basic info moved to metadata since version 0.15
-    // only for test
-    if (Options::Instance().new_version()) {
-        this->serialize_label_info(writer);
-    } else {
+    if (not Options::Instance().new_version()) {
+        // old parse logic, for testing ONLY
         this->serialize_basic_info_v0_14(writer);
-    }
 
-    this->basic_flatten_codes_->Serialize(writer);
-    this->bottom_graph_->Serialize(writer);
-    if (this->use_reorder_) {
-        this->high_precise_codes_->Serialize(writer);
-    }
-    for (const auto& route_graph : this->route_graphs_) {
-        route_graph->Serialize(writer);
-    }
-    if (this->extra_info_size_ > 0 && this->extra_infos_ != nullptr) {
-        this->extra_infos_->Serialize(writer);
-    }
-    if (this->use_attribute_filter_ and this->attr_filter_index_ != nullptr) {
-        this->attr_filter_index_->Serialize(writer);
-    }
+        this->basic_flatten_codes_->Serialize(writer);
+        this->bottom_graph_->Serialize(writer);
+        if (this->use_reorder_) {
+            this->high_precise_codes_->Serialize(writer);
+        }
+        for (const auto& route_graph : this->route_graphs_) {
+            route_graph->Serialize(writer);
+        }
+        if (this->extra_info_size_ > 0 && this->extra_infos_ != nullptr) {
+            this->extra_infos_->Serialize(writer);
+        }
+        if (this->use_attribute_filter_ and this->attr_filter_index_ != nullptr) {
+            this->attr_filter_index_->Serialize(writer);
+        }
+    } else {
+        this->serialize_label_info(writer);
 
-    // serialize footer (introduce since v0.15)
-    if (Options::Instance().new_version()) {
+        this->basic_flatten_codes_->Serialize(writer);
+        this->bottom_graph_->Serialize(writer);
+        if (this->use_reorder_) {
+            this->high_precise_codes_->Serialize(writer);
+        }
+        for (const auto& route_graph : this->route_graphs_) {
+            route_graph->Serialize(writer);
+        }
+        if (this->extra_info_size_ > 0 && this->extra_infos_ != nullptr) {
+            this->extra_infos_->Serialize(writer);
+        }
+        if (this->use_attribute_filter_ and this->attr_filter_index_ != nullptr) {
+            this->attr_filter_index_->Serialize(writer);
+        }
+
+        // serialize footer (introduce since v0.15)
         auto metadata = std::make_shared<Metadata>();
         auto jsonify_basic_info = this->serialize_basic_info();
         metadata->Set("basic_info", jsonify_basic_info);
@@ -825,37 +837,73 @@ HGraph::Deserialize(StreamReader& reader) {
         auto metadata = footer->GetMetadata();
         this->deserialize_basic_info(metadata->Get("basic_info"));
         this->deserialize_label_info(reader);
+
+        this->basic_flatten_codes_->Deserialize(reader);
+        this->bottom_graph_->Deserialize(reader);
+        if (this->use_reorder_) {
+            this->high_precise_codes_->Deserialize(reader);
+        }
+
+        for (auto& route_graph : this->route_graphs_) {
+            route_graph->Deserialize(reader);
+        }
+        auto new_size = max_capacity_.load();
+        this->neighbors_mutex_->Resize(new_size);
+
+        pool_ = std::make_shared<VisitedListPool>(1, allocator_, new_size, allocator_);
+
+        if (this->extra_info_size_ > 0 && this->extra_infos_ != nullptr) {
+            this->extra_infos_->Deserialize(reader);
+        }
+        this->total_count_ = this->basic_flatten_codes_->TotalCount();
+
+        // optimize
+        if (use_elp_optimizer_) {
+            elp_optimize();
+        }
+        if (this->use_attribute_filter_ and this->attr_filter_index_ != nullptr) {
+            this->attr_filter_index_->Deserialize(reader);
+        }
     } else {
         logger::debug("parse with v0.14 version format");
         this->deserialize_basic_info_v0_14(reader);
+
+        this->basic_flatten_codes_->Deserialize(reader);
+        this->bottom_graph_->Deserialize(reader);
+        if (this->use_reorder_) {
+            this->high_precise_codes_->Deserialize(reader);
+        }
+
+        for (auto& route_graph : this->route_graphs_) {
+            route_graph->Deserialize(reader);
+        }
+        auto new_size = max_capacity_.load();
+        this->neighbors_mutex_->Resize(new_size);
+
+        pool_ = std::make_shared<VisitedListPool>(1, allocator_, new_size, allocator_);
+
+        if (this->extra_info_size_ > 0 && this->extra_infos_ != nullptr) {
+            this->extra_infos_->Deserialize(reader);
+        }
+        this->total_count_ = this->basic_flatten_codes_->TotalCount();
+
+        // optimize
+        if (use_elp_optimizer_) {
+            elp_optimize();
+        }
+        if (this->use_attribute_filter_ and this->attr_filter_index_ != nullptr) {
+            this->attr_filter_index_->Deserialize(reader);
+        }
+    }
+}
+
+void
+HGraph::Serialize(Serial& serial) const {
+    if (this->ignore_reorder_) {
+        this->use_reorder_ = false;
     }
 
-    this->basic_flatten_codes_->Deserialize(reader);
-    this->bottom_graph_->Deserialize(reader);
-    if (this->use_reorder_) {
-        this->high_precise_codes_->Deserialize(reader);
-    }
-
-    for (auto& route_graph : this->route_graphs_) {
-        route_graph->Deserialize(reader);
-    }
-    auto new_size = max_capacity_.load();
-    this->neighbors_mutex_->Resize(new_size);
-
-    pool_ = std::make_shared<VisitedListPool>(1, allocator_, new_size, allocator_);
-
-    if (this->extra_info_size_ > 0 && this->extra_infos_ != nullptr) {
-        this->extra_infos_->Deserialize(reader);
-    }
-    this->total_count_ = this->basic_flatten_codes_->TotalCount();
-
-    // optimize
-    if (use_elp_optimizer_) {
-        elp_optimize();
-    }
-    if (this->use_attribute_filter_ and this->attr_filter_index_ != nullptr) {
-        this->attr_filter_index_->Deserialize(reader);
-    }
+    serial.GetWriter("")
 }
 
 std::string

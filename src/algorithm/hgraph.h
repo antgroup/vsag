@@ -36,8 +36,10 @@
 #include "index_feature_list.h"
 #include "inner_index_interface.h"
 #include "lock_strategy.h"
+#include "storage/serializable.h"
 #include "typing.h"
 #include "utils/distance_heap.h"
+#include "utils/function_exists_check.h"
 #include "utils/visited_list.h"
 #include "vsag/index.h"
 #include "vsag/index_features.h"
@@ -45,7 +47,7 @@
 namespace vsag {
 
 // introduce since v0.12
-class HGraph : public InnerIndexInterface {
+    class HGraph : public InnerIndexInterface, public virtual serializable {
 public:
     static ParamPtr
     CheckAndMappingExternalParam(const JsonType& external_param,
@@ -118,6 +120,12 @@ public:
 
     void
     Deserialize(StreamReader& reader) override;
+
+    void
+    Serialize(Serial& serial) const override;
+
+    void
+    Deserialize(Serial& serial) override;
 
     int64_t
     GetNumElements() const override {
