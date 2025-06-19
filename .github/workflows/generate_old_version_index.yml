@@ -1,0 +1,71 @@
+name: Generate Old Tag Vesion Index
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Enter the version tag number, eg: v0.14.2'
+        required: true
+        type: string
+        default: 'v0.14.0'
+  push:
+    tags:
+      - '[0-9]+.[0-9]+.[0-9]+'
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    container:
+      image: vsaglib/vsag:ci-x86
+    steps:
+      - name: Get Repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: '0'
+      - name: Determine version to use
+        id: set-version
+        run: |
+          git config --global --add safe.directory /__w/vsag/vsag
+          if [ "${{ github.event_name }}" = "push" ]; then
+            VERSION=$(git for-each-ref --sort=-committerdate refs/tags --format='%(refname:short)' | head -n 1)
+          else
+            VERSION=${{ github.event.inputs.version }}
+          fi
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          cd ${GITHUB_WORKSPACE}
+      - name: Fetch Index Branch
+        uses: actions/checkout@v4
+        with:
+          ref: old_version_index
+          path: vsag_index
+          fetch-tags: 'true'
+          fetch-depth: '0'
+      - name: Fetch Tag Branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.set-version.outputs.version }}
+          path: vsag_tag
+          fetch-depth: '0'
+          fetch-tags: 'true'
+      - name: Prepare And Build
+        run: |
+          echo ${{ steps.set-version.outputs.version }}
+          cd vsag_tag
+          cp ../vsag_index/create_old_version_index.cpp tools/
+          cat ../vsag_index/CMakeLists.txt >> tools/CMakeLists.txt
+          make release
+      - name: Generate Index And Move
+        run: |
+          cd ${GITHUB_WORKSPACE}/vsag_tag
+          ./build-release/tools/create_old_version_index ${{ steps.set-version.outputs.version }}
+          cd ../vsag_index
+      - name: Config Git And Push
+        uses: peter-evans/create-pull-request@v7
+        with:
+          path: vsag_index
+          base: old_version_index
+          signoff: 'true'
+          title: 'Update tag index ${{ steps.set-version.outputs.version }}'
