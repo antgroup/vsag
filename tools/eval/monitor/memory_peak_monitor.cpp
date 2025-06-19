@@ -24,7 +24,8 @@ GetProcFileName(pid_t pid) {
     return "/proc/" + std::to_string(pid) + "/statm";
 }
 
-MemoryPeakMonitor::MemoryPeakMonitor(const std::string& name) : Monitor("memory_peak_monitor"), process_name_(name) {
+MemoryPeakMonitor::MemoryPeakMonitor(const std::string& name)
+    : Monitor("memory_peak_monitor"), process_name_(name) {
     this->pid_ = getpid();
     this->infile_.open(GetProcFileName(pid_));
     uint64_t val1, val2;
@@ -44,7 +45,8 @@ Monitor::JsonType
 MemoryPeakMonitor::GetResult() {
     JsonType result;
     std::vector<std::string> metrics = {"B", "KB", "MB", "GB", "TB"};
-    auto size = static_cast<float>((this->max_memory_ - this->init_memory_) * sysconf(_SC_PAGESIZE));
+    auto size =
+        static_cast<float>((this->max_memory_ - this->init_memory_) * sysconf(_SC_PAGESIZE));
     size_t i = 0;
     while (size >= 1024.0F && i < metrics.size() - 1) {
         size /= 1024;
