@@ -69,3 +69,23 @@ TEST_CASE("SparseGraphDataCell Remove Test", "[ut][SparseGraphDataCell]") {
     graph_param->remove_flag_bit_ = remove_flag_bit;
     TestSparseGraphDataCell(graph_param, common_param, is_support_delete);
 }
+
+TEST_CASE("SparseGraphDataCell Merge Test", "[ut][SparseGraphDataCell]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    auto dim = GENERATE(32, 64);
+    auto max_degree = GENERATE(5, 32, 64);
+    auto is_support_delete = GENERATE(true, false);
+    int count = 1000;
+
+    IndexCommonParam common_param;
+    common_param.dim_ = dim;
+    common_param.allocator_ = allocator;
+    auto graph_param = std::make_shared<SparseGraphDatacellParameter>();
+    graph_param->max_degree_ = max_degree;
+    graph_param->support_delete_ = is_support_delete;
+
+    auto graph = GraphInterface::MakeInstance(graph_param, common_param);
+    GraphInterfaceTest test(graph);
+    auto other = GraphInterface::MakeInstance(graph_param, common_param);
+    test.MergeTest(other, count);
+}

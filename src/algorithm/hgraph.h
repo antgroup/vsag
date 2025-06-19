@@ -157,6 +157,9 @@ public:
     void
     GetRawData(vsag::InnerIdType inner_id, uint8_t* data) const override;
 
+    void
+    Merge(const std::vector<MergeUnit>& merge_units) override;
+
 private:
     const void*
     get_data(const DatasetPtr& dataset, uint32_t index = 0) const {

@@ -19,13 +19,13 @@ namespace vsag {
 
 void
 LabelTable::MergeOther(const LabelTablePtr& other, const IdMapFunction& id_map) {
-    auto cur_size = this->label_table_.size();
-    auto other_size = other->label_table_.size();
-    this->label_table_.resize(this->label_table_.size() + other->label_table_.size());
+    auto other_size = other->GetTotalCount();
+    this->label_table_.resize(total_count_ + other_size);
     for (int64_t i = 0; i < other_size; ++i) {
         auto new_label = std::get<1>(id_map(other->label_table_[i]));
-        this->label_table_[i + cur_size] = new_label;
-        this->label_remap_[new_label] = i + cur_size;
+        this->label_table_[i + total_count_] = new_label;
+        this->label_remap_[new_label] = i + total_count_;
     }
+    total_count_ += other_size;
 }
 }  // namespace vsag
