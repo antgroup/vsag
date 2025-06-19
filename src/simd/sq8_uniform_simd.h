@@ -17,39 +17,53 @@
 
 #include <cstdint>
 
+#include "simd_marco.h"
+
 namespace vsag {
 namespace generic {
 float
-SQ8UniformComputeCodesIP(const uint8_t* codes1, const uint8_t* codes2, uint64_t dim);
+SQ8UniformComputeCodesIP(const uint8_t* RESTRICT codes1,
+                         const uint8_t* RESTRICT codes2,
+                         uint64_t dim);
 }  // namespace generic
 
 namespace sse {
 float
-SQ8UniformComputeCodesIP(const uint8_t* codes1, const uint8_t* codes2, uint64_t dim);
+SQ8UniformComputeCodesIP(const uint8_t* RESTRICT codes1,
+                         const uint8_t* RESTRICT codes2,
+                         uint64_t dim);
 }  // namespace sse
 
 namespace avx {
 float
-SQ8UniformComputeCodesIP(const uint8_t* codes1, const uint8_t* codes2, uint64_t dim);
+SQ8UniformComputeCodesIP(const uint8_t* RESTRICT codes1,
+                         const uint8_t* RESTRICT codes2,
+                         uint64_t dim);
 }  // namespace avx
 
 namespace avx2 {
 float
-SQ8UniformComputeCodesIP(const uint8_t* codes1, const uint8_t* codes2, uint64_t dim);
+SQ8UniformComputeCodesIP(const uint8_t* RESTRICT codes1,
+                         const uint8_t* RESTRICT codes2,
+                         uint64_t dim);
 }  // namespace avx2
 
 namespace avx512 {
 float
-SQ8UniformComputeCodesIP(const uint8_t* codes1, const uint8_t* codes2, uint64_t dim);
+SQ8UniformComputeCodesIP(const uint8_t* RESTRICT codes1,
+                         const uint8_t* RESTRICT codes2,
+                         uint64_t dim);
 }  // namespace avx512
 
 namespace neon {
 float
-SQ8UniformComputeCodesIP(const uint8_t* codes1, const uint8_t* codes2, uint64_t dim);
+SQ8UniformComputeCodesIP(const uint8_t* RESTRICT codes1,
+                         const uint8_t* RESTRICT codes2,
+                         uint64_t dim);
 }  // namespace neon
 
-using SQ8UniformComputeCodesType = float (*)(const uint8_t* codes1,
-                                             const uint8_t* codes2,
+using SQ8UniformComputeCodesType = float (*)(const uint8_t* RESTRICT codes1,
+                                             const uint8_t* RESTRICT codes2,
                                              uint64_t dim);
 extern SQ8UniformComputeCodesType SQ8UniformComputeCodesIP;
 }  // namespace vsag

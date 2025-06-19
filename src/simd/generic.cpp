@@ -76,7 +76,7 @@ PQDistanceFloat256(const void* single_dim_centers, float single_dim_val, void* r
 }
 
 float
-FP32ComputeIP(const float* query, const float* codes, uint64_t dim) {
+FP32ComputeIP(const float* RESTRICT query, const float* RESTRICT codes, uint64_t dim) {
     float result = 0.0f;
 
     for (uint64_t i = 0; i < dim; ++i) {
@@ -86,7 +86,7 @@ FP32ComputeIP(const float* query, const float* codes, uint64_t dim) {
 }
 
 float
-FP32ComputeL2Sqr(const float* query, const float* codes, uint64_t dim) {
+FP32ComputeL2Sqr(const float* RESTRICT query, const float* RESTRICT codes, uint64_t dim) {
     float result = 0.0f;
     for (uint64_t i = 0; i < dim; ++i) {
         auto val = query[i] - codes[i];
@@ -96,12 +96,12 @@ FP32ComputeL2Sqr(const float* query, const float* codes, uint64_t dim) {
 }
 
 void
-FP32ComputeIPBatch4(const float* query,
+FP32ComputeIPBatch4(const float* RESTRICT query,
                     uint64_t dim,
-                    const float* codes1,
-                    const float* codes2,
-                    const float* codes3,
-                    const float* codes4,
+                    const float* RESTRICT codes1,
+                    const float* RESTRICT codes2,
+                    const float* RESTRICT codes3,
+                    const float* RESTRICT codes4,
                     float& result1,
                     float& result2,
                     float& result3,
@@ -115,12 +115,12 @@ FP32ComputeIPBatch4(const float* query,
 }
 
 void
-FP32ComputeL2SqrBatch4(const float* query,
+FP32ComputeL2SqrBatch4(const float* RESTRICT query,
                        uint64_t dim,
-                       const float* codes1,
-                       const float* codes2,
-                       const float* codes3,
-                       const float* codes4,
+                       const float* RESTRICT codes1,
+                       const float* RESTRICT codes2,
+                       const float* RESTRICT codes3,
+                       const float* RESTRICT codes4,
                        float& result1,
                        float& result2,
                        float& result3,
@@ -216,7 +216,7 @@ FloatToFP16(const float fp32_value) {
 }
 
 float
-BF16ComputeIP(const uint8_t* query, const uint8_t* codes, uint64_t dim) {
+BF16ComputeIP(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim) {
     float result = 0.0f;
     auto* query_bf16 = reinterpret_cast<const uint16_t*>(query);
     auto* codes_bf16 = reinterpret_cast<const uint16_t*>(codes);
@@ -227,7 +227,7 @@ BF16ComputeIP(const uint8_t* query, const uint8_t* codes, uint64_t dim) {
 }
 
 float
-BF16ComputeL2Sqr(const uint8_t* query, const uint8_t* codes, uint64_t dim) {
+BF16ComputeL2Sqr(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim) {
     float result = 0.0f;
     auto* query_bf16 = reinterpret_cast<const uint16_t*>(query);
     auto* codes_bf16 = reinterpret_cast<const uint16_t*>(codes);
@@ -239,7 +239,7 @@ BF16ComputeL2Sqr(const uint8_t* query, const uint8_t* codes, uint64_t dim) {
 }
 
 float
-FP16ComputeIP(const uint8_t* query, const uint8_t* codes, uint64_t dim) {
+FP16ComputeIP(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim) {
     float result = 0.0f;
     auto* query_bf16 = reinterpret_cast<const uint16_t*>(query);
     auto* codes_bf16 = reinterpret_cast<const uint16_t*>(codes);
@@ -250,7 +250,7 @@ FP16ComputeIP(const uint8_t* query, const uint8_t* codes, uint64_t dim) {
 }
 
 float
-FP16ComputeL2Sqr(const uint8_t* query, const uint8_t* codes, uint64_t dim) {
+FP16ComputeL2Sqr(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim) {
     float result = 0.0f;
     auto* query_bf16 = reinterpret_cast<const uint16_t*>(query);
     auto* codes_bf16 = reinterpret_cast<const uint16_t*>(codes);
@@ -262,10 +262,10 @@ FP16ComputeL2Sqr(const uint8_t* query, const uint8_t* codes, uint64_t dim) {
 }
 
 float
-SQ8ComputeIP(const float* query,
-             const uint8_t* codes,
-             const float* lower_bound,
-             const float* diff,
+SQ8ComputeIP(const float* RESTRICT query,
+             const uint8_t* RESTRICT codes,
+             const float* RESTRICT lower_bound,
+             const float* RESTRICT diff,
              uint64_t dim) {
     float result = 0.0f;
     for (uint64_t i = 0; i < dim; ++i) {
@@ -276,10 +276,10 @@ SQ8ComputeIP(const float* query,
 }
 
 float
-SQ8ComputeL2Sqr(const float* query,
-                const uint8_t* codes,
-                const float* lower_bound,
-                const float* diff,
+SQ8ComputeL2Sqr(const float* RESTRICT query,
+                const uint8_t* RESTRICT codes,
+                const float* RESTRICT lower_bound,
+                const float* RESTRICT diff,
                 uint64_t dim) {
     float result = 0.0f;
     for (uint64_t i = 0; i < dim; ++i) {
@@ -291,10 +291,10 @@ SQ8ComputeL2Sqr(const float* query,
 }
 
 float
-SQ8ComputeCodesIP(const uint8_t* codes1,
-                  const uint8_t* codes2,
-                  const float* lower_bound,
-                  const float* diff,
+SQ8ComputeCodesIP(const uint8_t* RESTRICT codes1,
+                  const uint8_t* RESTRICT codes2,
+                  const float* RESTRICT lower_bound,
+                  const float* RESTRICT diff,
                   uint64_t dim) {
     float result = 0.0f;
     for (uint64_t i = 0; i < dim; ++i) {
@@ -308,10 +308,10 @@ SQ8ComputeCodesIP(const uint8_t* codes1,
 }
 
 float
-SQ8ComputeCodesL2Sqr(const uint8_t* codes1,
-                     const uint8_t* codes2,
-                     const float* lower_bound,
-                     const float* diff,
+SQ8ComputeCodesL2Sqr(const uint8_t* RESTRICT codes1,
+                     const uint8_t* RESTRICT codes2,
+                     const float* RESTRICT lower_bound,
+                     const float* RESTRICT diff,
                      uint64_t dim) {
     float result = 0.0f;
     for (uint64_t i = 0; i < dim; ++i) {
@@ -325,10 +325,10 @@ SQ8ComputeCodesL2Sqr(const uint8_t* codes1,
 }
 
 float
-SQ4ComputeIP(const float* query,
-             const uint8_t* codes,
-             const float* lower_bound,
-             const float* diff,
+SQ4ComputeIP(const float* RESTRICT query,
+             const uint8_t* RESTRICT codes,
+             const float* RESTRICT lower_bound,
+             const float* RESTRICT diff,
              uint64_t dim) {
     float result = 0;
     float x_lo = 0, x_hi = 0, y_lo = 0, y_hi = 0;
@@ -351,10 +351,10 @@ SQ4ComputeIP(const float* query,
 }
 
 float
-SQ4ComputeL2Sqr(const float* query,
-                const uint8_t* codes,
-                const float* lower_bound,
-                const float* diff,
+SQ4ComputeL2Sqr(const float* RESTRICT query,
+                const uint8_t* RESTRICT codes,
+                const float* RESTRICT lower_bound,
+                const float* RESTRICT diff,
                 uint64_t dim) {
     float result = 0;
     float x_lo = 0, x_hi = 0, y_lo = 0, y_hi = 0;
@@ -377,10 +377,10 @@ SQ4ComputeL2Sqr(const float* query,
 }
 
 float
-SQ4ComputeCodesIP(const uint8_t* codes1,
-                  const uint8_t* codes2,
-                  const float* lower_bound,
-                  const float* diff,
+SQ4ComputeCodesIP(const uint8_t* RESTRICT codes1,
+                  const uint8_t* RESTRICT codes2,
+                  const float* RESTRICT lower_bound,
+                  const float* RESTRICT diff,
                   uint64_t dim) {
     float result = 0, delta = 0;
     float x_lo = 0, x_hi = 0, y_lo = 0, y_hi = 0;
@@ -403,10 +403,10 @@ SQ4ComputeCodesIP(const uint8_t* codes1,
 }
 
 float
-SQ4ComputeCodesL2Sqr(const uint8_t* codes1,
-                     const uint8_t* codes2,
-                     const float* lower_bound,
-                     const float* diff,
+SQ4ComputeCodesL2Sqr(const uint8_t* RESTRICT codes1,
+                     const uint8_t* RESTRICT codes2,
+                     const float* RESTRICT lower_bound,
+                     const float* RESTRICT diff,
                      uint64_t dim) {
     float result = 0, delta = 0;
     float x_lo = 0, x_hi = 0, y_lo = 0, y_hi = 0;
@@ -429,7 +429,9 @@ SQ4ComputeCodesL2Sqr(const uint8_t* codes1,
 }
 
 float
-SQ4UniformComputeCodesIP(const uint8_t* codes1, const uint8_t* codes2, uint64_t dim) {
+SQ4UniformComputeCodesIP(const uint8_t* RESTRICT codes1,
+                         const uint8_t* RESTRICT codes2,
+                         uint64_t dim) {
     int32_t result = 0;
 
     for (uint64_t d = 0; d < dim; d += 2) {
@@ -445,7 +447,9 @@ SQ4UniformComputeCodesIP(const uint8_t* codes1, const uint8_t* codes2, uint64_t 
 }
 
 float
-SQ8UniformComputeCodesIP(const uint8_t* codes1, const uint8_t* codes2, uint64_t dim) {
+SQ8UniformComputeCodesIP(const uint8_t* RESTRICT codes1,
+                         const uint8_t* RESTRICT codes2,
+                         uint64_t dim) {
     int32_t result = 0;
     for (uint64_t d = 0; d < dim; d++) {
         result += codes1[d] * codes2[d];
@@ -564,10 +568,10 @@ void
 Prefetch(const void* data){};
 
 void
-PQFastScanLookUp32(const uint8_t* lookup_table,
-                   const uint8_t* codes,
+PQFastScanLookUp32(const uint8_t* RESTRICT lookup_table,
+                   const uint8_t* RESTRICT codes,
                    uint64_t pq_dim,
-                   int32_t* result) {
+                   int32_t* RESTRICT result) {
     for (size_t i = 0; i < pq_dim; i++) {
         const auto* dict = lookup_table;
         lookup_table += 16;

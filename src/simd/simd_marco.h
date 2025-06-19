@@ -15,27 +15,12 @@
 
 #pragma once
 
-#include <cmath>
-#include <cstdlib>
-
-#include "basic_func.h"
-#include "bf16_simd.h"
-#include "bit_simd.h"
-#include "fp16_simd.h"
-#include "fp32_simd.h"
-#include "normalize.h"
-#include "pqfs_simd.h"
-#include "rabitq_simd.h"
-#include "simd_marco.h"
-#include "simd_status.h"
-#include "sq4_simd.h"
-#include "sq4_uniform_simd.h"
-#include "sq8_simd.h"
-#include "sq8_uniform_simd.h"
-
-namespace vsag {
-
-SimdStatus
-setup_simd();
-
-}  // namespace vsag
+#if defined(__cplusplus)
+#if defined(__GNUC__) || defined(__clang__)
+#define RESTRICT __restrict__
+#else
+#define RESTRICT
+#endif
+#else
+#define RESTRICT restrict
+#endif
