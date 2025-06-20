@@ -216,11 +216,6 @@ public:
     }
 
     tl::expected<void, Error>
-    Serialize(std::ostream& out_stream) override {
-        SAFE_CALL(return this->serialize(out_stream));
-    }
-
-    tl::expected<void, Error>
     Deserialize(const BinarySet& binary_set) override {
         SAFE_CALL(return this->deserialize(binary_set));
     }
@@ -230,11 +225,18 @@ public:
         SAFE_CALL(return this->deserialize(reader_set));
     }
 
+public:
+    tl::expected<void, Error>
+    Serialize(std::ostream& out_stream) override {
+        SAFE_CALL(return this->serialize(out_stream));
+    }
+
     tl::expected<void, Error>
     Deserialize(std::istream& in_stream) override {
         SAFE_CALL(return this->deserialize(in_stream));
     }
 
+public:
     tl::expected<void, Error>
     Merge(const std::vector<MergeUnit>& merge_units) override {
         SAFE_CALL(return this->merge(merge_units));
@@ -372,13 +374,13 @@ private:
     serialize() const;
 
     tl::expected<void, Error>
-    serialize(std::ostream& out_stream);
-
-    tl::expected<void, Error>
     deserialize(const BinarySet& binary_set);
 
     tl::expected<void, Error>
     deserialize(const ReaderSet& reader_set);
+
+    tl::expected<void, Error>
+    serialize(std::ostream& out_stream);
 
     tl::expected<void, Error>
     deserialize(std::istream& in_stream);

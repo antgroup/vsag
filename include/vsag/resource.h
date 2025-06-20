@@ -17,8 +17,8 @@
 
 #include <memory>
 
-#include "allocator.h"
-#include "thread_pool.h"
+#include "vsag/allocator.h"
+#include "vsag/thread_pool.h"
 
 namespace vsag {
 /**
