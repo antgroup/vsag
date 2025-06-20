@@ -40,12 +40,6 @@ InnerIndexInterface::Build(const DatasetPtr& base) {
 }
 
 DatasetPtr
-InnerIndexInterface::SearchWithRequest(const SearchRequest& request) const {
-    throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
-                        "Index doesn't support SearchWithRequest");
-}
-
-DatasetPtr
 InnerIndexInterface::KnnSearch(const DatasetPtr& query,
                                int64_t k,
                                const std::string& parameters,

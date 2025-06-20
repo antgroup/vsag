@@ -45,6 +45,7 @@ public:
     [[nodiscard]] virtual uint64_t
     GetValueCount() const = 0;
 };
+using AttributePtr = std::shared_ptr<Attribute>;
 
 template <class T>
 class AttributeValue : public Attribute {

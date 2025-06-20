@@ -75,6 +75,9 @@ public:
               const std::string& parameters,
               const FilterPtr& filter) const override;
 
+    [[nodiscard]] DatasetPtr
+    SearchWithRequest(const SearchRequest& request) const override;
+
     DatasetPtr
     RangeSearch(const DatasetPtr& query,
                 float radius,

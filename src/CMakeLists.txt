@@ -8,6 +8,8 @@ file (GLOB CPP_SRCS "*.cpp")
 list (FILTER CPP_SRCS EXCLUDE REGEX "_test.cpp")
 
 file (GLOB CPP_ATTR_SRCS "attr/*.cpp")
+file (GLOB CPP_ATTR_DETAIL_SRCS "attr/**/*.cpp")
+list (APPEND CPP_ATTR_SRCS ${CPP_ATTR_DETAIL_SRCS})
 list (FILTER CPP_ATTR_SRCS EXCLUDE REGEX "_test.cpp")
 
 file (GLOB CPP_IMPL_SRCS "impl/*.cpp")

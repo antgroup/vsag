@@ -17,6 +17,8 @@
 
 #include <set>
 
+#include "attr/executor/executor.h"
+#include "attr/expression_visitor.h"
 #include "impl/basic_searcher.h"
 #include "index/index_impl.h"
 #include "inner_string_params.h"
@@ -533,9 +535,14 @@ IVF::search(const DatasetPtr& query, const InnerSearchParam& param) const {
         }
 
         bucket_->ScanBucketById(dist.data(), computer, bucket_id);
+        FilterPtr attr_ft = nullptr;
+        if (param.executor != nullptr) {
+            attr_ft = param.executor->RunWithBucket(bucket_id);
+        }
         for (int j = 0; j < bucket_size; ++j) {
             auto origin_id = ids[j] / buckets_per_data_;
-            if (ft == nullptr or ft->CheckValid(origin_id)) {
+            if ((ft == nullptr or ft->CheckValid(origin_id)) and
+                (attr_ft == nullptr or attr_ft->CheckValid(j))) {
                 dist[j] -= ip_distance;
                 if constexpr (mode == KNN_SEARCH) {
                     if (search_result->Size() < topk or dist[j] < cur_heap_top) {
@@ -637,6 +644,34 @@ IVF::check_merge_illegal(const vsag::MergeUnit& unit) const {
             ErrorType::INVALID_ARGUMENT,
             "Merge Failed: IVF model not match, try to merge a different model ivf index");
     }
+}
+
+DatasetPtr
+IVF::SearchWithRequest(const SearchRequest& request) const {
+    auto param = this->create_search_param(request.params_str_, request.filter_);
+    param.search_mode = KNN_SEARCH;
+    param.topk = request.topk_;
+    if (use_reorder_) {
+        param.topk = static_cast<int64_t>(param.factor * static_cast<float>(request.topk_));
+    }
+    auto query = request.query_;
+    if (request.enable_attribute_filter_) {
+        auto expr = AstParse(request.attribute_filter_str_);
+        auto executor = Executor::MakeInstance(this->allocator_, expr, this->attr_filter_index_);
+        param.executor = executor;
+    }
+    auto search_result = this->search<KNN_SEARCH>(query, param);
+    if (use_reorder_) {
+        return reorder(request.topk_, search_result, query->GetFloat32Vectors());
+    }
+    auto count = static_cast<const int64_t>(search_result->Size());
+    auto [dataset_results, dists, labels] = CreateFastDataset(count, allocator_);
+    for (int64_t j = count - 1; j >= 0; --j) {
+        dists[j] = search_result->Top().first;
+        labels[j] = label_table_->GetLabelById(search_result->Top().second);
+        search_result->Pop();
+    }
+    return std::move(dataset_results);
 }
 
 }  // namespace vsag
