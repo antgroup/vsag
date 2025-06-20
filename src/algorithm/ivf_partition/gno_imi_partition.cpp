@@ -191,7 +191,9 @@ GNOIMIPartition::Train(const DatasetPtr dataset) {
 }
 
 Vector<BucketIdType>
-GNOIMIPartition::ClassifyDatas(const void* datas, int64_t count, BucketIdType buckets_per_data) {
+GNOIMIPartition::ClassifyDatas(const void* datas,
+                               int64_t count,
+                               BucketIdType buckets_per_data) const {
     Vector<BucketIdType> result(buckets_per_data * count, this->allocator_);
     inner_joint_classify_datas(
         reinterpret_cast<const float*>(datas), count, buckets_per_data, result.data());
@@ -331,7 +333,7 @@ void
 GNOIMIPartition::inner_joint_classify_datas(const float* datas,
                                             int64_t count,
                                             BucketIdType buckets_per_data,
-                                            BucketIdType* result) {
+                                            BucketIdType* result) const {
     Vector<float> dist_to_s(bucket_count_s_ * count, this->allocator_);
     Vector<float> dist_to_t(bucket_count_t_ * count, this->allocator_);
     Vector<std::pair<float, BucketIdType>> precomputed_terms_s(bucket_count_s_, this->allocator_);
