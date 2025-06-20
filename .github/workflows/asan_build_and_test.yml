@@ -24,7 +24,7 @@ jobs:
       - name: Load Cache
         uses: hendrikmuhs/ccache-action@v1.2
         with:
-          max-size: "5G"
+          max-size: "2G"
           save: ${{ github.event_name != 'pull_request' }}
           key: build-${{ hashFiles('./CMakeLists.txt') }}-${{ hashFiles('./.circleci/fresh_ci_cache.commit') }}
       - name: Make Asan
@@ -55,7 +55,7 @@ jobs:
       - name: Load Cache
         uses: hendrikmuhs/ccache-action@v1.2
         with:
-          max-size: "5G"
+          max-size: "2G"
           save: ${{ github.event_name != 'pull_request' }}
           key: build-aarch-${{ hashFiles('./CMakeLists.txt') }}-${{ hashFiles('./.circleci/fresh_ci_cache.commit') }}
       - name: Make Asan
