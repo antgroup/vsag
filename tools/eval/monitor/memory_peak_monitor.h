@@ -26,7 +26,7 @@ namespace vsag::eval {
 
 class MemoryPeakMonitor : public Monitor {
 public:
-    explicit MemoryPeakMonitor();
+    explicit MemoryPeakMonitor(const std::string& name);
 
     ~MemoryPeakMonitor() override = default;
 
@@ -44,6 +44,8 @@ public:
 
 private:
     uint64_t max_memory_{0};
+    uint64_t init_memory_{0};
+    std::string process_name_{};
 
     pid_t pid_{0};
 
