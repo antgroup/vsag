@@ -337,7 +337,7 @@ IVF::Add(const DatasetPtr& base) {
             auto* inner_ids = this->bucket_->GetInnerIds(bucket_id);
             for (InnerIdType j = 0; j < bucket_size; ++j) {
                 auto inner_id = inner_ids[j];
-                const auto& attr_set = attr_sets[inner_id - this->total_elements_];
+                const auto& attr_set = attr_sets[inner_id - current_num];
                 this->attr_filter_index_->InsertWithBucket(attr_set, j, bucket_id);
             }
         }
