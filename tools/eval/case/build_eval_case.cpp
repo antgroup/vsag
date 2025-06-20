@@ -71,6 +71,9 @@ BuildEvalCase::do_build() {
         monitor->Start();
     }
     auto build_index = index_->Build(base);
+    if (not build_index.has_value()) {
+        throw std::runtime_error(build_index.error().message);
+    }
     for (auto& monitor : monitors_) {
         monitor->Record();
         monitor->Stop();
