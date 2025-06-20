@@ -51,6 +51,10 @@ HGraphParameter::FromJson(const JsonType& json) {
         this->use_attribute_filter = json[HGRAPH_USE_ATTRIBUTE_FILTER_KEY];
     }
 
+    if (json.contains(HGRAPH_STATIC)) {
+        this->is_static = json[HGRAPH_STATIC];
+    }
+
     CHECK_ARGUMENT(json.contains(HGRAPH_BASE_CODES_KEY),
                    fmt::format("hgraph parameters must contains {}", HGRAPH_BASE_CODES_KEY));
     const auto& base_codes_json = json[HGRAPH_BASE_CODES_KEY];
