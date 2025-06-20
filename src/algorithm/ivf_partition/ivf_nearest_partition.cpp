@@ -88,7 +88,7 @@ IVFNearestPartition::ClassifyDatas(const void* datas,
                                    int64_t count,
                                    BucketIdType buckets_per_data) const {
     Vector<BucketIdType> result(buckets_per_data * count, -1, this->allocator_);
-    auto task = [&](int i) {
+    auto task = [&](int64_t i) {
         auto query = Dataset::Make();
         query->Dim(this->dim_)
             ->Float32Vectors(reinterpret_cast<const float*>(datas) + i * this->dim_)
