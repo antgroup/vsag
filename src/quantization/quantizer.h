@@ -163,7 +163,7 @@ public:
 
     inline float
     ComputeDist(Computer<QuantT>& computer, const uint8_t* codes) const {
-        float dist = 0.0f;
+        float dist = 0.0F;
         cast().ComputeDistImpl(computer, codes, &dist);
         return dist;
     }

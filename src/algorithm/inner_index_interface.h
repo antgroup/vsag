@@ -88,9 +88,6 @@ public:
     Build(const DatasetPtr& base);
 
     [[nodiscard]] virtual DatasetPtr
-    SearchWithRequest(const SearchRequest& request) const;
-
-    [[nodiscard]] virtual DatasetPtr
     KnnSearch(const DatasetPtr& query,
               int64_t k,
               const std::string& parameters,
@@ -126,6 +123,12 @@ public:
     [[nodiscard]] virtual DatasetPtr
     KnnSearch(const DatasetPtr& query, int64_t k, SearchParam& search_param) const {
         throw std::runtime_error("Index doesn't support new filter");
+    }
+
+    [[nodiscard]] virtual DatasetPtr
+    SearchWithRequest(const SearchRequest& request) const {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "Index doesn't support SearchWithRequest");
     }
 
     [[nodiscard]] virtual DatasetPtr
