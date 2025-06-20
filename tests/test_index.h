@@ -46,7 +46,7 @@ public:
         vsag::Options::Instance().logger()->SetLevel(vsag::Logger::Level::kDEBUG);
     }
 
-protected:
+public:
     static IndexPtr
     TestFactory(const std::string& name,
                 const std::string& build_param,

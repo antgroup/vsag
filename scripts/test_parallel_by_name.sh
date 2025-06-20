@@ -9,18 +9,27 @@ othertag=""
 rm -rf ./log
 mkdir ./log
 
-testname=$1
+if [ $# -eq 1 ]; then
+    testname="$1"
+    addition_tag="~[daily]"
+elif [ $# -eq 2 ]; then
+    testname="$1"
+    addition_tag="$2"
+else
+    echo "usage: $0 <testname> [addition_tag]"
+    exit 1
+fi
 
 for tag in ${parallel_tags}
 do
   othertag="~"${tag}${othertag}
-  ./build/tests/${testname} -d yes ${UT_FILTER} -a --order rand --allow-running-no-tests ${tag} -o ./log/${tag}.log &
+  ./build/tests/${testname} -d yes ${UT_FILTER} -a --order rand --allow-running-no-tests ${tag} ${addition_tag} -o ./log/${tag}.log &
   pids+=($!)
   logname="./log/"${tag}".log"
   logger_files+=($logname)
 done
 
-./build/tests/${testname} -d yes ${UT_FILTER} -a --order rand --allow-running-no-tests ${othertag} -o ./log/other.log &
+./build/tests/${testname} -d yes ${UT_FILTER} -a --order rand --allow-running-no-tests ${othertag} ${addition_tag} -o ./log/other.log &
 pids+=($!)
 logger_files+=("./log/other.log")
 
