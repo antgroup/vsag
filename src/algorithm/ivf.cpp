@@ -327,9 +327,6 @@ IVF::Add(const DatasetPtr& base) {
     }
 
     this->bucket_->Package();
-    if (use_reorder_) {
-        this->reorder_codes_->BatchInsertVector(base->GetFloat32Vectors(), base->GetNumElements());
-    }
     if (use_attribute_filter_ and this->attr_filter_index_ != nullptr and attr_sets != nullptr) {
         for (uint64_t i = 0; i < this->bucket_->bucket_count_; ++i) {
             auto bucket_id = static_cast<BucketIdType>(i);
@@ -345,7 +342,6 @@ IVF::Add(const DatasetPtr& base) {
             }
         }
     }
-    this->total_elements_ += num_element;
     return {};
 }
 
