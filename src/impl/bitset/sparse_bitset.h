@@ -51,13 +51,22 @@ public:
     Dump() override;
 
     void
-    Or(const Bitset& another) override;
+    Or(const ComputableBitset& another) override;
 
     void
-    And(const Bitset& another) override;
+    And(const ComputableBitset& another) override;
 
     void
-    Xor(const Bitset& another) override;
+    Xor(const ComputableBitset& another) override;
+
+    void
+    Or(const ComputableBitsetPtr& another) override;
+
+    void
+    And(const ComputableBitsetPtr& another) override;
+
+    void
+    Xor(const ComputableBitsetPtr& another) override;
 
     void
     Not() override;
@@ -67,6 +76,9 @@ public:
 
     void
     Deserialize(StreamReader& reader) override;
+
+    void
+    Clear() override;
 
 private:
     mutable std::mutex mutex_;

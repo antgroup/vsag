@@ -332,19 +332,5 @@ private:
 };
 
 vsag::ExprPtr
-AstParse(const std::string& filter_condition_str) {
-    antlr4::ANTLRInputStream input(filter_condition_str);
-    FCLexer lexer(&input);
-    antlr4::CommonTokenStream tokens(&lexer);
-    FCParser parser(&tokens);
-
-    FCErrorListener errorListener(filter_condition_str);
-    lexer.removeErrorListeners();
-    lexer.addErrorListener(&errorListener);
-    parser.removeErrorListeners();
-    parser.addErrorListener(&errorListener);
-    vsag::FCExpressionVisitor visitor;
-    auto expr_ptr = std::any_cast<vsag::ExprPtr>(visitor.visit(parser.filter_condition()));
-    return std::move(expr_ptr);
-}
+AstParse(const std::string& filter_condition_str);
 }  // namespace vsag
