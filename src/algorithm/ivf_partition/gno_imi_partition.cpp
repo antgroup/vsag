@@ -293,7 +293,7 @@ GNOIMIPartition::Serialize(StreamWriter& writer) {
     StreamWriter::WriteVector(writer, this->precomputed_terms_st_);
 }
 void
-GNOIMIPartition::Deserialize(StreamReader& reader) {
+GNOIMIPartition::Deserialize(lvalue_or_rvalue<StreamReader> reader) {
     IVFPartitionStrategy::Deserialize(reader);
     StreamReader::ReadObj<BucketIdType>(reader, this->bucket_count_s_);
     StreamReader::ReadObj<BucketIdType>(reader, this->bucket_count_t_);

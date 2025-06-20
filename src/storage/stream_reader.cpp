@@ -17,12 +17,23 @@
 
 #include <fmt/format-inl.h>
 
+#include <cstdint>
+#include <fstream>
+#include <iostream>
+
+#include "../logger.h"
+#include "footer.h"
 #include "vsag/options.h"
 #include "vsag_exception.h"
 
-ReadFuncStreamReader::ReadFuncStreamReader(std::function<void(uint64_t, uint64_t, void*)> read_func,
-                                           uint64_t cursor)
-    : readFunc_(std::move(read_func)), cursor_(cursor) {
+SliceReader
+StreamReader::Slice(uint64_t begin, uint64_t length) {
+    return {this, begin, length};
+}
+
+SliceReader
+StreamReader::Slice(uint64_t length) {
+    return {this, length};
 }
 
 void
@@ -41,11 +52,16 @@ ReadFuncStreamReader::GetCursor() const {
     return cursor_;
 }
 
-IOStreamReader::IOStreamReader(std::istream& istream) : istream_(istream) {
+ReadFuncStreamReader::ReadFuncStreamReader(std::function<void(uint64_t, uint64_t, void*)> read_func,
+                                           uint64_t cursor,
+                                           uint64_t length)
+    : StreamReader(length), readFunc_(std::move(read_func)), cursor_(cursor) {
 }
 
 void
 IOStreamReader::Read(char* data, uint64_t size) {
+    auto offset = std::to_string(istream_.tellg());
+    // vsag::logger::trace("io read offset {} size {}", offset, size);
     this->istream_.read(data, static_cast<int64_t>(size));
     if (istream_.fail()) {
         auto remaining = std::streamsize(this->istream_.gcount());
@@ -58,6 +74,7 @@ IOStreamReader::Read(char* data, uint64_t size) {
 
 void
 IOStreamReader::Seek(uint64_t cursor) {
+    // vsag::logger::trace("reader seek absolute::{}", cursor);
     istream_.seekg(static_cast<int64_t>(cursor), std::ios::beg);
 }
 
@@ -67,17 +84,16 @@ IOStreamReader::GetCursor() const {
     return cursor;
 }
 
-BufferStreamReader::BufferStreamReader(StreamReader* reader,
-                                       size_t max_size,
-                                       vsag::Allocator* allocator)
-    : reader_impl_(reader), max_size_(max_size), allocator_(allocator) {
-    buffer_size_ = std::min(max_size_, vsag::Options::Instance().block_size_limit());
-    buffer_cursor_ = buffer_size_;
-    valid_size_ = buffer_size_;
+IOStreamReader::IOStreamReader(std::istream& istream) : istream_(istream) {
+    auto cur_pos = istream.tellg();
+    istream.seekg(0, std::ios::end);
+    length_ = istream.tellg() - cur_pos;
+    istream.seekg(cur_pos);
 }
 
-BufferStreamReader::~BufferStreamReader() {
-    allocator_->Deallocate(buffer_);
+uint64_t
+BufferStreamReader::Length() {
+    return reader_impl_->Length();
 }
 
 void
@@ -124,6 +140,7 @@ BufferStreamReader::Read(char* data, uint64_t size) {
 
 void
 BufferStreamReader::Seek(uint64_t cursor) {
+    // vsag::logger::trace("reader seek absolute::{}", cursor);
     reader_impl_->Seek(cursor);
     buffer_cursor_ = valid_size_;  // record the invalidation of the buffer
     cursor_ = cursor;
@@ -132,4 +149,52 @@ BufferStreamReader::Seek(uint64_t cursor) {
 uint64_t
 BufferStreamReader::GetCursor() const {
     return reader_impl_->GetCursor() - (valid_size_ - buffer_cursor_);
+}
+
+BufferStreamReader::BufferStreamReader(StreamReader* reader,
+                                       size_t max_size,
+                                       vsag::Allocator* allocator)
+    : reader_impl_(reader), max_size_(max_size), allocator_(allocator) {
+    buffer_size_ = std::min(max_size_, vsag::Options::Instance().block_size_limit());
+    buffer_cursor_ = buffer_size_;
+    valid_size_ = buffer_size_;
+}
+
+BufferStreamReader::~BufferStreamReader() {
+    allocator_->Deallocate(buffer_);
+}
+
+uint64_t
+SliceReader::Length() {
+    return length_;
+}
+
+void
+SliceReader::Read(char* data, uint64_t size) {
+    // TODO(wxyu): check if the read operation is out of bounds
+    reader_impl_->Read(data, size);
+    cursor_ += size;
+}
+
+void
+SliceReader::Seek(uint64_t cursor) {
+    // TODO(wxyu): check if the seek operation is out of bounds
+    reader_impl_->Seek(begin_ + cursor);
+    cursor_ = cursor;
+}
+
+uint64_t
+SliceReader::GetCursor() const {
+    return cursor_;
+}
+
+SliceReader::SliceReader(StreamReader* reader, uint64_t begin, uint64_t length)
+    : StreamReader(length), reader_impl_(reader), begin_(begin) {
+    // vsag::logger::trace("SliceReader [{}, {})", begin_, begin_ + length_);
+}
+
+SliceReader::SliceReader(StreamReader* reader, uint64_t length)
+    : StreamReader(length), reader_impl_(reader) {
+    begin_ = reader->GetCursor();
+    // vsag::logger::trace("SliceReader [{}, {})", begin_, begin_ + length_);
 }

@@ -22,8 +22,8 @@
 
 #include "../logger.h"
 #include "matrix_rotator.h"
-#include "stream_reader.h"
-#include "stream_writer.h"
+#include "storage/stream_reader.h"
+#include "storage/stream_writer.h"
 #include "typing.h"
 #include "vsag/allocator.h"
 

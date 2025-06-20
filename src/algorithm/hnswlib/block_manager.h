@@ -21,8 +21,8 @@
 #include <mutex>
 
 #include "../../default_allocator.h"
-#include "stream_reader.h"
-#include "stream_writer.h"
+#include "storage/stream_reader.h"
+#include "storage/stream_writer.h"
 
 namespace hnswlib {
 
@@ -39,10 +39,7 @@ public:
     Resize(size_t new_max_elements);
 
     bool
-    Serialize(char*& buffer, size_t cur_element_count);
-
-    bool
-    Serialize(std::ostream& ofs, size_t cur_element_count);
+    Serialize(StreamWriter& writer, size_t cur_element_count);
 
     bool
     Deserialize(std::istream& ifs, size_t cur_element_count);
