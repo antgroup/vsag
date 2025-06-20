@@ -35,9 +35,11 @@ public:
                        "DataType",
                        "MetricType",
                        "IndexParam",
+                       "Memory(build)",
                        "BuildTime",
                        "TPS",
                        "SearchParam",
+                       "Memory(search)",
                        "QPS",
                        "LatencyAvg(ms)",
                        "RecallAvg"});
@@ -49,9 +51,11 @@ public:
             JSON_GET(data_type, value["dataset_info"]["data_type"], "N/A");
             JSON_GET(metric_type, value["index_info"]["metric_type"], "N/A");
             JSON_GET(index_param, value["index_info"]["index_param"].dump(), "N/A");
+            JSON_GET(memory_build, value["memory_peak(build)"], "N/A");
             JSON_GET(build_time, std::to_string(value["duration(s)"].get<float>()), "N/A");
             JSON_GET(tps, std::to_string(value["tps"].get<float>()), "N/A");
             JSON_GET(search_param, value["search_param"], "N/A");
+            JSON_GET(memory_search, value["memory_peak(search)"], "N/A");
             JSON_GET(qps, std::to_string(value["qps"].get<float>()), "N/A");
             JSON_GET(latency_avg, std::to_string(value["latency_avg(ms)"].get<float>()), "N/A");
             JSON_GET(recall_avg, std::to_string(value["recall_avg"].get<float>()), "N/A");
@@ -63,9 +67,11 @@ public:
                            data_type,
                            metric_type,
                            index_param,
+                           memory_build,
                            build_time,
                            tps,
                            search_param,
+                           memory_search,
                            qps,
                            latency_avg,
                            recall_avg});
