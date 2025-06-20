@@ -20,39 +20,30 @@
 
 #include <random>
 
-#include "../logger.h"
-#include "stream_reader.h"
-#include "stream_writer.h"
-#include "typing.h"
-#include "vsag/allocator.h"
+#include "vector_transformer.h"
 
 namespace vsag {
 
 // aka PCA
-class PrincipalComponentAnalysis {
+class PCATransformer : public VectorTransformer {
 public:
     // interface
-    PrincipalComponentAnalysis(uint64_t original_dim, uint64_t target_dim, Allocator* allocator)
-        : original_dim_(original_dim),
-          target_dim_(target_dim),
-          allocator_(allocator),
-          pca_matrix_(allocator),
-          mean_(allocator) {
-        pca_matrix_.resize(target_dim * original_dim);
-        mean_.resize(original_dim);
-    }
-
-    bool
-    Train(const float* data, uint64_t count);
+    explicit PCATransformer(Allocator* allocator, int64_t input_dim, int64_t output_dim);
 
     void
-    Transform(const float* original_vec, float* transformed_vec) const;
+    Train(const float* data, uint64_t count) override;
 
     void
-    Serialize(StreamWriter& writer);
+    Serialize(StreamWriter& writer) const override;
 
     void
-    Deserialize(StreamReader& reader);
+    Deserialize(StreamReader& reader) override;
+
+    void
+    Transform(const float* input_vec, float* output_vec) const override;
+
+    void
+    InverseTransform(const float* input_vec, float* output_vec) const override;
 
 public:
     // make public for test
@@ -83,13 +74,8 @@ public:
     CentralizeData(const float* original_data, float* centralized_data) const;
 
 private:
-    Allocator* const allocator_{nullptr};
-
-    const uint64_t original_dim_;
-    const uint64_t target_dim_;
-
-    vsag::Vector<float> pca_matrix_;  // [target_dim_ * original_dim_]
-    vsag::Vector<float> mean_;        // [original_dim_ * 1]
+    Vector<float> pca_matrix_;  // [input_dim_ * output_dim_]
+    Vector<float> mean_;        // [input_dim_ * 1]
 };
 
 }  // namespace vsag
