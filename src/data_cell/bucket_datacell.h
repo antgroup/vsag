@@ -96,7 +96,7 @@ public:
     Serialize(StreamWriter& writer) override;
 
     void
-    Deserialize(StreamReader& reader) override;
+    Deserialize(lvalue_or_rvalue<StreamReader> reader) override;
 
     [[nodiscard]] std::string
     GetQuantizerName() override {
@@ -308,7 +308,7 @@ BucketDataCell<QuantTmpl, IOTmpl>::Serialize(StreamWriter& writer) {
 
 template <typename QuantTmpl, typename IOTmpl>
 void
-BucketDataCell<QuantTmpl, IOTmpl>::Deserialize(StreamReader& reader) {
+BucketDataCell<QuantTmpl, IOTmpl>::Deserialize(lvalue_or_rvalue<StreamReader> reader) {
     BucketInterface::Deserialize(reader);
     quantizer_->Deserialize(reader);
     for (BucketIdType i = 0; i < this->bucket_count_; ++i) {

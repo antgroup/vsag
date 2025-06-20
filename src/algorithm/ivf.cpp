@@ -15,6 +15,7 @@
 
 #include "ivf.h"
 
+#include <fstream>
 #include <set>
 
 #include "attr/executor/executor.h"
@@ -24,6 +25,9 @@
 #include "inner_string_params.h"
 #include "ivf_partition/gno_imi_partition.h"
 #include "ivf_partition/ivf_nearest_partition.h"
+#include "storage/serialization.h"
+#include "storage/stream_reader.h"
+#include "storage/stream_writer.h"
 #include "utils/standard_heap.h"
 #include "utils/util_functions.h"
 
@@ -400,38 +404,122 @@ IVF::Merge(const std::vector<MergeUnit>& merge_units) {
     this->bucket_->Package();
 }
 
+#define WRITE_DATACELL_WITH_NAME(writer, name, datacell)            \
+    datacell_offsets[(name)] = offset;                              \
+    auto datacell##_start = (writer).GetCursor();                   \
+    (datacell)->Serialize(writer);                                  \
+    auto datacell##_size = (writer).GetCursor() - datacell##_start; \
+    datacell_sizes[(name)] = datacell##_size;                       \
+    offset += datacell##_size;
+
 void
 IVF::Serialize(StreamWriter& writer) const {
-    StreamWriter::WriteObj(writer, this->total_elements_);
-    StreamWriter::WriteObj(writer, this->use_reorder_);
-    StreamWriter::WriteObj(writer, this->is_trained_);
+    // FIXME(wxyu): only for testing, remove before merge into the main branch
+    // if (not Options::Instance().new_version()) {
+    //     StreamWriter::WriteObj(writer, this->total_elements_);
+    //     StreamWriter::WriteObj(writer, this->use_reorder_);
+    //     StreamWriter::WriteObj(writer, this->is_trained_);
 
-    this->bucket_->Serialize(writer);
-    this->partition_strategy_->Serialize(writer);
-    this->label_table_->Serialize(writer);
+    //     this->bucket_->Serialize(writer);
+    //     this->partition_strategy_->Serialize(writer);
+    //     this->label_table_->Serialize(writer);
+    //     if (use_reorder_) {
+    //         this->reorder_codes_->Serialize(writer);
+    //     }
+    //     if (use_attribute_filter_) {
+    //         this->attr_filter_index_->Serialize(writer);
+    //     }
+    //     return;
+    // }
+
+    JsonType datacell_offsets;
+    JsonType datacell_sizes;
+    uint64_t offset = 0;
+
+    WRITE_DATACELL_WITH_NAME(writer, "bucket", bucket_);
+    WRITE_DATACELL_WITH_NAME(writer, "partition_strategy", partition_strategy_);
+    WRITE_DATACELL_WITH_NAME(writer, "label_table", label_table_);
+
     if (use_reorder_) {
-        this->reorder_codes_->Serialize(writer);
+        WRITE_DATACELL_WITH_NAME(writer, "reorder_codes", reorder_codes_);
     }
+
     if (use_attribute_filter_) {
-        this->attr_filter_index_->Serialize(writer);
+        WRITE_DATACELL_WITH_NAME(writer, "attr_filter_index", attr_filter_index_);
     }
+
+    // serialize footer (introduced since v0.15)
+    JsonType basic_info;
+    basic_info["total_elements"] = this->total_elements_;
+    basic_info["use_reorder"] = this->use_reorder_;
+    basic_info["is_trained"] = this->is_trained_;
+
+    auto metadata = std::make_shared<Metadata>();
+    metadata->Set("basic_info", basic_info);
+    metadata->Set("datacell_offsets", datacell_offsets);
+    metadata->Set("datacell_sizes", datacell_sizes);
+
+    auto footer = std::make_shared<Footer>(metadata);
+    footer->Write(writer);
 }
+
+#define READ_DATACELL_WITH_NAME(reader, name, datacell)              \
+    reader.PushSeek(datacell_offsets[(name)].get<uint64_t>());       \
+    (datacell)->Deserialize((reader).Slice(datacell_sizes[(name)])); \
+    (reader).PopSeek();
 
 void
 IVF::Deserialize(StreamReader& reader) {
-    StreamReader::ReadObj(reader, this->total_elements_);
-    StreamReader::ReadObj(reader, this->use_reorder_);
-    StreamReader::ReadObj(reader, this->is_trained_);
+    // try to deserialize footer (only in new version)
+    auto footer = Footer::Parse(reader);
 
-    this->bucket_->Deserialize(reader);
-    this->partition_strategy_->Deserialize(reader);
-    this->label_table_->Deserialize(reader);
-    if (use_reorder_) {
-        this->reorder_codes_->Deserialize(reader);
+    if (footer == nullptr) {  // old format, DON'T EDIT, remove in the future
+        logger::debug("parse with v0.14 version format");
+
+        StreamReader::ReadObj(reader, this->total_elements_);
+        StreamReader::ReadObj(reader, this->use_reorder_);
+        StreamReader::ReadObj(reader, this->is_trained_);
+
+        this->bucket_->Deserialize(reader);
+        this->partition_strategy_->Deserialize(reader);
+        this->label_table_->Deserialize(reader);
+        if (use_reorder_) {
+            this->reorder_codes_->Deserialize(reader);
+        }
+
+        if (use_attribute_filter_) {
+            this->attr_filter_index_->Deserialize(reader);
+        }
+    } else {  // create like `else if ( ver in [v0.15, v0.17] )` here if need in the future
+        logger::debug("parse with new version format");
+
+        auto metadata = footer->GetMetadata();
+        if (metadata->EmptyIndex()) {
+            return;
+        }
+
+        auto basic_info = metadata->Get("basic_info");
+        this->total_elements_ = basic_info["total_elements"];
+        this->use_reorder_ = basic_info["use_reorder"];
+        this->is_trained_ = basic_info["is_trained"];
+
+        JsonType datacell_offsets = metadata->Get("datacell_offsets");
+        logger::debug("datacell_offsets: {}", datacell_offsets.dump());
+        JsonType datacell_sizes = metadata->Get("datacell_sizes");
+        logger::debug("datacell_sizes: {}", datacell_sizes.dump());
+
+        READ_DATACELL_WITH_NAME(reader, "bucket", this->bucket_);
+        READ_DATACELL_WITH_NAME(reader, "partition_strategy", this->partition_strategy_);
+        READ_DATACELL_WITH_NAME(reader, "label_table", this->label_table_);
+        if (use_reorder_) {
+            READ_DATACELL_WITH_NAME(reader, "reorder_codes", this->reorder_codes_);
+        }
+        if (use_attribute_filter_) {
+            READ_DATACELL_WITH_NAME(reader, "attr_filter_index", this->attr_filter_index_);
+        }
     }
-    if (use_attribute_filter_) {
-        this->attr_filter_index_->Deserialize(reader);
-    }
+
+    // post serialize procedure
 }
 
 InnerSearchParam
@@ -634,11 +722,24 @@ IVF::check_merge_illegal(const vsag::MergeUnit& unit) const {
     std::stringstream ss2;
     IOStreamWriter writer1(ss1);
     cur_model->Serialize(writer1);
+
+    // std::ofstream of1("/tmp/vsag-f1.index", std::ios::binary | std::ios::out);
+    // IOStreamWriter os1(of1);
+    // cur_model->Serialize(os1);
+    // of1.close();
+
     cur_model.reset();
     auto other_model = other_ivf_index->ExportModel(index->GetCommonParam());
     IOStreamWriter writer2(ss2);
     other_model->Serialize(writer2);
+
+    // std::ofstream of2("/tmp/vsag-f2.index", std::ios::binary | std::ios::out);
+    // IOStreamWriter os2(of2);
+    // other_model->Serialize(os2);
+    // of2.close();
+
     other_model.reset();
+
     if (not check_equal_on_string_stream(ss1, ss2)) {
         throw VsagException(
             ErrorType::INVALID_ARGUMENT,

@@ -16,9 +16,9 @@
 
 #include <memory>
 
-#include "allocator.h"
-#include "index.h"
-#include "readerset.h"
+#include "vsag/allocator.h"
+#include "vsag/index.h"
+#include "vsag/readerset.h"
 
 namespace vsag {
 

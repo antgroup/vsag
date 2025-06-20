@@ -17,11 +17,11 @@
 
 #include <memory>
 
-#include "allocator.h"
-#include "dataset.h"
-#include "index.h"
-#include "resource.h"
-#include "thread_pool.h"
+#include "vsag/allocator.h"
+#include "vsag/dataset.h"
+#include "vsag/index.h"
+#include "vsag/resource.h"
+#include "vsag/thread_pool.h"
 
 namespace vsag {
 /**

@@ -32,6 +32,7 @@
 //#include <Eigen/Dense>
 #include "../../default_allocator.h"
 #include "hnswlib.h"
+#include "storage/stream_reader.h"
 #include "visited_list_pool.h"
 
 namespace hnswlib {
@@ -1018,72 +1019,6 @@ public:
         dest += len;
     }
 
-    void
-    saveIndex(void* d) override {
-        // std::ofstream output(location, std::ios::binary);
-        // std::streampos position;
-        char* dest = (char*)d;
-
-        // writeBinaryPOD(output, offsetLevel0_);
-        writeVarToMem(dest, offsetLevel0_);
-        // writeBinaryPOD(output, max_elements_);
-        writeVarToMem(dest, max_elements_);
-        // writeBinaryPOD(output, cur_element_count_);
-        writeVarToMem(dest, cur_element_count_);
-        // writeBinaryPOD(output, size_data_per_element_);
-        writeVarToMem(dest, size_data_per_element_);
-        // writeBinaryPOD(output, label_offset_);
-        writeVarToMem(dest, label_offset_);
-        // writeBinaryPOD(output, offsetData_);
-        writeVarToMem(dest, offsetData_);
-        // writeBinaryPOD(output, maxlevel_);
-        writeVarToMem(dest, maxlevel_);
-        // writeBinaryPOD(output, enterpoint_node_);
-        writeVarToMem(dest, enterpoint_node_);
-        // writeBinaryPOD(output, maxM_);
-        writeVarToMem(dest, maxM_);
-
-        // writeBinaryPOD(output, maxM0_);
-        writeVarToMem(dest, maxM0_);
-        // writeBinaryPOD(output, M_);
-        writeVarToMem(dest, M_);
-        // writeBinaryPOD(output, mult_);
-        writeVarToMem(dest, mult_);
-        // writeBinaryPOD(output, ef_construction_);
-        writeVarToMem(dest, ef_construction_);
-
-        writeVarToMem(dest, pq_chunk);
-
-        writeVarToMem(dest, pq_cluster);
-
-        writeVarToMem(dest, pq_sub_dim);
-
-        // output.write(data_level0_memory_, cur_element_count_ * size_data_per_element_);
-        data_level0_memory_->Serialize(dest, cur_element_count_);
-
-        for (size_t i = 0; i < cur_element_count_; i++) {
-            unsigned int linkListSize =
-                element_levels_[i] > 0 ? size_links_per_element_ * element_levels_[i] : 0;
-            // writeBinaryPOD(output, linkListSize);
-            writeVarToMem(dest, linkListSize);
-            if (linkListSize) {
-                // output.write(linkLists_[i], linkListSize);
-                writeBinaryToMem(dest, linkLists_[i], linkListSize);
-            }
-        }
-
-        writeBinaryToMem(dest, (char*)pq_map, max_elements_ * pq_chunk * sizeof(uint8_t));
-
-        for (auto& chunk : pq_book) {
-            for (auto& cluster : chunk) {
-                writeBinaryToMem(dest, (char*)cluster.data(), pq_sub_dim * sizeof(float));
-            }
-        }
-
-        writeBinaryToMem(dest, (char*)node_cluster_dist_, max_elements_ * sizeof(float));
-        // output.close();
-    }
-
     size_t
     calcSerializeSize() override {
         // std::ofstream output(location, std::ios::binary);
@@ -1161,45 +1096,46 @@ public:
 
     // save index to a file stream
     void
-    saveIndex(std::ostream& out_stream) override {
-        writeBinaryPOD(out_stream, offsetLevel0_);
-        writeBinaryPOD(out_stream, max_elements_);
-        writeBinaryPOD(out_stream, cur_element_count_);
-        writeBinaryPOD(out_stream, size_data_per_element_);
-        writeBinaryPOD(out_stream, label_offset_);
-        writeBinaryPOD(out_stream, offsetData_);
-        writeBinaryPOD(out_stream, maxlevel_);
-        writeBinaryPOD(out_stream, enterpoint_node_);
-        writeBinaryPOD(out_stream, maxM_);
+    saveIndex(StreamWriter& writer) override {
+        StreamWriter::WriteObj(writer, offsetLevel0_);
+        StreamWriter::WriteObj(writer, max_elements_);
+        StreamWriter::WriteObj(writer, cur_element_count_);
+        StreamWriter::WriteObj(writer, size_data_per_element_);
+        StreamWriter::WriteObj(writer, label_offset_);
+        StreamWriter::WriteObj(writer, offsetData_);
+        StreamWriter::WriteObj(writer, maxlevel_);
+        StreamWriter::WriteObj(writer, enterpoint_node_);
+        StreamWriter::WriteObj(writer, maxM_);
 
-        writeBinaryPOD(out_stream, maxM0_);
-        writeBinaryPOD(out_stream, M_);
-        writeBinaryPOD(out_stream, mult_);
-        writeBinaryPOD(out_stream, ef_construction_);
+        StreamWriter::WriteObj(writer, maxM0_);
+        StreamWriter::WriteObj(writer, M_);
+        StreamWriter::WriteObj(writer, mult_);
+        StreamWriter::WriteObj(writer, ef_construction_);
 
-        writeBinaryPOD(out_stream, pq_chunk);
-        writeBinaryPOD(out_stream, pq_cluster);
-        writeBinaryPOD(out_stream, pq_sub_dim);
+        StreamWriter::WriteObj(writer, pq_chunk);
+        StreamWriter::WriteObj(writer, pq_cluster);
+        StreamWriter::WriteObj(writer, pq_sub_dim);
 
-        data_level0_memory_->Serialize(out_stream, cur_element_count_);
+        data_level0_memory_->Serialize(writer, cur_element_count_);
 
         for (size_t i = 0; i < cur_element_count_; i++) {
             unsigned int linkListSize =
                 element_levels_[i] > 0 ? size_links_per_element_ * element_levels_[i] : 0;
-            writeBinaryPOD(out_stream, linkListSize);
+
+            StreamWriter::WriteObj(writer, linkListSize);
             if (linkListSize) {
-                out_stream.write(linkLists_[i], linkListSize);
+                writer.Write(linkLists_[i], linkListSize);
             }
         }
 
-        out_stream.write((char*)pq_map, max_elements_ * pq_chunk * sizeof(uint8_t));
+        writer.Write((char*)pq_map, max_elements_ * pq_chunk * sizeof(uint8_t));
 
         for (auto& chunk : pq_book) {
             for (auto& cluster : chunk) {
-                out_stream.write((char*)cluster.data(), pq_sub_dim * sizeof(float));
+                writer.Write((char*)cluster.data(), pq_sub_dim * sizeof(float));
             }
         }
-        out_stream.write((char*)node_cluster_dist_, max_elements_ * sizeof(float));
+        writer.Write((char*)node_cluster_dist_, max_elements_ * sizeof(float));
     }
 
     // load index from a file stream

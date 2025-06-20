@@ -20,8 +20,8 @@
 #include "extra_info_datacell_parameter.h"
 #include "index/index_common_param.h"
 #include "quantization/computer.h"
-#include "stream_reader.h"
-#include "stream_writer.h"
+#include "storage/stream_reader.h"
+#include "storage/stream_writer.h"
 #include "typing.h"
 
 namespace vsag {

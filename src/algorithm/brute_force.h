@@ -25,6 +25,8 @@
 #include "typing.h"
 
 namespace vsag {
+
+// BruteForce index was introduced since v0.13
 class BruteForce : public InnerIndexInterface {
 public:
     static ParamPtr

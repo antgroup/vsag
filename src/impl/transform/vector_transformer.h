@@ -16,8 +16,8 @@
 
 #pragma once
 
-#include "stream_reader.h"
-#include "stream_writer.h"
+#include "storage/stream_reader.h"
+#include "storage/stream_writer.h"
 #include "vsag/allocator.h"
 
 namespace vsag {
