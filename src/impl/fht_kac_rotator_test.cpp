@@ -25,7 +25,7 @@ using namespace vsag;
 
 void
 TestRandomness(FhtKacRotator& rom1, FhtKacRotator& rom2, int dim) {
-    size_t flip_len = rom1.round_ * (dim + 7) / rom1.kByteLen_;
+    size_t flip_len = (dim + 7) / rom1.kByteLen_ * rom1.round_;
     std::vector<uint8_t> mat1(flip_len);
     rom1.CopyFlip(mat1.data());
 
@@ -34,12 +34,10 @@ TestRandomness(FhtKacRotator& rom1, FhtKacRotator& rom2, int dim) {
 
     uint64_t count_same = 0, count_non_zero = 0;
     for (uint64_t i = 0; i < flip_len; i++) {
-        if (not(std::abs(mat1[i]) < 1e-3 and std::abs(mat2[i]) < 1e-3)) {
-            if (std::abs(mat1[i] - mat2[i]) < 1e-3) {
-                count_same++;
-            }
-            count_non_zero++;
+        if (mat1[i] == mat2[i]) {
+            count_same++;
         }
+        count_non_zero++;
     }
 
     REQUIRE(count_same <= (uint64_t)(0.1 * count_non_zero));
@@ -47,14 +45,14 @@ TestRandomness(FhtKacRotator& rom1, FhtKacRotator& rom2, int dim) {
 
 void
 TestSame(FhtKacRotator& rom1, FhtKacRotator& rom2, uint64_t dim) {
-    size_t flip_len = rom1.round_ * (dim + 7) / rom1.kByteLen_;
+    size_t flip_len = (dim + 7) / rom1.kByteLen_ * rom1.round_;
     std::vector<uint8_t> mat1(flip_len);
     rom1.CopyFlip(mat1.data());
     std::vector<uint8_t> mat2(flip_len);
     rom2.CopyFlip(mat2.data());
     uint64_t count_same = 0;
     for (uint64_t i = 0; i < flip_len; i++) {
-        if (std::abs(mat1[i] - mat2[i]) < 1e-3) {
+        if (mat1[i] == mat2[i]) {
             count_same++;
         }
     }
@@ -90,6 +88,8 @@ TEST_CASE("Basic Hadamard Test", "[ut][FhtKacRotator]") {
     for (auto dim : dims) {
         FhtKacRotator rom(dim, allocator.get());
         FhtKacRotator rom_alter(dim, allocator.get());
+        rom.Build();
+        rom_alter.Build();
         TestTransform(rom, dim);
         TestRandomness(rom, rom_alter, dim);
     }
@@ -102,6 +102,8 @@ TEST_CASE("Hadamard Matrix Serialize / Deserialize Test", "[ut][FhtKacRotator]")
     for (auto dim : dims) {
         FhtKacRotator rom1(dim, allocator.get());
         FhtKacRotator rom2(dim, allocator.get());
+        rom1.Build();
+        rom2.Build();
 
         fixtures::TempDir dir("hadamard");
         auto filename = dir.GenerateRandomFile();
