@@ -322,6 +322,12 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                 }
             }
         }
+        if constexpr (mode == KNN_SEARCH) {
+            if (candidate_set->Empty() and top_candidates->Size() < inner_search_param.topk) {
+                auto new_id = random() % flatten->total_count_;
+                candidate_set->Push(-std::numeric_limits<float>::max(), new_id);
+            }
+        }
     }
 
     if constexpr (mode == KNN_SEARCH) {
