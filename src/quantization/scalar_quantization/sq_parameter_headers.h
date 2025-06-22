@@ -20,4 +20,5 @@
 #include "sq4_quantizer_parameter.h"
 #include "sq4_uniform_quantizer_parameter.h"
 #include "sq8_quantizer_parameter.h"
+#include "sq8_row_quantizer_parameter.h"
 #include "sq8_uniform_quantizer_parameter.h"

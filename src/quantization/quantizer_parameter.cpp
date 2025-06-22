@@ -37,6 +37,9 @@ QuantizerParameter::GetQuantizerParameterByJson(const JsonType& json) {
     } else if (type_name == QUANTIZATION_TYPE_VALUE_SQ8) {
         quantizer_param = std::make_shared<SQ8QuantizerParameter>();
         quantizer_param->FromJson(json);
+    } else if (type_name == QUANTIZATION_TYPE_VALUE_SQ8_ROW) {
+        quantizer_param = std::make_shared<SQ8RowQuantizerParameter>();
+        quantizer_param->FromJson(json);
     } else if (type_name == QUANTIZATION_TYPE_VALUE_SQ8_UNIFORM) {
         quantizer_param = std::make_shared<SQ8UniformQuantizerParameter>();
         quantizer_param->FromJson(json);

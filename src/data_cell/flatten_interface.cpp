@@ -46,6 +46,9 @@ make_instance(const FlattenInterfaceParamPtr& param, const IndexCommonParam& com
     if (quantization_string == QUANTIZATION_TYPE_VALUE_SQ8) {
         return make_instance<SQ8Quantizer<metric>, IOTemp>(param, common_param);
     }
+    if (quantization_string == QUANTIZATION_TYPE_VALUE_SQ8_ROW) {
+        return make_instance<SQ8RowQuantizer<metric>, IOTemp>(param, common_param);
+    }
     if (quantization_string == QUANTIZATION_TYPE_VALUE_FP32) {
         return make_instance<FP32Quantizer<metric>, IOTemp>(param, common_param);
     }

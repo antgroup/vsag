@@ -13,12 +13,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#pragma once
+#include "sq8_row_quantizer_parameter.h"
 
-#include "bf16_quantizer.h"
-#include "fp16_quantizer.h"
-#include "sq4_quantizer.h"
-#include "sq4_uniform_quantizer.h"
-#include "sq8_quantizer.h"
-#include "sq8_row_quantizer.h"
-#include "sq8_uniform_quantizer.h"
+#include "inner_string_params.h"
+
+namespace vsag {
+SQ8RowQuantizerParameter::SQ8RowQuantizerParameter()
+    : QuantizerParameter(QUANTIZATION_TYPE_VALUE_SQ8_ROW) {
+}
+
+void
+SQ8RowQuantizerParameter::FromJson(const JsonType& json) {
+}
+
+JsonType
+SQ8RowQuantizerParameter::ToJson() {
+    JsonType json;
+    json[QUANTIZATION_TYPE_KEY] = QUANTIZATION_TYPE_VALUE_SQ8_ROW;
+    return json;
+}
+}  // namespace vsag
