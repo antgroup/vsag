@@ -50,7 +50,7 @@ public:
     bool use_elp_optimizer{false};
     bool ignore_reorder{false};
     bool build_by_base{false};
-    bool is_static{false};
+    bool immutable{false};
 
     bool use_attribute_filter{false};
     uint64_t ef_construction{400};

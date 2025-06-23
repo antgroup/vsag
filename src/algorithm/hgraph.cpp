@@ -47,9 +47,9 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
       odescent_param_(hgraph_param->odescent_param),
       graph_type_(hgraph_param->graph_type),
       extra_info_size_(common_param.extra_info_size_),
-      deleted_ids_(allocator_),
-      is_static_(hgraph_param->is_static) {
-    if (is_static_) {
+      deleted_ids_(allocator_) {
+    this->immutable_ = hgraph_param->immutable;
+    if (immutable_) {
         neighbors_mutex_ = std::make_shared<EmptyMutex>();
         this->label_table_ = std::make_shared<LabelTable>(allocator_, false);
     } else {
@@ -1076,7 +1076,7 @@ static const std::string HGRAPH_PARAMS_TEMPLATE =
         "{HGRAPH_IGNORE_REORDER_KEY}": false,
         "{HGRAPH_BUILD_BY_BASE_QUANTIZATION_KEY}": false,
         "{HGRAPH_USE_ATTRIBUTE_FILTER_KEY}": false,
-        "{HGRSPH_STATIC_KEY}": false,
+        "{HGRSPH_IMMUTABLE_KEY}": false,
         "{HGRAPH_GRAPH_KEY}": {
             "{IO_PARAMS_KEY}": {
                 "{IO_TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
@@ -1294,8 +1294,8 @@ HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
             },
         },
         {
-            HGRAPH_STATIC,
-            {HGRSPH_STATIC_KEY},
+            HGRAPH_IMMUTABLE,
+            {HGRSPH_IMMUTABLE_KEY},
         },
         {
             SQ4_UNIFORM_TRUNC_RATE,
@@ -1359,7 +1359,7 @@ HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
     hgraph_parameter->data_type = common_param.data_type_;
     hgraph_parameter->FromJson(inner_json);
     uint64_t max_degree = hgraph_parameter->bottom_graph_param->max_degree_;
-    if (hgraph_parameter->is_static &&
+    if (hgraph_parameter->immutable &&
         (hgraph_parameter->build_thread_count != 0 || common_param.thread_pool_ != nullptr)) {
         throw VsagException(
             ErrorType::INVALID_ARGUMENT,

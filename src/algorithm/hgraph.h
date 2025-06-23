@@ -285,7 +285,6 @@ private:
     std::atomic<int64_t> delete_count_{0};
 
     std::shared_ptr<Optimizer<BasicSearcher>> optimizer_;
-    bool is_static_{false};
 
     AttrInvertedInterfacePtr attr_filter_index_{nullptr};
 };
