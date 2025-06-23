@@ -13,7 +13,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "random_orthogonal_matrix.h"
+#include "random_orthogonal_transformer.h"
+
+#include <cblas.h>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -129,8 +131,8 @@ TEST_CASE("Random Orthogonal Matrix Basic Test", "[ut][RandomOrthogonalMatrix]")
     const auto dims = fixtures::get_common_used_dims();
 
     for (auto dim : dims) {
-        RandomOrthogonalMatrix rom(dim, allocator.get());
-        RandomOrthogonalMatrix rom_alter(dim, allocator.get());
+        RandomOrthogonalMatrix rom(allocator.get(), dim);
+        RandomOrthogonalMatrix rom_alter(allocator.get(), dim);
 
         REQUIRE(rom.GenerateRandomOrthogonalMatrix() == true);
         REQUIRE(rom_alter.GenerateRandomOrthogonalMatrix() == true);
@@ -147,8 +149,8 @@ TEST_CASE("Random Orthogonal Matrix Serialize / Deserialize Test", "[ut][RandomO
     const auto dims = fixtures::get_common_used_dims();
 
     for (auto dim : dims) {
-        RandomOrthogonalMatrix rom1(dim, allocator.get());
-        RandomOrthogonalMatrix rom2(dim, allocator.get());
+        RandomOrthogonalMatrix rom1(allocator.get(), dim);
+        RandomOrthogonalMatrix rom2(allocator.get(), dim);
 
         REQUIRE(rom1.GenerateRandomOrthogonalMatrix() == true);
         REQUIRE(rom2.GenerateRandomOrthogonalMatrix() == true);

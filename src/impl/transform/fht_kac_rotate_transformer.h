@@ -16,20 +16,15 @@
 #include <stdint.h>
 
 #include <cstring>
-#include <random>
 
-#include "../logger.h"
-#include "matrix_rotator.h"
-#include "simd/simd.h"
-#include "stream_reader.h"
-#include "stream_writer.h"
+#include "vector_transformer.h"
 
 namespace vsag {
-class FhtKacRotator : public MatrixRotator {
+class FhtKacRotator : public VectorTransformer {
 public:
-    FhtKacRotator(uint64_t dim, Allocator* allocator);
+    explicit FhtKacRotator(Allocator* allocator, int64_t dim);
 
-    ~FhtKacRotator() = default;
+    ~FhtKacRotator() override = default;
 
     void
     Transform(const float* data, float* rotated_vec) const override;
@@ -38,29 +33,30 @@ public:
     InverseTransform(const float* data, float* rotated_vec) const override;
 
     void
-    Serialize(StreamWriter& writer) override;
+    Serialize(StreamWriter& writer) const override;
 
     void
     Deserialize(StreamReader& reader) override;
 
-    bool
-    Build() override;
+    void
+    Train(const float* data, uint64_t count) override;
+
+    void
+    Train();
 
     void
     CopyFlip(uint8_t* out_flip) const;
 
-    const size_t kByteLen_ = 8;
-    const int round_ = 4;
+    constexpr static size_t BYTE_LEN = 8;
+    constexpr static int ROUND = 4;
 
 private:
-    const uint64_t dim_{0};
-    size_t flip_offset_ = 0;
-    Allocator* const allocator_{nullptr};
+    size_t flip_offset_{0};
 
     std::vector<uint8_t> flip_;
 
-    size_t trunc_dim_ = 0;
+    size_t trunc_dim_{0};
 
-    float fac_ = 0;
+    float fac_{0};
 };
 }  //namespace vsag
