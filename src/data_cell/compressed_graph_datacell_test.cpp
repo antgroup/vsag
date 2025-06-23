@@ -114,11 +114,7 @@ TestBuildCompressedFromGraphDataCell(const GraphInterfaceParamPtr& param,
         graph->InsertNeighborsById(key, *value);
     }
 
-    for (InnerIdType id = 0; id < graph->MaxCapacity(); ++id) {
-        Vector<InnerIdType> neighbors(allocator.get());
-        graph->GetNeighbors(id, neighbors);
-    }
-    auto compressed_graph = std::make_shared<CompressedGraphDataCell>(graph, allocator.get());
+    auto compressed_graph = CompressedGraphDataCell::MakeCompressedGraph(graph, allocator.get());
     // Test GetNeighbors
     SECTION("Test GetNeighbors") {
         for (InnerIdType id = 0; id < graph->MaxCapacity(); ++id) {

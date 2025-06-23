@@ -32,17 +32,23 @@ CompressedGraphDataCell::CompressedGraphDataCell(const CompressedGraphDatacellPa
     this->max_capacity_ = 0;
 }
 
-CompressedGraphDataCell::CompressedGraphDataCell(const GraphInterfacePtr& graph_ptr,
-                                                 Allocator* allocator)
+CompressedGraphDataCell::CompressedGraphDataCell(Allocator* allocator)
     : allocator_(allocator), neighbor_sets_(allocator_) {
-    this->Resize(graph_ptr->MaxCapacity());
-    this->SetMaximumDegree(graph_ptr->MaximumDegree());
+}
 
-    for (InnerIdType id = 0; id < this->max_capacity_; ++id) {
-        Vector<InnerIdType> neighbor_ids(allocator_);
+GraphInterfacePtr
+CompressedGraphDataCell::MakeCompressedGraph(const GraphInterfacePtr& graph_ptr,
+                                             Allocator* allocator) {
+    auto compressed_graph = std::make_shared<CompressedGraphDataCell>(allocator);
+    compressed_graph->Resize(graph_ptr->MaxCapacity());
+    compressed_graph->SetMaximumDegree(graph_ptr->MaximumDegree());
+
+    for (InnerIdType id = 0; id < compressed_graph->max_capacity_; ++id) {
+        Vector<InnerIdType> neighbor_ids(allocator);
         graph_ptr->GetNeighbors(id, neighbor_ids);
-        this->InsertNeighborsById(id, neighbor_ids);
+        compressed_graph->InsertNeighborsById(id, neighbor_ids);
     }
+    return compressed_graph;
 }
 
 void
