@@ -256,8 +256,7 @@ SQ8UniformQuantizer<metric>::ComputeImpl(const uint8_t* codes1, const uint8_t* c
         sum_type sum1 = *((sum_type*)(codes1 + offset_sum_));
         sum_type sum2 = *((sum_type*)(codes2 + offset_sum_));
 
-        result = lower_bound_ * (sum1 + sum2) + scalar_rate_ * result +
-                 lower_bound_ * lower_bound_;
+        result = lower_bound_ * (sum1 + sum2) + scalar_rate_ * result + lower_bound_ * lower_bound_;
 
         result = 1 - result;
 
