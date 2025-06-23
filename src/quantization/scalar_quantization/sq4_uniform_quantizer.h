@@ -370,6 +370,7 @@ SQ4UniformQuantizer<metric>::DeserializeImpl(StreamReader& reader) {
     StreamReader::ReadObj(reader, this->offset_norm_);
     StreamReader::ReadObj(reader, this->offset_sum_);
     StreamReader::ReadObj(reader, this->offset_codes_sum_);
+    this->scalar_rate_ = (diff_ / 15.0) * (diff_ / 15.0);
 }
 
 }  // namespace vsag
