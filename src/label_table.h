@@ -17,6 +17,8 @@
 
 #include <fmt/format-inl.h>
 
+#include <atomic>
+
 #include "stream_reader.h"
 #include "stream_writer.h"
 #include "typing.h"
@@ -25,6 +27,7 @@ namespace vsag {
 
 class LabelTable;
 using LabelTablePtr = std::shared_ptr<LabelTable>;
+using IdMapFunction = std::function<std::tuple<bool, int64_t>(int64_t)>;
 
 class LabelTable {
 public:
@@ -38,6 +41,17 @@ public:
             label_table_.resize(id + 1);
         }
         label_table_[id] = label;
+        total_count_++;
+    }
+
+    inline bool
+    Remove(LabelType label) {
+        auto iter = label_remap_.find(label);
+        if (iter == label_remap_.end()) {
+            return false;
+        }
+        label_remap_.erase(iter);
+        return true;
     }
 
     inline InnerIdType
@@ -76,13 +90,27 @@ public:
     }
 
     void
-    MergeOther(const LabelTablePtr& other, InnerIdType bias);
+    Resize(uint64_t new_size) {
+        if (new_size < total_count_) {
+            return;
+        }
+        label_table_.resize(new_size);
+    }
+
+    int64_t
+    GetTotalCount() {
+        return total_count_;
+    }
+
+    void
+    MergeOther(const LabelTablePtr& other, const IdMapFunction& id_map = nullptr);
 
 public:
     Vector<LabelType> label_table_;
     UnorderedMap<LabelType, InnerIdType> label_remap_;
 
     Allocator* allocator_{nullptr};
+    std::atomic<int64_t> total_count_{0L};
 };
 
 }  // namespace vsag

@@ -18,6 +18,7 @@
 #include <limits>
 
 #include "algorithm/hnswlib/algorithm_interface.h"
+#include "attr/executor/executor.h"
 #include "basic_optimizer.h"
 #include "common.h"
 #include "data_cell/flatten_interface.h"
@@ -50,7 +51,9 @@ public:
     // for ivf
     int scan_bucket_size{1};
     float factor{2.0F};
+    float first_order_scan_ratio{1.0F};
     Allocator* search_alloc{nullptr};
+    ExecutorPtr executor{nullptr};
 
     InnerSearchParam&
     operator=(const InnerSearchParam& other) {
@@ -65,6 +68,7 @@ public:
             is_inner_id_allowed = other.is_inner_id_allowed;
             scan_bucket_size = other.scan_bucket_size;
             factor = other.factor;
+            first_order_scan_ratio = other.first_order_scan_ratio;
         }
         return *this;
     }

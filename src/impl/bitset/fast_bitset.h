@@ -25,7 +25,9 @@ namespace vsag {
 class FastBitset : public ComputableBitset {
 public:
     explicit FastBitset(Allocator* allocator)
-        : ComputableBitset(), allocator_(allocator), data_(allocator){};
+        : ComputableBitset(), allocator_(allocator), data_(allocator), fill_bit_(false) {
+        this->type_ = ComputableBitsetType::FastBitset;
+    };
 
     ~FastBitset() override = default;
 
@@ -39,13 +41,22 @@ public:
     Count() override;
 
     void
-    Or(const Bitset& another) override;
+    Or(const ComputableBitset& another) override;
 
     void
-    And(const Bitset& another) override;
+    And(const ComputableBitset& another) override;
 
     void
-    Xor(const Bitset& another) override;
+    Xor(const ComputableBitset& another) override;
+
+    void
+    Or(const ComputableBitsetPtr& another) override;
+
+    void
+    And(const ComputableBitsetPtr& another) override;
+
+    void
+    Xor(const ComputableBitsetPtr& another) override;
 
     void
     Not() override;
@@ -56,12 +67,21 @@ public:
     void
     Deserialize(StreamReader& reader) override;
 
+    void
+    Clear() override;
+
     std::string
     Dump() override;
 
 private:
     Vector<uint64_t> data_;
+
     mutable std::shared_mutex mutex_;
+
     Allocator* const allocator_{nullptr};
+
+    bool fill_bit_{false};
+
+    const uint64_t FILL_ONE = 0xFFFFFFFFFFFFFFFF;
 };
 }  // namespace vsag

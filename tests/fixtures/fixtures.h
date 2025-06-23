@@ -138,6 +138,12 @@ generate_index(const std::string& name,
 std::vector<char>
 generate_extra_infos(uint64_t count, uint32_t size, int seed = 47);
 
+vsag::AttributeSet*
+generate_attributes(uint64_t count,
+                    uint32_t max_term_count = 100,
+                    uint32_t max_value_count = 100,
+                    int seed = 97);
+
 float
 test_knn_recall(const vsag::IndexPtr& index,
                 const std::string& search_parameters,
@@ -280,4 +286,18 @@ SplitString(const std::string& s, char delimiter);
 
 float
 GetSparseDistance(const vsag::SparseVector& vec1, const vsag::SparseVector& vec2);
+
+template <typename T>
+std::vector<T>
+RandomSelect(const std::vector<T>& vec, int64_t count = 1) {
+    std::vector<T> selected;
+    count = std::min(count, static_cast<int64_t>(vec.size()));
+    std::sample(vec.begin(),
+                vec.end(),
+                std::back_inserter(selected),
+                count,
+                std::mt19937(RandomValue(0, 10000)));
+    return selected;
+}
+
 }  // Namespace fixtures

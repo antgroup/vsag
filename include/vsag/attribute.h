@@ -28,20 +28,41 @@ enum AttrValueType {
     UINT64 = 4,
     INT8 = 5,
     UINT8 = 6,
-    STRING = 7,
-    FIXSIZE_STRING = 8,
+    INT16 = 7,
+    UINT16 = 8,
+    STRING = 9,
 };
 
 class Attribute {
 public:
     std::string name_{};
-    virtual AttrValueType
-    GetValueType() = 0;
+
+    virtual ~Attribute() = default;
+
+    [[nodiscard]] virtual AttrValueType
+    GetValueType() const = 0;
+
+    [[nodiscard]] virtual uint64_t
+    GetValueCount() const = 0;
 };
+using AttributePtr = std::shared_ptr<Attribute>;
 
 template <class T>
 class AttributeValue : public Attribute {
 public:
+    [[nodiscard]] AttrValueType
+    GetValueType() const override;
+
+    [[nodiscard]] uint64_t
+    GetValueCount() const override;
+
+    std::vector<T>&
+    GetValue();
+
+    const std::vector<T>&
+    GetValue() const;
+
+private:
     std::vector<T> value_{};
 };
 

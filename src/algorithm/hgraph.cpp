@@ -25,6 +25,7 @@
 #include "dataset_impl.h"
 #include "impl/odescent_graph_builder.h"
 #include "impl/pruning_strategy.h"
+#include "index/index_impl.h"
 #include "index/iterator_filter.h"
 #include "utils/standard_heap.h"
 #include "utils/util_functions.h"
@@ -38,11 +39,13 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
       use_elp_optimizer_(hgraph_param->use_elp_optimizer),
       ignore_reorder_(hgraph_param->ignore_reorder),
       build_by_base_(hgraph_param->build_by_base),
+      use_attribute_filter_(hgraph_param->use_attribute_filter),
       ef_construct_(hgraph_param->ef_construction),
       build_thread_count_(hgraph_param->build_thread_count),
       odescent_param_(hgraph_param->odescent_param),
       graph_type_(hgraph_param->graph_type),
-      extra_info_size_(common_param.extra_info_size_) {
+      extra_info_size_(common_param.extra_info_size_),
+      deleted_ids_(allocator_) {
     neighbors_mutex_ = std::make_shared<PointsMutex>(0, common_param.allocator_.get());
     this->basic_flatten_codes_ =
         FlattenInterface::MakeInstance(hgraph_param->base_codes_param, common_param);
@@ -102,6 +105,10 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
 
     if (use_elp_optimizer_) {
         optimizer_ = std::make_shared<Optimizer<BasicSearcher>>(common_param);
+    }
+    if (use_attribute_filter_) {
+        this->attr_filter_index_ =
+            AttributeInvertedInterface::MakeInstance(allocator_, false /*have_bucket*/);
     }
 }
 void
@@ -204,10 +211,16 @@ HGraph::Add(const DatasetPtr& data) {
         }
     }
 
-    auto add_func =
-        [&](const void* data, int level, InnerIdType inner_id, const char* extra_info) -> void {
+    auto add_func = [&](const void* data,
+                        int level,
+                        InnerIdType inner_id,
+                        const char* extra_info,
+                        const AttributeSet* attrs) -> void {
         if (this->extra_infos_ != nullptr) {
             this->extra_infos_->InsertExtraInfo(extra_info, inner_id);
+        }
+        if (attrs != nullptr and this->use_attribute_filter_) {
+            this->attr_filter_index_->Insert(*attrs, inner_id);
         }
         this->add_one_point(data, level, inner_id);
     };
@@ -216,6 +229,7 @@ HGraph::Add(const DatasetPtr& data) {
     auto total = data->GetNumElements();
     const auto* labels = data->GetIds();
     const auto* extra_infos = data->GetExtraInfos();
+    const auto* attr_sets = data->GetAttributeSets();
     Vector<std::pair<InnerIdType, LabelType>> inner_ids(allocator_);
     for (int64_t j = 0; j < total; ++j) {
         auto label = labels[j];
@@ -243,12 +257,16 @@ HGraph::Add(const DatasetPtr& data) {
             level = this->get_random_level() - 1;
         }
         const auto* extra_info = extra_infos + local_idx * extra_info_size_;
+        const AttributeSet* cur_attr_set = nullptr;
+        if (attr_sets != nullptr) {
+            cur_attr_set = attr_sets + local_idx;
+        }
         if (this->build_pool_ != nullptr) {
             auto future = this->build_pool_->GeneralEnqueue(
-                add_func, get_data(data, local_idx), level, inner_id, extra_info);
+                add_func, get_data(data, local_idx), level, inner_id, extra_info, cur_attr_set);
             futures.emplace_back(std::move(future));
         } else {
-            add_func(get_data(data, local_idx), level, inner_id, extra_info);
+            add_func(get_data(data, local_idx), level, inner_id, extra_info, cur_attr_set);
         }
     }
     if (this->build_pool_ != nullptr) {
@@ -310,9 +328,9 @@ HGraph::KnnSearch(const DatasetPtr& query,
     FilterPtr ft = nullptr;
     if (filter != nullptr) {
         if (params.use_extra_info_filter) {
-            ft = std::make_shared<CommonExtraInfoFilter>(filter, this->extra_infos_);
+            ft = std::make_shared<ExtraInfoWrapperFilter>(filter, this->extra_infos_);
         } else {
-            ft = std::make_shared<CommonInnerIdFilter>(filter, *this->label_table_);
+            ft = std::make_shared<InnerIdWrapperFilter>(filter, *this->label_table_);
         }
     }
 
@@ -383,9 +401,9 @@ HGraph::KnnSearch(const DatasetPtr& query,
     FilterPtr ft = nullptr;
     if (filter != nullptr) {
         if (params.use_extra_info_filter) {
-            ft = std::make_shared<CommonExtraInfoFilter>(filter, this->extra_infos_);
+            ft = std::make_shared<ExtraInfoWrapperFilter>(filter, this->extra_infos_);
         } else {
-            ft = std::make_shared<CommonInnerIdFilter>(filter, *this->label_table_);
+            ft = std::make_shared<InnerIdWrapperFilter>(filter, *this->label_table_);
         }
     }
 
@@ -557,9 +575,9 @@ HGraph::RangeSearch(const DatasetPtr& query,
                     const std::string& parameters,
                     const FilterPtr& filter,
                     int64_t limited_size) const {
-    std::shared_ptr<CommonInnerIdFilter> ft = nullptr;
+    std::shared_ptr<InnerIdWrapperFilter> ft = nullptr;
     if (filter != nullptr) {
-        ft = std::make_shared<CommonInnerIdFilter>(filter, *this->label_table_);
+        ft = std::make_shared<InnerIdWrapperFilter>(filter, *this->label_table_);
     }
     int64_t query_dim = query->GetDim();
     if (data_type_ != DataTypes::DATA_TYPE_SPARSE) {
@@ -668,6 +686,9 @@ HGraph::Serialize(StreamWriter& writer) const {
     if (this->extra_info_size_ > 0 && this->extra_infos_ != nullptr) {
         this->extra_infos_->Serialize(writer);
     }
+    if (this->use_attribute_filter_ and this->attr_filter_index_ != nullptr) {
+        this->attr_filter_index_->Serialize(writer);
+    }
 }
 
 void
@@ -699,9 +720,12 @@ HGraph::Deserialize(StreamReader& reader) {
     if (use_elp_optimizer_) {
         elp_optimize();
     }
+    if (this->use_attribute_filter_ and this->attr_filter_index_ != nullptr) {
+        this->attr_filter_index_->Deserialize(reader);
+    }
 }
 
-JsonType
+std::string
 HGraph::GetMemoryUsageDetail() const {
     JsonType memory_usage;
     if (this->ignore_reorder_) {
@@ -721,7 +745,7 @@ HGraph::GetMemoryUsageDetail() const {
         memory_usage["extra_infos"] = this->extra_infos_->CalcSerializeSize();
     }
     memory_usage["__total_size__"] = this->CalSerializeSize();
-    return memory_usage;
+    return memory_usage.dump();
 }
 
 void
@@ -911,7 +935,7 @@ HGraph::resize(uint64_t new_size) {
     if (cur_size < new_size_power_2) {
         this->neighbors_mutex_->Resize(new_size_power_2);
         pool_ = std::make_shared<VisitedListPool>(1, allocator_, new_size_power_2, allocator_);
-        this->label_table_->label_table_.resize(new_size_power_2);
+        this->label_table_->Resize(new_size_power_2);
         bottom_graph_->Resize(new_size_power_2);
         this->max_capacity_.store(new_size_power_2);
         this->basic_flatten_codes_->Resize(new_size_power_2);
@@ -931,6 +955,7 @@ HGraph::InitFeatures() {
         IndexFeature::SUPPORT_BUILD,
         IndexFeature::SUPPORT_BUILD_WITH_MULTI_THREAD,
         IndexFeature::SUPPORT_ADD_AFTER_BUILD,
+        IndexFeature::SUPPORT_MERGE_INDEX,
     });
     // search
     this->index_feature_list_->SetFeatures({
@@ -1047,6 +1072,7 @@ static const std::string HGRAPH_PARAMS_TEMPLATE =
         "{HGRAPH_USE_ENV_OPTIMIZER}": false,
         "{HGRAPH_IGNORE_REORDER_KEY}": false,
         "{HGRAPH_BUILD_BY_BASE_QUANTIZATION_KEY}": false,
+        "{HGRAPH_USE_ATTRIBUTE_FILTER_KEY}": false,
         "{HGRAPH_GRAPH_KEY}": {
             "{IO_PARAMS_KEY}": {
                 "{IO_TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
@@ -1060,8 +1086,9 @@ static const std::string HGRAPH_PARAMS_TEMPLATE =
             "{ODESCENT_PARAMETER_GRAPH_ITER_TURN}": 30,
             "{ODESCENT_PARAMETER_NEIGHBOR_SAMPLE_RATE}": 0.2,
             "{GRAPH_PARAM_MAX_DEGREE}": 64,
-            "{GRAPH_PARAM_MAX_DEGREE}": 64,
-            "{GRAPH_PARAM_INIT_MAX_CAPACITY}": 100
+            "{GRAPH_PARAM_INIT_MAX_CAPACITY}": 100,
+            "{GRAPH_SUPPORT_REMOVE}": false,
+            "{REMOVE_FLAG_BIT}": 8
         },
         "{HGRAPH_BASE_CODES_KEY}": {
             "{IO_PARAMS_KEY}": {
@@ -1129,6 +1156,12 @@ HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
             HGRAPH_BUILD_BY_BASE_QUANTIZATION,
             {
                 HGRAPH_BUILD_BY_BASE_QUANTIZATION_KEY,
+            },
+        },
+        {
+            HGRAPH_USE_ATTRIBUTE_FILTER,
+            {
+                HGRAPH_USE_ATTRIBUTE_FILTER_KEY,
             },
         },
         {
@@ -1288,6 +1321,22 @@ HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
                 PRODUCT_QUANTIZATION_DIM,
             },
         },
+        {
+            RABITQ_USE_FHT,
+            {
+                HGRAPH_BASE_CODES_KEY,
+                QUANTIZATION_PARAMS_KEY,
+                USE_FHT,
+            },
+        },
+        {
+            HGRAPH_SUPPORT_REMOVE,
+            {HGRAPH_GRAPH_KEY, GRAPH_SUPPORT_REMOVE},
+        },
+        {
+            HGRAPH_REMOVE_FLAG_BIT,
+            {HGRAPH_GRAPH_KEY, REMOVE_FLAG_BIT},
+        },
     };
     if (common_param.data_type_ == DataTypes::DATA_TYPE_INT8) {
         throw VsagException(ErrorType::INVALID_ARGUMENT,
@@ -1332,6 +1381,92 @@ HGraph::GetRawData(vsag::InnerIdType inner_id, uint8_t* data) const {
         high_precise_codes_->GetCodesById(inner_id, data);
     } else {
         basic_flatten_codes_->GetCodesById(inner_id, data);
+    }
+}
+
+bool
+HGraph::Remove(int64_t id) {
+    // TODO(inbao): support thread safe remove
+    auto inner_id = this->label_table_->GetIdByLabel(id);
+    if (inner_id == this->entry_point_id_) {
+        bool find_new_ep = false;
+        while (not route_graphs_.empty()) {
+            auto& upper_graph = route_graphs_.back();
+            Vector<InnerIdType> neighbors(allocator_);
+            upper_graph->GetNeighbors(this->entry_point_id_, neighbors);
+            for (const auto& nb_id : neighbors) {
+                if (inner_id == nb_id) {
+                    continue;
+                }
+                this->entry_point_id_ = nb_id;
+                find_new_ep = true;
+                break;
+            }
+            if (find_new_ep) {
+                break;
+            }
+            route_graphs_.pop_back();
+        }
+    }
+    for (int level = static_cast<int>(route_graphs_.size()) - 1; level >= 0; --level) {
+        this->route_graphs_[level]->DeleteNeighborsById(inner_id);
+    }
+    this->bottom_graph_->DeleteNeighborsById(inner_id);
+    this->label_table_->Remove(id);
+    this->deleted_ids_.insert(inner_id);
+    delete_count_++;
+    return true;
+}
+
+void
+HGraph::Merge(const std::vector<MergeUnit>& merge_units) {
+    int64_t total_count = this->GetNumElements();
+    for (const auto& unit : merge_units) {
+        total_count += unit.index->GetNumElements();
+    }
+    if (max_capacity_ < total_count) {
+        this->resize(total_count);
+    }
+    for (const auto& merge_unit : merge_units) {
+        const auto other_index = std::dynamic_pointer_cast<HGraph>(
+            std::dynamic_pointer_cast<IndexImpl<HGraph>>(merge_unit.index)->GetInnerIndex());
+        if (total_count_ == 0) {
+            this->entry_point_id_ = other_index->entry_point_id_;
+        }
+        basic_flatten_codes_->MergeOther(other_index->basic_flatten_codes_, this->total_count_);
+        label_table_->MergeOther(other_index->label_table_, merge_unit.id_map_func);
+        if (use_reorder_) {
+            high_precise_codes_->MergeOther(other_index->high_precise_codes_, this->total_count_);
+        }
+        bottom_graph_->MergeOther(other_index->bottom_graph_, this->total_count_);
+        if (route_graphs_.size() < other_index->route_graphs_.size()) {
+            route_graphs_.push_back(this->generate_one_route_graph());
+        }
+        for (int j = 0; j < other_index->route_graphs_.size(); ++j) {
+            route_graphs_[j]->MergeOther(other_index->route_graphs_[j], this->total_count_);
+        }
+        this->total_count_ += other_index->GetNumElements();
+    }
+    if (this->odescent_param_ == nullptr) {
+        odescent_param_ = std::make_shared<ODescentParameter>();
+    }
+
+    auto build_data = (use_reorder_ and not build_by_base_) ? this->high_precise_codes_
+                                                            : this->basic_flatten_codes_;
+    {
+        odescent_param_->max_degree = bottom_graph_->MaximumDegree();
+        ODescent odescent_builder(odescent_param_, build_data, allocator_, this->build_pool_.get());
+        odescent_builder.Build(bottom_graph_);
+        odescent_builder.SaveGraph(bottom_graph_);
+    }
+    for (auto& graph : route_graphs_) {
+        odescent_param_->max_degree = bottom_graph_->MaximumDegree() / 2;
+        ODescent sparse_odescent_builder(
+            odescent_param_, build_data, allocator_, this->build_pool_.get());
+        auto ids = graph->GetIds();
+        sparse_odescent_builder.Build(ids, graph);
+        sparse_odescent_builder.SaveGraph(graph);
+        this->entry_point_id_ = ids.back();
     }
 }
 }  // namespace vsag

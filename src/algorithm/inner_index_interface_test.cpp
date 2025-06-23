@@ -67,3 +67,91 @@ TEST_CASE("Fast Create Index", "[ut][InnerIndexInterface]") {
         REQUIRE_THROWS(InnerIndexInterface::FastCreateIndex(index_fast_str, common_param));
     }
 }
+
+class EmptyInnerIndex : public InnerIndexInterface {
+public:
+    EmptyInnerIndex() : InnerIndexInterface() {
+    }
+
+    std::string
+    GetName() const override {
+        return "EmptyInnerIndex";
+    }
+
+    void
+    InitFeatures() override {
+        return;
+    }
+
+    std::vector<int64_t>
+    Add(const DatasetPtr& base) override {
+        return {};
+    }
+
+    DatasetPtr
+    KnnSearch(const DatasetPtr& query,
+              int64_t k,
+              const std::string& parameters,
+              const FilterPtr& filter) const override {
+        return nullptr;
+    }
+
+    [[nodiscard]] DatasetPtr
+    RangeSearch(const DatasetPtr& query,
+                float radius,
+                const std::string& parameters,
+                const FilterPtr& filter,
+                int64_t limited_size = -1) const override {
+        return nullptr;
+    }
+
+    void
+    Serialize(StreamWriter& writer) const override {
+        return;
+    }
+
+    void
+    Deserialize(StreamReader& reader) override {
+        return;
+    }
+
+    InnerIndexPtr
+    Fork(const IndexCommonParam& param) override {
+        return nullptr;
+    }
+
+    int64_t
+    GetNumElements() const override {
+        return 0;
+    }
+};
+
+TEST_CASE("NOT Implemented", "[ut][InnerIndexInterface]") {
+    auto empty_index = std::make_shared<EmptyInnerIndex>();
+    IndexCommonParam common_param;
+    common_param.dim_ = 128;
+    common_param.thread_pool_ = SafeThreadPool::FactoryDefaultThreadPool();
+    common_param.allocator_ = SafeAllocator::FactoryDefaultAllocator();
+    common_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
+
+    BinarySet binary;
+    std::vector<int64_t> pretrain_ids;
+    std::vector<MergeUnit> merge_units;
+
+    REQUIRE_THROWS(empty_index->Remove(0));
+    REQUIRE_THROWS(empty_index->EstimateMemory(1000));
+    REQUIRE_THROWS(empty_index->GetEstimateBuildMemory(1000));
+    REQUIRE_THROWS(empty_index->Feedback(nullptr, 10, ""));
+    REQUIRE_THROWS(empty_index->GetStats());
+    REQUIRE_THROWS(empty_index->UpdateId(0, 1));
+    REQUIRE_THROWS(empty_index->UpdateVector(0, nullptr));
+    REQUIRE_THROWS(empty_index->ContinueBuild(nullptr, binary));
+    REQUIRE_THROWS(empty_index->Pretrain(pretrain_ids, 10, ""));
+    REQUIRE_THROWS(empty_index->CalcDistanceById(nullptr, 1));
+    REQUIRE_THROWS(empty_index->ExportModel(common_param));
+    REQUIRE_THROWS(empty_index->GetRawData(1, nullptr));
+    REQUIRE_THROWS(empty_index->GetMinAndMaxId());
+    REQUIRE_THROWS(empty_index->GetMemoryUsageDetail());
+    REQUIRE_THROWS(empty_index->Merge(merge_units));
+    REQUIRE_THROWS(empty_index->GetExtraInfoByIds(nullptr, 1, nullptr));
+}

@@ -18,7 +18,7 @@
 *.exe
 *.out
 *.app
-
+.ccls-cache/
 # python
 __pycache__/
 *.py[cod]
@@ -180,6 +180,7 @@ data/
 /lcov_cobertura.py
 /testresult/
 *.index
+.ccls-cache/
 
 /build-release/
 *.so.[0-9]*

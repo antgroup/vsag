@@ -15,6 +15,7 @@
 
 #pragma once
 
+#include "data_cell/attribute_bucket_inverted_datacell.h"
 #include "data_cell/bucket_datacell.h"
 #include "data_cell/flatten_interface.h"
 #include "impl/basic_searcher.h"
@@ -74,6 +75,9 @@ public:
               const std::string& parameters,
               const FilterPtr& filter) const override;
 
+    [[nodiscard]] DatasetPtr
+    SearchWithRequest(const SearchRequest& request) const override;
+
     DatasetPtr
     RangeSearch(const DatasetPtr& query,
                 float radius,
@@ -114,15 +118,18 @@ private:
     BucketInterfacePtr bucket_{nullptr};
 
     IVFPartitionStrategyPtr partition_strategy_{nullptr};
+    BucketIdType buckets_per_data_;
 
     int64_t total_elements_{0};
 
     bool use_reorder_{false};
 
     bool is_trained_{false};
-
     bool use_residual_{false};
+    bool use_attribute_filter_{false};
 
     FlattenInterfacePtr reorder_codes_{nullptr};
+
+    AttrInvertedInterfacePtr attr_filter_index_{nullptr};
 };
 }  // namespace vsag

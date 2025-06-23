@@ -18,31 +18,32 @@
 #include <cstdint>
 #include <string>
 
+#include "simd_marco.h"
 namespace vsag {
 
 namespace generic {
 float
-FP32ComputeIP(const float* query, const float* codes, uint64_t dim);
+FP32ComputeIP(const float* RESTRICT query, const float* RESTRICT codes, uint64_t dim);
 float
-FP32ComputeL2Sqr(const float* query, const float* codes, uint64_t dim);
+FP32ComputeL2Sqr(const float* RESTRICT query, const float* RESTRICT codes, uint64_t dim);
 void
-FP32ComputeIPBatch4(const float* query,
+FP32ComputeIPBatch4(const float* RESTRICT query,
                     uint64_t dim,
-                    const float* codes1,
-                    const float* codes2,
-                    const float* codes3,
-                    const float* codes4,
+                    const float* RESTRICT codes1,
+                    const float* RESTRICT codes2,
+                    const float* RESTRICT codes3,
+                    const float* RESTRICT codes4,
                     float& result1,
                     float& result2,
                     float& result3,
                     float& result4);
 void
-FP32ComputeL2SqrBatch4(const float* query,
+FP32ComputeL2SqrBatch4(const float* RESTRICT query,
                        uint64_t dim,
-                       const float* codes1,
-                       const float* codes2,
-                       const float* codes3,
-                       const float* codes4,
+                       const float* RESTRICT codes1,
+                       const float* RESTRICT codes2,
+                       const float* RESTRICT codes3,
+                       const float* RESTRICT codes4,
                        float& result1,
                        float& result2,
                        float& result3,
@@ -62,27 +63,27 @@ FP32ReduceAdd(const float* x, uint64_t dim);
 
 namespace sse {
 float
-FP32ComputeIP(const float* query, const float* codes, uint64_t dim);
+FP32ComputeIP(const float* RESTRICT query, const float* RESTRICT codes, uint64_t dim);
 float
-FP32ComputeL2Sqr(const float* query, const float* codes, uint64_t dim);
+FP32ComputeL2Sqr(const float* RESTRICT query, const float* RESTRICT codes, uint64_t dim);
 void
-FP32ComputeIPBatch4(const float* query,
+FP32ComputeIPBatch4(const float* RESTRICT query,
                     uint64_t dim,
-                    const float* codes1,
-                    const float* codes2,
-                    const float* codes3,
-                    const float* codes4,
+                    const float* RESTRICT codes1,
+                    const float* RESTRICT codes2,
+                    const float* RESTRICT codes3,
+                    const float* RESTRICT codes4,
                     float& result1,
                     float& result2,
                     float& result3,
                     float& result4);
 void
-FP32ComputeL2SqrBatch4(const float* query,
+FP32ComputeL2SqrBatch4(const float* RESTRICT query,
                        uint64_t dim,
-                       const float* codes1,
-                       const float* codes2,
-                       const float* codes3,
-                       const float* codes4,
+                       const float* RESTRICT codes1,
+                       const float* RESTRICT codes2,
+                       const float* RESTRICT codes3,
+                       const float* RESTRICT codes4,
                        float& result1,
                        float& result2,
                        float& result3,
@@ -102,27 +103,27 @@ FP32ReduceAdd(const float* x, uint64_t dim);
 
 namespace avx {
 float
-FP32ComputeIP(const float* query, const float* codes, uint64_t dim);
+FP32ComputeIP(const float* RESTRICT query, const float* RESTRICT codes, uint64_t dim);
 float
-FP32ComputeL2Sqr(const float* query, const float* codes, uint64_t dim);
+FP32ComputeL2Sqr(const float* RESTRICT query, const float* RESTRICT codes, uint64_t dim);
 void
-FP32ComputeIPBatch4(const float* query,
+FP32ComputeIPBatch4(const float* RESTRICT query,
                     uint64_t dim,
-                    const float* codes1,
-                    const float* codes2,
-                    const float* codes3,
-                    const float* codes4,
+                    const float* RESTRICT codes1,
+                    const float* RESTRICT codes2,
+                    const float* RESTRICT codes3,
+                    const float* RESTRICT codes4,
                     float& result1,
                     float& result2,
                     float& result3,
                     float& result4);
 void
-FP32ComputeL2SqrBatch4(const float* query,
+FP32ComputeL2SqrBatch4(const float* RESTRICT query,
                        uint64_t dim,
-                       const float* codes1,
-                       const float* codes2,
-                       const float* codes3,
-                       const float* codes4,
+                       const float* RESTRICT codes1,
+                       const float* RESTRICT codes2,
+                       const float* RESTRICT codes3,
+                       const float* RESTRICT codes4,
                        float& result1,
                        float& result2,
                        float& result3,
@@ -142,27 +143,27 @@ FP32ReduceAdd(const float* x, uint64_t dim);
 
 namespace avx2 {
 float
-FP32ComputeIP(const float* query, const float* codes, uint64_t dim);
+FP32ComputeIP(const float* RESTRICT query, const float* RESTRICT codes, uint64_t dim);
 float
-FP32ComputeL2Sqr(const float* query, const float* codes, uint64_t dim);
+FP32ComputeL2Sqr(const float* RESTRICT query, const float* RESTRICT codes, uint64_t dim);
 void
-FP32ComputeIPBatch4(const float* query,
+FP32ComputeIPBatch4(const float* RESTRICT query,
                     uint64_t dim,
-                    const float* codes1,
-                    const float* codes2,
-                    const float* codes3,
-                    const float* codes4,
+                    const float* RESTRICT codes1,
+                    const float* RESTRICT codes2,
+                    const float* RESTRICT codes3,
+                    const float* RESTRICT codes4,
                     float& result1,
                     float& result2,
                     float& result3,
                     float& result4);
 void
-FP32ComputeL2SqrBatch4(const float* query,
+FP32ComputeL2SqrBatch4(const float* RESTRICT query,
                        uint64_t dim,
-                       const float* codes1,
-                       const float* codes2,
-                       const float* codes3,
-                       const float* codes4,
+                       const float* RESTRICT codes1,
+                       const float* RESTRICT codes2,
+                       const float* RESTRICT codes3,
+                       const float* RESTRICT codes4,
                        float& result1,
                        float& result2,
                        float& result3,
@@ -182,27 +183,27 @@ FP32ReduceAdd(const float* x, uint64_t dim);
 
 namespace avx512 {
 float
-FP32ComputeIP(const float* query, const float* codes, uint64_t dim);
+FP32ComputeIP(const float* RESTRICT query, const float* RESTRICT codes, uint64_t dim);
 float
-FP32ComputeL2Sqr(const float* query, const float* codes, uint64_t dim);
+FP32ComputeL2Sqr(const float* RESTRICT query, const float* RESTRICT codes, uint64_t dim);
 void
-FP32ComputeIPBatch4(const float* query,
+FP32ComputeIPBatch4(const float* RESTRICT query,
                     uint64_t dim,
-                    const float* codes1,
-                    const float* codes2,
-                    const float* codes3,
-                    const float* codes4,
+                    const float* RESTRICT codes1,
+                    const float* RESTRICT codes2,
+                    const float* RESTRICT codes3,
+                    const float* RESTRICT codes4,
                     float& result1,
                     float& result2,
                     float& result3,
                     float& result4);
 void
-FP32ComputeL2SqrBatch4(const float* query,
+FP32ComputeL2SqrBatch4(const float* RESTRICT query,
                        uint64_t dim,
-                       const float* codes1,
-                       const float* codes2,
-                       const float* codes3,
-                       const float* codes4,
+                       const float* RESTRICT codes1,
+                       const float* RESTRICT codes2,
+                       const float* RESTRICT codes3,
+                       const float* RESTRICT codes4,
                        float& result1,
                        float& result2,
                        float& result3,
@@ -220,16 +221,58 @@ float
 FP32ReduceAdd(const float* x, uint64_t dim);
 }  // namespace avx512
 
-using FP32ComputeType = float (*)(const float* query, const float* codes, uint64_t dim);
+namespace neon {
+float
+FP32ComputeIP(const float* RESTRICT query, const float* RESTRICT codes, uint64_t dim);
+float
+FP32ComputeL2Sqr(const float* RESTRICT query, const float* RESTRICT codes, uint64_t dim);
+void
+FP32ComputeIPBatch4(const float* RESTRICT query,
+                    uint64_t dim,
+                    const float* RESTRICT codes1,
+                    const float* RESTRICT codes2,
+                    const float* RESTRICT codes3,
+                    const float* RESTRICT codes4,
+                    float& result1,
+                    float& result2,
+                    float& result3,
+                    float& result4);
+void
+FP32ComputeL2SqrBatch4(const float* RESTRICT query,
+                       uint64_t dim,
+                       const float* RESTRICT codes1,
+                       const float* RESTRICT codes2,
+                       const float* RESTRICT codes3,
+                       const float* RESTRICT codes4,
+                       float& result1,
+                       float& result2,
+                       float& result3,
+                       float& result4);
+void
+FP32Sub(const float* x, const float* y, float* z, uint64_t dim);
+void
+FP32Add(const float* x, const float* y, float* z, uint64_t dim);
+void
+FP32Mul(const float* x, const float* y, float* z, uint64_t dim);
+void
+FP32Div(const float* x, const float* y, float* z, uint64_t dim);
+
+float
+FP32ReduceAdd(const float* x, uint64_t dim);
+}  // namespace neon
+
+using FP32ComputeType = float (*)(const float* RESTRICT query,
+                                  const float* RESTRICT codes,
+                                  uint64_t dim);
 extern FP32ComputeType FP32ComputeIP;
 extern FP32ComputeType FP32ComputeL2Sqr;
 
-using FP32ComputeBatch4Type = void (*)(const float* query,
+using FP32ComputeBatch4Type = void (*)(const float* RESTRICT query,
                                        uint64_t dim,
-                                       const float* codes1,
-                                       const float* codes2,
-                                       const float* codes3,
-                                       const float* codes4,
+                                       const float* RESTRICT codes1,
+                                       const float* RESTRICT codes2,
+                                       const float* RESTRICT codes3,
+                                       const float* RESTRICT codes4,
                                        float& result1,
                                        float& result2,
                                        float& result3,

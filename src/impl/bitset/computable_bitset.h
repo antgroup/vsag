@@ -23,10 +23,7 @@ namespace vsag {
 class ComputableBitset;
 using ComputableBitsetPtr = std::shared_ptr<ComputableBitset>;
 
-enum class ComputableBitsetType {
-    SparseBitset,
-    FastBitset,
-};
+enum class ComputableBitsetType { SparseBitset, FastBitset };
 
 /**
  * @brief ComputableBitset is a base class for bitsets that can be computed.
@@ -51,7 +48,7 @@ public:
      * @return void
      */
     virtual void
-    Or(const Bitset& another) = 0;
+    Or(const ComputableBitset& another) = 0;
 
     /**
      * @brief Performs a bitwise AND operation on the current bitset with another bitset.
@@ -60,7 +57,7 @@ public:
      * @return void
      */
     virtual void
-    And(const Bitset& another) = 0;
+    And(const ComputableBitset& another) = 0;
 
     /**
      * @brief Performs a bitwise XOR operation on the current bitset with another bitset.
@@ -69,7 +66,7 @@ public:
      * @return void
      */
     virtual void
-    Xor(const Bitset& another) = 0;
+    Xor(const ComputableBitset& another) = 0;
 
     /**
      * @brief Performs a bitwise NOT operation on the current bitset.
@@ -78,6 +75,33 @@ public:
      */
     virtual void
     Not() = 0;
+
+    /**
+     * @brief Performs a bitwise OR operation on the current computable bitset with another.
+     *
+     * @param another The computable pointer to perform the OR operation with.
+     * @return void
+     */
+    virtual void
+    Or(const ComputableBitsetPtr& another) = 0;
+
+    /**
+     * @brief Performs a bitwise AND operation on the current computable bitset with another.
+     *
+     * @param another The computable pointer to perform the AND operation with.
+     * @return void
+     */
+    virtual void
+    And(const ComputableBitsetPtr& another) = 0;
+
+    /**
+     * @brief Performs a bitwise XOR operation on the current computable bitset with another.
+     *
+     * @param another The computable pointer to perform the XOR operation with.
+     * @return void
+     */
+    virtual void
+    Xor(const ComputableBitsetPtr& another) = 0;
 
     /**
      * @brief Serializes the bitset to a stream.
@@ -98,6 +122,18 @@ public:
      */
     virtual void
     Deserialize(StreamReader& reader) = 0;
+
+    /**
+     * @brief Clear the bitset.
+     *
+     * @return void
+     * @note The bitset is cleared, all bits are set to 0.
+     */
+    virtual void
+    Clear() = 0;
+
+public:
+    ComputableBitsetType type_{ComputableBitsetType::SparseBitset};
 };
 
 }  // namespace vsag

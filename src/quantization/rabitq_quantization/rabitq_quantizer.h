@@ -21,8 +21,7 @@
 #include <unordered_map>
 #include <vector>
 
-#include "impl/principal_component_analysis.h"
-#include "impl/random_orthogonal_matrix.h"
+#include "impl/transform/transformer_headers.h"
 #include "index/index_common_param.h"
 #include "inner_string_params.h"
 #include "quantization/quantizer.h"
@@ -51,6 +50,7 @@ public:
     explicit RaBitQuantizer(int dim,
                             uint64_t pca_dim,
                             uint64_t num_bits_per_dim_query,
+                            bool use_fht,
                             Allocator* allocator);
 
     explicit RaBitQuantizer(const RaBitQuantizerParamPtr& param,
@@ -138,11 +138,12 @@ private:
     float inv_sqrt_d_{0};
 
     // random projection related
-    std::shared_ptr<RandomOrthogonalMatrix> rom_;
+    bool use_fht_{false};
+    std::shared_ptr<VectorTransformer> rom_;
     std::vector<float> centroid_;  // TODO(ZXY): use centroids (e.g., IVF or Graph) outside
 
     // pca related
-    std::shared_ptr<PrincipalComponentAnalysis> pca_;
+    std::shared_ptr<PCATransformer> pca_;
     std::uint64_t original_dim_{0};
     std::uint64_t pca_dim_{0};
 
@@ -167,10 +168,8 @@ private:
 };
 
 template <MetricType metric>
-RaBitQuantizer<metric>::RaBitQuantizer(int dim,
-                                       uint64_t pca_dim,
-                                       uint64_t num_bits_per_dim_query,
-                                       Allocator* allocator)
+RaBitQuantizer<metric>::RaBitQuantizer(
+    int dim, uint64_t pca_dim, uint64_t num_bits_per_dim_query, bool use_fht, Allocator* allocator)
     : Quantizer<RaBitQuantizer<metric>>(dim, allocator) {
     static_assert(metric == MetricType::METRIC_TYPE_L2SQR, "Unsupported metric type");
 
@@ -178,7 +177,7 @@ RaBitQuantizer<metric>::RaBitQuantizer(int dim,
     pca_dim_ = pca_dim;
     original_dim_ = dim;
     if (0 < pca_dim_ and pca_dim_ < dim) {
-        pca_.reset(new PrincipalComponentAnalysis(dim, pca_dim_, allocator));
+        pca_.reset(new PCATransformer(allocator, dim, pca_dim_));
         this->dim_ = pca_dim_;
     } else {
         pca_dim_ = dim;
@@ -191,7 +190,12 @@ RaBitQuantizer<metric>::RaBitQuantizer(int dim,
     centroid_.resize(this->dim_, 0);
 
     // random orthogonal matrix
-    rom_.reset(new RandomOrthogonalMatrix(this->dim_, allocator));
+    use_fht_ = use_fht;
+    if (use_fht_) {
+        rom_.reset(new FhtKacRotator(allocator, this->dim_));
+    } else {
+        rom_.reset(new RandomOrthogonalMatrix(allocator, this->dim_));
+    }
 
     // distance function related variable
     inv_sqrt_d_ = 1.0f / sqrt(this->dim_);
@@ -248,6 +252,7 @@ RaBitQuantizer<metric>::RaBitQuantizer(const RaBitQuantizerParamPtr& param,
     : RaBitQuantizer<metric>(common_param.dim_,
                              param->pca_dim_,
                              param->num_bits_per_dim_query_,
+                             param->use_fht_,
                              common_param.allocator_.get()){};
 
 template <MetricType metric>
@@ -269,10 +274,7 @@ RaBitQuantizer<metric>::TrainImpl(const DataType* data, uint64_t count) {
 
     // pca
     if (pca_dim_ != this->original_dim_) {
-        bool pca_result = pca_->Train(data, count);
-        if (not pca_result) {
-            return false;
-        }
+        pca_->Train(data, count);
     }
 
     // get centroid
@@ -295,24 +297,7 @@ RaBitQuantizer<metric>::TrainImpl(const DataType* data, uint64_t count) {
         centroid_[d] = centroid_[d] / (float)count;
     }
 
-    // generate rom
-    rom_->GenerateRandomOrthogonalMatrixWithRetry();
-
-    // validate rom
-    int retries = MAX_RETRIES;
-    bool successful_gen = true;
-    double det = rom_->ComputeDeterminant();
-    if (std::fabs(det - 1) > 1e-4) {
-        for (uint64_t i = 0; i < retries; i++) {
-            successful_gen = rom_->GenerateRandomOrthogonalMatrix();
-            if (successful_gen) {
-                break;
-            }
-        }
-    }
-    if (not successful_gen) {
-        return false;
-    }
+    rom_->Train(data, count);
 
     // transform centroid
     Vector<DataType> rp_centroids(this->dim_, 0, this->allocator_);

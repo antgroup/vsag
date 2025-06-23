@@ -65,6 +65,14 @@ float
 Normalize(const float* from, float* to, uint64_t dim);
 }  // namespace avx512
 
+namespace neon {
+void
+DivScalar(const float* from, float* to, uint64_t dim, float scalar);
+
+float
+Normalize(const float* from, float* to, uint64_t dim);
+}  // namespace neon
+
 using NormalizeType = float (*)(const float* from, float* to, uint64_t dim);
 extern NormalizeType Normalize;
 

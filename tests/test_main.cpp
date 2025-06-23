@@ -21,9 +21,10 @@
 int
 main(int argc, char** argv) {
     // your setup ...
-    vsag::Options::Instance().set_logger(&fixtures::logger::test_logger);
 
     fixtures::logger::test_logger.SetLevel(vsag::Logger::Level::kWARN);
+
+    vsag::Options::Instance().set_logger(&fixtures::logger::test_logger);
 
     int result = Catch::Session().run(argc, argv);
 

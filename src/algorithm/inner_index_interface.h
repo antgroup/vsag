@@ -77,6 +77,9 @@ public:
     [[nodiscard]] virtual InnerIndexPtr
     Fork(const IndexCommonParam& param) = 0;
 
+    [[nodiscard]] virtual int64_t
+    GetNumElements() const = 0;
+
 public:
     virtual void
     Train(const DatasetPtr& base){};
@@ -120,6 +123,12 @@ public:
     [[nodiscard]] virtual DatasetPtr
     KnnSearch(const DatasetPtr& query, int64_t k, SearchParam& search_param) const {
         throw std::runtime_error("Index doesn't support new filter");
+    }
+
+    [[nodiscard]] virtual DatasetPtr
+    SearchWithRequest(const SearchRequest& request) const {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "Index doesn't support SearchWithRequest");
     }
 
     [[nodiscard]] virtual DatasetPtr
@@ -242,15 +251,12 @@ public:
     }
 
     [[nodiscard]] virtual int64_t
-    GetNumElements() const = 0;
-
-    [[nodiscard]] virtual int64_t
     GetMemoryUsage() const {
         throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
                             "Index doesn't support GetMemoryUsage");
     }
 
-    [[nodiscard]] virtual JsonType
+    [[nodiscard]] virtual std::string
     GetMemoryUsageDetail() const {
         // TODO(deming): implement func for every types of inner index
         throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,

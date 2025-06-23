@@ -57,6 +57,8 @@ AllocateShared(Allocator* allocator, Args&&... args) {
 
 using ConstParamMap = const std::unordered_map<std::string, std::vector<std::string>>;
 
+using IdFilterFuncType = std::function<bool(int64_t)>;
+
 struct CompareByFirst {
     constexpr bool
     operator()(std::pair<float, InnerIdType> const& a,

@@ -166,15 +166,47 @@ SparseGraphDataCell::DeleteNeighborsById(vsag::InnerIdType id) {
                     "remove point too many times in SparseGraphDatacell, please rebuild index");
             }
             iter->second++;
-        } else {
-            throw VsagException(
-                ErrorType::INTERNAL_ERROR,
-                fmt::format("remove point {} not exist in SparseGraphDatacell", id));
         }
     } else {
         throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
                             "disable delete in sparse graph datacell");
     }
+}
+
+void
+SparseGraphDataCell::MergeOther(GraphInterfacePtr other, uint64_t bias) {
+    auto other_graph = std::dynamic_pointer_cast<SparseGraphDataCell>(other);
+    if (!other_graph) {
+        throw VsagException(ErrorType::INTERNAL_ERROR,
+                            "SparseGraphDataCell can only merge with SparseGraphDataCell");
+    }
+    if (this->maximum_degree_ != other_graph->maximum_degree_) {
+        throw VsagException(ErrorType::INTERNAL_ERROR,
+                            fmt::format("SparseGraphDataCell maximum degree mismatch: {} vs {}",
+                                        this->maximum_degree_,
+                                        other_graph->maximum_degree_));
+    }
+    Vector<InnerIdType> neighbor_ids(allocator_);
+    for (const auto& item : other_graph->neighbors_) {
+        auto id = item.first;
+        other_graph->GetNeighbors(id, neighbor_ids);
+        for (auto& neighbor_id : neighbor_ids) {
+            neighbor_id += bias;
+        }
+        this->InsertNeighborsById(id + bias, neighbor_ids);
+        if (is_support_delete_) {
+            this->node_version_[id + bias] = 0;
+        }
+    }
+}
+
+Vector<InnerIdType>
+SparseGraphDataCell::GetIds() const {
+    Vector<InnerIdType> ids(allocator_);
+    for (const auto& item : neighbors_) {
+        ids.push_back(item.first);
+    }
+    return ids;
 }
 
 }  // namespace vsag

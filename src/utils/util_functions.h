@@ -82,4 +82,14 @@ split_string(const std::string& str, const char delimiter);
 std::string
 get_current_time();
 
+template <class T1, class T2>
+void
+copy_vector(const std::vector<T1>& from, std::vector<T2>& to) {
+    static_assert(std::is_same_v<T1, T2> || std::is_convertible_v<T1, T2>);
+    to.resize(from.size());
+    for (int64_t i = 0; i < from.size(); ++i) {
+        to[i] = static_cast<T2>(from[i]);
+    }
+}
+
 }  // namespace vsag

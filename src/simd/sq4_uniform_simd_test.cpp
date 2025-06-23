@@ -47,6 +47,11 @@ using namespace vsag;
                 avx512::Func(codes1.data() + i * code_size, codes2.data() + i * code_size, dim); \
             REQUIRE(fixtures::dist_t(gt) == fixtures::dist_t(avx512));                           \
         }                                                                                        \
+        if (SimdStatus::SupportNEON()) {                                                         \
+            auto neon =                                                                          \
+                neon::Func(codes1.data() + i * code_size, codes2.data() + i * code_size, dim);   \
+            REQUIRE(fixtures::dist_t(gt) == fixtures::dist_t(neon));                             \
+        }                                                                                        \
     }
 
 TEST_CASE("SQ4 Uniform SIMD Compute Codes", "[ut][simd]") {
@@ -82,4 +87,5 @@ TEST_CASE("SQ4 Uniform SIMD Compute Benchmark", "[ut][simd][!benchmark]") {
     BENCHMARK_SIMD_COMPUTE(avx, SQ4UniformComputeCodesIP);
     BENCHMARK_SIMD_COMPUTE(avx2, SQ4UniformComputeCodesIP);
     BENCHMARK_SIMD_COMPUTE(avx512, SQ4UniformComputeCodesIP);
+    BENCHMARK_SIMD_COMPUTE(neon, SQ4UniformComputeCodesIP);
 }

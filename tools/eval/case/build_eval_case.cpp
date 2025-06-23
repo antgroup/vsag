@@ -35,7 +35,7 @@ BuildEvalCase::BuildEvalCase(const std::string& dataset_path,
 void
 BuildEvalCase::init_monitors() {
     if (config_.enable_memory) {
-        auto memory_peak_monitor = std::make_shared<MemoryPeakMonitor>();
+        auto memory_peak_monitor = std::make_shared<MemoryPeakMonitor>("build");
         this->monitors_.emplace_back(std::move(memory_peak_monitor));
     }
     if (config_.enable_tps) {
@@ -71,6 +71,9 @@ BuildEvalCase::do_build() {
         monitor->Start();
     }
     auto build_index = index_->Build(base);
+    if (not build_index.has_value()) {
+        throw std::runtime_error(build_index.error().message);
+    }
     for (auto& monitor : monitors_) {
         monitor->Record();
         monitor->Stop();
