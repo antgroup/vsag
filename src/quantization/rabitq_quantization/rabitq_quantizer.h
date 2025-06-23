@@ -21,9 +21,7 @@
 #include <unordered_map>
 #include <vector>
 
-#include "impl/fht_kac_rotator.h"
-#include "impl/principal_component_analysis.h"
-#include "impl/random_orthogonal_matrix.h"
+#include "impl/transform/transformer_headers.h"
 #include "index/index_common_param.h"
 #include "inner_string_params.h"
 #include "quantization/quantizer.h"
@@ -141,11 +139,11 @@ private:
 
     // random projection related
     bool use_fht_{false};
-    std::shared_ptr<MatrixRotator> rom_;
+    std::shared_ptr<VectorTransformer> rom_;
     std::vector<float> centroid_;  // TODO(ZXY): use centroids (e.g., IVF or Graph) outside
 
     // pca related
-    std::shared_ptr<PrincipalComponentAnalysis> pca_;
+    std::shared_ptr<PCATransformer> pca_;
     std::uint64_t original_dim_{0};
     std::uint64_t pca_dim_{0};
 
@@ -179,7 +177,7 @@ RaBitQuantizer<metric>::RaBitQuantizer(
     pca_dim_ = pca_dim;
     original_dim_ = dim;
     if (0 < pca_dim_ and pca_dim_ < dim) {
-        pca_.reset(new PrincipalComponentAnalysis(dim, pca_dim_, allocator));
+        pca_.reset(new PCATransformer(allocator, dim, pca_dim_));
         this->dim_ = pca_dim_;
     } else {
         pca_dim_ = dim;
@@ -194,9 +192,9 @@ RaBitQuantizer<metric>::RaBitQuantizer(
     // random orthogonal matrix
     use_fht_ = use_fht;
     if (use_fht_) {
-        rom_.reset(new FhtKacRotator(this->dim_, allocator));
+        rom_.reset(new FhtKacRotator(allocator, this->dim_));
     } else {
-        rom_.reset(new RandomOrthogonalMatrix(this->dim_, allocator));
+        rom_.reset(new RandomOrthogonalMatrix(allocator, this->dim_));
     }
 
     // distance function related variable
@@ -276,10 +274,7 @@ RaBitQuantizer<metric>::TrainImpl(const DataType* data, uint64_t count) {
 
     // pca
     if (pca_dim_ != this->original_dim_) {
-        bool pca_result = pca_->Train(data, count);
-        if (not pca_result) {
-            return false;
-        }
+        pca_->Train(data, count);
     }
 
     // get centroid
@@ -302,9 +297,7 @@ RaBitQuantizer<metric>::TrainImpl(const DataType* data, uint64_t count) {
         centroid_[d] = centroid_[d] / (float)count;
     }
 
-    if (not rom_->Build()) {
-        return false;
-    }
+    rom_->Train(data, count);
 
     // transform centroid
     Vector<DataType> rp_centroids(this->dim_, 0, this->allocator_);
