@@ -85,6 +85,7 @@ void
 SparseBitset::And(const ComputableBitsetPtr& another) {
     if (another == nullptr) {
         this->Clear();
+        return;
     }
     this->And(*another);
 }

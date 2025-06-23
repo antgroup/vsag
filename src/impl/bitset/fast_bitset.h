@@ -59,6 +59,15 @@ public:
     Xor(const ComputableBitsetPtr& another) override;
 
     void
+    And(const std::vector<ComputableBitsetPtr>& other_bitsets) override;
+
+    void
+    Or(const std::vector<ComputableBitsetPtr>& other_bitsets) override;
+
+    void
+    Xor(const std::vector<ComputableBitsetPtr>& other_bitsets) override;
+
+    void
     Not() override;
 
     void
