@@ -123,7 +123,7 @@ HgraphTestIndex::GenerateHGraphBuildParametersString(const std::string& metric_t
             "alpha": 1.2,
             "support_remove": {},
             "use_attribute_filter": {},
-            "immuatble": {}
+            "immutable": {}
         }}
     }}
     )";
@@ -147,7 +147,7 @@ HgraphTestIndex::GenerateHGraphBuildParametersString(const std::string& metric_t
             "alpha": 1.2,
             "support_remove": {},
             "use_attribute_filter": {},
-            "immuatble": {}
+            "immutable": {}
         }}
     }}
     )";
