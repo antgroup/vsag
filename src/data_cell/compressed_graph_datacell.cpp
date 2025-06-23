@@ -43,8 +43,8 @@ CompressedGraphDataCell::MakeCompressedGraph(const GraphInterfacePtr& graph_ptr,
     compressed_graph->Resize(graph_ptr->MaxCapacity());
     compressed_graph->SetMaximumDegree(graph_ptr->MaximumDegree());
 
+    Vector<InnerIdType> neighbor_ids(allocator);
     for (InnerIdType id = 0; id < compressed_graph->max_capacity_; ++id) {
-        Vector<InnerIdType> neighbor_ids(allocator);
         graph_ptr->GetNeighbors(id, neighbor_ids);
         compressed_graph->InsertNeighborsById(id, neighbor_ids);
     }

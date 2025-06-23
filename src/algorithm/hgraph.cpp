@@ -15,11 +15,10 @@
 
 #include "hgraph.h"
 
-#include <data_cell/compressed_graph_datacell.h>
-
 #include <memory>
 
 #include "common.h"
+#include "data_cell/compressed_graph_datacell.h"
 #include "data_cell/graph_datacell_parameter.h"
 #include "data_cell/sparse_graph_datacell.h"
 #include "dataset_impl.h"
