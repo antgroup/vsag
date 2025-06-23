@@ -192,6 +192,9 @@ BucketDataCell<QuantTmpl, IOTmpl>::query_one_by_id(
     const std::shared_ptr<Computer<QuantTmpl>>& computer,
     const BucketIdType& bucket_id,
     const InnerIdType& offset_id) {
+    if (bucket_id >= this->bucket_count_ or bucket_id < 0) {
+        throw VsagException(ErrorType::INTERNAL_ERROR, "visited invalid bucket id");
+    }
     std::shared_lock lock(this->bucket_mutexes_[bucket_id]);
     this->check_valid_bucket_id(bucket_id);
     if (offset_id >= this->bucket_sizes_[bucket_id]) {
@@ -214,6 +217,9 @@ BucketDataCell<QuantTmpl, IOTmpl>::scan_bucket_by_id(
     float* result_dists,
     const std::shared_ptr<Computer<QuantTmpl>>& computer,
     const BucketIdType& bucket_id) {
+    if (bucket_id >= this->bucket_count_ or bucket_id < 0) {
+        throw VsagException(ErrorType::INTERNAL_ERROR, "visited invalid bucket id");
+    }
     std::shared_lock lock(this->bucket_mutexes_[bucket_id]);
     constexpr InnerIdType scan_block_size = 32;
     InnerIdType offset = 0;
