@@ -99,6 +99,7 @@ private:
     uint64_t offset_code_{0};
     uint64_t offset_norm_{0};
     uint64_t offset_sum_{0};
+    float scalar_rate_{0.0F};
 };
 
 template <MetricType metric>
@@ -163,6 +164,7 @@ SQ8UniformQuantizer<metric>::TrainImpl(const DataType* data, uint64_t count) {
         data, count, this->diff_, this->lower_bound_, need_normalize, SQTrainMode::CLASSIC);
 
     this->diff_ -= this->lower_bound_;
+    this->scalar_rate_ = (diff_ / 255.0) * (diff_ / 255.0);
 
     this->is_trained_ = true;
     return true;
@@ -246,7 +248,7 @@ SQ8UniformQuantizer<metric>::ComputeImpl(const uint8_t* codes1, const uint8_t* c
         norm_type norm1 = *((norm_type*)(codes1 + offset_norm_));
         norm_type norm2 = *((norm_type*)(codes2 + offset_norm_));
 
-        result = norm1 + norm2 - 2 * result;
+        result = (norm1 + norm2 - 2 * result) * scalar_rate_;
     } else if constexpr (metric == MetricType::METRIC_TYPE_IP or
                          metric == MetricType::METRIC_TYPE_COSINE) {
         result = SQ8UniformComputeCodesIP(codes1, codes2, this->dim_);
@@ -254,8 +256,7 @@ SQ8UniformQuantizer<metric>::ComputeImpl(const uint8_t* codes1, const uint8_t* c
         sum_type sum1 = *((sum_type*)(codes1 + offset_sum_));
         sum_type sum2 = *((sum_type*)(codes2 + offset_sum_));
 
-        result = lower_bound_ * (sum1 + sum2) + (diff_ / 255.0) * (diff_ / 255.0) * result -
-                 lower_bound_ * lower_bound_;
+        result = lower_bound_ * (sum1 + sum2) + scalar_rate_ * result + lower_bound_ * lower_bound_;
 
         result = 1 - result;
 
@@ -323,6 +324,7 @@ SQ8UniformQuantizer<metric>::DeserializeImpl(StreamReader& reader) {
     StreamReader::ReadObj(reader, this->offset_code_);
     StreamReader::ReadObj(reader, this->offset_norm_);
     StreamReader::ReadObj(reader, this->offset_sum_);
+    this->scalar_rate_ = (diff_ / 255.0) * (diff_ / 255.0);
 }
 
 }  // namespace vsag
