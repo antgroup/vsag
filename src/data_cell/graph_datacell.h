@@ -120,6 +120,11 @@ GraphDataCell<IOTmpl>::GraphDataCell(const GraphDataCellParamPtr& param,
     if (this->is_support_delete_) {
         node_versions_.resize(max_capacity_);
     }
+
+    Vector<InnerIdType> empty_ids(allocator_);
+    for (InnerIdType id = 0; id < this->max_capacity_; ++id) {
+        GraphDataCell::InsertNeighborsById(id, empty_ids);
+    }
 }
 
 template <typename IOTmpl>
@@ -215,11 +220,18 @@ GraphDataCell<IOTmpl>::Resize(InnerIdType new_size) {
         }
         node_versions_.resize(new_size);
     }
+
+    InnerIdType old_capacity = this->max_capacity_;
     this->max_capacity_ = new_size;
     uint64_t io_size = static_cast<uint64_t>(new_size) * static_cast<uint64_t>(code_line_size_);
     uint8_t end_flag =
         127;  // the value is meaningless, only to occupy the position for io allocate
     this->io_->Write(&end_flag, 1, io_size);
+
+    Vector<InnerIdType> empty_ids(allocator_);
+    for (InnerIdType id = old_capacity; id < this->max_capacity_; ++id) {
+        InsertNeighborsById(id, empty_ids);
+    }
 }
 
 template <typename IOTmpl>

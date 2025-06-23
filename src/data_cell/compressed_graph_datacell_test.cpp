@@ -72,7 +72,7 @@ void
 TestBuildCompressedFromGraphDataCell(const GraphInterfaceParamPtr& param,
                                      const IndexCommonParam& common_param) {
     auto count = 2000;
-    auto max_id = 2000;
+    auto max_id = 10000;
 
     auto graph = GraphInterface::MakeInstance(param, common_param);
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
@@ -80,8 +80,9 @@ TestBuildCompressedFromGraphDataCell(const GraphInterfaceParamPtr& param,
     graph->Resize(max_id);
     UnorderedMap<InnerIdType, std::shared_ptr<Vector<InnerIdType>>> maps(allocator.get());
     std::unordered_set<InnerIdType> unique_keys;
-    for (int i = 0; i < max_id; i++) {
-        unique_keys.insert(i);
+    while (unique_keys.size() < count) {
+        InnerIdType new_key = random() % max_id;
+        unique_keys.insert(new_key);
     }
 
     std::vector<InnerIdType> keys(unique_keys.begin(), unique_keys.end());
