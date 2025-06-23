@@ -1359,12 +1359,6 @@ HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
     hgraph_parameter->data_type = common_param.data_type_;
     hgraph_parameter->FromJson(inner_json);
     uint64_t max_degree = hgraph_parameter->bottom_graph_param->max_degree_;
-    if (hgraph_parameter->immutable &&
-        (hgraph_parameter->build_thread_count != 0 || common_param.thread_pool_ != nullptr)) {
-        throw VsagException(
-            ErrorType::INVALID_ARGUMENT,
-            "HGraph static mode not support build_thread_count != 0 or thread_pool != nullptr");
-    }
 
     auto max_degree_threshold = std::max(common_param.dim_, 128L);
     CHECK_ARGUMENT(  // NOLINT

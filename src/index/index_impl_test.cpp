@@ -19,14 +19,17 @@
 #include <sstream>
 
 #include "algorithm/hgraph.h"
+#include "vsag/engine.h"
 
 TEST_CASE("immutable index test", "[ut][index_impl]") {
     vsag::IndexCommonParam common_param;
     common_param.dim_ = 128;
     common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
     common_param.metric_ = vsag::MetricType::METRIC_TYPE_L2SQR;
+    common_param.allocator_ = vsag::Engine::CreateDefaultAllocator();
     auto build_parameter_json = R"(
         {
+            "base_quantization_type": "fp32",
             "max_degree": 16,
             "ef_construction": 100,
             "immutable": true
