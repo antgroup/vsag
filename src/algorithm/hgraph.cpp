@@ -675,7 +675,8 @@ HGraph::Deserialize(StreamReader& reader) {
     this->deserialize_basic_info(reader);
     this->basic_flatten_codes_->Deserialize(reader);
     this->bottom_graph_->Deserialize(reader);
-    auto compressed_graph = CompressedGraphDataCell::MakeCompressedGraph(this->bottom_graph_, allocator_);
+    auto compressed_graph =
+        CompressedGraphDataCell::MakeCompressedGraph(this->bottom_graph_, allocator_);
     this->bottom_graph_ = std::move(compressed_graph);
     if (this->use_reorder_) {
         this->high_precise_codes_->Deserialize(reader);
