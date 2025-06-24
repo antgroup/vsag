@@ -32,6 +32,7 @@ public:
     bool dist_support_avx512bw = false;
     bool dist_support_avx512vl = false;
     bool dist_support_neon = false;
+    bool dist_support_avx512vpopcntdq = false;
     bool runtime_has_sse = false;
     bool runtime_has_avx = false;
     bool runtime_has_avx2 = false;
@@ -40,6 +41,7 @@ public:
     bool runtime_has_avx512bw = false;
     bool runtime_has_avx512vl = false;
     bool runtime_has_neon = false;
+    bool runtime_has_avx512vpopcntdq = false;
 
     static bool is_inited;
 
@@ -61,6 +63,16 @@ public:
         ret &= cpuinfo_has_x86_avx512f() & cpuinfo_has_x86_avx512dq() & cpuinfo_has_x86_avx512bw() &
                cpuinfo_has_x86_avx512vl();
         return ret;
+    }
+
+    static inline bool
+    SupportAVX512VPOPCNTDQ() {
+        Init();
+#if defined(ENABLE_AVX512VPOPCNTDQ)
+        return cpuinfo_has_x86_avx512vpopcntdq();
+#else
+        return false;
+#endif
     }
 
     static inline bool
@@ -144,6 +156,11 @@ public:
     [[nodiscard]] std::string
     neon() const {
         return status_to_string(dist_support_neon, runtime_has_neon);
+    }
+
+    [[nodiscard]] std::string
+    avx512vpopcntdq() const {
+        return status_to_string(dist_support_avx512vpopcntdq, runtime_has_avx512vpopcntdq);
     }
 
     static std::string

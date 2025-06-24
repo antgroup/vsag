@@ -50,14 +50,18 @@ using namespace vsag;
         }                                                        \
     };
 
-#define TEST_ACCURACY_SQ4(Func)                                        \
-    {                                                                  \
-        float gt, avx512;                                              \
-        gt = generic::Func(codes.data(), bits.data(), dim);            \
-        if (SimdStatus::SupportAVX512()) {                             \
-            avx512 = avx512::Func(codes.data(), bits.data(), dim);     \
-            REQUIRE(fixtures::dist_t(gt) == fixtures::dist_t(avx512)); \
-        }                                                              \
+#define TEST_ACCURACY_SQ4(Func)                                                \
+    {                                                                          \
+        float gt, avx512;                                                      \
+        gt = generic::Func(codes.data(), bits.data(), dim);                    \
+        if (SimdStatus::SupportAVX512()) {                                     \
+            avx512 = avx512::Func(codes.data(), bits.data(), dim);             \
+            REQUIRE(fixtures::dist_t(gt) == fixtures::dist_t(avx512));         \
+        }                                                                      \
+        if (SimdStatus::SupportAVX512VPOPCNTDQ()) {                            \
+            float res = avx512vpopcntdq::Func(codes.data(), bits.data(), dim); \
+            REQUIRE(fixtures::dist_t(gt) == fixtures::dist_t(res));            \
+        }                                                                      \
     };
 
 #define BENCHMARK_SIMD_COMPUTE_SQ4(Simd, Comp)          \
@@ -85,6 +89,7 @@ TEST_CASE("RaBitQ SQ4U-BQ Compute Benchmark", "[ut][simd][!benchmark]") {
     int dim = 32;
     BENCHMARK_SIMD_COMPUTE_SQ4(generic, RaBitQSQ4UBinaryIP);
     BENCHMARK_SIMD_COMPUTE_SQ4(avx512, RaBitQSQ4UBinaryIP);
+    BENCHMARK_SIMD_COMPUTE_SQ4(avx512vpopcntdq, RaBitQSQ4UBinaryIP);
 }
 
 TEST_CASE("RaBitQ SQ4U-BQ Compute Codes", "[ut][simd]") {
