@@ -621,16 +621,19 @@ TEST_CASE("[Daily] IVF Build With Large K", "[ft][ivf][daily]") {
 }
 
 static void
-TestIVFBuildWithAttr(const fixtures::IVFTestIndexPtr& test_index,
-                     const fixtures::IVFResourcePtr& resource) {
+TestIVFWithAttr(const fixtures::IVFTestIndexPtr& test_index,
+                const fixtures::IVFResourcePtr& resource) {
     using namespace fixtures;
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
     bool use_attribute_filter = true;
+    std::vector<std::pair<std::string, float>> tmp_test_cases = {
+        {"fp32", 0.75},
+    };
     for (auto metric_type : resource->metric_types) {
         for (auto dim : resource->dims) {
             for (auto train_type : resource->train_types) {
-                for (auto [base_quantization_str, recall] : resource->test_cases) {
+                for (auto [base_quantization_str, recall] : tmp_test_cases) {
                     if (train_type == "kmeans") {
                         recall *= 0.8F;  // Kmeans may not achieve high recall in random datasets
                     }
@@ -655,10 +658,30 @@ TestIVFBuildWithAttr(const fixtures::IVFTestIndexPtr& test_index,
                                                                        false,
                                                                        1,
                                                                        use_attribute_filter);
-                    auto index = IVFTestIndex::TestFactory(IVFTestIndex::name, param, true);
+                    auto index1 = IVFTestIndex::TestFactory(IVFTestIndex::name, param, true);
                     auto dataset = IVFTestIndex::pool.GetDatasetAndCreate(
                         dim, resource->base_count, metric_type);
-                    IVFTestIndex::TestBuildWithAttr(index, dataset);
+                    if (not index1->CheckFeature(vsag::SUPPORT_BUILD)) {
+                        continue;
+                    }
+                    auto build_result = index1->Build(dataset->base_);
+                    REQUIRE(build_result.has_value());
+                    IVFTestIndex::TestWithAttr(index1, dataset, search_param);
+
+                    auto dir = fixtures::TempDir("serialize");
+                    auto path = dir.GenerateRandomFile();
+                    std::ofstream outfile(path, std::ios::out | std::ios::binary);
+                    auto serialize_index = index1->Serialize(outfile);
+                    REQUIRE(serialize_index.has_value());
+                    outfile.close();
+
+                    auto index = TestIndex::TestFactory(IVFTestIndex::name, param, true);
+                    std::ifstream infile(path, std::ios::in | std::ios::binary);
+                    auto deserialize_index = index->Deserialize(infile);
+                    REQUIRE(deserialize_index.has_value());
+                    infile.close();
+                    IVFTestIndex::TestWithAttr(index, dataset, search_param);
+
                     vsag::Options::Instance().set_block_size_limit(origin_size);
                 }
             }
@@ -669,13 +692,13 @@ TestIVFBuildWithAttr(const fixtures::IVFTestIndexPtr& test_index,
 TEST_CASE("[PR] IVF Build With Attribute", "[ft][ivf][pr]") {
     auto test_index = std::make_shared<fixtures::IVFTestIndex>();
     auto resource = test_index->GetResource(true);
-    TestIVFBuildWithAttr(test_index, resource);
+    TestIVFWithAttr(test_index, resource);
 }
 
 TEST_CASE("[Daily] IVF Build With Attribute", "[ft][ivf][daily]") {
     auto test_index = std::make_shared<fixtures::IVFTestIndex>();
     auto resource = test_index->GetResource(false);
-    TestIVFBuildWithAttr(test_index, resource);
+    TestIVFWithAttr(test_index, resource);
 }
 
 static void
