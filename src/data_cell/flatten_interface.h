@@ -23,8 +23,8 @@
 #include "impl/runtime_parameter.h"
 #include "index/index_common_param.h"
 #include "quantization/computer.h"
-#include "stream_reader.h"
-#include "stream_writer.h"
+#include "storage/stream_reader.h"
+#include "storage/stream_writer.h"
 #include "typing.h"
 #include "vsag/constants.h"
 
@@ -129,7 +129,7 @@ public:
     }
 
     virtual void
-    Deserialize(StreamReader& reader) {
+    Deserialize(lvalue_or_rvalue<StreamReader> reader) {
         StreamReader::ReadObj(reader, this->total_count_);
         StreamReader::ReadObj(reader, this->max_capacity_);
         StreamReader::ReadObj(reader, this->code_size_);

@@ -71,4 +71,30 @@ using MaxHeap = std::priority_queue<std::pair<float, InnerIdType>,
                                     Vector<std::pair<float, InnerIdType>>,
                                     CompareByFirst>;
 
+template <typename Ref>
+struct lvalue_or_rvalue {
+    Ref&& ref;
+
+    template <typename Arg>
+    constexpr lvalue_or_rvalue(Arg&& arg) noexcept : ref(std::move(arg)) {
+    }
+
+    constexpr
+    operator Ref&() const& noexcept {
+        return ref;
+    }
+    constexpr
+    operator Ref&&() const& noexcept {
+        return std::move(ref);
+    }
+    constexpr Ref&
+    operator*() const noexcept {
+        return ref;
+    }
+    constexpr Ref*
+    operator->() const noexcept {
+        return &ref;
+    }
+};
+
 }  // namespace vsag

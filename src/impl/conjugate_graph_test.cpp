@@ -22,7 +22,7 @@
 
 #include "fixtures.h"
 #include "safe_allocator.h"
-#include "stream_reader.h"
+#include "storage/stream_reader.h"
 
 TEST_CASE("ConjugateGraph Build, Add and Memory Usage", "[ut][ConjugateGraph]") {
     auto allocator = vsag::SafeAllocator::FactoryDefaultAllocator();

@@ -14,6 +14,7 @@
 // limitations under the License.
 
 #include <catch2/catch_message.hpp>
+#include <iostream>
 #include <sstream>
 #include <string>
 
@@ -24,6 +25,12 @@
 namespace fixtures::logger {
 
 class TestLogger : public vsag::Logger {
+public:
+    inline void
+    OutputDirectly(bool output_directly) {
+        output_directly_ = output_directly;
+    }
+
 public:
     inline void
     Log(const std::string& msg, Level level) {
@@ -60,6 +67,13 @@ public:
     }
 
 public:
+#define OUTPUT_DIRECTLY_OR(test_logger_output, level)                          \
+    if (output_directly_) {                                                    \
+        std::cout << "[test-logger]::[" << #level << "] " << msg << std::endl; \
+    } else {                                                                   \
+        test_logger_output;                                                    \
+    }
+
     inline void
     SetLevel(Level log_level) override {
         std::lock_guard<std::mutex> lock(mutex_);
@@ -70,7 +84,7 @@ public:
     Trace(const std::string& msg) override {
         std::lock_guard<std::mutex> lock(mutex_);
         if (level_ <= 0) {
-            UNSCOPED_INFO("[test-logger]::[trace] " + msg);
+            OUTPUT_DIRECTLY_OR(UNSCOPED_INFO("[test-logger]::[trace] " + msg), trace);
         }
     }
 
@@ -78,7 +92,7 @@ public:
     Debug(const std::string& msg) override {
         std::lock_guard<std::mutex> lock(mutex_);
         if (level_ <= 1) {
-            UNSCOPED_INFO("[test-logger]::[debug] " + msg);
+            OUTPUT_DIRECTLY_OR(UNSCOPED_INFO("[test-logger]::[debug] " + msg), debug);
         }
     }
 
@@ -86,7 +100,7 @@ public:
     Info(const std::string& msg) override {
         std::lock_guard<std::mutex> lock(mutex_);
         if (level_ <= 2) {
-            UNSCOPED_INFO("[test-logger]::[info] " + msg);
+            OUTPUT_DIRECTLY_OR(UNSCOPED_INFO("[test-logger]::[info] " + msg), info);
         }
     }
 
@@ -94,7 +108,7 @@ public:
     Warn(const std::string& msg) override {
         std::lock_guard<std::mutex> lock(mutex_);
         if (level_ <= 3) {
-            UNSCOPED_INFO("[test-logger]::[warn] " + msg);
+            OUTPUT_DIRECTLY_OR(UNSCOPED_INFO("[test-logger]::[warn] " + msg), warn);
         }
     }
 
@@ -102,7 +116,7 @@ public:
     Error(const std::string& msg) override {
         std::lock_guard<std::mutex> lock(mutex_);
         if (level_ <= 4) {
-            UNSCOPED_INFO("[test-logger]::[error] " + msg);
+            OUTPUT_DIRECTLY_OR(UNSCOPED_INFO("[test-logger]::[error] " + msg), error);
         }
     }
 
@@ -110,13 +124,14 @@ public:
     Critical(const std::string& msg) override {
         std::lock_guard<std::mutex> lock(mutex_);
         if (level_ <= 5) {
-            UNSCOPED_INFO("[test-logger]::[critical] " + msg);
+            OUTPUT_DIRECTLY_OR(UNSCOPED_INFO("[test-logger]::[critical] " + msg), critical);
         }
     }
 
 private:
     int64_t level_ = 0;
     std::mutex mutex_;
+    bool output_directly_ = false;
 };
 
 class LoggerStream : public std::basic_streambuf<char> {

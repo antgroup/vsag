@@ -264,7 +264,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::BruteForceTestIndex,
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::BruteForceTestIndex,
                              "BruteForce Serialize File",
-                             "[ft][bruteforce]") {
+                             "[ft][bruteforce][serialization]") {
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
     auto metric_type = GENERATE("l2", "ip", "cosine");

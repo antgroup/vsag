@@ -23,13 +23,15 @@
 #include "inner_index_interface.h"
 #include "ivf_parameter.h"
 #include "ivf_partition/ivf_partition_strategy.h"
-#include "stream_reader.h"
-#include "stream_writer.h"
+#include "storage/stream_reader.h"
+#include "storage/stream_writer.h"
 #include "typing.h"
 #include "utils/distance_heap.h"
 #include "vsag/index.h"
 
 namespace vsag {
+
+// IVF index was introduced since v0.14
 class IVF : public InnerIndexInterface {
 public:
     static ParamPtr

@@ -18,8 +18,8 @@
 #include <nlohmann/json.hpp>
 #include <queue>
 
-#include "../footer.h"
 #include "../logger.h"
+#include "storage/footer.h"
 #include "typing.h"
 #include "vsag/index.h"
 

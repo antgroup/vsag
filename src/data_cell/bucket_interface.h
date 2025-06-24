@@ -20,8 +20,8 @@
 #include "bucket_datacell_parameter.h"
 #include "index/index_common_param.h"
 #include "quantization/computer.h"
-#include "stream_reader.h"
-#include "stream_writer.h"
+#include "storage/stream_reader.h"
+#include "storage/stream_writer.h"
 #include "typing.h"
 
 namespace vsag {
@@ -97,7 +97,7 @@ public:
     }
 
     virtual void
-    Deserialize(StreamReader& reader) {
+    Deserialize(lvalue_or_rvalue<StreamReader> reader) {
         StreamReader::ReadObj(reader, this->bucket_count_);
         StreamReader::ReadObj(reader, this->code_size_);
     }

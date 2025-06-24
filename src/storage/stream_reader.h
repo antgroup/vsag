@@ -17,23 +17,17 @@
 
 #include <cstdint>
 #include <functional>
+#include <iostream>
 #include <istream>
+#include <stack>
 
-#include "typing.h"
+#include "../logger.h"
+#include "../typing.h"
+
+class SliceStreamReader;
 
 class StreamReader {
 public:
-    StreamReader() = default;
-
-    virtual void
-    Read(char* data, uint64_t size) = 0;
-
-    virtual void
-    Seek(uint64_t cursor) = 0;
-
-    virtual uint64_t
-    GetCursor() const = 0;
-
     template <typename T>
     static void
     ReadObj(StreamReader& reader, T& val) {
@@ -46,7 +40,7 @@ public:
         StreamReader::ReadObj(reader, length);
         std::vector<char> buffer(length);
         reader.Read(buffer.data(), length);
-        return std::string(buffer.data(), length);
+        return {buffer.data(), length};
     }
 
     template <typename T>
@@ -66,38 +60,89 @@ public:
         val.resize(size);
         reader.Read(reinterpret_cast<char*>(val.data()), size * sizeof(T));
     }
+
+public:
+    virtual void
+    Read(char* data, uint64_t size) = 0;
+
+    virtual void
+    Seek(uint64_t cursor) = 0;
+
+    [[nodiscard]] virtual uint64_t
+    GetCursor() const = 0;
+
+    [[nodiscard]] virtual uint64_t
+    Length() {
+        return length_;
+    }
+
+public:
+    [[nodiscard]] SliceStreamReader
+    Slice(uint64_t begin, uint64_t length);
+
+    [[nodiscard]] SliceStreamReader
+    Slice(uint64_t length);
+
+    void
+    PushSeek(uint64_t cursor) {
+        positions_.push(this->GetCursor());
+        // vsag::logger::trace("reader goto relative::{}", cursor);
+        this->Seek(cursor);
+    }
+
+    void
+    PopSeek() {
+        // vsag::logger::trace("reader goback relative::{}", positions_.top());
+        this->Seek(positions_.top());
+        positions_.pop();
+    }
+
+public:
+    StreamReader() = default;
+    StreamReader(uint64_t length) : length_(length) {
+    }
+
+protected:
+    uint64_t length_{0};
+
+private:
+    std::stack<uint64_t> positions_;
 };
 
 class ReadFuncStreamReader : public StreamReader {
 public:
-    ReadFuncStreamReader(std::function<void(uint64_t, uint64_t, void*)> read_func, uint64_t cursor);
-
     void
     Read(char* data, uint64_t size) override;
 
     void
     Seek(uint64_t cursor) override;
 
-    uint64_t
+    [[nodiscard]] uint64_t
     GetCursor() const override;
+
+public:
+    ReadFuncStreamReader(std::function<void(uint64_t, uint64_t, void*)> read_func,
+                         uint64_t cursor,
+                         uint64_t length);
 
 private:
     const std::function<void(uint64_t, uint64_t, void*)> readFunc_;
-    uint64_t cursor_;
+    uint64_t cursor_{0};
 };
 
 class IOStreamReader : public StreamReader {
 public:
-    explicit IOStreamReader(std::istream& istream);
-
     void
     Read(char* data, uint64_t size) override;
 
     void
     Seek(uint64_t cursor) override;
 
-    uint64_t
+    [[nodiscard]] uint64_t
     GetCursor() const override;
+
+public:
+    explicit IOStreamReader(std::istream& istream);
 
 private:
     std::istream& istream_;
@@ -105,9 +150,8 @@ private:
 
 class BufferStreamReader : public StreamReader {
 public:
-    explicit BufferStreamReader(StreamReader* reader, size_t max_size, vsag::Allocator* allocator);
-
-    ~BufferStreamReader();
+    [[nodiscard]] uint64_t
+    Length() override;
 
     void
     Read(char* data, uint64_t size) override;
@@ -115,8 +159,13 @@ public:
     void
     Seek(uint64_t cursor) override;
 
-    uint64_t
+    [[nodiscard]] uint64_t
     GetCursor() const override;
+
+public:
+    explicit BufferStreamReader(StreamReader* reader, size_t max_size, vsag::Allocator* allocator);
+
+    ~BufferStreamReader();
 
 private:
     StreamReader* const reader_impl_{nullptr};
@@ -127,4 +176,30 @@ private:
     size_t buffer_size_{0};    // Maximum capacity of the cache
     size_t max_size_{0};       // Maximum capacity of the actual data stream
     size_t cursor_{0};         // Current read position in the actual data stream
+};
+
+class SliceStreamReader : public StreamReader {
+public:
+    [[nodiscard]] uint64_t
+    Length() override;
+
+    void
+    Read(char* data, uint64_t size) override;
+
+    void
+    Seek(uint64_t cursor) override;
+
+    [[nodiscard]] uint64_t
+    GetCursor() const override;
+
+public:
+    // create a slice from specified position
+    SliceStreamReader(StreamReader* reader, uint64_t begin, uint64_t length);
+    // create a slice from current position
+    SliceStreamReader(StreamReader* reader, uint64_t length);
+
+private:
+    StreamReader* const reader_impl_{nullptr};
+    uint64_t begin_{0};
+    uint64_t cursor_{0};
 };

@@ -176,4 +176,10 @@ extern const char* const IVF_USE_ATTRIBUTE_FILTER;
 
 extern const char* const GNO_IMI_FIRST_ORDER_BUCKETS_COUNT;
 extern const char* const GNO_IMI_SECOND_ORDER_BUCKETS_COUNT;
+
+// serialization
+extern const char* const SERIAL_MAGIC_BEGIN;
+extern const char* const SERIAL_MAGIC_END;
+extern const char* const SERIAL_META_KEY;
+
 }  // namespace vsag

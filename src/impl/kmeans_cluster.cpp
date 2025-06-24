@@ -77,21 +77,19 @@ KMeansCluster::Run(uint32_t k,
     auto* y_sqr = reinterpret_cast<float*>(y_sqr_buffer.data);
     auto* distances = reinterpret_cast<float*>(distances_buffer.data);
 
-    logger::debug("KMeansCluster::Run k: {}, count: {}, iter: {}", k, count, iter);
+    logger::trace("KMeansCluster::Run k: {}, count: {}, iter: {}", k, count, iter);
     if (k < THRESHOLD_FOR_HGRAPH) {
-        logger::debug("KMeansCluster::Run use blas");
+        logger::trace("KMeansCluster::Run use blas");
     } else {
-        logger::debug("KMeansCluster::Run use hgraph");
+        logger::trace("KMeansCluster::Run use hgraph");
     }
 
     for (int it = 0; it < iter; ++it) {
-        /*
-        logger::debug("[{}] KMeansCluster::Run iter: {}/{}, cur loss is {}",
+        logger::trace("[{}] KMeansCluster::Run iter: {}/{}, cur loss is {}",
                       get_current_time(),
                       it,
                       iter,
                       total_err);
-        */
         if (k < THRESHOLD_FOR_HGRAPH) {
             total_err = this->find_nearest_one_with_blas(datas, count, k, y_sqr, distances, labels);
         } else {

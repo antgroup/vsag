@@ -19,6 +19,7 @@
 
 #include <cstdint>
 #include <exception>
+#include <memory>
 #include <new>
 #include <nlohmann/json.hpp>
 #include <stdexcept>
@@ -33,6 +34,8 @@
 #include "io/memory_block_io_parameter.h"
 #include "quantization/fp32_quantizer_parameter.h"
 #include "safe_allocator.h"
+#include "storage/serialization.h"
+#include "storage/stream_writer.h"
 #include "utils/slow_task_timer.h"
 #include "utils/timer.h"
 #include "utils/util_functions.h"
@@ -40,6 +43,7 @@
 #include "vsag/constants.h"
 #include "vsag/errors.h"
 #include "vsag/expected.hpp"
+#include "vsag/options.h"
 
 namespace vsag {
 
@@ -463,17 +467,36 @@ HNSW::range_search(const DatasetPtr& query,
     }
 }
 
+#define HNSW_CHECK_SELF_VALID                                                            \
+    if (not this->IsValidStatus()) {                                                     \
+        LOG_ERROR_AND_RETURNS(                                                           \
+            ErrorType::WRONG_STATUS, "index is in the wrong status({})", PrintStatus()); \
+    }
+
+#define HNSW_CHECK_SELF_EMPTY                                               \
+    if (this->alg_hnsw_->getCurrentElementCount() > 0) {                    \
+        LOG_ERROR_AND_RETURNS(ErrorType::INDEX_NOT_EMPTY,                   \
+                              "failed to deserialize: index is not empty"); \
+    }
+
 tl::expected<BinarySet, Error>
 HNSW::serialize() const {
     std::shared_lock status_lock(index_status_mutex_);
-    if (not this->IsValidStatus()) {
-        LOG_ERROR_AND_RETURNS(
-            ErrorType::WRONG_STATUS, "index is in the wrong status({})", PrintStatus());
-    }
+    HNSW_CHECK_SELF_VALID;
+
+    auto metadata = std::make_shared<Metadata>();
 
     if (GetNumElements() == 0) {
-        // return a special binaryset means empty
-        return EmptyIndexBinarySet::Make("EMPTY_HNSW");
+        // TODO(wxyu): remove this if condition
+        // if (not Options::Instance().new_version()) {
+        //     // return a special binaryset means empty
+        //     return EmptyIndexBinarySet::Make("EMPTY_HNSW");
+        // }
+
+        metadata->SetEmptyIndex(true);
+        BinarySet bs;
+        bs.Set(SERIAL_META_KEY, metadata->ToBinary());
+        return bs;
     }
 
     SlowTaskTimer t("hnsw serialize");
@@ -481,7 +504,9 @@ HNSW::serialize() const {
     try {
         std::shared_ptr<int8_t[]> bin(new int8_t[num_bytes]);
         std::shared_lock lock(rw_mutex_);
-        alg_hnsw_->saveIndex(bin.get());
+        auto* buffer = (char*)bin.get();
+        BufferStreamWriter writer(buffer);
+        alg_hnsw_->saveIndex(writer);
         Binary b{
             .data = bin,
             .size = num_bytes,
@@ -492,8 +517,10 @@ HNSW::serialize() const {
         if (use_conjugate_graph_) {
             Binary b_cg = *conjugate_graph_->Serialize();
             bs.Set(CONJUGATE_GRAPH_DATA, b_cg);
+            metadata->Set("has_conjugate_graph", true);
         }
 
+        bs.Set(SERIAL_META_KEY, metadata->ToBinary());
         return bs;
     } catch (const std::bad_alloc& e) {
         LOG_ERROR_AND_RETURNS(
@@ -502,56 +529,29 @@ HNSW::serialize() const {
 }
 
 tl::expected<void, Error>
-HNSW::serialize(std::ostream& out_stream) {
-    std::shared_lock status_lock(index_status_mutex_);
-    if (not this->IsValidStatus()) {
-        LOG_ERROR_AND_RETURNS(
-            ErrorType::WRONG_STATUS, "index is in the wrong status({})", PrintStatus());
-    }
-
-    if (GetNumElements() == 0) {
-        LOG_ERROR_AND_RETURNS(ErrorType::INDEX_EMPTY, "failed to serialize: hnsw index is empty");
-
-        // FIXME(wxyu): cannot support serialize empty index by stream
-        // auto bs = empty_binaryset();
-        // for (const auto& key : bs.GetKeys()) {
-        //     auto b = bs.Get(key);
-        //     out_stream.write((char*)b.data.get(), b.size);
-        // }
-        // return {};
-    }
-
-    SlowTaskTimer t("hnsw serialize");
-
-    // no expected exception
-    std::shared_lock lock(rw_mutex_);
-    alg_hnsw_->saveIndex(out_stream);
-
-    if (use_conjugate_graph_) {
-        conjugate_graph_->Serialize(out_stream);
-    }
-
-    return {};
-}
-
-tl::expected<void, Error>
 HNSW::deserialize(const BinarySet& binary_set) {
     std::shared_lock status_lock(index_status_mutex_);
-    if (not this->IsValidStatus()) {
-        LOG_ERROR_AND_RETURNS(
-            ErrorType::WRONG_STATUS, "index is in the wrong status({})", PrintStatus());
-    }
+    HNSW_CHECK_SELF_VALID;
+    HNSW_CHECK_SELF_EMPTY;
 
     SlowTaskTimer t("hnsw deserialize");
-    if (this->alg_hnsw_->getCurrentElementCount() > 0) {
-        LOG_ERROR_AND_RETURNS(ErrorType::INDEX_NOT_EMPTY,
-                              "failed to deserialize: index is not empty");
-    }
+    // new version serialization will contains the META_KEY
+    if (binary_set.Contains(SERIAL_META_KEY)) {
+        logger::debug("parse with new version format");
+        auto metadata = std::make_shared<Metadata>(binary_set.Get(SERIAL_META_KEY));
 
-    // check if binaryset is a empty index
-    if (binary_set.Contains(BLANK_INDEX)) {
-        empty_index_ = true;
-        return {};
+        if (metadata->EmptyIndex()) {
+            empty_index_ = true;
+            return {};
+        }
+    } else {
+        logger::debug("parse with v0.11 version format");
+
+        // check if binaryset is a empty index
+        if (binary_set.Contains(BLANK_INDEX)) {
+            empty_index_ = true;
+            return {};
+        }
     }
 
     Binary b = binary_set.Get(HNSW_DATA);
@@ -566,7 +566,7 @@ HNSW::deserialize(const BinarySet& binary_set) {
     try {
         std::unique_lock lock(rw_mutex_);
         int64_t cursor = 0;
-        ReadFuncStreamReader reader(func, cursor);
+        ReadFuncStreamReader reader(func, cursor, b.size);
         BufferStreamReader buffer_reader(&reader, b.size, allocator_.get());
         alg_hnsw_->loadIndex(buffer_reader, this->space_.get());
         if (use_conjugate_graph_) {
@@ -589,21 +589,30 @@ HNSW::deserialize(const BinarySet& binary_set) {
 tl::expected<void, Error>
 HNSW::deserialize(const ReaderSet& reader_set) {
     std::shared_lock status_lock(index_status_mutex_);
-    if (not this->IsValidStatus()) {
-        LOG_ERROR_AND_RETURNS(
-            ErrorType::WRONG_STATUS, "index is in the wrong status({})", PrintStatus());
-    }
+    HNSW_CHECK_SELF_VALID;
+    HNSW_CHECK_SELF_EMPTY;
 
     SlowTaskTimer t("hnsw deserialize");
-    if (this->alg_hnsw_->getCurrentElementCount() > 0) {
-        LOG_ERROR_AND_RETURNS(ErrorType::INDEX_NOT_EMPTY,
-                              "failed to deserialize: index is not empty");
-    }
 
-    // check if readerset is a empty index
-    if (reader_set.Contains(BLANK_INDEX)) {
-        empty_index_ = true;
-        return {};
+    // new version serialization will contains the META_KEY
+    if (reader_set.Contains(SERIAL_META_KEY)) {
+        logger::debug("parse with new version format");
+
+        auto reader = reader_set.Get(SERIAL_META_KEY);
+        char buffer[reader->Size()];
+        reader->Read(0, reader->Size(), buffer);
+        auto metadata = std::make_shared<Metadata>(std::string(buffer, reader->Size()));
+
+        if (metadata->EmptyIndex()) {
+            empty_index_ = true;
+            return {};
+        }
+    } else {
+        // check if readerset is a empty index
+        if (reader_set.Contains(BLANK_INDEX)) {
+            empty_index_ = true;
+            return {};
+        }
     }
 
     const auto& hnsw_data = reader_set.Get(HNSW_DATA);
@@ -620,7 +629,7 @@ HNSW::deserialize(const ReaderSet& reader_set) {
         std::unique_lock lock(rw_mutex_);
 
         int64_t cursor = 0;
-        ReadFuncStreamReader reader(func, cursor);
+        ReadFuncStreamReader reader(func, cursor, hnsw_data->Size());
         BufferStreamReader buffer_reader(&reader, hnsw_data->Size(), allocator_.get());
         alg_hnsw_->loadIndex(buffer_reader, this->space_.get());
     } catch (const std::runtime_error& e) {
@@ -633,26 +642,68 @@ HNSW::deserialize(const ReaderSet& reader_set) {
 }
 
 tl::expected<void, Error>
+HNSW::serialize(std::ostream& out_stream) {
+    std::shared_lock status_lock(index_status_mutex_);
+    HNSW_CHECK_SELF_VALID;
+
+    SlowTaskTimer t("hnsw serialize");
+    auto metadata = std::make_shared<Metadata>();
+
+    if (GetNumElements() == 0) {
+        metadata->SetEmptyIndex(true);
+
+        auto footer = std::make_shared<Footer>(metadata);
+        IOStreamWriter writer(out_stream);
+        footer->Write(writer);
+
+        return {};
+    }
+
+    // no expected exception
+    std::shared_lock lock(rw_mutex_);
+
+    IOStreamWriter writer(out_stream);
+    alg_hnsw_->saveIndex(writer);
+
+    if (use_conjugate_graph_) {
+        metadata->Set("has_conjugate_graph", true);
+        conjugate_graph_->Serialize(out_stream);
+    }
+
+    // serialize footer (introduced since v0.15)
+    auto footer = std::make_shared<Footer>(metadata);
+    footer->Write(writer);
+
+    return {};
+}
+
+tl::expected<void, Error>
 HNSW::deserialize(std::istream& in_stream) {
     std::shared_lock status_lock(index_status_mutex_);
-    if (not this->IsValidStatus()) {
-        LOG_ERROR_AND_RETURNS(
-            ErrorType::WRONG_STATUS, "index is in the wrong status({})", PrintStatus());
-    }
+    HNSW_CHECK_SELF_VALID;
+    HNSW_CHECK_SELF_EMPTY;
 
     SlowTaskTimer t("hnsw deserialize");
-    if (this->alg_hnsw_->getCurrentElementCount() > 0) {
-        LOG_ERROR_AND_RETURNS(ErrorType::INDEX_NOT_EMPTY,
-                              "failed to deserialize: index is not empty");
-    }
-
     try {
         std::unique_lock lock(rw_mutex_);
 
         IOStreamReader reader(in_stream);
+        auto footer = Footer::Parse(reader);
+        if (footer != nullptr) {
+            logger::debug("parse with new version format");
+            if (footer->GetMetadata()->EmptyIndex()) {
+                return {};
+            }
+        } else {
+            logger::debug("parse with v0.11 version format");
+        }
+
         alg_hnsw_->loadIndex(reader, this->space_.get());
-        if (use_conjugate_graph_ and not conjugate_graph_->Deserialize(reader).has_value()) {
-            throw std::runtime_error("error in deserialize conjugate graph");
+
+        if (use_conjugate_graph_ and footer->GetMetadata()->Get("has_conjugate_graph")) {
+            if (not conjugate_graph_->Deserialize(reader).has_value()) {
+                throw std::runtime_error("error in deserialize conjugate graph");
+            }
         }
     } catch (const std::runtime_error& e) {
         LOG_ERROR_AND_RETURNS(ErrorType::READ_ERROR, "failed to deserialize: ", e.what());
@@ -1081,12 +1132,12 @@ HNSW::CheckFeature(IndexFeature feature) const {
 
 void
 HNSW::init_feature_list() {
-    // Add & Build
+    // add & build
     feature_list_.SetFeatures({IndexFeature::SUPPORT_BUILD,
                                IndexFeature::SUPPORT_BUILD_WITH_MULTI_THREAD,
                                IndexFeature::SUPPORT_ADD_AFTER_BUILD,
                                IndexFeature::SUPPORT_ADD_FROM_EMPTY});
-    // Search
+    // search
     feature_list_.SetFeatures({IndexFeature::SUPPORT_KNN_SEARCH,
                                IndexFeature::SUPPORT_RANGE_SEARCH,
                                IndexFeature::SUPPORT_KNN_SEARCH_WITH_ID_FILTER,

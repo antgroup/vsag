@@ -17,8 +17,8 @@
 #include <cstdint>
 #include <string>
 
-#include "dataset.h"
-#include "filter.h"
+#include "vsag/dataset.h"
+#include "vsag/filter.h"
 
 namespace vsag {
 enum class SearchMode {

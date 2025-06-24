@@ -129,7 +129,7 @@ AttributeBucketInvertedDataCell::Serialize(StreamWriter& writer) {
 }
 
 void
-AttributeBucketInvertedDataCell::Deserialize(StreamReader& reader) {
+AttributeBucketInvertedDataCell::Deserialize(lvalue_or_rvalue<StreamReader> reader) {
     uint64_t size;
     StreamReader::ReadObj(reader, size);
     multi_term_2_value_map_.reserve(size);
