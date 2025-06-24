@@ -389,7 +389,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex,
 
     for (auto dim : dims) {
         for (auto& [base_quantization_str, recall] : test_cases) {
-            INFO(fmt::format("quantizer str: {}", base_quantization_str));
+            INFO(fmt::format("quantizer str: {}, dim: {}", base_quantization_str, dim));
             if (IsRaBitQ(base_quantization_str)) {
                 if (std::string(metric_type) != "l2") {
                     continue;
@@ -421,7 +421,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex, "HGraph Train & Add Test
 
     for (auto dim : dims) {
         for (auto& [base_quantization_str, recall] : test_cases) {
-            INFO(fmt::format("quantizer str: {}", base_quantization_str));
+            INFO(fmt::format("quantizer str: {}, dim: {}", base_quantization_str, dim));
             if (IsRaBitQ(base_quantization_str)) {
                 if (std::string(metric_type) != "l2") {
                     continue;
@@ -494,7 +494,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex, "HGraph Build", "[ft][hg
 
     for (auto dim : dims) {
         for (auto& [base_quantization_str, recall] : test_cases) {
-            INFO(fmt::format("quantizer str: {}", base_quantization_str));
+            INFO(fmt::format("quantizer str: {}, dim: {}", base_quantization_str, dim));
             if (IsRaBitQ(base_quantization_str)) {
                 if (std::string(metric_type) != "l2") {
                     continue;
@@ -527,7 +527,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex, "HGraph Build With Attr"
 
     for (auto dim : dims) {
         for (auto& [base_quantization_str, recall] : test_cases) {
-            INFO(fmt::format("quantizer str: {}", base_quantization_str));
+            INFO(fmt::format("quantizer str: {}, dim: {}", base_quantization_str, dim));
             if (IsRaBitQ(base_quantization_str)) {
                 if (std::string(metric_type) != "l2") {
                     continue;
@@ -567,7 +567,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex, "HGraph ODescent Build",
 
     for (auto dim : dims) {
         for (auto& [base_quantization_str, recall] : test_cases) {
-            INFO(fmt::format("quantizer str: {}", base_quantization_str));
+            INFO(fmt::format("quantizer str: {}, dim: {}", base_quantization_str, dim));
             if (IsRaBitQ(base_quantization_str)) {
                 if (std::string(metric_type) != "l2") {
                     continue;
@@ -600,7 +600,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex, "HGraph Remove", "[ft][h
 
     for (auto dim : dims) {
         for (auto& [base_quantization_str, recall] : test_cases) {
-            INFO(fmt::format("quantizer str: {}", base_quantization_str));
+            INFO(fmt::format("quantizer str: {}, dim: {}", base_quantization_str, dim));
             if (IsRaBitQ(base_quantization_str)) {
                 if (std::string(metric_type) != "l2") {
                     continue;
@@ -635,7 +635,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex,
 
     for (auto dim : dims) {
         for (auto& [base_quantization_str, recall] : test_cases) {
-            INFO(fmt::format("quantizer str: {}", base_quantization_str));
+            INFO(fmt::format("quantizer str: {}, dim: {}", base_quantization_str, dim));
             if (IsRaBitQ(base_quantization_str)) {
                 if (std::string(metric_type) != "l2") {
                     continue;
@@ -700,7 +700,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex, "HGraph Add", "[ft][hgra
 
     for (auto dim : dims) {
         for (auto& [base_quantization_str, recall] : test_cases) {
-            INFO(fmt::format("quantizer str: {}", base_quantization_str));
+            INFO(fmt::format("quantizer str: {}, dim: {}", base_quantization_str, dim));
             if (IsRaBitQ(base_quantization_str)) {
                 if (std::string(metric_type) != "l2") {
                     continue;
@@ -737,7 +737,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex,
     auto test_cases = fixtures::RandomSelect(all_test_cases, 5);
 
     for (auto& [base_quantization_str, recall] : test_cases) {
-        INFO(fmt::format("quantizer str: {}", base_quantization_str));
+        INFO(fmt::format("quantizer str: {}, dim: {}", base_quantization_str, dim));
         if (IsRaBitQ(base_quantization_str)) {
             if (std::string(metric_type) != "l2") {
                 continue;
@@ -785,7 +785,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex,
 
     for (auto dim : dims) {
         for (auto& [base_quantization_str, recall] : test_cases) {
-            INFO(fmt::format("quantizer str: {}", base_quantization_str));
+            INFO(fmt::format("quantizer str: {}, dim: {}", base_quantization_str, dim));
             if (IsRaBitQ(base_quantization_str)) {
                 if (std::string(metric_type) != "l2") {
                     continue;
@@ -821,7 +821,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex, "HGraph Serialize File",
 
     for (auto dim : dims) {
         for (auto& [base_quantization_str, recall] : test_cases) {
-            INFO(fmt::format("quantizer str: {}", base_quantization_str));
+            INFO(fmt::format("quantizer str: {}, dim: {}", base_quantization_str, dim));
             if (IsRaBitQ(base_quantization_str)) {
                 if (std::string(metric_type) != "l2") {
                     continue;
@@ -865,7 +865,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex, "HGraph Clone", "[ft][hg
 
     for (auto dim : dims) {
         for (auto& [base_quantization_str, recall] : test_cases) {
-            INFO(fmt::format("quantizer str: {}", base_quantization_str));
+            INFO(fmt::format("quantizer str: {}, dim: {}", base_quantization_str, dim));
             if (IsRaBitQ(base_quantization_str)) {
                 if (std::string(metric_type) != "l2") {
                     continue;
@@ -903,7 +903,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex, "HGraph Export Model", "
 
     for (auto dim : dims) {
         for (auto& [base_quantization_str, recall] : test_cases) {
-            INFO(fmt::format("quantizer str: {}", base_quantization_str));
+            INFO(fmt::format("quantizer str: {}, dim: {}", base_quantization_str, dim));
             if (IsRaBitQ(base_quantization_str)) {
                 if (std::string(metric_type) != "l2") {
                     continue;
@@ -942,7 +942,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex,
 
     for (auto dim : dims) {
         for (auto& [base_quantization_str, recall] : test_cases) {
-            INFO(fmt::format("quantizer str: {}", base_quantization_str));
+            INFO(fmt::format("quantizer str: {}, dim: {}", base_quantization_str, dim));
             if (IsRaBitQ(base_quantization_str)) {
                 if (std::string(metric_type) != "l2") {
                     continue;
@@ -977,7 +977,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex, "HGraph Duplicate Build"
 
     for (auto dim : dims) {
         for (auto& [base_quantization_str, recall] : test_cases) {
-            INFO(fmt::format("quantizer str: {}", base_quantization_str));
+            INFO(fmt::format("quantizer str: {}, dim: {}", base_quantization_str, dim));
             if (IsRaBitQ(base_quantization_str)) {
                 if (std::string(metric_type) != "l2") {
                     continue;
@@ -1013,7 +1013,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex, "HGraph Estimate Memory"
 
     for (auto dim : dims) {
         for (auto& [base_quantization_str, recall] : test_cases) {
-            INFO(fmt::format("quantizer str: {}", base_quantization_str));
+            INFO(fmt::format("quantizer str: {}, dim: {}", base_quantization_str, dim));
             if (IsRaBitQ(base_quantization_str)) {
                 if (std::string(metric_type) != "l2") {
                     continue;
@@ -1125,7 +1125,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex, "HGraph With Extra Info"
 
     for (auto dim : dims) {
         for (auto& [base_quantization_str, recall] : test_cases) {
-            INFO(fmt::format("quantizer str: {}", base_quantization_str));
+            INFO(fmt::format("quantizer str: {}, dim: {}", base_quantization_str, dim));
             if (IsRaBitQ(base_quantization_str)) {
                 if (std::string(metric_type) != "l2") {
                     continue;

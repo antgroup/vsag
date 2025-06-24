@@ -347,7 +347,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex, "IVF Build & ContinueAdd Te
 
     for (auto dim : dims) {
         for (auto& [base_quantization_str, recall] : test_cases) {
-            INFO(fmt::format("quantizer str: {}", base_quantization_str));
+            INFO(fmt::format("quantizer str: {}, dim: {}", base_quantization_str, dim));
             vsag::Options::Instance().set_block_size_limit(size);
             auto param = GenerateIVFBuildParametersString(
                 metric_type, dim, base_quantization_str, 300, train_type);
@@ -410,7 +410,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex, "IVF Build", "[ft][ivf]") {
 
     for (auto dim : dims) {
         for (auto& [base_quantization_str, recall] : test_cases) {
-            INFO(fmt::format("quantizer str: {}", base_quantization_str));
+            INFO(fmt::format("quantizer str: {}, dim: {}", base_quantization_str, dim));
             vsag::Options::Instance().set_block_size_limit(size);
             auto param = GenerateIVFBuildParametersString(
                 metric_type, dim, base_quantization_str, 300, train_type);
@@ -468,7 +468,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex, "IVF Build With Attribute",
 
     for (auto dim : dims) {
         for (auto& [base_quantization_str, recall] : test_cases) {
-            INFO(fmt::format("quantizer str: {}", base_quantization_str));
+            INFO(fmt::format("quantizer str: {}, dim: {}", base_quantization_str, dim));
             vsag::Options::Instance().set_block_size_limit(size);
             auto param = GenerateIVFBuildParametersString(metric_type,
                                                           dim,
@@ -498,7 +498,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex, "IVF Export Model", "[ft][i
 
     for (auto dim : dims) {
         for (auto& [base_quantization_str, recall] : test_cases) {
-            INFO(fmt::format("quantizer str: {}", base_quantization_str));
+            INFO(fmt::format("quantizer str: {}, dim: {}", base_quantization_str, dim));
             vsag::Options::Instance().set_block_size_limit(size);
             auto param = GenerateIVFBuildParametersString(
                 metric_type, dim, base_quantization_str, 300, train_type);
@@ -526,7 +526,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex, "IVF Add", "[ft][ivf]") {
 
     for (auto dim : dims) {
         for (auto& [base_quantization_str, recall] : test_cases) {
-            INFO(fmt::format("quantizer str: {}", base_quantization_str));
+            INFO(fmt::format("quantizer str: {}, dim: {}", base_quantization_str, dim));
             vsag::Options::Instance().set_block_size_limit(size);
             auto param = GenerateIVFBuildParametersString(
                 metric_type, dim, base_quantization_str, 300, train_type);
@@ -554,7 +554,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex, "IVF Merge", "[ft][ivf]") {
 
     for (auto dim : dims) {
         for (auto& [base_quantization_str, recall] : test_cases) {
-            INFO(fmt::format("quantizer str: {}", base_quantization_str));
+            INFO(fmt::format("quantizer str: {}, dim: {}", base_quantization_str, dim));
             vsag::Options::Instance().set_block_size_limit(size);
             auto param = GenerateIVFBuildParametersString(
                 metric_type, dim, base_quantization_str, 300, train_type);
@@ -585,7 +585,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex,
 
     for (auto dim : dims) {
         for (auto& [base_quantization_str, recall] : test_cases) {
-            INFO(fmt::format("quantizer str: {}", base_quantization_str));
+            INFO(fmt::format("quantizer str: {}, dim: {}", base_quantization_str, dim));
             vsag::Options::Instance().set_block_size_limit(size);
             auto param = GenerateIVFBuildParametersString(
                 metric_type, dim, base_quantization_str, 300, train_type);
@@ -613,7 +613,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex, "IVF Serialize File", "[ft]
 
     for (auto dim : dims) {
         for (auto& [base_quantization_str, recall] : test_cases) {
-            INFO(fmt::format("quantizer str: {}", base_quantization_str));
+            INFO(fmt::format("quantizer str: {}, dim: {}", base_quantization_str, dim));
             vsag::Options::Instance().set_block_size_limit(size);
             auto param = GenerateIVFBuildParametersString(
                 metric_type, dim, base_quantization_str, 300, train_type);
@@ -656,7 +656,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex, "IVF Clone", "[ft][ivf]") {
 
     for (auto dim : dims) {
         for (auto& [base_quantization_str, recall] : test_cases) {
-            INFO(fmt::format("quantizer str: {}", base_quantization_str));
+            INFO(fmt::format("quantizer str: {}, dim: {}", base_quantization_str, dim));
             vsag::Options::Instance().set_block_size_limit(size);
             auto param = GenerateIVFBuildParametersString(
                 metric_type, dim, base_quantization_str, 300, train_type);
@@ -685,7 +685,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex,
 
     for (auto dim : dims) {
         for (auto& [base_quantization_str, recall] : test_cases) {
-            INFO(fmt::format("quantizer str: {}", base_quantization_str));
+            INFO(fmt::format("quantizer str: {}, dim: {}", base_quantization_str, dim));
             vsag::Options::Instance().set_block_size_limit(size);
             auto param =
                 GenerateIVFBuildParametersString(metric_type, dim, base_quantization_str, 1);
@@ -714,7 +714,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex, "IVF Estimate Memory", "[ft
 
     for (auto dim : dims) {
         for (auto& [base_quantization_str, recall] : test_cases) {
-            INFO(fmt::format("quantizer str: {}", base_quantization_str));
+            INFO(fmt::format("quantizer str: {}, dim: {}", base_quantization_str, dim));
             vsag::Options::Instance().set_block_size_limit(size);
             auto param = GenerateIVFBuildParametersString(
                 metric_type, dim, base_quantization_str, 300, train_type);
@@ -740,7 +740,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex,
 
     for (auto dim : dims) {
         for (auto& [base_quantization_str, recall] : test_cases) {
-            INFO(fmt::format("quantizer str: {}", base_quantization_str));
+            INFO(fmt::format("quantizer str: {}, dim: {}", base_quantization_str, dim));
             vsag::Options::Instance().set_block_size_limit(size);
             auto param = GenerateIVFBuildParametersString(
                 metric_type, dim, base_quantization_str, 300, train_type, false, 2);
@@ -769,7 +769,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex, "GNO-IMI Build", "[ft][ivf]
 
     for (auto dim : dims) {
         for (auto& [base_quantization_str, recall] : test_cases) {
-            INFO(fmt::format("quantizer str: {}", base_quantization_str));
+            INFO(fmt::format("quantizer str: {}, dim: {}", base_quantization_str, dim));
             vsag::Options::Instance().set_block_size_limit(size);
             auto param = GenerateGNOIMIBuildParametersString(
                 metric_type, dim, base_quantization_str, 20, 20, train_type, false, 1);
