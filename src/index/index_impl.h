@@ -51,36 +51,64 @@ public:
 public:
     tl::expected<std::vector<int64_t>, Error>
     Build(const DatasetPtr& base) override {
+        if (this->inner_index_->immutable_) {
+            return tl::unexpected(
+                Error(ErrorType::UNSUPPORTED_INDEX_OPERATION, "immutable index no support build"));
+        }
         SAFE_CALL(return this->inner_index_->Build(base));
     }
 
     tl::expected<void, Error>
     Train(const DatasetPtr& data) override {
+        if (this->inner_index_->immutable_) {
+            return tl::unexpected(
+                Error(ErrorType::UNSUPPORTED_INDEX_OPERATION, "immutable index no support train"));
+        }
         SAFE_CALL(this->inner_index_->Train(data));
     }
 
     tl::expected<Checkpoint, Error>
     ContinueBuild(const DatasetPtr& base, const BinarySet& binary_set) override {
+        if (this->inner_index_->immutable_) {
+            return tl::unexpected(Error(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                                        "immutable index no support continue build"));
+        }
         SAFE_CALL(return this->inner_index_->ContinueBuild(base, binary_set));
     }
 
     tl::expected<std::vector<int64_t>, Error>
     Add(const DatasetPtr& base) override {
+        if (this->inner_index_->immutable_) {
+            return tl::unexpected(
+                Error(ErrorType::UNSUPPORTED_INDEX_OPERATION, "immutable index no support add"));
+        }
         SAFE_CALL(return this->inner_index_->Add(base));
     }
 
     tl::expected<bool, Error>
     Remove(int64_t id) override {
+        if (this->inner_index_->immutable_) {
+            return tl::unexpected(
+                Error(ErrorType::UNSUPPORTED_INDEX_OPERATION, "immutable index no support remove"));
+        }
         SAFE_CALL(return this->inner_index_->Remove(id));
     }
 
     tl::expected<bool, Error>
     UpdateId(int64_t old_id, int64_t new_id) override {
+        if (this->inner_index_->immutable_) {
+            return tl::unexpected(Error(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                                        "immutable index no support update id"));
+        }
         SAFE_CALL(return this->inner_index_->UpdateId(old_id, new_id));
     }
 
     tl::expected<bool, Error>
     UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update = false) override {
+        if (this->inner_index_->immutable_) {
+            return tl::unexpected(Error(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                                        "immutable index no support update vector"));
+        }
         SAFE_CALL(return this->inner_index_->UpdateVector(id, new_base, force_update));
     }
 
@@ -212,6 +240,10 @@ public:
     Pretrain(const std::vector<int64_t>& base_tag_ids,
              uint32_t k,
              const std::string& parameters) override {
+        if (this->inner_index_->immutable_) {
+            return tl::unexpected(Error(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                                        "immutable index no support pretrain"));
+        }
         SAFE_CALL(return this->inner_index_->Pretrain(base_tag_ids, k, parameters));
     }
 
@@ -220,6 +252,10 @@ public:
              int64_t k,
              const std::string& parameters,
              int64_t global_optimum_tag_id = std::numeric_limits<int64_t>::max()) override {
+        if (this->inner_index_->immutable_) {
+            return tl::unexpected(Error(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                                        "immutable index no support feedback"));
+        }
         SAFE_CALL(return this->inner_index_->Feedback(query, k, parameters, global_optimum_tag_id));
     }
 
@@ -245,6 +281,10 @@ public:
 
     tl::expected<void, Error>
     Merge(const std::vector<MergeUnit>& merge_units) override {
+        if (this->inner_index_->immutable_) {
+            return tl::unexpected(
+                Error(ErrorType::UNSUPPORTED_INDEX_OPERATION, "immutable index no support merge"));
+        }
         SAFE_CALL(this->inner_index_->Merge(merge_units));
     }
 
@@ -273,6 +313,10 @@ public:
 
     tl::expected<void, Error>
     Deserialize(const BinarySet& binary_set) override {
+        if (this->inner_index_->immutable_) {
+            return tl::unexpected(Error(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                                        "immutable index no support deserialize"));
+        }
         SAFE_CALL(this->inner_index_->Deserialize(binary_set));
     }
 
@@ -288,6 +332,10 @@ public:
 
     tl::expected<void, Error>
     Deserialize(std::istream& in_stream) override {
+        if (this->inner_index_->immutable_) {
+            return tl::unexpected(Error(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                                        "immutable index no support deserialize"));
+        }
         SAFE_CALL(this->inner_index_->Deserialize(in_stream));
     }
 

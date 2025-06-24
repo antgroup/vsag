@@ -48,7 +48,13 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
       graph_type_(hgraph_param->graph_type),
       extra_info_size_(common_param.extra_info_size_),
       deleted_ids_(allocator_) {
-    neighbors_mutex_ = std::make_shared<PointsMutex>(0, common_param.allocator_.get());
+    this->immutable_ = hgraph_param->immutable;
+    if (immutable_) {
+        neighbors_mutex_ = std::make_shared<EmptyMutex>();
+        this->label_table_ = std::make_shared<LabelTable>(allocator_, false);
+    } else {
+        neighbors_mutex_ = std::make_shared<PointsMutex>(0, common_param.allocator_.get());
+    }
     this->basic_flatten_codes_ =
         FlattenInterface::MakeInstance(hgraph_param->base_codes_param, common_param);
     if (use_reorder_) {
@@ -662,7 +668,7 @@ HGraph::serialize_basic_info(StreamWriter& writer) const {
     StreamWriter::WriteObj(writer, capacity);
     StreamWriter::WriteVector(writer, this->label_table_->label_table_);
 
-    uint64_t size = this->label_table_->label_remap_.size();
+    uint64_t size = this->total_count_;
     StreamWriter::WriteObj(writer, size);
     for (const auto& pair : this->label_table_->label_remap_) {
         auto key = pair.first;
@@ -786,12 +792,7 @@ HGraph::CalcDistanceById(const float* query, int64_t id) const {
     auto computer = flat->FactoryComputer(query);
     {
         std::shared_lock<std::shared_mutex> lock(this->label_lookup_mutex_);
-        auto iter = this->label_table_->label_remap_.find(id);
-        if (iter == this->label_table_->label_remap_.end()) {
-            throw VsagException(ErrorType::INVALID_ARGUMENT,
-                                fmt::format("failed to find id: {}", id));
-        }
-        auto new_id = iter->second;
+        auto new_id = this->label_table_->GetIdByLabel(id);
         flat->Query(&result, computer, &new_id, 1);
         return result;
     }
@@ -813,13 +814,12 @@ HGraph::CalDistanceById(const float* query, const int64_t* ids, int64_t count) c
     {
         std::shared_lock<std::shared_mutex> lock(this->label_lookup_mutex_);
         for (int64_t i = 0; i < count; ++i) {
-            auto iter = this->label_table_->label_remap_.find(ids[i]);
-            if (iter == this->label_table_->label_remap_.end()) {
+            try {
+                inner_ids[i] = this->label_table_->GetIdByLabel(ids[i]);
+            } catch (std::runtime_error& e) {
                 logger::debug(fmt::format("failed to find id: {}", ids[i]));
                 invalid_id_loc.push_back(i);
-                continue;
             }
-            inner_ids[i] = iter->second;
         }
         flat->Query(distances, computer, inner_ids.data(), count);
         for (unsigned int i : invalid_id_loc) {
@@ -834,12 +834,16 @@ HGraph::GetMinAndMaxId() const {
     int64_t min_id = INT64_MAX;
     int64_t max_id = INT64_MIN;
     std::shared_lock<std::shared_mutex> lock(this->label_lookup_mutex_);
-    if (this->label_table_->label_remap_.empty()) {
+    if (this->total_count_ == 0) {
         throw VsagException(ErrorType::INTERNAL_ERROR, "Label map size is zero");
     }
-    for (auto& it : this->label_table_->label_remap_) {
-        max_id = it.first > max_id ? it.first : max_id;
-        min_id = it.first < min_id ? it.first : min_id;
+    for (int i = 0; i < this->total_count_; ++i) {
+        if (not deleted_ids_.empty() && deleted_ids_.count(i) != 0) {
+            continue;
+        }
+        auto label = this->label_table_->label_table_[i];
+        max_id = std::max(label, max_id);
+        min_id = std::min(label, min_id);
     }
     return {min_id, max_id};
 }
@@ -1072,6 +1076,7 @@ static const std::string HGRAPH_PARAMS_TEMPLATE =
         "{HGRAPH_IGNORE_REORDER_KEY}": false,
         "{HGRAPH_BUILD_BY_BASE_QUANTIZATION_KEY}": false,
         "{HGRAPH_USE_ATTRIBUTE_FILTER_KEY}": false,
+        "{HGRSPH_IMMUTABLE_KEY}": false,
         "{HGRAPH_GRAPH_KEY}": {
             "{IO_PARAMS_KEY}": {
                 "{IO_TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
@@ -1287,6 +1292,10 @@ HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
                 BUILD_PARAMS_KEY,
                 BUILD_THREAD_COUNT,
             },
+        },
+        {
+            HGRAPH_IMMUTABLE,
+            {HGRSPH_IMMUTABLE_KEY},
         },
         {
             SQ4_UNIFORM_TRUNC_RATE,
