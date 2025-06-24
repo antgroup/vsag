@@ -223,7 +223,7 @@ FillStringValues(vsag::AttributeValue<std::string>* attr,
                  uint32_t max_len,
                  Gen& gen) {
     std::uniform_int_distribution<uint32_t> len_dist(1, max_len);
-    std::uniform_int_distribution<char> char_dist('a', 'z');
+    std::uniform_int_distribution<int> char_dist('a', 'z');
     for (uint32_t i = 0; i < count; ++i) {
         uint32_t len = len_dist(gen);
         std::string str;

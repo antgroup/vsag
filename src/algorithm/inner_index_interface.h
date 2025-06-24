@@ -304,6 +304,7 @@ public:
     const ParamPtr create_param_ptr_{nullptr};
 
     int64_t dim_{0};
+    bool immutable_{false};
 
     MetricType metric_{MetricType::METRIC_TYPE_L2SQR};
 
