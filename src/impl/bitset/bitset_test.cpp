@@ -13,11 +13,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <catch2/catch_test_macros.hpp>
-
 #include "vsag/bitset.h"
 
-TEST_CASE("Test Bitset", "[ft][bitset]") {
+#include <catch2/catch_test_macros.hpp>
+
+TEST_CASE("Test Bitset Basic", "[ut][bitset]") {
     auto bitset = vsag::Bitset::Make();
 
     // empty

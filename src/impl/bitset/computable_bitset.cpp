@@ -30,4 +30,24 @@ ComputableBitset::MakeInstance(ComputableBitsetType type, Allocator* allocator) 
     }
     throw VsagException(ErrorType::INTERNAL_ERROR, "Unknown bitset type");
 }
+void
+ComputableBitset::And(const std::vector<ComputableBitsetPtr>& other_bitsets) {
+    for (const auto& ptr : other_bitsets) {
+        this->And(ptr);
+    }
+}
+
+void
+ComputableBitset::Or(const std::vector<ComputableBitsetPtr>& other_bitsets) {
+    for (const auto& ptr : other_bitsets) {
+        this->Or(ptr);
+    }
+}
+
+void
+ComputableBitset::Xor(const std::vector<ComputableBitsetPtr>& other_bitsets) {
+    for (const auto& ptr : other_bitsets) {
+        this->Xor(ptr);
+    }
+}
 }  // namespace vsag

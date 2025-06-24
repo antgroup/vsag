@@ -157,4 +157,138 @@ TEST_CASE("FastBitset bitwise operations", "[ut][FastBitset]") {
         REQUIRE(a.Test(1001));
         REQUIRE(a.Count() == 2);
     }
+
+    SECTION("AND Operation With Pointer") {
+        auto ptr1 = std::make_shared<FastBitset>(allocator.get());
+        auto ptr2 = std::make_shared<FastBitset>(allocator.get());
+        ptr1->Set(2, true);
+        ptr1->Set(215, true);
+        ptr2->Set(215, true);
+        ptr2->Set(1929, true);
+        ptr1->And(ptr2);
+
+        REQUIRE_FALSE(ptr1->Test(2));
+        REQUIRE(ptr1->Test(215));
+        REQUIRE_FALSE(ptr1->Test(1929));
+        REQUIRE(ptr1->Count() == 1);
+        REQUIRE(ptr1->Dump() == "{215}");
+
+        ptr2 = nullptr;
+        ptr1->And(ptr2);
+        REQUIRE_FALSE(ptr1->Test(215));
+        REQUIRE(ptr1->Count() == 0);
+        REQUIRE(ptr1->Dump() == "{}");
+    }
+
+    SECTION("OR Operation With Pointer") {
+        auto ptr1 = std::make_shared<FastBitset>(allocator.get());
+        auto ptr2 = std::make_shared<FastBitset>(allocator.get());
+        ptr1->Set(10, true);
+        ptr2->Set(111, true);
+        ptr1->Or(ptr2);
+
+        REQUIRE(ptr1->Test(10));
+        REQUIRE(ptr1->Test(111));
+        REQUIRE(ptr1->Count() == 2);
+        REQUIRE(ptr1->Dump() == "{10,111}");
+
+        auto ptr3 = std::make_shared<FastBitset>(allocator.get());
+        ptr3->Set(64, true);
+        ptr3->Set(111, true);
+        ptr1->Or(ptr3);
+        REQUIRE(ptr1->Test(64));
+        REQUIRE(ptr1->Count() == 3);
+
+        ptr2 = nullptr;
+        ptr1->Or(ptr2);
+        REQUIRE(ptr1->Count() == 3);
+        REQUIRE(ptr1->Test(64));
+        REQUIRE(ptr1->Dump() == "{10,64,111}");
+    }
+
+    SECTION("XOR Operation With Pointer") {
+        auto ptr1 = std::make_shared<FastBitset>(allocator.get());
+        auto ptr2 = std::make_shared<FastBitset>(allocator.get());
+        ptr1->Set(100, true);
+        ptr1->Set(1001, true);
+        ptr2->Set(1001, true);
+        ptr2->Set(2025, true);
+        ptr1->Xor(ptr2);
+
+        REQUIRE(ptr1->Test(100));
+        REQUIRE_FALSE(ptr1->Test(1001));
+        REQUIRE(ptr1->Test(2025));
+        REQUIRE(ptr1->Count() == 2);
+        REQUIRE(ptr1->Dump() == "{100,2025}");
+
+        ptr2 = nullptr;
+        ptr1->Xor(ptr2);
+        REQUIRE(ptr1->Count() == 2);
+        REQUIRE(ptr1->Dump() == "{100,2025}");
+    }
+
+    SECTION("AND Operation With Vector Pointer") {
+        ComputableBitsetPtr ptr1 = std::make_shared<FastBitset>(allocator.get());
+        auto ptr2 = std::make_shared<FastBitset>(allocator.get());
+        auto ptr3 = std::make_shared<FastBitset>(allocator.get());
+        std::vector<ComputableBitsetPtr> vec(2);
+        vec[0] = ptr2;
+        vec[1] = ptr3;
+        ptr1->Set(100, true);
+        ptr1->Set(1001, true);
+        ptr2->Set(1001, true);
+        ptr2->Set(2025, true);
+        ptr3->Set(1001, true);
+        ptr3->Set(2020, true);
+        ptr1->And(vec);
+        REQUIRE(ptr1->Test(1001));
+        REQUIRE_FALSE(ptr1->Test(2020));
+        REQUIRE_FALSE(ptr1->Test(2025));
+        REQUIRE_FALSE(ptr1->Test(100));
+        REQUIRE(ptr1->Count() == 1);
+        REQUIRE(ptr1->Dump() == "{1001}");
+    }
+
+    SECTION("OR Operation With Vector Pointer") {
+        ComputableBitsetPtr ptr1 = std::make_shared<FastBitset>(allocator.get());
+        auto ptr2 = std::make_shared<FastBitset>(allocator.get());
+        auto ptr3 = std::make_shared<FastBitset>(allocator.get());
+        std::vector<ComputableBitsetPtr> vec(2);
+        vec[0] = ptr2;
+        vec[1] = ptr3;
+        ptr1->Set(100, true);
+        ptr1->Set(1001, true);
+        ptr2->Set(1001, true);
+        ptr2->Set(2025, true);
+        ptr3->Set(1001, true);
+        ptr3->Set(2020, true);
+        ptr1->Or(vec);
+        REQUIRE(ptr1->Test(100));
+        REQUIRE(ptr1->Test(1001));
+        REQUIRE(ptr1->Test(2020));
+        REQUIRE(ptr1->Test(2025));
+        REQUIRE(ptr1->Count() == 4);
+        REQUIRE(ptr1->Dump() == "{100,1001,2020,2025}");
+    }
+
+    SECTION("XOR Operation With Vector Pointer") {
+        ComputableBitsetPtr ptr1 = std::make_shared<FastBitset>(allocator.get());
+        auto ptr2 = std::make_shared<FastBitset>(allocator.get());
+        auto ptr3 = std::make_shared<FastBitset>(allocator.get());
+        std::vector<ComputableBitsetPtr> vec(2);
+        vec[0] = ptr2;
+        vec[1] = ptr3;
+        ptr1->Set(100, true);
+        ptr1->Set(1001, true);
+        ptr2->Set(1001, true);
+        ptr2->Set(2025, true);
+        ptr3->Set(100, true);
+        ptr3->Set(2020, true);
+        ptr1->Xor(vec);
+        REQUIRE_FALSE(ptr1->Test(100));
+        REQUIRE_FALSE(ptr1->Test(1001));
+        REQUIRE(ptr1->Test(2020));
+        REQUIRE(ptr1->Test(2025));
+        REQUIRE(ptr1->Dump() == "{2020,2025}");
+    }
 }
