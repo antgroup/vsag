@@ -625,6 +625,7 @@ IVF::search(const DatasetPtr& query, const InnerSearchParam& param) const {
         bucket_->ScanBucketById(dist.data(), computer, bucket_id);
         FilterPtr attr_ft = nullptr;
         if (param.executor != nullptr) {
+            param.executor->Clear();
             attr_ft = param.executor->RunWithBucket(bucket_id);
         }
         for (int j = 0; j < bucket_size; ++j) {

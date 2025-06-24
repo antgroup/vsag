@@ -119,6 +119,7 @@ TEST_CASE("AttributeBucketInvertedDataCell insert various types",
     InnerIdType inner_id = 99;
     BucketIdType bucket_id = 53;
     cell.InsertWithBucket(attrSet, inner_id, bucket_id);
+    REQUIRE(cell.GetTypeOfField("str") == AttrValueType::STRING);
 
     for (auto* attr : attrSet.attrs_) {
         auto bitsets = cell.GetBitsetsByAttrAndBucketId(*attr, bucket_id);
@@ -145,4 +146,5 @@ TEST_CASE("AttributeBucketInvertedDataCell insert various types",
         REQUIRE(bitsets[0]->Test(inner_id) == true);
         REQUIRE(bitsets[0]->Test(inner_id - 1) == false);
     }
+    REQUIRE(cell2.GetTypeOfField("str") == AttrValueType::STRING);
 }
