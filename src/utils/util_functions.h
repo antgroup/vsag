@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include <cmath>
 #include <string>
 
 #include "index/index_common_param.h"
@@ -90,6 +91,11 @@ copy_vector(const std::vector<T1>& from, std::vector<T2>& to) {
     for (int64_t i = 0; i < from.size(); ++i) {
         to[i] = static_cast<T2>(from[i]);
     }
+}
+
+static inline __attribute__((always_inline)) bool
+is_approx_zero(const float v) {
+    return std::abs(v) < 1e-5;
 }
 
 }  // namespace vsag

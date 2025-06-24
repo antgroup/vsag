@@ -66,6 +66,11 @@ setup_simd() {
     ret.dist_support_avx512vl = true;
 #endif
 
+    ret.runtime_has_avx512vpopcntdq = cpuinfo_has_x86_avx512vpopcntdq();
+#ifdef ENABLE_AVX512VPOPCNTDQ
+    ret.dist_support_avx512vpopcntdq = true;
+#endif
+
     if (cpuinfo_has_arm_neon()) {
         ret.runtime_has_neon = true;
 #ifndef ENABLE_NEON

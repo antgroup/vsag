@@ -20,6 +20,14 @@
 #include "simd_status.h"
 
 namespace vsag {
+
+namespace avx512vpopcntdq {
+
+uint32_t
+RaBitQSQ4UBinaryIP(const uint8_t* codes, const uint8_t* bits, uint64_t dim);
+
+}  // namespace avx512vpopcntdq
+
 namespace avx512 {
 float
 RaBitQFloatBinaryIP(const float* vector, const uint8_t* bits, uint64_t dim, float inv_sqrt_d);
