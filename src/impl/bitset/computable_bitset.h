@@ -104,6 +104,33 @@ public:
     Xor(const ComputableBitsetPtr& another) = 0;
 
     /**
+     * @brief Performs a bitwise And operation on the current computable bitset with a vector of other computable bitsets.
+     *
+     * @param other_bitsets The vector of computable bitsets to perform the And operation with.
+     * @return void
+     */
+    virtual void
+    And(const std::vector<ComputableBitsetPtr>& other_bitsets);
+
+    /**
+     * @brief Performs a bitwise OR operation on the current computable bitset with a vector of other computable bitsets.
+     *
+     * @param other_bitsets The vector of computable bitsets to perform the OR operation with.
+     * @return void
+     */
+    virtual void
+    Or(const std::vector<ComputableBitsetPtr>& other_bitsets);
+
+    /**
+     * @brief Performs a bitwise XOR operation on the current computable bitset with a vector of other computable bitsets.
+     *
+     * @param other_bitsets The vector of computable bitsets to perform the XOR operation with.
+     * @return void
+     */
+    virtual void
+    Xor(const std::vector<ComputableBitsetPtr>& other_bitsets);
+
+    /**
      * @brief Serializes the bitset to a stream.
      *
      * @param writer The stream writer to write the serialized bitset to.
