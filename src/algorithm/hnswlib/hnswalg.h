@@ -328,10 +328,7 @@ public:
     calcSerializeSize() override;
 
     void
-    saveIndex(void* d) override;
-    // save index to a file stream
-    void
-    saveIndex(std::ostream& out_stream) override;
+    saveIndex(StreamWriter& writer) override;
 
     void
     SerializeImpl(StreamWriter& writer);

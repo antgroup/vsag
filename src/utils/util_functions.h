@@ -98,4 +98,24 @@ is_approx_zero(const float v) {
     return std::abs(v) < 1e-5;
 }
 
+std::string
+base64_encode(const std::string& in);
+
+template <typename T>
+std::string
+base64_encode_obj(T& obj) {
+    std::string to_string((char*)&obj, sizeof(obj));
+    return base64_encode(to_string);
+}
+
+std::string
+base64_decode(const std::string& in);
+
+template <typename T>
+void
+base64_decode_obj(const std::string& in, T& obj) {
+    std::string to_string = base64_decode(in);
+    memcpy(&obj, to_string.c_str(), sizeof(obj));
+}
+
 }  // namespace vsag

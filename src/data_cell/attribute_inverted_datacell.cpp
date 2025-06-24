@@ -106,7 +106,7 @@ AttributeInvertedDataCell::Serialize(StreamWriter& writer) {
 }
 
 void
-AttributeInvertedDataCell::Deserialize(StreamReader& reader) {
+AttributeInvertedDataCell::Deserialize(lvalue_or_rvalue<StreamReader> reader) {
     uint64_t size;
     StreamReader::ReadObj(reader, size);
     term_2_value_map_.reserve(size);

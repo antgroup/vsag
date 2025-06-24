@@ -17,6 +17,7 @@
 
 #include "data_cell/flatten_datacell.h"
 #include "inner_string_params.h"
+#include "storage/serialization.h"
 #include "utils/slow_task_timer.h"
 #include "utils/standard_heap.h"
 #include "utils/util_functions.h"
@@ -187,19 +188,51 @@ BruteForce::CalcDistanceById(const float* vector, int64_t id) const {
 
 void
 BruteForce::Serialize(StreamWriter& writer) const {
-    StreamWriter::WriteObj(writer, dim_);
-    StreamWriter::WriteObj(writer, total_count_);
+    // FIXME(wxyu): only for testing, remove before merge into the main branch
+    // if (not Options::Instance().new_version()) {
+    //     StreamWriter::WriteObj(writer, dim_);
+    //     StreamWriter::WriteObj(writer, total_count_);
+    //     this->inner_codes_->Serialize(writer);
+    //     this->label_table_->Serialize(writer);
+    //     return;
+    // }
 
     this->inner_codes_->Serialize(writer);
     this->label_table_->Serialize(writer);
+
+    // serialize footer (introduced since v0.15)
+    auto metadata = std::make_shared<Metadata>();
+    JsonType basic_info;
+    basic_info["dim"] = dim_;
+    basic_info["total_count"] = total_count_;
+    metadata->Set("basic_info", basic_info);
+    auto footer = std::make_shared<Footer>(metadata);
+    footer->Write(writer);
 }
 
 void
 BruteForce::Deserialize(StreamReader& reader) {
-    StreamReader::ReadObj(reader, dim_);
-    StreamReader::ReadObj(reader, total_count_);
-    this->inner_codes_->Deserialize(reader);
-    this->label_table_->Deserialize(reader);
+    // try to deserialize footer (only in new version)
+    auto footer = Footer::Parse(reader);
+
+    if (footer == nullptr) {  // old format, DON'T EDIT, remove in the future
+        logger::debug("parse with v0.13 version format");
+
+        StreamReader::ReadObj(reader, dim_);
+        StreamReader::ReadObj(reader, total_count_);
+    } else {  // create like `else if ( ver in [v0.15, v0.17] )` here if need in the future
+        logger::debug("parse with new version format");
+
+        auto metadata = footer->GetMetadata();
+        auto basic_info = metadata->Get("basic_info");
+        dim_ = basic_info["dim"];
+        total_count_ = basic_info["total_count"];
+
+        this->inner_codes_->Deserialize(reader);
+        this->label_table_->Deserialize(reader);
+    }
+
+    // post serialize procedure
 }
 
 void
@@ -216,16 +249,19 @@ BruteForce::InitFeatures() {
             IndexFeature::SUPPORT_RANGE_SEARCH_WITH_ID_FILTER,
         });
     }
-    // Add & Build
+
+    // add & build
     this->index_feature_list_->SetFeatures({
         IndexFeature::SUPPORT_BUILD,
         IndexFeature::SUPPORT_ADD_AFTER_BUILD,
     });
-    // Search
+
+    // search
     this->index_feature_list_->SetFeatures({
         IndexFeature::SUPPORT_KNN_SEARCH,
         IndexFeature::SUPPORT_KNN_SEARCH_WITH_ID_FILTER,
     });
+
     // concurrency
     this->index_feature_list_->SetFeatures({
         IndexFeature::SUPPORT_SEARCH_CONCURRENT,
@@ -240,6 +276,7 @@ BruteForce::InitFeatures() {
         IndexFeature::SUPPORT_SERIALIZE_BINARY_SET,
         IndexFeature::SUPPORT_SERIALIZE_FILE,
     });
+
     // others
     this->index_feature_list_->SetFeatures({
         IndexFeature::SUPPORT_ESTIMATE_MEMORY,

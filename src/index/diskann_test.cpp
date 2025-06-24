@@ -16,6 +16,7 @@
 #include "diskann.h"
 
 #include <catch2/catch_test_macros.hpp>
+#include <fstream>
 #include <nlohmann/json.hpp>
 #include <tuple>
 
@@ -586,4 +587,52 @@ TEST_CASE("split building process", "[ut][diskann]") {
     float recall_full = correct / 1000;
     vsag::logger::debug("Recall: " + std::to_string(recall_full));
     REQUIRE(recall_full == recall_partial);
+}
+
+TEST_CASE("diskann serialize in streaming", "[ut][diskann]") {
+    vsag::logger::set_level(vsag::logger::level::debug);
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 128;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    common_param.metric_ = vsag::MetricType::METRIC_TYPE_L2SQR;
+    vsag::DiskannParameters diskann_obj = parse_diskann_params(common_param);
+    diskann_obj.metric = diskann::Metric::L2;
+    diskann_obj.pq_sample_rate = 1.0F;
+    diskann_obj.pq_dims = 16;
+    diskann_obj.max_degree = 12;
+    diskann_obj.ef_construction = 100;
+    diskann_obj.use_bsa = false;
+    diskann_obj.use_reference = false;
+    diskann_obj.use_preload = false;
+
+    auto index = std::make_shared<vsag::DiskANN>(diskann_obj, common_param);
+
+    int64_t num_elements = 100;
+    auto [ids, vectors] = fixtures::generate_ids_and_vectors(num_elements, common_param.dim_);
+
+    auto dataset = vsag::Dataset::Make();
+    dataset->Dim(common_param.dim_)
+        ->NumElements(num_elements)
+        ->Ids(ids.data())
+        ->Float32Vectors(vectors.data())
+        ->Owner(false);
+
+    auto result = index->Build(dataset);
+    REQUIRE(result.has_value());
+
+    fixtures::TempDir dir("diskann_serialize_in_streaming");
+    auto filename = dir.GenerateRandomFile();
+
+    std::ofstream out_file(filename);
+    auto serialize_result = index->Serialize(out_file);
+    REQUIRE(serialize_result.has_value());
+    out_file.close();
+
+    index = nullptr;
+
+    index = std::make_shared<vsag::DiskANN>(diskann_obj, common_param);
+    std::ifstream in_file(filename);
+    auto deserialize_result = index->Deserialize(in_file);
+    REQUIRE(deserialize_result.has_value());
+    in_file.close();
 }
