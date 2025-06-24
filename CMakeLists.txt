@@ -48,6 +48,7 @@ option (DISABLE_SSE_FORCE "Force disable sse and higher instructions" OFF)
 option (DISABLE_AVX_FORCE "Force disable avx and higher instructions" OFF)
 option (DISABLE_AVX2_FORCE "Force disable avx2 and higher instructions" OFF)
 option (DISABLE_AVX512_FORCE "Force disable avx512 instructions" OFF)
+option (DISABLE_AVX512VPOPCNTDQ_FORCE "Force disable avx512vpopcntdq instructions" OFF)
 option (DISABLE_NEON_FORCE "Force disable neon instructions" OFF)
 
 
