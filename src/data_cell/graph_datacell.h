@@ -153,10 +153,10 @@ GraphDataCell<IOTmpl>::GraphDataCell(const GraphDataCellParamPtr& param,
         node_versions_.resize(max_capacity_);
     }
 
-    Vector<InnerIdType> empty_ids(allocator_);
-    for (InnerIdType id = 0; id < this->max_capacity_; ++id) {
-        GraphDataCell::InsertNeighborsById(id, empty_ids);
-    }
+    // Vector<InnerIdType> empty_ids(allocator_);
+    // for (InnerIdType id = 0; id < this->max_capacity_; ++id) {
+    //     GraphDataCell::InsertNeighborsById(id, empty_ids);
+    // }
 }
 
 template <typename IOTmpl>
