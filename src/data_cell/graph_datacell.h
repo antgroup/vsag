@@ -262,10 +262,10 @@ GraphDataCell<IOTmpl>::Resize(InnerIdType new_size) {
         127;  // the value is meaningless, only to occupy the position for io allocate
     this->io_->Write(&end_flag, 1, io_size);
 
-    Vector<InnerIdType> empty_ids(allocator_);
-    for (InnerIdType id = old_capacity; id < this->max_capacity_; ++id) {
-        InsertNeighborsById(id, empty_ids);
-    }
+    // Vector<InnerIdType> empty_ids(allocator_);
+    // for (InnerIdType id = old_capacity; id < this->max_capacity_; ++id) {
+    //     InsertNeighborsById(id, empty_ids);
+    // }
 }
 
 template <typename IOTmpl>
