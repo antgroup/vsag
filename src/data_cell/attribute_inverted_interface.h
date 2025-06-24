@@ -18,8 +18,8 @@
 #include <memory>
 
 #include "impl/bitset/computable_bitset.h"
-#include "stream_reader.h"
-#include "stream_writer.h"
+#include "storage/stream_reader.h"
+#include "storage/stream_writer.h"
 #include "typing.h"
 #include "vsag/attribute.h"
 #include "vsag_exception.h"
@@ -57,7 +57,7 @@ public:
     }
 
     virtual void
-    Deserialize(StreamReader& reader) {
+    Deserialize(lvalue_or_rvalue<StreamReader> reader) {
     }
 
     AttrValueType

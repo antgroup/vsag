@@ -24,8 +24,8 @@
 #include "graph_interface_parameter.h"
 #include "index/index_common_param.h"
 #include "inner_string_params.h"
-#include "stream_reader.h"
-#include "stream_writer.h"
+#include "storage/stream_reader.h"
+#include "storage/stream_writer.h"
 #include "typing.h"
 
 namespace vsag {

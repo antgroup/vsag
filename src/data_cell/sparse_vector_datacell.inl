@@ -35,7 +35,7 @@ SparseVectorDataCell<QuantTmpl, IOTmpl>::query(float* result_dists,
 }
 template <typename QuantTmpl, typename IOTmpl>
 void
-SparseVectorDataCell<QuantTmpl, IOTmpl>::Deserialize(StreamReader& reader) {
+SparseVectorDataCell<QuantTmpl, IOTmpl>::Deserialize(lvalue_or_rvalue<StreamReader> reader) {
     FlattenInterface::Deserialize(reader);
     StreamReader::ReadObj(reader, current_offset_);
     this->io_->Deserialize(reader);

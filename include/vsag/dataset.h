@@ -21,9 +21,9 @@
 #include <variant>
 #include <vector>
 
-#include "allocator.h"
-#include "attribute.h"
-#include "constants.h"
+#include "vsag/allocator.h"
+#include "vsag/attribute.h"
+#include "vsag/constants.h"
 
 namespace vsag {
 

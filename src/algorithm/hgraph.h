@@ -43,6 +43,8 @@
 #include "vsag/index_features.h"
 
 namespace vsag {
+
+// HGraph index was introduced since v0.12
 class HGraph : public InnerIndexInterface {
 public:
     static ParamPtr
@@ -220,12 +222,28 @@ private:
                      InnerSearchParam& inner_search_param,
                      IteratorFilterContext* iter_ctx) const;
 
-    void
-    serialize_basic_info(StreamWriter& writer) const;
+private:
+    // since v0.15
+    JsonType
+    serialize_basic_info() const;
 
     void
-    deserialize_basic_info(StreamReader& reader);
+    deserialize_basic_info(JsonType jsonify_basic_info);
 
+    void
+    serialize_label_info(StreamWriter& writer) const;
+
+    void
+    deserialize_label_info(StreamReader& reader) const;
+
+    // used in version [0.12.*, 0.14.*]
+    void
+    serialize_basic_info_v0_14(StreamWriter& writer) const;
+
+    void
+    deserialize_basic_info_v0_14(StreamReader& reader);
+
+private:
     void
     reorder(const void* query,
             const FlattenInterfacePtr& flatten_interface,

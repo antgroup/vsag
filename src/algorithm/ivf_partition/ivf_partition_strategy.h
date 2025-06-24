@@ -22,9 +22,11 @@
 
 #include "impl/basic_searcher.h"
 #include "ivf_partition_strategy_parameter.h"
-#include "stream_reader.h"
-#include "stream_writer.h"
+#include "storage/stream_reader.h"
+#include "storage/stream_writer.h"
+#include "typing.h"
 #include "vsag/dataset.h"
+#include "vsag/expected.hpp"
 
 namespace vsag {
 
@@ -71,7 +73,7 @@ public:
     }
 
     virtual void
-    Deserialize(StreamReader& reader) {
+    Deserialize(lvalue_or_rvalue<StreamReader> reader) {
         StreamReader::ReadObj(reader, this->is_trained_);
         StreamReader::ReadObj(reader, this->bucket_count_);
         StreamReader::ReadObj(reader, this->dim_);

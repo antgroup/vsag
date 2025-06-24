@@ -136,6 +136,17 @@ public:
     }
 
 public:
+    tl::expected<void, Error>
+    Serialize(std::ostream& out_stream) override {
+        SAFE_CALL(return this->serialize(out_stream));
+    }
+
+    tl::expected<void, Error>
+    Deserialize(std::istream& in_stream) override {
+        SAFE_CALL(return this->deserialize(in_stream));
+    }
+
+public:
     int64_t
     GetNumElements() const override {
         if (status_ == EMPTY)
@@ -205,6 +216,12 @@ private:
 
     tl::expected<void, Error>
     deserialize(const ReaderSet& reader_set);
+
+    tl::expected<void, Error>
+    serialize(std::ostream& out_stream);
+
+    tl::expected<void, Error>
+    deserialize(std::istream& in_stream);
 
     tl::expected<void, Error>
     build_partial_graph(const DatasetPtr& base,

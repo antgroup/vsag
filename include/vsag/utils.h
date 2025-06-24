@@ -19,7 +19,7 @@
 #include <string>
 #include <vector>
 
-#include "bitset.h"
+#include "vsag/bitset.h"
 #include "vsag/errors.h"
 #include "vsag/expected.hpp"
 
