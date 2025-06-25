@@ -34,21 +34,75 @@ RaBitQFloatBinaryIP(const float* vector, const uint8_t* bits, uint64_t dim, floa
 
 uint32_t
 RaBitQSQ4UBinaryIP(const uint8_t* codes, const uint8_t* bits, uint64_t dim);
+
+void
+KacsWalk(float* data, std::size_t len);
+
+void
+VecRescale(float* data, std::size_t dim, float val);
+
+void
+FHTRotate(float* data, std::size_t dim_);
+
+void
+FlipSign(const uint8_t* flip, float* data, std::size_t dim);
+
+void
+RotateOp(float* data, int idx, int dim_, int step);
 }  // namespace avx512
 
 namespace avx2 {
 float
 RaBitQFloatBinaryIP(const float* vector, const uint8_t* bits, uint64_t dim, float inv_sqrt_d);
+
+void
+FHTRotate(float* data, std::size_t dim_);
+
+void
+RotateOp(float* data, int idx, int dim_, int step);
+
+void
+VecRescale(float* data, std::size_t dim, float val);
+
+void
+KacsWalk(float* data, std::size_t len);
 }  // namespace avx2
 
 namespace avx {
 float
 RaBitQFloatBinaryIP(const float* vector, const uint8_t* bits, uint64_t dim, float inv_sqrt_d);
+
+void
+VecRescale(float* data, std::size_t dim, float val);
+
+void
+FHTRotate(float* data, std::size_t dim_);
+
+void
+FlipSign(const uint8_t* flip, float* data, std::size_t dim);
+
+void
+RotateOp(float* data, int idx, int dim_, int step);
+
+void
+KacsWalk(float* data, std::size_t len);
 }  // namespace avx
 
 namespace sse {
 float
 RaBitQFloatBinaryIP(const float* vector, const uint8_t* bits, uint64_t dim, float inv_sqrt_d);
+
+void
+FHTRotate(float* data, std::size_t dim_);
+
+void
+RotateOp(float* data, int idx, int dim_, int step);
+
+void
+VecRescale(float* data, std::size_t dim, float val);
+
+void
+KacsWalk(float* data, std::size_t len);
 }  // namespace sse
 
 namespace generic {
@@ -69,6 +123,9 @@ FHTRotate(float* data, std::size_t dim_);
 
 void
 FlipSign(const uint8_t* flip, float* data, std::size_t dim);
+
+void
+RotateOp(float* data, int idx, int dim_, int step);
 }  // namespace generic
 
 namespace neon {
@@ -90,10 +147,13 @@ using KacsWalkType = void (*)(float* data, size_t len);
 using VecRescaleType = void (*)(float* data, size_t dim, float val);
 
 using FlipSignType = void (*)(const uint8_t* flip, float* data, size_t dim);
+
+using RotateOpType = void (*)(float* data, int idx, int dim_, int step);
 extern RaBitQFloatBinaryType RaBitQFloatBinaryIP;
 extern RaBitQSQ4UBinaryType RaBitQSQ4UBinaryIP;
 extern FHTRotateType FHTRotate;
 extern KacsWalkType KacsWalk;
 extern VecRescaleType VecRescale;
 extern FlipSignType FlipSign;
+extern RotateOpType RotateOp;
 }  // namespace vsag
