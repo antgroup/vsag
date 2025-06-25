@@ -1060,4 +1060,137 @@ BitNot(const uint8_t* x, const uint64_t num_byte, uint8_t* result) {
     return avx2::BitNot(x, num_byte, result);
 #endif
 }
+
+void
+KacsWalk(float* data, size_t len) {
+#if defined(ENABLE_AVX512)
+    int base = len % 2;
+    int offset = base + (len / 2);
+    int i = 0;
+    for (; i + 16 < len / 2; i += 16) {
+        __m512 x = _mm512_loadu_ps(&data[i]);
+        __m512 y = _mm512_loadu_ps(&data[i + offset]);
+
+        __m512 new_x = _mm512_add_ps(x, y);
+        __m512 new_y = _mm512_sub_ps(x, y);
+
+        _mm512_storeu_ps(&data[i], new_x);
+        _mm512_storeu_ps(&data[i + offset], new_y);
+    }
+    for (; i < len / 2; i++) {
+        float x = data[i];
+        float y = data[i + offset];
+        data[i] = x + y;
+        data[i + offset] = x - y;
+    }
+    if (base != 0) {
+        data[len / 2] *= std::sqrt(2);
+    }
+#else
+    return avx2::KacsWalk(data, len);
+#endif
+}
+
+void
+FlipSign(const uint8_t* flip, float* data, size_t dim) {
+#if defined(ENABLE_AVX512)
+    constexpr size_t kFloatsPerChunk = 64;
+    size_t i = 0;
+    for (; i + 64 < dim; i += kFloatsPerChunk) {
+        // Load 64 bits (8 bytes) from the bit sequence
+        uint64_t mask_bits;
+        std::memcpy(&mask_bits, &flip[i / 8], sizeof(mask_bits));
+
+        // Split into four 16-bit mask segments
+        const __mmask16 mask0 = _cvtu32_mask16(static_cast<uint32_t>(mask_bits & 0xFFFF));
+        const __mmask16 mask1 = _cvtu32_mask16(static_cast<uint32_t>((mask_bits >> 16) & 0xFFFF));
+        const __mmask16 mask2 = _cvtu32_mask16(static_cast<uint32_t>((mask_bits >> 32) & 0xFFFF));
+        const __mmask16 mask3 = _cvtu32_mask16(static_cast<uint32_t>((mask_bits >> 48) & 0xFFFF));
+
+        // Prepare sign-flip constant
+        const __m512 sign_flip = _mm512_castsi512_ps(_mm512_set1_epi32(0x80000000));
+
+        // Process 16 floats at a time with each mask segment
+        __m512 vec0 = _mm512_loadu_ps(&data[i]);
+        vec0 = _mm512_mask_xor_ps(vec0, mask0, vec0, sign_flip);
+        _mm512_storeu_ps(&data[i], vec0);
+
+        __m512 vec1 = _mm512_loadu_ps(&data[i + 16]);
+        vec1 = _mm512_mask_xor_ps(vec1, mask1, vec1, sign_flip);
+        _mm512_storeu_ps(&data[i + 16], vec1);
+
+        __m512 vec2 = _mm512_loadu_ps(&data[i + 32]);
+        vec2 = _mm512_mask_xor_ps(vec2, mask2, vec2, sign_flip);
+        _mm512_storeu_ps(&data[i + 32], vec2);
+
+        __m512 vec3 = _mm512_loadu_ps(&data[i + 48]);
+        vec3 = _mm512_mask_xor_ps(vec3, mask3, vec3, sign_flip);
+        _mm512_storeu_ps(&data[i + 48], vec3);
+    }
+    for (; i < dim; i++) {
+        bool mask = (flip[i / 8] & (1 << (i % 8))) != 0;
+        if (mask) {
+            data[i] = -data[i];
+        }
+    }
+#else
+    return generic::FlipSign(flip, data, dim);
+#endif
+}
+
+void
+VecRescale(float* data, size_t dim, float val) {
+#if defined(ENABLE_AVX512)
+    __m512 scalar = _mm512_set1_ps(val);
+    size_t i = 0;
+    for (; i + 16 <= dim; i += 16) {
+        __m512 vec = _mm512_loadu_ps(&data[i]);
+        vec = _mm512_mul_ps(vec, scalar);
+        _mm512_storeu_ps(&data[i], vec);
+    }
+    for (; i < dim; i++) {
+        data[i] *= val;
+    }
+#else
+    return avx2::VecRescale(data, dim, val);
+#endif
+}
+
+void
+RotateOp(float* data, int idx, int dim_, int step) {
+#if defined(ENABLE_AVX512)
+    for (int i = 0; i < dim_; i += step * 2) {
+        for (int j = 0; j < step; j += 16) {
+            __m512 g1 = _mm512_loadu_ps(&data[i + j]);
+            __m512 g2 = _mm512_loadu_ps(&data[i + j + step]);
+            _mm512_storeu_ps(&data[i + j], _mm512_add_ps(g1, g2));
+            _mm512_storeu_ps(&data[i + j + step], _mm512_sub_ps(g1, g2));
+        }
+    }
+#else
+    return avx2::RotateOp(data, idx, dim_, step);
+#endif
+}
+
+void
+FHTRotate(float* data, size_t dim_) {
+#if defined(ENABLE_AVX512)
+    size_t n = dim_;
+    size_t step = 1;
+    while (step < n) {
+        if (step >= 16) {  // step is the power of 2
+            avx512::RotateOp(data, 0, dim_, step);
+        } else if (step == 8) {
+            avx2::RotateOp(data, 0, dim_, step);
+        } else if (step == 4) {
+            sse::RotateOp(data, 0, dim_, step);
+        } else {
+            generic::RotateOp(data, 0, dim_, step);
+        }
+        step *= 2;
+    }
+#else
+    return generic::FHTRotate(data, dim_);
+#endif
+}
 }  // namespace vsag::avx512

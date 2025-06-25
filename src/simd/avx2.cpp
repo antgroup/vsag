@@ -989,4 +989,86 @@ BitNot(const uint8_t* x, const uint64_t num_byte, uint8_t* result) {
     return sse::BitNot(x, num_byte, result);
 #endif
 }
+
+void
+VecRescale(float* data, size_t dim, float val) {
+#if defined(ENABLE_AVX2)
+    int i = 0;
+    __m256 val_vec = _mm256_set1_ps(val);
+    for (; i + 8 < dim; i += 8) {
+        __m256 data_vec = _mm256_loadu_ps(&data[i]);
+        __m256 result_vec = _mm256_mul_ps(data_vec, val_vec);
+        _mm256_storeu_ps(&data[i], result_vec);
+    }
+    for (; i < dim; i++) {
+        data[i] *= val;
+    }
+#else
+    return avx::VecRescale(data, dim, val);
+#endif
+}
+
+void
+RotateOp(float* data, int idx, int dim_, int step) {
+#if defined(ENABLE_AVX2)
+    for (int i = idx; i < dim_; i += step * 2) {
+        for (int j = 0; j < step; j += 8) {
+            __m256 g1 = _mm256_loadu_ps(&data[i + j]);
+            __m256 g2 = _mm256_loadu_ps(&data[i + j + step]);
+            _mm256_storeu_ps(&data[i + j], _mm256_add_ps(g1, g2));
+            _mm256_storeu_ps(&data[i + j + step], _mm256_sub_ps(g1, g2));
+        }
+    }
+#else
+    return avx::RotateOp(data, idx, dim_, step);
+#endif
+}
+
+void
+FHTRotate(float* data, size_t dim_) {
+#if defined(ENABLE_AVX2)
+    size_t n = dim_;
+    size_t step = 1;
+    while (step < n) {
+        if (step >= 8) {
+            avx2::RotateOp(data, 0, dim_, step);
+        } else if (step == 4) {
+            sse::RotateOp(data, 0, dim_, step);
+        } else {
+            generic::RotateOp(data, 0, dim_, step);
+        }
+        step *= 2;
+    }
+#else
+    return avx::FHTRotate(data, dim_);
+#endif
+}
+
+void
+KacsWalk(float* data, size_t len) {
+#if defined(ENABLE_AVX2)
+    size_t base = len % 2;
+    size_t offset = base + (len / 2);  // for odd dim
+    size_t i = 0;
+    for (; i + 8 < len / 2; i += 8) {
+        __m256 x = _mm256_loadu_ps(&data[i]);
+        __m256 y = _mm256_loadu_ps(&data[i + offset]);
+        _mm256_storeu_ps(&data[i], _mm256_add_ps(x, y));
+        _mm256_storeu_ps(&data[i + offset], _mm256_sub_ps(x, y));
+    }
+    for (; i < len / 2; i++) {
+        float add = data[i] + data[i + offset];
+        float sub = data[i] - data[i + offset];
+        data[i] = add;
+        data[i + offset] = sub;
+    }
+    if (base != 0) {
+        data[len / 2] *= std::sqrt(2.0F);
+        //In odd condition, we operate the prev len/2 items and the post len/2 items, the No.len/2 item stay still,
+        //As we need to resize the while sequence in the next step, so we increase the val of No.len/2 item to eliminate the impact of the following resize.
+    }
+#else
+    return avx::KacsWalk(data, len);
+#endif
+}
 }  // namespace vsag::avx2
