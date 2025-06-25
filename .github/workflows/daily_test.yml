@@ -1,0 +1,347 @@
+name: Daily Build & Test
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 14 * * *' 
+
+jobs:
+  daily_build_asan_x86:
+    name: Asan Build X86
+    runs-on: ubuntu-22.04
+    container:
+      image: vsaglib/vsag:ci-x86
+      volumes:
+        - /opt:/useless
+    concurrency:
+      group: daily_build_x86
+      cancel-in-progress: true
+    steps:
+      - name: Free Disk Space
+        run: rm -rf /useless/hostedtoolcache
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Load Cache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          max-size: "2G"
+          save: false
+          key: build-${{ hashFiles('./CMakeLists.txt') }}-${{ hashFiles('./.circleci/fresh_ci_cache.commit') }}
+      - name: Make Asan
+        run: export CMAKE_GENERATOR="Ninja"; make asan
+      - name: Clean
+        run: find ./build -type f -name "*.o" -exec rm -f {} +
+      - name: Save Test
+        uses: actions/upload-artifact@v4
+        with:
+          path: ./build
+          name: test_x86-${{ github.run_id }}
+          compression-level: 1
+          retention-days: 2
+          overwrite: 'true'
+
+  daily_build_asan_aarch64:
+    name: Asan Build Aarch64
+    runs-on: ubuntu-22.04-arm
+    concurrency:
+      group: daily_build_aarch
+      cancel-in-progress: true
+    steps:
+      - name: Free Disk Space
+        run: rm -rf /opt/hostedtoolcache
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Prepare Env
+        run: sudo bash ./scripts/deps/install_deps_ubuntu.sh
+      - name: Load Cache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          max-size: "2G"
+          save: false
+          key: build-aarch-${{ hashFiles('./CMakeLists.txt') }}-${{ hashFiles('./.circleci/fresh_ci_cache.commit') }}
+      - name: Make Asan
+        run: export CMAKE_GENERATOR="Ninja"; make asan
+      - name: Clean
+        run: find ./build -type f -name "*.o" -exec rm -f {} +
+      - name: Save Test
+        uses: actions/upload-artifact@v4
+        with:
+          path: ./build/
+          name: test_aarch64-${{ github.run_id }}
+          compression-level: 1
+          retention-days: 2
+          overwrite: 'true'
+
+  daily_test_asan_x86:
+    name: Test X86
+    needs: daily_build_asan_x86
+    runs-on: ubuntu-22.04
+    concurrency:
+      group: daily_test_x86-${{ matrix.test_type }}
+      cancel-in-progress: true
+    strategy:
+      matrix:
+        test_type: [ unittests, functests ]
+    container:
+      image: vsaglib/vsag:ci-x86
+      volumes:
+        - /opt:/useless
+    steps:
+      - name: Free Disk Space
+        run: rm -rf /opt/hostedtoolcache
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Clean Env
+        run: rm -rf ./build
+      - name: Download Test
+        uses: actions/download-artifact@v4
+        with:
+          name: test_x86-${{ github.run_id }}
+          path: ./build
+      - name: Do Asan Test In ${{ matrix.test_type }}
+        run: |
+          echo leak:libomp.so > omp.supp
+          export LSAN_OPTIONS=suppressions=omp.supp
+          chmod +x ./build/tests/${{ matrix.test_type }}
+          ./scripts/test_parallel_by_name.sh ${{ matrix.test_type }} ~[pr]
+      - name: Upload Log
+        uses: actions/upload-artifact@v4
+        with:
+          path: ./log
+          name: log-x86-${{ matrix.test_type }}-${{ github.run_id }}
+          compression-level: 1
+          retention-days: 2
+          overwrite: 'true'
+
+  daily_test_asan_aarch64:
+    name: Test Aarch64
+    needs: daily_build_asan_aarch64
+    runs-on: ubuntu-22.04-arm
+    strategy:
+      matrix:
+        test_type: [ unittests, functests ]
+    concurrency:
+      group: daily_test_aarch64-${{ matrix.test_type }}
+      cancel-in-progress: true
+    steps:
+      - name: Free Disk Space
+        run: rm -rf /opt/hostedtoolcache
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Prepare Env
+        run: sudo bash ./scripts/deps/install_deps_ubuntu.sh
+      - name: Clean Build
+        run: rm -rf ./build
+      - name: Download Test
+        uses: actions/download-artifact@v4
+        with:
+          name: test_aarch64-${{ github.run_id }}
+          path: ./build
+      - name: Do Asan Test In ${{ matrix.test_type }}
+        run: |
+          echo leak:libomp.so > omp.supp
+          export LSAN_OPTIONS=suppressions=omp.supp
+          chmod +x ./build/tests/${{ matrix.test_type }}
+          ./scripts/test_parallel_by_name.sh ${{ matrix.test_type }} ~[pr]
+      - name: Upload Log
+        uses: actions/upload-artifact@v4
+        with:
+          path: ./log
+          name: log-aarch64-${{ matrix.test_type }}-${{ github.run_id }}
+          compression-level: 1
+          retention-days: 2
+          overwrite: 'true'
+
+  asan_test_clean_up:
+    name: Clean Up
+    needs: [ daily_test_asan_x86, daily_test_asan_aarch64 ]
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Create Empty File
+        run: touch /tmp/clean_up
+      - name: Overwrite Test Artifact X86
+        uses: actions/upload-artifact@v4
+        with:
+          path: /tmp/clean_up
+          name: test_x86-${{ github.run_id }}
+          compression-level: 1
+          retention-days: 2
+          overwrite: 'true'
+      - name: Overwrite Test Artifact Aarch64
+        uses: actions/upload-artifact@v4
+        with:
+          path: /tmp/clean_up
+          name: test_aarch64-${{ github.run_id }}
+          compression-level: 1
+          retention-days: 2
+          overwrite: 'true'
+
+  daily_build_simd:
+    name: Asan Build Simd
+    runs-on: ubuntu-22.04
+    container:
+      image: vsaglib/vsag:ci-x86
+      volumes:
+        - /opt:/useless
+    strategy:
+      matrix:
+        simd_option: [
+#          "avx2;-DDISABLE_AVX512_FORCE=1",
+          "avx;-DDISABLE_AVX2_FORCE=1",
+          "sse;-DDISABLE_AVX_FORCE=1",
+          "generic;-DDISABLE_SSE_FORCE=1",
+        ]
+    concurrency:
+      group: daily_build_simd-${{ matrix.simd_option }}
+      cancel-in-progress: true
+    steps:
+      - name: Free Disk Space
+        run: rm -rf /useless/hostedtoolcache
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Make Asan
+        run: |
+          export EXTRA_DEFINED=`echo "${{ matrix.simd_option }}" | awk -F';' '{print $2}'`
+          export EXTRA_KEY=`echo "${{ matrix.simd_option }}" | awk -F';' '{print $1}'`
+          echo ${EXTRA_DEFINED}
+          echo ${EXTRA_KEY}
+          echo "SIMD_KEY=${EXTRA_KEY}" >> $GITHUB_ENV
+          export CMAKE_GENERATOR="Ninja"; make asan
+      - name: Clean
+        run: find ./build -type f -name "*.o" -exec rm -f {} +
+      - name: Save Test
+        uses: actions/upload-artifact@v4
+        with:
+          path: ./build
+          name: daily_test_simd-${{ env.SIMD_KEY }}-${{ github.run_id }}
+          compression-level: 1
+          retention-days: 1
+          overwrite: 'true'
+
+  daily_test_asan_simd:
+    name: Unit Test Simd
+    needs: daily_build_simd
+    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        test_type: [ unittests, functests ]
+        simd_key: [
+#          avx2,
+          avx,
+          sse,
+          generic
+        ]
+    concurrency:
+      group: daily_test_simd-${{ matrix.simd_key }}-${{ matrix.test_type }}
+      cancel-in-progress: true
+    container:
+      image: vsaglib/vsag:ci-x86
+      volumes:
+        - /opt:/useless
+    steps:
+      - name: Free Disk Space
+        run: rm -rf /useless/hostedtoolcache
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Clean Env
+        run: rm -rf ./build
+      - name: Download Test
+        uses: actions/download-artifact@v4
+        with:
+          name: daily_test_simd-${{ matrix.simd_key }}-${{ github.run_id }}
+          path: ./build/
+      - name: Do Asan Test In ${{ matrix.test_type }}
+        run: |
+          echo leak:libomp.so > omp.supp
+          export LSAN_OPTIONS=suppressions=omp.supp
+          chmod +x ./build/tests/${{ matrix.test_type }}
+          ./scripts/test_parallel_by_name.sh ${{ matrix.test_type }} ~[pr]
+
+  daily_clean_up_simd:
+    name: Clean Up
+    needs: daily_test_asan_simd
+    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        simd_key: [
+#          avx2,
+          avx,
+          sse,
+          generic
+        ]
+    steps:
+      - name: Create Empty File
+        run: touch /tmp/clean_up
+      - name: Overwrite Test Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          path: /tmp/clean_up
+          name: test-x86-${{ matrix.simd_key }}-${{ github.run_id }}
+          compression-level: 1
+          retention-days: 2
+          overwrite: 'true'
+
+  daily_build_tsan:
+    name: Daily Build with TSAN
+    runs-on: ubuntu-22.04
+    concurrency:
+      group: daily_build_tsan_x86
+      cancel-in-progress: true
+    container:
+      image: vsaglib/vsag:ci-x86
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: '0'
+          ref: main
+      - name: Load Cache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          max-size: "2G"
+          save: false
+          key: build-tsan-${{ hashFiles('./CMakeLists.txt') }}-${{ hashFiles('./.circleci/fresh_ci_cache.commit') }}
+      - name: Make Tsan
+        run: export CMAKE_GENERATOR="Ninja"; make tsan
+      - name: Clean
+        run: find ./build -type f -name "*.o" -exec rm -f {} +
+      - name: Save Test
+        uses: actions/upload-artifact@v4
+        with:
+          path: ./build
+          name: test_x86-${{ github.run_id }}-tsan
+          compression-level: 1
+          retention-days: 2
+          overwrite: 'true'
+
+  daily_test_tsan:
+    name: Daily Run TSAN Tests
+    needs: daily_build_tsan
+    runs-on: ubuntu-22.04
+    concurrency:
+      group: daily_test_tsan_x86
+      cancel-in-progress: true
+    container:
+      image: vsaglib/vsag:ci-x86
+    steps:
+      - uses: actions/checkout@v4
+      - name: Clean Env
+        run: rm -rf ./build
+      - name: Download Test
+        uses: actions/download-artifact@v4
+        with:
+          name: test_x86-${{ github.run_id }}-tsan
+          path: ./build/
+      - name: Run TSAN tests
+        run: |
+          echo leak:libomp.so > omp.supp
+          export LSAN_OPTIONS=suppressions=omp.supp
+          chmod +x ./build/tests/functests
+          ./build/tests/functests "[concurrent]~[pr]"
+
+

@@ -95,7 +95,7 @@ public:
     }
 
     void
-    Package32(const uint8_t* codes, uint8_t* packaged_codes) const override;
+    Package32(const uint8_t* codes, uint8_t* packaged_codes, int64_t valid_size) const override;
 
     void
     Unpack32(const uint8_t* packaged_codes, uint8_t* codes) const override;
@@ -391,11 +391,19 @@ PQFastScanQuantizer<metric>::ReleaseComputerImpl(
 
 template <MetricType metric>
 void
-PQFastScanQuantizer<metric>::Package32(const uint8_t* codes, uint8_t* packaged_codes) const {
+PQFastScanQuantizer<metric>::Package32(const uint8_t* codes,
+                                       uint8_t* packaged_codes,
+                                       int64_t valid_size) const {
     constexpr int32_t mapper[32] = {0, 16, 8,  24, 1, 17, 9,  25, 2, 18, 10, 26, 3, 19, 11, 27,
                                     4, 20, 12, 28, 5, 21, 13, 29, 6, 22, 14, 30, 7, 23, 15, 31};
+    if (valid_size == -1) {
+        valid_size = BLOCK_SIZE_PACKAGE;
+    }
 
     auto get_code = [&](int64_t vector_index, int64_t space_index) -> uint8_t {
+        if (vector_index >= valid_size) {
+            return 0;
+        }
         uint8_t code = codes[vector_index * this->code_size_ + space_index / 2];
         if (space_index % 2 == 0) {
             return code & 0x0F;

@@ -86,7 +86,7 @@ TEST_CASE("SQ8 SIMD Compute", "[ut][simd]") {
         std::transform(vec1.begin() + count * dim, vec1.end(), vec2.begin(), [](float x) {
             return uint64_t(x * 255.0);
         });
-        auto lb = fixtures::generate_vectors(1, dim, true, 186);
+        auto lb = fixtures::generate_vectors(1, dim, true, 183);
         auto diff = fixtures::generate_vectors(1, dim, true, 657);
         for (uint64_t i = 0; i < count; ++i) {
             TEST_ACCURACY(SQ8ComputeIP);
