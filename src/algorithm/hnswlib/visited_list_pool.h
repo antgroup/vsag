@@ -22,7 +22,7 @@
 #include <mutex>
 
 #include "../../default_allocator.h"
-#include "stream_writer.h"
+#include "storage/stream_writer.h"
 namespace vsag {
 
 extern void*

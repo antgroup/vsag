@@ -50,7 +50,7 @@ public:
     Serialize(StreamWriter& writer) override;
 
     void
-    Deserialize(StreamReader& reader) override;
+    Deserialize(lvalue_or_rvalue<StreamReader> reader) override;
 
 private:
     template <class T>

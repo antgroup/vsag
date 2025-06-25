@@ -61,6 +61,7 @@ FastBitset::Count() {
     }
     return count;
 }
+
 void
 FastBitset::Or(const ComputableBitset& another) {
     const auto* fast_another = dynamic_cast<const FastBitset*>(&another);
@@ -137,6 +138,37 @@ FastBitset::Xor(const ComputableBitsetPtr& another) {
     this->Xor(*another);
 }
 
+void
+FastBitset::And(const std::vector<ComputableBitsetPtr>& other_bitsets) {
+    for (const auto& ptr : other_bitsets) {
+        if (ptr == nullptr) {
+            this->Clear();
+            return;
+        }
+        this->And(*ptr);
+    }
+}
+
+void
+FastBitset::Or(const std::vector<ComputableBitsetPtr>& other_bitsets) {
+    for (const auto& ptr : other_bitsets) {
+        if (ptr != nullptr) {
+            this->Or(*ptr);
+        }
+    }
+}
+
+void
+FastBitset::Xor(const std::vector<ComputableBitsetPtr>& other_bitsets) {
+    for (const auto& ptr : other_bitsets) {
+        if (ptr == nullptr) {
+            this->Clear();
+            return;
+        }
+        this->Xor(*ptr);
+    }
+}
+
 std::string
 FastBitset::Dump() {
     std::shared_lock<std::shared_mutex> lock(mutex_);
@@ -192,4 +224,5 @@ FastBitset::Clear() {
     this->data_.clear();
     fill_bit_ = false;
 }
+
 }  // namespace vsag

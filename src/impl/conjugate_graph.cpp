@@ -183,7 +183,7 @@ ConjugateGraph::Deserialize(const Binary& binary) {
     };
 
     int64_t cursor = 0;
-    ReadFuncStreamReader reader(func, cursor);
+    ReadFuncStreamReader reader(func, cursor, binary.size);
     BufferStreamReader buffer_reader(&reader, binary.size, allocator_);
     return this->Deserialize(buffer_reader);
 }

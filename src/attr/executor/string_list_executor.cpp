@@ -58,9 +58,7 @@ StringListExecutor::Run() {
     }
 
     auto bitset_lists = this->attr_index_->GetBitsetsByAttr(*this->filter_attribute_);
-    for (auto& bitset : bitset_lists) {
-        this->bitset_->Or(bitset);
-    }
+    this->bitset_->Or(bitset_lists);
     if (this->is_not_in_) {
         this->only_bitset_ = false;
         this->filter_ = std::make_shared<BlackListFilter>(this->bitset_);
@@ -80,9 +78,7 @@ StringListExecutor::RunWithBucket(BucketIdType bucket_id) {
 
     auto bitset_lists =
         this->attr_index_->GetBitsetsByAttrAndBucketId(*this->filter_attribute_, bucket_id);
-    for (auto& bitset : bitset_lists) {
-        this->bitset_->Or(bitset);
-    }
+    this->bitset_->Or(bitset_lists);
     this->only_bitset_ = true;
     if (this->is_not_in_) {
         this->bitset_->Not();

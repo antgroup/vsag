@@ -32,6 +32,7 @@
 #include "impl/odescent_graph_builder.h"
 #include "io/memory_io_parameter.h"
 #include "quantization/fp32_quantizer_parameter.h"
+#include "storage/serialization.h"
 #include "utils/slow_task_timer.h"
 #include "utils/timer.h"
 #include "vsag/constants.h"
@@ -118,12 +119,52 @@ private:
     std::shared_ptr<SafeThreadPool> pool_;
 };
 
-Binary
-convert_stream_to_binary(const std::stringstream& stream) {
+class IStreamReader : public Reader {
+public:
+    IStreamReader(std::istream& in_stream, int64_t base_offset, int64_t size)
+        : in_stream_(in_stream), base_offset_(base_offset), size_(size) {
+    }
+
+    ~IStreamReader() override = default;
+
+    void
+    Read(uint64_t offset, uint64_t len, void* dest) override {
+        std::lock_guard<std::mutex> lock(mutex_);
+        in_stream_.seekg(static_cast<std::streamsize>(base_offset_ + offset), std::ios::beg);
+        in_stream_.read((char*)dest, static_cast<std::streamsize>(len));
+    }
+
+    void
+    AsyncRead(uint64_t offset, uint64_t len, void* dest, CallBack callback) override {
+        Read(offset, len, dest);
+        callback(IOErrorCode::IO_SUCCESS, "success");
+    }
+
+    [[nodiscard]] uint64_t
+    Size() const override {
+        return size_;
+    }
+
+private:
+    std::istream& in_stream_;
+    int64_t base_offset_{0};
+    uint64_t size_{0};
+    std::mutex mutex_;
+};
+
+uint64_t
+get_stringstream_size(const std::stringstream& stream) {
     std::streambuf* buf = stream.rdbuf();
     std::streamsize size = buf->pubseekoff(
         0, std::stringstream::end, std::stringstream::in);  // get the stream buffer size
     buf->pubseekpos(0, std::stringstream::in);              // reset pointer pos
+    return size;
+}
+
+Binary
+convert_stream_to_binary(const std::stringstream& stream) {
+    std::streambuf* buf = stream.rdbuf();
+    auto size = static_cast<std::streamsize>(get_stringstream_size(stream));
     std::shared_ptr<int8_t[]> binary_data(new int8_t[size]);
     buf->sgetn((char*)binary_data.get(), size);
     Binary binary{
@@ -138,6 +179,42 @@ convert_binary_to_stream(const Binary& binary, std::stringstream& stream) {
     stream.str("");
     if (binary.data && binary.size > 0) {
         stream.write((const char*)binary.data.get(), static_cast<int64_t>(binary.size));
+    }
+}
+
+void
+copy_istream_to_stringstream(std::stringstream& to, std::istream& from, uint64_t size) {
+    uint64_t done_size = 0;
+
+    const int32_t buffer_size = 1024;
+    char buffer[buffer_size] = {};
+
+    while (done_size < size) {
+        auto remain = size - done_size;
+        auto copy_size =
+            static_cast<std::streamsize>(remain / buffer_size > 0 ? buffer_size : remain);
+        from.read(buffer, copy_size);
+        to.write(buffer, copy_size);
+
+        done_size += copy_size;
+    }
+}
+
+void
+copy_stringstream_to_ostream(std::ostream& to, std::stringstream& from, uint64_t size) {
+    uint64_t done_size = 0;
+
+    const int32_t buffer_size = 1024;
+    char buffer[buffer_size] = {};
+
+    while (done_size < size) {
+        auto remain = size - done_size;
+        auto copy_size =
+            static_cast<std::streamsize>(remain / buffer_size > 0 ? buffer_size : remain);
+        from.read(buffer, copy_size);
+        to.write(buffer, copy_size);
+
+        done_size += copy_size;
     }
 }
 
@@ -623,12 +700,24 @@ DiskANN::range_search(const DatasetPtr& query,
 
 tl::expected<BinarySet, Error>
 DiskANN::serialize() const {
+    SlowTaskTimer t("diskann serialize");
+
+    auto metadata = std::make_shared<Metadata>();
+    metadata->SetVersion("v0.15");
+
     if (status_ == IndexStatus::EMPTY) {
-        // return a special binaryset means empty
-        return EmptyIndexBinarySet::Make("EMPTY_DISKANN");
+        // TODO(wxyu): remove this if condition
+        // if (not Options::Instance().new_version()) {
+        //     // return a special binaryset means empty
+        //     return EmptyIndexBinarySet::Make("EMPTY_DISKANN");
+        // }
+
+        metadata->SetEmptyIndex(true);
+        BinarySet bs;
+        bs.Set(SERIAL_META_KEY, metadata->ToBinary());
+        return bs;
     }
 
-    SlowTaskTimer t("diskann serialize");
     try {
         std::shared_lock lock(rw_mutex_);
         BinarySet bs;
@@ -639,21 +728,69 @@ DiskANN::serialize() const {
         bs.Set(DISKANN_TAG_FILE, convert_stream_to_binary(tag_stream_));
         if (preload_) {
             bs.Set(DISKANN_GRAPH, convert_stream_to_binary(graph_stream_));
+            metadata->Set("support_preload", true);
         }
+
+        bs.Set(SERIAL_META_KEY, metadata->ToBinary());
         return bs;
     } catch (const std::bad_alloc& e) {
         return tl::unexpected(Error(ErrorType::NO_ENOUGH_MEMORY, ""));
     }
 }
 
+#define DISKANN_CHECK_SELF_EMPTY                                           \
+    if (this->index_) {                                                    \
+        LOG_ERROR_AND_RETURNS(ErrorType::INDEX_NOT_EMPTY,                  \
+                              "failed to deserialize: index is not empty") \
+    }
+
 tl::expected<void, Error>
 DiskANN::deserialize(const BinarySet& binary_set) {
     SlowTaskTimer t("diskann deserialize");
+
     std::unique_lock lock(rw_mutex_);
-    if (this->index_) {
-        LOG_ERROR_AND_RETURNS(ErrorType::INDEX_NOT_EMPTY,
-                              "failed to deserialize: index is not empty")
+    DISKANN_CHECK_SELF_EMPTY;
+
+    // new version serialization will contains the META_KEY
+    if (binary_set.Contains(SERIAL_META_KEY)) {
+        logger::debug("parse with new version format");
+
+        auto metadata = std::make_shared<Metadata>(binary_set.Get(SERIAL_META_KEY));
+        logger::debug("version: ", metadata->Version());
+
+        // if some feature only works in specify version, use metadata->Version() likes below:
+        /*
+         * if (metadata->Version() == "v0.15") {
+         *     ... // load data with specify format
+         * }
+         */
+
+        if (metadata->EmptyIndex()) {
+            empty_index_ = true;
+            return {};
+        }
+
+        convert_binary_to_stream(binary_set.Get(DISKANN_LAYOUT_FILE), disk_layout_stream_);
+        auto graph = binary_set.Get(DISKANN_GRAPH);
+        if (/* trying to use graph-preload mode if parameter sets */ preload_) {
+            if (not metadata->Get("support_preload")) {
+                LOG_ERROR_AND_RETURNS(
+                    ErrorType::MISSING_FILE,
+                    fmt::format("missing file: {} when deserialize diskann index", DISKANN_GRAPH));
+            }
+            convert_binary_to_stream(graph, graph_stream_);
+        } else if (/* not use graph-preload mode, but contains */ graph.data) {
+            logger::warn("serialize without using file: {} ", DISKANN_GRAPH);
+        }
+
+        load_disk_index(binary_set);
+        status_ = IndexStatus::MEMORY;
+
+        return {};
     }
+
+    // the original deserial logic, edit ONLY NECESSARY
+    logger::debug("parse with v0.11 version format (matadata no found)");
 
     // check if binaryset is a empty index
     if (binary_set.Contains(BLANK_INDEX)) {
@@ -687,10 +824,84 @@ DiskANN::deserialize(const ReaderSet& reader_set) {
     SlowTaskTimer t("diskann deserialize");
 
     std::unique_lock lock(rw_mutex_);
-    if (this->index_) {
-        LOG_ERROR_AND_RETURNS(ErrorType::INDEX_NOT_EMPTY,
-                              fmt::format("failed to deserialize: {} is not empty", INDEX_DISKANN));
+    DISKANN_CHECK_SELF_EMPTY;
+
+    // new version serialization will contains the META_KEY
+    if (reader_set.Contains(SERIAL_META_KEY)) {
+        logger::debug("parse with new version format");
+
+        auto reader = reader_set.Get(SERIAL_META_KEY);
+        std::string str_metadata(reader->Size() + 1, '\0');
+        reader->Read(0, reader->Size(), str_metadata.data());
+        auto metadata = std::make_shared<Metadata>(str_metadata);
+        logger::debug("version: ", metadata->Version());
+
+        if (metadata->EmptyIndex()) {
+            empty_index_ = true;
+            return {};
+        }
+
+        std::stringstream pq_pivots_stream;
+        std::stringstream disk_pq_compressed_vectors;
+        std::stringstream graph;
+        std::stringstream tag_stream;
+
+        {
+            auto pq_reader = reader_set.Get(DISKANN_PQ);
+            auto pq_pivots_data = std::make_unique<char[]>(pq_reader->Size());
+            pq_reader->Read(0, pq_reader->Size(), pq_pivots_data.get());
+            pq_pivots_stream.write(pq_pivots_data.get(), static_cast<int64_t>(pq_reader->Size()));
+            pq_pivots_stream.seekg(0);
+        }
+
+        {
+            auto compressed_vector_reader = reader_set.Get(DISKANN_COMPRESSED_VECTOR);
+            auto compressed_vector_data =
+                std::make_unique<char[]>(compressed_vector_reader->Size());
+            compressed_vector_reader->Read(
+                0, compressed_vector_reader->Size(), compressed_vector_data.get());
+            disk_pq_compressed_vectors.write(
+                compressed_vector_data.get(),
+                static_cast<int64_t>(compressed_vector_reader->Size()));
+            disk_pq_compressed_vectors.seekg(0);
+        }
+
+        {
+            auto tag_reader = reader_set.Get(DISKANN_TAG_FILE);
+            auto tag_data = std::make_unique<char[]>(tag_reader->Size());
+            tag_reader->Read(0, tag_reader->Size(), tag_data.get());
+            tag_stream.write(tag_data.get(), static_cast<int64_t>(tag_reader->Size()));
+            tag_stream.seekg(0);
+        }
+
+        disk_layout_reader_ = reader_set.Get(DISKANN_LAYOUT_FILE);
+        reader_.reset(new LocalFileReader(batch_read_));
+        index_.reset(new diskann::PQFlashIndex<float, int64_t>(
+            reader_, metric_, sector_len_, dim_, use_bsa_));
+        index_->load_from_separate_paths(pq_pivots_stream, disk_pq_compressed_vectors, tag_stream);
+
+        auto graph_reader = reader_set.Get(DISKANN_GRAPH);
+        if (/* trying to use graph-preload mode, if parameter sets */ preload_) {
+            if (not metadata->Get("support_preload")) {
+                LOG_ERROR_AND_RETURNS(
+                    ErrorType::MISSING_FILE,
+                    fmt::format("miss file: {} when deserialize diskann index", DISKANN_GRAPH));
+            }
+            auto graph_data = std::make_unique<char[]>(graph_reader->Size());
+            graph_reader->Read(0, graph_reader->Size(), graph_data.get());
+            graph.write(graph_data.get(), static_cast<int64_t>(graph_reader->Size()));
+            graph.seekg(0);
+            index_->load_graph(graph);
+        } else if (/* not use graph-preload mode, but contains */ graph_reader) {
+            logger::warn("serialize without using file: {} ", DISKANN_GRAPH);
+        }
+        status_ = IndexStatus::HYBRID;
+
+        return {};
     }
+
+    // the original deserial logic, edit ONLY NECESSARY
+    logger::debug("parse with v0.11 version format (matadata no found)");
 
     // check if readerset is a empty index
     if (reader_set.Contains(BLANK_INDEX)) {
@@ -754,6 +965,120 @@ DiskANN::deserialize(const ReaderSet& reader_set) {
         }
     }
     status_ = IndexStatus::HYBRID;
+
+    return {};
+}
+
+#define WRITE_FOOTER_AND_RETURN                           \
+    {                                                     \
+        auto footer = std::make_shared<Footer>(metadata); \
+        IOStreamWriter writer(out_stream);                \
+        footer->Write(writer);                            \
+        return {};                                        \
+    }
+
+#define WRITE_DATACELL_WITH_NAME(out_stream, name, datacell_stream)                    \
+    datacell_offsets[(name)] = offset;                                                 \
+    auto datacell_stream##_size = get_stringstream_size((datacell_stream));            \
+    datacell_sizes[(name)] = datacell_stream##_size;                                   \
+    copy_stringstream_to_ostream(out_stream, datacell_stream, datacell_stream##_size); \
+    offset += datacell_stream##_size;
+
+tl::expected<void, Error>
+DiskANN::serialize(std::ostream& out_stream) {
+    SlowTaskTimer t("diskann serialize");
+
+    auto metadata = std::make_shared<Metadata>();
+    metadata->SetVersion("v0.15");
+
+    if (status_ == IndexStatus::EMPTY) {
+        metadata->SetEmptyIndex(true);
+
+        WRITE_FOOTER_AND_RETURN;
+    }
+
+    JsonType datacell_offsets;
+    JsonType datacell_sizes;
+    uint64_t offset = 0;
+
+    WRITE_DATACELL_WITH_NAME(out_stream, DISKANN_PQ, pq_pivots_stream_);
+    WRITE_DATACELL_WITH_NAME(out_stream, DISKANN_COMPRESSED_VECTOR, disk_pq_compressed_vectors_);
+    WRITE_DATACELL_WITH_NAME(out_stream, DISKANN_LAYOUT_FILE, disk_layout_stream_);
+    WRITE_DATACELL_WITH_NAME(out_stream, DISKANN_TAG_FILE, tag_stream_);
+
+    if (preload_) {
+        WRITE_DATACELL_WITH_NAME(out_stream, DISKANN_GRAPH, graph_stream_);
+        metadata->Set("support_preload", true);
+    }
+
+    metadata->Set("datacell_offsets", datacell_offsets);
+    metadata->Set("datacell_sizes", datacell_sizes);
+
+    WRITE_FOOTER_AND_RETURN;
+}
+
+#define READ_DATACELL_WITH_NAME(in_stream, name, datacell_stream) \
+    in_stream.seekg(datacell_offsets[(name)].get<uint64_t>());    \
+    copy_istream_to_stringstream(                                 \
+        (datacell_stream), in_stream, datacell_sizes[(name)].get<uint64_t>());
+
+tl::expected<void, Error>
+DiskANN::deserialize(std::istream& in_stream) {
+    SlowTaskTimer t("diskann deserialize");
+
+    try {
+        IOStreamReader reader(in_stream);
+        auto footer = Footer::Parse(reader);
+        if (footer == nullptr) {
+            throw std::runtime_error("unknown diskann serialization");
+        }
+
+        auto metadata = footer->GetMetadata();
+        if (metadata->EmptyIndex()) {
+            return {};
+        }
+
+        JsonType datacell_offsets = metadata->Get("datacell_offsets");
+        logger::debug("datacell_offsets: {}", datacell_offsets.dump());
+        JsonType datacell_sizes = metadata->Get("datacell_sizes");
+        logger::debug("datacell_sizes: {}", datacell_sizes.dump());
+
+        std::stringstream pq_pivots_stream;
+        std::stringstream disk_pq_compressed_vectors;
+        std::stringstream graph;
+        std::stringstream tag_stream;
+
+        READ_DATACELL_WITH_NAME(in_stream, DISKANN_PQ, pq_pivots_stream);
+        READ_DATACELL_WITH_NAME(in_stream, DISKANN_COMPRESSED_VECTOR, disk_pq_compressed_vectors);
+        READ_DATACELL_WITH_NAME(in_stream, DISKANN_TAG_FILE, tag_stream);
+
+        disk_layout_reader_ =
+            std::make_shared<IStreamReader>(in_stream,
+                                            datacell_offsets[DISKANN_LAYOUT_FILE].get<uint64_t>(),
+                                            datacell_sizes[DISKANN_LAYOUT_FILE].get<uint64_t>());
+
+        reader_.reset(new LocalFileReader(batch_read_));
+        index_.reset(new diskann::PQFlashIndex<float, int64_t>(
+            reader_, metric_, sector_len_, dim_, use_bsa_));
+        index_->load_from_separate_paths(pq_pivots_stream, disk_pq_compressed_vectors, tag_stream);
+
+        if (preload_) {
+            if (not metadata->Get("support_preload")) {
+                LOG_ERROR_AND_RETURNS(
+                    ErrorType::MISSING_FILE,
+                    fmt::format("miss file: {} when deserialize diskann index", DISKANN_GRAPH));
+            }
+
+            READ_DATACELL_WITH_NAME(in_stream, DISKANN_GRAPH, graph);
+            index_->load_graph(graph);
+        }
+        status_ = IndexStatus::HYBRID;
+
+    } catch (const std::runtime_error& e) {
+        LOG_ERROR_AND_RETURNS(ErrorType::READ_ERROR, "failed to deserialize: ", e.what());
+    } catch (const VsagException& e) {
+        LOG_ERROR_AND_RETURNS(ErrorType::READ_ERROR, "failed to deserialize: ", e.what());
+    }
 
     return {};
 }
@@ -1048,17 +1373,30 @@ DiskANN::CheckFeature(IndexFeature feature) const {
 }
 void
 DiskANN::init_feature_list() {
+    // build
     this->feature_list_->SetFeatures({
         SUPPORT_BUILD,
-        SUPPORT_SERIALIZE_BINARY_SET,
-        SUPPORT_DESERIALIZE_BINARY_SET,
-        SUPPORT_DESERIALIZE_BINARY_SET,
-        SUPPORT_SEARCH_CONCURRENT,
+    });
+
+    //  search
+    this->feature_list_->SetFeatures({
         SUPPORT_KNN_SEARCH,
         SUPPORT_KNN_SEARCH_WITH_ID_FILTER,
         SUPPORT_RANGE_SEARCH,
         SUPPORT_RANGE_SEARCH_WITH_ID_FILTER,
     });
+
+    // concurrency
+    this->feature_list_->SetFeatures({
+        SUPPORT_SEARCH_CONCURRENT,
+    });
+
+    // serialize
+    this->feature_list_->SetFeatures({IndexFeature::SUPPORT_DESERIALIZE_BINARY_SET,
+                                      IndexFeature::SUPPORT_DESERIALIZE_FILE,
+                                      IndexFeature::SUPPORT_DESERIALIZE_READER_SET,
+                                      IndexFeature::SUPPORT_SERIALIZE_BINARY_SET,
+                                      IndexFeature::SUPPORT_SERIALIZE_FILE});
 }
 
 }  // namespace vsag

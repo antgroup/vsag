@@ -21,8 +21,8 @@
 
 #include "byte_buffer.h"
 #include "io_parameter.h"
-#include "stream_reader.h"
-#include "stream_writer.h"
+#include "storage/stream_reader.h"
+#include "storage/stream_writer.h"
 #include "utils/function_exists_check.h"
 
 namespace vsag {

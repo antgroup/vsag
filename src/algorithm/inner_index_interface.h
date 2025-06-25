@@ -22,8 +22,8 @@
 #include "index_feature_list.h"
 #include "label_table.h"
 #include "parameter.h"
-#include "stream_reader.h"
-#include "stream_writer.h"
+#include "storage/stream_reader.h"
+#include "storage/stream_writer.h"
 #include "utils/function_exists_check.h"
 #include "vsag/dataset.h"
 #include "vsag/index.h"
@@ -304,6 +304,7 @@ public:
     const ParamPtr create_param_ptr_{nullptr};
 
     int64_t dim_{0};
+    bool immutable_{false};
 
     MetricType metric_{MetricType::METRIC_TYPE_L2SQR};
 

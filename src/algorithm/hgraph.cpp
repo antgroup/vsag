@@ -16,6 +16,7 @@
 #include "hgraph.h"
 
 #include <memory>
+#include <stdexcept>
 
 #include "common.h"
 #include "data_cell/compressed_graph_datacell.h"
@@ -26,8 +27,13 @@
 #include "impl/pruning_strategy.h"
 #include "index/index_impl.h"
 #include "index/iterator_filter.h"
+#include "logger.h"
+#include "storage/serialization.h"
+#include "storage/stream_reader.h"
+#include "typing.h"
 #include "utils/standard_heap.h"
 #include "utils/util_functions.h"
+#include "vsag/options.h"
 
 namespace vsag {
 
@@ -45,7 +51,13 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
       graph_type_(hgraph_param->graph_type),
       extra_info_size_(common_param.extra_info_size_),
       deleted_ids_(allocator_) {
-    neighbors_mutex_ = std::make_shared<PointsMutex>(0, common_param.allocator_.get());
+    this->immutable_ = hgraph_param->immutable;
+    if (immutable_) {
+        neighbors_mutex_ = std::make_shared<EmptyMutex>();
+        this->label_table_ = std::make_shared<LabelTable>(allocator_, false);
+    } else {
+        neighbors_mutex_ = std::make_shared<PointsMutex>(0, common_param.allocator_.get());
+    }
     this->basic_flatten_codes_ =
         FlattenInterface::MakeInstance(hgraph_param->base_codes_param, common_param);
     if (use_reorder_) {
@@ -646,7 +658,7 @@ HGraph::RangeSearch(const DatasetPtr& query,
 }
 
 void
-HGraph::serialize_basic_info(StreamWriter& writer) const {
+HGraph::serialize_basic_info_v0_14(StreamWriter& writer) const {
     StreamWriter::WriteObj(writer, this->use_reorder_);
     StreamWriter::WriteObj(writer, this->dim_);
     StreamWriter::WriteObj(writer, this->metric_);
@@ -659,7 +671,7 @@ HGraph::serialize_basic_info(StreamWriter& writer) const {
     StreamWriter::WriteObj(writer, capacity);
     StreamWriter::WriteVector(writer, this->label_table_->label_table_);
 
-    uint64_t size = this->label_table_->label_remap_.size();
+    uint64_t size = this->total_count_;
     StreamWriter::WriteObj(writer, size);
     for (const auto& pair : this->label_table_->label_remap_) {
         auto key = pair.first;
@@ -669,88 +681,7 @@ HGraph::serialize_basic_info(StreamWriter& writer) const {
 }
 
 void
-HGraph::Serialize(StreamWriter& writer) const {
-    if (this->ignore_reorder_) {
-        this->use_reorder_ = false;
-    }
-    this->serialize_basic_info(writer);
-    this->basic_flatten_codes_->Serialize(writer);
-    this->bottom_graph_->Serialize(writer);
-    if (this->use_reorder_) {
-        this->high_precise_codes_->Serialize(writer);
-    }
-    for (const auto& route_graph : this->route_graphs_) {
-        route_graph->Serialize(writer);
-    }
-    if (this->extra_info_size_ > 0 && this->extra_infos_ != nullptr) {
-        this->extra_infos_->Serialize(writer);
-    }
-    if (this->use_attribute_filter_ and this->attr_filter_index_ != nullptr) {
-        this->attr_filter_index_->Serialize(writer);
-    }
-}
-
-void
-HGraph::Deserialize(StreamReader& reader) {
-    this->deserialize_basic_info(reader);
-    this->basic_flatten_codes_->Deserialize(reader);
-    this->bottom_graph_->Deserialize(reader);
-    // if (std::dynamic_pointer_cast<CompressedGraphDataCell>(this->bottom_graph_) == nullptr) {
-    //     auto compressed_graph =
-    //         CompressedGraphDataCell::MakeCompressedGraph(this->bottom_graph_, allocator_);
-    //     this->bottom_graph_ = std::move(compressed_graph);
-    // }
-    if (this->use_reorder_) {
-        this->high_precise_codes_->Deserialize(reader);
-    }
-
-    for (auto& route_graph : this->route_graphs_) {
-        route_graph->Deserialize(reader);
-    }
-    auto new_size = max_capacity_.load();
-    this->neighbors_mutex_->Resize(new_size);
-
-    pool_ = std::make_shared<VisitedListPool>(1, allocator_, new_size, allocator_);
-
-    if (this->extra_info_size_ > 0 && this->extra_infos_ != nullptr) {
-        this->extra_infos_->Deserialize(reader);
-    }
-    this->total_count_ = this->basic_flatten_codes_->TotalCount();
-
-    // optimize
-    if (use_elp_optimizer_) {
-        elp_optimize();
-    }
-    if (this->use_attribute_filter_ and this->attr_filter_index_ != nullptr) {
-        this->attr_filter_index_->Deserialize(reader);
-    }
-}
-
-std::string
-HGraph::GetMemoryUsageDetail() const {
-    JsonType memory_usage;
-    if (this->ignore_reorder_) {
-        this->use_reorder_ = false;
-    }
-    memory_usage["basic_flatten_codes"] = this->basic_flatten_codes_->CalcSerializeSize();
-    memory_usage["bottom_graph"] = this->bottom_graph_->CalcSerializeSize();
-    if (this->use_reorder_) {
-        memory_usage["high_precise_codes"] = this->high_precise_codes_->CalcSerializeSize();
-    }
-    size_t route_graph_size = 0;
-    for (const auto& route_graph : this->route_graphs_) {
-        route_graph_size += route_graph->CalcSerializeSize();
-    }
-    memory_usage["route_graph"] = route_graph_size;
-    if (this->extra_info_size_ > 0 && this->extra_infos_ != nullptr) {
-        memory_usage["extra_infos"] = this->extra_infos_->CalcSerializeSize();
-    }
-    memory_usage["__total_size__"] = this->CalSerializeSize();
-    return memory_usage.dump();
-}
-
-void
-HGraph::deserialize_basic_info(StreamReader& reader) {
+HGraph::deserialize_basic_info_v0_14(StreamReader& reader) {
     StreamReader::ReadObj(reader, this->use_reorder_);
     StreamReader::ReadObj(reader, this->dim_);
     StreamReader::ReadObj(reader, this->metric_);
@@ -778,6 +709,228 @@ HGraph::deserialize_basic_info(StreamReader& reader) {
     }
 }
 
+#define TO_JSON(json_obj, var) json_obj[#var] = this->var##_;
+
+#define TO_JSON_BASE64(json_obj, var) json_obj[#var] = base64_encode_obj(this->var##_);
+
+#define TO_JSON_ATOMIC(json_obj, var) json_obj[#var] = this->var##_.load();
+
+JsonType
+HGraph::serialize_basic_info() const {
+    JsonType jsonify_basic_info;
+    TO_JSON(jsonify_basic_info, use_reorder);
+    TO_JSON(jsonify_basic_info, dim);
+    TO_JSON(jsonify_basic_info, metric);
+    TO_JSON(jsonify_basic_info, entry_point_id);
+    TO_JSON(jsonify_basic_info, ef_construct);
+    // logger::debug("mult: {}", this->mult_);
+    TO_JSON_BASE64(jsonify_basic_info, mult);
+    TO_JSON_ATOMIC(jsonify_basic_info, max_capacity);
+    jsonify_basic_info["max_level"] = this->route_graphs_.size();
+
+    return jsonify_basic_info;
+}
+
+#define FROM_JSON(json_obj, var) this->var##_ = (json_obj)[#var];
+
+#define FROM_JSON_BASE64(json_obj, var) base64_decode_obj((json_obj)[#var], this->var##_);
+
+#define FROM_JSON_ATOMIC(json_obj, var) this->var##_.store((json_obj)[#var]);
+
+void
+HGraph::deserialize_basic_info(JsonType jsonify_basic_info) {
+    logger::debug("jsonify_basic_info: {}", jsonify_basic_info.dump());
+    FROM_JSON(jsonify_basic_info, use_reorder);
+    FROM_JSON(jsonify_basic_info, dim);
+    FROM_JSON(jsonify_basic_info, metric);
+    FROM_JSON(jsonify_basic_info, entry_point_id);
+    FROM_JSON(jsonify_basic_info, ef_construct);
+    FROM_JSON_BASE64(jsonify_basic_info, mult);
+    // logger::debug("mult: {}", this->mult_);
+    FROM_JSON_ATOMIC(jsonify_basic_info, max_capacity);
+
+    uint64_t max_level = jsonify_basic_info["max_level"];
+    for (uint64_t i = 0; i < max_level; ++i) {
+        this->route_graphs_.emplace_back(this->generate_one_route_graph());
+    }
+}
+
+void
+HGraph::serialize_label_info(StreamWriter& writer) const {
+    StreamWriter::WriteVector(writer, this->label_table_->label_table_);
+    uint64_t size = this->label_table_->label_remap_.size();
+    StreamWriter::WriteObj(writer, size);
+    for (const auto& pair : this->label_table_->label_remap_) {
+        auto key = pair.first;
+        StreamWriter::WriteObj(writer, key);
+        StreamWriter::WriteObj(writer, pair.second);
+    }
+}
+
+void
+HGraph::deserialize_label_info(StreamReader& reader) const {
+    StreamReader::ReadVector(reader, this->label_table_->label_table_);
+    uint64_t size;
+    StreamReader::ReadObj(reader, size);
+    for (uint64_t i = 0; i < size; ++i) {
+        LabelType key;
+        StreamReader::ReadObj(reader, key);
+        InnerIdType value;
+        StreamReader::ReadObj(reader, value);
+        this->label_table_->label_remap_.emplace(key, value);
+    }
+}
+
+void
+HGraph::Serialize(StreamWriter& writer) const {
+    if (this->ignore_reorder_) {
+        this->use_reorder_ = false;
+    }
+
+    // FIXME(wxyu): only for testing, remove before merge into the main branch
+    // if (not Options::Instance().new_version()) {
+    //     this->serialize_basic_info_v0_14(writer);
+    //     this->basic_flatten_codes_->Serialize(writer);
+    //     this->bottom_graph_->Serialize(writer);
+    //     if (this->use_reorder_) {
+    //         this->high_precise_codes_->Serialize(writer);
+    //     }
+    //     for (const auto& route_graph : this->route_graphs_) {
+    //         route_graph->Serialize(writer);
+    //     }
+    //     if (this->extra_info_size_ > 0 && this->extra_infos_ != nullptr) {
+    //         this->extra_infos_->Serialize(writer);
+    //     }
+    //     if (this->use_attribute_filter_ and this->attr_filter_index_ != nullptr) {
+    //         this->attr_filter_index_->Serialize(writer);
+    //     }
+    //     return;
+    // }
+
+    this->serialize_label_info(writer);
+    this->basic_flatten_codes_->Serialize(writer);
+    this->bottom_graph_->Serialize(writer);
+    if (this->use_reorder_) {
+        this->high_precise_codes_->Serialize(writer);
+    }
+    for (const auto& route_graph : this->route_graphs_) {
+        route_graph->Serialize(writer);
+    }
+    if (this->extra_info_size_ > 0 && this->extra_infos_ != nullptr) {
+        this->extra_infos_->Serialize(writer);
+    }
+    if (this->use_attribute_filter_ and this->attr_filter_index_ != nullptr) {
+        this->attr_filter_index_->Serialize(writer);
+    }
+
+    // serialize footer (introduced since v0.15)
+    auto jsonify_basic_info = this->serialize_basic_info();
+    auto metadata = std::make_shared<Metadata>();
+    metadata->Set("basic_info", jsonify_basic_info);
+    logger::debug(jsonify_basic_info.dump());
+
+    auto footer = std::make_shared<Footer>(metadata);
+    footer->Write(writer);
+}
+
+void
+HGraph::Deserialize(StreamReader& reader) {
+    // try to deserialize footer (only in new version)
+    auto footer = Footer::Parse(reader);
+
+    if (footer == nullptr) {  // old format, DON'T EDIT, remove in the future
+        logger::debug("parse with v0.14 version format");
+
+        this->deserialize_basic_info_v0_14(reader);
+
+        this->basic_flatten_codes_->Deserialize(reader);
+        this->bottom_graph_->Deserialize(reader);
+        // if (std::dynamic_pointer_cast<CompressedGraphDataCell>(this->bottom_graph_) == nullptr) {
+        //     auto compressed_graph =
+        //         CompressedGraphDataCell::MakeCompressedGraph(this->bottom_graph_, allocator_);
+        //     this->bottom_graph_ = std::move(compressed_graph);
+        // }
+        if (this->use_reorder_) {
+            this->high_precise_codes_->Deserialize(reader);
+        }
+
+        for (auto& route_graph : this->route_graphs_) {
+            route_graph->Deserialize(reader);
+        }
+        auto new_size = max_capacity_.load();
+        this->neighbors_mutex_->Resize(new_size);
+
+        pool_ = std::make_shared<VisitedListPool>(1, allocator_, new_size, allocator_);
+
+        if (this->extra_info_size_ > 0 && this->extra_infos_ != nullptr) {
+            this->extra_infos_->Deserialize(reader);
+        }
+        this->total_count_ = this->basic_flatten_codes_->TotalCount();
+
+        if (this->use_attribute_filter_ and this->attr_filter_index_ != nullptr) {
+            this->attr_filter_index_->Deserialize(reader);
+        }
+    } else {  // create like `else if ( ver in [v0.15, v0.17] )` here if need in the future
+        logger::debug("parse with new version format");
+
+        auto metadata = footer->GetMetadata();
+        // metadata should NOT be nullptr if footer is not nullptr
+        this->deserialize_basic_info(metadata->Get("basic_info"));
+        this->deserialize_label_info(reader);
+
+        this->basic_flatten_codes_->Deserialize(reader);
+        this->bottom_graph_->Deserialize(reader);
+        if (this->use_reorder_) {
+            this->high_precise_codes_->Deserialize(reader);
+        }
+
+        for (auto& route_graph : this->route_graphs_) {
+            route_graph->Deserialize(reader);
+        }
+        auto new_size = max_capacity_.load();
+        this->neighbors_mutex_->Resize(new_size);
+
+        pool_ = std::make_shared<VisitedListPool>(1, allocator_, new_size, allocator_);
+
+        if (this->extra_info_size_ > 0 && this->extra_infos_ != nullptr) {
+            this->extra_infos_->Deserialize(reader);
+        }
+        this->total_count_ = this->basic_flatten_codes_->TotalCount();
+
+        if (this->use_attribute_filter_ and this->attr_filter_index_ != nullptr) {
+            this->attr_filter_index_->Deserialize(reader);
+        }
+    }
+
+    // post serialize procedure
+    if (use_elp_optimizer_) {
+        elp_optimize();
+    }
+}
+
+std::string
+HGraph::GetMemoryUsageDetail() const {
+    JsonType memory_usage;
+    if (this->ignore_reorder_) {
+        this->use_reorder_ = false;
+    }
+    memory_usage["basic_flatten_codes"] = this->basic_flatten_codes_->CalcSerializeSize();
+    memory_usage["bottom_graph"] = this->bottom_graph_->CalcSerializeSize();
+    if (this->use_reorder_) {
+        memory_usage["high_precise_codes"] = this->high_precise_codes_->CalcSerializeSize();
+    }
+    size_t route_graph_size = 0;
+    for (const auto& route_graph : this->route_graphs_) {
+        route_graph_size += route_graph->CalcSerializeSize();
+    }
+    memory_usage["route_graph"] = route_graph_size;
+    if (this->extra_info_size_ > 0 && this->extra_infos_ != nullptr) {
+        memory_usage["extra_infos"] = this->extra_infos_->CalcSerializeSize();
+    }
+    memory_usage["__total_size__"] = this->CalSerializeSize();
+    return memory_usage.dump();
+}
+
 float
 HGraph::CalcDistanceById(const float* query, int64_t id) const {
     auto flat = this->basic_flatten_codes_;
@@ -788,12 +941,7 @@ HGraph::CalcDistanceById(const float* query, int64_t id) const {
     auto computer = flat->FactoryComputer(query);
     {
         std::shared_lock<std::shared_mutex> lock(this->label_lookup_mutex_);
-        auto iter = this->label_table_->label_remap_.find(id);
-        if (iter == this->label_table_->label_remap_.end()) {
-            throw VsagException(ErrorType::INVALID_ARGUMENT,
-                                fmt::format("failed to find id: {}", id));
-        }
-        auto new_id = iter->second;
+        auto new_id = this->label_table_->GetIdByLabel(id);
         flat->Query(&result, computer, &new_id, 1);
         return result;
     }
@@ -815,13 +963,12 @@ HGraph::CalDistanceById(const float* query, const int64_t* ids, int64_t count) c
     {
         std::shared_lock<std::shared_mutex> lock(this->label_lookup_mutex_);
         for (int64_t i = 0; i < count; ++i) {
-            auto iter = this->label_table_->label_remap_.find(ids[i]);
-            if (iter == this->label_table_->label_remap_.end()) {
+            try {
+                inner_ids[i] = this->label_table_->GetIdByLabel(ids[i]);
+            } catch (std::runtime_error& e) {
                 logger::debug(fmt::format("failed to find id: {}", ids[i]));
                 invalid_id_loc.push_back(i);
-                continue;
             }
-            inner_ids[i] = iter->second;
         }
         flat->Query(distances, computer, inner_ids.data(), count);
         for (unsigned int i : invalid_id_loc) {
@@ -836,12 +983,16 @@ HGraph::GetMinAndMaxId() const {
     int64_t min_id = INT64_MAX;
     int64_t max_id = INT64_MIN;
     std::shared_lock<std::shared_mutex> lock(this->label_lookup_mutex_);
-    if (this->label_table_->label_remap_.empty()) {
+    if (this->total_count_ == 0) {
         throw VsagException(ErrorType::INTERNAL_ERROR, "Label map size is zero");
     }
-    for (auto& it : this->label_table_->label_remap_) {
-        max_id = it.first > max_id ? it.first : max_id;
-        min_id = it.first < min_id ? it.first : min_id;
+    for (int i = 0; i < this->total_count_; ++i) {
+        if (not deleted_ids_.empty() && deleted_ids_.count(i) != 0) {
+            continue;
+        }
+        auto label = this->label_table_->label_table_[i];
+        max_id = std::max(label, max_id);
+        min_id = std::min(label, min_id);
     }
     return {min_id, max_id};
 }
@@ -1074,6 +1225,7 @@ static const std::string HGRAPH_PARAMS_TEMPLATE =
         "{HGRAPH_IGNORE_REORDER_KEY}": false,
         "{HGRAPH_BUILD_BY_BASE_QUANTIZATION_KEY}": false,
         "{HGRAPH_USE_ATTRIBUTE_FILTER_KEY}": false,
+        "{HGRSPH_IMMUTABLE_KEY}": false,
         "{HGRAPH_GRAPH_KEY}": {
             "{IO_PARAMS_KEY}": {
                 "{IO_TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
@@ -1289,6 +1441,10 @@ HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
                 BUILD_PARAMS_KEY,
                 BUILD_THREAD_COUNT,
             },
+        },
+        {
+            HGRAPH_IMMUTABLE,
+            {HGRSPH_IMMUTABLE_KEY},
         },
         {
             SQ4_UNIFORM_TRUNC_RATE,

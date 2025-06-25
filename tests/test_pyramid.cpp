@@ -142,7 +142,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
                              "Pyramid Serialize File",
-                             "[ft][pyramid]") {
+                             "[ft][pyramid][serialization]") {
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
     auto metric_type = GENERATE("l2");
