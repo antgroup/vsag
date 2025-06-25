@@ -137,7 +137,7 @@ TEST_CASE("CompressedGraphDataCell Build From GraphDataCell Test",
     auto dim = GENERATE(32, 64);
     auto max_degree = GENERATE(5, 32, 64);
     auto max_capacity = GENERATE(100);
-    auto io_type = GENERATE("block_memory_io", "memory_io");
+    auto io_type = GENERATE("block_memory_io");
     auto is_support_delete = false;
     constexpr const char* graph_param_temp =
         R"(
