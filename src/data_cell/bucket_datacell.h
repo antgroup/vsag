@@ -334,7 +334,11 @@ BucketDataCell<QuantTmpl, IOTmpl>::package_fastscan() {
         const auto* codes = this->datas_[i]->Read(code_size_ * bucket_size, 0, need_release);
         InnerIdType begin = 0;
         while (begin < bucket_size) {
-            quantizer_->Package32(codes + begin * code_size_, buffer.data);
+            auto valid_size = bucket_size - begin;
+            if (valid_size > 32) {
+                valid_size = 32;
+            }
+            quantizer_->Package32(codes + begin * code_size_, buffer.data, valid_size);
             this->datas_[i]->Write(buffer.data, code_size_ * 32, begin * code_size_);
             begin += 32;
         }

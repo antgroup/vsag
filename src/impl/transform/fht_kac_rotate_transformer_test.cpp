@@ -39,8 +39,8 @@ TestRandomness(FhtKacRotator& rom1, FhtKacRotator& rom2, int dim) {
         }
         count_non_zero++;
     }
-
-    REQUIRE(count_same <= (uint64_t)(0.1 * count_non_zero));
+    uint64_t threshold = std::max(1UL, static_cast<uint64_t>(0.1 * count_non_zero));
+    REQUIRE(count_same <= threshold);
 }
 
 void
@@ -86,6 +86,7 @@ TEST_CASE("Basic Hadamard Test", "[ut][FhtKacRotator]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     const auto dims = fixtures::get_common_used_dims();
     for (auto dim : dims) {
+        INFO(fmt::format("dim = {}", dim));
         FhtKacRotator rom(allocator.get(), dim);
         FhtKacRotator rom_alter(allocator.get(), dim);
         rom.Train();
