@@ -15,6 +15,8 @@
 
 #pragma once
 
+#include <cstdint>
+
 #include "vsag/allocator.h"
 
 namespace vsag {
