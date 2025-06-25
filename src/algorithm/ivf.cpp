@@ -42,7 +42,7 @@ static constexpr const char* IVF_PARAMS_TEMPLATE =
         "{IVF_USE_REORDER_KEY}": false,
         "{BUCKET_PARAMS_KEY}": {
             "{IO_PARAMS_KEY}": {
-                "{IO_TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}"
+                "{IO_TYPE_KEY}": "{IO_TYPE_VALUE_MEMORY_IO}"
             },
             "{QUANTIZATION_PARAMS_KEY}": {
                 "{QUANTIZATION_TYPE_KEY}": "{QUANTIZATION_TYPE_VALUE_FP32}",

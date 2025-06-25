@@ -61,4 +61,4 @@ jobs:
           echo leak:libomp.so > omp.supp
           export LSAN_OPTIONS=suppressions=omp.supp
           chmod +x ./build/tests/functests
-          ./build/tests/functests "[concurrent]"
+          ./build/tests/functests "[concurrent]~[daily]"
