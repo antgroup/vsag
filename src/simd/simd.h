@@ -17,6 +17,7 @@
 
 #include <cmath>
 #include <cstdlib>
+#include <cstring>
 
 #include "basic_func.h"
 #include "bf16_simd.h"
