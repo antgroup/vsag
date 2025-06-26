@@ -98,6 +98,7 @@ AttributeInvertedDataCell::GetBitsetsByAttrAndBucketId(const Attribute& attr_nam
 
 void
 AttributeInvertedDataCell::Serialize(StreamWriter& writer) {
+    AttributeInvertedInterface::Serialize(writer);
     StreamWriter::WriteObj(writer, term_2_value_map_.size());
     for (auto& [term, value_map] : term_2_value_map_) {
         StreamWriter::WriteString(writer, term);
@@ -107,6 +108,7 @@ AttributeInvertedDataCell::Serialize(StreamWriter& writer) {
 
 void
 AttributeInvertedDataCell::Deserialize(lvalue_or_rvalue<StreamReader> reader) {
+    AttributeInvertedInterface::Deserialize(reader);
     uint64_t size;
     StreamReader::ReadObj(reader, size);
     term_2_value_map_.reserve(size);
