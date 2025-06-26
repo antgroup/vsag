@@ -91,6 +91,7 @@ TEST_CASE("AttributeInvertedDataCell insert various types", "[ut][AttributeInver
 
     InnerIdType inner_id = 99;
     cell.Insert(attrSet, inner_id);
+    REQUIRE(cell.GetTypeOfField("str") == AttrValueType::STRING);
 
     for (auto* attr : attrSet.attrs_) {
         auto bitsets = cell.GetBitsetsByAttr(*attr);
@@ -117,4 +118,5 @@ TEST_CASE("AttributeInvertedDataCell insert various types", "[ut][AttributeInver
         REQUIRE(bitsets[0]->Test(inner_id) == true);
         REQUIRE(bitsets[0]->Test(inner_id - 1) == false);
     }
+    REQUIRE(cell2.GetTypeOfField("str") == AttrValueType::STRING);
 }

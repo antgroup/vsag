@@ -60,10 +60,11 @@ public:
     ComputableBitsetPtr
     GetBitsetByValue(T value) {
         auto& map = this->GetMapByType<T>();
-        if (map.find(value) == map.end()) {
+        auto iter = map.find(value);
+        if (iter == map.end()) {
             return nullptr;
         }
-        return map[value];
+        return iter->second;
     }
 
     template <class T>
