@@ -71,6 +71,13 @@ FastBitset::Or(const ComputableBitset& another) {
     std::lock(mutex_, fast_another->mutex_);
     std::lock_guard<std::shared_mutex> lock1(mutex_, std::adopt_lock);
     std::lock_guard<std::shared_mutex> lock2(fast_another->mutex_, std::adopt_lock);
+    if (fast_another->data_.empty()) {
+        if (fast_another->fill_bit_) {
+            this->Clear();
+            this->fill_bit_ = true;
+        }
+        return;
+    }
     auto max_size = std::max(data_.size(), fast_another->data_.size());
     data_.resize(max_size, 0);
     BitOr(reinterpret_cast<const uint8_t*>(data_.data()),
@@ -90,6 +97,12 @@ FastBitset::And(const ComputableBitset& another) {
     std::lock_guard<std::shared_mutex> lock2(fast_another->mutex_, std::adopt_lock);
     auto max_size = std::max(data_.size(), fast_another->data_.size());
     data_.resize(max_size, 0);
+    if (fast_another->data_.empty()) {
+        if (not fast_another->fill_bit_) {
+            this->Clear();
+        }
+        return;
+    }
     BitAnd(reinterpret_cast<const uint8_t*>(data_.data()),
            reinterpret_cast<const uint8_t*>(fast_another->data_.data()),
            max_size * sizeof(uint64_t),

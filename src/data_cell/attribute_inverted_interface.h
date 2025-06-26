@@ -54,10 +54,26 @@ public:
 
     virtual void
     Serialize(StreamWriter& writer) {
+        auto size = this->field_type_map_.size();
+        StreamWriter::WriteObj(writer, size);
+        for (auto& [k, v] : this->field_type_map_) {
+            StreamWriter::WriteString(writer, k);
+            StreamWriter::WriteObj(writer, static_cast<int64_t>(v));
+        }
     }
 
     virtual void
     Deserialize(lvalue_or_rvalue<StreamReader> reader) {
+        uint64_t size;
+        StreamReader::ReadObj(reader, size);
+        this->field_type_map_.reserve(size);
+        std::string key;
+        int64_t value;
+        for (int64_t i = 0; i < size; ++i) {
+            key = StreamReader::ReadString(reader);
+            StreamReader::ReadObj(reader, value);
+            this->field_type_map_[key] = static_cast<AttrValueType>(value);
+        }
     }
 
     AttrValueType

@@ -39,7 +39,9 @@ public:
 
     virtual void
     Clear() {
-        this->bitset_->Clear();
+        if (this->bitset_ != nullptr) {
+            this->bitset_->Clear();
+        }
     };
 
     virtual FilterPtr
