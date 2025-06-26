@@ -101,6 +101,24 @@ public:
     Build(const Vector<InnerIdType>& ids_sequence,
           const GraphInterfacePtr& graph_storage = nullptr);
 
+    void PruneAndReverse(GraphInterfacePtr& graph_storage, int64_t data_num) {
+        data_num_ = data_num;
+        Vector<std::mutex>(data_num_, allocator_).swap(points_lock_);
+        Vector<InnerIdType> edges(allocator_);
+        graph_.resize(data_num, Linklist(allocator_));
+        for (int i = 0; i < data_num; ++i) {
+            graph_storage->GetNeighbors(i, edges);
+            for (int valid_id_count = 0; valid_id_count < edges.size(); ++valid_id_count) {
+                uint32_t neighbor_loc = edges[valid_id_count];
+                graph_[i].neighbors.emplace_back(neighbor_loc, get_distance(neighbor_loc, i));
+            }
+        }
+        prune_graph();
+        add_reverse_edges();
+        SaveGraph(graph_storage);
+    }
+
+
     void
     SaveGraph(std::stringstream& out);
 

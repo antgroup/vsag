@@ -213,6 +213,7 @@ MemoryBlockIO::check_and_realloc(uint64_t size) {
         this->blocks_.emplace_back((uint8_t*)(this->allocator_->Allocate(block_size_)));
         ++cur_block_size;
     }
+    this->size_ = size;
 }
 
 }  // namespace vsag

@@ -28,6 +28,7 @@
 #include "data_cell/flatten_interface.h"
 #include "data_cell/graph_interface.h"
 #include "data_cell/sparse_graph_datacell_parameter.h"
+#include "algorithm/ivf_partition/ivf_partition_strategy.h"
 #include "default_thread_pool.h"
 #include "hgraph_parameter.h"
 #include "impl/basic_searcher.h"
@@ -193,6 +194,13 @@ private:
     std::vector<int64_t>
     build_by_odescent(const DatasetPtr& data);
 
+
+    std::vector<int64_t>
+    build_by_distribution(const DatasetPtr& data);
+
+    float
+    cal_neighbor_distance(const GraphInterfacePtr& graph);
+
     void
     add_one_point(const void* data, int level, InnerIdType id);
 
@@ -287,5 +295,13 @@ private:
     std::shared_ptr<Optimizer<BasicSearcher>> optimizer_;
 
     AttrInvertedInterfacePtr attr_filter_index_{nullptr};
+
+    IVFPartitionStrategyPtr partition_;
+
+    int bucket_num_ = 100;
+    int data_per_bucket_ = 10;
+
+    const HGraphParameterPtr hgraph_param_;
+    const vsag::IndexCommonParam common_param_;
 };
 }  // namespace vsag

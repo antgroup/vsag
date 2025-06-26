@@ -31,6 +31,7 @@
 #include "index/iterator_filter.h"
 #include "utils/standard_heap.h"
 #include "utils/util_functions.h"
+#include "algorithm/ivf_partition/ivf_nearest_partition.h"
 
 namespace vsag {
 
@@ -47,7 +48,9 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
       odescent_param_(hgraph_param->odescent_param),
       graph_type_(hgraph_param->graph_type),
       extra_info_size_(common_param.extra_info_size_),
-      deleted_ids_(allocator_) {
+      deleted_ids_(allocator_),
+      hgraph_param_(hgraph_param),
+      common_param_(common_param){
     neighbors_mutex_ = std::make_shared<PointsMutex>(0, common_param.allocator_.get());
     this->basic_flatten_codes_ =
         FlattenInterface::MakeInstance(hgraph_param->base_codes_param, common_param);
@@ -130,11 +133,13 @@ HGraph::Build(const DatasetPtr& data) {
     if (graph_type_ == GRAPH_TYPE_NSW) {
         ret = this->Add(data);
     } else {
-        ret = this->build_by_odescent(data);
+        ret = this->build_by_distribution(data);
     }
     if (use_elp_optimizer_) {
         elp_optimize();
     }
+    float dis = cal_neighbor_distance(bottom_graph_);
+    std::cout << "finish Neighbor distance: " << dis << std::endl;
     return ret;
 }
 
@@ -1467,5 +1472,185 @@ HGraph::Merge(const std::vector<MergeUnit>& merge_units) {
         sparse_odescent_builder.SaveGraph(graph);
         this->entry_point_id_ = ids.back();
     }
+}
+
+
+void update_graph(DistHeapPtr neighbors, Vector<Node>& bottom_graph, InnerIdType inner_id, Allocator* allocator, const Vector<InnerIdType>&label_map, int64_t  max_degree) {
+    Vector<InnerIdType> buffer(allocator);
+    size_t i = 0;
+    while (not neighbors->Empty() && i < max_degree) {
+        bottom_graph.emplace_back(label_map[neighbors->Top().second], neighbors->Top().first);
+        ++i;
+        neighbors->Pop();
+    }
+    std::sort(bottom_graph.begin(), bottom_graph.end());
+    bottom_graph.erase(std::unique(bottom_graph.begin(), bottom_graph.end()), bottom_graph.end());
+    if (bottom_graph.size() > max_degree) {
+        bottom_graph.resize(max_degree);
+    }
+}
+
+
+
+
+void update_graph(GraphInterfacePtr neighbors, Vector<Node>& bottom_graph, InnerIdType inner_inner_id, Allocator* allocator, const Vector<InnerIdType>&label_map, FlattenInterfacePtr basic_flatten_codes, int64_t  max_degree) {
+    Vector<InnerIdType> neighbors_ids(allocator);
+    neighbors->GetNeighbors(inner_inner_id, neighbors_ids);
+    for (int i = 0; i < neighbors_ids.size(); ++i) {
+        bottom_graph.push_back({label_map[neighbors_ids[i]], basic_flatten_codes->ComputePairVectors(label_map[neighbors_ids[i]], label_map[inner_inner_id])});
+    }
+    std::sort(bottom_graph.begin(), bottom_graph.end());
+    bottom_graph.erase(std::unique(bottom_graph.begin(), bottom_graph.end()), bottom_graph.end());
+    if (bottom_graph.size() > max_degree) {
+        bottom_graph.resize(max_degree);
+    }
+}
+
+
+std::vector<int64_t>
+HGraph::build_by_distribution(const DatasetPtr& data) {
+    IVFPartitionStrategyParametersPtr ivf_param = std::make_shared<IVFPartitionStrategyParameters>();
+    partition_ = std::make_shared<IVFNearestPartition>(
+        this->bucket_num_, common_param_, ivf_param);
+    DatasetPtr cluster_data = Dataset::Make();
+    cluster_data->NumElements(data->GetNumElements() / 10)
+        ->Float32Vectors(data->GetFloat32Vectors())
+        ->Dim(data->GetDim())
+        ->Owner(false);
+    partition_->Train(cluster_data);
+    auto cluster_result = partition_->ClassifyDatas(data->GetFloat32Vectors(), data->GetNumElements(), this->data_per_bucket_);
+    assert(cluster_result.size() == data->GetNumElements() * this->data_per_bucket_);
+    Vector<Vector<InnerIdType>> build_list(
+        this->bucket_num_, Vector<InnerIdType>(allocator_), allocator_);
+    Vector<Vector<InnerIdType>> search_list(
+        this->bucket_num_, Vector<InnerIdType>(allocator_), allocator_);
+    for (int i = 0; i < data->GetNumElements(); ++i) {
+        for (int j = 0; j < this->data_per_bucket_; ++j) {
+            if (j == 0) {
+                build_list[cluster_result[i * this->data_per_bucket_ + j]].push_back(i);
+            } else {
+                search_list[cluster_result[i * this->data_per_bucket_ + j]].push_back(i);
+            }
+        }
+    }
+
+    InnerSearchParam param{
+        .topk = static_cast<int64_t>(ef_construct_),
+        .ep = 0,
+        .ef = ef_construct_,
+        .is_inner_id_allowed = nullptr,
+    };
+    Vector<InnerIdType> buffer(allocator_);
+    resize(data->GetNumElements());
+    for (int i = 0; i < data->GetNumElements(); ++i) {
+        this->basic_flatten_codes_->InsertVector(data->GetFloat32Vectors() + i * this->dim_);
+    }
+
+    Vector<InnerIdType> neighbors(allocator_);
+    Vector<Vector<Node>> graph_(data->GetNumElements(), Vector<Node>(allocator_), allocator_);
+    for (int i = 0; i < this->bucket_num_; ++i) {
+        auto& build_data = build_list[i];
+        if (build_data.empty()) {
+            continue;
+        }
+        neighbors_mutex_->Resize(build_data.size());
+        auto base_codes = FlattenInterface::MakeInstance(hgraph_param_->base_codes_param, common_param_);
+        base_codes->Resize(build_data.size());
+        for (int j = 0; j < build_data.size(); ++j) {
+            base_codes->InsertVector(data->GetFloat32Vectors() + build_data[j] * this->dim_, j);
+        }
+        auto sub_graph = GraphInterface::MakeInstance(
+            hgraph_param_->bottom_graph_param, common_param_);
+        sub_graph->Resize(build_data.size());
+
+        param.topk = static_cast<int64_t>(ef_construct_);
+        std::vector<std::future<void>> futures;
+        auto add_func = [&](int j) {
+            DistHeapPtr result = nullptr;
+            result = this->search_one_graph(data->GetFloat32Vectors() + build_data[j] * this->dim_, sub_graph, base_codes, param);
+            mutually_connect_new_element(
+                j, result, sub_graph, base_codes, neighbors_mutex_, allocator_);
+        };
+        sub_graph->InsertNeighborsById(0, Vector<InnerIdType>(allocator_));
+        for (int j = 1; j < build_data.size(); ++j) {
+            futures.push_back(this->build_pool_->GeneralEnqueue(add_func, j));
+        }
+        for (auto& item : futures) {
+            item.get();
+        }
+
+        std::vector<std::future<void>> futures_update;
+        for (int j = 0; j < build_data.size(); ++j) {
+            futures_update.push_back(this->build_pool_->GeneralEnqueue([&, j](){
+                update_graph(sub_graph, graph_[build_data[j]], j, allocator_, build_data, this->basic_flatten_codes_, sub_graph->maximum_degree_);
+            }));
+        }
+        for (auto& item : futures_update) {
+            item.get();
+        }
+        param.topk = sub_graph->maximum_degree_;
+        auto& search_data = search_list[i];
+        std::vector<std::future<void>> futures_search;
+        auto search_func = [&](int j) {
+            DistHeapPtr result = this->search_one_graph(data->GetFloat32Vectors() + search_data[j] * this->dim_, sub_graph, base_codes, param);
+            update_graph(result, graph_[search_data[j]], search_data[j], allocator_, build_data, sub_graph->maximum_degree_);
+        };
+        for (int j = 0; j < search_data.size(); ++j) {
+            futures_search.push_back(this->build_pool_->GeneralEnqueue(search_func, j));
+        }
+        for (auto& item : futures_search) {
+            item.get();
+        }
+        std::cout << "bucket " << i << " finished, size: " << build_data.size() << std::endl;
+//        std::cout << "bottom graph distance: "
+//                  << cal_neighbor_distance(this->bottom_graph_) << std::endl;
+//
+//        this->bottom_graph_->GetNeighbors(0, neighbors);
+//        for (int j = 0; j < neighbors.size(); ++j) {
+//            std::cout << neighbors[j] << " ";
+//        }
+//        std::cout << std::endl;
+    }
+    entry_point_id_ = 0;
+    total_count_ = data->GetNumElements();
+    for (int i = 0; i < total_count_; ++i) {
+        label_table_->Insert(i, data->GetIds()[i]);
+    }
+//    Vector<Node> nodes(allocator_);
+//    for (uint32_t i = 0; i < data->GetNumElements(); ++i) {
+//        nodes.push_back({i, this->basic_flatten_codes_->ComputePairVectors(0, i)});
+//    }
+//    std::sort(nodes.begin(), nodes.end());
+//    for (int i = 0; i < bottom_graph_->MaximumDegree(); ++i) {
+//        std::cout << nodes[i].id << " ";
+//    }
+//    std::cout << std::endl;
+    for (int i = 0; i < total_count_; ++i) {
+        neighbors.clear();
+        for (int j = 0; j < bottom_graph_->MaximumDegree(); ++j) {
+            neighbors.push_back(graph_[i][j].id);
+        }
+        bottom_graph_->InsertNeighborsById(i, neighbors);
+    }
+
+
+    odescent_param_->max_degree = bottom_graph_->MaximumDegree();
+    ODescent odescent_builder(odescent_param_, this->basic_flatten_codes_, allocator_, this->build_pool_.get());
+    odescent_builder.PruneAndReverse(bottom_graph_, this->total_count_);
+    return std::vector<int64_t>();
+}
+float
+HGraph::cal_neighbor_distance(const GraphInterfacePtr& graph) {
+    float total_distance = 0.0F;
+    int64_t total_count = 0;
+    Vector<InnerIdType> neighbors(allocator_);
+    for (InnerIdType i = 0; i < graph->TotalCount(); ++i) {
+        graph->GetNeighbors(i, neighbors);
+        for (const auto& neighbor : neighbors) {
+            total_distance += this->basic_flatten_codes_->ComputePairVectors(i, neighbor);
+        }
+        total_count += neighbors.size();
+    }
+    return total_distance / total_count;
 }
 }  // namespace vsag

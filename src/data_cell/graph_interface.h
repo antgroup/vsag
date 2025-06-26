@@ -134,7 +134,7 @@ public:
     };
 
 public:
-    InnerIdType max_capacity_{100};
+    InnerIdType max_capacity_{0};
     uint32_t maximum_degree_{0};
 
     std::atomic<InnerIdType> total_count_{0};

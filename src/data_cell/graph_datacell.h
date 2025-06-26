@@ -142,16 +142,13 @@ GraphDataCell<IOTmpl>::GraphDataCell(const GraphDataCellParamPtr& param,
     : node_versions_(common_param.allocator_.get()) {
     this->io_ = std::make_shared<IOTmpl>(param->io_parameter_, common_param);
     this->maximum_degree_ = param->max_degree_;
-    this->max_capacity_ = param->init_max_capacity_;
     this->is_support_delete_ = param->support_remove_;
     this->remove_flag_bit_ = param->remove_flag_bit_;
     this->id_bit_ = sizeof(InnerIdType) * 8 - this->remove_flag_bit_;
     this->remove_flag_mask_ = (1 << this->id_bit_) - 1;
     this->code_line_size_ = this->maximum_degree_ * sizeof(InnerIdType) + sizeof(uint32_t);
     this->allocator_ = common_param.allocator_.get();
-    if (this->is_support_delete_) {
-        node_versions_.resize(max_capacity_);
-    }
+    Resize(param->init_max_capacity_);
 }
 
 template <typename IOTmpl>
