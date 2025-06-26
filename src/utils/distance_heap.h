@@ -22,6 +22,8 @@
 #include "vsag/allocator.h"
 
 namespace vsag {
+class DistanceHeap;
+using DistHeapPtr = std::shared_ptr<DistanceHeap>;
 
 class DistanceHeap {
 public:
@@ -46,6 +48,11 @@ public:
             return a.first > b.first;
         }
     };
+
+public:
+    template <bool max_heap, bool fixed_size>
+    static DistHeapPtr
+    MakeInstanceBySize(Allocator* allocator, int64_t max_size);
 
 public:
     DistanceHeap(Allocator* allocator, int64_t max_size = -1)
