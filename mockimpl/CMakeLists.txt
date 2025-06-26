@@ -19,8 +19,16 @@ add_dependencies (vsag_mockimpl version_mockimpl roaring spdlog)
 add_dependencies (vsag_mockimpl_static version_mockimpl roaring spdlog)
 
 set_target_properties(vsag_mockimpl_static PROPERTIES OUTPUT_NAME "vsag_mockimpl")
-install(TARGETS vsag_mockimpl vsag_mockimpl_static
-	LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}")
+install(TARGETS
+            vsag_mockimpl
+            vsag_mockimpl_static
+        LIBRARY
+            COMPONENT Development
+            DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+        ARCHIVE
+            COMPONENT Development
+            DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+  )
 
 find_package (Git)
 add_custom_target (version_mockimpl

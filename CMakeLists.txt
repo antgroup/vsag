@@ -293,17 +293,36 @@ if (ENABLE_PYBINDS)
     target_link_libraries (_pyvsag PRIVATE pybind11::module vsag)
 endif ()
 
-# install
+
+# target_sources (vsag PUBLIC FILE_SET HEADERS FILES "include/*")
+
+# declare install
 install (DIRECTORY include/
-        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
-install (TARGETS vsag
-        LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}")
-install (TARGETS vsag_static
-        LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}")
-if (ENABLE_TESTS AND USE_CXX11_ABI)
-    install (TARGETS test_performance
-            LIBRARY DESTINATION "${CMAKE_INSTALL_BINDIR}")
-endif ()
+         COMPONENT Development
+         DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
+
+install (TARGETS
+             # libraries
+             vsag
+             vsag_static
+             # tools
+             eval_performance
+         RUNTIME
+             COMPONENT Development
+             DESTINATION "${CMAKE_INSTALL_BINDIR}"
+         LIBRARY
+             COMPONENT Development
+             DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+         ARCHIVE
+             COMPONENT Development
+             DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+         FILE_SET HEADERS
+             COMPONENT Development
+             DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+          )
+
+set (CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_LIBDIR}")
+set (CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
 
 # version
 find_package (Git)

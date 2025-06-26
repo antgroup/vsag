@@ -7,20 +7,20 @@ CURRENT_GID=$(id -g)
 
 docker build -t vsag-builder -f docker/Dockerfile.dist_x86 .
 
-# old-abi version
+# pre-cxx11-abi version
 docker run -u $CURRENT_UID:$CURRENT_GID --rm -v $(pwd):/work vsag-builder \
        bash -c "\
        export COMPILE_JOBS=48 && \
        export CMAKE_INSTALL_PREFIX=/tmp/vsag && \
-       make clean-release && make dist-old-abi && make install && \
+       make clean-release && make dist-pre-cxx11-abi && make install && \
        mkdir -p ./dist && \
        cp -r /tmp/vsag ./dist/ && \
        cd ./dist && \
-       rm -r ./vsag/lib && mv ./vsag/lib64 ./vsag/lib && \
+       rm -rf ./vsag/lib && mv ./vsag/lib64 ./vsag/lib && \
        tar czvf vsag.tar.gz ./vsag && rm -r ./vsag
 "
 version=$(git describe --tags --always --dirty --match "v*")
-dist_name=vsag-$version-old-abi.tar.gz
+dist_name=vsag-$version-pre-cxx11-abi.tar.gz
 mv dist/vsag.tar.gz dist/$dist_name
 
 # cxx11-abi version
@@ -32,7 +32,7 @@ docker run -u $CURRENT_UID:$CURRENT_GID --rm -v $(pwd):/work vsag-builder \
        mkdir -p ./dist && \
        cp -r /tmp/vsag ./dist/ && \
        cd ./dist && \
-       rm -r ./vsag/lib && mv ./vsag/lib64 ./vsag/lib && \
+       rm -rf ./vsag/lib && mv ./vsag/lib64 ./vsag/lib && \
        tar czvf vsag.tar.gz ./vsag && rm -r ./vsag
 "
 version=$(git describe --tags --always --dirty --match "v*")

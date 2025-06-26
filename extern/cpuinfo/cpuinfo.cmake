@@ -26,7 +26,8 @@ endif()
 
 include_directories (${cpuinfo_SOURCE_DIR}/include)
 
-install (
-  TARGETS cpuinfo
-  ARCHIVE DESTINATION lib
+install (TARGETS cpuinfo
+         ARCHIVE
+             COMPONENT Development
+             DESTINATION "${CMAKE_INSTALL_LIBDIR}"
 )

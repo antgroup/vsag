@@ -43,7 +43,8 @@ if(LIB_DIR_EXIST)
     file(GLOB LIB_FILES ${install_dir}/lib/lib*.a)
     foreach(lib_file ${LIB_FILES})
         install(FILES ${lib_file}
-                DESTINATION ${CMAKE_INSTALL_PREFIX}/lib
+                    COMPONENT Development
+                    DESTINATION "${CMAKE_INSTALL_LIBDIR}"
     )
     endforeach()
 endif()
@@ -53,7 +54,8 @@ if(LIB64_DIR_EXIST)
     file(GLOB LIB64_FILES ${install_dir}/lib64/lib*.a)
     foreach(lib64_file ${LIB64_FILES})
         install(FILES ${lib64_file}
-                DESTINATION ${CMAKE_INSTALL_PREFIX}/lib
+                    COMPONENT Development
+                    DESTINATION "${CMAKE_INSTALL_LIBDIR}"
     )
     endforeach()
 endif()
