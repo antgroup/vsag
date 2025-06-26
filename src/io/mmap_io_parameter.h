@@ -15,9 +15,27 @@
 
 #pragma once
 
-#include "async_io.h"
-#include "basic_io.h"
-#include "buffer_io.h"
-#include "memory_block_io.h"
-#include "memory_io.h"
-#include "mmap_io.h"
+#include "io_parameter.h"
+
+namespace vsag {
+class MMapIOParameter : public IOParameter {
+public:
+    MMapIOParameter();
+
+    explicit MMapIOParameter(const JsonType& json);
+
+    ~MMapIOParameter() override = default;
+
+    void
+    FromJson(const JsonType& json) override;
+
+    JsonType
+    ToJson() override;
+
+public:
+    std::string path_{};
+};
+
+using MMapIOParameterPtr = std::shared_ptr<MMapIOParameter>;
+
+}  // namespace vsag
