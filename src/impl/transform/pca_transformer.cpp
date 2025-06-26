@@ -21,12 +21,20 @@
 #include "vsag_exception.h"
 
 namespace vsag {
-PCATransformer::PCATransformer(Allocator* allocator, int64_t input_dim, int64_t output_dim)
+PCATransformer::PCATransformer(Allocator* allocator,
+                               int64_t input_dim,
+                               int64_t output_dim,
+                               bool is_mrq)
     : VectorTransformer(allocator, input_dim, output_dim),
+      is_mrq_(is_mrq),
       pca_matrix_(allocator),
       mean_(allocator) {
-    pca_matrix_.resize(output_dim * input_dim);
-    mean_.resize(input_dim);
+    if (is_mrq_) {
+        output_dim_ = input_dim;
+    }
+
+    pca_matrix_.resize(output_dim_ * input_dim_);
+    mean_.resize(input_dim_);
     this->type_ = VectorTransformerType::PCA;
 }
 

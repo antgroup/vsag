@@ -24,11 +24,24 @@
 
 namespace vsag {
 
-// aka PCA
+/* Integrate MRQ (Minimized Residual Quantization)
+ *
+ * Support use residual part of PCA to increase precision
+ *
+ * Paper Link: https://arxiv.org/abs/2411.06158
+ *
+ * Code Link: https://github.com/mingyu-hkustgz/RESQ
+ *
+ * Reference:
+ * Mingyu Yang, Wentao Li, Wei Wang. Fast High-dimensional Approximate Nearest Neighbor Search with Efficient Index Time and Space
+ */
 class PCATransformer : public VectorTransformer {
 public:
     // interface
-    explicit PCATransformer(Allocator* allocator, int64_t input_dim, int64_t output_dim);
+    explicit PCATransformer(Allocator* allocator,
+                            int64_t input_dim,
+                            int64_t output_dim,
+                            bool is_mrq = false);
 
     void
     Train(const float* data, uint64_t count) override;
@@ -74,7 +87,9 @@ public:
     CentralizeData(const float* original_data, float* centralized_data) const;
 
 private:
-    Vector<float> pca_matrix_;  // [input_dim_ * output_dim_]
+    bool is_mrq_{false};  // use MRQ residual computation
+
+    Vector<float> pca_matrix_;  // [input_dim_ * matrix_dim_]
     Vector<float> mean_;        // [input_dim_ * 1]
 };
 
