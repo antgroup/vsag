@@ -575,6 +575,10 @@ TEST_CASE("remove vectors from the index", "[ft][index]") {
         float recall_before = ((float)correct) / num_vectors;
 
         for (int i = 0; i < num_vectors / 2; ++i) {
+            REQUIRE(index->GetNumElements() == num_vectors - i);
+            if (index_name != std::string("fresh_hnsw")) {
+                REQUIRE(index->GetNumberRemoved() == i);
+            }
             auto result = index->Remove(ids[i]);
             REQUIRE(result.has_value());
             REQUIRE(result.value());
@@ -607,6 +611,10 @@ TEST_CASE("remove vectors from the index", "[ft][index]") {
 
         // remove all data
         for (int i = num_vectors / 2; i < num_vectors; ++i) {
+            REQUIRE(index->GetNumElements() == num_vectors - i);
+            if (index_name != std::string("fresh_hnsw")) {
+                REQUIRE(index->GetNumberRemoved() == i);
+            }
             auto result = index->Remove(i);
             REQUIRE(result.has_value());
             REQUIRE(result.value());
@@ -637,6 +645,7 @@ TEST_CASE("remove vectors from the index", "[ft][index]") {
         REQUIRE(std::abs(recall_before - recall_after) < 0.001);
     } else {  // index that does not supports remove
         REQUIRE_THROWS(index->Remove(-1));
+        REQUIRE_THROWS(index->GetNumberRemoved());
     }
 }
 

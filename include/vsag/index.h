@@ -521,6 +521,16 @@ public:
     GetNumElements() const = 0;
 
     /**
+      * @brief Return the number of removed elements in the index
+      *
+      * @return number of removed elements in the index.
+      */
+    [[nodiscard]] virtual int64_t
+    GetNumberRemoved() const {
+        throw std::runtime_error("Index not support GetNumberRemoved");
+    }
+
+    /**
       * @brief Return the memory occupied by the index
       *
       * @return number of bytes occupied by the index.
