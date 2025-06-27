@@ -114,7 +114,7 @@ SparseGraphDataCell::Serialize(StreamWriter& writer) {
     StreamWriter::WriteObj(writer, this->code_line_size_);
     auto size = this->neighbors_.size();
     StreamWriter::WriteObj(writer, size);
-    for (auto& pair : this->neighbors_) {
+    for (const auto& pair : this->neighbors_) {
         auto key = pair.first;
         StreamWriter::WriteObj(writer, key);
         StreamWriter::WriteVector(writer, *(pair.second));
@@ -165,7 +165,7 @@ SparseGraphDataCell::DeleteNeighborsById(vsag::InnerIdType id) {
                     ErrorType::INTERNAL_ERROR,
                     "remove point too many times in SparseGraphDatacell, please rebuild index");
             }
-            iter->second++;
+            iter.value()++;
         }
     } else {
         throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,

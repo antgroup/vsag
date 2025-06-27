@@ -100,7 +100,7 @@ void
 AttributeInvertedDataCell::Serialize(StreamWriter& writer) {
     AttributeInvertedInterface::Serialize(writer);
     StreamWriter::WriteObj(writer, term_2_value_map_.size());
-    for (auto& [term, value_map] : term_2_value_map_) {
+    for (const auto& [term, value_map] : term_2_value_map_) {
         StreamWriter::WriteString(writer, term);
         value_map->Serialize(writer);
     }

@@ -70,7 +70,7 @@ IndexNode::BuildGraph(ODescent& odescent) {
         odescent.SaveGraph(graph_);
         Vector<InnerIdType>(common_param_->allocator_.get()).swap(ids_);
     }
-    for (auto& item : children_) {
+    for (const auto& item : children_) {
         item.second->BuildGraph(odescent);
     }
 }

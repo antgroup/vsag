@@ -256,13 +256,13 @@ ConjugateGraph::UpdateId(int64_t old_tag_id, int64_t new_tag_id) {
             // both two id exists in graph, note that this situation should be filtered out before use this function.
             return false;
         }
-        conjugate_graph_[new_tag_id] = std::move(it_old_key->second);
+        conjugate_graph_[new_tag_id] = it_old_key->second;
         conjugate_graph_.erase(it_old_key);
         updated = true;
     }
 
     // 2. update neighbors
-    for (auto& [key, neighbors] : conjugate_graph_) {
+    for (const auto& [key, neighbors] : conjugate_graph_) {
         auto it_old_neighbor = neighbors->find(old_tag_id);
         if (it_old_neighbor != neighbors->end()) {
             neighbors->erase(it_old_neighbor);
