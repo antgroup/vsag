@@ -234,7 +234,7 @@ protected:
      * It is a constant pointer, which means that it cannot be modified
      * after it is initialized.
      */
-    Allocator* const allocator_{nullptr};
+    Allocator* const allocator_;
 
 private:
     /**
