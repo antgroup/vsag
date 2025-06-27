@@ -72,7 +72,7 @@ void
 TestBuildCompressedFromGraphDataCell(const GraphInterfaceParamPtr& param,
                                      const IndexCommonParam& common_param) {
     auto count = 2000;
-    auto max_id = 10000;
+    auto max_id = 2000;
 
     auto graph = GraphInterface::MakeInstance(param, common_param);
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
@@ -80,9 +80,8 @@ TestBuildCompressedFromGraphDataCell(const GraphInterfaceParamPtr& param,
     graph->Resize(max_id);
     UnorderedMap<InnerIdType, std::shared_ptr<Vector<InnerIdType>>> maps(allocator.get());
     std::unordered_set<InnerIdType> unique_keys;
-    while (unique_keys.size() < count) {
-        InnerIdType new_key = random() % max_id;
-        unique_keys.insert(new_key);
+    for (int i = 0; i < max_id; i++) {
+        unique_keys.insert(i);
     }
 
     std::vector<InnerIdType> keys(unique_keys.begin(), unique_keys.end());
@@ -130,34 +129,34 @@ TestBuildCompressedFromGraphDataCell(const GraphInterfaceParamPtr& param,
     }
 }
 
-// TEST_CASE("CompressedGraphDataCell Build From GraphDataCell Test",
-//           "[ut][CompressedGraphDataCell]") {
-//     // copy from graph_datacell_test.cpp
-//     auto allocator = SafeAllocator::FactoryDefaultAllocator();
-//     auto dim = GENERATE(32, 64);
-//     auto max_degree = GENERATE(5, 32, 64);
-//     auto max_capacity = GENERATE(100);
-//     auto io_type = GENERATE("block_memory_io", "memory_io");
-//     auto is_support_delete = false;
-//     constexpr const char* graph_param_temp =
-//         R"(
-//         {{
-//             "io_params": {{
-//                 "type": "{}"
-//             }},
-//             "max_degree": {},
-//             "init_capacity": {},
-//             "support_remove": {}
-//         }}
-//         )";
-//
-//     IndexCommonParam common_param;
-//     common_param.dim_ = dim;
-//     common_param.allocator_ = allocator;
-//     auto param_str =
-//         fmt::format(graph_param_temp, io_type, max_degree, max_capacity, is_support_delete);
-//     auto param_json = JsonType::parse(param_str);
-//     auto graph_param = GraphInterfaceParameter::GetGraphParameterByJson(
-//         GraphStorageTypes::GRAPH_STORAGE_TYPE_FLAT, param_json);
-//     TestBuildCompressedFromGraphDataCell(graph_param, common_param);
-// }
+TEST_CASE("CompressedGraphDataCell Build From GraphDataCell Test",
+          "[ut][CompressedGraphDataCell]") {
+    // copy from graph_datacell_test.cpp
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    auto dim = GENERATE(32, 64);
+    auto max_degree = GENERATE(5, 32, 64);
+    auto max_capacity = GENERATE(100);
+    auto io_type = GENERATE("block_memory_io", "memory_io");
+    auto is_support_delete = false;
+    constexpr const char* graph_param_temp =
+        R"(
+        {{
+            "io_params": {{
+                "type": "{}"
+            }},
+            "max_degree": {},
+            "init_capacity": {},
+            "support_remove": {}
+        }}
+        )";
+
+    IndexCommonParam common_param;
+    common_param.dim_ = dim;
+    common_param.allocator_ = allocator;
+    auto param_str =
+        fmt::format(graph_param_temp, io_type, max_degree, max_capacity, is_support_delete);
+    auto param_json = JsonType::parse(param_str);
+    auto graph_param = GraphInterfaceParameter::GetGraphParameterByJson(
+        GraphStorageTypes::GRAPH_STORAGE_TYPE_FLAT, param_json);
+    TestBuildCompressedFromGraphDataCell(graph_param, common_param);
+}
