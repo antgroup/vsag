@@ -66,12 +66,12 @@ CompressedGraphDataCell::InsertNeighborsById(InnerIdType id,
     if (not tmp.empty()) {
         new_node = std::make_unique<EliasFanoEncoder>(allocator_);
         new_node->Encode(tmp, max_capacity_);
-
-        InnerIdType current = total_count_.load();
-        while (current < id + 1 && !total_count_.compare_exchange_weak(current, id + 1)) {
-        }
     }
     neighbor_sets_[id] = std::move(new_node);
+
+    InnerIdType current = total_count_.load();
+    while (current < id + 1 && !total_count_.compare_exchange_weak(current, id + 1)) {
+    }
 }
 
 uint32_t

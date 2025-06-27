@@ -15,10 +15,7 @@
 
 #pragma once
 
-#include <limits>
 #include <memory>
-#include <nlohmann/json.hpp>
-#include <unordered_map>
 #include <vector>
 
 #include "algorithm/hnswlib/hnswalg.h"
@@ -246,7 +243,6 @@ GraphDataCell<IOTmpl>::Resize(InnerIdType new_size) {
         }
         node_versions_.resize(new_size);
     }
-
     this->max_capacity_ = new_size;
     uint64_t io_size = static_cast<uint64_t>(new_size) * static_cast<uint64_t>(code_line_size_);
     uint8_t end_flag =
