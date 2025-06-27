@@ -90,7 +90,7 @@ Optimizer<OptimizableOBJ>::Optimize(std::shared_ptr<OptimizableOBJ> obj) {
         obj->SetRuntimeParameters(best_params_);
         double optimized_loss = obj->MockRun();
         end2end_improvement = (original_loss - optimized_loss) / original_loss * 100;
-        for (auto& param : best_params_) {
+        for (const auto& param : best_params_) {
             vsag::logger::info(fmt::format("setting {} -> {:.1f}", param.first, param.second));
         }
         vsag::logger::info(

@@ -18,7 +18,6 @@
 #include <cmath>
 #include <limits>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
 #include "impl/transform/transformer_headers.h"
