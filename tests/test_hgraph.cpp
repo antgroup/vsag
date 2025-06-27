@@ -1522,6 +1522,7 @@ TestHGraphDiskIOType(const fixtures::HGraphTestIndexPtr& test_index,
     const std::vector<std::pair<std::string, std::string>> io_cases = {
         {"sq8_uniform,bf16", "sq8_uniform,bf16,buffer_io"},
         {"rabitq,fp16", "rabitq,fp16,async_io"},
+        {"rabitq,fp16", "rabitq,fp16,mmap_io"},
     };
     for (auto metric_type : resource->metric_types) {
         for (auto dim : resource->dims) {
