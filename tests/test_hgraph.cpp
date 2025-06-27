@@ -75,13 +75,6 @@ public:
 
     static const std::string name;
 
-    constexpr static const char* search_param_tmp = R"(
-        {{
-            "hgraph": {{
-                "ef_search": {},
-                "use_extra_info_filter": {}
-            }}
-        }})";
     static const std::vector<std::pair<std::string, float>> all_test_cases;
 };
 using HGraphTestIndexPtr = std::shared_ptr<HGraphTestIndex>;

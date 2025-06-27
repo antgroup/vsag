@@ -67,17 +67,6 @@ public:
 
     constexpr static uint64_t base_count = 1200;
 
-    constexpr static const char* search_param_tmp = R"(
-        {{
-            "ivf": {{
-                "scan_buckets_count": {},
-                "factor": 4.0,
-                "first_order_scan_ratio": 1.0
-            }}
-        }})";
-
-    // DON'T WORRY! IVF just can't achieve high recall on random datasets. so we set the expected
-    // recall with a small number in test cases
     static const std::vector<std::pair<std::string, float>> all_test_cases;
 };
 
@@ -86,6 +75,9 @@ using IVFTestIndexPtr = std::shared_ptr<IVFTestIndex>;
 TestDatasetPool IVFTestIndex::pool{};
 fixtures::TempDir IVFTestIndex::dir{"ivf_test"};
 const std::string IVFTestIndex::name = "ivf";
+
+// DON'T WORRY! IVF just can't achieve high recall on random datasets. so we set the expected
+// recall with a small number in test cases
 const std::vector<std::pair<std::string, float>> IVFTestIndex::all_test_cases = {
     {"fp32", 0.90},
     {"bf16", 0.88},
