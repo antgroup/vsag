@@ -168,10 +168,8 @@ GraphDataCell<IOTmpl>::InsertNeighborsById(InnerIdType id,
         throw std::invalid_argument(fmt::format(
             "insert neighbors count {} more than {}", neighbor_ids.size(), this->maximum_degree_));
     }
-    if (not neighbor_ids.empty()) {
-        InnerIdType current = total_count_.load();
-        while (current < id + 1 && !total_count_.compare_exchange_weak(current, id + 1)) {
-        }
+    InnerIdType current = total_count_.load();
+    while (current < id + 1 && !total_count_.compare_exchange_weak(current, id + 1)) {
     }
     auto start = static_cast<uint64_t>(id) * static_cast<uint64_t>(this->code_line_size_);
     if (is_support_delete_) {
@@ -249,7 +247,6 @@ GraphDataCell<IOTmpl>::Resize(InnerIdType new_size) {
         node_versions_.resize(new_size);
     }
 
-    InnerIdType old_capacity = this->max_capacity_;
     this->max_capacity_ = new_size;
     uint64_t io_size = static_cast<uint64_t>(new_size) * static_cast<uint64_t>(code_line_size_);
     uint8_t end_flag =
