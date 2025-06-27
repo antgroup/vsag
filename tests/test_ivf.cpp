@@ -115,6 +115,15 @@ IVFTestIndex::GetResource(bool sample) {
     return resource;
 }
 
+constexpr static const char* search_param_tmp = R"(
+        {{
+            "ivf": {{
+                "scan_buckets_count": {},
+                "factor": 4.0,
+                "first_order_scan_ratio": 1.0
+            }}
+        }})";
+
 std::string
 IVFTestIndex::GenerateIVFBuildParametersString(const std::string& metric_type,
                                                int64_t dim,
@@ -382,8 +391,7 @@ TestIVFBuildAndContinueAdd(const fixtures::IVFTestIndexPtr& test_index,
             for (auto train_type : resource->train_types) {
                 for (auto& [base_quantization_str, recall] : resource->test_cases) {
                     auto count = std::min(300, static_cast<int32_t>(dim / 4));
-                    auto search_param =
-                        fmt::format(test_index->search_param_tmp, std::max(250, count));
+                    auto search_param = fmt::format(search_param_tmp, std::max(250, count));
                     INFO(
                         fmt::format("metric_type: {}, dim: {}, base_quantization_str: {}, "
                                     "train_type: {}, recall: {}",
@@ -443,8 +451,7 @@ TestIVFBuildWithResidual(const fixtures::IVFTestIndexPtr& test_index,
                     if (dim > 960) {
                         recall *= 0.8F;
                     }
-                    auto search_param =
-                        fmt::format(test_index->search_param_tmp, std::max(250, count));
+                    auto search_param = fmt::format(search_param_tmp, std::max(250, count));
                     INFO(
                         fmt::format("metric_type: {}, dim: {}, base_quantization_str: {}, "
                                     "train_type: {}, recall: {}",
@@ -493,8 +500,7 @@ TestIVFBuild(const fixtures::IVFTestIndexPtr& test_index,
             for (auto train_type : resource->train_types) {
                 for (auto& [base_quantization_str, recall] : resource->test_cases) {
                     auto count = std::min(300, static_cast<int32_t>(dim / 4));
-                    auto search_param =
-                        fmt::format(test_index->search_param_tmp, std::max(200, count));
+                    auto search_param = fmt::format(search_param_tmp, std::max(200, count));
                     INFO(
                         fmt::format("metric_type: {}, dim: {}, base_quantization_str: {}, "
                                     "train_type: {}, recall: {}",
@@ -545,7 +551,7 @@ TestIVFBuildWithLargeK(const fixtures::IVFTestIndexPtr& test_index,
         for (auto dim : resource->dims) {
             for (auto train_type : resource->train_types) {
                 for (auto& [base_quantization_str, recall] : tmp_test_cases) {
-                    auto search_param = fmt::format(test_index->search_param_tmp, 3000);
+                    auto search_param = fmt::format(search_param_tmp, 3000);
                     INFO(
                         fmt::format("metric_type: {}, dim: {}, base_quantization_str: {}, "
                                     "train_type: {}, recall: {}",
@@ -595,8 +601,7 @@ TestIVFBuildWithAttr(const fixtures::IVFTestIndexPtr& test_index,
             for (auto train_type : resource->train_types) {
                 for (auto& [base_quantization_str, recall] : resource->test_cases) {
                     auto count = std::min(300, static_cast<int32_t>(dim / 4));
-                    auto search_param =
-                        fmt::format(test_index->search_param_tmp, std::max(200, count));
+                    auto search_param = fmt::format(search_param_tmp, std::max(200, count));
                     INFO(
                         fmt::format("metric_type: {}, dim: {}, base_quantization_str: {}, "
                                     "train_type: {}, recall: {}",
@@ -649,8 +654,7 @@ TestIVFExportModel(const fixtures::IVFTestIndexPtr& test_index,
             for (auto train_type : resource->train_types) {
                 for (auto& [base_quantization_str, recall] : resource->test_cases) {
                     auto count = std::min(300, static_cast<int32_t>(dim / 4));
-                    auto search_param =
-                        fmt::format(test_index->search_param_tmp, std::max(200, count));
+                    auto search_param = fmt::format(search_param_tmp, std::max(200, count));
                     INFO(
                         fmt::format("metric_type: {}, dim: {}, base_quantization_str: {}, "
                                     "train_type: {}, recall: {}",
@@ -698,8 +702,7 @@ TestIVFAdd(const fixtures::IVFTestIndexPtr& test_index, const fixtures::IVFResou
             for (auto train_type : resource->train_types) {
                 for (auto& [base_quantization_str, recall] : resource->test_cases) {
                     auto count = std::min(300, static_cast<int32_t>(dim / 4));
-                    auto search_param =
-                        fmt::format(test_index->search_param_tmp, std::max(200, count));
+                    auto search_param = fmt::format(search_param_tmp, std::max(200, count));
                     INFO(
                         fmt::format("metric_type: {}, dim: {}, base_quantization_str: {}, "
                                     "train_type: {}, recall: {}",
@@ -748,8 +751,7 @@ TestIVFMerge(const fixtures::IVFTestIndexPtr& test_index,
             for (auto train_type : resource->train_types) {
                 for (auto& [base_quantization_str, recall] : resource->test_cases) {
                     auto count = std::min(300, static_cast<int32_t>(dim / 4));
-                    auto search_param =
-                        fmt::format(test_index->search_param_tmp, std::max(200, count));
+                    auto search_param = fmt::format(search_param_tmp, std::max(200, count));
                     INFO(
                         fmt::format("metric_type: {}, dim: {}, base_quantization_str: {}, "
                                     "train_type: {}, recall: {}",
@@ -801,8 +803,7 @@ TestIVFConcurrentAdd(const fixtures::IVFTestIndexPtr& test_index,
             for (auto train_type : resource->train_types) {
                 for (auto& [base_quantization_str, recall] : resource->test_cases) {
                     auto count = std::min(300, static_cast<int32_t>(dim / 4));
-                    auto search_param =
-                        fmt::format(test_index->search_param_tmp, std::max(200, count));
+                    auto search_param = fmt::format(search_param_tmp, std::max(200, count));
                     INFO(
                         fmt::format("metric_type: {}, dim: {}, base_quantization_str: {}, "
                                     "train_type: {}, recall: {}",
@@ -851,8 +852,7 @@ TestIVFSerialize(const fixtures::IVFTestIndexPtr& test_index,
             for (auto train_type : resource->train_types) {
                 for (auto& [base_quantization_str, recall] : resource->test_cases) {
                     auto count = std::min(300, static_cast<int32_t>(dim / 4));
-                    auto search_param =
-                        fmt::format(test_index->search_param_tmp, std::max(200, count));
+                    auto search_param = fmt::format(search_param_tmp, std::max(200, count));
                     INFO(
                         fmt::format("metric_type: {}, dim: {}, base_quantization_str: {}, "
                                     "train_type: {}, recall: {}",
@@ -922,8 +922,7 @@ TestIVFClone(const fixtures::IVFTestIndexPtr& test_index,
             for (auto train_type : resource->train_types) {
                 for (auto& [base_quantization_str, recall] : resource->test_cases) {
                     auto count = std::min(300, static_cast<int32_t>(dim / 4));
-                    auto search_param =
-                        fmt::format(test_index->search_param_tmp, std::max(200, count));
+                    auto search_param = fmt::format(search_param_tmp, std::max(200, count));
                     INFO(
                         fmt::format("metric_type: {}, dim: {}, base_quantization_str: {}, "
                                     "train_type: {}, recall: {}",
@@ -972,8 +971,7 @@ TestIVFRandomAllocator(const fixtures::IVFTestIndexPtr& test_index,
             for (auto train_type : resource->train_types) {
                 for (auto& [base_quantization_str, recall] : resource->test_cases) {
                     auto count = std::min(300, static_cast<int32_t>(dim / 4));
-                    auto search_param =
-                        fmt::format(test_index->search_param_tmp, std::max(200, count));
+                    auto search_param = fmt::format(search_param_tmp, std::max(200, count));
                     INFO(
                         fmt::format("metric_type: {}, dim: {}, base_quantization_str: {}, "
                                     "train_type: {}, recall: {}",
@@ -1025,8 +1023,7 @@ TestIVFEstimateMemory(const fixtures::IVFTestIndexPtr& test_index,
             for (auto train_type : resource->train_types) {
                 for (auto& [base_quantization_str, recall] : resource->test_cases) {
                     auto count = std::min(300, static_cast<int32_t>(dim / 4));
-                    auto search_param =
-                        fmt::format(test_index->search_param_tmp, std::max(200, count));
+                    auto search_param = fmt::format(search_param_tmp, std::max(200, count));
                     INFO(
                         fmt::format("metric_type: {}, dim: {}, base_quantization_str: {}, "
                                     "train_type: {}, recall: {}",
@@ -1071,8 +1068,7 @@ TestIVFBuildMultiBucketsPerData(const fixtures::IVFTestIndexPtr& test_index,
             for (auto train_type : resource->train_types) {
                 for (auto& [base_quantization_str, recall] : resource->test_cases) {
                     auto count = std::min(300, static_cast<int32_t>(dim / 4));
-                    auto search_param =
-                        fmt::format(test_index->search_param_tmp, std::max(200, count));
+                    auto search_param = fmt::format(search_param_tmp, std::max(200, count));
                     INFO(
                         fmt::format("metric_type: {}, dim: {}, base_quantization_str: {}, "
                                     "train_type: {}, recall: {}",
@@ -1121,8 +1117,7 @@ TestIVFGNOIMIBuild(const fixtures::IVFTestIndexPtr& test_index,
             for (auto train_type : resource->train_types) {
                 for (auto& [base_quantization_str, recall] : resource->test_cases) {
                     auto count = std::min(300, static_cast<int32_t>(dim / 4));
-                    auto search_param =
-                        fmt::format(test_index->search_param_tmp, std::max(200, count));
+                    auto search_param = fmt::format(search_param_tmp, std::max(200, count));
                     INFO(
                         fmt::format("metric_type: {}, dim: {}, base_quantization_str: {}, "
                                     "train_type: {}, recall: {}",
@@ -1178,8 +1173,7 @@ TestIVFGNOIMIBuildWithResidual(const fixtures::IVFTestIndexPtr& test_index,
             for (auto train_type : resource->train_types) {
                 for (auto& [base_quantization_str, recall] : tmp_test_cases) {
                     auto count = std::min(900, static_cast<int32_t>(dim / 4));
-                    auto search_param =
-                        fmt::format(test_index->search_param_tmp, std::max(800, count));
+                    auto search_param = fmt::format(search_param_tmp, std::max(800, count));
                     INFO(
                         fmt::format("metric_type: {}, dim: {}, base_quantization_str: {}, "
                                     "train_type: {}, recall: {}",
