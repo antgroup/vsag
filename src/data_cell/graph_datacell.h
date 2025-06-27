@@ -18,7 +18,6 @@
 #include <limits>
 #include <memory>
 #include <nlohmann/json.hpp>
-#include <unordered_map>
 #include <vector>
 
 #include "algorithm/hnswlib/hnswalg.h"
