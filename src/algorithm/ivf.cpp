@@ -42,7 +42,7 @@ static constexpr const char* IVF_PARAMS_TEMPLATE =
         "{IVF_USE_REORDER_KEY}": false,
         "{BUCKET_PARAMS_KEY}": {
             "{IO_PARAMS_KEY}": {
-                "{IO_TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}"
+                "{IO_TYPE_KEY}": "{IO_TYPE_VALUE_MEMORY_IO}"
             },
             "{QUANTIZATION_PARAMS_KEY}": {
                 "{QUANTIZATION_TYPE_KEY}": "{QUANTIZATION_TYPE_VALUE_FP32}",
@@ -625,6 +625,7 @@ IVF::search(const DatasetPtr& query, const InnerSearchParam& param) const {
         bucket_->ScanBucketById(dist.data(), computer, bucket_id);
         FilterPtr attr_ft = nullptr;
         if (param.executor != nullptr) {
+            param.executor->Clear();
             attr_ft = param.executor->RunWithBucket(bucket_id);
         }
         for (int j = 0; j < bucket_size; ++j) {

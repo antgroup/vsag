@@ -15,7 +15,9 @@
 
 #pragma once
 
+#include <limits>
 #include <memory>
+#include <nlohmann/json.hpp>
 #include <vector>
 
 #include "algorithm/hnswlib/hnswalg.h"

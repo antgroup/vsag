@@ -20,6 +20,7 @@
 #include "inner_string_params.h"
 #include "memory_block_io_parameter.h"
 #include "memory_io_parameter.h"
+#include "mmap_io_parameter.h"
 
 namespace vsag {
 
@@ -39,6 +40,9 @@ IOParameter::GetIOParameterByJson(const JsonType& json) {
             io_ptr->FromJson(json);
         } else if (type_name == IO_TYPE_VALUE_ASYNC_IO) {
             io_ptr = std::make_shared<AsyncIOParameter>();
+            io_ptr->FromJson(json);
+        } else if (type_name == IO_TYPE_VALUE_MMAP_IO) {
+            io_ptr = std::make_shared<MMapIOParameter>();
             io_ptr->FromJson(json);
         }
     } catch (std::invalid_argument& error) {

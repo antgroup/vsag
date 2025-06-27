@@ -33,17 +33,17 @@ const int RABITQ_MIN_RACALL_DIM = 960;
 std::vector<int>
 get_common_used_dims(uint64_t count, int seed) {
     const std::vector<int> dims = {
-        7,    8,    9,      // generic (dim < 32)
-        32,   33,   48,     // sse(32) + generic(dim < 16)
-        64,   65,   70,     // avx(64) + generic(dim < 16)
-        96,   97,   109,    // avx(64) + sse(32) + generic(dim < 16)
-        128,  129,          // avx512(128) + generic(dim < 16)
-        160,  161,          // avx512(128) + sse(32) + generic(dim < 16)
-        192,  193,          // avx512(128) + avx(64) + generic(dim < 16)
-        224,  225,          // avx512(128) + avx(64) + sse(32) + generic(dim < 16)
-        256,  512,          // common used dims
-        784,  960,          // common used dims
-        1024, 1536, 2048};  // common used dims
+        7,    8,   9,    // generic (dim < 32)
+        32,   33,  48,   // sse(32) + generic(dim < 16)
+        64,   65,  70,   // avx(64) + generic(dim < 16)
+        96,   97,  109,  // avx(64) + sse(32) + generic(dim < 16)
+        128,  129,       // avx512(128) + generic(dim < 16)
+        160,  161,       // avx512(128) + sse(32) + generic(dim < 16)
+        192,  193,       // avx512(128) + avx(64) + generic(dim < 16)
+        224,  225,       // avx512(128) + avx(64) + sse(32) + generic(dim < 16)
+        256,  512,       // common used dims
+        784,  960,       // common used dims
+        1024, 1536};     // common used dims
     if (count == -1 || count >= dims.size()) {
         return dims;
     }

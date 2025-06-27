@@ -935,4 +935,92 @@ BitNot(const uint8_t* x, const uint64_t num_byte, uint8_t* result) {
     return sse::BitNot(x, num_byte, result);
 #endif
 }
+void
+VecRescale(float* data, size_t dim, float val) {
+#if defined(ENABLE_AVX)
+    int i = 0;
+    __m256 val_vec = _mm256_set1_ps(val);
+
+    for (; i + 8 <= dim; i += 8) {
+        __m256 data_vec = _mm256_loadu_ps(&data[i]);
+        __m256 result_vec = _mm256_mul_ps(data_vec, val_vec);
+        _mm256_storeu_ps(&data[i], result_vec);
+    }
+
+    for (; i < dim; i++) {
+        data[i] *= val;
+    }
+#else
+    return sse::VecRescale(data, dim, val);
+#endif
+}
+
+void
+RotateOp(float* data, int idx, int dim_, int step) {
+#if defined(ENABLE_AVX)
+    for (int i = idx; i < dim_; i += step * 2) {
+        for (int j = 0; j < step; j += 8) {
+            __m256 g1 = _mm256_loadu_ps(&data[i + j]);
+            __m256 g2 = _mm256_loadu_ps(&data[i + j + step]);
+            __m256 result_add = _mm256_add_ps(g1, g2);
+            __m256 result_sub = _mm256_sub_ps(g1, g2);
+            _mm256_storeu_ps(&data[i + j], result_add);
+            _mm256_storeu_ps(&data[i + j + step], result_sub);
+        }
+    }
+#else
+    return sse::RotateOp(data, idx, dim_, step);
+#endif
+}
+
+void
+FHTRotate(float* data, size_t dim_) {
+#if defined(ENABLE_AVX)
+    size_t n = dim_;
+    size_t step = 1;
+    while (step < n) {
+        if (step >= 8) {
+            avx::RotateOp(data, 0, dim_, step);
+        } else if (step == 4) {
+            sse::RotateOp(data, 0, dim_, step);
+        } else {
+            generic::RotateOp(data, 0, dim_, step);
+        }
+        step *= 2;
+    }
+#else
+    return sse::FHTRotate(data, dim_);
+#endif
+}
+
+void
+KacsWalk(float* data, size_t len) {
+#if defined(ENABLE_AVX)
+    size_t base = len % 2;
+    size_t offset = base + (len / 2);
+    size_t i = 0;
+
+    for (; i + 8 <= len / 2; i += 8) {
+        __m256 x = _mm256_loadu_ps(&data[i]);
+        __m256 y = _mm256_loadu_ps(&data[i + offset]);
+        __m256 add_result = _mm256_add_ps(x, y);
+        __m256 sub_result = _mm256_sub_ps(x, y);
+        _mm256_storeu_ps(&data[i], add_result);
+        _mm256_storeu_ps(&data[i + offset], sub_result);
+    }
+
+    for (; i < len / 2; i++) {
+        float add = data[i] + data[i + offset];
+        float sub = data[i] - data[i + offset];
+        data[i] = add;
+        data[i + offset] = sub;
+    }
+
+    if (base != 0) {
+        data[len / 2] *= std::sqrt(2.0F);
+    }
+#else
+    return sse::FHTRotate(data, len);
+#endif
+}
 }  // namespace vsag::avx

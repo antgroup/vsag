@@ -652,18 +652,23 @@ VecRescale(float* data, size_t dim, float val) {
 }
 
 void
+RotateOp(float* data, int idx, int dim_, int step) {
+    for (int i = idx; i < dim_; i += 2 * step) {
+        for (int j = 0; j < step; j++) {
+            float x = data[i + j];
+            float y = data[i + j + step];
+            data[i + j] = x + y;
+            data[i + j + step] = x - y;
+        }
+    }
+}
+
+void
 FHTRotate(float* data, size_t dim_) {
     size_t n = dim_;
     size_t step = 1;
     while (step < n) {
-        for (size_t i = 0; i < n; i += step * 2) {
-            for (int j = 0; j < step; j++) {
-                float even = data[i + j];
-                float odd = data[i + j + step];
-                data[i + j] = even + odd;
-                data[i + j + step] = even - odd;
-            }
-        }
+        generic::RotateOp(data, 0, dim_, step);
         step *= 2;
     }
 }
