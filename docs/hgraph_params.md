@@ -37,7 +37,7 @@ The example of the `hgraph_json_string`.
     "build_thread_count": 100, /* optional, default is 100, means how much thread will be used for hgraph build */
     
     "base_io_type": "block_memory_io", /* optional, default is 'block_memory_io', 
-                                          support "memory_io", "block_memory_io", "buffer_io", "async_io",
+                                          support "memory_io", "block_memory_io", "buffer_io", "async_io", "mmap_io"
                                           means the io type for 'base_quantization' codes 
                                           the "memory_io" and "block_memory_io" mean store in memory,
                                           "buffer_io" means on local SSD or local disk. */

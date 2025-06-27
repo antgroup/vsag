@@ -6,6 +6,7 @@ set (IO_SRC
         buffer_io_parameter.cpp
         async_io_parameter.cpp
         async_io.cpp
+        mmap_io_parameter.cpp
 )
 
 add_library (io OBJECT ${IO_SRC})

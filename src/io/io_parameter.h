@@ -36,6 +36,8 @@ public:
 protected:
     explicit IOParameter(std::string name);
 
+    ~IOParameter() override = default;
+
 private:
     std::string name_{};
 };
