@@ -417,7 +417,7 @@ TestHGraphBuildAndContinueAdd(const fixtures::HGraphTestIndexPtr& test_index,
     using namespace fixtures;
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
-    auto search_param = fmt::format(search_param_tmp, 200, false);
+    auto search_param = fmt::format(fixtures::search_param_tmp, 200, false);
     for (auto metric_type : resource->metric_types) {
         for (auto dim : resource->dims) {
             for (auto& [base_quantization_str, recall] : resource->test_cases) {
@@ -464,7 +464,7 @@ TestHGraphTrainAndAddTest(const fixtures::HGraphTestIndexPtr& test_index,
     using namespace fixtures;
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
-    auto search_param = fmt::format(search_param_tmp, 200, false);
+    auto search_param = fmt::format(fixtures::search_param_tmp, 200, false);
     for (auto metric_type : resource->metric_types) {
         for (auto dim : resource->dims) {
             for (auto& [base_quantization_str, recall] : resource->test_cases) {
@@ -511,8 +511,8 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HGraphTestIndex,
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
     auto metric_type = GENERATE("l2", "ip", "cosine");
-    auto search_param = fmt::format(search_param_tmp, 200, false);
-    auto ex_search_param = fmt::format(search_param_tmp, 200, true);
+    auto search_param = fmt::format(fixtures::search_param_tmp, 200, false);
+    auto ex_search_param = fmt::format(fixtures::search_param_tmp, 200, true);
     auto dim = fixtures::get_common_used_dims(1, fixtures::RandomValue(0, 999))[0];
     auto& [base_quantization_str, recall] = all_test_cases[0];
     vsag::Options::Instance().set_block_size_limit(size);
@@ -548,7 +548,7 @@ TestHGraphBuild(const fixtures::HGraphTestIndexPtr& test_index,
     using namespace fixtures;
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
-    auto search_param = fmt::format(search_param_tmp, 200, false);
+    auto search_param = fmt::format(fixtures::search_param_tmp, 200, false);
 
     for (auto metric_type : resource->metric_types) {
         for (auto dim : resource->dims) {
@@ -667,7 +667,7 @@ TestHGraphODescentBuild(const fixtures::HGraphTestIndexPtr& test_index,
     using namespace fixtures;
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
-    auto search_param = fmt::format(search_param_tmp, 200, false);
+    auto search_param = fmt::format(fixtures::search_param_tmp, 200, false);
 
     for (auto metric_type : resource->metric_types) {
         for (auto dim : resource->dims) {
@@ -725,7 +725,7 @@ TestHGraphRemove(const fixtures::HGraphTestIndexPtr& test_index,
     using namespace fixtures;
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
-    auto search_param = fmt::format(search_param_tmp, 200, false);
+    auto search_param = fmt::format(fixtures::search_param_tmp, 200, false);
 
     for (auto metric_type : resource->metric_types) {
         for (auto dim : resource->dims) {
@@ -774,7 +774,7 @@ TestHGraphCompressedBuild(const fixtures::HGraphTestIndexPtr& test_index,
     using namespace fixtures;
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
-    auto search_param = fmt::format(search_param_tmp, 200, false);
+    auto search_param = fmt::format(fixtures::search_param_tmp, 200, false);
 
     for (auto metric_type : resource->metric_types) {
         for (auto dim : resource->dims) {
@@ -823,7 +823,7 @@ TestHGraphMerge(const fixtures::HGraphTestIndexPtr& test_index,
     using namespace fixtures;
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
-    auto search_param = fmt::format(search_param_tmp, 200, false);
+    auto search_param = fmt::format(fixtures::search_param_tmp, 200, false);
 
     for (auto metric_type : resource->metric_types) {
         for (auto dim : resource->dims) {
@@ -874,7 +874,7 @@ TestHGraphAdd(const fixtures::HGraphTestIndexPtr& test_index,
     using namespace fixtures;
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
-    auto search_param = fmt::format(search_param_tmp, 200, false);
+    auto search_param = fmt::format(fixtures::search_param_tmp, 200, false);
 
     for (auto metric_type : resource->metric_types) {
         for (auto dim : resource->dims) {
@@ -925,7 +925,7 @@ TestHGraphSearchWithDirtyVector(const fixtures::HGraphTestIndexPtr& test_index,
     using namespace fixtures;
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
-    auto search_param = fmt::format(search_param_tmp, 200, false);
+    auto search_param = fmt::format(fixtures::search_param_tmp, 200, false);
 
     for (auto metric_type : resource->metric_types) {
         auto dataset = HGraphTestIndex::pool.GetNanDataset(metric_type);
@@ -975,7 +975,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HGraphTestIndex,
     INFO(fmt::format("metric_type: {}", metric_type));
     auto dim = 128;
     auto dataset = pool.GetSparseDatasetAndCreate(base_count, dim, 0.8);
-    auto search_param = fmt::format(search_param_tmp, 100, false);
+    auto search_param = fmt::format(fixtures::search_param_tmp, 100, false);
     vsag::Options::Instance().set_block_size_limit(size);
     auto param = GenerateHGraphBuildParametersString(metric_type, dim, "sparse", 5, 0, "sparse");
     auto index = TestFactory(name, param, true);
@@ -990,7 +990,7 @@ TestHGraphConcurrentAdd(const fixtures::HGraphTestIndexPtr& test_index,
     using namespace fixtures;
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
-    auto search_param = fmt::format(search_param_tmp, 200, false);
+    auto search_param = fmt::format(fixtures::search_param_tmp, 200, false);
 
     for (auto metric_type : resource->metric_types) {
         for (auto dim : resource->dims) {
@@ -1048,7 +1048,7 @@ TestHGraphSerialize(const fixtures::HGraphTestIndexPtr& test_index,
     using namespace fixtures;
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
-    auto search_param = fmt::format(search_param_tmp, 200, false);
+    auto search_param = fmt::format(fixtures::search_param_tmp, 200, false);
     uint64_t extra_info_size = 64;
 
     for (auto metric_type : resource->metric_types) {
@@ -1107,7 +1107,7 @@ TestHGraphClone(const fixtures::HGraphTestIndexPtr& test_index,
     using namespace fixtures;
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
-    auto search_param = fmt::format(search_param_tmp, 200, false);
+    auto search_param = fmt::format(fixtures::search_param_tmp, 200, false);
     uint64_t extra_info_size = 64;
 
     for (auto metric_type : resource->metric_types) {
@@ -1160,7 +1160,7 @@ TestHGraphExportModel(const fixtures::HGraphTestIndexPtr& test_index,
     using namespace fixtures;
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
-    auto search_param = fmt::format(search_param_tmp, 200, false);
+    auto search_param = fmt::format(fixtures::search_param_tmp, 200, false);
     uint64_t extra_info_size = 64;
 
     for (auto metric_type : resource->metric_types) {
@@ -1215,7 +1215,7 @@ TestHGraphRandomAllocator(const fixtures::HGraphTestIndexPtr& test_index,
 
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
-    auto search_param = fmt::format(search_param_tmp, 200, false);
+    auto search_param = fmt::format(fixtures::search_param_tmp, 200, false);
     uint64_t extra_info_size = 64;
 
     for (auto metric_type : resource->metric_types) {
@@ -1266,7 +1266,7 @@ TestHGraphDuplicateBuild(const fixtures::HGraphTestIndexPtr& test_index,
     using namespace fixtures;
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
-    auto search_param = fmt::format(search_param_tmp, 200, false);
+    auto search_param = fmt::format(fixtures::search_param_tmp, 200, false);
     uint64_t extra_info_size = 64;
 
     for (auto metric_type : resource->metric_types) {
@@ -1316,7 +1316,7 @@ TestHGraphEstimateMemory(const fixtures::HGraphTestIndexPtr& test_index,
     using namespace fixtures;
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
-    auto search_param = fmt::format(search_param_tmp, 200, false);
+    auto search_param = fmt::format(fixtures::search_param_tmp, 200, false);
     uint64_t extra_info_size = 64;
     uint64_t estimate_count = 1000;
 
@@ -1372,7 +1372,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HGraphTestIndex, "HGraph ELP Optimizer", 
     auto metric_type = fixtures::RandomSelect<std::string>({"l2", "ip", "cosine"})[0];
     INFO(fmt::format("metric_type: {}", metric_type));
 
-    auto search_param = fmt::format(search_param_tmp, 200, false);
+    auto search_param = fmt::format(fixtures::search_param_tmp, 200, false);
     constexpr auto parameter_temp = R"(
     {{
         "dtype": "float32",
@@ -1407,7 +1407,7 @@ TestHGraphIgnoreReorder(const fixtures::HGraphTestIndexPtr& test_index,
     using namespace fixtures;
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
-    auto search_param = fmt::format(search_param_tmp, 200, false);
+    auto search_param = fmt::format(fixtures::search_param_tmp, 200, false);
     constexpr auto parameter_temp_reorder = R"(
     {{
         "dtype": "float32",
@@ -1457,9 +1457,9 @@ TestHGraphWithExtraInfo(const fixtures::HGraphTestIndexPtr& test_index,
     using namespace fixtures;
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
-    auto search_param = fmt::format(search_param_tmp, 200, false);
+    auto search_param = fmt::format(fixtures::search_param_tmp, 200, false);
     uint64_t extra_info_size = 256;
-    auto search_ex_filter_param = fmt::format(search_param_tmp, 500, true);
+    auto search_ex_filter_param = fmt::format(fixtures::search_param_tmp, 500, true);
 
     for (auto metric_type : resource->metric_types) {
         for (auto dim : resource->dims) {
@@ -1518,7 +1518,7 @@ TestHGraphDiskIOType(const fixtures::HGraphTestIndexPtr& test_index,
     using namespace fixtures;
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
-    auto search_param = fmt::format(search_param_tmp, 200, false);
+    auto search_param = fmt::format(fixtures::search_param_tmp, 200, false);
     float recall = 0.98;
     const std::vector<std::pair<std::string, std::string>> io_cases = {
         {"sq8_uniform,bf16", "sq8_uniform,bf16,buffer_io"},
