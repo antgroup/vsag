@@ -292,7 +292,7 @@ IVF::Add(const DatasetPtr& base) {
     Vector<float> centroid(dim_, allocator_);
     int64_t current_num;
     {
-        std::lock_guard lock(size_lock_);
+        std::lock_guard lock(label_lookup_mutex_);
         if (use_reorder_) {
             this->reorder_codes_->BatchInsertVector(base->GetFloat32Vectors(),
                                                     base->GetNumElements());
