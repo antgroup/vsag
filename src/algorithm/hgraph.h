@@ -120,6 +120,11 @@ public:
     Deserialize(StreamReader& reader) override;
 
     int64_t
+    GetNumberRemoved() const override {
+        return delete_count_;
+    }
+
+    int64_t
     GetNumElements() const override {
         return static_cast<int64_t>(this->total_count_) - delete_count_;
     }
