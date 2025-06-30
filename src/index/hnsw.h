@@ -274,6 +274,11 @@ public:
     }
 
     int64_t
+    GetNumberRemoved() const override {
+        return this->get_num_removed_elements();
+    }
+
+    int64_t
     GetNumElements() const override {
         return this->get_num_elements();
     }
@@ -408,6 +413,9 @@ private:
 
     int64_t
     get_num_elements() const;
+
+    int64_t
+    get_num_removed_elements() const;
 
     int64_t
     get_memory_usage() const;

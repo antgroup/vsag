@@ -139,6 +139,7 @@ TEST_CASE("NOT Implemented", "[ut][InnerIndexInterface]") {
     std::vector<MergeUnit> merge_units;
 
     REQUIRE_THROWS(empty_index->Remove(0));
+    REQUIRE_THROWS(empty_index->GetNumberRemoved());
     REQUIRE_THROWS(empty_index->EstimateMemory(1000));
     REQUIRE_THROWS(empty_index->GetEstimateBuildMemory(1000));
     REQUIRE_THROWS(empty_index->Feedback(nullptr, 10, ""));

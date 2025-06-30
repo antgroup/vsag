@@ -1317,6 +1317,16 @@ HNSW::check_id_exist(int64_t id) const {
 }
 
 int64_t
+HNSW::get_num_removed_elements() const {
+    std::shared_lock status_lock(index_status_mutex_);
+    if (not this->IsValidStatus()) {
+        return 0;
+    }
+
+    return static_cast<int64_t>(alg_hnsw_->getDeletedCount());
+}
+
+int64_t
 HNSW::get_num_elements() const {
     std::shared_lock status_lock(index_status_mutex_);
     if (not this->IsValidStatus()) {
