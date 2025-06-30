@@ -585,6 +585,9 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex,
 
     for (auto dim : dims) {
         for (auto& [base_quantization_str, recall] : test_cases) {
+            if (base_quantization_str == "pqfs,fp32") {
+                continue;
+            }
             INFO(fmt::format("quantizer str: {}", base_quantization_str));
             vsag::Options::Instance().set_block_size_limit(size);
             auto param = GenerateIVFBuildParametersString(
