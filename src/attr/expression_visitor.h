@@ -103,6 +103,37 @@ ToArithmeticOp(const std::string& op) {
     throw std::runtime_error("Unknown arithmetic operator: " + op);
 }
 
+static NumericValue
+VisitIntToken(const std::string& int_token) {
+    if (!int_token.empty() && int_token.c_str()[0] == '-') {
+        int64_t val = std::stoll(int_token);
+        return val;
+    }
+    uint64_t uval = std::stoull(int_token);
+    if (uval > static_cast<uint64_t>(INT64_MAX)) {
+        return uval;
+    }
+    return static_cast<int64_t>(uval);
+}
+
+static std::any
+BuildIntListPtr(const int signed_cnt, const std::vector<NumericValue>& values) {
+    if (signed_cnt == values.size()) {
+        std::vector<int64_t> new_values;
+        for (auto& v : values) {
+            new_values.emplace_back(std::get<int64_t>(v));
+        }
+        auto int_list_ptr = std::make_shared<IntListConstant<int64_t>>(std::move(new_values));
+        return std::make_any<ExprPtr>(int_list_ptr);
+    }
+    std::vector<uint64_t> new_values;
+    for (auto& v : values) {
+        new_values.emplace_back(GetNumericValue<uint64_t>(v));
+    }
+    auto int_list_ptr = std::make_shared<IntListConstant<uint64_t>>(std::move(new_values));
+    return std::make_any<ExprPtr>(int_list_ptr);
+}
+
 class FCExpressionVisitor final : public FCBaseVisitor {
 public:
     std::any
@@ -139,9 +170,7 @@ public:
         auto left = std::any_cast<ExprPtr>(visit(ctx->field_name()));
         auto right = std::any_cast<ExprPtr>(visit(ctx->int_pipe_list()));
         return std::make_any<ExprPtr>(std::make_shared<IntListExpression>(
-            std::move(left),
-            ctx->NOT_IN() != nullptr,
-            std::move(std::dynamic_pointer_cast<IntListConstant>(right))));
+            std::move(left), ctx->NOT_IN() != nullptr, std::move(right)));
     }
 
     std::any
@@ -149,9 +178,7 @@ public:
         auto left = std::any_cast<ExprPtr>(visit(ctx->field_name()));
         auto right = std::any_cast<ExprPtr>(visit(ctx->str_pipe_list()));
         return std::make_any<ExprPtr>(std::make_shared<StrListExpression>(
-            std::move(left),
-            ctx->NOT_IN() != nullptr,
-            std::move(std::dynamic_pointer_cast<StrListConstant>(right))));
+            std::move(left), ctx->NOT_IN() != nullptr, std::move(right)));
     }
 
     std::any
@@ -159,9 +186,7 @@ public:
         auto left = std::any_cast<ExprPtr>(visit(ctx->field_name()));
         auto right = std::any_cast<ExprPtr>(visit(ctx->int_value_list()));
         return std::make_any<ExprPtr>(std::make_shared<IntListExpression>(
-            std::move(left),
-            ctx->NOT_IN() != nullptr,
-            std::move(std::dynamic_pointer_cast<IntListConstant>(right))));
+            std::move(left), ctx->NOT_IN() != nullptr, std::move(right)));
     }
 
     std::any
@@ -169,9 +194,7 @@ public:
         auto left = std::any_cast<ExprPtr>(visit(ctx->field_name()));
         auto right = std::any_cast<ExprPtr>(visit(ctx->str_value_list()));
         return std::make_any<ExprPtr>(std::make_shared<StrListExpression>(
-            std::move(left),
-            ctx->NOT_IN() != nullptr,
-            std::move(std::dynamic_pointer_cast<StrListConstant>(right))));
+            std::move(left), ctx->NOT_IN() != nullptr, std::move(right)));
     }
 
     std::any
@@ -250,31 +273,43 @@ public:
 
     std::any
     visitInt_value_list(FCParser::Int_value_listContext* ctx) override {
-        std::vector<long> values;
-        for (auto intToken : ctx->INTEGER()) {
-            values.emplace_back(std::stol(intToken->getText()));
+        std::vector<NumericValue> values;
+        int signed_cnt = 0;
+        for (auto int_token : ctx->INTEGER()) {
+            auto numeric_value = VisitIntToken(int_token->getText());
+            if (std::holds_alternative<int64_t>(numeric_value)) {
+                signed_cnt++;
+            }
+            values.emplace_back(numeric_value);
         }
-        auto int_list_ptr = std::make_shared<IntListConstant>(std::move(values));
-        return std::make_any<ExprPtr>(int_list_ptr);
+        return BuildIntListPtr(signed_cnt, values);
     }
 
     std::any
     visitInt_pipe_list(FCParser::Int_pipe_listContext* ctx) override {
-        std::vector<long> values;
+        std::vector<NumericValue> values;
+        int signed_cnt = 0;
         if (ctx->INT_STRING() && ctx->INT_STRING()->getText().size() >= 2) {
             auto str = ctx->INT_STRING()->getText();
             str = str.substr(1, str.size() - 2);
-            values.emplace_back(std::stol(str));
+            auto numeric_value = VisitIntToken(str);
+            if (std::holds_alternative<int64_t>(numeric_value)) {
+                signed_cnt++;
+            }
+            values.emplace_back(numeric_value);
         } else if (ctx->PIPE_INT_STR() && ctx->PIPE_INT_STR()->getText().size() >= 2) {
             auto str = ctx->PIPE_INT_STR()->getText();
             str = str.substr(1, str.size() - 2);
             const auto& result_view = StrViewSplit(str, '|');
             for (auto& s : result_view) {
-                values.emplace_back(std::stol(s.data()));
+                auto numeric_value = VisitIntToken(s.data());
+                if (std::holds_alternative<int64_t>(numeric_value)) {
+                    signed_cnt++;
+                }
+                values.emplace_back(numeric_value);
             }
         }
-        auto int_list_ptr = std::make_shared<IntListConstant>(std::move(values));
-        return std::make_any<ExprPtr>(int_list_ptr);
+        return BuildIntListPtr(signed_cnt, values);
     }
 
     std::any
@@ -305,7 +340,7 @@ public:
     visitNumeric(FCParser::NumericContext* ctx) override {
         if (ctx->INTEGER()) {
             return std::make_any<ExprPtr>(
-                std::make_shared<NumericConstant>(std::stol(ctx->INTEGER()->getText())));
+                std::make_shared<NumericConstant>(VisitIntToken(ctx->INTEGER()->getText())));
         }
         if (ctx->FLOAT()) {
             return std::make_any<ExprPtr>(
