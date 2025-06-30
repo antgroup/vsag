@@ -80,6 +80,12 @@ public:
     [[nodiscard]] virtual int64_t
     GetNumElements() const = 0;
 
+    [[nodiscard]] virtual int64_t
+    GetNumberRemoved() const {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "Index doesn't support GetNumberRemoved");
+    }
+
 public:
     virtual void
     Train(const DatasetPtr& base){};

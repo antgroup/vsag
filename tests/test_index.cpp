@@ -1683,6 +1683,7 @@ TestIndex::TestRemoveIndex(const TestIndex::IndexPtr& index,
         auto add_results = index->Add(new_data);
         REQUIRE(add_results.has_value());
         auto remove_results = index->Remove(i);
+        REQUIRE(index->GetNumberRemoved() == i + 1);
         REQUIRE(remove_results.has_value());
         remove_results = index->Remove(i);
         REQUIRE_FALSE(remove_results.has_value());
