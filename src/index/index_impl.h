@@ -350,6 +350,11 @@ public:
     }
 
     [[nodiscard]] int64_t
+    GetNumberRemoved() const override {
+        return this->inner_index_->GetNumberRemoved();
+    }
+
+    [[nodiscard]] int64_t
     GetMemoryUsage() const override {
         return this->inner_index_->GetMemoryUsage();
     }
