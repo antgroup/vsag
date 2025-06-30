@@ -48,6 +48,7 @@ public:
 public:
     explicit IVFPartitionStrategy(const IndexCommonParam& common_param, BucketIdType bucket_count)
         : allocator_(common_param.allocator_.get()),
+          thread_pool_(common_param.thread_pool_),
           bucket_count_(bucket_count),
           dim_(common_param.dim_){};
 
@@ -55,7 +56,7 @@ public:
     Train(const DatasetPtr dataset) = 0;
 
     virtual Vector<BucketIdType>
-    ClassifyDatas(const void* datas, int64_t count, BucketIdType buckets_per_data) = 0;
+    ClassifyDatas(const void* datas, int64_t count, BucketIdType buckets_per_data) const = 0;
 
     virtual Vector<BucketIdType>
     ClassifyDatasForSearch(const void* datas, int64_t count, const InnerSearchParam& param) {
@@ -94,6 +95,7 @@ public:
     bool is_trained_{false};
 
     Allocator* const allocator_{nullptr};
+    SafeThreadPoolPtr thread_pool_{nullptr};
 
     BucketIdType bucket_count_{0};
 

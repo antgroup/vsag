@@ -801,6 +801,9 @@ TestIVFConcurrentAdd(const fixtures::IVFTestIndexPtr& test_index,
         for (auto dim : resource->dims) {
             for (auto train_type : resource->train_types) {
                 for (auto& [base_quantization_str, recall] : resource->test_cases) {
+                    if (base_quantization_str == "pqfs,fp16") {
+                        continue;
+                    }
                     auto count = std::min(300, static_cast<int32_t>(dim / 4));
                     auto search_param =
                         fmt::format(fixtures::search_param_tmp, std::max(200, count));

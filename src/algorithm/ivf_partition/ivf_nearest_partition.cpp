@@ -86,9 +86,9 @@ IVFNearestPartition::Train(const DatasetPtr dataset) {
 Vector<BucketIdType>
 IVFNearestPartition::ClassifyDatas(const void* datas,
                                    int64_t count,
-                                   BucketIdType buckets_per_data) {
+                                   BucketIdType buckets_per_data) const {
     Vector<BucketIdType> result(buckets_per_data * count, -1, this->allocator_);
-    for (int64_t i = 0; i < count; ++i) {
+    auto task = [&](int64_t i) {
         auto query = Dataset::Make();
         query->Dim(this->dim_)
             ->Float32Vectors(reinterpret_cast<const float*>(datas) + i * this->dim_)
@@ -103,6 +103,19 @@ IVFNearestPartition::ClassifyDatas(const void* datas,
 
         for (int64_t j = 0; j < search_result->GetDim(); ++j) {
             result[i * buckets_per_data + j] = static_cast<BucketIdType>(result_ids[j]);
+        }
+    };
+    if (thread_pool_ == nullptr) {
+        for (int64_t i = 0; i < count; ++i) {
+            task(i);
+        }
+    } else {
+        Vector<std::future<void>> futures(allocator_);
+        for (int64_t i = 0; i < count; ++i) {
+            futures.push_back(thread_pool_->GeneralEnqueue(task, i));
+        }
+        for (auto& item : futures) {
+            item.get();
         }
     }
     return std::move(result);
