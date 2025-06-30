@@ -15,8 +15,6 @@
 
 #pragma once
 
-#include <shared_mutex>
-
 #include "compressed_graph_datacell_parameter.h"
 #include "graph_interface.h"
 #include "impl/elias_fano_encoder.h"
@@ -31,6 +29,11 @@ public:
 
     explicit CompressedGraphDataCell(const CompressedGraphDatacellParamPtr& graph_param,
                                      const IndexCommonParam& common_param);
+
+    explicit CompressedGraphDataCell(Allocator* allocator);
+
+    static GraphInterfacePtr
+    MakeCompressedGraph(const GraphInterfacePtr& graph_ptr, Allocator* allocator);
 
     void
     InsertNeighborsById(InnerIdType id, const Vector<InnerIdType>& neighbor_ids) override;

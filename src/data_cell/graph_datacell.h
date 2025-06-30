@@ -27,7 +27,6 @@
 #include "graph_interface_parameter.h"
 #include "index/index_common_param.h"
 #include "io/basic_io.h"
-#include "vsag/constants.h"
 
 namespace vsag {
 
