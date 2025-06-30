@@ -193,6 +193,7 @@ IVF::InitFeatures() {
     this->index_feature_list_->SetFeatures({
         IndexFeature::SUPPORT_BUILD,
         IndexFeature::SUPPORT_ADD_AFTER_BUILD,
+        IndexFeature::SUPPORT_ADD_CONCURRENT,
     });
 
     // search
@@ -289,6 +290,19 @@ IVF::Add(const DatasetPtr& base) {
     Vector<float> normalize_data(dim_, allocator_);
     Vector<float> residual_data(dim_, allocator_);
     Vector<float> centroid(dim_, allocator_);
+    int64_t current_num;
+    {
+        std::lock_guard lock(label_lookup_mutex_);
+        if (use_reorder_) {
+            this->reorder_codes_->BatchInsertVector(base->GetFloat32Vectors(),
+                                                    base->GetNumElements());
+        }
+        for (int64_t i = 0; i < num_element; ++i) {
+            this->label_table_->Insert(i + total_elements_, ids[i]);
+        }
+        current_num = this->total_elements_;
+        this->total_elements_ += num_element;
+    }
     for (int64_t i = 0; i < num_element; ++i) {
         const auto* data_ptr = vectors + i * dim_;
         for (int64_t j = 0; j < buckets_per_data_; ++j) {
@@ -303,20 +317,16 @@ IVF::Add(const DatasetPtr& base) {
                 FP32Sub(data_ptr, centroid.data(), residual_data.data(), dim_);
                 bucket_->InsertVector(residual_data.data(),
                                       buckets[idx],
-                                      idx + total_elements_ * buckets_per_data_,
+                                      idx + current_num * buckets_per_data_,
                                       centroid.data());
             } else {
                 bucket_->InsertVector(
-                    data_ptr, buckets[idx], idx + total_elements_ * buckets_per_data_);
+                    data_ptr, buckets[idx], idx + current_num * buckets_per_data_);
             }
         }
-        this->label_table_->Insert(i + total_elements_, ids[i]);
     }
 
     this->bucket_->Package();
-    if (use_reorder_) {
-        this->reorder_codes_->BatchInsertVector(base->GetFloat32Vectors(), base->GetNumElements());
-    }
     if (use_attribute_filter_ and this->attr_filter_index_ != nullptr and attr_sets != nullptr) {
         for (uint64_t i = 0; i < this->bucket_->bucket_count_; ++i) {
             auto bucket_id = static_cast<BucketIdType>(i);
@@ -327,12 +337,11 @@ IVF::Add(const DatasetPtr& base) {
             auto* inner_ids = this->bucket_->GetInnerIds(bucket_id);
             for (InnerIdType j = 0; j < bucket_size; ++j) {
                 auto inner_id = inner_ids[j];
-                const auto& attr_set = attr_sets[inner_id - this->total_elements_];
+                const auto& attr_set = attr_sets[inner_id - current_num];
                 this->attr_filter_index_->InsertWithBucket(attr_set, j, bucket_id);
             }
         }
     }
-    this->total_elements_ += num_element;
     return {};
 }
 
