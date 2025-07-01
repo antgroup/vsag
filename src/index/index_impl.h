@@ -279,6 +279,11 @@ public:
         SAFE_CALL(return this->inner_index_->GetMinAndMaxId());
     }
 
+    virtual tl::expected<DatasetPtr, Error>
+    GetVectorByIds(const int64_t* ids, int64_t count) const override {
+        SAFE_CALL(return this->inner_index_->GetVectorByIds(ids, count));
+    };
+
     tl::expected<void, Error>
     Merge(const std::vector<MergeUnit>& merge_units) override {
         if (this->inner_index_->immutable_) {

@@ -402,6 +402,10 @@ public:
         throw std::runtime_error("Index doesn't support GetExtraInfoByIds");
     };
 
+    virtual tl::expected<DatasetPtr, Error>
+    GetVectorByIds(const int64_t* ids, int64_t count) const {
+        throw std::runtime_error("Index doesn't support GetVectorByIds");
+    };
     /**
      * @brief Checks if the specified feature is supported by the index.
      *

@@ -1153,6 +1153,7 @@ HGraph::InitFeatures() {
     }
     if (have_fp32) {
         this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_CAL_DISTANCE_BY_ID);
+        this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_GET_VECTOR_BY_IDS);
     }
 
     // metric
@@ -1530,7 +1531,7 @@ HGraph::ExportModel(const IndexCommonParam& param) const {
     return index;
 }
 void
-HGraph::GetRawData(vsag::InnerIdType inner_id, uint8_t* data) const {
+HGraph::GetCodeByInnerId(InnerIdType inner_id, uint8_t* data) const {
     if (use_reorder_) {
         high_precise_codes_->GetCodesById(inner_id, data);
     } else {
@@ -1622,5 +1623,12 @@ HGraph::Merge(const std::vector<MergeUnit>& merge_units) {
         sparse_odescent_builder.SaveGraph(graph);
         this->entry_point_id_ = ids.back();
     }
+}
+void
+HGraph::GetVectorByInnerId(InnerIdType inner_id, float* data) const {
+    auto codes = (use_reorder_) ? high_precise_codes_ : basic_flatten_codes_;
+    Vector<uint8_t> buffer(codes->code_size_, allocator_);
+    codes->GetCodesById(inner_id, buffer.data());
+    codes->Decode(buffer.data(), data);
 }
 }  // namespace vsag

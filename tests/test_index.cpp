@@ -1698,5 +1698,25 @@ TestIndex::TestBuildWithAttr(const IndexPtr& index, const TestDatasetPtr& datase
     auto build_result = index->Build(dataset->base_);
     REQUIRE(build_result.has_value());
 }
+void
+TestIndex::TestGetVectorByIds(const TestIndex::IndexPtr& index,
+                              const TestDatasetPtr& dataset,
+                              bool expected_success) {
+    if (not index->CheckFeature(vsag::SUPPORT_GET_VECTOR_BY_IDS)) {
+        return;
+    }
+    int64_t count = dataset->count_;
+    auto vectors = index->GetVectorByIds(dataset->base_->GetIds(), count);
+    REQUIRE(vectors.has_value());
+    auto float_vectors = vectors.value()->GetFloat32Vectors();
+    auto dim = dataset->base_->GetDim();
+    for (int i = 0; i < count; ++i) {
+        auto distances = index->CalDistanceById(
+            vectors.value()->GetFloat32Vectors() + i * dim, dataset->base_->GetIds() + i, 1);
+        REQUIRE(distances.has_value());
+        auto dis = distances.value()->GetDistances();
+        REQUIRE(std::abs(dis[0]) < 1e-6f);
+    }
+}
 
 }  // namespace fixtures
