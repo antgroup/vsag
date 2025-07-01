@@ -327,26 +327,6 @@ HGraph::KnnSearch(const DatasetPtr& query,
     search_param.search_alloc = search_allocator;
     const auto* raw_query = get_data(query);
     for (auto i = static_cast<int64_t>(this->route_graphs_.size() - 1); i >= 0; --i) {
-//        // fp32
-//        auto result_fp32 = this->search_one_graph(raw_query, this->route_graphs_[i], this->high_precise_codes_, search_param);
-//        float dist_hi = result_fp32->Top().first;
-//
-//        // pca
-//        vsag::USE_MRQ = false;
-//        auto result_pca = this->search_one_graph(raw_query, this->route_graphs_[i], this->basic_flatten_codes_, search_param);
-//        auto computer = this->basic_flatten_codes_->FactoryComputer(raw_query);
-//        float dist_pca = 0;
-//        this->basic_flatten_codes_->Query(&dist_pca, computer, &result_fp32->Top().second, 1, search_allocator);
-//
-//        // mrq
-//        vsag::USE_MRQ = true;
-//        auto result_mrq = this->search_one_graph(
-//            raw_query, this->route_graphs_[i], this->basic_flatten_codes_, search_param);
-//        float dist_mrq = 0;
-//        this->basic_flatten_codes_->Query(&dist_mrq, computer, &result_fp32->Top().second, 1, search_allocator);
-//
-//        search_param.ep = result_fp32->Top().second;
-        vsag::USE_MRQ = false;
         auto result = this->search_one_graph(
             raw_query, this->route_graphs_[i], this->basic_flatten_codes_, search_param);
         search_param.ep = result->Top().second;

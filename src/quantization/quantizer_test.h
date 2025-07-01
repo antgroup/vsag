@@ -264,6 +264,7 @@ ComputeAllDists(Quantizer<T>& quantizer, std::vector<float> data, uint32_t count
 template <typename T, MetricType metric>
 void
 TestInversePair(Quantizer<T>& quantizer, size_t dim, uint32_t count, Allocator* allocator) {
+    auto logger = vsag::Options::Instance().logger();
     count = std::min(count, (uint32_t)100);
     auto data = fixtures::generate_vectors(count, dim, false);
     FP32Quantizer<metric> fp32_quantizer(dim, allocator);
@@ -292,7 +293,8 @@ TestInversePair(Quantizer<T>& quantizer, size_t dim, uint32_t count, Allocator* 
         }
     }
 
-    std::cout << count_diff << " " << count_compare << std::endl;
+    logger::debug(fmt::format("count_diff: {}, count_compare: {}", count_diff, count_compare));
+    REQUIRE(1.0 * count_diff / count_compare < 0.5);
 }
 
 template <typename T, MetricType metric>
