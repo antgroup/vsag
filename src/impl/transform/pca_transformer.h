@@ -70,7 +70,7 @@ public:
     SetMeanForTest(const float* input_mean);
 
     void
-    SetPCAMatrixForText(const float* input_pca_matrix);
+    SetPCAMatrixForTest(const float* input_pca_matrix);
 
     void
     ComputeColumnMean(const float* data, uint64_t count);
@@ -89,7 +89,7 @@ public:
 private:
     bool is_mrq_{false};  // use MRQ residual computation
 
-    Vector<float> pca_matrix_;  // [input_dim_ * matrix_dim_]
+    Vector<float> pca_matrix_;  // [input_dim_ * output_dim_]
     Vector<float> mean_;        // [input_dim_ * 1]
 };
 

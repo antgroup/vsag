@@ -186,6 +186,9 @@ private:
     uint64_t offset_error_{0};
     uint64_t offset_sum_{0};
     uint64_t offset_mrq_norm_{0};
+
+    uint64_t debug_offset_mrq_r{0};
+    uint64_t debug_query_offset_mrq_r{0};
 };
 
 template <MetricType metric>
@@ -273,6 +276,12 @@ RaBitQuantizer<metric>::RaBitQuantizer(
 
         query_offset_mrq_norm_ = this->query_code_size_;
         this->query_code_size_ += ((sizeof(norm_type) + align_size - 1) / align_size) * align_size;
+
+        debug_offset_mrq_r = this->code_size_;
+        this->code_size_ += (((this->original_dim_ - this->dim_) * sizeof(DataType) + align_size - 1) / align_size) * align_size;
+
+        debug_query_offset_mrq_r = this->query_code_size_;
+        this->query_code_size_ += (((this->original_dim_ - this->dim_) * sizeof(DataType) + align_size - 1) / align_size) * align_size;
     }
 }
 
@@ -349,10 +358,6 @@ RaBitQuantizer<metric>::EncodeOneImpl(const DataType* data, uint8_t* codes) cons
     // 1. pca
     if (pca_dim_ != this->original_dim_) {
         pca_->Transform(data, pca_data.data());
-        norm_type mrq_norm_sqr = FP32ComputeIP(pca_data.data() + this->dim_,
-                                               pca_data.data() + this->dim_,
-                                               this->original_dim_ - this->dim_);
-        *(norm_type*)(codes + offset_mrq_norm_) = mrq_norm_sqr;
     } else {
         pca_data.assign(data, data + original_dim_);
     }
@@ -391,6 +396,8 @@ RaBitQuantizer<metric>::EncodeOneImpl(const DataType* data, uint8_t* codes) cons
                                                pca_data.data() + this->dim_,
                                                this->original_dim_ - this->dim_);
         *(norm_type*)(codes + offset_mrq_norm_) = mrq_norm_sqr;
+
+        memcpy(codes + debug_offset_mrq_r, pca_data.data() + this->dim_, (original_dim_ - this->dim_) * sizeof(DataType));
     }
 
     return true;
@@ -487,10 +494,19 @@ RaBitQuantizer<metric>::ComputeQueryBaseImpl(const uint8_t* query_codes,
 
     float result = L2_UBE(base_norm, query_norm, ip_est);
 
-    if (pca_dim_ != this->original_dim_) {
+    if (pca_dim_ != this->original_dim_ and vsag::USE_MRQ) {
         norm_type query_mrq_norm_sqr = *(norm_type*)(query_codes + query_offset_mrq_norm_);
         norm_type base_mrq_norm_sqr = *(norm_type*)(base_codes + offset_mrq_norm_);
-        result += (query_mrq_norm_sqr + base_mrq_norm_sqr);
+
+        norm_type br_qr_ip = FP32ComputeIP((float*)(base_codes + debug_offset_mrq_r),
+                                           (float*)(query_codes + debug_query_offset_mrq_r),
+                                            this->original_dim_ - this->dim_);
+
+        norm_type valid_br_norm_sqr = FP32ComputeIP((float*)(base_codes + debug_offset_mrq_r),
+                                                    (float*)(base_codes + debug_offset_mrq_r),
+                                                    this->original_dim_ - this->dim_);
+
+        result += (query_mrq_norm_sqr + base_mrq_norm_sqr - 2 * br_qr_ip);
     }
 
     return result;
@@ -646,6 +662,9 @@ RaBitQuantizer<metric>::ProcessQueryImpl(const DataType* query,
             norm_type mrq_norm_sqr = FP32ComputeIP(pca_data.data() + this->dim_,
                                                    pca_data.data() + this->dim_,
                                                    this->original_dim_ - this->dim_);
+
+            memcpy(computer.buf_ + debug_query_offset_mrq_r, pca_data.data() + this->dim_, (original_dim_ - this->dim_) * sizeof(DataType));
+
             *(norm_type*)(computer.buf_ + query_offset_mrq_norm_) = mrq_norm_sqr;
         } else {
             pca_data.assign(query, query + original_dim_);
