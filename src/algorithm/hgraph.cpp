@@ -27,6 +27,7 @@
 #include "dataset_impl.h"
 #include "impl/odescent_graph_builder.h"
 #include "impl/pruning_strategy.h"
+#include "impl/reorder.h"
 #include "index/index_impl.h"
 #include "index/iterator_filter.h"
 #include "logger.h"
@@ -432,7 +433,7 @@ HGraph::KnnSearch(const DatasetPtr& query,
     }
 
     auto* iter_filter_ctx = static_cast<IteratorFilterContext*>(iter_ctx);
-    DistHeapPtr search_result = std::make_shared<StandardHeap<true, false>>(search_allocator, -1);
+    auto search_result = DistanceHeap::MakeInstanceBySize<true, false>(search_allocator, k);
     const auto* query_data = get_data(query);
     if (is_last_filter) {
         while (!iter_filter_ctx->Empty()) {
@@ -1186,31 +1187,16 @@ HGraph::elp_optimize() {
 
 void
 HGraph::reorder(const void* query,
-                const FlattenInterfacePtr& flatten_interface,
-                const DistHeapPtr& candidate_heap,
+                const FlattenInterfacePtr& flatten,
+                DistHeapPtr& candidate_heap,
                 int64_t k) const {
     uint64_t size = candidate_heap->Size();
     if (k <= 0) {
         k = static_cast<int64_t>(size);
     }
-    Vector<InnerIdType> ids(size, allocator_);
-    Vector<float> dists(size, allocator_);
-    uint64_t idx = 0;
-    while (not candidate_heap->Empty()) {
-        ids[idx] = candidate_heap->Top().second;
-        ++idx;
-        candidate_heap->Pop();
-    }
-    auto computer = flatten_interface->FactoryComputer(query);
-    flatten_interface->Query(dists.data(), computer, ids.data(), size);
-    for (uint64_t i = 0; i < size; ++i) {
-        if (candidate_heap->Size() < k or dists[i] <= candidate_heap->Top().first) {
-            candidate_heap->Push(dists[i], ids[i]);
-        }
-        if (candidate_heap->Size() > k) {
-            candidate_heap->Pop();
-        }
-    }
+    auto reorder_heap = Reorder::ReorderByFlatten(
+        candidate_heap, flatten, static_cast<const float*>(query), allocator_, k);
+    candidate_heap = reorder_heap;
 }
 
 static const std::string HGRAPH_PARAMS_TEMPLATE =
