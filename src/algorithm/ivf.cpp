@@ -21,6 +21,7 @@
 #include "attr/executor/executor.h"
 #include "attr/expression_visitor.h"
 #include "impl/basic_searcher.h"
+#include "impl/reorder.h"
 #include "index/index_impl.h"
 #include "inner_string_params.h"
 #include "ivf_partition/gno_imi_partition.h"
@@ -550,18 +551,11 @@ IVF::create_search_param(const std::string& parameters, const FilterPtr& filter)
 DatasetPtr
 IVF::reorder(int64_t topk, DistHeapPtr& input, const float* query) const {
     auto [dataset_results, dists, labels] = CreateFastDataset(topk, allocator_);
-    StandardHeap<true, true> reorder_heap(allocator_, topk);
-    auto computer = this->reorder_codes_->FactoryComputer(query);
-    while (not input->Empty()) {
-        auto [dist, id] = input->Top();
-        this->reorder_codes_->Query(&dist, computer, &id, 1);
-        reorder_heap.Push(dist, id);
-        input->Pop();
-    }
+    auto reorder_heap = Reorder::ReorderByFlatten(input, reorder_codes_, query, allocator_, topk);
     for (int64_t j = topk - 1; j >= 0; --j) {
-        dists[j] = reorder_heap.Top().first;
-        labels[j] = label_table_->GetLabelById(reorder_heap.Top().second);
-        reorder_heap.Pop();
+        dists[j] = reorder_heap->Top().first;
+        labels[j] = label_table_->GetLabelById(reorder_heap->Top().second);
+        reorder_heap->Pop();
     }
     return std::move(dataset_results);
 }
@@ -581,7 +575,6 @@ IVF::ExportModel(const IndexCommonParam& param) const {
 template <InnerSearchMode mode>
 DistHeapPtr
 IVF::search(const DatasetPtr& query, const InnerSearchParam& param) const {
-    auto search_result = std::make_shared<StandardHeap<true, false>>(allocator_, -1);
     const auto* query_data = query->GetFloat32Vectors();
     Vector<float> normalize_data(dim_, allocator_);
     if (use_residual_ && metric_ == MetricType::METRIC_TYPE_COSINE) {
@@ -610,6 +603,7 @@ IVF::search(const DatasetPtr& query, const InnerSearchParam& param) const {
         }
     }
 
+    auto search_result = DistanceHeap::MakeInstanceBySize<true, false>(this->allocator_, topk);
     const auto& ft = param.is_inner_id_allowed;
     Vector<float> centroid(dim_, allocator_);
 

@@ -251,8 +251,8 @@ private:
 private:
     void
     reorder(const void* query,
-            const FlattenInterfacePtr& flatten_interface,
-            const DistHeapPtr& candidate_heap,
+            const FlattenInterfacePtr& flatten,
+            DistHeapPtr& candidate_heap,
             int64_t k) const;
 
     void
