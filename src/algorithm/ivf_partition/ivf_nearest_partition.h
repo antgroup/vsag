@@ -48,8 +48,6 @@ public:
 
     InnerIndexPtr route_index_ptr_{nullptr};
 
-    MetricType metric_type_{MetricType::METRIC_TYPE_L2SQR};
-
 private:
     void
     factory_router_index(const IndexCommonParam& common_param);

@@ -1170,17 +1170,11 @@ TestIVFGNOIMIBuildWithResidual(const fixtures::IVFTestIndexPtr& test_index,
     using namespace fixtures;
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
-    std::vector<std::pair<std::string, float>> tmp_test_cases = {
-        {"fp32", 0.90}, {"fp16", 0.88},
-        // {"sq8", 0.84},
-        // {"pq,fp32", 0.82},
-        // {"pqfs,fp32", 0.82},
-    };
 
     for (auto metric_type : resource->metric_types) {
         for (auto dim : resource->dims) {
             for (auto train_type : resource->train_types) {
-                for (auto& [base_quantization_str, recall] : tmp_test_cases) {
+                for (auto& [base_quantization_str, recall] : resource->test_cases) {
                     auto count = std::min(900, static_cast<int32_t>(dim / 4));
                     auto search_param =
                         fmt::format(fixtures::search_param_tmp, std::max(800, count));
