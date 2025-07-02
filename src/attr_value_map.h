@@ -18,8 +18,8 @@
 
 #include "impl/bitset/computable_bitset.h"
 #include "safe_allocator.h"
-#include "stream_reader.h"
-#include "stream_writer.h"
+#include "storage/stream_reader.h"
+#include "storage/stream_writer.h"
 #include "typing.h"
 #include "vsag_exception.h"
 
@@ -60,10 +60,11 @@ public:
     ComputableBitsetPtr
     GetBitsetByValue(T value) {
         auto& map = this->GetMapByType<T>();
-        if (map.find(value) == map.end()) {
+        auto iter = map.find(value);
+        if (iter == map.end()) {
             return nullptr;
         }
-        return map[value];
+        return iter->second;
     }
 
     template <class T>

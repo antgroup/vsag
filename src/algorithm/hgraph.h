@@ -43,6 +43,8 @@
 #include "vsag/index_features.h"
 
 namespace vsag {
+
+// HGraph index was introduced since v0.12
 class HGraph : public InnerIndexInterface {
 public:
     static ParamPtr
@@ -118,6 +120,11 @@ public:
     Deserialize(StreamReader& reader) override;
 
     int64_t
+    GetNumberRemoved() const override {
+        return delete_count_;
+    }
+
+    int64_t
     GetNumElements() const override {
         return static_cast<int64_t>(this->total_count_) - delete_count_;
     }
@@ -156,6 +163,9 @@ public:
 
     void
     GetRawData(vsag::InnerIdType inner_id, uint8_t* data) const override;
+
+    void
+    Merge(const std::vector<MergeUnit>& merge_units) override;
 
 private:
     const void*
@@ -217,16 +227,32 @@ private:
                      InnerSearchParam& inner_search_param,
                      IteratorFilterContext* iter_ctx) const;
 
-    void
-    serialize_basic_info(StreamWriter& writer) const;
+private:
+    // since v0.15
+    JsonType
+    serialize_basic_info() const;
 
     void
-    deserialize_basic_info(StreamReader& reader);
+    deserialize_basic_info(JsonType jsonify_basic_info);
 
+    void
+    serialize_label_info(StreamWriter& writer) const;
+
+    void
+    deserialize_label_info(StreamReader& reader) const;
+
+    // used in version [0.12.*, 0.14.*]
+    void
+    serialize_basic_info_v0_14(StreamWriter& writer) const;
+
+    void
+    deserialize_basic_info_v0_14(StreamReader& reader);
+
+private:
     void
     reorder(const void* query,
-            const FlattenInterfacePtr& flatten_interface,
-            const DistHeapPtr& candidate_heap,
+            const FlattenInterfacePtr& flatten,
+            DistHeapPtr& candidate_heap,
             int64_t k) const;
 
     void

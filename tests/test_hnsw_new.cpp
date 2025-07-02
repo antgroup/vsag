@@ -502,7 +502,9 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex, "HNSW Update Vector", "[ft
     }
 }
 
-TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex, "HNSW Serialize File", "[ft][hnsw]") {
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex,
+                             "HNSW Serialize File",
+                             "[ft][hnsw][serialization]") {
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
     auto metric_type = GENERATE("l2", "ip", "cosine");
@@ -523,7 +525,9 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex, "HNSW Serialize File", "[f
     vsag::Options::Instance().set_block_size_limit(origin_size);
 }
 
-TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex, "static HNSW Serialize File", "[ft][hnsw]") {
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex,
+                             "static HNSW Serialize File",
+                             "[ft][hnsw][serialization]") {
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
     auto metric_type = "l2";

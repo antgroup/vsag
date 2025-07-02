@@ -22,9 +22,11 @@
 
 #include "impl/basic_searcher.h"
 #include "ivf_partition_strategy_parameter.h"
-#include "stream_reader.h"
-#include "stream_writer.h"
+#include "storage/stream_reader.h"
+#include "storage/stream_writer.h"
+#include "typing.h"
 #include "vsag/dataset.h"
+#include "vsag/expected.hpp"
 
 namespace vsag {
 
@@ -46,6 +48,7 @@ public:
 public:
     explicit IVFPartitionStrategy(const IndexCommonParam& common_param, BucketIdType bucket_count)
         : allocator_(common_param.allocator_.get()),
+          thread_pool_(common_param.thread_pool_),
           bucket_count_(bucket_count),
           dim_(common_param.dim_){};
 
@@ -53,7 +56,7 @@ public:
     Train(const DatasetPtr dataset) = 0;
 
     virtual Vector<BucketIdType>
-    ClassifyDatas(const void* datas, int64_t count, BucketIdType buckets_per_data) = 0;
+    ClassifyDatas(const void* datas, int64_t count, BucketIdType buckets_per_data) const = 0;
 
     virtual Vector<BucketIdType>
     ClassifyDatasForSearch(const void* datas, int64_t count, const InnerSearchParam& param) {
@@ -71,7 +74,7 @@ public:
     }
 
     virtual void
-    Deserialize(StreamReader& reader) {
+    Deserialize(lvalue_or_rvalue<StreamReader> reader) {
         StreamReader::ReadObj(reader, this->is_trained_);
         StreamReader::ReadObj(reader, this->bucket_count_);
         StreamReader::ReadObj(reader, this->dim_);
@@ -92,6 +95,7 @@ public:
     bool is_trained_{false};
 
     Allocator* const allocator_{nullptr};
+    SafeThreadPoolPtr thread_pool_{nullptr};
 
     BucketIdType bucket_count_{0};
 

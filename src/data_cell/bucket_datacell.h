@@ -96,7 +96,7 @@ public:
     Serialize(StreamWriter& writer) override;
 
     void
-    Deserialize(StreamReader& reader) override;
+    Deserialize(lvalue_or_rvalue<StreamReader> reader) override;
 
     [[nodiscard]] std::string
     GetQuantizerName() override {
@@ -131,11 +131,6 @@ private:
     query_one_by_id(const std::shared_ptr<Computer<QuantTmpl>>& computer,
                     const BucketIdType& bucket_id,
                     const InnerIdType& offset_id);
-    inline void
-    insert_vector_with_locate(const float* vector,
-                              const BucketIdType& bucket_id,
-                              const InnerIdType& offset_id,
-                              const float* centroid);
 
     inline void
     package_fastscan();
@@ -192,6 +187,10 @@ BucketDataCell<QuantTmpl, IOTmpl>::query_one_by_id(
     const std::shared_ptr<Computer<QuantTmpl>>& computer,
     const BucketIdType& bucket_id,
     const InnerIdType& offset_id) {
+    if (bucket_id >= this->bucket_count_ or bucket_id < 0) {
+        throw VsagException(ErrorType::INTERNAL_ERROR, "visited invalid bucket id");
+    }
+    std::shared_lock lock(this->bucket_mutexes_[bucket_id]);
     this->check_valid_bucket_id(bucket_id);
     if (offset_id >= this->bucket_sizes_[bucket_id]) {
         throw VsagException(ErrorType::INTERNAL_ERROR, "invalid offset id for bucket");
@@ -213,6 +212,10 @@ BucketDataCell<QuantTmpl, IOTmpl>::scan_bucket_by_id(
     float* result_dists,
     const std::shared_ptr<Computer<QuantTmpl>>& computer,
     const BucketIdType& bucket_id) {
+    if (bucket_id >= this->bucket_count_ or bucket_id < 0) {
+        throw VsagException(ErrorType::INTERNAL_ERROR, "visited invalid bucket id");
+    }
+    std::shared_lock lock(this->bucket_mutexes_[bucket_id]);
     constexpr InnerIdType scan_block_size = 32;
     InnerIdType offset = 0;
     this->check_valid_bucket_id(bucket_id);
@@ -256,38 +259,27 @@ BucketDataCell<QuantTmpl, IOTmpl>::InsertVector(const void* vector,
                                                 InnerIdType inner_id,
                                                 const float* centroid) {
     check_valid_bucket_id(bucket_id);
-    InnerIdType locate;
-    {
-        std::lock_guard lock(this->bucket_mutexes_[bucket_id]);
-        locate = this->bucket_sizes_[bucket_id];
-        this->bucket_sizes_[bucket_id]++;
-        inner_ids_[bucket_id].emplace_back(inner_id);
-        if (use_residual_ && this->quantizer_->Metric() == MetricType::METRIC_TYPE_L2SQR) {
-            residual_bias_[bucket_id].emplace_back(0.0F);
-        }
-    }
-    this->insert_vector_with_locate(
-        reinterpret_cast<const float*>(vector), bucket_id, locate, centroid);
-}
-
-template <typename QuantTmpl, typename IOTmpl>
-void
-BucketDataCell<QuantTmpl, IOTmpl>::insert_vector_with_locate(const float* vector,
-                                                             const BucketIdType& bucket_id,
-                                                             const InnerIdType& offset_id,
-                                                             const float* centroid) {
     ByteBuffer codes(static_cast<uint64_t>(code_size_), this->allocator_);
-    this->quantizer_->EncodeOne(vector, codes.data);
-    this->datas_[bucket_id]->Write(
-        codes.data,
-        code_size_,
-        static_cast<uint64_t>(offset_id) * static_cast<uint64_t>(code_size_));
+    this->quantizer_->EncodeOne(static_cast<const float*>(vector), codes.data);
+    float res_score = 0.0F;
     if (use_residual_ && this->quantizer_->Metric() == MetricType::METRIC_TYPE_L2SQR && centroid) {
         Vector<float> compress_vector(this->quantizer_->GetDim(), this->allocator_);
         this->quantizer_->DecodeOne(codes.data, compress_vector.data());
-        residual_bias_[bucket_id][offset_id] =
+        res_score =
             -2 * FP32ComputeIP(centroid, compress_vector.data(), this->quantizer_->GetDim()) -
             FP32ComputeIP(centroid, centroid, this->quantizer_->GetDim());
+    }
+    {
+        std::unique_lock lock(this->bucket_mutexes_[bucket_id]);
+        this->datas_[bucket_id]->Write(codes.data,
+                                       code_size_,
+                                       static_cast<uint64_t>(this->bucket_sizes_[bucket_id]) *
+                                           static_cast<uint64_t>(code_size_));
+        this->bucket_sizes_[bucket_id]++;
+        inner_ids_[bucket_id].emplace_back(inner_id);
+        if (use_residual_ && this->quantizer_->Metric() == MetricType::METRIC_TYPE_L2SQR) {
+            residual_bias_[bucket_id].emplace_back(res_score);
+        }
     }
 }
 
@@ -308,7 +300,7 @@ BucketDataCell<QuantTmpl, IOTmpl>::Serialize(StreamWriter& writer) {
 
 template <typename QuantTmpl, typename IOTmpl>
 void
-BucketDataCell<QuantTmpl, IOTmpl>::Deserialize(StreamReader& reader) {
+BucketDataCell<QuantTmpl, IOTmpl>::Deserialize(lvalue_or_rvalue<StreamReader> reader) {
     BucketInterface::Deserialize(reader);
     quantizer_->Deserialize(reader);
     for (BucketIdType i = 0; i < this->bucket_count_; ++i) {
@@ -334,7 +326,11 @@ BucketDataCell<QuantTmpl, IOTmpl>::package_fastscan() {
         const auto* codes = this->datas_[i]->Read(code_size_ * bucket_size, 0, need_release);
         InnerIdType begin = 0;
         while (begin < bucket_size) {
-            quantizer_->Package32(codes + begin * code_size_, buffer.data);
+            auto valid_size = bucket_size - begin;
+            if (valid_size > 32) {
+                valid_size = 32;
+            }
+            quantizer_->Package32(codes + begin * code_size_, buffer.data, valid_size);
             this->datas_[i]->Write(buffer.data, code_size_ * 32, begin * code_size_);
             begin += 32;
         }

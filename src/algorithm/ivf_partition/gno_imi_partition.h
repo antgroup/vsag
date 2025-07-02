@@ -33,7 +33,7 @@ public:
     Train(const DatasetPtr dataset) override;
 
     Vector<BucketIdType>
-    ClassifyDatas(const void* datas, int64_t count, BucketIdType buckets_per_data) override;
+    ClassifyDatas(const void* datas, int64_t count, BucketIdType buckets_per_data) const override;
 
     Vector<BucketIdType>
     ClassifyDatasForSearch(const void* datas,
@@ -47,7 +47,7 @@ public:
     Serialize(StreamWriter& writer) override;
 
     void
-    Deserialize(StreamReader& reader) override;
+    Deserialize(lvalue_or_rvalue<StreamReader> reader) override;
 
 public:
     IVFNearestPartitionTrainerType trainer_type_{IVFNearestPartitionTrainerType::KMeansTrainer};
@@ -70,7 +70,7 @@ private:
     inner_joint_classify_datas(const float* data,
                                int64_t count,
                                BucketIdType buckets_per_data,
-                               BucketIdType* result);
+                               BucketIdType* result) const;
 };
 
 }  // namespace vsag

@@ -21,8 +21,8 @@
 #include "../logger.h"
 #include "computer.h"
 #include "metric_type.h"
-#include "stream_reader.h"
-#include "stream_writer.h"
+#include "storage/stream_reader.h"
+#include "storage/stream_writer.h"
 #include "utils/function_exists_check.h"
 
 namespace vsag {
@@ -163,7 +163,7 @@ public:
 
     inline float
     ComputeDist(Computer<QuantT>& computer, const uint8_t* codes) const {
-        float dist = 0.0f;
+        float dist = 0.0F;
         cast().ComputeDistImpl(computer, codes, &dist);
         return dist;
     }
@@ -213,10 +213,10 @@ public:
     }
 
     virtual void
-    Package32(const uint8_t* codes, uint8_t* packaged_codes) const {};
+    Package32(const uint8_t* codes, uint8_t* packaged_codes, int64_t valid_size) const {};
 
     virtual void
-    Unpack32(const uint8_t* codes, uint8_t* packaged_codes) const {};
+    Unpack32(const uint8_t* packaged_codes, uint8_t* codes) const {};
 
     /**
      * @brief Get the size of the encoded code in bytes.

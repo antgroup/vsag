@@ -17,6 +17,7 @@
 
 #include <cmath>
 #include <cstdlib>
+#include <cstring>
 
 #include "basic_func.h"
 #include "bf16_simd.h"
@@ -26,6 +27,7 @@
 #include "normalize.h"
 #include "pqfs_simd.h"
 #include "rabitq_simd.h"
+#include "simd_marco.h"
 #include "simd_status.h"
 #include "sq4_simd.h"
 #include "sq4_uniform_simd.h"

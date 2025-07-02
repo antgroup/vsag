@@ -15,13 +15,20 @@
 
 #include "ivf.h"
 
+#include <fstream>
 #include <set>
 
+#include "attr/executor/executor.h"
+#include "attr/expression_visitor.h"
 #include "impl/basic_searcher.h"
+#include "impl/reorder.h"
 #include "index/index_impl.h"
 #include "inner_string_params.h"
 #include "ivf_partition/gno_imi_partition.h"
 #include "ivf_partition/ivf_nearest_partition.h"
+#include "storage/serialization.h"
+#include "storage/stream_reader.h"
+#include "storage/stream_writer.h"
 #include "utils/standard_heap.h"
 #include "utils/util_functions.h"
 
@@ -36,7 +43,7 @@ static constexpr const char* IVF_PARAMS_TEMPLATE =
         "{IVF_USE_REORDER_KEY}": false,
         "{BUCKET_PARAMS_KEY}": {
             "{IO_PARAMS_KEY}": {
-                "{IO_TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}"
+                "{IO_TYPE_KEY}": "{IO_TYPE_VALUE_MEMORY_IO}"
             },
             "{QUANTIZATION_PARAMS_KEY}": {
                 "{QUANTIZATION_TYPE_KEY}": "{QUANTIZATION_TYPE_VALUE_FP32}",
@@ -187,6 +194,7 @@ IVF::InitFeatures() {
     this->index_feature_list_->SetFeatures({
         IndexFeature::SUPPORT_BUILD,
         IndexFeature::SUPPORT_ADD_AFTER_BUILD,
+        IndexFeature::SUPPORT_ADD_CONCURRENT,
     });
 
     // search
@@ -283,6 +291,19 @@ IVF::Add(const DatasetPtr& base) {
     Vector<float> normalize_data(dim_, allocator_);
     Vector<float> residual_data(dim_, allocator_);
     Vector<float> centroid(dim_, allocator_);
+    int64_t current_num;
+    {
+        std::lock_guard lock(label_lookup_mutex_);
+        if (use_reorder_) {
+            this->reorder_codes_->BatchInsertVector(base->GetFloat32Vectors(),
+                                                    base->GetNumElements());
+        }
+        for (int64_t i = 0; i < num_element; ++i) {
+            this->label_table_->Insert(i + total_elements_, ids[i]);
+        }
+        current_num = this->total_elements_;
+        this->total_elements_ += num_element;
+    }
     for (int64_t i = 0; i < num_element; ++i) {
         const auto* data_ptr = vectors + i * dim_;
         for (int64_t j = 0; j < buckets_per_data_; ++j) {
@@ -297,20 +318,16 @@ IVF::Add(const DatasetPtr& base) {
                 FP32Sub(data_ptr, centroid.data(), residual_data.data(), dim_);
                 bucket_->InsertVector(residual_data.data(),
                                       buckets[idx],
-                                      idx + total_elements_ * buckets_per_data_,
+                                      idx + current_num * buckets_per_data_,
                                       centroid.data());
             } else {
                 bucket_->InsertVector(
-                    data_ptr, buckets[idx], idx + total_elements_ * buckets_per_data_);
+                    data_ptr, buckets[idx], idx + current_num * buckets_per_data_);
             }
         }
-        this->label_table_->Insert(i + total_elements_, ids[i]);
     }
 
     this->bucket_->Package();
-    if (use_reorder_) {
-        this->reorder_codes_->BatchInsertVector(base->GetFloat32Vectors(), base->GetNumElements());
-    }
     if (use_attribute_filter_ and this->attr_filter_index_ != nullptr and attr_sets != nullptr) {
         for (uint64_t i = 0; i < this->bucket_->bucket_count_; ++i) {
             auto bucket_id = static_cast<BucketIdType>(i);
@@ -321,12 +338,11 @@ IVF::Add(const DatasetPtr& base) {
             auto* inner_ids = this->bucket_->GetInnerIds(bucket_id);
             for (InnerIdType j = 0; j < bucket_size; ++j) {
                 auto inner_id = inner_ids[j];
-                const auto& attr_set = attr_sets[inner_id - this->total_elements_];
+                const auto& attr_set = attr_sets[inner_id - current_num];
                 this->attr_filter_index_->InsertWithBucket(attr_set, j, bucket_id);
             }
         }
     }
-    this->total_elements_ += num_element;
     return {};
 }
 
@@ -398,46 +414,130 @@ IVF::Merge(const std::vector<MergeUnit>& merge_units) {
     this->bucket_->Package();
 }
 
+#define WRITE_DATACELL_WITH_NAME(writer, name, datacell)            \
+    datacell_offsets[(name)] = offset;                              \
+    auto datacell##_start = (writer).GetCursor();                   \
+    (datacell)->Serialize(writer);                                  \
+    auto datacell##_size = (writer).GetCursor() - datacell##_start; \
+    datacell_sizes[(name)] = datacell##_size;                       \
+    offset += datacell##_size;
+
 void
 IVF::Serialize(StreamWriter& writer) const {
-    StreamWriter::WriteObj(writer, this->total_elements_);
-    StreamWriter::WriteObj(writer, this->use_reorder_);
-    StreamWriter::WriteObj(writer, this->is_trained_);
+    // FIXME(wxyu): only for testing, remove before merge into the main branch
+    // if (not Options::Instance().new_version()) {
+    //     StreamWriter::WriteObj(writer, this->total_elements_);
+    //     StreamWriter::WriteObj(writer, this->use_reorder_);
+    //     StreamWriter::WriteObj(writer, this->is_trained_);
 
-    this->bucket_->Serialize(writer);
-    this->partition_strategy_->Serialize(writer);
-    this->label_table_->Serialize(writer);
+    //     this->bucket_->Serialize(writer);
+    //     this->partition_strategy_->Serialize(writer);
+    //     this->label_table_->Serialize(writer);
+    //     if (use_reorder_) {
+    //         this->reorder_codes_->Serialize(writer);
+    //     }
+    //     if (use_attribute_filter_) {
+    //         this->attr_filter_index_->Serialize(writer);
+    //     }
+    //     return;
+    // }
+
+    JsonType datacell_offsets;
+    JsonType datacell_sizes;
+    uint64_t offset = 0;
+
+    WRITE_DATACELL_WITH_NAME(writer, "bucket", bucket_);
+    WRITE_DATACELL_WITH_NAME(writer, "partition_strategy", partition_strategy_);
+    WRITE_DATACELL_WITH_NAME(writer, "label_table", label_table_);
+
     if (use_reorder_) {
-        this->reorder_codes_->Serialize(writer);
+        WRITE_DATACELL_WITH_NAME(writer, "reorder_codes", reorder_codes_);
     }
+
     if (use_attribute_filter_) {
-        this->attr_filter_index_->Serialize(writer);
+        WRITE_DATACELL_WITH_NAME(writer, "attr_filter_index", attr_filter_index_);
     }
+
+    // serialize footer (introduced since v0.15)
+    JsonType basic_info;
+    basic_info["total_elements"] = this->total_elements_;
+    basic_info["use_reorder"] = this->use_reorder_;
+    basic_info["is_trained"] = this->is_trained_;
+
+    auto metadata = std::make_shared<Metadata>();
+    metadata->Set("basic_info", basic_info);
+    metadata->Set("datacell_offsets", datacell_offsets);
+    metadata->Set("datacell_sizes", datacell_sizes);
+
+    auto footer = std::make_shared<Footer>(metadata);
+    footer->Write(writer);
 }
+
+#define READ_DATACELL_WITH_NAME(reader, name, datacell)              \
+    reader.PushSeek(datacell_offsets[(name)].get<uint64_t>());       \
+    (datacell)->Deserialize((reader).Slice(datacell_sizes[(name)])); \
+    (reader).PopSeek();
 
 void
 IVF::Deserialize(StreamReader& reader) {
-    StreamReader::ReadObj(reader, this->total_elements_);
-    StreamReader::ReadObj(reader, this->use_reorder_);
-    StreamReader::ReadObj(reader, this->is_trained_);
+    // try to deserialize footer (only in new version)
+    auto footer = Footer::Parse(reader);
 
-    this->bucket_->Deserialize(reader);
-    this->partition_strategy_->Deserialize(reader);
-    this->label_table_->Deserialize(reader);
-    if (use_reorder_) {
-        this->reorder_codes_->Deserialize(reader);
+    if (footer == nullptr) {  // old format, DON'T EDIT, remove in the future
+        logger::debug("parse with v0.14 version format");
+
+        StreamReader::ReadObj(reader, this->total_elements_);
+        StreamReader::ReadObj(reader, this->use_reorder_);
+        StreamReader::ReadObj(reader, this->is_trained_);
+
+        this->bucket_->Deserialize(reader);
+        this->partition_strategy_->Deserialize(reader);
+        this->label_table_->Deserialize(reader);
+        if (use_reorder_) {
+            this->reorder_codes_->Deserialize(reader);
+        }
+
+        if (use_attribute_filter_) {
+            this->attr_filter_index_->Deserialize(reader);
+        }
+    } else {  // create like `else if ( ver in [v0.15, v0.17] )` here if need in the future
+        logger::debug("parse with new version format");
+
+        auto metadata = footer->GetMetadata();
+        if (metadata->EmptyIndex()) {
+            return;
+        }
+
+        auto basic_info = metadata->Get("basic_info");
+        this->total_elements_ = basic_info["total_elements"];
+        this->use_reorder_ = basic_info["use_reorder"];
+        this->is_trained_ = basic_info["is_trained"];
+
+        JsonType datacell_offsets = metadata->Get("datacell_offsets");
+        logger::debug("datacell_offsets: {}", datacell_offsets.dump());
+        JsonType datacell_sizes = metadata->Get("datacell_sizes");
+        logger::debug("datacell_sizes: {}", datacell_sizes.dump());
+
+        READ_DATACELL_WITH_NAME(reader, "bucket", this->bucket_);
+        READ_DATACELL_WITH_NAME(reader, "partition_strategy", this->partition_strategy_);
+        READ_DATACELL_WITH_NAME(reader, "label_table", this->label_table_);
+        if (use_reorder_) {
+            READ_DATACELL_WITH_NAME(reader, "reorder_codes", this->reorder_codes_);
+        }
+        if (use_attribute_filter_) {
+            READ_DATACELL_WITH_NAME(reader, "attr_filter_index", this->attr_filter_index_);
+        }
     }
-    if (use_attribute_filter_) {
-        this->attr_filter_index_->Deserialize(reader);
-    }
+
+    // post serialize procedure
 }
 
 InnerSearchParam
 IVF::create_search_param(const std::string& parameters, const FilterPtr& filter) const {
     InnerSearchParam param;
-    std::shared_ptr<CommonInnerIdFilter> ft = nullptr;
+    std::shared_ptr<InnerIdWrapperFilter> ft = nullptr;
     if (filter != nullptr) {
-        ft = std::make_shared<CommonInnerIdFilter>(filter, *this->label_table_);
+        ft = std::make_shared<InnerIdWrapperFilter>(filter, *this->label_table_);
     }
     param.is_inner_id_allowed = ft;
     auto search_param = IVFSearchParameters::FromJson(parameters);
@@ -451,18 +551,11 @@ IVF::create_search_param(const std::string& parameters, const FilterPtr& filter)
 DatasetPtr
 IVF::reorder(int64_t topk, DistHeapPtr& input, const float* query) const {
     auto [dataset_results, dists, labels] = CreateFastDataset(topk, allocator_);
-    StandardHeap<true, true> reorder_heap(allocator_, topk);
-    auto computer = this->reorder_codes_->FactoryComputer(query);
-    while (not input->Empty()) {
-        auto [dist, id] = input->Top();
-        this->reorder_codes_->Query(&dist, computer, &id, 1);
-        reorder_heap.Push(dist, id);
-        input->Pop();
-    }
+    auto reorder_heap = Reorder::ReorderByFlatten(input, reorder_codes_, query, allocator_, topk);
     for (int64_t j = topk - 1; j >= 0; --j) {
-        dists[j] = reorder_heap.Top().first;
-        labels[j] = label_table_->GetLabelById(reorder_heap.Top().second);
-        reorder_heap.Pop();
+        dists[j] = reorder_heap->Top().first;
+        labels[j] = label_table_->GetLabelById(reorder_heap->Top().second);
+        reorder_heap->Pop();
     }
     return std::move(dataset_results);
 }
@@ -482,7 +575,6 @@ IVF::ExportModel(const IndexCommonParam& param) const {
 template <InnerSearchMode mode>
 DistHeapPtr
 IVF::search(const DatasetPtr& query, const InnerSearchParam& param) const {
-    auto search_result = std::make_shared<StandardHeap<true, false>>(allocator_, -1);
     const auto* query_data = query->GetFloat32Vectors();
     Vector<float> normalize_data(dim_, allocator_);
     if (use_residual_ && metric_ == MetricType::METRIC_TYPE_COSINE) {
@@ -511,6 +603,7 @@ IVF::search(const DatasetPtr& query, const InnerSearchParam& param) const {
         }
     }
 
+    auto search_result = DistanceHeap::MakeInstanceBySize<true, false>(this->allocator_, topk);
     const auto& ft = param.is_inner_id_allowed;
     Vector<float> centroid(dim_, allocator_);
 
@@ -533,9 +626,15 @@ IVF::search(const DatasetPtr& query, const InnerSearchParam& param) const {
         }
 
         bucket_->ScanBucketById(dist.data(), computer, bucket_id);
+        FilterPtr attr_ft = nullptr;
+        if (param.executor != nullptr) {
+            param.executor->Clear();
+            attr_ft = param.executor->RunWithBucket(bucket_id);
+        }
         for (int j = 0; j < bucket_size; ++j) {
             auto origin_id = ids[j] / buckets_per_data_;
-            if (ft == nullptr or ft->CheckValid(origin_id)) {
+            if ((ft == nullptr or ft->CheckValid(origin_id)) and
+                (attr_ft == nullptr or attr_ft->CheckValid(j))) {
                 dist[j] -= ip_distance;
                 if constexpr (mode == KNN_SEARCH) {
                     if (search_result->Size() < topk or dist[j] < cur_heap_top) {
@@ -627,16 +726,57 @@ IVF::check_merge_illegal(const vsag::MergeUnit& unit) const {
     std::stringstream ss2;
     IOStreamWriter writer1(ss1);
     cur_model->Serialize(writer1);
+
+    // std::ofstream of1("/tmp/vsag-f1.index", std::ios::binary | std::ios::out);
+    // IOStreamWriter os1(of1);
+    // cur_model->Serialize(os1);
+    // of1.close();
+
     cur_model.reset();
     auto other_model = other_ivf_index->ExportModel(index->GetCommonParam());
     IOStreamWriter writer2(ss2);
     other_model->Serialize(writer2);
+
+    // std::ofstream of2("/tmp/vsag-f2.index", std::ios::binary | std::ios::out);
+    // IOStreamWriter os2(of2);
+    // other_model->Serialize(os2);
+    // of2.close();
+
     other_model.reset();
+
     if (not check_equal_on_string_stream(ss1, ss2)) {
         throw VsagException(
             ErrorType::INVALID_ARGUMENT,
             "Merge Failed: IVF model not match, try to merge a different model ivf index");
     }
+}
+
+DatasetPtr
+IVF::SearchWithRequest(const SearchRequest& request) const {
+    auto param = this->create_search_param(request.params_str_, request.filter_);
+    param.search_mode = KNN_SEARCH;
+    param.topk = request.topk_;
+    if (use_reorder_) {
+        param.topk = static_cast<int64_t>(param.factor * static_cast<float>(request.topk_));
+    }
+    auto query = request.query_;
+    if (request.enable_attribute_filter_) {
+        auto expr = AstParse(request.attribute_filter_str_);
+        auto executor = Executor::MakeInstance(this->allocator_, expr, this->attr_filter_index_);
+        param.executor = executor;
+    }
+    auto search_result = this->search<KNN_SEARCH>(query, param);
+    if (use_reorder_) {
+        return reorder(request.topk_, search_result, query->GetFloat32Vectors());
+    }
+    auto count = static_cast<const int64_t>(search_result->Size());
+    auto [dataset_results, dists, labels] = CreateFastDataset(count, allocator_);
+    for (int64_t j = count - 1; j >= 0; --j) {
+        dists[j] = search_result->Top().first;
+        labels[j] = label_table_->GetLabelById(search_result->Top().second);
+        search_result->Pop();
+    }
+    return std::move(dataset_results);
 }
 
 }  // namespace vsag

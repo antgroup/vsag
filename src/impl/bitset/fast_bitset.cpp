@@ -25,7 +25,11 @@ FastBitset::Set(int64_t pos, bool value) {
     std::lock_guard<std::shared_mutex> lock(mutex_);
     auto capacity = data_.size() * 64;
     if (pos >= capacity) {
-        data_.resize((pos / 64) + 1, 0);
+        if (fill_bit_) {
+            data_.resize((pos / 64) + 1, FILL_ONE);
+        } else {
+            data_.resize((pos / 64) + 1, 0);
+        }
     }
     auto word_index = pos / 64;
     auto bit_index = pos % 64;
@@ -41,7 +45,7 @@ FastBitset::Test(int64_t pos) {
     std::shared_lock<std::shared_mutex> lock(mutex_);
     auto capacity = data_.size() * 64;
     if (pos >= capacity) {
-        return false;
+        return fill_bit_;
     }
     auto word_index = pos / 64;
     auto bit_index = pos % 64;
@@ -57,8 +61,9 @@ FastBitset::Count() {
     }
     return count;
 }
+
 void
-FastBitset::Or(const Bitset& another) {
+FastBitset::Or(const ComputableBitset& another) {
     const auto* fast_another = dynamic_cast<const FastBitset*>(&another);
     if (fast_another == nullptr) {
         throw VsagException(ErrorType::INTERNAL_ERROR, "bitset not match");
@@ -66,6 +71,13 @@ FastBitset::Or(const Bitset& another) {
     std::lock(mutex_, fast_another->mutex_);
     std::lock_guard<std::shared_mutex> lock1(mutex_, std::adopt_lock);
     std::lock_guard<std::shared_mutex> lock2(fast_another->mutex_, std::adopt_lock);
+    if (fast_another->data_.empty()) {
+        if (fast_another->fill_bit_) {
+            this->Clear();
+            this->fill_bit_ = true;
+        }
+        return;
+    }
     auto max_size = std::max(data_.size(), fast_another->data_.size());
     data_.resize(max_size, 0);
     BitOr(reinterpret_cast<const uint8_t*>(data_.data()),
@@ -75,7 +87,7 @@ FastBitset::Or(const Bitset& another) {
 }
 
 void
-FastBitset::And(const Bitset& another) {
+FastBitset::And(const ComputableBitset& another) {
     const auto* fast_another = dynamic_cast<const FastBitset*>(&another);
     if (fast_another == nullptr) {
         throw VsagException(ErrorType::INTERNAL_ERROR, "bitset not match");
@@ -85,6 +97,12 @@ FastBitset::And(const Bitset& another) {
     std::lock_guard<std::shared_mutex> lock2(fast_another->mutex_, std::adopt_lock);
     auto max_size = std::max(data_.size(), fast_another->data_.size());
     data_.resize(max_size, 0);
+    if (fast_another->data_.empty()) {
+        if (not fast_another->fill_bit_) {
+            this->Clear();
+        }
+        return;
+    }
     BitAnd(reinterpret_cast<const uint8_t*>(data_.data()),
            reinterpret_cast<const uint8_t*>(fast_another->data_.data()),
            max_size * sizeof(uint64_t),
@@ -92,7 +110,7 @@ FastBitset::And(const Bitset& another) {
 }
 
 void
-FastBitset::Xor(const Bitset& another) {
+FastBitset::Xor(const ComputableBitset& another) {
     const auto* fast_another = dynamic_cast<const FastBitset*>(&another);
     if (fast_another == nullptr) {
         throw VsagException(ErrorType::INTERNAL_ERROR, "bitset not match");
@@ -106,6 +124,62 @@ FastBitset::Xor(const Bitset& another) {
            reinterpret_cast<const uint8_t*>(fast_another->data_.data()),
            max_size * sizeof(uint64_t),
            reinterpret_cast<uint8_t*>(data_.data()));
+}
+
+void
+FastBitset::Or(const ComputableBitsetPtr& another) {
+    if (another == nullptr) {
+        return;
+    }
+    this->Or(*another);
+}
+
+void
+FastBitset::And(const ComputableBitsetPtr& another) {
+    if (another == nullptr) {
+        this->Clear();
+        return;
+    }
+    this->And(*another);
+}
+
+void
+FastBitset::Xor(const ComputableBitsetPtr& another) {
+    if (another == nullptr) {
+        return;
+    }
+    this->Xor(*another);
+}
+
+void
+FastBitset::And(const std::vector<ComputableBitsetPtr>& other_bitsets) {
+    for (const auto& ptr : other_bitsets) {
+        if (ptr == nullptr) {
+            this->Clear();
+            return;
+        }
+        this->And(*ptr);
+    }
+}
+
+void
+FastBitset::Or(const std::vector<ComputableBitsetPtr>& other_bitsets) {
+    for (const auto& ptr : other_bitsets) {
+        if (ptr != nullptr) {
+            this->Or(*ptr);
+        }
+    }
+}
+
+void
+FastBitset::Xor(const std::vector<ComputableBitsetPtr>& other_bitsets) {
+    for (const auto& ptr : other_bitsets) {
+        if (ptr == nullptr) {
+            this->Clear();
+            return;
+        }
+        this->Xor(*ptr);
+    }
 }
 
 std::string
@@ -134,11 +208,13 @@ FastBitset::Not() {
     BitNot(reinterpret_cast<const uint8_t*>(data_.data()),
            data_.size() * sizeof(uint64_t),
            reinterpret_cast<uint8_t*>(data_.data()));
+    this->fill_bit_ = !this->fill_bit_;
 }
 
 void
 FastBitset::Serialize(StreamWriter& writer) const {
     std::shared_lock<std::shared_mutex> lock(mutex_);
+    StreamWriter::WriteObj(writer, fill_bit_);
     uint64_t size = data_.size();
     StreamWriter::WriteObj(writer, size);
     if (size > 0) {
@@ -149,9 +225,17 @@ FastBitset::Serialize(StreamWriter& writer) const {
 void
 FastBitset::Deserialize(StreamReader& reader) {
     std::lock_guard<std::shared_mutex> lock(mutex_);
+    StreamReader::ReadObj(reader, fill_bit_);
     uint64_t size;
     StreamReader::ReadObj(reader, size);
     data_.resize(size);
     reader.Read(reinterpret_cast<char*>(data_.data()), size * sizeof(uint64_t));
 }
+
+void
+FastBitset::Clear() {
+    this->data_.clear();
+    fill_bit_ = false;
+}
+
 }  // namespace vsag

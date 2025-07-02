@@ -22,8 +22,8 @@
 #include "index_feature_list.h"
 #include "label_table.h"
 #include "parameter.h"
-#include "stream_reader.h"
-#include "stream_writer.h"
+#include "storage/stream_reader.h"
+#include "storage/stream_writer.h"
 #include "utils/function_exists_check.h"
 #include "vsag/dataset.h"
 #include "vsag/index.h"
@@ -80,15 +80,18 @@ public:
     [[nodiscard]] virtual int64_t
     GetNumElements() const = 0;
 
+    [[nodiscard]] virtual int64_t
+    GetNumberRemoved() const {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "Index doesn't support GetNumberRemoved");
+    }
+
 public:
     virtual void
     Train(const DatasetPtr& base){};
 
     virtual std::vector<int64_t>
     Build(const DatasetPtr& base);
-
-    [[nodiscard]] virtual DatasetPtr
-    SearchWithRequest(const SearchRequest& request) const;
 
     [[nodiscard]] virtual DatasetPtr
     KnnSearch(const DatasetPtr& query,
@@ -126,6 +129,12 @@ public:
     [[nodiscard]] virtual DatasetPtr
     KnnSearch(const DatasetPtr& query, int64_t k, SearchParam& search_param) const {
         throw std::runtime_error("Index doesn't support new filter");
+    }
+
+    [[nodiscard]] virtual DatasetPtr
+    SearchWithRequest(const SearchRequest& request) const {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "Index doesn't support SearchWithRequest");
     }
 
     [[nodiscard]] virtual DatasetPtr
@@ -301,6 +310,7 @@ public:
     const ParamPtr create_param_ptr_{nullptr};
 
     int64_t dim_{0};
+    bool immutable_{false};
 
     MetricType metric_{MetricType::METRIC_TYPE_L2SQR};
 

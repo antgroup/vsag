@@ -112,6 +112,9 @@ FlattenInterface::MakeInstance(const FlattenInterfaceParamPtr& param,
     if (io_type_name == IO_TYPE_VALUE_ASYNC_IO) {
         return make_instance<AsyncIO>(param, common_param);
     }
+    if (io_type_name == IO_TYPE_VALUE_MMAP_IO) {
+        return make_instance<MMapIO>(param, common_param);
+    }
     return nullptr;
 }
 

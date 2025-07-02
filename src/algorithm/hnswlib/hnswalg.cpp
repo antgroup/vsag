@@ -904,15 +904,7 @@ HierarchicalNSW::calcSerializeSize() {
 }
 
 void
-HierarchicalNSW::saveIndex(void* d) {
-    char* dest = (char*)d;
-    BufferStreamWriter writer(dest);
-    SerializeImpl(writer);
-}
-// save index to a file stream
-void
-HierarchicalNSW::saveIndex(std::ostream& out_stream) {
-    IOStreamWriter writer(out_stream);
+HierarchicalNSW::saveIndex(StreamWriter& writer) {
     SerializeImpl(writer);
 }
 

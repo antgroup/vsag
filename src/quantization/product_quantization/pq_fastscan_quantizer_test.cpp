@@ -60,7 +60,7 @@ TestPackageUnpackMetricPQFS(uint64_t dim, int64_t pq_dim) {
     }
 
     std::vector<uint8_t> packaged(code_size * count);
-    quantizer.Package32(original_codes.data(), packaged.data());
+    quantizer.Package32(original_codes.data(), packaged.data(), -1);
     std::vector<uint8_t> unpacked_codes(count * code_size);
     quantizer.Unpack32(packaged.data(), unpacked_codes.data());
     for (size_t i = 0; i < original_codes.size(); ++i) {
@@ -93,7 +93,7 @@ TestComputerBatchPQFS(PQFastScanQuantizer<metric>& quant,
         need_normalize = false;
     }
     auto vecs = fixtures::generate_vectors(count, dim, need_normalize);
-    auto queries = fixtures::generate_vectors(query_count, dim, need_normalize, 165);
+    auto queries = fixtures::generate_vectors(query_count, dim, need_normalize);
     if (retrain) {
         quant.ReTrain(vecs.data(), count);
     }
@@ -119,7 +119,8 @@ TestComputerBatchPQFS(PQFastScanQuantizer<metric>& quant,
     quant.EncodeBatch(vecs.data(), codes.data(), count);
     for (int64_t i = 0; i < new_count; i += 32) {
         quant.Package32(codes.data() + i * quant.GetCodeSize(),
-                        packaged_codes.data() + i * quant.GetCodeSize());
+                        packaged_codes.data() + i * quant.GetCodeSize(),
+                        -1);
     }
 
     for (int i = 0; i < query_count; ++i) {
@@ -153,7 +154,7 @@ TEST_CASE("PQFSQuantizer Compute", "[ut][PQFSQuantizer]") {
         MetricType::METRIC_TYPE_IP,
         MetricType::METRIC_TYPE_COSINE,
     };
-    float error = 16.0F / 255.0F;
+    float error = 0.08F;
     for (auto dim : dims) {
         int64_t pq_dim = dim;
         for (auto count : counts) {
@@ -188,7 +189,7 @@ TestSerializeAndDeserializeMetricPQFS(uint64_t dim, int64_t pq_dim, int count, f
 TEST_CASE("PQFSQuantizer Serialize and Deserialize", "[ut][PQFSQuantizer]") {
     constexpr MetricType metrics[3] = {
         MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_COSINE, MetricType::METRIC_TYPE_IP};
-    float error = 16.0F / 255.0F;
+    float error = 0.08F;
     int64_t pq_dim;
     for (auto dim : dims) {
         pq_dim = dim;

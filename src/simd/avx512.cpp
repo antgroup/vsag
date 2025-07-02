@@ -87,7 +87,7 @@ PQDistanceFloat256(const void* single_dim_centers, float single_dim_val, void* r
 }
 
 float
-FP32ComputeIP(const float* query, const float* codes, uint64_t dim) {
+FP32ComputeIP(const float* RESTRICT query, const float* RESTRICT codes, uint64_t dim) {
 #if defined(ENABLE_AVX512)
     if (dim < 16) {
         return avx2::FP32ComputeIP(query, codes, dim);
@@ -136,7 +136,7 @@ FP32ComputeIP(const float* query, const float* codes, uint64_t dim) {
 }
 
 float
-FP32ComputeL2Sqr(const float* query, const float* codes, uint64_t dim) {
+FP32ComputeL2Sqr(const float* RESTRICT query, const float* RESTRICT codes, uint64_t dim) {
 #if defined(ENABLE_AVX512)
     if (dim < 16) {
         return avx2::FP32ComputeL2Sqr(query, codes, dim);
@@ -194,12 +194,12 @@ FP32ComputeL2Sqr(const float* query, const float* codes, uint64_t dim) {
 }
 
 void
-FP32ComputeIPBatch4(const float* query,
+FP32ComputeIPBatch4(const float* RESTRICT query,
                     uint64_t dim,
-                    const float* codes1,
-                    const float* codes2,
-                    const float* codes3,
-                    const float* codes4,
+                    const float* RESTRICT codes1,
+                    const float* RESTRICT codes2,
+                    const float* RESTRICT codes3,
+                    const float* RESTRICT codes4,
                     float& result1,
                     float& result2,
                     float& result3,
@@ -251,12 +251,12 @@ FP32ComputeIPBatch4(const float* query,
 }
 
 void
-FP32ComputeL2SqrBatch4(const float* query,
+FP32ComputeL2SqrBatch4(const float* RESTRICT query,
                        uint64_t dim,
-                       const float* codes1,
-                       const float* codes2,
-                       const float* codes3,
-                       const float* codes4,
+                       const float* RESTRICT codes1,
+                       const float* RESTRICT codes2,
+                       const float* RESTRICT codes3,
+                       const float* RESTRICT codes4,
                        float& result1,
                        float& result2,
                        float& result3,
@@ -406,7 +406,7 @@ __inline __m512i __attribute__((__always_inline__)) load_16_short(const uint16_t
 #endif
 
 float
-BF16ComputeIP(const uint8_t* query, const uint8_t* codes, uint64_t dim) {
+BF16ComputeIP(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim) {
 #if defined(ENABLE_AVX512)
     // Initialize the sum to 0
     __m512 sum = _mm512_setzero_ps();
@@ -437,7 +437,7 @@ BF16ComputeIP(const uint8_t* query, const uint8_t* codes, uint64_t dim) {
 }
 
 float
-BF16ComputeL2Sqr(const uint8_t* query, const uint8_t* codes, uint64_t dim) {
+BF16ComputeL2Sqr(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim) {
 #if defined(ENABLE_AVX512)
     // Initialize the sum to 0
     __m512 sum = _mm512_setzero_ps();
@@ -469,7 +469,7 @@ BF16ComputeL2Sqr(const uint8_t* query, const uint8_t* codes, uint64_t dim) {
 }
 
 float
-FP16ComputeIP(const uint8_t* query, const uint8_t* codes, uint64_t dim) {
+FP16ComputeIP(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim) {
 #if defined(ENABLE_AVX512)
     // Initialize the sum to 0
     __m512 sum = _mm512_setzero_ps();
@@ -500,7 +500,7 @@ FP16ComputeIP(const uint8_t* query, const uint8_t* codes, uint64_t dim) {
 }
 
 float
-FP16ComputeL2Sqr(const uint8_t* query, const uint8_t* codes, uint64_t dim) {
+FP16ComputeL2Sqr(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim) {
 #if defined(ENABLE_AVX512)
     // Initialize the sum to 0
     __m512 sum = _mm512_setzero_ps();
@@ -532,10 +532,10 @@ FP16ComputeL2Sqr(const uint8_t* query, const uint8_t* codes, uint64_t dim) {
 }
 
 float
-SQ8ComputeIP(const float* query,
-             const uint8_t* codes,
-             const float* lower_bound,
-             const float* diff,
+SQ8ComputeIP(const float* RESTRICT query,
+             const uint8_t* RESTRICT codes,
+             const float* RESTRICT lower_bound,
+             const float* RESTRICT diff,
              uint64_t dim) {
 #if defined(ENABLE_AVX512)
     // Initialize the sum to 0
@@ -567,10 +567,10 @@ SQ8ComputeIP(const float* query,
 }
 
 float
-SQ8ComputeL2Sqr(const float* query,
-                const uint8_t* codes,
-                const float* lower_bound,
-                const float* diff,
+SQ8ComputeL2Sqr(const float* RESTRICT query,
+                const uint8_t* RESTRICT codes,
+                const float* RESTRICT lower_bound,
+                const float* RESTRICT diff,
                 uint64_t dim) {
 #if defined(ENABLE_AVX512)
     __m512 sum = _mm512_setzero_ps();
@@ -601,10 +601,10 @@ SQ8ComputeL2Sqr(const float* query,
 }
 
 float
-SQ8ComputeCodesIP(const uint8_t* codes1,
-                  const uint8_t* codes2,
-                  const float* lower_bound,
-                  const float* diff,
+SQ8ComputeCodesIP(const uint8_t* RESTRICT codes1,
+                  const uint8_t* RESTRICT codes2,
+                  const float* RESTRICT lower_bound,
+                  const float* RESTRICT diff,
                   uint64_t dim) {
 #if defined(ENABLE_AVX512)
     __m512 sum = _mm512_setzero_ps();
@@ -638,10 +638,10 @@ SQ8ComputeCodesIP(const uint8_t* codes1,
 }
 
 float
-SQ8ComputeCodesL2Sqr(const uint8_t* codes1,
-                     const uint8_t* codes2,
-                     const float* lower_bound,
-                     const float* diff,
+SQ8ComputeCodesL2Sqr(const uint8_t* RESTRICT codes1,
+                     const uint8_t* RESTRICT codes2,
+                     const float* RESTRICT lower_bound,
+                     const float* RESTRICT diff,
                      uint64_t dim) {
 #if defined(ENABLE_AVX512)
     __m512 sum = _mm512_setzero_ps();
@@ -673,43 +673,45 @@ SQ8ComputeCodesL2Sqr(const uint8_t* codes1,
 }
 
 float
-SQ4ComputeIP(const float* query,
-             const uint8_t* codes,
-             const float* lower_bound,
-             const float* diff,
+SQ4ComputeIP(const float* RESTRICT query,
+             const uint8_t* RESTRICT codes,
+             const float* RESTRICT lower_bound,
+             const float* RESTRICT diff,
              uint64_t dim) {
     return avx2::SQ4ComputeIP(query, codes, lower_bound, diff, dim);
 }
 
 float
-SQ4ComputeL2Sqr(const float* query,
-                const uint8_t* codes,
-                const float* lower_bound,
-                const float* diff,
+SQ4ComputeL2Sqr(const float* RESTRICT query,
+                const uint8_t* RESTRICT codes,
+                const float* RESTRICT lower_bound,
+                const float* RESTRICT diff,
                 uint64_t dim) {
     return avx2::SQ4ComputeL2Sqr(query, codes, lower_bound, diff, dim);
 }
 
 float
-SQ4ComputeCodesIP(const uint8_t* codes1,
-                  const uint8_t* codes2,
-                  const float* lower_bound,
-                  const float* diff,
+SQ4ComputeCodesIP(const uint8_t* RESTRICT codes1,
+                  const uint8_t* RESTRICT codes2,
+                  const float* RESTRICT lower_bound,
+                  const float* RESTRICT diff,
                   uint64_t dim) {
     return avx2::SQ4ComputeCodesIP(codes1, codes2, lower_bound, diff, dim);
 }
 
 float
-SQ4ComputeCodesL2Sqr(const uint8_t* codes1,
-                     const uint8_t* codes2,
-                     const float* lower_bound,
-                     const float* diff,
+SQ4ComputeCodesL2Sqr(const uint8_t* RESTRICT codes1,
+                     const uint8_t* RESTRICT codes2,
+                     const float* RESTRICT lower_bound,
+                     const float* RESTRICT diff,
                      uint64_t dim) {
     return avx2::SQ4ComputeCodesL2Sqr(codes1, codes2, lower_bound, diff, dim);
 }
 
 float
-SQ4UniformComputeCodesIP(const uint8_t* codes1, const uint8_t* codes2, uint64_t dim) {
+SQ4UniformComputeCodesIP(const uint8_t* RESTRICT codes1,
+                         const uint8_t* RESTRICT codes2,
+                         uint64_t dim) {
 #if defined(ENABLE_AVX512)
     if (dim == 0) {
         return 0;
@@ -743,7 +745,9 @@ SQ4UniformComputeCodesIP(const uint8_t* codes1, const uint8_t* codes2, uint64_t 
 }
 
 float
-SQ8UniformComputeCodesIP(const uint8_t* codes1, const uint8_t* codes2, uint64_t dim) {
+SQ8UniformComputeCodesIP(const uint8_t* RESTRICT codes1,
+                         const uint8_t* RESTRICT codes2,
+                         uint64_t dim) {
 #if defined(ENABLE_AVX512)
     if (dim == 0) {
         return 0.0f;
@@ -918,10 +922,10 @@ Normalize(const float* from, float* to, uint64_t dim) {
 }
 
 void
-PQFastScanLookUp32(const uint8_t* lookup_table,
-                   const uint8_t* codes,
+PQFastScanLookUp32(const uint8_t* RESTRICT lookup_table,
+                   const uint8_t* RESTRICT codes,
                    uint64_t pq_dim,
-                   int32_t* result) {
+                   int32_t* RESTRICT result) {
 #if defined(ENABLE_AVX512)
     if (pq_dim == 0) {
         return;
@@ -1054,6 +1058,139 @@ BitNot(const uint8_t* x, const uint64_t num_byte, uint8_t* result) {
     }
 #else
     return avx2::BitNot(x, num_byte, result);
+#endif
+}
+
+void
+KacsWalk(float* data, size_t len) {
+#if defined(ENABLE_AVX512)
+    int base = len % 2;
+    int offset = base + (len / 2);
+    int i = 0;
+    for (; i + 16 < len / 2; i += 16) {
+        __m512 x = _mm512_loadu_ps(&data[i]);
+        __m512 y = _mm512_loadu_ps(&data[i + offset]);
+
+        __m512 new_x = _mm512_add_ps(x, y);
+        __m512 new_y = _mm512_sub_ps(x, y);
+
+        _mm512_storeu_ps(&data[i], new_x);
+        _mm512_storeu_ps(&data[i + offset], new_y);
+    }
+    for (; i < len / 2; i++) {
+        float x = data[i];
+        float y = data[i + offset];
+        data[i] = x + y;
+        data[i + offset] = x - y;
+    }
+    if (base != 0) {
+        data[len / 2] *= std::sqrt(2);
+    }
+#else
+    return avx2::KacsWalk(data, len);
+#endif
+}
+
+void
+FlipSign(const uint8_t* flip, float* data, size_t dim) {
+#if defined(ENABLE_AVX512)
+    constexpr size_t kFloatsPerChunk = 64;
+    size_t i = 0;
+    for (; i + 64 < dim; i += kFloatsPerChunk) {
+        // Load 64 bits (8 bytes) from the bit sequence
+        uint64_t mask_bits;
+        std::memcpy(&mask_bits, &flip[i / 8], sizeof(mask_bits));
+
+        // Split into four 16-bit mask segments
+        const __mmask16 mask0 = _cvtu32_mask16(static_cast<uint32_t>(mask_bits & 0xFFFF));
+        const __mmask16 mask1 = _cvtu32_mask16(static_cast<uint32_t>((mask_bits >> 16) & 0xFFFF));
+        const __mmask16 mask2 = _cvtu32_mask16(static_cast<uint32_t>((mask_bits >> 32) & 0xFFFF));
+        const __mmask16 mask3 = _cvtu32_mask16(static_cast<uint32_t>((mask_bits >> 48) & 0xFFFF));
+
+        // Prepare sign-flip constant
+        const __m512 sign_flip = _mm512_castsi512_ps(_mm512_set1_epi32(0x80000000));
+
+        // Process 16 floats at a time with each mask segment
+        __m512 vec0 = _mm512_loadu_ps(&data[i]);
+        vec0 = _mm512_mask_xor_ps(vec0, mask0, vec0, sign_flip);
+        _mm512_storeu_ps(&data[i], vec0);
+
+        __m512 vec1 = _mm512_loadu_ps(&data[i + 16]);
+        vec1 = _mm512_mask_xor_ps(vec1, mask1, vec1, sign_flip);
+        _mm512_storeu_ps(&data[i + 16], vec1);
+
+        __m512 vec2 = _mm512_loadu_ps(&data[i + 32]);
+        vec2 = _mm512_mask_xor_ps(vec2, mask2, vec2, sign_flip);
+        _mm512_storeu_ps(&data[i + 32], vec2);
+
+        __m512 vec3 = _mm512_loadu_ps(&data[i + 48]);
+        vec3 = _mm512_mask_xor_ps(vec3, mask3, vec3, sign_flip);
+        _mm512_storeu_ps(&data[i + 48], vec3);
+    }
+    for (; i < dim; i++) {
+        bool mask = (flip[i / 8] & (1 << (i % 8))) != 0;
+        if (mask) {
+            data[i] = -data[i];
+        }
+    }
+#else
+    return generic::FlipSign(flip, data, dim);
+#endif
+}
+
+void
+VecRescale(float* data, size_t dim, float val) {
+#if defined(ENABLE_AVX512)
+    __m512 scalar = _mm512_set1_ps(val);
+    size_t i = 0;
+    for (; i + 16 <= dim; i += 16) {
+        __m512 vec = _mm512_loadu_ps(&data[i]);
+        vec = _mm512_mul_ps(vec, scalar);
+        _mm512_storeu_ps(&data[i], vec);
+    }
+    for (; i < dim; i++) {
+        data[i] *= val;
+    }
+#else
+    return avx2::VecRescale(data, dim, val);
+#endif
+}
+
+void
+RotateOp(float* data, int idx, int dim_, int step) {
+#if defined(ENABLE_AVX512)
+    for (int i = 0; i < dim_; i += step * 2) {
+        for (int j = 0; j < step; j += 16) {
+            __m512 g1 = _mm512_loadu_ps(&data[i + j]);
+            __m512 g2 = _mm512_loadu_ps(&data[i + j + step]);
+            _mm512_storeu_ps(&data[i + j], _mm512_add_ps(g1, g2));
+            _mm512_storeu_ps(&data[i + j + step], _mm512_sub_ps(g1, g2));
+        }
+    }
+#else
+    return avx2::RotateOp(data, idx, dim_, step);
+#endif
+}
+
+void
+FHTRotate(float* data, size_t dim_) {
+#if defined(ENABLE_AVX512)
+    size_t n = dim_;
+    size_t step = 1;
+    while (step < n) {
+        if (step >= 16) {  // step is the power of 2
+            avx512::RotateOp(data, 0, dim_, step);
+        } else if (step == 8) {
+            avx2::RotateOp(data, 0, dim_, step);
+        } else if (step == 4) {
+            sse::RotateOp(data, 0, dim_, step);
+        } else {
+            generic::RotateOp(data, 0, dim_, step);
+        }
+        step *= 2;
+    }
+#else
+    return generic::FHTRotate(data, dim_);
 #endif
 }
 }  // namespace vsag::avx512

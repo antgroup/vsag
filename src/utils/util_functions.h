@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include <cmath>
 #include <string>
 
 #include "index/index_common_param.h"
@@ -81,5 +82,40 @@ split_string(const std::string& str, const char delimiter);
 
 std::string
 get_current_time();
+
+template <class T1, class T2>
+void
+copy_vector(const std::vector<T1>& from, std::vector<T2>& to) {
+    static_assert(std::is_same_v<T1, T2> || std::is_convertible_v<T1, T2>);
+    to.resize(from.size());
+    for (int64_t i = 0; i < from.size(); ++i) {
+        to[i] = static_cast<T2>(from[i]);
+    }
+}
+
+static inline __attribute__((always_inline)) bool
+is_approx_zero(const float v) {
+    return std::abs(v) < 1e-5;
+}
+
+std::string
+base64_encode(const std::string& in);
+
+template <typename T>
+std::string
+base64_encode_obj(T& obj) {
+    std::string to_string((char*)&obj, sizeof(obj));
+    return base64_encode(to_string);
+}
+
+std::string
+base64_decode(const std::string& in);
+
+template <typename T>
+void
+base64_decode_obj(const std::string& in, T& obj) {
+    std::string to_string = base64_decode(in);
+    memcpy(&obj, to_string.c_str(), sizeof(obj));
+}
 
 }  // namespace vsag

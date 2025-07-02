@@ -36,6 +36,7 @@ const char* const HGRAPH_BASE_CODES_KEY = "base_codes";
 const char* const HGRAPH_PRECISE_CODES_KEY = "precise_codes";
 const char* const HGRAPH_EXTRA_INFO_KEY = "extra_info";
 const char* const HGRAPH_USE_ATTRIBUTE_FILTER_KEY = "use_attribute_filter";
+const char* const HGRSPH_IMMUTABLE_KEY = "immutable";
 
 // IO param key
 const char* const IO_PARAMS_KEY = "io_params";
@@ -43,6 +44,7 @@ const char* const IO_PARAMS_KEY = "io_params";
 const char* const IO_TYPE_KEY = "type";
 const char* const IO_TYPE_VALUE_MEMORY_IO = "memory_io";
 const char* const IO_TYPE_VALUE_BUFFER_IO = "buffer_io";
+const char* const IO_TYPE_VALUE_MMAP_IO = "mmap_io";
 const char* const IO_TYPE_VALUE_ASYNC_IO = "async_io";
 const char* const IO_TYPE_VALUE_BLOCK_MEMORY_IO = "block_memory_io";
 const char* const BLOCK_IO_BLOCK_SIZE_KEY = "block_size";
@@ -71,6 +73,7 @@ const char* const RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY = "rabitq_bits_per_dim_
 const char* const SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE = "sq4_uniform_trunc_rate";
 const char* const PRODUCT_QUANTIZATION_DIM = "pq_dim";
 const char* const PRODUCT_QUANTIZATION_BITS = "pq_bits";
+const char* const USE_FHT = "use_fht";
 
 // graph param value
 const char* const GRAPH_PARAM_MAX_DEGREE = "max_degree";

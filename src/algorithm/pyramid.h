@@ -17,9 +17,9 @@
 
 #include <utility>
 
-#include "base_filter_functor.h"
 #include "data_cell/graph_interface.h"
 #include "impl/basic_searcher.h"
+#include "impl/filter/filter_headers.h"
 #include "impl/odescent_graph_builder.h"
 #include "index_feature_list.h"
 #include "inner_index_interface.h"
@@ -75,6 +75,7 @@ private:
     GraphInterfaceParamPtr graph_param_{nullptr};
 };
 
+// Pyramid index was introduced since v0.14
 class Pyramid : public InnerIndexInterface {
 public:
     static ParamPtr

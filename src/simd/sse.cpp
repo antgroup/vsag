@@ -89,7 +89,7 @@ __inline __m128i __attribute__((__always_inline__)) load_4_short(const uint16_t*
 #endif
 
 float
-FP32ComputeIP(const float* query, const float* codes, uint64_t dim) {
+FP32ComputeIP(const float* RESTRICT query, const float* RESTRICT codes, uint64_t dim) {
 #if defined(ENABLE_SSE)
     const int n = dim / 4;
     if (n == 0) {
@@ -114,7 +114,7 @@ FP32ComputeIP(const float* query, const float* codes, uint64_t dim) {
 }
 
 float
-FP32ComputeL2Sqr(const float* query, const float* codes, uint64_t dim) {
+FP32ComputeL2Sqr(const float* RESTRICT query, const float* RESTRICT codes, uint64_t dim) {
 #if defined(ENABLE_SSE)
     const uint64_t n = dim / 4;
     if (n == 0) {
@@ -138,12 +138,12 @@ FP32ComputeL2Sqr(const float* query, const float* codes, uint64_t dim) {
 }
 
 void
-FP32ComputeIPBatch4(const float* query,
+FP32ComputeIPBatch4(const float* RESTRICT query,
                     uint64_t dim,
-                    const float* codes1,
-                    const float* codes2,
-                    const float* codes3,
-                    const float* codes4,
+                    const float* RESTRICT codes1,
+                    const float* RESTRICT codes2,
+                    const float* RESTRICT codes3,
+                    const float* RESTRICT codes4,
                     float& result1,
                     float& result2,
                     float& result3,
@@ -197,12 +197,12 @@ FP32ComputeIPBatch4(const float* query,
 }
 
 void
-FP32ComputeL2SqrBatch4(const float* query,
+FP32ComputeL2SqrBatch4(const float* RESTRICT query,
                        uint64_t dim,
-                       const float* codes1,
-                       const float* codes2,
-                       const float* codes3,
-                       const float* codes4,
+                       const float* RESTRICT codes1,
+                       const float* RESTRICT codes2,
+                       const float* RESTRICT codes3,
+                       const float* RESTRICT codes4,
                        float& result1,
                        float& result2,
                        float& result3,
@@ -368,7 +368,7 @@ FP32ReduceAdd(const float* x, uint64_t dim) {
 }
 
 float
-BF16ComputeIP(const uint8_t* query, const uint8_t* codes, uint64_t dim) {
+BF16ComputeIP(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim) {
 #if defined(ENABLE_SSE)
     // Initialize the sum to 0
     __m128 sum = _mm_setzero_ps();
@@ -404,7 +404,7 @@ BF16ComputeIP(const uint8_t* query, const uint8_t* codes, uint64_t dim) {
 }
 
 float
-BF16ComputeL2Sqr(const uint8_t* query, const uint8_t* codes, uint64_t dim) {
+BF16ComputeL2Sqr(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim) {
 #if defined(ENABLE_SSE)
     // Initialize the sum to 0
     __m128 sum = _mm_setzero_ps();
@@ -441,20 +441,20 @@ BF16ComputeL2Sqr(const uint8_t* query, const uint8_t* codes, uint64_t dim) {
 }
 
 float
-FP16ComputeIP(const uint8_t* query, const uint8_t* codes, uint64_t dim) {
+FP16ComputeIP(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim) {
     return generic::FP16ComputeIP(query, codes, dim);
 }
 
 float
-FP16ComputeL2Sqr(const uint8_t* query, const uint8_t* codes, uint64_t dim) {
+FP16ComputeL2Sqr(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim) {
     return generic::FP16ComputeL2Sqr(query, codes, dim);
 }
 
 float
-SQ8ComputeIP(const float* query,
-             const uint8_t* codes,
-             const float* lower_bound,
-             const float* diff,
+SQ8ComputeIP(const float* RESTRICT query,
+             const uint8_t* RESTRICT codes,
+             const float* RESTRICT lower_bound,
+             const float* RESTRICT diff,
              uint64_t dim) {
 #if defined(ENABLE_SSE)
     // Initialize the sum to 0
@@ -493,10 +493,10 @@ SQ8ComputeIP(const float* query,
 }
 
 float
-SQ8ComputeL2Sqr(const float* query,
-                const uint8_t* codes,
-                const float* lower_bound,
-                const float* diff,
+SQ8ComputeL2Sqr(const float* RESTRICT query,
+                const uint8_t* RESTRICT codes,
+                const float* RESTRICT lower_bound,
+                const float* RESTRICT diff,
                 uint64_t dim) {
 #if defined(ENABLE_SSE)
     __m128 sum = _mm_setzero_ps();
@@ -535,10 +535,10 @@ SQ8ComputeL2Sqr(const float* query,
 }
 
 float
-SQ8ComputeCodesIP(const uint8_t* codes1,
-                  const uint8_t* codes2,
-                  const float* lower_bound,
-                  const float* diff,
+SQ8ComputeCodesIP(const uint8_t* RESTRICT codes1,
+                  const uint8_t* RESTRICT codes2,
+                  const float* RESTRICT lower_bound,
+                  const float* RESTRICT diff,
                   uint64_t dim) {
 #if defined(ENABLE_SSE)
     __m128 sum = _mm_setzero_ps();
@@ -576,10 +576,10 @@ SQ8ComputeCodesIP(const uint8_t* codes1,
 }
 
 float
-SQ8ComputeCodesL2Sqr(const uint8_t* codes1,
-                     const uint8_t* codes2,
-                     const float* lower_bound,
-                     const float* diff,
+SQ8ComputeCodesL2Sqr(const uint8_t* RESTRICT codes1,
+                     const uint8_t* RESTRICT codes2,
+                     const float* RESTRICT lower_bound,
+                     const float* RESTRICT diff,
                      uint64_t dim) {
 #if defined(ENABLE_SSE)
     __m128 sum = _mm_setzero_ps();
@@ -618,43 +618,45 @@ SQ8ComputeCodesL2Sqr(const uint8_t* codes1,
 }
 
 float
-SQ4ComputeIP(const float* query,
-             const uint8_t* codes,
-             const float* lower_bound,
-             const float* diff,
+SQ4ComputeIP(const float* RESTRICT query,
+             const uint8_t* RESTRICT codes,
+             const float* RESTRICT lower_bound,
+             const float* RESTRICT diff,
              uint64_t dim) {
     return generic::SQ4ComputeIP(query, codes, lower_bound, diff, dim);
 }
 
 float
-SQ4ComputeL2Sqr(const float* query,
-                const uint8_t* codes,
-                const float* lower_bound,
-                const float* diff,
+SQ4ComputeL2Sqr(const float* RESTRICT query,
+                const uint8_t* RESTRICT codes,
+                const float* RESTRICT lower_bound,
+                const float* RESTRICT diff,
                 uint64_t dim) {
     return generic::SQ4ComputeL2Sqr(query, codes, lower_bound, diff, dim);
 }
 
 float
-SQ4ComputeCodesIP(const uint8_t* codes1,
-                  const uint8_t* codes2,
-                  const float* lower_bound,
-                  const float* diff,
+SQ4ComputeCodesIP(const uint8_t* RESTRICT codes1,
+                  const uint8_t* RESTRICT codes2,
+                  const float* RESTRICT lower_bound,
+                  const float* RESTRICT diff,
                   uint64_t dim) {
     return generic::SQ4ComputeCodesIP(codes1, codes2, lower_bound, diff, dim);
 }
 
 float
-SQ4ComputeCodesL2Sqr(const uint8_t* codes1,
-                     const uint8_t* codes2,
-                     const float* lower_bound,
-                     const float* diff,
+SQ4ComputeCodesL2Sqr(const uint8_t* RESTRICT codes1,
+                     const uint8_t* RESTRICT codes2,
+                     const float* RESTRICT lower_bound,
+                     const float* RESTRICT diff,
                      uint64_t dim) {
     return generic::SQ4ComputeCodesL2Sqr(codes1, codes2, lower_bound, diff, dim);
 }
 
 float
-SQ4UniformComputeCodesIP(const uint8_t* codes1, const uint8_t* codes2, uint64_t dim) {
+SQ4UniformComputeCodesIP(const uint8_t* RESTRICT codes1,
+                         const uint8_t* RESTRICT codes2,
+                         uint64_t dim) {
 #if defined(ENABLE_SSE)
     if (dim == 0) {
         return 0;
@@ -687,7 +689,9 @@ SQ4UniformComputeCodesIP(const uint8_t* codes1, const uint8_t* codes2, uint64_t 
 }
 
 float
-SQ8UniformComputeCodesIP(const uint8_t* codes1, const uint8_t* codes2, uint64_t dim) {
+SQ8UniformComputeCodesIP(const uint8_t* RESTRICT codes1,
+                         const uint8_t* RESTRICT codes2,
+                         uint64_t dim) {
 #if defined(ENABLE_SSE)
     if (dim == 0) {
         return 0;
@@ -767,10 +771,10 @@ Prefetch(const void* data) {
 };
 
 void
-PQFastScanLookUp32(const uint8_t* lookup_table,
-                   const uint8_t* codes,
+PQFastScanLookUp32(const uint8_t* RESTRICT lookup_table,
+                   const uint8_t* RESTRICT codes,
                    uint64_t pq_dim,
-                   int32_t* result) {
+                   int32_t* RESTRICT result) {
 #if defined(ENABLE_SSE)
     __m128i sum[4];
     for (size_t i = 0; i < 4; i++) {
@@ -896,6 +900,86 @@ BitNot(const uint8_t* x, const uint64_t num_byte, uint8_t* result) {
     }
 #else
     return generic::BitNot(x, num_byte, result);
+#endif
+}
+
+void
+RotateOp(float* data, int idx, int dim_, int step) {
+#if defined(ENABLE_SSE)
+    for (int i = idx; i < dim_; i += step * 2) {
+        for (int j = 0; j < step; j += 4) {
+            __m128 g1 = _mm_loadu_ps(&data[i + j]);
+            __m128 g2 = _mm_loadu_ps(&data[i + j + step]);
+            _mm_storeu_ps(&data[i + j], _mm_add_ps(g1, g2));
+            _mm_storeu_ps(&data[i + j + step], _mm_sub_ps(g1, g2));
+        }
+    }
+#else
+    return generic::RotateOp(data, idx, dim_, step);
+#endif
+}
+
+void
+FHTRotate(float* data, size_t dim_) {
+#if defined(ENABLE_SSE)
+    size_t n = dim_;
+    size_t step = 1;
+    while (step < n) {
+        if (step >= 4) {
+            sse::RotateOp(data, 0, dim_, step);
+        } else {
+            generic::RotateOp(data, 0, dim_, step);
+        }
+        step *= 2;
+    }
+#else
+    return generic::FHTRotate(data, dim_);
+#endif
+}
+
+void
+VecRescale(float* data, size_t dim, float val) {
+#if defined(ENABLE_SSE)
+    int i = 0;
+    __m128 val_vec = _mm_set1_ps(val);
+    for (; i + 4 < dim; i += 4) {
+        __m128 data_vec = _mm_loadu_ps(&data[i]);
+        __m128 result_vec = _mm_mul_ps(data_vec, val_vec);
+        _mm_storeu_ps(&data[i], result_vec);
+    }
+    for (; i < dim; i++) {
+        data[i] *= val;
+    }
+#else
+    return generic::VecRescale(data, dim, val);
+#endif
+}
+
+void
+KacsWalk(float* data, size_t len) {
+#if defined(ENABLE_SSE)
+    size_t base = len % 2;
+    size_t offset = base + (len / 2);  // for odd dim
+    size_t i = 0;
+    for (; i + 4 < len / 2; i += 4) {
+        __m128 x = _mm_loadu_ps(&data[i]);
+        __m128 y = _mm_loadu_ps(&data[i + offset]);
+        _mm_storeu_ps(&data[i], _mm_add_ps(x, y));
+        _mm_storeu_ps(&data[i + offset], _mm_sub_ps(x, y));
+    }
+    for (; i < len / 2; i++) {
+        float add = data[i] + data[i + offset];
+        float sub = data[i] - data[i + offset];
+        data[i] = add;
+        data[i + offset] = sub;
+    }
+    if (base != 0) {
+        data[len / 2] *= std::sqrt(2.0F);
+        //In odd condition, we operate the prev len/2 items and the post len/2 items, the No.len/2 item stay still,
+        //As we need to resize the while sequence in the next step, so we increase the val of No.len/2 item to eliminate the impact of the following resize.
+    }
+#else
+    return generic::KacsWalk(data, len);
 #endif
 }
 }  // namespace vsag::sse

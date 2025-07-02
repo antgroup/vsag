@@ -27,13 +27,13 @@
 #include <vector>
 
 #include "algorithm/hnswlib/hnswlib.h"
-#include "base_filter_functor.h"
 #include "common.h"
 #include "data_cell/flatten_interface.h"
 #include "data_cell/graph_interface.h"
 #include "data_type.h"
 #include "hnsw_zparameters.h"
 #include "impl/conjugate_graph.h"
+#include "impl/filter/filter_headers.h"
 #include "index_common_param.h"
 #include "index_feature_list.h"
 #include "index_impl.h"
@@ -216,11 +216,6 @@ public:
     }
 
     tl::expected<void, Error>
-    Serialize(std::ostream& out_stream) override {
-        SAFE_CALL(return this->serialize(out_stream));
-    }
-
-    tl::expected<void, Error>
     Deserialize(const BinarySet& binary_set) override {
         SAFE_CALL(return this->deserialize(binary_set));
     }
@@ -230,11 +225,18 @@ public:
         SAFE_CALL(return this->deserialize(reader_set));
     }
 
+public:
+    tl::expected<void, Error>
+    Serialize(std::ostream& out_stream) override {
+        SAFE_CALL(return this->serialize(out_stream));
+    }
+
     tl::expected<void, Error>
     Deserialize(std::istream& in_stream) override {
         SAFE_CALL(return this->deserialize(in_stream));
     }
 
+public:
     tl::expected<void, Error>
     Merge(const std::vector<MergeUnit>& merge_units) override {
         SAFE_CALL(return this->merge(merge_units));
@@ -269,6 +271,11 @@ public:
     [[nodiscard]] bool
     CheckIdExist(int64_t id) const override {
         return this->check_id_exist(id);
+    }
+
+    int64_t
+    GetNumberRemoved() const override {
+        return this->get_num_removed_elements();
     }
 
     int64_t
@@ -372,13 +379,13 @@ private:
     serialize() const;
 
     tl::expected<void, Error>
-    serialize(std::ostream& out_stream);
-
-    tl::expected<void, Error>
     deserialize(const BinarySet& binary_set);
 
     tl::expected<void, Error>
     deserialize(const ReaderSet& reader_set);
+
+    tl::expected<void, Error>
+    serialize(std::ostream& out_stream);
 
     tl::expected<void, Error>
     deserialize(std::istream& in_stream);
@@ -406,6 +413,9 @@ private:
 
     int64_t
     get_num_elements() const;
+
+    int64_t
+    get_num_removed_elements() const;
 
     int64_t
     get_memory_usage() const;

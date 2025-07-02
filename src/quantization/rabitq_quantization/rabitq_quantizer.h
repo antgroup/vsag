@@ -18,11 +18,9 @@
 #include <cmath>
 #include <limits>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
-#include "impl/principal_component_analysis.h"
-#include "impl/random_orthogonal_matrix.h"
+#include "impl/transform/transformer_headers.h"
 #include "index/index_common_param.h"
 #include "inner_string_params.h"
 #include "quantization/quantizer.h"
@@ -31,6 +29,7 @@
 #include "simd/normalize.h"
 #include "simd/rabitq_simd.h"
 #include "typing.h"
+#include "utils/util_functions.h"
 
 namespace vsag {
 
@@ -51,6 +50,7 @@ public:
     explicit RaBitQuantizer(int dim,
                             uint64_t pca_dim,
                             uint64_t num_bits_per_dim_query,
+                            bool use_fht,
                             Allocator* allocator);
 
     explicit RaBitQuantizer(const RaBitQuantizerParamPtr& param,
@@ -133,16 +133,35 @@ public:
         return ret;
     }
 
+    void
+    EncodeSQ(const DataType* normed_data,
+             uint8_t* encode_data,
+             float& upper_bound,
+             float& lower_bound,
+             float& delta,
+             sum_type& query_sum) const;
+    void
+    DecodeSQ(const uint8_t* codes,
+             DataType* data,
+             const float upper_bound,
+             const float lower_bound) const;
+
+    void
+    ReOrderSQ(const uint8_t* quantized_data, uint8_t* reorder_data) const;
+    void
+    RecoverOrderSQ(const uint8_t* output, uint8_t* input) const;
+
 private:
     // compute related
     float inv_sqrt_d_{0};
 
     // random projection related
-    std::shared_ptr<RandomOrthogonalMatrix> rom_;
+    bool use_fht_{false};
+    std::shared_ptr<VectorTransformer> rom_;
     std::vector<float> centroid_;  // TODO(ZXY): use centroids (e.g., IVF or Graph) outside
 
     // pca related
-    std::shared_ptr<PrincipalComponentAnalysis> pca_;
+    std::shared_ptr<PCATransformer> pca_;
     std::uint64_t original_dim_{0};
     std::uint64_t pca_dim_{0};
 
@@ -167,10 +186,8 @@ private:
 };
 
 template <MetricType metric>
-RaBitQuantizer<metric>::RaBitQuantizer(int dim,
-                                       uint64_t pca_dim,
-                                       uint64_t num_bits_per_dim_query,
-                                       Allocator* allocator)
+RaBitQuantizer<metric>::RaBitQuantizer(
+    int dim, uint64_t pca_dim, uint64_t num_bits_per_dim_query, bool use_fht, Allocator* allocator)
     : Quantizer<RaBitQuantizer<metric>>(dim, allocator) {
     static_assert(metric == MetricType::METRIC_TYPE_L2SQR, "Unsupported metric type");
 
@@ -178,7 +195,7 @@ RaBitQuantizer<metric>::RaBitQuantizer(int dim,
     pca_dim_ = pca_dim;
     original_dim_ = dim;
     if (0 < pca_dim_ and pca_dim_ < dim) {
-        pca_.reset(new PrincipalComponentAnalysis(dim, pca_dim_, allocator));
+        pca_.reset(new PCATransformer(allocator, dim, pca_dim_));
         this->dim_ = pca_dim_;
     } else {
         pca_dim_ = dim;
@@ -191,7 +208,12 @@ RaBitQuantizer<metric>::RaBitQuantizer(int dim,
     centroid_.resize(this->dim_, 0);
 
     // random orthogonal matrix
-    rom_.reset(new RandomOrthogonalMatrix(this->dim_, allocator));
+    use_fht_ = use_fht;
+    if (use_fht_) {
+        rom_.reset(new FhtKacRotator(allocator, this->dim_));
+    } else {
+        rom_.reset(new RandomOrthogonalMatrix(allocator, this->dim_));
+    }
 
     // distance function related variable
     inv_sqrt_d_ = 1.0f / sqrt(this->dim_);
@@ -248,6 +270,7 @@ RaBitQuantizer<metric>::RaBitQuantizer(const RaBitQuantizerParamPtr& param,
     : RaBitQuantizer<metric>(common_param.dim_,
                              param->pca_dim_,
                              param->num_bits_per_dim_query_,
+                             param->use_fht_,
                              common_param.allocator_.get()){};
 
 template <MetricType metric>
@@ -269,10 +292,7 @@ RaBitQuantizer<metric>::TrainImpl(const DataType* data, uint64_t count) {
 
     // pca
     if (pca_dim_ != this->original_dim_) {
-        bool pca_result = pca_->Train(data, count);
-        if (not pca_result) {
-            return false;
-        }
+        pca_->Train(data, count);
     }
 
     // get centroid
@@ -295,24 +315,7 @@ RaBitQuantizer<metric>::TrainImpl(const DataType* data, uint64_t count) {
         centroid_[d] = centroid_[d] / (float)count;
     }
 
-    // generate rom
-    rom_->GenerateRandomOrthogonalMatrixWithRetry();
-
-    // validate rom
-    int retries = MAX_RETRIES;
-    bool successful_gen = true;
-    double det = rom_->ComputeDeterminant();
-    if (std::fabs(det - 1) > 1e-4) {
-        for (uint64_t i = 0; i < retries; i++) {
-            successful_gen = rom_->GenerateRandomOrthogonalMatrix();
-            if (successful_gen) {
-                break;
-            }
-        }
-    }
-    if (not successful_gen) {
-        return false;
-    }
+    rom_->Train(data, count);
 
     // transform centroid
     Vector<DataType> rp_centroids(this->dim_, 0, this->allocator_);
@@ -519,6 +522,84 @@ RaBitQuantizer<metric>::RecoverOrderSQ4(const uint8_t* output, uint8_t* input) c
 
 template <MetricType metric>
 void
+RaBitQuantizer<metric>::EncodeSQ(const DataType* normed_data,
+                                 uint8_t* quantized_data,
+                                 float& upper_bound,
+                                 float& lower_bound,
+                                 float& delta,
+                                 sum_type& query_sum) const {
+    lower_bound = std::numeric_limits<float>::max();
+    upper_bound = std::numeric_limits<float>::lowest();
+    for (size_t i = 0; i < this->dim_; i++) {
+        const float val = normed_data[i];
+        if (val < lower_bound)
+            lower_bound = val;
+        if (val > upper_bound)
+            upper_bound = val;
+    }
+    delta = (upper_bound - lower_bound) / ((1 << num_bits_per_dim_query_) - 1);
+    const float inv_delta = is_approx_zero(delta) ? 0.0f : 1.0f / delta;
+    query_sum = 0;
+    for (int32_t i = 0; i < this->dim_; i++) {
+        const uint val = std::round((normed_data[i] - lower_bound) * inv_delta);
+        quantized_data[i] = static_cast<uint8_t>(val);
+        query_sum += val;
+    }
+}
+
+template <MetricType metric>
+void
+RaBitQuantizer<metric>::ReOrderSQ(const uint8_t* quantized_data, uint8_t* reorder_data) const {
+    size_t offset = aligned_dim_ / 8;
+    for (size_t d = 0; d < this->dim_; d++) {
+        for (size_t bit_pos = 0; bit_pos < num_bits_per_dim_query_; bit_pos++) {
+            const bool bit = ((quantized_data[d] & (1 << bit_pos)) != 0);
+            reorder_data[bit_pos * offset + d / 8] |= (bit * (1 << (d % 8)));
+        }
+    }
+}
+
+template <MetricType metric>
+void
+RaBitQuantizer<metric>::DecodeSQ(const uint8_t* codes,
+                                 DataType* data,
+                                 const float upper_bound,
+                                 const float lower_bound) const {
+    for (uint64_t d = 0; d < this->dim_; d++) {
+        data[d] =
+            codes[d] / (float)((1 << num_bits_per_dim_query_) - 1) * (upper_bound - lower_bound) +
+            lower_bound;
+    }
+}
+
+template <MetricType metric>
+void
+RaBitQuantizer<metric>::RecoverOrderSQ(const uint8_t* output, uint8_t* input) const {
+    // note that the codesize of input is different from output
+    // output: align dim bits with 8 bits (1 byte)
+    size_t offset = aligned_dim_ / 8;
+    for (uint64_t d = 0; d < this->dim_; ++d) {
+        for (uint64_t bit_pos = 0; bit_pos < num_bits_per_dim_query_; ++bit_pos) {
+            // calculate the position in the reordered output
+            uint64_t output_bit_pos = bit_pos * aligned_dim_ + d;
+            uint64_t output_byte_i = output_bit_pos / 8;
+            uint64_t output_bit_i = output_bit_pos % 8;
+
+            // extract the bit
+            uint8_t bit_value = (output[output_byte_i] >> output_bit_i) & 0x1;
+
+            // calculate the position
+            uint64_t input_byte_i = d;
+            uint64_t input_bit_i = bit_pos;
+
+            // set the bit
+            input[input_byte_i] |= (bit_value << input_bit_i);
+        }
+    }
+}
+
+template <MetricType metric>
+void
 RaBitQuantizer<metric>::ProcessQueryImpl(const DataType* query,
                                          Computer<RaBitQuantizer>& computer) const {
     try {
@@ -546,23 +627,22 @@ RaBitQuantizer<metric>::ProcessQueryImpl(const DataType* query,
         // 4. query quantization
         if (num_bits_per_dim_query_ == 4) {
             // sq4 quantization
-            Vector<uint8_t> tmp_codes(this->query_code_size_, 0, this->allocator_);
-            SQ4UniformQuantizer<MetricType::METRIC_TYPE_IP> sq4_quantizer(
-                this->dim_, this->allocator_, 0.0f);
-            sq4_quantizer.Train(normed_data.data(), 1);
-            sq4_quantizer.EncodeOneImpl(normed_data.data(), tmp_codes.data());
-
-            // re-order and store codes
-            ReOrderSQ4(tmp_codes.data(), computer.buf_);
-
+            Vector<uint8_t> quantized_data(this->dim_, 0, this->allocator_);
+            float lower_bound = std::numeric_limits<float>::max();
+            float upper_bound = std::numeric_limits<float>::lowest();
+            float delta = 0.0F;
+            sum_type query_sum = 0;
+            EncodeSQ(normed_data.data(),
+                     quantized_data.data(),
+                     upper_bound,
+                     lower_bound,
+                     delta,
+                     query_sum);
+            ReOrderSQ(quantized_data.data(), reinterpret_cast<uint8_t*>(computer.buf_));
             // store info
-            auto lb_and_diff = sq4_quantizer.GetLBandDiff();
-            DataType lower_bound = lb_and_diff.first;
-            DataType delta = lb_and_diff.second / 15.0;
             *(DataType*)(computer.buf_ + query_offset_lb_) = lower_bound;
             *(DataType*)(computer.buf_ + query_offset_delta_) = delta;
-            *(sum_type*)(computer.buf_ + query_offset_sum_) =
-                sq4_quantizer.GetCodesSum(tmp_codes.data());
+            *(sum_type*)(computer.buf_ + query_offset_sum_) = query_sum;
         } else {
             // store codes
             memcpy(computer.buf_, normed_data.data(), normed_data.size() * sizeof(DataType));

@@ -45,7 +45,11 @@ GetRaBitQFloatBinaryIP() {
 
 static RaBitQSQ4UBinaryType
 GetRaBitQSQ4UBinaryIP() {
-    if (SimdStatus::SupportAVX512()) {
+    if (SimdStatus::SupportAVX512VPOPCNTDQ()) {
+#if defined(ENABLE_AVX512VPOPCNTDQ)
+        return avx512vpopcntdq::RaBitQSQ4UBinaryIP;
+#endif
+    } else if (SimdStatus::SupportAVX512()) {
 #if defined(ENABLE_AVX512)
         return avx512::RaBitQSQ4UBinaryIP;
 #endif
@@ -53,7 +57,108 @@ GetRaBitQSQ4UBinaryIP() {
     return generic::RaBitQSQ4UBinaryIP;
 }
 
+static FHTRotateType
+GetFHTRotate() {
+    if (SimdStatus::SupportAVX512()) {
+#if defined(ENABLE_AVX512)
+        return avx512::FHTRotate;
+#endif
+    } else if (SimdStatus::SupportAVX2()) {
+#if defined(ENABLE_AVX2)
+        return avx2::FHTRotate;
+#endif
+    } else if (SimdStatus::SupportAVX()) {
+#if defined(ENABLE_AVX)
+        return avx::FHTRotate;
+#endif
+    } else if (SimdStatus::SupportSSE()) {
+#if defined(ENABLE_SSE)
+        return sse::FHTRotate;
+#endif
+    }
+    return generic::FHTRotate;
+}
+
+static KacsWalkType
+GetKacsWalk() {
+    if (SimdStatus::SupportAVX512()) {
+#if defined(ENABLE_AVX512)
+        return avx512::KacsWalk;
+#endif
+    } else if (SimdStatus::SupportAVX2()) {
+#if defined(ENABLE_AVX2)
+        return avx2::KacsWalk;
+#endif
+    } else if (SimdStatus::SupportAVX()) {
+#if defined(ENABLE_AVX)
+        return avx::KacsWalk;
+#endif
+    } else if (SimdStatus::SupportSSE()) {
+#if defined(ENABLE_SSE)
+        return sse::KacsWalk;
+#endif
+    }
+    return generic::KacsWalk;
+}
+
+static VecRescaleType
+GetVecRescale() {
+    if (SimdStatus::SupportAVX512()) {
+#if defined(ENABLE_AVX512)
+        return avx512::VecRescale;
+#endif
+    } else if (SimdStatus::SupportAVX2()) {
+#if defined(ENABLE_AVX2)
+        return avx2::VecRescale;
+#endif
+    } else if (SimdStatus::SupportAVX()) {
+#if defined(ENABLE_AVX)
+        return avx::VecRescale;
+#endif
+    } else if (SimdStatus::SupportSSE()) {
+#if defined(ENABLE_SSE)
+        return sse::VecRescale;
+#endif
+    }
+    return generic::VecRescale;
+}
+
+static FlipSignType
+GetFlipSign() {
+    if (SimdStatus::SupportAVX512()) {
+#if defined(ENABLE_AVX512)
+        return avx512::FlipSign;
+#endif
+    }
+    return generic::FlipSign;
+}
+
+static RotateOpType
+GetRotateOp() {
+    if (SimdStatus::SupportAVX512()) {
+#if defined(ENABLE_AVX512)
+        return avx512::RotateOp;
+#endif
+    } else if (SimdStatus::SupportAVX2()) {
+#if defined(ENABLE_AVX2)
+        return avx2::RotateOp;
+#endif
+    } else if (SimdStatus::SupportAVX()) {
+#if defined(ENABLE_AVX)
+        return avx::RotateOp;
+#endif
+    } else if (SimdStatus::SupportSSE()) {
+#if defined(ENABLE_SSE)
+        return sse::RotateOp;
+#endif
+    }
+    return generic::RotateOp;
+}
 RaBitQFloatBinaryType RaBitQFloatBinaryIP = GetRaBitQFloatBinaryIP();
 RaBitQSQ4UBinaryType RaBitQSQ4UBinaryIP = GetRaBitQSQ4UBinaryIP();
-
+FHTRotateType FHTRotate = GetFHTRotate();
+KacsWalkType KacsWalk = GetKacsWalk();
+VecRescaleType VecRescale = GetVecRescale();
+FlipSignType FlipSign = GetFlipSign();
+RotateOpType RotateOp = GetRotateOp();
 }  // namespace vsag

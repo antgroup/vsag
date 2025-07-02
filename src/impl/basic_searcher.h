@@ -18,6 +18,7 @@
 #include <limits>
 
 #include "algorithm/hnswlib/algorithm_interface.h"
+#include "attr/executor/executor.h"
 #include "basic_optimizer.h"
 #include "common.h"
 #include "data_cell/flatten_interface.h"
@@ -52,6 +53,7 @@ public:
     float factor{2.0F};
     float first_order_scan_ratio{1.0F};
     Allocator* search_alloc{nullptr};
+    ExecutorPtr executor{nullptr};
 
     InnerSearchParam&
     operator=(const InnerSearchParam& other) {

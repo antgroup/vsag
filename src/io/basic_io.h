@@ -21,8 +21,8 @@
 
 #include "byte_buffer.h"
 #include "io_parameter.h"
-#include "stream_reader.h"
-#include "stream_writer.h"
+#include "storage/stream_reader.h"
+#include "storage/stream_writer.h"
 #include "utils/function_exists_check.h"
 
 namespace vsag {
@@ -234,7 +234,7 @@ protected:
      * It is a constant pointer, which means that it cannot be modified
      * after it is initialized.
      */
-    Allocator* const allocator_{nullptr};
+    Allocator* const allocator_;
 
 private:
     /**

@@ -129,6 +129,8 @@ extern const char* const SQ4_UNIFORM_TRUNC_RATE;
 extern const char* const RABITQ_PCA_DIM;
 extern const char* const RABITQ_BITS_PER_DIM_QUERY;
 
+extern const char* const RABITQ_USE_FHT;
+
 extern const char* const HGRAPH_SUPPORT_REMOVE;
 extern const char* const HGRAPH_REMOVE_FLAG_BIT;
 
@@ -144,6 +146,7 @@ extern const char* const HGRAPH_INIT_CAPACITY;
 extern const char* const HGRAPH_GRAPH_TYPE;
 extern const char* const HGRAPH_GRAPH_STORAGE_TYPE;
 extern const char* const HGRAPH_BUILD_THREAD_COUNT;
+extern const char* const HGRAPH_IMMUTABLE;
 extern const char* const HGRAPH_PRECISE_QUANTIZATION_TYPE;
 extern const char* const HGRAPH_BASE_IO_TYPE;
 extern const char* const HGRAPH_BASE_PQ_DIM;
@@ -173,4 +176,10 @@ extern const char* const IVF_USE_ATTRIBUTE_FILTER;
 
 extern const char* const GNO_IMI_FIRST_ORDER_BUCKETS_COUNT;
 extern const char* const GNO_IMI_SECOND_ORDER_BUCKETS_COUNT;
+
+// serialization
+extern const char* const SERIAL_MAGIC_BEGIN;
+extern const char* const SERIAL_MAGIC_END;
+extern const char* const SERIAL_META_KEY;
+
 }  // namespace vsag

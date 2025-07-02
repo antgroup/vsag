@@ -45,6 +45,7 @@ AttributeBucketInvertedDataCell::InsertWithBucket(const AttributeSet& attr_set,
         }
         auto& value_map = (*cur_bucket)[attr->name_];
         auto value_type = attr->GetValueType();
+        this->field_type_map_[attr->name_] = value_type;
         if (value_type == AttrValueType::INT32) {
             this->insert_by_type<int32_t>(value_map, attr, inner_id);
         } else if (value_type == AttrValueType::INT64) {
@@ -117,10 +118,11 @@ AttributeBucketInvertedDataCell::GetBitsetsByAttrAndBucketId(const Attribute& at
 
 void
 AttributeBucketInvertedDataCell::Serialize(StreamWriter& writer) {
+    AttributeInvertedInterface::Serialize(writer);
     StreamWriter::WriteObj(writer, multi_term_2_value_map_.size());
     for (auto& term_2_bucket_value_map : multi_term_2_value_map_) {
         StreamWriter::WriteObj(writer, term_2_bucket_value_map->size());
-        for (auto& [term, value_map] : *term_2_bucket_value_map) {
+        for (const auto& [term, value_map] : *term_2_bucket_value_map) {
             StreamWriter::WriteString(writer, term);
             value_map->Serialize(writer);
         }
@@ -128,7 +130,8 @@ AttributeBucketInvertedDataCell::Serialize(StreamWriter& writer) {
 }
 
 void
-AttributeBucketInvertedDataCell::Deserialize(StreamReader& reader) {
+AttributeBucketInvertedDataCell::Deserialize(lvalue_or_rvalue<StreamReader> reader) {
+    AttributeInvertedInterface::Deserialize(reader);
     uint64_t size;
     StreamReader::ReadObj(reader, size);
     multi_term_2_value_map_.reserve(size);

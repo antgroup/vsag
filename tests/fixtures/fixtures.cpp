@@ -33,17 +33,17 @@ const int RABITQ_MIN_RACALL_DIM = 960;
 std::vector<int>
 get_common_used_dims(uint64_t count, int seed) {
     const std::vector<int> dims = {
-        7,    8,    9,      // generic (dim < 32)
-        32,   33,   48,     // sse(32) + generic(dim < 16)
-        64,   65,   70,     // avx(64) + generic(dim < 16)
-        96,   97,   109,    // avx(64) + sse(32) + generic(dim < 16)
-        128,  129,          // avx512(128) + generic(dim < 16)
-        160,  161,          // avx512(128) + sse(32) + generic(dim < 16)
-        192,  193,          // avx512(128) + avx(64) + generic(dim < 16)
-        224,  225,          // avx512(128) + avx(64) + sse(32) + generic(dim < 16)
-        256,  512,          // common used dims
-        784,  960,          // common used dims
-        1024, 1536, 2048};  // common used dims
+        7,    8,   9,    // generic (dim < 32)
+        32,   33,  48,   // sse(32) + generic(dim < 16)
+        64,   65,  70,   // avx(64) + generic(dim < 16)
+        96,   97,  109,  // avx(64) + sse(32) + generic(dim < 16)
+        128,  129,       // avx512(128) + generic(dim < 16)
+        160,  161,       // avx512(128) + sse(32) + generic(dim < 16)
+        192,  193,       // avx512(128) + avx(64) + generic(dim < 16)
+        224,  225,       // avx512(128) + avx(64) + sse(32) + generic(dim < 16)
+        256,  512,       // common used dims
+        784,  960,       // common used dims
+        1024, 1536};     // common used dims
     if (count == -1 || count >= dims.size()) {
         return dims;
     }
@@ -212,7 +212,7 @@ FillIntegerValues(vsag::AttributeValue<T>* attr, uint32_t count, Gen& gen) {
     using Limits = std::numeric_limits<T>;
     std::uniform_int_distribution<int64_t> dist(Limits::min(), Limits::max());
     for (uint32_t i = 0; i < count; ++i) {
-        attr->value_.emplace_back(static_cast<T>(dist(gen)));
+        attr->GetValue().emplace_back(static_cast<T>(dist(gen)));
     }
 }
 
@@ -223,7 +223,7 @@ FillStringValues(vsag::AttributeValue<std::string>* attr,
                  uint32_t max_len,
                  Gen& gen) {
     std::uniform_int_distribution<uint32_t> len_dist(1, max_len);
-    std::uniform_int_distribution<char> char_dist('a', 'z');
+    std::uniform_int_distribution<int> char_dist('a', 'z');
     for (uint32_t i = 0; i < count; ++i) {
         uint32_t len = len_dist(gen);
         std::string str;
@@ -231,7 +231,7 @@ FillStringValues(vsag::AttributeValue<std::string>* attr,
         for (uint32_t c = 0; c < len; ++c) {
             str += char_dist(gen);
         }
-        attr->value_.emplace_back(str);
+        attr->GetValue().emplace_back(str);
     }
 }
 

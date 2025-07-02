@@ -25,6 +25,7 @@ AttributeInvertedDataCell::Insert(const AttributeSet& attr_set, InnerIdType inne
         }
         auto& value_map = term_2_value_map_[attr->name_];
         auto value_type = attr->GetValueType();
+        this->field_type_map_[attr->name_] = value_type;
         if (value_type == AttrValueType::INT32) {
             this->insert_by_type<int32_t>(value_map, attr, inner_id);
         } else if (value_type == AttrValueType::INT64) {
@@ -97,15 +98,17 @@ AttributeInvertedDataCell::GetBitsetsByAttrAndBucketId(const Attribute& attr_nam
 
 void
 AttributeInvertedDataCell::Serialize(StreamWriter& writer) {
+    AttributeInvertedInterface::Serialize(writer);
     StreamWriter::WriteObj(writer, term_2_value_map_.size());
-    for (auto& [term, value_map] : term_2_value_map_) {
+    for (const auto& [term, value_map] : term_2_value_map_) {
         StreamWriter::WriteString(writer, term);
         value_map->Serialize(writer);
     }
 }
 
 void
-AttributeInvertedDataCell::Deserialize(StreamReader& reader) {
+AttributeInvertedDataCell::Deserialize(lvalue_or_rvalue<StreamReader> reader) {
+    AttributeInvertedInterface::Deserialize(reader);
     uint64_t size;
     StreamReader::ReadObj(reader, size);
     term_2_value_map_.reserve(size);

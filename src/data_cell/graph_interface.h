@@ -24,8 +24,8 @@
 #include "graph_interface_parameter.h"
 #include "index/index_common_param.h"
 #include "inner_string_params.h"
-#include "stream_reader.h"
-#include "stream_writer.h"
+#include "storage/stream_reader.h"
+#include "storage/stream_writer.h"
 #include "typing.h"
 
 namespace vsag {
@@ -62,6 +62,18 @@ public:
 
     virtual void
     Prefetch(InnerIdType id, uint32_t neighbor_i) = 0;
+
+    virtual void
+    MergeOther(GraphInterfacePtr other, uint64_t bias) {
+        throw VsagException(ErrorType::INTERNAL_ERROR,
+                            "MergeOther in GraphInterface is not implemented");
+    }
+
+    virtual Vector<InnerIdType>
+    GetIds() const {
+        throw VsagException(ErrorType::INTERNAL_ERROR,
+                            "GetIds in GraphInterface is not implemented");
+    }
 
 public:
     virtual void
@@ -125,7 +137,6 @@ public:
     InnerIdType max_capacity_{100};
     uint32_t maximum_degree_{0};
 
-protected:
     std::atomic<InnerIdType> total_count_{0};
     Allocator* allocator_{nullptr};
 };

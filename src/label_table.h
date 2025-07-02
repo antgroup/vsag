@@ -17,8 +17,10 @@
 
 #include <fmt/format-inl.h>
 
-#include "stream_reader.h"
-#include "stream_writer.h"
+#include <atomic>
+
+#include "storage/stream_reader.h"
+#include "storage/stream_writer.h"
 #include "typing.h"
 
 namespace vsag {
@@ -29,20 +31,29 @@ using IdMapFunction = std::function<std::tuple<bool, int64_t>(int64_t)>;
 
 class LabelTable {
 public:
-    explicit LabelTable(Allocator* allocator)
-        : allocator_(allocator), label_table_(0, allocator), label_remap_(0, allocator){};
+    explicit LabelTable(Allocator* allocator, bool use_reverse_map = true)
+        : allocator_(allocator),
+          label_table_(0, allocator),
+          label_remap_(0, allocator),
+          use_reverse_map_(use_reverse_map){};
 
     inline void
     Insert(InnerIdType id, LabelType label) {
-        label_remap_[label] = id;
+        if (use_reverse_map_) {
+            label_remap_[label] = id;
+        }
         if (id + 1 > label_table_.size()) {
             label_table_.resize(id + 1);
         }
         label_table_[id] = label;
+        total_count_++;
     }
 
     inline bool
     Remove(LabelType label) {
+        if (not use_reverse_map_) {
+            return true;
+        }
         auto iter = label_remap_.find(label);
         if (iter == label_remap_.end()) {
             return false;
@@ -53,15 +64,26 @@ public:
 
     inline InnerIdType
     GetIdByLabel(LabelType label) const {
-        if (this->label_remap_.count(label) == 0) {
+        if (use_reverse_map_) {
+            if (this->label_remap_.count(label) == 0) {
+                throw std::runtime_error(fmt::format("label {} is not exists", label));
+            }
+            return this->label_remap_.at(label);
+        }
+        auto result = std::find(label_table_.begin(), label_table_.end(), label);
+        if (result == label_table_.end()) {
             throw std::runtime_error(fmt::format("label {} is not exists", label));
         }
-        return this->label_remap_.at(label);
+        return result - label_table_.begin();
     }
 
     inline bool
     CheckLabel(LabelType label) const {
-        return label_remap_.find(label) != label_remap_.end();
+        if (use_reverse_map_) {
+            return label_remap_.find(label) != label_remap_.end();
+        }
+        auto result = std::find(label_table_.begin(), label_table_.end(), label);
+        return result != label_table_.end();
     }
 
     inline LabelType
@@ -79,11 +101,26 @@ public:
     }
 
     void
-    Deserialize(StreamReader& reader) {
+    Deserialize(lvalue_or_rvalue<StreamReader> reader) {
         StreamReader::ReadVector(reader, label_table_);
-        for (InnerIdType id = 0; id < label_table_.size(); ++id) {
-            this->label_remap_[label_table_[id]] = id;
+        if (use_reverse_map_) {
+            for (InnerIdType id = 0; id < label_table_.size(); ++id) {
+                this->label_remap_[label_table_[id]] = id;
+            }
         }
+    }
+
+    void
+    Resize(uint64_t new_size) {
+        if (new_size < total_count_) {
+            return;
+        }
+        label_table_.resize(new_size);
+    }
+
+    int64_t
+    GetTotalCount() {
+        return total_count_;
     }
 
     void
@@ -94,6 +131,8 @@ public:
     UnorderedMap<LabelType, InnerIdType> label_remap_;
 
     Allocator* allocator_{nullptr};
+    std::atomic<int64_t> total_count_{0L};
+    bool use_reverse_map_{true};
 };
 
 }  // namespace vsag

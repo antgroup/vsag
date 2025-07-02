@@ -134,6 +134,7 @@ const char* const SQ4_UNIFORM_TRUNC_RATE = "sq4_uniform_trunc_rate";
 const char* const RABITQ_PCA_DIM = "rabitq_pca_dim";
 const char* const RABITQ_BITS_PER_DIM_QUERY = "rabitq_bits_per_dim_query";
 
+const char* const RABITQ_USE_FHT = "rabitq_use_fht";
 const char* const HGRAPH_SUPPORT_REMOVE = "support_remove";
 const char* const HGRAPH_REMOVE_FLAG_BIT = "remove_flag_bit";
 
@@ -148,6 +149,7 @@ const char* const HGRAPH_INIT_CAPACITY = "hgraph_init_capacity";
 const char* const HGRAPH_GRAPH_TYPE = "graph_type";
 const char* const HGRAPH_GRAPH_STORAGE_TYPE = "graph_storage_type";
 const char* const HGRAPH_BUILD_THREAD_COUNT = "build_thread_count";
+const char* const HGRAPH_IMMUTABLE = "immutable";
 const char* const HGRAPH_PRECISE_QUANTIZATION_TYPE = "precise_quantization_type";
 const char* const HGRAPH_BASE_IO_TYPE = "base_io_type";
 const char* const HGRAPH_BASE_PQ_DIM = "base_pq_dim";
@@ -178,5 +180,9 @@ const char* const IVF_PRECISE_QUANTIZATION_TYPE = "precise_quantization_type";
 const char* const IVF_PRECISE_IO_TYPE = "precise_io_type";
 const char* const IVF_PRECISE_FILE_PATH = "precise_file_path";
 const char* const IVF_USE_ATTRIBUTE_FILTER = "use_attribute_filter";
+
+const char* const SERIAL_MAGIC_BEGIN = "vsag0000";
+const char* const SERIAL_MAGIC_END = "0000gasv";
+const char* const SERIAL_META_KEY = "_meta";
 
 };  // namespace vsag
