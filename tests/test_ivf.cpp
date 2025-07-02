@@ -441,7 +441,7 @@ TestIVFBuildWithResidual(const fixtures::IVFTestIndexPtr& test_index,
             for (auto train_type : resource->train_types) {
                 for (auto [base_quantization_str, recall] : tmp_test_cases) {
                     auto count = std::min(300, static_cast<int32_t>(dim / 4));
-                    if (dim > 960) {
+                    if (train_type == "kmeans") {
                         recall *= 0.8F;
                     }
                     auto search_param =
