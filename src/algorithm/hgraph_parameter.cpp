@@ -101,7 +101,7 @@ HGraphParameter::FromJson(const JsonType& json) {
 
     hierarchical_graph_param = std::make_shared<SparseGraphDatacellParameter>();
     hierarchical_graph_param->max_degree_ = this->bottom_graph_param->max_degree_ / 2;
-    if (graph_storage_type != GraphStorageTypes::GRAPH_STORAGE_TYPE_FLAT) {
+    if (graph_storage_type == GraphStorageTypes::GRAPH_STORAGE_TYPE_FLAT) {
         auto graph_param =
             std::dynamic_pointer_cast<GraphDataCellParameter>(this->bottom_graph_param);
         if (graph_param != nullptr) {
