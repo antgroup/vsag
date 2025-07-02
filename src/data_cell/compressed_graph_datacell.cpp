@@ -120,8 +120,8 @@ CompressedGraphDataCell::Deserialize(StreamReader& reader) {
             StreamReader::ReadObj(reader, encoder.low_bits_size);
             StreamReader::ReadObj(reader, encoder.high_bits_size);
 
-            encoder.bits = static_cast<uint64_t*>(allocator_->Allocate(
-                (encoder.low_bits_size + encoder.high_bits_size) * sizeof(uint64_t)));
+            encoder.bits = static_cast<uint32_t*>(allocator_->Allocate(
+                (encoder.low_bits_size + encoder.high_bits_size) * sizeof(uint32_t)));
             for (size_t j = 0; j < encoder.low_bits_size + encoder.high_bits_size; j++) {
                 StreamReader::ReadObj(reader, encoder.bits[j]);
             }

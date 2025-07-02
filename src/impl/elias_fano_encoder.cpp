@@ -23,12 +23,12 @@ namespace vsag {
 
 // Cross-platform implementation of ctzll (count trailing zeros)
 static inline size_t
-ctzll(uint64_t x) {
+ctzll(uint32_t x) {
 #ifdef __GNUC__
-    return __builtin_ctzll(x);
+    return __builtin_ctz(x);
 #else
     if (x == 0) {
-        return 64;
+        return 32;
     }
     int count = 0;
     while ((x & 1) == 0) {
@@ -40,8 +40,8 @@ ctzll(uint64_t x) {
 }
 
 static inline void
-set_high_bit(uint64_t* bits_array, size_t pos, size_t low_bits_size) {
-    bits_array[low_bits_size + (pos >> 6)] |= (1ULL << (pos & 63));
+set_high_bit(uint32_t* bits_array, size_t pos, size_t low_bits_size) {
+    bits_array[low_bits_size + (pos >> 5)] |= (1U << (pos & 31));
 }
 
 // requires "const" to pass lint check
@@ -52,15 +52,15 @@ EliasFanoEncoder::set_low_bits(size_t index, InnerIdType value) const {
     }
 
     size_t bit_pos = index * low_bits_width;
-    size_t word_pos = bit_pos >> 6;
-    size_t shift = bit_pos & 63;
-    uint64_t mask = ((1ULL << low_bits_width) - 1) << shift;
-    bits[word_pos] = (bits[word_pos] & ~mask) | ((uint64_t)value << shift);
+    size_t word_pos = bit_pos >> 5;
+    size_t shift = bit_pos & 31;
+    uint32_t mask = ((1U << low_bits_width) - 1) << shift;
+    bits[word_pos] = (bits[word_pos] & ~mask) | ((uint32_t)value << shift);
 
     // Handle word boundary crossing
-    if (shift + low_bits_width > 64 && word_pos + 1 < low_bits_size) {
-        size_t remaining_bits = shift + low_bits_width - 64;
-        mask = (1ULL << remaining_bits) - 1;
+    if (shift + low_bits_width > 32 && word_pos + 1 < low_bits_size) {
+        size_t remaining_bits = shift + low_bits_width - 32;
+        mask = (1U << remaining_bits) - 1;
         bits[word_pos + 1] =
             (bits[word_pos + 1] & ~mask) | (value >> (low_bits_width - remaining_bits));
     }
@@ -73,14 +73,14 @@ EliasFanoEncoder::get_low_bits(size_t index) const {
     }
 
     size_t bit_pos = index * low_bits_width;
-    size_t word_pos = bit_pos >> 6;
-    size_t shift = bit_pos & 63;
-    InnerIdType value = (bits[word_pos] >> shift) & ((1ULL << low_bits_width) - 1);
+    size_t word_pos = bit_pos >> 5;
+    size_t shift = bit_pos & 31;
+    InnerIdType value = (bits[word_pos] >> shift) & ((1U << low_bits_width) - 1);
 
     // Handle word boundary crossing
-    if (shift + low_bits_width > 64 && word_pos + 1 < low_bits_size) {
-        size_t remaining_bits = shift + low_bits_width - 64;
-        value |= (bits[word_pos + 1] & ((1ULL << remaining_bits) - 1))
+    if (shift + low_bits_width > 32 && word_pos + 1 < low_bits_size) {
+        size_t remaining_bits = shift + low_bits_width - 32;
+        value |= (bits[word_pos + 1] & ((1U << remaining_bits) - 1))
                  << (low_bits_width - remaining_bits);
     }
     return value;
@@ -110,15 +110,15 @@ EliasFanoEncoder::Encode(const Vector<InnerIdType>& values,
 
     // Calculate the size of high bits
     const size_t high_bits_count = (max_value >> low_bits_width) + num_elements + 1;
-    high_bits_size = (high_bits_count + 63) / 64;
+    high_bits_size = (high_bits_count + 31) / 32;
 
     // Calculate the size of low bits
     size_t total_low_bits = static_cast<size_t>(num_elements) * low_bits_width;
-    low_bits_size = std::max<size_t>(1, (total_low_bits + 63) / 64);
+    low_bits_size = std::max<size_t>(1, (total_low_bits + 31) / 32);
 
     // Allocate combined space for both low and high bits
-    bits = static_cast<uint64_t*>(
-        allocator->Allocate((low_bits_size + high_bits_size) * sizeof(uint64_t)));
+    bits = static_cast<uint32_t*>(
+        allocator->Allocate((low_bits_size + high_bits_size) * sizeof(uint32_t)));
     std::fill(bits, bits + low_bits_size + high_bits_size, 0);
 
     // Encode each value
@@ -139,13 +139,13 @@ EliasFanoEncoder::DecompressAll(Vector<InnerIdType>& neighbors) const {
     // Decompress all values at once
     size_t count = 0;
     for (size_t i = 0; i < high_bits_size && count < num_elements; ++i) {
-        uint64_t word = bits[low_bits_size + i];
+        uint32_t word = bits[low_bits_size + i];
 
         // Use ctzll to find position of 1
         while (word != 0U && count < num_elements) {
             size_t bit = ctzll(word);
             // Found 1, calculate corresponding value
-            InnerIdType high = (i * 64 + bit) - count;
+            InnerIdType high = (i * 32 + bit) - count;
             InnerIdType low = get_low_bits(count);
             neighbors[count] = ((high << low_bits_width) | low);
             count++;

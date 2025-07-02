@@ -20,6 +20,7 @@
 namespace vsag {
 
 /// @brief Elias-Fano Encoder for *ordered* adjacency list
+/// @note Only used in Compressed Graph Datacell
 /// @note Our adjacency list size is mostly no more than 255, so we use uint8_t to store the number of elements
 class EliasFanoEncoder {
 public:
@@ -47,7 +48,7 @@ public:
 
     [[nodiscard]] size_t
     SizeInBytes() const {
-        return sizeof(EliasFanoEncoder) + (low_bits_size + high_bits_size) * sizeof(uint64_t);
+        return sizeof(EliasFanoEncoder) + (low_bits_size + high_bits_size) * sizeof(uint32_t);
     }
 
     [[nodiscard]] uint8_t
@@ -55,7 +56,7 @@ public:
         return num_elements;
     }
 
-    uint64_t* bits{nullptr};    // Combined storage for low bits and high bits
+    uint32_t* bits{nullptr};    // Combined storage for low bits and high bits
     uint8_t num_elements{0};    // Number of elements, max 255
     uint8_t low_bits_width{0};  // Width of low bits
     uint8_t low_bits_size{0};   // Size of low_bits_ array
