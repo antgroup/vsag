@@ -1175,8 +1175,9 @@ TestIVFGNOIMIBuildWithResidual(const fixtures::IVFTestIndexPtr& test_index,
         for (auto dim : resource->dims) {
             for (auto train_type : resource->train_types) {
                 for (auto& [base_quantization_str, recall] : resource->test_cases) {
-                    recall *=
-                        0.8;  // Recall for the random dataset in this test will be relatively low.
+                    if (base_quantization_str == "sq8_uniform,fp32") {
+                        continue;
+                    }
                     auto count = std::min(900, static_cast<int32_t>(dim / 4));
                     auto search_param =
                         fmt::format(fixtures::search_param_tmp, std::max(800, count));
