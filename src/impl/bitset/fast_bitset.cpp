@@ -78,12 +78,20 @@ FastBitset::Or(const ComputableBitset& another) {
         }
         return;
     }
-    auto max_size = std::max(data_.size(), fast_another->data_.size());
-    data_.resize(max_size, 0);
-    BitOr(reinterpret_cast<const uint8_t*>(data_.data()),
-          reinterpret_cast<const uint8_t*>(fast_another->data_.data()),
-          max_size * sizeof(uint64_t),
-          reinterpret_cast<uint8_t*>(data_.data()));
+    if (data_.size() >= fast_another->data_.size()) {
+        auto min_size = fast_another->data_.size();
+        BitOr(reinterpret_cast<const uint8_t*>(this->data_.data()),
+              reinterpret_cast<const uint8_t*>(fast_another->data_.data()),
+              min_size * sizeof(uint64_t),
+              reinterpret_cast<uint8_t*>(this->data_.data()));
+    } else {
+        auto max_size = fast_another->data_.size();
+        this->data_.resize(max_size, 0);
+        BitOr(reinterpret_cast<const uint8_t*>(this->data_.data()),
+              reinterpret_cast<const uint8_t*>(fast_another->data_.data()),
+              max_size * sizeof(uint64_t),
+              reinterpret_cast<uint8_t*>(this->data_.data()));
+    }
 }
 
 void
@@ -95,18 +103,30 @@ FastBitset::And(const ComputableBitset& another) {
     std::lock(mutex_, fast_another->mutex_);
     std::lock_guard<std::shared_mutex> lock1(mutex_, std::adopt_lock);
     std::lock_guard<std::shared_mutex> lock2(fast_another->mutex_, std::adopt_lock);
-    auto max_size = std::max(data_.size(), fast_another->data_.size());
-    data_.resize(max_size, 0);
     if (fast_another->data_.empty()) {
         if (not fast_another->fill_bit_) {
             this->Clear();
         }
         return;
     }
-    BitAnd(reinterpret_cast<const uint8_t*>(data_.data()),
-           reinterpret_cast<const uint8_t*>(fast_another->data_.data()),
-           max_size * sizeof(uint64_t),
-           reinterpret_cast<uint8_t*>(data_.data()));
+    if (data_.size() >= fast_another->data_.size()) {
+        auto min_size = fast_another->data_.size();
+        auto max_size = data_.size();
+        BitAnd(reinterpret_cast<const uint8_t*>(this->data_.data()),
+               reinterpret_cast<const uint8_t*>(fast_another->data_.data()),
+               min_size * sizeof(uint64_t),
+               reinterpret_cast<uint8_t*>(this->data_.data()));
+        if (max_size > min_size) {
+            std::fill(data_.begin() + static_cast<int64_t>(min_size), data_.end(), 0);
+        }
+    } else {
+        auto max_size = fast_another->data_.size();
+        this->data_.resize(max_size, 0);
+        BitAnd(reinterpret_cast<const uint8_t*>(this->data_.data()),
+               reinterpret_cast<const uint8_t*>(fast_another->data_.data()),
+               max_size * sizeof(uint64_t),
+               reinterpret_cast<uint8_t*>(this->data_.data()));
+    }
 }
 
 void
@@ -118,12 +138,20 @@ FastBitset::Xor(const ComputableBitset& another) {
     std::lock(mutex_, fast_another->mutex_);
     std::lock_guard<std::shared_mutex> lock1(mutex_, std::adopt_lock);
     std::lock_guard<std::shared_mutex> lock2(fast_another->mutex_, std::adopt_lock);
-    auto max_size = std::max(data_.size(), fast_another->data_.size());
-    data_.resize(max_size, 0);
-    BitXor(reinterpret_cast<const uint8_t*>(data_.data()),
-           reinterpret_cast<const uint8_t*>(fast_another->data_.data()),
-           max_size * sizeof(uint64_t),
-           reinterpret_cast<uint8_t*>(data_.data()));
+    if (data_.size() >= fast_another->data_.size()) {
+        auto min_size = fast_another->data_.size();
+        BitXor(reinterpret_cast<const uint8_t*>(this->data_.data()),
+               reinterpret_cast<const uint8_t*>(fast_another->data_.data()),
+               min_size * sizeof(uint64_t),
+               reinterpret_cast<uint8_t*>(this->data_.data()));
+    } else {
+        auto max_size = fast_another->data_.size();
+        this->data_.resize(max_size, 0);
+        BitXor(reinterpret_cast<const uint8_t*>(this->data_.data()),
+               reinterpret_cast<const uint8_t*>(fast_another->data_.data()),
+               max_size * sizeof(uint64_t),
+               reinterpret_cast<uint8_t*>(this->data_.data()));
+    }
 }
 
 void
