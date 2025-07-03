@@ -26,6 +26,7 @@
 #include "../monitor/recall_monitor.h"
 #include "typing.h"
 #include "vsag/filter.h"
+#include "vsag_exception.h"
 
 namespace vsag::eval {
 
@@ -249,7 +250,7 @@ SearchEvalCase::process_result() {
     // TODO(deming): remove try-catch after implement GetMemoryUsageDetail
     try {
         result["memory_detail(B)"] = this->index_->GetMemoryUsageDetail();
-    } catch (std::exception& e) {
+    } catch (vsag::VsagException& e) {
         logger_->Debug(e.what());
     }
     EvalCase::MergeJsonType(this->basic_info_, result);

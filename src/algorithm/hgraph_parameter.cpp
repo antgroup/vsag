@@ -15,6 +15,7 @@
 
 #include "hgraph_parameter.h"
 
+#include "data_cell/graph_datacell_parameter.h"
 #include "data_cell/graph_interface_parameter.h"
 #include "data_cell/sparse_vector_datacell_parameter.h"
 #include "inner_string_params.h"
@@ -97,6 +98,21 @@ HGraphParameter::FromJson(const JsonType& json) {
     }
     this->bottom_graph_param =
         GraphInterfaceParameter::GetGraphParameterByJson(graph_storage_type, graph_json);
+
+    hierarchical_graph_param = std::make_shared<SparseGraphDatacellParameter>();
+    hierarchical_graph_param->max_degree_ = this->bottom_graph_param->max_degree_ / 2;
+    if (graph_storage_type == GraphStorageTypes::GRAPH_STORAGE_TYPE_FLAT) {
+        auto graph_param =
+            std::dynamic_pointer_cast<GraphDataCellParameter>(this->bottom_graph_param);
+        if (graph_param != nullptr) {
+            hierarchical_graph_param->remove_flag_bit_ = graph_param->remove_flag_bit_;
+            hierarchical_graph_param->support_delete_ = graph_param->support_remove_;
+        } else {
+            hierarchical_graph_param->support_delete_ = false;
+        }
+    } else {
+        hierarchical_graph_param->support_delete_ = false;
+    }
 
     if (json.contains(BUILD_PARAMS_KEY)) {
         const auto& build_params = json[BUILD_PARAMS_KEY];

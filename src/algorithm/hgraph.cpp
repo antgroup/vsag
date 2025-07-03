@@ -52,6 +52,7 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
       build_thread_count_(hgraph_param->build_thread_count),
       odescent_param_(hgraph_param->odescent_param),
       graph_type_(hgraph_param->graph_type),
+      hierarchical_datacell_param_(hgraph_param->hierarchical_graph_param),
       extra_info_size_(common_param.extra_info_size_),
       deleted_ids_(allocator_) {
     this->immutable_ = hgraph_param->immutable;
@@ -71,16 +72,6 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
 
     this->bottom_graph_ =
         GraphInterface::MakeInstance(hgraph_param->bottom_graph_param, common_param);
-    auto graph_param =
-        std::dynamic_pointer_cast<GraphDataCellParameter>(hgraph_param->bottom_graph_param);
-    sparse_datacell_param_ = std::make_shared<SparseGraphDatacellParameter>();
-    sparse_datacell_param_->max_degree_ = hgraph_param->bottom_graph_param->max_degree_ / 2;
-    if (graph_param != nullptr) {
-        sparse_datacell_param_->remove_flag_bit_ = graph_param->remove_flag_bit_;
-        sparse_datacell_param_->support_delete_ = graph_param->support_remove_;
-    } else {
-        sparse_datacell_param_->support_delete_ = false;
-    }
     mult_ = 1 / log(1.0 * static_cast<double>(this->bottom_graph_->MaximumDegree()));
 
     if (extra_info_size_ > 0) {
@@ -554,7 +545,7 @@ HGraph::EstimateMemory(uint64_t num_elements) const {
 
 GraphInterfacePtr
 HGraph::generate_one_route_graph() {
-    return std::make_shared<SparseGraphDataCell>(sparse_datacell_param_, this->allocator_);
+    return std::make_shared<SparseGraphDataCell>(hierarchical_datacell_param_, this->allocator_);
 }
 
 template <InnerSearchMode mode>
