@@ -1147,13 +1147,15 @@ HGraph::InitFeatures() {
     if (name == QUANTIZATION_TYPE_VALUE_FP32) {
         have_fp32 = true;
     }
-    if (use_reorder_ and
+    if (use_reorder_ and not ignore_reorder_ and
         this->high_precise_codes_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32) {
         have_fp32 = true;
     }
     if (have_fp32) {
         this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_CAL_DISTANCE_BY_ID);
-        this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_GET_VECTOR_BY_IDS);
+        if (metric_ != MetricType::METRIC_TYPE_COSINE) {
+            this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_GET_VECTOR_BY_IDS);
+        }
     }
 
     // metric
