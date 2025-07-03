@@ -31,7 +31,9 @@ public:
     }
 
 public:
-    explicit SafeAllocator(Allocator* raw_allocator, bool owned = false)
+    explicit SafeAllocator(Allocator* raw_allocator) : SafeAllocator(raw_allocator, false){};
+
+    explicit SafeAllocator(Allocator* raw_allocator, bool owned)
         : raw_allocator_(raw_allocator), owned_(owned) {
     }
 
@@ -79,7 +81,7 @@ public:
     }
 
 private:
-    Allocator* const raw_allocator_ = nullptr;
+    Allocator* const raw_allocator_{nullptr};
 
     std::shared_ptr<Allocator> const raw_allocator_shared_;
 

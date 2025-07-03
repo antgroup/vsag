@@ -15,13 +15,14 @@
 
 #pragma once
 
+#include <fmt/format.h>
+
 #include <any>
 
 #include "FCBaseVisitor.h"
 #include "FCLexer.h"
 #include "antlr4-runtime.h"
 #include "expression.h"
-#include "fmt/format.h"
 
 namespace vsag {
 class FCErrorListener final : public antlr4::BaseErrorListener {

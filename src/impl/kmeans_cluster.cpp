@@ -18,15 +18,14 @@
 #include <cblas.h>
 #include <omp.h>
 
-#include <iostream>
 #include <random>
 
 #include "algorithm/inner_index_interface.h"
 #include "byte_buffer.h"
-#include "logger.h"
-#include "safe_allocator.h"
+#include "impl/allocator/safe_allocator.h"
 #include "simd/fp32_simd.h"
 #include "utils/util_functions.h"
+
 namespace vsag {
 KMeansCluster::KMeansCluster(int32_t dim, Allocator* allocator, SafeThreadPoolPtr thread_pool)
     : dim_(dim), allocator_(allocator), thread_pool_(std::move(thread_pool)) {

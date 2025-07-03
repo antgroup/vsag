@@ -15,7 +15,6 @@
 
 #include "elias_fano_encoder.h"
 
-#include <algorithm>
 #include <cmath>
 #include <iostream>
 

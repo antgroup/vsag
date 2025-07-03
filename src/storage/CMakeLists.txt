@@ -7,5 +7,5 @@ set (STORAGE_SRC
 )
 
 add_library (storage OBJECT ${STORAGE_SRC})
-target_link_libraries (storage PUBLIC fmt::fmt-header-only)
+target_link_libraries (storage PUBLIC fmt::fmt)
 add_dependencies (storage spdlog)

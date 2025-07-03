@@ -18,9 +18,9 @@
 
 #include "data_cell/sparse_vector_datacell_parameter.h"
 #include "fixtures.h"
+#include "impl/allocator/safe_allocator.h"
 #include "index/index_common_param.h"
 #include "quantization/sparse_quantization/sparse_quantizer_parameter.h"
-#include "safe_allocator.h"
 #include "thread_pool.h"
 
 namespace vsag {

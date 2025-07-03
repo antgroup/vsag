@@ -29,4 +29,4 @@ jobs:
           save: ${{ github.event_name != 'pull_request' }}
           key: build-lint-${{ hashFiles('./CMakeLists.txt') }}-${{ hashFiles('./.circleci/fresh_ci_cache.commit') }}
       - name: Run lint
-        run: export CMAKE_GENERATOR="Ninja" && make debug && make lint
+        run: export CMAKE_GENERATOR="Ninja" && make release && make lint

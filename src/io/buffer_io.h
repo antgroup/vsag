@@ -15,8 +15,6 @@
 
 #pragma once
 
-#include <utility>
-
 #include "basic_io.h"
 #include "buffer_io_parameter.h"
 #include "index/index_common_param.h"
@@ -25,75 +23,34 @@ namespace vsag {
 
 class BufferIO : public BasicIO<BufferIO> {
 public:
-    BufferIO(std::string filename, Allocator* allocator)
-        : BasicIO<BufferIO>(allocator), filepath_(std::move(filename)) {
-        this->fd_ = open(filepath_.c_str(), O_CREAT | O_RDWR, 0644);
-    }
+    BufferIO(std::string filename, Allocator* allocator);
 
-    explicit BufferIO(const BufferIOParameterPtr& io_param, const IndexCommonParam& common_param)
-        : BufferIO(io_param->path_, common_param.allocator_.get()){};
+    explicit BufferIO(const BufferIOParameterPtr& io_param, const IndexCommonParam& common_param);
 
-    explicit BufferIO(const IOParamPtr& param, const IndexCommonParam& common_param)
-        : BufferIO(std::dynamic_pointer_cast<BufferIOParameter>(param), common_param){};
+    explicit BufferIO(const IOParamPtr& param, const IndexCommonParam& common_param);
 
     ~BufferIO() override = default;
 
-    inline void
-    WriteImpl(const uint8_t* data, uint64_t size, uint64_t offset) {
-        auto ret = pwrite64(this->fd_, data, size, offset);
-        if (ret != size) {
-            throw VsagException(ErrorType::INTERNAL_ERROR,
-                                fmt::format("write bytes {} less than {}", ret, size));
-        }
-        if (size + offset > this->size_) {
-            this->size_ = size + offset;
-        }
-    }
+    void
+    WriteImpl(const uint8_t* data, uint64_t size, uint64_t offset);
 
-    inline bool
-    ReadImpl(uint64_t size, uint64_t offset, uint8_t* data) const {
-        if (size == 0) {
-            return true;
-        }
-        auto ret = pread64(this->fd_, data, size, offset);
-        if (ret != size) {
-            throw VsagException(ErrorType::INTERNAL_ERROR,
-                                fmt::format("read bytes {} less than {}", ret, size));
-        }
-        return true;
-    }
+    bool
+    ReadImpl(uint64_t size, uint64_t offset, uint8_t* data) const;
 
-    [[nodiscard]] inline const uint8_t*
-    DirectReadImpl(uint64_t size, uint64_t offset, bool& need_release) const {
-        need_release = true;
-        auto* buf = reinterpret_cast<uint8_t*>(allocator_->Allocate(size));
-        ReadImpl(size, offset, buf);
-        return buf;
-    }
+    [[nodiscard]] const uint8_t*
+    DirectReadImpl(uint64_t size, uint64_t offset, bool& need_release) const;
 
-    inline void
-    ReleaseImpl(const uint8_t* data) const {
-        auto ptr = const_cast<uint8_t*>(data);
-        allocator_->Deallocate(ptr);
-    }
+    void
+    ReleaseImpl(const uint8_t* data) const;
 
-    inline bool
-    MultiReadImpl(uint8_t* datas, uint64_t* sizes, uint64_t* offsets, uint64_t count) const {
-        bool ret = true;
-        for (uint64_t i = 0; i < count; ++i) {
-            ret &= ReadImpl(sizes[i], offsets[i], datas);
-            datas += sizes[i];
-        }
-        return ret;
-    }
+    bool
+    MultiReadImpl(uint8_t* datas, uint64_t* sizes, uint64_t* offsets, uint64_t count) const;
 
-    inline void
-    PrefetchImpl(uint64_t offset, uint64_t cache_line = 64){};
+    void
+    PrefetchImpl(uint64_t offset, uint64_t cache_line = 64);
 
-    static inline bool
-    InMemoryImpl() {
-        return false;
-    }
+    static bool
+    InMemoryImpl();
 
 private:
     std::string filepath_{};

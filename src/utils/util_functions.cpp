@@ -17,6 +17,8 @@
 
 #include <random>
 
+#include "vsag_exception.h"
+
 namespace vsag {
 
 std::string
@@ -55,7 +57,7 @@ mapping_external_param_to_inner(const JsonType& external_json,
 }
 
 std::tuple<DatasetPtr, float*, int64_t*>
-CreateFastDataset(int64_t dim, Allocator* allocator) {
+create_fast_dataset(int64_t dim, Allocator* allocator) {
     auto dataset = Dataset::Make();
     dataset->Dim(static_cast<int64_t>(dim))->NumElements(1)->Owner(true, allocator);
     auto* ids = reinterpret_cast<int64_t*>(allocator->Allocate(sizeof(int64_t) * dim));
@@ -143,7 +145,7 @@ split_string(const std::string& str, const char delimiter) {
     std::stringstream ss(str);
     std::string token;
     while (std::getline(ss, token, delimiter)) {
-        tokens.push_back(token);
+        tokens.emplace_back(token);
     }
     return tokens;
 }

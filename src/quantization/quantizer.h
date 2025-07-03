@@ -38,7 +38,7 @@ public:
     explicit Quantizer<QuantT>(int dim, Allocator* allocator)
         : dim_(dim), code_size_(dim * sizeof(DataType)), allocator_(allocator){};
 
-    ~Quantizer() = default;
+    virtual ~Quantizer() = default;
 
     /**
      * @brief Trains the model using the provided data.

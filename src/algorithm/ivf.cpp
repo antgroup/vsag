@@ -21,6 +21,7 @@
 #include "attr/executor/executor.h"
 #include "attr/expression_visitor.h"
 #include "impl/basic_searcher.h"
+#include "impl/heap/standard_heap.h"
 #include "impl/reorder.h"
 #include "index/index_impl.h"
 #include "inner_string_params.h"
@@ -29,7 +30,6 @@
 #include "storage/serialization.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
-#include "utils/standard_heap.h"
 #include "utils/util_functions.h"
 
 namespace vsag {
@@ -362,7 +362,7 @@ IVF::KnnSearch(const DatasetPtr& query,
         return reorder(k, search_result, query->GetFloat32Vectors());
     }
     auto count = static_cast<const int64_t>(search_result->Size());
-    auto [dataset_results, dists, labels] = CreateFastDataset(count, allocator_);
+    auto [dataset_results, dists, labels] = create_fast_dataset(count, allocator_);
     for (int64_t j = count - 1; j >= 0; --j) {
         dists[j] = search_result->Top().first;
         labels[j] = label_table_->GetLabelById(search_result->Top().second);
@@ -391,7 +391,7 @@ IVF::RangeSearch(const DatasetPtr& query,
         return reorder(k, search_result, query->GetFloat32Vectors());
     }
     auto count = static_cast<const int64_t>(search_result->Size());
-    auto [dataset_results, dists, labels] = CreateFastDataset(count, allocator_);
+    auto [dataset_results, dists, labels] = create_fast_dataset(count, allocator_);
     for (int64_t j = count - 1; j >= 0; --j) {
         dists[j] = search_result->Top().first;
         labels[j] = label_table_->GetLabelById(search_result->Top().second);
@@ -550,7 +550,7 @@ IVF::create_search_param(const std::string& parameters, const FilterPtr& filter)
 
 DatasetPtr
 IVF::reorder(int64_t topk, DistHeapPtr& input, const float* query) const {
-    auto [dataset_results, dists, labels] = CreateFastDataset(topk, allocator_);
+    auto [dataset_results, dists, labels] = create_fast_dataset(topk, allocator_);
     auto reorder_heap = Reorder::ReorderByFlatten(input, reorder_codes_, query, allocator_, topk);
     for (int64_t j = topk - 1; j >= 0; --j) {
         dists[j] = reorder_heap->Top().first;
@@ -770,7 +770,7 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
         return reorder(request.topk_, search_result, query->GetFloat32Vectors());
     }
     auto count = static_cast<const int64_t>(search_result->Size());
-    auto [dataset_results, dists, labels] = CreateFastDataset(count, allocator_);
+    auto [dataset_results, dists, labels] = create_fast_dataset(count, allocator_);
     for (int64_t j = count - 1; j >= 0; --j) {
         dists[j] = search_result->Top().first;
         labels[j] = label_table_->GetLabelById(search_result->Top().second);
