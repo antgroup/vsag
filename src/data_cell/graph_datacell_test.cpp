@@ -13,14 +13,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <fmt/format-inl.h>
+#include <fmt/format.h>
 
 #include <catch2/catch_template_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
 
 #include "graph_interface_parameter.h"
 #include "graph_interface_test.h"
-#include "safe_allocator.h"
+#include "impl/allocator/safe_allocator.h"
 
 using namespace vsag;
 

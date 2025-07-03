@@ -2,47 +2,30 @@
 add_subdirectory (simd)
 add_subdirectory (io)
 add_subdirectory (quantization)
-add_subdirectory (impl/filter)
-add_subdirectory (impl/transform)
+add_subdirectory (impl)
 add_subdirectory (storage)
+add_subdirectory (attr)
+add_subdirectory (data_cell)
+add_subdirectory (algorithm)
+add_subdirectory (utils)
 
 file (GLOB CPP_SRCS "*.cpp")
 list (FILTER CPP_SRCS EXCLUDE REGEX "_test.cpp")
 
-file (GLOB CPP_ATTR_SRCS "attr/*.cpp")
-file (GLOB CPP_ATTR_DETAIL_SRCS "attr/**/*.cpp")
-list (APPEND CPP_ATTR_SRCS ${CPP_ATTR_DETAIL_SRCS})
-list (FILTER CPP_ATTR_SRCS EXCLUDE REGEX "_test.cpp")
-
-file (GLOB CPP_IMPL_SRCS "impl/*.cpp")
-file (GLOB CPP_IMPL_EXTRA_SRCS "impl/bitset/*.cpp")
-list (APPEND CPP_IMPL_SRCS ${CPP_IMPL_EXTRA_SRCS})
-list (FILTER CPP_IMPL_SRCS EXCLUDE REGEX "_test.cpp")
-
 file (GLOB CPP_INDEX_SRCS "index/*.cpp")
 list (FILTER CPP_INDEX_SRCS EXCLUDE REGEX "_test.cpp")
 
-file (GLOB CPP_DATA_CELL_SRCS "data_cell/*.cpp")
-list (FILTER CPP_DATA_CELL_SRCS EXCLUDE REGEX "_test.cpp")
-
-file (GLOB CPP_ALGORITHM_SRCS "algorithm/*.cpp")
-file (GLOB CPP_ALGORITHM_EXTRA_SRCS "algorithm/**/*.cpp")
-list (APPEND CPP_ALGORITHM_SRCS ${CPP_ALGORITHM_EXTRA_SRCS})
-list (FILTER CPP_ALGORITHM_SRCS EXCLUDE REGEX "_test.cpp")
-
-file (GLOB CPP_UTILS_SRCS "utils/*.cpp")
-list (FILTER CPP_UTILS_SRCS EXCLUDE REGEX "_test.cpp")
-
-set (VSAG_SRCS ${CPP_SRCS} ${CPP_ATTR_SRCS} ${CPP_INDEX_SRCS} ${CPP_IMPL_SRCS}
-        ${CPP_DATA_CELL_SRCS} ${CPP_ALGORITHM_SRCS} ${CPP_UTILS_SRCS})
+set (VSAG_SRCS ${CPP_SRCS} ${CPP_INDEX_SRCS})
 
 add_library (vsag SHARED ${VSAG_SRCS})
 add_library (vsag_static STATIC ${VSAG_SRCS})
 
-set (VSAG_DEP_LIBS antlr4-autogen antlr4-runtime diskann simd io quantizer filter transform storage
-        pthread m dl fmt::fmt-header-only nlohmann_json::nlohmann_json roaring)
+set (VSAG_DEP_LIBS antlr4-autogen antlr4-runtime diskann simd io quantizer storage utils
+      datacell ${IMPL_LIBS} ${ALGORITHM_LIBS} attr pthread m dl fmt::fmt nlohmann_json::nlohmann_json roaring)
+
 target_link_libraries (vsag ${VSAG_DEP_LIBS} coverage_config)
 target_link_libraries (vsag_static ${VSAG_DEP_LIBS} coverage_config)
+
 add_dependencies (vsag spdlog)
 add_dependencies (vsag_static spdlog)
 

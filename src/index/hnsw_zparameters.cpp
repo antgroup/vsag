@@ -15,7 +15,7 @@
 
 #include "hnsw_zparameters.h"
 
-#include <fmt/format-inl.h>
+#include <fmt/format.h>
 
 #include <nlohmann/json.hpp>
 

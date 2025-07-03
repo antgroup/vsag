@@ -16,10 +16,10 @@
 #include "brute_force.h"
 
 #include "data_cell/flatten_datacell.h"
+#include "impl/heap/standard_heap.h"
 #include "inner_string_params.h"
 #include "storage/serialization.h"
 #include "utils/slow_task_timer.h"
-#include "utils/standard_heap.h"
 #include "utils/util_functions.h"
 
 namespace vsag {
@@ -135,7 +135,7 @@ BruteForce::KnnSearch(const DatasetPtr& query,
         }
     }
     auto [dataset_results, dists, ids] =
-        CreateFastDataset(static_cast<int64_t>(heap->Size()), allocator_);
+        create_fast_dataset(static_cast<int64_t>(heap->Size()), allocator_);
     for (auto j = static_cast<int64_t>(heap->Size() - 1); j >= 0; --j) {
         dists[j] = heap->Top().first;
         ids[j] = this->label_table_->GetLabelById(heap->Top().second);
@@ -168,7 +168,7 @@ BruteForce::RangeSearch(const vsag::DatasetPtr& query,
     }
 
     auto [dataset_results, dists, ids] =
-        CreateFastDataset(static_cast<int64_t>(heap->Size()), allocator_);
+        create_fast_dataset(static_cast<int64_t>(heap->Size()), allocator_);
     for (auto j = static_cast<int64_t>(heap->Size() - 1); j >= 0; --j) {
         dists[j] = heap->Top().first;
         ids[j] = this->label_table_->GetLabelById(heap->Top().second);

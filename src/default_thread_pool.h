@@ -20,7 +20,6 @@
 #include <functional>
 #include <future>
 
-#include "vsag/options.h"
 #include "vsag/thread_pool.h"
 
 namespace vsag {

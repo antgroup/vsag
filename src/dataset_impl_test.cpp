@@ -17,8 +17,8 @@
 
 #include <catch2/catch_test_macros.hpp>
 
-#include "default_allocator.h"
 #include "fixtures.h"
+#include "impl/allocator/default_allocator.h"
 #include "vsag/dataset.h"
 
 TEST_CASE("Dataset Implement Test", "[ut][dataset]") {

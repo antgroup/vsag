@@ -19,6 +19,7 @@
 #include <catch2/matchers/catch_matchers.hpp>
 
 #include "fixtures.h"
+#include "impl/allocator/safe_allocator.h"
 #include "utils/util_functions.h"
 
 using namespace vsag;

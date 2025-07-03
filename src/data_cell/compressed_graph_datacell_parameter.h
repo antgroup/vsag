@@ -15,9 +15,8 @@
 
 #pragma once
 
-#include <fmt/format-inl.h>
-
 #include "graph_interface_parameter.h"
+#include "inner_string_params.h"
 
 namespace vsag {
 class CompressedGraphDatacellParameter : public GraphInterfaceParameter {

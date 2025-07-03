@@ -15,7 +15,7 @@
 
 #include "inner_index_interface.h"
 
-#include <fmt/format-inl.h>
+#include <fmt/format.h>
 
 #include "brute_force.h"
 #include "empty_index_binary_set.h"

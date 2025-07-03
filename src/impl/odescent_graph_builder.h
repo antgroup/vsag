@@ -24,10 +24,9 @@
 #include "data_cell/flatten_datacell.h"
 #include "data_cell/graph_datacell.h"
 #include "data_cell/sparse_graph_datacell.h"
+#include "impl/allocator/safe_allocator.h"
 #include "impl/odescent_graph_parameter.h"
 #include "logger.h"
-#include "safe_allocator.h"
-#include "simd/simd.h"
 #include "utils.h"
 #include "vsag/dataset.h"
 
@@ -71,7 +70,7 @@ struct Node {
 struct Linklist {
     Vector<Node> neighbors;
     float greast_neighbor_distance;
-    Linklist(Allocator*& allocator)
+    Linklist(Allocator* allocator)
         : neighbors(allocator), greast_neighbor_distance(std::numeric_limits<float>::max()) {
     }
 };
@@ -157,7 +156,7 @@ private:
     const InnerIdType* valid_ids_{nullptr};
 
     bool pruning_{true};
-    Allocator* allocator_;
+    Allocator* const allocator_;
 
     const ODescentParameterPtr odescent_param_;
 

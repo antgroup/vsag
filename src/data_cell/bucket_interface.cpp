@@ -15,7 +15,7 @@
 
 #include "bucket_interface.h"
 
-#include <fmt/format-inl.h>
+#include <fmt/format.h>
 
 #include "bucket_datacell.h"
 #include "inner_string_params.h"

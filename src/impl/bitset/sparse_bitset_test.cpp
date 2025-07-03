@@ -21,7 +21,7 @@
 #include <roaring.hh>
 
 #include "fixtures.h"
-#include "safe_allocator.h"
+#include "impl/allocator/safe_allocator.h"
 
 using namespace roaring;
 using namespace vsag;

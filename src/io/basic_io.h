@@ -15,7 +15,7 @@
 
 #pragma once
 
-#include <fmt/format-inl.h>
+#include <fmt/format.h>
 
 #include <cstdint>
 

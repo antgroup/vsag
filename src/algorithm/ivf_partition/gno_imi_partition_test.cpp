@@ -19,8 +19,8 @@
 
 #include "algorithm/ivf_parameter.h"
 #include "fixtures.h"
+#include "impl/allocator/safe_allocator.h"
 #include "impl/basic_searcher.h"
-#include "safe_allocator.h"
 
 using namespace vsag;
 
