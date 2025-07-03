@@ -263,7 +263,7 @@ private:
     FlattenInterfacePtr high_precise_codes_{nullptr};
     Vector<GraphInterfacePtr> route_graphs_;
     GraphInterfacePtr bottom_graph_{nullptr};
-    SparseGraphDatacellParamPtr sparse_datacell_param_{nullptr};
+    SparseGraphDatacellParamPtr hierarchical_datacell_param_{nullptr};
 
     mutable bool use_reorder_{false};
     bool use_elp_optimizer_{false};
