@@ -18,6 +18,7 @@
 #include "data_cell/extra_info_datacell_parameter.h"
 #include "data_cell/flatten_datacell_parameter.h"
 #include "data_cell/graph_interface_parameter.h"
+#include "data_cell/sparse_graph_datacell_parameter.h"
 #include "data_type.h"
 #include "impl/odescent_graph_parameter.h"
 #include "parameter.h"
@@ -41,6 +42,7 @@ public:
     FlattenInterfaceParamPtr base_codes_param{nullptr};
     FlattenInterfaceParamPtr precise_codes_param{nullptr};
     GraphInterfaceParamPtr bottom_graph_param{nullptr};
+    SparseGraphDatacellParamPtr hierarchical_graph_param{nullptr};
     ExtraInfoDataCellParamPtr extra_info_param{nullptr};
     ODescentParameterPtr odescent_param{nullptr};
 
