@@ -426,11 +426,9 @@ TestHGraphBuildAndContinueAdd(const fixtures::HGraphTestIndexPtr& test_index,
                                  dim,
                                  base_quantization_str,
                                  recall));
-                if (HGraphTestIndex::IsRaBitQ(base_quantization_str)) {
-                    metric_type = "l2";
-                    if (dim <= fixtures::RABITQ_MIN_RACALL_DIM) {
-                        dim += fixtures::RABITQ_MIN_RACALL_DIM;
-                    }
+                if (HGraphTestIndex::IsRaBitQ(base_quantization_str) &&
+                    (metric_type != "l2" || dim < fixtures::RABITQ_MIN_RACALL_DIM)) {
+                    continue;  // Skip invalid RaBitQ configurations
                 }
                 vsag::Options::Instance().set_block_size_limit(size);
                 auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(
@@ -473,11 +471,9 @@ TestHGraphTrainAndAddTest(const fixtures::HGraphTestIndexPtr& test_index,
                                  dim,
                                  base_quantization_str,
                                  recall));
-                if (HGraphTestIndex::IsRaBitQ(base_quantization_str)) {
-                    metric_type = "l2";
-                    if (dim <= fixtures::RABITQ_MIN_RACALL_DIM) {
-                        dim += fixtures::RABITQ_MIN_RACALL_DIM;
-                    }
+                if (HGraphTestIndex::IsRaBitQ(base_quantization_str) &&
+                    (metric_type != "l2" || dim < fixtures::RABITQ_MIN_RACALL_DIM)) {
+                    continue;  // Skip invalid RaBitQ configurations
                 }
                 vsag::Options::Instance().set_block_size_limit(size);
                 auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(
@@ -558,12 +554,9 @@ TestHGraphBuild(const fixtures::HGraphTestIndexPtr& test_index,
                                  dim,
                                  base_quantization_str,
                                  recall));
-                if (HGraphTestIndex::IsRaBitQ(base_quantization_str)) {
-                    if (metric_type != "l2")
-                        continue;
-                    if (dim <= fixtures::RABITQ_MIN_RACALL_DIM) {
-                        dim += fixtures::RABITQ_MIN_RACALL_DIM;
-                    }
+                if (HGraphTestIndex::IsRaBitQ(base_quantization_str) &&
+                    (metric_type != "l2" || dim < fixtures::RABITQ_MIN_RACALL_DIM)) {
+                    continue;  // Skip invalid RaBitQ configurations
                 }
 
                 vsag::Options::Instance().set_block_size_limit(size);
@@ -610,12 +603,9 @@ TestHGraphBuildWithAttr(const fixtures::HGraphTestIndexPtr& test_index,
                                  dim,
                                  base_quantization_str,
                                  recall));
-                // Skip invalid RaBitQ configurations
-                if (HGraphTestIndex::IsRaBitQ(base_quantization_str)) {
-                    metric_type = "l2";
-                    if (dim <= fixtures::RABITQ_MIN_RACALL_DIM) {
-                        dim += fixtures::RABITQ_MIN_RACALL_DIM;
-                    }
+                if (HGraphTestIndex::IsRaBitQ(base_quantization_str) &&
+                    (metric_type != "l2" || dim < fixtures::RABITQ_MIN_RACALL_DIM)) {
+                    continue;  // Skip invalid RaBitQ configurations
                 }
 
                 // Set block size limit for current test iteration
@@ -677,12 +667,10 @@ TestHGraphODescentBuild(const fixtures::HGraphTestIndexPtr& test_index,
                                  dim,
                                  base_quantization_str,
                                  recall));
-                // Skip invalid RaBitQ configurations
-                if (HGraphTestIndex::IsRaBitQ(base_quantization_str)) {
-                    metric_type = "l2";
-                    if (dim <= fixtures::RABITQ_MIN_RACALL_DIM) {
-                        dim += fixtures::RABITQ_MIN_RACALL_DIM;
-                    }
+
+                if (HGraphTestIndex::IsRaBitQ(base_quantization_str) &&
+                    (metric_type != "l2" || dim < fixtures::RABITQ_MIN_RACALL_DIM)) {
+                    continue;  // Skip invalid RaBitQ configurations
                 }
 
                 // Set block size limit for current test iteration
@@ -735,12 +723,9 @@ TestHGraphRemove(const fixtures::HGraphTestIndexPtr& test_index,
                                  dim,
                                  base_quantization_str,
                                  recall));
-                // Skip invalid RaBitQ configurations
-                if (HGraphTestIndex::IsRaBitQ(base_quantization_str)) {
-                    metric_type = "l2";
-                    if (dim <= fixtures::RABITQ_MIN_RACALL_DIM) {
-                        dim += fixtures::RABITQ_MIN_RACALL_DIM;
-                    }
+                if (HGraphTestIndex::IsRaBitQ(base_quantization_str) &&
+                    (metric_type != "l2" || dim < fixtures::RABITQ_MIN_RACALL_DIM)) {
+                    continue;  // Skip invalid RaBitQ configurations
                 }
                 vsag::Options::Instance().set_block_size_limit(size);
                 auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(
@@ -784,12 +769,9 @@ TestHGraphCompressedBuild(const fixtures::HGraphTestIndexPtr& test_index,
                                  dim,
                                  base_quantization_str,
                                  recall));
-                // Skip invalid RaBitQ configurations
-                if (HGraphTestIndex::IsRaBitQ(base_quantization_str)) {
-                    metric_type = "l2";
-                    if (dim <= fixtures::RABITQ_MIN_RACALL_DIM) {
-                        dim += fixtures::RABITQ_MIN_RACALL_DIM;
-                    }
+                if (HGraphTestIndex::IsRaBitQ(base_quantization_str) &&
+                    (metric_type != "l2" || dim < fixtures::RABITQ_MIN_RACALL_DIM)) {
+                    continue;  // Skip invalid RaBitQ configurations
                 }
                 vsag::Options::Instance().set_block_size_limit(size);
                 auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(
@@ -833,12 +815,9 @@ TestHGraphMerge(const fixtures::HGraphTestIndexPtr& test_index,
                                  dim,
                                  base_quantization_str,
                                  recall));
-                // Skip invalid RaBitQ configurations
-                if (HGraphTestIndex::IsRaBitQ(base_quantization_str)) {
-                    metric_type = "l2";
-                    if (dim <= fixtures::RABITQ_MIN_RACALL_DIM) {
-                        dim += fixtures::RABITQ_MIN_RACALL_DIM;
-                    }
+                if (HGraphTestIndex::IsRaBitQ(base_quantization_str) &&
+                    (metric_type != "l2" || dim < fixtures::RABITQ_MIN_RACALL_DIM)) {
+                    continue;  // Skip invalid RaBitQ configurations
                 }
                 vsag::Options::Instance().set_block_size_limit(size);
                 auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(
@@ -884,12 +863,9 @@ TestHGraphAdd(const fixtures::HGraphTestIndexPtr& test_index,
                                  dim,
                                  base_quantization_str,
                                  recall));
-                // Skip invalid RaBitQ configurations
-                if (HGraphTestIndex::IsRaBitQ(base_quantization_str)) {
-                    metric_type = "l2";
-                    if (dim <= fixtures::RABITQ_MIN_RACALL_DIM) {
-                        dim += fixtures::RABITQ_MIN_RACALL_DIM;
-                    }
+                if (HGraphTestIndex::IsRaBitQ(base_quantization_str) &&
+                    (metric_type != "l2" || dim < fixtures::RABITQ_MIN_RACALL_DIM)) {
+                    continue;  // Skip invalid RaBitQ configurations
                 }
                 vsag::Options::Instance().set_block_size_limit(size);
                 auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(
@@ -937,11 +913,9 @@ TestHGraphSearchWithDirtyVector(const fixtures::HGraphTestIndexPtr& test_index,
                              dim,
                              base_quantization_str,
                              recall));
-            // Skip invalid RaBitQ configurations
-            if (HGraphTestIndex::IsRaBitQ(base_quantization_str)) {
-                if (std::string(metric_type) != "l2") {
-                    continue;
-                }
+            if (HGraphTestIndex::IsRaBitQ(base_quantization_str) &&
+                (metric_type != "l2" || dim < fixtures::RABITQ_MIN_RACALL_DIM)) {
+                continue;  // Skip invalid RaBitQ configurations
             }
             vsag::Options::Instance().set_block_size_limit(size);
             auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(
@@ -1000,12 +974,9 @@ TestHGraphConcurrentAdd(const fixtures::HGraphTestIndexPtr& test_index,
                                  dim,
                                  base_quantization_str,
                                  recall));
-                // Skip invalid RaBitQ configurations
-                if (HGraphTestIndex::IsRaBitQ(base_quantization_str)) {
-                    metric_type = "l2";
-                    if (dim <= fixtures::RABITQ_MIN_RACALL_DIM) {
-                        dim += fixtures::RABITQ_MIN_RACALL_DIM;
-                    }
+                if (HGraphTestIndex::IsRaBitQ(base_quantization_str) &&
+                    (metric_type != "l2" || dim < fixtures::RABITQ_MIN_RACALL_DIM)) {
+                    continue;  // Skip invalid RaBitQ configurations
                 }
 
                 // Set block size limit for current test iteration
@@ -1059,12 +1030,9 @@ TestHGraphSerialize(const fixtures::HGraphTestIndexPtr& test_index,
                                  dim,
                                  base_quantization_str,
                                  recall));
-                // Skip invalid RaBitQ configurations
-                if (HGraphTestIndex::IsRaBitQ(base_quantization_str)) {
-                    metric_type = "l2";
-                    if (dim <= fixtures::RABITQ_MIN_RACALL_DIM) {
-                        dim += fixtures::RABITQ_MIN_RACALL_DIM;
-                    }
+                if (HGraphTestIndex::IsRaBitQ(base_quantization_str) &&
+                    (metric_type != "l2" || dim < fixtures::RABITQ_MIN_RACALL_DIM)) {
+                    continue;  // Skip invalid RaBitQ configurations
                 }
                 vsag::Options::Instance().set_block_size_limit(size);
                 auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(
@@ -1118,11 +1086,9 @@ TestHGraphClone(const fixtures::HGraphTestIndexPtr& test_index,
                                  dim,
                                  base_quantization_str,
                                  recall));
-                if (HGraphTestIndex::IsRaBitQ(base_quantization_str)) {
-                    metric_type = "l2";
-                    if (dim <= fixtures::RABITQ_MIN_RACALL_DIM) {
-                        dim += fixtures::RABITQ_MIN_RACALL_DIM;
-                    }
+                if (HGraphTestIndex::IsRaBitQ(base_quantization_str) &&
+                    (metric_type != "l2" || dim < fixtures::RABITQ_MIN_RACALL_DIM)) {
+                    continue;  // Skip invalid RaBitQ configurations
                 }
                 vsag::Options::Instance().set_block_size_limit(size);
                 auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(
@@ -1171,11 +1137,9 @@ TestHGraphExportModel(const fixtures::HGraphTestIndexPtr& test_index,
                                  dim,
                                  base_quantization_str,
                                  recall));
-                if (HGraphTestIndex::IsRaBitQ(base_quantization_str)) {
-                    metric_type = "l2";
-                    if (dim <= fixtures::RABITQ_MIN_RACALL_DIM) {
-                        dim += fixtures::RABITQ_MIN_RACALL_DIM;
-                    }
+                if (HGraphTestIndex::IsRaBitQ(base_quantization_str) &&
+                    (metric_type != "l2" || dim < fixtures::RABITQ_MIN_RACALL_DIM)) {
+                    continue;  // Skip invalid RaBitQ configurations
                 }
                 vsag::Options::Instance().set_block_size_limit(size);
                 auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(
@@ -1226,11 +1190,9 @@ TestHGraphRandomAllocator(const fixtures::HGraphTestIndexPtr& test_index,
                                  dim,
                                  base_quantization_str,
                                  recall));
-                if (HGraphTestIndex::IsRaBitQ(base_quantization_str)) {
-                    metric_type = "l2";
-                    if (dim <= fixtures::RABITQ_MIN_RACALL_DIM) {
-                        dim += fixtures::RABITQ_MIN_RACALL_DIM;
-                    }
+                if (HGraphTestIndex::IsRaBitQ(base_quantization_str) &&
+                    (metric_type != "l2" || dim < fixtures::RABITQ_MIN_RACALL_DIM)) {
+                    continue;  // Skip invalid RaBitQ configurations
                 }
                 vsag::Options::Instance().set_block_size_limit(size);
                 auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(
@@ -1277,11 +1239,9 @@ TestHGraphDuplicateBuild(const fixtures::HGraphTestIndexPtr& test_index,
                                  dim,
                                  base_quantization_str,
                                  recall));
-                if (HGraphTestIndex::IsRaBitQ(base_quantization_str)) {
-                    metric_type = "l2";
-                    if (dim <= fixtures::RABITQ_MIN_RACALL_DIM) {
-                        dim += fixtures::RABITQ_MIN_RACALL_DIM;
-                    }
+                if (HGraphTestIndex::IsRaBitQ(base_quantization_str) &&
+                    (metric_type != "l2" || dim < fixtures::RABITQ_MIN_RACALL_DIM)) {
+                    continue;  // Skip invalid RaBitQ configurations
                 }
                 vsag::Options::Instance().set_block_size_limit(size);
 
@@ -1328,11 +1288,9 @@ TestHGraphEstimateMemory(const fixtures::HGraphTestIndexPtr& test_index,
                                  dim,
                                  base_quantization_str,
                                  recall));
-                if (HGraphTestIndex::IsRaBitQ(base_quantization_str)) {
-                    metric_type = "l2";
-                    if (dim <= fixtures::RABITQ_MIN_RACALL_DIM) {
-                        dim += fixtures::RABITQ_MIN_RACALL_DIM;
-                    }
+                if (HGraphTestIndex::IsRaBitQ(base_quantization_str) &&
+                    (metric_type != "l2" || dim < fixtures::RABITQ_MIN_RACALL_DIM)) {
+                    continue;  // Skip invalid RaBitQ configurations
                 }
                 vsag::Options::Instance().set_block_size_limit(size);
                 vsag::Options::Instance().set_block_size_limit(size);
@@ -1469,11 +1427,9 @@ TestHGraphWithExtraInfo(const fixtures::HGraphTestIndexPtr& test_index,
                                  dim,
                                  base_quantization_str,
                                  recall));
-                if (HGraphTestIndex::IsRaBitQ(base_quantization_str)) {
-                    metric_type = "l2";
-                    if (dim <= fixtures::RABITQ_MIN_RACALL_DIM) {
-                        dim += fixtures::RABITQ_MIN_RACALL_DIM;
-                    }
+                if (HGraphTestIndex::IsRaBitQ(base_quantization_str) &&
+                    (metric_type != "l2" || dim < fixtures::RABITQ_MIN_RACALL_DIM)) {
+                    continue;  // Skip invalid RaBitQ configurations
                 }
                 vsag::Options::Instance().set_block_size_limit(size);
                 auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(
@@ -1533,11 +1489,9 @@ TestHGraphDiskIOType(const fixtures::HGraphTestIndexPtr& test_index,
                                  dim,
                                  memory_io_str,
                                  disk_io_str));
-                if (HGraphTestIndex::IsRaBitQ(memory_io_str)) {
-                    metric_type = "l2";
-                    if (dim <= fixtures::RABITQ_MIN_RACALL_DIM) {
-                        dim += fixtures::RABITQ_MIN_RACALL_DIM;
-                    }
+                if (HGraphTestIndex::IsRaBitQ(memory_io_str) &&
+                    (metric_type != "l2" || dim < fixtures::RABITQ_MIN_RACALL_DIM)) {
+                    continue;  // Skip invalid RaBitQ configurations
                 }
                 vsag::Options::Instance().set_block_size_limit(size);
                 auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(
