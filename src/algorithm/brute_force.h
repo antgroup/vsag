@@ -96,6 +96,9 @@ public:
     [[nodiscard]] uint64_t
     EstimateMemory(uint64_t num_elements) const override;
 
+    void
+    GetVectorByInnerId(InnerIdType inner_id, float* data) const override;
+
 private:
     void
     resize(uint64_t new_size);

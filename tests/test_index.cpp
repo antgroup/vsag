@@ -1711,11 +1711,9 @@ TestIndex::TestGetVectorByIds(const TestIndex::IndexPtr& index,
     auto float_vectors = vectors.value()->GetFloat32Vectors();
     auto dim = dataset->base_->GetDim();
     for (int i = 0; i < count; ++i) {
-        auto distances = index->CalDistanceById(
-            vectors.value()->GetFloat32Vectors() + i * dim, dataset->base_->GetIds() + i, 1);
-        REQUIRE(distances.has_value());
-        auto dis = distances.value()->GetDistances();
-        REQUIRE(std::abs(dis[0]) < 1e-6f);
+        fixtures::dist_t dis = vsag::FP32ComputeL2Sqr(
+            float_vectors + i * dim, dataset->base_->GetFloat32Vectors() + i * dim, dim);
+        REQUIRE(dis == 0);
     }
 }
 
