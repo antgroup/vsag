@@ -279,6 +279,15 @@ public:
         SAFE_CALL(return this->inner_index_->GetMinAndMaxId());
     }
 
+    virtual tl::expected<DatasetPtr, Error>
+    GetRawVectorByIds(const int64_t* ids, int64_t count) const override {
+        if (not CheckFeature(IndexFeature::SUPPORT_GET_VECTOR_BY_IDS)) {
+            return tl::unexpected(Error(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                                        "index no support to get raw vector by ids"));
+        }
+        SAFE_CALL(return this->inner_index_->GetVectorByIds(ids, count));
+    };
+
     tl::expected<void, Error>
     Merge(const std::vector<MergeUnit>& merge_units) override {
         if (this->inner_index_->immutable_) {

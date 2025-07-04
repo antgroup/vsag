@@ -66,6 +66,8 @@ enum IndexFeature {
 
     SUPPORT_GET_EXTRA_INFO_BY_ID, /**< Supports get extra_info by id */
 
+    SUPPORT_GET_VECTOR_BY_IDS, /**< Supports get vectors by ids */
+
     SUPPORT_KNN_SEARCH_WITH_EX_FILTER, /**< Supports K-nearest neighbor search with extra info filtering */
 
     SUPPORT_CLONE, /**< Supports clone index */

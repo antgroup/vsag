@@ -403,6 +403,29 @@ public:
     };
 
     /**
+     * @brief Retrieve raw vector data associated with given IDs.
+     *
+     * This method fetches the actual vector data stored in the index for specified IDs.
+     * The returned dataset typically contains the original vector values in a format
+     * compatible with the index implementation (e.g., float arrays or binary embeddings).
+     * This is useful for operations requiring direct access to vector contents,
+     * such as retraining models or data migration.
+     *
+     * @param ids Array of vector IDs for which raw data is requested.
+     * @param count Number of IDs in the 'ids' array.
+     * @return tl::expected<DatasetPtr, Error>
+     *         - On success: A DatasetPtr containing the raw vector data
+     *           (format depends on implementation, but typically includes vector arrays).
+     *         - On failure: An error object (e.g., invalid ID, out of memory).
+     * @throws std::runtime_error If the index implementation does not support this operation
+     *            (default behavior for base class).
+     */
+    virtual tl::expected<DatasetPtr, Error>
+    GetRawVectorByIds(const int64_t* ids, int64_t count) const {
+        throw std::runtime_error("Index doesn't support GetRawVectorByIds");
+    };
+
+    /**
      * @brief Checks if the specified feature is supported by the index.
      *
      * This method checks whether the given `feature` is supported by the index.
