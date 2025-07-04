@@ -235,9 +235,9 @@ public:
                          int64_t extra_info_size);
 
     static void
-    TestGetVectorByIds(const IndexPtr& index,
-                       const TestDatasetPtr& dataset,
-                       bool expected_success = true);
+    TestGetRawVectorByIds(const IndexPtr& index,
+                          const TestDatasetPtr& dataset,
+                          bool expected_success = true);
 
     static void
     TestKnnSearchExFilter(const IndexPtr& index,

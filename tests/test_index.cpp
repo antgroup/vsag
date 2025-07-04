@@ -1699,14 +1699,14 @@ TestIndex::TestBuildWithAttr(const IndexPtr& index, const TestDatasetPtr& datase
     REQUIRE(build_result.has_value());
 }
 void
-TestIndex::TestGetVectorByIds(const TestIndex::IndexPtr& index,
-                              const TestDatasetPtr& dataset,
-                              bool expected_success) {
+TestIndex::TestGetRawVectorByIds(const IndexPtr& index,
+                                 const TestDatasetPtr& dataset,
+                                 bool expected_success) {
     if (not index->CheckFeature(vsag::SUPPORT_GET_VECTOR_BY_IDS)) {
         return;
     }
     int64_t count = dataset->count_;
-    auto vectors = index->GetVectorByIds(dataset->base_->GetIds(), count);
+    auto vectors = index->GetRawVectorByIds(dataset->base_->GetIds(), count);
     REQUIRE(vectors.has_value());
     auto float_vectors = vectors.value()->GetFloat32Vectors();
     auto dim = dataset->base_->GetDim();
