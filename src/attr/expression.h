@@ -15,6 +15,7 @@
 
 #pragma once
 
+#include <limits>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -144,13 +145,14 @@ ToString(const ComparisonOperator& op) {
     throw std::runtime_error("unsupported type");
 }
 
-using NumericValue = std::variant<long, double>;
+using NumericValue = std::variant<int64_t, uint64_t, double>;
 using StrList = std::vector<std::string>;
 
 inline bool
 CheckSameVType(const NumericValue&& lhs, const NumericValue&& rhs) {
     return (std::holds_alternative<double>(lhs) && std::holds_alternative<double>(rhs)) ||
-           (std::holds_alternative<long>(lhs) && std::holds_alternative<long>(rhs));
+           (std::holds_alternative<int64_t>(lhs) && std::holds_alternative<int64_t>(rhs)) ||
+           (std::holds_alternative<uint64_t>(lhs) && std::holds_alternative<uint64_t>(rhs));
 }
 
 inline NumericValue
@@ -205,6 +207,38 @@ operator/(const NumericValue& lhs, const NumericValue& rhs) {
         rhs);
 }
 
+template <typename T>
+T
+GetNumericValue(const NumericValue& value) {
+    return std::visit(
+        [](auto&& arg) -> T {
+            using ArgType = std::decay_t<decltype(arg)>;
+
+            if constexpr (std::is_floating_point_v<T>) {
+                if constexpr (std::is_integral_v<ArgType>) {
+                    throw std::runtime_error("Cannot convert integer to floating-point");
+                }
+            } else {
+                if constexpr (std::is_floating_point_v<ArgType>) {
+                    throw std::runtime_error("Cannot convert floating-point to integer");
+                } else {
+                    if constexpr (std::is_unsigned_v<T>) {
+                        if (arg < 0) {
+                            throw std::runtime_error("Cannot convert negative value to unsigned");
+                        }
+                    }
+                    if (arg < std::numeric_limits<T>::min() ||
+                        arg > std::numeric_limits<T>::max()) {
+                        throw std::runtime_error("Numeric value out of range");
+                    }
+                }
+            }
+
+            return static_cast<T>(arg);
+        },
+        value);
+}
+
 // Field reference
 class FieldExpression : public Expression {
 public:
@@ -237,7 +271,7 @@ public:
             [](auto&& arg) -> std::string {
                 using T = std::decay_t<decltype(arg)>;
 
-                if constexpr (std::is_same_v<T, long>) {
+                if constexpr (std::is_same_v<T, int64_t> || std::is_same_v<T, uint64_t>) {
                     return std::to_string(arg);
                 } else if constexpr (std::is_same_v<T, double>) {
                     std::string str = std::to_string(arg);
@@ -295,11 +329,12 @@ public:
     StrList values;
 };
 
+template <typename V>
 class IntListConstant : public Expression {
 public:
     using ptr = std::shared_ptr<IntListConstant>;
 
-    explicit IntListConstant(std::vector<long> values)
+    explicit IntListConstant(std::vector<V> values)
         : Expression(ExpressionType::kIntListConstant, OpType::kNone), values(std::move(values)) {
     }
 
@@ -314,7 +349,7 @@ public:
         return result + "]";
     }
 
-    std::vector<long> values;
+    std::vector<V> values;
 };
 
 // Arithmetic expression
@@ -360,7 +395,7 @@ public:
 // List membership expression
 class IntListExpression : public Expression {
 public:
-    IntListExpression(ExprPtr field, const bool is_not_in, IntListConstant::ptr values)
+    IntListExpression(ExprPtr field, const bool is_not_in, ExprPtr values)
         : Expression(ExpressionType::kIntListExpression, OpType::kBinary),
           field(std::move(field)),
           is_not_in(is_not_in),
@@ -375,13 +410,13 @@ public:
 
     ExprPtr field;
     bool is_not_in;  // true for NOT IN, false for IN
-    IntListConstant::ptr values;
+    ExprPtr values;
 };
 
 // List expression
 class StrListExpression : public Expression {
 public:
-    StrListExpression(ExprPtr field, const bool is_not_in, StrListConstant::ptr values)
+    StrListExpression(ExprPtr field, const bool is_not_in, ExprPtr values)
         : Expression(ExpressionType::kStrListExpression, OpType::kBinary),
           field(std::move(field)),
           is_not_in(is_not_in),
@@ -396,7 +431,7 @@ public:
 
     ExprPtr field;
     bool is_not_in;  // true for NOT IN, false for IN
-    StrListConstant::ptr values;
+    ExprPtr values;
 };
 
 // Logical expression
