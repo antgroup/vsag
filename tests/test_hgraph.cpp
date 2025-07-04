@@ -411,6 +411,35 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HGraphTestIndex,
     }
 }
 
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::HGraphTestIndex,
+                             "HGraph Factory Test With Correct Parameters",
+                             "[ft][hgraph]") {
+    // bug issue #883
+    SECTION("Empty index_param") {
+        auto param = R"(
+        {
+            "dtype": "float32",
+            "dim": 128,
+            "metric_type": "l2",
+            "index_param": {
+            }
+        })";
+        REQUIRE(TestFactory(name, param, true));
+    }
+    SECTION("pq index_param") {
+        auto param = R"(
+        {
+            "dtype": "float32",
+            "dim": 128,
+            "metric_type": "l2",
+            "index_param": {
+                "base_quantization_type": "pq"
+            }
+        })";
+        REQUIRE(TestFactory(name, param, true));
+    }
+}
+
 static void
 TestHGraphBuildAndContinueAdd(const fixtures::HGraphTestIndexPtr& test_index,
                               const fixtures::HGraphResourcePtr& resource) {
