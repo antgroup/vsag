@@ -48,13 +48,21 @@ public:
         this->inner_index_.reset();
     }
 
+#define CHECK_AND_RETURN_EMPTY_DATASET          \
+    if (GetNumElements() == 0) {                \
+        return DatasetImpl::MakeEmptyDataset(); \
+    }
+
+#define CHECK_IMMUTABLE_INDEX(operation_str)                                       \
+    if (this->inner_index_->immutable_) {                                          \
+        return tl::unexpected(Error(ErrorType::UNSUPPORTED_INDEX_OPERATION,        \
+                                    "immutable index no support " operation_str)); \
+    }
+
 public:
     tl::expected<std::vector<int64_t>, Error>
     Add(const DatasetPtr& base) override {
-        if (this->inner_index_->immutable_) {
-            return tl::unexpected(
-                Error(ErrorType::UNSUPPORTED_INDEX_OPERATION, "immutable index no support add"));
-        }
+        CHECK_IMMUTABLE_INDEX("add");
         SAFE_CALL(return this->inner_index_->Add(base));
     }
 
@@ -65,10 +73,7 @@ public:
 
     tl::expected<std::vector<int64_t>, Error>
     Build(const DatasetPtr& base) override {
-        if (this->inner_index_->immutable_) {
-            return tl::unexpected(
-                Error(ErrorType::UNSUPPORTED_INDEX_OPERATION, "immutable index no support build"));
-        }
+        CHECK_IMMUTABLE_INDEX("build");
         SAFE_CALL(return this->inner_index_->Build(base));
     }
 
@@ -108,10 +113,7 @@ public:
 
     tl::expected<Checkpoint, Error>
     ContinueBuild(const DatasetPtr& base, const BinarySet& binary_set) override {
-        if (this->inner_index_->immutable_) {
-            return tl::unexpected(Error(ErrorType::UNSUPPORTED_INDEX_OPERATION,
-                                        "immutable index no support continue build"));
-        }
+        CHECK_IMMUTABLE_INDEX("continue build");
         SAFE_CALL(return this->inner_index_->ContinueBuild(base, binary_set));
     }
 
@@ -217,9 +219,7 @@ public:
               int64_t k,
               const std::string& parameters,
               BitsetPtr invalid = nullptr) const override {
-        if (GetNumElements() == 0) {
-            return DatasetImpl::MakeEmptyDataset();
-        }
+        CHECK_AND_RETURN_EMPTY_DATASET;
         SAFE_CALL(return this->inner_index_->KnnSearch(query, k, parameters, invalid));
     }
 
@@ -228,9 +228,7 @@ public:
               int64_t k,
               const std::string& parameters,
               const std::function<bool(int64_t)>& filter) const override {
-        if (GetNumElements() == 0) {
-            return DatasetImpl::MakeEmptyDataset();
-        }
+        CHECK_AND_RETURN_EMPTY_DATASET;
         SAFE_CALL(return this->inner_index_->KnnSearch(query, k, parameters, filter));
     }
 
@@ -239,17 +237,13 @@ public:
               int64_t k,
               const std::string& parameters,
               const FilterPtr& filter) const override {
-        if (GetNumElements() == 0) {
-            return DatasetImpl::MakeEmptyDataset();
-        }
+        CHECK_AND_RETURN_EMPTY_DATASET;
         SAFE_CALL(return this->inner_index_->KnnSearch(query, k, parameters, filter));
     }
 
     tl::expected<DatasetPtr, Error>
     KnnSearch(const DatasetPtr& query, int64_t k, SearchParam& search_param) const override {
-        if (GetNumElements() == 0) {
-            return DatasetImpl::MakeEmptyDataset();
-        }
+        CHECK_AND_RETURN_EMPTY_DATASET;
         if (search_param.is_iter_filter) {
             SAFE_CALL(return this->inner_index_->KnnSearch(query,
                                                            k,
@@ -271,19 +265,14 @@ public:
               const FilterPtr& filter,
               IteratorContext*& iter_ctx,
               bool is_last_filter) const override {
-        if (GetNumElements() == 0) {
-            return DatasetImpl::MakeEmptyDataset();
-        }
+        CHECK_AND_RETURN_EMPTY_DATASET;
         SAFE_CALL(return this->inner_index_->KnnSearch(
             query, k, parameters, filter, nullptr, iter_ctx, is_last_filter));
     }
 
     tl::expected<void, Error>
     Merge(const std::vector<MergeUnit>& merge_units) override {
-        if (this->inner_index_->immutable_) {
-            return tl::unexpected(
-                Error(ErrorType::UNSUPPORTED_INDEX_OPERATION, "immutable index no support merge"));
-        }
+        CHECK_IMMUTABLE_INDEX("merge");
         SAFE_CALL(this->inner_index_->Merge(merge_units));
     }
 
@@ -291,10 +280,7 @@ public:
     Pretrain(const std::vector<int64_t>& base_tag_ids,
              uint32_t k,
              const std::string& parameters) override {
-        if (this->inner_index_->immutable_) {
-            return tl::unexpected(Error(ErrorType::UNSUPPORTED_INDEX_OPERATION,
-                                        "immutable index no support pretrain"));
-        }
+        CHECK_IMMUTABLE_INDEX("pretrain");
         SAFE_CALL(return this->inner_index_->Pretrain(base_tag_ids, k, parameters));
     }
 
@@ -303,10 +289,7 @@ public:
              int64_t k,
              const std::string& parameters,
              int64_t global_optimum_tag_id = std::numeric_limits<int64_t>::max()) override {
-        if (this->inner_index_->immutable_) {
-            return tl::unexpected(Error(ErrorType::UNSUPPORTED_INDEX_OPERATION,
-                                        "immutable index no support feedback"));
-        }
+        CHECK_IMMUTABLE_INDEX("feedback");
         SAFE_CALL(return this->inner_index_->Feedback(query, k, parameters, global_optimum_tag_id));
     }
 
@@ -315,9 +298,7 @@ public:
                 float radius,
                 const std::string& parameters,
                 int64_t limited_size = -1) const override {
-        if (GetNumElements() == 0) {
-            return DatasetImpl::MakeEmptyDataset();
-        }
+        CHECK_AND_RETURN_EMPTY_DATASET;
         SAFE_CALL(return this->inner_index_->RangeSearch(query, radius, parameters, limited_size));
     }
 
@@ -327,9 +308,7 @@ public:
                 const std::string& parameters,
                 BitsetPtr invalid,
                 int64_t limited_size = -1) const override {
-        if (GetNumElements() == 0) {
-            return DatasetImpl::MakeEmptyDataset();
-        }
+        CHECK_AND_RETURN_EMPTY_DATASET;
         SAFE_CALL(return this->inner_index_->RangeSearch(
             query, radius, parameters, invalid, limited_size));
     }
@@ -340,9 +319,7 @@ public:
                 const std::string& parameters,
                 const std::function<bool(int64_t)>& filter,
                 int64_t limited_size = -1) const override {
-        if (GetNumElements() == 0) {
-            return DatasetImpl::MakeEmptyDataset();
-        }
+        CHECK_AND_RETURN_EMPTY_DATASET;
         SAFE_CALL(return this->inner_index_->RangeSearch(
             query, radius, parameters, filter, limited_size));
     }
@@ -353,19 +330,14 @@ public:
                 const std::string& parameters,
                 const FilterPtr& filter,
                 int64_t limited_size = -1) const override {
-        if (GetNumElements() == 0) {
-            return DatasetImpl::MakeEmptyDataset();
-        }
+        CHECK_AND_RETURN_EMPTY_DATASET;
         SAFE_CALL(return this->inner_index_->RangeSearch(
             query, radius, parameters, filter, limited_size));
     }
 
     tl::expected<bool, Error>
     Remove(int64_t id) override {
-        if (this->inner_index_->immutable_) {
-            return tl::unexpected(
-                Error(ErrorType::UNSUPPORTED_INDEX_OPERATION, "immutable index no support remove"));
-        }
+        CHECK_IMMUTABLE_INDEX("remove");
         SAFE_CALL(return this->inner_index_->Remove(id));
     }
 
@@ -381,9 +353,7 @@ public:
 
     [[nodiscard]] tl::expected<DatasetPtr, Error>
     SearchWithRequest(const SearchRequest& request) const override {
-        if (GetNumElements() == 0) {
-            return DatasetImpl::MakeEmptyDataset();
-        }
+        CHECK_AND_RETURN_EMPTY_DATASET;
         SAFE_CALL(return this->inner_index_->SearchWithRequest(request));
     }
 
@@ -394,19 +364,13 @@ public:
 
     tl::expected<void, Error>
     Train(const DatasetPtr& data) override {
-        if (this->inner_index_->immutable_) {
-            return tl::unexpected(
-                Error(ErrorType::UNSUPPORTED_INDEX_OPERATION, "immutable index no support train"));
-        }
+        CHECK_IMMUTABLE_INDEX("train");
         SAFE_CALL(this->inner_index_->Train(data));
     }
 
     virtual tl::expected<void, Error>
     UpdateAttribute(int64_t id, const AttributeSet& new_attrs) override {
-        if (this->inner_index_->immutable_) {
-            return tl::unexpected(Error(ErrorType::UNSUPPORTED_INDEX_OPERATION,
-                                        "immutable index no support update attribute"));
-        }
+        CHECK_IMMUTABLE_INDEX("update attribute");
         SAFE_CALL(this->inner_index_->UpdateAttribute(id, new_attrs));
     }
 
@@ -414,38 +378,25 @@ public:
     UpdateAttribute(int64_t id,
                     const AttributeSet& new_attrs,
                     const AttributeSet& origin_attrs) override {
-        if (this->inner_index_->immutable_) {
-            return tl::unexpected(
-                Error(ErrorType::UNSUPPORTED_INDEX_OPERATION,
-                      "immutable index no support update attribute with origin attributes"));
-        }
+        CHECK_IMMUTABLE_INDEX("update attribute with origin attributes");
         SAFE_CALL(this->inner_index_->UpdateAttribute(id, new_attrs, origin_attrs));
     }
 
     virtual tl::expected<bool, Error>
     UpdateExtraInfo(const DatasetPtr& new_base) override {
-        if (this->inner_index_->immutable_) {
-            return tl::unexpected(Error(ErrorType::UNSUPPORTED_INDEX_OPERATION,
-                                        "immutable index no support update extra info"));
-        }
+        CHECK_IMMUTABLE_INDEX("update extra info");
         SAFE_CALL(return this->inner_index_->UpdateExtraInfo(new_base));
     }
 
     tl::expected<bool, Error>
     UpdateId(int64_t old_id, int64_t new_id) override {
-        if (this->inner_index_->immutable_) {
-            return tl::unexpected(Error(ErrorType::UNSUPPORTED_INDEX_OPERATION,
-                                        "immutable index no support update id"));
-        }
+        CHECK_IMMUTABLE_INDEX("update id");
         SAFE_CALL(return this->inner_index_->UpdateId(old_id, new_id));
     }
 
     tl::expected<bool, Error>
     UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update = false) override {
-        if (this->inner_index_->immutable_) {
-            return tl::unexpected(Error(ErrorType::UNSUPPORTED_INDEX_OPERATION,
-                                        "immutable index no support update vector"));
-        }
+        CHECK_IMMUTABLE_INDEX("update vector");
         SAFE_CALL(return this->inner_index_->UpdateVector(id, new_base, force_update));
     }
 
