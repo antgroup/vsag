@@ -17,7 +17,6 @@
 
 #include "inner_string_params.h"
 namespace vsag {
-
 const char* const INDEX_HGRAPH = "hgraph";
 const char* const INDEX_DISKANN = "diskann";
 const char* const INDEX_HNSW = "hnsw";

@@ -21,12 +21,20 @@
 #include "vsag_exception.h"
 
 namespace vsag {
-PCATransformer::PCATransformer(Allocator* allocator, int64_t input_dim, int64_t output_dim)
+PCATransformer::PCATransformer(Allocator* allocator,
+                               int64_t input_dim,
+                               int64_t output_dim,
+                               bool is_mrq)
     : VectorTransformer(allocator, input_dim, output_dim),
+      is_mrq_(is_mrq),
       pca_matrix_(allocator),
       mean_(allocator) {
-    pca_matrix_.resize(output_dim * input_dim);
-    mean_.resize(input_dim);
+    if (is_mrq_) {
+        output_dim_ = input_dim;
+    }
+
+    pca_matrix_.resize(output_dim_ * input_dim_);
+    mean_.resize(input_dim_);
     this->type_ = VectorTransformerType::PCA;
 }
 
@@ -62,7 +70,7 @@ PCATransformer::Transform(const float* input_vec, float* output_vec) const {
     this->CentralizeData(input_vec, centralized_vec.data());
 
     // output_vec[i] = sum_j(input_vec[j] * pca_matrix_[j, i])
-    // e.g., original_dim == 3, target_dim == 2
+    // e.g., input_dim == 3, output_dim == 2
     //       [1, 0, 0,] * [1,]  = [1,]
     //       [0, 0, 1 ]   [2,]  = [3 ]
     //                    [3 ]
@@ -193,7 +201,7 @@ PCATransformer::SetMeanForTest(const float* input_mean) {
 }
 
 void
-PCATransformer::SetPCAMatrixForText(const float* input_pca_matrix) {
+PCATransformer::SetPCAMatrixForTest(const float* input_pca_matrix) {
     for (uint64_t i = 0; i < pca_matrix_.size(); i++) {
         pca_matrix_[i] = input_pca_matrix[i];
     }

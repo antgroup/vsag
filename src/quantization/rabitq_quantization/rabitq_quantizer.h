@@ -26,6 +26,7 @@
 #include "quantization/quantizer.h"
 #include "quantization/scalar_quantization/sq4_uniform_quantizer.h"
 #include "rabitq_quantizer_parameter.h"
+#include "simd/fp32_simd.h"
 #include "simd/normalize.h"
 #include "simd/rabitq_simd.h"
 #include "typing.h"
@@ -51,6 +52,7 @@ public:
                             uint64_t pca_dim,
                             uint64_t num_bits_per_dim_query,
                             bool use_fht,
+                            bool use_mrq,
                             Allocator* allocator);
 
     explicit RaBitQuantizer(const RaBitQuantizerParamPtr& param,
@@ -164,9 +166,10 @@ private:
     std::shared_ptr<PCATransformer> pca_;
     std::uint64_t original_dim_{0};
     std::uint64_t pca_dim_{0};
+    bool use_mrq_{false};
 
     /***
-     * query layout: sq-code(required) + lower_bound(sq4) + delta(sq4) + sum(sq4) + norm(required)
+     * query layout: sq-code(required) + lower_bound(sq4) + delta(sq4) + sum(sq4) + norm(required) + mrq_norm(required)
      */
     uint64_t aligned_dim_{0};
     uint64_t num_bits_per_dim_query_{32};
@@ -175,27 +178,34 @@ private:
     uint64_t query_offset_delta_{0};
     uint64_t query_offset_sum_{0};
     uint64_t query_offset_norm_{0};
+    uint64_t query_offset_mrq_norm_{0};
 
     /***
-     * code layout: bq-code(required) + norm(required) + error(required) + sum(sq4)
+     * code layout: bq-code(required) + norm(required) + error(required) + sum(sq4) + mrq_norm(required)
      */
     uint64_t offset_code_{0};
     uint64_t offset_norm_{0};
     uint64_t offset_error_{0};
     uint64_t offset_sum_{0};
+    uint64_t offset_mrq_norm_{0};
 };
 
 template <MetricType metric>
-RaBitQuantizer<metric>::RaBitQuantizer(
-    int dim, uint64_t pca_dim, uint64_t num_bits_per_dim_query, bool use_fht, Allocator* allocator)
+RaBitQuantizer<metric>::RaBitQuantizer(int dim,
+                                       uint64_t pca_dim,
+                                       uint64_t num_bits_per_dim_query,
+                                       bool use_fht,
+                                       bool use_mrq,
+                                       Allocator* allocator)
     : Quantizer<RaBitQuantizer<metric>>(dim, allocator) {
     static_assert(metric == MetricType::METRIC_TYPE_L2SQR, "Unsupported metric type");
 
     // dim
+    use_mrq_ = use_mrq;
     pca_dim_ = pca_dim;
     original_dim_ = dim;
     if (0 < pca_dim_ and pca_dim_ < dim) {
-        pca_.reset(new PCATransformer(allocator, dim, pca_dim_));
+        pca_.reset(new PCATransformer(allocator, dim, pca_dim_, use_mrq_));
         this->dim_ = pca_dim_;
     } else {
         pca_dim_ = dim;
@@ -262,6 +272,15 @@ RaBitQuantizer<metric>::RaBitQuantizer(
 
     query_offset_norm_ = this->query_code_size_;
     this->query_code_size_ += ((sizeof(norm_type) + align_size - 1) / align_size) * align_size;
+
+    // MRQ residual term
+    if (pca_dim_ != original_dim_ and use_mrq_) {
+        offset_mrq_norm_ = this->code_size_;
+        this->code_size_ += ((sizeof(norm_type) + align_size - 1) / align_size) * align_size;
+
+        query_offset_mrq_norm_ = this->query_code_size_;
+        this->query_code_size_ += ((sizeof(norm_type) + align_size - 1) / align_size) * align_size;
+    }
 }
 
 template <MetricType metric>
@@ -271,6 +290,7 @@ RaBitQuantizer<metric>::RaBitQuantizer(const RaBitQuantizerParamPtr& param,
                              param->pca_dim_,
                              param->num_bits_per_dim_query_,
                              param->use_fht_,
+                             false,
                              common_param.allocator_.get()){};
 
 template <MetricType metric>
@@ -300,7 +320,7 @@ RaBitQuantizer<metric>::TrainImpl(const DataType* data, uint64_t count) {
         centroid_[d] = 0;
     }
     for (uint64_t i = 0; i < count; ++i) {
-        Vector<DataType> pca_data(this->dim_, 0, this->allocator_);
+        Vector<DataType> pca_data(this->original_dim_, 0, this->allocator_);
         if (pca_dim_ != this->original_dim_) {
             pca_->Transform(data + i * original_dim_, pca_data.data());
         } else {
@@ -330,13 +350,19 @@ template <MetricType metric>
 bool
 RaBitQuantizer<metric>::EncodeOneImpl(const DataType* data, uint8_t* codes) const {
     // 0. init
-    Vector<DataType> pca_data(this->dim_, 0, this->allocator_);
+    Vector<DataType> pca_data(this->original_dim_, 0, this->allocator_);
     Vector<DataType> transformed_data(this->dim_, 0, this->allocator_);
     Vector<DataType> normed_data(this->dim_, 0, this->allocator_);
 
     // 1. pca
     if (pca_dim_ != this->original_dim_) {
         pca_->Transform(data, pca_data.data());
+        if (use_mrq_) {
+            norm_type mrq_norm_sqr = FP32ComputeIP(pca_data.data() + this->dim_,
+                                                   pca_data.data() + this->dim_,
+                                                   this->original_dim_ - this->dim_);
+            *(norm_type*)(codes + offset_mrq_norm_) = mrq_norm_sqr;
+        }
     } else {
         pca_data.assign(data, data + original_dim_);
     }
@@ -463,6 +489,13 @@ RaBitQuantizer<metric>::ComputeQueryBaseImpl(const uint8_t* query_codes,
     float ip_est = ip_bq_estimate / ip_bb_1_32;
 
     float result = L2_UBE(base_norm, query_norm, ip_est);
+
+    if (pca_dim_ != this->original_dim_ and use_mrq_) {
+        norm_type query_mrq_norm_sqr = *(norm_type*)(query_codes + query_offset_mrq_norm_);
+        norm_type base_mrq_norm_sqr = *(norm_type*)(base_codes + offset_mrq_norm_);
+
+        result += (query_mrq_norm_sqr + base_mrq_norm_sqr);
+    }
 
     return result;
 }
@@ -606,13 +639,21 @@ RaBitQuantizer<metric>::ProcessQueryImpl(const DataType* query,
         computer.buf_ = reinterpret_cast<uint8_t*>(this->allocator_->Allocate(query_code_size_));
         std::fill(computer.buf_, computer.buf_ + query_code_size_, 0);
 
-        Vector<DataType> pca_data(this->dim_, 0, this->allocator_);
+        // use residual term in pca, so it's this->original_dim_
+        Vector<DataType> pca_data(this->original_dim_, 0, this->allocator_);
         Vector<DataType> transformed_data(this->dim_, 0, this->allocator_);
         Vector<DataType> normed_data(this->dim_, 0, this->allocator_);
 
         // 1. pca
         if (pca_dim_ != this->original_dim_) {
             pca_->Transform(query, pca_data.data());
+            if (use_mrq_) {
+                norm_type mrq_norm_sqr = FP32ComputeIP(pca_data.data() + this->dim_,
+                                                       pca_data.data() + this->dim_,
+                                                       this->original_dim_ - this->dim_);
+
+                *(norm_type*)(computer.buf_ + query_offset_mrq_norm_) = mrq_norm_sqr;
+            }
         } else {
             pca_data.assign(query, query + original_dim_);
         }

@@ -15,7 +15,6 @@
 #pragma once
 
 namespace vsag {
-
 extern const char* const INDEX_HGRAPH;
 extern const char* const INDEX_DISKANN;
 extern const char* const INDEX_HNSW;
