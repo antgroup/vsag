@@ -51,35 +51,35 @@ ComparisonExecutor::ComparisonExecutor(Allocator* allocator,
         }
         if (value_type == AttrValueType::INT8) {
             auto attr_value = std::make_shared<AttributeValue<int8_t>>();
-            attr_value->GetValue().emplace_back(std::get<long>(constant->value));
+            attr_value->GetValue().emplace_back(GetNumericValue<int8_t>(constant->value));
             this->filter_attribute_ = attr_value;
         } else if (value_type == AttrValueType::INT16) {
             auto attr_value = std::make_shared<AttributeValue<int16_t>>();
-            attr_value->GetValue().emplace_back(std::get<long>(constant->value));
+            attr_value->GetValue().emplace_back(GetNumericValue<int16_t>(constant->value));
             this->filter_attribute_ = attr_value;
         } else if (value_type == AttrValueType::INT32) {
             auto attr_value = std::make_shared<AttributeValue<int32_t>>();
-            attr_value->GetValue().emplace_back(std::get<long>(constant->value));
+            attr_value->GetValue().emplace_back(GetNumericValue<int32_t>(constant->value));
             this->filter_attribute_ = attr_value;
         } else if (value_type == AttrValueType::INT64) {
             auto attr_value = std::make_shared<AttributeValue<int64_t>>();
-            attr_value->GetValue().emplace_back(std::get<long>(constant->value));
+            attr_value->GetValue().emplace_back(GetNumericValue<int64_t>(constant->value));
             this->filter_attribute_ = attr_value;
         } else if (value_type == AttrValueType::UINT8) {
             auto attr_value = std::make_shared<AttributeValue<uint8_t>>();
-            attr_value->GetValue().emplace_back(std::get<long>(constant->value));
+            attr_value->GetValue().emplace_back(GetNumericValue<uint8_t>(constant->value));
             this->filter_attribute_ = attr_value;
         } else if (value_type == AttrValueType::UINT16) {
             auto attr_value = std::make_shared<AttributeValue<uint16_t>>();
-            attr_value->GetValue().emplace_back(std::get<long>(constant->value));
+            attr_value->GetValue().emplace_back(GetNumericValue<uint16_t>(constant->value));
             this->filter_attribute_ = attr_value;
         } else if (value_type == AttrValueType::UINT32) {
             auto attr_value = std::make_shared<AttributeValue<uint32_t>>();
-            attr_value->GetValue().emplace_back(std::get<long>(constant->value));
+            attr_value->GetValue().emplace_back(GetNumericValue<uint32_t>(constant->value));
             this->filter_attribute_ = attr_value;
         } else if (value_type == AttrValueType::UINT64) {
             auto attr_value = std::make_shared<AttributeValue<uint64_t>>();
-            attr_value->GetValue().emplace_back(std::get<long>(constant->value));
+            attr_value->GetValue().emplace_back(GetNumericValue<uint64_t>(constant->value));
             this->filter_attribute_ = attr_value;
         } else {
             throw VsagException(ErrorType::INTERNAL_ERROR, "unsupported attribute type");

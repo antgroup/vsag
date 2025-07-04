@@ -563,6 +563,18 @@ TEST_CASE("Test LogicalExpression", "[ft][expression_visitor]") {
         REQUIRE(logic_expr->right->ToString() == "(name = \"Alice\")");
         REQUIRE(logic_expr->ToString() == "((age >= 18) AND (name = \"Alice\"))");
     }
+
+    {
+        auto filter_condition_str =
+            R"((id >= 9223372036854775808) and (id <= 18446744073709551615))";
+        auto expr_ptr = AstParse(filter_condition_str);
+        auto logic_expr = std::dynamic_pointer_cast<LogicalExpression>(expr_ptr);
+        REQUIRE(logic_expr != nullptr);
+        REQUIRE(logic_expr->left->ToString() == "(id >= 9223372036854775808)");
+        REQUIRE(logic_expr->right->ToString() == "(id <= 18446744073709551615)");
+        REQUIRE(logic_expr->ToString() ==
+                "((id >= 9223372036854775808) AND (id <= 18446744073709551615))");
+    }
 }
 
 TEST_CASE("Test InIntListExpression", "[ft][expression_visitor]") {
@@ -579,6 +591,36 @@ TEST_CASE("Test InIntListExpression", "[ft][expression_visitor]") {
     }
 
     {
+        auto filter_condition_str =
+            "id IN [9223372036854775808, 18446744073709551615, 13835058055282163712]";
+        auto expr_ptr = AstParse(filter_condition_str);
+        auto int_list_expr = std::dynamic_pointer_cast<IntListExpression>(expr_ptr);
+        REQUIRE(int_list_expr != nullptr);
+        REQUIRE(int_list_expr->field->ToString() == "id");
+        REQUIRE_FALSE(int_list_expr->is_not_in);
+        REQUIRE(int_list_expr->values->ToString() ==
+                "[9223372036854775808, 18446744073709551615, 13835058055282163712]");
+        REQUIRE(int_list_expr->ToString() ==
+                "(id IN [9223372036854775808, 18446744073709551615, 13835058055282163712])");
+    }
+
+    {
+        auto filter_condition_str = "id IN [9223372036854775808, -1, 3]";
+        REQUIRE_THROWS(AstParse(filter_condition_str));
+    }
+
+    {
+        auto filter_condition_str = "id IN [9223372036854775808]";
+        auto expr_ptr = AstParse(filter_condition_str);
+        auto int_list_expr = std::dynamic_pointer_cast<IntListExpression>(expr_ptr);
+        REQUIRE(int_list_expr != nullptr);
+        REQUIRE(int_list_expr->field->ToString() == "id");
+        REQUIRE_FALSE(int_list_expr->is_not_in);
+        REQUIRE(int_list_expr->values->ToString() == "[9223372036854775808]");
+        REQUIRE(int_list_expr->ToString() == "(id IN [9223372036854775808])");
+    }
+
+    {
         auto filter_condition_str = R"(multi_in(id, "1|2|3", "|"))";
         auto expr_ptr = AstParse(filter_condition_str);
         // AST 结构: comparison -> field_name -> ID('id'), IN('IN'), int_value_list -> [INTEGER('1'), INTEGER('2'), INTEGER('3')]
@@ -588,6 +630,22 @@ TEST_CASE("Test InIntListExpression", "[ft][expression_visitor]") {
         REQUIRE_FALSE(int_list_expr->is_not_in);
         REQUIRE(int_list_expr->values->ToString() == "[1, 2, 3]");
         REQUIRE(int_list_expr->ToString() == "(id IN [1, 2, 3])");
+    }
+
+    {
+        auto filter_condition_str = R"(multi_in(id, "9223372036854775808|-2|3", "|"))";
+        REQUIRE_THROWS(AstParse(filter_condition_str));
+    }
+
+    {
+        auto filter_condition_str = R"(multi_in(id, "9223372036854775808", "|"))";
+        auto expr_ptr = AstParse(filter_condition_str);
+        auto int_list_expr = std::dynamic_pointer_cast<IntListExpression>(expr_ptr);
+        REQUIRE(int_list_expr != nullptr);
+        REQUIRE(int_list_expr->field->ToString() == "id");
+        REQUIRE_FALSE(int_list_expr->is_not_in);
+        REQUIRE(int_list_expr->values->ToString() == "[9223372036854775808]");
+        REQUIRE(int_list_expr->ToString() == "(id IN [9223372036854775808])");
     }
 
     {
