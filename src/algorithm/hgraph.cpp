@@ -1248,12 +1248,12 @@ static const std::string HGRAPH_PARAMS_TEMPLATE =
             },
             "codes_type": "flatten_codes",
             "{QUANTIZATION_PARAMS_KEY}": {
-                "{QUANTIZATION_TYPE_KEY}": "{QUANTIZATION_TYPE_VALUE_PQ}",
+                "{QUANTIZATION_TYPE_KEY}": "{QUANTIZATION_TYPE_VALUE_FP32}",
                 "{SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE}": 0.05,
                 "{PCA_DIM}": 0,
                 "{RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY}": 32,
                 "nbits": 8,
-                "{PRODUCT_QUANTIZATION_DIM}": 0
+                "{PRODUCT_QUANTIZATION_DIM}": 1
             }
         },
         "{HGRAPH_PRECISE_CODES_KEY}": {
@@ -1266,7 +1266,7 @@ static const std::string HGRAPH_PARAMS_TEMPLATE =
                 "{QUANTIZATION_TYPE_KEY}": "{QUANTIZATION_TYPE_VALUE_FP32}",
                 "{SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE}": 0.05,
                 "{PCA_DIM}": 0,
-                "{PRODUCT_QUANTIZATION_DIM}": 0
+                "{PRODUCT_QUANTIZATION_DIM}": 1
             }
         },
         "{BUILD_PARAMS_KEY}": {
