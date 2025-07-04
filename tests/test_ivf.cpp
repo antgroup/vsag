@@ -1176,7 +1176,7 @@ TestIVFGNOIMIBuildWithResidual(const fixtures::IVFTestIndexPtr& test_index,
             for (auto train_type : resource->train_types) {
                 for (auto& [base_quantization_str, recall] : resource->test_cases) {
                     if (base_quantization_str == "sq8_uniform,fp32") {
-                        continue;
+                        continue;  // sq8_uniform reduce recall when using residual in GNO-IMI
                     }
                     auto count = std::min(900, static_cast<int32_t>(dim / 4));
                     auto search_param =
