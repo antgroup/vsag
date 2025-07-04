@@ -50,7 +50,8 @@ public:
         : allocator_(common_param.allocator_.get()),
           thread_pool_(common_param.thread_pool_),
           bucket_count_(bucket_count),
-          dim_(common_param.dim_){};
+          dim_(common_param.dim_),
+          metric_type_(common_param.metric_){};
 
     virtual void
     Train(const DatasetPtr dataset) = 0;
@@ -96,6 +97,8 @@ public:
 
     Allocator* const allocator_{nullptr};
     SafeThreadPoolPtr thread_pool_{nullptr};
+
+    MetricType metric_type_{MetricType::METRIC_TYPE_L2SQR};
 
     BucketIdType bucket_count_{0};
 
