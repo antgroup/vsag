@@ -15,11 +15,15 @@
 
 #include "integer_list_executor.h"
 
+#include <variant>
+
 #include "impl/bitset/fast_bitset.h"
 #include "utils/util_functions.h"
 #include "vsag_exception.h"
 
 namespace vsag {
+using ListVariant = std::variant<std::shared_ptr<const IntListConstant<int64_t>>,
+                                 std::shared_ptr<const IntListConstant<uint64_t>>>;
 
 IntegerListExecutor::IntegerListExecutor(Allocator* allocator,
                                          const ExprPtr& expr,
@@ -34,47 +38,57 @@ IntegerListExecutor::IntegerListExecutor(Allocator* allocator,
     if (field_expr == nullptr) {
         throw VsagException(ErrorType::INTERNAL_ERROR, "expression type not match");
     }
-    auto list_constant = std::dynamic_pointer_cast<const IntListConstant>(list_expr->values);
-    if (list_constant == nullptr) {
+    ListVariant list_variant;
+    if (auto i64 = std::dynamic_pointer_cast<const IntListConstant<int64_t>>(list_expr->values)) {
+        list_variant = i64;
+    } else if (auto u64 =
+                   std::dynamic_pointer_cast<const IntListConstant<uint64_t>>(list_expr->values)) {
+        list_variant = u64;
+    } else {
         throw VsagException(ErrorType::INTERNAL_ERROR, "expression type not match");
     }
     this->field_name_ = field_expr->fieldName;
     auto value_type = this->attr_index_->GetTypeOfField(this->field_name_);
-    if (value_type == AttrValueType::INT8) {
-        auto attr_value = std::make_shared<AttributeValue<int8_t>>();
-        copy_vector(list_constant->values, attr_value->GetValue());
-        this->filter_attribute_ = attr_value;
-    } else if (value_type == AttrValueType::INT16) {
-        auto attr_value = std::make_shared<AttributeValue<int16_t>>();
-        copy_vector(list_constant->values, attr_value->GetValue());
-        this->filter_attribute_ = attr_value;
-    } else if (value_type == AttrValueType::INT32) {
-        auto attr_value = std::make_shared<AttributeValue<int32_t>>();
-        copy_vector(list_constant->values, attr_value->GetValue());
-        this->filter_attribute_ = attr_value;
-    } else if (value_type == AttrValueType::INT64) {
-        auto attr_value = std::make_shared<AttributeValue<int64_t>>();
-        copy_vector(list_constant->values, attr_value->GetValue());
-        this->filter_attribute_ = attr_value;
-    } else if (value_type == AttrValueType::UINT8) {
-        auto attr_value = std::make_shared<AttributeValue<uint8_t>>();
-        copy_vector(list_constant->values, attr_value->GetValue());
-        this->filter_attribute_ = attr_value;
-    } else if (value_type == AttrValueType::UINT16) {
-        auto attr_value = std::make_shared<AttributeValue<uint16_t>>();
-        copy_vector(list_constant->values, attr_value->GetValue());
-        this->filter_attribute_ = attr_value;
-    } else if (value_type == AttrValueType::UINT32) {
-        auto attr_value = std::make_shared<AttributeValue<uint32_t>>();
-        copy_vector(list_constant->values, attr_value->GetValue());
-        this->filter_attribute_ = attr_value;
-    } else if (value_type == AttrValueType::UINT64) {
-        auto attr_value = std::make_shared<AttributeValue<uint64_t>>();
-        copy_vector(list_constant->values, attr_value->GetValue());
-        this->filter_attribute_ = attr_value;
-    } else {
-        throw VsagException(ErrorType::INTERNAL_ERROR, "unsupported attribute type");
-    }
+    std::visit(
+        [this, value_type](auto&& list_constant) {
+            if (value_type == AttrValueType::INT8) {
+                auto attr_value = std::make_shared<AttributeValue<int8_t>>();
+                copy_vector(list_constant->values, attr_value->GetValue());
+                this->filter_attribute_ = attr_value;
+            } else if (value_type == AttrValueType::INT16) {
+                auto attr_value = std::make_shared<AttributeValue<int16_t>>();
+                copy_vector(list_constant->values, attr_value->GetValue());
+                this->filter_attribute_ = attr_value;
+            } else if (value_type == AttrValueType::INT32) {
+                auto attr_value = std::make_shared<AttributeValue<int32_t>>();
+                copy_vector(list_constant->values, attr_value->GetValue());
+                this->filter_attribute_ = attr_value;
+            } else if (value_type == AttrValueType::INT64) {
+                auto attr_value = std::make_shared<AttributeValue<int64_t>>();
+                copy_vector(list_constant->values, attr_value->GetValue());
+                this->filter_attribute_ = attr_value;
+            } else if (value_type == AttrValueType::UINT8) {
+                auto attr_value = std::make_shared<AttributeValue<uint8_t>>();
+                copy_vector(list_constant->values, attr_value->GetValue());
+                this->filter_attribute_ = attr_value;
+            } else if (value_type == AttrValueType::UINT16) {
+                auto attr_value = std::make_shared<AttributeValue<uint16_t>>();
+                copy_vector(list_constant->values, attr_value->GetValue());
+                this->filter_attribute_ = attr_value;
+            } else if (value_type == AttrValueType::UINT32) {
+                auto attr_value = std::make_shared<AttributeValue<uint32_t>>();
+                copy_vector(list_constant->values, attr_value->GetValue());
+                this->filter_attribute_ = attr_value;
+            } else if (value_type == AttrValueType::UINT64) {
+                auto attr_value = std::make_shared<AttributeValue<uint64_t>>();
+                copy_vector(list_constant->values, attr_value->GetValue());
+                this->filter_attribute_ = attr_value;
+            } else {
+                throw VsagException(ErrorType::INTERNAL_ERROR, "unsupported attribute type");
+            }
+        },
+        list_variant);
+
     this->filter_attribute_->name_ = this->field_name_;
 }
 
