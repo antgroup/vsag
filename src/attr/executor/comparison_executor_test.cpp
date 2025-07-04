@@ -20,7 +20,7 @@
 #include "attr/expression_visitor.h"
 #include "data_cell/attribute_inverted_interface.h"
 #include "executor_test.h"
-#include "safe_allocator.h"
+#include "impl/allocator/safe_allocator.h"
 
 using namespace vsag;
 

@@ -16,6 +16,7 @@
 #pragma once
 
 #include "graph_interface_parameter.h"
+#include "inner_string_params.h"
 #include "vsag/constants.h"
 
 namespace vsag {

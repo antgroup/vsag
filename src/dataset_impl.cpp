@@ -29,4 +29,52 @@ DatasetImpl::MakeEmptyDataset() {
     return result;
 }
 
+DatasetImpl::~DatasetImpl() noexcept {
+    if (not owner_) {
+        return;
+    }
+
+    if (allocator_ != nullptr) {
+        allocator_->Deallocate((void*)(DatasetImpl::GetIds()));
+        allocator_->Deallocate((void*)(DatasetImpl::GetDistances()));
+        allocator_->Deallocate((void*)(DatasetImpl::GetInt8Vectors()));
+        allocator_->Deallocate((void*)(DatasetImpl::GetFloat32Vectors()));
+        allocator_->Deallocate((void*)(DatasetImpl::GetPaths()));
+        allocator_->Deallocate((void*)(DatasetImpl::GetExtraInfos()));
+
+        if (DatasetImpl::GetSparseVectors() != nullptr) {
+            for (int i = 0; i < DatasetImpl::GetNumElements(); i++) {
+                allocator_->Deallocate((void*)DatasetImpl::GetSparseVectors()[i].ids_);
+                allocator_->Deallocate((void*)DatasetImpl::GetSparseVectors()[i].vals_);
+            }
+            allocator_->Deallocate((void*)DatasetImpl::GetSparseVectors());
+        }
+
+    } else {
+        delete[] DatasetImpl::GetIds();
+        delete[] DatasetImpl::GetDistances();
+        delete[] DatasetImpl::GetInt8Vectors();
+        delete[] DatasetImpl::GetFloat32Vectors();
+        delete[] DatasetImpl::GetPaths();
+        delete[] DatasetImpl::GetExtraInfos();
+
+        if (DatasetImpl::GetSparseVectors() != nullptr) {
+            for (int i = 0; i < DatasetImpl::GetNumElements(); i++) {
+                delete[] DatasetImpl::GetSparseVectors()[i].ids_;
+                delete[] DatasetImpl::GetSparseVectors()[i].vals_;
+            }
+            delete[] DatasetImpl::GetSparseVectors();
+        }
+    }
+    if (DatasetImpl::GetAttributeSets() != nullptr) {
+        const auto* attrsets = DatasetImpl::GetAttributeSets();
+        for (int i = 0; i < DatasetImpl::GetNumElements(); ++i) {
+            for (auto* attr : attrsets[i].attrs_) {
+                delete attr;
+            }
+        }
+        delete[] attrsets;
+    }
+}
+
 };  // namespace vsag

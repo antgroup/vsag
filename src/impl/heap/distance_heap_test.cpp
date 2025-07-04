@@ -18,8 +18,8 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "fixtures.h"
+#include "impl/allocator/safe_allocator.h"
 #include "memmove_heap.h"
-#include "safe_allocator.h"
 #include "standard_heap.h"
 
 using namespace vsag;

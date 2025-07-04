@@ -17,9 +17,7 @@
 
 #include <random>
 
-#include "basic_searcher.h"
 #include "common.h"
-#include "data_cell/flatten_datacell.h"
 #include "index/index_common_param.h"
 #include "runtime_parameter.h"
 #include "typing.h"
@@ -30,8 +28,9 @@ template <typename OptimizableOBJ>
 class Optimizer {
 public:
     Optimizer(const IndexCommonParam& common_param)
-        : parameters_(common_param.allocator_.get()), best_params_(common_param.allocator_.get()) {
-        allocator_ = common_param.allocator_.get();
+        : parameters_(common_param.allocator_.get()),
+          best_params_(common_param.allocator_.get()),
+          allocator_(common_param.allocator_.get()) {
         std::random_device rd;
         gen_.seed(rd());
     }
@@ -41,11 +40,11 @@ public:
 
     void
     RegisterParameter(const RuntimeParameter& runtime_parameter) {
-        parameters_.push_back(runtime_parameter);
+        parameters_.emplace_back(runtime_parameter);
     }
 
 private:
-    Allocator* allocator_{nullptr};
+    Allocator* const allocator_{nullptr};
 
     std::mt19937 gen_;
 

@@ -16,7 +16,6 @@
 #pragma once
 
 #include <cstdint>
-#include <nlohmann/json.hpp>
 
 #include "data_type.h"
 #include "metric_type.h"

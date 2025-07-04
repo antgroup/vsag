@@ -15,6 +15,8 @@
 
 #include "basic_optimizer.h"
 
+#include "basic_searcher.h"
+
 namespace vsag {
 
 template <typename OptimizableOBJ>

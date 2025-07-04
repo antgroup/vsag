@@ -20,7 +20,7 @@
 #include "utils/resource_object_pool.h"
 
 namespace vsag {
-class IOContext : ResourceObject {
+class IOContext : public ResourceObject {
 public:
     IOContext() {
         memset(&ctx_, 0, sizeof(ctx_));

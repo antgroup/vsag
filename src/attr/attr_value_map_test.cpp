@@ -13,12 +13,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "attr_value_map.h"
+#include "attr/attr_value_map.h"
 
 #include <catch2/catch_all.hpp>
 
 #include "fixtures.h"
-#include "safe_allocator.h"
+#include "impl/allocator/safe_allocator.h"
 
 using namespace vsag;
 

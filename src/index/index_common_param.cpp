@@ -15,7 +15,7 @@
 
 #include "index_common_param.h"
 
-#include <fmt/format-inl.h>
+#include <fmt/format.h>
 
 #include "common.h"
 #include "vsag/constants.h"

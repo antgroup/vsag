@@ -15,7 +15,7 @@
 
 #include "ivf_partition_strategy_parameter.h"
 
-#include <fmt/format-inl.h>
+#include <fmt/format.h>
 
 #include <iostream>
 

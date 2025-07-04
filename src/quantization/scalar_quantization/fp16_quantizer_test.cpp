@@ -19,8 +19,8 @@
 #include <vector>
 
 #include "fixtures.h"
+#include "impl/allocator/safe_allocator.h"
 #include "quantization/quantizer_test.h"
-#include "safe_allocator.h"
 
 using namespace vsag;
 

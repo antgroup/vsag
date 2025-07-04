@@ -15,8 +15,6 @@
 
 #pragma once
 
-#include <exceptions.h>
-
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -41,53 +39,7 @@ class DatasetImpl : public Dataset {
 public:
     DatasetImpl() = default;
 
-    ~DatasetImpl() override {
-        if (not owner_) {
-            return;
-        }
-
-        if (allocator_) {
-            allocator_->Deallocate((void*)this->GetIds());
-            allocator_->Deallocate((void*)this->GetDistances());
-            allocator_->Deallocate((void*)this->GetInt8Vectors());
-            allocator_->Deallocate((void*)this->GetFloat32Vectors());
-            allocator_->Deallocate((void*)this->GetPaths());
-            allocator_->Deallocate((void*)this->GetExtraInfos());
-
-            if (this->GetSparseVectors()) {
-                for (int i = 0; i < this->GetNumElements(); i++) {
-                    allocator_->Deallocate((void*)this->GetSparseVectors()[i].ids_);
-                    allocator_->Deallocate((void*)this->GetSparseVectors()[i].vals_);
-                }
-                allocator_->Deallocate((void*)this->GetSparseVectors());
-            }
-
-        } else {
-            delete[] this->GetIds();
-            delete[] this->GetDistances();
-            delete[] this->GetInt8Vectors();
-            delete[] this->GetFloat32Vectors();
-            delete[] this->GetPaths();
-            delete[] this->GetExtraInfos();
-
-            if (this->GetSparseVectors()) {
-                for (int i = 0; i < this->GetNumElements(); i++) {
-                    delete[] this->GetSparseVectors()[i].ids_;
-                    delete[] this->GetSparseVectors()[i].vals_;
-                }
-                delete[] this->GetSparseVectors();
-            }
-        }
-        if (this->GetAttributeSets()) {
-            auto* attrsets = this->GetAttributeSets();
-            for (int i = 0; i < this->GetNumElements(); ++i) {
-                for (auto* attr : attrsets[i].attrs_) {
-                    delete attr;
-                }
-            }
-            delete[] attrsets;
-        }
-    }
+    ~DatasetImpl() noexcept override;
 
     DatasetImpl(const DatasetImpl&) = delete;
     DatasetImpl&
@@ -273,7 +225,7 @@ public:
     MakeEmptyDataset();
 
 private:
-    bool owner_ = true;
+    bool owner_{true};
     std::unordered_map<std::string, var> data_;
     Allocator* allocator_ = nullptr;
 };

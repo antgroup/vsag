@@ -15,128 +15,43 @@
 
 #pragma once
 
-#include <utility>
-
 #include "async_io_parameter.h"
 #include "basic_io.h"
-#include "direct_io_object.h"
 #include "index/index_common_param.h"
 #include "io_context.h"
 
 namespace vsag {
+
 class AsyncIO : public BasicIO<AsyncIO> {
 public:
-    AsyncIO(std::string filename, Allocator* allocator)
-        : BasicIO<AsyncIO>(allocator), filepath_(std::move(filename)) {
-        this->rfd_ = open(filepath_.c_str(), O_CREAT | O_RDWR | O_DIRECT, 0644);
-        this->wfd_ = open(filepath_.c_str(), O_CREAT | O_RDWR, 0644);
-    }
+    explicit AsyncIO(std::string filename, Allocator* allocator);
 
-    explicit AsyncIO(const AsyncIOParameterPtr& io_param, const IndexCommonParam& common_param)
-        : AsyncIO(io_param->path_, common_param.allocator_.get()){};
+    explicit AsyncIO(const AsyncIOParameterPtr& io_param, const IndexCommonParam& common_param);
 
-    explicit AsyncIO(const IOParamPtr& param, const IndexCommonParam& common_param)
-        : AsyncIO(std::dynamic_pointer_cast<AsyncIOParameter>(param), common_param){};
+    explicit AsyncIO(const IOParamPtr& param, const IndexCommonParam& common_param);
 
     ~AsyncIO() override = default;
 
 public:
-    inline void
-    WriteImpl(const uint8_t* data, uint64_t size, uint64_t offset) {
-        auto ret = pwrite64(this->wfd_, data, size, offset);
-        if (ret != size) {
-            throw VsagException(ErrorType::INTERNAL_ERROR,
-                                fmt::format("write bytes {} less than {}", ret, size));
-        }
-        if (size + offset > this->size_) {
-            this->size_ = size + offset;
-        }
-        fsync(wfd_);
-    }
+    void
+    WriteImpl(const uint8_t* data, uint64_t size, uint64_t offset);
 
-    inline bool
-    ReadImpl(uint64_t size, uint64_t offset, uint8_t* data) const {
-        bool need_release = true;
-        auto ptr = DirectReadImpl(size, offset, need_release);
-        memcpy(data, ptr, size);
-        this->ReleaseImpl(ptr);
-        return true;
-    }
+    bool
+    ReadImpl(uint64_t size, uint64_t offset, uint8_t* data) const;
 
-    [[nodiscard]] inline const uint8_t*
-    DirectReadImpl(uint64_t size, uint64_t offset, bool& need_release) const {
-        need_release = true;
-        if (size == 0) {
-            return nullptr;
-        }
-        DirectIOObject obj(size, offset);
-        auto ret = pread64(this->rfd_, obj.align_data, obj.size, obj.offset);
-        if (ret < 0) {
-            throw VsagException(ErrorType::INTERNAL_ERROR, fmt::format("pread64 error {}", ret));
-        }
-        return obj.data;
-    }
+    [[nodiscard]] const uint8_t*
+    DirectReadImpl(uint64_t size, uint64_t offset, bool& need_release) const;
 
-    inline void
-    ReleaseImpl(const uint8_t* data) const {
-        auto ptr = const_cast<uint8_t*>(data);
-        constexpr auto ALIGN_BIT = DirectIOObject::ALIGN_BIT;
-        free(reinterpret_cast<void*>((reinterpret_cast<uint64_t>(ptr) >> ALIGN_BIT) << ALIGN_BIT));
-    }
+    void
+    ReleaseImpl(const uint8_t* data) const;
 
-    inline bool
-    MultiReadImpl(uint8_t* datas, uint64_t* sizes, uint64_t* offsets, uint64_t count) const {
-        auto context = io_context_pool->TakeOne();
-        uint8_t* cur_data = datas;
-        int64_t all_count = count;
-        while (all_count > 0) {
-            count = std::min(IOContext::DEFAULT_REQUEST_COUNT, all_count);
-            auto* cb = context->cb_;
-            std::vector<DirectIOObject> objs(count);
-            for (int64_t i = 0; i < count; ++i) {
-                objs[i].Set(sizes[i], offsets[i]);
-                auto& obj = objs[i];
-                io_prep_pread(cb[i], rfd_, obj.align_data, obj.size, obj.offset);
-                cb[i]->data = &(objs[i]);
-            }
+    bool
+    MultiReadImpl(uint8_t* datas, uint64_t* sizes, uint64_t* offsets, uint64_t count) const;
 
-            int submitted = io_submit(context->ctx_, count, cb);
-            if (submitted < 0) {
-                io_context_pool->ReturnOne(context);
-                for (auto& obj : objs) {
-                    obj.Release();
-                }
-                throw VsagException(ErrorType::INTERNAL_ERROR, "io submit failed");
-            }
-
-            struct timespec timeout = {1, 0};
-            auto num_events = io_getevents(context->ctx_, count, count, context->events_, &timeout);
-            if (num_events != count) {
-                io_context_pool->ReturnOne(context);
-                for (auto& obj : objs) {
-                    obj.Release();
-                }
-                throw VsagException(ErrorType::INTERNAL_ERROR, "io async read failed");
-            }
-
-            for (int64_t i = 0; i < count; ++i) {
-                memcpy(cur_data, objs[i].data, sizes[i]);
-                cur_data += sizes[i];
-                this->ReleaseImpl(objs[i].data);
-            }
-
-            sizes += count;
-            offsets += count;
-            all_count -= count;
-        }
-        io_context_pool->ReturnOne(context);
-        return true;
-    }
-
-    inline void
+    void
     PrefetchImpl(uint64_t offset, uint64_t cache_line = 64){};
 
-    static inline bool
+    static bool
     InMemoryImpl() {
         return false;
     }
