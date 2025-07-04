@@ -10,6 +10,8 @@ else ()
     set (VSAG_ANTLR4_CXX11_ABI "-D_GLIBCXX_USE_CXX11_ABI=0")
 endif ()
 
+set (FULL_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${VSAG_ANTLR4_CXX11_ABI}")
+
 ExternalProject_Add(
         ${name}
         URL https://github.com/antlr/antlr4/archive/refs/tags/4.13.2.tar.gz
@@ -26,7 +28,7 @@ ExternalProject_Add(
         BINARY_DIR ${binary_dir}
         BUILD_IN_SOURCE 0
         CONFIGURE_COMMAND
-        cmake ${common_cmake_args} ${VSAG_ANTLR4_CXX11_ABI} -DCMAKE_INSTALL_PREFIX=${install_dir} -DANTLR_BUILD_SHARED=OFF -DANTLR_BUILD_STATIC=ON -DWITH_DEMO=False -DANTLR_BUILD_CPP_TESTS=OFF -S . -B build
+        cmake ${common_cmake_args} -DCMAKE_CXX_FLAGS=${FULL_CXX_FLAGS} -DCMAKE_INSTALL_PREFIX=${install_dir} -DANTLR_BUILD_SHARED=OFF -DANTLR_BUILD_STATIC=ON -DWITH_DEMO=False -DANTLR_BUILD_CPP_TESTS=OFF -S . -B build
         BUILD_COMMAND
         cmake --build build --target install --parallel ${NUM_BUILDING_JOBS}
         INSTALL_COMMAND cmake --install build
@@ -46,6 +48,6 @@ include_directories(extern/antlr4/fc)
 file(GLOB ANTLR4_GEN_SRC "extern/antlr4/fc/*.cpp")
 add_library(antlr4-autogen STATIC ${ANTLR4_GEN_SRC})
 add_dependencies(antlr4-autogen antlr4)
-target_compile_options(antlr4-autogen PRIVATE ${common_cmake_args})
+target_compile_options(antlr4-autogen PRIVATE ${common_cmake_args} ${VSAG_ANTLR4_CXX11_ABI})
 set_property(TARGET antlr4-autogen PROPERTY CXX_STANDARD 17)
 target_link_libraries(antlr4-autogen antlr4-runtime)
