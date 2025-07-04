@@ -94,6 +94,7 @@ AttributeBucketInvertedDataCell::get_bitsets_by_type(const ValueMapPtr& value_ma
     if (attr_value == nullptr) {
         throw VsagException(ErrorType::INTERNAL_ERROR, "Invalid attribute type");
     }
+    bitsets.reserve(attr_value->GetValue().size());
     for (auto& value : attr_value->GetValue()) {
         auto bitset = value_map->GetBitsetByValue(value);
         bitsets.emplace_back(bitset);
