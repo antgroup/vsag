@@ -377,6 +377,35 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex,
 }
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex,
+                             "HGraph Factory Test With Correct Parameters",
+                             "[ft][hgraph]") {
+    // bug issue #883
+    SECTION("Empty index_param") {
+        auto param = R"(
+        {
+            "dtype": "float32",
+            "dim": 128,
+            "metric_type": "l2",
+            "index_param": {
+            }
+        })";
+        REQUIRE(TestFactory("hgraph", param, true));
+    }
+    SECTION("pq index_param") {
+        auto param = R"(
+        {
+            "dtype": "float32",
+            "dim": 128,
+            "metric_type": "l2",
+            "index_param": {
+                "base_quantization_type": "pq"
+            }
+        })";
+        REQUIRE(TestFactory("hgraph", param, true));
+    }
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::HgraphTestIndex,
                              "HGraph Build & ContinueAdd Test",
                              "[ft][hgraph]") {
     auto origin_size = vsag::Options::Instance().block_size_limit();
