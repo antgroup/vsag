@@ -22,6 +22,7 @@
 #include "vsag/constants.h"
 #include "vsag/errors.h"
 #include "vsag/expected.hpp"
+#include "vsag/index.h"
 #include "vsag_exception.h"
 
 namespace vsag {

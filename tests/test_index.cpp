@@ -1698,5 +1698,23 @@ TestIndex::TestBuildWithAttr(const IndexPtr& index, const TestDatasetPtr& datase
     auto build_result = index->Build(dataset->base_);
     REQUIRE(build_result.has_value());
 }
+void
+TestIndex::TestGetRawVectorByIds(const IndexPtr& index,
+                                 const TestDatasetPtr& dataset,
+                                 bool expected_success) {
+    if (not index->CheckFeature(vsag::SUPPORT_GET_VECTOR_BY_IDS)) {
+        return;
+    }
+    int64_t count = dataset->count_;
+    auto vectors = index->GetRawVectorByIds(dataset->base_->GetIds(), count);
+    REQUIRE(vectors.has_value());
+    auto float_vectors = vectors.value()->GetFloat32Vectors();
+    auto dim = dataset->base_->GetDim();
+    for (int i = 0; i < count; ++i) {
+        fixtures::dist_t dis = vsag::FP32ComputeL2Sqr(
+            float_vectors + i * dim, dataset->base_->GetFloat32Vectors() + i * dim, dim);
+        REQUIRE(dis == 0);
+    }
+}
 
 }  // namespace fixtures

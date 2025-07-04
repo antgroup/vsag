@@ -162,7 +162,10 @@ public:
     }
 
     void
-    GetRawData(vsag::InnerIdType inner_id, uint8_t* data) const override;
+    GetCodeByInnerId(InnerIdType inner_id, uint8_t* data) const override;
+
+    void
+    GetVectorByInnerId(InnerIdType inner_id, float* data) const override;
 
     void
     Merge(const std::vector<MergeUnit>& merge_units) override;

@@ -86,6 +86,9 @@ public:
                             "Index doesn't support GetNumberRemoved");
     }
 
+    DatasetPtr
+    GetVectorByIds(const int64_t* ids, int64_t count) const;
+
 public:
     virtual void
     Train(const DatasetPtr& base){};
@@ -293,9 +296,15 @@ public:
     }
 
     virtual void
-    GetRawData(InnerIdType inner_id, uint8_t* data) const {
+    GetCodeByInnerId(InnerIdType inner_id, uint8_t* data) const {
         throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
-                            "Index doesn't support GetRawData");
+                            "Index doesn't support GetCodeByInnerId");
+    }
+
+    virtual void
+    GetVectorByInnerId(InnerIdType inner_id, float* data) const {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "Index doesn't support GetVectorByInnerId");
     }
 
 public:

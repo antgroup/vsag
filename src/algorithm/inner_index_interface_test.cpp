@@ -150,9 +150,10 @@ TEST_CASE("NOT Implemented", "[ut][InnerIndexInterface]") {
     REQUIRE_THROWS(empty_index->Pretrain(pretrain_ids, 10, ""));
     REQUIRE_THROWS(empty_index->CalcDistanceById(nullptr, 1));
     REQUIRE_THROWS(empty_index->ExportModel(common_param));
-    REQUIRE_THROWS(empty_index->GetRawData(1, nullptr));
+    REQUIRE_THROWS(empty_index->GetCodeByInnerId(1, nullptr));
     REQUIRE_THROWS(empty_index->GetMinAndMaxId());
     REQUIRE_THROWS(empty_index->GetMemoryUsageDetail());
     REQUIRE_THROWS(empty_index->Merge(merge_units));
     REQUIRE_THROWS(empty_index->GetExtraInfoByIds(nullptr, 1, nullptr));
+    REQUIRE_THROWS(empty_index->GetVectorByInnerId(1, nullptr));
 }

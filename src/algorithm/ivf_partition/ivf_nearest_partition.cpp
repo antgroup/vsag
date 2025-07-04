@@ -146,6 +146,6 @@ IVFNearestPartition::GetCentroid(BucketIdType bucket_id, Vector<float>& centroid
     if (!is_trained_ || bucket_id >= bucket_count_) {
         throw std::runtime_error("Invalid bucket_id or partition not trained");
     }
-    this->route_index_ptr_->GetRawData(bucket_id, (uint8_t*)centroid.data());
+    this->route_index_ptr_->GetCodeByInnerId(bucket_id, (uint8_t*)centroid.data());
 }
 }  // namespace vsag

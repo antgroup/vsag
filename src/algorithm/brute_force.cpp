@@ -242,12 +242,13 @@ BruteForce::InitFeatures() {
     if (name != QUANTIZATION_TYPE_VALUE_FP32 and name != QUANTIZATION_TYPE_VALUE_BF16) {
         this->index_feature_list_->SetFeature(IndexFeature::NEED_TRAIN);
     } else {
-        this->index_feature_list_->SetFeatures({
-            IndexFeature::SUPPORT_ADD_FROM_EMPTY,
-            IndexFeature::SUPPORT_RANGE_SEARCH,
-            IndexFeature::SUPPORT_CAL_DISTANCE_BY_ID,
-            IndexFeature::SUPPORT_RANGE_SEARCH_WITH_ID_FILTER,
-        });
+        this->index_feature_list_->SetFeatures({IndexFeature::SUPPORT_ADD_FROM_EMPTY,
+                                                IndexFeature::SUPPORT_RANGE_SEARCH,
+                                                IndexFeature::SUPPORT_CAL_DISTANCE_BY_ID,
+                                                IndexFeature::SUPPORT_RANGE_SEARCH_WITH_ID_FILTER});
+    }
+    if (name == QUANTIZATION_TYPE_VALUE_FP32 and metric_ != MetricType::METRIC_TYPE_COSINE) {
+        this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_GET_VECTOR_BY_IDS);
     }
 
     // add & build
@@ -351,6 +352,13 @@ BruteForce::resize(uint64_t new_size) {
 void
 BruteForce::add_one(const float* data, InnerIdType inner_id) {
     this->inner_codes_->InsertVector(data, inner_id);
+}
+
+void
+BruteForce::GetVectorByInnerId(InnerIdType inner_id, float* data) const {
+    Vector<uint8_t> codes(inner_codes_->code_size_, allocator_);
+    inner_codes_->GetCodesById(inner_id, codes.data());
+    inner_codes_->Decode(codes.data(), data);
 }
 
 }  // namespace vsag
