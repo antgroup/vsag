@@ -633,8 +633,10 @@ IVF::search(const DatasetPtr& query, const InnerSearchParam& param) const {
         }
         for (int j = 0; j < bucket_size; ++j) {
             auto origin_id = ids[j] / buckets_per_data_;
-            if ((ft == nullptr or ft->CheckValid(origin_id)) and
-                (attr_ft == nullptr or attr_ft->CheckValid(j))) {
+            if (attr_ft != nullptr and not attr_ft->CheckValid(j)) {
+                continue;
+            }
+            if (ft == nullptr or ft->CheckValid(origin_id)) {
                 dist[j] -= ip_distance;
                 if constexpr (mode == KNN_SEARCH) {
                     if (search_result->Size() < topk or dist[j] < cur_heap_top) {
