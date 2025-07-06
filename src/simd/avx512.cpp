@@ -46,6 +46,14 @@ InnerProductDistance(const void* pVect1, const void* pVect2, const void* qty_ptr
 }
 
 float
+INT8L2Sqr(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
+    auto* pVect1 = (int8_t*)pVect1v;
+    auto* pVect2 = (int8_t*)pVect2v;
+    auto qty = *((size_t*)qty_ptr);
+    return avx512::INT8ComputeL2Sqr(pVect1, pVect2, qty);
+}
+
+float
 INT8InnerProduct(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
 #if defined(ENABLE_AVX512)
     __mmask32 mask = 0xFFFFFFFF;
@@ -404,6 +412,50 @@ __inline __m512i __attribute__((__always_inline__)) load_16_short(const uint16_t
     return _mm512_slli_epi32(bf32, 16);
 }
 #endif
+
+float
+INT8ComputeL2Sqr(const int8_t* RESTRICT query, const int8_t* RESTRICT codes, uint64_t dim) {
+#if defined(ENABLE_AVX512)
+    constexpr int64_t BATCH_SIZE{32};
+
+    const uint64_t n = dim / BATCH_SIZE;
+
+    if (n == 0) {
+        return avx2::INT8ComputeL2Sqr(query, codes, dim);
+    }
+
+    __m512i sum_sq = _mm512_setzero_si512();
+
+    for (uint64_t i = 0; i < n; ++i) {
+        __m256i q = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(query + BATCH_SIZE * i));
+        __m256i c = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(codes + BATCH_SIZE * i));
+
+        __m512i q_int16 = _mm512_cvtepi8_epi16(q);
+        __m512i c_int16 = _mm512_cvtepi8_epi16(c);
+
+        __m512i diff = _mm512_sub_epi16(q_int16, c_int16);
+
+        __m512i sq = _mm512_madd_epi16(diff, diff);
+
+        sum_sq = _mm512_add_epi32(sq, sum_sq);
+    }
+
+    alignas(32) int32_t results[BATCH_SIZE / 2];
+
+    _mm512_store_si512(reinterpret_cast<__m512i*>(results), sum_sq);
+
+    int32_t l2 = 0;
+    for (int i = 0; i < BATCH_SIZE / 2; ++i) {
+        l2 += results[i];
+    }
+
+    l2 += avx2::INT8ComputeL2Sqr(
+        query + BATCH_SIZE * n, codes + BATCH_SIZE * n, dim - BATCH_SIZE * n);
+    return static_cast<float>(l2);
+#else
+    return avx2::INT8ComputeL2Sqr(query, codes, dim);
+#endif
+}
 
 float
 BF16ComputeIP(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim) {

@@ -49,6 +49,16 @@ InnerProductDistance(const void* pVect1, const void* pVect2, const void* qty_ptr
 }
 
 float
+INT8L2Sqr(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
+    // TODO: impl
+    auto* pVect1 = (int8_t*)pVect1v;
+    auto* pVect2 = (int8_t*)pVect2v;
+    auto qty = *((size_t*)qty_ptr);
+
+    return generic::INT8ComputeL2Sqr(pVect1, pVect2, qty);
+}
+
+float
 INT8InnerProduct(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
     return generic::INT8InnerProduct(pVect1v, pVect2v, qty_ptr);
 }
