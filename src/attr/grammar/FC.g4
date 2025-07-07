@@ -32,8 +32,8 @@ comparison_op: EQ | NQ | GT | LT | GE | LE;
 int_value_list: '[' INTEGER (',' INTEGER)* ']';
 int_pipe_list: PIPE_INT_STR | INT_STRING;
 
-str_value_list: '[' STRING (',' STRING)* ']';
-str_pipe_list: PIPE_ID_STR | STRING;
+str_value_list: '[' STRING (',' STRING)* ']' | '[' INT_STRING (',' INT_STRING)* ']';
+str_pipe_list: PIPE_STR_STR | STRING;
 
 field_name: ID;
 
@@ -65,7 +65,7 @@ SEP_STR: '"' SEP '"';
 INT_STRING: '"' INTEGER '"';
 STRING: '"' (~["|])* '"';
 PIPE_INT_STR:'"' INTEGER (SEP INTEGER)* '"';
-PIPE_ID_STR: '"' ID (SEP ID)* '"';
+PIPE_STR_STR: '"' (~["\\] | '\\' .)+ (SEP (~["\\] | '\\' .)*)* '"';
 FLOAT : ('+' | '-')? (DIGIT+ '.' DIGIT* | '.' DIGIT+) ([eE] ('+' | '-')? DIGIT+)?;
 fragment DIGIT : [0-9];
 

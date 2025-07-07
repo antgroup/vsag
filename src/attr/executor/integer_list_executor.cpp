@@ -39,11 +39,12 @@ IntegerListExecutor::IntegerListExecutor(Allocator* allocator,
         throw VsagException(ErrorType::INTERNAL_ERROR, "expression type not match");
     }
     ListVariant list_variant;
-    if (auto i64 = std::dynamic_pointer_cast<const IntListConstant<int64_t>>(list_expr->values)) {
-        list_variant = i64;
-    } else if (auto u64 =
+    if (auto list_i64 =
+            std::dynamic_pointer_cast<const IntListConstant<int64_t>>(list_expr->values)) {
+        list_variant = list_i64;
+    } else if (auto list_u64 =
                    std::dynamic_pointer_cast<const IntListConstant<uint64_t>>(list_expr->values)) {
-        list_variant = u64;
+        list_variant = list_u64;
     } else {
         throw VsagException(ErrorType::INTERNAL_ERROR, "expression type not match");
     }
