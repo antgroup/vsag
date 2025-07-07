@@ -84,9 +84,18 @@ FastBitset::Or(const ComputableBitset& another) {
               reinterpret_cast<const uint8_t*>(fast_another->data_.data()),
               min_size * sizeof(uint64_t),
               reinterpret_cast<uint8_t*>(this->data_.data()));
+        if (fast_another->fill_bit_) {
+            data_.resize(min_size);
+            this->fill_bit_ = true;
+        }
     } else {
         auto max_size = fast_another->data_.size();
-        this->data_.resize(max_size, 0);
+        if (this->fill_bit_) {
+            max_size = this->data_.size();
+        } else {
+            this->data_.resize(max_size, 0);
+            this->fill_bit_ = fast_another->fill_bit_;
+        }
         BitOr(reinterpret_cast<const uint8_t*>(this->data_.data()),
               reinterpret_cast<const uint8_t*>(fast_another->data_.data()),
               max_size * sizeof(uint64_t),
@@ -116,17 +125,22 @@ FastBitset::And(const ComputableBitset& another) {
                reinterpret_cast<const uint8_t*>(fast_another->data_.data()),
                min_size * sizeof(uint64_t),
                reinterpret_cast<uint8_t*>(this->data_.data()));
-        if (max_size > min_size) {
+        if (max_size > min_size and not fast_another->fill_bit_) {
             std::fill(data_.begin() + static_cast<int64_t>(min_size), data_.end(), 0);
         }
     } else {
         auto max_size = fast_another->data_.size();
-        this->data_.resize(max_size, 0);
+        if (this->fill_bit_) {
+            max_size = this->data_.size();
+        } else {
+            this->data_.resize(max_size, 0);
+        }
         BitAnd(reinterpret_cast<const uint8_t*>(this->data_.data()),
                reinterpret_cast<const uint8_t*>(fast_another->data_.data()),
                max_size * sizeof(uint64_t),
                reinterpret_cast<uint8_t*>(this->data_.data()));
     }
+    this->fill_bit_ = this->fill_bit_ && fast_another->fill_bit_;
 }
 
 void
