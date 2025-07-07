@@ -76,7 +76,7 @@ public:
      * @return true If the bit is set (true), false otherwise.
      */
     virtual bool
-    Test(int64_t pos) = 0;
+    Test(int64_t pos) const = 0;
 
     /**
      * @brief Returns the number of bits that are set to true.
