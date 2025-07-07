@@ -93,4 +93,6 @@ private:
 
     const uint64_t FILL_ONE = 0xFFFFFFFFFFFFFFFF;
 };
+
+using FastBitsetPtr = std::shared_ptr<FastBitset>;
 }  // namespace vsag

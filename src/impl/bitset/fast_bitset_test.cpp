@@ -19,276 +19,316 @@
 #include <catch2/matchers/catch_matchers.hpp>
 
 #include "fixtures.h"
+#include "utils/util_functions.h"
 
 using namespace vsag;
 
-TEST_CASE("FastBitset basic operations", "[ut][FastBitset]") {
+std::pair<FastBitsetPtr, std::vector<int>>
+GetRandomBitset(Allocator* allocator, int64_t max_size, int64_t max_element) {
+    auto values = select_k_numbers(max_element, max_size);
+    auto bitset = std::make_shared<FastBitset>(allocator);
+    for (auto& v : values) {
+        bitset->Set(v, true);
+    }
+    return std::make_pair(bitset, values);
+}
+
+std::unordered_set<int>
+GetIntersection(const std::vector<int>& a, const std::vector<int>& b) {
+    std::unordered_set<int> setA(a.begin(), a.end());
+    std::unordered_set<int> result;
+
+    for (int val : b) {
+        if (setA.count(val)) {
+            result.insert(val);
+        }
+    }
+
+    return result;
+}
+
+std::unordered_set<int>
+GetIntersection(const std::unordered_set<int>& set) {
+    return set;
+}
+
+template <typename... Args>
+std::unordered_set<int>
+GetIntersection(const std::unordered_set<int>& set, const std::vector<int>& vec, Args... args) {
+    std::unordered_set<int> result;
+    for (auto v : vec) {
+        if (set.count(v)) {
+            result.insert(v);
+        }
+    }
+    return GetIntersection(result, args...);
+}
+
+template <typename... Args>
+std::unordered_set<int>
+GetIntersection(const std::vector<int>& vec1, const std::vector<int>& vec2, Args... args) {
+    auto result = GetIntersection(vec1, vec2);
+    return GetIntersection(result, args...);
+}
+
+TEST_CASE("FastBitset And operations", "[ut][FastBitset]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
-    FastBitset bs(allocator.get());
 
-    SECTION("Initial state") {
-        REQUIRE_FALSE(bs.Test(0));
-        REQUIRE(bs.Count() == 0);
-        REQUIRE(bs.Dump() == "{}");
+    SECTION("and basic operator with ptr") {
+        auto [bitset1, values1] = GetRandomBitset(allocator.get(), 100, 10000);
+        auto [bitset2, values2] = GetRandomBitset(allocator.get(), 100, 10000);
+        bitset1->And(bitset2);
+        auto values = GetIntersection(values1, values2);
+        for (auto& v : values1) {
+            if (values.find(v) == values.end()) {
+                REQUIRE(bitset1->Test(v) == false);
+            } else {
+                REQUIRE(bitset1->Test(v) == true);
+            }
+        }
+        for (auto& v : values2) {
+            if (values.find(v) == values.end()) {
+                REQUIRE(bitset1->Test(v) == false);
+            } else {
+                REQUIRE(bitset1->Test(v) == true);
+            }
+        }
     }
 
-    SECTION("Single bit set") {
-        bs.Set(10, true);
-        REQUIRE(bs.Test(10));
-        REQUIRE(bs.Count() == 1);
-        REQUIRE(bs.Dump() == "{10}");
-
-        bs.Set(10, false);
-        REQUIRE_FALSE(bs.Test(0));
-        REQUIRE(bs.Count() == 0);
-        REQUIRE(bs.Dump() == "{}");
+    SECTION("and basic operator with ref") {
+        auto [bitset1, values1] = GetRandomBitset(allocator.get(), 100, 10000);
+        auto [bitset2, values2] = GetRandomBitset(allocator.get(), 100, 10000);
+        bitset1->And(*bitset2);
+        auto values = GetIntersection(values1, values2);
+        for (auto& v : values1) {
+            if (values.find(v) == values.end()) {
+                REQUIRE(bitset1->Test(v) == false);
+            } else {
+                REQUIRE(bitset1->Test(v) == true);
+            }
+        }
+        for (auto& v : values2) {
+            if (values.find(v) == values.end()) {
+                REQUIRE(bitset1->Test(v) == false);
+            } else {
+                REQUIRE(bitset1->Test(v) == true);
+            }
+        }
     }
 
-    SECTION("Multiple bits in same word") {
-        bs.Set(1, true);
-        bs.Set(3, true);
-        bs.Set(5, true);
-        REQUIRE(bs.Count() == 3);
-        REQUIRE(bs.Dump() == "{1,3,5}");
+    SECTION("and basic operator with vector") {
+        auto [bitset1, values1] = GetRandomBitset(allocator.get(), 100, 10000);
+        auto [bitset2, values2] = GetRandomBitset(allocator.get(), 100, 10000);
+        auto [bitset3, values3] = GetRandomBitset(allocator.get(), 100, 10000);
+        std::vector<ComputableBitsetPtr> bitsets;
+        bitsets.emplace_back(bitset2);
+        bitsets.emplace_back(bitset3);
+        bitset1->And(bitsets);
+        auto values = GetIntersection(values1, values2, values3);
+        for (auto& v : values1) {
+            if (values.find(v) == values.end()) {
+                REQUIRE(bitset1->Test(v) == false);
+            } else {
+                REQUIRE(bitset1->Test(v) == true);
+            }
+        }
+        for (auto& v : values2) {
+            if (values.find(v) == values.end()) {
+                REQUIRE(bitset1->Test(v) == false);
+            } else {
+                REQUIRE(bitset1->Test(v) == true);
+            }
+        }
+        for (auto& v : values3) {
+            if (values.find(v) == values.end()) {
+                REQUIRE(bitset1->Test(v) == false);
+            } else {
+                REQUIRE(bitset1->Test(v) == true);
+            }
+        }
     }
 
-    SECTION("Multiple bit set in different word") {
-        bs.Set(0, true);
-        bs.Set(103, true);
-        REQUIRE(bs.Test(0));
-        REQUIRE(bs.Test(103));
-        REQUIRE(bs.Count() == 2);
-        REQUIRE(bs.Dump() == "{0,103}");
+    SECTION("and basic operator with not") {
+        auto [bitset1, values1] = GetRandomBitset(allocator.get(), 100, 10000);
+        auto [bitset2, values2] = GetRandomBitset(allocator.get(), 100, 10000);
+        bitset2->Not();
+        std::unordered_set<int> values_origin(values2.begin(), values2.end());
+        std::unordered_set<int> values;
+        for (int i = 0; i < 10000; ++i) {
+            if (values_origin.find(i) == values_origin.end()) {
+                REQUIRE(bitset2->Test(i) == true);
+            } else {
+                REQUIRE(bitset2->Test(i) == false);
+            }
+        }
+        for (auto& v : values1) {
+            if (values_origin.count(v) == 0) {
+                values.insert(v);
+            }
+        }
 
-        bs.Set(0, false);
-        REQUIRE_FALSE(bs.Test(0));
-        REQUIRE(bs.Test(103));
-        REQUIRE(bs.Count() == 1);
-        REQUIRE(bs.Dump() == "{103}");
-    }
+        bitset1->And(bitset2);
 
-    SECTION("Resize on large position") {
-        bs.Set(12800, true);
-        REQUIRE(bs.Test(12800));
-        REQUIRE(bs.Count() == 1);
-        REQUIRE(bs.Dump() == "{12800}");
-    }
-
-    SECTION("Serialize and deserialize") {
-        fixtures::TempDir dir("fast_bitset");
-        auto path = dir.GenerateRandomFile();
-        std::ofstream ofs(path, std::ios::binary);
-        IOStreamWriter writer(ofs);
-
-        bs.Set(101, true);
-        bs.Serialize(writer);
-        ofs.close();
-
-        std::ifstream ifs(path, std::ios::binary);
-        IOStreamReader reader(ifs);
-        FastBitset bitset2(allocator.get());
-        bitset2.Deserialize(reader);
-        ifs.close();
-        auto dump = bitset2.Dump();
-        REQUIRE(dump == "{101}");
+        for (auto& v : values1) {
+            if (values.find(v) == values.end()) {
+                REQUIRE(bitset1->Test(v) == false);
+            } else {
+                REQUIRE(bitset1->Test(v) == true);
+            }
+        }
+        for (auto& v : values2) {
+            if (values.find(v) == values.end()) {
+                REQUIRE(bitset1->Test(v) == false);
+            } else {
+                REQUIRE(bitset1->Test(v) == true);
+            }
+        }
     }
 }
 
-TEST_CASE("FastBitset bitwise operations", "[ut][FastBitset]") {
+std::unordered_set<int>
+GetUnion(const std::vector<int>& values1, const std::vector<int>& values2) {
+    // get the union of values1 and values2
+    std::unordered_set<int> result(values2.begin(), values2.end());
+
+    for (int value : values1) {
+        result.insert(value);
+    }
+    return result;
+}
+
+std::unordered_set<int>
+GetUnion(const std::unordered_set<int>& set) {
+    return set;
+}
+
+template <typename... Args>
+std::unordered_set<int>
+GetUnion(const std::unordered_set<int>& set, const std::vector<int>& vec, Args... args) {
+    std::unordered_set<int> result = set;
+    for (auto v : vec) {
+        result.insert(v);
+    }
+    return GetUnion(result, args...);
+}
+
+template <typename... Args>
+std::unordered_set<int>
+GetUnion(const std::vector<int>& vec1, const std::vector<int>& vec2, Args... args) {
+    auto result = GetUnion(vec1, vec2);
+    return GetUnion(result, args...);
+}
+
+TEST_CASE("FastBitset Or operations", "[ut][FastBitset]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
 
-    FastBitset a(allocator.get());
-    FastBitset b(allocator.get());
-
-    SECTION("OR operation") {
-        a.Set(10, true);
-        b.Set(111, true);
-        a.Or(b);
-
-        REQUIRE(a.Test(10));
-        REQUIRE(a.Test(111));
-        REQUIRE(a.Count() == 2);
-        REQUIRE(a.Dump() == "{10,111}");
-
-        FastBitset c(allocator.get());
-        c.Set(64, true);
-        c.Set(111, true);
-        a.Or(c);
-        REQUIRE(a.Test(64));
-        REQUIRE(a.Count() == 3);
+    SECTION("or basic operator with ptr") {
+        auto [bitset1, values1] = GetRandomBitset(allocator.get(), 100, 10000);
+        auto [bitset2, values2] = GetRandomBitset(allocator.get(), 100, 10000);
+        bitset1->Or(bitset2);
+        auto values = GetUnion(values1, values2);
+        for (auto& v : values1) {
+            if (values.find(v) == values.end()) {
+                REQUIRE(bitset1->Test(v) == false);
+            } else {
+                REQUIRE(bitset1->Test(v) == true);
+            }
+        }
+        for (auto& v : values2) {
+            if (values.find(v) == values.end()) {
+                REQUIRE(bitset1->Test(v) == false);
+            } else {
+                REQUIRE(bitset1->Test(v) == true);
+            }
+        }
     }
 
-    SECTION("AND operation") {
-        a.Set(2, true);
-        a.Set(215, true);
-        b.Set(215, true);
-        b.Set(1928, true);
-        a.And(b);
-
-        REQUIRE_FALSE(a.Test(2));
-        REQUIRE(a.Test(215));
-        REQUIRE_FALSE(a.Test(1928));
-        REQUIRE(a.Count() == 1);
-        REQUIRE(a.Dump() == "{215}");
+    SECTION("or basic operator with ref") {
+        auto [bitset1, values1] = GetRandomBitset(allocator.get(), 100, 10000);
+        auto [bitset2, values2] = GetRandomBitset(allocator.get(), 100, 10000);
+        bitset1->Or(*bitset2);
+        auto values = GetUnion(values1, values2);
+        for (auto& v : values1) {
+            if (values.find(v) == values.end()) {
+                REQUIRE(bitset1->Test(v) == false);
+            } else {
+                REQUIRE(bitset1->Test(v) == true);
+            }
+        }
+        for (auto& v : values2) {
+            if (values.find(v) == values.end()) {
+                REQUIRE(bitset1->Test(v) == false);
+            } else {
+                REQUIRE(bitset1->Test(v) == true);
+            }
+        }
     }
 
-    SECTION("XOR operation") {
-        a.Set(100, true);
-        a.Set(1001, true);
-        b.Set(1001, true);
-        b.Set(2025, true);
-        a.Xor(b);
-
-        REQUIRE(a.Test(100));
-        REQUIRE_FALSE(a.Test(1001));
-        REQUIRE(a.Test(2025));
-        REQUIRE(a.Count() == 2);
-        REQUIRE(a.Dump() == "{100,2025}");
+    SECTION("and basic operator with vector") {
+        auto [bitset1, values1] = GetRandomBitset(allocator.get(), 100, 10000);
+        auto [bitset2, values2] = GetRandomBitset(allocator.get(), 100, 10000);
+        auto [bitset3, values3] = GetRandomBitset(allocator.get(), 100, 10000);
+        std::vector<ComputableBitsetPtr> bitsets;
+        bitsets.emplace_back(bitset2);
+        bitsets.emplace_back(bitset3);
+        bitset1->Or(bitsets);
+        auto values = GetUnion(values1, values2, values3);
+        for (auto& v : values1) {
+            if (values.find(v) == values.end()) {
+                REQUIRE(bitset1->Test(v) == false);
+            } else {
+                REQUIRE(bitset1->Test(v) == true);
+            }
+        }
+        for (auto& v : values2) {
+            if (values.find(v) == values.end()) {
+                REQUIRE(bitset1->Test(v) == false);
+            } else {
+                REQUIRE(bitset1->Test(v) == true);
+            }
+        }
+        for (auto& v : values3) {
+            if (values.find(v) == values.end()) {
+                REQUIRE(bitset1->Test(v) == false);
+            } else {
+                REQUIRE(bitset1->Test(v) == true);
+            }
+        }
     }
 
-    SECTION("NOT operation") {
-        a.Set(100, true);
-        a.Set(1001, true);
-        a.Not();
-        REQUIRE_FALSE(a.Test(100));
-        REQUIRE_FALSE(a.Test(1001));
-        a.Not();
-        REQUIRE(a.Test(100));
-        REQUIRE(a.Test(1001));
-        REQUIRE(a.Count() == 2);
-    }
+    SECTION("and basic operator with not") {
+        auto [bitset1, values1] = GetRandomBitset(allocator.get(), 100, 10000);
+        auto [bitset2, values2] = GetRandomBitset(allocator.get(), 100, 10000);
+        bitset2->Not();
+        std::unordered_set<int> values_origin(values2.begin(), values2.end());
+        std::unordered_set<int> values;
+        for (int i = 0; i < 10000; ++i) {
+            if (values_origin.find(i) == values_origin.end()) {
+                REQUIRE(bitset2->Test(i) == true);
+                values.insert(i);
+            } else {
+                REQUIRE(bitset2->Test(i) == false);
+            }
+        }
+        for (auto& v : values1) {
+            values.insert(v);
+        }
 
-    SECTION("AND Operation With Pointer") {
-        auto ptr1 = std::make_shared<FastBitset>(allocator.get());
-        auto ptr2 = std::make_shared<FastBitset>(allocator.get());
-        ptr1->Set(2, true);
-        ptr1->Set(215, true);
-        ptr2->Set(215, true);
-        ptr2->Set(1929, true);
-        ptr1->And(ptr2);
+        bitset1->Or(bitset2);
 
-        REQUIRE_FALSE(ptr1->Test(2));
-        REQUIRE(ptr1->Test(215));
-        REQUIRE_FALSE(ptr1->Test(1929));
-        REQUIRE(ptr1->Count() == 1);
-        REQUIRE(ptr1->Dump() == "{215}");
-
-        ptr2 = nullptr;
-        ptr1->And(ptr2);
-        REQUIRE_FALSE(ptr1->Test(215));
-        REQUIRE(ptr1->Count() == 0);
-        REQUIRE(ptr1->Dump() == "{}");
-    }
-
-    SECTION("OR Operation With Pointer") {
-        auto ptr1 = std::make_shared<FastBitset>(allocator.get());
-        auto ptr2 = std::make_shared<FastBitset>(allocator.get());
-        ptr1->Set(10, true);
-        ptr2->Set(111, true);
-        ptr1->Or(ptr2);
-
-        REQUIRE(ptr1->Test(10));
-        REQUIRE(ptr1->Test(111));
-        REQUIRE(ptr1->Count() == 2);
-        REQUIRE(ptr1->Dump() == "{10,111}");
-
-        auto ptr3 = std::make_shared<FastBitset>(allocator.get());
-        ptr3->Set(64, true);
-        ptr3->Set(111, true);
-        ptr1->Or(ptr3);
-        REQUIRE(ptr1->Test(64));
-        REQUIRE(ptr1->Count() == 3);
-
-        ptr2 = nullptr;
-        ptr1->Or(ptr2);
-        REQUIRE(ptr1->Count() == 3);
-        REQUIRE(ptr1->Test(64));
-        REQUIRE(ptr1->Dump() == "{10,64,111}");
-    }
-
-    SECTION("XOR Operation With Pointer") {
-        auto ptr1 = std::make_shared<FastBitset>(allocator.get());
-        auto ptr2 = std::make_shared<FastBitset>(allocator.get());
-        ptr1->Set(100, true);
-        ptr1->Set(1001, true);
-        ptr2->Set(1001, true);
-        ptr2->Set(2025, true);
-        ptr1->Xor(ptr2);
-
-        REQUIRE(ptr1->Test(100));
-        REQUIRE_FALSE(ptr1->Test(1001));
-        REQUIRE(ptr1->Test(2025));
-        REQUIRE(ptr1->Count() == 2);
-        REQUIRE(ptr1->Dump() == "{100,2025}");
-
-        ptr2 = nullptr;
-        ptr1->Xor(ptr2);
-        REQUIRE(ptr1->Count() == 2);
-        REQUIRE(ptr1->Dump() == "{100,2025}");
-    }
-
-    SECTION("AND Operation With Vector Pointer") {
-        ComputableBitsetPtr ptr1 = std::make_shared<FastBitset>(allocator.get());
-        auto ptr2 = std::make_shared<FastBitset>(allocator.get());
-        auto ptr3 = std::make_shared<FastBitset>(allocator.get());
-        std::vector<ComputableBitsetPtr> vec(2);
-        vec[0] = ptr2;
-        vec[1] = ptr3;
-        ptr1->Set(100, true);
-        ptr1->Set(1001, true);
-        ptr2->Set(1001, true);
-        ptr2->Set(2025, true);
-        ptr3->Set(1001, true);
-        ptr3->Set(2020, true);
-        ptr1->And(vec);
-        REQUIRE(ptr1->Test(1001));
-        REQUIRE_FALSE(ptr1->Test(2020));
-        REQUIRE_FALSE(ptr1->Test(2025));
-        REQUIRE_FALSE(ptr1->Test(100));
-        REQUIRE(ptr1->Count() == 1);
-        REQUIRE(ptr1->Dump() == "{1001}");
-    }
-
-    SECTION("OR Operation With Vector Pointer") {
-        ComputableBitsetPtr ptr1 = std::make_shared<FastBitset>(allocator.get());
-        auto ptr2 = std::make_shared<FastBitset>(allocator.get());
-        auto ptr3 = std::make_shared<FastBitset>(allocator.get());
-        std::vector<ComputableBitsetPtr> vec(2);
-        vec[0] = ptr2;
-        vec[1] = ptr3;
-        ptr1->Set(100, true);
-        ptr1->Set(1001, true);
-        ptr2->Set(1001, true);
-        ptr2->Set(2025, true);
-        ptr3->Set(1001, true);
-        ptr3->Set(2020, true);
-        ptr1->Or(vec);
-        REQUIRE(ptr1->Test(100));
-        REQUIRE(ptr1->Test(1001));
-        REQUIRE(ptr1->Test(2020));
-        REQUIRE(ptr1->Test(2025));
-        REQUIRE(ptr1->Count() == 4);
-        REQUIRE(ptr1->Dump() == "{100,1001,2020,2025}");
-    }
-
-    SECTION("XOR Operation With Vector Pointer") {
-        ComputableBitsetPtr ptr1 = std::make_shared<FastBitset>(allocator.get());
-        auto ptr2 = std::make_shared<FastBitset>(allocator.get());
-        auto ptr3 = std::make_shared<FastBitset>(allocator.get());
-        std::vector<ComputableBitsetPtr> vec(2);
-        vec[0] = ptr2;
-        vec[1] = ptr3;
-        ptr1->Set(100, true);
-        ptr1->Set(1001, true);
-        ptr2->Set(1001, true);
-        ptr2->Set(2025, true);
-        ptr3->Set(100, true);
-        ptr3->Set(2020, true);
-        ptr1->Xor(vec);
-        REQUIRE_FALSE(ptr1->Test(100));
-        REQUIRE_FALSE(ptr1->Test(1001));
-        REQUIRE(ptr1->Test(2020));
-        REQUIRE(ptr1->Test(2025));
-        REQUIRE(ptr1->Dump() == "{2020,2025}");
+        for (auto& v : values1) {
+            if (values.find(v) == values.end()) {
+                REQUIRE(bitset1->Test(v) == false);
+            } else {
+                REQUIRE(bitset1->Test(v) == true);
+            }
+        }
+        for (auto& v : values2) {
+            if (values.find(v) == values.end()) {
+                REQUIRE(bitset1->Test(v) == false);
+            } else {
+                REQUIRE(bitset1->Test(v) == true);
+            }
+        }
     }
 }
