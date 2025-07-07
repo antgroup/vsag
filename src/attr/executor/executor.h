@@ -35,7 +35,12 @@ public:
              const AttrInvertedInterfacePtr& attr_index)
         : expr_(expression), attr_index_(attr_index), allocator_(allocator){};
 
-    virtual ~Executor() = default;
+    virtual ~Executor() {
+        if (this->own_bitset_) {
+            delete bitset_;
+            bitset_ = nullptr;
+        }
+    }
 
     virtual void
     Clear() {
@@ -55,12 +60,14 @@ public:
 
     FilterPtr filter_{nullptr};
 
-    ComputableBitsetPtr bitset_{nullptr};
+    ComputableBitset* bitset_{nullptr};
 
     ExprPtr expr_{nullptr};
 
     AttrInvertedInterfacePtr attr_index_{nullptr};
 
     Allocator* const allocator_{nullptr};
+
+    bool own_bitset_{false};
 };
 }  // namespace vsag

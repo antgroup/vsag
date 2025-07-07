@@ -38,10 +38,10 @@ public:
                      InnerIdType inner_id,
                      BucketIdType bucket_id) override;
 
-    std::vector<ComputableBitsetPtr>
+    std::vector<const ComputableBitset*>
     GetBitsetsByAttr(const Attribute& attr) override;
 
-    std::vector<ComputableBitsetPtr>
+    std::vector<const ComputableBitset*>
     GetBitsetsByAttrAndBucketId(const Attribute& attr_name, BucketIdType bucket_id) override;
 
     void
@@ -59,7 +59,7 @@ private:
     void
     get_bitsets_by_type(const ValueMapPtr& value_map,
                         const Attribute* attr,
-                        std::vector<ComputableBitsetPtr>& bitsets);
+                        std::vector<const ComputableBitset*>& bitsets);
 
 private:
     UnorderedMap<std::string, ValueMapPtr> term_2_value_map_;
@@ -85,7 +85,7 @@ template <class T>
 void
 AttributeInvertedDataCell::get_bitsets_by_type(const ValueMapPtr& value_map,
                                                const Attribute* attr,
-                                               std::vector<ComputableBitsetPtr>& bitsets) {
+                                               std::vector<const ComputableBitset*>& bitsets) {
     auto* attr_value = dynamic_cast<const AttributeValue<T>*>(attr);
     if (attr_value == nullptr) {
         throw VsagException(ErrorType::INTERNAL_ERROR, "Invalid attribute type");
