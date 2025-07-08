@@ -138,7 +138,7 @@ ComparisonExecutor::RunWithBucket(BucketIdType bucket_id) {
     if (this->op_ == ComparisonOperator::NE) {
         this->bitset_->Not();
     }
-    this->filter_ = std::make_shared<WhiteListFilter>(this->bitset_);
+    WhiteListFilter::TryToUpdate(this->filter_, this->bitset_);
     return this->filter_;
 }
 
