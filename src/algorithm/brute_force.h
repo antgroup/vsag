@@ -67,6 +67,9 @@ public:
     std::vector<int64_t>
     Add(const DatasetPtr& data) override;
 
+    bool
+    Remove(int64_t label) override;
+
     DatasetPtr
     KnnSearch(const DatasetPtr& query,
               int64_t k,
