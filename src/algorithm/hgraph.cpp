@@ -15,13 +15,11 @@
 
 #include "hgraph.h"
 
-#include <data_cell/compressed_graph_datacell_parameter.h>
-#include <fmt/format-inl.h>
-
 #include <memory>
 #include <stdexcept>
 
 #include "common.h"
+#include "data_cell/compressed_graph_datacell.h"
 #include "data_cell/graph_datacell_parameter.h"
 #include "data_cell/sparse_graph_datacell.h"
 #include "dataset_impl.h"
@@ -869,6 +867,11 @@ HGraph::Deserialize(StreamReader& reader) {
 
         this->basic_flatten_codes_->Deserialize(reader);
         this->bottom_graph_->Deserialize(reader);
+        if (std::dynamic_pointer_cast<CompressedGraphDataCell>(this->bottom_graph_) == nullptr) {
+            auto compressed_graph =
+                CompressedGraphDataCell::MakeCompressedGraph(this->bottom_graph_, allocator_);
+            this->bottom_graph_ = std::move(compressed_graph);
+        }
         if (this->use_reorder_) {
             this->high_precise_codes_->Deserialize(reader);
         }
