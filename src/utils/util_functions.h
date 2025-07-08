@@ -19,7 +19,9 @@
 #include <cmath>
 #include <string>
 
+#include "diskann_logger.h"
 #include "index/index_common_param.h"
+#include "spdlog/spdlog.h"
 #include "vsag/dataset.h"
 #include "vsag/expected.hpp"
 #include "vsag_exception.h"

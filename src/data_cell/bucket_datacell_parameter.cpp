@@ -18,6 +18,7 @@
 #include <fmt/format.h>
 
 #include "inner_string_params.h"
+#include "logger.h"
 
 namespace vsag {
 BucketDataCellParameter::BucketDataCellParameter() = default;
@@ -44,12 +45,47 @@ BucketDataCellParameter::FromJson(const JsonType& json) {
 }
 
 JsonType
-BucketDataCellParameter::ToJson() {
+BucketDataCellParameter::ToJson() const {
     JsonType json;
     json[IO_PARAMS_KEY] = this->io_parameter->ToJson();
     json[BUCKET_USE_RESIDUAL] = this->use_residual_;
     json[QUANTIZATION_PARAMS_KEY] = this->quantizer_parameter->ToJson();
     json[BUCKETS_COUNT_KEY] = this->buckets_count;
     return json;
+}
+bool
+BucketDataCellParameter::CheckCompatibility(const ParamPtr& other) const {
+    auto bucket_param = std::dynamic_pointer_cast<BucketDataCellParameter>(other);
+    if (not bucket_param) {
+        logger::error(
+            "BucketDataCellParameter::CheckCompatibility: other parameter is not a "
+            "BucketDataCellParameter");
+        return false;
+    }
+
+    if (not this->quantizer_parameter->CheckCompatibility(bucket_param->quantizer_parameter)) {
+        logger::error(
+            "BucketDataCellParameter::CheckCompatibility: quantizer parameters are not compatible");
+        return false;
+    }
+
+    if (buckets_count != bucket_param->buckets_count) {
+        logger::error(
+            "BucketDataCellParameter::CheckCompatibility: buckets count is not compatible: {} != "
+            "{}",
+            buckets_count,
+            bucket_param->buckets_count);
+        return false;
+    }
+
+    if (use_residual_ != bucket_param->use_residual_) {
+        logger::error(
+            "BucketDataCellParameter::CheckCompatibility: use residual is not compatible: {} != {}",
+            use_residual_,
+            bucket_param->use_residual_);
+        return false;
+    }
+
+    return true;
 }
 }  // namespace vsag

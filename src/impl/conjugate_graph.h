@@ -18,7 +18,7 @@
 #include <nlohmann/json.hpp>
 #include <queue>
 
-#include "../logger.h"
+#include "logger.h"
 #include "storage/footer.h"
 #include "typing.h"
 #include "vsag/index.h"

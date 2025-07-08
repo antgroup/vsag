@@ -20,6 +20,7 @@
 #include <iostream>
 
 #include "inner_string_params.h"
+#include "logger.h"
 #include "vsag/constants.h"
 
 namespace vsag {
@@ -52,7 +53,7 @@ IVFPartitionStrategyParameters::FromJson(const JsonType& json) {
 }
 
 JsonType
-IVFPartitionStrategyParameters::ToJson() {
+IVFPartitionStrategyParameters::ToJson() const {
     JsonType json;
     if (this->partition_train_type == IVFNearestPartitionTrainerType::KMeansTrainer) {
         json[IVF_TRAIN_TYPE_KEY] = IVF_TRAIN_TYPE_KMEANS;
@@ -70,4 +71,23 @@ IVFPartitionStrategyParameters::ToJson() {
     }
     return json;
 }
+
+bool
+IVFPartitionStrategyParameters::CheckCompatibility(const ParamPtr& other) const {
+    auto ivf_partition_param = std::dynamic_pointer_cast<IVFPartitionStrategyParameters>(other);
+    if (not ivf_partition_param) {
+        logger::error(
+            "IVFPartitionStrategyParameters::CheckCompatibility: other parameter is not "
+            "IVFPartitionStrategyParameters");
+        return false;
+    }
+    if (this->partition_strategy_type != ivf_partition_param->partition_strategy_type) {
+        logger::error(
+            "IVFPartitionStrategyParameters::CheckCompatibility: partition strategy type is not "
+            "compatible");
+        return false;
+    }
+    return this->gnoimi_param->CheckCompatibility(ivf_partition_param->gnoimi_param);
+}
+
 }  // namespace vsag

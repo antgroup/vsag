@@ -493,6 +493,7 @@ IVF::Serialize(StreamWriter& writer) const {
     basic_info["total_elements"] = this->total_elements_;
     basic_info["use_reorder"] = this->use_reorder_;
     basic_info["is_trained"] = this->is_trained_;
+    basic_info[INDEX_PARAM] = this->create_param_ptr_->ToString();
 
     auto metadata = std::make_shared<Metadata>();
     metadata->Set("basic_info", basic_info);
@@ -542,6 +543,18 @@ IVF::Deserialize(StreamReader& reader) {
         this->total_elements_ = basic_info["total_elements"];
         this->use_reorder_ = basic_info["use_reorder"];
         this->is_trained_ = basic_info["is_trained"];
+        if (basic_info.contains(INDEX_PARAM)) {
+            auto param_str = basic_info[INDEX_PARAM];
+            auto index_param = std::make_shared<IVFParameter>();
+            index_param->FromString(param_str);
+            if (not this->create_param_ptr_->CheckCompatibility(index_param)) {
+                auto message = fmt::format("IVF index parameter not match, current: {}, new: {}",
+                                           this->create_param_ptr_->ToString(),
+                                           index_param->ToString());
+                logger::error(message);
+                throw VsagException(ErrorType::INVALID_ARGUMENT, message);
+            }
+        }
 
         JsonType datacell_offsets = metadata->Get("datacell_offsets");
         logger::debug("datacell_offsets: {}", datacell_offsets.dump());

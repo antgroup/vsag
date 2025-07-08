@@ -17,36 +17,22 @@
 
 #include "graph_interface_parameter.h"
 #include "inner_string_params.h"
+#include "logger.h"
 #include "vsag/constants.h"
 
 namespace vsag {
 class SparseGraphDatacellParameter : public GraphInterfaceParameter {
 public:
-    SparseGraphDatacellParameter()
-        : GraphInterfaceParameter(GraphStorageTypes::GRAPH_STORAGE_TYPE_SPARSE) {
-    }
+    SparseGraphDatacellParameter();
 
     void
-    FromJson(const JsonType& json) override {
-        if (json.contains(GRAPH_PARAM_MAX_DEGREE)) {
-            this->max_degree_ = json[GRAPH_PARAM_MAX_DEGREE];
-        }
-        if (json.contains(GRAPH_SUPPORT_REMOVE)) {
-            this->support_delete_ = json[GRAPH_SUPPORT_REMOVE];
-        }
-        if (json.contains(REMOVE_FLAG_BIT)) {
-            this->remove_flag_bit_ = json[REMOVE_FLAG_BIT];
-        }
-    }
+    FromJson(const JsonType& json) override;
 
     JsonType
-    ToJson() override {
-        JsonType json;
-        json[GRAPH_PARAM_MAX_DEGREE] = this->max_degree_;
-        json[GRAPH_SUPPORT_REMOVE] = support_delete_;
-        json[REMOVE_FLAG_BIT] = remove_flag_bit_;
-        return json;
-    }
+    ToJson() const override;
+
+    bool
+    CheckCompatibility(const vsag::ParamPtr& other) const override;
 
 public:
     bool support_delete_{false};

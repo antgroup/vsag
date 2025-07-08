@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT license.
 
-#include "logger.h"
+#include "diskann_logger.h"
 #include "memory_mapper.h"
 #include <iostream>
 #include <sstream>

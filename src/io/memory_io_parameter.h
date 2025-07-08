@@ -28,7 +28,7 @@ public:
     FromJson(const JsonType& json) override;
 
     JsonType
-    ToJson() override;
+    ToJson() const override;
 };
 
 using MemoryIOParamPtr = std::shared_ptr<MemoryIOParameter>;

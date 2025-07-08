@@ -17,6 +17,7 @@
 
 #include <fmt/format.h>
 
+#include "logger.h"
 #include "vsag/constants.h"
 
 namespace vsag {
@@ -31,9 +32,21 @@ BruteForceParameter::FromJson(const JsonType& json) {
 }
 
 JsonType
-BruteForceParameter::ToJson() {
+BruteForceParameter::ToJson() const {
     auto json = this->flatten_param->ToJson();
     json["type"] = INDEX_BRUTE_FORCE;
     return json;
+}
+
+bool
+BruteForceParameter::CheckCompatibility(const ParamPtr& other) const {
+    auto brute_force_param = std::dynamic_pointer_cast<BruteForceParameter>(other);
+    if (not brute_force_param) {
+        logger::error(
+            "BruteForceParameter::CheckCompatibility: "
+            "other parameter is not a BruteForceParameter");
+        return false;
+    }
+    return this->flatten_param->CheckCompatibility(brute_force_param->flatten_param);
 }
 }  // namespace vsag

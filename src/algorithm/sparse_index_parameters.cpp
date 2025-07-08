@@ -27,7 +27,7 @@ SparseIndexParameters::FromJson(const JsonType& json) {
 }
 
 JsonType
-SparseIndexParameters::ToJson() {
+SparseIndexParameters::ToJson() const {
     JsonType json;
     json[SPARSE_NEED_SORT] = need_sort;
     return json;

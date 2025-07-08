@@ -15,6 +15,8 @@
 
 #pragma once
 
+#include <iostream>
+
 #include "common.h"
 #include "typing.h"
 
@@ -46,11 +48,16 @@ public:
     }
 
     virtual JsonType
-    ToJson() = 0;
+    ToJson() const = 0;
 
     std::string
-    ToString() {
+    ToString() const {
         return this->ToJson().dump(4);
+    }
+
+    virtual bool
+    CheckCompatibility(const ParamPtr& other) const {
+        return this->ToString() == other->ToString();
     }
 };
 
