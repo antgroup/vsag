@@ -203,6 +203,7 @@ RaBitQuantizer<metric>::RaBitQuantizer(int dim,
     static_assert(metric == MetricType::METRIC_TYPE_L2SQR, "Unsupported metric type");
 
     // dim
+    use_mrq_ = use_mrq;
     pca_dim_ = pca_dim;
     original_dim_ = dim;
     if (0 < pca_dim_ and pca_dim_ < dim) {
