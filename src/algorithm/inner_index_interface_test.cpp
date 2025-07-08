@@ -17,6 +17,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <memory>
+#include <sstream>
 
 #include "brute_force.h"
 #include "hgraph.h"
@@ -127,7 +128,7 @@ public:
 };
 
 TEST_CASE("NOT Implemented", "[ut][InnerIndexInterface]") {
-    auto empty_index = std::make_shared<EmptyInnerIndex>();
+    InnerIndexPtr empty_index = std::make_shared<EmptyInnerIndex>();
     IndexCommonParam common_param;
     common_param.dim_ = 128;
     common_param.thread_pool_ = SafeThreadPool::FactoryDefaultThreadPool();
@@ -156,4 +157,9 @@ TEST_CASE("NOT Implemented", "[ut][InnerIndexInterface]") {
     REQUIRE_THROWS(empty_index->Merge(merge_units));
     REQUIRE_THROWS(empty_index->GetExtraInfoByIds(nullptr, 1, nullptr));
     REQUIRE_THROWS(empty_index->GetVectorByInnerId(1, nullptr));
+
+    std::stringstream stream;
+    empty_index->Serialize(stream);
+    stream.seekg(0);
+    REQUIRE_NOTHROW(empty_index->Deserialize(stream));
 }

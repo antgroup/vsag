@@ -14,6 +14,7 @@
 // limitations under the License.
 
 #include <catch2/catch_test_macros.hpp>
+#include <fstream>
 
 #include "fixtures/test_dataset_pool.h"
 #include "vsag/index.h"
@@ -95,13 +96,18 @@ public:
 };
 
 TEST_CASE("Test Simple Index", "[ft][simple_index]") {
-    auto index = std::make_shared<SimpleIndex>();
+    IndexPtr index = std::make_shared<SimpleIndex>();
     auto pool = std::make_shared<fixtures::TestDatasetPool>();
     auto dim = 12;
     auto base_count = 100;
     auto dataset = pool->GetDatasetAndCreate(dim, base_count, "fp32");
     BinarySet binary;
     std::vector<int64_t> pretrain_ids;
+    FilterPtr filter = nullptr;
+    SearchRequest req;
+    IteratorContext* itex = nullptr;
+    std::string search_param = "{}";
+    SearchParam param(true, search_param, filter, nullptr);
 
     REQUIRE_THROWS(index->Add(dataset->base_));
     REQUIRE_THROWS(index->Remove(0));
@@ -116,7 +122,26 @@ TEST_CASE("Test Simple Index", "[ft][simple_index]") {
     REQUIRE_THROWS(index->Pretrain(pretrain_ids, 10, ""));
     REQUIRE_THROWS(index->CheckIdExist(0));
     REQUIRE_THROWS(index->CalcDistanceById(dataset->base_->GetFloat32Vectors(), 1));
+    REQUIRE_THROWS(index->CalDistanceById(dataset->base_->GetFloat32Vectors(), nullptr, 1));
+    REQUIRE_THROWS(index->GetMinAndMaxId());
+    REQUIRE_THROWS(index->GetExtraInfoByIds(nullptr, 1, nullptr));
+    REQUIRE_THROWS(index->GetRawVectorByIds(nullptr, 1));
     REQUIRE_THROWS(index->Clone());
     REQUIRE_THROWS(index->ExportModel());
     REQUIRE_THROWS(index->Train(dataset->base_));
+    REQUIRE_THROWS(index->KnnSearch(dataset->query_, 10, search_param, filter, itex, true));
+    REQUIRE_THROWS(index->KnnSearch(dataset->query_, 10, search_param, filter));
+    REQUIRE_THROWS(index->KnnSearch(dataset->query_, 10, param));
+    REQUIRE_THROWS(index->SearchWithRequest(req));
+    REQUIRE_THROWS(index->RangeSearch(dataset->query_, 1.0F, search_param, filter));
+    REQUIRE_THROWS(index->GetMemoryUsageDetail());
+
+    std::vector<MergeUnit> units;
+    REQUIRE_THROWS(index->Merge(units));
+
+    std::ofstream o_file("1234", std::ios::binary);
+    REQUIRE_THROWS(index->Serialize(o_file));
+
+    std::ifstream i_file("1234", std::ios::binary);
+    REQUIRE_THROWS(index->Deserialize(i_file));
 }
