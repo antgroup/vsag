@@ -38,7 +38,7 @@ public:
     explicit AsyncIO(const IOParamPtr& param, const IndexCommonParam& common_param)
         : AsyncIO(std::dynamic_pointer_cast<AsyncIOParameter>(param), common_param){};
 
-    ~AsyncIO() override = default;
+    ~AsyncIO() override;
 
 public:
     inline void
