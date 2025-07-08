@@ -230,7 +230,7 @@ BruteForce::Deserialize(StreamReader& reader) {
             std::string index_param_string = basic_info[INDEX_PARAM];
             BruteForceParameterPtr index_param = std::make_shared<BruteForceParameter>();
             index_param->FromString(index_param_string);
-            if (this->create_param_ptr_->CheckCompatibility(index_param)) {
+            if (not this->create_param_ptr_->CheckCompatibility(index_param)) {
                 auto message =
                     fmt::format("BruteForce index parameter not match, current: {}, new: {}",
                                 this->create_param_ptr_->ToString(),

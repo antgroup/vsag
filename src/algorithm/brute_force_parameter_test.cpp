@@ -21,8 +21,19 @@
 
 TEST_CASE("BruteForce Parameters CheckCompatibility",
           "[ut][BruteForceParameter][CheckCompatibility]") {
+    auto param_str = R"({
+        "io_params": {
+            "type": "block_memory_io"
+        },
+        "quantization_params": {
+            "type": "sq8"
+        },
+        "type": "brute_force"
+    })";
+
     SECTION("wrong parameter type") {
         auto param = std::make_shared<vsag::BruteForceParameter>();
+        param->FromString(param_str);
         REQUIRE(param->CheckCompatibility(param));
         REQUIRE_FALSE(param->CheckCompatibility(std::make_shared<vsag::EmptyParameter>()));
     }
