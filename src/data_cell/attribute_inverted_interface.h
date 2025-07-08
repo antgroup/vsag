@@ -17,6 +17,7 @@
 
 #include <memory>
 
+#include "attr/attr_type_schema.h"
 #include "impl/bitset/computable_bitset.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
@@ -54,40 +55,22 @@ public:
 
     virtual void
     Serialize(StreamWriter& writer) {
-        auto size = this->field_type_map_.size();
-        StreamWriter::WriteObj(writer, size);
-        for (auto& [k, v] : this->field_type_map_) {
-            StreamWriter::WriteString(writer, k);
-            StreamWriter::WriteObj(writer, static_cast<int64_t>(v));
-        }
+        this->field_type_map_.Serialize(writer);
     }
 
     virtual void
     Deserialize(lvalue_or_rvalue<StreamReader> reader) {
-        uint64_t size;
-        StreamReader::ReadObj(reader, size);
-        this->field_type_map_.reserve(size);
-        std::string key;
-        int64_t value;
-        for (int64_t i = 0; i < size; ++i) {
-            key = StreamReader::ReadString(reader);
-            StreamReader::ReadObj(reader, value);
-            this->field_type_map_[key] = static_cast<AttrValueType>(value);
-        }
+        this->field_type_map_.Deserialize(reader);
     }
 
     AttrValueType
     GetTypeOfField(const std::string& field_name) {
-        auto iter = this->field_type_map_.find(field_name);
-        if (iter == this->field_type_map_.end()) {
-            throw VsagException(ErrorType::INTERNAL_ERROR, "field not found");
-        }
-        return iter->second;
+        return this->field_type_map_.GetTypeOfField(field_name);
     }
 
 public:
     Allocator* const allocator_{nullptr};
 
-    UnorderedMap<std::string, AttrValueType> field_type_map_;
+    AttrTypeSchema field_type_map_;
 };
 }  // namespace vsag
