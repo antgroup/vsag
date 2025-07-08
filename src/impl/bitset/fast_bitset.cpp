@@ -41,7 +41,7 @@ FastBitset::Set(int64_t pos, bool value) {
 }
 
 bool
-FastBitset::Test(int64_t pos) {
+FastBitset::Test(int64_t pos) const {
     std::shared_lock<std::shared_mutex> lock(mutex_);
     auto capacity = data_.size() * 64;
     if (pos >= capacity) {
