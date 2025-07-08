@@ -13,26 +13,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#pragma once
+#include "brute_force_parameter.h"
 
-#include "quantization/quantizer_parameter.h"
+#include <catch2/catch_test_macros.hpp>
 
-namespace vsag {
-class BF16QuantizerParameter : public QuantizerParameter {
-public:
-    BF16QuantizerParameter();
+#include "parameter_test.h"
 
-    ~BF16QuantizerParameter() override = default;
-
-    void
-    FromJson(const JsonType& json) override;
-
-    JsonType
-    ToJson() const override;
-
-public:
-};
-
-using BF16QuantizerParamPtr = std::shared_ptr<BF16QuantizerParameter>;
-
-}  // namespace vsag
+TEST_CASE("BruteForce Parameters CheckCompatibility",
+          "[ut][BruteForceParameter][CheckCompatibility]") {
+    SECTION("wrong parameter type") {
+        auto param = std::make_shared<vsag::BruteForceParameter>();
+        REQUIRE(param->CheckCompatibility(param));
+        REQUIRE_FALSE(param->CheckCompatibility(std::make_shared<vsag::EmptyParameter>()));
+    }
+}

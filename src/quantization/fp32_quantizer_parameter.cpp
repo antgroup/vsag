@@ -27,7 +27,7 @@ FP32QuantizerParameter::FromJson(const JsonType& json) {
 }
 
 JsonType
-FP32QuantizerParameter::ToJson() {
+FP32QuantizerParameter::ToJson() const {
     JsonType json;
     json[QUANTIZATION_TYPE_KEY] = QUANTIZATION_TYPE_VALUE_FP32;
     return json;
