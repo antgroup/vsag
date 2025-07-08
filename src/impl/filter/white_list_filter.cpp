@@ -26,4 +26,39 @@ WhiteListFilter::CheckValid(int64_t id) const {
     }
     return fallback_func_(id);
 }
+
+void
+WhiteListFilter::Update(const IdFilterFuncType& fallback_func) {
+    this->fallback_func_ = fallback_func;
+    this->bitset_ = nullptr;
+    this->is_bitset_filter_ = false;
+}
+
+void
+WhiteListFilter::Update(const BitsetPtr& bitset) {
+    this->fallback_func_ = nullptr;
+    this->bitset_ = bitset.get();
+    this->is_bitset_filter_ = true;
+}
+
+void
+WhiteListFilter::TryToUpdate(FilterPtr& ptr, const IdFilterFuncType& fallback_func) {
+    if (ptr == nullptr) {
+        ptr = std::make_shared<WhiteListFilter>(fallback_func);
+    } else {
+        auto* white_ptr = static_cast<WhiteListFilter*>(ptr.get());
+        white_ptr->Update(fallback_func);
+    }
+}
+
+void
+WhiteListFilter::TryToUpdate(FilterPtr& ptr, const BitsetPtr& bitset) {
+    if (ptr == nullptr) {
+        ptr = std::make_shared<WhiteListFilter>(bitset);
+    } else {
+        auto* white_ptr = static_cast<WhiteListFilter*>(ptr.get());
+        white_ptr->Update(bitset);
+    }
+}
+
 }  // namespace vsag

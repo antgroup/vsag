@@ -31,7 +31,7 @@ SparseBitset::Set(int64_t pos, bool value) {
 }
 
 bool
-SparseBitset::Test(int64_t pos) {
+SparseBitset::Test(int64_t pos) const {
     std::lock_guard<std::mutex> lock(mutex_);
     return r_.contains(pos);
 }

@@ -59,28 +59,28 @@ LogicalExecutor::logical_run() {
             this->only_bitset_ = true;
             this->bitset_ = this->left_->bitset_;
             this->bitset_->And(this->right_->bitset_);
-            this->filter_ = std::make_shared<WhiteListFilter>(this->bitset_);
+            WhiteListFilter::TryToUpdate(this->filter_, this->bitset_);
         } else {
             this->only_bitset_ = false;
             auto filter_func = [this](int64_t id) -> bool {
                 return this->left_->filter_->CheckValid(id) and
                        this->right_->filter_->CheckValid(id);
             };
-            this->filter_ = std::make_shared<WhiteListFilter>(filter_func);
+            WhiteListFilter::TryToUpdate(this->filter_, filter_func);
         }
     } else if (this->op_ == LogicalOperator::OR) {
         if (this->left_->only_bitset_ and this->right_->only_bitset_) {
             this->only_bitset_ = true;
             this->bitset_ = this->left_->bitset_;
             this->bitset_->Or(this->right_->bitset_);
-            this->filter_ = std::make_shared<WhiteListFilter>(this->bitset_);
+            WhiteListFilter::TryToUpdate(this->filter_, this->bitset_);
         } else {
             this->only_bitset_ = false;
             auto filter_func = [this](int64_t id) -> bool {
                 return this->left_->filter_->CheckValid(id) or
                        this->right_->filter_->CheckValid(id);
             };
-            this->filter_ = std::make_shared<WhiteListFilter>(filter_func);
+            WhiteListFilter::TryToUpdate(this->filter_, filter_func);
         }
     } else {
         // TODO(LHT129): NOT operator implementation

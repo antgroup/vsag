@@ -35,7 +35,7 @@ public:
     Set(int64_t pos, bool value) override;
 
     bool
-    Test(int64_t pos) override;
+    Test(int64_t pos) const override;
 
     uint64_t
     Count() override;
