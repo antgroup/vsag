@@ -62,7 +62,7 @@ PCATransformer::Transform(const float* input_vec, float* output_vec) const {
     this->CentralizeData(input_vec, centralized_vec.data());
 
     // output_vec[i] = sum_j(input_vec[j] * pca_matrix_[j, i])
-    // e.g., original_dim == 3, target_dim == 2
+    // e.g., input_dim == 3, output_dim == 2
     //       [1, 0, 0,] * [1,]  = [1,]
     //       [0, 0, 1 ]   [2,]  = [3 ]
     //                    [3 ]
@@ -193,7 +193,7 @@ PCATransformer::SetMeanForTest(const float* input_mean) {
 }
 
 void
-PCATransformer::SetPCAMatrixForText(const float* input_pca_matrix) {
+PCATransformer::SetPCAMatrixForTest(const float* input_pca_matrix) {
     for (uint64_t i = 0; i < pca_matrix_.size(); i++) {
         pca_matrix_[i] = input_pca_matrix[i];
     }

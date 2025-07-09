@@ -24,7 +24,6 @@
 
 namespace vsag {
 
-// aka PCA
 class PCATransformer : public VectorTransformer {
 public:
     // interface
@@ -57,7 +56,7 @@ public:
     SetMeanForTest(const float* input_mean);
 
     void
-    SetPCAMatrixForText(const float* input_pca_matrix);
+    SetPCAMatrixForTest(const float* input_pca_matrix);
 
     void
     ComputeColumnMean(const float* data, uint64_t count);

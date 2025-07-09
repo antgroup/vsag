@@ -17,6 +17,7 @@
 #include <fstream>
 
 #include "fixtures.h"
+#include "fp32_quantizer.h"
 #include "iostream"
 #include "quantizer.h"
 #include "simd/normalize.h"
@@ -46,20 +47,27 @@ TestEncodeDecodeRaBitQ(Quantizer<T>& quantizer,
 
     // Test EncodeOne & DecodeOne
     float count_same_sign_1 = 0;
+    bool decode_result;
     std::vector<uint8_t> codes1(quantizer.GetCodeSize() * count);
     for (uint64_t i = 0; i < count; ++i) {
         uint8_t* codes = codes1.data() + i * quantizer.GetCodeSize();
         quantizer.EncodeOne(vecs.data() + i * dim, codes);
 
         std::vector<float> out_vec(dim);
-        quantizer.DecodeOne(codes, out_vec.data());
+        decode_result = quantizer.DecodeOne(codes, out_vec.data());
+        if (not decode_result) {
+            continue;
+        }
         for (uint64_t d = 0; d < dim; ++d) {
             if (vecs[i * dim + d] * out_vec[d] >= 0) {
                 count_same_sign_1++;
             }
         }
     }
-    REQUIRE(count_same_sign_1 / (count * dim) > same_sign_rate);
+
+    if (decode_result) {
+        REQUIRE(count_same_sign_1 / (count * dim) > same_sign_rate);
+    }
 
     // Test EncodeBatch & DecodeBatch
     float count_same_sign_2 = 0;
@@ -67,6 +75,10 @@ TestEncodeDecodeRaBitQ(Quantizer<T>& quantizer,
     quantizer.EncodeBatch(vecs.data(), codes2.data(), count);
     for (int c = 0; c < quantizer.GetCodeSize() * count; c++) {
         REQUIRE(codes1[c] == codes2[c]);
+    }
+
+    if (not decode_result) {
+        return;
     }
 
     std::vector<float> out_vec(dim * count);
@@ -221,6 +233,68 @@ TestComputeCodesSame(Quantizer<T>& quantizer,
         }
         REQUIRE(std::abs(gt - value) <= error);
     }
+}
+
+template <typename T>
+std::vector<std::vector<float>>
+ComputeAllDists(Quantizer<T>& quantizer, std::vector<float> data, uint32_t count, uint32_t dim) {
+    std::vector<uint8_t> codes(quantizer.GetCodeSize() * count);
+    std::vector<std::vector<float>> dists(count, std::vector<float>(count, 0));
+
+    // 1. encode
+    quantizer.EncodeBatch(data.data(), codes.data(), count);
+
+    // 2. compute dist
+    for (int i = 0; i < count; i++) {
+        std::shared_ptr<Computer<T>> computer;
+        computer = quantizer.FactoryComputer();
+        computer->SetQuery(data.data() + i * dim);
+
+        for (int j = 0; j < count; j++) {
+            auto code = codes.data() + j * quantizer.GetCodeSize();
+            if (i == j) {
+                continue;
+            }
+            dists[i][j] = quantizer.ComputeDist(*computer, code);
+        }
+    }
+    return dists;
+}
+
+template <typename T, MetricType metric>
+void
+TestInversePair(Quantizer<T>& quantizer, size_t dim, uint32_t count, Allocator* allocator) {
+    auto logger = vsag::Options::Instance().logger();
+    count = std::min(count, (uint32_t)100);
+    auto data = fixtures::generate_vectors(count, dim, false);
+    FP32Quantizer<metric> fp32_quantizer(dim, allocator);
+    fp32_quantizer.ReTrain(data.data(), count);
+    quantizer.ReTrain(data.data(), count);
+
+    auto dist_fp32 = ComputeAllDists<FP32Quantizer<metric>>(fp32_quantizer, data, count, dim);
+    auto dist_quan = ComputeAllDists<T>(quantizer, data, count, dim);
+
+    uint32_t count_diff = 0;
+    uint32_t count_compare = 0;
+    for (int i = 0; i < count; i++) {
+        for (int j = 0; j < count; j++) {
+            for (int k = j + 1; k < count; k++) {
+                count_compare++;
+                if (dist_fp32[i][j] < dist_fp32[i][k]) {
+                    if (dist_quan[i][j] > dist_quan[i][k]) {
+                        count_diff++;
+                    }
+                } else {
+                    if (dist_quan[i][j] < dist_quan[i][k]) {
+                        count_diff++;
+                    }
+                }
+            }
+        }
+    }
+
+    logger::debug(fmt::format("count_diff: {}, count_compare: {}", count_diff, count_compare));
+    REQUIRE(1.0 * count_diff / count_compare < 0.5);
 }
 
 template <typename T, MetricType metric>

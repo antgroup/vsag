@@ -126,7 +126,7 @@ TestTransform() {
                                      1.0f};  // eigen_vec[-2]
     PCATransformer pca(allocator.get(), original_dim, target_dim);
     pca.SetMeanForTest(mean.data());
-    pca.SetPCAMatrixForText(pca_matrix.data());
+    pca.SetPCAMatrixForTest(pca_matrix.data());
 
     std::vector<float> input = {4.0f, 6.0f, 8.0f};  // centralized: [1, 2, 3]
     std::vector<float> output(target_dim, 0);
