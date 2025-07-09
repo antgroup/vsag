@@ -36,6 +36,9 @@ public:
     static ComputableBitsetPtr
     MakeInstance(ComputableBitsetType type, Allocator* allocator = nullptr);
 
+    static ComputableBitset*
+    MakeRawInstance(ComputableBitsetType type, Allocator* allocator = nullptr);
+
 public:
     ComputableBitset() = default;
 
@@ -83,7 +86,7 @@ public:
      * @return void
      */
     virtual void
-    Or(const ComputableBitsetPtr& another) = 0;
+    Or(const ComputableBitset* another) = 0;
 
     /**
      * @brief Performs a bitwise AND operation on the current computable bitset with another.
@@ -92,7 +95,7 @@ public:
      * @return void
      */
     virtual void
-    And(const ComputableBitsetPtr& another) = 0;
+    And(const ComputableBitset* another) = 0;
 
     /**
      * @brief Performs a bitwise XOR operation on the current computable bitset with another.
@@ -101,7 +104,7 @@ public:
      * @return void
      */
     virtual void
-    Xor(const ComputableBitsetPtr& another) = 0;
+    Xor(const ComputableBitset* another) = 0;
 
     /**
      * @brief Performs a bitwise And operation on the current computable bitset with a vector of other computable bitsets.
@@ -110,7 +113,7 @@ public:
      * @return void
      */
     virtual void
-    And(const std::vector<ComputableBitsetPtr>& other_bitsets);
+    And(const std::vector<const ComputableBitset*>& other_bitsets);
 
     /**
      * @brief Performs a bitwise OR operation on the current computable bitset with a vector of other computable bitsets.
@@ -119,7 +122,7 @@ public:
      * @return void
      */
     virtual void
-    Or(const std::vector<ComputableBitsetPtr>& other_bitsets);
+    Or(const std::vector<const ComputableBitset*>& other_bitsets);
 
     /**
      * @brief Performs a bitwise XOR operation on the current computable bitset with a vector of other computable bitsets.
@@ -128,7 +131,7 @@ public:
      * @return void
      */
     virtual void
-    Xor(const std::vector<ComputableBitsetPtr>& other_bitsets);
+    Xor(const std::vector<const ComputableBitset*>& other_bitsets);
 
     /**
      * @brief Serializes the bitset to a stream.

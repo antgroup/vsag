@@ -35,9 +35,9 @@ WhiteListFilter::Update(const IdFilterFuncType& fallback_func) {
 }
 
 void
-WhiteListFilter::Update(const BitsetPtr& bitset) {
+WhiteListFilter::Update(const Bitset* bitset) {
     this->fallback_func_ = nullptr;
-    this->bitset_ = bitset.get();
+    this->bitset_ = bitset;
     this->is_bitset_filter_ = true;
 }
 
@@ -52,7 +52,7 @@ WhiteListFilter::TryToUpdate(FilterPtr& ptr, const IdFilterFuncType& fallback_fu
 }
 
 void
-WhiteListFilter::TryToUpdate(FilterPtr& ptr, const BitsetPtr& bitset) {
+WhiteListFilter::TryToUpdate(FilterPtr& ptr, const Bitset* bitset) {
     if (ptr == nullptr) {
         ptr = std::make_shared<WhiteListFilter>(bitset);
     } else {

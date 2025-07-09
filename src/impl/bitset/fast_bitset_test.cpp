@@ -77,7 +77,7 @@ TEST_CASE("FastBitset And operations", "[ut][FastBitset]") {
     SECTION("and basic operator with ptr") {
         auto [bitset1, values1] = GetRandomBitset(allocator.get(), 100, 10000);
         auto [bitset2, values2] = GetRandomBitset(allocator.get(), 100, 10000);
-        bitset1->And(bitset2);
+        bitset1->And(bitset2.get());
         auto values = GetIntersection(values1, values2);
         for (auto& v : values1) {
             if (values.find(v) == values.end()) {
@@ -120,9 +120,9 @@ TEST_CASE("FastBitset And operations", "[ut][FastBitset]") {
         auto [bitset1, values1] = GetRandomBitset(allocator.get(), 100, 10000);
         auto [bitset2, values2] = GetRandomBitset(allocator.get(), 100, 10000);
         auto [bitset3, values3] = GetRandomBitset(allocator.get(), 100, 10000);
-        std::vector<ComputableBitsetPtr> bitsets;
-        bitsets.emplace_back(bitset2);
-        bitsets.emplace_back(bitset3);
+        std::vector<const ComputableBitset*> bitsets;
+        bitsets.emplace_back(bitset2.get());
+        bitsets.emplace_back(bitset3.get());
         bitset1->And(bitsets);
         auto values = GetIntersection(values1, values2, values3);
         for (auto& v : values1) {
@@ -167,7 +167,7 @@ TEST_CASE("FastBitset And operations", "[ut][FastBitset]") {
             }
         }
 
-        bitset1->And(bitset2);
+        bitset1->And(bitset2.get());
 
         for (auto& v : values1) {
             if (values.find(v) == values.end()) {
@@ -225,7 +225,7 @@ TEST_CASE("FastBitset Or operations", "[ut][FastBitset]") {
     SECTION("or basic operator with ptr") {
         auto [bitset1, values1] = GetRandomBitset(allocator.get(), 100, 10000);
         auto [bitset2, values2] = GetRandomBitset(allocator.get(), 100, 10000);
-        bitset1->Or(bitset2);
+        bitset1->Or(bitset2.get());
         auto values = GetUnion(values1, values2);
         for (auto& v : values1) {
             if (values.find(v) == values.end()) {
@@ -268,9 +268,9 @@ TEST_CASE("FastBitset Or operations", "[ut][FastBitset]") {
         auto [bitset1, values1] = GetRandomBitset(allocator.get(), 100, 10000);
         auto [bitset2, values2] = GetRandomBitset(allocator.get(), 100, 10000);
         auto [bitset3, values3] = GetRandomBitset(allocator.get(), 100, 10000);
-        std::vector<ComputableBitsetPtr> bitsets;
-        bitsets.emplace_back(bitset2);
-        bitsets.emplace_back(bitset3);
+        std::vector<const ComputableBitset*> bitsets;
+        bitsets.emplace_back(bitset2.get());
+        bitsets.emplace_back(bitset3.get());
         bitset1->Or(bitsets);
         auto values = GetUnion(values1, values2, values3);
         for (auto& v : values1) {
@@ -314,7 +314,7 @@ TEST_CASE("FastBitset Or operations", "[ut][FastBitset]") {
             values.insert(v);
         }
 
-        bitset1->Or(bitset2);
+        bitset1->Or(bitset2.get());
 
         for (auto& v : values1) {
             if (values.find(v) == values.end()) {

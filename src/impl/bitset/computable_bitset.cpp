@@ -30,24 +30,37 @@ ComputableBitset::MakeInstance(ComputableBitsetType type, Allocator* allocator) 
     }
     throw VsagException(ErrorType::INTERNAL_ERROR, "Unknown bitset type");
 }
+
+ComputableBitset*
+ComputableBitset::MakeRawInstance(ComputableBitsetType type, Allocator* allocator) {
+    if (type == ComputableBitsetType::SparseBitset) {
+        return new SparseBitset();
+    }
+    if (type == ComputableBitsetType::FastBitset) {
+        return new FastBitset(allocator);
+    }
+    throw VsagException(ErrorType::INTERNAL_ERROR, "Unknown bitset type");
+}
+
 void
-ComputableBitset::And(const std::vector<ComputableBitsetPtr>& other_bitsets) {
+ComputableBitset::And(const std::vector<const ComputableBitset*>& other_bitsets) {
     for (const auto& ptr : other_bitsets) {
         this->And(ptr);
     }
 }
 
 void
-ComputableBitset::Or(const std::vector<ComputableBitsetPtr>& other_bitsets) {
+ComputableBitset::Or(const std::vector<const ComputableBitset*>& other_bitsets) {
     for (const auto& ptr : other_bitsets) {
         this->Or(ptr);
     }
 }
 
 void
-ComputableBitset::Xor(const std::vector<ComputableBitsetPtr>& other_bitsets) {
+ComputableBitset::Xor(const std::vector<const ComputableBitset*>& other_bitsets) {
     for (const auto& ptr : other_bitsets) {
         this->Xor(ptr);
     }
 }
+
 }  // namespace vsag

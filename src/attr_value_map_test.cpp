@@ -30,7 +30,7 @@ TEST_CASE("AttrValueMap insert and retrieve int32", "[ut][AttrValueMap]") {
     InnerIdType id = 5;
 
     map.Insert(value, id);
-    BitsetPtr bitset = map.GetBitsetByValue(value);
+    auto bitset = map.GetBitsetByValue(value);
     REQUIRE(bitset != nullptr);
     REQUIRE(bitset->Test(id) == true);
     REQUIRE(nullptr == map.GetBitsetByValue(999));
