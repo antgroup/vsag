@@ -15,8 +15,17 @@
 
 #include "async_io.h"
 
+#include <filesystem>
+
 namespace vsag {
 std::unique_ptr<IOContextPool> AsyncIO::io_context_pool =
     std::make_unique<IOContextPool>(10, nullptr);
+
+AsyncIO::~AsyncIO() {
+    close(this->wfd_);
+    close(this->rfd_);
+    // remove file
+    std::filesystem::remove(this->filepath_);
+}
 
 }  // namespace vsag

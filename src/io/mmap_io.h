@@ -17,6 +17,7 @@
 
 #include <sys/mman.h>
 
+#include <filesystem>
 #include <utility>
 
 #include "basic_io.h"
@@ -51,7 +52,9 @@ public:
     ~MMapIO() override {
         munmap(this->start_, this->size_);
         close(this->fd_);
-    };
+        // remove file
+        std::filesystem::remove(this->filepath_);
+    }
 
     inline void
     WriteImpl(const uint8_t* data, uint64_t size, uint64_t offset) {
