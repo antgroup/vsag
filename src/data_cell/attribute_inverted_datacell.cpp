@@ -57,7 +57,7 @@ AttributeInvertedDataCell::InsertWithBucket(const AttributeSet& attr_set,
     throw VsagException(ErrorType::INTERNAL_ERROR, "InsertWithBucket Not implemented");
 }
 
-std::vector<ComputableBitsetPtr>
+std::vector<const ComputableBitset*>
 AttributeInvertedDataCell::GetBitsetsByAttr(const Attribute& attr) {
     std::shared_lock lock(this->term_2_value_map_mutex_);
     if (term_2_value_map_.find(attr.name_) == term_2_value_map_.end()) {
@@ -65,7 +65,7 @@ AttributeInvertedDataCell::GetBitsetsByAttr(const Attribute& attr) {
     }
     auto& value_map = term_2_value_map_[attr.name_];
     auto value_type = attr.GetValueType();
-    std::vector<ComputableBitsetPtr> bitsets;
+    std::vector<const ComputableBitset*> bitsets;
     if (value_type == AttrValueType::INT32) {
         this->get_bitsets_by_type<int32_t>(value_map, &attr, bitsets);
     } else if (value_type == AttrValueType::INT64) {
@@ -90,7 +90,7 @@ AttributeInvertedDataCell::GetBitsetsByAttr(const Attribute& attr) {
     return bitsets;
 }
 
-std::vector<ComputableBitsetPtr>
+std::vector<const ComputableBitset*>
 AttributeInvertedDataCell::GetBitsetsByAttrAndBucketId(const Attribute& attr_name,
                                                        BucketIdType bucket_id) {
     throw VsagException(ErrorType::INTERNAL_ERROR, "GetBitsetsByAttrAndBucketId Not implemented");

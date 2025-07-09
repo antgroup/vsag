@@ -62,13 +62,13 @@ public:
     Xor(const ComputableBitset& another) override;
 
     void
-    Or(const ComputableBitsetPtr& another) override;
+    Or(const ComputableBitset* another) override;
 
     void
-    And(const ComputableBitsetPtr& another) override;
+    And(const ComputableBitset* another) override;
 
     void
-    Xor(const ComputableBitsetPtr& another) override;
+    Xor(const ComputableBitset* another) override;
 
     void
     Not() override;

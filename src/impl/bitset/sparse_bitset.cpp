@@ -74,7 +74,7 @@ SparseBitset::Xor(const ComputableBitset& another) {
 }
 
 void
-SparseBitset::Or(const ComputableBitsetPtr& another) {
+SparseBitset::Or(const ComputableBitset* another) {
     if (another == nullptr) {
         return;
     }
@@ -82,7 +82,7 @@ SparseBitset::Or(const ComputableBitsetPtr& another) {
 }
 
 void
-SparseBitset::And(const ComputableBitsetPtr& another) {
+SparseBitset::And(const ComputableBitset* another) {
     if (another == nullptr) {
         this->Clear();
         return;
@@ -91,7 +91,7 @@ SparseBitset::And(const ComputableBitsetPtr& another) {
 }
 
 void
-SparseBitset::Xor(const ComputableBitsetPtr& another) {
+SparseBitset::Xor(const ComputableBitset* another) {
     if (another == nullptr) {
         return;
     }

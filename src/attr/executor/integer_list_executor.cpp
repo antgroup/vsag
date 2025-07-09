@@ -101,11 +101,17 @@ FilterPtr
 IntegerListExecutor::Run() {
     if (this->bitset_ == nullptr) {
         this->bitset_ =
-            ComputableBitset::MakeInstance(ComputableBitsetType::SparseBitset, this->allocator_);
+            ComputableBitset::MakeRawInstance(ComputableBitsetType::SparseBitset, this->allocator_);
+        this->own_bitset_ = true;
     }
 
     auto bitset_lists = this->attr_index_->GetBitsetsByAttr(*this->filter_attribute_);
-    this->bitset_->Or(bitset_lists);
+    for (const auto* bitset : bitset_lists) {
+        if (bitset == nullptr) {
+            continue;
+        }
+        this->bitset_->Or(*bitset);
+    }
     if (this->is_not_in_) {
         this->only_bitset_ = false;
         this->filter_ = std::make_shared<BlackListFilter>(this->bitset_);
@@ -120,12 +126,18 @@ FilterPtr
 IntegerListExecutor::RunWithBucket(BucketIdType bucket_id) {
     if (this->bitset_ == nullptr) {
         this->bitset_ =
-            ComputableBitset::MakeInstance(ComputableBitsetType::FastBitset, this->allocator_);
+            ComputableBitset::MakeRawInstance(ComputableBitsetType::FastBitset, this->allocator_);
+        this->own_bitset_ = true;
     }
 
     auto bitset_lists =
         this->attr_index_->GetBitsetsByAttrAndBucketId(*this->filter_attribute_, bucket_id);
-    this->bitset_->Or(bitset_lists);
+    for (const auto* bitset : bitset_lists) {
+        if (bitset == nullptr) {
+            continue;
+        }
+        this->bitset_->Or(*bitset);
+    }
     this->only_bitset_ = true;
     if (this->is_not_in_) {
         this->bitset_->Not();

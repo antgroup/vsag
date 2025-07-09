@@ -31,6 +31,8 @@ public:
     explicit WhiteListFilter(const BitsetPtr& bitset)
         : bitset_(bitset.get()), is_bitset_filter_(true){};
 
+    explicit WhiteListFilter(const Bitset* bitset) : bitset_(bitset), is_bitset_filter_(true){};
+
     bool
     CheckValid(int64_t id) const override;
 
@@ -38,13 +40,13 @@ public:
     Update(const IdFilterFuncType& fallback_func);
 
     void
-    Update(const BitsetPtr& bitset);
+    Update(const Bitset* bitset);
 
     static void
     TryToUpdate(FilterPtr& ptr, const IdFilterFuncType& fallback_func);
 
     static void
-    TryToUpdate(FilterPtr& ptr, const BitsetPtr& bitset);
+    TryToUpdate(FilterPtr& ptr, const Bitset* bitset);
 
 private:
     IdFilterFuncType fallback_func_{nullptr};

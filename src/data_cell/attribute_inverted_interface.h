@@ -47,10 +47,10 @@ public:
                      InnerIdType inner_id,
                      BucketIdType bucket_id) = 0;
 
-    virtual std::vector<ComputableBitsetPtr>
+    virtual std::vector<const ComputableBitset*>
     GetBitsetsByAttr(const Attribute& attr) = 0;
 
-    virtual std::vector<ComputableBitsetPtr>
+    virtual std::vector<const ComputableBitset*>
     GetBitsetsByAttrAndBucketId(const Attribute& attr_name, BucketIdType bucket_id) = 0;
 
     virtual void
