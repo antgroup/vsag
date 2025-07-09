@@ -19,45 +19,52 @@
 
 #include "fixtures.h"
 #include "safe_allocator.h"
+#include "safe_thread_pool.h"
 
 using namespace vsag;
 
 TEST_CASE("IVF Nearest Partition Basic Test", "[ut][IVFNearestPartition]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    auto thread_pool = SafeThreadPool::FactoryDefaultThreadPool();
+    std::vector<SafeThreadPoolPtr> pools{thread_pool, nullptr};
     int64_t dim = 128;
     int64_t bucket_count = 20;
-    IndexCommonParam param;
-    param.dim_ = 128;
-    param.metric_ = MetricType::METRIC_TYPE_L2SQR;
-    param.allocator_ = allocator;
-    IVFPartitionStrategyParametersPtr strategy_param =
-        std::make_shared<IVFPartitionStrategyParameters>();
-    auto partition = std::make_unique<IVFNearestPartition>(bucket_count, param, strategy_param);
+    for (auto& tp : pools) {
+        IndexCommonParam param;
+        param.dim_ = 128;
+        param.metric_ = MetricType::METRIC_TYPE_L2SQR;
+        param.allocator_ = allocator;
+        param.thread_pool_ = tp;
 
-    auto dataset = Dataset::Make();
-    int64_t data_count = 1000L;
-    auto vec = fixtures::generate_vectors(data_count, dim, true, 95);
-    dataset->Float32Vectors(vec.data())->Dim(dim)->NumElements(data_count)->Owner(false);
+        IVFPartitionStrategyParametersPtr strategy_param =
+            std::make_shared<IVFPartitionStrategyParameters>();
+        auto partition = std::make_unique<IVFNearestPartition>(bucket_count, param, strategy_param);
 
-    partition->Train(dataset);
-    auto class_result = partition->ClassifyDatas(vec.data(), data_count, 1);
-    REQUIRE(class_result.size() == data_count);
+        auto dataset = Dataset::Make();
+        int64_t data_count = 1000L;
+        auto vec = fixtures::generate_vectors(data_count, dim, true, 95);
+        dataset->Float32Vectors(vec.data())->Dim(dim)->NumElements(data_count)->Owner(false);
 
-    auto index = partition->route_index_ptr_;
-    std::string route_search_param = R"(
-    {
-        "hgraph": {
-            "ef_search": 20
+        partition->Train(dataset);
+        auto class_result = partition->ClassifyDatas(vec.data(), data_count, 1);
+        REQUIRE(class_result.size() == data_count);
+
+        auto index = partition->route_index_ptr_;
+        std::string route_search_param = R"(
+        {
+            "hgraph": {
+                "ef_search": 20
+            }
         }
-    }
-    )";
-    FilterPtr filter = nullptr;
-    for (int64_t i = 0; i < data_count; ++i) {
-        auto query = Dataset::Make();
-        query->Dim(dim)->Float32Vectors(vec.data() + i * dim)->NumElements(1)->Owner(false);
-        auto result = index->KnnSearch(query, 1, route_search_param, filter);
-        auto id = result->GetIds()[0];
-        REQUIRE(id == class_result[i]);
+        )";
+        FilterPtr filter = nullptr;
+        for (int64_t i = 0; i < data_count; ++i) {
+            auto query = Dataset::Make();
+            query->Dim(dim)->Float32Vectors(vec.data() + i * dim)->NumElements(1)->Owner(false);
+            auto result = index->KnnSearch(query, 1, route_search_param, filter);
+            auto id = result->GetIds()[0];
+            REQUIRE(id == class_result[i]);
+        }
     }
 }
 

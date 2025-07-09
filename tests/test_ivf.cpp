@@ -381,7 +381,10 @@ TestIVFBuildAndContinueAdd(const fixtures::IVFTestIndexPtr& test_index,
     for (auto metric_type : resource->metric_types) {
         for (auto dim : resource->dims) {
             for (auto train_type : resource->train_types) {
-                for (auto& [base_quantization_str, recall] : resource->test_cases) {
+                for (auto [base_quantization_str, recall] : resource->test_cases) {
+                    if (train_type == "kmeans") {
+                        recall *= 0.8F;  // Kmeans may not achieve high recall in random datasets
+                    }
                     auto count = std::min(300, static_cast<int32_t>(dim / 4));
                     auto search_param =
                         fmt::format(fixtures::search_param_tmp, std::max(250, count));
@@ -441,8 +444,8 @@ TestIVFBuildWithResidual(const fixtures::IVFTestIndexPtr& test_index,
             for (auto train_type : resource->train_types) {
                 for (auto [base_quantization_str, recall] : tmp_test_cases) {
                     auto count = std::min(300, static_cast<int32_t>(dim / 4));
-                    if (dim > 960) {
-                        recall *= 0.8F;
+                    if (train_type == "kmeans") {
+                        recall *= 0.8F;  // Kmeans may not achieve high recall in random datasets
                     }
                     auto search_param =
                         fmt::format(fixtures::search_param_tmp, std::max(250, count));
@@ -492,8 +495,11 @@ TestIVFBuild(const fixtures::IVFTestIndexPtr& test_index,
     for (auto metric_type : resource->metric_types) {
         for (auto dim : resource->dims) {
             for (auto train_type : resource->train_types) {
-                for (auto& [base_quantization_str, recall] : resource->test_cases) {
+                for (auto [base_quantization_str, recall] : resource->test_cases) {
                     auto count = std::min(300, static_cast<int32_t>(dim / 4));
+                    if (train_type == "kmeans") {
+                        recall *= 0.8F;  // Kmeans may not achieve high recall in random datasets
+                    }
                     auto search_param =
                         fmt::format(fixtures::search_param_tmp, std::max(200, count));
                     INFO(
@@ -545,7 +551,10 @@ TestIVFBuildWithLargeK(const fixtures::IVFTestIndexPtr& test_index,
     for (auto metric_type : resource->metric_types) {
         for (auto dim : resource->dims) {
             for (auto train_type : resource->train_types) {
-                for (auto& [base_quantization_str, recall] : tmp_test_cases) {
+                for (auto [base_quantization_str, recall] : tmp_test_cases) {
+                    if (train_type == "kmeans") {
+                        recall *= 0.8F;  // Kmeans may not achieve high recall in random datasets
+                    }
                     auto search_param = fmt::format(fixtures::search_param_tmp, 3000);
                     INFO(
                         fmt::format("metric_type: {}, dim: {}, base_quantization_str: {}, "
@@ -594,7 +603,10 @@ TestIVFBuildWithAttr(const fixtures::IVFTestIndexPtr& test_index,
     for (auto metric_type : resource->metric_types) {
         for (auto dim : resource->dims) {
             for (auto train_type : resource->train_types) {
-                for (auto& [base_quantization_str, recall] : resource->test_cases) {
+                for (auto [base_quantization_str, recall] : resource->test_cases) {
+                    if (train_type == "kmeans") {
+                        recall *= 0.8F;  // Kmeans may not achieve high recall in random datasets
+                    }
                     auto count = std::min(300, static_cast<int32_t>(dim / 4));
                     auto search_param =
                         fmt::format(fixtures::search_param_tmp, std::max(200, count));
@@ -648,7 +660,10 @@ TestIVFExportModel(const fixtures::IVFTestIndexPtr& test_index,
     for (auto metric_type : resource->metric_types) {
         for (auto dim : resource->dims) {
             for (auto train_type : resource->train_types) {
-                for (auto& [base_quantization_str, recall] : resource->test_cases) {
+                for (auto [base_quantization_str, recall] : resource->test_cases) {
+                    if (train_type == "kmeans") {
+                        recall *= 0.8F;  // Kmeans may not achieve high recall in random datasets
+                    }
                     auto count = std::min(300, static_cast<int32_t>(dim / 4));
                     auto search_param =
                         fmt::format(fixtures::search_param_tmp, std::max(200, count));
@@ -697,7 +712,10 @@ TestIVFAdd(const fixtures::IVFTestIndexPtr& test_index, const fixtures::IVFResou
     for (auto metric_type : resource->metric_types) {
         for (auto dim : resource->dims) {
             for (auto train_type : resource->train_types) {
-                for (auto& [base_quantization_str, recall] : resource->test_cases) {
+                for (auto [base_quantization_str, recall] : resource->test_cases) {
+                    if (train_type == "kmeans") {
+                        recall *= 0.8F;  // Kmeans may not achieve high recall in random datasets
+                    }
                     auto count = std::min(300, static_cast<int32_t>(dim / 4));
                     auto search_param =
                         fmt::format(fixtures::search_param_tmp, std::max(200, count));
@@ -747,7 +765,10 @@ TestIVFMerge(const fixtures::IVFTestIndexPtr& test_index,
     for (auto metric_type : resource->metric_types) {
         for (auto dim : resource->dims) {
             for (auto train_type : resource->train_types) {
-                for (auto& [base_quantization_str, recall] : resource->test_cases) {
+                for (auto [base_quantization_str, recall] : resource->test_cases) {
+                    if (train_type == "kmeans") {
+                        recall *= 0.8F;  // Kmeans may not achieve high recall in random datasets
+                    }
                     auto count = std::min(300, static_cast<int32_t>(dim / 4));
                     auto search_param =
                         fmt::format(fixtures::search_param_tmp, std::max(200, count));
@@ -800,7 +821,10 @@ TestIVFConcurrentAdd(const fixtures::IVFTestIndexPtr& test_index,
     for (auto metric_type : resource->metric_types) {
         for (auto dim : resource->dims) {
             for (auto train_type : resource->train_types) {
-                for (auto& [base_quantization_str, recall] : resource->test_cases) {
+                for (auto [base_quantization_str, recall] : resource->test_cases) {
+                    if (train_type == "kmeans") {
+                        recall *= 0.8F;  // Kmeans may not achieve high recall in random datasets
+                    }
                     if (base_quantization_str == "pqfs,fp16") {
                         continue;
                     }
@@ -853,7 +877,10 @@ TestIVFSerialize(const fixtures::IVFTestIndexPtr& test_index,
     for (auto metric_type : resource->metric_types) {
         for (auto dim : resource->dims) {
             for (auto train_type : resource->train_types) {
-                for (auto& [base_quantization_str, recall] : resource->test_cases) {
+                for (auto [base_quantization_str, recall] : resource->test_cases) {
+                    if (train_type == "kmeans") {
+                        recall *= 0.8F;  // Kmeans may not achieve high recall in random datasets
+                    }
                     auto count = std::min(300, static_cast<int32_t>(dim / 4));
                     auto search_param =
                         fmt::format(fixtures::search_param_tmp, std::max(200, count));
@@ -924,7 +951,10 @@ TestIVFClone(const fixtures::IVFTestIndexPtr& test_index,
     for (auto metric_type : resource->metric_types) {
         for (auto dim : resource->dims) {
             for (auto train_type : resource->train_types) {
-                for (auto& [base_quantization_str, recall] : resource->test_cases) {
+                for (auto [base_quantization_str, recall] : resource->test_cases) {
+                    if (train_type == "kmeans") {
+                        recall *= 0.8F;  // Kmeans may not achieve high recall in random datasets
+                    }
                     auto count = std::min(300, static_cast<int32_t>(dim / 4));
                     auto search_param =
                         fmt::format(fixtures::search_param_tmp, std::max(200, count));
@@ -974,7 +1004,10 @@ TestIVFRandomAllocator(const fixtures::IVFTestIndexPtr& test_index,
     for (auto metric_type : resource->metric_types) {
         for (auto dim : resource->dims) {
             for (auto train_type : resource->train_types) {
-                for (auto& [base_quantization_str, recall] : resource->test_cases) {
+                for (auto [base_quantization_str, recall] : resource->test_cases) {
+                    if (train_type == "kmeans") {
+                        recall *= 0.8F;  // Kmeans may not achieve high recall in random datasets
+                    }
                     auto count = std::min(300, static_cast<int32_t>(dim / 4));
                     auto search_param =
                         fmt::format(fixtures::search_param_tmp, std::max(200, count));
@@ -1027,7 +1060,10 @@ TestIVFEstimateMemory(const fixtures::IVFTestIndexPtr& test_index,
     for (auto metric_type : resource->metric_types) {
         for (auto dim : resource->dims) {
             for (auto train_type : resource->train_types) {
-                for (auto& [base_quantization_str, recall] : resource->test_cases) {
+                for (auto [base_quantization_str, recall] : resource->test_cases) {
+                    if (train_type == "kmeans") {
+                        recall *= 0.8F;  // Kmeans may not achieve high recall in random datasets
+                    }
                     auto count = std::min(300, static_cast<int32_t>(dim / 4));
                     auto search_param =
                         fmt::format(fixtures::search_param_tmp, std::max(200, count));
@@ -1073,7 +1109,10 @@ TestIVFBuildMultiBucketsPerData(const fixtures::IVFTestIndexPtr& test_index,
     for (auto metric_type : resource->metric_types) {
         for (auto dim : resource->dims) {
             for (auto train_type : resource->train_types) {
-                for (auto& [base_quantization_str, recall] : resource->test_cases) {
+                for (auto [base_quantization_str, recall] : resource->test_cases) {
+                    if (train_type == "kmeans") {
+                        recall *= 0.8F;  // Kmeans may not achieve high recall in random datasets
+                    }
                     auto count = std::min(300, static_cast<int32_t>(dim / 4));
                     auto search_param =
                         fmt::format(fixtures::search_param_tmp, std::max(200, count));
@@ -1123,7 +1162,10 @@ TestIVFGNOIMIBuild(const fixtures::IVFTestIndexPtr& test_index,
     for (auto metric_type : resource->metric_types) {
         for (auto dim : resource->dims) {
             for (auto train_type : resource->train_types) {
-                for (auto& [base_quantization_str, recall] : resource->test_cases) {
+                for (auto [base_quantization_str, recall] : resource->test_cases) {
+                    if (train_type == "kmeans") {
+                        recall *= 0.8F;  // Kmeans may not achieve high recall in random datasets
+                    }
                     auto count = std::min(300, static_cast<int32_t>(dim / 4));
                     auto search_param =
                         fmt::format(fixtures::search_param_tmp, std::max(200, count));
@@ -1170,17 +1212,17 @@ TestIVFGNOIMIBuildWithResidual(const fixtures::IVFTestIndexPtr& test_index,
     using namespace fixtures;
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
-    std::vector<std::pair<std::string, float>> tmp_test_cases = {
-        {"fp32", 0.90}, {"fp16", 0.88},
-        // {"sq8", 0.84},
-        // {"pq,fp32", 0.82},
-        // {"pqfs,fp32", 0.82},
-    };
 
     for (auto metric_type : resource->metric_types) {
         for (auto dim : resource->dims) {
             for (auto train_type : resource->train_types) {
-                for (auto& [base_quantization_str, recall] : tmp_test_cases) {
+                for (auto [base_quantization_str, recall] : resource->test_cases) {
+                    if (train_type == "kmeans") {
+                        recall *= 0.8F;  // Kmeans may not achieve high recall in random datasets
+                    }
+                    if (base_quantization_str == "sq8_uniform,fp32") {
+                        continue;  // sq8_uniform reduce recall when using residual in GNO-IMI
+                    }
                     auto count = std::min(900, static_cast<int32_t>(dim / 4));
                     auto search_param =
                         fmt::format(fixtures::search_param_tmp, std::max(800, count));

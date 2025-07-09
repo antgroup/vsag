@@ -52,6 +52,7 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
       build_thread_count_(hgraph_param->build_thread_count),
       odescent_param_(hgraph_param->odescent_param),
       graph_type_(hgraph_param->graph_type),
+      hierarchical_datacell_param_(hgraph_param->hierarchical_graph_param),
       extra_info_size_(common_param.extra_info_size_),
       deleted_ids_(allocator_) {
     this->immutable_ = hgraph_param->immutable;
@@ -71,16 +72,6 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
 
     this->bottom_graph_ =
         GraphInterface::MakeInstance(hgraph_param->bottom_graph_param, common_param);
-    auto graph_param =
-        std::dynamic_pointer_cast<GraphDataCellParameter>(hgraph_param->bottom_graph_param);
-    sparse_datacell_param_ = std::make_shared<SparseGraphDatacellParameter>();
-    sparse_datacell_param_->max_degree_ = hgraph_param->bottom_graph_param->max_degree_ / 2;
-    if (graph_param != nullptr) {
-        sparse_datacell_param_->remove_flag_bit_ = graph_param->remove_flag_bit_;
-        sparse_datacell_param_->support_delete_ = graph_param->support_remove_;
-    } else {
-        sparse_datacell_param_->support_delete_ = false;
-    }
     mult_ = 1 / log(1.0 * static_cast<double>(this->bottom_graph_->MaximumDegree()));
 
     if (extra_info_size_ > 0) {
@@ -554,7 +545,7 @@ HGraph::EstimateMemory(uint64_t num_elements) const {
 
 GraphInterfacePtr
 HGraph::generate_one_route_graph() {
-    return std::make_shared<SparseGraphDataCell>(sparse_datacell_param_, this->allocator_);
+    return std::make_shared<SparseGraphDataCell>(hierarchical_datacell_param_, this->allocator_);
 }
 
 template <InnerSearchMode mode>
@@ -1148,12 +1139,15 @@ HGraph::InitFeatures() {
     if (name == QUANTIZATION_TYPE_VALUE_FP32) {
         have_fp32 = true;
     }
-    if (use_reorder_ and
+    if (use_reorder_ and not ignore_reorder_ and
         this->high_precise_codes_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32) {
         have_fp32 = true;
     }
     if (have_fp32) {
         this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_CAL_DISTANCE_BY_ID);
+        if (metric_ != MetricType::METRIC_TYPE_COSINE) {
+            this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_GET_VECTOR_BY_IDS);
+        }
     }
 
     // metric
@@ -1233,12 +1227,12 @@ static const std::string HGRAPH_PARAMS_TEMPLATE =
             },
             "codes_type": "flatten_codes",
             "{QUANTIZATION_PARAMS_KEY}": {
-                "{QUANTIZATION_TYPE_KEY}": "{QUANTIZATION_TYPE_VALUE_PQ}",
+                "{QUANTIZATION_TYPE_KEY}": "{QUANTIZATION_TYPE_VALUE_FP32}",
                 "{SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE}": 0.05,
                 "{PCA_DIM}": 0,
                 "{RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY}": 32,
                 "nbits": 8,
-                "{PRODUCT_QUANTIZATION_DIM}": 0
+                "{PRODUCT_QUANTIZATION_DIM}": 1
             }
         },
         "{HGRAPH_PRECISE_CODES_KEY}": {
@@ -1251,7 +1245,7 @@ static const std::string HGRAPH_PARAMS_TEMPLATE =
                 "{QUANTIZATION_TYPE_KEY}": "{QUANTIZATION_TYPE_VALUE_FP32}",
                 "{SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE}": 0.05,
                 "{PCA_DIM}": 0,
-                "{PRODUCT_QUANTIZATION_DIM}": 0
+                "{PRODUCT_QUANTIZATION_DIM}": 1
             }
         },
         "{BUILD_PARAMS_KEY}": {
@@ -1516,7 +1510,7 @@ HGraph::ExportModel(const IndexCommonParam& param) const {
     return index;
 }
 void
-HGraph::GetRawData(vsag::InnerIdType inner_id, uint8_t* data) const {
+HGraph::GetCodeByInnerId(InnerIdType inner_id, uint8_t* data) const {
     if (use_reorder_) {
         high_precise_codes_->GetCodesById(inner_id, data);
     } else {
@@ -1608,5 +1602,12 @@ HGraph::Merge(const std::vector<MergeUnit>& merge_units) {
         sparse_odescent_builder.SaveGraph(graph);
         this->entry_point_id_ = ids.back();
     }
+}
+void
+HGraph::GetVectorByInnerId(InnerIdType inner_id, float* data) const {
+    auto codes = (use_reorder_) ? high_precise_codes_ : basic_flatten_codes_;
+    Vector<uint8_t> buffer(codes->code_size_, allocator_);
+    codes->GetCodesById(inner_id, buffer.data());
+    codes->Decode(buffer.data(), data);
 }
 }  // namespace vsag

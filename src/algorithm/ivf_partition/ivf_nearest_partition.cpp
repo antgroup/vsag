@@ -37,8 +37,7 @@ IVFNearestPartition::IVFNearestPartition(BucketIdType bucket_count,
                                          const IndexCommonParam& common_param,
                                          IVFPartitionStrategyParametersPtr param)
     : IVFPartitionStrategy(common_param, bucket_count),
-      ivf_partition_strategy_param_(std::move(param)),
-      metric_type_(common_param.metric_) {
+      ivf_partition_strategy_param_(std::move(param)) {
     this->factory_router_index(common_param);
 }
 
@@ -147,6 +146,6 @@ IVFNearestPartition::GetCentroid(BucketIdType bucket_id, Vector<float>& centroid
     if (!is_trained_ || bucket_id >= bucket_count_) {
         throw std::runtime_error("Invalid bucket_id or partition not trained");
     }
-    this->route_index_ptr_->GetRawData(bucket_id, (uint8_t*)centroid.data());
+    this->route_index_ptr_->GetCodeByInnerId(bucket_id, (uint8_t*)centroid.data());
 }
 }  // namespace vsag

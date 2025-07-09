@@ -279,6 +279,15 @@ public:
         SAFE_CALL(return this->inner_index_->GetMinAndMaxId());
     }
 
+    virtual tl::expected<DatasetPtr, Error>
+    GetRawVectorByIds(const int64_t* ids, int64_t count) const override {
+        if (not CheckFeature(IndexFeature::SUPPORT_GET_VECTOR_BY_IDS)) {
+            return tl::unexpected(Error(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                                        "index no support to get raw vector by ids"));
+        }
+        SAFE_CALL(return this->inner_index_->GetVectorByIds(ids, count));
+    };
+
     tl::expected<void, Error>
     Merge(const std::vector<MergeUnit>& merge_units) override {
         if (this->inner_index_->immutable_) {
@@ -313,10 +322,6 @@ public:
 
     tl::expected<void, Error>
     Deserialize(const BinarySet& binary_set) override {
-        if (this->inner_index_->immutable_) {
-            return tl::unexpected(Error(ErrorType::UNSUPPORTED_INDEX_OPERATION,
-                                        "immutable index no support deserialize"));
-        }
         SAFE_CALL(this->inner_index_->Deserialize(binary_set));
     }
 
@@ -332,10 +337,6 @@ public:
 
     tl::expected<void, Error>
     Deserialize(std::istream& in_stream) override {
-        if (this->inner_index_->immutable_) {
-            return tl::unexpected(Error(ErrorType::UNSUPPORTED_INDEX_OPERATION,
-                                        "immutable index no support deserialize"));
-        }
         SAFE_CALL(this->inner_index_->Deserialize(in_stream));
     }
 

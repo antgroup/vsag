@@ -93,6 +93,15 @@ GNOIMIPartition::Train(const DatasetPtr dataset) {
     auto centroids_t = Dataset::Make();
     const auto* vectors = dataset->GetFloat32Vectors();
     auto num_element = dataset->GetNumElements();
+    Vector<float> norm_vectors(allocator_);
+    if (metric_type_ == MetricType::METRIC_TYPE_COSINE) {
+        norm_vectors.resize(num_element * dim);
+        for (int64_t i = 0; i < num_element; ++i) {
+            Normalize(vectors + i * dim_, norm_vectors.data() + i * dim_, dim_);
+        }
+        vectors = norm_vectors.data();
+    }
+
     Vector<LabelType> ids_centroids_s(this->bucket_count_s_, allocator_);
     Vector<LabelType> ids_centroids_t(this->bucket_count_t_, allocator_);
     Vector<float> data_centroids_s_tmp(this->bucket_count_s_ * dim_, allocator_);
@@ -204,6 +213,15 @@ Vector<BucketIdType>
 GNOIMIPartition::ClassifyDatasForSearch(const void* datas,
                                         int64_t count,
                                         const InnerSearchParam& param) {
+    Vector<float> norm_vectors(allocator_);
+    if (metric_type_ == MetricType::METRIC_TYPE_COSINE) {
+        norm_vectors.resize(count * dim_);
+        for (int64_t i = 0; i < count; ++i) {
+            Normalize(
+                static_cast<const float*>(datas) + i * dim_, norm_vectors.data() + i * dim_, dim_);
+        }
+        datas = norm_vectors.data();
+    }
     auto buckets_per_data = param.scan_bucket_size;
     Vector<BucketIdType> result(buckets_per_data * count, this->allocator_);
     auto candidate_count_s = bucket_count_s_;

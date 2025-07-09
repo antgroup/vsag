@@ -35,7 +35,7 @@ public:
     Set(int64_t pos, bool value) override;
 
     bool
-    Test(int64_t pos) override;
+    Test(int64_t pos) const override;
 
     uint64_t
     Count() override;
@@ -93,4 +93,6 @@ private:
 
     const uint64_t FILL_ONE = 0xFFFFFFFFFFFFFFFF;
 };
+
+using FastBitsetPtr = std::shared_ptr<FastBitset>;
 }  // namespace vsag

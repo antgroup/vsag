@@ -28,14 +28,27 @@ public:
     explicit WhiteListFilter(const IdFilterFuncType& fallback_func)
         : fallback_func_(fallback_func), is_bitset_filter_(false), bitset_(nullptr){};
 
-    explicit WhiteListFilter(const BitsetPtr& bitset) : bitset_(bitset), is_bitset_filter_(true){};
+    explicit WhiteListFilter(const BitsetPtr& bitset)
+        : bitset_(bitset.get()), is_bitset_filter_(true){};
 
     bool
     CheckValid(int64_t id) const override;
 
+    void
+    Update(const IdFilterFuncType& fallback_func);
+
+    void
+    Update(const BitsetPtr& bitset);
+
+    static void
+    TryToUpdate(FilterPtr& ptr, const IdFilterFuncType& fallback_func);
+
+    static void
+    TryToUpdate(FilterPtr& ptr, const BitsetPtr& bitset);
+
 private:
     IdFilterFuncType fallback_func_{nullptr};
-    const BitsetPtr bitset_;
-    const bool is_bitset_filter_;
+    const Bitset* bitset_;
+    bool is_bitset_filter_;
 };
 }  // namespace vsag
