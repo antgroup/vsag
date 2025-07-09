@@ -28,14 +28,17 @@ public:
     explicit BlackListFilter(const IdFilterFuncType& fallback_func)
         : fallback_func_(fallback_func), is_bitset_filter_(false), bitset_(nullptr){};
 
-    explicit BlackListFilter(const BitsetPtr& bitset) : bitset_(bitset), is_bitset_filter_(true){};
+    explicit BlackListFilter(const BitsetPtr& bitset)
+        : bitset_(bitset.get()), is_bitset_filter_(true){};
+
+    explicit BlackListFilter(const Bitset* bitset) : bitset_(bitset), is_bitset_filter_(true){};
 
     bool
     CheckValid(int64_t id) const override;
 
 private:
     IdFilterFuncType fallback_func_{nullptr};
-    const BitsetPtr bitset_{nullptr};
+    const Bitset* bitset_{nullptr};
     const bool is_bitset_filter_;
 };
 }  // namespace vsag

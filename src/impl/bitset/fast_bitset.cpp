@@ -64,7 +64,7 @@ FastBitset::Count() {
 
 void
 FastBitset::Or(const ComputableBitset& another) {
-    const auto* fast_another = dynamic_cast<const FastBitset*>(&another);
+    const auto* fast_another = static_cast<const FastBitset*>(&another);
     if (fast_another == nullptr) {
         throw VsagException(ErrorType::INTERNAL_ERROR, "bitset not match");
     }
@@ -105,7 +105,7 @@ FastBitset::Or(const ComputableBitset& another) {
 
 void
 FastBitset::And(const ComputableBitset& another) {
-    const auto* fast_another = dynamic_cast<const FastBitset*>(&another);
+    const auto* fast_another = static_cast<const FastBitset*>(&another);
     if (fast_another == nullptr) {
         throw VsagException(ErrorType::INTERNAL_ERROR, "bitset not match");
     }
@@ -145,7 +145,7 @@ FastBitset::And(const ComputableBitset& another) {
 
 void
 FastBitset::Xor(const ComputableBitset& another) {
-    const auto* fast_another = dynamic_cast<const FastBitset*>(&another);
+    const auto* fast_another = static_cast<const FastBitset*>(&another);
     if (fast_another == nullptr) {
         throw VsagException(ErrorType::INTERNAL_ERROR, "bitset not match");
     }
@@ -169,7 +169,7 @@ FastBitset::Xor(const ComputableBitset& another) {
 }
 
 void
-FastBitset::Or(const ComputableBitsetPtr& another) {
+FastBitset::Or(const ComputableBitset* another) {
     if (another == nullptr) {
         return;
     }
@@ -177,7 +177,7 @@ FastBitset::Or(const ComputableBitsetPtr& another) {
 }
 
 void
-FastBitset::And(const ComputableBitsetPtr& another) {
+FastBitset::And(const ComputableBitset* another) {
     if (another == nullptr) {
         this->Clear();
         return;
@@ -186,7 +186,7 @@ FastBitset::And(const ComputableBitsetPtr& another) {
 }
 
 void
-FastBitset::Xor(const ComputableBitsetPtr& another) {
+FastBitset::Xor(const ComputableBitset* another) {
     if (another == nullptr) {
         return;
     }
@@ -194,7 +194,7 @@ FastBitset::Xor(const ComputableBitsetPtr& another) {
 }
 
 void
-FastBitset::And(const std::vector<ComputableBitsetPtr>& other_bitsets) {
+FastBitset::And(const std::vector<const ComputableBitset*>& other_bitsets) {
     for (const auto& ptr : other_bitsets) {
         if (ptr == nullptr) {
             this->Clear();
@@ -205,7 +205,7 @@ FastBitset::And(const std::vector<ComputableBitsetPtr>& other_bitsets) {
 }
 
 void
-FastBitset::Or(const std::vector<ComputableBitsetPtr>& other_bitsets) {
+FastBitset::Or(const std::vector<const ComputableBitset*>& other_bitsets) {
     for (const auto& ptr : other_bitsets) {
         if (ptr != nullptr) {
             this->Or(*ptr);
@@ -214,7 +214,7 @@ FastBitset::Or(const std::vector<ComputableBitsetPtr>& other_bitsets) {
 }
 
 void
-FastBitset::Xor(const std::vector<ComputableBitsetPtr>& other_bitsets) {
+FastBitset::Xor(const std::vector<const ComputableBitset*>& other_bitsets) {
     for (const auto& ptr : other_bitsets) {
         if (ptr == nullptr) {
             this->Clear();

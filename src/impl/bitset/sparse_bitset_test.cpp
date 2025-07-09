@@ -266,7 +266,7 @@ TEST_CASE("SparseBitset Bitwise Operations", "[ut][SparseBitset]") {
         ptr1->Set(215, true);
         ptr2->Set(215, true);
         ptr2->Set(1929, true);
-        ptr1->And(ptr2);
+        ptr1->And(ptr2.get());
 
         REQUIRE_FALSE(ptr1->Test(2));
         REQUIRE(ptr1->Test(215));
@@ -275,7 +275,7 @@ TEST_CASE("SparseBitset Bitwise Operations", "[ut][SparseBitset]") {
         REQUIRE(ptr1->Dump() == "{215}");
 
         ptr2 = nullptr;
-        ptr1->And(ptr2);
+        ptr1->And(ptr2.get());
         REQUIRE_FALSE(ptr1->Test(215));
         REQUIRE(ptr1->Count() == 0);
         REQUIRE(ptr1->Dump() == "{}");
@@ -286,7 +286,7 @@ TEST_CASE("SparseBitset Bitwise Operations", "[ut][SparseBitset]") {
         auto ptr2 = std::make_shared<SparseBitset>(allocator.get());
         ptr1->Set(10, true);
         ptr2->Set(111, true);
-        ptr1->Or(ptr2);
+        ptr1->Or(ptr2.get());
 
         REQUIRE(ptr1->Test(10));
         REQUIRE(ptr1->Test(111));
@@ -296,12 +296,12 @@ TEST_CASE("SparseBitset Bitwise Operations", "[ut][SparseBitset]") {
         auto ptr3 = std::make_shared<SparseBitset>(allocator.get());
         ptr3->Set(64, true);
         ptr3->Set(111, true);
-        ptr1->Or(ptr3);
+        ptr1->Or(ptr3.get());
         REQUIRE(ptr1->Test(64));
         REQUIRE(ptr1->Count() == 3);
 
         ptr2 = nullptr;
-        ptr1->Or(ptr2);
+        ptr1->Or(ptr2.get());
         REQUIRE(ptr1->Count() == 3);
         REQUIRE(ptr1->Test(64));
         REQUIRE(ptr1->Dump() == "{10,64,111}");
@@ -314,7 +314,7 @@ TEST_CASE("SparseBitset Bitwise Operations", "[ut][SparseBitset]") {
         ptr1->Set(1001, true);
         ptr2->Set(1001, true);
         ptr2->Set(2025, true);
-        ptr1->Xor(ptr2);
+        ptr1->Xor(ptr2.get());
 
         REQUIRE(ptr1->Test(100));
         REQUIRE_FALSE(ptr1->Test(1001));
@@ -323,7 +323,7 @@ TEST_CASE("SparseBitset Bitwise Operations", "[ut][SparseBitset]") {
         REQUIRE(ptr1->Dump() == "{100,2025}");
 
         ptr2 = nullptr;
-        ptr1->Xor(ptr2);
+        ptr1->Xor(ptr2.get());
         REQUIRE(ptr1->Count() == 2);
         REQUIRE(ptr1->Dump() == "{100,2025}");
     }
@@ -332,9 +332,9 @@ TEST_CASE("SparseBitset Bitwise Operations", "[ut][SparseBitset]") {
         ComputableBitsetPtr ptr1 = std::make_shared<SparseBitset>(allocator.get());
         auto ptr2 = std::make_shared<SparseBitset>(allocator.get());
         auto ptr3 = std::make_shared<SparseBitset>(allocator.get());
-        std::vector<ComputableBitsetPtr> vec(2);
-        vec[0] = ptr2;
-        vec[1] = ptr3;
+        std::vector<const ComputableBitset*> vec(2);
+        vec[0] = ptr2.get();
+        vec[1] = ptr3.get();
         ptr1->Set(100, true);
         ptr1->Set(1001, true);
         ptr2->Set(1001, true);
@@ -354,9 +354,9 @@ TEST_CASE("SparseBitset Bitwise Operations", "[ut][SparseBitset]") {
         ComputableBitsetPtr ptr1 = std::make_shared<SparseBitset>(allocator.get());
         auto ptr2 = std::make_shared<SparseBitset>(allocator.get());
         auto ptr3 = std::make_shared<SparseBitset>(allocator.get());
-        std::vector<ComputableBitsetPtr> vec(2);
-        vec[0] = ptr2;
-        vec[1] = ptr3;
+        std::vector<const ComputableBitset*> vec(2);
+        vec[0] = ptr2.get();
+        vec[1] = ptr3.get();
         ptr1->Set(100, true);
         ptr1->Set(1001, true);
         ptr2->Set(1001, true);
@@ -376,9 +376,9 @@ TEST_CASE("SparseBitset Bitwise Operations", "[ut][SparseBitset]") {
         ComputableBitsetPtr ptr1 = std::make_shared<SparseBitset>(allocator.get());
         auto ptr2 = std::make_shared<SparseBitset>(allocator.get());
         auto ptr3 = std::make_shared<SparseBitset>(allocator.get());
-        std::vector<ComputableBitsetPtr> vec(2);
-        vec[0] = ptr2;
-        vec[1] = ptr3;
+        std::vector<const ComputableBitset*> vec(2);
+        vec[0] = ptr2.get();
+        vec[1] = ptr3.get();
         ptr1->Set(100, true);
         ptr1->Set(1001, true);
         ptr2->Set(1001, true);

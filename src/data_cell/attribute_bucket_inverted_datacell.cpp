@@ -70,12 +70,12 @@ AttributeBucketInvertedDataCell::InsertWithBucket(const AttributeSet& attr_set,
     }
 }
 
-std::vector<ComputableBitsetPtr>
+std::vector<const ComputableBitset*>
 AttributeBucketInvertedDataCell::GetBitsetsByAttr(const Attribute& attr) {
     throw VsagException(ErrorType::INTERNAL_ERROR, "GetBitsetsByAttr Not implemented");
 }
 
-std::vector<ComputableBitsetPtr>
+std::vector<const ComputableBitset*>
 AttributeBucketInvertedDataCell::GetBitsetsByAttrAndBucketId(const Attribute& attr,
                                                              BucketIdType bucket_id) {
     std::shared_lock lock(this->multi_term_2_value_map_mutex_);
@@ -86,12 +86,16 @@ AttributeBucketInvertedDataCell::GetBitsetsByAttrAndBucketId(const Attribute& at
 
     std::shared_lock bucket_lock(*this->bucket_mutexes_[bucket_id]);
 
-    if (value_maps == nullptr or value_maps->find(attr.name_) == value_maps->end()) {
+    if (value_maps == nullptr) {
         return {attr.GetValueCount(), nullptr};
     }
-    auto& value_map = (*value_maps)[attr.name_];
+    auto iter = value_maps->find(attr.name_);
+    if (iter == value_maps->end()) {
+        return {attr.GetValueCount(), nullptr};
+    }
+    const auto& value_map = iter->second;
     auto value_type = attr.GetValueType();
-    std::vector<ComputableBitsetPtr> bitsets;
+    std::vector<const ComputableBitset*> bitsets(attr.GetValueCount());
     if (value_type == AttrValueType::INT32) {
         this->get_bitsets_by_type<int32_t>(value_map, &attr, bitsets);
     } else if (value_type == AttrValueType::INT64) {
