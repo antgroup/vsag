@@ -144,31 +144,6 @@ FastBitset::And(const ComputableBitset& another) {
 }
 
 void
-FastBitset::Xor(const ComputableBitset& another) {
-    const auto* fast_another = static_cast<const FastBitset*>(&another);
-    if (fast_another == nullptr) {
-        throw VsagException(ErrorType::INTERNAL_ERROR, "bitset not match");
-    }
-    std::lock(mutex_, fast_another->mutex_);
-    std::lock_guard<std::shared_mutex> lock1(mutex_, std::adopt_lock);
-    std::lock_guard<std::shared_mutex> lock2(fast_another->mutex_, std::adopt_lock);
-    if (data_.size() >= fast_another->data_.size()) {
-        auto min_size = fast_another->data_.size();
-        BitXor(reinterpret_cast<const uint8_t*>(this->data_.data()),
-               reinterpret_cast<const uint8_t*>(fast_another->data_.data()),
-               min_size * sizeof(uint64_t),
-               reinterpret_cast<uint8_t*>(this->data_.data()));
-    } else {
-        auto max_size = fast_another->data_.size();
-        this->data_.resize(max_size, 0);
-        BitXor(reinterpret_cast<const uint8_t*>(this->data_.data()),
-               reinterpret_cast<const uint8_t*>(fast_another->data_.data()),
-               max_size * sizeof(uint64_t),
-               reinterpret_cast<uint8_t*>(this->data_.data()));
-    }
-}
-
-void
 FastBitset::Or(const ComputableBitset* another) {
     if (another == nullptr) {
         return;
@@ -183,14 +158,6 @@ FastBitset::And(const ComputableBitset* another) {
         return;
     }
     this->And(*another);
-}
-
-void
-FastBitset::Xor(const ComputableBitset* another) {
-    if (another == nullptr) {
-        return;
-    }
-    this->Xor(*another);
 }
 
 void
@@ -210,17 +177,6 @@ FastBitset::Or(const std::vector<const ComputableBitset*>& other_bitsets) {
         if (ptr != nullptr) {
             this->Or(*ptr);
         }
-    }
-}
-
-void
-FastBitset::Xor(const std::vector<const ComputableBitset*>& other_bitsets) {
-    for (const auto& ptr : other_bitsets) {
-        if (ptr == nullptr) {
-            this->Clear();
-            return;
-        }
-        this->Xor(*ptr);
     }
 }
 

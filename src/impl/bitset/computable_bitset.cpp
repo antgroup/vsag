@@ -56,11 +56,4 @@ ComputableBitset::Or(const std::vector<const ComputableBitset*>& other_bitsets) 
     }
 }
 
-void
-ComputableBitset::Xor(const std::vector<const ComputableBitset*>& other_bitsets) {
-    for (const auto& ptr : other_bitsets) {
-        this->Xor(ptr);
-    }
-}
-
 }  // namespace vsag

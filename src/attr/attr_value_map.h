@@ -56,6 +56,20 @@ public:
         return iter->second;
     }
 
+    template <class T>
+    void
+    Erase(InnerIdType inner_id, BucketIdType bucket_id = 0) {
+        auto& map = this->get_map_by_type<T>();
+        for (auto& [key, manager] : map) {
+            if (manager != nullptr) {
+                auto* bitset = manager->GetOneBitset(bucket_id);
+                if (bitset != nullptr) {
+                    bitset->Set(inner_id, false);
+                }
+            }
+        }
+    }
+
     void
     Serialize(StreamWriter& writer);
 
