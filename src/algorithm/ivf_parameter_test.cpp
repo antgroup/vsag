@@ -156,7 +156,10 @@ TEST_CASE("IVF Parameters Test", "[ut][IVFParameter]") {
 
 TEST_CASE("IVF Parameters CheckCompatibility", "[ut][IVFParameter][CheckCompatibility]") {
     SECTION("wrong parameter type") {
+        IVFDefaultParam index_param;
+        auto param_str = generate_ivf_param(index_param);
         auto param = std::make_shared<vsag::IVFParameter>();
+        param->FromString(param_str);
         REQUIRE(param->CheckCompatibility(param));
         REQUIRE_FALSE(param->CheckCompatibility(std::make_shared<vsag::EmptyParameter>()));
     }
