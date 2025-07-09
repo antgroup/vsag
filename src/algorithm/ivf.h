@@ -91,6 +91,9 @@ public:
     Merge(const std::vector<MergeUnit>& merge_units) override;
 
     void
+    UpdateAttribute(int64_t id, const AttributeSet& new_attrs) override;
+
+    void
     Serialize(StreamWriter& writer) const override;
 
     void
@@ -116,6 +119,12 @@ private:
     void
     check_merge_illegal(const MergeUnit& unit) const;
 
+    void
+    fill_location_map();
+
+    std::pair<BucketIdType, InnerIdType>
+    get_location(InnerIdType inner_id);
+
 private:
     BucketInterfacePtr bucket_{nullptr};
 
@@ -133,5 +142,9 @@ private:
     FlattenInterfacePtr reorder_codes_{nullptr};
 
     AttrInvertedInterfacePtr attr_filter_index_{nullptr};
+
+    Vector<uint64_t> location_map_;
+
+    static const uint64_t LOCATION_SPLIT_BIT = 32;
 };
 }  // namespace vsag

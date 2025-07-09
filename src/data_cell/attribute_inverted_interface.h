@@ -54,6 +54,11 @@ public:
     GetBitsetsByAttrAndBucketId(const Attribute& attr_name, BucketIdType bucket_id) = 0;
 
     virtual void
+    UpdateBitsetsByAttrAndBucketId(const AttributeSet& attributes,
+                                   const BucketIdType bucket_id,
+                                   const InnerIdType offset_id){};
+
+    virtual void
     Serialize(StreamWriter& writer) {
         this->field_type_map_.Serialize(writer);
     }

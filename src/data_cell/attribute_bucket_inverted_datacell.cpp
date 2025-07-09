@@ -16,6 +16,85 @@
 #include "attribute_bucket_inverted_datacell.h"
 namespace vsag {
 
+template <class T>
+static void
+insert_by_type(ValueMapPtr& value_map, const Attribute* attr, InnerIdType inner_id) {
+    auto* attr_value = dynamic_cast<const AttributeValue<T>*>(attr);
+    if (attr_value == nullptr) {
+        throw VsagException(ErrorType::INTERNAL_ERROR, "Invalid attribute type");
+    }
+    for (auto& value : attr_value->GetValue()) {
+        value_map->Insert(value, inner_id);
+    }
+}
+
+static void
+insert_by_type(ValueMapPtr& value_map, const Attribute* attr, InnerIdType inner_id) {
+    auto value_type = attr->GetValueType();
+    if (value_type == AttrValueType::INT32) {
+        insert_by_type<int32_t>(value_map, attr, inner_id);
+    } else if (value_type == AttrValueType::INT64) {
+        insert_by_type<int64_t>(value_map, attr, inner_id);
+    } else if (value_type == AttrValueType::INT16) {
+        insert_by_type<int16_t>(value_map, attr, inner_id);
+    } else if (value_type == AttrValueType::INT8) {
+        insert_by_type<int8_t>(value_map, attr, inner_id);
+    } else if (value_type == AttrValueType::UINT32) {
+        insert_by_type<uint32_t>(value_map, attr, inner_id);
+    } else if (value_type == AttrValueType::UINT64) {
+        insert_by_type<uint64_t>(value_map, attr, inner_id);
+    } else if (value_type == AttrValueType::UINT16) {
+        insert_by_type<uint16_t>(value_map, attr, inner_id);
+    } else if (value_type == AttrValueType::UINT8) {
+        insert_by_type<uint8_t>(value_map, attr, inner_id);
+    } else if (value_type == AttrValueType::STRING) {
+        insert_by_type<std::string>(value_map, attr, inner_id);
+    } else {
+        throw VsagException(ErrorType::INTERNAL_ERROR, "Unsupported value type");
+    }
+}
+
+static void
+erase_by_type(ValueMapPtr& value_map, const AttrValueType value_type, InnerIdType inner_id) {
+    if (value_type == AttrValueType::INT32) {
+        value_map->Erase<int32_t>(inner_id);
+    } else if (value_type == AttrValueType::INT64) {
+        value_map->Erase<int64_t>(inner_id);
+    } else if (value_type == AttrValueType::INT16) {
+        value_map->Erase<int16_t>(inner_id);
+    } else if (value_type == AttrValueType::INT8) {
+        value_map->Erase<int8_t>(inner_id);
+    } else if (value_type == AttrValueType::UINT32) {
+        value_map->Erase<uint32_t>(inner_id);
+    } else if (value_type == AttrValueType::UINT64) {
+        value_map->Erase<uint64_t>(inner_id);
+    } else if (value_type == AttrValueType::UINT16) {
+        value_map->Erase<uint16_t>(inner_id);
+    } else if (value_type == AttrValueType::UINT8) {
+        value_map->Erase<uint8_t>(inner_id);
+    } else if (value_type == AttrValueType::STRING) {
+        value_map->Erase<std::string>(inner_id);
+    } else {
+        throw VsagException(ErrorType::INTERNAL_ERROR, "Unsupported value type");
+    }
+}
+
+template <class T>
+static void
+get_bitsets_by_type(const ValueMapPtr& value_map,
+                    const Attribute* attr,
+                    std::vector<const ComputableBitset*>& bitsets) {
+    auto* attr_value = dynamic_cast<const AttributeValue<T>*>(attr);
+    if (attr_value == nullptr) {
+        throw VsagException(ErrorType::INTERNAL_ERROR, "Invalid attribute type");
+    }
+    auto values = attr_value->GetValue();
+    auto count = values.size();
+    for (int i = 0; i < count; ++i) {
+        bitsets[i] = value_map->GetBitsetByValue(values[i]);
+    }
+}
+
 void
 AttributeBucketInvertedDataCell::Insert(const AttributeSet& attr_set, InnerIdType inner_id) {
     throw VsagException(ErrorType::INTERNAL_ERROR, "Insert Not implemented");
@@ -46,27 +125,7 @@ AttributeBucketInvertedDataCell::InsertWithBucket(const AttributeSet& attr_set,
         auto& value_map = (*cur_bucket)[attr->name_];
         auto value_type = attr->GetValueType();
         this->field_type_map_.SetTypeOfField(attr->name_, value_type);
-        if (value_type == AttrValueType::INT32) {
-            this->insert_by_type<int32_t>(value_map, attr, inner_id);
-        } else if (value_type == AttrValueType::INT64) {
-            this->insert_by_type<int64_t>(value_map, attr, inner_id);
-        } else if (value_type == AttrValueType::INT16) {
-            this->insert_by_type<int16_t>(value_map, attr, inner_id);
-        } else if (value_type == AttrValueType::INT8) {
-            this->insert_by_type<int8_t>(value_map, attr, inner_id);
-        } else if (value_type == AttrValueType::UINT32) {
-            this->insert_by_type<uint32_t>(value_map, attr, inner_id);
-        } else if (value_type == AttrValueType::UINT64) {
-            this->insert_by_type<uint64_t>(value_map, attr, inner_id);
-        } else if (value_type == AttrValueType::UINT16) {
-            this->insert_by_type<uint16_t>(value_map, attr, inner_id);
-        } else if (value_type == AttrValueType::UINT8) {
-            this->insert_by_type<uint8_t>(value_map, attr, inner_id);
-        } else if (value_type == AttrValueType::STRING) {
-            this->insert_by_type<std::string>(value_map, attr, inner_id);
-        } else {
-            throw VsagException(ErrorType::INTERNAL_ERROR, "Unsupported value type");
-        }
+        insert_by_type(value_map, attr, inner_id);
     }
 }
 
@@ -97,23 +156,23 @@ AttributeBucketInvertedDataCell::GetBitsetsByAttrAndBucketId(const Attribute& at
     auto value_type = attr.GetValueType();
     std::vector<const ComputableBitset*> bitsets(attr.GetValueCount());
     if (value_type == AttrValueType::INT32) {
-        this->get_bitsets_by_type<int32_t>(value_map, &attr, bitsets);
+        get_bitsets_by_type<int32_t>(value_map, &attr, bitsets);
     } else if (value_type == AttrValueType::INT64) {
-        this->get_bitsets_by_type<int64_t>(value_map, &attr, bitsets);
+        get_bitsets_by_type<int64_t>(value_map, &attr, bitsets);
     } else if (value_type == AttrValueType::INT16) {
-        this->get_bitsets_by_type<int16_t>(value_map, &attr, bitsets);
+        get_bitsets_by_type<int16_t>(value_map, &attr, bitsets);
     } else if (value_type == AttrValueType::INT8) {
-        this->get_bitsets_by_type<int8_t>(value_map, &attr, bitsets);
+        get_bitsets_by_type<int8_t>(value_map, &attr, bitsets);
     } else if (value_type == AttrValueType::UINT32) {
-        this->get_bitsets_by_type<uint32_t>(value_map, &attr, bitsets);
+        get_bitsets_by_type<uint32_t>(value_map, &attr, bitsets);
     } else if (value_type == AttrValueType::UINT64) {
-        this->get_bitsets_by_type<uint64_t>(value_map, &attr, bitsets);
+        get_bitsets_by_type<uint64_t>(value_map, &attr, bitsets);
     } else if (value_type == AttrValueType::UINT16) {
-        this->get_bitsets_by_type<uint16_t>(value_map, &attr, bitsets);
+        get_bitsets_by_type<uint16_t>(value_map, &attr, bitsets);
     } else if (value_type == AttrValueType::UINT8) {
-        this->get_bitsets_by_type<uint8_t>(value_map, &attr, bitsets);
+        get_bitsets_by_type<uint8_t>(value_map, &attr, bitsets);
     } else if (value_type == AttrValueType::STRING) {
-        this->get_bitsets_by_type<std::string>(value_map, &attr, bitsets);
+        get_bitsets_by_type<std::string>(value_map, &attr, bitsets);
     } else {
         throw VsagException(ErrorType::INTERNAL_ERROR, "Unsupported value type");
     }
@@ -154,6 +213,19 @@ AttributeBucketInvertedDataCell::Deserialize(lvalue_or_rvalue<StreamReader> read
             (*map)[term] = value_map;
         }
         multi_term_2_value_map_.emplace_back(std::move(map));
+    }
+}
+void
+AttributeBucketInvertedDataCell::UpdateBitsetsByAttrAndBucketId(const AttributeSet& attributes,
+                                                                const BucketIdType bucket_id,
+                                                                const InnerIdType offset_id) {
+    auto& value_maps = this->multi_term_2_value_map_[bucket_id];
+    for (const auto* attr : attributes.attrs_) {
+        const auto& name = attr->name_;
+        auto& value_map = (*value_maps)[name];
+        auto type = attr->GetValueType();
+        erase_by_type(value_map, type, offset_id);
+        insert_by_type(value_map, attr, offset_id);
     }
 }
 
