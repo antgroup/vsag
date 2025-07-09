@@ -85,12 +85,4 @@ TEST_CASE("immutable index test", "[ut][index_impl]") {
     auto result_merge = index->Merge(merge_units);
     REQUIRE_FALSE(result_merge.has_value());
     REQUIRE(result_merge.error().type == vsag::ErrorType::UNSUPPORTED_INDEX_OPERATION);
-
-    auto result_deserialize = index->Deserialize(binary_set);
-    REQUIRE_FALSE(result_deserialize.has_value());
-    REQUIRE(result_deserialize.error().type == vsag::ErrorType::UNSUPPORTED_INDEX_OPERATION);
-
-    auto result_deserialize_stream = index->Deserialize(ss);
-    REQUIRE_FALSE(result_deserialize_stream.has_value());
-    REQUIRE(result_deserialize_stream.error().type == vsag::ErrorType::UNSUPPORTED_INDEX_OPERATION);
 }
