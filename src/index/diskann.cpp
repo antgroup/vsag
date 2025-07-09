@@ -276,6 +276,7 @@ DiskANN::DiskANN(DiskannParameters& diskann_params, const IndexCommonParam& inde
         MINIMAL_SECTOR_LEN,                                                           // NOLINT
         (size_t)(dim_ * sizeof(float) + (R_ * GRAPH_SLACK + 1) * sizeof(uint32_t)) *  // NOLINT
             VECTOR_PER_BLOCK);                                                        // NOLINT
+
     this->feature_list_ = std::make_shared<IndexFeatureList>();
     this->init_feature_list();
 }
