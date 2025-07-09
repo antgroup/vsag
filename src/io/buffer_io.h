@@ -15,6 +15,7 @@
 
 #pragma once
 
+#include <filesystem>
 #include <utility>
 
 #include "basic_io.h"
@@ -36,7 +37,11 @@ public:
     explicit BufferIO(const IOParamPtr& param, const IndexCommonParam& common_param)
         : BufferIO(std::dynamic_pointer_cast<BufferIOParameter>(param), common_param){};
 
-    ~BufferIO() override = default;
+    ~BufferIO() override {
+        close(this->fd_);
+        // remove file
+        std::filesystem::remove(this->filepath_);
+    }
 
     inline void
     WriteImpl(const uint8_t* data, uint64_t size, uint64_t offset) {
