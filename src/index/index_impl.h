@@ -322,10 +322,6 @@ public:
 
     tl::expected<void, Error>
     Deserialize(const BinarySet& binary_set) override {
-        if (this->inner_index_->immutable_) {
-            return tl::unexpected(Error(ErrorType::UNSUPPORTED_INDEX_OPERATION,
-                                        "immutable index no support deserialize"));
-        }
         SAFE_CALL(this->inner_index_->Deserialize(binary_set));
     }
 
@@ -341,10 +337,6 @@ public:
 
     tl::expected<void, Error>
     Deserialize(std::istream& in_stream) override {
-        if (this->inner_index_->immutable_) {
-            return tl::unexpected(Error(ErrorType::UNSUPPORTED_INDEX_OPERATION,
-                                        "immutable index no support deserialize"));
-        }
         SAFE_CALL(this->inner_index_->Deserialize(in_stream));
     }
 
