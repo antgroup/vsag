@@ -69,6 +69,7 @@ RaBitQuantizerParameter::CheckCompatibility(const ParamPtr& other) const {
             "not match: {} vs {}",
             this->num_bits_per_dim_query_,
             rabitq_param->num_bits_per_dim_query_);
+        return false;
     }
     if (this->use_fht_ != rabitq_param->use_fht_) {
         logger::error(
