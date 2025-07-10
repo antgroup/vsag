@@ -29,7 +29,7 @@ namespace vsag {
 class ExtraInfoWrapperFilter : public Filter {
 public:
     ExtraInfoWrapperFilter(const FilterPtr filter_impl, const ExtraInfoInterfacePtr& extra_infos)
-        : filter_impl_(filter_impl), extra_infos_(extra_infos){};
+        : filter_impl_(filter_impl), extra_infos_(extra_infos) {};
 
     [[nodiscard]] bool
     CheckValid(int64_t inner_id) const override;

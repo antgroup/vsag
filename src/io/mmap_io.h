@@ -44,10 +44,10 @@ public:
     }
 
     explicit MMapIO(const MMapIOParameterPtr& io_param, const IndexCommonParam& common_param)
-        : MMapIO(io_param->path_, common_param.allocator_.get()){};
+        : MMapIO(io_param->path_, common_param.allocator_.get()) {};
 
     explicit MMapIO(const IOParamPtr& param, const IndexCommonParam& common_param)
-        : MMapIO(std::dynamic_pointer_cast<MMapIOParameter>(param), common_param){};
+        : MMapIO(std::dynamic_pointer_cast<MMapIOParameter>(param), common_param) {};
 
     ~MMapIO() override {
         munmap(this->start_, this->size_);
@@ -112,7 +112,7 @@ public:
     }
 
     inline void
-    PrefetchImpl(uint64_t offset, uint64_t cache_line = 64){};
+    PrefetchImpl(uint64_t offset, uint64_t cache_line = 64) {};
 
     static inline bool
     InMemoryImpl() {

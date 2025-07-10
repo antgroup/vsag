@@ -32,7 +32,7 @@ public:
     }
     ~SparseBitset() override = default;
 
-    explicit SparseBitset(Allocator* allocator) : SparseBitset(){};
+    explicit SparseBitset(Allocator* allocator) : SparseBitset() {};
 
     SparseBitset(const SparseBitset&) = delete;
     SparseBitset&

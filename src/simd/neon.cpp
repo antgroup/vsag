@@ -59,7 +59,8 @@ INT8InnerProductDistance(const void* pVect1v, const void* pVect2v, const void* q
 }
 
 #if defined(ENABLE_NEON)
-__inline float32x4x3_t __attribute__((__always_inline__)) vcvt3_f32_f16(const float16x4x3_t a) {
+__inline float32x4x3_t __attribute__((__always_inline__))
+vcvt3_f32_f16(const float16x4x3_t a) {
     float32x4x3_t c;
     c.val[0] = vcvt_f32_f16(a.val[0]);
     c.val[1] = vcvt_f32_f16(a.val[1]);
@@ -67,14 +68,16 @@ __inline float32x4x3_t __attribute__((__always_inline__)) vcvt3_f32_f16(const fl
     return c;
 }
 
-__inline float32x4x2_t __attribute__((__always_inline__)) vcvt2_f32_f16(const float16x4x2_t a) {
+__inline float32x4x2_t __attribute__((__always_inline__))
+vcvt2_f32_f16(const float16x4x2_t a) {
     float32x4x2_t c;
     c.val[0] = vcvt_f32_f16(a.val[0]);
     c.val[1] = vcvt_f32_f16(a.val[1]);
     return c;
 }
 
-__inline float32x4x3_t __attribute__((__always_inline__)) vcvt3_f32_half(const uint16x4x3_t x) {
+__inline float32x4x3_t __attribute__((__always_inline__))
+vcvt3_f32_half(const uint16x4x3_t x) {
     float32x4x3_t c;
     c.val[0] = vreinterpretq_f32_u32(vshlq_n_u32(vmovl_u16(x.val[0]), 16));
     c.val[1] = vreinterpretq_f32_u32(vshlq_n_u32(vmovl_u16(x.val[1]), 16));
@@ -82,13 +85,15 @@ __inline float32x4x3_t __attribute__((__always_inline__)) vcvt3_f32_half(const u
     return c;
 }
 
-__inline float32x4x2_t __attribute__((__always_inline__)) vcvt2_f32_half(const uint16x4x2_t x) {
+__inline float32x4x2_t __attribute__((__always_inline__))
+vcvt2_f32_half(const uint16x4x2_t x) {
     float32x4x2_t c;
     c.val[0] = vreinterpretq_f32_u32(vshlq_n_u32(vmovl_u16(x.val[0]), 16));
     c.val[1] = vreinterpretq_f32_u32(vshlq_n_u32(vmovl_u16(x.val[1]), 16));
     return c;
 }
-__inline float32x4_t __attribute__((__always_inline__)) vcvt_f32_half(const uint16x4_t x) {
+__inline float32x4_t __attribute__((__always_inline__))
+vcvt_f32_half(const uint16x4_t x) {
     return vreinterpretq_f32_u32(vshlq_n_u32(vmovl_u16(x), 16));
 }
 
@@ -488,7 +493,8 @@ FP32ReduceAdd(const float* x, uint64_t dim) {
 }
 
 #if defined(ENABLE_NEON)
-__inline uint16x8_t __attribute__((__always_inline__)) load_4_short(const uint16_t* data) {
+__inline uint16x8_t __attribute__((__always_inline__))
+load_4_short(const uint16_t* data) {
     uint16_t tmp[] = {data[3], 0, data[2], 0, data[1], 0, data[0], 0};
     return vld1q_u16(tmp);
 }
@@ -782,7 +788,8 @@ FP16ComputeL2Sqr(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, u
 }
 
 #if defined(ENABLE_NEON)
-__inline uint8x16_t __attribute__((__always_inline__)) load_4_char(const uint8_t* data) {
+__inline uint8x16_t __attribute__((__always_inline__))
+load_4_char(const uint8_t* data) {
     uint8x16_t vec = vdupq_n_u8(0);
     vec = vsetq_lane_u8(data[0], vec, 0);
     vec = vsetq_lane_u8(data[1], vec, 1);
@@ -791,7 +798,8 @@ __inline uint8x16_t __attribute__((__always_inline__)) load_4_char(const uint8_t
     return vec;
 }
 
-__inline float32x4_t __attribute__((__always_inline__)) get_4_float(uint8x16_t* code_vec) {
+__inline float32x4_t __attribute__((__always_inline__))
+get_4_float(uint8x16_t* code_vec) {
     uint8x8_t code_low = vget_low_u8(*code_vec);
     uint16x8_t code_low_16 = vmovl_u8(code_low);
     uint16x4_t code_low_16_low = vget_low_u16(code_low_16);
@@ -1307,7 +1315,8 @@ BitNot(const uint8_t* x, const uint64_t num_byte, uint8_t* result) {
 #endif
 }
 
-void RotateOp(float* data, int idx, int dim_, int step) {
+void
+RotateOp(float* data, int idx, int dim_, int step) {
 #if defined(ENABLE_NEON)
     for (int i = idx; i < dim_; i += step * 2) {
         for (int j = 0; j < step; j += 4) {
@@ -1330,7 +1339,7 @@ FHTRotate(float* data, size_t dim_) {
     size_t n = dim_;
     size_t step = 1;
     while (step < n) {
-        if(step >= 4){
+        if (step >= 4) {
             neno::RotateOp(data, 0, dim_, step);
         } else {
             generic::RotateOp(data, 0, dim_, step);
@@ -1347,7 +1356,7 @@ VecRescale(float* data, size_t dim, float val) {
 #if defined(ENABLE_NEON)
     size_t i = 0;
     float32x4_t val_vec = vdupq_n_f32(val);
-    for(; i + 4 <= dim; i += 4){
+    for (; i + 4 <= dim; i += 4) {
         float32x4_t data_vec = vld1q_f32(&data[i]);
         float32x4_t result_vec = vmulq_f32(data_vec, val_vec);
         vst1q_f32(&data[i], result_vec);
@@ -1368,7 +1377,7 @@ KacsWalk(float* data, size_t len) {
     size_t offset = base + (len / 2);  // for odd dim
     size_t i = 0;
 
-    for(; i + 4 < len / 2; i += 4){
+    for (; i + 4 < len / 2; i += 4) {
         float32x4_t x = vld1q_f32(&data[i]);
         float32x4_t y = vld1q_f32(&data[i + offset]);
 
@@ -1389,7 +1398,7 @@ KacsWalk(float* data, size_t len) {
     if (base != 0 && len > 0) {
         data[len / 2] *= std::sqrt(2.0F);
     }
-#else 
+#else
     generic::KacsWalk(data, len);
 #endif
 }

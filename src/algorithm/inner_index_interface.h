@@ -91,7 +91,7 @@ public:
 
 public:
     virtual void
-    Train(const DatasetPtr& base){};
+    Train(const DatasetPtr& base) {};
 
     virtual std::vector<int64_t>
     Build(const DatasetPtr& base);

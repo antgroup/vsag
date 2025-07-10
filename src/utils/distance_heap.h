@@ -56,7 +56,7 @@ public:
 
 public:
     DistanceHeap(Allocator* allocator, int64_t max_size = -1)
-        : allocator_(allocator), max_size_(max_size){};
+        : allocator_(allocator), max_size_(max_size) {};
 
     virtual void
     Push(const DistanceRecord& record) {

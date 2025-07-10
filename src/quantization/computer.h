@@ -38,7 +38,7 @@ public:
         quantizer_->ReleaseComputer(*this);
     }
 
-    explicit Computer(const T* quantizer) : quantizer_(quantizer){};
+    explicit Computer(const T* quantizer) : quantizer_(quantizer) {};
 
     void
     SetQuery(const DataType* query) {

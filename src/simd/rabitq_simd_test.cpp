@@ -187,7 +187,7 @@ TEST_CASE("SIMD test for rescale", "[ut][simd]") {
             auto* avx2_data = avx2_datas.data() + i * dim;
             auto* avx_data = avx_datas.data() + i * dim;
             auto* sse_data = sse_datas.data() + i * dim;
-            auto * neon_data = neon_datas.data() + i * dim;
+            auto* neon_data = neon_datas.data() + i * dim;
 
             const float delta = 1e-5;
             generic::VecRescale(gt_data, dim, 0.5);
@@ -215,9 +215,9 @@ TEST_CASE("SIMD test for rescale", "[ut][simd]") {
                     REQUIRE(gt_data[i] - sse_data[i] < delta);
                 }
             }
-            if (SimdStatus::SupportNEON()){
+            if (SimdStatus::SupportNEON()) {
                 neon::VecRescale(neon_data, dim, 0.5);
-                for(int i = 0; i < dim; i++){
+                for (int i = 0; i < dim; i++) {
                     REQUIRE(gt_data[i] - neon_data[i] < delta);
                 }
             }
@@ -274,10 +274,10 @@ TEST_CASE("SIMD test for kacs_walk", "[ut][simd]") {
                     REQUIRE(gt_data[i] - sse_data[i] < delta);
                 }
             }
-            if (SimdStatus::SupportNEON()){
-                auto * neon_data = neon_datas.data() + i * dim;
+            if (SimdStatus::SupportNEON()) {
+                auto* neon_data = neon_datas.data() + i * dim;
                 neon::KacsWalk(neon_data, dim);
-                for(int i = 0; i < dim; i++){
+                for (int i = 0; i < dim; i++) {
                     REQUIRE(gt_data[i] - neon_data[i] < delta);
                 }
             }
@@ -348,11 +348,11 @@ TEST_CASE("SIMD test for rotate", "[ut][simd]") {
                     REQUIRE(gt_data[i] - sse_data[i] < delta);
                 }
             }
-            if (SimdStatus::SupportNEON()){
-                auto * neon_data = neon_datas.data() + i * dim;
+            if (SimdStatus::SupportNEON()) {
+                auto* neon_data = neon_datas.data() + i * dim;
                 neon::FHTRotate(neon_data, trunc_dim);
                 neon::FHTRotate(neon_data + start, trunc_dim);
-                for(int i = 0; i < dim; i++){
+                for (int i = 0; i < dim; i++) {
                     REQUIRE(gt_data[i] - neon_data[i] < delta);
                 }
             }

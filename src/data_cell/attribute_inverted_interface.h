@@ -36,7 +36,7 @@ public:
 
 public:
     AttributeInvertedInterface(Allocator* allocator)
-        : allocator_(allocator), field_type_map_(allocator){};
+        : allocator_(allocator), field_type_map_(allocator) {};
     virtual ~AttributeInvertedInterface() = default;
 
     virtual void

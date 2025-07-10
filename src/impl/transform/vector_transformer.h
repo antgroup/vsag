@@ -50,7 +50,7 @@ public:
 
 public:
     virtual void
-    Train(const float* data, uint64_t count){};
+    Train(const float* data, uint64_t count) {};
 
     virtual void
     InverseTransform(const float* input_vec, float* output_vec) const;

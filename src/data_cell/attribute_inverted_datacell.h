@@ -27,7 +27,7 @@ namespace vsag {
 class AttributeInvertedDataCell : public AttributeInvertedInterface {
 public:
     AttributeInvertedDataCell(Allocator* allocator)
-        : AttributeInvertedInterface(allocator), term_2_value_map_(allocator){};
+        : AttributeInvertedInterface(allocator), term_2_value_map_(allocator) {};
     ~AttributeInvertedDataCell() override = default;
 
     void

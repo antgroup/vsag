@@ -565,7 +565,7 @@ DivScalar(const float* from, float* to, uint64_t dim, float scalar) {
 }
 
 void
-Prefetch(const void* data){};
+Prefetch(const void* data) {};
 
 void
 PQFastScanLookUp32(const uint8_t* RESTRICT lookup_table,

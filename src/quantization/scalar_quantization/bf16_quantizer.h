@@ -74,10 +74,10 @@ public:
     ReleaseComputerImpl(Computer<BF16Quantizer<metric>>& computer) const;
 
     inline void
-    SerializeImpl(StreamWriter& writer){};
+    SerializeImpl(StreamWriter& writer) {};
 
     inline void
-    DeserializeImpl(StreamReader& reader){};
+    DeserializeImpl(StreamReader& reader) {};
 
     [[nodiscard]] std::string
     NameImpl() const {

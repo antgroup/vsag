@@ -33,10 +33,10 @@ public:
     }
 
     explicit AsyncIO(const AsyncIOParameterPtr& io_param, const IndexCommonParam& common_param)
-        : AsyncIO(io_param->path_, common_param.allocator_.get()){};
+        : AsyncIO(io_param->path_, common_param.allocator_.get()) {};
 
     explicit AsyncIO(const IOParamPtr& param, const IndexCommonParam& common_param)
-        : AsyncIO(std::dynamic_pointer_cast<AsyncIOParameter>(param), common_param){};
+        : AsyncIO(std::dynamic_pointer_cast<AsyncIOParameter>(param), common_param) {};
 
     ~AsyncIO() override;
 
@@ -134,7 +134,7 @@ public:
     }
 
     inline void
-    PrefetchImpl(uint64_t offset, uint64_t cache_line = 64){};
+    PrefetchImpl(uint64_t offset, uint64_t cache_line = 64) {};
 
     static inline bool
     InMemoryImpl() {

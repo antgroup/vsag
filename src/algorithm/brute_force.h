@@ -37,7 +37,7 @@ public:
     explicit BruteForce(const BruteForceParameterPtr& param, const IndexCommonParam& common_param);
 
     explicit BruteForce(const ParamPtr& param, const IndexCommonParam& common_param)
-        : BruteForce(std::dynamic_pointer_cast<BruteForceParameter>(param), common_param){};
+        : BruteForce(std::dynamic_pointer_cast<BruteForceParameter>(param), common_param) {};
 
     ~BruteForce() override = default;
 

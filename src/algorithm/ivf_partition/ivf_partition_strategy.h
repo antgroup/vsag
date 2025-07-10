@@ -51,7 +51,7 @@ public:
           thread_pool_(common_param.thread_pool_),
           bucket_count_(bucket_count),
           dim_(common_param.dim_),
-          metric_type_(common_param.metric_){};
+          metric_type_(common_param.metric_) {};
 
     virtual void
     Train(const DatasetPtr dataset) = 0;

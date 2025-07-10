@@ -35,7 +35,7 @@ public:
         : allocator_(allocator),
           label_table_(0, allocator),
           label_remap_(0, allocator),
-          use_reverse_map_(use_reverse_map){};
+          use_reverse_map_(use_reverse_map) {};
 
     inline void
     Insert(InnerIdType id, LabelType label) {

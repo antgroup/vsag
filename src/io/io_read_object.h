@@ -21,7 +21,7 @@
 
 class IOReadObject {
 public:
-    explicit IOReadObject(std::function<void(const uint8_t*)> func) : release_func_(func){};
+    explicit IOReadObject(std::function<void(const uint8_t*)> func) : release_func_(func) {};
 
     const uint8_t* data_;
 

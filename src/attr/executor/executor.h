@@ -33,7 +33,7 @@ public:
     Executor(Allocator* allocator,
              const ExprPtr& expression,
              const AttrInvertedInterfacePtr& attr_index)
-        : expr_(expression), attr_index_(attr_index), allocator_(allocator){};
+        : expr_(expression), attr_index_(attr_index), allocator_(allocator) {};
 
     virtual ~Executor() {
         if (this->own_bitset_) {

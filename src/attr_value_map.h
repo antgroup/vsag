@@ -42,7 +42,7 @@ public:
           uint16_to_bitset_(allocator),
           uint8_to_bitset_(allocator),
           string_to_bitset_(allocator),
-          bitset_type_(bitset_type){};
+          bitset_type_(bitset_type) {};
 
     virtual ~AttrValueMap() {
         clear_map(this->int16_to_bitset_);

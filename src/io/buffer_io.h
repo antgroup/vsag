@@ -32,10 +32,10 @@ public:
     }
 
     explicit BufferIO(const BufferIOParameterPtr& io_param, const IndexCommonParam& common_param)
-        : BufferIO(io_param->path_, common_param.allocator_.get()){};
+        : BufferIO(io_param->path_, common_param.allocator_.get()) {};
 
     explicit BufferIO(const IOParamPtr& param, const IndexCommonParam& common_param)
-        : BufferIO(std::dynamic_pointer_cast<BufferIOParameter>(param), common_param){};
+        : BufferIO(std::dynamic_pointer_cast<BufferIOParameter>(param), common_param) {};
 
     ~BufferIO() override {
         close(this->fd_);
@@ -93,7 +93,7 @@ public:
     }
 
     inline void
-    PrefetchImpl(uint64_t offset, uint64_t cache_line = 64){};
+    PrefetchImpl(uint64_t offset, uint64_t cache_line = 64) {};
 
     static inline bool
     InMemoryImpl() {

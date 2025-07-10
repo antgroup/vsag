@@ -113,10 +113,10 @@ public:
     }
 
     virtual void
-    EnableForceInMemory(){};
+    EnableForceInMemory() {};
 
     virtual void
-    DisableForceInMemory(){};
+    DisableForceInMemory() {};
 
 public:
     InnerIdType total_count_{0};

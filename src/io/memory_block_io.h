@@ -41,10 +41,10 @@ public:
     }
 
     explicit MemoryBlockIO(const MemoryBlockIOParamPtr& param, const IndexCommonParam& common_param)
-        : MemoryBlockIO(common_param.allocator_.get(), param->block_size_){};
+        : MemoryBlockIO(common_param.allocator_.get(), param->block_size_) {};
 
     explicit MemoryBlockIO(const IOParamPtr& param, const IndexCommonParam& common_param)
-        : MemoryBlockIO(std::dynamic_pointer_cast<MemoryBlockIOParameter>(param), common_param){};
+        : MemoryBlockIO(std::dynamic_pointer_cast<MemoryBlockIOParameter>(param), common_param) {};
 
     ~MemoryBlockIO() override {
         for (auto* block : blocks_) {

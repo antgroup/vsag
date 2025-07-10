@@ -29,7 +29,7 @@ public:
     using Term2ValueMap = std::unique_ptr<UnorderedMap<std::string, ValueMapPtr>>;
 
     AttributeBucketInvertedDataCell(Allocator* allocator)
-        : AttributeInvertedInterface(allocator), multi_term_2_value_map_(allocator){};
+        : AttributeInvertedInterface(allocator), multi_term_2_value_map_(allocator) {};
     ~AttributeBucketInvertedDataCell() override = default;
 
     void

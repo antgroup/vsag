@@ -24,7 +24,7 @@ namespace vsag {
 class FlattenInterfaceTest {
 public:
     FlattenInterfaceTest(FlattenInterfacePtr flatten, MetricType metric)
-        : flatten_(flatten), metric_(metric){};
+        : flatten_(flatten), metric_(metric) {};
 
     void
     BasicTest(int64_t dim, uint64_t base_count, float error = 1e-5f);
