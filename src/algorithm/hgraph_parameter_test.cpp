@@ -47,6 +47,7 @@ struct HGraphDefaultParam {
     std::string precise_codes_quantization_type = "fp32";
     int max_degree = 26;
     bool support_remove = true;
+    int remove_flag_bit = 8;
     bool use_attribute_filter = false;
     bool use_reorder = true;
     bool have_extro_info = false;
@@ -83,7 +84,8 @@ generate_hgraph_param(const HGraphDefaultParam& param) {
                 "type": "block_memory_io"
             }},
             "max_degree": {},
-            "support_remove": {}
+            "support_remove": {},
+            "remove_flag_bit": {}
         }},
         "ignore_reorder": false,
         "precise_codes": {{
@@ -110,6 +112,7 @@ generate_hgraph_param(const HGraphDefaultParam& param) {
                        param.graph_storage_type,
                        param.max_degree,
                        param.support_remove,
+                       param.remove_flag_bit,
                        param.precise_codes_io_type,
                        param.precise_codes_quantization_type,
                        param.use_attribute_filter,
@@ -133,6 +136,7 @@ TEST_CASE("HGraph Parameters CheckCompatibility", "[ut][HGraphParameter][CheckCo
     TEST_COMPATIBILITY_CASE("different graph type", graph_storage_type, "flat", "compressed", false)
     TEST_COMPATIBILITY_CASE("different max degree", max_degree, 26, 30, false)
     TEST_COMPATIBILITY_CASE("different support remove", support_remove, true, false, false)
+    TEST_COMPATIBILITY_CASE("different remove flag bit", remove_flag_bit, 8, 16, false)
     TEST_COMPATIBILITY_CASE("different use reorder", use_reorder, true, false, false)
     TEST_COMPATIBILITY_CASE("different precise codes io type",
                             precise_codes_io_type,
@@ -144,4 +148,6 @@ TEST_CASE("HGraph Parameters CheckCompatibility", "[ut][HGraphParameter][CheckCo
                             "fp32",
                             "sq8",
                             false)
+    TEST_COMPATIBILITY_CASE(
+        "different use attribute filter", use_attribute_filter, true, false, false)
 }

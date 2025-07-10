@@ -22,6 +22,8 @@
 struct PyramidDefaultParam {
     std::string odescent_io_type = "memory_io";
     int odescent_max_degree = 16;
+    bool odescent_support_remove = false;
+    int odescent_remove_flag_bit = 8;
     std::string base_codes_io_type = "memory_io";
     std::string base_codes_quantization_type = "fp32";
     std::vector<int> no_build_levels = {0, 1, 4};
@@ -38,7 +40,9 @@ generate_pyramid(const PyramidDefaultParam& param) {
                 "max_degree": {},
                 "alpha": 1.5,
                 "graph_iter_turn": 10,
-                "neighbor_sample_rate": 0.5
+                "neighbor_sample_rate": 0.5,
+                "support_remove": {},
+                "remove_flag_bit": {}
             }},
             "base_codes": {{
                 "io_params": {{
@@ -55,6 +59,8 @@ generate_pyramid(const PyramidDefaultParam& param) {
     return fmt::format(param_str,
                        param.odescent_io_type,
                        param.odescent_max_degree,
+                       param.odescent_support_remove,
+                       param.odescent_remove_flag_bit,
                        param.base_codes_io_type,
                        param.base_codes_quantization_type,
                        fmt::join(param.no_build_levels, ","));
@@ -127,6 +133,10 @@ TEST_CASE("Pyramid Parameters CheckCompatibility", "[ut][PyramidParameter][Check
     TEST_COMPATIBILITY_CASE(
         "different graph io type", odescent_io_type, "memory_io", "block_memory_io", true);
     TEST_COMPATIBILITY_CASE("different graph max_degree", odescent_max_degree, 18, 24, false);
+    TEST_COMPATIBILITY_CASE(
+        "different graph support remove", odescent_support_remove, true, false, false);
+    TEST_COMPATIBILITY_CASE(
+        "different graph remove flag bit", odescent_remove_flag_bit, 8, 4, false);
     TEST_COMPATIBILITY_CASE(
         "different base codes io type", base_codes_io_type, "memory_io", "block_memory_io", true);
     TEST_COMPATIBILITY_CASE("different base codes quantization type",

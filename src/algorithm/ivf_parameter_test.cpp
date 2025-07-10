@@ -23,12 +23,14 @@ struct IVFDefaultParam {
     std::string buckect_io_type = "block_memory_io";
     std::string bucket_quantization_type = "sq8";
     int buckets_count = 3;
+    bool use_residual = true;
     bool use_reorder = true;
     std::string precise_codes_io_type = "block_memory_io";
     std::string precise_codes_quantization_type = "fp32";
     std::string partition_strategy_type = "ivf";
     std::string ivf_train_type = "kmeans";
     int buckets_per_data = 1;
+    bool use_attribute_filter = true;
 };
 
 std::string
@@ -43,7 +45,8 @@ generate_ivf_param(const IVFDefaultParam& param) {
             "quantization_params": {{
                 "type": "{}"
             }},
-            "buckets_count": {}
+            "buckets_count": {},
+            "use_residual": {}
         }},
         "use_reorder": {},
         "partition_strategy": {{
@@ -62,18 +65,21 @@ generate_ivf_param(const IVFDefaultParam& param) {
                 "type": "{}"
             }}
         }},
-        "buckets_per_data": {}
+        "buckets_per_data": {},
+        "use_attribute_filter": {}
     }})";
     return fmt::format(param_str,
                        param.buckect_io_type,
                        param.bucket_quantization_type,
                        param.buckets_count,
+                       param.use_residual,
                        param.use_reorder,
                        param.partition_strategy_type,
                        param.ivf_train_type,
                        param.precise_codes_io_type,
                        param.precise_codes_quantization_type,
-                       param.buckets_per_data);
+                       param.buckets_per_data,
+                       param.use_attribute_filter);
 }
 
 TEST_CASE("IVF Parameters Test", "[ut][IVFParameter]") {
@@ -169,6 +175,7 @@ TEST_CASE("IVF Parameters CheckCompatibility", "[ut][IVFParameter][CheckCompatib
         "ivf bucket io type", buckect_io_type, "block_memory_io", "memory_io", true);
     TEST_COMPATIBILITY_CASE(
         "ivf bucket quantization type", bucket_quantization_type, "sq8", "fp32", false);
+    TEST_COMPATIBILITY_CASE("ivf buckect use_residual", use_residual, true, false, false);
     TEST_COMPATIBILITY_CASE("ivf use_reorder", use_reorder, true, false, false);
     TEST_COMPATIBILITY_CASE(
         "ivf precise_codes io type", precise_codes_io_type, "block_memory_io", "memory_io", true);
@@ -181,4 +188,5 @@ TEST_CASE("IVF Parameters CheckCompatibility", "[ut][IVFParameter][CheckCompatib
         "ivf partition_strategy_type", partition_strategy_type, "ivf", "gno_imi", false);
     TEST_COMPATIBILITY_CASE("ivf ivf_train_type", ivf_train_type, "kmeans", "random", true);
     TEST_COMPATIBILITY_CASE("ivf buckets_per_data", buckets_per_data, 3, 2, false);
+    TEST_COMPATIBILITY_CASE("ivf use_attribute_filter", use_attribute_filter, true, false, false);
 }

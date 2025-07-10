@@ -81,12 +81,6 @@ IVFPartitionStrategyParameters::CheckCompatibility(const ParamPtr& other) const 
             "IVFPartitionStrategyParameters");
         return false;
     }
-    if (this->partition_strategy_type != ivf_partition_param->partition_strategy_type) {
-        logger::error(
-            "IVFPartitionStrategyParameters::CheckCompatibility: partition strategy type is not "
-            "compatible");
-        return false;
-    }
     return this->gnoimi_param->CheckCompatibility(ivf_partition_param->gnoimi_param);
 }
 
