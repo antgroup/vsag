@@ -77,7 +77,7 @@ GetFHTRotate() {
 #endif
     } else if (SimdStatus::SupportNEON()) {
 #if defined(ENABLE_NEON)
-        return neno::FHTRotate;
+        return neon::FHTRotate;
 #endif
     }
     return generic::FHTRotate;
@@ -103,7 +103,7 @@ GetKacsWalk() {
 #endif
     } else if (SimdStatus::SupportNEON()) {
 #if defined(ENABLE_NEON)
-        return neno::KacsWalk;
+        return neon::KacsWalk;
 #endif
     }
     return generic::KacsWalk;
@@ -129,7 +129,7 @@ GetVecRescale() {
 #endif
     } else if (SimdStatus::SupportNEON()) {
 #if defined(ENABLE_NEON)
-        return neno::VecRescale;
+        return neon::VecRescale;
 #endif
     }
     return generic::VecRescale;
@@ -165,7 +165,7 @@ GetRotateOp() {
 #endif
     } else if (SimdStatus::SupportNEON()) {
 #if defined(ENABLE_NEON)
-        return neno::RotateOp;
+        return neon::RotateOp;
 #endif
     }
     return generic::RotateOp;
