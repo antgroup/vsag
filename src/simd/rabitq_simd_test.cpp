@@ -178,15 +178,16 @@ TEST_CASE("SIMD test for rescale", "[ut][simd]") {
         avx_datas.assign(gt.begin(), gt.end());
         std::vector<float> sse_datas(gt.size());
         sse_datas.assign(gt.begin(), gt.end());
-        std::vector<float> neno_datas(gt.size());
-        neno_datas.assign(gt.begin(), gt.end());
+        std::vector<float> neon_datas(gt.size());
+        neon_datas.assign(gt.begin(), gt.end());
+
         for (int i = 0; i < count; i++) {
             auto* gt_data = gt.data() + i * dim;
             auto* avx512_data = avx512_datas.data() + i * dim;
             auto* avx2_data = avx2_datas.data() + i * dim;
             auto* avx_data = avx_datas.data() + i * dim;
             auto* sse_data = sse_datas.data() + i * dim;
-            auto * neno_data = neno_datas.data() + i * dim;
+            auto * neon_data = neon_datas.data() + i * dim;
 
             const float delta = 1e-5;
             generic::VecRescale(gt_data, dim, 0.5);
@@ -215,9 +216,9 @@ TEST_CASE("SIMD test for rescale", "[ut][simd]") {
                 }
             }
             if (SimdStatus::SupportNEON()){
-                neno::VecRescale(sse_data, dim, 0.5);
+                neon::VecRescale(neon_data, dim, 0.5);
                 for(int i = 0; i < dim; i++){
-                    REQUIRE(gt_data[i] - neno_data[i] < delta);
+                    REQUIRE(gt_data[i] - neon_data[i] < delta);
                 }
             }
         }
@@ -238,8 +239,8 @@ TEST_CASE("SIMD test for kacs_walk", "[ut][simd]") {
         avx_datas.assign(gt.begin(), gt.end());
         std::vector<float> sse_datas(gt.size());
         sse_datas.assign(gt.begin(), gt.end());
-        std::vector<float> neno_datas(gt.size());
-        neno_datas.assign(gt.begin(), gt.end());
+        std::vector<float> neon_datas(gt.size());
+        neon_datas.assign(gt.begin(), gt.end());
 
         const float delta = 1e-5;
         for (int i = 0; i < count; i++) {
@@ -274,10 +275,10 @@ TEST_CASE("SIMD test for kacs_walk", "[ut][simd]") {
                 }
             }
             if (SimdStatus::SupportNEON()){
-                auto * neno_data = neno_datas.data() + i * dim;
-                neno::KacsWalk(sse_data, dim);
+                auto * neon_data = neon_datas.data() + i * dim;
+                neon::KacsWalk(neon_data, dim);
                 for(int i = 0; i < dim; i++){
-                    REQUIRE(gt_data[i] - neno_data[i] < delta);
+                    REQUIRE(gt_data[i] - neon_data[i] < delta);
                 }
             }
         }
@@ -298,8 +299,8 @@ TEST_CASE("SIMD test for rotate", "[ut][simd]") {
         avx_datas.assign(gt.begin(), gt.end());
         std::vector<float> sse_datas(gt.size());
         sse_datas.assign(gt.begin(), gt.end());
-        std::vector<float> neno_datas(gt.size());
-        neno_datas.assign(gt.begin(), gt.end());
+        std::vector<float> neon_datas(gt.size());
+        neon_datas.assign(gt.begin(), gt.end());
 
         const float delta = 1e-5;
         for (int i = 0; i < count; i++) {
@@ -348,11 +349,11 @@ TEST_CASE("SIMD test for rotate", "[ut][simd]") {
                 }
             }
             if (SimdStatus::SupportNEON()){
-                auto * neno_data = neno_datas.data() + i * dim;
-                sse::FHTRotate(neno_data, trunc_dim);
-                sse::FHTRotate(neno_data + start, trunc_dim);
+                auto * neon_data = neon_datas.data() + i * dim;
+                neon::FHTRotate(neon_data, trunc_dim);
+                neon::FHTRotate(neon_data + start, trunc_dim);
                 for(int i = 0; i < dim; i++){
-                    REQUIRE(gt_data[i] - neno_data[i] < delta);
+                    REQUIRE(gt_data[i] - neon_data[i] < delta);
                 }
             }
         }
