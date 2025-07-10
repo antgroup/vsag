@@ -57,6 +57,7 @@ public:
             logger::error(
                 "SparseVectorDataCellParameter::CheckCompatibility: "
                 "other parameter is not SparseVectorDataCellParameter");
+            return false;
         }
         return this->quantizer_parameter->CheckCompatibility(sparse_param->quantizer_parameter);
     }
