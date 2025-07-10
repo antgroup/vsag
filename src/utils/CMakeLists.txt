@@ -6,6 +6,7 @@ set (UTILS_SRC
         slow_task_timer.cpp
         timer.cpp
         window_result_queue.cpp
+        sparse_vector_transform.cpp
 )
 
 add_library (utils OBJECT ${UTILS_SRC})

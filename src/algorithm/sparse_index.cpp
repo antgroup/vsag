@@ -120,12 +120,7 @@ SparseIndex::KnnSearch(const DatasetPtr& query,
 
     auto [sorted_ids, sorted_vals] = sort_sparse_vector(sparse_vectors[0]);
     for (int j = 0; j < cur_element_count_; ++j) {
-        auto distance = get_distance(sorted_ids.size(),
-                                     sorted_ids.data(),
-                                     sorted_vals.data(),
-                                     datas_[j][0],
-                                     datas_[j] + 1,
-                                     (float*)(datas_[j] + 1 + datas_[j][0]));
+        auto distance = CalDistanceByIdUnsafe(sorted_ids, sorted_vals, j);
         auto label = label_table_->GetLabelById(j);
         if (not filter || filter->CheckValid(label)) {
             results->Push(distance, label);
@@ -149,12 +144,7 @@ SparseIndex::RangeSearch(const DatasetPtr& query,
     auto results = std::make_shared<StandardHeap<true, false>>(allocator_, -1);
     auto [sorted_ids, sorted_vals] = sort_sparse_vector(sparse_vectors[0]);
     for (int j = 0; j < cur_element_count_; ++j) {
-        auto distance = get_distance(sorted_ids.size(),
-                                     sorted_ids.data(),
-                                     sorted_vals.data(),
-                                     datas_[j][0],
-                                     datas_[j] + 1,
-                                     (float*)(datas_[j] + 1 + datas_[j][0]));
+        auto distance = CalDistanceByIdUnsafe(sorted_ids, sorted_vals, j);
         auto label = label_table_->GetLabelById(j);
         if ((not filter || filter->CheckValid(label)) && distance <= radius + 2e-6) {
             results->Push(distance, label);
@@ -184,6 +174,18 @@ SparseIndex::collect_results(const DistHeapPtr& results) const {
         results->Pop();
     }
     return result;
+}
+
+float
+SparseIndex::CalDistanceByIdUnsafe(Vector<uint32_t>& sorted_ids,
+                                   Vector<float>& sorted_vals,
+                                   uint32_t inner_id) const {
+    return get_distance(sorted_ids.size(),
+                        sorted_ids.data(),
+                        sorted_vals.data(),
+                        datas_[inner_id][0],
+                        datas_[inner_id] + 1,
+                        (float*)(datas_[inner_id] + 1 + datas_[inner_id][0]));
 }
 
 }  // namespace vsag
