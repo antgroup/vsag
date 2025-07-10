@@ -142,7 +142,7 @@ IntegerListExecutor::RunWithBucket(BucketIdType bucket_id) {
     if (this->is_not_in_) {
         this->bitset_->Not();
     }
-    this->filter_ = std::make_shared<WhiteListFilter>(this->bitset_);
+    WhiteListFilter::TryToUpdate(this->filter_, this->bitset_);
     return this->filter_;
 }
 
