@@ -160,10 +160,6 @@ HGraphParameter::ToJson() const {
 
 bool
 HGraphParameter::CheckCompatibility(const ParamPtr& other) const {
-    if (other == nullptr) {
-        logger::error("HGraphParameter::CheckCompatibility: other is nullptr");
-        return false;
-    }
     auto hgraph_param = std::dynamic_pointer_cast<HGraphParameter>(other);
     if (hgraph_param == nullptr) {
         logger::error("HGraphParameter::CheckCompatibility: other is not HGraphParameter");
@@ -189,12 +185,6 @@ HGraphParameter::CheckCompatibility(const ParamPtr& other) const {
     }
     if (not this->bottom_graph_param->CheckCompatibility(hgraph_param->bottom_graph_param)) {
         logger::error("HGraphParameter::CheckCompatibility: bottom_graph_param is not compatible");
-        return false;
-    }
-    if (not this->hierarchical_graph_param->CheckCompatibility(
-            hgraph_param->hierarchical_graph_param)) {
-        logger::error(
-            "HGraphParameter::CheckCompatibility: hierarchical_graph_param is not compatible");
         return false;
     }
     if (use_attribute_filter != hgraph_param->use_attribute_filter) {
