@@ -25,6 +25,7 @@
 #include "algorithm/pyramid.h"
 #include "algorithm/pyramid_zparameters.h"
 #include "algorithm/sparse_index.h"
+#include "algorithm/sparse_term_index/sparse_term_index.h"
 #include "common.h"
 #include "index/diskann.h"
 #include "index/diskann_zparameters.h"
@@ -138,6 +139,14 @@ Engine::CreateIndex(const std::string& origin_name, const std::string& parameter
             }
             auto sparse_index =
                 std::make_shared<IndexImpl<SparseIndex>>(sparse_json, index_common_params);
+            return sparse_index;
+        } else if (name == INDEX_SPARSE_TERM) {
+            JsonType sparse_json;
+            if (parsed_params.contains(INDEX_PARAM)) {
+                sparse_json = std::move(parsed_params[INDEX_PARAM]);
+            }
+            auto sparse_index =
+                std::make_shared<IndexImpl<SparseTermIndex>>(sparse_json, index_common_params);
             return sparse_index;
         } else {
             LOG_ERROR_AND_RETURNS(

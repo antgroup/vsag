@@ -1,0 +1,114 @@
+
+// Copyright 2024-present the vsag project
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+#pragma once
+
+#include <cstdint>
+#include <memory>
+
+#include "metric_type.h"
+#include "utils/sparse_vector_transform.h"
+
+namespace vsag {
+
+static constexpr int INVALID_TERM = -1;
+
+class SparseTermComputer {
+public:
+    ~SparseTermComputer() {
+    }
+
+    explicit SparseTermComputer(float query_prune_ratio = 0, Allocator* allocator = nullptr)
+        : sorted_query_(allocator), id2pos_map_(allocator), query_prune_ratio_(query_prune_ratio) {
+    }
+
+    void
+    SetQuery(const SparseVector& sparse_query) {
+        sort_sparse_vector(sparse_query, sorted_query_);
+
+        pruned_len_ = (uint32_t)(query_prune_ratio_ * sparse_query.len_);
+        if (pruned_len_ == 0) {
+            if (sorted_query_.size() != 0) {
+                pruned_len_ = 1;
+            }
+        }
+
+        for (auto i = 0; i < sorted_query_.size(); i++) {
+            id2pos_map_[sorted_query_[i].first] = i;
+            sorted_query_[i].second *= -1;  // note that: dist_ip = -1 * query * base
+        }
+    }
+
+    inline void
+    ScanForAccumulate(uint32_t id,
+                      const uint32_t* term_ids,
+                      const float* term_datas,
+                      uint32_t term_count,
+                      float* global_dists) {
+        float query_val = sorted_query_[id2pos_map_[id]].second;
+        for (auto i = 0; i < term_count; i++) {
+            global_dists[term_ids[i]] += query_val * term_datas[i];
+        }
+    }
+
+    //    inline void
+    //    ScanForReduction(uint32_t id, const uint32_t* term_id, const float* term_data, uint32_t term_count,
+    //                     float* local_dists, float* global_dists) {
+    //        float query_val = sorted_query_[id2pos_map_[id]].second;
+    //        for (auto i = 0; i < term_count; i++) {
+    //
+    //        }
+    //    }
+
+    inline bool
+    HasNextTerm() {
+        return term_iterator_ < pruned_len_;
+    }
+
+    inline uint32_t
+    NextTerm() {
+        return HasNextTerm() ? sorted_query_[term_iterator_++].first : INVALID_TERM;
+    }
+
+    inline void
+    ResetTerm() {
+        term_iterator_ = 0;
+    }
+
+    inline void
+    ScanForCompute(uint32_t id, const float* term_datas, uint32_t term_count, float* local_dists) {
+        float query_val = sorted_query_[id2pos_map_[id]].second;
+        for (auto i = 0; i < term_count; i++) {
+            local_dists[i] = query_val * term_datas[i];
+        }
+    }
+
+public:
+    Vector<std::pair<uint32_t, float>> sorted_query_;
+
+    UnorderedMap<uint32_t, uint32_t> id2pos_map_;
+
+    float query_prune_ratio_{0};
+
+    uint32_t pruned_len_{0};
+
+    uint32_t term_iterator_{0};
+
+    Allocator* const allocator_{nullptr};
+};
+
+using SparseTermComputerPtr = std::shared_ptr<SparseTermComputer>;
+
+}  // namespace vsag

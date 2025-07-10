@@ -1,0 +1,149 @@
+
+// Copyright 2024-present the vsag project
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+#include <vsag/vsag.h>
+
+#include <iostream>
+#include <unordered_set>
+
+float
+compute_recall(vsag::DatasetPtr global, vsag::DatasetPtr local, int k) {
+    std::unordered_set<int64_t> global_set;
+    std::unordered_set<int64_t> local_set;
+    float recall = 0;
+
+    for (auto i = 0; i < global->GetDim(); ++i) {
+        global_set.insert(global->GetIds()[i]);
+    }
+
+    for (auto i = 0; i < local->GetDim(); ++i) {
+        auto id = local->GetIds()[i];
+        if (global_set.count(id) != 0) {
+            recall += 1;
+        }
+    }
+    return recall / (float)k;
+}
+
+std::vector<vsag::SparseVector>
+GenerateSparseVectors(
+    uint32_t count, uint32_t max_dim, uint32_t max_id, float min_val, float max_val, int seed) {
+    std::mt19937 rng(seed);
+    std::uniform_real_distribution<float> distrib_real(min_val, max_val);
+    std::uniform_int_distribution<int> distrib_dim(max_dim / 2, max_dim);
+    std::uniform_int_distribution<int> distrib_id(0, max_id);
+
+    std::vector<vsag::SparseVector> sparse_vectors(count);
+    if (max_dim > max_id) {
+        throw std::runtime_error("generate sparse vectors failed, max_dim > max_id");
+    }
+
+    for (int i = 0; i < count; i++) {
+        sparse_vectors[i].len_ = distrib_dim(rng);
+        sparse_vectors[i].ids_ = new uint32_t[sparse_vectors[i].len_];
+        sparse_vectors[i].vals_ = new float[sparse_vectors[i].len_];
+        std::unordered_set<uint32_t> unique_ids;
+        for (int d = 0; d < sparse_vectors[i].len_; d++) {
+            auto u_id = distrib_id(rng);
+            while (unique_ids.count(u_id) > 0) {
+                u_id = distrib_id(rng);
+            }
+            unique_ids.insert(u_id);
+            sparse_vectors[i].ids_[d] = u_id;
+            sparse_vectors[i].vals_[d] = distrib_real(rng);
+        }
+    }
+
+    return sparse_vectors;
+}
+
+int
+main(int argc, char** argv) {
+    vsag::init();
+
+    /******************* Prepare Base and Query Dataset *****************/
+    int64_t num_base = 10000;
+    int64_t max_dim = 128;
+    int64_t max_id = 10000;
+    float min_val = 0;
+    float max_val = 10;
+    int seed_base = 114;
+    int seed_query = 514;
+    int64_t k = 10;
+
+    std::vector<int64_t> ids(num_base);
+    for (int64_t i = 0; i < num_base; ++i) {
+        ids[i] = i;
+    }
+
+    auto sv_base = GenerateSparseVectors(num_base, max_dim, max_id, min_val, max_val, seed_base);
+    auto base = vsag::Dataset::Make();
+    base->NumElements(num_base)->SparseVectors(sv_base.data())->Ids(ids.data())->Owner(false);
+
+    auto sv_query = GenerateSparseVectors(1, max_dim / 2, max_id, min_val, max_val, seed_query);
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)->SparseVectors(sv_query.data())->Owner(false);
+
+    /******************* Create Index *****************/
+    std::string build_params = R"(
+    {
+        "dtype": "sparse",
+        "dim": 128,
+        "metric_type": "ip",
+        "index_param": {
+            "use_reorder": true,
+            "query_prune_ratio": 1,
+            "doc_prune_ratio": 1,
+            "term_prune_ratio": 0.9,
+            "window_size": 1000,
+            "need_sort": true
+        }
+    }
+    )";
+
+    auto bf_index = vsag::Factory::CreateIndex("sparse_index", build_params).value();
+    bf_index->Build(base);
+    auto gt_result = bf_index->KnnSearch(query, k, "").value();
+
+    auto index = vsag::Factory::CreateIndex("sparse_term_index", build_params).value();
+
+    /******************* Build Index *****************/
+    if (auto build_result = index->Add(base); build_result.has_value()) {
+        std::cout << "After Build(), Sparse Term Index contains: " << index->GetNumElements()
+                  << std::endl;
+    } else if (build_result.error().type == vsag::ErrorType::INTERNAL_ERROR) {
+        std::cerr << "Failed to build index: internalError" << std::endl;
+        exit(-1);
+    }
+
+    /******************* KnnSearch *****************/
+    std::string search_params = R"(
+    {
+        "n_candidate": 20
+    }
+    )";
+    auto result = index->KnnSearch(query, k, search_params).value();
+
+    /******************* Print Search Result *****************/
+    std::cout << "results: " << std::endl;
+    for (int64_t i = 0; i < result->GetDim(); ++i) {
+        std::cout << result->GetIds()[i] << ": " << result->GetDistances()[i] << std::endl;
+    }
+
+    float recall = compute_recall(gt_result, result, k);
+    std::cout << "recall: " << recall << std::endl;
+
+    return 0;
+}

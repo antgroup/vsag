@@ -75,6 +75,15 @@ const char* const PRODUCT_QUANTIZATION_DIM = "pq_dim";
 const char* const PRODUCT_QUANTIZATION_BITS = "pq_bits";
 const char* const USE_FHT = "use_fht";
 
+// sparse index param
+const char* const SPARSE_NEED_SORT = "need_sort";
+const char* const SPARSE_QUERY_PRUNE_RATIO = "query_prune_ratio";
+const char* const SPARSE_DOC_PRUNE_RATIO = "doc_prune_ratio";
+const char* const SPARSE_TERM_PRUNE_RATIO = "term_prune_ratio";
+const char* const SPARSE_WINDOW_SIZE = "window_size";
+const char* const SPARSE_USE_REORDER = "use_reorder";
+const char* const SPARSE_N_CANDIDATE = "n_candidate";
+
 // graph param value
 const char* const GRAPH_PARAM_MAX_DEGREE = "max_degree";
 const char* const GRAPH_PARAM_INIT_MAX_CAPACITY = "init_capacity";
@@ -83,7 +92,6 @@ const char* const BUILD_PARAMS_KEY = "build_params";
 const char* const BUILD_THREAD_COUNT = "build_thread_count";
 const char* const BUILD_EF_CONSTRUCTION = "ef_construction";
 
-const char* const SPARSE_NEED_SORT = "need_sort";
 const char* const GRAPH_TYPE_KEY = "graph_type";
 
 const char* const GRAPH_STORAGE_TYPE_KEY = "graph_storage_type";
