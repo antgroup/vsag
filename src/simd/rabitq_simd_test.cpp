@@ -178,12 +178,15 @@ TEST_CASE("SIMD test for rescale", "[ut][simd]") {
         avx_datas.assign(gt.begin(), gt.end());
         std::vector<float> sse_datas(gt.size());
         sse_datas.assign(gt.begin(), gt.end());
+        std::vector<float> neno_datas(gt.size());
+        neno_datas.assign(gt.begin(), gt.end());
         for (int i = 0; i < count; i++) {
             auto* gt_data = gt.data() + i * dim;
             auto* avx512_data = avx512_datas.data() + i * dim;
             auto* avx2_data = avx2_datas.data() + i * dim;
             auto* avx_data = avx_datas.data() + i * dim;
             auto* sse_data = sse_datas.data() + i * dim;
+            auto * neno_data = neno_datas.data() + i * dim;
 
             const float delta = 1e-5;
             generic::VecRescale(gt_data, dim, 0.5);
@@ -211,6 +214,12 @@ TEST_CASE("SIMD test for rescale", "[ut][simd]") {
                     REQUIRE(gt_data[i] - sse_data[i] < delta);
                 }
             }
+            if (SimdStatus::SupportNEON()){
+                neno::VecRescale(sse_data, dim, 0.5);
+                for(int i = 0; i < dim; i++){
+                    REQUIRE(gt_data[i] - neno_data[i] < delta);
+                }
+            }
         }
     }
 }
@@ -229,6 +238,8 @@ TEST_CASE("SIMD test for kacs_walk", "[ut][simd]") {
         avx_datas.assign(gt.begin(), gt.end());
         std::vector<float> sse_datas(gt.size());
         sse_datas.assign(gt.begin(), gt.end());
+        std::vector<float> neno_datas(gt.size());
+        neno_datas.assign(gt.begin(), gt.end());
 
         const float delta = 1e-5;
         for (int i = 0; i < count; i++) {
@@ -262,6 +273,13 @@ TEST_CASE("SIMD test for kacs_walk", "[ut][simd]") {
                     REQUIRE(gt_data[i] - sse_data[i] < delta);
                 }
             }
+            if (SimdStatus::SupportNEON()){
+                auto * neno_data = neno_datas.data() + i * dim;
+                neno::KacsWalk(sse_data, dim);
+                for(int i = 0; i < dim; i++){
+                    REQUIRE(gt_data[i] - neno_data[i] < delta);
+                }
+            }
         }
     }
 }
@@ -280,6 +298,8 @@ TEST_CASE("SIMD test for rotate", "[ut][simd]") {
         avx_datas.assign(gt.begin(), gt.end());
         std::vector<float> sse_datas(gt.size());
         sse_datas.assign(gt.begin(), gt.end());
+        std::vector<float> neno_datas(gt.size());
+        neno_datas.assign(gt.begin(), gt.end());
 
         const float delta = 1e-5;
         for (int i = 0; i < count; i++) {
@@ -325,6 +345,14 @@ TEST_CASE("SIMD test for rotate", "[ut][simd]") {
                 sse::FHTRotate(sse_data + start, trunc_dim);
                 for (int i = 0; i < dim; i++) {
                     REQUIRE(gt_data[i] - sse_data[i] < delta);
+                }
+            }
+            if (SimdStatus::SupportNEON()){
+                auto * neno_data = neno_datas.data() + i * dim;
+                sse::FHTRotate(neno_data, trunc_dim);
+                sse::FHTRotate(neno_data + start, trunc_dim);
+                for(int i = 0; i < dim; i++){
+                    REQUIRE(gt_data[i] - neno_data[i] < delta);
                 }
             }
         }

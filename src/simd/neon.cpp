@@ -1307,4 +1307,90 @@ BitNot(const uint8_t* x, const uint64_t num_byte, uint8_t* result) {
 #endif
 }
 
+void RotateOp(float* data, int idx, int dim_, int step) {
+#if defined(ENABLE_NEON)
+    for (int i = idx; i < dim_; i += step * 2) {
+        for (int j = 0; j < step; j += 4) {
+            float32x4_t g1 = vld1q_f32(&data[i + j]);
+            float32x4_t g2 = vld1q_f32(&data[i + j + step]);
+            float32x4_t sum = vaddq_f32(g1, g2);
+            float32x4_t diff = vsubq_f32(g1, g2);
+            vst1q_f32(&data[i + j], sum);
+            vst1q_f32(&data[i + j + step], diff);
+        }
+    }
+#else
+    return generic::RotateOp(data, idx, dim_, step);
+#endif
+}
+
+void
+FHTRotate(float* data, size_t dim_) {
+#if defined(ENABLE_NEON)
+    size_t n = dim_;
+    size_t step = 1;
+    while (step < n) {
+        if(step >= 4){
+            neno::RotateOp(data, 0, dim_, step);
+        } else {
+            generic::RotateOp(data, 0, dim_, step);
+        }
+        step *= 2;
+    }
+#else
+    return generic::FHTRotate(data, dim_);
+#endif
+}
+
+void
+VecRescale(float* data, size_t dim, float val) {
+#if defined(ENABLE_NEON)
+    size_t i = 0;
+    float32x4_t val_vec = vdupq_n_f32(val);
+    for(; i + 4 <= dim; i += 4){
+        float32x4_t data_vec = vld1q_f32(&data[i]);
+        float32x4_t result_vec = vmulq_f32(data_vec, val_vec);
+        vst1q_f32(&data[i], result_vec);
+    }
+
+    for (; i < dim; i++) {
+        data[i] *= val;
+    }
+#else
+    generic::VecRescale(data, dim, val);
+#endif
+}
+
+void
+KacsWalk(float* data, size_t len) {
+#if defined(ENABLE_NEON)
+    size_t base = len % 2;
+    size_t offset = base + (len / 2);  // for odd dim
+    size_t i = 0;
+
+    for(; i + 4 < len / 2; i += 4){
+        float32x4_t x = vld1q_f32(&data[i]);
+        float32x4_t y = vld1q_f32(&data[i + offset]);
+
+        float32x4_t add = vaddq_f32(x, y);
+        float32x4_t sub = vsubq_f32(x, y);
+
+        vst1q_f32(&data[i], add);
+        vst1q_f32(&data[i + offset], sub);
+    }
+
+    for (; i < len / 2; i++) {
+        float add = data[i] + data[i + offset];
+        float sub = data[i] - data[i + offset];
+        data[i] = add;
+        data[i + offset] = sub;
+    }
+
+    if (base != 0 && len > 0) {
+        data[len / 2] *= std::sqrt(2.0F);
+    }
+#else 
+    generic::KacsWalk(data, len);
+#endif
+}
 }  // namespace vsag::neon

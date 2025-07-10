@@ -75,6 +75,10 @@ GetFHTRotate() {
 #if defined(ENABLE_SSE)
         return sse::FHTRotate;
 #endif
+    } else if (SimdStatus::SupportNEON()){
+#if defined(ENABLE_NEON)
+        return neno::FHTRotate;
+#endif
     }
     return generic::FHTRotate;
 }
@@ -97,6 +101,10 @@ GetKacsWalk() {
 #if defined(ENABLE_SSE)
         return sse::KacsWalk;
 #endif
+    } else if (SimdStatus::SupportNEON()){
+#if defined(ENABLE_NEON)
+        return neno::KacsWalk;
+#endif
     }
     return generic::KacsWalk;
 }
@@ -118,6 +126,10 @@ GetVecRescale() {
     } else if (SimdStatus::SupportSSE()) {
 #if defined(ENABLE_SSE)
         return sse::VecRescale;
+#endif
+    } else if (SimdStatus::SupportNEON()){
+#if defined(ENABLE_NEON)
+    return neno::VecRescale;
 #endif
     }
     return generic::VecRescale;
@@ -150,6 +162,10 @@ GetRotateOp() {
     } else if (SimdStatus::SupportSSE()) {
 #if defined(ENABLE_SSE)
         return sse::RotateOp;
+#endif
+    } else if (SimdStatus::SupportNEON()){
+#if defined(ENABLE_NEON)
+    return neno::RotateOp;
 #endif
     }
     return generic::RotateOp;
