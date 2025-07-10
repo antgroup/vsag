@@ -161,9 +161,9 @@ SparseGraphDataCell::DeleteNeighborsById(vsag::InnerIdType id) {
         auto iter = node_version_.find(id);
         if (iter != node_version_.end()) {
             if (iter->second + 1 == 0) {
-                throw VsagException(
-                    ErrorType::INTERNAL_ERROR,
-                    "remove point too many times in SparseGraphDatacell, please rebuild index");
+                throw VsagException(ErrorType::INTERNAL_ERROR,
+                                    "remove point too many times in "
+                                    "SparseGraphDatacell, please rebuild index");
             }
             iter.value()++;
         }

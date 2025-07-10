@@ -251,7 +251,8 @@ TEST_CASE("RaBitQ Query SQ4 Transform dim=15", "[ut][RaBitQuantizer]") {
         dim, dim, num_bits_per_dim_query, use_fht, false, allocator.get());
 
     std::vector<float> original_data = {1, 2, 4, 8, 0, 3, 11, 15, 9, 13, 10, 6, 7, 12, 14};
-    // input  [0010 0001, 1000 0100, 0011 0000, 1111 1011, 1101 1001, 0110 1010, 1100 0111, 0000 1110]
+    // input  [0010 0001, 1000 0100, 0011 0000, 1111 1011, 1101 1001, 0110 1010,
+    // 1100 0111, 0000 1110]
     std::vector<uint8_t> input = {0x21, 0x84, 0x30, 0xfb, 0xd9, 0x6a, 0xc7, 0x0e};
     std::vector<uint8_t> sq_data(dim + 4 + 4, 0);
 

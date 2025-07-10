@@ -50,7 +50,8 @@ InnerProductDistance(const void* pVect1, const void* pVect2, const void* qty_ptr
 
 float
 INT8InnerProduct(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
-    return sse::INT8InnerProduct(pVect1v, pVect2v, qty_ptr);  // TODO(LHT): implement
+    return sse::INT8InnerProduct(pVect1v, pVect2v,
+                                 qty_ptr);  // TODO(LHT): implement
 }
 
 float
@@ -602,7 +603,8 @@ SQ8ComputeL2Sqr(const float* RESTRICT query,
     result += sse::SQ8ComputeL2Sqr(query + i, codes + i, lower_bound + i, diff + i, dim - i);
     return result;
 #else
-    return vsag::sse::SQ8ComputeL2Sqr(query, codes, lower_bound, diff, dim);  // TODO
+    return vsag::sse::SQ8ComputeL2Sqr(query, codes, lower_bound, diff,
+                                      dim);  // TODO
 #endif
 }
 
@@ -736,7 +738,8 @@ SQ4UniformComputeCodesIP(const uint8_t* RESTRICT codes1,
                          const uint8_t* RESTRICT codes2,
                          uint64_t dim) {
 #if defined(ENABLE_AVX)
-    return sse::SQ4UniformComputeCodesIP(codes1, codes2, dim);  // TODO(LHT): implement
+    return sse::SQ4UniformComputeCodesIP(codes1, codes2,
+                                         dim);  // TODO(LHT): implement
 #else
     return sse::SQ4UniformComputeCodesIP(codes1, codes2, dim);
 #endif
@@ -747,7 +750,8 @@ SQ8UniformComputeCodesIP(const uint8_t* RESTRICT codes1,
                          const uint8_t* RESTRICT codes2,
                          uint64_t dim) {
 #if defined(ENABLE_AVX)
-    return sse::SQ8UniformComputeCodesIP(codes1, codes2, dim);  // TODO(LHT): implement
+    return sse::SQ8UniformComputeCodesIP(codes1, codes2,
+                                         dim);  // TODO(LHT): implement
 #else
     return sse::SQ8UniformComputeCodesIP(codes1, codes2, dim);
 #endif

@@ -97,10 +97,11 @@ generate_build_parameters(std::string metric_type,
             return std::tolower(c);
         });
     if (metric_type != "l2" and metric_type != "ip" and metric_type != "cosine") {
-        return tl::unexpected(Error(
-            ErrorType::INVALID_ARGUMENT,
-            fmt::format("failed to generate build parameter: metric_type({}) is not in [l2, ip]",
-                        metric_type)));
+        return tl::unexpected(
+            Error(ErrorType::INVALID_ARGUMENT,
+                  fmt::format("failed to generate build parameter: metric_type({}) "
+                              "is not in [l2, ip]",
+                              metric_type)));
     }
 
     // check dimension
@@ -132,11 +133,11 @@ generate_build_parameters(std::string metric_type,
         return parameter_string(
             metric_type, dim, 48, 500, 48, 500, pq_dims, 0.1, use_conjugate_graph);
     }
-    return tl::unexpected(Error(
-        ErrorType::INVALID_ARGUMENT,
-        fmt::format("failed to generate build parameter: unsupported num_elements({}) or dim({})",
-                    num_elements,
-                    dim)));
+    return tl::unexpected(Error(ErrorType::INVALID_ARGUMENT,
+                                fmt::format("failed to generate build parameter: unsupported "
+                                            "num_elements({}) or dim({})",
+                                            num_elements,
+                                            dim)));
 }
 tl::expected<float, Error>
 estimate_search_time(const std::string& index_name,

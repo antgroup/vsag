@@ -90,7 +90,8 @@ main() {
         auto index = vsag::Factory::CreateIndex("hnsw", paramesters);
     }
 
-    /******************* Customized Logger (e.g., denoted by [mylogger]::[debug]) *****************/
+    /******************* Customized Logger (e.g., denoted by [mylogger]::[debug])
+   * *****************/
     MyLogger logger;
     vsag::Options::Instance().set_logger(&logger);
     vsag::Options::Instance().logger()->SetLevel(vsag::Logger::kDEBUG);

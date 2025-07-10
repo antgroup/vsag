@@ -415,7 +415,8 @@ TEST_CASE("Roaring Bitmap Test", "[ut][bitset]") {
     r1.setCopyOnWrite(true);
 
     uint32_t compact_size = r1.getSizeInBytes();
-    // std::cout << "size before run optimize " << size << " bytes, and after " << compact_size
+    // std::cout << "size before run optimize " << size << " bytes, and after " <<
+    // compact_size
     //           << " bytes." << std::endl;
 
     // create a new bitmap with varargs

@@ -41,24 +41,24 @@ public:
     ~Quantizer() = default;
 
     /**
-     * @brief Trains the model using the provided data.
-     *
-     * @param data Pointer to the input data.
-     * @param count The number of elements in the data array.
-     * @return True if training was successful; False otherwise.
-     */
+   * @brief Trains the model using the provided data.
+   *
+   * @param data Pointer to the input data.
+   * @param count The number of elements in the data array.
+   * @return True if training was successful; False otherwise.
+   */
     bool
     Train(const DataType* data, uint64_t count) {
         return cast().TrainImpl(data, count);
     }
 
     /**
-     * @brief Re-Train the model using the provided data.
-     *
-     * @param data Pointer to the input data.
-     * @param count The number of elements in the data array.
-     * @return True if training was successful; False otherwise.
-     */
+   * @brief Re-Train the model using the provided data.
+   *
+   * @param data Pointer to the input data.
+   * @param count The number of elements in the data array.
+   * @return True if training was successful; False otherwise.
+   */
     bool
     ReTrain(const DataType* data, uint64_t count) {
         this->is_trained_ = false;
@@ -66,63 +66,64 @@ public:
     }
 
     /**
-     * @brief Encodes one element from the input data into a code.
-     *
-     * @param data Pointer to the input data.
-     * @param codes Output buffer where the encoded code will be stored.
-     * @return True if encoding was successful; False otherwise.
-     */
+   * @brief Encodes one element from the input data into a code.
+   *
+   * @param data Pointer to the input data.
+   * @param codes Output buffer where the encoded code will be stored.
+   * @return True if encoding was successful; False otherwise.
+   */
     bool
     EncodeOne(const DataType* data, uint8_t* codes) {
         return cast().EncodeOneImpl(data, codes);
     }
 
     /**
-     * @brief Encodes multiple elements from the input data into codes.
-     *
-     * @param data Pointer to the input data.
-     * @param codes Output buffer where the encoded codes will be stored.
-     * @param count The number of elements to encode.
-     * @return True if encoding was successful; False otherwise.
-     */
+   * @brief Encodes multiple elements from the input data into codes.
+   *
+   * @param data Pointer to the input data.
+   * @param codes Output buffer where the encoded codes will be stored.
+   * @param count The number of elements to encode.
+   * @return True if encoding was successful; False otherwise.
+   */
     bool
     EncodeBatch(const DataType* data, uint8_t* codes, uint64_t count) {
         return cast().EncodeBatchImpl(data, codes, count);
     }
 
     /**
-     * @brief Decodes an encoded code back into its original data representation.
-     *
-     * @param codes Pointer to the encoded code.
-     * @param data Output buffer where the decoded data will be stored.
-     * @return True if decoding was successful; False otherwise.
-     */
+   * @brief Decodes an encoded code back into its original data representation.
+   *
+   * @param codes Pointer to the encoded code.
+   * @param data Output buffer where the decoded data will be stored.
+   * @return True if decoding was successful; False otherwise.
+   */
     bool
     DecodeOne(const uint8_t* codes, DataType* data) {
         return cast().DecodeOneImpl(codes, data);
     }
 
     /**
-     * @brief Decodes multiple encoded codes back into their original data representations.
-     *
-     * @param codes Pointer to the encoded codes.
-     * @param data Output buffer where the decoded data will be stored.
-     * @param count The number of elements to decode.
-     * @return True if decoding was successful; False otherwise.
-     */
+   * @brief Decodes multiple encoded codes back into their original data
+   * representations.
+   *
+   * @param codes Pointer to the encoded codes.
+   * @param data Output buffer where the decoded data will be stored.
+   * @param count The number of elements to decode.
+   * @return True if decoding was successful; False otherwise.
+   */
     bool
     DecodeBatch(const uint8_t* codes, DataType* data, uint64_t count) {
         return cast().DecodeBatchImpl(codes, data, count);
     }
 
     /**
-     * @brief Compute the distance between two encoded codes.
-     *
-     * @tparam float the computed distance.
-     * @param codes1 Pointer to the first encoded code.
-     * @param codes2 Pointer to the second encoded code.
-     * @return The computed distance between the decoded data points.
-     */
+   * @brief Compute the distance between two encoded codes.
+   *
+   * @tparam float the computed distance.
+   * @param codes1 Pointer to the first encoded code.
+   * @param codes2 Pointer to the second encoded code.
+   * @return The computed distance between the decoded data points.
+   */
     inline float
     Compute(const uint8_t* codes1, const uint8_t* codes2) {
         return cast().ComputeImpl(codes1, codes2);
@@ -219,20 +220,20 @@ public:
     Unpack32(const uint8_t* packaged_codes, uint8_t* codes) const {};
 
     /**
-     * @brief Get the size of the encoded code in bytes.
-     *
-     * @return The code size in bytes.
-     */
+   * @brief Get the size of the encoded code in bytes.
+   *
+   * @return The code size in bytes.
+   */
     inline uint64_t
     GetCodeSize() const {
         return this->code_size_;
     }
 
     /**
-     * @brief Get the dimensionality of the input data.
-     *
-     * @return The dimensionality of the input data.
-     */
+   * @brief Get the dimensionality of the input data.
+   *
+   * @return The dimensionality of the input data.
+   */
     inline int
     GetDim() const {
         return this->dim_;

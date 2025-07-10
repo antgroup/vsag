@@ -35,8 +35,9 @@ Metadata::make_sure_metadata_not_null() {
        << (sec < 10 ? "0" : "") << sec;
     std::string formatted_datetime = ss.str();
 
-    // FIXME(wxyu): Index merge depends on model comparison, timestamp in footer may cause the
-    // two models not to be equal, remove this line after supporting comparing two indexes in memory
+    // FIXME(wxyu): Index merge depends on model comparison, timestamp in footer
+    // may cause the two models not to be equal, remove this line after supporting
+    // comparing two indexes in memory
     formatted_datetime = "1970-01-01 00:00:00";
 
     metadata_["_update_time"] = formatted_datetime;
@@ -93,7 +94,8 @@ Footer::Parse(StreamReader& reader) {
     return footer;
 }
 
-/* [magic (8B)] [length_of_metadata (8B)] [metadata (*B)] [checksum (4B)] [length_of_footer (8B)] [cigam (8B)] */
+/* [magic (8B)] [length_of_metadata (8B)] [metadata (*B)] [checksum (4B)]
+ * [length_of_footer (8B)] [cigam (8B)] */
 void
 Footer::Write(StreamWriter& writer) {
     uint64_t length = 0;

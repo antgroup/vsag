@@ -24,14 +24,14 @@ public:
     virtual ~ResourceObject() = default;
 
     /**
-     * @brief Reset the resource to its initial state.
-     *
-     * This pure virtual function forces derived classes to provide an
-     * implementation for resetting their specific resources. The reset
-     * operation should revert the resource to a known, initial state,
-     * freeing and reallocating memory if necessary, and ensuring that resources
-     * are ready for reuse.
-     */
+   * @brief Reset the resource to its initial state.
+   *
+   * This pure virtual function forces derived classes to provide an
+   * implementation for resetting their specific resources. The reset
+   * operation should revert the resource to a known, initial state,
+   * freeing and reallocating memory if necessary, and ensuring that resources
+   * are ready for reuse.
+   */
     virtual void
     Reset() = 0;
 };

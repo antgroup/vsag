@@ -795,7 +795,8 @@ HGraph::Serialize(StreamWriter& writer) const {
     //     if (this->extra_info_size_ > 0 && this->extra_infos_ != nullptr) {
     //         this->extra_infos_->Serialize(writer);
     //     }
-    //     if (this->use_attribute_filter_ and this->attr_filter_index_ != nullptr) {
+    //     if (this->use_attribute_filter_ and this->attr_filter_index_ !=
+    //     nullptr) {
     //         this->attr_filter_index_->Serialize(writer);
     //     }
     //     return;
@@ -859,7 +860,8 @@ HGraph::Deserialize(StreamReader& reader) {
         if (this->use_attribute_filter_ and this->attr_filter_index_ != nullptr) {
             this->attr_filter_index_->Deserialize(reader);
         }
-    } else {  // create like `else if ( ver in [v0.15, v0.17] )` here if need in the future
+    } else {  // create like `else if ( ver in [v0.15, v0.17] )` here if need in
+              // the future
         logger::debug("parse with new version format");
 
         auto metadata = footer->GetMetadata();
@@ -1173,7 +1175,8 @@ HGraph::elp_optimize() {
     param.topk = 10;
     param.is_inner_id_allowed = nullptr;
     searcher_->SetMockParameters(bottom_graph_, basic_flatten_codes_, pool_, param, dim_);
-    // TODO(ZXY): optimize PREFETCH_DEPTH_CODE and add default value for the others
+    // TODO(ZXY): optimize PREFETCH_DEPTH_CODE and add default value for the
+    // others
     optimizer_->RegisterParameter(RuntimeParameter(PREFETCH_STRIDE_CODE, 1, 10, 1));
     optimizer_->RegisterParameter(RuntimeParameter(PREFETCH_STRIDE_VISIT, 1, 10, 1));
     optimizer_->Optimize(searcher_);

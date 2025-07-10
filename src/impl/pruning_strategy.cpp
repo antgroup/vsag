@@ -71,9 +71,9 @@ mutually_connect_new_element(InnerIdType cur_c,
     const size_t max_size = graph->MaximumDegree();
     select_edges_by_heuristic(top_candidates, max_size, flatten, allocator);
     if (top_candidates->Size() > max_size) {
-        throw VsagException(
-            ErrorType::INTERNAL_ERROR,
-            "Should be not be more than max_size candidates returned by the heuristic");
+        throw VsagException(ErrorType::INTERNAL_ERROR,
+                            "Should be not be more than max_size candidates "
+                            "returned by the heuristic");
     }
 
     Vector<InnerIdType> selected_neighbors(allocator);
@@ -103,7 +103,9 @@ mutually_connect_new_element(InnerIdType cur_c,
         if (sz_link_list_other > max_size) {
             throw VsagException(ErrorType::INTERNAL_ERROR, "Bad value of sz_link_list_other");
         }
-        // If cur_c is already present in the neighboring connections of `selected_neighbors[idx]` then no need to modify any connections or run the heuristics.
+        // If cur_c is already present in the neighboring connections of
+        // `selected_neighbors[idx]` then no need to modify any connections or run
+        // the heuristics.
         if (sz_link_list_other < max_size) {
             neighbors.emplace_back(cur_c);
             graph->InsertNeighborsById(selected_neighbor, neighbors);

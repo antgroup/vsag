@@ -911,9 +911,9 @@ HNSW::feedback(const DatasetPtr& query,
 tl::expected<uint32_t, Error>
 HNSW::feedback(const DatasetPtr& result, int64_t global_optimum_tag_id, int64_t k) {
     if (not alg_hnsw_->isValidLabel(global_optimum_tag_id)) {
-        LOG_ERROR_AND_RETURNS(
-            ErrorType::INVALID_ARGUMENT,
-            "failed to feedback(invalid argument): global optimum tag id doesn't belong to index");
+        LOG_ERROR_AND_RETURNS(ErrorType::INVALID_ARGUMENT,
+                              "failed to feedback(invalid argument): global "
+                              "optimum tag id doesn't belong to index");
     }
 
     const auto* tag_ids = result->GetIds();
@@ -922,9 +922,9 @@ HNSW::feedback(const DatasetPtr& result, int64_t global_optimum_tag_id, int64_t 
 
     for (int i = 0; i < k; i++) {
         if (not alg_hnsw_->isValidLabel(tag_ids[i])) {
-            LOG_ERROR_AND_RETURNS(
-                ErrorType::INVALID_ARGUMENT,
-                "failed to feedback(invalid argument): input result don't belong to index");
+            LOG_ERROR_AND_RETURNS(ErrorType::INVALID_ARGUMENT,
+                                  "failed to feedback(invalid argument): input "
+                                  "result don't belong to index");
         }
         if (*conjugate_graph_->AddNeighbor(tag_ids[i], global_optimum_tag_id)) {
             successfully_feedback++;

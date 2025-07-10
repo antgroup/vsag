@@ -99,7 +99,8 @@ vcvt_f32_half(const uint16x4_t x) {
 
 #endif
 
-// calculate the dist between each pq kmeans centers and corresponding pq query dim value.
+// calculate the dist between each pq kmeans centers and corresponding pq query
+// dim value.
 void
 PQDistanceFloat256(const void* single_dim_centers, float single_dim_val, void* result) {
 #if defined(ENABLE_NEON)
@@ -1131,7 +1132,8 @@ SQ8UniformComputeCodesIP(const uint8_t* codes1, const uint8_t* codes2, uint64_t 
 float
 RaBitQFloatBinaryIP(const float* vector, const uint8_t* bits, uint64_t dim, float inv_sqrt_d) {
 #if defined(ENABLE_NEON)
-    return generic::RaBitQFloatBinaryIP(vector, bits, dim, inv_sqrt_d);  // TODO(zxy): implement
+    return generic::RaBitQFloatBinaryIP(vector, bits, dim,
+                                        inv_sqrt_d);  // TODO(zxy): implement
 #else
     return generic::RaBitQFloatBinaryIP(vector, bits, dim, inv_sqrt_d);
 #endif

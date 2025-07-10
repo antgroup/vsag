@@ -111,7 +111,8 @@ main(int argc, char** argv) {
     )";
     int64_t topk = 10;
 
-    /******************* KnnSearch For HGraph Index Before Merge *****************/
+    /******************* KnnSearch For HGraph Index Before Merge
+   * *****************/
     std::cout << "Before Merge:" << std::endl;
     query_index(indexes[0], query, hgraph_search_parameters, topk);
 

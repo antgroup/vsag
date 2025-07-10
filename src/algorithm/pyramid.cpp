@@ -62,7 +62,8 @@ IndexNode::IndexNode(IndexCommonParam* common_param, GraphInterfaceParamPtr grap
 void
 IndexNode::BuildGraph(ODescent& odescent) {
     std::lock_guard<std::mutex> lock(mutex_);
-    // Build an index when the level corresponding to the current node requires indexing
+    // Build an index when the level corresponding to the current node requires
+    // indexing
     if (has_index_ && not ids_.empty()) {
         InitGraph();
         entry_point_ = ids_[0];
@@ -336,7 +337,8 @@ Pyramid::Deserialize(StreamReader& reader) {
         root_->Deserialize(reader);
         pool_ = std::make_unique<VisitedListPool>(
             1, allocator_, flatten_interface_ptr_->TotalCount(), allocator_);
-    } else {  // create like `else if ( ver in [v0.15, v0.17] )` here if need in the future
+    } else {  // create like `else if ( ver in [v0.15, v0.17] )` here if need in
+              // the future
         logger::debug("parse with new version format");
         auto metadata = footer->GetMetadata();
 

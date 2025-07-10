@@ -96,7 +96,8 @@ RandomOrthogonalMatrix::InverseTransform(const float* transformed_vec, float* or
 bool
 RandomOrthogonalMatrix::GenerateRandomOrthogonalMatrix() {
     auto dim = static_cast<uint64_t>(this->input_dim_);
-    // generate a random matrix with elements following a standard normal distribution
+    // generate a random matrix with elements following a standard normal
+    // distribution
     std::random_device rd;
     std::mt19937 gen(rd());
     std::normal_distribution<float> dist(0.0, 1.0);

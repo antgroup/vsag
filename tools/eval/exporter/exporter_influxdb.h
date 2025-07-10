@@ -57,9 +57,11 @@ public:
     }
 
 private:
-    // e.g., "http://127.0.0.1:8086/api/v2/write?org=vsag&bucket=example&precision=ns"
+    // e.g.,
+    // "http://127.0.0.1:8086/api/v2/write?org=vsag&bucket=example&precision=ns"
     std::string endpoint_{};
-    // e.g., "Token mlIiP-zVfcooHhMbGG9Yk-KfrkHyDc2h-rphnIBda8UMe_6Qocy8tNmV323yxOPEAsC8uIs6_nb-XUSMEAO76A=="
+    // e.g., "Token
+    // mlIiP-zVfcooHhMbGG9Yk-KfrkHyDc2h-rphnIBda8UMe_6Qocy8tNmV323yxOPEAsC8uIs6_nb-XUSMEAO76A=="
     std::string token_{};
 };
 

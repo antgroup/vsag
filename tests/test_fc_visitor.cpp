@@ -106,7 +106,8 @@ TEST_CASE("Test NumericComparison", "[ft][expression_visitor]") {
     {
         auto filter_condition_str = "age > 18";
         auto expr_ptr = AstParse(filter_condition_str);
-        // AST 结构: comparison -> field_expr -> field_name -> ID('age'), comparison_op -> GT('>'), numeric -> INTEGER('18')
+        // AST 结构: comparison -> field_expr -> field_name -> ID('age'),
+        // comparison_op -> GT('>'), numeric -> INTEGER('18')
         auto comparison_expr = std::dynamic_pointer_cast<ComparisonExpression>(expr_ptr);
         REQUIRE(comparison_expr != nullptr);
         REQUIRE(comparison_expr->left->ToString() == "age");
@@ -117,7 +118,8 @@ TEST_CASE("Test NumericComparison", "[ft][expression_visitor]") {
     {
         auto filter_condition_str = "age >= 18.5";
         auto expr_ptr = AstParse(filter_condition_str);
-        // AST 结构: comparison -> field_expr -> field_name -> ID('age'), comparison_op -> GT('>'), numeric -> FLOAT('18.5')
+        // AST 结构: comparison -> field_expr -> field_name -> ID('age'),
+        // comparison_op -> GT('>'), numeric -> FLOAT('18.5')
         auto comparison_expr = std::dynamic_pointer_cast<ComparisonExpression>(expr_ptr);
         REQUIRE(comparison_expr != nullptr);
         REQUIRE(comparison_expr->left->ToString() == "age");
@@ -128,7 +130,8 @@ TEST_CASE("Test NumericComparison", "[ft][expression_visitor]") {
     {
         auto filter_condition_str = "age < 18";
         auto expr_ptr = AstParse(filter_condition_str);
-        // AST 结构: comparison -> field_expr -> field_name -> ID('age'), comparison_op -> LT('<'), numeric -> INTEGER('18')
+        // AST 结构: comparison -> field_expr -> field_name -> ID('age'),
+        // comparison_op -> LT('<'), numeric -> INTEGER('18')
         auto comparison_expr = std::dynamic_pointer_cast<ComparisonExpression>(expr_ptr);
         REQUIRE(comparison_expr != nullptr);
         REQUIRE(comparison_expr->left->ToString() == "age");
@@ -139,7 +142,8 @@ TEST_CASE("Test NumericComparison", "[ft][expression_visitor]") {
     {
         auto filter_condition_str = "age <= 18.5";
         auto expr_ptr = AstParse(filter_condition_str);
-        // AST 结构: comparison -> field_expr -> field_name -> ID('age'), comparison_op -> LE('<='), numeric -> FLOAT('18.5')
+        // AST 结构: comparison -> field_expr -> field_name -> ID('age'),
+        // comparison_op -> LE('<='), numeric -> FLOAT('18.5')
         auto comparison_expr = std::dynamic_pointer_cast<ComparisonExpression>(expr_ptr);
         REQUIRE(comparison_expr != nullptr);
         REQUIRE(comparison_expr->left->ToString() == "age");
@@ -150,7 +154,8 @@ TEST_CASE("Test NumericComparison", "[ft][expression_visitor]") {
     {
         auto filter_condition_str = "age = 18";
         auto expr_ptr = AstParse(filter_condition_str);
-        // AST 结构: comparison -> field_expr -> field_name -> ID('age'), comparison_op -> EQ('='), numeric -> INTEGER('18')
+        // AST 结构: comparison -> field_expr -> field_name -> ID('age'),
+        // comparison_op -> EQ('='), numeric -> INTEGER('18')
         auto comparison_expr = std::dynamic_pointer_cast<ComparisonExpression>(expr_ptr);
         REQUIRE(comparison_expr != nullptr);
         REQUIRE(comparison_expr->left->ToString() == "age");
@@ -161,7 +166,8 @@ TEST_CASE("Test NumericComparison", "[ft][expression_visitor]") {
     {
         auto filter_condition_str = "age != 18.5";
         auto expr_ptr = AstParse(filter_condition_str);
-        // AST 结构: comparison -> field_expr -> field_name -> ID('age'), comparison_op -> NQ('!='), numeric -> FLOAT('18.5')
+        // AST 结构: comparison -> field_expr -> field_name -> ID('age'),
+        // comparison_op -> NQ('!='), numeric -> FLOAT('18.5')
         auto comparison_expr = std::dynamic_pointer_cast<ComparisonExpression>(expr_ptr);
         REQUIRE(comparison_expr != nullptr);
         REQUIRE(comparison_expr->left->ToString() == "age");
@@ -172,7 +178,8 @@ TEST_CASE("Test NumericComparison", "[ft][expression_visitor]") {
     {
         auto filter_condition_str = "age > 0";
         auto expr_ptr = AstParse(filter_condition_str);
-        // AST 结构: comparison -> field_expr -> field_name -> ID('age'), comparison_op -> GT('>'), numeric -> INTEGER('0')
+        // AST 结构: comparison -> field_expr -> field_name -> ID('age'),
+        // comparison_op -> GT('>'), numeric -> INTEGER('0')
         auto comparison_expr = std::dynamic_pointer_cast<ComparisonExpression>(expr_ptr);
         REQUIRE(comparison_expr != nullptr);
         REQUIRE(comparison_expr->left->ToString() == "age");
@@ -183,7 +190,8 @@ TEST_CASE("Test NumericComparison", "[ft][expression_visitor]") {
     {
         auto filter_condition_str = "age < 0";
         auto expr_ptr = AstParse(filter_condition_str);
-        // AST 结构: comparison -> field_expr -> field_name -> ID('age'), comparison_op -> LT('<'), numeric -> INTEGER('0')
+        // AST 结构: comparison -> field_expr -> field_name -> ID('age'),
+        // comparison_op -> LT('<'), numeric -> INTEGER('0')
         auto comparison_expr = std::dynamic_pointer_cast<ComparisonExpression>(expr_ptr);
         REQUIRE(comparison_expr != nullptr);
         REQUIRE(comparison_expr->left->ToString() == "age");
@@ -194,7 +202,8 @@ TEST_CASE("Test NumericComparison", "[ft][expression_visitor]") {
     {
         auto filter_condition_str = "age = 0";
         auto expr_ptr = AstParse(filter_condition_str);
-        // AST 结构: comparison -> field_expr -> field_name -> ID('age'), comparison_op -> EQ('='), numeric -> INTEGER('0')
+        // AST 结构: comparison -> field_expr -> field_name -> ID('age'),
+        // comparison_op -> EQ('='), numeric -> INTEGER('0')
         auto comparison_expr = std::dynamic_pointer_cast<ComparisonExpression>(expr_ptr);
         REQUIRE(comparison_expr != nullptr);
         REQUIRE(comparison_expr->left->ToString() == "age");
@@ -205,7 +214,8 @@ TEST_CASE("Test NumericComparison", "[ft][expression_visitor]") {
     {
         auto filter_condition_str = "age != 0";
         auto expr_ptr = AstParse(filter_condition_str);
-        // AST 结构: comparison -> field_expr -> field_name -> ID('age'), comparison_op -> NQ('!='), numeric -> INTEGER('0')
+        // AST 结构: comparison -> field_expr -> field_name -> ID('age'),
+        // comparison_op -> NQ('!='), numeric -> INTEGER('0')
         auto comparison_expr = std::dynamic_pointer_cast<ComparisonExpression>(expr_ptr);
         REQUIRE(comparison_expr != nullptr);
         REQUIRE(comparison_expr->left->ToString() == "age");
@@ -216,7 +226,8 @@ TEST_CASE("Test NumericComparison", "[ft][expression_visitor]") {
     {
         auto filter_condition_str = "age >= 0";
         auto expr_ptr = AstParse(filter_condition_str);
-        // AST 结构: comparison -> field_expr -> field_name -> ID('age'), comparison_op -> GE('>='), numeric -> INTEGER('0')
+        // AST 结构: comparison -> field_expr -> field_name -> ID('age'),
+        // comparison_op -> GE('>='), numeric -> INTEGER('0')
         auto comparison_expr = std::dynamic_pointer_cast<ComparisonExpression>(expr_ptr);
         REQUIRE(comparison_expr != nullptr);
         REQUIRE(comparison_expr->left->ToString() == "age");
@@ -227,7 +238,8 @@ TEST_CASE("Test NumericComparison", "[ft][expression_visitor]") {
     {
         auto filter_condition_str = "age <= 0";
         auto expr_ptr = AstParse(filter_condition_str);
-        // AST 结构: comparison -> field_expr -> field_name -> ID('age'), comparison_op -> LE('<='), numeric -> INTEGER('0')
+        // AST 结构: comparison -> field_expr -> field_name -> ID('age'),
+        // comparison_op -> LE('<='), numeric -> INTEGER('0')
         auto comparison_expr = std::dynamic_pointer_cast<ComparisonExpression>(expr_ptr);
         REQUIRE(comparison_expr != nullptr);
         REQUIRE(comparison_expr->left->ToString() == "age");
@@ -238,7 +250,8 @@ TEST_CASE("Test NumericComparison", "[ft][expression_visitor]") {
     {
         auto filter_condition_str = "age > 18.0";
         auto expr_ptr = AstParse(filter_condition_str);
-        // AST 结构: comparison -> field_expr -> field_name -> ID('age'), comparison_op -> GT('>'), numeric -> FLOAT('18.0')
+        // AST 结构: comparison -> field_expr -> field_name -> ID('age'),
+        // comparison_op -> GT('>'), numeric -> FLOAT('18.0')
         auto comparison_expr = std::dynamic_pointer_cast<ComparisonExpression>(expr_ptr);
         REQUIRE(comparison_expr != nullptr);
         REQUIRE(comparison_expr->left->ToString() == "age");
@@ -249,7 +262,8 @@ TEST_CASE("Test NumericComparison", "[ft][expression_visitor]") {
     {
         auto filter_condition_str = "age < 18.0";
         auto expr_ptr = AstParse(filter_condition_str);
-        // AST 结构: comparison -> field_expr -> field_name -> ID('age'), comparison_op -> LT('<'), numeric -> FLOAT('18.0')
+        // AST 结构: comparison -> field_expr -> field_name -> ID('age'),
+        // comparison_op -> LT('<'), numeric -> FLOAT('18.0')
         auto comparison_expr = std::dynamic_pointer_cast<ComparisonExpression>(expr_ptr);
         REQUIRE(comparison_expr != nullptr);
         REQUIRE(comparison_expr->left->ToString() == "age");
@@ -260,7 +274,8 @@ TEST_CASE("Test NumericComparison", "[ft][expression_visitor]") {
     {
         auto filter_condition_str = "age = 18.0";
         auto expr_ptr = AstParse(filter_condition_str);
-        // AST 结构: comparison -> field_expr -> field_name -> ID('age'), comparison_op -> EQ('='), numeric -> FLOAT('18.0')
+        // AST 结构: comparison -> field_expr -> field_name -> ID('age'),
+        // comparison_op -> EQ('='), numeric -> FLOAT('18.0')
         auto comparison_expr = std::dynamic_pointer_cast<ComparisonExpression>(expr_ptr);
         REQUIRE(comparison_expr != nullptr);
         REQUIRE(comparison_expr->left->ToString() == "age");
@@ -271,7 +286,8 @@ TEST_CASE("Test NumericComparison", "[ft][expression_visitor]") {
     {
         auto filter_condition_str = "age != 18.0";
         auto expr_ptr = AstParse(filter_condition_str);
-        // AST 结构: comparison -> field_expr -> field_name -> ID('age'), comparison_op -> NQ('!='), numeric -> FLOAT('18.0')
+        // AST 结构: comparison -> field_expr -> field_name -> ID('age'),
+        // comparison_op -> NQ('!='), numeric -> FLOAT('18.0')
         auto comparison_expr = std::dynamic_pointer_cast<ComparisonExpression>(expr_ptr);
         REQUIRE(comparison_expr != nullptr);
         REQUIRE(comparison_expr->left->ToString() == "age");
@@ -282,7 +298,8 @@ TEST_CASE("Test NumericComparison", "[ft][expression_visitor]") {
     {
         auto filter_condition_str = "age >= 18.0";
         auto expr_ptr = AstParse(filter_condition_str);
-        // AST 结构: comparison -> field_expr -> field_name -> ID('age'), comparison_op -> GE('>='), numeric -> FLOAT('18.0')
+        // AST 结构: comparison -> field_expr -> field_name -> ID('age'),
+        // comparison_op -> GE('>='), numeric -> FLOAT('18.0')
         auto comparison_expr = std::dynamic_pointer_cast<ComparisonExpression>(expr_ptr);
         REQUIRE(comparison_expr != nullptr);
         REQUIRE(comparison_expr->left->ToString() == "age");
@@ -293,7 +310,8 @@ TEST_CASE("Test NumericComparison", "[ft][expression_visitor]") {
     {
         auto filter_condition_str = "age <= 18.0";
         auto expr_ptr = AstParse(filter_condition_str);
-        // AST 结构: comparison -> field_expr -> field_name -> ID('age'), comparison_op -> LE('<='), numeric -> FLOAT('18.0')
+        // AST 结构: comparison -> field_expr -> field_name -> ID('age'),
+        // comparison_op -> LE('<='), numeric -> FLOAT('18.0')
         auto comparison_expr = std::dynamic_pointer_cast<ComparisonExpression>(expr_ptr);
         REQUIRE(comparison_expr != nullptr);
         REQUIRE(comparison_expr->left->ToString() == "age");
@@ -304,7 +322,8 @@ TEST_CASE("Test NumericComparison", "[ft][expression_visitor]") {
     {
         auto filter_condition_str = "age <= .15";
         auto expr_ptr = AstParse(filter_condition_str);
-        // AST 结构: comparison -> field_expr -> field_name -> ID('age'), comparison_op -> LE('<='), numeric -> FLOAT('0.15')
+        // AST 结构: comparison -> field_expr -> field_name -> ID('age'),
+        // comparison_op -> LE('<='), numeric -> FLOAT('0.15')
         auto comparison_expr = std::dynamic_pointer_cast<ComparisonExpression>(expr_ptr);
         REQUIRE(comparison_expr != nullptr);
         REQUIRE(comparison_expr->left->ToString() == "age");
@@ -315,7 +334,8 @@ TEST_CASE("Test NumericComparison", "[ft][expression_visitor]") {
     {
         auto filter_condition_str = "age <= 15.";
         auto expr_ptr = AstParse(filter_condition_str);
-        // AST 结构: comparison -> field_expr -> field_name -> ID('age'), comparison_op -> LE('<='), numeric -> FLOAT('15.')
+        // AST 结构: comparison -> field_expr -> field_name -> ID('age'),
+        // comparison_op -> LE('<='), numeric -> FLOAT('15.')
         auto comparison_expr = std::dynamic_pointer_cast<ComparisonExpression>(expr_ptr);
         REQUIRE(comparison_expr != nullptr);
         REQUIRE(comparison_expr->left->ToString() == "age");
@@ -326,7 +346,8 @@ TEST_CASE("Test NumericComparison", "[ft][expression_visitor]") {
     {
         auto filter_condition_str = "age <= 15.23e-4";
         auto expr_ptr = AstParse(filter_condition_str);
-        // AST 结构: comparison -> field_expr -> field_name -> ID('age'), comparison_op -> LE('<='), numeric -> FLOAT('15.23e-4')
+        // AST 结构: comparison -> field_expr -> field_name -> ID('age'),
+        // comparison_op -> LE('<='), numeric -> FLOAT('15.23e-4')
         auto comparison_expr = std::dynamic_pointer_cast<ComparisonExpression>(expr_ptr);
         REQUIRE(comparison_expr != nullptr);
         REQUIRE(comparison_expr->left->ToString() == "age");
@@ -338,7 +359,8 @@ TEST_CASE("Test NumericComparison", "[ft][expression_visitor]") {
     {
         auto filter_condition_str = "age > 2147483647";  // INT_MAX
         auto expr_ptr = AstParse(filter_condition_str);
-        // AST 结构: comparison -> field_expr -> field_name -> ID('age'), comparison_op -> GT('>'), numeric -> INTEGER('2147483647')
+        // AST 结构: comparison -> field_expr -> field_name -> ID('age'),
+        // comparison_op -> GT('>'), numeric -> INTEGER('2147483647')
         auto comparison_expr = std::dynamic_pointer_cast<ComparisonExpression>(expr_ptr);
         REQUIRE(comparison_expr != nullptr);
         REQUIRE(comparison_expr->left->ToString() == "age");
@@ -349,7 +371,8 @@ TEST_CASE("Test NumericComparison", "[ft][expression_visitor]") {
     {
         auto filter_condition_str = "age < -2147483648";  // INT_MIN
         auto expr_ptr = AstParse(filter_condition_str);
-        // AST 结构: comparison -> field_expr -> field_name -> ID('age'), comparison_op -> LT('<'), numeric -> INTEGER('-2147483648')
+        // AST 结构: comparison -> field_expr -> field_name -> ID('age'),
+        // comparison_op -> LT('<'), numeric -> INTEGER('-2147483648')
         auto comparison_expr = std::dynamic_pointer_cast<ComparisonExpression>(expr_ptr);
         REQUIRE(comparison_expr != nullptr);
         REQUIRE(comparison_expr->left->ToString() == "age");
@@ -360,7 +383,8 @@ TEST_CASE("Test NumericComparison", "[ft][expression_visitor]") {
     {
         auto filter_condition_str = "age = 0.0";
         auto expr_ptr = AstParse(filter_condition_str);
-        // AST 结构: comparison -> field_expr -> field_name -> ID('age'), comparison_op -> EQ('='), numeric -> FLOAT('0.0')
+        // AST 结构: comparison -> field_expr -> field_name -> ID('age'),
+        // comparison_op -> EQ('='), numeric -> FLOAT('0.0')
         auto comparison_expr = std::dynamic_pointer_cast<ComparisonExpression>(expr_ptr);
         REQUIRE(comparison_expr != nullptr);
         REQUIRE(comparison_expr->left->ToString() == "age");
@@ -371,7 +395,8 @@ TEST_CASE("Test NumericComparison", "[ft][expression_visitor]") {
     {
         auto filter_condition_str = "age != 0.0";
         auto expr_ptr = AstParse(filter_condition_str);
-        // AST 结构: comparison -> field_expr -> field_name -> ID('age'), comparison_op -> NQ('!='), numeric -> FLOAT('0.0')
+        // AST 结构: comparison -> field_expr -> field_name -> ID('age'),
+        // comparison_op -> NQ('!='), numeric -> FLOAT('0.0')
         auto comparison_expr = std::dynamic_pointer_cast<ComparisonExpression>(expr_ptr);
         REQUIRE(comparison_expr != nullptr);
         REQUIRE(comparison_expr->left->ToString() == "age");
@@ -468,7 +493,8 @@ TEST_CASE("Test StringComparison", "[ft][expression_visitor]") {
     {
         auto filter_condition_str = R"(name = "Alice")";
         auto expr_ptr = AstParse(filter_condition_str);
-        // AST 结构: comparison -> field_name -> ID('name'), comparison_sop -> EQ('='), STRING -> "Alice"
+        // AST 结构: comparison -> field_name -> ID('name'), comparison_sop ->
+        // EQ('='), STRING -> "Alice"
         auto comparison_expr = std::dynamic_pointer_cast<ComparisonExpression>(expr_ptr);
         REQUIRE(comparison_expr != nullptr);
         REQUIRE(comparison_expr->left->ToString() == "name");
@@ -480,7 +506,8 @@ TEST_CASE("Test StringComparison", "[ft][expression_visitor]") {
     {
         auto filter_condition_str = R"(name != "Alice")";
         auto expr_ptr = AstParse(filter_condition_str);
-        // AST 结构: comparison -> field_name -> ID('name'), comparison_sop -> NE('!='), STRING -> "Alice"
+        // AST 结构: comparison -> field_name -> ID('name'), comparison_sop ->
+        // NE('!='), STRING -> "Alice"
         auto comparison_expr = std::dynamic_pointer_cast<ComparisonExpression>(expr_ptr);
         REQUIRE(comparison_expr != nullptr);
         REQUIRE(comparison_expr->left->ToString() == "name");
@@ -492,7 +519,8 @@ TEST_CASE("Test StringComparison", "[ft][expression_visitor]") {
     {
         auto filter_condition_str = R"(name = "")";
         auto expr_ptr = AstParse(filter_condition_str);
-        // AST 结构: comparison -> field_name -> ID('name'), comparison_sop -> EQ('='), STRING -> ""
+        // AST 结构: comparison -> field_name -> ID('name'), comparison_sop ->
+        // EQ('='), STRING -> ""
         auto comparison_expr = std::dynamic_pointer_cast<ComparisonExpression>(expr_ptr);
         REQUIRE(comparison_expr != nullptr);
         REQUIRE(comparison_expr->left->ToString() == "name");
@@ -510,7 +538,8 @@ TEST_CASE("Test InStrListExpression", "[ft][expression_visitor]") {
     {
         auto filter_condition_str = R"(name IN ["Alice", "Bob"])";
         auto expr_ptr = AstParse(filter_condition_str);
-        // AST 结构: comparison -> field_name -> ID('name'), IN('IN'), str_value_list -> [STRING("Alice"), STRING("Bob")]
+        // AST 结构: comparison -> field_name -> ID('name'), IN('IN'),
+        // str_value_list -> [STRING("Alice"), STRING("Bob")]
         auto str_list_expr = std::dynamic_pointer_cast<StrListExpression>(expr_ptr);
         REQUIRE(str_list_expr != nullptr);
         REQUIRE(str_list_expr->field->ToString() == "name");
@@ -522,7 +551,8 @@ TEST_CASE("Test InStrListExpression", "[ft][expression_visitor]") {
     {
         auto filter_condition_str = R"(multi_notin(name, "Alice|Bob", "|"))";
         auto expr_ptr = AstParse(filter_condition_str);
-        // AST 结构: comparison -> field_name -> ID('name'), IN('IN'), str_value_list -> [STRING("Alice"), STRING("Bob")]
+        // AST 结构: comparison -> field_name -> ID('name'), IN('IN'),
+        // str_value_list -> [STRING("Alice"), STRING("Bob")]
         auto str_list_expr = std::dynamic_pointer_cast<StrListExpression>(expr_ptr);
         REQUIRE(str_list_expr != nullptr);
         REQUIRE(str_list_expr->field->ToString() == "name");
@@ -581,7 +611,8 @@ TEST_CASE("Test InIntListExpression", "[ft][expression_visitor]") {
     {
         auto filter_condition_str = "id IN [1, 2, 3]";
         auto expr_ptr = AstParse(filter_condition_str);
-        // AST 结构: comparison -> field_name -> ID('id'), IN('IN'), int_value_list -> [INTEGER('1'), INTEGER('2'), INTEGER('3')]
+        // AST 结构: comparison -> field_name -> ID('id'), IN('IN'), int_value_list
+        // -> [INTEGER('1'), INTEGER('2'), INTEGER('3')]
         auto int_list_expr = std::dynamic_pointer_cast<IntListExpression>(expr_ptr);
         REQUIRE(int_list_expr != nullptr);
         REQUIRE(int_list_expr->field->ToString() == "id");
@@ -592,7 +623,8 @@ TEST_CASE("Test InIntListExpression", "[ft][expression_visitor]") {
 
     {
         auto filter_condition_str =
-            "id IN [9223372036854775808, 18446744073709551615, 13835058055282163712]";
+            "id IN [9223372036854775808, "
+            "18446744073709551615, 13835058055282163712]";
         auto expr_ptr = AstParse(filter_condition_str);
         auto int_list_expr = std::dynamic_pointer_cast<IntListExpression>(expr_ptr);
         REQUIRE(int_list_expr != nullptr);
@@ -601,7 +633,8 @@ TEST_CASE("Test InIntListExpression", "[ft][expression_visitor]") {
         REQUIRE(int_list_expr->values->ToString() ==
                 "[9223372036854775808, 18446744073709551615, 13835058055282163712]");
         REQUIRE(int_list_expr->ToString() ==
-                "(id IN [9223372036854775808, 18446744073709551615, 13835058055282163712])");
+                "(id IN [9223372036854775808, 18446744073709551615, "
+                "13835058055282163712])");
     }
 
     {
@@ -623,7 +656,8 @@ TEST_CASE("Test InIntListExpression", "[ft][expression_visitor]") {
     {
         auto filter_condition_str = R"(multi_in(id, "1|2|3", "|"))";
         auto expr_ptr = AstParse(filter_condition_str);
-        // AST 结构: comparison -> field_name -> ID('id'), IN('IN'), int_value_list -> [INTEGER('1'), INTEGER('2'), INTEGER('3')]
+        // AST 结构: comparison -> field_name -> ID('id'), IN('IN'), int_value_list
+        // -> [INTEGER('1'), INTEGER('2'), INTEGER('3')]
         auto int_list_expr = std::dynamic_pointer_cast<IntListExpression>(expr_ptr);
         REQUIRE(int_list_expr != nullptr);
         REQUIRE(int_list_expr->field->ToString() == "id");
@@ -651,7 +685,8 @@ TEST_CASE("Test InIntListExpression", "[ft][expression_visitor]") {
     {
         auto filter_condition_str = R"(multi_in(id, "1", "|"))";
         auto expr_ptr = AstParse(filter_condition_str);
-        // AST 结构: comparison -> field_name -> ID('id'), IN('IN'), int_value_list -> [INTEGER('1'), INTEGER('2'), INTEGER('3')]
+        // AST 结构: comparison -> field_name -> ID('id'), IN('IN'), int_value_list
+        // -> [INTEGER('1'), INTEGER('2'), INTEGER('3')]
         auto int_list_expr = std::dynamic_pointer_cast<IntListExpression>(expr_ptr);
         REQUIRE(int_list_expr != nullptr);
         REQUIRE(int_list_expr->field->ToString() == "id");
@@ -663,7 +698,8 @@ TEST_CASE("Test InIntListExpression", "[ft][expression_visitor]") {
     {
         auto filter_condition_str = "id IN [1, 2, 3, 4]";
         auto expr_ptr = AstParse(filter_condition_str);
-        // AST 结构: comparison -> field_name -> ID('id'), IN('IN'), int_value_list -> [INTEGER('1'), INTEGER('2'), INTEGER('3'), INTEGER('4')]
+        // AST 结构: comparison -> field_name -> ID('id'), IN('IN'), int_value_list
+        // -> [INTEGER('1'), INTEGER('2'), INTEGER('3'), INTEGER('4')]
         auto int_list_expr = std::dynamic_pointer_cast<IntListExpression>(expr_ptr);
         REQUIRE(int_list_expr != nullptr);
         REQUIRE(int_list_expr->field->ToString() == "id");
@@ -682,38 +718,66 @@ TEST_CASE("Test LongMultiInExpression", "[ft][expression_visitor]") {
         REQUIRE(int_list_expr != nullptr);
         REQUIRE(int_list_expr->field->ToString() == "rta_uniq_id");
         REQUIRE(int_list_expr->is_not_in);
-        REQUIRE(
-            int_list_expr->values->ToString() ==
-            "[1961100458546670265, 8669342430913282238, 4295511754643557149, 3820165547219126739, "
-            "1615416169623352709, 6314578306465646238, 8519232450117756233, 2756461647811536678, "
-            "7246372942013239063, 6016028506275409733, 3202937297212420206, 7510237410486928689, "
-            "2693897507874692550, 7942461091316593098, 8468109175693762333, 2246205382807091008, "
-            "4762936000914802423, 6797061107232090018, 8530742052452506732, 3327382205450771314, "
-            "6522909056849751446, 2097254881891107942, 9081283293213749162, 7659202351373227815, "
-            "2426484522154290531, 9028175612421629988, 3979294040747128108, 7616191334060074064, "
-            "2216336493100479083, 6983229653395630143, 7061041066005578122, 3196243134178854499, "
-            "1239316581789112809, 4146619685878866397, 2993398114247915385, 5239079003920071893, "
-            "7306779578940296486, 8664775826449197998, 7292236495175168278, 3792060204756314668, "
-            "943879882149209231, 67786373045767393, 5460974927050884095, 3985833378458068290, "
-            "7260385150729580290, 1471584193443402819, 1093004338684365583, 3888227820969699574, "
-            "2263550131772636927, 4925893694984496472, 4053461338322378105, 2309747396698563821, "
-            "6079754561320324176, 160623819949859655, 2024781313054920143, 8988650033226888193, "
-            "6672705482565606954, 3463594972398901639, 4011710098241765573, 2628278965639395857, "
-            "7430455255531202418, 9127158149800262638, 6615696035589714492, 6463699161937835373, "
-            "4524875330387178960, 8052583455002209669, 7438806969338678071, 765272482175117030, "
-            "3216643116160913287, 8937191440708183065, 3599927177086139360, 4603694906434758431, "
-            "4839962215257436741, 7951576000074314225, 5404201438195616115, 1933117509111472906, "
-            "4420843354467922436, 6949401081268099700, 8286688749939713010, 7471024169212191085, "
-            "5756165102291555444, 7855894148486084345, 5425421488718376732, 4212694001066848701, "
-            "9207657085406962396, 3201372394618115663, 9089499071344019177, 4485876234743098538, "
-            "4261325010202841032, 8937647154994060117, 5363833089632775568, 8563220203728265761, "
-            "8757703765922223628, 7720373886526897000, 6940990643005730592, 1422105493879373245, "
-            "2371341722325808920, 7660148443976918122, 6952169319874687609, 7406880929185273462, "
-            "2114067842011407513, 189373988687663231, 8153479507569108764, 3355979313800702697, "
-            "9171725698747800278, 8777056532130596413, 3339864690631806628, 3727437985819132169, "
-            "4413544153042575492, 7498777981318184046, 7355443397257156893, 5999546154177100186, "
-            "3412685935113877458, 2571149021240417685, 8457673131098490986, 5749328167325148894, "
-            "5341841126750918352, 257263441440370798]");
+        REQUIRE(int_list_expr->values->ToString() ==
+                "[1961100458546670265, 8669342430913282238, 4295511754643557149, "
+                "3820165547219126739, "
+                "1615416169623352709, 6314578306465646238, 8519232450117756233, "
+                "2756461647811536678, "
+                "7246372942013239063, 6016028506275409733, 3202937297212420206, "
+                "7510237410486928689, "
+                "2693897507874692550, 7942461091316593098, 8468109175693762333, "
+                "2246205382807091008, "
+                "4762936000914802423, 6797061107232090018, 8530742052452506732, "
+                "3327382205450771314, "
+                "6522909056849751446, 2097254881891107942, 9081283293213749162, "
+                "7659202351373227815, "
+                "2426484522154290531, 9028175612421629988, 3979294040747128108, "
+                "7616191334060074064, "
+                "2216336493100479083, 6983229653395630143, 7061041066005578122, "
+                "3196243134178854499, "
+                "1239316581789112809, 4146619685878866397, 2993398114247915385, "
+                "5239079003920071893, "
+                "7306779578940296486, 8664775826449197998, 7292236495175168278, "
+                "3792060204756314668, "
+                "943879882149209231, 67786373045767393, 5460974927050884095, "
+                "3985833378458068290, "
+                "7260385150729580290, 1471584193443402819, 1093004338684365583, "
+                "3888227820969699574, "
+                "2263550131772636927, 4925893694984496472, 4053461338322378105, "
+                "2309747396698563821, "
+                "6079754561320324176, 160623819949859655, 2024781313054920143, "
+                "8988650033226888193, "
+                "6672705482565606954, 3463594972398901639, 4011710098241765573, "
+                "2628278965639395857, "
+                "7430455255531202418, 9127158149800262638, 6615696035589714492, "
+                "6463699161937835373, "
+                "4524875330387178960, 8052583455002209669, 7438806969338678071, "
+                "765272482175117030, "
+                "3216643116160913287, 8937191440708183065, 3599927177086139360, "
+                "4603694906434758431, "
+                "4839962215257436741, 7951576000074314225, 5404201438195616115, "
+                "1933117509111472906, "
+                "4420843354467922436, 6949401081268099700, 8286688749939713010, "
+                "7471024169212191085, "
+                "5756165102291555444, 7855894148486084345, 5425421488718376732, "
+                "4212694001066848701, "
+                "9207657085406962396, 3201372394618115663, 9089499071344019177, "
+                "4485876234743098538, "
+                "4261325010202841032, 8937647154994060117, 5363833089632775568, "
+                "8563220203728265761, "
+                "8757703765922223628, 7720373886526897000, 6940990643005730592, "
+                "1422105493879373245, "
+                "2371341722325808920, 7660148443976918122, 6952169319874687609, "
+                "7406880929185273462, "
+                "2114067842011407513, 189373988687663231, 8153479507569108764, "
+                "3355979313800702697, "
+                "9171725698747800278, 8777056532130596413, 3339864690631806628, "
+                "3727437985819132169, "
+                "4413544153042575492, 7498777981318184046, 7355443397257156893, "
+                "5999546154177100186, "
+                "3412685935113877458, 2571149021240417685, 8457673131098490986, "
+                "5749328167325148894, "
+                "5341841126750918352, 257263441440370798]");
     }
 
     {
@@ -725,10 +789,14 @@ TEST_CASE("Test LongMultiInExpression", "[ft][expression_visitor]") {
         REQUIRE(int_list_expr->field->ToString() == "trade_id_v2");
         REQUIRE(int_list_expr->is_not_in);
         REQUIRE(int_list_expr->values->ToString() ==
-                "[75, 75001, 78002, 78005, 78010, 78011, 77002001, 77004001, 77005001, 77005002, "
-                "77005003, 77005004, 77005005, 77005006, 77005007, 77005008, 77005009, 77005010, "
-                "77005011, 77005012, 77005013, 77005014, 77005015, 77005016, 77005017, 77010001, "
-                "77010002, 77010003, 77010004, 77010005, 77010006, 77010007, 77010008, 77010009, "
+                "[75, 75001, 78002, 78005, 78010, 78011, 77002001, 77004001, "
+                "77005001, 77005002, "
+                "77005003, 77005004, 77005005, 77005006, 77005007, 77005008, "
+                "77005009, 77005010, "
+                "77005011, 77005012, 77005013, 77005014, 77005015, 77005016, "
+                "77005017, 77010001, "
+                "77010002, 77010003, 77010004, 77010005, 77010006, 77010007, "
+                "77010008, 77010009, "
                 "77010010, 77011001, 77011002, 77011003]");
     }
 
@@ -742,8 +810,10 @@ TEST_CASE("Test LongMultiInExpression", "[ft][expression_visitor]") {
         REQUIRE(int_list_expr->is_not_in);
         REQUIRE(int_list_expr->values->ToString() ==
                 "[6475634789599348344, 195756431, 189279530, 216140542, 213432363, "
-                "4510564146827331015, 3843306077049549813, 217536181, 198561015, 216460872, "
-                "198254807, 3524173534128122501, 215845445, 209827459, 217559498, 169981625, "
+                "4510564146827331015, 3843306077049549813, 217536181, 198561015, "
+                "216460872, "
+                "198254807, 3524173534128122501, 215845445, 209827459, 217559498, "
+                "169981625, "
                 "214545359, 214544614, 192847772, 193580054]");
     }
 
@@ -768,10 +838,14 @@ TEST_CASE("Test LongMultiInExpression", "[ft][expression_visitor]") {
         REQUIRE(str_list_expr->field->ToString() == "tp_id_list");
         REQUIRE_FALSE(str_list_expr->is_not_in);
         REQUIRE(str_list_expr->values->ToString() ==
-                "[\"TPID_1\", \"TPID_12\", \"TPID_17\", \"TPID_20\", \"TPID_21\", \"TPID_22\", "
-                "\"TPID_24\", \"TPID_45\", \"TPID_46\", \"TPID_48\", \"TPID_50\", \"TPID_51\", "
-                "\"TPID_53\", \"TPID_59\", \"TPID_61\", \"TPID_62\", \"TPID_63\", \"TPID_65\", "
-                "\"TPID_67\", \"TPID_75\", \"TPID_76\", \"TPID_8\", \"TPID_89\", \"TPID_91\", "
+                "[\"TPID_1\", \"TPID_12\", \"TPID_17\", \"TPID_20\", \"TPID_21\", "
+                "\"TPID_22\", "
+                "\"TPID_24\", \"TPID_45\", \"TPID_46\", \"TPID_48\", \"TPID_50\", "
+                "\"TPID_51\", "
+                "\"TPID_53\", \"TPID_59\", \"TPID_61\", \"TPID_62\", \"TPID_63\", "
+                "\"TPID_65\", "
+                "\"TPID_67\", \"TPID_75\", \"TPID_76\", \"TPID_8\", \"TPID_89\", "
+                "\"TPID_91\", "
                 "\"TPID_92\", \"TPID_95\", \"TPID_96\"]");
     }
 }
@@ -787,8 +861,10 @@ TEST_CASE("Test ComplexExpression", "[ft][expression_visitor]") {
         REQUIRE(int_list_expr->is_not_in);
         REQUIRE(int_list_expr->values->ToString() ==
                 "[6475634789599348344, 195756431, 189279530, 216140542, 213432363, "
-                "4510564146827331015, 3843306077049549813, 217536181, 198561015, 216460872, "
-                "198254807, 3524173534128122501, 215845445, 209827459, 217559498, 169981625, "
+                "4510564146827331015, 3843306077049549813, 217536181, 198561015, "
+                "216460872, "
+                "198254807, 3524173534128122501, 215845445, 209827459, 217559498, "
+                "169981625, "
                 "214545359, 214544614, 192847772, 193580054]");
     }
 

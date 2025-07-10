@@ -97,7 +97,8 @@ HierarchicalNSW::reset() {
 
 bool
 HierarchicalNSW::init_memory_space() {
-    // release the memory allocated by the init_memory_space function that was called earlier
+    // release the memory allocated by the init_memory_space function that was
+    // called earlier
     reset();
     visited_list_pool_ = allocator_->New<VisitedListPool>(max_elements_, allocator_);
     element_levels_ = (int*)allocator_->Allocate(max_elements_ * sizeof(int));
@@ -404,9 +405,8 @@ HierarchicalNSW::searchBaseLayer(InnerIdType ep_id, const void* data_point, int 
         InnerIdType curNodeNum = curr_el_pair.second;
 
         getLinklistAtLevel(curNodeNum, layer, link_data.get());
-        int* data =
-            (int*)
-                link_data.get();  // = (int *)(linkList0_ + curNodeNum * size_links_per_element0_);
+        int* data = (int*)link_data.get();  // = (int *)(linkList0_ + curNodeNum *
+                                            // size_links_per_element0_);
         size_t size = getListCount((linklistsizeint*)data);
         auto* datal = (InnerIdType*)(data + 1);
 #ifdef USE_SSE
@@ -774,7 +774,9 @@ HierarchicalNSW::mutuallyConnectNewElement(InnerIdType cur_c,
             }
         }
 
-        // If cur_c is already present in the neighboring connections of `selectedNeighbors[idx]` then no need to modify any connections or run the heuristics.
+        // If cur_c is already present in the neighboring connections of
+        // `selectedNeighbors[idx]` then no need to modify any connections or run
+        // the heuristics.
         if (!is_cur_c_present) {
             if (sz_link_list_other < m_curmax) {
                 appendNeigohbor(selectedNeighbor, level, cur_c, m_curmax);
@@ -808,16 +810,16 @@ HierarchicalNSW::mutuallyConnectNewElement(InnerIdType cur_c,
                 updateConnections(selectedNeighbor, cand_neighbors, level, true);
                 // Nearest K:
                 /*int indx = -1;
-                    for (int j = 0; j < sz_link_list_other; j++) {
-                        float d = fstdistfunc_(getDataByInternalId(data[j]), getDataByInternalId(rez[idx]), dist_func_param_);
-                        if (d > d_max) {
-                            indx = j;
-                            d_max = d;
-                        }
-                    }
-                    if (indx >= 0) {
-                        data[indx] = cur_c;
-                    } */
+            for (int j = 0; j < sz_link_list_other; j++) {
+                float d = fstdistfunc_(getDataByInternalId(data[j]),
+           getDataByInternalId(rez[idx]), dist_func_param_); if (d > d_max) {
+                    indx = j;
+                    d_max = d;
+                }
+            }
+            if (indx >= 0) {
+                data[indx] = cur_c;
+            } */
             }
         }
     }
@@ -830,7 +832,8 @@ HierarchicalNSW::resizeIndex(size_t new_max_elements) {
     std::unique_lock resize_lock(resize_mutex_);
     if (new_max_elements < cur_element_count_)
         throw std::runtime_error(
-            "Cannot Resize, max element is less than the current number of elements");
+            "Cannot Resize, max element is less than the "
+            "current number of elements");
 
     auto new_visited_list_pool = allocator_->New<VisitedListPool>(new_max_elements, allocator_);
     allocator_->Delete(visited_list_pool_);
@@ -862,7 +865,8 @@ HierarchicalNSW::resizeIndex(size_t new_max_elements) {
             reversed_level0_link_list_, new_max_elements * sizeof(reverselinklist*));
         if (reversed_level0_link_list_new == nullptr) {
             throw std::runtime_error(
-                "Not enough memory: resizeIndex failed to allocate reversed_level0_link_list_");
+                "Not enough memory: resizeIndex failed to "
+                "allocate reversed_level0_link_list_");
         }
         reversed_level0_link_list_ = reversed_level0_link_list_new;
 
@@ -876,7 +880,8 @@ HierarchicalNSW::resizeIndex(size_t new_max_elements) {
                 new_max_elements * sizeof(vsag::UnorderedMap<int, reverselinklist>*));
         if (reversed_link_lists_new == nullptr) {
             throw std::runtime_error(
-                "Not enough memory: resizeIndex failed to allocate reversed_link_lists_");
+                "Not enough memory: resizeIndex failed to "
+                "allocate reversed_link_lists_");
         }
         reversed_link_lists_ = reversed_link_lists_new;
         memset(
@@ -973,35 +978,41 @@ HierarchicalNSW::DeserializeImpl(StreamReader& reader, SpaceInterface* s, size_t
     ReadOne(reader, offset_data_);
     ReadOne(reader, max_level_);
 
-    // Fixes #623: Unified entrypoint_node type during index loading (old: int64_t → new: InnerIdType (i.e., uint32))
+    // Fixes #623: Unified entrypoint_node type during index loading (old: int64_t
+    // → new: InnerIdType (i.e., uint32))
     /*
-     * Header Format Diagram for enterpoint_node_ and maxM_
-     *
-     * This diagram illustrates the serialization format differences between old and new versions.
-     * The code handles backward compatibility by trying both formats during index loading.
-     */
+   * Header Format Diagram for enterpoint_node_ and maxM_
+   *
+   * This diagram illustrates the serialization format differences between old
+   * and new versions. The code handles backward compatibility by trying both
+   * formats during index loading.
+   */
     // New Format (v2) Header Layout
     // -----------------------------
-    // | Field              | Type       | Size (bytes) | Description                  |
+    // | Field              | Type       | Size (bytes) | Description |
     // |--------------------|------------|--------------|------------------------------|
-    // | enterpoint_node_   | InnerIdType| 4            | 32-bit unsigned integer      |
-    // | maxM_              | size_t     | 8            | Maximum connections count    |
-    // ----------------------------- 4 + 8 = 12 bytes total -----------------------------------
+    // | enterpoint_node_   | InnerIdType| 4            | 32-bit unsigned integer
+    // | | maxM_              | size_t     | 8            | Maximum connections
+    // count    |
+    // ----------------------------- 4 + 8 = 12 bytes total
+    // -----------------------------------
 
     // Old Format (v1) Header Layout
     // -----------------------------
-    // | Field              | Type       | Size (bytes) | Description                  |
+    // | Field              | Type       | Size (bytes) | Description |
     // |--------------------|------------|--------------|------------------------------|
-    // | enterpoint_node_   | int64_t    | 8            | 64-bit signed integer        |
-    // | maxM_              | size_t     | 8            | Maximum connections count    |
-    // ----------------------------- 8 + 8 = 16 bytes total -----------------------------------
+    // | enterpoint_node_   | int64_t    | 8            | 64-bit signed integer |
+    // | maxM_              | size_t     | 8            | Maximum connections
+    // count    |
+    // ----------------------------- 8 + 8 = 16 bytes total
+    // -----------------------------------
 
     /*
-     * Compatibility Logic Flow:
-     * 1. Try reading newer format (12 bytes)
-     * 2. If validation fails (M_ != maxM_),
-     * 3. Read older format (16 bytes) as fallback
-     */
+   * Compatibility Logic Flow:
+   * 1. Try reading newer format (12 bytes)
+   * 2. If validation fails (M_ != maxM_),
+   * 3. Read older format (16 bytes) as fallback
+   */
 
     // to resolve compatibility issues
     auto buffer_size = sizeof(int64_t) + sizeof(size_t);
@@ -1021,11 +1032,11 @@ HierarchicalNSW::DeserializeImpl(StreamReader& reader, SpaceInterface* s, size_t
         enterpoint_node_ = *(int64_t*)(raw_buffer);
         maxM_ = *(size_t*)(raw_buffer + sizeof(int64_t));
         if (M_ != maxM_) {
-            // this condition will be true only when the parameter used in create_index is not equal
-            // to the parameter of the serialized index
-            throw vsag::VsagException(
-                vsag::ErrorType::INTERNAL_ERROR,
-                "The index was saved with different M_ value, please use the same M_ value");
+            // this condition will be true only when the parameter used in
+            // create_index is not equal to the parameter of the serialized index
+            throw vsag::VsagException(vsag::ErrorType::INTERNAL_ERROR,
+                                      "The index was saved with different M_ value, "
+                                      "please use the same M_ value");
         }
     }
 
@@ -1124,8 +1135,9 @@ HierarchicalNSW::copyDataByLabel(LabelType label, void* data_point) {
 }
 
 /*
-    * Marks an element with the given label deleted, does NOT really change the current graph.
-    */
+ * Marks an element with the given label deleted, does NOT really change the
+ * current graph.
+ */
 void
 HierarchicalNSW::markDelete(LabelType label) {
     // lock all operations with element by label
@@ -1140,9 +1152,10 @@ HierarchicalNSW::markDelete(LabelType label) {
 }
 
 /*
-    * Uses the last 16 bits of the memory for the linked list size to store the mark,
-    * whereas maxM0_ has to be limited to the lower 16 bits, however, still large enough in almost all cases.
-    */
+ * Uses the last 16 bits of the memory for the linked list size to store the
+ * mark, whereas maxM0_ has to be limited to the lower 16 bits, however, still
+ * large enough in almost all cases.
+ */
 void
 HierarchicalNSW::markDeletedInternal(InnerIdType internalId) {
     assert(internalId < cur_element_count_);
@@ -1161,8 +1174,8 @@ HierarchicalNSW::markDeletedInternal(InnerIdType internalId) {
 }
 
 /*
-    * Adds point.
-    */
+ * Adds point.
+ */
 bool
 HierarchicalNSW::addPoint(const void* data_point, LabelType label) {
     if (addPoint(data_point, label, -1) == -1) {
@@ -1212,8 +1225,8 @@ bool
 HierarchicalNSW::swapConnections(InnerIdType pre_internal_id, InnerIdType post_internal_id) {
     {
         // modify the connectivity relationships in the graph.
-        // Through the reverse edges, change the edges pointing to pre_internal_id to point to
-        // post_internal_id.
+        // Through the reverse edges, change the edges pointing to pre_internal_id
+        // to point to post_internal_id.
         modifyOutEdge(pre_internal_id, post_internal_id);
         modifyOutEdge(post_internal_id, pre_internal_id);
 
@@ -1237,9 +1250,10 @@ HierarchicalNSW::swapConnections(InnerIdType pre_internal_id, InnerIdType post_i
                   reversed_level0_link_list_[post_internal_id]);
         std::swap(reversed_link_lists_[pre_internal_id], reversed_link_lists_[post_internal_id]);
 
-        // First, remove the incorrect connectivity relationships in the reverse edges and then
-        // proceed with the insertion. This avoids losing edges when a point simultaneously
-        // has edges pointing to both pre_internal_id and post_internal_id.
+        // First, remove the incorrect connectivity relationships in the reverse
+        // edges and then proceed with the insertion. This avoids losing edges when
+        // a point simultaneously has edges pointing to both pre_internal_id and
+        // post_internal_id.
 
         modifyInEdges(pre_internal_id, post_internal_id, true);
         modifyInEdges(post_internal_id, pre_internal_id, true);
@@ -1337,9 +1351,9 @@ HierarchicalNSW::removePoint(LabelType label) {
     InnerIdType internal_id = 0;
     std::unique_lock lock(max_level_mutex_);
     {
-        // Swap the connection relationship corresponding to the label to be deleted with the
-        // last element, and modify the information in label_lookup_. By swapping the two points,
-        // fill the void left by the deletion.
+        // Swap the connection relationship corresponding to the label to be deleted
+        // with the last element, and modify the information in label_lookup_. By
+        // swapping the two points, fill the void left by the deletion.
         std::unique_lock lock_table(label_lookup_lock_);
         auto iter = label_lookup_.find(label);
         if (iter == label_lookup_.end()) {
@@ -1378,9 +1392,9 @@ HierarchicalNSW::removePoint(LabelType label) {
         }
     }
 
-    // Repair the connection relationship between the indegree and outdegree nodes at each
-    // level. We connect each indegree node with each outdegree node, and then prune the
-    // indegree nodes.
+    // Repair the connection relationship between the indegree and outdegree nodes
+    // at each level. We connect each indegree node with each outdegree node, and
+    // then prune the indegree nodes.
     for (int level = 0; level <= element_levels_[cur_c]; ++level) {
         const auto in_edges_cur = getEdges(cur_c, level);
         auto data_cur = getLinklistAtLevel(cur_c, level);
@@ -1426,8 +1440,8 @@ HierarchicalNSW::removePoint(LabelType label) {
             }
             mutuallyConnectNewElement(in_edge, candidates, level, true);
 
-            // Handle the operations of the deletion point which result in some nodes having no
-            // indegree nodes, and carry out repairs.
+            // Handle the operations of the deletion point which result in some nodes
+            // having no indegree nodes, and carry out repairs.
             size_t m_curmax = level ? maxM_ : maxM0_;
             for (auto id : unique_ids) {
                 if (getEdges(id, level).empty()) {

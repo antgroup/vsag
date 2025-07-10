@@ -45,22 +45,23 @@ public:
     ~BinarySet() = default;
 
     /**
-     * @brief Stores a Binary object with a specified name.
-     *
-     * @param name The name associated with the Binary object.
-     * @param binary The Binary object to be stored.
-     */
+   * @brief Stores a Binary object with a specified name.
+   *
+   * @param name The name associated with the Binary object.
+   * @param binary The Binary object to be stored.
+   */
     void
     Set(const std::string& name, Binary binary) {
         data_[name] = std::move(binary);
     }
 
     /**
-     * @brief Retrieves a Binary object by name.
-     *
-     * @param name The name associated with the Binary object.
-     * @return The Binary object retrieved, or an empty Binary object if not found.
-     */
+   * @brief Retrieves a Binary object by name.
+   *
+   * @param name The name associated with the Binary object.
+   * @return The Binary object retrieved, or an empty Binary object if not
+   * found.
+   */
     Binary
     Get(const std::string& name) const {
         if (data_.find(name) == data_.end()) {
@@ -70,10 +71,10 @@ public:
     }
 
     /**
-     * @brief Gets a list of all stored names.
-     *
-     * @return A vector of all names in the BinarySet.
-     */
+   * @brief Gets a list of all stored names.
+   *
+   * @return A vector of all names in the BinarySet.
+   */
     std::vector<std::string>
     GetKeys() const {
         std::vector<std::string> keys;
@@ -88,11 +89,11 @@ public:
     }
 
     /**
-     * @brief Checks if a Binary object with the specified name exists.
-     *
-     * @param key The name of the Binary object to check for.
-     * @return True if the Binary object exists, false otherwise.
-     */
+   * @brief Checks if a Binary object with the specified name exists.
+   *
+   * @param key The name of the Binary object to check for.
+   * @return True if the Binary object exists, false otherwise.
+   */
     bool
     Contains(const std::string& key) const {
         return data_.find(key) != data_.end();

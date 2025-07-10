@@ -220,7 +220,8 @@ BruteForce::Deserialize(StreamReader& reader) {
 
         StreamReader::ReadObj(reader, dim_);
         StreamReader::ReadObj(reader, total_count_);
-    } else {  // create like `else if ( ver in [v0.15, v0.17] )` here if need in the future
+    } else {  // create like `else if ( ver in [v0.15, v0.17] )` here if need in
+              // the future
         logger::debug("parse with new version format");
 
         auto metadata = footer->GetMetadata();

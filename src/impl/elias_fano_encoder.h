@@ -20,7 +20,8 @@
 namespace vsag {
 
 /// @brief Elias-Fano Encoder for *ordered* adjacency list
-/// @note Our adjacency list size is mostly no more than 255, so we use uint8_t to store the number of elements
+/// @note Our adjacency list size is mostly no more than 255, so we use uint8_t
+/// to store the number of elements
 class EliasFanoEncoder {
 public:
     EliasFanoEncoder(Allocator* allocator) : allocator_(allocator) {
@@ -68,7 +69,8 @@ public:
 
 private:
     // requires "const" to pass lint check
-    // set_low_bits modifies the values pointed by ${bits}, but not the pointer itself
+    // set_low_bits modifies the values pointed by ${bits}, but not the pointer
+    // itself
     void
     set_low_bits(size_t index, InnerIdType value) const;
 

@@ -29,7 +29,7 @@
 #include <random>
 #include <stdexcept>
 #include <unordered_set>
-//#include <Eigen/Dense>
+// #include <Eigen/Dense>
 #include "../../default_allocator.h"
 #include "hnswlib.h"
 #include "storage/stream_reader.h"
@@ -90,15 +90,15 @@ private:
     mutable std::atomic<long> metric_distance_computations{0};
     mutable std::atomic<long> metric_hops{0};
 
-    bool allow_replace_deleted_ =
-        false;  // flag to replace deleted elements (marked as deleted) during insertions
+    bool allow_replace_deleted_ = false;  // flag to replace deleted elements
+                                          // (marked as deleted) during insertions
 
     std::mutex deleted_elements_lock;               // lock for deleted_elements
     std::unordered_set<tableint> deleted_elements;  // contains internal ids of deleted elements
 
     /*
-     * PQ data only support float data
-     */
+   * PQ data only support float data
+   */
     uint8_t* pq_map{nullptr};
     size_t pq_chunk{0}, pq_cluster{0}, pq_sub_dim{0}, pq_dim{0}, pq_train_bound = 65536;
     float* node_cluster_dist_{nullptr};
@@ -369,12 +369,14 @@ public:
 
             std::unique_lock<std::mutex> lock(link_list_locks_[curNodeNum]);
 
-            int* data;  // = (int *)(linkList0_ + curNodeNum * size_links_per_element0_);
+            int* data;  // = (int *)(linkList0_ + curNodeNum *
+                        // size_links_per_element0_);
             if (layer == 0) {
                 data = (int*)get_linklist0(curNodeNum);
             } else {
                 data = (int*)get_linklist(curNodeNum, layer);
-                //                    data = (int *) (linkLists_[curNodeNum] + (layer - 1) * size_links_per_element_);
+                //                    data = (int *) (linkLists_[curNodeNum] + (layer -
+                //                    1) * size_links_per_element_);
             }
             size_t size = getListCount((linklistsizeint*)data);
             tableint* datal = (tableint*)(data + 1);
@@ -457,7 +459,8 @@ public:
 
         float lower_bound;
         float lower_boundcan;
-        // Insert the entry point to the result and search set with its exact distance as a key.
+        // Insert the entry point to the result and search set with its exact
+        // distance as a key.
         if (!has_deletions || !isMarkedDeleted(ep_id)) {
             float dist = fstdistfunc_(data_point, getDataByInternalId(ep_id), dist_func_param_);
             lower_bound = dist;
@@ -473,11 +476,13 @@ public:
 
         visited_array[ep_id] = visited_array_tag;
 
-        // Iteratively generate candidates and conduct DCOs to maintain the result set R.
+        // Iteratively generate candidates and conduct DCOs to maintain the result
+        // set R.
         while (!candidate_set.empty()) {
             std::pair<float, tableint> current_node_pair = candidate_set.top();
 
-            // When the smallest object in S has its distance larger than the largest in R, terminate the algorithm.
+            // When the smallest object in S has its distance larger than the largest
+            // in R, terminate the algorithm.
             if ((-current_node_pair.first) > top_candidates.top().first &&
                 (top_candidates.size() == ef || has_deletions == false)) {
                 break;
@@ -493,7 +498,8 @@ public:
                 metric_distance_computations += size;
             }
 
-            // Enumerate all the neighbors of the object and view them as candidates of KNNs.
+            // Enumerate all the neighbors of the object and view them as candidates
+            // of KNNs.
             std::vector<int> ids;
             std::vector<float> res;
             int not_vis_count = 0;
@@ -510,7 +516,8 @@ public:
             pq_scan(ids.data(), res.data(), dist_map, ids.size());
             for (size_t j = 0; j < not_vis_count; j++) {
                 int candidate_id = ids[j];
-                // If the result set is not full, then calculate the exact distance. (i.e., assume the distance threshold to be infinity)
+                // If the result set is not full, then calculate the exact distance.
+                // (i.e., assume the distance threshold to be infinity)
                 if (answers.size() < k) {
                     char* currObj1 = (getDataByInternalId(candidate_id));
                     float dist = fstdistfunc_(data_point, currObj1, dist_func_param_);
@@ -593,7 +600,8 @@ public:
 
         float lower_bound;
         float lower_boundcan;
-        // Insert the entry point to the result and search set with its exact distance as a key.
+        // Insert the entry point to the result and search set with its exact
+        // distance as a key.
         if (!has_deletions || !isMarkedDeleted(ep_id)) {
             float dist = fstdistfunc_(data_point, getDataByInternalId(ep_id), dist_func_param_);
             lower_bound = dist;
@@ -609,11 +617,13 @@ public:
 
         visited_array[ep_id] = visited_array_tag;
 
-        // Iteratively generate candidates and conduct DCOs to maintain the result set R.
+        // Iteratively generate candidates and conduct DCOs to maintain the result
+        // set R.
         while (!candidate_set.empty()) {
             std::pair<float, tableint> current_node_pair = candidate_set.top();
 
-            // When the smallest object in S has its distance larger than the largest in R, terminate the algorithm.
+            // When the smallest object in S has its distance larger than the largest
+            // in R, terminate the algorithm.
             if ((-current_node_pair.first) > top_candidates.top().first &&
                 (top_candidates.size() == ef || has_deletions == false)) {
                 break;
@@ -629,13 +639,15 @@ public:
                 metric_distance_computations += size;
             }
 
-            // Enumerate all the neighbors of the object and view them as candidates of KNNs.
+            // Enumerate all the neighbors of the object and view them as candidates
+            // of KNNs.
             for (size_t j = 1; j <= size; j++) {
                 int candidate_id = *(data + j);
                 if (!(visited_array[candidate_id] == visited_array_tag)) {
                     visited_array[candidate_id] = visited_array_tag;
 
-                    // If the KNN set is not full, then calculate the exact distance. (i.e., assume the distance threshold to be infinity)
+                    // If the KNN set is not full, then calculate the exact distance.
+                    // (i.e., assume the distance threshold to be infinity)
                     if (answers.size() < k) {
                         char* currObj1 = (getDataByInternalId(candidate_id));
                         float dist = fstdistfunc_(data_point, currObj1, dist_func_param_);
@@ -710,10 +722,10 @@ public:
     //
     //        float lower_bound;
     //        if ((!has_deletions || !isMarkedDeleted(ep_id)) &&
-    //            ((!is_id_allowed) || (*is_id_allowed)(getExternalLabel(ep_id)))) {
-    //            float dist = fstdistfunc_(data_point, getDataByInternalId(ep_id), dist_func_param_);
-    //            lower_bound = dist;
-    //            if (dist < radius)
+    //            ((!is_id_allowed) || (*is_id_allowed)(getExternalLabel(ep_id))))
+    //            { float dist = fstdistfunc_(data_point,
+    //            getDataByInternalId(ep_id), dist_func_param_); lower_bound =
+    //            dist; if (dist < radius)
     //                top_candidates.emplace(dist, ep_id);
     //            candidate_set.emplace(-dist, ep_id);
     //        } else {
@@ -725,67 +737,75 @@ public:
     //        uint64_t visited_count = 0;
     //
     //        while (!candidate_set.empty()) {
-    //            std::pair<float, tableint> current_node_pair = candidate_set.top();
+    //            std::pair<float, tableint> current_node_pair =
+    //            candidate_set.top();
     //
     //            candidate_set.pop();
     //
     //            tableint current_node_id = current_node_pair.second;
     //            int* data = (int*)getLinklist0(current_node_id);
     //            size_t size = getListCount((linklistsizeint*)data);
-    //            //                bool cur_node_deleted = isMarkedDeleted(current_node_id);
-    //            if (collect_metrics) {
+    //            //                bool cur_node_deleted =
+    //            isMarkedDeleted(current_node_id); if (collect_metrics) {
     //                metric_hops_++;
     //                metric_distance_computations_ += size;
     //            }
     //
-    //#ifdef USE_SSE
+    // #ifdef USE_SSE
     //            _mm_prefetch((char*)(visited_array + *(data + 1)), _MM_HINT_T0);
-    //            _mm_prefetch((char*)(visited_array + *(data + 1) + 64), _MM_HINT_T0);
-    //            _mm_prefetch(data_level0_memory_ + (*(data + 1)) * size_data_per_element_ + offsetData_,
+    //            _mm_prefetch((char*)(visited_array + *(data + 1) + 64),
+    //            _MM_HINT_T0); _mm_prefetch(data_level0_memory_ + (*(data + 1)) *
+    //            size_data_per_element_ + offsetData_,
     //                         _MM_HINT_T0);
     //            _mm_prefetch((char*)(data + 2), _MM_HINT_T0);
-    //#endif
+    // #endif
     //
     //            for (size_t j = 1; j <= size; j++) {
     //                int candidate_id = *(data + j);
     ////                    if (candidate_id == 0) continue;
-    //#ifdef USE_SSE
-    //                _mm_prefetch((char*)(visited_array + *(data + j + 1)), _MM_HINT_T0);
-    //                _mm_prefetch(
-    //                    data_level0_memory_ + (*(data + j + 1)) * size_data_per_element_ + offsetData_,
-    //                    _MM_HINT_T0);  ////////////
-    //#endif
-    //                if (!(visited_array[candidate_id] == visited_array_tag)) {
-    //                    visited_array[candidate_id] = visited_array_tag;
-    //                    ++visited_count;
+    // #ifdef USE_SSE
+    //                 _mm_prefetch((char*)(visited_array + *(data + j + 1)),
+    //                 _MM_HINT_T0); _mm_prefetch(
+    //                     data_level0_memory_ + (*(data + j + 1)) *
+    //                     size_data_per_element_ + offsetData_, _MM_HINT_T0);
+    //                     ////////////
+    // #endif
+    //                 if (!(visited_array[candidate_id] == visited_array_tag)) {
+    //                     visited_array[candidate_id] = visited_array_tag;
+    //                     ++visited_count;
     //
-    //                    char* currObj1 = (getDataByInternalId(candidate_id));
-    //                    float dist = fstdistfunc_(data_point, currObj1, dist_func_param_);
+    //                     char* currObj1 = (getDataByInternalId(candidate_id));
+    //                     float dist = fstdistfunc_(data_point, currObj1,
+    //                     dist_func_param_);
     //
-    //                    if (visited_count < ef_ || dist < radius || lower_bound > dist) {
-    //                        candidate_set.emplace(-dist, candidate_id);
-    //#ifdef USE_SSE
-    //                        _mm_prefetch(data_level0_memory_ +
-    //                                         candidate_set.top().second * size_data_per_element_ +
-    //                                         offsetLevel0_,  ///////////
-    //                                     _MM_HINT_T0);       ////////////////////////
-    //#endif
+    //                     if (visited_count < ef_ || dist < radius || lower_bound
+    //                     > dist) {
+    //                         candidate_set.emplace(-dist, candidate_id);
+    // #ifdef USE_SSE
+    //                         _mm_prefetch(data_level0_memory_ +
+    //                                          candidate_set.top().second *
+    //                                          size_data_per_element_ +
+    //                                          offsetLevel0_,  ///////////
+    //                                      _MM_HINT_T0); ////////////////////////
+    // #endif
     //
-    //                        if ((!has_deletions || !isMarkedDeleted(candidate_id)) &&
-    //                            ((!is_id_allowed) || (*is_id_allowed)(getExternalLabel(candidate_id))))
-    //                            if (dist < radius)
-    //                                top_candidates.emplace(dist, candidate_id);
+    //                         if ((!has_deletions ||
+    //                         !isMarkedDeleted(candidate_id)) &&
+    //                             ((!is_id_allowed) ||
+    //                             (*is_id_allowed)(getExternalLabel(candidate_id))))
+    //                             if (dist < radius)
+    //                                 top_candidates.emplace(dist, candidate_id);
     //
-    //                        if (!top_candidates.empty())
-    //                            lower_bound = top_candidates.top().first;
-    //                    }
-    //                }
-    //            }
-    //        }
+    //                         if (!top_candidates.empty())
+    //                             lower_bound = top_candidates.top().first;
+    //                     }
+    //                 }
+    //             }
+    //         }
     //
-    //        visited_list_pool_->releaseVisitedList(vl);
-    //        return top_candidates;
-    //    }
+    //         visited_list_pool_->releaseVisitedList(vl);
+    //         return top_candidates;
+    //     }
 
     void
     getNeighborsByHeuristic2(std::priority_queue<std::pair<float, tableint>,
@@ -926,7 +946,9 @@ public:
                 }
             }
 
-            // If cur_c is already present in the neighboring connections of `selectedNeighbors[idx]` then no need to modify any connections or run the heuristics.
+            // If cur_c is already present in the neighboring connections of
+            // `selectedNeighbors[idx]` then no need to modify any connections or run
+            // the heuristics.
             if (!is_cur_c_present) {
                 if (sz_link_list_other < Mcurmax) {
                     data[sz_link_list_other] = cur_c;
@@ -962,16 +984,16 @@ public:
                     setListCount(ll_other, indx);
                     // Nearest K:
                     /*int indx = -1;
-                    for (int j = 0; j < sz_link_list_other; j++) {
-                        float d = fstdistfunc_(getDataByInternalId(data[j]), getDataByInternalId(rez[idx]), dist_func_param_);
-                        if (d > d_max) {
-                            indx = j;
-                            d_max = d;
-                        }
-                    }
-                    if (indx >= 0) {
-                        data[indx] = cur_c;
-                    } */
+          for (int j = 0; j < sz_link_list_other; j++) {
+              float d = fstdistfunc_(getDataByInternalId(data[j]),
+          getDataByInternalId(rez[idx]), dist_func_param_); if (d > d_max) {
+                  indx = j;
+                  d_max = d;
+              }
+          }
+          if (indx >= 0) {
+              data[indx] = cur_c;
+          } */
                 }
             }
         }
@@ -983,7 +1005,8 @@ public:
     resizeIndex(size_t new_max_elements) override {
         if (new_max_elements < cur_element_count_)
             throw std::runtime_error(
-                "Cannot Resize, max element is less than the current number of elements");
+                "Cannot Resize, max element is less than the "
+                "current number of elements");
 
         allocator_->Delete(visited_list_pool_);
         visited_list_pool_ = allocator_->New<VisitedListPool>(new_max_elements, allocator_);
@@ -1059,7 +1082,8 @@ public:
 
         size += sizeof(pq_sub_dim);
 
-        // output.write(data_level0_memory_, cur_element_count_ * size_data_per_element_);
+        // output.write(data_level0_memory_, cur_element_count_ *
+        // size_data_per_element_);
         size += data_level0_memory_->GetSize();
 
         for (size_t i = 0; i < cur_element_count_; i++) {
@@ -1171,25 +1195,26 @@ public:
 
         /// Optional - check if index is ok:
         /*
-        in_stream.seekg(cur_element_count_ * size_data_per_element_, in_stream.cur);
-        for (size_t i = 0; i < cur_element_count_; i++) {
-            if (in_stream.tellg() < 0 || in_stream.tellg() >= beg_pos + length) {
-                throw std::runtime_error("Index seems to be corrupted or unsupported");
-            }
-
-            unsigned int linkListSize;
-            readBinaryPOD(in_stream, linkListSize);
-            if (linkListSize != 0) {
-                in_stream.seekg(linkListSize, in_stream.cur);
-            }
+    in_stream.seekg(cur_element_count_ * size_data_per_element_, in_stream.cur);
+    for (size_t i = 0; i < cur_element_count_; i++) {
+        if (in_stream.tellg() < 0 || in_stream.tellg() >= beg_pos + length) {
+            throw std::runtime_error("Index seems to be corrupted or
+    unsupported");
         }
 
-        // throw exception if it either corrupted or old index
-        if (in_stream.tellg() != beg_pos + length)
-            throw std::runtime_error("Index seems to be corrupted or unsupported");
+        unsigned int linkListSize;
+        readBinaryPOD(in_stream, linkListSize);
+        if (linkListSize != 0) {
+            in_stream.seekg(linkListSize, in_stream.cur);
+        }
+    }
 
-        in_stream.clear();
-        */
+    // throw exception if it either corrupted or old index
+    if (in_stream.tellg() != beg_pos + length)
+        throw std::runtime_error("Index seems to be corrupted or unsupported");
+
+    in_stream.clear();
+    */
         /// Optional check end
 
         resizeIndex(max_elements);
@@ -1261,8 +1286,9 @@ public:
     }
 
     /*
-    * Checks the first 16 bits of the memory to see if the element is marked deleted.
-    */
+   * Checks the first 16 bits of the memory to see if the element is marked
+   * deleted.
+   */
     bool
     isMarkedDeleted(tableint internalId) const {
         unsigned char* ll_cur = ((unsigned char*)get_linklist0(internalId)) + 2;
@@ -1280,8 +1306,8 @@ public:
     }
 
     /*
-    * Adds point.
-    */
+   * Adds point.
+   */
     bool
     addPoint(const void* data_point, LabelType label) override {
         if (addPoint(data_point, label, -1) == -1) {
@@ -1457,14 +1483,16 @@ public:
         if (num_deleted_) {
             //            if (!is_trained_infer)
             //                top_candidates = searchBaseLayerST<true, true>(
-            //                    currObj, query_data, std::max(ef_, k), is_id_allowed);
+            //                    currObj, query_data, std::max(ef_, k),
+            //                    is_id_allowed);
             //            else
             top_candidates = searchBaseLayerPQSIMDinfer<true, true>(
                 currObj, query_data, dist_map, std::max(ef, k), k, is_id_allowed);
         } else {
             //            if (!is_trained_infer)
             //                top_candidates = searchBaseLayerST<false, true>(
-            //                    currObj, query_data, std::max(ef, k), is_id_allowed);
+            //                    currObj, query_data, std::max(ef, k),
+            //                    is_id_allowed);
             //            else
             top_candidates = searchBaseLayerPQSIMDinfer<true, true>(
                 currObj, query_data, dist_map, std::max(ef, k), k, is_id_allowed);
@@ -1494,7 +1522,8 @@ public:
         //
         //        tableint currObj = enterpoint_node_;
         //        float curdist =
-        //            fstdistfunc_(query_data, getDataByInternalId(enterpoint_node_), dist_func_param_);
+        //            fstdistfunc_(query_data,
+        //            getDataByInternalId(enterpoint_node_), dist_func_param_);
         //
         //        for (int level = maxlevel_; level > 0; level--) {
         //            bool changed = true;
@@ -1512,7 +1541,8 @@ public:
         //                    tableint cand = datal[i];
         //                    if (cand < 0 || cand > max_elements_)
         //                        throw std::runtime_error("cand error");
-        //                    float d = fstdistfunc_(query_data, getDataByInternalId(cand), dist_func_param_);
+        //                    float d = fstdistfunc_(query_data,
+        //                    getDataByInternalId(cand), dist_func_param_);
         //
         //                    if (d < curdist) {
         //                        curdist = d;
@@ -1529,11 +1559,14 @@ public:
         //            top_candidates;
         //        if (num_deleted_) {
         //            throw std::runtime_error(
-        //                "not support perform range search on a index that deleted some vectors");
+        //                "not support perform range search on a index that deleted
+        //                some vectors");
         //        } else {
         //            top_candidates =
-        //                searchBaseLayerST<false, true>(currObj, query_data, radius, is_id_allowed);
-        //            // std::cout << "top_candidates.size(): " << top_candidates.size() << std::endl;
+        //                searchBaseLayerST<false, true>(currObj, query_data,
+        //                radius, is_id_allowed);
+        //            // std::cout << "top_candidates.size(): " <<
+        //            top_candidates.size() << std::endl;
         //        }
         //
         //        // while (top_candidates.size() > k) {
@@ -1541,12 +1574,12 @@ public:
         //        // }
         //        while (top_candidates.size() > 0) {
         //            std::pair<float, tableint> rez = top_candidates.top();
-        //            result.push(std::pair<float, LabelType>(rez.first, getExternalLabel(rez.second)));
-        //            top_candidates.pop();
+        //            result.push(std::pair<float, LabelType>(rez.first,
+        //            getExternalLabel(rez.second))); top_candidates.pop();
         //        }
         //
-        //        // std::cout << "hnswalg::result.size(): " << result.size() << std::endl;
-        //        return result;
+        //        // std::cout << "hnswalg::result.size(): " << result.size() <<
+        //        std::endl; return result;
         return {};
     }
 
@@ -1954,30 +1987,69 @@ public:
     }
 #endif
 
-    //The default processing length is a multiple of 4, if not, add 0
+    // The default processing length is a multiple of 4, if not, add 0
     void
     pq_scan(const int* id, float* res, float*& dist_mp, unsigned num) const {
         for (int i = 0; i < num; i += 4) {
-            //#ifdef USE_AVX512
-            //            if (i + 16 < num) {
-            //                __m512 candidate_dist;
-            //                const uint8_t* const pqcode0 = pq_map + id[i] * pq_chunk;
-            //                const uint8_t* const pqcode1 = pq_map + id[i + 1] * pq_chunk;
-            //                const uint8_t* const pqcode2 = pq_map + id[i + 2] * pq_chunk;
-            //                const uint8_t* const pqcode3 = pq_map + id[i + 3] * pq_chunk;
-            //                const uint8_t* const pqcode4 = pq_map + id[i + 4] * pq_chunk;
-            //                const uint8_t* const pqcode5 = pq_map + id[i + 5] * pq_chunk;
-            //                const uint8_t* const pqcode6 = pq_map + id[i + 6] * pq_chunk;
-            //                const uint8_t* const pqcode7 = pq_map + id[i + 7] * pq_chunk;
-            //                const uint8_t* const pqcode8 = pq_map + id[i + 8] * pq_chunk;
-            //                const uint8_t* const pqcode9 = pq_map + id[i + 9] * pq_chunk;
-            //                const uint8_t* const pqcode10 = pq_map + id[i + 10] * pq_chunk;
-            //                const uint8_t* const pqcode11 = pq_map + id[i + 11] * pq_chunk;
-            //                const uint8_t* const pqcode12 = pq_map + id[i + 12] * pq_chunk;
-            //                const uint8_t* const pqcode13 = pq_map + id[i + 13] * pq_chunk;
-            //                const uint8_t* const pqcode14 = pq_map + id[i + 14] * pq_chunk;
-            //                const uint8_t* const pqcode15 = pq_map + id[i + 15] * pq_chunk;
-            //                axv16_product_map_dist(pqcode0,
+            // #ifdef USE_AVX512
+            //             if (i + 16 < num) {
+            //                 __m512 candidate_dist;
+            //                 const uint8_t* const pqcode0 = pq_map + id[i] *
+            //                 pq_chunk; const uint8_t* const pqcode1 = pq_map + id[i
+            //                 + 1] * pq_chunk; const uint8_t* const pqcode2 = pq_map
+            //                 + id[i + 2] * pq_chunk; const uint8_t* const pqcode3 =
+            //                 pq_map + id[i + 3] * pq_chunk; const uint8_t* const
+            //                 pqcode4 = pq_map + id[i + 4] * pq_chunk; const uint8_t*
+            //                 const pqcode5 = pq_map + id[i + 5] * pq_chunk; const
+            //                 uint8_t* const pqcode6 = pq_map + id[i + 6] * pq_chunk;
+            //                 const uint8_t* const pqcode7 = pq_map + id[i + 7] *
+            //                 pq_chunk; const uint8_t* const pqcode8 = pq_map + id[i
+            //                 + 8] * pq_chunk; const uint8_t* const pqcode9 = pq_map
+            //                 + id[i + 9] * pq_chunk; const uint8_t* const pqcode10 =
+            //                 pq_map + id[i + 10] * pq_chunk; const uint8_t* const
+            //                 pqcode11 = pq_map + id[i + 11] * pq_chunk; const
+            //                 uint8_t* const pqcode12 = pq_map + id[i + 12] *
+            //                 pq_chunk; const uint8_t* const pqcode13 = pq_map + id[i
+            //                 + 13] * pq_chunk; const uint8_t* const pqcode14 =
+            //                 pq_map + id[i + 14] * pq_chunk; const uint8_t* const
+            //                 pqcode15 = pq_map + id[i + 15] * pq_chunk;
+            //                 axv16_product_map_dist(pqcode0,
+            //                                        pqcode1,
+            //                                        pqcode2,
+            //                                        pqcode3,
+            //                                        pqcode4,
+            //                                        pqcode5,
+            //                                        pqcode6,
+            //                                        pqcode7,
+            //                                        pqcode8,
+            //                                        pqcode9,
+            //                                        pqcode10,
+            //                                        pqcode11,
+            //                                        pqcode12,
+            //                                        pqcode13,
+            //                                        pqcode14,
+            //                                        pqcode15,
+            //                                        dist_mp,
+            //                                        candidate_dist);
+            //                 _mm512_storeu_ps(res + i, candidate_dist);
+            //                 i += 16;
+            //                 continue;
+            //             }
+            // #endif
+            //
+            // #ifdef USE_AVX
+            //             if (i + 8 < num) {
+            //                 __m256 candidate_dist;
+            //                 const uint8_t* const pqcode0 = pq_map + id[i] *
+            //                 pq_chunk; const uint8_t* const pqcode1 = pq_map + id[i
+            //                 + 1] * pq_chunk; const uint8_t* const pqcode2 = pq_map
+            //                 + id[i + 2] * pq_chunk; const uint8_t* const pqcode3 =
+            //                 pq_map + id[i + 3] * pq_chunk; const uint8_t* const
+            //                 pqcode4 = pq_map + id[i + 4] * pq_chunk; const uint8_t*
+            //                 const pqcode5 = pq_map + id[i + 5] * pq_chunk; const
+            //                 uint8_t* const pqcode6 = pq_map + id[i + 6] * pq_chunk;
+            //                 const uint8_t* const pqcode7 = pq_map + id[i + 7] *
+            //                 pq_chunk; axv8_product_map_dist(pqcode0,
             //                                       pqcode1,
             //                                       pqcode2,
             //                                       pqcode3,
@@ -1985,48 +2057,13 @@ public:
             //                                       pqcode5,
             //                                       pqcode6,
             //                                       pqcode7,
-            //                                       pqcode8,
-            //                                       pqcode9,
-            //                                       pqcode10,
-            //                                       pqcode11,
-            //                                       pqcode12,
-            //                                       pqcode13,
-            //                                       pqcode14,
-            //                                       pqcode15,
             //                                       dist_mp,
             //                                       candidate_dist);
-            //                _mm512_storeu_ps(res + i, candidate_dist);
-            //                i += 16;
-            //                continue;
-            //            }
-            //#endif
-            //
-            //#ifdef USE_AVX
-            //            if (i + 8 < num) {
-            //                __m256 candidate_dist;
-            //                const uint8_t* const pqcode0 = pq_map + id[i] * pq_chunk;
-            //                const uint8_t* const pqcode1 = pq_map + id[i + 1] * pq_chunk;
-            //                const uint8_t* const pqcode2 = pq_map + id[i + 2] * pq_chunk;
-            //                const uint8_t* const pqcode3 = pq_map + id[i + 3] * pq_chunk;
-            //                const uint8_t* const pqcode4 = pq_map + id[i + 4] * pq_chunk;
-            //                const uint8_t* const pqcode5 = pq_map + id[i + 5] * pq_chunk;
-            //                const uint8_t* const pqcode6 = pq_map + id[i + 6] * pq_chunk;
-            //                const uint8_t* const pqcode7 = pq_map + id[i + 7] * pq_chunk;
-            //                axv8_product_map_dist(pqcode0,
-            //                                      pqcode1,
-            //                                      pqcode2,
-            //                                      pqcode3,
-            //                                      pqcode4,
-            //                                      pqcode5,
-            //                                      pqcode6,
-            //                                      pqcode7,
-            //                                      dist_mp,
-            //                                      candidate_dist);
-            //                _mm256_storeu_ps(res + i, candidate_dist);
-            //                i += 8;
-            //                continue;
-            //            }
-            //#endif
+            //                 _mm256_storeu_ps(res + i, candidate_dist);
+            //                 i += 8;
+            //                 continue;
+            //             }
+            // #endif
 
 #ifdef USE_SSE
             __m128 candidate_dist;

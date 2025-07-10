@@ -214,15 +214,15 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::DiskANNTestIndex,
 /* FIXME: segmentation fault on some platform
 TEST_CASE("DiskAnn OPQ", "[ft][diskann]") {
     int dim = 128;            // Dimension of the elements
-    int max_elements = 1000;  // Maximum number of elements, should be known beforehand
-    int max_degree = 16;      // Tightly connected with internal dimensionality of the data
+    int max_elements = 1000;  // Maximum number of elements, should be known
+beforehand int max_degree = 16;      // Tightly connected with internal
+dimensionality of the data
     // strongly affects the memory consumption
-    int ef_construction = 200;  // Controls index search speed/build speed tradeoff
-    int ef_search = 200;
-    float pq_sample_rate =
-        0.5;  // pq_sample_rate represents how much original data is selected during the training of pq compressed vectors.
-    int pq_dims = 8;  // pq_dims represents the dimensionality of the compressed vector.
-    std::string disk_layout_file = "index.out";
+    int ef_construction = 200;  // Controls index search speed/build speed
+tradeoff int ef_search = 200; float pq_sample_rate = 0.5;  // pq_sample_rate
+represents how much original data is selected during the training of pq
+compressed vectors. int pq_dims = 8;  // pq_dims represents the dimensionality
+of the compressed vector. std::string disk_layout_file = "index.out";
     // Initing index
     nlohmann::json diskann_parameters{{"max_degree", max_degree},
                                       {"ef_construction", ef_construction},
@@ -259,20 +259,20 @@ TEST_CASE("DiskAnn OPQ", "[ft][diskann]") {
     float correct = 0;
     for (int i = 0; i < max_elements; i++) {
         auto query = vsag::Dataset::Make();
-        query->NumElements(1)->Dim(dim)->Float32Vectors(data + i * dim)->Owner(false);
-        nlohmann::json parameters{
-            {"diskann", {{"ef_search", ef_search}, {"beam_search", 4}, {"io_limit", 200}}}};
-        int64_t k = 2;
-        if (auto result = diskann->KnnSearch(query, k, parameters.dump()); result.has_value()) {
-            if (result.value()->GetNumElements() == 1) {
+        query->NumElements(1)->Dim(dim)->Float32Vectors(data + i *
+dim)->Owner(false); nlohmann::json parameters{
+            {"diskann", {{"ef_search", ef_search}, {"beam_search", 4},
+{"io_limit", 200}}}}; int64_t k = 2; if (auto result = diskann->KnnSearch(query,
+k, parameters.dump()); result.has_value()) { if
+(result.value()->GetNumElements() == 1) {
                 REQUIRE(!std::isinf(result.value()->GetDistances()[0]));
                 if (result.value()->GetIds()[0] == i) {
                     correct++;
                 }
             }
         } else if (result.error().type == vsag::ErrorType::INTERNAL_ERROR) {
-            std::cerr << "failed to search on index: internal error" << std::endl;
-            exit(-1);
+            std::cerr << "failed to search on index: internal error" <<
+std::endl; exit(-1);
         }
     }
     float recall = correct / max_elements;
@@ -290,9 +290,9 @@ TEST_CASE("DiskAnn Filter Test", "[ft][diskann]") {
     // strongly affects the memory consumption
     int ef_construction = 200;  // Controls index search speed/build speed tradeoff
     int ef_search = 200;
-    float pq_sample_rate =
-        0.5;  // pq_sample_rate represents how much original data is selected during the training of pq compressed vectors.
-    int pq_dims = 9;  // pq_dims represents the dimensionality of the compressed vector.
+    float pq_sample_rate = 0.5;  // pq_sample_rate represents how much original data is selected
+                                 // during the training of pq compressed vectors.
+    int pq_dims = 9;             // pq_dims represents the dimensionality of the compressed vector.
     float threshold = 8.0;
     int64_t k = 10;
     // Initing index
@@ -437,9 +437,9 @@ TEST_CASE("DiskAnn Random Id", "[ft][diskann]") {
     // strongly affects the memory consumption
     int ef_construction = 200;  // Controls index search speed/build speed tradeoff
     int ef_search = 200;
-    float pq_sample_rate =
-        0.5;  // pq_sample_rate represents how much original data is selected during the training of pq compressed vectors.
-    int pq_dims = 9;  // pq_dims represents the dimensionality of the compressed vector.
+    float pq_sample_rate = 0.5;  // pq_sample_rate represents how much original data is selected
+                                 // during the training of pq compressed vectors.
+    int pq_dims = 9;             // pq_dims represents the dimensionality of the compressed vector.
     float threshold = 8.0;
     // Initing index
     nlohmann::json diskann_parameters{{"max_degree", max_degree},
@@ -649,7 +649,8 @@ TEST_CASE("split building process", "[ft][diskann]") {
         checkpoint2 = partial_index->ContinueBuild(dataset, checkpoint2.data).value();
     }
 
-    // Verify the consistency of recall rates between segmented index building and complete index building.
+    // Verify the consistency of recall rates between segmented index building and
+    // complete index building.
     nlohmann::json parameters{
         {"diskann", {{"ef_search", 10}, {"beam_search", 4}, {"io_limit", 20}}}};
     float correct = 0;

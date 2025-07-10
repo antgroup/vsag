@@ -34,14 +34,19 @@
 
 namespace vsag {
 
-/** Implement of RaBitQ Quantization, Integrate MRQ (Minimized Residual Quantization)
+/** Implement of RaBitQ Quantization, Integrate MRQ (Minimized Residual
+ * Quantization)
  *
  *  RaBitQ: Supports bit-level quantization
  *  MRQ: Support use residual part of PCA to increase precision
  *
  *  Reference:
- *  [1] Jianyang Gao and Cheng Long. 2024. RaBitQ: Quantizing High-Dimensional Vectors with a Theoretical Error Bound for Approximate Nearest Neighbor Search. Proc. ACM Manag. Data 2, 3, Article 167 (June 2024), 27 pages. https://doi.org/10.1145/3654970
- *  [2] Mingyu Yang, Wentao Li, Wei Wang. Fast High-dimensional Approximate Nearest Neighbor Search with Efficient Index Time and Space
+ *  [1] Jianyang Gao and Cheng Long. 2024. RaBitQ: Quantizing High-Dimensional
+ * Vectors with a Theoretical Error Bound for Approximate Nearest Neighbor
+ * Search. Proc. ACM Manag. Data 2, 3, Article 167 (June 2024), 27 pages.
+ * https://doi.org/10.1145/3654970 [2] Mingyu Yang, Wentao Li, Wei Wang. Fast
+ * High-dimensional Approximate Nearest Neighbor Search with Efficient Index
+ * Time and Space
  */
 template <MetricType metric = MetricType::METRIC_TYPE_L2SQR>
 class RaBitQuantizer : public Quantizer<RaBitQuantizer<metric>> {
@@ -171,8 +176,9 @@ private:
     bool use_mrq_{false};
 
     /***
-     * query layout: sq-code(required) + lower_bound(sq4) + delta(sq4) + sum(sq4) + norm(required) + mrq_norm(required)
-     */
+   * query layout: sq-code(required) + lower_bound(sq4) + delta(sq4) + sum(sq4)
+   * + norm(required) + mrq_norm(required)
+   */
     uint64_t aligned_dim_{0};
     uint64_t num_bits_per_dim_query_{32};
     uint64_t query_code_size_{0};
@@ -183,8 +189,9 @@ private:
     uint64_t query_offset_mrq_norm_{0};
 
     /***
-     * code layout: bq-code(required) + norm(required) + error(required) + sum(sq4) + mrq_norm(required)
-     */
+   * code layout: bq-code(required) + norm(required) + error(required) +
+   * sum(sq4) + mrq_norm(required)
+   */
     uint64_t offset_code_{0};
     uint64_t offset_norm_{0};
     uint64_t offset_error_{0};
@@ -258,8 +265,8 @@ RaBitQuantizer<metric>::RaBitQuantizer(int dim,
     if (num_bits_per_dim_query_ == 4) {
         // Re-order the SQ4U Code Layout (align with 8 bits)
         // e.g., for a float query with dim == 4:   [1, 2, 4, 8]
-        //       suppose original SQ4U code is:     [0001 0010, 0100 1000]  (0001 is 4)
-        //       then, the re-ordered code is:      [1000 0100, 0010 0001]
+        //       suppose original SQ4U code is:     [0001 0010, 0100 1000]  (0001 is
+        //       4) then, the re-ordered code is:      [1000 0100, 0010 0001]
         aligned_dim_ = ((this->dim_ + 511) / 512) * 512;
         auto sq_code_size = aligned_dim_ / 8 * num_bits_per_dim_query_;
         this->query_code_size_ = (sq_code_size / align_size) * align_size;
@@ -440,7 +447,8 @@ RaBitQuantizer<metric>::DecodeOneImpl(const uint8_t* codes, DataType* data) {
                                  *(norm_type*)(codes + offset_norm_));
 
     // 4. inverse random projection
-    // Note that the value may be much different between original since inv_sqrt_d is small
+    // Note that the value may be much different between original since inv_sqrt_d
+    // is small
     rom_->InverseTransform(transformed_data.data(), data);
     return true;
 }

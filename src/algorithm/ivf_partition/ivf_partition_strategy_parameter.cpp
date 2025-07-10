@@ -42,11 +42,11 @@ IVFPartitionStrategyParameters::FromJson(const JsonType& json) {
 
     this->gnoimi_param = std::make_shared<GNOIMIParameter>();
     if (this->partition_strategy_type == IVFPartitionStrategyType::GNO_IMI) {
-        CHECK_ARGUMENT(
-            json.contains(IVF_PARTITION_STRATEGY_TYPE_GNO_IMI),
-            fmt::format("partition strategy parameters must contains {} when strategy type is {}",
-                        IVF_PARTITION_STRATEGY_TYPE_GNO_IMI,
-                        IVF_PARTITION_STRATEGY_TYPE_GNO_IMI));
+        CHECK_ARGUMENT(json.contains(IVF_PARTITION_STRATEGY_TYPE_GNO_IMI),
+                       fmt::format("partition strategy parameters must contains {} "
+                                   "when strategy type is {}",
+                                   IVF_PARTITION_STRATEGY_TYPE_GNO_IMI,
+                                   IVF_PARTITION_STRATEGY_TYPE_GNO_IMI));
         this->gnoimi_param->FromJson(json[IVF_PARTITION_STRATEGY_TYPE_GNO_IMI]);
     }
 }

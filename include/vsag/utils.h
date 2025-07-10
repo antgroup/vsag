@@ -29,16 +29,19 @@ namespace vsag {
  * @brief Performs k-means clustering on the given data.
  *
  * This function applies the k-means clustering algorithm to partition the input
- * data into `k` clusters. The algorithm iteratively assigns data points to clusters
- * and updates the cluster centroids.
+ * data into `k` clusters. The algorithm iteratively assigns data points to
+ * clusters and updates the cluster centroids.
  *
  * @param d The dimensionality of the data points.
  * @param n The number of data points.
  * @param k The number of clusters.
  * @param x Pointer to the input data array of size `n * d`.
- * @param centroids Pre-allocated output array to store the centroid of each cluster, of size `k * d`.
- * @param dis_type The type of distance metric to use, specified as a string ("l2", "cosine", "ip").
- * @return float The final quantization error (sum of squared distances to the nearest centroid).
+ * @param centroids Pre-allocated output array to store the centroid of each
+ * cluster, of size `k * d`.
+ * @param dis_type The type of distance metric to use, specified as a string
+ * ("l2", "cosine", "ip").
+ * @return float The final quantization error (sum of squared distances to the
+ * nearest centroid).
  */
 float
 kmeans_clustering(
@@ -47,15 +50,17 @@ kmeans_clustering(
 /**
  * @brief Filters a set of vectors based on a distance threshold.
  *
- * This function calculates the L2 distance between entries in the base and query sets and
- * filters out those pairs for which the distance exceeds a given threshold.
+ * This function calculates the L2 distance between entries in the base and
+ * query sets and filters out those pairs for which the distance exceeds a given
+ * threshold.
  *
  * @param dim The dimensionality of the vectors.
  * @param nb The number of base vectors.
  * @param base Pointer to the array containing base vectors of size `nb * dim`.
  * @param query Pointer to the query vector of size `dim`.
  * @param threshold The distance threshold for filtering.
- * @return BitsetPtr A pointer to a bitset indicating which base vectors have not been filtered out.
+ * @return BitsetPtr A pointer to a bitset indicating which base vectors have
+ * not been filtered out.
  */
 BitsetPtr
 l2_and_filtering(int64_t dim, int64_t nb, const float* base, const float* query, float threshold);
@@ -63,8 +68,9 @@ l2_and_filtering(int64_t dim, int64_t nb, const float* base, const float* query,
 /**
  * @brief Computes the recall of k-nearest neighbors (k-NN) search results.
  *
- * This function computes how many of the retrieved nearest neighbors in the result set
- * match the true nearest neighbors from the given ground truth mapping.
+ * This function computes how many of the retrieved nearest neighbors in the
+ * result set match the true nearest neighbors from the given ground truth
+ * mapping.
  *
  * @param base Pointer to the array containing base vectors.
  * @param id_map Pointer to the ground truth id mapping.
@@ -87,8 +93,8 @@ knn_search_recall(const float* base,
 /**
  * @brief Computes the recall of a range search based on a given threshold.
  *
- * This function assesses how many of the base vectors are correctly included or excluded
- * from the result set by comparing to a given set of result ids.
+ * This function assesses how many of the base vectors are correctly included or
+ * excluded from the result set by comparing to a given set of result ids.
  *
  * @param base Pointer to the array containing base vectors.
  * @param base_ids Pointer to the base vector ids.

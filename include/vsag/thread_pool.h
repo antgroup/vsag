@@ -23,50 +23,50 @@ namespace vsag {
 class ThreadPool {
 public:
     /**
-      * Blocks until all tasks in the thread pool have completed.
-      *
-      * This function will wait until all tasks that have been
-      * enqueued to the thread pool are finished executing.
-      */
+   * Blocks until all tasks in the thread pool have completed.
+   *
+   * This function will wait until all tasks that have been
+   * enqueued to the thread pool are finished executing.
+   */
     virtual void
     WaitUntilEmpty() = 0;
 
     /**
-      * Sets the limit on the size of the task queue.
-      *
-      * @param limit The maximum size of the task queue.
-      *              Tasks exceeding this size may be rejected or blocked,
-      *              depending on the specific implementation.
-      */
+   * Sets the limit on the size of the task queue.
+   *
+   * @param limit The maximum size of the task queue.
+   *              Tasks exceeding this size may be rejected or blocked,
+   *              depending on the specific implementation.
+   */
     virtual void
     SetQueueSizeLimit(std::size_t limit) = 0;
 
     /**
-      * Sets the limit on the size of the thread pool.
-      *
-      * @param limit The maximum number of worker threads in the pool.
-      *              No additional threads will be created beyond this limit.
-      */
+   * Sets the limit on the size of the thread pool.
+   *
+   * @param limit The maximum number of worker threads in the pool.
+   *              No additional threads will be created beyond this limit.
+   */
     virtual void
     SetPoolSize(std::size_t limit) = 0;
 
     /**
-      * Destructor.
-      *
-      * Cleans up resources used by the thread pool.
-      */
+   * Destructor.
+   *
+   * Cleans up resources used by the thread pool.
+   */
     virtual ~ThreadPool() = default;
 
     /**
-      * Enqueues a new task to be executed by the thread pool.
-      *
-      * @param task A callable object that takes no parameters and
-      *             represents the task to be executed.
-      * @return std::future<void> A future object representing the
-      *                           asynchronous execution of the task,
-      *                           which can be used to obtain the task's
-      *                           result and status.
-      */
+   * Enqueues a new task to be executed by the thread pool.
+   *
+   * @param task A callable object that takes no parameters and
+   *             represents the task to be executed.
+   * @return std::future<void> A future object representing the
+   *                           asynchronous execution of the task,
+   *                           which can be used to obtain the task's
+   *                           result and status.
+   */
     virtual std::future<void>
     Enqueue(std::function<void(void)> task) = 0;
 };

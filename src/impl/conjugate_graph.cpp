@@ -253,7 +253,8 @@ ConjugateGraph::UpdateId(int64_t old_tag_id, int64_t new_tag_id) {
     if (it_old_key != conjugate_graph_.end()) {
         auto it_new_key = conjugate_graph_.find(new_tag_id);
         if (it_new_key != conjugate_graph_.end()) {
-            // both two id exists in graph, note that this situation should be filtered out before use this function.
+            // both two id exists in graph, note that this situation should be
+            // filtered out before use this function.
             return false;
         }
         conjugate_graph_[new_tag_id] = it_old_key->second;

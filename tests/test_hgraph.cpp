@@ -1014,7 +1014,9 @@ TestHGraphConcurrentAdd(const fixtures::HGraphTestIndexPtr& test_index,
 
                 // Generate index parameters with attribute support enabled
                 auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(
-                    metric_type, dim, base_quantization_str);  // Create index and dataset
+                    metric_type,
+                    dim,
+                    base_quantization_str);  // Create index and dataset
                 auto index = TestIndex::TestFactory(test_index->name, param, true);
                 auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(
                     dim, resource->base_count, metric_type);

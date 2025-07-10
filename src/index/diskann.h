@@ -15,7 +15,8 @@
 
 #pragma once
 
-// to suppress deprecated warning below(no better way found that works with clang-tidy-15):
+// to suppress deprecated warning below(no better way found that works with
+// clang-tidy-15):
 // - clang-diagnostic-deprecated-builtins
 #if defined(__clang__) && (__clang_major__ >= 15)
 #pragma clang diagnostic push

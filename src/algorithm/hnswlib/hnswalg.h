@@ -78,14 +78,16 @@ private:
 
     VisitedListPool* visited_list_pool_{nullptr};
 
-    mutable std::shared_mutex
-        resize_mutex_{};  // Ensures safety during the resize process; is the largest lock.
-    mutable std::shared_mutex
-        max_level_mutex_{};  // Ensures access safety for global max_level and entry point.
+    mutable std::shared_mutex resize_mutex_{};     // Ensures safety during the resize
+                                                   // process; is the largest lock.
+    mutable std::shared_mutex max_level_mutex_{};  // Ensures access safety for global max_level and
+                                                   // entry point.
     mutable vsag::Vector<std::shared_mutex>
-        points_locks_;  // Ensures access safety for the link list and label of a specific point.
+        points_locks_;  // Ensures access safety for the link list and label of a
+                        // specific point.
     mutable std::shared_mutex
-        label_lookup_lock_{};  // Ensures access safety for the global label lookup table.
+        label_lookup_lock_{};  // Ensures access safety for the global label lookup
+                               // table.
 
     InnerIdType enterpoint_node_{0};
 
@@ -346,21 +348,24 @@ public:
     copyDataByLabel(LabelType label, void* data_point) override;
 
     /*
-    * Marks an element with the given label deleted, does NOT really change the current graph.
-    */
+   * Marks an element with the given label deleted, does NOT really change the
+   * current graph.
+   */
     void
     markDelete(LabelType label);
 
     /*
-    * Uses the last 16 bits of the memory for the linked list size to store the mark,
-    * whereas maxM0_ has to be limited to the lower 16 bits, however, still large enough in almost all cases.
-    */
+   * Uses the last 16 bits of the memory for the linked list size to store the
+   * mark, whereas maxM0_ has to be limited to the lower 16 bits, however, still
+   * large enough in almost all cases.
+   */
     void
     markDeletedInternal(InnerIdType internal_id);
 
     /*
-    * Checks the first 16 bits of the memory to see if the element is marked deleted.
-    */
+   * Checks the first 16 bits of the memory to see if the element is marked
+   * deleted.
+   */
     bool
     isMarkedDeleted(InnerIdType internal_id) const {
         std::shared_ptr<char[]> data = std::shared_ptr<char[]>(new char[size_links_level0_]);
@@ -380,8 +385,8 @@ public:
     }
 
     /*
-    * Adds point.
-    */
+   * Adds point.
+   */
     bool
     addPoint(const void* data_point, LabelType label) override;
 

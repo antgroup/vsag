@@ -46,7 +46,8 @@ main(int argc, char** argv) {
         ->Owner(false);
 
     /******************* Build Hnsw Index *****************/
-    // When you want to use EnhanceGraph, the use_conjugate_graph must be set to true
+    // When you want to use EnhanceGraph, the use_conjugate_graph must be set to
+    // true
     auto hnsw_build_paramesters = R"(
     {
         "dtype": "float32",
@@ -74,10 +75,12 @@ main(int argc, char** argv) {
         exit(-1);
     }
 
-    /******************* Search Hnsw Index without Conjugate Graph *****************/
+    /******************* Search Hnsw Index without Conjugate Graph
+   * *****************/
     // record the failed ids
     std::set<std::pair<int, int64_t>> failed_queries;
-    // use_conjugate_graph_search indicates whether to use information from the conjugate_graph to enhance the search results.
+    // use_conjugate_graph_search indicates whether to use information from the
+    // conjugate_graph to enhance the search results.
     auto before_enhance_parameters = R"(
     {
         "hnsw": {

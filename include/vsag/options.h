@@ -26,127 +26,131 @@ namespace vsag {
 
 /**
  * @class Options
- * @brief Singleton class for configuring and obtaining settings for threaded operations,
- * block size limits, and logging.
+ * @brief Singleton class for configuring and obtaining settings for threaded
+ * operations, block size limits, and logging.
  *
- * The `Options` class provides thread-safe methods to get and set various configuration
- * parameters such as the number of threads used for IO and building operations, the block size
- * limit for memory usage, and a logger instance for recording events.
+ * The `Options` class provides thread-safe methods to get and set various
+ * configuration parameters such as the number of threads used for IO and
+ * building operations, the block size limit for memory usage, and a logger
+ * instance for recording events.
  */
 class Options {
 public:
     /**
-     * @brief Get the singleton instance of the Options class.
-     *
-     * @return Options& Reference to the singleton instance.
-     */
+   * @brief Get the singleton instance of the Options class.
+   *
+   * @return Options& Reference to the singleton instance.
+   */
     static Options&
     Instance();
 
     /* for testing
 public:
-    inline bool
-    new_version() const {
-        return new_version_;
-    }
+  inline bool
+  new_version() const {
+      return new_version_;
+  }
 
-    inline void
-    set_new_version(bool new_version) {
-        new_version_ = new_version;
-    }
+  inline void
+  set_new_version(bool new_version) {
+      new_version_ = new_version;
+  }
 
 private:
-    bool new_version_ = true;
+  bool new_version_ = true;
 */
 
 public:
     /**
-     * @brief Gets the number of threads for IO operations.
-     *
-     * This function retrieves the number of threads to use for disk index IO during the search process.
-     * It is thread-safe, using memory order acquire operations.
-     *
-     * @return size_t The number of threads for IO operations.
-     */
+   * @brief Gets the number of threads for IO operations.
+   *
+   * This function retrieves the number of threads to use for disk index IO
+   * during the search process. It is thread-safe, using memory order acquire
+   * operations.
+   *
+   * @return size_t The number of threads for IO operations.
+   */
     [[nodiscard]] inline size_t
     num_threads_io() const {
         return num_threads_io_.load(std::memory_order_acquire);
     }
 
     /**
-     * @brief Gets the number of threads for building operations.
-     *
-     * This function retrieves the number of threads used for constructing indices.
-     * It is thread-safe, using memory order acquire operations.
-     *
-     * @return size_t The number of threads for building operations.
-     */
+   * @brief Gets the number of threads for building operations.
+   *
+   * This function retrieves the number of threads used for constructing
+   * indices. It is thread-safe, using memory order acquire operations.
+   *
+   * @return size_t The number of threads for building operations.
+   */
     [[nodiscard]] inline size_t
     num_threads_building() const {
         return num_threads_building_.load(std::memory_order_acquire);
     }
 
     /**
-     * @brief Sets the number of threads for IO operations in diskann.
-     *
-     * This function sets the number of threads to use for disk index IO during the search process.
-     * The specified number of threads should be between 1 and 200.
-     *
-     * @param num_threads Number of threads for IO operations.
-     */
+   * @brief Sets the number of threads for IO operations in diskann.
+   *
+   * This function sets the number of threads to use for disk index IO during
+   * the search process. The specified number of threads should be between 1 and
+   * 200.
+   *
+   * @param num_threads Number of threads for IO operations.
+   */
     void
     set_num_threads_io(size_t num_threads);
 
     /**
-     * @brief Sets the number of threads for building operations in diskann.
-     *
-     * This function sets the number of threads to use for constructing diskann index
-     *
-     * @param num_threads Number of threads for building operations.
-     */
+   * @brief Sets the number of threads for building operations in diskann.
+   *
+   * This function sets the number of threads to use for constructing diskann
+   * index
+   *
+   * @param num_threads Number of threads for building operations.
+   */
     void
     set_num_threads_building(size_t num_threads);
 
     /**
-     * @brief Gets the limit of block size for memory allocations.
-     *
-     * This function retrieves the block size limit for memory allocations.
-     * It is thread-safe, using memory order acquire operations.
-     * The block size should be greater than 2M.
-     *
-     * @return size_t The block size limit for memory allocations.
-     */
+   * @brief Gets the limit of block size for memory allocations.
+   *
+   * This function retrieves the block size limit for memory allocations.
+   * It is thread-safe, using memory order acquire operations.
+   * The block size should be greater than 2M.
+   *
+   * @return size_t The block size limit for memory allocations.
+   */
     [[nodiscard]] inline size_t
     block_size_limit() const {
         return block_size_limit_.load(std::memory_order_acquire);
     }
 
     /**
-     * @brief Sets the limit of block size for memory allocations.
-     *
-     * This function sets the block size limit for memory allocations.
-     *
-     * @param size The size of the block limit, must be greater than 2M.
-     */
+   * @brief Sets the limit of block size for memory allocations.
+   *
+   * This function sets the block size limit for memory allocations.
+   *
+   * @param size The size of the block limit, must be greater than 2M.
+   */
     void
     set_block_size_limit(size_t size);
 
     /**
-     * @brief Gets the current logger instance.
-     *
-     * @return Logger* Pointer to the current logger instance.
-     */
+   * @brief Gets the current logger instance.
+   *
+   * @return Logger* Pointer to the current logger instance.
+   */
     Logger*
     logger();
 
     /**
-     * @brief Sets the logger instance.
-     *
-     * This function sets the logger used for recording events.
-     *
-     * @param logger Pointer to the logger instance to set.
-     * @return bool Returns true if the logger is successfully set.
-     */
+   * @brief Sets the logger instance.
+   *
+   * This function sets the logger used for recording events.
+   *
+   * @param logger Pointer to the logger instance to set.
+   * @return bool Returns true if the logger is successfully set.
+   */
     inline bool
     set_logger(Logger* logger) {
         logger_ = logger;

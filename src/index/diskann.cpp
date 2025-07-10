@@ -155,9 +155,10 @@ private:
 uint64_t
 get_stringstream_size(const std::stringstream& stream) {
     std::streambuf* buf = stream.rdbuf();
-    std::streamsize size = buf->pubseekoff(
-        0, std::stringstream::end, std::stringstream::in);  // get the stream buffer size
-    buf->pubseekpos(0, std::stringstream::in);              // reset pointer pos
+    std::streamsize size = buf->pubseekoff(0,
+                                           std::stringstream::end,
+                                           std::stringstream::in);  // get the stream buffer size
+    buf->pubseekpos(0, std::stringstream::in);                      // reset pointer pos
     return size;
 }
 
@@ -271,7 +272,8 @@ DiskANN::DiskANN(DiskannParameters& diskann_params, const IndexCommonParam& inde
 
     R_ = std::min(MAXIMAL_R, std::max(MINIMAL_R, R_));
 
-    // When the length of the vector is too long, set sector_len_ to the size of storing a vector along with its linkage list.
+    // When the length of the vector is too long, set sector_len_ to the size of
+    // storing a vector along with its linkage list.
     sector_len_ = std::max(
         MINIMAL_SECTOR_LEN,
         (size_t)(static_cast<uint64_t>(dim_) * sizeof(float) +
@@ -758,12 +760,13 @@ DiskANN::deserialize(const BinarySet& binary_set) {
         auto metadata = std::make_shared<Metadata>(binary_set.Get(SERIAL_META_KEY));
         logger::debug("version: ", metadata->Version());
 
-        // if some feature only works in specify version, use metadata->Version() likes below:
+        // if some feature only works in specify version, use metadata->Version()
+        // likes below:
         /*
-         * if (metadata->Version() == "v0.15") {
-         *     ... // load data with specify format
-         * }
-         */
+     * if (metadata->Version() == "v0.15") {
+     *     ... // load data with specify format
+     * }
+     */
 
         if (metadata->EmptyIndex()) {
             empty_index_ = true;
@@ -1103,7 +1106,8 @@ DiskANN::GetStats() const {
 int64_t
 DiskANN::GetEstimateBuildMemory(const int64_t num_elements) const {
     int64_t estimate_memory_usage = 0;
-    // Memory usage of graph (1.365 is the relaxation factor used by DiskANN during graph construction.)
+    // Memory usage of graph (1.365 is the relaxation factor used by DiskANN
+    // during graph construction.)
     estimate_memory_usage += (num_elements * R_ * sizeof(uint32_t)  // NOLINT
                               + num_elements * (R_ + 1) * sizeof(uint32_t)) *
                              GRAPH_SLACK;

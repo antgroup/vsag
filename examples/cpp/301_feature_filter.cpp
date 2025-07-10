@@ -122,7 +122,8 @@ main(int argc, char** argv) {
         std::cout << result->GetIds()[i] << ": " << result->GetDistances()[i] << std::endl;
     }
 
-    /******************* HNSW Filter Search With filter function *****************/
+    /******************* HNSW Filter Search With filter function
+   * *****************/
     search_result = index->KnnSearch(query, topk, hnsw_search_parameters, filter_func);
     if (not search_result.has_value()) {
         std::cerr << "Failed to search index with filter" << search_result.error().message

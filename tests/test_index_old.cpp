@@ -326,48 +326,48 @@ TEST_CASE("serialize/deserialize with file stream", "[ft][index]") {
         REQUIRE(before_serialize_recall == after_serialize_recall);
     }
 
-    // FIXME(wxyu): the last 10 bytes belong to the footer, which is introduced in v0.15. for
-    // compatibility reasons, we need to keep the old index deserialize logic, which makes
-    // an integrity check impossible
+    // FIXME(wxyu): the last 10 bytes belong to the footer, which is introduced in
+    // v0.15. for compatibility reasons, we need to keep the old index deserialize
+    // logic, which makes an integrity check impossible
 
     // SECTION("less bits") {
     //     fixtures::TempDir dir("test_index_serialize_via_stream");
 
     //     // serialize to file stream
-    //     std::fstream out_file(dir.path + "index.bin", std::ios::out | std::ios::binary);
-    //     REQUIRE(index->Serialize(out_file).has_value());
-    //     int size = out_file.tellg();
-    //     out_file.close();
+    //     std::fstream out_file(dir.path + "index.bin", std::ios::out |
+    //     std::ios::binary); REQUIRE(index->Serialize(out_file).has_value()); int
+    //     size = out_file.tellg(); out_file.close();
 
     //     // deserialize from file stream
     //     std::filesystem::resize_file(dir.path + "index.bin", size - 10);
-    //     std::fstream in_file(dir.path + "index.bin", std::ios::in | std::ios::binary);
+    //     std::fstream in_file(dir.path + "index.bin", std::ios::in |
+    //     std::ios::binary);
 
     //     auto new_index =
     //         vsag::Factory::CreateIndex(
     //             index_name,
-    //             vsag::generate_build_parameters(metric_type, num_vectors, dim, true).value())
-    //             .value();
-    //     REQUIRE(new_index->Deserialize(in_file).error().type == vsag::ErrorType::READ_ERROR);
+    //             vsag::generate_build_parameters(metric_type, num_vectors, dim,
+    //             true).value()) .value();
+    //     REQUIRE(new_index->Deserialize(in_file).error().type ==
+    //     vsag::ErrorType::READ_ERROR);
     // }
 
     // SECTION("diskann invalid") {
     //     fixtures::TempDir dir("test_index_serialize_via_stream");
 
     //     // serialize to file stream
-    //     std::fstream out_file(dir.path + "index.bin", std::ios::out | std::ios::binary);
-    //     REQUIRE(index->Serialize(out_file).has_value());
-    //     int size = out_file.tellg();
-    //     out_file.close();
+    //     std::fstream out_file(dir.path + "index.bin", std::ios::out |
+    //     std::ios::binary); REQUIRE(index->Serialize(out_file).has_value()); int
+    //     size = out_file.tellg(); out_file.close();
 
     //     // deserialize from file stream
     //     std::filesystem::resize_file(dir.path + "index.bin", size - 10);
-    //     std::fstream in_file(dir.path + "index.bin", std::ios::in | std::ios::binary);
-    //     auto new_index =
+    //     std::fstream in_file(dir.path + "index.bin", std::ios::in |
+    //     std::ios::binary); auto new_index =
     //         vsag::Factory::CreateIndex(
     //             "diskann",
-    //             vsag::generate_build_parameters(metric_type, num_vectors, dim, true).value())
-    //             .value();
+    //             vsag::generate_build_parameters(metric_type, num_vectors, dim,
+    //             true).value()) .value();
     //     REQUIRE_THROWS(new_index->Deserialize(in_file));
     //     REQUIRE_THROWS(new_index->Serialize(in_file));
     // }
@@ -449,9 +449,9 @@ TEST_CASE("serialize/deserialize hnswstatic with file stream", "[ft][index]") {
         REQUIRE(before_serialize_recall == after_serialize_recall);
     }
 
-    // FIXME(wxyu): the last 10 bytes belong to the footer, which is introduced in v0.15. for
-    // compatibility reasons, we need to keep the old index deserialize logic, which makes
-    // an integrity check impossible
+    // FIXME(wxyu): the last 10 bytes belong to the footer, which is introduced in
+    // v0.15. for compatibility reasons, we need to keep the old index deserialize
+    // logic, which makes an integrity check impossible
     //
     // SECTION("less bits") {
     //     fixtures::TempDir dir("test_index_serialize_via_stream");
@@ -466,8 +466,10 @@ TEST_CASE("serialize/deserialize hnswstatic with file stream", "[ft][index]") {
     //     std::filesystem::resize_file(filepath, size - 10);
     //     std::fstream in_file(filepath, std::ios::in | std::ios::binary);
 
-    //     auto new_index = vsag::Factory::CreateIndex(index_name, build_parameters).value();
-    //     REQUIRE(new_index->Deserialize(in_file).error().type == vsag::ErrorType::READ_ERROR);
+    //     auto new_index = vsag::Factory::CreateIndex(index_name,
+    //     build_parameters).value();
+    //     REQUIRE(new_index->Deserialize(in_file).error().type ==
+    //     vsag::ErrorType::READ_ERROR);
     // }
 }
 

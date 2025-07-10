@@ -39,13 +39,16 @@ main(int argc, char** argv) {
     base->NumElements(num_vectors)->Dim(dim)->Ids(ids)->Float32Vectors(vectors);
 
     /******************* Create FreshHnsw Index *****************/
-    // fresh_hnsw_build_parameters is the configuration for building an FreshHNSW index.
-    // The "dtype" specifies the data type, which supports float32 and int8.
-    // The "metric_type" indicates the distance metric type (e.g., cosine, inner product, and L2).
-    // The "dim" represents the dimensionality of the vectors, indicating the number of features for each data point.
-    // The "fresh_hnsw" section contains parameters specific to FreshHNSW:
-    // - "max_degree": The maximum number of connections for each node in the graph.
-    // - "ef_construction": The size used for nearest neighbor search during graph construction, which affects both speed and the quality of the graph.
+    // fresh_hnsw_build_parameters is the configuration for building an FreshHNSW
+    // index. The "dtype" specifies the data type, which supports float32 and
+    // int8. The "metric_type" indicates the distance metric type (e.g., cosine,
+    // inner product, and L2). The "dim" represents the dimensionality of the
+    // vectors, indicating the number of features for each data point. The
+    // "fresh_hnsw" section contains parameters specific to FreshHNSW:
+    // - "max_degree": The maximum number of connections for each node in the
+    // graph.
+    // - "ef_construction": The size used for nearest neighbor search during graph
+    // construction, which affects both speed and the quality of the graph.
     auto fresh_hnsw_build_paramesters = R"(
     {
         "dtype": "float32",
@@ -57,7 +60,10 @@ main(int argc, char** argv) {
         }
     }
     )";
-    // The difference between HNSW and FreshHNSW is that FreshHNSW supports actual deletions, while HNSW only supports marked deletions. However, FreshHNSW incurs double the graph storage cost of HNSW due to the need to store reverse edges.
+    // The difference between HNSW and FreshHNSW is that FreshHNSW supports actual
+    // deletions, while HNSW only supports marked deletions. However, FreshHNSW
+    // incurs double the graph storage cost of HNSW due to the need to store
+    // reverse edges.
     auto index = vsag::Factory::CreateIndex("fresh_hnsw", fresh_hnsw_build_paramesters).value();
 
     /******************* Build FreshHnsw Index *****************/
@@ -75,9 +81,11 @@ main(int argc, char** argv) {
         query_vector[i] = distrib_real(rng);
     }
 
-    // fresh_hnsw_search_parameters is the configuration for searching in an FreshHNSW index.
-    // The "fresh_hnsw" section contains parameters specific to the search operation:
-    // - "ef_search": The size of the dynamic list used for nearest neighbor search, which influences both recall and search speed.
+    // fresh_hnsw_search_parameters is the configuration for searching in an
+    // FreshHNSW index. The "fresh_hnsw" section contains parameters specific to
+    // the search operation:
+    // - "ef_search": The size of the dynamic list used for nearest neighbor
+    // search, which influences both recall and search speed.
 
     auto fresh_hnsw_search_parameters = R"(
     {

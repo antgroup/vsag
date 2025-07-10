@@ -49,7 +49,8 @@ InnerProductDistance(const void* pVect1, const void* pVect2, const void* qty_ptr
 
 float
 INT8InnerProduct(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
-    return generic::INT8InnerProduct(pVect1v, pVect2v, qty_ptr);  // TODO(LHT): implement
+    return generic::INT8InnerProduct(pVect1v, pVect2v,
+                                     qty_ptr);  // TODO(LHT): implement
 }
 
 float
@@ -730,7 +731,8 @@ SQ8UniformComputeCodesIP(const uint8_t* RESTRICT codes1,
 float
 RaBitQFloatBinaryIP(const float* vector, const uint8_t* bits, uint64_t dim, float inv_sqrt_d) {
 #if defined(ENABLE_SSE)
-    return generic::RaBitQFloatBinaryIP(vector, bits, dim, inv_sqrt_d);  // TODO(zxy): implement
+    return generic::RaBitQFloatBinaryIP(vector, bits, dim,
+                                        inv_sqrt_d);  // TODO(zxy): implement
 #else
     return generic::RaBitQFloatBinaryIP(vector, bits, dim, inv_sqrt_d);
 #endif
@@ -977,8 +979,10 @@ KacsWalk(float* data, size_t len) {
     }
     if (base != 0) {
         data[len / 2] *= std::sqrt(2.0F);
-        //In odd condition, we operate the prev len/2 items and the post len/2 items, the No.len/2 item stay still,
-        //As we need to resize the while sequence in the next step, so we increase the val of No.len/2 item to eliminate the impact of the following resize.
+        // In odd condition, we operate the prev len/2 items and the post len/2
+        // items, the No.len/2 item stay still, As we need to resize the while
+        // sequence in the next step, so we increase the val of No.len/2 item to
+        // eliminate the impact of the following resize.
     }
 #else
     return generic::KacsWalk(data, len);

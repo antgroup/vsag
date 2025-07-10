@@ -92,7 +92,10 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
     for (auto& dim : dims) {
         auto param = GeneratePyramidBuildParametersString(metric_type, dim, level);
         auto index = TestFactory(name, param, true);
-        auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type, /*with_path=*/true);
+        auto dataset = pool.GetDatasetAndCreate(dim,
+                                                base_count,
+                                                metric_type,
+                                                /*with_path=*/true);
         TestContinueAdd(index, dataset, true);
         TestKnnSearch(index, dataset, search_param, 0.99, true);
         TestFilterSearch(index, dataset, search_param, 0.99, true);
@@ -110,7 +113,10 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex, "Pyramid Add Test", "[f
     for (auto& dim : dims) {
         auto param = GeneratePyramidBuildParametersString(metric_type, dim, level);
         auto index = TestFactory(name, param, true);
-        auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type, /*with_path=*/true);
+        auto dataset = pool.GetDatasetAndCreate(dim,
+                                                base_count,
+                                                metric_type,
+                                                /*with_path=*/true);
         TestAddIndex(index, dataset, true);
         TestKnnSearch(index, dataset, search_param, 0.99, true);
         TestFilterSearch(index, dataset, search_param, 0.99, true);
@@ -130,8 +136,10 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
         for (const auto& level : levels) {
             auto param = GeneratePyramidBuildParametersString(metric_type, dim, level);
             auto index = TestFactory(name, param, true);
-            auto dataset =
-                pool.GetDatasetAndCreate(dim, base_count, metric_type, /*with_path=*/true);
+            auto dataset = pool.GetDatasetAndCreate(dim,
+                                                    base_count,
+                                                    metric_type,
+                                                    /*with_path=*/true);
             TestContinueAdd(index, dataset, true);
             TestKnnSearch(index, dataset, search_param, 0.99, true);
             TestFilterSearch(index, dataset, search_param, 0.99, true);
@@ -161,7 +169,10 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
             auto deserialize_index = index2->Deserialize(serialize_binary.value());
             REQUIRE(deserialize_index.has_value());
         }
-        auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type, /*with_path=*/true);
+        auto dataset = pool.GetDatasetAndCreate(dim,
+                                                base_count,
+                                                metric_type,
+                                                /*with_path=*/true);
         TestBuildIndex(index, dataset, true);
         SECTION("serialize/deserialize by binary") {
             auto index2 = TestFactory(name, param, true);
@@ -191,7 +202,10 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex, "Pyramid Clone", "[ft][
         vsag::Options::Instance().set_block_size_limit(size);
         auto param = GeneratePyramidBuildParametersString(metric_type, dim, level);
         auto index = TestFactory(name, param, true);
-        auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type, /*with_path=*/true);
+        auto dataset = pool.GetDatasetAndCreate(dim,
+                                                base_count,
+                                                metric_type,
+                                                /*with_path=*/true);
         TestBuildIndex(index, dataset, true);
         TestClone(index, dataset, search_param);
     }
@@ -214,7 +228,10 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
         if (not index.has_value()) {
             continue;
         }
-        auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type, /*with_path=*/true);
+        auto dataset = pool.GetDatasetAndCreate(dim,
+                                                base_count,
+                                                metric_type,
+                                                /*with_path=*/true);
         TestContinueAddIgnoreRequire(index.value(), dataset, 1);
         vsag::Options::Instance().set_block_size_limit(origin_size);
     }
@@ -229,7 +246,10 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
     for (auto& dim : dims) {
         auto param = GeneratePyramidBuildParametersString(metric_type, dim, level);
         auto index = TestFactory(name, param, true);
-        auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type, /*with_path=*/true);
+        auto dataset = pool.GetDatasetAndCreate(dim,
+                                                base_count,
+                                                metric_type,
+                                                /*with_path=*/true);
         TestConcurrentAdd(index, dataset, true);
         TestConcurrentKnnSearch(index, dataset, search_param, 0.99, true);
     }

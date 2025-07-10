@@ -218,7 +218,8 @@ TestIndex::TestUpdateVector(const IndexPtr& index,
                 auto fail_vec_res = index->UpdateVector(ids[i], new_base);
                 REQUIRE(fail_vec_res.has_value());
                 if (fail_vec_res.value()) {
-                    // note that the update should be failed, but for some cases, it success
+                    // note that the update should be failed, but for some cases, it
+                    // success
                     auto force_update_dist = *index->CalcDistanceById(base + i * dim, ids[i]);
                     REQUIRE(after_update_dist < force_update_dist);
                     success_force_updated++;

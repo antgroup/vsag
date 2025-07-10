@@ -49,10 +49,11 @@ public:
     Resize(InnerIdType new_size) override;
 
     /****
-     * prefetch neighbors of a base point with id
-     * @param id of base point
-     * @param neighbor_i index of neighbor, 0 for neighbor size, 1 for first neighbor
-     */
+   * prefetch neighbors of a base point with id
+   * @param id of base point
+   * @param neighbor_i index of neighbor, 0 for neighbor size, 1 for first
+   * neighbor
+   */
     void
     Prefetch(InnerIdType id, uint32_t neighbor_i) override {
         // TODO(LHT): implement

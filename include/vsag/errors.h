@@ -31,10 +31,12 @@ enum class ErrorType {
     // [behavior errors]
     WRONG_STATUS,                 // index is at wrong status (e.g., destruct)
     BUILD_TWICE,                  // index has been build, cannot build again
-    INDEX_NOT_EMPTY,              // index object is NOT empty so that should not deserialize on it
+    INDEX_NOT_EMPTY,              // index object is NOT empty so that should not deserialize
+                                  // on it
     UNSUPPORTED_INDEX,            // trying to create an unsupported index
     UNSUPPORTED_INDEX_OPERATION,  // the index does not support this function
-    DIMENSION_NOT_EQUAL,          // the dimension of add/build/search request is NOT equal to index
+    DIMENSION_NOT_EQUAL,          // the dimension of add/build/search request is NOT equal
+                                  // to index
     INDEX_EMPTY,                  // index is empty, cannot search or serialize
 
     // [runtime errors]
@@ -71,4 +73,4 @@ _concatenate(std::stringstream& ss, const T& value, const Args&... args) {
     logger::error(ss.str());          \
     return tl::unexpected(Error(t, ss.str()));
 
-}  //namespace vsag
+}  // namespace vsag

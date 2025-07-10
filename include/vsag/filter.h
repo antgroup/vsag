@@ -28,48 +28,49 @@ public:
 
 public:
     /**
-      * @brief Check if a vector is filtered out by pre-filter, true means
-      * not been filtered out, false means have been filtered out, the result
-      * of KnnSearch/RangeSearch will only contain non-filtered-out vectors
-      * 
-      * @param id of the vector
-      * @return true if vector is valid, otherwise false
-      */
+   * @brief Check if a vector is filtered out by pre-filter, true means
+   * not been filtered out, false means have been filtered out, the result
+   * of KnnSearch/RangeSearch will only contain non-filtered-out vectors
+   *
+   * @param id of the vector
+   * @return true if vector is valid, otherwise false
+   */
     [[nodiscard]] virtual bool
     CheckValid(int64_t id) const = 0;
 
     /**
-      * @brief Check if a vector is filtered out by pre-filter, true means
-      * not been filtered out, false means have been filtered out, the result
-      * of KnnSearch/RangeSearch will only contain non-filtered-out vectors
-      * 
-      * @param data extra info of the vector
-      * @return true if vector is valid, otherwise false
-      */
+   * @brief Check if a vector is filtered out by pre-filter, true means
+   * not been filtered out, false means have been filtered out, the result
+   * of KnnSearch/RangeSearch will only contain non-filtered-out vectors
+   *
+   * @param data extra info of the vector
+   * @return true if vector is valid, otherwise false
+   */
     [[nodiscard]] virtual bool
     CheckValid(const char* data) const {
         return true;
     }
 
     /**
-      * @brief Get valid ratio of pre-filter, 1.0 means all the vectors valid, 
-      * none of them have been filter out.
-      * 
-      * @return the valid ratio
-      */
+   * @brief Get valid ratio of pre-filter, 1.0 means all the vectors valid,
+   * none of them have been filter out.
+   *
+   * @return the valid ratio
+   */
     [[nodiscard]] virtual float
     ValidRatio() const {
         return 1.0f;  // (default) all vectors is valid
     }
 
     /**
-      * @brief Get the distribution of pre-filter
-      * 
-      * @return distribution type of this filter
-      */
+   * @brief Get the distribution of pre-filter
+   *
+   * @return distribution type of this filter
+   */
     [[nodiscard]] virtual Distribution
     FilterDistribution() const {
-        return Distribution::NONE;  // (default) no distribution information hints provides
+        return Distribution::NONE;  // (default) no distribution information hints
+                                    // provides
     }
 };
 

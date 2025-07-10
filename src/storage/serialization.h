@@ -125,7 +125,8 @@ public:
     static FooterPtr
     Parse(StreamReader& reader);
 
-    /* [magic (8B)] [length_of_metadata (8B)] [metadata (*B)] [checksum (4B)] [length_of_footer (8B)] [cigam (8B)] */
+    /* [magic (8B)] [length_of_metadata (8B)] [metadata (*B)] [checksum (4B)]
+   * [length_of_footer (8B)] [cigam (8B)] */
     void
     Write(StreamWriter& writer);
 

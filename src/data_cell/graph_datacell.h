@@ -69,10 +69,11 @@ public:
     }
 
     /****
-     * prefetch neighbors of a base point with id
-     * @param id of base point
-     * @param neighbor_i index of neighbor, 0 for neighbor size, 1 for first neighbor
-     */
+   * prefetch neighbors of a base point with id
+   * @param id of base point
+   * @param neighbor_i index of neighbor, 0 for neighbor size, 1 for first
+   * neighbor
+   */
     void
     Prefetch(InnerIdType id, uint32_t neighbor_i) override {
         io_->Prefetch(static_cast<uint64_t>(id) * static_cast<uint64_t>(this->code_line_size_) +
@@ -240,7 +241,8 @@ GraphDataCell<IOTmpl>::Resize(InnerIdType new_size) {
     }
     if (is_support_delete_) {
         if (new_size > remove_flag_mask_) {
-            // remove_flag_mask_ exactly matches the maximum size of the graph in dynamic mode.
+            // remove_flag_mask_ exactly matches the maximum size of the graph in
+            // dynamic mode.
             throw VsagException(ErrorType::INTERNAL_ERROR,
                                 fmt::format("the size of graph is limit ({})", remove_flag_mask_));
         }
@@ -248,8 +250,8 @@ GraphDataCell<IOTmpl>::Resize(InnerIdType new_size) {
     }
     this->max_capacity_ = new_size;
     uint64_t io_size = static_cast<uint64_t>(new_size) * static_cast<uint64_t>(code_line_size_);
-    uint8_t end_flag =
-        127;  // the value is meaningless, only to occupy the position for io allocate
+    uint8_t end_flag = 127;  // the value is meaningless, only to occupy the
+                             // position for io allocate
     this->io_->Write(&end_flag, 1, io_size);
 }
 
@@ -281,9 +283,9 @@ GraphDataCell<IOTmpl>::DeleteNeighborsById(vsag::InnerIdType id) {
     if (is_support_delete_) {
         if (id <= max_capacity_) {
             if (node_versions_[id] + 1 == 0) {
-                throw VsagException(
-                    ErrorType::INTERNAL_ERROR,
-                    "remove point too many times in GraphDatacell, please rebuild index");
+                throw VsagException(ErrorType::INTERNAL_ERROR,
+                                    "remove point too many times in GraphDatacell, "
+                                    "please rebuild index");
             }
         } else {
             throw VsagException(ErrorType::INTERNAL_ERROR,

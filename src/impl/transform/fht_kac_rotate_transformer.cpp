@@ -22,7 +22,7 @@
 namespace vsag {
 
 inline size_t
-floor_log2(size_t x) {  //smaller or equal
+floor_log2(size_t x) {  // smaller or equal
     size_t ret = 0;
     while (x > 1) {
         ret++;
@@ -88,7 +88,8 @@ FhtKacRotator::Transform(const float* data, float* rotated_vec) const {
         KacsWalk(rotated_vec, dim);
     }
     VecRescale(rotated_vec, dim, 0.25F);
-    //origin vec(x,y), after kacs_walk_generic() -> (x+y, x-y),should be resize by sqrt(0.5) for each KacsWalk() to make the len of vector consistent
+    // origin vec(x,y), after kacs_walk_generic() -> (x+y, x-y),should be resize
+    // by sqrt(0.5) for each KacsWalk() to make the len of vector consistent
 }
 void
 FhtKacRotator::InverseTransform(float const* data, float* rotated_vec) const {

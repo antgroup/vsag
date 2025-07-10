@@ -59,14 +59,17 @@ public:
             JSON_GET(
                 latency_p99, std::to_string(value["latency_detail(ms)"]["p99"].get<float>()), "-1");
             JSON_GET(recall_avg, std::to_string(value["recall_avg"].get<float>()), "-1");
-            // JSON_GET(recall_p50, std::to_string(value["recall_detail"]["p50"].get<float>()), "-1");
-            // JSON_GET(recall_p90, std::to_string(value["recall_detail"]["p90"].get<float>()), "-1");
+            // JSON_GET(recall_p50,
+            // std::to_string(value["recall_detail"]["p50"].get<float>()), "-1");
+            // JSON_GET(recall_p90,
+            // std::to_string(value["recall_detail"]["p90"].get<float>()), "-1");
 
             constexpr static const char* row_template =
                 "performance,case_name={0},index_name={1},dtype={2}"
                 " "
                 "num_vectors={3},dim={4},build_time={5},tps={6},qps={7}"
-                ",latency_avg={8},latency_p90={9},latency_p95={10},latency_p99={11},recall_avg={12}"
+                ",latency_avg={8},latency_p90={9},latency_p95={10},latency_p99={11},"
+                "recall_avg={12}"
                 " "
                 "{13}";
             auto row = fmt::format(row_template,

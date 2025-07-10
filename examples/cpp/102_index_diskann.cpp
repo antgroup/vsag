@@ -42,18 +42,20 @@ main(int argc, char** argv) {
     base->NumElements(num_vectors)->Dim(dim)->Ids(ids)->Float32Vectors(vectors);
 
     /******************* Create DiskANN Index *****************/
-    // diskann_build_paramesters is the configuration for building a DiskANN index.
-    // The "dtype" specifies the data type, "metric_type" indicates the distance metric,
-    // and "dim" represents the dimensionality of the feature vectors.
-    // The "diskann" section contains parameters specific to DiskANN:
+    // diskann_build_paramesters is the configuration for building a DiskANN
+    // index. The "dtype" specifies the data type, "metric_type" indicates the
+    // distance metric, and "dim" represents the dimensionality of the feature
+    // vectors. The "diskann" section contains parameters specific to DiskANN:
     // - "max_degree": Maximum degree of the graph
     // - "ef_construction": Construction phase efficiency factor
     // - "pq_sample_rate": PQ sampling rate
     // - "pq_dims": PQ dimensionality
-    // - "use_pq_search": Indicates whether to cache the graph in memory and use PQ vectors for retrieval (optional)
+    // - "use_pq_search": Indicates whether to cache the graph in memory and use
+    // PQ vectors for retrieval (optional)
     // - "use_async_io": Specifies whether to use asynchronous I/O (optional)
-    // - "use_bsa": Determines whether to use the BSA method for lossless filtering during the reordering phase (optional)
-    // Other parameters are mandatory.
+    // - "use_bsa": Determines whether to use the BSA method for lossless
+    // filtering during the reordering phase (optional) Other parameters are
+    // mandatory.
     auto diskann_build_paramesters = R"(
     {
         "dtype": "float32",
@@ -87,12 +89,17 @@ main(int argc, char** argv) {
         query_vector[i] = distrib_real(rng);
     }
 
-    // diskann_search_parameters is the configuration for searching in a DiskANN index.
-    // The "diskann" section contains parameters specific to the search operation:
-    // - "ef_search": The search efficiency factor, which influences accuracy and speed.
-    // - "beam_search": The number of beams to use during the search process, balancing exploration and exploitation.
-    // - "io_limit": The maximum number of I/O operations allowed during the search.
-    // - "use_reorder": Indicates whether to perform reordering of results for better accuracy (optional).
+    // diskann_search_parameters is the configuration for searching in a DiskANN
+    // index. The "diskann" section contains parameters specific to the search
+    // operation:
+    // - "ef_search": The search efficiency factor, which influences accuracy and
+    // speed.
+    // - "beam_search": The number of beams to use during the search process,
+    // balancing exploration and exploitation.
+    // - "io_limit": The maximum number of I/O operations allowed during the
+    // search.
+    // - "use_reorder": Indicates whether to perform reordering of results for
+    // better accuracy (optional).
 
     auto diskann_search_parameters = R"(
     {
@@ -138,8 +145,9 @@ main(int argc, char** argv) {
         }
     }
 
-    // Through the Reader, disk-based DiskANN retrieval can be achieved, and the Reader can be customized.
-    // Here we provide an example of a Reader based on the local file system.
+    // Through the Reader, disk-based DiskANN retrieval can be achieved, and the
+    // Reader can be customized. Here we provide an example of a Reader based on
+    // the local file system.
     /******************* Deserialize with Reader *****************/
     {
         vsag::ReaderSet rs;

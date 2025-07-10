@@ -41,11 +41,14 @@ main(int argc, char** argv) {
     /******************* Create HNSW Index *****************/
     // hnsw_build_parameters is the configuration for building an HNSW index.
     // The "dtype" specifies the data type, which supports float32 and int8.
-    // The "metric_type" indicates the distance metric type (e.g., cosine, inner product, and L2).
-    // The "dim" represents the dimensionality of the vectors, indicating the number of features for each data point.
-    // The "hnsw" section contains parameters specific to HNSW:
-    // - "max_degree": The maximum number of connections for each node in the graph.
-    // - "ef_construction": The size used for nearest neighbor search during graph construction, which affects both speed and the quality of the graph.
+    // The "metric_type" indicates the distance metric type (e.g., cosine, inner
+    // product, and L2). The "dim" represents the dimensionality of the vectors,
+    // indicating the number of features for each data point. The "hnsw" section
+    // contains parameters specific to HNSW:
+    // - "max_degree": The maximum number of connections for each node in the
+    // graph.
+    // - "ef_construction": The size used for nearest neighbor search during graph
+    // construction, which affects both speed and the quality of the graph.
     auto hnsw_build_paramesters = R"(
     {
         "dtype": "float32",
@@ -75,7 +78,8 @@ main(int argc, char** argv) {
 
     // hnsw_search_parameters is the configuration for searching in an HNSW index.
     // The "hnsw" section contains parameters specific to the search operation:
-    // - "ef_search": The size of the dynamic list used for nearest neighbor search, which influences both recall and search speed.
+    // - "ef_search": The size of the dynamic list used for nearest neighbor
+    // search, which influences both recall and search speed.
     auto hnsw_search_parameters = R"(
     {
         "hnsw": {

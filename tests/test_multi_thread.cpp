@@ -51,9 +51,9 @@ TEST_CASE("Test DiskAnn Multi-threading", "[ft][diskann]") {
     int ef_search = 100;
     int io_limit = 200;
     float threshold = 8.0;
-    float pq_sample_rate =
-        0.5;  // pq_sample_rate represents how much original data is selected during the training of pq compressed vectors.
-    int pq_dims = 9;  // pq_dims represents the dimensionality of the compressed vector.
+    float pq_sample_rate = 0.5;  // pq_sample_rate represents how much original data is selected
+                                 // during the training of pq compressed vectors.
+    int pq_dims = 9;             // pq_dims represents the dimensionality of the compressed vector.
     nlohmann::json diskann_parameters{{"max_degree", max_degree},
                                       {"ef_construction", ef_construction},
                                       {"pq_sample_rate", pq_sample_rate},

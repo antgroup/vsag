@@ -28,7 +28,8 @@ class Parameter {
 public:
     static std::string
     TryToParseType(const JsonType& json) {
-        CHECK_ARGUMENT(json.contains("type"), "params must have type");  // TODO(LHT): "type" rename
+        CHECK_ARGUMENT(json.contains("type"),
+                       "params must have type");  // TODO(LHT): "type" rename
         return json["type"];
     }
 

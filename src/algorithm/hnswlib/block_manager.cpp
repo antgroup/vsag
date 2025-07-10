@@ -53,10 +53,10 @@ BlockManager::Resize(size_t new_max_elements) {
 
     try {
         bool append_more_block = blocks_.size() <= new_full_blocks;
-        // Adjust the size of the last block. There are two scenarios here: when more blocks
-        // need to be padded, the last block should be converted from a remaining_block to a
-        // full_block; otherwise, the size of the remaining_block should be increased to make
-        // it a larger remaining_block.
+        // Adjust the size of the last block. There are two scenarios here: when
+        // more blocks need to be padded, the last block should be converted from a
+        // remaining_block to a full_block; otherwise, the size of the
+        // remaining_block should be increased to make it a larger remaining_block.
         if (!blocks_.empty() && blocks_.back() != nullptr && block_lens_.back() != block_size_) {
             char* last_block = blocks_.back();
 
@@ -69,13 +69,15 @@ BlockManager::Resize(size_t new_max_elements) {
             block_lens_.back() = new_last_block_size;
         }
 
-        // If the current number of blocks is less than the number of complete blocks needed, proceed with padding.
+        // If the current number of blocks is less than the number of complete
+        // blocks needed, proceed with padding.
         while (blocks_.size() < new_full_blocks) {
             blocks_.push_back(static_cast<char*>(allocator_->Allocate(block_size_)));
             block_lens_.push_back(block_size_);
         }
 
-        // Padding the last block is necessary only when there are not enough blocks.
+        // Padding the last block is necessary only when there are not enough
+        // blocks.
         if (new_remaining_size > 0 && append_more_block) {
             blocks_.push_back(static_cast<char*>(allocator_->Allocate(new_remaining_size)));
             block_lens_.push_back(new_remaining_size);

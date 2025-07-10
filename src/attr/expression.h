@@ -47,8 +47,9 @@ enum class ExpressionType {
  * @class Expression
  * @brief Abstract base class for all expression types.
  *
- * This class provides the interface for expression evaluation and string representation.
- * All concrete expression types should inherit from this class and implement the pure virtual methods.
+ * This class provides the interface for expression evaluation and string
+ * representation. All concrete expression types should inherit from this class
+ * and implement the pure virtual methods.
  */
 class Expression {
 public:

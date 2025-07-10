@@ -70,8 +70,8 @@ public:
         }
         size_t io_size = (new_capacity - total_count_) * max_code_size_ + current_offset_;
         this->max_capacity_ = new_capacity;
-        uint8_t end_flag =
-            127;  // the value is meaingless, only to occupy the position for io allocate
+        uint8_t end_flag = 127;  // the value is meaingless, only to occupy the
+                                 // position for io allocate
         this->io_->Write(&end_flag, 1, io_size);
         this->offset_io_->Write(&end_flag, 1, new_capacity * sizeof(uint32_t));
     }

@@ -71,7 +71,8 @@ parse_args(argparse::ArgumentParser& parser, int argc, char** argv) {
         .choices("knn", "range", "knn_filter", "range_filter")
         .help(
             "The mode supported while use 'search' type,"
-            " choose from {\"knn\", \"range\", \"knn_filter\", \"range_filter\"}");
+            " choose from {\"knn\", \"range\", \"knn_filter\", "
+            "\"range_filter\"}");
     parser.add_argument("--delete-index-after-search")
         .default_value(false)
         .help("Delete index after search");
@@ -194,7 +195,8 @@ main(int argc, char** argv) {
         // <format, formatted_results>
         std::unordered_map<std::string, std::string> cached_strings;
         for (const auto& exporter : job.exporters) {
-            // std::cout << "export to " << exporter.to << " in " << exporter.format << std::endl;
+            // std::cout << "export to " << exporter.to << " in " << exporter.format
+            // << std::endl;
 
             // convert at first time
             if (cached_strings.find(exporter.format) == cached_strings.end()) {

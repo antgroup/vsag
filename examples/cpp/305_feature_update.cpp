@@ -74,12 +74,14 @@ main(int argc, char** argv) {
         ->Float32Vectors(new_vector.data())
         ->Owner(false);
 
-    // try to update determines by the distance between the new vector and the old vector
+    // try to update determines by the distance between the new vector and the old
+    // vector
     if (auto update_status = index->UpdateVector(update_id, update_dataset, false);
         not update_status.has_value()) { /* update returns an error */
         std::cerr << "update vector failed: " << update_status.error().message << std::endl;
         abort();
-    } else if (*update_status) { /* updated, new vector is near to the old vector */
+    } else if (*update_status) { /* updated, new vector is near to the old vector
+                                */
         std::cout << "updated, new vector is near to the old vector" << std::endl;
     } else { /* not update, new vector is far away from the old vector */
         std::cout << "not update, new vector is far away from the old vector" << std::endl;
@@ -89,7 +91,8 @@ main(int argc, char** argv) {
             not remove.has_value()) { /* remove returns an error */
             std::cerr << "delete vector failed: " << remove.error().message << std::endl;
             abort();
-        } else if (not *remove) { /* id not exists, should NOT happend in this example */
+        } else if (not *remove) { /* id not exists, should NOT happend in this
+                                 example */
             std::cerr << "example error" << std::endl;
             abort();
         } else { /* delete vector success */
@@ -98,8 +101,9 @@ main(int argc, char** argv) {
                 not add.has_value()) { /* add returns an error */
                 std::cout << "insert vector failed: " << add.error().message << std::endl;
                 abort();
-            } else if (
-                not add->empty()) { /* not insert, id is already exist in index, shoud NOT happen in this example */
+            } else if (not add->empty()) { /* not insert, id is already exist in
+                                        index, shoud NOT happen in this example
+                                      */
                 std::cerr << "example error" << std::endl;
                 abort();
             } else {

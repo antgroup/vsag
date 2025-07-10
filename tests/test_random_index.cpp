@@ -30,14 +30,16 @@ TEST_CASE("Test Random Index", "[ft][random]") {
     std::uniform_int_distribution<int> dim_generate(1, 500);
     std::uniform_int_distribution<int> max_elements_generate(1, 1000);
     std::uniform_int_distribution<int> max_degree_generate(
-        5, 64);  // When the number of edges is less than 5, connectivity cannot be guaranteed.
+        5, 64);  // When the number of edges is less than 5, connectivity cannot be
+                 // guaranteed.
     std::uniform_int_distribution<int> construct_generate(1, 500);
     std::uniform_int_distribution<int> search_generate(1, 500);
     std::uniform_int_distribution<int> k_generate(1, 200);
     std::uniform_int_distribution<int> io_limit_generate(1, 500);
     std::uniform_real_distribution<float> threshold_generate(1, 500);
     std::uniform_real_distribution<float> pq_dims_generate(
-        1, 512);  // DiskANN does not allow the number of PQ buckets to be greater than 512.
+        1, 512);  // DiskANN does not allow the number of PQ buckets to be greater
+                  // than 512.
     std::uniform_real_distribution<float> use_pq_search_generate;
     std::uniform_real_distribution<float> mold_generate(-1000, 1000);
 

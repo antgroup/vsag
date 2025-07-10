@@ -240,8 +240,9 @@ EvalDataset::Load(const std::string& filename) {
         attr.read(str_type, metric);
         if (obj->vector_type_ == DENSE_VECTORS) {
             if (metric == "euclidean") {
-                // the distance in the ground truth (provided by public datasets), is L2 distance,
-                // which cannot be compared with L2Sqr distance (from VSAG) directly
+                // the distance in the ground truth (provided by public datasets), is L2
+                // distance, which cannot be compared with L2Sqr distance (from VSAG)
+                // directly
                 obj->distance_func_ =
                     [](const void* query1, const void* query2, const void* qty_ptr) -> float {
                     return sqrt(vsag::L2Sqr(query1, query2, qty_ptr));

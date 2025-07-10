@@ -87,7 +87,8 @@ TEST_CASE("SQ8 Uniform Serialize and Deserialize", "[ut][SQ8UniformQuantizer]") 
         float error = 4 * 1.0f / 255.0f;
         for (auto count : counts) {
             TestSerializeAndDeserializeMetricSQ8Uniform<metrics[0]>(dim, count, error);
-            //            TestSerializeAndDeserializeMetricSQ8Uniform<metrics[1]>(dim, count, error);
+            //            TestSerializeAndDeserializeMetricSQ8Uniform<metrics[1]>(dim,
+            //            count, error);
             TestSerializeAndDeserializeMetricSQ8Uniform<metrics[2]>(dim, count, error);
         }
     }

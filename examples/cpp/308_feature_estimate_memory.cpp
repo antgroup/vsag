@@ -40,7 +40,8 @@ main(int argc, char** argv) {
     /******************* Estimate Memory *****************/
     if (index->CheckFeature(vsag::SUPPORT_ESTIMATE_MEMORY)) {
         auto estimate_memory = index->EstimateMemory(100'000);
-        std::cout << "Index Support EstimateMemory, when given 100000 vectors to build, the "
+        std::cout << "Index Support EstimateMemory, when given 100000 vectors to "
+                     "build, the "
                      "estimate memory is "
                   << estimate_memory << " byte" << std::endl;
     }

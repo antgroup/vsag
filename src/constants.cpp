@@ -123,7 +123,7 @@ const char* const STATSTIC_RANGE_HOP = "range_hop";
 const char* const STATSTIC_RANGE_CACHE_HIT = "range_cache_hit";
 const char* const STATSTIC_RANGE_IO_TIME = "range_io_time";
 
-//Error message
+// Error message
 const char* const MESSAGE_PARAMETER = "invalid parameter";
 
 // Serialize key

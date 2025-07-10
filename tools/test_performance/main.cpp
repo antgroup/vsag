@@ -65,7 +65,8 @@ main(int argc, char* argv[]) {
     set_level(level::off);
     if (argc != 6) {
         std::cerr << "Usage: " << argv[0]
-                  << " <dataset_file_path> <process> <index_name> <build_param> <search_param>"
+                  << " <dataset_file_path> <process> <index_name> <build_param> "
+                     "<search_param>"
                   << std::endl;
         return -1;
     }

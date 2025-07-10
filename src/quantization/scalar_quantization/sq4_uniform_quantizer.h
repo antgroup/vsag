@@ -108,10 +108,10 @@ private:
     DataType diff_{0};
 
     /***
-     * code layout: sq-code(fixed) + norm(opt) + sum(opt)
-     * for L2 and COSINE, norm is needed for fast computation
-     * for IP and COSINE, sum is needed for restoring original distance
-     */
+   * code layout: sq-code(fixed) + norm(opt) + sum(opt)
+   * for L2 and COSINE, norm is needed for fast computation
+   * for IP and COSINE, sum is needed for restoring original distance
+   */
     uint64_t offset_code_{0};
     uint64_t offset_norm_{0};
     uint64_t offset_sum_{0};

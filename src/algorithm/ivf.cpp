@@ -500,7 +500,8 @@ IVF::Deserialize(StreamReader& reader) {
         if (use_attribute_filter_) {
             this->attr_filter_index_->Deserialize(reader);
         }
-    } else {  // create like `else if ( ver in [v0.15, v0.17] )` here if need in the future
+    } else {  // create like `else if ( ver in [v0.15, v0.17] )` here if need in
+              // the future
         logger::debug("parse with new version format");
 
         auto metadata = footer->GetMetadata();
@@ -593,7 +594,8 @@ IVF::search(const DatasetPtr& query, const InnerSearchParam& param) const {
             topk = std::numeric_limits<int64_t>::max();
         }
     }
-    // Scale topk to ensure sufficient candidates after deduplication when buckets_per_data_ > 1
+    // Scale topk to ensure sufficient candidates after deduplication when
+    // buckets_per_data_ > 1
     int64_t origin_topk = topk;
     if (buckets_per_data_ > 1) {
         if (topk <= std::numeric_limits<int64_t>::max() / buckets_per_data_) {
@@ -709,19 +711,18 @@ void
 IVF::check_merge_illegal(const vsag::MergeUnit& unit) const {
     auto index = std::dynamic_pointer_cast<IndexImpl<IVF>>(unit.index);
     if (index == nullptr) {
-        throw VsagException(
-            ErrorType::INVALID_ARGUMENT,
-            "Merge Failed: index type not match, try to merge a non-ivf index to an IVF index");
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            "Merge Failed: index type not match, try to merge a "
+                            "non-ivf index to an IVF index");
     }
     auto other_ivf_index = std::dynamic_pointer_cast<IVF>(
         std::dynamic_pointer_cast<IndexImpl<IVF>>(unit.index)->GetInnerIndex());
     if (other_ivf_index->use_reorder_ != this->use_reorder_) {
-        throw VsagException(
-            ErrorType::INVALID_ARGUMENT,
-            fmt::format(
-                "Merge Failed: ivf use_reorder not match, current index is {}, other index is {}",
-                this->use_reorder_,
-                other_ivf_index->use_reorder_));
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            fmt::format("Merge Failed: ivf use_reorder not match, "
+                                        "current index is {}, other index is {}",
+                                        this->use_reorder_,
+                                        other_ivf_index->use_reorder_));
     }
     auto cur_model = this->ExportModel(index->GetCommonParam());
     std::stringstream ss1;
@@ -747,9 +748,9 @@ IVF::check_merge_illegal(const vsag::MergeUnit& unit) const {
     other_model.reset();
 
     if (not check_equal_on_string_stream(ss1, ss2)) {
-        throw VsagException(
-            ErrorType::INVALID_ARGUMENT,
-            "Merge Failed: IVF model not match, try to merge a different model ivf index");
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            "Merge Failed: IVF model not match, try to merge a "
+                            "different model ivf index");
     }
 }
 

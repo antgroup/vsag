@@ -76,8 +76,8 @@ TestDatasetPool IVFTestIndex::pool{};
 fixtures::TempDir IVFTestIndex::dir{"ivf_test"};
 const std::string IVFTestIndex::name = "ivf";
 
-// DON'T WORRY! IVF just can't achieve high recall on random datasets. so we set the expected
-// recall with a small number in test cases
+// DON'T WORRY! IVF just can't achieve high recall on random datasets. so we set
+// the expected recall with a small number in test cases
 const std::vector<std::pair<std::string, float>> IVFTestIndex::all_test_cases = {
     {"fp32", 0.90},
     {"bf16", 0.88},
@@ -1221,7 +1221,8 @@ TestIVFGNOIMIBuildWithResidual(const fixtures::IVFTestIndexPtr& test_index,
                         recall *= 0.8F;  // Kmeans may not achieve high recall in random datasets
                     }
                     if (base_quantization_str == "sq8_uniform,fp32") {
-                        continue;  // sq8_uniform reduce recall when using residual in GNO-IMI
+                        continue;  // sq8_uniform reduce recall when using residual in
+                                   // GNO-IMI
                     }
                     auto count = std::min(900, static_cast<int32_t>(dim / 4));
                     auto search_param =

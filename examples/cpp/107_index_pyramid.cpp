@@ -86,15 +86,20 @@ main(int argc, char** argv) {
     /******************* Create Pyramid Index *****************/
     // pyramid_build_parameters is the configuration for building a Pyramid index.
     // The "dtype" specifies the data type, which supports float32 and int8.
-    // The "metric_type" indicates the distance metric type (e.g., cosine, inner product, and L2).
-    // The "dim" represents the dimensionality of the vectors, indicating the number of features for each data point.
-    // The "pyramid" section contains parameters specific to Pyramid:
+    // The "metric_type" indicates the distance metric type (e.g., cosine, inner
+    // product, and L2). The "dim" represents the dimensionality of the vectors,
+    // indicating the number of features for each data point. The "pyramid"
+    // section contains parameters specific to Pyramid:
     // - "odescent": graph type
-    //    - "io_params": The parameters for the I/O operation, which can be "memory" or "block_memory_io".
-    //    - "max_degree": The maximum number of connections for each node in the graph.
-    //    - "alpha": The parameter for the graph construction, which influences the pruning process.
+    //    - "io_params": The parameters for the I/O operation, which can be
+    //    "memory" or "block_memory_io".
+    //    - "max_degree": The maximum number of connections for each node in the
+    //    graph.
+    //    - "alpha": The parameter for the graph construction, which influences
+    //    the pruning process.
     //    - "graph_iter_turn": The number of iterations for graph construction.
-    //    - "neighbor_sample_rate": The ratio of the number of neighbors to be selected for iteration of graph update.
+    //    - "neighbor_sample_rate": The ratio of the number of neighbors to be
+    //    selected for iteration of graph update.
     // - "no_build_levels": The levels that do not need to be built.
     auto pyramid_build_paramesters = R"(
     {
@@ -134,9 +139,11 @@ main(int argc, char** argv) {
         query_vector[i] = distrib_real(rng);
     }
 
-    // pyramid_search_parameters is the configuration for searching in an Pyramid index.
-    // The "pyramid" section contains parameters specific to the search operation:
-    // - "ef_search": The size of the dynamic list used for nearest neighbor search, which influences both recall and search speed.
+    // pyramid_search_parameters is the configuration for searching in an Pyramid
+    // index. The "pyramid" section contains parameters specific to the search
+    // operation:
+    // - "ef_search": The size of the dynamic list used for nearest neighbor
+    // search, which influences both recall and search speed.
     auto pyramid_search_parameters = R"(
     {
         "pyramid": {

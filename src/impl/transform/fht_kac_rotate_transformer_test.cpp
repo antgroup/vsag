@@ -67,9 +67,10 @@ TestTransform(FhtKacRotator& rom, uint32_t dim) {
     std::vector<float> inverse_vec = vec;
 
     rom.Transform(original_vec.data(), vec.data());
-    //test
+    // test
     rom.InverseTransform(vec.data(), inverse_vec.data());
-    // verify that the length remains constant (orthogonal matrix preserving length)
+    // verify that the length remains constant (orthogonal matrix preserving
+    // length)
     double original_length = 0.0, transformed_length = 0.0, inverse_length = 0.0;
     for (uint32_t i = 0; i < dim; ++i) {
         original_length += original_vec[i] * original_vec[i];

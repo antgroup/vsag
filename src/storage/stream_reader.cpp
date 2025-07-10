@@ -129,9 +129,9 @@ BufferStreamReader::Read(char* data, uint64_t size) {
         buffer_cursor_ = 0;  // Reset cursor to overwrite buffer_'s content
         valid_size_ = std::min(max_size_ - cursor_, buffer_size_);
         if (valid_size_ == 0) {
-            throw vsag::VsagException(
-                vsag::ErrorType::READ_ERROR,
-                "BufferStreamReader: The file size is smaller than the memory you want to read.");
+            throw vsag::VsagException(vsag::ErrorType::READ_ERROR,
+                                      "BufferStreamReader: The file size is smaller "
+                                      "than the memory you want to read.");
         }
         reader_impl_->Read(buffer_, valid_size_);
         cursor_ += valid_size_;

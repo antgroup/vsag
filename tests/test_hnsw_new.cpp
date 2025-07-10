@@ -128,22 +128,22 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex,
     }
     // TODO(lht)dim check
     /*
-    SECTION("Invalid dim param") {
-        auto dim = GENERATE(-1, std::numeric_limits<uint64_t>::max(), 0, 8.6);
-        constexpr const char* param_tmp = R"(
-        {{
-            "dtype": "float32",
-            "metric_type": "l2",
-            "dim": {},
-            "hnsw": {{
-                "max_degree": 64,
-                "ef_construction": 500
-            }}
-        }})";
-        auto param = fmt::format(param_tmp, dim);
-        REQUIRE_THROWS(TestFactory(name, param, false));
-    }
-    */
+  SECTION("Invalid dim param") {
+      auto dim = GENERATE(-1, std::numeric_limits<uint64_t>::max(), 0, 8.6);
+      constexpr const char* param_tmp = R"(
+      {{
+          "dtype": "float32",
+          "metric_type": "l2",
+          "dim": {},
+          "hnsw": {{
+              "max_degree": 64,
+              "ef_construction": 500
+          }}
+      }})";
+      auto param = fmt::format(param_tmp, dim);
+      REQUIRE_THROWS(TestFactory(name, param, false));
+  }
+  */
 
     SECTION("Miss hnsw param") {
         auto param = GENERATE(

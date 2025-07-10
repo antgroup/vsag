@@ -118,7 +118,7 @@ extern const char* const STATSTIC_RANGE_HOP;
 extern const char* const STATSTIC_RANGE_CACHE_HIT;
 extern const char* const STATSTIC_RANGE_IO_TIME;
 
-//Error message
+// Error message
 extern const char* const MESSAGE_PARAMETER;
 
 // Serialize key

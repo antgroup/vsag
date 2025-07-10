@@ -629,8 +629,10 @@ KacsWalk(float* data, size_t len) {
     }
     if (base != 0) {
         data[len / 2] *= std::sqrt(2.0F);
-        //In odd condition, we operate the prev len/2 items and the post len/2 items, the No.len/2 item stay still,
-        //As we need to resize the while sequence in the next step, so we increase the val of No.len/2 item to eliminate the impact of the following resize.
+        // In odd condition, we operate the prev len/2 items and the post len/2
+        // items, the No.len/2 item stay still, As we need to resize the while
+        // sequence in the next step, so we increase the val of No.len/2 item to
+        // eliminate the impact of the following resize.
     }
 }
 

@@ -20,13 +20,15 @@ namespace vsag {
 enum IndexFeature {
     NEED_TRAIN = 1, /**< Indicates that the class needs to be trained */
 
-    SUPPORT_BUILD,                     /**< Supports building the index */
-    SUPPORT_ADD_AFTER_BUILD,           /**< Supports adding new elements after building*/
-    SUPPORT_ADD_FROM_EMPTY,            /**< Supports adding elements to an empty index */
-    SUPPORT_KNN_SEARCH,                /**< Supports K-nearest neighbor search */
-    SUPPORT_KNN_SEARCH_WITH_ID_FILTER, /**< Supports K-nearest neighbor search with ID filtering */
-    SUPPORT_RANGE_SEARCH,              /**< Supports range search */
-    SUPPORT_RANGE_SEARCH_WITH_ID_FILTER, /**< Supports range search with ID filtering */
+    SUPPORT_BUILD,                       /**< Supports building the index */
+    SUPPORT_ADD_AFTER_BUILD,             /**< Supports adding new elements after building*/
+    SUPPORT_ADD_FROM_EMPTY,              /**< Supports adding elements to an empty index */
+    SUPPORT_KNN_SEARCH,                  /**< Supports K-nearest neighbor search */
+    SUPPORT_KNN_SEARCH_WITH_ID_FILTER,   /**< Supports K-nearest neighbor search
+                                          with ID filtering */
+    SUPPORT_RANGE_SEARCH,                /**< Supports range search */
+    SUPPORT_RANGE_SEARCH_WITH_ID_FILTER, /**< Supports range search with ID
+                                          filtering */
     SUPPORT_KNN_ITERATOR_FILTER_SEARCH,  /**< Support iterator filter search **/
     SUPPORT_DELETE_BY_ID,                /**< Supports deleting elements by ID */
     SUPPORT_BATCH_SEARCH,                /**< Supports batch search */
@@ -36,31 +38,45 @@ enum IndexFeature {
     SUPPORT_SERIALIZE_FILE,              /**< Supports serialization to a file */
     SUPPORT_SERIALIZE_BINARY_SET,        /**< Supports serialization to a binary set */
     SUPPORT_DESERIALIZE_FILE,            /**< Supports deserialization from a file */
-    SUPPORT_DESERIALIZE_BINARY_SET,      /**< Supports deserialization from a binary set */
-    SUPPORT_DESERIALIZE_READER_SET,      /**< Supports deserialization from a reader set */
+    SUPPORT_DESERIALIZE_BINARY_SET,      /**< Supports deserialization from a binary
+                                     set */
+    SUPPORT_DESERIALIZE_READER_SET,      /**< Supports deserialization from a reader
+                                     set */
     SUPPORT_RESET,                       /**< Supports resetting the class */
     SUPPORT_FEEDBACK,                    /**< Supports feedback */
     SUPPORT_CAL_DISTANCE_BY_ID,          /**< Supports calculating distance by ID */
 
-    SUPPORT_TRAIN_WITH_MULTI_THREAD,      /**< Supports training with multi-threading */
-    SUPPORT_BUILD_WITH_MULTI_THREAD,      /**< Supports building with multi-threading */
-    SUPPORT_BATCH_ADD_WITH_MULTI_THREAD,  /**< Supports batch adding with multi-threading */
-    SUPPORT_SEARCH_ONE_WITH_MULTI_THREAD, /**< Supports searching one element with multi-threading */
-    SUPPORT_BATCH_SEARCH_WITH_MULTI_THREAD, /**< Supports batch searching with multi-threading */
+    SUPPORT_TRAIN_WITH_MULTI_THREAD,        /**< Supports training with multi-threading
+                                    */
+    SUPPORT_BUILD_WITH_MULTI_THREAD,        /**< Supports building with multi-threading
+                                    */
+    SUPPORT_BATCH_ADD_WITH_MULTI_THREAD,    /**< Supports batch adding with
+                                           multi-threading */
+    SUPPORT_SEARCH_ONE_WITH_MULTI_THREAD,   /**< Supports searching one element with
+                                           multi-threading */
+    SUPPORT_BATCH_SEARCH_WITH_MULTI_THREAD, /**< Supports batch searching with
+                                             multi-threading */
 
     SUPPORT_ADD_CONCURRENT,               /**< Supports concurrent addition of elements */
-    SUPPORT_UPDATE_ID_CONCURRENT,         /**< Supports concurrent update id of elements */
-    SUPPORT_UPDATE_VECTOR_CONCURRENT,     /**< Supports concurrent update vector of elements */
+    SUPPORT_UPDATE_ID_CONCURRENT,         /**< Supports concurrent update id of elements
+                                 */
+    SUPPORT_UPDATE_VECTOR_CONCURRENT,     /**< Supports concurrent update vector of
+                                       elements */
     SUPPORT_SEARCH_CONCURRENT,            /**< Supports concurrent searching */
     SUPPORT_DELETE_CONCURRENT,            /**< Supports concurrent deletion */
-    SUPPORT_ADD_SEARCH_CONCURRENT,        /**< Supports concurrent addition and searching */
-    SUPPORT_ADD_DELETE_CONCURRENT,        /**< Supports concurrent addition and deletion */
-    SUPPORT_SEARCH_DELETE_CONCURRENT,     /**< Supports concurrent searching and deletion */
-    SUPPORT_ADD_SEARCH_DELETE_CONCURRENT, /**< Supports concurrent addition, searching, and deletion */
+    SUPPORT_ADD_SEARCH_CONCURRENT,        /**< Supports concurrent addition and searching
+                                  */
+    SUPPORT_ADD_DELETE_CONCURRENT,        /**< Supports concurrent addition and deletion
+                                  */
+    SUPPORT_SEARCH_DELETE_CONCURRENT,     /**< Supports concurrent searching and
+                                           deletion */
+    SUPPORT_ADD_SEARCH_DELETE_CONCURRENT, /**< Supports concurrent addition,
+                                           searching, and deletion */
 
     SUPPORT_ESTIMATE_MEMORY, /**< Supports estimate memory usage by data count */
 
-    SUPPORT_CHECK_ID_EXIST, /**< Supports check whether given id exists in index */
+    SUPPORT_CHECK_ID_EXIST, /**< Supports check whether given id exists in index
+                           */
 
     SUPPORT_MERGE_INDEX, /**< Supports to merge indices of the same type */
 
@@ -68,7 +84,8 @@ enum IndexFeature {
 
     SUPPORT_GET_VECTOR_BY_IDS, /**< Supports get vectors by ids */
 
-    SUPPORT_KNN_SEARCH_WITH_EX_FILTER, /**< Supports K-nearest neighbor search with extra info filtering */
+    SUPPORT_KNN_SEARCH_WITH_EX_FILTER, /**< Supports K-nearest neighbor search
+                                        with extra info filtering */
 
     SUPPORT_CLONE, /**< Supports clone index */
 

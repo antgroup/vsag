@@ -77,7 +77,8 @@ main(int argc, char** argv) {
         id = random() % num_vectors;
     }
 
-    /******************* Calculate distance by id(batch) For HGraph Index *****************/
+    /******************* Calculate distance by id(batch) For HGraph Index
+   * *****************/
     auto result = index->CalDistanceById(query_vector.data(), ids_new.data(), ids_new.size());
     if (not result.has_value()) {
         std::cerr << "Failed to cal distance by id: internalError" << std::endl;
