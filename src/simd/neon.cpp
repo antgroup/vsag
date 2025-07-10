@@ -1340,7 +1340,7 @@ FHTRotate(float* data, size_t dim_) {
     size_t step = 1;
     while (step < n) {
         if (step >= 4) {
-            neno::RotateOp(data, 0, dim_, step);
+            neon::RotateOp(data, 0, dim_, step);
         } else {
             generic::RotateOp(data, 0, dim_, step);
         }
