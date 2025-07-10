@@ -59,115 +59,115 @@ GetRaBitQSQ4UBinaryIP() {
 
 static FHTRotateType
 GetFHTRotate() {
-//     if (SimdStatus::SupportAVX512()) {
-// #if defined(ENABLE_AVX512)
-//         return avx512::FHTRotate;
-// #endif
-//     } else if (SimdStatus::SupportAVX2()) {
-// #if defined(ENABLE_AVX2)
-//         return avx2::FHTRotate;
-// #endif
-//     } else if (SimdStatus::SupportAVX()) {
-// #if defined(ENABLE_AVX)
-//         return avx::FHTRotate;
-// #endif
-//     } else if (SimdStatus::SupportSSE()) {
-// #if defined(ENABLE_SSE)
-//         return sse::FHTRotate;
-// #endif
-//     } else if (SimdStatus::SupportNEON()) {
-// #if defined(ENABLE_NEON)
-//         return neon::FHTRotate;
-// #endif
-//     }
+    if (SimdStatus::SupportAVX512()) {
+#if defined(ENABLE_AVX512)
+        return avx512::FHTRotate;
+#endif
+    } else if (SimdStatus::SupportAVX2()) {
+#if defined(ENABLE_AVX2)
+        return avx2::FHTRotate;
+#endif
+    } else if (SimdStatus::SupportAVX()) {
+#if defined(ENABLE_AVX)
+        return avx::FHTRotate;
+#endif
+    } else if (SimdStatus::SupportSSE()) {
+#if defined(ENABLE_SSE)
+        return sse::FHTRotate;
+#endif
+    } else if (SimdStatus::SupportNEON()) {
+#if defined(ENABLE_NEON)
+        return neon::FHTRotate;
+#endif
+    }
     return generic::FHTRotate;
 }
 
 static KacsWalkType
 GetKacsWalk() {
-//     if (SimdStatus::SupportAVX512()) {
-// #if defined(ENABLE_AVX512)
-//         return avx512::KacsWalk;
-// #endif
-//     } else if (SimdStatus::SupportAVX2()) {
-// #if defined(ENABLE_AVX2)
-//         return avx2::KacsWalk;
-// #endif
-//     } else if (SimdStatus::SupportAVX()) {
-// #if defined(ENABLE_AVX)
-//         return avx::KacsWalk;
-// #endif
-//     } else if (SimdStatus::SupportSSE()) {
-// #if defined(ENABLE_SSE)
-//         return sse::KacsWalk;
-// #endif
-//     } else if (SimdStatus::SupportNEON()) {
-// #if defined(ENABLE_NEON)
-//         return neon::KacsWalk;
-// #endif
-//     }
+    if (SimdStatus::SupportAVX512()) {
+#if defined(ENABLE_AVX512)
+        return avx512::KacsWalk;
+#endif
+    } else if (SimdStatus::SupportAVX2()) {
+#if defined(ENABLE_AVX2)
+        return avx2::KacsWalk;
+#endif
+    } else if (SimdStatus::SupportAVX()) {
+#if defined(ENABLE_AVX)
+        return avx::KacsWalk;
+#endif
+    } else if (SimdStatus::SupportSSE()) {
+#if defined(ENABLE_SSE)
+        return sse::KacsWalk;
+#endif
+    } else if (SimdStatus::SupportNEON()) {
+#if defined(ENABLE_NEON)
+        return neon::KacsWalk;
+#endif
+    }
     return generic::KacsWalk;
 }
 
 static VecRescaleType
 GetVecRescale() {
-//     if (SimdStatus::SupportAVX512()) {
-// #if defined(ENABLE_AVX512)
-//         return avx512::VecRescale;
-// #endif
-//     } else if (SimdStatus::SupportAVX2()) {
-// #if defined(ENABLE_AVX2)
-//         return avx2::VecRescale;
-// #endif
-//     } else if (SimdStatus::SupportAVX()) {
-// #if defined(ENABLE_AVX)
-//         return avx::VecRescale;
-// #endif
-//     } else if (SimdStatus::SupportSSE()) {
-// #if defined(ENABLE_SSE)
-//         return sse::VecRescale;
-// #endif
-//     } else if (SimdStatus::SupportNEON()) {
-// #if defined(ENABLE_NEON)
-//         return neon::VecRescale;
-// #endif
-//     }
+    if (SimdStatus::SupportAVX512()) {
+#if defined(ENABLE_AVX512)
+        return avx512::VecRescale;
+#endif
+    } else if (SimdStatus::SupportAVX2()) {
+#if defined(ENABLE_AVX2)
+        return avx2::VecRescale;
+#endif
+    } else if (SimdStatus::SupportAVX()) {
+#if defined(ENABLE_AVX)
+        return avx::VecRescale;
+#endif
+    } else if (SimdStatus::SupportSSE()) {
+#if defined(ENABLE_SSE)
+        return sse::VecRescale;
+#endif
+    } else if (SimdStatus::SupportNEON()) {
+#if defined(ENABLE_NEON)
+        return neon::VecRescale;
+#endif
+    }
     return generic::VecRescale;
 }
 
 static FlipSignType
 GetFlipSign() {
-//     if (SimdStatus::SupportAVX512()) {
-// #if defined(ENABLE_AVX512)
-//         return avx512::FlipSign;
-// #endif
-//     }
+    if (SimdStatus::SupportAVX512()) {
+#if defined(ENABLE_AVX512)
+        return avx512::FlipSign;
+#endif
+    }
     return generic::FlipSign;
 }
 
 static RotateOpType
 GetRotateOp() {
-//     if (SimdStatus::SupportAVX512()) {
-// #if defined(ENABLE_AVX512)
-//         return avx512::RotateOp;
-// #endif
-//     } else if (SimdStatus::SupportAVX2()) {
-// #if defined(ENABLE_AVX2)
-//         return avx2::RotateOp;
-// #endif
-//     } else if (SimdStatus::SupportAVX()) {
-// #if defined(ENABLE_AVX)
-//         return avx::RotateOp;
-// #endif
-//     } else if (SimdStatus::SupportSSE()) {
-// #if defined(ENABLE_SSE)
-//         return sse::RotateOp;
-// #endif
-//     } else if (SimdStatus::SupportNEON()) {
-// #if defined(ENABLE_NEON)
-//         return neon::RotateOp;
-// #endif
-//     }
+    if (SimdStatus::SupportAVX512()) {
+#if defined(ENABLE_AVX512)
+        return avx512::RotateOp;
+#endif
+    } else if (SimdStatus::SupportAVX2()) {
+#if defined(ENABLE_AVX2)
+        return avx2::RotateOp;
+#endif
+    } else if (SimdStatus::SupportAVX()) {
+#if defined(ENABLE_AVX)
+        return avx::RotateOp;
+#endif
+    } else if (SimdStatus::SupportSSE()) {
+#if defined(ENABLE_SSE)
+        return sse::RotateOp;
+#endif
+    } else if (SimdStatus::SupportNEON()) {
+#if defined(ENABLE_NEON)
+        return neon::RotateOp;
+#endif
+    }
     return generic::RotateOp;
 }
 RaBitQFloatBinaryType RaBitQFloatBinaryIP = GetRaBitQFloatBinaryIP();

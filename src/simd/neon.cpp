@@ -1320,6 +1320,7 @@ BitNot(const uint8_t* x, const uint64_t num_byte, uint8_t* result) {
 void
 RotateOp(float* data, int idx, int dim_, int step) {
 #if defined(ENABLE_NEON)
+std::cout<< "RotateOp\n";
     for (int i = idx; i < dim_; i += step * 2) {
         for (int j = 0; j < step; j += 4) {
             float32x4_t g1 = vld1q_f32(&data[i + j]);
@@ -1338,6 +1339,7 @@ RotateOp(float* data, int idx, int dim_, int step) {
 void
 FHTRotate(float* data, size_t dim_) {
 #if defined(ENABLE_NEON)
+    std::cout<< "FHTRotate\n";
     size_t n = dim_;
     size_t step = 1;
     while (step < n) {
@@ -1356,6 +1358,7 @@ FHTRotate(float* data, size_t dim_) {
 void
 VecRescale(float* data, size_t dim, float val) {
 #if defined(ENABLE_NEON)
+std::cout<< "VecRescale\n";
     size_t i = 0;
     float32x4_t val_vec = vdupq_n_f32(val);
     for (; i + 4 <= dim; i += 4) {
@@ -1375,6 +1378,7 @@ VecRescale(float* data, size_t dim, float val) {
 void
 KacsWalk(float* data, size_t len) {
 #if defined(ENABLE_NEON)
+std::cout<< "KacsWalk\n";
     size_t base = len % 2;
     size_t offset = base + (len / 2);  // for odd dim
     size_t i = 0;
