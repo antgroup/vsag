@@ -17,8 +17,8 @@
 
 #include <catch2/catch_test_macros.hpp>
 
-#include "default_allocator.h"
 #include "fixtures.h"
+#include "impl/allocator/default_allocator.h"
 #include "vsag/iterator_context.h"
 
 using namespace vsag;

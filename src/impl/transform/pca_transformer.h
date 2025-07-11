@@ -15,11 +15,6 @@
 
 #pragma once
 
-#include <cblas.h>
-#include <lapacke.h>
-
-#include <random>
-
 #include "vector_transformer.h"
 
 namespace vsag {

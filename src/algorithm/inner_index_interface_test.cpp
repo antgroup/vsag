@@ -21,7 +21,7 @@
 
 #include "brute_force.h"
 #include "hgraph.h"
-#include "safe_allocator.h"
+#include "impl/allocator/safe_allocator.h"
 
 using namespace vsag;
 

@@ -17,7 +17,7 @@
 
 #include <catch2/catch_all.hpp>
 
-#include "safe_allocator.h"
+#include "impl/allocator/safe_allocator.h"
 
 using namespace vsag;
 

@@ -22,7 +22,7 @@
 #undef EOF
 
 #include "attr/expression_visitor.h"
-#include "safe_allocator.h"
+#include "impl/allocator/safe_allocator.h"
 #include "vsag_exception.h"
 
 using namespace vsag;

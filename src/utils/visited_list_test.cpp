@@ -18,7 +18,7 @@
 #include <thread>
 
 #include "catch2/catch_test_macros.hpp"
-#include "default_allocator.h"
+#include "impl/allocator/default_allocator.h"
 using namespace vsag;
 
 TEST_CASE("VisitedList Basic Test", "[ut][VisitedList]") {
