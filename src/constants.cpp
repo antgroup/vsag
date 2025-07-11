@@ -180,6 +180,7 @@ const char* const IVF_PRECISE_QUANTIZATION_TYPE = "precise_quantization_type";
 const char* const IVF_PRECISE_IO_TYPE = "precise_io_type";
 const char* const IVF_PRECISE_FILE_PATH = "precise_file_path";
 const char* const IVF_USE_ATTRIBUTE_FILTER = "use_attribute_filter";
+const char* const IVF_THREAD_COUNT = "thread_count";
 
 const char* const SERIAL_MAGIC_BEGIN = "vsag0000";
 const char* const SERIAL_MAGIC_END = "0000gasv";

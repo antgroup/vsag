@@ -39,7 +39,8 @@ public:
                                      const std::string& train_type = "kmeans",
                                      bool use_residual = false,
                                      int buckets_per_data = 1,
-                                     bool use_attr_filter = false);
+                                     bool use_attr_filter = false,
+                                     int thread_count = 1);
 
     static IVFResourcePtr
     GetResource(bool sample = true);
@@ -52,7 +53,8 @@ public:
                                         int second_order_buckets_count = 15,
                                         const std::string& train_type = "kmeans",
                                         bool use_residual = false,
-                                        int buckets_per_data = 1);
+                                        int buckets_per_data = 1,
+                                        int thread_count = 1);
     static void
     TestGeneral(const IndexPtr& index,
                 const TestDatasetPtr& dataset,
@@ -124,7 +126,8 @@ IVFTestIndex::GenerateIVFBuildParametersString(const std::string& metric_type,
                                                const std::string& train_type,
                                                bool use_residual,
                                                int buckets_per_data,
-                                               bool use_attr_filter) {
+                                               bool use_attr_filter,
+                                               int thread_count) {
     std::string build_parameters_str;
 
     constexpr auto parameter_temp = R"(
@@ -141,7 +144,8 @@ IVFTestIndex::GenerateIVFBuildParametersString(const std::string& metric_type,
             "precise_quantization_type": "{}",
             "use_residual": {},
             "buckets_per_data": {},
-            "use_attribute_filter": {}
+            "use_attribute_filter": {},
+            "thread_count": {}
         }}
     }}
     )";
@@ -169,7 +173,8 @@ IVFTestIndex::GenerateIVFBuildParametersString(const std::string& metric_type,
                                        precise_quantizer_str,
                                        use_residual,
                                        buckets_per_data,
-                                       use_attr_filter);
+                                       use_attr_filter,
+                                       thread_count);
     INFO(build_parameters_str);
     return build_parameters_str;
 }
@@ -182,7 +187,8 @@ IVFTestIndex::GenerateGNOIMIBuildParametersString(const std::string& metric_type
                                                   int second_order_buckets_count,
                                                   const std::string& train_type,
                                                   bool use_residual,
-                                                  int buckets_per_data) {
+                                                  int buckets_per_data,
+                                                  int thread_count) {
     std::string build_parameters_str;
 
     constexpr auto parameter_temp = R"(
@@ -200,6 +206,7 @@ IVFTestIndex::GenerateGNOIMIBuildParametersString(const std::string& metric_type
             "precise_quantization_type": "{}",
             "use_residual": {},
             "buckets_per_data": {},
+            "thread_count": {},
             "partition_strategy_type": "gno_imi"
         }}
     }}
@@ -228,7 +235,8 @@ IVFTestIndex::GenerateGNOIMIBuildParametersString(const std::string& metric_type
                                        pq_dim,
                                        precise_quantizer_str,
                                        use_residual,
-                                       buckets_per_data);
+                                       buckets_per_data,
+                                       thread_count);
 
     INFO(build_parameters_str);
     return build_parameters_str;
@@ -492,6 +500,15 @@ TestIVFBuild(const fixtures::IVFTestIndexPtr& test_index,
     using namespace fixtures;
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
+    constexpr static const char* search_param_tmp2 = R"(
+        {{
+            "ivf": {{
+                "scan_buckets_count": {},
+                "factor": 4.0,
+                "first_order_scan_ratio": 1.0,
+                "parallelism": {}
+            }}
+        }})";
     for (auto metric_type : resource->metric_types) {
         for (auto dim : resource->dims) {
             for (auto train_type : resource->train_types) {
@@ -500,8 +517,9 @@ TestIVFBuild(const fixtures::IVFTestIndexPtr& test_index,
                     if (train_type == "kmeans") {
                         recall *= 0.8F;  // Kmeans may not achieve high recall in random datasets
                     }
+                    auto search_thread_count = GENERATE(1, 3);
                     auto search_param =
-                        fmt::format(fixtures::search_param_tmp, std::max(200, count));
+                        fmt::format(search_param_tmp2, std::max(200, count), search_thread_count);
                     INFO(
                         fmt::format("metric_type: {}, dim: {}, base_quantization_str: {}, "
                                     "train_type: {}, recall: {}",
@@ -511,8 +529,16 @@ TestIVFBuild(const fixtures::IVFTestIndexPtr& test_index,
                                     train_type,
                                     recall));
                     vsag::Options::Instance().set_block_size_limit(size);
-                    auto param = IVFTestIndex::GenerateIVFBuildParametersString(
-                        metric_type, dim, base_quantization_str, 300, train_type);
+                    auto param =
+                        IVFTestIndex::GenerateIVFBuildParametersString(metric_type,
+                                                                       dim,
+                                                                       base_quantization_str,
+                                                                       300,
+                                                                       train_type,
+                                                                       false,
+                                                                       1,
+                                                                       false,
+                                                                       3);
                     auto index = IVFTestIndex::TestFactory(IVFTestIndex::name, param, true);
                     auto dataset = IVFTestIndex::pool.GetDatasetAndCreate(
                         dim, resource->base_count, metric_type);
