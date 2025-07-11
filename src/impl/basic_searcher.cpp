@@ -259,6 +259,7 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
     Vector<InnerIdType> to_be_visited_id(graph->MaximumDegree(), alloc);
     Vector<InnerIdType> neighbors(graph->MaximumDegree(), alloc);
     Vector<float> line_dists(graph->MaximumDegree(), alloc);
+    InnerIdType random_jump_id = 0;  // used for jumping out of the local optimum.
 
     flatten->Query(&dist, computer, &ep, 1, alloc);
     if (not is_id_allowed || is_id_allowed->CheckValid(ep)) {
@@ -320,6 +321,21 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
 
                 if (not top_candidates->Empty()) {
                     lower_bound = top_candidates->Top().first;
+                }
+            }
+        }
+        if constexpr (mode == KNN_SEARCH) {
+            float dist_jump;
+            if (candidate_set->Empty() and top_candidates->Size() < inner_search_param.topk and
+                flatten->total_count_ > inner_search_param.topk) {
+                for (InnerIdType j = random_jump_id; j < flatten->total_count_; ++j) {
+                    if (not vl->Get(j)) {
+                        random_jump_id = j;
+                        flatten->Query(&dist_jump, computer, &random_jump_id, 1, allocator_);
+                        candidate_set->Push(-dist_jump, random_jump_id);
+                        vl->Set(random_jump_id);
+                        break;
+                    }
                 }
             }
         }
