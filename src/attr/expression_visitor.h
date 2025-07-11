@@ -15,13 +15,20 @@
 
 #pragma once
 
-#include <any>
+#include <antlr4-autogen/FCBaseVisitor.h>
+#include <antlr4-runtime/antlr4-runtime.h>
+#include <fmt/chrono.h>
+#include <fmt/format.h>
 
-#include "FCBaseVisitor.h"
-#include "FCLexer.h"
-#include "antlr4-runtime.h"
+#include <any>
+#include <cstdio>
+
+#define EOF (-1)
+#include <nlohmann/json.hpp>
+#undef EOF
+
+#include "attr_type_schema.h"
 #include "expression.h"
-#include "fmt/format.h"
 
 namespace vsag {
 class FCErrorListener final : public antlr4::BaseErrorListener {
@@ -136,6 +143,9 @@ BuildIntListPtr(const int signed_cnt, const std::vector<NumericValue>& values) {
 
 class FCExpressionVisitor final : public FCBaseVisitor {
 public:
+    explicit FCExpressionVisitor(AttrTypeSchema* schema) : schema_(schema) {
+    }
+
     std::any
     visitFilter_condition(FCParser::Filter_conditionContext* ctx) override {
         return visit(ctx->expr());
@@ -168,7 +178,13 @@ public:
     std::any
     visitIntPipeListExpr(FCParser::IntPipeListExprContext* ctx) override {
         auto left = std::any_cast<ExprPtr>(visit(ctx->field_name()));
-        auto right = std::any_cast<ExprPtr>(visit(ctx->int_pipe_list()));
+        ExprPtr right = nullptr;
+        if (schema_ != nullptr && IsStringType(left)) {
+            right = std::any_cast<ExprPtr>(visitInt_pipe_list(ctx->int_pipe_list(), true));
+            return std::make_any<ExprPtr>(std::make_shared<StrListExpression>(
+                std::move(left), ctx->NOT_IN() != nullptr, std::move(right)));
+        }
+        right = std::any_cast<ExprPtr>(visit(ctx->int_pipe_list()));
         return std::make_any<ExprPtr>(std::make_shared<IntListExpression>(
             std::move(left), ctx->NOT_IN() != nullptr, std::move(right)));
     }
@@ -176,6 +192,9 @@ public:
     std::any
     visitStrPipeListExpr(FCParser::StrPipeListExprContext* ctx) override {
         auto left = std::any_cast<ExprPtr>(visit(ctx->field_name()));
+        if (schema_ != nullptr && not IsStringType(left)) {
+            throw std::runtime_error("attribute value type is not string type");
+        }
         auto right = std::any_cast<ExprPtr>(visit(ctx->str_pipe_list()));
         return std::make_any<ExprPtr>(std::make_shared<StrListExpression>(
             std::move(left), ctx->NOT_IN() != nullptr, std::move(right)));
@@ -184,6 +203,11 @@ public:
     std::any
     visitIntListExpr(FCParser::IntListExprContext* ctx) override {
         auto left = std::any_cast<ExprPtr>(visit(ctx->field_name()));
+        if (schema_ != nullptr && IsStringType(left)) {
+            auto right = std::any_cast<ExprPtr>(visitInt_value_list(ctx->int_value_list(), true));
+            return std::make_any<ExprPtr>(std::make_shared<StrListExpression>(
+                std::move(left), ctx->NOT_IN() != nullptr, std::move(right)));
+        }
         auto right = std::any_cast<ExprPtr>(visit(ctx->int_value_list()));
         return std::make_any<ExprPtr>(std::make_shared<IntListExpression>(
             std::move(left), ctx->NOT_IN() != nullptr, std::move(right)));
@@ -192,6 +216,9 @@ public:
     std::any
     visitStrListExpr(FCParser::StrListExprContext* ctx) override {
         auto left = std::any_cast<ExprPtr>(visit(ctx->field_name()));
+        if (schema_ != nullptr && not IsStringType(left)) {
+            throw std::runtime_error("attribute value type is not string type");
+        }
         auto right = std::any_cast<ExprPtr>(visit(ctx->str_value_list()));
         return std::make_any<ExprPtr>(std::make_shared<StrListExpression>(
             std::move(left), ctx->NOT_IN() != nullptr, std::move(right)));
@@ -208,6 +235,9 @@ public:
     std::any
     visitStringComparison(FCParser::StringComparisonContext* ctx) override {
         auto left = std::any_cast<ExprPtr>(visit(ctx->field_name()));
+        if (schema_ != nullptr && not IsStringType(left)) {
+            throw std::runtime_error("attribute value type is not string type");
+        }
         auto str =
             ctx->STRING() != nullptr ? ctx->STRING()->getText() : ctx->INT_STRING()->getText();
         auto right = std::make_shared<StringConstant>(str.substr(1, str.size() - 2));
@@ -222,7 +252,11 @@ public:
 
     std::any
     visitFieldRef(FCParser::FieldRefContext* ctx) override {
-        return visit(ctx->field_name());
+        auto field_ref = std::any_cast<ExprPtr>(visit(ctx->field_name()));
+        if (schema_ != nullptr && IsStringType(field_ref)) {
+            throw std::runtime_error("attribute value type is not numeric type");
+        }
+        return field_ref;
     }
 
     std::any
@@ -267,6 +301,13 @@ public:
             values.emplace_back(str);
         }
 
+        for (auto strToken : ctx->INT_STRING()) {
+            auto str = strToken->getText();
+            // Remove quotes
+            str = str.substr(1, str.size() - 2);
+            values.emplace_back(str);
+        }
+
         auto str_list_ptr = std::make_shared<StrListConstant>(std::move(values));
         return std::make_any<ExprPtr>(str_list_ptr);
     }
@@ -283,6 +324,19 @@ public:
             values.emplace_back(numeric_value);
         }
         return BuildIntListPtr(signed_cnt, values);
+    }
+
+    std::any
+    visitInt_value_list(FCParser::Int_value_listContext* ctx, const bool is_string_type) {
+        if (is_string_type) {
+            StrList values;
+            for (auto int_token : ctx->INTEGER()) {
+                values.emplace_back(int_token->getText());
+            }
+            auto str_list_ptr = std::make_shared<StrListConstant>(std::move(values));
+            return std::make_any<ExprPtr>(str_list_ptr);
+        }
+        return visitInt_value_list(ctx);
     }
 
     std::any
@@ -313,14 +367,36 @@ public:
     }
 
     std::any
+    visitInt_pipe_list(FCParser::Int_pipe_listContext* ctx, const bool is_string_type) {
+        if (is_string_type) {
+            StrList values;
+            if (ctx->INT_STRING() && ctx->INT_STRING()->getText().size() >= 2) {
+                auto str = ctx->INT_STRING()->getText();
+                str = str.substr(1, str.size() - 2);
+                values.emplace_back(str);
+            } else if (ctx->PIPE_INT_STR() && ctx->PIPE_INT_STR()->getText().size() >= 2) {
+                auto str = ctx->PIPE_INT_STR()->getText();
+                str = str.substr(1, str.size() - 2);
+                const auto& result_view = StrViewSplit(str, '|');
+                for (auto& s : result_view) {
+                    values.emplace_back(s);
+                }
+            }
+            auto str_list_ptr = std::make_shared<StrListConstant>(std::move(values));
+            return std::make_any<ExprPtr>(str_list_ptr);
+        }
+        return visitInt_pipe_list(ctx);
+    }
+
+    std::any
     visitStr_pipe_list(FCParser::Str_pipe_listContext* ctx) override {
         StrList values;
         if (ctx->STRING() && ctx->STRING()->getText().size() >= 2) {
             auto str = ctx->STRING()->getText();
             str = str.substr(1, str.size() - 2);
             values.emplace_back(str);
-        } else if (ctx->PIPE_ID_STR() && ctx->PIPE_ID_STR()->getText().size() >= 2) {
-            auto str = ctx->PIPE_ID_STR()->getText();
+        } else if (ctx->PIPE_STR_STR() && ctx->PIPE_STR_STR()->getText().size() >= 2) {
+            auto str = ctx->PIPE_STR_STR()->getText();
             str = str.substr(1, str.size() - 2);
             const auto& result_view = StrViewSplit(str, '|');
             for (auto& s : result_view) {
@@ -364,8 +440,19 @@ private:
         result.emplace_back(str.substr(start));
         return std::move(result);
     }
+
+    bool
+    IsStringType(const ExprPtr& expr) {
+        if (auto field_expr = std::dynamic_pointer_cast<FieldExpression>(expr);
+            field_expr != nullptr) {
+            return schema_->GetTypeOfField(field_expr->fieldName) == STRING;
+        }
+        throw std::runtime_error("Invalid field expression: " + expr->ToString());
+    }
+
+    AttrTypeSchema* schema_;
 };
 
 vsag::ExprPtr
-AstParse(const std::string& filter_condition_str);
+AstParse(const std::string& filter_condition_str, AttrTypeSchema* schema = nullptr);
 }  // namespace vsag
