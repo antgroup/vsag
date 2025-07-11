@@ -51,3 +51,10 @@ add_dependencies(antlr4-autogen antlr4)
 target_compile_options(antlr4-autogen PRIVATE ${common_cmake_args} ${VSAG_ANTLR4_CXX11_ABI})
 set_property(TARGET antlr4-autogen PROPERTY CXX_STANDARD 17)
 target_link_libraries(antlr4-autogen antlr4-runtime)
+
+file(COPY extern/antlr4/fc/
+        DESTINATION ${install_dir}/include/antlr4-autogen
+        FILES_MATCHING
+        PATTERN "*.h"
+        PATTERN "*.hpp")
+include_directories(${install_dir}/include)
