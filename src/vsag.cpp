@@ -15,7 +15,7 @@
 
 #include "vsag/vsag.h"
 
-#include <../extern/diskann/DiskANN/include/logger.h>
+#include <../extern/diskann/DiskANN/include/diskann_logger.h>
 #include <cpuinfo.h>
 
 #include <sstream>

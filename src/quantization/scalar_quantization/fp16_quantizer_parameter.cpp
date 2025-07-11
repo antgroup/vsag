@@ -28,7 +28,7 @@ FP16QuantizerParameter::FromJson(const JsonType& json) {
 }
 
 JsonType
-FP16QuantizerParameter::ToJson() {
+FP16QuantizerParameter::ToJson() const {
     JsonType json;
     json[QUANTIZATION_TYPE_KEY] = QUANTIZATION_TYPE_VALUE_FP16;
     return json;

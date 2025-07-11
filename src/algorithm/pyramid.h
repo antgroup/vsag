@@ -18,13 +18,13 @@
 #include <utility>
 
 #include "data_cell/graph_interface.h"
+#include "diskann_logger.h"
 #include "impl/basic_searcher.h"
 #include "impl/filter/filter_headers.h"
 #include "impl/odescent_graph_builder.h"
 #include "index_feature_list.h"
 #include "inner_index_interface.h"
 #include "io/memory_io_parameter.h"
-#include "logger.h"
 #include "pyramid_zparameters.h"
 #include "quantization/fp32_quantizer_parameter.h"
 #include "safe_allocator.h"

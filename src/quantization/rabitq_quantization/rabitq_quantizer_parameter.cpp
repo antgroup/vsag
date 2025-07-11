@@ -16,6 +16,7 @@
 #include "rabitq_quantizer_parameter.h"
 
 #include "inner_string_params.h"
+#include "logger.h"
 
 namespace vsag {
 
@@ -37,12 +38,47 @@ RaBitQuantizerParameter::FromJson(const JsonType& json) {
 }
 
 JsonType
-RaBitQuantizerParameter::ToJson() {
+RaBitQuantizerParameter::ToJson() const {
     JsonType json;
     json[QUANTIZATION_TYPE_KEY] = QUANTIZATION_TYPE_VALUE_RABITQ;
     json[PCA_DIM] = this->pca_dim_;
     json[RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY] = this->num_bits_per_dim_query_;
     json[USE_FHT] = this->use_fht_;
     return json;
+}
+
+bool
+RaBitQuantizerParameter::CheckCompatibility(const ParamPtr& other) const {
+    auto rabitq_param = std::dynamic_pointer_cast<RaBitQuantizerParameter>(other);
+    if (not rabitq_param) {
+        logger::error(
+            "RaBitQuantizerParameter::CheckCompatibility: other parameter is not a "
+            "RaBitQuantizerParameter");
+        return false;
+    }
+    if (this->pca_dim_ != rabitq_param->pca_dim_) {
+        logger::error(
+            "RaBitQuantizerParameter::CheckCompatibility: PCA dimensions do not match: {} vs {}",
+            this->pca_dim_,
+            rabitq_param->pca_dim_);
+        return false;
+    }
+    if (this->num_bits_per_dim_query_ != rabitq_param->num_bits_per_dim_query_) {
+        logger::error(
+            "RaBitQuantizerParameter::CheckCompatibility: Number of bits per dimension query do "
+            "not match: {} vs {}",
+            this->num_bits_per_dim_query_,
+            rabitq_param->num_bits_per_dim_query_);
+        return false;
+    }
+    if (this->use_fht_ != rabitq_param->use_fht_) {
+        logger::error(
+            "RaBitQuantizerParameter::CheckCompatibility: Use FHT flag does not match: {} vs {}",
+            this->use_fht_,
+            rabitq_param->use_fht_);
+        return false;
+    }
+
+    return true;
 }
 }  // namespace vsag

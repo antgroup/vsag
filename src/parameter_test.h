@@ -30,4 +30,16 @@ public:
         REQUIRE(param->ToString() == str1);
     }
 };
+
+class EmptyParameter : public Parameter {
+    void
+    FromJson(const JsonType& json) override {
+    }
+
+    JsonType
+    ToJson() const override {
+        return JsonType();
+    }
+};
+
 }  // namespace vsag

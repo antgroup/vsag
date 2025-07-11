@@ -43,11 +43,23 @@ public:
     }
 
     JsonType
-    ToJson() override {
+    ToJson() const override {
         JsonType json;
         json[IO_PARAMS_KEY] = this->io_parameter->ToJson();
         json[QUANTIZATION_PARAMS_KEY] = this->quantizer_parameter->ToJson();
         return json;
+    }
+
+    bool
+    CheckCompatibility(const vsag::ParamPtr& other) const override {
+        auto sparse_param = std::dynamic_pointer_cast<SparseVectorDataCellParameter>(other);
+        if (not sparse_param) {
+            logger::error(
+                "SparseVectorDataCellParameter::CheckCompatibility: "
+                "other parameter is not SparseVectorDataCellParameter");
+            return false;
+        }
+        return this->quantizer_parameter->CheckCompatibility(sparse_param->quantizer_parameter);
     }
 };
 

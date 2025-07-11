@@ -38,3 +38,21 @@ TEST_CASE("IVF Partition Strategy Parameters Test", "[ut][IVFPartitionStrategyPa
 
     vsag::ParameterTest::TestToJson(param);
 }
+
+TEST_CASE("IVF Partition Strategy Parameters CheckCompatibility",
+          "[ut][IVFPartitionStrategyParameters]") {
+    std::string param_str = R"(
+    {
+        "partition_strategy_type": "gno_imi",
+        "ivf_train_type": "random",
+        "gno_imi": {
+            "first_order_buckets_count": 200,
+            "second_order_buckets_count": 50
+        }
+    })";
+    auto param = std::make_shared<vsag::IVFPartitionStrategyParameters>();
+    param->FromString(param_str);
+    REQUIRE(param->CheckCompatibility(param));
+    auto other_type_param = std::make_shared<vsag::EmptyParameter>();
+    REQUIRE_FALSE(param->CheckCompatibility(other_type_param));
+}

@@ -7,7 +7,7 @@
 #include <mutex>
 
 #include "ann_exception.h"
-#include "logger.h"
+#include "diskann_logger.h"
 
 namespace diskann
 {

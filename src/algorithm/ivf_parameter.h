@@ -32,7 +32,10 @@ public:
     FromJson(const JsonType& json) override;
 
     JsonType
-    ToJson() override;
+    ToJson() const override;
+
+    bool
+    CheckCompatibility(const vsag::ParamPtr& other) const override;
 
 public:
     BucketDataCellParamPtr bucket_param{nullptr};
