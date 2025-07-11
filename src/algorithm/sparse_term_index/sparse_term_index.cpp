@@ -179,6 +179,10 @@ SparseTermIndex::KnnSearch(const DatasetPtr& query,
         // low precision
         auto [results, ret_dists, ret_ids] = CreateFastDataset(static_cast<int64_t>(k), allocator_);
 
+        while (heap.size() > k) {
+            heap.pop();
+        }
+
         for (auto j = k; j >= 0; --j) {
             ret_dists[j] = -heap.top().first;
             ret_ids[j] = label_table_->GetLabelById(heap.top().second);

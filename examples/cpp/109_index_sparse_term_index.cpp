@@ -74,9 +74,10 @@ main(int argc, char** argv) {
     vsag::init();
 
     /******************* Prepare Base and Query Dataset *****************/
-    int64_t num_base = 10000;
+    uint32_t num_base = 100000;
+    uint32_t num_query = 1000;
     int64_t max_dim = 128;
-    int64_t max_id = 10000;
+    int64_t max_id = 30000;
     float min_val = 0;
     float max_val = 10;
     int seed_base = 114;
@@ -92,9 +93,10 @@ main(int argc, char** argv) {
     auto base = vsag::Dataset::Make();
     base->NumElements(num_base)->SparseVectors(sv_base.data())->Ids(ids.data())->Owner(false);
 
-    auto sv_query = GenerateSparseVectors(1, max_dim / 2, max_id, min_val, max_val, seed_query);
+    auto sv_query = GenerateSparseVectors(num_query, max_dim / 2, max_id, min_val, max_val, seed_query);
     auto query = vsag::Dataset::Make();
-    query->NumElements(1)->SparseVectors(sv_query.data())->Owner(false);
+
+    std::vector<vsag::DatasetPtr> gt_results(num_query);
 
     /******************* Create Index *****************/
     std::string build_params = R"(
@@ -103,11 +105,11 @@ main(int argc, char** argv) {
         "dim": 128,
         "metric_type": "ip",
         "index_param": {
-            "use_reorder": true,
+            "use_reorder": false,
             "query_prune_ratio": 1,
             "doc_prune_ratio": 1,
             "term_prune_ratio": 0.9,
-            "window_size": 1000,
+            "window_size": 10000,
             "need_sort": true
         }
     }
@@ -115,7 +117,11 @@ main(int argc, char** argv) {
 
     auto bf_index = vsag::Factory::CreateIndex("sparse_index", build_params).value();
     bf_index->Build(base);
-    auto gt_result = bf_index->KnnSearch(query, k, "").value();
+
+    for (auto i = 0; i < num_query; i++) {
+        query->NumElements(1)->SparseVectors(sv_query.data() + i)->Owner(false);
+        gt_results[i] = bf_index->KnnSearch(query, k, "").value();
+    }
 
     auto index = vsag::Factory::CreateIndex("sparse_term_index", build_params).value();
 
@@ -134,16 +140,30 @@ main(int argc, char** argv) {
         "n_candidate": 20
     }
     )";
-    auto result = index->KnnSearch(query, k, search_params).value();
 
-    /******************* Print Search Result *****************/
-    std::cout << "results: " << std::endl;
-    for (int64_t i = 0; i < result->GetDim(); ++i) {
-        std::cout << result->GetIds()[i] << ": " << result->GetDistances()[i] << std::endl;
+    float recall = 0.0f;
+    int64_t total_search_time_ns = 0;
+
+    for (int i = 0; i < num_query; ++i) {
+        query->NumElements(1)->SparseVectors(sv_query.data() + i)->Owner(false);
+
+        auto start_time = std::chrono::high_resolution_clock::now();
+        auto result = index->KnnSearch(query, k, search_params).value();
+        auto end_time = std::chrono::high_resolution_clock::now();
+
+        auto search_time_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(end_time - start_time).count();
+        total_search_time_ns += search_time_ns;
+
+        recall += compute_recall(gt_results[i], result, k);
     }
 
-    float recall = compute_recall(gt_result, result, k);
-    std::cout << "recall: " << recall << std::endl;
+    recall /= num_query;
+
+    double total_search_time_s = total_search_time_ns / 1e9;
+    double qps = num_query / total_search_time_s;
+
+    std::cout << "Recall: " << recall << std::endl;
+    std::cout << "QPS: " << qps << std::endl;
 
     return 0;
 }
