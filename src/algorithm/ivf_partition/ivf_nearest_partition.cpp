@@ -15,12 +15,12 @@
 
 #include "ivf_nearest_partition.h"
 
-#include <fmt/format-inl.h>
+#include <fmt/format.h>
 
 #include "algorithm/hgraph.h"
+#include "impl/allocator/safe_allocator.h"
 #include "impl/kmeans_cluster.h"
 #include "inner_string_params.h"
-#include "safe_allocator.h"
 #include "utils/util_functions.h"
 
 namespace vsag {

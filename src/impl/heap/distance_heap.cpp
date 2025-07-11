@@ -38,4 +38,13 @@ DistanceHeap::MakeInstanceBySize<false, true>(Allocator* allocator, int64_t max_
 template DistHeapPtr
 DistanceHeap::MakeInstanceBySize<false, false>(Allocator* allocator, int64_t max_size);
 
+DistanceHeap::DistanceHeap(Allocator* allocator) : DistanceHeap(allocator, -1){};
+
+DistanceHeap::DistanceHeap(Allocator* allocator, int64_t max_size)
+    : allocator_(allocator), max_size_(max_size){};
+
+void
+DistanceHeap::Push(const DistanceRecord& record) {
+    return this->Push(record.first, record.second);
+}
 }  // namespace vsag

@@ -22,8 +22,8 @@
 #include <mutex>
 #include <type_traits>
 
+#include "impl/allocator/safe_allocator.h"
 #include "resource_object.h"
-#include "safe_allocator.h"
 #include "typing.h"
 
 namespace vsag {

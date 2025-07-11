@@ -23,10 +23,10 @@
 #include "catch2/catch_template_test_macros.hpp"
 #include "data_cell/flatten_datacell.h"
 #include "fixtures.h"
+#include "impl/allocator/safe_allocator.h"
 #include "io/memory_io.h"
 #include "quantization/fp32_quantizer.h"
 #include "quantization/scalar_quantization/sq4_uniform_quantizer.h"
-#include "safe_allocator.h"
 #include "test_logger.h"
 #include "utils/visited_list.h"
 

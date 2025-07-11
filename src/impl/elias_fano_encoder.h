@@ -75,7 +75,8 @@ private:
     [[nodiscard]] InnerIdType
     get_low_bits(size_t index) const;
 
-    Allocator* allocator_;
+private:
+    Allocator* const allocator_;
 };
 
 }  // namespace vsag

@@ -20,9 +20,9 @@
 #include <catch2/generators/catch_generators.hpp>
 #include <utility>
 
-#include "default_allocator.h"
 #include "fixtures.h"
-#include "safe_allocator.h"
+#include "impl/allocator/default_allocator.h"
+#include "impl/allocator/safe_allocator.h"
 #include "simd/simd.h"
 
 using namespace vsag;

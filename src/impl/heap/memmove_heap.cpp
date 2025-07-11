@@ -13,48 +13,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#pragma once
-
-#include <queue>
-
-#include "distance_heap.h"
+#include "memmove_heap.h"
 
 namespace vsag {
-template <bool max_heap = true, bool fixed_size = true>
-class MemmoveHeap : public DistanceHeap {
-public:
-public:
-    MemmoveHeap(Allocator* allocator, int64_t max_size);
-
-    void
-    Push(float dist, InnerIdType id) override;
-
-    [[nodiscard]] const DistanceRecord&
-    Top() const override {
-        return this->ordered_buffer_[cur_size_ - 1];
-    }
-
-    void
-    Pop() override {
-        cur_size_--;
-    }
-
-    [[nodiscard]] uint64_t
-    Size() const override {
-        return this->cur_size_;
-    }
-
-    [[nodiscard]] bool
-    Empty() const override {
-        return this->cur_size_ == 0;
-    }
-
-private:
-    Vector<DistanceRecord> ordered_buffer_;
-
-    int64_t cur_size_{0};
-};
-
 template <bool max_heap, bool fixed_size>
 MemmoveHeap<max_heap, fixed_size>::MemmoveHeap(Allocator* allocator, int64_t max_size)
     : DistanceHeap(allocator, max_size), ordered_buffer_(allocator) {
@@ -100,4 +61,10 @@ MemmoveHeap<max_heap, fixed_size>::Push(float dist, InnerIdType id) {
         cur_size_++;
     }
 }
+
+template class MemmoveHeap<true, true>;
+template class MemmoveHeap<true, false>;
+template class MemmoveHeap<false, true>;
+template class MemmoveHeap<false, false>;
+
 }  // namespace vsag

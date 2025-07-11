@@ -36,7 +36,7 @@
 #include "block_manager.h"
 #include "data_cell/flatten_interface.h"
 #include "data_cell/graph_interface.h"
-#include "default_allocator.h"
+#include "impl/allocator/default_allocator.h"
 #include "index/iterator_filter.h"
 #include "prefetch.h"
 #include "simd/simd.h"

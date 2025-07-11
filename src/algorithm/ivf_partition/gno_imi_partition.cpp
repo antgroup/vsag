@@ -15,14 +15,15 @@
 
 #include "gno_imi_partition.h"
 
-#include <fmt/format-inl.h>
+#include <cblas.h>
+#include <fmt/format.h>
 
 #include <fstream>
 #include <vector>
 
+#include "impl/allocator/safe_allocator.h"
 #include "impl/kmeans_cluster.h"
 #include "inner_string_params.h"
-#include "safe_allocator.h"
 #include "utils/util_functions.h"
 
 namespace vsag {

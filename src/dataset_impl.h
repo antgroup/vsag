@@ -15,8 +15,6 @@
 
 #pragma once
 
-#include <exceptions.h>
-
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -46,41 +44,41 @@ public:
             return;
         }
 
-        if (allocator_) {
-            allocator_->Deallocate((void*)this->GetIds());
-            allocator_->Deallocate((void*)this->GetDistances());
-            allocator_->Deallocate((void*)this->GetInt8Vectors());
-            allocator_->Deallocate((void*)this->GetFloat32Vectors());
-            allocator_->Deallocate((void*)this->GetPaths());
-            allocator_->Deallocate((void*)this->GetExtraInfos());
+        if (allocator_ != nullptr) {
+            allocator_->Deallocate((void*)(DatasetImpl::GetIds()));
+            allocator_->Deallocate((void*)(DatasetImpl::GetDistances()));
+            allocator_->Deallocate((void*)(DatasetImpl::GetInt8Vectors()));
+            allocator_->Deallocate((void*)(DatasetImpl::GetFloat32Vectors()));
+            allocator_->Deallocate((void*)(DatasetImpl::GetPaths()));
+            allocator_->Deallocate((void*)(DatasetImpl::GetExtraInfos()));
 
-            if (this->GetSparseVectors()) {
-                for (int i = 0; i < this->GetNumElements(); i++) {
-                    allocator_->Deallocate((void*)this->GetSparseVectors()[i].ids_);
-                    allocator_->Deallocate((void*)this->GetSparseVectors()[i].vals_);
+            if (DatasetImpl::GetSparseVectors() != nullptr) {
+                for (int i = 0; i < DatasetImpl::GetNumElements(); i++) {
+                    allocator_->Deallocate((void*)DatasetImpl::GetSparseVectors()[i].ids_);
+                    allocator_->Deallocate((void*)DatasetImpl::GetSparseVectors()[i].vals_);
                 }
-                allocator_->Deallocate((void*)this->GetSparseVectors());
+                allocator_->Deallocate((void*)DatasetImpl::GetSparseVectors());
             }
 
         } else {
-            delete[] this->GetIds();
-            delete[] this->GetDistances();
-            delete[] this->GetInt8Vectors();
-            delete[] this->GetFloat32Vectors();
-            delete[] this->GetPaths();
-            delete[] this->GetExtraInfos();
+            delete[] DatasetImpl::GetIds();
+            delete[] DatasetImpl::GetDistances();
+            delete[] DatasetImpl::GetInt8Vectors();
+            delete[] DatasetImpl::GetFloat32Vectors();
+            delete[] DatasetImpl::GetPaths();
+            delete[] DatasetImpl::GetExtraInfos();
 
-            if (this->GetSparseVectors()) {
-                for (int i = 0; i < this->GetNumElements(); i++) {
-                    delete[] this->GetSparseVectors()[i].ids_;
-                    delete[] this->GetSparseVectors()[i].vals_;
+            if (DatasetImpl::GetSparseVectors() != nullptr) {
+                for (int i = 0; i < DatasetImpl::GetNumElements(); i++) {
+                    delete[] DatasetImpl::GetSparseVectors()[i].ids_;
+                    delete[] DatasetImpl::GetSparseVectors()[i].vals_;
                 }
-                delete[] this->GetSparseVectors();
+                delete[] DatasetImpl::GetSparseVectors();
             }
         }
-        if (this->GetAttributeSets()) {
-            auto* attrsets = this->GetAttributeSets();
-            for (int i = 0; i < this->GetNumElements(); ++i) {
+        if (DatasetImpl::GetAttributeSets() != nullptr) {
+            const auto* attrsets = DatasetImpl::GetAttributeSets();
+            for (int i = 0; i < DatasetImpl::GetNumElements(); ++i) {
                 for (auto* attr : attrsets[i].attrs_) {
                     delete attr;
                 }
@@ -273,7 +271,7 @@ public:
     MakeEmptyDataset();
 
 private:
-    bool owner_ = true;
+    bool owner_{true};
     std::unordered_map<std::string, var> data_;
     Allocator* allocator_ = nullptr;
 };

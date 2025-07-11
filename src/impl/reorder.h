@@ -18,7 +18,8 @@
 #include <memory>
 
 #include "data_cell/flatten_interface.h"
-#include "utils/distance_heap.h"
+#include "heap/distance_heap.h"
+
 namespace vsag {
 class Reorder {
 public:

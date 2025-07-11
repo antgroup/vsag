@@ -19,7 +19,7 @@
 #include <memory>
 
 #include "basic_io_test.h"
-#include "safe_allocator.h"
+#include "impl/allocator/safe_allocator.h"
 
 using namespace vsag;
 

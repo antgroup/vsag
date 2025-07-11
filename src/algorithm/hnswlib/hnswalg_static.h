@@ -30,8 +30,8 @@
 #include <stdexcept>
 #include <unordered_set>
 //#include <Eigen/Dense>
-#include "../../default_allocator.h"
 #include "hnswlib.h"
+#include "impl/allocator/default_allocator.h"
 #include "storage/stream_reader.h"
 #include "visited_list_pool.h"
 

@@ -23,9 +23,9 @@
 #include "data_cell/flatten_interface.h"
 #include "data_cell/graph_interface.h"
 #include "fixtures.h"
+#include "impl/allocator/safe_allocator.h"
 #include "io/memory_io_parameter.h"
 #include "quantization/fp32_quantizer_parameter.h"
-#include "safe_allocator.h"
 
 size_t
 calculate_overlap(const vsag::Vector<uint32_t>& vec1, const vsag::Vector<uint32_t>& vec2, int K) {

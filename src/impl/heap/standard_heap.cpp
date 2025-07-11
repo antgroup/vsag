@@ -13,52 +13,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#pragma once
-
-#include <queue>
-
-#include "distance_heap.h"
+#include "standard_heap.h"
 
 namespace vsag {
-template <bool max_heap = true, bool fixed_size = true>
-class StandardHeap : public DistanceHeap {
-public:
-    using QueueMax =
-        std::priority_queue<DistanceRecord, Vector<std::pair<float, InnerIdType>>, CompareMax>;
-
-    using QueueMin =
-        std::priority_queue<DistanceRecord, Vector<std::pair<float, InnerIdType>>, CompareMin>;
-
-public:
-    StandardHeap(Allocator* allocator, int64_t max_size);
-
-    void
-    Push(float dist, InnerIdType id) override;
-
-    [[nodiscard]] const DistanceRecord&
-    Top() const override {
-        return this->queue_.top();
-    }
-
-    void
-    Pop() override {
-        this->queue_.pop();
-    }
-
-    [[nodiscard]] uint64_t
-    Size() const override {
-        return this->queue_.size();
-    }
-
-    [[nodiscard]] bool
-    Empty() const override {
-        return this->queue_.size() == 0;
-    }
-
-private:
-    typename std::conditional<max_heap, QueueMax, QueueMin>::type queue_;
-};
-
 template <bool max_heap, bool fixed_size>
 StandardHeap<max_heap, fixed_size>::StandardHeap(Allocator* allocator, int64_t max_size)
     : DistanceHeap(allocator, max_size), queue_(allocator) {
@@ -78,5 +35,10 @@ StandardHeap<max_heap, fixed_size>::Push(float dist, InnerIdType id) {
         queue_.emplace(dist, id);
     }
 }
+
+template class StandardHeap<true, true>;
+template class StandardHeap<true, false>;
+template class StandardHeap<false, true>;
+template class StandardHeap<false, false>;
 
 }  // namespace vsag

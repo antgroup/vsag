@@ -18,8 +18,8 @@
 #include <shared_mutex>
 
 #include "computable_bitset.h"
-#include "safe_allocator.h"
 #include "typing.h"
+#include "vsag/allocator.h"
 
 namespace vsag {
 class FastBitset : public ComputableBitset {

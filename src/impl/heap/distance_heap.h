@@ -55,13 +55,14 @@ public:
     MakeInstanceBySize(Allocator* allocator, int64_t max_size);
 
 public:
-    DistanceHeap(Allocator* allocator, int64_t max_size = -1)
-        : allocator_(allocator), max_size_(max_size){};
+    explicit DistanceHeap(Allocator* allocator);
+
+    explicit DistanceHeap(Allocator* allocator, int64_t max_size);
+
+    virtual ~DistanceHeap() = default;
 
     virtual void
-    Push(const DistanceRecord& record) {
-        return this->Push(record.first, record.second);
-    }
+    Push(const DistanceRecord& record);
 
     virtual void
     Push(float dist, InnerIdType id) = 0;

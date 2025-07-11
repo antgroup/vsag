@@ -14,8 +14,9 @@
 // limitations under the License.
 
 #pragma once
+#include <fmt/format.h>
+
 #include "data_cell/bucket_datacell_parameter.h"
-#include "fmt/format-inl.h"
 #include "gno_imi_parameter.h"
 #include "inner_string_params.h"
 #include "parameter.h"

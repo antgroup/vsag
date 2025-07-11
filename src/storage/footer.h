@@ -14,7 +14,8 @@
 // limitations under the License.
 
 #pragma once
-#include "fmt/format.h"
+#include <fmt/format.h>
+
 #include "nlohmann/json.hpp"
 #include "stream_reader.h"
 #include "typing.h"

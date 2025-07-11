@@ -16,7 +16,7 @@
 #include "hgraph.h"
 
 #include <data_cell/compressed_graph_datacell_parameter.h>
-#include <fmt/format-inl.h>
+#include <fmt/format.h>
 
 #include <memory>
 #include <stdexcept>
@@ -25,6 +25,7 @@
 #include "data_cell/graph_datacell_parameter.h"
 #include "data_cell/sparse_graph_datacell.h"
 #include "dataset_impl.h"
+#include "impl/heap/standard_heap.h"
 #include "impl/odescent_graph_builder.h"
 #include "impl/pruning_strategy.h"
 #include "impl/reorder.h"
@@ -34,7 +35,6 @@
 #include "storage/serialization.h"
 #include "storage/stream_reader.h"
 #include "typing.h"
-#include "utils/standard_heap.h"
 #include "utils/util_functions.h"
 #include "vsag/options.h"
 
@@ -358,7 +358,7 @@ HGraph::KnnSearch(const DatasetPtr& query,
         return DatasetImpl::MakeEmptyDataset();
     }
     auto count = static_cast<const int64_t>(search_result->Size());
-    auto [dataset_results, dists, ids] = CreateFastDataset(count, search_allocator);
+    auto [dataset_results, dists, ids] = create_fast_dataset(count, search_allocator);
     char* extra_infos = nullptr;
     if (extra_info_size_ > 0) {
         extra_infos = (char*)search_allocator->Allocate(extra_info_size_ * search_result->Size());
@@ -473,7 +473,7 @@ HGraph::KnnSearch(const DatasetPtr& query,
         return DatasetImpl::MakeEmptyDataset();
     }
     auto count = static_cast<const int64_t>(search_result->Size());
-    auto [dataset_results, dists, ids] = CreateFastDataset(count, search_allocator);
+    auto [dataset_results, dists, ids] = create_fast_dataset(count, search_allocator);
     char* extra_infos = nullptr;
     if (extra_info_size_ > 0) {
         extra_infos = (char*)search_allocator->Allocate(extra_info_size_ * search_result->Size());
@@ -633,7 +633,7 @@ HGraph::RangeSearch(const DatasetPtr& query,
     }
 
     auto count = static_cast<const int64_t>(search_result->Size());
-    auto [dataset_results, dists, ids] = CreateFastDataset(count, allocator_);
+    auto [dataset_results, dists, ids] = create_fast_dataset(count, allocator_);
     char* extra_infos = nullptr;
     if (extra_info_size_ > 0) {
         extra_infos = (char*)allocator_->Allocate(extra_info_size_ * search_result->Size());

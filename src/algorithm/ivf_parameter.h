@@ -14,11 +14,12 @@
 // limitations under the License.
 
 #pragma once
+#include <fmt/format.h>
+
 #include "algorithm/ivf_partition/ivf_nearest_partition.h"
 #include "algorithm/ivf_partition/ivf_partition_strategy_parameter.h"
 #include "data_cell/bucket_datacell_parameter.h"
 #include "data_cell/flatten_datacell_parameter.h"
-#include "fmt/format-inl.h"
 #include "inner_string_params.h"
 #include "parameter.h"
 #include "typing.h"
