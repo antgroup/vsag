@@ -47,21 +47,15 @@ public:
     GetBitsetsByAttrAndBucketId(const Attribute& attr_name, BucketIdType bucket_id) override;
 
     void
+    UpdateBitsetsByAttrAndBucketId(const AttributeSet& attributes,
+                                   const BucketIdType bucket_id,
+                                   const InnerIdType offset_id) override;
+
+    void
     Serialize(StreamWriter& writer) override;
 
     void
     Deserialize(lvalue_or_rvalue<StreamReader> reader) override;
-
-private:
-    template <class T>
-    void
-    insert_by_type(ValueMapPtr& value_map, const Attribute* attr, InnerIdType inner_id);
-
-    template <class T>
-    void
-    get_bitsets_by_type(const ValueMapPtr& value_map,
-                        const Attribute* attr,
-                        std::vector<const ComputableBitset*>& bitsets);
 
 private:
     Vector<Term2ValueMap> multi_term_2_value_map_;
@@ -70,36 +64,4 @@ private:
 
     std::shared_mutex multi_term_2_value_map_mutex_{};
 };
-
-template <class T>
-void
-AttributeBucketInvertedDataCell::insert_by_type(ValueMapPtr& value_map,
-                                                const Attribute* attr,
-                                                InnerIdType inner_id) {
-    auto* attr_value = dynamic_cast<const AttributeValue<T>*>(attr);
-    if (attr_value == nullptr) {
-        throw VsagException(ErrorType::INTERNAL_ERROR, "Invalid attribute type");
-    }
-    for (auto& value : attr_value->GetValue()) {
-        value_map->Insert(value, inner_id);
-    }
-}
-
-template <class T>
-void
-AttributeBucketInvertedDataCell::get_bitsets_by_type(
-    const ValueMapPtr& value_map,
-    const Attribute* attr,
-    std::vector<const ComputableBitset*>& bitsets) {
-    auto* attr_value = dynamic_cast<const AttributeValue<T>*>(attr);
-    if (attr_value == nullptr) {
-        throw VsagException(ErrorType::INTERNAL_ERROR, "Invalid attribute type");
-    }
-    auto values = attr_value->GetValue();
-    auto count = values.size();
-    for (int i = 0; i < count; ++i) {
-        bitsets[i] = value_map->GetBitsetByValue(values[i]);
-    }
-}
-
 }  // namespace vsag

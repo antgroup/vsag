@@ -59,16 +59,10 @@ public:
     And(const ComputableBitset& another) override;
 
     void
-    Xor(const ComputableBitset& another) override;
-
-    void
     Or(const ComputableBitset* another) override;
 
     void
     And(const ComputableBitset* another) override;
-
-    void
-    Xor(const ComputableBitset* another) override;
 
     void
     Not() override;

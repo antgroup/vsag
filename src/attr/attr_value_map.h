@@ -67,6 +67,17 @@ public:
     }
 
     template <class T>
+    void
+    Erase(InnerIdType inner_id) {
+        auto& map = GetMapByType<T>();
+        for (auto& [key, bitset] : map) {
+            if (bitset != nullptr) {
+                bitset->Set(inner_id, false);
+            }
+        }
+    }
+
+    template <class T>
     ComputableBitset*
     GetBitsetByValue(T value) {
         auto& map = this->GetMapByType<T>();
