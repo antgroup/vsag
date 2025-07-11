@@ -15,7 +15,7 @@
 
 #include "flatten_datacell_parameter.h"
 
-#include <fmt/format-inl.h>
+#include <fmt/format.h>
 
 #include "inner_string_params.h"
 

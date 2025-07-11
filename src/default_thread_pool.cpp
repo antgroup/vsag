@@ -15,6 +15,8 @@
 
 #include "default_thread_pool.h"
 
+#include "vsag/options.h"
+
 namespace vsag {
 
 DefaultThreadPool::DefaultThreadPool(std::size_t threads) {

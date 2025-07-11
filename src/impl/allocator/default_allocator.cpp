@@ -17,7 +17,20 @@
 
 #include <fmt/format.h>
 
+#include "../../logger.h"
+
 namespace vsag {
+#ifndef NDEBUG
+DefaultAllocator::~DefaultAllocator() {
+    if (not allocated_ptrs_.empty()) {
+        logger::error(fmt::format("There is a memory leak in {}.", DefaultAllocator::Name()));
+        abort();
+    }
+}
+#else
+DefaultAllocator::~DefaultAllocator() = default;
+#endif
+
 void*
 DefaultAllocator::Allocate(size_t size) {
     auto* ptr = malloc(size);

@@ -25,12 +25,12 @@
 
 namespace vsag {
 
-static const int64_t LOOK_AT_K = 20;
-static const int64_t MAXIMUM_DEGREE = 128;
+static constexpr int64_t LOOK_AT_K = 20;
+static constexpr int64_t MAXIMUM_DEGREE = 128;
 
 class ConjugateGraph {
 public:
-    ConjugateGraph(Allocator* allocator);
+    explicit ConjugateGraph(Allocator* allocator);
 
     tl::expected<bool, Error>
     AddNeighbor(int64_t from_tag_id, int64_t to_tag_id);

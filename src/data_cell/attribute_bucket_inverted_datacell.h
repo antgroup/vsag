@@ -18,7 +18,7 @@
 #include <memory>
 #include <shared_mutex>
 
-#include "attr_value_map.h"
+#include "attr/attr_value_map.h"
 #include "attribute_inverted_interface.h"
 #include "vsag_exception.h"
 

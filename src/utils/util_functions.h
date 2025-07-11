@@ -20,8 +20,6 @@
 #include <string>
 
 #include "index/index_common_param.h"
-#include "logger.h"
-#include "spdlog/spdlog.h"
 #include "vsag/dataset.h"
 #include "vsag/expected.hpp"
 #include "vsag_exception.h"
@@ -66,7 +64,7 @@ mapping_external_param_to_inner(const JsonType& external_json,
                                 JsonType& inner_json);
 
 std::tuple<DatasetPtr, float*, int64_t*>
-CreateFastDataset(int64_t dim, Allocator* allocator);
+create_fast_dataset(int64_t dim, Allocator* allocator);
 
 std::vector<int>
 select_k_numbers(int64_t n, int k);

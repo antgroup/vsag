@@ -15,7 +15,7 @@
 
 #include "stream_reader.h"
 
-#include <fmt/format-inl.h>
+#include <fmt/format.h>
 
 #include <cstdint>
 #include <fstream>

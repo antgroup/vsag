@@ -19,7 +19,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <random>
 
-#include "safe_allocator.h"
+#include "impl/allocator/safe_allocator.h"
 
 namespace vsag {
 

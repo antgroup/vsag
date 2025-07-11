@@ -15,7 +15,7 @@
 
 #include "hnsw.h"
 
-#include <fmt/format-inl.h>
+#include <fmt/format.h>
 
 #include <cstdint>
 #include <exception>
@@ -29,11 +29,11 @@
 #include "data_cell/flatten_datacell.h"
 #include "data_cell/graph_datacell_parameter.h"
 #include "empty_index_binary_set.h"
+#include "impl/allocator/safe_allocator.h"
 #include "impl/odescent_graph_builder.h"
 #include "index/hnsw_zparameters.h"
 #include "io/memory_block_io_parameter.h"
 #include "quantization/fp32_quantizer_parameter.h"
-#include "safe_allocator.h"
 #include "storage/serialization.h"
 #include "storage/stream_writer.h"
 #include "utils/slow_task_timer.h"
@@ -331,7 +331,7 @@ HNSW::knn_search(const DatasetPtr& query,
             results.pop();
         }
         auto [dataset_results, dists, ids] =
-            CreateFastDataset(static_cast<int64_t>(results.size()), search_allocator);
+            create_fast_dataset(static_cast<int64_t>(results.size()), search_allocator);
 
         for (auto j = static_cast<int64_t>(results.size() - 1); j >= 0; --j) {
             dists[j] = results.top().first;
@@ -445,7 +445,7 @@ HNSW::range_search(const DatasetPtr& query,
         if (limited_size >= 1) {
             target_size = std::min(limited_size, target_size);
         }
-        auto [dataset_results, dists, ids] = CreateFastDataset(target_size, allocator_.get());
+        auto [dataset_results, dists, ids] = create_fast_dataset(target_size, allocator_.get());
 
         for (auto j = static_cast<int64_t>(results.size() - 1); j >= 0; --j) {
             if (j < target_size) {

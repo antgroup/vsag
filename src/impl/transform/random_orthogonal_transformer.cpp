@@ -16,7 +16,7 @@
 #include "random_orthogonal_transformer.h"
 
 #include <cblas.h>
-#include <fmt/format-inl.h>
+#include <fmt/format.h>
 #include <lapacke.h>
 
 #include <random>

@@ -15,9 +15,12 @@
 
 #include "pca_transformer.h"
 
-#include <fmt/format-inl.h>
+#include <cblas.h>
+#include <fmt/format.h>
+#include <lapacke.h>
 
-#include "../../logger.h"
+#include <random>
+
 #include "vsag_exception.h"
 
 namespace vsag {

@@ -15,7 +15,7 @@
 
 #include "sparse_index.h"
 
-#include "utils/standard_heap.h"
+#include "impl/heap/standard_heap.h"
 #include "utils/util_functions.h"
 
 namespace vsag {
@@ -172,7 +172,7 @@ SparseIndex::RangeSearch(const DatasetPtr& query,
 DatasetPtr
 SparseIndex::collect_results(const DistHeapPtr& results) const {
     auto [result, dists, ids] =
-        CreateFastDataset(static_cast<int64_t>(results->Size()), allocator_);
+        create_fast_dataset(static_cast<int64_t>(results->Size()), allocator_);
     if (results->Empty()) {
         result->Dim(0)->NumElements(1);
         return result;

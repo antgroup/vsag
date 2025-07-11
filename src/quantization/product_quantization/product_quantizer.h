@@ -63,7 +63,7 @@ public:
     inline float
     ComputeImpl(const uint8_t* codes1, const uint8_t* codes2);
 
-    inline void
+    void
     ProcessQueryImpl(const DataType* query, Computer<ProductQuantizer>& computer) const;
 
     inline void
@@ -264,81 +264,6 @@ ProductQuantizer<metric>::ComputeImpl(const uint8_t* codes1, const uint8_t* code
         }
     }
     return dist;
-}
-
-template <MetricType metric>
-void
-ProductQuantizer<metric>::ProcessQueryImpl(const DataType* query,
-                                           Computer<ProductQuantizer>& computer) const {
-    try {
-        const float* cur_query = query;
-        Vector<float> norm_vec(this->allocator_);
-        if constexpr (metric == MetricType::METRIC_TYPE_COSINE) {
-            norm_vec.resize(this->dim_);
-            Normalize(query, norm_vec.data(), this->dim_);
-            cur_query = norm_vec.data();
-        }
-        auto* lookup_table = reinterpret_cast<float*>(
-            this->allocator_->Allocate(this->pq_dim_ * CENTROIDS_PER_SUBSPACE * sizeof(float)));
-        if (true) {
-            for (int i = 0; i < pq_dim_; ++i) {
-                const auto* per_query = cur_query + i * subspace_dim_;
-                const auto* per_code_book = get_codebook_data(i, 0);
-                auto* per_result = lookup_table + i * CENTROIDS_PER_SUBSPACE;
-                if constexpr (metric == MetricType::METRIC_TYPE_IP or
-                              metric == MetricType::METRIC_TYPE_COSINE) {
-                    cblas_sgemv(CblasRowMajor,
-                                CblasNoTrans,
-                                CENTROIDS_PER_SUBSPACE,
-                                subspace_dim_,
-                                1.0F,
-                                per_code_book,
-                                subspace_dim_,
-                                per_query,
-                                1,
-                                0.0F,
-                                per_result,
-                                1);
-                } else if constexpr (metric == MetricType::METRIC_TYPE_L2SQR) {
-                    // TODO(LHT): use blas opt
-                    for (int64_t j = 0; j < CENTROIDS_PER_SUBSPACE; ++j) {
-                        per_result[j] = FP32ComputeL2Sqr(
-                            per_query, per_code_book + j * subspace_dim_, subspace_dim_);
-                    }
-                }
-            }
-        } else {
-            Vector<float> tmp(this->allocator_);
-            tmp.resize(this->dim_);
-            for (int i = 0; i < CENTROIDS_PER_SUBSPACE; ++i) {
-                if constexpr (metric == MetricType::METRIC_TYPE_IP or
-                              metric == MetricType::METRIC_TYPE_COSINE) {
-                    FP32Mul(reverse_codebooks_.data() + i * this->dim_,
-                            cur_query,
-                            tmp.data(),
-                            this->dim_);
-                } else if constexpr (metric == MetricType::METRIC_TYPE_L2SQR) {
-                    FP32Sub(reverse_codebooks_.data() + i * this->dim_,
-                            cur_query,
-                            tmp.data(),
-                            this->dim_);
-                    FP32Mul(tmp.data(), tmp.data(), tmp.data(), this->dim_);
-                }
-                for (int j = 0; j < pq_dim_; ++j) {
-                    lookup_table[j * CENTROIDS_PER_SUBSPACE + i] =
-                        FP32ReduceAdd(tmp.data() + j * subspace_dim_, subspace_dim_);
-                }
-            }
-        }
-        computer.buf_ = reinterpret_cast<uint8_t*>(lookup_table);
-
-    } catch (const std::bad_alloc& e) {
-        if (computer.buf_ != nullptr) {
-            this->allocator_->Deallocate(computer.buf_);
-        }
-        computer.buf_ = nullptr;
-        throw VsagException(ErrorType::NO_ENOUGH_MEMORY, "bad alloc when init computer buf");
-    }
 }
 
 template <MetricType metric>

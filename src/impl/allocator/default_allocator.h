@@ -15,11 +15,9 @@
 
 #pragma once
 
-#include <memory>
+#include <mutex>
 #include <unordered_set>
-#include <vector>
 
-#include "logger.h"
 #include "vsag/allocator.h"
 
 namespace vsag {
@@ -27,14 +25,7 @@ namespace vsag {
 class DefaultAllocator : public Allocator {
 public:
     DefaultAllocator() = default;
-    ~DefaultAllocator() override {
-#ifndef NDEBUG
-        if (not allocated_ptrs_.empty()) {
-            logger::error(fmt::format("There is a memory leak in {}.", Name()));
-            abort();
-        }
-#endif
-    }
+    ~DefaultAllocator() override;
 
     DefaultAllocator(const DefaultAllocator&) = delete;
     DefaultAllocator(DefaultAllocator&&) = delete;

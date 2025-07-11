@@ -16,8 +16,8 @@
 #pragma once
 #include <memory>
 
+#include "impl/allocator/safe_allocator.h"
 #include "impl/bitset/computable_bitset.h"
-#include "safe_allocator.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
 #include "typing.h"

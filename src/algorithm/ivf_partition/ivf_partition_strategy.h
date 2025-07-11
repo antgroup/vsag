@@ -15,8 +15,6 @@
 
 #pragma once
 
-#include <cblas.h>
-
 #include <iostream>
 #include <vector>
 
@@ -82,15 +80,7 @@ public:
     }
 
     virtual void
-    GetResidual(
-        size_t n, const float* x, float* residuals, float* centroids, BucketIdType* assign) {
-        // TODO: Directly implement c = a - b.
-        memcpy(residuals, x, sizeof(float) * n * dim_);
-        for (size_t i = 0; i < n; ++i) {
-            BucketIdType bucket_id = assign[i];
-            cblas_saxpy(dim_, -1.0, centroids + bucket_id * dim_, 1, residuals + i * dim_, 1);
-        }
-    }
+    GetResidual(size_t n, const float* x, float* residuals, float* centroids, BucketIdType* assign);
 
 public:
     bool is_trained_{false};

@@ -17,12 +17,12 @@
 
 #include "data_cell/flatten_interface.h"
 #include "empty_index_binary_set.h"
+#include "impl/heap/standard_heap.h"
 #include "impl/odescent_graph_builder.h"
 #include "impl/pruning_strategy.h"
 #include "io/memory_io_parameter.h"
 #include "storage/serialization.h"
 #include "utils/slow_task_timer.h"
-#include "utils/standard_heap.h"
 
 namespace vsag {
 

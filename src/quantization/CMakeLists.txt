@@ -12,6 +12,11 @@ set (QUANTIZER_SRC
         rabitq_quantization/rabitq_quantizer_parameter.cpp
         product_quantization/product_quantizer_parameter.cpp
         product_quantization/pq_fastscan_quantizer_parameter.cpp
+        product_quantization/pq_fastscan_quantizer.cpp
+        product_quantization/product_quantizer.cpp
 )
 
 add_library (quantizer OBJECT ${QUANTIZER_SRC})
+target_link_libraries(quantizer PUBLIC fmt::fmt coverage_config)
+
+maybe_add_dependencies (quantizer spdlog openblas mkl)
