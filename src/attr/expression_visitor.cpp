@@ -15,9 +15,11 @@
 
 #include "expression_visitor.h"
 
+#include <antlr4-autogen/FCLexer.h>
+
 namespace vsag {
 vsag::ExprPtr
-AstParse(const std::string& filter_condition_str) {
+AstParse(const std::string& filter_condition_str, AttrTypeSchema* schema) {
     antlr4::ANTLRInputStream input(filter_condition_str);
     FCLexer lexer(&input);
     antlr4::CommonTokenStream tokens(&lexer);
@@ -28,7 +30,7 @@ AstParse(const std::string& filter_condition_str) {
     lexer.addErrorListener(&error_listener);
     parser.removeErrorListeners();
     parser.addErrorListener(&error_listener);
-    vsag::FCExpressionVisitor visitor;
+    vsag::FCExpressionVisitor visitor(schema);
     auto expr_ptr = std::any_cast<vsag::ExprPtr>(visitor.visit(parser.filter_condition()));
     return std::move(expr_ptr);
 }

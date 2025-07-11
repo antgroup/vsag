@@ -763,7 +763,8 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
     }
     auto query = request.query_;
     if (request.enable_attribute_filter_) {
-        auto expr = AstParse(request.attribute_filter_str_);
+        auto& schema = this->attr_filter_index_->field_type_map_;
+        auto expr = AstParse(request.attribute_filter_str_, &schema);
         auto executor = Executor::MakeInstance(this->allocator_, expr, this->attr_filter_index_);
         param.executor = executor;
     }
