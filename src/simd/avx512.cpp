@@ -261,7 +261,7 @@ FP32ComputeL2SqrBatch4(const float* RESTRICT query,
                        float& result2,
                        float& result3,
                        float& result4) {
-#if defined(ENABLE_AVX2)
+#if defined(ENABLE_AVX512)
     if (dim < 16) {
         return avx2::FP32ComputeL2SqrBatch4(
             query, dim, codes1, codes2, codes3, codes4, result1, result2, result3, result4);
