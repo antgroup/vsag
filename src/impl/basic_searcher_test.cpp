@@ -15,12 +15,12 @@
 
 #include "basic_searcher.h"
 
+#include <catch2/catch_template_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
 
 #include "algorithm/hnswlib/hnswalg.h"
 #include "algorithm/hnswlib/space_l2.h"
 #include "basic_optimizer.h"
-#include "catch2/catch_template_test_macros.hpp"
 #include "data_cell/flatten_datacell.h"
 #include "fixtures.h"
 #include "impl/allocator/safe_allocator.h"

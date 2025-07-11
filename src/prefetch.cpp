@@ -92,8 +92,8 @@ PrefetchLines(const void* data, uint64_t size) {
         PREFETCH_LINE(60);
         PREFETCH_LINE(61);
         PREFETCH_LINE(62);
-        PREFETCH_LINE(63);
         default:
+            PrefetchImpl<63>(data);
             break;
     }
 }
