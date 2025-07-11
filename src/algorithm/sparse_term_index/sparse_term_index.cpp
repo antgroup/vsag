@@ -183,7 +183,9 @@ SparseTermIndex::KnnSearch(const DatasetPtr& query,
             heap.pop();
         }
 
-        for (auto j = k; j >= 0; --j) {
+        int cur_size = heap.size();
+
+        for (int j = cur_size - 1; j >= 0; j--) {
             ret_dists[j] = -heap.top().first;
             ret_ids[j] = label_table_->GetLabelById(heap.top().second);
             heap.pop();
