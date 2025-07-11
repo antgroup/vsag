@@ -79,7 +79,76 @@ time cost:  0.08879923391342164 s
 recall:  0.9722000000000001
 """
 
+data_scann = """
+QPS: 1003.95, Recall: 0.4056
+QPS: 677.42, Recall: 0.5009
+QPS: 381.19, Recall: 0.5497
+QPS: 206.46, Recall: 0.5815
+QPS: 1110.96, Recall: 0.4810
+QPS: 682.65, Recall: 0.6036
+QPS: 382.56, Recall: 0.6697
+QPS: 206.29, Recall: 0.7134
+QPS: 58.37, Recall: 0.9011
+QPS: 44.74, Recall: 0.8912
+QPS: 43.46, Recall: 0.8788
+QPS: 40.52, Recall: 0.8805
+QPS: 36.54, Recall: 0.8817
+QPS: 33.37, Recall: 0.8951
+QPS: 30.68, Recall: 0.9062
+QPS: 28.37, Recall: 0.9067
+QPS: 24.41, Recall: 0.9084
+QPS: 20.61, Recall: 0.9100
+QPS: 16.88, Recall: 0.9172
+QPS: 14.27, Recall: 0.9315
+QPS: 12.43, Recall: 0.9458
+QPS: 11.07, Recall: 0.9464
+QPS: 9.36, Recall: 0.9618
+QPS: 8.53, Recall: 0.9747
+QPS: 7.59, Recall: 0.9751
+QPS: 6.16, Recall: 0.9633
+QPS: 4.79, Recall: 0.9639
+QPS: 3.85, Recall: 0.9766
+QPS: 2.40, Recall: 0.9876
+"""
+
+data_nndescent = """"""
+
 if is_10m:
+
+    data_scann = """
+QPS: 530.45, Recall: 0.8233
+QPS: 475.03, Recall: 0.8250
+QPS: 420.10, Recall: 0.8291
+QPS: 396.73, Recall: 0.8541
+QPS: 364.64, Recall: 0.8663
+QPS: 290.72, Recall: 0.8669
+QPS: 302.42, Recall: 0.8698
+QPS: 255.82, Recall: 0.8709
+QPS: 211.29, Recall: 0.8802
+QPS: 180.04, Recall: 0.9035
+QPS: 156.39, Recall: 0.9209
+QPS: 140.17, Recall: 0.9227
+QPS: 116.93, Recall: 0.9453
+QPS: 105.59, Recall: 0.9541
+QPS: 94.18, Recall: 0.9564
+QPS: 75.49, Recall: 0.9541
+QPS: 58.68, Recall: 0.9628
+QPS: 48.60, Recall: 0.9756
+QPS: 30.58, Recall: 0.9878
+    """
+
+    data_nndescent = """
+    QPS: 384.30, Recall: 0.8767
+    QPS: 282.47, Recall: 0.9157
+    QPS: 229.71, Recall: 0.9494
+    QPS: 151.41, Recall: 0.9773
+    QPS: 89.04, Recall: 0.9837
+    QPS: 45.05, Recall: 0.9872
+    QPS: 14.63, Recall: 0.9878
+    QPS: 11.85, Recall: 0.9895
+    QPS: 10.12, Recall: 0.9895
+    """
+
     data_hnswlib = """
     {"QPS":2123.456787109375,"RT":0.00047093024477362633,"Recall":0.7749999761581421,"ef_search":10}
     {"QPS":1421.4876708984375,"RT":0.0007034883601590991,"Recall":0.8947674632072449,"ef_search":20}
@@ -179,6 +248,24 @@ if is_10m:
     recall:  0.9395348837209302
     """
 
+def process_data(data):
+    qps_values5 = []
+    recall_values5 = []
+    for line in data.strip().split('\n'):
+        # 分割每一行的键值对
+        parts = line.split(',')
+        qps_part = parts[0].strip()  # QPS部分
+        recall_part = parts[1].strip()  # Recall部分
+
+        # 提取数值
+        qps_value = float(qps_part.split(':')[1].strip())
+        recall_value = float(recall_part.split(':')[1].strip())
+
+        # 添加到对应的列表中
+        qps_values5.append(qps_value)
+        recall_values5.append(recall_value)
+    return qps_values5, recall_values5
+
 # 将数据解析为列表
 data_list1 = [json.loads(line) for line in data_hnswlib.strip().split("\n")]
 data_list2 = [json.loads(line) for line in data2.strip().split("\n")]
@@ -212,12 +299,20 @@ for i in range(0, len(lines), 3):  # 每3行为一组
     qps_values3.append(qps)
     recall_values3.append(recall_value)
 
+qps_values4, recall_values4 = process_data(data_scann)
+
+qps_values5 = []
+recall_values5 = []
+# qps_values5, recall_values5 = process_data(data_nndescent)
+
 
 # 定义样式
 LINE_STYLES = {
     "vsag": {"color": "#03A9F4", "marker": "o"},  # 清新蓝色 + 圆形
     "hnswlib": {"color": "#FF5722", "marker": "s"},  # 清新橙色 + 方形
     "faiss-ivfpqfs": {"color": "red", "marker": ">"},  # 红色 + 三角形
+    "scann": {"color": "green", "marker": "v"},
+    "nndescent": {"color": "purple", "marker": "D"},
 }
 
 # 绘制曲线
@@ -240,6 +335,20 @@ plt.plot(recall_values2, qps_values2,
 style3 = LINE_STYLES["faiss-ivfpqfs"]
 plt.plot(recall_values3, qps_values3,
          label="faiss-ivfpqfs", marker=style3["marker"], color=style3["color"],
+         markersize=8, markeredgecolor="black", linewidth=2, zorder=2)
+
+
+# 数据集 3 的 QPS vs Recall 曲线
+style4 = LINE_STYLES["scann"]
+plt.plot(recall_values4, qps_values4,
+         label="scann", marker=style4["marker"], color=style4["color"],
+         markersize=8, markeredgecolor="black", linewidth=2, zorder=2)
+
+
+# 数据集 3 的 QPS vs Recall 曲线
+style5 = LINE_STYLES["nndescent"]
+plt.plot(recall_values5, qps_values5,
+         label="nndescent", marker=style5["marker"], color=style5["color"],
          markersize=8, markeredgecolor="black", linewidth=2, zorder=2)
 
 # 设置图形属性
@@ -294,6 +403,9 @@ def draw_legend(output_dir):
                markersize=10, markeredgecolor="black"),
         Line2D([0], [0], marker=LINE_STYLES["faiss-ivfpqfs"]["marker"], color="w",
                label="faiss-ivfpqfs", markerfacecolor=LINE_STYLES["faiss-ivfpqfs"]["color"],
+               markersize=10, markeredgecolor="black"),
+        Line2D([0], [0], marker=LINE_STYLES["scann"]["marker"], color="w",
+               label="scann", markerfacecolor=LINE_STYLES["scann"]["color"],
                markersize=10, markeredgecolor="black"),
     ]
 
