@@ -88,8 +88,12 @@ TEST_CASE("RaBitQ SQ4U-BQ Compute Benchmark", "[ut][simd][!benchmark]") {
     int count = 10000;
     int dim = 32;
     BENCHMARK_SIMD_COMPUTE_SQ4(generic, RaBitQSQ4UBinaryIP);
-    BENCHMARK_SIMD_COMPUTE_SQ4(avx512, RaBitQSQ4UBinaryIP);
-    BENCHMARK_SIMD_COMPUTE_SQ4(avx512vpopcntdq, RaBitQSQ4UBinaryIP);
+    if (SimdStatus::SupportAVX512()) {
+        BENCHMARK_SIMD_COMPUTE_SQ4(avx512, RaBitQSQ4UBinaryIP);
+    }
+    if (SimdStatus::SupportAVX512VPOPCNTDQ()) {
+        BENCHMARK_SIMD_COMPUTE_SQ4(avx512vpopcntdq, RaBitQSQ4UBinaryIP);
+    }
 }
 
 TEST_CASE("RaBitQ SQ4U-BQ Compute Codes", "[ut][simd]") {
@@ -158,11 +162,21 @@ TEST_CASE("RaBitQ FP32-BQ SIMD Compute Benchmark", "[ut][simd][!benchmark]") {
     std::tie(queries, bases) = fixtures::GenerateBinaryVectorsAndCodes(count, dim);
 
     BENCHMARK_SIMD_COMPUTE(generic, RaBitQFloatBinaryIP);
-    BENCHMARK_SIMD_COMPUTE(sse, RaBitQFloatBinaryIP);
-    BENCHMARK_SIMD_COMPUTE(avx, RaBitQFloatBinaryIP);
-    BENCHMARK_SIMD_COMPUTE(avx2, RaBitQFloatBinaryIP);
-    BENCHMARK_SIMD_COMPUTE(avx512, RaBitQFloatBinaryIP);
-    BENCHMARK_SIMD_COMPUTE(neon, RaBitQFloatBinaryIP);
+    if (SimdStatus::SupportSSE()) {
+        BENCHMARK_SIMD_COMPUTE(sse, RaBitQFloatBinaryIP);
+    }
+    if (SimdStatus::SupportAVX()) {
+        BENCHMARK_SIMD_COMPUTE(avx, RaBitQFloatBinaryIP);
+    }
+    if (SimdStatus::SupportAVX2()) {
+        BENCHMARK_SIMD_COMPUTE(avx2, RaBitQFloatBinaryIP);
+    }
+    if (SimdStatus::SupportAVX512()) {
+        BENCHMARK_SIMD_COMPUTE(avx512, RaBitQFloatBinaryIP);
+    }
+    if (SimdStatus::SupportNEON()) {
+        BENCHMARK_SIMD_COMPUTE(neon, RaBitQFloatBinaryIP);
+    }
 }
 TEST_CASE("SIMD test for rescale", "[ut][simd]") {
     auto dims = fixtures::get_common_used_dims();

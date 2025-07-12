@@ -116,9 +116,19 @@ TEST_CASE("SQ8 SIMD Compute Benchmark", "[ut][simd][!benchmark]") {
     auto lb = fixtures::generate_vectors(1, dim, true, 180);
     auto diff = fixtures::generate_vectors(1, dim, true, 6217);
     BENCHMARK_SIMD_COMPUTE(generic, SQ8ComputeIP);
-    BENCHMARK_SIMD_COMPUTE(sse, SQ8ComputeIP);
-    BENCHMARK_SIMD_COMPUTE(avx, SQ8ComputeIP);
-    BENCHMARK_SIMD_COMPUTE(avx2, SQ8ComputeIP);
-    BENCHMARK_SIMD_COMPUTE(avx512, SQ8ComputeIP);
-    BENCHMARK_SIMD_COMPUTE(neon, SQ8ComputeIP);
+    if (SimdStatus::SupportSSE()) {
+        BENCHMARK_SIMD_COMPUTE(sse, SQ8ComputeIP);
+    }
+    if (SimdStatus::SupportAVX()) {
+        BENCHMARK_SIMD_COMPUTE(avx, SQ8ComputeIP);
+    }
+    if (SimdStatus::SupportAVX2()) {
+        BENCHMARK_SIMD_COMPUTE(avx2, SQ8ComputeIP);
+    }
+    if (SimdStatus::SupportAVX512()) {
+        BENCHMARK_SIMD_COMPUTE(avx512, SQ8ComputeIP);
+    }
+    if (SimdStatus::SupportNEON()) {
+        BENCHMARK_SIMD_COMPUTE(neon, SQ8ComputeIP);
+    }
 }
