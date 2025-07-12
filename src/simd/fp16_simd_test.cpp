@@ -104,14 +104,30 @@ TEST_CASE("FP16 Benchmark", "[ut][simd][!benchmark]") {
     auto vec2_fp32 = fixtures::generate_vectors(count, dim, false, 86);
     auto vec2 = encode_fp16(vec2_fp32, count * dim);
     BENCHMARK_SIMD_COMPUTE(generic, FP16ComputeIP);
-    BENCHMARK_SIMD_COMPUTE(sse, FP16ComputeIP);
-    BENCHMARK_SIMD_COMPUTE(avx2, FP16ComputeIP);
-    BENCHMARK_SIMD_COMPUTE(avx512, FP16ComputeIP);
-    BENCHMARK_SIMD_COMPUTE(neon, FP16ComputeIP);
+    if (SimdStatus::SupportSSE()) {
+        BENCHMARK_SIMD_COMPUTE(sse, FP16ComputeIP);
+    }
+    if (SimdStatus::SupportAVX2()) {
+        BENCHMARK_SIMD_COMPUTE(avx2, FP16ComputeIP);
+    }
+    if (SimdStatus::SupportAVX512()) {
+        BENCHMARK_SIMD_COMPUTE(avx512, FP16ComputeIP);
+    }
+    if (SimdStatus::SupportNEON()) {
+        BENCHMARK_SIMD_COMPUTE(neon, FP16ComputeIP);
+    }
 
     BENCHMARK_SIMD_COMPUTE(generic, FP16ComputeL2Sqr);
-    BENCHMARK_SIMD_COMPUTE(sse, FP16ComputeL2Sqr);
-    BENCHMARK_SIMD_COMPUTE(avx2, FP16ComputeL2Sqr);
-    BENCHMARK_SIMD_COMPUTE(avx512, FP16ComputeL2Sqr);
-    BENCHMARK_SIMD_COMPUTE(neon, FP16ComputeL2Sqr);
+    if (SimdStatus::SupportSSE()) {
+        BENCHMARK_SIMD_COMPUTE(sse, FP16ComputeL2Sqr);
+    }
+    if (SimdStatus::SupportAVX2()) {
+        BENCHMARK_SIMD_COMPUTE(avx2, FP16ComputeL2Sqr);
+    }
+    if (SimdStatus::SupportAVX512()) {
+        BENCHMARK_SIMD_COMPUTE(avx512, FP16ComputeL2Sqr);
+    }
+    if (SimdStatus::SupportNEON()) {
+        BENCHMARK_SIMD_COMPUTE(neon, FP16ComputeL2Sqr);
+    }
 }
