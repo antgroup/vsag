@@ -310,6 +310,10 @@ public:
                             "Index doesn't support GetVectorByInnerId");
     }
 
+    virtual void
+    SetIOs() {
+    }
+
 public:
     LabelTablePtr label_table_{nullptr};
 
