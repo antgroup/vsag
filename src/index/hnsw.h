@@ -39,7 +39,6 @@
 #include "index_common_param.h"
 #include "index_feature_list.h"
 #include "index_impl.h"
-#include "safe_allocator.h"
 #include "logger.h"
 #include "typing.h"
 #include "utils/window_result_queue.h"
