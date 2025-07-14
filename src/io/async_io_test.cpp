@@ -29,6 +29,17 @@ TEST_CASE("AsyncIO Read And Write", "[ut][AsyncIO]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     auto io = std::make_unique<AsyncIO>(path, allocator.get());
     TestBasicReadWrite(*io);
+
+    // read zero
+    bool need_release = false;
+    auto result = io->DirectReadImpl(0, 0, need_release);
+    REQUIRE(result == nullptr);
+
+    // prefetch
+    REQUIRE_NOTHROW(io->PrefetchImpl(0));
+
+    // in memory
+    REQUIRE(io->InMemoryImpl() == false);
 }
 
 TEST_CASE("AsyncIO Parameter", "[ut][AsyncIO]") {
