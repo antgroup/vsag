@@ -40,7 +40,8 @@
 
 struct HGraphDefaultParam {
     std::string base_codes_io_type = "block_memory_io";
-    std::string base_codes_quantization_type = "sq8";
+    std::string base_codes_quantization_type = "pq";
+    int base_codes_pq_dim = 8;
     std::string precise_codes_io_type = "block_memory_io";
     std::string graph_io_type = "block_memory_io";
     std::string graph_storage_type = "flat";
@@ -64,7 +65,7 @@ generate_hgraph_param(const HGraphDefaultParam& param) {
             }},
             "quantization_params": {{
                 "pca_dim": 0,
-                "pq_dim": 1,
+                "pq_dim": {},
                 "sq4_uniform_trunc_rate": 0.05,
                 "type": "{}"
             }}
@@ -108,6 +109,7 @@ generate_hgraph_param(const HGraphDefaultParam& param) {
 
     return fmt::format(param_str,
                        param.base_codes_io_type,
+                       param.base_codes_pq_dim,
                        param.base_codes_quantization_type,
                        param.graph_storage_type,
                        param.max_degree,
@@ -131,6 +133,7 @@ TEST_CASE("HGraph Parameters CheckCompatibility", "[ut][HGraphParameter][CheckCo
 
     TEST_COMPATIBILITY_CASE(
         "different base codes io type", base_codes_io_type, "memory_io", "block_memory_io", true)
+    TEST_COMPATIBILITY_CASE("different pq dim", base_codes_pq_dim, 8, 16, true)
     TEST_COMPATIBILITY_CASE(
         "different base codes quantization type", base_codes_quantization_type, "sq4", "sq8", false)
     TEST_COMPATIBILITY_CASE("different graph type", graph_storage_type, "flat", "compressed", false)
