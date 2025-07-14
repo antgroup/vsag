@@ -6,7 +6,7 @@ from matplotlib.ticker import FuncFormatter
 from matplotlib.ticker import MaxNLocator
 
 
-is_10m = False
+is_10m = True
 
 data_hnswlib = """
 {"QPS":1290.3226318359375,"RT":0.0007749999640509486,"Recall":0.9235000014305115,"ef_search":30}
@@ -80,16 +80,6 @@ recall:  0.9722000000000001
 """
 
 data_scann = """
-QPS: 1003.95, Recall: 0.4056
-QPS: 677.42, Recall: 0.5009
-QPS: 381.19, Recall: 0.5497
-QPS: 206.46, Recall: 0.5815
-QPS: 1110.96, Recall: 0.4810
-QPS: 682.65, Recall: 0.6036
-QPS: 382.56, Recall: 0.6697
-QPS: 206.29, Recall: 0.7134
-QPS: 58.37, Recall: 0.9011
-QPS: 44.74, Recall: 0.8912
 QPS: 43.46, Recall: 0.8788
 QPS: 40.52, Recall: 0.8805
 QPS: 36.54, Recall: 0.8817
@@ -100,15 +90,7 @@ QPS: 24.41, Recall: 0.9084
 QPS: 20.61, Recall: 0.9100
 QPS: 16.88, Recall: 0.9172
 QPS: 14.27, Recall: 0.9315
-QPS: 12.43, Recall: 0.9458
 QPS: 11.07, Recall: 0.9464
-QPS: 9.36, Recall: 0.9618
-QPS: 8.53, Recall: 0.9747
-QPS: 7.59, Recall: 0.9751
-QPS: 6.16, Recall: 0.9633
-QPS: 4.79, Recall: 0.9639
-QPS: 3.85, Recall: 0.9766
-QPS: 2.40, Recall: 0.9876
 """
 
 data_nndescent = """"""
@@ -116,25 +98,19 @@ data_nndescent = """"""
 if is_10m:
 
     data_scann = """
-QPS: 530.45, Recall: 0.8233
-QPS: 475.03, Recall: 0.8250
-QPS: 420.10, Recall: 0.8291
-QPS: 396.73, Recall: 0.8541
-QPS: 364.64, Recall: 0.8663
-QPS: 290.72, Recall: 0.8669
-QPS: 302.42, Recall: 0.8698
-QPS: 255.82, Recall: 0.8709
-QPS: 211.29, Recall: 0.8802
-QPS: 180.04, Recall: 0.9035
-QPS: 156.39, Recall: 0.9209
-QPS: 140.17, Recall: 0.9227
-QPS: 116.93, Recall: 0.9453
-QPS: 105.59, Recall: 0.9541
-QPS: 94.18, Recall: 0.9564
-QPS: 75.49, Recall: 0.9541
-QPS: 58.68, Recall: 0.9628
-QPS: 48.60, Recall: 0.9756
-QPS: 30.58, Recall: 0.9878
+    QPS: 530.45, Recall: 0.8233
+    QPS: 475.03, Recall: 0.8250
+    QPS: 420.10, Recall: 0.8291
+    QPS: 396.73, Recall: 0.8541
+    QPS: 364.64, Recall: 0.8663
+    QPS: 290.72, Recall: 0.8669
+    QPS: 302.42, Recall: 0.8698
+    QPS: 255.82, Recall: 0.8709
+    QPS: 211.29, Recall: 0.8802
+    QPS: 180.04, Recall: 0.9035
+    QPS: 156.39, Recall: 0.9209
+    QPS: 140.17, Recall: 0.9227
+    QPS: 116.93, Recall: 0.9453
     """
 
     data_nndescent = """
@@ -144,9 +120,7 @@ QPS: 30.58, Recall: 0.9878
     QPS: 151.41, Recall: 0.9773
     QPS: 89.04, Recall: 0.9837
     QPS: 45.05, Recall: 0.9872
-    QPS: 14.63, Recall: 0.9878
     QPS: 11.85, Recall: 0.9895
-    QPS: 10.12, Recall: 0.9895
     """
 
     data_hnswlib = """
@@ -303,7 +277,7 @@ qps_values4, recall_values4 = process_data(data_scann)
 
 qps_values5 = []
 recall_values5 = []
-# qps_values5, recall_values5 = process_data(data_nndescent)
+qps_values5, recall_values5 = process_data(data_nndescent)
 
 
 # 定义样式
@@ -395,11 +369,14 @@ def draw_legend(output_dir):
 
     # 创建图例项
     legend_elements = [
+        Line2D([0], [0], marker=LINE_STYLES["vsag"]["marker"], color="w",
+               label="vsag", markerfacecolor=LINE_STYLES["vsag"]["color"],
+               markersize=10, markeredgecolor="black"),
         Line2D([0], [0], marker=LINE_STYLES["hnswlib"]["marker"], color="w",
                label="hnswlib", markerfacecolor=LINE_STYLES["hnswlib"]["color"],
                markersize=10, markeredgecolor="black"),
-        Line2D([0], [0], marker=LINE_STYLES["vsag"]["marker"], color="w",
-               label="vsag", markerfacecolor=LINE_STYLES["vsag"]["color"],
+        Line2D([0], [0], marker=LINE_STYLES["nndescent"]["marker"], color="w",
+               label="nndescent", markerfacecolor=LINE_STYLES["nndescent"]["color"],
                markersize=10, markeredgecolor="black"),
         Line2D([0], [0], marker=LINE_STYLES["faiss-ivfpqfs"]["marker"], color="w",
                label="faiss-ivfpqfs", markerfacecolor=LINE_STYLES["faiss-ivfpqfs"]["color"],
@@ -413,7 +390,7 @@ def draw_legend(output_dir):
     legend = ax.legend(
         handles=legend_elements,
         loc="center",  # 图例位置
-        ncol=3,  # 每排两个图例项
+        ncol=5,  # 每排两个图例项
         fontsize=16,  # 字体大小
         frameon=False,  # 不显示边框
         handlelength=1.0,  # 标记长度
@@ -423,6 +400,7 @@ def draw_legend(output_dir):
     )
 
     # 保存图例为 PDF 文件
+    plt.savefig(os.path.join(output_dir, "legend.png"), format="png", bbox_inches="tight")
     plt.savefig(os.path.join(output_dir, "legend.pdf"), format="pdf", bbox_inches="tight")
     plt.close()  # 关闭图形以释放内存
 
