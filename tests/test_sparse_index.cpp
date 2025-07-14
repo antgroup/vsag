@@ -49,6 +49,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::SparseTestIndex,
                              "[ft][sparse_index]") {
     auto index = TestFactory("sparse_index", build_param, true);
     auto dataset = pool.GetSparseDatasetAndCreate(base_count, 128, 0.8);
+    REQUIRE(index->GetIndexType() == vsag::IndexType::SPARSE);
     TestContinueAdd(index, dataset, true);
     TestKnnSearch(index, dataset, search_param, 0.99, true);
     TestRangeSearch(index, dataset, search_param, 0.99, 10, true);

@@ -58,6 +58,11 @@ public:
         SAFE_CALL(return this->inner_index_->Build(base));
     }
 
+    IndexType
+    GetIndexType() override {
+        return this->inner_index_->GetIndexType();
+    }
+
     tl::expected<void, Error>
     Train(const DatasetPtr& data) override {
         if (this->inner_index_->immutable_) {
