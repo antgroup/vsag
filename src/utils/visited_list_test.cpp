@@ -15,9 +15,9 @@
 
 #include "visited_list.h"
 
+#include <catch2/catch_test_macros.hpp>
 #include <thread>
 
-#include "catch2/catch_test_macros.hpp"
 #include "impl/allocator/default_allocator.h"
 using namespace vsag;
 
