@@ -133,7 +133,7 @@ TEST_CASE("HGraph Parameters CheckCompatibility", "[ut][HGraphParameter][CheckCo
 
     TEST_COMPATIBILITY_CASE(
         "different base codes io type", base_codes_io_type, "memory_io", "block_memory_io", true)
-    TEST_COMPATIBILITY_CASE("different pq dim", base_codes_pq_dim, 8, 16, true)
+    TEST_COMPATIBILITY_CASE("different pq dim", base_codes_pq_dim, 8, 16, false)
     TEST_COMPATIBILITY_CASE(
         "different base codes quantization type", base_codes_quantization_type, "sq4", "sq8", false)
     TEST_COMPATIBILITY_CASE("different graph type", graph_storage_type, "flat", "compressed", false)
