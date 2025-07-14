@@ -46,6 +46,13 @@ public:
         return this->factory_computer((const float*)query);
     }
 
+    bool
+    Decode(const uint8_t* codes, DataType* vector) override {
+        // TODO(inabao): Implement the decode function
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "Decode function is not implemented for SparseVectorDataCell");
+    }
+
     float
     ComputePairVectors(InnerIdType id1, InnerIdType id2) override;
 
@@ -57,11 +64,6 @@ public:
 
     void
     BatchInsertVector(const void* vectors, InnerIdType count, InnerIdType* idx_vec) override;
-
-    void
-    SetMaxCapacity(InnerIdType capacity) override {
-        this->max_capacity_ = std::max(capacity, this->total_count_);
-    }
 
     void
     Resize(InnerIdType new_capacity) override {
