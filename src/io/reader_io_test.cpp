@@ -22,6 +22,22 @@
 #include "safe_allocator.h"
 
 
+class TestReader: public vsag::Reader {
+public:
+    TestReader(uint8_t* data): data_(data) {}
+
+    void Read(uint64_t offset, uint64_t len, void *dest) override {
+        memcpy(dest, data_ + offset, len);
+    }
+
+    void AsyncRead(uint64_t offset, uint64_t len, void *dest, vsag::CallBack callback) override {
+        Read(offset, len, dest);
+        callback(vsag::IOErrorCode::IO_SUCCESS, "success");
+    }
+private:
+    const uint8_t* data_{nullptr};
+};
+
 
 TEST_CASE("ReaderIO Read Test", "[ut][ReaderIO]") {
 
