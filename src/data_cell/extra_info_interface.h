@@ -55,25 +55,16 @@ public:
     Release(const char* extra_info) = 0;
 
 public:
-    virtual void
-    SetMaxCapacity(InnerIdType capacity) {
-        this->max_capacity_ = capacity;
-    };
-
-    virtual InnerIdType
+    InnerIdType
     GetMaxCapacity() {
         return this->max_capacity_;
     };
 
     virtual const char*
-    GetExtraInfoById(InnerIdType id, bool& need_release) const {
-        return nullptr;
-    }
+    GetExtraInfoById(InnerIdType id, bool& need_release) const = 0;
 
     virtual bool
-    GetExtraInfoById(InnerIdType id, char* extra_info) const {
-        return false;
-    }
+    GetExtraInfoById(InnerIdType id, char* extra_info) const = 0;
 
     [[nodiscard]] virtual InnerIdType
     TotalCount() const {
@@ -108,9 +99,7 @@ public:
     }
 
     [[nodiscard]] virtual bool
-    InMemory() const {
-        return true;
-    }
+    InMemory() const = 0;
 
     virtual void
     EnableForceInMemory(){};
@@ -120,7 +109,7 @@ public:
 
 public:
     InnerIdType total_count_{0};
-    InnerIdType max_capacity_{800};
+    InnerIdType max_capacity_{0};
     uint64_t extra_info_size_{0};
 };
 

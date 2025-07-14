@@ -66,11 +66,6 @@ public:
     void
     BatchInsertVector(const void* vectors, InnerIdType count, InnerIdType* idx_vec) override;
 
-    void
-    SetMaxCapacity(InnerIdType capacity) override {
-        this->max_capacity_ = std::max(capacity, this->total_count_);  // TODO(LHT): add warning
-    }
-
     bool
     Decode(const uint8_t* codes, DataType* data) override {
         return this->quantizer_->DecodeOne(codes, data);
