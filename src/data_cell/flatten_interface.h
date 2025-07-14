@@ -96,25 +96,14 @@ public:
         return ret;
     }
 
-    virtual void
-    SetMaxCapacity(InnerIdType capacity) {
-        this->max_capacity_ = capacity;
-    };
-
     virtual bool
-    Decode(const uint8_t* codes, DataType* vector) {
-        return false;
-    }
+    Decode(const uint8_t* codes, DataType* vector) = 0;
 
     [[nodiscard]] virtual const uint8_t*
-    GetCodesById(InnerIdType id, bool& need_release) const {
-        return nullptr;
-    }
+    GetCodesById(InnerIdType id, bool& need_release) const = 0;
 
     virtual bool
-    GetCodesById(InnerIdType id, uint8_t* codes) const {
-        return false;
-    }
+    GetCodesById(InnerIdType id, uint8_t* codes) const = 0;
 
     [[nodiscard]] virtual InnerIdType
     TotalCount() const {
