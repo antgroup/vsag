@@ -317,7 +317,8 @@ public:
     }
 
     virtual void
-    SetIOs() {
+    SetIO(const std::shared_ptr<Reader> reader) {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION, "Index doesn't support SetIO");
     }
 
 public:

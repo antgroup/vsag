@@ -19,26 +19,114 @@
 #include <memory>
 
 #include "basic_io_test.h"
-#include "safe_allocator.h"
+#include "reader_io_parameter.h"
 
-
-class TestReader: public vsag::Reader {
+class TestReader : public vsag::Reader {
 public:
-    TestReader(uint8_t* data): data_(data) {}
+    TestReader(uint8_t* data, size_t size) : data_(data), size_(size) {
+    }
 
-    void Read(uint64_t offset, uint64_t len, void *dest) override {
+    void
+    Read(uint64_t offset, uint64_t len, void* dest) override {
         memcpy(dest, data_ + offset, len);
     }
 
-    void AsyncRead(uint64_t offset, uint64_t len, void *dest, vsag::CallBack callback) override {
+    void
+    AsyncRead(uint64_t offset, uint64_t len, void* dest, vsag::CallBack callback) override {
         Read(offset, len, dest);
         callback(vsag::IOErrorCode::IO_SUCCESS, "success");
     }
+
+    uint64_t
+    Size() const override {
+        return size_;
+    }
+
 private:
     const uint8_t* data_{nullptr};
+    size_t size_{0};
 };
 
-
 TEST_CASE("ReaderIO Read Test", "[ut][ReaderIO]") {
+    const uint64_t kTestSize = 1024;
+    std::vector<uint8_t> test_data(kTestSize + sizeof(kTestSize));
+    for (uint64_t i = 0; i < kTestSize; ++i) {
+        test_data[i + sizeof(kTestSize)] = static_cast<uint8_t>(i % 256);
+    }
+    auto size_ptr = reinterpret_cast<uint64_t*>(test_data.data());
+    *size_ptr = kTestSize;
 
+    vsag::IndexCommonParam common_param;
+    common_param.allocator_ = vsag::Engine::CreateDefaultAllocator();
+    auto reader_param = std::make_shared<vsag::ReaderIOParameter>();
+    reader_param->reader = std::make_shared<TestReader>(test_data.data(), kTestSize);
+    reader_param->size = kTestSize + sizeof(kTestSize);
+    reader_param->start = 0;
+
+    ReaderIO reader_io(reader_param, common_param);
+    reader_io.Init(reader_param);
+
+    SECTION("Test ReadImpl normal case") {
+        const uint64_t offset = 100;
+        const uint64_t size = 256;
+        std::vector<uint8_t> buffer(size);
+        bool result = reader_io.ReadImpl(size, offset, buffer.data());
+        REQUIRE(result == true);
+        for (uint64_t i = 0; i < size; ++i) {
+            REQUIRE(buffer[i] == test_data[offset + i]);
+        }
+    }
+
+    SECTION("Test ReadImpl out of bounds") {
+        const uint64_t offset = kTestSize;
+        const uint64_t size = 1;
+        std::vector<uint8_t> buffer(size);
+        bool result = reader_io.ReadImpl(size, offset, buffer.data());
+        REQUIRE(result == false);
+    }
+
+    SECTION("Test DirectReadImpl normal case") {
+        const uint64_t offset = 100;
+        const uint64_t size = 256;
+        bool need_release = false;
+        const uint8_t* data = reader_io.DirectReadImpl(size, offset, need_release);
+        REQUIRE(need_release == true);
+        REQUIRE(data != nullptr);
+        for (uint64_t i = 0; i < size; ++i) {
+            REQUIRE(data[i] == test_data[offset + i]);
+        }
+        reader_io.ReleaseImpl(data);  // 释放内存
+    }
+
+    SECTION("Test DirectReadImpl out of bounds") {
+        const uint64_t offset = kTestSize;
+        const uint64_t size = 1;
+        bool need_release = false;
+        const uint8_t* data = reader_io.DirectReadImpl(size, offset, need_release);
+        REQUIRE(data == nullptr);
+    }
+
+    SECTION("Test MultiReadImpl multiple reads") {
+        const uint64_t count = 2;
+        uint64_t offsets[] = {100, 200};
+        uint64_t sizes[] = {256, 256};
+        std::vector<uint8_t> buffer(sizes[0] + sizes[1]);
+        bool result = reader_io.MultiReadImpl(buffer.data(), sizes, offsets, count);
+        REQUIRE(result == true);
+
+        for (uint64_t i = 0; i < sizes[0]; ++i) {
+            REQUIRE(buffer[i] == test_data[offsets[0] + i]);
+        }
+        for (uint64_t i = 0; i < sizes[1]; ++i) {
+            REQUIRE(buffer[sizes[0] + i] == test_data[offsets[1] + i]);
+        }
+    }
+
+    SECTION("Test MultiReadImpl with error") {
+        const uint64_t count = 1;
+        uint64_t offsets[] = {kTestSize};
+        uint64_t sizes[] = {1};
+        std::vector<uint8_t> buffer(1);
+        REQUIRE_THROWS(reader_io.MultiReadImpl(buffer.data(), sizes, offsets, count));
+    }
 }

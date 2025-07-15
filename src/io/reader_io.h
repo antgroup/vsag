@@ -29,9 +29,6 @@ public:
 
     explicit ReaderIO(const ReaderIOParamPtr& param, const IndexCommonParam& common_param)
         : ReaderIO(common_param.allocator_.get()) {
-        reader_ = param->reader;
-        start_ = param->start;
-        size_ = param->size;
     }
 
     explicit ReaderIO(const IOParamPtr& param, const IndexCommonParam& common_param)
@@ -41,31 +38,111 @@ public:
     ~ReaderIO() override = default;
 
     inline void
-    WriteImpl(const uint8_t* data, uint64_t size, uint64_t offset);
+    WriteImpl(const uint8_t* data, uint64_t size, uint64_t offset) {
+        // ReaderIO is read-only, so we do nothing here. Just for deserialization.
+    }
+
+    inline void
+    Init(const ReaderIOParamPtr& param) {
+        reader_ = param->reader;
+        uint64_t content_size;
+        reader_->Read(param->start, sizeof(uint64_t), &content_size);
+        if (content_size + sizeof(uint64_t) != param->size) {
+            throw VsagException(ErrorType::INTERNAL_ERROR,
+                                fmt::format("ReaderIO size mismatch: expected {}, got {}",
+                                            content_size + content_size,
+                                            param->size));
+        }
+        start_ = param->start + sizeof(uint64_t);
+        size_ = param->size - sizeof(uint64_t);
+    }
 
     inline bool
-    ReadImpl(uint64_t size, uint64_t offset, uint8_t* data) const;
+    ReadImpl(uint64_t size, uint64_t offset, uint8_t* data) const {
+        if (not reader_) {
+            throw VsagException(ErrorType::INTERNAL_ERROR,
+                                "ReaderIO is not initialized, please call Init() first.");
+        }
+        bool ret = check_valid_offset(size + offset);
+        if (ret) {
+            reader_->Read(offset, size, data);
+        }
+        return ret;
+    }
 
     [[nodiscard]] inline const uint8_t*
-    DirectReadImpl(uint64_t size, uint64_t offset, bool& need_release) const;
+    DirectReadImpl(uint64_t size, uint64_t offset, bool& need_release) const {
+        if (not reader_) {
+            throw VsagException(ErrorType::INTERNAL_ERROR,
+                                "ReaderIO is not initialized, please call Init() first.");
+        }
+        if (check_valid_offset(size + offset)) {
+            uint8_t* data = static_cast<uint8_t*>(allocator_->Allocate(size));
+            need_release = true;
+            reader_->Read(offset, size, data);
+            return data;
+        }
+        return nullptr;
+    }
 
     inline void
-    ReleaseImpl(const uint8_t* data) const;
+    ReleaseImpl(const uint8_t* data) const {
+        allocator_->Deallocate((void*)data);
+    }
 
     inline bool
-    MultiReadImpl(uint8_t* datas, uint64_t* sizes, uint64_t* offsets, uint64_t count) const;
+    MultiReadImpl(uint8_t* datas, uint64_t* sizes, uint64_t* offsets, uint64_t count) const {
+        if (not reader_) {
+            throw VsagException(ErrorType::INTERNAL_ERROR,
+                                "ReaderIO is not initialized, please call Init() first.");
+        }
+        std::atomic<bool> succeed(true);
+        std::string error_message;
+        std::atomic<uint64_t> counter(count);
+        std::promise<void> total_promise;
+        uint8_t* dest = datas;
+        auto total_future = total_promise.get_future();
+        for (int i = 0; i < count; ++i) {
+            uint64_t offset = offsets[i];
+            uint64_t size = sizes[i];
+            if (not check_valid_offset(size + offset)) {
+                throw VsagException(ErrorType::INTERNAL_ERROR,
+                                    fmt::format("ReaderIO MultiReadImpl size mismatch: "
+                                                "offset {}, size {}, total size {}",
+                                                offset,
+                                                size,
+                                                size_ + start_));
+            }
+            auto callback = [&counter, &total_promise, &succeed, &error_message](
+                                IOErrorCode code, const std::string& message) {
+                if (code != vsag::IOErrorCode::IO_SUCCESS) {
+                    bool expected = true;
+                    if (succeed.compare_exchange_strong(expected, false)) {
+                        error_message = message;
+                    }
+                }
+                if (--counter == 0) {
+                    total_promise.set_value();
+                }
+            };
+            reader_->AsyncRead(offset, size, dest, callback);
+            dest += size;
+        }
+        total_future.wait();
+        if (not succeed) {
+            throw VsagException(ErrorType::READ_ERROR, "failed to read diskann index");
+        }
+        return true;
+    }
 
     inline void
-    PrefetchImpl(uint64_t offset, uint64_t cache_line = 64);
+    PrefetchImpl(uint64_t offset, uint64_t cache_line = 64) {
+    }
 
     static inline bool
     InMemoryImpl() {
         return true;
     }
-
-private:
-    void
-    check(uint64_t size);
 
 private:
     std::shared_ptr<Reader> reader_{nullptr};

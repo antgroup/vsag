@@ -138,6 +138,25 @@ public:
         this->io_ = io;
     }
 
+    void
+    InitIO(const IOParamPtr& io_param) override {
+        auto reader_io = std::dynamic_pointer_cast<ReaderIO>(this->io_);
+        if (reader_io) {
+            auto reader_param = std::dynamic_pointer_cast<ReaderIOParameter>(io_param);
+            if (not reader_param) {
+                throw VsagException(ErrorType::INTERNAL_ERROR,
+                                    "ReaderIOParameter is required for ReaderIO initialization.");
+            }
+            uint64_t size = 0;
+            auto func = [&](uint64_t offset, uint64_t len, void* dest) -> void { size += len; };
+            auto reader = ReadFuncStreamReader(func, 0, reader_param->size);
+            FlattenInterface::Deserialize(reader);
+            reader_param->start += size;
+            reader_param->size -= size;
+            reader_io->Init(reader_param);
+        }
+    }
+
 public:
     std::shared_ptr<Quantizer<QuantTmpl>> quantizer_{nullptr};
     std::shared_ptr<BasicIO<IOTmpl>> io_{nullptr};

@@ -22,6 +22,7 @@
 #include "flatten_interface_parameter.h"
 #include "impl/runtime_parameter.h"
 #include "index/index_common_param.h"
+#include "io/reader_io.h"
 #include "quantization/computer.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
@@ -76,6 +77,12 @@ public:
 
     virtual void
     ExportModel(const FlattenInterfacePtr& other) const = 0;
+
+    virtual void
+    InitIO(const IOParamPtr& io_param) {
+        throw VsagException(ErrorType::INTERNAL_ERROR,
+                            "InitIO not implemented in FlattenInterface");
+    }
 
 public:
     virtual bool

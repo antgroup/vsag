@@ -179,6 +179,9 @@ public:
     void
     SetImmutable() override;
 
+    void
+    SetIO(const std::shared_ptr<Reader> reader) override;
+
 private:
     const void*
     get_data(const DatasetPtr& dataset, uint32_t index = 0) const {
@@ -322,5 +325,8 @@ private:
     std::shared_ptr<Optimizer<BasicSearcher>> optimizer_;
 
     AttrInvertedInterfacePtr attr_filter_index_{nullptr};
+
+    JsonType datacell_sizes_;
+    JsonType datacell_offsets_;
 };
 }  // namespace vsag
