@@ -1000,9 +1000,8 @@ VecRescale(float* data, size_t dim, float val) {
         __m256 result_vec = _mm256_mul_ps(data_vec, val_vec);
         _mm256_storeu_ps(&data[i], result_vec);
     }
-    for (; i < dim; i++) {
-        data[i] *= val;
-    }
+
+    sse::VecRescale(data + i, dim - i, val);
 #else
     return avx::VecRescale(data, dim, val);
 #endif

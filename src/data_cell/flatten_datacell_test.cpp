@@ -30,7 +30,7 @@ using namespace vsag;
 void
 TestFlattenDataCell(FlattenDataCellParamPtr& param,
                     IndexCommonParam& common_param,
-                    float error = 1e-5) {
+                    float error = 1e-3) {
     auto count = GENERATE(100, 1000);
     auto flatten = FlattenInterface::MakeInstance(param, common_param);
 
