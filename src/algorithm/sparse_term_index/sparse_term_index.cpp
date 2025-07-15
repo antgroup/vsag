@@ -141,6 +141,7 @@ SparseTermIndex::KnnSearch(const DatasetPtr& query,
     // rerank
     if (use_reorder_) {
         // high precision
+        float cur_heap_top = std::numeric_limits<float>::max();
         auto candidate_size = heap.size();
         auto high_precise_heap = std::make_shared<StandardHeap<true, false>>(allocator_, -1);
         auto [sorted_ids, sorted_vals] = rerank_flat_index_->sort_sparse_vector(sparse_query);
@@ -151,10 +152,13 @@ SparseTermIndex::KnnSearch(const DatasetPtr& query,
                 sorted_vals,
                 inner_id);  // TODO(ZXY): use flat to replace rerank_flat_index_
             auto label = label_table_->GetLabelById(inner_id);
-            high_precise_heap->Push(high_precise_distance, label);
+            if (high_precise_distance < cur_heap_top or high_precise_heap->Size() < k) {
+                high_precise_heap->Push(high_precise_distance, label);
+            }
             if (high_precise_heap->Size() > k) {
                 high_precise_heap->Pop();
             }
+            cur_heap_top = high_precise_heap->Top().first;
             heap.pop();
         }
 
