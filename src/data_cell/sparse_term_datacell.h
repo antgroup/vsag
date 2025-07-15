@@ -36,7 +36,8 @@ public:
           allocator_(allocator),
           term_ids_(0, Vector<uint32_t>(allocator), allocator),
           term_datas_(0, Vector<float>(allocator), allocator),
-          term_sizes_(allocator) {
+          term_sizes_(allocator),
+          term_pruned_sizes_(allocator) {
     }
 
     std::shared_ptr<SparseTermDataCell>
@@ -58,7 +59,7 @@ public:
             computer->ScanForAccumulate(term,
                                         term_ids_[term].data(),
                                         term_datas_[term].data(),
-                                        term_ids_[term].size(),
+                                        term_pruned_sizes_[term],
                                         global_dists);
         }
         computer->ResetTerm();
@@ -75,15 +76,11 @@ public:
     TermPrune() {
         // use this function after all vectors have been inserted
         for (auto i = 0; i < term_sizes_.size(); i++) {
-            auto original_size = term_sizes_[i];
-            if (original_size <= 1) {
+            if (term_sizes_[i] <= 1) {
                 continue;
             }
 
-            auto pruned_size = original_size * term_prune_ratio_;
-            term_ids_[i].resize(pruned_size);
-            term_datas_[i].resize(pruned_size);
-            term_sizes_[i] = pruned_size;
+            term_pruned_sizes_[i] = term_sizes_[i] * term_prune_ratio_;
         }
     }
 
@@ -132,6 +129,7 @@ public:
         term_ids_.resize(term_capacity_, Vector<uint32_t>(allocator_));
         term_datas_.resize(term_capacity_, Vector<float>(allocator_));
         term_sizes_.resize(term_capacity_, 0);
+        term_pruned_sizes_.resize(term_capacity_, 0);
     }
 
 private:
@@ -148,6 +146,8 @@ private:
     Vector<Vector<float>> term_datas_;
 
     Vector<uint32_t> term_sizes_;
+
+    Vector<uint32_t> term_pruned_sizes_;
 
     Allocator* const allocator_{nullptr};
 };

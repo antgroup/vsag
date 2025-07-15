@@ -74,7 +74,16 @@ SparseTermIndex::Add(const DatasetPtr& base) {
     if (use_reorder_) {
         rerank_flat_index_->Add(base);
     }
+
+    for (int64_t i = 0; i < window_term_list_.size(); i++) {
+        window_term_list_[i]->TermPrune();
+    }
     return {};
+}
+
+std::vector<int64_t>
+SparseTermIndex::Build(const DatasetPtr& base) {
+    return this->Add(base);
 }
 
 DatasetPtr

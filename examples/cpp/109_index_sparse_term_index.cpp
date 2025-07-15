@@ -64,6 +64,8 @@ GenerateSparseVectors(
             sparse_vectors[i].ids_[d] = u_id;
             sparse_vectors[i].vals_[d] = distrib_real(rng);
         }
+
+        std::sort(sparse_vectors[i].ids_, sparse_vectors[i].ids_ + sparse_vectors[i].len_);
     }
 
     return sparse_vectors;
@@ -93,7 +95,8 @@ main(int argc, char** argv) {
     auto base = vsag::Dataset::Make();
     base->NumElements(num_base)->SparseVectors(sv_base.data())->Ids(ids.data())->Owner(false);
 
-    auto sv_query = GenerateSparseVectors(num_query, max_dim / 2, max_id, min_val, max_val, seed_query);
+    auto sv_query =
+        GenerateSparseVectors(num_query, max_dim / 2, max_id, min_val, max_val, seed_query);
     auto query = vsag::Dataset::Make();
 
     std::vector<vsag::DatasetPtr> gt_results(num_query);
@@ -105,10 +108,10 @@ main(int argc, char** argv) {
         "dim": 128,
         "metric_type": "ip",
         "index_param": {
-            "use_reorder": false,
-            "query_prune_ratio": 1,
+            "use_reorder": true,
+            "query_prune_ratio": 0.7,
             "doc_prune_ratio": 1,
-            "term_prune_ratio": 0.9,
+            "term_prune_ratio": 1,
             "window_size": 10000,
             "need_sort": true
         }
@@ -126,7 +129,7 @@ main(int argc, char** argv) {
     auto index = vsag::Factory::CreateIndex("sparse_term_index", build_params).value();
 
     /******************* Build Index *****************/
-    if (auto build_result = index->Add(base); build_result.has_value()) {
+    if (auto build_result = index->Build(base); build_result.has_value()) {
         std::cout << "After Build(), Sparse Term Index contains: " << index->GetNumElements()
                   << std::endl;
     } else if (build_result.error().type == vsag::ErrorType::INTERNAL_ERROR) {
@@ -151,7 +154,8 @@ main(int argc, char** argv) {
         auto result = index->KnnSearch(query, k, search_params).value();
         auto end_time = std::chrono::high_resolution_clock::now();
 
-        auto search_time_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(end_time - start_time).count();
+        auto search_time_ns =
+            std::chrono::duration_cast<std::chrono::nanoseconds>(end_time - start_time).count();
         total_search_time_ns += search_time_ns;
 
         recall += compute_recall(gt_results[i], result, k);
