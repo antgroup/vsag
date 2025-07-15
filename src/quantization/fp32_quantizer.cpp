@@ -32,6 +32,10 @@ template <MetricType metric>
 FP32Quantizer<metric>::FP32Quantizer(const FP32QuantizerParamPtr& param,
                                      const IndexCommonParam& common_param)
     : FP32Quantizer<metric>(common_param.dim_, common_param.allocator_.get()) {
+    this->hold_molds_ = param->hold_molds;
+    if (metric == MetricType::METRIC_TYPE_COSINE && this->hold_molds_) {
+        this->code_size_ += sizeof(float);
+    }
 }
 
 template <MetricType metric>
@@ -53,6 +57,12 @@ bool
 FP32Quantizer<metric>::EncodeOneImpl(const DataType* data, uint8_t* codes) {
     if constexpr (metric == MetricType::METRIC_TYPE_COSINE) {
         Normalize(data, reinterpret_cast<float*>(codes), this->dim_);
+        if (this->hold_molds_) {
+            // Store the mold for cosine similarity
+            auto data_float = reinterpret_cast<const float*>(data);
+            float mold = std::sqrt(FP32ComputeIP(data_float, data_float, this->dim_));
+            memcpy(codes + this->dim_ * sizeof(float), &mold, sizeof(float));
+        }
     } else {
         memcpy(codes, data, this->code_size_);
     }
@@ -71,7 +81,14 @@ FP32Quantizer<metric>::EncodeBatchImpl(const DataType* data, uint8_t* codes, uin
 template <MetricType metric>
 bool
 FP32Quantizer<metric>::DecodeOneImpl(const uint8_t* codes, DataType* data) {
-    memcpy(data, codes, this->code_size_);
+    memcpy(data, codes, this->dim_ * sizeof(float));
+    if (metric == MetricType::METRIC_TYPE_COSINE && this->hold_molds_) {
+        // If hold molds, we need to restore the mold for cosine similarity
+        auto mold_ptr = reinterpret_cast<const float*>(codes + this->dim_ * sizeof(float));
+        for (int i = 0; i < this->dim_; ++i) {
+            data[i] *= mold_ptr[0];
+        }
+    }
     return true;
 }
 
