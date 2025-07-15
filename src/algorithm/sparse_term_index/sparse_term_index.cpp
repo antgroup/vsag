@@ -112,7 +112,7 @@ SparseTermIndex::KnnSearch(const DatasetPtr& query,
     // computer and heap
     auto computer = this->window_term_list_[0]->FactoryComputer(sparse_query);
     MaxHeap heap(this->allocator_);
-    float cur_heap_top = std::numeric_limits<float>::max();
+    //    float cur_heap_top = std::numeric_limits<float>::max();
 
     // window iteration
     std::vector<float> dists(window_size_, 0.0);
@@ -123,19 +123,8 @@ SparseTermIndex::KnnSearch(const DatasetPtr& query,
         // compute
         term_list->Query(dists.data(), computer);
 
-        // todo: use in-place push heap
-        for (auto i = 0; i < window_size_; ++i) {
-            if (dists[i] >= 0) [[likely]] {
-                continue;
-            }
-            heap.emplace(dists[i], i);
-            if (heap.size() > n_candidate) [[likely]] {
-                heap.pop();
-            }
-            dists[i] = 0;
-        }
-
-        cur_heap_top = heap.top().first;
+        // insert heap
+        term_list->InsertHeapPreFill(dists.data(), computer, heap, n_candidate);
     }
 
     for (auto cur = 1; cur < window_term_list_.size(); cur++) {
@@ -145,22 +134,8 @@ SparseTermIndex::KnnSearch(const DatasetPtr& query,
         // compute
         term_list->Query(dists.data(), computer);
 
-        // todo: use in-place push heap
-        // update heap and clear dists
-        for (auto i = 0; i < window_size_; ++i) {
-            if (dists[i] >= 0) [[likely]] {
-                continue;
-            }
-            if (dists[i] >= cur_heap_top) [[likely]] {
-                dists[i] = 0;
-                continue;
-            } else {
-                heap.emplace(dists[i], i + window_start_id);
-                heap.pop();
-                cur_heap_top = heap.top().first;
-                dists[i] = 0;
-            }
-        }
+        // insert heap
+        term_list->InsertHeapFull(dists.data(), computer, heap, window_start_id);
     }
 
     // rerank
