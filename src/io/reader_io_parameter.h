@@ -15,6 +15,7 @@
 
 #pragma once
 
+#include "inner_string_params.h"
 #include "io_parameter.h"
 #include "vsag/readerset.h"
 
