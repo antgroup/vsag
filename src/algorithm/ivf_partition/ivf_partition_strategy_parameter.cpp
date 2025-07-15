@@ -81,6 +81,15 @@ IVFPartitionStrategyParameters::CheckCompatibility(const ParamPtr& other) const 
             "IVFPartitionStrategyParameters");
         return false;
     }
+    if (partition_strategy_type != ivf_partition_param->partition_strategy_type) {
+        std::string message = fmt::format(
+            "IVFPartitionStrategyParameters::CheckCompatibility: partition strategy type mismatch, "
+            "this: {}, other: {}",
+            (int)partition_strategy_type,
+            (int)ivf_partition_param->partition_strategy_type);
+        logger::error(message);
+        return false;
+    }
     return this->gnoimi_param->CheckCompatibility(ivf_partition_param->gnoimi_param);
 }
 

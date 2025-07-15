@@ -49,26 +49,27 @@ SparseGraphDatacellParameter::CheckCompatibility(const ParamPtr& other) const {
     auto graph_param = std::dynamic_pointer_cast<SparseGraphDatacellParameter>(other);
     if (not graph_param) {
         logger::error(
-            "GraphDataCellParameter::CheckCompatibility: other parameter is not a "
-            "GraphDataCellParameter");
+            "SparseGraphDatacellParameter::CheckCompatibility: other parameter is not a "
+            "SparseGraphDatacellParameter");
         return false;
     }
     if (max_degree_ != graph_param->max_degree_) {
-        logger::error("GraphDataCellParameter::CheckCompatibility: max_degree_ mismatch: {} vs {}",
-                      max_degree_,
-                      graph_param->max_degree_);
+        logger::error(
+            "SparseGraphDatacellParameter::CheckCompatibility: max_degree_ mismatch: {} vs {}",
+            max_degree_,
+            graph_param->max_degree_);
         return false;
     }
     if (support_delete_ != graph_param->support_delete_) {
         logger::error(
-            "GraphDataCellParameter::CheckCompatibility: support_delete_ mismatch: {} vs {}",
+            "SparseGraphDatacellParameter::CheckCompatibility: support_delete_ mismatch: {} vs {}",
             support_delete_,
             graph_param->support_delete_);
         return false;
     }
     if (remove_flag_bit_ != graph_param->remove_flag_bit_) {
         logger::error(
-            "GraphDataCellParameter::CheckCompatibility: remove_flag_bit_ mismatch: {} vs {}",
+            "SparseGraphDatacellParameter::CheckCompatibility: remove_flag_bit_ mismatch: {} vs {}",
             remove_flag_bit_,
             graph_param->remove_flag_bit_);
         return false;

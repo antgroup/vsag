@@ -17,11 +17,8 @@
 
 #include <fmt/format.h>
 
-#include <iostream>
-
 #include "inner_string_params.h"
 #include "logger.h"
-#include "vsag/constants.h"
 
 namespace vsag {
 

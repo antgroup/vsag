@@ -166,7 +166,8 @@ HGraphParameter::CheckCompatibility(const ParamPtr& other) const {
         return false;
     }
     auto have_reorder = this->use_reorder && not this->ignore_reorder;
-    if (have_reorder != hgraph_param->use_reorder) {
+    auto have_reorder_other = hgraph_param->use_reorder && not hgraph_param->ignore_reorder;
+    if (have_reorder != have_reorder_other) {
         logger::error(
             "HGraphParameter::CheckCompatibility: use_reorder and ignore_reorder must be the same");
         return false;
