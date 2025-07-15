@@ -247,6 +247,11 @@ public:
                          int64_t extra_info_size);
 
     static void
+    TestUpdateExtraInfo(const IndexPtr& index,
+                        const TestDatasetPtr& dataset,
+                        int64_t extra_info_size);
+
+    static void
     TestGetRawVectorByIds(const IndexPtr& index,
                           const TestDatasetPtr& dataset,
                           bool expected_success = true);

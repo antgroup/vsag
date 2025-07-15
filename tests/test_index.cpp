@@ -1575,6 +1575,62 @@ TestIndex::TestGetExtraInfoById(const TestIndex::IndexPtr& index,
 }
 
 void
+TestIndex::TestUpdateExtraInfo(const TestIndex::IndexPtr& index,
+                               const TestDatasetPtr& dataset,
+                               int64_t extra_info_size) {
+    if (not index->CheckFeature(vsag::SUPPORT_UPDATE_EXTRA_INFO_CONCURRENT)) {
+        return;
+    }
+    int64_t count = dataset->count_;
+    std::vector<int64_t> ids(count);
+    memcpy(ids.data(), dataset->base_->GetIds(), count * sizeof(int64_t));
+    std::vector<char> extra_infos(extra_info_size * count);
+    {
+        auto result = index->GetExtraInfoByIds(ids.data(), count, extra_infos.data());
+        REQUIRE(result.has_value());
+    }
+
+    std::vector<char> empty_extra_info(extra_info_size);
+
+    for (int64_t i = 0; i < count; ++i) {
+        auto extra_info_dataset = vsag::Dataset::Make();
+        extra_info_dataset->ExtraInfos(empty_extra_info.data())
+            ->NumElements(1)
+            ->Owner(false)
+            ->ExtraInfoSize(extra_info_size)
+            ->Ids(ids.data() + i);
+        auto result = index->UpdateExtraInfo(extra_info_dataset);
+        REQUIRE(result.has_value());
+        REQUIRE(result.value());
+    }
+
+    {
+        int64_t invalid_label = 1000000001;
+        auto extra_info_dataset = vsag::Dataset::Make();
+        extra_info_dataset->ExtraInfos(empty_extra_info.data())
+            ->NumElements(1)
+            ->Owner(false)
+            ->ExtraInfoSize(extra_info_size)
+            ->Ids(&invalid_label);
+        auto result = index->UpdateExtraInfo(extra_info_dataset);
+        REQUIRE(result.has_value());
+        REQUIRE(!result.value());
+    }
+
+    for (int64_t i = 0; i < count; ++i) {
+        auto extra_info_dataset = vsag::Dataset::Make();
+        extra_info_dataset->ExtraInfos(extra_infos.data() + i * extra_info_size)
+            ->NumElements(1)
+            ->Owner(false)
+            ->ExtraInfoSize(extra_info_size)
+            ->Ids(ids.data() + i);
+        auto result = index->UpdateExtraInfo(extra_info_dataset);
+        REQUIRE(result.has_value());
+        REQUIRE(result.value());
+    }
+}
+
+void
 TestIndex::TestKnnSearchExFilter(const IndexPtr& index,
                                  const TestDatasetPtr& dataset,
                                  const std::string& search_param,
