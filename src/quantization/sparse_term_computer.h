@@ -57,7 +57,7 @@ public:
                       const float* term_datas,
                       uint32_t term_count,
                       float* global_dists) {
-        float query_val = sorted_query_[id2pos_map_[id]].second;
+        float query_val = sorted_query_[term_iterator_].second;
         for (auto i = 0; i < term_count; i++) {
             global_dists[term_ids[i]] += query_val * term_datas[i];
         }
@@ -79,20 +79,17 @@ public:
 
     inline uint32_t
     NextTerm() {
-        return HasNextTerm() ? sorted_query_[term_iterator_++].first : INVALID_TERM;
+        return sorted_query_[term_iterator_++].first;
+    }
+
+    inline uint32_t
+    PrevTerm() {
+        return sorted_query_[term_iterator_--].first;
     }
 
     inline void
     ResetTerm() {
         term_iterator_ = 0;
-    }
-
-    inline void
-    ScanForCompute(uint32_t id, const float* term_datas, uint32_t term_count, float* local_dists) {
-        float query_val = sorted_query_[id2pos_map_[id]].second;
-        for (auto i = 0; i < term_count; i++) {
-            local_dists[i] = query_val * term_datas[i];
-        }
     }
 
 public:

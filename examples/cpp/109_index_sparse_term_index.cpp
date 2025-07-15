@@ -144,30 +144,33 @@ main(int argc, char** argv) {
     }
     )";
 
-    float recall = 0.0f;
-    int64_t total_search_time_ns = 0;
+    std::cout << "start query" << std::endl;
+    while (true) {
+        float recall = 0.0f;
+        int64_t total_search_time_ns = 0;
 
-    for (int i = 0; i < num_query; ++i) {
-        query->NumElements(1)->SparseVectors(sv_query.data() + i)->Owner(false);
+        for (int i = 0; i < num_query; ++i) {
+            query->NumElements(1)->SparseVectors(sv_query.data() + i)->Owner(false);
 
-        auto start_time = std::chrono::high_resolution_clock::now();
-        auto result = index->KnnSearch(query, k, search_params).value();
-        auto end_time = std::chrono::high_resolution_clock::now();
+            auto start_time = std::chrono::high_resolution_clock::now();
+            auto result = index->KnnSearch(query, k, search_params).value();
+            auto end_time = std::chrono::high_resolution_clock::now();
 
-        auto search_time_ns =
-            std::chrono::duration_cast<std::chrono::nanoseconds>(end_time - start_time).count();
-        total_search_time_ns += search_time_ns;
+            auto search_time_ns =
+                std::chrono::duration_cast<std::chrono::nanoseconds>(end_time - start_time).count();
+            total_search_time_ns += search_time_ns;
 
-        recall += compute_recall(gt_results[i], result, k);
+            recall += compute_recall(gt_results[i], result, k);
+        }
+
+        recall /= num_query;
+
+        double total_search_time_s = total_search_time_ns / 1e9;
+        double qps = num_query / total_search_time_s;
+
+        std::cout << "Recall: " << recall << std::endl;
+        std::cout << "QPS: " << qps << std::endl;
     }
-
-    recall /= num_query;
-
-    double total_search_time_s = total_search_time_ns / 1e9;
-    double qps = num_query / total_search_time_s;
-
-    std::cout << "Recall: " << recall << std::endl;
-    std::cout << "QPS: " << qps << std::endl;
 
     return 0;
 }
