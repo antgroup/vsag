@@ -25,6 +25,18 @@ namespace vsag {
  */
 class ReaderIOParameter : public IOParameter {
 public:
+    ReaderIOParameter() : IOParameter(IO_TYPE_VALUE_READER_IO) {
+    }
+
+    JsonType
+    ToJson() override {
+        return JsonType();
+    }
+
+    void
+    FromJson(const JsonType& json) override {
+    }
+
     std::shared_ptr<Reader> reader;
     uint64_t start{0};
     uint64_t size{0};
