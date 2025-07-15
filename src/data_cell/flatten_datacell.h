@@ -118,6 +118,8 @@ public:
     [[nodiscard]] bool
     InMemory() const override;
 
+    bool HoldMolds() const override;
+
     bool
     GetCodesById(InnerIdType id, uint8_t* codes) const override;
 
@@ -159,6 +161,11 @@ private:
         return computer;
     }
 };
+template <typename QuantTmpl, typename IOTmpl>
+bool
+FlattenDataCell<QuantTmpl, IOTmpl>::HoldMolds() const {
+    return this->quantizer_->HoldMolds();
+}
 
 template <typename QuantTmpl, typename IOTmpl>
 FlattenDataCell<QuantTmpl, IOTmpl>::FlattenDataCell(const QuantizerParamPtr& quantization_param,

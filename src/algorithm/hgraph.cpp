@@ -1141,17 +1141,20 @@ HGraph::InitFeatures() {
     }
 
     bool have_fp32 = false;
+    bool hold_molds = false;
     if (name == QUANTIZATION_TYPE_VALUE_FP32) {
         have_fp32 = true;
+        hold_molds |= this->basic_flatten_codes_->HoldMolds();
     }
     if (use_reorder_ and not ignore_reorder_ and
         this->high_precise_codes_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32) {
         have_fp32 = true;
+        hold_molds |= this->high_precise_codes_->HoldMolds();
     }
     if (have_fp32) {
         this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_CAL_DISTANCE_BY_ID);
-        if (metric_ != MetricType::METRIC_TYPE_COSINE) {
-            this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_GET_VECTOR_BY_IDS);
+        if (metric_ != MetricType::METRIC_TYPE_COSINE || hold_molds) {
+            this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_GET_RAW_VECTOR_BY_IDS);
         }
     }
 
@@ -1236,7 +1239,8 @@ static const std::string HGRAPH_PARAMS_TEMPLATE =
                 "{PCA_DIM}": 0,
                 "{RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY}": 32,
                 "nbits": 8,
-                "{PRODUCT_QUANTIZATION_DIM}": 1
+                "{PRODUCT_QUANTIZATION_DIM}": 1,
+                "{HOLD_MOLDS}": false
             }
         },
         "{HGRAPH_PRECISE_CODES_KEY}": {
@@ -1249,7 +1253,8 @@ static const std::string HGRAPH_PARAMS_TEMPLATE =
                 "{QUANTIZATION_TYPE_KEY}": "{QUANTIZATION_TYPE_VALUE_FP32}",
                 "{SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE}": 0.05,
                 "{PCA_DIM}": 0,
-                "{PRODUCT_QUANTIZATION_DIM}": 1
+                "{PRODUCT_QUANTIZATION_DIM}": 1,
+                "{HOLD_MOLDS}": false
             }
         },
         "{BUILD_PARAMS_KEY}": {
@@ -1307,6 +1312,14 @@ HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
             },
         },
         {
+            HGRAPH_STORE_RAW_VECTOR,
+            {
+                HGRAPH_BASE_CODES_KEY,
+                QUANTIZATION_PARAMS_KEY,
+                HOLD_MOLDS,
+            },
+        },
+        {
             HGRAPH_BASE_IO_TYPE,
             {
                 HGRAPH_BASE_CODES_KEY,
@@ -1344,6 +1357,14 @@ HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
                 HGRAPH_PRECISE_CODES_KEY,
                 QUANTIZATION_PARAMS_KEY,
                 QUANTIZATION_TYPE_KEY,
+            },
+        },
+        {
+            HGRAPH_STORE_RAW_VECTOR,
+            {
+                HGRAPH_PRECISE_CODES_KEY,
+                QUANTIZATION_PARAMS_KEY,
+                HOLD_MOLDS,
             },
         },
         {
@@ -1480,6 +1501,8 @@ HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
     std::string str = format_map(HGRAPH_PARAMS_TEMPLATE, DEFAULT_MAP);
     auto inner_json = JsonType::parse(str);
     mapping_external_param_to_inner(external_param, external_mapping, inner_json);
+    std::cout << "inner_json: " << inner_json.dump(4) << std::endl;
+    std::cout << "external_param: " << external_param.dump(4) << std::endl;
 
     auto hgraph_parameter = std::make_shared<HGraphParameter>();
     hgraph_parameter->data_type = common_param.data_type_;

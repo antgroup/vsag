@@ -262,7 +262,7 @@ BruteForce::InitFeatures() {
                                                 IndexFeature::SUPPORT_RANGE_SEARCH_WITH_ID_FILTER});
     }
     if (name == QUANTIZATION_TYPE_VALUE_FP32 and metric_ != MetricType::METRIC_TYPE_COSINE) {
-        this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_GET_VECTOR_BY_IDS);
+        this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_GET_RAW_VECTOR_BY_IDS);
     }
 
     // add & build
