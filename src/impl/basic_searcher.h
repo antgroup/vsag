@@ -40,6 +40,7 @@ public:
     float skip_ratio{0.8F};
     InnerSearchMode search_mode{KNN_SEARCH};
     int range_search_limit_size{-1};
+    int64_t parallel_search_thread_count{1};
 
     // for ivf
     int scan_bucket_size{1};
