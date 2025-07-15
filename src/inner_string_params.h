@@ -98,9 +98,12 @@ const char* const BUCKETS_COUNT_KEY = "buckets_count";
 const char* const BUCKET_USE_RESIDUAL = "use_residual";
 const char* const IVF_SEARCH_PARAM_SCAN_BUCKETS_COUNT = "scan_buckets_count";
 const char* const IVF_SEARCH_PARAM_FACTOR = "factor";
+const char* const IVF_SEARCH_PARALLELISM = "parallelism";
+
 const char* const IVF_USE_REORDER_KEY = "use_reorder";
 const char* const IVF_PRECISE_CODES_KEY = "precise_codes";
 const char* const IVF_USE_ATTRIBUTE_FILTER_KEY = "use_attribute_filter";
+const char* const IVF_THREAD_COUNT_KEY = "thread_count";
 const char* const IVF_TRAIN_TYPE_KEY = "ivf_train_type";
 const char* const IVF_TRAIN_TYPE_RANDOM = "random";
 const char* const IVF_TRAIN_TYPE_KMEANS = "kmeans";
@@ -179,6 +182,9 @@ const std::unordered_map<std::string, std::string> DEFAULT_MAP = {
     {"IVF_PARTITION_STRATEGY_TYPE_KEY", IVF_PARTITION_STRATEGY_TYPE_KEY},
     {"IVF_PARTITION_STRATEGY_TYPE_NEAREST", IVF_PARTITION_STRATEGY_TYPE_NEAREST},
     {"IVF_TRAIN_TYPE_KMEANS", IVF_TRAIN_TYPE_KMEANS},
-    {"IVF_PARTITION_STRATEGY_TYPE_GNO_IMI", IVF_PARTITION_STRATEGY_TYPE_GNO_IMI}};
+    {"IVF_THREAD_COUNT_KEY", IVF_THREAD_COUNT_KEY},
+    {"IVF_SEARCH_PARALLELISM", IVF_SEARCH_PARALLELISM},
+    {"IVF_PARTITION_STRATEGY_TYPE_GNO_IMI", IVF_PARTITION_STRATEGY_TYPE_GNO_IMI},
+};
 
 }  // namespace vsag

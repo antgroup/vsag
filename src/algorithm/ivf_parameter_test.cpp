@@ -22,6 +22,7 @@
 TEST_CASE("IVF Parameters Test", "[ut][IVFParameter]") {
     auto param_str = R"({
         "type": "ivf",
+        "thread_count": 3,
         "buckets_params": {
             "io_params": {
                 "type": "block_memory_io"
@@ -52,6 +53,7 @@ TEST_CASE("IVF Parameters Test", "[ut][IVFParameter]") {
             vsag::IVFNearestPartitionTrainerType::KMeansTrainer);
     REQUIRE(param->buckets_per_data == 1);
     REQUIRE(param->use_reorder == true);
+    REQUIRE(param->thread_count == 3);
     REQUIRE(param->flatten_param->quantizer_parameter->GetTypeName() == "fp32");
 
     param_str = R"({

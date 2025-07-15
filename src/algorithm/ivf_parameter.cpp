@@ -53,6 +53,10 @@ IVFParameter::FromJson(const JsonType& json) {
         this->use_attribute_filter = json[IVF_USE_ATTRIBUTE_FILTER_KEY];
     }
 
+    if (json.contains(IVF_THREAD_COUNT_KEY)) {
+        this->thread_count = json[IVF_THREAD_COUNT_KEY];
+    }
+
     if (this->use_reorder) {
         CHECK_ARGUMENT(json.contains(IVF_PRECISE_CODES_KEY),
                        fmt::format("ivf parameters must contains {} when enable reorder",
@@ -70,6 +74,7 @@ IVFParameter::ToJson() {
     json[IVF_PARTITION_STRATEGY_PARAMS_KEY] = this->ivf_partition_strategy_parameter->ToJson();
     json[BUCKET_PER_DATA_KEY] = this->buckets_per_data;
     json[IVF_USE_REORDER_KEY] = this->use_reorder;
+    json[IVF_THREAD_COUNT_KEY] = this->thread_count;
     if (use_reorder) {
         json[IVF_PRECISE_CODES_KEY] = this->flatten_param->ToJson();
     }
