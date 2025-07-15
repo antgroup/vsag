@@ -52,25 +52,16 @@ public:
     }
 
     inline void
-    ScanForAccumulate(uint32_t id,
+    ScanForAccumulate(uint32_t term_iterator,
                       const uint32_t* term_ids,
                       const float* term_datas,
                       uint32_t term_count,
                       float* global_dists) {
-        float query_val = sorted_query_[term_iterator_].second;
+        float query_val = sorted_query_[term_iterator].second;
         for (auto i = 0; i < term_count; i++) {
             global_dists[term_ids[i]] += query_val * term_datas[i];
         }
     }
-
-    //    inline void
-    //    ScanForReduction(uint32_t id, const uint32_t* term_id, const float* term_data, uint32_t term_count,
-    //                     float* local_dists, float* global_dists) {
-    //        float query_val = sorted_query_[id2pos_map_[id]].second;
-    //        for (auto i = 0; i < term_count; i++) {
-    //
-    //        }
-    //    }
 
     inline bool
     HasNextTerm() {
@@ -78,18 +69,18 @@ public:
     }
 
     inline uint32_t
-    NextTerm() {
-        return sorted_query_[term_iterator_++].first;
-    }
-
-    inline uint32_t
-    PrevTerm() {
-        return sorted_query_[term_iterator_--].first;
+    NextTermIter() {
+        return term_iterator_++;
     }
 
     inline void
     ResetTerm() {
         term_iterator_ = 0;
+    }
+
+    uint32_t
+    GetTerm(uint32_t term_iterator) {
+        return sorted_query_[term_iterator].first;
     }
 
 public:

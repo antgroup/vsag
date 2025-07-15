@@ -54,17 +54,18 @@ public:
     Query(float* global_dists,
           const SparseTermComputerPtr& computer,
           const bool only_collect_id = false) {
-        uint32_t term, next_term;
         while (computer->HasNextTerm()) {
-            term = computer->NextTerm();
+            auto it = computer->NextTermIter();
+            auto term = computer->GetTerm(it);
             if (computer->HasNextTerm()) {
-                next_term = computer->NextTerm();
+                auto next_it = it + 1;
+                auto next_term = computer->GetTerm(next_it);
+
                 __builtin_prefetch(term_ids_[next_term].data(), 0, 3);
                 __builtin_prefetch(term_datas_[next_term].data(), 0, 3);
-                computer->PrevTerm();
             }
 
-            computer->ScanForAccumulate(term,
+            computer->ScanForAccumulate(it,
                                         term_ids_[term].data(),
                                         term_datas_[term].data(),
                                         term_pruned_sizes_[term],
@@ -80,7 +81,8 @@ public:
                       uint32_t n_candidate) {
         uint32_t id = 0;
         while (computer->HasNextTerm()) {
-            auto term = computer->NextTerm();
+            auto it = computer->NextTermIter();
+            auto term = computer->GetTerm(it);
 
             for (auto i = 0; i < term_pruned_sizes_[term]; i++) {
                 id = term_ids_[term][i];
@@ -105,7 +107,8 @@ public:
         uint32_t id = 0;
         float cur_heap_top = heap.top().first;
         while (computer->HasNextTerm()) {
-            auto term = computer->NextTerm();
+            auto it = computer->NextTermIter();
+            auto term = computer->GetTerm(it);
 
             for (auto i = 0; i < term_pruned_sizes_[term]; i++) {
                 id = term_ids_[term][i];
