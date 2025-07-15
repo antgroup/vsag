@@ -308,12 +308,15 @@ TestComputer(Quantizer<T>& quant,
              float unbounded_numeric_error_rate = 1.0f,
              float unbounded_related_error_rate = 1.0f) {
     auto query_count = 10;
-    bool need_normalize = true;
-    if constexpr (metric == vsag::MetricType::METRIC_TYPE_COSINE) {
-        need_normalize = false;
-    }
+    bool need_normalize = false;
     auto vecs = fixtures::generate_vectors(count, dim, need_normalize);
     auto queries = fixtures::generate_vectors(query_count, dim, need_normalize, 165);
+    for (int d = 0; d < dim; d++) {
+        vecs[d] = 0.0f;
+    }
+    for (int d = 0; d < dim; d++) {
+        queries[query_count * dim / 2 + d] = 0.0f;
+    }
     if (retrain) {
         quant.ReTrain(vecs.data(), count);
     }
@@ -351,7 +354,7 @@ TestComputer(Quantizer<T>& quant,
             if (std::abs(gt - dists1[j]) > error) {
                 count_unbounded_numeric_error++;
             }
-            if (std::abs(gt - dists1[j]) > related_error * gt) {
+            if (std::abs(gt - dists1[j]) > std::abs(related_error * gt)) {
                 count_unbounded_related_error++;
             }
         }

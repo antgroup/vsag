@@ -1148,9 +1148,7 @@ VecRescale(float* data, size_t dim, float val) {
         vec = _mm512_mul_ps(vec, scalar);
         _mm512_storeu_ps(&data[i], vec);
     }
-    for (; i < dim; i++) {
-        data[i] *= val;
-    }
+    avx2::VecRescale(data + i, dim - i, val);
 #else
     return avx2::VecRescale(data, dim, val);
 #endif
