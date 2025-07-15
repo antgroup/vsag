@@ -181,6 +181,7 @@ private:
     uint64_t query_offset_sum_{0};
     uint64_t query_offset_norm_{0};
     uint64_t query_offset_mrq_norm_{0};
+    uint64_t query_offset_raw_norm_{0};
 
     /***
      * code layout: bq-code(required) + norm(required) + error(required) + sum(sq4) + mrq_norm(required)
@@ -190,6 +191,7 @@ private:
     uint64_t offset_error_{0};
     uint64_t offset_sum_{0};
     uint64_t offset_mrq_norm_{0};
+    uint64_t offset_raw_norm_{0};
 };
 
 template <MetricType metric>
@@ -200,8 +202,6 @@ RaBitQuantizer<metric>::RaBitQuantizer(int dim,
                                        bool use_mrq,
                                        Allocator* allocator)
     : Quantizer<RaBitQuantizer<metric>>(dim, allocator) {
-    static_assert(metric == MetricType::METRIC_TYPE_L2SQR, "Unsupported metric type");
-
     // dim
     use_mrq_ = use_mrq;
     pca_dim_ = pca_dim;
@@ -230,7 +230,6 @@ RaBitQuantizer<metric>::RaBitQuantizer(int dim,
     } else {
         rom_.reset(new RandomOrthogonalMatrix(allocator, this->dim_));
     }
-
     // distance function related variable
     inv_sqrt_d_ = 1.0f / sqrt(this->dim_);
 
@@ -252,6 +251,12 @@ RaBitQuantizer<metric>::RaBitQuantizer(int dim,
     if (num_bits_per_dim_query_ != 32) {
         offset_sum_ = this->code_size_;
         this->code_size_ += ((sizeof(sum_type) + align_size - 1) / align_size) * align_size;
+    }
+
+    if constexpr (metric == MetricType::METRIC_TYPE_IP or
+                  metric == MetricType::METRIC_TYPE_COSINE) {
+        offset_raw_norm_ = this->code_size_;
+        this->code_size_ += ((sizeof(norm_type) + align_size - 1) / align_size) * align_size;
     }
 
     // query code layout
@@ -285,6 +290,12 @@ RaBitQuantizer<metric>::RaBitQuantizer(int dim,
         this->code_size_ += ((sizeof(norm_type) + align_size - 1) / align_size) * align_size;
 
         query_offset_mrq_norm_ = this->query_code_size_;
+        this->query_code_size_ += ((sizeof(norm_type) + align_size - 1) / align_size) * align_size;
+    }
+
+    if constexpr (metric == MetricType::METRIC_TYPE_IP or
+                  metric == MetricType::METRIC_TYPE_COSINE) {
+        query_offset_raw_norm_ = this->query_code_size_;
         this->query_code_size_ += ((sizeof(norm_type) + align_size - 1) / align_size) * align_size;
     }
 }
@@ -361,6 +372,14 @@ RaBitQuantizer<metric>::EncodeOneImpl(const DataType* data, uint8_t* codes) cons
     Vector<DataType> normed_data(this->dim_, 0, this->allocator_);
     memset(codes, 0, this->code_size_);
 
+    float raw_norm = 0;
+    if constexpr (metric == MetricType::METRIC_TYPE_IP or
+                  metric == MetricType::METRIC_TYPE_COSINE) {
+        for (uint64_t d = 0; d < this->dim_; ++d) {
+            raw_norm += data[d] * data[d];
+        }
+    }
+    raw_norm = std::sqrt(raw_norm);
     // 1. pca
     if (pca_dim_ != this->original_dim_) {
         pca_->Transform(data, pca_data.data());
@@ -401,7 +420,10 @@ RaBitQuantizer<metric>::EncodeOneImpl(const DataType* data, uint8_t* codes) cons
     if (num_bits_per_dim_query_ != 32) {
         *(sum_type*)(codes + offset_sum_) = sum;
     }
-
+    if constexpr (metric == MetricType::METRIC_TYPE_IP or
+                  metric == MetricType::METRIC_TYPE_COSINE) {
+        *(norm_type*)(codes + offset_raw_norm_) = raw_norm;
+    }
     return true;
 }
 
@@ -431,14 +453,12 @@ RaBitQuantizer<metric>::DecodeOneImpl(const uint8_t* codes, DataType* data) {
         bool bit = ((codes[d / 8] >> (d % 8)) & 1) != 0;
         normed_data[d] = bit ? inv_sqrt_d_ : -inv_sqrt_d_;
     }
-
     // 3. inverse normalize
     InverseNormalizeWithCentroid(normed_data.data(),
                                  centroid_.data(),
                                  transformed_data.data(),
                                  this->dim_,
                                  *(norm_type*)(codes + offset_norm_));
-
     // 4. inverse random projection
     // Note that the value may be much different between original since inv_sqrt_d is small
     rom_->InverseTransform(transformed_data.data(), data);
@@ -486,6 +506,15 @@ RaBitQuantizer<metric>::ComputeQueryBaseImpl(const uint8_t* query_codes,
 
     norm_type query_norm = *((norm_type*)(query_codes + query_offset_norm_));
     norm_type base_norm = *((norm_type*)(base_codes + offset_norm_));
+
+    norm_type quer_raw_norm = 0;
+    norm_type base_raw_norm = 0;
+    if constexpr (metric == MetricType::METRIC_TYPE_IP or
+                  metric == MetricType::METRIC_TYPE_COSINE) {
+        quer_raw_norm = *((norm_type*)(query_codes + query_offset_raw_norm_));
+        base_raw_norm = *((norm_type*)(base_codes + offset_raw_norm_));
+    }
+
     error_type base_error = *((error_type*)(base_codes + offset_error_));
     if (std::abs(base_error) < 1e-5) {
         base_error = (base_error > 0) ? 1.0f : -1.0f;
@@ -501,6 +530,22 @@ RaBitQuantizer<metric>::ComputeQueryBaseImpl(const uint8_t* query_codes,
         norm_type base_mrq_norm_sqr = *(norm_type*)(base_codes + offset_mrq_norm_);
 
         result += (query_mrq_norm_sqr + base_mrq_norm_sqr);
+    }
+    if constexpr (metric == MetricType::METRIC_TYPE_COSINE) {
+        if (is_approx_zero(quer_raw_norm) or is_approx_zero(base_raw_norm)) {
+            result = 1;
+        } else {
+            result = 1 - (quer_raw_norm * quer_raw_norm + base_raw_norm * base_raw_norm - result) *
+                             0.5F / (quer_raw_norm * base_raw_norm);
+        }
+    }
+    if constexpr (metric == MetricType::METRIC_TYPE_IP) {
+        if (is_approx_zero(quer_raw_norm) or is_approx_zero(base_raw_norm)) {
+            result = 1;
+        } else {
+            result =
+                1 - (quer_raw_norm * quer_raw_norm + base_raw_norm * base_raw_norm - result) * 0.5F;
+        }
     }
 
     return result;
@@ -650,6 +695,14 @@ RaBitQuantizer<metric>::ProcessQueryImpl(const DataType* query,
         Vector<DataType> transformed_data(this->dim_, 0, this->allocator_);
         Vector<DataType> normed_data(this->dim_, 0, this->allocator_);
 
+        float query_raw_norm = 0;
+        if constexpr (metric == MetricType::METRIC_TYPE_IP or
+                      metric == MetricType::METRIC_TYPE_COSINE) {
+            for (uint64_t d = 0; d < this->dim_; ++d) {
+                query_raw_norm += query[d] * query[d];
+            }
+        }
+        query_raw_norm = std::sqrt(query_raw_norm);
         // 1. pca
         if (pca_dim_ != this->original_dim_) {
             pca_->Transform(query, pca_data.data());
@@ -697,6 +750,10 @@ RaBitQuantizer<metric>::ProcessQueryImpl(const DataType* query,
 
         // 5. store norm
         *(norm_type*)(computer.buf_ + query_offset_norm_) = query_norm;
+        if constexpr (metric == MetricType::METRIC_TYPE_IP or
+                      metric == MetricType::METRIC_TYPE_COSINE) {
+            *(norm_type*)(computer.buf_ + query_offset_raw_norm_) = query_raw_norm;
+        }
     } catch (std::bad_alloc& e) {
         logger::error("bad alloc when init computer buf");
         throw e;

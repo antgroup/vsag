@@ -947,9 +947,7 @@ VecRescale(float* data, size_t dim, float val) {
         _mm256_storeu_ps(&data[i], result_vec);
     }
 
-    for (; i < dim; i++) {
-        data[i] *= val;
-    }
+    sse::VecRescale(data + i, dim - i, val);
 #else
     return sse::VecRescale(data, dim, val);
 #endif
