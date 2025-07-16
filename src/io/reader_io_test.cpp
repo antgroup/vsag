@@ -49,17 +49,18 @@ private:
 
 TEST_CASE("ReaderIO Read Test", "[ut][ReaderIO]") {
     const uint64_t kTestSize = 1024;
-    std::vector<uint8_t> test_data(kTestSize + sizeof(kTestSize));
+    std::vector<uint8_t> all_data(kTestSize + sizeof(kTestSize));
     for (uint64_t i = 0; i < kTestSize; ++i) {
-        test_data[i + sizeof(kTestSize)] = static_cast<uint8_t>(i % 256);
+        all_data[i + sizeof(kTestSize)] = static_cast<uint8_t>(i % 256);
     }
-    auto size_ptr = reinterpret_cast<uint64_t*>(test_data.data());
+    auto test_data = all_data.data() + sizeof(kTestSize);
+    auto size_ptr = reinterpret_cast<uint64_t*>(all_data.data());
     *size_ptr = kTestSize;
 
     vsag::IndexCommonParam common_param;
     common_param.allocator_ = vsag::Engine::CreateDefaultAllocator();
     auto reader_param = std::make_shared<vsag::ReaderIOParameter>();
-    reader_param->reader = std::make_shared<TestReader>(test_data.data(), kTestSize);
+    reader_param->reader = std::make_shared<TestReader>(all_data.data(), all_data.size());
     reader_param->size = kTestSize + sizeof(kTestSize);
     reader_param->start = 0;
 

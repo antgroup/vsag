@@ -150,9 +150,17 @@ public:
             uint64_t size = 0;
             auto func = [&](uint64_t offset, uint64_t len, void* dest) -> void { size += len; };
             auto reader = ReadFuncStreamReader(func, 0, reader_param->size);
-            FlattenInterface::Deserialize(reader);
-            reader_param->start += size;
-            reader_param->size -= size;
+            {
+                size = 0;
+                FlattenInterface::Deserialize(reader);
+                reader_param->start += size;
+                reader_param->size -= size;
+            }
+            {
+                size = 0;
+                this->quantizer_->Deserialize(reader);
+                reader_param->size -= size;
+            }
             reader_io->Init(reader_param);
         }
     }

@@ -49,7 +49,7 @@ ReaderIO::ReadImpl(uint64_t size, uint64_t offset, uint8_t* data) const {
     }
     bool ret = check_valid_offset(size + offset);
     if (ret) {
-        reader_->Read(offset, size, data);
+        reader_->Read(start_ + offset, size, data);
     }
     return ret;
 }
@@ -61,9 +61,9 @@ ReaderIO::DirectReadImpl(uint64_t size, uint64_t offset, bool& need_release) con
                             "ReaderIO is not initialized, please call Init() first.");
     }
     if (check_valid_offset(size + offset)) {
-        uint8_t* data = static_cast<uint8_t*>(allocator_->Allocate(size));
+        auto* data = static_cast<uint8_t*>(allocator_->Allocate(size));
         need_release = true;
-        reader_->Read(offset, size, data);
+        reader_->Read(start_ + offset, size, data);
         return data;
     }
     return nullptr;
@@ -75,7 +75,10 @@ ReaderIO::ReleaseImpl(const uint8_t* data) const {
 }
 
 bool
-ReaderIO::MultiReadImpl(uint8_t* datas, uint64_t* sizes, uint64_t* offsets, uint64_t count) const {
+ReaderIO::MultiReadImpl(uint8_t* datas,
+                        const uint64_t* sizes,
+                        const uint64_t* offsets,
+                        uint64_t count) const {
     if (not reader_) {
         throw VsagException(ErrorType::INTERNAL_ERROR,
                             "ReaderIO is not initialized, please call Init() first.");
@@ -109,7 +112,7 @@ ReaderIO::MultiReadImpl(uint8_t* datas, uint64_t* sizes, uint64_t* offsets, uint
                 total_promise.set_value();
             }
         };
-        reader_->AsyncRead(offset, size, dest, callback);
+        reader_->AsyncRead(start_ + offset, size, dest, callback);
         dest += size;
     }
     total_future.wait();
