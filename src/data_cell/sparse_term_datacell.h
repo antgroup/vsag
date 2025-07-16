@@ -75,37 +75,13 @@ public:
     }
 
     void
-    InsertHeapPreFill(float* dists,
-                      const SparseTermComputerPtr& computer,
-                      MaxHeap& heap,
-                      uint32_t n_candidate) {
+    InsertHeap(float* dists,
+               const SparseTermComputerPtr& computer,
+               MaxHeap& heap,
+               uint32_t n_candidate,
+               uint32_t offset_id) {
         uint32_t id = 0;
-        while (computer->HasNextTerm()) {
-            auto it = computer->NextTermIter();
-            auto term = computer->GetTerm(it);
-
-            for (auto i = 0; i < term_pruned_sizes_[term]; i++) {
-                id = term_ids_[term][i];
-                if (dists[id] >= 0) [[likely]] {
-                    continue;
-                }
-                heap.emplace(dists[id], id);
-                if (heap.size() > n_candidate) [[likely]] {
-                    heap.pop();
-                }
-                dists[id] = 0;
-            }
-        }
-        computer->ResetTerm();
-    }
-
-    void
-    InsertHeapFull(float* dists,
-                   const SparseTermComputerPtr& computer,
-                   MaxHeap& heap,
-                   uint32_t offset_id) {
-        uint32_t id = 0;
-        float cur_heap_top = heap.top().first;
+        float cur_heap_top = std::numeric_limits<float>::max();
         while (computer->HasNextTerm()) {
             auto it = computer->NextTermIter();
             auto term = computer->GetTerm(it);
@@ -118,10 +94,12 @@ public:
                     continue;
                 } else {
                     heap.emplace(dists[id], id + offset_id);
-                    heap.pop();
-                    cur_heap_top = heap.top().first;
-                    dists[id] = 0;
                 }
+                if (heap.size() > n_candidate) [[likely]] {
+                    heap.pop();
+                }
+                cur_heap_top = heap.top().first;
+                dists[id] = 0;
             }
         }
         computer->ResetTerm();

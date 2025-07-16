@@ -117,17 +117,7 @@ SparseTermIndex::KnnSearch(const DatasetPtr& query,
     // window iteration
     std::vector<float> dists(window_size_, 0.0);
 
-    {  // pre-fill the heap
-        auto term_list = this->window_term_list_[0];
-
-        // compute
-        term_list->Query(dists.data(), computer);
-
-        // insert heap
-        term_list->InsertHeapPreFill(dists.data(), computer, heap, n_candidate);
-    }
-
-    for (auto cur = 1; cur < window_term_list_.size(); cur++) {
+    for (auto cur = 0; cur < window_term_list_.size(); cur++) {
         auto window_start_id = cur * window_size_;
         auto term_list = this->window_term_list_[cur];
 
@@ -135,7 +125,7 @@ SparseTermIndex::KnnSearch(const DatasetPtr& query,
         term_list->Query(dists.data(), computer);
 
         // insert heap
-        term_list->InsertHeapFull(dists.data(), computer, heap, window_start_id);
+        term_list->InsertHeap(dists.data(), computer, heap, n_candidate, window_start_id);
     }
 
     // rerank
