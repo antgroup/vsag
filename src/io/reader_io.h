@@ -53,7 +53,10 @@ public:
     ReleaseImpl(const uint8_t* data) const;
 
     bool
-    MultiReadImpl(uint8_t* datas, uint64_t* sizes, uint64_t* offsets, uint64_t count) const;
+    MultiReadImpl(uint8_t* datas,
+                  const uint64_t* sizes,
+                  const uint64_t* offsets,
+                  uint64_t count) const;
 
     void
     PrefetchImpl(uint64_t offset, uint64_t cache_line = 64);
