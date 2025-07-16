@@ -1702,9 +1702,9 @@ void
 TestIndex::TestGetRawVectorByIds(const IndexPtr& index,
                                  const TestDatasetPtr& dataset,
                                  bool expected_success) {
-//    if (not index->CheckFeature(vsag::SUPPORT_GET_RAW_VECTOR_BY_IDS)) {
-//        return;
-//    }
+    //    if (not index->CheckFeature(vsag::SUPPORT_GET_RAW_VECTOR_BY_IDS)) {
+    //        return;
+    //    }
     int64_t count = dataset->count_;
     auto vectors = index->GetRawVectorByIds(dataset->base_->GetIds(), count);
     REQUIRE(vectors.has_value());

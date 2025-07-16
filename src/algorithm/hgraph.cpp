@@ -1266,7 +1266,8 @@ static const std::string HGRAPH_PARAMS_TEMPLATE =
                 "{IO_TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
                 "{IO_FILE_PATH}": "{DEFAULT_FILE_PATH_VALUE}"
             }
-        }
+        },
+        "{HGRAPH_GET_RAW_VECTOR_COSINE}": false
     })";
 
 ParamPtr
@@ -1492,7 +1493,7 @@ HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
             HGRAPH_REMOVE_FLAG_BIT,
             {HGRAPH_GRAPH_KEY, REMOVE_FLAG_BIT},
         },
-    };
+        {HGRAPH_GET_RAW_VECTOR_COSINE, {HGRAPH_GET_RAW_VECTOR_COSINE}}};
     if (common_param.data_type_ == DataTypes::DATA_TYPE_INT8) {
         throw VsagException(ErrorType::INVALID_ARGUMENT,
                             fmt::format("HGraph not support {} datatype", DATATYPE_INT8));

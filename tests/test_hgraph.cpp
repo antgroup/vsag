@@ -683,17 +683,14 @@ TEST_CASE("[Daily] HGraph Build With Attr", "[ft][hgraph][daily]") {
     TestHGraphBuildWithAttr(test_index, resource);
 }
 
-
 static void
 TestHGraphGetRawVector(const fixtures::HGraphTestIndexPtr& test_index,
-                        const fixtures::HGraphResourcePtr& resource) {
+                       const fixtures::HGraphResourcePtr& resource) {
     using namespace fixtures;
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
-    const std::vector<std::pair<std::string, float>> test_cases = {
-        {"fp32", 0.99},
-        {"sq4_uniform,fp32", 0.95}
-    };
+    const std::vector<std::pair<std::string, float>> test_cases = {{"fp32", 0.99},
+                                                                   {"sq4_uniform,fp32", 0.95}};
     auto search_param = fmt::format(fixtures::search_param_tmp, 200, false);
     for (auto metric_type : resource->metric_types) {
         metric_type = "cosine";
@@ -756,7 +753,6 @@ TEST_CASE("[Daily] HGraph Support Get Raw Vector", "[ft][hgraph][daily]") {
     auto resource = test_index->GetResource(false);
     TestHGraphGetRawVector(test_index, resource);
 }
-
 
 static void
 TestHGraphODescentBuild(const fixtures::HGraphTestIndexPtr& test_index,

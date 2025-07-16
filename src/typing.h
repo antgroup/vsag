@@ -55,7 +55,7 @@ AllocateShared(Allocator* allocator, Args&&... args) {
     return std::allocate_shared<T>(AllocatorWrapper<T>(allocator), std::forward<Args>(args)...);
 }
 
-using ConstParamMap = const std::unordered_map<std::string, std::vector<std::string>>;
+using ConstParamMap = const std::unordered_multimap<std::string, std::vector<std::string>>;
 
 using IdFilterFuncType = std::function<bool(int64_t)>;
 
