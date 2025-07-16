@@ -1,6 +1,6 @@
 ## 极致的二值量化方法— 深度解读 RaBitQ及其在 VSAG 上的工程实践
 
-本文作者：向岚（钟萧遥），杨鸣（杨鸣宇）
+本文作者：@ShawnShawnYou @mingyu-hkustgz
 
 
 
