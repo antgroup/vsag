@@ -1743,10 +1743,10 @@ shuffle_16_char(const uint8x16_t* a, const uint8x16_t* b) {
 #endif
 
 void
-Prefetch(const void* data){
-    // #if defined(ENABLE_NEON)
-    //     __builtin_prefetch(data, 0, 1);
-    // #endif
+Prefetch(const void* data) {
+#if defined(ENABLE_NEON)
+    __builtin_prefetch(data, 0, 3);
+#endif
 };
 
 void
