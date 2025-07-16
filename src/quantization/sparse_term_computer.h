@@ -58,6 +58,11 @@ public:
                       uint32_t term_count,
                       float* global_dists) {
         float query_val = sorted_query_[term_iterator].second;
+
+        //        __builtin_prefetch(term_ids + term_count / 2, 0, 3);
+        //        __builtin_prefetch(term_datas + term_count / 2, 0, 3);
+        //        __builtin_prefetch(global_dists + term_ids[term_count / 2], 0, 3);
+
         for (auto i = 0; i < term_count; i++) {
             global_dists[term_ids[i]] += query_val * term_datas[i];
         }

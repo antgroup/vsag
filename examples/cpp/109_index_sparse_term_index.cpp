@@ -15,8 +15,11 @@
 
 #include <vsag/vsag.h>
 
+#include <fstream>
 #include <iostream>
 #include <unordered_set>
+
+#include "vsag/binaryset.h"
 
 float
 compute_recall(vsag::DatasetPtr global, vsag::DatasetPtr local, int k) {
@@ -112,7 +115,7 @@ main(int argc, char** argv) {
             "query_prune_ratio": 0.7,
             "doc_prune_ratio": 1,
             "term_prune_ratio": 1,
-            "window_size": 10000,
+            "window_size": 100000,
             "need_sort": true
         }
     }
@@ -135,6 +138,35 @@ main(int argc, char** argv) {
     } else if (build_result.error().type == vsag::ErrorType::INTERNAL_ERROR) {
         std::cerr << "Failed to build index: internalError" << std::endl;
         exit(-1);
+    }
+
+    /******************* Save Index to OStream *****************/
+    auto tmp_file = "/tmp/vsag-persistent-streaming-sparse.index";
+    std::ofstream out_stream(tmp_file);
+    auto serialize_result = index->Serialize(out_stream);
+    out_stream.close();
+    if (not serialize_result.has_value()) {
+        std::cerr << serialize_result.error().message << std::endl;
+        abort();
+    } else {
+        std::cout << "finish serialize" << std::endl;
+    }
+
+    /******************* Load Index from IStream *****************/
+    index = nullptr;
+    if (auto create_index = vsag::Factory::CreateIndex("sparse_term_index", build_params);
+        not create_index.has_value()) {
+        std::cout << "create index failed: " << create_index.error().message << std::endl;
+        abort();
+    } else {
+        index = *create_index;
+    }
+    std::ifstream in_stream(tmp_file);
+    if (auto deserialize = index->Deserialize(in_stream); not deserialize.has_value()) {
+        std::cerr << "load index failed: " << deserialize.error().message << std::endl;
+        abort();
+    } else {
+        std::cout << "finish deserialize" << std::endl;
     }
 
     /******************* KnnSearch *****************/

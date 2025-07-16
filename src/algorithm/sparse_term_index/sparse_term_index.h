@@ -76,10 +76,40 @@ public:
 
     void
     Serialize(StreamWriter& writer) const override {
+        StreamWriter::WriteObj(writer, cur_element_count_);
+
+        uint32_t window_term_list_size = window_term_list_.size();
+        StreamWriter::WriteObj(writer, window_term_list_size);
+        for (auto i = 0; i < window_term_list_.size(); i++) {
+            window_term_list_[i]->Serialize(writer);
+        }
+
+        label_table_->Serialize(writer);
+
+        if (use_reorder_) {
+            rerank_flat_index_->Serialize(writer);
+        }
     }
 
     void
     Deserialize(StreamReader& reader) override {
+        StreamReader::ReadObj(reader, cur_element_count_);
+
+        uint32_t window_term_list_size = 0;
+        StreamReader::ReadObj(reader, window_term_list_size);
+        window_term_list_.resize(window_term_list_size);
+        for (auto i = 0; i < window_term_list_.size(); i++) {
+            if (i != 0) {
+                window_term_list_[i] = this->window_term_list_[0]->Clone();
+            }
+            window_term_list_[i]->Deserialize(reader);
+        }
+
+        label_table_->Deserialize(reader);
+
+        if (use_reorder_) {
+            rerank_flat_index_->Deserialize(reader);
+        }
     }
 
     int64_t

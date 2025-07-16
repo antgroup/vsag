@@ -194,6 +194,30 @@ public:
         term_pruned_sizes_.resize(term_capacity_, 0);
     }
 
+    void
+    Serialize(StreamWriter& writer) const {
+        StreamWriter::WriteObj(writer, term_capacity_);
+        for (auto i = 0; i < term_capacity_; i++) {
+            StreamWriter::WriteVector(writer, term_ids_[i]);
+            StreamWriter::WriteVector(writer, term_datas_[i]);
+        }
+        StreamWriter::WriteVector(writer, term_sizes_);
+        StreamWriter::WriteVector(writer, term_pruned_sizes_);
+    }
+
+    void
+    Deserialize(StreamReader& reader) {
+        uint32_t term_capacity;
+        StreamReader::ReadObj(reader, term_capacity);
+        ResizeTermList(term_capacity);
+        for (auto i = 0; i < term_capacity_; i++) {
+            StreamReader::ReadVector(reader, term_ids_[i]);
+            StreamReader::ReadVector(reader, term_datas_[i]);
+        }
+        StreamReader::ReadVector(reader, term_sizes_);
+        StreamReader::ReadVector(reader, term_pruned_sizes_);
+    }
+
 private:
     float query_prune_ratio_{0};
 
