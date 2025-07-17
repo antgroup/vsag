@@ -83,6 +83,7 @@ TEST_CASE_METHOD(fixtures::DiskANNTestIndex, "diskann build test", "[ft][index][
         auto index = TestFactory(name, param, true);
         auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
         TestBuildIndex(index, dataset, true);
+        REQUIRE(index->GetIndexType() == vsag::IndexType::DISKANN);
     }
 }
 

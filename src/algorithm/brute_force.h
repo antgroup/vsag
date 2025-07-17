@@ -55,6 +55,11 @@ public:
     std::vector<int64_t>
     Build(const DatasetPtr& data) override;
 
+    IndexType
+    GetIndexType() override {
+        return IndexType::BRUTEFORCE;
+    }
+
     void
     Train(const DatasetPtr& data) override;
 
