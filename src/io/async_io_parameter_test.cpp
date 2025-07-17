@@ -25,7 +25,7 @@ using namespace vsag;
 TEST_CASE("AsyncIO Parameters Test", "[ut][AsyncIOParameters]") {
     fixtures::TempDir dir("async_io");
     auto path = dir.GenerateRandomFile();
-    auto param_str = R"(
+    constexpr const char* param_str = R"(
         {{
             "type": "async_io",
             "file_path": "{}"
