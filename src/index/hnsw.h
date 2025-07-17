@@ -31,7 +31,6 @@
 #include "data_cell/flatten_interface.h"
 #include "data_cell/graph_interface.h"
 #include "data_type.h"
-#include "diskann_logger.h"
 #include "hnsw_zparameters.h"
 #include "impl/allocator/safe_allocator.h"
 #include "impl/conjugate_graph.h"

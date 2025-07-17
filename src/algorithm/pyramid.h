@@ -18,7 +18,6 @@
 #include <utility>
 
 #include "data_cell/graph_interface.h"
-#include "diskann_logger.h"
 #include "impl/allocator/safe_allocator.h"
 #include "impl/basic_searcher.h"
 #include "impl/filter/filter_headers.h"

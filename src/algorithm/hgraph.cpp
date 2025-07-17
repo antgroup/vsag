@@ -22,10 +22,8 @@
 #include <stdexcept>
 
 #include "common.h"
-#include "data_cell/graph_datacell_parameter.h"
 #include "data_cell/sparse_graph_datacell.h"
 #include "dataset_impl.h"
-#include "diskann_logger.h"
 #include "impl/heap/standard_heap.h"
 #include "impl/odescent_graph_builder.h"
 #include "impl/pruning_strategy.h"
