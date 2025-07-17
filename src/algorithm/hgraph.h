@@ -65,6 +65,11 @@ public:
         return INDEX_TYPE_HGRAPH;
     }
 
+    IndexType
+    GetIndexType() override {
+        return IndexType::HGRAPH;
+    }
+
     void
     InitFeatures() override;
 

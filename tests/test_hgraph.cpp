@@ -246,6 +246,7 @@ HGraphTestIndex::TestGeneral(const TestIndex::IndexPtr& index,
                              const TestDatasetPtr& dataset,
                              const std::string& search_param,
                              float recall) {
+    REQUIRE(index->GetIndexType() == vsag::IndexType::HGRAPH);
     TestGetMinAndMaxId(index, dataset);
     TestKnnSearch(index, dataset, search_param, recall, true);
     TestKnnSearchIter(index, dataset, search_param, recall, true);

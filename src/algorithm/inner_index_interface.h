@@ -49,6 +49,9 @@ public:
     [[nodiscard]] virtual std::string
     GetName() const = 0;
 
+    [[nodiscard]] virtual IndexType
+    GetIndexType() = 0;
+
     virtual void
     InitFeatures() = 0;
 

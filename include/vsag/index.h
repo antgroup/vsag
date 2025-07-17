@@ -42,6 +42,16 @@ struct MergeUnit {
     IdMapFunction id_map_func = nullptr;
 };
 
+enum class IndexType {
+    HNSW,
+    DISKANN,
+    HGRAPH,
+    IVF,
+    PYRAMID,
+    BRUTEFORCE,
+    SPARSE,
+};
+
 class Index {
 public:
     // [basic methods]
@@ -54,6 +64,15 @@ public:
       */
     virtual tl::expected<std::vector<int64_t>, Error>
     Build(const DatasetPtr& base) = 0;
+
+    /**
+     * @brief Get Index Type
+     * @return IndexType
+     */
+    virtual IndexType
+    GetIndexType() {
+        throw std::runtime_error("Index not support GetIndexType");
+    }
 
     /**
       * @brief Training index with given vectors

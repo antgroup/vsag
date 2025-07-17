@@ -48,6 +48,11 @@ public:
         return INDEX_SPARSE;
     }
 
+    IndexType
+    GetIndexType() override {
+        return IndexType::SPARSE;
+    }
+
     [[nodiscard]] InnerIndexPtr
     Fork(const IndexCommonParam& param) override {
         return std::make_shared<SparseIndex>(this->create_param_ptr_, param);

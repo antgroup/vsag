@@ -71,6 +71,11 @@ public:
         SAFE_CALL(return this->build(base));
     }
 
+    IndexType
+    GetIndexType() override {
+        return IndexType::DISKANN;
+    }
+
     tl::expected<Checkpoint, Error>
     ContinueBuild(const DatasetPtr& base, const BinarySet& binary_set) override {
         SAFE_CALL(return this->continue_build(base, binary_set));
