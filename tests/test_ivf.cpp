@@ -1189,12 +1189,9 @@ TestIVFGNOIMIBuild(const fixtures::IVFTestIndexPtr& test_index,
         for (auto dim : resource->dims) {
             for (auto train_type : resource->train_types) {
                 for (auto [base_quantization_str, recall] : resource->test_cases) {
-                    if (train_type == "kmeans") {
-                        recall *= 0.8F;  // Kmeans may not achieve high recall in random datasets
-                    }
-                    auto count = std::min(300, static_cast<int32_t>(dim / 4));
+                    auto count = std::min(400, static_cast<int32_t>(dim / 4));
                     auto search_param =
-                        fmt::format(fixtures::search_param_tmp, std::max(200, count));
+                        fmt::format(fixtures::search_param_tmp, std::max(350, count));
                     INFO(
                         fmt::format("metric_type: {}, dim: {}, base_quantization_str: {}, "
                                     "train_type: {}, recall: {}",
@@ -1249,9 +1246,9 @@ TestIVFGNOIMIBuildWithResidual(const fixtures::IVFTestIndexPtr& test_index,
                     if (base_quantization_str == "sq8_uniform,fp32") {
                         continue;  // sq8_uniform reduce recall when using residual in GNO-IMI
                     }
-                    auto count = std::min(900, static_cast<int32_t>(dim / 4));
+                    auto count = std::min(400, static_cast<int32_t>(dim / 4));
                     auto search_param =
-                        fmt::format(fixtures::search_param_tmp, std::max(800, count));
+                        fmt::format(fixtures::search_param_tmp, std::max(400, count));
                     INFO(
                         fmt::format("metric_type: {}, dim: {}, base_quantization_str: {}, "
                                     "train_type: {}, recall: {}",
@@ -1262,7 +1259,7 @@ TestIVFGNOIMIBuildWithResidual(const fixtures::IVFTestIndexPtr& test_index,
                                     recall));
                     vsag::Options::Instance().set_block_size_limit(size);
                     auto param = IVFTestIndex::GenerateGNOIMIBuildParametersString(
-                        metric_type, dim, base_quantization_str, 30, 30, train_type, true, 1);
+                        metric_type, dim, base_quantization_str, 20, 20, train_type, true, 1);
                     auto index = IVFTestIndex::TestFactory(IVFTestIndex::name, param, true);
                     auto dataset = IVFTestIndex::pool.GetDatasetAndCreate(
                         dim, resource->base_count, metric_type);
