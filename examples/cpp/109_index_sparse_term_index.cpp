@@ -115,7 +115,7 @@ main(int argc, char** argv) {
             "query_prune_ratio": 0.7,
             "doc_prune_ratio": 1,
             "term_prune_ratio": 1,
-            "window_size": 10000,
+            "window_size": 100000,
             "need_sort": true
         }
     }

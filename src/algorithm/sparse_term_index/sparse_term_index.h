@@ -48,6 +48,11 @@ public:
     InitFeatures() override {
     }
 
+    std::string
+    GetMemoryUsageDetail() const override {
+        return "";
+    }
+
     std::vector<int64_t>
     Add(const DatasetPtr& base) override;
 

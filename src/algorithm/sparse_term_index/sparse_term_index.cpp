@@ -128,6 +128,11 @@ SparseTermIndex::KnnSearch(const DatasetPtr& query,
         term_list->InsertHeap(dists.data(), computer, heap, n_candidate, window_start_id);
     }
 
+    // fill up to k
+    while (heap.size() < k) {
+        heap.push({std::numeric_limits<float>::max(), 0});  // TODO(ZXY): replace with random points
+    }
+
     // rerank
     if (use_reorder_) {
         // high precision
