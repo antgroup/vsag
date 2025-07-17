@@ -17,85 +17,54 @@
 namespace vsag {
 
 void
-AttributeBucketInvertedDataCell::Insert(const AttributeSet& attr_set, InnerIdType inner_id) {
-    throw VsagException(ErrorType::INTERNAL_ERROR, "Insert Not implemented");
-}
+AttributeBucketInvertedDataCell::Insert(const AttributeSet& attr_set,
+                                        InnerIdType inner_id,
+                                        BucketIdType bucket_id) {
+    std::lock_guard lock(this->global_mutex_);
 
-void
-AttributeBucketInvertedDataCell::InsertWithBucket(const AttributeSet& attr_set,
-                                                  InnerIdType inner_id,
-                                                  BucketIdType bucket_id) {
-    {
-        std::lock_guard lock(this->multi_term_2_value_map_mutex_);
-        auto start = this->multi_term_2_value_map_.size();
-        while (start < bucket_id + 1) {
-            this->multi_term_2_value_map_.emplace_back(
-                std::make_unique<UnorderedMap<std::string, ValueMapPtr>>(allocator_));
-            ++start;
-            this->bucket_mutexes_.emplace_back(std::make_shared<std::shared_mutex>());
-        }
-    }
-    std::shared_lock lock(this->multi_term_2_value_map_mutex_);
-    auto& cur_bucket = this->multi_term_2_value_map_[bucket_id];
-    std::lock_guard bucket_lock(*this->bucket_mutexes_[bucket_id]);
     for (auto* attr : attr_set.attrs_) {
-        if (cur_bucket->find(attr->name_) == cur_bucket->end()) {
-            (*cur_bucket)[attr->name_] =
-                std::make_shared<AttrValueMap>(allocator_, ComputableBitsetType::FastBitset);
+        auto iter = field_2_value_map_.find(attr->name_);
+        if (iter == field_2_value_map_.end()) {
+            field_2_value_map_[attr->name_] =
+                std::make_shared<AttrValueMap>(allocator_, this->bitset_type_);
         }
-        auto& value_map = (*cur_bucket)[attr->name_];
+        auto& value_map = field_2_value_map_[attr->name_];
         auto value_type = attr->GetValueType();
         this->field_type_map_.SetTypeOfField(attr->name_, value_type);
         if (value_type == AttrValueType::INT32) {
-            this->insert_by_type<int32_t>(value_map, attr, inner_id);
+            this->insert_by_type<int32_t>(value_map, attr, inner_id, bucket_id);
         } else if (value_type == AttrValueType::INT64) {
-            this->insert_by_type<int64_t>(value_map, attr, inner_id);
+            this->insert_by_type<int64_t>(value_map, attr, inner_id, bucket_id);
         } else if (value_type == AttrValueType::INT16) {
-            this->insert_by_type<int16_t>(value_map, attr, inner_id);
+            this->insert_by_type<int16_t>(value_map, attr, inner_id, bucket_id);
         } else if (value_type == AttrValueType::INT8) {
-            this->insert_by_type<int8_t>(value_map, attr, inner_id);
+            this->insert_by_type<int8_t>(value_map, attr, inner_id, bucket_id);
         } else if (value_type == AttrValueType::UINT32) {
-            this->insert_by_type<uint32_t>(value_map, attr, inner_id);
+            this->insert_by_type<uint32_t>(value_map, attr, inner_id, bucket_id);
         } else if (value_type == AttrValueType::UINT64) {
-            this->insert_by_type<uint64_t>(value_map, attr, inner_id);
+            this->insert_by_type<uint64_t>(value_map, attr, inner_id, bucket_id);
         } else if (value_type == AttrValueType::UINT16) {
-            this->insert_by_type<uint16_t>(value_map, attr, inner_id);
+            this->insert_by_type<uint16_t>(value_map, attr, inner_id, bucket_id);
         } else if (value_type == AttrValueType::UINT8) {
-            this->insert_by_type<uint8_t>(value_map, attr, inner_id);
+            this->insert_by_type<uint8_t>(value_map, attr, inner_id, bucket_id);
         } else if (value_type == AttrValueType::STRING) {
-            this->insert_by_type<std::string>(value_map, attr, inner_id);
+            this->insert_by_type<std::string>(value_map, attr, inner_id, bucket_id);
         } else {
             throw VsagException(ErrorType::INTERNAL_ERROR, "Unsupported value type");
         }
     }
 }
 
-std::vector<const ComputableBitset*>
+std::vector<const MultiBitsetManager*>
 AttributeBucketInvertedDataCell::GetBitsetsByAttr(const Attribute& attr) {
-    throw VsagException(ErrorType::INTERNAL_ERROR, "GetBitsetsByAttr Not implemented");
-}
-
-std::vector<const ComputableBitset*>
-AttributeBucketInvertedDataCell::GetBitsetsByAttrAndBucketId(const Attribute& attr,
-                                                             BucketIdType bucket_id) {
-    std::shared_lock lock(this->multi_term_2_value_map_mutex_);
-    if (bucket_id >= this->bucket_mutexes_.size()) {
-        return {attr.GetValueCount(), nullptr};
-    }
-    auto& value_maps = multi_term_2_value_map_[bucket_id];
-
-    std::shared_lock bucket_lock(*this->bucket_mutexes_[bucket_id]);
-
-    if (value_maps == nullptr) {
-        return {attr.GetValueCount(), nullptr};
-    }
-    auto iter = value_maps->find(attr.name_);
-    if (iter == value_maps->end()) {
-        return {attr.GetValueCount(), nullptr};
+    std::shared_lock lock(this->global_mutex_);
+    std::vector<const MultiBitsetManager*> bitsets(attr.GetValueCount(), nullptr);
+    auto iter = field_2_value_map_.find(attr.name_);
+    if (iter == field_2_value_map_.end()) {
+        return std::move(bitsets);
     }
     const auto& value_map = iter->second;
     auto value_type = attr.GetValueType();
-    std::vector<const ComputableBitset*> bitsets(attr.GetValueCount());
     if (value_type == AttrValueType::INT32) {
         this->get_bitsets_by_type<int32_t>(value_map, &attr, bitsets);
     } else if (value_type == AttrValueType::INT64) {
@@ -117,19 +86,18 @@ AttributeBucketInvertedDataCell::GetBitsetsByAttrAndBucketId(const Attribute& at
     } else {
         throw VsagException(ErrorType::INTERNAL_ERROR, "Unsupported value type");
     }
-    return bitsets;
+    return std::move(bitsets);
 }
 
 void
 AttributeBucketInvertedDataCell::Serialize(StreamWriter& writer) {
     AttributeInvertedInterface::Serialize(writer);
-    StreamWriter::WriteObj(writer, multi_term_2_value_map_.size());
-    for (auto& term_2_bucket_value_map : multi_term_2_value_map_) {
-        StreamWriter::WriteObj(writer, term_2_bucket_value_map->size());
-        for (const auto& [term, value_map] : *term_2_bucket_value_map) {
-            StreamWriter::WriteString(writer, term);
-            value_map->Serialize(writer);
-        }
+    auto size = field_2_value_map_.size();
+    StreamWriter::WriteObj(writer, size);
+
+    for (const auto& [term, value_map] : field_2_value_map_) {
+        StreamWriter::WriteString(writer, term);
+        value_map->Serialize(writer);
     }
 }
 
@@ -138,22 +106,12 @@ AttributeBucketInvertedDataCell::Deserialize(lvalue_or_rvalue<StreamReader> read
     AttributeInvertedInterface::Deserialize(reader);
     uint64_t size;
     StreamReader::ReadObj(reader, size);
-    multi_term_2_value_map_.reserve(size);
-    bucket_mutexes_.resize(size);
+    this->field_2_value_map_.reserve(size);
     for (uint64_t i = 0; i < size; i++) {
-        bucket_mutexes_[i] = std::make_shared<std::shared_mutex>();
-        uint64_t map_size;
-        StreamReader::ReadObj(reader, map_size);
-        Term2ValueMap map = std::make_unique<UnorderedMap<std::string, ValueMapPtr>>(allocator_);
-        map->reserve(map_size);
-        for (uint64_t j = 0; j < map_size; ++j) {
-            auto term = StreamReader::ReadString(reader);
-            auto value_map =
-                std::make_shared<AttrValueMap>(this->allocator_, ComputableBitsetType::FastBitset);
-            value_map->Deserialize(reader);
-            (*map)[term] = value_map;
-        }
-        multi_term_2_value_map_.emplace_back(std::move(map));
+        auto term = StreamReader::ReadString(reader);
+        auto value_map = std::make_shared<AttrValueMap>(this->allocator_, this->bitset_type_);
+        value_map->Deserialize(reader);
+        field_2_value_map_[term] = value_map;
     }
 }
 

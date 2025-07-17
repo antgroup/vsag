@@ -42,21 +42,21 @@ WhiteListFilter::Update(const Bitset* bitset) {
 }
 
 void
-WhiteListFilter::TryToUpdate(FilterPtr& ptr, const IdFilterFuncType& fallback_func) {
+WhiteListFilter::TryToUpdate(Filter*& ptr, const IdFilterFuncType& fallback_func) {
     if (ptr == nullptr) {
-        ptr = std::make_shared<WhiteListFilter>(fallback_func);
+        ptr = new WhiteListFilter(fallback_func);
     } else {
-        auto* white_ptr = static_cast<WhiteListFilter*>(ptr.get());
+        auto* white_ptr = static_cast<WhiteListFilter*>(ptr);
         white_ptr->Update(fallback_func);
     }
 }
 
 void
-WhiteListFilter::TryToUpdate(FilterPtr& ptr, const Bitset* bitset) {
+WhiteListFilter::TryToUpdate(Filter*& ptr, const Bitset* bitset) {
     if (ptr == nullptr) {
-        ptr = std::make_shared<WhiteListFilter>(bitset);
+        ptr = new WhiteListFilter(bitset);
     } else {
-        auto* white_ptr = static_cast<WhiteListFilter*>(ptr.get());
+        auto* white_ptr = static_cast<WhiteListFilter*>(ptr);
         white_ptr->Update(bitset);
     }
 }

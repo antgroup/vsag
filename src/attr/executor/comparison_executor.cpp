@@ -93,58 +93,42 @@ ComparisonExecutor::Clear() {
     Executor::Clear();
 }
 
-FilterPtr
-ComparisonExecutor::Run() {
+Filter*
+ComparisonExecutor::Run(BucketIdType bucket_id) {
     if (this->op_ != ComparisonOperator::EQ and this->op_ != ComparisonOperator::NE) {
         throw VsagException(ErrorType::INTERNAL_ERROR, "unsupported comparison operator");
     }
 
-    if (this->bitset_ == nullptr) {
-        this->bitset_ =
-            ComputableBitset::MakeRawInstance(ComputableBitsetType::SparseBitset, this->allocator_);
-        this->own_bitset_ = true;
-    }
-
-    auto bitset_lists = this->attr_index_->GetBitsetsByAttr(*this->filter_attribute_);
-
-    this->bitset_->Or(bitset_lists[0]);
-
-    if (this->op_ == ComparisonOperator::NE) {
-        this->only_bitset_ = false;
-        this->filter_ = std::make_shared<BlackListFilter>(this->bitset_);
-    } else {
-        this->only_bitset_ = true;
-        this->filter_ = std::make_shared<WhiteListFilter>(this->bitset_);
-    }
-    return this->filter_;
-}
-
-FilterPtr
-ComparisonExecutor::RunWithBucket(BucketIdType bucket_id) {
-    if (this->op_ != ComparisonOperator::EQ and this->op_ != ComparisonOperator::NE) {
-        throw VsagException(ErrorType::INTERNAL_ERROR, "unsupported comparison operator");
-    }
-
-    if (this->bitset_ == nullptr) {
-        this->bitset_ =
-            ComputableBitset::MakeRawInstance(ComputableBitsetType::FastBitset, this->allocator_);
-        this->own_bitset_ = true;
-    }
-
-    auto bitset_lists =
-        this->attr_index_->GetBitsetsByAttrAndBucketId(*this->filter_attribute_, bucket_id);
-    for (const auto* bitset : bitset_lists) {
-        if (bitset == nullptr) {
+    for (const auto* manager : managers_) {
+        if (manager == nullptr) {
             continue;
         }
-        this->bitset_->Or(*bitset);
+        auto* bitset = manager->GetOneBitset(bucket_id);
+        this->bitset_->Or(bitset);
     }
-    this->only_bitset_ = true;
-    if (this->op_ == ComparisonOperator::NE) {
-        this->bitset_->Not();
+    if (this->op_ == ComparisonOperator::EQ) {
+        this->only_bitset_ = true;
+        WhiteListFilter::TryToUpdate(this->filter_, this->bitset_);
+    } else {
+        if (bitset_type_ == ComputableBitsetType::FastBitset) {
+            this->bitset_->Not();
+            this->only_bitset_ = true;
+            WhiteListFilter::TryToUpdate(this->filter_, this->bitset_);
+        } else {
+            this->only_bitset_ = false;
+            this->filter_ = new BlackListFilter(this->bitset_);
+        }
     }
-    WhiteListFilter::TryToUpdate(this->filter_, this->bitset_);
+
     return this->filter_;
+}
+void
+ComparisonExecutor::Init() {
+    if (this->bitset_ == nullptr) {
+        this->bitset_ = ComputableBitset::MakeRawInstance(this->bitset_type_, this->allocator_);
+        this->own_bitset_ = true;
+    }
+    this->managers_ = this->attr_index_->GetBitsetsByAttr(*this->filter_attribute_);
 }
 
 }  // namespace vsag

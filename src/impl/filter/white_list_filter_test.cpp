@@ -40,7 +40,7 @@ TEST_CASE("WhiteListFilter Basic Test For Bitset", "[ut][WhiteListFilter]") {
         }
     }
 
-    auto test_func = [&](const FilterPtr& white, int value = 0) {
+    auto test_func = [&](const Filter* white, int value = 0) {
         for (int64_t i = 0; i < max_count; i++) {
             if (i % 3 == value) {
                 REQUIRE(white->CheckValid(i));
@@ -51,29 +51,35 @@ TEST_CASE("WhiteListFilter Basic Test For Bitset", "[ut][WhiteListFilter]") {
     };
 
     SECTION("shared ptr") {
-        FilterPtr white = std::make_shared<WhiteListFilter>(bitset);
+        Filter* white = new WhiteListFilter(bitset);
         test_func(white);
 
         // TestUpdate from nullptr
+        delete white;
         white = nullptr;
         WhiteListFilter::TryToUpdate(white, bitset.get());
         test_func(white);
 
         WhiteListFilter::TryToUpdate(white, bitset2.get());
         test_func(white, 1);
+
+        delete white;
     }
 
     SECTION("raw ptr") {
-        FilterPtr white = std::make_shared<WhiteListFilter>(bitset.get());
+        Filter* white = new WhiteListFilter(bitset.get());
         test_func(white);
 
         // TestUpdate from nullptr
+        delete white;
         white = nullptr;
         WhiteListFilter::TryToUpdate(white, bitset.get());
         test_func(white);
 
         WhiteListFilter::TryToUpdate(white, bitset2.get());
         test_func(white, 1);
+
+        delete white;
     }
 }
 
@@ -84,7 +90,7 @@ TEST_CASE("WhiteListFilter Basic Test For IdFilterFuncType", "[ut][WhiteListFilt
 
     auto func2 = [](int64_t id) -> bool { return id % 3 == 1; };
 
-    auto test_func = [&](const FilterPtr& white, int value = 0) {
+    auto test_func = [&](const Filter* white, int value = 0) {
         for (int64_t i = 0; i < max_count; i++) {
             if (i % 3 == value) {
                 REQUIRE(white->CheckValid(i));
@@ -94,9 +100,10 @@ TEST_CASE("WhiteListFilter Basic Test For IdFilterFuncType", "[ut][WhiteListFilt
         }
     };
 
-    FilterPtr white = std::make_shared<WhiteListFilter>(func);
+    Filter* white = new WhiteListFilter(func);
     test_func(white);
 
+    delete white;
     white = nullptr;
     WhiteListFilter::TryToUpdate(white, func);
     test_func(white);
@@ -105,4 +112,5 @@ TEST_CASE("WhiteListFilter Basic Test For IdFilterFuncType", "[ut][WhiteListFilt
     test_func(white, 1);
 
     REQUIRE(white->FilterDistribution() == Filter::Distribution::NONE);
+    delete white;
 }
