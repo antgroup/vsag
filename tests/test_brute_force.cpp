@@ -81,6 +81,7 @@ BruteForceTestIndex::TestGeneral(const IndexPtr& index,
                                  const TestDatasetPtr& dataset,
                                  const std::string& search_param,
                                  float recall) {
+    REQUIRE(index->GetIndexType() == vsag::IndexType::BRUTEFORCE);
     TestKnnSearch(index, dataset, search_param, recall, true);
     TestConcurrentKnnSearch(index, dataset, search_param, recall, true);
     TestRangeSearch(index, dataset, search_param, recall, 10, true);

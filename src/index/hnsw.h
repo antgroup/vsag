@@ -78,6 +78,11 @@ public:
         SAFE_CALL(return this->build(base));
     }
 
+    IndexType
+    GetIndexType() override {
+        return IndexType::HNSW;
+    }
+
     tl::expected<std::vector<int64_t>, Error>
     Add(const DatasetPtr& base) override {
         SAFE_CALL(return this->add(base));

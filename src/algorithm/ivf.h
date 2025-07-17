@@ -62,6 +62,11 @@ public:
     std::vector<int64_t>
     Build(const DatasetPtr& base) override;
 
+    IndexType
+    GetIndexType() override {
+        return IndexType::IVF;
+    }
+
     std::vector<int64_t>
     Add(const DatasetPtr& base) override;
 

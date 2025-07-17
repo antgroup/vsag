@@ -92,6 +92,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
     for (auto& dim : dims) {
         auto param = GeneratePyramidBuildParametersString(metric_type, dim, level);
         auto index = TestFactory(name, param, true);
+        REQUIRE(index->GetIndexType() == vsag::IndexType::PYRAMID);
         auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type, /*with_path=*/true);
         TestContinueAdd(index, dataset, true);
         TestKnnSearch(index, dataset, search_param, 0.99, true);

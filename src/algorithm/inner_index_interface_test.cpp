@@ -79,6 +79,11 @@ public:
         return "EmptyInnerIndex";
     }
 
+    IndexType
+    GetIndexType() override {
+        throw std::runtime_error("Index not support GetIndexType");
+    }
+
     void
     InitFeatures() override {
         return;

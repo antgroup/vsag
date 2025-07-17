@@ -236,6 +236,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex,
         vsag::Options::Instance().set_block_size_limit(size);
         auto param = GenerateHNSWBuildParametersString(metric_type, dim);
         auto index = TestFactory(name, param, true);
+        REQUIRE(index->GetIndexType() == vsag::IndexType::HNSW);
         auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
         TestContinueAdd(index, dataset, true);
         TestKnnSearch(index, dataset, search_param, 0.99, true);
