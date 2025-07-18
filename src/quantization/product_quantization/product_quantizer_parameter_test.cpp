@@ -33,4 +33,6 @@ TEST_CASE("Product Quantizer Parameter ToJson Test", "[ut][ProductQuantizerParam
     ParameterTest::TestToJson(param);
     REQUIRE(param->pq_bits_ == 8);
     REQUIRE(param->pq_dim_ == 64);
+
+    TestParamCheckCompatibility<ProductQuantizerParameter>(param_str);
 }

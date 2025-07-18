@@ -15,12 +15,6 @@
 
 #pragma once
 
-#include <algorithm>
-#include <cstring>
-#include <limits>
-#include <memory>
-#include <nlohmann/json.hpp>
-
 #include "index/index_common_param.h"
 #include "inner_string_params.h"
 #include "pq_fastscan_quantizer_parameter.h"
