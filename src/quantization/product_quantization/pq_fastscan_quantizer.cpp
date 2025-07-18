@@ -363,7 +363,5 @@ PQFastScanQuantizer<metric>::ProcessQueryImpl(const DataType* query,
     }
 }
 
-template class PQFastScanQuantizer<MetricType::METRIC_TYPE_L2SQR>;
-template class PQFastScanQuantizer<MetricType::METRIC_TYPE_COSINE>;
-template class PQFastScanQuantizer<MetricType::METRIC_TYPE_IP>;
+TEMPLATE_QUANTIZER(PQFastScanQuantizer);
 }  // namespace vsag
