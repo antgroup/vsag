@@ -1492,8 +1492,7 @@ HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
         {
             HGRAPH_REMOVE_FLAG_BIT,
             {HGRAPH_GRAPH_KEY, REMOVE_FLAG_BIT},
-        },
-        {HGRAPH_GET_RAW_VECTOR_COSINE, {HGRAPH_GET_RAW_VECTOR_COSINE}}};
+        }};
     if (common_param.data_type_ == DataTypes::DATA_TYPE_INT8) {
         throw VsagException(ErrorType::INVALID_ARGUMENT,
                             fmt::format("HGraph not support {} datatype", DATATYPE_INT8));
@@ -1502,8 +1501,6 @@ HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
     std::string str = format_map(HGRAPH_PARAMS_TEMPLATE, DEFAULT_MAP);
     auto inner_json = JsonType::parse(str);
     mapping_external_param_to_inner(external_param, external_mapping, inner_json);
-    std::cout << "inner_json: " << inner_json.dump(4) << std::endl;
-    std::cout << "external_param: " << external_param.dump(4) << std::endl;
 
     auto hgraph_parameter = std::make_shared<HGraphParameter>();
     hgraph_parameter->data_type = common_param.data_type_;

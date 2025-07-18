@@ -118,7 +118,8 @@ public:
     [[nodiscard]] bool
     InMemory() const override;
 
-    bool HoldMolds() const override;
+    bool
+    HoldMolds() const override;
 
     bool
     GetCodesById(InnerIdType id, uint8_t* codes) const override;
