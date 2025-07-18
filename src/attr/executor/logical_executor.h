@@ -27,14 +27,14 @@ public:
     void
     Clear() override;
 
-    FilterPtr
-    Run() override;
+    void
+    Init() override;
 
-    FilterPtr
-    RunWithBucket(BucketIdType bucket_id) override;
+    Filter*
+    Run(BucketIdType bucket_id) override;
 
 private:
-    FilterPtr
+    Filter*
     logical_run();
 
 private:

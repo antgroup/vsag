@@ -16,14 +16,15 @@
 #include "attribute_inverted_interface.h"
 
 #include "attribute_bucket_inverted_datacell.h"
-#include "attribute_inverted_datacell.h"
 namespace vsag {
 
 AttrInvertedInterfacePtr
 AttributeInvertedInterface::MakeInstance(Allocator* allocator, bool have_bucket) {
     if (not have_bucket) {
-        return std::make_shared<AttributeInvertedDataCell>(allocator);
+        return std::make_shared<AttributeBucketInvertedDataCell>(
+            allocator, ComputableBitsetType::SparseBitset);
     }
-    return std::make_shared<AttributeBucketInvertedDataCell>(allocator);
+    return std::make_shared<AttributeBucketInvertedDataCell>(allocator,
+                                                             ComputableBitsetType::FastBitset);
 }
 }  // namespace vsag

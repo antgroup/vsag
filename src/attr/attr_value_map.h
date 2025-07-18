@@ -17,7 +17,7 @@
 #include <memory>
 
 #include "impl/allocator/safe_allocator.h"
-#include "impl/bitset/computable_bitset.h"
+#include "multi_bitset_manager.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
 #include "typing.h"
@@ -31,45 +31,24 @@ using ValueMapPtr = std::shared_ptr<AttrValueMap>;
 class AttrValueMap {
 public:
     explicit AttrValueMap(Allocator* allocator,
-                          ComputableBitsetType bitset_type = ComputableBitsetType::SparseBitset)
-        : allocator_(allocator),
-          int64_to_bitset_(allocator),
-          int32_to_bitset_(allocator),
-          int16_to_bitset_(allocator),
-          int8_to_bitset_(allocator),
-          uint64_to_bitset_(allocator),
-          uint32_to_bitset_(allocator),
-          uint16_to_bitset_(allocator),
-          uint8_to_bitset_(allocator),
-          string_to_bitset_(allocator),
-          bitset_type_(bitset_type){};
+                          ComputableBitsetType bitset_type = ComputableBitsetType::FastBitset);
 
-    virtual ~AttrValueMap() {
-        clear_map(this->int16_to_bitset_);
-        clear_map(this->int8_to_bitset_);
-        clear_map(this->uint16_to_bitset_);
-        clear_map(this->uint8_to_bitset_);
-        clear_map(this->string_to_bitset_);
-        clear_map(this->int64_to_bitset_);
-        clear_map(this->int32_to_bitset_);
-        clear_map(this->uint64_to_bitset_);
-        clear_map(this->uint32_to_bitset_);
-    }
+    virtual ~AttrValueMap();
 
     template <class T>
     void
-    Insert(T value, InnerIdType inner_id) {
-        auto& map = GetMapByType<T>();
+    Insert(T value, InnerIdType inner_id, BucketIdType bucket_id = 0) {
+        auto& map = this->get_map_by_type<T>();
         if (map.find(value) == map.end()) {
-            map[value] = ComputableBitset::MakeRawInstance(this->bitset_type_, allocator_);
+            map[value] = new MultiBitsetManager(allocator_, 1, this->bitset_type_);
         }
-        map[value]->Set(inner_id);
+        map[value]->InsertValue(bucket_id, inner_id, true);
     }
 
     template <class T>
-    ComputableBitset*
+    MultiBitsetManager*
     GetBitsetByValue(T value) {
-        auto& map = this->GetMapByType<T>();
+        auto& map = this->get_map_by_type<T>();
         auto iter = map.find(value);
         if (iter == map.end()) {
             return nullptr;
@@ -77,9 +56,16 @@ public:
         return iter->second;
     }
 
+    void
+    Serialize(StreamWriter& writer);
+
+    void
+    Deserialize(StreamReader& reader);
+
+private:
     template <class T>
-    UnorderedMap<T, ComputableBitset*>&
-    GetMapByType() {
+    UnorderedMap<T, MultiBitsetManager*>&
+    get_map_by_type() {
         if constexpr (std::is_same_v<T, int64_t>) {
             return this->int64_to_bitset_;
         } else if constexpr (std::is_same_v<T, int32_t>) {
@@ -101,87 +87,16 @@ public:
         }
     }
 
-    void
-    Serialize(StreamWriter& writer) {
-        serialize_map(writer, int64_to_bitset_);
-        serialize_map(writer, int32_to_bitset_);
-        serialize_map(writer, int16_to_bitset_);
-        serialize_map(writer, int8_to_bitset_);
-        serialize_map(writer, uint64_to_bitset_);
-        serialize_map(writer, uint32_to_bitset_);
-        serialize_map(writer, uint16_to_bitset_);
-        serialize_map(writer, uint8_to_bitset_);
-        StreamWriter::WriteObj(writer, string_to_bitset_.size());
-        for (auto& [key, value] : string_to_bitset_) {
-            StreamWriter::WriteString(writer, key);
-            value->Serialize(writer);
-        }
-    }
-
-    void
-    Deserialize(StreamReader& reader) {
-        deserialize_map(reader, int64_to_bitset_);
-        deserialize_map(reader, int32_to_bitset_);
-        deserialize_map(reader, int16_to_bitset_);
-        deserialize_map(reader, int8_to_bitset_);
-        deserialize_map(reader, uint64_to_bitset_);
-        deserialize_map(reader, uint32_to_bitset_);
-        deserialize_map(reader, uint16_to_bitset_);
-        deserialize_map(reader, uint8_to_bitset_);
-        uint64_t size;
-        StreamReader::ReadObj(reader, size);
-        for (uint64_t i = 0; i < size; ++i) {
-            std::string key;
-            key = StreamReader::ReadString(reader);
-            auto bitset = ComputableBitset::MakeRawInstance(this->bitset_type_, allocator_);
-            bitset->Deserialize(reader);
-            string_to_bitset_[key] = bitset;
-        }
-    }
-
 private:
-    template <class T>
-    void
-    serialize_map(StreamWriter& writer, const UnorderedMap<T, ComputableBitset*>& map) {
-        StreamWriter::WriteObj(writer, map.size());
-        for (auto& [key, value] : map) {
-            StreamWriter::WriteObj(writer, key);
-            value->Serialize(writer);
-        }
-    }
-
-    template <class T>
-    void
-    deserialize_map(StreamReader& reader, UnorderedMap<T, ComputableBitset*>& map) {
-        uint64_t size;
-        StreamReader::ReadObj(reader, size);
-        for (uint64_t i = 0; i < size; ++i) {
-            T key;
-            StreamReader::ReadObj(reader, key);
-            auto bitset = ComputableBitset::MakeRawInstance(this->bitset_type_, allocator_);
-            bitset->Deserialize(reader);
-            map[key] = bitset;
-        }
-    }
-
-    template <class T>
-    void
-    clear_map(const UnorderedMap<T, ComputableBitset*>& map) {
-        for (auto& iter : map) {
-            delete iter.second;
-        }
-    }
-
-private:
-    UnorderedMap<int64_t, ComputableBitset*> int64_to_bitset_;
-    UnorderedMap<int32_t, ComputableBitset*> int32_to_bitset_;
-    UnorderedMap<int16_t, ComputableBitset*> int16_to_bitset_;
-    UnorderedMap<int8_t, ComputableBitset*> int8_to_bitset_;
-    UnorderedMap<uint64_t, ComputableBitset*> uint64_to_bitset_;
-    UnorderedMap<uint32_t, ComputableBitset*> uint32_to_bitset_;
-    UnorderedMap<uint16_t, ComputableBitset*> uint16_to_bitset_;
-    UnorderedMap<uint8_t, ComputableBitset*> uint8_to_bitset_;
-    UnorderedMap<std::string, ComputableBitset*> string_to_bitset_;
+    UnorderedMap<int64_t, MultiBitsetManager*> int64_to_bitset_;
+    UnorderedMap<int32_t, MultiBitsetManager*> int32_to_bitset_;
+    UnorderedMap<int16_t, MultiBitsetManager*> int16_to_bitset_;
+    UnorderedMap<int8_t, MultiBitsetManager*> int8_to_bitset_;
+    UnorderedMap<uint64_t, MultiBitsetManager*> uint64_to_bitset_;
+    UnorderedMap<uint32_t, MultiBitsetManager*> uint32_to_bitset_;
+    UnorderedMap<uint16_t, MultiBitsetManager*> uint16_to_bitset_;
+    UnorderedMap<uint8_t, MultiBitsetManager*> uint8_to_bitset_;
+    UnorderedMap<std::string, MultiBitsetManager*> string_to_bitset_;
 
     Allocator* const allocator_{nullptr};
 

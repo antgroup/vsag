@@ -34,13 +34,16 @@ TestAttributeWithoutBucket(const std::string& name,
     for (auto value : values) {
         auto query = CreateEqString(name, value);
         auto expr = AstParse(query);
-        auto executor = std::make_shared<ComparisonExecutor>(allocator, expr, sparse_attr_index);
+        ExecutorPtr executor =
+            std::make_shared<ComparisonExecutor>(allocator, expr, sparse_attr_index);
+        executor->Init();
         auto filter = executor->Run();
         REQUIRE(filter->CheckValid(index) == true);
 
         query = CreateNqString(name, value);
         expr = AstParse(query);
         executor = std::make_shared<ComparisonExecutor>(allocator, expr, sparse_attr_index);
+        executor->Init();
         filter = executor->Run();
         REQUIRE(filter->CheckValid(index) == false);
 
@@ -50,6 +53,7 @@ TestAttributeWithoutBucket(const std::string& name,
                 query = CreateOtherString(name, value, op);
                 expr = AstParse(query);
                 executor = std::make_shared<ComparisonExecutor>(allocator, expr, sparse_attr_index);
+                executor->Init();
                 REQUIRE_THROWS(executor->Run());
             }
         }
@@ -60,13 +64,15 @@ TestAttributeWithoutBucket(const std::string& name,
             if (sets.count(i) == 0) {
                 auto query = CreateEqString(name, i);
                 auto expr = AstParse(query);
-                auto executor =
+                ExecutorPtr executor =
                     std::make_shared<ComparisonExecutor>(allocator, expr, sparse_attr_index);
+                executor->Init();
                 auto filter = executor->Run();
                 REQUIRE(filter->CheckValid(index) == false);
                 query = CreateNqString(name, i);
                 expr = AstParse(query);
                 executor = std::make_shared<ComparisonExecutor>(allocator, expr, sparse_attr_index);
+                executor->Init();
                 filter = executor->Run();
                 REQUIRE(filter->CheckValid(index) == true);
                 break;
@@ -76,13 +82,15 @@ TestAttributeWithoutBucket(const std::string& name,
             if (sets.count(value_name) == 0) {
                 auto query = CreateEqString(name, value_name);
                 auto expr = AstParse(query);
-                auto executor =
+                ExecutorPtr executor =
                     std::make_shared<ComparisonExecutor>(allocator, expr, sparse_attr_index);
+                executor->Init();
                 auto filter = executor->Run();
                 REQUIRE(filter->CheckValid(index) == false);
                 query = CreateNqString(name, value_name);
                 expr = AstParse(query);
                 executor = std::make_shared<ComparisonExecutor>(allocator, expr, sparse_attr_index);
+                executor->Init();
                 filter = executor->Run();
                 REQUIRE(filter->CheckValid(index) == true);
                 break;
@@ -164,17 +172,20 @@ TestAttributeWithBucket(const std::string& name,
     for (auto value : values) {
         auto query = CreateEqString(name, value);
         auto expr = AstParse(query);
-        auto executor = std::make_shared<ComparisonExecutor>(allocator, expr, sparse_attr_index);
-        auto filter = executor->RunWithBucket(index % 2);
+        ExecutorPtr executor =
+            std::make_shared<ComparisonExecutor>(allocator, expr, sparse_attr_index);
+        executor->Init();
+        auto filter = executor->Run(index % 2);
         REQUIRE(filter->CheckValid(index) == true);
         executor->Clear();
-        auto filter_other_bucket = executor->RunWithBucket((index + 1) % 2);
+        auto filter_other_bucket = executor->Run((index + 1) % 2);
         REQUIRE(filter_other_bucket->CheckValid(index) == false);
 
         query = CreateNqString(name, value);
         expr = AstParse(query);
         executor = std::make_shared<ComparisonExecutor>(allocator, expr, sparse_attr_index);
-        filter = executor->RunWithBucket(index % 2);
+        executor->Init();
+        filter = executor->Run(index % 2);
         REQUIRE(filter->CheckValid(index) == false);
 
         if constexpr (not std::is_same_v<std::string, T>) {
@@ -183,7 +194,8 @@ TestAttributeWithBucket(const std::string& name,
                 query = CreateOtherString(name, value, op);
                 expr = AstParse(query);
                 executor = std::make_shared<ComparisonExecutor>(allocator, expr, sparse_attr_index);
-                REQUIRE_THROWS(executor->RunWithBucket(index % 2));
+                executor->Init();
+                REQUIRE_THROWS(executor->Run(index % 2));
             }
         }
     }
@@ -193,9 +205,10 @@ TestAttributeWithBucket(const std::string& name,
             if (sets.count(i) == 0) {
                 auto query = CreateEqString(name, i);
                 auto expr = AstParse(query);
-                auto executor =
+                ExecutorPtr executor =
                     std::make_shared<ComparisonExecutor>(allocator, expr, sparse_attr_index);
-                auto filter = executor->RunWithBucket(index % 2);
+                executor->Init();
+                auto filter = executor->Run(index % 2);
                 REQUIRE(filter->CheckValid(index) == false);
                 break;
             }
@@ -204,9 +217,10 @@ TestAttributeWithBucket(const std::string& name,
             if (sets.count(value_name) == 0) {
                 auto query = CreateEqString(name, value_name);
                 auto expr = AstParse(query);
-                auto executor =
+                ExecutorPtr executor =
                     std::make_shared<ComparisonExecutor>(allocator, expr, sparse_attr_index);
-                auto filter = executor->RunWithBucket(index % 2);
+                executor->Init();
+                auto filter = executor->Run(index % 2);
                 REQUIRE(filter->CheckValid(index) == false);
                 break;
             }
@@ -224,7 +238,7 @@ TEST_CASE("ComparisonExecutor Normal With Bucket", "[ut][ComparisonExecutor]") {
     }
     int idx = 0;
     for (auto& attr_set : attr_sets) {
-        fast_attr_index->InsertWithBucket(attr_set, idx, idx % 2);
+        fast_attr_index->Insert(attr_set, idx, idx % 2);
         idx++;
     }
 

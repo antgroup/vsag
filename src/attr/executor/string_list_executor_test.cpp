@@ -32,7 +32,8 @@ TestAttributeWithoutBucket(const std::string& name,
     auto none_interact_vec = GetNoneInteractValues(values, name);
     auto query = CreateMultiInString(name, none_interact_vec);
     auto expr = AstParse(query);
-    auto executor = std::make_shared<StringListExecutor>(allocator, expr, sparse_attr_index);
+    ExecutorPtr executor = std::make_shared<StringListExecutor>(allocator, expr, sparse_attr_index);
+    executor->Init();
     auto filter = executor->Run();
     REQUIRE(filter->CheckValid(index) == false);
     REQUIRE(executor->only_bitset_ == true);
@@ -40,6 +41,7 @@ TestAttributeWithoutBucket(const std::string& name,
     query = CreateMultiNotInString(name, none_interact_vec);
     expr = AstParse(query);
     executor = std::make_shared<StringListExecutor>(allocator, expr, sparse_attr_index);
+    executor->Init();
     filter = executor->Run();
     REQUIRE(filter->CheckValid(index) == true);
     REQUIRE(executor->only_bitset_ == false);
@@ -48,6 +50,7 @@ TestAttributeWithoutBucket(const std::string& name,
     query = CreateMultiNotInString(name, interact_vec);
     expr = AstParse(query);
     executor = std::make_shared<StringListExecutor>(allocator, expr, sparse_attr_index);
+    executor->Init();
     filter = executor->Run();
     REQUIRE(filter->CheckValid(index) == false);
     REQUIRE(executor->only_bitset_ == false);
@@ -55,6 +58,7 @@ TestAttributeWithoutBucket(const std::string& name,
     query = CreateMultiInString(name, interact_vec);
     expr = AstParse(query);
     executor = std::make_shared<StringListExecutor>(allocator, expr, sparse_attr_index);
+    executor->Init();
     filter = executor->Run();
     REQUIRE(filter->CheckValid(index) == true);
     REQUIRE(executor->only_bitset_ == true);
@@ -101,24 +105,26 @@ TestAttributeWithBucket(const std::string& name,
     auto none_interact_vec = GetNoneInteractValues(values, name);
     auto query = CreateMultiInString(name, none_interact_vec);
     auto expr = AstParse(query);
-    auto executor = std::make_shared<StringListExecutor>(allocator, expr, sparse_attr_index);
-    auto filter = executor->RunWithBucket(index % 2);
+    ExecutorPtr executor = std::make_shared<StringListExecutor>(allocator, expr, sparse_attr_index);
+    executor->Init();
+    auto filter = executor->Run(index % 2);
     REQUIRE(filter->CheckValid(index) == false);
     REQUIRE(executor->only_bitset_ == true);
     executor->Clear();
-    auto filter_other_bucket = executor->RunWithBucket((index + 1) % 2);
+    auto filter_other_bucket = executor->Run((index + 1) % 2);
     REQUIRE(filter_other_bucket->CheckValid(index) == false);
     REQUIRE(executor->only_bitset_ == true);
 
     query = CreateMultiNotInString(name, none_interact_vec);
     expr = AstParse(query);
     executor = std::make_shared<StringListExecutor>(allocator, expr, sparse_attr_index);
-    filter = executor->RunWithBucket(index % 2);
+    executor->Init();
+    filter = executor->Run(index % 2);
     REQUIRE(filter->CheckValid(index) == true);
 
     REQUIRE(executor->only_bitset_ == true);
     executor->Clear();
-    filter_other_bucket = executor->RunWithBucket((index + 1) % 2);
+    filter_other_bucket = executor->Run((index + 1) % 2);
     REQUIRE(filter_other_bucket->CheckValid(index) == true);
     REQUIRE(executor->only_bitset_ == true);
 
@@ -126,22 +132,24 @@ TestAttributeWithBucket(const std::string& name,
     query = CreateMultiNotInString(name, interact_vec);
     expr = AstParse(query);
     executor = std::make_shared<StringListExecutor>(allocator, expr, sparse_attr_index);
-    filter = executor->RunWithBucket(index % 2);
+    executor->Init();
+    filter = executor->Run(index % 2);
     REQUIRE(filter->CheckValid(index) == false);
     REQUIRE(executor->only_bitset_ == true);
     executor->Clear();
-    filter_other_bucket = executor->RunWithBucket((index + 1) % 2);
+    filter_other_bucket = executor->Run((index + 1) % 2);
     REQUIRE(filter_other_bucket->CheckValid(index) == true);
     REQUIRE(executor->only_bitset_ == true);
 
     query = CreateMultiInString(name, interact_vec);
     expr = AstParse(query);
     executor = std::make_shared<StringListExecutor>(allocator, expr, sparse_attr_index);
-    filter = executor->RunWithBucket(index % 2);
+    executor->Init();
+    filter = executor->Run(index % 2);
     REQUIRE(filter->CheckValid(index) == true);
     REQUIRE(executor->only_bitset_ == true);
     executor->Clear();
-    filter_other_bucket = executor->RunWithBucket((index + 1) % 2);
+    filter_other_bucket = executor->Run((index + 1) % 2);
     REQUIRE(filter_other_bucket->CheckValid(index) == false);
     REQUIRE(executor->only_bitset_ == true);
 }
@@ -156,7 +164,7 @@ TEST_CASE("StringListExecutor Normal With Bucket", "[ut][StringListExecutor]") {
     }
     int idx = 0;
     for (auto& attr_set : attr_sets) {
-        fast_attr_index->InsertWithBucket(attr_set, idx, idx % 2);
+        fast_attr_index->Insert(attr_set, idx, idx % 2);
         idx++;
     }
 
