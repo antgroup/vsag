@@ -27,7 +27,7 @@ ReaderIO::WriteImpl(const uint8_t* data, uint64_t size, uint64_t offset) {
 }
 
 void
-ReaderIO::InitIOImpl(const vsag::IOParamPtr& io_param){
+ReaderIO::InitIOImpl(const vsag::IOParamPtr& io_param) {
     auto reader_param = std::dynamic_pointer_cast<ReaderIOParameter>(io_param);
     if (not reader_param) {
         throw VsagException(ErrorType::INTERNAL_ERROR,
