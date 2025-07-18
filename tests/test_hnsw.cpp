@@ -604,3 +604,25 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex,
         vsag::Options::Instance().set_block_size_limit(origin_size);
     }
 }
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex,
+                             "HNSW Set Immutable",
+                             "[ft][hnsw][immutable]") {
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    auto size = GENERATE(1024 * 1024 * 2);
+    auto metric_type = "l2";
+    const std::string name = "hnsw";
+    auto dim = 128;
+    auto search_param = fmt::format(search_param_tmp, 100);
+    vsag::Options::Instance().set_block_size_limit(size);
+    auto param = GenerateHNSWBuildParametersString(metric_type, dim);
+    auto index = TestFactory(name, param, true);
+    auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
+    index->SetImmutable();
+    TestDuplicateAdd(index, dataset);
+    TestKnnSearch(index, dataset, search_param, 0.99, true);
+    TestConcurrentKnnSearch(index, dataset, search_param, 0.99, true);
+    TestRangeSearch(index, dataset, search_param, 0.99, 10, true);
+    TestRangeSearch(index, dataset, search_param, 0.49, 5, true);
+    TestFilterSearch(index, dataset, search_param, 0.99, true);
+}

@@ -31,8 +31,7 @@ TEST_CASE("immutable index test", "[ut][index_impl]") {
         {
             "base_quantization_type": "fp32",
             "max_degree": 16,
-            "ef_construction": 100,
-            "immutable": true
+            "ef_construction": 100
         }
     )";
 
@@ -46,6 +45,7 @@ TEST_CASE("immutable index test", "[ut][index_impl]") {
     std::vector<vsag::MergeUnit> merge_units;
     std::stringstream ss;
 
+    index->SetImmutable();
     auto result_build = index->Build(dataset);
     REQUIRE_FALSE(result_build.has_value());
     REQUIRE(result_build.error().type == vsag::ErrorType::UNSUPPORTED_INDEX_OPERATION);
