@@ -18,6 +18,7 @@
 #include <fmt/format.h>
 
 #include "inner_string_params.h"
+#include "logger.h"
 #include "vsag/constants.h"
 namespace vsag {
 
@@ -41,7 +42,7 @@ GraphDataCellParameter::FromJson(const JsonType& json) {
 }
 
 JsonType
-GraphDataCellParameter::ToJson() {
+GraphDataCellParameter::ToJson() const {
     JsonType json;
     json[IO_PARAMS_KEY] = this->io_parameter_->ToJson();
     json[GRAPH_PARAM_MAX_DEGREE] = this->max_degree_;
@@ -49,6 +50,37 @@ GraphDataCellParameter::ToJson() {
     json[GRAPH_SUPPORT_REMOVE] = this->support_remove_;
     json[REMOVE_FLAG_BIT] = this->remove_flag_bit_;
     return json;
+}
+bool
+GraphDataCellParameter::CheckCompatibility(const ParamPtr& other) const {
+    auto graph_param = std::dynamic_pointer_cast<GraphDataCellParameter>(other);
+    if (not graph_param) {
+        logger::error(
+            "GraphDataCellParameter::CheckCompatibility: other parameter is not a "
+            "GraphDataCellParameter");
+        return false;
+    }
+    if (max_degree_ != graph_param->max_degree_) {
+        logger::error("GraphDataCellParameter::CheckCompatibility: max_degree_ mismatch: {} vs {}",
+                      max_degree_,
+                      graph_param->max_degree_);
+        return false;
+    }
+    if (support_remove_ != graph_param->support_remove_) {
+        logger::error(
+            "GraphDataCellParameter::CheckCompatibility: support_remove_ mismatch: {} vs {}",
+            support_remove_,
+            graph_param->support_remove_);
+        return false;
+    }
+    if (remove_flag_bit_ != graph_param->remove_flag_bit_) {
+        logger::error(
+            "GraphDataCellParameter::CheckCompatibility: remove_flag_bit_ mismatch: {} vs {}",
+            remove_flag_bit_,
+            graph_param->remove_flag_bit_);
+        return false;
+    }
+    return true;
 }
 
 }  // namespace vsag

@@ -22,7 +22,6 @@
 #include <stdexcept>
 
 #include "common.h"
-#include "data_cell/graph_datacell_parameter.h"
 #include "data_cell/sparse_graph_datacell.h"
 #include "dataset_impl.h"
 #include "impl/heap/standard_heap.h"
@@ -31,7 +30,6 @@
 #include "impl/reorder.h"
 #include "index/index_impl.h"
 #include "index/iterator_filter.h"
-#include "logger.h"
 #include "storage/serialization.h"
 #include "storage/stream_reader.h"
 #include "typing.h"
@@ -721,6 +719,7 @@ HGraph::serialize_basic_info() const {
     TO_JSON_BASE64(jsonify_basic_info, mult);
     TO_JSON_ATOMIC(jsonify_basic_info, max_capacity);
     jsonify_basic_info["max_level"] = this->route_graphs_.size();
+    jsonify_basic_info[INDEX_PARAM] = this->create_param_ptr_->ToString();
 
     return jsonify_basic_info;
 }
@@ -746,6 +745,18 @@ HGraph::deserialize_basic_info(JsonType jsonify_basic_info) {
     uint64_t max_level = jsonify_basic_info["max_level"];
     for (uint64_t i = 0; i < max_level; ++i) {
         this->route_graphs_.emplace_back(this->generate_one_route_graph());
+    }
+    if (jsonify_basic_info.contains(INDEX_PARAM)) {
+        std::string index_param_string = jsonify_basic_info[INDEX_PARAM];
+        HGraphParameterPtr index_param = std::make_shared<HGraphParameter>();
+        index_param->FromString(index_param_string);
+        if (not this->create_param_ptr_->CheckCompatibility(index_param)) {
+            auto message = fmt::format("HGraph index parameter not match, current: {}, new: {}",
+                                       this->create_param_ptr_->ToString(),
+                                       index_param->ToString());
+            logger::error(message);
+            throw VsagException(ErrorType::INVALID_ARGUMENT, message);
+        }
     }
 }
 

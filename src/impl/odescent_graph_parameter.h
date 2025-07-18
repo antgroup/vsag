@@ -27,7 +27,7 @@ public:
     FromJson(const JsonType& json) override;
 
     JsonType
-    ToJson() override;
+    ToJson() const override;
 
 public:
     int64_t turn{30};

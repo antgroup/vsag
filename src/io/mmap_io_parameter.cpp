@@ -33,7 +33,7 @@ MMapIOParameter::FromJson(const JsonType& json) {
 }
 
 JsonType
-MMapIOParameter::ToJson() {
+MMapIOParameter::ToJson() const {
     JsonType json;
     json[IO_TYPE_KEY] = IO_TYPE_VALUE_MMAP_IO;
     json[IO_FILE_PATH] = this->path_;

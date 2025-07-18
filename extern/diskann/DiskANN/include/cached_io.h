@@ -7,7 +7,7 @@
 #include <iostream>
 #include <sstream>
 
-#include "logger.h"
+#include "diskann_logger.h"
 #include "ann_exception.h"
 
 // sequential cached reads

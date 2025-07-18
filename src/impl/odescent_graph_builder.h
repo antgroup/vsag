@@ -24,9 +24,11 @@
 #include "data_cell/flatten_datacell.h"
 #include "data_cell/graph_datacell.h"
 #include "data_cell/sparse_graph_datacell.h"
+#include "diskann_logger.h"
 #include "impl/allocator/safe_allocator.h"
 #include "impl/odescent_graph_parameter.h"
 #include "logger.h"
+#include "simd/simd.h"
 #include "utils.h"
 #include "vsag/dataset.h"
 

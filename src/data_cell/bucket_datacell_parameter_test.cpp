@@ -104,3 +104,21 @@ TEST_CASE("BucketDataCellParameter Parse Exception", "[ut][BucketDataCellParamet
         auto param = check_param(param_str);
     }
 }
+
+TEST_CASE("bucket CheckCompatibility", "[ut][BucketDataCellParameter]") {
+    std::string param_str = R"(
+    {
+        "io_params": {
+            "type": "memory_io"
+        },
+        "quantization_params": {
+            "type": "sq8"
+        },
+        "buckets_count": 10
+    })";
+    auto param = std::make_shared<BucketDataCellParameter>();
+    param->FromString(param_str);
+    REQUIRE(param->CheckCompatibility(param));
+    auto other_type_param = std::make_shared<vsag::EmptyParameter>();
+    REQUIRE_FALSE(param->CheckCompatibility(other_type_param));
+}

@@ -7,7 +7,7 @@
 #include "gperftools/malloc_extension.h"
 #endif
 
-#include "logger.h"
+#include "diskann_logger.h"
 #include "disk_utils.h"
 #include "cached_io.h"
 #include "index.h"

@@ -24,7 +24,7 @@
 
 #include "distance.h"
 #include "utils.h"
-#include "logger.h"
+#include "diskann_logger.h"
 #include "ann_exception.h"
 
 namespace vsag

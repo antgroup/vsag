@@ -15,7 +15,7 @@
 
 #include "iterator_filter.h"
 
-#include "../logger.h"
+#include "logger.h"
 
 namespace vsag {
 

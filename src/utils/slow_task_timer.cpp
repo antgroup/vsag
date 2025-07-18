@@ -15,7 +15,7 @@
 
 #include "slow_task_timer.h"
 
-#include "../logger.h"
+#include "logger.h"
 
 namespace vsag {
 SlowTaskTimer::SlowTaskTimer(std::string n, int64_t log_threshold_ms)

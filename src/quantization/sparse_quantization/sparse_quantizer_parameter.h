@@ -31,7 +31,7 @@ public:
     }
 
     JsonType
-    ToJson() override {
+    ToJson() const override {
         JsonType json;
         json[QUANTIZATION_TYPE_KEY] = this->GetTypeName();
         return json;

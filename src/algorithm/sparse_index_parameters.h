@@ -26,7 +26,7 @@ public:
     FromJson(const JsonType& json) override;
 
     JsonType
-    ToJson() override;
+    ToJson() const override;
 
     SparseIndexParameters() = default;
 
