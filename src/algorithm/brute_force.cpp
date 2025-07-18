@@ -262,7 +262,7 @@ BruteForce::InitFeatures() {
                                                 IndexFeature::SUPPORT_RANGE_SEARCH_WITH_ID_FILTER});
     }
     if (name == QUANTIZATION_TYPE_VALUE_FP32 and metric_ != MetricType::METRIC_TYPE_COSINE) {
-        this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_GET_VECTOR_BY_IDS);
+        this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_GET_RAW_VECTOR_BY_IDS);
     }
 
     // add & build
@@ -317,21 +317,20 @@ static const std::string BRUTE_FORCE_PARAMS_TEMPLATE =
 ParamPtr
 BruteForce::CheckAndMappingExternalParam(const JsonType& external_param,
                                          const IndexCommonParam& common_param) {
-    const std::unordered_map<std::string, std::vector<std::string>> external_mapping = {
-        {
-            BRUTE_FORCE_QUANTIZATION_TYPE,
-            {
-                QUANTIZATION_PARAMS_KEY,
-                QUANTIZATION_TYPE_KEY,
-            },
-        },
-        {
-            BRUTE_FORCE_IO_TYPE,
-            {
-                IO_PARAMS_KEY,
-                IO_TYPE_KEY,
-            },
-        }};
+    const ConstParamMap external_mapping = {{
+                                                BRUTE_FORCE_QUANTIZATION_TYPE,
+                                                {
+                                                    QUANTIZATION_PARAMS_KEY,
+                                                    QUANTIZATION_TYPE_KEY,
+                                                },
+                                            },
+                                            {
+                                                BRUTE_FORCE_IO_TYPE,
+                                                {
+                                                    IO_PARAMS_KEY,
+                                                    IO_TYPE_KEY,
+                                                },
+                                            }};
 
     if (common_param.data_type_ == DataTypes::DATA_TYPE_INT8) {
         throw VsagException(ErrorType::INVALID_ARGUMENT,
