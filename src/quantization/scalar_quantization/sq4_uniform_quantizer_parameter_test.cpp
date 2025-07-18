@@ -31,4 +31,6 @@ TEST_CASE("SQ4 Uniform Quantizer Parameter ToJson Test", "[ut][SQ4UniformQuantiz
     param->FromJson(JsonType::parse(param_str));
     REQUIRE(std::abs(param->trunc_rate_ - 0.06) < 1e-5F);
     ParameterTest::TestToJson(param);
+
+    TestParamCheckCompatibility<SQ4UniformQuantizerParameter>(param_str);
 }

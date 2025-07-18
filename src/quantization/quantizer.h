@@ -271,4 +271,8 @@ private:
                                  std::declval<float&>())
 };
 
+#define TEMPLATE_QUANTIZER(Name)                        \
+    template class Name<MetricType::METRIC_TYPE_L2SQR>; \
+    template class Name<MetricType::METRIC_TYPE_IP>;    \
+    template class Name<MetricType::METRIC_TYPE_COSINE>;
 }  // namespace vsag
