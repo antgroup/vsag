@@ -1690,13 +1690,114 @@ TestIndex::TestRemoveIndex(const TestIndex::IndexPtr& index,
         REQUIRE(index->GetNumElements() == dataset->base_->GetNumElements());
     }
 }
-void
-TestIndex::TestBuildWithAttr(const IndexPtr& index, const TestDatasetPtr& dataset) {
-    if (not index->CheckFeature(vsag::SUPPORT_BUILD)) {
-        return;
+
+template <class T>
+std::string
+create_attr_string(const std::string& name, const std::vector<T>& values) {
+    if (values.size() == 1) {
+        std::stringstream ss;
+        if constexpr (std::is_same_v<T, std::string>) {
+            ss << name << " = \"" << values[0] << "\"";
+        } else {
+            ss << name << " = " << std::to_string(values[0]);
+        }
+        return ss.str();
     }
-    auto build_result = index->Build(dataset->base_);
-    REQUIRE(build_result.has_value());
+    std::ostringstream oss;
+    for (size_t i = 0; i < values.size(); ++i) {
+        if (i != 0) {
+            oss << "|";
+        }
+        if constexpr (std::is_same_v<T, std::string>) {
+            oss << values[i];
+        } else {
+            oss << std::to_string(values[i]);
+        }
+    }
+    return "multi_in(" + name + ", \"" + oss.str() + "\", \"|\")";
+}
+
+std::string
+trans_attr_to_string(const vsag::Attribute& attr) {
+    using namespace vsag;
+    auto name = attr.name_;
+    auto type = attr.GetValueType();
+    if (type == AttrValueType::STRING) {
+        const auto temp = dynamic_cast<const AttributeValue<std::string>*>(&attr);
+        auto values = temp->GetValue();
+        return create_attr_string(name, values);
+    } else if (type == AttrValueType::UINT8) {
+        const auto temp = dynamic_cast<const AttributeValue<uint8_t>*>(&attr);
+        auto values = temp->GetValue();
+        return create_attr_string(name, values);
+    } else if (type == AttrValueType::UINT16) {
+        const auto temp = dynamic_cast<const AttributeValue<uint16_t>*>(&attr);
+        auto values = temp->GetValue();
+        return create_attr_string(name, values);
+    } else if (type == AttrValueType::UINT32) {
+        const auto temp = dynamic_cast<const AttributeValue<uint32_t>*>(&attr);
+        auto values = temp->GetValue();
+        return create_attr_string(name, values);
+    } else if (type == AttrValueType::UINT64) {
+        const auto temp = dynamic_cast<const AttributeValue<uint64_t>*>(&attr);
+        auto values = temp->GetValue();
+        return create_attr_string(name, values);
+    } else if (type == AttrValueType::INT8) {
+        const auto temp = dynamic_cast<const AttributeValue<int8_t>*>(&attr);
+        auto values = temp->GetValue();
+        return create_attr_string(name, values);
+    } else if (type == AttrValueType::INT16) {
+        const auto temp = dynamic_cast<const AttributeValue<int16_t>*>(&attr);
+        auto values = temp->GetValue();
+        return create_attr_string(name, values);
+    } else if (type == AttrValueType::INT32) {
+        const auto temp = dynamic_cast<const AttributeValue<int32_t>*>(&attr);
+        auto values = temp->GetValue();
+        return create_attr_string(name, values);
+    } else if (type == AttrValueType::INT64) {
+        const auto temp = dynamic_cast<const AttributeValue<int64_t>*>(&attr);
+        auto values = temp->GetValue();
+        return create_attr_string(name, values);
+    }
+    return "";
+}
+
+void
+TestIndex::TestWithAttr(const IndexPtr& index,
+                        const TestDatasetPtr& dataset,
+                        const std::string& search_param) {
+    auto attrsets = dataset->base_->GetAttributeSets();
+    auto* query_vec = dataset->base_->GetFloat32Vectors();
+    auto base_count = dataset->base_->GetNumElements();
+    auto dim = dataset->base_->GetDim();
+    std::vector<vsag::SearchRequest> reqs(base_count);
+    for (int i = 0; i < base_count; ++i) {
+        auto query = vsag::Dataset::Make();
+        query->Float32Vectors(query_vec + i * dim)->Dim(dim)->Owner(false)->NumElements(1);
+        auto attrset = attrsets[i].attrs_;
+        int j = random() % attrset.size();
+        auto attr = attrset[j];
+        int j2 = random() % attrset.size();
+        INFO(std::to_string(i));
+        vsag::SearchRequest& req = reqs[i];
+        req.topk_ = 10;
+        req.filter_ = nullptr;
+        req.params_str_ = search_param;
+        req.enable_attribute_filter_ = true;
+        req.query_ = query;
+        req.attribute_filter_str_ = "(" + trans_attr_to_string(*attrset[j2]) + ") AND (" +
+                                    trans_attr_to_string(*attr) + ")";
+    }
+
+    for (int i = 0; i < base_count; ++i) {
+        auto the_id = dataset->base_->GetIds()[i];
+        auto result = index->SearchWithRequest(reqs[i]);
+        REQUIRE(result.has_value());
+        auto ids = result.value()->GetIds();
+        auto result_count = result.value()->GetNumElements();
+        std::unordered_set<int64_t> sets(ids, ids + result_count);
+        REQUIRE(sets.find(the_id) != sets.end());
+    }
 }
 void
 TestIndex::TestGetRawVectorByIds(const IndexPtr& index,
