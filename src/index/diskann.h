@@ -40,9 +40,9 @@
 #include <string>
 
 #include "common.h"
+#include "diskann_logger.h"
 #include "diskann_zparameters.h"
 #include "index_feature_list.h"
-#include "logger.h"
 #include "typing.h"
 #include "utils/window_result_queue.h"
 #include "vsag/index.h"

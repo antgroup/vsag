@@ -17,10 +17,8 @@
 
 #include <fmt/format.h>
 
-#include <iostream>
-
 #include "inner_string_params.h"
-#include "vsag/constants.h"
+#include "logger.h"
 
 namespace vsag {
 
@@ -41,10 +39,37 @@ GNOIMIParameter::FromJson(const JsonType& json) {
 }
 
 JsonType
-GNOIMIParameter::ToJson() {
+GNOIMIParameter::ToJson() const {
     JsonType json;
     json[GNO_IMI_FIRST_ORDER_BUCKETS_COUNT_KEY] = this->first_order_buckets_count;
     json[GNO_IMI_SECOND_ORDER_BUCKETS_COUNT_KEY] = this->second_order_buckets_count;
     return json;
+}
+bool
+GNOIMIParameter::CheckCompatibility(const ParamPtr& other) const {
+    auto gno_imi_param = std::dynamic_pointer_cast<GNOIMIParameter>(other);
+    if (!gno_imi_param) {
+        logger::error(
+            "GNOIMIParameter::CheckCompatibility: "
+            "other parameter is not GNOIMIParameter");
+        return false;
+    }
+    if (this->first_order_buckets_count != gno_imi_param->first_order_buckets_count) {
+        logger::error(
+            "GNOIMIParameter::CheckCompatibility: "
+            "first_order_buckets_count mismatch: {} != {}",
+            this->first_order_buckets_count,
+            gno_imi_param->first_order_buckets_count);
+        return false;
+    }
+    if (this->second_order_buckets_count != gno_imi_param->second_order_buckets_count) {
+        logger::error(
+            "GNOIMIParameter::CheckCompatibility: "
+            "second_order_buckets_count mismatch: {} != {}",
+            this->second_order_buckets_count,
+            gno_imi_param->second_order_buckets_count);
+        return false;
+    }
+    return true;
 }
 }  // namespace vsag

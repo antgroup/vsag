@@ -140,7 +140,7 @@ HGraphParameter::FromJson(const JsonType& json) {
 }
 
 JsonType
-HGraphParameter::ToJson() {
+HGraphParameter::ToJson() const {
     JsonType json;
     json["type"] = INDEX_TYPE_HGRAPH;
 
@@ -156,6 +156,43 @@ HGraphParameter::ToJson() {
     json[BUILD_PARAMS_KEY][BUILD_THREAD_COUNT] = this->build_thread_count;
     json[HGRAPH_EXTRA_INFO_KEY] = this->extra_info_param->ToJson();
     return json;
+}
+
+bool
+HGraphParameter::CheckCompatibility(const ParamPtr& other) const {
+    auto hgraph_param = std::dynamic_pointer_cast<HGraphParameter>(other);
+    if (hgraph_param == nullptr) {
+        logger::error("HGraphParameter::CheckCompatibility: other is not HGraphParameter");
+        return false;
+    }
+    auto have_reorder = this->use_reorder && not this->ignore_reorder;
+    auto have_reorder_other = hgraph_param->use_reorder && not hgraph_param->ignore_reorder;
+    if (have_reorder != have_reorder_other) {
+        logger::error(
+            "HGraphParameter::CheckCompatibility: use_reorder and ignore_reorder must be the same");
+        return false;
+    }
+    if (not this->base_codes_param->CheckCompatibility(hgraph_param->base_codes_param)) {
+        logger::error("HGraphParameter::CheckCompatibility: base_codes_param is not compatible");
+        return false;
+    }
+    if (have_reorder) {
+        if (not this->precise_codes_param ||
+            not this->precise_codes_param->CheckCompatibility(hgraph_param->precise_codes_param)) {
+            logger::error(
+                "HGraphParameter::CheckCompatibility: precise_codes_param is not compatible");
+            return false;
+        }
+    }
+    if (not this->bottom_graph_param->CheckCompatibility(hgraph_param->bottom_graph_param)) {
+        logger::error("HGraphParameter::CheckCompatibility: bottom_graph_param is not compatible");
+        return false;
+    }
+    if (use_attribute_filter != hgraph_param->use_attribute_filter) {
+        logger::error("HGraphParameter::CheckCompatibility: use_attribute_filter must be the same");
+        return false;
+    }
+    return true;
 }
 
 HGraphSearchParameters

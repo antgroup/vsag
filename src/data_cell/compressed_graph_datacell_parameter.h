@@ -33,7 +33,7 @@ public:
     }
 
     JsonType
-    ToJson() override {
+    ToJson() const override {
         JsonType json;
         json[GRAPH_PARAM_MAX_DEGREE] = this->max_degree_;
         json[GRAPH_STORAGE_TYPE_KEY] = GRAPH_STORAGE_TYPE_COMPRESSED;

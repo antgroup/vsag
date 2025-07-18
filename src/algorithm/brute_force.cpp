@@ -205,6 +205,7 @@ BruteForce::Serialize(StreamWriter& writer) const {
     JsonType basic_info;
     basic_info["dim"] = dim_;
     basic_info["total_count"] = total_count_;
+    basic_info[INDEX_PARAM] = this->create_param_ptr_->ToString();
     metadata->Set("basic_info", basic_info);
     auto footer = std::make_shared<Footer>(metadata);
     footer->Write(writer);
@@ -225,6 +226,19 @@ BruteForce::Deserialize(StreamReader& reader) {
 
         auto metadata = footer->GetMetadata();
         auto basic_info = metadata->Get("basic_info");
+        if (basic_info.contains(INDEX_PARAM)) {
+            std::string index_param_string = basic_info[INDEX_PARAM];
+            BruteForceParameterPtr index_param = std::make_shared<BruteForceParameter>();
+            index_param->FromString(index_param_string);
+            if (not this->create_param_ptr_->CheckCompatibility(index_param)) {
+                auto message =
+                    fmt::format("BruteForce index parameter not match, current: {}, new: {}",
+                                this->create_param_ptr_->ToString(),
+                                index_param->ToString());
+                logger::error(message);
+                throw VsagException(ErrorType::INVALID_ARGUMENT, message);
+            }
+        }
         dim_ = basic_info["dim"];
         total_count_ = basic_info["total_count"];
 

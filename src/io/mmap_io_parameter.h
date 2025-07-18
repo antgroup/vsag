@@ -30,7 +30,7 @@ public:
     FromJson(const JsonType& json) override;
 
     JsonType
-    ToJson() override;
+    ToJson() const override;
 
 public:
     std::string path_{};

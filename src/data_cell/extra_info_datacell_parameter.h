@@ -27,7 +27,10 @@ public:
     FromJson(const JsonType& json) override;
 
     JsonType
-    ToJson() override;
+    ToJson() const override;
+
+    bool
+    CheckCompatibility(const ParamPtr& other) const override;
 
 public:
     IOParamPtr io_parameter{nullptr};

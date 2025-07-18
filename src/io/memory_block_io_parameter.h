@@ -28,7 +28,7 @@ public:
     FromJson(const JsonType& json) override;
 
     JsonType
-    ToJson() override;
+    ToJson() const override;
 
     static uint64_t
     NearestPowerOfTwo(uint64_t value);

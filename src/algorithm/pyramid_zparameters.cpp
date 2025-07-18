@@ -18,6 +18,7 @@
 #include "common.h"
 #include "index/diskann_zparameters.h"
 #include "io/memory_io_parameter.h"
+#include "logger.h"
 #include "quantization/fp32_quantizer_parameter.h"
 
 // NOLINTBEGIN(readability-simplify-boolean-expr)
@@ -59,13 +60,43 @@ PyramidParameters::FromJson(const JsonType& json) {
     }
 }
 JsonType
-PyramidParameters::ToJson() {
+PyramidParameters::ToJson() const {
     JsonType json;
     json[GRAPH_TYPE_ODESCENT] = graph_param->ToJson();
     json[GRAPH_TYPE_ODESCENT].update(odescent_param->ToJson());
     json[PYRAMID_PARAMETER_BASE_CODES] = flatten_data_cell_param->ToJson();
     json[NO_BUILD_LEVELS] = no_build_levels;
     return json;
+}
+
+bool
+PyramidParameters::CheckCompatibility(const ParamPtr& other) const {
+    auto pyramid_param = std::dynamic_pointer_cast<PyramidParameters>(other);
+    if (not pyramid_param) {
+        logger::error(
+            "PyramidParameters::CheckCompatibility: other parameter is not PyramidParameters");
+        return false;
+    }
+    if (not graph_param->CheckCompatibility(pyramid_param->graph_param)) {
+        logger::error("PyramidParameters::CheckCompatibility: graph parameters are not compatible");
+        return false;
+    }
+
+    if (not flatten_data_cell_param->CheckCompatibility(pyramid_param->flatten_data_cell_param)) {
+        logger::error(
+            "PyramidParameters::CheckCompatibility: flatten data cell parameters are not "
+            "compatible");
+        return false;
+    }
+    if (no_build_levels.size() != pyramid_param->no_build_levels.size() ||
+        not std::is_permutation(no_build_levels.begin(),
+                                no_build_levels.end(),
+                                pyramid_param->no_build_levels.begin())) {
+        logger::error("PyramidParameters::CheckCompatibility: no_build_levels are not compatible");
+        return false;
+    }
+
+    return true;
 }
 
 PyramidSearchParameters

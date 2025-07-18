@@ -26,7 +26,6 @@
 #include "index_feature_list.h"
 #include "inner_index_interface.h"
 #include "io/memory_io_parameter.h"
-#include "logger.h"
 #include "pyramid_zparameters.h"
 #include "quantization/fp32_quantizer_parameter.h"
 

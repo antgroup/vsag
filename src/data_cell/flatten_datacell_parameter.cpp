@@ -18,6 +18,7 @@
 #include <fmt/format.h>
 
 #include "inner_string_params.h"
+#include "logger.h"
 
 namespace vsag {
 FlattenDataCellParameter::FlattenDataCellParameter()
@@ -39,10 +40,21 @@ FlattenDataCellParameter::FromJson(const JsonType& json) {
 }
 
 JsonType
-FlattenDataCellParameter::ToJson() {
+FlattenDataCellParameter::ToJson() const {
     JsonType json;
     json[IO_PARAMS_KEY] = this->io_parameter->ToJson();
     json[QUANTIZATION_PARAMS_KEY] = this->quantizer_parameter->ToJson();
     return json;
+}
+bool
+FlattenDataCellParameter::CheckCompatibility(const ParamPtr& other) const {
+    auto flatten_other = std::dynamic_pointer_cast<FlattenDataCellParameter>(other);
+    if (not flatten_other) {
+        logger::error(
+            "FlattenDataCellParameter::CheckCompatibility: "
+            "other parameter is not FlattenDataCellParameter");
+        return false;
+    }
+    return this->quantizer_parameter->CheckCompatibility(flatten_other->quantizer_parameter);
 }
 }  // namespace vsag
