@@ -24,6 +24,7 @@
 #include "logger.h"
 #include "quantization/quantizer_test.h"
 #include "quantization/scalar_quantization/sq4_uniform_quantizer.h"
+#include "utils/util_functions.h"
 
 using namespace vsag;
 
@@ -242,7 +243,7 @@ TEST_CASE("RaBitQ Query SQ4 Transform", "[ut][RaBitQuantizer]") {
     std::vector<uint8_t> sq_data(4 + 4 + 4, 0);
 
     // test sq
-    SQ4UniformQuantizer<MetricType::METRIC_TYPE_IP> sq4_quantizer(dim, allocator.get(), 0.0f);
+    SQ4UniformQuantizer<MetricType::METRIC_TYPE_IP> sq4_quantizer(dim, allocator.get(), 0.0F);
     sq4_quantizer.Train(original_data.data(), 1);
     sq4_quantizer.EncodeOneImpl(original_data.data(), sq_data.data());
     auto is_consistent = std::memcmp(sq_data.data(), input.data(), input.size());
@@ -298,7 +299,7 @@ TEST_CASE("RaBitQ Query SQ4 Transform dim=15", "[ut][RaBitQuantizer]") {
     std::vector<uint8_t> sq_data(dim + 4 + 4, 0);
 
     // test sq
-    SQ4UniformQuantizer<MetricType::METRIC_TYPE_IP> sq4_quantizer(dim, allocator.get(), 0.0f);
+    SQ4UniformQuantizer<MetricType::METRIC_TYPE_IP> sq4_quantizer(dim, allocator.get(), 0.0F);
     sq4_quantizer.Train(original_data.data(), 1);
     sq4_quantizer.EncodeOneImpl(original_data.data(), sq_data.data());
 

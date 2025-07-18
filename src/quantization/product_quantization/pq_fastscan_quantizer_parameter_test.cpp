@@ -31,4 +31,6 @@ TEST_CASE("PQFS Parameter ToJson Test", "[ut][PQFastScanQuantizerParameter]") {
     param->FromJson(JsonType::parse(param_str));
     ParameterTest::TestToJson(param);
     REQUIRE(param->pq_dim_ == 64);
+
+    TestParamCheckCompatibility<PQFastScanQuantizerParameter>(param_str);
 }
