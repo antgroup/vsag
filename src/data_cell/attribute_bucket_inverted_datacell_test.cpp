@@ -38,32 +38,29 @@ TEST_CASE("AttributeBucketInvertedDataCell insert single attribute",
 
     BucketIdType bucket_id = 29;
 
-    cell.InsertWithBucket(attrSet, inner_id, bucket_id);
+    cell.Insert(attrSet, inner_id, bucket_id);
 
-    auto bitsets = cell.GetBitsetsByAttrAndBucketId(*attr, bucket_id);
-    REQUIRE(bitsets.size() == 1);
-    REQUIRE(bitsets[0]->Test(inner_id) == true);
-    REQUIRE(bitsets[0]->Test(inner_id + 1) == false);
-
-    // invalid bucket id
-    bitsets = cell.GetBitsetsByAttrAndBucketId(*attr, bucket_id + 1);
-    REQUIRE(bitsets.size() == 1);
-    REQUIRE(bitsets[0] == nullptr);
+    auto managers = cell.GetBitsetsByAttr(*attr);
+    REQUIRE(managers.size() == 1);
+    REQUIRE(managers[0]->GetOneBitset(bucket_id)->Test(inner_id) == true);
+    REQUIRE(managers[0]->GetOneBitset(bucket_id + 1) == nullptr);
+    REQUIRE(managers[0]->GetOneBitset(bucket_id - 1) == nullptr);
+    REQUIRE(managers[0]->GetOneBitset(bucket_id)->Test(inner_id + 1) == false);
 
     // invalid attr name
     AttributeValue<int32_t> attr2;
     attr2.name_ = "age2";
     attr2.GetValue().emplace_back(30);
-    bitsets = cell.GetBitsetsByAttrAndBucketId(attr2, bucket_id);
-    REQUIRE(bitsets.size() == 1);
-    REQUIRE(bitsets[0] == nullptr);
+    managers = cell.GetBitsetsByAttr(attr2);
+    REQUIRE(managers.size() == 1);
+    REQUIRE(managers[0] == nullptr);
 
     // invalid value
     attr->GetValue().emplace_back(47);
-    bitsets = cell.GetBitsetsByAttrAndBucketId(*attr, bucket_id);
-    REQUIRE(bitsets.size() == 2);
-    REQUIRE(bitsets[0]->Test(inner_id) == true);
-    REQUIRE(bitsets[1] == nullptr);
+    managers = cell.GetBitsetsByAttr(*attr);
+    REQUIRE(managers.size() == 2);
+    REQUIRE(managers[0]->GetOneBitset(bucket_id)->Test(inner_id) == true);
+    REQUIRE(managers[1] == nullptr);
 
     delete attr;
 }
@@ -71,7 +68,6 @@ TEST_CASE("AttributeBucketInvertedDataCell insert single attribute",
 TEST_CASE("AttributeBucketInvertedDataCell insert multiple values",
           "[ut][AttributeBucketInvertedDataCell]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
-
     AttributeBucketInvertedDataCell cell(allocator.get());
 
     AttributeValue<int32_t>* attr = new AttributeValue<int32_t>();
@@ -83,12 +79,12 @@ TEST_CASE("AttributeBucketInvertedDataCell insert multiple values",
 
     InnerIdType inner_id = 5;
     BucketIdType bucket_id = 11;
-    cell.InsertWithBucket(attrSet, inner_id, bucket_id);
+    cell.Insert(attrSet, inner_id, bucket_id);
 
-    auto bitsets = cell.GetBitsetsByAttrAndBucketId(*attr, bucket_id);
-    REQUIRE(bitsets.size() == 3);
-    for (auto& bs : bitsets) {
-        REQUIRE(bs->Test(inner_id) == true);
+    auto managers = cell.GetBitsetsByAttr(*attr);
+    REQUIRE(managers.size() == 3);
+    for (auto& ms : managers) {
+        REQUIRE(ms->GetOneBitset(bucket_id)->Test(inner_id) == true);
     }
 
     delete attr;
@@ -118,14 +114,14 @@ TEST_CASE("AttributeBucketInvertedDataCell insert various types",
 
     InnerIdType inner_id = 99;
     BucketIdType bucket_id = 53;
-    cell.InsertWithBucket(attrSet, inner_id, bucket_id);
+    cell.Insert(attrSet, inner_id, bucket_id);
     REQUIRE(cell.GetTypeOfField("str") == AttrValueType::STRING);
 
     for (auto* attr : attrSet.attrs_) {
-        auto bitsets = cell.GetBitsetsByAttrAndBucketId(*attr, bucket_id);
-        REQUIRE(bitsets.size() == 1);
-        REQUIRE(bitsets[0]->Test(inner_id) == true);
-        REQUIRE(bitsets[0]->Test(inner_id - 1) == false);
+        auto managers = cell.GetBitsetsByAttr(*attr);
+        REQUIRE(managers.size() == 1);
+        REQUIRE(managers[0]->GetOneBitset(bucket_id)->Test(inner_id) == true);
+        REQUIRE(managers[0]->GetOneBitset(bucket_id)->Test(inner_id - 1) == false);
     }
 
     auto dir = fixtures::TempDir("attr");
@@ -141,10 +137,10 @@ TEST_CASE("AttributeBucketInvertedDataCell insert various types",
     cell2.Deserialize(reader);
     ifs.close();
     for (auto* attr : attrSet.attrs_) {
-        auto bitsets = cell2.GetBitsetsByAttrAndBucketId(*attr, bucket_id);
-        REQUIRE(bitsets.size() == 1);
-        REQUIRE(bitsets[0]->Test(inner_id) == true);
-        REQUIRE(bitsets[0]->Test(inner_id - 1) == false);
+        auto managers = cell2.GetBitsetsByAttr(*attr);
+        REQUIRE(managers.size() == 1);
+        REQUIRE(managers[0]->GetOneBitset(bucket_id)->Test(inner_id) == true);
+        REQUIRE(managers[0]->GetOneBitset(bucket_id)->Test(inner_id - 1) == false);
     }
     REQUIRE(cell2.GetTypeOfField("str") == AttrValueType::STRING);
 }

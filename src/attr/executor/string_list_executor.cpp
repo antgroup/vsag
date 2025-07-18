@@ -50,48 +50,39 @@ StringListExecutor::Clear() {
     Executor::Clear();
 }
 
-FilterPtr
-StringListExecutor::Run() {
-    if (this->bitset_ == nullptr) {
-        this->bitset_ =
-            ComputableBitset::MakeRawInstance(ComputableBitsetType::SparseBitset, this->allocator_);
-        this->own_bitset_ = true;
+Filter*
+StringListExecutor::Run(BucketIdType bucket_id) {
+    for (const auto* manager : managers_) {
+        if (manager == nullptr) {
+            continue;
+        }
+        auto* bitset = manager->GetOneBitset(bucket_id);
+        this->bitset_->Or(bitset);
     }
 
-    auto bitset_lists = this->attr_index_->GetBitsetsByAttr(*this->filter_attribute_);
-    this->bitset_->Or(bitset_lists);
-    if (this->is_not_in_) {
-        this->only_bitset_ = false;
-        this->filter_ = std::make_shared<BlackListFilter>(this->bitset_);
-    } else {
+    if (not this->is_not_in_) {
         this->only_bitset_ = true;
-        this->filter_ = std::make_shared<WhiteListFilter>(this->bitset_);
+        WhiteListFilter::TryToUpdate(this->filter_, this->bitset_);
+    } else {
+        if (bitset_type_ == ComputableBitsetType::FastBitset) {
+            this->bitset_->Not();
+            this->only_bitset_ = true;
+            WhiteListFilter::TryToUpdate(this->filter_, this->bitset_);
+        } else {
+            this->only_bitset_ = false;
+            this->filter_ = new BlackListFilter(this->bitset_);
+        }
     }
     return this->filter_;
 }
 
-FilterPtr
-StringListExecutor::RunWithBucket(BucketIdType bucket_id) {
+void
+StringListExecutor::Init() {
     if (this->bitset_ == nullptr) {
-        this->bitset_ =
-            ComputableBitset::MakeRawInstance(ComputableBitsetType::FastBitset, this->allocator_);
+        this->bitset_ = ComputableBitset::MakeRawInstance(this->bitset_type_, this->allocator_);
         this->own_bitset_ = true;
     }
-
-    auto bitset_lists =
-        this->attr_index_->GetBitsetsByAttrAndBucketId(*this->filter_attribute_, bucket_id);
-    for (const auto* bitset : bitset_lists) {
-        if (bitset == nullptr) {
-            continue;
-        }
-        this->bitset_->Or(*bitset);
-    }
-    this->only_bitset_ = true;
-    if (this->is_not_in_) {
-        this->bitset_->Not();
-    }
-    WhiteListFilter::TryToUpdate(this->filter_, this->bitset_);
-    return this->filter_;
+    this->managers_ = this->attr_index_->GetBitsetsByAttr(*this->filter_attribute_);
 }
 
 }  // namespace vsag

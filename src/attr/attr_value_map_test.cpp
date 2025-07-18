@@ -22,34 +22,36 @@
 
 using namespace vsag;
 
-TEST_CASE("AttrValueMap insert and retrieve int32", "[ut][AttrValueMap]") {
-    auto allocator = SafeAllocator::FactoryDefaultAllocator();
-    auto type = GENERATE(ComputableBitsetType::SparseBitset, ComputableBitsetType::FastBitset);
-    AttrValueMap map(allocator.get(), type);
-    int32_t value = 42;
-    InnerIdType id = 5;
-
-    map.Insert(value, id);
-    auto bitset = map.GetBitsetByValue(value);
-    REQUIRE(bitset != nullptr);
-    REQUIRE(bitset->Test(id) == true);
-    REQUIRE(nullptr == map.GetBitsetByValue(999));
+template <class T>
+T
+GetRandomValue() {
+    if constexpr (std::is_integral<T>::value) {
+        return random() % std::numeric_limits<T>::max();
+    } else if constexpr (std::is_same_v<T, std::string>) {
+        return "abc";
+    }
 }
 
-TEST_CASE("AttrValueMap serialize & deserialize", "[ut][AttrValueMap]") {
+template <class T>
+void
+TestAttrValueMap() {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     auto type = GENERATE(ComputableBitsetType::SparseBitset, ComputableBitsetType::FastBitset);
     AttrValueMap map(allocator.get(), type);
-    int32_t value = 42;
-    InnerIdType id = 5;
+    T value = GetRandomValue<T>();
+    InnerIdType id = random() % 10 + 1;
 
     map.Insert(value, id);
-    {
-        auto bitset = map.GetBitsetByValue(value);
-        REQUIRE(bitset != nullptr);
-        REQUIRE(bitset->Test(id) == true);
-        REQUIRE(nullptr == map.GetBitsetByValue(999));
-    }
+    auto manager = map.GetBitsetByValue(value);
+    REQUIRE(manager != nullptr);
+    REQUIRE(manager->GetOneBitset(0)->Test(id) == true);
+    REQUIRE(nullptr == map.GetBitsetByValue(999));
+
+    map.Insert(value, id, 3);
+    manager = map.GetBitsetByValue(value);
+    REQUIRE(manager != nullptr);
+    REQUIRE(manager->GetOneBitset(2) == nullptr);
+    REQUIRE(manager->GetOneBitset(3)->Test(id) == true);
 
     auto dir = fixtures::TempDir("value_map");
     auto path = dir.GenerateRandomFile();
@@ -63,10 +65,22 @@ TEST_CASE("AttrValueMap serialize & deserialize", "[ut][AttrValueMap]") {
     AttrValueMap map2(allocator.get(), type);
     map2.Deserialize(reader);
     ifs.close();
-    {
-        auto bitset = map2.GetBitsetByValue(value);
-        REQUIRE(bitset != nullptr);
-        REQUIRE(bitset->Test(id) == true);
-        REQUIRE(nullptr == map2.GetBitsetByValue(999));
-    }
+
+    manager = map2.GetBitsetByValue(value);
+    REQUIRE(manager != nullptr);
+    REQUIRE(manager->GetOneBitset(2) == nullptr);
+    REQUIRE(manager->GetOneBitset(3)->Test(id) == true);
+    REQUIRE(nullptr == map2.GetBitsetByValue(999));
+}
+
+TEST_CASE("AttrValueMap Basic Test", "[ut][AttrValueMap]") {
+    TestAttrValueMap<int64_t>();
+    TestAttrValueMap<int32_t>();
+    TestAttrValueMap<int16_t>();
+    TestAttrValueMap<int8_t>();
+    TestAttrValueMap<uint64_t>();
+    TestAttrValueMap<uint32_t>();
+    TestAttrValueMap<uint16_t>();
+    TestAttrValueMap<uint8_t>();
+    TestAttrValueMap<std::string>();
 }

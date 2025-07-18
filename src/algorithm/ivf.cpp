@@ -369,7 +369,7 @@ IVF::Add(const DatasetPtr& base) {
             for (InnerIdType j = 0; j < bucket_size; ++j) {
                 auto inner_id = inner_ids[j];
                 const auto& attr_set = attr_sets[inner_id - current_num];
-                this->attr_filter_index_->InsertWithBucket(attr_set, j, bucket_id);
+                this->attr_filter_index_->Insert(attr_set, j, bucket_id);
             }
         }
     }
@@ -681,10 +681,10 @@ IVF::search(const DatasetPtr& query, const InnerSearchParam& param) const {
             }
 
             bucket_->ScanBucketById(dist.data(), computer, bucket_id);
-            FilterPtr attr_ft = nullptr;
+            Filter* attr_ft = nullptr;
             if (param.executor != nullptr) {
                 param.executor->Clear();
-                attr_ft = param.executor->RunWithBucket(bucket_id);
+                attr_ft = param.executor->Run(bucket_id);
             }
             for (int j = 0; j < bucket_size; ++j) {
                 auto origin_id = ids[j] / buckets_per_data_;
@@ -843,6 +843,7 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
         auto& schema = this->attr_filter_index_->field_type_map_;
         auto expr = AstParse(request.attribute_filter_str_, &schema);
         auto executor = Executor::MakeInstance(this->allocator_, expr, this->attr_filter_index_);
+        executor->Init();
         param.executor = executor;
     }
     auto search_result = this->search<KNN_SEARCH>(query, param);

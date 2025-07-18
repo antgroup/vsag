@@ -27,6 +27,8 @@ public:
     };
 
 public:
+    virtual ~Filter() = default;
+
     /**
       * @brief Check if a vector is filtered out by pre-filter, true means
       * not been filtered out, false means have been filtered out, the result
