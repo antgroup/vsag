@@ -325,6 +325,5 @@ private:
     std::shared_ptr<Optimizer<BasicSearcher>> optimizer_;
 
     AttrInvertedInterfacePtr attr_filter_index_{nullptr};
-
 };
 }  // namespace vsag
