@@ -216,11 +216,14 @@ BruteForce::Deserialize(StreamReader& reader) {
     // try to deserialize footer (only in new version)
     auto footer = Footer::Parse(reader);
 
+    BufferStreamReader buffer_reader(
+        &reader, std::numeric_limits<uint64_t>::max(), this->allocator_);
+
     if (footer == nullptr) {  // old format, DON'T EDIT, remove in the future
         logger::debug("parse with v0.13 version format");
 
-        StreamReader::ReadObj(reader, dim_);
-        StreamReader::ReadObj(reader, total_count_);
+        StreamReader::ReadObj(buffer_reader, dim_);
+        StreamReader::ReadObj(buffer_reader, total_count_);
     } else {  // create like `else if ( ver in [v0.15, v0.17] )` here if need in the future
         logger::debug("parse with new version format");
 
@@ -242,8 +245,8 @@ BruteForce::Deserialize(StreamReader& reader) {
         dim_ = basic_info["dim"];
         total_count_ = basic_info["total_count"];
 
-        this->inner_codes_->Deserialize(reader);
-        this->label_table_->Deserialize(reader);
+        this->inner_codes_->Deserialize(buffer_reader);
+        this->label_table_->Deserialize(buffer_reader);
     }
 
     // post serialize procedure
