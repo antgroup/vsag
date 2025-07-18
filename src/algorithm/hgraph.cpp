@@ -30,6 +30,7 @@
 #include "impl/reorder.h"
 #include "index/index_impl.h"
 #include "index/iterator_filter.h"
+#include "io/reader_io_parameter.h"
 #include "storage/serialization.h"
 #include "storage/stream_reader.h"
 #include "typing.h"
@@ -1621,4 +1622,14 @@ HGraph::GetVectorByInnerId(InnerIdType inner_id, float* data) const {
     codes->GetCodesById(inner_id, buffer.data());
     codes->Decode(buffer.data(), data);
 }
+
+void
+HGraph::SetIO(const std::shared_ptr<Reader> reader) {
+    if (use_reorder_) {
+        auto reader_param = std::make_shared<ReaderIOParameter>();
+        reader_param->reader = reader;
+        high_precise_codes_->InitIO(reader_param);
+    }
+}
+
 }  // namespace vsag

@@ -176,6 +176,9 @@ public:
     void
     Merge(const std::vector<MergeUnit>& merge_units) override;
 
+    void
+    SetIO(const std::shared_ptr<Reader> reader) override;
+
 private:
     const void*
     get_data(const DatasetPtr& dataset, uint32_t index = 0) const {

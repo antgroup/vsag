@@ -310,6 +310,10 @@ public:
                             "Index doesn't support GetVectorByInnerId");
     }
 
+    virtual void
+    SetIO(const std::shared_ptr<Reader> reader) {
+    }
+
 public:
     LabelTablePtr label_table_{nullptr};
 
