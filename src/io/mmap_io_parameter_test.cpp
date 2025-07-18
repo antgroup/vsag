@@ -25,7 +25,7 @@ using namespace vsag;
 TEST_CASE("MMapIO Parameters Test", "[ut][MMapIOParameters]") {
     fixtures::TempDir dir("async_io");
     auto path = dir.GenerateRandomFile();
-    auto param_str = R"(
+    constexpr const char* param_str = R"(
         {{
             "type": "mmap_io",
             "file_path": "{}"
