@@ -20,11 +20,11 @@
 #include <nlohmann/json.hpp>
 #include <vector>
 
-#include "../data_type.h"
-#include "../logger.h"
 #include "data_cell/graph_datacell_parameter.h"
+#include "data_type.h"
 #include "fixtures.h"
 #include "io/memory_io_parameter.h"
+#include "logger.h"
 #include "quantization/fp32_quantizer_parameter.h"
 #include "storage/serialization.h"
 #include "vsag/bitset.h"

@@ -27,7 +27,7 @@ typedef int FileHandle;
 #endif
 
 #include "distance.h"
-#include "logger.h"
+#include "diskann_logger.h"
 #include "cached_io.h"
 #include "ann_exception.h"
 #include "windows_customizations.h"

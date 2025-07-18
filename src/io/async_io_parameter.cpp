@@ -34,7 +34,7 @@ AsyncIOParameter::FromJson(const JsonType& json) {
 }
 
 JsonType
-AsyncIOParameter::ToJson() {
+AsyncIOParameter::ToJson() const {
     JsonType json;
     json[IO_TYPE_KEY] = IO_TYPE_VALUE_ASYNC_IO;
     json[IO_FILE_PATH] = this->path_;

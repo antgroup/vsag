@@ -16,6 +16,7 @@
 #include "pq_fastscan_quantizer_parameter.h"
 
 #include "inner_string_params.h"
+#include "logger.h"
 
 namespace vsag {
 
@@ -32,10 +33,30 @@ PQFastScanQuantizerParameter::FromJson(const JsonType& json) {
 }
 
 JsonType
-PQFastScanQuantizerParameter::ToJson() {
+PQFastScanQuantizerParameter::ToJson() const {
     JsonType json;
     json[QUANTIZATION_TYPE_KEY] = QUANTIZATION_TYPE_VALUE_PQFS;
     json[PRODUCT_QUANTIZATION_DIM] = this->pq_dim_;
     return json;
+}
+
+bool
+PQFastScanQuantizerParameter::CheckCompatibility(const ParamPtr& other) const {
+    auto pq_fast_param = std::dynamic_pointer_cast<const PQFastScanQuantizerParameter>(other);
+    if (not pq_fast_param) {
+        logger::error(
+            "PQFastScanQuantizerParameter::CheckCompatibility: "
+            "other is not PQFastScanQuantizerParameter");
+        return false;
+    }
+    if (this->pq_dim_ != pq_fast_param->pq_dim_) {
+        logger::error(
+            "PQFastScanQuantizerParameter::CheckCompatibility: "
+            "pq_dim mismatch, this: {}, other: {}",
+            this->pq_dim_,
+            pq_fast_param->pq_dim_);
+        return false;
+    }
+    return true;
 }
 }  // namespace vsag

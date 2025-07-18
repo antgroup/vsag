@@ -22,6 +22,7 @@
 
 #include "algorithm/inner_index_interface.h"
 #include "byte_buffer.h"
+#include "diskann_logger.h"
 #include "impl/allocator/safe_allocator.h"
 #include "simd/fp32_simd.h"
 #include "utils/util_functions.h"
