@@ -41,7 +41,7 @@ public:
     WriteImpl(const uint8_t* data, uint64_t size, uint64_t offset);
 
     void
-    Init(const ReaderIOParamPtr& param);
+    InitIOImpl(const IOParamPtr& io_param);
 
     bool
     ReadImpl(uint64_t size, uint64_t offset, uint8_t* data) const;
@@ -68,7 +68,6 @@ public:
 
 private:
     std::shared_ptr<Reader> reader_{nullptr};
-    uint64_t start_{0};
 };
 
 }  // namespace vsag

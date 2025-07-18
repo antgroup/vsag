@@ -27,18 +27,13 @@ ReaderIO::WriteImpl(const uint8_t* data, uint64_t size, uint64_t offset) {
 }
 
 void
-ReaderIO::Init(const ReaderIOParamPtr& param) {
-    reader_ = param->reader;
-    uint64_t content_size;
-    reader_->Read(param->start, sizeof(uint64_t), &content_size);
-    if (content_size + sizeof(uint64_t) != param->size) {
+ReaderIO::InitIOImpl(const vsag::IOParamPtr& io_param){
+    auto reader_param = std::dynamic_pointer_cast<ReaderIOParameter>(io_param);
+    if (not reader_param) {
         throw VsagException(ErrorType::INTERNAL_ERROR,
-                            fmt::format("ReaderIO size mismatch: expected {}, got {}",
-                                        content_size + content_size,
-                                        param->size));
+                            "ReaderIOParam is required for ReaderIO initialization.");
     }
-    start_ = param->start + sizeof(uint64_t);
-    size_ = param->size - sizeof(uint64_t);
+    reader_ = reader_param->reader;
 }
 
 bool
