@@ -42,11 +42,6 @@ public:
         return metadata_[name];
     }
 
-    [[nodiscard]] bool
-    Contain(std::string_view name) const {
-        return metadata_.contains(name);
-    }
-
     void
     Set(const std::string& name, JsonType jsonify_obj) {
         // name `_[0-9a-z_]*` is reserved

@@ -67,6 +67,10 @@ public:
         return true;
     }
 
+    void
+    InitIOImpl(const IOParamPtr& io_param) {
+    }
+
 private:
     void
     check_and_realloc(uint64_t size) {

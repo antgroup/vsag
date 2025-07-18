@@ -30,7 +30,7 @@ public:
     }
 
     JsonType
-    ToJson() override {
+    ToJson() const override {
         return JsonType();
     }
 
@@ -39,8 +39,6 @@ public:
     }
 
     std::shared_ptr<Reader> reader;
-    uint64_t start{0};
-    uint64_t size{0};
 };
 
 using ReaderIOParamPtr = std::shared_ptr<ReaderIOParameter>;

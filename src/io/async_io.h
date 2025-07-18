@@ -56,6 +56,10 @@ public:
         return false;
     }
 
+    void
+    InitIOImpl(const IOParamPtr& io_param) {
+    }
+
 public:
     static std::unique_ptr<IOContextPool> io_context_pool;
 

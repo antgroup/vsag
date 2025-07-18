@@ -160,12 +160,12 @@ public:
      */
     inline void
     Deserialize(StreamReader& reader) {
-        uint64_t size;
-        StreamReader::ReadObj(reader, size);
+        StreamReader::ReadObj(reader, this->size_);
         ByteBuffer buffer(SERIALIZE_BUFFER_SIZE, this->allocator_);
         uint64_t offset = 0;
-        while (offset < size) {
-            auto cur_size = std::min(SERIALIZE_BUFFER_SIZE, size - offset);
+        this->start_ = reader.GetCursor();
+        while (offset < this->size_) {
+            auto cur_size = std::min(SERIALIZE_BUFFER_SIZE, this->size_ - offset);
             reader.Read(reinterpret_cast<char*>(buffer.data), cur_size);
             this->Write(buffer.data, cur_size, offset);
             offset += cur_size;
@@ -204,11 +204,27 @@ public:
         return cast().InMemoryImpl();
     }
 
+    /**
+     * @brief Initializes the IO object with the given IO parameters.
+     *
+     * This function checks if the IO object has an InitIOImpl method.
+     * If it does, it calls the method with the provided IO parameters.
+     * Otherwise, it throws a runtime error.
+     *
+     * @param io_param A pointer to the IO parameters used for initialization.
+     */
+    inline void
+    InitIO(const IOParamPtr& io_param) {
+        static_assert(has_InitIOImpl<IOTmpl>::value);
+        return cast().InitIOImpl(io_param);
+    }
+
 public:
     /**
      * @brief The size of the IO object.
      */
     uint64_t size_{0};
+    uint64_t start_{0};
 
 protected:
     /**
@@ -294,5 +310,6 @@ private:
                                  std::declval<uint64_t>())
     GENERATE_HAS_MEMBER_FUNCTION(ReleaseImpl, void, std::declval<const uint8_t*>())
     GENERATE_HAS_MEMBER_FUNCTION(InMemoryImpl, bool)
+    GENERATE_HAS_MEMBER_FUNCTION(InitIOImpl, void, std::declval<const IOParamPtr&>())
 };
 }  // namespace vsag

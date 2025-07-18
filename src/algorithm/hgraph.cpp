@@ -781,13 +781,6 @@ HGraph::deserialize_label_info(StreamReader& reader) const {
     }
 }
 
-#define WRITE_DATACELL_WITH_NAME(writer, name, datacell)            \
-    auto datacell##_start = (writer).GetCursor();                   \
-    datacell_offsets[(name)] = datacell##_start;                    \
-    (datacell)->Serialize(writer);                                  \
-    auto datacell##_size = (writer).GetCursor() - datacell##_start; \
-    datacell_sizes[(name)] = datacell##_size;
-
 void
 HGraph::Serialize(StreamWriter& writer) const {
     if (this->ignore_reorder_) {
@@ -815,30 +808,25 @@ HGraph::Serialize(StreamWriter& writer) const {
     // }
 
     this->serialize_label_info(writer);
-
-    JsonType datacell_offsets;
-    JsonType datacell_sizes;
-    WRITE_DATACELL_WITH_NAME(writer, "basic_flatten_codes", basic_flatten_codes_);
-    WRITE_DATACELL_WITH_NAME(writer, "bottom_graph", bottom_graph_);
+    this->basic_flatten_codes_->Serialize(writer);
+    this->bottom_graph_->Serialize(writer);
     if (this->use_reorder_) {
-        WRITE_DATACELL_WITH_NAME(writer, "high_precise_codes", high_precise_codes_);
+        this->high_precise_codes_->Serialize(writer);
     }
     for (const auto& route_graph : this->route_graphs_) {
         route_graph->Serialize(writer);
     }
     if (this->extra_info_size_ > 0 && this->extra_infos_ != nullptr) {
-        WRITE_DATACELL_WITH_NAME(writer, "extra_infos", extra_infos_);
+        this->extra_infos_->Serialize(writer);
     }
     if (this->use_attribute_filter_ and this->attr_filter_index_ != nullptr) {
-        WRITE_DATACELL_WITH_NAME(writer, "attr_filter_index", attr_filter_index_);
+        this->attr_filter_index_->Serialize(writer);
     }
 
     // serialize footer (introduced since v0.15)
     auto jsonify_basic_info = this->serialize_basic_info();
     auto metadata = std::make_shared<Metadata>();
     metadata->Set("basic_info", jsonify_basic_info);
-    metadata->Set(DATACELL_OFFSETS, datacell_offsets.dump());
-    metadata->Set(DATACELL_SIZES, datacell_sizes.dump());
     logger::debug(jsonify_basic_info.dump());
 
     auto footer = std::make_shared<Footer>(metadata);
@@ -881,15 +869,6 @@ HGraph::Deserialize(StreamReader& reader) {
         logger::debug("parse with new version format");
 
         auto metadata = footer->GetMetadata();
-        if (metadata->Contain(DATACELL_SIZES)) {
-            std::string size_str = metadata->Get(DATACELL_SIZES);
-            datacell_sizes_ = JsonType::parse(size_str);
-        }
-        if (metadata->Contain(DATACELL_OFFSETS)) {
-            std::string offset_str = metadata->Get(DATACELL_OFFSETS);
-            datacell_offsets_ = JsonType::parse(offset_str);
-        }
-
         // metadata should NOT be nullptr if footer is not nullptr
         this->deserialize_basic_info(metadata->Get("basic_info"));
         this->deserialize_label_info(reader);
@@ -1651,8 +1630,6 @@ HGraph::SetIO(const std::shared_ptr<Reader> reader) {
     if (use_reorder_) {
         auto reader_param = std::make_shared<ReaderIOParameter>();
         reader_param->reader = reader;
-        reader_param->start = datacell_offsets_["high_precise_codes"];
-        reader_param->size = datacell_sizes_["high_precise_codes"];
         high_precise_codes_->InitIO(reader_param);
     }
 }

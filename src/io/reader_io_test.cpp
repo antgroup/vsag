@@ -49,23 +49,20 @@ private:
 
 TEST_CASE("ReaderIO Read Test", "[ut][ReaderIO]") {
     const uint64_t kTestSize = 1024;
-    std::vector<uint8_t> all_data(kTestSize + sizeof(kTestSize));
+    std::vector<uint8_t> all_data(kTestSize);
     for (uint64_t i = 0; i < kTestSize; ++i) {
-        all_data[i + sizeof(kTestSize)] = static_cast<uint8_t>(i % 256);
+        all_data[i] = static_cast<uint8_t>(i % 256);
     }
-    auto test_data = all_data.data() + sizeof(kTestSize);
-    auto size_ptr = reinterpret_cast<uint64_t*>(all_data.data());
-    *size_ptr = kTestSize;
 
     vsag::IndexCommonParam common_param;
     common_param.allocator_ = vsag::Engine::CreateDefaultAllocator();
     auto reader_param = std::make_shared<vsag::ReaderIOParameter>();
     reader_param->reader = std::make_shared<TestReader>(all_data.data(), all_data.size());
-    reader_param->size = kTestSize + sizeof(kTestSize);
-    reader_param->start = 0;
 
     ReaderIO reader_io(reader_param, common_param);
-    reader_io.Init(reader_param);
+    reader_io.InitIOImpl(reader_param);
+    reader_io.start_ = 0;
+    reader_io.size_ = kTestSize;
 
     SECTION("Test ReadImpl normal case") {
         const uint64_t offset = 100;
@@ -74,7 +71,7 @@ TEST_CASE("ReaderIO Read Test", "[ut][ReaderIO]") {
         bool result = reader_io.ReadImpl(size, offset, buffer.data());
         REQUIRE(result == true);
         for (uint64_t i = 0; i < size; ++i) {
-            REQUIRE(buffer[i] == test_data[offset + i]);
+            REQUIRE(buffer[i] == all_data[offset + i]);
         }
     }
 
@@ -94,7 +91,7 @@ TEST_CASE("ReaderIO Read Test", "[ut][ReaderIO]") {
         REQUIRE(need_release == true);
         REQUIRE(data != nullptr);
         for (uint64_t i = 0; i < size; ++i) {
-            REQUIRE(data[i] == test_data[offset + i]);
+            REQUIRE(data[i] == all_data[offset + i]);
         }
         reader_io.ReleaseImpl(data);  // 释放内存
     }
@@ -116,10 +113,10 @@ TEST_CASE("ReaderIO Read Test", "[ut][ReaderIO]") {
         REQUIRE(result == true);
 
         for (uint64_t i = 0; i < sizes[0]; ++i) {
-            REQUIRE(buffer[i] == test_data[offsets[0] + i]);
+            REQUIRE(buffer[i] == all_data[offsets[0] + i]);
         }
         for (uint64_t i = 0; i < sizes[1]; ++i) {
-            REQUIRE(buffer[sizes[0] + i] == test_data[offsets[1] + i]);
+            REQUIRE(buffer[sizes[0] + i] == all_data[offsets[1] + i]);
         }
     }
 

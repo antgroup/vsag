@@ -326,7 +326,5 @@ private:
 
     AttrInvertedInterfacePtr attr_filter_index_{nullptr};
 
-    JsonType datacell_sizes_;
-    JsonType datacell_offsets_;
 };
 }  // namespace vsag
