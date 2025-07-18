@@ -33,13 +33,17 @@ public:
     Executor(Allocator* allocator,
              const ExprPtr& expression,
              const AttrInvertedInterfacePtr& attr_index)
-        : expr_(expression), attr_index_(attr_index), allocator_(allocator){};
+        : expr_(expression),
+          attr_index_(attr_index),
+          allocator_(allocator),
+          bitset_type_(attr_index->GetBitsetType()){};
 
     virtual ~Executor() {
         if (this->own_bitset_) {
             delete bitset_;
             bitset_ = nullptr;
         }
+        delete filter_;
     }
 
     virtual void
@@ -49,16 +53,21 @@ public:
         }
     };
 
-    virtual FilterPtr
-    Run() = 0;
+    virtual void
+    Init(){};
 
-    virtual FilterPtr
-    RunWithBucket(BucketIdType bucket_id) = 0;
+    virtual Filter*
+    Run(BucketIdType bucket_id) = 0;
+
+    Filter*
+    Run() {
+        return this->Run(0);
+    }
 
 public:
     bool only_bitset_{true};
 
-    FilterPtr filter_{nullptr};
+    Filter* filter_{nullptr};
 
     ComputableBitset* bitset_{nullptr};
 
@@ -69,5 +78,7 @@ public:
     Allocator* const allocator_{nullptr};
 
     bool own_bitset_{false};
+
+    ComputableBitsetType bitset_type_{ComputableBitsetType::FastBitset};
 };
 }  // namespace vsag

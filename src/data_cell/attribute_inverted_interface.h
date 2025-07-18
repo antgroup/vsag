@@ -18,7 +18,7 @@
 #include <memory>
 
 #include "attr/attr_type_schema.h"
-#include "impl/bitset/computable_bitset.h"
+#include "attr/multi_bitset_manager.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
 #include "typing.h"
@@ -35,23 +35,21 @@ public:
     MakeInstance(Allocator* allocator, bool have_bucket = false);
 
 public:
-    AttributeInvertedInterface(Allocator* allocator)
-        : allocator_(allocator), field_type_map_(allocator){};
+    AttributeInvertedInterface(Allocator* allocator, ComputableBitsetType bitset_type)
+        : allocator_(allocator), field_type_map_(allocator), bitset_type_(bitset_type){};
+
     virtual ~AttributeInvertedInterface() = default;
 
     virtual void
-    Insert(const AttributeSet& attr_set, InnerIdType inner_id) = 0;
+    Insert(const AttributeSet& attr_set, InnerIdType inner_id) {
+        this->Insert(attr_set, inner_id, 0);
+    }
 
     virtual void
-    InsertWithBucket(const AttributeSet& attr_set,
-                     InnerIdType inner_id,
-                     BucketIdType bucket_id) = 0;
+    Insert(const AttributeSet& attr_set, InnerIdType inner_id, BucketIdType bucket_id) = 0;
 
-    virtual std::vector<const ComputableBitset*>
+    virtual std::vector<const MultiBitsetManager*>
     GetBitsetsByAttr(const Attribute& attr) = 0;
-
-    virtual std::vector<const ComputableBitset*>
-    GetBitsetsByAttrAndBucketId(const Attribute& attr_name, BucketIdType bucket_id) = 0;
 
     virtual void
     Serialize(StreamWriter& writer) {
@@ -68,9 +66,16 @@ public:
         return this->field_type_map_.GetTypeOfField(field_name);
     }
 
+    ComputableBitsetType
+    GetBitsetType() {
+        return this->bitset_type_;
+    }
+
 public:
     Allocator* const allocator_{nullptr};
 
     AttrTypeSchema field_type_map_;
+
+    ComputableBitsetType bitset_type_{ComputableBitsetType::FastBitset};
 };
 }  // namespace vsag

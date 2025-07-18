@@ -15,6 +15,7 @@
 
 #pragma once
 
+#include "attr/multi_bitset_manager.h"
 #include "executor.h"
 #include "vsag/attribute.h"
 
@@ -28,11 +29,11 @@ public:
     void
     Clear() override;
 
-    FilterPtr
-    Run() override;
+    void
+    Init() override;
 
-    FilterPtr
-    RunWithBucket(BucketIdType bucket_id) override;
+    Filter*
+    Run(BucketIdType bucket_id) override;
 
 private:
     std::string field_name_{};
@@ -40,6 +41,8 @@ private:
     AttributePtr filter_attribute_{nullptr};
 
     ComparisonOperator op_{};
+
+    std::vector<const MultiBitsetManager*> managers_;
 };
 
 }  // namespace vsag

@@ -26,25 +26,17 @@ namespace vsag {
 
 class AttributeBucketInvertedDataCell : public AttributeInvertedInterface {
 public:
-    using Term2ValueMap = std::unique_ptr<UnorderedMap<std::string, ValueMapPtr>>;
+    AttributeBucketInvertedDataCell(
+        Allocator* allocator, ComputableBitsetType bitset_type = ComputableBitsetType::FastBitset)
+        : AttributeInvertedInterface(allocator, bitset_type), field_2_value_map_(allocator){};
 
-    AttributeBucketInvertedDataCell(Allocator* allocator)
-        : AttributeInvertedInterface(allocator), multi_term_2_value_map_(allocator){};
     ~AttributeBucketInvertedDataCell() override = default;
 
     void
-    Insert(const AttributeSet& attr_set, InnerIdType inner_id) override;
+    Insert(const AttributeSet& attr_set, InnerIdType inner_id, BucketIdType bucket_id) override;
 
-    void
-    InsertWithBucket(const AttributeSet& attr_set,
-                     InnerIdType inner_id,
-                     BucketIdType bucket_id) override;
-
-    std::vector<const ComputableBitset*>
+    std::vector<const MultiBitsetManager*>
     GetBitsetsByAttr(const Attribute& attr) override;
-
-    std::vector<const ComputableBitset*>
-    GetBitsetsByAttrAndBucketId(const Attribute& attr_name, BucketIdType bucket_id) override;
 
     void
     Serialize(StreamWriter& writer) override;
@@ -55,33 +47,35 @@ public:
 private:
     template <class T>
     void
-    insert_by_type(ValueMapPtr& value_map, const Attribute* attr, InnerIdType inner_id);
+    insert_by_type(ValueMapPtr& value_map,
+                   const Attribute* attr,
+                   InnerIdType inner_id,
+                   BucketIdType bucket_id);
 
     template <class T>
     void
     get_bitsets_by_type(const ValueMapPtr& value_map,
                         const Attribute* attr,
-                        std::vector<const ComputableBitset*>& bitsets);
+                        std::vector<const MultiBitsetManager*>& bitsets);
 
 private:
-    Vector<Term2ValueMap> multi_term_2_value_map_;
+    UnorderedMap<std::string, ValueMapPtr> field_2_value_map_;
 
-    std::vector<std::shared_ptr<std::shared_mutex>> bucket_mutexes_{};
-
-    std::shared_mutex multi_term_2_value_map_mutex_{};
+    std::shared_mutex global_mutex_{};
 };
 
 template <class T>
 void
 AttributeBucketInvertedDataCell::insert_by_type(ValueMapPtr& value_map,
                                                 const Attribute* attr,
-                                                InnerIdType inner_id) {
+                                                InnerIdType inner_id,
+                                                BucketIdType bucket_id) {
     auto* attr_value = dynamic_cast<const AttributeValue<T>*>(attr);
     if (attr_value == nullptr) {
         throw VsagException(ErrorType::INTERNAL_ERROR, "Invalid attribute type");
     }
     for (auto& value : attr_value->GetValue()) {
-        value_map->Insert(value, inner_id);
+        value_map->Insert(value, inner_id, bucket_id);
     }
 }
 
@@ -90,7 +84,7 @@ void
 AttributeBucketInvertedDataCell::get_bitsets_by_type(
     const ValueMapPtr& value_map,
     const Attribute* attr,
-    std::vector<const ComputableBitset*>& bitsets) {
+    std::vector<const MultiBitsetManager*>& bitsets) {
     auto* attr_value = dynamic_cast<const AttributeValue<T>*>(attr);
     if (attr_value == nullptr) {
         throw VsagException(ErrorType::INTERNAL_ERROR, "Invalid attribute type");

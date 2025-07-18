@@ -43,10 +43,10 @@ public:
     Update(const Bitset* bitset);
 
     static void
-    TryToUpdate(FilterPtr& ptr, const IdFilterFuncType& fallback_func);
+    TryToUpdate(Filter*& ptr, const IdFilterFuncType& fallback_func);
 
     static void
-    TryToUpdate(FilterPtr& ptr, const Bitset* bitset);
+    TryToUpdate(Filter*& ptr, const Bitset* bitset);
 
 private:
     IdFilterFuncType fallback_func_{nullptr};
