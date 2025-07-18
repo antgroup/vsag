@@ -49,6 +49,15 @@ InnerProductDistance(const void* pVect1, const void* pVect2, const void* qty_ptr
 }
 
 float
+INT8L2Sqr(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
+    auto* pVect1 = (int8_t*)pVect1v;
+    auto* pVect2 = (int8_t*)pVect2v;
+    auto qty = *((size_t*)qty_ptr);
+
+    return neon::INT8ComputeL2Sqr(pVect1, pVect2, qty);
+}
+
+float
 INT8InnerProduct(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
     return generic::INT8InnerProduct(pVect1v, pVect2v, qty_ptr);
 }
@@ -800,6 +809,12 @@ __inline float32x4_t __attribute__((__always_inline__)) get_4_float(uint8x16_t* 
     return code_floats;
 }
 #endif
+
+float
+INT8ComputeL2Sqr(const int8_t* __restrict query, const int8_t* __restrict codes, uint64_t dim) {
+    //TODO(lc): impl
+    return generic::INT8ComputeL2Sqr(query, codes, dim);
+}
 
 float
 SQ8ComputeIP(const float* RESTRICT query,
