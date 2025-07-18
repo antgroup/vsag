@@ -160,12 +160,13 @@ public:
      */
     inline void
     Deserialize(StreamReader& reader) {
-        StreamReader::ReadObj(reader, this->size_);
+        uint64_t size = 0;
+        StreamReader::ReadObj(reader, size);
         ByteBuffer buffer(SERIALIZE_BUFFER_SIZE, this->allocator_);
         uint64_t offset = 0;
         this->start_ = reader.GetCursor();
-        while (offset < this->size_) {
-            auto cur_size = std::min(SERIALIZE_BUFFER_SIZE, this->size_ - offset);
+        while (offset < size) {
+            auto cur_size = std::min(SERIALIZE_BUFFER_SIZE, size - offset);
             reader.Read(reinterpret_cast<char*>(buffer.data), cur_size);
             this->Write(buffer.data, cur_size, offset);
             offset += cur_size;
