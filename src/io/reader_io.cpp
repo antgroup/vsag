@@ -24,6 +24,7 @@ namespace vsag {
 void
 ReaderIO::WriteImpl(const uint8_t* data, uint64_t size, uint64_t offset) {
     // ReaderIO is read-only, so we do nothing here. Just for deserialization.
+    this->size_ += size;
 }
 
 void
