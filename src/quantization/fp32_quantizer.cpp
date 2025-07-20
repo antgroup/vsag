@@ -59,7 +59,7 @@ FP32Quantizer<metric>::EncodeOneImpl(const DataType* data, uint8_t* codes) {
         Normalize(data, reinterpret_cast<float*>(codes), this->dim_);
         if (this->hold_molds_) {
             // Store the mold for cosine similarity
-            auto data_float = reinterpret_cast<const float*>(data);
+            const auto* data_float = reinterpret_cast<const float*>(data);
             float mold = std::sqrt(FP32ComputeIP(data_float, data_float, this->dim_));
             memcpy(codes + this->dim_ * sizeof(float), &mold, sizeof(float));
         }
@@ -84,7 +84,7 @@ FP32Quantizer<metric>::DecodeOneImpl(const uint8_t* codes, DataType* data) {
     memcpy(data, codes, this->dim_ * sizeof(float));
     if (metric == MetricType::METRIC_TYPE_COSINE && this->hold_molds_) {
         // If hold molds, we need to restore the mold for cosine similarity
-        auto mold_ptr = reinterpret_cast<const float*>(codes + this->dim_ * sizeof(float));
+        const auto* mold_ptr = reinterpret_cast<const float*>(codes + this->dim_ * sizeof(float));
         for (int i = 0; i < this->dim_; ++i) {
             data[i] *= mold_ptr[0];
         }
