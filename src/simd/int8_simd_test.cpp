@@ -64,3 +64,24 @@ TEST_CASE("INT8 SIMD Compute", "[ut][simd][int8]") {
         }
     }
 }
+
+#define BENCHMARK_SIMD_COMPUTE(Simd, Comp)                                         \
+    BENCHMARK_ADVANCED(#Simd #Comp) {                                              \
+        for (int i = 0; i < count; ++i) {                                          \
+            Simd::Comp(vec1.data() + i * 2 * dim, vec2.data() + i * 2 * dim, dim); \
+        }                                                                          \
+        return;                                                                    \
+    }
+
+TEST_CASE("INT8 Benchmark", "[ut][simd][int8][!benchmark]") {
+    int64_t count = 500;
+    int64_t dim = 128;
+    auto vec1 = fixtures::generate_int8_codes(count,  dim);
+    auto vec2 = fixtures::generate_int8_codes(count,  dim);
+
+    BENCHMARK_SIMD_COMPUTE(generic, INT8ComputeL2Sqr);
+    BENCHMARK_SIMD_COMPUTE(sse, INT8ComputeL2Sqr);
+    BENCHMARK_SIMD_COMPUTE(avx2, INT8ComputeL2Sqr);
+    BENCHMARK_SIMD_COMPUTE(avx512, INT8ComputeL2Sqr);
+    BENCHMARK_SIMD_COMPUTE(neon, INT8ComputeL2Sqr);
+}
