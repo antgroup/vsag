@@ -127,7 +127,6 @@ CompressedGraphDataCell::Deserialize(StreamReader& reader) {
             }
         }
     }
-    this->total_count_ = vertex_num;
 }
 
 void

@@ -30,4 +30,24 @@ public:
         REQUIRE(param->ToString() == str1);
     }
 };
+
+class EmptyParameter : public Parameter {
+    void
+    FromJson(const JsonType& json) override {
+    }
+
+    JsonType
+    ToJson() const override {
+        return JsonType();
+    }
+};
+
+template <typename T>
+void
+TestParamCheckCompatibility(const std::string& param_str) {
+    auto param = std::make_shared<T>();
+    param->FromString(param_str);
+    REQUIRE(param->CheckCompatibility(param));
+    REQUIRE_FALSE(param->CheckCompatibility(std::make_shared<vsag::EmptyParameter>()));
+}
 }  // namespace vsag

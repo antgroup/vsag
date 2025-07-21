@@ -42,17 +42,6 @@ public:
     BatchInsertExtraInfo(const char* extra_infos, InnerIdType count, InnerIdType* idx) override;
 
     void
-    SetMaxCapacity(InnerIdType capacity) override {
-        this->max_capacity_ = std::max(capacity, this->total_count_);
-    }
-
-    InnerIdType
-    GetMaxCapacity() override {
-        this->max_capacity_ = std::max(this->max_capacity_, this->total_count_);
-        return this->max_capacity_;
-    };
-
-    void
     Prefetch(InnerIdType id) override {
         io_->Prefetch(id * extra_info_size_, extra_info_size_);
     };

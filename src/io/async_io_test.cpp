@@ -19,7 +19,7 @@
 #include <memory>
 
 #include "basic_io_test.h"
-#include "safe_allocator.h"
+#include "impl/allocator/safe_allocator.h"
 
 using namespace vsag;
 
@@ -29,13 +29,24 @@ TEST_CASE("AsyncIO Read And Write", "[ut][AsyncIO]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     auto io = std::make_unique<AsyncIO>(path, allocator.get());
     TestBasicReadWrite(*io);
+
+    // read zero
+    bool need_release = false;
+    auto result = io->DirectReadImpl(0, 0, need_release);
+    REQUIRE(result == nullptr);
+
+    // prefetch
+    REQUIRE_NOTHROW(io->PrefetchImpl(0));
+
+    // in memory
+    REQUIRE(io->InMemoryImpl() == false);
 }
 
 TEST_CASE("AsyncIO Parameter", "[ut][AsyncIO]") {
     fixtures::TempDir dir("async_io");
     auto path = dir.GenerateRandomFile();
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
-    constexpr auto param_str = R"(
+    constexpr const char* param_str = R"(
     {{
         "type": "async_io",
         "file_path" : "{}"

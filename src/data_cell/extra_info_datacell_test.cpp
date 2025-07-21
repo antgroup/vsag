@@ -20,11 +20,11 @@
 #include <catch2/generators/catch_generators.hpp>
 #include <utility>
 
-#include "default_allocator.h"
 #include "extra_info_interface_test.h"
 #include "fixtures.h"
+#include "impl/allocator/default_allocator.h"
+#include "impl/allocator/safe_allocator.h"
 #include "parameter_test.h"
-#include "safe_allocator.h"
 
 using namespace vsag;
 

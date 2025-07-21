@@ -15,7 +15,7 @@
 
 #include "pruning_strategy.h"
 
-#include "utils/standard_heap.h"
+#include "impl/heap/standard_heap.h"
 
 namespace vsag {
 

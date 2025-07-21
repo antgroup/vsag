@@ -35,7 +35,7 @@ MemoryBlockIOParameter::FromJson(const JsonType& json) {
 }
 
 JsonType
-MemoryBlockIOParameter::ToJson() {
+MemoryBlockIOParameter::ToJson() const {
     JsonType json;
     json[IO_TYPE_KEY] = IO_TYPE_VALUE_BLOCK_MEMORY_IO;
     return json;

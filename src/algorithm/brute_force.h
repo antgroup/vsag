@@ -17,12 +17,10 @@
 
 #include "algorithm/inner_index_interface.h"
 #include "brute_force_parameter.h"
-#include "common.h"
-#include "data_cell/flatten_datacell.h"
-#include "impl/filter/filter_headers.h"
-#include "index_feature_list.h"
+#include "data_cell/flatten_interface.h"
 #include "label_table.h"
 #include "typing.h"
+#include "vsag/filter.h"
 
 namespace vsag {
 
@@ -56,6 +54,11 @@ public:
 
     std::vector<int64_t>
     Build(const DatasetPtr& data) override;
+
+    IndexType
+    GetIndexType() override {
+        return IndexType::BRUTEFORCE;
+    }
 
     void
     Train(const DatasetPtr& data) override;

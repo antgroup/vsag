@@ -40,9 +40,9 @@
 #include <string>
 
 #include "common.h"
+#include "diskann_logger.h"
 #include "diskann_zparameters.h"
 #include "index_feature_list.h"
-#include "logger.h"
 #include "typing.h"
 #include "utils/window_result_queue.h"
 #include "vsag/index.h"
@@ -69,6 +69,11 @@ public:
     tl::expected<std::vector<int64_t>, Error>
     Build(const DatasetPtr& base) override {
         SAFE_CALL(return this->build(base));
+    }
+
+    IndexType
+    GetIndexType() override {
+        return IndexType::DISKANN;
     }
 
     tl::expected<Checkpoint, Error>

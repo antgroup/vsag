@@ -14,8 +14,9 @@
 // limitations under the License.
 
 #pragma once
+#include <fmt/format.h>
+
 #include "data_cell/bucket_datacell_parameter.h"
-#include "fmt/format-inl.h"
 #include "inner_string_params.h"
 #include "parameter.h"
 #include "typing.h"
@@ -29,7 +30,10 @@ public:
     FromJson(const JsonType& json) override;
 
     JsonType
-    ToJson() override;
+    ToJson() const override;
+
+    bool
+    CheckCompatibility(const vsag::ParamPtr& other) const override;
 
 public:
     BucketIdType first_order_buckets_count{100};

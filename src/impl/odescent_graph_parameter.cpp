@@ -15,7 +15,7 @@
 
 #include "odescent_graph_parameter.h"
 
-#include <fmt/format-inl.h>
+#include <fmt/format.h>
 
 #include "vsag/constants.h"
 
@@ -44,7 +44,7 @@ ODescentParameter::FromJson(const vsag::JsonType& json) {
 }
 
 JsonType
-ODescentParameter::ToJson() {
+ODescentParameter::ToJson() const {
     JsonType json;
     json[ODESCENT_PARAMETER_ALPHA] = alpha;
     json[ODESCENT_PARAMETER_NEIGHBOR_SAMPLE_RATE] = sample_rate;

@@ -29,7 +29,7 @@ public:
 
 public:
     inline std::string
-    GetTypeName() {
+    GetTypeName() const {
         return this->name_;
     }
 

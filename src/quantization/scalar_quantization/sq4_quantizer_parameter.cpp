@@ -27,7 +27,7 @@ SQ4QuantizerParameter::FromJson(const JsonType& json) {
 }
 
 JsonType
-SQ4QuantizerParameter::ToJson() {
+SQ4QuantizerParameter::ToJson() const {
     JsonType json;
     json[QUANTIZATION_TYPE_KEY] = QUANTIZATION_TYPE_VALUE_SQ4;
     return json;

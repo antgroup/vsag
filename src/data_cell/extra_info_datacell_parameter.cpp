@@ -15,7 +15,7 @@
 
 #include "extra_info_datacell_parameter.h"
 
-#include <fmt/format-inl.h>
+#include <fmt/format.h>
 
 #include "inner_string_params.h"
 
@@ -30,9 +30,13 @@ ExtraInfoDataCellParameter::FromJson(const JsonType& json) {
 }
 
 JsonType
-ExtraInfoDataCellParameter::ToJson() {
+ExtraInfoDataCellParameter::ToJson() const {
     JsonType json;
     json[IO_PARAMS_KEY] = this->io_parameter->ToJson();
     return json;
+}
+bool
+ExtraInfoDataCellParameter::CheckCompatibility(const ParamPtr& other) const {
+    return true;
 }
 }  // namespace vsag

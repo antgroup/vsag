@@ -38,21 +38,14 @@ LogicalExecutor::Clear() {
     Executor::Clear();
 }
 
-FilterPtr
-LogicalExecutor::Run() {
-    this->left_->Run();
-    this->right_->Run();
+Filter*
+LogicalExecutor::Run(BucketIdType bucket_id) {
+    this->left_->Run(bucket_id);
+    this->right_->Run(bucket_id);
     return this->logical_run();
 }
 
-FilterPtr
-LogicalExecutor::RunWithBucket(BucketIdType bucket_id) {
-    this->left_->RunWithBucket(bucket_id);
-    this->right_->RunWithBucket(bucket_id);
-    return this->logical_run();
-}
-
-FilterPtr
+Filter*
 LogicalExecutor::logical_run() {
     if (this->op_ == LogicalOperator::AND) {
         if (this->left_->only_bitset_ and this->right_->only_bitset_) {
@@ -87,6 +80,11 @@ LogicalExecutor::logical_run() {
         throw VsagException(ErrorType::INTERNAL_ERROR, "logical operator not supported");
     }
     return this->filter_;
+}
+void
+LogicalExecutor::Init() {
+    this->left_->Init();
+    this->right_->Init();
 }
 
 }  // namespace vsag

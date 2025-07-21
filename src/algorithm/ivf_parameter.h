@@ -14,11 +14,12 @@
 // limitations under the License.
 
 #pragma once
+#include <fmt/format.h>
+
 #include "algorithm/ivf_partition/ivf_nearest_partition.h"
 #include "algorithm/ivf_partition/ivf_partition_strategy_parameter.h"
 #include "data_cell/bucket_datacell_parameter.h"
 #include "data_cell/flatten_datacell_parameter.h"
-#include "fmt/format-inl.h"
 #include "inner_string_params.h"
 #include "parameter.h"
 #include "typing.h"
@@ -32,7 +33,10 @@ public:
     FromJson(const JsonType& json) override;
 
     JsonType
-    ToJson() override;
+    ToJson() const override;
+
+    bool
+    CheckCompatibility(const vsag::ParamPtr& other) const override;
 
 public:
     BucketDataCellParamPtr bucket_param{nullptr};
@@ -42,6 +46,8 @@ public:
     bool use_reorder{false};
 
     bool use_attribute_filter{false};
+
+    int thread_count{1};
 
     FlattenDataCellParamPtr flatten_param{nullptr};
 };
@@ -74,6 +80,11 @@ public:
             obj.first_order_scan_ratio =
                 params[INDEX_TYPE_IVF][GNO_IMI_SEARCH_PARAM_FIRST_ORDER_SCAN_RATIO];
         }
+
+        if (params[INDEX_TYPE_IVF].contains(IVF_SEARCH_PARALLELISM)) {
+            obj.parallel_search_thread_count = params[INDEX_TYPE_IVF][IVF_SEARCH_PARALLELISM];
+        }
+
         return obj;
     }
 
@@ -81,6 +92,7 @@ public:
     int64_t scan_buckets_count{30};
     float topk_factor{2.0F};
     float first_order_scan_ratio{1.0F};
+    int64_t parallel_search_thread_count{1};
 
 private:
     IVFSearchParameters() = default;

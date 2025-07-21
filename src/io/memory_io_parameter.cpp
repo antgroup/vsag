@@ -32,7 +32,7 @@ MemoryIOParameter::FromJson(const JsonType& json) {
 }
 
 JsonType
-MemoryIOParameter::ToJson() {
+MemoryIOParameter::ToJson() const {
     JsonType json;
     json[IO_TYPE_KEY] = IO_TYPE_VALUE_MEMORY_IO;
     return json;

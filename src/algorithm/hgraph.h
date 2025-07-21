@@ -30,14 +30,15 @@
 #include "data_cell/sparse_graph_datacell_parameter.h"
 #include "default_thread_pool.h"
 #include "hgraph_parameter.h"
+#include "impl/basic_optimizer.h"
 #include "impl/basic_searcher.h"
+#include "impl/heap/distance_heap.h"
 #include "index/index_common_param.h"
 #include "index/iterator_filter.h"
 #include "index_feature_list.h"
 #include "inner_index_interface.h"
 #include "lock_strategy.h"
 #include "typing.h"
-#include "utils/distance_heap.h"
 #include "utils/visited_list.h"
 #include "vsag/index.h"
 #include "vsag/index_features.h"
@@ -62,6 +63,11 @@ public:
     [[nodiscard]] std::string
     GetName() const override {
         return INDEX_TYPE_HGRAPH;
+    }
+
+    IndexType
+    GetIndexType() override {
+        return IndexType::HGRAPH;
     }
 
     void

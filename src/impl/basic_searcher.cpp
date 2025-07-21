@@ -17,8 +17,9 @@
 
 #include <limits>
 
+#include "impl/heap/standard_heap.h"
 #include "utils/linear_congruential_generator.h"
-#include "utils/standard_heap.h"
+
 namespace vsag {
 
 BasicSearcher::BasicSearcher(const IndexCommonParam& common_param, MutexArrayPtr mutex_array)

@@ -32,13 +32,13 @@
 #include "data_cell/graph_interface.h"
 #include "data_type.h"
 #include "hnsw_zparameters.h"
+#include "impl/allocator/safe_allocator.h"
 #include "impl/conjugate_graph.h"
 #include "impl/filter/filter_headers.h"
 #include "index_common_param.h"
 #include "index_feature_list.h"
 #include "index_impl.h"
 #include "logger.h"
-#include "safe_allocator.h"
 #include "typing.h"
 #include "utils/window_result_queue.h"
 #include "vsag/binaryset.h"
@@ -77,6 +77,11 @@ public:
     tl::expected<std::vector<int64_t>, Error>
     Build(const DatasetPtr& base) override {
         SAFE_CALL(return this->build(base));
+    }
+
+    IndexType
+    GetIndexType() override {
+        return IndexType::HNSW;
     }
 
     tl::expected<std::vector<int64_t>, Error>

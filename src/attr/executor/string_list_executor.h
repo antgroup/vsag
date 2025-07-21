@@ -28,11 +28,11 @@ public:
     void
     Clear() override;
 
-    FilterPtr
-    Run() override;
+    void
+    Init() override;
 
-    FilterPtr
-    RunWithBucket(BucketIdType bucket_id) override;
+    Filter*
+    Run(BucketIdType bucket_id) override;
 
 private:
     std::string field_name_{};
@@ -40,6 +40,8 @@ private:
     AttributePtr filter_attribute_{nullptr};
 
     bool is_not_in_{false};
+
+    std::vector<const MultiBitsetManager*> managers_;
 };
 
 }  // namespace vsag

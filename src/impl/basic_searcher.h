@@ -15,25 +15,18 @@
 
 #pragma once
 
-#include <limits>
-
-#include "algorithm/hnswlib/algorithm_interface.h"
 #include "attr/executor/executor.h"
-#include "basic_optimizer.h"
-#include "common.h"
 #include "data_cell/flatten_interface.h"
 #include "data_cell/graph_interface.h"
+#include "impl/heap/distance_heap.h"
 #include "index/index_common_param.h"
 #include "index/iterator_filter.h"
 #include "lock_strategy.h"
-#include "runtime_parameter.h"
-#include "utils/distance_heap.h"
-#include "utils/linear_congruential_generator.h"
 #include "utils/visited_list.h"
 
 namespace vsag {
 
-static const uint32_t OPTIMIZE_SEARCHER_SAMPLE_SIZE = 10000;
+static constexpr uint32_t OPTIMIZE_SEARCHER_SAMPLE_SIZE = 10000;
 
 enum InnerSearchMode { KNN_SEARCH = 1, RANGE_SEARCH = 2 };
 
@@ -47,6 +40,7 @@ public:
     float skip_ratio{0.8F};
     InnerSearchMode search_mode{KNN_SEARCH};
     int range_search_limit_size{-1};
+    int64_t parallel_search_thread_count{1};
 
     // for ivf
     int scan_bucket_size{1};

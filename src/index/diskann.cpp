@@ -273,11 +273,10 @@ DiskANN::DiskANN(DiskannParameters& diskann_params, const IndexCommonParam& inde
 
     // When the length of the vector is too long, set sector_len_ to the size of storing a vector along with its linkage list.
     sector_len_ = std::max(
-        MINIMAL_SECTOR_LEN,
-        (size_t)(static_cast<uint64_t>(dim_) * sizeof(float) +
-                 static_cast<uint64_t>(std::ceil(static_cast<float>(R_) * GRAPH_SLACK + 1)) *
-                     sizeof(uint32_t)) *
-            VECTOR_PER_BLOCK);
+        MINIMAL_SECTOR_LEN,                                                           // NOLINT
+        (size_t)(dim_ * sizeof(float) + (R_ * GRAPH_SLACK + 1) * sizeof(uint32_t)) *  // NOLINT
+            VECTOR_PER_BLOCK);                                                        // NOLINT
+
     this->feature_list_ = std::make_shared<IndexFeatureList>();
     this->init_feature_list();
 }

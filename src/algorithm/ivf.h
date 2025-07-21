@@ -19,6 +19,7 @@
 #include "data_cell/bucket_datacell.h"
 #include "data_cell/flatten_interface.h"
 #include "impl/basic_searcher.h"
+#include "impl/heap/distance_heap.h"
 #include "index/index_common_param.h"
 #include "inner_index_interface.h"
 #include "ivf_parameter.h"
@@ -26,7 +27,6 @@
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
 #include "typing.h"
-#include "utils/distance_heap.h"
 #include "vsag/index.h"
 
 namespace vsag {
@@ -61,6 +61,11 @@ public:
 
     std::vector<int64_t>
     Build(const DatasetPtr& base) override;
+
+    IndexType
+    GetIndexType() override {
+        return IndexType::IVF;
+    }
 
     std::vector<int64_t>
     Add(const DatasetPtr& base) override;
@@ -133,5 +138,7 @@ private:
     FlattenInterfacePtr reorder_codes_{nullptr};
 
     AttrInvertedInterfacePtr attr_filter_index_{nullptr};
+
+    std::shared_ptr<SafeThreadPool> thread_pool_{nullptr};
 };
 }  // namespace vsag

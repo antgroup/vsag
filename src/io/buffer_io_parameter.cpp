@@ -34,7 +34,7 @@ BufferIOParameter::FromJson(const JsonType& json) {
 }
 
 JsonType
-BufferIOParameter::ToJson() {
+BufferIOParameter::ToJson() const {
     JsonType json;
     json[IO_TYPE_KEY] = IO_TYPE_VALUE_BUFFER_IO;
     json[IO_FILE_PATH] = this->path_;

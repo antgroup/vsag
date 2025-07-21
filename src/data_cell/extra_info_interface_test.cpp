@@ -19,9 +19,9 @@
 #include <fstream>
 #include <iostream>
 
-#include "default_allocator.h"
 #include "fixtures.h"
-#include "safe_allocator.h"
+#include "impl/allocator/default_allocator.h"
+#include "impl/allocator/safe_allocator.h"
 #include "simd/simd.h"
 
 namespace vsag {
@@ -32,6 +32,9 @@ ExtraInfoInterfaceTest::BasicTest(uint64_t base_count) {
     int64_t query_count = 100;
     uint64_t extra_info_size = extra_info_->ExtraInfoSize();
     auto extra_infos = fixtures::generate_extra_infos(base_count, extra_info_size);
+
+    extra_info_->Resize(base_count);
+    REQUIRE(extra_info_->GetMaxCapacity() == base_count);
 
     // test InsertExtraInfo and BatchInsertExtraInfo
     auto old_count = extra_info_->TotalCount();
@@ -64,10 +67,6 @@ ExtraInfoInterfaceTest::BasicTest(uint64_t base_count) {
     }
 
     // test SetMaxCapacity and GetMaxCapacity
-    auto origin_capacity = extra_info_->GetMaxCapacity();
-    extra_info_->SetMaxCapacity(origin_capacity * 2);
-    REQUIRE(extra_info_->GetMaxCapacity() == origin_capacity * 2);
-    extra_info_->SetMaxCapacity(origin_capacity);
     allocator->Delete(extra_info);
 }
 

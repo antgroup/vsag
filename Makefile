@@ -86,11 +86,11 @@ cov:                     ## Build unit tests with code coverage enabled.
 
 .PHONEY: lint
 lint:                    ## Check coding styles defined in `.clang-tidy`.
-	@./scripts/linters/run-clang-tidy.py -p build/ -use-color -source-filter '^.*vsag\/src.*(?<!_test)\.cpp$$' -j ${COMPILE_JOBS}
+	@./scripts/linters/run-clang-tidy.py -p build-release/ -use-color -source-filter '^.*vsag\/src.*(?<!_test)\.cpp$$' -j ${COMPILE_JOBS}
 
 .PHONEY: fix-lint
 fix-lint:                ## Fix coding style issues in-place via clang-apply-replacements, use it be careful!!!
-	@./scripts/linters/run-clang-tidy.py -p build/ -use-color -source-filter '^.*vsag\/src.*(?<!_test)\.cpp$$' -j ${COMPILE_JOBS} -fix
+	@./scripts/linters/run-clang-tidy.py -p build-release/ -use-color -source-filter '^.*vsag\/src.*(?<!_test)\.cpp$$' -j ${COMPILE_JOBS} -fix
 
 .PHONY: test_parallel
 test_parallel:           ## Run all tests parallel (used in CI).

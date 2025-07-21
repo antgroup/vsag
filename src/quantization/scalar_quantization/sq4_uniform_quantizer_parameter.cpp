@@ -16,6 +16,7 @@
 #include "sq4_uniform_quantizer_parameter.h"
 
 #include "inner_string_params.h"
+#include "logger.h"
 
 namespace vsag {
 SQ4UniformQuantizerParameter::SQ4UniformQuantizerParameter()
@@ -30,10 +31,30 @@ SQ4UniformQuantizerParameter::FromJson(const JsonType& json) {
 }
 
 JsonType
-SQ4UniformQuantizerParameter::ToJson() {
+SQ4UniformQuantizerParameter::ToJson() const {
     JsonType json;
     json[QUANTIZATION_TYPE_KEY] = QUANTIZATION_TYPE_VALUE_SQ4_UNIFORM;
     json[SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE] = this->trunc_rate_;
     return json;
+}
+bool
+SQ4UniformQuantizerParameter::CheckCompatibility(const ParamPtr& other) const {
+    auto other_sq4_uniform_quantizer_parameter =
+        std::dynamic_pointer_cast<SQ4UniformQuantizerParameter>(other);
+    if (not other_sq4_uniform_quantizer_parameter) {
+        logger::error(
+            "SQ4UniformQuantizerParameter::CheckCompatibility: "
+            "other is not SQ4UniformQuantizerParameter");
+        return false;
+    }
+    if (this->trunc_rate_ != other_sq4_uniform_quantizer_parameter->trunc_rate_) {
+        logger::error(
+            "SQ4UniformQuantizerParameter::CheckCompatibility: "
+            "trunc_rate mismatch: {} vs {}",
+            this->trunc_rate_,
+            other_sq4_uniform_quantizer_parameter->trunc_rate_);
+        return false;
+    }
+    return true;
 }
 }  // namespace vsag

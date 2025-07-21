@@ -18,6 +18,7 @@
 #include <chrono>
 #include <ios>
 
+#include "simd/simd.h"
 #include "utils/linear_congruential_generator.h"
 
 namespace vsag {

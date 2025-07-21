@@ -19,9 +19,9 @@
 #include <fstream>
 #include <random>
 
-#include "default_allocator.h"
 #include "fixtures.h"
-#include "safe_allocator.h"
+#include "impl/allocator/default_allocator.h"
+#include "impl/allocator/safe_allocator.h"
 
 using namespace vsag;
 
