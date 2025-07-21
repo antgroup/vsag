@@ -35,6 +35,14 @@ Options::logger() {
 }
 
 void
+Options::set_direct_IO_object_align_bit(size_t align_bit) {
+    if (align_bit > 12) {
+        throw std::runtime_error(fmt::format("size ({}) should be smaller than 2^12(4096).", align_bit));
+    }
+    direct_IO_object_align_bit_.store(align_bit, std::memory_order_release);
+}
+
+void
 Options::set_block_size_limit(size_t size) {
     if (size < 2ULL * 1024 * 1024) {
         throw std::runtime_error(fmt::format("size ({}) should be greater than 2M.", size));

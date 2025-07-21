@@ -132,6 +132,29 @@ public:
     set_block_size_limit(size_t size);
 
     /**
+     * @brief Gets the size of direct IO object align bits.
+     *
+     * This function retrieves the size of direct IO object align bits.
+     * It is thread-safe, using memory order acquire operations.
+     *
+     * @return size_t The size of direct IO object align bits.
+     */
+    [[nodiscard]] inline size_t
+    direct_IO_object_align_bit() const {
+        return direct_IO_object_align_bit_.load(std::memory_order_acquire);
+    }
+
+    /**
+     * @brief Sets the size of direct IO object align bits.
+     *
+     * This function sets the size of direct IO object align bits.
+     *
+     * @param align_bit The size of direct IO object align bits.
+     */
+    void
+    set_direct_IO_object_align_bit(size_t align_bit);
+
+    /**
      * @brief Gets the current logger instance.
      *
      * @return Logger* Pointer to the current logger instance.
@@ -175,6 +198,9 @@ private:
 
     ///< The size of the maximum memory allocated each time (default is 128MB).
     std::atomic<size_t> block_size_limit_{128 * 1024 * 1024};
+
+    ///< The size of the bits used for DirectIOObject align (default is 9). 
+    std::atomic<size_t> direct_IO_object_align_bit_{9};
 
     ///< Pointer to the logger instance.
     Logger* logger_ = nullptr;
