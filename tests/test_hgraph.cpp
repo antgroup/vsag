@@ -720,7 +720,6 @@ TestHGraphGetRawVector(const fixtures::HGraphTestIndexPtr& test_index,
                                                                          /*graph_storage*/ "flat",
                                                                          /*support_remove*/ false,
                                                                          /*use_attr_filter*/ false,
-                                                                         /*immutable*/ false,
                                                                          /*store_raw_vector*/ true);
 
                 // Create index and dataset
