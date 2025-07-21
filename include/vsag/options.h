@@ -200,7 +200,7 @@ private:
     ///< The size of the maximum memory allocated each time (default is 128MB).
     std::atomic<size_t> block_size_limit_{128 * 1024 * 1024};
 
-    ///< The size of the bits used for DirectIOObject align (default is 9). 
+    ///< The size of the bits used for DirectIOObject align (default is 9).
     std::atomic<size_t> direct_IO_object_align_bit_{9};
 
     ///< Pointer to the logger instance.
