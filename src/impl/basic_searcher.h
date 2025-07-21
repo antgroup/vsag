@@ -104,6 +104,9 @@ public:
     virtual double
     MockRun() const;
 
+    void
+    SetMutexArray(MutexArrayPtr new_mutex_array);
+
 private:
     // rid means the neighbor's rank (e.g., the first neighbor's rid == 0)
     //  id means the neighbor's  id  (e.g., the first neighbor's  id == 12345)

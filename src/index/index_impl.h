@@ -320,6 +320,11 @@ public:
         return std::make_shared<IndexImpl<T>>(model_value.value(), this->common_param_);
     }
 
+    tl::expected<void, Error>
+    SetImmutable() override {
+        SAFE_CALL(this->inner_index_->SetImmutable());
+    }
+
     [[nodiscard]] tl::expected<BinarySet, Error>
     Serialize() const override {
         SAFE_CALL(return this->inner_index_->Serialize());

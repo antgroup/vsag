@@ -397,4 +397,10 @@ BasicSearcher::MockRun() const {
     return time_cost;
 }
 
+void
+BasicSearcher::SetMutexArray(MutexArrayPtr new_mutex_array) {
+    mutex_array_.reset();
+    mutex_array_ = std::move(new_mutex_array);
+}
+
 }  // namespace vsag

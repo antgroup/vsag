@@ -149,7 +149,6 @@ const char* const HGRAPH_INIT_CAPACITY = "hgraph_init_capacity";
 const char* const HGRAPH_GRAPH_TYPE = "graph_type";
 const char* const HGRAPH_GRAPH_STORAGE_TYPE = "graph_storage_type";
 const char* const HGRAPH_BUILD_THREAD_COUNT = "build_thread_count";
-const char* const HGRAPH_IMMUTABLE = "immutable";
 const char* const HGRAPH_PRECISE_QUANTIZATION_TYPE = "precise_quantization_type";
 const char* const HGRAPH_BASE_IO_TYPE = "base_io_type";
 const char* const HGRAPH_BASE_PQ_DIM = "base_pq_dim";
