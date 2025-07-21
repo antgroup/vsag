@@ -176,6 +176,9 @@ public:
     void
     Merge(const std::vector<MergeUnit>& merge_units) override;
 
+    void
+    SetImmutable() override;
+
 private:
     const void*
     get_data(const DatasetPtr& dataset, uint32_t index = 0) const {
