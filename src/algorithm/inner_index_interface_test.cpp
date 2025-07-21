@@ -162,6 +162,7 @@ TEST_CASE("NOT Implemented", "[ut][InnerIndexInterface]") {
     REQUIRE_THROWS(empty_index->Merge(merge_units));
     REQUIRE_THROWS(empty_index->GetExtraInfoByIds(nullptr, 1, nullptr));
     REQUIRE_THROWS(empty_index->GetVectorByInnerId(1, nullptr));
+    REQUIRE_THROWS(empty_index->SetImmutable());
 
     std::stringstream stream;
     empty_index->Serialize(stream);

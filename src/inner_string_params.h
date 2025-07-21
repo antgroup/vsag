@@ -36,7 +36,6 @@ const char* const HGRAPH_BASE_CODES_KEY = "base_codes";
 const char* const HGRAPH_PRECISE_CODES_KEY = "precise_codes";
 const char* const HGRAPH_EXTRA_INFO_KEY = "extra_info";
 const char* const HGRAPH_USE_ATTRIBUTE_FILTER_KEY = "use_attribute_filter";
-const char* const HGRSPH_IMMUTABLE_KEY = "immutable";
 
 // IO param key
 const char* const IO_PARAMS_KEY = "io_params";
