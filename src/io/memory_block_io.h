@@ -59,6 +59,10 @@ public:
         return true;
     }
 
+    void
+    InitIOImpl(const IOParamPtr& io_param) {
+    }
+
 private:
     void
     update_by_block_size();

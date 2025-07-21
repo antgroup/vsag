@@ -15,7 +15,6 @@
 
 #include "ivf.h"
 
-#include <fstream>
 #include <set>
 
 #include "attr/executor/executor.h"
@@ -556,9 +555,9 @@ IVF::Deserialize(StreamReader& reader) {
             }
         }
 
-        JsonType datacell_offsets = metadata->Get("datacell_offsets");
+        JsonType datacell_offsets = metadata->Get(DATACELL_OFFSETS);
         logger::debug("datacell_offsets: {}", datacell_offsets.dump());
-        JsonType datacell_sizes = metadata->Get("datacell_sizes");
+        JsonType datacell_sizes = metadata->Get(DATACELL_SIZES);
         logger::debug("datacell_sizes: {}", datacell_sizes.dump());
 
         READ_DATACELL_WITH_NAME(reader, "bucket", this->bucket_);

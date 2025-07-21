@@ -1095,6 +1095,66 @@ TEST_CASE("[Daily] HGraph Serialize File", "[ft][hgraph][serialization][daily]")
     auto resource = test_index->GetResource(false);
     TestHGraphSerialize(test_index, resource);
 }
+
+static void
+TestHGraphReaderIO(const fixtures::HGraphTestIndexPtr& test_index,
+                   const fixtures::HGraphResourcePtr& resource) {
+    using namespace fixtures;
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    auto size = GENERATE(1024 * 1024 * 2);
+    auto search_param = fmt::format(fixtures::search_param_tmp, 200, false);
+    uint64_t extra_info_size = 64;
+
+    for (auto metric_type : resource->metric_types) {
+        for (auto dim : resource->dims) {
+            for (auto [base_quantization_str, recall] : resource->test_cases) {
+                INFO(fmt::format("metric_type: {}, dim: {}, base_quantization_str: {}, recall: {}",
+                                 metric_type,
+                                 dim,
+                                 base_quantization_str,
+                                 recall));
+                if (HGraphTestIndex::IsRaBitQ(base_quantization_str) &&
+                    (metric_type != "l2" || dim < fixtures::RABITQ_MIN_RACALL_DIM)) {
+                    continue;  // Skip invalid RaBitQ configurations
+                }
+                vsag::Options::Instance().set_block_size_limit(size);
+                auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(
+                    metric_type, dim, base_quantization_str, 5 /*thread_count*/, extra_info_size);
+                auto index = TestIndex::TestFactory(test_index->name, param, true);
+                auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(dim,
+                                                                         resource->base_count,
+                                                                         metric_type,
+                                                                         false /*with_path*/,
+                                                                         0.8 /*valid_ratio*/,
+                                                                         extra_info_size);
+
+                TestIndex::TestBuildIndex(index, dataset, true);
+                if (base_quantization_str.find(',') != std::string::npos) {
+                    base_quantization_str += ",reader_io";
+                }
+                auto reader_param = HGraphTestIndex::GenerateHGraphBuildParametersString(
+                    metric_type, dim, base_quantization_str, 5 /*thread_count*/, extra_info_size);
+                auto index2 = TestIndex::TestFactory(test_index->name, reader_param, true);
+                TestIndex::TestSerializeReaderSet(
+                    index, index2, dataset, search_param, test_index->name, true);
+                vsag::Options::Instance().set_block_size_limit(origin_size);
+            }
+        }
+    }
+}
+
+TEST_CASE("[PR] HGraph Reader IO", "[ft][hgraph][serialization][pr]") {
+    auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
+    auto resource = test_index->GetResource(true);
+    TestHGraphReaderIO(test_index, resource);
+}
+
+TEST_CASE("[Daily] HGraph Reader IO", "[ft][hgraph][serialization][daily]") {
+    auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
+    auto resource = test_index->GetResource(false);
+    TestHGraphReaderIO(test_index, resource);
+}
+
 static void
 TestHGraphClone(const fixtures::HGraphTestIndexPtr& test_index,
                 const fixtures::HGraphResourcePtr& resource) {
