@@ -136,6 +136,7 @@ public:
      *
      * This function retrieves the size of direct IO object align bits.
      * It is thread-safe, using memory order acquire operations.
+     * The size of direct IO object align bits should be smaller than 21(direct IO object smaller than 2M).
      *
      * @return size_t The size of direct IO object align bits.
      */
