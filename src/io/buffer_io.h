@@ -56,6 +56,10 @@ public:
     static bool
     InMemoryImpl();
 
+    void
+    InitIOImpl(const IOParamPtr& io_param) {
+    }
+
 private:
     std::string filepath_{};
 
