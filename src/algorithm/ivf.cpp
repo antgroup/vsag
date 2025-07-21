@@ -195,7 +195,7 @@ IVF::IVF(const IVFParameterPtr& param, const IndexCommonParam& common_param)
     }
 
     this->thread_pool_ = common_param.thread_pool_;
-    if (param->thread_count > 1 && this->thread_pool_ == nullptr) {
+    if (param->thread_count > 1 and this->thread_pool_ == nullptr) {
         this->thread_pool_ = SafeThreadPool::FactoryDefaultThreadPool();
         this->thread_pool_->SetPoolSize(param->thread_count);
     }
@@ -317,6 +317,7 @@ IVF::Add(const DatasetPtr& base) {
         current_num = this->total_elements_;
         this->total_elements_ += num_element;
     }
+
     auto add_func = [&](int64_t i) -> void {
         Vector<float> normalize_data(dim_, allocator_);
         Vector<float> residual_data(dim_, allocator_);
@@ -324,7 +325,7 @@ IVF::Add(const DatasetPtr& base) {
         for (int64_t j = 0; j < buckets_per_data_; ++j) {
             const auto* data_ptr = vectors + i * dim_;
             auto idx = i * buckets_per_data_ + j;
-
+            InnerIdType offset_id;
             if (use_residual_) {
                 partition_strategy_->GetCentroid(buckets[idx], centroid);
                 if (metric_ == MetricType::METRIC_TYPE_COSINE) {
@@ -332,13 +333,18 @@ IVF::Add(const DatasetPtr& base) {
                     data_ptr = normalize_data.data();
                 }
                 FP32Sub(data_ptr, centroid.data(), residual_data.data(), dim_);
-                bucket_->InsertVector(residual_data.data(),
-                                      buckets[idx],
-                                      idx + current_num * buckets_per_data_,
-                                      centroid.data());
+                offset_id = bucket_->InsertVector(residual_data.data(),
+                                                  buckets[idx],
+                                                  idx + current_num * buckets_per_data_,
+                                                  centroid.data());
             } else {
-                bucket_->InsertVector(
+                offset_id = bucket_->InsertVector(
                     data_ptr, buckets[idx], idx + current_num * buckets_per_data_);
+            }
+            if (use_attribute_filter_ and this->attr_filter_index_ != nullptr and
+                attr_sets != nullptr) {
+                const auto& attr_set = attr_sets[i];
+                this->attr_filter_index_->Insert(attr_set, offset_id, buckets[idx]);
             }
         }
     };
@@ -358,23 +364,6 @@ IVF::Add(const DatasetPtr& base) {
         }
     }
     this->bucket_->Package();
-
-    // TODO(LHT): fix on concurrent add
-    if (use_attribute_filter_ and this->attr_filter_index_ != nullptr and attr_sets != nullptr) {
-        for (uint64_t i = 0; i < this->bucket_->bucket_count_; ++i) {
-            auto bucket_id = static_cast<BucketIdType>(i);
-            auto bucket_size = this->bucket_->GetBucketSize(bucket_id);
-            if (bucket_size == 0) {
-                continue;
-            }
-            auto* inner_ids = this->bucket_->GetInnerIds(bucket_id);
-            for (InnerIdType j = 0; j < bucket_size; ++j) {
-                auto inner_id = inner_ids[j];
-                const auto& attr_set = attr_sets[inner_id - current_num];
-                this->attr_filter_index_->Insert(attr_set, j, bucket_id);
-            }
-        }
-    }
     return {};
 }
 
