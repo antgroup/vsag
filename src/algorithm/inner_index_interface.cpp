@@ -189,6 +189,7 @@ InnerIndexInterface::Deserialize(const ReaderSet& reader_set) {
         uint64_t cursor = 0;
         auto reader = ReadFuncStreamReader(func, cursor, index_reader->Size());
         this->Deserialize(reader);
+        this->SetIO(index_reader);
         return;
     } catch (const std::bad_alloc& e) {
         throw VsagException(ErrorType::READ_ERROR, "failed to Deserialize: ", e.what());

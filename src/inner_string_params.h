@@ -44,6 +44,7 @@ const char* const IO_TYPE_KEY = "type";
 const char* const IO_TYPE_VALUE_MEMORY_IO = "memory_io";
 const char* const IO_TYPE_VALUE_BUFFER_IO = "buffer_io";
 const char* const IO_TYPE_VALUE_MMAP_IO = "mmap_io";
+const char* const IO_TYPE_VALUE_READER_IO = "reader_io";
 const char* const IO_TYPE_VALUE_ASYNC_IO = "async_io";
 const char* const IO_TYPE_VALUE_BLOCK_MEMORY_IO = "block_memory_io";
 const char* const BLOCK_IO_BLOCK_SIZE_KEY = "block_size";
@@ -121,6 +122,9 @@ const char* const SPARSE_VECTOR_DATA_CELL = "sparse_vector_data_cell";
 
 const char* const GRAPH_SUPPORT_REMOVE = "support_remove";
 const char* const REMOVE_FLAG_BIT = "remove_flag_bit";
+
+const char* const DATACELL_OFFSETS = "datacell_offsets";
+const char* const DATACELL_SIZES = "datacell_sizes";
 
 const std::unordered_map<std::string, std::string> DEFAULT_MAP = {
     {"INDEX_TYPE_HGRAPH", INDEX_TYPE_HGRAPH},

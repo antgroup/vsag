@@ -119,6 +119,10 @@ public:
         return false;
     }
 
+    void
+    InitIOImpl(const IOParamPtr& io_param) {
+    }
+
     constexpr static int64_t DEFAULT_INIT_MMAP_SIZE = 4096;
 
 private:

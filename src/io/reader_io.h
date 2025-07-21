@@ -15,26 +15,33 @@
 
 #pragma once
 
-#include "async_io_parameter.h"
 #include "basic_io.h"
 #include "index/index_common_param.h"
-#include "io_context.h"
+#include "reader_io_parameter.h"
+#include "vsag/allocator.h"
 
 namespace vsag {
 
-class AsyncIO : public BasicIO<AsyncIO> {
+class ReaderIO : public BasicIO<ReaderIO> {
 public:
-    explicit AsyncIO(std::string filename, Allocator* allocator);
+    explicit ReaderIO(Allocator* allocator) : BasicIO<ReaderIO>(allocator) {
+    }
 
-    explicit AsyncIO(const AsyncIOParameterPtr& io_param, const IndexCommonParam& common_param);
+    explicit ReaderIO(const ReaderIOParamPtr& param, const IndexCommonParam& common_param)
+        : ReaderIO(common_param.allocator_.get()) {
+    }
 
-    explicit AsyncIO(const IOParamPtr& param, const IndexCommonParam& common_param);
+    explicit ReaderIO(const IOParamPtr& param, const IndexCommonParam& common_param)
+        : ReaderIO(std::dynamic_pointer_cast<ReaderIOParameter>(param), common_param) {
+    }
 
-    ~AsyncIO() override;
+    ~ReaderIO() override = default;
 
-public:
     void
     WriteImpl(const uint8_t* data, uint64_t size, uint64_t offset);
+
+    void
+    InitIOImpl(const IOParamPtr& io_param);
 
     bool
     ReadImpl(uint64_t size, uint64_t offset, uint8_t* data) const;
@@ -42,32 +49,25 @@ public:
     [[nodiscard]] const uint8_t*
     DirectReadImpl(uint64_t size, uint64_t offset, bool& need_release) const;
 
-    static void
-    ReleaseImpl(const uint8_t* data);
+    void
+    ReleaseImpl(const uint8_t* data) const;
 
     bool
-    MultiReadImpl(uint8_t* datas, uint64_t* sizes, uint64_t* offsets, uint64_t count) const;
+    MultiReadImpl(uint8_t* datas,
+                  const uint64_t* sizes,
+                  const uint64_t* offsets,
+                  uint64_t count) const;
 
     void
-    PrefetchImpl(uint64_t offset, uint64_t cache_line = 64){};
+    PrefetchImpl(uint64_t offset, uint64_t cache_line = 64);
 
-    static bool
+    static inline bool
     InMemoryImpl() {
         return false;
     }
 
-    void
-    InitIOImpl(const IOParamPtr& io_param) {
-    }
-
-public:
-    static std::unique_ptr<IOContextPool> io_context_pool;
-
 private:
-    std::string filepath_{};
-
-    int rfd_{-1};
-
-    int wfd_{-1};
+    std::shared_ptr<Reader> reader_{nullptr};
 };
+
 }  // namespace vsag

@@ -138,6 +138,11 @@ public:
         this->io_ = io;
     }
 
+    void
+    InitIO(const IOParamPtr& io_param) override {
+        this->io_->InitIO(io_param);
+    }
+
 public:
     std::shared_ptr<Quantizer<QuantTmpl>> quantizer_{nullptr};
     std::shared_ptr<BasicIO<IOTmpl>> io_{nullptr};
