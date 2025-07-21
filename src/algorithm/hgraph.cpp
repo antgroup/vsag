@@ -1624,7 +1624,6 @@ HGraph::SetImmutable() {
     this->immutable_ = true;
 }
 
-
 void
 HGraph::SetIO(const std::shared_ptr<Reader> reader) {
     if (use_reorder_) {
