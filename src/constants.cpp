@@ -163,6 +163,7 @@ const char* const HGRAPH_STORE_RAW_VECTOR = "store_raw_vector";
 
 const char* const BRUTE_FORCE_QUANTIZATION_TYPE = "quantization_type";
 const char* const BRUTE_FORCE_IO_TYPE = "io_type";
+const char* const BRUTE_FORCE_STORE_RAW_VECTOR = "store_raw_vector";
 
 const char* const IVF_USE_RESIDUAL = "use_residual";
 const char* const IVF_USE_REORDER = "use_reorder";

@@ -261,7 +261,8 @@ BruteForce::InitFeatures() {
                                                 IndexFeature::SUPPORT_CAL_DISTANCE_BY_ID,
                                                 IndexFeature::SUPPORT_RANGE_SEARCH_WITH_ID_FILTER});
     }
-    if (name == QUANTIZATION_TYPE_VALUE_FP32 and metric_ != MetricType::METRIC_TYPE_COSINE) {
+    if (name == QUANTIZATION_TYPE_VALUE_FP32 and
+        (metric_ != MetricType::METRIC_TYPE_COSINE || this->inner_codes_->HoldMolds())) {
         this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_GET_RAW_VECTOR_BY_IDS);
     }
 
@@ -310,27 +311,30 @@ static const std::string BRUTE_FORCE_PARAMS_TEMPLATE =
         "{QUANTIZATION_PARAMS_KEY}": {
             "{QUANTIZATION_TYPE_KEY}": "{QUANTIZATION_TYPE_VALUE_FP32}",
             "subspace": 64,
-            "nbits": 8
+            "nbits": 8,
+            "{HOLD_MOLDS}": false
         }
     })";
 
 ParamPtr
 BruteForce::CheckAndMappingExternalParam(const JsonType& external_param,
                                          const IndexCommonParam& common_param) {
-    const ConstParamMap external_mapping = {{
-                                                BRUTE_FORCE_QUANTIZATION_TYPE,
-                                                {
-                                                    QUANTIZATION_PARAMS_KEY,
-                                                    QUANTIZATION_TYPE_KEY,
-                                                },
-                                            },
-                                            {
-                                                BRUTE_FORCE_IO_TYPE,
-                                                {
-                                                    IO_PARAMS_KEY,
-                                                    IO_TYPE_KEY,
-                                                },
-                                            }};
+    const ConstParamMap external_mapping = {
+        {
+            BRUTE_FORCE_QUANTIZATION_TYPE,
+            {
+                QUANTIZATION_PARAMS_KEY,
+                QUANTIZATION_TYPE_KEY,
+            },
+        },
+        {
+            BRUTE_FORCE_IO_TYPE,
+            {
+                IO_PARAMS_KEY,
+                IO_TYPE_KEY,
+            },
+        },
+        {BRUTE_FORCE_STORE_RAW_VECTOR, {QUANTIZATION_PARAMS_KEY, HOLD_MOLDS}}};
 
     if (common_param.data_type_ == DataTypes::DATA_TYPE_INT8) {
         throw VsagException(ErrorType::INVALID_ARGUMENT,

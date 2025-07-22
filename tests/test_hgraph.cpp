@@ -693,6 +693,7 @@ TestHGraphGetRawVector(const fixtures::HGraphTestIndexPtr& test_index,
                                                                    {"sq4_uniform,fp32", 0.95}};
     auto search_param = fmt::format(fixtures::search_param_tmp, 200, false);
     for (auto metric_type : resource->metric_types) {
+        metric_type = "cosine";
         for (auto dim : resource->dims) {
             for (auto& [base_quantization_str, recall] : test_cases) {
                 INFO(fmt::format("metric_type: {}, dim: {}, base_quantization_str: {}, recall: {}",

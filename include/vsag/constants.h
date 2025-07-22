@@ -160,6 +160,7 @@ extern const char* const HGRAPH_STORE_RAW_VECTOR;
 
 extern const char* const BRUTE_FORCE_QUANTIZATION_TYPE;
 extern const char* const BRUTE_FORCE_IO_TYPE;
+extern const char* const BRUTE_FORCE_STORE_RAW_VECTOR;
 
 extern const char* const IVF_USE_RESIDUAL;
 extern const char* const IVF_USE_REORDER;

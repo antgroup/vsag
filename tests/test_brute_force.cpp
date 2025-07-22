@@ -67,7 +67,8 @@ BruteForceTestIndex::GenerateBruteForceBuildParametersString(const std::string& 
         "metric_type": "{}",
         "dim": {},
         "index_param": {{
-            "quantization_type": "{}"
+            "quantization_type": "{}",
+            "store_raw_vector": true
         }}
     }}
     )";
@@ -87,6 +88,7 @@ BruteForceTestIndex::TestGeneral(const IndexPtr& index,
     TestRangeSearch(index, dataset, search_param, recall, 10, true);
     TestRangeSearch(index, dataset, search_param, recall / 2.0, 5, true);
     TestFilterSearch(index, dataset, search_param, recall, true);
+    TestGetRawVectorByIds(index, dataset, true);
     TestCheckIdExist(index, dataset);
 }
 }  // namespace fixtures

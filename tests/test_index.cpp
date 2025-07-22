@@ -1711,9 +1711,9 @@ TestIndex::TestGetRawVectorByIds(const IndexPtr& index,
     auto float_vectors = vectors.value()->GetFloat32Vectors();
     auto dim = dataset->base_->GetDim();
     for (int i = 0; i < count; ++i) {
-        fixtures::dist_t dis = vsag::FP32ComputeL2Sqr(
-            float_vectors + i * dim, dataset->base_->GetFloat32Vectors() + i * dim, dim);
-        REQUIRE(dis == 0);
+        REQUIRE(std::memcmp(float_vectors + i * dim,
+                            dataset->base_->GetFloat32Vectors() + i * dim,
+                            dim * sizeof(float)) == 0);
     }
 }
 

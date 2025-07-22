@@ -56,12 +56,14 @@ template <MetricType metric>
 bool
 FP32Quantizer<metric>::EncodeOneImpl(const DataType* data, uint8_t* codes) {
     if constexpr (metric == MetricType::METRIC_TYPE_COSINE) {
-        Normalize(data, reinterpret_cast<float*>(codes), this->dim_);
         if (this->hold_molds_) {
             // Store the mold for cosine similarity
             const auto* data_float = reinterpret_cast<const float*>(data);
             float mold = std::sqrt(FP32ComputeIP(data_float, data_float, this->dim_));
+            memcpy(codes, data, this->code_size_);
             memcpy(codes + this->dim_ * sizeof(float), &mold, sizeof(float));
+        } else {
+            Normalize(data, reinterpret_cast<float*>(codes), this->dim_);
         }
     } else {
         memcpy(codes, data, this->code_size_);
@@ -82,13 +84,6 @@ template <MetricType metric>
 bool
 FP32Quantizer<metric>::DecodeOneImpl(const uint8_t* codes, DataType* data) {
     memcpy(data, codes, this->dim_ * sizeof(float));
-    if (metric == MetricType::METRIC_TYPE_COSINE && this->hold_molds_) {
-        // If hold molds, we need to restore the mold for cosine similarity
-        const auto* mold_ptr = reinterpret_cast<const float*>(codes + this->dim_ * sizeof(float));
-        for (int i = 0; i < this->dim_; ++i) {
-            data[i] *= mold_ptr[0];
-        }
-    }
     return true;
 }
 
@@ -104,10 +99,21 @@ FP32Quantizer<metric>::DecodeBatchImpl(const uint8_t* codes, DataType* data, uin
 template <MetricType metric>
 float
 FP32Quantizer<metric>::ComputeImpl(const uint8_t* codes1, const uint8_t* codes2) {
-    if (metric == MetricType::METRIC_TYPE_IP or metric == MetricType::METRIC_TYPE_COSINE) {
+    if (metric == MetricType::METRIC_TYPE_IP) {
         return 1.0F - FP32ComputeIP(reinterpret_cast<const float*>(codes1),
                                     reinterpret_cast<const float*>(codes2),
                                     this->dim_);
+    }
+    if (metric == MetricType::METRIC_TYPE_COSINE) {
+        auto similarity = FP32ComputeIP(reinterpret_cast<const float*>(codes1),
+                                        reinterpret_cast<const float*>(codes2),
+                                        this->dim_);
+        if (this->hold_molds_) {
+            const auto* mold1 = reinterpret_cast<const float*>(codes1 + this->dim_ * sizeof(float));
+            const auto* mold2 = reinterpret_cast<const float*>(codes2 + this->dim_ * sizeof(float));
+            similarity /= mold1[0] * mold2[0];
+        }
+        return 1.0F - similarity;
     }
     if (metric == MetricType::METRIC_TYPE_L2SQR) {
         return FP32ComputeL2Sqr(reinterpret_cast<const float*>(codes1),
@@ -151,10 +157,19 @@ void
 FP32Quantizer<metric>::ComputeDistImpl(Computer<FP32Quantizer<metric>>& computer,
                                        const uint8_t* codes,
                                        float* dists) const {
-    if (metric == MetricType::METRIC_TYPE_IP or metric == MetricType::METRIC_TYPE_COSINE) {
+    if (metric == MetricType::METRIC_TYPE_IP) {
         *dists = 1.0F - FP32ComputeIP(reinterpret_cast<const float*>(codes),
                                       reinterpret_cast<const float*>(computer.buf_),
                                       this->dim_);
+    } else if (metric == MetricType::METRIC_TYPE_COSINE) {
+        auto similarity = FP32ComputeIP(reinterpret_cast<const float*>(codes),
+                                        reinterpret_cast<const float*>(computer.buf_),
+                                        this->dim_);
+        if (this->hold_molds_) {
+            const auto* mold = reinterpret_cast<const float*>(codes + this->dim_ * sizeof(float));
+            similarity /= mold[0];
+        }
+        *dists = 1.0F - similarity;
     } else if (metric == MetricType::METRIC_TYPE_L2SQR) {
         *dists = FP32ComputeL2Sqr(reinterpret_cast<const float*>(codes),
                                   reinterpret_cast<const float*>(computer.buf_),
@@ -175,8 +190,7 @@ FP32Quantizer<metric>::ComputeDistsBatch4Impl(Computer<FP32Quantizer<metric>>& c
                                               float& dists2,
                                               float& dists3,
                                               float& dists4) const {
-    if constexpr (metric == MetricType::METRIC_TYPE_IP or
-                  metric == MetricType::METRIC_TYPE_COSINE) {
+    if constexpr (metric == MetricType::METRIC_TYPE_IP) {
         FP32ComputeIPBatch4(reinterpret_cast<const float*>(computer.buf_),
                             this->dim_,
                             reinterpret_cast<const float*>(codes1),
@@ -187,6 +201,31 @@ FP32Quantizer<metric>::ComputeDistsBatch4Impl(Computer<FP32Quantizer<metric>>& c
                             dists2,
                             dists3,
                             dists4);
+        dists1 = 1.0F - dists1;
+        dists2 = 1.0F - dists2;
+        dists3 = 1.0F - dists3;
+        dists4 = 1.0F - dists4;
+    } else if (metric == MetricType::METRIC_TYPE_COSINE) {
+        FP32ComputeIPBatch4(reinterpret_cast<const float*>(computer.buf_),
+                            this->dim_,
+                            reinterpret_cast<const float*>(codes1),
+                            reinterpret_cast<const float*>(codes2),
+                            reinterpret_cast<const float*>(codes3),
+                            reinterpret_cast<const float*>(codes4),
+                            dists1,
+                            dists2,
+                            dists3,
+                            dists4);
+        if (this->hold_molds_) {
+            const auto* mold1 = reinterpret_cast<const float*>(codes1 + this->dim_ * sizeof(float));
+            const auto* mold2 = reinterpret_cast<const float*>(codes2 + this->dim_ * sizeof(float));
+            const auto* mold3 = reinterpret_cast<const float*>(codes3 + this->dim_ * sizeof(float));
+            const auto* mold4 = reinterpret_cast<const float*>(codes4 + this->dim_ * sizeof(float));
+            dists1 /= mold1[0];
+            dists2 /= mold2[0];
+            dists3 /= mold3[0];
+            dists4 /= mold4[0];
+        }
         dists1 = 1.0F - dists1;
         dists2 = 1.0F - dists2;
         dists3 = 1.0F - dists3;
