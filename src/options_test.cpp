@@ -42,5 +42,5 @@ TEST_CASE("Options Test", "[ut][option]") {
     vsag::Options::Instance().set_direct_IO_object_align_bit(direct_IO_object_align_bit);
     REQUIRE(vsag::Option::Instance().direct_IO_object_align_bit() == direct_IO_object_align_bit);
 
-    REQUIRE_THROWS(vsag::Option::Instance().set_direct_IO_object_align_bit(13));
+    REQUIRE_THROWS(vsag::Option::Instance().set_direct_IO_object_align_bit(22));
 }
