@@ -155,6 +155,9 @@ BufferStreamReader::BufferStreamReader(StreamReader* reader,
                                        size_t max_size,
                                        vsag::Allocator* allocator)
     : reader_impl_(reader), max_size_(max_size), allocator_(allocator) {
+    if (max_size == std::numeric_limits<uint64_t>::max()) {
+        max_size_ = reader->Length() - reader->GetCursor();
+    }
     buffer_size_ = std::min(max_size_, vsag::Options::Instance().block_size_limit());
     buffer_cursor_ = buffer_size_;
     valid_size_ = buffer_size_;

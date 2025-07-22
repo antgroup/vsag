@@ -514,22 +514,25 @@ IVF::Deserialize(StreamReader& reader) {
     // try to deserialize footer (only in new version)
     auto footer = Footer::Parse(reader);
 
+    BufferStreamReader buffer_reader(
+        &reader, std::numeric_limits<uint64_t>::max(), this->allocator_);
+
     if (footer == nullptr) {  // old format, DON'T EDIT, remove in the future
         logger::debug("parse with v0.14 version format");
 
-        StreamReader::ReadObj(reader, this->total_elements_);
-        StreamReader::ReadObj(reader, this->use_reorder_);
-        StreamReader::ReadObj(reader, this->is_trained_);
+        StreamReader::ReadObj(buffer_reader, this->total_elements_);
+        StreamReader::ReadObj(buffer_reader, this->use_reorder_);
+        StreamReader::ReadObj(buffer_reader, this->is_trained_);
 
-        this->bucket_->Deserialize(reader);
-        this->partition_strategy_->Deserialize(reader);
-        this->label_table_->Deserialize(reader);
+        this->bucket_->Deserialize(buffer_reader);
+        this->partition_strategy_->Deserialize(buffer_reader);
+        this->label_table_->Deserialize(buffer_reader);
         if (use_reorder_) {
-            this->reorder_codes_->Deserialize(reader);
+            this->reorder_codes_->Deserialize(buffer_reader);
         }
 
         if (use_attribute_filter_) {
-            this->attr_filter_index_->Deserialize(reader);
+            this->attr_filter_index_->Deserialize(buffer_reader);
         }
     } else {  // create like `else if ( ver in [v0.15, v0.17] )` here if need in the future
         logger::debug("parse with new version format");
@@ -561,14 +564,14 @@ IVF::Deserialize(StreamReader& reader) {
         JsonType datacell_sizes = metadata->Get(DATACELL_SIZES);
         logger::debug("datacell_sizes: {}", datacell_sizes.dump());
 
-        READ_DATACELL_WITH_NAME(reader, "bucket", this->bucket_);
-        READ_DATACELL_WITH_NAME(reader, "partition_strategy", this->partition_strategy_);
-        READ_DATACELL_WITH_NAME(reader, "label_table", this->label_table_);
+        READ_DATACELL_WITH_NAME(buffer_reader, "bucket", this->bucket_);
+        READ_DATACELL_WITH_NAME(buffer_reader, "partition_strategy", this->partition_strategy_);
+        READ_DATACELL_WITH_NAME(buffer_reader, "label_table", this->label_table_);
         if (use_reorder_) {
-            READ_DATACELL_WITH_NAME(reader, "reorder_codes", this->reorder_codes_);
+            READ_DATACELL_WITH_NAME(buffer_reader, "reorder_codes", this->reorder_codes_);
         }
         if (use_attribute_filter_) {
-            READ_DATACELL_WITH_NAME(reader, "attr_filter_index", this->attr_filter_index_);
+            READ_DATACELL_WITH_NAME(buffer_reader, "attr_filter_index", this->attr_filter_index_);
         }
     }
     this->fill_location_map();
