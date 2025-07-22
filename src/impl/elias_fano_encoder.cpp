@@ -87,8 +87,10 @@ EliasFanoEncoder::get_low_bits(size_t index) const {
 }
 
 void
-EliasFanoEncoder::Encode(const Vector<InnerIdType>& values, InnerIdType max_value) {
-    Clear();
+EliasFanoEncoder::Encode(const Vector<InnerIdType>& values,
+                         InnerIdType max_value,
+                         Allocator* allocator) {
+    Clear(allocator);
     if (values.empty()) {
         return;
     }
@@ -116,7 +118,7 @@ EliasFanoEncoder::Encode(const Vector<InnerIdType>& values, InnerIdType max_valu
 
     // Allocate combined space for both low and high bits
     bits = static_cast<uint64_t*>(
-        allocator_->Allocate((low_bits_size + high_bits_size) * sizeof(uint64_t)));
+        allocator->Allocate((low_bits_size + high_bits_size) * sizeof(uint64_t)));
     std::fill(bits, bits + low_bits_size + high_bits_size, 0);
 
     // Encode each value
