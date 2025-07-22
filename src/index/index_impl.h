@@ -117,6 +117,15 @@ public:
         SAFE_CALL(return this->inner_index_->UpdateVector(id, new_base, force_update));
     }
 
+    virtual tl::expected<void, Error>
+    UpdateAttribute(int64_t id, const AttributeSet& new_attrs) override {
+        if (this->inner_index_->immutable_) {
+            return tl::unexpected(Error(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                                        "immutable index no support update attribute"));
+        }
+        SAFE_CALL(this->inner_index_->UpdateAttribute(id, new_attrs));
+    }
+
     [[nodiscard]] tl::expected<DatasetPtr, Error>
     SearchWithRequest(const SearchRequest& request) const override {
         if (GetNumElements() == 0) {

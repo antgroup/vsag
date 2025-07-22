@@ -167,7 +167,9 @@ IVF::CheckAndMappingExternalParam(const JsonType& external_param,
 }
 
 IVF::IVF(const IVFParameterPtr& param, const IndexCommonParam& common_param)
-    : InnerIndexInterface(param, common_param), buckets_per_data_(param->buckets_per_data) {
+    : InnerIndexInterface(param, common_param),
+      buckets_per_data_(param->buckets_per_data),
+      location_map_(common_param.allocator_.get()) {
     this->bucket_ = BucketInterface::MakeInstance(param->bucket_param, common_param);
     if (this->bucket_ == nullptr) {
         throw VsagException(ErrorType::INTERNAL_ERROR, "bucket init error");
@@ -251,6 +253,7 @@ IVF::Build(const DatasetPtr& base) {
     this->Train(base);
     // TODO(LHT): duplicate
     auto result = this->Add(base);
+    this->fill_location_map();
     return result;
 }
 
@@ -443,6 +446,22 @@ IVF::Merge(const std::vector<MergeUnit>& merge_units) {
     this->bucket_->Package();
 }
 
+std::pair<BucketIdType, InnerIdType>
+IVF::get_location(InnerIdType inner_id) {
+    auto loc = this->location_map_[inner_id];
+    constexpr uint64_t mask = (1ULL << LOCATION_SPLIT_BIT) - 1ULL;
+    auto bucket_id = static_cast<BucketIdType>(loc >> LOCATION_SPLIT_BIT);
+    auto offset_id = static_cast<InnerIdType>(loc & mask);
+    return {bucket_id, offset_id};
+}
+
+void
+IVF::UpdateAttribute(int64_t id, const AttributeSet& new_attrs) {
+    auto inner_id = this->label_table_->GetIdByLabel(id);
+    auto [bucket_id, offset_id] = this->get_location(inner_id);
+    this->attr_filter_index_->UpdateBitsetsByAttr(new_attrs, offset_id, bucket_id);
+}
+
 #define WRITE_DATACELL_WITH_NAME(writer, name, datacell)            \
     datacell_offsets[(name)] = offset;                              \
     auto datacell##_start = (writer).GetCursor();                   \
@@ -453,24 +472,6 @@ IVF::Merge(const std::vector<MergeUnit>& merge_units) {
 
 void
 IVF::Serialize(StreamWriter& writer) const {
-    // FIXME(wxyu): only for testing, remove before merge into the main branch
-    // if (not Options::Instance().new_version()) {
-    //     StreamWriter::WriteObj(writer, this->total_elements_);
-    //     StreamWriter::WriteObj(writer, this->use_reorder_);
-    //     StreamWriter::WriteObj(writer, this->is_trained_);
-
-    //     this->bucket_->Serialize(writer);
-    //     this->partition_strategy_->Serialize(writer);
-    //     this->label_table_->Serialize(writer);
-    //     if (use_reorder_) {
-    //         this->reorder_codes_->Serialize(writer);
-    //     }
-    //     if (use_attribute_filter_) {
-    //         this->attr_filter_index_->Serialize(writer);
-    //     }
-    //     return;
-    // }
-
     JsonType datacell_offsets;
     JsonType datacell_sizes;
     uint64_t offset = 0;
@@ -570,6 +571,7 @@ IVF::Deserialize(StreamReader& reader) {
             READ_DATACELL_WITH_NAME(reader, "attr_filter_index", this->attr_filter_index_);
         }
     }
+    this->fill_location_map();
 
     // post serialize procedure
 }
@@ -857,6 +859,23 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
         search_result->Pop();
     }
     return std::move(dataset_results);
+}
+
+void
+IVF::fill_location_map() {
+    this->location_map_.resize(this->total_elements_ * buckets_per_data_);
+    auto bucket_count = this->bucket_->bucket_count_;
+    for (BucketIdType i = 0; i < bucket_count; ++i) {
+        auto* ids = this->bucket_->GetInnerIds(i);
+        auto bucket_size = this->bucket_->GetBucketSize(i);
+        for (uint64_t j = 0; j < bucket_size; ++j) {
+            if (ids[j] >= this->total_elements_ * buckets_per_data_) {
+                throw VsagException(ErrorType::INTERNAL_ERROR, "invalid inner_id");
+            }
+            this->location_map_[ids[j]] =
+                (static_cast<uint64_t>(i) << LOCATION_SPLIT_BIT) | static_cast<uint64_t>(j);
+        }
+    }
 }
 
 }  // namespace vsag
