@@ -25,6 +25,7 @@ enum SQTrainMode {
     CLASSIC = 1,
     K_MEANS = 2,
     TRUNC_BOUND = 3,
+    PSO = 4,
 };
 
 class ScalarQuantizationTrainer {
@@ -37,7 +38,7 @@ public:
           float* upper_bound,
           float* lower_bound,
           bool need_normalize = false,
-          SQTrainMode mode = SQTrainMode::TRUNC_BOUND);
+          SQTrainMode mode = SQTrainMode::PSO);  // suggest to use PSO
 
     void
     TrainUniform(const float* data,
@@ -66,6 +67,9 @@ private:
                       uint64_t count,
                       float* upper_bound,
                       float* lower_bound) const;
+
+    void
+    pso_train(const float* data, uint64_t count, float* upper_bound, float* lower_bound) const;
 
     uint64_t
     sample_train_data(const float* data,
