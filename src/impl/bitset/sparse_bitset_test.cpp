@@ -152,51 +152,6 @@ TEST_CASE("SparseBitset And Test", "[ut][bitset]") {
     }
 }
 
-TEST_CASE("SparseBitset Xor Test", "[ut][bitset]") {
-    SECTION("both empty") {
-        SparseBitset bitset1;
-        SparseBitset bitset2;
-        bitset1.Xor(bitset2);
-        REQUIRE(bitset1.Count() == 0);
-        REQUIRE(bitset1.Dump() == "{}");
-    }
-
-    SECTION("empty and non-empty") {
-        SparseBitset bitset1;
-        SparseBitset bitset2;
-        bitset2.Set(100, true);
-        bitset1.Xor(bitset2);
-        REQUIRE(bitset1.Test(100));
-        REQUIRE(bitset1.Count() == 1);
-        REQUIRE(bitset1.Dump() == "{100}");
-    }
-
-    SECTION("partial overlap") {
-        SparseBitset bitset1;
-        SparseBitset bitset2;
-        bitset1.Set(100, true);
-        bitset1.Set(200, true);
-        bitset2.Set(200, true);
-        bitset2.Set(300, true);
-        bitset1.Xor(bitset2);
-        REQUIRE(bitset1.Count() == 2);
-        REQUIRE(bitset1.Test(100));
-        REQUIRE_FALSE(bitset1.Test(200));
-        REQUIRE(bitset1.Test(300));
-        REQUIRE(bitset1.Dump() == "{100,300}");
-    }
-
-    SECTION("identical sets") {
-        SparseBitset bitset1;
-        SparseBitset bitset2;
-        bitset1.Set(100, true);
-        bitset2.Set(100, true);
-        bitset1.Xor(bitset2);
-        REQUIRE(bitset1.Count() == 0);
-        REQUIRE(bitset1.Dump() == "{}");
-    }
-}
-
 TEST_CASE("SparseBitset Bitwise Operations", "[ut][SparseBitset]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
 
@@ -233,20 +188,6 @@ TEST_CASE("SparseBitset Bitwise Operations", "[ut][SparseBitset]") {
         REQUIRE_FALSE(a.Test(1928));
         REQUIRE(a.Count() == 1);
         REQUIRE(a.Dump() == "{215}");
-    }
-
-    SECTION("XOR operation") {
-        a.Set(100, true);
-        a.Set(1001, true);
-        b.Set(1001, true);
-        b.Set(2025, true);
-        a.Xor(b);
-
-        REQUIRE(a.Test(100));
-        REQUIRE_FALSE(a.Test(1001));
-        REQUIRE(a.Test(2025));
-        REQUIRE(a.Count() == 2);
-        REQUIRE(a.Dump() == "{100,2025}");
     }
 
     SECTION("NOT operation") {
@@ -307,27 +248,6 @@ TEST_CASE("SparseBitset Bitwise Operations", "[ut][SparseBitset]") {
         REQUIRE(ptr1->Dump() == "{10,64,111}");
     }
 
-    SECTION("XOR Operation With Pointer") {
-        auto ptr1 = std::make_shared<SparseBitset>(allocator.get());
-        auto ptr2 = std::make_shared<SparseBitset>(allocator.get());
-        ptr1->Set(100, true);
-        ptr1->Set(1001, true);
-        ptr2->Set(1001, true);
-        ptr2->Set(2025, true);
-        ptr1->Xor(ptr2.get());
-
-        REQUIRE(ptr1->Test(100));
-        REQUIRE_FALSE(ptr1->Test(1001));
-        REQUIRE(ptr1->Test(2025));
-        REQUIRE(ptr1->Count() == 2);
-        REQUIRE(ptr1->Dump() == "{100,2025}");
-
-        ptr2 = nullptr;
-        ptr1->Xor(ptr2.get());
-        REQUIRE(ptr1->Count() == 2);
-        REQUIRE(ptr1->Dump() == "{100,2025}");
-    }
-
     SECTION("AND Operation With Vector Pointer") {
         ComputableBitsetPtr ptr1 = std::make_shared<SparseBitset>(allocator.get());
         auto ptr2 = std::make_shared<SparseBitset>(allocator.get());
@@ -370,27 +290,6 @@ TEST_CASE("SparseBitset Bitwise Operations", "[ut][SparseBitset]") {
         REQUIRE(ptr1->Test(2025));
         REQUIRE(ptr1->Count() == 4);
         REQUIRE(ptr1->Dump() == "{100,1001,2020,2025}");
-    }
-
-    SECTION("XOR Operation With Vector Pointer") {
-        ComputableBitsetPtr ptr1 = std::make_shared<SparseBitset>(allocator.get());
-        auto ptr2 = std::make_shared<SparseBitset>(allocator.get());
-        auto ptr3 = std::make_shared<SparseBitset>(allocator.get());
-        std::vector<const ComputableBitset*> vec(2);
-        vec[0] = ptr2.get();
-        vec[1] = ptr3.get();
-        ptr1->Set(100, true);
-        ptr1->Set(1001, true);
-        ptr2->Set(1001, true);
-        ptr2->Set(2025, true);
-        ptr3->Set(100, true);
-        ptr3->Set(2020, true);
-        ptr1->Xor(vec);
-        REQUIRE_FALSE(ptr1->Test(100));
-        REQUIRE_FALSE(ptr1->Test(1001));
-        REQUIRE(ptr1->Test(2020));
-        REQUIRE(ptr1->Test(2025));
-        REQUIRE(ptr1->Dump() == "{2020,2025}");
     }
 }
 

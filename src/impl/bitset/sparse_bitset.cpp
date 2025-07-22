@@ -65,15 +65,6 @@ SparseBitset::And(const ComputableBitset& another) {
 }
 
 void
-SparseBitset::Xor(const ComputableBitset& another) {
-    const auto* another_ptr = reinterpret_cast<const SparseBitset*>(&another);
-    std::lock(mutex_, another_ptr->mutex_);
-    std::lock_guard<std::mutex> lock(mutex_, std::adopt_lock);
-    std::lock_guard<std::mutex> lock_other(another_ptr->mutex_, std::adopt_lock);
-    r_ ^= another_ptr->r_;
-}
-
-void
 SparseBitset::Or(const ComputableBitset* another) {
     if (another == nullptr) {
         return;
@@ -88,14 +79,6 @@ SparseBitset::And(const ComputableBitset* another) {
         return;
     }
     this->And(*another);
-}
-
-void
-SparseBitset::Xor(const ComputableBitset* another) {
-    if (another == nullptr) {
-        return;
-    }
-    this->Xor(*another);
 }
 
 void
