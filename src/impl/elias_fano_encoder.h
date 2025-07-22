@@ -23,25 +23,20 @@ namespace vsag {
 /// @note Our adjacency list size is mostly no more than 255, so we use uint8_t to store the number of elements
 class EliasFanoEncoder {
 public:
-    EliasFanoEncoder(Allocator* allocator) : allocator_(allocator) {
-    }
-
-    ~EliasFanoEncoder() {
-        Clear();
-    }
+    EliasFanoEncoder() = default;
 
     // Encode ordered sequence
     void
-    Encode(const Vector<InnerIdType>& values, InnerIdType max_value);
+    Encode(const Vector<InnerIdType>& values, InnerIdType max_value, Allocator* allocator);
 
     // Decompress all values
     void
     DecompressAll(Vector<InnerIdType>& neighbors) const;
 
     void
-    Clear() {
+    Clear(Allocator* allocator) {
         if (bits != nullptr) {
-            allocator_->Deallocate(bits);
+            allocator->Deallocate(bits);
             bits = nullptr;
         }
         num_elements = 0;
@@ -74,9 +69,6 @@ private:
 
     [[nodiscard]] InnerIdType
     get_low_bits(size_t index) const;
-
-private:
-    Allocator* const allocator_;
 };
 
 }  // namespace vsag

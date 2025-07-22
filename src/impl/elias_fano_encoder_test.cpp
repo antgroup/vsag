@@ -32,7 +32,7 @@ TEST_CASE("EliasFanoEncoder, original seq equal to decoded seq", "[ut][EliasFano
     std::uniform_int_distribution<InnerIdType> dist(0, max_id);
 
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
-    std::shared_ptr<EliasFanoEncoder> encoder = std::make_shared<EliasFanoEncoder>(allocator.get());
+    std::shared_ptr<EliasFanoEncoder> encoder = std::make_shared<EliasFanoEncoder>();
 
     for (int size = 0; size <= max_size; size++) {
         Vector<InnerIdType> values(allocator.get());
@@ -44,7 +44,7 @@ TEST_CASE("EliasFanoEncoder, original seq equal to decoded seq", "[ut][EliasFano
         }
         std::sort(values.begin(), values.end());
 
-        encoder->Encode(values, max_id);
+        encoder->Encode(values, max_id, allocator.get());
         REQUIRE(encoder->Size() == values.size());
 
         // check if original seq equal to decoded seq
@@ -55,6 +55,7 @@ TEST_CASE("EliasFanoEncoder, original seq equal to decoded seq", "[ut][EliasFano
             REQUIRE(decompressed[i] == values[i]);
         }
     }
+    encoder->Clear(allocator.get());
 }
 
 }  // namespace vsag
