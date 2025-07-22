@@ -330,19 +330,22 @@ Pyramid::Deserialize(StreamReader& reader) {
     // try to deserialize footer (only in new version)
     auto footer = Footer::Parse(reader);
 
+    BufferStreamReader buffer_reader(
+        &reader, std::numeric_limits<uint64_t>::max(), this->allocator_);
+
     if (footer == nullptr) {  // old format, DON'T EDIT, remove in the future
-        StreamReader::ReadVector(reader, label_table_->label_table_);
-        flatten_interface_ptr_->Deserialize(reader);
-        root_->Deserialize(reader);
+        StreamReader::ReadVector(buffer_reader, label_table_->label_table_);
+        flatten_interface_ptr_->Deserialize(buffer_reader);
+        root_->Deserialize(buffer_reader);
         pool_ = std::make_unique<VisitedListPool>(
             1, allocator_, flatten_interface_ptr_->TotalCount(), allocator_);
     } else {  // create like `else if ( ver in [v0.15, v0.17] )` here if need in the future
         logger::debug("parse with new version format");
         auto metadata = footer->GetMetadata();
 
-        StreamReader::ReadVector(reader, label_table_->label_table_);
-        flatten_interface_ptr_->Deserialize(reader);
-        root_->Deserialize(reader);
+        StreamReader::ReadVector(buffer_reader, label_table_->label_table_);
+        flatten_interface_ptr_->Deserialize(buffer_reader);
+        root_->Deserialize(buffer_reader);
         pool_ = std::make_unique<VisitedListPool>(
             1, allocator_, flatten_interface_ptr_->TotalCount(), allocator_);
     }
