@@ -13,6 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "scalar_quantization_trainer.h"
+
 #include <algorithm>
 #include <catch2/catch_message.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -23,7 +25,6 @@
 #include <random>
 #include <vector>
 
-#include "quantization/scalar_quantization/scalar_quantization_trainer.h"
 #include "vsag/vsag.h"
 
 using namespace vsag;
@@ -50,17 +51,22 @@ TEST_CASE("ScalarQuantizationTrainer", "[ft][scalar_quantization_trainer]") {
         data.push_back(dist(gen));
     }
     int bits = 4;
-    float lower_c, upper_c, lower_p, upper_p;
+    float lower_c, upper_c, lower_t, upper_t, lower_p, upper_p;
 
     vsag::ScalarQuantizationTrainer trainer(1, bits);
 
-    // classic
+    // CLASSIC
     trainer.Train(data.data(), data.size(), &lower_c, &upper_c, vsag::SQTrainMode::CLASSIC);
     float mse_classic = compute_mse(data, lower_c, upper_c, bits);
+
+    // TRUNC_BOUND
+    trainer.Train(data.data(), data.size(), &lower_t, &upper_t, vsag::SQTrainMode::TRUNC_BOUND);
+    float mse_trunc = compute_mse(data, lower_t, upper_t, bits);
 
     // PSO
     trainer.Train(data.data(), data.size(), &lower_p, &upper_p, vsag::SQTrainMode::PSO);
     float mse_pso = compute_mse(data, lower_p, upper_p, bits);
 
     REQUIRE(mse_pso < mse_classic * 0.95);
+    REQUIRE(mse_pso < mse_trunc);
 }
