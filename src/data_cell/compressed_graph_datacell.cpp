@@ -32,6 +32,15 @@ CompressedGraphDataCell::CompressedGraphDataCell(const CompressedGraphDatacellPa
     this->max_capacity_ = 0;
 }
 
+CompressedGraphDataCell::~CompressedGraphDataCell() {
+    for (auto& encoder : neighbor_sets_) {
+        if (encoder) {
+            encoder->Clear(allocator_);
+            encoder.reset();
+        }
+    }
+}
+
 void
 CompressedGraphDataCell::InsertNeighborsById(InnerIdType id,
                                              const Vector<InnerIdType>& neighbor_ids) {
@@ -45,8 +54,11 @@ CompressedGraphDataCell::InsertNeighborsById(InnerIdType id,
 
     std::unique_ptr<EliasFanoEncoder> new_node;
     if (not tmp.empty()) {
-        new_node = std::make_unique<EliasFanoEncoder>(allocator_);
-        new_node->Encode(tmp, max_capacity_);
+        new_node = std::make_unique<EliasFanoEncoder>();
+        new_node->Encode(tmp, max_capacity_, allocator_);
+    }
+    if (neighbor_sets_[id]) {
+        neighbor_sets_[id]->Clear(allocator_);
     }
     neighbor_sets_[id] = std::move(new_node);
 
@@ -101,7 +113,7 @@ CompressedGraphDataCell::Deserialize(StreamReader& reader) {
         uint8_t num_elements = 0;
         StreamReader::ReadObj(reader, num_elements);
         if (num_elements > 0) {
-            this->neighbor_sets_[id] = std::make_unique<EliasFanoEncoder>(allocator_);
+            this->neighbor_sets_[id] = std::make_unique<EliasFanoEncoder>();
             EliasFanoEncoder& encoder = *this->neighbor_sets_[id];
             encoder.num_elements = num_elements;
             StreamReader::ReadObj(reader, encoder.low_bits_width);
