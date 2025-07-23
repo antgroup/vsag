@@ -27,8 +27,7 @@ static constexpr int INVALID_TERM = -1;
 
 class SparseTermComputer {
 public:
-    ~SparseTermComputer() {
-    }
+    ~SparseTermComputer() = default;
 
     explicit SparseTermComputer(float query_prune_ratio = 0, Allocator* allocator = nullptr)
         : sorted_query_(allocator), query_prune_ratio_(query_prune_ratio) {

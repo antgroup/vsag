@@ -97,4 +97,9 @@ TEST_CASE("SINDI Basic Test", "[ut][SINDI]") {
         }
         REQUIRE(result->GetIds()[0] == ids[i]);
     }
+
+    for (auto& item : sv_base) {
+        delete[] item.vals_;
+        delete[] item.ids_;
+    }
 }

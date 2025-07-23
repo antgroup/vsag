@@ -202,5 +202,14 @@ main(int argc, char** argv) {
 
     std::cout << "Recall: " << recall << std::endl;
     std::cout << "QPS: " << qps << std::endl;
+
+    for (auto& item : sv_base) {
+        delete[] item.vals_;
+        delete[] item.ids_;
+    }
+    for (auto& item : sv_query) {
+        delete[] item.vals_;
+        delete[] item.ids_;
+    }
     return 0;
 }
