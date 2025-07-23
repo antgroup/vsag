@@ -24,13 +24,13 @@ class DirectIOObject {
 public:
     DirectIOObject() = default;
 
-    DirectIOObject(uint64_t size, uint64_t offset, uint64_t align_bit) {
-        this->Set(size, offset, align_bit);
+    DirectIOObject(uint64_t size, uint64_t offset) {
+        this->Set(size, offset);
     }
 
     void
-    Set(uint64_t size1, uint64_t offset1, uint64_t align_bit1) {
-        this->align_bit = align_bit1;
+    Set(uint64_t size1, uint64_t offset1) {
+        this->align_bit = Options::Instance().direct_IO_object_align_bit();
         this->align_size = 1 << align_bit;
         this->align_mask = (1 << align_bit) - 1;
         this->size = size1;

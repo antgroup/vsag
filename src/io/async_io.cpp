@@ -71,7 +71,7 @@ AsyncIO::DirectReadImpl(uint64_t size, uint64_t offset, bool& need_release) cons
     if (size == 0) {
         return nullptr;
     }
-    DirectIOObject obj(size, offset, Options::Instance().direct_IO_object_align_bit());
+    DirectIOObject obj(size, offset);
     auto ret = pread64(this->rfd_, obj.align_data, obj.size, static_cast<int64_t>(obj.offset));
     if (ret < 0) {
         throw VsagException(ErrorType::INTERNAL_ERROR, fmt::format("pread64 error {}", ret));
@@ -99,7 +99,7 @@ AsyncIO::MultiReadImpl(uint8_t* datas, uint64_t* sizes, uint64_t* offsets, uint6
         auto* cb = context->cb_;
         std::vector<DirectIOObject> objs(count);
         for (int64_t i = 0; i < count; ++i) {
-            objs[i].Set(sizes[i], offsets[i], Options::Instance().direct_IO_object_align_bit());
+            objs[i].Set(sizes[i], offsets[i]);
             auto& obj = objs[i];
             io_prep_pread(cb[i], rfd_, obj.align_data, obj.size, static_cast<int64_t>(obj.offset));
             cb[i]->data = &(objs[i]);
