@@ -235,6 +235,21 @@ FillStringValues(vsag::AttributeValue<std::string>* attr,
     }
 }
 
+static std::vector<int>
+select_k_numbers(int64_t n, int k) {
+    std::vector<int> numbers(n);
+    std::iota(numbers.begin(), numbers.end(), 0);
+
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    for (int i = 0; i < k; ++i) {
+        std::uniform_int_distribution<> dist(i, static_cast<int>(n - 1));
+        std::swap(numbers[i], numbers[dist(gen)]);
+    }
+    numbers.resize(k);
+    return numbers;
+}
+
 template <typename Gen>
 vsag::Attribute*
 CreateAttribute(std::string term_name,
@@ -316,14 +331,19 @@ generate_attributes(uint64_t count, uint32_t max_term_count, uint32_t max_value_
     for (uint64_t i = 0; i < term_count; ++i) {
         std::string term_name = fmt::format("term_{}", i);
         auto term_type = static_cast<vsag::AttrValueType>(type_dist(gen));
+        if (term_type == vsag::AttrValueType::UINT64) {
+            term_type = vsag::AttrValueType::INT64;
+        }
         terms[i] = {term_name, term_type};
     }
 
     for (uint32_t i = 0; i < count; ++i) {
-        auto cur_term_count = term_count_dist(gen) % term_count;
+        auto cur_term_count = RandomValue(1, term_count);
         results[i].attrs_.reserve(cur_term_count);
+        auto idxes = select_k_numbers(term_count, cur_term_count);
+
         for (uint32_t j = 0; j < cur_term_count; ++j) {
-            auto term_id = term_count_dist(gen) % term_count;
+            auto term_id = idxes[j];
             auto& term_name = terms[term_id].first;
             auto& term_type = terms[term_id].second;
             auto attr = CreateAttribute(term_name, term_type, value_count_dist(gen), 10, gen);
