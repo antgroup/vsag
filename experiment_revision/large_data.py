@@ -11,7 +11,7 @@ plt.rcParams['font.family'] = 'STIXGeneral'
 plt.rcParams['mathtext.fontset'] = 'stix'
 # plt.rcParams['fontsize'] = 'stix'
 f_size = 20
-is_10m = False
+is_10m = True
 
 data_hnswlib = """
 {"QPS":1290.3226318359375,"RT":0.0007749999640509486,"Recall":0.9235000014305115,"ef_search":30}
@@ -287,12 +287,25 @@ if is_10m:
 
 
 # 定义样式
+
+LINE_STYLES = {
+    "full_redundant": {"color": "#4CAF50", "marker": "o"},  # 清新绿色 + 圆形
+    "partial_redundant": {"color": "#03A9F4", "marker": "s"},  # 清新蓝色 + 方形
+    "no_redundant": {"color": "#FFC107", "marker": "^"},  # 清新黄色 + 三角形
+    "no_opt": {"color": "#E91E63", "marker": "D"},  # 清新粉色 + 菱形
+    "no_bdc": {"color": "#9C27B0", "marker": "*"},  # 清新紫色 + 星形
+    "no_bdc_opt": {"color": "#FF5722", "marker": "p"},  # 清新橙色 + 五边形
+    "no_prefetch": {"color": "#00BCD4", "marker": "h"},  # 清新青色 + 六边形
+    "hnswlib": {"color": "#795548", "marker": "X"}  # 清新棕色 + 十字
+}
+
+
 LINE_STYLES = {
     "vsag": {"color": "#03A9F4", "marker": "o"},  # 清新蓝色 + 圆形
     "hnswlib": {"color": "#FF5722", "marker": "s"},  # 清新橙色 + 方形
-    "faiss-ivfpqfs": {"color": "red", "marker": ">"},  # 红色 + 三角形
-    "scann": {"color": "green", "marker": "v"},
-    "nndescent": {"color": "purple", "marker": "D"},
+    "faiss-ivfpqfs": {"color": "#E91E63", "marker": ">"},  # 红色 + 三角形
+    "scann": {"color": "#4CAF50", "marker": "v"},
+    "nndescent": {"color": "#9C27B0", "marker": "D"},
 }
 
 # 绘制曲线
