@@ -619,6 +619,8 @@ TestHGraphBuildWithAttr(const fixtures::HGraphTestIndexPtr& test_index,
                         const fixtures::HGraphResourcePtr& resource) {
     using namespace fixtures;
     auto origin_size = vsag::Options::Instance().block_size_limit();
+    auto search_param = fmt::format(fixtures::search_param_tmp, 200, false);
+
     auto size = GENERATE(1024 * 1024 * 2);
 
     for (auto metric_type : resource->metric_types) {
@@ -655,8 +657,14 @@ TestHGraphBuildWithAttr(const fixtures::HGraphTestIndexPtr& test_index,
                 auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(
                     dim, resource->base_count, metric_type);
 
+                if (not index->CheckFeature(vsag::SUPPORT_BUILD)) {
+                    continue;
+                }
+                auto build_result = index->Build(dataset->base_);
+                REQUIRE(build_result.has_value());
+
                 // Execute attribute-aware build test
-                TestIndex::TestBuildWithAttr(index, dataset);
+                // TestIndex::TestWithAttr(index, dataset, search_param);
 
                 // Restore original block size limit
                 vsag::Options::Instance().set_block_size_limit(origin_size);

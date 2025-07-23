@@ -75,6 +75,7 @@ IVFParameter::ToJson() const {
     json[BUCKET_PER_DATA_KEY] = this->buckets_per_data;
     json[IVF_USE_REORDER_KEY] = this->use_reorder;
     json[IVF_THREAD_COUNT_KEY] = this->thread_count;
+    json[IVF_USE_ATTRIBUTE_FILTER_KEY] = this->use_attribute_filter;
     if (use_reorder) {
         json[IVF_PRECISE_CODES_KEY] = this->flatten_param->ToJson();
     }
