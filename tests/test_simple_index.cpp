@@ -119,4 +119,5 @@ TEST_CASE("Test Simple Index", "[ft][simple_index]") {
     REQUIRE_THROWS(index->Clone());
     REQUIRE_THROWS(index->ExportModel());
     REQUIRE_THROWS(index->Train(dataset->base_));
+    REQUIRE_THROWS(index->SetImmutable());
 }

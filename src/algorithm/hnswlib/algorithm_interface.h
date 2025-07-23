@@ -119,6 +119,11 @@ public:
         return 0;
     }
 
+    virtual void
+    setImmutable() {
+        throw std::runtime_error("Index doesn't support set immutable");
+    }
+
     virtual ~AlgorithmInterface() {
     }
 };

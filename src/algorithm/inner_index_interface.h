@@ -233,6 +233,12 @@ public:
                             "Index doesn't support ExportModel");
     }
 
+    virtual void
+    SetImmutable() {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "Index doesn't support SetImmutable");
+    }
+
     [[nodiscard]] virtual BinarySet
     Serialize() const;
 

@@ -457,6 +457,17 @@ public:
         throw std::runtime_error("Index doesn't support ExportModel");
     }
 
+    /**
+     * @brief set the index to immutable state.
+     * After setting this state, no further modifications are supported, such as no additions or deletions 
+     *
+     * @throws std::runtime_error If the index does not support to set immutable
+     */
+    virtual tl::expected<void, Error>
+    SetImmutable() {
+        throw std::runtime_error("Index doesn't support SetImmutable");
+    }
+
 public:
     // [serialize/deserialize with binaryset]
 
