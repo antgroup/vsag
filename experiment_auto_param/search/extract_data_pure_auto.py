@@ -2,7 +2,15 @@ import os
 import re
 import pandas as pd
 import matplotlib.pyplot as plt
+from matplotlib.ticker import FuncFormatter
+from matplotlib.ticker import MaxNLocator
 import random
+
+plt.rcParams['pdf.fonttype'] = 42
+plt.rcParams['ps.fonttype'] = 42
+plt.rcParams['font.family'] = 'STIXGeneral'
+plt.rcParams['mathtext.fontset'] = 'stix'
+f_size = 20
 
 dataset_s = [
     "gist-960-euclidean",
@@ -209,7 +217,6 @@ def plot_auto_with_manual_baselines(df_auto, baseline_files, dataset, filter_rec
                  marker='*', color="#03A9F4", markersize=10, markeredgecolor="black", linewidth=2, zorder=2)
 
     # 添加标题和轴标签
-    f_size = 16
     plt.xlabel("Recall@10", fontsize=f_size)
     plt.ylabel("QPS", fontsize=f_size)
     plt.grid(True, linestyle="--", alpha=0.6)
@@ -218,6 +225,10 @@ def plot_auto_with_manual_baselines(df_auto, baseline_files, dataset, filter_rec
     # 设置 y 轴为对数刻度，并固定刻度为 10^1, 10^2, 10^3, 10^4
     plt.yscale("log")
     plt.yticks([10**4], ["$10^4$"], fontsize=f_size)
+    def format_func(value, tick_number):
+        return f"{value:.2f}"  # 保留两位小数
+    plt.gca().xaxis.set_major_formatter(FuncFormatter(format_func))
+    plt.gca().xaxis.set_major_locator(MaxNLocator(nbins=6))
     plt.xticks(fontsize=f_size)
 
     # 如果启用了过滤，则限定 x 轴范围
@@ -230,6 +241,7 @@ def plot_auto_with_manual_baselines(df_auto, baseline_files, dataset, filter_rec
 
     # 保存图片（不包含图例）
     # plt.savefig(f"{output_dir}/{dataset}.jpg", bbox_inches="tight")
+    plt.savefig(f"{output_dir}/{dataset}.png", format="png", bbox_inches="tight")
     plt.savefig(f"{output_dir}/{dataset}.pdf", format="pdf", bbox_inches="tight")
     plt.close()  # 关闭图形以释放内存
 
@@ -253,7 +265,6 @@ def save_legend_as_image(dataset):
     ]
 
     # 绘制图例
-    f_size = 12
     legend = ax.legend(handles=handles, loc="center", ncol=2, fontsize=f_size, frameon=False)
 
     # 隐藏坐标轴
@@ -265,6 +276,7 @@ def save_legend_as_image(dataset):
 
     # 保存图例图片
     # plt.savefig(f"{output_dir}/legend.jpg", bbox_inches="tight")
+    plt.savefig(f"{output_dir}/legend.png", format="png", bbox_inches="tight")
     plt.savefig(f"{output_dir}/legend.pdf", format="pdf", bbox_inches="tight")
     plt.close()  # 关闭图形以释放内存
 

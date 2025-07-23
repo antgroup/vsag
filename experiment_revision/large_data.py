@@ -5,8 +5,13 @@ from matplotlib.lines import Line2D
 from matplotlib.ticker import FuncFormatter
 from matplotlib.ticker import MaxNLocator
 
-
-is_10m = True
+plt.rcParams['pdf.fonttype'] = 42
+plt.rcParams['ps.fonttype'] = 42
+plt.rcParams['font.family'] = 'STIXGeneral'
+plt.rcParams['mathtext.fontset'] = 'stix'
+# plt.rcParams['fontsize'] = 'stix'
+f_size = 20
+is_10m = False
 
 data_hnswlib = """
 {"QPS":1290.3226318359375,"RT":0.0007749999640509486,"Recall":0.9235000014305115,"ef_search":30}
@@ -277,7 +282,8 @@ qps_values4, recall_values4 = process_data(data_scann)
 
 qps_values5 = []
 recall_values5 = []
-qps_values5, recall_values5 = process_data(data_nndescent)
+if is_10m:
+    qps_values5, recall_values5 = process_data(data_nndescent)
 
 
 # 定义样式
@@ -326,7 +332,6 @@ plt.plot(recall_values5, qps_values5,
          markersize=8, markeredgecolor="black", linewidth=2, zorder=2)
 
 # 设置图形属性
-f_size = 16
 plt.xlabel("Recall@10", fontsize=f_size)
 plt.ylabel("QPS", fontsize=f_size)
 plt.grid(True, linestyle="--", alpha=0.6)  # 添加网格线，使用浅灰色虚线
