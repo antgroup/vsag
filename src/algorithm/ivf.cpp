@@ -451,6 +451,13 @@ IVF::UpdateAttribute(int64_t id, const AttributeSet& new_attrs) {
     this->attr_filter_index_->UpdateBitsetsByAttr(new_attrs, offset_id, bucket_id);
 }
 
+void
+IVF::UpdateAttribute(int64_t id, const AttributeSet& new_attrs, const AttributeSet& origin_attrs) {
+    auto inner_id = this->label_table_->GetIdByLabel(id);
+    auto [bucket_id, offset_id] = this->get_location(inner_id);
+    this->attr_filter_index_->UpdateBitsetsByAttr(new_attrs, offset_id, bucket_id, origin_attrs);
+}
+
 #define WRITE_DATACELL_WITH_NAME(writer, name, datacell)            \
     datacell_offsets[(name)] = offset;                              \
     auto datacell##_start = (writer).GetCursor();                   \

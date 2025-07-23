@@ -88,6 +88,35 @@ erase_by_type(ValueMapPtr& value_map,
     }
 }
 
+static void
+erase_by_type(ValueMapPtr& value_map,
+              const Attribute* attr,
+              InnerIdType inner_id,
+              BucketIdType bucket_id) {
+    auto value_type = attr->GetValueType();
+    if (value_type == AttrValueType::INT32) {
+        value_map->Erase<int32_t>(inner_id, attr, bucket_id);
+    } else if (value_type == AttrValueType::INT64) {
+        value_map->Erase<int64_t>(inner_id, attr, bucket_id);
+    } else if (value_type == AttrValueType::INT16) {
+        value_map->Erase<int16_t>(inner_id, attr, bucket_id);
+    } else if (value_type == AttrValueType::INT8) {
+        value_map->Erase<int8_t>(inner_id, attr, bucket_id);
+    } else if (value_type == AttrValueType::UINT32) {
+        value_map->Erase<uint32_t>(inner_id, attr, bucket_id);
+    } else if (value_type == AttrValueType::UINT64) {
+        value_map->Erase<uint64_t>(inner_id, attr, bucket_id);
+    } else if (value_type == AttrValueType::UINT16) {
+        value_map->Erase<uint16_t>(inner_id, attr, bucket_id);
+    } else if (value_type == AttrValueType::UINT8) {
+        value_map->Erase<uint8_t>(inner_id, attr, bucket_id);
+    } else if (value_type == AttrValueType::STRING) {
+        value_map->Erase<std::string>(inner_id, attr, bucket_id);
+    } else {
+        throw VsagException(ErrorType::INTERNAL_ERROR, "Unsupported value type");
+    }
+}
+
 template <class T>
 static void
 get_bitsets_by_type(const ValueMapPtr& value_map,
@@ -192,6 +221,25 @@ AttributeBucketInvertedDataCell::UpdateBitsetsByAttr(const AttributeSet& attribu
         auto& value_map = this->field_2_value_map_[name];
         auto type = attr->GetValueType();
         erase_by_type(value_map, type, offset_id, bucket_id);
+        insert_by_type(value_map, attr, offset_id, bucket_id);
+    }
+}
+
+void
+AttributeBucketInvertedDataCell::UpdateBitsetsByAttr(const AttributeSet& attributes,
+                                                     const InnerIdType offset_id,
+                                                     const BucketIdType bucket_id,
+                                                     const AttributeSet& origin_attributes) {
+    std::lock_guard lock(this->global_mutex_);
+    for (const auto* attr : origin_attributes.attrs_) {
+        const auto& name = attr->name_;
+        auto& value_map = this->field_2_value_map_[name];
+        erase_by_type(value_map, attr, offset_id, bucket_id);
+    }
+
+    for (const auto* attr : attributes.attrs_) {
+        const auto& name = attr->name_;
+        auto& value_map = this->field_2_value_map_[name];
         insert_by_type(value_map, attr, offset_id, bucket_id);
     }
 }
