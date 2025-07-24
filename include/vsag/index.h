@@ -42,15 +42,7 @@ struct MergeUnit {
     IdMapFunction id_map_func = nullptr;
 };
 
-enum class IndexType {
-    HNSW,
-    DISKANN,
-    HGRAPH,
-    IVF,
-    PYRAMID,
-    BRUTEFORCE,
-    SPARSE,
-};
+enum class IndexType { HNSW, DISKANN, HGRAPH, IVF, PYRAMID, BRUTEFORCE, SPARSE, SINDI };
 
 class Index {
 public:

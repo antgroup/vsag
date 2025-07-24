@@ -114,13 +114,18 @@ public:
     InitFeatures() override {
     }
 
-private:
+    float
+    CalDistanceByIdUnsafe(Vector<uint32_t>& sorted_ids,
+                          Vector<float>& sorted_vals,
+                          uint32_t inner_id) const;
+
     DatasetPtr
     collect_results(const DistHeapPtr& results) const;
 
     std::tuple<Vector<uint32_t>, Vector<float>>
     sort_sparse_vector(const SparseVector& vector) const;
 
+private:
     void
     resize(int64_t new_capacity) {
         if (new_capacity <= max_capacity_) {

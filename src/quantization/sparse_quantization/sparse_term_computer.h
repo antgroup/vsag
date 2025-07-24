@@ -1,0 +1,104 @@
+
+// Copyright 2024-present the vsag project
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+#pragma once
+
+#include <cstdint>
+#include <memory>
+
+#include "metric_type.h"
+#include "utils/sparse_vector_transform.h"
+
+namespace vsag {
+
+static constexpr int INVALID_TERM = -1;
+
+class SparseTermComputer {
+public:
+    ~SparseTermComputer() = default;
+
+    explicit SparseTermComputer(float query_prune_ratio = 0, Allocator* allocator = nullptr)
+        : sorted_query_(allocator), query_prune_ratio_(query_prune_ratio) {
+    }
+
+    void
+    SetQuery(const SparseVector& sparse_query) {
+        sort_sparse_vector(sparse_query, sorted_query_);
+
+        pruned_len_ = (uint32_t)(query_prune_ratio_ * sparse_query.len_);
+        if (pruned_len_ == 0) {
+            if (sorted_query_.size() != 0) {
+                pruned_len_ = 1;
+            }
+        }
+
+        for (auto i = 0; i < sorted_query_.size(); i++) {
+            sorted_query_[i].second *= -1;  // note that: dist_ip = -1 * query * base
+        }
+    }
+
+    inline void
+    ScanForAccumulate(uint32_t term_iterator,
+                      const uint32_t* term_ids,
+                      const float* term_datas,
+                      uint32_t term_count,
+                      float* global_dists) {
+        float query_val = sorted_query_[term_iterator].second;
+
+        // TODO(ZXY): add prefetch to decrease cache miss like:
+        //  __builtin_prefetch(term_ids + term_count / 2, 0, 3);
+        //  __builtin_prefetch(term_datas + term_count / 2, 0, 3);
+        //  __builtin_prefetch(global_dists + term_ids[term_count / 2], 0, 3);
+
+        for (auto i = 0; i < term_count; i++) {
+            global_dists[term_ids[i]] += query_val * term_datas[i];
+        }
+    }
+
+    inline bool
+    HasNextTerm() {
+        return term_iterator_ < pruned_len_;
+    }
+
+    inline uint32_t
+    NextTermIter() {
+        return term_iterator_++;
+    }
+
+    inline void
+    ResetTerm() {
+        term_iterator_ = 0;
+    }
+
+    uint32_t
+    GetTerm(uint32_t term_iterator) {
+        return sorted_query_[term_iterator].first;
+    }
+
+public:
+    Vector<std::pair<uint32_t, float>> sorted_query_;
+
+    float query_prune_ratio_{0};
+
+    uint32_t pruned_len_{0};
+
+    uint32_t term_iterator_{0};
+
+    Allocator* const allocator_{nullptr};
+};
+
+using SparseTermComputerPtr = std::shared_ptr<SparseTermComputer>;
+
+}  // namespace vsag
