@@ -23,7 +23,7 @@
 
 using namespace vsag;
 
-TEST_CASE("Iterator context", "[ut][hnsw]") {
+TEST_CASE("Iterator context", "[ut][hnsw][filter]") {
     auto allocator = std::make_shared<DefaultAllocator>();
     vsag::IteratorFilterContext filter_context = IteratorFilterContext();
     uint32_t max_size = 1000;
@@ -58,4 +58,28 @@ TEST_CASE("Iterator context", "[ut][hnsw]") {
         REQUIRE(filter_context.GetDiscardElementNum() == num_elements - 1);
         REQUIRE(filter_context.CheckPoint(55));
     }
+}
+
+TEST_CASE("Empty Iterator Context Destruction", "[ut][hnsw][filter]") {
+    IteratorFilterContext filter_context = IteratorFilterContext();
+}
+
+TEST_CASE("Iterator Context CheckPoint And SetPoint", "[ut][hnsw][filter]") {
+    auto allocator = std::make_shared<DefaultAllocator>();
+    IteratorFilterContext filter_context = IteratorFilterContext();
+    uint32_t max_size = 1000;
+    int64_t ef_search = 200;
+    auto res = filter_context.init(max_size, ef_search, allocator.get());
+    REQUIRE(res.has_value());
+    REQUIRE(filter_context.CheckPoint(100));
+    filter_context.SetPoint(100);
+    REQUIRE_FALSE(filter_context.CheckPoint(100));
+
+    REQUIRE(filter_context.CheckPoint(128));
+    filter_context.SetPoint(128);
+    REQUIRE_FALSE(filter_context.CheckPoint(128));
+
+    REQUIRE(filter_context.CheckPoint(3));
+    filter_context.SetPoint(3);
+    REQUIRE_FALSE(filter_context.CheckPoint(3));
 }
