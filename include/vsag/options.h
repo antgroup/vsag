@@ -203,6 +203,9 @@ private:
     ///< The size of the bits used for DirectIOObject align (default is 9).
     std::atomic<size_t> direct_IO_object_align_bit_{9};
 
+    ///< A flag to ensure that the set_direct_IO_object_align_bit() is called only once.
+    std::atomic<bool> direct_IO_object_align_bit_flag{false};
+
     ///< Pointer to the logger instance.
     Logger* logger_ = nullptr;
 };
