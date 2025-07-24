@@ -16,11 +16,16 @@
 #include "iterator_filter.h"
 
 #include "logger.h"
+#include "utils/util_functions.h"
 
 namespace vsag {
 
 IteratorFilterContext::~IteratorFilterContext() {
-    allocator_->Deallocate(list_);
+    if (nullptr != allocator_) {
+        if (nullptr != list_) {
+            allocator_->Deallocate(list_);
+        }
+    }
 }
 
 tl::expected<void, Error>
@@ -34,9 +39,9 @@ IteratorFilterContext::init(InnerIdType max_size, int64_t ef_search, Allocator* 
         allocator_ = allocator;
         max_size_ = max_size;
         discard_ = std::make_unique<MaxHeap>(allocator);
-        list_ = reinterpret_cast<VisitedListType*>(
-            allocator_->Allocate((uint64_t)max_size * sizeof(VisitedListType)));
-        memset(list_, 0, max_size * sizeof(VisitedListType));
+        size_t byte_len = ceil_int(max_size, BITS_PER_BYTE) / BITS_PER_BYTE;
+        list_ = reinterpret_cast<uint8_t*>(allocator_->Allocate(byte_len));
+        memset(list_, 0, byte_len);
     } catch (const std::bad_alloc& e) {
         LOG_ERROR_AND_RETURNS(ErrorType::NO_ENOUGH_MEMORY,
                               "failed to init iterator filter(not enough memory): ",
@@ -89,12 +94,12 @@ IteratorFilterContext::SetOFFFirstUsed() {
 
 void
 IteratorFilterContext::SetPoint(InnerIdType inner_id) {
-    list_[inner_id] = 1;
+    list_[byte_pos(inner_id)] |= (1 << bit_pos(inner_id));
 }
 
 bool
 IteratorFilterContext::CheckPoint(InnerIdType inner_id) {
-    return list_[inner_id] == 0;
+    return (list_[byte_pos(inner_id)] & (1 << bit_pos(inner_id))) == 0;
 }
 
 int64_t
