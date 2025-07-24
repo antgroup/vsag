@@ -40,9 +40,9 @@ Options::set_direct_IO_object_align_bit(size_t align_bit) {
         throw std::runtime_error(
             fmt::format("size ({}) should be smaller than 2^21(2M).", align_bit));
     }
-    if (!direct_IO_object_align_bit_flag.exchange(true, std::memory_order_acq_rel)){
-    direct_IO_object_align_bit_.store(align_bit, std::memory_order_release);
-}
+    if (!direct_IO_object_align_bit_flag.exchange(true, std::memory_order_acq_rel)) {
+        direct_IO_object_align_bit_.store(align_bit, std::memory_order_release);
+    }
 }
 
 void
