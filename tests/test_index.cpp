@@ -1822,6 +1822,7 @@ TestIndex::TestBuildDuplicateIndex(const IndexPtr& index,
                                    const TestDatasetPtr& dataset,
                                    const std::string& duplicate_pos,
                                    bool expect_success) {
+    index->Train(dataset->base_);
     if (duplicate_pos == "prefix") {
         auto result = index->Build(dataset->base_);
         REQUIRE(result.has_value() == expect_success);
