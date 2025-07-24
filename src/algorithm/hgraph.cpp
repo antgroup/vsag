@@ -108,6 +108,7 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
         this->attr_filter_index_ =
             AttributeInvertedInterface::MakeInstance(allocator_, false /*have_bucket*/);
     }
+    this->label_table_->compress_duplicate_data_ = hgraph_param->support_duplicate;
 }
 void
 HGraph::Train(const DatasetPtr& base) {
@@ -335,6 +336,7 @@ HGraph::KnnSearch(const DatasetPtr& query,
     search_param.ef = std::max(params.ef_search, k);
     search_param.is_inner_id_allowed = ft;
     search_param.topk = static_cast<int64_t>(search_param.ef);
+    search_param.consider_duplicate = true;
     auto search_result = this->search_one_graph(
         raw_query, this->bottom_graph_, this->basic_flatten_codes_, search_param);
 
@@ -548,7 +550,8 @@ HGraph::search_one_graph(const void* query,
                          const FlattenInterfacePtr& flatten,
                          InnerSearchParam& inner_search_param) const {
     auto visited_list = this->pool_->TakeOne();
-    auto result = this->searcher_->Search(graph, flatten, visited_list, query, inner_search_param);
+    auto result = this->searcher_->Search(
+        graph, flatten, visited_list, query, inner_search_param, this->label_table_);
     this->pool_->ReturnOne(visited_list);
     return result;
 }
@@ -1020,8 +1023,12 @@ HGraph::add_one_point(const void* data, int level, InnerIdType inner_id) {
         for (auto j = static_cast<int>(this->route_graphs_.size()); j <= level; ++j) {
             this->route_graphs_.emplace_back(this->generate_one_route_graph());
         }
-        this->graph_add_one(data, level, inner_id);
-        entry_point_id_ = inner_id;
+        auto insert_success = this->graph_add_one(data, level, inner_id);
+        if (insert_success) {
+            entry_point_id_ = inner_id;
+        } else {
+            this->route_graphs_.pop_back();
+        }
         add_lock.unlock();
     } else {
         add_lock.unlock();
@@ -1030,7 +1037,7 @@ HGraph::add_one_point(const void* data, int level, InnerIdType inner_id) {
     }
 }
 
-void
+bool
 HGraph::graph_add_one(const void* data, int level, InnerIdType inner_id) {
     DistHeapPtr result = nullptr;
     InnerSearchParam param{
@@ -1055,6 +1062,11 @@ HGraph::graph_add_one(const void* data, int level, InnerIdType inner_id) {
 
     if (bottom_graph_->TotalCount() != 0) {
         result = search_one_graph(data, this->bottom_graph_, flatten_codes, param);
+        if (this->label_table_->CompressDuplicateData() && param.duplicate_id >= 0) {
+            std::unique_lock lock(this->label_lookup_mutex_);
+            label_table_->SetDuplicateId(static_cast<InnerIdType>(param.duplicate_id), inner_id);
+            return false;
+        }
         mutually_connect_new_element(
             inner_id, result, this->bottom_graph_, flatten_codes, neighbors_mutex_, allocator_);
     } else {
@@ -1070,6 +1082,7 @@ HGraph::graph_add_one(const void* data, int level, InnerIdType inner_id) {
             route_graphs_[j]->InsertNeighborsById(inner_id, Vector<InnerIdType>(allocator_));
         }
     }
+    return true;
 }
 
 void
@@ -1271,7 +1284,8 @@ static const std::string HGRAPH_PARAMS_TEMPLATE =
                 "{IO_FILE_PATH}": "{DEFAULT_FILE_PATH_VALUE}"
             }
         },
-        "{HGRAPH_GET_RAW_VECTOR_COSINE}": false
+        "{HGRAPH_GET_RAW_VECTOR_COSINE}": false,
+        "{HGRAPH_SUPPORT_DUPLICATE}": false
     })";
 
 ParamPtr
@@ -1495,6 +1509,12 @@ HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
                                             {
                                                 HGRAPH_REMOVE_FLAG_BIT,
                                                 {HGRAPH_GRAPH_KEY, REMOVE_FLAG_BIT},
+                                            },
+                                            {
+                                                HGRAPH_SUPPORT_DUPLICATE,
+                                                {
+                                                    SUPPORT_DUPLICATE,
+                                                },
                                             }};
     if (common_param.data_type_ == DataTypes::DATA_TYPE_INT8) {
         throw VsagException(ErrorType::INVALID_ARGUMENT,

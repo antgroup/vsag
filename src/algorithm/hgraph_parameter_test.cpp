@@ -50,6 +50,7 @@ struct HGraphDefaultParam {
     bool support_remove = true;
     int remove_flag_bit = 8;
     bool use_attribute_filter = false;
+    bool support_duplicate = false;
     bool use_reorder = true;
     bool have_extro_info = false;
 };
@@ -104,7 +105,8 @@ generate_hgraph_param(const HGraphDefaultParam& param) {
         }},
         "type": "hgraph",
         "use_attribute_filter": {},
-        "use_reorder": {}
+        "use_reorder": {},
+        "support_duplicate": {}
     }})";
 
     return fmt::format(param_str,
@@ -118,7 +120,8 @@ generate_hgraph_param(const HGraphDefaultParam& param) {
                        param.precise_codes_io_type,
                        param.precise_codes_quantization_type,
                        param.use_attribute_filter,
-                       param.use_reorder);
+                       param.use_reorder,
+                       param.support_duplicate);
 }
 
 TEST_CASE("HGraph Parameters CheckCompatibility", "[ut][HGraphParameter][CheckCompatibility]") {
@@ -153,4 +156,5 @@ TEST_CASE("HGraph Parameters CheckCompatibility", "[ut][HGraphParameter][CheckCo
                             false)
     TEST_COMPATIBILITY_CASE(
         "different use attribute filter", use_attribute_filter, true, false, false)
+    TEST_COMPATIBILITY_CASE("different support duplicate", support_duplicate, true, false, false)
 }

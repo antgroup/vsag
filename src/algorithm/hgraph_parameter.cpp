@@ -133,6 +133,9 @@ HGraphParameter::FromJson(const JsonType& json) {
     const auto& extra_info_json = json[HGRAPH_EXTRA_INFO_KEY];
     this->extra_info_param = std::make_shared<ExtraInfoDataCellParameter>();
     this->extra_info_param->FromJson(extra_info_json);
+    if (json.contains(SUPPORT_DUPLICATE)) {
+        this->support_duplicate = json[SUPPORT_DUPLICATE];
+    }
 }
 
 JsonType
@@ -151,6 +154,7 @@ HGraphParameter::ToJson() const {
     json[BUILD_PARAMS_KEY][BUILD_EF_CONSTRUCTION] = this->ef_construction;
     json[BUILD_PARAMS_KEY][BUILD_THREAD_COUNT] = this->build_thread_count;
     json[HGRAPH_EXTRA_INFO_KEY] = this->extra_info_param->ToJson();
+    json[SUPPORT_DUPLICATE] = this->support_duplicate;
     json[HGRAPH_STORE_RAW_VECTOR] = this->store_raw_vector;
     return json;
 }
@@ -187,6 +191,10 @@ HGraphParameter::CheckCompatibility(const ParamPtr& other) const {
     }
     if (use_attribute_filter != hgraph_param->use_attribute_filter) {
         logger::error("HGraphParameter::CheckCompatibility: use_attribute_filter must be the same");
+        return false;
+    }
+    if (support_duplicate != hgraph_param->support_duplicate) {
+        logger::error("HGraphParameter::CheckCompatibility: support_duplicate must be the same");
         return false;
     }
     return true;

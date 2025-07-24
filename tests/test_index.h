@@ -57,6 +57,12 @@ public:
     }
 
     static void
+    TestBuildDuplicateIndex(const IndexPtr& index,
+                            const TestDatasetPtr& dataset,
+                            const std::string& duplicate_pos,
+                            bool expect_success = true);
+
+    static void
     TestBuildIndex(const IndexPtr& index,
                    const TestDatasetPtr& dataset,
                    bool expected_success = true);
