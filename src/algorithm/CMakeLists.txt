@@ -1,6 +1,7 @@
 
 add_subdirectory (ivf_partition)
 add_subdirectory (hnswlib)
+add_subdirectory (sindi)
 
 file (GLOB ALGORITHM_SRCS "*.cpp")
 list (FILTER ALGORITHM_SRCS EXCLUDE REGEX "_test.cpp")
@@ -14,4 +15,5 @@ set (ALGORITHM_LIBS
         algorithm
         hnswlib
         ivf_partition
+        sindi
         PARENT_SCOPE)
