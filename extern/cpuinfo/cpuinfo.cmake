@@ -16,6 +16,7 @@ set(CPUINFO_BUILD_UNIT_TESTS OFF CACHE BOOL "Disable some option in the library"
 set(CPUINFO_BUILD_MOCK_TESTS OFF CACHE BOOL "Disable some option in the library" FORCE)
 set(CPUINFO_BUILD_BENCHMARKS OFF CACHE BOOL "Disable some option in the library" FORCE)
 set(CPUINFO_BUILD_PKG_CONFIG OFF CACHE BOOL "Disable some option in the library" FORCE)
+set(CPUINFO_LIBRARY_TYPE "static")
 
 # exclude cpuinfo in vsag installation
 FetchContent_GetProperties(cpuinfo)
