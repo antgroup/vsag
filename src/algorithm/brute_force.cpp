@@ -15,6 +15,8 @@
 
 #include "brute_force.h"
 
+#include <optional>
+
 #include "data_cell/flatten_datacell.h"
 #include "impl/heap/standard_heap.h"
 #include "inner_string_params.h"
@@ -74,49 +76,77 @@ BruteForce::Add(const DatasetPtr& data) {
         }
     }
 
-    auto add_func = [&](const float* data, InnerIdType inner_id) -> void {
-        this->add_one(data, inner_id);
+    auto add_func = [&](const float* data, const int64_t label) -> std::optional<int64_t> {
+        {
+            std::scoped_lock add_lock(this->label_lookup_mutex_, this->add_mutex_);
+            if (this->label_table_->CheckLabel(label)) {
+                return label;
+            }
+            const InnerIdType inner_id = this->total_count_;
+            total_count_++;
+            this->resize(total_count_);
+            this->add_one(data, inner_id);
+            this->label_table_->Insert(inner_id, label);
+            return std::nullopt;
+        }
     };
 
-    std::vector<std::future<void>> futures;
-    auto total = data->GetNumElements();
+    std::vector<std::future<std::optional<int64_t>>> futures;
+    const auto total = data->GetNumElements();
     const auto* labels = data->GetIds();
     const auto* vectors = data->GetFloat32Vectors();
-    Vector<std::pair<InnerIdType, LabelType>> inner_ids(allocator_);
     for (int64_t j = 0; j < total; ++j) {
-        auto label = labels[j];
-        InnerIdType inner_id;
+        const auto label = labels[j];
         {
             std::lock_guard label_lock(this->label_lookup_mutex_);
             if (this->label_table_->CheckLabel(label)) {
                 failed_ids.emplace_back(label);
                 continue;
             }
-            {
-                std::lock_guard lock(this->add_mutex_);
-                inner_id = this->total_count_;
-                total_count_++;
-                this->resize(total_count_);
-            }
-            this->label_table_->Insert(inner_id, label);
-            inner_ids.emplace_back(inner_id, j);
         }
-    }
-    for (auto& [inner_id, local_idx] : inner_ids) {
         if (this->build_pool_ != nullptr) {
-            auto future =
-                this->build_pool_->GeneralEnqueue(add_func, vectors + local_idx * dim_, inner_id);
+            auto future = this->build_pool_->GeneralEnqueue(add_func, vectors + j * dim_, label);
             futures.emplace_back(std::move(future));
         } else {
-            add_func(vectors + local_idx * dim_, inner_id);
+            if (auto add_res = add_func(vectors + j * dim_, label); add_res.has_value()) {
+                failed_ids.emplace_back(add_res.value());
+            }
         }
     }
+
     if (this->build_pool_ != nullptr) {
         for (auto& future : futures) {
-            future.get();
+            if (auto reply = future.get(); reply.has_value()) {
+                failed_ids.emplace_back(reply.value());
+            }
         }
     }
     return failed_ids;
+}
+
+bool
+BruteForce::Remove(int64_t label) {
+    std::scoped_lock lock(this->add_mutex_, this->label_lookup_mutex_);
+    const auto last_inner_id = static_cast<InnerIdType>(this->total_count_ - 1);
+    const auto inner_id = this->label_table_->GetIdByLabel(label);
+    CHECK_ARGUMENT(inner_id <= last_inner_id, "the element to be remove is invalid");
+
+    const auto last_label = this->label_table_->GetLabelById(last_inner_id);
+    this->label_table_->Remove(label);
+    --this->label_table_->total_count_;
+
+    if (inner_id < last_inner_id) {
+        Vector<uint8_t> codes(inner_codes_->code_size_, allocator_);
+        inner_codes_->GetCodesById(last_inner_id, codes.data());
+
+        this->label_table_->Remove(last_label);
+        --this->label_table_->total_count_;
+
+        this->inner_codes_->InsertVector(codes.data(), inner_id);
+        this->label_table_->Insert(inner_id, last_label);
+    }
+    this->total_count_--;
+    return true;
 }
 
 DatasetPtr
@@ -269,10 +299,11 @@ BruteForce::InitFeatures() {
         this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_GET_RAW_VECTOR_BY_IDS);
     }
 
-    // add & build
+    // add & build & delete
     this->index_feature_list_->SetFeatures({
         IndexFeature::SUPPORT_BUILD,
         IndexFeature::SUPPORT_ADD_AFTER_BUILD,
+        IndexFeature::SUPPORT_DELETE_BY_ID,
     });
 
     // search
@@ -285,6 +316,7 @@ BruteForce::InitFeatures() {
     this->index_feature_list_->SetFeatures({
         IndexFeature::SUPPORT_SEARCH_CONCURRENT,
         IndexFeature::SUPPORT_ADD_CONCURRENT,
+        IndexFeature::SUPPORT_DELETE_CONCURRENT,
     });
 
     // serialize
