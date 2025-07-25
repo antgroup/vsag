@@ -55,7 +55,7 @@ public:
     void
     Train(const void* data, uint64_t count) override;
 
-    void
+    InnerIdType
     InsertVector(const void* vector,
                  BucketIdType bucket_id,
                  InnerIdType inner_id,
@@ -254,12 +254,13 @@ BucketDataCell<QuantTmpl, IOTmpl>::Train(const void* data, uint64_t count) {
 }
 
 template <typename QuantTmpl, typename IOTmpl>
-void
+InnerIdType
 BucketDataCell<QuantTmpl, IOTmpl>::InsertVector(const void* vector,
                                                 BucketIdType bucket_id,
                                                 InnerIdType inner_id,
                                                 const float* centroid) {
     check_valid_bucket_id(bucket_id);
+    InnerIdType offset_id;
     ByteBuffer codes(static_cast<uint64_t>(code_size_), this->allocator_);
     this->quantizer_->EncodeOne(static_cast<const float*>(vector), codes.data);
     float res_score = 0.0F;
@@ -272,6 +273,7 @@ BucketDataCell<QuantTmpl, IOTmpl>::InsertVector(const void* vector,
     }
     {
         std::unique_lock lock(this->bucket_mutexes_[bucket_id]);
+        offset_id = this->bucket_sizes_[bucket_id];
         this->datas_[bucket_id]->Write(codes.data,
                                        code_size_,
                                        static_cast<uint64_t>(this->bucket_sizes_[bucket_id]) *
@@ -282,6 +284,7 @@ BucketDataCell<QuantTmpl, IOTmpl>::InsertVector(const void* vector,
             residual_bias_[bucket_id].emplace_back(res_score);
         }
     }
+    return offset_id;
 }
 
 template <typename QuantTmpl, typename IOTmpl>

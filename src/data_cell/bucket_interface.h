@@ -52,7 +52,7 @@ public:
     virtual void
     Train(const void* data, uint64_t count) = 0;
 
-    virtual void
+    virtual InnerIdType
     InsertVector(const void* vector,
                  BucketIdType bucket_id,
                  InnerIdType inner_id,
