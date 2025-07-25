@@ -26,7 +26,7 @@
 
 namespace vsag {
 
-static constexpr uint32_t OPTIMIZE_SEARCHER_SAMPLE_SIZE = 10000;
+static constexpr uint32_t OPTIMIZE_SEARCHER_SAMPLE_SIZE = 1000;
 
 enum InnerSearchMode { KNN_SEARCH = 1, RANGE_SEARCH = 2 };
 

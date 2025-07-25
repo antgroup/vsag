@@ -28,62 +28,68 @@ Optimizer<OptimizableOBJ>::Optimize(std::shared_ptr<OptimizableOBJ> obj) {
 
     // generate a group of runtime params
     UnorderedMap<std::string, float> current_params(allocator_);
-    for (auto& param : parameters_) {
-        bool successful_optimized = false;
-        double before_loss = obj->MockRun();
-        double best_loss = before_loss;
-        double best_improve = 0;
 
-        while (not param.IsEnd()) {
+    if (parameters_.size() == 0) {
+        return 0;
+    }
+
+    bool has_next_combination = true;
+    double baseline_loss = obj->MockRun();
+    double previous_best_loss = baseline_loss;
+    double best_loss = baseline_loss;
+    double best_improve = 0;
+
+    while (has_next_combination) {
+        // 1. set param
+        std::string set_info = "";
+        for (auto& param : parameters_) {
             current_params[param.name_] = param.Cur();
-            auto set_status = obj->SetRuntimeParameters(current_params);
-            if (not set_status) {
-                continue;
-            }
-
-            // evaluate
-            double loss = obj->MockRun();
-            double improvement = (before_loss - loss) / before_loss * 100;
-            vsag::logger::info(
-                fmt::format("setting {} -> {}, get new loss = {:.3f} from before = {:.3f}, "
-                            "improving = {:.3f} %",
-                            param.name_,
-                            current_params[param.name_],
-                            loss,
-                            before_loss,
-                            improvement));
-
-            // update
-            // overall principle: choose smaller param
-            if (loss < best_loss and                  // condition1. has improvement
-                improvement - best_improve > 0.2 and  // condition2. improvement is noteworthy
-                improvement > 2.0) {                  // condition3. improvement is valid
-                successful_optimized = true;
-                have_improvement = true;
-                best_loss = loss;
-                best_improve = improvement;
-                best_params_[param.name_] = current_params[param.name_];
-            }
-
-            param.Next();
+            set_info += fmt::format("setting {} -> {}, ", param.name_, param.Cur());
+        }
+        auto set_status = obj->SetRuntimeParameters(current_params);
+        if (not set_status) {
+            continue;
         }
 
-        if (successful_optimized) {
-            current_params[param.name_] = best_params_[param.name_];
-            vsag::logger::info(fmt::format("setting to best param: {} -> {}, improving {:.3f}%",
-                                           param.name_,
-                                           best_params_[param.name_],
-                                           best_improve));
-        } else {
-            param.Reset();
-            current_params[param.name_] = param.Cur();
-            obj->SetRuntimeParameters(current_params);
+        // 2. evaluate
+        double loss = obj->MockRun();
+        double improvement = (baseline_loss - loss) / baseline_loss * 100;
+        set_info +=
+            fmt::format("get new loss = {:.3f} from baseline = {:.3f}, improving = {:.3f} %",
+                        loss,
+                        baseline_loss,
+                        improvement);
+        vsag::logger::info(set_info);
 
-            vsag::logger::info(fmt::format(
-                "reset to original param: {} -> {}", param.name_, current_params[param.name_]));
+        // 3. update
+        // overall principle: choose smaller param
+        if (loss < best_loss and                  // condition1. has improvement
+            improvement - best_improve > 0.2 and  // condition2. improvement is noteworthy
+            improvement > 2.0) {                  // condition3. improvement is valid
+            have_improvement = true;
+            best_loss = loss;
+            best_improve = improvement;
+
+            for (auto& param : parameters_) {
+                best_params_[param.name_] = param.Cur();
+            }
         }
 
-        param.Reset();
+        // 4. iter parameter
+        size_t level = parameters_.size() - 1;
+        while (level < parameters_.size()) {
+            parameters_[level].Next();
+
+            if (!parameters_[level].IsEnd()) {
+                break;
+            }
+
+            parameters_[level].Reset();
+            if (level == 0) {
+                has_next_combination = false;
+            }
+            --level;
+        }
     }
 
     vsag::logger::info(fmt::format("============Optimize Report==========="));
