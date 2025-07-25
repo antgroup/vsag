@@ -24,6 +24,9 @@ FP32QuantizerParameter::FP32QuantizerParameter()
 
 void
 FP32QuantizerParameter::FromJson(const JsonType& json) {
+    if (json.contains(HOLD_MOLDS)) {
+        hold_molds = json[HOLD_MOLDS];
+    }
 }
 
 JsonType

@@ -81,7 +81,7 @@ static constexpr const char* IVF_PARAMS_TEMPLATE =
 ParamPtr
 IVF::CheckAndMappingExternalParam(const JsonType& external_param,
                                   const IndexCommonParam& common_param) {
-    const std::unordered_map<std::string, std::vector<std::string>> external_mapping = {
+    const ConstParamMap external_mapping = {
         {
             IVF_BASE_QUANTIZATION_TYPE,
             {BUCKET_PARAMS_KEY, QUANTIZATION_PARAMS_KEY, QUANTIZATION_TYPE_KEY},

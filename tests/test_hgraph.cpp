@@ -49,7 +49,8 @@ public:
                                         std::string graph_type = "nsw",
                                         std::string graph_storage = "flat",
                                         bool support_remove = false,
-                                        bool use_attr_filter = false);
+                                        bool use_attr_filter = false,
+                                        bool store_raw_vector = false);
 
     static HGraphResourcePtr
     GetResource(bool sample = true);
@@ -131,7 +132,8 @@ HGraphTestIndex::GenerateHGraphBuildParametersString(const std::string& metric_t
                                                      std::string graph_type,
                                                      std::string graph_storage,
                                                      bool support_remove,
-                                                     bool use_attr_filter) {
+                                                     bool use_attr_filter,
+                                                     bool store_raw_vector) {
     std::string build_parameters_str;
 
     constexpr auto parameter_temp_reorder = R"(
@@ -156,7 +158,8 @@ HGraphTestIndex::GenerateHGraphBuildParametersString(const std::string& metric_t
             "neighbor_sample_rate": 0.3,
             "alpha": 1.2,
             "support_remove": {},
-            "use_attribute_filter": {}
+            "use_attribute_filter": {},
+            "store_raw_vector": {}
         }}
     }}
     )";
@@ -179,7 +182,8 @@ HGraphTestIndex::GenerateHGraphBuildParametersString(const std::string& metric_t
             "neighbor_sample_rate": 0.3,
             "alpha": 1.2,
             "support_remove": {},
-            "use_attribute_filter": {}
+            "use_attribute_filter": {},
+            "store_raw_vector": {}
         }}
     }}
     )";
@@ -212,7 +216,8 @@ HGraphTestIndex::GenerateHGraphBuildParametersString(const std::string& metric_t
                                            graph_type,
                                            graph_storage,
                                            support_remove,
-                                           use_attr_filter);
+                                           use_attr_filter,
+                                           store_raw_vector);
     } else {
         build_parameters_str = fmt::format(parameter_temp_origin,
                                            data_type,
@@ -225,7 +230,8 @@ HGraphTestIndex::GenerateHGraphBuildParametersString(const std::string& metric_t
                                            graph_type,
                                            graph_storage,
                                            support_remove,
-                                           use_attr_filter);
+                                           use_attr_filter,
+                                           store_raw_vector);
     }
     return build_parameters_str;
 }
@@ -683,6 +689,76 @@ TEST_CASE("[Daily] HGraph Build With Attr", "[ft][hgraph][daily]") {
     auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
     auto resource = test_index->GetResource(false);
     TestHGraphBuildWithAttr(test_index, resource);
+}
+
+static void
+TestHGraphGetRawVector(const fixtures::HGraphTestIndexPtr& test_index,
+                       const fixtures::HGraphResourcePtr& resource) {
+    using namespace fixtures;
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    auto size = GENERATE(1024 * 1024 * 2);
+    const std::vector<std::pair<std::string, float>> test_cases = {{"fp32", 0.99},
+                                                                   {"sq4_uniform,fp32", 0.95}};
+    auto search_param = fmt::format(fixtures::search_param_tmp, 200, false);
+    for (auto metric_type : resource->metric_types) {
+        metric_type = "cosine";
+        for (auto dim : resource->dims) {
+            for (auto& [base_quantization_str, recall] : test_cases) {
+                INFO(fmt::format("metric_type: {}, dim: {}, base_quantization_str: {}, recall: {}",
+                                 metric_type,
+                                 dim,
+                                 base_quantization_str,
+                                 recall));
+                if (HGraphTestIndex::IsRaBitQ(base_quantization_str) &&
+                    dim < fixtures::RABITQ_MIN_RACALL_DIM) {
+                    continue;  // Skip invalid RaBitQ configurations
+                }
+
+                // Set block size limit for current test iteration
+                vsag::Options::Instance().set_block_size_limit(size);
+
+                // Generate index parameters with attribute support enabled
+                auto param =
+                    HGraphTestIndex::GenerateHGraphBuildParametersString(metric_type,
+                                                                         dim,
+                                                                         base_quantization_str,
+                                                                         /*thread_count*/ 5,
+                                                                         /*extra_info_size*/ 0,
+                                                                         /*data_type*/ "float32",
+                                                                         /*graph_type*/ "nsw",
+                                                                         /*graph_storage*/ "flat",
+                                                                         /*support_remove*/ false,
+                                                                         /*use_attr_filter*/ false,
+                                                                         /*store_raw_vector*/ true);
+
+                // Create index and dataset
+                auto index = TestIndex::TestFactory(test_index->name, param, true);
+
+                auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(
+                    dim, resource->base_count, metric_type);
+
+                TestIndex::TestBuildIndex(index, dataset, true);
+
+                // Execute attribute-aware build test
+                HGraphTestIndex::TestGeneral(index, dataset, search_param, recall);
+
+                // Restore original block size limit
+                vsag::Options::Instance().set_block_size_limit(origin_size);
+            }
+        }
+    }
+}
+
+TEST_CASE("[PR] HGraph Support Get Raw Vector", "[ft][hgraph][pr]") {
+    auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
+    auto resource = test_index->GetResource(true);
+    TestHGraphGetRawVector(test_index, resource);
+}
+
+TEST_CASE("[Daily] HGraph Support Get Raw Vector", "[ft][hgraph][daily]") {
+    auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
+    auto resource = test_index->GetResource(false);
+    TestHGraphGetRawVector(test_index, resource);
 }
 
 static void

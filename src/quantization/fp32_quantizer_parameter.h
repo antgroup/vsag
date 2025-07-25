@@ -31,6 +31,7 @@ public:
     ToJson() const override;
 
 public:
+    bool hold_molds{false};
 };
 
 using FP32QuantizerParamPtr = std::shared_ptr<FP32QuantizerParameter>;

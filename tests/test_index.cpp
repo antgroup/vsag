@@ -1803,7 +1803,7 @@ void
 TestIndex::TestGetRawVectorByIds(const IndexPtr& index,
                                  const TestDatasetPtr& dataset,
                                  bool expected_success) {
-    if (not index->CheckFeature(vsag::SUPPORT_GET_VECTOR_BY_IDS)) {
+    if (not index->CheckFeature(vsag::SUPPORT_GET_RAW_VECTOR_BY_IDS)) {
         return;
     }
     int64_t count = dataset->count_;
@@ -1812,9 +1812,9 @@ TestIndex::TestGetRawVectorByIds(const IndexPtr& index,
     auto float_vectors = vectors.value()->GetFloat32Vectors();
     auto dim = dataset->base_->GetDim();
     for (int i = 0; i < count; ++i) {
-        fixtures::dist_t dis = vsag::FP32ComputeL2Sqr(
-            float_vectors + i * dim, dataset->base_->GetFloat32Vectors() + i * dim, dim);
-        REQUIRE(dis == 0);
+        REQUIRE(std::memcmp(float_vectors + i * dim,
+                            dataset->base_->GetFloat32Vectors() + i * dim,
+                            dim * sizeof(float)) == 0);
     }
 }
 
