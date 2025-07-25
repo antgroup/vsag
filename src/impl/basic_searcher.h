@@ -48,6 +48,8 @@ public:
     float first_order_scan_ratio{1.0F};
     Allocator* search_alloc{nullptr};
     ExecutorPtr executor{nullptr};
+    mutable int64_t duplicate_id{-1};
+    bool consider_duplicate{false};
 
     InnerSearchParam&
     operator=(const InnerSearchParam& other) {
@@ -80,7 +82,8 @@ public:
            const FlattenInterfacePtr& flatten,
            const VisitedListPtr& vl,
            const void* query,
-           const InnerSearchParam& inner_search_param) const;
+           const InnerSearchParam& inner_search_param,
+           const LabelTablePtr& label_table = nullptr) const;
 
     virtual DistHeapPtr
     Search(const GraphInterfacePtr& graph,
@@ -126,7 +129,8 @@ private:
                 const FlattenInterfacePtr& flatten,
                 const VisitedListPtr& vl,
                 const void* query,
-                const InnerSearchParam& inner_search_param) const;
+                const InnerSearchParam& inner_search_param,
+                const LabelTablePtr& label_table) const;
 
     template <InnerSearchMode mode = KNN_SEARCH>
     DistHeapPtr

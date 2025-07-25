@@ -72,11 +72,14 @@ BasicSearcher::Search(const GraphInterfacePtr& graph,
                       const FlattenInterfacePtr& flatten,
                       const VisitedListPtr& vl,
                       const void* query,
-                      const InnerSearchParam& inner_search_param) const {
+                      const InnerSearchParam& inner_search_param,
+                      const LabelTablePtr& label_table) const {
     if (inner_search_param.search_mode == KNN_SEARCH) {
-        return this->search_impl<KNN_SEARCH>(graph, flatten, vl, query, inner_search_param);
+        return this->search_impl<KNN_SEARCH>(
+            graph, flatten, vl, query, inner_search_param, label_table);
     }
-    return this->search_impl<RANGE_SEARCH>(graph, flatten, vl, query, inner_search_param);
+    return this->search_impl<RANGE_SEARCH>(
+        graph, flatten, vl, query, inner_search_param, label_table);
 }
 
 DistHeapPtr
@@ -186,6 +189,9 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
 
         for (uint32_t i = 0; i < count_no_visited; i++) {
             dist = line_dists[i];
+            if (dist < THRESHOLD_ERROR) {
+                inner_search_param.duplicate_id = to_be_visited_id[i];
+            }
             if (top_candidates->Size() < ef || lower_bound > dist ||
                 (mode == RANGE_SEARCH && dist <= inner_search_param.radius)) {
                 if (!iter_ctx->CheckPoint(to_be_visited_id[i])) {
@@ -233,7 +239,8 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                            const FlattenInterfacePtr& flatten,
                            const VisitedListPtr& vl,
                            const void* query,
-                           const InnerSearchParam& inner_search_param) const {
+                           const InnerSearchParam& inner_search_param,
+                           const LabelTablePtr& label_table) const {
     Allocator* alloc =
         inner_search_param.search_alloc == nullptr ? allocator_ : inner_search_param.search_alloc;
     auto top_candidates = std::make_shared<StandardHeap<true, false>>(alloc, -1);
@@ -270,6 +277,9 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
             top_candidates->Pop();
         }
     }
+    if (dist < THRESHOLD_ERROR) {
+        inner_search_param.duplicate_id = ep;
+    }
     candidate_set->Push(-dist, ep);
     vl->Set(ep);
 
@@ -304,12 +314,22 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
 
         for (uint32_t i = 0; i < count_no_visited; i++) {
             dist = line_dists[i];
+            if (dist < THRESHOLD_ERROR) {
+                inner_search_param.duplicate_id = to_be_visited_id[i];
+            }
             if (top_candidates->Size() < ef || lower_bound > dist ||
                 (mode == RANGE_SEARCH && dist <= inner_search_param.radius)) {
                 candidate_set->Push(-dist, to_be_visited_id[i]);
                 //                flatten->Prefetch(candidate_set->Top().second);
                 if (not is_id_allowed || is_id_allowed->CheckValid(to_be_visited_id[i])) {
                     top_candidates->Push(dist, to_be_visited_id[i]);
+                }
+                if (inner_search_param.consider_duplicate && label_table &&
+                    label_table->CompressDuplicateData()) {
+                    const auto& duplicate_ids = label_table->GetDuplicateId(to_be_visited_id[i]);
+                    for (const auto& item : duplicate_ids) {
+                        top_candidates->Push(dist, item);
+                    }
                 }
 
                 if constexpr (mode == KNN_SEARCH) {
