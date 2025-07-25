@@ -443,6 +443,16 @@ public:
      *         - On failure: An error object (e.g., invalid ID, out of memory).
      * @throws std::runtime_error If the index implementation does not support this operation
      *            (default behavior for base class).
+     *
+     * @note The returned vectors are guaranteed to have a distance **close to 0** (e.g., Euclidean
+     * distance) compared to the original vectors stored in the index. However, **exact equality is
+     * not guaranteed** due to potential implementation-specific factors such as:
+     *       - Floating-point precision limitations (e.g., 32-bit vs. 64-bit storage).
+     *       - Quantization or compression techniques used by the index (e.g., product quantization
+     *       for approximate nearest neighbors).
+     *       - Internal transformations (e.g., normalization, dimensionality reduction).
+     * Users should not assume bitwise identicality between the returned vectors and the originally
+     * inserted ones, even if the IDs match.
      */
     virtual tl::expected<DatasetPtr, Error>
     GetRawVectorByIds(const int64_t* ids, int64_t count) const {

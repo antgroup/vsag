@@ -211,6 +211,10 @@ public:
     Metric() const {
         return this->metric_;
     }
+    [[nodiscard]] bool
+    HoldMolds() const {
+        return this->hold_molds_;
+    }
 
     virtual void
     Package32(const uint8_t* codes, uint8_t* packaged_codes, int64_t valid_size) const {};
@@ -257,6 +261,7 @@ private:
     bool is_trained_{false};
     MetricType metric_{MetricType::METRIC_TYPE_L2SQR};
     Allocator* const allocator_{nullptr};
+    bool hold_molds_{false};
 
     GENERATE_HAS_MEMBER_FUNCTION(ComputeDistsBatch4Impl,
                                  void,
