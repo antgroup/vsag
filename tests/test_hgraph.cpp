@@ -1602,6 +1602,26 @@ TestHGraphWithExtraInfo(const fixtures::HGraphTestIndexPtr& test_index,
                     continue;  // Skip invalid RaBitQ configurations
                 }
                 vsag::Options::Instance().set_block_size_limit(size);
+                {
+                    auto param =
+                        HGraphTestIndex::GenerateHGraphBuildParametersString(metric_type,
+                                                                             dim,
+                                                                             base_quantization_str,
+                                                                             5 /*thread_count*/,
+                                                                             0 /*extra_info_size*/);
+                    auto index = TestIndex::TestFactory(test_index->name, param, true);
+                    int64_t label = 8001;
+                    std::vector<char> empty_extra_info(extra_info_size);
+                    auto extra_info_dataset = vsag::Dataset::Make();
+                    extra_info_dataset->ExtraInfos(empty_extra_info.data())
+                        ->NumElements(1)
+                        ->Owner(false)
+                        ->ExtraInfoSize(0)
+                        ->Ids(&label);
+                    auto result = index->UpdateExtraInfo(extra_info_dataset);
+                    REQUIRE(!result.has_value());
+                    REQUIRE(result.error().message == "extra_infos is not initialized");
+                }
                 auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(
                     metric_type, dim, base_quantization_str, 5 /*thread_count*/, extra_info_size);
                 auto index = TestIndex::TestFactory(test_index->name, param, true);
@@ -1616,6 +1636,9 @@ TestHGraphWithExtraInfo(const fixtures::HGraphTestIndexPtr& test_index,
                 TestIndex::TestKnnSearchIter(index, dataset, search_param, recall, true);
                 TestIndex::TestRangeSearch(index, dataset, search_param, recall, 10, true);
                 TestIndex::TestGetExtraInfoById(index, dataset, extra_info_size);
+                TestIndex::TestKnnSearchExFilter(
+                    index, dataset, search_ex_filter_param, recall, true);
+                TestIndex::TestUpdateExtraInfo(index, dataset, extra_info_size);
                 TestIndex::TestKnnSearchExFilter(
                     index, dataset, search_ex_filter_param, recall, true);
                 TestIndex::TestKnnSearchIter(
