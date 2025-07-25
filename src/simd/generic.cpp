@@ -49,6 +49,23 @@ InnerProductDistance(const void* pVect1, const void* pVect2, const void* qty_ptr
 }
 
 float
+INT8L2Sqr(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
+    auto* pVect1 = (int8_t*)pVect1v;
+    auto* pVect2 = (int8_t*)pVect2v;
+    uint64_t qty = *((uint64_t*)qty_ptr);
+
+    float res = 0.0f;
+    for (uint64_t i = 0; i < qty; ++i) {
+        float t = static_cast<float>(*pVect1 - *pVect2);
+        pVect1++;
+        pVect2++;
+        res += t * t;
+    }
+
+    return res;
+}
+
+float
 INT8InnerProduct(const void* pVect1, const void* pVect2, const void* qty_ptr) {
     uint64_t qty = *((uint64_t*)qty_ptr);
     auto* vec1 = (int8_t*)pVect1;
@@ -174,6 +191,16 @@ union FP32Struct {
     uint32_t int_value;
     float float_value;
 };
+
+float
+INT8ComputeL2Sqr(const int8_t* RESTRICT query, const int8_t* RESTRICT codes, uint64_t dim) {
+    float result = 0.0f;
+    for (uint64_t i = 0; i < dim; ++i) {
+        auto val = static_cast<float>(query[i] - codes[i]);
+        result += val * val;
+    }
+    return result;
+}
 
 float
 BF16ToFloat(const uint16_t bf16_value) {
