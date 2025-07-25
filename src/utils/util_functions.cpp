@@ -40,18 +40,18 @@ mapping_external_param_to_inner(const JsonType& external_json,
                                 ConstParamMap& param_map,
                                 JsonType& inner_json) {
     for (const auto& [key, value] : external_json.items()) {
-        const auto& iter = param_map.find(key);
-
-        if (iter != param_map.end()) {
+        auto ranges = param_map.equal_range(key);
+        if (ranges.first == ranges.second) {
+            throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                fmt::format("invalid config param: {}", key));
+        }
+        for (auto iter = ranges.first; iter != ranges.second; ++iter) {
             const auto& vec = iter->second;
             auto* json = &inner_json;
             for (const auto& str : vec) {
                 json = &(json->operator[](str));
             }
             *json = value;
-        } else {
-            throw VsagException(ErrorType::INVALID_ARGUMENT,
-                                fmt::format("invalid config param: {}", key));
         }
     }
 }

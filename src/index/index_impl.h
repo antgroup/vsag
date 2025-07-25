@@ -295,7 +295,7 @@ public:
 
     virtual tl::expected<DatasetPtr, Error>
     GetRawVectorByIds(const int64_t* ids, int64_t count) const override {
-        if (not CheckFeature(IndexFeature::SUPPORT_GET_VECTOR_BY_IDS)) {
+        if (not CheckFeature(IndexFeature::SUPPORT_GET_RAW_VECTOR_BY_IDS)) {
             return tl::unexpected(Error(ErrorType::UNSUPPORTED_INDEX_OPERATION,
                                         "index no support to get raw vector by ids"));
         }

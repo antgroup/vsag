@@ -144,6 +144,11 @@ public:
         return true;
     }
 
+    [[nodiscard]] virtual bool
+    HoldMolds() const {
+        return false;
+    }
+
     virtual void
     MergeOther(const FlattenInterfacePtr& other, InnerIdType bias) {
         throw VsagException(ErrorType::INTERNAL_ERROR, "MergeOther not implemented");

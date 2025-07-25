@@ -151,6 +151,7 @@ HGraphParameter::ToJson() const {
     json[BUILD_PARAMS_KEY][BUILD_EF_CONSTRUCTION] = this->ef_construction;
     json[BUILD_PARAMS_KEY][BUILD_THREAD_COUNT] = this->build_thread_count;
     json[HGRAPH_EXTRA_INFO_KEY] = this->extra_info_param->ToJson();
+    json[HGRAPH_STORE_RAW_VECTOR] = this->store_raw_vector;
     return json;
 }
 
