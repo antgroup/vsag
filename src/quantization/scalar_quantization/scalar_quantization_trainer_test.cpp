@@ -67,6 +67,10 @@ TEST_CASE("ScalarQuantizationTrainer", "[ft][scalar_quantization_trainer]") {
     trainer.Train(data.data(), data.size(), &lower_p, &upper_p, vsag::SQTrainMode::PSO);
     float mse_pso = compute_mse(data, lower_p, upper_p, bits);
 
+    REQUIRE(lower_c <= upper_c);
+    REQUIRE(lower_t <= upper_t);
+    REQUIRE(lower_p <= upper_p);
+
     REQUIRE(mse_pso < mse_classic * 0.95);
     REQUIRE(mse_pso < mse_trunc);
 }
