@@ -94,42 +94,41 @@ ScalarQuantizationTrainer::pso_train_impl(const float* data,
 
         std::random_device rd;
         std::mt19937 gen(rd());
-        std::uniform_real_distribution<float> v_dis(-init_range_width * 0.1f,
-                                                    init_range_width * 0.1f);
+        std::uniform_real_distribution<float> v_dis(-init_range_width * 0.01f,
+                                                    init_range_width * 0.01f);
         std::uniform_real_distribution<float> p_dis(0.0f, 1.0f);
 
-        auto loss = [=](float center, float width) {
-            float step_size = width / div;
-            step_size = std::max(step_size, 1e-8f);
+        auto loss = [=, this](float lower, float step_size) {
+            step_size = std::max(step_size, 1e-6f);
             float total_loss = 0.0f;
             for (uint64_t j = 0; j < count; ++j) {
                 float value = data[j * dim_ + i];
-                float quantized_code = std::round((value - center) / step_size);
+                float quantized_code = std::round((value - lower) / step_size);
                 quantized_code = std::min(quantized_code, div);
                 quantized_code = std::max(quantized_code, 0.0f);
-                float error = (value - (center + quantized_code * step_size)) *
-                              (value - (center + quantized_code * step_size));
+                float error = (value - (lower + quantized_code * step_size)) *
+                              (value - (lower + quantized_code * step_size));
                 total_loss += error;
             }
-            return total_loss * step_size * step_size;
+            return total_loss;
         };
 
         struct Particle {
-            float center;
-            float width;
-            float v_center;
-            float v_width;
-            float best_center;
-            float best_width;
+            float lower;
+            float step_size;
+            float v_lower;
+            float v_step_size;
+            float best_lower;
+            float best_step_size;
             float min_loss;
 
-            Particle(const float c_val, const float w_val, const float vc_val, const float vw_val)
-                : center(c_val),
-                  width(w_val),
-                  v_center(vc_val),
-                  v_width(vw_val),
-                  best_center(c_val),
-                  best_width(w_val),
+            Particle(const float l_val, const float s_val, const float vl_val, const float vs_val)
+                : lower(l_val),
+                  step_size(s_val),
+                  v_lower(vl_val),
+                  v_step_size(vs_val),
+                  best_lower(l_val),
+                  best_step_size(s_val),
                   min_loss(std::numeric_limits<float>::max()) {
             }
         };
@@ -138,29 +137,26 @@ ScalarQuantizationTrainer::pso_train_impl(const float* data,
         swarm.reserve(grid_side_length * grid_side_length);
         for (size_t m = 0; m < grid_side_length; ++m) {
             for (size_t n = 0; n < grid_side_length; ++n) {
-                float lower = init_lower_bound - grid_scale_factor * init_range_width +
-                              static_cast<float>(m) * 2 * grid_scale_factor * init_range_width /
-                                  grid_side_length;
-                float upper = init_upper_bound - grid_scale_factor * init_range_width +
-                              static_cast<float>(n) * 2 * grid_scale_factor * init_range_width /
-                                  grid_side_length;
-                float particle_center = (lower + upper) * 0.5f;
-                float particle_width = upper - lower;
-                swarm.emplace_back(particle_center, particle_width, v_dis(gen), v_dis(gen));
+                float particle_lower =
+                    init_lower_bound + (static_cast<float>(m) - grid_side_length * 0.5f) *
+                                           grid_scale_factor * init_range_width / grid_side_length;
+                float particle_step_size =
+                    init_range_width / div * (0.5f + static_cast<float>(n) / grid_side_length);
+                particle_step_size = std::max(particle_step_size, 1e-6f);
+                swarm.emplace_back(particle_lower, particle_step_size, v_dis(gen), v_dis(gen));
             }
         }
 
-        float global_best_center = init_range_center;
-        float global_best_width = init_range_width;
-        float global_min_loss = loss(init_range_center, init_range_width);
+        float global_best_lower = init_lower_bound;
+        float global_best_step_size = std::max(init_range_width / div, 1e-6f);
+        float global_min_loss = loss(init_lower_bound, global_best_step_size);
         for (auto& particle : swarm) {
-            float curr_lower = particle.center - particle.width * 0.5f;
-            float curr_loss = loss(particle.center, particle.width);
+            float curr_loss = loss(particle.lower, particle.step_size);
             particle.min_loss = curr_loss;
             if (curr_loss < global_min_loss) {
                 global_min_loss = curr_loss;
-                global_best_center = particle.center;
-                global_best_width = particle.width;
+                global_best_lower = particle.lower;
+                global_best_step_size = particle.step_size;
             }
         }
 
@@ -170,32 +166,32 @@ ScalarQuantizationTrainer::pso_train_impl(const float* data,
             for (auto& particle : swarm) {
                 float r1 = p_dis(gen);
                 float r2 = p_dis(gen);
-                particle.v_center = inertia * particle.v_center +
-                                    c1 * r1 * (particle.best_center - particle.center) +
-                                    c2 * r2 * (global_best_center - particle.center);
-                particle.v_width = inertia * particle.v_width +
-                                   c1 * r1 * (particle.best_width - particle.width) +
-                                   c2 * r2 * (global_best_width - particle.width);
-                particle.center += particle.v_center;
-                particle.width += particle.v_width;
-                if (particle.width <= std::numeric_limits<float>::epsilon()) {
-                    particle.width = std::numeric_limits<float>::epsilon();
+                particle.v_lower = inertia * particle.v_lower +
+                                   c1 * r1 * (particle.best_lower - particle.lower) +
+                                   c2 * r2 * (global_best_lower - particle.lower);
+                particle.v_step_size = inertia * particle.v_step_size +
+                                       c1 * r1 * (particle.best_step_size - particle.step_size) +
+                                       c2 * r2 * (global_best_step_size - particle.step_size);
+                particle.lower += particle.v_lower;
+                particle.step_size += particle.v_step_size;
+                if (particle.step_size <= 1e-6f) {
+                    particle.step_size = 1e-6f;
                 }
-                float curr_loss = loss(particle.center, particle.width);
+                float curr_loss = loss(particle.lower, particle.step_size);
                 if (curr_loss < particle.min_loss) {
                     particle.min_loss = curr_loss;
-                    particle.best_center = particle.center;
-                    particle.best_width = particle.width;
+                    particle.best_lower = particle.lower;
+                    particle.best_step_size = particle.step_size;
                 }
                 if (curr_loss < global_min_loss) {
                     global_min_loss = curr_loss;
-                    global_best_center = particle.center;
-                    global_best_width = particle.width;
+                    global_best_lower = particle.lower;
+                    global_best_step_size = particle.step_size;
                 }
             }
         }
-        lower_bound[i] = global_best_center - global_best_width * 0.5f;
-        upper_bound[i] = global_best_center + global_best_width * 0.5f;
+        lower_bound[i] = global_best_lower;
+        upper_bound[i] = global_best_lower + global_best_step_size * div;
     }
 }
 
