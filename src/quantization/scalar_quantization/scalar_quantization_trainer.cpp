@@ -49,6 +49,14 @@ ScalarQuantizationTrainer::pso_train(const float* data,
                                      uint64_t count,
                                      float* upper_bound,
                                      float* lower_bound) const {
+    return pso_train_impl(data, count, upper_bound, lower_bound);
+}
+
+void
+ScalarQuantizationTrainer::pso_train_impl(const float* data,
+                                          uint64_t count,
+                                          float* upper_bound,
+                                          float* lower_bound) const {
     this->classic_train(data, count, upper_bound, lower_bound);
     float div = (1 << this->bits_) - 1;
 

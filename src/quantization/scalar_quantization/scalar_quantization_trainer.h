@@ -71,6 +71,9 @@ private:
     void
     pso_train(const float* data, uint64_t count, float* upper_bound, float* lower_bound) const;
 
+    void
+    pso_train_impl(const float* data, uint64_t count, float* upper_bound, float* lower_bound) const;
+
     uint64_t
     sample_train_data(const float* data,
                       uint64_t count,
