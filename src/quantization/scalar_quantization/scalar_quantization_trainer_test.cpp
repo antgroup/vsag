@@ -44,31 +44,31 @@ compute_mse(const std::vector<float>& data, float lower, float upper, int bits) 
 TEST_CASE("ScalarQuantizationTrainer", "[ft][scalar_quantization_trainer]") {
     std::vector<float> data;
     std::mt19937 gen(42);
-    std::normal_distribution<float> dist(0.0f, 1.0f);
+    std::uniform_real_distribution<float> dist(0.0f, 1.0f);
     for (int i = 0; i < 1000; ++i) {
         data.push_back(dist(gen));
     }
     int bits = 4;
-    float lower_c, upper_c, lower_t, upper_t, lower_p, upper_p;
+    float lower_c[1], upper_c[1], lower_t[1], upper_t[1], lower_p[1], upper_p[1];
 
-    vsag::ScalarQuantizationTrainer trainer(1, bits);
+    ScalarQuantizationTrainer trainer(1, bits);
 
     // CLASSIC
-    trainer.Train(data.data(), data.size(), &upper_c, &lower_c, vsag::SQTrainMode::CLASSIC);
-    float mse_classic = compute_mse(data, lower_c, upper_c, bits);
+    trainer.classic_train(data.data(), data.size(), upper_c, lower_c);
+    float mse_classic = compute_mse(data, lower_c[0], upper_c[0], bits);
 
     // TRUNC_BOUND
-    trainer.Train(data.data(), data.size(), &upper_t, &lower_t, vsag::SQTrainMode::TRUNC_BOUND);
-    float mse_trunc = compute_mse(data, lower_t, upper_t, bits);
+    trainer.trunc_bound_train(data.data(), data.size(), upper_t, lower_t);
+    float mse_trunc = compute_mse(data, lower_t[0], upper_t[0], bits);
 
     // PSO
-    trainer.Train(data.data(), data.size(), &upper_p, &lower_p, vsag::SQTrainMode::PSO);
-    float mse_pso = compute_mse(data, lower_p, upper_p, bits);
+    trainer.pso_train(data.data(), data.size(), upper_p, lower_p);
+    float mse_pso = compute_mse(data, lower_p[0], upper_p[0], bits);
 
     REQUIRE(lower_c <= upper_c);
     REQUIRE(lower_t <= upper_t);
     REQUIRE(lower_p <= upper_p);
 
-    REQUIRE(mse_pso <= mse_classic * 0.95);
-    REQUIRE(mse_pso <= mse_trunc);
+    REQUIRE(mse_pso < mse_classic * 0.95);
+    REQUIRE(mse_pso < mse_trunc);
 }
