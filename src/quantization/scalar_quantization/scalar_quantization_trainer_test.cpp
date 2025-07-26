@@ -54,15 +54,15 @@ TEST_CASE("ScalarQuantizationTrainer", "[ft][scalar_quantization_trainer]") {
     ScalarQuantizationTrainer trainer(1, bits);
 
     // CLASSIC
-    trainer.classic_train(data.data(), data.size(), upper_c, lower_c);
+    trainer.Train(data.data(), data.size(), upper_c, lower_c, false, vsag::CLASSIC);
     float mse_classic = compute_mse(data, lower_c[0], upper_c[0], bits);
 
     // TRUNC_BOUND
-    trainer.trunc_bound_train(data.data(), data.size(), upper_t, lower_t);
+    trainer.Train(data.data(), data.size(), upper_t, lower_t, false, vsag::TRUNC_BOUND);
     float mse_trunc = compute_mse(data, lower_t[0], upper_t[0], bits);
 
     // PSO
-    trainer.pso_train(data.data(), data.size(), upper_p, lower_p);
+    trainer.Train(data.data(), data.size(), upper_p, lower_p, false, vsag::PSO);
     float mse_pso = compute_mse(data, lower_p[0], upper_p[0], bits);
 
     REQUIRE(lower_c <= upper_c);

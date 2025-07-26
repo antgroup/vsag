@@ -59,6 +59,7 @@ public:
         this->trunc_rate_ = trunc_rate;
     }
 
+private:
     void
     classic_train(const float* data, uint64_t count, float* upper_bound, float* lower_bound) const;
 
@@ -71,7 +72,6 @@ public:
     void
     pso_train(const float* data, uint64_t count, float* upper_bound, float* lower_bound) const;
 
-private:
     void
     pso_train_impl(const float* data,
                    uint64_t count,
