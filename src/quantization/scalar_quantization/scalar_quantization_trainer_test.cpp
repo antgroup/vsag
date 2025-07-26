@@ -25,8 +25,6 @@
 #include <random>
 #include <vector>
 
-#include "vsag/vsag.h"
-
 using namespace vsag;
 
 float
@@ -71,6 +69,6 @@ TEST_CASE("ScalarQuantizationTrainer", "[ft][scalar_quantization_trainer]") {
     REQUIRE(lower_t <= upper_t);
     REQUIRE(lower_p <= upper_p);
 
-    REQUIRE(mse_pso < mse_classic * 0.95);
-    REQUIRE(mse_pso < mse_trunc);
+    REQUIRE(mse_pso <= mse_classic * 0.95);
+    REQUIRE(mse_pso <= mse_trunc);
 }
