@@ -38,7 +38,7 @@ public:
           float* upper_bound,
           float* lower_bound,
           bool need_normalize = false,
-          SQTrainMode mode = SQTrainMode::PSO);  // suggest to use PSO
+          SQTrainMode mode = SQTrainMode::TRUNC_BOUND);
 
     void
     TrainUniform(const float* data,
