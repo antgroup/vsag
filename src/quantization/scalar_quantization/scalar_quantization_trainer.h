@@ -16,6 +16,7 @@
 #pragma once
 
 #include <cstdint>
+#include <vector>
 
 #include "typing.h"
 
@@ -72,7 +73,17 @@ private:
     pso_train(const float* data, uint64_t count, float* upper_bound, float* lower_bound) const;
 
     void
-    pso_train_impl(const float* data, uint64_t count, float* upper_bound, float* lower_bound) const;
+    pso_train_impl(const float* data,
+                   uint64_t count,
+                   float* upper_bound,
+                   float* lower_bound,
+                   size_t max_iter,
+                   size_t grid_side_length,
+                   float grid_scale_factor,
+                   float init_inertia,
+                   float final_inertia,
+                   float c1,
+                   float c2) const;
 
     uint64_t
     sample_train_data(const float* data,

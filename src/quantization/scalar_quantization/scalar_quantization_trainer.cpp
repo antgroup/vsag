@@ -49,14 +49,39 @@ ScalarQuantizationTrainer::pso_train(const float* data,
                                      uint64_t count,
                                      float* upper_bound,
                                      float* lower_bound) const {
-    return pso_train_impl(data, count, upper_bound, lower_bound);
+    constexpr size_t max_iter = 128;
+    constexpr size_t grid_side_length = 8;
+    constexpr float grid_scale_factor = 0.1f;
+    constexpr float init_inertia = 0.9f;
+    constexpr float final_inertia = 0.4f;
+    constexpr float c1 = 1.8f;
+    constexpr float c2 = 1.8f;
+
+    return pso_train_impl(data,
+                          count,
+                          upper_bound,
+                          lower_bound,
+                          max_iter,
+                          grid_side_length,
+                          grid_scale_factor,
+                          init_inertia,
+                          final_inertia,
+                          c1,
+                          c2);
 }
 
 void
 ScalarQuantizationTrainer::pso_train_impl(const float* data,
                                           uint64_t count,
                                           float* upper_bound,
-                                          float* lower_bound) const {
+                                          float* lower_bound,
+                                          size_t max_iter,
+                                          size_t grid_side_length,
+                                          float grid_scale_factor,
+                                          float init_inertia,
+                                          float final_inertia,
+                                          float c1,
+                                          float c2) const {
     this->classic_train(data, count, upper_bound, lower_bound);
     float div = (1 << this->bits_) - 1;
 
@@ -72,14 +97,6 @@ ScalarQuantizationTrainer::pso_train_impl(const float* data,
         std::uniform_real_distribution<float> v_dis(-init_range_width * 0.1f,
                                                     init_range_width * 0.1f);
         std::uniform_real_distribution<float> p_dis(0.0f, 1.0f);
-
-        constexpr size_t max_iter = 128;
-        constexpr size_t grid_side_length = 8;
-        constexpr float grid_scale_factor = 0.1f;
-        constexpr float init_inertia = 0.9f;
-        constexpr float final_inertia = 0.4f;
-        constexpr float c1 = 1.8f;
-        constexpr float c2 = 1.8f;
 
         auto loss = [=](float center, float width) {
             float step_size = width / div;
