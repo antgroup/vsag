@@ -49,6 +49,7 @@ ScalarQuantizationTrainer::pso_train(const float* data,
                                      uint64_t count,
                                      float* upper_bound,
                                      float* lower_bound) const {
+    this->classic_train(data, count, upper_bound, lower_bound);
     float div = (1 << this->bits_) - 1;
 
 #pragma omp parallel for
