@@ -35,7 +35,6 @@ struct DuplicateRecord {
     DuplicateRecord(Allocator* allocator) : duplicate_ids(allocator) {
     }
 };
-using DuplicateRecordPtr = std::shared_ptr<DuplicateRecord>;
 
 class LabelTable {
 public:
@@ -48,6 +47,12 @@ public:
           use_reverse_map_(use_reverse_map),
           compress_duplicate_data_(compress_redundant_data),
           duplicate_records_(0, allocator){};
+
+    ~LabelTable() {
+        for (int i = 0; i < duplicate_records_.size(); ++i) {
+            allocator_->Delete(duplicate_records_[i]);
+        }
+    }
 
     inline void
     Insert(InnerIdType id, LabelType label) {
@@ -129,7 +134,7 @@ public:
         }
         label_table_.resize(new_size);
         if (compress_duplicate_data_) {
-            duplicate_records_.resize(new_size);
+            duplicate_records_.resize(new_size, nullptr);
         }
     }
 
@@ -146,7 +151,7 @@ public:
     inline void
     SetDuplicateId(InnerIdType previous_id, InnerIdType current_id) {
         if (duplicate_records_[previous_id] == nullptr) {
-            duplicate_records_[previous_id] = std::make_shared<DuplicateRecord>(allocator_);
+            duplicate_records_[previous_id] = allocator_->New<DuplicateRecord>(allocator_);
         }
         std::lock_guard lock(duplicate_records_[previous_id]->duplicate_mutex);
         duplicate_records_[previous_id]->duplicate_ids.push_back(current_id);
@@ -169,7 +174,7 @@ public:
     UnorderedMap<LabelType, InnerIdType> label_remap_;
 
     bool compress_duplicate_data_{true};
-    Vector<DuplicateRecordPtr> duplicate_records_;
+    Vector<DuplicateRecord*> duplicate_records_;
 
     Allocator* allocator_{nullptr};
     std::atomic<int64_t> total_count_{0L};
