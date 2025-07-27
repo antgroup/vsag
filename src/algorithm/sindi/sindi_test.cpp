@@ -89,13 +89,33 @@ TEST_CASE("SINDI Basic Test", "[ut][SINDI]") {
     for (int i = 0; i < num_base; ++i) {
         query->NumElements(1)->SparseVectors(sv_base.data() + i)->Owner(false);
 
+        // test basic performance
         auto result = index->KnnSearch(query, k, search_param_str, nullptr);
-        auto another_result = another_index->KnnSearch(query, k, search_param_str, nullptr);
+        REQUIRE(result->GetIds()[0] == ids[i]);
 
+        // test serialize
+        auto another_result = another_index->KnnSearch(query, k, search_param_str, nullptr);
         for (int j = 0; j < k; j++) {
             REQUIRE(result->GetIds()[j] == another_result->GetIds()[j]);
+            REQUIRE(std::abs(result->GetDistances()[j] - another_result->GetDistances()[j]) < 1e-3);
         }
-        REQUIRE(result->GetIds()[0] == ids[i]);
+
+        // test range search limit
+        auto range_result_limit_3 = index->RangeSearch(query, 0, search_param_str, nullptr, 3);
+        REQUIRE(range_result_limit_3->GetDim() == 3);
+        for (int j = 0; j < 3; j++) {
+            REQUIRE(result->GetIds()[j] == range_result_limit_3->GetIds()[j]);
+            REQUIRE(std::abs(result->GetDistances()[j] - range_result_limit_3->GetDistances()[j]) <
+                    1e-3);
+        }
+
+        // test range search radius
+        auto target_radius = result->GetDistances()[5];
+        auto range_result_radius_3 =
+            index->RangeSearch(query, target_radius, search_param_str, nullptr);
+        for (int j = 0; j < range_result_radius_3->GetDim(); j++) {
+            REQUIRE(range_result_radius_3->GetDistances()[j] < target_radius);
+        }
     }
 
     for (auto& item : sv_base) {
