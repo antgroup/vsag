@@ -65,9 +65,7 @@ public:
                 float radius,
                 const std::string& parameters,
                 const FilterPtr& filter,
-                int64_t limited_size = -1) const override {
-        return nullptr;
-    }
+                int64_t limited_size = -1) const override;
 
     InnerIndexPtr
     Fork(const IndexCommonParam& param) override {
@@ -89,6 +87,13 @@ public:
     GetNumElements() const override {
         return cur_element_count_;
     }
+
+private:
+    template <InnerSearchMode mode>
+    DatasetPtr
+    search_impl(const SparseVector sparse_query,
+                InnerSearchParam inner_param,
+                const FilterPtr& filter) const;
 
 private:
     uint32_t window_size_{0};

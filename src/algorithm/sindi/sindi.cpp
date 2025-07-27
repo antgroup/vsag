@@ -115,15 +115,25 @@ SINDI::KnnSearch(const DatasetPtr& query,
     // search parameter
     SINDIParameters search_param;
     search_param.FromJson(JsonType::parse(parameters));
-    auto n_candidate = search_param.n_candidate;
-    if (n_candidate == DEFAULT_N_CANDIDATE or n_candidate <= k) {
-        n_candidate = k;
+    InnerSearchParam inner_param;
+    inner_param.ef = search_param.n_candidate;
+    if (search_param.n_candidate == DEFAULT_N_CANDIDATE or search_param.n_candidate <= k) {
+        inner_param.ef = k;
     }
+    inner_param.topk = k;
 
+    return search_impl<KNN_SEARCH>(sparse_query, inner_param, filter);
+}
+
+template <InnerSearchMode mode>
+DatasetPtr
+SINDI::search_impl(const SparseVector sparse_query,
+                   InnerSearchParam inner_param,
+                   const FilterPtr& filter) const {
     // computer and heap
     auto computer = this->window_term_list_[0]->FactoryComputer(sparse_query);
     MaxHeap heap(this->allocator_);
-    //    float cur_heap_top = std::numeric_limits<float>::max();
+    auto k = inner_param.topk;
 
     // window iteration
     std::vector<float> dists(window_size_, 0.0);
@@ -136,12 +146,16 @@ SINDI::KnnSearch(const DatasetPtr& query,
         term_list->Query(dists.data(), computer);
 
         // insert heap
-        term_list->InsertHeap(dists.data(), computer, heap, n_candidate, window_start_id);
+        term_list->InsertHeap<KNN_SEARCH>(
+            dists.data(), computer, heap, inner_param, window_start_id);
     }
 
-    // fill up to k
-    while (heap.size() < k) {
-        heap.push({std::numeric_limits<float>::max(), 0});  // TODO(ZXY): replace with random points
+    if constexpr (mode == KNN_SEARCH) {
+        // fill up to k
+        while (heap.size() < k) {
+            heap.push(
+                {std::numeric_limits<float>::max(), 0});  // TODO(ZXY): replace with random points
+        }
     }
 
     // rerank
@@ -187,6 +201,15 @@ SINDI::KnnSearch(const DatasetPtr& query,
     }
 
     return results;
+}
+
+DatasetPtr
+SINDI::RangeSearch(const DatasetPtr& query,
+                   float radius,
+                   const std::string& parameters,
+                   const FilterPtr& filter,
+                   int64_t limited_size) const {
+    return nullptr;
 }
 
 void

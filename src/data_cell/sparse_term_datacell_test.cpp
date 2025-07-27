@@ -98,8 +98,10 @@ TEST_CASE("SparseTermDatacell Basic Test", "[ut][SparseTermDatacell]") {
 
     // test insert heap
     auto topk = 5;
+    InnerSearchParam inner_param;
+    inner_param.ef = topk;
     MaxHeap heap(allocator.get());
-    data_cell->InsertHeap(dists.data(), computer, heap, topk, 0);
+    data_cell->InsertHeap<KNN_SEARCH>(dists.data(), computer, heap, inner_param, 0);
     REQUIRE(heap.size() == topk);
     for (auto i = 0; i < topk; i++) {
         auto cur_top = heap.top();
