@@ -133,7 +133,18 @@ SINDI::search_impl(const SparseVector sparse_query,
     // computer and heap
     auto computer = this->window_term_list_[0]->FactoryComputer(sparse_query);
     MaxHeap heap(this->allocator_);
-    auto k = inner_param.topk;
+    uint32_t k = 0;
+
+    if constexpr (mode == KNN_SEARCH) {
+        k = inner_param.topk;
+    }
+    if constexpr (mode == RANGE_SEARCH) {
+        if (inner_param.range_search_limit_size != -1) {
+            k = inner_param.range_search_limit_size;
+        } else {
+            k = std::numeric_limits<uint32_t>::max();
+        }
+    }
 
     // window iteration
     std::vector<float> dists(window_size_, 0.0);
@@ -146,8 +157,7 @@ SINDI::search_impl(const SparseVector sparse_query,
         term_list->Query(dists.data(), computer);
 
         // insert heap
-        term_list->InsertHeap<KNN_SEARCH>(
-            dists.data(), computer, heap, inner_param, window_start_id);
+        term_list->InsertHeap<mode>(dists.data(), computer, heap, inner_param, window_start_id);
     }
 
     if constexpr (mode == KNN_SEARCH) {
@@ -162,6 +172,9 @@ SINDI::search_impl(const SparseVector sparse_query,
     if (use_reorder_) {
         // high precision
         float cur_heap_top = std::numeric_limits<float>::max();
+        if constexpr (mode == RANGE_SEARCH) {
+            cur_heap_top = inner_param.radius;
+        }
         auto candidate_size = heap.size();
         auto high_precise_heap = std::make_shared<StandardHeap<true, false>>(allocator_, -1);
         auto [sorted_ids, sorted_vals] = rerank_flat_index_->sort_sparse_vector(sparse_query);
@@ -178,7 +191,12 @@ SINDI::search_impl(const SparseVector sparse_query,
             if (high_precise_heap->Size() > k) {
                 high_precise_heap->Pop();
             }
-            cur_heap_top = high_precise_heap->Top().first;
+            if constexpr (mode == KNN_SEARCH) {
+                cur_heap_top = high_precise_heap->Top().first;
+            }
+            if constexpr (mode == RANGE_SEARCH) {
+                cur_heap_top = inner_param.radius;
+            }
             heap.pop();
         }
 
@@ -209,7 +227,21 @@ SINDI::RangeSearch(const DatasetPtr& query,
                    const std::string& parameters,
                    const FilterPtr& filter,
                    int64_t limited_size) const {
-    return nullptr;
+    // Due to concerns about the performance of this index
+    // We have not yet implemented search with filtering capabilities
+    const auto* sparse_vectors = query->GetSparseVectors();
+    CHECK_ARGUMENT(query->GetNumElements() == 1, "num of query should be 1");
+    auto sparse_query = sparse_vectors[0];
+
+    // search parameter
+    SINDIParameters search_param;
+    search_param.FromJson(JsonType::parse(parameters));
+    InnerSearchParam inner_param;
+
+    inner_param.range_search_limit_size = limited_size;
+    inner_param.radius = radius;
+
+    return search_impl<RANGE_SEARCH>(sparse_query, inner_param, filter);
 }
 
 void
