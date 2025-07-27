@@ -76,8 +76,8 @@ TEST_CASE("INT8 SIMD Compute", "[ut][simd][int8]") {
 TEST_CASE("INT8 Benchmark", "[ut][simd][int8][!benchmark]") {
     int64_t count = 500;
     int64_t dim = 128;
-    auto vec1 = fixtures::generate_int8_codes(count,  dim);
-    auto vec2 = fixtures::generate_int8_codes(count,  dim);
+    auto vec1 = fixtures::generate_int8_codes(count, dim);
+    auto vec2 = fixtures::generate_int8_codes(count, dim);
 
     BENCHMARK_SIMD_COMPUTE(generic, INT8ComputeL2Sqr);
     BENCHMARK_SIMD_COMPUTE(sse, INT8ComputeL2Sqr);
