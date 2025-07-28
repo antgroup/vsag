@@ -202,6 +202,9 @@ SINDI::search_impl(const SparseVector sparse_query,
     // low precision
     if constexpr (mode == RANGE_SEARCH) {
         k = heap.size();
+        if (inner_param.range_search_limit_size != -1) {
+            k = inner_param.range_search_limit_size;
+        }
     }
     auto [results, ret_dists, ret_ids] = create_fast_dataset(static_cast<int64_t>(k), allocator_);
 
@@ -209,10 +212,10 @@ SINDI::search_impl(const SparseVector sparse_query,
         heap.pop();
     }
 
-    auto cur_size = heap.size();
+    int cur_size = static_cast<int>(heap.size());
 
-    for (auto j = cur_size - 1; j >= 0; j--) {
-        ret_dists[j] = -heap.top().first;
+    for (int j = cur_size - 1; j >= 0; j--) {
+        ret_dists[j] = 1 + heap.top().first;  // dist = -ip -> 1 + dist = 1 - ip
         ret_ids[j] = label_table_->GetLabelById(heap.top().second);
         heap.pop();
     }
@@ -237,7 +240,7 @@ SINDI::RangeSearch(const DatasetPtr& query,
     search_param.FromJson(JsonType::parse(parameters));
     InnerSearchParam inner_param;
 
-    inner_param.range_search_limit_size = limited_size;
+    inner_param.range_search_limit_size = static_cast<int>(limited_size);
     inner_param.radius = radius;
 
     return search_impl<RANGE_SEARCH>(sparse_query, inner_param, filter);
