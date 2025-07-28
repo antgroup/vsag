@@ -51,7 +51,7 @@ public:
     InsertHeap(float* dists,
                const SparseTermComputerPtr& computer,
                MaxHeap& heap,
-               InnerSearchParam param,
+               const InnerSearchParam& param,
                uint32_t offset_id) const;
 
     SparseTermComputerPtr

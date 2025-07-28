@@ -50,7 +50,7 @@ void
 SparseTermDataCell::InsertHeap(float* dists,
                                const SparseTermComputerPtr& computer,
                                MaxHeap& heap,
-                               InnerSearchParam param,
+                               const InnerSearchParam& param,
                                uint32_t offset_id) const {
     uint32_t id = 0;
     float cur_heap_top = std::numeric_limits<float>::max();
@@ -104,7 +104,7 @@ SparseTermDataCell::InsertHeap(float* dists,
                 cur_heap_top = heap.top().first;
             }
             if constexpr (mode == InnerSearchMode::RANGE_SEARCH) {
-                cur_heap_top = -1 * radius;
+                cur_heap_top = radius - 1;
             }
             dists[id] = 0;
         }
@@ -209,14 +209,14 @@ template void
 SparseTermDataCell::InsertHeap<InnerSearchMode::KNN_SEARCH>(float* dists,
                                                             const SparseTermComputerPtr& computer,
                                                             MaxHeap& heap,
-                                                            InnerSearchParam param,
+                                                            const InnerSearchParam& param,
                                                             uint32_t offset_id) const;
 
 template void
 SparseTermDataCell::InsertHeap<InnerSearchMode::RANGE_SEARCH>(float* dists,
                                                               const SparseTermComputerPtr& computer,
                                                               MaxHeap& heap,
-                                                              InnerSearchParam param,
+                                                              const InnerSearchParam& param,
                                                               uint32_t offset_id) const;
 
 }  // namespace vsag
