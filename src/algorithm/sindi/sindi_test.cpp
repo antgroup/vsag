@@ -118,6 +118,17 @@ TEST_CASE("SINDI Basic Test", "[ut][SINDI]") {
             REQUIRE(std::abs(result->GetDistances()[j] - bf_result->GetDistances()[j]) < 1e-2);
         }
 
+        // test filter with knn
+        auto filter_knn_result = index->KnnSearch(query, k, search_param_str, mock_filter);
+        REQUIRE(filter_knn_result->GetDim() == k);
+        auto cur = 0;
+        for (int j = 0; j < k; j++) {
+            if (mock_filter->CheckValid(result->GetIds()[j])) {
+                REQUIRE(result->GetIds()[j] == filter_knn_result->GetIds()[cur]);
+                cur++;
+            }
+        }
+
         // test serialize
         auto another_result = another_index->KnnSearch(query, k, search_param_str, nullptr);
         for (int j = 0; j < k; j++) {
@@ -134,6 +145,19 @@ TEST_CASE("SINDI Basic Test", "[ut][SINDI]") {
                     1e-3);
         }
 
+        // test filter with range limit
+        auto filter_range_limit_result =
+            index->RangeSearch(query, 0, search_param_str, mock_filter, 3);
+        REQUIRE(filter_range_limit_result->GetDim() == 3);
+        cur = 0;
+        for (int j = 0; j < 3; j++) {
+            if (mock_filter->CheckValid(range_result_limit_3->GetIds()[j])) {
+                REQUIRE(range_result_limit_3->GetIds()[j] ==
+                        filter_range_limit_result->GetIds()[cur]);
+                cur++;
+            }
+        }
+
         // test range search radius
         auto target_radius = result->GetDistances()[5];
         auto range_result_radius_3 =
@@ -142,13 +166,14 @@ TEST_CASE("SINDI Basic Test", "[ut][SINDI]") {
             REQUIRE(range_result_radius_3->GetDistances()[j] < target_radius);
         }
 
-        // test filter
-        auto filter_result = index->KnnSearch(query, k, search_param_str, mock_filter);
-        REQUIRE(filter_result->GetDim() == k);
-        auto cur = 0;
-        for (int j = 0; j < k; j++) {
-            if (mock_filter->CheckValid(result->GetIds()[j])) {
-                REQUIRE(result->GetIds()[j] == filter_result->GetIds()[cur]);
+        // test filter with range radius
+        auto filter_range_radius_result =
+            index->RangeSearch(query, target_radius, search_param_str, mock_filter);
+        cur = 0;
+        for (int j = 0; j < range_result_radius_3->GetDim(); j++) {
+            if (mock_filter->CheckValid(range_result_radius_3->GetIds()[j])) {
+                REQUIRE(range_result_radius_3->GetIds()[j] ==
+                        filter_range_radius_result->GetIds()[cur]);
                 cur++;
             }
         }
