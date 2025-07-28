@@ -86,8 +86,7 @@ PQDistanceFloat256(const void* single_dim_centers, float single_dim_val, void* r
 }
 
 #if defined(ENABLE_AVX)
-__inline __m256i __attribute__((__always_inline__))
-load_8_char_and_convert(const uint8_t* data) {
+__inline __m256i __attribute__((__always_inline__)) load_8_char_and_convert(const uint8_t* data) {
     __m128i first_8 =
         _mm_set_epi8(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, data[3], data[2], data[1], data[0]);
     __m128i second_8 =
@@ -370,8 +369,7 @@ FP32ReduceAdd(const float* x, uint64_t dim) {
 }
 
 #if defined(ENABLE_AVX)
-__inline __m256i __attribute__((__always_inline__))
-load_8_short(const uint16_t* data) {
+__inline __m256i __attribute__((__always_inline__)) load_8_short(const uint16_t* data) {
     return _mm256_set_epi16(data[7],
                             0,
                             data[6],
