@@ -86,7 +86,9 @@ TEST_CASE("SINDI Basic Test", "[ut][SINDI]") {
 
     std::string search_param_str = R"(
     {
-        "n_candidate": 20
+        "sindi": {
+            "n_candidate": 20
+        }
     }
     )";
 
