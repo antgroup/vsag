@@ -80,7 +80,7 @@ void
 TestSerializeAndDeserializeMetricSQ4(uint64_t dim, int count, float error = 1e-5) {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     SQ4Quantizer<metric> quantizer1(dim, allocator.get());
-    SQ4Quantizer<metric> quantizer2(0, allocator.get());
+    SQ4Quantizer<metric> quantizer2(dim, allocator.get());
     TestSerializeAndDeserialize<SQ4Quantizer<metric>, metric>(
         quantizer1, quantizer2, dim, count, error);
 }

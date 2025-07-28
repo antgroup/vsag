@@ -43,6 +43,8 @@ PQFastScanQuantizer<metric>::PQFastScanQuantizer(int dim, int64_t pq_dim, Alloca
     this->subspace_dim_ = this->dim_ / pq_dim;
     this->metric_ = metric;
     codebooks_.resize(this->dim_ * CENTROIDS_PER_SUBSPACE);
+    this->query_code_size_ =
+        this->pq_dim_ * CENTROIDS_PER_SUBSPACE * sizeof(uint8_t) + 2 * sizeof(float);
 }
 
 template <MetricType metric>
@@ -312,8 +314,10 @@ PQFastScanQuantizer<metric>::ProcessQueryImpl(const DataType* query,
             cur_query = norm_vec.data();
         }
         Vector<float> lookup_table(this->pq_dim_ * CENTROIDS_PER_SUBSPACE, this->allocator_);
-        computer.buf_ = reinterpret_cast<uint8_t*>(this->allocator_->Allocate(
-            this->pq_dim_ * CENTROIDS_PER_SUBSPACE * sizeof(uint8_t) + 2 * sizeof(float)));
+        if (computer.buf_ == nullptr) {
+            computer.buf_ =
+                reinterpret_cast<uint8_t*>(this->allocator_->Allocate(this->query_code_size_));
+        }
         for (int i = 0; i < pq_dim_; ++i) {
             const auto* per_query = cur_query + i * subspace_dim_;
             const auto* per_code_book = get_codebook_data(i, 0);

@@ -144,7 +144,6 @@ private:
      */
     uint64_t aligned_dim_{0};
     uint64_t num_bits_per_dim_query_{32};
-    uint64_t query_code_size_{0};
     uint64_t query_offset_lb_{0};
     uint64_t query_offset_delta_{0};
     uint64_t query_offset_sum_{0};

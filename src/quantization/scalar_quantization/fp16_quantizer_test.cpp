@@ -74,7 +74,7 @@ void
 TestSerializeAndDeserializeMetricFP16(uint64_t dim, int count, float error = 1e-5) {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     FP16Quantizer<metric> quantizer1(dim, allocator.get());
-    FP16Quantizer<metric> quantizer2(0, allocator.get());
+    FP16Quantizer<metric> quantizer2(dim, allocator.get());
     TestSerializeAndDeserialize<FP16Quantizer<metric>, metric>(
         quantizer1, quantizer2, dim, count, error);
 }

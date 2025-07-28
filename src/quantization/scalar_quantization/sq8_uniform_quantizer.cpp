@@ -54,6 +54,8 @@ SQ8UniformQuantizer<metric>::SQ8UniformQuantizer(int dim, Allocator* allocator)
         offset_sum_ = this->code_size_;
         this->code_size_ += ceil_int(sizeof(sum_type), static_cast<int64_t>(align_size));
     }
+
+    this->query_code_size_ = this->code_size_;
 }
 
 template <MetricType metric>
@@ -196,7 +198,10 @@ void
 SQ8UniformQuantizer<metric>::ProcessQueryImpl(const DataType* query,
                                               Computer<SQ8UniformQuantizer>& computer) const {
     try {
-        computer.buf_ = reinterpret_cast<uint8_t*>(this->allocator_->Allocate(this->code_size_));
+        if (computer.buf_ == nullptr) {
+            computer.buf_ =
+                reinterpret_cast<uint8_t*>(this->allocator_->Allocate(this->query_code_size_));
+        }
         this->EncodeOneImpl(query, computer.buf_);
     } catch (const std::bad_alloc& e) {
         throw VsagException(ErrorType::NO_ENOUGH_MEMORY, "bad alloc when init computer buf");
