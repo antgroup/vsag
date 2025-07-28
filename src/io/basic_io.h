@@ -26,7 +26,7 @@
 #include "utils/function_exists_check.h"
 
 namespace vsag {
-
+class MemoryIO;
 /**
  * @brief A template class for basic input/output operations.
  *
@@ -152,8 +152,15 @@ public:
         uint64_t offset = 0;
         while (offset < this->size_) {
             auto cur_size = std::min(SERIALIZE_BUFFER_SIZE, this->size_ - offset);
-            this->Read(cur_size, offset, buffer.data);
-            writer.Write(reinterpret_cast<const char*>(buffer.data), cur_size);
+            if (std::is_same_v<MemoryIO, IOTmpl>) {
+                bool need_release = false;
+                auto* data = this->Read(cur_size, offset, need_release);
+                writer.Write(reinterpret_cast<const char*>(data), cur_size);
+            } else {
+                this->Read(cur_size, offset, buffer.data);
+                writer.Write(reinterpret_cast<const char*>(buffer.data), cur_size);
+            }
+
             offset += cur_size;
         }
     }

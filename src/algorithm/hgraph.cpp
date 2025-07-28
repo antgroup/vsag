@@ -1206,7 +1206,7 @@ static const std::string HGRAPH_PARAMS_TEMPLATE =
         "{STORE_RAW_VECTOR_KEY}": false,
         "{HGRAPH_GRAPH_KEY}": {
             "{IO_PARAMS_KEY}": {
-                "{IO_TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
+                "{IO_TYPE_KEY}": "{IO_TYPE_VALUE_MEMORY_IO}",
                 "{IO_FILE_PATH}": "{DEFAULT_FILE_PATH_VALUE}"
             },
             "{GRAPH_TYPE_KEY}": "{GRAPH_TYPE_NSW}",

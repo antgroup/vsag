@@ -62,6 +62,7 @@ void
 IOStreamReader::Read(char* data, uint64_t size) {
     auto offset = std::to_string(istream_.tellg());
     // vsag::logger::trace("io read offset {} size {}", offset, size);
+    this->istream_.clear();
     this->istream_.read(data, static_cast<int64_t>(size));
     if (istream_.fail()) {
         auto remaining = std::streamsize(this->istream_.gcount());
