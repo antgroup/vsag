@@ -110,7 +110,7 @@ const char* const IVF_SEARCH_PARALLELISM = "parallelism";
 
 const char* const IVF_USE_REORDER_KEY = "use_reorder";
 const char* const IVF_PRECISE_CODES_KEY = "precise_codes";
-const char* const IVF_USE_ATTRIBUTE_FILTER_KEY = "use_attribute_filter";
+const char* const USE_ATTRIBUTE_FILTER_KEY = "use_attribute_filter";
 const char* const IVF_THREAD_COUNT_KEY = "thread_count";
 const char* const IVF_TRAIN_TYPE_KEY = "ivf_train_type";
 const char* const IVF_TRAIN_TYPE_RANDOM = "random";
@@ -181,7 +181,7 @@ const std::unordered_map<std::string, std::string> DEFAULT_MAP = {
     {"DEFAULT_FILE_PATH_VALUE", DEFAULT_FILE_PATH_VALUE},
     {"IVF_PRECISE_CODES_KEY", IVF_PRECISE_CODES_KEY},
     {"IVF_USE_REORDER_KEY", IVF_USE_REORDER_KEY},
-    {"IVF_USE_ATTRIBUTE_FILTER_KEY", IVF_USE_ATTRIBUTE_FILTER_KEY},
+    {"USE_ATTRIBUTE_FILTER_KEY", USE_ATTRIBUTE_FILTER_KEY},
     {"SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE", SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE},
     {"PCA_DIM", PCA_DIM},
     {"IVF_SEARCH_PARAM_SCAN_BUCKETS_COUNT", IVF_SEARCH_PARAM_SCAN_BUCKETS_COUNT},

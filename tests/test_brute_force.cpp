@@ -29,7 +29,8 @@ public:
     static std::string
     GenerateBruteForceBuildParametersString(const std::string& metric_type,
                                             int64_t dim,
-                                            const std::string& quantization_str = "sq8");
+                                            const std::string& quantization_str = "sq8",
+                                            bool use_attr_filter = false);
 
     static void
     TestGeneral(const IndexPtr& index,
@@ -58,7 +59,8 @@ std::vector<int> BruteForceTestIndex::dims = fixtures::get_common_used_dims(2, R
 std::string
 BruteForceTestIndex::GenerateBruteForceBuildParametersString(const std::string& metric_type,
                                                              int64_t dim,
-                                                             const std::string& quantization_str) {
+                                                             const std::string& quantization_str,
+                                                             bool use_attr_filter) {
     std::string build_parameters_str;
 
     constexpr auto parameter_temp = R"(
@@ -68,12 +70,14 @@ BruteForceTestIndex::GenerateBruteForceBuildParametersString(const std::string& 
         "dim": {},
         "index_param": {{
             "quantization_type": "{}",
-            "store_raw_vector": true
+            "store_raw_vector": true,
+            "use_attribute_filter": {}
         }}
     }}
     )";
 
-    build_parameters_str = fmt::format(parameter_temp, metric_type, dim, quantization_str);
+    build_parameters_str =
+        fmt::format(parameter_temp, metric_type, dim, quantization_str, use_attr_filter);
 
     return build_parameters_str;
 }
@@ -380,6 +384,29 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::BruteForceTestIndex,
             auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
             TestDuplicateAdd(index, dataset);
             TestGeneral(index, dataset, search_param, recall);
+            vsag::Options::Instance().set_block_size_limit(origin_size);
+        }
+    }
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::BruteForceTestIndex,
+                             "BruteForce With Attribute Filter",
+                             "[ft][bruteforce]") {
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    auto size = GENERATE(1024 * 1024 * 2);
+    auto metric_type = GENERATE("l2", "ip", "cosine");
+
+    const std::string name = "brute_force";
+    auto search_param = "";
+    for (auto& dim : dims) {
+        for (auto& [base_quantization_str, recall] : test_cases) {
+            vsag::Options::Instance().set_block_size_limit(size);
+            auto param = GenerateBruteForceBuildParametersString(
+                metric_type, dim, base_quantization_str, true);
+            auto index = TestFactory(name, param, true);
+            auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
+            TestBuildIndex(index, dataset, true);
+            TestWithAttr(index, dataset, search_param);
             vsag::Options::Instance().set_block_size_limit(origin_size);
         }
     }
