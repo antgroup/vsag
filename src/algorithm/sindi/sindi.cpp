@@ -115,15 +115,29 @@ SINDI::KnnSearch(const DatasetPtr& query,
     // search parameter
     SINDIParameters search_param;
     search_param.FromJson(JsonType::parse(parameters));
-    auto n_candidate = search_param.n_candidate;
-    if (n_candidate == DEFAULT_N_CANDIDATE or n_candidate <= k) {
-        n_candidate = k;
+    InnerSearchParam inner_param;
+    inner_param.ef = search_param.n_candidate;
+    if (search_param.n_candidate == DEFAULT_N_CANDIDATE or search_param.n_candidate <= k) {
+        inner_param.ef = k;
     }
+    inner_param.topk = k;
 
+    return search_impl<KNN_SEARCH>(sparse_query, inner_param, filter);
+}
+
+template <InnerSearchMode mode>
+DatasetPtr
+SINDI::search_impl(const SparseVector sparse_query,
+                   InnerSearchParam inner_param,
+                   const FilterPtr& filter) const {
     // computer and heap
     auto computer = this->window_term_list_[0]->FactoryComputer(sparse_query);
     MaxHeap heap(this->allocator_);
-    //    float cur_heap_top = std::numeric_limits<float>::max();
+    uint32_t k = 0;
+
+    if constexpr (mode == KNN_SEARCH) {
+        k = inner_param.topk;
+    }
 
     // window iteration
     std::vector<float> dists(window_size_, 0.0);
@@ -136,12 +150,15 @@ SINDI::KnnSearch(const DatasetPtr& query,
         term_list->Query(dists.data(), computer);
 
         // insert heap
-        term_list->InsertHeap(dists.data(), computer, heap, n_candidate, window_start_id);
+        term_list->InsertHeap<mode>(dists.data(), computer, heap, inner_param, window_start_id);
     }
 
-    // fill up to k
-    while (heap.size() < k) {
-        heap.push({std::numeric_limits<float>::max(), 0});  // TODO(ZXY): replace with random points
+    if constexpr (mode == KNN_SEARCH) {
+        // fill up to k
+        while (heap.size() < k) {
+            heap.push(
+                {std::numeric_limits<float>::max(), 0});  // TODO(ZXY): replace with random points
+        }
     }
 
     // rerank
@@ -158,13 +175,24 @@ SINDI::KnnSearch(const DatasetPtr& query,
                 sorted_vals,
                 inner_id);  // TODO(ZXY): use flat to replace rerank_flat_index_
             auto label = label_table_->GetLabelById(inner_id);
-            if (high_precise_distance < cur_heap_top or high_precise_heap->Size() < k) {
-                high_precise_heap->Push(high_precise_distance, label);
+            if constexpr (mode == KNN_SEARCH) {
+                if (high_precise_distance < cur_heap_top or high_precise_heap->Size() < k) {
+                    high_precise_heap->Push(high_precise_distance, label);
+                }
+                if (high_precise_heap->Size() > k) {
+                    high_precise_heap->Pop();
+                }
+                cur_heap_top = high_precise_heap->Top().first;
             }
-            if (high_precise_heap->Size() > k) {
-                high_precise_heap->Pop();
+            if constexpr (mode == RANGE_SEARCH) {
+                if (high_precise_distance < inner_param.radius) {
+                    high_precise_heap->Push(high_precise_distance, label);
+                }
+                if (inner_param.range_search_limit_size != -1 and
+                    high_precise_heap->Size() > inner_param.range_search_limit_size) {
+                    high_precise_heap->Pop();
+                }
             }
-            cur_heap_top = high_precise_heap->Top().first;
             heap.pop();
         }
 
@@ -172,21 +200,50 @@ SINDI::KnnSearch(const DatasetPtr& query,
     }
 
     // low precision
+    if constexpr (mode == RANGE_SEARCH) {
+        k = heap.size();
+        if (inner_param.range_search_limit_size != -1) {
+            k = inner_param.range_search_limit_size;
+        }
+    }
     auto [results, ret_dists, ret_ids] = create_fast_dataset(static_cast<int64_t>(k), allocator_);
 
     while (heap.size() > k) {
         heap.pop();
     }
 
-    auto cur_size = heap.size();
+    int cur_size = static_cast<int>(heap.size());
 
-    for (auto j = cur_size - 1; j >= 0; j--) {
-        ret_dists[j] = -heap.top().first;
+    for (int j = cur_size - 1; j >= 0; j--) {
+        ret_dists[j] = 1 + heap.top().first;  // dist = -ip -> 1 + dist = 1 - ip
         ret_ids[j] = label_table_->GetLabelById(heap.top().second);
         heap.pop();
     }
 
     return results;
+}
+
+DatasetPtr
+SINDI::RangeSearch(const DatasetPtr& query,
+                   float radius,
+                   const std::string& parameters,
+                   const FilterPtr& filter,
+                   int64_t limited_size) const {
+    // Due to concerns about the performance of this index
+    // We have not yet implemented search with filtering capabilities
+    const auto* sparse_vectors = query->GetSparseVectors();
+    CHECK_ARGUMENT(query->GetNumElements() == 1, "num of query should be 1");
+    auto sparse_query = sparse_vectors[0];
+
+    // search parameter
+    SINDIParameters search_param;
+    search_param.FromJson(JsonType::parse(parameters));
+    InnerSearchParam inner_param;
+
+    inner_param.range_search_limit_size = static_cast<int>(limited_size);
+    inner_param.radius = radius;
+
+    return search_impl<RANGE_SEARCH>(sparse_query, inner_param, filter);
 }
 
 void

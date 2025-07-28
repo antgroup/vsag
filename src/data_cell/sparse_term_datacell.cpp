@@ -45,14 +45,25 @@ SparseTermDataCell::Query(float* global_dists,
     computer->ResetTerm();
 }
 
+template <InnerSearchMode mode>
 void
 SparseTermDataCell::InsertHeap(float* dists,
                                const SparseTermComputerPtr& computer,
                                MaxHeap& heap,
-                               uint32_t n_candidate,
+                               const InnerSearchParam& param,
                                uint32_t offset_id) const {
     uint32_t id = 0;
     float cur_heap_top = std::numeric_limits<float>::max();
+    auto n_candidate = param.ef;
+    auto radius = param.radius;
+
+    if constexpr (mode == InnerSearchMode::RANGE_SEARCH) {
+        // note that radius = 1 - ip -> radius - 1 = 0 - ip
+        // the dist in heap is equal to 0 - ip
+        // thus, we need to compare dist with radius - 1
+        cur_heap_top = radius - 1;
+    }
+
     while (computer->HasNextTerm()) {
         auto it = computer->NextTermIter();
         auto term = computer->GetTerm(it);
@@ -61,16 +72,18 @@ SparseTermDataCell::InsertHeap(float* dists,
         }
 
         uint32_t i = 0;
-        if (heap.size() < n_candidate) {
-            for (; i < term_pruned_sizes_[term]; i++) {
-                id = term_ids_[term][i];
+        if constexpr (mode == InnerSearchMode::KNN_SEARCH) {
+            if (heap.size() < n_candidate) {
+                for (; i < term_pruned_sizes_[term]; i++) {
+                    id = term_ids_[term][i];
 
-                heap.emplace(dists[id], id + offset_id);
-                cur_heap_top = heap.top().first;
-                dists[id] = 0;
+                    heap.emplace(dists[id], id + offset_id);
+                    cur_heap_top = heap.top().first;
+                    dists[id] = 0;
 
-                if (heap.size() == n_candidate) {
-                    break;
+                    if (heap.size() == n_candidate) {
+                        break;
+                    }
                 }
             }
         }
@@ -84,10 +97,15 @@ SparseTermDataCell::InsertHeap(float* dists,
             } else {
                 heap.emplace(dists[id], id + offset_id);
             }
-            if (heap.size() > n_candidate) [[likely]] {
-                heap.pop();
+            if constexpr (mode == InnerSearchMode::KNN_SEARCH) {
+                if (heap.size() > n_candidate) [[likely]] {
+                    heap.pop();
+                }
+                cur_heap_top = heap.top().first;
             }
-            cur_heap_top = heap.top().first;
+            if constexpr (mode == InnerSearchMode::RANGE_SEARCH) {
+                cur_heap_top = radius - 1;
+            }
             dists[id] = 0;
         }
     }
@@ -186,5 +204,19 @@ SparseTermDataCell::Deserialize(StreamReader& reader) {
     StreamReader::ReadVector(reader, term_sizes_);
     StreamReader::ReadVector(reader, term_pruned_sizes_);
 }
+
+template void
+SparseTermDataCell::InsertHeap<InnerSearchMode::KNN_SEARCH>(float* dists,
+                                                            const SparseTermComputerPtr& computer,
+                                                            MaxHeap& heap,
+                                                            const InnerSearchParam& param,
+                                                            uint32_t offset_id) const;
+
+template void
+SparseTermDataCell::InsertHeap<InnerSearchMode::RANGE_SEARCH>(float* dists,
+                                                              const SparseTermComputerPtr& computer,
+                                                              MaxHeap& heap,
+                                                              const InnerSearchParam& param,
+                                                              uint32_t offset_id) const;
 
 }  // namespace vsag
