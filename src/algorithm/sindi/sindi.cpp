@@ -22,7 +22,7 @@ namespace vsag {
 ParamPtr
 SINDI::CheckAndMappingExternalParam(const JsonType& external_param,
                                     const IndexCommonParam& common_param) {
-    auto ptr = std::make_shared<SINDIParameters>();
+    auto ptr = std::make_shared<SINDIParameter>();
     ptr->FromJson(external_param);
     return ptr;
 }
@@ -31,13 +31,11 @@ SINDI::SINDI(const SINDIParameterPtr& param, const IndexCommonParam& common_para
     : InnerIndexInterface(param, common_param),
       use_reorder_(param->use_reorder),
       window_size_(param->window_size),
+      doc_prune_ratio_(param->doc_prune_ratio),
       window_term_list_(common_param.allocator_.get()) {
     window_term_list_.resize(1, nullptr);
     this->window_term_list_[0] =
-        std::make_shared<SparseTermDataCell>(param->query_prune_ratio,
-                                             param->doc_prune_ratio,
-                                             param->term_prune_ratio,
-                                             common_param.allocator_.get());
+        std::make_shared<SparseTermDataCell>(doc_prune_ratio_, common_param.allocator_.get());
 
     if (use_reorder_) {
         SparseIndexParameterPtr rerank_param = std::make_shared<SparseIndexParameters>();
@@ -63,11 +61,7 @@ SINDI::Add(const DatasetPtr& base) {
         window_term_list_.resize(final_add_window + 1);
     }
     for (uint32_t i = start_add_window + 1; i < window_term_list_.size(); i++) {
-        window_term_list_[i] =
-            std::make_shared<SparseTermDataCell>(this->window_term_list_[0]->query_prune_ratio_,
-                                                 this->window_term_list_[0]->doc_prune_ratio_,
-                                                 this->window_term_list_[0]->term_prune_ratio_,
-                                                 this->window_term_list_[0]->allocator_);
+        window_term_list_[i] = std::make_shared<SparseTermDataCell>(doc_prune_ratio_, allocator_);
     }
 
     // add process
@@ -82,12 +76,6 @@ SINDI::Add(const DatasetPtr& base) {
 
         cur_element_count_++;
     }
-
-    // pruning
-    for (uint32_t i = start_add_window; i < window_term_list_.size(); i++) {
-        window_term_list_[i]->TermPrune();
-    }
-
     // high precision part
     if (use_reorder_) {
         rerank_flat_index_->Add(base);
@@ -113,7 +101,7 @@ SINDI::KnnSearch(const DatasetPtr& query,
     auto sparse_query = sparse_vectors[0];
 
     // search parameter
-    SINDIParameters search_param;
+    SINDISearchParameters search_param;
     search_param.FromJson(JsonType::parse(parameters));
     InnerSearchParam inner_param;
     inner_param.ef = search_param.n_candidate;
@@ -131,7 +119,7 @@ SINDI::search_impl(const SparseVector sparse_query,
                    InnerSearchParam inner_param,
                    const FilterPtr& filter) const {
     // computer and heap
-    auto computer = this->window_term_list_[0]->FactoryComputer(sparse_query);
+    auto computer = this->window_term_list_[0]->FactoryComputer(sparse_query, search_param);
     MaxHeap heap(this->allocator_);
     uint32_t k = 0;
 
@@ -273,10 +261,7 @@ SINDI::Deserialize(StreamReader& reader) {
     for (auto i = 0; i < window_term_list_.size(); i++) {
         if (i != 0) {
             window_term_list_[i] =
-                std::make_shared<SparseTermDataCell>(this->window_term_list_[0]->query_prune_ratio_,
-                                                     this->window_term_list_[0]->doc_prune_ratio_,
-                                                     this->window_term_list_[0]->term_prune_ratio_,
-                                                     this->window_term_list_[0]->allocator_);
+                std::make_shared<SparseTermDataCell>(doc_prune_ratio_, allocator_);
         }
         window_term_list_[i]->Deserialize(reader);
     }

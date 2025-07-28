@@ -18,6 +18,7 @@
 #include <catch2/catch_template_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
 
+#include "algorithm/sindi/sindi_parameter.h"
 #include "impl/allocator/safe_allocator.h"
 
 using namespace vsag;
@@ -34,8 +35,11 @@ TEST_CASE("SparseTermComputer Basic Test", "[ut][SparseTermComputer]") {
         query_sv.ids_[i] = i;
         query_sv.vals_[i] = i;
     }
+
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
-    auto computer = std::make_shared<SparseTermComputer>(query_prune_ratio, allocator.get());
+    SINDISearchParameters search_params;
+    search_params.query_prune_ratio = query_prune_ratio;
+    auto computer = std::make_shared<SparseTermComputer>(search_params, allocator.get());
 
     // test set query
     computer->SetQuery(query_sv);

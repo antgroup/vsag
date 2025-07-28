@@ -20,23 +20,11 @@
 namespace vsag {
 
 void
-SINDIParameters::FromJson(const JsonType& json) {
-    if (json.contains(SPARSE_QUERY_PRUNE_RATIO)) {
-        query_prune_ratio = json[SPARSE_QUERY_PRUNE_RATIO];
-    } else {
-        query_prune_ratio = DEFAULT_QUERY_PRUNE_RATIO;
-    }
-
+SINDIParameter::FromJson(const JsonType& json) {
     if (json.contains(SPARSE_DOC_PRUNE_RATIO)) {
         doc_prune_ratio = json[SPARSE_DOC_PRUNE_RATIO];
     } else {
         doc_prune_ratio = DEFAULT_DOC_PRUNE_RATIO;
-    }
-
-    if (json.contains(SPARSE_TERM_PRUNE_RATIO)) {
-        term_prune_ratio = json[SPARSE_TERM_PRUNE_RATIO];
-    } else {
-        term_prune_ratio = DEFAULT_TERM_PRUNE_RATIO;
     }
 
     if (json.contains(SPARSE_USE_REORDER)) {
@@ -50,23 +38,43 @@ SINDIParameters::FromJson(const JsonType& json) {
     } else {
         window_size = DEFAULT_WINDOW_SIZE;
     }
+}
 
+JsonType
+SINDIParameter::ToJson() const {
+    JsonType json;
+    json[SPARSE_DOC_PRUNE_RATIO] = doc_prune_ratio;
+    json[SPARSE_USE_REORDER] = use_reorder;
+    json[SPARSE_WINDOW_SIZE] = window_size;
+
+    return json;
+}
+
+void
+SINDISearchParameters::FromJson(const JsonType& json) {
+    if (json.contains(SPARSE_TERM_PRUNE_RATIO)) {
+        term_prune_ratio = json[SPARSE_TERM_PRUNE_RATIO];
+    } else {
+        term_prune_ratio = DEFAULT_TERM_PRUNE_RATIO;
+    }
+
+    if (json.contains(SPARSE_QUERY_PRUNE_RATIO)) {
+        query_prune_ratio = json[SPARSE_QUERY_PRUNE_RATIO];
+    } else {
+        query_prune_ratio = DEFAULT_QUERY_PRUNE_RATIO;
+    }
     if (json.contains(SPARSE_N_CANDIDATE)) {
         n_candidate = json[SPARSE_N_CANDIDATE];
     } else {
         n_candidate = DEFAULT_N_CANDIDATE;
     }
 }
-
 JsonType
-SINDIParameters::ToJson() const {
+SINDISearchParameters::ToJson() const {
     JsonType json;
     json[SPARSE_QUERY_PRUNE_RATIO] = query_prune_ratio;
-    json[SPARSE_DOC_PRUNE_RATIO] = doc_prune_ratio;
-    json[SPARSE_TERM_PRUNE_RATIO] = term_prune_ratio;
-    json[SPARSE_USE_REORDER] = use_reorder;
-    json[SPARSE_WINDOW_SIZE] = window_size;
     json[SPARSE_N_CANDIDATE] = n_candidate;
+    json[SPARSE_TERM_PRUNE_RATIO] = term_prune_ratio;
 
     return json;
 }
