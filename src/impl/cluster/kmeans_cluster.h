@@ -36,7 +36,8 @@ public:
         int iter = 25,
         double* err = nullptr,
         bool use_mse_for_convergence = false,
-        float threshold = 1e-6F);
+        float threshold = 1e-6F,
+        bool use_balance = false);
 
 public:
     float* k_centroids_{nullptr};
@@ -46,6 +47,7 @@ private:
     find_nearest_one_with_blas(const float* query,
                                const uint64_t query_count,
                                const uint64_t k,
+                               const Vector<int>& counts,
                                float* y_sqr,
                                float* distances,
                                Vector<int32_t>& labels);
@@ -54,6 +56,7 @@ private:
     find_nearest_one_with_hgraph(const float* query,
                                  const uint64_t query_count,
                                  const uint64_t k,
+                                 const Vector<int>& counts,
                                  Vector<int32_t>& labels);
 
 private:
@@ -66,6 +69,8 @@ private:
     static constexpr uint64_t THRESHOLD_FOR_HGRAPH = 10000ULL;
 
     static constexpr uint64_t QUERY_BS = 65536ULL;
+
+    static constexpr float BALANCE_FACTOR = 1e-5F;
 };
 
 }  // namespace vsag
