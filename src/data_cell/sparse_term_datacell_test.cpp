@@ -88,30 +88,60 @@ TEST_CASE("SparseTermDatacell Basic Test", "[ut][SparseTermDatacell]") {
         REQUIRE(data_cell->term_datas_[i].size() == exp_size[i]);
     }
 
-    // test query
-    std::vector<float> dists(count_base, 0);
-    data_cell->Query(dists.data(), computer);
     std::vector<float> exp_dists = {35, 40, 45, 50, 55, 60, 65, 70, 75, 80};
-    for (auto i = 0; i < dists.size(); i++) {
-        REQUIRE(std::abs(dists[i] + exp_dists[i]) < 1e-3);
+    SECTION("test query") {
+        std::vector<float> dists(count_base, 0);
+        data_cell->Query(dists.data(), computer);
+        for (auto i = 0; i < dists.size(); i++) {
+            REQUIRE(std::abs(dists[i] + exp_dists[i]) < 1e-3);
+        }
     }
 
-    // test insert heap
-    auto topk = 5;
-    MaxHeap heap(allocator.get());
-    data_cell->InsertHeap(dists.data(), computer, heap, topk, 0);
-    REQUIRE(heap.size() == topk);
-    for (auto i = 0; i < topk; i++) {
-        auto cur_top = heap.top();
-        auto exp_id = 5 + i;
-        REQUIRE(cur_top.second == exp_id);
-        REQUIRE(std::abs(cur_top.first + exp_dists[exp_id]) < 1e-3);
-        heap.pop();
-    }
-    for (auto i = 0; i < dists.size(); i++) {
-        REQUIRE(std::abs(dists[i] - 0) < 1e-3);
+    SECTION("test insert heap in knn search") {
+        auto topk = 5;
+        auto pos = count_base - topk;
+        InnerSearchParam inner_param;
+        inner_param.ef = topk;
+        MaxHeap heap(allocator.get());
+        std::vector<float> dists(count_base, 0);
+        data_cell->Query(dists.data(), computer);
+
+        data_cell->InsertHeap<KNN_SEARCH>(dists.data(), computer, heap, inner_param, 0);
+        REQUIRE(heap.size() == topk);
+        for (auto i = 0; i < topk; i++) {
+            auto cur_top = heap.top();
+            auto exp_id = pos + i;
+            REQUIRE(cur_top.second == exp_id);
+            REQUIRE(std::abs(cur_top.first + exp_dists[exp_id]) < 1e-3);
+            heap.pop();
+        }
+        for (auto i = 0; i < dists.size(); i++) {
+            REQUIRE(std::abs(dists[i] - 0) < 1e-3);
+        }
     }
 
+    SECTION("test insert heap in range search") {
+        auto range_topk = 3;
+        auto pos = count_base - range_topk - 1;  // note that we retrieval dist < dists[pos]
+        InnerSearchParam inner_param;
+        std::vector<float> dists(count_base, 0);
+        data_cell->Query(dists.data(), computer);
+        inner_param.radius = dists[pos];
+        MaxHeap heap(allocator.get());
+
+        data_cell->InsertHeap<RANGE_SEARCH>(dists.data(), computer, heap, inner_param, 0);
+        REQUIRE(heap.size() == range_topk);
+        for (auto i = 0; i < range_topk; i++) {
+            auto cur_top = heap.top();
+            auto exp_id = pos + i + 1;
+            REQUIRE(cur_top.second == exp_id);
+            REQUIRE(std::abs(cur_top.first + exp_dists[exp_id]) < 1e-3);
+            heap.pop();
+        }
+        for (auto i = 0; i < range_topk; i++) {
+            REQUIRE(std::abs(dists[i] - 0) < 1e-3);
+        }
+    }
     // clean
     for (auto& item : sparse_vectors) {
         delete[] item.vals_;

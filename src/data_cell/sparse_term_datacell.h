@@ -16,6 +16,7 @@
 #pragma once
 
 #include "algorithm/sindi/sindi_parameter.h"
+#include "impl/basic_searcher.h"
 #include "quantization/sparse_quantization//sparse_term_computer.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
@@ -45,11 +46,12 @@ public:
           const SparseTermComputerPtr& computer,
           const bool only_collect_id = false) const;
 
+    template <InnerSearchMode mode = InnerSearchMode::KNN_SEARCH>
     void
     InsertHeap(float* dists,
                const SparseTermComputerPtr& computer,
                MaxHeap& heap,
-               uint32_t n_candidate,
+               const InnerSearchParam& param,
                uint32_t offset_id) const;
 
     SparseTermComputerPtr
