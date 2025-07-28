@@ -16,6 +16,7 @@
 #include "sindi.h"
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
 #include "fixtures.h"
 #include "impl/allocator/safe_allocator.h"
@@ -27,15 +28,16 @@ TEST_CASE("SINDI Basic Test", "[ut][SINDI]") {
     IndexCommonParam common_param;
     common_param.allocator_ = allocator;
 
-    /******************* Prepare Base and Query Dataset *****************/
+    // Prepare Base and Query Dataset
     uint32_t num_base = 10000;
+    uint32_t num_query = 1000;
     int64_t max_dim = 128;
     int64_t max_id = 30000;
     float min_val = 0;
     float max_val = 10;
     int seed_base = 114;
-    int seed_query = 514;
     int64_t k = 10;
+    auto use_reorder = GENERATE("false", "true");
 
     std::vector<int64_t> ids(num_base);
     for (int64_t i = 0; i < num_base; ++i) {
@@ -47,20 +49,24 @@ TEST_CASE("SINDI Basic Test", "[ut][SINDI]") {
     auto base = vsag::Dataset::Make();
     base->NumElements(num_base)->SparseVectors(sv_base.data())->Ids(ids.data())->Owner(false);
 
-    auto param_str = R"({
-        "use_reorder": true,
+    auto param_str = R"({{
+        "use_reorder": {},
         "query_prune_ratio": 1,
         "doc_prune_ratio": 1,
         "term_prune_ratio": 1,
         "window_size": 1000
-    })";
+    }})";
 
-    vsag::JsonType param_json = vsag::JsonType::parse(param_str);
+    vsag::JsonType param_json = vsag::JsonType::parse(fmt::format(param_str, use_reorder));
     auto index_param = std::make_shared<vsag::SINDIParameters>();
     index_param->FromJson(param_json);
     auto index = std::make_unique<SINDI>(index_param, common_param);
     auto another_index = std::make_unique<SINDI>(index_param, common_param);
+    SparseIndexParameterPtr bf_param = std::make_shared<SparseIndexParameters>();
+    bf_param->need_sort = true;
+    auto bf_index = std::make_unique<SparseIndex>(bf_param, common_param);
 
+    bf_index->Build(base);
     auto build_res = index->Build(base);
     REQUIRE(build_res.size() == 0);
     REQUIRE(index->GetNumElements() == num_base);
@@ -86,16 +92,43 @@ TEST_CASE("SINDI Basic Test", "[ut][SINDI]") {
 
     auto query = vsag::Dataset::Make();
 
-    for (int i = 0; i < num_base; ++i) {
+    for (int i = 0; i < num_query; ++i) {
         query->NumElements(1)->SparseVectors(sv_base.data() + i)->Owner(false);
 
-        auto result = index->KnnSearch(query, k, search_param_str, nullptr);
-        auto another_result = another_index->KnnSearch(query, k, search_param_str, nullptr);
+        // gt
+        auto bf_result = bf_index->KnnSearch(query, k, search_param_str, nullptr);
 
+        // test basic performance
+        auto result = index->KnnSearch(query, k, search_param_str, nullptr);
+        REQUIRE(result->GetIds()[0] == ids[i]);
+        for (int j = 0; j < k; j++) {
+            REQUIRE(result->GetIds()[j] == bf_result->GetIds()[j]);
+            REQUIRE(std::abs(result->GetDistances()[j] - bf_result->GetDistances()[j]) < 1e-2);
+        }
+
+        // test serialize
+        auto another_result = another_index->KnnSearch(query, k, search_param_str, nullptr);
         for (int j = 0; j < k; j++) {
             REQUIRE(result->GetIds()[j] == another_result->GetIds()[j]);
+            REQUIRE(std::abs(result->GetDistances()[j] - another_result->GetDistances()[j]) < 1e-3);
         }
-        REQUIRE(result->GetIds()[0] == ids[i]);
+
+        // test range search limit
+        auto range_result_limit_3 = index->RangeSearch(query, 0, search_param_str, nullptr, 3);
+        REQUIRE(range_result_limit_3->GetDim() == 3);
+        for (int j = 0; j < 3; j++) {
+            REQUIRE(result->GetIds()[j] == range_result_limit_3->GetIds()[j]);
+            REQUIRE(std::abs(result->GetDistances()[j] - range_result_limit_3->GetDistances()[j]) <
+                    1e-3);
+        }
+
+        // test range search radius
+        auto target_radius = result->GetDistances()[5];
+        auto range_result_radius_3 =
+            index->RangeSearch(query, target_radius, search_param_str, nullptr);
+        for (int j = 0; j < range_result_radius_3->GetDim(); j++) {
+            REQUIRE(range_result_radius_3->GetDistances()[j] < target_radius);
+        }
     }
 
     for (auto& item : sv_base) {
