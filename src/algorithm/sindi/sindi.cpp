@@ -109,6 +109,14 @@ SINDI::KnnSearch(const DatasetPtr& query,
         inner_param.ef = k;
     }
     inner_param.topk = k;
+
+
+    FilterPtr ft = nullptr;
+    if (filter != nullptr) {
+        ft = std::make_shared<InnerIdWrapperFilter>(filter, *this->label_table_);
+    }
+    inner_param.is_inner_id_allowed = ft;
+
     auto computer = this->window_term_list_[0]->FactoryComputer(sparse_query, search_param);
     return search_impl<KNN_SEARCH>(computer, inner_param, filter);
 }
@@ -230,6 +238,12 @@ SINDI::RangeSearch(const DatasetPtr& query,
 
     inner_param.range_search_limit_size = static_cast<int>(limited_size);
     inner_param.radius = radius;
+
+    FilterPtr ft = nullptr;
+    if (filter != nullptr) {
+        ft = std::make_shared<InnerIdWrapperFilter>(filter, *this->label_table_);
+    }
+    inner_param.is_inner_id_allowed = ft;
 
     auto computer = this->window_term_list_[0]->FactoryComputer(sparse_query, search_param);
     return search_impl<RANGE_SEARCH>(computer, inner_param, filter);

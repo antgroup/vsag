@@ -23,6 +23,15 @@
 
 using namespace vsag;
 
+class MockFilter : public Filter {
+public:
+    [[nodiscard]] bool
+    CheckValid(int64_t id) const override {
+        // return true if id is even, otherwise false
+        return id % 2 == 0;
+    }
+};
+
 TEST_CASE("SINDI Basic Test", "[ut][SINDI]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     IndexCommonParam common_param;
@@ -93,6 +102,7 @@ TEST_CASE("SINDI Basic Test", "[ut][SINDI]") {
     )";
 
     auto query = vsag::Dataset::Make();
+    auto mock_filter = std::make_shared<MockFilter>();
 
     for (int i = 0; i < num_query; ++i) {
         query->NumElements(1)->SparseVectors(sv_base.data() + i)->Owner(false);
@@ -130,6 +140,17 @@ TEST_CASE("SINDI Basic Test", "[ut][SINDI]") {
             index->RangeSearch(query, target_radius, search_param_str, nullptr);
         for (int j = 0; j < range_result_radius_3->GetDim(); j++) {
             REQUIRE(range_result_radius_3->GetDistances()[j] < target_radius);
+        }
+
+        // test filter
+        auto filter_result = index->KnnSearch(query, k, search_param_str, mock_filter);
+        REQUIRE(filter_result->GetDim() == k);
+        auto cur = 0;
+        for (int j = 0; j < k; j++) {
+            if (mock_filter->CheckValid(result->GetIds()[j])) {
+                REQUIRE(result->GetIds()[j] == filter_result->GetIds()[cur]);
+                cur++;
+            }
         }
     }
 

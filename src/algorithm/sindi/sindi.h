@@ -92,8 +92,7 @@ private:
     template <InnerSearchMode mode>
     DatasetPtr
     search_impl(const SparseTermComputerPtr& computer,
-                const InnerSearchParam& inner_param,
-                const FilterPtr& filter) const;
+                const InnerSearchParam& inner_param) const;
 
 private:
     uint32_t window_size_{0};
