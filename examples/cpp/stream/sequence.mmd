@@ -1,0 +1,14 @@
+sequenceDiagram
+    Sender->>MessageQueue: Data Prepare Ready
+    Sender->>Sender: Wait Message
+    MessageQueue->>Reciver: Send Message
+    Reciver-->>MessageQueue: Need Data(<4k)
+    Reciver-->>Reciver: Wait Message
+    MessageQueue-->>Sender: SendMessage
+    Sender->>MessageQueue: Send Data(<4k)
+    Sender->>Sender: Wait Message
+    MessageQueue->>Reciver: Send Message
+    Reciver-->>Reciver: Read Data
+    Reciver-->>MessageQueue: Need Next Data(<4k)
+    Reciver-->>Reciver: Wait Message
+    
