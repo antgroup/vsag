@@ -30,11 +30,25 @@ class SparseTermComputer {
 public:
     ~SparseTermComputer() = default;
 
-    explicit SparseTermComputer(const SINDISearchParameters& search_param,
+    explicit SparseTermComputer(const SparseVector& sparse_query,
+                                const SINDISearchParameter& search_param,
                                 Allocator* allocator = nullptr)
         : sorted_query_(allocator),
           query_prune_ratio_(search_param.query_prune_ratio),
-          term_prune_ratio_(search_param.term_prune_ratio) {
+          term_prune_ratio_(search_param.term_prune_ratio),
+          raw_query_(sparse_query) {
+        sort_sparse_vector(sparse_query, sorted_query_);
+
+        pruned_len_ = (uint32_t)(query_prune_ratio_ * sparse_query.len_);
+        if (pruned_len_ == 0) {
+            if (sorted_query_.size() != 0) {
+                pruned_len_ = 1;
+            }
+        }
+
+        for (auto i = 0; i < sorted_query_.size(); i++) {
+            sorted_query_[i].second *= -1;  // note that: dist_ip = -1 * query * base
+        }
     }
 
     void
@@ -93,6 +107,8 @@ public:
 
 public:
     Vector<std::pair<uint32_t, float>> sorted_query_;
+
+    const SparseVector& raw_query_;
 
     float query_prune_ratio_{0};
 

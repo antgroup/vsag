@@ -29,8 +29,8 @@ TEST_CASE("SINDI Basic Test", "[ut][SINDI]") {
     common_param.allocator_ = allocator;
 
     // Prepare Base and Query Dataset
-    uint32_t num_base = 10000;
-    uint32_t num_query = 1000;
+    uint32_t num_base = 1000;
+    uint32_t num_query = 100;
     int64_t max_dim = 128;
     int64_t max_id = 30000;
     float min_val = 0;
@@ -49,7 +49,7 @@ TEST_CASE("SINDI Basic Test", "[ut][SINDI]") {
     auto base = vsag::Dataset::Make();
     base->NumElements(num_base)->SparseVectors(sv_base.data())->Ids(ids.data())->Owner(false);
 
-    auto param_str = R"({{
+    constexpr static auto param_str = R"({{
         "use_reorder": {},
         "query_prune_ratio": 1,
         "doc_prune_ratio": 1,

@@ -51,7 +51,7 @@ SINDIParameter::ToJson() const {
 }
 
 void
-SINDISearchParameters::FromJson(const JsonType& json) {
+SINDISearchParameter::FromJson(const JsonType& json) {
     CHECK_ARGUMENT(json.contains(INDEX_SINDI),
                    fmt::format("parameters must contains {}", INDEX_SINDI));
     if (json[INDEX_SINDI].contains(SPARSE_TERM_PRUNE_RATIO)) {
@@ -72,7 +72,7 @@ SINDISearchParameters::FromJson(const JsonType& json) {
     }
 }
 JsonType
-SINDISearchParameters::ToJson() const {
+SINDISearchParameter::ToJson() const {
     JsonType json;
     json[INDEX_SINDI] = JsonType();
     json[INDEX_SINDI][SPARSE_QUERY_PRUNE_RATIO] = query_prune_ratio;

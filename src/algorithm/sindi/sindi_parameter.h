@@ -47,7 +47,7 @@ public:
 
 using SINDIParameterPtr = std::shared_ptr<SINDIParameter>;
 
-struct SINDISearchParameters : public Parameter {
+struct SINDISearchParameter : public Parameter {
 public:
     void
     FromJson(const JsonType& json) override;
@@ -55,7 +55,7 @@ public:
     JsonType
     ToJson() const override;
 
-    SINDISearchParameters() = default;
+    SINDISearchParameter() = default;
 
 public:
     // search

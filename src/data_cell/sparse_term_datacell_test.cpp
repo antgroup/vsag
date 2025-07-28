@@ -65,7 +65,7 @@ TEST_CASE("SparseTermDatacell Basic Test", "[ut][SparseTermDatacell]") {
     REQUIRE(std::abs(data_cell->doc_prune_ratio_ - doc_prune_ratio) < 1e-3);
 
     // test factory computer
-    SINDISearchParameters search_params;
+    SINDISearchParameter search_params;
     search_params.term_prune_ratio = term_prune_ratio;
     search_params.query_prune_ratio = query_prune_ratio;
     auto computer = data_cell->FactoryComputer(query_sv, search_params);

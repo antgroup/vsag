@@ -112,10 +112,8 @@ SparseTermDataCell::InsertHeap(float* dists,
 
 SparseTermComputerPtr
 SparseTermDataCell::FactoryComputer(const SparseVector& sparse_query,
-                                    const SINDISearchParameters& search_param) {
-    auto computer = std::make_shared<SparseTermComputer>(search_param, allocator_);
-    computer->SetQuery(sparse_query);
-    return computer;
+                                    const SINDISearchParameter& search_param) {
+    return std::make_shared<SparseTermComputer>(sparse_query, search_param, allocator_);
 }
 
 void

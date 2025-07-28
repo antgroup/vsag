@@ -37,12 +37,10 @@ TEST_CASE("SparseTermComputer Basic Test", "[ut][SparseTermComputer]") {
     }
 
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
-    SINDISearchParameters search_params;
+    SINDISearchParameter search_params;
     search_params.query_prune_ratio = query_prune_ratio;
-    auto computer = std::make_shared<SparseTermComputer>(search_params, allocator.get());
+    auto computer = std::make_shared<SparseTermComputer>(query_sv, search_params, allocator.get());
 
-    // test set query
-    computer->SetQuery(query_sv);
     REQUIRE(computer->sorted_query_.size() == query_len);
     REQUIRE(computer->pruned_len_ == query_len * query_prune_ratio);
     for (auto i = 0; i < computer->sorted_query_.size(); i++) {

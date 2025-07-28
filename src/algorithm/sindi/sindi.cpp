@@ -101,7 +101,7 @@ SINDI::KnnSearch(const DatasetPtr& query,
     auto sparse_query = sparse_vectors[0];
 
     // search parameter
-    SINDISearchParameters search_param;
+    SINDISearchParameter search_param;
     search_param.FromJson(JsonType::parse(parameters));
     InnerSearchParam inner_param;
     inner_param.ef = search_param.n_candidate;
@@ -109,17 +109,16 @@ SINDI::KnnSearch(const DatasetPtr& query,
         inner_param.ef = k;
     }
     inner_param.topk = k;
-
-    return search_impl<KNN_SEARCH>(sparse_query, inner_param, filter);
+    auto computer = this->window_term_list_[0]->FactoryComputer(sparse_query, search_param);
+    return search_impl<KNN_SEARCH>(computer, inner_param, filter);
 }
 
 template <InnerSearchMode mode>
 DatasetPtr
-SINDI::search_impl(const SparseVector sparse_query,
-                   InnerSearchParam inner_param,
+SINDI::search_impl(const SparseTermComputerPtr& computer,
+                   const InnerSearchParam& inner_param,
                    const FilterPtr& filter) const {
     // computer and heap
-    auto computer = this->window_term_list_[0]->FactoryComputer(sparse_query, search_param);
     MaxHeap heap(this->allocator_);
     uint32_t k = 0;
 
@@ -155,7 +154,8 @@ SINDI::search_impl(const SparseVector sparse_query,
         float cur_heap_top = std::numeric_limits<float>::max();
         auto candidate_size = heap.size();
         auto high_precise_heap = std::make_shared<StandardHeap<true, false>>(allocator_, -1);
-        auto [sorted_ids, sorted_vals] = rerank_flat_index_->sort_sparse_vector(sparse_query);
+        auto [sorted_ids, sorted_vals] =
+            rerank_flat_index_->sort_sparse_vector(computer->raw_query_);
         for (auto i = 0; i < candidate_size; i++) {
             auto inner_id = heap.top().second;
             auto high_precise_distance = rerank_flat_index_->CalDistanceByIdUnsafe(
@@ -224,14 +224,15 @@ SINDI::RangeSearch(const DatasetPtr& query,
     auto sparse_query = sparse_vectors[0];
 
     // search parameter
-    SINDIParameters search_param;
+    SINDISearchParameter search_param;
     search_param.FromJson(JsonType::parse(parameters));
     InnerSearchParam inner_param;
 
     inner_param.range_search_limit_size = static_cast<int>(limited_size);
     inner_param.radius = radius;
 
-    return search_impl<RANGE_SEARCH>(sparse_query, inner_param, filter);
+    auto computer = this->window_term_list_[0]->FactoryComputer(sparse_query, search_param);
+    return search_impl<RANGE_SEARCH>(computer, inner_param, filter);
 }
 
 void
