@@ -30,15 +30,18 @@ public:
 
     void
     Set(uint64_t size1, uint64_t offset1) {
+        this->align_bit = Options::Instance().direct_IO_object_align_bit();
+        this->align_size = 1 << align_bit;
+        this->align_mask = (1 << align_bit) - 1;
         this->size = size1;
         this->offset = offset1;
         if (align_data) {
             free(align_data);
         }
-        auto new_offset = (offset >> ALIGN_BIT) << ALIGN_BIT;
-        auto inner_offset = offset & ALIGN_MASK;
-        auto new_size = (((size + inner_offset) + ALIGN_MASK) >> ALIGN_BIT) << ALIGN_BIT;
-        this->align_data = static_cast<uint8_t*>(std::aligned_alloc(ALIGN_SIZE, new_size));
+        auto new_offset = (offset >> align_bit) << align_bit;
+        auto inner_offset = offset & align_mask;
+        auto new_size = (((size + inner_offset) + align_mask) >> align_bit) << align_bit;
+        this->align_data = static_cast<uint8_t*>(std::aligned_alloc(align_size, new_size));
         this->data = align_data + inner_offset;
         this->size = new_size;
         this->offset = new_offset;
@@ -57,10 +60,10 @@ public:
     uint64_t offset;
     uint8_t* align_data{nullptr};
 
-    static constexpr int64_t ALIGN_BIT = 9;
+    int64_t align_bit;
 
-    static constexpr int64_t ALIGN_SIZE = 1 << ALIGN_BIT;
+    int64_t align_size;
 
-    static constexpr int64_t ALIGN_MASK = (1 << ALIGN_BIT) - 1;
+    int64_t align_mask;
 };
 }  // namespace vsag
