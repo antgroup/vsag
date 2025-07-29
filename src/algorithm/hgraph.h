@@ -218,7 +218,7 @@ private:
     void
     add_one_point(const void* data, int level, InnerIdType id);
 
-    void
+    bool
     graph_add_one(const void* data, int level, InnerIdType inner_id);
 
     void

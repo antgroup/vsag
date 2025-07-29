@@ -61,6 +61,8 @@ public:
     uint64_t ef_construction{400};
     uint64_t build_thread_count{100};
 
+    bool support_duplicate{false};
+
     DataTypes data_type{DataTypes::DATA_TYPE_FLOAT};
 
     std::string name;
