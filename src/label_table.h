@@ -29,13 +29,30 @@ class LabelTable;
 using LabelTablePtr = std::shared_ptr<LabelTable>;
 using IdMapFunction = std::function<std::tuple<bool, int64_t>(int64_t)>;
 
+struct DuplicateRecord {
+    std::mutex duplicate_mutex;
+    Vector<InnerIdType> duplicate_ids;
+    DuplicateRecord(Allocator* allocator) : duplicate_ids(allocator) {
+    }
+};
+
 class LabelTable {
 public:
-    explicit LabelTable(Allocator* allocator, bool use_reverse_map = true)
+    explicit LabelTable(Allocator* allocator,
+                        bool use_reverse_map = true,
+                        bool compress_redundant_data = true)
         : allocator_(allocator),
           label_table_(0, allocator),
           label_remap_(0, allocator),
-          use_reverse_map_(use_reverse_map){};
+          use_reverse_map_(use_reverse_map),
+          compress_duplicate_data_(compress_redundant_data),
+          duplicate_records_(0, allocator){};
+
+    ~LabelTable() {
+        for (int i = 0; i < duplicate_records_.size(); ++i) {
+            allocator_->Delete(duplicate_records_[i]);
+        }
+    }
 
     inline void
     Insert(InnerIdType id, LabelType label) {
@@ -116,11 +133,37 @@ public:
             return;
         }
         label_table_.resize(new_size);
+        if (compress_duplicate_data_) {
+            duplicate_records_.resize(new_size, nullptr);
+        }
     }
 
     int64_t
     GetTotalCount() {
         return total_count_;
+    }
+
+    inline bool
+    CompressDuplicateData() const {
+        return compress_duplicate_data_;
+    }
+
+    inline void
+    SetDuplicateId(InnerIdType previous_id, InnerIdType current_id) {
+        if (duplicate_records_[previous_id] == nullptr) {
+            duplicate_records_[previous_id] = allocator_->New<DuplicateRecord>(allocator_);
+        }
+        std::lock_guard lock(duplicate_records_[previous_id]->duplicate_mutex);
+        duplicate_records_[previous_id]->duplicate_ids.push_back(current_id);
+    }
+
+    const Vector<InnerIdType>
+    GetDuplicateId(InnerIdType id) const {
+        if (duplicate_records_[id] == nullptr) {
+            return Vector<InnerIdType>(allocator_);
+        }
+        std::lock_guard lock(duplicate_records_[id]->duplicate_mutex);
+        return duplicate_records_[id]->duplicate_ids;
     }
 
     void
@@ -129,6 +172,9 @@ public:
 public:
     Vector<LabelType> label_table_;
     UnorderedMap<LabelType, InnerIdType> label_remap_;
+
+    bool compress_duplicate_data_{true};
+    Vector<DuplicateRecord*> duplicate_records_;
 
     Allocator* allocator_{nullptr};
     std::atomic<int64_t> total_count_{0L};
