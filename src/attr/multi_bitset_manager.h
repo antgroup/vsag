@@ -116,6 +116,9 @@ private:
     /// A vector containing pointers to ComputableBitset instances.
     Vector<ComputableBitset*> bitsets_;
 
+    /// map origin id to inner id (avoiding nullptr)
+    Vector<int16_t> bitset_map_;
+
     /// The current number of ComputableBitset instances managed by this object. Defaults to 1.
     uint64_t count_{1};
 
