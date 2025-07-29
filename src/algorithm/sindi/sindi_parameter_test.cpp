@@ -66,6 +66,17 @@ TEST_CASE("SINDI Index Parameters Test", "[ut][SINDIParameter]") {
     REQUIRE(param->window_size == 66666);
 
     vsag::ParameterTest::TestToJson(param);
+
+    auto search_param_str = R"(
+        "sindi": {
+            "query_prune_ratio": 0.9,
+            "n_candidate": 20,
+            "term_prune_ratio": 1
+        }
+    )";
+    auto search_param = std::make_shared<vsag::SINDIParameter>();
+    search_param->FromJson(search_param_str);
+    vsag::ParameterTest::TestToJson(search_param);
 }
 
 TEST_CASE("SINDI Index Parameters Compatibility Test", "[ut][SINDIParameter]") {
