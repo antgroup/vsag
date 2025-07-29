@@ -131,6 +131,7 @@ const char* const SPARSE_VECTOR_DATA_CELL = "sparse_vector_data_cell";
 const char* const GRAPH_SUPPORT_REMOVE = "support_remove";
 const char* const REMOVE_FLAG_BIT = "remove_flag_bit";
 const char* const HOLD_MOLDS = "hold_molds";
+const char* const SUPPORT_DUPLICATE = "support_duplicate";
 
 const char* const DATACELL_OFFSETS = "datacell_offsets";
 const char* const DATACELL_SIZES = "datacell_sizes";
@@ -147,6 +148,7 @@ const std::unordered_map<std::string, std::string> DEFAULT_MAP = {
     {"HGRAPH_BASE_CODES_KEY", HGRAPH_BASE_CODES_KEY},
     {"HGRAPH_PRECISE_CODES_KEY", HGRAPH_PRECISE_CODES_KEY},
     {"HGRAPH_USE_ATTRIBUTE_FILTER_KEY", HGRAPH_USE_ATTRIBUTE_FILTER_KEY},
+    {"HGRAPH_SUPPORT_DUPLICATE", HGRAPH_SUPPORT_DUPLICATE},
     {"IO_TYPE_KEY", IO_TYPE_KEY},
     {"IO_TYPE_VALUE_MEMORY_IO", IO_TYPE_VALUE_MEMORY_IO},
     {"IO_TYPE_VALUE_BLOCK_MEMORY_IO", IO_TYPE_VALUE_BLOCK_MEMORY_IO},

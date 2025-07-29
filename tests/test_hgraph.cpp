@@ -50,7 +50,8 @@ public:
                                         std::string graph_storage = "flat",
                                         bool support_remove = false,
                                         bool use_attr_filter = false,
-                                        bool store_raw_vector = false);
+                                        bool store_raw_vector = false,
+                                        bool support_duplicate = false);
 
     static HGraphResourcePtr
     GetResource(bool sample = true);
@@ -133,7 +134,8 @@ HGraphTestIndex::GenerateHGraphBuildParametersString(const std::string& metric_t
                                                      std::string graph_storage,
                                                      bool support_remove,
                                                      bool use_attr_filter,
-                                                     bool store_raw_vector) {
+                                                     bool store_raw_vector,
+                                                     bool support_duplicate) {
     std::string build_parameters_str;
 
     constexpr auto parameter_temp_reorder = R"(
@@ -159,7 +161,8 @@ HGraphTestIndex::GenerateHGraphBuildParametersString(const std::string& metric_t
             "alpha": 1.2,
             "support_remove": {},
             "use_attribute_filter": {},
-            "store_raw_vector": {}
+            "store_raw_vector": {},
+            "support_duplicate": {}
         }}
     }}
     )";
@@ -183,7 +186,8 @@ HGraphTestIndex::GenerateHGraphBuildParametersString(const std::string& metric_t
             "alpha": 1.2,
             "support_remove": {},
             "use_attribute_filter": {},
-            "store_raw_vector": {}
+            "store_raw_vector": {},
+            "support_duplicate": {}
         }}
     }}
     )";
@@ -217,7 +221,8 @@ HGraphTestIndex::GenerateHGraphBuildParametersString(const std::string& metric_t
                                            graph_storage,
                                            support_remove,
                                            use_attr_filter,
-                                           store_raw_vector);
+                                           store_raw_vector,
+                                           support_duplicate);
     } else {
         build_parameters_str = fmt::format(parameter_temp_origin,
                                            data_type,
@@ -231,7 +236,8 @@ HGraphTestIndex::GenerateHGraphBuildParametersString(const std::string& metric_t
                                            graph_storage,
                                            support_remove,
                                            use_attr_filter,
-                                           store_raw_vector);
+                                           store_raw_vector,
+                                           support_duplicate);
     }
     return build_parameters_str;
 }
@@ -1003,6 +1009,78 @@ TEST_CASE("[Daily] HGraph Add", "[ft][hgraph][daily]") {
     auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
     auto resource = test_index->GetResource(false);
     TestHGraphAdd(test_index, resource);
+}
+
+static void
+TestHGraphDuplicate(const fixtures::HGraphTestIndexPtr& test_index,
+                    const fixtures::HGraphResourcePtr& resource) {
+    using namespace fixtures;
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    auto size = GENERATE(1024 * 1024 * 2);
+    auto duplicate_pos = GENERATE("prefix", "suffix", "middle");
+    auto search_param = fmt::format(fixtures::search_param_tmp, 200, false);
+    std::unordered_map<std::string, float> ratios{
+        {"prefix", 0.9}, {"suffix", 0.9}, {"middle", 0.5}};
+    const std::vector<std::pair<std::string, float>> all_test_cases =
+        fixtures::RandomSelect<std::pair<std::string, float>>(
+            {
+                {"fp32", 0.99},
+                {"rabitq,fp32", 0.3},
+                {"pq,fp32", 0.95},
+                {"sq8_uniform,fp32", 0.98},
+            },
+            2);
+    for (auto metric_type : resource->metric_types) {
+        for (auto dim : resource->dims) {
+            for (auto& [base_quantization_str, recall] : all_test_cases) {
+                INFO(
+                    fmt::format("metric_type: {}, dim: {}, base_quantization_str: {}, recall: {}, "
+                                "duplicate_pos: {}",
+                                metric_type,
+                                dim,
+                                base_quantization_str,
+                                recall,
+                                duplicate_pos));
+                if (HGraphTestIndex::IsRaBitQ(base_quantization_str) &&
+                    dim < fixtures::RABITQ_MIN_RACALL_DIM) {
+                    continue;  // Skip invalid RaBitQ configurations
+                }
+                vsag::Options::Instance().set_block_size_limit(size);
+                auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(
+                    metric_type,
+                    dim,
+                    base_quantization_str,
+                    /*thread_count*/ 5,
+                    /*extra_info_size*/ 0,
+                    /*data_type*/ "float32",
+                    /*graph_type*/ "nsw",
+                    /*graph_storage*/ "flat",
+                    /*support_remove*/ false,
+                    /*use_attr_filter*/ false,
+                    /*store_raw_vector*/ false,
+                    /*support_duplicate*/ true);
+                auto index = TestIndex::TestFactory(test_index->name, param, true);
+                auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(
+                    dim, resource->base_count, metric_type);
+                TestIndex::TestBuildDuplicateIndex(index, dataset, duplicate_pos, true);
+                TestIndex::TestKnnSearch(
+                    index, dataset, search_param, recall * ratios[duplicate_pos], true);
+                vsag::Options::Instance().set_block_size_limit(origin_size);
+            }
+        }
+    }
+}
+
+TEST_CASE("[PR] HGraph Duplicate", "[ft][hgraph][pr]") {
+    auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
+    auto resource = test_index->GetResource(true);
+    TestHGraphDuplicate(test_index, resource);
+}
+
+TEST_CASE("[Daily] HGraph Duplicate", "[ft][hgraph][daily]") {
+    auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
+    auto resource = test_index->GetResource(false);
+    TestHGraphDuplicate(test_index, resource);
 }
 
 static void
