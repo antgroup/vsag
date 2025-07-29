@@ -82,7 +82,7 @@ AsyncIO::DirectReadImpl(uint64_t size, uint64_t offset, bool& need_release) cons
 void
 AsyncIO::ReleaseImpl(const uint8_t* data) {
     auto* ptr = const_cast<uint8_t*>(data);
-    constexpr int64_t align_bit = DirectIOObject::ALIGN_BIT;
+    uint64_t align_bit = Options::Instance().direct_IO_object_align_bit();
     auto raw = reinterpret_cast<uintptr_t>(ptr);
     raw &= ~((1ULL << align_bit) - 1);
     // NOLINTNEXTLINE(performance-no-int-to-ptr)

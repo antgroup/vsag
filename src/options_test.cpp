@@ -37,4 +37,13 @@ TEST_CASE("Options Test", "[ut][option]") {
 
     REQUIRE_THROWS(vsag::Option::Instance().set_num_threads_building(0));
     REQUIRE_THROWS(vsag::Option::Instance().set_num_threads_building(201));
+
+    size_t direct_IO_object_align_bit = 12;
+    vsag::Options::Instance().set_direct_IO_object_align_bit(direct_IO_object_align_bit);
+    REQUIRE(vsag::Option::Instance().direct_IO_object_align_bit() == direct_IO_object_align_bit);
+    size_t direct_IO_object_align_bit1 = 9;
+    vsag::Options::Instance().set_direct_IO_object_align_bit(direct_IO_object_align_bit1);
+    REQUIRE(vsag::Option::Instance().direct_IO_object_align_bit() == direct_IO_object_align_bit);
+
+    REQUIRE_THROWS(vsag::Option::Instance().set_direct_IO_object_align_bit(22));
 }
