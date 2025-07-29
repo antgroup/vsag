@@ -24,6 +24,9 @@ namespace vsag {
 
 class AsyncIO : public BasicIO<AsyncIO> {
 public:
+    static constexpr bool InMemory = false;
+
+public:
     explicit AsyncIO(std::string filename, Allocator* allocator);
 
     explicit AsyncIO(const AsyncIOParameterPtr& io_param, const IndexCommonParam& common_param);
@@ -47,18 +50,6 @@ public:
 
     bool
     MultiReadImpl(uint8_t* datas, uint64_t* sizes, uint64_t* offsets, uint64_t count) const;
-
-    void
-    PrefetchImpl(uint64_t offset, uint64_t cache_line = 64){};
-
-    static bool
-    InMemoryImpl() {
-        return false;
-    }
-
-    void
-    InitIOImpl(const IOParamPtr& io_param) {
-    }
 
 public:
     static std::unique_ptr<IOContextPool> io_context_pool;

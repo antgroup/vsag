@@ -137,7 +137,7 @@ ExtraInfoDataCell<IOTmpl>::BatchInsertExtraInfo(const char* extra_infos,
 template <typename IOTmpl>
 bool
 ExtraInfoDataCell<IOTmpl>::InMemory() const {
-    return this->io_->InMemory();
+    return IOTmpl::InMemory;
 }
 
 template <typename IOTmpl>
