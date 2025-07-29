@@ -91,7 +91,7 @@ global:
     search_mode: "knn"
     delete_index_after_search: false
 
-90/WHOLENET:
+90/INTERNET:
     datapath: "/tmp/data/wholenet-sparse-1m-ip.hdf5"
     type: "build,search" # build, search
     index_name: "sindi"
