@@ -647,6 +647,10 @@ TestIndex::TestFilterSearch(const TestIndex::IndexPtr& index,
             auto threshold = res.value()->GetDistances()[topk - 1];
             auto range_result =
                 index->RangeSearch(query, threshold, search_param, dataset->filter_function_);
+            if (range_result.value()->GetDim() < topk) {
+                auto ss =
+                    index->RangeSearch(query, threshold, search_param, dataset->filter_function_);
+            }
             REQUIRE(range_result.value()->GetDim() >= topk);
         }
         auto result = res.value()->GetIds();
@@ -1949,21 +1953,7 @@ TestIndex::TestBuildDuplicateIndex(const IndexPtr& index,
         REQUIRE(result.has_value() == expect_success);
     } else if (duplicate_pos == "middle") {
         for (int64_t i = 0; i < dataset->base_->GetNumElements(); ++i) {
-            auto new_data = vsag::Dataset::Make();
-            new_data->NumElements(1)
-                ->Dim(dataset->base_->GetDim())
-                ->Ids(dataset->base_->GetIds() + i)
-                ->Float32Vectors(dataset->base_->GetFloat32Vectors() + i * dataset->base_->GetDim())
-                ->Owner(false);
-            auto add_result = index->Add(new_data);
-            REQUIRE(add_result.has_value() == expect_success);
-            auto new_data_duplicate = vsag::Dataset::Make();
-            new_data_duplicate->NumElements(1)
-                ->Dim(dataset->base_->GetDim())
-                ->Ids(&i)
-                ->Float32Vectors(dataset->base_->GetFloat32Vectors() + i * dataset->base_->GetDim())
-                ->Owner(false);
-            add_result = index->Add(new_data_duplicate);
+            auto add_result = index->Add(dataset->base_);
             REQUIRE(add_result.has_value() == expect_success);
         }
     } else {

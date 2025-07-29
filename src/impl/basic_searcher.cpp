@@ -328,7 +328,9 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                     label_table->CompressDuplicateData()) {
                     const auto& duplicate_ids = label_table->GetDuplicateId(to_be_visited_id[i]);
                     for (const auto& item : duplicate_ids) {
-                        top_candidates->Push(dist, item);
+                        if (not is_id_allowed || is_id_allowed->CheckValid(item)) {
+                            top_candidates->Push(dist, item);
+                        }
                     }
                 }
 

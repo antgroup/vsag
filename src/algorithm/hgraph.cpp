@@ -615,6 +615,7 @@ HGraph::RangeSearch(const DatasetPtr& query,
     search_param.is_inner_id_allowed = ft;
     search_param.radius = radius;
     search_param.search_mode = RANGE_SEARCH;
+    search_param.consider_duplicate = true;
     search_param.range_search_limit_size = static_cast<int>(limited_size);
     auto search_result = this->search_one_graph(
         raw_query, this->bottom_graph_, this->basic_flatten_codes_, search_param);
@@ -760,6 +761,10 @@ HGraph::deserialize_basic_info(JsonType jsonify_basic_info) {
 
 void
 HGraph::serialize_label_info(StreamWriter& writer) const {
+    if (this->label_table_->CompressDuplicateData()) {
+        this->label_table_->Serialize(writer);
+        return;
+    }
     StreamWriter::WriteVector(writer, this->label_table_->label_table_);
     uint64_t size = this->label_table_->label_remap_.size();
     StreamWriter::WriteObj(writer, size);
@@ -772,6 +777,10 @@ HGraph::serialize_label_info(StreamWriter& writer) const {
 
 void
 HGraph::deserialize_label_info(StreamReader& reader) const {
+    if (this->label_table_->CompressDuplicateData()) {
+        this->label_table_->Deserialize(reader);
+        return;
+    }
     StreamReader::ReadVector(reader, this->label_table_->label_table_);
     uint64_t size;
     StreamReader::ReadObj(reader, size);
