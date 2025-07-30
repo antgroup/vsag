@@ -21,6 +21,7 @@
 #include <nlohmann/json.hpp>
 #undef EOF
 
+#include "attr/argparse.h"
 #include "attr/expression_visitor.h"
 #include "impl/allocator/safe_allocator.h"
 #include "vsag_exception.h"
