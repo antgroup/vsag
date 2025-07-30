@@ -54,6 +54,7 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
       hierarchical_datacell_param_(hgraph_param->hierarchical_graph_param),
       extra_info_size_(common_param.extra_info_size_),
       deleted_ids_(allocator_) {
+    this->label_table_->compress_duplicate_data_ = hgraph_param->support_duplicate;
     neighbors_mutex_ = std::make_shared<PointsMutex>(0, common_param.allocator_.get());
     this->basic_flatten_codes_ =
         FlattenInterface::MakeInstance(hgraph_param->base_codes_param, common_param);
@@ -108,7 +109,6 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
         this->attr_filter_index_ =
             AttributeInvertedInterface::MakeInstance(allocator_, false /*have_bucket*/);
     }
-    this->label_table_->compress_duplicate_data_ = hgraph_param->support_duplicate;
 }
 void
 HGraph::Train(const DatasetPtr& base) {
