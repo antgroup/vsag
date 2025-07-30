@@ -8,6 +8,7 @@ list (APPEND ATTR_SRCS
         attr_type_schema.cpp
         multi_bitset_manager.cpp
         attr_value_map.cpp
+        argparse.cpp
 )
 
 add_library (attr OBJECT ${ATTR_SRCS})
