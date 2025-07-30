@@ -87,7 +87,7 @@ public:
 
     bool
     InMemory() const override {
-        return this->io_->InMemory();
+        return IOTmpl::InMemory;
     }
 
     void

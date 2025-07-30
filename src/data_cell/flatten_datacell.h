@@ -250,7 +250,7 @@ FlattenDataCell<QuantTmpl, IOTmpl>::GetMetricType() {
 template <typename QuantTmpl, typename IOTmpl>
 bool
 FlattenDataCell<QuantTmpl, IOTmpl>::InMemory() const {
-    return this->io_->InMemory();
+    return IOTmpl::InMemory;
 }
 
 template <typename QuantTmpl, typename IOTmpl>
@@ -265,16 +265,18 @@ FlattenDataCell<QuantTmpl, IOTmpl>::query(float* result_dists,
         this->io_->Prefetch(static_cast<uint64_t>(idx[i]) * static_cast<uint64_t>(code_size_),
                             this->prefetch_depth_code_ * 64);
     }
-    if (not this->io_->InMemory() and id_count > 1) {
-        ByteBuffer codes(id_count * this->code_size_, search_alloc);
-        Vector<uint64_t> sizes(id_count, this->code_size_, search_alloc);
-        Vector<uint64_t> offsets(id_count, this->code_size_, search_alloc);
-        for (int64_t i = 0; i < id_count; ++i) {
-            offsets[i] = static_cast<uint64_t>(idx[i]) * this->code_size_;
+    if constexpr (not IOTmpl::InMemory) {
+        if (id_count > 1) {
+            ByteBuffer codes(id_count * this->code_size_, search_alloc);
+            Vector<uint64_t> sizes(id_count, this->code_size_, search_alloc);
+            Vector<uint64_t> offsets(id_count, this->code_size_, search_alloc);
+            for (int64_t i = 0; i < id_count; ++i) {
+                offsets[i] = static_cast<uint64_t>(idx[i]) * this->code_size_;
+            }
+            this->io_->MultiRead(codes.data, sizes.data(), offsets.data(), id_count);
+            computer->ScanBatchDists(id_count, codes.data, result_dists);
+            return;
         }
-        this->io_->MultiRead(codes.data, sizes.data(), offsets.data(), id_count);
-        computer->ScanBatchDists(id_count, codes.data, result_dists);
-        return;
     }
 
     memset(result_dists, 0, sizeof(float) * id_count);
