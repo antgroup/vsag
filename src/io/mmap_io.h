@@ -28,6 +28,9 @@ namespace vsag {
 
 class MMapIO : public BasicIO<MMapIO> {
 public:
+    static constexpr bool InMemory = false;
+
+public:
     MMapIO(std::string filename, Allocator* allocator)
         : BasicIO<MMapIO>(allocator), filepath_(std::move(filename)) {
         this->fd_ = open(filepath_.c_str(), O_CREAT | O_RDWR, 0644);
@@ -97,10 +100,6 @@ public:
         return reinterpret_cast<const uint8_t*>(this->start_ + offset);
     }
 
-    inline void
-    ReleaseImpl(const uint8_t* data) const {
-    }
-
     inline bool
     MultiReadImpl(uint8_t* datas, uint64_t* sizes, uint64_t* offsets, uint64_t count) const {
         bool ret = true;
@@ -111,19 +110,7 @@ public:
         return ret;
     }
 
-    inline void
-    PrefetchImpl(uint64_t offset, uint64_t cache_line = 64){};
-
-    static inline bool
-    InMemoryImpl() {
-        return false;
-    }
-
-    void
-    InitIOImpl(const IOParamPtr& io_param) {
-    }
-
-    constexpr static int64_t DEFAULT_INIT_MMAP_SIZE = 4096;
+    static constexpr int64_t DEFAULT_INIT_MMAP_SIZE = 4096;
 
 private:
     std::string filepath_{};

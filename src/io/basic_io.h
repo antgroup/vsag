@@ -38,6 +38,10 @@ namespace vsag {
 template <typename IOTmpl>
 class BasicIO {
 public:
+    /// Checks if the IO object is in-memory.
+    static constexpr bool InMemory = IOTmpl::InMemory;
+
+public:
     /**
      * @brief Constructor that takes an Allocator pointer.
      *
@@ -131,8 +135,9 @@ public:
      */
     inline void
     Prefetch(uint64_t offset, uint64_t cache_line = 64) {
-        static_assert(has_PrefetchImpl<IOTmpl>::value);
-        return cast().PrefetchImpl(offset, cache_line);
+        if constexpr (has_PrefetchImpl<IOTmpl>::value) {
+            return cast().PrefetchImpl(offset, cache_line);
+        }
     }
 
     /**
@@ -186,23 +191,9 @@ public:
 
     inline void
     Release(const uint8_t* data) const {
-        static_assert(has_ReleaseImpl<IOTmpl>::value);
-        return cast().ReleaseImpl(data);
-    }
-
-    /**
-     * @brief Checks if the IO object is in-memory.
-     *
-     * This function checks if the IO object has an InMemoryImpl method.
-     * If it does, it calls the method and returns the result.
-     * Otherwise, it throws a runtime error.
-     *
-     * @return True if the IO object is in-memory, false otherwise.
-     */
-    inline bool
-    InMemory() const {
-        static_assert(has_InMemoryImpl<IOTmpl>::value);
-        return cast().InMemoryImpl();
+        if constexpr (has_ReleaseImpl<IOTmpl>::value) {
+            return cast().ReleaseImpl(data);
+        }
     }
 
     /**
@@ -216,8 +207,9 @@ public:
      */
     inline void
     InitIO(const IOParamPtr& io_param) {
-        static_assert(has_InitIOImpl<IOTmpl>::value);
-        return cast().InitIOImpl(io_param);
+        if constexpr (has_InitIOImpl<IOTmpl>::value) {
+            return cast().InitIOImpl(io_param);
+        }
     }
 
 public:
@@ -310,7 +302,6 @@ private:
                                  std::declval<uint64_t>(),
                                  std::declval<uint64_t>())
     GENERATE_HAS_MEMBER_FUNCTION(ReleaseImpl, void, std::declval<const uint8_t*>())
-    GENERATE_HAS_MEMBER_FUNCTION(InMemoryImpl, bool)
     GENERATE_HAS_MEMBER_FUNCTION(InitIOImpl, void, std::declval<const IOParamPtr&>())
 };
 }  // namespace vsag

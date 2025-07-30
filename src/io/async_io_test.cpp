@@ -35,11 +35,8 @@ TEST_CASE("AsyncIO Read And Write", "[ut][AsyncIO]") {
     auto result = io->DirectReadImpl(0, 0, need_release);
     REQUIRE(result == nullptr);
 
-    // prefetch
-    REQUIRE_NOTHROW(io->PrefetchImpl(0));
-
     // in memory
-    REQUIRE(io->InMemoryImpl() == false);
+    REQUIRE(AsyncIO::InMemory == false);
 }
 
 TEST_CASE("AsyncIO Parameter", "[ut][AsyncIO]") {

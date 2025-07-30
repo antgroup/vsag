@@ -118,8 +118,4 @@ ReaderIO::MultiReadImpl(uint8_t* datas,
     return true;
 }
 
-void
-ReaderIO::PrefetchImpl(uint64_t offset, uint64_t cache_line) {
-}
-
 }  // namespace vsag
