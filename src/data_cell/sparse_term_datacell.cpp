@@ -55,6 +55,7 @@ SparseTermDataCell::InsertHeap(float* dists,
     float cur_heap_top = std::numeric_limits<float>::max();
     auto n_candidate = param.ef;
     auto radius = param.radius;
+    auto filter = param.is_inner_id_allowed;
 
     if constexpr (mode == InnerSearchMode::RANGE_SEARCH) {
         // note that radius = 1 - ip -> radius - 1 = 0 - ip
@@ -78,6 +79,11 @@ SparseTermDataCell::InsertHeap(float* dists,
                      i++) {
                     id = term_ids_[term][i];
 
+                    if (filter and not filter->CheckValid(id + offset_id)) {
+                        dists[id] = 0;
+                        continue;
+                    }
+
                     heap.emplace(dists[id], id + offset_id);
                     cur_heap_top = heap.top().first;
                     dists[id] = 0;
@@ -94,7 +100,8 @@ SparseTermDataCell::InsertHeap(float* dists,
              i++) {
             id = term_ids_[term][i];
 
-            if (dists[id] >= cur_heap_top) [[likely]] {
+            if (dists[id] >= cur_heap_top or (filter and not filter->CheckValid(id + offset_id)))
+                [[likely]] {
                 dists[id] = 0;
                 continue;
             } else {
