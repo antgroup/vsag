@@ -28,13 +28,15 @@ TEST_CASE("BruteForce Parameters CheckCompatibility",
         "quantization_params": {
             "type": "sq8"
         },
-        "type": "brute_force"
+        "type": "brute_force",
+        "use_attribute_filter": true
     })";
 
     SECTION("wrong parameter type") {
         auto param = std::make_shared<vsag::BruteForceParameter>();
         param->FromString(param_str);
         REQUIRE(param->CheckCompatibility(param));
+        REQUIRE(param->use_attribute_filter == true);
         REQUIRE_FALSE(param->CheckCompatibility(std::make_shared<vsag::EmptyParameter>()));
     }
 }
