@@ -16,6 +16,7 @@
 #pragma once
 
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 #include "utils/util_functions.h"
