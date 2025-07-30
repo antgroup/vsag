@@ -140,7 +140,7 @@ Engine::CreateIndex(const std::string& origin_name, const std::string& parameter
             auto sparse_index =
                 std::make_shared<IndexImpl<SparseIndex>>(sparse_json, index_common_params);
             return sparse_index;
-        } else if (name == INDEX_SPARSE_TERM) {
+        } else if (name == INDEX_SINDI) {
             JsonType sparse_json;
             if (parsed_params.contains(INDEX_PARAM)) {
                 sparse_json = std::move(parsed_params[INDEX_PARAM]);

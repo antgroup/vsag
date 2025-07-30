@@ -32,7 +32,7 @@ global:
     search_mode: "knn" # ["knn", "range", "knn_filter", "range_filter"]
     range: 0.5
     delete_index_after_search: false
- 
+
 90/SIFT:
     datapath: "/tmp/data/sift-128-euclidean.hdf5"
     type: "build,search" # build, search
@@ -87,6 +87,17 @@ global:
     create_params: '{"dim":768,"dtype":"float32","metric_type":"cosine","index_param":{"base_quantization_type":"sq8_uniform","max_degree":64,"ef_construction":400, "precise_quantization_type":"fp32", "use_reorder":true}}'
     search_params: '{"hgraph":{"ef_search":29}}'
     index_path: "/tmp/cohere-768-1m-angular/index/hgraph_index"
+    topk: 10
+    search_mode: "knn"
+    delete_index_after_search: false
+
+90/INTERNET:
+    datapath: "/tmp/data/wholenet-sparse-1m-ip.hdf5"
+    type: "build,search" # build, search
+    index_name: "sindi"
+    create_params: '{"dim":512,"dtype":"sparse","metric_type":"ip","index_param":{"use_reorder": true, "doc_prune_ratio": 1, "window_size": 100000}}'
+    search_params: '{"sindi":{"query_prune_ratio": 0.75, "term_prune_ratio": 1, "n_candidate": 35}}'
+    index_path: "/tmp/wholenet-sparse-1m-ip/index/wholenet_index"
     topk: 10
     search_mode: "knn"
     delete_index_after_search: false
