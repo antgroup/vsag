@@ -1762,43 +1762,139 @@ trans_attr_to_string(const vsag::Attribute& attr) {
     return "";
 }
 
+template <typename T>
+static vsag::Attribute*
+mock_value(const vsag::AttributeValue<T>* attr) {
+    auto result = new vsag::AttributeValue<T>();
+    result->name_ = attr->name_;
+    auto old_values = std::unordered_set<T>(attr->GetValue().begin(), attr->GetValue().end());
+    T random_new_value;
+    if constexpr (std::is_same_v<T, std::string>) {
+        random_new_value = "random_string";
+    } else {
+        random_new_value = static_cast<T>(rand());
+        while (old_values.count(random_new_value)) {
+            random_new_value = static_cast<T>(rand());
+        }
+    }
+    result->GetValue().emplace_back(random_new_value);
+    return result;
+}
+
+static void
+mock_attrset(vsag::Attribute& attr, vsag::AttributeSet& old_attrs, vsag::AttributeSet& new_attrs) {
+    using namespace vsag;
+    old_attrs.attrs_.emplace_back(&attr);
+    auto name = attr.name_;
+    auto type = attr.GetValueType();
+    if (type == AttrValueType::STRING) {
+        const auto temp = dynamic_cast<const AttributeValue<std::string>*>(&attr);
+        new_attrs.attrs_.emplace_back(mock_value<std::string>(temp));
+    } else if (type == AttrValueType::UINT8) {
+        const auto temp = dynamic_cast<const AttributeValue<uint8_t>*>(&attr);
+        new_attrs.attrs_.emplace_back(mock_value<uint8_t>(temp));
+    } else if (type == AttrValueType::UINT16) {
+        const auto temp = dynamic_cast<const AttributeValue<uint16_t>*>(&attr);
+        new_attrs.attrs_.emplace_back(mock_value<uint16_t>(temp));
+    } else if (type == AttrValueType::UINT32) {
+        const auto temp = dynamic_cast<const AttributeValue<uint32_t>*>(&attr);
+        new_attrs.attrs_.emplace_back(mock_value<uint32_t>(temp));
+    } else if (type == AttrValueType::UINT64) {
+        const auto temp = dynamic_cast<const AttributeValue<uint64_t>*>(&attr);
+        new_attrs.attrs_.emplace_back(mock_value<uint64_t>(temp));
+    } else if (type == AttrValueType::INT8) {
+        const auto temp = dynamic_cast<const AttributeValue<int8_t>*>(&attr);
+        new_attrs.attrs_.emplace_back(mock_value<int8_t>(temp));
+    } else if (type == AttrValueType::INT16) {
+        const auto temp = dynamic_cast<const AttributeValue<int16_t>*>(&attr);
+        new_attrs.attrs_.emplace_back(mock_value<int16_t>(temp));
+    } else if (type == AttrValueType::INT32) {
+        const auto temp = dynamic_cast<const AttributeValue<int32_t>*>(&attr);
+        new_attrs.attrs_.emplace_back(mock_value<int32_t>(temp));
+    } else if (type == AttrValueType::INT64) {
+        const auto temp = dynamic_cast<const AttributeValue<int64_t>*>(&attr);
+        new_attrs.attrs_.emplace_back(mock_value<int64_t>(temp));
+    }
+}
+
+static void
+release_attrset(vsag::AttributeSet& attrset) {
+    for (auto* attr : attrset.attrs_) {
+        delete attr;
+    }
+}
+
 void
 TestIndex::TestWithAttr(const IndexPtr& index,
                         const TestDatasetPtr& dataset,
-                        const std::string& search_param) {
+                        const std::string& search_param,
+                        bool with_update) {
+    using namespace vsag;
     auto attrsets = dataset->base_->GetAttributeSets();
     auto* query_vec = dataset->base_->GetFloat32Vectors();
-    auto base_count = dataset->base_->GetNumElements();
+    auto count = std::min(dataset->base_->GetNumElements(), 200L);
     auto dim = dataset->base_->GetDim();
-    std::vector<vsag::SearchRequest> reqs(base_count);
-    for (int i = 0; i < base_count; ++i) {
+    const auto* labels = dataset->base_->GetIds();
+
+    for (int i = 0; i < count; ++i) {
+        SearchRequest req;
         auto query = vsag::Dataset::Make();
         query->Float32Vectors(query_vec + i * dim)->Dim(dim)->Owner(false)->NumElements(1);
         auto attrset = attrsets[i].attrs_;
-        int j = random() % attrset.size();
-        auto attr = attrset[j];
+        int j1 = random() % attrset.size();
         int j2 = random() % attrset.size();
-        INFO(std::to_string(i));
-        vsag::SearchRequest& req = reqs[i];
         req.topk_ = 10;
         req.filter_ = nullptr;
         req.params_str_ = search_param;
         req.enable_attribute_filter_ = true;
         req.query_ = query;
         req.attribute_filter_str_ = "(" + trans_attr_to_string(*attrset[j2]) + ") AND (" +
-                                    trans_attr_to_string(*attr) + ")";
-    }
-
-    for (int i = 0; i < base_count; ++i) {
+                                    trans_attr_to_string(*attrset[j1]) + ")";
         auto the_id = dataset->base_->GetIds()[i];
-        auto result = index->SearchWithRequest(reqs[i]);
+        auto result = index->SearchWithRequest(req);
         REQUIRE(result.has_value());
         auto ids = result.value()->GetIds();
-        auto result_count = result.value()->GetNumElements();
+        auto result_count = result.value()->GetDim();
         std::unordered_set<int64_t> sets(ids, ids + result_count);
         REQUIRE(sets.find(the_id) != sets.end());
+        if (not with_update) {
+            continue;
+        }
+        AttributeSet new_attrs;
+        AttributeSet old_attrs;
+        mock_attrset(*attrset[j1], old_attrs, new_attrs);
+
+        auto test_func = [&]() -> void {
+            auto result1 = index->SearchWithRequest(req);
+            REQUIRE(result1.has_value());
+            auto* ids = result1.value()->GetIds();
+            auto result_count = result1.value()->GetDim();
+            if (result_count != 0) {
+                std::unordered_set<int64_t> sets1(ids, ids + result_count);
+                REQUIRE(sets1.find(the_id) == sets1.end());
+            }
+
+            req.attribute_filter_str_ = "(" + trans_attr_to_string(*new_attrs.attrs_[0]) + ")";
+
+            auto result2 = index->SearchWithRequest(req);
+            REQUIRE(result2.has_value());
+            ids = result2.value()->GetIds();
+            result_count = result2.value()->GetDim();
+            std::unordered_set<int64_t> sets1(ids, ids + result_count);
+            REQUIRE(sets1.find(the_id) != sets1.end());
+        };
+
+        if (i % 2 == 0) {
+            index->UpdateAttribute(labels[i], new_attrs, old_attrs);
+            test_func();
+        } else {
+            index->UpdateAttribute(labels[i], new_attrs);
+            test_func();
+        }
+        release_attrset(new_attrs);
     }
 }
+
 void
 TestIndex::TestGetRawVectorByIds(const IndexPtr& index,
                                  const TestDatasetPtr& dataset,

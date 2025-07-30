@@ -99,6 +99,11 @@ public:
     UpdateAttribute(int64_t id, const AttributeSet& new_attrs) override;
 
     void
+    UpdateAttribute(int64_t id,
+                    const AttributeSet& new_attrs,
+                    const AttributeSet& origin_attrs) override;
+
+    void
     Serialize(StreamWriter& writer) const override;
 
     void

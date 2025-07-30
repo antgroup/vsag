@@ -136,6 +136,10 @@ TEST_CASE("Test Simple Index", "[ft][simple_index]") {
     REQUIRE_THROWS(index->RangeSearch(dataset->query_, 1.0F, search_param, filter));
     REQUIRE_THROWS(index->GetMemoryUsageDetail());
     REQUIRE_THROWS(index->SetImmutable());
+    AttributeSet old_attrs;
+    AttributeSet new_attrs;
+    REQUIRE_THROWS(index->UpdateAttribute(0, new_attrs));
+    REQUIRE_THROWS(index->UpdateAttribute(1, new_attrs, old_attrs));
 
     std::vector<MergeUnit> units;
     REQUIRE_THROWS(index->Merge(units));

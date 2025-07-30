@@ -21,6 +21,7 @@
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
 #include "typing.h"
+#include "vsag/attribute.h"
 #include "vsag_exception.h"
 
 namespace vsag {
@@ -63,6 +64,26 @@ public:
         for (auto& [key, manager] : map) {
             if (manager != nullptr) {
                 auto* bitset = manager->GetOneBitset(bucket_id);
+                if (bitset != nullptr) {
+                    bitset->Set(inner_id, false);
+                }
+            }
+        }
+    }
+
+    template <class T>
+    void
+    Erase(InnerIdType inner_id, const Attribute* attr, BucketIdType bucket_id = 0) {
+        auto& map = this->get_map_by_type<T>();
+        const auto* attr_values = dynamic_cast<const AttributeValue<T>*>(attr);
+        if (attr_values == nullptr) {
+            throw VsagException(ErrorType::INTERNAL_ERROR, "Attribute type not match");
+        }
+        const auto& values = attr_values->GetValue();
+        for (const auto& value : values) {
+            auto iter = map.find(value);
+            if (iter != map.end() and iter->second != nullptr) {
+                auto* bitset = iter->second->GetOneBitset(bucket_id);
                 if (bitset != nullptr) {
                     bitset->Set(inner_id, false);
                 }
