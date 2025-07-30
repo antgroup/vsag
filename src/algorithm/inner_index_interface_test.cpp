@@ -155,4 +155,5 @@ TEST_CASE("NOT Implemented", "[ut][InnerIndexInterface]") {
     REQUIRE_THROWS(empty_index->GetMemoryUsageDetail());
     REQUIRE_THROWS(empty_index->Merge(merge_units));
     REQUIRE_THROWS(empty_index->GetExtraInfoByIds(nullptr, 1, nullptr));
+    REQUIRE_THROWS(empty_index->SetImmutable());
 }

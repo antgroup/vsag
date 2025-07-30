@@ -89,9 +89,11 @@ public:
     }
 };
 
+// To reduce the overhead of the construction and destruction of share_ptr,
+// the mutex_impl parameter is passed by reference rather than by value.
 class SharedLock {
 public:
-    SharedLock(MutexArrayPtr mutex_impl, uint32_t locked_index)
+    SharedLock(const MutexArrayPtr& mutex_impl, uint32_t locked_index)
         : mutex_impl_(mutex_impl), locked_index_(locked_index) {
         mutex_impl_->SharedLock(locked_index_);
     }
@@ -101,7 +103,7 @@ public:
 
 private:
     uint32_t locked_index_;
-    MutexArrayPtr mutex_impl_;
+    const MutexArrayPtr& mutex_impl_;
 };
 
 class LockGuard {

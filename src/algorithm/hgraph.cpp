@@ -54,13 +54,7 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
       extra_info_size_(common_param.extra_info_size_),
       use_old_serial_format_(common_param.use_old_serial_format_),
       deleted_ids_(allocator_) {
-    this->immutable_ = hgraph_param->immutable;
-    if (immutable_) {
-        neighbors_mutex_ = std::make_shared<EmptyMutex>();
-        this->label_table_ = std::make_shared<LabelTable>(allocator_, false);
-    } else {
-        neighbors_mutex_ = std::make_shared<PointsMutex>(0, common_param.allocator_.get());
-    }
+    neighbors_mutex_ = std::make_shared<PointsMutex>(0, common_param.allocator_.get());
     this->basic_flatten_codes_ =
         FlattenInterface::MakeInstance(hgraph_param->base_codes_param, common_param);
     if (use_reorder_) {
@@ -1223,7 +1217,6 @@ static const std::string HGRAPH_PARAMS_TEMPLATE =
         "{HGRAPH_IGNORE_REORDER_KEY}": false,
         "{HGRAPH_BUILD_BY_BASE_QUANTIZATION_KEY}": false,
         "{HGRAPH_USE_ATTRIBUTE_FILTER_KEY}": false,
-        "{HGRSPH_IMMUTABLE_KEY}": false,
         "{HGRAPH_GRAPH_KEY}": {
             "{IO_PARAMS_KEY}": {
                 "{IO_TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
@@ -1441,10 +1434,6 @@ HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
             },
         },
         {
-            HGRAPH_IMMUTABLE,
-            {HGRSPH_IMMUTABLE_KEY},
-        },
-        {
             SQ4_UNIFORM_TRUNC_RATE,
             {
                 HGRAPH_BASE_CODES_KEY,
@@ -1624,4 +1613,17 @@ HGraph::Merge(const std::vector<MergeUnit>& merge_units) {
         this->entry_point_id_ = ids.back();
     }
 }
+
+void
+HGraph::SetImmutable() {
+    if (this->immutable_) {
+        return;
+    }
+    std::lock_guard<std::shared_mutex> wlock(this->global_mutex_);
+    this->neighbors_mutex_.reset();
+    this->neighbors_mutex_ = std::make_shared<EmptyMutex>();
+    this->searcher_->SetMutexArray(this->neighbors_mutex_);
+    this->immutable_ = true;
+}
+
 }  // namespace vsag

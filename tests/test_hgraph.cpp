@@ -39,8 +39,7 @@ public:
                                         std::string graph_type = "nsw",
                                         std::string graph_storage = "flat",
                                         bool support_remove = false,
-                                        bool use_attr_filter = false,
-                                        bool immutable = false);
+                                        bool use_attr_filter = false);
     static bool
     IsRaBitQ(const std::string& quantization_str);
 
@@ -96,8 +95,7 @@ HgraphTestIndex::GenerateHGraphBuildParametersString(const std::string& metric_t
                                                      std::string graph_type,
                                                      std::string graph_storage,
                                                      bool support_remove,
-                                                     bool use_attr_filter,
-                                                     bool immutable) {
+                                                     bool use_attr_filter) {
     std::string build_parameters_str;
 
     constexpr auto parameter_temp_reorder = R"(
@@ -122,8 +120,7 @@ HgraphTestIndex::GenerateHGraphBuildParametersString(const std::string& metric_t
             "neighbor_sample_rate": 0.3,
             "alpha": 1.2,
             "support_remove": {},
-            "use_attribute_filter": {},
-            "immutable": {}
+            "use_attribute_filter": {}
         }}
     }}
     )";
@@ -146,8 +143,7 @@ HgraphTestIndex::GenerateHGraphBuildParametersString(const std::string& metric_t
             "neighbor_sample_rate": 0.3,
             "alpha": 1.2,
             "support_remove": {},
-            "use_attribute_filter": {},
-            "immutable": {}
+            "use_attribute_filter": {}
         }}
     }}
     )";
@@ -180,8 +176,7 @@ HgraphTestIndex::GenerateHGraphBuildParametersString(const std::string& metric_t
                                            graph_type,
                                            graph_storage,
                                            support_remove,
-                                           use_attr_filter,
-                                           immutable);
+                                           use_attr_filter);
     } else {
         build_parameters_str = fmt::format(parameter_temp_origin,
                                            data_type,
@@ -194,8 +189,7 @@ HgraphTestIndex::GenerateHGraphBuildParametersString(const std::string& metric_t
                                            graph_type,
                                            graph_storage,
                                            support_remove,
-                                           use_attr_filter,
-                                           immutable);
+                                           use_attr_filter);
     }
     return build_parameters_str;
 }
