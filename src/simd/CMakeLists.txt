@@ -12,6 +12,7 @@ set (SIMD_SRCS
         bit_simd.cpp
         fp32_simd.cpp
         fp16_simd.cpp
+        int8_simd.cpp
         bf16_simd.cpp
         pqfs_simd.cpp
         sq8_simd.cpp

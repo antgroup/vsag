@@ -49,6 +49,14 @@ InnerProductDistance(const void* pVect1, const void* pVect2, const void* qty_ptr
 }
 
 float
+INT8L2Sqr(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
+    auto* pVect1 = (int8_t*)pVect1v;
+    auto* pVect2 = (int8_t*)pVect2v;
+    auto qty = *((size_t*)qty_ptr);
+    return avx::INT8ComputeL2Sqr(pVect1, pVect2, qty);
+}
+
+float
 INT8InnerProduct(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
     return sse::INT8InnerProduct(pVect1v, pVect2v, qty_ptr);  // TODO(LHT): implement
 }
@@ -516,6 +524,16 @@ FP16ComputeL2Sqr(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, u
     return l2 + sse::FP16ComputeL2Sqr(query + i * 2, codes + i * 2, dim - i);
 #else
     return sse::FP16ComputeL2Sqr(query, codes, dim);
+#endif
+}
+
+float
+INT8ComputeL2Sqr(const int8_t* RESTRICT query, const int8_t* RESTRICT codes, uint64_t dim) {
+#if defined(ENABLE_AVX)
+    // TODO: impl based on AVX
+    return sse::INT8ComputeL2Sqr(query, codes, dim);
+#else
+    return sse::INT8ComputeL2Sqr(query, codes, dim);
 #endif
 }
 

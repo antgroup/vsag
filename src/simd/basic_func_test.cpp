@@ -55,7 +55,7 @@ TEST_CASE("L2Sqr & InnerProduct SIMD Compute", "[ut][simd]") {
     for (const auto& dim2 : dims) {
         uint64_t dim = dim2;
         auto vec1 = fixtures::generate_vectors(count * 2, dim);
-        std::vector<float> vec2(vec1.begin() + count, vec1.end());
+        std::vector<float> vec2(vec1.begin() + count * dim, vec1.end());
         for (uint64_t i = 0; i < count; ++i) {
             TEST_ACCURACY(L2Sqr);
             TEST_ACCURACY(InnerProduct);
@@ -64,14 +64,15 @@ TEST_CASE("L2Sqr & InnerProduct SIMD Compute", "[ut][simd]") {
     }
 }
 
-TEST_CASE("Int8 SIMD Compute", "[ut][simd]") {
+TEST_CASE("Int8 SIMD Compute", "[ut][simd][int8]") {
     auto dims = fixtures::get_common_used_dims(8, 217);
     int64_t count = 100;
     for (const auto& dim2 : dims) {
         uint64_t dim = dim2;
         auto vec1 = fixtures::generate_int8_codes(count * 2, dim);
-        std::vector<int8_t> vec2(vec1.begin() + count, vec1.end());
+        std::vector<int8_t> vec2(vec1.begin() + count * dim, vec1.end());
         for (uint64_t i = 0; i < count; ++i) {
+            TEST_ACCURACY(INT8L2Sqr);
             TEST_ACCURACY(INT8InnerProduct);
             TEST_ACCURACY(INT8InnerProductDistance);
         }
