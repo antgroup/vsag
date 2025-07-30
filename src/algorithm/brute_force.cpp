@@ -15,6 +15,8 @@
 
 #include "brute_force.h"
 
+#include "attr/executor/executor.h"
+#include "attr/expression_visitor.h"
 #include "data_cell/flatten_datacell.h"
 #include "impl/heap/standard_heap.h"
 #include "inner_string_params.h"
@@ -34,6 +36,11 @@ BruteForce::BruteForce(const BruteForceParameterPtr& param, const IndexCommonPar
     this->build_pool_ = common_param.thread_pool_;
     if (this->build_pool_ == nullptr) {
         this->build_pool_ = SafeThreadPool::FactoryDefaultThreadPool();
+    }
+    this->use_attribute_filter_ = param->use_attribute_filter;
+    if (this->use_attribute_filter_) {
+        this->attr_filter_index_ =
+            AttributeInvertedInterface::MakeInstance(allocator_, true /*have_bucket*/);
     }
 }
 
@@ -74,7 +81,10 @@ BruteForce::Add(const DatasetPtr& data) {
         }
     }
 
-    auto add_func = [&](const float* data, InnerIdType inner_id) -> void {
+    auto add_func = [&](const float* data, InnerIdType inner_id, const AttributeSet* attr) -> void {
+        if (use_attribute_filter_) {
+            this->attr_filter_index_->Insert(*attr, inner_id);
+        }
         this->add_one(data, inner_id);
     };
 
@@ -82,6 +92,7 @@ BruteForce::Add(const DatasetPtr& data) {
     auto total = data->GetNumElements();
     const auto* labels = data->GetIds();
     const auto* vectors = data->GetFloat32Vectors();
+    const auto* attrs = data->GetAttributeSets();
     Vector<std::pair<InnerIdType, LabelType>> inner_ids(allocator_);
     for (int64_t j = 0; j < total; ++j) {
         auto label = labels[j];
@@ -103,12 +114,16 @@ BruteForce::Add(const DatasetPtr& data) {
         }
     }
     for (auto& [inner_id, local_idx] : inner_ids) {
+        const AttributeSet* attr = nullptr;
+        if (this->use_attribute_filter_) {
+            attr = attrs + local_idx;
+        }
         if (this->build_pool_ != nullptr) {
-            auto future =
-                this->build_pool_->GeneralEnqueue(add_func, vectors + local_idx * dim_, inner_id);
+            auto future = this->build_pool_->GeneralEnqueue(
+                add_func, vectors + local_idx * dim_, inner_id, attr);
             futures.emplace_back(std::move(future));
         } else {
-            add_func(vectors + local_idx * dim_, inner_id);
+            add_func(vectors + local_idx * dim_, inner_id, attr);
         }
     }
     if (this->build_pool_ != nullptr) {
@@ -134,6 +149,44 @@ BruteForce::KnnSearch(const DatasetPtr& query,
             heap->Push(dist, i);
         }
     }
+    auto [dataset_results, dists, ids] =
+        create_fast_dataset(static_cast<int64_t>(heap->Size()), allocator_);
+    for (auto j = static_cast<int64_t>(heap->Size() - 1); j >= 0; --j) {
+        dists[j] = heap->Top().first;
+        ids[j] = this->label_table_->GetLabelById(heap->Top().second);
+        heap->Pop();
+    }
+    return std::move(dataset_results);
+}
+
+DatasetPtr
+BruteForce::SearchWithRequest(const SearchRequest& request) const {
+    std::shared_lock read_lock(this->global_mutex_);
+    auto computer = this->inner_codes_->FactoryComputer(request.query_->GetFloat32Vectors());
+    auto heap = DistanceHeap::MakeInstanceBySize<true, true>(this->allocator_, request.topk_);
+    ExecutorPtr executor = nullptr;
+    Filter* attr_filter = nullptr;
+    if (request.enable_attribute_filter_) {
+        auto& schema = this->attr_filter_index_->field_type_map_;
+        auto expr = AstParse(request.attribute_filter_str_, &schema);
+        executor = Executor::MakeInstance(this->allocator_, expr, this->attr_filter_index_);
+        executor->Init();
+        executor->Clear();
+        attr_filter = executor->Run();
+    }
+
+    for (InnerIdType i = 0; i < total_count_; ++i) {
+        float dist;
+        if (attr_filter != nullptr and not attr_filter->CheckValid(i)) {
+            continue;
+        }
+        if (request.filter_ == nullptr or
+            request.filter_->CheckValid(this->label_table_->GetLabelById(i))) {
+            inner_codes_->Query(&dist, computer, &i, 1);
+            heap->Push(dist, i);
+        }
+    }
+
     auto [dataset_results, dists, ids] =
         create_fast_dataset(static_cast<int64_t>(heap->Size()), allocator_);
     for (auto j = static_cast<int64_t>(heap->Size() - 1); j >= 0; --j) {
@@ -316,7 +369,8 @@ static const std::string BRUTE_FORCE_PARAMS_TEMPLATE =
             "subspace": 64,
             "nbits": 8,
             "{HOLD_MOLDS}": false
-        }
+        },
+        "{USE_ATTRIBUTE_FILTER_KEY}": false
     })";
 
 ParamPtr
@@ -337,7 +391,18 @@ BruteForce::CheckAndMappingExternalParam(const JsonType& external_param,
                 IO_TYPE_KEY,
             },
         },
-        {BRUTE_FORCE_STORE_RAW_VECTOR, {QUANTIZATION_PARAMS_KEY, HOLD_MOLDS}}};
+        {
+            BRUTE_FORCE_STORE_RAW_VECTOR,
+            {
+                QUANTIZATION_PARAMS_KEY,
+                HOLD_MOLDS,
+            },
+        },
+        {USE_ATTRIBUTE_FILTER,
+         {
+             USE_ATTRIBUTE_FILTER_KEY,
+         }},
+    };
 
     if (common_param.data_type_ == DataTypes::DATA_TYPE_INT8) {
         throw VsagException(ErrorType::INVALID_ARGUMENT,

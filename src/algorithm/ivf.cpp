@@ -84,43 +84,72 @@ IVF::CheckAndMappingExternalParam(const JsonType& external_param,
     const ConstParamMap external_mapping = {
         {
             IVF_BASE_QUANTIZATION_TYPE,
-            {BUCKET_PARAMS_KEY, QUANTIZATION_PARAMS_KEY, QUANTIZATION_TYPE_KEY},
+            {
+                BUCKET_PARAMS_KEY,
+                QUANTIZATION_PARAMS_KEY,
+                QUANTIZATION_TYPE_KEY,
+            },
         },
         {
             IVF_BASE_IO_TYPE,
-            {BUCKET_PARAMS_KEY, IO_PARAMS_KEY, IO_TYPE_KEY},
+            {
+                BUCKET_PARAMS_KEY,
+                IO_PARAMS_KEY,
+                IO_TYPE_KEY,
+            },
         },
         {
             IVF_PRECISE_QUANTIZATION_TYPE,
-            {IVF_PRECISE_CODES_KEY, QUANTIZATION_PARAMS_KEY, QUANTIZATION_TYPE_KEY},
+            {
+                IVF_PRECISE_CODES_KEY,
+                QUANTIZATION_PARAMS_KEY,
+                QUANTIZATION_TYPE_KEY,
+            },
         },
         {
             IVF_PRECISE_IO_TYPE,
-            {IVF_PRECISE_CODES_KEY, IO_PARAMS_KEY, IO_TYPE_KEY},
+            {
+                IVF_PRECISE_CODES_KEY,
+                IO_PARAMS_KEY,
+                IO_TYPE_KEY,
+            },
         },
         {
             IVF_BUCKETS_COUNT,
-            {BUCKET_PARAMS_KEY, BUCKETS_COUNT_KEY},
+            {
+                BUCKET_PARAMS_KEY,
+                BUCKETS_COUNT_KEY,
+            },
         },
         {
             IVF_TRAIN_TYPE,
-            {IVF_PARTITION_STRATEGY_PARAMS_KEY, IVF_TRAIN_TYPE_KEY},
+            {
+                IVF_PARTITION_STRATEGY_PARAMS_KEY,
+                IVF_TRAIN_TYPE_KEY,
+            },
         },
         {
             IVF_PARTITION_STRATEGY_TYPE_KEY,
-            {IVF_PARTITION_STRATEGY_PARAMS_KEY, IVF_PARTITION_STRATEGY_TYPE_KEY},
+            {
+                IVF_PARTITION_STRATEGY_PARAMS_KEY,
+                IVF_PARTITION_STRATEGY_TYPE_KEY,
+            },
         },
         {
             GNO_IMI_FIRST_ORDER_BUCKETS_COUNT,
-            {IVF_PARTITION_STRATEGY_PARAMS_KEY,
-             IVF_PARTITION_STRATEGY_TYPE_GNO_IMI,
-             GNO_IMI_FIRST_ORDER_BUCKETS_COUNT_KEY},
+            {
+                IVF_PARTITION_STRATEGY_PARAMS_KEY,
+                IVF_PARTITION_STRATEGY_TYPE_GNO_IMI,
+                GNO_IMI_FIRST_ORDER_BUCKETS_COUNT_KEY,
+            },
         },
         {
             GNO_IMI_SECOND_ORDER_BUCKETS_COUNT,
-            {IVF_PARTITION_STRATEGY_PARAMS_KEY,
-             IVF_PARTITION_STRATEGY_TYPE_GNO_IMI,
-             GNO_IMI_SECOND_ORDER_BUCKETS_COUNT_KEY},
+            {
+                IVF_PARTITION_STRATEGY_PARAMS_KEY,
+                IVF_PARTITION_STRATEGY_TYPE_GNO_IMI,
+                GNO_IMI_SECOND_ORDER_BUCKETS_COUNT_KEY,
+            },
         },
         {
             BUCKET_PER_DATA_KEY,
@@ -130,10 +159,18 @@ IVF::CheckAndMappingExternalParam(const JsonType& external_param,
             IVF_USE_REORDER,
             {IVF_USE_REORDER_KEY},
         },
-        {IVF_USE_RESIDUAL, {BUCKET_PARAMS_KEY, BUCKET_USE_RESIDUAL}},
         {
-            IVF_USE_ATTRIBUTE_FILTER,
-            {IVF_USE_ATTRIBUTE_FILTER_KEY},
+            IVF_USE_RESIDUAL,
+            {
+                BUCKET_PARAMS_KEY,
+                BUCKET_USE_RESIDUAL,
+            },
+        },
+        {
+            USE_ATTRIBUTE_FILTER,
+            {
+                USE_ATTRIBUTE_FILTER_KEY,
+            },
         },
         {
             IVF_BASE_PQ_DIM,
