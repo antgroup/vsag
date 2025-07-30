@@ -49,6 +49,15 @@ InnerProductDistance(const void* pVect1, const void* pVect2, const void* qty_ptr
 }
 
 float
+INT8L2Sqr(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
+    auto* pVect1 = (int8_t*)pVect1v;
+    auto* pVect2 = (int8_t*)pVect2v;
+    auto qty = *((size_t*)qty_ptr);
+
+    return neon::INT8ComputeL2Sqr(pVect1, pVect2, qty);
+}
+
+float
 INT8InnerProduct(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
     return generic::INT8InnerProduct(pVect1v, pVect2v, qty_ptr);
 }
@@ -800,6 +809,44 @@ __inline float32x4_t __attribute__((__always_inline__)) get_4_float(uint8x16_t* 
     return code_floats;
 }
 #endif
+
+float
+INT8ComputeL2Sqr(const int8_t* __restrict query, const int8_t* __restrict codes, uint64_t dim) {
+#if defined(ENABLE_NEON)
+    constexpr int BATCH_SIZE{8};
+
+    const uint64_t n = dim / BATCH_SIZE;
+
+    if (n == 0) {
+        return generic::INT8ComputeL2Sqr(query, codes, dim);
+    }
+
+    int32x4_t sum_sq = vdupq_n_s32(0);
+    for (uint64_t i{0}; i < n; i++) {
+        int8x8_t q = vld1_s8(query + BATCH_SIZE * i);
+        int8x8_t c = vld1_s8(codes + BATCH_SIZE * i);
+
+        int16x8_t q_16 = vmovl_s8(q);
+        int16x8_t c_16 = vmovl_s8(c);
+
+        int16x8_t diff = vsubq_s16(q_16, c_16);
+
+        sum_sq = vmlal_s16(sum_sq, vget_low_s16(diff), vget_low_s16(diff));
+        sum_sq = vmlal_s16(sum_sq, vget_high_s16(diff), vget_high_s16(diff));
+    }
+
+    int32_t result[4];
+    vst1q_s32(result, sum_sq);
+    int64_t l2 = static_cast<int64_t>(result[0] + result[1] + result[2] + result[3]);
+
+    l2 += generic::INT8ComputeL2Sqr(
+        query + BATCH_SIZE * n, codes + BATCH_SIZE * n, dim - BATCH_SIZE * n);
+
+    return static_cast<float>(l2);
+#else
+    return generic::INT8ComputeL2Sqr(query, codes, dim);
+#endif
+}
 
 float
 SQ8ComputeIP(const float* RESTRICT query,

@@ -48,6 +48,14 @@ InnerProductDistance(const void* pVect1, const void* pVect2, const void* qty_ptr
 }
 
 float
+INT8L2Sqr(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
+    auto* pVect1 = (int8_t*)pVect1v;
+    auto* pVect2 = (int8_t*)pVect2v;
+    auto qty = *((size_t*)qty_ptr);
+    return sse::INT8ComputeL2Sqr(pVect1, pVect2, qty);
+}
+
+float
 INT8InnerProduct(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
     return generic::INT8InnerProduct(pVect1v, pVect2v, qty_ptr);  // TODO(LHT): implement
 }
@@ -448,6 +456,46 @@ FP16ComputeIP(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint
 float
 FP16ComputeL2Sqr(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim) {
     return generic::FP16ComputeL2Sqr(query, codes, dim);
+}
+
+float
+INT8ComputeL2Sqr(const int8_t* RESTRICT query, const int8_t* RESTRICT codes, uint64_t dim) {
+#if defined(ENABLE_SSE)
+    constexpr int64_t BATCH_SIZE{8};
+
+    const uint64_t n = dim / BATCH_SIZE;
+
+    if (n == 0) {
+        return generic::INT8ComputeL2Sqr(query, codes, dim);
+    }
+
+    __m128i sum_sq = _mm_setzero_si128();
+
+    for (uint64_t i = 0; i < n; ++i) {
+        __m128i q = _mm_loadl_epi64(reinterpret_cast<const __m128i*>(query + BATCH_SIZE * i));
+        __m128i c = _mm_loadl_epi64(reinterpret_cast<const __m128i*>(codes + BATCH_SIZE * i));
+
+        __m128i q_low = _mm_cvtepi8_epi16(q);
+        __m128i c_low = _mm_cvtepi8_epi16(c);
+
+        __m128i diff = _mm_sub_epi16(q_low, c_low);
+
+        __m128i sq = _mm_madd_epi16(diff, diff);
+
+        sum_sq = _mm_add_epi32(sum_sq, sq);
+    }
+
+    alignas(32) int32_t result[BATCH_SIZE / 2];
+    _mm_store_si128(reinterpret_cast<__m128i*>(result), sum_sq);
+    int64_t l2 = static_cast<int64_t>(result[0]) + result[1] + result[2] + result[3];
+
+    l2 += generic::INT8ComputeL2Sqr(
+        query + BATCH_SIZE * n, codes + BATCH_SIZE * n, dim - BATCH_SIZE * n);
+
+    return static_cast<float>(l2);
+#else
+    return generic::INT8ComputeL2Sqr(query, codes, dim);
+#endif
 }
 
 float
