@@ -49,6 +49,14 @@ InnerProductDistance(const void* pVect1, const void* pVect2, const void* qty_ptr
 }
 
 float
+INT8L2Sqr(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
+    auto* pVect1 = (int8_t*)pVect1v;
+    auto* pVect2 = (int8_t*)pVect2v;
+    auto qty = *((size_t*)qty_ptr);
+    return avx2::INT8ComputeL2Sqr(pVect1, pVect2, qty);
+}
+
+float
 INT8InnerProduct(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
     return avx::INT8InnerProduct(pVect1v, pVect2v, qty_ptr);  // TODO(LHT): implement
 }
@@ -492,6 +500,50 @@ FP16ComputeL2Sqr(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, u
     return l2 + avx::FP16ComputeL2Sqr(query + i * 2, codes + i * 2, dim - i);
 #else
     return avx::FP16ComputeL2Sqr(query, codes, dim);
+#endif
+}
+
+float
+INT8ComputeL2Sqr(const int8_t* RESTRICT query, const int8_t* RESTRICT codes, uint64_t dim) {
+#if defined(ENABLE_AVX2)
+    constexpr int64_t BATCH_SIZE{16};
+
+    const int n = dim / BATCH_SIZE;
+
+    if (n == 0) {
+        return avx::INT8ComputeL2Sqr(query, codes, dim);
+    }
+
+    __m256i sum_sq = _mm256_setzero_si256();
+
+    for (int i{0}; i < n; ++i) {
+        __m128i q = _mm_loadu_si128(reinterpret_cast<const __m128i*>(query + BATCH_SIZE * i));
+        __m128i c = _mm_loadu_si128(reinterpret_cast<const __m128i*>(codes + BATCH_SIZE * i));
+
+        __m256i q_int16 = _mm256_cvtepi8_epi16(q);
+        __m256i c_int16 = _mm256_cvtepi8_epi16(c);
+
+        __m256i diff = _mm256_sub_epi16(q_int16, c_int16);
+
+        __m256i sq = _mm256_madd_epi16(diff, diff);
+
+        sum_sq = _mm256_add_epi32(sum_sq, sq);
+    }
+
+    alignas(32) int32_t result[BATCH_SIZE / 2];
+    _mm256_store_si256(reinterpret_cast<__m256i*>(result), sum_sq);
+
+    int32_t l2 = 0;
+    for (int i = 0; i < BATCH_SIZE / 2; ++i) {
+        l2 += result[i];
+    }
+
+    l2 +=
+        avx::INT8ComputeL2Sqr(query + BATCH_SIZE * n, codes + BATCH_SIZE * n, dim - BATCH_SIZE * n);
+
+    return static_cast<float>(l2);
+#else
+    return avx::INT8ComputeL2Sqr(query, codes, dim);
 #endif
 }
 
