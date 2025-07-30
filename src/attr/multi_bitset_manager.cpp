@@ -20,8 +20,11 @@ namespace vsag {
 MultiBitsetManager::MultiBitsetManager(Allocator* allocator,
                                        uint64_t count,
                                        ComputableBitsetType bitset_type)
-    : allocator_(allocator), count_(count), bitsets_(allocator), bitset_type_(bitset_type) {
-    bitsets_.resize(count, nullptr);
+    : allocator_(allocator),
+      count_(count),
+      bitsets_(allocator),
+      bitset_map_(count, -1, allocator),
+      bitset_type_(bitset_type) {
 }
 
 MultiBitsetManager::MultiBitsetManager(Allocator* allocator, uint64_t count)
@@ -43,7 +46,7 @@ MultiBitsetManager::SetNewCount(uint64_t new_count) {
         return;
     }
     this->count_ = new_count;
-    this->bitsets_.resize(new_count, nullptr);
+    this->bitset_map_.resize(new_count, -1);
 }
 
 ComputableBitset*
@@ -51,7 +54,11 @@ MultiBitsetManager::GetOneBitset(uint64_t id) const {
     if (id >= count_) {
         return nullptr;
     }
-    return this->bitsets_[id];
+    auto inner_id = bitset_map_[id];
+    if (inner_id == -1) {
+        return nullptr;
+    }
+    return this->bitsets_[inner_id];
 }
 
 void
@@ -59,37 +66,42 @@ MultiBitsetManager::InsertValue(uint64_t id, uint64_t offset, bool value) {
     if (id >= count_) {
         this->SetNewCount(id + 1);
     }
-    if (this->bitsets_[id] == nullptr) {
-        this->bitsets_[id] =
-            ComputableBitset::MakeRawInstance(this->bitset_type_, this->allocator_);
+    auto inner_id = bitset_map_[id];
+    if (inner_id == -1) {
+        inner_id = static_cast<int16_t>(bitsets_.size());
+        bitset_map_[id] = inner_id;
+        bitsets_.emplace_back(
+            ComputableBitset::MakeRawInstance(this->bitset_type_, this->allocator_));
     }
-    this->bitsets_[id]->Set(static_cast<int64_t>(offset), value);
+    this->bitsets_[inner_id]->Set(static_cast<int64_t>(offset), value);
 }
 
 void
 MultiBitsetManager::Serialize(StreamWriter& writer) {
     StreamWriter::WriteObj(writer, count_);
+    for (auto id : bitset_map_) {
+        StreamWriter::WriteObj(writer, id);
+    }
+    uint64_t size = bitsets_.size();
+    StreamWriter::WriteObj(writer, size);
     for (auto* bitset : bitsets_) {
-        if (bitset == nullptr) {
-            StreamWriter::WriteObj(writer, false);
-        } else {
-            StreamWriter::WriteObj(writer, true);
-            bitset->Serialize(writer);
-        }
+        bitset->Serialize(writer);
     }
 }
 
 void
 MultiBitsetManager::Deserialize(lvalue_or_rvalue<StreamReader> reader) {
     StreamReader::ReadObj(reader, count_);
-    this->bitsets_.resize(count_, nullptr);
+    this->bitset_map_.resize(count_, -1);
     for (uint64_t i = 0; i < count_; i++) {
-        bool has_bitset;
-        StreamReader::ReadObj(reader, has_bitset);
-        if (has_bitset) {
-            bitsets_[i] = ComputableBitset::MakeRawInstance(bitset_type_, allocator_);
-            bitsets_[i]->Deserialize(reader);
-        }
+        StreamReader::ReadObj(reader, this->bitset_map_[i]);
+    }
+    uint64_t size;
+    StreamReader::ReadObj(reader, size);
+    bitsets_.resize(size, nullptr);
+    for (uint64_t i = 0; i < size; i++) {
+        bitsets_[i] = ComputableBitset::MakeRawInstance(bitset_type_, allocator_);
+        bitsets_[i]->Deserialize(reader);
     }
 }
 
