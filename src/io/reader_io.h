@@ -24,6 +24,9 @@ namespace vsag {
 
 class ReaderIO : public BasicIO<ReaderIO> {
 public:
+    static constexpr bool InMemory = false;
+
+public:
     explicit ReaderIO(Allocator* allocator) : BasicIO<ReaderIO>(allocator) {
     }
 
@@ -57,14 +60,6 @@ public:
                   const uint64_t* sizes,
                   const uint64_t* offsets,
                   uint64_t count) const;
-
-    void
-    PrefetchImpl(uint64_t offset, uint64_t cache_line = 64);
-
-    static inline bool
-    InMemoryImpl() {
-        return false;
-    }
 
 private:
     std::shared_ptr<Reader> reader_{nullptr};

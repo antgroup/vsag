@@ -28,6 +28,9 @@ namespace vsag {
 
 class MemoryIO : public BasicIO<MemoryIO> {
 public:
+    static constexpr bool InMemory = true;
+
+public:
     explicit MemoryIO(Allocator* allocator) : BasicIO<MemoryIO>(allocator) {
         start_ = static_cast<uint8_t*>(allocator->Allocate(1));
     }
@@ -53,23 +56,11 @@ public:
     [[nodiscard]] inline const uint8_t*
     DirectReadImpl(uint64_t size, uint64_t offset, bool& need_release) const;
 
-    inline void
-    ReleaseImpl(const uint8_t* data) const {};
-
     inline bool
     MultiReadImpl(uint8_t* datas, uint64_t* sizes, uint64_t* offsets, uint64_t count) const;
 
     inline void
     PrefetchImpl(uint64_t offset, uint64_t cache_line = 64);
-
-    static inline bool
-    InMemoryImpl() {
-        return true;
-    }
-
-    void
-    InitIOImpl(const IOParamPtr& io_param) {
-    }
 
 private:
     void

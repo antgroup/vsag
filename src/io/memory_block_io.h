@@ -24,6 +24,9 @@ class IndexCommonParam;
 
 class MemoryBlockIO : public BasicIO<MemoryBlockIO> {
 public:
+    static constexpr bool InMemory = true;
+
+public:
     explicit MemoryBlockIO(Allocator* allocator, uint64_t block_size);
 
     explicit MemoryBlockIO(const MemoryBlockIOParamPtr& param,
@@ -53,15 +56,6 @@ public:
 
     void
     PrefetchImpl(uint64_t offset, uint64_t cache_line = 64);
-
-    static bool
-    InMemoryImpl() {
-        return true;
-    }
-
-    void
-    InitIOImpl(const IOParamPtr& io_param) {
-    }
 
 private:
     void

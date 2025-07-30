@@ -80,12 +80,4 @@ BufferIO::MultiReadImpl(uint8_t* datas, uint64_t* sizes, uint64_t* offsets, uint
     return ret;
 }
 
-void
-BufferIO::PrefetchImpl(uint64_t offset, uint64_t cache_line){};
-
-bool
-BufferIO::InMemoryImpl() {
-    return false;
-}
-
 }  // namespace vsag
