@@ -264,7 +264,8 @@ public:
     static void
     TestWithAttr(const IndexPtr& index,
                  const TestDatasetPtr& dataset,
-                 const std::string& search_param);
+                 const std::string& search_param,
+                 bool with_update = true);
 
     constexpr static float RECALL_THRESHOLD = 0.95;
 };

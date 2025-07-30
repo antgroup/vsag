@@ -44,6 +44,12 @@ public:
                         const BucketIdType bucket_id) override;
 
     void
+    UpdateBitsetsByAttr(const AttributeSet& attributes,
+                        const InnerIdType offset_id,
+                        const BucketIdType bucket_id,
+                        const AttributeSet& origin_attributes) override;
+
+    void
     Serialize(StreamWriter& writer) override;
 
     void

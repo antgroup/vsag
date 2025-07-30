@@ -195,6 +195,12 @@ public:
                             "Index doesn't support UpdateAttribute");
     }
 
+    virtual void
+    UpdateAttribute(int64_t id, const AttributeSet& new_attrs, const AttributeSet& origin_attrs) {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "Index doesn't support UpdateAttribute with origin attributes");
+    }
+
     virtual uint32_t
     Pretrain(const std::vector<int64_t>& base_tag_ids, uint32_t k, const std::string& parameters) {
         throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,

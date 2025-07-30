@@ -666,7 +666,7 @@ TestIVFWithAttr(const fixtures::IVFTestIndexPtr& test_index,
                     }
                     auto build_result = index1->Build(dataset->base_);
                     REQUIRE(build_result.has_value());
-                    IVFTestIndex::TestWithAttr(index1, dataset, search_param);
+                    IVFTestIndex::TestWithAttr(index1, dataset, search_param, false);
 
                     auto dir = fixtures::TempDir("serialize");
                     auto path = dir.GenerateRandomFile();

@@ -126,6 +126,18 @@ public:
         SAFE_CALL(this->inner_index_->UpdateAttribute(id, new_attrs));
     }
 
+    tl::expected<void, Error>
+    UpdateAttribute(int64_t id,
+                    const AttributeSet& new_attrs,
+                    const AttributeSet& origin_attrs) override {
+        if (this->inner_index_->immutable_) {
+            return tl::unexpected(
+                Error(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                      "immutable index no support update attribute with origin attributes"));
+        }
+        SAFE_CALL(this->inner_index_->UpdateAttribute(id, new_attrs, origin_attrs));
+    }
+
     [[nodiscard]] tl::expected<DatasetPtr, Error>
     SearchWithRequest(const SearchRequest& request) const override {
         if (GetNumElements() == 0) {
