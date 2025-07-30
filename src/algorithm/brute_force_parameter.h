@@ -34,6 +34,8 @@ public:
 
 public:
     FlattenDataCellParamPtr flatten_param;
+
+    bool use_attribute_filter{false};
 };
 
 using BruteForceParameterPtr = std::shared_ptr<BruteForceParameter>;
