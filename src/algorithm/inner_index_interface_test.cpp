@@ -164,6 +164,11 @@ TEST_CASE("NOT Implemented", "[ut][InnerIndexInterface]") {
     REQUIRE_THROWS(empty_index->GetVectorByInnerId(1, nullptr));
     REQUIRE_THROWS(empty_index->SetImmutable());
 
+    AttributeSet old_attrs;
+    AttributeSet new_attrs;
+    REQUIRE_THROWS(empty_index->UpdateAttribute(0, new_attrs));
+    REQUIRE_THROWS(empty_index->UpdateAttribute(1, new_attrs, old_attrs));
+
     std::stringstream stream;
     empty_index->Serialize(stream);
     stream.seekg(0);

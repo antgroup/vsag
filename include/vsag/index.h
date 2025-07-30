@@ -155,6 +155,19 @@ public:
     }
 
     /**
+     * @brief Update the attribute of a base point from the index
+     *
+     * @param id indicates the id of a base point in index
+     * @param new_attrs is the new attributes of the base point
+     * @param origin_attrs is the origin attributes of the base point
+     * @return result indicates whether the update operation is successful.
+     */
+    virtual tl::expected<void, Error>
+    UpdateAttribute(int64_t id, const AttributeSet& new_attrs, const AttributeSet& origin_attrs) {
+        throw std::runtime_error("Index not support update attribute with origin attributes");
+    }
+
+    /**
       * @brief Performing single KNN search on index
       * 
       * @param query should contains dim, num_elements and vectors
