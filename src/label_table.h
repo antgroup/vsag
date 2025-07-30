@@ -40,7 +40,7 @@ class LabelTable {
 public:
     explicit LabelTable(Allocator* allocator,
                         bool use_reverse_map = true,
-                        bool compress_redundant_data = true)
+                        bool compress_redundant_data = false)
         : allocator_(allocator),
           label_table_(0, allocator),
           label_remap_(0, allocator),
