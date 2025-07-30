@@ -30,7 +30,7 @@ public:
     explicit SINDI(const SINDIParameterPtr& param, const IndexCommonParam& common_param);
 
     SINDI(const ParamPtr& param, const IndexCommonParam& common_param)
-        : SINDI(std::dynamic_pointer_cast<SINDIParameters>(param), common_param){};
+        : SINDI(std::dynamic_pointer_cast<SINDIParameter>(param), common_param){};
 
     ~SINDI() = default;
 
@@ -91,8 +91,8 @@ public:
 private:
     template <InnerSearchMode mode>
     DatasetPtr
-    search_impl(const SparseVector sparse_query,
-                InnerSearchParam inner_param,
+    search_impl(const SparseTermComputerPtr& computer,
+                const InnerSearchParam& inner_param,
                 const FilterPtr& filter) const;
 
 private:
@@ -103,6 +103,7 @@ private:
     int64_t cur_element_count_{0};
 
     bool use_reorder_{false};
+    float doc_prune_ratio_{0};
 
     std::shared_ptr<SparseIndex> rerank_flat_index_{nullptr};
 };

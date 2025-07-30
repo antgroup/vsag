@@ -27,24 +27,16 @@ class SparseTermDataCell {
 public:
     SparseTermDataCell() = default;
 
-    SparseTermDataCell(float query_prune_ratio,
-                       float doc_prune_ratio,
-                       float term_prune_ratio,
-                       Allocator* allocator)
+    SparseTermDataCell(float doc_prune_ratio, Allocator* allocator)
         : doc_prune_ratio_(doc_prune_ratio),
-          term_prune_ratio_(term_prune_ratio),
-          query_prune_ratio_(query_prune_ratio),
           allocator_(allocator),
           term_ids_(0, Vector<uint32_t>(allocator), allocator),
           term_datas_(0, Vector<float>(allocator), allocator),
-          term_sizes_(allocator),
-          term_pruned_sizes_(allocator) {
+          term_sizes_(allocator) {
     }
 
     void
-    Query(float* global_dists,
-          const SparseTermComputerPtr& computer,
-          const bool only_collect_id = false) const;
+    Query(float* global_dists, const SparseTermComputerPtr& computer) const;
 
     template <InnerSearchMode mode = InnerSearchMode::KNN_SEARCH>
     void
@@ -55,10 +47,7 @@ public:
                uint32_t offset_id) const;
 
     SparseTermComputerPtr
-    FactoryComputer(const SparseVector& sparse_query);
-
-    void
-    TermPrune();
+    FactoryComputer(const SparseVector& sparse_query, const SINDISearchParameter& search_param);
 
     void
     DocPrune(Vector<std::pair<uint32_t, float>>& sorted_base) const;
@@ -76,11 +65,7 @@ public:
     Deserialize(StreamReader& reader);
 
 public:
-    float query_prune_ratio_{0};
-
     float doc_prune_ratio_{0};
-
-    float term_prune_ratio_{0};
 
     uint32_t term_capacity_{0};
 
@@ -89,8 +74,6 @@ public:
     Vector<Vector<float>> term_datas_;
 
     Vector<uint32_t> term_sizes_;
-
-    Vector<uint32_t> term_pruned_sizes_;
 
     Allocator* const allocator_{nullptr};
 };

@@ -61,14 +61,14 @@ TEST_CASE("SparseTermDatacell Basic Test", "[ut][SparseTermDatacell]") {
     float doc_prune_ratio = 0.5;
     float term_prune_ratio = 1.0;
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
-    auto data_cell = std::make_shared<SparseTermDataCell>(
-        query_prune_ratio, doc_prune_ratio, term_prune_ratio, allocator.get());
-    REQUIRE(std::abs(data_cell->query_prune_ratio_ - query_prune_ratio) < 1e-3);
+    auto data_cell = std::make_shared<SparseTermDataCell>(doc_prune_ratio, allocator.get());
     REQUIRE(std::abs(data_cell->doc_prune_ratio_ - doc_prune_ratio) < 1e-3);
-    REQUIRE(std::abs(data_cell->term_prune_ratio_ - term_prune_ratio) < 1e-3);
 
     // test factory computer
-    auto computer = data_cell->FactoryComputer(query_sv);
+    SINDISearchParameter search_params;
+    search_params.term_prune_ratio = term_prune_ratio;
+    search_params.query_prune_ratio = query_prune_ratio;
+    auto computer = data_cell->FactoryComputer(query_sv, search_params);
     REQUIRE(computer->pruned_len_ == query_prune_ratio * query_sv.len_);
 
     // test insert
@@ -77,13 +77,11 @@ TEST_CASE("SparseTermDatacell Basic Test", "[ut][SparseTermDatacell]") {
     for (auto i = 0; i < count_base; i++) {
         data_cell->InsertVector(sparse_vectors[i], i);
     }
-    data_cell->TermPrune();
     REQUIRE(data_cell->term_capacity_ == exp_id_size);
     REQUIRE(data_cell->term_ids_.size() == exp_id_size);
     REQUIRE(data_cell->term_datas_.size() == exp_id_size);
     for (auto i = 0; i < data_cell->term_capacity_; i++) {
         REQUIRE(data_cell->term_ids_[i].size() == data_cell->term_sizes_[i]);
-        REQUIRE(data_cell->term_pruned_sizes_[i] == data_cell->term_sizes_[i] * term_prune_ratio);
         REQUIRE(data_cell->term_ids_[i].size() == exp_size[i]);
         REQUIRE(data_cell->term_datas_[i].size() == exp_size[i]);
     }

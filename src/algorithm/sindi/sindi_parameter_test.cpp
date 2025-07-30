@@ -19,22 +19,68 @@
 
 #include "parameter_test.h"
 
-TEST_CASE("SINDI Index Parameters Test", "[ut][SINDIParameters]") {
-    auto param_str = R"({
-        "use_reorder": true,
-        "query_prune_ratio": 0.9,
-        "doc_prune_ratio": 0.8,
-        "term_prune_ratio": 0.7,
-        "window_size": 66666
-    })";
+using namespace vsag;
+
+#define TEST_COMPATIBILITY_CASE(section_name, param_member, val1, val2, expect_compatible) \
+    SECTION(section_name) {                                                                \
+        SINDIDefaultParam param1;                                                          \
+        SINDIDefaultParam param2;                                                          \
+        param1.param_member = val1;                                                        \
+        param2.param_member = val2;                                                        \
+        auto param_str1 = generate_sindi_param(param1);                                    \
+        auto param_str2 = generate_sindi_param(param2);                                    \
+        auto sindi_param1 = std::make_shared<vsag::SINDIParameter>();                      \
+        auto sindi_param2 = std::make_shared<vsag::SINDIParameter>();                      \
+        sindi_param1->FromString(param_str1);                                              \
+        sindi_param2->FromString(param_str2);                                              \
+        if (expect_compatible) {                                                           \
+            REQUIRE(sindi_param1->CheckCompatibility(sindi_param2));                       \
+        } else {                                                                           \
+            REQUIRE_FALSE(sindi_param1->CheckCompatibility(sindi_param2));                 \
+        }                                                                                  \
+    }
+
+struct SINDIDefaultParam {
+    bool use_reorder = true;
+    float doc_prune_ratio = 0.8F;
+    int window_size = 66666;
+};
+
+std::string
+generate_sindi_param(const SINDIDefaultParam& param) {
+    vsag::JsonType json;
+    json["use_reorder"] = param.use_reorder;
+    json["doc_prune_ratio"] = param.doc_prune_ratio;
+    json["window_size"] = param.window_size;
+    return json.dump();
+}
+
+TEST_CASE("SINDI Index Parameters Test", "[ut][SINDIParameter]") {
+    SINDIDefaultParam default_param;
+    std::string param_str = generate_sindi_param(default_param);
     vsag::JsonType param_json = vsag::JsonType::parse(param_str);
-    auto param = std::make_shared<vsag::SINDIParameters>();
+    auto param = std::make_shared<vsag::SINDIParameter>();
     param->FromJson(param_json);
     REQUIRE(param->use_reorder == true);
-    REQUIRE(std::abs(param->query_prune_ratio - 0.9) < 1e-3);
     REQUIRE(std::abs(param->doc_prune_ratio - 0.8) < 1e-3);
-    REQUIRE(std::abs(param->term_prune_ratio - 0.7) < 1e-3);
     REQUIRE(param->window_size == 66666);
 
     vsag::ParameterTest::TestToJson(param);
+
+    auto search_param_str = R"(
+        "sindi": {
+            "query_prune_ratio": 0.9,
+            "n_candidate": 20,
+            "term_prune_ratio": 1
+        }
+    )";
+    auto search_param = std::make_shared<vsag::SINDIParameter>();
+    search_param->FromJson(search_param_str);
+    vsag::ParameterTest::TestToJson(search_param);
+}
+
+TEST_CASE("SINDI Index Parameters Compatibility Test", "[ut][SINDIParameter]") {
+    TEST_COMPATIBILITY_CASE("use_reorder compatibility", use_reorder, true, false, false);
+    TEST_COMPATIBILITY_CASE("doc_prune_ratio compatibility", doc_prune_ratio, 0.8F, 0.9F, false);
+    TEST_COMPATIBILITY_CASE("window_size compatibility", window_size, 66666, 77777, false);
 }

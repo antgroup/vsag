@@ -27,7 +27,7 @@ static constexpr float DEFAULT_DOC_PRUNE_RATIO = 1;
 static constexpr float DEFAULT_TERM_PRUNE_RATIO = 1;
 static constexpr uint32_t DEFAULT_N_CANDIDATE = 0;
 
-struct SINDIParameters : public Parameter {
+struct SINDIParameter : public Parameter {
 public:
     void
     FromJson(const JsonType& json) override;
@@ -35,22 +35,35 @@ public:
     JsonType
     ToJson() const override;
 
-    SINDIParameters() = default;
+    SINDIParameter() = default;
+
+public:
+    // index
+    uint32_t window_size{0};
+    bool use_reorder{false};
+
+    float doc_prune_ratio{0};
+};
+
+using SINDIParameterPtr = std::shared_ptr<SINDIParameter>;
+
+struct SINDISearchParameter : public Parameter {
+public:
+    void
+    FromJson(const JsonType& json) override;
+
+    JsonType
+    ToJson() const override;
+
+    SINDISearchParameter() = default;
 
 public:
     // search
     uint32_t n_candidate{0};
 
-    // index
-    uint32_t window_size{0};
-    bool use_reorder{false};
-
     // data cell
     float query_prune_ratio{0};
-    float doc_prune_ratio{0};
     float term_prune_ratio{0};
 };
-
-using SINDIParameterPtr = std::shared_ptr<SINDIParameters>;
 
 }  // namespace vsag

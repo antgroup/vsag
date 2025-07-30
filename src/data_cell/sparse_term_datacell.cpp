@@ -18,9 +18,7 @@
 namespace vsag {
 
 void
-SparseTermDataCell::Query(float* global_dists,
-                          const SparseTermComputerPtr& computer,
-                          const bool only_collect_id) const {
+SparseTermDataCell::Query(float* global_dists, const SparseTermComputerPtr& computer) const {
     while (computer->HasNextTerm()) {
         auto it = computer->NextTermIter();
         auto term = computer->GetTerm(it);
@@ -39,7 +37,8 @@ SparseTermDataCell::Query(float* global_dists,
         computer->ScanForAccumulate(it,
                                     term_ids_[term].data(),
                                     term_datas_[term].data(),
-                                    term_pruned_sizes_[term],
+                                    static_cast<uint32_t>(static_cast<float>(term_sizes_[term]) *
+                                                          computer->term_prune_ratio_),
                                     global_dists);
     }
     computer->ResetTerm();
@@ -74,7 +73,9 @@ SparseTermDataCell::InsertHeap(float* dists,
         uint32_t i = 0;
         if constexpr (mode == InnerSearchMode::KNN_SEARCH) {
             if (heap.size() < n_candidate) {
-                for (; i < term_pruned_sizes_[term]; i++) {
+                for (; static_cast<float>(i) <
+                       static_cast<float>(term_sizes_[term]) * computer->term_prune_ratio_;
+                     i++) {
                     id = term_ids_[term][i];
 
                     heap.emplace(dists[id], id + offset_id);
@@ -88,7 +89,9 @@ SparseTermDataCell::InsertHeap(float* dists,
             }
         }
 
-        for (; i < term_pruned_sizes_[term]; i++) {
+        for (; static_cast<float>(i) <
+               static_cast<float>(term_sizes_[term]) * computer->term_prune_ratio_;
+             i++) {
             id = term_ids_[term][i];
 
             if (dists[id] >= cur_heap_top) [[likely]] {
@@ -113,23 +116,9 @@ SparseTermDataCell::InsertHeap(float* dists,
 }
 
 SparseTermComputerPtr
-SparseTermDataCell::FactoryComputer(const SparseVector& sparse_query) {
-    auto computer = std::make_shared<SparseTermComputer>(query_prune_ratio_, allocator_);
-    computer->SetQuery(sparse_query);
-    return computer;
-}
-
-void
-SparseTermDataCell::TermPrune() {
-    // use this function after all vectors have been inserted
-    for (auto i = 0; i < term_sizes_.size(); i++) {
-        if (term_sizes_[i] <= 1) {
-            term_pruned_sizes_[i] = term_sizes_[i];
-        } else {
-            term_pruned_sizes_[i] =
-                static_cast<uint32_t>(static_cast<float>(term_sizes_[i]) * term_prune_ratio_);
-        }
-    }
+SparseTermDataCell::FactoryComputer(const SparseVector& sparse_query,
+                                    const SINDISearchParameter& search_param) {
+    return std::make_shared<SparseTermComputer>(sparse_query, search_param, allocator_);
 }
 
 void
@@ -178,7 +167,6 @@ SparseTermDataCell::ResizeTermList(InnerIdType new_term_capacity) {
     term_ids_.resize(term_capacity_, Vector<uint32_t>(allocator_));
     term_datas_.resize(term_capacity_, Vector<float>(allocator_));
     term_sizes_.resize(term_capacity_, 0);
-    term_pruned_sizes_.resize(term_capacity_, 0);
 }
 
 void
@@ -189,7 +177,6 @@ SparseTermDataCell::Serialize(StreamWriter& writer) const {
         StreamWriter::WriteVector(writer, term_datas_[i]);
     }
     StreamWriter::WriteVector(writer, term_sizes_);
-    StreamWriter::WriteVector(writer, term_pruned_sizes_);
 }
 
 void
@@ -202,7 +189,6 @@ SparseTermDataCell::Deserialize(StreamReader& reader) {
         StreamReader::ReadVector(reader, term_datas_[i]);
     }
     StreamReader::ReadVector(reader, term_sizes_);
-    StreamReader::ReadVector(reader, term_pruned_sizes_);
 }
 
 template void
