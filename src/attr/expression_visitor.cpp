@@ -266,6 +266,41 @@ std::any
 FCExpressionVisitor::visitNumericConst(FCParser::NumericConstContext* ctx) {
     return visit(ctx->numeric());
 }
+std::any
+FCExpressionVisitor::visitFunctionExpr(FCParser::FunctionExprContext* ctx) {
+    auto func_name = ctx->function_name()->ID()->getText();
+    auto args = std::any_cast<ExprPtr>(visitArg_pipe_list(ctx->arg_pipe_list()));
+    auto types = std::any_cast<ExprPtr>(visitStr_pipe_list(ctx->str_pipe_list()));
+    auto args_ptr = std::dynamic_pointer_cast<StrListConstant>(args);
+    auto types_ptr = std::dynamic_pointer_cast<StrListConstant>(types);
+    auto function_expr =
+        std::make_shared<FunctionExpression>(func_name, args_ptr->values, types_ptr->values);
+    return std::make_any<ExprPtr>(function_expr);
+}
+std::any
+FCExpressionVisitor::visitRegionFilterExpr(FCParser::RegionFilterExprContext* ctx) {
+    auto region_filter_expr = std::make_shared<RegionFilterExpression>(
+        std::any_cast<ExprPtr>(visitField_name(ctx->field_name(0))),
+        std::any_cast<ExprPtr>(visitField_name(ctx->field_name(1))),
+        std::any_cast<ExprPtr>(visitField_name(ctx->field_name(2))),
+        std::any_cast<ExprPtr>(visitInt_pipe_list(ctx->int_pipe_list(0))),
+        std::any_cast<ExprPtr>(visitInt_pipe_list(ctx->int_pipe_list(1))),
+        std::any_cast<ExprPtr>(visitInt_pipe_list(ctx->int_pipe_list(2))));
+    return std::make_any<ExprPtr>(region_filter_expr);
+}
+
+std::any
+FCExpressionVisitor::visitArg_pipe_list(FCParser::Arg_pipe_listContext* ctx) {
+    if (ctx->str_pipe_list()) {
+        return visitStr_pipe_list(ctx->str_pipe_list());
+    }
+    if (ctx->int_pipe_list()) {
+        return visitInt_pipe_list(ctx->int_pipe_list(), true);
+    }
+    StrList values;
+    auto str_list_ptr = std::make_shared<StrListConstant>(std::move(values));
+    return std::make_any<ExprPtr>(str_list_ptr);
+}
 
 std::any
 FCExpressionVisitor::visitStr_value_list(FCParser::Str_value_listContext* ctx) {
