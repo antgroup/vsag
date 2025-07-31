@@ -176,6 +176,17 @@ public:
     void
     Merge(const std::vector<MergeUnit>& merge_units) override;
 
+    [[nodiscard]] DatasetPtr
+    SearchWithRequest(const SearchRequest& request) const override;
+
+    void
+    UpdateAttribute(int64_t id, const AttributeSet& new_attrs) override;
+
+    void
+    UpdateAttribute(int64_t id,
+                    const AttributeSet& new_attrs,
+                    const AttributeSet& origin_attrs) override;
+
     void
     SetImmutable() override;
 

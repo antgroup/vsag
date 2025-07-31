@@ -34,73 +34,59 @@ enum class level {
     off = Logger::Level::kOFF
 };
 
-inline void
-set_level(level log_level) {
-    Options::Instance().logger()->SetLevel((Logger::Level)log_level);
-}
+void
+set_level(level log_level);
 
-inline void
-trace(const std::string& msg) {
-    Options::Instance().logger()->Trace(msg);
-}
+void
+trace(const std::string& msg);
 
-inline void
-debug(const std::string& msg) {
-    Options::Instance().logger()->Debug(msg);
-}
+void
+debug(const std::string& msg);
 
-inline void
-info(const std::string& msg) {
-    Options::Instance().logger()->Info(msg);
-}
+void
+info(const std::string& msg);
 
-inline void
-warn(const std::string& msg) {
-    Options::Instance().logger()->Warn(msg);
-}
+void
+warn(const std::string& msg);
 
-inline void
-error(const std::string& msg) {
-    Options::Instance().logger()->Error(msg);
-}
+void
+error(const std::string& msg);
 
-inline void
-critical(const std::string& msg) {
-    Options::Instance().logger()->Critical(msg);
-}
+void
+critical(const std::string& msg);
 
 template <typename... Args>
-inline void
+void
 trace(fmt::format_string<Args...> fmt, Args&&... args) {
     trace(fmt::format(fmt, std::forward<Args>(args)...));
 }
 
 template <typename... Args>
-inline void
+void
 debug(fmt::format_string<Args...> fmt, Args&&... args) {
     debug(fmt::format(fmt, std::forward<Args>(args)...));
 }
 
 template <typename... Args>
-inline void
+void
 info(fmt::format_string<Args...> fmt, Args&&... args) {
     info(fmt::format(fmt, std::forward<Args>(args)...));
 }
 
 template <typename... Args>
-inline void
+void
 warn(fmt::format_string<Args...> fmt, Args&&... args) {
     warn(fmt::format(fmt, std::forward<Args>(args)...));
 }
 
 template <typename... Args>
-inline void
+void
 error(fmt::format_string<Args...> fmt, Args&&... args) {
     error(fmt::format(fmt, std::forward<Args>(args)...));
 }
 
 template <typename... Args>
-inline void
+void
 critical(fmt::format_string<Args...> fmt, Args&&... args) {
     critical(fmt::format(fmt, std::forward<Args>(args)...));
 }

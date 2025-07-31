@@ -48,8 +48,8 @@ HGraphParameter::FromJson(const JsonType& json) {
         this->build_by_base = json[HGRAPH_BUILD_BY_BASE_QUANTIZATION_KEY];
     }
 
-    if (json.contains(HGRAPH_USE_ATTRIBUTE_FILTER_KEY)) {
-        this->use_attribute_filter = json[HGRAPH_USE_ATTRIBUTE_FILTER_KEY];
+    if (json.contains(USE_ATTRIBUTE_FILTER_KEY)) {
+        this->use_attribute_filter = json[USE_ATTRIBUTE_FILTER_KEY];
     }
 
     CHECK_ARGUMENT(json.contains(HGRAPH_BASE_CODES_KEY),
@@ -156,6 +156,7 @@ HGraphParameter::ToJson() const {
     json[HGRAPH_EXTRA_INFO_KEY] = this->extra_info_param->ToJson();
     json[SUPPORT_DUPLICATE] = this->support_duplicate;
     json[HGRAPH_STORE_RAW_VECTOR] = this->store_raw_vector;
+    json[USE_ATTRIBUTE_FILTER_KEY] = this->use_attribute_filter;
     return json;
 }
 
