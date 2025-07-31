@@ -101,7 +101,7 @@ private:
     int64_t cur_element_count_{0};
 
     bool use_reorder_{false};
-    float doc_prune_ratio_{0};
+    float doc_retain_ratio_{0};
 
     std::shared_ptr<SparseIndex> rerank_flat_index_{nullptr};
 };

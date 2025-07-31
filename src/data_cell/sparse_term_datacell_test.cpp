@@ -57,9 +57,9 @@ TEST_CASE("SparseTermDatacell Basic Test", "[ut][SparseTermDatacell]") {
     }
 
     // prepare data_cell
-    float query_prune_ratio = 1.0;
+    float query_prune_ratio = 0.0;
     float doc_prune_ratio = 0.5;
-    float term_prune_ratio = 1.0;
+    float term_prune_ratio = 0.0;
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     auto data_cell = std::make_shared<SparseTermDataCell>(doc_prune_ratio, allocator.get());
     REQUIRE(std::abs(data_cell->doc_prune_ratio_ - doc_prune_ratio) < 1e-3);
@@ -69,7 +69,7 @@ TEST_CASE("SparseTermDatacell Basic Test", "[ut][SparseTermDatacell]") {
     search_params.term_prune_ratio = term_prune_ratio;
     search_params.query_prune_ratio = query_prune_ratio;
     auto computer = data_cell->FactoryComputer(query_sv, search_params);
-    REQUIRE(computer->pruned_len_ == query_prune_ratio * query_sv.len_);
+    REQUIRE(computer->pruned_len_ == (1.0F - query_prune_ratio) * query_sv.len_);
 
     // test insert
     auto exp_id_size = 19;

@@ -60,9 +60,8 @@ TEST_CASE("SINDI Basic Test", "[ut][SINDI]") {
 
     constexpr static auto param_str = R"({{
         "use_reorder": {},
-        "query_prune_ratio": 1,
-        "doc_prune_ratio": 1,
-        "term_prune_ratio": 1,
+        "doc_prune_ratio": 0.0,
+        "term_prune_ratio": 0.0,
         "window_size": 1000
     }})";
 
@@ -96,6 +95,8 @@ TEST_CASE("SINDI Basic Test", "[ut][SINDI]") {
     std::string search_param_str = R"(
     {
         "sindi": {
+            "query_prune_ratio": 0.0,
+            "term_prune_ratio": 0.0,
             "n_candidate": 20
         }
     }
