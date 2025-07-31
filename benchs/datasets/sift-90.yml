@@ -1,0 +1,54 @@
+global:
+    exporters:
+        e1: # give a name you like, will not be used
+            format: "text"
+            to: "stdout"
+        e2:
+            format: "json"
+            to: "file://tmp/eval-sift.json"
+    num_threads_building: 16
+    num_threads_searching: 16
+
+HGRAPH/SIFT/90:
+    datapath: "/tmp/data/sift-128-euclidean.hdf5"
+    type: "build,search" # build, search
+    index_name: "hgraph"
+    create_params: '{"dim":128,"dtype":"float32","metric_type":"l2","index_param":{"base_quantization_type":"sq8_uniform", "graph_type":"odescent","max_degree":64, "alpha": 1.2, "graph_iter_turn": 50, "neighbor_sample_rate": 0.2}}'
+    search_params: '{"hgraph":{"ef_search":17}}'
+    index_path: "/tmp/eval/sift-128-euclidean/90/hgraph"
+    topk: 10
+    search_mode: "knn"
+    delete_index_after_search: false
+
+HNSW/SIFT/90:
+    datapath: "/tmp/data/sift-128-euclidean.hdf5"
+    type: "build,search" # build, search
+    index_name: "hnsw"
+    create_params: '{"dim":128,"dtype":"float32","metric_type":"l2","hnsw":{"max_degree":12,"ef_construction": 500}}'
+    search_params: '{"hnsw":{"ef_search":40}}'
+    index_path: "/tmp/eval/sift-128-euclidean/90/hnsw"
+    topk: 10
+    search_mode: "knn"
+    delete_index_after_search: false
+
+IVF/SIFT/90:
+    datapath: "/tmp/data/sift-128-euclidean.hdf5"
+    type: "build,search" # build, search
+    index_name: "ivf"
+    create_params: '{"dim":128,"dtype":"float32","metric_type":"l2","index_param": {"buckets_count": 1000,"base_quantization_type": "fp32","partition_strategy_type": "ivf","ivf_train_type": "kmeans"}}'
+    search_params: '{"ivf":{"scan_buckets_count":13}}'
+    index_path: "/tmp/eval/sift-128-euclidean/90/ivf"
+    topk: 10
+    search_mode: "knn"
+    delete_index_after_search: false
+
+DISKANN/SIFT/90:
+    datapath: "/tmp/data/sift-128-euclidean.hdf5"
+    type: "build,search" # build, search
+    index_name: "diskann"
+    create_params: '{"dim":128,"dtype":"float32","metric_type":"l2","diskann": {"max_degree": 16,"ef_construction": 200,"pq_sample_rate": 0.5,"pq_dims": 16,"use_pq_search": true,"use_bsa": true}}'
+    search_params: '{"diskann": {"ef_search": 120,"beam_search": 4,"io_limit": 60,"use_reorder": true}}'
+    index_path: "/tmp/eval/sift-128-euclidean/90/diskann"
+    topk: 10
+    search_mode: "knn"
+    delete_index_after_search: false
