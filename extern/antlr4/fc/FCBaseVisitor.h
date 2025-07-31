@@ -43,6 +43,14 @@ public:
     return visitChildren(ctx);
   }
 
+  virtual std::any visitFunctionExpr(FCParser::FunctionExprContext *ctx) override {
+    return visitChildren(ctx);
+  }
+
+  virtual std::any visitRegionFilterExpr(FCParser::RegionFilterExprContext *ctx) override {
+    return visitChildren(ctx);
+  }
+
   virtual std::any visitIntListExpr(FCParser::IntListExprContext *ctx) override {
     return visitChildren(ctx);
   }
@@ -99,7 +107,15 @@ public:
     return visitChildren(ctx);
   }
 
+  virtual std::any visitArg_pipe_list(FCParser::Arg_pipe_listContext *ctx) override {
+    return visitChildren(ctx);
+  }
+
   virtual std::any visitField_name(FCParser::Field_nameContext *ctx) override {
+    return visitChildren(ctx);
+  }
+
+  virtual std::any visitFunction_name(FCParser::Function_nameContext *ctx) override {
     return visitChildren(ctx);
   }
 
