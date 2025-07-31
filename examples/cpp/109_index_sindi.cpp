@@ -112,9 +112,7 @@ main(int argc, char** argv) {
         "metric_type": "ip",
         "index_param": {
             "use_reorder": true,
-            "query_prune_ratio": 0.7,
             "doc_prune_ratio": 1,
-            "term_prune_ratio": 1,
             "window_size": 100000,
             "need_sort": true
         }
@@ -172,7 +170,11 @@ main(int argc, char** argv) {
     /******************* KnnSearch *****************/
     std::string search_params = R"(
     {
-        "n_candidate": 20
+        "sindi": {
+            "query_prune_ratio": 0.7,
+            "term_prune_ratio": 1,
+            "n_candidate": 20
+}
     }
     )";
 
