@@ -80,8 +80,8 @@ public:
     inline void
     ReleaseImpl(const uint8_t* data) const {
         auto ptr = const_cast<uint8_t*>(data);
-        constexpr auto ALIGN_BIT = DirectIOObject::ALIGN_BIT;
-        free(reinterpret_cast<void*>((reinterpret_cast<uint64_t>(ptr) >> ALIGN_BIT) << ALIGN_BIT));
+        uint64_t align_bit = Options::Instance().direct_IO_object_align_bit();
+        free(reinterpret_cast<void*>((reinterpret_cast<uint64_t>(ptr) >> align_bit) << align_bit));
     }
 
     inline bool
