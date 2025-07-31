@@ -19,6 +19,7 @@
 
 #include "fixtures.h"
 #include "impl/allocator/safe_allocator.h"
+#include "storage/serialization_template_test.h"
 
 using namespace vsag;
 
@@ -53,18 +54,8 @@ TestAttrValueMap() {
     REQUIRE(manager->GetOneBitset(2) == nullptr);
     REQUIRE(manager->GetOneBitset(3)->Test(id) == true);
 
-    auto dir = fixtures::TempDir("value_map");
-    auto path = dir.GenerateRandomFile();
-    std::ofstream ofs(path, std::ios::binary);
-    IOStreamWriter writer(ofs);
-
-    map.Serialize(writer);
-    ofs.close();
-    std::ifstream ifs(path, std::ios::binary);
-    IOStreamReader reader(ifs);
     AttrValueMap map2(allocator.get(), type);
-    map2.Deserialize(reader);
-    ifs.close();
+    test_serializion(map, map2);
 
     manager = map2.GetBitsetByValue(value);
     REQUIRE(manager != nullptr);
