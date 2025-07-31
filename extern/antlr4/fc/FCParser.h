@@ -12,18 +12,19 @@
 class  FCParser : public antlr4::Parser {
 public:
   enum {
-    T__0 = 1, T__1 = 2, T__2 = 3, T__3 = 4, T__4 = 5, AND = 6, OR = 7, NOT = 8, 
-    IN = 9, NOT_IN = 10, EQ = 11, NQ = 12, GT = 13, LT = 14, GE = 15, LE = 16, 
-    MUL = 17, DIV = 18, ADD = 19, SUB = 20, ID = 21, INTEGER = 22, SEP = 23, 
-    SEP_STR = 24, INT_STRING = 25, STRING = 26, PIPE_INT_STR = 27, PIPE_STR_STR = 28, 
-    FLOAT = 29, WS = 30, LINE_COMMENT = 31
+    T__0 = 1, T__1 = 2, T__2 = 3, T__3 = 4, T__4 = 5, FUNCTION = 6, REGION_FILTER = 7, 
+    AND = 8, OR = 9, NOT = 10, IN = 11, NOT_IN = 12, EQ = 13, NQ = 14, GT = 15, 
+    LT = 16, GE = 17, LE = 18, MUL = 19, DIV = 20, ADD = 21, SUB = 22, ID = 23, 
+    INTEGER = 24, SEP = 25, SEP_STR = 26, INT_STRING = 27, STRING = 28, 
+    PIPE_INT_STR = 29, PIPE_STR_STR = 30, FLOAT = 31, WS = 32, LINE_COMMENT = 33
   };
 
   enum {
     RuleFilter_condition = 0, RuleExpr = 1, RuleComparison = 2, RuleField_expr = 3, 
     RuleComparison_sop = 4, RuleComparison_op = 5, RuleInt_value_list = 6, 
     RuleInt_pipe_list = 7, RuleStr_value_list = 8, RuleStr_pipe_list = 9, 
-    RuleField_name = 10, RuleNumeric = 11
+    RuleArg_pipe_list = 10, RuleField_name = 11, RuleFunction_name = 12, 
+    RuleNumeric = 13
   };
 
   explicit FCParser(antlr4::TokenStream *input);
@@ -53,7 +54,9 @@ public:
   class Int_pipe_listContext;
   class Str_value_listContext;
   class Str_pipe_listContext;
+  class Arg_pipe_listContext;
   class Field_nameContext;
+  class Function_nameContext;
   class NumericContext; 
 
   class  Filter_conditionContext : public antlr4::ParserRuleContext {
@@ -228,6 +231,22 @@ public:
     virtual std::any accept(antlr4::tree::ParseTreeVisitor *visitor) override;
   };
 
+  class  RegionFilterExprContext : public ComparisonContext {
+  public:
+    RegionFilterExprContext(ComparisonContext *ctx);
+
+    antlr4::Token *op = nullptr;
+    std::vector<Field_nameContext *> field_name();
+    Field_nameContext* field_name(size_t i);
+    std::vector<Int_pipe_listContext *> int_pipe_list();
+    Int_pipe_listContext* int_pipe_list(size_t i);
+    antlr4::tree::TerminalNode *REGION_FILTER();
+    virtual void enterRule(antlr4::tree::ParseTreeListener *listener) override;
+    virtual void exitRule(antlr4::tree::ParseTreeListener *listener) override;
+
+    virtual std::any accept(antlr4::tree::ParseTreeVisitor *visitor) override;
+  };
+
   class  NumericComparisonContext : public ComparisonContext {
   public:
     NumericComparisonContext(ComparisonContext *ctx);
@@ -236,6 +255,21 @@ public:
     Field_exprContext *field_expr();
     NumericContext *numeric();
     Comparison_opContext *comparison_op();
+    virtual void enterRule(antlr4::tree::ParseTreeListener *listener) override;
+    virtual void exitRule(antlr4::tree::ParseTreeListener *listener) override;
+
+    virtual std::any accept(antlr4::tree::ParseTreeVisitor *visitor) override;
+  };
+
+  class  FunctionExprContext : public ComparisonContext {
+  public:
+    FunctionExprContext(ComparisonContext *ctx);
+
+    antlr4::Token *op = nullptr;
+    Function_nameContext *function_name();
+    Arg_pipe_listContext *arg_pipe_list();
+    Str_pipe_listContext *str_pipe_list();
+    antlr4::tree::TerminalNode *FUNCTION();
     virtual void enterRule(antlr4::tree::ParseTreeListener *listener) override;
     virtual void exitRule(antlr4::tree::ParseTreeListener *listener) override;
 
@@ -411,6 +445,22 @@ public:
 
   Str_pipe_listContext* str_pipe_list();
 
+  class  Arg_pipe_listContext : public antlr4::ParserRuleContext {
+  public:
+    Arg_pipe_listContext(antlr4::ParserRuleContext *parent, size_t invokingState);
+    virtual size_t getRuleIndex() const override;
+    Str_pipe_listContext *str_pipe_list();
+    Int_pipe_listContext *int_pipe_list();
+
+    virtual void enterRule(antlr4::tree::ParseTreeListener *listener) override;
+    virtual void exitRule(antlr4::tree::ParseTreeListener *listener) override;
+
+    virtual std::any accept(antlr4::tree::ParseTreeVisitor *visitor) override;
+   
+  };
+
+  Arg_pipe_listContext* arg_pipe_list();
+
   class  Field_nameContext : public antlr4::ParserRuleContext {
   public:
     Field_nameContext(antlr4::ParserRuleContext *parent, size_t invokingState);
@@ -425,6 +475,21 @@ public:
   };
 
   Field_nameContext* field_name();
+
+  class  Function_nameContext : public antlr4::ParserRuleContext {
+  public:
+    Function_nameContext(antlr4::ParserRuleContext *parent, size_t invokingState);
+    virtual size_t getRuleIndex() const override;
+    antlr4::tree::TerminalNode *ID();
+
+    virtual void enterRule(antlr4::tree::ParseTreeListener *listener) override;
+    virtual void exitRule(antlr4::tree::ParseTreeListener *listener) override;
+
+    virtual std::any accept(antlr4::tree::ParseTreeVisitor *visitor) override;
+   
+  };
+
+  Function_nameContext* function_name();
 
   class  NumericContext : public antlr4::ParserRuleContext {
   public:

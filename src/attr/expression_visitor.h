@@ -109,6 +109,12 @@ public:
     visitNumericConst(FCParser::NumericConstContext* ctx) override;
 
     std::any
+    visitFunctionExpr(FCParser::FunctionExprContext* ctx) override;
+
+    std::any
+    visitRegionFilterExpr(FCParser::RegionFilterExprContext* ctx) override;
+
+    std::any
     visitStr_value_list(FCParser::Str_value_listContext* ctx) override;
 
     std::any
@@ -131,6 +137,9 @@ public:
 
     std::any
     visitNumeric(FCParser::NumericContext* ctx) override;
+
+    std::any
+    visitArg_pipe_list(FCParser::Arg_pipe_listContext* ctx) override;
 
 private:
     bool
