@@ -204,8 +204,13 @@ BruteForce::SearchWithRequest(const SearchRequest& request) const {
         filter = request.filter_.get();
     }
     if (request.enable_attribute_filter_) {
-        auto& schema = this->attr_filter_index_->field_type_map_;
-        auto expr = AstParse(request.attribute_filter_str_, &schema);
+        ExprPtr expr;
+        if (request.expression_ != nullptr) {
+            expr = request.expression_;
+        } else {
+            auto& schema = this->attr_filter_index_->field_type_map_;
+            expr = AstParse(request.attribute_filter_str_, &schema);
+        }
         executor = Executor::MakeInstance(this->allocator_, expr, this->attr_filter_index_);
         executor->Init();
         executor->Clear();

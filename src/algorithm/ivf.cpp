@@ -16,6 +16,7 @@
 #include "ivf.h"
 
 #include <atomic>
+#include <iostream>
 #include <random>
 #include <set>
 
@@ -807,8 +808,10 @@ IVF::search(const DatasetPtr& query, const InnerSearchParam& param, QueryContext
             for (int j = 0; j < bucket_size; ++j) {
                 auto origin_id = ids[j] / buckets_per_data_;
                 if (attr_ft != nullptr and not attr_ft->CheckValid(j)) {
+                    // prefilter_count++;
                     continue;
                 }
+                // postfilter_count++;
                 if (ft == nullptr or ft->CheckValid(origin_id)) {
                     if constexpr (mode == KNN_SEARCH) {
                         if (heap->Size() < topk or dist[j] < cur_heap_top) {
@@ -853,6 +856,9 @@ IVF::search(const DatasetPtr& query, const InnerSearchParam& param, QueryContext
             }
         }
     }
+
+    // std::cout << "prefilter_count: " << prefilter_count << std::endl;
+    // std::cout << "postfilter_count: " << postfilter_count << std::endl;
 
     // Deduplicate ids when buckets_per_data_ > 1
     if (buckets_per_data_ > 1) {
@@ -957,7 +963,12 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
     auto query = request.query_;
     if (request.enable_attribute_filter_ and this->attr_filter_index_ != nullptr) {
         auto& schema = this->attr_filter_index_->field_type_map_;
-        auto expr = AstParse(request.attribute_filter_str_, &schema);
+        ExprPtr expr;
+        if (request.expression_ != nullptr) {
+            expr = request.expression_;
+        } else {
+            expr = AstParse(request.attribute_filter_str_, &schema);
+        }
         for (int64_t i = 0; i < param.parallel_search_thread_count; ++i) {
             auto executor =
                 Executor::MakeInstance(this->allocator_, expr, this->attr_filter_index_);

@@ -34,6 +34,8 @@
 
 namespace vsag {
 
+class AttrTypeSchema;
+
 class Index;
 using IndexPtr = std::shared_ptr<Index>;
 using IdMapFunction = std::function<std::tuple<bool, int64_t>(int64_t)>;
@@ -839,6 +841,11 @@ public:
     [[nodiscard]] virtual bool
     CheckIdExist(int64_t id) const {
         throw std::runtime_error("Index not support check id exist");
+    }
+
+    virtual AttrTypeSchema*
+    GetAttrTypeSchema() const {
+        throw std::runtime_error("Index not support get attr type schema");
     }
 
 public:
