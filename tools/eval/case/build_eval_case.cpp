@@ -108,8 +108,11 @@ BuildEvalCase::process_result() {
     // TODO(deming): remove try-catch after implement GetMemoryUsageDetail
     try {
         result["memory_detail(B)"] = this->index_->GetMemoryUsageDetail();
+    } catch (std::runtime_error& e) {
+        // if GetMemoryUsageDetail not implemented
+        logger_->Error(e.what());
     } catch (vsag::VsagException& e) {
-        logger_->Debug(e.what());
+        logger_->Error(e.what());
     }
     return result;
 }
