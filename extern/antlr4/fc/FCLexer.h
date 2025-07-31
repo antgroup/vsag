@@ -12,11 +12,11 @@
 class  FCLexer : public antlr4::Lexer {
 public:
   enum {
-    T__0 = 1, T__1 = 2, T__2 = 3, T__3 = 4, T__4 = 5, AND = 6, OR = 7, NOT = 8, 
-    IN = 9, NOT_IN = 10, EQ = 11, NQ = 12, GT = 13, LT = 14, GE = 15, LE = 16, 
-    MUL = 17, DIV = 18, ADD = 19, SUB = 20, ID = 21, INTEGER = 22, SEP = 23, 
-    SEP_STR = 24, INT_STRING = 25, STRING = 26, PIPE_INT_STR = 27, PIPE_STR_STR = 28, 
-    FLOAT = 29, WS = 30, LINE_COMMENT = 31
+    T__0 = 1, T__1 = 2, T__2 = 3, T__3 = 4, T__4 = 5, FUNCTION = 6, REGION_FILTER = 7, 
+    AND = 8, OR = 9, NOT = 10, IN = 11, NOT_IN = 12, EQ = 13, NQ = 14, GT = 15, 
+    LT = 16, GE = 17, LE = 18, MUL = 19, DIV = 20, ADD = 21, SUB = 22, ID = 23, 
+    INTEGER = 24, SEP = 25, SEP_STR = 26, INT_STRING = 27, STRING = 28, 
+    PIPE_INT_STR = 29, PIPE_STR_STR = 30, FLOAT = 31, WS = 32, LINE_COMMENT = 33
   };
 
   explicit FCLexer(antlr4::CharStream *input);

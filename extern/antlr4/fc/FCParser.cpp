@@ -55,71 +55,82 @@ void fcParserInitialize() {
     std::vector<std::string>{
       "filter_condition", "expr", "comparison", "field_expr", "comparison_sop", 
       "comparison_op", "int_value_list", "int_pipe_list", "str_value_list", 
-      "str_pipe_list", "field_name", "numeric"
+      "str_pipe_list", "arg_pipe_list", "field_name", "function_name", "numeric"
     },
     std::vector<std::string>{
-      "", "'('", "')'", "','", "'['", "']'", "", "", "'!'", "", "", "'='", 
-      "'!='", "'>'", "'<'", "'>='", "'<='", "'*'", "'/'", "'+'", "'-'", 
-      "", "", "'|'"
+      "", "'('", "')'", "','", "'['", "']'", "", "'region_filter'", "", 
+      "", "'!'", "", "", "'='", "'!='", "'>'", "'<'", "'>='", "'<='", "'*'", 
+      "'/'", "'+'", "'-'", "", "", "'|'"
     },
     std::vector<std::string>{
-      "", "", "", "", "", "", "AND", "OR", "NOT", "IN", "NOT_IN", "EQ", 
-      "NQ", "GT", "LT", "GE", "LE", "MUL", "DIV", "ADD", "SUB", "ID", "INTEGER", 
-      "SEP", "SEP_STR", "INT_STRING", "STRING", "PIPE_INT_STR", "PIPE_STR_STR", 
-      "FLOAT", "WS", "LINE_COMMENT"
+      "", "", "", "", "", "", "FUNCTION", "REGION_FILTER", "AND", "OR", 
+      "NOT", "IN", "NOT_IN", "EQ", "NQ", "GT", "LT", "GE", "LE", "MUL", 
+      "DIV", "ADD", "SUB", "ID", "INTEGER", "SEP", "SEP_STR", "INT_STRING", 
+      "STRING", "PIPE_INT_STR", "PIPE_STR_STR", "FLOAT", "WS", "LINE_COMMENT"
     }
   );
   static const int32_t serializedATNSegment[] = {
-  	4,1,31,164,2,0,7,0,2,1,7,1,2,2,7,2,2,3,7,3,2,4,7,4,2,5,7,5,2,6,7,6,2,
-  	7,7,7,2,8,7,8,2,9,7,9,2,10,7,10,2,11,7,11,1,0,1,0,1,0,1,1,1,1,1,1,1,1,
-  	1,1,1,1,1,1,1,1,1,1,1,1,1,1,3,1,39,8,1,1,1,1,1,1,1,5,1,44,8,1,10,1,12,
-  	1,47,9,1,1,2,1,2,1,2,1,2,1,2,1,2,1,2,1,2,1,2,1,2,1,2,1,2,1,2,1,2,1,2,
+  	4,1,33,198,2,0,7,0,2,1,7,1,2,2,7,2,2,3,7,3,2,4,7,4,2,5,7,5,2,6,7,6,2,
+  	7,7,7,2,8,7,8,2,9,7,9,2,10,7,10,2,11,7,11,2,12,7,12,2,13,7,13,1,0,1,0,
+  	1,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,3,1,43,8,1,1,1,1,1,1,
+  	1,5,1,48,8,1,10,1,12,1,51,9,1,1,2,1,2,1,2,1,2,1,2,1,2,1,2,1,2,1,2,1,2,
   	1,2,1,2,1,2,1,2,1,2,1,2,1,2,1,2,1,2,1,2,1,2,1,2,1,2,1,2,1,2,1,2,1,2,1,
-  	2,1,2,1,2,1,2,1,2,1,2,1,2,1,2,1,2,1,2,1,2,1,2,1,2,1,2,1,2,1,2,3,2,97,
-  	8,2,1,3,1,3,1,3,1,3,1,3,1,3,1,3,3,3,106,8,3,1,3,1,3,1,3,1,3,1,3,1,3,5,
-  	3,114,8,3,10,3,12,3,117,9,3,1,4,1,4,1,5,1,5,1,6,1,6,1,6,1,6,5,6,127,8,
-  	6,10,6,12,6,130,9,6,1,6,1,6,1,7,1,7,1,8,1,8,1,8,1,8,5,8,140,8,8,10,8,
-  	12,8,143,9,8,1,8,1,8,1,8,1,8,1,8,5,8,150,8,8,10,8,12,8,153,9,8,1,8,3,
-  	8,156,8,8,1,9,1,9,1,10,1,10,1,11,1,11,1,11,0,2,2,6,12,0,2,4,6,8,10,12,
-  	14,16,18,20,22,0,10,1,0,6,7,1,0,9,10,1,0,25,26,1,0,17,18,1,0,19,20,1,
-  	0,11,12,1,0,11,16,2,0,25,25,27,27,2,0,26,26,28,28,2,0,22,22,29,29,169,
-  	0,24,1,0,0,0,2,38,1,0,0,0,4,96,1,0,0,0,6,105,1,0,0,0,8,118,1,0,0,0,10,
-  	120,1,0,0,0,12,122,1,0,0,0,14,133,1,0,0,0,16,155,1,0,0,0,18,157,1,0,0,
-  	0,20,159,1,0,0,0,22,161,1,0,0,0,24,25,3,2,1,0,25,26,5,0,0,1,26,1,1,0,
-  	0,0,27,28,6,1,-1,0,28,29,5,1,0,0,29,30,3,2,1,0,30,31,5,2,0,0,31,39,1,
-  	0,0,0,32,33,5,8,0,0,33,34,5,1,0,0,34,35,3,2,1,0,35,36,5,2,0,0,36,39,1,
-  	0,0,0,37,39,3,4,2,0,38,27,1,0,0,0,38,32,1,0,0,0,38,37,1,0,0,0,39,45,1,
-  	0,0,0,40,41,10,2,0,0,41,42,7,0,0,0,42,44,3,2,1,3,43,40,1,0,0,0,44,47,
-  	1,0,0,0,45,43,1,0,0,0,45,46,1,0,0,0,46,3,1,0,0,0,47,45,1,0,0,0,48,49,
-  	7,1,0,0,49,50,5,1,0,0,50,51,3,20,10,0,51,52,5,3,0,0,52,53,3,14,7,0,53,
-  	54,5,2,0,0,54,97,1,0,0,0,55,56,7,1,0,0,56,57,5,1,0,0,57,58,3,20,10,0,
-  	58,59,5,3,0,0,59,60,3,14,7,0,60,61,5,3,0,0,61,62,5,24,0,0,62,63,5,2,0,
-  	0,63,97,1,0,0,0,64,65,7,1,0,0,65,66,5,1,0,0,66,67,3,20,10,0,67,68,5,3,
-  	0,0,68,69,3,18,9,0,69,70,5,2,0,0,70,97,1,0,0,0,71,72,7,1,0,0,72,73,5,
-  	1,0,0,73,74,3,20,10,0,74,75,5,3,0,0,75,76,3,18,9,0,76,77,5,3,0,0,77,78,
-  	5,24,0,0,78,79,5,2,0,0,79,97,1,0,0,0,80,81,3,20,10,0,81,82,7,1,0,0,82,
-  	83,3,12,6,0,83,97,1,0,0,0,84,85,3,20,10,0,85,86,7,1,0,0,86,87,3,16,8,
-  	0,87,97,1,0,0,0,88,89,3,6,3,0,89,90,3,10,5,0,90,91,3,22,11,0,91,97,1,
-  	0,0,0,92,93,3,20,10,0,93,94,3,8,4,0,94,95,7,2,0,0,95,97,1,0,0,0,96,48,
-  	1,0,0,0,96,55,1,0,0,0,96,64,1,0,0,0,96,71,1,0,0,0,96,80,1,0,0,0,96,84,
-  	1,0,0,0,96,88,1,0,0,0,96,92,1,0,0,0,97,5,1,0,0,0,98,99,6,3,-1,0,99,106,
-  	3,20,10,0,100,106,3,22,11,0,101,102,5,1,0,0,102,103,3,6,3,0,103,104,5,
-  	2,0,0,104,106,1,0,0,0,105,98,1,0,0,0,105,100,1,0,0,0,105,101,1,0,0,0,
-  	106,115,1,0,0,0,107,108,10,5,0,0,108,109,7,3,0,0,109,114,3,6,3,6,110,
-  	111,10,4,0,0,111,112,7,4,0,0,112,114,3,6,3,5,113,107,1,0,0,0,113,110,
-  	1,0,0,0,114,117,1,0,0,0,115,113,1,0,0,0,115,116,1,0,0,0,116,7,1,0,0,0,
-  	117,115,1,0,0,0,118,119,7,5,0,0,119,9,1,0,0,0,120,121,7,6,0,0,121,11,
-  	1,0,0,0,122,123,5,4,0,0,123,128,5,22,0,0,124,125,5,3,0,0,125,127,5,22,
-  	0,0,126,124,1,0,0,0,127,130,1,0,0,0,128,126,1,0,0,0,128,129,1,0,0,0,129,
-  	131,1,0,0,0,130,128,1,0,0,0,131,132,5,5,0,0,132,13,1,0,0,0,133,134,7,
-  	7,0,0,134,15,1,0,0,0,135,136,5,4,0,0,136,141,5,26,0,0,137,138,5,3,0,0,
-  	138,140,5,26,0,0,139,137,1,0,0,0,140,143,1,0,0,0,141,139,1,0,0,0,141,
-  	142,1,0,0,0,142,144,1,0,0,0,143,141,1,0,0,0,144,156,5,5,0,0,145,146,5,
-  	4,0,0,146,151,5,25,0,0,147,148,5,3,0,0,148,150,5,25,0,0,149,147,1,0,0,
-  	0,150,153,1,0,0,0,151,149,1,0,0,0,151,152,1,0,0,0,152,154,1,0,0,0,153,
-  	151,1,0,0,0,154,156,5,5,0,0,155,135,1,0,0,0,155,145,1,0,0,0,156,17,1,
-  	0,0,0,157,158,7,8,0,0,158,19,1,0,0,0,159,160,5,21,0,0,160,21,1,0,0,0,
-  	161,162,7,9,0,0,162,23,1,0,0,0,10,38,45,96,105,113,115,128,141,151,155
+  	2,1,2,1,2,1,2,1,2,1,2,1,2,1,2,1,2,1,2,1,2,1,2,1,2,1,2,1,2,1,2,1,2,1,2,
+  	1,2,1,2,1,2,1,2,1,2,1,2,1,2,1,2,1,2,1,2,1,2,1,2,1,2,1,2,1,2,1,2,1,2,1,
+  	2,1,2,1,2,1,2,1,2,1,2,1,2,1,2,1,2,1,2,3,2,125,8,2,1,3,1,3,1,3,1,3,1,3,
+  	1,3,1,3,3,3,134,8,3,1,3,1,3,1,3,1,3,1,3,1,3,5,3,142,8,3,10,3,12,3,145,
+  	9,3,1,4,1,4,1,5,1,5,1,6,1,6,1,6,1,6,5,6,155,8,6,10,6,12,6,158,9,6,1,6,
+  	1,6,1,7,1,7,1,8,1,8,1,8,1,8,5,8,168,8,8,10,8,12,8,171,9,8,1,8,1,8,1,8,
+  	1,8,1,8,5,8,178,8,8,10,8,12,8,181,9,8,1,8,3,8,184,8,8,1,9,1,9,1,10,1,
+  	10,3,10,190,8,10,1,11,1,11,1,12,1,12,1,13,1,13,1,13,0,2,2,6,14,0,2,4,
+  	6,8,10,12,14,16,18,20,22,24,26,0,10,1,0,8,9,1,0,11,12,1,0,27,28,1,0,19,
+  	20,1,0,21,22,1,0,13,14,1,0,13,18,2,0,27,27,29,29,2,0,28,28,30,30,2,0,
+  	24,24,31,31,204,0,28,1,0,0,0,2,42,1,0,0,0,4,124,1,0,0,0,6,133,1,0,0,0,
+  	8,146,1,0,0,0,10,148,1,0,0,0,12,150,1,0,0,0,14,161,1,0,0,0,16,183,1,0,
+  	0,0,18,185,1,0,0,0,20,189,1,0,0,0,22,191,1,0,0,0,24,193,1,0,0,0,26,195,
+  	1,0,0,0,28,29,3,2,1,0,29,30,5,0,0,1,30,1,1,0,0,0,31,32,6,1,-1,0,32,33,
+  	5,1,0,0,33,34,3,2,1,0,34,35,5,2,0,0,35,43,1,0,0,0,36,37,5,10,0,0,37,38,
+  	5,1,0,0,38,39,3,2,1,0,39,40,5,2,0,0,40,43,1,0,0,0,41,43,3,4,2,0,42,31,
+  	1,0,0,0,42,36,1,0,0,0,42,41,1,0,0,0,43,49,1,0,0,0,44,45,10,2,0,0,45,46,
+  	7,0,0,0,46,48,3,2,1,3,47,44,1,0,0,0,48,51,1,0,0,0,49,47,1,0,0,0,49,50,
+  	1,0,0,0,50,3,1,0,0,0,51,49,1,0,0,0,52,53,7,1,0,0,53,54,5,1,0,0,54,55,
+  	3,22,11,0,55,56,5,3,0,0,56,57,3,14,7,0,57,58,5,2,0,0,58,125,1,0,0,0,59,
+  	60,7,1,0,0,60,61,5,1,0,0,61,62,3,22,11,0,62,63,5,3,0,0,63,64,3,14,7,0,
+  	64,65,5,3,0,0,65,66,5,26,0,0,66,67,5,2,0,0,67,125,1,0,0,0,68,69,7,1,0,
+  	0,69,70,5,1,0,0,70,71,3,22,11,0,71,72,5,3,0,0,72,73,3,18,9,0,73,74,5,
+  	2,0,0,74,125,1,0,0,0,75,76,7,1,0,0,76,77,5,1,0,0,77,78,3,22,11,0,78,79,
+  	5,3,0,0,79,80,3,18,9,0,80,81,5,3,0,0,81,82,5,26,0,0,82,83,5,2,0,0,83,
+  	125,1,0,0,0,84,85,5,6,0,0,85,86,5,1,0,0,86,87,3,24,12,0,87,88,5,3,0,0,
+  	88,89,3,20,10,0,89,90,5,3,0,0,90,91,3,18,9,0,91,92,5,2,0,0,92,125,1,0,
+  	0,0,93,94,5,7,0,0,94,95,5,1,0,0,95,96,3,22,11,0,96,97,5,3,0,0,97,98,3,
+  	22,11,0,98,99,5,3,0,0,99,100,3,22,11,0,100,101,5,3,0,0,101,102,3,14,7,
+  	0,102,103,5,3,0,0,103,104,3,14,7,0,104,105,5,3,0,0,105,106,3,14,7,0,106,
+  	107,5,2,0,0,107,125,1,0,0,0,108,109,3,22,11,0,109,110,7,1,0,0,110,111,
+  	3,12,6,0,111,125,1,0,0,0,112,113,3,22,11,0,113,114,7,1,0,0,114,115,3,
+  	16,8,0,115,125,1,0,0,0,116,117,3,6,3,0,117,118,3,10,5,0,118,119,3,26,
+  	13,0,119,125,1,0,0,0,120,121,3,22,11,0,121,122,3,8,4,0,122,123,7,2,0,
+  	0,123,125,1,0,0,0,124,52,1,0,0,0,124,59,1,0,0,0,124,68,1,0,0,0,124,75,
+  	1,0,0,0,124,84,1,0,0,0,124,93,1,0,0,0,124,108,1,0,0,0,124,112,1,0,0,0,
+  	124,116,1,0,0,0,124,120,1,0,0,0,125,5,1,0,0,0,126,127,6,3,-1,0,127,134,
+  	3,22,11,0,128,134,3,26,13,0,129,130,5,1,0,0,130,131,3,6,3,0,131,132,5,
+  	2,0,0,132,134,1,0,0,0,133,126,1,0,0,0,133,128,1,0,0,0,133,129,1,0,0,0,
+  	134,143,1,0,0,0,135,136,10,5,0,0,136,137,7,3,0,0,137,142,3,6,3,6,138,
+  	139,10,4,0,0,139,140,7,4,0,0,140,142,3,6,3,5,141,135,1,0,0,0,141,138,
+  	1,0,0,0,142,145,1,0,0,0,143,141,1,0,0,0,143,144,1,0,0,0,144,7,1,0,0,0,
+  	145,143,1,0,0,0,146,147,7,5,0,0,147,9,1,0,0,0,148,149,7,6,0,0,149,11,
+  	1,0,0,0,150,151,5,4,0,0,151,156,5,24,0,0,152,153,5,3,0,0,153,155,5,24,
+  	0,0,154,152,1,0,0,0,155,158,1,0,0,0,156,154,1,0,0,0,156,157,1,0,0,0,157,
+  	159,1,0,0,0,158,156,1,0,0,0,159,160,5,5,0,0,160,13,1,0,0,0,161,162,7,
+  	7,0,0,162,15,1,0,0,0,163,164,5,4,0,0,164,169,5,28,0,0,165,166,5,3,0,0,
+  	166,168,5,28,0,0,167,165,1,0,0,0,168,171,1,0,0,0,169,167,1,0,0,0,169,
+  	170,1,0,0,0,170,172,1,0,0,0,171,169,1,0,0,0,172,184,5,5,0,0,173,174,5,
+  	4,0,0,174,179,5,27,0,0,175,176,5,3,0,0,176,178,5,27,0,0,177,175,1,0,0,
+  	0,178,181,1,0,0,0,179,177,1,0,0,0,179,180,1,0,0,0,180,182,1,0,0,0,181,
+  	179,1,0,0,0,182,184,5,5,0,0,183,163,1,0,0,0,183,173,1,0,0,0,184,17,1,
+  	0,0,0,185,186,7,8,0,0,186,19,1,0,0,0,187,190,3,18,9,0,188,190,3,14,7,
+  	0,189,187,1,0,0,0,189,188,1,0,0,0,190,21,1,0,0,0,191,192,5,23,0,0,192,
+  	23,1,0,0,0,193,194,5,23,0,0,194,25,1,0,0,0,195,196,7,9,0,0,196,27,1,0,
+  	0,0,11,42,49,124,133,141,143,156,169,179,183,189
   };
   staticData->serializedATN = antlr4::atn::SerializedATNView(serializedATNSegment, sizeof(serializedATNSegment) / sizeof(serializedATNSegment[0]));
 
@@ -220,9 +231,9 @@ FCParser::Filter_conditionContext* FCParser::filter_condition() {
   });
   try {
     enterOuterAlt(_localctx, 1);
-    setState(24);
+    setState(28);
     expr(0);
-    setState(25);
+    setState(29);
     match(FCParser::EOF);
    
   }
@@ -392,7 +403,7 @@ FCParser::ExprContext* FCParser::expr(int precedence) {
   try {
     size_t alt;
     enterOuterAlt(_localctx, 1);
-    setState(38);
+    setState(42);
     _errHandler->sync(this);
     switch (getInterpreter<atn::ParserATNSimulator>()->adaptivePredict(_input, 0, _ctx)) {
     case 1: {
@@ -400,11 +411,11 @@ FCParser::ExprContext* FCParser::expr(int precedence) {
       _ctx = _localctx;
       previousContext = _localctx;
 
-      setState(28);
+      setState(32);
       match(FCParser::T__0);
-      setState(29);
+      setState(33);
       expr(0);
-      setState(30);
+      setState(34);
       match(FCParser::T__1);
       break;
     }
@@ -413,13 +424,13 @@ FCParser::ExprContext* FCParser::expr(int precedence) {
       _localctx = _tracker.createInstance<NotExprContext>(_localctx);
       _ctx = _localctx;
       previousContext = _localctx;
-      setState(32);
+      setState(36);
       match(FCParser::NOT);
-      setState(33);
+      setState(37);
       match(FCParser::T__0);
-      setState(34);
+      setState(38);
       expr(0);
-      setState(35);
+      setState(39);
       match(FCParser::T__1);
       break;
     }
@@ -428,7 +439,7 @@ FCParser::ExprContext* FCParser::expr(int precedence) {
       _localctx = _tracker.createInstance<CompExprContext>(_localctx);
       _ctx = _localctx;
       previousContext = _localctx;
-      setState(37);
+      setState(41);
       comparison();
       break;
     }
@@ -437,7 +448,7 @@ FCParser::ExprContext* FCParser::expr(int precedence) {
       break;
     }
     _ctx->stop = _input->LT(-1);
-    setState(45);
+    setState(49);
     _errHandler->sync(this);
     alt = getInterpreter<atn::ParserATNSimulator>()->adaptivePredict(_input, 1, _ctx);
     while (alt != 2 && alt != atn::ATN::INVALID_ALT_NUMBER) {
@@ -449,10 +460,10 @@ FCParser::ExprContext* FCParser::expr(int precedence) {
         _localctx = newContext;
         newContext->left = previousContext;
         pushNewRecursionContext(newContext, startState, RuleExpr);
-        setState(40);
+        setState(44);
 
         if (!(precpred(_ctx, 2))) throw FailedPredicateException(this, "precpred(_ctx, 2)");
-        setState(41);
+        setState(45);
         antlrcpp::downCast<LogicalExprContext *>(_localctx)->op = _input->LT(1);
         _la = _input->LA(1);
         if (!(_la == FCParser::AND
@@ -464,10 +475,10 @@ FCParser::ExprContext* FCParser::expr(int precedence) {
           _errHandler->reportMatch(this);
           consume();
         }
-        setState(42);
+        setState(46);
         antlrcpp::downCast<LogicalExprContext *>(_localctx)->right = expr(3); 
       }
-      setState(47);
+      setState(51);
       _errHandler->sync(this);
       alt = getInterpreter<atn::ParserATNSimulator>()->adaptivePredict(_input, 1, _ctx);
     }
@@ -688,6 +699,47 @@ std::any FCParser::StrPipeListExprContext::accept(tree::ParseTreeVisitor *visito
   else
     return visitor->visitChildren(this);
 }
+//----------------- RegionFilterExprContext ------------------------------------------------------------------
+
+std::vector<FCParser::Field_nameContext *> FCParser::RegionFilterExprContext::field_name() {
+  return getRuleContexts<FCParser::Field_nameContext>();
+}
+
+FCParser::Field_nameContext* FCParser::RegionFilterExprContext::field_name(size_t i) {
+  return getRuleContext<FCParser::Field_nameContext>(i);
+}
+
+std::vector<FCParser::Int_pipe_listContext *> FCParser::RegionFilterExprContext::int_pipe_list() {
+  return getRuleContexts<FCParser::Int_pipe_listContext>();
+}
+
+FCParser::Int_pipe_listContext* FCParser::RegionFilterExprContext::int_pipe_list(size_t i) {
+  return getRuleContext<FCParser::Int_pipe_listContext>(i);
+}
+
+tree::TerminalNode* FCParser::RegionFilterExprContext::REGION_FILTER() {
+  return getToken(FCParser::REGION_FILTER, 0);
+}
+
+FCParser::RegionFilterExprContext::RegionFilterExprContext(ComparisonContext *ctx) { copyFrom(ctx); }
+
+void FCParser::RegionFilterExprContext::enterRule(tree::ParseTreeListener *listener) {
+  auto parserListener = dynamic_cast<FCListener *>(listener);
+  if (parserListener != nullptr)
+    parserListener->enterRegionFilterExpr(this);
+}
+void FCParser::RegionFilterExprContext::exitRule(tree::ParseTreeListener *listener) {
+  auto parserListener = dynamic_cast<FCListener *>(listener);
+  if (parserListener != nullptr)
+    parserListener->exitRegionFilterExpr(this);
+}
+
+std::any FCParser::RegionFilterExprContext::accept(tree::ParseTreeVisitor *visitor) {
+  if (auto parserVisitor = dynamic_cast<FCVisitor*>(visitor))
+    return parserVisitor->visitRegionFilterExpr(this);
+  else
+    return visitor->visitChildren(this);
+}
 //----------------- NumericComparisonContext ------------------------------------------------------------------
 
 FCParser::Field_exprContext* FCParser::NumericComparisonContext::field_expr() {
@@ -721,6 +773,43 @@ std::any FCParser::NumericComparisonContext::accept(tree::ParseTreeVisitor *visi
   else
     return visitor->visitChildren(this);
 }
+//----------------- FunctionExprContext ------------------------------------------------------------------
+
+FCParser::Function_nameContext* FCParser::FunctionExprContext::function_name() {
+  return getRuleContext<FCParser::Function_nameContext>(0);
+}
+
+FCParser::Arg_pipe_listContext* FCParser::FunctionExprContext::arg_pipe_list() {
+  return getRuleContext<FCParser::Arg_pipe_listContext>(0);
+}
+
+FCParser::Str_pipe_listContext* FCParser::FunctionExprContext::str_pipe_list() {
+  return getRuleContext<FCParser::Str_pipe_listContext>(0);
+}
+
+tree::TerminalNode* FCParser::FunctionExprContext::FUNCTION() {
+  return getToken(FCParser::FUNCTION, 0);
+}
+
+FCParser::FunctionExprContext::FunctionExprContext(ComparisonContext *ctx) { copyFrom(ctx); }
+
+void FCParser::FunctionExprContext::enterRule(tree::ParseTreeListener *listener) {
+  auto parserListener = dynamic_cast<FCListener *>(listener);
+  if (parserListener != nullptr)
+    parserListener->enterFunctionExpr(this);
+}
+void FCParser::FunctionExprContext::exitRule(tree::ParseTreeListener *listener) {
+  auto parserListener = dynamic_cast<FCListener *>(listener);
+  if (parserListener != nullptr)
+    parserListener->exitFunctionExpr(this);
+}
+
+std::any FCParser::FunctionExprContext::accept(tree::ParseTreeVisitor *visitor) {
+  if (auto parserVisitor = dynamic_cast<FCVisitor*>(visitor))
+    return parserVisitor->visitFunctionExpr(this);
+  else
+    return visitor->visitChildren(this);
+}
 FCParser::ComparisonContext* FCParser::comparison() {
   ComparisonContext *_localctx = _tracker.createInstance<ComparisonContext>(_ctx, getState());
   enterRule(_localctx, 4, FCParser::RuleComparison);
@@ -734,13 +823,13 @@ FCParser::ComparisonContext* FCParser::comparison() {
     exitRule();
   });
   try {
-    setState(96);
+    setState(124);
     _errHandler->sync(this);
     switch (getInterpreter<atn::ParserATNSimulator>()->adaptivePredict(_input, 2, _ctx)) {
     case 1: {
       _localctx = _tracker.createInstance<FCParser::IntPipeListExprContext>(_localctx);
       enterOuterAlt(_localctx, 1);
-      setState(48);
+      setState(52);
       antlrcpp::downCast<IntPipeListExprContext *>(_localctx)->op = _input->LT(1);
       _la = _input->LA(1);
       if (!(_la == FCParser::IN
@@ -752,15 +841,15 @@ FCParser::ComparisonContext* FCParser::comparison() {
         _errHandler->reportMatch(this);
         consume();
       }
-      setState(49);
-      match(FCParser::T__0);
-      setState(50);
-      field_name();
-      setState(51);
-      match(FCParser::T__2);
-      setState(52);
-      int_pipe_list();
       setState(53);
+      match(FCParser::T__0);
+      setState(54);
+      field_name();
+      setState(55);
+      match(FCParser::T__2);
+      setState(56);
+      int_pipe_list();
+      setState(57);
       match(FCParser::T__1);
       break;
     }
@@ -768,7 +857,7 @@ FCParser::ComparisonContext* FCParser::comparison() {
     case 2: {
       _localctx = _tracker.createInstance<FCParser::IntPipeListExprContext>(_localctx);
       enterOuterAlt(_localctx, 2);
-      setState(55);
+      setState(59);
       antlrcpp::downCast<IntPipeListExprContext *>(_localctx)->op = _input->LT(1);
       _la = _input->LA(1);
       if (!(_la == FCParser::IN
@@ -780,19 +869,19 @@ FCParser::ComparisonContext* FCParser::comparison() {
         _errHandler->reportMatch(this);
         consume();
       }
-      setState(56);
-      match(FCParser::T__0);
-      setState(57);
-      field_name();
-      setState(58);
-      match(FCParser::T__2);
-      setState(59);
-      int_pipe_list();
       setState(60);
-      match(FCParser::T__2);
+      match(FCParser::T__0);
       setState(61);
-      match(FCParser::SEP_STR);
+      field_name();
       setState(62);
+      match(FCParser::T__2);
+      setState(63);
+      int_pipe_list();
+      setState(64);
+      match(FCParser::T__2);
+      setState(65);
+      match(FCParser::SEP_STR);
+      setState(66);
       match(FCParser::T__1);
       break;
     }
@@ -800,7 +889,7 @@ FCParser::ComparisonContext* FCParser::comparison() {
     case 3: {
       _localctx = _tracker.createInstance<FCParser::StrPipeListExprContext>(_localctx);
       enterOuterAlt(_localctx, 3);
-      setState(64);
+      setState(68);
       antlrcpp::downCast<StrPipeListExprContext *>(_localctx)->op = _input->LT(1);
       _la = _input->LA(1);
       if (!(_la == FCParser::IN
@@ -812,15 +901,15 @@ FCParser::ComparisonContext* FCParser::comparison() {
         _errHandler->reportMatch(this);
         consume();
       }
-      setState(65);
-      match(FCParser::T__0);
-      setState(66);
-      field_name();
-      setState(67);
-      match(FCParser::T__2);
-      setState(68);
-      str_pipe_list();
       setState(69);
+      match(FCParser::T__0);
+      setState(70);
+      field_name();
+      setState(71);
+      match(FCParser::T__2);
+      setState(72);
+      str_pipe_list();
+      setState(73);
       match(FCParser::T__1);
       break;
     }
@@ -828,7 +917,7 @@ FCParser::ComparisonContext* FCParser::comparison() {
     case 4: {
       _localctx = _tracker.createInstance<FCParser::StrPipeListExprContext>(_localctx);
       enterOuterAlt(_localctx, 4);
-      setState(71);
+      setState(75);
       antlrcpp::downCast<StrPipeListExprContext *>(_localctx)->op = _input->LT(1);
       _la = _input->LA(1);
       if (!(_la == FCParser::IN
@@ -840,29 +929,85 @@ FCParser::ComparisonContext* FCParser::comparison() {
         _errHandler->reportMatch(this);
         consume();
       }
-      setState(72);
-      match(FCParser::T__0);
-      setState(73);
-      field_name();
-      setState(74);
-      match(FCParser::T__2);
-      setState(75);
-      str_pipe_list();
       setState(76);
-      match(FCParser::T__2);
+      match(FCParser::T__0);
       setState(77);
-      match(FCParser::SEP_STR);
+      field_name();
       setState(78);
+      match(FCParser::T__2);
+      setState(79);
+      str_pipe_list();
+      setState(80);
+      match(FCParser::T__2);
+      setState(81);
+      match(FCParser::SEP_STR);
+      setState(82);
       match(FCParser::T__1);
       break;
     }
 
     case 5: {
-      _localctx = _tracker.createInstance<FCParser::IntListExprContext>(_localctx);
+      _localctx = _tracker.createInstance<FCParser::FunctionExprContext>(_localctx);
       enterOuterAlt(_localctx, 5);
-      setState(80);
+      setState(84);
+      antlrcpp::downCast<FunctionExprContext *>(_localctx)->op = match(FCParser::FUNCTION);
+      setState(85);
+      match(FCParser::T__0);
+      setState(86);
+      function_name();
+      setState(87);
+      match(FCParser::T__2);
+      setState(88);
+      arg_pipe_list();
+      setState(89);
+      match(FCParser::T__2);
+      setState(90);
+      str_pipe_list();
+      setState(91);
+      match(FCParser::T__1);
+      break;
+    }
+
+    case 6: {
+      _localctx = _tracker.createInstance<FCParser::RegionFilterExprContext>(_localctx);
+      enterOuterAlt(_localctx, 6);
+      setState(93);
+      antlrcpp::downCast<RegionFilterExprContext *>(_localctx)->op = match(FCParser::REGION_FILTER);
+      setState(94);
+      match(FCParser::T__0);
+      setState(95);
       field_name();
-      setState(81);
+      setState(96);
+      match(FCParser::T__2);
+      setState(97);
+      field_name();
+      setState(98);
+      match(FCParser::T__2);
+      setState(99);
+      field_name();
+      setState(100);
+      match(FCParser::T__2);
+      setState(101);
+      int_pipe_list();
+      setState(102);
+      match(FCParser::T__2);
+      setState(103);
+      int_pipe_list();
+      setState(104);
+      match(FCParser::T__2);
+      setState(105);
+      int_pipe_list();
+      setState(106);
+      match(FCParser::T__1);
+      break;
+    }
+
+    case 7: {
+      _localctx = _tracker.createInstance<FCParser::IntListExprContext>(_localctx);
+      enterOuterAlt(_localctx, 7);
+      setState(108);
+      field_name();
+      setState(109);
       antlrcpp::downCast<IntListExprContext *>(_localctx)->op = _input->LT(1);
       _la = _input->LA(1);
       if (!(_la == FCParser::IN
@@ -874,17 +1019,17 @@ FCParser::ComparisonContext* FCParser::comparison() {
         _errHandler->reportMatch(this);
         consume();
       }
-      setState(82);
+      setState(110);
       int_value_list();
       break;
     }
 
-    case 6: {
+    case 8: {
       _localctx = _tracker.createInstance<FCParser::StrListExprContext>(_localctx);
-      enterOuterAlt(_localctx, 6);
-      setState(84);
+      enterOuterAlt(_localctx, 8);
+      setState(112);
       field_name();
-      setState(85);
+      setState(113);
       antlrcpp::downCast<StrListExprContext *>(_localctx)->op = _input->LT(1);
       _la = _input->LA(1);
       if (!(_la == FCParser::IN
@@ -896,31 +1041,31 @@ FCParser::ComparisonContext* FCParser::comparison() {
         _errHandler->reportMatch(this);
         consume();
       }
-      setState(86);
+      setState(114);
       str_value_list();
       break;
     }
 
-    case 7: {
+    case 9: {
       _localctx = _tracker.createInstance<FCParser::NumericComparisonContext>(_localctx);
-      enterOuterAlt(_localctx, 7);
-      setState(88);
+      enterOuterAlt(_localctx, 9);
+      setState(116);
       field_expr(0);
-      setState(89);
+      setState(117);
       antlrcpp::downCast<NumericComparisonContext *>(_localctx)->op = comparison_op();
-      setState(90);
+      setState(118);
       numeric();
       break;
     }
 
-    case 8: {
+    case 10: {
       _localctx = _tracker.createInstance<FCParser::StringComparisonContext>(_localctx);
-      enterOuterAlt(_localctx, 8);
-      setState(92);
+      enterOuterAlt(_localctx, 10);
+      setState(120);
       field_name();
-      setState(93);
+      setState(121);
       antlrcpp::downCast<StringComparisonContext *>(_localctx)->op = comparison_sop();
-      setState(94);
+      setState(122);
       _la = _input->LA(1);
       if (!(_la == FCParser::INT_STRING
 
@@ -1109,7 +1254,7 @@ FCParser::Field_exprContext* FCParser::field_expr(int precedence) {
   try {
     size_t alt;
     enterOuterAlt(_localctx, 1);
-    setState(105);
+    setState(133);
     _errHandler->sync(this);
     switch (_input->LA(1)) {
       case FCParser::ID: {
@@ -1117,7 +1262,7 @@ FCParser::Field_exprContext* FCParser::field_expr(int precedence) {
         _ctx = _localctx;
         previousContext = _localctx;
 
-        setState(99);
+        setState(127);
         field_name();
         break;
       }
@@ -1127,7 +1272,7 @@ FCParser::Field_exprContext* FCParser::field_expr(int precedence) {
         _localctx = _tracker.createInstance<NumericConstContext>(_localctx);
         _ctx = _localctx;
         previousContext = _localctx;
-        setState(100);
+        setState(128);
         numeric();
         break;
       }
@@ -1136,11 +1281,11 @@ FCParser::Field_exprContext* FCParser::field_expr(int precedence) {
         _localctx = _tracker.createInstance<ParenFieldExprContext>(_localctx);
         _ctx = _localctx;
         previousContext = _localctx;
-        setState(101);
+        setState(129);
         match(FCParser::T__0);
-        setState(102);
+        setState(130);
         field_expr(0);
-        setState(103);
+        setState(131);
         match(FCParser::T__1);
         break;
       }
@@ -1149,7 +1294,7 @@ FCParser::Field_exprContext* FCParser::field_expr(int precedence) {
       throw NoViableAltException(this);
     }
     _ctx->stop = _input->LT(-1);
-    setState(115);
+    setState(143);
     _errHandler->sync(this);
     alt = getInterpreter<atn::ParserATNSimulator>()->adaptivePredict(_input, 5, _ctx);
     while (alt != 2 && alt != atn::ATN::INVALID_ALT_NUMBER) {
@@ -1157,17 +1302,17 @@ FCParser::Field_exprContext* FCParser::field_expr(int precedence) {
         if (!_parseListeners.empty())
           triggerExitRuleEvent();
         previousContext = _localctx;
-        setState(113);
+        setState(141);
         _errHandler->sync(this);
         switch (getInterpreter<atn::ParserATNSimulator>()->adaptivePredict(_input, 4, _ctx)) {
         case 1: {
           auto newContext = _tracker.createInstance<ArithmeticExprContext>(_tracker.createInstance<Field_exprContext>(parentContext, parentState));
           _localctx = newContext;
           pushNewRecursionContext(newContext, startState, RuleField_expr);
-          setState(107);
+          setState(135);
 
           if (!(precpred(_ctx, 5))) throw FailedPredicateException(this, "precpred(_ctx, 5)");
-          setState(108);
+          setState(136);
           antlrcpp::downCast<ArithmeticExprContext *>(_localctx)->op = _input->LT(1);
           _la = _input->LA(1);
           if (!(_la == FCParser::MUL
@@ -1179,7 +1324,7 @@ FCParser::Field_exprContext* FCParser::field_expr(int precedence) {
             _errHandler->reportMatch(this);
             consume();
           }
-          setState(109);
+          setState(137);
           field_expr(6);
           break;
         }
@@ -1188,10 +1333,10 @@ FCParser::Field_exprContext* FCParser::field_expr(int precedence) {
           auto newContext = _tracker.createInstance<ArithmeticExprContext>(_tracker.createInstance<Field_exprContext>(parentContext, parentState));
           _localctx = newContext;
           pushNewRecursionContext(newContext, startState, RuleField_expr);
-          setState(110);
+          setState(138);
 
           if (!(precpred(_ctx, 4))) throw FailedPredicateException(this, "precpred(_ctx, 4)");
-          setState(111);
+          setState(139);
           antlrcpp::downCast<ArithmeticExprContext *>(_localctx)->op = _input->LT(1);
           _la = _input->LA(1);
           if (!(_la == FCParser::ADD
@@ -1203,7 +1348,7 @@ FCParser::Field_exprContext* FCParser::field_expr(int precedence) {
             _errHandler->reportMatch(this);
             consume();
           }
-          setState(112);
+          setState(140);
           field_expr(5);
           break;
         }
@@ -1212,7 +1357,7 @@ FCParser::Field_exprContext* FCParser::field_expr(int precedence) {
           break;
         } 
       }
-      setState(117);
+      setState(145);
       _errHandler->sync(this);
       alt = getInterpreter<atn::ParserATNSimulator>()->adaptivePredict(_input, 5, _ctx);
     }
@@ -1278,7 +1423,7 @@ FCParser::Comparison_sopContext* FCParser::comparison_sop() {
   });
   try {
     enterOuterAlt(_localctx, 1);
-    setState(118);
+    setState(146);
     _la = _input->LA(1);
     if (!(_la == FCParser::EQ
 
@@ -1369,10 +1514,10 @@ FCParser::Comparison_opContext* FCParser::comparison_op() {
   });
   try {
     enterOuterAlt(_localctx, 1);
-    setState(120);
+    setState(148);
     _la = _input->LA(1);
     if (!((((_la & ~ 0x3fULL) == 0) &&
-      ((1ULL << _la) & 129024) != 0))) {
+      ((1ULL << _la) & 516096) != 0))) {
     _errHandler->recoverInline(this);
     }
     else {
@@ -1443,23 +1588,23 @@ FCParser::Int_value_listContext* FCParser::int_value_list() {
   });
   try {
     enterOuterAlt(_localctx, 1);
-    setState(122);
+    setState(150);
     match(FCParser::T__3);
-    setState(123);
+    setState(151);
     match(FCParser::INTEGER);
-    setState(128);
+    setState(156);
     _errHandler->sync(this);
     _la = _input->LA(1);
     while (_la == FCParser::T__2) {
-      setState(124);
+      setState(152);
       match(FCParser::T__2);
-      setState(125);
+      setState(153);
       match(FCParser::INTEGER);
-      setState(130);
+      setState(158);
       _errHandler->sync(this);
       _la = _input->LA(1);
     }
-    setState(131);
+    setState(159);
     match(FCParser::T__4);
    
   }
@@ -1525,7 +1670,7 @@ FCParser::Int_pipe_listContext* FCParser::int_pipe_list() {
   });
   try {
     enterOuterAlt(_localctx, 1);
-    setState(133);
+    setState(161);
     _la = _input->LA(1);
     if (!(_la == FCParser::INT_STRING
 
@@ -1607,51 +1752,51 @@ FCParser::Str_value_listContext* FCParser::str_value_list() {
     exitRule();
   });
   try {
-    setState(155);
+    setState(183);
     _errHandler->sync(this);
     switch (getInterpreter<atn::ParserATNSimulator>()->adaptivePredict(_input, 9, _ctx)) {
     case 1: {
       enterOuterAlt(_localctx, 1);
-      setState(135);
+      setState(163);
       match(FCParser::T__3);
-      setState(136);
+      setState(164);
       match(FCParser::STRING);
-      setState(141);
+      setState(169);
       _errHandler->sync(this);
       _la = _input->LA(1);
       while (_la == FCParser::T__2) {
-        setState(137);
+        setState(165);
         match(FCParser::T__2);
-        setState(138);
+        setState(166);
         match(FCParser::STRING);
-        setState(143);
+        setState(171);
         _errHandler->sync(this);
         _la = _input->LA(1);
       }
-      setState(144);
+      setState(172);
       match(FCParser::T__4);
       break;
     }
 
     case 2: {
       enterOuterAlt(_localctx, 2);
-      setState(145);
+      setState(173);
       match(FCParser::T__3);
-      setState(146);
+      setState(174);
       match(FCParser::INT_STRING);
-      setState(151);
+      setState(179);
       _errHandler->sync(this);
       _la = _input->LA(1);
       while (_la == FCParser::T__2) {
-        setState(147);
+        setState(175);
         match(FCParser::T__2);
-        setState(148);
+        setState(176);
         match(FCParser::INT_STRING);
-        setState(153);
+        setState(181);
         _errHandler->sync(this);
         _la = _input->LA(1);
       }
-      setState(154);
+      setState(182);
       match(FCParser::T__4);
       break;
     }
@@ -1723,7 +1868,7 @@ FCParser::Str_pipe_listContext* FCParser::str_pipe_list() {
   });
   try {
     enterOuterAlt(_localctx, 1);
-    setState(157);
+    setState(185);
     _la = _input->LA(1);
     if (!(_la == FCParser::STRING
 
@@ -1733,6 +1878,90 @@ FCParser::Str_pipe_listContext* FCParser::str_pipe_list() {
     else {
       _errHandler->reportMatch(this);
       consume();
+    }
+   
+  }
+  catch (RecognitionException &e) {
+    _errHandler->reportError(this, e);
+    _localctx->exception = std::current_exception();
+    _errHandler->recover(this, _localctx->exception);
+  }
+
+  return _localctx;
+}
+
+//----------------- Arg_pipe_listContext ------------------------------------------------------------------
+
+FCParser::Arg_pipe_listContext::Arg_pipe_listContext(ParserRuleContext *parent, size_t invokingState)
+  : ParserRuleContext(parent, invokingState) {
+}
+
+FCParser::Str_pipe_listContext* FCParser::Arg_pipe_listContext::str_pipe_list() {
+  return getRuleContext<FCParser::Str_pipe_listContext>(0);
+}
+
+FCParser::Int_pipe_listContext* FCParser::Arg_pipe_listContext::int_pipe_list() {
+  return getRuleContext<FCParser::Int_pipe_listContext>(0);
+}
+
+
+size_t FCParser::Arg_pipe_listContext::getRuleIndex() const {
+  return FCParser::RuleArg_pipe_list;
+}
+
+void FCParser::Arg_pipe_listContext::enterRule(tree::ParseTreeListener *listener) {
+  auto parserListener = dynamic_cast<FCListener *>(listener);
+  if (parserListener != nullptr)
+    parserListener->enterArg_pipe_list(this);
+}
+
+void FCParser::Arg_pipe_listContext::exitRule(tree::ParseTreeListener *listener) {
+  auto parserListener = dynamic_cast<FCListener *>(listener);
+  if (parserListener != nullptr)
+    parserListener->exitArg_pipe_list(this);
+}
+
+
+std::any FCParser::Arg_pipe_listContext::accept(tree::ParseTreeVisitor *visitor) {
+  if (auto parserVisitor = dynamic_cast<FCVisitor*>(visitor))
+    return parserVisitor->visitArg_pipe_list(this);
+  else
+    return visitor->visitChildren(this);
+}
+
+FCParser::Arg_pipe_listContext* FCParser::arg_pipe_list() {
+  Arg_pipe_listContext *_localctx = _tracker.createInstance<Arg_pipe_listContext>(_ctx, getState());
+  enterRule(_localctx, 20, FCParser::RuleArg_pipe_list);
+
+#if __cplusplus > 201703L
+  auto onExit = finally([=, this] {
+#else
+  auto onExit = finally([=] {
+#endif
+    exitRule();
+  });
+  try {
+    setState(189);
+    _errHandler->sync(this);
+    switch (_input->LA(1)) {
+      case FCParser::STRING:
+      case FCParser::PIPE_STR_STR: {
+        enterOuterAlt(_localctx, 1);
+        setState(187);
+        str_pipe_list();
+        break;
+      }
+
+      case FCParser::INT_STRING:
+      case FCParser::PIPE_INT_STR: {
+        enterOuterAlt(_localctx, 2);
+        setState(188);
+        int_pipe_list();
+        break;
+      }
+
+    default:
+      throw NoViableAltException(this);
     }
    
   }
@@ -1782,7 +2011,7 @@ std::any FCParser::Field_nameContext::accept(tree::ParseTreeVisitor *visitor) {
 
 FCParser::Field_nameContext* FCParser::field_name() {
   Field_nameContext *_localctx = _tracker.createInstance<Field_nameContext>(_ctx, getState());
-  enterRule(_localctx, 20, FCParser::RuleField_name);
+  enterRule(_localctx, 22, FCParser::RuleField_name);
 
 #if __cplusplus > 201703L
   auto onExit = finally([=, this] {
@@ -1793,7 +2022,68 @@ FCParser::Field_nameContext* FCParser::field_name() {
   });
   try {
     enterOuterAlt(_localctx, 1);
-    setState(159);
+    setState(191);
+    match(FCParser::ID);
+   
+  }
+  catch (RecognitionException &e) {
+    _errHandler->reportError(this, e);
+    _localctx->exception = std::current_exception();
+    _errHandler->recover(this, _localctx->exception);
+  }
+
+  return _localctx;
+}
+
+//----------------- Function_nameContext ------------------------------------------------------------------
+
+FCParser::Function_nameContext::Function_nameContext(ParserRuleContext *parent, size_t invokingState)
+  : ParserRuleContext(parent, invokingState) {
+}
+
+tree::TerminalNode* FCParser::Function_nameContext::ID() {
+  return getToken(FCParser::ID, 0);
+}
+
+
+size_t FCParser::Function_nameContext::getRuleIndex() const {
+  return FCParser::RuleFunction_name;
+}
+
+void FCParser::Function_nameContext::enterRule(tree::ParseTreeListener *listener) {
+  auto parserListener = dynamic_cast<FCListener *>(listener);
+  if (parserListener != nullptr)
+    parserListener->enterFunction_name(this);
+}
+
+void FCParser::Function_nameContext::exitRule(tree::ParseTreeListener *listener) {
+  auto parserListener = dynamic_cast<FCListener *>(listener);
+  if (parserListener != nullptr)
+    parserListener->exitFunction_name(this);
+}
+
+
+std::any FCParser::Function_nameContext::accept(tree::ParseTreeVisitor *visitor) {
+  if (auto parserVisitor = dynamic_cast<FCVisitor*>(visitor))
+    return parserVisitor->visitFunction_name(this);
+  else
+    return visitor->visitChildren(this);
+}
+
+FCParser::Function_nameContext* FCParser::function_name() {
+  Function_nameContext *_localctx = _tracker.createInstance<Function_nameContext>(_ctx, getState());
+  enterRule(_localctx, 24, FCParser::RuleFunction_name);
+
+#if __cplusplus > 201703L
+  auto onExit = finally([=, this] {
+#else
+  auto onExit = finally([=] {
+#endif
+    exitRule();
+  });
+  try {
+    enterOuterAlt(_localctx, 1);
+    setState(193);
     match(FCParser::ID);
    
   }
@@ -1847,7 +2137,7 @@ std::any FCParser::NumericContext::accept(tree::ParseTreeVisitor *visitor) {
 
 FCParser::NumericContext* FCParser::numeric() {
   NumericContext *_localctx = _tracker.createInstance<NumericContext>(_ctx, getState());
-  enterRule(_localctx, 22, FCParser::RuleNumeric);
+  enterRule(_localctx, 26, FCParser::RuleNumeric);
   size_t _la = 0;
 
 #if __cplusplus > 201703L
@@ -1859,7 +2149,7 @@ FCParser::NumericContext* FCParser::numeric() {
   });
   try {
     enterOuterAlt(_localctx, 1);
-    setState(161);
+    setState(195);
     _la = _input->LA(1);
     if (!(_la == FCParser::INTEGER
 

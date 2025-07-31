@@ -15,8 +15,11 @@
 
 #pragma once
 
+#include <strings.h>
+
 #include <limits>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <variant>
@@ -41,6 +44,8 @@ enum class ExpressionType {
     kStrListExpression,
     kNotExpression,
     kLogicalExpression,
+    kFunctionExpression,
+    kRegionFilterExpression,
 };
 
 /**
@@ -467,5 +472,215 @@ public:
     }
 
     ExprPtr expr;
+};
+
+class FunctionExpression : public Expression {
+public:
+    enum class ArgTypes {
+        kInnerId,
+        kAttribute,
+        kInt16,
+        kUint16,
+        kInt32,
+        kUInt32,
+        kInt64,
+        kUInt64,
+        kFloat,
+        kFloat64,
+        kString,
+    };
+
+    static std::string
+    ArgTypesToString(ArgTypes arg_type) {
+        switch (arg_type) {
+            case ArgTypes::kInnerId:
+                return "inner_id";
+            case ArgTypes::kAttribute:
+                return "attribute";
+            case ArgTypes::kInt16:
+                return "int16";
+            case ArgTypes::kUint16:
+                return "uint16";
+            case ArgTypes::kInt32:
+                return "int32";
+            case ArgTypes::kUInt32:
+                return "uint32";
+            case ArgTypes::kInt64:
+                return "int64";
+            case ArgTypes::kUInt64:
+                return "uint64";
+            case ArgTypes::kFloat:
+                return "float";
+            case ArgTypes::kFloat64:
+                return "float64";
+            case ArgTypes::kString:
+                return "string";
+            default:
+                throw std::runtime_error("unknown arg type");
+        }
+    }
+    using ArgValueType = std::variant<std::string,
+                                      std::int16_t,
+                                      std::uint16_t,
+                                      std::int32_t,
+                                      std::uint32_t,
+                                      std::int64_t,
+                                      std::uint64_t,
+                                      float,
+                                      double>;
+
+    explicit FunctionExpression(const std::string& name,
+                                const std::vector<std::string>& args,
+                                const std::vector<std::string>& types)
+        : Expression(ExpressionType::kFunctionExpression, OpType::kNone), function_name(name) {
+        if (args.size() != types.size()) {
+            throw std::runtime_error(name +
+                                     " function expression args size not equal to types size");
+        }
+
+        for (size_t i = 0; i < args.size(); ++i) {
+            auto& arg_type = types[i];
+            if (arg_type.empty()) {
+                continue;
+            }
+            if (arg_type == "inner_id") {
+                arg_types.emplace_back(ArgTypes::kInnerId);
+                if (args[i] != "placeholder") {
+                    throw std::runtime_error("inner_id arg must be placeholder");
+                }
+                arg_values.emplace_back("placeholder");
+            } else if (arg_type == "attribute") {
+                arg_types.emplace_back(ArgTypes::kAttribute);
+                arg_values.emplace_back(args[i]);
+            } else if (!strcasecmp(arg_type.c_str(), "int16")) {
+                arg_types.emplace_back(ArgTypes::kInt16);
+                auto value = std::stoll(args[i]);
+                if (value < std::numeric_limits<std::int16_t>::min() ||
+                    value > std::numeric_limits<std::int16_t>::max()) {
+                    throw std::runtime_error("Numeric value out of range");
+                }
+                arg_values.emplace_back(static_cast<int16_t>(value));
+            } else if (!strcasecmp(arg_type.c_str(), "uint16")) {
+                arg_types.emplace_back(ArgTypes::kUint16);
+                arg_values.emplace_back(GetNumericValue<std::uint16_t>(args[i]));
+            } else if (!strcasecmp(arg_type.c_str(), "int32")) {
+                arg_types.emplace_back(ArgTypes::kInt32);
+                arg_values.emplace_back(std::stoi(args[i]));
+            } else if (!strcasecmp(arg_type.c_str(), "uint32")) {
+                arg_types.emplace_back(ArgTypes::kUInt32);
+                arg_values.emplace_back(GetNumericValue<std::uint32_t>(args[i]));
+            } else if (!strcasecmp(arg_type.c_str(), "int64")) {
+                arg_types.emplace_back(ArgTypes::kInt64);
+                arg_values.emplace_back(static_cast<std::int64_t>(std::stoll(args[i])));
+            } else if (!strcasecmp(arg_type.c_str(), "uint64")) {
+                arg_types.emplace_back(ArgTypes::kUInt64);
+                arg_values.emplace_back(static_cast<std::uint64_t>(std::stoull(args[i])));
+            } else if (!strcasecmp(arg_type.c_str(), "float")) {
+                arg_types.emplace_back(ArgTypes::kFloat);
+                arg_values.emplace_back(std::stof(args[i]));
+            } else if (!strcasecmp(arg_type.c_str(), "float64")) {
+                arg_types.emplace_back(ArgTypes::kFloat64);
+                arg_values.emplace_back(std::stod(args[i]));
+            } else if (!strcasecmp(arg_type.c_str(), "string")) {
+                arg_types.emplace_back(ArgTypes::kString);
+                arg_values.emplace_back(args[i]);
+            } else {
+                throw std::runtime_error("Unknown argument type: " + arg_type);
+            }
+        }
+    }
+
+    template <typename T>
+    [[nodiscard]] std::optional<T>
+    GetArg(size_t index) const {
+        if (index >= arg_values.size()) {
+            return std::nullopt;
+        }
+        auto& arg_value = arg_values[index];
+        return std::visit(
+            [](auto&& arg) -> std::optional<T> {
+                using V = std::decay_t<decltype(arg)>;
+                if constexpr (std::is_same_v<V, T>) {
+                    return static_cast<T>(arg);
+                }
+                return std::nullopt;
+            },
+            arg_value);
+    }
+
+    [[nodiscard]] std::string
+    ToString() const override {
+        std::string result = "FUNCTION (" + function_name + ",\"";
+        for (size_t i = 0; i < arg_values.size(); ++i) {
+            if (i != 0)
+                result += "|";
+            auto& arg_value = arg_values[i];
+            std::visit(
+                [&result](auto&& arg) {
+                    using V = std::decay_t<decltype(arg)>;
+                    if constexpr (std::is_same_v<V, std::string>) {
+                        result += arg;
+                    } else {
+                        result += std::to_string(arg);
+                    }
+                },
+                arg_value);
+        }
+        result += "\",\"";
+        for (size_t i = 0; i < arg_types.size(); ++i) {
+            if (i != 0)
+                result += "|";
+            result += ArgTypesToString(arg_types[i]);
+        }
+
+        return result + "\")";
+    }
+
+    std::string function_name;
+    std::vector<ArgValueType> arg_values;
+    std::vector<ArgTypes> arg_types;
+
+private:
+    template <typename T>
+    [[nodiscard]] static T
+    GetNumericValue(const std::string& str) {
+        auto value = std::stoull(str);
+        if (value > std::numeric_limits<T>::max()) {
+            throw std::runtime_error("Numeric value out of range");
+        }
+        return static_cast<T>(value);
+    }
+};
+
+class RegionFilterExpression : public Expression {
+public:
+    explicit RegionFilterExpression(ExprPtr region_type,
+                                    ExprPtr region_list,
+                                    ExprPtr residence_tag_list,
+                                    ExprPtr arg0,
+                                    ExprPtr arg1,
+                                    ExprPtr arg2)
+        : Expression(ExpressionType::kRegionFilterExpression, OpType::kNone),
+          region_type(std::move(region_type)),
+          region_list(std::move(region_list)),
+          residence_tag_list(std::move(residence_tag_list)),
+          arg0(std::move(arg0)),
+          arg1(std::move(arg1)),
+          arg2(std::move(arg2)) {
+    }
+
+    std::string
+    ToString() const override {
+        return "region_filter (" + region_type->ToString() + ", " + region_list->ToString() + ", " +
+               residence_tag_list->ToString() + ", " + arg0->ToString() + ", " + arg1->ToString() +
+               ", " + arg2->ToString() + ")";
+    }
+
+    ExprPtr region_type;
+    ExprPtr region_list;
+    ExprPtr residence_tag_list;
+    ExprPtr arg0;
+    ExprPtr arg1;
+    ExprPtr arg2;
 };
 }  // namespace vsag
