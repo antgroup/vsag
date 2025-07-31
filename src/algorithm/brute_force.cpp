@@ -446,4 +446,18 @@ BruteForce::GetVectorByInnerId(InnerIdType inner_id, float* data) const {
     inner_codes_->Decode(codes.data(), data);
 }
 
+void
+BruteForce::UpdateAttribute(int64_t id, const AttributeSet& new_attrs) {
+    auto inner_id = this->label_table_->GetIdByLabel(id);
+    this->attr_filter_index_->UpdateBitsetsByAttr(new_attrs, inner_id, 0);
+}
+
+void
+BruteForce::UpdateAttribute(int64_t id,
+                            const AttributeSet& new_attrs,
+                            const AttributeSet& origin_attrs) {
+    auto inner_id = this->label_table_->GetIdByLabel(id);
+    this->attr_filter_index_->UpdateBitsetsByAttr(new_attrs, inner_id, 0, origin_attrs);
+}
+
 }  // namespace vsag
