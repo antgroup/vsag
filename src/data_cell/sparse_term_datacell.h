@@ -38,7 +38,8 @@ public:
     void
     Query(float* global_dists, const SparseTermComputerPtr& computer) const;
 
-    template <InnerSearchMode mode = InnerSearchMode::KNN_SEARCH>
+    template <InnerSearchMode mode = InnerSearchMode::KNN_SEARCH,
+              InnerSearchType type = InnerSearchType::PURE>
     void
     InsertHeap(float* dists,
                const SparseTermComputerPtr& computer,
