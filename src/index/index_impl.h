@@ -440,6 +440,11 @@ public:
         return this->common_param_;
     }
 
+    [[nodiscard]] inline AttrTypeSchema*
+    GetAttrTypeSchema() const override {
+        return this->inner_index_->GetAttrTypeSchema();
+    }
+
 private:
     tl::expected<InnerIndexPtr, Error>
     clone_inner_index() const {

@@ -375,6 +375,14 @@ public:
                             "Index doesn't support UpdateVector");
     }
 
+    [[nodiscard]] virtual AttrTypeSchema*
+    GetAttrTypeSchema() const {
+        if (this->attr_filter_index_ == nullptr) {
+            throw std::runtime_error("Index not support get attr type schema");
+        }
+        return &this->attr_filter_index_->field_type_map_;
+    }
+
 protected:
     void
     analyze_quantizer(JsonType& stats,

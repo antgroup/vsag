@@ -17,8 +17,9 @@
 
 #include "attr_type_schema.h"
 #include "expression.h"
+#include "vsag/search_request.h"
 
 namespace vsag {
-ExprPtr
-AstParse(const std::string& filter_condition_str, AttrTypeSchema* schema = nullptr);
+// ExprPtr
+// AstParse(const std::string& filter_condition_str, AttrTypeSchema* schema = nullptr);
 }  // namespace vsag
