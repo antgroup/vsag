@@ -12,6 +12,8 @@ comparison: op=(NOT_IN|IN) '(' field_name ',' int_pipe_list ')'                 
           | op=(NOT_IN|IN) '(' field_name ',' int_pipe_list ',' SEP_STR ')'            # intPipeListExpr
           | op=(NOT_IN|IN) '(' field_name ',' str_pipe_list ')'                        # strPipeListExpr
           | op=(NOT_IN|IN) '(' field_name ',' str_pipe_list ',' SEP_STR ')'            # strPipeListExpr
+          | op=FUNCTION '('function_name ',' arg_pipe_list ',' str_pipe_list ')'       # functionExpr
+          | op=REGION_FILTER '(' field_name ',' field_name ',' field_name ',' int_pipe_list ',' int_pipe_list ',' int_pipe_list  ')'      # RegionFilterExpr
           | field_name op=(NOT_IN|IN) int_value_list                                   # intListExpr
           | field_name op=(NOT_IN|IN) str_value_list                                   # strListExpr
           | field_expr op=comparison_op numeric                                        # numericComparison
@@ -34,12 +36,16 @@ int_pipe_list: PIPE_INT_STR | INT_STRING;
 
 str_value_list: '[' STRING (',' STRING)* ']' | '[' INT_STRING (',' INT_STRING)* ']';
 str_pipe_list: PIPE_STR_STR | STRING;
+arg_pipe_list: str_pipe_list | int_pipe_list;
 
 field_name: ID;
+function_name: ID;
 
 numeric: INTEGER | FLOAT;
 
 // 词法规则
+FUNCTION: 'FUNCTION' | 'function';
+REGION_FILTER: 'region_filter';
 AND: 'AND' | 'and' | '&&';
 OR: 'OR' | 'or' | '||';
 NOT: '!';
