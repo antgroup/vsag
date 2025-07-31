@@ -143,7 +143,13 @@ SINDI::search_impl(const SparseTermComputerPtr& computer,
         term_list->Query(dists.data(), computer);
 
         // insert heap
-        term_list->InsertHeap<mode>(dists.data(), computer, heap, inner_param, window_start_id);
+        if (inner_param.is_inner_id_allowed) {
+            term_list->InsertHeap<mode, WITH_FILTER>(
+                dists.data(), computer, heap, inner_param, window_start_id);
+        } else {
+            term_list->InsertHeap<mode, PURE>(
+                dists.data(), computer, heap, inner_param, window_start_id);
+        }
     }
 
     if constexpr (mode == KNN_SEARCH) {

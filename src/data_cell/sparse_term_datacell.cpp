@@ -44,7 +44,7 @@ SparseTermDataCell::Query(float* global_dists, const SparseTermComputerPtr& comp
     computer->ResetTerm();
 }
 
-template <InnerSearchMode mode>
+template <InnerSearchMode mode, InnerSearchType type>
 void
 SparseTermDataCell::InsertHeap(float* dists,
                                const SparseTermComputerPtr& computer,
@@ -72,16 +72,19 @@ SparseTermDataCell::InsertHeap(float* dists,
         }
 
         uint32_t i = 0;
+        auto term_size = static_cast<uint32_t>(static_cast<float>(term_sizes_[term]) *
+                                               computer->term_prune_ratio_);
+        bool is_valid = false;
         if constexpr (mode == InnerSearchMode::KNN_SEARCH) {
             if (heap.size() < n_candidate) {
-                for (; static_cast<float>(i) <
-                       static_cast<float>(term_sizes_[term]) * computer->term_prune_ratio_;
-                     i++) {
+                for (; i < term_size; i++) {
                     id = term_ids_[term][i];
 
-                    if (filter and not filter->CheckValid(id + offset_id)) {
-                        dists[id] = 0;
-                        continue;
+                    if constexpr (type == InnerSearchType::WITH_FILTER) {
+                        if (filter and not filter->CheckValid(id + offset_id)) {
+                            dists[id] = 0;
+                            continue;
+                        }
                     }
 
                     heap.emplace(dists[id], id + offset_id);
@@ -95,13 +98,13 @@ SparseTermDataCell::InsertHeap(float* dists,
             }
         }
 
-        for (; static_cast<float>(i) <
-               static_cast<float>(term_sizes_[term]) * computer->term_prune_ratio_;
-             i++) {
+        for (; i < term_size; i++) {
             id = term_ids_[term][i];
 
-            if (dists[id] >= cur_heap_top or (filter and not filter->CheckValid(id + offset_id)))
-                [[likely]] {
+            if constexpr (type == InnerSearchType::WITH_FILTER) {
+                is_valid = (filter and not filter->CheckValid(id + offset_id));
+            }
+            if (dists[id] >= cur_heap_top or is_valid) [[likely]] {
                 dists[id] = 0;
                 continue;
             } else {
@@ -199,17 +202,35 @@ SparseTermDataCell::Deserialize(StreamReader& reader) {
 }
 
 template void
-SparseTermDataCell::InsertHeap<InnerSearchMode::KNN_SEARCH>(float* dists,
-                                                            const SparseTermComputerPtr& computer,
-                                                            MaxHeap& heap,
-                                                            const InnerSearchParam& param,
-                                                            uint32_t offset_id) const;
+SparseTermDataCell::InsertHeap<InnerSearchMode::KNN_SEARCH, InnerSearchType::PURE>(
+    float* dists,
+    const SparseTermComputerPtr& computer,
+    MaxHeap& heap,
+    const InnerSearchParam& param,
+    uint32_t offset_id) const;
 
 template void
-SparseTermDataCell::InsertHeap<InnerSearchMode::RANGE_SEARCH>(float* dists,
-                                                              const SparseTermComputerPtr& computer,
-                                                              MaxHeap& heap,
-                                                              const InnerSearchParam& param,
-                                                              uint32_t offset_id) const;
+SparseTermDataCell::InsertHeap<InnerSearchMode::KNN_SEARCH, InnerSearchType::WITH_FILTER>(
+    float* dists,
+    const SparseTermComputerPtr& computer,
+    MaxHeap& heap,
+    const InnerSearchParam& param,
+    uint32_t offset_id) const;
+
+template void
+SparseTermDataCell::InsertHeap<InnerSearchMode::RANGE_SEARCH, InnerSearchType::PURE>(
+    float* dists,
+    const SparseTermComputerPtr& computer,
+    MaxHeap& heap,
+    const InnerSearchParam& param,
+    uint32_t offset_id) const;
+
+template void
+SparseTermDataCell::InsertHeap<InnerSearchMode::RANGE_SEARCH, InnerSearchType::WITH_FILTER>(
+    float* dists,
+    const SparseTermComputerPtr& computer,
+    MaxHeap& heap,
+    const InnerSearchParam& param,
+    uint32_t offset_id) const;
 
 }  // namespace vsag

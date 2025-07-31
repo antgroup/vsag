@@ -104,7 +104,7 @@ TEST_CASE("SparseTermDatacell Basic Test", "[ut][SparseTermDatacell]") {
         std::vector<float> dists(count_base, 0);
         data_cell->Query(dists.data(), computer);
 
-        data_cell->InsertHeap<KNN_SEARCH>(dists.data(), computer, heap, inner_param, 0);
+        data_cell->InsertHeap<KNN_SEARCH, PURE>(dists.data(), computer, heap, inner_param, 0);
         REQUIRE(heap.size() == topk);
         for (auto i = 0; i < topk; i++) {
             auto cur_top = heap.top();
@@ -127,7 +127,7 @@ TEST_CASE("SparseTermDatacell Basic Test", "[ut][SparseTermDatacell]") {
         inner_param.radius = dists[pos];
         MaxHeap heap(allocator.get());
 
-        data_cell->InsertHeap<RANGE_SEARCH>(dists.data(), computer, heap, inner_param, 0);
+        data_cell->InsertHeap<RANGE_SEARCH, PURE>(dists.data(), computer, heap, inner_param, 0);
         REQUIRE(heap.size() == range_topk);
         for (auto i = 0; i < range_topk; i++) {
             auto cur_top = heap.top();

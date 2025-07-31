@@ -30,6 +30,8 @@ static constexpr uint32_t OPTIMIZE_SEARCHER_SAMPLE_SIZE = 10000;
 
 enum InnerSearchMode { KNN_SEARCH = 1, RANGE_SEARCH = 2 };
 
+enum InnerSearchType { PURE = 1, WITH_FILTER = 2 };
+
 class InnerSearchParam {
 public:
     int64_t topk{0};
