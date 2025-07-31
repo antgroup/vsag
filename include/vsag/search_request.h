@@ -16,8 +16,10 @@
 #include <cstdint>
 #include <string>
 
+#include "vsag/bitset.h"
 #include "vsag/dataset.h"
 #include "vsag/filter.h"
+#include "vsag/iterator_context.h"
 
 namespace vsag {
 enum class SearchMode {
@@ -25,6 +27,12 @@ enum class SearchMode {
     RANGE_SEARCH = 2,
 };
 
+class Expression;
+class AttrTypeSchema;
+using ExprPtr = std::shared_ptr<Expression>;
+
+ExprPtr
+AstParse(const std::string& filter_condition_str, AttrTypeSchema* schema = nullptr);
 class SearchRequest {
 public:
     // basic params
@@ -168,6 +176,8 @@ public:
      * @details When set to true, signals that no more results are expected from this iterator.ß
      */
     bool is_last_search_{false};
+
+    std::shared_ptr<Expression> expression_{nullptr};
 };
 
 }  // namespace vsag
