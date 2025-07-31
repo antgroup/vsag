@@ -35,6 +35,12 @@ public:
   virtual void enterStrPipeListExpr(FCParser::StrPipeListExprContext *ctx) = 0;
   virtual void exitStrPipeListExpr(FCParser::StrPipeListExprContext *ctx) = 0;
 
+  virtual void enterFunctionExpr(FCParser::FunctionExprContext *ctx) = 0;
+  virtual void exitFunctionExpr(FCParser::FunctionExprContext *ctx) = 0;
+
+  virtual void enterRegionFilterExpr(FCParser::RegionFilterExprContext *ctx) = 0;
+  virtual void exitRegionFilterExpr(FCParser::RegionFilterExprContext *ctx) = 0;
+
   virtual void enterIntListExpr(FCParser::IntListExprContext *ctx) = 0;
   virtual void exitIntListExpr(FCParser::IntListExprContext *ctx) = 0;
 
@@ -77,8 +83,14 @@ public:
   virtual void enterStr_pipe_list(FCParser::Str_pipe_listContext *ctx) = 0;
   virtual void exitStr_pipe_list(FCParser::Str_pipe_listContext *ctx) = 0;
 
+  virtual void enterArg_pipe_list(FCParser::Arg_pipe_listContext *ctx) = 0;
+  virtual void exitArg_pipe_list(FCParser::Arg_pipe_listContext *ctx) = 0;
+
   virtual void enterField_name(FCParser::Field_nameContext *ctx) = 0;
   virtual void exitField_name(FCParser::Field_nameContext *ctx) = 0;
+
+  virtual void enterFunction_name(FCParser::Function_nameContext *ctx) = 0;
+  virtual void exitFunction_name(FCParser::Function_nameContext *ctx) = 0;
 
   virtual void enterNumeric(FCParser::NumericContext *ctx) = 0;
   virtual void exitNumeric(FCParser::NumericContext *ctx) = 0;
