@@ -106,6 +106,14 @@ public:
     [[nodiscard]] virtual DatasetPtr
     SearchWithRequest(const SearchRequest& request) const override;
 
+    void
+    UpdateAttribute(int64_t id, const AttributeSet& new_attrs) override;
+
+    void
+    UpdateAttribute(int64_t id,
+                    const AttributeSet& new_attrs,
+                    const AttributeSet& origin_attrs) override;
+
 private:
     void
     resize(uint64_t new_size);
