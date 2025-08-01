@@ -39,19 +39,28 @@ public:
 using HGraphResourcePtr = std::shared_ptr<HGraphTestResource>;
 class HGraphTestIndex : public fixtures::TestIndex {
 public:
+    struct HGraphBuildParam {
+        std::string metric_type;
+        int64_t dim;
+        std::string quantization_str = "sq8";
+        int thread_count = 5;
+        int extra_info_size = 0;
+        std::string data_type = "float32";
+        std::string graph_type = "nsw";
+        std::string graph_storage = "flat";
+        bool support_remove = false;
+        bool use_attr_filter = false;
+        bool store_raw_vector = false;
+        bool support_duplicate = false;
+        HGraphBuildParam(const std::string& metric_type,
+                         int64_t dim,
+                         const std::string& quantization_str)
+            : metric_type(metric_type), dim(dim), quantization_str(quantization_str) {
+        }
+    };
+
     static std::string
-    GenerateHGraphBuildParametersString(const std::string& metric_type,
-                                        int64_t dim,
-                                        const std::string& quantization_str = "sq8",
-                                        int thread_count = 5,
-                                        int extra_info_size = 0,
-                                        const std::string& data_type = "float32",
-                                        std::string graph_type = "nsw",
-                                        std::string graph_storage = "flat",
-                                        bool support_remove = false,
-                                        bool use_attr_filter = false,
-                                        bool store_raw_vector = false,
-                                        bool support_duplicate = false);
+    GenerateHGraphBuildParametersString(const HGraphBuildParam& param);
 
     static HGraphResourcePtr
     GetResource(bool sample = true);
@@ -124,18 +133,7 @@ HGraphTestIndex::GetResource(bool sample) {
 }
 
 std::string
-HGraphTestIndex::GenerateHGraphBuildParametersString(const std::string& metric_type,
-                                                     int64_t dim,
-                                                     const std::string& quantization_str,
-                                                     int thread_count,
-                                                     int extra_info_size,
-                                                     const std::string& data_type,
-                                                     std::string graph_type,
-                                                     std::string graph_storage,
-                                                     bool support_remove,
-                                                     bool use_attr_filter,
-                                                     bool store_raw_vector,
-                                                     bool support_duplicate) {
+HGraphTestIndex::GenerateHGraphBuildParametersString(const HGraphBuildParam& param) {
     std::string build_parameters_str;
 
     constexpr auto parameter_temp_reorder = R"(
@@ -192,12 +190,12 @@ HGraphTestIndex::GenerateHGraphBuildParametersString(const std::string& metric_t
     }}
     )";
 
-    int pq_dim = dim;
+    int pq_dim = param.dim;
     if (pq_dim % 2 == 0) {
         pq_dim /= 2;
     }
 
-    auto strs = fixtures::SplitString(quantization_str, ',');
+    auto strs = fixtures::SplitString(param.quantization_str, ',');
     std::string high_quantizer_str, precise_io_type = "block_memory_io";
     auto& base_quantizer_str = strs[0];
     if (strs.size() > 1) {
@@ -206,38 +204,38 @@ HGraphTestIndex::GenerateHGraphBuildParametersString(const std::string& metric_t
             precise_io_type = strs[2];
         }
         build_parameters_str = fmt::format(parameter_temp_reorder,
-                                           data_type,
-                                           metric_type,
-                                           dim,
-                                           extra_info_size,
+                                           param.data_type,
+                                           param.metric_type,
+                                           param.dim,
+                                           param.extra_info_size,
                                            true, /* reorder */
                                            base_quantizer_str,
-                                           thread_count,
+                                           param.thread_count,
                                            pq_dim,
                                            high_quantizer_str,
                                            precise_io_type,
                                            dir.GenerateRandomFile(),
-                                           graph_type,
-                                           graph_storage,
-                                           support_remove,
-                                           use_attr_filter,
-                                           store_raw_vector,
-                                           support_duplicate);
+                                           param.graph_type,
+                                           param.graph_storage,
+                                           param.support_remove,
+                                           param.use_attr_filter,
+                                           param.store_raw_vector,
+                                           param.support_duplicate);
     } else {
         build_parameters_str = fmt::format(parameter_temp_origin,
-                                           data_type,
-                                           metric_type,
-                                           dim,
-                                           extra_info_size,
+                                           param.data_type,
+                                           param.metric_type,
+                                           param.dim,
+                                           param.extra_info_size,
                                            base_quantizer_str,
                                            pq_dim,
-                                           thread_count,
-                                           graph_type,
-                                           graph_storage,
-                                           support_remove,
-                                           use_attr_filter,
-                                           store_raw_vector,
-                                           support_duplicate);
+                                           param.thread_count,
+                                           param.graph_type,
+                                           param.graph_storage,
+                                           param.support_remove,
+                                           param.use_attr_filter,
+                                           param.store_raw_vector,
+                                           param.support_duplicate);
     }
     return build_parameters_str;
 }
@@ -469,8 +467,9 @@ TestHGraphBuildAndContinueAdd(const fixtures::HGraphTestIndexPtr& test_index,
                     continue;  // Skip invalid RaBitQ configurations
                 }
                 vsag::Options::Instance().set_block_size_limit(size);
-                auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(
+                HGraphTestIndex::HGraphBuildParam build_param(
                     metric_type, dim, base_quantization_str);
+                auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
                 auto index = TestIndex::TestFactory(test_index->name, param, true);
                 auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(
                     dim, resource->base_count, metric_type);
@@ -514,8 +513,9 @@ TestHGraphTrainAndAddTest(const fixtures::HGraphTestIndexPtr& test_index,
                     continue;  // Skip invalid RaBitQ configurations
                 }
                 vsag::Options::Instance().set_block_size_limit(size);
-                auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(
+                HGraphTestIndex::HGraphBuildParam build_param(
                     metric_type, dim, base_quantization_str);
+                auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
                 auto index = TestIndex::TestFactory(test_index->name, param, true);
                 auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(
                     dim, resource->base_count, metric_type);
@@ -550,7 +550,8 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HGraphTestIndex,
     auto dim = fixtures::get_common_used_dims(1, fixtures::RandomValue(0, 999))[0];
     auto& [base_quantization_str, recall] = all_test_cases[0];
     vsag::Options::Instance().set_block_size_limit(size);
-    auto param = GenerateHGraphBuildParametersString(metric_type, dim, base_quantization_str);
+    HGraphTestIndex::HGraphBuildParam build_param(metric_type, dim, base_quantization_str);
+    auto param = GenerateHGraphBuildParametersString(build_param);
     auto index = TestFactory(name, param, true);
     auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
     TestGetMinAndMaxId(index, dataset, false);
@@ -566,12 +567,11 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HGraphTestIndex,
     TestKnnSearchExFilter(index, dataset, ex_search_param, recall, false);
     TestKnnSearchIter(index, dataset, ex_search_param, recall, false, true);
     // with ex info empty index
-    auto extra_info_size = 256;
-    auto ex_param = GenerateHGraphBuildParametersString(
-        metric_type, dim, base_quantization_str, 5, extra_info_size);
+    build_param.extra_info_size = 256;
+    auto ex_param = GenerateHGraphBuildParametersString(build_param);
     auto ex_index = TestFactory(name, param, true);
-    auto ex_dataset =
-        pool.GetDatasetAndCreate(dim, base_count, metric_type, false, 0.8, extra_info_size);
+    auto ex_dataset = pool.GetDatasetAndCreate(
+        dim, base_count, metric_type, false, 0.8, build_param.extra_info_size);
     TestKnnSearchExFilter(ex_index, ex_dataset, ex_search_param, recall, false);
     TestKnnSearchIter(ex_index, ex_dataset, ex_search_param, recall, false, true);
     vsag::Options::Instance().set_block_size_limit(origin_size);
@@ -599,8 +599,9 @@ TestHGraphBuild(const fixtures::HGraphTestIndexPtr& test_index,
 
                 vsag::Options::Instance().set_block_size_limit(size);
 
-                auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(
+                HGraphTestIndex::HGraphBuildParam build_param(
                     metric_type, dim, base_quantization_str);
+                auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
                 auto index = TestIndex::TestFactory(test_index->name, param, true);
 
                 auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(
@@ -652,17 +653,10 @@ TestHGraphBuildWithAttr(const fixtures::HGraphTestIndexPtr& test_index,
                 vsag::Options::Instance().set_block_size_limit(size);
 
                 // Generate index parameters with attribute support enabled
-                auto param =
-                    HGraphTestIndex::GenerateHGraphBuildParametersString(metric_type,
-                                                                         dim,
-                                                                         base_quantization_str,
-                                                                         /*thread_count*/ 5,
-                                                                         /*extra_info_size*/ 0,
-                                                                         /*data_type*/ "float32",
-                                                                         /*graph_type*/ "nsw",
-                                                                         /*graph_storage*/ "flat",
-                                                                         /*support_remove*/ false,
-                                                                         /*use_attr_filter*/ true);
+                HGraphTestIndex::HGraphBuildParam build_param(
+                    metric_type, dim, base_quantization_str);
+                build_param.use_attr_filter = true;
+                auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
 
                 // Create index and dataset
                 auto index = TestIndex::TestFactory(test_index->name, param, true);
@@ -724,18 +718,10 @@ TestHGraphGetRawVector(const fixtures::HGraphTestIndexPtr& test_index,
                 vsag::Options::Instance().set_block_size_limit(size);
 
                 // Generate index parameters with attribute support enabled
-                auto param =
-                    HGraphTestIndex::GenerateHGraphBuildParametersString(metric_type,
-                                                                         dim,
-                                                                         base_quantization_str,
-                                                                         /*thread_count*/ 5,
-                                                                         /*extra_info_size*/ 0,
-                                                                         /*data_type*/ "float32",
-                                                                         /*graph_type*/ "nsw",
-                                                                         /*graph_storage*/ "flat",
-                                                                         /*support_remove*/ false,
-                                                                         /*use_attr_filter*/ false,
-                                                                         /*store_raw_vector*/ true);
+                HGraphTestIndex::HGraphBuildParam build_param(
+                    metric_type, dim, base_quantization_str);
+                build_param.store_raw_vector = true;
+                auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
 
                 // Create index and dataset
                 auto index = TestIndex::TestFactory(test_index->name, param, true);
@@ -793,8 +779,10 @@ TestHGraphODescentBuild(const fixtures::HGraphTestIndexPtr& test_index,
                 vsag::Options::Instance().set_block_size_limit(size);
 
                 // Generate index parameters with attribute support enabled
-                auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(
-                    metric_type, dim, base_quantization_str, 0, 0, "float32", "odescent");
+                HGraphTestIndex::HGraphBuildParam build_param(
+                    metric_type, dim, base_quantization_str);
+                build_param.graph_type = "odescent";
+                auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
                 // Create index and dataset
                 auto index = TestIndex::TestFactory(test_index->name, param, true);
                 auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(
@@ -844,8 +832,10 @@ TestHGraphRemove(const fixtures::HGraphTestIndexPtr& test_index,
                     continue;  // Skip invalid RaBitQ configurations
                 }
                 vsag::Options::Instance().set_block_size_limit(size);
-                auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(
-                    metric_type, dim, base_quantization_str, 5, 0, "float32", "nsw", "flat", true);
+                HGraphTestIndex::HGraphBuildParam build_param(
+                    metric_type, dim, base_quantization_str);
+                build_param.support_remove = true;
+                auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
                 auto index = TestIndex::TestFactory(test_index->name, param, true);
                 auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(
                     dim, resource->base_count, metric_type);
@@ -890,8 +880,10 @@ TestHGraphCompressedBuild(const fixtures::HGraphTestIndexPtr& test_index,
                     continue;  // Skip invalid RaBitQ configurations
                 }
                 vsag::Options::Instance().set_block_size_limit(size);
-                auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(
-                    metric_type, dim, base_quantization_str, 0, 0, "float32", "nsw", "compressed");
+                HGraphTestIndex::HGraphBuildParam build_param(
+                    metric_type, dim, base_quantization_str);
+                build_param.graph_storage = "compressed";
+                auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
                 auto index = TestIndex::TestFactory(test_index->name, param, true);
                 auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(
                     dim, resource->base_count, metric_type);
@@ -936,8 +928,9 @@ TestHGraphMerge(const fixtures::HGraphTestIndexPtr& test_index,
                     continue;  // Skip invalid RaBitQ configurations
                 }
                 vsag::Options::Instance().set_block_size_limit(size);
-                auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(
+                HGraphTestIndex::HGraphBuildParam build_param(
                     metric_type, dim, base_quantization_str);
+                auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
                 auto model = TestIndex::TestFactory(test_index->name, param, true);
                 auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(
                     dim, resource->base_count, metric_type);
@@ -984,8 +977,9 @@ TestHGraphAdd(const fixtures::HGraphTestIndexPtr& test_index,
                     continue;  // Skip invalid RaBitQ configurations
                 }
                 vsag::Options::Instance().set_block_size_limit(size);
-                auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(
+                HGraphTestIndex::HGraphBuildParam build_param(
                     metric_type, dim, base_quantization_str);
+                auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
                 auto index = TestIndex::TestFactory(test_index->name, param, true);
                 auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(
                     dim, resource->base_count, metric_type);
@@ -1046,19 +1040,10 @@ TestHGraphDuplicate(const fixtures::HGraphTestIndexPtr& test_index,
                     continue;  // Skip invalid RaBitQ configurations
                 }
                 vsag::Options::Instance().set_block_size_limit(size);
-                auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(
-                    metric_type,
-                    dim,
-                    base_quantization_str,
-                    /*thread_count*/ 5,
-                    /*extra_info_size*/ 0,
-                    /*data_type*/ "float32",
-                    /*graph_type*/ "nsw",
-                    /*graph_storage*/ "flat",
-                    /*support_remove*/ false,
-                    /*use_attr_filter*/ false,
-                    /*store_raw_vector*/ false,
-                    /*support_duplicate*/ true);
+                HGraphTestIndex::HGraphBuildParam build_param(
+                    metric_type, dim, base_quantization_str);
+                build_param.support_duplicate = true;
+                auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
                 auto index = TestIndex::TestFactory(test_index->name, param, true);
                 auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(
                     dim, resource->base_count, metric_type);
@@ -1106,8 +1091,8 @@ TestHGraphSearchWithDirtyVector(const fixtures::HGraphTestIndexPtr& test_index,
                 continue;  // Skip invalid RaBitQ configurations
             }
             vsag::Options::Instance().set_block_size_limit(size);
-            auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(
-                metric_type, dim, base_quantization_str);
+            HGraphTestIndex::HGraphBuildParam build_param(metric_type, dim, base_quantization_str);
+            auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
             auto index = TestIndex::TestFactory(test_index->name, param, true);
             TestIndex::TestBuildIndex(index, dataset, true);
             TestIndex::TestSearchWithDirtyVector(index, dataset, search_param, true);
@@ -1139,7 +1124,10 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HGraphTestIndex,
     auto dataset = pool.GetSparseDatasetAndCreate(base_count, dim, 0.8);
     auto search_param = fmt::format(fixtures::search_param_tmp, 100, false);
     vsag::Options::Instance().set_block_size_limit(size);
-    auto param = GenerateHGraphBuildParametersString(metric_type, dim, "sparse", 5, 0, "sparse");
+
+    HGraphTestIndex::HGraphBuildParam build_param(metric_type, dim, "sparse");
+    build_param.data_type = "sparse";
+    auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
     auto index = TestFactory(name, param, true);
     TestConcurrentAdd(index, dataset, true);
     TestKnnSearch(index, dataset, search_param, true);
@@ -1171,8 +1159,9 @@ TestHGraphConcurrentAdd(const fixtures::HGraphTestIndexPtr& test_index,
                 vsag::Options::Instance().set_block_size_limit(size);
 
                 // Generate index parameters with attribute support enabled
-                auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(
-                    metric_type, dim, base_quantization_str);  // Create index and dataset
+                HGraphTestIndex::HGraphBuildParam build_param(
+                    metric_type, dim, base_quantization_str);
+                auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
                 auto index = TestIndex::TestFactory(test_index->name, param, true);
                 auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(
                     dim, resource->base_count, metric_type);
@@ -1223,8 +1212,10 @@ TestHGraphSerialize(const fixtures::HGraphTestIndexPtr& test_index,
                     continue;  // Skip invalid RaBitQ configurations
                 }
                 vsag::Options::Instance().set_block_size_limit(size);
-                auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(
-                    metric_type, dim, base_quantization_str, 5 /*thread_count*/, extra_info_size);
+                HGraphTestIndex::HGraphBuildParam build_param(
+                    metric_type, dim, base_quantization_str);
+                build_param.extra_info_size = extra_info_size;
+                auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
                 auto index = TestIndex::TestFactory(test_index->name, param, true);
                 auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(dim,
                                                                          resource->base_count,
@@ -1280,8 +1271,10 @@ TestHGraphReaderIO(const fixtures::HGraphTestIndexPtr& test_index,
                     continue;  // Skip invalid RaBitQ configurations
                 }
                 vsag::Options::Instance().set_block_size_limit(size);
-                auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(
-                    metric_type, dim, base_quantization_str, 5 /*thread_count*/, extra_info_size);
+                HGraphTestIndex::HGraphBuildParam build_param(
+                    metric_type, dim, base_quantization_str);
+                build_param.extra_info_size = extra_info_size;
+                auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
                 auto index = TestIndex::TestFactory(test_index->name, param, true);
                 auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(dim,
                                                                          resource->base_count,
@@ -1294,8 +1287,8 @@ TestHGraphReaderIO(const fixtures::HGraphTestIndexPtr& test_index,
                 if (base_quantization_str.find(',') != std::string::npos) {
                     base_quantization_str += ",reader_io";
                 }
-                auto reader_param = HGraphTestIndex::GenerateHGraphBuildParametersString(
-                    metric_type, dim, base_quantization_str, 5 /*thread_count*/, extra_info_size);
+                auto reader_param =
+                    HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
                 auto index2 = TestIndex::TestFactory(test_index->name, reader_param, true);
                 TestIndex::TestSerializeReaderSet(
                     index, index2, dataset, search_param, test_index->name, true);
@@ -1339,8 +1332,10 @@ TestHGraphClone(const fixtures::HGraphTestIndexPtr& test_index,
                     continue;  // Skip invalid RaBitQ configurations
                 }
                 vsag::Options::Instance().set_block_size_limit(size);
-                auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(
-                    metric_type, dim, base_quantization_str, 5 /*thread_count*/, extra_info_size);
+                HGraphTestIndex::HGraphBuildParam build_param(
+                    metric_type, dim, base_quantization_str);
+                build_param.extra_info_size = extra_info_size;
+                auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
                 auto index = TestIndex::TestFactory(test_index->name, param, true);
                 auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(dim,
                                                                          resource->base_count,
@@ -1390,8 +1385,10 @@ TestHGraphExportModel(const fixtures::HGraphTestIndexPtr& test_index,
                     continue;  // Skip invalid RaBitQ configurations
                 }
                 vsag::Options::Instance().set_block_size_limit(size);
-                auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(
-                    metric_type, dim, base_quantization_str, 5 /*thread_count*/, extra_info_size);
+                HGraphTestIndex::HGraphBuildParam build_param(
+                    metric_type, dim, base_quantization_str);
+                build_param.extra_info_size = extra_info_size;
+                auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
                 auto index = TestIndex::TestFactory(test_index->name, param, true);
                 auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(dim,
                                                                          resource->base_count,
@@ -1443,8 +1440,10 @@ TestHGraphRandomAllocator(const fixtures::HGraphTestIndexPtr& test_index,
                     continue;  // Skip invalid RaBitQ configurations
                 }
                 vsag::Options::Instance().set_block_size_limit(size);
-                auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(
-                    metric_type, dim, base_quantization_str, 1);
+                HGraphTestIndex::HGraphBuildParam build_param(
+                    metric_type, dim, base_quantization_str);
+                build_param.thread_count = 1;
+                auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
                 auto index = vsag::Factory::CreateIndex(test_index->name, param, allocator.get());
                 if (not index.has_value()) {
                     continue;
@@ -1493,8 +1492,9 @@ TestHGraphDuplicateBuild(const fixtures::HGraphTestIndexPtr& test_index,
                 }
                 vsag::Options::Instance().set_block_size_limit(size);
 
-                auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(
+                HGraphTestIndex::HGraphBuildParam build_param(
                     metric_type, dim, base_quantization_str);
+                auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
                 auto index = TestIndex::TestFactory(test_index->name, param, true);
                 auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(
                     dim, resource->base_count, metric_type);
@@ -1542,8 +1542,10 @@ TestHGraphEstimateMemory(const fixtures::HGraphTestIndexPtr& test_index,
                 }
                 vsag::Options::Instance().set_block_size_limit(size);
                 vsag::Options::Instance().set_block_size_limit(size);
-                auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(
-                    metric_type, dim, base_quantization_str, 5 /*thread_count*/, extra_info_size);
+                HGraphTestIndex::HGraphBuildParam build_param(
+                    metric_type, dim, base_quantization_str);
+                build_param.extra_info_size = extra_info_size;
+                auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
                 auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(dim,
                                                                          estimate_count,
                                                                          metric_type,
@@ -1680,8 +1682,10 @@ TestHGraphWithExtraInfo(const fixtures::HGraphTestIndexPtr& test_index,
                     continue;  // Skip invalid RaBitQ configurations
                 }
                 vsag::Options::Instance().set_block_size_limit(size);
-                auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(
-                    metric_type, dim, base_quantization_str, 5 /*thread_count*/, extra_info_size);
+                HGraphTestIndex::HGraphBuildParam build_param(
+                    metric_type, dim, base_quantization_str);
+                build_param.extra_info_size = extra_info_size;
+                auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
                 auto index = TestIndex::TestFactory(test_index->name, param, true);
                 auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(dim,
                                                                          resource->base_count,
@@ -1742,15 +1746,14 @@ TestHGraphDiskIOType(const fixtures::HGraphTestIndexPtr& test_index,
                     continue;  // Skip invalid RaBitQ configurations
                 }
                 vsag::Options::Instance().set_block_size_limit(size);
-                auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(
-                    metric_type, dim, memory_io_str);
+                HGraphTestIndex::HGraphBuildParam build_param(metric_type, dim, memory_io_str);
+                auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
                 auto index = TestIndex::TestFactory(test_index->name, param, true);
                 auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(
                     dim, resource->base_count, metric_type);
                 TestIndex::TestBuildIndex(index, dataset, true);
-
-                param = HGraphTestIndex::GenerateHGraphBuildParametersString(
-                    metric_type, dim, disk_io_str);
+                build_param.quantization_str = disk_io_str;
+                param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
                 auto disk_index = TestIndex::TestFactory(test_index->name, param, true);
                 TestIndex::TestSerializeFile(index, disk_index, dataset, search_param, true);
                 HGraphTestIndex::TestGeneral(disk_index, dataset, search_param, recall);
