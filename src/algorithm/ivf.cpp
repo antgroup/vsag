@@ -683,15 +683,16 @@ IVF::search(const DatasetPtr& query, const InnerSearchParam& param) const {
         }
     }
 
-    auto search_result = DistanceHeap::MakeInstanceBySize<true, false>(this->allocator_, topk);
+    DistHeapPtr search_result = nullptr;
     const auto& ft = param.is_inner_id_allowed;
 
     auto bucket_count = candidate_buckets.size();
     const auto search_thread_count = param.parallel_search_thread_count;
-    std::mutex heap_mutex;
+    std::vector<DistHeapPtr> heaps(search_thread_count);
 
     auto search_func = [&](int64_t thread_id) -> void {
-        std::unique_ptr<std::lock_guard<std::mutex>> lock_ptr = nullptr;
+        heaps[thread_id] = DistanceHeap::MakeInstanceBySize<true, false>(this->allocator_, topk);
+        auto& heap = heaps[thread_id];
         Vector<float> centroid(dim_, allocator_);
         Vector<float> dist(allocator_);
         for (uint64_t i = 0; i < bucket_count; ++i) {
@@ -719,9 +720,9 @@ IVF::search(const DatasetPtr& query, const InnerSearchParam& param) const {
 
             bucket_->ScanBucketById(dist.data(), computer, bucket_id);
             Filter* attr_ft = nullptr;
-            if (param.executor != nullptr) {
-                param.executor->Clear();
-                attr_ft = param.executor->Run(bucket_id);
+            if (param.executors.size() > thread_id and param.executors[thread_id] != nullptr) {
+                param.executors[thread_id]->Clear();
+                attr_ft = param.executors[thread_id]->Run(bucket_id);
             }
             for (int j = 0; j < bucket_size; ++j) {
                 auto origin_id = ids[j] / buckets_per_data_;
@@ -730,26 +731,21 @@ IVF::search(const DatasetPtr& query, const InnerSearchParam& param) const {
                 }
                 if (ft == nullptr or ft->CheckValid(origin_id)) {
                     dist[j] -= ip_distance;
-                    if (search_thread_count > 1) {
-                        lock_ptr = std::make_unique<std::lock_guard<std::mutex>>(heap_mutex);
-                    }
+
                     if constexpr (mode == KNN_SEARCH) {
-                        if (search_result->Size() < topk or dist[j] < cur_heap_top) {
-                            search_result->Push(dist[j], ids[j]);
+                        if (heap->Size() < topk or dist[j] < cur_heap_top) {
+                            heap->Push(dist[j], ids[j]);
                         }
                     } else if constexpr (mode == RANGE_SEARCH) {
                         if (dist[j] <= param.radius + THRESHOLD_ERROR and dist[j] < cur_heap_top) {
-                            search_result->Push(dist[j], ids[j]);
+                            heap->Push(dist[j], ids[j]);
                         }
                     }
-                    if (search_result->Size() > topk) {
-                        search_result->Pop();
+                    if (heap->Size() > topk) {
+                        heap->Pop();
                     }
-                    if (not search_result->Empty() and search_result->Size() == topk) {
-                        cur_heap_top = search_result->Top().first;
-                    }
-                    if (search_thread_count > 1) {
-                        lock_ptr.reset(nullptr);
+                    if (not heap->Empty() and heap->Size() == topk) {
+                        cur_heap_top = heap->Top().first;
                     }
                 }
             }
@@ -763,11 +759,19 @@ IVF::search(const DatasetPtr& query, const InnerSearchParam& param) const {
         }
     } else {
         search_func(0);
+        search_result = heaps[0];
     }
 
     if (this->thread_pool_ != nullptr and search_thread_count > 1) {
         for (auto& future : futures) {
             future.get();
+        }
+        search_result = DistanceHeap::MakeInstanceBySize<true, true>(this->allocator_, topk);
+        for (auto& heap : heaps) {
+            while (not heap->Empty()) {
+                search_result->Push(heap->Top());
+                heap->Pop();
+            }
         }
     }
 
@@ -879,9 +883,12 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
     if (request.enable_attribute_filter_) {
         auto& schema = this->attr_filter_index_->field_type_map_;
         auto expr = AstParse(request.attribute_filter_str_, &schema);
-        auto executor = Executor::MakeInstance(this->allocator_, expr, this->attr_filter_index_);
-        executor->Init();
-        param.executor = executor;
+        for (int64_t i = 0; i < param.parallel_search_thread_count; ++i) {
+            auto executor =
+                Executor::MakeInstance(this->allocator_, expr, this->attr_filter_index_);
+            executor->Init();
+            param.executors.emplace_back(executor);
+        }
     }
     auto search_result = this->search<KNN_SEARCH>(query, param);
     if (use_reorder_) {

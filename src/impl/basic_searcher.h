@@ -49,7 +49,7 @@ public:
     float factor{2.0F};
     float first_order_scan_ratio{1.0F};
     Allocator* search_alloc{nullptr};
-    ExecutorPtr executor{nullptr};
+    std::vector<ExecutorPtr> executors;
     mutable int64_t duplicate_id{-1};
     bool consider_duplicate{false};
 
