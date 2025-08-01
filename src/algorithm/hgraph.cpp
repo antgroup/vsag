@@ -297,6 +297,14 @@ HGraph::KnnSearch(const DatasetPtr& query,
             query_dim == dim_,
             fmt::format("query.dim({}) must be equal to index.dim({})", query_dim, dim_));
     }
+
+    auto params = HGraphSearchParameters::FromJson(parameters);
+
+    auto ef_search_threshold = std::max(AMPLIFICATION_FACTOR * k, 1000L);
+    CHECK_ARGUMENT(  // NOLINT
+        (1 <= params.ef_search) and (params.ef_search <= ef_search_threshold),
+        fmt::format("ef_search({}) must in range[1, {}]", params.ef_search, ef_search_threshold));
+
     // check k
     CHECK_ARGUMENT(k > 0, fmt::format("k({}) must be greater than 0", k));
     k = std::min(k, GetNumElements());
@@ -316,13 +324,6 @@ HGraph::KnnSearch(const DatasetPtr& query,
             raw_query, this->route_graphs_[i], this->basic_flatten_codes_, search_param);
         search_param.ep = result->Top().second;
     }
-
-    auto params = HGraphSearchParameters::FromJson(parameters);
-
-    auto ef_search_threshold = std::max(AMPLIFICATION_FACTOR * k, 1000L);
-    CHECK_ARGUMENT(  // NOLINT
-        (1 <= params.ef_search) and (params.ef_search <= ef_search_threshold),
-        fmt::format("ef_search({}) must in range[1, {}]", params.ef_search, ef_search_threshold));
 
     FilterPtr ft = nullptr;
     if (filter != nullptr) {
@@ -389,14 +390,19 @@ HGraph::KnnSearch(const DatasetPtr& query,
             query_dim == dim_,
             fmt::format("query.dim({}) must be equal to index.dim({})", query_dim, dim_));
     }
+
+    auto params = HGraphSearchParameters::FromJson(parameters);
+    auto ef_search_threshold = std::max(AMPLIFICATION_FACTOR * k, 1000L);
+    CHECK_ARGUMENT(  // NOLINT
+        (1 <= params.ef_search) and (params.ef_search <= ef_search_threshold),
+        fmt::format("ef_search({}) must in range[1, {}]", params.ef_search, ef_search_threshold));
+
     // check k
     CHECK_ARGUMENT(k > 0, fmt::format("k({}) must be greater than 0", k));
     k = std::min(k, GetNumElements());
 
     // check query vector
     CHECK_ARGUMENT(query->GetNumElements() == 1, "query dataset should contain 1 vector only");
-
-    auto params = HGraphSearchParameters::FromJson(parameters);
 
     FilterPtr ft = nullptr;
     if (filter != nullptr) {
