@@ -79,8 +79,8 @@ main(int argc, char** argv) {
     vsag::init();
 
     /******************* Prepare Base and Query Dataset *****************/
-    uint32_t num_base = 100000;
-    uint32_t num_query = 1000;
+    uint32_t num_base = 10000;
+    uint32_t num_query = 100;
     int64_t max_dim = 128;
     int64_t max_id = 30000;
     float min_val = 0;
@@ -96,7 +96,7 @@ main(int argc, char** argv) {
 
     auto sv_base = GenerateSparseVectors(num_base, max_dim, max_id, min_val, max_val, seed_base);
     auto base = vsag::Dataset::Make();
-    base->NumElements(num_base)->SparseVectors(sv_base.data())->Ids(ids.data())->Owner(true);
+    base->NumElements(num_base)->SparseVectors(sv_base.data())->Ids(ids.data())->Owner(false);
 
     auto sv_query =
         GenerateSparseVectors(num_query, max_dim / 2, max_id, min_val, max_val, seed_query);
@@ -105,16 +105,27 @@ main(int argc, char** argv) {
     std::vector<vsag::DatasetPtr> gt_results(num_query);
 
     /******************* Create Index *****************/
-    std::string build_params = R"(
+    /*
+     * build_params is the configuration for building a sparse index.
+     *
+     * - dtype: Must be set to "sparse", indicating the data type of the vectors.
+     * - dim: Dimensionality of the sparse vectors (must be >0, but does not affect the result).
+     * - metric_type: Distance metric type, currently only "ip" (inner product) is supported.
+     * - index_param: Parameters specific to sparse indexing:
+     *   - use_reorder: If true, enables full-precision re-ranking of results. This requires storing additional data.
+     *     When doc_prune_ratio is 0, use_reorder can be false while still maintaining full-precision results.
+     *   - doc_prune_ratio: Ratio of term pruning in documents (0 = no pruning).
+     *   - window_size: Window size for table scanning. Related to L3 cache size; 100000 is an empirically optimal value.
+     */
+    auto build_params = R"(
     {
         "dtype": "sparse",
         "dim": 128,
         "metric_type": "ip",
         "index_param": {
             "use_reorder": true,
-            "doc_prune_ratio": 1,
-            "window_size": 100000,
-            "need_sort": true
+            "doc_prune_ratio": 0.0,
+            "window_size": 100000
         }
     }
     )";
@@ -168,13 +179,20 @@ main(int argc, char** argv) {
     }
 
     /******************* KnnSearch *****************/
-    std::string search_params = R"(
+    /*
+     * search_params is the configuration for sparse index search.
+     *
+     * - sindi: Parameters specific to sparse indexing search:
+     *   - query_prune_ratio: Ratio of term pruning for the query (0 = no pruning).
+     *   - n_candidate: Number of candidates for re-ranking. Must be greater than topK.
+     *     This parameter is ignored if use_reorder is false in the build parameters.
+     */
+    auto search_params = R"(
     {
         "sindi": {
-            "query_prune_ratio": 0.7,
-            "term_prune_ratio": 1,
-            "n_candidate": 20
-}
+            "query_prune_ratio": 0,
+            "n_candidate": 0
+        }
     }
     )";
 
@@ -184,7 +202,7 @@ main(int argc, char** argv) {
     int64_t total_search_time_ns = 0;
 
     for (int i = 0; i < num_query; ++i) {
-        query->NumElements(1)->SparseVectors(sv_query.data() + i)->Owner(true);
+        query->NumElements(1)->SparseVectors(sv_query.data() + i)->Owner(false);
 
         auto start_time = std::chrono::high_resolution_clock::now();
         auto result = index->KnnSearch(query, k, search_params).value();
@@ -204,7 +222,8 @@ main(int argc, char** argv) {
 
     std::cout << "Recall: " << recall << std::endl;
     std::cout << "QPS: " << qps << std::endl;
-
+    gt_results
+        .clear();  // Ensure that the results obtained from bf_index are cleared before bf_index is destroyed.
     for (auto& item : sv_base) {
         delete[] item.vals_;
         delete[] item.ids_;
