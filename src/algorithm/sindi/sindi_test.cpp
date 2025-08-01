@@ -20,6 +20,7 @@
 
 #include "fixtures.h"
 #include "impl/allocator/safe_allocator.h"
+#include "storage/serialization_template_test.h"
 
 using namespace vsag;
 
@@ -80,17 +81,7 @@ TEST_CASE("SINDI Basic Test", "[ut][SINDI]") {
     REQUIRE(build_res.size() == 0);
     REQUIRE(index->GetNumElements() == num_base);
 
-    auto dir = fixtures::TempDir("serialize");
-    auto path = dir.GenerateRandomFile();
-    std::ofstream outfile(path, std::ios::out | std::ios::binary);
-    IOStreamWriter writer(outfile);
-    index->Serialize(writer);
-    outfile.close();
-
-    std::ifstream infile(path, std::ios::in | std::ios::binary);
-    IOStreamReader reader(infile);
-    another_index->Deserialize(reader);
-    infile.close();
+    test_serializion(*index, *another_index);
     REQUIRE(another_index->GetNumElements() == num_base);
 
     std::string search_param_str = R"(

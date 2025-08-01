@@ -19,6 +19,7 @@
 
 #include "fixtures.h"
 #include "impl/allocator/safe_allocator.h"
+#include "storage/serialization_template_test.h"
 
 using namespace vsag;
 
@@ -124,18 +125,9 @@ TEST_CASE("AttributeBucketInvertedDataCell insert various types",
         REQUIRE(managers[0]->GetOneBitset(bucket_id)->Test(inner_id - 1) == false);
     }
 
-    auto dir = fixtures::TempDir("attr");
-    auto path = dir.GenerateRandomFile();
-    std::ofstream ofs(path, std::ios::binary);
-    IOStreamWriter writer(ofs);
-
-    cell.Serialize(writer);
-    ofs.close();
-    std::ifstream ifs(path, std::ios::binary);
-    IOStreamReader reader(ifs);
     AttributeBucketInvertedDataCell cell2(allocator.get());
-    cell2.Deserialize(reader);
-    ifs.close();
+    test_serializion(cell, cell2);
+
     for (auto* attr : attrSet.attrs_) {
         auto managers = cell2.GetBitsetsByAttr(*attr);
         REQUIRE(managers.size() == 1);

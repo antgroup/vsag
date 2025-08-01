@@ -20,6 +20,7 @@
 
 #include "fixtures.h"
 #include "impl/allocator/safe_allocator.h"
+#include "storage/serialization_template_test.h"
 
 using namespace vsag;
 
@@ -106,16 +107,7 @@ TEST_CASE("Hadamard Matrix Serialize / Deserialize Test", "[ut][FhtKacRotator]")
         rom1.Train();
         rom2.Train();
 
-        fixtures::TempDir dir("hadamard");
-        auto filename = dir.GenerateRandomFile();
-        std::ofstream outfile(filename.c_str(), std::ios::binary);
-        IOStreamWriter writer(outfile);
-        rom1.Serialize(writer);
-        outfile.close();
-        std::ifstream infile(filename.c_str(), std::ios::binary);
-        IOStreamReader reader(infile);
-        rom2.Deserialize(reader);
-        infile.close();
+        test_serializion(rom1, rom2);
 
         TestSame(rom1, rom2, dim);
     }

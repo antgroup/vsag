@@ -15,8 +15,8 @@
 
 #include "fixtures/fixtures.h"
 #include "fixtures/test_dataset_pool.h"
+#include "storage/serialization_template_test.h"
 #include "test_index.h"
-
 namespace fixtures {
 
 class IVFTestResource {
@@ -667,19 +667,10 @@ TestIVFWithAttr(const fixtures::IVFTestIndexPtr& test_index,
                     auto build_result = index1->Build(dataset->base_);
                     REQUIRE(build_result.has_value());
                     IVFTestIndex::TestWithAttr(index1, dataset, search_param, false);
-
-                    auto dir = fixtures::TempDir("serialize");
-                    auto path = dir.GenerateRandomFile();
-                    std::ofstream outfile(path, std::ios::out | std::ios::binary);
-                    auto serialize_index = index1->Serialize(outfile);
-                    REQUIRE(serialize_index.has_value());
-                    outfile.close();
-
                     auto index = TestIndex::TestFactory(IVFTestIndex::name, param, true);
-                    std::ifstream infile(path, std::ios::in | std::ios::binary);
-                    auto deserialize_index = index->Deserialize(infile);
-                    REQUIRE(deserialize_index.has_value());
-                    infile.close();
+
+                    REQUIRE_NOTHROW(test_serializion_file(*index1, *index, "serialize"));
+
                     IVFTestIndex::TestWithAttr(index, dataset, search_param);
 
                     vsag::Options::Instance().set_block_size_limit(origin_size);

@@ -21,6 +21,7 @@
 #include "impl/allocator/safe_allocator.h"
 #include "index/index_common_param.h"
 #include "quantization/sparse_quantization/sparse_quantizer_parameter.h"
+#include "storage/serialization_template_test.h"
 #include "thread_pool.h"
 
 namespace vsag {
@@ -84,19 +85,8 @@ TEST_CASE("SparseDataCell Basic Test", "[ut][SparseDataCell] ") {
         }
     }
     SECTION("serialize and deserialize") {
-        fixtures::TempDir dir("flatten");
-        auto path = dir.GenerateRandomFile();
-        std::ofstream outfile(path.c_str(), std::ios::binary);
-        IOStreamWriter writer(outfile);
-        data_cell->Serialize(writer);
-        outfile.close();
-
         auto new_data_cell = FlattenInterface::MakeInstance(param, index_common_param);
-
-        std::ifstream infile(path.c_str(), std::ios::binary);
-        IOStreamReader reader(infile);
-        new_data_cell->Deserialize(reader);
-        infile.close();
+        test_serializion(*data_cell, *new_data_cell);
         auto computer = new_data_cell->FactoryComputer(query_sparse_vectors.data());
         std::shared_ptr<float[]> dist = std::shared_ptr<float[]>(new float[base_count]);
         new_data_cell->Query(dist.get(), computer, idx.data(), 1);

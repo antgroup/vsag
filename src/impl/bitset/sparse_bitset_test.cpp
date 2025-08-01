@@ -22,6 +22,7 @@
 
 #include "fixtures.h"
 #include "impl/allocator/safe_allocator.h"
+#include "storage/serialization_template_test.h"
 
 using namespace roaring;
 using namespace vsag;
@@ -51,18 +52,8 @@ TEST_CASE("SparseBitset Test", "[ut][bitset]") {
     auto dumped = bitset.Dump();
     REQUIRE(dumped == "{100}");
 
-    fixtures::TempDir dir("sparse_bitset");
-    auto path = dir.GenerateRandomFile();
-    std::ofstream ofs(path, std::ios::binary);
-    IOStreamWriter writer(ofs);
-    bitset.Serialize(writer);
-    ofs.close();
-
-    std::ifstream ifs(path, std::ios::binary);
-    IOStreamReader reader(ifs);
     SparseBitset bitset2;
-    bitset2.Deserialize(reader);
-    ifs.close();
+    test_serializion(bitset, bitset2);
     dumped = bitset.Dump();
     REQUIRE(dumped == "{100}");
 }

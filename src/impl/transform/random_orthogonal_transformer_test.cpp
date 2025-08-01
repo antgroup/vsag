@@ -21,6 +21,7 @@
 
 #include "fixtures.h"
 #include "impl/allocator/safe_allocator.h"
+#include "storage/serialization_template_test.h"
 
 using namespace vsag;
 
@@ -155,17 +156,7 @@ TEST_CASE("Random Orthogonal Matrix Serialize / Deserialize Test", "[ut][RandomO
         REQUIRE(rom1.GenerateRandomOrthogonalMatrix() == true);
         REQUIRE(rom2.GenerateRandomOrthogonalMatrix() == true);
 
-        fixtures::TempDir dir("rom");
-        auto filename = dir.GenerateRandomFile();
-        std::ofstream outfile(filename.c_str(), std::ios::binary);
-        IOStreamWriter writer(outfile);
-        rom1.Serialize(writer);
-        outfile.close();
-
-        std::ifstream infile(filename.c_str(), std::ios::binary);
-        IOStreamReader reader(infile);
-        rom2.Deserialize(reader);
-        infile.close();
+        test_serializion(rom1, rom2);
 
         TestOrthogonality(rom1, dim);
         TestTransform(rom1, dim);
