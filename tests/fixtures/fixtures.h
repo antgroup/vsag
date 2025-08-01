@@ -46,7 +46,9 @@ template <typename T>
 T*
 DuplicateCopyVector(const std::vector<T>& vec) {
     auto result = new T[vec.size()];
-    assert(vec.size() % 2 == 0);
+    if (vec.size() % 2 != 0) {
+        throw std::runtime_error("Vector size must be even for duplication.");
+    }
     memcpy(result, vec.data(), (vec.size() / 2) * sizeof(T));
     memcpy(result + vec.size() / 2, vec.data(), (vec.size() / 2) * sizeof(T));
     return result;
