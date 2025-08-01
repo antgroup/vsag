@@ -1,4 +1,3 @@
-
 // Copyright 2024-present the vsag project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -34,6 +33,10 @@ GetRaBitQFloatBinaryIP() {
     } else if (SimdStatus::SupportSSE()) {
 #if defined(ENABLE_SSE)
         return sse::RaBitQFloatBinaryIP;
+#endif
+    } else if (SimdStatus::SupportSVE()) {
+#if defined(ENABLE_SVE)
+        return sve::RaBitQFloatBinaryIP;
 #endif
     } else if (SimdStatus::SupportNEON()) {
 #if defined(ENABLE_NEON)
@@ -75,6 +78,14 @@ GetFHTRotate() {
 #if defined(ENABLE_SSE)
         return sse::FHTRotate;
 #endif
+    } else if (SimdStatus::SupportSVE()) {
+#if defined(ENABLE_SVE)
+        return sve::FHTRotate;
+#endif
+    } else if (SimdStatus::SupportNEON()) {
+#if defined(ENABLE_NEON)
+        return neon::FHTRotate;
+#endif
     }
     return generic::FHTRotate;
 }
@@ -96,6 +107,14 @@ GetKacsWalk() {
     } else if (SimdStatus::SupportSSE()) {
 #if defined(ENABLE_SSE)
         return sse::KacsWalk;
+#endif
+    } else if (SimdStatus::SupportSVE()) {
+#if defined(ENABLE_SVE)
+        return sve::KacsWalk;
+#endif
+    } else if (SimdStatus::SupportNEON()) {
+#if defined(ENABLE_NEON)
+        return neon::KacsWalk;
 #endif
     }
     return generic::KacsWalk;
@@ -119,6 +138,14 @@ GetVecRescale() {
 #if defined(ENABLE_SSE)
         return sse::VecRescale;
 #endif
+    } else if (SimdStatus::SupportSVE()) {
+#if defined(ENABLE_SVE)
+        return sve::VecRescale;
+#endif
+    } else if (SimdStatus::SupportNEON()) {
+#if defined(ENABLE_NEON)
+        return neon::VecRescale;
+#endif
     }
     return generic::VecRescale;
 }
@@ -128,6 +155,14 @@ GetFlipSign() {
     if (SimdStatus::SupportAVX512()) {
 #if defined(ENABLE_AVX512)
         return avx512::FlipSign;
+#endif
+    } else if (SimdStatus::SupportSVE()) {
+#if defined(ENABLE_SVE)
+        return sve::FlipSign;
+#endif
+    } else if (SimdStatus::SupportNEON()) {
+#if defined(ENABLE_NEON)
+        return neon::FlipSign;
 #endif
     }
     return generic::FlipSign;
@@ -150,6 +185,14 @@ GetRotateOp() {
     } else if (SimdStatus::SupportSSE()) {
 #if defined(ENABLE_SSE)
         return sse::RotateOp;
+#endif
+    } else if (SimdStatus::SupportSVE()) {
+#if defined(ENABLE_SVE)
+        return sve::RotateOp;
+#endif
+    } else if (SimdStatus::SupportNEON()) {
+#if defined(ENABLE_NEON)
+        return neon::RotateOp;
 #endif
     }
     return generic::RotateOp;

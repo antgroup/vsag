@@ -25,7 +25,7 @@ using namespace vsag;
 
 #define TEST_ACCURACY(Func)                                                            \
     {                                                                                  \
-        float gt, sse, avx, avx2, avx512, neon;                                        \
+        float gt, sse, avx, avx2, avx512, neon, sve;                                   \
         gt = generic::Func(vec1.data() + i * dim, vec2.data() + i * dim, &dim);        \
         if (SimdStatus::SupportSSE()) {                                                \
             sse = sse::Func(vec1.data() + i * dim, vec2.data() + i * dim, &dim);       \
@@ -46,6 +46,10 @@ using namespace vsag;
         if (SimdStatus::SupportNEON()) {                                               \
             neon = neon::Func(vec1.data() + i * dim, vec2.data() + i * dim, &dim);     \
             REQUIRE(fixtures::dist_t(gt) == fixtures::dist_t(neon));                   \
+        }                                                                              \
+        if (SimdStatus::SupportSVE()) {                                                \
+            sve = sve::Func(vec1.data() + i * dim, vec2.data() + i * dim, &dim);       \
+            REQUIRE(fixtures::dist_t(gt) == fixtures::dist_t(sve));                    \
         }                                                                              \
     };
 
@@ -107,6 +111,10 @@ TEST_CASE("PQ Calculation", "[ut][simd]") {
     }
     if (SimdStatus::SupportAVX512()) {
         avx512::PQDistanceFloat256(vectors.data(), single_dim_value, results);
+        check_func();
+    }
+    if (SimdStatus::SupportSVE()) {
+        sve::PQDistanceFloat256(vectors.data(), single_dim_value, results);
         check_func();
     }
     if (SimdStatus::SupportNEON()) {
