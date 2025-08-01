@@ -251,12 +251,6 @@ HNSW::knn_search(const DatasetPtr& query,
             query_dim == dim_,
             fmt::format("query.dim({}) must be equal to index.dim({})", query_dim, dim_));
 
-        // check k
-        CHECK_ARGUMENT(k > 0, fmt::format("k({}) must be greater than 0", k))
-        k = std::min(k, GetNumElements());
-
-        std::shared_lock lock_global(rw_mutex_);
-
         // check search parameters
         auto params = HnswSearchParameters::FromJson(parameters);
         auto ef_search_threshold = std::max(AMPLIFICATION_FACTOR * k, 1000L);
@@ -264,6 +258,12 @@ HNSW::knn_search(const DatasetPtr& query,
             (1 <= params.ef_search) and (params.ef_search <= ef_search_threshold),
             fmt::format(
                 "ef_search({}) must in range[1, {}]", params.ef_search, ef_search_threshold));
+
+        // check k
+        CHECK_ARGUMENT(k > 0, fmt::format("k({}) must be greater than 0", k))
+        k = std::min(k, GetNumElements());
+
+        std::shared_lock lock_global(rw_mutex_);
         if (iter_ctx != nullptr && *iter_ctx == nullptr) {
             auto* filter_context = new IteratorFilterContext();
             filter_context->init(alg_hnsw_->getMaxElements(), params.ef_search, search_allocator);
