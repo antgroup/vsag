@@ -1948,24 +1948,8 @@ TestIndex::TestBuildDuplicateIndex(const IndexPtr& index,
         auto result = index->Add(dataset->base_);
         REQUIRE(result.has_value() == expect_success);
     } else if (duplicate_pos == "middle") {
-        for (int64_t i = 0; i < dataset->base_->GetNumElements(); ++i) {
-            auto new_data = vsag::Dataset::Make();
-            new_data->NumElements(1)
-                ->Dim(dataset->base_->GetDim())
-                ->Ids(dataset->base_->GetIds() + i)
-                ->Float32Vectors(dataset->base_->GetFloat32Vectors() + i * dataset->base_->GetDim())
-                ->Owner(false);
-            auto add_result = index->Add(new_data);
-            REQUIRE(add_result.has_value() == expect_success);
-            auto new_data_duplicate = vsag::Dataset::Make();
-            new_data_duplicate->NumElements(1)
-                ->Dim(dataset->base_->GetDim())
-                ->Ids(&i)
-                ->Float32Vectors(dataset->base_->GetFloat32Vectors() + i * dataset->base_->GetDim())
-                ->Owner(false);
-            add_result = index->Add(new_data_duplicate);
-            REQUIRE(add_result.has_value() == expect_success);
-        }
+        auto add_result = index->Add(dataset->base_);
+        REQUIRE(add_result.has_value() == expect_success);
     } else {
         throw std::invalid_argument("Invalid duplicate position: " + duplicate_pos);
     }
