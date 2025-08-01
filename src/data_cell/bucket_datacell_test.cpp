@@ -24,6 +24,7 @@
 #include "impl/allocator/default_allocator.h"
 #include "impl/allocator/safe_allocator.h"
 #include "simd/simd.h"
+#include "storage/serialization_template_test.h"
 
 using namespace vsag;
 
@@ -96,16 +97,7 @@ BucketInterfaceTest::BasicTest(int64_t dim, uint64_t base_count, float error) {
 }
 void
 BucketInterfaceTest::TestSerializeAndDeserialize(int64_t dim, const BucketInterfacePtr& other) {
-    fixtures::TempDir dir("bucket");
-    auto path = dir.GenerateRandomFile();
-    std::ofstream outfile(path.c_str(), std::ios::binary);
-    IOStreamWriter writer(outfile);
-    this->bucket_->Serialize(writer);
-    outfile.close();
-
-    std::ifstream infile(path.c_str(), std::ios::binary);
-    IOStreamReader reader(infile);
-    other->Deserialize(reader);
+    test_serializion(*this->bucket_, *other);
 
     int64_t query_count = 100;
     auto queries = fixtures::generate_vectors(query_count, dim, random());
@@ -133,8 +125,6 @@ BucketInterfaceTest::TestSerializeAndDeserialize(int64_t dim, const BucketInterf
             }
         }
     }
-
-    infile.close();
 }
 
 void

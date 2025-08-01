@@ -22,6 +22,7 @@
 #include "quantizer.h"
 #include "simd/normalize.h"
 #include "simd/simd.h"
+#include "storage/serialization_template_test.h"
 
 using namespace vsag;
 
@@ -385,17 +386,8 @@ TestSerializeAndDeserialize(Quantizer<T>& quant1,
                             bool is_rabitq = false) {
     auto vecs = fixtures::generate_vectors(count, dim);
     quant1.ReTrain(vecs.data(), count);
-    fixtures::TempDir dir("quantizer");
-    auto filename = dir.GenerateRandomFile();
-    std::ofstream outfile(filename.c_str(), std::ios::binary);
-    IOStreamWriter writer(outfile);
-    quant1.Serialize(writer);
-    outfile.close();
 
-    std::ifstream infile(filename.c_str(), std::ios::binary);
-    IOStreamReader reader(infile);
-    quant2.Deserialize(reader);
-    infile.close();
+    test_serializion(quant1, quant2);
 
     REQUIRE(quant1.GetCodeSize() == quant2.GetCodeSize());
     REQUIRE(quant1.GetDim() == quant2.GetDim());

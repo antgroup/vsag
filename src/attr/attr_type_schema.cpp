@@ -25,7 +25,8 @@ AttrValueType
 AttrTypeSchema::GetTypeOfField(const std::string& field_name) {
     auto iter = this->schema_.find(field_name);
     if (iter == this->schema_.end()) {
-        throw VsagException(ErrorType::INTERNAL_ERROR, "field not found");
+        throw VsagException(ErrorType::INTERNAL_ERROR,
+                            fmt::format("field not found: {}", field_name));
     }
     return iter->second;
 }

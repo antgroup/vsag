@@ -300,4 +300,21 @@ RandomSelect(const std::vector<T>& vec, int64_t count = 1) {
     return selected;
 }
 
-}  // Namespace fixtures
+template <typename T>
+void
+test_serializion_file(T& old_instance, T& new_instance, const std::string name) {
+    auto temp_dir = TempDir(name);
+    auto file = temp_dir.GenerateRandomFile();
+    std::ofstream ofs(file);
+    old_instance.Serialize(ofs);
+    ofs.close();
+
+    std::ifstream ifs(file);
+    auto value = new_instance.Deserialize(ifs);
+    ifs.close();
+    if (not value.has_value()) {
+        throw std::runtime_error("deserialize failed: " + value.error().message);
+    }
+}
+
+}  // namespace fixtures
