@@ -63,7 +63,7 @@ set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-builtin-free")
 set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fopenmp -fopenmp-simd")
 set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -funroll-loops")
 
-add_library (simd ${SIMD_SRCS})
+add_library (simd STATIC ${SIMD_SRCS})
 
 macro (simd_add_definitions flag1 flag2)
     if (${flag1})
@@ -78,5 +78,9 @@ simd_add_definitions (DIST_CONTAINS_AVX512 -DENABLE_AVX512=1)
 simd_add_definitions (DIST_CONTAINS_AVX512VPOPCNTDQ -DENABLE_AVX512VPOPCNTDQ=1)
 simd_add_definitions (DIST_CONTAINS_NEON -DENABLE_NEON=1)
 
-target_link_libraries (simd INTERFACE cpuinfo coverage_config)
+target_link_libraries (simd
+  PRIVATE cpuinfo
+  INTERFACE coverage_config
+  )
+add_dependencies (simd cpuinfo)
 install (TARGETS simd ARCHIVE DESTINATION lib)
