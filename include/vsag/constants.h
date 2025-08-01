@@ -157,7 +157,6 @@ extern const char* const HGRAPH_PARAMETER_EF_RUNTIME;
 extern const char* const HGRAPH_EXTRA_INFO_SIZE;
 extern const char* const HGRAPH_SUPPORT_DUPLICATE;
 extern const char* const HGRAPH_USE_EXTRA_INFO_FILTER;
-extern const char* const HGRAPH_USE_ATTRIBUTE_FILTER;
 extern const char* const HGRAPH_STORE_RAW_VECTOR;
 
 extern const char* const BRUTE_FORCE_QUANTIZATION_TYPE;

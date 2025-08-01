@@ -160,7 +160,6 @@ const char* const HGRAPH_PARAMETER_EF_RUNTIME = "ef_search";
 const char* const HGRAPH_EXTRA_INFO_SIZE = "extra_info_size";
 const char* const HGRAPH_SUPPORT_DUPLICATE = "support_duplicate";
 const char* const HGRAPH_USE_EXTRA_INFO_FILTER = "use_extra_info_filter";
-const char* const HGRAPH_USE_ATTRIBUTE_FILTER = "use_attribute_filter";
 const char* const HGRAPH_STORE_RAW_VECTOR = "store_raw_vector";
 
 const char* const BRUTE_FORCE_QUANTIZATION_TYPE = "quantization_type";
