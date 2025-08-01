@@ -21,6 +21,7 @@
 #include "fixtures.h"
 #include "impl/allocator/safe_allocator.h"
 #include "impl/basic_searcher.h"
+#include "storage/serialization_template_test.h"
 
 using namespace vsag;
 
@@ -139,18 +140,8 @@ TEST_CASE("GNO-IMI Partition Serialize Test", "[ut][GNOIMIPartition]") {
     auto class_result = partition->ClassifyDatas(vec.data(), data_count, 1);
     REQUIRE(class_result.size() == data_count);
 
-    auto dir = fixtures::TempDir("serialize");
-    auto path = dir.GenerateRandomFile();
-    std::ofstream outfile(path, std::ios::out | std::ios::binary);
-    IOStreamWriter writer(outfile);
-    partition->Serialize(writer);
-    outfile.close();
-    partition = std::make_unique<GNOIMIPartition>(param, strategy_param);
-
-    std::ifstream infile(path, std::ios::in | std::ios::binary);
-    IOStreamReader reader(infile);
-    partition->Deserialize(reader);
-    infile.close();
+    auto partition2 = std::make_unique<GNOIMIPartition>(param, strategy_param);
+    test_serializion(*partition, *partition2);
 
     param_str = R"(
     {
@@ -171,7 +162,7 @@ TEST_CASE("GNO-IMI Partition Serialize Test", "[ut][GNOIMIPartition]") {
         auto query = Dataset::Make();
         query->Dim(dim)->Float32Vectors(vec.data() + i * dim)->NumElements(1)->Owner(false);
         auto result =
-            partition->ClassifyDatasForSearch(vec.data() + i * dim, 1, inner_search_param);
+            partition2->ClassifyDatasForSearch(vec.data() + i * dim, 1, inner_search_param);
         auto id = result[0];
         if (id == class_result[i]) {
             match_count++;

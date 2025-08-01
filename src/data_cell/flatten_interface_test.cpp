@@ -20,6 +20,7 @@
 
 #include "fixtures.h"
 #include "simd/simd.h"
+#include "storage/serialization_template_test.h"
 
 namespace vsag {
 void
@@ -74,16 +75,7 @@ void
 FlattenInterfaceTest::TestSerializeAndDeserialize(int64_t dim,
                                                   FlattenInterfacePtr other,
                                                   float error) {
-    fixtures::TempDir dir("flatten");
-    auto path = dir.GenerateRandomFile();
-    std::ofstream outfile(path.c_str(), std::ios::binary);
-    IOStreamWriter writer(outfile);
-    this->flatten_->Serialize(writer);
-    outfile.close();
-
-    std::ifstream infile(path.c_str(), std::ios::binary);
-    IOStreamReader reader(infile);
-    other->Deserialize(reader);
+    test_serializion(*this->flatten_, *other);
 
     int64_t query_count = 100;
     auto queries = fixtures::generate_vectors(query_count, dim, random());
@@ -145,7 +137,5 @@ FlattenInterfaceTest::TestSerializeAndDeserialize(int64_t dim,
             }
         }
     }
-
-    infile.close();
 }
 }  // namespace vsag

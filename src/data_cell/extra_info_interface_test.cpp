@@ -23,6 +23,7 @@
 #include "impl/allocator/default_allocator.h"
 #include "impl/allocator/safe_allocator.h"
 #include "simd/simd.h"
+#include "storage/serialization_template_test.h"
 
 namespace vsag {
 void
@@ -119,21 +120,10 @@ ExtraInfoInterfaceTest::TestForceInMemory(uint64_t force_count) {
 
 void
 ExtraInfoInterfaceTest::TestSerializeAndDeserialize(ExtraInfoInterfacePtr other) {
-    fixtures::TempDir dir("extra_info");
-    auto path = dir.GenerateRandomFile();
-    std::ofstream outfile(path.c_str(), std::ios::binary);
-    IOStreamWriter writer(outfile);
-    this->extra_info_->Serialize(writer);
-    outfile.close();
-
-    std::ifstream infile(path.c_str(), std::ios::binary);
-    IOStreamReader reader(infile);
-    other->Deserialize(reader);
+    test_serializion(*this->extra_info_, *other);
 
     auto total_count = other->TotalCount();
     REQUIRE(total_count == this->extra_info_->TotalCount());
     REQUIRE(other->ExtraInfoSize() == this->extra_info_->ExtraInfoSize());
-
-    infile.close();
 }
 }  // namespace vsag

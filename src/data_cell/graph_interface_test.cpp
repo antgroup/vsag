@@ -22,6 +22,7 @@
 #include "fixtures.h"
 #include "impl/allocator/default_allocator.h"
 #include "impl/allocator/safe_allocator.h"
+#include "storage/serialization_template_test.h"
 
 using namespace vsag;
 
@@ -100,16 +101,7 @@ GraphInterfaceTest::BasicTest(uint64_t max_id,
     }
 
     SECTION("Serialize & Deserialize") {
-        fixtures::TempDir dir("");
-        auto path = dir.GenerateRandomFile();
-        std::ofstream outfile(path.c_str(), std::ios::binary);
-        IOStreamWriter writer(outfile);
-        this->graph_->Serialize(writer);
-        outfile.close();
-
-        std::ifstream infile(path.c_str(), std::ios::binary);
-        IOStreamReader reader(infile);
-        other->Deserialize(reader);
+        test_serializion(*this->graph_, *other);
 
         REQUIRE(this->graph_->TotalCount() == other->TotalCount());
         REQUIRE(this->graph_->MaxCapacity() == other->MaxCapacity());
@@ -120,8 +112,6 @@ GraphInterfaceTest::BasicTest(uint64_t max_id,
             REQUIRE(memcmp(neighbors.data(), value->data(), value->size() * sizeof(InnerIdType)) ==
                     0);
         }
-
-        infile.close();
     }
 
     if (test_delete) {

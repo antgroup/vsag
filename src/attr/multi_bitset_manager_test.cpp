@@ -19,6 +19,7 @@
 
 #include "fixtures.h"
 #include "impl/allocator/safe_allocator.h"
+#include "storage/serialization_template_test.h"
 
 using namespace vsag;
 
@@ -41,18 +42,8 @@ TEST_CASE("MultiBitsetManager Basic Test", "[ut][MultiBitsetManager]") {
     REQUIRE(ptr->Test(10) == true);
     REQUIRE(ptr->Test(9) == false);
 
-    auto tmp_dir = fixtures::TempDir("multi_bitset_manager");
-    auto filepath = tmp_dir.GenerateRandomFile();
-    std::ofstream ofile(filepath, std::ios::binary);
-    IOStreamWriter writer(ofile);
-    manager->Serialize(writer);
-    ofile.close();
-
     auto manager2 = std::make_unique<MultiBitsetManager>(allocator.get());
-    std::ifstream ifile(filepath, std::ios::binary);
-    IOStreamReader reader(ifile);
-    manager2->Deserialize(reader);
-    ifile.close();
+    test_serializion(*manager, *manager2);
 
     REQUIRE(manager2->GetOneBitset(100) != nullptr);
 

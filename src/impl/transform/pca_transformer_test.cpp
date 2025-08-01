@@ -19,6 +19,7 @@
 
 #include "fixtures.h"
 #include "impl/allocator/safe_allocator.h"
+#include "storage/serialization_template_test.h"
 
 using namespace vsag;
 
@@ -198,18 +199,7 @@ TEST_CASE("PCA Serialize / Deserialize Test", "[ut][PCA]") {
         pca1.Train(vec.data(), count);
 
         // copy pca1 -> pca2
-        fixtures::TempDir dir("pca");
-        auto filename = dir.GenerateRandomFile();
-        std::ofstream outfile(filename.c_str(), std::ios::binary);
-        IOStreamWriter writer(outfile);
-        pca1.Serialize(writer);
-        outfile.close();
-
-        std::ifstream infile(filename.c_str(), std::ios::binary);
-        IOStreamReader reader(infile);
-        pca2.Deserialize(reader);
-        infile.close();
-
+        test_serializion(pca1, pca2);
         // validate pca1 == pca2
         std::vector<float> mean1(dim, 0);
         std::vector<float> mean2(dim, 0);

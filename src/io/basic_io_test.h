@@ -22,6 +22,7 @@
 
 #include "basic_io.h"
 #include "fixtures.h"
+#include "storage/serialization_template_test.h"
 
 using namespace vsag;
 
@@ -72,19 +73,11 @@ TestSerializeAndDeserialize(BasicIO<T>& wio, BasicIO<T>& rio) {
     fixtures::TempDir dirname("TestSerializeAndDeserialize");
     for (auto count : counts) {
         for (auto max_length : max_lengths) {
-            auto filename = dirname.GenerateRandomFile();
             auto vecs = fixtures::GenTestItems(count, max_length);
             for (auto& item : vecs) {
                 wio.Write(item.data_, item.length_, item.start_);
             }
-            std::ofstream outfile(filename.c_str(), std::ios::binary);
-            IOStreamWriter writer(outfile);
-            wio.Serialize(writer);
-            outfile.close();
-
-            std::ifstream infile(filename.c_str(), std::ios::binary);
-            IOStreamReader reader(infile);
-            rio.Deserialize(reader);
+            test_serializion(wio, rio);
 
             for (auto& item : vecs) {
                 std::vector<uint8_t> data(item.length_);
@@ -97,7 +90,6 @@ TestSerializeAndDeserialize(BasicIO<T>& wio, BasicIO<T>& rio) {
                     rio.Release(ptr);
                 }
             }
-            infile.close();
         }
     }
 }

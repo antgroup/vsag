@@ -21,6 +21,7 @@
 #include "fixtures.h"
 #include "impl/allocator/safe_allocator.h"
 #include "quantization/quantizer_test.h"
+#include "storage/serialization_template_test.h"
 
 using namespace vsag;
 
@@ -172,17 +173,8 @@ TestSerializeAndDeserializeMetricPQFS(uint64_t dim, int64_t pq_dim, int count, f
     PQFastScanQuantizer<metric> quantizer1(dim, pq_dim, allocator.get());
     PQFastScanQuantizer<metric> quantizer2(dim, pq_dim, allocator.get());
     TestComputerBatchPQFS(quantizer1, dim, count, error);
-    fixtures::TempDir dir("quantizer");
-    auto filename = dir.GenerateRandomFile();
-    std::ofstream outfile(filename.c_str(), std::ios::binary);
-    IOStreamWriter writer(outfile);
-    quantizer1.Serialize(writer);
-    outfile.close();
 
-    std::ifstream infile(filename.c_str(), std::ios::binary);
-    IOStreamReader reader(infile);
-    quantizer2.Deserialize(reader);
-    infile.close();
+    test_serializion(quantizer1, quantizer2);
     TestComputerBatchPQFS(quantizer2, dim, count, error, false);
 }
 

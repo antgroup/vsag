@@ -20,6 +20,7 @@
 #include "fixtures.h"
 #include "impl/allocator/safe_allocator.h"
 #include "safe_thread_pool.h"
+#include "storage/serialization_template_test.h"
 
 using namespace vsag;
 
@@ -89,20 +90,10 @@ TEST_CASE("IVF Nearest Partition Serialize Test", "[ut][IVFNearestPartition]") {
     auto class_result = partition->ClassifyDatas(vec.data(), data_count, 1);
     REQUIRE(class_result.size() == data_count);
 
-    auto dir = fixtures::TempDir("serialize");
-    auto path = dir.GenerateRandomFile();
-    std::ofstream outfile(path, std::ios::out | std::ios::binary);
-    IOStreamWriter writer(outfile);
-    partition->Serialize(writer);
-    outfile.close();
-    partition = std::make_unique<IVFNearestPartition>(bucket_count, param, strategy_param);
+    auto partition2 = std::make_unique<IVFNearestPartition>(bucket_count, param, strategy_param);
+    test_serializion(*partition, *partition2);
 
-    std::ifstream infile(path, std::ios::in | std::ios::binary);
-    IOStreamReader reader(infile);
-    partition->Deserialize(reader);
-    infile.close();
-
-    auto index = partition->route_index_ptr_;
+    auto index = partition2->route_index_ptr_;
     std::string route_search_param = R"(
     {
         "hgraph": {
