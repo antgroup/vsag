@@ -25,7 +25,7 @@ using namespace vsag;
 
 TEST_CASE("SparseTermComputer Basic Test", "[ut][SparseTermComputer]") {
     // prepare data
-    auto query_prune_ratio = 0.8;
+    auto query_prune_ratio = 0.2;
     auto query_len = 10;
     SparseVector query_sv;
     query_sv.len_ = query_len;
@@ -42,7 +42,7 @@ TEST_CASE("SparseTermComputer Basic Test", "[ut][SparseTermComputer]") {
     auto computer = std::make_shared<SparseTermComputer>(query_sv, search_params, allocator.get());
 
     REQUIRE(computer->sorted_query_.size() == query_len);
-    REQUIRE(computer->pruned_len_ == query_len * query_prune_ratio);
+    REQUIRE(computer->pruned_len_ == query_len * (1.0F - query_prune_ratio));
     for (auto i = 0; i < computer->sorted_query_.size(); i++) {
         auto id = query_len - i - 1;
         REQUIRE(computer->sorted_query_[i].first == id);

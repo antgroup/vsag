@@ -38,7 +38,7 @@ SparseTermDataCell::Query(float* global_dists, const SparseTermComputerPtr& comp
                                     term_ids_[term].data(),
                                     term_datas_[term].data(),
                                     static_cast<uint32_t>(static_cast<float>(term_sizes_[term]) *
-                                                          computer->term_prune_ratio_),
+                                                          computer->term_retain_ratio_),
                                     global_dists);
     }
     computer->ResetTerm();
@@ -73,7 +73,7 @@ SparseTermDataCell::InsertHeap(float* dists,
 
         uint32_t i = 0;
         auto term_size = static_cast<uint32_t>(static_cast<float>(term_sizes_[term]) *
-                                               computer->term_prune_ratio_);
+                                               computer->term_retain_ratio_);
         bool is_valid = false;
         if constexpr (mode == InnerSearchMode::KNN_SEARCH) {
             if (heap.size() < n_candidate) {

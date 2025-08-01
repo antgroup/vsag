@@ -31,11 +31,11 @@ SINDI::SINDI(const SINDIParameterPtr& param, const IndexCommonParam& common_para
     : InnerIndexInterface(param, common_param),
       use_reorder_(param->use_reorder),
       window_size_(param->window_size),
-      doc_prune_ratio_(param->doc_prune_ratio),
+      doc_retain_ratio_(1.0F - param->doc_prune_ratio),
       window_term_list_(common_param.allocator_.get()) {
     window_term_list_.resize(1, nullptr);
     this->window_term_list_[0] =
-        std::make_shared<SparseTermDataCell>(doc_prune_ratio_, common_param.allocator_.get());
+        std::make_shared<SparseTermDataCell>(doc_retain_ratio_, common_param.allocator_.get());
 
     if (use_reorder_) {
         SparseIndexParameterPtr rerank_param = std::make_shared<SparseIndexParameters>();
@@ -61,7 +61,7 @@ SINDI::Add(const DatasetPtr& base) {
         window_term_list_.resize(final_add_window + 1);
     }
     for (uint32_t i = start_add_window + 1; i < window_term_list_.size(); i++) {
-        window_term_list_[i] = std::make_shared<SparseTermDataCell>(doc_prune_ratio_, allocator_);
+        window_term_list_[i] = std::make_shared<SparseTermDataCell>(doc_retain_ratio_, allocator_);
     }
 
     // add process
@@ -280,7 +280,7 @@ SINDI::Deserialize(StreamReader& reader) {
     for (auto i = 0; i < window_term_list_.size(); i++) {
         if (i != 0) {
             window_term_list_[i] =
-                std::make_shared<SparseTermDataCell>(doc_prune_ratio_, allocator_);
+                std::make_shared<SparseTermDataCell>(doc_retain_ratio_, allocator_);
         }
         window_term_list_[i]->Deserialize(reader);
     }

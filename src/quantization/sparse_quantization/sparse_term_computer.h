@@ -34,12 +34,12 @@ public:
                                 const SINDISearchParameter& search_param,
                                 Allocator* allocator = nullptr)
         : sorted_query_(allocator),
-          query_prune_ratio_(search_param.query_prune_ratio),
-          term_prune_ratio_(search_param.term_prune_ratio),
+          query_retain_ratio_(1.0F - search_param.query_prune_ratio),
+          term_retain_ratio_(1.0F - search_param.term_prune_ratio),
           raw_query_(sparse_query) {
         sort_sparse_vector(sparse_query, sorted_query_);
 
-        pruned_len_ = (uint32_t)(query_prune_ratio_ * sparse_query.len_);
+        pruned_len_ = (uint32_t)(query_retain_ratio_ * sparse_query.len_);
         if (pruned_len_ == 0) {
             if (sorted_query_.size() != 0) {
                 pruned_len_ = 1;
@@ -55,7 +55,7 @@ public:
     SetQuery(const SparseVector& sparse_query) {
         sort_sparse_vector(sparse_query, sorted_query_);
 
-        pruned_len_ = (uint32_t)(query_prune_ratio_ * sparse_query.len_);
+        pruned_len_ = (uint32_t)(query_retain_ratio_ * sparse_query.len_);
         if (pruned_len_ == 0) {
             if (sorted_query_.size() != 0) {
                 pruned_len_ = 1;
@@ -110,9 +110,9 @@ public:
 
     const SparseVector& raw_query_;
 
-    float query_prune_ratio_{0};
+    float query_retain_ratio_{0.0F};
 
-    float term_prune_ratio_{0.0f};
+    float term_retain_ratio_{0.0F};
 
     uint32_t pruned_len_{0};
 
