@@ -32,7 +32,7 @@ public:
             "metric_type": "ip",
             "index_param": {
                 "use_reorder": true,
-                "doc_prune_ratio": 1,
+                "doc_prune_ratio": 0.0,
                 "window_size": 100000
             }
         })";
@@ -41,8 +41,8 @@ public:
             "sindi":
             {
                 "n_candidate": 20,
-                "query_prune_ratio": 0.9,
-                "term_prune_ratio": 1
+                "query_prune_ratio": 0.1,
+                "term_prune_ratio": 0.0
             }
         })";
 };

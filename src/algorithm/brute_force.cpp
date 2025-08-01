@@ -23,7 +23,6 @@
 #include "storage/serialization.h"
 #include "utils/slow_task_timer.h"
 #include "utils/util_functions.h"
-
 namespace vsag {
 
 BruteForce::BruteForce(const BruteForceParameterPtr& param, const IndexCommonParam& common_param)

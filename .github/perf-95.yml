@@ -90,3 +90,15 @@ global:
     topk: 10
     search_mode: "knn"
     delete_index_after_search: false
+
+
+95/INTERNET:
+    datapath: "/tmp/data/wholenet-sparse-1m-ip.hdf5"
+    type: "build,search" # build, search
+    index_name: "sindi"
+    create_params: '{"dim":512,"dtype":"sparse","metric_type":"ip","index_param":{"use_reorder": true, "doc_prune_ratio": 0.0, "window_size": 100000}}'
+    search_params: '{"sindi":{"query_prune_ratio": 0.1, "term_prune_ratio": 0, "n_candidate": 30}}'
+    index_path: "/tmp/wholenet-sparse-1m-ip/index/wholenet_index"
+    topk: 10
+    search_mode: "knn"
+    delete_index_after_search: false
