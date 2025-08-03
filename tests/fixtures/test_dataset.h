@@ -34,7 +34,8 @@ public:
                       bool with_path = false,
                       float valid_ratio = 0.8,
                       std::string vector_type = "dense",
-                      uint64_t extra_info_size = 0);
+                      uint64_t extra_info_size = 0,
+                      bool has_duplicate = false);
 
     static std::shared_ptr<TestDataset>
     CreateNanDataset(const std::string& metric_str);

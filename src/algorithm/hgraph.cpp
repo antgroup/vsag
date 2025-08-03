@@ -54,6 +54,7 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
       hierarchical_datacell_param_(hgraph_param->hierarchical_graph_param),
       extra_info_size_(common_param.extra_info_size_),
       deleted_ids_(allocator_) {
+    this->label_table_->compress_duplicate_data_ = hgraph_param->support_duplicate;
     neighbors_mutex_ = std::make_shared<PointsMutex>(0, common_param.allocator_.get());
     this->basic_flatten_codes_ =
         FlattenInterface::MakeInstance(hgraph_param->base_codes_param, common_param);
@@ -108,7 +109,6 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
         this->attr_filter_index_ =
             AttributeInvertedInterface::MakeInstance(allocator_, false /*have_bucket*/);
     }
-    this->label_table_->compress_duplicate_data_ = hgraph_param->support_duplicate;
 }
 void
 HGraph::Train(const DatasetPtr& base) {
@@ -621,6 +621,7 @@ HGraph::RangeSearch(const DatasetPtr& query,
     search_param.is_inner_id_allowed = ft;
     search_param.radius = radius;
     search_param.search_mode = RANGE_SEARCH;
+    search_param.consider_duplicate = true;
     search_param.range_search_limit_size = static_cast<int>(limited_size);
     auto search_result = this->search_one_graph(
         raw_query, this->bottom_graph_, this->basic_flatten_codes_, search_param);
@@ -766,6 +767,10 @@ HGraph::deserialize_basic_info(JsonType jsonify_basic_info) {
 
 void
 HGraph::serialize_label_info(StreamWriter& writer) const {
+    if (this->label_table_->CompressDuplicateData()) {
+        this->label_table_->Serialize(writer);
+        return;
+    }
     StreamWriter::WriteVector(writer, this->label_table_->label_table_);
     uint64_t size = this->label_table_->label_remap_.size();
     StreamWriter::WriteObj(writer, size);
@@ -778,6 +783,10 @@ HGraph::serialize_label_info(StreamWriter& writer) const {
 
 void
 HGraph::deserialize_label_info(StreamReader& reader) const {
+    if (this->label_table_->CompressDuplicateData()) {
+        this->label_table_->Deserialize(reader);
+        return;
+    }
     StreamReader::ReadVector(reader, this->label_table_->label_table_);
     uint64_t size;
     StreamReader::ReadObj(reader, size);

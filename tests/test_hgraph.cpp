@@ -1014,7 +1014,7 @@ TestHGraphDuplicate(const fixtures::HGraphTestIndexPtr& test_index,
     auto duplicate_pos = GENERATE("prefix", "suffix", "middle");
     auto search_param = fmt::format(fixtures::search_param_tmp, 200, false);
     std::unordered_map<std::string, float> ratios{
-        {"prefix", 0.9}, {"suffix", 0.9}, {"middle", 0.5}};
+        {"prefix", 0.9}, {"suffix", 0.9}, {"middle", 1.0}};
     const std::vector<std::pair<std::string, float>> all_test_cases =
         fixtures::RandomSelect<std::pair<std::string, float>>(
             {
@@ -1045,11 +1045,23 @@ TestHGraphDuplicate(const fixtures::HGraphTestIndexPtr& test_index,
                 build_param.support_duplicate = true;
                 auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
                 auto index = TestIndex::TestFactory(test_index->name, param, true);
-                auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(
+                auto dataset = HGraphTestIndex::pool.GetDuplicateDataset(
                     dim, resource->base_count, metric_type);
                 TestIndex::TestBuildDuplicateIndex(index, dataset, duplicate_pos, true);
-                TestIndex::TestKnnSearch(
-                    index, dataset, search_param, recall * ratios[duplicate_pos], true);
+                TestIndex::TestKnnSearch(index, dataset, search_param, recall, true);
+                // TODO(inabao): Fix knn search iter test
+                // TestIndex::TestKnnSearchIter(index, dataset, search_param, recall, true);
+                TestIndex::TestConcurrentKnnSearch(index, dataset, search_param, recall, true);
+                TestIndex::TestRangeSearch(index, dataset, search_param, recall, 10, true);
+                TestIndex::TestRangeSearch(index, dataset, search_param, recall / 2.0, 5, true);
+                TestIndex::TestFilterSearch(index, dataset, search_param, recall, true, true);
+                TestIndex::TestCheckIdExist(index, dataset);
+                TestIndex::TestCalcDistanceById(index, dataset);
+                TestIndex::TestGetRawVectorByIds(index, dataset);
+                TestIndex::TestBatchCalcDistanceById(index, dataset);
+                TestIndex::TestSearchAllocator(index, dataset, search_param, recall, true);
+                auto index2 = TestIndex::TestFactory(test_index->name, param, true);
+                TestIndex::TestSerializeFile(index, index2, dataset, search_param, true);
                 vsag::Options::Instance().set_block_size_limit(origin_size);
             }
         }

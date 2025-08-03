@@ -44,6 +44,18 @@ CopyVector(const std::vector<T>& vec) {
 
 template <typename T>
 T*
+DuplicateCopyVector(const std::vector<T>& vec) {
+    auto result = new T[vec.size()];
+    if (vec.size() % 2 != 0) {
+        throw std::runtime_error("Vector size must be even for duplication.");
+    }
+    memcpy(result, vec.data(), (vec.size() / 2) * sizeof(T));
+    memcpy(result + vec.size() / 2, vec.data(), (vec.size() / 2) * sizeof(T));
+    return result;
+}
+
+template <typename T>
+T*
 CopyVector(const vsag::Vector<T>& vec, vsag::Allocator* allocator) {
     T* result;
     if (allocator) {

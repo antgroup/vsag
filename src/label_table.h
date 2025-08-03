@@ -40,7 +40,7 @@ class LabelTable {
 public:
     explicit LabelTable(Allocator* allocator,
                         bool use_reverse_map = true,
-                        bool compress_redundant_data = true)
+                        bool compress_redundant_data = false)
         : allocator_(allocator),
           label_table_(0, allocator),
           label_remap_(0, allocator),
@@ -115,6 +115,15 @@ public:
     void
     Serialize(StreamWriter& writer) const {
         StreamWriter::WriteVector(writer, label_table_);
+        if (compress_duplicate_data_) {
+            StreamWriter::WriteObj(writer, duplicate_count_);
+            for (InnerIdType i = 0; i < label_table_.size(); ++i) {
+                if (duplicate_records_[i] != nullptr) {
+                    StreamWriter::WriteObj(writer, i);
+                    StreamWriter::WriteVector(writer, duplicate_records_[i]->duplicate_ids);
+                }
+            }
+        }
     }
 
     void
@@ -123,6 +132,16 @@ public:
         if (use_reverse_map_) {
             for (InnerIdType id = 0; id < label_table_.size(); ++id) {
                 this->label_remap_[label_table_[id]] = id;
+            }
+        }
+        if (compress_duplicate_data_) {
+            StreamReader::ReadObj(reader, duplicate_count_);
+            duplicate_records_.resize(label_table_.size(), nullptr);
+            for (InnerIdType i = 0; i < duplicate_count_; ++i) {
+                InnerIdType id;
+                StreamReader::ReadObj<InnerIdType>(reader, id);
+                duplicate_records_[id] = allocator_->New<DuplicateRecord>(allocator_);
+                StreamReader::ReadVector(reader, duplicate_records_[id]->duplicate_ids);
             }
         }
     }
@@ -150,8 +169,10 @@ public:
 
     inline void
     SetDuplicateId(InnerIdType previous_id, InnerIdType current_id) {
+        std::lock_guard duplicate_lock(duplicate_mutex_);
         if (duplicate_records_[previous_id] == nullptr) {
             duplicate_records_[previous_id] = allocator_->New<DuplicateRecord>(allocator_);
+            duplicate_count_++;
         }
         std::lock_guard lock(duplicate_records_[previous_id]->duplicate_mutex);
         duplicate_records_[previous_id]->duplicate_ids.push_back(current_id);
@@ -174,6 +195,9 @@ public:
     UnorderedMap<LabelType, InnerIdType> label_remap_;
 
     bool compress_duplicate_data_{true};
+
+    std::mutex duplicate_mutex_;
+    uint64_t duplicate_count_{0L};
     Vector<DuplicateRecord*> duplicate_records_;
 
     Allocator* allocator_{nullptr};
