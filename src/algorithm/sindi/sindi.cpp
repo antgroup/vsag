@@ -55,15 +55,15 @@ SINDI::Add(const DatasetPtr& base) {
     const auto* ids = base->GetIds();
 
     // adjust window
-    uint32_t start_add_window = cur_element_count_ / window_size_;
-    uint32_t final_add_window = (cur_element_count_ + data_num) / window_size_;
-    if ((cur_element_count_ + data_num) % window_size_ == 0) {
-        window_term_list_.resize(final_add_window);
-    } else {
-        window_term_list_.resize(final_add_window + 1);
-    }
-    for (uint32_t i = start_add_window + 1; i < window_term_list_.size(); i++) {
-        window_term_list_[i] = std::make_shared<SparseTermDataCell>(doc_retain_ratio_, allocator_);
+    uint32_t old_window_count = (cur_element_count_ + window_size_ - 1) / window_size_;  // ceil
+    uint32_t new_window_count = (cur_element_count_ + data_num + window_size_ - 1) / window_size_;
+
+    if (new_window_count > old_window_count) {
+        window_term_list_.resize(new_window_count);
+        for (uint32_t i = old_window_count; i < new_window_count; ++i) {
+            window_term_list_[i] =
+                std::make_shared<SparseTermDataCell>(doc_retain_ratio_, allocator_);
+        }
     }
 
     // add process
@@ -72,7 +72,7 @@ SINDI::Add(const DatasetPtr& base) {
         auto window_start_id = cur_window * window_size_;
         const auto& sparse_vector = sparse_vectors[i];
 
-        label_table_->Insert(cur_element_count_, ids[i]);
+        label_table_->Insert(cur_element_count_, ids[i]);  // todo(zxy): check id exists
         uint32_t inner_id = cur_element_count_ - window_start_id;
         window_term_list_[cur_window]->InsertVector(sparse_vector, inner_id);
 

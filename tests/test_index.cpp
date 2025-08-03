@@ -1037,6 +1037,7 @@ TestIndex::TestSerializeReaderSet(const IndexPtr& index_from,
 void
 TestIndex::TestConcurrentAddSearch(const TestIndex::IndexPtr& index,
                                    const TestDatasetPtr& dataset,
+                                   const std::string& search_param,
                                    bool expected_success) {
     if (not index->CheckFeature(vsag::SUPPORT_ADD_CONCURRENT) or
         not index->CheckFeature(vsag::SUPPORT_SEARCH_CONCURRENT)) {
@@ -1044,6 +1045,9 @@ TestIndex::TestConcurrentAddSearch(const TestIndex::IndexPtr& index,
     }
     fixtures::logger::LoggerReplacer _;
 
+    auto gts = dataset->ground_truth_;
+    auto gt_topK = dataset->top_k;
+    auto topk = gt_topK;
     auto base_count = dataset->base_->GetNumElements();
     auto temp_count = static_cast<int64_t>(base_count * 0.8);
     auto dim = dataset->base_->GetDim();
@@ -1057,10 +1061,9 @@ TestIndex::TestConcurrentAddSearch(const TestIndex::IndexPtr& index,
         ->Owner(false);
     index->Build(temp_dataset);
     fixtures::ThreadPool pool(5);
-    using RetType = tl::expected<std::vector<int64_t>, vsag::Error>;
-    std::vector<std::future<RetType>> futures;
+    std::vector<std::future<bool>> futures;
 
-    auto func = [&](uint64_t i) -> RetType {
+    auto func = [&](uint64_t i) -> bool {
         auto data_one = vsag::Dataset::Make();
         data_one->Dim(dim)
             ->Ids(dataset->base_->GetIds() + i)
@@ -1069,8 +1072,13 @@ TestIndex::TestConcurrentAddSearch(const TestIndex::IndexPtr& index,
             ->Float32Vectors(dataset->base_->GetFloat32Vectors() + i * dim)
             ->SparseVectors(dataset->base_->GetSparseVectors() + i)
             ->Owner(false);
-        auto add_index = index->Add(data_one);
-        return add_index;
+        if (i % 2 == 0) {
+            auto add_index = index->Add(data_one);
+            return add_index.has_value();
+        } else {
+            auto search_index = index->KnnSearch(data_one, topk, search_param);
+            return search_index.has_value();
+        }
     };
 
     for (uint64_t j = temp_count; j < base_count; ++j) {
@@ -1079,9 +1087,9 @@ TestIndex::TestConcurrentAddSearch(const TestIndex::IndexPtr& index,
 
     for (auto& res : futures) {
         auto val = res.get();
-        REQUIRE(val.has_value() == expected_success);
+        REQUIRE(val == expected_success);
     }
-    REQUIRE(index->GetNumElements() == base_count);
+    REQUIRE(index->GetNumElements() == base_count * 0.9);
 }
 
 void
