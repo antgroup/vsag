@@ -125,12 +125,6 @@ SparseTermDataCell::InsertHeap(float* dists,
     computer->ResetTerm();
 }
 
-SparseTermComputerPtr
-SparseTermDataCell::FactoryComputer(const SparseVector& sparse_query,
-                                    const SINDISearchParameter& search_param) {
-    return std::make_shared<SparseTermComputer>(sparse_query, search_param, allocator_);
-}
-
 void
 SparseTermDataCell::DocPrune(Vector<std::pair<uint32_t, float>>& sorted_base) const {
     // use this function when inserting
