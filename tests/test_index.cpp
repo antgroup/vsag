@@ -1161,6 +1161,7 @@ TestIndex::TestConcurrentKnnSearch(const TestIndex::IndexPtr& index,
             ->Dim(dim)
             ->Paths(queries->GetPaths() + i)
             ->Float32Vectors(queries->GetFloat32Vectors() + i * dim)
+            ->SparseVectors(queries->GetSparseVectors() + i)
             ->Owner(false);
         auto res = index->KnnSearch(query, topk, search_param);
         return {res, i};

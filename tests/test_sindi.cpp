@@ -58,7 +58,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex, "SINDI Build and Search",
     TestKnnSearch(index, dataset, search_param, 0.99, true);
     TestRangeSearch(index, dataset, search_param, 0.99, 10, true);
     TestRangeSearch(index, dataset, search_param, 0.49, 5, true);
-    //    TestFilterSearch(index, dataset, search_param, 0.99, true);
+    //    TestFilterSearch(index, dataset, search_param, 0.99, true);   // todo(zxy): radius align with hgraph
     TestConcurrentKnnSearch(index, dataset, search_param, 0.99, true);
 }
 
