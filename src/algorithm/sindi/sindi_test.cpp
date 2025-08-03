@@ -155,7 +155,7 @@ TEST_CASE("SINDI Basic Test", "[ut][SINDI]") {
         auto range_result_radius_3 =
             index->RangeSearch(query, target_radius, search_param_str, nullptr);
         for (int j = 0; j < range_result_radius_3->GetDim(); j++) {
-            REQUIRE(range_result_radius_3->GetDistances()[j] < target_radius);
+            REQUIRE(range_result_radius_3->GetDistances()[j] <= target_radius);
         }
 
         // test filter with range radius

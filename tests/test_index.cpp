@@ -1035,6 +1035,56 @@ TestIndex::TestSerializeReaderSet(const IndexPtr& index_from,
 }
 
 void
+TestIndex::TestConcurrentAddSearch(const TestIndex::IndexPtr& index,
+                                   const TestDatasetPtr& dataset,
+                                   bool expected_success) {
+    if (not index->CheckFeature(vsag::SUPPORT_ADD_CONCURRENT) or
+        not index->CheckFeature(vsag::SUPPORT_SEARCH_CONCURRENT)) {
+        return;
+    }
+    fixtures::logger::LoggerReplacer _;
+
+    auto base_count = dataset->base_->GetNumElements();
+    auto temp_count = static_cast<int64_t>(base_count * 0.8);
+    auto dim = dataset->base_->GetDim();
+    auto temp_dataset = vsag::Dataset::Make();
+    temp_dataset->Dim(dim)
+        ->Ids(dataset->base_->GetIds())
+        ->NumElements(temp_count)
+        ->Paths(dataset->base_->GetPaths())
+        ->Float32Vectors(dataset->base_->GetFloat32Vectors())
+        ->SparseVectors(dataset->base_->GetSparseVectors())
+        ->Owner(false);
+    index->Build(temp_dataset);
+    fixtures::ThreadPool pool(5);
+    using RetType = tl::expected<std::vector<int64_t>, vsag::Error>;
+    std::vector<std::future<RetType>> futures;
+
+    auto func = [&](uint64_t i) -> RetType {
+        auto data_one = vsag::Dataset::Make();
+        data_one->Dim(dim)
+            ->Ids(dataset->base_->GetIds() + i)
+            ->NumElements(1)
+            ->Paths(dataset->base_->GetPaths() + i)
+            ->Float32Vectors(dataset->base_->GetFloat32Vectors() + i * dim)
+            ->SparseVectors(dataset->base_->GetSparseVectors() + i)
+            ->Owner(false);
+        auto add_index = index->Add(data_one);
+        return add_index;
+    };
+
+    for (uint64_t j = temp_count; j < base_count; ++j) {
+        futures.emplace_back(pool.enqueue(func, j));
+    }
+
+    for (auto& res : futures) {
+        auto val = res.get();
+        REQUIRE(val.has_value() == expected_success);
+    }
+    REQUIRE(index->GetNumElements() == base_count);
+}
+
+void
 TestIndex::TestConcurrentAdd(const TestIndex::IndexPtr& index,
                              const TestDatasetPtr& dataset,
                              bool expected_success) {

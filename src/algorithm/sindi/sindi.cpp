@@ -46,6 +46,8 @@ SINDI::SINDI(const SINDIParameterPtr& param, const IndexCommonParam& common_para
 
 std::vector<int64_t>
 SINDI::Add(const DatasetPtr& base) {
+    std::unique_lock wlock(this->global_mutex_);
+
     auto data_num = base->GetNumElements();
     CHECK_ARGUMENT(data_num > 0, "data_num is zero when add vectors");
 
@@ -86,6 +88,7 @@ SINDI::Add(const DatasetPtr& base) {
 
 std::vector<int64_t>
 SINDI::Build(const DatasetPtr& base) {
+    // note that there's a wlock in Add()
     return this->Add(base);
 }
 
@@ -94,6 +97,8 @@ SINDI::KnnSearch(const DatasetPtr& query,
                  int64_t k,
                  const std::string& parameters,
                  const FilterPtr& filter) const {
+    std::shared_lock rlock(this->global_mutex_);
+
     // Due to concerns about the performance of this index
     // We have not yet implemented search with filtering capabilities
     const auto* sparse_vectors = query->GetSparseVectors();
@@ -185,7 +190,7 @@ SINDI::search_impl(const SparseTermComputerPtr& computer,
                 cur_heap_top = high_precise_heap->Top().first;
             }
             if constexpr (mode == RANGE_SEARCH) {
-                if (high_precise_distance < inner_param.radius) {
+                if (high_precise_distance <= inner_param.radius) {
                     high_precise_heap->Push(high_precise_distance, label);
                 }
                 if (inner_param.range_search_limit_size != -1 and
@@ -229,6 +234,8 @@ SINDI::RangeSearch(const DatasetPtr& query,
                    const std::string& parameters,
                    const FilterPtr& filter,
                    int64_t limited_size) const {
+    std::shared_lock rlock(this->global_mutex_);
+
     // Due to concerns about the performance of this index
     // We have not yet implemented search with filtering capabilities
     const auto* sparse_vectors = query->GetSparseVectors();
@@ -255,6 +262,8 @@ SINDI::RangeSearch(const DatasetPtr& query,
 
 void
 SINDI::Serialize(StreamWriter& writer) const {
+    std::shared_lock rlock(this->global_mutex_);
+
     StreamWriter::WriteObj(writer, cur_element_count_);
 
     uint32_t window_term_list_size = window_term_list_.size();
@@ -272,6 +281,8 @@ SINDI::Serialize(StreamWriter& writer) const {
 
 void
 SINDI::Deserialize(StreamReader& reader) {
+    std::shared_lock rlock(this->global_mutex_);
+
     StreamReader::ReadObj(reader, cur_element_count_);
 
     uint32_t window_term_list_size = 0;
@@ -290,6 +301,42 @@ SINDI::Deserialize(StreamReader& reader) {
     if (use_reorder_) {
         rerank_flat_index_->Deserialize(reader);
     }
+}
+
+void
+SINDI::InitFeatures() {
+    // build & add
+    this->index_feature_list_->SetFeatures({
+        IndexFeature::SUPPORT_BUILD,
+        IndexFeature::SUPPORT_BUILD_WITH_MULTI_THREAD,
+        IndexFeature::SUPPORT_ADD_AFTER_BUILD,
+    });
+
+    // search
+    this->index_feature_list_->SetFeatures({
+        IndexFeature::SUPPORT_KNN_SEARCH,
+        IndexFeature::SUPPORT_KNN_SEARCH_WITH_ID_FILTER,
+        IndexFeature::SUPPORT_RANGE_SEARCH,
+        IndexFeature::SUPPORT_RANGE_SEARCH_WITH_ID_FILTER,
+    });
+
+    // serialize
+    this->index_feature_list_->SetFeatures({
+        IndexFeature::SUPPORT_DESERIALIZE_BINARY_SET,
+        IndexFeature::SUPPORT_DESERIALIZE_FILE,
+        IndexFeature::SUPPORT_DESERIALIZE_READER_SET,
+        IndexFeature::SUPPORT_SERIALIZE_BINARY_SET,
+        IndexFeature::SUPPORT_SERIALIZE_FILE,
+    });
+
+    // concurrency
+    this->index_feature_list_->SetFeatures({
+        IndexFeature::SUPPORT_SEARCH_CONCURRENT,
+        IndexFeature::SUPPORT_ADD_CONCURRENT,
+    });
+
+    // metric
+    this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_METRIC_TYPE_INNER_PRODUCT);
 }
 
 }  // namespace vsag
