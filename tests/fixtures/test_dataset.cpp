@@ -86,7 +86,8 @@ GenerateRandomDataset(uint64_t dim,
                       std::string metric_str = "l2",
                       bool is_query = false,
                       uint64_t extra_info_size = 0,
-                      std::string vector_type = "dense") {
+                      std::string vector_type = "dense",
+                      bool has_duplicate = false) {
     auto base = vsag::Dataset::Make();
     bool need_normalize = (metric_str != "cosine");
     auto vecs =
@@ -101,14 +102,22 @@ GenerateRandomDataset(uint64_t dim,
     std::iota(ids.begin(), ids.end(), TestDataset::ID_BIAS);
     base->Dim(dim)
         ->Ids(CopyVector(ids))
-        ->Float32Vectors(CopyVector(vecs))
-        ->Int8Vectors(CopyVector(vecs_int8))
         ->Paths(paths)
         ->AttributeSets(attr_sets)
         ->NumElements(count)
         ->Owner(true);
+    if (not has_duplicate) {
+        base->Float32Vectors(CopyVector(vecs))->Int8Vectors(CopyVector(vecs_int8));
+    } else {
+        base->Float32Vectors(DuplicateCopyVector(vecs))
+            ->Int8Vectors(DuplicateCopyVector(vecs_int8));
+    }
     if (vector_type == "sparse") {
-        base->SparseVectors(CopyVector(GenerateSparseVectors(count, dim)));
+        if (not has_duplicate) {
+            base->SparseVectors(CopyVector(GenerateSparseVectors(count, dim)));
+        } else {
+            base->SparseVectors(DuplicateCopyVector(GenerateSparseVectors(count, dim)));
+        }
     }
     if (extra_info_size != 0) {
         auto extra_infos = fixtures::generate_extra_infos(count, extra_info_size);
@@ -344,12 +353,13 @@ TestDataset::CreateTestDataset(uint64_t dim,
                                bool with_path,
                                float valid_ratio,
                                std::string vector_type,
-                               uint64_t extra_info_size) {
+                               uint64_t extra_info_size,
+                               bool has_duplicate) {
     TestDatasetPtr dataset = std::shared_ptr<TestDataset>(new TestDataset);
     dataset->dim_ = dim;
     dataset->count_ = count;
     dataset->base_ = GenerateRandomDataset(
-        dim, count, metric_str, false /*is_query*/, extra_info_size, vector_type);
+        dim, count, metric_str, false /*is_query*/, extra_info_size, vector_type, has_duplicate);
     constexpr uint64_t query_count = 100;
     dataset->query_ =
         GenerateRandomDataset(dim, query_count, metric_str, true, extra_info_size, vector_type);
