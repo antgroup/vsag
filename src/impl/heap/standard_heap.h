@@ -23,13 +23,6 @@ namespace vsag {
 template <bool max_heap = true, bool fixed_size = true>
 class StandardHeap : public DistanceHeap {
 public:
-    using QueueMax =
-        std::priority_queue<DistanceRecord, Vector<std::pair<float, InnerIdType>>, CompareMax>;
-
-    using QueueMin =
-        std::priority_queue<DistanceRecord, Vector<std::pair<float, InnerIdType>>, CompareMin>;
-
-public:
     explicit StandardHeap(Allocator* allocator, int64_t max_size);
 
     void
@@ -37,12 +30,17 @@ public:
 
     [[nodiscard]] const DistanceRecord&
     Top() const override {
-        return this->queue_.top();
+        return this->queue_.front();
     }
 
     void
     Pop() override {
-        this->queue_.pop();
+        if constexpr (max_heap) {
+            std::pop_heap(queue_.begin(), queue_.end(), CompareMax());
+        } else {
+            std::pop_heap(queue_.begin(), queue_.end(), CompareMin());
+        }
+        queue_.pop_back();
     }
 
     [[nodiscard]] uint64_t
@@ -55,7 +53,12 @@ public:
         return this->queue_.size() == 0;
     }
 
+    [[nodiscard]] const DistanceRecord*
+    GetData() const override {
+        return this->queue_.data();
+    }
+
 private:
-    typename std::conditional<max_heap, QueueMax, QueueMin>::type queue_;
+    Vector<DistanceRecord> queue_;
 };
 }  // namespace vsag
