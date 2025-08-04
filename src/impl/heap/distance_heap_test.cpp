@@ -50,8 +50,18 @@ public:
             gt = &sorted_data_greater;
         }
 
-        std::vector<DistanceHeap::DistanceRecord> temp;
         auto size = heap.Size();
+        std::vector<DistanceHeap::DistanceRecord> temp;
+        std::vector<DistanceHeap::DistanceRecord> temp2(size);
+
+        const auto* data = heap.GetData();
+        memcpy(temp2.data(), data, size * sizeof(DistanceHeap::DistanceRecord));
+        std::sort(temp2.begin(), temp2.end(), [](const auto& a, const auto& b) {
+            return a.first < b.first;
+        });
+        if (use_max) {
+            std::reverse(temp2.begin(), temp2.end());
+        }
         while (not heap.Empty()) {
             temp.emplace_back(heap.Top());
             heap.Pop();
@@ -59,6 +69,7 @@ public:
         REQUIRE(temp.size() == size);
         for (int i = 0; i < size; ++i) {
             REQUIRE(gt->at(size - i - 1) == temp[i]);
+            REQUIRE(gt->at(size - i - 1) == temp2[i]);
         }
     }
 
