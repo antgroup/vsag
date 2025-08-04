@@ -48,6 +48,11 @@ public:
         return this->cur_size_ == 0;
     }
 
+    [[nodiscard]] const DistanceRecord*
+    GetData() const override {
+        return this->ordered_buffer_.data();
+    }
+
 private:
     Vector<DistanceRecord> ordered_buffer_;
 

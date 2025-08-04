@@ -79,6 +79,9 @@ public:
     [[nodiscard]] virtual bool
     Empty() const = 0;
 
+    [[nodiscard]] virtual const DistanceRecord*
+    GetData() const = 0;
+
 protected:
     Allocator* allocator_{nullptr};
     int64_t max_size_{-1};
