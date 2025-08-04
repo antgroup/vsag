@@ -58,7 +58,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex, "SINDI Build and Search",
     TestKnnSearch(index, dataset, search_param, 0.99, true);
     TestRangeSearch(index, dataset, search_param, 0.99, 10, true);
     TestRangeSearch(index, dataset, search_param, 0.49, 5, true);
-    //    TestFilterSearch(index, dataset, search_param, 0.99, true);   // todo(zxy): radius align with hgraph
+    TestFilterSearch(index, dataset, search_param, 0.99, true);
     TestConcurrentKnnSearch(index, dataset, search_param, 0.99, true);
 }
 
@@ -66,7 +66,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex, "SINDI Concurrent", "[ft]
     auto index = TestFactory("sindi", build_param, true);
     auto dataset = pool.GetSparseDatasetAndCreate(base_count, 128, 0.8);
     REQUIRE(index->GetIndexType() == vsag::IndexType::SINDI);
-    TestConcurrentAddSearch(index, dataset, search_param, true);
+    TestConcurrentAddSearch(index, dataset, search_param, 0.99, true);
 }
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex, "SINDI Serialize File", "[ft][sindi]") {

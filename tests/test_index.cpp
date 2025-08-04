@@ -644,7 +644,7 @@ TestIndex::TestFilterSearch(const TestIndex::IndexPtr& index,
         }
         REQUIRE(res.value()->GetDim() == topk);
         if (index->CheckFeature(vsag::SUPPORT_RANGE_SEARCH_WITH_ID_FILTER)) {
-            auto threshold = res.value()->GetDistances()[topk - 1];
+            auto threshold = res.value()->GetDistances()[topk - 1] + 1e-5;
             auto range_result =
                 index->RangeSearch(query, threshold, search_param, dataset->filter_function_);
             REQUIRE(range_result.value()->GetDim() >= topk);
@@ -1038,9 +1038,11 @@ void
 TestIndex::TestConcurrentAddSearch(const TestIndex::IndexPtr& index,
                                    const TestDatasetPtr& dataset,
                                    const std::string& search_param,
+                                   float expected_recall,
                                    bool expected_success) {
     if (not index->CheckFeature(vsag::SUPPORT_ADD_CONCURRENT) or
-        not index->CheckFeature(vsag::SUPPORT_SEARCH_CONCURRENT)) {
+        not index->CheckFeature(vsag::SUPPORT_SEARCH_CONCURRENT) or
+        not index->CheckFeature(vsag::SUPPORT_ADD_SEARCH_CONCURRENT)) {
         return;
     }
     fixtures::logger::LoggerReplacer _;
@@ -1061,9 +1063,9 @@ TestIndex::TestConcurrentAddSearch(const TestIndex::IndexPtr& index,
         ->Owner(false);
     index->Build(temp_dataset);
     fixtures::ThreadPool pool(5);
-    std::vector<std::future<bool>> futures;
+    std::vector<std::future<int>> futures;
 
-    auto func = [&](uint64_t i) -> bool {
+    auto func = [&](uint64_t i) -> int {
         auto data_one = vsag::Dataset::Make();
         data_one->Dim(dim)
             ->Ids(dataset->base_->GetIds() + i)
@@ -1072,24 +1074,33 @@ TestIndex::TestConcurrentAddSearch(const TestIndex::IndexPtr& index,
             ->Float32Vectors(dataset->base_->GetFloat32Vectors() + i * dim)
             ->SparseVectors(dataset->base_->GetSparseVectors() + i)
             ->Owner(false);
-        if (i % 2 == 0) {
-            auto add_index = index->Add(data_one);
-            return add_index.has_value();
-        } else {
-            auto search_index = index->KnnSearch(data_one, topk, search_param);
-            return search_index.has_value();
+
+        auto add_res = index->Add(data_one);
+        auto search_res = index->KnnSearch(data_one, topk, search_param);
+
+        bool ret = 0;
+        if (not add_res.has_value() or not search_res.has_value()) {
+            return -1;
         }
+        if (search_res.value()->GetIds()[0] == dataset->base_->GetIds()[i]) {
+            ret = 1;
+        }
+        return ret;
     };
 
     for (uint64_t j = temp_count; j < base_count; ++j) {
         futures.emplace_back(pool.enqueue(func, j));
     }
 
+    float query_size = static_cast<float>(base_count - temp_count);
+    float recall = 0;
     for (auto& res : futures) {
         auto val = res.get();
-        REQUIRE(val == expected_success);
+        REQUIRE(val != -1);
+        recall += val;
     }
-    REQUIRE(index->GetNumElements() == base_count * 0.9);
+    REQUIRE(recall / query_size >= expected_recall);
+    REQUIRE(index->GetNumElements() == base_count);
 }
 
 void

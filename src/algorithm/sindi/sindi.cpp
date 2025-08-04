@@ -281,7 +281,7 @@ SINDI::Serialize(StreamWriter& writer) const {
 
 void
 SINDI::Deserialize(StreamReader& reader) {
-    std::shared_lock rlock(this->global_mutex_);
+    std::unique_lock wlock(this->global_mutex_);
 
     StreamReader::ReadObj(reader, cur_element_count_);
 

@@ -226,6 +226,7 @@ public:
     TestConcurrentAddSearch(const IndexPtr& index,
                             const TestDatasetPtr& dataset,
                             const std::string& search_param,
+                            float expected_recall,
                             bool expected_success = true);
     static void
     TestDuplicateAdd(const IndexPtr& index, const TestDatasetPtr& dataset);
