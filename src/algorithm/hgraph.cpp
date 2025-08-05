@@ -21,6 +21,7 @@
 #include <memory>
 #include <stdexcept>
 
+#include "attr/argparse.h"
 #include "common.h"
 #include "data_cell/sparse_graph_datacell.h"
 #include "dataset_impl.h"
@@ -290,86 +291,13 @@ HGraph::KnnSearch(const DatasetPtr& query,
                   const std::string& parameters,
                   const FilterPtr& filter,
                   Allocator* allocator) const {
-    int64_t query_dim = query->GetDim();
-    Allocator* search_allocator = allocator == nullptr ? allocator_ : allocator;
-    if (data_type_ != DataTypes::DATA_TYPE_SPARSE) {
-        CHECK_ARGUMENT(
-            query_dim == dim_,
-            fmt::format("query.dim({}) must be equal to index.dim({})", query_dim, dim_));
-    }
-
-    auto params = HGraphSearchParameters::FromJson(parameters);
-
-    auto ef_search_threshold = std::max(AMPLIFICATION_FACTOR * k, 1000L);
-    CHECK_ARGUMENT(  // NOLINT
-        (1 <= params.ef_search) and (params.ef_search <= ef_search_threshold),
-        fmt::format("ef_search({}) must in range[1, {}]", params.ef_search, ef_search_threshold));
-
-    // check k
-    CHECK_ARGUMENT(k > 0, fmt::format("k({}) must be greater than 0", k));
-    k = std::min(k, GetNumElements());
-
-    // check query vector
-    CHECK_ARGUMENT(query->GetNumElements() == 1, "query dataset should contain 1 vector only");
-
-    InnerSearchParam search_param;
-    search_param.ep = this->entry_point_id_;
-    search_param.topk = 1;
-    search_param.ef = 1;
-    search_param.is_inner_id_allowed = nullptr;
-    search_param.search_alloc = search_allocator;
-    const auto* raw_query = get_data(query);
-    for (auto i = static_cast<int64_t>(this->route_graphs_.size() - 1); i >= 0; --i) {
-        auto result = this->search_one_graph(
-            raw_query, this->route_graphs_[i], this->basic_flatten_codes_, search_param);
-        search_param.ep = result->Top().second;
-    }
-
-    FilterPtr ft = nullptr;
-    if (filter != nullptr) {
-        if (params.use_extra_info_filter) {
-            ft = std::make_shared<ExtraInfoWrapperFilter>(filter, this->extra_infos_);
-        } else {
-            ft = std::make_shared<InnerIdWrapperFilter>(filter, *this->label_table_);
-        }
-    }
-
-    search_param.ef = std::max(params.ef_search, k);
-    search_param.is_inner_id_allowed = ft;
-    search_param.topk = static_cast<int64_t>(search_param.ef);
-    search_param.consider_duplicate = true;
-    auto search_result = this->search_one_graph(
-        raw_query, this->bottom_graph_, this->basic_flatten_codes_, search_param);
-
-    if (use_reorder_) {
-        this->reorder(raw_query, this->high_precise_codes_, search_result, k);
-    }
-
-    while (search_result->Size() > k) {
-        search_result->Pop();
-    }
-
-    // return an empty dataset directly if searcher returns nothing
-    if (search_result->Empty()) {
-        return DatasetImpl::MakeEmptyDataset();
-    }
-    auto count = static_cast<const int64_t>(search_result->Size());
-    auto [dataset_results, dists, ids] = create_fast_dataset(count, search_allocator);
-    char* extra_infos = nullptr;
-    if (extra_info_size_ > 0) {
-        extra_infos = (char*)search_allocator->Allocate(extra_info_size_ * search_result->Size());
-        dataset_results->ExtraInfos(extra_infos);
-    }
-    for (int64_t j = count - 1; j >= 0; --j) {
-        dists[j] = search_result->Top().first;
-        ids[j] = this->label_table_->GetLabelById(search_result->Top().second);
-        if (extra_infos != nullptr) {
-            this->extra_infos_->GetExtraInfoById(search_result->Top().second,
-                                                 extra_infos + extra_info_size_ * j);
-        }
-        search_result->Pop();
-    }
-    return std::move(dataset_results);
+    SearchRequest req;
+    req.query_ = query;
+    req.topk_ = k;
+    req.filter_ = filter;
+    req.params_str_ = parameters;
+    req.search_allocator_ = allocator;
+    return this->SearchWithRequest(req);
 }
 
 DatasetPtr
@@ -1331,9 +1259,9 @@ HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
                                                 },
                                             },
                                             {
-                                                HGRAPH_USE_ATTRIBUTE_FILTER,
+                                                USE_ATTRIBUTE_FILTER,
                                                 {
-                                                    HGRAPH_USE_ATTRIBUTE_FILTER_KEY,
+                                                    USE_ATTRIBUTE_FILTER_KEY,
                                                 },
                                             },
                                             {
@@ -1689,6 +1617,117 @@ HGraph::SetIO(const std::shared_ptr<Reader> reader) {
         reader_param->reader = reader;
         high_precise_codes_->InitIO(reader_param);
     }
+}
+
+[[nodiscard]] DatasetPtr
+HGraph::SearchWithRequest(const SearchRequest& request) const {
+    const auto& query = request.query_;
+    int64_t query_dim = query->GetDim();
+    Allocator* search_allocator = this->allocator_;
+    if (request.search_allocator_ != nullptr) {
+        search_allocator = request.search_allocator_;
+    }
+    auto k = request.topk_;
+    if (data_type_ != DataTypes::DATA_TYPE_SPARSE) {
+        CHECK_ARGUMENT(
+            query_dim == dim_,
+            fmt::format("query.dim({}) must be equal to index.dim({})", query_dim, dim_));
+    }
+
+    auto params = HGraphSearchParameters::FromJson(request.params_str_);
+
+    auto ef_search_threshold = std::max(AMPLIFICATION_FACTOR * k, 1000L);
+    CHECK_ARGUMENT(  // NOLINT
+        (1 <= params.ef_search) and (params.ef_search <= ef_search_threshold),
+        fmt::format("ef_search({}) must in range[1, {}]", params.ef_search, ef_search_threshold));
+
+    // check k
+    CHECK_ARGUMENT(k > 0, fmt::format("k({}) must be greater than 0", k));
+    k = std::min(k, GetNumElements());
+
+    // check query vector
+    CHECK_ARGUMENT(query->GetNumElements() == 1, "query dataset should contain 1 vector only");
+
+    InnerSearchParam search_param;
+    search_param.ep = this->entry_point_id_;
+    search_param.topk = 1;
+    search_param.ef = 1;
+    search_param.is_inner_id_allowed = nullptr;
+    search_param.search_alloc = search_allocator;
+    const auto* raw_query = get_data(query);
+    for (auto i = static_cast<int64_t>(this->route_graphs_.size() - 1); i >= 0; --i) {
+        auto result = this->search_one_graph(
+            raw_query, this->route_graphs_[i], this->basic_flatten_codes_, search_param);
+        search_param.ep = result->Top().second;
+    }
+
+    FilterPtr ft = nullptr;
+    if (request.filter_ != nullptr) {
+        if (params.use_extra_info_filter) {
+            ft = std::make_shared<ExtraInfoWrapperFilter>(request.filter_, this->extra_infos_);
+        } else {
+            ft = std::make_shared<InnerIdWrapperFilter>(request.filter_, *this->label_table_);
+        }
+    }
+
+    if (request.enable_attribute_filter_ and this->attr_filter_index_ != nullptr) {
+        auto& schema = this->attr_filter_index_->field_type_map_;
+        auto expr = AstParse(request.attribute_filter_str_, &schema);
+        auto executor = Executor::MakeInstance(this->allocator_, expr, this->attr_filter_index_);
+        executor->Init();
+        search_param.executors.emplace_back(executor);
+    }
+
+    search_param.ef = std::max(params.ef_search, k);
+    search_param.is_inner_id_allowed = ft;
+    search_param.topk = static_cast<int64_t>(search_param.ef);
+    search_param.consider_duplicate = true;
+    auto search_result = this->search_one_graph(
+        raw_query, this->bottom_graph_, this->basic_flatten_codes_, search_param);
+
+    if (use_reorder_) {
+        this->reorder(raw_query, this->high_precise_codes_, search_result, k);
+    }
+
+    while (search_result->Size() > k) {
+        search_result->Pop();
+    }
+
+    // return an empty dataset directly if searcher returns nothing
+    if (search_result->Empty()) {
+        return DatasetImpl::MakeEmptyDataset();
+    }
+    auto count = static_cast<const int64_t>(search_result->Size());
+    auto [dataset_results, dists, ids] = create_fast_dataset(count, search_allocator);
+    char* extra_infos = nullptr;
+    if (extra_info_size_ > 0) {
+        extra_infos = (char*)search_allocator->Allocate(extra_info_size_ * search_result->Size());
+        dataset_results->ExtraInfos(extra_infos);
+    }
+    for (int64_t j = count - 1; j >= 0; --j) {
+        dists[j] = search_result->Top().first;
+        ids[j] = this->label_table_->GetLabelById(search_result->Top().second);
+        if (extra_infos != nullptr) {
+            this->extra_infos_->GetExtraInfoById(search_result->Top().second,
+                                                 extra_infos + extra_info_size_ * j);
+        }
+        search_result->Pop();
+    }
+    return std::move(dataset_results);
+}
+
+void
+HGraph::UpdateAttribute(int64_t id, const AttributeSet& new_attrs) {
+    auto inner_id = this->label_table_->GetIdByLabel(id);
+    this->attr_filter_index_->UpdateBitsetsByAttr(new_attrs, inner_id, 0);
+}
+
+void
+HGraph::UpdateAttribute(int64_t id,
+                        const AttributeSet& new_attrs,
+                        const AttributeSet& origin_attrs) {
+    auto inner_id = this->label_table_->GetIdByLabel(id);
+    this->attr_filter_index_->UpdateBitsetsByAttr(new_attrs, inner_id, 0, origin_attrs);
 }
 
 }  // namespace vsag

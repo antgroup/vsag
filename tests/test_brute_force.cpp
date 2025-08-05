@@ -19,6 +19,7 @@
 #include <catch2/generators/catch_generators.hpp>
 #include <limits>
 
+#include "fixtures/fixtures.h"
 #include "fixtures/test_dataset_pool.h"
 #include "test_index.h"
 #include "vsag/options.h"
@@ -392,6 +393,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::BruteForceTestIndex,
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::BruteForceTestIndex,
                              "BruteForce With Attribute Filter",
                              "[ft][bruteforce]") {
+    using namespace fixtures;
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
     auto metric_type = GENERATE("l2", "ip", "cosine");
@@ -406,7 +408,12 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::BruteForceTestIndex,
             auto index = TestFactory(name, param, true);
             auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
             TestBuildIndex(index, dataset, true);
-            TestWithAttr(index, dataset, search_param);
+            TestIndex::TestWithAttr(index, dataset, search_param, false);
+            auto index2 = TestIndex::TestFactory(name, param, true);
+
+            REQUIRE_NOTHROW(test_serializion_file(*index, *index2, "serialize_bruteforce"));
+            TestIndex::TestWithAttr(index2, dataset, search_param, true);
+
             vsag::Options::Instance().set_block_size_limit(origin_size);
         }
     }
