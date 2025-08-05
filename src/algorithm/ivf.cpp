@@ -880,7 +880,7 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
         param.topk = static_cast<int64_t>(param.factor * static_cast<float>(request.topk_));
     }
     auto query = request.query_;
-    if (request.enable_attribute_filter_) {
+    if (request.enable_attribute_filter_ and this->attr_filter_index_ != nullptr) {
         auto& schema = this->attr_filter_index_->field_type_map_;
         auto expr = AstParse(request.attribute_filter_str_, &schema);
         for (int64_t i = 0; i < param.parallel_search_thread_count; ++i) {

@@ -248,7 +248,9 @@ BruteForce::Serialize(StreamWriter& writer) const {
     //     this->label_table_->Serialize(writer);
     //     return;
     // }
-
+    if (this->use_attribute_filter_ and this->attr_filter_index_ != nullptr) {
+        this->attr_filter_index_->Serialize(writer);
+    }
     this->inner_codes_->Serialize(writer);
     this->label_table_->Serialize(writer);
 
@@ -296,6 +298,10 @@ BruteForce::Deserialize(StreamReader& reader) {
         }
         dim_ = basic_info["dim"];
         total_count_ = basic_info["total_count"];
+
+        if (this->use_attribute_filter_ and this->attr_filter_index_ != nullptr) {
+            this->attr_filter_index_->Deserialize(buffer_reader);
+        }
 
         this->inner_codes_->Deserialize(buffer_reader);
         this->label_table_->Deserialize(buffer_reader);
@@ -397,10 +403,12 @@ BruteForce::CheckAndMappingExternalParam(const JsonType& external_param,
                 HOLD_MOLDS,
             },
         },
-        {USE_ATTRIBUTE_FILTER,
-         {
-             USE_ATTRIBUTE_FILTER_KEY,
-         }},
+        {
+            USE_ATTRIBUTE_FILTER,
+            {
+                USE_ATTRIBUTE_FILTER_KEY,
+            },
+        },
     };
 
     if (common_param.data_type_ == DataTypes::DATA_TYPE_INT8) {
