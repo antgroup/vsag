@@ -1716,6 +1716,9 @@ TestHGraphWithExtraInfo(const fixtures::HGraphTestIndexPtr& test_index,
                 TestIndex::TestGetExtraInfoById(index, dataset, extra_info_size);
                 TestIndex::TestKnnSearchExFilter(
                     index, dataset, search_ex_filter_param, recall, true);
+                TestIndex::TestUpdateExtraInfo(index, dataset, extra_info_size);
+                TestIndex::TestKnnSearchExFilter(
+                    index, dataset, search_ex_filter_param, recall, true);
                 TestIndex::TestKnnSearchIter(
                     index, dataset, search_ex_filter_param, recall, true, true);
                 vsag::Options::Instance().set_block_size_limit(origin_size);

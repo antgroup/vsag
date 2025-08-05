@@ -125,6 +125,7 @@ TEST_CASE("Test Simple Index", "[ft][simple_index]") {
     REQUIRE_THROWS(index->CalDistanceById(dataset->base_->GetFloat32Vectors(), nullptr, 1));
     REQUIRE_THROWS(index->GetMinAndMaxId());
     REQUIRE_THROWS(index->GetExtraInfoByIds(nullptr, 1, nullptr));
+    REQUIRE_THROWS(index->UpdateExtraInfo(dataset->query_));
     REQUIRE_THROWS(index->GetRawVectorByIds(nullptr, 1));
     REQUIRE_THROWS(index->Clone());
     REQUIRE_THROWS(index->ExportModel());

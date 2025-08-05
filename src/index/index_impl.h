@@ -138,6 +138,15 @@ public:
         SAFE_CALL(this->inner_index_->UpdateAttribute(id, new_attrs, origin_attrs));
     }
 
+    virtual tl::expected<bool, Error>
+    UpdateExtraInfo(const DatasetPtr& new_base) override {
+        if (this->inner_index_->immutable_) {
+            return tl::unexpected(Error(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                                        "immutable index no support update extra info"));
+        }
+        SAFE_CALL(return this->inner_index_->UpdateExtraInfo(new_base));
+    }
+
     [[nodiscard]] tl::expected<DatasetPtr, Error>
     SearchWithRequest(const SearchRequest& request) const override {
         if (GetNumElements() == 0) {

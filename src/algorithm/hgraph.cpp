@@ -1130,6 +1130,7 @@ HGraph::InitFeatures() {
     if (this->extra_infos_ != nullptr) {
         this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_GET_EXTRA_INFO_BY_ID);
         this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_KNN_SEARCH_WITH_EX_FILTER);
+        this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_UPDATE_EXTRA_INFO_CONCURRENT);
     }
 }
 
@@ -1589,6 +1590,24 @@ HGraph::Merge(const std::vector<MergeUnit>& merge_units) {
         sparse_odescent_builder.SaveGraph(graph);
         this->entry_point_id_ = ids.back();
     }
+}
+bool
+HGraph::UpdateExtraInfo(const DatasetPtr& new_base) {
+    CHECK_ARGUMENT(new_base != nullptr, "new_base is nullptr");
+    CHECK_ARGUMENT(new_base->GetExtraInfos() != nullptr, "extra_infos is nullptr");
+    CHECK_ARGUMENT(new_base->GetExtraInfoSize() == extra_info_size_, "extra_infos size mismatch");
+    CHECK_ARGUMENT(new_base->GetNumElements() == 1, "new_base size must be one");
+    auto label = new_base->GetIds()[0];
+    if (this->extra_infos_ != nullptr) {
+        std::shared_lock label_lock(this->label_lookup_mutex_);
+        if (not this->label_table_->CheckLabel(label)) {
+            return false;
+        }
+        const auto inner_id = this->label_table_->GetIdByLabel(label);
+        this->extra_infos_->InsertExtraInfo(new_base->GetExtraInfos(), inner_id);
+        return true;
+    }
+    throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION, "extra_infos is not initialized");
 }
 void
 HGraph::GetVectorByInnerId(InnerIdType inner_id, float* data) const {
