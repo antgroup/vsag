@@ -40,8 +40,7 @@ public:
     }
 
     void
-    InitFeatures() override {
-    }
+    InitFeatures() override;
 
     std::string
     GetMemoryUsageDetail() const override {
@@ -94,6 +93,8 @@ private:
     search_impl(const SparseTermComputerPtr& computer, const InnerSearchParam& inner_param) const;
 
 private:
+    mutable std::shared_mutex global_mutex_;
+
     uint32_t window_size_{0};
 
     Vector<SparseTermDataCellPtr> window_term_list_;
@@ -101,6 +102,7 @@ private:
     int64_t cur_element_count_{0};
 
     bool use_reorder_{false};
+
     float doc_retain_ratio_{0};
 
     std::shared_ptr<SparseIndex> rerank_flat_index_{nullptr};

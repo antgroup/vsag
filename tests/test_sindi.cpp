@@ -33,7 +33,7 @@ public:
             "index_param": {
                 "use_reorder": true,
                 "doc_prune_ratio": 0.0,
-                "window_size": 100000
+                "window_size": 100
             }
         })";
     constexpr static const char* search_param = R"(
@@ -41,7 +41,7 @@ public:
             "sindi":
             {
                 "n_candidate": 20,
-                "query_prune_ratio": 0.1,
+                "query_prune_ratio": 0.0,
                 "term_prune_ratio": 0.0
             }
         })";
@@ -59,6 +59,14 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex, "SINDI Build and Search",
     TestRangeSearch(index, dataset, search_param, 0.99, 10, true);
     TestRangeSearch(index, dataset, search_param, 0.49, 5, true);
     TestFilterSearch(index, dataset, search_param, 0.99, true);
+    TestConcurrentKnnSearch(index, dataset, search_param, 0.99, true);
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex, "SINDI Concurrent", "[ft][sindi]") {
+    auto index = TestFactory("sindi", build_param, true);
+    auto dataset = pool.GetSparseDatasetAndCreate(base_count, 128, 0.8);
+    REQUIRE(index->GetIndexType() == vsag::IndexType::SINDI);
+    TestConcurrentAddSearch(index, dataset, search_param, 0.99, true);
 }
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex, "SINDI Serialize File", "[ft][sindi]") {
