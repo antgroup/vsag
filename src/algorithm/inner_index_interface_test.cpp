@@ -152,6 +152,7 @@ TEST_CASE("NOT Implemented", "[ut][InnerIndexInterface]") {
     REQUIRE_THROWS(empty_index->GetStats());
     REQUIRE_THROWS(empty_index->UpdateId(0, 1));
     REQUIRE_THROWS(empty_index->UpdateVector(0, nullptr));
+    REQUIRE_THROWS(empty_index->UpdateExtraInfo(nullptr));
     REQUIRE_THROWS(empty_index->ContinueBuild(nullptr, binary));
     REQUIRE_THROWS(empty_index->Pretrain(pretrain_ids, 10, ""));
     REQUIRE_THROWS(empty_index->CalcDistanceById(nullptr, 1));

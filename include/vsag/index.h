@@ -141,6 +141,11 @@ public:
         throw std::runtime_error("Index not support update vector");
     }
 
+    virtual tl::expected<bool, Error>
+    UpdateExtraInfo(const DatasetPtr& new_base) {
+        throw std::runtime_error("Index not support update extra info");
+    }
+
     /**
      * @brief Update the attribute of a base point from the index
      *

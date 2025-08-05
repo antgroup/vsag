@@ -193,6 +193,9 @@ public:
     void
     SetIO(const std::shared_ptr<Reader> reader) override;
 
+    bool
+    UpdateExtraInfo(const DatasetPtr& new_base) override;
+
 private:
     const void*
     get_data(const DatasetPtr& dataset, uint32_t index = 0) const {
