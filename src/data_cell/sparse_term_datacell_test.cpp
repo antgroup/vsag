@@ -68,7 +68,7 @@ TEST_CASE("SparseTermDatacell Basic Test", "[ut][SparseTermDatacell]") {
     SINDISearchParameter search_params;
     search_params.term_prune_ratio = term_prune_ratio;
     search_params.query_prune_ratio = query_prune_ratio;
-    auto computer = data_cell->FactoryComputer(query_sv, search_params);
+    auto computer = std::make_shared<SparseTermComputer>(query_sv, search_params, allocator.get());
     REQUIRE(computer->pruned_len_ == (1.0F - query_prune_ratio) * query_sv.len_);
 
     // test insert
