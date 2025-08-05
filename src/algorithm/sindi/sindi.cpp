@@ -298,7 +298,7 @@ SINDI::Deserialize(StreamReader& reader) {
     uint32_t window_term_list_size = 0;
     StreamReader::ReadObj(reader, window_term_list_size);
     window_term_list_.resize(window_term_list_size);
-    for (auto & window : window_term_list_) {
+    for (auto& window : window_term_list_) {
         window = std::make_shared<SparseTermDataCell>(doc_retain_ratio_, allocator_);
         window->Deserialize(reader);
     }
