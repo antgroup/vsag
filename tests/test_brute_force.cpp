@@ -418,3 +418,35 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::BruteForceTestIndex,
         }
     }
 }
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::BruteForceTestIndex,
+                             "BruteForce Remove By ID",
+                             "[ft][bruteforce]") {
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    auto size = GENERATE(1024 * 1024 * 2);
+    auto metric_type = "l2";
+
+    const std::string name = "brute_force";
+    auto search_param = "";
+    for (auto& dim : dims) {
+        auto base_quantization_str = "fp32";
+        auto recall = 0.99;
+        vsag::Options::Instance().set_block_size_limit(size);
+        auto param =
+            GenerateBruteForceBuildParametersString(metric_type, dim, base_quantization_str);
+        auto index = TestFactory(name, param, true);
+        auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
+        TestContinueAdd(index, dataset, true);
+        TestGeneral(index, dataset, search_param, recall);
+        for (int i = 0; i < base_count; ++i) {
+            auto res = index->Remove(dataset->base_->GetIds()[i]);
+            auto check_exist = index->CheckIdExist(dataset->base_->GetIds()[i]);
+            REQUIRE(res.has_value());
+            REQUIRE(res.value());
+            REQUIRE(not check_exist);
+            auto num = index->GetNumElements();
+            REQUIRE(num == base_count - i - 1);
+        }
+        vsag::Options::Instance().set_block_size_limit(origin_size);
+    }
+}
