@@ -47,9 +47,6 @@ public:
                const InnerSearchParam& param,
                uint32_t offset_id) const;
 
-    SparseTermComputerPtr
-    FactoryComputer(const SparseVector& sparse_query, const SINDISearchParameter& search_param);
-
     void
     DocPrune(Vector<std::pair<uint32_t, float>>& sorted_base) const;
 

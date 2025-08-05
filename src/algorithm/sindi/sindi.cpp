@@ -16,6 +16,7 @@
 #include "sindi.h"
 
 #include "impl/heap/standard_heap.h"
+#include "storage/serialization.h"
 #include "utils/util_functions.h"
 
 namespace vsag {
@@ -33,10 +34,6 @@ SINDI::SINDI(const SINDIParameterPtr& param, const IndexCommonParam& common_para
       window_size_(param->window_size),
       doc_retain_ratio_(1.0F - param->doc_prune_ratio),
       window_term_list_(common_param.allocator_.get()) {
-    window_term_list_.resize(1, nullptr);
-    this->window_term_list_[0] =
-        std::make_shared<SparseTermDataCell>(doc_retain_ratio_, common_param.allocator_.get());
-
     if (use_reorder_) {
         SparseIndexParameterPtr rerank_param = std::make_shared<SparseIndexParameters>();
         rerank_param->need_sort = true;
@@ -55,15 +52,10 @@ SINDI::Add(const DatasetPtr& base) {
     const auto* ids = base->GetIds();
 
     // adjust window
-    uint32_t old_window_count = (cur_element_count_ + window_size_ - 1) / window_size_;  // ceil
-    uint32_t new_window_count = (cur_element_count_ + data_num + window_size_ - 1) / window_size_;
-
-    if (new_window_count > old_window_count) {
-        window_term_list_.resize(new_window_count);
-        for (uint32_t i = old_window_count; i < new_window_count; ++i) {
-            window_term_list_[i] =
-                std::make_shared<SparseTermDataCell>(doc_retain_ratio_, allocator_);
-        }
+    int64_t final_add_window = ceil_int(cur_element_count_ + data_num, window_size_);
+    while (window_term_list_.size() < final_add_window) {
+        window_term_list_.emplace_back(
+            std::make_shared<SparseTermDataCell>(doc_retain_ratio_, allocator_));
     }
 
     // add process
@@ -121,7 +113,7 @@ SINDI::KnnSearch(const DatasetPtr& query,
     }
     inner_param.is_inner_id_allowed = ft;
 
-    auto computer = this->window_term_list_[0]->FactoryComputer(sparse_query, search_param);
+    auto computer = std::make_shared<SparseTermComputer>(sparse_query, search_param, allocator_);
     return search_impl<KNN_SEARCH>(computer, inner_param);
 }
 
@@ -256,7 +248,7 @@ SINDI::RangeSearch(const DatasetPtr& query,
     }
     inner_param.is_inner_id_allowed = ft;
 
-    auto computer = this->window_term_list_[0]->FactoryComputer(sparse_query, search_param);
+    auto computer = std::make_shared<SparseTermComputer>(sparse_query, search_param, allocator_);
     return search_impl<RANGE_SEARCH>(computer, inner_param);
 }
 
@@ -277,23 +269,38 @@ SINDI::Serialize(StreamWriter& writer) const {
     if (use_reorder_) {
         rerank_flat_index_->Serialize(writer);
     }
+
+    JsonType jsonify_basic_info;
+    auto metadata = std::make_shared<Metadata>();
+    jsonify_basic_info[INDEX_PARAM] = this->create_param_ptr_->ToString();
+    metadata->Set("basic_info", jsonify_basic_info);
+    auto footer = std::make_shared<Footer>(metadata);
+    footer->Write(writer);
 }
 
 void
 SINDI::Deserialize(StreamReader& reader) {
     std::unique_lock wlock(this->global_mutex_);
 
+    auto footer = Footer::Parse(reader);
+    auto metadata = footer->GetMetadata();
+    JsonType jsonify_basic_info = metadata->Get("basic_info");
+    // Check if the index parameter is compatible
+    {
+        auto param = jsonify_basic_info[INDEX_PARAM];
+        SINDIParameterPtr index_param = std::make_shared<SINDIParameter>();
+        index_param->FromJson(param);
+        this->create_param_ptr_->CheckCompatibility(index_param);
+    }
+
     StreamReader::ReadObj(reader, cur_element_count_);
 
     uint32_t window_term_list_size = 0;
     StreamReader::ReadObj(reader, window_term_list_size);
     window_term_list_.resize(window_term_list_size);
-    for (auto i = 0; i < window_term_list_.size(); i++) {
-        if (i != 0) {
-            window_term_list_[i] =
-                std::make_shared<SparseTermDataCell>(doc_retain_ratio_, allocator_);
-        }
-        window_term_list_[i]->Deserialize(reader);
+    for (auto& window : window_term_list_) {
+        window = std::make_shared<SparseTermDataCell>(doc_retain_ratio_, allocator_);
+        window->Deserialize(reader);
     }
 
     label_table_->Deserialize(reader);
