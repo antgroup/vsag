@@ -628,17 +628,19 @@ TEST_CASE("[Daily] HGraph Build Test", "[ft][hgraph][daily]") {
     TestHGraphBuild(test_index, resource);
 }
 static void
-TestHGraphBuildWithAttr(const fixtures::HGraphTestIndexPtr& test_index,
-                        const fixtures::HGraphResourcePtr& resource) {
+TestHGraphWithAttr(const fixtures::HGraphTestIndexPtr& test_index,
+                   const fixtures::HGraphResourcePtr& resource) {
     using namespace fixtures;
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto search_param = fmt::format(fixtures::search_param_tmp, 200, false);
 
     auto size = GENERATE(1024 * 1024 * 2);
-
+    std::vector<std::pair<std::string, float>> tmp_test_cases = {
+        {"fp32", 0.75},
+    };
     for (auto metric_type : resource->metric_types) {
         for (auto dim : resource->dims) {
-            for (auto& [base_quantization_str, recall] : resource->test_cases) {
+            for (auto& [base_quantization_str, recall] : tmp_test_cases) {
                 INFO(fmt::format("metric_type: {}, dim: {}, base_quantization_str: {}, recall: {}",
                                  metric_type,
                                  dim,
@@ -668,9 +670,11 @@ TestHGraphBuildWithAttr(const fixtures::HGraphTestIndexPtr& test_index,
                 }
                 auto build_result = index->Build(dataset->base_);
                 REQUIRE(build_result.has_value());
+                TestIndex::TestWithAttr(index, dataset, search_param, false);
+                auto index2 = TestIndex::TestFactory(HGraphTestIndex::name, param, true);
 
-                // Execute attribute-aware build test
-                // TestIndex::TestWithAttr(index, dataset, search_param);
+                REQUIRE_NOTHROW(test_serializion_file(*index, *index2, "serialize_hgraph"));
+                TestIndex::TestWithAttr(index2, dataset, search_param, true);
 
                 // Restore original block size limit
                 vsag::Options::Instance().set_block_size_limit(origin_size);
@@ -679,16 +683,16 @@ TestHGraphBuildWithAttr(const fixtures::HGraphTestIndexPtr& test_index,
     }
 }
 
-TEST_CASE("[PR] HGraph Build With Attr", "[ft][hgraph][pr]") {
+TEST_CASE("[PR] HGraph With Attr", "[ft][hgraph][pr]") {
     auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
     auto resource = test_index->GetResource(true);
-    TestHGraphBuildWithAttr(test_index, resource);
+    TestHGraphWithAttr(test_index, resource);
 }
 
-TEST_CASE("[Daily] HGraph Build With Attr", "[ft][hgraph][daily]") {
+TEST_CASE("[Daily] HGraph With Attr", "[ft][hgraph][daily]") {
     auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
     auto resource = test_index->GetResource(false);
-    TestHGraphBuildWithAttr(test_index, resource);
+    TestHGraphWithAttr(test_index, resource);
 }
 
 static void

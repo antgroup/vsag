@@ -35,7 +35,6 @@ const char* const HGRAPH_GRAPH_KEY = "graph";
 const char* const HGRAPH_BASE_CODES_KEY = "base_codes";
 const char* const HGRAPH_PRECISE_CODES_KEY = "precise_codes";
 const char* const HGRAPH_EXTRA_INFO_KEY = "extra_info";
-const char* const HGRAPH_USE_ATTRIBUTE_FILTER_KEY = "use_attribute_filter";
 
 // IO param key
 const char* const IO_PARAMS_KEY = "io_params";
@@ -147,7 +146,6 @@ const std::unordered_map<std::string, std::string> DEFAULT_MAP = {
     {"HGRAPH_GRAPH_KEY", HGRAPH_GRAPH_KEY},
     {"HGRAPH_BASE_CODES_KEY", HGRAPH_BASE_CODES_KEY},
     {"HGRAPH_PRECISE_CODES_KEY", HGRAPH_PRECISE_CODES_KEY},
-    {"HGRAPH_USE_ATTRIBUTE_FILTER_KEY", HGRAPH_USE_ATTRIBUTE_FILTER_KEY},
     {"HGRAPH_SUPPORT_DUPLICATE", HGRAPH_SUPPORT_DUPLICATE},
     {"IO_TYPE_KEY", IO_TYPE_KEY},
     {"IO_TYPE_VALUE_MEMORY_IO", IO_TYPE_VALUE_MEMORY_IO},

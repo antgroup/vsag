@@ -36,6 +36,8 @@ public:
     bool enable_attribute_filter_{false};
     std::string attribute_filter_str_;
     FilterPtr filter_{nullptr};
+
+    Allocator* search_allocator_{nullptr};
 };
 
 }  // namespace vsag
