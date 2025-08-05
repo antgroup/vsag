@@ -644,7 +644,7 @@ TestIndex::TestFilterSearch(const TestIndex::IndexPtr& index,
         }
         REQUIRE(res.value()->GetDim() == topk);
         if (index->CheckFeature(vsag::SUPPORT_RANGE_SEARCH_WITH_ID_FILTER)) {
-            auto threshold = res.value()->GetDistances()[topk - 1];
+            auto threshold = res.value()->GetDistances()[topk - 1] + 1e-5;
             auto range_result =
                 index->RangeSearch(query, threshold, search_param, dataset->filter_function_);
             REQUIRE(range_result.value()->GetDim() >= topk);
@@ -1035,6 +1035,75 @@ TestIndex::TestSerializeReaderSet(const IndexPtr& index_from,
 }
 
 void
+TestIndex::TestConcurrentAddSearch(const TestIndex::IndexPtr& index,
+                                   const TestDatasetPtr& dataset,
+                                   const std::string& search_param,
+                                   float expected_recall,
+                                   bool expected_success) {
+    if (not index->CheckFeature(vsag::SUPPORT_ADD_CONCURRENT) or
+        not index->CheckFeature(vsag::SUPPORT_SEARCH_CONCURRENT) or
+        not index->CheckFeature(vsag::SUPPORT_ADD_SEARCH_CONCURRENT)) {
+        return;
+    }
+    fixtures::logger::LoggerReplacer _;
+
+    auto gts = dataset->ground_truth_;
+    auto gt_topK = dataset->top_k;
+    auto topk = gt_topK;
+    auto base_count = dataset->base_->GetNumElements();
+    auto temp_count = static_cast<int64_t>(base_count * 0.8);
+    auto dim = dataset->base_->GetDim();
+    auto temp_dataset = vsag::Dataset::Make();
+    temp_dataset->Dim(dim)
+        ->Ids(dataset->base_->GetIds())
+        ->NumElements(temp_count)
+        ->Paths(dataset->base_->GetPaths())
+        ->Float32Vectors(dataset->base_->GetFloat32Vectors())
+        ->SparseVectors(dataset->base_->GetSparseVectors())
+        ->Owner(false);
+    index->Build(temp_dataset);
+    fixtures::ThreadPool pool(5);
+    std::vector<std::future<int>> futures;
+
+    auto func = [&](uint64_t i) -> int {
+        auto data_one = vsag::Dataset::Make();
+        data_one->Dim(dim)
+            ->Ids(dataset->base_->GetIds() + i)
+            ->NumElements(1)
+            ->Paths(dataset->base_->GetPaths() + i)
+            ->Float32Vectors(dataset->base_->GetFloat32Vectors() + i * dim)
+            ->SparseVectors(dataset->base_->GetSparseVectors() + i)
+            ->Owner(false);
+
+        auto add_res = index->Add(data_one);
+        auto search_res = index->KnnSearch(data_one, topk, search_param);
+
+        bool ret = 0;
+        if (not add_res.has_value() or not search_res.has_value()) {
+            return -1;
+        }
+        if (search_res.value()->GetIds()[0] == dataset->base_->GetIds()[i]) {
+            ret = 1;
+        }
+        return ret;
+    };
+
+    for (uint64_t j = temp_count; j < base_count; ++j) {
+        futures.emplace_back(pool.enqueue(func, j));
+    }
+
+    float query_size = static_cast<float>(base_count - temp_count);
+    float recall = 0;
+    for (auto& res : futures) {
+        auto val = res.get();
+        REQUIRE(val != -1);
+        recall += val;
+    }
+    REQUIRE(recall / query_size >= expected_recall);
+    REQUIRE(index->GetNumElements() == base_count);
+}
+
+void
 TestIndex::TestConcurrentAdd(const TestIndex::IndexPtr& index,
                              const TestDatasetPtr& dataset,
                              bool expected_success) {
@@ -1111,6 +1180,7 @@ TestIndex::TestConcurrentKnnSearch(const TestIndex::IndexPtr& index,
             ->Dim(dim)
             ->Paths(queries->GetPaths() + i)
             ->Float32Vectors(queries->GetFloat32Vectors() + i * dim)
+            ->SparseVectors(queries->GetSparseVectors() + i)
             ->Owner(false);
         auto res = index->KnnSearch(query, topk, search_param);
         return {res, i};

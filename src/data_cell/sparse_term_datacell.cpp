@@ -74,7 +74,7 @@ SparseTermDataCell::InsertHeap(float* dists,
         uint32_t i = 0;
         auto term_size = static_cast<uint32_t>(static_cast<float>(term_sizes_[term]) *
                                                computer->term_retain_ratio_);
-        bool is_valid = false;
+        bool is_valid = true;
         if constexpr (mode == InnerSearchMode::KNN_SEARCH) {
             if (heap.size() < n_candidate) {
                 for (; i < term_size; i++) {
@@ -102,9 +102,9 @@ SparseTermDataCell::InsertHeap(float* dists,
             id = term_ids_[term][i];
 
             if constexpr (type == InnerSearchType::WITH_FILTER) {
-                is_valid = (filter and not filter->CheckValid(id + offset_id));
+                is_valid = (filter and filter->CheckValid(id + offset_id));
             }
-            if (dists[id] >= cur_heap_top or is_valid) [[likely]] {
+            if (dists[id] > cur_heap_top or not is_valid) [[likely]] {
                 dists[id] = 0;
                 continue;
             } else {
