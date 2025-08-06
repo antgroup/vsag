@@ -15,6 +15,7 @@
 
 #include "ivf.h"
 
+#include <iostream>
 #include <set>
 
 #include "attr/argparse.h"
@@ -705,6 +706,8 @@ IVF::search(const DatasetPtr& query, const InnerSearchParam& param) const {
     }
     std::vector<DistHeapPtr> heaps(search_thread_count);
 
+    // uint64_t prefilter_count = 0;
+    // uint64_t postfilter_count = 0;
     auto search_func = [&](int64_t thread_id) -> void {
         heaps[thread_id] = DistanceHeap::MakeInstanceBySize<true, false>(this->allocator_, topk);
         auto& heap = heaps[thread_id];
@@ -742,8 +745,10 @@ IVF::search(const DatasetPtr& query, const InnerSearchParam& param) const {
             for (int j = 0; j < bucket_size; ++j) {
                 auto origin_id = ids[j] / buckets_per_data_;
                 if (attr_ft != nullptr and not attr_ft->CheckValid(j)) {
+                    // prefilter_count++;
                     continue;
                 }
+                // postfilter_count++;
                 if (ft == nullptr or ft->CheckValid(origin_id)) {
                     dist[j] -= ip_distance;
 
@@ -790,6 +795,9 @@ IVF::search(const DatasetPtr& query, const InnerSearchParam& param) const {
             }
         }
     }
+
+    // std::cout << "prefilter_count: " << prefilter_count << std::endl;
+    // std::cout << "postfilter_count: " << postfilter_count << std::endl;
 
     // Deduplicate ids when buckets_per_data_ > 1
     if (buckets_per_data_ > 1) {
