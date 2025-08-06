@@ -699,7 +699,10 @@ IVF::search(const DatasetPtr& query, const InnerSearchParam& param) const {
     const auto& ft = param.is_inner_id_allowed;
 
     auto bucket_count = candidate_buckets.size();
-    const auto search_thread_count = param.parallel_search_thread_count;
+    auto search_thread_count = param.parallel_search_thread_count;
+    if (this->thread_pool_ == nullptr) {
+        search_thread_count = 1;
+    }
     std::vector<DistHeapPtr> heaps(search_thread_count);
 
     auto search_func = [&](int64_t thread_id) -> void {
@@ -780,9 +783,10 @@ IVF::search(const DatasetPtr& query, const InnerSearchParam& param) const {
         }
         search_result = DistanceHeap::MakeInstanceBySize<true, true>(this->allocator_, topk);
         for (auto& heap : heaps) {
-            while (not heap->Empty()) {
-                search_result->Push(heap->Top());
-                heap->Pop();
+            auto size = heap->Size();
+            const auto* data = heap->GetData();
+            for (int i = 0; i < size; ++i) {
+                search_result->Push(data[i]);
             }
         }
     }
