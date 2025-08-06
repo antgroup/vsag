@@ -66,6 +66,9 @@ build_pyvsag() {
     PYVSAG_CPYTHON_SO=$(find $CMAKE_BUILD_DIR -name _pyvsag.cpython*.so | head -n1)
     cp $PYVSAG_CPYTHON_SO python/pyvsag
     for lib in $(get_linked_libraries $PYVSAG_CPYTHON_SO); do
+        if [[ $lib == *vsag* ]]; then
+            strip $lib
+        fi
         if [[ $lib == *vsag* ]] || [[ $lib == *gfortran* ]] || [[ $lib == *mkl* ]]; then
             cp $lib python/pyvsag/
         fi
