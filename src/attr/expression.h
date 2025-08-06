@@ -520,12 +520,12 @@ public:
         }
     }
     using ArgValueType = std::variant<std::string,
-                                      std::int16_t,
-                                      std::uint16_t,
-                                      std::int32_t,
-                                      std::uint32_t,
-                                      std::int64_t,
-                                      std::uint64_t,
+                                      int16_t,
+                                      uint16_t,
+                                      int32_t,
+                                      uint32_t,
+                                      int64_t,
+                                      uint64_t,
                                       float,
                                       double>;
 
@@ -555,26 +555,26 @@ public:
             } else if (!strcasecmp(arg_type.c_str(), "int16")) {
                 arg_types.emplace_back(ArgTypes::kInt16);
                 auto value = std::stoll(args[i]);
-                if (value < std::numeric_limits<std::int16_t>::min() ||
-                    value > std::numeric_limits<std::int16_t>::max()) {
+                if (value < std::numeric_limits<int16_t>::min() ||
+                    value > std::numeric_limits<int16_t>::max()) {
                     throw std::runtime_error("Numeric value out of range");
                 }
                 arg_values.emplace_back(static_cast<int16_t>(value));
             } else if (!strcasecmp(arg_type.c_str(), "uint16")) {
                 arg_types.emplace_back(ArgTypes::kUint16);
-                arg_values.emplace_back(GetNumericValue<std::uint16_t>(args[i]));
+                arg_values.emplace_back(GetNumericValue<uint16_t>(args[i]));
             } else if (!strcasecmp(arg_type.c_str(), "int32")) {
                 arg_types.emplace_back(ArgTypes::kInt32);
                 arg_values.emplace_back(std::stoi(args[i]));
             } else if (!strcasecmp(arg_type.c_str(), "uint32")) {
                 arg_types.emplace_back(ArgTypes::kUInt32);
-                arg_values.emplace_back(GetNumericValue<std::uint32_t>(args[i]));
+                arg_values.emplace_back(GetNumericValue<uint32_t>(args[i]));
             } else if (!strcasecmp(arg_type.c_str(), "int64")) {
                 arg_types.emplace_back(ArgTypes::kInt64);
-                arg_values.emplace_back(static_cast<std::int64_t>(std::stoll(args[i])));
+                arg_values.emplace_back(static_cast<int64_t>(std::stoll(args[i])));
             } else if (!strcasecmp(arg_type.c_str(), "uint64")) {
                 arg_types.emplace_back(ArgTypes::kUInt64);
-                arg_values.emplace_back(static_cast<std::uint64_t>(std::stoull(args[i])));
+                arg_values.emplace_back(static_cast<uint64_t>(std::stoull(args[i])));
             } else if (!strcasecmp(arg_type.c_str(), "float")) {
                 arg_types.emplace_back(ArgTypes::kFloat);
                 arg_values.emplace_back(std::stof(args[i]));
