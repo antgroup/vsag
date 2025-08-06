@@ -28,7 +28,7 @@ const AttributeValue<int16_t>
 RegionFilterExecutor::init_type_query() {
     AttributeValue<int16_t> attr;
     attr.name_ = region_type_field_name;
-    for (int16_t i = 0; i < 5; i++) {
+    for (int16_t i = 0; i < 6; i++) {
         attr.GetValue().emplace_back(i);
     }
     attr.GetValue().emplace_back(-1);
@@ -44,20 +44,22 @@ RegionFilterExecutor::RegionFilterExecutor(Allocator* allocator,
     : Executor(allocator, expr, attr_index) {
     auto region_expr = std::dynamic_pointer_cast<const RegionFilterExpression>(expr);
     if (region_expr == nullptr) {
-        throw VsagException(ErrorType::INTERNAL_ERROR, "expression type not match");
+        throw VsagException(ErrorType::INTERNAL_ERROR, "expression type not match(region filter)");
     }
-    auto region_list_expr = std::dynamic_pointer_cast<const IntListExpression>(region_expr->arg0);
+    auto region_list_expr =
+        std::dynamic_pointer_cast<const IntListConstant<int64_t>>(region_expr->arg0);
     if (region_list_expr == nullptr) {
         throw VsagException(ErrorType::INTERNAL_ERROR, "expression type not match");
     }
 
     auto residence_list_expr =
-        std::dynamic_pointer_cast<const IntListExpression>(region_expr->arg1);
+        std::dynamic_pointer_cast<const IntListConstant<int64_t>>(region_expr->arg1);
     if (residence_list_expr == nullptr) {
         throw VsagException(ErrorType::INTERNAL_ERROR, "expression type not match");
     }
 
-    auto trigger_list_expr = std::dynamic_pointer_cast<const IntListExpression>(region_expr->arg2);
+    auto trigger_list_expr =
+        std::dynamic_pointer_cast<const IntListConstant<int64_t>>(region_expr->arg2);
     if (trigger_list_expr == nullptr) {
         throw VsagException(ErrorType::INTERNAL_ERROR, "expression type not match");
     }
@@ -66,19 +68,14 @@ RegionFilterExecutor::RegionFilterExecutor(Allocator* allocator,
 
     AttributeValue<int64_t> list_value;
     list_value.name_ = region_list_field_name;
-    list_value.GetValue() =
-        std::dynamic_pointer_cast<const IntListConstant<int64_t>>(region_list_expr->values)->values;
+    list_value.GetValue() = region_list_expr->values;
     this->region_list_managers_ = attr_index->GetBitsetsByAttr(list_value);
 
     list_value.name_ = residence_list_field_name;
-    list_value.GetValue() =
-        std::dynamic_pointer_cast<const IntListConstant<int64_t>>(residence_list_expr->values)
-            ->values;
+    list_value.GetValue() = residence_list_expr->values;
     this->residence_list_managers_ = attr_index->GetBitsetsByAttr(list_value);
 
-    list_value.GetValue() =
-        std::dynamic_pointer_cast<const IntListConstant<int64_t>>(trigger_list_expr->values)
-            ->values;
+    list_value.GetValue() = trigger_list_expr->values;
     this->trigger_list_managers_ = attr_index->GetBitsetsByAttr(list_value);
 }
 
