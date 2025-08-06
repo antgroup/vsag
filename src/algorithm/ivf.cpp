@@ -50,7 +50,7 @@ static constexpr const char* IVF_PARAMS_TEMPLATE =
                 "{SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE}": 0.05,
                 "{PCA_DIM}": 0,
                 "{RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY}": 32,
-                "{PRODUCT_QUANTIZATION_DIM}": 0
+                "{PRODUCT_QUANTIZATION_DIM}": 1
             },
             "{BUCKETS_COUNT_KEY}": 10,
             "{BUCKET_USE_RESIDUAL}": false
@@ -115,6 +115,14 @@ IVF::CheckAndMappingExternalParam(const JsonType& external_param,
             },
         },
         {
+            IVF_PRECISE_FILE_PATH,
+            {
+                IVF_PRECISE_CODES_KEY,
+                IO_PARAMS_KEY,
+                IO_FILE_PATH,
+            },
+        },
+        {
             IVF_BUCKETS_COUNT,
             {
                 BUCKET_PARAMS_KEY,
@@ -153,11 +161,15 @@ IVF::CheckAndMappingExternalParam(const JsonType& external_param,
         },
         {
             BUCKET_PER_DATA_KEY,
-            {BUCKET_PER_DATA_KEY},
+            {
+                BUCKET_PER_DATA_KEY,
+            },
         },
         {
             IVF_USE_REORDER,
-            {IVF_USE_REORDER_KEY},
+            {
+                IVF_USE_REORDER_KEY,
+            },
         },
         {
             IVF_USE_RESIDUAL,
