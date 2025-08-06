@@ -18,8 +18,8 @@
 #include "comparison_executor.h"
 #include "integer_list_executor.h"
 #include "logical_executor.h"
-#include "string_list_executor.h"
 #include "region_filter_executor.h"
+#include "string_list_executor.h"
 namespace vsag {
 
 ExecutorPtr

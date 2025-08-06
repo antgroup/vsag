@@ -21,15 +21,17 @@
 std::vector<std::pair<std::vector<float>, std::string>>
 loadVectorFilterPairs(const std::string& filePath) {
     std::ifstream file(filePath);
-    if (!file.is_open())
+    if (!file.is_open()) {
         return {};
+    }
 
     std::vector<std::pair<std::vector<float>, std::string>> result;
     std::string line;
 
     while (std::getline(file, line)) {
-        if (line.empty())
+        if (line.empty()) {
             continue;
+        }
 
         std::vector<float> vec(32);
         std::istringstream iss(line);
@@ -47,12 +49,14 @@ loadVectorFilterPairs(const std::string& filePath) {
             }
         }
 
-        if (!success)
+        if (!success) {
             continue;
+        }
 
         std::string filterLine;
-        if (!std::getline(file, filterLine))
+        if (!std::getline(file, filterLine)) {
             break;
+        }
 
         result.emplace_back(vec, filterLine);
     }
@@ -92,7 +96,7 @@ main(int argc, char** argv) {
         "metric_type": "l2",
         "dim": 32,
         "index_param": {
-            "buckets_count": 500,
+            "buckets_count": 100,
             "base_quantization_type": "fp32",
             "partition_strategy_type": "ivf",
             "ivf_train_type": "kmeans",
@@ -110,7 +114,7 @@ main(int argc, char** argv) {
     //     std::cerr << "Failed to build index: internalError" << std::endl;
     //     exit(-1);
     // }
-    std::ifstream infile("/home/tianlan.lht/suguan.dx_ivf.index.bin", std::ios::binary);
+    std::ifstream infile("/home/tianlan.lht/suguan.dx_ivf.index.bin.10", std::ios::binary);
 
     index->Deserialize(infile);
 
@@ -124,12 +128,12 @@ main(int argc, char** argv) {
     auto ivf_search_parameters = R"(
     {
         "ivf": {
-            "scan_buckets_count": 200
+            "scan_buckets_count": 30
         }
     })";
-    int64_t topk = 300;
+    int64_t topk = 500;
 
-    auto querys = loadVectorFilterPairs("/home/tianlan.lht/suguan.dx_req");
+    auto querys = loadVectorFilterPairs("/home/tianlan.lht/suguan.dx_req10");
 
     int query_count = querys.size();
     while (true) {
@@ -153,7 +157,8 @@ main(int argc, char** argv) {
         }
         auto end = std::chrono::high_resolution_clock::now();
         auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
-        std::cout << "query count: " << query_count << ", time: " << duration.count() << "ms" << std::endl;
+        std::cout << "query count: " << query_count << ", time: " << duration.count() << "ms"
+                  << std::endl;
     }
 
     /******************* Print Search Result *****************/
