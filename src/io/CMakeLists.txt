@@ -8,6 +8,7 @@ set (IO_SRC
         async_io_parameter.cpp
         async_io.cpp
         mmap_io_parameter.cpp
+        mmap_io.cpp
         memory_block_io.cpp
         reader_io.cpp
         reader_io_parameter.cpp

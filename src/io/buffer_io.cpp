@@ -22,7 +22,16 @@ namespace vsag {
 
 BufferIO::BufferIO(std::string filename, Allocator* allocator)
     : BasicIO<BufferIO>(allocator), filepath_(std::move(filename)) {
+    this->exist_file_ = std::filesystem::exists(this->filepath_);
+    if (std::filesystem::is_directory(this->filepath_)) {
+        throw VsagException(ErrorType::INTERNAL_ERROR,
+                            fmt::format("{} is a directory", this->filepath_));
+    }
     this->fd_ = open(filepath_.c_str(), O_CREAT | O_RDWR, 0644);
+    if (this->fd_ < 0) {
+        throw VsagException(ErrorType::INTERNAL_ERROR,
+                            fmt::format("open file {} error {}", this->filepath_, strerror(errno)));
+    }
 }
 
 BufferIO::BufferIO(const BufferIOParameterPtr& io_param, const IndexCommonParam& common_param)
