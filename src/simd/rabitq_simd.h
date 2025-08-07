@@ -131,6 +131,23 @@ RotateOp(float* data, int idx, int dim_, int step);
 namespace neon {
 float
 RaBitQFloatBinaryIP(const float* vector, const uint8_t* bits, uint64_t dim, float inv_sqrt_d);
+uint32_t
+RaBitQSQ4UBinaryIP(const uint8_t* codes, const uint8_t* bits, uint64_t dim);
+
+void
+KacsWalk(float* data, std::size_t len);
+
+void
+VecRescale(float* data, std::size_t dim, float val);
+
+void
+FHTRotate(float* data, std::size_t dim_);
+
+void
+FlipSign(const uint8_t* flip, float* data, std::size_t dim);
+
+void
+RotateOp(float* data, int idx, int dim_, int step);
 }  // namespace neon
 
 using RaBitQFloatBinaryType = float (*)(const float* vector,
