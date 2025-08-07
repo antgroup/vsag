@@ -37,6 +37,10 @@ GetL2Sqr() {
 #if defined(ENABLE_SSE)
         return sse::L2Sqr;
 #endif
+    } else if (SimdStatus::SupportSVE()) {
+#if defined(ENABLE_SVE)
+        return sve::L2Sqr;
+#endif
     } else if (SimdStatus::SupportNEON()) {
 #if defined(ENABLE_NEON)
         return neon::L2Sqr;
@@ -63,6 +67,10 @@ GetInnerProduct() {
     } else if (SimdStatus::SupportSSE()) {
 #if defined(ENABLE_SSE)
         return sse::InnerProduct;
+#endif
+    } else if (SimdStatus::SupportSVE()) {
+#if defined(ENABLE_SVE)
+        return sve::InnerProduct;
 #endif
     } else if (SimdStatus::SupportNEON()) {
 #if defined(ENABLE_NEON)
@@ -91,6 +99,10 @@ GetInnerProductDistance() {
 #if defined(ENABLE_SSE)
         return sse::InnerProductDistance;
 #endif
+    } else if (SimdStatus::SupportSVE()) {
+#if defined(ENABLE_SVE)
+        return sve::InnerProductDistance;
+#endif
     } else if (SimdStatus::SupportNEON()) {
 #if defined(ENABLE_NEON)
         return neon::InnerProductDistance;
@@ -117,6 +129,10 @@ GetINT8InnerProduct() {
     } else if (SimdStatus::SupportSSE()) {
 #if defined(ENABLE_SSE)
         return sse::INT8InnerProduct;
+#endif
+    } else if (SimdStatus::SupportSVE()) {
+#if defined(ENABLE_SVE)
+        return sve::INT8InnerProduct;
 #endif
     } else if (SimdStatus::SupportNEON()) {
 #if defined(ENABLE_NEON)
@@ -145,6 +161,10 @@ GetINT8InnerProductDistance() {
 #if defined(ENABLE_SSE)
         return sse::INT8InnerProductDistance;
 #endif
+    } else if (SimdStatus::SupportSVE()) {
+#if defined(ENABLE_SVE)
+        return sve::INT8InnerProductDistance;
+#endif
     } else if (SimdStatus::SupportNEON()) {
 #if defined(ENABLE_NEON)
         return neon::INT8InnerProductDistance;
@@ -172,6 +192,10 @@ GetPQDistanceFloat256() {
 #if defined(ENABLE_SSE)
         return sse::PQDistanceFloat256;
 #endif
+    } else if (SimdStatus::SupportSVE()) {
+#if defined(ENABLE_SVE)
+        return sve::PQDistanceFloat256;
+#endif
     } else if (SimdStatus::SupportNEON()) {
 #if defined(ENABLE_NEON)
         return neon::PQDistanceFloat256;
@@ -186,6 +210,14 @@ GetPrefetch() {
     if (SimdStatus::SupportSSE()) {
 #if defined(ENABLE_SSE)
         return sse::Prefetch;
+#endif
+    } else if (SimdStatus::SupportSVE()) {
+#if defined(ENABLE_SVE)
+        return sve::Prefetch;
+#endif
+    } else if (SimdStatus::SupportNEON()) {
+#if defined(ENABLE_NEON)
+        return neon::Prefetch;
 #endif
     }
     return generic::Prefetch;

@@ -86,6 +86,17 @@ void
 BitNot(const uint8_t* x, const uint64_t num_byte, uint8_t* result);
 }  // namespace neon
 
+namespace sve {
+void
+BitAnd(const uint8_t* x, const uint8_t* y, const uint64_t num_byte, uint8_t* result);
+void
+BitOr(const uint8_t* x, const uint8_t* y, const uint64_t num_byte, uint8_t* result);
+void
+BitXor(const uint8_t* x, const uint8_t* y, const uint64_t num_byte, uint8_t* result);
+void
+BitNot(const uint8_t* x, const uint64_t num_byte, uint8_t* result);
+}  // namespace sve
+
 using BitOperatorType = void (*)(const uint8_t* x,
                                  const uint8_t* y,
                                  const uint64_t num_byte,
