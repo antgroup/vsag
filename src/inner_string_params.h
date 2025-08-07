@@ -134,6 +134,8 @@ const char* const SUPPORT_DUPLICATE = "support_duplicate";
 
 const char* const DATACELL_OFFSETS = "datacell_offsets";
 const char* const DATACELL_SIZES = "datacell_sizes";
+const char* const BASIC_INFO = "basic_info";
+const char* const INDEX_TYPE = "type";
 
 const std::unordered_map<std::string, std::string> DEFAULT_MAP = {
     {"INDEX_TYPE_HGRAPH", INDEX_TYPE_HGRAPH},

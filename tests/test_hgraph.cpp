@@ -446,6 +446,32 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HGraphTestIndex,
     }
 }
 
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::HGraphTestIndex, "HGraph GetStatus", "[ft][hgraph]") {
+    auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
+    auto resource = test_index->GetResource(true);
+    for (auto metric_type : resource->metric_types) {
+        for (auto dim : resource->dims) {
+            for (auto& [base_quantization_str, recall] : resource->test_cases) {
+                INFO(fmt::format("metric_type: {}, dim: {}, base_quantization_str: {}, recall: {}",
+                                 metric_type,
+                                 dim,
+                                 base_quantization_str,
+                                 recall));
+                HGraphTestIndex::HGraphBuildParam build_param(
+                    metric_type, dim, base_quantization_str);
+                build_param.support_duplicate = true;
+                build_param.support_remove = true;
+                auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
+                auto index = TestIndex::TestFactory(test_index->name, param, true);
+                auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(
+                    dim, resource->base_count, metric_type);
+                TestIndex::TestBuildIndex(index, dataset, true);
+                INFO(index->GetStats());
+            }
+        }
+    }
+}
+
 static void
 TestHGraphBuildAndContinueAdd(const fixtures::HGraphTestIndexPtr& test_index,
                               const fixtures::HGraphResourcePtr& resource) {
