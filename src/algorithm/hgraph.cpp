@@ -596,7 +596,7 @@ HGraph::serialize_basic_info_v0_14(StreamWriter& writer) const {
     StreamWriter::WriteObj(writer, capacity);
     StreamWriter::WriteVector(writer, this->label_table_->label_table_);
 
-    uint64_t size = this->total_count_;
+    uint64_t size = this->label_table_->label_remap_.size();
     StreamWriter::WriteObj(writer, size);
     for (const auto& pair : this->label_table_->label_remap_) {
         auto key = pair.first;
