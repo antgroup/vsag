@@ -196,6 +196,9 @@ public:
     bool
     UpdateExtraInfo(const DatasetPtr& new_base) override;
 
+    std::string
+    GetStats() const override;
+
 private:
     const void*
     get_data(const DatasetPtr& dataset, uint32_t index = 0) const {
