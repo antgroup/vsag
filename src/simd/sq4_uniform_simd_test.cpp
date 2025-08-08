@@ -83,9 +83,19 @@ TEST_CASE("SQ4 Uniform SIMD Compute Benchmark", "[ut][simd][!benchmark]") {
     auto codes1 = fixtures::generate_int4_codes(count, dim, 114);
     auto codes2 = fixtures::generate_int4_codes(count, dim, 514);
     BENCHMARK_SIMD_COMPUTE(generic, SQ4UniformComputeCodesIP);
-    BENCHMARK_SIMD_COMPUTE(sse, SQ4UniformComputeCodesIP);
-    BENCHMARK_SIMD_COMPUTE(avx, SQ4UniformComputeCodesIP);
-    BENCHMARK_SIMD_COMPUTE(avx2, SQ4UniformComputeCodesIP);
-    BENCHMARK_SIMD_COMPUTE(avx512, SQ4UniformComputeCodesIP);
-    BENCHMARK_SIMD_COMPUTE(neon, SQ4UniformComputeCodesIP);
+    if (SimdStatus::SupportSSE()) {
+        BENCHMARK_SIMD_COMPUTE(sse, SQ4UniformComputeCodesIP);
+    }
+    if (SimdStatus::SupportAVX()) {
+        BENCHMARK_SIMD_COMPUTE(avx, SQ4UniformComputeCodesIP);
+    }
+    if (SimdStatus::SupportAVX2()) {
+        BENCHMARK_SIMD_COMPUTE(avx2, SQ4UniformComputeCodesIP);
+    }
+    if (SimdStatus::SupportAVX512()) {
+        BENCHMARK_SIMD_COMPUTE(avx512, SQ4UniformComputeCodesIP);
+    }
+    if (SimdStatus::SupportNEON()) {
+        BENCHMARK_SIMD_COMPUTE(neon, SQ4UniformComputeCodesIP);
+    }
 }
