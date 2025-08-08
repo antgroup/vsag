@@ -638,6 +638,10 @@ IVF::create_search_param(const std::string& parameters, const FilterPtr& filter)
     param.factor = search_param.topk_factor;
     param.first_order_scan_ratio = search_param.first_order_scan_ratio;
     param.parallel_search_thread_count = search_param.parallel_search_thread_count;
+    if (search_param.enable_time_record) {
+        param.time_cost = std::make_shared<Timer>();
+        param.time_cost->SetThreshold(search_param.timeout_ms);
+    }
     return param;
 }
 
@@ -645,7 +649,8 @@ DatasetPtr
 IVF::reorder(int64_t topk, DistHeapPtr& input, const float* query) const {
     auto [dataset_results, dists, labels] = create_fast_dataset(topk, allocator_);
     auto reorder_heap = Reorder::ReorderByFlatten(input, reorder_codes_, query, allocator_, topk);
-    for (int64_t j = topk - 1; j >= 0; --j) {
+    auto size = static_cast<int64_t>(reorder_heap->Size());
+    for (int64_t j = size - 1; j >= 0; --j) {
         dists[j] = reorder_heap->Top().first;
         labels[j] = label_table_->GetLabelById(reorder_heap->Top().second);
         reorder_heap->Pop();
@@ -711,6 +716,9 @@ IVF::search(const DatasetPtr& query, const InnerSearchParam& param) const {
         Vector<float> centroid(dim_, allocator_);
         Vector<float> dist(allocator_);
         for (uint64_t i = 0; i < bucket_count; ++i) {
+            if (param.time_cost != nullptr and param.time_cost->CheckOvertime()) {
+                break;
+            }
             if (i % search_thread_count != thread_id) {
                 continue;
             }

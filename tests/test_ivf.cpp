@@ -567,6 +567,76 @@ TEST_CASE("[Daily] IVF Build", "[ft][ivf][daily]") {
 }
 
 static void
+TestIVFSearchOvertime(const fixtures::IVFTestIndexPtr& test_index,
+                      const fixtures::IVFResourcePtr& resource) {
+    using namespace fixtures;
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    auto size = GENERATE(1024 * 1024 * 2);
+    constexpr static const char* search_param_tmp2 = R"(
+        {{
+            "ivf": {{
+                "scan_buckets_count": {},
+                "factor": 4.0,
+                "first_order_scan_ratio": 1.0,
+                "parallelism": {},
+                "timeout_ms": 20.0
+            }}
+        }})";
+    for (auto metric_type : resource->metric_types) {
+        for (auto dim : resource->dims) {
+            for (auto train_type : resource->train_types) {
+                for (auto [base_quantization_str, recall] : resource->test_cases) {
+                    auto count = std::min(300, static_cast<int32_t>(dim / 4));
+                    if (train_type == "kmeans") {
+                        recall *= 0.8F;  // Kmeans may not achieve high recall in random datasets
+                    }
+                    auto search_thread_count = GENERATE(1, 3);
+                    auto search_param =
+                        fmt::format(search_param_tmp2, std::max(200, count), search_thread_count);
+                    INFO(
+                        fmt::format("metric_type: {}, dim: {}, base_quantization_str: {}, "
+                                    "train_type: {}, recall: {}",
+                                    metric_type,
+                                    dim,
+                                    base_quantization_str,
+                                    train_type,
+                                    recall));
+                    vsag::Options::Instance().set_block_size_limit(size);
+                    auto param =
+                        IVFTestIndex::GenerateIVFBuildParametersString(metric_type,
+                                                                       dim,
+                                                                       base_quantization_str,
+                                                                       300,
+                                                                       train_type,
+                                                                       false,
+                                                                       1,
+                                                                       false,
+                                                                       3);
+                    auto index = IVFTestIndex::TestFactory(IVFTestIndex::name, param, true);
+                    auto dataset = IVFTestIndex::pool.GetDatasetAndCreate(
+                        dim, resource->base_count, metric_type);
+                    IVFTestIndex::TestBuildIndex(index, dataset, true);
+                    IVFTestIndex::TestSearchOvertime(index, dataset, search_param);
+                    vsag::Options::Instance().set_block_size_limit(origin_size);
+                }
+            }
+        }
+    }
+}
+
+TEST_CASE("[PR] IVF Search Overtime", "[ft][ivf][pr]") {
+    auto test_index = std::make_shared<fixtures::IVFTestIndex>();
+    auto resource = test_index->GetResource(true);
+    TestIVFSearchOvertime(test_index, resource);
+}
+
+TEST_CASE("[Daily] IVF Search Overtime", "[ft][ivf][daily]") {
+    auto test_index = std::make_shared<fixtures::IVFTestIndex>();
+    auto resource = test_index->GetResource(false);
+    TestIVFSearchOvertime(test_index, resource);
+}
+
+static void
 TestIVFBuildWithLargeK(const fixtures::IVFTestIndexPtr& test_index,
                        const fixtures::IVFResourcePtr& resource) {
     using namespace fixtures;

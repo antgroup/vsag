@@ -2081,4 +2081,23 @@ TestIndex::TestBuildDuplicateIndex(const IndexPtr& index,
     }
 }
 
+void
+TestIndex::TestSearchOvertime(const IndexPtr& index,
+                              const TestDatasetPtr& dataset,
+                              const std::string& search_param) {
+    auto queries = dataset->query_;
+    auto query_count = queries->GetNumElements();
+    auto dim = queries->GetDim();
+    for (auto i = 0; i < query_count; ++i) {
+        auto query = vsag::Dataset::Make();
+        query->NumElements(1)
+            ->Dim(dim)
+            ->Float32Vectors(queries->GetFloat32Vectors() + i * dim)
+            ->SparseVectors(queries->GetSparseVectors() + i)
+            ->Paths(queries->GetPaths() + i)
+            ->Owner(false);
+        auto res = index->KnnSearch(query, 10, search_param);
+        REQUIRE(res.has_value());
+    }
+}
 }  // namespace fixtures
