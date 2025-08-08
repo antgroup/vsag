@@ -26,6 +26,11 @@ std::unique_ptr<IOContextPool> AsyncIO::io_context_pool =
 
 AsyncIO::AsyncIO(std::string filename, Allocator* allocator)
     : BasicIO<AsyncIO>(allocator), filepath_(std::move(filename)) {
+    this->exist_file_ = std::filesystem::exists(this->filepath_);
+    if (std::filesystem::is_directory(this->filepath_)) {
+        throw VsagException(ErrorType::INTERNAL_ERROR,
+                            fmt::format("{} is a directory", this->filepath_));
+    }
     this->rfd_ = open(filepath_.c_str(), O_CREAT | O_RDWR | O_DIRECT, 0644);
     this->wfd_ = open(filepath_.c_str(), O_CREAT | O_RDWR, 0644);
 }
@@ -40,7 +45,9 @@ AsyncIO::~AsyncIO() {
     close(this->wfd_);
     close(this->rfd_);
     // remove file
-    std::filesystem::remove(this->filepath_);
+    if (not this->exist_file_) {
+        std::filesystem::remove(this->filepath_);
+    }
 }
 
 void
