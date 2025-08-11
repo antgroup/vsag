@@ -1838,8 +1838,9 @@ HGraph::analyze_quantizer(JsonType& stats,
                 }
             }
             int64_t search_count = search_result->GetDim();
-            tmp_inversion_count_rate = static_cast<float>(inversion_count) /
-                                       static_cast<float>(search_count * (search_count - 1) / 2);
+            tmp_inversion_count_rate =
+                static_cast<float>(inversion_count) /
+                (static_cast<float>(search_count * (search_count - 1)) / 2.0F);
             inversion_count_rate += tmp_inversion_count_rate;
         }
         stats["quantization_bias_ratio"] = bias_ratio / static_cast<float>(sample_data_size);
