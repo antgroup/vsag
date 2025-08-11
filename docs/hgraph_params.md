@@ -39,9 +39,11 @@ The example of the `hgraph_json_string`.
     "base_io_type": "block_memory_io", /* optional, default is 'block_memory_io', 
                                           support "memory_io", "block_memory_io", "buffer_io", "async_io", "mmap_io"
                                           means the io type for 'base_quantization' codes 
-                                          the "memory_io" and "block_memory_io" mean store in memory,
-                                          "buffer_io" means on local SSD or local disk. */
-                                        
+                                          the "memory_io" and "block_memory_io" mean stored in memory,
+                                          "buffer_io" means on local SSD or local disk. "reader_io" means that the 
+                                          IO section will be set during deserialization, and IO operations will be 
+                                          based on Reader*/
+
     "base_file_path": "./default_file_path", /* optional, default is "./default_file_path", 
                                                 means the filepath for 'base_quantization' codes storage,
                                                 the parameter is meaningless 
@@ -63,8 +65,16 @@ The example of the `hgraph_json_string`.
     "base_pq_dim": 128, /* optional, when base_quantization_type is "pq" or "pqfs", this key must be set.
                             means the pq subspace count */
 
-    "graph_type": "nsw" /* optional, default is "nsw", support "nsw", "odescent",
+    "graph_type": "nsw", /* optional, default is "nsw", support "nsw", "odescent",
                           means the graph type for hgraph */
+    "support_duplicate": false, /* optional, default is false, when set to true it adds duplicate data 
+                                 checks to reduce the impact of duplicate data on the graph index */
+    "store_raw_vector": false, /* optional, default is false, when metric is cosine, set to true to 
+                                retrieve raw vectors from the index */
+    "use_elp_optimizer": false, /* optional, default is false, automatically adjusts internal parameters 
+                                 after index construction or deserialization based on system conditions */
+    "support_remove": false  /* optional, default is false, set to true when the index needs to support 
+                              deletions */
   }
 }
 ```
