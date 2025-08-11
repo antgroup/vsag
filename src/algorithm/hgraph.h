@@ -291,6 +291,24 @@ private:
     elp_optimize();
 
 private:
+    void
+    analyze_quantizer(JsonType& stats,
+                      const Vector<float>& data,
+                      uint64_t sample_data_size,
+                      int64_t topk,
+                      const std::string& search_param) const;
+
+    void
+    analyze_graph_recall(JsonType& stats,
+                         Vector<float>& data,
+                         uint64_t sample_data_size,
+                         int64_t topk,
+                         const std::string& search_param) const;
+
+    void
+    analyze_graph_connection(JsonType& stats) const;
+
+private:
     FlattenInterfacePtr basic_flatten_codes_{nullptr};
     FlattenInterfacePtr high_precise_codes_{nullptr};
     Vector<GraphInterfacePtr> route_graphs_;
