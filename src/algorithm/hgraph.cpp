@@ -1811,7 +1811,7 @@ HGraph::analyze_quantizer(JsonType& stats,
             float tmp_bias_ratio = 0.0F;
             float tmp_inversion_count_rate = 0.0F;
             this->use_reorder_ = false;
-            auto* query_data = data.data() + i * dim_;
+            const auto* query_data = data.data() + i * dim_;
             auto query = Dataset::Make();
             query->Owner(false)->NumElements(1)->Float32Vectors(query_data)->Dim(dim_);
             auto search_result = this->KnnSearch(query, topk, search_param, nullptr);
@@ -1837,9 +1837,9 @@ HGraph::analyze_quantizer(JsonType& stats,
                     }
                 }
             }
-            tmp_inversion_count_rate =
-                static_cast<float>(inversion_count) /
-                static_cast<float>(search_result->GetDim() * (search_result->GetDim() - 1) / 2);
+            int64_t search_count = search_result->GetDim();
+            tmp_inversion_count_rate = static_cast<float>(inversion_count) /
+                                       static_cast<float>(search_count * (search_count - 1) / 2);
             inversion_count_rate += tmp_inversion_count_rate;
         }
         stats["quantization_bias_ratio"] = bias_ratio / static_cast<float>(sample_data_size);
