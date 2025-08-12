@@ -36,9 +36,9 @@ Reorder::ReorderByFlatten(const DistHeapPtr& input,
     for (int i = 0; i < candidate_size; ++i) {
         if (reorder_heap->Size() < topk || dists[i] < reorder_heap->Top().first) {
             reorder_heap->Push(dists[i], candidate_result[i].second);
-        }
-        if (reorder_heap->Size() > topk) {
-            reorder_heap->Pop();
+            if (reorder_heap->Size() > topk) {
+                reorder_heap->Pop();
+            }
         }
     }
     return reorder_heap;
