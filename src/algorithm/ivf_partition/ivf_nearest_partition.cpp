@@ -19,7 +19,7 @@
 
 #include "algorithm/hgraph.h"
 #include "impl/allocator/safe_allocator.h"
-#include "impl/kmeans_cluster.h"
+#include "impl/cluster/kmeans_cluster.h"
 #include "inner_string_params.h"
 #include "utils/util_functions.h"
 
