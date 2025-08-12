@@ -34,7 +34,7 @@ public:
 
     void
     AsyncRead(uint64_t offset, uint64_t len, void* dest, vsag::CallBack callback) override {
-        Read(offset, len, dest);
+        memcpy((char*)dest, binary_.data.get() + offset, len);
         callback(vsag::IOErrorCode::IO_SUCCESS, "success");
     }
 
