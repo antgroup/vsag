@@ -131,7 +131,7 @@ FastBitset::And(const ComputableBitset& another) {
     } else {
         auto max_size = fast_another->data_.size();
         if (this->fill_bit_) {
-            max_size = this->data_.size();
+            this->data_.resize(max_size, (uint64_t)(-1));
         } else {
             this->data_.resize(max_size, 0);
         }
