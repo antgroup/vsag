@@ -7,9 +7,9 @@
 
 #include "boost_dynamic_bitset_fwd.h"
 // #include "boost/dynamic_bitset.hpp"
-#include "tsl/robin_set.h"
-#include "tsl/robin_map.h"
-#include "tsl/sparse_map.h"
+#include "diskann_tsl/robin_set.h"
+#include "diskann_tsl/robin_map.h"
+#include "diskann_tsl/sparse_map.h"
 
 #include "neighbor.h"
 #include "concurrent_queue.h"
