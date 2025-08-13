@@ -1327,7 +1327,7 @@ TestHGraphReaderIO(const fixtures::HGraphTestIndexPtr& test_index,
 
                 TestIndex::TestBuildIndex(index, dataset, true);
                 if (base_quantization_str.find(',') != std::string::npos) {
-                    base_quantization_str += ",reader_io";
+                    build_param.quantization_str += ",reader_io";
                 }
                 auto reader_param =
                     HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);

@@ -25,12 +25,21 @@ Reorder::ReorderByFlatten(const DistHeapPtr& input,
                           int64_t topk) {
     auto reorder_heap = DistanceHeap::MakeInstanceBySize<true, true>(allocator, topk);
     auto computer = flatten->FactoryComputer(query);
-
-    while (not input->Empty()) {
-        auto [dist, id] = input->Top();
-        flatten->Query(&dist, computer, &id, 1);
-        reorder_heap->Push(dist, id);
-        input->Pop();
+    size_t candidate_size = input->Size();
+    const auto* candidate_result = input->GetData();
+    Vector<InnerIdType> ids(candidate_size, allocator);
+    Vector<float> dists(candidate_size, allocator);
+    for (int i = 0; i < candidate_size; ++i) {
+        ids[i] = candidate_result[i].second;
+    }
+    flatten->Query(dists.data(), computer, ids.data(), candidate_size);
+    for (int i = 0; i < candidate_size; ++i) {
+        if (reorder_heap->Size() < topk || dists[i] < reorder_heap->Top().first) {
+            reorder_heap->Push(dists[i], candidate_result[i].second);
+            if (reorder_heap->Size() > topk) {
+                reorder_heap->Pop();
+            }
+        }
     }
     return reorder_heap;
 }
