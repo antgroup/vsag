@@ -53,7 +53,7 @@ private:
     init_memory_monitor();
 
     void
-    deserialize();
+    deserialize(std::ifstream& infile);
 
     void
     do_knn_search();
