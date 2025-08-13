@@ -84,8 +84,8 @@ HGRAPH/COHERE/90:
     datapath: "/tmp/data/cohere-768-1m-angular.hdf5"
     type: "build,search" # build, search
     index_name: "hgraph"
-    create_params: '{"dim":768,"dtype":"float32","metric_type":"cosine","index_param":{"base_quantization_type":"sq8_uniform","max_degree":64,"ef_construction":400, "precise_quantization_type":"fp32", "use_reorder":true}}'
-    search_params: '{"hgraph":{"ef_search":29}}'
+    create_params: '{"dim":768,"dtype":"float32","metric_type":"cosine","index_param":{"base_quantization_type":"rabitq","max_degree":64,"ef_construction":400, "rabitq_use_fht": true,"precise_quantization_type":"fp32", "use_reorder":true}}'
+    search_params: '{"hgraph":{"ef_search":23}}'
     index_path: "/tmp/cohere-768-1m-angular/index/hgraph_index"
     topk: 10
     search_mode: "knn"
