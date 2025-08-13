@@ -196,6 +196,9 @@ public:
     bool
     UpdateExtraInfo(const DatasetPtr& new_base) override;
 
+    std::string
+    GetStats() const override;
+
 private:
     const void*
     get_data(const DatasetPtr& dataset, uint32_t index = 0) const {
@@ -286,6 +289,24 @@ private:
 
     void
     elp_optimize();
+
+private:
+    void
+    analyze_quantizer(JsonType& stats,
+                      const Vector<float>& data,
+                      uint64_t sample_data_size,
+                      int64_t topk,
+                      const std::string& search_param) const;
+
+    void
+    analyze_graph_recall(JsonType& stats,
+                         Vector<float>& data,
+                         uint64_t sample_data_size,
+                         int64_t topk,
+                         const std::string& search_param) const;
+
+    void
+    analyze_graph_connection(JsonType& stats) const;
 
 private:
     FlattenInterfacePtr basic_flatten_codes_{nullptr};
