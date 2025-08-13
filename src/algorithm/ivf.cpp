@@ -541,7 +541,7 @@ IVF::Serialize(StreamWriter& writer) const {
     basic_info[INDEX_PARAM] = this->create_param_ptr_->ToString();
 
     auto metadata = std::make_shared<Metadata>();
-    metadata->Set("basic_info", basic_info);
+    metadata->Set(BASIC_INFO, basic_info);
     metadata->Set("datacell_offsets", datacell_offsets);
     metadata->Set("datacell_sizes", datacell_sizes);
 
@@ -587,7 +587,7 @@ IVF::Deserialize(StreamReader& reader) {
             return;
         }
 
-        auto basic_info = metadata->Get("basic_info");
+        auto basic_info = metadata->Get(BASIC_INFO);
         this->total_elements_ = basic_info["total_elements"];
         this->use_reorder_ = basic_info["use_reorder"];
         this->is_trained_ = basic_info["is_trained"];
