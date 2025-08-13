@@ -2,7 +2,7 @@
 include(FetchContent)
 
 FetchContent_Declare(
-        robin
+        tsl
         URL https://github.com/Tessil/robin-map/archive/refs/tags/v1.4.0.tar.gz
         # this url is maintained by the vsag project, if it's broken, please try
         #  the latest commit or contact the vsag project
@@ -12,5 +12,5 @@ FetchContent_Declare(
         TIMEOUT 30
 )
 
-FetchContent_MakeAvailable(robin)
-include_directories(${robin_SOURCE_DIR}/include)
+FetchContent_MakeAvailable(tsl)
+include_directories(${tsl_SOURCE_DIR}/include)

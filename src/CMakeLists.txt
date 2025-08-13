@@ -21,7 +21,7 @@ add_library (vsag SHARED ${VSAG_SRCS})
 add_library (vsag_static STATIC ${VSAG_SRCS})
 
 set (VSAG_DEP_LIBS antlr4-autogen antlr4-runtime diskann simd io quantizer storage utils
-      datacell ${IMPL_LIBS} ${ALGORITHM_LIBS} attr pthread m dl fmt::fmt nlohmann_json::nlohmann_json roaring robin)
+      datacell ${IMPL_LIBS} ${ALGORITHM_LIBS} attr pthread m dl fmt::fmt nlohmann_json::nlohmann_json roaring tsl)
 
 target_link_libraries (vsag ${VSAG_DEP_LIBS} coverage_config)
 target_link_libraries (vsag_static ${VSAG_DEP_LIBS} coverage_config)
@@ -29,5 +29,5 @@ target_link_libraries (vsag_static ${VSAG_DEP_LIBS} coverage_config)
 add_dependencies (vsag spdlog)
 add_dependencies (vsag_static spdlog)
 
-maybe_add_dependencies (vsag antlr4 spdlog roaring openblas boost mkl robin)
-maybe_add_dependencies (vsag_static antlr4 spdlog roaring openblas boost mkl robin)
+maybe_add_dependencies (vsag antlr4 spdlog roaring openblas boost mkl tsl)
+maybe_add_dependencies (vsag_static antlr4 spdlog roaring openblas boost mkl tsl)

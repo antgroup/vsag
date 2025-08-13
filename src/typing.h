@@ -15,14 +15,15 @@
 
 #pragma once
 
+#include <tsl/robin_map.h>
+#include <tsl/robin_set.h>
+
 #include <cstdint>
 #include <deque>
 #include <queue>
 
 #include "impl/allocator/allocator_wrapper.h"
 #include "nlohmann/json.hpp"
-#include <tsl/robin_map.h>
-#include <tsl/robin_set.h>
 
 namespace vsag {
 
