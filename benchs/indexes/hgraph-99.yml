@@ -89,7 +89,6 @@ HGRAPH/COHERE/99:
     index_path: "/tmp/cohere-768-1m-angular/index/hgraph_index"
     topk: 10
     search_mode: "knn"
-    delete_index_after_search: false
 
 HGRAPH/INTERNET/99:
     datapath: "/tmp/data/wholenet-sparse-1m-ip.hdf5"
