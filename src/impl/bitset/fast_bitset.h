@@ -25,7 +25,7 @@ namespace vsag {
 class FastBitset : public ComputableBitset {
 public:
     explicit FastBitset(Allocator* allocator)
-        : ComputableBitset(), allocator_(allocator), data_(allocator), fill_bit_(false) {
+        : ComputableBitset(), data_(allocator), fill_bit_(false) {
         this->type_ = ComputableBitsetType::FastBitset;
     };
 
@@ -74,15 +74,9 @@ public:
     Dump() override;
 
 private:
-    Vector<uint64_t> data_;
-
-    mutable std::shared_mutex mutex_;
-
-    Allocator* const allocator_{nullptr};
-
     bool fill_bit_{false};
 
-    const uint64_t FILL_ONE = 0xFFFFFFFFFFFFFFFF;
+    Vector<uint64_t> data_;
 };
 
 using FastBitsetPtr = std::shared_ptr<FastBitset>;
