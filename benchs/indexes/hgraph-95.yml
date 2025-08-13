@@ -5,98 +5,98 @@ global:
             to: "stdout"
         e2:
             format: "json"
-            to: "file://tmp/perf-90.json"
+            to: "file://tmp/perf-95.json"
     num_threads_building: 16
     num_threads_searching: 16
 
-90/DEEP1B:
+HGRAPH/DEEP1B/95:
     datapath: "/tmp/data/deep-image-96-angular.hdf5"
     type: "build,search" # build, search
     index_name: "hgraph"
-    create_params: '{"dim":96,"dtype":"float32","metric_type":"cosine","index_param":{"base_quantization_type":"fp32","max_degree":48, "graph_type":"odescent", "alpha": 1.2, "graph_iter_turn": 40, "neighbor_sample_rate": 0.2}}'
-    search_params: '{"hgraph":{"ef_search":66}}'
+    create_params: '{"dim":96,"dtype":"float32","metric_type":"cosine","index_param":{"base_quantization_type":"fp32","max_degree":64,"ef_construction":400, "precise_quantization_type":"fp32", "use_reorder":true}}'
+    search_params: '{"hgraph":{"ef_search":55}}'
     index_path: "/tmp/deep-image-96-angular/index/hgraph_index"
     topk: 10
     search_mode: "knn" # ["knn", "range", "knn_filter", "range_filter"]
     range: 0.5
     delete_index_after_search: false
 
-90/GIST:
+HGRAPH/GIST/95:
     datapath: "/tmp/data/gist-960-euclidean.hdf5"
     type: "build,search" # build, search
     index_name: "hgraph"
-    create_params: '{"dim":960,"dtype":"float32","metric_type":"l2","index_param":{"base_quantization_type":"sq8_uniform","max_degree":64, "graph_type":"odescent", "alpha": 1.2, "graph_iter_turn": 60, "neighbor_sample_rate": 0.2, "precise_quantization_type":"fp32", "use_reorder":true}}'
-    search_params: '{"hgraph":{"ef_search":60}}'
+    create_params: '{"dim":960,"dtype":"float32","metric_type":"l2","index_param":{"base_quantization_type":"sq8_uniform","max_degree":96,"ef_construction":400, "precise_quantization_type":"fp32", "use_reorder":true}}'
+    search_params: '{"hgraph":{"ef_search":120}}'
     index_path: "/tmp/gist-960-euclidean/index/hgraph_index"
     topk: 10
     search_mode: "knn" # ["knn", "range", "knn_filter", "range_filter"]
     range: 0.5
     delete_index_after_search: false
 
-90/SIFT:
+HGRAPH/SIFT/95:
     datapath: "/tmp/data/sift-128-euclidean.hdf5"
     type: "build,search" # build, search
     index_name: "hgraph"
-    create_params: '{"dim":128,"dtype":"float32","metric_type":"l2","index_param":{"base_quantization_type":"sq8_uniform", "graph_type":"odescent","max_degree":64, "alpha": 1.2, "graph_iter_turn": 50, "neighbor_sample_rate": 0.2}}'
-    search_params: '{"hgraph":{"ef_search":17}}'
+    create_params: '{"dim":128,"dtype":"float32","metric_type":"l2","index_param":{"base_quantization_type":"sq8_uniform","max_degree":32,"ef_construction":400, "precise_quantization_type":"fp32", "use_reorder":true}}'
+    search_params: '{"hgraph":{"ef_search":44}}'
     index_path: "/tmp/sift-128-euclidean/index/hgraph_index"
     topk: 10
     search_mode: "knn" # ["knn", "range", "knn_filter", "range_filter"]
     range: 0.5
     delete_index_after_search: false
 
-90/GloVe-100:
+HGRAPH/GloVe-100/95:
     datapath: "/tmp/data/glove-100-angular.hdf5"
     type: "build,search" # build, search
     index_name: "hgraph"
-    create_params: '{"dim":100,"dtype":"float32","metric_type":"cosine","index_param":{"base_quantization_type":"fp32", "graph_type":"odescent","max_degree":96, "alpha": 1.2, "graph_iter_turn": 30, "neighbor_sample_rate": 0.2}}'
-    search_params: '{"hgraph":{"ef_search":88}}'
+    create_params: '{"dim":100,"dtype":"float32","metric_type":"cosine","index_param":{"base_quantization_type":"sq8_uniform","max_degree":96,"ef_construction":400, "precise_quantization_type":"fp32", "use_reorder":true}}'
+    search_params: '{"hgraph":{"ef_search":200}}'
     index_path: "/tmp/glove-100-angular/index/hgraph_index"
     topk: 10
     search_mode: "knn" # ["knn", "range", "knn_filter", "range_filter"]
     range: 0.5
     delete_index_after_search: false
 
-90/NYTimes:
+HGRAPH/NYTimes/95:
     datapath: "/tmp/data/nytimes-256-angular.hdf5"
     type: "build,search" # build, search
     index_name: "hgraph"
-    create_params: '{"dim":256,"dtype":"float32","metric_type":"cosine","index_param":{"base_quantization_type":"sq8_uniform","max_degree":48,"ef_construction":400}}'
-    search_params: '{"hgraph":{"ef_search":90}}'
+    create_params: '{"dim":256,"dtype":"float32","metric_type":"cosine","index_param":{"base_quantization_type":"sq8_uniform","max_degree":96,"ef_construction":300, "precise_quantization_type":"fp32", "use_reorder":true}}'
+    search_params: '{"hgraph":{"ef_search":120}}'
     index_path: "/tmp/nytimes-256-angular/index/hgraph_index"
     topk: 10
     search_mode: "knn" # ["knn", "range", "knn_filter", "range_filter"]
     range: 0.5
     delete_index_after_search: false
 
-90/OPENAI:
+HGRAPH/OPENAI/95:
     datapath: "/tmp/data/openai-1536-500k-angular.hdf5"
     type: "build,search" # build, search
     index_name: "hgraph"
-    create_params: '{"dim":1536,"dtype":"float32","metric_type":"cosine","index_param":{"base_quantization_type":"fp32","max_degree":64, "graph_type":"odescent", "alpha": 1.2, "graph_iter_turn": 30, "neighbor_sample_rate": 0.1}}'
-    search_params: '{"hgraph":{"ef_search":10}}'
+    create_params: '{"dim":1536,"dtype":"float32","metric_type":"cosine","index_param":{"base_quantization_type":"fp32","max_degree":96,"ef_construction":400}}'
+    search_params: '{"hgraph":{"ef_search":25}}'
     index_path: "/tmp/openai-1536-500k-angular/index/hgraph_index"
-    topk: 15
+    topk: 10
     search_mode: "knn"
     delete_index_after_search: false
 
-90/COHERE:
+HGRAPH/COHERE/95:
     datapath: "/tmp/data/cohere-768-1m-angular.hdf5"
     type: "build,search" # build, search
     index_name: "hgraph"
     create_params: '{"dim":768,"dtype":"float32","metric_type":"cosine","index_param":{"base_quantization_type":"sq8_uniform","max_degree":64,"ef_construction":400, "precise_quantization_type":"fp32", "use_reorder":true}}'
-    search_params: '{"hgraph":{"ef_search":29}}'
+    search_params: '{"hgraph":{"ef_search":51}}'
     index_path: "/tmp/cohere-768-1m-angular/index/hgraph_index"
     topk: 10
     search_mode: "knn"
     delete_index_after_search: false
 
-90/INTERNET:
+HGRAPH/INTERNET/95:
     datapath: "/tmp/data/wholenet-sparse-1m-ip.hdf5"
     type: "build,search" # build, search
     index_name: "sindi"
     create_params: '{"dim":512,"dtype":"sparse","metric_type":"ip","index_param":{"use_reorder": true, "doc_prune_ratio": 0.0, "window_size": 100000}}'
-    search_params: '{"sindi":{"query_prune_ratio": 0.25, "term_prune_ratio": 0, "n_candidate": 35}}'
+    search_params: '{"sindi":{"query_prune_ratio": 0.1, "term_prune_ratio": 0, "n_candidate": 30}}'
     index_path: "/tmp/wholenet-sparse-1m-ip/index/wholenet_index"
     topk: 10
     search_mode: "knn"

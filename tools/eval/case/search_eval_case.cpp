@@ -20,6 +20,7 @@
 #include <cstdio>
 #include <fstream>
 #include <iostream>
+#include <stdexcept>
 
 #include "../monitor/latency_monitor.h"
 #include "../monitor/memory_peak_monitor.h"
@@ -120,7 +121,8 @@ SearchEvalCase::init_memory_monitor() {
 
 JsonType
 SearchEvalCase::Run() {
-    this->deserialize();
+    std::ifstream infile(this->index_path_, std::ios::binary);
+    this->deserialize(infile);
     switch (this->search_type_) {
         case KNN:
             this->do_knn_search();
@@ -141,11 +143,12 @@ SearchEvalCase::Run() {
     }
     return result;
 }
+
 void
-SearchEvalCase::deserialize() {
-    std::ifstream infile(this->index_path_, std::ios::binary);
+SearchEvalCase::deserialize(std::ifstream& infile) {
     this->index_->Deserialize(infile);
 }
+
 void
 SearchEvalCase::do_knn_search() {
     uint64_t topk = config_.top_k;
@@ -185,9 +188,11 @@ SearchEvalCase::do_knn_search() {
         monitor->Stop();
     }
 }
+
 void
 SearchEvalCase::do_range_search() {
 }
+
 void
 SearchEvalCase::do_knn_filter_search() {
     uint64_t topk = config_.top_k;
@@ -231,6 +236,7 @@ SearchEvalCase::do_knn_filter_search() {
         monitor->Stop();
     }
 }
+
 void
 SearchEvalCase::do_range_filter_search() {
 }
@@ -250,8 +256,11 @@ SearchEvalCase::process_result() {
     // TODO(deming): remove try-catch after implement GetMemoryUsageDetail
     try {
         result["memory_detail(B)"] = this->index_->GetMemoryUsageDetail();
+    } catch (std::runtime_error& e) {
+        // if GetMemoryUsageDetail not implemented
+        logger_->Error(e.what());
     } catch (vsag::VsagException& e) {
-        logger_->Debug(e.what());
+        logger_->Error(e.what());
     }
     EvalCase::MergeJsonType(this->basic_info_, result);
     return result;
