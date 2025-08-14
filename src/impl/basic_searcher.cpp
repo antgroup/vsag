@@ -298,6 +298,11 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
         hops++;
         auto current_node_pair = candidate_set->Top();
 
+        if (inner_search_param.time_cost != nullptr and
+            inner_search_param.time_cost->CheckOvertime()) {
+            break;
+        }
+
         if constexpr (mode == InnerSearchMode::KNN_SEARCH) {
             if ((-current_node_pair.first) > lower_bound && top_candidates->Size() == ef) {
                 break;

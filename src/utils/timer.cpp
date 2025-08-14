@@ -15,14 +15,44 @@
 
 #include "timer.h"
 
+#include <numeric>
+
 namespace vsag {
-Timer::Timer(double& ref) : ref_(ref) {
+Timer::Timer(double* ref) : ref_(ref) {
     start = std::chrono::steady_clock::now();
+    this->threshold_ = std::numeric_limits<double>::max();
+}
+
+Timer::Timer(double& ref) : Timer(&ref){};
+
+Timer::Timer() : Timer(nullptr){};
+
+double
+Timer::Record() {
+    auto finish = std::chrono::steady_clock::now();
+    std::chrono::duration<double, std::milli> duration = finish - start;
+    return duration.count();
+}
+
+bool
+Timer::CheckOvertime() {
+    if (threshold_ == std::numeric_limits<double>::max()) {
+        return false;
+    }
+    double duration = Record();
+    return duration > threshold_;
+}
+
+void
+Timer::SetThreshold(double threshold) {
+    threshold_ = threshold;
 }
 
 Timer::~Timer() {
     auto finish = std::chrono::steady_clock::now();
     std::chrono::duration<double, std::milli> duration = finish - start;
-    ref_ = duration.count();
+    if (ref_ != nullptr) {
+        *ref_ = duration.count();
+    }
 }
 }  // namespace vsag
