@@ -89,6 +89,12 @@ public:
                             "Index doesn't support GetNumberRemoved");
     }
 
+    [[nodiscard]] virtual DatasetPtr
+    GetDataByIds(const int64_t* ids, int64_t count) const {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "Index doesn't support GetDataByIds");
+    }
+
     DatasetPtr
     GetVectorByIds(const int64_t* ids, int64_t count) const;
 

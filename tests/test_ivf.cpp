@@ -738,12 +738,12 @@ TestIVFWithAttr(const fixtures::IVFTestIndexPtr& test_index,
                     auto build_result = index1->Build(dataset->base_);
                     REQUIRE(build_result.has_value());
                     IVFTestIndex::TestWithAttr(index1, dataset, search_param, false);
+                    TestIndex::TestGetDataById(index1, dataset);
                     auto index = TestIndex::TestFactory(IVFTestIndex::name, param, true);
 
                     REQUIRE_NOTHROW(test_serializion_file(*index1, *index, "serialize"));
 
                     IVFTestIndex::TestWithAttr(index, dataset, search_param);
-
                     vsag::Options::Instance().set_block_size_limit(origin_size);
                 }
             }

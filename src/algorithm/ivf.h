@@ -112,6 +112,12 @@ public:
     int64_t
     GetNumElements() const override;
 
+    [[nodiscard]] DatasetPtr
+    GetDataByIds(const int64_t* ids, int64_t count) const override;
+
+    void
+    GetCodeByInnerId(InnerIdType inner_id, uint8_t* data) const override;
+
 private:
     InnerSearchParam
     create_search_param(const std::string& parameters, const FilterPtr& filter) const;
@@ -133,7 +139,10 @@ private:
     fill_location_map();
 
     std::pair<BucketIdType, InnerIdType>
-    get_location(InnerIdType inner_id);
+    get_location(InnerIdType inner_id) const;
+
+    void
+    get_attr_by_inner_id(InnerIdType inner_id, AttributeSet* attr) const;
 
 private:
     BucketInterfacePtr bucket_{nullptr};

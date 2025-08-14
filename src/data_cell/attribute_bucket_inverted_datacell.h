@@ -55,6 +55,9 @@ public:
     void
     Deserialize(lvalue_or_rvalue<StreamReader> reader) override;
 
+    void
+    GetAttribute(BucketIdType bucket_id, InnerIdType inner_id, AttributeSet* attr) override;
+
 private:
     UnorderedMap<std::string, ValueMapPtr> field_2_value_map_;
 
