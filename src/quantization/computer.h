@@ -18,41 +18,42 @@
 #include <cstdint>
 #include <memory>
 
+#include "computer_interface.h"
 #include "metric_type.h"
+#include "vsag/allocator.h"
 
 namespace vsag {
+
 using DataType = float;
 
 template <typename T>
-class Quantizer;
-
-class ComputerInterface {
-protected:
-    ComputerInterface() = default;
-};
-
-template <typename T>
-class Computer : public ComputerInterface {
+class Computer : public ComputerInterface, public std::enable_shared_from_this<Computer<T>> {
 public:
-    ~Computer() {
-        quantizer_->ReleaseComputer(*this);
+    ~Computer() override {
+        this->allocator_->Deallocate(buf_);
     }
 
-    explicit Computer(const T* quantizer) : quantizer_(quantizer){};
+    explicit Computer(const T* quantizer, Allocator* allocator)
+        : quantizer_(quantizer), allocator_(allocator){};
+
+    ComputerInterfacePtr
+    GetComputerInterfacePtr() override {
+        return this->shared_from_this();
+    }
 
     void
-    SetQuery(const DataType* query) {
-        quantizer_->ProcessQuery(query, *this);
+    SetQuery(const DataType* query) override {
+        quantizer_->ProcessQuery(query, this->shared_from_this());
     }
 
     inline void
     ComputeDist(const uint8_t* codes, float* dists) {
-        quantizer_->ComputeDist(*this, codes, dists);
+        quantizer_->ComputeDist(this->shared_from_this(), codes, dists);
     }
 
     inline void
     ScanBatchDists(uint64_t count, const uint8_t* codes, float* dists) {
-        quantizer_->ScanBatchDists(*this, count, codes, dists);
+        quantizer_->ScanBatchDists(this->shared_from_this(), count, codes, dists);
     }
 
     inline void
@@ -64,15 +65,22 @@ public:
                        float& dists2,
                        float& dists3,
                        float& dists4) {
-        quantizer_->ComputeDistsBatch4(
-            *this, codes1, codes2, codes3, codes4, dists1, dists2, dists3, dists4);
+        quantizer_->ComputeDistsBatch4(this->shared_from_this(),
+                                       codes1,
+                                       codes2,
+                                       codes3,
+                                       codes4,
+                                       dists1,
+                                       dists2,
+                                       dists3,
+                                       dists4);
     }
 
 public:
+    Allocator* const allocator_{nullptr};
     const T* quantizer_{nullptr};
     uint8_t* buf_{nullptr};
+    ComputerInterfacePtr inner_computer_{nullptr};
 };
-
-using ComputerInterfacePtr = std::shared_ptr<ComputerInterface>;
 
 }  // namespace vsag

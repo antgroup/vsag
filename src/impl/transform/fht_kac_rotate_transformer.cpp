@@ -61,8 +61,9 @@ FhtKacRotator::Train(const float* data, uint64_t count) {
     this->Train();
 }
 
-void
+TransformerMetaPtr
 FhtKacRotator::Transform(const float* data, float* rotated_vec) const {
+    auto meta = std::make_shared<FHTMeta>();
     auto dim = static_cast<uint64_t>(this->input_dim_);
     std::memcpy(rotated_vec, data, sizeof(float) * dim);
     if (trunc_dim_ == dim) {
@@ -71,7 +72,7 @@ FhtKacRotator::Transform(const float* data, float* rotated_vec) const {
             FHTRotate(rotated_vec, trunc_dim_);
             VecRescale(rotated_vec, trunc_dim_, fac_);
         }
-        return;
+        return meta;
     }
 
     size_t start = dim - trunc_dim_;
@@ -89,6 +90,8 @@ FhtKacRotator::Transform(const float* data, float* rotated_vec) const {
     }
     VecRescale(rotated_vec, dim, 0.25F);
     //origin vec(x,y), after kacs_walk_generic() -> (x+y, x-y),should be resize by sqrt(0.5) for each KacsWalk() to make the len of vector consistent
+
+    return meta;
 }
 void
 FhtKacRotator::InverseTransform(float const* data, float* rotated_vec) const {

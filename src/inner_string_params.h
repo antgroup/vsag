@@ -65,14 +65,26 @@ const char* const QUANTIZATION_TYPE_VALUE_PQ = "pq";
 const char* const QUANTIZATION_TYPE_VALUE_PQFS = "pqfs";
 const char* const QUANTIZATION_TYPE_VALUE_RABITQ = "rabitq";
 const char* const QUANTIZATION_TYPE_VALUE_SPARSE = "sparse";
+const char* const QUANTIZATION_TYPE_VALUE_TQ = "tq";
+
+// vector transformer type
+const char* const TRANSFORMER_TYPE_VALUE_PCA = "pca";
+const char* const TRANSFORMER_TYPE_VALUE_ROM = "rom";
+const char* const TRANSFORMER_TYPE_VALUE_FHT = "fht";
+const char* const TRANSFORMER_TYPE_VALUE_RESIDUAL = "residual";
+const char* const TRANSFORMER_TYPE_VALUE_NORMALIZE = "normalize";
+
+// vector transformer param
+const char* const INPUT_DIM = "input_dim";
+const char* const PCA_DIM = "pca_dim";
+const char* const USE_FHT = "use_fht";
 
 // quantization param
-const char* const PCA_DIM = "pca_dim";
+const char* const TQ_CHAIN = "tq_chain";
 const char* const RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY = "rabitq_bits_per_dim_query";
 const char* const SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE = "sq4_uniform_trunc_rate";
 const char* const PRODUCT_QUANTIZATION_DIM = "pq_dim";
 const char* const PRODUCT_QUANTIZATION_BITS = "pq_bits";
-const char* const USE_FHT = "use_fht";
 
 // sparse index param
 const char* const SPARSE_NEED_SORT = "need_sort";

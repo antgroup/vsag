@@ -24,6 +24,7 @@
 #include "rabitq_quantization/rabitq_quantizer_parameter.h"
 #include "scalar_quantization/sq_parameter_headers.h"
 #include "sparse_quantization/sparse_quantizer_parameter.h"
+#include "transform_quantization/transform_quantizer_parameter.h"
 
 namespace vsag {
 QuantizerParamPtr
@@ -63,6 +64,9 @@ QuantizerParameter::GetQuantizerParameterByJson(const JsonType& json) {
         quantizer_param->FromJson(json);
     } else if (type_name == QUANTIZATION_TYPE_VALUE_PQFS) {
         quantizer_param = std::make_shared<PQFastScanQuantizerParameter>();
+        quantizer_param->FromJson(json);
+    } else if (type_name == QUANTIZATION_TYPE_VALUE_TQ) {
+        quantizer_param = std::make_shared<TransformQuantizerParameter>();
         quantizer_param->FromJson(json);
     } else {
         throw VsagException(ErrorType::INVALID_ARGUMENT,

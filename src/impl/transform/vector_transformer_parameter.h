@@ -15,8 +15,28 @@
 
 #pragma once
 
-#include "fht_kac_rotate_transformer.h"
-#include "pca_transformer.h"
-#include "random_orthogonal_transformer.h"
-#include "vector_transformer.h"
-#include "vector_transformer_parameter.h"
+#include "index/index_common_param.h"
+#include "quantization/quantizer_parameter.h"
+
+namespace vsag {
+class VectorTransformerParameter : public Parameter {
+public:
+    VectorTransformerParameter() = default;
+
+    ~VectorTransformerParameter() override = default;
+
+    void
+    FromJson(const JsonType& json) override;
+
+    JsonType
+    ToJson() const override;
+
+    bool
+    CheckCompatibility(const vsag::ParamPtr& other) const override;
+
+public:
+    uint32_t input_dim_;
+    uint32_t pca_dim_;
+};
+
+}  // namespace vsag
