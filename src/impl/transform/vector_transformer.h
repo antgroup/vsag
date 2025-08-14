@@ -22,12 +22,24 @@
 
 namespace vsag {
 
-enum class VectorTransformerType {
-    NONE,
-    PCA,
-    RANDOM_ORTHOGONAL,
-    FHT,
+class VectorTransformer;
+using VectorTransformerPtr = std::shared_ptr<VectorTransformer>;
+
+enum class VectorTransformerType { NONE, PCA, RANDOM_ORTHOGONAL, FHT, RESIDUAL, NORMALIZE };
+
+struct TransformerMeta {
+    virtual void
+    EncodeMeta(uint8_t* code) {
+        return;
+    };
+
+    virtual void
+    DecodeMeta(uint8_t* code, uint32_t align_size) {
+        return;
+    };
 };
+
+using TransformerMetaPtr = std::shared_ptr<TransformerMeta>;
 
 class VectorTransformer {
 public:
@@ -39,14 +51,36 @@ public:
 
     virtual ~VectorTransformer() = default;
 
-    virtual void
-    Transform(const float* input_vec, float* output_vec) const = 0;
+    virtual TransformerMetaPtr
+    Transform(const float* input_vec, float* output_vec) const {
+        return nullptr;
+    };
 
     virtual void
     Serialize(StreamWriter& writer) const = 0;
 
     virtual void
     Deserialize(StreamReader& reader) = 0;
+
+    virtual float
+    RecoveryDistance(float dist, const uint8_t* meta1, const uint8_t* meta2) const {
+        return dist;
+    };
+
+    virtual uint32_t
+    GetMetaSize() const {
+        return 0;
+    };  // return original meta size
+
+    virtual uint32_t
+    GetMetaSize(uint32_t align_size) const {
+        return 0;
+    };  // return aligned meta size
+
+    virtual uint32_t
+    GetAlignSize() const {
+        return 0;
+    }
 
 public:
     virtual void
@@ -70,7 +104,13 @@ public:
         return this->type_;
     }
 
+    [[nodiscard]] uint32_t
+    GetExtraCodeSize() const {
+        return this->extra_code_size_;
+    }
+
 protected:
+    uint32_t extra_code_size_{0};  // e.g., sizeof(float)
     int64_t input_dim_{0};
     int64_t output_dim_{0};
     Allocator* const allocator_{nullptr};

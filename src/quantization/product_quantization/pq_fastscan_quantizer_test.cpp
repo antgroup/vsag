@@ -126,11 +126,12 @@ TestComputerBatchPQFS(PQFastScanQuantizer<metric>& quant,
 
     for (int i = 0; i < query_count; ++i) {
         std::shared_ptr<Computer<PQFastScanQuantizer<metric>>> computer;
-        computer = quant.FactoryComputer();
+        computer = std::dynamic_pointer_cast<Computer<PQFastScanQuantizer<metric>>>(
+            quant.FactoryComputer());
         computer->SetQuery(queries.data() + i * dim);
         std::vector<float> dists(count);
 
-        quant.ScanBatchDists(*computer, count, packaged_codes.data(), dists.data());
+        quant.ScanBatchDists(computer, count, packaged_codes.data(), dists.data());
         for (int j = 0; j < count; ++j) {
             auto gt = gt_func(j, i);
             REQUIRE(std::abs(dists[j] - gt) <= error);

@@ -19,6 +19,35 @@
 
 namespace vsag {
 
+struct PCAMeta : public TransformerMeta {
+    float residual_norm;
+
+    void
+    EncodeMeta(uint8_t* code) override {
+        *((float*)code) = residual_norm;
+    }
+
+    void
+    DecodeMeta(uint8_t* code, uint32_t align_size) override {
+        residual_norm = *((float*)code);
+    }
+
+    static uint32_t
+    GetMetaSize() {
+        return sizeof(float);
+    }
+
+    static uint32_t
+    GetMetaSize(uint32_t align_size) {
+        return std::max(static_cast<uint32_t>(sizeof(float)), align_size);
+    }
+
+    static uint32_t
+    GetAlignSize() {
+        return sizeof(float);
+    }
+};
+
 class PCATransformer : public VectorTransformer {
 public:
     // interface
@@ -33,11 +62,31 @@ public:
     void
     Deserialize(StreamReader& reader) override;
 
-    void
+    TransformerMetaPtr
     Transform(const float* input_vec, float* output_vec) const override;
 
     void
     InverseTransform(const float* input_vec, float* output_vec) const override;
+
+    float
+    RecoveryDistance(float dist, const uint8_t* meta1, const uint8_t* meta2) const override {
+        return dist;
+    };
+
+    uint32_t
+    GetMetaSize() const override {
+        return PCAMeta::GetMetaSize();
+    }
+
+    uint32_t
+    GetMetaSize(uint32_t align_size) const override {
+        return PCAMeta::GetMetaSize(align_size);
+    }
+
+    uint32_t
+    GetAlignSize() const override {
+        return PCAMeta::GetAlignSize();
+    }
 
 public:
     // make public for test

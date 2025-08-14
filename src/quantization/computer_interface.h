@@ -15,8 +15,32 @@
 
 #pragma once
 
-#include "fht_kac_rotate_transformer.h"
-#include "pca_transformer.h"
-#include "random_orthogonal_transformer.h"
-#include "vector_transformer.h"
-#include "vector_transformer_parameter.h"
+#include <cstdint>
+#include <memory>
+
+#include "metric_type.h"
+
+namespace vsag {
+using DataType = float;
+
+template <typename T>
+class Quantizer;
+
+class ComputerInterface;
+
+using ComputerInterfacePtr = std::shared_ptr<ComputerInterface>;
+
+class ComputerInterface {
+public:
+    ComputerInterface() = default;
+
+    virtual ~ComputerInterface() = default;
+
+    virtual void
+    SetQuery(const DataType* query) = 0;
+
+    virtual ComputerInterfacePtr
+    GetComputerInterfacePtr() = 0;
+};
+
+}  // namespace vsag

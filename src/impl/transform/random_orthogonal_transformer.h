@@ -19,6 +19,8 @@
 
 namespace vsag {
 
+struct ROMMeta : public TransformerMeta {};
+
 class RandomOrthogonalMatrix : public VectorTransformer {
 public:
     explicit RandomOrthogonalMatrix(Allocator* allocator,
@@ -27,7 +29,7 @@ public:
 
     virtual ~RandomOrthogonalMatrix() override = default;
 
-    void
+    TransformerMetaPtr
     Transform(const float* original_vec, float* transformed_vec) const override;
 
     void

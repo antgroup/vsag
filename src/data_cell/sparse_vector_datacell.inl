@@ -27,7 +27,7 @@ SparseVectorDataCell<QuantTmpl, IOTmpl>::query(float* result_dists,
     for (int i = 0; i < id_count; ++i) {
         bool need_release{true};
         auto codes = this->GetCodesById(idx[i], need_release);
-        result_dists[i] = this->quantizer_->ComputeDist(*computer, codes);
+        result_dists[i] = this->quantizer_->ComputeDist(computer, codes);
         if (need_release) {
             allocator_->Deallocate((void*)codes);
         }
