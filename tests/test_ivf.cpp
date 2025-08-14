@@ -255,6 +255,7 @@ IVFTestIndex::TestGeneral(const TestIndex::IndexPtr& index,
     TestFilterSearch(index, dataset, search_param, recall, true);
     TestCheckIdExist(index, dataset);
     TestExportIDs(index, dataset);
+    TestGetDataById(index, dataset);
 }
 }  // namespace fixtures
 
@@ -743,6 +744,7 @@ TestIVFWithAttr(const fixtures::IVFTestIndexPtr& test_index,
                     REQUIRE_NOTHROW(test_serializion_file(*index1, *index, "serialize"));
 
                     IVFTestIndex::TestWithAttr(index, dataset, search_param);
+                    TestIndex::TestGetDataById(index, dataset);
 
                     vsag::Options::Instance().set_block_size_limit(origin_size);
                 }
