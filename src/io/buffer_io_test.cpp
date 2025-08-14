@@ -27,6 +27,7 @@ TEST_CASE("BufferIO Read & Write", "[ut][BufferIO]") {
     fixtures::TempDir dir("buffer_io");
     auto path = dir.GenerateRandomFile();
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    TestDistIOWrongInit<BufferIO>(allocator.get());
     auto io = std::make_unique<BufferIO>(path, allocator.get());
     TestBasicReadWrite(*io);
 }

@@ -27,6 +27,7 @@ TEST_CASE("AsyncIO Read And Write", "[ut][AsyncIO]") {
     fixtures::TempDir dir("async_io");
     auto path = dir.GenerateRandomFile();
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    TestDistIOWrongInit<AsyncIO>(allocator.get());
     auto io = std::make_unique<AsyncIO>(path, allocator.get());
     TestBasicReadWrite(*io);
 
