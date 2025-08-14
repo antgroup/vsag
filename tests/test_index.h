@@ -278,6 +278,11 @@ public:
                  const std::string& search_param,
                  bool with_update = true);
 
+    static void
+    TestSearchOvertime(const IndexPtr& index,
+                       const TestDatasetPtr& dataset,
+                       const std::string& search_param);
+
     constexpr static float RECALL_THRESHOLD = 0.95;
 };
 

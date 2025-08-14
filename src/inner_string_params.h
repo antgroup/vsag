@@ -106,6 +106,7 @@ const char* const BUCKET_USE_RESIDUAL = "use_residual";
 const char* const IVF_SEARCH_PARAM_SCAN_BUCKETS_COUNT = "scan_buckets_count";
 const char* const IVF_SEARCH_PARAM_FACTOR = "factor";
 const char* const IVF_SEARCH_PARALLELISM = "parallelism";
+const char* const SEARCH_MAX_TIME_COST_MS = "timeout_ms";
 
 const char* const IVF_USE_REORDER_KEY = "use_reorder";
 const char* const IVF_PRECISE_CODES_KEY = "precise_codes";

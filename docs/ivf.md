@@ -140,12 +140,19 @@ means that the index is built using 50 buckets, the base quantization type is pq
 - **Optional Values**: 1 to INT_MAX
 - **Default Value**: 1 (only the search main thread do the search)
 
+### timeout_ms
+- **Parameter Type**: double
+- **Parameter Description**: Maximum time cost in milliseconds for each query, used to control the search time cost
+- **Optional Values**: 1 to DOUBLE_MAX
+- **Default Value**: DOUBLE_MAX
+
 ## Examples for Search Parameter String
 ```json
 "ivf": {
     "scan_buckets_count": 10,
     "factor": 2.0,
-    "parallelism": 4
+    "parallelism": 4,
+    "timeout_ms": 30.0
 }
 ```
-means that the search will scan 10 buckets, the factor is 2.0, and the parallelism is 4, around 4 threads per query. 
+means that the search will scan 10 buckets, the factor is 2.0, and the parallelism is 4, around 4 threads per query, and the max time cost is 30ms (when search time exceed 30ms, will return the current result). 

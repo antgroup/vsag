@@ -85,6 +85,11 @@ public:
             obj.parallel_search_thread_count = params[INDEX_TYPE_IVF][IVF_SEARCH_PARALLELISM];
         }
 
+        if (params[INDEX_TYPE_IVF].contains(SEARCH_MAX_TIME_COST_MS)) {
+            obj.timeout_ms = params[INDEX_TYPE_IVF][SEARCH_MAX_TIME_COST_MS];
+            obj.enable_time_record = true;
+        }
+
         return obj;
     }
 
@@ -93,6 +98,8 @@ public:
     float topk_factor{2.0F};
     float first_order_scan_ratio{1.0F};
     int64_t parallel_search_thread_count{1};
+    double timeout_ms{std::numeric_limits<double>::max()};
+    bool enable_time_record{false};
 
 private:
     IVFSearchParameters() = default;

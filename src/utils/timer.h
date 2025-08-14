@@ -20,10 +20,25 @@ namespace vsag {
 class Timer {
 public:
     explicit Timer(double& ref);
+
+    explicit Timer(double* ref);
+
+    explicit Timer();
+
     ~Timer();
 
-public:
-    double& ref_;
+    double
+    Record();
+
+    void
+    SetThreshold(double threshold);
+
+    bool
+    CheckOvertime();
+
+private:
+    double* ref_{nullptr};
+    double threshold_{std::numeric_limits<double>::max()};
     std::chrono::steady_clock::time_point start;
 };
 }  // namespace vsag

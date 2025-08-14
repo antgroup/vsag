@@ -79,6 +79,8 @@ public:
     int64_t ef_search{30};
     bool use_reorder{false};
     bool use_extra_info_filter{false};
+    bool enable_time_record{false};
+    double timeout_ms{std::numeric_limits<double>::max()};
 
 private:
     HGraphSearchParameters() = default;
