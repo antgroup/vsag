@@ -27,6 +27,7 @@ TEST_CASE("MMapIO Read & Write", "[ut][MMapIO]") {
     fixtures::TempDir dir("mmap_io");
     auto path = dir.GenerateRandomFile();
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    TestDistIOWrongInit<MMapIO>(allocator.get());
     auto io = std::make_unique<MMapIO>(path, allocator.get());
     TestBasicReadWrite(*io);
 }

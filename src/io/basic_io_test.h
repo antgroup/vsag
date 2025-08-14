@@ -93,3 +93,14 @@ TestSerializeAndDeserialize(BasicIO<T>& wio, BasicIO<T>& rio) {
         }
     }
 }
+
+template <typename T>
+void
+TestDistIOWrongInit(Allocator* allocator) {
+    if (T::InMemory) {
+        return;
+    }
+    auto dirname = fixtures::TempDir("TestDistIOWrongInit");
+    auto func = [&]() { auto io = std::make_unique<T>(dirname.path, allocator); };
+    REQUIRE_THROWS(func());
+}

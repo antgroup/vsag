@@ -35,7 +35,9 @@ public:
     ~BufferIO() override {
         close(this->fd_);
         // remove file
-        std::filesystem::remove(this->filepath_);
+        if (not this->exist_file_) {
+            std::filesystem::remove(this->filepath_);
+        }
     }
 
     void
@@ -57,5 +59,7 @@ private:
     std::string filepath_{};
 
     int fd_{-1};
+
+    bool exist_file_{false};
 };
 }  // namespace vsag

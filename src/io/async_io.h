@@ -60,5 +60,7 @@ private:
     int rfd_{-1};
 
     int wfd_{-1};
+
+    bool exist_file_{false};
 };
 }  // namespace vsag
