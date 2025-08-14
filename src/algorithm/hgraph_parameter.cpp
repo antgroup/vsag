@@ -220,6 +220,11 @@ HGraphSearchParameters::FromJson(const std::string& json_string) {
         obj.use_extra_info_filter = params[INDEX_TYPE_HGRAPH][HGRAPH_USE_EXTRA_INFO_FILTER];
     }
 
+    if (params[INDEX_TYPE_HGRAPH].contains(SEARCH_MAX_TIME_COST_MS)) {
+        obj.timeout_ms = params[INDEX_TYPE_HGRAPH][SEARCH_MAX_TIME_COST_MS];
+        obj.enable_time_record = true;
+    }
+
     return obj;
 }
 }  // namespace vsag

@@ -1703,6 +1703,10 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     search_param.is_inner_id_allowed = ft;
     search_param.topk = static_cast<int64_t>(search_param.ef);
     search_param.consider_duplicate = true;
+    if (params.enable_time_record) {
+        search_param.time_cost = std::make_shared<Timer>();
+        search_param.time_cost->SetThreshold(params.timeout_ms);
+    }
     auto search_result = this->search_one_graph(
         raw_query, this->bottom_graph_, this->basic_flatten_codes_, search_param);
 
