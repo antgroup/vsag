@@ -57,8 +57,9 @@ RandomOrthogonalMatrix::CopyOrthogonalMatrix(float* out_matrix) const {
               out_matrix);
 }
 
-void
+TransformerMetaPtr
 RandomOrthogonalMatrix::Transform(const float* original_vec, float* transformed_vec) const {
+    auto meta = std::make_shared<ROMMeta>();
     // perform matrix-vector multiplication: y = Q * x
     auto dim = static_cast<blasint>(this->input_dim_);
     cblas_sgemv(CblasRowMajor,
@@ -73,6 +74,8 @@ RandomOrthogonalMatrix::Transform(const float* original_vec, float* transformed_
                 0.0F,
                 transformed_vec,
                 1);
+
+    return meta;
 }
 
 void

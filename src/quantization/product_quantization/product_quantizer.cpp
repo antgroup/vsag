@@ -36,6 +36,7 @@ ProductQuantizer<metric>::ProductQuantizer(int dim, int64_t pq_dim, Allocator* a
             fmt::format("pq_dim({}) does not divide evenly into dim({})", pq_dim, dim));
     }
     this->code_size_ = this->pq_dim_;
+    this->query_code_size_ = this->pq_dim_ * CENTROIDS_PER_SUBSPACE * sizeof(float);
     this->metric_ = metric;
     this->subspace_dim_ = this->dim_ / pq_dim;
     codebooks_.resize(this->dim_ * CENTROIDS_PER_SUBSPACE);
@@ -332,8 +333,11 @@ ProductQuantizer<metric>::ProcessQueryImpl(const DataType* query,
             Normalize(query, norm_vec.data(), this->dim_);
             cur_query = norm_vec.data();
         }
-        auto* lookup_table = reinterpret_cast<float*>(
-            this->allocator_->Allocate(this->pq_dim_ * CENTROIDS_PER_SUBSPACE * sizeof(float)));
+        if (computer.buf_ == nullptr) {
+            computer.buf_ =
+                reinterpret_cast<uint8_t*>(this->allocator_->Allocate(this->query_code_size_));
+        }
+        auto* lookup_table = reinterpret_cast<float*>(computer.buf_);
 
         for (int i = 0; i < pq_dim_; ++i) {
             const auto* per_query = cur_query + i * subspace_dim_;
@@ -361,8 +365,6 @@ ProductQuantizer<metric>::ProcessQueryImpl(const DataType* query,
                 }
             }
         }
-
-        computer.buf_ = reinterpret_cast<uint8_t*>(lookup_table);
 
     } catch (const std::bad_alloc& e) {
         if (computer.buf_ != nullptr) {

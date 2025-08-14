@@ -75,7 +75,7 @@ void
 TestSerializeAndDeserializeMetricSQ8Uniform(uint64_t dim, int count, float error = 1e-5) {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     SQ8UniformQuantizer<metric> quantizer1(dim, allocator.get());
-    SQ8UniformQuantizer<metric> quantizer2(0, allocator.get());
+    SQ8UniformQuantizer<metric> quantizer2(dim, allocator.get());
     TestSerializeAndDeserialize<SQ8UniformQuantizer<metric>, metric, true>(
         quantizer1, quantizer2, dim, count, error);
 }

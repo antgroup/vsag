@@ -26,6 +26,7 @@ template <MetricType metric>
 SQ4Quantizer<metric>::SQ4Quantizer(int dim, Allocator* allocator)
     : Quantizer<SQ4Quantizer<metric>>(dim, allocator) {
     this->code_size_ = (dim + (1 << 6) - 1) >> 6 << 6;
+    this->query_code_size_ = this->dim_ * sizeof(float);
     this->metric_ = metric;
     lower_bound_.resize(dim, std::numeric_limits<DataType>::max());
     diff_.resize(dim, std::numeric_limits<DataType>::lowest());
@@ -149,8 +150,10 @@ void
 SQ4Quantizer<metric>::ProcessQueryImpl(const DataType* query,
                                        Computer<SQ4Quantizer>& computer) const {
     try {
-        computer.buf_ =
-            reinterpret_cast<uint8_t*>(this->allocator_->Allocate(this->dim_ * sizeof(float)));
+        if (computer.buf_ == nullptr) {
+            computer.buf_ =
+                reinterpret_cast<uint8_t*>(this->allocator_->Allocate(this->query_code_size_));
+        }
 
     } catch (const std::bad_alloc& e) {
         computer.buf_ = nullptr;

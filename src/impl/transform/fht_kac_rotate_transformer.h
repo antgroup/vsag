@@ -19,13 +19,16 @@
 #include "vector_transformer.h"
 
 namespace vsag {
+
+struct FHTMeta : public TransformerMeta {};
+
 class FhtKacRotator : public VectorTransformer {
 public:
     explicit FhtKacRotator(Allocator* allocator, int64_t dim);
 
     ~FhtKacRotator() override = default;
 
-    void
+    TransformerMetaPtr
     Transform(const float* data, float* rotated_vec) const override;
 
     void

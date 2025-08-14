@@ -548,8 +548,11 @@ void
 RaBitQuantizer<metric>::ProcessQueryImpl(const DataType* query,
                                          Computer<RaBitQuantizer>& computer) const {
     try {
-        computer.buf_ = reinterpret_cast<uint8_t*>(this->allocator_->Allocate(query_code_size_));
-        std::fill(computer.buf_, computer.buf_ + query_code_size_, 0);
+        if (computer.buf_ == nullptr) {
+            computer.buf_ =
+                reinterpret_cast<uint8_t*>(this->allocator_->Allocate(this->query_code_size_));
+        }
+        std::fill(computer.buf_, computer.buf_ + this->query_code_size_, 0);
 
         // use residual term in pca, so it's this->original_dim_
         Vector<DataType> pca_data(this->original_dim_, 0, this->allocator_);

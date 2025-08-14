@@ -8,6 +8,8 @@ set (TRANSFORM_SRC
         fht_kac_rotate_transformer.h
         pca_transformer.cpp
         pca_transformer.h
+        vector_transformer_parameter.cpp
+        vector_transformer_parameter.h
 )
 add_library (transform OBJECT ${TRANSFORM_SRC})
 target_link_libraries (transform PUBLIC fmt::fmt coverage_config)

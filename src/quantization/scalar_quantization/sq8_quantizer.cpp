@@ -26,6 +26,7 @@ SQ8Quantizer<metric>::SQ8Quantizer(int dim, Allocator* allocator)
     : Quantizer<SQ8Quantizer<metric>>(dim, allocator), diff_(allocator), lower_bound_(allocator) {
     // align 64 bytes (512 bits) to avoid illegal memory access in SIMD
     this->code_size_ = this->dim_;
+    this->query_code_size_ = this->dim_ * sizeof(float);
     this->metric_ = metric;
     this->diff_.resize(dim, 0);
     this->lower_bound_.resize(dim, std::numeric_limits<DataType>::max());
@@ -138,8 +139,10 @@ void
 SQ8Quantizer<metric>::ProcessQueryImpl(const DataType* query,
                                        Computer<SQ8Quantizer>& computer) const {
     try {
-        computer.buf_ =
-            reinterpret_cast<uint8_t*>(this->allocator_->Allocate(this->dim_ * sizeof(float)));
+        if (computer.buf_ == nullptr) {
+            computer.buf_ =
+                reinterpret_cast<uint8_t*>(this->allocator_->Allocate(this->query_code_size_));
+        }
     } catch (const std::bad_alloc& e) {
         computer.buf_ = nullptr;
         throw VsagException(ErrorType::NO_ENOUGH_MEMORY, "bad alloc when init computer buf");

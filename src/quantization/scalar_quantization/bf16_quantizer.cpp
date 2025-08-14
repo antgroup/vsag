@@ -26,6 +26,7 @@ template <MetricType metric>
 BF16Quantizer<metric>::BF16Quantizer(int dim, Allocator* allocator)
     : Quantizer<BF16Quantizer<metric>>(dim, allocator) {
     this->code_size_ = dim * 2;
+    this->query_code_size_ = this->code_size_;
     this->metric_ = metric;
 }
 
@@ -111,7 +112,10 @@ void
 BF16Quantizer<metric>::ProcessQueryImpl(const DataType* query,
                                         Computer<BF16Quantizer>& computer) const {
     try {
-        computer.buf_ = reinterpret_cast<uint8_t*>(this->allocator_->Allocate(this->code_size_));
+        if (computer.buf_ == nullptr) {
+            computer.buf_ =
+                reinterpret_cast<uint8_t*>(this->allocator_->Allocate(this->query_code_size_));
+        }
         this->EncodeOneImpl(query, computer.buf_);
     } catch (const std::bad_alloc& e) {
         throw VsagException(ErrorType::NO_ENOUGH_MEMORY, "bad alloc when init computer buf");
