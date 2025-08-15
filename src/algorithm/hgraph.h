@@ -199,6 +199,9 @@ public:
     std::string
     GetStats() const override;
 
+    std::string
+    AnalyzeIndexBySearch(const SearchRequest& request) override;
+
 private:
     const void*
     get_data(const DatasetPtr& dataset, uint32_t index = 0) const {
@@ -293,7 +296,7 @@ private:
 private:
     void
     analyze_quantizer(JsonType& stats,
-                      const Vector<float>& data,
+                      const float* data,
                       uint64_t sample_data_size,
                       int64_t topk,
                       const std::string& search_param) const;

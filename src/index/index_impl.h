@@ -425,6 +425,11 @@ public:
         return this->inner_index_->GetStats();
     }
 
+    std::string
+    AnalyzeIndexBySearch(const SearchRequest& request) override {
+        return this->inner_index_->AnalyzeIndexBySearch(request);
+    }
+
     [[nodiscard]] bool
     CheckIdExist(int64_t id) const override {
         return this->inner_index_->CheckIdExist(id);
