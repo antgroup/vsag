@@ -37,6 +37,10 @@ GetFP32ComputeIP() {
 #if defined(ENABLE_SSE)
         return sse::FP32ComputeIP;
 #endif
+    } else if (SimdStatus::SupportSVE()) {
+#if defined(ENABLE_SVE)
+        return sve::FP32ComputeIP;
+#endif
     } else if (SimdStatus::SupportNEON()) {
 #if defined(ENABLE_NEON)
         return neon::FP32ComputeIP;
@@ -63,6 +67,10 @@ GetFP32ComputeIPBatch4() {
     } else if (SimdStatus::SupportSSE()) {
 #if defined(ENABLE_SSE)
         return sse::FP32ComputeIPBatch4;
+#endif
+    } else if (SimdStatus::SupportSVE()) {
+#if defined(ENABLE_SVE)
+        return sve::FP32ComputeIPBatch4;
 #endif
     } else if (SimdStatus::SupportNEON()) {
 #if defined(ENABLE_NEON)
@@ -91,6 +99,10 @@ GetFP32ComputeL2Sqr() {
 #if defined(ENABLE_SSE)
         return sse::FP32ComputeL2Sqr;
 #endif
+    } else if (SimdStatus::SupportSVE()) {
+#if defined(ENABLE_SVE)
+        return sve::FP32ComputeL2Sqr;
+#endif
     } else if (SimdStatus::SupportNEON()) {
 #if defined(ENABLE_NEON)
         return neon::FP32ComputeL2Sqr;
@@ -117,6 +129,10 @@ GetFP32ComputeL2SqrBatch4() {
     } else if (SimdStatus::SupportSSE()) {
 #if defined(ENABLE_SSE)
         return sse::FP32ComputeL2SqrBatch4;
+#endif
+    } else if (SimdStatus::SupportSVE()) {
+#if defined(ENABLE_SVE)
+        return sve::FP32ComputeL2SqrBatch4;
 #endif
     } else if (SimdStatus::SupportNEON()) {
 #if defined(ENABLE_NEON)
@@ -145,6 +161,10 @@ GetFP32Sub() {
 #if defined(ENABLE_SSE)
         return sse::FP32Sub;
 #endif
+    } else if (SimdStatus::SupportSVE()) {
+#if defined(ENABLE_SVE)
+        return sve::FP32Sub;
+#endif
     } else if (SimdStatus::SupportNEON()) {
 #if defined(ENABLE_NEON)
         return neon::FP32Sub;
@@ -171,6 +191,10 @@ GetFP32Add() {
     } else if (SimdStatus::SupportSSE()) {
 #if defined(ENABLE_SSE)
         return sse::FP32Add;
+#endif
+    } else if (SimdStatus::SupportSVE()) {
+#if defined(ENABLE_SVE)
+        return sve::FP32Add;
 #endif
     } else if (SimdStatus::SupportNEON()) {
 #if defined(ENABLE_NEON)
@@ -199,6 +223,10 @@ GetFP32Mul() {
 #if defined(ENABLE_SSE)
         return sse::FP32Mul;
 #endif
+    } else if (SimdStatus::SupportSVE()) {
+#if defined(ENABLE_SVE)
+        return sve::FP32Mul;
+#endif
     } else if (SimdStatus::SupportNEON()) {
 #if defined(ENABLE_NEON)
         return neon::FP32Mul;
@@ -226,6 +254,10 @@ GetFP32Div() {
 #if defined(ENABLE_SSE)
         return sse::FP32Div;
 #endif
+    } else if (SimdStatus::SupportSVE()) {
+#if defined(ENABLE_SVE)
+        return sve::FP32Div;
+#endif
     } else if (SimdStatus::SupportNEON()) {
 #if defined(ENABLE_NEON)
         return neon::FP32Div;
@@ -252,6 +284,10 @@ GetFP32ReduceAdd() {
     } else if (SimdStatus::SupportSSE()) {
 #if defined(ENABLE_SSE)
         return sse::FP32ReduceAdd;
+#endif
+    } else if (SimdStatus::SupportSVE()) {
+#if defined(ENABLE_SVE)
+        return sve::FP32ReduceAdd;
 #endif
     } else if (SimdStatus::SupportNEON()) {
 #if defined(ENABLE_NEON)

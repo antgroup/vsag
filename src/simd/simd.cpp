@@ -80,6 +80,15 @@ setup_simd() {
     ret.dist_support_neon = true;
 #endif
 
+    if (cpuinfo_has_arm_sve()) {
+        ret.runtime_has_sve = true;
+#ifndef ENABLE_SVE
+    }
+#else
+    }
+    ret.dist_support_sve = true;
+#endif
+
     return ret;
 }
 
