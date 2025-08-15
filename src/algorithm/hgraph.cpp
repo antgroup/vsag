@@ -1915,6 +1915,7 @@ HGraph::analyze_graph_recall(JsonType& stats,
     if (this->use_reorder_ && not this->high_precise_codes_->InMemory()) {
         logger::info(
             "analyze_graph_recall: high_precise_codes_ is not in memory, skip base recall test");
+        return;
     }
     // recall of "base" when searching for "base"
     logger::info("analyze_graph_recall: sample_data_size = {}, topk = {}", sample_data_size, topk);

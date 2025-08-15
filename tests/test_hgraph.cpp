@@ -467,6 +467,14 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HGraphTestIndex, "HGraph GetStatus", "[ft
                     dim, resource->base_count, metric_type);
                 TestIndex::TestBuildIndex(index, dataset, true);
                 INFO(index->GetStats());
+                vsag::SearchRequest request;
+                request.topk_ = 100;
+                request.params_str_ = fmt::format(fixtures::search_param_tmp, 200, false);
+                request.query_ = dataset->query_;
+                auto raw_num = dataset->query_->GetNumElements();
+                dataset->query_->NumElements(10);
+                INFO(index->AnalyzeIndexBySearch(request));
+                dataset->query_->NumElements(raw_num);
             }
         }
     }

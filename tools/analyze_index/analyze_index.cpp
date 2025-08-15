@@ -133,15 +133,15 @@ public:
         return create_index_without_param(index_name_, reader);
     }
 
-    bool
+    void
     AnalyzeQuery(const DatasetPtr& query_dataset, int64_t topk, const std::string& search_param) {
         if (not index_) {
             logger::error("Index not loaded");
-            return false;
+            return;
         }
         if (not query_dataset) {
             logger::error("Query dataset is null");
-            return false;
+            return;
         }
         SearchRequest query_request;
         query_request.query_ = query_dataset;
@@ -149,7 +149,6 @@ public:
         query_request.params_str_ = search_param;
         auto search_result = index_->AnalyzeIndexBySearch(query_request);
         logger::info("Search Analyze: {}", search_result);
-        return true;
     }
 
     void
