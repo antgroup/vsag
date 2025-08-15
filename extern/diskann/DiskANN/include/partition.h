@@ -10,7 +10,7 @@
 
 #include "neighbor.h"
 #include "parameters.h"
-#include "tsl/robin_set.h"
+#include "diskann_tsl/robin_set.h"
 #include "utils.h"
 
 #include "windows_customizations.h"

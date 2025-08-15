@@ -13,8 +13,8 @@
 #include "utils.h"
 #include "windows_customizations.h"
 #include "scratch.h"
-#include "tsl/robin_map.h"
-#include "tsl/robin_set.h"
+#include "diskann_tsl/robin_map.h"
+#include "diskann_tsl/robin_set.h"
 
 #define FULL_PRECISION_REORDER_MULTIPLIER 3
 

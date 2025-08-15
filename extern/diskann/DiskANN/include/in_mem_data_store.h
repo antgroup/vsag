@@ -5,9 +5,9 @@
 #include <memory>
 #include <map>
 
-#include "tsl/robin_map.h"
-#include "tsl/robin_set.h"
-#include "tsl/sparse_map.h"
+#include "diskann_tsl/robin_map.h"
+#include "diskann_tsl/robin_set.h"
+#include "diskann_tsl/sparse_map.h"
 // #include "boost/dynamic_bitset.hpp"
 
 #include "abstract_data_store.h"

@@ -14,8 +14,8 @@
 #include <set>
 #include <tuple>
 #include <string>
-#include <tsl/robin_map.h>
-#include <tsl/robin_set.h>
+#include "diskann_tsl/robin_map.h"
+#include "diskann_tsl/robin_set.h"
 #ifdef __APPLE__
 #else
 #include <malloc.h>
