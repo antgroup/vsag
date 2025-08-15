@@ -416,8 +416,8 @@ SQ4ComputeCodesIP(const uint8_t* RESTRICT codes1,
         x_lo = (codes1[d >> 1] & 0x0f) / 15.0 * diff[d] + lower_bound[d];
         y_lo = (codes2[d >> 1] & 0x0f) / 15.0 * diff[d] + lower_bound[d];
         if (d + 1 < dim) {
-            x_hi = ((codes1[d >> 1] & 0xf0) >> 4) / 15.0 * diff[d] + lower_bound[d];
-            y_hi = ((codes2[d >> 1] & 0xf0) >> 4) / 15.0 * diff[d] + lower_bound[d];
+            x_hi = ((codes1[d >> 1] & 0xf0) >> 4) / 15.0 * diff[d + 1] + lower_bound[d + 1];
+            y_hi = ((codes2[d >> 1] & 0xf0) >> 4) / 15.0 * diff[d + 1] + lower_bound[d + 1];
         } else {
             x_hi = 0;
             y_hi = 0;
@@ -442,8 +442,8 @@ SQ4ComputeCodesL2Sqr(const uint8_t* RESTRICT codes1,
         x_lo = (codes1[d >> 1] & 0x0f) / 15.0 * diff[d] + lower_bound[d];
         y_lo = (codes2[d >> 1] & 0x0f) / 15.0 * diff[d] + lower_bound[d];
         if (d + 1 < dim) {
-            x_hi = ((codes1[d >> 1] & 0xf0) >> 4) / 15.0 * diff[d] + lower_bound[d];
-            y_hi = ((codes2[d >> 1] & 0xf0) >> 4) / 15.0 * diff[d] + lower_bound[d];
+            x_hi = ((codes1[d >> 1] & 0xf0) >> 4) / 15.0 * diff[d + 1] + lower_bound[d + 1];
+            y_hi = ((codes2[d >> 1] & 0xf0) >> 4) / 15.0 * diff[d + 1] + lower_bound[d + 1];
         } else {
             x_hi = 0;
             y_hi = 0;
