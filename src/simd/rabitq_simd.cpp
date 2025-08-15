@@ -53,6 +53,10 @@ GetRaBitQSQ4UBinaryIP() {
 #if defined(ENABLE_AVX512)
         return avx512::RaBitQSQ4UBinaryIP;
 #endif
+    } else if (SimdStatus::SupportNEON()) {
+#if defined(ENABLE_NEON)
+        return neon::RaBitQSQ4UBinaryIP;
+#endif
     }
     return generic::RaBitQSQ4UBinaryIP;
 }
@@ -74,6 +78,10 @@ GetFHTRotate() {
     } else if (SimdStatus::SupportSSE()) {
 #if defined(ENABLE_SSE)
         return sse::FHTRotate;
+#endif
+    } else if (SimdStatus::SupportNEON()) {
+#if defined(ENABLE_NEON)
+        return neon::FHTRotate;
 #endif
     }
     return generic::FHTRotate;
@@ -97,6 +105,10 @@ GetKacsWalk() {
 #if defined(ENABLE_SSE)
         return sse::KacsWalk;
 #endif
+    } else if (SimdStatus::SupportNEON()) {
+#if defined(ENABLE_NEON)
+        return neon::KacsWalk;
+#endif
     }
     return generic::KacsWalk;
 }
@@ -119,6 +131,10 @@ GetVecRescale() {
 #if defined(ENABLE_SSE)
         return sse::VecRescale;
 #endif
+    } else if (SimdStatus::SupportNEON()) {
+#if defined(ENABLE_NEON)
+        return neon::VecRescale;
+#endif
     }
     return generic::VecRescale;
 }
@@ -128,6 +144,11 @@ GetFlipSign() {
     if (SimdStatus::SupportAVX512()) {
 #if defined(ENABLE_AVX512)
         return avx512::FlipSign;
+#endif
+    }
+    if (SimdStatus::SupportNEON()) {
+#if defined(ENABLE_NEON)
+        return neon::FlipSign;
 #endif
     }
     return generic::FlipSign;
@@ -150,6 +171,10 @@ GetRotateOp() {
     } else if (SimdStatus::SupportSSE()) {
 #if defined(ENABLE_SSE)
         return sse::RotateOp;
+#endif
+    } else if (SimdStatus::SupportNEON()) {
+#if defined(ENABLE_NEON)
+        return neon::RotateOp;
 #endif
     }
     return generic::RotateOp;
