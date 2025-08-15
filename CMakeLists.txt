@@ -189,6 +189,7 @@ include (extern/catch2/catch2.cmake)
 include (extern/cpuinfo/cpuinfo.cmake)
 include (extern/fmt/fmt.cmake)
 include (extern/thread_pool/thread_pool.cmake)
+include (extern/tsl/tsl.cmake)
 include (extern/roaringbitmap/roaringbitmap.cmake)
 
 include_directories (${CMAKE_CURRENT_BINARY_DIR}/spdlog/install/include)

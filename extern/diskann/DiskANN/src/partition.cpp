@@ -8,8 +8,8 @@
 #include <string>
 
 #include <omp.h>
-#include "tsl/robin_map.h"
-#include "tsl/robin_set.h"
+#include "diskann_tsl/robin_map.h"
+#include "diskann_tsl/robin_set.h"
 
 #if defined(RELEASE_UNUSED_TCMALLOC_MEMORY_AT_CHECKPOINTS) && defined(DISKANN_BUILD)
 #include "gperftools/malloc_extension.h"
