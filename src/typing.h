@@ -15,16 +15,16 @@
 
 #pragma once
 
+#include <tsl/robin_map.h>
+#include <tsl/robin_set.h>
+
 #include <cstdint>
 #include <deque>
 #include <queue>
 
 #include "impl/allocator/allocator_wrapper.h"
 #include "nlohmann/json.hpp"
-#include "tsl/robin_map.h"
-#include "tsl/robin_set.h"
 
-// TODO(LHT): now tsl from diskann, try to import it from extern
 namespace vsag {
 
 using InnerIdType = uint32_t;  // inner id's type; index's vector count may less than 2^31 - 1
