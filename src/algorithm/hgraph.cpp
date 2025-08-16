@@ -2079,7 +2079,7 @@ HGraph::AnalyzeIndexBySearch(const SearchRequest& request) {
         num_elements, UnorderedSet<InnerIdType>(allocator_), allocator_);
     float dist = 0.0F;
     for (int64_t i = 0; i < num_elements; i++) {
-        auto query_data = get_data(querys, i);
+        const auto* query_data = get_data(querys, i);
         auto computer = codes->FactoryComputer(query_data);
         if (i % 10 == 0) {
             logger::info("calculate groundtruth for query data {} of {}", i, i + 10);
