@@ -34,6 +34,7 @@ InnerIndexInterface::InnerIndexInterface(ParamPtr index_param, const IndexCommon
       metric_(common_param.metric_),
       data_type_(common_param.data_type_) {
     this->label_table_ = std::make_shared<LabelTable>(allocator_);
+    this->tomb_label_table_ = std::make_shared<LabelTable>(allocator_);
     this->index_feature_list_ = std::make_shared<IndexFeatureList>();
     this->index_feature_list_->SetFeature(SUPPORT_EXPORT_IDS);
 }

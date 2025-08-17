@@ -263,6 +263,8 @@ HGraphTestIndex::TestGeneral(const TestIndex::IndexPtr& index,
     TestGetRawVectorByIds(index, dataset);
     TestBatchCalcDistanceById(index, dataset);
     TestSearchAllocator(index, dataset, search_param, recall, true);
+    TestUpdateVector(index, dataset, search_param, false);
+    TestUpdateId(index, dataset, search_param, true);
     TestMemoryUsageDetail(index);
 }
 

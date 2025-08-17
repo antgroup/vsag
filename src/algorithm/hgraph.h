@@ -39,6 +39,7 @@
 #include "inner_index_interface.h"
 #include "lock_strategy.h"
 #include "typing.h"
+#include "utils/util_functions.h"
 #include "utils/visited_list.h"
 #include "vsag/index.h"
 #include "vsag/index_features.h"
@@ -178,6 +179,12 @@ public:
 
     [[nodiscard]] DatasetPtr
     SearchWithRequest(const SearchRequest& request) const override;
+
+    bool
+    UpdateId(int64_t old_id, int64_t new_id) override;
+
+    bool
+    UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update = false) override;
 
     void
     UpdateAttribute(int64_t id, const AttributeSet& new_attrs) override;
@@ -329,6 +336,7 @@ private:
     bool ignore_reorder_{false};
     bool build_by_base_{false};
     bool use_attribute_filter_{false};
+    bool support_tombstone_{false};
 
     BasicSearcherPtr searcher_;
 
