@@ -344,6 +344,8 @@ public:
 public:
     LabelTablePtr label_table_{nullptr};
 
+    LabelTablePtr tomb_label_table_{nullptr};
+
     Allocator* allocator_{nullptr};
 
     IndexFeatureListPtr index_feature_list_{nullptr};

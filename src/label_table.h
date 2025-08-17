@@ -103,6 +103,32 @@ public:
         return result != label_table_.end();
     }
 
+    inline void
+    UpdateLabel(LabelType old_label, LabelType new_label) {
+        // 1. check whether new_label is occupied
+        if (CheckLabel(new_label)) {
+            throw std::runtime_error(fmt::format("new label {} has been in HGraph", new_label));
+        }
+
+        // 2. check whether old_label exists
+        InnerIdType internal_id = 0;
+
+        auto iter_old = label_remap_.find(old_label);
+        if (iter_old == label_remap_.end()) {
+            // 3. old id not exists
+            throw std::runtime_error(
+                fmt::format("old label {} does not exist in HGraph", old_label));
+        } else {
+            // 4. update label to id
+            internal_id = iter_old->second;
+            label_remap_.erase(iter_old);
+            label_remap_[new_label] = internal_id;
+        }
+
+        // 5. reset id to label
+        label_table_[internal_id] = new_label;
+    }
+
     inline LabelType
     GetLabelById(InnerIdType inner_id) const {
         if (inner_id >= label_table_.size()) {
