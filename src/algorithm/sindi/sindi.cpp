@@ -52,7 +52,7 @@ SINDI::Add(const DatasetPtr& base) {
     const auto* ids = base->GetIds();
 
     // adjust window
-    int64_t final_add_window = ceil_int(cur_element_count_ + data_num, window_size_);
+    int64_t final_add_window = ceil_int(cur_element_count_ + data_num, window_size_) / window_size_;
     while (window_term_list_.size() < final_add_window) {
         window_term_list_.emplace_back(
             std::make_shared<SparseTermDataCell>(doc_retain_ratio_, allocator_));
