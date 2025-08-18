@@ -1,0 +1,70 @@
+[build-system]
+requires = ["setuptools>=61.0", "setuptools_scm[toml]>=6.2", "pep440"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pyvsag"
+description = "vsag is a vector indexing library used for similarity search"
+authors = [
+    {name = "the vsag project", email = "the.vsag.project@gmail.com"},
+]
+license = {text = "Apache-2.0"}
+keywords = ["search", "nearest", "neighbors"]
+requires-python = ">=3.6"
+classifiers = [
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.6",
+    "Programming Language :: Python :: 3.7",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+dependencies = [
+    "packaging",
+]
+dynamic = ["version"]
+
+[project.urls]
+Homepage = "https://github.com/antgroup/vsag"
+
+[tool.setuptools]
+packages = ["pyvsag"]
+package-data = { "pyvsag" = ["_pyvsag*.so"] }
+zip-safe = false
+
+[tool.setuptools_scm]
+version_scheme = "release-branch-semver"
+local_scheme = "no-local-version"
+write_to = "python/pyvsag/_version.py"
+root = ".."
+
+[tool.cibuildwheel]
+skip = ["*-musllinux*", "*i686*", "pp*"]
+before-build = '''
+                bash scripts/deps/install_deps_centos.sh 
+                bash scripts/build_cpp_for_cibw.sh
+              '''
+before-all = '''
+    sed -i 's/mirrorlist/#mirrorlist/g' /etc/yum.repos.d/CentOS-*.repo
+    sed -i 's|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' /etc/yum.repos.d/CentOS-*.repo
+    if [[ "$(uname -m)" == "aarch64" ]]; then
+      rm -f /etc/yum.repos.d/CentOS-SCLo-*.repo
+    fi
+    yum clean all
+    yum install -y gcc gcc-c++ gcc-gfortran python3-devel
+    yum install -y libaio-devel libcurl-devel ca-certificates
+    if [[ "$(uname -m)" == "x86_64" ]]; then
+      yum-config-manager --add-repo https://yum.repos.intel.com/mkl/setup/intel-mkl.repo
+      rpm --import https://yum.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS-2019.PUB
+      yum install -y intel-mkl-64bit-2020.0-088
+    fi
+    yum install -y libgomp
+'''
+
+[tool.cibuildwheel.linux]
+repair-wheel-command = "auditwheel repair -w {dest_dir} {wheel}"
+manylinux-x86_64-image = "manylinux2014"
+manylinux-aarch64-image = "manylinux2014"
