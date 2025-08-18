@@ -37,6 +37,10 @@ GetNormalize() {
 #if defined(ENABLE_SSE)
         return sse::Normalize;
 #endif
+    } else if (SimdStatus::SupportSVE()) {
+#if defined(ENABLE_SVE)
+        return sve::Normalize;
+#endif
     } else if (SimdStatus::SupportNEON()) {
 #if defined(ENABLE_NEON)
         return neon::Normalize;
@@ -75,6 +79,10 @@ GetDivScalar() {
     } else if (SimdStatus::SupportSSE()) {
 #if defined(ENABLE_SSE)
         return sse::DivScalar;
+#endif
+    } else if (SimdStatus::SupportSVE()) {
+#if defined(ENABLE_SVE)
+        return sve::DivScalar;
 #endif
     } else if (SimdStatus::SupportNEON()) {
 #if defined(ENABLE_NEON)

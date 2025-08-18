@@ -37,6 +37,10 @@ GetSQ4UniformComputeCodesIP() {
 #if defined(ENABLE_SSE)
         return sse::SQ4UniformComputeCodesIP;
 #endif
+    } else if (SimdStatus::SupportSVE()) {
+#if defined(ENABLE_SVE)
+        return sve::SQ4UniformComputeCodesIP;
+#endif
     } else if (SimdStatus::SupportNEON()) {
 #if defined(ENABLE_NEON)
         return neon::SQ4UniformComputeCodesIP;

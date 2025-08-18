@@ -37,6 +37,10 @@ GetBF16ComputeIP() {
 #if defined(ENABLE_SSE)
         return sse::BF16ComputeIP;
 #endif
+    } else if (SimdStatus::SupportSVE()) {
+#if defined(ENABLE_SVE)
+        return sve::BF16ComputeIP;
+#endif
     } else if (SimdStatus::SupportNEON()) {
 #if defined(ENABLE_NEON)
         return neon::BF16ComputeIP;
@@ -63,6 +67,10 @@ GetBF16ComputeL2Sqr() {
     } else if (SimdStatus::SupportSSE()) {
 #if defined(ENABLE_SSE)
         return sse::BF16ComputeL2Sqr;
+#endif
+    } else if (SimdStatus::SupportSVE()) {
+#if defined(ENABLE_SVE)
+        return sve::BF16ComputeL2Sqr;
 #endif
     } else if (SimdStatus::SupportNEON()) {
 #if defined(ENABLE_NEON)

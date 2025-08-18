@@ -70,6 +70,14 @@ PQFastScanLookUp32(const uint8_t* RESTRICT lookup_table,
                    int32_t* RESTRICT result);
 }  // namespace neon
 
+namespace sve {
+void
+PQFastScanLookUp32(const uint8_t* RESTRICT lookup_table,
+                   const uint8_t* RESTRICT codes,
+                   uint64_t pq_dim,
+                   int32_t* RESTRICT result);
+}  // namespace sve
+
 using PQFastScanLookUp32Type = void (*)(const uint8_t* RESTRICT lookup_table,
                                         const uint8_t* RESTRICT codes,
                                         uint64_t pq_dim,

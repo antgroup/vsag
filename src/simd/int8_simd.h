@@ -52,6 +52,10 @@ float
 INT8ComputeL2Sqr(const int8_t* RESTRICT query, const int8_t* RESTRICT codes, uint64_t dim);
 }  // namespace neon
 
+namespace sve {
+float
+INT8ComputeL2Sqr(const int8_t* RESTRICT query, const int8_t* RESTRICT codes, uint64_t dim);
+}  // namespace sve
 using INT8ComputeType = float (*)(const int8_t* RESTRICT query,
                                   const int8_t* RESTRICT codes,
                                   uint64_t dim);
