@@ -62,6 +62,13 @@ SQ4UniformComputeCodesIP(const uint8_t* RESTRICT codes1,
                          uint64_t dim);
 }  // namespace neon
 
+namespace sve {
+float
+SQ4UniformComputeCodesIP(const uint8_t* RESTRICT codes1,
+                         const uint8_t* RESTRICT codes2,
+                         uint64_t dim);
+}  // namespace sve
+
 using SQ4UniformComputeCodesType = float (*)(const uint8_t* RESTRICT codes1,
                                              const uint8_t* RESTRICT codes2,
                                              uint64_t dim);

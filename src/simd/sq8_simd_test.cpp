@@ -23,7 +23,7 @@
 
 using namespace vsag;
 
-#define TEST_ACCURACY(Func)                                                                 \
+#define TEST_ACCURACY_CODES(Func)                                                           \
     {                                                                                       \
         auto gt = generic::Func(                                                            \
             vec1.data() + i * dim, vec2.data() + i * dim, lb.data(), diff.data(), dim);     \
@@ -52,6 +52,47 @@ using namespace vsag;
                 vec1.data() + i * dim, vec2.data() + i * dim, lb.data(), diff.data(), dim); \
             REQUIRE(fixtures::dist_t(gt) == fixtures::dist_t(neon));                        \
         }                                                                                   \
+        if (SimdStatus::SupportSVE()) {                                                     \
+            auto sve = sve::Func(                                                           \
+                vec1.data() + i * dim, vec2.data() + i * dim, lb.data(), diff.data(), dim); \
+            REQUIRE(fixtures::dist_t(gt) == fixtures::dist_t(sve));                         \
+        }                                                                                   \
+    }
+
+#define TEST_ACCURACY_QUERY(Func)                                                           \
+    {                                                                                       \
+        auto gt = generic::Func(                                                            \
+            vec1.data() + i * dim, vec2.data() + i * dim, lb.data(), diff.data(), dim);     \
+        if (SimdStatus::SupportSSE()) {                                                     \
+            auto sse = sse::Func(                                                           \
+                vec1.data() + i * dim, vec2.data() + i * dim, lb.data(), diff.data(), dim); \
+            REQUIRE(fixtures::dist_t(gt) == fixtures::dist_t(sse));                         \
+        }                                                                                   \
+        if (SimdStatus::SupportAVX()) {                                                     \
+            auto avx = avx::Func(                                                           \
+                vec1.data() + i * dim, vec2.data() + i * dim, lb.data(), diff.data(), dim); \
+            REQUIRE(fixtures::dist_t(gt) == fixtures::dist_t(avx));                         \
+        }                                                                                   \
+        if (SimdStatus::SupportAVX2()) {                                                    \
+            auto avx2 = avx2::Func(                                                         \
+                vec1.data() + i * dim, vec2.data() + i * dim, lb.data(), diff.data(), dim); \
+            REQUIRE(fixtures::dist_t(gt) == fixtures::dist_t(avx2));                        \
+        }                                                                                   \
+        if (SimdStatus::SupportAVX512()) {                                                  \
+            auto avx512 = avx512::Func(                                                     \
+                vec1.data() + i * dim, vec2.data() + i * dim, lb.data(), diff.data(), dim); \
+            REQUIRE(fixtures::dist_t(gt) == fixtures::dist_t(avx512));                      \
+        }                                                                                   \
+        if (SimdStatus::SupportNEON()) {                                                    \
+            auto neon = neon::Func(                                                         \
+                vec1.data() + i * dim, vec2.data() + i * dim, lb.data(), diff.data(), dim); \
+            REQUIRE(fixtures::dist_t(gt) == fixtures::dist_t(neon));                        \
+        }                                                                                   \
+        if (SimdStatus::SupportSVE()) {                                                     \
+            auto sve = sve::Func(                                                           \
+                vec1.data() + i * dim, vec2.data() + i * dim, lb.data(), diff.data(), dim); \
+            REQUIRE(fixtures::dist_t(gt) == fixtures::dist_t(sve));                         \
+        }                                                                                   \
     }
 
 TEST_CASE("SQ8 SIMD Compute Codes", "[ut][simd]") {
@@ -71,8 +112,8 @@ TEST_CASE("SQ8 SIMD Compute Codes", "[ut][simd]") {
         auto lb = fixtures::generate_vectors(1, dim, true, 186);
         auto diff = fixtures::generate_vectors(1, dim, true, 657);
         for (uint64_t i = 0; i < count; ++i) {
-            TEST_ACCURACY(SQ8ComputeCodesIP);
-            TEST_ACCURACY(SQ8ComputeCodesL2Sqr);
+            TEST_ACCURACY_CODES(SQ8ComputeCodesIP);
+            TEST_ACCURACY_CODES(SQ8ComputeCodesL2Sqr);
         }
     }
 }
@@ -89,13 +130,13 @@ TEST_CASE("SQ8 SIMD Compute", "[ut][simd]") {
         auto lb = fixtures::generate_vectors(1, dim, true, 183);
         auto diff = fixtures::generate_vectors(1, dim, true, 657);
         for (uint64_t i = 0; i < count; ++i) {
-            TEST_ACCURACY(SQ8ComputeIP);
-            TEST_ACCURACY(SQ8ComputeL2Sqr);
+            TEST_ACCURACY_QUERY(SQ8ComputeIP);
+            TEST_ACCURACY_QUERY(SQ8ComputeL2Sqr);
         }
     }
 }
 
-#define BENCHMARK_SIMD_COMPUTE(Simd, Comp)                                                         \
+#define BENCHMARK_SIMD_COMPUTE_QUERY(Simd, Comp)                                                   \
     BENCHMARK_ADVANCED(#Simd #Comp) {                                                              \
         for (int i = 0; i < count; ++i) {                                                          \
             Simd::Comp(vec1.data() + i * dim, vec2.data() + i * dim, lb.data(), diff.data(), dim); \
@@ -115,10 +156,23 @@ TEST_CASE("SQ8 SIMD Compute Benchmark", "[ut][simd][!benchmark]") {
     });
     auto lb = fixtures::generate_vectors(1, dim, true, 180);
     auto diff = fixtures::generate_vectors(1, dim, true, 6217);
-    BENCHMARK_SIMD_COMPUTE(generic, SQ8ComputeIP);
-    BENCHMARK_SIMD_COMPUTE(sse, SQ8ComputeIP);
-    BENCHMARK_SIMD_COMPUTE(avx, SQ8ComputeIP);
-    BENCHMARK_SIMD_COMPUTE(avx2, SQ8ComputeIP);
-    BENCHMARK_SIMD_COMPUTE(avx512, SQ8ComputeIP);
-    BENCHMARK_SIMD_COMPUTE(neon, SQ8ComputeIP);
+    BENCHMARK_SIMD_COMPUTE_QUERY(generic, SQ8ComputeIP);
+    if (SimdStatus::SupportSSE()) {
+        BENCHMARK_SIMD_COMPUTE_QUERY(sse, SQ8ComputeIP);
+    }
+    if (SimdStatus::SupportAVX()) {
+        BENCHMARK_SIMD_COMPUTE_QUERY(avx, SQ8ComputeIP);
+    }
+    if (SimdStatus::SupportAVX2()) {
+        BENCHMARK_SIMD_COMPUTE_QUERY(avx2, SQ8ComputeIP);
+    }
+    if (SimdStatus::SupportAVX512()) {
+        BENCHMARK_SIMD_COMPUTE_QUERY(avx512, SQ8ComputeIP);
+    }
+    if (SimdStatus::SupportNEON()) {
+        BENCHMARK_SIMD_COMPUTE_QUERY(neon, SQ8ComputeIP);
+    }
+    if (SimdStatus::SupportSVE()) {
+        BENCHMARK_SIMD_COMPUTE_QUERY(sve, SQ8ComputeIP);
+    }
 }

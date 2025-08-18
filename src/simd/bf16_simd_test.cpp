@@ -44,7 +44,7 @@ TEST_CASE("Encode & Decode BF16", "[ut][simd]") {
 
 #define TEST_ACCURACY(Func)                                                           \
     {                                                                                 \
-        float gt, sse, avx, avx2, avx512, neon;                                       \
+        float gt, sse, avx, avx2, avx512, neon, sve;                                  \
         gt = generic::Func(vec1.data() + i * dim, vec2.data() + i * dim, dim);        \
         if (SimdStatus::SupportSSE()) {                                               \
             sse = sse::Func(vec1.data() + i * dim, vec2.data() + i * dim, dim);       \
@@ -65,6 +65,10 @@ TEST_CASE("Encode & Decode BF16", "[ut][simd]") {
         if (SimdStatus::SupportNEON()) {                                              \
             neon = neon::Func(vec1.data() + i * dim, vec2.data() + i * dim, dim);     \
             REQUIRE(fixtures::dist_t(gt) == fixtures::dist_t(neon));                  \
+        }                                                                             \
+        if (SimdStatus::SupportSVE()) {                                               \
+            sve = sve::Func(vec1.data() + i * dim, vec2.data() + i * dim, dim);       \
+            REQUIRE(fixtures::dist_t(gt) == fixtures::dist_t(sve));                   \
         }                                                                             \
     };
 
@@ -99,16 +103,42 @@ TEST_CASE("BF16 Benchmark", "[ut][simd][!benchmark]") {
     auto vec2_fp32 = fixtures::generate_vectors(count, dim, false, 86);
     auto vec2 = encode_bf16(vec2_fp32, count * dim);
     BENCHMARK_SIMD_COMPUTE(generic, BF16ComputeIP);
-    BENCHMARK_SIMD_COMPUTE(sse, BF16ComputeIP);
-    BENCHMARK_SIMD_COMPUTE(avx, BF16ComputeIP);
-    BENCHMARK_SIMD_COMPUTE(avx2, BF16ComputeIP);
-    BENCHMARK_SIMD_COMPUTE(avx512, BF16ComputeIP);
-    BENCHMARK_SIMD_COMPUTE(neon, BF16ComputeIP);
+    if (SimdStatus::SupportSSE()) {
+        BENCHMARK_SIMD_COMPUTE(sse, BF16ComputeIP);
+    }
+    if (SimdStatus::SupportAVX()) {
+        BENCHMARK_SIMD_COMPUTE(avx, BF16ComputeIP);
+    }
+    if (SimdStatus::SupportAVX2()) {
+        BENCHMARK_SIMD_COMPUTE(avx2, BF16ComputeIP);
+    }
+    if (SimdStatus::SupportAVX512()) {
+        BENCHMARK_SIMD_COMPUTE(avx512, BF16ComputeIP);
+    }
+    if (SimdStatus::SupportNEON()) {
+        BENCHMARK_SIMD_COMPUTE(neon, BF16ComputeIP);
+    }
+    if (SimdStatus::SupportSVE()) {
+        BENCHMARK_SIMD_COMPUTE(sve, BF16ComputeIP);
+    }
 
     BENCHMARK_SIMD_COMPUTE(generic, BF16ComputeL2Sqr);
-    BENCHMARK_SIMD_COMPUTE(sse, BF16ComputeL2Sqr);
-    BENCHMARK_SIMD_COMPUTE(avx, BF16ComputeL2Sqr);
-    BENCHMARK_SIMD_COMPUTE(avx2, BF16ComputeL2Sqr);
-    BENCHMARK_SIMD_COMPUTE(avx512, BF16ComputeL2Sqr);
-    BENCHMARK_SIMD_COMPUTE(neon, BF16ComputeL2Sqr);
+    if (SimdStatus::SupportSSE()) {
+        BENCHMARK_SIMD_COMPUTE(sse, BF16ComputeL2Sqr);
+    }
+    if (SimdStatus::SupportAVX()) {
+        BENCHMARK_SIMD_COMPUTE(avx, BF16ComputeL2Sqr);
+    }
+    if (SimdStatus::SupportAVX2()) {
+        BENCHMARK_SIMD_COMPUTE(avx2, BF16ComputeL2Sqr);
+    }
+    if (SimdStatus::SupportAVX512()) {
+        BENCHMARK_SIMD_COMPUTE(avx512, BF16ComputeL2Sqr);
+    }
+    if (SimdStatus::SupportNEON()) {
+        BENCHMARK_SIMD_COMPUTE(neon, BF16ComputeL2Sqr);
+    }
+    if (SimdStatus::SupportSVE()) {
+        BENCHMARK_SIMD_COMPUTE(sve, BF16ComputeL2Sqr);
+    }
 }

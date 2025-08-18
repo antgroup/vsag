@@ -73,6 +73,14 @@ float
 Normalize(const float* from, float* to, uint64_t dim);
 }  // namespace neon
 
+namespace sve {
+void
+DivScalar(const float* from, float* to, uint64_t dim, float scalar);
+
+float
+Normalize(const float* from, float* to, uint64_t dim);
+}  // namespace sve
+
 using NormalizeType = float (*)(const float* from, float* to, uint64_t dim);
 extern NormalizeType Normalize;
 

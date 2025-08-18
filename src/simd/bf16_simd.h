@@ -68,6 +68,13 @@ float
 BF16ComputeL2Sqr(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim);
 }  // namespace neon
 
+namespace sve {
+float
+BF16ComputeIP(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim);
+float
+BF16ComputeL2Sqr(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim);
+}  // namespace sve
+
 using BF16ComputeType = float (*)(const uint8_t* RESTRICT query,
                                   const uint8_t* RESTRICT codes,
                                   uint64_t dim);

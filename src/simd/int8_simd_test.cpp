@@ -26,7 +26,7 @@ using namespace vsag;
 
 #define TEST_INT8_COMPUTE_ACCURACY(Func)                                              \
     {                                                                                 \
-        float gt, sse, avx, avx2, avx512, neon;                                       \
+        float gt, sse, avx, avx2, avx512, neon, sve;                                  \
         gt = generic::Func(vec1.data() + i * dim, vec2.data() + i * dim, dim);        \
         if (SimdStatus::SupportSSE()) {                                               \
             sse = sse::Func(vec1.data() + i * dim, vec2.data() + i * dim, dim);       \
@@ -47,6 +47,10 @@ using namespace vsag;
         if (SimdStatus::SupportNEON()) {                                              \
             neon = neon::Func(vec1.data() + i * dim, vec2.data() + i * dim, dim);     \
             REQUIRE(fixtures::dist_t(gt) == fixtures::dist_t(neon));                  \
+        }                                                                             \
+        if (SimdStatus::SupportSVE()) {                                               \
+            sve = sve::Func(vec1.data() + i * dim, vec2.data() + i * dim, dim);       \
+            REQUIRE(fixtures::dist_t(gt) == fixtures::dist_t(sve));                   \
         }                                                                             \
     };
 
@@ -84,4 +88,5 @@ TEST_CASE("INT8 Benchmark", "[ut][simd][int8][!benchmark]") {
     BENCHMARK_SIMD_COMPUTE(avx2, INT8ComputeL2Sqr);
     BENCHMARK_SIMD_COMPUTE(avx512, INT8ComputeL2Sqr);
     BENCHMARK_SIMD_COMPUTE(neon, INT8ComputeL2Sqr);
+    BENCHMARK_SIMD_COMPUTE(sve, INT8ComputeL2Sqr);
 }

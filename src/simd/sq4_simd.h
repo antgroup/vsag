@@ -182,6 +182,33 @@ SQ4ComputeCodesL2Sqr(const uint8_t* RESTRICT codes1,
                      uint64_t dim);
 }  // namespace neon
 
+namespace sve {
+float
+SQ4ComputeIP(const float* RESTRICT query,
+             const uint8_t* RESTRICT codes,
+             const float* RESTRICT lower_bound,
+             const float* RESTRICT diff,
+             uint64_t dim);
+float
+SQ4ComputeL2Sqr(const float* RESTRICT query,
+                const uint8_t* RESTRICT codes,
+                const float* RESTRICT lower_bound,
+                const float* RESTRICT diff,
+                uint64_t dim);
+float
+SQ4ComputeCodesIP(const uint8_t* RESTRICT codes1,
+                  const uint8_t* RESTRICT codes2,
+                  const float* RESTRICT lower_bound,
+                  const float* RESTRICT diff,
+                  uint64_t dim);
+float
+SQ4ComputeCodesL2Sqr(const uint8_t* RESTRICT codes1,
+                     const uint8_t* RESTRICT codes2,
+                     const float* RESTRICT lower_bound,
+                     const float* RESTRICT diff,
+                     uint64_t dim);
+}  // namespace sve
+
 using SQ4ComputeType = float (*)(const float* RESTRICT query,
                                  const uint8_t* RESTRICT codes,
                                  const float* RESTRICT lower_bound,

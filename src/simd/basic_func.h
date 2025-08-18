@@ -127,6 +127,25 @@ void
 Prefetch(const void* data);
 }  // namespace neon
 
+namespace sve {
+float
+L2Sqr(const void* pVect1v, const void* pVect2v, const void* qty_ptr);
+float
+InnerProduct(const void* pVect1, const void* pVect2, const void* qty_ptr);
+float
+InnerProductDistance(const void* pVect1, const void* pVect2, const void* qty_ptr);
+float
+INT8L2Sqr(const void* pVect1v, const void* pVect2v, const void* qty_ptr);
+float
+INT8InnerProduct(const void* pVect1, const void* pVect2, const void* qty_ptr);
+float
+INT8InnerProductDistance(const void* pVect1, const void* pVect2, const void* qty_ptr);
+void
+PQDistanceFloat256(const void* single_dim_centers, float single_dim_val, void* result);
+void
+Prefetch(const void* data);
+}  // namespace sve
+
 using DistanceFuncType = float (*)(const void* query1, const void* query2, const void* qty_ptr);
 extern DistanceFuncType L2Sqr;
 extern DistanceFuncType InnerProduct;
