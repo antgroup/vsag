@@ -37,6 +37,10 @@ GetSQ8ComputeIP() {
 #if defined(ENABLE_SSE)
         return sse::SQ8ComputeIP;
 #endif
+    } else if (SimdStatus::SupportSVE()) {
+#if defined(ENABLE_SVE)
+        return sve::SQ8ComputeIP;
+#endif
     } else if (SimdStatus::SupportNEON()) {
 #if defined(ENABLE_NEON)
         return neon::SQ8ComputeIP;
@@ -63,6 +67,10 @@ GetSQ8ComputeL2Sqr() {
     } else if (SimdStatus::SupportSSE()) {
 #if defined(ENABLE_SSE)
         return sse::SQ8ComputeL2Sqr;
+#endif
+    } else if (SimdStatus::SupportSVE()) {
+#if defined(ENABLE_SVE)
+        return sve::SQ8ComputeL2Sqr;
 #endif
     } else if (SimdStatus::SupportNEON()) {
 #if defined(ENABLE_NEON)
@@ -91,6 +99,10 @@ GetSQ8ComputeCodesIP() {
 #if defined(ENABLE_SSE)
         return sse::SQ8ComputeCodesIP;
 #endif
+    } else if (SimdStatus::SupportSVE()) {
+#if defined(ENABLE_SVE)
+        return sve::SQ8ComputeCodesIP;
+#endif
     } else if (SimdStatus::SupportNEON()) {
 #if defined(ENABLE_NEON)
         return neon::SQ8ComputeCodesIP;
@@ -117,6 +129,10 @@ GetSQ8ComputeCodesL2Sqr() {
     } else if (SimdStatus::SupportSSE()) {
 #if defined(ENABLE_SSE)
         return sse::SQ8ComputeCodesL2Sqr;
+#endif
+    } else if (SimdStatus::SupportSVE()) {
+#if defined(ENABLE_SVE)
+        return sve::SQ8ComputeCodesL2Sqr;
 #endif
     } else if (SimdStatus::SupportNEON()) {
 #if defined(ENABLE_NEON)

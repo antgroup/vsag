@@ -32,6 +32,7 @@ public:
     bool dist_support_avx512bw = false;
     bool dist_support_avx512vl = false;
     bool dist_support_neon = false;
+    bool dist_support_sve = false;
     bool dist_support_avx512vpopcntdq = false;
     bool runtime_has_sse = false;
     bool runtime_has_avx = false;
@@ -41,6 +42,7 @@ public:
     bool runtime_has_avx512bw = false;
     bool runtime_has_avx512vl = false;
     bool runtime_has_neon = false;
+    bool runtime_has_sve = false;
     bool runtime_has_avx512vpopcntdq = false;
 
     static bool is_inited;
@@ -118,6 +120,17 @@ public:
         return ret;
     }
 
+    static inline bool
+    SupportSVE() {
+        Init();
+        bool ret = false;
+#if defined(ENABLE_SVE)
+        ret = true;
+#endif
+        ret &= cpuinfo_has_arm_sve();
+        return ret;
+    }
+
     [[nodiscard]] std::string
     sse() const {
         return status_to_string(dist_support_sse, runtime_has_sse);
@@ -156,6 +169,11 @@ public:
     [[nodiscard]] std::string
     neon() const {
         return status_to_string(dist_support_neon, runtime_has_neon);
+    }
+
+    [[nodiscard]] std::string
+    sve() const {
+        return status_to_string(dist_support_sve, runtime_has_sve);
     }
 
     [[nodiscard]] std::string

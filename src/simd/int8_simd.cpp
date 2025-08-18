@@ -41,6 +41,10 @@ GetINT8ComputeL2Sqr() {
 #if defined(ENABLE_NEON)
         return neon::INT8ComputeL2Sqr;
 #endif
+    } else if (SimdStatus::SupportSVE()) {
+#if defined(ENABLE_SVE)
+        return sve::INT8ComputeL2Sqr;
+#endif
     }
     return generic::INT8ComputeL2Sqr;
 }
