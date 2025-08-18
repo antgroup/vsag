@@ -23,7 +23,8 @@ void
 select_edges_by_heuristic(const DistHeapPtr& edges,
                           uint64_t max_size,
                           const FlattenInterfacePtr& flatten,
-                          Allocator* allocator) {
+                          Allocator* allocator,
+                          float alpha = 1.0f) {
     if (edges->Size() < max_size) {
         return;
     }
@@ -46,7 +47,7 @@ select_edges_by_heuristic(const DistHeapPtr& edges,
 
         for (const auto& second_pair : return_list) {
             float curdist = flatten->ComputePairVectors(second_pair.second, current_pair.second);
-            if (curdist < float_query) {
+            if (alpha * curdist < float_query) {
                 good = false;
                 break;
             }
@@ -69,7 +70,7 @@ mutually_connect_new_element(InnerIdType cur_c,
                              const MutexArrayPtr& neighbors_mutexes,
                              Allocator* allocator) {
     const size_t max_size = graph->MaximumDegree();
-    select_edges_by_heuristic(top_candidates, max_size, flatten, allocator);
+    select_edges_by_heuristic(top_candidates, max_size, flatten, allocator, 1.0f);
     if (top_candidates->Size() > max_size) {
         throw VsagException(
             ErrorType::INTERNAL_ERROR,
