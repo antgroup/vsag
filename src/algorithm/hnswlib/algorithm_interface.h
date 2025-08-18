@@ -112,6 +112,11 @@ public:
     isValidLabel(LabelType label) = 0;
 
     virtual bool
+    isTombLabel(LabelType label) {
+        return false;
+    };
+
+    virtual bool
     init_memory_space() = 0;
 
     virtual uint64_t

@@ -250,6 +250,17 @@ HierarchicalNSW::isValidLabel(LabelType label) {
     return is_valid;
 }
 
+bool
+HierarchicalNSW::isTombLabel(LabelType label) {
+    std::shared_lock lock_table(label_lookup_lock_);
+
+    if (not allow_replace_deleted_) {
+        return false;
+    }
+    auto is_tomb = (deleted_elements_.find(label) != deleted_elements_.end());
+    return is_tomb;
+}
+
 void
 HierarchicalNSW::setBatchNeigohbors(InnerIdType internal_id,
                                     int level,
@@ -1136,8 +1147,25 @@ HierarchicalNSW::markDelete(LabelType label) {
         throw std::runtime_error("Label not found");
     }
     InnerIdType internalId = search->second;
-    label_lookup_.erase(search);
     markDeletedInternal(internalId);
+    label_lookup_.erase(search);
+}
+
+void
+HierarchicalNSW::recoverMarkDelete(LabelType label) {
+    if (not allow_replace_deleted_) {
+        return;
+    }
+
+    // lock all operations with element by label
+    std::scoped_lock lock_table(label_lookup_lock_);
+    auto search = deleted_elements_.find(label);
+    if (search == deleted_elements_.end()) {
+        throw std::runtime_error("Label not found");
+    }
+    InnerIdType internalId = search->second;
+    recoveryMarkDeletedInternal(internalId);
+    label_lookup_[label] = internalId;
 }
 
 /*
@@ -1158,6 +1186,22 @@ HierarchicalNSW::markDeletedInternal(InnerIdType internalId) {
         }
     } else {
         throw std::runtime_error("The requested to delete element is already deleted");
+    }
+}
+
+void
+HierarchicalNSW::recoveryMarkDeletedInternal(InnerIdType internalId) {
+    if (isMarkedDeleted(internalId)) {
+        unsigned char* ll_cur =
+            (unsigned char*)data_level0_memory_->GetElementPtr(internalId, offsetLevel0_) + 2;
+        *ll_cur &= ~DELETE_MARK;
+        num_deleted_ -= 1;
+        if (allow_replace_deleted_) {
+            std::scoped_lock lock_deleted_elements(deleted_elements_lock_);
+            deleted_elements_.erase(getExternalLabel(internalId));
+        }
+    } else {
+        throw std::runtime_error("The requested to delete element is not deleted");
     }
 }
 
