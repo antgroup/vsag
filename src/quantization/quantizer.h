@@ -27,6 +27,7 @@
 
 namespace vsag {
 using DataType = float;
+using DataTypePtr = float*;
 
 /**
  * @class Quantizer
