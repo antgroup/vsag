@@ -65,12 +65,12 @@ private:
 class TestFlatten : public FlattenInterface {
 public:
     explicit TestFlatten(Allocator* allocator) : allocator_(allocator) {
-        set_distance(0, 1, 1.0f);
-        set_distance(0, 2, 2.0f);
-        set_distance(0, 3, 3.0f);
-        set_distance(1, 2, 1.5f);
-        set_distance(1, 3, 2.5f);
-        set_distance(2, 3, 1.0f);
+        set_distance(0, 1, 1.0F);
+        set_distance(0, 2, 2.0F);
+        set_distance(0, 3, 3.0F);
+        set_distance(1, 2, 1.5F);
+        set_distance(1, 3, 2.5F);
+        set_distance(2, 3, 1.0F);
     }
 
     float
@@ -195,7 +195,7 @@ select_edges_by_heuristic(const DistHeapPtr& edges,
                           uint64_t max_size,
                           const FlattenInterfacePtr& flatten,
                           Allocator* allocator,
-                          float alpha = 1.0f) {
+                          float alpha = 1.0F) {
     if (edges->Size() <= max_size) {
         return;
     }
@@ -232,9 +232,9 @@ TEST_CASE("Pruning Strategy Select Edges Test", "[ut][pruning_strategy]") {
     SECTION("prunes to farthest nodes") {
         auto edges = std::make_shared<StandardHeap<true, false>>(allocator.get(), -1);
         // Initial edges: [ (1.0, 1), (2.0, 2), (3.0, 3) ]
-        edges->Push(3.0f, 3);
-        edges->Push(1.0f, 1);
-        edges->Push(2.0f, 2);
+        edges->Push(3.0F, 3);
+        edges->Push(1.0F, 1);
+        edges->Push(2.0F, 2);
 
         /*
         Pruning process (alpha = 1.0, max_size = 2):
@@ -257,8 +257,8 @@ TEST_CASE("Pruning Strategy Select Edges Test", "[ut][pruning_strategy]") {
     SECTION("alpha = 0.5 favors closer nodes") {
         auto edges = std::make_shared<StandardHeap<true, false>>(allocator.get(), -1);
         // Initial edges: [ (1.0, 1), (4.0, 2) ]
-        edges->Push(1.0f, 1);
-        edges->Push(4.0f, 2);
+        edges->Push(1.0F, 1);
+        edges->Push(4.0F, 2);
 
         /*
         Pruning process (alpha=0.5, max_size=1):
@@ -275,9 +275,9 @@ TEST_CASE("Pruning Strategy Select Edges Test", "[ut][pruning_strategy]") {
     SECTION("alpha=2.0 strongly favors farther nodes") {
         auto edges = std::make_shared<StandardHeap<true, false>>(allocator.get(), -1);
         // Initial edges: [ (1.0, 1), (2.0, 2), (3.0, 3) ]
-        edges->Push(1.0f, 1);
-        edges->Push(2.0f, 2);
-        edges->Push(3.0f, 3);
+        edges->Push(1.0F, 1);
+        edges->Push(2.0F, 2);
+        edges->Push(3.0F, 3);
 
         /*
         Pruning process (alpha=2.0, max_size=2):
@@ -285,7 +285,7 @@ TEST_CASE("Pruning Strategy Select Edges Test", "[ut][pruning_strategy]") {
             2. Max-heap: [ (6.0, 3), (4.0, 2), (2.0, 1) ]
             3. Select top 2: (6.0, 3) and (4.0, 2)
         */
-        select_edges_by_heuristic(edges, 2, flatten, allocator.get(), 2.0f);
+        select_edges_by_heuristic(edges, 2, flatten, allocator.get(), 2.0F);
 
         REQUIRE(edges->Size() == 2);
 
@@ -309,8 +309,8 @@ TEST_CASE("Pruning Strategy Mutual Connection Test", "[ut][pruning_strategy]") {
     SECTION("connects to farthest candidate") {
         auto candidates = std::make_shared<StandardHeap<true, false>>(allocator.get(), -1);
         // Candidate edges: [ (1.0, 1), (3.0, 3) ]
-        candidates->Push(3.0f, 3);
-        candidates->Push(1.0f, 1);
+        candidates->Push(3.0F, 3);
+        candidates->Push(1.0F, 1);
 
         /*
         Mutual connection process (max_degree=1):
@@ -330,7 +330,7 @@ TEST_CASE("Pruning Strategy Mutual Connection Test", "[ut][pruning_strategy]") {
 
     SECTION("rejects self-connections") {
         auto candidates = std::make_shared<StandardHeap<true, false>>(allocator.get(), -1);
-        candidates->Push(-1.0f, 0);  // Attempt self-connection
+        candidates->Push(-1.0F, 0);  // Attempt self-connection
 
         REQUIRE_THROWS_AS(
             mutually_connect_new_element(0, candidates, graph, flatten, mutexes, allocator.get()),
