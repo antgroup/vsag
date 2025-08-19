@@ -74,6 +74,16 @@ HGraphParameter::FromJson(const JsonType& json) {
         this->precise_codes_param->FromJson(precise_codes_json);
     }
 
+    if (json.contains(STORE_RAW_VECTOR_KEY)) {
+        this->store_raw_vector = json[STORE_RAW_VECTOR_KEY];
+    }
+
+    if (this->store_raw_vector) {
+        const auto& raw_vector_json = json[RAW_VECTOR_KEY];
+        this->raw_vector_param = std::make_shared<FlattenDataCellParameter>();
+        this->raw_vector_param->FromJson(raw_vector_json);
+    }
+
     CHECK_ARGUMENT(json.contains(HGRAPH_GRAPH_KEY),
                    fmt::format("hgraph parameters must contains {}", HGRAPH_GRAPH_KEY));
     const auto& graph_json = json[HGRAPH_GRAPH_KEY];
@@ -149,13 +159,16 @@ HGraphParameter::ToJson() const {
     if (use_reorder) {
         json[HGRAPH_PRECISE_CODES_KEY] = this->precise_codes_param->ToJson();
     }
+    if (this->store_raw_vector) {
+        json[STORE_RAW_VECTOR_KEY] = this->raw_vector_param->ToJson();
+    }
     json[HGRAPH_GRAPH_KEY] = this->bottom_graph_param->ToJson();
 
     json[BUILD_PARAMS_KEY][BUILD_EF_CONSTRUCTION] = this->ef_construction;
     json[BUILD_PARAMS_KEY][BUILD_THREAD_COUNT] = this->build_thread_count;
     json[HGRAPH_EXTRA_INFO_KEY] = this->extra_info_param->ToJson();
     json[SUPPORT_DUPLICATE] = this->support_duplicate;
-    json[HGRAPH_STORE_RAW_VECTOR] = this->store_raw_vector;
+    json[STORE_RAW_VECTOR] = this->store_raw_vector;
     json[USE_ATTRIBUTE_FILTER_KEY] = this->use_attribute_filter;
     return json;
 }

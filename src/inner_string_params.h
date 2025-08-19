@@ -140,6 +140,9 @@ const char* const GNO_IMI_SEARCH_PARAM_FIRST_ORDER_SCAN_RATIO = "first_order_sca
 const char* const FLATTEN_DATA_CELL = "flatten_data_cell";
 const char* const SPARSE_VECTOR_DATA_CELL = "sparse_vector_data_cell";
 
+const char* const STORE_RAW_VECTOR_KEY = "store_raw_vector";
+const char* const RAW_VECTOR_KEY = "raw_vector";
+
 const char* const GRAPH_SUPPORT_REMOVE = "support_remove";
 const char* const REMOVE_FLAG_BIT = "remove_flag_bit";
 const char* const HOLD_MOLDS = "hold_molds";
@@ -215,10 +218,12 @@ const std::unordered_map<std::string, std::string> DEFAULT_MAP = {
     {"IVF_TRAIN_TYPE_KMEANS", IVF_TRAIN_TYPE_KMEANS},
     {"IVF_THREAD_COUNT_KEY", IVF_THREAD_COUNT_KEY},
     {"IVF_SEARCH_PARALLELISM", IVF_SEARCH_PARALLELISM},
-    {"HGRAPH_STORE_RAW_VECTOR", HGRAPH_STORE_RAW_VECTOR},
     {"GRAPH_SUPPORT_REMOVE", GRAPH_SUPPORT_REMOVE},
     {"REMOVE_FLAG_BIT", REMOVE_FLAG_BIT},
     {"HOLD_MOLDS", HOLD_MOLDS},
-    {"IVF_PARTITION_STRATEGY_TYPE_GNO_IMI", IVF_PARTITION_STRATEGY_TYPE_GNO_IMI}};
+    {"IVF_PARTITION_STRATEGY_TYPE_GNO_IMI", IVF_PARTITION_STRATEGY_TYPE_GNO_IMI},
+    {"STORE_RAW_VECTOR_KEY", STORE_RAW_VECTOR_KEY},
+    {"RAW_VECTOR_KEY", RAW_VECTOR_KEY},
+};
 
 }  // namespace vsag

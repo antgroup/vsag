@@ -438,7 +438,7 @@ BruteForce::CheckAndMappingExternalParam(const JsonType& external_param,
             },
         },
         {
-            BRUTE_FORCE_STORE_RAW_VECTOR,
+            STORE_RAW_VECTOR,
             {
                 QUANTIZATION_PARAMS_KEY,
                 HOLD_MOLDS,
