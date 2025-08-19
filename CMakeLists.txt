@@ -59,6 +59,9 @@ if (ENABLE_CXX11_ABI)
 else ()
     add_definitions (-D_GLIBCXX_USE_CXX11_ABI=0)
     message (STATUS "Using libstdc++ with pre-C++11 ABI")
+
+    # for avoiding symbol conflict: _Rep::_S_create
+    vsag_add_shared_linker_flag(-fvisibility-inlines-hidden)
 endif ()
 
 if (ENABLE_WERROR)
