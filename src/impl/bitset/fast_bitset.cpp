@@ -24,12 +24,12 @@ static constexpr uint64_t FILL_ONE = 0xFFFFFFFFFFFFFFFF;
 
 void
 FastBitset::Set(int64_t pos, bool value) {
-    auto capacity = data_.size() * 64;
+    auto capacity = this->size_ * 64;
     if (pos >= capacity) {
-        if (fill_bit_) {
-            data_.resize((pos / 64) + 1, FILL_ONE);
+        if (get_fill_bit()) {
+            resize((pos / 64) + 1, FILL_ONE);
         } else {
-            data_.resize((pos / 64) + 1, 0);
+            resize((pos / 64) + 1, 0);
         }
     }
     auto word_index = pos / 64;
@@ -43,9 +43,9 @@ FastBitset::Set(int64_t pos, bool value) {
 
 bool
 FastBitset::Test(int64_t pos) const {
-    auto capacity = data_.size() * 64;
+    auto capacity = this->size_ * 64;
     if (pos >= capacity) {
-        return fill_bit_;
+        return get_fill_bit();
     }
     auto word_index = pos / 64;
     auto bit_index = pos % 64;
@@ -55,8 +55,8 @@ FastBitset::Test(int64_t pos) const {
 uint64_t
 FastBitset::Count() {
     uint64_t count = 0;
-    for (auto word : data_) {
-        count += __builtin_popcountll(word);
+    for (uint32_t i = 0; i < this->size_; i++) {
+        count += __builtin_popcountll(data_[i]);
     }
     return count;
 }
@@ -67,35 +67,35 @@ FastBitset::Or(const ComputableBitset& another) {
     if (fast_another == nullptr) {
         throw VsagException(ErrorType::INTERNAL_ERROR, "bitset not match");
     }
-    if (fast_another->data_.empty()) {
-        if (fast_another->fill_bit_) {
+    if (fast_another->size_ == 0) {
+        if (fast_another->get_fill_bit()) {
             this->Clear();
-            this->fill_bit_ = true;
+            this->set_fill_bit(true);
         }
         return;
     }
-    if (data_.size() >= fast_another->data_.size()) {
-        auto min_size = fast_another->data_.size();
-        BitOr(reinterpret_cast<const uint8_t*>(this->data_.data()),
-              reinterpret_cast<const uint8_t*>(fast_another->data_.data()),
+    if (this->size_ >= fast_another->size_) {
+        auto min_size = fast_another->size_;
+        BitOr(reinterpret_cast<const uint8_t*>(this->data_),
+              reinterpret_cast<const uint8_t*>(fast_another->data_),
               min_size * sizeof(uint64_t),
-              reinterpret_cast<uint8_t*>(this->data_.data()));
-        if (fast_another->fill_bit_) {
-            data_.resize(min_size);
-            this->fill_bit_ = true;
+              reinterpret_cast<uint8_t*>(this->data_));
+        if (fast_another->get_fill_bit()) {
+            resize(min_size);
+            this->set_fill_bit(true);
         }
     } else {
-        auto max_size = fast_another->data_.size();
-        if (this->fill_bit_) {
-            max_size = this->data_.size();
+        auto max_size = fast_another->size_;
+        if (this->get_fill_bit()) {
+            max_size = this->size_;
         } else {
-            this->data_.resize(max_size, 0);
-            this->fill_bit_ = fast_another->fill_bit_;
+            resize(max_size, 0);
+            this->set_fill_bit(fast_another->get_fill_bit());
         }
-        BitOr(reinterpret_cast<const uint8_t*>(this->data_.data()),
-              reinterpret_cast<const uint8_t*>(fast_another->data_.data()),
+        BitOr(reinterpret_cast<const uint8_t*>(this->data_),
+              reinterpret_cast<const uint8_t*>(fast_another->data_),
               max_size * sizeof(uint64_t),
-              reinterpret_cast<uint8_t*>(this->data_.data()));
+              reinterpret_cast<uint8_t*>(this->data_));
     }
 }
 
@@ -105,35 +105,35 @@ FastBitset::And(const ComputableBitset& another) {
     if (fast_another == nullptr) {
         throw VsagException(ErrorType::INTERNAL_ERROR, "bitset not match");
     }
-    if (fast_another->data_.empty()) {
-        if (not fast_another->fill_bit_) {
+    if (fast_another->size_ == 0) {
+        if (not fast_another->get_fill_bit()) {
             this->Clear();
         }
         return;
     }
-    if (data_.size() >= fast_another->data_.size()) {
-        auto min_size = fast_another->data_.size();
-        auto max_size = data_.size();
-        BitAnd(reinterpret_cast<const uint8_t*>(this->data_.data()),
-               reinterpret_cast<const uint8_t*>(fast_another->data_.data()),
+    if (this->size_ >= fast_another->size_) {
+        auto min_size = fast_another->size_;
+        auto max_size = this->size_;
+        BitAnd(reinterpret_cast<const uint8_t*>(this->data_),
+               reinterpret_cast<const uint8_t*>(fast_another->data_),
                min_size * sizeof(uint64_t),
-               reinterpret_cast<uint8_t*>(this->data_.data()));
-        if (max_size > min_size and not fast_another->fill_bit_) {
-            std::fill(data_.begin() + static_cast<int64_t>(min_size), data_.end(), 0);
+               reinterpret_cast<uint8_t*>(this->data_));
+        if (max_size > min_size and not fast_another->get_fill_bit()) {
+            std::fill(data_ + min_size, data_ + max_size, 0);
         }
     } else {
-        auto max_size = fast_another->data_.size();
-        if (this->fill_bit_) {
-            this->data_.resize(max_size, (uint64_t)(-1));
+        auto max_size = fast_another->size_;
+        if (this->get_fill_bit()) {
+            resize(max_size, FILL_ONE);
         } else {
-            this->data_.resize(max_size, 0);
+            resize(max_size, 0);
         }
-        BitAnd(reinterpret_cast<const uint8_t*>(this->data_.data()),
-               reinterpret_cast<const uint8_t*>(fast_another->data_.data()),
+        BitAnd(reinterpret_cast<const uint8_t*>(this->data_),
+               reinterpret_cast<const uint8_t*>(fast_another->data_),
                max_size * sizeof(uint64_t),
-               reinterpret_cast<uint8_t*>(this->data_.data()));
+               reinterpret_cast<uint8_t*>(this->data_));
     }
-    this->fill_bit_ = this->fill_bit_ && fast_another->fill_bit_;
+    this->set_fill_bit(this->get_fill_bit() && fast_another->get_fill_bit());
 }
 
 void
@@ -176,7 +176,7 @@ FastBitset::Or(const std::vector<const ComputableBitset*>& other_bitsets) {
 std::string
 FastBitset::Dump() {
     std::string result = "{";
-    auto capacity = data_.size() * 64;
+    auto capacity = this->size_ * 64;
     int count = 0;
     for (int64_t i = 0; i < capacity; ++i) {
         if (Test(i)) {
@@ -194,35 +194,55 @@ FastBitset::Dump() {
 
 void
 FastBitset::Not() {
-    BitNot(reinterpret_cast<const uint8_t*>(data_.data()),
-           data_.size() * sizeof(uint64_t),
-           reinterpret_cast<uint8_t*>(data_.data()));
-    this->fill_bit_ = !this->fill_bit_;
+    BitNot(reinterpret_cast<const uint8_t*>(data_),
+           this->size_ * sizeof(uint64_t),
+           reinterpret_cast<uint8_t*>(data_));
+    this->set_fill_bit(!this->get_fill_bit());
 }
 
 void
 FastBitset::Serialize(StreamWriter& writer) const {
-    StreamWriter::WriteObj(writer, fill_bit_);
-    uint64_t size = data_.size();
+    bool fill_bit = this->get_fill_bit();
+    StreamWriter::WriteObj(writer, fill_bit);
+    uint64_t size = this->size_;
     StreamWriter::WriteObj(writer, size);
     if (size > 0) {
-        writer.Write(reinterpret_cast<const char*>(data_.data()), size * sizeof(uint64_t));
+        writer.Write(reinterpret_cast<const char*>(data_), size * sizeof(uint64_t));
     }
 }
 
 void
 FastBitset::Deserialize(StreamReader& reader) {
-    StreamReader::ReadObj(reader, fill_bit_);
+    bool fill_bit;
+    StreamReader::ReadObj(reader, fill_bit);
     uint64_t size;
     StreamReader::ReadObj(reader, size);
-    data_.resize(size);
-    reader.Read(reinterpret_cast<char*>(data_.data()), size * sizeof(uint64_t));
+    data_ = new uint64_t[size];
+    reader.Read(reinterpret_cast<char*>(data_), size * sizeof(uint64_t));
+    this->size_ = size;
+    this->set_capacity(size);
+    this->set_fill_bit(fill_bit);
 }
 
 void
 FastBitset::Clear() {
-    this->data_.clear();
-    fill_bit_ = false;
+    this->size_ = 0;
+    this->set_fill_bit(false);
+}
+
+void
+FastBitset::resize(uint32_t new_size, uint64_t fill) {
+    if (new_size > this->get_capacity()) {
+        auto* tmp = new uint64_t[new_size];
+        std::memcpy(tmp, data_, size_ * sizeof(uint64_t));
+        delete[] data_;
+        this->data_ = tmp;
+        this->set_capacity(new_size);
+    }
+    if (new_size > size_) {
+        std::fill(data_ + size_, data_ + new_size, fill);
+    }
+    size_ = new_size;
 }
 
 }  // namespace vsag
