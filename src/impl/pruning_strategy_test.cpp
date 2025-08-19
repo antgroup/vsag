@@ -214,7 +214,7 @@ TEST_CASE("Pruning Strategy Mutual Connection Test", "[ut][pruning_strategy]") {
 
         SECTION("rejects invalid candidates") {
             auto candidates = std::make_shared<StandardHeap<true, false>>(allocator.get(), -1);
-            candidates->Push(-1.0f, 0);
+            candidates->Push(-1.0F, 0);
 
             REQUIRE_THROWS_AS(mutually_connect_new_element(
                                   0, candidates, graph, flatten, mutexes, allocator.get()),
