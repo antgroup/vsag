@@ -533,6 +533,17 @@ public:
     }
 
     /**
+     * @brief Export the index's IDs as a dataset.
+     * 
+     * @return DatasetPtr A pointer to the exported IDs dataset.
+     * @throws std::runtime_error If the index does not support exporting the IDs.
+     */
+    virtual tl::expected<DatasetPtr, Error>
+    ExportIDs() const {
+        throw std::runtime_error("Index doesn't support ExportIDs");
+    }
+
+    /**
      * @brief set the index to immutable state.
      * After setting this state, no further modifications are supported, such as no additions or deletions 
      *
