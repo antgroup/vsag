@@ -117,7 +117,7 @@ release:                 ## Build vsag with release options.
 	cmake --build ${RELEASE_BUILD_DIR} --parallel ${COMPILE_JOBS}
 
 .PHONY: dist-old-abi
-dist-old-abi:            ## Build vsag with distribution options.
+dist-pre-cxx11-abi:      ## Build vsag with distribution options.
 	cmake ${VSAG_CMAKE_ARGS} -B${RELEASE_BUILD_DIR} -DCMAKE_BUILD_TYPE=Release -DENABLE_INTEL_MKL=off -DENABLE_CXX11_ABI=off -DENABLE_LIBCXX=off
 	cmake --build ${RELEASE_BUILD_DIR} --parallel ${COMPILE_JOBS}
 
