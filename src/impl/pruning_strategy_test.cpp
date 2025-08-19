@@ -87,7 +87,7 @@ CreateTestFlatten(Allocator* allocator) {
     vectors[0][0] = 1.0F;
     vectors[1][1] = 1.0F;
     vectors[2][2] = 1.0F;
-    for(int i = 0; i<3; ++i){
+    for (int i = 0; i < 3; ++i) {
         vectors[3][i] = 0.5F;
     }
     // Node 0: [1,0,0] (query point)
