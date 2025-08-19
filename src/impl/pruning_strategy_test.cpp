@@ -72,6 +72,7 @@ select_edges_by_heuristic(const DistHeapPtr& edges,
 
 static FlattenInterfacePtr
 CreateTestFlatten(Allocator* allocator) {
+    constexpr size_t TEST_DIM = 3;
     auto flatten_param = std::make_shared<FlattenDataCellParameter>();
     flatten_param->quantizer_parameter = std::make_shared<FP32QuantizerParameter>();
     flatten_param->io_parameter = std::make_shared<MemoryIOParameter>();
@@ -80,7 +81,7 @@ CreateTestFlatten(Allocator* allocator) {
     IndexCommonParam common_param;
     common_param.allocator_ = std::shared_ptr<Allocator>(allocator, [](auto*) {});
     common_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
-    common_param.dim_ = 128;
+    common_param.dim_ = TEST_DIM;
 
     auto flatten = FlattenInterface::MakeInstance(flatten_param, common_param);
     float vectors[4][3] = {
