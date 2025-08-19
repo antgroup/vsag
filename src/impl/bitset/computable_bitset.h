@@ -134,9 +134,6 @@ public:
      */
     virtual void
     Clear() = 0;
-
-public:
-    ComputableBitsetType type_{ComputableBitsetType::SparseBitset};
 };
 
 }  // namespace vsag
