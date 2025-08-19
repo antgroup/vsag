@@ -28,8 +28,8 @@ namespace vsag {
 class SparseBitset : public ComputableBitset {
 public:
     explicit SparseBitset() : ComputableBitset() {
-        this->type_ = ComputableBitsetType::SparseBitset;
     }
+
     ~SparseBitset() override = default;
 
     explicit SparseBitset(Allocator* allocator) : SparseBitset(){};
