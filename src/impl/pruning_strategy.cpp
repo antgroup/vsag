@@ -35,6 +35,8 @@ select_edges_by_heuristic(const DistHeapPtr& edges,
         edges->Pop();
     }
 
+    float alpha = 2.0;
+
     while (not queue_closest->Empty()) {
         if (return_list.size() >= max_size) {
             break;
@@ -46,7 +48,7 @@ select_edges_by_heuristic(const DistHeapPtr& edges,
 
         for (const auto& second_pair : return_list) {
             float curdist = flatten->ComputePairVectors(second_pair.second, current_pair.second);
-            if (curdist < float_query) {
+            if (alpha * curdist < float_query) {
                 good = false;
                 break;
             }

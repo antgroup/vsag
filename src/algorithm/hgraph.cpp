@@ -98,6 +98,8 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
         this->build_pool_->SetPoolSize(build_thread_count_);
     }
 
+    this->parallel_searcher_ = std::make_shared<ParallelSearcher>(common_param, neighbors_mutex_, build_pool_);
+
     UnorderedMap<std::string, float> default_param(common_param.allocator_.get());
     default_param.insert(
         {PREFETCH_DEPTH_CODE, (this->basic_flatten_codes_->code_size_ + 63.0) / 64.0});
@@ -370,6 +372,7 @@ HGraph::KnnSearch(const DatasetPtr& query,
         search_param.ef = 1;
         search_param.is_inner_id_allowed = nullptr;
         search_param.search_alloc = search_allocator;
+        search_param.level_0 = false;
         if (iter_filter_ctx->IsFirstUsed()) {
             for (auto i = static_cast<int64_t>(this->route_graphs_.size() - 1); i >= 0; --i) {
                 auto result = this->search_one_graph(
@@ -381,6 +384,7 @@ HGraph::KnnSearch(const DatasetPtr& query,
         search_param.ef = std::max(params.ef_search, k);
         search_param.is_inner_id_allowed = ft;
         search_param.topk = static_cast<int64_t>(search_param.ef);
+        search_param.level_0 = true;
         search_result = this->search_one_graph(query_data,
                                                this->bottom_graph_,
                                                this->basic_flatten_codes_,
@@ -485,11 +489,21 @@ HGraph::search_one_graph(const void* query,
                          const FlattenInterfacePtr& flatten,
                          InnerSearchParam& inner_search_param) const {
     auto visited_list = this->pool_->TakeOne();
-    auto result = this->searcher_->Search(
-        graph, flatten, visited_list, query, inner_search_param, this->label_table_);
+    DistHeapPtr result = nullptr;
+    if(inner_search_param.level_0){
+    result = 
+        //this->searcher_->Search(graph, flatten, visited_list, query, inner_search_param, this->label_table_);
+        this->parallel_searcher_->Search(graph, flatten, visited_list, query, inner_search_param);
+        //this->parallel_searcher_->Search_plus(graph, flatten, visited_list, query, inner_search_param);
+    }
+    else{
+        //std::cout<<"cnm"<<std::endl;
+        result = 
+        this->searcher_->Search(graph, flatten, visited_list, query, inner_search_param, this->label_table_);
+    }
     this->pool_->ReturnOne(visited_list);
     return result;
-}
+}  
 
 template <InnerSearchMode mode>
 DistHeapPtr
@@ -1735,6 +1749,7 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     search_param.ef = 1;
     search_param.is_inner_id_allowed = nullptr;
     search_param.search_alloc = search_allocator;
+    search_param.level_0 = false;
     const auto* raw_query = get_data(query);
     for (auto i = static_cast<int64_t>(this->route_graphs_.size() - 1); i >= 0; --i) {
         auto result = this->search_one_graph(
@@ -1763,6 +1778,7 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     search_param.is_inner_id_allowed = ft;
     search_param.topk = static_cast<int64_t>(search_param.ef);
     search_param.consider_duplicate = true;
+    search_param.level_0 = true;
     if (params.enable_time_record) {
         search_param.time_cost = std::make_shared<Timer>();
         search_param.time_cost->SetThreshold(params.timeout_ms);

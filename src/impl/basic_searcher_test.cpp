@@ -15,67 +15,9 @@
 
 #include "basic_searcher.h"
 
-#include <catch2/catch_template_test_macros.hpp>
-#include <catch2/generators/catch_generators.hpp>
-
-#include "algorithm/hnswlib/hnswalg.h"
-#include "algorithm/hnswlib/space_l2.h"
-#include "basic_optimizer.h"
-#include "data_cell/flatten_datacell.h"
-#include "fixtures.h"
-#include "impl/allocator/safe_allocator.h"
-#include "io/memory_io.h"
-#include "quantization/fp32_quantizer.h"
-#include "quantization/scalar_quantization/sq4_uniform_quantizer.h"
-#include "test_logger.h"
-#include "utils/visited_list.h"
+#include "searcher_test.h"
 
 using namespace vsag;
-
-class AdaptGraphDataCell : public GraphInterface {
-public:
-    AdaptGraphDataCell(std::shared_ptr<hnswlib::HierarchicalNSW> alg_hnsw) : alg_hnsw_(alg_hnsw){};
-
-    void
-    InsertNeighborsById(InnerIdType id, const Vector<InnerIdType>& neighbor_ids) override {
-        return;
-    };
-
-    void
-    Resize(InnerIdType new_size) override {
-        return;
-    };
-
-    void
-    GetNeighbors(InnerIdType id, Vector<InnerIdType>& neighbor_ids) const override {
-        int* data = (int*)alg_hnsw_->get_linklist0(id);
-        uint32_t size = alg_hnsw_->getListCount((hnswlib::linklistsizeint*)data);
-        neighbor_ids.resize(size);
-        for (uint32_t i = 0; i < size; i++) {
-            neighbor_ids[i] = *(data + i + 1);
-        }
-    }
-
-    uint32_t
-    GetNeighborSize(InnerIdType id) const override {
-        int* data = (int*)alg_hnsw_->get_linklist0(id);
-        return alg_hnsw_->getListCount((hnswlib::linklistsizeint*)data);
-    }
-
-    void
-    Prefetch(InnerIdType id, InnerIdType neighbor_i) override {
-        int* data = (int*)alg_hnsw_->get_linklist0(id);
-        vsag::Prefetch(data + neighbor_i + 1);
-    }
-
-    InnerIdType
-    MaximumDegree() const override {
-        return alg_hnsw_->getMaxDegree();
-    }
-
-private:
-    std::shared_ptr<hnswlib::HierarchicalNSW> alg_hnsw_;
-};
 
 TEST_CASE("Basic Usage for GraphDataCell (adapter of hnsw)", "[ut][GraphDataCell]") {
     uint32_t M = 32;

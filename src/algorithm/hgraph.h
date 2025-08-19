@@ -32,6 +32,7 @@
 #include "hgraph_parameter.h"
 #include "impl/basic_optimizer.h"
 #include "impl/basic_searcher.h"
+#include "impl/parallel_searcher.h"
 #include "impl/heap/distance_heap.h"
 #include "index/index_common_param.h"
 #include "index/iterator_filter.h"
@@ -328,6 +329,7 @@ private:
     bool use_attribute_filter_{false};
 
     BasicSearcherPtr searcher_;
+    ParallelSearcherPtr parallel_searcher_;
 
     std::default_random_engine level_generator_{2021};
     double mult_{1.0};
@@ -348,7 +350,7 @@ private:
     mutable std::shared_mutex add_mutex_;
 
     std::shared_ptr<SafeThreadPool> build_pool_{nullptr};
-    uint64_t build_thread_count_{100};
+    uint64_t build_thread_count_{1};
 
     std::atomic<InnerIdType> max_capacity_{0};
 
