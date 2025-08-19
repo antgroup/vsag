@@ -17,178 +17,25 @@
 
 #include <algorithm>
 #include <catch2/catch_test_macros.hpp>
-#include <map>
 #include <memory>
 #include <set>
 #include <vector>
 
-#include "data_cell/flatten_interface.h"
+#include "data_cell/flatten_datacell_parameter.h"
+#include "data_cell/graph_datacell_parameter.h"
+#include "fixtures.h"
 #include "impl/allocator/safe_allocator.h"
 #include "impl/heap/standard_heap.h"
+#include "io/memory_io_parameter.h"
 #include "lock_strategy.h"
-#include "metric_type.h"
+#include "quantization/fp32_quantizer_parameter.h"
 #include "typing.h"
+#include "vsag/engine.h"
 
 namespace vsag {
 using DistanceRecord = std::pair<float, InnerIdType>;
 #define distance first
 #define id second
-
-class TestMutexArray : public MutexArray {
-public:
-    explicit TestMutexArray(uint32_t size, Allocator* allocator)
-        : size_(size), allocator_(allocator) {
-    }
-
-    void
-    Lock(uint32_t i) override {
-    }
-    void
-    Unlock(uint32_t i) override {
-    }
-    void
-    SharedLock(uint32_t i) override {
-    }
-    void
-    SharedUnlock(uint32_t i) override {
-    }
-    void
-    Resize(uint32_t new_size) override {
-        size_ = new_size;
-    }
-
-private:
-    uint32_t size_;
-    Allocator* allocator_;
-};
-
-class TestFlatten : public FlattenInterface {
-public:
-    explicit TestFlatten(Allocator* allocator) : allocator_(allocator) {
-        set_distance(0, 1, 1.0F);
-        set_distance(0, 2, 2.0F);
-        set_distance(0, 3, 3.0F);
-        set_distance(1, 2, 1.5F);
-        set_distance(1, 3, 2.5F);
-        set_distance(2, 3, 1.0F);
-    }
-
-    float
-    ComputePairVectors(InnerIdType a, InnerIdType b) override {
-        auto key = a < b ? std::make_pair(a, b) : std::make_pair(b, a);
-        return distances_.at(key);
-    }
-
-    void
-    Query(
-        float*, const ComputerInterfacePtr&, const InnerIdType*, InnerIdType, Allocator*) override {
-    }
-    ComputerInterfacePtr
-    FactoryComputer(const void*) override {
-        return nullptr;
-    }
-    void
-    Train(const void*, uint64_t) override {
-    }
-    void
-    InsertVector(const void*, InnerIdType) override {
-    }
-    void
-    BatchInsertVector(const void*, InnerIdType, InnerIdType*) override {
-    }
-    void
-    Prefetch(InnerIdType) override {
-    }
-    std::string
-    GetQuantizerName() override {
-        return "test";
-    }
-    MetricType
-    GetMetricType() override {
-        return MetricType::METRIC_TYPE_L2SQR;
-    }
-    void
-    Resize(InnerIdType) override {
-    }
-    void
-    ExportModel(const FlattenInterfacePtr&) const override {
-    }
-    bool
-    Decode(const uint8_t*, DataType*) override {
-        return false;
-    }
-    const uint8_t*
-    GetCodesById(InnerIdType, bool&) const override {
-        return nullptr;
-    }
-    bool
-    GetCodesById(InnerIdType, uint8_t*) const override {
-        return false;
-    }
-    InnerIdType
-    TotalCount() const override {
-        return 4;
-    }
-
-private:
-    void
-    set_distance(InnerIdType a, InnerIdType b, float dist) {
-        distances_[{a, b}] = dist;
-        distances_[{b, a}] = dist;
-    }
-
-    Allocator* allocator_;
-    std::map<std::pair<InnerIdType, InnerIdType>, float> distances_;
-};
-
-class TestGraph : public GraphInterface {
-public:
-    explicit TestGraph(Allocator* allocator) : allocator_(allocator), max_degree_(16) {
-    }
-
-    void
-    InsertNeighborsById(InnerIdType id, const Vector<InnerIdType>& neighbors) override {
-        if (neighbors.size() > max_degree_) {
-            throw std::runtime_error("Exceeded maximum degree");
-        }
-        neighbors_[id] = std::vector<InnerIdType>(neighbors.begin(), neighbors.end());
-    }
-
-    void
-    GetNeighbors(InnerIdType id, Vector<InnerIdType>& neighbors) const override {
-        neighbors.clear();
-        auto it = neighbors_.find(id);
-        if (it != neighbors_.end()) {
-            neighbors.assign(it->second.begin(), it->second.end());
-        }
-    }
-
-    uint32_t
-    GetNeighborSize(InnerIdType id) const override {
-        auto it = neighbors_.find(id);
-        return it != neighbors_.end() ? it->second.size() : 0;
-    }
-
-    void
-    Prefetch(InnerIdType, InnerIdType) override {
-    }
-    InnerIdType
-    MaximumDegree() const override {
-        return max_degree_;
-    }
-    void
-    SetMaximumDegree(InnerIdType max_degree) override {
-        max_degree_ = max_degree;
-    }
-    void
-    Resize(InnerIdType) override {
-    }
-
-private:
-    Allocator* allocator_;
-    InnerIdType max_degree_;
-    std::map<InnerIdType, std::vector<InnerIdType>> neighbors_;
-};
 
 void
 select_edges_by_heuristic(const DistHeapPtr& edges,
@@ -200,7 +47,7 @@ select_edges_by_heuristic(const DistHeapPtr& edges,
         return;
     }
 
-    // Step 1: Extract all edges and apply alpha scaling
+    // 1. Extract and scale all edges from the heap
     std::vector<DistanceRecord> all_edges;
     while (!edges->Empty()) {
         auto top = edges->Top();
@@ -208,133 +55,171 @@ select_edges_by_heuristic(const DistHeapPtr& edges,
         edges->Pop();
     }
 
-    // Step 2: Build max-heap (prioritizing larger distances)
-    auto comp = [](const DistanceRecord& a, const DistanceRecord& b) {
-        return a.distance < b.distance;
-    };
-    std::make_heap(all_edges.begin(), all_edges.end(), comp);
+    // 2. Sort by distance (descending) and then by id (ascending) for tie-breaker
+    std::sort(
+        all_edges.begin(), all_edges.end(), [](const DistanceRecord& a, const DistanceRecord& b) {
+            if (a.distance != b.distance) {
+                return a.distance > b.distance;
+            }
+            return a.id < b.id;
+        });
 
-    // Step 3: Select top max_size edges with largest scaled distances
+    // 3. Select top max_size edges
     for (size_t i = 0; i < max_size && i < all_edges.size(); ++i) {
         edges->Push(all_edges[i].distance, all_edges[i].id);
     }
 }
 
-static std::shared_ptr<Allocator>
-CreateTestAllocator() {
-    return std::make_shared<SafeAllocator>(std::make_shared<DefaultAllocator>());
+static FlattenInterfacePtr
+CreateTestFlatten(Allocator* allocator) {
+    auto flatten_param = std::make_shared<FlattenDataCellParameter>();
+    flatten_param->quantizer_parameter = std::make_shared<FP32QuantizerParameter>();
+    flatten_param->io_parameter = std::make_shared<MemoryIOParameter>();
+    flatten_param->name = FLATTEN_DATA_CELL;
+
+    IndexCommonParam common_param;
+    common_param.allocator_ = std::shared_ptr<Allocator>(allocator, [](auto*) {});
+    common_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
+    common_param.dim_ = 128;
+
+    auto flatten = FlattenInterface::MakeInstance(flatten_param, common_param);
+    float vectors[4][3] = {
+        {1.0F, 0.0F, 0.0F}, {0.0F, 1.0F, 0.0F}, {0.0F, 0.0F, 1.0F}, {0.5F, 0.5F, 0.5F}};
+    // Node 0: [1,0,0] (query point)
+    // Node 1: [0,1,0] (distance 1.414 from node 0)
+    // Node 2: [0,0,1] (distance 1.414 from node 0)
+    // Node 3: [0.5,0.5,0.5] (distance 0.866 from node 0)
+
+    flatten->Train(vectors, 4);
+    flatten->BatchInsertVector(vectors, 4);
+
+    return flatten;
+}
+
+static GraphInterfacePtr
+CreateTestGraph(Allocator* allocator) {
+    auto graph_param = std::make_shared<GraphDataCellParameter>();
+    graph_param->io_parameter_ = std::make_shared<MemoryIOParameter>();
+    graph_param->max_degree_ = 32;
+    graph_param->init_max_capacity_ = 100;
+    graph_param->support_remove_ = false;
+
+    IndexCommonParam common_param;
+    common_param.allocator_ = std::shared_ptr<Allocator>(allocator, [](auto*) {});
+
+    return GraphInterface::MakeInstance(graph_param, common_param);
 }
 
 TEST_CASE("Pruning Strategy Select Edges Test", "[ut][pruning_strategy]") {
-    auto allocator = CreateTestAllocator();
-    auto flatten = std::make_shared<TestFlatten>(allocator.get());
+    auto allocator = Engine::CreateDefaultAllocator();
+    {
+        auto flatten = CreateTestFlatten(allocator.get());
 
-    SECTION("prunes to farthest nodes") {
-        auto edges = std::make_shared<StandardHeap<true, false>>(allocator.get(), -1);
-        // Initial edges: [ (1.0, 1), (2.0, 2), (3.0, 3) ]
-        edges->Push(3.0F, 3);
-        edges->Push(1.0F, 1);
-        edges->Push(2.0F, 2);
+        SECTION("prunes to farthest nodes (alpha=1.0 default)") {
+            // Initialize test heap with 3 edges:
+            // [ (1.414,1), (1.414,2), (0.866,3) ]
+            auto edges = std::make_shared<StandardHeap<true, false>>(allocator.get(), -1);
+            edges->Push(flatten->ComputePairVectors(0, 1), 1);
+            edges->Push(flatten->ComputePairVectors(0, 2), 2);
+            edges->Push(flatten->ComputePairVectors(0, 3), 3);
 
-        /*
-        Pruning process (alpha = 1.0, max_size = 2):
-            1. Extract edges: [(3.0, 3), (1.0, 1), (2.0, 2) ]
-            2. Build max-heap: [ (3.0, 3), (1.0, 1), (2.0, 2) ]
-            3. Select top 2: (3.0, 3) and (2.0, 2)
-        */
-        select_edges_by_heuristic(edges, 2, flatten, allocator.get());
+            // Pruning process (max_size=2):
+            // 1. Extract all edges (no change with alpha=1.0)
+            // 2. Sort: maintains order since distances equal
+            // 3. Select top 2: keeps nodes 1 and 2
+            select_edges_by_heuristic(edges, 2, flatten, allocator.get());
 
-        REQUIRE(edges->Size() == 2);
+            REQUIRE(edges->Size() == 2);
+            std::set<InnerIdType> kept_nodes;
+            kept_nodes.insert(edges->Top().id);
+            edges->Pop();
+            kept_nodes.insert(edges->Top().id);
+            REQUIRE(kept_nodes == std::set<InnerIdType>{1, 2});
+        }
 
-        std::set<InnerIdType> kept_nodes;
-        kept_nodes.insert(edges->Top().id);
-        edges->Pop();
-        kept_nodes.insert(edges->Top().id);
+        SECTION("alpha=0.5 reduces distance differences") {
+            auto edges = std::make_shared<StandardHeap<true, false>>(allocator.get(), -1);
+            edges->Push(flatten->ComputePairVectors(0, 1), 1);
+            edges->Push(flatten->ComputePairVectors(0, 2), 2);
+            edges->Push(flatten->ComputePairVectors(0, 3), 3);
 
-        REQUIRE(kept_nodes == std::set<InnerIdType>{2, 3});
-    }
+            // Pruning process:
+            // 1. Scaled distances: [0.707, 0.707, 0.433]
+            // 2. Sort maintains order
+            // 3. Still keeps nodes 1 and 2
+            select_edges_by_heuristic(edges, 2, flatten, allocator.get(), 0.5F);
 
-    SECTION("alpha = 0.5 favors closer nodes") {
-        auto edges = std::make_shared<StandardHeap<true, false>>(allocator.get(), -1);
-        // Initial edges: [ (1.0, 1), (4.0, 2) ]
-        edges->Push(1.0F, 1);
-        edges->Push(4.0F, 2);
+            REQUIRE(edges->Size() == 2);
+            std::set<InnerIdType> kept_nodes;
+            kept_nodes.insert(edges->Top().id);
+            edges->Pop();
+            kept_nodes.insert(edges->Top().id);
+            REQUIRE(kept_nodes == std::set<InnerIdType>{1, 2});
+        }
 
-        /*
-        Pruning process (alpha=0.5, max_size=1):
-            1. Scaled distances: [ (0.5, 1), (2.0, 2) ]
-            2. Max-heap: [ (2.0, 2), (0.5, 1) ]
-            3. Select top 1: (2.0, 2)
-        */
-        select_edges_by_heuristic(edges, 1, flatten, allocator.get(), 0.5f);
+        SECTION("alpha=2.0 amplifies distance differences") {
+            auto edges = std::make_shared<StandardHeap<true, false>>(allocator.get(), -1);
+            edges->Push(flatten->ComputePairVectors(0, 1), 1);
+            edges->Push(flatten->ComputePairVectors(0, 2), 2);
+            edges->Push(flatten->ComputePairVectors(0, 3), 3);
 
-        REQUIRE(edges->Size() == 1);
-        REQUIRE(edges->Top().id == 2);
-    }
+            select_edges_by_heuristic(edges, 2, flatten, allocator.get(), 2.0F);
 
-    SECTION("alpha=2.0 strongly favors farther nodes") {
-        auto edges = std::make_shared<StandardHeap<true, false>>(allocator.get(), -1);
-        // Initial edges: [ (1.0, 1), (2.0, 2), (3.0, 3) ]
-        edges->Push(1.0F, 1);
-        edges->Push(2.0F, 2);
-        edges->Push(3.0F, 3);
+            REQUIRE(edges->Size() == 2);
+            std::set<InnerIdType> kept_nodes;
+            kept_nodes.insert(edges->Top().id);
+            edges->Pop();
+            kept_nodes.insert(edges->Top().id);
+            REQUIRE(kept_nodes == std::set<InnerIdType>{1, 2});
+        }
 
-        /*
-        Pruning process (alpha=2.0, max_size=2):
-            1. Scaled distances: [ (2.0, 1), (4.0, 2), (6.0, 3) ]
-            2. Max-heap: [ (6.0, 3), (4.0, 2), (2.0, 1) ]
-            3. Select top 2: (6.0, 3) and (4.0, 2)
-        */
-        select_edges_by_heuristic(edges, 2, flatten, allocator.get(), 2.0F);
+        SECTION("alpha=0.5 with single selection") {
+            auto edges = std::make_shared<StandardHeap<true, false>>(allocator.get(), -1);
+            edges->Push(flatten->ComputePairVectors(0, 1), 1);  // 0.707
+            edges->Push(flatten->ComputePairVectors(0, 2), 2);  // 0.707
+            edges->Push(flatten->ComputePairVectors(0, 3), 3);  // 0.433
 
-        REQUIRE(edges->Size() == 2);
+            select_edges_by_heuristic(edges, 1, flatten, allocator.get(), 0.5F);
 
-        std::set<InnerIdType> kept_nodes;
-        kept_nodes.insert(edges->Top().id);
-        edges->Pop();
-        kept_nodes.insert(edges->Top().id);
-
-        REQUIRE(kept_nodes == std::set<InnerIdType>{2, 3});
+            REQUIRE(edges->Size() == 1);
+            REQUIRE((edges->Top().id == 1 || edges->Top().id == 2));
+        }
     }
 }
 
 TEST_CASE("Pruning Strategy Mutual Connection Test", "[ut][pruning_strategy]") {
-    auto allocator = CreateTestAllocator();
-    auto flatten = std::make_shared<TestFlatten>(allocator.get());
-    auto graph = std::make_shared<TestGraph>(allocator.get());
-    auto mutexes = std::make_shared<TestMutexArray>(10, allocator.get());
+    auto allocator = Engine::CreateDefaultAllocator();
+    {
+        auto flatten = CreateTestFlatten(allocator.get());
+        auto graph = CreateTestGraph(allocator.get());
+        auto mutexes = std::make_shared<EmptyMutex>();
 
-    graph->SetMaximumDegree(1);
+        graph->SetMaximumDegree(1);
 
-    SECTION("connects to farthest candidate") {
-        auto candidates = std::make_shared<StandardHeap<true, false>>(allocator.get(), -1);
-        // Candidate edges: [ (1.0, 1), (3.0, 3) ]
-        candidates->Push(3.0F, 3);
-        candidates->Push(1.0F, 1);
+        SECTION("connects to farthest candidate") {
+            auto candidates = std::make_shared<StandardHeap<true, false>>(allocator.get(), -1);
+            candidates->Push(flatten->ComputePairVectors(0, 1), 1);
+            candidates->Push(flatten->ComputePairVectors(0, 3), 3);
 
-        /*
-        Mutual connection process (max_degree=1):
-            1. Select farthest candidate (node 3)
-            2. Connect node 0 to node 3
-            3. Return entry point (node 3)
-        */
-        auto entry =
-            mutually_connect_new_element(0, candidates, graph, flatten, mutexes, allocator.get());
-        REQUIRE(entry == 3);
+            //verify connection was made
+            auto entry = mutually_connect_new_element(
+                0, candidates, graph, flatten, mutexes, allocator.get());
+            REQUIRE(entry == 1);
 
-        Vector<InnerIdType> neighbors(allocator.get());
-        graph->GetNeighbors(0, neighbors);
-        REQUIRE(neighbors.size() == 1);
-        REQUIRE(neighbors[0] == 3);
-    }
+            Vector<InnerIdType> neighbors(allocator.get());
+            graph->GetNeighbors(0, neighbors);
+            REQUIRE(neighbors.size() == 1);
+            REQUIRE(neighbors[0] == 1);
+        }
 
-    SECTION("rejects self-connections") {
-        auto candidates = std::make_shared<StandardHeap<true, false>>(allocator.get(), -1);
-        candidates->Push(-1.0F, 0);  // Attempt self-connection
+        SECTION("rejects invalid candidates") {
+            auto candidates = std::make_shared<StandardHeap<true, false>>(allocator.get(), -1);
+            candidates->Push(-1.0f, 0);
 
-        REQUIRE_THROWS_AS(
-            mutually_connect_new_element(0, candidates, graph, flatten, mutexes, allocator.get()),
-            VsagException);
+            REQUIRE_THROWS_AS(mutually_connect_new_element(
+                                  0, candidates, graph, flatten, mutexes, allocator.get()),
+                              VsagException);
+        }
     }
 }
 }  // namespace vsag
