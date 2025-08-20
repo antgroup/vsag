@@ -160,11 +160,12 @@ const char* const HGRAPH_PARAMETER_EF_RUNTIME = "ef_search";
 const char* const HGRAPH_EXTRA_INFO_SIZE = "extra_info_size";
 const char* const HGRAPH_SUPPORT_DUPLICATE = "support_duplicate";
 const char* const HGRAPH_USE_EXTRA_INFO_FILTER = "use_extra_info_filter";
-const char* const HGRAPH_STORE_RAW_VECTOR = "store_raw_vector";
+const char* const STORE_RAW_VECTOR = "store_raw_vector";
+const char* const RAW_VECTOR_IO_TYPE = "raw_vector_io_type";
+const char* const RAW_VECTOR_FILE_PATH = "raw_vector_file_path";
 
 const char* const BRUTE_FORCE_QUANTIZATION_TYPE = "quantization_type";
 const char* const BRUTE_FORCE_IO_TYPE = "io_type";
-const char* const BRUTE_FORCE_STORE_RAW_VECTOR = "store_raw_vector";
 
 const char* const IVF_USE_RESIDUAL = "use_residual";
 const char* const IVF_USE_REORDER = "use_reorder";

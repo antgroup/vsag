@@ -110,6 +110,7 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
         this->attr_filter_index_ =
             AttributeInvertedInterface::MakeInstance(allocator_, false /*have_bucket*/);
     }
+    check_and_init_raw_vector(hgraph_param->raw_vector_param, common_param);
 }
 void
 HGraph::Train(const DatasetPtr& base) {
@@ -777,6 +778,9 @@ HGraph::Serialize(StreamWriter& writer) const {
     if (this->use_attribute_filter_ and this->attr_filter_index_ != nullptr) {
         this->attr_filter_index_->Serialize(writer);
     }
+    if (create_new_raw_vector_) {
+        this->raw_vector_->Serialize(writer);
+    }
 
     // serialize footer (introduced since v0.15)
     auto jsonify_basic_info = this->serialize_basic_info();
@@ -852,6 +856,10 @@ HGraph::Deserialize(StreamReader& reader) {
 
         if (this->use_attribute_filter_ and this->attr_filter_index_ != nullptr) {
             this->attr_filter_index_->Deserialize(buffer_reader);
+        }
+
+        if (create_new_raw_vector_) {
+            this->raw_vector_->Deserialize(buffer_reader);
         }
     }
 
@@ -967,6 +975,9 @@ HGraph::add_one_point(const void* data, int level, InnerIdType inner_id) {
     this->basic_flatten_codes_->InsertVector(data, inner_id);
     if (use_reorder_) {
         this->high_precise_codes_->InsertVector(data, inner_id);
+    }
+    if (create_new_raw_vector_) {
+        raw_vector_->InsertVector(data, inner_id);
     }
     std::unique_lock add_lock(add_mutex_);
     if (level >= static_cast<int>(this->route_graphs_.size()) || bottom_graph_->TotalCount() == 0) {
@@ -1127,6 +1138,11 @@ HGraph::InitFeatures() {
         }
     }
 
+    if (raw_vector_ != nullptr) {
+        this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_CAL_DISTANCE_BY_ID);
+        this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_GET_RAW_VECTOR_BY_IDS);
+    }
+
     // metric
     if (metric_ == MetricType::METRIC_TYPE_IP) {
         this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_METRIC_TYPE_INNER_PRODUCT);
@@ -1180,6 +1196,7 @@ static const std::string HGRAPH_PARAMS_TEMPLATE =
         "{HGRAPH_IGNORE_REORDER_KEY}": false,
         "{HGRAPH_BUILD_BY_BASE_QUANTIZATION_KEY}": false,
         "{HGRAPH_USE_ATTRIBUTE_FILTER_KEY}": false,
+        "{STORE_RAW_VECTOR_KEY}": false,
         "{HGRAPH_GRAPH_KEY}": {
             "{IO_PARAMS_KEY}": {
                 "{IO_TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
@@ -1227,6 +1244,16 @@ static const std::string HGRAPH_PARAMS_TEMPLATE =
                 "{HOLD_MOLDS}": false
             }
         },
+        "{RAW_VECTOR_KEY}": {
+            "{IO_PARAMS_KEY}": {
+                "{IO_TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
+                "{IO_FILE_PATH}": "{DEFAULT_FILE_PATH_VALUE}"
+            },
+            "{QUANTIZATION_PARAMS_KEY}": {
+                "{QUANTIZATION_TYPE_KEY}": "{QUANTIZATION_TYPE_VALUE_FP32}",
+                "{HOLD_MOLDS}": true
+            }
+        },
         "{BUILD_PARAMS_KEY}": {
             "{BUILD_EF_CONSTRUCTION}": 400,
             "{BUILD_THREAD_COUNT}": 100
@@ -1237,7 +1264,6 @@ static const std::string HGRAPH_PARAMS_TEMPLATE =
                 "{IO_FILE_PATH}": "{DEFAULT_FILE_PATH_VALUE}"
             }
         },
-        "{HGRAPH_GET_RAW_VECTOR_COSINE}": false,
         "{HGRAPH_SUPPORT_DUPLICATE}": false
     })";
 
@@ -1283,7 +1309,7 @@ HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
                                                 },
                                             },
                                             {
-                                                HGRAPH_STORE_RAW_VECTOR,
+                                                STORE_RAW_VECTOR,
                                                 {
                                                     HGRAPH_BASE_CODES_KEY,
                                                     QUANTIZATION_PARAMS_KEY,
@@ -1331,11 +1357,33 @@ HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
                                                 },
                                             },
                                             {
-                                                HGRAPH_STORE_RAW_VECTOR,
+                                                STORE_RAW_VECTOR,
                                                 {
                                                     HGRAPH_PRECISE_CODES_KEY,
                                                     QUANTIZATION_PARAMS_KEY,
                                                     HOLD_MOLDS,
+                                                },
+                                            },
+                                            {
+                                                STORE_RAW_VECTOR,
+                                                {
+                                                    STORE_RAW_VECTOR_KEY,
+                                                },
+                                            },
+                                            {
+                                                RAW_VECTOR_IO_TYPE,
+                                                {
+                                                    RAW_VECTOR_KEY,
+                                                    IO_PARAMS_KEY,
+                                                    IO_TYPE_KEY,
+                                                },
+                                            },
+                                            {
+                                                RAW_VECTOR_FILE_PATH,
+                                                {
+                                                    RAW_VECTOR_KEY,
+                                                    IO_PARAMS_KEY,
+                                                    IO_FILE_PATH,
                                                 },
                                             },
                                             {
@@ -1508,6 +1556,11 @@ HGraph::ExportModel(const IndexCommonParam& param) const {
 }
 void
 HGraph::GetCodeByInnerId(InnerIdType inner_id, uint8_t* data) const {
+    if (raw_vector_ != nullptr) {
+        raw_vector_->GetCodesById(inner_id, data);
+        return;
+    }
+
     if (use_reorder_) {
         high_precise_codes_->GetCodesById(inner_id, data);
     } else {
@@ -1963,6 +2016,46 @@ HGraph::analyze_graph_connection(JsonType& stats) const {
         }
     }
     stats["connect_components"] = connect_components;
+}
+
+void
+HGraph::check_and_init_raw_vector(const FlattenInterfaceParamPtr& raw_vector_param,
+                                  const IndexCommonParam& common_param) {
+    if (raw_vector_param == nullptr) {
+        return;
+    }
+
+    if (basic_flatten_codes_->GetQuantizerName() != QUANTIZATION_TYPE_VALUE_FP32 and
+        high_precise_codes_ == nullptr) {
+        raw_vector_ = FlattenInterface::MakeInstance(raw_vector_param, common_param);
+        create_new_raw_vector_ = true;
+        return;
+    }
+    if (basic_flatten_codes_->GetQuantizerName() != QUANTIZATION_TYPE_VALUE_FP32 and
+        high_precise_codes_ != nullptr and
+        high_precise_codes_->GetQuantizerName() != QUANTIZATION_TYPE_VALUE_FP32) {
+        raw_vector_ = FlattenInterface::MakeInstance(raw_vector_param, common_param);
+        create_new_raw_vector_ = true;
+        return;
+    }
+
+    auto io_type_name = raw_vector_param->io_parameter->GetTypeName();
+    if (io_type_name != IO_TYPE_VALUE_BLOCK_MEMORY_IO and io_type_name != IO_TYPE_VALUE_MEMORY_IO) {
+        raw_vector_ = FlattenInterface::MakeInstance(raw_vector_param, common_param);
+        create_new_raw_vector_ = true;
+        return;
+    }
+
+    if (basic_flatten_codes_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32) {
+        raw_vector_ = basic_flatten_codes_;
+        return;
+    }
+
+    if (high_precise_codes_ != nullptr and
+        high_precise_codes_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32) {
+        raw_vector_ = high_precise_codes_;
+        return;
+    }
 }
 
 }  // namespace vsag
