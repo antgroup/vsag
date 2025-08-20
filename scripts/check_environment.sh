@@ -12,7 +12,7 @@ function get_vsag() {
 }
 
 function get_compiler() {
-    compiler_version=$(c++ --version | head -n 1)
+    compiler_version=$(${CXX:-c++} --version | head -n 1)
     echo "- compiler version: $compiler_version"
 }
 

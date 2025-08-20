@@ -38,7 +38,7 @@ using namespace vsag;
     }
 
 TEST_CASE("Transform Quantizer Parameter CheckCompatibility", "[ut][TransformQuantizerParameter]") {
-    auto param_template = R"(
+    constexpr static const char* param_template = R"(
         {{
             "tq_chain": "{}",
             "rabitq_use_fht": true,
