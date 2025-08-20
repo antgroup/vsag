@@ -2100,4 +2100,25 @@ TestIndex::TestSearchOvertime(const IndexPtr& index,
         REQUIRE(res.has_value());
     }
 }
+
+void
+TestIndex::TestExportIDs(const IndexPtr& index, const TestDatasetPtr& dataset) {
+    if (not index->CheckFeature(vsag::SUPPORT_EXPORT_IDS)) {
+        return;
+    }
+    auto result = index->ExportIDs();
+    REQUIRE(result.has_value());
+    const auto* ids = result.value()->GetIds();
+    auto num_element = result.value()->GetNumElements();
+    REQUIRE(num_element == dataset->base_->GetNumElements());
+    auto* origin_ids = dataset->base_->GetIds();
+    // check ids, no order
+    std::unordered_set<int64_t> id_set(origin_ids, origin_ids + num_element);
+    for (int64_t i = 0; i < num_element; ++i) {
+        REQUIRE(id_set.find(ids[i]) != id_set.end());
+    }
+    std::unordered_set<int64_t> id_set2(ids, ids + num_element);
+    REQUIRE(id_set2.size() == num_element);
+}
+
 }  // namespace fixtures

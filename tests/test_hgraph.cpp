@@ -635,6 +635,7 @@ TestHGraphBuild(const fixtures::HGraphTestIndexPtr& test_index,
 
                 TestIndex::TestBuildIndex(index, dataset, true);
                 HGraphTestIndex::TestGeneral(index, dataset, search_param, recall);
+                TestIndex::TestExportIDs(index, dataset);
 
                 vsag::Options::Instance().set_block_size_limit(origin_size);
             }
