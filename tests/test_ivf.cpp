@@ -254,6 +254,7 @@ IVFTestIndex::TestGeneral(const TestIndex::IndexPtr& index,
     TestRangeSearch(index, dataset, search_param, recall / 2.0, 5, true);
     TestFilterSearch(index, dataset, search_param, recall, true);
     TestCheckIdExist(index, dataset);
+    TestExportIDs(index, dataset);
 }
 }  // namespace fixtures
 

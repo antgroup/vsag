@@ -283,6 +283,9 @@ public:
                        const TestDatasetPtr& dataset,
                        const std::string& search_param);
 
+    static void
+    TestExportIDs(const IndexPtr& index, const TestDatasetPtr& dataset);
+
     constexpr static float RECALL_THRESHOLD = 0.95;
 };
 

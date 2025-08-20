@@ -112,6 +112,11 @@ public:
         return this->label_table_[inner_id];
     }
 
+    inline const LabelType*
+    GetAllLabels() const {
+        return label_table_.data();
+    }
+
     void
     Serialize(StreamWriter& writer) const {
         StreamWriter::WriteVector(writer, label_table_);

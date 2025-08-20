@@ -257,6 +257,9 @@ public:
                             "Index doesn't support ExportModel");
     }
 
+    virtual DatasetPtr
+    ExportIDs() const;
+
     virtual void
     SetImmutable() {
         throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
