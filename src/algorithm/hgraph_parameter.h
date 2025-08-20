@@ -44,6 +44,7 @@ public:
 public:
     FlattenInterfaceParamPtr base_codes_param{nullptr};
     FlattenInterfaceParamPtr precise_codes_param{nullptr};
+    FlattenInterfaceParamPtr raw_vector_param{nullptr};
     GraphInterfaceParamPtr bottom_graph_param{nullptr};
     SparseGraphDatacellParamPtr hierarchical_graph_param{nullptr};
     ExtraInfoDataCellParamPtr extra_info_param{nullptr};
