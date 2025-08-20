@@ -29,8 +29,8 @@
 #include "io/memory_io_parameter.h"
 #include "lock_strategy.h"
 #include "quantization/fp32_quantizer_parameter.h"
-#include "vsag/engine.h"
 #include "typing.h"
+#include "vsag/engine.h"
 
 namespace vsag {
 using DistanceRecord = std::pair<float, InnerIdType>;
