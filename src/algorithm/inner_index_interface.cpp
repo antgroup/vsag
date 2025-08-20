@@ -35,6 +35,7 @@ InnerIndexInterface::InnerIndexInterface(ParamPtr index_param, const IndexCommon
       data_type_(common_param.data_type_) {
     this->label_table_ = std::make_shared<LabelTable>(allocator_);
     this->index_feature_list_ = std::make_shared<IndexFeatureList>();
+    this->index_feature_list_->SetFeature(SUPPORT_EXPORT_IDS);
 }
 
 std::vector<int64_t>
@@ -332,6 +333,18 @@ InnerIndexInterface::GetVectorByIds(const int64_t* ids, int64_t count) const {
         this->GetVectorByInnerId(inner_id, float_vectors + i * dim_);
     }
     return vectors;
+}
+
+DatasetPtr
+InnerIndexInterface::ExportIDs() const {
+    std::shared_lock lock(this->label_lookup_mutex_);
+    DatasetPtr result = Dataset::Make();
+    auto num_element = this->label_table_->GetTotalCount();
+    auto* labels = (LabelType*)allocator_->Allocate(sizeof(LabelType) * num_element);
+    const auto* origin_label = this->label_table_->GetAllLabels();
+    memcpy(labels, origin_label, sizeof(LabelType) * num_element);
+    result->NumElements(num_element)->Ids(labels)->Dim(1)->Owner(true, allocator_);
+    return result;
 }
 
 }  // namespace vsag
