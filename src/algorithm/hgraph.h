@@ -308,9 +308,15 @@ private:
     void
     analyze_graph_connection(JsonType& stats) const;
 
+    void
+    check_and_init_raw_vector(const FlattenInterfaceParamPtr& raw_vector_param,
+                              const IndexCommonParam& common_param);
+
 private:
     FlattenInterfacePtr basic_flatten_codes_{nullptr};
     FlattenInterfacePtr high_precise_codes_{nullptr};
+    bool create_new_raw_vector_{false};
+    FlattenInterfacePtr raw_vector_{nullptr};
     Vector<GraphInterfacePtr> route_graphs_;
     GraphInterfacePtr bottom_graph_{nullptr};
     SparseGraphDatacellParamPtr hierarchical_datacell_param_{nullptr};
