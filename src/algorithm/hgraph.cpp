@@ -294,6 +294,7 @@ HGraph::KnnSearch(const DatasetPtr& query,
                   const std::string& parameters,
                   const FilterPtr& filter,
                   Allocator* allocator) const {
+    SearchRequest req;
     req.query_ = query;
     req.topk_ = k;
     req.filter_ = filter;
