@@ -53,6 +53,7 @@ constexpr static const uint32_t GENERATE_SEARCH_L = 400;
 constexpr static const uint32_t UPDATE_CHECK_SEARCH_L = 100;
 constexpr static const float GENERATE_OMEGA = 0.51;
 constexpr static const uint32_t TQ_MAX_TRAIN_COUNT = 10000;
+constexpr static const uint32_t DEFAULT_CENTROIDS_COUNT = 10;
 
 // sindi related
 constexpr static const uint32_t ESTIMATE_DOC_TERM = 100;

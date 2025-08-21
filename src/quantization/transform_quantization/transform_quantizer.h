@@ -89,7 +89,8 @@ public:
 public:
     VectorTransformerPtr
     MakeTransformerInstance(std::string transform_str,
-                            const VectorTransformerParameter& param) const;
+                            const VectorTransformerParameter& param,
+                            const IndexCommonParam& common_param) const;
 
     void
     ExecuteChainTransform(DataType* prev_data, const uint32_t* meta_offsets, uint8_t* codes) const;

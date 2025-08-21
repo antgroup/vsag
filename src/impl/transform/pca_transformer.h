@@ -28,7 +28,7 @@ struct PCAMeta : public TransformerMeta {
     }
 
     void
-    DecodeMeta(uint8_t* code, uint32_t align_size) override {
+    DecodeMeta(const uint8_t* code, uint32_t align_size) override {
         residual_norm = *((float*)code);
     }
 
@@ -63,10 +63,14 @@ public:
     Deserialize(StreamReader& reader) override;
 
     TransformerMetaPtr
-    Transform(const float* input_vec, float* output_vec) const override;
+    Transform(const float* input_vec,
+              float* output_vec,
+              const InnerTransformParamPtr param = nullptr) const override;
 
     void
-    InverseTransform(const float* input_vec, float* output_vec) const override;
+    InverseTransform(const float* input_vec,
+                     float* output_vec,
+                     const InnerTransformParamPtr param = nullptr) const override;
 
     float
     RecoveryDistance(float dist, const uint8_t* meta1, const uint8_t* meta2) const override {

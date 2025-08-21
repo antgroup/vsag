@@ -1,7 +1,7 @@
 
 CMAKE_GENERATOR ?= "Unix Makefiles"
 CMAKE_INSTALL_PREFIX ?= "/usr/local/"
-COMPILE_JOBS ?= 6
+COMPILE_JOBS ?= 32
 DEBUG_BUILD_DIR ?= "./build/"
 RELEASE_BUILD_DIR ?= "./build-release/"
 

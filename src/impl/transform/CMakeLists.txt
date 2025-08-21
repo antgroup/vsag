@@ -23,6 +23,8 @@ set (TRANSFORM_SRC
         fht_kac_rotate_transformer.h
         pca_transformer.cpp
         pca_transformer.h
+        residual_transformer.cpp
+        residual_transformer.h
         vector_transformer_parameter.cpp
         vector_transformer_parameter.h
 )

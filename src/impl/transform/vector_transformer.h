@@ -22,6 +22,17 @@
 
 namespace vsag {
 
+class InnerTransformParam {
+public:
+    int64_t target_centroid = -1;
+    bool is_base = true;
+};
+
+using InnerTransformParamPtr = std::shared_ptr<InnerTransformParam>;
+
+class VectorTransformer;
+using VectorTransformerPtr = std::shared_ptr<VectorTransformer>;
+
 class Allocator;
 DEFINE_POINTER(VectorTransformer);
 DEFINE_POINTER(TransformerMeta);
@@ -35,7 +46,7 @@ struct TransformerMeta {
     };
 
     virtual void
-    DecodeMeta(uint8_t* code, uint32_t align_size) {
+    DecodeMeta(const uint8_t* code, uint32_t align_size) {
         return;
     };
 };
@@ -51,7 +62,9 @@ public:
     virtual ~VectorTransformer() = default;
 
     virtual TransformerMetaPtr
-    Transform(const float* input_vec, float* output_vec) const {
+    Transform(const float* input_vec,
+              float* output_vec,
+              const InnerTransformParamPtr param = nullptr) const {
         return nullptr;
     };
 
@@ -86,7 +99,9 @@ public:
     Train(const float* data, uint64_t count){};
 
     virtual void
-    InverseTransform(const float* input_vec, float* output_vec) const;
+    InverseTransform(const float* input_vec,
+                     float* output_vec,
+                     const InnerTransformParamPtr param = nullptr) const;
 
     [[nodiscard]] int64_t
     GetInputDim() const {

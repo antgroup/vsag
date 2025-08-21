@@ -23,7 +23,9 @@ VectorTransformer::VectorTransformer(Allocator* allocator, int64_t input_dim, in
     : allocator_(allocator), input_dim_(input_dim), output_dim_(output_dim) {
 }
 void
-VectorTransformer::InverseTransform(const float* input_vec, float* output_vec) const {
+VectorTransformer::InverseTransform(const float* input_vec,
+                                    float* output_vec,
+                                    const InnerTransformParamPtr param) const {
     throw VsagException(ErrorType::INTERNAL_ERROR, "InverseTransform not implement");
 }
 

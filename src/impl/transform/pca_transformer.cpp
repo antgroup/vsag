@@ -57,7 +57,9 @@ PCATransformer::Train(const float* data, uint64_t count) {
 }
 
 TransformerMetaPtr
-PCATransformer::Transform(const float* input_vec, float* output_vec) const {
+PCATransformer::Transform(const float* input_vec,
+                          float* output_vec,
+                          const InnerTransformParamPtr param) const {
     auto meta = std::make_shared<PCAMeta>();
     vsag::Vector<float> centralized_vec(allocator_);
     centralized_vec.resize(input_dim_, 0.0F);
@@ -87,7 +89,9 @@ PCATransformer::Transform(const float* input_vec, float* output_vec) const {
 }
 
 void
-PCATransformer::InverseTransform(const float* input_vec, float* output_vec) const {
+PCATransformer::InverseTransform(const float* input_vec,
+                                 float* output_vec,
+                                 const InnerTransformParamPtr param) const {
     throw VsagException(ErrorType::INTERNAL_ERROR, "InverseTransform not implement");
 }
 
