@@ -189,3 +189,5 @@ data/
 /coverage/
 *.gcov
 /dist/
+log.txt
+benchs/indexes/hgraph-95.yml

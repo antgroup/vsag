@@ -32,59 +32,6 @@ static constexpr uint32_t OPTIMIZE_SEARCHER_SAMPLE_SIZE = 10000;
 
 constexpr float THRESHOLD_ERROR = 2e-6;
 
-enum InnerSearchMode { KNN_SEARCH = 1, RANGE_SEARCH = 2 };
-
-enum InnerSearchType { PURE = 1, WITH_FILTER = 2 };
-
-class InnerSearchParam {
-public:
-    int64_t topk{0};
-    float radius{0.0f};
-    InnerIdType ep{0};
-    uint64_t ef{10};
-    FilterPtr is_inner_id_allowed{nullptr};
-    float skip_ratio{0.8F};
-    InnerSearchMode search_mode{KNN_SEARCH};
-    int range_search_limit_size{-1};
-    int64_t parallel_search_thread_count{1};
-    bool use_muti_threads_for_one_query{false};
-    uint64_t parallel_search_thread_count_per_query{4};
-    float min_percent_of_task_of_one_graph_maxdegree{0.2};
-    bool level_0{false};
-
-    // for ivf
-    int scan_bucket_size{1};
-    float factor{2.0F};
-    float first_order_scan_ratio{1.0F};
-    Allocator* search_alloc{nullptr};
-    std::vector<ExecutorPtr> executors;
-    mutable int64_t duplicate_id{-1};
-    bool consider_duplicate{false};
-
-    InnerSearchParam&
-    operator=(const InnerSearchParam& other) {
-        if (this != &other) {
-            topk = other.topk;
-            radius = other.radius;
-            ep = other.ep;
-            ef = other.ef;
-            skip_ratio = other.skip_ratio;
-            search_mode = other.search_mode;
-            range_search_limit_size = other.range_search_limit_size;
-            is_inner_id_allowed = other.is_inner_id_allowed;
-            scan_bucket_size = other.scan_bucket_size;
-            factor = other.factor;
-            first_order_scan_ratio = other.first_order_scan_ratio;
-            use_muti_threads_for_one_query = other.use_muti_threads_for_one_query;
-            parallel_search_thread_count_per_query = other.parallel_search_thread_count_per_query;
-            min_percent_of_task_of_one_graph_maxdegree = other.min_percent_of_task_of_one_graph_maxdegree;
-            level_0 = other.level_0;
-        }
-        return *this;
-    }
-};
-
-
 class BasicSearcher {
 public:
     explicit BasicSearcher(const IndexCommonParam& common_param,
