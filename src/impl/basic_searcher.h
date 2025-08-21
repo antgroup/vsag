@@ -47,9 +47,10 @@ public:
     InnerSearchMode search_mode{KNN_SEARCH};
     int range_search_limit_size{-1};
     int64_t parallel_search_thread_count{1};
+    bool use_muti_threads_for_one_query{false};
     uint64_t parallel_search_thread_count_per_query{4};
-    bool level_0{true};
-    double *latency{nullptr};
+    float min_percent_of_task_of_one_graph_maxdegree{0.2};
+    bool level_0{false};
 
     // for ivf
     int scan_bucket_size{1};
@@ -74,9 +75,10 @@ public:
             scan_bucket_size = other.scan_bucket_size;
             factor = other.factor;
             first_order_scan_ratio = other.first_order_scan_ratio;
+            use_muti_threads_for_one_query = other.use_muti_threads_for_one_query;
             parallel_search_thread_count_per_query = other.parallel_search_thread_count_per_query;
+            min_percent_of_task_of_one_graph_maxdegree = other.min_percent_of_task_of_one_graph_maxdegree;
             level_0 = other.level_0;
-            latency = other.latency;
         }
         return *this;
     }

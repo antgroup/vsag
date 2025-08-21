@@ -77,27 +77,24 @@ ParallelSearcher::Search(const GraphInterfacePtr& graph,
                       const FlattenInterfacePtr& flatten,
                       const VisitedListPtr& vl,
                       const void* query,
-                      const InnerSearchParam& inner_search_param) const {
+                      const InnerSearchParam& inner_search_param,
+                    const LabelTablePtr& label_table) const {
     if (inner_search_param.search_mode == KNN_SEARCH) {
         return this->search_impl<KNN_SEARCH>(
-            graph, flatten, vl, query, inner_search_param);
+            graph, flatten, vl, query, inner_search_param, label_table);
     }
     return this->search_impl<RANGE_SEARCH>(
-        graph, flatten, vl, query, inner_search_param);
+        graph, flatten, vl, query, inner_search_param, label_table);
 }
 
 DistHeapPtr
-ParallelSearcher::Search_plus(const GraphInterfacePtr& graph,
+ParallelSearcher::Search(const GraphInterfacePtr& graph,
                       const FlattenInterfacePtr& flatten,
                       const VisitedListPtr& vl,
                       const void* query,
-                      const InnerSearchParam& inner_search_param) const {
-    if (inner_search_param.search_mode == KNN_SEARCH) {
-        return this->search_impl_plus<KNN_SEARCH>(
-            graph, flatten, vl, query, inner_search_param);
-    }
-    return this->search_impl_plus<RANGE_SEARCH>(
-        graph, flatten, vl, query, inner_search_param);
+                      const InnerSearchParam& inner_search_param,
+                      IteratorFilterContext* iter_ctx) const {
+    return this->search_impl<KNN_SEARCH>(graph, flatten, vl, query, inner_search_param, iter_ctx);
 }
 
 template <InnerSearchMode mode>
@@ -106,9 +103,9 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
                            const FlattenInterfacePtr& flatten,
                            const VisitedListPtr& vl,
                            const void* query,
-                           const InnerSearchParam& inner_search_param) const {
+                           const InnerSearchParam& inner_search_param,
+                           const LabelTablePtr& label_table) const {
 
-    //auto checkpoint1 = std::chrono::high_resolution_clock::now();
     Allocator* alloc =
         inner_search_param.search_alloc == nullptr ? allocator_ : inner_search_param.search_alloc;
     auto top_candidates = std::make_shared<StandardHeap<true, false>>(alloc, -1);
@@ -132,22 +129,17 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
     uint32_t dist_cmp = 0;
     uint32_t count_no_visited = 0;
     uint32_t vector_size = graph->MaximumDegree() * inner_search_param.parallel_search_thread_count_per_query;
+    uint64_t min_task = vector_size * 0.2;
+    uint64_t min_task_per_thread = static_cast<uint64_t>(std::ceil(graph->MaximumDegree() * 0.2));
     uint32_t current_start = 0;
     Vector<InnerIdType> to_be_visited_rid(vector_size, alloc);
-    Vector<InnerIdType> to_be_visited_id(vector_size, alloc);//计算的时候用到
+    Vector<InnerIdType> to_be_visited_id(vector_size, alloc);
     std::vector<Vector<InnerIdType>> neighbors(inner_search_param.parallel_search_thread_count_per_query, Vector<InnerIdType>(graph->MaximumDegree(), alloc));
     Vector<float> line_dists(vector_size, alloc);
     Vector<std::pair<float, uint64_t>> node_pair(inner_search_param.parallel_search_thread_count_per_query, alloc);
     Vector<uint32_t> tasks_per_thread(inner_search_param.parallel_search_thread_count_per_query, alloc);
     Vector<uint32_t> start_index(inner_search_param.parallel_search_thread_count_per_query, alloc);
 
-    // std::cout << "parallel_search_thread_count_per_query:" << inner_search_param.parallel_search_thread_count_per_query << std::endl;
-    // std::cout << "topk:" << inner_search_param.topk << std::endl;
-
-    // std::cout << "数组neighbors.size():" << neighbors[0].size() << std::endl;
-    // std::cout << "graph->MaximumDegree():" << graph->MaximumDegree() << std::endl;
-
-    //auto checkpoint2 = std::chrono::high_resolution_clock::now();
     flatten->Query(&dist, computer, &ep, 1, alloc);
     if (not is_id_allowed || is_id_allowed->CheckValid(ep)) {
         top_candidates->Push(dist, ep);
@@ -164,8 +156,6 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
     candidate_set->Push(-dist, ep);
     vl->Set(ep);
 
-    //auto checkpoint3 = std::chrono::high_resolution_clock::now();
-
     // double time1 = 0;
     // double time2 = 0;
     // double time3 = 0;
@@ -174,11 +164,9 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
 
     // std::vector<std::chrono::time_point<std::chrono::high_resolution_clock>> timee(inner_search_param.parallel_search_thread_count_per_query * 2);
 
-    uint64_t min_task = vector_size * 0.2;
-    uint64_t min_task_per_thread = static_cast<uint64_t>(std::ceil(graph->MaximumDegree() * 0.2));
+    
 
     while (not candidate_set->Empty()) {
-        //auto checkpoint6 = std::chrono::high_resolution_clock::now();
         hops++;
         auto num_explore_nodes = candidate_set->Size() < inner_search_param.parallel_search_thread_count_per_query ? candidate_set->Size() : inner_search_param.parallel_search_thread_count_per_query;
         //num_threads = 1;
@@ -197,8 +185,6 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
             candidate_set->Pop();
         }
 
-        //auto checkpoint7 = std::chrono::high_resolution_clock::now();
-
         count_no_visited = visit(graph,
                                  vl,
                                  node_pair,
@@ -209,23 +195,12 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
                                  neighbors,
                                  num_explore_nodes);
 
-        //std::cout << "num_threads:" << num_threads << std::endl;
-        // std::cout << "count_no_visited:" << count_no_visited << std::endl;
-        // if (not candidate_set->Empty()) {
-        //     graph->Prefetch(candidate_set->Top().second, 0);
-        // }
-        //auto checkpoint8 = std::chrono::high_resolution_clock::now();
-        //std::sort(to_be_visited_id.begin(), to_be_visited_id.begin() + count_no_visited);
-        //auto checkpoint9 = std::chrono::high_resolution_clock::now();
         dist_cmp += count_no_visited;
         uint64_t num_threads = num_explore_nodes;
 
         if(count_no_visited < min_task){
-            //std::cout << "count_no_visited: " << count_no_visited << std::endl;
             num_threads = count_no_visited % min_task_per_thread == 0 ? count_no_visited / min_task_per_thread : count_no_visited / min_task_per_thread + 1;
-            //std::cout << "num_threads: " << num_threads << std::endl;
         }
-        //num_threads = num_explore_nodes;
 
         uint32_t base = 0,remainder = 0;
 
@@ -298,42 +273,6 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
         // std::cout << "get: "  << time2 <<"(" << time2/time3 << ")" << std::endl; 
         // std::cout << "total: "  << time3 <<"(" << time3/time3 << ")" << std::endl; 
         // std::cout << std::endl;
-
-
-        // time5 += std::chrono::duration_cast<std::chrono::nanoseconds>(checkpoint13 - checkpoint12).count();
-
-        //auto checkpoint10 = std::chrono::high_resolution_clock::now();
-        //for (uint64_t i = 0; i < num_threads; i++) {
-        //     uint64_t i = 0;
-        //     auto function = [&flatten, &line_dists, &computer, &to_be_visited_id, &tasks_per_thread, &start_index, &alloc, &time2, i]() -> void {
-        //         auto checkpoint121 = std::chrono::high_resolution_clock::now();
-        //         flatten->Query(line_dists.data() + start_index[i], computer, to_be_visited_id.data() + start_index[i], tasks_per_thread[i], alloc);
-        //         auto checkpoint122 = std::chrono::high_resolution_clock::now();
-        //         time2 += std::chrono::duration_cast<std::chrono::nanoseconds>(checkpoint122 - checkpoint121).count();
-                    
-        //     };
-
-        //     auto checkpoint11 = std::chrono::high_resolution_clock::now();
-        //     //function();
-        //     futures.emplace_back(pool->Enqueue(function));
-        // //}
-        //     auto checkpoint12 = std::chrono::high_resolution_clock::now();
-        //     // futures.emplace_back(
-        //     //     pool->Enqueue([&flatten, &line_dists, &computer, &to_be_visited_id, &alloc, count_no_visited]() -> void {
-        //     //         flatten->Query(line_dists.data(), computer, to_be_visited_id.data(), count_no_visited, alloc);
-        //     //     }));
-
-        // //flatten->Query(line_dists.data(), computer, to_be_visited_id.data(), count_no_visited, alloc);
-        
-        // for (auto& f : futures) {
-        //     f.get();
-        // }
-        // auto checkpoint13 = std::chrono::high_resolution_clock::now();
-        
-        // time1 += std::chrono::duration_cast<std::chrono::nanoseconds>(checkpoint11 - checkpoint10).count();
-        // time3 += std::chrono::duration_cast<std::chrono::nanoseconds>(checkpoint12 - checkpoint11).count();
-        // time4 += std::chrono::duration_cast<std::chrono::nanoseconds>(checkpoint13 - checkpoint10).count();
-        // time5 += std::chrono::duration_cast<std::chrono::nanoseconds>(checkpoint13 - checkpoint12).count();
         
         for (uint32_t i = 0; i < count_no_visited; i++) {
             dist = line_dists[i];
@@ -343,17 +282,16 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
             if (top_candidates->Size() < ef || lower_bound > dist ||
                 (mode == RANGE_SEARCH && dist <= inner_search_param.radius)) {
                 candidate_set->Push(-dist, to_be_visited_id[i]);
-                //                flatten->Prefetch(candidate_set->Top().second);
                 if (not is_id_allowed || is_id_allowed->CheckValid(to_be_visited_id[i])) {
                     top_candidates->Push(dist, to_be_visited_id[i]);
                 }
-                // if (inner_search_param.consider_duplicate && label_table &&
-                //     label_table->CompressDuplicateData()) {
-                //     const auto& duplicate_ids = label_table->GetDuplicateId(to_be_visited_id[i]);
-                //     for (const auto& item : duplicate_ids) {
-                //         top_candidates->Push(dist, item);
-                //     }
-                // }
+                if (inner_search_param.consider_duplicate && label_table &&
+                    label_table->CompressDuplicateData()) {
+                    const auto& duplicate_ids = label_table->GetDuplicateId(to_be_visited_id[i]);
+                    for (const auto& item : duplicate_ids) {
+                        top_candidates->Push(dist, item);
+                    }
+                }
 
                 if constexpr (mode == KNN_SEARCH) {
                     if (top_candidates->Size() > ef) {
@@ -366,17 +304,7 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
                 }
             }
         }
-        // auto checkpoint13 = std::chrono::high_resolution_clock::now();
-        // inner_search_param.latency[4] += std::chrono::duration_cast<std::chrono::microseconds>(checkpoint7 - checkpoint6).count();
-        // inner_search_param.latency[5] += std::chrono::duration_cast<std::chrono::microseconds>(checkpoint8 - checkpoint7).count();
-        // inner_search_param.latency[6] += std::chrono::duration_cast<std::chrono::microseconds>(checkpoint9 - checkpoint8).count();
-        // inner_search_param.latency[7] += std::chrono::duration_cast<std::chrono::microseconds>(checkpoint10 - checkpoint9).count();
-        // inner_search_param.latency[8] += std::chrono::duration_cast<std::chrono::microseconds>(checkpoint11 - checkpoint10).count();
-        // inner_search_param.latency[9] += std::chrono::duration_cast<std::chrono::microseconds>(checkpoint12 - checkpoint11).count();
-        // inner_search_param.latency[10] += std::chrono::duration_cast<std::chrono::microseconds>(checkpoint13 - checkpoint12).count();
     }
-
-    //auto checkpoint4 = std::chrono::high_resolution_clock::now();
 
     if constexpr (mode == KNN_SEARCH) {
         while (top_candidates->Size() > inner_search_param.topk) {
@@ -393,35 +321,21 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
             top_candidates->Pop();
         }
     }
-    // std::cout << "lambda define: "  << time1 <<"(" << time1/time4 << ")" << std::endl; 
-    // std::cout << "query: "  << time2 <<"(" << time2/time4 << ")" << std::endl; 
-    // std::cout << "exec lambda: "  << time3 <<"(" << time3/time4 << ")" << std::endl; 
-    // std::cout << "get(): "  << time5 <<"(" << time5/time4 << ")" << std::endl; 
-    // std::cout << "total: "  << time4 <<"(" << time4/time4 << ")" << std::endl;
-    // std::cout << std::endl;
-    // std::cout << hops << std::endl;
-    // auto checkpoint5 = std::chrono::high_resolution_clock::now();
-    // inner_search_param.latency[0] += std::chrono::duration_cast<std::chrono::microseconds>(checkpoint2 - checkpoint1).count();
-    // inner_search_param.latency[1] += std::chrono::duration_cast<std::chrono::microseconds>(checkpoint3 - checkpoint2).count();
-    // inner_search_param.latency[2] += std::chrono::duration_cast<std::chrono::microseconds>(checkpoint4 - checkpoint3).count();
-    // inner_search_param.latency[3] += std::chrono::duration_cast<std::chrono::microseconds>(checkpoint5 - checkpoint4).count();
     return top_candidates;
 }
 
 template <InnerSearchMode mode>
 DistHeapPtr
-ParallelSearcher::search_impl_plus(const GraphInterfacePtr& graph,
-                                    const FlattenInterfacePtr& flatten,
-                                    const VisitedListPtr& vl,
-                                    const void* query,
-                                    const InnerSearchParam& inner_search_param) const {
-
-    //auto checkpoint1 = std::chrono::high_resolution_clock::now();
+ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
+                           const FlattenInterfacePtr& flatten,
+                           const VisitedListPtr& vl,
+                           const void* query,
+                           const InnerSearchParam& inner_search_param,
+                           IteratorFilterContext* iter_ctx) const {
     Allocator* alloc =
         inner_search_param.search_alloc == nullptr ? allocator_ : inner_search_param.search_alloc;
     auto top_candidates = std::make_shared<StandardHeap<true, false>>(alloc, -1);
     auto candidate_set = std::make_shared<StandardHeap<true, false>>(alloc, -1);
-    
 
     if (not graph or not flatten) {
         return top_candidates;
@@ -434,56 +348,59 @@ ParallelSearcher::search_impl_plus(const GraphInterfacePtr& graph,
     auto ef = inner_search_param.ef;
 
     float dist = 0.0F;
+    uint64_t ids_cnt = 1;
     auto lower_bound = std::numeric_limits<float>::max();
 
     uint32_t hops = 0;
     uint32_t dist_cmp = 0;
     uint32_t count_no_visited = 0;
-    uint32_t vector_size = graph->MaximumDegree() * inner_search_param.parallel_search_thread_count_per_query * 2;
+    uint32_t vector_size = graph->MaximumDegree() * inner_search_param.parallel_search_thread_count_per_query;
+    uint64_t min_task = vector_size * 0.2;
+    uint64_t min_task_per_thread = static_cast<uint64_t>(std::ceil(graph->MaximumDegree() * 0.2));
     uint32_t current_start = 0;
     Vector<InnerIdType> to_be_visited_rid(vector_size, alloc);
-    Vector<InnerIdType> to_be_visited_id(vector_size, alloc);//计算的时候用到
-    std::vector<Vector<InnerIdType>> neighbors(inner_search_param.parallel_search_thread_count_per_query * 2, Vector<InnerIdType>(graph->MaximumDegree(), alloc));
+    Vector<InnerIdType> to_be_visited_id(vector_size, alloc);
+    std::vector<Vector<InnerIdType>> neighbors(inner_search_param.parallel_search_thread_count_per_query, Vector<InnerIdType>(graph->MaximumDegree(), alloc));
     Vector<float> line_dists(vector_size, alloc);
-    Vector<std::pair<float, uint64_t>> node_pair(inner_search_param.parallel_search_thread_count_per_query * 2, alloc);
+    Vector<std::pair<float, uint64_t>> node_pair(inner_search_param.parallel_search_thread_count_per_query, alloc);
     Vector<uint32_t> tasks_per_thread(inner_search_param.parallel_search_thread_count_per_query, alloc);
     Vector<uint32_t> start_index(inner_search_param.parallel_search_thread_count_per_query, alloc);
 
-    // std::cout << "parallel_search_thread_count_per_query:" << inner_search_param.parallel_search_thread_count_per_query << std::endl;
-    // std::cout << "topk:" << inner_search_param.topk << std::endl;
 
-    // std::cout << "数组neighbors.size():" << neighbors[0].size() << std::endl;
-    // std::cout << "graph->MaximumDegree():" << graph->MaximumDegree() << std::endl;
-
-    //auto checkpoint2 = std::chrono::high_resolution_clock::now();
-    flatten->Query(&dist, computer, &ep, 1, alloc);
-    if (not is_id_allowed || is_id_allowed->CheckValid(ep)) {
-        top_candidates->Push(dist, ep);
-        lower_bound = top_candidates->Top().first;
-    }
-    if constexpr (mode == InnerSearchMode::RANGE_SEARCH) {
-        if (dist > inner_search_param.radius and not top_candidates->Empty()) {
-            top_candidates->Pop();
+    if (!iter_ctx->IsFirstUsed()) {
+        if (iter_ctx->Empty()) {
+            return top_candidates;
         }
+        while (!iter_ctx->Empty()) {
+            uint32_t cur_inner_id = iter_ctx->GetTopID();
+            float cur_dist = iter_ctx->GetTopDist();
+            if (!vl->Get(cur_inner_id) && iter_ctx->CheckPoint(cur_inner_id)) {
+                vl->Set(cur_inner_id);
+                lower_bound = std::max(lower_bound, cur_dist);
+                flatten->Query(&cur_dist, computer, &cur_inner_id, 1, alloc);
+                top_candidates->Push(cur_dist, cur_inner_id);
+                candidate_set->Push(cur_dist, cur_inner_id);
+                if constexpr (mode == InnerSearchMode::RANGE_SEARCH) {
+                    if (cur_dist > inner_search_param.radius and not top_candidates->Empty()) {
+                        top_candidates->Pop();
+                    }
+                }
+            }
+            iter_ctx->PopDiscard();
+        }
+    } else {
+        flatten->Query(&dist, computer, &ep, 1, alloc);
+        if (not is_id_allowed || is_id_allowed->CheckValid(ep)) {
+            top_candidates->Push(dist, ep);
+            lower_bound = top_candidates->Top().first;
+        }
+        candidate_set->Push(-dist, ep);
+        vl->Set(ep);
     }
-    if (dist < THRESHOLD_ERROR) {
-        inner_search_param.duplicate_id = ep;
-    }
-    candidate_set->Push(-dist, ep);
-    vl->Set(ep);
-
-    //auto checkpoint3 = std::chrono::high_resolution_clock::now();
 
     while (not candidate_set->Empty()) {
-        //auto checkpoint6 = std::chrono::high_resolution_clock::now();
         hops++;
-        uint64_t num_threads = inner_search_param.parallel_search_thread_count_per_query;
-        uint64_t will_visit = inner_search_param.parallel_search_thread_count_per_query * 2;
-        if(candidate_set->Size() < inner_search_param.parallel_search_thread_count_per_query * 2){
-            num_threads = candidate_set->Size() / 2 + 1;
-            will_visit = candidate_set->Size();
-        }
-        
+        auto num_explore_nodes = candidate_set->Size() < inner_search_param.parallel_search_thread_count_per_query ? candidate_set->Size() : inner_search_param.parallel_search_thread_count_per_query;
         auto current_first_node_pair = candidate_set->Top();
         node_pair[0] = current_first_node_pair;
 
@@ -494,12 +411,10 @@ ParallelSearcher::search_impl_plus(const GraphInterfacePtr& graph,
         }
         candidate_set->Pop();
 
-        for(uint64_t i = 1; i < will_visit; i++){
+        for(uint64_t i = 1; i < num_explore_nodes; i++){
             node_pair[i] = candidate_set->Top();
             candidate_set->Pop();
         }
-
-        //auto checkpoint7 = std::chrono::high_resolution_clock::now();
 
         count_no_visited = visit(graph,
                                  vl,
@@ -509,21 +424,22 @@ ParallelSearcher::search_impl_plus(const GraphInterfacePtr& graph,
                                  to_be_visited_rid,
                                  to_be_visited_id,
                                  neighbors,
-                                 will_visit);
+                                 num_explore_nodes);
 
-        //std::cout << "num_threads:" << num_threads << std::endl;
-        // std::cout << "count_no_visited:" << count_no_visited << std::endl;
-        // if (not candidate_set->Empty()) {
-        //     graph->Prefetch(candidate_set->Top().second, 0);
-        // }
-        //auto checkpoint8 = std::chrono::high_resolution_clock::now();
-        //std::sort(to_be_visited_id.begin(), to_be_visited_id.begin() + count_no_visited);
-        //auto checkpoint9 = std::chrono::high_resolution_clock::now();
         dist_cmp += count_no_visited;
+        uint64_t num_threads = num_explore_nodes;
 
-        uint32_t base = count_no_visited / num_threads;
-        uint32_t remainder = count_no_visited % num_threads;
+        if(count_no_visited < min_task){
+            num_threads = count_no_visited % min_task_per_thread == 0 ? count_no_visited / min_task_per_thread : count_no_visited / min_task_per_thread + 1;
+        }
 
+        uint32_t base = 0,remainder = 0;
+
+        if(num_threads){
+            base = count_no_visited / num_threads;
+            remainder = count_no_visited % num_threads;
+        }
+        
         current_start = 0;
         for (uint64_t i = 0; i < num_threads; ++i) {
             tasks_per_thread[i] = base + (i < remainder ? 1 : 0);
@@ -533,26 +449,62 @@ ParallelSearcher::search_impl_plus(const GraphInterfacePtr& graph,
 
         std::vector<std::future<void>> futures;
 
-        //auto checkpoint10 = std::chrono::high_resolution_clock::now();
+        //auto checkpoint1 = std::chrono::high_resolution_clock::now();
+
         for (uint64_t i = 0; i < num_threads; i++) {
             futures.emplace_back(
                 pool->Enqueue([&flatten, &line_dists, &computer, &to_be_visited_id, &tasks_per_thread, &start_index, &alloc, i]() -> void {
+                //pool->Enqueue([&flatten, &line_dists, &computer, &to_be_visited_id, &tasks_per_thread, &start_index, &alloc, &timee, i]() -> void {
+                    //timee[i * 2] = std::chrono::high_resolution_clock::now();
                     flatten->Query(line_dists.data() + start_index[i], computer, to_be_visited_id.data() + start_index[i], tasks_per_thread[i], alloc);
+                    //timee[i * 2 + 1] = std::chrono::high_resolution_clock::now();
                 }));
         }
+        
+        //auto checkpoint2 = std::chrono::high_resolution_clock::now();
 
-            // futures.emplace_back(
-            //     pool->Enqueue([&flatten, &line_dists, &computer, &to_be_visited_id, &alloc, count_no_visited]() -> void {
-            //         flatten->Query(line_dists.data(), computer, to_be_visited_id.data(), count_no_visited, alloc);
-            //     }));
-
-        //flatten->Query(line_dists.data(), computer, to_be_visited_id.data(), count_no_visited, alloc);
-        //auto checkpoint11 = std::chrono::high_resolution_clock::now();
         for (auto& f : futures) {
             f.get();
         }
-        //auto checkpoint12 = std::chrono::high_resolution_clock::now();
-        
+
+        //auto checkpoint3 = std::chrono::high_resolution_clock::now();
+
+        // time1 = std::chrono::duration_cast<std::chrono::nanoseconds>(checkpoint2 - checkpoint1).count();
+        // time2 = std::chrono::duration_cast<std::chrono::nanoseconds>(checkpoint3 - checkpoint2).count();
+        // time3 = std::chrono::duration_cast<std::chrono::nanoseconds>(checkpoint3 - checkpoint1).count();
+
+
+        // std::cout << "task number:   ";
+        // for(uint64_t i = 0; i < num_threads; i++){
+        //     std::cout << tasks_per_thread[i] << "    ";
+        // }
+        // std::cout << std::endl;
+
+        // std::cout << "task latency: ";
+        // for(uint64_t i = 0; i < num_threads; i++){
+        //     std::cout << std::chrono::duration_cast<std::chrono::nanoseconds>(timee[i * 2 + 1] - timee[i * 2]).count() << " ";
+        // }
+        // std::cout << std::endl;
+
+        // std::cout << "task begin time: ";
+        // for(uint64_t i = 0; i < num_threads; i++){
+        //     std::cout << std::chrono::duration_cast<std::chrono::nanoseconds>(timee[i * 2] - checkpoint1).count() << " ";
+        // }
+        // std::cout << std::endl;
+
+        // std::cout << "task finished time: ";
+        // for(uint64_t i = 0; i < num_threads; i++){
+        //     std::cout << std::chrono::duration_cast<std::chrono::nanoseconds>(timee[i * 2 + 1] - checkpoint1).count() << " ";
+        // }
+        // std::cout << std::endl;
+
+
+
+        // std::cout << "for circulate: "  << time1 <<"(" << time1/time3 << ")" << std::endl; 
+        // std::cout << ".get(): "  << time2 <<"(" << time2/time3 << ")" << std::endl; 
+        // std::cout << "total: "  << time3 <<"(" << time3/time3 << ")" << std::endl; 
+        // std::cout << std::endl;
+
         for (uint32_t i = 0; i < count_no_visited; i++) {
             dist = line_dists[i];
             if (dist < THRESHOLD_ERROR) {
@@ -560,21 +512,21 @@ ParallelSearcher::search_impl_plus(const GraphInterfacePtr& graph,
             }
             if (top_candidates->Size() < ef || lower_bound > dist ||
                 (mode == RANGE_SEARCH && dist <= inner_search_param.radius)) {
+                if (!iter_ctx->CheckPoint(to_be_visited_id[i])) {
+                    continue;
+                }
                 candidate_set->Push(-dist, to_be_visited_id[i]);
-                //                flatten->Prefetch(candidate_set->Top().second);
+                flatten->Prefetch(candidate_set->Top().second);
                 if (not is_id_allowed || is_id_allowed->CheckValid(to_be_visited_id[i])) {
                     top_candidates->Push(dist, to_be_visited_id[i]);
                 }
-                // if (inner_search_param.consider_duplicate && label_table &&
-                //     label_table->CompressDuplicateData()) {
-                //     const auto& duplicate_ids = label_table->GetDuplicateId(to_be_visited_id[i]);
-                //     for (const auto& item : duplicate_ids) {
-                //         top_candidates->Push(dist, item);
-                //     }
-                // }
 
                 if constexpr (mode == KNN_SEARCH) {
                     if (top_candidates->Size() > ef) {
+                        if (iter_ctx->CheckPoint(top_candidates->Top().second)) {
+                            auto cur_node_pair = top_candidates->Top();
+                            iter_ctx->AddDiscardNode(cur_node_pair.first, cur_node_pair.second);
+                        }
                         top_candidates->Pop();
                     }
                 }
@@ -584,39 +536,18 @@ ParallelSearcher::search_impl_plus(const GraphInterfacePtr& graph,
                 }
             }
         }
-        // auto checkpoint13 = std::chrono::high_resolution_clock::now();
-        // inner_search_param.latency[4] += std::chrono::duration_cast<std::chrono::microseconds>(checkpoint7 - checkpoint6).count();
-        // inner_search_param.latency[5] += std::chrono::duration_cast<std::chrono::microseconds>(checkpoint8 - checkpoint7).count();
-        // inner_search_param.latency[6] += std::chrono::duration_cast<std::chrono::microseconds>(checkpoint9 - checkpoint8).count();
-        // inner_search_param.latency[7] += std::chrono::duration_cast<std::chrono::microseconds>(checkpoint10 - checkpoint9).count();
-        // inner_search_param.latency[8] += std::chrono::duration_cast<std::chrono::microseconds>(checkpoint11 - checkpoint10).count();
-        // inner_search_param.latency[9] += std::chrono::duration_cast<std::chrono::microseconds>(checkpoint12 - checkpoint11).count();
-        // inner_search_param.latency[10] += std::chrono::duration_cast<std::chrono::microseconds>(checkpoint13 - checkpoint12).count();
     }
-
-    //auto checkpoint4 = std::chrono::high_resolution_clock::now();
 
     if constexpr (mode == KNN_SEARCH) {
         while (top_candidates->Size() > inner_search_param.topk) {
-            top_candidates->Pop();
-        }
-    } else if constexpr (mode == RANGE_SEARCH) {
-        if (inner_search_param.range_search_limit_size > 0) {
-            while (top_candidates->Size() > inner_search_param.range_search_limit_size) {
-                top_candidates->Pop();
+            auto cur_node_pair = top_candidates->Top();
+            if (iter_ctx->CheckPoint(cur_node_pair.second)) {
+                iter_ctx->AddDiscardNode(cur_node_pair.first, cur_node_pair.second);
             }
-        }
-        while (not top_candidates->Empty() &&
-               top_candidates->Top().first > inner_search_param.radius + THRESHOLD_ERROR) {
             top_candidates->Pop();
         }
     }
-    // auto checkpoint5 = std::chrono::high_resolution_clock::now();
-    // inner_search_param.latency[0] += std::chrono::duration_cast<std::chrono::microseconds>(checkpoint2 - checkpoint1).count();
-    // inner_search_param.latency[1] += std::chrono::duration_cast<std::chrono::microseconds>(checkpoint3 - checkpoint2).count();
-    // inner_search_param.latency[2] += std::chrono::duration_cast<std::chrono::microseconds>(checkpoint4 - checkpoint3).count();
-    // inner_search_param.latency[3] += std::chrono::duration_cast<std::chrono::microseconds>(checkpoint5 - checkpoint4).count();
-    // inner_search_param.latency[11] += hops;
+
     return top_candidates;
 }
 

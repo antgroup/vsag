@@ -35,7 +35,7 @@ select_edges_by_heuristic(const DistHeapPtr& edges,
         edges->Pop();
     }
 
-    float alpha = 2.0;
+    float alpha = 1.0;
 
     while (not queue_closest->Empty()) {
         if (return_list.size() >= max_size) {

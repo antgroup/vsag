@@ -189,7 +189,6 @@ SearchEvalCase::do_knn_search() {
         }
         monitor->Stop();
     }
-    std::cout << "query_count" << query_count << std::endl;
 }
 
 void

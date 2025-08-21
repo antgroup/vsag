@@ -350,7 +350,7 @@ private:
     mutable std::shared_mutex add_mutex_;
 
     std::shared_ptr<SafeThreadPool> build_pool_{nullptr};
-    uint64_t build_thread_count_{1};
+    uint64_t build_thread_count_{100};
 
     std::atomic<InnerIdType> max_capacity_{0};
 
