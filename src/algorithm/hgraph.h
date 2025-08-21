@@ -320,6 +320,7 @@ private:
     Vector<GraphInterfacePtr> route_graphs_;
     GraphInterfacePtr bottom_graph_{nullptr};
     SparseGraphDatacellParamPtr hierarchical_datacell_param_{nullptr};
+    HGraphParameter hgraph_params_;
 
     mutable bool use_reorder_{false};
     bool use_elp_optimizer_{false};
@@ -338,7 +339,7 @@ private:
     std::string graph_type_{GRAPH_TYPE_NSW};
 
     uint64_t ef_construct_{400};
-
+    float alpha_{1.0};
     uint64_t total_count_{0};
 
     std::shared_ptr<VisitedListPool> pool_{nullptr};

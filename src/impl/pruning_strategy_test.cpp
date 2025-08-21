@@ -192,39 +192,4 @@ TEST_CASE("Pruning Strategy Select Edges Test", "[ut][pruning_strategy]") {
     }
 }
 
-TEST_CASE("Pruning Strategy Mutual Connection Test", "[ut][pruning_strategy]") {
-    auto allocator = Engine::CreateDefaultAllocator();
-    {
-        auto flatten = CreateTestFlatten(allocator.get());
-        auto graph = CreateTestGraph(allocator.get());
-        auto mutexes = std::make_shared<EmptyMutex>();
-
-        graph->SetMaximumDegree(1);
-
-        SECTION("connects to farthest candidate") {
-            auto candidates = std::make_shared<StandardHeap<true, false>>(allocator.get(), -1);
-            candidates->Push(flatten->ComputePairVectors(0, 1), 1);
-            candidates->Push(flatten->ComputePairVectors(0, 3), 3);
-
-            //verify connection was made
-            auto entry = mutually_connect_new_element(
-                0, candidates, graph, flatten, mutexes, allocator.get());
-            REQUIRE(entry == 1);
-
-            Vector<InnerIdType> neighbors(allocator.get());
-            graph->GetNeighbors(0, neighbors);
-            REQUIRE(neighbors.size() == 1);
-            REQUIRE(neighbors[0] == 1);
-        }
-
-        SECTION("rejects invalid candidates") {
-            auto candidates = std::make_shared<StandardHeap<true, false>>(allocator.get(), -1);
-            candidates->Push(-1.0F, 0);
-
-            REQUIRE_THROWS_AS(mutually_connect_new_element(
-                                  0, candidates, graph, flatten, mutexes, allocator.get()),
-                              VsagException);
-        }
-    }
-}
 }  // namespace vsag

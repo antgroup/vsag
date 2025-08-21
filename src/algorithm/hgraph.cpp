@@ -54,7 +54,9 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
       graph_type_(hgraph_param->graph_type),
       hierarchical_datacell_param_(hgraph_param->hierarchical_graph_param),
       extra_info_size_(common_param.extra_info_size_),
-      deleted_ids_(allocator_) {
+      deleted_ids_(allocator_),
+      alpha_(hgraph_param->alpha)
+ {
     this->label_table_->compress_duplicate_data_ = hgraph_param->support_duplicate;
     neighbors_mutex_ = std::make_shared<PointsMutex>(0, common_param.allocator_.get());
     this->basic_flatten_codes_ =
@@ -1002,6 +1004,7 @@ HGraph::add_one_point(const void* data, int level, InnerIdType inner_id) {
 
 bool
 HGraph::graph_add_one(const void* data, int level, InnerIdType inner_id) {
+    float alpha=this->alpha_;
     DistHeapPtr result = nullptr;
     InnerSearchParam param{
         .topk = 1,
@@ -1031,7 +1034,7 @@ HGraph::graph_add_one(const void* data, int level, InnerIdType inner_id) {
             return false;
         }
         mutually_connect_new_element(
-            inner_id, result, this->bottom_graph_, flatten_codes, neighbors_mutex_, allocator_);
+            inner_id, result, this->bottom_graph_, flatten_codes, neighbors_mutex_, allocator_,alpha);
     } else {
         bottom_graph_->InsertNeighborsById(inner_id, Vector<InnerIdType>(allocator_));
     }
@@ -1040,7 +1043,7 @@ HGraph::graph_add_one(const void* data, int level, InnerIdType inner_id) {
         if (route_graphs_[j]->TotalCount() != 0) {
             result = search_one_graph(data, route_graphs_[j], flatten_codes, param);
             mutually_connect_new_element(
-                inner_id, result, route_graphs_[j], flatten_codes, neighbors_mutex_, allocator_);
+                inner_id, result, route_graphs_[j], flatten_codes, neighbors_mutex_, allocator_,alpha);
         } else {
             route_graphs_[j]->InsertNeighborsById(inner_id, Vector<InnerIdType>(allocator_));
         }
@@ -1398,6 +1401,13 @@ HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
                                                 {
                                                     BUILD_PARAMS_KEY,
                                                     BUILD_EF_CONSTRUCTION,
+                                                },
+                                            },
+                                            {
+                                                HGRAPH_BUILD_ALPHA,
+                                                {
+                                                    BUILD_PARAMS_KEY,
+                                                    BUILD_ALPHA_KEY,
                                                 },
                                             },
                                             {

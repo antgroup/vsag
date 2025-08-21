@@ -24,7 +24,7 @@ select_edges_by_heuristic(const DistHeapPtr& edges,
                           uint64_t max_size,
                           const FlattenInterfacePtr& flatten,
                           Allocator* allocator,
-                          float alpha = 1.0F) {
+                          float alpha) {
     if (edges->Size() < max_size) {
         return;
     }
@@ -68,9 +68,11 @@ mutually_connect_new_element(InnerIdType cur_c,
                              const GraphInterfacePtr& graph,
                              const FlattenInterfacePtr& flatten,
                              const MutexArrayPtr& neighbors_mutexes,
-                             Allocator* allocator) {
+                             Allocator* allocator,
+                             float alpha
+) {
     const size_t max_size = graph->MaximumDegree();
-    select_edges_by_heuristic(top_candidates, max_size, flatten, allocator, 1.0F);
+    select_edges_by_heuristic(top_candidates, max_size, flatten, allocator, 2.0F);
     if (top_candidates->Size() > max_size) {
         throw VsagException(
             ErrorType::INTERNAL_ERROR,
@@ -120,7 +122,7 @@ mutually_connect_new_element(InnerIdType cur_c,
                                  neighbors[j]);
             }
 
-            select_edges_by_heuristic(candidates, max_size, flatten, allocator);
+            select_edges_by_heuristic(candidates, max_size, flatten, allocator,2.0F);
 
             Vector<InnerIdType> cand_neighbors(allocator);
             while (not candidates->Empty()) {
