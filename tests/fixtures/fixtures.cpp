@@ -140,6 +140,45 @@ GenerateBinaryVectorsAndCodes(uint32_t count, uint32_t dim, int seed) {
     return {vectors, codes};
 }
 
+std::string
+create_random_string(bool is_full) {
+    const std::vector<std::string> level1 = {"a", "b", "c"};
+    const std::vector<std::string> level2 = {"d", "e"};
+    const std::vector<std::string> level3 = {"f", "g", "h"};
+
+    std::random_device rd;
+    std::mt19937 mt(rd());
+    std::uniform_int_distribution<> distr;
+
+    std::vector<std::string> selected_levels;
+
+    if (is_full) {
+        selected_levels.push_back(level1[distr(mt) % level1.size()]);
+        selected_levels.push_back(level2[distr(mt) % level2.size()]);
+        selected_levels.push_back(level3[distr(mt) % level3.size()]);
+    } else {
+        std::uniform_int_distribution<> dist(1, 3);
+        int num_levels = dist(mt);
+
+        if (num_levels >= 1) {
+            selected_levels.push_back(level1[distr(mt) % level1.size()]);
+        }
+        if (num_levels >= 2) {
+            selected_levels.push_back(level2[distr(mt) % level2.size()]);
+        }
+        if (num_levels == 3) {
+            selected_levels.push_back(level3[distr(mt) % level3.size()]);
+        }
+    }
+
+    std::string random_string = selected_levels.empty() ? "" : selected_levels[0];
+    for (size_t i = 1; i < selected_levels.size(); ++i) {
+        random_string += "/" + selected_levels[i];
+    }
+
+    return random_string;
+}
+
 std::vector<float>
 generate_vectors(uint64_t count, uint32_t dim, bool need_normalize, int seed) {
     return std::move(GenerateVectors<float>(count, dim, seed, need_normalize));
