@@ -17,6 +17,8 @@
 
 #include <cstring>
 
+#include "vsag_exception.h"
+
 namespace vsag {
 
 DatasetPtr
@@ -39,12 +41,12 @@ AllocateAndCopy(
         return nullptr;
     }
     if (old_dest == nullptr && old_count > 0) {
-        throw std::runtime_error(
-            "Old destination cannot be null if old count is greater than zero");
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            "Old destination cannot be null if old count is greater than zero");
     }
     if (old_dest && old_count == 0) {
-        throw std::runtime_error(
-            "Old count must be greater than zero if old destination is provided");
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            "Old count must be greater than zero if old destination is provided");
     }
 
     T* dest;
@@ -161,15 +163,50 @@ DatasetImpl::DeepCopy(Allocator* allocator) const {
             }
         }
     }
+
+    if (this->GetExtraInfoSize() != 0) {
+        if (this->GetExtraInfos() == nullptr) {
+            throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                "Extra info size is set but extra infos is null");
+        }
+        auto extra_info_size = this->GetExtraInfoSize();
+        copy_dataset->ExtraInfoSize(extra_info_size);
+        char* extra_info = nullptr;
+        if (allocator_ref) {
+            extra_info =
+                static_cast<char*>(allocator_ref->Allocate(extra_info_size * num_elements));
+        } else {
+            extra_info = new char[extra_info_size * num_elements];
+        }
+        copy_dataset->ExtraInfos(extra_info);
+        std::memcpy(extra_info, this->GetExtraInfos(), extra_info_size * num_elements);
+    }
+
     return copy_dataset;
 }
+
+#define APPEND_DATA(KEY, TYPE, SETTER_FUNC, MULTIPLIER)                                          \
+    if (auto iter = this->data_.find(KEY); iter != this->data_.end()) {                          \
+        if (other->Get##SETTER_FUNC() == nullptr) {                                              \
+            throw VsagException(ErrorType::INVALID_ARGUMENT,                                     \
+                                "Cannot append dataset without " #KEY " to dataset with " #KEY); \
+        }                                                                                        \
+        auto ptr = const_cast<TYPE*>(std::get<const TYPE*>(iter->second));                       \
+        this->SETTER_FUNC(AllocateAndCopy(other->Get##SETTER_FUNC(),                             \
+                                          new_num_elements*(MULTIPLIER),                         \
+                                          this->allocator_,                                      \
+                                          ptr,                                                   \
+                                          old_num_elements*(MULTIPLIER)));                       \
+    }
+
 DatasetPtr
 DatasetImpl::Append(const DatasetPtr& other) {
     if (owner_ == false) {
-        throw std::runtime_error("Cannot append to a non-owner dataset");
+        throw VsagException(ErrorType::INVALID_ARGUMENT, "Cannot append to a non-owner dataset");
     }
     if (this->GetDim() != other->GetDim()) {
-        throw std::runtime_error("Cannot append datasets with different dimensions");
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            "Cannot append datasets with different dimensions");
     }
 
     auto old_num_elements = this->GetNumElements();
@@ -179,57 +216,22 @@ DatasetImpl::Append(const DatasetPtr& other) {
     this->NumElements(old_num_elements + new_num_elements);
 
     // append ids
-    if (auto iter = this->data_.find(IDS); iter != this->data_.end()) {
-        if (other->GetIds() == nullptr) {
-            throw std::runtime_error("Cannot append dataset without ids to dataset with ids");
-        }
-        auto ptr = const_cast<int64_t*>(std::get<const int64_t*>(iter->second));
-        this->Ids(AllocateAndCopy(
-            other->GetIds(), new_num_elements, this->allocator_, ptr, old_num_elements));
-    }
+    APPEND_DATA(IDS, int64_t, Ids, 1);
+
     // append distances
-    if (auto iter = this->data_.find(DISTS); iter != this->data_.end()) {
-        if (other->GetDistances() == nullptr) {
-            throw std::runtime_error(
-                "Cannot append dataset without distances to dataset with distances");
-        }
-        auto ptr = const_cast<float*>(std::get<const float*>(iter->second));
-        this->Distances(AllocateAndCopy(other->GetDistances(),
-                                        new_num_elements * dim,
-                                        this->allocator_,
-                                        ptr,
-                                        old_num_elements * dim));
-    }
+    APPEND_DATA(DISTS, float, Distances, dim);
+
     // append int8 vectors
-    if (auto iter = this->data_.find(INT8_VECTORS); iter != this->data_.end()) {
-        if (other->GetInt8Vectors() == nullptr) {
-            throw std::runtime_error(
-                "Cannot append dataset without int8 vectors to dataset with int8 vectors");
-        }
-        auto ptr = const_cast<int8_t*>(std::get<const int8_t*>(iter->second));
-        this->Int8Vectors(AllocateAndCopy(other->GetInt8Vectors(),
-                                          new_num_elements * dim,
-                                          this->allocator_,
-                                          ptr,
-                                          old_num_elements * dim));
-    }
+    APPEND_DATA(INT8_VECTORS, int8_t, Int8Vectors, dim);
+
     // append float32 vectors
-    if (auto iter = this->data_.find(FLOAT32_VECTORS); iter != this->data_.end()) {
-        if (other->GetFloat32Vectors() == nullptr) {
-            throw std::runtime_error(
-                "Cannot append dataset without float32 vectors to dataset with float32 vectors");
-        }
-        auto ptr = const_cast<float*>(std::get<const float*>(iter->second));
-        this->Float32Vectors(AllocateAndCopy(other->GetFloat32Vectors(),
-                                             new_num_elements * dim,
-                                             this->allocator_,
-                                             ptr,
-                                             old_num_elements * dim));
-    }
+    APPEND_DATA(FLOAT32_VECTORS, float, Float32Vectors, dim);
+
     // append paths
     if (auto iter = this->data_.find(DATASET_PATHS); iter != this->data_.end()) {
         if (other->GetPaths() == nullptr) {
-            throw std::runtime_error("Cannot append dataset without paths to dataset with paths");
+            throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                "Cannot append dataset without paths to dataset with paths");
         }
         auto ptr = const_cast<std::string*>(std::get<const std::string*>(iter->second));
         std::string* paths_copy = new std::string[old_num_elements + new_num_elements];
@@ -246,7 +248,8 @@ DatasetImpl::Append(const DatasetPtr& other) {
     // append sparse vectors
     if (auto iter = this->data_.find(SPARSE_VECTORS); iter != this->data_.end()) {
         if (other->GetSparseVectors() == nullptr) {
-            throw std::runtime_error(
+            throw VsagException(
+                ErrorType::INVALID_ARGUMENT,
                 "Cannot append dataset without sparse vectors to dataset with sparse vectors");
         }
         auto ptr = const_cast<SparseVector*>(std::get<const SparseVector*>(iter->second));
@@ -257,7 +260,8 @@ DatasetImpl::Append(const DatasetPtr& other) {
     // append attribute sets
     if (auto iter = this->data_.find(ATTRIBUTE_SETS); iter != this->data_.end()) {
         if (other->GetAttributeSets() == nullptr) {
-            throw std::runtime_error(
+            throw VsagException(
+                ErrorType::INVALID_ARGUMENT,
                 "Cannot append dataset without attribute sets to dataset with attribute sets");
         }
         auto ptr = const_cast<AttributeSet*>(std::get<const AttributeSet*>(iter->second));
@@ -276,6 +280,39 @@ DatasetImpl::Append(const DatasetPtr& other) {
             }
         }
     }
+
+    // append extra infos
+    if (auto iter = this->data_.find(EXTRA_INFOS); iter != this->data_.end()) {
+        if (other->GetExtraInfoSize() != this->GetExtraInfoSize()) {
+            throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                "Cannot append datasets with different extra info sizes");
+        }
+        if (other->GetExtraInfos() == nullptr) {
+            throw VsagException(
+                ErrorType::INVALID_ARGUMENT,
+                "Cannot append dataset without extra infos to dataset with extra infos");
+        }
+        auto ptr = const_cast<char*>(
+            reinterpret_cast<const char*>(std::get<const int64_t*>(iter->second)));
+        size_t extra_info_size = this->GetExtraInfoSize();
+        if (allocator_) {
+            ptr = static_cast<char*>(allocator_->Reallocate(
+                ptr, extra_info_size * (old_num_elements + new_num_elements)));
+            std::memcpy(ptr + extra_info_size * old_num_elements,
+                        other->GetExtraInfos(),
+                        extra_info_size * new_num_elements);
+            this->ExtraInfos(ptr);
+        } else {
+            char* extra_info = new char[extra_info_size * (old_num_elements + new_num_elements)];
+            std::memcpy(extra_info, ptr, extra_info_size * old_num_elements);
+            delete[] ptr;  // Free the old memory if it was allocated with new[]
+            std::memcpy(extra_info + extra_info_size * old_num_elements,
+                        other->GetExtraInfos(),
+                        extra_info_size * new_num_elements);
+            this->ExtraInfos(extra_info);
+        }
+    }
+
     return shared_from_this();
 }
 

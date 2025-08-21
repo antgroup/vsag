@@ -115,7 +115,10 @@ TEST_CASE("Dataset Implement Test", "[ut][dataset]") {
 }
 
 vsag::DatasetPtr
-CreateTestDataset(int num_elements = 777, int dim = 38, vsag::Allocator* allocator = nullptr) {
+CreateTestDataset(int num_elements = 777,
+                  int dim = 38,
+                  int64_t extra_info_size = 13,
+                  vsag::Allocator* allocator = nullptr) {
     auto base = vsag::Dataset::Make();
     auto vecs = fixtures::generate_vectors(num_elements, dim, false, fixtures::RandomValue(0, 564));
     auto distances =
@@ -135,11 +138,18 @@ CreateTestDataset(int num_elements = 777, int dim = 38, vsag::Allocator* allocat
         ->AttributeSets(attr_sets)
         ->NumElements(num_elements)
         ->Distances(fixtures::CopyVector(distances, allocator))
-        ->Owner(true);
+        ->Owner(true, allocator);
     base->Float32Vectors(fixtures::CopyVector(vecs, allocator))
         ->Int8Vectors(fixtures::CopyVector(vecs_int8, allocator));
-    base->SparseVectors(
-        fixtures::CopyVector(fixtures::GenerateSparseVectors(num_elements, dim), allocator));
+    if (allocator != nullptr) {
+        base->SparseVectors(fixtures::CopyVector(
+            fixtures::GenerateSparseVectors(allocator, num_elements, dim), allocator));
+    } else {
+        base->SparseVectors(
+            fixtures::CopyVector(fixtures::GenerateSparseVectors(num_elements, dim), allocator));
+    }
+    auto extro_infos = fixtures::generate_extra_infos(num_elements, extra_info_size);
+    base->ExtraInfoSize(extra_info_size)->ExtraInfos(fixtures::CopyVector(extro_infos, allocator));
     return base;
 }
 
@@ -221,6 +231,15 @@ EqualDataset(const vsag::DatasetPtr& data1, const vsag::DatasetPtr& data2) {
     } else if (sparse_vectors1 != nullptr || sparse_vectors2 != nullptr) {
         return false;
     }
+    if (data1->GetExtraInfoSize() != data2->GetExtraInfoSize()) {
+        return false;
+    }
+    if (data1->GetExtraInfoSize() > 0 &&
+        memcmp(data1->GetExtraInfos(),
+               data2->GetExtraInfos(),
+               sizeof(char) * data1->GetExtraInfoSize() * num_element) != 0) {
+        return false;
+    }
     return true;
 }
 
@@ -233,12 +252,17 @@ TEST_CASE("Dataset Copy and Append Test", "[ut][Dataset]") {
     int num_elements = great_num(gen);
     int append_num_elements = append_num(gen);
     int dim = dim_random(gen);
-    auto original = CreateTestDataset(num_elements, dim);
+
+    auto use_allocator = GENERATE(true, false);
+    std::shared_ptr<vsag::Allocator> allocator =
+        use_allocator ? vsag::Engine::CreateDefaultAllocator() : nullptr;
+    int64_t extra_info_size = 13;
+    auto original = CreateTestDataset(num_elements, dim, extra_info_size, allocator.get());
     SECTION("Deep Copy") {
-        auto use_allocator = GENERATE(true, false);
-        std::shared_ptr<vsag::Allocator> allocator =
+        auto use_copy_allocator = GENERATE(true, false);
+        std::shared_ptr<vsag::Allocator> copy_allocator =
             use_allocator ? vsag::Engine::CreateDefaultAllocator() : nullptr;
-        auto copy = original->DeepCopy(allocator.get());
+        auto copy = original->DeepCopy(copy_allocator.get());
         REQUIRE(EqualDataset(original, copy));
         REQUIRE(memcmp(original->GetSparseVectors(),
                        copy->GetSparseVectors(),
@@ -251,10 +275,7 @@ TEST_CASE("Dataset Copy and Append Test", "[ut][Dataset]") {
                        sizeof(std::string) * num_elements) != 0);
     }
     SECTION("Append") {
-        auto use_allocator = GENERATE(false);
-        std::shared_ptr<vsag::Allocator> allocator =
-            use_allocator ? vsag::Engine::CreateDefaultAllocator() : nullptr;
-        auto copy = original->DeepCopy(allocator.get());
+        auto copy = original->DeepCopy();
         auto append_dataset = CreateTestDataset(append_num_elements, dim);
         original->Append(append_dataset);
         REQUIRE(original->GetNumElements() == num_elements + append_num_elements);
@@ -271,6 +292,8 @@ TEST_CASE("Dataset Copy and Append Test", "[ut][Dataset]") {
             ->Paths(original->GetPaths() + num_elements)
             ->AttributeSets(original->GetAttributeSets() + num_elements)
             ->NumElements(append_num_elements)
+            ->ExtraInfoSize(extra_info_size)
+            ->ExtraInfos(original->GetExtraInfos() + num_elements * extra_info_size)
             ->Owner(false);
         REQUIRE(EqualDataset(sub_original, append_dataset));
     }
