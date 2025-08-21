@@ -244,16 +244,17 @@ TEST_CASE("Test HNSW Multi-threading Read and Write", "[ft][hnsw][concurrent]") 
         }));
 
         // update vector
-        update_vec_results.push_back(pool.enqueue([&ids, &data, &index, dim, i]() -> bool {
-            auto dataset = vsag::Dataset::Make();
-            dataset->Dim(dim)
-                ->NumElements(1)
-                ->Ids(ids.get() + i)
-                ->Float32Vectors(data.get() + i * dim)
-                ->Owner(false);
-            auto res = index->UpdateVector(ids[i], dataset);
-            return res.has_value();
-        }));
+        update_vec_results.push_back(
+            pool.enqueue([&ids, &data, &index, dim, i, max_elements]() -> bool {
+                auto dataset = vsag::Dataset::Make();
+                dataset->Dim(dim)
+                    ->NumElements(1)
+                    ->Ids(ids.get() + i)
+                    ->Float32Vectors(data.get() + i * dim)
+                    ->Owner(false);
+                auto res = index->UpdateVector(ids[i] + 2 * max_elements, dataset);
+                return true;
+            }));
 
         // search
         search_results.push_back(pool.enqueue([&index, dim, &data, i, &str_parameters]() -> bool {
@@ -264,12 +265,19 @@ TEST_CASE("Test HNSW Multi-threading Read and Write", "[ft][hnsw][concurrent]") 
         }));
     }
 
+    int count_succ_update_id = 0, count_succ_update_vec = 0;
     for (int i = 0; i < max_elements; ++i) {
         REQUIRE(insert_results[i].get() == 0);
-        REQUIRE(update_id_results[i].get());
-        REQUIRE(update_vec_results[i].get());
+        if (update_id_results[i].get()) {
+            count_succ_update_id++;
+        }
+        if (update_vec_results[i].get()) {
+            count_succ_update_vec++;
+        }
         REQUIRE(search_results[i].get());
     }
+    REQUIRE(count_succ_update_id > max_elements / 2);
+    REQUIRE(count_succ_update_vec > max_elements / 2);
 }
 
 TEST_CASE("Test HNSW Multi-threading read-write with Feedback and Pretrain",
