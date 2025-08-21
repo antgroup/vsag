@@ -69,6 +69,8 @@ enum IndexFeature {
 
     SUPPORT_GET_RAW_VECTOR_BY_IDS, /**< Supports get raw vectors by ids */
 
+    SUPPORT_EXPORT_IDS, /**< Supports export ids */
+
     SUPPORT_KNN_SEARCH_WITH_EX_FILTER, /**< Supports K-nearest neighbor search with extra info filtering */
 
     SUPPORT_CLONE, /**< Supports clone index */

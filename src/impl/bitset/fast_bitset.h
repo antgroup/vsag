@@ -25,11 +25,12 @@ namespace vsag {
 class FastBitset : public ComputableBitset {
 public:
     explicit FastBitset(Allocator* allocator)
-        : ComputableBitset(), data_(allocator), fill_bit_(false) {
-        this->type_ = ComputableBitsetType::FastBitset;
-    };
+        : ComputableBitset(), data_(nullptr), size_(0), capacity_(0){};
 
-    ~FastBitset() override = default;
+    ~FastBitset() override {
+        delete[] data_;
+        data_ = nullptr;
+    }
 
     void
     Set(int64_t pos, bool value) override;
@@ -74,9 +75,39 @@ public:
     Dump() override;
 
 private:
-    bool fill_bit_{false};
+    void
+    resize(uint32_t new_size, uint64_t fill = 0);
 
-    Vector<uint64_t> data_;
+    constexpr bool
+    get_fill_bit() const {
+        return (capacity_ >> 31) & 1;
+    }
+
+    constexpr void
+    set_fill_bit(bool value) {
+        if (value) {
+            capacity_ |= (1UL << 31);
+        } else {
+            capacity_ &= ~(1UL << 31);
+        }
+    }
+
+    constexpr uint32_t
+    get_capacity() const {
+        return capacity_ & 0x7FFFFFFF;
+    }
+
+    constexpr void
+    set_capacity(uint32_t cap) {
+        capacity_ = (capacity_ & (1UL << 31)) | (cap & 0x7FFFFFFF);
+    }
+
+private:
+    uint64_t* data_{nullptr};
+
+    uint32_t size_{0};
+
+    uint32_t capacity_{0};
 };
 
 using FastBitsetPtr = std::shared_ptr<FastBitset>;

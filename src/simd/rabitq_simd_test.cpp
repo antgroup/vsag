@@ -102,7 +102,7 @@ TEST_CASE("RaBitQ SQ4U-BQ Compute Benchmark", "[ut][simd][!benchmark]") {
     if (SimdStatus::SupportSVE()) {
         BENCHMARK_SIMD_COMPUTE_SQ4(sve, RaBitQSQ4UBinaryIP);
     }
-    if (SimdStatus::SupportNEON) {
+    if (SimdStatus::SupportNEON()) {
         BENCHMARK_SIMD_COMPUTE_SQ4(neon, RaBitQSQ4UBinaryIP);
     }
     if (SimdStatus::SupportAVX512VPOPCNTDQ()) {
