@@ -49,7 +49,6 @@ public:
             allocator_->Deallocate((void*)(DatasetImpl::GetDistances()));
             allocator_->Deallocate((void*)(DatasetImpl::GetInt8Vectors()));
             allocator_->Deallocate((void*)(DatasetImpl::GetFloat32Vectors()));
-            allocator_->Deallocate((void*)(DatasetImpl::GetPaths()));
             allocator_->Deallocate((void*)(DatasetImpl::GetExtraInfos()));
 
             if (DatasetImpl::GetSparseVectors() != nullptr) {
@@ -65,7 +64,6 @@ public:
             delete[] DatasetImpl::GetDistances();
             delete[] DatasetImpl::GetInt8Vectors();
             delete[] DatasetImpl::GetFloat32Vectors();
-            delete[] DatasetImpl::GetPaths();
             delete[] DatasetImpl::GetExtraInfos();
 
             if (DatasetImpl::GetSparseVectors() != nullptr) {
@@ -76,6 +74,7 @@ public:
                 delete[] DatasetImpl::GetSparseVectors();
             }
         }
+        delete[] DatasetImpl::GetPaths();
         if (DatasetImpl::GetAttributeSets() != nullptr) {
             const auto* attrsets = DatasetImpl::GetAttributeSets();
             for (int i = 0; i < DatasetImpl::GetNumElements(); ++i) {
@@ -104,6 +103,12 @@ public:
         this->allocator_ = allocator;
         return shared_from_this();
     }
+
+    DatasetPtr
+    DeepCopy(Allocator* allocator) const override;
+
+    DatasetPtr
+    Append(const vsag::DatasetPtr& other) override;
 
 public:
     DatasetPtr
