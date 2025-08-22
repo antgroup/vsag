@@ -108,12 +108,12 @@ TEST_CASE("Pruning Strategy Select Edges With Heuristic", "[ut][pruning_strategy
         edges->Push(d04, 4);
 
         // Pruning process with alpha=1.5 (max_size=3)
-        // Step 1: Keep ID1 â†’ return_list = [ID1]
-        // Step 2: Process ID4: 1.5 * 17.0 = 25.5 < 26.0 â-> PRUNE ID4
-        // Step 3: Process ID3: 1.5 * 20.0 = 30.0 < 29.0 â-> NO, keep ID3
+        // Step 1: Keep ID1,so  return_list = [ID1]
+        // Step 2: Process ID4: 1.5 * 17.0 = 25.5 < 26.0-> PRUNE ID4
+        // Step 3: Process ID3: 1.5 * 20.0 = 30.0 < 29.0-> NO, keep ID3
         //         - return_list = [ID1, ID3]
-        // Step 4: Process ID2: 1.5 * 25.0 = 37.5 < 34.0 â-> NO, but check ID3
-        //         - 1.5 * 13.0 (ID2-ID3 distance) = 19.5 < 34.0 â-> PRUNE ID2
+        // Step 4: Process ID2: 1.5 * 25.0 = 37.5 < 34.0-> NO, but check ID3
+        //         - 1.5 * 13.0 (ID2-ID3 distance) = 19.5 < 34.0-> PRUNE ID2
         // Final return_list size: 2
         select_edges_by_heuristic(edges, 3, flatten, allocator.get(), 1.5F);
 
