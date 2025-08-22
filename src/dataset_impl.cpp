@@ -76,7 +76,7 @@ AllocateAndCopy(
 void
 copy_sparse_vector(const SparseVector& src, SparseVector* dest, Allocator* allocator) {
     size_t len = src.len_;
-    if (allocator) {
+    if (allocator != nullptr) {
         dest->ids_ = static_cast<uint32_t*>(allocator->Allocate(len * sizeof(uint32_t)));
         dest->vals_ = static_cast<float*>(allocator->Allocate(len * sizeof(float)));
     } else {
@@ -94,13 +94,14 @@ AllocateAndCopySparseVectors(const SparseVector* src,
                              Allocator* allocator,
                              SparseVector* old_dest = nullptr,
                              size_t old_count = 0) {
-    if (!src || count == 0)
+    if (!src || count == 0) {
         return old_dest;
+    }
 
     size_t new_total = old_count + count;
     SparseVector* dest = nullptr;
 
-    if (allocator) {
+    if (allocator != nullptr) {
         if (old_dest) {
             dest = static_cast<SparseVector*>(
                 allocator->Reallocate(old_dest, new_total * sizeof(SparseVector)));
@@ -125,7 +126,7 @@ AllocateAndCopySparseVectors(const SparseVector* src,
 
 DatasetPtr
 DatasetImpl::DeepCopy(Allocator* allocator) const {
-    auto allocator_ref = allocator != nullptr ? allocator : this->allocator_;
+    auto* allocator_ref = allocator != nullptr ? allocator : this->allocator_;
     auto copy_dataset = std::make_shared<DatasetImpl>();
     copy_dataset->Owner(true, allocator_ref);
 
@@ -145,7 +146,7 @@ DatasetImpl::DeepCopy(Allocator* allocator) const {
     copy_dataset->SparseVectors(
         AllocateAndCopySparseVectors(this->GetSparseVectors(), num_elements, allocator_ref));
 
-    auto paths = new std::string[num_elements];
+    auto* paths = new std::string[num_elements];
     copy_dataset->Paths(paths);
     for (int i = 0; i < num_elements; ++i) {
         paths[i] = this->GetPaths()[i];
@@ -153,7 +154,7 @@ DatasetImpl::DeepCopy(Allocator* allocator) const {
 
     if (this->GetAttributeSets() != nullptr) {
         const auto* attrsets = this->GetAttributeSets();
-        AttributeSet* attrsets_copy = new AttributeSet[num_elements];
+        auto* attrsets_copy = new AttributeSet[num_elements];
         copy_dataset->AttributeSets(attrsets_copy);
 
         for (int i = 0; i < num_elements; ++i) {
@@ -172,7 +173,7 @@ DatasetImpl::DeepCopy(Allocator* allocator) const {
         auto extra_info_size = this->GetExtraInfoSize();
         copy_dataset->ExtraInfoSize(extra_info_size);
         char* extra_info = nullptr;
-        if (allocator_ref) {
+        if (allocator_ref != nullptr) {
             extra_info =
                 static_cast<char*>(allocator_ref->Allocate(extra_info_size * num_elements));
         } else {
@@ -197,11 +198,11 @@ DatasetImpl::DeepCopy(Allocator* allocator) const {
                                           this->allocator_,                                      \
                                           ptr,                                                   \
                                           old_num_elements*(MULTIPLIER)));                       \
-    }
+    }  // NOLINT(bugprone-macro-parentheses)
 
 DatasetPtr
 DatasetImpl::Append(const DatasetPtr& other) {
-    if (owner_ == false) {
+    if (!owner_) {
         throw VsagException(ErrorType::INVALID_ARGUMENT, "Cannot append to a non-owner dataset");
     }
     if (this->GetDim() != other->GetDim()) {
@@ -233,8 +234,8 @@ DatasetImpl::Append(const DatasetPtr& other) {
             throw VsagException(ErrorType::INVALID_ARGUMENT,
                                 "Cannot append dataset without paths to dataset with paths");
         }
-        auto ptr = const_cast<std::string*>(std::get<const std::string*>(iter->second));
-        std::string* paths_copy = new std::string[old_num_elements + new_num_elements];
+        auto* ptr = const_cast<std::string*>(std::get<const std::string*>(iter->second));
+        auto* paths_copy = new std::string[old_num_elements + new_num_elements];
         for (int i = 0; i < old_num_elements; ++i) {
             paths_copy[i] = ptr[i];
         }
@@ -252,7 +253,7 @@ DatasetImpl::Append(const DatasetPtr& other) {
                 ErrorType::INVALID_ARGUMENT,
                 "Cannot append dataset without sparse vectors to dataset with sparse vectors");
         }
-        auto ptr = const_cast<SparseVector*>(std::get<const SparseVector*>(iter->second));
+        auto* ptr = const_cast<SparseVector*>(std::get<const SparseVector*>(iter->second));
         this->SparseVectors(AllocateAndCopySparseVectors(
             other->GetSparseVectors(), new_num_elements, this->allocator_, ptr, old_num_elements));
     }
@@ -264,14 +265,14 @@ DatasetImpl::Append(const DatasetPtr& other) {
                 ErrorType::INVALID_ARGUMENT,
                 "Cannot append dataset without attribute sets to dataset with attribute sets");
         }
-        auto ptr = const_cast<AttributeSet*>(std::get<const AttributeSet*>(iter->second));
-        AttributeSet* attrsets_copy = new AttributeSet[new_num_elements + old_num_elements];
+        auto* ptr = const_cast<AttributeSet*>(std::get<const AttributeSet*>(iter->second));
+        auto* attrsets_copy = new AttributeSet[new_num_elements + old_num_elements];
         this->AttributeSets(attrsets_copy);
         for (int i = 0; i < old_num_elements; ++i) {
             attrsets_copy[i].attrs_.swap(ptr[i].attrs_);
         }
         delete[] ptr;
-        auto other_attribute_sets = other->GetAttributeSets();
+        const auto* other_attribute_sets = other->GetAttributeSets();
         for (int i = 0; i < new_num_elements; ++i) {
             attrsets_copy[old_num_elements + i].attrs_.reserve(
                 other_attribute_sets[i].attrs_.size());
@@ -292,10 +293,10 @@ DatasetImpl::Append(const DatasetPtr& other) {
                 ErrorType::INVALID_ARGUMENT,
                 "Cannot append dataset without extra infos to dataset with extra infos");
         }
-        auto ptr = const_cast<char*>(
+        auto* ptr = const_cast<char*>(
             reinterpret_cast<const char*>(std::get<const int64_t*>(iter->second)));
         size_t extra_info_size = this->GetExtraInfoSize();
-        if (allocator_) {
+        if (allocator_ != nullptr) {
             ptr = static_cast<char*>(allocator_->Reallocate(
                 ptr, extra_info_size * (old_num_elements + new_num_elements)));
             std::memcpy(ptr + extra_info_size * old_num_elements,
