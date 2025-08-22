@@ -108,7 +108,7 @@ TEST_CASE("Pruning Strategy Select Edges With Heuristic", "[ut][pruning_strategy
         edges->Push(d04, 4);
 
         // Pruning process with alpha=1.5 (max_size=3)
-        // Step 1: Keep ID1,so  return_list = [ID1]
+        // Step 1: Keep ID1,so return_list = [ID1]
         // Step 2: Process ID4: 1.5 * 17.0 = 25.5 < 26.0-> PRUNE ID4
         // Step 3: Process ID3: 1.5 * 20.0 = 30.0 < 29.0-> NO, keep ID3
         //         - return_list = [ID1, ID3]
