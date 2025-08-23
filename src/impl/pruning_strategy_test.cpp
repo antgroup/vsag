@@ -25,6 +25,7 @@
 #include "data_cell/graph_datacell_parameter.h"
 #include "impl/allocator/safe_allocator.h"
 #include "impl/heap/standard_heap.h"
+#include "lock_strategy.h"
 #include "io/memory_io_parameter.h"
 #include "quantization/fp32_quantizer_parameter.h"
 #include "typing.h"
@@ -48,6 +49,7 @@ TEST_CASE("Pruning Strategy Select Edges With Heuristic", "[ut][pruning_strategy
 
     // Create flatten interface instance with configured parameters
     auto flatten = FlattenInterface::MakeInstance(flatten_param, common_param);
+    REQUIRE(flatten != nullptr);
 
     float vectors[5][128] = {0};
     vectors[0][0] = 5.0F;
@@ -182,9 +184,10 @@ TEST_CASE("Pruning Strategy Select Edges With Heuristic", "[ut][pruning_strategy
         candidates->Push(d03, 3);
         candidates->Push(d04, 4);
 
-        auto mutexes = std::make_shared<EmptyMutex>();
+        auto mutexes=std::make_shared<EmptyMutex>();
+        MutexArrayPtr mutex_array = std::make_shared<EmptyMutex>();
         auto entry_point =
-            mutually_connect_new_element(0, candidates, graph, flatten, mutexes, allocator.get());
+            mutually_connect_new_element(0, candidates, graph, flatten, mutex_array, allocator.get());
 
         REQUIRE(entry_point == 1);
 
