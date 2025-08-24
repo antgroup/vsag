@@ -29,12 +29,13 @@
 #include "io/memory_io_parameter.h"
 #include "quantization/fp32_quantizer_parameter.h"
 #include "typing.h"
+#include "vsag/engine.h"
 
 namespace vsag {
 
 TEST_CASE("Pruning Strategy Select Edges With Heuristic", "[ut][pruning_strategy]") {
     // Initialize memory allocator for safe memory management
-    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    auto allocator = Engine::CreateDefaultAllocator();
 
     // Configure flatten data cell parameters with FP32 quantization and memory I/O
     auto flatten_param = std::make_shared<FlattenDataCellParameter>();
@@ -187,7 +188,7 @@ TEST_CASE("Pruning Strategy Select Edges With Heuristic", "[ut][pruning_strategy
         auto mutexes=std::make_shared<EmptyMutex>();
         MutexArrayPtr mutex_array = std::make_shared<EmptyMutex>();
         auto entry_point =
-            mutually_connect_new_element(0, candidates, graph, flatten, mutex_array, allocator.get());
+            mutually_connect_new_element(0, candidates, graph, flatten, mutexes, allocator.get());
 
         REQUIRE(entry_point == 1);
 
