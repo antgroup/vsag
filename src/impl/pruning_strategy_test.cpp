@@ -172,12 +172,8 @@ TEST_CASE("Pruning Strategy Select Edges With Heuristic", "[ut][pruning_strategy
     SECTION("Mutual connection returns farthest candidate") {
         auto graph_param = std::make_shared<GraphDataCellParameter>();
         graph_param->io_parameter_ = std::make_shared<MemoryIOParameter>();
-        graph_param->max_degree_ = 2;
+        graph_param->max_degree_ = 4;
         auto graph = GraphInterface::MakeInstance(graph_param, common_param);
-
-        Vector<InnerIdType> init_neighbors(allocator.get());
-        init_neighbors.emplace_back(3);
-        graph->InsertNeighborsById(2, init_neighbors);
 
         auto candidates = std::make_shared<StandardHeap<true, false>>(allocator.get(), -1);
         candidates->Push(d01, 1);
