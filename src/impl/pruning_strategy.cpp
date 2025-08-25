@@ -23,7 +23,8 @@ void
 select_edges_by_heuristic(const DistHeapPtr& edges,
                           uint64_t max_size,
                           const FlattenInterfacePtr& flatten,
-                          Allocator* allocator) {
+                          Allocator* allocator,
+                          float alpha) {
     if (edges->Size() < max_size) {
         return;
     }
@@ -46,7 +47,7 @@ select_edges_by_heuristic(const DistHeapPtr& edges,
 
         for (const auto& second_pair : return_list) {
             float curdist = flatten->ComputePairVectors(second_pair.second, current_pair.second);
-            if (curdist < float_query) {
+            if (alpha * curdist < float_query) {
                 good = false;
                 break;
             }
