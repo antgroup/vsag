@@ -681,6 +681,18 @@ public:
     }
 
     /**
+      * @brief Perform analysis on the index using a search request.
+      *
+      *
+      * @param request The search request to use for index analysis.
+      * @return A JSON-formatted string containing the index analysis result
+      */
+    virtual std::string
+    AnalyzeIndexBySearch(const SearchRequest& request) {
+        throw std::runtime_error("Index not support analyze index by search");
+    }
+
+    /**
       * @brief Check if a specific ID exists in the index.
       *
       * @param id The ID to check for existence in the index.
