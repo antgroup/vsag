@@ -17,7 +17,7 @@
 
 #include <cblas.h>
 
-#include "impl/kmeans_cluster.h"
+#include "impl/cluster/kmeans_cluster.h"
 #include "prefetch.h"
 #include "simd/fp32_simd.h"
 #include "simd/normalize.h"
