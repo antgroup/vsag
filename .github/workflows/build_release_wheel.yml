@@ -1,0 +1,146 @@
+name: Build and Publish Wheels
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+  release:
+    types: [published]
+
+jobs:
+  build_wheels:
+    name: Build wheels for ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-latest
+          - arch: aarch64
+            runner: ubuntu-22.04-arm
+    
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  
+      
+      - name: Build wheels
+        uses: pypa/cibuildwheel@5f22145df44122af0f5a201f93cf0207171beca7
+        with:
+          package-dir: python
+        env:
+          
+          CIBW_ARCHS: ${{ matrix.arch }}
+          
+          
+          CIBW_BUILD: "cp38-* cp39-* cp310-* cp311-* cp312-*"
+          
+          
+          CIBW_SKIP: "pp* *-musllinux*"
+          
+         
+          CIBW_MANYLINUX_X86_64_IMAGE: manylinux2014
+          CIBW_MANYLINUX_AARCH64_IMAGE: manylinux2014
+          
+          CIBW_BEFORE_ALL: |
+           
+            sed -i 's/mirrorlist/#mirrorlist/g' /etc/yum.repos.d/CentOS-*.repo
+            sed -i 's|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' /etc/yum.repos.d/CentOS-*.repo
+            
+            
+            if [[ "$(uname -m)" == "aarch64" ]]; then
+              rm -f /etc/yum.repos.d/CentOS-SCLo-*.repo
+            fi
+            
+            yum clean all
+            
+           
+            yum install -y gcc gcc-c++ gcc-gfortran python3-devel
+            
+           
+            yum install -y libaio-devel libcurl-devel ca-certificates
+            
+            
+            if [[ "$(uname -m)" == "x86_64" ]]; then
+              yum-config-manager --add-repo https://yum.repos.intel.com/mkl/setup/intel-mkl.repo
+              rpm --import https://yum.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS-2019.PUB
+              yum install -y intel-mkl-64bit-2020.0-088
+            fi
+            
+            # For OpenMP, use the standard package instead of alibaba-specific ones
+            yum install -y libgomp
+      
+      
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.arch }}
+          path: ./wheelhouse/*.whl
+          if-no-files-found: error
+
+
+
+  publish_test_pypi:
+    name: Publish to TestPyPI
+    needs: [build_wheels]
+    runs-on: ubuntu-latest
+    
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' || github.event_name == 'release'
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      
+      
+      - name: List distribution files
+        run: |
+          ls -la dist/
+          echo "Files to upload:"
+          ls -1 dist/
+      
+      
+      - name: Publish to TestPyPI
+        uses: pypa/gh-action-pypi-publish@76f52bc884231f62b9a034ebfe128415bbaabdfc
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          password: ${{ secrets.TEST_PYPI_API_TOKEN }}
+          skip-existing: true
+          verbose: true
+
+  publish_pypi:
+    name: Publish to PyPI
+    runs-on: ubuntu-latest
+    needs: [build_wheels]
+    
+    if: github.event_name == 'release' && github.event.action == 'published'
+    environment:
+      name: pypi
+      url: https://pypi.org/p/pyvsag
+    
+    steps:
+      
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      
+      
+      - name: List distribution files
+        run: |
+          ls -la dist/
+          echo "Files to upload to PyPI:"
+          ls -1 dist/
+      
+      
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@76f52bc884231f62b9a034ebfe128415bbaabdfc
+        with:
+          password: ${{ secrets.PYPI_API_TOKEN }}
+          verbose: true
