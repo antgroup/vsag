@@ -92,6 +92,9 @@ public:
     virtual void
     AsyncRead(uint64_t offset, uint64_t len, void* dest, CallBack callback) = 0;
 
+    virtual bool
+    MultiRead(uint8_t* datas, const uint64_t* sizes, const uint64_t* offsets, uint64_t count);
+
     /**
      * @brief Returns the size of the data source.
      *
