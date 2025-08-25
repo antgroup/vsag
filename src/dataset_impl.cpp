@@ -35,7 +35,7 @@ DatasetImpl::MakeEmptyDataset() {
 
 template <typename T>
 T*
-AllocateAndCopy(
+allocate_and_copy(
     const T* src, size_t count, Allocator* allocator, T* old_dest = nullptr, size_t old_count = 0) {
     if (!src || count == 0) {
         return nullptr;
@@ -50,8 +50,8 @@ AllocateAndCopy(
     }
 
     T* dest;
-    if (allocator) {
-        if (old_dest) {
+    if (allocator != nullptr) {
+        if (old_dest != nullptr) {
             // If old_dest is provided, we need to reallocate new memory
             dest =
                 static_cast<T*>(allocator->Reallocate(old_dest, (old_count + count) * sizeof(T)));
@@ -60,7 +60,7 @@ AllocateAndCopy(
             dest = static_cast<T*>(allocator->Allocate(count * sizeof(T)));
         }
     } else {
-        if (old_dest) {
+        if (old_dest != nullptr) {
             // If old_dest is provided, we need to allocate new memory
             dest = new T[old_count + count];
             memcpy(dest, old_dest, old_count * sizeof(T));
@@ -89,12 +89,12 @@ copy_sparse_vector(const SparseVector& src, SparseVector* dest, Allocator* alloc
 }
 
 SparseVector*
-AllocateAndCopySparseVectors(const SparseVector* src,
-                             size_t count,
-                             Allocator* allocator,
-                             SparseVector* old_dest = nullptr,
-                             size_t old_count = 0) {
-    if (!src || count == 0) {
+allocate_and_copy_sparse_vectors(const SparseVector* src,
+                                 size_t count,
+                                 Allocator* allocator,
+                                 SparseVector* old_dest = nullptr,
+                                 size_t old_count = 0) {
+    if (src == nullptr || count == 0) {
         return old_dest;
     }
 
@@ -102,7 +102,7 @@ AllocateAndCopySparseVectors(const SparseVector* src,
     SparseVector* dest = nullptr;
 
     if (allocator != nullptr) {
-        if (old_dest) {
+        if (old_dest != nullptr) {
             dest = static_cast<SparseVector*>(
                 allocator->Reallocate(old_dest, new_total * sizeof(SparseVector)));
         } else {
@@ -136,15 +136,15 @@ DatasetImpl::DeepCopy(Allocator* allocator) const {
     copy_dataset->NumElements(num_elements);
     copy_dataset->Dim(dim);
 
-    copy_dataset->Ids(AllocateAndCopy(this->GetIds(), num_elements, allocator_ref));
+    copy_dataset->Ids(allocate_and_copy(this->GetIds(), num_elements, allocator_ref));
     copy_dataset->Distances(
-        AllocateAndCopy(this->GetDistances(), num_elements * dim, allocator_ref));
+        allocate_and_copy(this->GetDistances(), num_elements * dim, allocator_ref));
     copy_dataset->Int8Vectors(
-        AllocateAndCopy(this->GetInt8Vectors(), num_elements * dim, allocator_ref));
+        allocate_and_copy(this->GetInt8Vectors(), num_elements * dim, allocator_ref));
     copy_dataset->Float32Vectors(
-        AllocateAndCopy(this->GetFloat32Vectors(), num_elements * dim, allocator_ref));
+        allocate_and_copy(this->GetFloat32Vectors(), num_elements * dim, allocator_ref));
     copy_dataset->SparseVectors(
-        AllocateAndCopySparseVectors(this->GetSparseVectors(), num_elements, allocator_ref));
+        allocate_and_copy_sparse_vectors(this->GetSparseVectors(), num_elements, allocator_ref));
 
     auto* paths = new std::string[num_elements];
     copy_dataset->Paths(paths);
@@ -193,12 +193,12 @@ DatasetImpl::DeepCopy(Allocator* allocator) const {
                                 "Cannot append dataset without " #KEY " to dataset with " #KEY); \
         }                                                                                        \
         auto ptr = const_cast<TYPE*>(std::get<const TYPE*>(iter->second));                       \
-        this->SETTER_FUNC(AllocateAndCopy(other->Get##SETTER_FUNC(),                             \
-                                          new_num_elements*(MULTIPLIER),                         \
-                                          this->allocator_,                                      \
-                                          ptr,                                                   \
-                                          old_num_elements*(MULTIPLIER)));                       \
-    }  // NOLINT(bugprone-macro-parentheses)
+        this->SETTER_FUNC(allocate_and_copy(other->Get##SETTER_FUNC(),                           \
+                                            new_num_elements*(MULTIPLIER),                       \
+                                            this->allocator_,                                    \
+                                            ptr,                                                 \
+                                            old_num_elements*(MULTIPLIER)));                     \
+    }
 
 DatasetPtr
 DatasetImpl::Append(const DatasetPtr& other) {
@@ -217,16 +217,16 @@ DatasetImpl::Append(const DatasetPtr& other) {
     this->NumElements(old_num_elements + new_num_elements);
 
     // append ids
-    APPEND_DATA(IDS, int64_t, Ids, 1);
+    APPEND_DATA(IDS, int64_t, Ids, 1);  // NOLINT(bugprone-macro-parentheses)
 
     // append distances
-    APPEND_DATA(DISTS, float, Distances, dim);
+    APPEND_DATA(DISTS, float, Distances, dim);  // NOLINT(bugprone-macro-parentheses)
 
     // append int8 vectors
-    APPEND_DATA(INT8_VECTORS, int8_t, Int8Vectors, dim);
+    APPEND_DATA(INT8_VECTORS, int8_t, Int8Vectors, dim);  // NOLINT(bugprone-macro-parentheses)
 
     // append float32 vectors
-    APPEND_DATA(FLOAT32_VECTORS, float, Float32Vectors, dim);
+    APPEND_DATA(FLOAT32_VECTORS, float, Float32Vectors, dim);  // NOLINT(bugprone-macro-parentheses)
 
     // append paths
     if (auto iter = this->data_.find(DATASET_PATHS); iter != this->data_.end()) {
@@ -254,7 +254,7 @@ DatasetImpl::Append(const DatasetPtr& other) {
                 "Cannot append dataset without sparse vectors to dataset with sparse vectors");
         }
         auto* ptr = const_cast<SparseVector*>(std::get<const SparseVector*>(iter->second));
-        this->SparseVectors(AllocateAndCopySparseVectors(
+        this->SparseVectors(allocate_and_copy_sparse_vectors(
             other->GetSparseVectors(), new_num_elements, this->allocator_, ptr, old_num_elements));
     }
 
