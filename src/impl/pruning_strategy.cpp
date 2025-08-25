@@ -70,7 +70,7 @@ mutually_connect_new_element(InnerIdType cur_c,
                              const MutexArrayPtr& neighbors_mutexes,
                              Allocator* allocator) {
     const size_t max_size = graph->MaximumDegree();
-    select_edges_by_heuristic(top_candidates, max_size, flatten, allocator, 1.0F);
+    select_edges_by_heuristic(top_candidates, max_size, flatten, allocator);
     if (top_candidates->Size() > max_size) {
         throw VsagException(
             ErrorType::INTERNAL_ERROR,
@@ -120,7 +120,7 @@ mutually_connect_new_element(InnerIdType cur_c,
                                  neighbors[j]);
             }
 
-            select_edges_by_heuristic(candidates, max_size, flatten, allocator, 1.0F);
+            select_edges_by_heuristic(candidates, max_size, flatten, allocator);
 
             Vector<InnerIdType> cand_neighbors(allocator);
             while (not candidates->Empty()) {
