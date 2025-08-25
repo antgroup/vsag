@@ -1501,7 +1501,7 @@ TestIndex::TestMergeIndex(const std::string& name,
 }
 
 TestIndex::IndexPtr
-TestIndex::TestMergeIndexWithSameModel(const TestIndex::IndexPtr model,
+TestIndex::TestMergeIndexWithSameModel(const TestIndex::IndexPtr& model,
                                        const TestDatasetPtr& dataset,
                                        int32_t split_num,
                                        bool expect_success) {
@@ -2119,6 +2119,76 @@ TestIndex::TestExportIDs(const IndexPtr& index, const TestDatasetPtr& dataset) {
     }
     std::unordered_set<int64_t> id_set2(ids, ids + num_element);
     REQUIRE(id_set2.size() == num_element);
+}
+
+template <typename T>
+static void
+compare_attr_value(const vsag::Attribute* attr1, const vsag::Attribute* attr2) {
+    REQUIRE(attr1->GetValueCount() == attr2->GetValueCount());
+    auto count = attr1->GetValueCount();
+    auto* ptr1 = dynamic_cast<const vsag::AttributeValue<T>*>(attr1);
+    auto* ptr2 = dynamic_cast<const vsag::AttributeValue<T>*>(attr2);
+    for (int i = 0; i < count; ++i) {
+        REQUIRE(ptr1->GetValue()[i] == ptr2->GetValue()[i]);
+    }
+}
+
+static void
+compare_attr_set(const vsag::AttributeSet& attr1, const vsag::AttributeSet& attr2) {
+    REQUIRE(attr1.attrs_.size() == attr2.attrs_.size());
+    auto size = attr1.attrs_.size();
+    for (int i = 0; i < size; ++i) {
+        auto& attr = attr1.attrs_[i];
+        auto& gt_attr = attr2.attrs_[i];
+        REQUIRE(attr->name_ == gt_attr->name_);
+        REQUIRE(attr->GetValueType() == gt_attr->GetValueType());
+        if (attr->GetValueType() == vsag::AttrValueType::UINT64) {
+            compare_attr_value<uint64_t>(attr, gt_attr);
+        } else if (attr->GetValueType() == vsag::AttrValueType::INT64) {
+            compare_attr_value<int64_t>(attr, gt_attr);
+        } else if (attr->GetValueType() == vsag::AttrValueType::UINT32) {
+            compare_attr_value<uint32_t>(attr, gt_attr);
+        } else if (attr->GetValueType() == vsag::AttrValueType::INT32) {
+            compare_attr_value<int32_t>(attr, gt_attr);
+        } else if (attr->GetValueType() == vsag::AttrValueType::UINT16) {
+            compare_attr_value<uint16_t>(attr, gt_attr);
+        } else if (attr->GetValueType() == vsag::AttrValueType::INT16) {
+            compare_attr_value<int16_t>(attr, gt_attr);
+        } else if (attr->GetValueType() == vsag::AttrValueType::UINT8) {
+            compare_attr_value<uint8_t>(attr, gt_attr);
+        } else if (attr->GetValueType() == vsag::AttrValueType::INT8) {
+            compare_attr_value<int8_t>(attr, gt_attr);
+        } else if (attr->GetValueType() == vsag::AttrValueType::STRING) {
+            compare_attr_value<std::string>(attr, gt_attr);
+        }
+    }
+}
+
+void
+TestIndex::TestGetDataById(const IndexPtr& model, const TestDatasetPtr& dataset) {
+    if (not model->CheckFeature(vsag::SUPPORT_GET_DATA_BY_IDS)) {
+        return;
+    }
+    auto result = model->GetDataByIds(dataset->base_->GetIds(), dataset->base_->GetNumElements());
+    REQUIRE(result.has_value());
+    auto data = result.value();
+    REQUIRE(data->GetNumElements() == dataset->base_->GetNumElements());
+    REQUIRE(data->GetDim() == dataset->base_->GetDim());
+    // vectors
+    auto float_vectors = data->GetFloat32Vectors();
+    for (int i = 0; i < data->GetNumElements(); ++i) {
+        REQUIRE(memcmp(float_vectors + i * data->GetDim(),
+                       dataset->base_->GetFloat32Vectors() + i * data->GetDim(),
+                       data->GetDim() * sizeof(float)) == 0);
+    }
+    // attributes
+    auto attrs = data->GetAttributeSets();
+    auto gt_attrs = dataset->base_->GetAttributeSets();
+    for (int i = 0; i < data->GetNumElements(); ++i) {
+        auto& attr = attrs[i];
+        auto& gt_attr = gt_attrs[i];
+        compare_attr_set(attr, gt_attr);
+    }
 }
 
 }  // namespace fixtures

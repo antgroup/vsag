@@ -485,7 +485,7 @@ IVF::Merge(const std::vector<MergeUnit>& merge_units) {
 }
 
 std::pair<BucketIdType, InnerIdType>
-IVF::get_location(InnerIdType inner_id) {
+IVF::get_location(InnerIdType inner_id) const {
     auto loc = this->location_map_[inner_id];
     constexpr uint64_t mask = (1ULL << LOCATION_SPLIT_BIT) - 1ULL;
     auto bucket_id = static_cast<BucketIdType>(loc >> LOCATION_SPLIT_BIT);
@@ -943,6 +943,30 @@ IVF::fill_location_map() {
                 (static_cast<uint64_t>(i) << LOCATION_SPLIT_BIT) | static_cast<uint64_t>(j);
         }
     }
+}
+
+DatasetPtr
+IVF::GetDataByIds(const int64_t* ids, int64_t count) const {
+    auto dataset = Dataset::Make();
+    dataset->NumElements(count)->Dim(dim_)->Owner(true, allocator_);
+    auto* fp32_data =
+        reinterpret_cast<float*>(this->allocator_->Allocate(count * this->dim_ * sizeof(float)));
+    auto* attribute_data =
+        reinterpret_cast<AttributeSet*>(this->allocator_->Allocate(count * sizeof(AttributeSet)));
+    dataset->AttributeSets(attribute_data)->Float32Vectors(fp32_data);
+    for (int64_t i = 0; i < count; ++i) {
+        auto inner_id = this->label_table_->GetIdByLabel(ids[i]);
+        this->GetCodeByInnerId(inner_id, reinterpret_cast<uint8_t*>(fp32_data + i * this->dim_));
+        this->get_attr_by_inner_id(inner_id, attribute_data + i);
+    }
+
+    return dataset;
+}
+
+void
+IVF::get_attr_by_inner_id(InnerIdType inner_id, AttributeSet* attr) const {
+    auto [bucket_id, bucket_offset] = this->get_location(inner_id);
+    this->attr_filter_index_->GetAttribute(bucket_id, bucket_offset, attr);
 }
 
 }  // namespace vsag
