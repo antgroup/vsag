@@ -89,7 +89,8 @@ HNSW::HNSW(HnswParameters hnsw_params, const IndexCommonParam& index_common_para
                                                        hnsw_params.ef_construction,
                                                        use_reversed_edges_,
                                                        hnsw_params.normalize,
-                                                       Options::Instance().block_size_limit());
+                                                       Options::Instance().block_size_limit(),
+                                                       true);
     } else {
         if (dim_ % 4 != 0) {
             // FIXME(wxyu): remove throw stmt from construct function
@@ -188,6 +189,38 @@ HNSW::add(const DatasetPtr& base) {
         std::vector<int64_t> failed_ids;
         for (int64_t i = 0; i < num_elements; ++i) {
             // noexcept runtime
+            if (alg_hnsw_->isTombLabel(ids[i])) {
+                auto index = std::reinterpret_pointer_cast<hnswlib::HierarchicalNSW>(alg_hnsw_);
+                // process data
+                auto one_base = Dataset::Make();
+                one_base->Ids(ids + i)
+                    ->Float32Vectors((float*)((char*)vectors + data_size * i))
+                    ->Int8Vectors((int8_t*)((char*)vectors + data_size * i))
+                    ->NumElements(1)
+                    ->Owner(false);
+
+                // try update
+                {
+                    std::scoped_lock lock(rw_mutex_);
+                    index->recoverMarkDelete(ids[i]);
+                }
+                auto update_res = UpdateVector(ids[i], one_base, false);
+
+                // process result
+                if (update_res.has_value() and update_res.value()) {
+                    // recover success
+                    continue;
+                }
+                // recover failed: mark delete again
+                {
+                    std::scoped_lock lock(rw_mutex_);
+                    index->markDelete(ids[i]);
+                }
+                logger::debug("duplicate point: {}", i);
+                failed_ids.push_back(ids[i]);
+                continue;
+            }
+
             std::shared_lock lock(rw_mutex_);
             if (!alg_hnsw_->addPoint((const void*)((char*)vectors + data_size * i), ids[i])) {
                 logger::debug("duplicate point: {}", i);
