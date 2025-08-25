@@ -162,6 +162,9 @@ public:
     bool
     isValidLabel(LabelType label) override;
 
+    bool
+    isTombLabel(LabelType label) override;
+
     size_t
     getMaxDegree() {
         return maxM0_;
@@ -355,11 +358,23 @@ public:
     markDelete(LabelType label);
 
     /*
+    * Remove mark on an element that deleted, does NOT really change the current graph.
+    */
+    void
+    recoverMarkDelete(LabelType label);
+
+    /*
     * Uses the last 16 bits of the memory for the linked list size to store the mark,
     * whereas maxM0_ has to be limited to the lower 16 bits, however, still large enough in almost all cases.
     */
     void
     markDeletedInternal(InnerIdType internal_id);
+
+    /*
+     * Recover the procee
+     */
+    void
+    recoveryMarkDeletedInternal(InnerIdType internal_id);
 
     /*
     * Checks the first 16 bits of the memory to see if the element is marked deleted.
