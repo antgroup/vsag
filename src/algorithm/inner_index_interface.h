@@ -320,6 +320,12 @@ public:
                             "Index doesn't support GetStats");
     }
 
+    virtual std::string
+    AnalyzeIndexBySearch(const SearchRequest& request) {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "Index doesn't support analyze index by search");
+    }
+
     [[nodiscard]] virtual bool
     CheckIdExist(int64_t id) const {
         return this->label_table_->CheckLabel(id);

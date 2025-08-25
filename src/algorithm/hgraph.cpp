@@ -1815,7 +1815,7 @@ HGraph::UpdateAttribute(int64_t id,
     this->attr_filter_index_->UpdateBitsetsByAttr(new_attrs, inner_id, 0, origin_attrs);
 }
 
-const static uint64_t QUERY_SAMPLE_SIZE = 100;
+const static uint64_t QUERY_SAMPLE_SIZE = 10;
 const static int64_t DEFAULT_TOPK = 100;
 
 std::string
@@ -1828,12 +1828,12 @@ HGraph::GetStats() const {
         stats["total_count"] = 0;
         return stats.dump();
     }
-    // TODO(inabao): configure in next pr
-    std::string search_params = R"({
-        "hgraph": {
-            "ef_search": 200
-        }
-    })";
+    constexpr static const char* search_params_template = R"({{
+        "hgraph": {{
+            "ef_search": {}
+        }}
+    }})";
+    std::string search_params = fmt::format(search_params_template, ef_construct_);
     stats["total_count"] = this->total_count_;
     // duplicate rate
     size_t duplicate_num = 0;
@@ -1849,13 +1849,13 @@ HGraph::GetStats() const {
     stats["deleted_count"] = delete_count_.load();
     this->analyze_graph_connection(stats);
     this->analyze_graph_recall(stats, sample_base_datas, sample_size, topk, search_params);
-    this->analyze_quantizer(stats, sample_base_datas, sample_size, topk, search_params);
+    this->analyze_quantizer(stats, sample_base_datas.data(), sample_size, topk, search_params);
     return stats.dump(4);
 }
 
 void
 HGraph::analyze_quantizer(JsonType& stats,
-                          const Vector<float>& data,
+                          const float* data,
                           uint64_t sample_data_size,
                           int64_t topk,
                           const std::string& search_param) const {
@@ -1868,7 +1868,7 @@ HGraph::analyze_quantizer(JsonType& stats,
             float tmp_bias_ratio = 0.0F;
             float tmp_inversion_count_rate = 0.0F;
             this->use_reorder_ = false;
-            const auto* query_data = data.data() + i * dim_;
+            const auto* query_data = data + i * dim_;
             auto query = Dataset::Make();
             query->Owner(false)->NumElements(1)->Float32Vectors(query_data)->Dim(dim_);
             auto search_result = this->KnnSearch(query, topk, search_param, nullptr);
@@ -1912,6 +1912,11 @@ HGraph::analyze_graph_recall(JsonType& stats,
                              uint64_t sample_data_size,
                              int64_t topk,
                              const std::string& search_param) const {
+    if (this->use_reorder_ && not this->high_precise_codes_->InMemory()) {
+        logger::info(
+            "analyze_graph_recall: high_precise_codes_ is not in memory, skip base recall test");
+        return;
+    }
     // recall of "base" when searching for "base"
     logger::info("analyze_graph_recall: sample_data_size = {}, topk = {}", sample_data_size, topk);
     auto codes = this->use_reorder_ ? this->high_precise_codes_ : this->basic_flatten_codes_;
@@ -1932,8 +1937,8 @@ HGraph::analyze_graph_recall(JsonType& stats,
             if (groundtruth->Size() < topk) {
                 groundtruth->Push({dist, j});
             } else if (dist < groundtruth->Top().first) {
-                groundtruth->Pop();
                 groundtruth->Push({dist, j});
+                groundtruth->Pop();
             }
         }
         // neighbors of a point and the proximity relationship of a point
@@ -2056,6 +2061,80 @@ HGraph::check_and_init_raw_vector(const FlattenInterfaceParamPtr& raw_vector_par
         raw_vector_ = high_precise_codes_;
         return;
     }
+}
+
+std::string
+HGraph::AnalyzeIndexBySearch(const SearchRequest& request) {
+    JsonType stats;
+    Vector<float> distances(this->total_count_, allocator_);
+    Vector<InnerIdType> ids(this->total_count_, allocator_);
+    std::iota(ids.begin(), ids.end(), 0);
+    auto codes = (this->use_reorder_) ? this->high_precise_codes_ : this->basic_flatten_codes_;
+    auto querys = request.query_;
+    auto topk = std::min(request.topk_, GetNumElements());
+
+    int64_t num_elements = querys->GetNumElements();
+    DistHeapPtr heap = std::make_shared<StandardHeap<true, false>>(allocator_, -1);
+    Vector<UnorderedSet<InnerIdType>> ground_truths(
+        num_elements, UnorderedSet<InnerIdType>(allocator_), allocator_);
+    float dist = 0.0F;
+    for (int64_t i = 0; i < num_elements; i++) {
+        const auto* query_data = get_data(querys, i);
+        auto computer = codes->FactoryComputer(query_data);
+        if (i % 10 == 0) {
+            logger::info("calculate groundtruth for query data {} of {}", i, i + 10);
+        }
+        codes->Query(distances.data(), computer, ids.data(), this->total_count_);
+        for (int64_t j = 0; j < this->total_count_; ++j) {
+            if (heap->Size() < topk) {
+                heap->Push({distances[j], ids[j]});
+            } else if (distances[j] < heap->Top().first) {
+                heap->Push({distances[j], ids[j]});
+                heap->Pop();
+            }
+        }
+        while (not heap->Empty()) {
+            ground_truths[i].insert(heap->Top().second);
+            dist += heap->Top().first;
+            heap->Pop();
+        }
+    }
+    dist /= static_cast<float>(num_elements * topk);
+    stats["avg_distance_query"] = dist;
+    auto param_str = request.params_str_;
+    double time_cost = 0.0;
+    int64_t result_hit = 0;
+    for (int64_t i = 0; i < num_elements; ++i) {
+        auto query = Dataset::Make();
+        query->NumElements(1)
+            ->Dim(dim_)
+            ->Float32Vectors((const float*)get_data(querys, i))
+            ->Owner(false);
+        DatasetPtr search_result;
+        double single_query_time;
+        {
+            Timer t(single_query_time);
+            search_result = this->KnnSearch(query, topk, param_str, nullptr);
+        }
+        if (search_result->GetDim() != topk) {
+            logger::error(
+                "search result size mismatch: expected {}, got {}", topk, search_result->GetDim());
+            continue;
+        }
+        int64_t hit_count = 0;
+        for (int64_t j = 0; j < search_result->GetDim(); ++j) {
+            if (ground_truths[i].count(search_result->GetIds()[j]) > 0) {
+                hit_count++;
+            }
+        }
+        result_hit += hit_count;
+        time_cost += single_query_time;
+    }
+    stats["recall_query"] =
+        static_cast<double>(result_hit) / static_cast<double>(num_elements * topk);
+    stats["time_cost_query"] = time_cost / static_cast<double>(num_elements);
+    this->analyze_quantizer(stats, querys->GetFloat32Vectors(), num_elements, topk, param_str);
+    return stats.dump(4);
 }
 
 }  // namespace vsag
