@@ -192,7 +192,7 @@ DatasetImpl::DeepCopy(Allocator* allocator) const {
             throw VsagException(ErrorType::INVALID_ARGUMENT,                                     \
                                 "Cannot append dataset without " #KEY " to dataset with " #KEY); \
         }                                                                                        \
-        auto ptr = const_cast<TYPE*>(std::get<const TYPE*>(iter->second));                       \
+        auto ptr = const_cast<TYPE>(std::get<const TYPE>(iter->second));                         \
         this->SETTER_FUNC(allocate_and_copy(other->Get##SETTER_FUNC(),                           \
                                             new_num_elements*(MULTIPLIER),                       \
                                             this->allocator_,                                    \
@@ -217,16 +217,16 @@ DatasetImpl::Append(const DatasetPtr& other) {
     this->NumElements(old_num_elements + new_num_elements);
 
     // append ids
-    APPEND_DATA(IDS, int64_t, Ids, 1);  // NOLINT(bugprone-macro-parentheses)
+    APPEND_DATA(IDS, int64_t*, Ids, 1);
 
     // append distances
-    APPEND_DATA(DISTS, float, Distances, dim);  // NOLINT(bugprone-macro-parentheses)
+    APPEND_DATA(DISTS, float*, Distances, dim);
 
     // append int8 vectors
-    APPEND_DATA(INT8_VECTORS, int8_t, Int8Vectors, dim);  // NOLINT(bugprone-macro-parentheses)
+    APPEND_DATA(INT8_VECTORS, int8_t*, Int8Vectors, dim);
 
     // append float32 vectors
-    APPEND_DATA(FLOAT32_VECTORS, float, Float32Vectors, dim);  // NOLINT(bugprone-macro-parentheses)
+    APPEND_DATA(FLOAT32_VECTORS, float*, Float32Vectors, dim);
 
     // append paths
     if (auto iter = this->data_.find(DATASET_PATHS); iter != this->data_.end()) {
