@@ -249,6 +249,11 @@ IVF::IVF(const IVFParameterPtr& param, const IndexCommonParam& common_param)
         this->thread_pool_->SetPoolSize(param->thread_count);
     }
 }
+void
+IVF::GetCodeByInnerId(InnerIdType inner_id, uint8_t* data) const {
+    auto [bucket_id, offset_id] = this->get_location(inner_id);
+    this->bucket_->GetCodesById(bucket_id, offset_id, data);
+}
 
 void
 IVF::InitFeatures() {
@@ -278,7 +283,8 @@ IVF::InitFeatures() {
     });
 
     auto name = this->bucket_->GetQuantizerName();
-    if (name != QUANTIZATION_TYPE_VALUE_FP32 and name != QUANTIZATION_TYPE_VALUE_BF16) {
+    if (name != QUANTIZATION_TYPE_VALUE_FP32 and name != QUANTIZATION_TYPE_VALUE_BF16 and
+        name != QUANTIZATION_TYPE_VALUE_FP16) {
         this->index_feature_list_->SetFeature(IndexFeature::NEED_TRAIN);
     } else {
         this->index_feature_list_->SetFeatures({
@@ -286,6 +292,13 @@ IVF::InitFeatures() {
             IndexFeature::SUPPORT_RANGE_SEARCH_WITH_ID_FILTER,
         });
     }
+
+    if (name == QUANTIZATION_TYPE_VALUE_FP32 and
+        this->bucket_->GetMetricType() != MetricType::METRIC_TYPE_COSINE and
+        not this->use_residual_) {
+        this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_GET_DATA_BY_IDS);
+    }
+
     this->index_feature_list_->SetFeatures({
         IndexFeature::SUPPORT_CLONE,
         IndexFeature::SUPPORT_EXPORT_MODEL,
@@ -485,7 +498,7 @@ IVF::Merge(const std::vector<MergeUnit>& merge_units) {
 }
 
 std::pair<BucketIdType, InnerIdType>
-IVF::get_location(InnerIdType inner_id) {
+IVF::get_location(InnerIdType inner_id) const {
     auto loc = this->location_map_[inner_id];
     constexpr uint64_t mask = (1ULL << LOCATION_SPLIT_BIT) - 1ULL;
     auto bucket_id = static_cast<BucketIdType>(loc >> LOCATION_SPLIT_BIT);
@@ -943,6 +956,29 @@ IVF::fill_location_map() {
                 (static_cast<uint64_t>(i) << LOCATION_SPLIT_BIT) | static_cast<uint64_t>(j);
         }
     }
+}
+
+DatasetPtr
+IVF::GetDataByIds(const int64_t* ids, int64_t count) const {
+    auto dataset = Dataset::Make();
+    dataset->NumElements(count)->Dim(dim_)->Owner(true, allocator_);
+    auto* fp32_data =
+        reinterpret_cast<float*>(this->allocator_->Allocate(count * this->dim_ * sizeof(float)));
+    auto* attribute_data = new AttributeSet[count];
+    dataset->AttributeSets(attribute_data)->Float32Vectors(fp32_data);
+    for (int64_t i = 0; i < count; ++i) {
+        auto inner_id = this->label_table_->GetIdByLabel(ids[i]);
+        this->GetCodeByInnerId(inner_id, reinterpret_cast<uint8_t*>(fp32_data + i * this->dim_));
+        this->get_attr_by_inner_id(inner_id, attribute_data + i);
+    }
+
+    return dataset;
+}
+
+void
+IVF::get_attr_by_inner_id(InnerIdType inner_id, AttributeSet* attr) const {
+    auto [bucket_id, bucket_offset] = this->get_location(inner_id);
+    this->attr_filter_index_->GetAttribute(bucket_id, bucket_offset, attr);
 }
 
 }  // namespace vsag

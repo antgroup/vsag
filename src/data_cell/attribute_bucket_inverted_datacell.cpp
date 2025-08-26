@@ -244,4 +244,68 @@ AttributeBucketInvertedDataCell::UpdateBitsetsByAttr(const AttributeSet& attribu
     }
 }
 
+template <typename T>
+static Attribute*
+get_attr_by_type(const std::shared_ptr<AttrValueMap>& value_map,
+                 InnerIdType inner_id,
+                 BucketIdType bucket_id,
+                 const std::string& name) {
+    auto* attr = value_map->template GetAttr<T>(inner_id, bucket_id);
+    if (attr != nullptr) {
+        attr->name_ = name;
+        return attr;
+    }
+    return nullptr;
+}
+
+static Attribute*
+get_attr_by_type(const std::shared_ptr<AttrValueMap>& value_map,
+                 AttrValueType value_type,
+                 InnerIdType inner_id,
+                 BucketIdType bucket_id,
+                 const std::string& name) {
+    if (value_type == AttrValueType::INT32) {
+        return get_attr_by_type<int32_t>(value_map, inner_id, bucket_id, name);
+    }
+    if (value_type == AttrValueType::INT64) {
+        return get_attr_by_type<int64_t>(value_map, inner_id, bucket_id, name);
+    }
+    if (value_type == AttrValueType::INT16) {
+        return get_attr_by_type<int16_t>(value_map, inner_id, bucket_id, name);
+    }
+    if (value_type == AttrValueType::INT8) {
+        return get_attr_by_type<int8_t>(value_map, inner_id, bucket_id, name);
+    }
+    if (value_type == AttrValueType::UINT32) {
+        return get_attr_by_type<uint32_t>(value_map, inner_id, bucket_id, name);
+    }
+    if (value_type == AttrValueType::UINT64) {
+        return get_attr_by_type<uint64_t>(value_map, inner_id, bucket_id, name);
+    }
+    if (value_type == AttrValueType::UINT16) {
+        return get_attr_by_type<uint16_t>(value_map, inner_id, bucket_id, name);
+    }
+    if (value_type == AttrValueType::UINT8) {
+        return get_attr_by_type<uint8_t>(value_map, inner_id, bucket_id, name);
+    }
+    if (value_type == AttrValueType::STRING) {
+        return get_attr_by_type<std::string>(value_map, inner_id, bucket_id, name);
+    }
+    throw VsagException(ErrorType::INTERNAL_ERROR, "Unsupported value type");
+}
+
+void
+AttributeBucketInvertedDataCell::GetAttribute(BucketIdType bucket_id,
+                                              InnerIdType inner_id,
+                                              AttributeSet* attr) {
+    std::shared_lock lock(this->global_mutex_);
+    for (const auto& [name, value_map] : this->field_2_value_map_) {
+        auto value_type = this->field_type_map_.GetTypeOfField(name);
+        auto* attr_ptr = get_attr_by_type(value_map, value_type, inner_id, bucket_id, name);
+        if (attr_ptr != nullptr) {
+            attr->attrs_.emplace_back(attr_ptr);
+        }
+    }
+}
+
 }  // namespace vsag
