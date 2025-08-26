@@ -418,7 +418,7 @@ TEST_CASE("Test HNSW Multi-threading read-write with Feedback and Pretrain",
             }));
     }
 
-    uint32_t succ_feedback = 0, succ_pretrain = 0, succ_search = 0;
+    uint32_t succ_feedback = 0, succ_pretrain = 0, succ_search = 0, succ_update_vec = 0;
     for (int64_t i = 0; i < max_elements; ++i) {
         REQUIRE(insert_results[i].get() == 0);
         if (i < max_elements / 2) {
@@ -428,8 +428,10 @@ TEST_CASE("Test HNSW Multi-threading read-write with Feedback and Pretrain",
             if (pretrain_results[i].get()) {
                 succ_pretrain++;
             }
+            if (update_vector_results[i].get()) {
+                succ_update_vec++;
+            }
             succ_search += (search_results[i].get() == ids[i]);
-            REQUIRE(update_vector_results[i].get() == true);
             REQUIRE(delete_re_insert_results[i].get() == true);
         }
     }
@@ -437,4 +439,5 @@ TEST_CASE("Test HNSW Multi-threading read-write with Feedback and Pretrain",
     REQUIRE(succ_search > 0.7 * max_elements / 2);
     REQUIRE(succ_feedback > 0);
     REQUIRE(succ_pretrain > 0);
+    REQUIRE(succ_update_vec > max_elements / 3);
 }

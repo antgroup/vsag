@@ -815,6 +815,11 @@ HNSW::update_vector(int64_t id, const DatasetPtr& new_base, bool force_update) {
             std::reinterpret_pointer_cast<hnswlib::HierarchicalNSW>(alg_hnsw_)->getDistanceByLabel(
                 id, new_base_vec);
         for (int i = 0; i < neighbors->GetDim(); i++) {
+            // don't compare with itself
+            if (neighbors->GetIds()[i] == id) {
+                continue;
+            }
+
             float neighbor_dist = 0;
             try {
                 neighbor_dist = std::reinterpret_pointer_cast<hnswlib::HierarchicalNSW>(alg_hnsw_)
