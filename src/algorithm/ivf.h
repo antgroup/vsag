@@ -42,7 +42,7 @@ public:
     explicit IVF(const IVFParameterPtr& param, const IndexCommonParam& common_param);
 
     explicit IVF(const ParamPtr& param, const IndexCommonParam& common_param)
-        : IVF(std::dynamic_pointer_cast<IVFParameter>(param), common_param){};
+        : IVF(std::dynamic_pointer_cast<IVFParameter>(param), common_param) {};
 
     ~IVF() override = default;
 

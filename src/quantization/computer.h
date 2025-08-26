@@ -34,7 +34,7 @@ public:
     }
 
     explicit Computer(const T* quantizer, Allocator* allocator)
-        : quantizer_(quantizer), allocator_(allocator){};
+        : quantizer_(quantizer), allocator_(allocator) {};
 
     ComputerInterfacePtr
     GetComputerInterfacePtr() override {

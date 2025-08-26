@@ -22,7 +22,7 @@ Checks: >
 
 HeaderFilterRegex: ''
 WarningsAsErrors: "*"
-AnalyzeTemporaryDtors: true
+# AnalyzeTemporaryDtors: true
 
 CheckOptions:
   - { key: readability-identifier-naming.NamespaceCase,               value: lower_case }

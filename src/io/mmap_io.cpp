@@ -43,10 +43,10 @@ MMapIO::MMapIO(std::string filename, Allocator* allocator)
 }
 
 MMapIO::MMapIO(const MMapIOParameterPtr& io_param, const IndexCommonParam& common_param)
-    : MMapIO(io_param->path_, common_param.allocator_.get()){};
+    : MMapIO(io_param->path_, common_param.allocator_.get()) {};
 
 MMapIO::MMapIO(const IOParamPtr& param, const IndexCommonParam& common_param)
-    : MMapIO(std::dynamic_pointer_cast<MMapIOParameter>(param), common_param){};
+    : MMapIO(std::dynamic_pointer_cast<MMapIOParameter>(param), common_param) {};
 
 MMapIO::~MMapIO() {
     munmap(this->start_, this->size_);

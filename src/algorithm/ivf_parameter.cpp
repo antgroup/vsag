@@ -37,9 +37,9 @@ IVFParameter::FromJson(const JsonType& json) {
 
     if (this->ivf_partition_strategy_parameter->partition_strategy_type ==
         IVFPartitionStrategyType::GNO_IMI) {
-        this->bucket_param->buckets_count = static_cast<BucketIdType>(
+        this->bucket_param->buckets_count = (static_cast<int64_t>(
             this->ivf_partition_strategy_parameter->gnoimi_param->first_order_buckets_count *
-            this->ivf_partition_strategy_parameter->gnoimi_param->second_order_buckets_count);
+            this->ivf_partition_strategy_parameter->gnoimi_param->second_order_buckets_count));
     }
 
     if (json.contains(BUCKET_PER_DATA_KEY)) {

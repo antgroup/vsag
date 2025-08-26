@@ -117,7 +117,7 @@ string_view_split(std::string_view str, char delim) {
     result.emplace_back(str.substr(start));
     return result;
 }
-FCExpressionVisitor::FCExpressionVisitor(AttrTypeSchema* schema) : schema_(schema){};
+FCExpressionVisitor::FCExpressionVisitor(AttrTypeSchema* schema) : schema_(schema) {};
 
 std::any
 FCExpressionVisitor::visitFilter_condition(FCParser::Filter_conditionContext* ctx) {

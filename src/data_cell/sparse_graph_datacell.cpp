@@ -152,7 +152,7 @@ SparseGraphDataCell::Deserialize(StreamReader& reader) {
 }
 
 void
-SparseGraphDataCell::Resize(InnerIdType new_size){};
+SparseGraphDataCell::Resize(InnerIdType new_size) {};
 
 void
 SparseGraphDataCell::DeleteNeighborsById(vsag::InnerIdType id) {

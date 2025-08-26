@@ -33,12 +33,13 @@ Checks: >
     -readability-identifier-length,
     -readability-magic-numbers,
     -readability-function-cognitive-complexity, # enable after fix all
-    -readability-redundant-access-specifiers
+    -readability-redundant-access-specifiers,
+    -readability-avoid-nested-conditional-operator
 
 
 HeaderFilterRegex: ''
 WarningsAsErrors: "*"
-AnalyzeTemporaryDtors: true
+# AnalyzeTemporaryDtors: true
 
 CheckOptions:
   - { key: readability-identifier-naming.NamespaceCase,               value: lower_case }

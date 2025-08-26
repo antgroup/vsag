@@ -22,7 +22,7 @@
 namespace vsag {
 class VsagException : std::exception {
 public:
-    explicit VsagException(Error& error) : error_(error){};
+    explicit VsagException(Error& error) : error_(error) {};
 
     template <typename... Args>
     explicit VsagException(ErrorType error_type, Args&&... args)

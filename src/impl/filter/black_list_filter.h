@@ -26,12 +26,12 @@ namespace vsag {
 class BlackListFilter : public Filter {
 public:
     explicit BlackListFilter(const IdFilterFuncType& fallback_func)
-        : fallback_func_(fallback_func), is_bitset_filter_(false), bitset_(nullptr){};
+        : fallback_func_(fallback_func), is_bitset_filter_(false), bitset_(nullptr) {};
 
     explicit BlackListFilter(const BitsetPtr& bitset)
-        : bitset_(bitset.get()), is_bitset_filter_(true){};
+        : bitset_(bitset.get()), is_bitset_filter_(true) {};
 
-    explicit BlackListFilter(const Bitset* bitset) : bitset_(bitset), is_bitset_filter_(true){};
+    explicit BlackListFilter(const Bitset* bitset) : bitset_(bitset), is_bitset_filter_(true) {};
 
     bool
     CheckValid(int64_t id) const override;

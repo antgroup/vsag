@@ -36,7 +36,7 @@ public:
         : expr_(expression),
           attr_index_(attr_index),
           allocator_(allocator),
-          bitset_type_(attr_index->GetBitsetType()){};
+          bitset_type_(attr_index->GetBitsetType()) {};
 
     virtual ~Executor() {
         if (this->own_bitset_) {
@@ -54,7 +54,7 @@ public:
     };
 
     virtual void
-    Init(){};
+    Init() {};
 
     virtual Filter*
     Run(BucketIdType bucket_id) = 0;

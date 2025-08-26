@@ -32,7 +32,7 @@ namespace vsag {
 class BucketInterfaceTest {
 public:
     BucketInterfaceTest(BucketInterfacePtr bucket, MetricType metric)
-        : bucket_(std::move(bucket)), metric_(metric){};
+        : bucket_(std::move(bucket)), metric_(metric) {};
 
     void
     BasicTest(int64_t dim, uint64_t base_count, float error = 1e-5f);

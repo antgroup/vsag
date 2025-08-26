@@ -35,7 +35,7 @@ public:
     }
 
     SparseIndex(const ParamPtr& param, const IndexCommonParam& common_param)
-        : SparseIndex(std::dynamic_pointer_cast<SparseIndexParameters>(param), common_param){};
+        : SparseIndex(std::dynamic_pointer_cast<SparseIndexParameters>(param), common_param) {};
 
     ~SparseIndex() override {
         for (auto& data : datas_) {
