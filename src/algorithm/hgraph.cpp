@@ -710,7 +710,9 @@ HGraph::serialize_label_info(StreamWriter& writer) const {
         this->label_table_->Serialize(writer);
         return;
     }
-    this->tomb_label_table_->Serialize(writer);
+    if (this->support_tombstone_) {
+        this->tomb_label_table_->Serialize(writer);
+    }
     StreamWriter::WriteVector(writer, this->label_table_->label_table_);
     uint64_t size = this->label_table_->label_remap_.size();
     StreamWriter::WriteObj(writer, size);
