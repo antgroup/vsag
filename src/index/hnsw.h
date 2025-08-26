@@ -103,7 +103,7 @@ public:
 
     tl::expected<bool, Error>
     UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update = false) override {
-        SAFE_CALL(this->update_vector(id, new_base, force_update));
+        SAFE_CALL(return this->update_vector(id, new_base, force_update));
     }
 
     tl::expected<DatasetPtr, Error>
