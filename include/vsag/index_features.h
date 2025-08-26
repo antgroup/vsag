@@ -68,6 +68,7 @@ enum IndexFeature {
     SUPPORT_GET_EXTRA_INFO_BY_ID, /**< Supports get extra_info by id */
 
     SUPPORT_GET_RAW_VECTOR_BY_IDS, /**< Supports get raw vectors by ids */
+    SUPPORT_GET_DATA_BY_IDS,       /**< Supports get data by ids */
 
     SUPPORT_EXPORT_IDS, /**< Supports export ids */
 
