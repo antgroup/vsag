@@ -63,6 +63,9 @@ public:
                         const AttributeSet& origin_attributes) = 0;
 
     virtual void
+    GetAttribute(BucketIdType bucket_id, InnerIdType inner_id, AttributeSet* attr) = 0;
+
+    virtual void
     Serialize(StreamWriter& writer) {
         this->field_type_map_.Serialize(writer);
     }

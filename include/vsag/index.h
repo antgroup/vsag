@@ -478,6 +478,25 @@ public:
     };
 
     /**
+     * @brief Retrieve all data associated with vectors identified by given IDs.
+     *
+     * This method fetches data stored with the vectors in the index
+     * (e.g., attributes, labels, or extra infos).
+     *
+     * @param ids Array of vector IDs for which extra information is requested.
+     * @param count Number of IDs in the 'ids' array.
+     * @return tl::expected<DatasetPtr, Error>
+     *         - On success: A DatasetPtr containing the extra data, attribute and vector
+     *         - On failure: An error object (e.g., invalid ID, out of memory).
+     * @throws std::runtime_error If the index implementation does not support this operation
+     *            (default behavior for base class).
+     */
+    virtual tl::expected<DatasetPtr, Error>
+    GetDataByIds(const int64_t* ids, int64_t count) const {
+        throw std::runtime_error("Index doesn't support GetDataByIds");
+    };
+
+    /**
      * @brief Checks if the specified feature is supported by the index.
      *
      * This method checks whether the given `feature` is supported by the index.

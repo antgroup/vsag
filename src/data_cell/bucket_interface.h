@@ -64,6 +64,9 @@ public:
     virtual void
     Prefetch(BucketIdType bucket_id, InnerIdType offset_id) = 0;
 
+    virtual void
+    GetCodesById(BucketIdType bucket_id, InnerIdType offset_id, uint8_t* data) const = 0;
+
     [[nodiscard]] virtual std::string
     GetQuantizerName() = 0;
 
