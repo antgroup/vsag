@@ -1252,7 +1252,7 @@ extract_data_and_graph(const std::vector<MergeUnit>& merge_units,
     for (const auto& merge_unit : merge_units) {
         auto stat_string = merge_unit.index->GetStats();
         auto stats = JsonType::parse(stat_string);
-        std::string index_name = stats[STATSTIC_INDEX_NAME];
+        // std::string index_name = stats[STATSTIC_INDEX_NAME];
         auto hnsw = std::dynamic_pointer_cast<HNSW>(merge_unit.index);
         hnsw->ExtractDataAndGraph(data, graph, ids, merge_unit.id_map_func, allocator);
     }

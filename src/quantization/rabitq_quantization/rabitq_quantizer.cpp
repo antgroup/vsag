@@ -15,6 +15,8 @@
 
 #include "rabitq_quantizer.h"
 
+#include <memory>
+
 #include "impl/transform/transformer_headers.h"
 #include "simd/fp32_simd.h"
 #include "simd/normalize.h"
@@ -38,9 +40,9 @@ RaBitQuantizer<metric>::RaBitQuantizer(int dim,
     original_dim_ = dim;
     if (0 < pca_dim_ and pca_dim_ < dim) {
         if (use_mrq_) {
-            pca_.reset(new PCATransformer(allocator, dim, dim));
+            pca_ = std::make_shared<PCATransformer>(allocator, dim, dim);
         } else {
-            pca_.reset(new PCATransformer(allocator, dim, pca_dim_));
+            pca_ = std::make_shared<PCATransformer>(allocator, dim, pca_dim_);
         }
         this->dim_ = pca_dim_;
     } else {
@@ -56,9 +58,9 @@ RaBitQuantizer<metric>::RaBitQuantizer(int dim,
     // random orthogonal matrix
     use_fht_ = use_fht;
     if (use_fht_) {
-        rom_.reset(new FhtKacRotator(allocator, this->dim_));
+        rom_ = std::make_shared<FhtKacRotator>(allocator, this->dim_);
     } else {
-        rom_.reset(new RandomOrthogonalMatrix(allocator, this->dim_));
+        rom_ = std::make_shared<RandomOrthogonalMatrix>(allocator, this->dim_);
     }
     // distance function related variable
     inv_sqrt_d_ = 1.0F / sqrt(this->dim_);

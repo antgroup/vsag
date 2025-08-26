@@ -152,8 +152,8 @@ SINDI::search_impl(const SparseTermComputerPtr& computer,
     if constexpr (mode == KNN_SEARCH) {
         // fill up to k
         while (heap.size() < k) {
-            heap.push(
-                {std::numeric_limits<float>::max(), 0});  // TODO(ZXY): replace with random points
+            heap.emplace(std::numeric_limits<float>::max(),
+                         0);  // TODO(ZXY): replace with random points
         }
     }
 

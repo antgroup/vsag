@@ -103,10 +103,10 @@ public:
     }
 
     virtual void
-    Package(){};
+    Package() {};
 
     virtual void
-    Unpack(){};
+    Unpack() {};
 
 public:
     BucketIdType bucket_count_{0};

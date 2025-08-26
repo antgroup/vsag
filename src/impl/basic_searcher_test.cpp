@@ -34,7 +34,7 @@ using namespace vsag;
 
 class AdaptGraphDataCell : public GraphInterface {
 public:
-    AdaptGraphDataCell(std::shared_ptr<hnswlib::HierarchicalNSW> alg_hnsw) : alg_hnsw_(alg_hnsw){};
+    AdaptGraphDataCell(std::shared_ptr<hnswlib::HierarchicalNSW> alg_hnsw) : alg_hnsw_(alg_hnsw) {};
 
     void
     InsertNeighborsById(InnerIdType id, const Vector<InnerIdType>& neighbor_ids) override {

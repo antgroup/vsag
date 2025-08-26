@@ -46,7 +46,7 @@ public:
           label_remap_(0, allocator),
           use_reverse_map_(use_reverse_map),
           compress_duplicate_data_(compress_redundant_data),
-          duplicate_records_(0, allocator){};
+          duplicate_records_(0, allocator) {};
 
     ~LabelTable() {
         for (int i = 0; i < duplicate_records_.size(); ++i) {

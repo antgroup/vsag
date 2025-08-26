@@ -44,10 +44,10 @@ AsyncIO::AsyncIO(std::string filename, Allocator* allocator)
 }
 
 AsyncIO::AsyncIO(const AsyncIOParameterPtr& io_param, const IndexCommonParam& common_param)
-    : AsyncIO(io_param->path_, common_param.allocator_.get()){};
+    : AsyncIO(io_param->path_, common_param.allocator_.get()) {};
 
 AsyncIO::AsyncIO(const IOParamPtr& param, const IndexCommonParam& common_param)
-    : AsyncIO(std::dynamic_pointer_cast<AsyncIOParameter>(param), common_param){};
+    : AsyncIO(std::dynamic_pointer_cast<AsyncIOParameter>(param), common_param) {};
 
 AsyncIO::~AsyncIO() {
     close(this->wfd_);
@@ -146,7 +146,7 @@ AsyncIO::MultiReadImpl(uint8_t* datas, uint64_t* sizes, uint64_t* offsets, uint6
         for (int64_t i = 0; i < count; ++i) {
             memcpy(cur_data, objs[i].data, sizes[i]);
             cur_data += sizes[i];
-            this->ReleaseImpl(objs[i].data);
+            vsag::AsyncIO::ReleaseImpl(objs[i].data);
         }
 
         sizes += count;

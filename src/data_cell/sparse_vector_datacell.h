@@ -79,7 +79,7 @@ public:
     }
 
     void
-    Prefetch(InnerIdType id) override{};
+    Prefetch(InnerIdType id) override {};
 
     void
     ExportModel(const FlattenInterfacePtr& other) const override {

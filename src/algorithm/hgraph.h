@@ -56,7 +56,7 @@ public:
     HGraph(const HGraphParameterPtr& param, const IndexCommonParam& common_param);
 
     HGraph(const ParamPtr& param, const IndexCommonParam& common_param)
-        : HGraph(std::dynamic_pointer_cast<HGraphParameter>(param), common_param){};
+        : HGraph(std::dynamic_pointer_cast<HGraphParameter>(param), common_param) {};
 
     ~HGraph() override = default;
 

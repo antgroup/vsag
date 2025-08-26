@@ -36,7 +36,7 @@ public:
 
 public:
     AttributeInvertedInterface(Allocator* allocator, ComputableBitsetType bitset_type)
-        : allocator_(allocator), field_type_map_(allocator), bitset_type_(bitset_type){};
+        : allocator_(allocator), field_type_map_(allocator), bitset_type_(bitset_type) {};
 
     virtual ~AttributeInvertedInterface() = default;
 

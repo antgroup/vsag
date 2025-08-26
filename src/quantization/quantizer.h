@@ -234,10 +234,10 @@ public:
     }
 
     virtual void
-    Package32(const uint8_t* codes, uint8_t* packaged_codes, int64_t valid_size) const override{};
+    Package32(const uint8_t* codes, uint8_t* packaged_codes, int64_t valid_size) const override {};
 
     virtual void
-    Unpack32(const uint8_t* packaged_codes, uint8_t* codes) const override{};
+    Unpack32(const uint8_t* packaged_codes, uint8_t* codes) const override {};
 
     /**
      * @brief Get the size of the encoded code in bytes.

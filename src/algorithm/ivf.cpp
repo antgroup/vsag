@@ -939,8 +939,7 @@ IVF::fill_location_map() {
             if (ids[j] >= this->total_elements_ * buckets_per_data_) {
                 throw VsagException(ErrorType::INTERNAL_ERROR, "invalid inner_id");
             }
-            this->location_map_[ids[j]] =
-                (static_cast<uint64_t>(i) << LOCATION_SPLIT_BIT) | static_cast<uint64_t>(j);
+            this->location_map_[ids[j]] = (static_cast<uint64_t>(i) << LOCATION_SPLIT_BIT) | j;
         }
     }
 }

@@ -21,6 +21,7 @@
 #include <functional>
 #include <future>
 #include <iterator>
+#include <memory>
 #include <new>
 #include <nlohmann/json.hpp>
 #include <stdexcept>
@@ -378,9 +379,9 @@ DiskANN::build(const DatasetPtr& base) {
                        [&ids](const auto& index) { return ids[index]; });
 
         disk_layout_reader_ = std::make_shared<LocalMemoryReader>(disk_layout_stream_);
-        reader_.reset(new LocalFileReader(batch_read_));
-        index_.reset(new diskann::PQFlashIndex<float, int64_t>(
-            reader_, metric_, sector_len_, dim_, use_bsa_));
+        reader_ = std::make_shared<LocalFileReader>(batch_read_);
+        index_ = std::make_shared<diskann::PQFlashIndex<float, int64_t>>(
+            reader_, metric_, sector_len_, dim_, use_bsa_);
         index_->load_from_separate_paths(
             pq_pivots_stream_, disk_pq_compressed_vectors_, tag_stream_);
         if (preload_) {
@@ -874,9 +875,9 @@ DiskANN::deserialize(const ReaderSet& reader_set) {
         }
 
         disk_layout_reader_ = reader_set.Get(DISKANN_LAYOUT_FILE);
-        reader_.reset(new LocalFileReader(batch_read_));
-        index_.reset(new diskann::PQFlashIndex<float, int64_t>(
-            reader_, metric_, sector_len_, dim_, use_bsa_));
+        reader_ = std::make_shared<LocalFileReader>(batch_read_);
+        index_ = std::make_shared<diskann::PQFlashIndex<float, int64_t>>(
+            reader_, metric_, sector_len_, dim_, use_bsa_);
         index_->load_from_separate_paths(pq_pivots_stream, disk_pq_compressed_vectors, tag_stream);
 
         auto graph_reader = reader_set.Get(DISKANN_GRAPH);
@@ -940,9 +941,9 @@ DiskANN::deserialize(const ReaderSet& reader_set) {
     }
 
     disk_layout_reader_ = reader_set.Get(DISKANN_LAYOUT_FILE);
-    reader_.reset(new LocalFileReader(batch_read_));
-    index_.reset(
-        new diskann::PQFlashIndex<float, int64_t>(reader_, metric_, sector_len_, dim_, use_bsa_));
+    reader_ = std::make_shared<LocalFileReader>(batch_read_);
+    index_ = std::make_shared<diskann::PQFlashIndex<float, int64_t>>(
+        reader_, metric_, sector_len_, dim_, use_bsa_);
     index_->load_from_separate_paths(pq_pivots_stream, disk_pq_compressed_vectors, tag_stream);
 
     auto graph_reader = reader_set.Get(DISKANN_GRAPH);
@@ -1056,9 +1057,9 @@ DiskANN::deserialize(std::istream& in_stream) {
                                             datacell_offsets[DISKANN_LAYOUT_FILE].get<uint64_t>(),
                                             datacell_sizes[DISKANN_LAYOUT_FILE].get<uint64_t>());
 
-        reader_.reset(new LocalFileReader(batch_read_));
-        index_.reset(new diskann::PQFlashIndex<float, int64_t>(
-            reader_, metric_, sector_len_, dim_, use_bsa_));
+        reader_ = std::make_shared<LocalFileReader>(batch_read_);
+        index_ = std::make_shared<diskann::PQFlashIndex<float, int64_t>>(
+            reader_, metric_, sector_len_, dim_, use_bsa_);
         index_->load_from_separate_paths(pq_pivots_stream, disk_pq_compressed_vectors, tag_stream);
 
         if (preload_) {
@@ -1349,9 +1350,9 @@ DiskANN::build_partial_graph(const DatasetPtr& base,
 tl::expected<void, Error>
 DiskANN::load_disk_index(const BinarySet& binary_set) {
     disk_layout_reader_ = std::make_shared<LocalMemoryReader>(disk_layout_stream_);
-    reader_.reset(new LocalFileReader(batch_read_));
-    index_.reset(
-        new diskann::PQFlashIndex<float, int64_t>(reader_, metric_, sector_len_, dim_, use_bsa_));
+    reader_ = std::make_shared<LocalFileReader>(batch_read_);
+    index_ = std::make_shared<diskann::PQFlashIndex<float, int64_t>>(
+        reader_, metric_, sector_len_, dim_, use_bsa_);
 
     convert_binary_to_stream(binary_set.Get(DISKANN_COMPRESSED_VECTOR),
                              disk_pq_compressed_vectors_);

@@ -28,7 +28,7 @@ namespace vsag {
 
 class IteratorFilterContext : public IteratorContext {
 public:
-    IteratorFilterContext() : is_first_used_(true){};
+    IteratorFilterContext() : is_first_used_(true) {};
     ~IteratorFilterContext();
 
     tl::expected<void, Error>

@@ -23,7 +23,7 @@ namespace vsag {
 class InnerIdWrapperFilter : public Filter {
 public:
     InnerIdWrapperFilter(const FilterPtr filter_impl, const LabelTable& label_table)
-        : filter_impl_(filter_impl), label_table_(label_table){};
+        : filter_impl_(filter_impl), label_table_(label_table) {};
 
     [[nodiscard]] bool
     CheckValid(int64_t inner_id) const override {

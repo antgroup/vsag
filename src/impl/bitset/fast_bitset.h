@@ -25,7 +25,7 @@ namespace vsag {
 class FastBitset : public ComputableBitset {
 public:
     explicit FastBitset(Allocator* allocator)
-        : ComputableBitset(), data_(nullptr), size_(0), capacity_(0){};
+        : ComputableBitset(), data_(nullptr), size_(0), capacity_(0) {};
 
     ~FastBitset() override {
         delete[] data_;

@@ -38,7 +38,7 @@ public:
     };
 
     void
-    Reset() override{};
+    Reset() override {};
 
 public:
     static constexpr int64_t DEFAULT_REQUEST_COUNT = 100;
