@@ -68,7 +68,8 @@ mutually_connect_new_element(InnerIdType cur_c,
                              const GraphInterfacePtr& graph,
                              const FlattenInterfacePtr& flatten,
                              const MutexArrayPtr& neighbors_mutexes,
-                             Allocator* allocator) {
+                             Allocator* allocator,
+                             float alpha) {
     const size_t max_size = graph->MaximumDegree();
     select_edges_by_heuristic(top_candidates, max_size, flatten, allocator);
     if (top_candidates->Size() > max_size) {

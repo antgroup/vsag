@@ -53,7 +53,8 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
       odescent_param_(hgraph_param->odescent_param),
       graph_type_(hgraph_param->graph_type),
       hierarchical_datacell_param_(hgraph_param->hierarchical_graph_param),
-      extra_info_size_(common_param.extra_info_size_) {
+      extra_info_size_(common_param.extra_info_size_),
+      alpha_(hgraph_param->alpha) {
     this->label_table_->compress_duplicate_data_ = hgraph_param->support_duplicate;
     this->label_table_->support_tombstone_ = hgraph_param->support_tombstone;
     neighbors_mutex_ = std::make_shared<PointsMutex>(0, common_param.allocator_.get());
@@ -1004,6 +1005,7 @@ HGraph::add_one_point(const void* data, int level, InnerIdType inner_id) {
 bool
 HGraph::graph_add_one(const void* data, int level, InnerIdType inner_id) {
     DistHeapPtr result = nullptr;
+    float alpha = this->alpha_;
     InnerSearchParam param{
         .topk = 1,
         .ep = this->entry_point_id_,
@@ -1031,8 +1033,13 @@ HGraph::graph_add_one(const void* data, int level, InnerIdType inner_id) {
             label_table_->SetDuplicateId(static_cast<InnerIdType>(param.duplicate_id), inner_id);
             return false;
         }
-        mutually_connect_new_element(
-            inner_id, result, this->bottom_graph_, flatten_codes, neighbors_mutex_, allocator_);
+        mutually_connect_new_element(inner_id,
+                                     result,
+                                     this->bottom_graph_,
+                                     flatten_codes,
+                                     neighbors_mutex_,
+                                     allocator_,
+                                     alpha);
     } else {
         bottom_graph_->InsertNeighborsById(inner_id, Vector<InnerIdType>(allocator_));
     }
@@ -1040,8 +1047,13 @@ HGraph::graph_add_one(const void* data, int level, InnerIdType inner_id) {
     for (int64_t j = 0; j <= level; ++j) {
         if (route_graphs_[j]->TotalCount() != 0) {
             result = search_one_graph(data, route_graphs_[j], flatten_codes, param);
-            mutually_connect_new_element(
-                inner_id, result, route_graphs_[j], flatten_codes, neighbors_mutex_, allocator_);
+            mutually_connect_new_element(inner_id,
+                                         result,
+                                         route_graphs_[j],
+                                         flatten_codes,
+                                         neighbors_mutex_,
+                                         allocator_,
+                                         alpha);
         } else {
             route_graphs_[j]->InsertNeighborsById(inner_id, Vector<InnerIdType>(allocator_));
         }
@@ -1403,6 +1415,13 @@ HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
                                                 {
                                                     BUILD_PARAMS_KEY,
                                                     BUILD_EF_CONSTRUCTION,
+                                                },
+                                            },
+                                            {
+                                                HGRAPH_BUILD_ALPHA,
+                                                {
+                                                    BUILD_PARAMS_KEY,
+                                                    BUILD_ALPHA_KEY,
                                                 },
                                             },
                                             {

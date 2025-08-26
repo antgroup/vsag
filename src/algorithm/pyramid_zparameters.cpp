@@ -48,6 +48,13 @@ PyramidParameters::FromJson(const JsonType& json) {
         this->ef_construction = json[BUILD_EF_CONSTRUCTION];
     }
 
+    if (json.contains(BUILD_PARAMS_KEY)) {
+        const auto& build_params = json[BUILD_PARAMS_KEY];
+        if (build_params.contains(BUILD_ALPHA_KEY)) {
+            this->alpha = build_params[BUILD_ALPHA_KEY];
+        }
+    }
+
     if (json.contains(NO_BUILD_LEVELS)) {
         const auto& no_build_levels_json = json[NO_BUILD_LEVELS];
         CHECK_ARGUMENT(no_build_levels_json.is_array(),
@@ -66,6 +73,7 @@ PyramidParameters::ToJson() const {
     json[GRAPH_TYPE_ODESCENT].update(odescent_param->ToJson());
     json[PYRAMID_PARAMETER_BASE_CODES] = flatten_data_cell_param->ToJson();
     json[NO_BUILD_LEVELS] = no_build_levels;
+    json[BUILD_PARAMS_KEY][BUILD_ALPHA_KEY] = this->alpha;
     return json;
 }
 

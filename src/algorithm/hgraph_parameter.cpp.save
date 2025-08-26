@@ -15,13 +15,9 @@
 
 #include "hgraph_parameter.h"
 
-#include "data_cell/extra_info_datacell_parameter.h"
-#include "data_cell/flatten_datacell_parameter.h"
 #include "data_cell/graph_datacell_parameter.h"
 #include "data_cell/graph_interface_parameter.h"
-#include "data_cell/sparse_graph_datacell_parameter.h"
 #include "data_cell/sparse_vector_datacell_parameter.h"
-#include "impl/odescent_graph_parameter.h"
 #include "inner_string_params.h"
 #include "vsag/constants.h"
 
@@ -129,7 +125,7 @@ HGraphParameter::FromJson(const JsonType& json) {
         if (build_params.contains(BUILD_EF_CONSTRUCTION)) {
             this->ef_construction = build_params[BUILD_EF_CONSTRUCTION];
         }
-        if (build_params.contains(BUILD_ALPHA_KEY)) {
+if (build_params.contains(BUILD_ALPHA_KEY)) {
             this->alpha = build_params[BUILD_ALPHA_KEY];
         }
         if (build_params.contains(BUILD_THREAD_COUNT)) {
@@ -153,9 +149,6 @@ HGraphParameter::FromJson(const JsonType& json) {
     if (json.contains(SUPPORT_DUPLICATE)) {
         this->support_duplicate = json[SUPPORT_DUPLICATE];
     }
-    if (json.contains(SUPPORT_TOMBSTONE)) {
-        this->support_tombstone = json[SUPPORT_TOMBSTONE];
-    }
 }
 
 JsonType
@@ -175,7 +168,7 @@ HGraphParameter::ToJson() const {
     json[HGRAPH_GRAPH_KEY] = this->bottom_graph_param->ToJson();
 
     json[BUILD_PARAMS_KEY][BUILD_EF_CONSTRUCTION] = this->ef_construction;
-    json[BUILD_PARAMS_KEY][BUILD_ALPHA_KEY] = this->alpha;
+
     json[BUILD_PARAMS_KEY][BUILD_THREAD_COUNT] = this->build_thread_count;
     json[HGRAPH_EXTRA_INFO_KEY] = this->extra_info_param->ToJson();
     json[SUPPORT_DUPLICATE] = this->support_duplicate;
