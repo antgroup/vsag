@@ -692,6 +692,7 @@ HGraph::deserialize_basic_info(JsonType jsonify_basic_info) {
     if (jsonify_basic_info.contains(INDEX_PARAM)) {
         std::string index_param_string = jsonify_basic_info[INDEX_PARAM];
         HGraphParameterPtr index_param = std::make_shared<HGraphParameter>();
+        index_param->data_type = this->data_type_;
         index_param->FromString(index_param_string);
         if (not this->create_param_ptr_->CheckCompatibility(index_param)) {
             auto message = fmt::format("HGraph index parameter not match, current: {}, new: {}",
