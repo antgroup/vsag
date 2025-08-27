@@ -45,7 +45,6 @@ Reader::MultiRead(uint8_t* dests, const uint64_t* lens, const uint64_t* offsets,
 
     total_future.wait();
     return succeed.load();
-    ;
 }
 
 }  // namespace vsag
