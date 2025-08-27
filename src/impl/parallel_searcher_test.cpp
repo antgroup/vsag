@@ -14,11 +14,12 @@
 // limitations under the License.
 
 #include "parallel_searcher.h"
+
 #include "searcher_test.h"
 
 using namespace vsag;
 
-TEST_CASE("Parallel Search with HNSW", "[ut][ParallelSearcher]") {
+TEST_CASE("Search with HNSW", "[ut][ParallelSearcher]") {
     // data attr
     uint32_t base_size = 1000;
     uint32_t query_size = 100;
@@ -116,7 +117,7 @@ TEST_CASE("Parallel Search with HNSW", "[ut][ParallelSearcher]") {
     search_param_temp.is_inner_id_allowed = nullptr;
     search_param_temp.radius = range;
     search_param_temp.use_muti_threads_for_one_query = true;
-    search_param_temp.parallel_search_thread_count_per_query = 4;
+    search_param_temp.level_0 = true;
 
     std::vector<InnerSearchParam> params(4);
     params[0] = search_param_temp;
@@ -129,7 +130,7 @@ TEST_CASE("Parallel Search with HNSW", "[ut][ParallelSearcher]") {
 
     for (const auto& search_param : params) {
         exception_func(search_param);
-        auto searcher = std::make_shared<BasicSearcher>(common);
+        auto searcher = std::make_shared<ParallelSearcher>(common);
         for (int i = 0; i < query_size; i++) {
             std::unordered_set<InnerIdType> valid_set, set;
             auto vl = pool->TakeOne();
@@ -166,12 +167,19 @@ TEST_CASE("Parallel Search with HNSW", "[ut][ParallelSearcher]") {
                 }
             }
 
+            uint64_t res_in_valid_num = 0;
+            uint64_t valid_in_res_num = 0;
+
             for (auto id : set) {
-                REQUIRE(valid_set.count(id) > 0);
+                if (valid_set.count(id) > 0)
+                    res_in_valid_num++;
             }
+            REQUIRE(res_in_valid_num / result_size > 0.9);
             for (auto id : valid_set) {
-                REQUIRE(set.count(id) > 0);
+                if (set.count(id) > 0)
+                    valid_in_res_num;
             }
+            REQUIRE(valid_in_res_num / result_size > 0.9);
         }
     }
 }

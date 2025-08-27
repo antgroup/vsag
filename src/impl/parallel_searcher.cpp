@@ -22,30 +22,34 @@
 
 namespace vsag {
 
-ParallelSearcher::ParallelSearcher(const IndexCommonParam& common_param, MutexArrayPtr mutex_array, std::shared_ptr<SafeThreadPool> search_pool)
-    : allocator_(common_param.allocator_.get()), mutex_array_(std::move(mutex_array)), pool(search_pool) {
+ParallelSearcher::ParallelSearcher(const IndexCommonParam& common_param,
+                                   MutexArrayPtr mutex_array,
+                                   std::shared_ptr<SafeThreadPool> search_pool)
+    : allocator_(common_param.allocator_.get()),
+      mutex_array_(std::move(mutex_array)),
+      pool(search_pool) {
 }
 
 uint32_t
 ParallelSearcher::visit(const GraphInterfacePtr& graph,
-                     const VisitedListPtr& vl,
-                     const Vector<std::pair<float, uint64_t>>& node_pair,
-                     const FilterPtr& filter,
-                     float skip_ratio,
-                     Vector<InnerIdType>& to_be_visited_rid,
-                     Vector<InnerIdType>& to_be_visited_id,
-                     std::vector<Vector<InnerIdType>>& neighbors,
-                     uint64_t point_visited_num) const {
+                        const VisitedListPtr& vl,
+                        const Vector<std::pair<float, uint64_t>>& node_pair,
+                        const FilterPtr& filter,
+                        float skip_ratio,
+                        Vector<InnerIdType>& to_be_visited_rid,
+                        Vector<InnerIdType>& to_be_visited_id,
+                        std::vector<Vector<InnerIdType>>& neighbors,
+                        uint64_t point_visited_num) const {
     LinearCongruentialGenerator generator;
     uint32_t count_no_visited = 0;
 
     if (this->mutex_array_ != nullptr) {
-        for(uint64_t i = 0; i < point_visited_num; i++){
+        for (uint64_t i = 0; i < point_visited_num; i++) {
             SharedLock lock(this->mutex_array_, node_pair[i].second);
             graph->GetNeighbors(node_pair[i].second, neighbors[i]);
         }
     } else {
-        for(uint64_t i = 0; i < point_visited_num; i++)
+        for (uint64_t i = 0; i < point_visited_num; i++)
             graph->GetNeighbors(node_pair[i].second, neighbors[i]);
     }
 
@@ -53,7 +57,7 @@ ParallelSearcher::visit(const GraphInterfacePtr& graph,
         (filter != nullptr
              ? (filter->ValidRatio() == 1.0F ? 0 : (1 - ((1 - filter->ValidRatio()) * skip_ratio)))
              : 0.0F);
-    for(uint64_t i = 0; i < point_visited_num; i++){
+    for (uint64_t i = 0; i < point_visited_num; i++) {
         for (uint32_t j = 0; j < neighbors[i].size(); j++) {
             if (j + prefetch_stride_visit_ < neighbors[i].size()) {
                 vl->Prefetch(neighbors[i][j + prefetch_stride_visit_]);
@@ -74,11 +78,11 @@ ParallelSearcher::visit(const GraphInterfacePtr& graph,
 
 DistHeapPtr
 ParallelSearcher::Search(const GraphInterfacePtr& graph,
-                      const FlattenInterfacePtr& flatten,
-                      const VisitedListPtr& vl,
-                      const void* query,
-                      const InnerSearchParam& inner_search_param,
-                    const LabelTablePtr& label_table) const {
+                         const FlattenInterfacePtr& flatten,
+                         const VisitedListPtr& vl,
+                         const void* query,
+                         const InnerSearchParam& inner_search_param,
+                         const LabelTablePtr& label_table) const {
     if (inner_search_param.search_mode == KNN_SEARCH) {
         return this->search_impl<KNN_SEARCH>(
             graph, flatten, vl, query, inner_search_param, label_table);
@@ -89,28 +93,26 @@ ParallelSearcher::Search(const GraphInterfacePtr& graph,
 
 DistHeapPtr
 ParallelSearcher::Search(const GraphInterfacePtr& graph,
-                      const FlattenInterfacePtr& flatten,
-                      const VisitedListPtr& vl,
-                      const void* query,
-                      const InnerSearchParam& inner_search_param,
-                      IteratorFilterContext* iter_ctx) const {
+                         const FlattenInterfacePtr& flatten,
+                         const VisitedListPtr& vl,
+                         const void* query,
+                         const InnerSearchParam& inner_search_param,
+                         IteratorFilterContext* iter_ctx) const {
     return this->search_impl<KNN_SEARCH>(graph, flatten, vl, query, inner_search_param, iter_ctx);
 }
 
 template <InnerSearchMode mode>
 DistHeapPtr
 ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
-                           const FlattenInterfacePtr& flatten,
-                           const VisitedListPtr& vl,
-                           const void* query,
-                           const InnerSearchParam& inner_search_param,
-                           const LabelTablePtr& label_table) const {
-
+                              const FlattenInterfacePtr& flatten,
+                              const VisitedListPtr& vl,
+                              const void* query,
+                              const InnerSearchParam& inner_search_param,
+                              const LabelTablePtr& label_table) const {
     Allocator* alloc =
         inner_search_param.search_alloc == nullptr ? allocator_ : inner_search_param.search_alloc;
     auto top_candidates = std::make_shared<StandardHeap<true, false>>(alloc, -1);
     auto candidate_set = std::make_shared<StandardHeap<true, false>>(alloc, -1);
-    
 
     if (not graph or not flatten) {
         return top_candidates;
@@ -128,16 +130,19 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
     uint32_t hops = 0;
     uint32_t dist_cmp = 0;
     uint32_t count_no_visited = 0;
-    uint32_t vector_size = graph->MaximumDegree() * inner_search_param.parallel_search_thread_count_per_query;
-    uint64_t min_task = vector_size * 0.2;
-    uint64_t min_task_per_thread = static_cast<uint64_t>(std::ceil(graph->MaximumDegree() * 0.2));
+    uint32_t vector_size =
+        graph->MaximumDegree() * inner_search_param.parallel_search_thread_count_per_query;
     uint32_t current_start = 0;
     Vector<InnerIdType> to_be_visited_rid(vector_size, alloc);
     Vector<InnerIdType> to_be_visited_id(vector_size, alloc);
-    std::vector<Vector<InnerIdType>> neighbors(inner_search_param.parallel_search_thread_count_per_query, Vector<InnerIdType>(graph->MaximumDegree(), alloc));
+    std::vector<Vector<InnerIdType>> neighbors(
+        inner_search_param.parallel_search_thread_count_per_query,
+        Vector<InnerIdType>(graph->MaximumDegree(), alloc));
     Vector<float> line_dists(vector_size, alloc);
-    Vector<std::pair<float, uint64_t>> node_pair(inner_search_param.parallel_search_thread_count_per_query, alloc);
-    Vector<uint32_t> tasks_per_thread(inner_search_param.parallel_search_thread_count_per_query, alloc);
+    Vector<std::pair<float, uint64_t>> node_pair(
+        inner_search_param.parallel_search_thread_count_per_query, alloc);
+    Vector<uint32_t> tasks_per_thread(inner_search_param.parallel_search_thread_count_per_query,
+                                      alloc);
     Vector<uint32_t> start_index(inner_search_param.parallel_search_thread_count_per_query, alloc);
 
     flatten->Query(&dist, computer, &ep, 1, alloc);
@@ -156,23 +161,16 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
     candidate_set->Push(-dist, ep);
     vl->Set(ep);
 
-    // double time1 = 0;
-    // double time2 = 0;
-    // double time3 = 0;
-    // double time4 = 0;
-    // double time5 = 0;
-
-    // std::vector<std::chrono::time_point<std::chrono::high_resolution_clock>> timee(inner_search_param.parallel_search_thread_count_per_query * 2);
-
-    
-
     while (not candidate_set->Empty()) {
         hops++;
-        auto num_explore_nodes = candidate_set->Size() < inner_search_param.parallel_search_thread_count_per_query ? candidate_set->Size() : inner_search_param.parallel_search_thread_count_per_query;
-        //num_threads = 1;
+        auto num_explore_nodes =
+            candidate_set->Size() < inner_search_param.parallel_search_thread_count_per_query
+                ? candidate_set->Size()
+                : inner_search_param.parallel_search_thread_count_per_query;
+
         auto current_first_node_pair = candidate_set->Top();
         node_pair[0] = current_first_node_pair;
- 
+
         if constexpr (mode == InnerSearchMode::KNN_SEARCH) {
             if ((-current_first_node_pair.first) > lower_bound && top_candidates->Size() == ef) {
                 break;
@@ -180,7 +178,7 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
         }
         candidate_set->Pop();
 
-        for(uint64_t i = 1; i < num_explore_nodes; i++){
+        for (uint64_t i = 1; i < num_explore_nodes; i++) {
             node_pair[i] = candidate_set->Top();
             candidate_set->Pop();
         }
@@ -198,17 +196,13 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
         dist_cmp += count_no_visited;
         uint64_t num_threads = num_explore_nodes;
 
-        if(count_no_visited < min_task){
-            num_threads = count_no_visited % min_task_per_thread == 0 ? count_no_visited / min_task_per_thread : count_no_visited / min_task_per_thread + 1;
-        }
+        uint32_t base = 0, remainder = 0;
 
-        uint32_t base = 0,remainder = 0;
-
-        if(num_threads){
+        if (num_threads) {
             base = count_no_visited / num_threads;
             remainder = count_no_visited % num_threads;
         }
-        
+
         current_start = 0;
         for (uint64_t i = 0; i < num_threads; ++i) {
             tasks_per_thread[i] = base + (i < remainder ? 1 : 0);
@@ -218,62 +212,27 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
 
         std::vector<std::future<void>> futures;
 
-        //auto checkpoint1 = std::chrono::high_resolution_clock::now();
-
         for (uint64_t i = 0; i < num_threads; i++) {
-            futures.emplace_back(
-                pool->Enqueue([&flatten, &line_dists, &computer, &to_be_visited_id, &tasks_per_thread, &start_index, &alloc, i]() -> void {
-                //pool->Enqueue([&flatten, &line_dists, &computer, &to_be_visited_id, &tasks_per_thread, &start_index, &alloc, &timee, i]() -> void {
-                    //timee[i * 2] = std::chrono::high_resolution_clock::now();
-                    flatten->Query(line_dists.data() + start_index[i], computer, to_be_visited_id.data() + start_index[i], tasks_per_thread[i], alloc);
-                    //timee[i * 2 + 1] = std::chrono::high_resolution_clock::now();
-                }));
+            futures.emplace_back(pool->Enqueue([&flatten,
+                                                &line_dists,
+                                                &computer,
+                                                &to_be_visited_id,
+                                                &tasks_per_thread,
+                                                &start_index,
+                                                &alloc,
+                                                i]() -> void {
+                flatten->Query(line_dists.data() + start_index[i],
+                               computer,
+                               to_be_visited_id.data() + start_index[i],
+                               tasks_per_thread[i],
+                               alloc);
+            }));
         }
-        
-        //auto checkpoint2 = std::chrono::high_resolution_clock::now();
 
         for (auto& f : futures) {
             f.get();
         }
 
-        //auto checkpoint3 = std::chrono::high_resolution_clock::now();
-
-        // time1 = std::chrono::duration_cast<std::chrono::nanoseconds>(checkpoint2 - checkpoint1).count();
-        // time2 = std::chrono::duration_cast<std::chrono::nanoseconds>(checkpoint3 - checkpoint2).count();
-        // time3 = std::chrono::duration_cast<std::chrono::nanoseconds>(checkpoint3 - checkpoint1).count();
-
-
-        // std::cout << "任务量:   ";
-        // for(uint64_t i = 0; i < num_threads; i++){
-        //     std::cout << tasks_per_thread[i] << "    ";
-        // }
-        // std::cout << std::endl;
-
-        // std::cout << "任务时间: ";
-        // for(uint64_t i = 0; i < num_threads; i++){
-        //     std::cout << std::chrono::duration_cast<std::chrono::nanoseconds>(timee[i * 2 + 1] - timee[i * 2]).count() << " ";
-        // }
-        // std::cout << std::endl;
-
-        // std::cout << "任务开始时间: ";
-        // for(uint64_t i = 0; i < num_threads; i++){
-        //     std::cout << std::chrono::duration_cast<std::chrono::nanoseconds>(timee[i * 2] - checkpoint1).count() << " ";
-        // }
-        // std::cout << std::endl;
-
-        // std::cout << "任务结束时间: ";
-        // for(uint64_t i = 0; i < num_threads; i++){
-        //     std::cout << std::chrono::duration_cast<std::chrono::nanoseconds>(timee[i * 2 + 1] - checkpoint1).count() << " ";
-        // }
-        // std::cout << std::endl;
-
-
-
-        // std::cout << "循环: "  << time1 <<"(" << time1/time3 << ")" << std::endl; 
-        // std::cout << "get: "  << time2 <<"(" << time2/time3 << ")" << std::endl; 
-        // std::cout << "total: "  << time3 <<"(" << time3/time3 << ")" << std::endl; 
-        // std::cout << std::endl;
-        
         for (uint32_t i = 0; i < count_no_visited; i++) {
             dist = line_dists[i];
             if (dist < THRESHOLD_ERROR) {
@@ -327,11 +286,11 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
 template <InnerSearchMode mode>
 DistHeapPtr
 ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
-                           const FlattenInterfacePtr& flatten,
-                           const VisitedListPtr& vl,
-                           const void* query,
-                           const InnerSearchParam& inner_search_param,
-                           IteratorFilterContext* iter_ctx) const {
+                              const FlattenInterfacePtr& flatten,
+                              const VisitedListPtr& vl,
+                              const void* query,
+                              const InnerSearchParam& inner_search_param,
+                              IteratorFilterContext* iter_ctx) const {
     Allocator* alloc =
         inner_search_param.search_alloc == nullptr ? allocator_ : inner_search_param.search_alloc;
     auto top_candidates = std::make_shared<StandardHeap<true, false>>(alloc, -1);
@@ -354,18 +313,20 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
     uint32_t hops = 0;
     uint32_t dist_cmp = 0;
     uint32_t count_no_visited = 0;
-    uint32_t vector_size = graph->MaximumDegree() * inner_search_param.parallel_search_thread_count_per_query;
-    uint64_t min_task = vector_size * 0.2;
-    uint64_t min_task_per_thread = static_cast<uint64_t>(std::ceil(graph->MaximumDegree() * 0.2));
+    uint32_t vector_size =
+        graph->MaximumDegree() * inner_search_param.parallel_search_thread_count_per_query;
     uint32_t current_start = 0;
     Vector<InnerIdType> to_be_visited_rid(vector_size, alloc);
     Vector<InnerIdType> to_be_visited_id(vector_size, alloc);
-    std::vector<Vector<InnerIdType>> neighbors(inner_search_param.parallel_search_thread_count_per_query, Vector<InnerIdType>(graph->MaximumDegree(), alloc));
+    std::vector<Vector<InnerIdType>> neighbors(
+        inner_search_param.parallel_search_thread_count_per_query,
+        Vector<InnerIdType>(graph->MaximumDegree(), alloc));
     Vector<float> line_dists(vector_size, alloc);
-    Vector<std::pair<float, uint64_t>> node_pair(inner_search_param.parallel_search_thread_count_per_query, alloc);
-    Vector<uint32_t> tasks_per_thread(inner_search_param.parallel_search_thread_count_per_query, alloc);
+    Vector<std::pair<float, uint64_t>> node_pair(
+        inner_search_param.parallel_search_thread_count_per_query, alloc);
+    Vector<uint32_t> tasks_per_thread(inner_search_param.parallel_search_thread_count_per_query,
+                                      alloc);
     Vector<uint32_t> start_index(inner_search_param.parallel_search_thread_count_per_query, alloc);
-
 
     if (!iter_ctx->IsFirstUsed()) {
         if (iter_ctx->Empty()) {
@@ -400,7 +361,10 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
 
     while (not candidate_set->Empty()) {
         hops++;
-        auto num_explore_nodes = candidate_set->Size() < inner_search_param.parallel_search_thread_count_per_query ? candidate_set->Size() : inner_search_param.parallel_search_thread_count_per_query;
+        auto num_explore_nodes =
+            candidate_set->Size() < inner_search_param.parallel_search_thread_count_per_query
+                ? candidate_set->Size()
+                : inner_search_param.parallel_search_thread_count_per_query;
         auto current_first_node_pair = candidate_set->Top();
         node_pair[0] = current_first_node_pair;
 
@@ -411,7 +375,7 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
         }
         candidate_set->Pop();
 
-        for(uint64_t i = 1; i < num_explore_nodes; i++){
+        for (uint64_t i = 1; i < num_explore_nodes; i++) {
             node_pair[i] = candidate_set->Top();
             candidate_set->Pop();
         }
@@ -429,17 +393,13 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
         dist_cmp += count_no_visited;
         uint64_t num_threads = num_explore_nodes;
 
-        if(count_no_visited < min_task){
-            num_threads = count_no_visited % min_task_per_thread == 0 ? count_no_visited / min_task_per_thread : count_no_visited / min_task_per_thread + 1;
-        }
+        uint32_t base = 0, remainder = 0;
 
-        uint32_t base = 0,remainder = 0;
-
-        if(num_threads){
+        if (num_threads) {
             base = count_no_visited / num_threads;
             remainder = count_no_visited % num_threads;
         }
-        
+
         current_start = 0;
         for (uint64_t i = 0; i < num_threads; ++i) {
             tasks_per_thread[i] = base + (i < remainder ? 1 : 0);
@@ -449,61 +409,26 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
 
         std::vector<std::future<void>> futures;
 
-        //auto checkpoint1 = std::chrono::high_resolution_clock::now();
-
         for (uint64_t i = 0; i < num_threads; i++) {
-            futures.emplace_back(
-                pool->Enqueue([&flatten, &line_dists, &computer, &to_be_visited_id, &tasks_per_thread, &start_index, &alloc, i]() -> void {
-                //pool->Enqueue([&flatten, &line_dists, &computer, &to_be_visited_id, &tasks_per_thread, &start_index, &alloc, &timee, i]() -> void {
-                    //timee[i * 2] = std::chrono::high_resolution_clock::now();
-                    flatten->Query(line_dists.data() + start_index[i], computer, to_be_visited_id.data() + start_index[i], tasks_per_thread[i], alloc);
-                    //timee[i * 2 + 1] = std::chrono::high_resolution_clock::now();
-                }));
+            futures.emplace_back(pool->Enqueue([&flatten,
+                                                &line_dists,
+                                                &computer,
+                                                &to_be_visited_id,
+                                                &tasks_per_thread,
+                                                &start_index,
+                                                &alloc,
+                                                i]() -> void {
+                flatten->Query(line_dists.data() + start_index[i],
+                               computer,
+                               to_be_visited_id.data() + start_index[i],
+                               tasks_per_thread[i],
+                               alloc);
+            }));
         }
-        
-        //auto checkpoint2 = std::chrono::high_resolution_clock::now();
 
         for (auto& f : futures) {
             f.get();
         }
-
-        //auto checkpoint3 = std::chrono::high_resolution_clock::now();
-
-        // time1 = std::chrono::duration_cast<std::chrono::nanoseconds>(checkpoint2 - checkpoint1).count();
-        // time2 = std::chrono::duration_cast<std::chrono::nanoseconds>(checkpoint3 - checkpoint2).count();
-        // time3 = std::chrono::duration_cast<std::chrono::nanoseconds>(checkpoint3 - checkpoint1).count();
-
-
-        // std::cout << "task number:   ";
-        // for(uint64_t i = 0; i < num_threads; i++){
-        //     std::cout << tasks_per_thread[i] << "    ";
-        // }
-        // std::cout << std::endl;
-
-        // std::cout << "task latency: ";
-        // for(uint64_t i = 0; i < num_threads; i++){
-        //     std::cout << std::chrono::duration_cast<std::chrono::nanoseconds>(timee[i * 2 + 1] - timee[i * 2]).count() << " ";
-        // }
-        // std::cout << std::endl;
-
-        // std::cout << "task begin time: ";
-        // for(uint64_t i = 0; i < num_threads; i++){
-        //     std::cout << std::chrono::duration_cast<std::chrono::nanoseconds>(timee[i * 2] - checkpoint1).count() << " ";
-        // }
-        // std::cout << std::endl;
-
-        // std::cout << "task finished time: ";
-        // for(uint64_t i = 0; i < num_threads; i++){
-        //     std::cout << std::chrono::duration_cast<std::chrono::nanoseconds>(timee[i * 2 + 1] - checkpoint1).count() << " ";
-        // }
-        // std::cout << std::endl;
-
-
-
-        // std::cout << "for circulate: "  << time1 <<"(" << time1/time3 << ")" << std::endl; 
-        // std::cout << ".get(): "  << time2 <<"(" << time2/time3 << ")" << std::endl; 
-        // std::cout << "total: "  << time3 <<"(" << time3/time3 << ")" << std::endl; 
-        // std::cout << std::endl;
 
         for (uint32_t i = 0; i < count_no_visited; i++) {
             dist = line_dists[i];
@@ -566,11 +491,11 @@ ParallelSearcher::SetRuntimeParameters(const UnorderedMap<std::string, float>& n
 
 void
 ParallelSearcher::SetMockParameters(const GraphInterfacePtr& graph,
-                                 const FlattenInterfacePtr& flatten,
-                                 const std::shared_ptr<VisitedListPool>& vl_pool,
-                                 const InnerSearchParam& inner_search_param,
-                                 const uint64_t dim,
-                                 const uint32_t n_trials) {
+                                    const FlattenInterfacePtr& flatten,
+                                    const std::shared_ptr<VisitedListPool>& vl_pool,
+                                    const InnerSearchParam& inner_search_param,
+                                    const uint64_t dim,
+                                    const uint32_t n_trials) {
     mock_graph_ = graph;
     mock_flatten_ = flatten;
     mock_vl_pool_ = vl_pool;

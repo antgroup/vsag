@@ -98,7 +98,8 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
         this->build_pool_->SetPoolSize(build_thread_count_);
     }
 
-    this->parallel_searcher_ = std::make_shared<ParallelSearcher>(common_param, neighbors_mutex_, build_pool_);
+    this->parallel_searcher_ =
+        std::make_shared<ParallelSearcher>(common_param, neighbors_mutex_, build_pool_);
 
     UnorderedMap<std::string, float> default_param(common_param.allocator_.get());
     default_param.insert(
@@ -490,17 +491,16 @@ HGraph::search_one_graph(const void* query,
                          InnerSearchParam& inner_search_param) const {
     auto visited_list = this->pool_->TakeOne();
     DistHeapPtr result = nullptr;
-    if(inner_search_param.use_muti_threads_for_one_query && inner_search_param.level_0){
-    result = 
-        this->parallel_searcher_->Search(graph, flatten, visited_list, query, inner_search_param);
-    }
-    else{
-        result = 
-        this->searcher_->Search(graph, flatten, visited_list, query, inner_search_param, this->label_table_);
+    if (inner_search_param.use_muti_threads_for_one_query && inner_search_param.level_0) {
+        result = this->parallel_searcher_->Search(
+            graph, flatten, visited_list, query, inner_search_param);
+    } else {
+        result = this->searcher_->Search(
+            graph, flatten, visited_list, query, inner_search_param, this->label_table_);
     }
     this->pool_->ReturnOne(visited_list);
     return result;
-}  
+}
 
 template <InnerSearchMode mode>
 DistHeapPtr
@@ -511,13 +511,12 @@ HGraph::search_one_graph(const void* query,
                          IteratorFilterContext* iter_ctx) const {
     auto visited_list = this->pool_->TakeOne();
     DistHeapPtr result = nullptr;
-    if(inner_search_param.use_muti_threads_for_one_query && inner_search_param.level_0){
-    result = 
-        this->parallel_searcher_->Search(graph, flatten, visited_list, query, inner_search_param, iter_ctx);
-    }
-    else{
-    result =
-        this->searcher_->Search(graph, flatten, visited_list, query, inner_search_param, iter_ctx);
+    if (inner_search_param.use_muti_threads_for_one_query && inner_search_param.level_0) {
+        result = this->parallel_searcher_->Search(
+            graph, flatten, visited_list, query, inner_search_param, iter_ctx);
+    } else {
+        result = this->searcher_->Search(
+            graph, flatten, visited_list, query, inner_search_param, iter_ctx);
     }
     this->pool_->ReturnOne(visited_list);
     return result;
@@ -571,6 +570,8 @@ HGraph::RangeSearch(const DatasetPtr& query,
     search_param.search_mode = RANGE_SEARCH;
     search_param.consider_duplicate = true;
     search_param.range_search_limit_size = static_cast<int>(limited_size);
+    //search_param.use_muti_threads_for_one_query = true;
+    //search_param.parallel_search_thread_count_per_query = 6;
     search_param.level_0 = true;
     auto search_result = this->search_one_graph(
         raw_query, this->bottom_graph_, this->basic_flatten_codes_, search_param);

@@ -18,20 +18,20 @@
 #include "attr/executor/executor.h"
 #include "data_cell/flatten_interface.h"
 #include "data_cell/graph_interface.h"
+#include "impl/basic_searcher.h"
 #include "impl/heap/distance_heap.h"
 #include "index/index_common_param.h"
 #include "index/iterator_filter.h"
 #include "lock_strategy.h"
 #include "utils/visited_list.h"
-#include "impl/basic_searcher.h"
 
 namespace vsag {
 
 class ParallelSearcher {
 public:
     explicit ParallelSearcher(const IndexCommonParam& common_param,
-                           MutexArrayPtr mutex_array = nullptr,
-                           std::shared_ptr<SafeThreadPool> search_pool = nullptr);
+                              MutexArrayPtr mutex_array = nullptr,
+                              std::shared_ptr<SafeThreadPool> search_pool = nullptr);
 
     virtual DistHeapPtr
     Search(const GraphInterfacePtr& graph,
@@ -39,7 +39,7 @@ public:
            const VisitedListPtr& vl,
            const void* query,
            const InnerSearchParam& inner_search_param,
-        const LabelTablePtr& label_table = nullptr) const;
+           const LabelTablePtr& label_table = nullptr) const;
 
     virtual DistHeapPtr
     Search(const GraphInterfacePtr& graph,
