@@ -104,16 +104,17 @@ SparseTermDataCell::InsertHeap(float* dists,
             if constexpr (type == InnerSearchType::WITH_FILTER) {
                 is_valid = (filter and filter->CheckValid(id + offset_id));
             }
+#if __cplusplus >= 202002L
             if (dists[id] > cur_heap_top or not is_valid) [[likely]] {
+#else
+            if (__builtin_expect(dists[id] > cur_heap_top || !is_valid, 1)) {
+#endif
                 dists[id] = 0;
                 continue;
-            } else {
-                heap.emplace(dists[id], id + offset_id);
             }
+            heap.emplace(dists[id], id + offset_id);
             if constexpr (mode == InnerSearchMode::KNN_SEARCH) {
-                if (heap.size() > n_candidate) [[likely]] {
-                    heap.pop();
-                }
+                heap.pop();
                 cur_heap_top = heap.top().first;
             }
             if constexpr (mode == InnerSearchMode::RANGE_SEARCH) {
