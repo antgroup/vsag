@@ -374,6 +374,14 @@ public:
                             "Index doesn't support UpdateVector");
     }
 
+protected:
+    void
+    analyze_quantizer(JsonType& stats,
+                      const float* data,
+                      uint64_t sample_data_size,
+                      int64_t topk,
+                      const std::string& search_param) const;
+
 public:
     LabelTablePtr label_table_{nullptr};
     mutable std::shared_mutex label_lookup_mutex_{};  // lock for label_lookup_ & labels_
@@ -382,6 +390,9 @@ public:
 
     Allocator* const allocator_{nullptr};
     int64_t dim_{0};
+
+    mutable bool use_reorder_{false};
+
     MetricType metric_{MetricType::METRIC_TYPE_L2SQR};
     DataTypes data_type_{DataTypes::DATA_TYPE_FLOAT};
 

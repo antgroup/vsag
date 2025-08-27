@@ -424,4 +424,58 @@ InnerIndexInterface::GetDataByIdsWithFlag(const int64_t* ids,
     return dataset;
 }
 
+void
+InnerIndexInterface::analyze_quantizer(JsonType& stats,
+                                       const float* data,
+                                       uint64_t sample_data_size,
+                                       int64_t topk,
+                                       const std::string& search_param) const {
+    // record quantized information
+    if (this->use_reorder_) {
+        logger::info("analyze_quantizer: sample_data_size = {}, topk = {}", sample_data_size, topk);
+        float bias_ratio = 0.0F;
+        float inversion_count_rate = 0.0F;
+        for (uint64_t i = 0; i < sample_data_size; ++i) {
+            float tmp_bias_ratio = 0.0F;
+            float tmp_inversion_count_rate = 0.0F;
+            this->use_reorder_ = false;
+            const auto* query_data = data + i * dim_;
+            auto query = Dataset::Make();
+            FilterPtr filter = nullptr;
+            query->Owner(false)->NumElements(1)->Float32Vectors(query_data)->Dim(dim_);
+            auto search_result = this->KnnSearch(query, topk, search_param, filter);
+            this->use_reorder_ = true;
+            auto distance_result =
+                this->CalDistanceById(query_data, search_result->GetIds(), search_result->GetDim());
+            const auto* ground_distances = distance_result->GetDistances();
+            const auto* approximate_distances = search_result->GetDistances();
+            for (int64_t j = 0; j < topk; ++j) {
+                if (ground_distances[j] > 0) {
+                    tmp_bias_ratio += std::abs(approximate_distances[j] - ground_distances[j]) /
+                                      ground_distances[j];
+                }
+            }
+            tmp_bias_ratio /= static_cast<float>(topk);
+            bias_ratio += tmp_bias_ratio;
+            // calculate inversion count rate
+            int64_t inversion_count = 0;
+            for (int64_t j = 0; j < search_result->GetDim() - 1; ++j) {
+                for (int64_t k = j + 1; k < search_result->GetDim(); ++k) {
+                    if (ground_distances[j] > ground_distances[k]) {
+                        inversion_count++;
+                    }
+                }
+            }
+            int64_t search_count = search_result->GetDim();
+            tmp_inversion_count_rate =
+                static_cast<float>(inversion_count) /
+                (static_cast<float>(search_count * (search_count - 1)) / 2.0F);
+            inversion_count_rate += tmp_inversion_count_rate;
+        }
+        stats["quantization_bias_ratio"] = bias_ratio / static_cast<float>(sample_data_size);
+        stats["quantization_inversion_count_rate"] =
+            inversion_count_rate / static_cast<float>(sample_data_size);
+    }
+}
+
 }  // namespace vsag
