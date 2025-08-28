@@ -131,7 +131,7 @@ TestComputerBatchPQFS(PQFastScanQuantizer<metric>& quant,
         computer->SetQuery(queries.data() + i * dim);
         std::vector<float> dists(count);
 
-        quant.ScanBatchDists(computer, count, packaged_codes.data(), dists.data());
+        quant.ScanBatchDists(*computer, count, packaged_codes.data(), dists.data());
         for (int j = 0; j < count; ++j) {
             auto gt = gt_func(j, i);
             REQUIRE(std::abs(dists[j] - gt) <= error);
