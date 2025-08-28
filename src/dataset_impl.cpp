@@ -35,12 +35,13 @@ DatasetImpl::MakeEmptyDataset() {
 
 template <typename T>
 inline T*
-new_element(T* old_dest, size_t old_count, size_t new_total) {
+new_element(T*& old_dest, size_t old_count, size_t new_total) {
     T* dest = new T[new_total];
     if (old_dest != nullptr) {
         memcpy(dest, old_dest, old_count * sizeof(T));
     }
     delete[] old_dest;  // Free the old memory if it was allocated with new[]
+    old_dest = nullptr;
     return dest;
 }
 
@@ -226,6 +227,7 @@ DatasetImpl::Append(const DatasetPtr& other) {
             paths_copy[i] = ptr[i];
         }
         delete[] ptr;  // Free the old memory if it was allocated with new[]
+        ptr = nullptr;
         for (int i = 0; i < new_num_elements; ++i) {
             paths_copy[old_num_elements + i] = other->GetPaths()[i];
         }
@@ -258,6 +260,7 @@ DatasetImpl::Append(const DatasetPtr& other) {
             attrsets_copy[i].attrs_.swap(ptr[i].attrs_);
         }
         delete[] ptr;
+        ptr = nullptr;
         const auto* other_attribute_sets = other->GetAttributeSets();
         for (int i = 0; i < new_num_elements; ++i) {
             attrsets_copy[old_num_elements + i].attrs_.reserve(
