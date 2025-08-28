@@ -510,14 +510,8 @@ HGraph::search_one_graph(const void* query,
                          InnerSearchParam& inner_search_param,
                          IteratorFilterContext* iter_ctx) const {
     auto visited_list = this->pool_->TakeOne();
-    DistHeapPtr result = nullptr;
-    if (inner_search_param.use_muti_threads_for_one_query && inner_search_param.level_0) {
-        result = this->parallel_searcher_->Search(
-            graph, flatten, visited_list, query, inner_search_param, iter_ctx);
-    } else {
-        result = this->searcher_->Search(
-            graph, flatten, visited_list, query, inner_search_param, iter_ctx);
-    }
+    auto result =
+        this->searcher_->Search(graph, flatten, visited_list, query, inner_search_param, iter_ctx);
     this->pool_->ReturnOne(visited_list);
     return result;
 }

@@ -93,16 +93,6 @@ ParallelSearcher::Search(const GraphInterfacePtr& graph,
         graph, flatten, vl, query, inner_search_param, label_table);
 }
 
-DistHeapPtr
-ParallelSearcher::Search(const GraphInterfacePtr& graph,
-                         const FlattenInterfacePtr& flatten,
-                         const VisitedListPtr& vl,
-                         const void* query,
-                         const InnerSearchParam& inner_search_param,
-                         IteratorFilterContext* iter_ctx) const {
-    return this->search_impl<KNN_SEARCH>(graph, flatten, vl, query, inner_search_param, iter_ctx);
-}
-
 template <InnerSearchMode mode>
 DistHeapPtr
 ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
@@ -213,23 +203,18 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
             current_start += tasks_per_thread[i];
         }
 
+        auto dist_compute = [&](uint64_t i) -> void {
+            flatten->Query(line_dists.data() + start_index[i],
+                           computer,
+                           to_be_visited_id.data() + start_index[i],
+                           tasks_per_thread[i],
+                           alloc);
+        };
+
         std::vector<std::future<void>> futures;
 
         for (uint64_t i = 0; i < num_threads; i++) {
-            futures.emplace_back(pool->Enqueue([&flatten,
-                                                &line_dists,
-                                                &computer,
-                                                &to_be_visited_id,
-                                                &tasks_per_thread,
-                                                &start_index,
-                                                &alloc,
-                                                i]() -> void {
-                flatten->Query(line_dists.data() + start_index[i],
-                               computer,
-                               to_be_visited_id.data() + start_index[i],
-                               tasks_per_thread[i],
-                               alloc);
-            }));
+            futures.emplace_back(pool->GeneralEnqueue(dist_compute, i));
         }
 
         for (auto& f : futures) {
@@ -283,200 +268,6 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
             top_candidates->Pop();
         }
     }
-    return top_candidates;
-}
-
-template <InnerSearchMode mode>
-DistHeapPtr
-ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
-                              const FlattenInterfacePtr& flatten,
-                              const VisitedListPtr& vl,
-                              const void* query,
-                              const InnerSearchParam& inner_search_param,
-                              IteratorFilterContext* iter_ctx) const {
-    Allocator* alloc =
-        inner_search_param.search_alloc == nullptr ? allocator_ : inner_search_param.search_alloc;
-    auto top_candidates = std::make_shared<StandardHeap<true, false>>(alloc, -1);
-    auto candidate_set = std::make_shared<StandardHeap<true, false>>(alloc, -1);
-
-    if (not graph or not flatten) {
-        return top_candidates;
-    }
-
-    auto computer = flatten->FactoryComputer(query);
-
-    auto is_id_allowed = inner_search_param.is_inner_id_allowed;
-    auto ep = inner_search_param.ep;
-    auto ef = inner_search_param.ef;
-
-    float dist = 0.0F;
-    uint64_t ids_cnt = 1;
-    auto lower_bound = std::numeric_limits<float>::max();
-
-    uint32_t hops = 0;
-    uint32_t dist_cmp = 0;
-    uint32_t count_no_visited = 0;
-    uint32_t vector_size =
-        graph->MaximumDegree() * inner_search_param.parallel_search_thread_count_per_query;
-    uint32_t current_start = 0;
-    Vector<InnerIdType> to_be_visited_rid(vector_size, alloc);
-    Vector<InnerIdType> to_be_visited_id(vector_size, alloc);
-    std::vector<Vector<InnerIdType>> neighbors(
-        inner_search_param.parallel_search_thread_count_per_query,
-        Vector<InnerIdType>(graph->MaximumDegree(), alloc));
-    Vector<float> line_dists(vector_size, alloc);
-    Vector<std::pair<float, uint64_t>> node_pair(
-        inner_search_param.parallel_search_thread_count_per_query, alloc);
-    Vector<uint32_t> tasks_per_thread(inner_search_param.parallel_search_thread_count_per_query,
-                                      alloc);
-    Vector<uint32_t> start_index(inner_search_param.parallel_search_thread_count_per_query, alloc);
-
-    if (!iter_ctx->IsFirstUsed()) {
-        if (iter_ctx->Empty()) {
-            return top_candidates;
-        }
-        while (!iter_ctx->Empty()) {
-            uint32_t cur_inner_id = iter_ctx->GetTopID();
-            float cur_dist = iter_ctx->GetTopDist();
-            if (!vl->Get(cur_inner_id) && iter_ctx->CheckPoint(cur_inner_id)) {
-                vl->Set(cur_inner_id);
-                lower_bound = std::max(lower_bound, cur_dist);
-                flatten->Query(&cur_dist, computer, &cur_inner_id, 1, alloc);
-                top_candidates->Push(cur_dist, cur_inner_id);
-                candidate_set->Push(cur_dist, cur_inner_id);
-                if constexpr (mode == InnerSearchMode::RANGE_SEARCH) {
-                    if (cur_dist > inner_search_param.radius and not top_candidates->Empty()) {
-                        top_candidates->Pop();
-                    }
-                }
-            }
-            iter_ctx->PopDiscard();
-        }
-    } else {
-        flatten->Query(&dist, computer, &ep, 1, alloc);
-        if (not is_id_allowed || is_id_allowed->CheckValid(ep)) {
-            top_candidates->Push(dist, ep);
-            lower_bound = top_candidates->Top().first;
-        }
-        candidate_set->Push(-dist, ep);
-        vl->Set(ep);
-    }
-
-    while (not candidate_set->Empty()) {
-        hops++;
-        auto num_explore_nodes =
-            candidate_set->Size() < inner_search_param.parallel_search_thread_count_per_query
-                ? candidate_set->Size()
-                : inner_search_param.parallel_search_thread_count_per_query;
-        auto current_first_node_pair = candidate_set->Top();
-        node_pair[0] = current_first_node_pair;
-
-        if constexpr (mode == InnerSearchMode::KNN_SEARCH) {
-            if ((-current_first_node_pair.first) > lower_bound && top_candidates->Size() == ef) {
-                break;
-            }
-        }
-        candidate_set->Pop();
-
-        for (uint64_t i = 1; i < num_explore_nodes; i++) {
-            node_pair[i] = candidate_set->Top();
-            candidate_set->Pop();
-        }
-
-        count_no_visited = visit(graph,
-                                 vl,
-                                 node_pair,
-                                 inner_search_param.is_inner_id_allowed,
-                                 inner_search_param.skip_ratio,
-                                 to_be_visited_rid,
-                                 to_be_visited_id,
-                                 neighbors,
-                                 num_explore_nodes);
-
-        dist_cmp += count_no_visited;
-        uint64_t num_threads = num_explore_nodes;
-
-        uint32_t base = 0;
-        uint32_t remainder = 0;
-
-        if (num_threads) {
-            base = count_no_visited / num_threads;
-            remainder = count_no_visited % num_threads;
-        }
-
-        current_start = 0;
-        for (uint64_t i = 0; i < num_threads; ++i) {
-            tasks_per_thread[i] = base + (i < remainder ? 1 : 0);
-            start_index[i] = current_start;
-            current_start += tasks_per_thread[i];
-        }
-
-        std::vector<std::future<void>> futures;
-
-        for (uint64_t i = 0; i < num_threads; i++) {
-            futures.emplace_back(pool->Enqueue([&flatten,
-                                                &line_dists,
-                                                &computer,
-                                                &to_be_visited_id,
-                                                &tasks_per_thread,
-                                                &start_index,
-                                                &alloc,
-                                                i]() -> void {
-                flatten->Query(line_dists.data() + start_index[i],
-                               computer,
-                               to_be_visited_id.data() + start_index[i],
-                               tasks_per_thread[i],
-                               alloc);
-            }));
-        }
-
-        for (auto& f : futures) {
-            f.get();
-        }
-
-        for (uint32_t i = 0; i < count_no_visited; i++) {
-            dist = line_dists[i];
-            if (dist < THRESHOLD_ERROR) {
-                inner_search_param.duplicate_id = to_be_visited_id[i];
-            }
-            if (top_candidates->Size() < ef || lower_bound > dist ||
-                (mode == RANGE_SEARCH && dist <= inner_search_param.radius)) {
-                if (!iter_ctx->CheckPoint(to_be_visited_id[i])) {
-                    continue;
-                }
-                candidate_set->Push(-dist, to_be_visited_id[i]);
-                flatten->Prefetch(candidate_set->Top().second);
-                if (not is_id_allowed || is_id_allowed->CheckValid(to_be_visited_id[i])) {
-                    top_candidates->Push(dist, to_be_visited_id[i]);
-                }
-
-                if constexpr (mode == KNN_SEARCH) {
-                    if (top_candidates->Size() > ef) {
-                        if (iter_ctx->CheckPoint(top_candidates->Top().second)) {
-                            auto cur_node_pair = top_candidates->Top();
-                            iter_ctx->AddDiscardNode(cur_node_pair.first, cur_node_pair.second);
-                        }
-                        top_candidates->Pop();
-                    }
-                }
-
-                if (not top_candidates->Empty()) {
-                    lower_bound = top_candidates->Top().first;
-                }
-            }
-        }
-    }
-
-    if constexpr (mode == KNN_SEARCH) {
-        while (top_candidates->Size() > inner_search_param.topk) {
-            auto cur_node_pair = top_candidates->Top();
-            if (iter_ctx->CheckPoint(cur_node_pair.second)) {
-                iter_ctx->AddDiscardNode(cur_node_pair.first, cur_node_pair.second);
-            }
-            top_candidates->Pop();
-        }
-    }
-
     return top_candidates;
 }
 

@@ -41,14 +41,6 @@ public:
            const InnerSearchParam& inner_search_param,
            const LabelTablePtr& label_table = nullptr) const;
 
-    virtual DistHeapPtr
-    Search(const GraphInterfacePtr& graph,
-           const FlattenInterfacePtr& flatten,
-           const VisitedListPtr& vl,
-           const void* query,
-           const InnerSearchParam& inner_search_param,
-           IteratorFilterContext* iter_ctx) const;
-
     virtual bool
     SetRuntimeParameters(const UnorderedMap<std::string, float>& new_params);
 
@@ -88,15 +80,6 @@ private:
                 const void* query,
                 const InnerSearchParam& inner_search_param,
                 const LabelTablePtr& label_table = nullptr) const;
-
-    template <InnerSearchMode mode = KNN_SEARCH>
-    DistHeapPtr
-    search_impl(const GraphInterfacePtr& graph,
-                const FlattenInterfacePtr& flatten,
-                const VisitedListPtr& vl,
-                const void* query,
-                const InnerSearchParam& inner_search_param,
-                IteratorFilterContext* iter_ctx) const;
 
 private:
     Allocator* allocator_{nullptr};
