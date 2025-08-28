@@ -26,8 +26,8 @@ ParallelSearcher::ParallelSearcher(const IndexCommonParam& common_param,
                                    std::shared_ptr<SafeThreadPool> search_pool,
                                    MutexArrayPtr mutex_array)
     : allocator_(common_param.allocator_.get()),
-      pool(std::move(search_pool),
-      mutex_array_(std::move(mutex_array))) {
+      pool(std::move(search_pool)),
+      mutex_array_(std::move(mutex_array)) {
 }
 
 uint32_t
