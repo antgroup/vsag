@@ -21,7 +21,6 @@
 #include "computer.h"
 #include "logger.h"
 #include "metric_type.h"
-#include "quantizer_interface.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
 #include "utils/function_exists_check.h"
@@ -29,15 +28,12 @@
 namespace vsag {
 using DataType = float;
 
-template <MetricType metric = MetricType::METRIC_TYPE_L2SQR>
-class TransformQuantizer;
-
 /**
  * @class Quantizer
  * @brief This class is used for quantization and encoding/decoding of data.
  */
 template <typename QuantT>
-class Quantizer : public QuantizerInterface {
+class Quantizer {
 public:
     explicit Quantizer<QuantT>(int dim, Allocator* allocator)
         : dim_(dim), code_size_(dim * sizeof(DataType)), allocator_(allocator){};
@@ -52,7 +48,7 @@ public:
      * @return True if training was successful; False otherwise.
      */
     bool
-    Train(const DataType* data, uint64_t count) override {
+    Train(const DataType* data, uint64_t count) {
         return cast().TrainImpl(data, count);
     }
 
@@ -64,7 +60,7 @@ public:
      * @return True if training was successful; False otherwise.
      */
     bool
-    ReTrain(const DataType* data, uint64_t count) override {
+    ReTrain(const DataType* data, uint64_t count) {
         this->is_trained_ = false;
         return cast().TrainImpl(data, count);
     }
@@ -77,7 +73,7 @@ public:
      * @return True if encoding was successful; False otherwise.
      */
     bool
-    EncodeOne(const DataType* data, uint8_t* codes) override {
+    EncodeOne(const DataType* data, uint8_t* codes) {
         return cast().EncodeOneImpl(data, codes);
     }
 
@@ -90,7 +86,7 @@ public:
      * @return True if encoding was successful; False otherwise.
      */
     bool
-    EncodeBatch(const DataType* data, uint8_t* codes, uint64_t count) override {
+    EncodeBatch(const DataType* data, uint8_t* codes, uint64_t count) {
         return cast().EncodeBatchImpl(data, codes, count);
     }
 
@@ -102,7 +98,7 @@ public:
      * @return True if decoding was successful; False otherwise.
      */
     bool
-    DecodeOne(const uint8_t* codes, DataType* data) override {
+    DecodeOne(const uint8_t* codes, DataType* data) {
         return cast().DecodeOneImpl(codes, data);
     }
 
@@ -115,7 +111,7 @@ public:
      * @return True if decoding was successful; False otherwise.
      */
     bool
-    DecodeBatch(const uint8_t* codes, DataType* data, uint64_t count) override {
+    DecodeBatch(const uint8_t* codes, DataType* data, uint64_t count) {
         return cast().DecodeBatchImpl(codes, data, count);
     }
 
@@ -128,12 +124,12 @@ public:
      * @return The computed distance between the decoded data points.
      */
     inline float
-    Compute(const uint8_t* codes1, const uint8_t* codes2) override {
+    Compute(const uint8_t* codes1, const uint8_t* codes2) {
         return cast().ComputeImpl(codes1, codes2);
     }
 
     inline void
-    Serialize(StreamWriter& writer) override {
+    Serialize(StreamWriter& writer) {
         StreamWriter::WriteObj(writer, this->dim_);
         StreamWriter::WriteObj(writer, this->metric_);
         StreamWriter::WriteObj(writer, this->code_size_);
@@ -142,7 +138,7 @@ public:
     }
 
     inline void
-    Deserialize(StreamReader& reader) override {
+    Deserialize(StreamReader& reader) {
         StreamReader::ReadObj(reader, this->dim_);
         StreamReader::ReadObj(reader, this->metric_);
         StreamReader::ReadObj(reader, this->code_size_);
@@ -150,49 +146,38 @@ public:
         return cast().DeserializeImpl(reader);
     }
 
-    ComputerInterfacePtr
-    FactoryComputer() override {
-        auto computer_ptr =
-            std::make_shared<Computer<QuantT>>(static_cast<QuantT*>(this), allocator_);
-        if constexpr (std::is_same_v<QuantT, TransformQuantizer<MetricType::METRIC_TYPE_L2SQR>> or
-                      std::is_same_v<QuantT, TransformQuantizer<MetricType::METRIC_TYPE_IP>> or
-                      std::is_same_v<QuantT, TransformQuantizer<MetricType::METRIC_TYPE_COSINE>>) {
-            computer_ptr->inner_computer_ = cast().quantizer_->FactoryComputer();
-        }
-        return computer_ptr;
+    std::shared_ptr<Computer<QuantT>>
+    FactoryComputer() {
+        return std::make_shared<Computer<QuantT>>(static_cast<QuantT*>(this), allocator_);
     }
 
     inline void
-    ProcessQuery(const DataType* query, ComputerInterfacePtr computer) const override {
-        auto computer_ptr = std::dynamic_pointer_cast<Computer<QuantT>>(computer);
-        return cast().ProcessQueryImpl(query, *computer_ptr);
+    ProcessQuery(const DataType* query, Computer<QuantT>& computer) const {
+        return cast().ProcessQueryImpl(query, computer);
     }
 
     inline void
-    ComputeDist(ComputerInterfacePtr computer, const uint8_t* codes, float* dists) const override {
-        auto computer_ptr = std::dynamic_pointer_cast<Computer<QuantT>>(computer);
-        return cast().ComputeDistImpl(*computer_ptr, codes, dists);
+    ComputeDist(Computer<QuantT>& computer, const uint8_t* codes, float* dists) const {
+        return cast().ComputeDistImpl(computer, codes, dists);
     }
 
     inline float
-    ComputeDist(ComputerInterfacePtr computer, const uint8_t* codes) const override {
+    ComputeDist(Computer<QuantT>& computer, const uint8_t* codes) const {
         float dist = 0.0F;
-        auto computer_ptr = std::dynamic_pointer_cast<Computer<QuantT>>(computer);
-        cast().ComputeDistImpl(*computer_ptr, codes, &dist);
+        cast().ComputeDistImpl(computer, codes, &dist);
         return dist;
     }
 
     inline void
-    ScanBatchDists(ComputerInterfacePtr computer,
+    ScanBatchDists(Computer<QuantT>& computer,
                    uint64_t count,
                    const uint8_t* codes,
-                   float* dists) const override {
-        auto computer_ptr = std::dynamic_pointer_cast<Computer<QuantT>>(computer);
-        return cast().ScanBatchDistImpl(*computer_ptr, count, codes, dists);
+                   float* dists) const {
+        return cast().ScanBatchDistImpl(computer, count, codes, dists);
     }
 
     inline void
-    ComputeDistsBatch4(ComputerInterfacePtr computer,
+    ComputeDistsBatch4(Computer<QuantT>& computer,
                        const uint8_t* codes1,
                        const uint8_t* codes2,
                        const uint8_t* codes3,
@@ -200,32 +185,30 @@ public:
                        float& dists1,
                        float& dists2,
                        float& dists3,
-                       float& dists4) const override {
-        auto computer_ptr = std::dynamic_pointer_cast<Computer<QuantT>>(computer);
+                       float& dists4) const {
         if constexpr (has_ComputeDistsBatch4Impl<QuantT>::value) {
             cast().ComputeDistsBatch4Impl(
-                *computer_ptr, codes1, codes2, codes3, codes4, dists1, dists2, dists3, dists4);
+                computer, codes1, codes2, codes3, codes4, dists1, dists2, dists3, dists4);
         } else {
-            cast().ComputeDistImpl(*computer_ptr, codes1, &dists1);
-            cast().ComputeDistImpl(*computer_ptr, codes2, &dists2);
-            cast().ComputeDistImpl(*computer_ptr, codes3, &dists3);
-            cast().ComputeDistImpl(*computer_ptr, codes4, &dists4);
+            cast().ComputeDistImpl(computer, codes1, &dists1);
+            cast().ComputeDistImpl(computer, codes2, &dists2);
+            cast().ComputeDistImpl(computer, codes3, &dists3);
+            cast().ComputeDistImpl(computer, codes4, &dists4);
         }
     }
 
     inline void
-    ReleaseComputer(ComputerInterfacePtr computer) const override {
-        auto computer_ptr = std::dynamic_pointer_cast<Computer<QuantT>>(computer);
-        cast().ReleaseComputerImpl(*computer_ptr);
+    ReleaseComputer(Computer<QuantT>& computer) const {
+        cast().ReleaseComputerImpl(computer);
     }
 
     [[nodiscard]] virtual std::string
-    Name() const override {
+    Name() const {
         return cast().NameImpl();
     }
 
     [[nodiscard]] MetricType
-    Metric() const override {
+    Metric() const {
         return this->metric_;
     }
     [[nodiscard]] bool
@@ -234,10 +217,10 @@ public:
     }
 
     virtual void
-    Package32(const uint8_t* codes, uint8_t* packaged_codes, int64_t valid_size) const override{};
+    Package32(const uint8_t* codes, uint8_t* packaged_codes, int64_t valid_size) const {};
 
     virtual void
-    Unpack32(const uint8_t* packaged_codes, uint8_t* codes) const override{};
+    Unpack32(const uint8_t* packaged_codes, uint8_t* codes) const {};
 
     /**
      * @brief Get the size of the encoded code in bytes.
@@ -245,12 +228,12 @@ public:
      * @return The code size in bytes.
      */
     inline uint64_t
-    GetCodeSize() const override {
+    GetCodeSize() const {
         return this->code_size_;
     }
 
     inline uint64_t
-    GetQueryCodeSize() const override {
+    GetQueryCodeSize() const {
         return this->query_code_size_;
     }
 
@@ -260,7 +243,7 @@ public:
      * @return The dimensionality of the input data.
      */
     inline int
-    GetDim() const override {
+    GetDim() const {
         return this->dim_;
     }
 
