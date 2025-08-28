@@ -72,6 +72,9 @@ private:
     std::shared_ptr<SafeThreadPool> pool{nullptr};
 
     MutexArrayPtr mutex_array_{nullptr};
+
+    // runtime parameters
+    uint32_t prefetch_stride_visit_{3};
 };
 
 using ParallelSearcherPtr = std::shared_ptr<ParallelSearcher>;
