@@ -232,7 +232,7 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
         }
 
         for (auto& f : futures) {
-            f.get();
+            f.get();  // NOLINT(clang-analyzer-cplusplus.NewDeleteLeaks)
         }
 
         for (uint32_t i = 0; i < count_no_visited; i++) {
@@ -395,7 +395,8 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
         dist_cmp += count_no_visited;
         uint64_t num_threads = num_explore_nodes;
 
-        uint32_t base = 0, remainder = 0;
+        uint32_t base = 0;
+        uint32_t remainder = 0;
 
         if (num_threads) {
             base = count_no_visited / num_threads;
@@ -429,7 +430,7 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
         }
 
         for (auto& f : futures) {
-            f.get();
+            f.get();  // NOLINT(clang-analyzer-cplusplus.NewDeleteLeaks)
         }
 
         for (uint32_t i = 0; i < count_no_visited; i++) {
