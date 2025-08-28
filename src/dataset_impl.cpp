@@ -206,19 +206,10 @@ DatasetImpl::Append(const DatasetPtr& other) {
 
     this->NumElements(old_num_elements + new_num_elements);
 
-    // append ids
     APPEND_DATA(IDS, int64_t*, Ids, 1);
-
-    // append distances
     APPEND_DATA(DISTS, float*, Distances, dim);
-
-    // append int8 vectors
     APPEND_DATA(INT8_VECTORS, int8_t*, Int8Vectors, dim);
-
-    // append float32 vectors
     APPEND_DATA(FLOAT32_VECTORS, float*, Float32Vectors, dim);
-
-    // append extra infos
     if (this->GetExtraInfoSize() != 0) {
         APPEND_DATA(EXTRA_INFOS, char*, ExtraInfos, this->GetExtraInfoSize());
     }
