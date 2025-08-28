@@ -373,7 +373,6 @@ HGraph::KnnSearch(const DatasetPtr& query,
         search_param.ef = 1;
         search_param.is_inner_id_allowed = nullptr;
         search_param.search_alloc = search_allocator;
-        search_param.level_0 = false;
         if (iter_filter_ctx->IsFirstUsed()) {
             for (auto i = static_cast<int64_t>(this->route_graphs_.size() - 1); i >= 0; --i) {
                 auto result = this->search_one_graph(
@@ -385,7 +384,6 @@ HGraph::KnnSearch(const DatasetPtr& query,
         search_param.ef = std::max(params.ef_search, k);
         search_param.is_inner_id_allowed = ft;
         search_param.topk = static_cast<int64_t>(search_param.ef);
-        search_param.level_0 = true;
         search_result = this->search_one_graph(query_data,
                                                this->bottom_graph_,
                                                this->basic_flatten_codes_,
@@ -546,7 +544,6 @@ HGraph::RangeSearch(const DatasetPtr& query,
     search_param.ep = this->entry_point_id_;
     search_param.topk = 1;
     search_param.ef = 1;
-    search_param.level_0 = false;
     const auto* raw_query = get_data(query);
     for (auto i = static_cast<int64_t>(this->route_graphs_.size() - 1); i >= 0; --i) {
         auto result = this->search_one_graph(
@@ -564,9 +561,10 @@ HGraph::RangeSearch(const DatasetPtr& query,
     search_param.search_mode = RANGE_SEARCH;
     search_param.consider_duplicate = true;
     search_param.range_search_limit_size = static_cast<int>(limited_size);
+    //used for parallel searching
+    //search_param.level_0 = true;
     //search_param.use_muti_threads_for_one_query = true;
     //search_param.parallel_search_thread_count_per_query = 6;
-    search_param.level_0 = true;
     auto search_result = this->search_one_graph(
         raw_query, this->bottom_graph_, this->basic_flatten_codes_, search_param);
     if (use_reorder_) {
@@ -1750,7 +1748,6 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     search_param.ef = 1;
     search_param.is_inner_id_allowed = nullptr;
     search_param.search_alloc = search_allocator;
-    search_param.level_0 = false;
     const auto* raw_query = get_data(query);
     for (auto i = static_cast<int64_t>(this->route_graphs_.size() - 1); i >= 0; --i) {
         auto result = this->search_one_graph(
@@ -1779,7 +1776,8 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     search_param.is_inner_id_allowed = ft;
     search_param.topk = static_cast<int64_t>(search_param.ef);
     search_param.consider_duplicate = true;
-    search_param.level_0 = true;
+    //used for parallel searching
+    //search_param.level_0 = true;
     //search_param.use_muti_threads_for_one_query = true;
     //search_param.parallel_search_thread_count_per_query = 6;
     if (params.enable_time_record) {
