@@ -16,6 +16,7 @@
 #include "parallel_searcher.h"
 
 #include <limits>
+#include <utility>
 
 #include "impl/heap/standard_heap.h"
 #include "utils/linear_congruential_generator.h"
@@ -232,7 +233,7 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
         }
 
         for (auto& f : futures) {
-            f.get();  // NOLINT(clang-analyzer-cplusplus.NewDeleteLeaks)
+            f.get();
         }
 
         for (uint32_t i = 0; i < count_no_visited; i++) {
@@ -430,7 +431,7 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
         }
 
         for (auto& f : futures) {
-            f.get();  // NOLINT(clang-analyzer-cplusplus.NewDeleteLeaks)
+            f.get();
         }
 
         for (uint32_t i = 0; i < count_no_visited; i++) {
