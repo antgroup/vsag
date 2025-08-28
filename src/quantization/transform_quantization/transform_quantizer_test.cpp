@@ -46,12 +46,13 @@ TestComputeMetricTQ(std::string tq_chain, uint64_t dim, int count, float error =
     IndexCommonParam common_param;
     common_param.allocator_ = allocator;
     common_param.dim_ = dim;
-    TransformQuantizer<metric> quantizer(param, common_param);
+    TransformQuantizer<FP32Quantizer<metric>, metric> quantizer(param, common_param);
 
     REQUIRE(quantizer.NameImpl() == QUANTIZATION_TYPE_VALUE_TQ);
-
-    TestComputeCodes<TransformQuantizer<metric>, metric>(quantizer, dim, count, error);
-    TestComputer<TransformQuantizer<metric>, metric>(quantizer, dim, count, error);
+    TestComputeCodes<TransformQuantizer<FP32Quantizer<metric>, metric>, metric>(
+        quantizer, dim, count, error);
+    TestComputer<TransformQuantizer<FP32Quantizer<metric>, metric>, metric>(
+        quantizer, dim, count, error);
 }
 
 TEST_CASE("TQ Compute", "[ut][TransformQuantizer]") {

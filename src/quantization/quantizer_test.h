@@ -349,8 +349,8 @@ TestComputer(Quantizer<T>& quant,
             auto gt = gt_func(j, i);
             uint8_t* code = codes1.data() + j * quant.GetCodeSize();
             quant.EncodeOne(vecs.data() + j * dim, code);
-            quant.ComputeDist(computer, code, dists1.data() + j);
-            REQUIRE(quant.ComputeDist(computer, code) == dists1[j]);
+            quant.ComputeDist(*computer, code, dists1.data() + j);
+            REQUIRE(quant.ComputeDist(*computer, code) == dists1[j]);
             if (std::abs(gt - dists1[j]) > error) {
                 count_unbounded_numeric_error++;
             }
@@ -363,7 +363,7 @@ TestComputer(Quantizer<T>& quant,
         std::vector<uint8_t> codes2(quant.GetCodeSize() * count);
         std::vector<float> dists2(count);
         quant.EncodeBatch(vecs.data(), codes2.data(), count);
-        quant.ScanBatchDists(computer, count, codes2.data(), dists2.data());
+        quant.ScanBatchDists(*computer, count, codes2.data(), dists2.data());
         for (int j = 0; j < count; ++j) {
             REQUIRE(fixtures::dist_t(dists1[j]) == fixtures::dist_t(dists2[j]));
         }
