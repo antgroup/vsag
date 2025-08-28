@@ -23,6 +23,7 @@
 #include "impl/runtime_parameter.h"
 #include "index/index_common_param.h"
 #include "io/reader_io.h"
+#include "pointer_define.h"
 #include "quantization/computer.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
@@ -30,8 +31,7 @@
 #include "vsag/constants.h"
 
 namespace vsag {
-class FlattenInterface;
-using FlattenInterfacePtr = std::shared_ptr<FlattenInterface>;
+DEFINE_POINTER(FlattenInterface);
 
 class FlattenInterface {
 public:

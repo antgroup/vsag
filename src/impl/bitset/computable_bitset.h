@@ -15,13 +15,12 @@
 
 #pragma once
 
+#include "pointer_define.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
 #include "vsag/bitset.h"
-
 namespace vsag {
-class ComputableBitset;
-using ComputableBitsetPtr = std::shared_ptr<ComputableBitset>;
+DEFINE_POINTER(ComputableBitset);
 
 enum class ComputableBitsetType { SparseBitset, FastBitset };
 

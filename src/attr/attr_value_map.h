@@ -18,6 +18,7 @@
 
 #include "impl/allocator/safe_allocator.h"
 #include "multi_bitset_manager.h"
+#include "pointer_define.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
 #include "typing.h"
@@ -26,8 +27,7 @@
 
 namespace vsag {
 
-class AttrValueMap;
-using ValueMapPtr = std::shared_ptr<AttrValueMap>;
+DEFINE_POINTER2(ValueMap, AttrValueMap);
 
 class AttrValueMap {
 public:

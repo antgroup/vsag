@@ -16,8 +16,9 @@
 #pragma once
 
 #include "io_parameter.h"
-
+#include "pointer_define.h"
 namespace vsag {
+DEFINE_POINTER(BufferIOParameter);
 class BufferIOParameter : public IOParameter {
 public:
     BufferIOParameter();
@@ -33,7 +34,5 @@ public:
 public:
     std::string path_{};
 };
-
-using BufferIOParameterPtr = std::shared_ptr<BufferIOParameter>;
 
 }  // namespace vsag

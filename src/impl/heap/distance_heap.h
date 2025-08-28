@@ -18,12 +18,13 @@
 #include <type_traits>
 #include <utility>
 
+#include "pointer_define.h"
 #include "typing.h"
 #include "vsag/allocator.h"
 
 namespace vsag {
-class DistanceHeap;
-using DistHeapPtr = std::shared_ptr<DistanceHeap>;
+
+DEFINE_POINTER2(DistHeap, DistanceHeap);
 
 class DistanceHeap {
 public:
@@ -86,7 +87,4 @@ protected:
     Allocator* allocator_{nullptr};
     int64_t max_size_{-1};
 };
-
-using DistHeapPtr = std::shared_ptr<DistanceHeap>;
-
 }  // namespace vsag

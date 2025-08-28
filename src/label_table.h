@@ -19,14 +19,15 @@
 
 #include <atomic>
 
+#include "pointer_define.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
 #include "typing.h"
 
 namespace vsag {
 
-class LabelTable;
-using LabelTablePtr = std::shared_ptr<LabelTable>;
+DEFINE_POINTER(LabelTable);
+
 using IdMapFunction = std::function<std::tuple<bool, int64_t>(int64_t)>;
 
 struct DuplicateRecord {
