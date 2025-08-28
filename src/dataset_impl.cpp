@@ -50,9 +50,8 @@ inline T*
 allocator_element(Allocator* allocator, T* old_dest, size_t new_size_in_bytes) {
     if (old_dest != nullptr) {
         return static_cast<T*>(allocator->Reallocate(old_dest, new_size_in_bytes));
-    } else {
-        return static_cast<T*>(allocator->Allocate(new_size_in_bytes));
     }
+    return static_cast<T*>(allocator->Allocate(new_size_in_bytes));
 }
 
 template <typename T>
