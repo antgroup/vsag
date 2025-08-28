@@ -14,11 +14,11 @@
 // limitations under the License.
 
 #pragma once
-#include "data_cell/flatten_datacell_parameter.h"
 #include "parameter.h"
+#include "pointer_define.h"
 #include "typing.h"
-
 namespace vsag {
+DEFINE_POINTER2(FlattenDataCellParam, FlattenDataCellParameter);
 class BruteForceParameter : public Parameter {
 public:
     explicit BruteForceParameter();
@@ -38,6 +38,6 @@ public:
     bool use_attribute_filter{false};
 };
 
-using BruteForceParameterPtr = std::shared_ptr<BruteForceParameter>;
+DEFINE_POINTER(BruteForceParameter);
 
 }  // namespace vsag

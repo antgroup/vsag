@@ -33,7 +33,7 @@ public:
 public:
     MMapIO(std::string filename, Allocator* allocator);
 
-    explicit MMapIO(const MMapIOParameterPtr& io_param, const IndexCommonParam& common_param);
+    explicit MMapIO(const MMapIOParamPtr& io_param, const IndexCommonParam& common_param);
 
     explicit MMapIO(const IOParamPtr& param, const IndexCommonParam& common_param);
 

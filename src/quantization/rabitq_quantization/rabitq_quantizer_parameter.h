@@ -15,9 +15,10 @@
 
 #pragma once
 
+#include "pointer_define.h"
 #include "quantization/quantizer_parameter.h"
-
 namespace vsag {
+DEFINE_POINTER2(RaBitQuantizerParam, RaBitQuantizerParameter);
 class RaBitQuantizerParameter : public QuantizerParameter {
 public:
     RaBitQuantizerParameter();
@@ -38,7 +39,4 @@ public:
     uint64_t num_bits_per_dim_query_{32};
     bool use_fht_{false};
 };
-
-using RaBitQuantizerParamPtr = std::shared_ptr<RaBitQuantizerParameter>;
-
 }  // namespace vsag
