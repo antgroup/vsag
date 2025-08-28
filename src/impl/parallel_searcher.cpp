@@ -271,59 +271,6 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
     return top_candidates;
 }
 
-bool
-ParallelSearcher::SetRuntimeParameters(const UnorderedMap<std::string, float>& new_params) {
-    bool ret = false;
-    auto iter = new_params.find(PREFETCH_STRIDE_VISIT);
-    if (iter != new_params.end()) {
-        prefetch_stride_visit_ = static_cast<uint32_t>(iter->second);
-        ret = true;
-    }
-
-    ret |= this->mock_flatten_->SetRuntimeParameters(new_params);
-    return ret;
-}
-
-void
-ParallelSearcher::SetMockParameters(const GraphInterfacePtr& graph,
-                                    const FlattenInterfacePtr& flatten,
-                                    const std::shared_ptr<VisitedListPool>& vl_pool,
-                                    const InnerSearchParam& inner_search_param,
-                                    const uint64_t dim,
-                                    const uint32_t n_trials) {
-    mock_graph_ = graph;
-    mock_flatten_ = flatten;
-    mock_vl_pool_ = vl_pool;
-    mock_inner_search_param_ = inner_search_param;
-    mock_dim_ = dim;
-    mock_n_trials_ = n_trials;
-}
-
-double
-ParallelSearcher::MockRun() const {
-    uint64_t n_trials = std::min(mock_n_trials_, mock_flatten_->TotalCount());
-
-    double time_cost = 0;
-    for (uint32_t i = 0; i < n_trials; ++i) {
-        // init param
-        Vector<uint8_t> codes(mock_flatten_->code_size_, allocator_);
-        mock_flatten_->GetCodesById(i, codes.data());
-
-        Vector<float> raw_data(mock_dim_, allocator_);
-        mock_flatten_->Decode(codes.data(), raw_data.data());
-        auto vl = mock_vl_pool_->TakeOne();
-
-        // mock run
-        auto st = std::chrono::high_resolution_clock::now();
-        Search(mock_graph_, mock_flatten_, vl, raw_data.data(), mock_inner_search_param_);
-        auto ed = std::chrono::high_resolution_clock::now();
-        time_cost += std::chrono::duration<double>(ed - st).count();
-
-        mock_vl_pool_->ReturnOne(vl);
-    }
-    return time_cost;
-}
-
 void
 ParallelSearcher::SetMutexArray(MutexArrayPtr new_mutex_array) {
     mutex_array_.reset();

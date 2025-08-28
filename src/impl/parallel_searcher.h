@@ -21,7 +21,6 @@
 #include "impl/basic_searcher.h"
 #include "impl/heap/distance_heap.h"
 #include "index/index_common_param.h"
-#include "index/iterator_filter.h"
 #include "lock_strategy.h"
 #include "utils/visited_list.h"
 
@@ -40,20 +39,6 @@ public:
            const void* query,
            const InnerSearchParam& inner_search_param,
            const LabelTablePtr& label_table = nullptr) const;
-
-    virtual bool
-    SetRuntimeParameters(const UnorderedMap<std::string, float>& new_params);
-
-    virtual void
-    SetMockParameters(const GraphInterfacePtr& graph,
-                      const FlattenInterfacePtr& flatten,
-                      const std::shared_ptr<VisitedListPool>& vl_pool,
-                      const InnerSearchParam& inner_search_param,
-                      const uint64_t dim,
-                      const uint32_t n_trials = OPTIMIZE_SEARCHER_SAMPLE_SIZE);
-
-    virtual double
-    MockRun() const;
 
     void
     SetMutexArray(MutexArrayPtr new_mutex_array);
@@ -87,17 +72,6 @@ private:
     std::shared_ptr<SafeThreadPool> pool{nullptr};
 
     MutexArrayPtr mutex_array_{nullptr};
-
-    // mock run parameters
-    GraphInterfacePtr mock_graph_{nullptr};
-    FlattenInterfacePtr mock_flatten_{nullptr};
-    std::shared_ptr<VisitedListPool> mock_vl_pool_{nullptr};
-    InnerSearchParam mock_inner_search_param_;
-    uint64_t mock_dim_{0};
-    uint32_t mock_n_trials_{1};
-
-    // runtime parameters
-    uint32_t prefetch_stride_visit_{3};
 };
 
 using ParallelSearcherPtr = std::shared_ptr<ParallelSearcher>;
