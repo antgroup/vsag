@@ -30,6 +30,7 @@ namespace vsag {
 class DatasetImpl : public Dataset {
     using var = std::variant<int64_t,
                              const float*,
+                             const char*,
                              const int8_t*,
                              const int64_t*,
                              const std::string*,
@@ -246,14 +247,14 @@ public:
 
     DatasetPtr
     ExtraInfos(const char* extra_info) override {
-        this->data_[EXTRA_INFOS] = reinterpret_cast<const int64_t*>(extra_info);
+        this->data_[EXTRA_INFOS] = extra_info;
         return shared_from_this();
     }
 
     const char*
     GetExtraInfos() const override {
         if (auto iter = this->data_.find(EXTRA_INFOS); iter != this->data_.end()) {
-            return reinterpret_cast<const char*>(std::get<const int64_t*>(iter->second));
+            return std::get<const char*>(iter->second);
         }
         return nullptr;
     }

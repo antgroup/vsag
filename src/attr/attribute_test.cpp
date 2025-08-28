@@ -22,10 +22,9 @@
 using namespace vsag;
 
 TEST_CASE("Attribute Equal Test", "[ut][Attribute]") {
-    // 测试每个类型
     auto test_equal = [](const auto& attr1, const auto& attr2, bool expected) {
         REQUIRE(attr1->Equal(attr2.get()) == expected);
-        REQUIRE(attr2->Equal(attr1.get()) == expected);  // 双向比较
+        REQUIRE(attr2->Equal(attr1.get()) == expected);
     };
 
     SECTION("INT32") {

@@ -77,6 +77,7 @@ AttributeValue<T>::Equal(const Attribute* other) const {
         this->GetValueType() != other->GetValueType()) {
         return false;
     }
+
     auto count = this->GetValueCount();
     const auto* other_instance = dynamic_cast<const AttributeValue<T>*>(other);
     if (other_instance) {
@@ -91,6 +92,7 @@ AttributeValue<T>::Equal(const Attribute* other) const {
         }
         return true;
     }
+
     return false;
 }
 

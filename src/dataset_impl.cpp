@@ -34,10 +34,31 @@ DatasetImpl::MakeEmptyDataset() {
 }
 
 template <typename T>
+inline T*
+new_element(T* old_dest, size_t old_count, size_t new_total) {
+    T* dest = new T[new_total];
+    if (old_dest != nullptr) {
+        memcpy(dest, old_dest, old_count * sizeof(T));
+    }
+    delete[] old_dest;  // Free the old memory if it was allocated with new[]
+    return dest;
+}
+
+template <typename T>
+inline T*
+allocator_element(Allocator* allocator, T* old_dest, size_t new_size_in_bytes) {
+    if (old_dest != nullptr) {
+        return static_cast<T*>(allocator->Reallocate(old_dest, new_size_in_bytes));
+    } else {
+        return static_cast<T*>(allocator->Allocate(new_size_in_bytes));
+    }
+}
+
+template <typename T>
 T*
 allocate_and_copy(
     const T* src, size_t count, Allocator* allocator, T* old_dest = nullptr, size_t old_count = 0) {
-    if (!src || count == 0) {
+    if (src == nullptr || count == 0) {
         return nullptr;
     }
     if (old_dest == nullptr && old_count > 0) {
@@ -51,23 +72,9 @@ allocate_and_copy(
 
     T* dest;
     if (allocator != nullptr) {
-        if (old_dest != nullptr) {
-            // If old_dest is provided, we need to reallocate new memory
-            dest =
-                static_cast<T*>(allocator->Reallocate(old_dest, (old_count + count) * sizeof(T)));
-        } else {
-            // Allocate new memory for the new count
-            dest = static_cast<T*>(allocator->Allocate(count * sizeof(T)));
-        }
+        dest = allocator_element<T>(allocator, old_dest, (old_count + count) * sizeof(T));
     } else {
-        if (old_dest != nullptr) {
-            // If old_dest is provided, we need to allocate new memory
-            dest = new T[old_count + count];
-            memcpy(dest, old_dest, old_count * sizeof(T));
-            delete[] old_dest;  // Free the old memory if it was allocated with new[]
-        } else {
-            dest = new T[count];
-        }
+        dest = new_element<T>(old_dest, old_count, old_count + count);
     }
     memcpy(dest + old_count, src, count * sizeof(T));
     return dest;
@@ -102,19 +109,10 @@ allocate_and_copy_sparse_vectors(const SparseVector* src,
     SparseVector* dest = nullptr;
 
     if (allocator != nullptr) {
-        if (old_dest != nullptr) {
-            dest = static_cast<SparseVector*>(
-                allocator->Reallocate(old_dest, new_total * sizeof(SparseVector)));
-        } else {
-            dest =
-                static_cast<SparseVector*>(allocator->Allocate(new_total * sizeof(SparseVector)));
-        }
+        dest =
+            allocator_element<SparseVector>(allocator, old_dest, new_total * sizeof(SparseVector));
     } else {
-        dest = new SparseVector[new_total];
-        for (size_t i = 0; i < old_count; ++i) {
-            dest[i] = old_dest[i];
-        }
-        delete[] old_dest;
+        dest = new_element<SparseVector>(old_dest, old_count, new_total);
     }
 
     for (size_t i = old_count; i < new_total; ++i) {
@@ -143,6 +141,12 @@ DatasetImpl::DeepCopy(Allocator* allocator) const {
         allocate_and_copy(this->GetInt8Vectors(), num_elements * dim, allocator_ref));
     copy_dataset->Float32Vectors(
         allocate_and_copy(this->GetFloat32Vectors(), num_elements * dim, allocator_ref));
+
+    if (this->GetExtraInfoSize() != 0) {
+        copy_dataset->ExtraInfoSize(this->GetExtraInfoSize());
+        copy_dataset->ExtraInfos(allocate_and_copy(
+            this->GetExtraInfos(), num_elements * this->GetExtraInfoSize(), allocator_ref));
+    }
     copy_dataset->SparseVectors(
         allocate_and_copy_sparse_vectors(this->GetSparseVectors(), num_elements, allocator_ref));
 
@@ -163,24 +167,6 @@ DatasetImpl::DeepCopy(Allocator* allocator) const {
                 attrsets_copy[i].attrs_.emplace_back(attr->DeepCopy());
             }
         }
-    }
-
-    if (this->GetExtraInfoSize() != 0) {
-        if (this->GetExtraInfos() == nullptr) {
-            throw VsagException(ErrorType::INVALID_ARGUMENT,
-                                "Extra info size is set but extra infos is null");
-        }
-        auto extra_info_size = this->GetExtraInfoSize();
-        copy_dataset->ExtraInfoSize(extra_info_size);
-        char* extra_info = nullptr;
-        if (allocator_ref != nullptr) {
-            extra_info =
-                static_cast<char*>(allocator_ref->Allocate(extra_info_size * num_elements));
-        } else {
-            extra_info = new char[extra_info_size * num_elements];
-        }
-        copy_dataset->ExtraInfos(extra_info);
-        std::memcpy(extra_info, this->GetExtraInfos(), extra_info_size * num_elements);
     }
 
     return copy_dataset;
@@ -209,6 +195,10 @@ DatasetImpl::Append(const DatasetPtr& other) {
         throw VsagException(ErrorType::INVALID_ARGUMENT,
                             "Cannot append datasets with different dimensions");
     }
+    if (other->GetExtraInfoSize() != this->GetExtraInfoSize()) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            "Cannot append datasets with different extra info sizes");
+    }
 
     auto old_num_elements = this->GetNumElements();
     auto new_num_elements = other->GetNumElements();
@@ -227,6 +217,11 @@ DatasetImpl::Append(const DatasetPtr& other) {
 
     // append float32 vectors
     APPEND_DATA(FLOAT32_VECTORS, float*, Float32Vectors, dim);
+
+    // append extra infos
+    if (this->GetExtraInfoSize() != 0) {
+        APPEND_DATA(EXTRA_INFOS, char*, ExtraInfos, this->GetExtraInfoSize());
+    }
 
     // append paths
     if (auto iter = this->data_.find(DATASET_PATHS); iter != this->data_.end()) {
@@ -281,39 +276,6 @@ DatasetImpl::Append(const DatasetPtr& other) {
             }
         }
     }
-
-    // append extra infos
-    if (auto iter = this->data_.find(EXTRA_INFOS); iter != this->data_.end()) {
-        if (other->GetExtraInfoSize() != this->GetExtraInfoSize()) {
-            throw VsagException(ErrorType::INVALID_ARGUMENT,
-                                "Cannot append datasets with different extra info sizes");
-        }
-        if (other->GetExtraInfos() == nullptr) {
-            throw VsagException(
-                ErrorType::INVALID_ARGUMENT,
-                "Cannot append dataset without extra infos to dataset with extra infos");
-        }
-        auto* ptr = const_cast<char*>(
-            reinterpret_cast<const char*>(std::get<const int64_t*>(iter->second)));
-        size_t extra_info_size = this->GetExtraInfoSize();
-        if (allocator_ != nullptr) {
-            ptr = static_cast<char*>(allocator_->Reallocate(
-                ptr, extra_info_size * (old_num_elements + new_num_elements)));
-            std::memcpy(ptr + extra_info_size * old_num_elements,
-                        other->GetExtraInfos(),
-                        extra_info_size * new_num_elements);
-            this->ExtraInfos(ptr);
-        } else {
-            char* extra_info = new char[extra_info_size * (old_num_elements + new_num_elements)];
-            std::memcpy(extra_info, ptr, extra_info_size * old_num_elements);
-            delete[] ptr;  // Free the old memory if it was allocated with new[]
-            std::memcpy(extra_info + extra_info_size * old_num_elements,
-                        other->GetExtraInfos(),
-                        extra_info_size * new_num_elements);
-            this->ExtraInfos(extra_info);
-        }
-    }
-
     return shared_from_this();
 }
 
