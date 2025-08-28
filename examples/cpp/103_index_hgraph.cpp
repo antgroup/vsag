@@ -51,7 +51,7 @@ main(int argc, char** argv) {
             "base_quantization_type": "sq8",
             "max_degree": 26,
             "ef_construction": 100,
-"alpha":1.2
+            "alpha":1.2
         }
     }
     )";
