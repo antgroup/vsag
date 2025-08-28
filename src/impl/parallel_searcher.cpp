@@ -23,11 +23,11 @@
 namespace vsag {
 
 ParallelSearcher::ParallelSearcher(const IndexCommonParam& common_param,
-                                   MutexArrayPtr mutex_array,
-                                   std::shared_ptr<SafeThreadPool> search_pool)
+                                   std::shared_ptr<SafeThreadPool> search_pool,
+                                   MutexArrayPtr mutex_array)
     : allocator_(common_param.allocator_.get()),
-      mutex_array_(std::move(mutex_array)),
-      pool(search_pool) {
+      pool(std::move(search_pool),
+      mutex_array_(std::move(mutex_array))) {
 }
 
 uint32_t
@@ -49,8 +49,9 @@ ParallelSearcher::visit(const GraphInterfacePtr& graph,
             graph->GetNeighbors(node_pair[i].second, neighbors[i]);
         }
     } else {
-        for (uint64_t i = 0; i < point_visited_num; i++)
+        for (uint64_t i = 0; i < point_visited_num; i++) {
             graph->GetNeighbors(node_pair[i].second, neighbors[i]);
+        }
     }
 
     float skip_threshold =
@@ -196,7 +197,8 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
         dist_cmp += count_no_visited;
         uint64_t num_threads = num_explore_nodes;
 
-        uint32_t base = 0, remainder = 0;
+        uint32_t base = 0;
+        uint32_t remainder = 0;
 
         if (num_threads) {
             base = count_no_visited / num_threads;

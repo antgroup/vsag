@@ -30,8 +30,8 @@ namespace vsag {
 class ParallelSearcher {
 public:
     explicit ParallelSearcher(const IndexCommonParam& common_param,
-                              MutexArrayPtr mutex_array = nullptr,
-                              std::shared_ptr<SafeThreadPool> search_pool = nullptr);
+                              std::shared_ptr<SafeThreadPool> search_pool,
+                              MutexArrayPtr mutex_array = nullptr);
 
     virtual DistHeapPtr
     Search(const GraphInterfacePtr& graph,
@@ -78,7 +78,7 @@ private:
           Vector<InnerIdType>& to_be_visited_rid,
           Vector<InnerIdType>& to_be_visited_id,
           std::vector<Vector<InnerIdType>>& neighbors,
-          uint64_t num_visit) const;
+          uint64_t point_visited_num) const;
 
     template <InnerSearchMode mode = KNN_SEARCH>
     DistHeapPtr
@@ -101,9 +101,9 @@ private:
 private:
     Allocator* allocator_{nullptr};
 
-    MutexArrayPtr mutex_array_{nullptr};
-
     std::shared_ptr<SafeThreadPool> pool{nullptr};
+
+    MutexArrayPtr mutex_array_{nullptr};
 
     // mock run parameters
     GraphInterfacePtr mock_graph_{nullptr};

@@ -99,7 +99,7 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
     }
 
     this->parallel_searcher_ =
-        std::make_shared<ParallelSearcher>(common_param, neighbors_mutex_, build_pool_);
+        std::make_shared<ParallelSearcher>(common_param, build_pool_, neighbors_mutex_);
 
     UnorderedMap<std::string, float> default_param(common_param.allocator_.get());
     default_param.insert(

@@ -84,9 +84,12 @@ TEST_CASE("Parallel search with HNSW", "[ut][ParallelSearcher]") {
     auto pool = std::make_shared<VisitedListPool>(
         init_size, allocator.get(), vector_data_cell->TotalCount(), allocator.get());
 
+    auto thread_pool = SafeThreadPool::FactoryDefaultThreadPool();
+    thread_pool->SetPoolSize(16);
+
     auto exception_func = [&](const InnerSearchParam& search_param) -> void {
         // init searcher
-        auto searcher = std::make_shared<ParallelSearcher>(common);
+        auto searcher = std::make_shared<ParallelSearcher>(common, thread_pool);
         {
             // search with empty graph_data_cell
             auto vl = pool->TakeOne();
@@ -130,7 +133,7 @@ TEST_CASE("Parallel search with HNSW", "[ut][ParallelSearcher]") {
 
     for (const auto& search_param : params) {
         exception_func(search_param);
-        auto searcher = std::make_shared<ParallelSearcher>(common);
+        auto searcher = std::make_shared<ParallelSearcher>(common, thread_pool);
         for (int i = 0; i < query_size; i++) {
             std::unordered_set<InnerIdType> valid_set, set;
             auto vl = pool->TakeOne();
@@ -167,19 +170,19 @@ TEST_CASE("Parallel search with HNSW", "[ut][ParallelSearcher]") {
                 }
             }
 
-            uint64_t res_in_valid_num = 0;
-            uint64_t valid_in_res_num = 0;
+            uint32_t res_in_valid_num = 0;
+            uint32_t valid_in_res_num = 0;
 
             for (auto id : set) {
                 if (valid_set.count(id) > 0)
                     res_in_valid_num++;
             }
-            REQUIRE(res_in_valid_num / result_size > 0.9);
+
             for (auto id : valid_set) {
                 if (set.count(id) > 0)
-                    valid_in_res_num;
+                    valid_in_res_num++;
             }
-            REQUIRE(valid_in_res_num / result_size > 0.9);
+            REQUIRE(res_in_valid_num == valid_in_res_num);
         }
     }
 }
