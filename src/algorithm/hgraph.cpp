@@ -98,6 +98,9 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
         this->build_pool_->SetPoolSize(build_thread_count_);
     }
 
+    this->parallel_searcher_ =
+        std::make_shared<ParallelSearcher>(common_param, build_pool_, neighbors_mutex_);
+
     UnorderedMap<std::string, float> default_param(common_param.allocator_.get());
     default_param.insert(
         {PREFETCH_DEPTH_CODE, (this->basic_flatten_codes_->code_size_ + 63.0) / 64.0});
@@ -485,8 +488,14 @@ HGraph::search_one_graph(const void* query,
                          const FlattenInterfacePtr& flatten,
                          InnerSearchParam& inner_search_param) const {
     auto visited_list = this->pool_->TakeOne();
-    auto result = this->searcher_->Search(
-        graph, flatten, visited_list, query, inner_search_param, this->label_table_);
+    DistHeapPtr result = nullptr;
+    if (inner_search_param.use_muti_threads_for_one_query && inner_search_param.level_0) {
+        result = this->parallel_searcher_->Search(
+            graph, flatten, visited_list, query, inner_search_param);
+    } else {
+        result = this->searcher_->Search(
+            graph, flatten, visited_list, query, inner_search_param, this->label_table_);
+    }
     this->pool_->ReturnOne(visited_list);
     return result;
 }
@@ -552,6 +561,10 @@ HGraph::RangeSearch(const DatasetPtr& query,
     search_param.search_mode = RANGE_SEARCH;
     search_param.consider_duplicate = true;
     search_param.range_search_limit_size = static_cast<int>(limited_size);
+    //used for parallel searching
+    //search_param.level_0 = true;
+    //search_param.use_muti_threads_for_one_query = true;
+    //search_param.parallel_search_thread_count_per_query = 6;
     auto search_result = this->search_one_graph(
         raw_query, this->bottom_graph_, this->basic_flatten_codes_, search_param);
     if (use_reorder_) {
@@ -1764,6 +1777,10 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     search_param.is_inner_id_allowed = ft;
     search_param.topk = static_cast<int64_t>(search_param.ef);
     search_param.consider_duplicate = true;
+    //used for parallel searching
+    //search_param.level_0 = true;
+    //search_param.use_muti_threads_for_one_query = true;
+    //search_param.parallel_search_thread_count_per_query = 6;
     if (params.enable_time_record) {
         search_param.time_cost = std::make_shared<Timer>();
         search_param.time_cost->SetThreshold(params.timeout_ms);
