@@ -67,6 +67,19 @@ CopyVector(const vsag::Vector<T>& vec, vsag::Allocator* allocator) {
     return result;
 }
 
+template <typename T>
+T*
+CopyVector(const std::vector<T>& vec, vsag::Allocator* allocator) {
+    T* result;
+    if (allocator) {
+        result = (T*)allocator->Allocate(sizeof(T) * vec.size());
+    } else {
+        result = new T[vec.size()];
+    }
+    memcpy(result, vec.data(), vec.size() * sizeof(T));
+    return result;
+}
+
 template <typename T, typename RT = typename std::enable_if<std::is_integral_v<T>, T>::type>
 std::vector<RT>
 GenerateVectors(uint64_t count,
@@ -119,6 +132,9 @@ GenerateSparseVectors(vsag::Allocator* allocator,
 
 std::pair<std::vector<float>, std::vector<uint8_t>>
 GenerateBinaryVectorsAndCodes(uint32_t count, uint32_t dim, int seed = 47);
+
+std::string
+create_random_string(bool is_full);
 
 std::vector<float>
 generate_vectors(uint64_t count, uint32_t dim, bool need_normalize = true, int seed = 47);
