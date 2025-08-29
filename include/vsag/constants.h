@@ -156,6 +156,7 @@ extern const char* const HGRAPH_PRECISE_FILE_PATH;
 extern const char* const HGRAPH_PARAMETER_EF_RUNTIME;
 extern const char* const HGRAPH_EXTRA_INFO_SIZE;
 extern const char* const HGRAPH_SUPPORT_DUPLICATE;
+extern const char* const HGRAPH_SUPPORT_TOMBSTONE;
 extern const char* const HGRAPH_USE_EXTRA_INFO_FILTER;
 extern const char* const STORE_RAW_VECTOR;
 extern const char* const RAW_VECTOR_IO_TYPE;

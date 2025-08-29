@@ -47,16 +47,6 @@
 
 namespace vsag {
 
-const static int64_t EXPANSION_NUM = 1000000;
-const static int64_t DEFAULT_MAX_ELEMENT = 1;
-const static int MINIMAL_M = 8;
-const static int MAXIMAL_M = 64;
-const static uint32_t GENERATE_SEARCH_K = 50;
-const static uint32_t UPDATE_CHECK_SEARCH_K = 10;
-const static uint32_t GENERATE_SEARCH_L = 400;
-const static uint32_t UPDATE_CHECK_SEARCH_L = 100;
-const static float GENERATE_OMEGA = 0.51;
-
 HNSW::HNSW(HnswParameters hnsw_params, const IndexCommonParam& index_common_param)
     : space_(std::move(hnsw_params.space)),
       use_static_(hnsw_params.use_static),
@@ -135,7 +125,7 @@ HNSW::build(const DatasetPtr& base) {
         const auto* ids = base->GetIds();
         void* vectors = nullptr;
         size_t data_size = 0;
-        get_vectors(base, &vectors, &data_size);
+        get_vectors(type_, dim_, base, &vectors, &data_size);
         std::vector<int64_t> failed_ids;
         {
             SlowTaskTimer t("hnsw graph");
@@ -185,7 +175,7 @@ HNSW::add(const DatasetPtr& base) {
         const auto* ids = base->GetIds();
         void* vectors = nullptr;
         size_t data_size = 0;
-        get_vectors(base, &vectors, &data_size);
+        get_vectors(type_, dim_, base, &vectors, &data_size);
         std::vector<int64_t> failed_ids;
         for (int64_t i = 0; i < num_elements; ++i) {
             // noexcept runtime
@@ -278,7 +268,7 @@ HNSW::knn_search(const DatasetPtr& query,
         CHECK_ARGUMENT(query->GetNumElements() == 1, "query dataset should contain 1 vector only");
         void* vector = nullptr;
         size_t data_size = 0;
-        get_vectors(query, &vector, &data_size);
+        get_vectors(type_, dim_, query, &vector, &data_size);
         int64_t query_dim = query->GetDim();
         CHECK_ARGUMENT(
             query_dim == dim_,
@@ -430,7 +420,7 @@ HNSW::range_search(const DatasetPtr& query,
         CHECK_ARGUMENT(query->GetNumElements() == 1, "query dataset should contain 1 vector only");
         void* vector = nullptr;
         size_t data_size = 0;
-        get_vectors(query, &vector, &data_size);
+        get_vectors(type_, dim_, query, &vector, &data_size);
         int64_t query_dim = query->GetDim();
         CHECK_ARGUMENT(
             query_dim == dim_,
@@ -776,25 +766,16 @@ HNSW::update_id(int64_t old_id, int64_t new_id) {
                               "static hnsw does not support update");
     }
 
-    try {
-        std::unique_lock lock(rw_mutex_);
+    std::scoped_lock lock(rw_mutex_);
 
-        if (old_id == new_id) {
-            return true;
-        }
+    if (old_id == new_id) {
+        return true;
+    }
 
-        // note that the validation of old_id is handled within updateLabel.
-        std::reinterpret_pointer_cast<hnswlib::HierarchicalNSW>(alg_hnsw_)->updateLabel(old_id,
-                                                                                        new_id);
-        if (use_conjugate_graph_) {
-            conjugate_graph_->UpdateId(old_id, new_id);
-        }
-    } catch (const std::runtime_error& e) {
-#ifndef ENABLE_TESTS
-        logger::warn(
-            "update error for replace old_id {} to new_id {}: {}", old_id, new_id, e.what());
-#endif
-        return false;
+    // note that the validation of old_id is handled within updateLabel.
+    std::reinterpret_pointer_cast<hnswlib::HierarchicalNSW>(alg_hnsw_)->updateLabel(old_id, new_id);
+    if (use_conjugate_graph_) {
+        conjugate_graph_->UpdateId(old_id, new_id);
     }
 
     return true;
@@ -807,65 +788,55 @@ HNSW::update_vector(int64_t id, const DatasetPtr& new_base, bool force_update) {
                               "static hnsw does not support update");
     }
 
-    try {
-        // the validation of the new vector
-        void* new_base_vec = nullptr;
-        size_t data_size = 0;
-        get_vectors(new_base, &new_base_vec, &data_size);
+    // the validation of the new vector
+    void* new_base_vec = nullptr;
+    size_t data_size = 0;
+    get_vectors(type_, dim_, new_base, &new_base_vec, &data_size);
 
-        if (not force_update) {
-            std::shared_ptr<int8_t[]> base_data(new int8_t[data_size]);
-            auto base = Dataset::Make();
+    if (not force_update) {
+        Vector<int8_t> base_data(data_size, allocator_.get());
+        auto base = Dataset::Make();
 
-            // check if id exists and get copied base data
-            std::reinterpret_pointer_cast<hnswlib::HierarchicalNSW>(alg_hnsw_)->copyDataByLabel(
-                id, base_data.get());
-            set_dataset(base, base_data.get(), 1);
+        // check if id exists and get copied base data
+        std::reinterpret_pointer_cast<hnswlib::HierarchicalNSW>(alg_hnsw_)->copyDataByLabel(
+            id, base_data.data());
+        set_dataset(type_, dim_, base, base_data.data(), 1);
 
-            // search neighbors
-            auto neighbors = *this->knn_search(base,
-                                               vsag::UPDATE_CHECK_SEARCH_K,
-                                               fmt::format(R"({{
-                                                                "hnsw":
-                                                                    {{
-                                                                        "ef_search": {}
-                                                                    }}
-                                                            }})",
-                                                           vsag::UPDATE_CHECK_SEARCH_L),
-                                               nullptr);
+        // search neighbors
+        auto neighbors = *this->knn_search(
+            base,
+            UPDATE_CHECK_SEARCH_K,
+            fmt::format(R"({{"hnsw": {{ "ef_search": {} }} }})", UPDATE_CHECK_SEARCH_L),
+            nullptr);
 
-            // check whether the neighborhood relationship is same
-            float self_dist = 0;
-            try {
-                self_dist = std::reinterpret_pointer_cast<hnswlib::HierarchicalNSW>(alg_hnsw_)
-                                ->getDistanceByLabel(id, new_base_vec);
-            } catch (const std::runtime_error& e) {
-                self_dist = std::numeric_limits<float>::max();
+        // check whether the neighborhood relationship is same
+        float self_dist = 0;
+        self_dist =
+            std::reinterpret_pointer_cast<hnswlib::HierarchicalNSW>(alg_hnsw_)->getDistanceByLabel(
+                id, new_base_vec);
+        for (int i = 0; i < neighbors->GetDim(); i++) {
+            // don't compare with itself
+            if (neighbors->GetIds()[i] == id) {
+                continue;
             }
-            for (int i = 0; i < neighbors->GetDim(); i++) {
-                float neighbor_dist = 0;
-                try {
-                    neighbor_dist =
-                        std::reinterpret_pointer_cast<hnswlib::HierarchicalNSW>(alg_hnsw_)
-                            ->getDistanceByLabel(neighbors->GetIds()[i], new_base_vec);
-                } catch (const std::runtime_error& e) {
-                    neighbor_dist = self_dist = std::numeric_limits<float>::max();
-                }
-                if (neighbor_dist < self_dist) {
-                    return false;
-                }
+
+            float neighbor_dist = 0;
+            try {
+                neighbor_dist = std::reinterpret_pointer_cast<hnswlib::HierarchicalNSW>(alg_hnsw_)
+                                    ->getDistanceByLabel(neighbors->GetIds()[i], new_base_vec);
+            } catch (const std::runtime_error& e) {
+                // incase that neighbor has been deleted
+                continue;
+            }
+            if (neighbor_dist < self_dist) {
+                return false;
             }
         }
-
-        // note that the validation of old_id is handled within updatePoint.
-        std::reinterpret_pointer_cast<hnswlib::HierarchicalNSW>(alg_hnsw_)->updateVector(
-            id, new_base_vec);
-    } catch (const std::runtime_error& e) {
-#ifndef ENABLE_TESTS
-        logger::warn("update error for replace vector of id {}: {}", id, e.what());
-#endif
-        return false;
     }
+
+    // note that the validation of old_id is handled within updatePoint.
+    std::reinterpret_pointer_cast<hnswlib::HierarchicalNSW>(alg_hnsw_)->updateVector(id,
+                                                                                     new_base_vec);
 
     return true;
 }
@@ -992,7 +963,7 @@ HNSW::brute_force(const DatasetPtr& query, int64_t k) {
 
         void* vector = nullptr;
         size_t data_size = 0;
-        get_vectors(query, &vector, &data_size);
+        get_vectors(type_, dim_, query, &vector, &data_size);
 
         std::shared_lock lock(rw_mutex_);
 
@@ -1052,13 +1023,13 @@ HNSW::pretrain(const std::vector<int64_t>& base_tag_ids,
     std::shared_ptr<int8_t[]> topk_data(new int8_t[data_size]);
 
     std::shared_ptr<int8_t[]> generated_data(new int8_t[data_size]);
-    set_dataset(generated_query, generated_data.get(), 1);
+    set_dataset(type_, dim_, generated_query, generated_data.get(), 1);
 
     for (const int64_t& base_tag_id : base_tag_ids) {
         try {
             std::reinterpret_pointer_cast<hnswlib::HierarchicalNSW>(alg_hnsw_)->copyDataByLabel(
                 base_tag_id, base_data.get());
-            set_dataset(base, base_data.get(), 1);
+            set_dataset(type_, dim_, base, base_data.get(), 1);
         } catch (const std::runtime_error& e) {
             LOG_ERROR_AND_RETURNS(ErrorType::INVALID_ARGUMENT,
                                   fmt::format("failed to pretrain(invalid argument): base tag id "
@@ -1067,7 +1038,7 @@ HNSW::pretrain(const std::vector<int64_t>& base_tag_ids,
         }
 
         auto result = this->knn_search(base,
-                                       vsag::GENERATE_SEARCH_K,
+                                       GENERATE_SEARCH_K,
                                        fmt::format(R"(
                                         {{
                                             "hnsw": {{
@@ -1075,7 +1046,7 @@ HNSW::pretrain(const std::vector<int64_t>& base_tag_ids,
                                                 "use_conjugate_graph": true
                                             }}
                                         }})",
-                                                   vsag::GENERATE_SEARCH_L),
+                                                   GENERATE_SEARCH_L),
                                        nullptr);
 
         for (int i = 0; i < result.value()->GetDim(); i++) {
@@ -1089,13 +1060,12 @@ HNSW::pretrain(const std::vector<int64_t>& base_tag_ids,
 
             for (int d = 0; d < dim_; d++) {
                 if (type_ == DataTypes::DATA_TYPE_INT8) {
-                    generated_data.get()[d] =
-                        vsag::GENERATE_OMEGA * (float)(base_data[d]) +  // NOLINT
-                        (1 - vsag::GENERATE_OMEGA) * (float)(topk_data[d]);
+                    generated_data.get()[d] = GENERATE_OMEGA * (float)(base_data[d]) +  // NOLINT
+                                              (1 - GENERATE_OMEGA) * (float)(topk_data[d]);
                 } else {
                     ((float*)generated_data.get())[d] =
-                        vsag::GENERATE_OMEGA * ((float*)base_data.get())[d] +
-                        (1 - vsag::GENERATE_OMEGA) * ((float*)topk_data.get())[d];
+                        GENERATE_OMEGA * ((float*)base_data.get())[d] +
+                        (1 - GENERATE_OMEGA) * ((float*)topk_data.get())[d];
                 }
             }
 
@@ -1127,32 +1097,6 @@ HNSW::InitMemorySpace() {
     return true;
 }
 
-void
-HNSW::get_vectors(const vsag::DatasetPtr& base, void** vectors_ptr, size_t* data_size_ptr) const {
-    if (type_ == DataTypes::DATA_TYPE_FLOAT) {
-        *vectors_ptr = (void*)base->GetFloat32Vectors();
-        *data_size_ptr = dim_ * sizeof(float);
-    } else if (type_ == DataTypes::DATA_TYPE_INT8) {
-        *vectors_ptr = (void*)base->GetInt8Vectors();
-        *data_size_ptr = dim_ * sizeof(int8_t);
-    } else {
-        throw std::invalid_argument(fmt::format("no support for this metric: {}", (int)type_));
-    }
-}
-
-void
-HNSW::set_dataset(const DatasetPtr& base, const void* vectors_ptr, uint32_t num_element) const {
-    if (type_ == DataTypes::DATA_TYPE_FLOAT) {
-        base->Float32Vectors((float*)vectors_ptr)
-            ->Dim(dim_)
-            ->Owner(false)
-            ->NumElements(num_element);
-    } else if (type_ == DataTypes::DATA_TYPE_INT8) {
-        base->Int8Vectors((int8_t*)vectors_ptr)->Dim(dim_)->Owner(false)->NumElements(num_element);
-    } else {
-        throw std::invalid_argument(fmt::format("no support for this type: {}", (int)type_));
-    }
-}
 bool
 HNSW::CheckFeature(IndexFeature feature) const {
     std::shared_lock status_lock(index_status_mutex_);
