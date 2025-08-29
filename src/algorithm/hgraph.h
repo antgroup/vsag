@@ -22,7 +22,6 @@
 
 #include "common.h"
 #include "data_cell/attribute_inverted_interface.h"
-#include "data_cell/extra_info_interface.h"
 #include "data_cell/flatten_interface.h"
 #include "data_cell/graph_interface.h"
 #include "data_cell/sparse_graph_datacell_parameter.h"
@@ -82,6 +81,9 @@ public:
 
     uint64_t
     EstimateMemory(uint64_t num_elements) const override;
+
+    void
+    GetAttributeSetByInnerId(InnerIdType inner_id, AttributeSet* attr) const override;
 
     void
     GetCodeByInnerId(InnerIdType inner_id, uint8_t* data) const override;
@@ -326,8 +328,7 @@ private:
 private:
     FlattenInterfacePtr basic_flatten_codes_{nullptr};
     FlattenInterfacePtr high_precise_codes_{nullptr};
-    bool create_new_raw_vector_{false};
-    FlattenInterfacePtr raw_vector_{nullptr};
+
     Vector<GraphInterfacePtr> route_graphs_;
     GraphInterfacePtr bottom_graph_{nullptr};
     SparseGraphDatacellParamPtr hierarchical_datacell_param_{nullptr};
@@ -366,9 +367,6 @@ private:
     uint64_t resize_increase_count_bit_{
         DEFAULT_RESIZE_BIT};  // 2^resize_increase_count_bit_ for resize count
 
-    ExtraInfoInterfacePtr extra_infos_{nullptr};
-    uint64_t extra_info_size_{0};
-
     static constexpr uint64_t DEFAULT_RESIZE_BIT = 10;
 
     std::atomic<int64_t> delete_count_{0};
@@ -376,5 +374,8 @@ private:
     std::shared_ptr<Optimizer<BasicSearcher>> optimizer_;
 
     AttrInvertedInterfacePtr attr_filter_index_{nullptr};
+
+    bool create_new_raw_vector_{false};
+    FlattenInterfacePtr raw_vector_{nullptr};
 };
 }  // namespace vsag

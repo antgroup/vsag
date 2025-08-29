@@ -348,4 +348,80 @@ InnerIndexInterface::ExportIDs() const {
     return result;
 }
 
+DatasetPtr
+InnerIndexInterface::GetDataByIds(const int64_t* ids, int64_t count) const {
+    uint64_t selected_flag = DATA_FLAG_ID;
+    if (this->has_raw_vector_) {
+        selected_flag |= DATA_FLAG_FLOAT32_VECTOR;
+    }
+    if (this->has_attribute_) {
+        selected_flag |= DATA_FLAG_ATTRIBUTE;
+    }
+    if (this->extra_info_size_ > 0) {
+        selected_flag |= DATA_FLAG_EXTRA_INFO;
+    }
+    return this->GetDataByIdsWithFlag(ids, count, selected_flag);
+}
+
+DatasetPtr
+InnerIndexInterface::GetDataByIdsWithFlag(const int64_t* ids,
+                                          int64_t count,
+                                          uint64_t selected_data_flag) const {
+    auto* inner_ids =
+        reinterpret_cast<InnerIdType*>(this->allocator_->Allocate(count * sizeof(InnerIdType)));
+    {
+        std::shared_lock lock(this->label_lookup_mutex_);
+        for (int64_t i = 0; i < count; ++i) {
+            inner_ids[i] = this->label_table_->GetIdByLabel(ids[i]);
+        }
+    }
+    auto dataset = Dataset::Make();
+    dataset->NumElements(count)->Dim(dim_)->Owner(true, allocator_);
+    if ((selected_data_flag & DATA_FLAG_FLOAT32_VECTOR) != 0U) {
+        if (not this->has_raw_vector_) {
+            throw VsagException(ErrorType::INVALID_ARGUMENT, "has_raw_vector_ is false");
+        }
+        auto* fp32_data = reinterpret_cast<float*>(
+            this->allocator_->Allocate(count * this->dim_ * sizeof(float)));
+        dataset->Float32Vectors(fp32_data);
+        for (int64_t i = 0; i < count; ++i) {
+            auto inner_id = this->label_table_->GetIdByLabel(ids[i]);
+            this->GetVectorByInnerId(inner_id, fp32_data + i * this->dim_);
+        }
+    }
+
+    if ((selected_data_flag & DATA_FLAG_ATTRIBUTE) != 0U) {
+        if (not this->has_attribute_) {
+            throw VsagException(ErrorType::INVALID_ARGUMENT, "has_attribute_ is false");
+        }
+        auto* attribute_data = new AttributeSet[count];
+        dataset->AttributeSets(attribute_data);
+        for (int64_t i = 0; i < count; ++i) {
+            auto inner_id = this->label_table_->GetIdByLabel(ids[i]);
+            this->GetAttributeSetByInnerId(inner_id, attribute_data + i);
+        }
+    }
+
+    if ((selected_data_flag & DATA_FLAG_EXTRA_INFO) != 0U) {
+        if (extra_info_size_ == 0) {
+            throw VsagException(ErrorType::INVALID_ARGUMENT, "extra_info_size_ is 0");
+        }
+        auto* extra_info =
+            reinterpret_cast<char*>(this->allocator_->Allocate(count * extra_info_size_));
+        dataset->ExtraInfos(extra_info);
+        for (int64_t i = 0; i < count; ++i) {
+            auto inner_id = this->label_table_->GetIdByLabel(ids[i]);
+            this->extra_infos_->GetExtraInfoById(inner_id, extra_info + i * extra_info_size_);
+        }
+    }
+    if ((selected_data_flag & DATA_FLAG_ID) != 0U) {
+        auto* new_ids =
+            reinterpret_cast<int64_t*>(this->allocator_->Allocate(count * sizeof(int64_t)));
+        memcpy(new_ids, ids, count * sizeof(int64_t));
+        dataset->Ids(new_ids);
+    }
+    this->allocator_->Deallocate(inner_ids);
+    return dataset;
+}
+
 }  // namespace vsag
