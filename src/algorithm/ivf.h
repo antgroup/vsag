@@ -52,6 +52,11 @@ public:
     std::vector<int64_t>
     Build(const DatasetPtr& base) override;
 
+
+    DatasetPtr
+    CalDistanceById(const float* query, const int64_t* ids, int64_t count) const override;
+
+
     void
     Deserialize(StreamReader& reader) override;
 
