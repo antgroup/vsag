@@ -981,4 +981,34 @@ IVF::get_attr_by_inner_id(InnerIdType inner_id, AttributeSet* attr) const {
     this->attr_filter_index_->GetAttribute(bucket_id, bucket_offset, attr);
 }
 
+DatasetPtr
+IVF::CalDistanceById(const float* query, const int64_t* ids, int64_t count) const {
+    Vector<float> normalize_data(dim_, allocator_);
+    Vector<float> centroid(dim_, allocator_);
+    if (use_residual_ && metric_ == MetricType::METRIC_TYPE_COSINE) {
+        Normalize(query, normalize_data.data(), dim_);
+        query = normalize_data.data();
+    }
+    auto computer = this->bucket_->FactoryComputer(query);
+    auto result = Dataset::Make();
+    result->Owner(true, allocator_);
+    auto* distances = (float*)allocator_->Allocate(sizeof(float) * count);
+    result->Distances(distances);
+    for (int64_t i = 0; i < count; ++i) {
+        auto inner_id = this->label_table_->GetIdByLabel(ids[i]);
+        auto location = this->get_location(inner_id);
+        auto ip_distance = 0.0F;
+        if (use_residual_) {
+            partition_strategy_->GetCentroid(location.first, centroid);
+            ip_distance = FP32ComputeIP(query, centroid.data(), dim_);
+            if (metric_ == MetricType::METRIC_TYPE_L2SQR) {
+                ip_distance *= 2;
+            }
+        }
+        distances[i] =
+            this->bucket_->QueryOneById(computer, location.first, location.second) - ip_distance;
+    }
+    return result;
+}
+
 }  // namespace vsag

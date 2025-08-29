@@ -118,6 +118,9 @@ public:
     void
     GetCodeByInnerId(InnerIdType inner_id, uint8_t* data) const override;
 
+    DatasetPtr
+    CalDistanceById(const float* query, const int64_t* ids, int64_t count) const override;
+
 private:
     InnerSearchParam
     create_search_param(const std::string& parameters, const FilterPtr& filter) const;
