@@ -93,6 +93,33 @@ public:
     AsyncRead(uint64_t offset, uint64_t len, void* dest, CallBack callback) = 0;
 
     /**
+     * @brief Performs multiple synchronous read operations from the data source.
+     *
+     * This virtual function initiates a batch of read operations, each reading a specified
+     * number of bytes from the source starting at a given offset and copying them to a
+     * corresponding destination buffer. The parameters are provided as arrays where each
+     * index corresponds to a single read operation.
+     *
+     * @param dests    Array of pointers to the memory buffers where the read bytes will be copied.
+     *                 Each element corresponds to a specific read operation.
+     * @param lens     Array of lengths (in bytes) for each read operation. Must match the
+     *                 number of operations specified by `count`.
+     * @param offsets  Array of starting positions in the data source for each read operation.
+     *                 Must match the number of operations specified by `count`.
+     * @param count    The total number of read operations to perform.
+     *
+     * @return         Returns `true` if all read operations completed successfully,
+     *                 `false` otherwise (e.g., due to invalid parameters or I/O errors).
+     *
+     * @note This function is thread-safe and operates synchronously, blocking until all
+     *       read operations are completed.
+     * @note The arrays `dests`, `lens`, and `offsets` must be valid and contain exactly `count`
+     *       elements. Passing null pointers or mismatched array sizes may result in undefined behavior.
+     */
+    virtual bool
+    MultiRead(uint8_t* dests, const uint64_t* lens, const uint64_t* offsets, uint64_t count);
+
+    /**
      * @brief Returns the size of the data source.
      *
      * This pure virtual function returns the total size of the data source.
