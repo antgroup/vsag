@@ -19,9 +19,10 @@
 #include <memory>
 
 #include "metric_type.h"
+#include "pointer_define.h"
 #include "vsag/allocator.h"
-
 namespace vsag {
+DEFINE_POINTER(ComputerInterface);
 
 using DataType = float;
 
@@ -31,8 +32,6 @@ public:
 
     virtual ~ComputerInterface() = default;
 };
-
-using ComputerInterfacePtr = std::shared_ptr<ComputerInterface>;
 
 template <typename T>
 class Computer : public ComputerInterface {

@@ -15,10 +15,12 @@
 
 #pragma once
 
+#include "pointer_define.h"
 #include "quantization/quantizer_parameter.h"
 #include "typing.h"
-
 namespace vsag {
+DEFINE_POINTER2(SparseQuantizerParam, SparseQuantizerParameter);
+
 class SparseQuantizerParameter : public QuantizerParameter {
 public:
     SparseQuantizerParameter() : QuantizerParameter(QUANTIZATION_TYPE_VALUE_SPARSE) {
@@ -37,6 +39,4 @@ public:
         return json;
     }
 };
-
-using SparseQuantizerParamPtr = std::shared_ptr<SparseQuantizerParameter>;
 }  // namespace vsag

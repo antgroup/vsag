@@ -42,7 +42,7 @@ MMapIO::MMapIO(std::string filename, Allocator* allocator)
     this->start_ = static_cast<uint8_t*>(addr);
 }
 
-MMapIO::MMapIO(const MMapIOParameterPtr& io_param, const IndexCommonParam& common_param)
+MMapIO::MMapIO(const MMapIOParamPtr& io_param, const IndexCommonParam& common_param)
     : MMapIO(io_param->path_, common_param.allocator_.get()){};
 
 MMapIO::MMapIO(const IOParamPtr& param, const IndexCommonParam& common_param)

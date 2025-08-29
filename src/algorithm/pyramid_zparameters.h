@@ -23,11 +23,13 @@
 #include "data_cell/graph_interface.h"
 #include "impl/odescent_graph_parameter.h"
 #include "index/index_common_param.h"
+#include "pointer_define.h"
 #include "typing.h"
 #include "vsag/index.h"
 
 namespace vsag {
 
+DEFINE_POINTER2(PyramidParam, PyramidParameters);
 struct PyramidParameters : public Parameter {
 public:
     void
@@ -59,7 +61,4 @@ public:
 private:
     PyramidSearchParameters() = default;
 };
-
-using PyramidParamPtr = std::shared_ptr<PyramidParameters>;
-
 }  // namespace vsag
