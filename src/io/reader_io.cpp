@@ -79,43 +79,12 @@ ReaderIO::MultiReadImpl(uint8_t* datas,
         throw VsagException(ErrorType::INTERNAL_ERROR,
                             "ReaderIO is not initialized, please call Init() first.");
     }
-    std::atomic<bool> succeed(true);
-    std::string error_message;
-    std::atomic<uint64_t> counter(count);
-    std::promise<void> total_promise;
-    uint8_t* dest = datas;
-    auto total_future = total_promise.get_future();
-    for (int i = 0; i < count; ++i) {
-        uint64_t offset = offsets[i];
-        uint64_t size = sizes[i];
-        if (not check_valid_offset(size + offset)) {
-            throw VsagException(ErrorType::INTERNAL_ERROR,
-                                fmt::format("ReaderIO MultiReadImpl size mismatch: "
-                                            "offset {}, size {}, total size {}",
-                                            offset,
-                                            size,
-                                            size_ + start_));
-        }
-        auto callback = [&counter, &total_promise, &succeed, &error_message](
-                            IOErrorCode code, const std::string& message) {
-            if (code != vsag::IOErrorCode::IO_SUCCESS) {
-                bool expected = true;
-                if (succeed.compare_exchange_strong(expected, false)) {
-                    error_message = message;
-                }
-            }
-            if (--counter == 0) {
-                total_promise.set_value();
-            }
-        };
-        reader_->AsyncRead(start_ + offset, size, dest, callback);
-        dest += size;
+
+    std::vector<uint64_t> real_offsets(count);
+    for (uint64_t i = 0; i < count; ++i) {
+        real_offsets[i] = start_ + offsets[i];
     }
-    total_future.wait();
-    if (not succeed) {
-        throw VsagException(ErrorType::READ_ERROR, "failed to read diskann index");
-    }
-    return true;
+    return reader_->MultiRead(datas, sizes, real_offsets.data(), count);
 }
 
 }  // namespace vsag
