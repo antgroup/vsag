@@ -40,22 +40,32 @@ GenerateDataset(int32_t k, int32_t dim, uint64_t count, std::vector<int>& labels
 }
 
 TEST_CASE("Kmeans Basic Test", "[ut][KMeansCluster]") {
+    using namespace vsag;
     std::vector<int> labels;
     int32_t k = 10;
     int32_t dim = 3;
     uint64_t count = 2000;
     auto datas = GenerateDataset(k, dim, count, labels);
-
-    auto allocator = vsag::SafeAllocator::FactoryDefaultAllocator();
-
-    vsag::KMeansCluster cluster(dim, allocator.get());
-    auto pos = cluster.Run(k, datas.data(), count, 25, nullptr, false);
-    std::vector<int> new_labels(k, 0);
-    for (int i = 0; i < count; ++i) {
-        new_labels[pos[i]]++;
-    }
-    std::sort(new_labels.begin(), new_labels.end());
-    for (int i = 0; i < k; ++i) {
-        REQUIRE(new_labels[i] == labels[i]);
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    std::vector<SafeThreadPoolPtr> thread_pools = {
+        SafeThreadPool::FactoryDefaultThreadPool(),
+        nullptr,
+    };
+    std::vector<bool> use_balances{true, false};
+    for (auto& thread_pool : thread_pools) {
+        for (bool use_balance : use_balances) {
+            INFO(fmt::format("use_balance: {}", use_balance));
+            INFO(fmt::format("thread_pool: {}", thread_pool == nullptr));
+            KMeansCluster cluster(dim, allocator.get(), thread_pool);
+            auto pos = cluster.Run(k, datas.data(), count, 50, nullptr, false, 1e-6F, use_balance);
+            std::vector<int> new_labels(k, 0);
+            for (int j = 0; j < count; ++j) {
+                new_labels[pos[j]]++;
+            }
+            std::sort(new_labels.begin(), new_labels.end());
+            for (int i = 0; i < k; ++i) {
+                REQUIRE(new_labels[i] == labels[i]);
+            }
+        }
     }
 }

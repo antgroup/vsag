@@ -17,7 +17,7 @@
 
 #include <cblas.h>
 
-#include "impl/kmeans_cluster.h"
+#include "impl/cluster/kmeans_cluster.h"
 #include "index/index_common_param.h"
 #include "pq_fastscan_quantizer_parameter.h"
 #include "prefetch.h"
