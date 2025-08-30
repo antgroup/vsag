@@ -13,8 +13,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+<<<<<<< HEAD
 #include <cstdint>
 
+=======
+>>>>>>> 097dd30 (wip(quantizer): add int8 quantizer l2 impl)
 #include "simd/int8_simd.h"
 #if defined(ENABLE_SSE)
 #include <x86intrin.h>
@@ -505,6 +508,7 @@ INT8ComputeL2Sqr(const int8_t* RESTRICT query, const int8_t* RESTRICT codes, uin
 }
 
 float
+<<<<<<< HEAD
 INT8ComputeIP(const int8_t* __restrict query, const int8_t* __restrict codes, uint64_t dim) {
 #if defined(ENABLE_SSE)
     constexpr int BATCH_SIZE = 8;
@@ -536,6 +540,11 @@ INT8ComputeIP(const int8_t* __restrict query, const int8_t* __restrict codes, ui
         query + BATCH_SIZE * n, codes + BATCH_SIZE * n, dim - BATCH_SIZE * n);
 
     return static_cast<float>(ip);
+=======
+INT8ComputeIP(const int8_t* RESTRICT query, const int8_t* RESTRICT codes, uint64_t dim) {
+#if defined(ENABLE_SSE)
+    return generic::INT8ComputeIP(query, codes, dim);
+>>>>>>> 097dd30 (wip(quantizer): add int8 quantizer l2 impl)
 #else
     return generic::INT8ComputeIP(query, codes, dim);
 #endif

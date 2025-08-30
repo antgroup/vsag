@@ -18,13 +18,18 @@
 #include <cstdint>
 #include <cstdlib>
 #include <initializer_list>
+#include <iostream>
+#include <memory>
+#include <vector>
 
 #include "catch2/catch_test_macros.hpp"
+#include "fixtures.h"
 #include "impl/allocator/safe_allocator.h"
 #include "metric_type.h"
 #include "quantization/computer.h"
 #include "quantization/quantizer.h"
 #include "quantizer_test.h"
+#include "simd/basic_func.h"
 
 namespace vsag {
 
@@ -122,12 +127,74 @@ TestComputeCodesINT8(Quantizer<INT8Quantizer<metric>>& quantizer,
 
 template <MetricType metric>
 void
+TestComputerINT8(Quantizer<INT8Quantizer<metric>>& quant,
+                 size_t dim,
+                 uint32_t count,
+                 float error = 1e-5f,
+                 float related_error = 1.0f,
+                 bool retrain = true,
+                 float unbounded_numeric_error_rate = 1.0f,
+                 float unbounded_related_error_rate = 1.0f) {
+    auto query_count = 10;
+    bool need_normalize = false;
+    auto vecs = fixtures::generate_int8_codes(count, dim);
+    auto queries = fixtures::generate_int8_codes(query_count, dim, 165);
+
+    if (retrain) {
+        quant.ReTrain(reinterpret_cast<DataTypePtr>(vecs.data()), count);
+    }
+
+    auto gt_func = [&](int base_idx, int query_idx) -> float {
+        if constexpr (metric == vsag::MetricType::METRIC_TYPE_IP) {
+            return INT8InnerProductDistance(
+                vecs.data() + base_idx * dim, queries.data() + query_idx * dim, &dim);
+        } else if constexpr (metric == vsag::MetricType::METRIC_TYPE_L2SQR) {
+            return INT8L2Sqr(vecs.data() + base_idx * dim, queries.data() + query_idx * dim, &dim);
+        } else if constexpr (metric == vsag::MetricType::METRIC_TYPE_COSINE) {
+            std::vector<int8_t> zeros(dim, 0);
+            // float norm = INT8L2Sqr(vecs.data() + base_idx * dim, zeros.data(), &dim);
+            // float query_norm = INT8L2Sqr(queries.data() + query_idx * dim, zeros.data(), &dim);
+            float dot = INT8InnerProductDistance(
+                vecs.data() + base_idx * dim, queries.data() + query_idx * dim, &dim);
+            // return 1.0f - dot / (norm * query_norm);
+            return dot;
+        }
+    };
+
+    float count_unbounded_related_error = 0, count_unbounded_numeric_error = 0;
+    for (int i = 0; i < query_count; ++i) {
+        std::shared_ptr<Computer<INT8Quantizer<metric>>> computer;
+        computer = quant.FactoryComputer();
+        computer->SetQuery(reinterpret_cast<DataTypePtr>(queries.data() + i * dim));
+
+        //Test Compute One Dist;
+        std::vector<uint8_t> codes1(quant.GetCodeSize() * count, 0);
+        std::vector<float> dists1(count);
+        for (int j = 0; j < count; ++j) {
+            auto gt = gt_func(j, i);
+            uint8_t* code = codes1.data() + j * quant.GetCodeSize();
+            quant.EncodeOne(reinterpret_cast<DataTypePtr>(vecs.data() + j * dim), code);
+            quant.ComputeDist(*computer, code, dists1.data() + j);
+            REQUIRE(quant.ComputeDist(*computer, code) == dists1[j]);
+            if (std::abs(gt - dists1[j]) > error) {
+                count_unbounded_numeric_error++;
+            }
+            if (std::abs(gt - dists1[j]) > std::abs(related_error * gt)) {
+                count_unbounded_related_error++;
+            }
+        }
+    }
+    REQUIRE(count_unbounded_numeric_error / (query_count * count) <= unbounded_numeric_error_rate);
+    REQUIRE(count_unbounded_related_error / (query_count * count) <= unbounded_related_error_rate);
+}
+
+template <MetricType metric>
+void
 TestComputeMetricINT8(uint64_t dim, int count, float error = 1e-5) {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     INT8Quantizer<metric> quantizer(dim, allocator.get());
     TestComputeCodesINT8<metric>(quantizer, dim, count, error);
-    // TestComputeCodesSame<FP32Quantizer<metric>, metric>(quantizer, dim, count, 65536);
-    // TestComputer<FP32Quantizer<metric>, metric>(quantizer, dim, count, error);
+    TestComputerINT8<metric>(quantizer, dim, count, error, 1.01, true, 0.01, 0.01);
 }
 
 TEST_CASE("INT8 Compute", "[ut][INT8Quantizer]") {

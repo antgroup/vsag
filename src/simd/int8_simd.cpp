@@ -15,6 +15,7 @@
 
 #include "int8_simd.h"
 
+#include "simd/fp32_simd.h"
 #include "simd_status.h"
 
 namespace vsag {

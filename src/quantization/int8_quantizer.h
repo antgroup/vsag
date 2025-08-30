@@ -58,10 +58,21 @@ public:
     ComputeImpl(const uint8_t* codes1, const uint8_t* codes2);
 
     void
-    SerializeImpl(StreamWriter& writer) {};
+    SerializeImpl(StreamWriter& writer){};
 
     void
-    DeserializeImpl(StreamReader& reader) {};
+    DeserializeImpl(StreamReader& reader){};
+
+    void
+    ProcessQueryImpl(const DataType* query, Computer<INT8Quantizer<metric>>& computer) const;
+
+    void
+    ComputeDistImpl(Computer<INT8Quantizer<metric>>& computer,
+                    const uint8_t* codes,
+                    float* dists) const;
+
+    void
+    ReleaseComputerImpl(Computer<INT8Quantizer<metric>>& computer) const;
 
     [[nodiscard]] std::string
     NameImpl() const {

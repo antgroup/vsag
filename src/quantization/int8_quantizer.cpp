@@ -19,11 +19,14 @@
 #include <cstdint>
 #include <cstring>
 #include <memory>
+#include <new>
 
+#include "FCParser.h"
 #include "metric_type.h"
 #include "quantization/computer.h"
 #include "quantization/int8_quantizer_parameter.h"
 #include "quantization/quantizer.h"
+#include "simd/basic_func.h"
 #include "simd/int8_simd.h"
 
 namespace vsag {
@@ -103,13 +106,56 @@ template <MetricType metric>
 float
 INT8Quantizer<metric>::ComputeImpl(const uint8_t* codes1, const uint8_t* codes2) {
     if constexpr (metric == MetricType::METRIC_TYPE_IP) {
+        // TODO(coien): impl ip
     } else if constexpr (metric == MetricType::METRIC_TYPE_COSINE) {
+        // TODO(coien): impl cosine
     } else if (metric == MetricType::METRIC_TYPE_L2SQR) {
         return INT8ComputeL2Sqr(reinterpret_cast<const int8_t*>(codes1),
                                 reinterpret_cast<const int8_t*>(codes2),
                                 this->dim_);
     }
     return 0.0F;
+}
+
+template <MetricType metric>
+void
+INT8Quantizer<metric>::ProcessQueryImpl(const DataType* query,
+                                        Computer<INT8Quantizer<metric>>& computer) const {
+    try {
+        computer.buf_ = reinterpret_cast<uint8_t*>(this->allocator_->Allocate(this->code_size_));
+    } catch (const std::bad_alloc& e) {
+        computer.buf_ = nullptr;
+        throw VsagException(ErrorType::NO_ENOUGH_MEMORY, "bad alloc when init computer buf");
+    }
+    memcpy(computer.buf_, query, this->code_size_);
+}
+
+template <MetricType metric>
+void
+INT8Quantizer<metric>::ComputeDistImpl(Computer<INT8Quantizer<metric>>& computer,
+                                       const uint8_t* codes,
+                                       float* dists) const {
+    if (metric == MetricType::METRIC_TYPE_IP) {
+        *dists = INT8ComputeIP(reinterpret_cast<const int8_t*>(codes),
+                               reinterpret_cast<const int8_t*>(computer.buf_),
+                               this->dim_);
+    } else if (metric == MetricType::METRIC_TYPE_COSINE) {
+        *dists = INT8ComputeIP(reinterpret_cast<const int8_t*>(codes),
+                                        reinterpret_cast<const int8_t*>(computer.buf_),
+                                        this->dim_);
+    } else if (metric == MetricType::METRIC_TYPE_L2SQR) {
+        *dists = INT8ComputeL2Sqr(reinterpret_cast<const int8_t*>(codes),
+                                  reinterpret_cast<const int8_t*>(computer.buf_),
+                                  this->dim_);
+    } else {
+        *dists = 1.0F;
+    }
+}
+
+template <MetricType metric>
+void
+INT8Quantizer<metric>::ReleaseComputerImpl(Computer<INT8Quantizer<metric>>& computer) const {
+    this->allocator_->Deallocate(computer.buf_);
 }
 
 TEMPLATE_QUANTIZER(INT8Quantizer)
