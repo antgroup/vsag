@@ -113,33 +113,6 @@ GetInnerProductDistance() {
 DistanceFuncType InnerProductDistance = GetInnerProductDistance();
 
 static DistanceFuncType
-GetINT8L2Sqr() {
-    if (SimdStatus::SupportAVX512()) {
-#if defined(ENABLE_AVX512)
-        return avx512::INT8L2Sqr;
-#endif
-    } else if (SimdStatus::SupportAVX2()) {
-#if defined(ENABLE_AVX2)
-        return avx2::INT8L2Sqr;
-#endif
-    } else if (SimdStatus::SupportAVX()) {
-#if defined(ENABLE_AVX)
-        return avx::INT8L2Sqr;
-#endif
-    } else if (SimdStatus::SupportSSE()) {
-#if defined(ENABLE_SSE)
-        return sse::INT8L2Sqr;
-#endif
-    } else if (SimdStatus::SupportNEON()) {
-#if defined(ENABLE_NEON)
-        return neon::INT8L2Sqr;
-#endif
-    }
-    return generic::L2Sqr;
-}
-DistanceFuncType INT8L2Sqr = GetINT8L2Sqr();
-
-static DistanceFuncType
 GetINT8InnerProduct() {
     if (SimdStatus::SupportAVX512()) {
 #if defined(ENABLE_AVX512)
