@@ -91,13 +91,15 @@ PQDistanceFloat256(const void* single_dim_centers, float single_dim_val, void* r
 }
 
 #if defined(ENABLE_SSE)
-__inline __m128i __attribute__((__always_inline__)) load_4_char(const uint8_t* data) {
+__inline __m128i __attribute__((__always_inline__))
+load_4_char(const uint8_t* data) {
     return _mm_set_epi8(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, data[3], data[2], data[1], data[0]);
 }
 #endif
 
 #if defined(ENABLE_SSE)
-__inline __m128i __attribute__((__always_inline__)) load_4_short(const uint16_t* data) {
+__inline __m128i __attribute__((__always_inline__))
+load_4_short(const uint16_t* data) {
     return _mm_set_epi16(data[3], 0, data[2], 0, data[1], 0, data[0], 0);
 }
 #endif

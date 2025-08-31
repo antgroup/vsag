@@ -106,22 +106,9 @@ INT8ComputeL2Sqr(const int8_t* RESTRICT query, const int8_t* RESTRICT codes, uin
 float
 INT8ComputeIP(const int8_t* __restrict query, const int8_t* __restrict codes, uint64_t dim) {
 #if defined(ENABLE_SVE)
-    svint32_t sum = svdup_s32(0);
-    uint64_t i = 0;
-    const uint64_t step = svcntb();
-
-    svbool_t predicate = svwhilelt_b8(i, dim);
-    do {
-        svint8_t vec1 = svld1_s8(predicate, query + i);
-        svint8_t vec2 = svld1_s8(predicate, codes + i);
-        sum = svdot_s32(sum, vec1, vec2);
-        i += step;
-        predicate = svwhilelt_b8(i, dim);
-    } while (svptest_first(svptrue_b8(), predicate));
-
-    return static_cast<float>(svaddv_s32(svptrue_b32(), sum));
+    return 0;
 #else
-    return neon::INT8ComputeIP(query, codes, dim);
+    return 0;
 #endif
 }
 

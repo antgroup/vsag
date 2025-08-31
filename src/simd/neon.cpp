@@ -71,7 +71,8 @@ INT8InnerProductDistance(const void* pVect1v, const void* pVect2v, const void* q
 }
 
 #if defined(ENABLE_NEON)
-__inline float32x4x3_t __attribute__((__always_inline__)) vcvt3_f32_f16(const float16x4x3_t a) {
+__inline float32x4x3_t __attribute__((__always_inline__))
+vcvt3_f32_f16(const float16x4x3_t a) {
     float32x4x3_t c;
     c.val[0] = vcvt_f32_f16(a.val[0]);
     c.val[1] = vcvt_f32_f16(a.val[1]);
@@ -79,14 +80,16 @@ __inline float32x4x3_t __attribute__((__always_inline__)) vcvt3_f32_f16(const fl
     return c;
 }
 
-__inline float32x4x2_t __attribute__((__always_inline__)) vcvt2_f32_f16(const float16x4x2_t a) {
+__inline float32x4x2_t __attribute__((__always_inline__))
+vcvt2_f32_f16(const float16x4x2_t a) {
     float32x4x2_t c;
     c.val[0] = vcvt_f32_f16(a.val[0]);
     c.val[1] = vcvt_f32_f16(a.val[1]);
     return c;
 }
 
-__inline float32x4x3_t __attribute__((__always_inline__)) vcvt3_f32_half(const uint16x4x3_t x) {
+__inline float32x4x3_t __attribute__((__always_inline__))
+vcvt3_f32_half(const uint16x4x3_t x) {
     float32x4x3_t c;
     c.val[0] = vreinterpretq_f32_u32(vshlq_n_u32(vmovl_u16(x.val[0]), 16));
     c.val[1] = vreinterpretq_f32_u32(vshlq_n_u32(vmovl_u16(x.val[1]), 16));
@@ -94,13 +97,15 @@ __inline float32x4x3_t __attribute__((__always_inline__)) vcvt3_f32_half(const u
     return c;
 }
 
-__inline float32x4x2_t __attribute__((__always_inline__)) vcvt2_f32_half(const uint16x4x2_t x) {
+__inline float32x4x2_t __attribute__((__always_inline__))
+vcvt2_f32_half(const uint16x4x2_t x) {
     float32x4x2_t c;
     c.val[0] = vreinterpretq_f32_u32(vshlq_n_u32(vmovl_u16(x.val[0]), 16));
     c.val[1] = vreinterpretq_f32_u32(vshlq_n_u32(vmovl_u16(x.val[1]), 16));
     return c;
 }
-__inline float32x4_t __attribute__((__always_inline__)) vcvt_f32_half(const uint16x4_t x) {
+__inline float32x4_t __attribute__((__always_inline__))
+vcvt_f32_half(const uint16x4_t x) {
     return vreinterpretq_f32_u32(vshlq_n_u32(vmovl_u16(x), 16));
 }
 
@@ -500,7 +505,8 @@ FP32ReduceAdd(const float* x, uint64_t dim) {
 }
 
 #if defined(ENABLE_NEON)
-__inline uint16x8_t __attribute__((__always_inline__)) load_4_short(const uint16_t* data) {
+__inline uint16x8_t __attribute__((__always_inline__))
+load_4_short(const uint16_t* data) {
     uint16_t tmp[] = {data[3], 0, data[2], 0, data[1], 0, data[0], 0};
     return vld1q_u16(tmp);
 }
@@ -794,7 +800,8 @@ FP16ComputeL2Sqr(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, u
 }
 
 #if defined(ENABLE_NEON)
-__inline float32x4_t __attribute__((__always_inline__)) load_4_uint8_to_float(const uint8_t* data) {
+__inline float32x4_t __attribute__((__always_inline__))
+load_4_uint8_to_float(const uint8_t* data) {
     uint32x4_t code_values = {data[0], data[1], data[2], data[3]};
     return vcvtq_f32_u32(code_values);
 }
@@ -809,7 +816,8 @@ load_8_uint8_to_float(const uint8_t* data, float32x4_t& low, float32x4_t& high) 
     high = vcvtq_f32_u32(code_32_high);
 }
 
-__inline void __attribute__((__always_inline__)) load_16_uint8_to_float(
+__inline void __attribute__((__always_inline__))
+load_16_uint8_to_float(
     const uint8_t* data, float32x4_t& f0, float32x4_t& f1, float32x4_t& f2, float32x4_t& f3) {
     uint8x16_t code_vec = vld1q_u8(data);
     uint16x8_t code_16_low = vmovl_u8(vget_low_u8(code_vec));
@@ -883,45 +891,7 @@ INT8ComputeL2Sqr(const int8_t* __restrict query, const int8_t* __restrict codes,
 float
 INT8ComputeIP(const int8_t* __restrict query, const int8_t* __restrict codes, uint64_t dim) {
 #if defined(ENABLE_NEON)
-    constexpr int BATCH_SIZE = 8;
-
-    const uint64_t n = dim / BATCH_SIZE;
-
-    if (n == 0) {
-        return generic::INT8ComputeIP(query, codes, dim);
-    }
-
-    int32x4_t sum_0 = vdupq_n_s32(0);
-    int32x4_t sum_1 = vdupq_n_s32(0);
-
-    for (uint64_t i = 0; i < n; ++i) {
-        int8x8_t q_vec = vld1_s8(query + BATCH_SIZE * i);
-        int8x8_t c_vec = vld1_s8(codes + BATCH_SIZE * i);
-
-        int16x8_t q_16 = vmovl_s8(q_vec);
-        int16x8_t c_16 = vmovl_s8(c_vec);
-
-        int16x8_t prod_16 = vmulq_s16(q_16, c_16);
-
-        int32x4_t prod_low = vmovl_s16(vget_low_s16(prod_16));
-        int32x4_t prod_high = vmovl_s16(vget_high_s16(prod_16));
-
-        sum_0 = vaddq_s32(sum_0, prod_low);
-        sum_1 = vaddq_s32(sum_1, prod_high);
-    }
-
-    int32x4_t sum_total = vaddq_s32(sum_0, sum_1);
-
-    int32_t result[4];
-    vst1q_s32(result, sum_total);
-
-    int64_t dot = static_cast<int64_t>(result[0]) + static_cast<int64_t>(result[1]) +
-                  static_cast<int64_t>(result[2]) + static_cast<int64_t>(result[3]);
-
-    dot += generic::INT8ComputeIP(
-        query + BATCH_SIZE * n, codes + BATCH_SIZE * n, dim - BATCH_SIZE * n);
-
-    return static_cast<float>(dot);
+    return 0;
 #else
     return generic::INT8ComputeIP(query, codes, dim);
 #endif
@@ -1635,11 +1605,12 @@ SQ8UniformComputeCodesIP(const uint8_t* codes1, const uint8_t* codes2, uint64_t 
 }
 
 #if defined(ENABLE_NEON)
-__inline void __attribute__((__always_inline__)) extract_12_bits_to_mask(const uint8_t* bits,
-                                                                         size_t bit_offset,
-                                                                         uint32x4_t& mask0,
-                                                                         uint32x4_t& mask1,
-                                                                         uint32x4_t& mask2) {
+__inline void __attribute__((__always_inline__))
+extract_12_bits_to_mask(const uint8_t* bits,
+                        size_t bit_offset,
+                        uint32x4_t& mask0,
+                        uint32x4_t& mask1,
+                        uint32x4_t& mask2) {
     size_t byte_idx = bit_offset / 8;
     size_t bit_start = bit_offset % 8;
 
@@ -1671,10 +1642,11 @@ __inline void __attribute__((__always_inline__)) extract_12_bits_to_mask(const u
                          (mask_bits & 0x800) ? 0xFFFFFFFF : 0};
 }
 
-__inline void __attribute__((__always_inline__)) extract_8_bits_to_mask(const uint8_t* bits,
-                                                                        size_t bit_offset,
-                                                                        uint32x4_t& mask0,
-                                                                        uint32x4_t& mask1) {
+__inline void __attribute__((__always_inline__))
+extract_8_bits_to_mask(const uint8_t* bits,
+                       size_t bit_offset,
+                       uint32x4_t& mask0,
+                       uint32x4_t& mask1) {
     size_t byte_idx = bit_offset / 8;
     size_t bit_start = bit_offset % 8;
 
