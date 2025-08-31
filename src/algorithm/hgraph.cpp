@@ -53,8 +53,7 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
       odescent_param_(hgraph_param->odescent_param),
       graph_type_(hgraph_param->graph_type),
       hierarchical_datacell_param_(hgraph_param->hierarchical_graph_param),
-      extra_info_size_(common_param.extra_info_size_),
-      deleted_ids_(allocator_) {
+      extra_info_size_(common_param.extra_info_size_) {
     this->label_table_->compress_duplicate_data_ = hgraph_param->support_duplicate;
     this->support_tombstone_ = hgraph_param->support_tombstone;
     neighbors_mutex_ = std::make_shared<PointsMutex>(0, common_param.allocator_.get());
@@ -955,7 +954,7 @@ HGraph::GetMinAndMaxId() const {
         throw VsagException(ErrorType::INTERNAL_ERROR, "Label map size is zero");
     }
     for (int i = 0; i < this->total_count_; ++i) {
-        if (not deleted_ids_.empty() && deleted_ids_.count(i) != 0) {
+        if (this->label_table_->IsRemoved(i)) {
             continue;
         }
         auto label = this->label_table_->label_table_[i];
@@ -1616,7 +1615,6 @@ HGraph::Remove(int64_t id) {
     this->bottom_graph_->DeleteNeighborsById(inner_id);
     this->label_table_->Remove(id);
     this->tomb_label_table_->Insert(inner_id, id);
-    this->deleted_ids_.insert(inner_id);
     delete_count_++;
     return true;
 }
@@ -2018,7 +2016,7 @@ HGraph::analyze_graph_connection(JsonType& stats) const {
         }
     }
     for (int64_t i = 0; i < total_count_; ++i) {
-        if (not visited[i] and (deleted_ids_.count(i) == 0)) {
+        if (not visited[i] and this->label_table_->IsRemoved(i)) {
             connect_components++;
             int64_t component_size = 0;
             std::queue<int64_t> q;
@@ -2031,7 +2029,7 @@ HGraph::analyze_graph_connection(JsonType& stats) const {
                 Vector<InnerIdType> neighbors(allocator_);
                 this->bottom_graph_->GetNeighbors(node, neighbors);
                 for (const auto& nb : neighbors) {
-                    if (not visited[nb] and (deleted_ids_.count(nb) == 0)) {
+                    if (not visited[nb] and this->label_table_->IsRemoved(nb)) {
                         visited[nb] = true;
                         q.push(nb);
                     }
@@ -2088,27 +2086,8 @@ HGraph::UpdateId(int64_t old_id, int64_t new_id) {
         return true;
     }
 
-    bool is_tombstone = false;
-    {
-        std::shared_lock label_lock(this->label_lookup_mutex_);
-        if (not this->label_table_->CheckLabel(old_id)) {
-            is_tombstone = true;
-            if (not this->tomb_label_table_->CheckLabel(old_id)) {
-                throw vsag::VsagException(
-                    ErrorType::INVALID_ARGUMENT,
-                    fmt::format("old label {} does not exist in HGraph", old_id));
-            }
-        }
-    }
-
-    {
-        std::scoped_lock label_lock(this->label_lookup_mutex_);
-        if (is_tombstone) {
-            this->tomb_label_table_->UpdateLabel(old_id, new_id);
-        } else {
-            this->label_table_->UpdateLabel(old_id, new_id);
-        }
-    }
+    std::scoped_lock label_lock(this->label_lookup_mutex_);
+    this->label_table_->UpdateLabel(old_id, new_id);
 
     return true;
 }

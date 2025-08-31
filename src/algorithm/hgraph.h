@@ -371,7 +371,6 @@ private:
 
     static constexpr uint64_t DEFAULT_RESIZE_BIT = 10;
 
-    UnorderedSet<InnerIdType> deleted_ids_;
     std::atomic<int64_t> delete_count_{0};
 
     std::shared_ptr<Optimizer<BasicSearcher>> optimizer_;

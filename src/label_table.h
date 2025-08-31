@@ -45,6 +45,7 @@ public:
           label_table_(0, allocator),
           label_remap_(0, allocator),
           use_reverse_map_(use_reverse_map),
+          deleted_ids_(allocator),
           compress_duplicate_data_(compress_redundant_data),
           duplicate_records_(0, allocator){};
 
@@ -75,8 +76,17 @@ public:
         if (iter == label_remap_.end()) {
             return false;
         }
-        label_remap_.erase(iter);
+        label_remap_[label] = std::numeric_limits<InnerIdType>::max();
+
+        if (support_tombstone_) {
+            deleted_ids_.insert(iter->second);
+        }
         return true;
+    }
+
+    inline bool
+    IsRemoved(InnerIdType id) {
+        return not deleted_ids_.empty() && deleted_ids_.count(id) != 0;
     }
 
     inline InnerIdType
@@ -85,7 +95,10 @@ public:
             if (this->label_remap_.count(label) == 0) {
                 throw std::runtime_error(fmt::format("label {} is not exists", label));
             }
-            return this->label_remap_.at(label);
+            auto id = this->label_remap_.at(label);
+            if (id != std::numeric_limits<InnerIdType>::max()) {
+                return id;
+            }
         }
         auto result = std::find(label_table_.begin(), label_table_.end(), label);
         if (result == label_table_.end()) {
@@ -97,7 +110,9 @@ public:
     inline bool
     CheckLabel(LabelType label) const {
         if (use_reverse_map_) {
-            return label_remap_.find(label) != label_remap_.end();
+            auto iter = label_remap_.find(label);
+            return iter != label_remap_.end() and
+                   iter->second != std::numeric_limits<InnerIdType>::max();
         }
         auto result = std::find(label_table_.begin(), label_table_.end(), label);
         return result != label_table_.end();
@@ -110,23 +125,18 @@ public:
             throw std::runtime_error(fmt::format("new label {} has been in HGraph", new_label));
         }
 
-        // 2. check whether old_label exists
-        InnerIdType internal_id = 0;
+        // 2. update label_table_
+        InnerIdType internal_id = GetIdByLabel(old_label);
+        label_table_[internal_id] = new_label;
 
-        auto iter_old = label_remap_.find(old_label);
-        if (iter_old == label_remap_.end()) {
-            // 3. old id not exists
-            throw std::runtime_error(
-                fmt::format("old label {} does not exist in HGraph", old_label));
-        } else {
-            // 4. update label to id
+        // 3. update label_remap_
+        if (use_reverse_map_) {
+            // note that currently, old_label must exist
+            auto iter_old = label_remap_.find(old_label);
             internal_id = iter_old->second;
             label_remap_.erase(iter_old);
             label_remap_[new_label] = internal_id;
         }
-
-        // 5. reset id to label
-        label_table_[internal_id] = new_label;
     }
 
     inline LabelType
@@ -224,8 +234,10 @@ public:
 public:
     Vector<LabelType> label_table_;
     UnorderedMap<LabelType, InnerIdType> label_remap_;
+    UnorderedSet<InnerIdType> deleted_ids_;
 
     bool compress_duplicate_data_{true};
+    bool support_tombstone_{false};
 
     std::mutex duplicate_mutex_;
     uint64_t duplicate_count_{0L};
