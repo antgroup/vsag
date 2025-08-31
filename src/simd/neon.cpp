@@ -891,7 +891,45 @@ INT8ComputeL2Sqr(const int8_t* __restrict query, const int8_t* __restrict codes,
 float
 INT8ComputeIP(const int8_t* __restrict query, const int8_t* __restrict codes, uint64_t dim) {
 #if defined(ENABLE_NEON)
-    return 0;
+    constexpr int BATCH_SIZE = 8;
+
+    const uint64_t n = dim / BATCH_SIZE;
+
+    if (n == 0) {
+        return generic::INT8ComputeIP(query, codes, dim);
+    }
+
+    int32x4_t sum_0 = vdupq_n_s32(0);
+    int32x4_t sum_1 = vdupq_n_s32(0);
+
+    for (uint64_t i = 0; i < n; ++i) {
+        int8x8_t q_vec = vld1_s8(query + BATCH_SIZE * i);
+        int8x8_t c_vec = vld1_s8(codes + BATCH_SIZE * i);
+
+        int16x8_t q_16 = vmovl_s8(q_vec);
+        int16x8_t c_16 = vmovl_s8(c_vec);
+
+        int16x8_t prod_16 = vmulq_s16(q_16, c_16);
+
+        int32x4_t prod_low = vmovl_s16(vget_low_s16(prod_16));
+        int32x4_t prod_high = vmovl_s16(vget_high_s16(prod_16));
+
+        sum_0 = vaddq_s32(sum_0, prod_low);
+        sum_1 = vaddq_s32(sum_1, prod_high);
+    }
+
+    int32x4_t sum_total = vaddq_s32(sum_0, sum_1);
+
+    int32_t result[4];
+    vst1q_s32(result, sum_total);
+
+    int64_t dot = static_cast<int64_t>(result[0]) + static_cast<int64_t>(result[1]) +
+                  static_cast<int64_t>(result[2]) + static_cast<int64_t>(result[3]);
+
+    dot += generic::INT8ComputeIP(
+        query + BATCH_SIZE * n, codes + BATCH_SIZE * n, dim - BATCH_SIZE * n);
+
+    return static_cast<float>(dot);
 #else
     return generic::INT8ComputeIP(query, codes, dim);
 #endif
