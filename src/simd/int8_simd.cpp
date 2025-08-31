@@ -50,4 +50,35 @@ GetINT8ComputeL2Sqr() {
 }
 INT8ComputeType INT8ComputeL2Sqr = GetINT8ComputeL2Sqr();
 
+static INT8ComputeType
+GetINT8ComputeIP() {
+    if (SimdStatus::SupportAVX512()) {
+#if defined(ENABLE_AVX512)
+        return avx512::INT8ComputeIP;
+#endif
+    } else if (SimdStatus::SupportAVX2()) {
+#if defined(ENABLE_AVX2)
+        return avx2::INT8ComputeIP;
+#endif
+    } else if (SimdStatus::SupportAVX()) {
+#if defined(ENABLE_AVX)
+        return avx::INT8ComputeIP;
+#endif
+    } else if (SimdStatus::SupportSSE()) {
+#if defined(ENABLE_SSE)
+        return sse::INT8ComputeIP;
+#endif
+    } else if (SimdStatus::SupportNEON()) {
+#if defined(ENABLE_NEON)
+        return neon::INT8ComputeIP;
+#endif
+    } else if (SimdStatus::SupportSVE()) {
+#if defined(ENABLE_SVE)
+        return sve::INT8ComputeIP;
+#endif
+    }
+    return generic::INT8ComputeIP;
+}
+INT8ComputeType INT8ComputeIP = GetINT8ComputeIP();
+
 }  // namespace vsag
