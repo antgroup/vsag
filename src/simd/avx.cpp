@@ -542,7 +542,7 @@ INT8ComputeL2Sqr(const int8_t* RESTRICT query, const int8_t* RESTRICT codes, uin
 
 float
 INT8ComputeIP(const int8_t* RESTRICT query, const int8_t* RESTRICT codes, uint64_t dim) {
-#if defined (ENABLE_AVX)
+#if defined(ENABLE_AVX)
     return sse::INT8ComputeIP(query, codes, dim);
 #else
     return sse::INT8ComputeIP(query, codes, dim);

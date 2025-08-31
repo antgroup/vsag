@@ -91,8 +91,7 @@ PQDistanceFloat256(const void* single_dim_centers, float single_dim_val, void* r
 }
 
 #if defined(ENABLE_AVX2)
-__inline __m128i __attribute__((__always_inline__))
-load_8_char(const uint8_t* data) {
+__inline __m128i __attribute__((__always_inline__)) load_8_char(const uint8_t* data) {
     return _mm_loadl_epi64(reinterpret_cast<const __m128i*>(data));
 }
 #endif
@@ -368,8 +367,7 @@ FP32ReduceAdd(const float* x, uint64_t dim) {
 }
 
 #if defined(ENABLE_AVX2)
-__inline __m256i __attribute__((__always_inline__))
-load_8_short(const uint16_t* data) {
+__inline __m256i __attribute__((__always_inline__)) load_8_short(const uint16_t* data) {
     __m128i bf16 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(data));
     __m256i bf32 = _mm256_cvtepu16_epi32(bf16);
     return _mm256_slli_epi32(bf32, 16);

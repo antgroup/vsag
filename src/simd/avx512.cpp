@@ -384,8 +384,7 @@ FP32ReduceAdd(const float* x, uint64_t dim) {
 }
 
 #if defined(ENABLE_AVX512)
-__inline __m512i __attribute__((__always_inline__))
-load_16_short(const uint16_t* data) {
+__inline __m512i __attribute__((__always_inline__)) load_16_short(const uint16_t* data) {
     __m256i bf16 = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(data));
     __m512i bf32 = _mm512_cvtepu16_epi32(bf16);
     return _mm512_slli_epi32(bf32, 16);
