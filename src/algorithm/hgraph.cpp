@@ -55,7 +55,7 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
       hierarchical_datacell_param_(hgraph_param->hierarchical_graph_param),
       extra_info_size_(common_param.extra_info_size_) {
     this->label_table_->compress_duplicate_data_ = hgraph_param->support_duplicate;
-    this->support_tombstone_ = hgraph_param->support_tombstone;
+    this->label_table_->support_tombstone_ = hgraph_param->support_tombstone;
     neighbors_mutex_ = std::make_shared<PointsMutex>(0, common_param.allocator_.get());
     this->basic_flatten_codes_ =
         FlattenInterface::MakeInstance(hgraph_param->base_codes_param, common_param);
@@ -709,9 +709,6 @@ HGraph::serialize_label_info(StreamWriter& writer) const {
         this->label_table_->Serialize(writer);
         return;
     }
-    if (this->support_tombstone_) {
-        this->tomb_label_table_->Serialize(writer);
-    }
     StreamWriter::WriteVector(writer, this->label_table_->label_table_);
     uint64_t size = this->label_table_->label_remap_.size();
     StreamWriter::WriteObj(writer, size);
@@ -727,9 +724,6 @@ HGraph::deserialize_label_info(StreamReader& reader) const {
     if (this->label_table_->CompressDuplicateData()) {
         this->label_table_->Deserialize(reader);
         return;
-    }
-    if (this->support_tombstone_) {
-        this->tomb_label_table_->Deserialize(reader);
     }
     StreamReader::ReadVector(reader, this->label_table_->label_table_);
     uint64_t size;
@@ -1068,7 +1062,6 @@ HGraph::resize(uint64_t new_size) {
         this->neighbors_mutex_->Resize(new_size_power_2);
         pool_ = std::make_shared<VisitedListPool>(1, allocator_, new_size_power_2, allocator_);
         this->label_table_->Resize(new_size_power_2);
-        this->tomb_label_table_->Resize(new_size_power_2);
         bottom_graph_->Resize(new_size_power_2);
         this->max_capacity_.store(new_size_power_2);
         this->basic_flatten_codes_->Resize(new_size_power_2);
@@ -1614,7 +1607,6 @@ HGraph::Remove(int64_t id) {
     }
     this->bottom_graph_->DeleteNeighborsById(inner_id);
     this->label_table_->Remove(id);
-    this->tomb_label_table_->Insert(inner_id, id);
     delete_count_++;
     return true;
 }

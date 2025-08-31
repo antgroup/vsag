@@ -73,14 +73,12 @@ public:
             return true;
         }
         auto iter = label_remap_.find(label);
-        if (iter == label_remap_.end()) {
+        if (iter == label_remap_.end() or iter->second == std::numeric_limits<InnerIdType>::max()) {
             return false;
         }
-        label_remap_[label] = std::numeric_limits<InnerIdType>::max();
+        deleted_ids_.insert(iter->second);
 
-        if (support_tombstone_) {
-            deleted_ids_.insert(iter->second);
-        }
+        label_remap_[label] = std::numeric_limits<InnerIdType>::max();
         return true;
     }
 
@@ -98,6 +96,8 @@ public:
             auto id = this->label_remap_.at(label);
             if (id != std::numeric_limits<InnerIdType>::max()) {
                 return id;
+            } else {
+                throw std::runtime_error(fmt::format("label {} is removed", label));
             }
         }
         auto result = std::find(label_table_.begin(), label_table_.end(), label);
@@ -126,7 +126,12 @@ public:
         }
 
         // 2. update label_table_
-        InnerIdType internal_id = GetIdByLabel(old_label);
+
+        auto result = std::find(label_table_.begin(), label_table_.end(), old_label);
+        if (result == label_table_.end()) {
+            throw std::runtime_error(fmt::format("old label {} is not exists", old_label));
+        }
+        InnerIdType internal_id = result - label_table_.begin();
         label_table_[internal_id] = new_label;
 
         // 3. update label_remap_
@@ -165,6 +170,9 @@ public:
                 }
             }
         }
+        if (support_tombstone_) {
+            StreamWriter::WriteObj(writer, deleted_ids_);
+        }
     }
 
     void
@@ -184,6 +192,9 @@ public:
                 duplicate_records_[id] = allocator_->New<DuplicateRecord>(allocator_);
                 StreamReader::ReadVector(reader, duplicate_records_[id]->duplicate_ids);
             }
+        }
+        if (support_tombstone_) {
+            StreamReader::ReadObj(reader, deleted_ids_);
         }
     }
 

@@ -336,7 +336,6 @@ private:
     bool ignore_reorder_{false};
     bool build_by_base_{false};
     bool use_attribute_filter_{false};
-    bool support_tombstone_{false};
 
     BasicSearcherPtr searcher_;
 
