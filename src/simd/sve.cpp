@@ -93,6 +93,7 @@ INT8InnerProduct(const void* pVect1v, const void* pVect2v, const void* qty_ptr) 
     return neon::INT8InnerProduct(pVect1v, pVect2v, qty_ptr);
 #endif
 }
+
 float
 INT8ComputeL2Sqr(const int8_t* RESTRICT query, const int8_t* RESTRICT codes, uint64_t dim) {
 #if defined(ENABLE_SVE)
@@ -118,6 +119,16 @@ INT8ComputeL2Sqr(const int8_t* RESTRICT query, const int8_t* RESTRICT codes, uin
     return neon::INT8ComputeL2Sqr(query, codes, dim);
 #endif
 }
+
+float
+INT8ComputeIP(const int8_t* __restrict query, const int8_t* __restrict codes, uint64_t dim) {
+#if defined(ENABLE_SVE)
+    return 0;
+#else
+    return 0;
+#endif
+}
+
 float
 INT8InnerProductDistance(const void* pVect1, const void* pVect2, const void* qty_ptr) {
     return -sve::INT8InnerProduct(pVect1, pVect2, qty_ptr);

@@ -13,6 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "simd/int8_simd.h"
+#include "vsag/attribute.h"
 #if defined(ENABLE_AVX2)
 #include <immintrin.h>
 #endif
@@ -58,7 +60,10 @@ INT8L2Sqr(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
 
 float
 INT8InnerProduct(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
-    return avx::INT8InnerProduct(pVect1v, pVect2v, qty_ptr);  // TODO(LHT): implement
+    auto* pVect1 = (int8_t*)pVect1v;
+    auto* pVect2 = (int8_t*)pVect2v;
+    auto qty = *((size_t*)qty_ptr);
+    return avx2::INT8ComputeIP(pVect1, pVect2, qty);
 }
 
 float
@@ -86,7 +91,8 @@ PQDistanceFloat256(const void* single_dim_centers, float single_dim_val, void* r
 }
 
 #if defined(ENABLE_AVX2)
-__inline __m128i __attribute__((__always_inline__)) load_8_char(const uint8_t* data) {
+__inline __m128i __attribute__((__always_inline__))
+load_8_char(const uint8_t* data) {
     return _mm_loadl_epi64(reinterpret_cast<const __m128i*>(data));
 }
 #endif
@@ -362,7 +368,8 @@ FP32ReduceAdd(const float* x, uint64_t dim) {
 }
 
 #if defined(ENABLE_AVX2)
-__inline __m256i __attribute__((__always_inline__)) load_8_short(const uint16_t* data) {
+__inline __m256i __attribute__((__always_inline__))
+load_8_short(const uint16_t* data) {
     __m128i bf16 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(data));
     __m256i bf32 = _mm256_cvtepu16_epi32(bf16);
     return _mm256_slli_epi32(bf32, 16);
@@ -544,6 +551,47 @@ INT8ComputeL2Sqr(const int8_t* RESTRICT query, const int8_t* RESTRICT codes, uin
     return static_cast<float>(l2);
 #else
     return avx::INT8ComputeL2Sqr(query, codes, dim);
+#endif
+}
+
+float
+INT8ComputeIP(const int8_t* __restrict query, const int8_t* __restrict codes, uint64_t dim) {
+#if defined(ENABLE_AVX2)
+    constexpr int64_t BATCH_SIZE{16};
+
+    const int n = dim / BATCH_SIZE;
+
+    if (n == 0) {
+        return avx::INT8ComputeIP(query, codes, dim);
+    }
+
+    __m256i sum_sq = _mm256_setzero_si256();
+
+    for (int i{0}; i < n; ++i) {
+        __m128i q = _mm_loadu_si128(reinterpret_cast<const __m128i*>(query + BATCH_SIZE * i));
+        __m128i c = _mm_loadu_si128(reinterpret_cast<const __m128i*>(codes + BATCH_SIZE * i));
+
+        __m256i q_int16 = _mm256_cvtepi8_epi16(q);
+        __m256i c_int16 = _mm256_cvtepi8_epi16(c);
+
+        __m256i sq = _mm256_madd_epi16(q_int16, c_int16);
+
+        sum_sq = _mm256_add_epi32(sum_sq, sq);
+    }
+
+    alignas(32) int32_t result[BATCH_SIZE / 2];
+    _mm256_store_si256(reinterpret_cast<__m256i*>(result), sum_sq);
+
+    int32_t ip = 0;
+    for (int i = 0; i < BATCH_SIZE / 2; ++i) {
+        ip += result[i];
+    }
+
+    ip += avx::INT8ComputeIP(query + BATCH_SIZE * n, codes + BATCH_SIZE * n, dim - BATCH_SIZE * n);
+
+    return static_cast<float>(ip);
+#else
+    return avx::INT8ComputeIP(query, codes, dim);
 #endif
 }
 
