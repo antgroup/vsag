@@ -21,12 +21,10 @@
 #include <memory>
 #include <new>
 
-#include "FCParser.h"
 #include "metric_type.h"
 #include "quantization/computer.h"
 #include "quantization/int8_quantizer_parameter.h"
 #include "quantization/quantizer.h"
-#include "simd/basic_func.h"
 #include "simd/int8_simd.h"
 
 namespace vsag {

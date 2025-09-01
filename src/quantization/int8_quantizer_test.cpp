@@ -18,7 +18,6 @@
 #include <cstdint>
 #include <cstdlib>
 #include <initializer_list>
-#include <iostream>
 #include <memory>
 #include <vector>
 
@@ -91,6 +90,7 @@ TEST_CASE("INT8 Quantizer Encode and Decode", "[ut][INT8Quantizer]") {
         for (auto count : counts) {
             TestQuantizerEncodeDecodeMetricINT8<metrics[0]>(dim, count, error);
             TestQuantizerEncodeDecodeMetricINT8<metrics[1]>(dim, count, error);
+            // TODO: impl cosine
         }
     }
 }
@@ -208,6 +208,59 @@ TEST_CASE("INT8 Compute", "[ut][INT8Quantizer]") {
             TestComputeMetricINT8<metrics[0]>(dim, count, error);
             // TestComputeMetricINT8<metrics[1]>(dim, count, error);
             TestComputeMetricINT8<metrics[2]>(dim, count, error);
+        }
+    }
+}
+
+template <MetricType metric>
+void
+TestSerializeAndDeserializeINT8(Quantizer<INT8Quantizer<metric>>& quant1,
+                                Quantizer<INT8Quantizer<metric>>& quant2,
+                                size_t dim,
+                                uint32_t count,
+                                float error = 1e-5f,
+                                float related_error = 1.0f,
+                                float unbounded_numeric_error_rate = 1.0f,
+                                float unbounded_related_error_rate = 1.0f) {
+    auto vecs = fixtures::generate_int8_codes(count, dim);
+    quant1.ReTrain(reinterpret_cast<DataTypePtr>(vecs.data()), count);
+
+    test_serializion(quant1, quant2);
+
+    REQUIRE(quant1.GetCodeSize() == quant2.GetCodeSize());
+    REQUIRE(quant1.GetDim() == quant2.GetDim());
+
+    TestQuantizerEncodeDecodeINT8(quant2, dim, count, error, false);
+    TestComputerINT8(quant2,
+                     dim,
+                     count,
+                     error,
+                     related_error,
+                     false,
+                     unbounded_numeric_error_rate,
+                     unbounded_related_error_rate);
+    TestComputeCodesINT8(quant2, dim, count, error * dim * 2.0F, false);
+}
+
+template <MetricType metric>
+void
+TestSerializeAndDeserializeMetricINT8(uint64_t dim, int count, float error = 1e-5) {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    INT8Quantizer<metric> quantizer1(dim, allocator.get());
+    INT8Quantizer<metric> quantizer2(dim, allocator.get());
+    TestSerializeAndDeserializeINT8<metric>(quantizer1, quantizer2, dim, count, error);
+}
+
+TEST_CASE("INT8 Serialize and Deserialize", "[ut][INT8Quantizer]") {
+    constexpr MetricType metrics[3] = {
+        MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_COSINE, MetricType::METRIC_TYPE_IP};
+    float error = 2e-5f;
+    for (auto dim : dims) {
+        for (auto count : counts) {
+            TestSerializeAndDeserializeMetricINT8<metrics[0]>(dim, count, error);
+            // TODO: impl cosine
+            // TestSerializeAndDeserializeMetricINT8<metrics[1]>(dim, count, error);
+            TestSerializeAndDeserializeMetricINT8<metrics[2]>(dim, count, error);
         }
     }
 }
