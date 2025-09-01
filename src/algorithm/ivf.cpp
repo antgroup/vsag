@@ -303,6 +303,7 @@ IVF::InitFeatures() {
         IndexFeature::SUPPORT_CLONE,
         IndexFeature::SUPPORT_EXPORT_MODEL,
         IndexFeature::SUPPORT_MERGE_INDEX,
+        IndexFeature::SUPPORT_CAL_DISTANCE_BY_ID
     });
 
     if (this->bucket_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_PQFS) {
