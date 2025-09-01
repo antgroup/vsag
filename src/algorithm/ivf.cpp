@@ -321,7 +321,6 @@ IVF::Build(const DatasetPtr& base) {
     this->Train(base);
     // TODO(LHT): duplicate
     auto result = this->Add(base);
-    this->fill_location_map();
     return result;
 }
 
@@ -410,7 +409,7 @@ IVF::Add(const DatasetPtr& base) {
                 offset_id = bucket_->InsertVector(
                     data_ptr, buckets[idx], idx + current_num * buckets_per_data_);
             }
-            {
+            if (j == 0) {
                 std::lock_guard lock(label_lookup_mutex_);
                 location_map_[i + current_num] =
                     (static_cast<uint64_t>(buckets[idx]) << LOCATION_SPLIT_BIT) |
@@ -965,7 +964,7 @@ IVF::fill_location_map() {
             if (ids[j] >= this->total_elements_ * buckets_per_data_) {
                 throw VsagException(ErrorType::INTERNAL_ERROR, "invalid inner_id");
             }
-            this->location_map_[ids[j]] =
+            this->location_map_[ids[j] / buckets_per_data_] =
                 (static_cast<uint64_t>(i) << LOCATION_SPLIT_BIT) | static_cast<uint64_t>(j);
         }
     }
