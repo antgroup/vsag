@@ -16,8 +16,10 @@
 #pragma once
 
 #include "io_parameter.h"
+#include "pointer_define.h"
 
 namespace vsag {
+DEFINE_POINTER(AsyncIOParameter);
 class AsyncIOParameter : public IOParameter {
 public:
     AsyncIOParameter();
@@ -33,7 +35,4 @@ public:
 public:
     std::string path_{};
 };
-
-using AsyncIOParameterPtr = std::shared_ptr<AsyncIOParameter>;
-
 }  // namespace vsag

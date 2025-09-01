@@ -16,11 +16,9 @@
 #pragma once
 
 #include "parameter.h"
-
+#include "pointer_define.h"
 namespace vsag {
-
-class QuantizerParameter;
-using QuantizerParamPtr = std::shared_ptr<QuantizerParameter>;
+DEFINE_POINTER2(QuantizerParam, QuantizerParameter);
 
 class QuantizerParameter : public Parameter {
 public:

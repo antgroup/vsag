@@ -15,9 +15,10 @@
 
 #pragma once
 
+#include "pointer_define.h"
 #include "quantization/quantizer_parameter.h"
-
 namespace vsag {
+DEFINE_POINTER2(TransformQuantizerParam, TransformQuantizerParameter)
 class TransformQuantizerParameter : public QuantizerParameter {
 public:
     TransformQuantizerParameter();
@@ -43,7 +44,4 @@ public:
     std::vector<std::string> tq_chain_;
     JsonType base_quantizer_json_;  // store param of base quantizer
 };
-
-using TransformQuantizerParamPtr = std::shared_ptr<TransformQuantizerParameter>;
-
 }  // namespace vsag

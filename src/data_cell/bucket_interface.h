@@ -19,14 +19,14 @@
 
 #include "bucket_datacell_parameter.h"
 #include "index/index_common_param.h"
+#include "pointer_define.h"
 #include "quantization/computer.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
 #include "typing.h"
 
 namespace vsag {
-class BucketInterface;
-using BucketInterfacePtr = std::shared_ptr<BucketInterface>;
+DEFINE_POINTER(BucketInterface);
 
 class BucketInterface {
 public:

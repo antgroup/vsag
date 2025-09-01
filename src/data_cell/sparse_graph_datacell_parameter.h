@@ -18,9 +18,11 @@
 #include "graph_interface_parameter.h"
 #include "inner_string_params.h"
 #include "logger.h"
+#include "pointer_define.h"
 #include "vsag/constants.h"
 
 namespace vsag {
+DEFINE_POINTER2(SparseGraphDatacellParam, SparseGraphDatacellParameter);
 class SparseGraphDatacellParameter : public GraphInterfaceParameter {
 public:
     SparseGraphDatacellParameter();
@@ -38,6 +40,4 @@ public:
     bool support_delete_{false};
     uint32_t remove_flag_bit_{8};
 };
-
-using SparseGraphDatacellParamPtr = std::shared_ptr<SparseGraphDatacellParameter>;
 }  // namespace vsag

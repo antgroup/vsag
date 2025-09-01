@@ -22,9 +22,12 @@
 #include "data_cell/flatten_datacell_parameter.h"
 #include "inner_string_params.h"
 #include "parameter.h"
+#include "pointer_define.h"
 #include "typing.h"
 
 namespace vsag {
+
+DEFINE_POINTER(IVFParameter);
 class IVFParameter : public Parameter {
 public:
     explicit IVFParameter();
@@ -51,9 +54,6 @@ public:
 
     FlattenDataCellParamPtr flatten_param{nullptr};
 };
-
-using IVFParameterPtr = std::shared_ptr<IVFParameter>;
-
 class IVFSearchParameters {
 public:
     static IVFSearchParameters

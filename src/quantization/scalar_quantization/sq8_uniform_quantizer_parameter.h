@@ -15,9 +15,10 @@
 
 #pragma once
 
+#include "pointer_define.h"
 #include "quantization/quantizer_parameter.h"
-
 namespace vsag {
+DEFINE_POINTER2(SQ8UniformQuantizerParam, SQ8UniformQuantizerParameter)
 class SQ8UniformQuantizerParameter : public QuantizerParameter {
 public:
     SQ8UniformQuantizerParameter();
@@ -29,9 +30,5 @@ public:
 
     JsonType
     ToJson() const override;
-
-public:
 };
-
-using SQ8UniformQuantizerParamPtr = std::shared_ptr<SQ8UniformQuantizerParameter>;
 }  // namespace vsag
