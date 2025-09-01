@@ -17,6 +17,7 @@
 
 #include "index/index_common_param.h"
 #include "parameter.h"
+#include "pointer_define.h"
 
 namespace vsag {
 
@@ -27,7 +28,9 @@ static constexpr float DEFAULT_DOC_PRUNE_RATIO = 0.0F;
 static constexpr float DEFAULT_TERM_PRUNE_RATIO = 0.0F;
 static constexpr uint32_t DEFAULT_N_CANDIDATE = 0;
 
-struct SINDIParameter : public Parameter {
+DEFINE_POINTER(SINDIParameter);
+
+class SINDIParameter : public Parameter {
 public:
     void
     FromJson(const JsonType& json) override;
@@ -45,9 +48,7 @@ public:
     float doc_prune_ratio{0};
 };
 
-using SINDIParameterPtr = std::shared_ptr<SINDIParameter>;
-
-struct SINDISearchParameter : public Parameter {
+class SINDISearchParameter : public Parameter {
 public:
     void
     FromJson(const JsonType& json) override;

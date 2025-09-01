@@ -20,12 +20,12 @@
 
 #include "algorithm/sindi/sindi_parameter.h"
 #include "metric_type.h"
+#include "pointer_define.h"
 #include "utils/sparse_vector_transform.h"
-
 namespace vsag {
 
 static constexpr int INVALID_TERM = -1;
-
+DEFINE_POINTER(SparseTermComputer)
 class SparseTermComputer {
 public:
     ~SparseTermComputer() = default;
@@ -120,7 +120,4 @@ public:
 
     Allocator* const allocator_{nullptr};
 };
-
-using SparseTermComputerPtr = std::shared_ptr<SparseTermComputer>;
-
 }  // namespace vsag

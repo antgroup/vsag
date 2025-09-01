@@ -23,6 +23,7 @@
 #include "index/iterator_filter.h"
 #include "inner_search_param.h"
 #include "lock_strategy.h"
+#include "pointer_define.h"
 #include "utils/timer.h"
 #include "utils/visited_list.h"
 
@@ -31,7 +32,7 @@ namespace vsag {
 static constexpr uint32_t OPTIMIZE_SEARCHER_SAMPLE_SIZE = 10000;
 
 constexpr float THRESHOLD_ERROR = 2e-6;
-
+DEFINE_POINTER(BasicSearcher);
 class BasicSearcher {
 public:
     explicit BasicSearcher(const IndexCommonParam& common_param,
@@ -117,7 +118,4 @@ private:
     // runtime parameters
     uint32_t prefetch_stride_visit_{3};
 };
-
-using BasicSearcherPtr = std::shared_ptr<BasicSearcher>;
-
 }  // namespace vsag

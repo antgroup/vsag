@@ -15,9 +15,11 @@
 
 #pragma once
 
+#include "pointer_define.h"
 #include "quantization/quantizer_parameter.h"
 
 namespace vsag {
+DEFINE_POINTER2(SQ4UniformQuantizerParam, SQ4UniformQuantizerParameter)
 class SQ4UniformQuantizerParameter : public QuantizerParameter {
 public:
     SQ4UniformQuantizerParameter();
@@ -36,6 +38,4 @@ public:
 public:
     float trunc_rate_{0.05F};
 };
-
-using SQ4UniformQuantizerParamPtr = std::shared_ptr<SQ4UniformQuantizerParameter>;
 }  // namespace vsag

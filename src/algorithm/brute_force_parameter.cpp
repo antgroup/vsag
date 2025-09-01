@@ -17,6 +17,7 @@
 
 #include <fmt/format.h>
 
+#include "data_cell/flatten_datacell_parameter.h"
 #include "inner_string_params.h"
 #include "logger.h"
 #include "vsag/constants.h"

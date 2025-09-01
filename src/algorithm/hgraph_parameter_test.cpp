@@ -15,6 +15,8 @@
 
 #include "hgraph_parameter.h"
 
+#include <fmt/format.h>
+
 #include <catch2/catch_test_macros.hpp>
 
 #include "parameter_test.h"

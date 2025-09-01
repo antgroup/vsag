@@ -19,7 +19,9 @@
 
 #include "attr/argparse.h"
 #include "attr/executor/executor.h"
+#include "data_cell/attribute_inverted_interface.h"
 #include "data_cell/flatten_datacell.h"
+#include "data_cell/flatten_interface.h"
 #include "fmt/chrono.h"
 #include "impl/heap/standard_heap.h"
 #include "inner_string_params.h"
@@ -324,7 +326,7 @@ BruteForce::Deserialize(StreamReader& reader) {
         auto basic_info = metadata->Get("basic_info");
         if (basic_info.contains(INDEX_PARAM)) {
             std::string index_param_string = basic_info[INDEX_PARAM];
-            BruteForceParameterPtr index_param = std::make_shared<BruteForceParameter>();
+            auto index_param = std::make_shared<BruteForceParameter>();
             index_param->FromString(index_param_string);
             if (not this->create_param_ptr_->CheckCompatibility(index_param)) {
                 auto message =

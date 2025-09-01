@@ -32,7 +32,7 @@ template <MetricType metric>
 void
 TestComputeMetricTQ(std::string tq_chain, uint64_t dim, int count, float error = 1e-5) {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
-    TransformQuantizerParamPtr param = std::make_shared<TransformQuantizerParameter>();
+    auto param = std::make_shared<TransformQuantizerParameter>();
     constexpr static const char* param_template = R"(
         {{
             "tq_chain": "{}",

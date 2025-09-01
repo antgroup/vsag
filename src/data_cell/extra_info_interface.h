@@ -19,14 +19,14 @@
 
 #include "extra_info_datacell_parameter.h"
 #include "index/index_common_param.h"
+#include "pointer_define.h"
 #include "quantization/computer.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
 #include "typing.h"
 
 namespace vsag {
-class ExtraInfoInterface;
-using ExtraInfoInterfacePtr = std::shared_ptr<ExtraInfoInterface>;
+DEFINE_POINTER(ExtraInfoInterface);
 
 class ExtraInfoInterface {
 public:

@@ -19,9 +19,10 @@
 
 #include "flatten_interface.h"
 #include "inner_string_params.h"
+#include "pointer_define.h"
 
 namespace vsag {
-
+DEFINE_POINTER2(SparseVectorDataCellParam, SparseVectorDataCellParameter);
 class SparseVectorDataCellParameter : public FlattenInterfaceParameter {
 public:
     explicit SparseVectorDataCellParameter() : FlattenInterfaceParameter(SPARSE_VECTOR_DATA_CELL) {
@@ -62,7 +63,4 @@ public:
         return this->quantizer_parameter->CheckCompatibility(sparse_param->quantizer_parameter);
     }
 };
-
-using SparseVectorDataCellParamPtr = std::shared_ptr<SparseVectorDataCellParameter>;
-
 }  // namespace vsag

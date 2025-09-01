@@ -18,8 +18,11 @@
 #include "flatten_interface_parameter.h"
 #include "io/io_parameter.h"
 #include "parameter.h"
+#include "pointer_define.h"
 #include "quantization/quantizer_parameter.h"
+
 namespace vsag {
+DEFINE_POINTER2(FlattenDataCellParam, FlattenDataCellParameter);
 
 class FlattenDataCellParameter : public FlattenInterfaceParameter {
 public:
@@ -34,7 +37,4 @@ public:
     bool
     CheckCompatibility(const vsag::ParamPtr& other) const override;
 };
-
-using FlattenDataCellParamPtr = std::shared_ptr<FlattenDataCellParameter>;
-
 }  // namespace vsag

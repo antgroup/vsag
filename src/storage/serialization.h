@@ -24,6 +24,7 @@
 
 #include "../logger.h"
 #include "../typing.h"
+#include "pointer_define.h"
 #include "stream_reader.h"
 #include "stream_writer.h"
 #include "utils/function_exists_check.h"
@@ -33,8 +34,7 @@
 namespace vsag {
 
 // Metadata is using to describe how is the index create
-class Metadata;
-using MetadataPtr = std::shared_ptr<Metadata>;
+DEFINE_POINTER(Metadata);
 class Metadata {
 public:
     [[nodiscard]] JsonType
@@ -118,8 +118,7 @@ private:
 };
 
 // Footer is a wrapper of metadata, only used in all-in-one serialize format
-class Footer;
-using FooterPtr = std::shared_ptr<Footer>;
+DEFINE_POINTER(Footer);
 class Footer {
 public:
     static FooterPtr
@@ -168,5 +167,3 @@ private:
 };
 
 };  // namespace vsag
-
-// namespace vsag

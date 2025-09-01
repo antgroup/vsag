@@ -16,12 +16,11 @@
 #pragma once
 
 #include "common.h"
+#include "pointer_define.h"
 #include "typing.h"
-
 namespace vsag {
 
-class Parameter;
-using ParamPtr = std::shared_ptr<Parameter>;
+DEFINE_POINTER2(Param, Parameter);
 
 class Parameter {
 public:

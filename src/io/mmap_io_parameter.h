@@ -16,8 +16,10 @@
 #pragma once
 
 #include "io_parameter.h"
-
+#include "pointer_define.h"
 namespace vsag {
+DEFINE_POINTER2(MMapIOParam, MMapIOParameter);
+
 class MMapIOParameter : public IOParameter {
 public:
     MMapIOParameter();
@@ -35,7 +37,4 @@ public:
 public:
     std::string path_{};
 };
-
-using MMapIOParameterPtr = std::shared_ptr<MMapIOParameter>;
-
 }  // namespace vsag

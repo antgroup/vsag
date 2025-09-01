@@ -17,8 +17,10 @@
 
 #include "index/index_common_param.h"
 #include "parameter.h"
+#include "pointer_define.h"
 
 namespace vsag {
+DEFINE_POINTER2(SparseIndexParameter, SparseIndexParameters);
 
 struct SparseIndexParameters : public Parameter {
 public:
@@ -33,7 +35,4 @@ public:
 public:
     bool need_sort{true};
 };
-
-using SparseIndexParameterPtr = std::shared_ptr<SparseIndexParameters>;
-
 }  // namespace vsag

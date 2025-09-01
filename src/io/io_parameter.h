@@ -16,11 +16,10 @@
 #pragma once
 
 #include "parameter.h"
+#include "pointer_define.h"
 
 namespace vsag {
-
-class IOParameter;
-using IOParamPtr = std::shared_ptr<IOParameter>;
+DEFINE_POINTER2(IOParam, IOParameter);
 
 class IOParameter : public Parameter {
 public:

@@ -15,9 +15,10 @@
 
 #pragma once
 
+#include "pointer_define.h"
 #include "quantization/quantizer_parameter.h"
-
 namespace vsag {
+DEFINE_POINTER2(SQ8QuantizerParam, SQ8QuantizerParameter)
 class SQ8QuantizerParameter : public QuantizerParameter {
 public:
     SQ8QuantizerParameter();
@@ -32,6 +33,4 @@ public:
 
 public:
 };
-
-using SQ8QuantizerParamPtr = std::shared_ptr<SQ8QuantizerParameter>;
 }  // namespace vsag
