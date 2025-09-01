@@ -19,6 +19,7 @@
 
 #include "attr/attr_type_schema.h"
 #include "attr/multi_bitset_manager.h"
+#include "pointer_define.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
 #include "typing.h"
@@ -26,9 +27,7 @@
 #include "vsag_exception.h"
 
 namespace vsag {
-class AttributeInvertedInterface;
-using AttrInvertedInterfacePtr = std::shared_ptr<AttributeInvertedInterface>;
-
+DEFINE_POINTER2(AttrInvertedInterface, AttributeInvertedInterface);
 class AttributeInvertedInterface {
 public:
     static AttrInvertedInterfacePtr

@@ -17,8 +17,9 @@
 
 #include "default_thread_pool.h"
 #include "logger.h"
-
+#include "pointer_define.h"
 namespace vsag {
+DEFINE_POINTER(SafeThreadPool);
 
 class SafeThreadPool : public ThreadPool {
 public:
@@ -85,7 +86,5 @@ private:
     std::shared_ptr<ThreadPool> pool_ptr_{nullptr};
     bool owner_{false};
 };
-
-using SafeThreadPoolPtr = std::shared_ptr<SafeThreadPool>;
 
 }  // namespace vsag

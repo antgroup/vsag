@@ -16,14 +16,15 @@
 
 #pragma once
 
+#include "pointer_define.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
 #include "vsag/allocator.h"
 
 namespace vsag {
 
-class VectorTransformer;
-using VectorTransformerPtr = std::shared_ptr<VectorTransformer>;
+DEFINE_POINTER(VectorTransformer);
+DEFINE_POINTER(TransformerMeta);
 
 enum class VectorTransformerType { NONE, PCA, RANDOM_ORTHOGONAL, FHT, RESIDUAL, NORMALIZE };
 
@@ -38,9 +39,6 @@ struct TransformerMeta {
         return;
     };
 };
-
-using TransformerMetaPtr = std::shared_ptr<TransformerMeta>;
-
 class VectorTransformer {
 public:
     explicit VectorTransformer(Allocator* allocator, int64_t input_dim, int64_t output_dim);

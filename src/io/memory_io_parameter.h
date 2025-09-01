@@ -16,8 +16,11 @@
 #pragma once
 
 #include "io_parameter.h"
+#include "pointer_define.h"
 
 namespace vsag {
+DEFINE_POINTER2(MemoryIOParam, MemoryIOParameter);
+
 class MemoryIOParameter : public IOParameter {
 public:
     MemoryIOParameter();
@@ -30,7 +33,4 @@ public:
     JsonType
     ToJson() const override;
 };
-
-using MemoryIOParamPtr = std::shared_ptr<MemoryIOParameter>;
-
 }  // namespace vsag

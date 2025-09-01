@@ -18,10 +18,10 @@
 #include "data_cell/attribute_inverted_interface.h"
 #include "impl/bitset/computable_bitset.h"
 #include "impl/filter/filter_headers.h"
+#include "pointer_define.h"
 
 namespace vsag {
-class Executor;
-using ExecutorPtr = std::shared_ptr<Executor>;
+DEFINE_POINTER(Executor);
 
 class Executor {
 public:

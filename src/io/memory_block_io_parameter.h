@@ -16,8 +16,11 @@
 #pragma once
 
 #include "io_parameter.h"
+#include "pointer_define.h"
 
 namespace vsag {
+DEFINE_POINTER2(MemoryBlockIOParam, MemoryBlockIOParameter);
+
 class MemoryBlockIOParameter : public IOParameter {
 public:
     MemoryBlockIOParameter();
@@ -36,7 +39,4 @@ public:
 public:
     uint64_t block_size_{};
 };
-
-using MemoryBlockIOParamPtr = std::shared_ptr<MemoryBlockIOParameter>;
-
 }  // namespace vsag

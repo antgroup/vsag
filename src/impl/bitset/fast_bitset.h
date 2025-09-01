@@ -18,10 +18,13 @@
 #include <shared_mutex>
 
 #include "computable_bitset.h"
+#include "pointer_define.h"
 #include "typing.h"
 #include "vsag/allocator.h"
 
 namespace vsag {
+
+DEFINE_POINTER(FastBitset);
 class FastBitset : public ComputableBitset {
 public:
     explicit FastBitset(Allocator* allocator)
@@ -110,5 +113,4 @@ private:
     uint32_t capacity_{0};
 };
 
-using FastBitsetPtr = std::shared_ptr<FastBitset>;
 }  // namespace vsag

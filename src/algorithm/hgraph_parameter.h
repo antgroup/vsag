@@ -15,17 +15,19 @@
 
 #pragma once
 
-#include "data_cell/extra_info_datacell_parameter.h"
-#include "data_cell/flatten_datacell_parameter.h"
-#include "data_cell/graph_interface_parameter.h"
-#include "data_cell/sparse_graph_datacell_parameter.h"
 #include "data_type.h"
-#include "impl/odescent_graph_parameter.h"
 #include "parameter.h"
+#include "pointer_define.h"
 #include "vsag/constants.h"
 
 namespace vsag {
+DEFINE_POINTER2(ExtraInfoDataCellParam, ExtraInfoDataCellParameter);
+DEFINE_POINTER2(FlattenInterfaceParam, FlattenInterfaceParameter);
+DEFINE_POINTER2(GraphInterfaceParam, GraphInterfaceParameter);
+DEFINE_POINTER2(SparseGraphDatacellParam, SparseGraphDatacellParameter);
+DEFINE_POINTER(ODescentParameter);
 
+DEFINE_POINTER(HGraphParameter);
 class HGraphParameter : public Parameter {
 public:
     explicit HGraphParameter(const JsonType& json);
@@ -68,8 +70,6 @@ public:
 
     std::string name;
 };
-
-using HGraphParameterPtr = std::shared_ptr<HGraphParameter>;
 
 class HGraphSearchParameters {
 public:

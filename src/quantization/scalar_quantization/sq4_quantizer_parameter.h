@@ -15,9 +15,11 @@
 
 #pragma once
 
+#include "pointer_define.h"
 #include "quantization/quantizer_parameter.h"
 
 namespace vsag {
+DEFINE_POINTER2(SQ4QuantizerParam, SQ4QuantizerParameter)
 class SQ4QuantizerParameter : public QuantizerParameter {
 public:
     SQ4QuantizerParameter();
@@ -32,7 +34,4 @@ public:
 
 public:
 };
-
-using SQ4QuantizerParamPtr = std::shared_ptr<SQ4QuantizerParameter>;
-
 }  // namespace vsag

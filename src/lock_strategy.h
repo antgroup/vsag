@@ -17,9 +17,11 @@
 
 #include <shared_mutex>
 
+#include "pointer_define.h"
 #include "typing.h"
 
 namespace vsag {
+DEFINE_POINTER(MutexArray);
 
 class MutexArray {
 public:
@@ -38,8 +40,6 @@ public:
     virtual void
     Resize(uint32_t new_element_num) = 0;
 };
-
-using MutexArrayPtr = std::shared_ptr<MutexArray>;
 
 class PointsMutex : public MutexArray {
 public:

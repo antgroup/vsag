@@ -22,6 +22,7 @@
 #include "index_feature_list.h"
 #include "label_table.h"
 #include "parameter.h"
+#include "pointer_define.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
 #include "utils/function_exists_check.h"
@@ -30,8 +31,7 @@
 
 namespace vsag {
 
-class InnerIndexInterface;
-using InnerIndexPtr = std::shared_ptr<InnerIndexInterface>;
+DEFINE_POINTER2(InnerIndex, InnerIndexInterface);
 
 class InnerIndexInterface {
 public:

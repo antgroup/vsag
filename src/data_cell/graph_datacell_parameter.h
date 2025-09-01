@@ -17,8 +17,10 @@
 
 #include "graph_interface_parameter.h"
 #include "io/io_parameter.h"
+#include "pointer_define.h"
 
 namespace vsag {
+DEFINE_POINTER2(GraphDataCellParam, GraphDataCellParameter);
 class GraphDataCellParameter : public GraphInterfaceParameter {
 public:
     GraphDataCellParameter() : GraphInterfaceParameter(GraphStorageTypes::GRAPH_STORAGE_TYPE_FLAT) {
@@ -41,6 +43,4 @@ public:
     bool support_remove_{false};
     uint32_t remove_flag_bit_{8};
 };
-
-using GraphDataCellParamPtr = std::shared_ptr<GraphDataCellParameter>;
 }  // namespace vsag

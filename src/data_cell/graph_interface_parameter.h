@@ -16,11 +16,9 @@
 #pragma once
 
 #include "parameter.h"
-
+#include "pointer_define.h"
 namespace vsag {
-
-class GraphInterfaceParameter;
-using GraphInterfaceParamPtr = std::shared_ptr<GraphInterfaceParameter>;
+DEFINE_POINTER2(GraphInterfaceParam, GraphInterfaceParameter);
 
 enum class GraphStorageTypes {
     GRAPH_STORAGE_TYPE_FLAT = 0,

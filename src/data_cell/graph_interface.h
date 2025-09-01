@@ -24,14 +24,13 @@
 #include "graph_interface_parameter.h"
 #include "index/index_common_param.h"
 #include "inner_string_params.h"
+#include "pointer_define.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
 #include "typing.h"
 
 namespace vsag {
-
-class GraphInterface;
-using GraphInterfacePtr = std::shared_ptr<GraphInterface>;
+DEFINE_POINTER(GraphInterface);
 
 class GraphInterface {
 public:

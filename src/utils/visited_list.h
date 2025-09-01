@@ -16,6 +16,7 @@
 #pragma once
 #include <cstring>
 
+#include "pointer_define.h"
 #include "prefetch.h"
 #include "resource_object.h"
 #include "resource_object_pool.h"
@@ -24,6 +25,7 @@
 
 namespace vsag {
 
+DEFINE_POINTER(VisitedList);
 class VisitedList : public ResourceObject {
 public:
     using VisitedListType = uint16_t;
@@ -61,6 +63,4 @@ private:
 };
 
 using VisitedListPool = ResourceObjectPool<VisitedList>;
-using VisitedListPtr = std::shared_ptr<VisitedList>;
-
 }  // namespace vsag

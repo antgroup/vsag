@@ -16,10 +16,10 @@
 #pragma once
 
 #include "parameter.h"
-
+#include "pointer_define.h"
 namespace vsag {
-
-struct ODescentParameter : public Parameter {
+DEFINE_POINTER(ODescentParameter);
+class ODescentParameter : public Parameter {
 public:
     ODescentParameter() = default;
 
@@ -37,7 +37,4 @@ public:
     int64_t max_degree{32};
     int64_t block_size{10000};
 };
-
-using ODescentParameterPtr = std::shared_ptr<ODescentParameter>;
-
 }  // namespace vsag

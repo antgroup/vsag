@@ -20,8 +20,6 @@
 #include <shared_mutex>
 #include <string>
 
-#include "algorithm/hnswlib/algorithm_interface.h"
-#include "algorithm/hnswlib/visited_list_pool.h"
 #include "common.h"
 #include "data_cell/attribute_inverted_interface.h"
 #include "data_cell/extra_info_interface.h"

@@ -15,9 +15,10 @@
 
 #pragma once
 
+#include "pointer_define.h"
 #include "quantization/quantizer_parameter.h"
-
 namespace vsag {
+DEFINE_POINTER2(ProductQuantizerParam, ProductQuantizerParameter);
 class ProductQuantizerParameter : public QuantizerParameter {
 public:
     ProductQuantizerParameter();
@@ -37,7 +38,4 @@ public:
     int64_t pq_dim_{1};
     int64_t pq_bits_{8};
 };
-
-using ProductQuantizerParamPtr = std::shared_ptr<ProductQuantizerParameter>;
-
 }  // namespace vsag

@@ -17,14 +17,15 @@
 
 #include "algorithm/inner_index_interface.h"
 #include "brute_force_parameter.h"
-#include "data_cell/attribute_inverted_interface.h"
-#include "data_cell/flatten_interface.h"
 #include "label_table.h"
+#include "pointer_define.h"
 #include "typing.h"
 #include "vsag/filter.h"
 
 namespace vsag {
 
+DEFINE_POINTER2(AttrInvertedInterface, AttributeInvertedInterface);
+DEFINE_POINTER(FlattenInterface);
 // BruteForce index was introduced since v0.13
 class BruteForce : public InnerIndexInterface {
 public:

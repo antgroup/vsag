@@ -15,12 +15,14 @@
 
 #pragma once
 
-#include "attr/executor/executor.h"
+#include "pointer_define.h"
 #include "typing.h"
 #include "utils/timer.h"
-#include "vsag/filter.h"
 
 namespace vsag {
+
+DEFINE_POINTER(Filter);
+DEFINE_POINTER(Executor);
 
 enum InnerSearchMode { KNN_SEARCH = 1, RANGE_SEARCH = 2 };
 
@@ -29,7 +31,7 @@ enum InnerSearchType { PURE = 1, WITH_FILTER = 2 };
 class InnerSearchParam {
 public:
     int64_t topk{0};
-    float radius{0.0f};
+    float radius{0.0F};
     InnerIdType ep{0};
     uint64_t ef{10};
     FilterPtr is_inner_id_allowed{nullptr};
