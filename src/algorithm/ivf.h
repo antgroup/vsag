@@ -123,6 +123,30 @@ public:
                     const AttributeSet& new_attrs,
                     const AttributeSet& origin_attrs) override;
 
+<<<<<<< HEAD
+=======
+    void
+    Serialize(StreamWriter& writer) const override;
+
+    void
+    Deserialize(StreamReader& reader) override;
+
+    int64_t
+    GetNumElements() const override;
+
+    [[nodiscard]] DatasetPtr
+    GetDataByIds(const int64_t* ids, int64_t count) const override;
+
+    void
+    GetCodeByInnerId(InnerIdType inner_id, uint8_t* data) const override;
+
+    DatasetPtr
+    CalDistanceById(const float* query, const int64_t* ids, int64_t count) const override;
+
+    float
+    CalcDistanceById(const float* query, int64_t id) const override;
+
+>>>>>>> modify
 private:
     InnerSearchParam
     create_search_param(const std::string& parameters, const FilterPtr& filter) const;

@@ -293,18 +293,23 @@ IVF::InitFeatures() {
         });
     }
 
+    bool has_fp32 = false;
+    if (use_reorder_ && reorder_codes_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32) {
+        has_fp32 = true;
+    }
+    if (name == QUANTIZATION_TYPE_VALUE_FP32 or has_fp32) {
+        this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_CAL_DISTANCE_BY_ID);
+    }
+
     if (name == QUANTIZATION_TYPE_VALUE_FP32 and
         this->bucket_->GetMetricType() != MetricType::METRIC_TYPE_COSINE and
         not this->use_residual_) {
         this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_GET_DATA_BY_IDS);
     }
 
-    this->index_feature_list_->SetFeatures({
-        IndexFeature::SUPPORT_CLONE,
-        IndexFeature::SUPPORT_EXPORT_MODEL,
-        IndexFeature::SUPPORT_MERGE_INDEX,
-        IndexFeature::SUPPORT_CAL_DISTANCE_BY_ID
-    });
+    this->index_feature_list_->SetFeatures({IndexFeature::SUPPORT_CLONE,
+                                            IndexFeature::SUPPORT_EXPORT_MODEL,
+                                            IndexFeature::SUPPORT_MERGE_INDEX});
 
     if (this->bucket_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_PQFS) {
         this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_ADD_AFTER_BUILD, false);
@@ -379,6 +384,7 @@ IVF::Add(const DatasetPtr& base) {
         }
         current_num = this->total_elements_;
         this->total_elements_ += num_element;
+        location_map_.resize(this->total_elements_);
     }
 
     auto add_func = [&](int64_t i) -> void {
@@ -403,6 +409,12 @@ IVF::Add(const DatasetPtr& base) {
             } else {
                 offset_id = bucket_->InsertVector(
                     data_ptr, buckets[idx], idx + current_num * buckets_per_data_);
+            }
+            {
+                std::lock_guard lock(label_lookup_mutex_);
+                location_map_[i + current_num] =
+                    (static_cast<uint64_t>(buckets[idx]) << LOCATION_SPLIT_BIT) |
+                    static_cast<uint64_t>(offset_id);
             }
             if (use_attribute_filter_ and this->attr_filter_index_ != nullptr and
                 attr_sets != nullptr) {
@@ -984,6 +996,19 @@ IVF::get_attr_by_inner_id(InnerIdType inner_id, AttributeSet* attr) const {
 
 DatasetPtr
 IVF::CalDistanceById(const float* query, const int64_t* ids, int64_t count) const {
+    auto result = Dataset::Make();
+    result->Owner(true, allocator_);
+    auto* distances = (float*)allocator_->Allocate(sizeof(float) * count);
+    result->Distances(distances);
+    if (this->use_reorder_) {
+        auto computer = this->reorder_codes_->FactoryComputer(query);
+        Vector<InnerIdType> inner_ids(count, allocator_);
+        for (int64_t i = 0; i < count; ++i) {
+            inner_ids[i] = this->label_table_->GetIdByLabel(ids[i]);
+        }
+        this->reorder_codes_->Query(distances, computer, inner_ids.data(), count);
+        return result;
+    }
     Vector<float> normalize_data(dim_, allocator_);
     Vector<float> centroid(dim_, allocator_);
     if (use_residual_ && metric_ == MetricType::METRIC_TYPE_COSINE) {
@@ -991,10 +1016,6 @@ IVF::CalDistanceById(const float* query, const int64_t* ids, int64_t count) cons
         query = normalize_data.data();
     }
     auto computer = this->bucket_->FactoryComputer(query);
-    auto result = Dataset::Make();
-    result->Owner(true, allocator_);
-    auto* distances = (float*)allocator_->Allocate(sizeof(float) * count);
-    result->Distances(distances);
     for (int64_t i = 0; i < count; ++i) {
         auto inner_id = this->label_table_->GetIdByLabel(ids[i]);
         auto location = this->get_location(inner_id);
@@ -1010,6 +1031,34 @@ IVF::CalDistanceById(const float* query, const int64_t* ids, int64_t count) cons
             this->bucket_->QueryOneById(computer, location.first, location.second) - ip_distance;
     }
     return result;
+}
+float
+IVF::CalcDistanceById(const float* query, int64_t id) const {
+    if (this->use_reorder_) {
+        float dist = 0.0F;
+        auto computer = this->reorder_codes_->FactoryComputer(query);
+        auto inner_id = this->label_table_->GetIdByLabel(id);
+        this->reorder_codes_->Query(&dist, computer, &inner_id, 1);
+        return dist;
+    }
+    Vector<float> normalize_data(dim_, allocator_);
+    Vector<float> centroid(dim_, allocator_);
+    if (use_residual_ && metric_ == MetricType::METRIC_TYPE_COSINE) {
+        Normalize(query, normalize_data.data(), dim_);
+        query = normalize_data.data();
+    }
+    auto computer = this->bucket_->FactoryComputer(query);
+    auto inner_id = this->label_table_->GetIdByLabel(id);
+    auto location = this->get_location(inner_id);
+    auto ip_distance = 0.0F;
+    if (use_residual_) {
+        partition_strategy_->GetCentroid(location.first, centroid);
+        ip_distance = FP32ComputeIP(query, centroid.data(), dim_);
+        if (metric_ == MetricType::METRIC_TYPE_L2SQR) {
+            ip_distance *= 2;
+        }
+    }
+    return this->bucket_->QueryOneById(computer, location.first, location.second) - ip_distance;
 }
 
 }  // namespace vsag
