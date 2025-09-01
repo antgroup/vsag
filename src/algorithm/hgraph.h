@@ -59,10 +59,70 @@ public:
 
     ~HGraph() override = default;
 
+    std::vector<int64_t>
+    Add(const DatasetPtr& data) override;
+
+    std::string
+    AnalyzeIndexBySearch(const SearchRequest& request) override;
+
+    std::vector<int64_t>
+    Build(const DatasetPtr& data) override;
+
+    float
+    CalcDistanceById(const float* query, int64_t id) const override;
+
+    DatasetPtr
+    CalDistanceById(const float* query, const int64_t* ids, int64_t count) const override;
+
+    void
+    Deserialize(StreamReader& reader) override;
+
+    InnerIndexPtr
+    ExportModel(const IndexCommonParam& param) const override;
+
+    uint64_t
+    EstimateMemory(uint64_t num_elements) const override;
+
+    void
+    GetCodeByInnerId(InnerIdType inner_id, uint8_t* data) const override;
+
+    void
+    GetExtraInfoByIds(const int64_t* ids, int64_t count, char* extra_infos) const override;
+
+    int64_t
+    GetMemoryUsage() const override {
+        return static_cast<int64_t>(this->CalSerializeSize());
+    }
+
+    std::string
+    GetMemoryUsageDetail() const override;
+
+    std::pair<int64_t, int64_t>
+    GetMinAndMaxId() const override;
+
     [[nodiscard]] std::string
     GetName() const override {
         return INDEX_TYPE_HGRAPH;
     }
+
+    int64_t
+    GetNumElements() const override {
+        return static_cast<int64_t>(this->total_count_) - delete_count_;
+    }
+
+    int64_t
+    GetNumberRemoved() const override {
+        return delete_count_;
+    }
+
+    std::string
+    GetStats() const override;
+
+    void
+    GetVectorByInnerId(InnerIdType inner_id, float* data) const override;
+
+    DatasetPtr
+    GetVectorByIds(const int64_t* ids, int64_t count) const;
 
     IndexType
     GetIndexType() override {
@@ -71,23 +131,6 @@ public:
 
     void
     InitFeatures() override;
-
-    [[nodiscard]] InnerIndexPtr
-    Fork(const IndexCommonParam& param) override {
-        return std::make_shared<HGraph>(this->create_param_ptr_, param);
-    }
-
-    void
-    Train(const DatasetPtr& base) override;
-
-    std::vector<int64_t>
-    Build(const DatasetPtr& data) override;
-
-    std::vector<int64_t>
-    Add(const DatasetPtr& data) override;
-
-    bool
-    Remove(int64_t id) override;
 
     [[nodiscard]] DatasetPtr
     KnnSearch(const DatasetPtr& query,
@@ -111,6 +154,14 @@ public:
               IteratorContext*& iter_ctx,
               bool is_last_filter) const override;
 
+    [[nodiscard]] InnerIndexPtr
+    Fork(const IndexCommonParam& param) override {
+        return std::make_shared<HGraph>(this->create_param_ptr_, param);
+    }
+
+    void
+    Merge(const std::vector<MergeUnit>& merge_units) override;
+
     [[nodiscard]] DatasetPtr
     RangeSearch(const DatasetPtr& query,
                 float radius,
@@ -118,47 +169,14 @@ public:
                 const FilterPtr& filter,
                 int64_t limited_size = -1) const override;
 
+    [[nodiscard]] DatasetPtr
+    SearchWithRequest(const SearchRequest& request) const override;
+
+    bool
+    Remove(int64_t id) override;
+
     void
     Serialize(StreamWriter& writer) const override;
-
-    void
-    Deserialize(StreamReader& reader) override;
-
-    int64_t
-    GetNumberRemoved() const override {
-        return delete_count_;
-    }
-
-    int64_t
-    GetNumElements() const override {
-        return static_cast<int64_t>(this->total_count_) - delete_count_;
-    }
-
-    uint64_t
-    EstimateMemory(uint64_t num_elements) const override;
-
-    int64_t
-    GetMemoryUsage() const override {
-        return static_cast<int64_t>(this->CalSerializeSize());
-    }
-
-    std::string
-    GetMemoryUsageDetail() const override;
-
-    float
-    CalcDistanceById(const float* query, int64_t id) const override;
-
-    DatasetPtr
-    CalDistanceById(const float* query, const int64_t* ids, int64_t count) const override;
-
-    std::pair<int64_t, int64_t>
-    GetMinAndMaxId() const override;
-
-    void
-    GetExtraInfoByIds(const int64_t* ids, int64_t count, char* extra_infos) const override;
-
-    InnerIndexPtr
-    ExportModel(const IndexCommonParam& param) const override;
 
     inline void
     SetBuildThreadsCount(uint64_t count) {
@@ -167,16 +185,13 @@ public:
     }
 
     void
-    GetCodeByInnerId(InnerIdType inner_id, uint8_t* data) const override;
+    SetImmutable() override;
 
     void
-    GetVectorByInnerId(InnerIdType inner_id, float* data) const override;
+    SetIO(const std::shared_ptr<Reader> reader) override;
 
     void
-    Merge(const std::vector<MergeUnit>& merge_units) override;
-
-    [[nodiscard]] DatasetPtr
-    SearchWithRequest(const SearchRequest& request) const override;
+    Train(const DatasetPtr& base) override;
 
     bool
     UpdateId(int64_t old_id, int64_t new_id) override;
@@ -192,20 +207,8 @@ public:
                     const AttributeSet& new_attrs,
                     const AttributeSet& origin_attrs) override;
 
-    void
-    SetImmutable() override;
-
-    void
-    SetIO(const std::shared_ptr<Reader> reader) override;
-
     bool
     UpdateExtraInfo(const DatasetPtr& new_base) override;
-
-    std::string
-    GetStats() const override;
-
-    std::string
-    AnalyzeIndexBySearch(const SearchRequest& request) override;
 
 private:
     const void*
