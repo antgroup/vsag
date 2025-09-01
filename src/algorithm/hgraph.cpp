@@ -53,9 +53,9 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
       odescent_param_(hgraph_param->odescent_param),
       graph_type_(hgraph_param->graph_type),
       hierarchical_datacell_param_(hgraph_param->hierarchical_graph_param),
-      extra_info_size_(common_param.extra_info_size_),
-      deleted_ids_(allocator_) {
+      extra_info_size_(common_param.extra_info_size_) {
     this->label_table_->compress_duplicate_data_ = hgraph_param->support_duplicate;
+    this->label_table_->support_tombstone_ = hgraph_param->support_tombstone;
     neighbors_mutex_ = std::make_shared<PointsMutex>(0, common_param.allocator_.get());
     this->basic_flatten_codes_ =
         FlattenInterface::MakeInstance(hgraph_param->base_codes_param, common_param);
@@ -949,7 +949,7 @@ HGraph::GetMinAndMaxId() const {
         throw VsagException(ErrorType::INTERNAL_ERROR, "Label map size is zero");
     }
     for (int i = 0; i < this->total_count_; ++i) {
-        if (not deleted_ids_.empty() && deleted_ids_.count(i) != 0) {
+        if (this->label_table_->IsRemoved(i)) {
             continue;
         }
         auto label = this->label_table_->label_table_[i];
@@ -1090,6 +1090,9 @@ HGraph::InitFeatures() {
         IndexFeature::SUPPORT_KNN_SEARCH_WITH_ID_FILTER,
         IndexFeature::SUPPORT_KNN_ITERATOR_FILTER_SEARCH,
     });
+    // update
+    this->index_feature_list_->SetFeatures({IndexFeature::SUPPORT_UPDATE_ID_CONCURRENT,
+                                            IndexFeature::SUPPORT_UPDATE_VECTOR_CONCURRENT});
     // concurrency
     this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_SEARCH_CONCURRENT);
     this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_ADD_CONCURRENT);
@@ -1265,7 +1268,8 @@ static const std::string HGRAPH_PARAMS_TEMPLATE =
                 "{IO_FILE_PATH}": "{DEFAULT_FILE_PATH_VALUE}"
             }
         },
-        "{HGRAPH_SUPPORT_DUPLICATE}": false
+        "{HGRAPH_SUPPORT_DUPLICATE}": false,
+        "{HGRAPH_SUPPORT_TOMBSTONE}": false
     })";
 
 ParamPtr
@@ -1517,6 +1521,12 @@ HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
                                                 {
                                                     SUPPORT_DUPLICATE,
                                                 },
+                                            },
+                                            {
+                                                HGRAPH_SUPPORT_TOMBSTONE,
+                                                {
+                                                    SUPPORT_TOMBSTONE,
+                                                },
                                             }};
     if (common_param.data_type_ == DataTypes::DATA_TYPE_INT8) {
         throw VsagException(ErrorType::INVALID_ARGUMENT,
@@ -1598,7 +1608,6 @@ HGraph::Remove(int64_t id) {
     }
     this->bottom_graph_->DeleteNeighborsById(inner_id);
     this->label_table_->Remove(id);
-    this->deleted_ids_.insert(inner_id);
     delete_count_++;
     return true;
 }
@@ -2000,7 +2009,7 @@ HGraph::analyze_graph_connection(JsonType& stats) const {
         }
     }
     for (int64_t i = 0; i < total_count_; ++i) {
-        if (not visited[i] and (deleted_ids_.count(i) == 0)) {
+        if (not visited[i] and this->label_table_->IsRemoved(i)) {
             connect_components++;
             int64_t component_size = 0;
             std::queue<int64_t> q;
@@ -2013,7 +2022,7 @@ HGraph::analyze_graph_connection(JsonType& stats) const {
                 Vector<InnerIdType> neighbors(allocator_);
                 this->bottom_graph_->GetNeighbors(node, neighbors);
                 for (const auto& nb : neighbors) {
-                    if (not visited[nb] and (deleted_ids_.count(nb) == 0)) {
+                    if (not visited[nb] and this->label_table_->IsRemoved(nb)) {
                         visited[nb] = true;
                         q.push(nb);
                     }
@@ -2062,6 +2071,79 @@ HGraph::check_and_init_raw_vector(const FlattenInterfaceParamPtr& raw_vector_par
         raw_vector_ = high_precise_codes_;
         return;
     }
+}
+
+bool
+HGraph::UpdateId(int64_t old_id, int64_t new_id) {
+    if (old_id == new_id) {
+        return true;
+    }
+
+    std::scoped_lock label_lock(this->label_lookup_mutex_);
+    this->label_table_->UpdateLabel(old_id, new_id);
+
+    return true;
+}
+
+bool
+HGraph::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) {
+    // check if id exists and get copied base data
+    uint32_t inner_id = 0;
+    {
+        std::shared_lock label_lock(this->label_lookup_mutex_);
+        inner_id = this->label_table_->GetIdByLabel(id);
+    }
+
+    // the validation of the new vector
+    void* new_base_vec = nullptr;
+    size_t data_size = 0;
+    get_vectors(data_type_, dim_, new_base, &new_base_vec, &data_size);
+
+    if (not force_update) {
+        Vector<int8_t> base_data(data_size, allocator_);
+        auto base = Dataset::Make();
+
+        GetVectorByInnerId(inner_id, (float*)base_data.data());
+        set_dataset(data_type_, dim_, base, base_data.data(), 1);
+
+        // search neighbors
+        auto neighbors = this->KnnSearch(
+            base,
+            UPDATE_CHECK_SEARCH_K,
+            fmt::format(R"({{"hgraph": {{ "ef_search": {} }} }})", UPDATE_CHECK_SEARCH_L),
+            nullptr);
+
+        // check whether the neighborhood relationship is same
+        float self_dist = 0;
+        self_dist = this->CalcDistanceById((float*)new_base_vec, id);
+        for (int i = 0; i < neighbors->GetDim(); i++) {
+            // don't compare with itself
+            if (neighbors->GetIds()[i] == id) {
+                continue;
+            }
+
+            float neighbor_dist = 0;
+            try {
+                neighbor_dist =
+                    this->CalcDistanceById((float*)new_base_vec, neighbors->GetIds()[i]);
+            } catch (const std::runtime_error& e) {
+                // incase that neighbor has been deleted
+                continue;
+            }
+            if (neighbor_dist < self_dist) {
+                return false;
+            }
+        }
+    }
+
+    // note that only modify vector need to obtain unique lock
+    // and the lock has been obtained inside datacell
+    auto codes = (use_reorder_) ? high_precise_codes_ : basic_flatten_codes_;
+    bool update_status = basic_flatten_codes_->UpdateVector(new_base_vec, inner_id);
+    if (use_reorder_) {
+        update_status = update_status && high_precise_codes_->UpdateVector(new_base_vec, inner_id);
+    }
+    return update_status;
 }
 
 std::string
