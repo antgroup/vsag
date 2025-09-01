@@ -506,6 +506,7 @@ IVF::Merge(const std::vector<MergeUnit>& merge_units) {
     for (const auto& unit : merge_units) {
         this->merge_one_unit(unit);
     }
+    this->fill_location_map();
     this->bucket_->Package();
 }
 
