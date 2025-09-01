@@ -106,15 +106,20 @@ template <MetricType metric>
 float
 INT8Quantizer<metric>::ComputeImpl(const uint8_t* codes1, const uint8_t* codes2) {
     if constexpr (metric == MetricType::METRIC_TYPE_IP) {
-        // TODO(coien): impl ip
+        return INT8ComputeIP(reinterpret_cast<const int8_t*>(codes1),
+                             reinterpret_cast<const int8_t*>(codes2),
+                             this->dim_);
     } else if constexpr (metric == MetricType::METRIC_TYPE_COSINE) {
-        // TODO(coien): impl cosine
+        //TODO: impl cosine
+        // return INT8ComputeIP(reinterpret_cast<const int8_t*>(codes1),
+        //                      reinterpret_cast<const int8_t*>(codes2),
+        //                      this->dim_);
+        return 0.0f;
     } else if (metric == MetricType::METRIC_TYPE_L2SQR) {
         return INT8ComputeL2Sqr(reinterpret_cast<const int8_t*>(codes1),
                                 reinterpret_cast<const int8_t*>(codes2),
                                 this->dim_);
     }
-    return 0.0F;
 }
 
 template <MetricType metric>
@@ -140,9 +145,10 @@ INT8Quantizer<metric>::ComputeDistImpl(Computer<INT8Quantizer<metric>>& computer
                                reinterpret_cast<const int8_t*>(computer.buf_),
                                this->dim_);
     } else if (metric == MetricType::METRIC_TYPE_COSINE) {
-        *dists = INT8ComputeIP(reinterpret_cast<const int8_t*>(codes),
-                                        reinterpret_cast<const int8_t*>(computer.buf_),
-                                        this->dim_);
+        // *dists = INT8ComputeIP(reinterpret_cast<const int8_t*>(codes),
+        //                        reinterpret_cast<const int8_t*>(computer.buf_),
+        //                        this->dim_);
+        *dists = 1.0f;
     } else if (metric == MetricType::METRIC_TYPE_L2SQR) {
         *dists = INT8ComputeL2Sqr(reinterpret_cast<const int8_t*>(codes),
                                   reinterpret_cast<const int8_t*>(computer.buf_),
