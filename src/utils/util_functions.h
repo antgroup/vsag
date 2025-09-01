@@ -116,4 +116,18 @@ base64_decode_obj(const std::string& in, T& obj) {
     memcpy(&obj, to_string.c_str(), sizeof(obj));
 }
 
+void
+get_vectors(DataTypes type,
+            int64_t dim,
+            const vsag::DatasetPtr& base,
+            void** vectors_ptr,
+            size_t* data_size_ptr);
+
+void
+set_dataset(DataTypes type,
+            int64_t dim,
+            const DatasetPtr& base,
+            const void* vectors_ptr,
+            uint32_t num_element);
+
 }  // namespace vsag

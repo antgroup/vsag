@@ -57,6 +57,12 @@ public:
     virtual void
     InsertVector(const void* vector, InnerIdType idx = std::numeric_limits<InnerIdType>::max()) = 0;
 
+    virtual bool
+    UpdateVector(const void* vector, InnerIdType idx = std::numeric_limits<InnerIdType>::max()) {
+        throw VsagException(ErrorType::INTERNAL_ERROR,
+                            "UpdateVector not implemented in FlattenInterface");
+    };
+
     virtual void
     BatchInsertVector(const void* vectors, InnerIdType count, InnerIdType* idx_vec = nullptr) = 0;
 

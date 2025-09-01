@@ -41,3 +41,12 @@
 constexpr static const int64_t INIT_CAPACITY = 10;
 constexpr static const int64_t MAX_CAPACITY_EXTEND = 10000;
 constexpr static const int64_t AMPLIFICATION_FACTOR = 10;
+constexpr static const int64_t EXPANSION_NUM = 1000000;
+constexpr static const int64_t DEFAULT_MAX_ELEMENT = 1;
+constexpr static const int MINIMAL_M = 8;
+constexpr static const int MAXIMAL_M = 64;
+constexpr static const uint32_t GENERATE_SEARCH_K = 50;
+constexpr static const uint32_t UPDATE_CHECK_SEARCH_K = 10;
+constexpr static const uint32_t GENERATE_SEARCH_L = 400;
+constexpr static const uint32_t UPDATE_CHECK_SEARCH_L = 100;
+constexpr static const float GENERATE_OMEGA = 0.51;

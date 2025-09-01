@@ -63,6 +63,10 @@ public:
     void
     InsertVector(const void* vector, InnerIdType idx) override;
 
+    bool
+    UpdateVector(const void* vector,
+                 InnerIdType idx = std::numeric_limits<InnerIdType>::max()) override;
+
     void
     BatchInsertVector(const void* vectors, InnerIdType count, InnerIdType* idx_vec) override;
 
@@ -207,6 +211,20 @@ FlattenDataCell<QuantTmpl, IOTmpl>::InsertVector(const void* vector, InnerIdType
     quantizer_->EncodeOne((const float*)vector, codes.data);
     io_->Write(
         codes.data, code_size_, static_cast<uint64_t>(idx) * static_cast<uint64_t>(code_size_));
+}
+
+template <typename QuantTmpl, typename IOTmpl>
+bool
+FlattenDataCell<QuantTmpl, IOTmpl>::UpdateVector(const void* vector, InnerIdType idx) {
+    if (idx >= total_count_) {
+        return false;
+    }
+    std::lock_guard lock(mutex_);
+    ByteBuffer codes(static_cast<uint64_t>(code_size_), allocator_);
+    quantizer_->EncodeOne((const float*)vector, codes.data);
+    io_->Write(
+        codes.data, code_size_, static_cast<uint64_t>(idx) * static_cast<uint64_t>(code_size_));
+    return true;
 }
 
 template <typename QuantTmpl, typename IOTmpl>

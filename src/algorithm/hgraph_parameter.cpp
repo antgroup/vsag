@@ -150,6 +150,9 @@ HGraphParameter::FromJson(const JsonType& json) {
     if (json.contains(SUPPORT_DUPLICATE)) {
         this->support_duplicate = json[SUPPORT_DUPLICATE];
     }
+    if (json.contains(SUPPORT_TOMBSTONE)) {
+        this->support_tombstone = json[SUPPORT_TOMBSTONE];
+    }
 }
 
 JsonType

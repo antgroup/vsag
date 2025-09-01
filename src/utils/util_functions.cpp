@@ -210,4 +210,36 @@ base64_decode(const std::string& in) {
     return out;
 }
 
+void
+get_vectors(DataTypes type,
+            int64_t dim,
+            const vsag::DatasetPtr& base,
+            void** vectors_ptr,
+            size_t* data_size_ptr) {
+    if (type == DataTypes::DATA_TYPE_FLOAT) {
+        *vectors_ptr = (void*)base->GetFloat32Vectors();
+        *data_size_ptr = dim * sizeof(float);
+    } else if (type == DataTypes::DATA_TYPE_INT8) {
+        *vectors_ptr = (void*)base->GetInt8Vectors();
+        *data_size_ptr = dim * sizeof(int8_t);
+    } else {
+        throw std::invalid_argument(fmt::format("no support for this metric: {}", (int)type));
+    }
+}
+
+void
+set_dataset(DataTypes type,
+            int64_t dim,
+            const DatasetPtr& base,
+            const void* vectors_ptr,
+            uint32_t num_element) {
+    if (type == DataTypes::DATA_TYPE_FLOAT) {
+        base->Float32Vectors((float*)vectors_ptr)->Dim(dim)->Owner(false)->NumElements(num_element);
+    } else if (type == DataTypes::DATA_TYPE_INT8) {
+        base->Int8Vectors((int8_t*)vectors_ptr)->Dim(dim)->Owner(false)->NumElements(num_element);
+    } else {
+        throw std::invalid_argument(fmt::format("no support for this type: {}", (int)type));
+    }
+}
+
 }  // namespace vsag
