@@ -1224,13 +1224,9 @@ TestIVFBuildMultiBucketsPerData(const fixtures::IVFResourcePtr& resource) {
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
     for (auto metric_type : resource->metric_types) {
-        metric_type = "ip";
         for (auto dim : resource->dims) {
-            dim = 48;
             for (auto train_type : resource->train_types) {
                 for (auto [base_quantization_str, recall] : resource->test_cases) {
-                    base_quantization_str = "fp32";
-                    recall = 0.72;
                     if (train_type == "kmeans") {
                         recall *= 0.8F;  // Kmeans may not achieve high recall in random datasets
                     }
