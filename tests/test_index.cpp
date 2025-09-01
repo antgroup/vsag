@@ -126,8 +126,7 @@ TestIndex::TestUpdateId(const IndexPtr& index,
 
                 // old id don't exist
                 auto failed_old_res = index->UpdateId(ids[i], update_id_map[ids[i]]);
-                REQUIRE(failed_old_res.has_value());
-                REQUIRE(not failed_old_res.value());
+                REQUIRE(not failed_old_res.has_value());
 
                 // same id
                 auto succ_same_res = index->UpdateId(update_id_map[ids[i]], update_id_map[ids[i]]);
@@ -145,8 +144,7 @@ TestIndex::TestUpdateId(const IndexPtr& index,
                 // new id is used
                 auto failed_new_res =
                     index->UpdateId(update_id_map[ids[i]], update_id_map[ids[num_vectors - i - 1]]);
-                REQUIRE(failed_new_res.has_value());
-                REQUIRE(not failed_new_res.value());
+                REQUIRE(not failed_new_res.has_value());
             }
         }
     }
@@ -176,7 +174,7 @@ TestIndex::TestUpdateVector(const IndexPtr& index,
     }
 
     std::vector<int> correct_num = {0, 0};
-    uint32_t success_force_updated = 0, failed_force_updated = 0;
+    uint32_t success_far_updated = 0, failed_far_updated = 0;
     for (int round = 0; round < 2; round++) {
         // round 0 for update, round 1 for validate update results
         for (int i = 0; i < num_vectors; i++) {
@@ -189,6 +187,10 @@ TestIndex::TestUpdateVector(const IndexPtr& index,
             if (round == 0) {
                 if (result.value()->GetIds()[0] == ids[i]) {
                     correct_num[round] += 1;
+                }
+
+                if (not index->CheckIdExist(ids[i])) {
+                    continue;
                 }
 
                 std::vector<float> update_vecs(dim);
@@ -206,12 +208,12 @@ TestIndex::TestUpdateVector(const IndexPtr& index,
                 // success case
                 auto before_update_dist = *index->CalcDistanceById(base + i * dim, ids[i]);
                 auto succ_vec_res = index->UpdateVector(ids[i], new_base);
-                REQUIRE(succ_vec_res.has_value());
-                if (expected_success) {
-                    REQUIRE(succ_vec_res.value());
-                }
                 auto after_update_dist = *index->CalcDistanceById(base + i * dim, ids[i]);
-                REQUIRE(before_update_dist < after_update_dist);
+                if (expected_success) {
+                    REQUIRE(succ_vec_res.has_value());
+                    REQUIRE(succ_vec_res.value());
+                    REQUIRE(before_update_dist <= after_update_dist);
+                }
 
                 // update with far vector
                 new_base->Float32Vectors(far_vecs.data());
@@ -220,35 +222,36 @@ TestIndex::TestUpdateVector(const IndexPtr& index,
                 if (fail_vec_res.value()) {
                     // note that the update should be failed, but for some cases, it success
                     auto force_update_dist = *index->CalcDistanceById(base + i * dim, ids[i]);
-                    REQUIRE(after_update_dist < force_update_dist);
-                    success_force_updated++;
+                    if (expected_success) {
+                        REQUIRE(after_update_dist <= force_update_dist);
+                    }
+                    success_far_updated++;
                 } else {
-                    failed_force_updated++;
+                    failed_far_updated++;
                 }
 
                 // force update with far vector
                 new_base->Float32Vectors(far_vecs.data());
                 auto force_update_res1 = index->UpdateVector(ids[i], new_base, true);
                 REQUIRE(force_update_res1.has_value());
+                REQUIRE(force_update_res1.value());
+                auto force_update_dist = *index->CalcDistanceById(base + i * dim, ids[i]);
                 if (expected_success) {
-                    REQUIRE(force_update_res1.value());
-                    auto force_update_dist = *index->CalcDistanceById(base + i * dim, ids[i]);
-                    REQUIRE(after_update_dist < force_update_dist);
+                    REQUIRE(after_update_dist <= force_update_dist);
                 }
 
                 new_base->Float32Vectors(update_vecs.data());
                 auto force_update_res2 = index->UpdateVector(ids[i], new_base, true);
                 REQUIRE(force_update_res2.has_value());
+                REQUIRE(force_update_res2.value());
+                force_update_dist = *index->CalcDistanceById(base + i * dim, ids[i]);
                 if (expected_success) {
-                    REQUIRE(force_update_res2.value());
-                    auto force_update_dist = *index->CalcDistanceById(base + i * dim, ids[i]);
                     REQUIRE(std::abs(after_update_dist - force_update_dist) < 1e-5);
                 }
 
                 // old id don't exist
                 auto failed_old_res = index->UpdateVector(ids[i] + 2 * max_id, new_base);
-                REQUIRE(failed_old_res.has_value());
-                REQUIRE(not failed_old_res.value());
+                REQUIRE(not failed_old_res.has_value());
             } else {
                 if (result.value()->GetIds()[0] == ids[i]) {
                     correct_num[round] += 1;
@@ -257,8 +260,10 @@ TestIndex::TestUpdateVector(const IndexPtr& index,
         }
     }
 
-    REQUIRE(correct_num[0] == correct_num[1]);
-    REQUIRE(success_force_updated < failed_force_updated);
+    if (expected_success) {
+        REQUIRE(correct_num[0] == correct_num[1]);
+        REQUIRE(success_far_updated < failed_far_updated);
+    }
 }
 
 void

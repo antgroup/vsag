@@ -40,8 +40,10 @@
 #include "index_impl.h"
 #include "logger.h"
 #include "typing.h"
+#include "utils/util_functions.h"
 #include "utils/window_result_queue.h"
 #include "vsag/binaryset.h"
+#include "vsag/constants.h"
 #include "vsag/errors.h"
 #include "vsag/index.h"
 #include "vsag/iterator_context.h"
@@ -399,12 +401,6 @@ private:
 
     tl::expected<void, Error>
     deserialize(std::istream& in_stream);
-
-    void
-    get_vectors(const DatasetPtr& base, void** vectors_ptr, size_t* data_size_ptr) const;
-
-    void
-    set_dataset(const DatasetPtr& base, const void* vectors_ptr, uint32_t num_element) const;
 
     tl::expected<void, Error>
     merge(const std::vector<MergeUnit>& merge_units);

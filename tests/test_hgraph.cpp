@@ -263,6 +263,8 @@ HGraphTestIndex::TestGeneral(const TestIndex::IndexPtr& index,
     TestGetRawVectorByIds(index, dataset);
     TestBatchCalcDistanceById(index, dataset);
     TestSearchAllocator(index, dataset, search_param, recall, true);
+    TestUpdateVector(index, dataset, search_param, false);
+    TestUpdateId(index, dataset, search_param, true);
     TestMemoryUsageDetail(index);
 }
 
@@ -642,8 +644,8 @@ TestHGraphBuild(const fixtures::HGraphTestIndexPtr& test_index,
                     dim, resource->base_count, metric_type);
 
                 TestIndex::TestBuildIndex(index, dataset, true);
-                HGraphTestIndex::TestGeneral(index, dataset, search_param, recall);
                 TestIndex::TestExportIDs(index, dataset);
+                HGraphTestIndex::TestGeneral(index, dataset, search_param, recall);
 
                 vsag::Options::Instance().set_block_size_limit(origin_size);
             }
