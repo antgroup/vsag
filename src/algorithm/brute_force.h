@@ -41,35 +41,49 @@ public:
 
     ~BruteForce() override = default;
 
-    [[nodiscard]] std::string
-    GetName() const override {
-        return INDEX_BRUTE_FORCE;
-    }
+    std::vector<int64_t>
+    Add(const DatasetPtr& data) override;
+
+    std::vector<int64_t>
+    Build(const DatasetPtr& data) override;
+
+    float
+    CalcDistanceById(const float* vector, int64_t id) const override;
+
+    void
+    Deserialize(StreamReader& reader) override;
+
+    uint64_t
+    EstimateMemory(uint64_t num_elements) const override;
 
     [[nodiscard]] InnerIndexPtr
     Fork(const IndexCommonParam& param) override {
         return std::make_shared<BruteForce>(this->create_param_ptr_, param);
     }
 
-    void
-    InitFeatures() override;
-
-    std::vector<int64_t>
-    Build(const DatasetPtr& data) override;
-
     IndexType
     GetIndexType() override {
         return IndexType::BRUTEFORCE;
     }
 
+    int64_t
+    GetMemoryUsage() const override;
+
+    std::string
+    GetName() const override {
+        return INDEX_BRUTE_FORCE;
+    }
+
+    int64_t
+    GetNumElements() const override {
+        return this->total_count_;
+    }
+
     void
-    Train(const DatasetPtr& data) override;
+    GetVectorByInnerId(InnerIdType inner_id, float* data) const override;
 
-    std::vector<int64_t>
-    Add(const DatasetPtr& data) override;
-
-    bool
-    Remove(int64_t label) override;
+    void
+    InitFeatures() override;
 
     DatasetPtr
     KnnSearch(const DatasetPtr& query,
@@ -84,31 +98,17 @@ public:
                 const FilterPtr& filter,
                 int64_t limited_size = -1) const override;
 
-    float
-    CalcDistanceById(const float* vector, int64_t id) const override;
+    bool
+    Remove(int64_t label) override;
+
+    DatasetPtr
+    SearchWithRequest(const SearchRequest& request) const override;
 
     void
     Serialize(StreamWriter& writer) const override;
 
     void
-    Deserialize(StreamReader& reader) override;
-
-    [[nodiscard]] int64_t
-    GetNumElements() const override {
-        return this->total_count_;
-    }
-
-    [[nodiscard]] int64_t
-    GetMemoryUsage() const override;
-
-    [[nodiscard]] uint64_t
-    EstimateMemory(uint64_t num_elements) const override;
-
-    void
-    GetVectorByInnerId(InnerIdType inner_id, float* data) const override;
-
-    [[nodiscard]] virtual DatasetPtr
-    SearchWithRequest(const SearchRequest& request) const override;
+    Train(const DatasetPtr& data) override;
 
     void
     UpdateAttribute(int64_t id, const AttributeSet& new_attrs) override;
