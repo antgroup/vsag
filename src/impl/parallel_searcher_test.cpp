@@ -19,7 +19,7 @@
 
 using namespace vsag;
 
-TEST_CASE("Parallel search with HNSW", "[ut][ParallelSearcher]") {
+TEST_CASE("Parallel search with HNSW", "[ut][ParallelSearcher][concurrent]") {
     // data attr
     uint32_t base_size = 1000;
     uint32_t query_size = 100;

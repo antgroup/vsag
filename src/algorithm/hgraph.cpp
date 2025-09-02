@@ -561,10 +561,6 @@ HGraph::RangeSearch(const DatasetPtr& query,
     search_param.search_mode = RANGE_SEARCH;
     search_param.consider_duplicate = true;
     search_param.range_search_limit_size = static_cast<int>(limited_size);
-    //used for parallel searching
-    //search_param.level_0 = true;
-    //search_param.use_muti_threads_for_one_query = true;
-    //search_param.parallel_search_thread_count_per_query = 6;
     auto search_result = this->search_one_graph(
         raw_query, this->bottom_graph_, this->basic_flatten_codes_, search_param);
     if (use_reorder_) {
@@ -1776,10 +1772,6 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     search_param.is_inner_id_allowed = ft;
     search_param.topk = static_cast<int64_t>(search_param.ef);
     search_param.consider_duplicate = true;
-    //used for parallel searching
-    //search_param.level_0 = true;
-    //search_param.use_muti_threads_for_one_query = true;
-    //search_param.parallel_search_thread_count_per_query = 6;
     if (params.enable_time_record) {
         search_param.time_cost = std::make_shared<Timer>();
         search_param.time_cost->SetThreshold(params.timeout_ms);
