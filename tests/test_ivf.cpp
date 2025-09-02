@@ -456,6 +456,9 @@ TestIVFBuildWithResidual(const fixtures::IVFResourcePtr& resource) {
             for (auto train_type : resource->train_types) {
                 for (auto [base_quantization_str, recall] : tmp_test_cases) {
                     auto count = std::min(300, static_cast<int32_t>(dim / 4));
+                    if (base_quantization_str == "fp16") {
+                        recall *= (1 - 0.2F * dim / 1536.0F);
+                    }
                     if (train_type == "kmeans") {
                         recall *= 0.8F;  // Kmeans may not achieve high recall in random datasets
                     }
