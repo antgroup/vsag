@@ -43,9 +43,33 @@ public:
         }
     }
 
-    [[nodiscard]] std::string
-    GetName() const override {
-        return INDEX_SPARSE;
+    std::vector<int64_t>
+    Add(const DatasetPtr& base) override;
+
+    DatasetPtr
+    CalDistanceById(const float* query, const int64_t* ids, int64_t count) const override {
+        throw VsagException(vsag::ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "no support CalDistanceById in " + GetName());
+    }
+
+    void
+    Deserialize(StreamReader& reader) override {
+        StreamReader::ReadObj(reader, cur_element_count_);
+        datas_.resize(cur_element_count_);
+        max_capacity_ = cur_element_count_;
+        for (int i = 0; i < cur_element_count_; ++i) {
+            uint32_t len;
+            StreamReader::ReadObj(reader, len);
+            datas_[i] = (uint32_t*)allocator_->Allocate((2 * len + 1) * sizeof(uint32_t));
+            datas_[i][0] = len;
+            reader.Read((char*)(datas_[i] + 1), 2 * len * sizeof(uint32_t));
+        }
+        label_table_->Deserialize(reader);
+    }
+
+    InnerIndexPtr
+    Fork(const IndexCommonParam& param) override {
+        return std::make_shared<SparseIndex>(this->create_param_ptr_, param);
     }
 
     IndexType
@@ -53,13 +77,19 @@ public:
         return IndexType::SPARSE;
     }
 
-    [[nodiscard]] InnerIndexPtr
-    Fork(const IndexCommonParam& param) override {
-        return std::make_shared<SparseIndex>(this->create_param_ptr_, param);
+    std::string
+    GetName() const override {
+        return INDEX_SPARSE;
     }
 
-    std::vector<int64_t>
-    Add(const DatasetPtr& base) override;
+    int64_t
+    GetNumElements() const override {
+        return cur_element_count_;
+    }
+
+    void
+    InitFeatures() override {
+    }
 
     DatasetPtr
     KnnSearch(const DatasetPtr& query,
@@ -82,36 +112,6 @@ public:
             writer.Write((char*)datas_[i], (2 * len + 1) * sizeof(uint32_t));
         }
         label_table_->Serialize(writer);
-    }
-
-    void
-    Deserialize(StreamReader& reader) override {
-        StreamReader::ReadObj(reader, cur_element_count_);
-        datas_.resize(cur_element_count_);
-        max_capacity_ = cur_element_count_;
-        for (int i = 0; i < cur_element_count_; ++i) {
-            uint32_t len;
-            StreamReader::ReadObj(reader, len);
-            datas_[i] = (uint32_t*)allocator_->Allocate((2 * len + 1) * sizeof(uint32_t));
-            datas_[i][0] = len;
-            reader.Read((char*)(datas_[i] + 1), 2 * len * sizeof(uint32_t));
-        }
-        label_table_->Deserialize(reader);
-    }
-
-    int64_t
-    GetNumElements() const override {
-        return cur_element_count_;
-    }
-
-    DatasetPtr
-    CalDistanceById(const float* query, const int64_t* ids, int64_t count) const override {
-        throw VsagException(vsag::ErrorType::UNSUPPORTED_INDEX_OPERATION,
-                            "no support CalDistanceById in " + GetName());
-    }
-
-    void
-    InitFeatures() override {
     }
 
     float
