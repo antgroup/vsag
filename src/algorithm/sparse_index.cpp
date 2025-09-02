@@ -188,4 +188,12 @@ SparseIndex::CalDistanceByIdUnsafe(Vector<uint32_t>& sorted_ids,
                         (float*)(datas_[inner_id] + 1 + datas_[inner_id][0]));
 }
 
+float
+SparseIndex::CalcDistanceById(const DatasetPtr& vector, int64_t id) const {
+    const auto* sparse_vectors = vector->GetSparseVectors();
+    uint32_t inner_id = this->label_table_->GetIdByLabel(id);
+    auto [sorted_ids, sorted_vals] = sort_sparse_vector(sparse_vectors[0]);
+    return CalDistanceByIdUnsafe(sorted_ids, sorted_vals, inner_id);
+}
+
 }  // namespace vsag

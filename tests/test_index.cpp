@@ -773,6 +773,8 @@ TestIndex::TestCalcDistanceById(const IndexPtr& index,
         query->NumElements(1)
             ->Dim(dim)
             ->Float32Vectors(queries->GetFloat32Vectors() + i * dim)
+            ->SparseVectors(queries->GetSparseVectors() + i)
+            ->Paths(queries->GetPaths() + i)
             ->Owner(false);
         for (auto j = 0; j < gt_topK; ++j) {
             auto id = gts->GetIds()[i * gt_topK + j];

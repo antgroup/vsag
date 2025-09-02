@@ -302,6 +302,69 @@ SINDI::Deserialize(StreamReader& reader) {
     }
 }
 
+bool
+SINDI::UpdateId(int64_t old_id, int64_t new_id) {
+    std::unique_lock wlock(this->global_mutex_);
+    label_table_->UpdateLabel(old_id, new_id);
+    return true;
+}
+
+std::pair<int64_t, int64_t>
+SINDI::GetMinAndMaxId() const {
+    int64_t min_id = INT64_MAX;
+    int64_t max_id = INT64_MIN;
+    std::shared_lock<std::shared_mutex> lock(this->label_lookup_mutex_);
+    if (this->cur_element_count_ == 0) {
+        throw VsagException(ErrorType::INTERNAL_ERROR, "Label map size is zero");
+    }
+    for (int i = 0; i < this->cur_element_count_; ++i) {
+        if (this->label_table_->IsRemoved(i)) {
+            continue;
+        }
+        auto label = this->label_table_->label_table_[i];
+        max_id = std::max(label, max_id);
+        min_id = std::min(label, min_id);
+    }
+    return {min_id, max_id};
+}
+
+uint64_t
+SINDI::EstimateMemory(uint64_t num_elements) const {
+    uint64_t mem = 0;
+    // size of label table
+    mem += 2 * sizeof(int64_t) * num_elements;
+
+    // size of term list
+    mem += ESTIMATE_DOC_TERM * num_elements * sizeof(float);
+
+    // size of rerank index is same as sindi
+    if (use_reorder_) {
+        mem *= 2;
+    }
+
+    return mem;
+}
+
+float
+SINDI::CalcDistanceById(const DatasetPtr& vector, int64_t id) const {
+    std::shared_lock rlock(this->global_mutex_);
+
+    if (use_reorder_) {
+        return this->rerank_flat_index_->CalcDistanceById(vector, id);
+    }
+
+    auto inner_id = this->label_table_->GetIdByLabel(id);
+    auto cur_window = inner_id / window_size_;
+    auto term_list = this->window_term_list_[cur_window];
+
+    const auto sparse_query = vector->GetSparseVectors()[0];
+    SINDISearchParameter search_param;
+    search_param.query_prune_ratio = 0;
+    search_param.term_prune_ratio = 0;
+    auto computer = std::make_shared<SparseTermComputer>(sparse_query, search_param, allocator_);
+    return term_list->CalcDistanceByInnerId(computer, inner_id);
+}
+
 void
 SINDI::InitFeatures() {
     // build & add
@@ -327,6 +390,9 @@ SINDI::InitFeatures() {
         IndexFeature::SUPPORT_SERIALIZE_BINARY_SET,
         IndexFeature::SUPPORT_SERIALIZE_FILE,
     });
+
+    // info
+    this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_CAL_DISTANCE_BY_ID);
 
     // concurrency
     this->index_feature_list_->SetFeatures({

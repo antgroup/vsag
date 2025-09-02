@@ -87,10 +87,6 @@ public:
         return cur_element_count_;
     }
 
-    void
-    InitFeatures() override {
-    }
-
     DatasetPtr
     KnnSearch(const DatasetPtr& query,
               int64_t k,
@@ -112,6 +108,26 @@ public:
             writer.Write((char*)datas_[i], (2 * len + 1) * sizeof(uint32_t));
         }
         label_table_->Serialize(writer);
+    }
+
+
+    int64_t
+    GetNumElements() const override {
+        return cur_element_count_;
+    }
+
+    DatasetPtr
+    CalDistanceById(const float* query, const int64_t* ids, int64_t count) const override {
+        throw VsagException(vsag::ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "no support CalDistanceById in " + GetName());
+    }
+
+    float
+    CalcDistanceById(const DatasetPtr& vector, int64_t id) const override;
+
+    void
+    InitFeatures() override {
+        this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_CAL_DISTANCE_BY_ID);
     }
 
     float

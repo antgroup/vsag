@@ -401,6 +401,18 @@ public:
     };
 
     /**
+     * @brief Calculate the distance between the query and the vector of the given ID.
+     *
+     * @param vector is the embedding of query
+     * @param id is the unique identifier of the vector to be calculated in the index.
+     * @return result is the distance between the query and the vector of the given ID.
+     */
+    virtual tl::expected<float, Error>
+    CalcDistanceById(const DatasetPtr& vector, int64_t id) const {
+        throw std::runtime_error("Index doesn't support get distance by id");
+    };
+
+    /**
      * @brief Calculate the distance between the query and the vector of the given ID for batch.
      *
      * @param query is the embedding of query

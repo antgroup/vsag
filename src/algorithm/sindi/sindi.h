@@ -87,6 +87,18 @@ public:
         return cur_element_count_;
     }
 
+    [[nodiscard]] uint64_t
+    EstimateMemory(uint64_t num_elements) const override;
+
+    float
+    CalcDistanceById(const DatasetPtr& vector, int64_t id) const override;
+
+    bool
+    UpdateId(int64_t old_id, int64_t new_id) override;
+
+    std::pair<int64_t, int64_t>
+    GetMinAndMaxId() const override;
+
 private:
     template <InnerSearchMode mode>
     DatasetPtr
