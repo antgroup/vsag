@@ -46,35 +46,44 @@ public:
 
     ~IVF() override = default;
 
-    [[nodiscard]] std::string
-    GetName() const override {
-        return INDEX_IVF;
-    }
+    std::vector<int64_t>
+    Add(const DatasetPtr& base) override;
+
+    std::vector<int64_t>
+    Build(const DatasetPtr& base) override;
+
+    void
+    Deserialize(StreamReader& reader) override;
+
+    [[nodiscard]] InnerIndexPtr
+    ExportModel(const IndexCommonParam& param) const override;
 
     [[nodiscard]] InnerIndexPtr
     Fork(const IndexCommonParam& param) override {
         return std::make_shared<IVF>(this->create_param_ptr_, param);
     }
 
-    void
-    InitFeatures() override;
-
-    std::vector<int64_t>
-    Build(const DatasetPtr& base) override;
+    DatasetPtr
+    GetDataByIds(const int64_t* ids, int64_t count) const override;
 
     IndexType
     GetIndexType() override {
         return IndexType::IVF;
     }
 
-    std::vector<int64_t>
-    Add(const DatasetPtr& base) override;
+    std::string
+    GetName() const override {
+        return INDEX_IVF;
+    }
+
+    int64_t
+    GetNumElements() const override;
 
     void
-    Train(const DatasetPtr& data) override;
+    GetCodeByInnerId(InnerIdType inner_id, uint8_t* data) const override;
 
-    InnerIndexPtr
-    ExportModel(const IndexCommonParam& param) const override;
+    void
+    InitFeatures() override;
 
     DatasetPtr
     KnnSearch(const DatasetPtr& query,
@@ -82,8 +91,8 @@ public:
               const std::string& parameters,
               const FilterPtr& filter) const override;
 
-    [[nodiscard]] DatasetPtr
-    SearchWithRequest(const SearchRequest& request) const override;
+    void
+    Merge(const std::vector<MergeUnit>& merge_units) override;
 
     DatasetPtr
     RangeSearch(const DatasetPtr& query,
@@ -92,8 +101,14 @@ public:
                 const FilterPtr& filter,
                 int64_t limited_size = -1) const override;
 
+    DatasetPtr
+    SearchWithRequest(const SearchRequest& request) const override;
+
     void
-    Merge(const std::vector<MergeUnit>& merge_units) override;
+    Serialize(StreamWriter& writer) const override;
+
+    void
+    Train(const DatasetPtr& data) override;
 
     void
     UpdateAttribute(int64_t id, const AttributeSet& new_attrs) override;
@@ -102,21 +117,6 @@ public:
     UpdateAttribute(int64_t id,
                     const AttributeSet& new_attrs,
                     const AttributeSet& origin_attrs) override;
-
-    void
-    Serialize(StreamWriter& writer) const override;
-
-    void
-    Deserialize(StreamReader& reader) override;
-
-    int64_t
-    GetNumElements() const override;
-
-    [[nodiscard]] DatasetPtr
-    GetDataByIds(const int64_t* ids, int64_t count) const override;
-
-    void
-    GetCodeByInnerId(InnerIdType inner_id, uint8_t* data) const override;
 
 private:
     InnerSearchParam

@@ -95,9 +95,20 @@ public:
     explicit Pyramid(const ParamPtr& param, const IndexCommonParam& common_param)
         : Pyramid(std::dynamic_pointer_cast<PyramidParameters>(param), common_param){};
 
-    std::string
-    GetName() const override {
-        return INDEX_PYRAMID;
+    ~Pyramid() = default;
+
+    std::vector<int64_t>
+    Add(const DatasetPtr& base) override;
+
+    std::vector<int64_t>
+    Build(const DatasetPtr& base) override;
+
+    void
+    Deserialize(StreamReader& reader) override;
+
+    [[nodiscard]] InnerIndexPtr
+    Fork(const IndexCommonParam& param) override {
+        return std::make_shared<Pyramid>(this->create_param_ptr_, param);
     }
 
     IndexType
@@ -105,18 +116,19 @@ public:
         return IndexType::PYRAMID;
     }
 
-    [[nodiscard]] InnerIndexPtr
-    Fork(const IndexCommonParam& param) override {
-        return std::make_shared<Pyramid>(this->create_param_ptr_, param);
+    int64_t
+    GetMemoryUsage() const override;
+
+    std::string
+    GetName() const override {
+        return INDEX_PYRAMID;
     }
 
-    ~Pyramid() = default;
+    int64_t
+    GetNumElements() const override;
 
-    std::vector<int64_t>
-    Build(const DatasetPtr& base) override;
-
-    std::vector<int64_t>
-    Add(const DatasetPtr& base) override;
+    void
+    InitFeatures() override;
 
     DatasetPtr
     KnnSearch(const DatasetPtr& query,
@@ -130,20 +142,9 @@ public:
                 const std::string& parameters,
                 const FilterPtr& filter,
                 int64_t limited_size = -1) const override;
+
     void
     Serialize(StreamWriter& writer) const override;
-
-    void
-    Deserialize(StreamReader& reader) override;
-
-    int64_t
-    GetNumElements() const override;
-
-    int64_t
-    GetMemoryUsage() const override;
-
-    void
-    InitFeatures() override;
 
 private:
     void
