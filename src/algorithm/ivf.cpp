@@ -293,17 +293,23 @@ IVF::InitFeatures() {
         });
     }
 
+    bool has_fp32 = false;
+    if (use_reorder_ && reorder_codes_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32) {
+        has_fp32 = true;
+    }
+    if (name == QUANTIZATION_TYPE_VALUE_FP32 or has_fp32) {
+        this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_CAL_DISTANCE_BY_ID);
+    }
+
     if (name == QUANTIZATION_TYPE_VALUE_FP32 and
         this->bucket_->GetMetricType() != MetricType::METRIC_TYPE_COSINE and
         not this->use_residual_) {
         this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_GET_DATA_BY_IDS);
     }
 
-    this->index_feature_list_->SetFeatures({
-        IndexFeature::SUPPORT_CLONE,
-        IndexFeature::SUPPORT_EXPORT_MODEL,
-        IndexFeature::SUPPORT_MERGE_INDEX,
-    });
+    this->index_feature_list_->SetFeatures({IndexFeature::SUPPORT_CLONE,
+                                            IndexFeature::SUPPORT_EXPORT_MODEL,
+                                            IndexFeature::SUPPORT_MERGE_INDEX});
 
     if (this->bucket_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_PQFS) {
         this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_ADD_AFTER_BUILD, false);
@@ -315,7 +321,6 @@ IVF::Build(const DatasetPtr& base) {
     this->Train(base);
     // TODO(LHT): duplicate
     auto result = this->Add(base);
-    this->fill_location_map();
     return result;
 }
 
@@ -378,6 +383,7 @@ IVF::Add(const DatasetPtr& base) {
         }
         current_num = this->total_elements_;
         this->total_elements_ += num_element;
+        location_map_.resize(this->total_elements_);
     }
 
     auto add_func = [&](int64_t i) -> void {
@@ -402,6 +408,12 @@ IVF::Add(const DatasetPtr& base) {
             } else {
                 offset_id = bucket_->InsertVector(
                     data_ptr, buckets[idx], idx + current_num * buckets_per_data_);
+            }
+            if (j == 0) {
+                std::lock_guard lock(label_lookup_mutex_);
+                location_map_[i + current_num] =
+                    (static_cast<uint64_t>(buckets[idx]) << LOCATION_SPLIT_BIT) |
+                    static_cast<uint64_t>(offset_id);
             }
             if (use_attribute_filter_ and this->attr_filter_index_ != nullptr and
                 attr_sets != nullptr) {
@@ -494,6 +506,7 @@ IVF::Merge(const std::vector<MergeUnit>& merge_units) {
     for (const auto& unit : merge_units) {
         this->merge_one_unit(unit);
     }
+    this->fill_location_map();
     this->bucket_->Package();
 }
 
@@ -952,7 +965,7 @@ IVF::fill_location_map() {
             if (ids[j] >= this->total_elements_ * buckets_per_data_) {
                 throw VsagException(ErrorType::INTERNAL_ERROR, "invalid inner_id");
             }
-            this->location_map_[ids[j]] =
+            this->location_map_[ids[j] / buckets_per_data_] =
                 (static_cast<uint64_t>(i) << LOCATION_SPLIT_BIT) | static_cast<uint64_t>(j);
         }
     }
@@ -979,6 +992,73 @@ void
 IVF::get_attr_by_inner_id(InnerIdType inner_id, AttributeSet* attr) const {
     auto [bucket_id, bucket_offset] = this->get_location(inner_id);
     this->attr_filter_index_->GetAttribute(bucket_id, bucket_offset, attr);
+}
+
+DatasetPtr
+IVF::CalDistanceById(const float* query, const int64_t* ids, int64_t count) const {
+    auto result = Dataset::Make();
+    result->Owner(true, allocator_);
+    auto* distances = (float*)allocator_->Allocate(sizeof(float) * count);
+    result->Distances(distances);
+    if (this->use_reorder_) {
+        auto computer = this->reorder_codes_->FactoryComputer(query);
+        Vector<InnerIdType> inner_ids(count, allocator_);
+        for (int64_t i = 0; i < count; ++i) {
+            inner_ids[i] = this->label_table_->GetIdByLabel(ids[i]);
+        }
+        this->reorder_codes_->Query(distances, computer, inner_ids.data(), count);
+        return result;
+    }
+    Vector<float> normalize_data(dim_, allocator_);
+    Vector<float> centroid(dim_, allocator_);
+    if (use_residual_ && metric_ == MetricType::METRIC_TYPE_COSINE) {
+        Normalize(query, normalize_data.data(), dim_);
+        query = normalize_data.data();
+    }
+    auto computer = this->bucket_->FactoryComputer(query);
+    for (int64_t i = 0; i < count; ++i) {
+        auto inner_id = this->label_table_->GetIdByLabel(ids[i]);
+        auto location = this->get_location(inner_id);
+        auto ip_distance = 0.0F;
+        if (use_residual_) {
+            partition_strategy_->GetCentroid(location.first, centroid);
+            ip_distance = FP32ComputeIP(query, centroid.data(), dim_);
+            if (metric_ == MetricType::METRIC_TYPE_L2SQR) {
+                ip_distance *= 2;
+            }
+        }
+        distances[i] =
+            this->bucket_->QueryOneById(computer, location.first, location.second) - ip_distance;
+    }
+    return result;
+}
+float
+IVF::CalcDistanceById(const float* query, int64_t id) const {
+    if (this->use_reorder_) {
+        float dist = 0.0F;
+        auto computer = this->reorder_codes_->FactoryComputer(query);
+        auto inner_id = this->label_table_->GetIdByLabel(id);
+        this->reorder_codes_->Query(&dist, computer, &inner_id, 1);
+        return dist;
+    }
+    Vector<float> normalize_data(dim_, allocator_);
+    Vector<float> centroid(dim_, allocator_);
+    if (use_residual_ && metric_ == MetricType::METRIC_TYPE_COSINE) {
+        Normalize(query, normalize_data.data(), dim_);
+        query = normalize_data.data();
+    }
+    auto computer = this->bucket_->FactoryComputer(query);
+    auto inner_id = this->label_table_->GetIdByLabel(id);
+    auto location = this->get_location(inner_id);
+    auto ip_distance = 0.0F;
+    if (use_residual_) {
+        partition_strategy_->GetCentroid(location.first, centroid);
+        ip_distance = FP32ComputeIP(query, centroid.data(), dim_);
+        if (metric_ == MetricType::METRIC_TYPE_L2SQR) {
+            ip_distance *= 2;
+        }
+    }
+    return this->bucket_->QueryOneById(computer, location.first, location.second) - ip_distance;
 }
 
 }  // namespace vsag

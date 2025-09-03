@@ -207,6 +207,9 @@ BucketDataCell<QuantTmpl, IOTmpl>::query_one_by_id(
     if (need_release) {
         this->datas_[bucket_id]->Release(codes);
     }
+    if (use_residual_ && this->quantizer_->Metric() == MetricType::METRIC_TYPE_L2SQR) {
+        ret -= residual_bias_[bucket_id][offset_id];
+    }
     return ret;
 }
 

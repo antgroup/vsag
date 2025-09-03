@@ -253,6 +253,7 @@ IVFTestIndex::TestGeneral(const TestIndex::IndexPtr& index,
     TestRangeSearch(index, dataset, search_param, recall, 10, true);
     TestRangeSearch(index, dataset, search_param, recall / 2.0, 5, true);
     TestFilterSearch(index, dataset, search_param, recall, true);
+    TestCalcDistanceById(index, dataset, 2e-6, true);
     TestCheckIdExist(index, dataset);
     TestExportIDs(index, dataset);
 }
