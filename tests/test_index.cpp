@@ -759,7 +759,8 @@ void
 TestIndex::TestCalcDistanceById(const IndexPtr& index,
                                 const TestDatasetPtr& dataset,
                                 float error,
-                                bool expected_success) {
+                                bool expected_success,
+                                bool is_sparse) {
     if (not index->CheckFeature(vsag::SUPPORT_CAL_DISTANCE_BY_ID)) {
         return;
     }
@@ -779,7 +780,12 @@ TestIndex::TestCalcDistanceById(const IndexPtr& index,
         for (auto j = 0; j < gt_topK; ++j) {
             auto id = gts->GetIds()[i * gt_topK + j];
             auto dist = gts->GetDistances()[i * gt_topK + j];
-            auto result = index->CalcDistanceById(query->GetFloat32Vectors(), id);
+            tl::expected<float, vsag::Error> result;
+            if (is_sparse) {
+                result = index->CalcDistanceById(query, id);
+            } else {
+                result = index->CalcDistanceById(query->GetFloat32Vectors(), id);
+            }
             if (not expected_success) {
                 REQUIRE_FALSE(result.has_value());
                 continue;

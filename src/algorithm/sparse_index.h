@@ -52,6 +52,9 @@ public:
                             "no support CalDistanceById in " + GetName());
     }
 
+    float
+    CalcDistanceById(const DatasetPtr& vector, int64_t id) const override;
+
     void
     Deserialize(StreamReader& reader) override {
         StreamReader::ReadObj(reader, cur_element_count_);
@@ -109,21 +112,6 @@ public:
         }
         label_table_->Serialize(writer);
     }
-
-
-    int64_t
-    GetNumElements() const override {
-        return cur_element_count_;
-    }
-
-    DatasetPtr
-    CalDistanceById(const float* query, const int64_t* ids, int64_t count) const override {
-        throw VsagException(vsag::ErrorType::UNSUPPORTED_INDEX_OPERATION,
-                            "no support CalDistanceById in " + GetName());
-    }
-
-    float
-    CalcDistanceById(const DatasetPtr& vector, int64_t id) const override;
 
     void
     InitFeatures() override {

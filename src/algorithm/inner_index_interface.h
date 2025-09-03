@@ -54,6 +54,12 @@ public:
     Build(const DatasetPtr& base);
 
     virtual float
+    CalcDistanceById(const DatasetPtr& vector, int64_t id) const {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "Index doesn't support calculate distance by id");
+    };
+
+    virtual float
     CalcDistanceById(const float* query, int64_t id) const {
         throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
                             "Index doesn't support calculate distance by id");
@@ -357,23 +363,6 @@ public:
 
     virtual bool
     UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update = false) {
-    virtual float
-    CalcDistanceById(const DatasetPtr& vector, int64_t id) const {
-        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
-                            "Index doesn't support calculate distance by id");
-    };
-
-    virtual DatasetPtr
-    CalDistanceById(const float* query, const int64_t* ids, int64_t count) const;
-
-    virtual std::pair<int64_t, int64_t>
-    GetMinAndMaxId() const {
-        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
-                            "Index doesn't support GetMinAndMaxId");
-    }
-
-    virtual void
-    GetExtraInfoByIds(const int64_t* ids, int64_t count, char* extra_infos) const {
         throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
                             "Index doesn't support UpdateVector");
     }
