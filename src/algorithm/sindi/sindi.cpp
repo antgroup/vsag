@@ -123,7 +123,7 @@ SINDI::search_impl(const SparseTermComputerPtr& computer,
                    const InnerSearchParam& inner_param) const {
     // computer and heap
     MaxHeap heap(this->allocator_);
-    uint32_t k = 0;
+    int64_t k = 0;
 
     if constexpr (mode == KNN_SEARCH) {
         k = inner_param.topk;
@@ -190,20 +190,21 @@ SINDI::search_impl(const SparseTermComputerPtr& computer,
 
     // low precision
     if constexpr (mode == RANGE_SEARCH) {
-        k = heap.size();
+        k = static_cast<int64_t>(heap.size());
         if (inner_param.range_search_limit_size != -1) {
             k = inner_param.range_search_limit_size;
         }
     }
-    auto [results, ret_dists, ret_ids] = create_fast_dataset(static_cast<int64_t>(k), allocator_);
+
+    int64_t cur_size = std::min(static_cast<int64_t>(heap.size()), k);
+
+    auto [results, ret_dists, ret_ids] = create_fast_dataset(cur_size, allocator_);
 
     while (heap.size() > k) {
         heap.pop();
     }
 
-    int cur_size = static_cast<int>(heap.size());
-
-    for (int j = cur_size - 1; j >= 0; j--) {
+    for (auto j = cur_size - 1; j >= 0; j--) {
         ret_dists[j] = 1 + heap.top().first;  // dist = -ip -> 1 + dist = 1 - ip
         ret_ids[j] = label_table_->GetLabelById(heap.top().second);
         heap.pop();
