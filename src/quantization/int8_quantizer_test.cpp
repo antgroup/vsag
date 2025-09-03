@@ -185,6 +185,15 @@ TestComputerINT8(Quantizer<INT8Quantizer<metric>>& quant,
                 count_unbounded_related_error++;
             }
         }
+
+        // Test Compute Batch
+        std::vector<uint8_t> codes2(quant.GetCodeSize() * count, 0);
+        std::vector<float> dists2(count);
+        quant.EncodeBatch(reinterpret_cast<DataTypePtr>(vecs.data()), codes2.data(), count);
+        quant.ScanBatchDists(*computer, count, codes2.data(), dists2.data());
+        for (int j = 0; j < count; ++j) {
+          REQUIRE(fixtures::dist_t(dists1[j]) == fixtures::dist_t(dists2[j]));
+        }
     }
     REQUIRE(count_unbounded_numeric_error / (query_count * count) <= unbounded_numeric_error_rate);
     REQUIRE(count_unbounded_related_error / (query_count * count) <= unbounded_related_error_rate);

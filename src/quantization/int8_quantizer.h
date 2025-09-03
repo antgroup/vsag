@@ -72,6 +72,12 @@ public:
                     float* dists) const;
 
     void
+    ScanBatchDistImpl(Computer<INT8Quantizer<metric>>& computer,
+                      uint64_t count,
+                      const uint8_t* codes,
+                      float* dists) const;
+
+    void
     ReleaseComputerImpl(Computer<INT8Quantizer<metric>>& computer) const;
 
     [[nodiscard]] std::string

@@ -18,6 +18,7 @@
 #include <cstdint>
 
 #include "vsag_exception.h"
+#include <cstdint>
 
 #define SAFE_CALL(stmt)                                                              \
     try {                                                                            \

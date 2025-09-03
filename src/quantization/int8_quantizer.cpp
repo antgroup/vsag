@@ -158,6 +158,17 @@ INT8Quantizer<metric>::ComputeDistImpl(Computer<INT8Quantizer<metric>>& computer
 
 template <MetricType metric>
 void
+INT8Quantizer<metric>::ScanBatchDistImpl(Computer<INT8Quantizer<metric>>& computer,
+                                         uint64_t count,
+                                         const uint8_t* codes,
+                                         float* dists) const {
+    for (uint64_t i = 0; i < count; ++i) {
+      this->ComputeDistImpl(computer, codes+i*this->code_size_, dists+i);
+    }
+}
+
+template <MetricType metric>
+void
 INT8Quantizer<metric>::ReleaseComputerImpl(Computer<INT8Quantizer<metric>>& computer) const {
     this->allocator_->Deallocate(computer.buf_);
 }
