@@ -32,6 +32,8 @@ class BucketInterface {
 public:
     BucketInterface() = default;
 
+    virtual ~BucketInterface() = default;
+
     static BucketInterfacePtr
     MakeInstance(const BucketDataCellParamPtr& param, const IndexCommonParam& common_param);
 

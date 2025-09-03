@@ -52,6 +52,12 @@ public:
     std::vector<int64_t>
     Build(const DatasetPtr& base) override;
 
+    float
+    CalcDistanceById(const float* query, int64_t id) const override;
+
+    DatasetPtr
+    CalDistanceById(const float* query, const int64_t* ids, int64_t count) const override;
+
     void
     Deserialize(StreamReader& reader) override;
 
@@ -65,6 +71,11 @@ public:
 
     DatasetPtr
     GetDataByIds(const int64_t* ids, int64_t count) const override;
+
+    int64_t
+    GetMemoryUsage() const override {
+        return static_cast<int64_t>(this->CalSerializeSize());
+    }
 
     IndexType
     GetIndexType() override {
@@ -117,6 +128,9 @@ public:
     UpdateAttribute(int64_t id,
                     const AttributeSet& new_attrs,
                     const AttributeSet& origin_attrs) override;
+
+    bool
+    UpdateId(int64_t old_id, int64_t new_id) override;
 
 private:
     InnerSearchParam

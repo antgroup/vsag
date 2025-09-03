@@ -319,6 +319,53 @@ IVF::Build(const DatasetPtr& base) {
     return result;
 }
 
+float
+IVF::CalcDistanceById(const float* query, int64_t id) const {
+    if (not use_reorder_) {
+        auto computer = this->bucket_->FactoryComputer(query);
+        auto [bucket_id, offset_id] = this->get_location(id);
+        return this->bucket_->QueryOneById(computer, bucket_id, offset_id);
+    }
+    auto computer = reorder_codes_->FactoryComputer(query);
+    float result = 0.0F;
+    auto new_id = this->label_table_->GetIdByLabel(id);
+    reorder_codes_->Query(&result, computer, &new_id, 1);
+    return result;
+}
+
+DatasetPtr
+IVF::CalDistanceById(const float* query, const int64_t* ids, int64_t count) const {
+    auto result = Dataset::Make();
+    auto* distances = reinterpret_cast<float*>(allocator_->Allocate(sizeof(float) * count));
+    result->Distances(distances)->Owner(true, allocator_);
+    if (not use_reorder_) {
+        auto computer = this->bucket_->FactoryComputer(query);
+
+        for (int i = 0; i < count; ++i) {
+            auto [bucket_id, offset_id] = this->get_location(ids[i]);
+            distances[i] = this->bucket_->QueryOneById(computer, bucket_id, offset_id);
+        }
+    } else {
+        Vector<InnerIdType> inner_ids(count, 0, allocator_);
+        Vector<InnerIdType> invalid_id_loc(allocator_);
+        auto computer = this->reorder_codes_->FactoryComputer(query);
+        for (int64_t i = 0; i < count; ++i) {
+            try {
+                inner_ids[i] = this->label_table_->GetIdByLabel(ids[i]);
+            } catch (std::runtime_error& e) {
+                logger::debug(fmt::format("failed to find id: {}", ids[i]));
+                invalid_id_loc.push_back(i);
+            }
+        }
+        reorder_codes_->Query(distances, computer, inner_ids.data(), count);
+        for (unsigned int i : invalid_id_loc) {
+            distances[i] = -1;
+        }
+    }
+
+    return result;
+}
+
 void
 IVF::Train(const DatasetPtr& data) {
     if (this->is_trained_) {
@@ -979,6 +1026,16 @@ void
 IVF::get_attr_by_inner_id(InnerIdType inner_id, AttributeSet* attr) const {
     auto [bucket_id, bucket_offset] = this->get_location(inner_id);
     this->attr_filter_index_->GetAttribute(bucket_id, bucket_offset, attr);
+}
+
+bool
+IVF::UpdateId(int64_t old_id, int64_t new_id) {
+    if (old_id == new_id) {
+        return true;
+    }
+    std::scoped_lock label_lock(this->label_lookup_mutex_);
+    this->label_table_->UpdateLabel(old_id, new_id);
+    return true;
 }
 
 }  // namespace vsag
