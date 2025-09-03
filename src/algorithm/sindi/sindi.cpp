@@ -190,7 +190,7 @@ SINDI::search_impl(const SparseTermComputerPtr& computer,
 
     // low precision
     if constexpr (mode == RANGE_SEARCH) {
-        k = heap.size();
+        k = static_cast<int64_t>(heap.size());
         if (inner_param.range_search_limit_size != -1) {
             k = inner_param.range_search_limit_size;
         }
@@ -204,7 +204,7 @@ SINDI::search_impl(const SparseTermComputerPtr& computer,
         heap.pop();
     }
 
-    for (int j = cur_size - 1; j >= 0; j--) {
+    for (auto j = cur_size - 1; j >= 0; j--) {
         ret_dists[j] = 1 + heap.top().first;  // dist = -ip -> 1 + dist = 1 - ip
         ret_ids[j] = label_table_->GetLabelById(heap.top().second);
         heap.pop();
