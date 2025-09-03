@@ -479,7 +479,8 @@ TestIndex::TestRangeSearch(const IndexPtr& index,
         auto result = res.value()->GetIds();
         auto gt = gts->GetIds() + gt_topK * i;
         auto val = Intersection(gt, gt_topK - 1, result, res.value()->GetDim());
-        cur_recall += static_cast<float>(val) / static_cast<float>(gt_topK - 1);
+        cur_recall += static_cast<float>(val) /
+                      static_cast<float>(std::min(gt_topK - 1, res.value()->GetDim()));
     }
     if (cur_recall <= expected_recall * query_count) {
         WARN(fmt::format("cur_result({}) <= expected_recall * query_count({})",
