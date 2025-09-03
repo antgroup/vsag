@@ -196,4 +196,36 @@ SparseIndex::CalcDistanceById(const DatasetPtr& vector, int64_t id) const {
     return CalDistanceByIdUnsafe(sorted_ids, sorted_vals, inner_id);
 }
 
+void
+SparseIndex::InitFeatures() {
+    // build & add
+    this->index_feature_list_->SetFeatures({
+        IndexFeature::SUPPORT_BUILD,
+        IndexFeature::SUPPORT_ADD_AFTER_BUILD,
+    });
+
+    // search
+    this->index_feature_list_->SetFeatures({
+        IndexFeature::SUPPORT_KNN_SEARCH,
+        IndexFeature::SUPPORT_KNN_SEARCH_WITH_ID_FILTER,
+        IndexFeature::SUPPORT_RANGE_SEARCH,
+        IndexFeature::SUPPORT_RANGE_SEARCH_WITH_ID_FILTER,
+    });
+
+    // serialize
+    this->index_feature_list_->SetFeatures({
+        IndexFeature::SUPPORT_DESERIALIZE_BINARY_SET,
+        IndexFeature::SUPPORT_DESERIALIZE_FILE,
+        IndexFeature::SUPPORT_DESERIALIZE_READER_SET,
+        IndexFeature::SUPPORT_SERIALIZE_BINARY_SET,
+        IndexFeature::SUPPORT_SERIALIZE_FILE,
+    });
+
+    // info
+    this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_CAL_DISTANCE_BY_ID);
+
+    // metric
+    this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_METRIC_TYPE_INNER_PRODUCT);
+}
+
 }  // namespace vsag

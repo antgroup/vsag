@@ -114,9 +114,7 @@ public:
     }
 
     void
-    InitFeatures() override {
-        this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_CAL_DISTANCE_BY_ID);
-    }
+    InitFeatures() override;
 
     float
     CalDistanceByIdUnsafe(Vector<uint32_t>& sorted_ids,
