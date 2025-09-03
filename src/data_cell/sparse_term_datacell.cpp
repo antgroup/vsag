@@ -87,9 +87,11 @@ SparseTermDataCell::InsertHeap(float* dists,
                         }
                     }
 
-                    heap.emplace(dists[id], id + offset_id);
-                    cur_heap_top = heap.top().first;
-                    dists[id] = 0;
+                    if (dists[id] != 0) {
+                        heap.emplace(dists[id], id + offset_id);
+                        cur_heap_top = heap.top().first;
+                        dists[id] = 0;
+                    }
 
                     if (heap.size() == n_candidate) {
                         break;
