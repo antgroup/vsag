@@ -304,6 +304,10 @@ SINDI::Deserialize(StreamReader& reader) {
 
 bool
 SINDI::UpdateId(int64_t old_id, int64_t new_id) {
+    if (old_id == new_id) {
+        return true;
+    }
+
     std::unique_lock wlock(this->global_mutex_);
     label_table_->UpdateLabel(old_id, new_id);
     return true;
@@ -334,8 +338,8 @@ SINDI::EstimateMemory(uint64_t num_elements) const {
     // size of label table
     mem += 2 * sizeof(int64_t) * num_elements;
 
-    // size of term list
-    mem += ESTIMATE_DOC_TERM * num_elements * sizeof(float);
+    // size of term id + term data
+    mem += ESTIMATE_DOC_TERM * num_elements * sizeof(float) * 2;
 
     // size of rerank index is same as sindi
     if (use_reorder_) {
@@ -355,6 +359,7 @@ SINDI::CalcDistanceById(const DatasetPtr& vector, int64_t id) const {
 
     auto inner_id = this->label_table_->GetIdByLabel(id);
     auto cur_window = inner_id / window_size_;
+    auto window_start_id = cur_window * window_size_;
     auto term_list = this->window_term_list_[cur_window];
 
     const auto sparse_query = vector->GetSparseVectors()[0];
@@ -362,7 +367,7 @@ SINDI::CalcDistanceById(const DatasetPtr& vector, int64_t id) const {
     search_param.query_prune_ratio = 0;
     search_param.term_prune_ratio = 0;
     auto computer = std::make_shared<SparseTermComputer>(sparse_query, search_param, allocator_);
-    return term_list->CalcDistanceByInnerId(computer, inner_id);
+    return term_list->CalcDistanceByInnerId(computer, inner_id - window_start_id);
 }
 
 void
@@ -395,10 +400,10 @@ SINDI::InitFeatures() {
     this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_CAL_DISTANCE_BY_ID);
 
     // concurrency
-    this->index_feature_list_->SetFeatures({
-        IndexFeature::SUPPORT_SEARCH_CONCURRENT,
-        IndexFeature::SUPPORT_ADD_CONCURRENT,
-    });
+    this->index_feature_list_->SetFeatures({IndexFeature::SUPPORT_SEARCH_CONCURRENT,
+                                            IndexFeature::SUPPORT_ADD_CONCURRENT,
+                                            IndexFeature::SUPPORT_ADD_CONCURRENT,
+                                            IndexFeature::SUPPORT_UPDATE_ID_CONCURRENT});
 
     // metric
     this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_METRIC_TYPE_INNER_PRODUCT);

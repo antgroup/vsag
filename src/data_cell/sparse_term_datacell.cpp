@@ -196,7 +196,7 @@ SparseTermDataCell::CalcDistanceByInnerId(const SparseTermComputerPtr& computer,
             it, term_ids_[term].data(), term_datas_[term].data(), term_sizes_[term], base_id, &ip);
     }
     computer->ResetTerm();
-    return 1 - ip;
+    return 1 + ip;
 }
 
 void

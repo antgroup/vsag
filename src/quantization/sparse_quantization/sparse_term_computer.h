@@ -91,12 +91,12 @@ public:
                          const float* term_datas,
                          uint32_t term_count,
                          uint32_t target_id,
-                         float* ip) {
+                         float* dist) {
         float query_val = sorted_query_[term_iterator].second;
 
         for (auto i = 0; i < term_count; i++) {
             if (term_ids[i] == target_id) {
-                *ip += query_val * term_datas[i];
+                *dist += query_val * term_datas[i];
                 break;
             }
         }

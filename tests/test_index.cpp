@@ -104,7 +104,11 @@ TestIndex::TestUpdateId(const IndexPtr& index,
         // round 0 for update, round 1 for validate update results
         for (int i = 0; i < num_vectors; i++) {
             auto query = vsag::Dataset::Make();
-            query->NumElements(1)->Dim(dim)->Float32Vectors(base + i * dim)->Owner(false);
+            query->NumElements(1)
+                ->Dim(dim)
+                ->Float32Vectors(base + i * dim)
+                ->SparseVectors(dataset->base_->GetSparseVectors() + i)
+                ->Owner(false);
 
             auto result = index->KnnSearch(query, gt_topK, search_param);
             REQUIRE(result.has_value());
@@ -791,7 +795,8 @@ TestIndex::TestCalcDistanceById(const IndexPtr& index,
                 continue;
             }
             REQUIRE(result.has_value());
-            REQUIRE(std::abs(dist - result.value()) < error);
+            float estimate_dist = result.value();
+            REQUIRE(std::abs(dist - estimate_dist) < error);
         }
     }
 }
