@@ -601,3 +601,34 @@ TEST_CASE("(Daily) BruteForce Remove By ID Test", "[ft][BruteForce][daily]") {
     auto resource = fixtures::BruteForceTestIndex::GetResource(false);
     TestBruteForceRemoveById(resource);
 }
+
+static void
+TestBruteForceEstimateMemory(const fixtures::BruteForceResourcePtr& resource) {
+    using namespace fixtures;
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    auto size = 1024 * 1024 * 2;
+    uint64_t estimate_count = 1000;
+    int64_t dim = 1536;
+    for (const auto& metric_type : resource->metric_types) {
+        for (auto& [base_quantization_str, recall] : resource->test_cases) {
+            vsag::Options::Instance().set_block_size_limit(size);
+            auto param = BruteForceTestIndex::GenerateBruteForceBuildParametersString(
+                metric_type, dim, base_quantization_str);
+            auto index = TestIndex::TestFactory(BruteForceTestIndex::name, param, true);
+            auto dataset = BruteForceTestIndex::pool.GetDatasetAndCreate(
+                dim, BruteForceTestIndex::base_count, metric_type);
+            index->EstimateMemory(1000);
+            vsag::Options::Instance().set_block_size_limit(origin_size);
+        }
+    }
+}
+
+TEST_CASE("(PR) BruteForce BruteForce Estimate Memory Test", "[ft][BruteForce][pr]") {
+    auto resource = fixtures::BruteForceTestIndex::GetResource(true);
+    TestBruteForceEstimateMemory(resource);
+}
+
+TEST_CASE("(Daily) BruteForce BruteForce Estimate Memory Test", "[ft][BruteForce][daily]") {
+    auto resource = fixtures::BruteForceTestIndex::GetResource(false);
+    TestBruteForceEstimateMemory(resource);
+}

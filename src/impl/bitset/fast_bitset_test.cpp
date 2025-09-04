@@ -31,6 +31,9 @@ GetRandomBitset(Allocator* allocator, int64_t max_size, int64_t max_element) {
     for (auto& v : values) {
         bitset->Set(v, true);
     }
+    REQUIRE(bitset->Count() == values.size());
+    auto string = bitset->Dump();
+    REQUIRE(string.size() > 0);
     return std::make_pair(bitset, values);
 }
 

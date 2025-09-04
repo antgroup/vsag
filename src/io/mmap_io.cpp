@@ -96,12 +96,10 @@ MMapIO::ReadImpl(uint64_t size, uint64_t offset, uint8_t* data) const {
 
 [[nodiscard]] const uint8_t*
 MMapIO::DirectReadImpl(uint64_t size, uint64_t offset, bool& need_release) const {
-    need_release = false;
-    if (offset + size > this->size_) {
-        throw VsagException(
-            ErrorType::INTERNAL_ERROR,
-            fmt::format("read offset {} + size {} > size {}", offset, size, this->size_));
+    if (not check_valid_offset(size + offset)) {
+        return nullptr;
     }
+    need_release = false;
     return reinterpret_cast<const uint8_t*>(this->start_ + offset);
 }
 

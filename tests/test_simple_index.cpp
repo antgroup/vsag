@@ -122,6 +122,7 @@ TEST_CASE("Test Simple Index", "[ft][simple_index]") {
     REQUIRE_THROWS(index->Pretrain(pretrain_ids, 10, ""));
     REQUIRE_THROWS(index->CheckIdExist(0));
     REQUIRE_THROWS(index->CalcDistanceById(dataset->base_->GetFloat32Vectors(), 1));
+    REQUIRE_THROWS(index->CalcDistanceById(dataset->query_, 1));
     REQUIRE_THROWS(index->CalDistanceById(dataset->base_->GetFloat32Vectors(), nullptr, 1));
     REQUIRE_THROWS(index->GetMinAndMaxId());
     REQUIRE_THROWS(index->GetExtraInfoByIds(nullptr, 1, nullptr));
@@ -150,4 +151,9 @@ TEST_CASE("Test Simple Index", "[ft][simple_index]") {
 
     std::ifstream i_file("1234", std::ios::binary);
     REQUIRE_THROWS(index->Deserialize(i_file));
+
+    REQUIRE_THROWS(index->GetDataByIds(nullptr, 1));
+    REQUIRE_THROWS(index->ExportIDs());
+    REQUIRE_THROWS(index->AnalyzeIndexBySearch(req));
+    REQUIRE_THROWS(index->GetIndexType());
 }
