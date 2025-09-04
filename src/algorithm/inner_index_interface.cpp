@@ -21,6 +21,9 @@
 #include "empty_index_binary_set.h"
 #include "hgraph.h"
 #include "impl/filter/filter_headers.h"
+#include "index/index_common_param.h"
+#include "index_feature_list.h"
+#include "label_table.h"
 #include "storage/serialization.h"
 #include "utils/slow_task_timer.h"
 #include "utils/util_functions.h"
@@ -196,6 +199,16 @@ InnerIndexInterface::Deserialize(const ReaderSet& reader_set) {
     } catch (const std::bad_alloc& e) {
         throw VsagException(ErrorType::READ_ERROR, "failed to Deserialize: ", e.what());
     }
+}
+
+bool
+InnerIndexInterface::CheckFeature(IndexFeature feature) const {
+    return this->index_feature_list_->CheckFeature(feature);
+}
+
+bool
+InnerIndexInterface::CheckIdExist(int64_t id) const {
+    return this->label_table_->CheckLabel(id);
 }
 
 void

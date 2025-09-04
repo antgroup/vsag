@@ -24,6 +24,8 @@
 #include "data_cell/flatten_interface.h"
 #include "fmt/chrono.h"
 #include "impl/heap/standard_heap.h"
+#include "index/index_common_param.h"
+#include "index_feature_list.h"
 #include "inner_string_params.h"
 #include "storage/serialization.h"
 #include "utils/slow_task_timer.h"

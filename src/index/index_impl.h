@@ -17,8 +17,8 @@
 
 #include "algorithm/inner_index_interface.h"
 #include "common.h"
+#include "index_common_param.h"
 #include "vsag/index.h"
-
 namespace vsag {
 
 GENERATE_HAS_STATIC_CLASS_FUNCTION(CheckAndMappingExternalParam,

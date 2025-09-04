@@ -20,10 +20,10 @@
 #include "computable_bitset.h"
 #include "pointer_define.h"
 #include "typing.h"
-#include "vsag/allocator.h"
 
 namespace vsag {
 
+class Allocator;
 DEFINE_POINTER(FastBitset);
 class FastBitset : public ComputableBitset {
 public:

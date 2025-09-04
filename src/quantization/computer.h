@@ -21,6 +21,7 @@
 #include "metric_type.h"
 #include "pointer_define.h"
 #include "vsag/allocator.h"
+
 namespace vsag {
 DEFINE_POINTER(ComputerInterface);
 

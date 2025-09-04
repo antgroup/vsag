@@ -28,7 +28,7 @@ float
 L2Sqr(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
     auto* float_vec1 = (float*)pVect1v;
     auto* float_vec2 = (float*)pVect2v;
-    size_t dim = *((size_t*)qty_ptr);
+    uint64_t dim = *((uint64_t*)qty_ptr);
     return avx512::FP32ComputeL2Sqr(float_vec1, float_vec2, dim);
 }
 
@@ -36,7 +36,7 @@ float
 InnerProduct(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
     auto* float_vec1 = (float*)pVect1v;
     auto* float_vec2 = (float*)pVect2v;
-    size_t dim = *((size_t*)qty_ptr);
+    uint64_t dim = *((uint64_t*)qty_ptr);
     return avx512::FP32ComputeIP(float_vec1, float_vec2, dim);
 }
 
@@ -49,7 +49,7 @@ float
 INT8L2Sqr(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
     auto* pVect1 = (int8_t*)pVect1v;
     auto* pVect2 = (int8_t*)pVect2v;
-    auto qty = *((size_t*)qty_ptr);
+    auto qty = *((uint64_t*)qty_ptr);
     return avx512::INT8ComputeL2Sqr(pVect1, pVect2, qty);
 }
 
@@ -58,7 +58,7 @@ INT8InnerProduct(const void* pVect1v, const void* pVect2v, const void* qty_ptr) 
 #if defined(ENABLE_AVX512)
     __mmask32 mask = 0xFFFFFFFF;
 
-    auto qty = *((size_t*)qty_ptr);
+    auto qty = *((uint64_t*)qty_ptr);
     const uint32_t n = (qty >> 5);
     if (n == 0) {
         return avx2::INT8InnerProduct(pVect1v, pVect2v, qty_ptr);
@@ -887,12 +887,12 @@ RaBitQSQ4UBinaryIP(const uint8_t* codes, const uint8_t* bits, uint64_t dim) {
                                              0x0403030203020201llu);
 
     uint32_t result = 0;
-    size_t num_bytes = (dim + 7) / 8;
+    uint64_t num_bytes = (dim + 7) / 8;
 
     const __m512i low_mask = _mm512_set1_epi8(0x0F);
 
     for (uint64_t bit_pos = 0; bit_pos < 4; ++bit_pos) {
-        size_t i = 0;
+        uint64_t i = 0;
 
         __m512i acc = _mm512_setzero_si512();
 
@@ -983,7 +983,7 @@ PQFastScanLookUp32(const uint8_t* RESTRICT lookup_table,
         return;
     }
     __m512i sum[4];
-    for (size_t i = 0; i < 4; i++) {
+    for (uint64_t i = 0; i < 4; i++) {
         sum[i] = _mm512_setzero_si512();
     }
     const auto sign4 = _mm512_set1_epi8(0x0F);
@@ -1114,7 +1114,7 @@ BitNot(const uint8_t* x, const uint64_t num_byte, uint8_t* result) {
 }
 
 void
-KacsWalk(float* data, size_t len) {
+KacsWalk(float* data, uint64_t len) {
 #if defined(ENABLE_AVX512)
     int base = len % 2;
     int offset = base + (len / 2);
@@ -1144,10 +1144,10 @@ KacsWalk(float* data, size_t len) {
 }
 
 void
-FlipSign(const uint8_t* flip, float* data, size_t dim) {
+FlipSign(const uint8_t* flip, float* data, uint64_t dim) {
 #if defined(ENABLE_AVX512)
-    constexpr size_t kFloatsPerChunk = 64;
-    size_t i = 0;
+    constexpr uint64_t kFloatsPerChunk = 64;
+    uint64_t i = 0;
     for (; i + 64 < dim; i += kFloatsPerChunk) {
         // Load 64 bits (8 bytes) from the bit sequence
         uint64_t mask_bits;
@@ -1191,10 +1191,10 @@ FlipSign(const uint8_t* flip, float* data, size_t dim) {
 }
 
 void
-VecRescale(float* data, size_t dim, float val) {
+VecRescale(float* data, uint64_t dim, float val) {
 #if defined(ENABLE_AVX512)
     __m512 scalar = _mm512_set1_ps(val);
-    size_t i = 0;
+    uint64_t i = 0;
     for (; i + 16 <= dim; i += 16) {
         __m512 vec = _mm512_loadu_ps(&data[i]);
         vec = _mm512_mul_ps(vec, scalar);
@@ -1223,10 +1223,10 @@ RotateOp(float* data, int idx, int dim_, int step) {
 }
 
 void
-FHTRotate(float* data, size_t dim_) {
+FHTRotate(float* data, uint64_t dim_) {
 #if defined(ENABLE_AVX512)
-    size_t n = dim_;
-    size_t step = 1;
+    uint64_t n = dim_;
+    uint64_t step = 1;
     while (step < n) {
         if (step >= 16) {  // step is the power of 2
             avx512::RotateOp(data, 0, dim_, step);

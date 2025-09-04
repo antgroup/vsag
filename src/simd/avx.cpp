@@ -31,7 +31,7 @@ float
 L2Sqr(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
     auto* pVect1 = (float*)pVect1v;
     auto* pVect2 = (float*)pVect2v;
-    auto qty = *((size_t*)qty_ptr);
+    auto qty = *((uint64_t*)qty_ptr);
     return avx::FP32ComputeL2Sqr(pVect1, pVect2, qty);
 }
 
@@ -39,7 +39,7 @@ float
 InnerProduct(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
     auto* pVect1 = (float*)pVect1v;
     auto* pVect2 = (float*)pVect2v;
-    auto qty = *((size_t*)qty_ptr);
+    auto qty = *((uint64_t*)qty_ptr);
     return avx::FP32ComputeIP(pVect1, pVect2, qty);
 }
 
@@ -52,7 +52,7 @@ float
 INT8L2Sqr(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
     auto* pVect1 = (int8_t*)pVect1v;
     auto* pVect2 = (int8_t*)pVect2v;
-    auto qty = *((size_t*)qty_ptr);
+    auto qty = *((uint64_t*)qty_ptr);
     return avx::INT8ComputeL2Sqr(pVect1, pVect2, qty);
 }
 
@@ -71,7 +71,7 @@ PQDistanceFloat256(const void* single_dim_centers, float single_dim_val, void* r
 #if defined(ENABLE_AVX)
     auto* float_centers = (const float*)single_dim_centers;
     auto* float_result = (float*)result;
-    for (size_t idx = 0; idx < 256; idx += 8) {
+    for (uint64_t idx = 0; idx < 256; idx += 8) {
         __m256 v_centers_dim = _mm256_loadu_ps(float_centers + idx);
         __m256 v_query_vec = _mm256_set1_ps(single_dim_val);
         __m256 v_diff = _mm256_sub_ps(v_centers_dim, v_query_vec);
@@ -954,7 +954,7 @@ BitNot(const uint8_t* x, const uint64_t num_byte, uint8_t* result) {
 #endif
 }
 void
-VecRescale(float* data, size_t dim, float val) {
+VecRescale(float* data, uint64_t dim, float val) {
 #if defined(ENABLE_AVX)
     int i = 0;
     __m256 val_vec = _mm256_set1_ps(val);
@@ -990,10 +990,10 @@ RotateOp(float* data, int idx, int dim_, int step) {
 }
 
 void
-FHTRotate(float* data, size_t dim_) {
+FHTRotate(float* data, uint64_t dim_) {
 #if defined(ENABLE_AVX)
-    size_t n = dim_;
-    size_t step = 1;
+    uint64_t n = dim_;
+    uint64_t step = 1;
     while (step < n) {
         if (step >= 8) {
             avx::RotateOp(data, 0, dim_, step);
@@ -1010,11 +1010,11 @@ FHTRotate(float* data, size_t dim_) {
 }
 
 void
-KacsWalk(float* data, size_t len) {
+KacsWalk(float* data, uint64_t len) {
 #if defined(ENABLE_AVX)
-    size_t base = len % 2;
-    size_t offset = base + (len / 2);
-    size_t i = 0;
+    uint64_t base = len % 2;
+    uint64_t offset = base + (len / 2);
+    uint64_t i = 0;
 
     for (; i + 8 <= len / 2; i += 8) {
         __m256 x = _mm256_loadu_ps(&data[i]);
