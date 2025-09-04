@@ -83,6 +83,12 @@ public:
         return Owner(is_owner, nullptr);
     }
 
+    virtual DatasetPtr
+    Append(const DatasetPtr& other) = 0;
+
+    virtual DatasetPtr
+    DeepCopy(Allocator* allocator = nullptr) const = 0;
+
 public:
     /**
      * @brief Sets the number of elements in the dataset.

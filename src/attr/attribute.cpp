@@ -15,6 +15,9 @@
 
 #include "vsag/attribute.h"
 
+#include <cstring>
+#include <memory>
+
 namespace vsag {
 
 template <class T>
@@ -57,6 +60,40 @@ template <class T>
 const std::vector<T>&
 AttributeValue<T>::GetValue() const {
     return value_;
+}
+
+template <class T>
+Attribute*
+AttributeValue<T>::DeepCopy() const {
+    auto attr = new AttributeValue<T>();
+    attr->value_ = value_;
+    return attr;
+}
+
+template <class T>
+bool
+AttributeValue<T>::Equal(const Attribute* other) const {
+    if (this->GetValueCount() != other->GetValueCount() ||
+        this->GetValueType() != other->GetValueType()) {
+        return false;
+    }
+
+    auto count = this->GetValueCount();
+    const auto* other_instance = dynamic_cast<const AttributeValue<T>*>(other);
+    if (other_instance) {
+        if (this->GetValueType() != AttrValueType::STRING) {
+            return std::memcmp(
+                       value_.data(), other_instance->GetValue().data(), count * sizeof(T)) == 0;
+        }
+        for (int i = 0; i < count; ++i) {
+            if (value_[i] != other_instance->GetValue()[i]) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    return false;
 }
 
 template class AttributeValue<int32_t>;
