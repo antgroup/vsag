@@ -450,3 +450,26 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::BruteForceTestIndex,
         vsag::Options::Instance().set_block_size_limit(origin_size);
     }
 }
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::BruteForceTestIndex,
+                             "BruteForce Estimate Memory",
+                             "[ft][bruteforce]") {
+    using namespace fixtures;
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    auto size = GENERATE(1024 * 1024 * 2);
+    auto metric_type = GENERATE("l2", "ip", "cosine");
+    uint64_t estimate_count = 1000;
+
+    const std::string name = "brute_force";
+    auto search_param = "";
+    int64_t dim = 1536;
+    for (auto& [base_quantization_str, recall] : test_cases) {
+        vsag::Options::Instance().set_block_size_limit(size);
+        auto param =
+            GenerateBruteForceBuildParametersString(metric_type, dim, base_quantization_str);
+        auto index = TestFactory(name, param, true);
+        auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
+        TestIndex::TestEstimateMemory(name, param, dataset);
+        vsag::Options::Instance().set_block_size_limit(origin_size);
+    }
+}

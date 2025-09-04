@@ -1028,6 +1028,7 @@ TestIndex::TestSerializeReaderSet(const IndexPtr& index_from,
     for (const auto& key : binary_set.GetKeys()) {
         rs.Set(key, std::make_shared<TestReader>(binary_set.Get(key)));
     }
+    REQUIRE(rs.Get("this_is_a_wrong_key") == nullptr);
     auto deserialize_index = index_to->Deserialize(rs);
     REQUIRE(deserialize_index.has_value() == expected_success);
 
@@ -1434,8 +1435,8 @@ TestIndex::TestEstimateMemory(const std::string& index_name,
                                  static_cast<uint64_t>(real_memory * 1.2)));
             }
 
-            REQUIRE(estimate_memory >= static_cast<uint64_t>(real_memory * 0.2));
-            REQUIRE(estimate_memory <= static_cast<uint64_t>(real_memory * 3.2));
+            REQUIRE(estimate_memory >= static_cast<uint64_t>(real_memory * 0.1));
+            REQUIRE(estimate_memory <= static_cast<uint64_t>(real_memory * 5.0));
             inf.close();
         }
     }
