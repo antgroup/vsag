@@ -64,6 +64,9 @@ public:
     void
     Deserialize(StreamReader& reader);
 
+    float
+    CalcDistanceByInnerId(const SparseTermComputerPtr& computer, uint32_t base_id);
+
 public:
     float doc_prune_ratio_{0};
 

@@ -52,6 +52,9 @@ public:
                             "no support CalDistanceById in " + GetName());
     }
 
+    float
+    CalcDistanceById(const DatasetPtr& vector, int64_t id) const override;
+
     void
     Deserialize(StreamReader& reader) override {
         StreamReader::ReadObj(reader, cur_element_count_);
@@ -87,10 +90,6 @@ public:
         return cur_element_count_;
     }
 
-    void
-    InitFeatures() override {
-    }
-
     DatasetPtr
     KnnSearch(const DatasetPtr& query,
               int64_t k,
@@ -113,6 +112,9 @@ public:
         }
         label_table_->Serialize(writer);
     }
+
+    void
+    InitFeatures() override;
 
     float
     CalDistanceByIdUnsafe(Vector<uint32_t>& sorted_ids,
