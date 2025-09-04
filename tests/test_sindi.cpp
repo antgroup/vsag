@@ -63,7 +63,7 @@ TestDatasetPool SINDITestIndex::pool{};
 }  // namespace fixtures
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex, "SINDI Build and Search", "[ft][sindi]") {
-    auto build_param = GENERATE(build_param_flat);
+    auto build_param = GENERATE(build_param_reorder, build_param_flat);
     auto index = TestFactory("sindi", build_param, true);
     auto dataset = pool.GetSparseDatasetAndCreate(base_count, 128, 0.8);
     REQUIRE(index->GetIndexType() == vsag::IndexType::SINDI);
