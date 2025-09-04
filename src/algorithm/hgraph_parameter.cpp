@@ -129,6 +129,9 @@ HGraphParameter::FromJson(const JsonType& json) {
         if (build_params.contains(BUILD_EF_CONSTRUCTION)) {
             this->ef_construction = build_params[BUILD_EF_CONSTRUCTION];
         }
+        if (build_params.contains(BUILD_ALPHA_KEY)) {
+            this->alpha = build_params[BUILD_ALPHA_KEY];
+        }
         if (build_params.contains(BUILD_THREAD_COUNT)) {
             this->build_thread_count = build_params[BUILD_THREAD_COUNT];
         }
@@ -172,6 +175,7 @@ HGraphParameter::ToJson() const {
     json[HGRAPH_GRAPH_KEY] = this->bottom_graph_param->ToJson();
 
     json[BUILD_PARAMS_KEY][BUILD_EF_CONSTRUCTION] = this->ef_construction;
+    json[BUILD_PARAMS_KEY][BUILD_ALPHA_KEY] = this->alpha;
     json[BUILD_PARAMS_KEY][BUILD_THREAD_COUNT] = this->build_thread_count;
     json[HGRAPH_EXTRA_INFO_KEY] = this->extra_info_param->ToJson();
     json[SUPPORT_DUPLICATE] = this->support_duplicate;

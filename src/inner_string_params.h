@@ -102,6 +102,7 @@ const char* const GRAPH_PARAM_INIT_MAX_CAPACITY = "init_capacity";
 const char* const BUILD_PARAMS_KEY = "build_params";
 const char* const BUILD_THREAD_COUNT = "build_thread_count";
 const char* const BUILD_EF_CONSTRUCTION = "ef_construction";
+const char* const BUILD_ALPHA_KEY = "alpha";
 
 const char* const GRAPH_TYPE_KEY = "graph_type";
 
@@ -192,6 +193,7 @@ const std::unordered_map<std::string, std::string> DEFAULT_MAP = {
     {"BUILD_PARAMS_KEY", BUILD_PARAMS_KEY},
     {"BUILD_THREAD_COUNT", BUILD_THREAD_COUNT},
     {"BUILD_EF_CONSTRUCTION", BUILD_EF_CONSTRUCTION},
+    {"BUILD_ALPHA_KEY", BUILD_ALPHA_KEY},
     {"BUCKETS_COUNT_KEY", BUCKETS_COUNT_KEY},
     {"BUCKET_PARAMS_KEY", BUCKET_PARAMS_KEY},
     {"IO_FILE_PATH", IO_FILE_PATH},
