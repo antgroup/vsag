@@ -54,6 +54,12 @@ public:
     Build(const DatasetPtr& base);
 
     virtual float
+    CalcDistanceById(const DatasetPtr& vector, int64_t id) const {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "Index doesn't support calculate distance by id");
+    };
+
+    virtual float
     CalcDistanceById(const float* query, int64_t id) const {
         throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
                             "Index doesn't support calculate distance by id");

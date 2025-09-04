@@ -85,6 +85,23 @@ public:
         }
     }
 
+    inline void
+    ScanForCalculateDist(uint32_t term_iterator,
+                         const uint32_t* term_ids,
+                         const float* term_datas,
+                         uint32_t term_count,
+                         uint32_t target_id,
+                         float* dist) {
+        float query_val = sorted_query_[term_iterator].second;
+
+        for (auto i = 0; i < term_count; i++) {
+            if (term_ids[i] == target_id) {
+                *dist += query_val * term_datas[i];
+                break;
+            }
+        }
+    }
+
     inline bool
     HasNextTerm() {
         return term_iterator_ < pruned_len_;

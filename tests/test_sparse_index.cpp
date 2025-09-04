@@ -55,6 +55,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::SparseTestIndex,
     TestRangeSearch(index, dataset, search_param, 0.99, 10, true);
     TestRangeSearch(index, dataset, search_param, 0.49, 5, true);
     TestFilterSearch(index, dataset, search_param, 0.99, true);
+    TestCalcDistanceById(index, dataset, 10, true, true);
 }
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::SparseTestIndex,
