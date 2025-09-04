@@ -73,6 +73,11 @@ public:
     }
 
     tl::expected<float, Error>
+    CalcDistanceById(const DatasetPtr& vector, int64_t id) const override {
+        SAFE_CALL(return this->inner_index_->CalcDistanceById(vector, id));
+    }
+
+    tl::expected<float, Error>
     CalcDistanceById(const float* vector, int64_t id) const override {
         SAFE_CALL(return this->inner_index_->CalcDistanceById(vector, id));
     }

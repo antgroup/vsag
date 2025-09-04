@@ -176,6 +176,31 @@ SparseTermDataCell::ResizeTermList(InnerIdType new_term_capacity) {
     term_sizes_.resize(term_capacity_, 0);
 }
 
+float
+SparseTermDataCell::CalcDistanceByInnerId(const SparseTermComputerPtr& computer, uint32_t base_id) {
+    float ip = 0;
+    while (computer->HasNextTerm()) {
+        auto it = computer->NextTermIter();
+        auto term = computer->GetTerm(it);
+        if (computer->HasNextTerm()) {
+            auto next_it = it + 1;
+            auto next_term = computer->GetTerm(next_it);
+            if (next_term >= term_ids_.size()) {
+                continue;
+            }
+            __builtin_prefetch(term_ids_[next_term].data(), 0, 3);
+            __builtin_prefetch(term_datas_[next_term].data(), 0, 3);
+        }
+        if (term >= term_ids_.size()) {
+            continue;
+        }
+        computer->ScanForCalculateDist(
+            it, term_ids_[term].data(), term_datas_[term].data(), term_sizes_[term], base_id, &ip);
+    }
+    computer->ResetTerm();
+    return 1 + ip;
+}
+
 void
 SparseTermDataCell::Serialize(StreamWriter& writer) const {
     StreamWriter::WriteObj(writer, term_capacity_);

@@ -25,13 +25,25 @@ class SINDITestIndex : public fixtures::TestIndex {
 public:
     static TestDatasetPool pool;
     constexpr static uint64_t base_count = 1000;
-    constexpr static const char* build_param = R"(
+    constexpr static const char* build_param_reorder = R"(
         {
             "dim": 16,
             "dtype": "sparse",
             "metric_type": "ip",
             "index_param": {
                 "use_reorder": true,
+                "doc_prune_ratio": 0.0,
+                "window_size": 100
+            }
+        })";
+
+    constexpr static const char* build_param_flat = R"(
+        {
+            "dim": 16,
+            "dtype": "sparse",
+            "metric_type": "ip",
+            "index_param": {
+                "use_reorder": false,
                 "doc_prune_ratio": 0.0,
                 "window_size": 100
             }
@@ -51,6 +63,7 @@ TestDatasetPool SINDITestIndex::pool{};
 }  // namespace fixtures
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex, "SINDI Build and Search", "[ft][sindi]") {
+    auto build_param = GENERATE(build_param_reorder, build_param_flat);
     auto index = TestFactory("sindi", build_param, true);
     auto dataset = pool.GetSparseDatasetAndCreate(base_count, 128, 0.8);
     REQUIRE(index->GetIndexType() == vsag::IndexType::SINDI);
@@ -60,9 +73,14 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex, "SINDI Build and Search",
     TestRangeSearch(index, dataset, search_param, 0.49, 5, true);
     TestFilterSearch(index, dataset, search_param, 0.99, true);
     TestConcurrentKnnSearch(index, dataset, search_param, 0.99, true);
+    TestGetMinAndMaxId(index, dataset, true);
+    TestCalcDistanceById(index, dataset, 0.1, true, true);
+    TestUpdateId(index, dataset, search_param, true);
+    TestEstimateMemory("sindi", build_param, dataset);
 }
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex, "SINDI Concurrent", "[ft][sindi]") {
+    auto build_param = GENERATE(build_param_reorder, build_param_flat);
     auto index = TestFactory("sindi", build_param, true);
     auto dataset = pool.GetSparseDatasetAndCreate(base_count, 128, 0.8);
     REQUIRE(index->GetIndexType() == vsag::IndexType::SINDI);
@@ -70,6 +88,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex, "SINDI Concurrent", "[ft]
 }
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex, "SINDI Serialize File", "[ft][sindi]") {
+    auto build_param = GENERATE(build_param_reorder, build_param_flat);
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
     auto metric_type = GENERATE("ip");
