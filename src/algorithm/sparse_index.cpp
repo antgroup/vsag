@@ -16,11 +16,13 @@
 #include "sparse_index.h"
 
 #include "impl/heap/standard_heap.h"
+#include "index_feature_list.h"
+#include "label_table.h"
 #include "utils/util_functions.h"
 
 namespace vsag {
 
-float
+static float
 get_distance(uint32_t len1,
              const uint32_t* ids1,
              const float* vals1,
@@ -44,6 +46,46 @@ get_distance(uint32_t len1,
     }
 
     return 1 - sum;
+}
+
+SparseIndex::SparseIndex(const SparseIndexParameterPtr& param, const IndexCommonParam& common_param)
+    : InnerIndexInterface(param, common_param),
+      datas_(common_param.allocator_.get()),
+      need_sort_(param->need_sort) {
+}
+
+SparseIndex::SparseIndex(const ParamPtr& param, const IndexCommonParam& common_param)
+    : SparseIndex(std::dynamic_pointer_cast<SparseIndexParameters>(param), common_param){};
+
+SparseIndex::~SparseIndex() {
+    for (auto& data : datas_) {
+        allocator_->Deallocate(data);
+    }
+}
+
+void
+SparseIndex::Deserialize(StreamReader& reader) {
+    StreamReader::ReadObj(reader, cur_element_count_);
+    datas_.resize(cur_element_count_);
+    max_capacity_ = cur_element_count_;
+    for (int i = 0; i < cur_element_count_; ++i) {
+        uint32_t len;
+        StreamReader::ReadObj(reader, len);
+        datas_[i] = (uint32_t*)allocator_->Allocate((2 * len + 1) * sizeof(uint32_t));
+        datas_[i][0] = len;
+        reader.Read((char*)(datas_[i] + 1), static_cast<uint64_t>(2 * len) * sizeof(uint32_t));
+    }
+    label_table_->Deserialize(reader);
+}
+
+void
+SparseIndex::Serialize(StreamWriter& writer) const {
+    StreamWriter::WriteObj(writer, cur_element_count_);
+    for (int i = 0; i < cur_element_count_; ++i) {
+        uint32_t len = datas_[i][0];
+        writer.Write((char*)datas_[i], (2 * len + 1) * sizeof(uint32_t));
+    }
+    label_table_->Serialize(writer);
 }
 
 ParamPtr

@@ -18,7 +18,6 @@
 #include "basic_io.h"
 #include "index/index_common_param.h"
 #include "reader_io_parameter.h"
-#include "vsag/allocator.h"
 
 namespace vsag {
 
