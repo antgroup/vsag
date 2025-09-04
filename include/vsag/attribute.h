@@ -44,6 +44,12 @@ public:
 
     [[nodiscard]] virtual uint64_t
     GetValueCount() const = 0;
+
+    [[nodiscard]] virtual Attribute*
+    DeepCopy() const = 0;
+
+    [[nodiscard]] virtual bool
+    Equal(const Attribute* other) const = 0;
 };
 using AttributePtr = std::shared_ptr<Attribute>;
 
@@ -61,6 +67,12 @@ public:
 
     const std::vector<T>&
     GetValue() const;
+
+    Attribute*
+    DeepCopy() const override;
+
+    bool
+    Equal(const Attribute* other) const override;
 
 private:
     std::vector<T> value_{};
