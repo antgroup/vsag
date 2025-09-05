@@ -61,20 +61,23 @@ public:
         return std::make_shared<BruteForce>(this->create_param_ptr_, param);
     }
 
-    IndexType
+    void
+    GetAttributeSetByInnerId(InnerIdType inner_id, AttributeSet* attr) const override;
+
+    [[nodiscard]] IndexType
     GetIndexType() override {
         return IndexType::BRUTEFORCE;
     }
 
-    int64_t
+    [[nodiscard]] int64_t
     GetMemoryUsage() const override;
 
-    std::string
+    [[nodiscard]] std::string
     GetName() const override {
         return INDEX_BRUTE_FORCE;
     }
 
-    int64_t
+    [[nodiscard]] int64_t
     GetNumElements() const override {
         return this->total_count_;
     }
@@ -85,13 +88,13 @@ public:
     void
     InitFeatures() override;
 
-    DatasetPtr
+    [[nodiscard]] DatasetPtr
     KnnSearch(const DatasetPtr& query,
               int64_t k,
               const std::string& parameters,
               const FilterPtr& filter) const override;
 
-    DatasetPtr
+    [[nodiscard]] DatasetPtr
     RangeSearch(const DatasetPtr& query,
                 float radius,
                 const std::string& parameters,
@@ -101,7 +104,7 @@ public:
     bool
     Remove(int64_t label) override;
 
-    DatasetPtr
+    [[nodiscard]] DatasetPtr
     SearchWithRequest(const SearchRequest& request) const override;
 
     void

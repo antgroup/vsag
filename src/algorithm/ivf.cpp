@@ -241,12 +241,17 @@ IVF::IVF(const IVFParameterPtr& param, const IndexCommonParam& common_param)
     if (this->use_attribute_filter_) {
         this->attr_filter_index_ =
             AttributeInvertedInterface::MakeInstance(allocator_, true /*have_bucket*/);
+        this->has_attribute_ = true;
     }
 
     this->thread_pool_ = common_param.thread_pool_;
     if (param->thread_count > 1 and this->thread_pool_ == nullptr) {
         this->thread_pool_ = SafeThreadPool::FactoryDefaultThreadPool();
         this->thread_pool_->SetPoolSize(param->thread_count);
+    }
+
+    if (bucket_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32) {
+        this->has_raw_vector_ = true;
     }
 }
 void
@@ -604,6 +609,7 @@ IVF::Deserialize(StreamReader& reader) {
 
         if (use_attribute_filter_) {
             this->attr_filter_index_->Deserialize(buffer_reader);
+            this->has_attribute_ = true;
         }
     } else {  // create like `else if ( ver in [v0.15, v0.17] )` here if need in the future
         logger::debug("parse with new version format");
@@ -643,6 +649,10 @@ IVF::Deserialize(StreamReader& reader) {
         }
         if (use_attribute_filter_) {
             READ_DATACELL_WITH_NAME(buffer_reader, "attr_filter_index", this->attr_filter_index_);
+            this->has_attribute_ = true;
+        }
+        if (this->bucket_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32) {
+            this->has_raw_vector_ = true;
         }
     }
     this->fill_location_map();
@@ -971,25 +981,8 @@ IVF::fill_location_map() {
     }
 }
 
-DatasetPtr
-IVF::GetDataByIds(const int64_t* ids, int64_t count) const {
-    auto dataset = Dataset::Make();
-    dataset->NumElements(count)->Dim(dim_)->Owner(true, allocator_);
-    auto* fp32_data =
-        reinterpret_cast<float*>(this->allocator_->Allocate(count * this->dim_ * sizeof(float)));
-    auto* attribute_data = new AttributeSet[count];
-    dataset->AttributeSets(attribute_data)->Float32Vectors(fp32_data);
-    for (int64_t i = 0; i < count; ++i) {
-        auto inner_id = this->label_table_->GetIdByLabel(ids[i]);
-        this->GetCodeByInnerId(inner_id, reinterpret_cast<uint8_t*>(fp32_data + i * this->dim_));
-        this->get_attr_by_inner_id(inner_id, attribute_data + i);
-    }
-
-    return dataset;
-}
-
 void
-IVF::get_attr_by_inner_id(InnerIdType inner_id, AttributeSet* attr) const {
+IVF::GetAttributeSetByInnerId(InnerIdType inner_id, AttributeSet* attr) const {
     auto [bucket_id, bucket_offset] = this->get_location(inner_id);
     this->attr_filter_index_->GetAttribute(bucket_id, bucket_offset, attr);
 }
@@ -1059,6 +1052,12 @@ IVF::CalcDistanceById(const float* query, int64_t id) const {
         }
     }
     return this->bucket_->QueryOneById(computer, location.first, location.second) - ip_distance;
+}
+
+void
+IVF::GetVectorByInnerId(InnerIdType inner_id, float* data) const {
+    auto [bucket_id, bucket_offset] = this->get_location(inner_id);
+    this->bucket_->GetCodesById(bucket_id, bucket_offset, reinterpret_cast<uint8_t*>(data));
 }
 
 }  // namespace vsag
