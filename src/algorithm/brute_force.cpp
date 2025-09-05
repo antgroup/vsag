@@ -510,4 +510,9 @@ BruteForce::UpdateAttribute(int64_t id,
     this->attr_filter_index_->UpdateBitsetsByAttr(new_attrs, inner_id, 0, origin_attrs);
 }
 
+void
+BruteForce::GetAttributeSetByInnerId(InnerIdType inner_id, AttributeSet* attr) const {
+    this->attr_filter_index_->GetAttribute(0, inner_id, attr);
+}
+
 }  // namespace vsag

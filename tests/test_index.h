@@ -288,7 +288,10 @@ public:
     TestExportIDs(const IndexPtr& index, const TestDatasetPtr& dataset);
 
     static void
-    TestGetDataById(const IndexPtr& model, const TestDatasetPtr& dataset);
+    TestGetDataById(const IndexPtr& index, const TestDatasetPtr& dataset);
+
+    static void
+    TestGetDataByIdWithFlag(const IndexPtr& index, const TestDatasetPtr& dataset);
 
     constexpr static float RECALL_THRESHOLD = 0.95;
 };
