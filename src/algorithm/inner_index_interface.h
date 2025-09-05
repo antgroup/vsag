@@ -17,6 +17,7 @@
 #include <shared_mutex>
 #include <vector>
 
+#include "data_cell/extra_info_interface.h"
 #include "dataset_impl.h"
 #include "index/index_common_param.h"
 #include "index_feature_list.h"
@@ -135,16 +136,22 @@ public:
     }
 
     virtual void
+    GetAttributeSetByInnerId(InnerIdType inner_id, AttributeSet* attr) const {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "Index doesn't support GetAttributeSetByInnerId");
+    }
+
+    virtual void
     GetCodeByInnerId(InnerIdType inner_id, uint8_t* data) const {
         throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
                             "Index doesn't support GetCodeByInnerId");
     }
 
     [[nodiscard]] virtual DatasetPtr
-    GetDataByIds(const int64_t* ids, int64_t count) const {
-        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
-                            "Index doesn't support GetDataByIds");
-    }
+    GetDataByIds(const int64_t* ids, int64_t count) const;
+
+    [[nodiscard]] virtual DatasetPtr
+    GetDataByIdsWithFlag(const int64_t* ids, int64_t count, uint64_t selected_data_flag) const;
 
     [[nodiscard]] virtual int64_t
     GetEstimateBuildMemory(const int64_t num_elements) const {
@@ -369,15 +376,26 @@ public:
 
 public:
     LabelTablePtr label_table_{nullptr};
-    LabelTablePtr tomb_label_table_{nullptr};
-    Allocator* allocator_{nullptr};
-    IndexFeatureListPtr index_feature_list_{nullptr};
     mutable std::shared_mutex label_lookup_mutex_{};  // lock for label_lookup_ & labels_
-    const ParamPtr create_param_ptr_{nullptr};
+
+    LabelTablePtr tomb_label_table_{nullptr};
+
+    Allocator* const allocator_{nullptr};
     int64_t dim_{0};
-    bool immutable_{false};
     MetricType metric_{MetricType::METRIC_TYPE_L2SQR};
     DataTypes data_type_{DataTypes::DATA_TYPE_FLOAT};
+
+    IndexFeatureListPtr index_feature_list_{nullptr};
+
+    const ParamPtr create_param_ptr_{nullptr};
+    bool immutable_{false};
+
+protected:
+    bool has_raw_vector_{false};
+    bool has_attribute_{false};
+
+    uint64_t extra_info_size_{0};
+    ExtraInfoInterfacePtr extra_infos_{nullptr};
 };
 
 }  // namespace vsag

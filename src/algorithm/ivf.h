@@ -69,29 +69,32 @@ public:
         return std::make_shared<IVF>(this->create_param_ptr_, param);
     }
 
-    DatasetPtr
-    GetDataByIds(const int64_t* ids, int64_t count) const override;
-
-    IndexType
-    GetIndexType() override {
-        return IndexType::IVF;
-    }
-
-    std::string
-    GetName() const override {
-        return INDEX_IVF;
-    }
-
-    int64_t
-    GetNumElements() const override;
+    void
+    GetAttributeSetByInnerId(InnerIdType inner_id, AttributeSet* attr) const override;
 
     void
     GetCodeByInnerId(InnerIdType inner_id, uint8_t* data) const override;
 
+    [[nodiscard]] IndexType
+    GetIndexType() override {
+        return IndexType::IVF;
+    }
+
+    [[nodiscard]] std::string
+    GetName() const override {
+        return INDEX_IVF;
+    }
+
+    [[nodiscard]] int64_t
+    GetNumElements() const override;
+
+    void
+    GetVectorByInnerId(InnerIdType inner_id, float* data) const override;
+
     void
     InitFeatures() override;
 
-    DatasetPtr
+    [[nodiscard]] DatasetPtr
     KnnSearch(const DatasetPtr& query,
               int64_t k,
               const std::string& parameters,
@@ -100,14 +103,14 @@ public:
     void
     Merge(const std::vector<MergeUnit>& merge_units) override;
 
-    DatasetPtr
+    [[nodiscard]] DatasetPtr
     RangeSearch(const DatasetPtr& query,
                 float radius,
                 const std::string& parameters,
                 const FilterPtr& filter,
                 int64_t limited_size = -1) const override;
 
-    DatasetPtr
+    [[nodiscard]] DatasetPtr
     SearchWithRequest(const SearchRequest& request) const override;
 
     void
@@ -146,9 +149,6 @@ private:
 
     std::pair<BucketIdType, InnerIdType>
     get_location(InnerIdType inner_id) const;
-
-    void
-    get_attr_by_inner_id(InnerIdType inner_id, AttributeSet* attr) const;
 
 private:
     BucketInterfacePtr bucket_{nullptr};

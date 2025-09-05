@@ -44,6 +44,13 @@ struct MergeUnit {
 
 enum class IndexType { HNSW, DISKANN, HGRAPH, IVF, PYRAMID, BRUTEFORCE, SPARSE, SINDI };
 
+#define DATA_FLAG_FLOAT32_VECTOR 0x01
+#define DATA_FLAG_INT8_VECTOR 0x02
+#define DATA_FLAG_SPARSE_VECTOR 0x04
+#define DATA_FLAG_EXTRA_INFO 0x10
+#define DATA_FLAG_ATTRIBUTE 0x20
+#define DATA_FLAG_ID 0x40
+
 class Index {
 public:
     // [basic methods]
@@ -497,11 +504,32 @@ public:
      *
      * @param ids Array of vector IDs for which extra information is requested.
      * @param count Number of IDs in the 'ids' array.
+     * @param selected_data_flag selected data flag, set with DATA_FLAG_*
      * @return tl::expected<DatasetPtr, Error>
      *         - On success: A DatasetPtr containing the extra data, attribute and vector
      *         - On failure: An error object (e.g., invalid ID, out of memory).
      * @throws std::runtime_error If the index implementation does not support this operation
      *            (default behavior for base class).
+     */
+    virtual tl::expected<DatasetPtr, Error>
+    GetDataByIdsWithFlag(const int64_t* ids, int64_t count, uint64_t selected_data_flag) const {
+        throw std::runtime_error("Index doesn't support GetDataByIdsWithFlag");
+    };
+
+    /**
+     * @brief Retrieve all data associated with vectors identified by given IDs.
+     *
+     * This method fetches data stored with the vectors in the index
+     * (e.g., attributes, labels, or extra infos).
+     *
+     * @param ids Array of vector IDs for which extra information is requested.
+     * @param count Number of IDs in the 'ids' array.
+     * @return tl::expected<DatasetPtr, Error>
+     *         - On success: A DatasetPtr containing the extra data, attribute and vector
+     *         - On failure: An error object (e.g., invalid ID, out of memory).
+     * @throws std::runtime_error If the index implementation does not support this operation
+     *            (default behavior for base class).
+     * @note The default implementation returns all data which in current index
      */
     virtual tl::expected<DatasetPtr, Error>
     GetDataByIds(const int64_t* ids, int64_t count) const {

@@ -2194,11 +2194,11 @@ compare_attr_set(const vsag::AttributeSet& attr1, const vsag::AttributeSet& attr
 }
 
 void
-TestIndex::TestGetDataById(const IndexPtr& model, const TestDatasetPtr& dataset) {
-    if (not model->CheckFeature(vsag::SUPPORT_GET_DATA_BY_IDS)) {
+TestIndex::TestGetDataById(const IndexPtr& index, const TestDatasetPtr& dataset) {
+    if (not index->CheckFeature(vsag::SUPPORT_GET_DATA_BY_IDS)) {
         return;
     }
-    auto result = model->GetDataByIds(dataset->base_->GetIds(), dataset->base_->GetNumElements());
+    auto result = index->GetDataByIds(dataset->base_->GetIds(), dataset->base_->GetNumElements());
     REQUIRE(result.has_value());
     auto data = result.value();
     REQUIRE(data->GetNumElements() == dataset->base_->GetNumElements());
@@ -2218,6 +2218,10 @@ TestIndex::TestGetDataById(const IndexPtr& model, const TestDatasetPtr& dataset)
         auto& gt_attr = gt_attrs[i];
         compare_attr_set(attr, gt_attr);
     }
+}
+
+void
+TestIndex::TestGetDataByIdWithFlag(const IndexPtr& index, const TestDatasetPtr& dataset) {
 }
 
 }  // namespace fixtures

@@ -52,8 +52,7 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
       build_thread_count_(hgraph_param->build_thread_count),
       odescent_param_(hgraph_param->odescent_param),
       graph_type_(hgraph_param->graph_type),
-      hierarchical_datacell_param_(hgraph_param->hierarchical_graph_param),
-      extra_info_size_(common_param.extra_info_size_) {
+      hierarchical_datacell_param_(hgraph_param->hierarchical_graph_param) {
     this->label_table_->compress_duplicate_data_ = hgraph_param->support_duplicate;
     this->label_table_->support_tombstone_ = hgraph_param->support_tombstone;
     neighbors_mutex_ = std::make_shared<PointsMutex>(0, common_param.allocator_.get());
@@ -69,7 +68,8 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
         GraphInterface::MakeInstance(hgraph_param->bottom_graph_param, common_param);
     mult_ = 1 / log(1.0 * static_cast<double>(this->bottom_graph_->MaximumDegree()));
 
-    if (extra_info_size_ > 0) {
+    this->extra_info_size_ = common_param.extra_info_size_;
+    if (this->extra_info_size_ > 0) {
         this->extra_infos_ =
             ExtraInfoInterface::MakeInstance(hgraph_param->extra_info_param, common_param);
     }
@@ -83,7 +83,7 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
         block_size_per_vector =
             std::max(block_size_per_vector, this->high_precise_codes_->code_size_);
     }
-    if (extra_infos_ != nullptr) {
+    if (this->extra_infos_ != nullptr) {
         block_size_per_vector =
             std::max(block_size_per_vector, static_cast<uint32_t>(this->extra_info_size_));
     }
@@ -861,6 +861,9 @@ HGraph::Deserialize(StreamReader& reader) {
 
         if (create_new_raw_vector_) {
             this->raw_vector_->Deserialize(buffer_reader);
+        }
+        if (this->raw_vector_ != nullptr) {
+            this->has_raw_vector_ = true;
         }
     }
 
@@ -2044,6 +2047,7 @@ HGraph::check_and_init_raw_vector(const FlattenInterfaceParamPtr& raw_vector_par
         high_precise_codes_ == nullptr) {
         raw_vector_ = FlattenInterface::MakeInstance(raw_vector_param, common_param);
         create_new_raw_vector_ = true;
+        has_raw_vector_ = true;
         return;
     }
     if (basic_flatten_codes_->GetQuantizerName() != QUANTIZATION_TYPE_VALUE_FP32 and
@@ -2051,6 +2055,7 @@ HGraph::check_and_init_raw_vector(const FlattenInterfaceParamPtr& raw_vector_par
         high_precise_codes_->GetQuantizerName() != QUANTIZATION_TYPE_VALUE_FP32) {
         raw_vector_ = FlattenInterface::MakeInstance(raw_vector_param, common_param);
         create_new_raw_vector_ = true;
+        has_raw_vector_ = true;
         return;
     }
 
@@ -2058,17 +2063,20 @@ HGraph::check_and_init_raw_vector(const FlattenInterfaceParamPtr& raw_vector_par
     if (io_type_name != IO_TYPE_VALUE_BLOCK_MEMORY_IO and io_type_name != IO_TYPE_VALUE_MEMORY_IO) {
         raw_vector_ = FlattenInterface::MakeInstance(raw_vector_param, common_param);
         create_new_raw_vector_ = true;
+        has_raw_vector_ = true;
         return;
     }
 
     if (basic_flatten_codes_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32) {
         raw_vector_ = basic_flatten_codes_;
+        has_raw_vector_ = true;
         return;
     }
 
     if (high_precise_codes_ != nullptr and
         high_precise_codes_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32) {
         raw_vector_ = high_precise_codes_;
+        has_raw_vector_ = true;
         return;
     }
 }
@@ -2218,6 +2226,11 @@ HGraph::AnalyzeIndexBySearch(const SearchRequest& request) {
     stats["time_cost_query"] = time_cost / static_cast<double>(num_elements);
     this->analyze_quantizer(stats, querys->GetFloat32Vectors(), num_elements, topk, param_str);
     return stats.dump(4);
+}
+
+void
+HGraph::GetAttributeSetByInnerId(InnerIdType inner_id, AttributeSet* attr) const {
+    this->attr_filter_index_->GetAttribute(0, inner_id, attr);
 }
 
 }  // namespace vsag

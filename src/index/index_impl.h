@@ -158,6 +158,13 @@ public:
         SAFE_CALL(return this->inner_index_->GetDataByIds(ids, count));
     };
 
+    tl::expected<DatasetPtr, Error>
+    GetDataByIdsWithFlag(const int64_t* ids,
+                         int64_t count,
+                         uint64_t selected_data_flag) const override {
+        SAFE_CALL(return this->inner_index_->GetDataByIdsWithFlag(ids, count, selected_data_flag));
+    };
+
     [[nodiscard]] int64_t
     GetEstimateBuildMemory(const int64_t num_elements) const override {
         return this->inner_index_->GetEstimateBuildMemory(num_elements);
