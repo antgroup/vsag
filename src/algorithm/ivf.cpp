@@ -1077,7 +1077,7 @@ calculate_percentile(const std::vector<float>& sorted_data, float percentile) {
     }
 
     float fractional = index - static_cast<float>(floor_index);
-    return sorted_data[floor_index] * (1.0 - fractional) + sorted_data[ceil_index] * fractional;
+    return sorted_data[floor_index] * (1.0F - fractional) + sorted_data[ceil_index] * fractional;
 }
 
 void
@@ -1090,7 +1090,7 @@ get_data_stats(const Vector<float>& data, JsonType& json) {
     for (float val : data) {
         sum += val;
     }
-    float mean = sum / data.size();
+    float mean = sum / static_cast<float>(data.size());
     json["mean"] = mean;
 
     float sq_diff_sum = 0.0;
