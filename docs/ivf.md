@@ -20,6 +20,26 @@ IVF (Inverted File Index) improves search efficiency by **partitioning** data in
 ## Usage
 For examples, refer to [106_index_ivf.cpp](https://github.com/antgroup/vsag/blob/main/examples/cpp/106_index_ivf.cpp).
 
+## Factory Parameter Overview Table
+
+| **Category** | **Parameter** | **Type** | **Default Value** | **Required** | **Description** |
+|--------------|---------------|----------|-------------|--------------|-----------------|
+| **Basic** | dtype | string | "float32" | Yes | Data type (only float32 supported) |
+| **Basic** | metric_type | string | "l2" | Yes | Distance metric: l2, ip, cosine |
+| **Basic** | dim | int | - | Yes | Vector dimension [1, 4096] |
+| **Partition** | partition_strategy_type | string | "ivf" | No | Bucket partitioning strategy: ivf, gno_imi |
+| **Partition** | buckets_count | int | 10 | No | Number of buckets (for ivf strategy) |
+| **Partition** | first_order_buckets_count | int | 10 | No | First-level buckets (for gno_imi strategy) |
+| **Partition** | second_order_buckets_count | int | 10 | No | Second-level buckets (for gno_imi strategy) |
+| **Partition** | ivf_train_type | string | "kmeans" | No | Clustering algorithm: kmeans, random |
+| **Quantization** | base_quantization_type | string | "fp32" | No | Coarse-ranking vector quantization type |
+| **Quantization** | use_reorder | bool | false | No | Enable re-ranking |
+| **Quantization** | precise_quantization_type | string | "fp32" | Conditional | Fine-ranking quantization type for re-ranking |
+| **Quantization** | base_pq_dim | int | 1 | Conditional | Coarse-ranking PQ dimension |
+| **Storage** | base_io_type | string | "memory_io" | No | Coarse-ranking vector IO type |
+| **Storage** | precise_io_type | string | "block_memory_io" | No | Fine-ranking vector IO type |
+| **Storage** | precise_file_path | string | "" | No | Fine-ranking vector file path |
+
 ## Detailed Explanation of Building Parameters
 
 ### partition_strategy_type
