@@ -51,7 +51,7 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
       build_thread_count_(hgraph_param->build_thread_count),
       odescent_param_(hgraph_param->odescent_param),
       graph_type_(hgraph_param->graph_type),
-      hierarchical_datacell_param_(hgraph_param->hierarchical_graph_param){
+      hierarchical_datacell_param_(hgraph_param->hierarchical_graph_param) {
     this->use_reorder_ = hgraph_param->use_reorder;
     this->label_table_->compress_duplicate_data_ = hgraph_param->support_duplicate;
     this->label_table_->support_tombstone_ = hgraph_param->support_tombstone;
