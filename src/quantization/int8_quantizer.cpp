@@ -33,6 +33,9 @@ template <MetricType metric>
 INT8Quantizer<metric>::INT8Quantizer(int dim, Allocator* allocator)
     : Quantizer<INT8Quantizer<metric>>(dim, allocator) {
     this->code_size_ = dim * sizeof(int8_t);
+    if constexpr (metric == MetricType::METRIC_TYPE_COSINE) {
+        this->code_size_ += sizeof(float);
+    }
     this->query_code_size_ = this->code_size_;
     this->metric_ = metric;
 }
@@ -42,9 +45,6 @@ INT8Quantizer<metric>::INT8Quantizer(const INT8QuantizerParamPtr& param,
                                      const IndexCommonParam& common_param)
     : INT8Quantizer<metric>(common_param.dim_, common_param.allocator_.get()) {
     this->hold_molds_ = param->hold_molds;
-    if (metric == MetricType::METRIC_TYPE_COSINE && this->hold_molds_) {
-        this->code_size_ += sizeof(float);
-    }
 }
 
 template <MetricType metric>
@@ -64,7 +64,7 @@ INT8Quantizer<metric>::TrainImpl(const DataType* data, uint64_t count) {
 template <MetricType metric>
 bool
 INT8Quantizer<metric>::EncodeOneImpl(const DataType* data, uint8_t* codes) {
-    memcpy(codes, data, this->code_size_);
+    memcpy(codes, data, this->dim_);
     if constexpr (metric == MetricType::METRIC_TYPE_COSINE) {
         // Store the mold for cosine similarity
         const auto* data_int8 = reinterpret_cast<const int8_t*>(data);
@@ -80,7 +80,7 @@ INT8Quantizer<metric>::EncodeBatchImpl(const DataType* data, uint8_t* codes, uin
     const int8_t* dataPtr = reinterpret_cast<const int8_t*>(data);
     for (uint64_t i{0}; i < count; ++i) {
         EncodeOneImpl(reinterpret_cast<const float*>(dataPtr + i * this->dim_),
-                      codes + i * this->dim_);
+                      codes + i * this->code_size_);
     }
     return false;
 }
@@ -133,12 +133,21 @@ void
 INT8Quantizer<metric>::ProcessQueryImpl(const DataType* query,
                                         Computer<INT8Quantizer<metric>>& computer) const {
     try {
-        computer.buf_ = reinterpret_cast<uint8_t*>(this->allocator_->Allocate(this->code_size_));
+        if (computer.buf_ == nullptr) {
+            computer.buf_ =
+                reinterpret_cast<uint8_t*>(this->allocator_->Allocate(this->code_size_));
+        }
     } catch (const std::bad_alloc& e) {
         computer.buf_ = nullptr;
         throw VsagException(ErrorType::NO_ENOUGH_MEMORY, "bad alloc when init computer buf");
     }
-    memcpy(computer.buf_, query, this->code_size_);
+    memcpy(computer.buf_, query, this->dim_);
+    if constexpr (metric == MetricType::METRIC_TYPE_COSINE) {
+        // Store the mold for cosine similarity
+        const auto* data_int8 = reinterpret_cast<const int8_t*>(query);
+        float mold = std::sqrt(INT8ComputeIP(data_int8, data_int8, this->dim_));
+        memcpy(computer.buf_ + this->dim_ * sizeof(int8_t), &mold, sizeof(float));
+    }
 }
 
 template <MetricType metric>
@@ -147,20 +156,27 @@ INT8Quantizer<metric>::ComputeDistImpl(Computer<INT8Quantizer<metric>>& computer
                                        const uint8_t* codes,
                                        float* dists) const {
     if (metric == MetricType::METRIC_TYPE_IP) {
-        *dists = INT8ComputeIP(reinterpret_cast<const int8_t*>(codes),
-                               reinterpret_cast<const int8_t*>(computer.buf_),
-                               this->dim_);
+        *dists = 1.0F - INT8ComputeIP(reinterpret_cast<const int8_t*>(codes),
+                                      reinterpret_cast<const int8_t*>(computer.buf_),
+                                      this->dim_);
     } else if (metric == MetricType::METRIC_TYPE_COSINE) {
-        // *dists = INT8ComputeIP(reinterpret_cast<const int8_t*>(codes),
-        //                        reinterpret_cast<const int8_t*>(computer.buf_),
-        //                        this->dim_);
-        *dists = 1.0f;
+        const auto* mold = reinterpret_cast<const float*>(codes + this->dim_ * sizeof(uint8_t));
+        const auto* query_mold =
+            reinterpret_cast<const float*>(computer.buf_ + this->dim_ * sizeof(uint8_t));
+        if (*mold == 0 || *query_mold == 0) {
+            *dists = 1.0F;
+            return;
+        }
+        const auto similarity = INT8ComputeIP(reinterpret_cast<const int8_t*>(codes),
+                                              reinterpret_cast<const int8_t*>(computer.buf_),
+                                              this->dim_);
+        *dists = 1.0F - std::max(-1.0F, std::min(1.0F, similarity / (mold[0] * query_mold[0])));
     } else if (metric == MetricType::METRIC_TYPE_L2SQR) {
         *dists = INT8ComputeL2Sqr(reinterpret_cast<const int8_t*>(codes),
                                   reinterpret_cast<const int8_t*>(computer.buf_),
                                   this->dim_);
     } else {
-        *dists = 1.0F;
+        *dists = -404.0F;
     }
 }
 
@@ -170,8 +186,8 @@ INT8Quantizer<metric>::ScanBatchDistImpl(Computer<INT8Quantizer<metric>>& comput
                                          uint64_t count,
                                          const uint8_t* codes,
                                          float* dists) const {
-    for (uint64_t i = 0; i < count; ++i) {
-      this->ComputeDistImpl(computer, codes+i*this->code_size_, dists+i);
+    for (uint64_t i = 0; i < count; i++) {
+        this->ComputeDistImpl(computer, codes + i * this->code_size_, dists + i);
     }
 }
 

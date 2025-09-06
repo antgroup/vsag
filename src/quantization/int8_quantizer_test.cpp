@@ -161,19 +161,25 @@ TestComputerINT8(Quantizer<INT8Quantizer<metric>>& quant,
 
     auto gt_func = [&](int base_idx, int query_idx) -> float {
         if constexpr (metric == vsag::MetricType::METRIC_TYPE_IP) {
-            return INT8InnerProduct(
-                vecs.data() + base_idx * dim, queries.data() + query_idx * dim, &dim);
+            return 1.0F - INT8InnerProduct(
+                              vecs.data() + base_idx * dim, queries.data() + query_idx * dim, &dim);
         } else if constexpr (metric == vsag::MetricType::METRIC_TYPE_L2SQR) {
             return INT8L2Sqr(vecs.data() + base_idx * dim, queries.data() + query_idx * dim, &dim);
         } else if constexpr (metric == vsag::MetricType::METRIC_TYPE_COSINE) {
-            // TODO: cosine
-            // std::vector<int8_t> zeros(dim, 0);
-            // float norm = INT8L2Sqr(vecs.data() + base_idx * dim, zeros.data(), &dim);
-            // float query_norm = INT8L2Sqr(queries.data() + query_idx * dim, zeros.data(), &dim);
-            // float dot = INT8InnerProduct(
-            //     vecs.data() + base_idx * dim, queries.data() + query_idx * dim, &dim);
-            // return 1.0f - dot / (norm * query_norm);
-            return 0.0f;
+            auto baseNorm = std::sqrt(
+                INT8InnerProduct(vecs.data() + base_idx * dim, vecs.data() + base_idx * dim, &dim));
+            auto queryNorm = std::sqrt(INT8InnerProduct(
+                queries.data() + query_idx * dim, queries.data() + query_idx * dim, &dim));
+
+            if (baseNorm == 0 || queryNorm == 0) {
+                return 1.0F;
+            }
+
+            auto similarity = INT8InnerProduct(
+                vecs.data() + base_idx * dim, queries.data() + query_idx * dim, &dim);
+            auto cosineSim = similarity / (baseNorm * queryNorm);
+            cosineSim = std::max(-1.0F, std::min(1.0F, cosineSim));
+            return 1.0F - cosineSim;
         }
     };
 
@@ -191,7 +197,7 @@ TestComputerINT8(Quantizer<INT8Quantizer<metric>>& quant,
             uint8_t* code = codes1.data() + j * quant.GetCodeSize();
             quant.EncodeOne(reinterpret_cast<DataTypePtr>(vecs.data() + j * dim), code);
             quant.ComputeDist(*computer, code, dists1.data() + j);
-            REQUIRE(quant.ComputeDist(*computer, code) == dists1[j]);
+            REQUIRE(gt == dists1[j]);
             if (std::abs(gt - dists1[j]) > error) {
                 count_unbounded_numeric_error++;
             }
@@ -202,11 +208,11 @@ TestComputerINT8(Quantizer<INT8Quantizer<metric>>& quant,
 
         // Test Compute Batch
         std::vector<uint8_t> codes2(quant.GetCodeSize() * count, 0);
-        std::vector<float> dists2(count);
+        std::vector<float> dists2(count, 0);
         quant.EncodeBatch(reinterpret_cast<DataTypePtr>(vecs.data()), codes2.data(), count);
         quant.ScanBatchDists(*computer, count, codes2.data(), dists2.data());
         for (int j = 0; j < count; ++j) {
-          REQUIRE(fixtures::dist_t(dists1[j]) == fixtures::dist_t(dists2[j]));
+            REQUIRE(fixtures::dist_t(dists1[j]) == fixtures::dist_t(dists2[j]));
         }
     }
     REQUIRE(count_unbounded_numeric_error / (query_count * count) <= unbounded_numeric_error_rate);
@@ -219,7 +225,7 @@ TestComputeMetricINT8(uint64_t dim, int count, float error = 1e-5) {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     INT8Quantizer<metric> quantizer(dim, allocator.get());
     TestComputeCodesINT8<metric>(quantizer, dim, count, error);
-    // TestComputerINT8<metric>(quantizer, dim, count, error, 1.01, true, 0.01, 0.01);
+    TestComputerINT8<metric>(quantizer, dim, count, error, 1.01, true, 0.01, 0.01);
 }
 
 TEST_CASE("INT8 Compute", "[ut][INT8Quantizer]") {
