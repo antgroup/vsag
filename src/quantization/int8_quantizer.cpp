@@ -66,12 +66,10 @@ bool
 INT8Quantizer<metric>::EncodeOneImpl(const DataType* data, uint8_t* codes) {
     memcpy(codes, data, this->code_size_);
     if constexpr (metric == MetricType::METRIC_TYPE_COSINE) {
-        if (this->hold_molds_) {
-            // Store the mold for cosine similarity
-            const auto* data_int8 = reinterpret_cast<const int8_t*>(data);
-            float mold = std::sqrt(INT8ComputeIP(data_int8, data_int8, this->dim_));
-            memcpy(codes + this->dim_ * sizeof(int8_t), &mold, sizeof(float));
-        }
+        // Store the mold for cosine similarity
+        const auto* data_int8 = reinterpret_cast<const int8_t*>(data);
+        float mold = std::sqrt(INT8ComputeIP(data_int8, data_int8, this->dim_));
+        memcpy(codes + this->dim_ * sizeof(int8_t), &mold, sizeof(float));
     }
     return true;
 }
@@ -108,15 +106,21 @@ template <MetricType metric>
 float
 INT8Quantizer<metric>::ComputeImpl(const uint8_t* codes1, const uint8_t* codes2) {
     if constexpr (metric == MetricType::METRIC_TYPE_IP) {
-        return INT8ComputeIP(reinterpret_cast<const int8_t*>(codes1),
-                             reinterpret_cast<const int8_t*>(codes2),
-                             this->dim_);
+        return 1.0F - INT8ComputeIP(reinterpret_cast<const int8_t*>(codes1),
+                                    reinterpret_cast<const int8_t*>(codes2),
+                                    this->dim_);
     } else if constexpr (metric == MetricType::METRIC_TYPE_COSINE) {
-        //TODO: impl cosine
-        // return INT8ComputeIP(reinterpret_cast<const int8_t*>(codes1),
-        //                      reinterpret_cast<const int8_t*>(codes2),
-        //                      this->dim_);
-        return 0.0f;
+        const auto* mold1 = reinterpret_cast<const float*>(codes1 + this->dim_ * sizeof(uint8_t));
+        const auto* mold2 = reinterpret_cast<const float*>(codes2 + this->dim_ * sizeof(uint8_t));
+
+        if (*mold1 == 0 || *mold2 == 0) {
+            return 1.0F;
+        }
+        auto similarity = INT8ComputeIP(reinterpret_cast<const int8_t*>(codes1),
+                                        reinterpret_cast<const int8_t*>(codes2),
+                                        this->dim_);
+        similarity /= mold1[0] * mold2[0];
+        return 1.0F - std::max(-1.0f, std::min(1.0f, similarity));
     } else if (metric == MetricType::METRIC_TYPE_L2SQR) {
         return INT8ComputeL2Sqr(reinterpret_cast<const int8_t*>(codes1),
                                 reinterpret_cast<const int8_t*>(codes2),

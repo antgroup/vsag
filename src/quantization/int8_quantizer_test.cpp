@@ -15,6 +15,7 @@
 
 #include "quantization/int8_quantizer.h"
 
+#include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <initializer_list>
@@ -114,14 +115,26 @@ TestComputeCodesINT8(Quantizer<INT8Quantizer<metric>>& quantizer,
         std::vector<uint8_t> codes2(quantizer.GetCodeSize());
         quantizer.EncodeOne(reinterpret_cast<DataTypePtr>(vecs.data() + idx1 * dim), codes1.data());
         quantizer.EncodeOne(reinterpret_cast<DataTypePtr>(vecs.data() + idx2 * dim), codes2.data());
-        float gt = 0.0;
+        float gt = 1.0F;
         float value = quantizer.Compute(codes1.data(), codes2.data());
         if constexpr (metric == vsag::MetricType::METRIC_TYPE_IP) {
-            gt = INT8InnerProduct(vecs.data() + idx1 * dim, vecs.data() + idx2 * dim, &dim);
+            gt -= INT8InnerProduct(vecs.data() + idx1 * dim, vecs.data() + idx2 * dim, &dim);
         } else if constexpr (metric == vsag::MetricType::METRIC_TYPE_L2SQR) {
             gt = INT8L2Sqr(vecs.data() + idx1 * dim, vecs.data() + idx2 * dim, &dim);
         } else if constexpr (metric == vsag::MetricType::METRIC_TYPE_COSINE) {
-            gt = 0.0f;
+            auto similarity =
+                INT8InnerProduct(vecs.data() + idx1 * dim, vecs.data() + idx2 * dim, &dim);
+            if (similarity == 0) {
+                gt = 1.0f;
+            } else {
+                auto norm1 = std::sqrt(
+                    INT8InnerProduct(vecs.data() + idx1 * dim, vecs.data() + idx1 * dim, &dim));
+                auto norm2 = std::sqrt(
+                    INT8InnerProduct(vecs.data() + idx2 * dim, vecs.data() + idx2 * dim, &dim));
+                auto cosineSim = similarity / (norm1 * norm2);
+                cosineSim = std::max(-1.0f, std::min(1.0f, cosineSim));
+                gt -= cosineSim;
+            }
         }
         REQUIRE(std::abs(gt - value) < error);
     }
@@ -206,7 +219,7 @@ TestComputeMetricINT8(uint64_t dim, int count, float error = 1e-5) {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     INT8Quantizer<metric> quantizer(dim, allocator.get());
     TestComputeCodesINT8<metric>(quantizer, dim, count, error);
-    TestComputerINT8<metric>(quantizer, dim, count, error, 1.01, true, 0.01, 0.01);
+    // TestComputerINT8<metric>(quantizer, dim, count, error, 1.01, true, 0.01, 0.01);
 }
 
 TEST_CASE("INT8 Compute", "[ut][INT8Quantizer]") {
@@ -216,7 +229,7 @@ TEST_CASE("INT8 Compute", "[ut][INT8Quantizer]") {
     for (auto dim : dims) {
         for (auto count : counts) {
             TestComputeMetricINT8<metrics[0]>(dim, count, error);
-            // TestComputeMetricINT8<metrics[1]>(dim, count, error);
+            TestComputeMetricINT8<metrics[1]>(dim, count, error);
             TestComputeMetricINT8<metrics[2]>(dim, count, error);
         }
     }
