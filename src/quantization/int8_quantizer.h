@@ -27,9 +27,6 @@
 namespace vsag {
 template <MetricType metric = MetricType::METRIC_TYPE_L2SQR>
 class INT8Quantizer : public Quantizer<INT8Quantizer<metric>> {
-private:
-    float molds_{0};
-
 public:
     explicit INT8Quantizer(int dim, Allocator* allocator);
 

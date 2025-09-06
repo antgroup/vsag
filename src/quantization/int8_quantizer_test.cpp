@@ -84,13 +84,14 @@ TestQuantizerEncodeDecodeMetricINT8(int64_t dim, int64_t count, float error = 1e
 }
 
 TEST_CASE("INT8 Quantizer Encode and Decode", "[ut][INT8Quantizer]") {
-    constexpr MetricType metrics[2] = {MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_IP};
+    constexpr MetricType metrics[3] = {
+        MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_IP, MetricType::METRIC_TYPE_COSINE};
     float error = 2e-5f;
     for (auto dim : dims) {
         for (auto count : counts) {
             TestQuantizerEncodeDecodeMetricINT8<metrics[0]>(dim, count, error);
             TestQuantizerEncodeDecodeMetricINT8<metrics[1]>(dim, count, error);
-            // TODO: impl cosine
+            TestQuantizerEncodeDecodeMetricINT8<metrics[2]>(dim, count, error);
         }
     }
 }

@@ -33,6 +33,7 @@ template <MetricType metric>
 INT8Quantizer<metric>::INT8Quantizer(int dim, Allocator* allocator)
     : Quantizer<INT8Quantizer<metric>>(dim, allocator) {
     this->code_size_ = dim * sizeof(int8_t);
+    this->query_code_size_ = this->code_size_;
     this->metric_ = metric;
 }
 
@@ -41,6 +42,9 @@ INT8Quantizer<metric>::INT8Quantizer(const INT8QuantizerParamPtr& param,
                                      const IndexCommonParam& common_param)
     : INT8Quantizer<metric>(common_param.dim_, common_param.allocator_.get()) {
     this->hold_molds_ = param->hold_molds;
+    if (metric == MetricType::METRIC_TYPE_COSINE && this->hold_molds_) {
+        this->code_size_ += sizeof(float);
+    }
 }
 
 template <MetricType metric>
@@ -60,14 +64,14 @@ INT8Quantizer<metric>::TrainImpl(const DataType* data, uint64_t count) {
 template <MetricType metric>
 bool
 INT8Quantizer<metric>::EncodeOneImpl(const DataType* data, uint8_t* codes) {
+    memcpy(codes, data, this->code_size_);
     if constexpr (metric == MetricType::METRIC_TYPE_COSINE) {
         if (this->hold_molds_) {
             // Store the mold for cosine similarity
-            // TODO: impl
-        } else {
+            const auto* data_int8 = reinterpret_cast<const int8_t*>(data);
+            float mold = std::sqrt(INT8ComputeIP(data_int8, data_int8, this->dim_));
+            memcpy(codes + this->dim_ * sizeof(int8_t), &mold, sizeof(float));
         }
-    } else {
-        memcpy(codes, data, this->code_size_);
     }
     return true;
 }
