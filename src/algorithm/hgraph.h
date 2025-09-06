@@ -305,13 +305,6 @@ private:
 
 private:
     void
-    analyze_quantizer(JsonType& stats,
-                      const float* data,
-                      uint64_t sample_data_size,
-                      int64_t topk,
-                      const std::string& search_param) const;
-
-    void
     analyze_graph_recall(JsonType& stats,
                          Vector<float>& data,
                          uint64_t sample_data_size,
@@ -333,7 +326,6 @@ private:
     GraphInterfacePtr bottom_graph_{nullptr};
     SparseGraphDatacellParamPtr hierarchical_datacell_param_{nullptr};
 
-    mutable bool use_reorder_{false};
     bool use_elp_optimizer_{false};
     bool ignore_reorder_{false};
     bool build_by_base_{false};

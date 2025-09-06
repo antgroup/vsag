@@ -179,6 +179,37 @@ IVFTestIndex::GenerateIVFBuildParametersString(const std::string& metric_type,
     return build_parameters_str;
 }
 
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex, "IVF GetStatus", "[ft][ivf]") {
+    auto test_index = std::make_shared<fixtures::IVFTestIndex>();
+    auto resource = test_index->GetResource(true);
+    for (auto metric_type : resource->metric_types) {
+        for (auto dim : resource->dims) {
+            for (auto& [base_quantization_str, recall] : resource->test_cases) {
+                INFO(fmt::format("metric_type: {}, dim: {}, base_quantization_str: {}, recall: {}",
+                                 metric_type,
+                                 dim,
+                                 base_quantization_str,
+                                 recall));
+                auto param = IVFTestIndex::GenerateIVFBuildParametersString(
+                    metric_type, dim, base_quantization_str, 300);
+                auto index = TestIndex::TestFactory(test_index->name, param, true);
+                auto dataset =
+                    IVFTestIndex::pool.GetDatasetAndCreate(dim, resource->base_count, metric_type);
+                TestIndex::TestBuildIndex(index, dataset, true);
+                INFO(index->GetStats());
+                vsag::SearchRequest request;
+                request.topk_ = 100;
+                request.params_str_ = fmt::format(fixtures::search_param_tmp, 200);
+                request.query_ = dataset->query_;
+                auto raw_num = dataset->query_->GetNumElements();
+                dataset->query_->NumElements(10);
+                INFO(index->AnalyzeIndexBySearch(request));
+                dataset->query_->NumElements(raw_num);
+            }
+        }
+    }
+}
+
 std::string
 IVFTestIndex::GenerateGNOIMIBuildParametersString(const std::string& metric_type,
                                                   int64_t dim,

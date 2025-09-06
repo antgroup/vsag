@@ -49,6 +49,9 @@ public:
     std::vector<int64_t>
     Add(const DatasetPtr& base) override;
 
+    std::string
+    AnalyzeIndexBySearch(const vsag::SearchRequest& request) override;
+
     std::vector<int64_t>
     Build(const DatasetPtr& base) override;
 
@@ -90,6 +93,9 @@ public:
 
     void
     GetVectorByInnerId(InnerIdType inner_id, float* data) const override;
+
+    std::string
+    GetStats() const override;
 
     void
     InitFeatures() override;
@@ -157,8 +163,6 @@ private:
     BucketIdType buckets_per_data_;
 
     int64_t total_elements_{0};
-
-    bool use_reorder_{false};
 
     bool is_trained_{false};
     bool use_residual_{false};
