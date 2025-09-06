@@ -15,16 +15,13 @@
 
 #pragma once
 
-#include <sys/mman.h>
-
-#include <filesystem>
-#include <utility>
-
 #include "basic_io.h"
-#include "index/index_common_param.h"
 #include "mmap_io_parameter.h"
 
 namespace vsag {
+
+class IndexCommonParam;
+class Allocator;
 
 class MMapIO : public BasicIO<MMapIO> {
 public:

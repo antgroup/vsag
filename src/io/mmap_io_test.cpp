@@ -20,6 +20,7 @@
 
 #include "basic_io_test.h"
 #include "impl/allocator/safe_allocator.h"
+#include "index/index_common_param.h"
 
 using namespace vsag;
 
