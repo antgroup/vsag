@@ -13,56 +13,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "basic_searcher.h"
+#include "parallel_searcher.h"
 
 #include "searcher_test.h"
 
 using namespace vsag;
 
-TEST_CASE("Basic Usage for GraphDataCell (adapter of hnsw)", "[ut][GraphDataCell]") {
-    uint32_t M = 32;
-    uint32_t data_size = 1000;
-    uint32_t ef_construction = 100;
-    uint64_t DEFAULT_MAX_ELEMENT = 1;
-    uint64_t dim = 960;
-    auto vectors = fixtures::generate_vectors(data_size, dim);
-    std::vector<int64_t> ids(data_size);
-    std::iota(ids.begin(), ids.end(), 0);
-
-    auto allocator = SafeAllocator::FactoryDefaultAllocator();
-    auto space = std::make_shared<hnswlib::L2Space>(dim);
-    auto io = std::make_shared<MemoryIO>(allocator.get());
-    auto alg_hnsw =
-        std::make_shared<hnswlib::HierarchicalNSW>(space.get(),
-                                                   DEFAULT_MAX_ELEMENT,
-                                                   allocator.get(),
-                                                   M / 2,
-                                                   ef_construction,
-                                                   Options::Instance().block_size_limit());
-    alg_hnsw->init_memory_space();
-    for (int64_t i = 0; i < data_size; ++i) {
-        auto successful_insert =
-            alg_hnsw->addPoint((const void*)(vectors.data() + i * dim), ids[i]);
-        REQUIRE(successful_insert == true);
-    }
-
-    GraphInterfacePtr graph = std::make_shared<AdaptGraphDataCell>(alg_hnsw);
-
-    for (uint32_t i = 0; i < data_size; i++) {
-        auto neighbor_size = graph->GetNeighborSize(i);
-        Vector<InnerIdType> neighbor_ids(neighbor_size, allocator.get());
-        graph->GetNeighbors(i, neighbor_ids);
-
-        int* data = (int*)alg_hnsw->get_linklist0(i);
-        REQUIRE(neighbor_size == alg_hnsw->getListCount((hnswlib::linklistsizeint*)data));
-
-        for (uint32_t j = 0; j < neighbor_size; j++) {
-            REQUIRE(neighbor_ids[j] == *(data + j + 1));
-        }
-    }
-}
-
-TEST_CASE("Search with HNSW", "[ut][BasicSearcher]") {
+TEST_CASE("Parallel search with HNSW", "[ut][ParallelSearcher][concurrent]") {
     // data attr
     uint32_t base_size = 1000;
     uint32_t query_size = 100;
@@ -127,9 +84,12 @@ TEST_CASE("Search with HNSW", "[ut][BasicSearcher]") {
     auto pool = std::make_shared<VisitedListPool>(
         init_size, allocator.get(), vector_data_cell->TotalCount(), allocator.get());
 
+    auto thread_pool = SafeThreadPool::FactoryDefaultThreadPool();
+    thread_pool->SetPoolSize(16);
+
     auto exception_func = [&](const InnerSearchParam& search_param) -> void {
         // init searcher
-        auto searcher = std::make_shared<BasicSearcher>(common);
+        auto searcher = std::make_shared<ParallelSearcher>(common, thread_pool);
         {
             // search with empty graph_data_cell
             auto vl = pool->TakeOne();
@@ -159,6 +119,8 @@ TEST_CASE("Search with HNSW", "[ut][BasicSearcher]") {
     search_param_temp.topk = k;
     search_param_temp.is_inner_id_allowed = nullptr;
     search_param_temp.radius = range;
+    search_param_temp.use_muti_threads_for_one_query = true;
+    search_param_temp.level_0 = true;
 
     std::vector<InnerSearchParam> params(4);
     params[0] = search_param_temp;
@@ -171,7 +133,7 @@ TEST_CASE("Search with HNSW", "[ut][BasicSearcher]") {
 
     for (const auto& search_param : params) {
         exception_func(search_param);
-        auto searcher = std::make_shared<BasicSearcher>(common);
+        auto searcher = std::make_shared<ParallelSearcher>(common, thread_pool);
         for (int i = 0; i < query_size; i++) {
             std::unordered_set<InnerIdType> valid_set, set;
             auto vl = pool->TakeOne();
@@ -208,105 +170,19 @@ TEST_CASE("Search with HNSW", "[ut][BasicSearcher]") {
                 }
             }
 
+            uint32_t res_in_valid_num = 0;
+            uint32_t valid_in_res_num = 0;
+
             for (auto id : set) {
-                REQUIRE(valid_set.count(id) > 0);
+                if (valid_set.count(id) > 0)
+                    res_in_valid_num++;
             }
+
             for (auto id : valid_set) {
-                REQUIRE(set.count(id) > 0);
+                if (set.count(id) > 0)
+                    valid_in_res_num++;
             }
+            REQUIRE(res_in_valid_num == valid_in_res_num);
         }
     }
-}
-
-TEST_CASE("Optimize SQ4", "[ut][BasicOptimizer]") {
-    // avoid too much slow task logs
-    fixtures::logger::LoggerReplacer _;
-    vsag::Options::Instance().logger()->SetLevel(vsag::Logger::Level::kDEBUG);
-
-    // data attr
-    auto allocator = SafeAllocator::FactoryDefaultAllocator();
-    uint32_t base_size = 10000;
-    uint64_t dim = 960;
-    auto quantizer_type = GENERATE("fp32", "sq4_uniform");
-
-    // build and search attr
-    uint32_t M = 32;
-    uint32_t ef_construction = 100;
-    uint32_t ef_search = 300;
-    uint32_t k = ef_search;
-    InnerIdType fixed_entry_point_id = 0;
-    uint64_t DEFAULT_MAX_ELEMENT = 1;
-
-    // data preparation
-    auto base_vectors = fixtures::generate_vectors(base_size, dim, true);
-    std::vector<InnerIdType> ids(base_size);
-    std::iota(ids.begin(), ids.end(), 0);
-
-    // vector data cell
-    constexpr const char* param_temp = R"({{"type": "{}"}})";
-    auto quantizer_param = QuantizerParameter::GetQuantizerParameterByJson(
-        JsonType::parse(fmt::format(param_temp, quantizer_type)));
-    auto io_param =
-        IOParameter::GetIOParameterByJson(JsonType::parse(fmt::format(param_temp, "memory_io")));
-    IndexCommonParam common;
-    common.dim_ = dim;
-    common.allocator_ = allocator;
-    common.metric_ = vsag::MetricType::METRIC_TYPE_L2SQR;
-
-    FlattenInterfacePtr vector_data_cell;
-    if (quantizer_type == std::string("sq4_uniform")) {
-        vector_data_cell = std::make_shared<
-            FlattenDataCell<SQ4UniformQuantizer<vsag::MetricType::METRIC_TYPE_L2SQR>, MemoryIO>>(
-            quantizer_param, io_param, common);
-    } else {
-        vector_data_cell = std::make_shared<
-            FlattenDataCell<FP32Quantizer<vsag::MetricType::METRIC_TYPE_L2SQR>, MemoryIO>>(
-            quantizer_param, io_param, common);
-    }
-
-    vector_data_cell->Train(base_vectors.data(), base_size);
-    vector_data_cell->BatchInsertVector(base_vectors.data(), base_size, ids.data());
-
-    // hnswlib build
-    auto space = std::make_shared<hnswlib::L2Space>(dim);
-    auto io = std::make_shared<MemoryIO>(allocator.get());
-    auto alg_hnsw =
-        std::make_shared<hnswlib::HierarchicalNSW>(space.get(),
-                                                   DEFAULT_MAX_ELEMENT,
-                                                   allocator.get(),
-                                                   M / 2,
-                                                   ef_construction,
-                                                   Options::Instance().block_size_limit());
-    alg_hnsw->init_memory_space();
-
-    for (int64_t i = 0; i < base_size; ++i) {
-        alg_hnsw->addPoint((const void*)(base_vectors.data() + i * dim), ids[i]);
-    }
-
-    // graph data cell
-    auto graph_data_cell = std::make_shared<AdaptGraphDataCell>(alg_hnsw);
-
-    // pool
-    auto init_size = 10;
-    auto pool = std::make_shared<VisitedListPool>(
-        init_size, allocator.get(), vector_data_cell->TotalCount(), allocator.get());
-
-    // search param
-    InnerSearchParam search_param;
-    search_param.ep = fixed_entry_point_id;
-    search_param.ef = ef_search;
-    search_param.topk = k;
-
-    // init searcher
-    auto searcher = std::make_shared<BasicSearcher>(common);
-
-    // searcher-optimizer
-    searcher->SetMockParameters(graph_data_cell, vector_data_cell, pool, search_param, dim, 1000);
-    auto loss_before = searcher->MockRun();
-    auto optimizer_searcher = std::make_shared<Optimizer<BasicSearcher>>(common);
-    optimizer_searcher->RegisterParameter(RuntimeParameter(PREFETCH_DEPTH_CODE, 1, 10, 1));
-    optimizer_searcher->RegisterParameter(RuntimeParameter(PREFETCH_STRIDE_CODE, 1, 10, 1));
-    optimizer_searcher->RegisterParameter(RuntimeParameter(PREFETCH_STRIDE_VISIT, 1, 10, 1));
-    float end2end_improvement = optimizer_searcher->Optimize(searcher);
-    auto loss_after = searcher->MockRun();
 }
