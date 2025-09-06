@@ -254,6 +254,7 @@ IVF::IVF(const IVFParameterPtr& param, const IndexCommonParam& common_param)
         this->has_raw_vector_ = true;
     }
 }
+
 void
 IVF::GetCodeByInnerId(InnerIdType inner_id, uint8_t* data) const {
     auto [bucket_id, offset_id] = this->get_location(inner_id);
@@ -569,7 +570,11 @@ IVF::Serialize(StreamWriter& writer) const {
     basic_info["total_elements"] = this->total_elements_;
     basic_info["use_reorder"] = this->use_reorder_;
     basic_info["is_trained"] = this->is_trained_;
+    basic_info[DIM] = this->dim_;
+    basic_info[EXTRA_INFO_SIZE] = 0;
     basic_info[INDEX_PARAM] = this->create_param_ptr_->ToString();
+    basic_info["data_type"] = this->data_type_;
+    basic_info["metric"] = this->metric_;
 
     auto metadata = std::make_shared<Metadata>();
     metadata->Set(BASIC_INFO, basic_info);
@@ -1058,6 +1063,100 @@ void
 IVF::GetVectorByInnerId(InnerIdType inner_id, float* data) const {
     auto [bucket_id, bucket_offset] = this->get_location(inner_id);
     this->bucket_->GetCodesById(bucket_id, bucket_offset, reinterpret_cast<uint8_t*>(data));
+}
+
+float
+calculate_percentile(const std::vector<float>& sorted_data, float percentile) {
+    size_t n = sorted_data.size();
+    float index = percentile * static_cast<float>(n - 1);
+    auto floor_index = static_cast<size_t>(std::floor(index));
+    size_t ceil_index = floor_index + 1;
+
+    if (ceil_index >= n) {
+        return sorted_data[floor_index];
+    }
+
+    float fractional = index - static_cast<float>(floor_index);
+    return sorted_data[floor_index] * (1.0F - fractional) + sorted_data[ceil_index] * fractional;
+}
+
+void
+get_data_stats(const Vector<float>& data, JsonType& json) {
+    if (data.empty()) {
+        throw std::invalid_argument("Vector cannot be empty.");
+    }
+
+    float sum = 0.0;
+    for (float val : data) {
+        sum += val;
+    }
+    float mean = sum / static_cast<float>(data.size());
+    json["mean"] = mean;
+
+    float sq_diff_sum = 0.0;
+    for (float val : data) {
+        sq_diff_sum += (val - mean) * (val - mean);
+    }
+    float variance = sq_diff_sum / static_cast<float>(data.size());
+    json["std"] = std::sqrt(variance);
+
+    float min_val = *std::min_element(data.begin(), data.end());
+    json["min"] = min_val;
+    float max_val = *std::max_element(data.begin(), data.end());
+    json["max"] = max_val;
+
+    std::vector<float> sorted_data(data.begin(), data.end());
+    std::sort(sorted_data.begin(), sorted_data.end());
+
+    float q25 = calculate_percentile(sorted_data, 0.25);
+    float q50 = calculate_percentile(sorted_data, 0.5);
+    float q75 = calculate_percentile(sorted_data, 0.75);
+    json["q25"] = q25;
+    json["q50"] = q50;
+    json["q75"] = q75;
+}
+
+std::string
+IVF::GetStats() const {
+    JsonType stats;
+    // bucket_radius
+    stats["bucket_count"] = this->bucket_->bucket_count_;
+    Vector<float> centroids(this->dim_, allocator_);
+    Vector<float> bucket_counts(allocator_);
+    Vector<float> bucket_radius(allocator_);
+    for (int i = 0; i < this->bucket_->bucket_count_; ++i) {
+        auto size = bucket_->GetBucketSize(i);
+        if (size == 0) {
+            bucket_counts.push_back(0);
+            continue;
+        }
+        bucket_counts.push_back(static_cast<float>(size));
+        Vector<float> dists(size, allocator_);
+        partition_strategy_->GetCentroid(i, centroids);
+        auto computer = bucket_->FactoryComputer(centroids.data());
+        bucket_->ScanBucketById(dists.data(), computer, i);
+        float max_distance = *std::max_element(dists.begin(), dists.end());
+        bucket_radius.push_back(max_distance);
+    }
+    // bucket_count_std
+    stats["bucket_num"] = JsonType();
+    get_data_stats(bucket_counts, stats["bucket_num"]);
+    // bucket_radius
+    stats["bucket_radius"] = JsonType();
+    get_data_stats(bucket_radius, stats["bucket_radius"]);
+    return stats.dump(4);
+}
+
+std::string
+IVF::AnalyzeIndexBySearch(const SearchRequest& request) {
+    JsonType stats;
+    auto querys = request.query_;
+    auto topk = std::min(request.topk_, GetNumElements());
+    auto num_elements = querys->GetNumElements();
+    auto param_str = request.params_str_;
+    // quantization error
+    this->analyze_quantizer(stats, querys->GetFloat32Vectors(), num_elements, topk, param_str);
+    return stats.dump(4);
 }
 
 }  // namespace vsag
