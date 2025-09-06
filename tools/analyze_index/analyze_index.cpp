@@ -20,6 +20,7 @@
 #include <iostream>
 
 #include "algorithm/hgraph.h"
+#include "algorithm/ivf.h"
 #include "index/index_impl.h"
 #include "inner_string_params.h"
 #include "storage/serialization.h"
@@ -222,6 +223,13 @@ private:
             auto inner_index = std::make_shared<HGraph>(hgraph_parameter, index_common_params);
             inner_index->Deserialize(reader);
             index_ = std::make_shared<IndexImpl<HGraph>>(inner_index, index_common_params);
+            return true;
+        } else if (index_name_ == INDEX_IVF) {
+            auto ivf_parameter = std::make_shared<IVFParameter>();
+            ivf_parameter->FromJson(index_param_);
+            auto inner_index = std::make_shared<IVF>(ivf_parameter, index_common_params);
+            inner_index->Deserialize(reader);
+            index_ = std::make_shared<IndexImpl<IVF>>(inner_index, index_common_params);
             return true;
         } else {
             logger::error("Index type {} not supported", index_name_);
