@@ -88,7 +88,7 @@ INT8Quantizer<metric>::EncodeBatchImpl(const DataType* data, uint8_t* codes, uin
 template <MetricType metric>
 bool
 INT8Quantizer<metric>::DecodeOneImpl(const uint8_t* codes, DataType* data) {
-    memcpy(data, codes, this->code_size_);
+    memcpy(data, codes, this->dim_);
     return true;
 }
 
@@ -97,7 +97,7 @@ bool
 INT8Quantizer<metric>::DecodeBatchImpl(const uint8_t* codes, DataType* data, uint64_t count) {
     int8_t* dataPtr = reinterpret_cast<int8_t*>(data);
     for (uint64_t i{0}; i < count; ++i) {
-        memcpy(dataPtr + i * this->code_size_, codes + i * this->code_size_, this->code_size_);
+        memcpy(dataPtr + i * this->dim_, codes + i * this->code_size_, this->dim_);
     }
     return false;
 }
