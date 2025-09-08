@@ -141,6 +141,9 @@ const char* const GNO_IMI_SECOND_ORDER_BUCKETS_COUNT_KEY = "second_order_buckets
 const char* const GNO_IMI_SEARCH_PARAM_FIRST_ORDER_SCAN_RATIO = "first_order_scan_ratio";
 const char* const FLATTEN_DATA_CELL = "flatten_data_cell";
 const char* const SPARSE_VECTOR_DATA_CELL = "sparse_vector_data_cell";
+const char* const PNM_DATA_CELL = "pnm_data_cell";
+const char* const HGRAPH_CODES_TYPE_KEY = "codes_type";
+const char* const HGRAPH_PRECISE_CODES_TYPE_KEY = "precise_codes_type";
 
 const char* const GRAPH_SUPPORT_REMOVE = "support_remove";
 const char* const REMOVE_FLAG_BIT = "remove_flag_bit";
@@ -156,6 +159,7 @@ const char* const INDEX_TYPE = "type";
 const char* const CODES_TYPE_KEY = "codes_type";
 const char* const FLATTEN_CODES = "flatten";
 const char* const SPARSE_CODES = "sparse";
+const char* const PNM_CODES = "pnm";
 
 const std::unordered_map<std::string, std::string> DEFAULT_MAP = {
     {"INDEX_TYPE_HGRAPH", INDEX_TYPE_HGRAPH},
@@ -168,6 +172,7 @@ const std::unordered_map<std::string, std::string> DEFAULT_MAP = {
     {"HGRAPH_BASE_CODES_KEY", HGRAPH_BASE_CODES_KEY},
     {"PRECISE_CODES_KEY", PRECISE_CODES_KEY},
     {"HGRAPH_SUPPORT_DUPLICATE", HGRAPH_SUPPORT_DUPLICATE},
+    {"HGRAPH_CODES_TYPE_KEY", HGRAPH_CODES_TYPE_KEY},
     {"IO_TYPE_KEY", IO_TYPE_KEY},
     {"IO_TYPE_VALUE_MEMORY_IO", IO_TYPE_VALUE_MEMORY_IO},
     {"IO_TYPE_VALUE_BLOCK_MEMORY_IO", IO_TYPE_VALUE_BLOCK_MEMORY_IO},

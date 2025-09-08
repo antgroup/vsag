@@ -19,6 +19,7 @@
 #include "datacell/flatten_datacell_parameter.h"
 #include "datacell/graph_datacell_parameter.h"
 #include "datacell/graph_interface_parameter.h"
+#include "datacell/pnm_datacell_parameter.h"
 #include "datacell/sparse_graph_datacell_parameter.h"
 #include "datacell/sparse_vector_datacell_parameter.h"
 #include "impl/odescent/odescent_graph_parameter.h"

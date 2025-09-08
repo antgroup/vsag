@@ -17,6 +17,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <stdexcept>
 
 #include "metric_type.h"
 #include "utils/pointer_define.h"
@@ -76,6 +77,44 @@ public:
     Allocator* const allocator_{nullptr};
     const T* quantizer_{nullptr};
     uint8_t* buf_{nullptr};
+};
+
+class PnmComputer : public ComputerInterface {
+public:
+    explicit PnmComputer(Allocator* allocator, uint32_t code_size);
+
+    ~PnmComputer() override;
+
+    void
+    SetQuery(const DataType* query);
+
+    inline void
+    ComputeDist(const uint8_t* codes, float* dists) {
+        throw std::runtime_error("ComputerInterface::ComputeDist");
+    }
+
+    inline void
+    ScanBatchDists(uint64_t count, const uint8_t* codes, float* dists) {
+        throw std::runtime_error("ComputerInterface::ScanBatchDists");
+    }
+
+    inline void
+    ComputeDistsBatch4(const uint8_t* codes1,
+                       const uint8_t* codes2,
+                       const uint8_t* codes3,
+                       const uint8_t* codes4,
+                       float& dists1,
+                       float& dists2,
+                       float& dists3,
+                       float& dists4) {
+        throw std::runtime_error("ComputerInterface::ComputeDistsBatch4");
+    }
+
+public:
+    Allocator* const allocator_{nullptr};
+    uint8_t* buf_{nullptr};
+    uint32_t code_size_{0};
+    int query_id_{-1};
 };
 
 template <typename QuantImpl, MetricType metric>

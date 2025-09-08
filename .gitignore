@@ -189,3 +189,4 @@ data/
 /coverage/
 *.gcov
 /dist/
+pnmesdk_client_c.*

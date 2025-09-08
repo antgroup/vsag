@@ -20,60 +20,60 @@
 #include "impl/logger/logger.h"
 
 namespace vsag {
-#ifndef NDEBUG
-DefaultAllocator::~DefaultAllocator() {
-    if (not allocated_ptrs_.empty()) {
-        logger::error(fmt::format("There is a memory leak in {}.", DefaultAllocator::Name()));
-        abort();
-    }
-}
-#else
+// #ifndef NDEBUG
+// DefaultAllocator::~DefaultAllocator() {
+//     if (not allocated_ptrs_.empty()) {
+//         logger::error(fmt::format("There is a memory leak in {}.", DefaultAllocator::Name()));
+//         abort();
+//     }
+// }
+// #else
 DefaultAllocator::~DefaultAllocator() = default;
-#endif
+// #endif
 
 void*
 DefaultAllocator::Allocate(size_t size) {
     auto* ptr = malloc(size);
-#ifndef NDEBUG
-    std::lock_guard<std::mutex> guard(set_mutex_);
-    allocated_ptrs_.insert(ptr);
-#endif
+    // #ifndef NDEBUG
+    //     std::lock_guard<std::mutex> guard(set_mutex_);
+    //     allocated_ptrs_.insert(ptr);
+    // #endif
     return ptr;
 }
 
 void
 DefaultAllocator::Deallocate(void* p) {
-#ifndef NDEBUG
-    if (p == nullptr) {
-        return;
-    }
-    std::lock_guard<std::mutex> guard(set_mutex_);
-    if (allocated_ptrs_.find(p) == allocated_ptrs_.end()) {
-        throw std::runtime_error(
-            fmt::format("deallocate: address {} is not allocated by {}", p, Name()));
-    }
-    allocated_ptrs_.erase(p);
-#endif
+    // #ifndef NDEBUG
+    //     if (p == nullptr) {
+    //         return;
+    //     }
+    //     std::lock_guard<std::mutex> guard(set_mutex_);
+    //     if (allocated_ptrs_.find(p) == allocated_ptrs_.end()) {
+    //         throw std::runtime_error(
+    //             fmt::format("deallocate: address {} is not allocated by {}", p, Name()));
+    //     }
+    //     allocated_ptrs_.erase(p);
+    // #endif
     free(p);
 }
 
 void*
 DefaultAllocator::Reallocate(void* p, size_t size) {
-#ifndef NDEBUG
-    if (p == nullptr) {
-        return Allocate(size);
-    }
-    std::lock_guard<std::mutex> guard(set_mutex_);
-    if (allocated_ptrs_.find(p) == allocated_ptrs_.end()) {
-        throw std::runtime_error(
-            fmt::format("reallocate: address {} is not allocated by {}", p, Name()));
-    }
-    allocated_ptrs_.erase(p);
-#endif
+    // #ifndef NDEBUG
+    //     if (p == nullptr) {
+    //         return Allocate(size);
+    //     }
+    //     std::lock_guard<std::mutex> guard(set_mutex_);
+    //     if (allocated_ptrs_.find(p) == allocated_ptrs_.end()) {
+    //         throw std::runtime_error(
+    //             fmt::format("reallocate: address {} is not allocated by {}", p, Name()));
+    //     }
+    //     allocated_ptrs_.erase(p);
+    // #endif
     auto* ptr = realloc(p, size);
-#ifndef NDEBUG
-    allocated_ptrs_.insert(ptr);
-#endif
+    // #ifndef NDEBUG
+    //     allocated_ptrs_.insert(ptr);
+    // #endif
     return ptr;
 }
 

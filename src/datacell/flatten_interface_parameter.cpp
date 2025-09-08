@@ -17,6 +17,7 @@
 
 #include "flatten_datacell_parameter.h"
 #include "inner_string_params.h"
+#include "pnm_datacell_parameter.h"
 #include "sparse_vector_datacell_parameter.h"
 
 namespace vsag {
@@ -24,8 +25,14 @@ namespace vsag {
 FlattenInterfaceParamPtr
 CreateFlattenParam(const JsonType& json) {
     FlattenInterfaceParamPtr param = nullptr;
-    if (json.Contains(CODES_TYPE_KEY) && json[CODES_TYPE_KEY].GetString() == SPARSE_CODES) {
-        param = std::make_shared<SparseVectorDataCellParameter>();
+    if (json.Contains(CODES_TYPE_KEY)) {
+        if (json[CODES_TYPE_KEY].GetString() == SPARSE_CODES) {
+            param = std::make_shared<SparseVectorDataCellParameter>();
+        } else if (json[CODES_TYPE_KEY].GetString() == PNM_CODES) {
+            param = std::make_shared<PnmDatacellParameter>();
+        } else {
+            param = std::make_shared<FlattenDataCellParameter>();
+        }
     } else {
         param = std::make_shared<FlattenDataCellParameter>();
     }

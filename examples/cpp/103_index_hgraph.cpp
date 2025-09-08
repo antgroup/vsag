@@ -15,6 +15,7 @@
 
 #include <vsag/vsag.h>
 
+#include <fstream>
 #include <iostream>
 
 int
@@ -22,7 +23,7 @@ main(int argc, char** argv) {
     vsag::init();
 
     /******************* Prepare Base Dataset *****************/
-    int64_t num_vectors = 10000;
+    int64_t num_vectors = 1000;
     int64_t dim = 128;
     std::vector<int64_t> ids(num_vectors);
     std::vector<float> datas(num_vectors * dim);
@@ -48,10 +49,10 @@ main(int argc, char** argv) {
         "metric_type": "l2",
         "dim": 128,
         "index_param": {
-            "base_quantization_type": "sq8",
+            "base_quantization_type": "sq4_uniform",
             "max_degree": 26,
             "ef_construction": 100,
-            "alpha":1.2
+            "use_reorder": true
         }
     }
     )";
@@ -93,6 +94,35 @@ main(int argc, char** argv) {
         std::cout << result->GetIds()[i] << ": " << result->GetDistances()[i] << std::endl;
     }
 
+    std::ofstream tmp_file("/data/jinjiabao.jjb/vsag/data/file_data");
+    index->Serialize(tmp_file);
+    tmp_file.close();
+
+    std::string hgraph_deserialize_parameters = R"(
+    {
+        "dtype": "float32",
+        "metric_type": "l2",
+        "dim": 128,
+        "index_param": {
+            "base_quantization_type": "sq4_uniform",
+            "max_degree": 26,
+            "ef_construction": 100,
+            "precise_codes_type": "pnm",
+            "use_reorder": true
+        }
+    }
+    )";
+    auto index2 = engine.CreateIndex("hgraph", hgraph_deserialize_parameters).value();
+    std::ifstream tmp_file2("/data/jinjiabao.jjb/vsag/data/file_data");
+    index2->Deserialize(tmp_file2);
+
+    result = index2->KnnSearch(query, topk, hgraph_search_parameters).value();
+
+    /******************* Print Search Result *****************/
+    std::cout << "pnm results: " << std::endl;
+    for (int64_t i = 0; i < result->GetDim(); ++i) {
+        std::cout << result->GetIds()[i] << ": " << result->GetDistances()[i] << std::endl;
+    }
     engine.Shutdown();
     return 0;
 }
