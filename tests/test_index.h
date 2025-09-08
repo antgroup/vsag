@@ -166,7 +166,8 @@ public:
     TestBatchCalcDistanceById(const IndexPtr& index,
                               const TestDatasetPtr& dataset,
                               float error = 1e-5,
-                              bool expected_success = true);
+                              bool expected_success = true,
+                              bool is_sparse = false);
 
     static void
     TestGetMinAndMaxId(const IndexPtr& index,

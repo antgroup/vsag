@@ -74,7 +74,8 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex, "SINDI Build and Search",
     TestFilterSearch(index, dataset, search_param, 0.99, true);
     TestConcurrentKnnSearch(index, dataset, search_param, 0.99, true);
     TestGetMinAndMaxId(index, dataset, true);
-    TestCalcDistanceById(index, dataset, 0.1, true, true);
+    TestCalcDistanceById(index, dataset, 1e-4, true, true);
+    TestBatchCalcDistanceById(index, dataset, 1e-4, true, true);
     TestUpdateId(index, dataset, search_param, true);
     TestEstimateMemory("sindi", build_param, dataset);
 }
