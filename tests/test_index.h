@@ -167,7 +167,8 @@ public:
                               const TestDatasetPtr& dataset,
                               float error = 1e-5,
                               bool expected_success = true,
-                              bool is_sparse = false);
+                              bool is_sparse = false,
+                              bool is_old_index = false);
 
     static void
     TestGetMinAndMaxId(const IndexPtr& index,
