@@ -59,6 +59,7 @@ coverage.xml
 .hypothesis/
 .pytest_cache/
 cover/
+lib/
 *.mo
 *.pot
 *.log
