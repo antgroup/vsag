@@ -36,9 +36,7 @@ HGraphParameter::HGraphParameter() : name(INDEX_TYPE_HGRAPH) {
 
 void
 HGraphParameter::FromJson(const JsonType& json) {
-    CHECK_ARGUMENT(json.contains(HGRAPH_USE_REORDER_KEY),
-                   fmt::format("hgraph parameters must contains {}", HGRAPH_USE_REORDER_KEY));
-    this->use_reorder = json[HGRAPH_USE_REORDER_KEY];
+    InnerIndexParameter::FromJson(json);
 
     if (json.contains(HGRAPH_USE_ELP_OPTIMIZER_KEY)) {
         this->use_elp_optimizer = json[HGRAPH_USE_ELP_OPTIMIZER_KEY];
@@ -52,10 +50,6 @@ HGraphParameter::FromJson(const JsonType& json) {
         this->build_by_base = json[HGRAPH_BUILD_BY_BASE_QUANTIZATION_KEY];
     }
 
-    if (json.contains(USE_ATTRIBUTE_FILTER_KEY)) {
-        this->use_attribute_filter = json[USE_ATTRIBUTE_FILTER_KEY];
-    }
-
     CHECK_ARGUMENT(json.contains(HGRAPH_BASE_CODES_KEY),
                    fmt::format("hgraph parameters must contains {}", HGRAPH_BASE_CODES_KEY));
     const auto& base_codes_json = json[HGRAPH_BASE_CODES_KEY];
@@ -67,25 +61,15 @@ HGraphParameter::FromJson(const JsonType& json) {
     this->base_codes_param->FromJson(base_codes_json);
 
     if (use_reorder) {
-        CHECK_ARGUMENT(json.contains(HGRAPH_PRECISE_CODES_KEY),
-                       fmt::format("hgraph parameters must contains {}", HGRAPH_PRECISE_CODES_KEY));
-        const auto& precise_codes_json = json[HGRAPH_PRECISE_CODES_KEY];
+        CHECK_ARGUMENT(json.contains(PRECISE_CODES_KEY),
+                       fmt::format("hgraph parameters must contains {}", PRECISE_CODES_KEY));
+        const auto& precise_codes_json = json[PRECISE_CODES_KEY];
         if (data_type == DataTypes::DATA_TYPE_SPARSE) {
             this->precise_codes_param = std::make_shared<SparseVectorDataCellParameter>();
         } else {
             this->precise_codes_param = std::make_shared<FlattenDataCellParameter>();
         }
         this->precise_codes_param->FromJson(precise_codes_json);
-    }
-
-    if (json.contains(STORE_RAW_VECTOR_KEY)) {
-        this->store_raw_vector = json[STORE_RAW_VECTOR_KEY];
-    }
-
-    if (this->store_raw_vector) {
-        const auto& raw_vector_json = json[RAW_VECTOR_KEY];
-        this->raw_vector_param = std::make_shared<FlattenDataCellParameter>();
-        this->raw_vector_param->FromJson(raw_vector_json);
     }
 
     CHECK_ARGUMENT(json.contains(HGRAPH_GRAPH_KEY),
@@ -124,14 +108,12 @@ HGraphParameter::FromJson(const JsonType& json) {
         hierarchical_graph_param->support_delete_ = false;
     }
 
-    if (json.contains(BUILD_PARAMS_KEY)) {
-        const auto& build_params = json[BUILD_PARAMS_KEY];
-        if (build_params.contains(BUILD_EF_CONSTRUCTION)) {
-            this->ef_construction = build_params[BUILD_EF_CONSTRUCTION];
-        }
-        if (build_params.contains(BUILD_THREAD_COUNT)) {
-            this->build_thread_count = build_params[BUILD_THREAD_COUNT];
-        }
+    if (json.contains(HGRAPH_EF_CONSTRUCTION_KEY)) {
+        this->ef_construction = json[HGRAPH_EF_CONSTRUCTION_KEY];
+    }
+
+    if (json.contains(BUILD_THREAD_COUNT_KEY)) {
+        this->build_thread_count = json[BUILD_THREAD_COUNT_KEY];
     }
 
     if (graph_json.contains(GRAPH_TYPE_KEY)) {
@@ -142,11 +124,6 @@ HGraphParameter::FromJson(const JsonType& json) {
         }
     }
 
-    CHECK_ARGUMENT(json.contains(HGRAPH_EXTRA_INFO_KEY),
-                   fmt::format("hgraph parameters must contains {}", HGRAPH_EXTRA_INFO_KEY));
-    const auto& extra_info_json = json[HGRAPH_EXTRA_INFO_KEY];
-    this->extra_info_param = std::make_shared<ExtraInfoDataCellParameter>();
-    this->extra_info_param->FromJson(extra_info_json);
     if (json.contains(SUPPORT_DUPLICATE)) {
         this->support_duplicate = json[SUPPORT_DUPLICATE];
     }
@@ -157,26 +134,14 @@ HGraphParameter::FromJson(const JsonType& json) {
 
 JsonType
 HGraphParameter::ToJson() const {
-    JsonType json;
-    json["type"] = INDEX_TYPE_HGRAPH;
+    JsonType json = InnerIndexParameter::ToJson();
+    json[TYPE_KEY] = INDEX_TYPE_HGRAPH;
 
-    json[HGRAPH_USE_REORDER_KEY] = this->use_reorder;
     json[HGRAPH_USE_ELP_OPTIMIZER_KEY] = this->use_elp_optimizer;
     json[HGRAPH_BASE_CODES_KEY] = this->base_codes_param->ToJson();
-    if (use_reorder) {
-        json[HGRAPH_PRECISE_CODES_KEY] = this->precise_codes_param->ToJson();
-    }
-    if (this->store_raw_vector) {
-        json[STORE_RAW_VECTOR_KEY] = this->raw_vector_param->ToJson();
-    }
     json[HGRAPH_GRAPH_KEY] = this->bottom_graph_param->ToJson();
-
-    json[BUILD_PARAMS_KEY][BUILD_EF_CONSTRUCTION] = this->ef_construction;
-    json[BUILD_PARAMS_KEY][BUILD_THREAD_COUNT] = this->build_thread_count;
-    json[HGRAPH_EXTRA_INFO_KEY] = this->extra_info_param->ToJson();
+    json[HGRAPH_EF_CONSTRUCTION_KEY] = this->ef_construction;
     json[SUPPORT_DUPLICATE] = this->support_duplicate;
-    json[STORE_RAW_VECTOR] = this->store_raw_vector;
-    json[USE_ATTRIBUTE_FILTER_KEY] = this->use_attribute_filter;
     return json;
 }
 

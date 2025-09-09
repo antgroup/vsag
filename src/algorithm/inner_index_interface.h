@@ -21,6 +21,7 @@
 #include "data_cell/extra_info_interface.h"
 #include "data_type.h"
 #include "dataset_impl.h"
+#include "inner_index_parameter.h"
 #include "metric_type.h"
 #include "parameter.h"
 #include "pointer_define.h"
@@ -41,10 +42,16 @@ class IndexCommonParam;
 class InnerIndexInterface {
 public:
     InnerIndexInterface() = default;
-    explicit InnerIndexInterface(ParamPtr index_param, const IndexCommonParam& common_param);
+
+    explicit InnerIndexInterface(const InnerIndexParameterPtr& index_param,
+                                 const IndexCommonParam& common_param);
+
     virtual ~InnerIndexInterface() = default;
 
     constexpr static char fast_string_delimiter = '|';
+
+    static InnerIndexPtr
+    FastCreateIndex(const std::string& index_fast_str, const IndexCommonParam& common_param);
 
     virtual std::vector<int64_t>
     Add(const DatasetPtr& base) = 0;
@@ -112,9 +119,6 @@ public:
                             "Index doesn't support EstimateMemory");
     }
 
-    static InnerIndexPtr
-    FastCreateIndex(const std::string& index_fast_str, const IndexCommonParam& common_param);
-
     virtual DatasetPtr
     ExportIDs() const;
 
@@ -163,10 +167,7 @@ public:
     }
 
     virtual void
-    GetExtraInfoByIds(const int64_t* ids, int64_t count, char* extra_infos) const {
-        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
-                            "Index doesn't support GetExtraInfoByIds");
-    }
+    GetExtraInfoByIds(const int64_t* ids, int64_t count, char* extra_infos) const;
 
     [[nodiscard]] virtual IndexType
     GetIndexType() = 0;
@@ -359,10 +360,7 @@ public:
     }
 
     virtual bool
-    UpdateExtraInfo(const DatasetPtr& new_base) {
-        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
-                            "Index doesn't support UpdateVector");
-    }
+    UpdateExtraInfo(const DatasetPtr& new_base);
 
     virtual bool
     UpdateId(int64_t old_id, int64_t new_id) {
@@ -400,15 +398,21 @@ public:
 
     IndexFeatureListPtr index_feature_list_{nullptr};
 
-    const ParamPtr create_param_ptr_{nullptr};
+    const InnerIndexParameterPtr create_param_ptr_{nullptr};
     bool immutable_{false};
 
 protected:
     bool has_raw_vector_{false};
     bool has_attribute_{false};
 
+    bool use_attribute_filter_{false};
+
     uint64_t extra_info_size_{0};
     ExtraInfoInterfacePtr extra_infos_{nullptr};
+
+    uint64_t build_thread_count_{100};
+
+    std::shared_ptr<SafeThreadPool> build_pool_{nullptr};
 };
 
 }  // namespace vsag

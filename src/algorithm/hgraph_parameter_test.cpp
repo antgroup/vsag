@@ -54,7 +54,6 @@ struct HGraphDefaultParam {
     bool use_attribute_filter = false;
     bool support_duplicate = false;
     bool use_reorder = true;
-    bool have_extro_info = false;
 };
 
 std::string

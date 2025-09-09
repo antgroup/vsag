@@ -26,15 +26,22 @@ const char* const INDEX_TYPE_HGRAPH = "hgraph";
 const char* const INDEX_TYPE_IVF = "ivf";
 const char* const INDEX_TYPE_GNO_IMI = "gno_imi";
 
+const char* const TYPE_KEY = "type";
+const char* const USE_REORDER_KEY = "use_reorder";
+const char* const EXTRA_INFO_KEY = "extra_info";
+const char* const USE_ATTRIBUTE_FILTER_KEY = "use_attribute_filter";
+const char* const BUILD_THREAD_COUNT_KEY = "build_thread_count";
+const char* const PRECISE_CODES_KEY = "precise_codes";
+const char* const STORE_RAW_VECTOR_KEY = "store_raw_vector";
+const char* const RAW_VECTOR_KEY = "raw_vector";
+
 // Parameter key for hgraph
-const char* const HGRAPH_USE_REORDER_KEY = "use_reorder";
 const char* const HGRAPH_USE_ELP_OPTIMIZER_KEY = "use_elp_optimizer";
 const char* const HGRAPH_IGNORE_REORDER_KEY = "ignore_reorder";
 const char* const HGRAPH_BUILD_BY_BASE_QUANTIZATION_KEY = "build_by_base";
 const char* const HGRAPH_GRAPH_KEY = "graph";
 const char* const HGRAPH_BASE_CODES_KEY = "base_codes";
-const char* const HGRAPH_PRECISE_CODES_KEY = "precise_codes";
-const char* const HGRAPH_EXTRA_INFO_KEY = "extra_info";
+const char* const HGRAPH_EF_CONSTRUCTION_KEY = "ef_construction";
 
 // IO param key
 const char* const IO_PARAMS_KEY = "io_params";
@@ -100,10 +107,6 @@ const char* const SPARSE_DESERIALIZE_WITHOUT_FOOTER = "deserialize_without_foote
 const char* const GRAPH_PARAM_MAX_DEGREE = "max_degree";
 const char* const GRAPH_PARAM_INIT_MAX_CAPACITY = "init_capacity";
 
-const char* const BUILD_PARAMS_KEY = "build_params";
-const char* const BUILD_THREAD_COUNT = "build_thread_count";
-const char* const BUILD_EF_CONSTRUCTION = "ef_construction";
-
 const char* const GRAPH_TYPE_KEY = "graph_type";
 
 const char* const GRAPH_STORAGE_TYPE_KEY = "graph_storage_type";
@@ -121,10 +124,6 @@ const char* const IVF_SEARCH_PARAM_FACTOR = "factor";
 const char* const IVF_SEARCH_PARALLELISM = "parallelism";
 const char* const SEARCH_MAX_TIME_COST_MS = "timeout_ms";
 
-const char* const IVF_USE_REORDER_KEY = "use_reorder";
-const char* const IVF_PRECISE_CODES_KEY = "precise_codes";
-const char* const USE_ATTRIBUTE_FILTER_KEY = "use_attribute_filter";
-const char* const IVF_THREAD_COUNT_KEY = "thread_count";
 const char* const IVF_TRAIN_TYPE_KEY = "ivf_train_type";
 const char* const IVF_TRAIN_TYPE_RANDOM = "random";
 const char* const IVF_TRAIN_TYPE_KMEANS = "kmeans";
@@ -141,9 +140,6 @@ const char* const GNO_IMI_SEARCH_PARAM_FIRST_ORDER_SCAN_RATIO = "first_order_sca
 const char* const FLATTEN_DATA_CELL = "flatten_data_cell";
 const char* const SPARSE_VECTOR_DATA_CELL = "sparse_vector_data_cell";
 
-const char* const STORE_RAW_VECTOR_KEY = "store_raw_vector";
-const char* const RAW_VECTOR_KEY = "raw_vector";
-
 const char* const GRAPH_SUPPORT_REMOVE = "support_remove";
 const char* const REMOVE_FLAG_BIT = "remove_flag_bit";
 const char* const HOLD_MOLDS = "hold_molds";
@@ -159,13 +155,12 @@ const std::unordered_map<std::string, std::string> DEFAULT_MAP = {
     {"INDEX_TYPE_HGRAPH", INDEX_TYPE_HGRAPH},
     {"INDEX_TYPE_IVF", INDEX_TYPE_IVF},
     {"INDEX_TYPE_GNO_IMI", INDEX_TYPE_GNO_IMI},
-    {"HGRAPH_USE_REORDER_KEY", HGRAPH_USE_REORDER_KEY},
     {"HGRAPH_USE_ELP_OPTIMIZER_KEY", HGRAPH_USE_ELP_OPTIMIZER_KEY},
     {"HGRAPH_IGNORE_REORDER_KEY", HGRAPH_IGNORE_REORDER_KEY},
     {"HGRAPH_BUILD_BY_BASE_QUANTIZATION_KEY", HGRAPH_BUILD_BY_BASE_QUANTIZATION_KEY},
     {"HGRAPH_GRAPH_KEY", HGRAPH_GRAPH_KEY},
     {"HGRAPH_BASE_CODES_KEY", HGRAPH_BASE_CODES_KEY},
-    {"HGRAPH_PRECISE_CODES_KEY", HGRAPH_PRECISE_CODES_KEY},
+    {"PRECISE_CODES_KEY", PRECISE_CODES_KEY},
     {"HGRAPH_SUPPORT_DUPLICATE", HGRAPH_SUPPORT_DUPLICATE},
     {"IO_TYPE_KEY", IO_TYPE_KEY},
     {"IO_TYPE_VALUE_MEMORY_IO", IO_TYPE_VALUE_MEMORY_IO},
@@ -190,15 +185,14 @@ const std::unordered_map<std::string, std::string> DEFAULT_MAP = {
     {"QUANTIZATION_PARAMS_KEY", QUANTIZATION_PARAMS_KEY},
     {"GRAPH_PARAM_MAX_DEGREE", GRAPH_PARAM_MAX_DEGREE},
     {"GRAPH_PARAM_INIT_MAX_CAPACITY", GRAPH_PARAM_INIT_MAX_CAPACITY},
-    {"BUILD_PARAMS_KEY", BUILD_PARAMS_KEY},
-    {"BUILD_THREAD_COUNT", BUILD_THREAD_COUNT},
-    {"BUILD_EF_CONSTRUCTION", BUILD_EF_CONSTRUCTION},
+    {"BUILD_THREAD_COUNT_KEY", BUILD_THREAD_COUNT_KEY},
+    {"HGRAPH_EF_CONSTRUCTION_KEY", HGRAPH_EF_CONSTRUCTION_KEY},
     {"BUCKETS_COUNT_KEY", BUCKETS_COUNT_KEY},
     {"BUCKET_PARAMS_KEY", BUCKET_PARAMS_KEY},
     {"IO_FILE_PATH", IO_FILE_PATH},
     {"DEFAULT_FILE_PATH_VALUE", DEFAULT_FILE_PATH_VALUE},
-    {"IVF_PRECISE_CODES_KEY", IVF_PRECISE_CODES_KEY},
-    {"IVF_USE_REORDER_KEY", IVF_USE_REORDER_KEY},
+    {"PRECISE_CODES_KEY", PRECISE_CODES_KEY},
+    {"USE_REORDER_KEY", USE_REORDER_KEY},
     {"USE_ATTRIBUTE_FILTER_KEY", USE_ATTRIBUTE_FILTER_KEY},
     {"SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE", SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE},
     {"PCA_DIM", PCA_DIM},
@@ -211,14 +205,14 @@ const std::unordered_map<std::string, std::string> DEFAULT_MAP = {
     {"ODESCENT_PARAMETER_ALPHA", ODESCENT_PARAMETER_ALPHA},
     {"ODESCENT_PARAMETER_GRAPH_ITER_TURN", ODESCENT_PARAMETER_GRAPH_ITER_TURN},
     {"ODESCENT_PARAMETER_NEIGHBOR_SAMPLE_RATE", ODESCENT_PARAMETER_NEIGHBOR_SAMPLE_RATE},
-    {"HGRAPH_EXTRA_INFO_KEY", HGRAPH_EXTRA_INFO_KEY},
+    {"EXTRA_INFO_KEY", EXTRA_INFO_KEY},
     {"IVF_SEARCH_PARAM_FACTOR", IVF_SEARCH_PARAM_FACTOR},
     {"BUCKET_PER_DATA_KEY", BUCKET_PER_DATA_KEY},
     {"IVF_PARTITION_STRATEGY_PARAMS_KEY", IVF_PARTITION_STRATEGY_PARAMS_KEY},
     {"IVF_PARTITION_STRATEGY_TYPE_KEY", IVF_PARTITION_STRATEGY_TYPE_KEY},
     {"IVF_PARTITION_STRATEGY_TYPE_NEAREST", IVF_PARTITION_STRATEGY_TYPE_NEAREST},
     {"IVF_TRAIN_TYPE_KMEANS", IVF_TRAIN_TYPE_KMEANS},
-    {"IVF_THREAD_COUNT_KEY", IVF_THREAD_COUNT_KEY},
+    {"BUILD_THREAD_COUNT_KEY", BUILD_THREAD_COUNT_KEY},
     {"IVF_SEARCH_PARALLELISM", IVF_SEARCH_PARALLELISM},
     {"GRAPH_SUPPORT_REMOVE", GRAPH_SUPPORT_REMOVE},
     {"REMOVE_FLAG_BIT", REMOVE_FLAG_BIT},
