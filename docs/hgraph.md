@@ -21,7 +21,7 @@ HGraph (Hierarchical Graph) is a **graph-based** index structure that constructs
 5. Real-time search scenarios requiring low-latency responses.
 
 ## Usage
-For examples, refer to [105_index_hgraph.cpp](https://github.com/antgroup/vsag/blob/main/examples/cpp/105_index_hgraph.cpp).
+For examples, refer to [103_index_hgraph.cpp](https://github.com/antgroup/vsag/blob/main/examples/cpp/103_index_hgraph.cpp).
 
 ## Factory Parameter Overview Table
 
