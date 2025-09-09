@@ -807,7 +807,9 @@ void
 TestIndex::TestBatchCalcDistanceById(const IndexPtr& index,
                                      const TestDatasetPtr& dataset,
                                      float error,
-                                     bool expected_success) {
+                                     bool expected_success,
+                                     bool is_sparse,
+                                     bool is_old_index) {
     if (not index->CheckFeature(vsag::SUPPORT_CAL_DISTANCE_BY_ID)) {
         return;
     }
@@ -821,9 +823,25 @@ TestIndex::TestBatchCalcDistanceById(const IndexPtr& index,
         query->NumElements(1)
             ->Dim(dim)
             ->Float32Vectors(queries->GetFloat32Vectors() + i * dim)
+            ->SparseVectors(queries->GetSparseVectors() + i)
+            ->Paths(queries->GetPaths() + i)
             ->Owner(false);
-        auto result = index->CalDistanceById(
-            query->GetFloat32Vectors(), gts->GetIds() + (i * gt_topK), gt_topK);
+        tl::expected<DatasetPtr, vsag::Error> result;
+        if (is_sparse) {
+            result = index->CalDistanceById(query, gts->GetIds() + (i * gt_topK), gt_topK);
+        } else {
+            result = index->CalDistanceById(
+                query->GetFloat32Vectors(), gts->GetIds() + (i * gt_topK), gt_topK);
+            if (is_old_index) {
+                // for old index (hnsw and diskann)
+                REQUIRE_THROWS(index->CalDistanceById(query, gts->GetIds() + (i * gt_topK), gt_topK)
+                                   .has_value());
+            } else {
+                // for new index (from inner_index_interface)
+                REQUIRE_FALSE(index->CalDistanceById(query, gts->GetIds() + (i * gt_topK), gt_topK)
+                                  .has_value());
+            }
+        }
         if (not expected_success) {
             return;
         }
@@ -838,8 +856,13 @@ TestIndex::TestBatchCalcDistanceById(const IndexPtr& index,
         for (int i = 0; i < test_num; ++i) {
             no_exist_ids[i] = -i - 1;
         }
-        auto result =
-            index->CalDistanceById(queries->GetFloat32Vectors(), no_exist_ids.data(), test_num);
+        tl::expected<DatasetPtr, vsag::Error> result;
+        if (is_sparse) {
+            result = index->CalDistanceById(queries, no_exist_ids.data(), test_num);
+        } else {
+            result =
+                index->CalDistanceById(queries->GetFloat32Vectors(), no_exist_ids.data(), test_num);
+        }
         for (int i = 0; i < test_num; ++i) {
             fixtures::dist_t dist = result.value()->GetDistances()[i];
             REQUIRE(dist == -1);
