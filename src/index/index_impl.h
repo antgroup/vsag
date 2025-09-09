@@ -92,6 +92,11 @@ public:
         SAFE_CALL(return this->inner_index_->CalDistanceById(query, ids, count));
     }
 
+    tl::expected<DatasetPtr, Error>
+    CalDistanceById(const DatasetPtr& query, const int64_t* ids, int64_t count) const override {
+        SAFE_CALL(return this->inner_index_->CalDistanceById(query, ids, count));
+    }
+
     [[nodiscard]] bool
     CheckFeature(IndexFeature feature) const override {
         return this->inner_index_->CheckFeature(feature);
