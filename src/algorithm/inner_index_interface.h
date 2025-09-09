@@ -69,6 +69,9 @@ public:
     virtual DatasetPtr
     CalDistanceById(const float* query, const int64_t* ids, int64_t count) const;
 
+    virtual DatasetPtr
+    CalDistanceById(const DatasetPtr& query, const int64_t* ids, int64_t count) const;
+
     virtual uint64_t
     CalSerializeSize() const;
 
