@@ -15,6 +15,8 @@
 
 #pragma once
 
+#include <cstdint>
+
 #include "vsag_exception.h"
 
 #define SAFE_CALL(stmt)                                                              \
