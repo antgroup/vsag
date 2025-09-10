@@ -23,7 +23,7 @@ namespace vsag {
 
 typedef float (*DistanceFunc)(const void* pVect1, const void* pVect2, const void* qty_ptr);
 extern DistanceFunc
-GetL2DistanceFunc(size_t dim);
+GetL2DistanceFunc(uint64_t dim);
 
 }  // namespace vsag
 
@@ -31,10 +31,10 @@ float
 L2SqrGT(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
     float* pVect1 = (float*)pVect1v;
     float* pVect2 = (float*)pVect2v;
-    size_t qty = *((size_t*)qty_ptr);
+    uint64_t qty = *((uint64_t*)qty_ptr);
 
     float res = 0;
-    for (size_t i = 0; i < qty; i++) {
+    for (uint64_t i = 0; i < qty; i++) {
         float t = *pVect1 - *pVect2;
         pVect1++;
         pVect2++;
@@ -45,7 +45,7 @@ L2SqrGT(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
 
 float
 InnerProductDistanceGT(const void* pVect1, const void* pVect2, const void* qty_ptr) {
-    size_t qty = *((size_t*)qty_ptr);
+    uint64_t qty = *((uint64_t*)qty_ptr);
     float res = 0;
     for (unsigned i = 0; i < qty; i++) {
         res += ((float*)pVect1)[i] * ((float*)pVect2)[i];
@@ -56,7 +56,7 @@ InnerProductDistanceGT(const void* pVect1, const void* pVect2, const void* qty_p
 TEST_CASE("Test InnerProduct Instructions", "[ut][simd]") {
     std::random_device rd;
     std::mt19937 rng(rd());
-    for (size_t dim = 1; dim < 1026; dim++) {
+    for (uint64_t dim = 1; dim < 1026; dim++) {
         std::uniform_real_distribution<> distrib_real;
         float vector1[dim];
         float vector2[dim];
@@ -73,7 +73,7 @@ TEST_CASE("Test InnerProduct Instructions", "[ut][simd]") {
 TEST_CASE("Test L2 Instructions", "[ut][simd]") {
     std::random_device rd;
     std::mt19937 rng(rd());
-    for (size_t dim = 1; dim < 1026; dim++) {
+    for (uint64_t dim = 1; dim < 1026; dim++) {
         std::uniform_real_distribution<> distrib_real;
         float vector1[dim];
         float vector2[dim];

@@ -14,16 +14,15 @@
 // limitations under the License.
 
 #pragma once
-#include <cstring>
 
 #include "pointer_define.h"
 #include "prefetch.h"
 #include "resource_object.h"
 #include "resource_object_pool.h"
 #include "typing.h"
-#include "vsag/allocator.h"
 
 namespace vsag {
+class Allocator;
 
 DEFINE_POINTER(VisitedList);
 class VisitedList : public ResourceObject {

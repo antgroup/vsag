@@ -19,7 +19,6 @@
 
 #include "typing.h"
 #include "utils/visited_list.h"
-#include "vsag/allocator.h"
 #include "vsag/errors.h"
 #include "vsag/expected.hpp"
 #include "vsag/iterator_context.h"

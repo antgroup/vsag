@@ -16,6 +16,7 @@
 #include "sindi.h"
 
 #include "impl/heap/standard_heap.h"
+#include "index_feature_list.h"
 #include "storage/serialization.h"
 #include "utils/util_functions.h"
 
