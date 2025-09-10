@@ -53,7 +53,10 @@ public:
                 bool expect_success = true) {
         auto new_index = vsag::Factory::CreateIndex(name, build_param);
         REQUIRE(new_index.has_value() == expect_success);
-        return new_index.value();
+        if (expect_success) {
+            return new_index.value();
+        }
+        return nullptr;
     }
 
     static void
