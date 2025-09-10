@@ -43,6 +43,9 @@ public:
     bool use_reorder{false};
 
     float doc_prune_ratio{0};
+
+    // temporal parameter
+    bool deserialize_without_footer{false};
 };
 
 using SINDIParameterPtr = std::shared_ptr<SINDIParameter>;

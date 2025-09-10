@@ -82,6 +82,7 @@ const char* const SPARSE_TERM_PRUNE_RATIO = "term_prune_ratio";
 const char* const SPARSE_WINDOW_SIZE = "window_size";
 const char* const SPARSE_USE_REORDER = "use_reorder";
 const char* const SPARSE_N_CANDIDATE = "n_candidate";
+const char* const SPARSE_DESERIALIZE_WITHOUT_FOOTER = "deserialize_without_footer";
 
 // graph param value
 const char* const GRAPH_PARAM_MAX_DEGREE = "max_degree";

@@ -106,6 +106,7 @@ private:
     float doc_retain_ratio_{0};
 
     std::shared_ptr<SparseIndex> rerank_flat_index_{nullptr};
+    bool deserialize_without_footer_{false};
 };
 
 }  // namespace vsag
