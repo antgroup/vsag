@@ -38,6 +38,9 @@ SINDIParameter::FromJson(const JsonType& json) {
     } else {
         window_size = DEFAULT_WINDOW_SIZE;
     }
+    if (json.contains(SPARSE_DESERIALIZE_WITHOUT_FOOTER)) {
+        deserialize_without_footer = json[SPARSE_DESERIALIZE_WITHOUT_FOOTER];
+    }
 }
 
 JsonType
