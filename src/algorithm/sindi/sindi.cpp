@@ -33,7 +33,8 @@ SINDI::SINDI(const SINDIParameterPtr& param, const IndexCommonParam& common_para
       use_reorder_(param->use_reorder),
       window_size_(param->window_size),
       doc_retain_ratio_(1.0F - param->doc_prune_ratio),
-      window_term_list_(common_param.allocator_.get()) {
+      window_term_list_(common_param.allocator_.get()),
+      deserialize_without_footer_(param->deserialize_without_footer) {
     if (use_reorder_) {
         SparseIndexParameterPtr rerank_param = std::make_shared<SparseIndexParameters>();
         rerank_param->need_sort = true;
@@ -277,16 +278,17 @@ SINDI::Serialize(StreamWriter& writer) const {
 void
 SINDI::Deserialize(StreamReader& reader) {
     std::unique_lock wlock(this->global_mutex_);
-
-    auto footer = Footer::Parse(reader);
-    auto metadata = footer->GetMetadata();
-    JsonType jsonify_basic_info = metadata->Get("basic_info");
-    // Check if the index parameter is compatible
-    {
-        auto param = jsonify_basic_info[INDEX_PARAM];
-        SINDIParameterPtr index_param = std::make_shared<SINDIParameter>();
-        index_param->FromJson(param);
-        this->create_param_ptr_->CheckCompatibility(index_param);
+    if (not deserialize_without_footer_) {
+        auto footer = Footer::Parse(reader);
+        auto metadata = footer->GetMetadata();
+        JsonType jsonify_basic_info = metadata->Get("basic_info");
+        // Check if the index parameter is compatible
+        {
+            auto param = jsonify_basic_info[INDEX_PARAM];
+            SINDIParameterPtr index_param = std::make_shared<SINDIParameter>();
+            index_param->FromJson(param);
+            this->create_param_ptr_->CheckCompatibility(index_param);
+        }
     }
 
     StreamReader::ReadObj(reader, cur_element_count_);
