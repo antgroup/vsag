@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "simd/int8_simd.h"
 #if defined(ENABLE_SVE)
 #include <arm_sve.h>
 #endif
@@ -70,29 +71,12 @@ InnerProductDistance(const void* pVect1, const void* pVect2, const void* qty_ptr
 
 float
 INT8InnerProduct(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
-#if defined(ENABLE_SVE)
-    auto* pVect1 = (const int8_t*)pVect1v;
-    auto* pVect2 = (const int8_t*)pVect2v;
-    auto qty = *((uint64_t*)qty_ptr);
-
-    svint32_t sum = svdup_s32(0);
-    uint64_t i = 0;
-    const uint64_t step = svcntb();
-
-    svbool_t predicate = svwhilelt_b8(i, qty);
-    do {
-        svint8_t vec1 = svld1_s8(predicate, pVect1 + i);
-        svint8_t vec2 = svld1_s8(predicate, pVect2 + i);
-        sum = svdot_s32(sum, vec1, vec2);
-        i += step;
-        predicate = svwhilelt_b8(i, qty);
-    } while (svptest_first(svptrue_b8(), predicate));
-
-    return static_cast<float>(svaddv_s32(svptrue_b32(), sum));
-#else
-    return neon::INT8InnerProduct(pVect1v, pVect2v, qty_ptr);
-#endif
+    auto* pVect1 = (int8_t*)pVect1v;
+    auto* pVect2 = (int8_t*)pVect2v;
+    auto qty = *((size_t*)qty_ptr);
+    return sve::INT8ComputeIP(pVect1, pVect2, qty);
 }
+
 float
 INT8ComputeL2Sqr(const int8_t* RESTRICT query, const int8_t* RESTRICT codes, uint64_t dim) {
 #if defined(ENABLE_SVE)
@@ -118,6 +102,29 @@ INT8ComputeL2Sqr(const int8_t* RESTRICT query, const int8_t* RESTRICT codes, uin
     return neon::INT8ComputeL2Sqr(query, codes, dim);
 #endif
 }
+
+float
+INT8ComputeIP(const int8_t* __restrict query, const int8_t* __restrict codes, uint64_t dim) {
+#if defined(ENABLE_SVE)
+    svint32_t sum = svdup_s32(0);
+    uint64_t i = 0;
+    const uint64_t step = svcntb();
+
+    svbool_t predicate = svwhilelt_b8(i, dim);
+    do {
+        svint8_t vec1 = svld1_s8(predicate, query + i);
+        svint8_t vec2 = svld1_s8(predicate, codes + i);
+        sum = svdot_s32(sum, vec1, vec2);
+        i += step;
+        predicate = svwhilelt_b8(i, dim);
+    } while (svptest_first(svptrue_b8(), predicate));
+
+    return static_cast<float>(svaddv_s32(svptrue_b32(), sum));
+#else
+    return neon::INT8ComputeIP(query, codes, dim);
+#endif
+}
+
 float
 INT8InnerProductDistance(const void* pVect1, const void* pVect2, const void* qty_ptr) {
     return -sve::INT8InnerProduct(pVect1, pVect2, qty_ptr);

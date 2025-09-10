@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "simd/int8_simd.h"
 #if defined(ENABLE_NEON)
 #include <arm_neon.h>
 #endif
@@ -58,12 +59,10 @@ INT8L2Sqr(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
 
 float
 INT8InnerProduct(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
-#if defined(ENABLE_NEON)
-    // TODO: NEON implementation here
-    return generic::INT8InnerProduct(pVect1v, pVect2v, qty_ptr);
-#else
-    return generic::INT8InnerProduct(pVect1v, pVect2v, qty_ptr);
-#endif
+    auto* pVect1 = (int8_t*)pVect1v;
+    auto* pVect2 = (int8_t*)pVect2v;
+    auto qty = *((size_t*)qty_ptr);
+    return neon::INT8ComputeIP(pVect1, pVect2, qty);
 }
 
 float
@@ -882,6 +881,53 @@ INT8ComputeL2Sqr(const int8_t* __restrict query, const int8_t* __restrict codes,
 }
 
 float
+INT8ComputeIP(const int8_t* __restrict query, const int8_t* __restrict codes, uint64_t dim) {
+#if defined(ENABLE_NEON)
+    constexpr int BATCH_SIZE = 8;
+
+    const uint64_t n = dim / BATCH_SIZE;
+
+    if (n == 0) {
+        return generic::INT8ComputeIP(query, codes, dim);
+    }
+
+    int32x4_t sum_0 = vdupq_n_s32(0);
+    int32x4_t sum_1 = vdupq_n_s32(0);
+
+    for (uint64_t i = 0; i < n; ++i) {
+        int8x8_t q_vec = vld1_s8(query + BATCH_SIZE * i);
+        int8x8_t c_vec = vld1_s8(codes + BATCH_SIZE * i);
+
+        int16x8_t q_16 = vmovl_s8(q_vec);
+        int16x8_t c_16 = vmovl_s8(c_vec);
+
+        int16x8_t prod_16 = vmulq_s16(q_16, c_16);
+
+        int32x4_t prod_low = vmovl_s16(vget_low_s16(prod_16));
+        int32x4_t prod_high = vmovl_s16(vget_high_s16(prod_16));
+
+        sum_0 = vaddq_s32(sum_0, prod_low);
+        sum_1 = vaddq_s32(sum_1, prod_high);
+    }
+
+    int32x4_t sum_total = vaddq_s32(sum_0, sum_1);
+
+    int32_t result[4];
+    vst1q_s32(result, sum_total);
+
+    int64_t dot = static_cast<int64_t>(result[0]) + static_cast<int64_t>(result[1]) +
+                  static_cast<int64_t>(result[2]) + static_cast<int64_t>(result[3]);
+
+    dot += generic::INT8ComputeIP(
+        query + BATCH_SIZE * n, codes + BATCH_SIZE * n, dim - BATCH_SIZE * n);
+
+    return static_cast<float>(dot);
+#else
+    return generic::INT8ComputeIP(query, codes, dim);
+#endif
+}
+
+float
 SQ8ComputeIP(const float* RESTRICT query,
              const uint8_t* RESTRICT codes,
              const float* RESTRICT lower_bound,
@@ -1590,12 +1636,12 @@ SQ8UniformComputeCodesIP(const uint8_t* codes1, const uint8_t* codes2, uint64_t 
 
 #if defined(ENABLE_NEON)
 __inline void __attribute__((__always_inline__)) extract_12_bits_to_mask(const uint8_t* bits,
-                                                                         uint64_t bit_offset,
+                                                                         size_t bit_offset,
                                                                          uint32x4_t& mask0,
                                                                          uint32x4_t& mask1,
                                                                          uint32x4_t& mask2) {
-    uint64_t byte_idx = bit_offset / 8;
-    uint64_t bit_start = bit_offset % 8;
+    size_t byte_idx = bit_offset / 8;
+    size_t bit_start = bit_offset % 8;
 
     uint32_t mask_bits;
     if (bit_start <= 4) {
@@ -1626,11 +1672,11 @@ __inline void __attribute__((__always_inline__)) extract_12_bits_to_mask(const u
 }
 
 __inline void __attribute__((__always_inline__)) extract_8_bits_to_mask(const uint8_t* bits,
-                                                                        uint64_t bit_offset,
+                                                                        size_t bit_offset,
                                                                         uint32x4_t& mask0,
                                                                         uint32x4_t& mask1) {
-    uint64_t byte_idx = bit_offset / 8;
-    uint64_t bit_start = bit_offset % 8;
+    size_t byte_idx = bit_offset / 8;
+    size_t bit_start = bit_offset % 8;
 
     uint16_t mask_bits;
     if (bit_start == 0) {
