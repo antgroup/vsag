@@ -21,7 +21,6 @@
 #include "metric_type.h"
 #include "safe_thread_pool.h"
 #include "typing.h"
-#include "vsag/allocator.h"
 #include "vsag/resource.h"
 
 namespace vsag {

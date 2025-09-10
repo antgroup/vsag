@@ -21,8 +21,10 @@
 #include <memory>
 #include <vector>
 
+#include "data_cell/flatten_datacell.h"
 #include "data_cell/flatten_datacell_parameter.h"
 #include "data_cell/graph_datacell_parameter.h"
+#include "data_cell/graph_interface.h"
 #include "impl/allocator/safe_allocator.h"
 #include "impl/heap/standard_heap.h"
 #include "io/memory_io_parameter.h"

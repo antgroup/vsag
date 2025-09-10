@@ -84,7 +84,7 @@ TEST_CASE("Int8 SIMD Compute", "[ut][simd][int8]") {
 }
 
 TEST_CASE("PQ Calculation", "[ut][simd]") {
-    size_t dim = 256;
+    uint64_t dim = 256;
     float single_dim_value = 0.571;
     float results_expected[256]{0.0f};
     float results[256]{0.0f};

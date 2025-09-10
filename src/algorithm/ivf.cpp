@@ -23,6 +23,7 @@
 #include "impl/heap/standard_heap.h"
 #include "impl/reorder.h"
 #include "index/index_impl.h"
+#include "index_feature_list.h"
 #include "inner_string_params.h"
 #include "ivf_partition/gno_imi_partition.h"
 #include "ivf_partition/ivf_nearest_partition.h"

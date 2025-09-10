@@ -19,10 +19,10 @@
 #include "pointer_define.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
-#include "vsag/allocator.h"
 
 namespace vsag {
 
+class Allocator;
 DEFINE_POINTER(VectorTransformer);
 DEFINE_POINTER(TransformerMeta);
 
@@ -39,6 +39,7 @@ struct TransformerMeta {
         return;
     };
 };
+
 class VectorTransformer {
 public:
     explicit VectorTransformer(Allocator* allocator, int64_t input_dim, int64_t output_dim);

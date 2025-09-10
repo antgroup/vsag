@@ -24,6 +24,8 @@
 
 namespace vsag {
 
+class SafeThreadPool;
+
 DEFINE_POINTER2(AttrInvertedInterface, AttributeInvertedInterface);
 DEFINE_POINTER(FlattenInterface);
 // BruteForce index was introduced since v0.13

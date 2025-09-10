@@ -492,7 +492,7 @@ RaBitQFloatBinaryIP(const float* vector, const uint8_t* bits, uint64_t dim, floa
 
     float result = 0.0f;
 
-    for (std::size_t d = 0; d < dim; ++d) {
+    for (uint64_t d = 0; d < dim; ++d) {
         bool bit = ((bits[d / 8] >> (d % 8)) & 1) != 0;
         float b_i = bit ? inv_sqrt_d : -inv_sqrt_d;
         result += b_i * vector[d];
@@ -510,16 +510,16 @@ RaBitQSQ4UBinaryIP(const uint8_t* codes, const uint8_t* bits, uint64_t dim) {
     }
 
     uint32_t result = 0;
-    size_t num_bytes = (dim + 7) / 8;
-    size_t num_blocks = num_bytes / 8;
-    size_t remainder = num_bytes % 8;
+    uint64_t num_bytes = (dim + 7) / 8;
+    uint64_t num_blocks = num_bytes / 8;
+    uint64_t remainder = num_bytes % 8;
 
     for (uint64_t bit_pos = 0; bit_pos < 4; ++bit_pos) {
         const uint64_t* codes_block =
             reinterpret_cast<const uint64_t*>(codes + bit_pos * num_bytes);
         const uint64_t* bits_block = reinterpret_cast<const uint64_t*>(bits);
 
-        for (size_t i = 0; i < num_blocks; ++i) {
+        for (uint64_t i = 0; i < num_blocks; ++i) {
             uint64_t bitwise_and = codes_block[i] & bits_block[i];
             result += __builtin_popcountll(bitwise_and) << bit_pos;
         }
@@ -528,7 +528,7 @@ RaBitQSQ4UBinaryIP(const uint8_t* codes, const uint8_t* bits, uint64_t dim) {
             uint64_t leftover_code = 0;
             uint64_t leftover_bits = 0;
 
-            for (size_t i = 0; i < remainder; ++i) {
+            for (uint64_t i = 0; i < remainder; ++i) {
                 leftover_code |=
                     static_cast<uint64_t>(codes[bit_pos * num_bytes + num_blocks * 8 + i])
                     << (i * 8);
@@ -599,12 +599,12 @@ PQFastScanLookUp32(const uint8_t* RESTRICT lookup_table,
                    const uint8_t* RESTRICT codes,
                    uint64_t pq_dim,
                    int32_t* RESTRICT result) {
-    for (size_t i = 0; i < pq_dim; i++) {
+    for (uint64_t i = 0; i < pq_dim; i++) {
         const auto* dict = lookup_table;
         lookup_table += 16;
         const auto* code = codes;
         codes += 16;
-        for (size_t j = 0; j < 16; j++) {
+        for (uint64_t j = 0; j < 16; j++) {
             if (j % 2 == 0) {
                 result[j / 2] += static_cast<uint32_t>(dict[code[j] & 0x0F]);
                 result[16 + j / 2] += static_cast<uint32_t>(dict[(code[j] >> 4)]);
@@ -645,10 +645,10 @@ BitNot(const uint8_t* x, const uint64_t num_byte, uint8_t* result) {
 }
 
 void
-KacsWalk(float* data, size_t len) {
-    size_t base = len % 2;
-    size_t offset = base + (len / 2);  // for odd dim
-    for (size_t i = 0; i < len / 2; i++) {
+KacsWalk(float* data, uint64_t len) {
+    uint64_t base = len % 2;
+    uint64_t offset = base + (len / 2);  // for odd dim
+    for (uint64_t i = 0; i < len / 2; i++) {
         float add = data[i] + data[i + offset];
         float sub = data[i] - data[i + offset];
         data[i] = add;
@@ -662,8 +662,8 @@ KacsWalk(float* data, size_t len) {
 }
 
 void
-FlipSign(const uint8_t* flip, float* data, size_t dim) {
-    for (size_t i = 0; i < dim; i++) {
+FlipSign(const uint8_t* flip, float* data, uint64_t dim) {
+    for (uint64_t i = 0; i < dim; i++) {
         bool mask = (flip[i / 8] & (1 << (i % 8))) != 0;
         if (mask) {
             data[i] = -data[i];
@@ -672,7 +672,7 @@ FlipSign(const uint8_t* flip, float* data, size_t dim) {
 }
 
 void
-VecRescale(float* data, size_t dim, float val) {
+VecRescale(float* data, uint64_t dim, float val) {
     for (int i = 0; i < dim; i++) {
         data[i] *= val;
     }
@@ -691,9 +691,9 @@ RotateOp(float* data, int idx, int dim_, int step) {
 }
 
 void
-FHTRotate(float* data, size_t dim_) {
-    size_t n = dim_;
-    size_t step = 1;
+FHTRotate(float* data, uint64_t dim_) {
+    uint64_t n = dim_;
+    uint64_t step = 1;
     while (step < n) {
         generic::RotateOp(data, 0, dim_, step);
         step *= 2;

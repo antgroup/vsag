@@ -17,10 +17,9 @@
 
 #include "safe_thread_pool.h"
 #include "typing.h"
-#include "vsag/allocator.h"
 
 namespace vsag {
-
+class Allocator;
 class KMeansCluster {
 public:
     explicit KMeansCluster(int32_t dim,

@@ -17,7 +17,6 @@
 
 #include "basic_io.h"
 #include "memory_block_io_parameter.h"
-#include "vsag/allocator.h"
 
 namespace vsag {
 class IndexCommonParam;

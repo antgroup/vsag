@@ -15,14 +15,14 @@
 
 #pragma once
 
-#include "data_cell/flatten_datacell.h"
-#include "data_cell/graph_interface.h"
-#include "impl/heap/distance_heap.h"
-#include "lock_strategy.h"
+#include "pointer_define.h"
 #include "typing.h"
-#include "vsag/allocator.h"
 
 namespace vsag {
+DEFINE_POINTER2(DistHeap, DistanceHeap);
+DEFINE_POINTER(FlattenInterface);
+DEFINE_POINTER(GraphInterface);
+DEFINE_POINTER(MutexArray);
 
 void
 select_edges_by_heuristic(const DistHeapPtr& edges,

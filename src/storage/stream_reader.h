@@ -17,7 +17,6 @@
 
 #include <cstdint>
 #include <functional>
-#include <iostream>
 #include <istream>
 #include <stack>
 

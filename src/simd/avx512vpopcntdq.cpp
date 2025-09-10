@@ -29,10 +29,10 @@ RaBitQSQ4UBinaryIP(const uint8_t* codes, const uint8_t* bits, uint64_t dim) {
     }
 
     uint32_t result = 0;
-    size_t num_bytes = (dim + 7) / 8;
+    uint64_t num_bytes = (dim + 7) / 8;
 
     for (uint64_t bit_pos = 0; bit_pos < 4; ++bit_pos) {
-        size_t i = 0;
+        uint64_t i = 0;
 
         __m512i acc = _mm512_setzero_si512();
         const uint8_t* cur = codes + bit_pos * num_bytes;
