@@ -199,6 +199,9 @@ SINDI::search_impl(const SparseTermComputerPtr& computer,
     int64_t cur_size = std::min(static_cast<int64_t>(heap.size()), k);
 
     auto [results, ret_dists, ret_ids] = create_fast_dataset(cur_size, allocator_);
+    if (cur_size == 0) {
+        return results;
+    }
 
     while (heap.size() > k) {
         heap.pop();
