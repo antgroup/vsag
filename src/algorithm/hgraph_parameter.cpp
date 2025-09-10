@@ -24,6 +24,7 @@
 #include "impl/odescent_graph_parameter.h"
 #include "inner_string_params.h"
 #include "vsag/constants.h"
+#include "data_cell/pnm_datacell_parameter.h"
 
 namespace vsag {
 
@@ -67,7 +68,11 @@ HGraphParameter::FromJson(const JsonType& json) {
         if (data_type == DataTypes::DATA_TYPE_SPARSE) {
             this->precise_codes_param = std::make_shared<SparseVectorDataCellParameter>();
         } else {
-            this->precise_codes_param = std::make_shared<FlattenDataCellParameter>();
+            if (precise_codes_json[HGRAPH_CODES_TYPE_KEY] == "pnm_codes") {
+                this->precise_codes_param = std::make_shared<PnmDatacellParameter>();
+            } else {
+                this->precise_codes_param = std::make_shared<FlattenDataCellParameter>();
+            }
         }
         this->precise_codes_param->FromJson(precise_codes_json);
     }

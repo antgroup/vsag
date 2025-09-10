@@ -21,6 +21,7 @@
 #include "quantization/quantizer_headers.h"
 #include "quantization/sparse_quantization/sparse_quantizer.h"
 #include "sparse_vector_datacell.h"
+#include "pnm_datacell.h"
 
 namespace vsag {
 template <typename QuantTemp, typename IOTemp>
@@ -35,6 +36,9 @@ make_instance(const FlattenInterfaceParamPtr& param, const IndexCommonParam& com
     if (param->name == FLATTEN_DATA_CELL) {
         return std::make_shared<FlattenDataCell<QuantTemp, IOTemp>>(
             quantizer_param, io_param, common_param);
+    }
+    if (param->name == PNM_DATA_CELL) {
+        return std::make_shared<PnmDatacell<QuantTemp>>(quantizer_param, common_param);
     }
     return nullptr;
 }

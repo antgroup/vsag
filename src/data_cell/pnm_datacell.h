@@ -26,6 +26,9 @@
 #include <pnm_engine_def.h>
 #include <pnmesdk_client_c.h>
 namespace vsag {
+
+static int instance_count = 0;
+
 /*
 * thread unsafe
 */
@@ -37,12 +40,20 @@ public:
         context_.data_type = data_type::FP32;
         context_.vecdim = common_param.dim_;
         this->quantizer_ = std::make_shared<QuantTmpl>(quantization_param, common_param);
+        code_size_ = this->quantizer_->GetCodeSize();
+        if (instance_count == 0) {
+            conf.timeout = 10000;
+            pnmesdk_init(&conf);
+        }
+        instance_count ++;
         auto database_id = pnmesdk_db_open(&context_, 0, database_name_);
         context_.database_id = database_id;
     }
-
     ~PnmDatacell() {
-        pnmesdk_db_del(&context_);
+        instance_count --;
+        if (instance_count == 0) {
+            pnmesdk_uninit(&conf);
+        }
     }
 
     void
@@ -51,7 +62,7 @@ public:
           const InnerIdType* idx,
           InnerIdType id_count,
           Allocator* allocator = nullptr) override {
-        auto comp = std::static_pointer_cast<Computer<QuantTmpl>>(computer);
+        auto comp = std::static_pointer_cast<PnmComputer>(computer);
         calculate_config config;
         Vector<uint64_t> ids(id_count, allocator_);
         for (auto i = 0; i < id_count; ++i) {
@@ -61,7 +72,13 @@ public:
         config.ids_size = id_count;
         config.result_list = result_dists;
         config.target_vector = comp->buf_;
-        database_context_cal(&context_, &config);
+        config.target_vector_size = quantizer_->GetCodeSize();
+        config.hnsw_query_id = comp->query_id_;
+        auto ret = database_context_cal(&context_, &config);
+        if (ret != 0) {
+            logger::error(fmt::format("pnm error code: {}", ret));
+            throw VsagException(ErrorType::INTERNAL_ERROR, "Query in pnm");
+        }
     }
 
     ComputerInterfacePtr
@@ -83,7 +100,11 @@ public:
         if (total_count_ + 1 != idx) {
             throw VsagException(ErrorType::INTERNAL_ERROR, "invalid idx");
         }
-        pnmesdk_db_storage(&context_, const_cast<char*>(static_cast<const char *>(vector)), 1);
+        auto ret = pnmesdk_db_storage(&context_, const_cast<char*>(static_cast<const char *>(vector)), context_.vecdim * sizeof(float));
+        if (ret != 0) {
+            logger::error(fmt::format("pnm error code: {}", ret));
+            throw VsagException(ErrorType::INTERNAL_ERROR, "InsertVector in pnm");
+        }
     }
 
     bool
@@ -94,7 +115,11 @@ public:
 
     void
     BatchInsertVector(const void* vectors, InnerIdType count, InnerIdType* idx_vec) override {
-        pnmesdk_db_storage(&context_, const_cast<char*>(static_cast<const char *>(vectors)), count);
+        auto ret = pnmesdk_db_storage(&context_, const_cast<char*>(static_cast<const char *>(vectors)), count * context_.vecdim * sizeof(float));
+        if (ret != 0) {
+            logger::error(fmt::format("pnm error code: {}", ret));
+            throw VsagException(ErrorType::INTERNAL_ERROR, "BatchInsertVector in pnm");
+        }
     }
 
     bool
@@ -151,12 +176,24 @@ public:
 
     void
     Serialize(StreamWriter& writer) override {
-
+        throw VsagException(ErrorType::INTERNAL_ERROR, "no support for serialize in pnm");
     }
 
     void
     Deserialize(lvalue_or_rvalue<StreamReader> reader) override {
-
+        FlattenInterface::Deserialize(reader);
+        uint64_t size = 0;
+        StreamReader::ReadObj(reader, size);
+        ByteBuffer buffer(Options::Instance().block_size_limit(), this->allocator_);
+        auto vector_num = Options::Instance().block_size_limit() / code_size_;
+        uint64_t offset = 0;
+        while (offset < size) {
+            auto cur_size = std::min(vector_num * code_size_, size - offset);
+            reader->Read(reinterpret_cast<char*>(buffer.data), cur_size);
+            pnmesdk_db_storage(&context_, reinterpret_cast<char*>(buffer.data), cur_size);
+            offset += cur_size;
+        }
+        this->quantizer_->Deserialize(reader);
     }
 
     void
@@ -171,12 +208,14 @@ public:
 private:
     ComputerInterfacePtr
     factory_computer(const float* query) {
-        auto computer = this->quantizer_->FactoryComputer();
+        auto computer = std::make_shared<PnmComputer>(allocator_, code_size_);
         computer->SetQuery(query);
         return computer;
     }
 private:
     database_context context_;
+    int64_t code_size_;
+    pnmesdk_conf conf;
     char database_name_[5] = "test";
 };
 }  // namespace vsag

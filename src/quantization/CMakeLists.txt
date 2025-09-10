@@ -11,6 +11,7 @@ set (QUANTIZER_SRC
         product_quantization/product_quantizer.cpp
         rabitq_quantization/rabitq_quantizer.cpp
         quantizer_parameter.cpp
+        computer.cpp
         fp32_quantizer_parameter.cpp
         scalar_quantization/sq8_quantizer_parameter.cpp
         scalar_quantization/sq8_uniform_quantizer_parameter.cpp

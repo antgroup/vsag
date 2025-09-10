@@ -13,49 +13,46 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "flatten_datacell_parameter.h"
-
-#include <fmt/format.h>
-
+#include "pnm_datacell_parameter.h"
 #include "inner_string_params.h"
 #include "logger.h"
 
 namespace vsag {
-FlattenDataCellParameter::FlattenDataCellParameter()
-    : FlattenInterfaceParameter(FLATTEN_DATA_CELL) {
+PnmDatacellParameter::PnmDatacellParameter(): FlattenInterfaceParameter(PNM_DATA_CELL) {
 }
-
 void
-FlattenDataCellParameter::FromJson(const JsonType& json) {
-    CHECK_ARGUMENT(json.contains(IO_PARAMS_KEY),
-                   fmt::format("flatten interface parameters must contains {}", IO_PARAMS_KEY));
-    this->io_parameter = IOParameter::GetIOParameterByJson(json[IO_PARAMS_KEY]);
-
+PnmDatacellParameter::FromJson(const JsonType& json) {
     CHECK_ARGUMENT(
         json.contains(QUANTIZATION_PARAMS_KEY),
         fmt::format("flatten interface parameters must contains {}", QUANTIZATION_PARAMS_KEY));
     this->quantizer_parameter =
         QuantizerParameter::GetQuantizerParameterByJson(json[QUANTIZATION_PARAMS_KEY]);
-    this->name = FLATTEN_DATA_CELL;
+
+    CHECK_ARGUMENT(json.contains(IO_PARAMS_KEY),
+                   fmt::format("flatten interface parameters must contains {}", IO_PARAMS_KEY));
+    this->io_parameter = IOParameter::GetIOParameterByJson(json[IO_PARAMS_KEY]);
 }
 
 JsonType
-FlattenDataCellParameter::ToJson() const {
+PnmDatacellParameter::ToJson() const {
     JsonType json;
-    json[IO_PARAMS_KEY] = this->io_parameter->ToJson();
     json[QUANTIZATION_PARAMS_KEY] = this->quantizer_parameter->ToJson();
-    json[HGRAPH_CODES_TYPE_KEY] = "flatten_codes";
+    json[IO_PARAMS_KEY] = this->io_parameter->ToJson();
+    json[HGRAPH_CODES_TYPE_KEY] = "pnm_codes";
     return json;
 }
+
 bool
-FlattenDataCellParameter::CheckCompatibility(const ParamPtr& other) const {
-    auto flatten_other = std::dynamic_pointer_cast<FlattenDataCellParameter>(other);
+PnmDatacellParameter::CheckCompatibility(const ParamPtr& other) const {
+    auto flatten_other = std::dynamic_pointer_cast<FlattenInterfaceParameter>(other);
     if (not flatten_other) {
         logger::error(
-            "FlattenDataCellParameter::CheckCompatibility: "
-            "other parameter is not FlattenDataCellParameter");
+            "PnmDatacellParameter::CheckCompatibility: "
+            "other parameter is not PnmDatacellParameter");
         return false;
     }
     return this->quantizer_parameter->CheckCompatibility(flatten_other->quantizer_parameter);
 }
-}  // namespace vsag
+
+}
+
