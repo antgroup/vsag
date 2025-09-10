@@ -58,7 +58,10 @@ INT8L2Sqr(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
 
 float
 INT8InnerProduct(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
-    return sse::INT8InnerProduct(pVect1v, pVect2v, qty_ptr);  // TODO(LHT): implement
+    auto* pVect1 = (int8_t*)pVect1v;
+    auto* pVect2 = (int8_t*)pVect2v;
+    auto qty = *((size_t*)qty_ptr);
+    return avx::INT8ComputeIP(pVect1, pVect2, qty);
 }
 
 float
@@ -534,6 +537,15 @@ INT8ComputeL2Sqr(const int8_t* RESTRICT query, const int8_t* RESTRICT codes, uin
     return sse::INT8ComputeL2Sqr(query, codes, dim);
 #else
     return sse::INT8ComputeL2Sqr(query, codes, dim);
+#endif
+}
+
+float
+INT8ComputeIP(const int8_t* RESTRICT query, const int8_t* RESTRICT codes, uint64_t dim) {
+#if defined(ENABLE_AVX)
+    return sse::INT8ComputeIP(query, codes, dim);
+#else
+    return sse::INT8ComputeIP(query, codes, dim);
 #endif
 }
 

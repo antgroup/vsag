@@ -14,6 +14,7 @@
 // limitations under the License.
 
 #include "simd.h"
+#include "simd/int8_simd.h"
 
 namespace vsag::generic {
 
@@ -198,6 +199,15 @@ INT8ComputeL2Sqr(const int8_t* RESTRICT query, const int8_t* RESTRICT codes, uin
     for (uint64_t i = 0; i < dim; ++i) {
         auto val = static_cast<float>(query[i] - codes[i]);
         result += val * val;
+    }
+    return result;
+}
+
+float
+INT8ComputeIP(const int8_t* __restrict query, const int8_t* __restrict codes, uint64_t dim) {
+    float result = 0.0f;
+    for (uint64_t i = 0; i < dim; ++i) {
+        result += static_cast<float>(query[i] * codes[i]);
     }
     return result;
 }

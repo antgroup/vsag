@@ -19,7 +19,6 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "fixtures.h"
-#include "fp32_simd.h"
 #include "simd_status.h"
 
 using namespace vsag;
@@ -62,6 +61,7 @@ TEST_CASE("INT8 SIMD Compute", "[ut][simd][int8]") {
         std::vector<int8_t> vec2(vec1.begin() + count * dim, vec1.end());
         for (uint64_t i = 0; i < count; ++i) {
             TEST_INT8_COMPUTE_ACCURACY(INT8ComputeL2Sqr);
+            TEST_INT8_COMPUTE_ACCURACY(INT8ComputeIP);
         }
         //TODO(lc): Add batch compute func test
         for (uint64_t i = 0; i < count; i += 4) {
@@ -69,13 +69,27 @@ TEST_CASE("INT8 SIMD Compute", "[ut][simd][int8]") {
     }
 }
 
-#define BENCHMARK_SIMD_COMPUTE(Simd, Comp)                                         \
-    BENCHMARK_ADVANCED(#Simd #Comp) {                                              \
-        for (int i = 0; i < count; ++i) {                                          \
-            Simd::Comp(vec1.data() + i * 2 * dim, vec2.data() + i * 2 * dim, dim); \
-        }                                                                          \
-        return;                                                                    \
+#define BENCHMARK_ONE(Simd, Func)                                          \
+    BENCHMARK_ADVANCED(#Simd #Func) {                                      \
+        for (int i = 0; i < count; ++i) {                                  \
+            Simd::Func(vec1.data() + i * dim, vec2.data() + i * dim, dim); \
+        }                                                                  \
     }
+
+#define TEST_ALL_BACKENDS(func)      \
+    BENCHMARK_ONE(generic, func);    \
+    if (SimdStatus::SupportSSE())    \
+        BENCHMARK_ONE(sse, func);    \
+    if (SimdStatus::SupportAVX())    \
+        BENCHMARK_ONE(avx, func);    \
+    if (SimdStatus::SupportAVX2())   \
+        BENCHMARK_ONE(avx2, func);   \
+    if (SimdStatus::SupportAVX512()) \
+        BENCHMARK_ONE(avx512, func); \
+    if (SimdStatus::SupportNEON())   \
+        BENCHMARK_ONE(neon, func);   \
+    if (SimdStatus::SupportSVE())    \
+        BENCHMARK_ONE(sve, func);
 
 TEST_CASE("INT8 Benchmark", "[ut][simd][int8][!benchmark]") {
     int64_t count = 500;
@@ -83,10 +97,6 @@ TEST_CASE("INT8 Benchmark", "[ut][simd][int8][!benchmark]") {
     auto vec1 = fixtures::generate_int8_codes(count, dim);
     auto vec2 = fixtures::generate_int8_codes(count, dim);
 
-    BENCHMARK_SIMD_COMPUTE(generic, INT8ComputeL2Sqr);
-    BENCHMARK_SIMD_COMPUTE(sse, INT8ComputeL2Sqr);
-    BENCHMARK_SIMD_COMPUTE(avx2, INT8ComputeL2Sqr);
-    BENCHMARK_SIMD_COMPUTE(avx512, INT8ComputeL2Sqr);
-    BENCHMARK_SIMD_COMPUTE(neon, INT8ComputeL2Sqr);
-    BENCHMARK_SIMD_COMPUTE(sve, INT8ComputeL2Sqr);
+    TEST_ALL_BACKENDS(INT8ComputeL2Sqr);
+    TEST_ALL_BACKENDS(INT8ComputeIP);
 }

@@ -13,6 +13,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <cstdint>
+
+#include "simd/int8_simd.h"
 #if defined(ENABLE_SSE)
 #include <x86intrin.h>
 #endif
@@ -57,7 +60,10 @@ INT8L2Sqr(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
 
 float
 INT8InnerProduct(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
-    return generic::INT8InnerProduct(pVect1v, pVect2v, qty_ptr);  // TODO(LHT): implement
+    auto* pVect1 = (int8_t*)pVect1v;
+    auto* pVect2 = (int8_t*)pVect2v;
+    auto qty = *((size_t*)qty_ptr);
+    return sse::INT8ComputeIP(pVect1, pVect2, qty);
 }
 
 float
@@ -495,6 +501,43 @@ INT8ComputeL2Sqr(const int8_t* RESTRICT query, const int8_t* RESTRICT codes, uin
     return static_cast<float>(l2);
 #else
     return generic::INT8ComputeL2Sqr(query, codes, dim);
+#endif
+}
+
+float
+INT8ComputeIP(const int8_t* __restrict query, const int8_t* __restrict codes, uint64_t dim) {
+#if defined(ENABLE_SSE)
+    constexpr int BATCH_SIZE = 8;
+    const uint64_t n = dim / BATCH_SIZE;
+
+    if (n == 0) {
+        return generic::INT8ComputeIP(query, codes, dim);
+    }
+
+    __m128i sum_sq = _mm_setzero_si128();
+
+    for (uint64_t i = 0; i < n; ++i) {
+        __m128i q = _mm_loadl_epi64(reinterpret_cast<const __m128i*>(query + BATCH_SIZE * i));
+        __m128i c = _mm_loadl_epi64(reinterpret_cast<const __m128i*>(codes + BATCH_SIZE * i));
+
+        __m128i q_low = _mm_cvtepi8_epi16(q);
+        __m128i c_low = _mm_cvtepi8_epi16(c);
+
+        __m128i sq = _mm_madd_epi16(q_low, c_low);
+
+        sum_sq = _mm_add_epi32(sum_sq, sq);
+    }
+
+    alignas(32) int32_t result[BATCH_SIZE / 2];
+    _mm_store_si128(reinterpret_cast<__m128i*>(result), sum_sq);
+    int64_t ip = static_cast<int64_t>(result[0]) + result[1] + result[2] + result[3];
+
+    ip += generic::INT8ComputeIP(
+        query + BATCH_SIZE * n, codes + BATCH_SIZE * n, dim - BATCH_SIZE * n);
+
+    return static_cast<float>(ip);
+#else
+    return generic::INT8ComputeIP(query, codes, dim);
 #endif
 }
 
