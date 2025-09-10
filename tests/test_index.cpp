@@ -1449,6 +1449,19 @@ TestIndex::TestEstimateMemory(const std::string& index_name,
             std::ifstream inf(path, std::ios::binary);
             index1->Deserialize(inf);
             auto real_memory = allocator->GetCurrentMemory();
+            auto get_memory = index1->GetMemoryUsage();
+
+            if (get_memory <= static_cast<uint64_t>(real_memory * 0.8) or
+                get_memory >= static_cast<uint64_t>(real_memory * 1.2)) {
+                WARN(fmt::format("get_memory({}) is not in range [{}, {}]",
+                                 get_memory,
+                                 static_cast<uint64_t>(real_memory * 0.8),
+                                 static_cast<uint64_t>(real_memory * 1.2)));
+            }
+
+            REQUIRE(get_memory >= static_cast<uint64_t>(real_memory * 0.2));
+            REQUIRE(get_memory <= static_cast<uint64_t>(real_memory * 3.2));
+
             if (estimate_memory <= static_cast<uint64_t>(real_memory * 0.8) or
                 estimate_memory >= static_cast<uint64_t>(real_memory * 1.2)) {
                 WARN(fmt::format("estimate_memory({}) is not in range [{}, {}]",
