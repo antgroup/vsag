@@ -23,7 +23,7 @@ void
 SINDIParameter::FromJson(const JsonType& json) {
     if (json.contains(SPARSE_DOC_PRUNE_RATIO)) {
         doc_prune_ratio = json[SPARSE_DOC_PRUNE_RATIO];
-        CHECK_ARGUMENT(doc_prune_ratio >= 0.0F and doc_prune_ratio <= 0.5F,
+        CHECK_ARGUMENT((doc_prune_ratio >= 0.0F and doc_prune_ratio <= 0.5F),
                        fmt::format("doc_prune_ratio must in [0, 0.5], got {}", doc_prune_ratio));
     } else {
         doc_prune_ratio = DEFAULT_DOC_PRUNE_RATIO;
@@ -65,7 +65,7 @@ SINDISearchParameter::FromJson(const JsonType& json) {
                    fmt::format("parameters must contains {}", INDEX_SINDI));
     if (json[INDEX_SINDI].contains(SPARSE_TERM_PRUNE_RATIO)) {
         term_prune_ratio = json[INDEX_SINDI][SPARSE_TERM_PRUNE_RATIO];
-        CHECK_ARGUMENT(term_prune_ratio >= 0.0F and term_prune_ratio <= 0.5F,
+        CHECK_ARGUMENT((term_prune_ratio >= 0.0F and term_prune_ratio <= 0.5F),
                        fmt::format("term_prune_ratio must in [0, 0.5], got {}", term_prune_ratio));
     } else {
         term_prune_ratio = DEFAULT_TERM_PRUNE_RATIO;
@@ -74,7 +74,7 @@ SINDISearchParameter::FromJson(const JsonType& json) {
     if (json[INDEX_SINDI].contains(SPARSE_QUERY_PRUNE_RATIO)) {
         query_prune_ratio = json[INDEX_SINDI][SPARSE_QUERY_PRUNE_RATIO];
         CHECK_ARGUMENT(
-            query_prune_ratio >= 0.0F and query_prune_ratio <= 0.5F,
+            (query_prune_ratio >= 0.0F and query_prune_ratio <= 0.5F),
             fmt::format("query_prune_ratio must in [0, 0.5], got {}", query_prune_ratio));
     } else {
         query_prune_ratio = DEFAULT_QUERY_PRUNE_RATIO;

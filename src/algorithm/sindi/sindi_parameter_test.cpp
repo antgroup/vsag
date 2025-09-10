@@ -42,7 +42,7 @@ using namespace vsag;
 
 struct SINDIDefaultParam {
     bool use_reorder = true;
-    float doc_prune_ratio = 0.8F;
+    float doc_prune_ratio = 0.1F;
     int window_size = 66666;
 };
 
@@ -69,9 +69,9 @@ TEST_CASE("SINDI Index Parameters Test", "[ut][SINDIParameter]") {
 
     auto search_param_str = R"(
         "sindi": {
-            "query_prune_ratio": 0.9,
+            "query_prune_ratio": 0.2,
             "n_candidate": 20,
-            "term_prune_ratio": 1
+            "term_prune_ratio": 0.1
         }
     )";
     auto search_param = std::make_shared<vsag::SINDIParameter>();
@@ -81,6 +81,6 @@ TEST_CASE("SINDI Index Parameters Test", "[ut][SINDIParameter]") {
 
 TEST_CASE("SINDI Index Parameters Compatibility Test", "[ut][SINDIParameter]") {
     TEST_COMPATIBILITY_CASE("use_reorder compatibility", use_reorder, true, false, false);
-    TEST_COMPATIBILITY_CASE("doc_prune_ratio compatibility", doc_prune_ratio, 0.8F, 0.9F, false);
+    TEST_COMPATIBILITY_CASE("doc_prune_ratio compatibility", doc_prune_ratio, 0.2F, 0.3F, false);
     TEST_COMPATIBILITY_CASE("window_size compatibility", window_size, 66666, 77777, false);
 }
