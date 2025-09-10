@@ -74,17 +74,21 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex,
     SECTION("invalid doc_prune_ratio") {
         fixtures::SINDIParam param;
         param.doc_prune_ratio = 0.6;
-        TestFactory("sindi", fixtures::SINDITestIndex::GenerateBuildParameter(param), false);
+        REQUIRE_THROWS(
+            TestFactory("sindi", fixtures::SINDITestIndex::GenerateBuildParameter(param), false));
         param.doc_prune_ratio = -0.1;
-        TestFactory("sindi", fixtures::SINDITestIndex::GenerateBuildParameter(param), false);
+        REQUIRE_THROWS(
+            TestFactory("sindi", fixtures::SINDITestIndex::GenerateBuildParameter(param), false));
     }
 
     SECTION("invalid window_size") {
         fixtures::SINDIParam param;
         param.window_size = 5000;
-        TestFactory("sindi", fixtures::SINDITestIndex::GenerateBuildParameter(param), false);
+        REQUIRE_THROWS(
+            TestFactory("sindi", fixtures::SINDITestIndex::GenerateBuildParameter(param), false));
         param.window_size = 1100000;
-        TestFactory("sindi", fixtures::SINDITestIndex::GenerateBuildParameter(param), false);
+        REQUIRE_THROWS(
+            TestFactory("sindi", fixtures::SINDITestIndex::GenerateBuildParameter(param), false));
     }
     fixtures::SINDIParam param;
     param.window_size = 10000;
