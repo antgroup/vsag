@@ -42,7 +42,7 @@ class InnerIndexInterface {
 public:
     InnerIndexInterface() = default;
     explicit InnerIndexInterface(ParamPtr index_param, const IndexCommonParam& common_param);
-    virtual ~InnerIndexInterface() = default;
+    virtual ~InnerIndexInterface();
 
     constexpr static char fast_string_delimiter = '|';
 
@@ -398,7 +398,7 @@ public:
     MetricType metric_{MetricType::METRIC_TYPE_L2SQR};
     DataTypes data_type_{DataTypes::DATA_TYPE_FLOAT};
 
-    IndexFeatureListPtr index_feature_list_{nullptr};
+    IndexFeatureListUPtr index_feature_list_{nullptr};
 
     const ParamPtr create_param_ptr_{nullptr};
     bool immutable_{false};
