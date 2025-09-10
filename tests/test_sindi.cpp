@@ -86,6 +86,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex, "SINDI Build and Search",
     TestBatchCalcDistanceById(index, dataset, 1e-4, true, true);
     TestUpdateId(index, dataset, search_param, true);
     TestEstimateMemory("sindi", build_param, dataset);
+    TestIndexStatus(index);
 }
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex, "SINDI Concurrent", "[ft][sindi]") {

@@ -99,6 +99,9 @@ public:
     std::pair<int64_t, int64_t>
     GetMinAndMaxId() const override;
 
+    void
+    SetImmutable() override;
+
 private:
     template <InnerSearchMode mode>
     DatasetPtr

@@ -45,7 +45,7 @@ SINDI::SINDI(const SINDIParameterPtr& param, const IndexCommonParam& common_para
 
 std::vector<int64_t>
 SINDI::Add(const DatasetPtr& base) {
-    std::unique_lock wlock(this->global_mutex_);
+    std::scoped_lock wlock(this->global_mutex_);
 
     auto data_num = base->GetNumElements();
     CHECK_ARGUMENT(data_num > 0, "data_num is zero when add vectors");
@@ -278,7 +278,8 @@ SINDI::Serialize(StreamWriter& writer) const {
 
 void
 SINDI::Deserialize(StreamReader& reader) {
-    std::unique_lock wlock(this->global_mutex_);
+    std::scoped_lock wlock(this->global_mutex_);
+
     if (not deserialize_without_footer_) {
         auto footer = Footer::Parse(reader);
         auto metadata = footer->GetMetadata();
@@ -315,7 +316,7 @@ SINDI::UpdateId(int64_t old_id, int64_t new_id) {
         return true;
     }
 
-    std::unique_lock wlock(this->global_mutex_);
+    std::scoped_lock wlock(this->global_mutex_);
     label_table_->UpdateLabel(old_id, new_id);
     return true;
 }
@@ -375,6 +376,12 @@ SINDI::CalcDistanceById(const DatasetPtr& vector, int64_t id) const {
     search_param.term_prune_ratio = 0;
     auto computer = std::make_shared<SparseTermComputer>(sparse_query, search_param, allocator_);
     return term_list->CalcDistanceByInnerId(computer, inner_id - window_start_id);
+}
+
+void
+SINDI::SetImmutable() {
+    std::scoped_lock wlock(this->global_mutex_);
+    this->immutable_ = true;
 }
 
 void
