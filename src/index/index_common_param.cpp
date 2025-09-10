@@ -22,6 +22,8 @@
 
 namespace vsag {
 
+constexpr static const int64_t MAX_DIM_SPARSE = 4096;
+
 inline void
 fill_datatype(IndexCommonParam& result, JsonType::const_reference datatype_obj) {
     CHECK_ARGUMENT(datatype_obj.is_string(),
@@ -102,10 +104,16 @@ IndexCommonParam::CheckAndCreate(JsonType& params, const std::shared_ptr<Resourc
     fill_metrictype(result, metric_obj);
 
     // Check and Fill Dim
-    CHECK_ARGUMENT(params.contains(PARAMETER_DIM),
-                   fmt::format("parameters must contain {}", PARAMETER_DIM));
-    const auto dim_obj = params[PARAMETER_DIM];
-    fill_dim(result, dim_obj);
+    if (params.contains(PARAMETER_DIM)) {
+        const auto dim_obj = params[PARAMETER_DIM];
+        fill_dim(result, dim_obj);
+    } else {
+        if (result.data_type_ != DataTypes::DATA_TYPE_SPARSE) {
+            throw vsag::VsagException(ErrorType::INVALID_ARGUMENT,
+                                      fmt::format("parameters must contain {}", PARAMETER_DIM));
+        }
+        result.dim_ = MAX_DIM_SPARSE;
+    }
 
     if (params.contains(EXTRA_INFO_SIZE)) {
         const auto extra_info_size_obj = params[EXTRA_INFO_SIZE];
