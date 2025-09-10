@@ -786,22 +786,19 @@ HGraph::Deserialize(StreamReader& reader) {
     // try to deserialize footer (only in new version)
     auto footer = Footer::Parse(reader);
 
-    BufferStreamReader buffer_reader(
-        &reader, std::numeric_limits<uint64_t>::max(), this->allocator_);
-
     if (footer == nullptr) {  // old format, DON'T EDIT, remove in the future
         logger::debug("parse with v0.14 version format");
 
-        this->deserialize_basic_info_v0_14(buffer_reader);
+        this->deserialize_basic_info_v0_14(reader);
 
-        this->basic_flatten_codes_->Deserialize(buffer_reader);
-        this->bottom_graph_->Deserialize(buffer_reader);
+        this->basic_flatten_codes_->Deserialize(reader);
+        this->bottom_graph_->Deserialize(reader);
         if (this->use_reorder_) {
-            this->high_precise_codes_->Deserialize(buffer_reader);
+            this->high_precise_codes_->Deserialize(reader);
         }
 
         for (auto& route_graph : this->route_graphs_) {
-            route_graph->Deserialize(buffer_reader);
+            route_graph->Deserialize(reader);
         }
         auto new_size = max_capacity_.load();
         this->neighbors_mutex_->Resize(new_size);
@@ -809,15 +806,18 @@ HGraph::Deserialize(StreamReader& reader) {
         pool_ = std::make_shared<VisitedListPool>(1, allocator_, new_size, allocator_);
 
         if (this->extra_info_size_ > 0 && this->extra_infos_ != nullptr) {
-            this->extra_infos_->Deserialize(buffer_reader);
+            this->extra_infos_->Deserialize(reader);
         }
         this->total_count_ = this->basic_flatten_codes_->TotalCount();
 
         if (this->use_attribute_filter_ and this->attr_filter_index_ != nullptr) {
-            this->attr_filter_index_->Deserialize(buffer_reader);
+            this->attr_filter_index_->Deserialize(reader);
         }
     } else {  // create like `else if ( ver in [v0.15, v0.17] )` here if need in the future
         logger::debug("parse with new version format");
+
+        BufferStreamReader buffer_reader(
+            &reader, std::numeric_limits<uint64_t>::max(), this->allocator_);
 
         auto metadata = footer->GetMetadata();
         // metadata should NOT be nullptr if footer is not nullptr
