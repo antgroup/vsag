@@ -457,13 +457,13 @@ TestIVFBuildAndContinueAdd(const fixtures::IVFResourcePtr& resource) {
     }
 }
 
-TEST_CASE("[PR] IVF Build & ContinueAdd Test", "[ft][ivf][pr][concurrent]") {
+TEST_CASE("(PR) IVF Build & ContinueAdd Test", "[ft][ivf][pr][concurrent]") {
     auto test_index = std::make_shared<fixtures::IVFTestIndex>();
     auto resource = test_index->GetResource(true);
     TestIVFBuildAndContinueAdd(resource);
 }
 
-TEST_CASE("[Daily] IVF Build & ContinueAdd Test", "[ft][ivf][daily][concurrent]") {
+TEST_CASE("(Daily) IVF Build & ContinueAdd Test", "[ft][ivf][daily][concurrent]") {
     auto test_index = std::make_shared<fixtures::IVFTestIndex>();
     auto resource = test_index->GetResource(false);
     TestIVFBuildAndContinueAdd(resource);
@@ -520,13 +520,13 @@ TestIVFBuildWithResidual(const fixtures::IVFResourcePtr& resource) {
     }
 }
 
-TEST_CASE("[PR] IVF Build with Residual", "[ft][ivf][pr]") {
+TEST_CASE("(PR) IVF Build with Residual", "[ft][ivf][pr]") {
     auto test_index = std::make_shared<fixtures::IVFTestIndex>();
     auto resource = test_index->GetResource(true);
     TestIVFBuildWithResidual(resource);
 }
 
-TEST_CASE("[Daily] IVF Build with Residual", "[ft][ivf][daily]") {
+TEST_CASE("(Daily) IVF Build with Residual", "[ft][ivf][daily]") {
     auto test_index = std::make_shared<fixtures::IVFTestIndex>();
     auto resource = test_index->GetResource(false);
     TestIVFBuildWithResidual(resource);
@@ -593,13 +593,13 @@ TestIVFBuild(const fixtures::IVFResourcePtr& resource) {
     }
 }
 
-TEST_CASE("[PR] IVF Build", "[ft][ivf][pr]") {
+TEST_CASE("(PR) IVF Build", "[ft][ivf][pr]") {
     auto test_index = std::make_shared<fixtures::IVFTestIndex>();
     auto resource = test_index->GetResource(true);
     TestIVFBuild(resource);
 }
 
-TEST_CASE("[Daily] IVF Build", "[ft][ivf][daily]") {
+TEST_CASE("(Daily) IVF Build", "[ft][ivf][daily]") {
     auto test_index = std::make_shared<fixtures::IVFTestIndex>();
     auto resource = test_index->GetResource(false);
     TestIVFBuild(resource);
@@ -662,13 +662,13 @@ TestIVFSearchOvertime(const fixtures::IVFResourcePtr& resource) {
     }
 }
 
-TEST_CASE("[PR] IVF Search Overtime", "[ft][ivf][pr]") {
+TEST_CASE("(PR) IVF Search Overtime", "[ft][ivf][pr]") {
     auto test_index = std::make_shared<fixtures::IVFTestIndex>();
     auto resource = test_index->GetResource(true);
     TestIVFSearchOvertime(resource);
 }
 
-TEST_CASE("[Daily] IVF Search Overtime", "[ft][ivf][daily]") {
+TEST_CASE("(Daily) IVF Search Overtime", "[ft][ivf][daily]") {
     auto test_index = std::make_shared<fixtures::IVFTestIndex>();
     auto resource = test_index->GetResource(false);
     TestIVFSearchOvertime(resource);
@@ -715,13 +715,13 @@ TestIVFBuildWithLargeK(const fixtures::IVFResourcePtr& resource) {
     }
 }
 
-TEST_CASE("[PR] IVF Build With Large K", "[ft][ivf][pr]") {
+TEST_CASE("(PR) IVF Build With Large K", "[ft][ivf][pr]") {
     auto test_index = std::make_shared<fixtures::IVFTestIndex>();
     auto resource = test_index->GetResource(true);
     TestIVFBuildWithLargeK(resource);
 }
 
-TEST_CASE("[Daily] IVF Build With Large K", "[ft][ivf][daily]") {
+TEST_CASE("(Daily) IVF Build With Large K", "[ft][ivf][daily]") {
     auto test_index = std::make_shared<fixtures::IVFTestIndex>();
     auto resource = test_index->GetResource(false);
     TestIVFBuildWithLargeK(resource);
@@ -789,13 +789,13 @@ TestIVFWithAttr(const fixtures::IVFResourcePtr& resource) {
     }
 }
 
-TEST_CASE("[PR] IVF Build With Attribute", "[ft][ivf][pr]") {
+TEST_CASE("(PR) IVF Build With Attribute", "[ft][ivf][pr]") {
     auto test_index = std::make_shared<fixtures::IVFTestIndex>();
     auto resource = test_index->GetResource(true);
     TestIVFWithAttr(resource);
 }
 
-TEST_CASE("[Daily] IVF Build With Attribute", "[ft][ivf][daily]") {
+TEST_CASE("(Daily) IVF Build With Attribute", "[ft][ivf][daily]") {
     auto test_index = std::make_shared<fixtures::IVFTestIndex>();
     auto resource = test_index->GetResource(false);
     TestIVFWithAttr(resource);
@@ -841,13 +841,13 @@ TestIVFExportModel(const fixtures::IVFResourcePtr& resource) {
     }
 }
 
-TEST_CASE("[PR] IVF Export Model", "[ft][ivf][pr]") {
+TEST_CASE("(PR) IVF Export Model", "[ft][ivf][pr]") {
     auto test_index = std::make_shared<fixtures::IVFTestIndex>();
     auto resource = test_index->GetResource(true);
     TestIVFExportModel(resource);
 }
 
-TEST_CASE("[Daily] IVF IVF Export Model", "[ft][ivf][daily]") {
+TEST_CASE("(Daily) IVF IVF Export Model", "[ft][ivf][daily]") {
     auto test_index = std::make_shared<fixtures::IVFTestIndex>();
     auto resource = test_index->GetResource(false);
     TestIVFExportModel(resource);
@@ -893,13 +893,13 @@ TestIVFAdd(const fixtures::IVFResourcePtr& resource) {
     }
 }
 
-TEST_CASE("[PR] IVF Add", "[ft][ivf][pr]") {
+TEST_CASE("(PR) IVF Add", "[ft][ivf][pr]") {
     auto test_index = std::make_shared<fixtures::IVFTestIndex>();
     auto resource = test_index->GetResource(true);
     TestIVFAdd(resource);
 }
 
-TEST_CASE("[Daily] IVF Add", "[ft][ivf][daily]") {
+TEST_CASE("(Daily) IVF Add", "[ft][ivf][daily]") {
     auto test_index = std::make_shared<fixtures::IVFTestIndex>();
     auto resource = test_index->GetResource(false);
     TestIVFAdd(resource);
@@ -951,13 +951,13 @@ TestIVFMerge(const fixtures::IVFResourcePtr& resource) {
     }
 }
 
-TEST_CASE("[PR] IVF Merge", "[ft][ivf][pr]") {
+TEST_CASE("(PR) IVF Merge", "[ft][ivf][pr]") {
     auto test_index = std::make_shared<fixtures::IVFTestIndex>();
     auto resource = test_index->GetResource(true);
     TestIVFMerge(resource);
 }
 
-TEST_CASE("[Daily] IVF Merge", "[ft][ivf][daily]") {
+TEST_CASE("(Daily) IVF Merge", "[ft][ivf][daily]") {
     auto test_index = std::make_shared<fixtures::IVFTestIndex>();
     auto resource = test_index->GetResource(false);
     TestIVFMerge(resource);
@@ -1009,13 +1009,13 @@ TestIVFConcurrentAdd(const fixtures::IVFResourcePtr& resource) {
     }
 }
 
-TEST_CASE("[PR] IVF Concurrent Add", "[ft][ivf][pr]") {
+TEST_CASE("(PR) IVF Concurrent Add", "[ft][ivf][pr]") {
     auto test_index = std::make_shared<fixtures::IVFTestIndex>();
     auto resource = test_index->GetResource(true);
     TestIVFConcurrentAdd(resource);
 }
 
-TEST_CASE("[Daily] IVF Concurrent Add", "[ft][ivf][daily]") {
+TEST_CASE("(Daily) IVF Concurrent Add", "[ft][ivf][daily]") {
     auto test_index = std::make_shared<fixtures::IVFTestIndex>();
     auto resource = test_index->GetResource(false);
     TestIVFConcurrentAdd(resource);
@@ -1082,13 +1082,13 @@ TestIVFSerialize(const fixtures::IVFResourcePtr& resource) {
     }
 }
 
-TEST_CASE("[PR] IVF Serialize File", "[ft][ivf][serialization][pr]") {
+TEST_CASE("(PR) IVF Serialize File", "[ft][ivf][serialization][pr]") {
     auto test_index = std::make_shared<fixtures::IVFTestIndex>();
     auto resource = test_index->GetResource(true);
     TestIVFSerialize(resource);
 }
 
-TEST_CASE("[Daily] IVF Serialize File", "[ft][ivf][serialization][daily]") {
+TEST_CASE("(Daily) IVF Serialize File", "[ft][ivf][serialization][daily]") {
     auto test_index = std::make_shared<fixtures::IVFTestIndex>();
     auto resource = test_index->GetResource(false);
     TestIVFSerialize(resource);
@@ -1133,13 +1133,13 @@ TestIVFClone(const fixtures::IVFResourcePtr& resource) {
     }
 }
 
-TEST_CASE("[PR] IVF Clone", "[ft][ivf][pr]") {
+TEST_CASE("(PR) IVF Clone", "[ft][ivf][pr]") {
     auto test_index = std::make_shared<fixtures::IVFTestIndex>();
     auto resource = test_index->GetResource(true);
     TestIVFClone(resource);
 }
 
-TEST_CASE("[Daily] IVF Clone", "[ft][ivf][daily]") {
+TEST_CASE("(Daily) IVF Clone", "[ft][ivf][daily]") {
     auto test_index = std::make_shared<fixtures::IVFTestIndex>();
     auto resource = test_index->GetResource(false);
     TestIVFClone(resource);
@@ -1187,13 +1187,13 @@ TestIVFRandomAllocator(const fixtures::IVFResourcePtr& resource) {
     }
 }
 
-TEST_CASE("[PR] IVF Build & ContinueAdd Test With Random Allocator", "[ft][ivf][pr]") {
+TEST_CASE("(PR) IVF Build & ContinueAdd Test With Random Allocator", "[ft][ivf][pr]") {
     auto test_index = std::make_shared<fixtures::IVFTestIndex>();
     auto resource = test_index->GetResource(true);
     TestIVFRandomAllocator(resource);
 }
 
-TEST_CASE("[Daily] IVF Build & ContinueAdd Test With Random Allocator", "[ft][ivf][daily]") {
+TEST_CASE("(Daily) IVF Build & ContinueAdd Test With Random Allocator", "[ft][ivf][daily]") {
     auto test_index = std::make_shared<fixtures::IVFTestIndex>();
     auto resource = test_index->GetResource(false);
     TestIVFRandomAllocator(resource);
@@ -1237,13 +1237,13 @@ TestIVFEstimateMemory(const fixtures::IVFResourcePtr& resource) {
     }
 }
 
-TEST_CASE("[PR] IVF Estimate Memory", "[ft][ivf][pr]") {
+TEST_CASE("(PR) IVF Estimate Memory", "[ft][ivf][pr]") {
     auto test_index = std::make_shared<fixtures::IVFTestIndex>();
     auto resource = test_index->GetResource(true);
     TestIVFEstimateMemory(resource);
 }
 
-TEST_CASE("[Daily] IVF Estimate Memory", "[ft][ivf][daily]") {
+TEST_CASE("(Daily) IVF Estimate Memory", "[ft][ivf][daily]") {
     auto test_index = std::make_shared<fixtures::IVFTestIndex>();
     auto resource = test_index->GetResource(false);
     TestIVFEstimateMemory(resource);
@@ -1292,13 +1292,13 @@ TestIVFBuildMultiBucketsPerData(const fixtures::IVFResourcePtr& resource) {
     }
 }
 
-TEST_CASE("[PR] IVF Build Multi Buckets Per Data", "[ft][ivf][pr]") {
+TEST_CASE("(PR) IVF Build Multi Buckets Per Data", "[ft][ivf][pr]") {
     auto test_index = std::make_shared<fixtures::IVFTestIndex>();
     auto resource = test_index->GetResource(true);
     TestIVFBuildMultiBucketsPerData(resource);
 }
 
-TEST_CASE("[Daily] IVF Build Multi Buckets Per Data", "[ft][ivf][daily]") {
+TEST_CASE("(Daily) IVF Build Multi Buckets Per Data", "[ft][ivf][daily]") {
     auto test_index = std::make_shared<fixtures::IVFTestIndex>();
     auto resource = test_index->GetResource(false);
     TestIVFBuildMultiBucketsPerData(resource);
@@ -1344,13 +1344,13 @@ TestIVFGNOIMIBuild(const fixtures::IVFResourcePtr& resource) {
     }
 }
 
-TEST_CASE("[PR] IVF GNO-IMI Build", "[ft][ivf][pr]") {
+TEST_CASE("(PR) IVF GNO-IMI Build", "[ft][ivf][pr]") {
     auto test_index = std::make_shared<fixtures::IVFTestIndex>();
     auto resource = test_index->GetResource(true);
     TestIVFGNOIMIBuild(resource);
 }
 
-TEST_CASE("[Daily] IVF GNO-IMI Build", "[ft][ivf][daily]") {
+TEST_CASE("(Daily) IVF GNO-IMI Build", "[ft][ivf][daily]") {
     auto test_index = std::make_shared<fixtures::IVFTestIndex>();
     auto resource = test_index->GetResource(false);
     TestIVFGNOIMIBuild(resource);
@@ -1403,13 +1403,13 @@ TestIVFGNOIMIBuildWithResidual(const fixtures::IVFResourcePtr& resource) {
     }
 }
 
-TEST_CASE("[PR] IVF GNO-IMI Build with Residual", "[ft][ivf][pr]") {
+TEST_CASE("(PR) IVF GNO-IMI Build with Residual", "[ft][ivf][pr]") {
     auto test_index = std::make_shared<fixtures::IVFTestIndex>();
     auto resource = test_index->GetResource(true);
     TestIVFGNOIMIBuildWithResidual(resource);
 }
 
-TEST_CASE("[Daily] IVF GNO-IMI Build with Residual", "[ft][ivf][daily]") {
+TEST_CASE("(Daily) IVF GNO-IMI Build with Residual", "[ft][ivf][daily]") {
     auto test_index = std::make_shared<fixtures::IVFTestIndex>();
     auto resource = test_index->GetResource(false);
     TestIVFGNOIMIBuildWithResidual(resource);
