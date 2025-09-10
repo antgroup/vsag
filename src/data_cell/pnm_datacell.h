@@ -189,8 +189,14 @@ public:
         uint64_t offset = 0;
         while (offset < size) {
             auto cur_size = std::min(vector_num * code_size_, size - offset);
+            auto cut_cur_size = cur_size;
             reader->Read(reinterpret_cast<char*>(buffer.data), cur_size);
-            pnmesdk_db_storage(&context_, reinterpret_cast<char*>(buffer.data), cur_size);
+            if (cut_cur_size + offset > code_size_ * total_count_) {
+                cut_cur_size = code_size_ * total_count_ - offset;
+            }
+            if (cut_cur_size > 0) {
+                pnmesdk_db_storage(&context_, reinterpret_cast<char*>(buffer.data), cut_cur_size);
+            }
             offset += cur_size;
         }
         this->quantizer_->Deserialize(reader);
