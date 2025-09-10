@@ -2244,6 +2244,27 @@ TestIndex::TestGetDataById(const IndexPtr& index, const TestDatasetPtr& dataset)
 }
 
 void
+TestIndex::TestIndexStatus(const IndexPtr& index) {
+    auto set_result = index->SetImmutable();
+    if (not set_result.has_value()) {
+        return;
+    }
+    REQUIRE_FALSE(index->Train(nullptr));
+    REQUIRE_FALSE(index->Build(nullptr));
+    REQUIRE_FALSE(index->Add(nullptr));
+    std::ifstream inf;
+    REQUIRE_FALSE(index->Deserialize(inf));
+    REQUIRE_FALSE(index->Remove(0));
+    std::vector<vsag::MergeUnit> merge_units;
+    REQUIRE_FALSE(index->Merge(merge_units));
+    vsag::AttributeSet new_attrs;
+    REQUIRE_FALSE(index->UpdateAttribute(0, new_attrs));
+    REQUIRE_FALSE(index->UpdateAttribute(0, new_attrs, new_attrs));
+    REQUIRE_FALSE(index->UpdateId(0, 0));
+    REQUIRE_FALSE(index->UpdateVector(0, nullptr, false));
+}
+
+void
 TestIndex::TestGetDataByIdWithFlag(const IndexPtr& index, const TestDatasetPtr& dataset) {
 }
 

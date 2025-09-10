@@ -295,6 +295,9 @@ public:
     static void
     TestGetDataByIdWithFlag(const IndexPtr& index, const TestDatasetPtr& dataset);
 
+    static void
+    TestIndexStatus(const IndexPtr& index);
+
     constexpr static float RECALL_THRESHOLD = 0.95;
 };
 
