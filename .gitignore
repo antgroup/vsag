@@ -59,7 +59,6 @@ coverage.xml
 .hypothesis/
 .pytest_cache/
 cover/
-lib/
 *.mo
 *.pot
 *.log
@@ -190,3 +189,4 @@ data/
 /coverage/
 *.gcov
 /dist/
+pnmesdk_client_c.*
