@@ -60,6 +60,9 @@ std::tuple<DatasetPtr, float*, int64_t*>
 create_fast_dataset(int64_t dim, Allocator* allocator) {
     auto dataset = Dataset::Make();
     dataset->Dim(static_cast<int64_t>(dim))->NumElements(1)->Owner(true, allocator);
+    if (dim == 0) {
+        return {dataset, nullptr, nullptr};
+    }
     auto* ids = reinterpret_cast<int64_t*>(allocator->Allocate(sizeof(int64_t) * dim));
     dataset->Ids(ids);
     auto* dists = reinterpret_cast<float*>(allocator->Allocate(sizeof(float) * dim));
