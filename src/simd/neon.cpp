@@ -30,7 +30,7 @@ float
 L2Sqr(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
     auto* pVect1 = (float*)pVect1v;
     auto* pVect2 = (float*)pVect2v;
-    auto qty = *((size_t*)qty_ptr);
+    auto qty = *((uint64_t*)qty_ptr);
     return neon::FP32ComputeL2Sqr(pVect1, pVect2, qty);
 }
 
@@ -38,7 +38,7 @@ float
 InnerProduct(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
     auto* pVect1 = (float*)pVect1v;
     auto* pVect2 = (float*)pVect2v;
-    auto qty = *((size_t*)qty_ptr);
+    auto qty = *((uint64_t*)qty_ptr);
     return neon::FP32ComputeIP(pVect1, pVect2, qty);
 }
 
@@ -51,7 +51,7 @@ float
 INT8L2Sqr(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
     auto* pVect1 = (int8_t*)pVect1v;
     auto* pVect2 = (int8_t*)pVect2v;
-    auto qty = *((size_t*)qty_ptr);
+    auto qty = *((uint64_t*)qty_ptr);
 
     return neon::INT8ComputeL2Sqr(pVect1, pVect2, qty);
 }
@@ -113,7 +113,7 @@ PQDistanceFloat256(const void* single_dim_centers, float single_dim_val, void* r
 #if defined(ENABLE_NEON)
     const auto* float_centers = (const float*)single_dim_centers;
     auto* float_result = (float*)result;
-    for (size_t idx = 0; idx < 256; idx += 8) {
+    for (uint64_t idx = 0; idx < 256; idx += 8) {
         float32x4x2_t v_centers_dim = vld1q_f32_x2(float_centers + idx);
         float32x4x2_t v_query_vec = {vdupq_n_f32(single_dim_val), vdupq_n_f32(single_dim_val)};
 
@@ -1577,7 +1577,7 @@ SQ8UniformComputeCodesIP(const uint8_t* codes1, const uint8_t* codes2, uint64_t 
         d -= 4;
     }
     int32_t rem_sum = 0;
-    for (size_t i = 0; i < d; ++i) {
+    for (uint64_t i = 0; i < d; ++i) {
         rem_sum += static_cast<int32_t>(codes1[i]) * static_cast<int32_t>(codes2[i]);
     }
 
@@ -1590,12 +1590,12 @@ SQ8UniformComputeCodesIP(const uint8_t* codes1, const uint8_t* codes2, uint64_t 
 
 #if defined(ENABLE_NEON)
 __inline void __attribute__((__always_inline__)) extract_12_bits_to_mask(const uint8_t* bits,
-                                                                         size_t bit_offset,
+                                                                         uint64_t bit_offset,
                                                                          uint32x4_t& mask0,
                                                                          uint32x4_t& mask1,
                                                                          uint32x4_t& mask2) {
-    size_t byte_idx = bit_offset / 8;
-    size_t bit_start = bit_offset % 8;
+    uint64_t byte_idx = bit_offset / 8;
+    uint64_t bit_start = bit_offset % 8;
 
     uint32_t mask_bits;
     if (bit_start <= 4) {
@@ -1626,11 +1626,11 @@ __inline void __attribute__((__always_inline__)) extract_12_bits_to_mask(const u
 }
 
 __inline void __attribute__((__always_inline__)) extract_8_bits_to_mask(const uint8_t* bits,
-                                                                        size_t bit_offset,
+                                                                        uint64_t bit_offset,
                                                                         uint32x4_t& mask0,
                                                                         uint32x4_t& mask1) {
-    size_t byte_idx = bit_offset / 8;
-    size_t bit_start = bit_offset % 8;
+    uint64_t byte_idx = bit_offset / 8;
+    uint64_t bit_start = bit_offset % 8;
 
     uint16_t mask_bits;
     if (bit_start == 0) {
@@ -1653,9 +1653,9 @@ __inline void __attribute__((__always_inline__)) extract_8_bits_to_mask(const ui
 }
 
 __inline uint32x4_t __attribute__((__always_inline__))
-extract_4_bits_to_mask(const uint8_t* bits, size_t bit_offset) {
-    size_t byte_idx = bit_offset / 8;
-    size_t bit_start = bit_offset % 8;
+extract_4_bits_to_mask(const uint8_t* bits, uint64_t bit_offset) {
+    uint64_t byte_idx = bit_offset / 8;
+    uint64_t bit_start = bit_offset % 8;
 
     uint8_t mask_bits;
     if (bit_start <= 4) {
@@ -1740,8 +1740,8 @@ RaBitQFloatBinaryIP(const float* vector, const uint8_t* bits, uint64_t dim, floa
 
     if (remaining >= 3) {
         res_vec = vld1q_lane_f32(vector + d, res_vec, 2);
-        size_t byte_idx = d / 8;
-        size_t bit_idx = d % 8;
+        uint64_t byte_idx = d / 8;
+        uint64_t bit_idx = d % 8;
         bool bit_set = (bits[byte_idx] & (1 << bit_idx)) != 0;
         res_b = vsetq_lane_f32(bit_set ? inv_sqrt_d : -inv_sqrt_d, res_b, 2);
         d++;
@@ -1750,8 +1750,8 @@ RaBitQFloatBinaryIP(const float* vector, const uint8_t* bits, uint64_t dim, floa
 
     if (remaining >= 2) {
         res_vec = vld1q_lane_f32(vector + d, res_vec, 1);
-        size_t byte_idx = d / 8;
-        size_t bit_idx = d % 8;
+        uint64_t byte_idx = d / 8;
+        uint64_t bit_idx = d % 8;
         bool bit_set = (bits[byte_idx] & (1 << bit_idx)) != 0;
         res_b = vsetq_lane_f32(bit_set ? inv_sqrt_d : -inv_sqrt_d, res_b, 1);
         d++;
@@ -1760,8 +1760,8 @@ RaBitQFloatBinaryIP(const float* vector, const uint8_t* bits, uint64_t dim, floa
 
     if (remaining >= 1) {
         res_vec = vld1q_lane_f32(vector + d, res_vec, 0);
-        size_t byte_idx = d / 8;
-        size_t bit_idx = d % 8;
+        uint64_t byte_idx = d / 8;
+        uint64_t bit_idx = d % 8;
         bool bit_set = (bits[byte_idx] & (1 << bit_idx)) != 0;
         res_b = vsetq_lane_f32(bit_set ? inv_sqrt_d : -inv_sqrt_d, res_b, 0);
     }
@@ -1828,13 +1828,13 @@ PQFastScanLookUp32(const uint8_t* RESTRICT lookup_table,
                    int32_t* RESTRICT result) {
 #if defined(ENABLE_NEON)
     uint32x4_t sum[4];
-    for (size_t i = 0; i < 4; ++i) {
+    for (uint64_t i = 0; i < 4; ++i) {
         sum[i] = vdupq_n_u32(0);
     }
     const auto sign4 = vdupq_n_u8(0x0F);
     const auto sign8 = vdupq_n_u16(0xFF);
 
-    for (size_t i = 0; i < pq_dim; ++i) {
+    for (uint64_t i = 0; i < pq_dim; ++i) {
         auto dict = vld1q_u8(lookup_table);
         auto code = vld1q_u8(codes);
         lookup_table += 16;
@@ -1967,7 +1967,7 @@ RaBitQSQ4UBinaryIP(const uint8_t* codes, const uint8_t* bits, uint64_t dim) {
 }
 
 void
-KacsWalk(float* data, size_t len) {
+KacsWalk(float* data, uint64_t len) {
 #if defined(ENABLE_NEON)
     // TODO: NEON implementation here
     generic::KacsWalk(data, len);
@@ -1977,7 +1977,7 @@ KacsWalk(float* data, size_t len) {
 }
 
 void
-FlipSign(const uint8_t* flip, float* data, size_t dim) {
+FlipSign(const uint8_t* flip, float* data, uint64_t dim) {
 #if defined(ENABLE_NEON)
     // TODO: NEON implementation here
     generic::FlipSign(flip, data, dim);
@@ -1987,7 +1987,7 @@ FlipSign(const uint8_t* flip, float* data, size_t dim) {
 }
 
 void
-VecRescale(float* data, size_t dim, float val) {
+VecRescale(float* data, uint64_t dim, float val) {
 #if defined(ENABLE_NEON)
     // TODO: NEON implementation here
     generic::VecRescale(data, dim, val);
@@ -2007,7 +2007,7 @@ RotateOp(float* data, int idx, int dim_, int step) {
 }
 
 void
-FHTRotate(float* data, size_t dim_) {
+FHTRotate(float* data, uint64_t dim_) {
 #if defined(ENABLE_NEON)
     // TODO: NEON implementation here
     generic::FHTRotate(data, dim_);

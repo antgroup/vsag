@@ -14,6 +14,8 @@
 
 #include "rabitq_simd.h"
 
+#include "simd_status.h"
+
 namespace vsag {
 
 static RaBitQFloatBinaryType

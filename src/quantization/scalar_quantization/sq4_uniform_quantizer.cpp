@@ -17,9 +17,11 @@
 
 #include <cstddef>
 
+#include "index/index_common_param.h"
 #include "scalar_quantization_trainer.h"
 #include "simd/normalize.h"
 #include "simd/sq4_uniform_simd.h"
+#include "sq4_uniform_quantizer_parameter.h"
 #include "typing.h"
 #include "utils/util_functions.h"
 

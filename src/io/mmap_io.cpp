@@ -15,6 +15,13 @@
 
 #include "mmap_io.h"
 
+#include <sys/mman.h>
+
+#include <filesystem>
+#include <utility>
+
+#include "index/index_common_param.h"
+
 namespace vsag {
 
 MMapIO::MMapIO(std::string filename, Allocator* allocator)

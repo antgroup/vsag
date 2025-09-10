@@ -14,14 +14,14 @@
 // limitations under the License.
 
 #pragma once
+
 #include <shared_mutex>
 #include <vector>
 
 #include "data_cell/extra_info_interface.h"
+#include "data_type.h"
 #include "dataset_impl.h"
-#include "index/index_common_param.h"
-#include "index_feature_list.h"
-#include "label_table.h"
+#include "metric_type.h"
 #include "parameter.h"
 #include "pointer_define.h"
 #include "storage/stream_reader.h"
@@ -33,6 +33,10 @@
 namespace vsag {
 
 DEFINE_POINTER2(InnerIndex, InnerIndexInterface);
+DEFINE_POINTER(LabelTable);
+DEFINE_POINTER(IndexFeatureList);
+
+class IndexCommonParam;
 
 class InnerIndexInterface {
 public:
@@ -76,14 +80,10 @@ public:
     CalSerializeSize() const;
 
     [[nodiscard]] virtual bool
-    CheckFeature(IndexFeature feature) const {
-        return this->index_feature_list_->CheckFeature(feature);
-    }
+    CheckFeature(IndexFeature feature) const;
 
     [[nodiscard]] virtual bool
-    CheckIdExist(int64_t id) const {
-        return this->label_table_->CheckLabel(id);
-    }
+    CheckIdExist(int64_t id) const;
 
     virtual InnerIndexPtr
     Clone(const IndexCommonParam& param);

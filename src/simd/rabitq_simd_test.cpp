@@ -20,6 +20,7 @@
 
 #include "fixtures.h"
 #include "fp32_simd.h"
+#include "simd_status.h"
 
 using namespace vsag;
 
@@ -363,13 +364,13 @@ TEST_CASE("SIMD test for rotate", "[ut][simd]") {
         const float delta = 1e-5;
         for (int i = 0; i < count; i++) {
             auto* gt_data = gt.data() + i * dim;
-            size_t tmp_dim = dim;
-            size_t ret = 0;
+            uint64_t tmp_dim = dim;
+            uint64_t ret = 0;
             while (tmp_dim > 1) {
                 ret++;
                 tmp_dim >>= 1;
             }
-            size_t trunc_dim = 1 << ret;
+            uint64_t trunc_dim = 1 << ret;
             int start = dim - trunc_dim;
             generic::FHTRotate(gt_data, trunc_dim);
             generic::FHTRotate(gt_data + start, trunc_dim);

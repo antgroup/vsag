@@ -20,7 +20,6 @@
 
 #include "pointer_define.h"
 #include "typing.h"
-#include "vsag/allocator.h"
 
 namespace vsag {
 

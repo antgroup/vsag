@@ -15,12 +15,16 @@
 
 #pragma once
 
-#include "index/index_common_param.h"
 #include "inner_string_params.h"
+#include "metric_type.h"
+#include "pointer_define.h"
 #include "quantization/quantizer.h"
-#include "sq4_uniform_quantizer_parameter.h"
 
 namespace vsag {
+
+DEFINE_POINTER2(SQ4UniformQuantizerParam, SQ4UniformQuantizerParameter);
+DEFINE_POINTER2(QuantizerParam, QuantizerParameter);
+class IndexCommonParam;
 
 using sum_type = float;
 
