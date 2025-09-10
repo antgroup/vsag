@@ -266,6 +266,7 @@ HGraphTestIndex::TestGeneral(const TestIndex::IndexPtr& index,
     TestUpdateVector(index, dataset, search_param, false);
     TestUpdateId(index, dataset, search_param, true);
     TestMemoryUsageDetail(index);
+    TestIndexStatus(index);
 }
 
 void
