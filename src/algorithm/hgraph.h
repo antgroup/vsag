@@ -30,6 +30,7 @@
 #include "impl/basic_optimizer.h"
 #include "impl/basic_searcher.h"
 #include "impl/heap/distance_heap.h"
+#include "impl/parallel_searcher.h"
 #include "index/index_common_param.h"
 #include "index/iterator_filter.h"
 #include "index_feature_list.h"
@@ -327,6 +328,7 @@ private:
     bool use_attribute_filter_{false};
 
     BasicSearcherPtr searcher_;
+    ParallelSearcherPtr parallel_searcher_;
 
     std::default_random_engine level_generator_{2021};
     double mult_{1.0};
