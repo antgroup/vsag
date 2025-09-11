@@ -135,9 +135,7 @@ PARAM1 := "-DNUM_BUILDING_JOBS=${COMPILE_JOBS} -DENABLE_PYBINDS=1 -S. -B${RELEAS
 PARAM2 := "--build ${RELEASE_BUILD_DIR} --parallel ${COMPILE_JOBS}"
 PARAM3 := "${RELEASE_BUILD_DIR}"
 
-.PHONY: pyvsag
-pyvsag:                  ## Build pyvsag wheel.
-	bash ./scripts/build_pyvsag_multiple_version.sh $(PARAM1) $(PARAM2) $(PARAM3)
+
 
 .PHONY: clean-release
 clean-release:           ## Clear build-release/ directory.
