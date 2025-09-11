@@ -173,8 +173,7 @@ public:
 
     [[nodiscard]] virtual int64_t
     GetMemoryUsage() const {
-        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
-                            "Index doesn't support GetMemoryUsage");
+        return this->CalSerializeSize();
     }
 
     [[nodiscard]] virtual std::string

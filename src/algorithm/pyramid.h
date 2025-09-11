@@ -116,9 +116,6 @@ public:
         return IndexType::PYRAMID;
     }
 
-    int64_t
-    GetMemoryUsage() const override;
-
     std::string
     GetName() const override {
         return INDEX_PYRAMID;

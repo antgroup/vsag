@@ -91,11 +91,6 @@ public:
     void
     GetExtraInfoByIds(const int64_t* ids, int64_t count, char* extra_infos) const override;
 
-    int64_t
-    GetMemoryUsage() const override {
-        return static_cast<int64_t>(this->CalSerializeSize());
-    }
-
     std::string
     GetMemoryUsageDetail() const override;
 
