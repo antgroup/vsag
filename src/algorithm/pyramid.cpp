@@ -300,11 +300,6 @@ Pyramid::GetNumElements() const {
     return flatten_interface_ptr_->TotalCount();
 }
 
-int64_t
-Pyramid::GetMemoryUsage() const {
-    return 0;
-}
-
 void
 Pyramid::Serialize(StreamWriter& writer) const {
     // FIXME(wxyu): only for testing, remove before merge into the main branch
