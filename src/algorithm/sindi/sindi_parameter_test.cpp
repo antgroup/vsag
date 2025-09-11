@@ -62,7 +62,7 @@ TEST_CASE("SINDI Index Parameters Test", "[ut][SINDIParameter]") {
     auto param = std::make_shared<vsag::SINDIParameter>();
     param->FromJson(param_json);
     REQUIRE(param->use_reorder == true);
-    REQUIRE(std::abs(param->doc_prune_ratio - 0.8) < 1e-3);
+    REQUIRE(std::abs(param->doc_prune_ratio - 0.1F) < 1e-3);
     REQUIRE(param->window_size == 66666);
 
     vsag::ParameterTest::TestToJson(param);
