@@ -139,9 +139,6 @@ public:
     int64_t
     GetNumElements() const override;
 
-    int64_t
-    GetMemoryUsage() const override;
-
     void
     InitFeatures() override;
 

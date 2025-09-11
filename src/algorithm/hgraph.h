@@ -138,11 +138,6 @@ public:
     uint64_t
     EstimateMemory(uint64_t num_elements) const override;
 
-    int64_t
-    GetMemoryUsage() const override {
-        return static_cast<int64_t>(this->CalSerializeSize());
-    }
-
     std::string
     GetMemoryUsageDetail() const override;
 

@@ -1425,6 +1425,19 @@ TestIndex::TestEstimateMemory(const std::string& index_name,
 
             REQUIRE(estimate_memory >= static_cast<uint64_t>(real_memory * 0.2));
             REQUIRE(estimate_memory <= static_cast<uint64_t>(real_memory * 3.2));
+
+            auto get_memory = index1->GetMemoryUsage();
+            if (get_memory <= static_cast<uint64_t>(real_memory * 0.8) or
+                get_memory >= static_cast<uint64_t>(real_memory * 1.2)) {
+                WARN(fmt::format("get_memory({}) is not in range [{}, {}]",
+                                 get_memory,
+                                 static_cast<uint64_t>(real_memory * 0.8),
+                                 static_cast<uint64_t>(real_memory * 1.2)));
+            }
+
+            REQUIRE(get_memory >= static_cast<uint64_t>(real_memory * 0.2));
+            REQUIRE(get_memory <= static_cast<uint64_t>(real_memory * 3.2));
+
             inf.close();
         }
     }
