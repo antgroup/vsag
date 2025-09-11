@@ -68,7 +68,8 @@ SINDI::Add(const DatasetPtr& base) {
         const auto& sparse_vector = sparse_vectors[i];
         if (sparse_vectors->len_ <= 0) {
             failed_ids.push_back(ids[i]);
-            logger::warn("query.len_ ({}) is invalid for id ({})", sparse_vectors->len_, ids[i]);
+            logger::warn(
+                "sparse_vectors.len_ ({}) is invalid for id ({})", sparse_vectors->len_, ids[i]);
             continue;
         }
 
@@ -105,7 +106,7 @@ SINDI::KnnSearch(const DatasetPtr& query,
     CHECK_ARGUMENT(query->GetNumElements() == 1, "num of query should be 1");
     auto sparse_query = sparse_vectors[0];
     CHECK_ARGUMENT(sparse_vectors->len_ > 0,
-                   fmt::format("query.len_ ({}) is invalid", sparse_vectors->len_));
+                   fmt::format("sparse_vectors.len_ ({}) is invalid", sparse_vectors->len_));
 
     // search parameter
     SINDISearchParameter search_param;
