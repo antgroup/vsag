@@ -82,7 +82,7 @@ INT8Quantizer<metric>::EncodeBatchImpl(const DataType* data, uint8_t* codes, uin
         EncodeOneImpl(reinterpret_cast<const float*>(dataPtr + i * this->dim_),
                       codes + i * this->code_size_);
     }
-    return false;
+    return true;
 }
 
 template <MetricType metric>
@@ -99,7 +99,7 @@ INT8Quantizer<metric>::DecodeBatchImpl(const uint8_t* codes, DataType* data, uin
     for (uint64_t i{0}; i < count; ++i) {
         memcpy(dataPtr + i * this->dim_, codes + i * this->code_size_, this->dim_);
     }
-    return false;
+    return true;
 }
 
 template <MetricType metric>
