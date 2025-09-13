@@ -287,8 +287,7 @@ TEST_CASE("INT8 Serialize and Deserialize", "[ut][INT8Quantizer]") {
     for (auto dim : dims) {
         for (auto count : counts) {
             TestSerializeAndDeserializeMetricINT8<metrics[0]>(dim, count, error);
-            // TODO: impl cosine
-            // TestSerializeAndDeserializeMetricINT8<metrics[1]>(dim, count, error);
+            TestSerializeAndDeserializeMetricINT8<metrics[1]>(dim, count, error);
             TestSerializeAndDeserializeMetricINT8<metrics[2]>(dim, count, error);
         }
     }
