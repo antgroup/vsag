@@ -30,6 +30,8 @@ class IndexFeatureList {
 public:
     explicit IndexFeatureList();
 
+    ~IndexFeatureList() = default;
+
     [[nodiscard]] bool
     CheckFeature(IndexFeature feature) const;
 
