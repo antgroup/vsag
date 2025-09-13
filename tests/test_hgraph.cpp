@@ -611,6 +611,12 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HGraphTestIndex,
         dim, base_count, metric_type, false, 0.8, build_param.extra_info_size);
     TestKnnSearchExFilter(ex_index, ex_dataset, ex_search_param, recall, false);
     TestKnnSearchIter(ex_index, ex_dataset, ex_search_param, recall, false, true);
+    auto index2 = TestIndex::TestFactory(name, param, true);
+    TestIndex::TestSerializeFile(index, index2, dataset, search_param, true);
+    index2 = TestIndex::TestFactory(name, param, true);
+    TestIndex::TestSerializeBinarySet(index, index2, dataset, search_param, true);
+    index2 = TestIndex::TestFactory(name, param, true);
+    TestIndex::TestSerializeReaderSet(index, index2, dataset, search_param, name, true);
     vsag::Options::Instance().set_block_size_limit(origin_size);
 }
 static void
