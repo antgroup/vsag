@@ -1365,6 +1365,22 @@ HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
                                                 },
                                             },
                                             {
+                                                HGRAPH_GRAPH_IO_TYPE,
+                                                {
+                                                    HGRAPH_GRAPH_KEY,
+                                                    IO_PARAMS_KEY,
+                                                    IO_TYPE_KEY,
+                                                },
+                                            },
+                                            {
+                                                HGRAPH_GRAPH_FILE_PATH,
+                                                {
+                                                    HGRAPH_GRAPH_KEY,
+                                                    IO_PARAMS_KEY,
+                                                    IO_FILE_PATH,
+                                                },
+                                            },
+                                            {
                                                 STORE_RAW_VECTOR,
                                                 {
                                                     HGRAPH_PRECISE_CODES_KEY,
