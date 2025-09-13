@@ -920,6 +920,9 @@ TestIndex::TestSerializeFile(const IndexPtr& index_from,
     auto deserialize_index = index_to->Deserialize(infile);
     REQUIRE(deserialize_index.has_value() == expected_success);
     infile.close();
+    if (index_to->GetNumElements() == 0) {
+        return;
+    }
 
     const auto& queries = dataset->query_;
     auto query_count = queries->GetNumElements();
@@ -1009,6 +1012,9 @@ TestIndex::TestSerializeBinarySet(const IndexPtr& index_from,
 
     auto deserialize_index = index_to->Deserialize(serialize_binary.value());
     REQUIRE(deserialize_index.has_value() == expected_success);
+    if (index_to->GetNumElements() == 0) {
+        return;
+    }
 
     const auto& queries = dataset->query_;
     auto query_count = queries->GetNumElements();
@@ -1053,6 +1059,9 @@ TestIndex::TestSerializeReaderSet(const IndexPtr& index_from,
     }
     auto deserialize_index = index_to->Deserialize(rs);
     REQUIRE(deserialize_index.has_value() == expected_success);
+    if (index_to->GetNumElements() == 0) {
+        return;
+    }
 
     const auto& queries = dataset->query_;
     auto query_count = queries->GetNumElements();

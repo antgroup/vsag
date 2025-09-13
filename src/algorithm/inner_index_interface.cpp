@@ -182,9 +182,25 @@ InnerIndexInterface::Deserialize(const BinarySet& binary_set) {
 void
 InnerIndexInterface::Deserialize(const ReaderSet& reader_set) {
     CHECK_SELF_EMPTY;
-
     std::string time_record_name = this->GetName() + " Deserialize";
     SlowTaskTimer t(time_record_name);
+    if (reader_set.Contains(SERIAL_META_KEY)) {
+        logger::debug("parse with new version format");
+        const auto& meta_reader = reader_set.Get(SERIAL_META_KEY);
+        uint64_t size = meta_reader->Size();
+        Binary binary{.data = std::shared_ptr<int8_t[]>(new int8_t[size]), .size = size};
+        meta_reader->Read(0, size, binary.data.get());
+        auto metadata = std::make_shared<Metadata>(binary);
+        if (metadata->EmptyIndex()) {
+            return;
+        }
+    } else {
+        logger::debug("parse with v0.14 version format");
+        // check if binary set is an empty index
+        if (reader_set.Contains(BLANK_INDEX)) {
+            return;
+        }
+    }
 
     try {
         auto index_reader = reader_set.Get(this->GetName());
@@ -242,6 +258,14 @@ InnerIndexInterface::Deserialize(std::istream& in_stream) {
     SlowTaskTimer t(time_record_name);
     try {
         IOStreamReader reader(in_stream);
+
+        auto footer = Footer::Parse(reader);
+        if (footer != nullptr) {
+            auto metadata = footer->GetMetadata();
+            if (metadata->EmptyIndex()) {
+                return;
+            }
+        }
         this->Deserialize(reader);
         return;
     } catch (const std::bad_alloc& e) {
