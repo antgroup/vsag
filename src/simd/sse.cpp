@@ -14,6 +14,7 @@
 // limitations under the License.
 
 #include <cstdint>
+
 #include "simd/int8_simd.h"
 #if defined(ENABLE_SSE)
 #include <x86intrin.h>
