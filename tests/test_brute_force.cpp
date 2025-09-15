@@ -25,6 +25,17 @@
 #include "vsag/options.h"
 
 namespace fixtures {
+
+class BruteForceTestResource {
+public:
+    std::vector<int> dims;
+    std::vector<std::pair<std::string, float>> test_cases;
+    std::vector<std::string> metric_types;
+    std::vector<std::string> train_types;
+    uint64_t base_count;
+};
+using BruteForceResourcePtr = std::shared_ptr<BruteForceTestResource>;
+
 class BruteForceTestIndex : public fixtures::TestIndex {
 public:
     static std::string
@@ -32,6 +43,9 @@ public:
                                             int64_t dim,
                                             const std::string& quantization_str = "sq8",
                                             bool use_attr_filter = false);
+
+    static BruteForceResourcePtr
+    GetResource(bool sample = true);
 
     static void
     TestGeneral(const IndexPtr& index,
@@ -41,21 +55,46 @@ public:
 
     static TestDatasetPool pool;
 
-    static std::vector<int> dims;
+    static fixtures::TempDir dir;
 
-    constexpr static uint64_t base_count = 3000;
+    static const std::string name;
 
-    const std::vector<std::pair<std::string, float>> test_cases = {
-        {"sq8", 0.90},
-        {"fp32", 0.99},
-        {"sq8_uniform", 0.90},
-        {"bf16", 0.92},
-        {"fp16", 0.92},
-    };
+    constexpr static uint64_t base_count = 1000;
+
+    static const std::vector<std::pair<std::string, float>> all_test_cases;
 };
 
 TestDatasetPool BruteForceTestIndex::pool{};
-std::vector<int> BruteForceTestIndex::dims = fixtures::get_common_used_dims(2, RandomValue(0, 999));
+fixtures::TempDir BruteForceTestIndex::dir{"BruteForce_test"};
+const std::string BruteForceTestIndex::name = "brute_force";
+const std::vector<std::pair<std::string, float>> BruteForceTestIndex::all_test_cases = {
+    {"sq8", 0.90},
+    {"fp32", 0.99},
+    {"sq8_uniform", 0.90},
+    {"bf16", 0.92},
+    {"fp16", 0.92},
+};
+
+constexpr static const char* search_param_tmp = "";
+
+BruteForceResourcePtr
+BruteForceTestIndex::GetResource(bool sample) {
+    auto resource = std::make_shared<BruteForceTestResource>();
+    if (sample) {
+        resource->dims = fixtures::get_common_used_dims(1, RandomValue(0, 999));
+        resource->test_cases = fixtures::RandomSelect(BruteForceTestIndex::all_test_cases, 3);
+        resource->metric_types = fixtures::RandomSelect<std::string>({"ip", "l2", "cosine"}, 1);
+        resource->train_types = fixtures::RandomSelect<std::string>({"kmeans", "random"}, 1);
+        resource->base_count = BruteForceTestIndex::base_count;
+    } else {
+        resource->dims = fixtures::get_common_used_dims();
+        resource->test_cases = BruteForceTestIndex::all_test_cases;
+        resource->metric_types = {"ip", "l2", "cosine"};
+        resource->train_types = {"kmeans", "random"};
+        resource->base_count = BruteForceTestIndex::base_count * 3;
+    }
+    return resource;
+}
 
 std::string
 BruteForceTestIndex::GenerateBruteForceBuildParametersString(const std::string& metric_type,
@@ -82,6 +121,7 @@ BruteForceTestIndex::GenerateBruteForceBuildParametersString(const std::string& 
 
     return build_parameters_str;
 }
+
 void
 BruteForceTestIndex::TestGeneral(const IndexPtr& index,
                                  const TestDatasetPtr& dataset,
@@ -175,278 +215,389 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::BruteForceTestIndex,
     }
 }
 
-TEST_CASE_PERSISTENT_FIXTURE(fixtures::BruteForceTestIndex,
-                             "BruteForce Build & ContinueAdd Test",
-                             "[ft][bruteforce]") {
+static void
+TestBruteForceBuildAndContinueAdd(const fixtures::BruteForceResourcePtr& resource) {
+    using namespace fixtures;
     auto origin_size = vsag::Options::Instance().block_size_limit();
-    auto size = GENERATE(1024 * 1024 * 2);
-    auto metric_type = GENERATE("l2", "ip", "cosine");
+    auto size = 1024 * 1024 * 2;
 
-    const std::string name = "brute_force";
-    auto search_param = "";
-    for (auto& dim : dims) {
-        for (auto& [base_quantization_str, recall] : test_cases) {
-            vsag::Options::Instance().set_block_size_limit(size);
-            auto param =
-                GenerateBruteForceBuildParametersString(metric_type, dim, base_quantization_str);
-            auto index = TestFactory(name, param, true);
-            auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
-            TestContinueAdd(index, dataset, true);
-            TestGeneral(index, dataset, search_param, recall);
-        }
-        vsag::Options::Instance().set_block_size_limit(origin_size);
-    }
-}
-
-TEST_CASE_PERSISTENT_FIXTURE(fixtures::BruteForceTestIndex,
-                             "BruteForce Build",
-                             "[ft][bruteforce]") {
-    auto origin_size = vsag::Options::Instance().block_size_limit();
-    auto size = GENERATE(1024 * 1024 * 2);
-    auto metric_type = GENERATE("ip");
-
-    const std::string name = "brute_force";
-    auto search_param = "";
-    for (auto& dim : dims) {
-        for (auto& [base_quantization_str, recall] : test_cases) {
-            vsag::Options::Instance().set_block_size_limit(size);
-            auto param =
-                GenerateBruteForceBuildParametersString(metric_type, dim, base_quantization_str);
-            auto index = TestFactory(name, param, true);
-            auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
-            TestBuildIndex(index, dataset, true);
-            TestGeneral(index, dataset, search_param, recall);
-            vsag::Options::Instance().set_block_size_limit(origin_size);
-        }
-    }
-}
-
-TEST_CASE_PERSISTENT_FIXTURE(fixtures::BruteForceTestIndex, "BruteForce Add", "[ft][bruteforce]") {
-    auto origin_size = vsag::Options::Instance().block_size_limit();
-    auto size = GENERATE(1024 * 1024 * 2);
-    auto metric_type = GENERATE("l2", "ip", "cosine");
-
-    const std::string name = "brute_force";
-    auto search_param = "";
-    for (auto& dim : dims) {
-        for (auto& [base_quantization_str, recall] : test_cases) {
-            vsag::Options::Instance().set_block_size_limit(size);
-            auto param =
-                GenerateBruteForceBuildParametersString(metric_type, dim, base_quantization_str);
-            auto index = TestFactory(name, param, true);
-            auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
-            TestAddIndex(index, dataset, true);
-            if (index->CheckFeature(vsag::SUPPORT_ADD_FROM_EMPTY)) {
-                TestGeneral(index, dataset, search_param, recall);
+    vsag::Options::Instance().set_block_size_limit(size);
+    for (const auto& metric_type : resource->metric_types) {
+        for (auto dim : resource->dims) {
+            for (const auto& [base_quantization_str, recall] : resource->test_cases) {
+                auto param = BruteForceTestIndex::GenerateBruteForceBuildParametersString(
+                    metric_type, dim, base_quantization_str);
+                auto index = TestIndex::TestFactory(BruteForceTestIndex::name, param, true);
+                auto dataset = BruteForceTestIndex::pool.GetDatasetAndCreate(
+                    dim, BruteForceTestIndex::base_count, metric_type);
+                TestIndex::TestContinueAdd(index, dataset, true);
+                BruteForceTestIndex::TestGeneral(index, dataset, search_param_tmp, recall);
             }
-
-            vsag::Options::Instance().set_block_size_limit(origin_size);
         }
     }
+    vsag::Options::Instance().set_block_size_limit(origin_size);
 }
 
-TEST_CASE_PERSISTENT_FIXTURE(fixtures::BruteForceTestIndex,
-                             "BruteForce Concurrent Add",
-                             "[ft][bruteforce][concurrent]") {
-    auto origin_size = vsag::Options::Instance().block_size_limit();
-    auto size = GENERATE(1024 * 1024 * 2);
-    auto metric_type = GENERATE("l2", "ip", "cosine");
-
-    const std::string name = "brute_force";
-    auto search_param = "";
-    for (auto& dim : dims) {
-        for (auto& [base_quantization_str, recall] : test_cases) {
-            vsag::Options::Instance().set_block_size_limit(size);
-            auto param =
-                GenerateBruteForceBuildParametersString(metric_type, dim, base_quantization_str);
-            auto index = TestFactory(name, param, true);
-            auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
-            TestConcurrentAdd(index, dataset, true);
-            if (index->CheckFeature(vsag::SUPPORT_ADD_CONCURRENT)) {
-                TestGeneral(index, dataset, search_param, recall);
-            }
-            vsag::Options::Instance().set_block_size_limit(origin_size);
-        }
-    }
+TEST_CASE("(PR) BruteForce Build & ContinueAdd Test", "[ft][BruteForce][pr]") {
+    auto resource = fixtures::BruteForceTestIndex::GetResource(true);
+    TestBruteForceBuildAndContinueAdd(resource);
 }
 
-TEST_CASE_PERSISTENT_FIXTURE(fixtures::BruteForceTestIndex,
-                             "BruteForce Serialize File",
-                             "[ft][bruteforce][serialization]") {
-    auto origin_size = vsag::Options::Instance().block_size_limit();
-    auto size = GENERATE(1024 * 1024 * 2);
-    auto metric_type = GENERATE("l2", "ip", "cosine");
-    const std::string name = "brute_force";
-    auto search_param = "";
-
-    for (auto& dim : dims) {
-        for (auto& [base_quantization_str, recall] : test_cases) {
-            vsag::Options::Instance().set_block_size_limit(size);
-            auto param =
-                GenerateBruteForceBuildParametersString(metric_type, dim, base_quantization_str);
-            auto index = TestFactory(name, param, true);
-
-            auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
-            TestBuildIndex(index, dataset, true);
-            auto index2 = TestFactory(name, param, true);
-            TestSerializeFile(index, index2, dataset, search_param, true);
-            index2 = TestFactory(name, param, true);
-            TestSerializeBinarySet(index, index2, dataset, search_param, true);
-            index2 = TestFactory(name, param, true);
-            TestSerializeReaderSet(index, index2, dataset, search_param, name, true);
-            vsag::Options::Instance().set_block_size_limit(origin_size);
-        }
-    }
+TEST_CASE("(Daily) BruteForce Build & ContinueAdd Test", "[ft][BruteForce][daily]") {
+    auto resource = fixtures::BruteForceTestIndex::GetResource(false);
+    TestBruteForceBuildAndContinueAdd(resource);
 }
 
-TEST_CASE_PERSISTENT_FIXTURE(fixtures::BruteForceTestIndex,
-                             "BruteForce Clone",
-                             "[ft][bruteforce]") {
-    auto origin_size = vsag::Options::Instance().block_size_limit();
-    auto size = GENERATE(1024 * 1024 * 2);
-    auto metric_type = GENERATE("l2", "ip", "cosine");
-    const std::string name = "brute_force";
-    auto search_param = "";
-
-    for (auto& dim : dims) {
-        for (auto& [base_quantization_str, recall] : test_cases) {
-            vsag::Options::Instance().set_block_size_limit(size);
-            auto param =
-                GenerateBruteForceBuildParametersString(metric_type, dim, base_quantization_str);
-            auto index = TestFactory(name, param, true);
-
-            auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
-            TestBuildIndex(index, dataset, true);
-            TestClone(index, dataset, search_param);
-            vsag::Options::Instance().set_block_size_limit(origin_size);
-        }
-    }
-}
-
-TEST_CASE_PERSISTENT_FIXTURE(fixtures::BruteForceTestIndex,
-                             "BruteForce Build & ContinueAdd Test With Random Allocator",
-                             "[ft][bruteforce]") {
-    auto allocator = std::make_shared<fixtures::RandomAllocator>();
-    auto origin_size = vsag::Options::Instance().block_size_limit();
-    auto size = GENERATE(1024 * 1024 * 2);
-    auto metric_type = GENERATE("l2", "ip", "cosine");
-    const std::string name = "brute_force";
-    for (auto& dim : dims) {
-        for (auto& [base_quantization_str, recall] : test_cases) {
-            vsag::Options::Instance().set_block_size_limit(size);
-            auto param =
-                GenerateBruteForceBuildParametersString(metric_type, dim, base_quantization_str);
-            auto index = vsag::Factory::CreateIndex(name, param, allocator.get());
-            if (not index.has_value()) {
-                continue;
-            }
-            auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
-            TestContinueAddIgnoreRequire(index.value(), dataset);
-            vsag::Options::Instance().set_block_size_limit(origin_size);
-        }
-    }
-}
-
-TEST_CASE_PERSISTENT_FIXTURE(fixtures::BruteForceTestIndex,
-                             "BruteForce GetDistance By ID",
-                             "[ft][bruteforce]") {
-    auto origin_size = vsag::Options::Instance().block_size_limit();
-    auto size = GENERATE(1024 * 1024 * 2);
-    auto metric_type = GENERATE("l2", "ip", "cosine");
-    const std::string name = "brute_force";
-    for (auto& dim : dims) {
-        auto base_quantization_str = "fp32";
-        vsag::Options::Instance().set_block_size_limit(size);
-        auto param =
-            GenerateBruteForceBuildParametersString(metric_type, dim, base_quantization_str);
-        auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
-        auto index = TestFactory(name, param, true);
-        TestBuildIndex(index, dataset, true);
-        TestCalcDistanceById(index, dataset);
-        vsag::Options::Instance().set_block_size_limit(origin_size);
-    }
-}
-
-TEST_CASE_PERSISTENT_FIXTURE(fixtures::BruteForceTestIndex,
-                             "BruteForce Duplicate Build",
-                             "[ft][bruteforce]") {
-    auto origin_size = vsag::Options::Instance().block_size_limit();
-    auto size = GENERATE(1024 * 1024 * 2);
-    auto metric_type = GENERATE("l2", "ip", "cosine");
-
-    const std::string name = "brute_force";
-    auto search_param = "";
-    for (auto& dim : dims) {
-        for (auto& [base_quantization_str, recall] : test_cases) {
-            vsag::Options::Instance().set_block_size_limit(size);
-            auto param =
-                GenerateBruteForceBuildParametersString(metric_type, dim, base_quantization_str);
-            auto index = TestFactory(name, param, true);
-            auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
-            TestDuplicateAdd(index, dataset);
-            TestGeneral(index, dataset, search_param, recall);
-            vsag::Options::Instance().set_block_size_limit(origin_size);
-        }
-    }
-}
-
-TEST_CASE_PERSISTENT_FIXTURE(fixtures::BruteForceTestIndex,
-                             "BruteForce With Attribute Filter",
-                             "[ft][bruteforce]") {
+static void
+TestBruteForceBuild(const fixtures::BruteForceResourcePtr& resource) {
     using namespace fixtures;
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
-    auto metric_type = GENERATE("l2", "ip", "cosine");
 
-    const std::string name = "brute_force";
-    auto search_param = "";
-    for (auto& dim : dims) {
-        for (auto& [base_quantization_str, recall] : test_cases) {
+    for (const auto& metric_type : resource->metric_types) {
+        for (auto dim : resource->dims) {
+            for (const auto& [base_quantization_str, recall] : resource->test_cases) {
+                vsag::Options::Instance().set_block_size_limit(size);
+                auto param = BruteForceTestIndex::GenerateBruteForceBuildParametersString(
+                    metric_type, dim, base_quantization_str);
+                auto index = TestIndex::TestFactory(BruteForceTestIndex::name, param, true);
+                auto dataset = BruteForceTestIndex::pool.GetDatasetAndCreate(
+                    dim, BruteForceTestIndex::base_count, metric_type);
+                TestIndex::TestBuildIndex(index, dataset, true);
+                BruteForceTestIndex::TestGeneral(index, dataset, search_param_tmp, recall);
+                vsag::Options::Instance().set_block_size_limit(origin_size);
+            }
+        }
+    }
+}
+
+TEST_CASE("(PR) BruteForce Build Test", "[ft][BruteForce][pr]") {
+    auto resource = fixtures::BruteForceTestIndex::GetResource(true);
+    TestBruteForceBuild(resource);
+}
+
+TEST_CASE("(Daily) BruteForce Build Test", "[ft][BruteForce][daily]") {
+    auto resource = fixtures::BruteForceTestIndex::GetResource(false);
+    TestBruteForceBuild(resource);
+}
+
+static void
+TestBruteForceAdd(const fixtures::BruteForceResourcePtr& resource) {
+    using namespace fixtures;
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    auto size = 1024 * 1024 * 2;
+    for (const auto& metric_type : resource->metric_types) {
+        for (auto dim : resource->dims) {
+            for (const auto& [base_quantization_str, recall] : resource->test_cases) {
+                vsag::Options::Instance().set_block_size_limit(size);
+                auto param = BruteForceTestIndex::GenerateBruteForceBuildParametersString(
+                    metric_type, dim, base_quantization_str);
+                auto index = TestIndex::TestFactory(BruteForceTestIndex::name, param, true);
+                auto dataset = BruteForceTestIndex::pool.GetDatasetAndCreate(
+                    dim, BruteForceTestIndex::base_count, metric_type);
+                TestIndex::TestAddIndex(index, dataset, true);
+                if (index->CheckFeature(vsag::SUPPORT_ADD_FROM_EMPTY)) {
+                    BruteForceTestIndex::TestGeneral(index, dataset, search_param_tmp, recall);
+                }
+                vsag::Options::Instance().set_block_size_limit(origin_size);
+            }
+        }
+    }
+}
+
+TEST_CASE("(PR) BruteForce Add Test", "[ft][BruteForce][pr]") {
+    auto resource = fixtures::BruteForceTestIndex::GetResource(true);
+    TestBruteForceAdd(resource);
+}
+
+TEST_CASE("(Daily) BruteForce Add Test", "[ft][BruteForce][daily]") {
+    auto resource = fixtures::BruteForceTestIndex::GetResource(false);
+    TestBruteForceAdd(resource);
+}
+
+static void
+TestBruteForceConcurrentAdd(const fixtures::BruteForceResourcePtr& resource) {
+    using namespace fixtures;
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    auto size = 1024 * 1024 * 2;
+    for (const auto& metric_type : resource->metric_types) {
+        for (auto dim : resource->dims) {
+            for (const auto& [base_quantization_str, recall] : resource->test_cases) {
+                vsag::Options::Instance().set_block_size_limit(size);
+                auto param = BruteForceTestIndex::GenerateBruteForceBuildParametersString(
+                    metric_type, dim, base_quantization_str);
+                auto index = TestIndex::TestFactory(BruteForceTestIndex::name, param, true);
+                auto dataset = BruteForceTestIndex::pool.GetDatasetAndCreate(
+                    dim, BruteForceTestIndex::base_count, metric_type);
+                TestIndex::TestConcurrentAdd(index, dataset, true);
+                if (index->CheckFeature(vsag::SUPPORT_ADD_CONCURRENT)) {
+                    BruteForceTestIndex::TestGeneral(index, dataset, search_param_tmp, recall);
+                }
+                vsag::Options::Instance().set_block_size_limit(origin_size);
+            }
+        }
+    }
+}
+
+TEST_CASE("(PR) BruteForce Concurrent Add Test", "[ft][BruteForce][pr][concurrent]") {
+    auto resource = fixtures::BruteForceTestIndex::GetResource(true);
+    TestBruteForceConcurrentAdd(resource);
+}
+
+TEST_CASE("(Daily) BruteForce Concurrent Add Test", "[ft][BruteForce][daily][concurrent]") {
+    auto resource = fixtures::BruteForceTestIndex::GetResource(false);
+    TestBruteForceConcurrentAdd(resource);
+}
+
+static void
+TestBruteForceSerializeFile(const fixtures::BruteForceResourcePtr& resource) {
+    using namespace fixtures;
+
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    auto size = 1024 * 1024 * 2;
+    for (const auto& metric_type : resource->metric_types) {
+        for (auto dim : resource->dims) {
+            for (const auto& [base_quantization_str, recall] : resource->test_cases) {
+                vsag::Options::Instance().set_block_size_limit(size);
+                auto param = BruteForceTestIndex::GenerateBruteForceBuildParametersString(
+                    metric_type, dim, base_quantization_str);
+                auto index = TestIndex::TestFactory(BruteForceTestIndex::name, param, true);
+                auto dataset = BruteForceTestIndex::pool.GetDatasetAndCreate(
+                    dim, BruteForceTestIndex::base_count, metric_type);
+                TestIndex::TestBuildIndex(index, dataset, true);
+                auto index2 = TestIndex::TestFactory(BruteForceTestIndex::name, param, true);
+                TestIndex::TestSerializeFile(index, index2, dataset, search_param_tmp, true);
+                index2 = TestIndex::TestFactory(BruteForceTestIndex::name, param, true);
+                TestIndex::TestSerializeBinarySet(index, index2, dataset, search_param_tmp, true);
+                index2 = TestIndex::TestFactory(BruteForceTestIndex::name, param, true);
+                TestIndex::TestSerializeReaderSet(
+                    index, index2, dataset, search_param_tmp, BruteForceTestIndex::name, true);
+                vsag::Options::Instance().set_block_size_limit(origin_size);
+            }
+        }
+    }
+}
+
+TEST_CASE("(PR) BruteForce Serialize File Test", "[ft][BruteForce][pr][serialization]") {
+    auto resource = fixtures::BruteForceTestIndex::GetResource(true);
+    TestBruteForceSerializeFile(resource);
+}
+
+TEST_CASE("(Daily) BruteForce Serialize File Test", "[ft][BruteForce][daily][serialization]") {
+    auto resource = fixtures::BruteForceTestIndex::GetResource(false);
+    TestBruteForceSerializeFile(resource);
+}
+
+static void
+TestBruteForceClone(const fixtures::BruteForceResourcePtr& resource) {
+    using namespace fixtures;
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    auto size = 1024 * 1024 * 2;
+    for (const auto& metric_type : resource->metric_types) {
+        for (auto dim : resource->dims) {
+            for (const auto& [base_quantization_str, recall] : resource->test_cases) {
+                vsag::Options::Instance().set_block_size_limit(size);
+                auto param = BruteForceTestIndex::GenerateBruteForceBuildParametersString(
+                    metric_type, dim, base_quantization_str);
+                auto index = TestIndex::TestFactory(BruteForceTestIndex::name, param, true);
+                auto dataset = BruteForceTestIndex::pool.GetDatasetAndCreate(
+                    dim, BruteForceTestIndex::base_count, metric_type);
+                TestIndex::TestBuildIndex(index, dataset, true);
+                auto index2 = TestIndex::TestFactory(BruteForceTestIndex::name, param, true);
+                TestIndex::TestClone(index, dataset, search_param_tmp);
+                vsag::Options::Instance().set_block_size_limit(origin_size);
+            }
+        }
+    }
+}
+
+TEST_CASE("(PR) BruteForce Clone Test", "[ft][BruteForce][pr]") {
+    auto resource = fixtures::BruteForceTestIndex::GetResource(true);
+    TestBruteForceClone(resource);
+}
+
+TEST_CASE("(Daily) BruteForce Clone Test", "[ft][BruteForce][daily]") {
+    auto resource = fixtures::BruteForceTestIndex::GetResource(false);
+    TestBruteForceClone(resource);
+}
+
+static void
+TestBruteForceRandomAllocator(const fixtures::BruteForceResourcePtr& resource) {
+    using namespace fixtures;
+    auto allocator = std::make_shared<fixtures::RandomAllocator>();
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    auto size = 1024 * 1024 * 2;
+    for (const auto& metric_type : resource->metric_types) {
+        for (auto dim : resource->dims) {
+            for (auto& [base_quantization_str, recall] : resource->test_cases) {
+                vsag::Options::Instance().set_block_size_limit(size);
+                auto param = BruteForceTestIndex::GenerateBruteForceBuildParametersString(
+                    metric_type, dim, base_quantization_str);
+                auto index =
+                    vsag::Factory::CreateIndex(BruteForceTestIndex::name, param, allocator.get());
+                if (not index.has_value()) {
+                    continue;
+                }
+                auto dataset = BruteForceTestIndex::pool.GetDatasetAndCreate(
+                    dim, BruteForceTestIndex::base_count, metric_type);
+                TestIndex::TestContinueAddIgnoreRequire(index.value(), dataset);
+                vsag::Options::Instance().set_block_size_limit(origin_size);
+            }
+        }
+    }
+}
+
+TEST_CASE("(PR) BruteForce Build & ContinueAdd Test With Random Allocator",
+          "[ft][BruteForce][pr]") {
+    auto resource = fixtures::BruteForceTestIndex::GetResource(true);
+    TestBruteForceRandomAllocator(resource);
+}
+
+TEST_CASE("(Daily) BruteForce Build & ContinueAdd Test With Random Allocator",
+          "[ft][BruteForce][daily]") {
+    auto resource = fixtures::BruteForceTestIndex::GetResource(false);
+    TestBruteForceRandomAllocator(resource);
+}
+
+static void
+TestBruteForceCalcDistanceById(const fixtures::BruteForceResourcePtr& resource) {
+    using namespace fixtures;
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    auto size = 1024 * 1024 * 2;
+
+    for (const auto& metric_type : resource->metric_types) {
+        for (auto dim : resource->dims) {
+            auto base_quantization_str = "fp32";
             vsag::Options::Instance().set_block_size_limit(size);
-            auto param = GenerateBruteForceBuildParametersString(
-                metric_type, dim, base_quantization_str, true);
-            auto index = TestFactory(name, param, true);
-            auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
-            TestBuildIndex(index, dataset, true);
-            TestIndex::TestWithAttr(index, dataset, search_param, false);
-            auto index2 = TestIndex::TestFactory(name, param, true);
-
-            REQUIRE_NOTHROW(test_serializion_file(*index, *index2, "serialize_bruteforce"));
-            TestIndex::TestWithAttr(index2, dataset, search_param, true);
-
+            auto param = BruteForceTestIndex::GenerateBruteForceBuildParametersString(
+                metric_type, dim, base_quantization_str);
+            auto dataset = BruteForceTestIndex::pool.GetDatasetAndCreate(
+                dim, BruteForceTestIndex::base_count, metric_type);
+            auto index = TestIndex::TestFactory(BruteForceTestIndex::name, param, true);
+            TestIndex::TestBuildIndex(index, dataset, true);
+            TestIndex::TestCalcDistanceById(index, dataset);
             vsag::Options::Instance().set_block_size_limit(origin_size);
         }
     }
 }
 
-TEST_CASE_PERSISTENT_FIXTURE(fixtures::BruteForceTestIndex,
-                             "BruteForce Remove By ID",
-                             "[ft][bruteforce]") {
+TEST_CASE("(PR) BruteForce GetDistance By ID Test", "[ft][BruteForce][pr]") {
+    auto resource = fixtures::BruteForceTestIndex::GetResource(true);
+    TestBruteForceCalcDistanceById(resource);
+}
+
+TEST_CASE("(Daily) BruteForce GetDistance By ID Test", "[ft][BruteForce][daily]") {
+    auto resource = fixtures::BruteForceTestIndex::GetResource(false);
+    TestBruteForceCalcDistanceById(resource);
+}
+
+static void
+TestBruteForceDuplicateBuild(const fixtures::BruteForceResourcePtr& resource) {
+    using namespace fixtures;
     auto origin_size = vsag::Options::Instance().block_size_limit();
-    auto size = GENERATE(1024 * 1024 * 2);
+    auto size = 1024 * 1024 * 2;
+    for (const auto& metric_type : resource->metric_types) {
+        for (auto& dim : resource->dims) {
+            for (auto& [base_quantization_str, recall] : resource->test_cases) {
+                vsag::Options::Instance().set_block_size_limit(size);
+                auto param = BruteForceTestIndex::GenerateBruteForceBuildParametersString(
+                    metric_type, dim, base_quantization_str);
+                auto index = TestIndex::TestFactory(BruteForceTestIndex::name, param, true);
+                auto dataset = BruteForceTestIndex::pool.GetDatasetAndCreate(
+                    dim, BruteForceTestIndex::base_count, metric_type);
+                TestIndex::TestDuplicateAdd(index, dataset);
+                BruteForceTestIndex::TestGeneral(index, dataset, search_param_tmp, recall);
+                vsag::Options::Instance().set_block_size_limit(origin_size);
+            }
+        }
+    }
+}
+
+TEST_CASE("(PR) BruteForce Duplicate Build Test", "[ft][BruteForce][pr]") {
+    auto resource = fixtures::BruteForceTestIndex::GetResource(true);
+    TestBruteForceDuplicateBuild(resource);
+}
+
+TEST_CASE("(Daily) BruteForce Duplicate Build Test", "[ft][BruteForce][daily]") {
+    auto resource = fixtures::BruteForceTestIndex::GetResource(false);
+    TestBruteForceDuplicateBuild(resource);
+}
+
+static void
+TestBruteForceWithAttrFilter(const fixtures::BruteForceResourcePtr& resource) {
+    using namespace fixtures;
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    auto size = 1024 * 1024 * 2;
+
+    for (const auto& metric_type : resource->metric_types) {
+        for (auto& dim : resource->dims) {
+            for (auto& [base_quantization_str, recall] : resource->test_cases) {
+                vsag::Options::Instance().set_block_size_limit(size);
+                auto param = BruteForceTestIndex::GenerateBruteForceBuildParametersString(
+                    metric_type, dim, base_quantization_str, true);
+                auto index = TestIndex::TestFactory(BruteForceTestIndex::name, param, true);
+                auto dataset = BruteForceTestIndex::pool.GetDatasetAndCreate(
+                    dim, BruteForceTestIndex::base_count, metric_type);
+                TestIndex::TestBuildIndex(index, dataset, true);
+                TestIndex::TestWithAttr(index, dataset, search_param_tmp, false);
+                auto index2 = TestIndex::TestFactory(BruteForceTestIndex::name, param, true);
+
+                REQUIRE_NOTHROW(test_serializion_file(*index, *index2, "serialize_bruteforce"));
+                TestIndex::TestWithAttr(index2, dataset, search_param_tmp, true);
+
+                vsag::Options::Instance().set_block_size_limit(origin_size);
+            }
+        }
+    }
+}
+
+TEST_CASE("(PR) BruteForce With Attribute Filter Test", "[ft][BruteForce][pr]") {
+    auto resource = fixtures::BruteForceTestIndex::GetResource(true);
+    TestBruteForceWithAttrFilter(resource);
+}
+
+TEST_CASE("(Daily) BruteForce With Attribute Filter Test", "[ft][BruteForce][daily]") {
+    auto resource = fixtures::BruteForceTestIndex::GetResource(false);
+    TestBruteForceWithAttrFilter(resource);
+}
+
+static void
+TestBruteForceRemoveById(const fixtures::BruteForceResourcePtr& resource) {
+    using namespace fixtures;
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    auto size = 1024 * 1024 * 2;
     auto metric_type = "l2";
 
-    const std::string name = "brute_force";
-    auto search_param = "";
-    for (auto& dim : dims) {
+    for (auto& dim : resource->dims) {
         auto base_quantization_str = "fp32";
         auto recall = 0.99;
         vsag::Options::Instance().set_block_size_limit(size);
-        auto param =
-            GenerateBruteForceBuildParametersString(metric_type, dim, base_quantization_str);
-        auto index = TestFactory(name, param, true);
-        auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
-        TestContinueAdd(index, dataset, true);
-        TestGeneral(index, dataset, search_param, recall);
-        for (int i = 0; i < base_count; ++i) {
+        auto param = BruteForceTestIndex::GenerateBruteForceBuildParametersString(
+            metric_type, dim, base_quantization_str);
+        auto index = TestIndex::TestFactory(BruteForceTestIndex::name, param, true);
+        auto dataset = BruteForceTestIndex::pool.GetDatasetAndCreate(
+            dim, BruteForceTestIndex::base_count, metric_type);
+        TestIndex::TestContinueAdd(index, dataset, true);
+        BruteForceTestIndex::TestGeneral(index, dataset, search_param_tmp, recall);
+        for (int i = 0; i < BruteForceTestIndex::base_count; ++i) {
             auto res = index->Remove(dataset->base_->GetIds()[i]);
             auto check_exist = index->CheckIdExist(dataset->base_->GetIds()[i]);
             REQUIRE(res.has_value());
             REQUIRE(res.value());
             REQUIRE(not check_exist);
             auto num = index->GetNumElements();
-            REQUIRE(num == base_count - i - 1);
+            REQUIRE(num == BruteForceTestIndex::base_count - i - 1);
         }
         vsag::Options::Instance().set_block_size_limit(origin_size);
     }
+}
+
+TEST_CASE("(PR) BruteForce Remove By ID Test", "[ft][BruteForce][pr]") {
+    auto resource = fixtures::BruteForceTestIndex::GetResource(true);
+    TestBruteForceRemoveById(resource);
+}
+
+TEST_CASE("(Daily) BruteForce Remove By ID Test", "[ft][BruteForce][daily]") {
+    auto resource = fixtures::BruteForceTestIndex::GetResource(false);
+    TestBruteForceRemoveById(resource);
 }
