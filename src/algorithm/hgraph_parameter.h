@@ -16,7 +16,7 @@
 #pragma once
 
 #include "data_type.h"
-#include "parameter.h"
+#include "inner_index_parameter.h"
 #include "pointer_define.h"
 #include "vsag/constants.h"
 
@@ -28,7 +28,7 @@ DEFINE_POINTER2(SparseGraphDatacellParam, SparseGraphDatacellParameter);
 DEFINE_POINTER(ODescentParameter);
 
 DEFINE_POINTER(HGraphParameter);
-class HGraphParameter : public Parameter {
+class HGraphParameter : public InnerIndexParameter {
 public:
     explicit HGraphParameter(const JsonType& json);
 
@@ -45,24 +45,18 @@ public:
 
 public:
     FlattenInterfaceParamPtr base_codes_param{nullptr};
-    FlattenInterfaceParamPtr precise_codes_param{nullptr};
-    FlattenInterfaceParamPtr raw_vector_param{nullptr};
     GraphInterfaceParamPtr bottom_graph_param{nullptr};
     SparseGraphDatacellParamPtr hierarchical_graph_param{nullptr};
-    ExtraInfoDataCellParamPtr extra_info_param{nullptr};
+
     ODescentParameterPtr odescent_param{nullptr};
 
     std::string graph_type{GRAPH_TYPE_NSW};
 
-    bool use_reorder{false};
     bool use_elp_optimizer{false};
     bool ignore_reorder{false};
     bool build_by_base{false};
-    bool store_raw_vector{false};
 
-    bool use_attribute_filter{false};
     uint64_t ef_construction{400};
-    uint64_t build_thread_count{100};
 
     bool support_duplicate{false};
     bool support_tombstone{false};

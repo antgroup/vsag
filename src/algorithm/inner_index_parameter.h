@@ -15,24 +15,21 @@
 
 #pragma once
 
-#include <functional>
-
-#include "algorithm/hgraph_parameter.h"
-#include "data_cell/flatten_interface.h"
-#include "data_cell/graph_datacell_parameter.h"
-#include "data_cell/graph_interface.h"
-#include "impl/odescent_graph_parameter.h"
-#include "index/index_common_param.h"
-#include "inner_index_parameter.h"
+#include "parameter.h"
 #include "pointer_define.h"
 #include "typing.h"
-#include "vsag/index.h"
 
 namespace vsag {
+DEFINE_POINTER(InnerIndexParameter);
+DEFINE_POINTER2(ExtraInfoDataCellParam, ExtraInfoDataCellParameter);
+DEFINE_POINTER2(FlattenInterfaceParam, FlattenInterfaceParameter);
 
-DEFINE_POINTER2(PyramidParam, PyramidParameters);
-struct PyramidParameters : public InnerIndexParameter {
+class InnerIndexParameter : public Parameter {
 public:
+    explicit InnerIndexParameter() = default;
+
+    ~InnerIndexParameter() override = default;
+
     void
     FromJson(const JsonType& json) override;
 
@@ -43,23 +40,16 @@ public:
     CheckCompatibility(const vsag::ParamPtr& other) const override;
 
 public:
-    GraphInterfaceParamPtr graph_param{nullptr};
-    FlattenDataCellParamPtr flatten_data_cell_param{nullptr};
-    ODescentParameterPtr odescent_param{nullptr};
+    bool use_reorder{false};
+    FlattenInterfaceParamPtr precise_codes_param{nullptr};
 
-    std::vector<int32_t> no_build_levels;
-    uint64_t ef_construction{100};
-};
+    bool use_attribute_filter{false};
 
-class PyramidSearchParameters {
-public:
-    static PyramidSearchParameters
-    FromJson(const std::string& json_string);
+    uint64_t build_thread_count{100};
 
-public:
-    int64_t ef_search{100};
+    bool store_raw_vector{false};
+    FlattenInterfaceParamPtr raw_vector_param{nullptr};
 
-private:
-    PyramidSearchParameters() = default;
+    ExtraInfoDataCellParamPtr extra_info_param{nullptr};
 };
 }  // namespace vsag

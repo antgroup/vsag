@@ -89,7 +89,8 @@ BruteForce::Add(const DatasetPtr& data) {
 
     auto add_func = [&](const float* data,
                         const int64_t label,
-                        const AttributeSet* attr) -> std::optional<int64_t> {
+                        const AttributeSet* attr,
+                        const char* extra_info) -> std::optional<int64_t> {
         {
             std::scoped_lock add_lock(this->label_lookup_mutex_, this->add_mutex_);
             if (this->label_table_->CheckLabel(label)) {
@@ -114,6 +115,8 @@ BruteForce::Add(const DatasetPtr& data) {
     const auto* labels = data->GetIds();
     const auto* vectors = data->GetFloat32Vectors();
     const auto* attrs = data->GetAttributeSets();
+    const auto* extra_info = data->GetExtraInfos();
+    const auto extra_info_size = data->GetExtraInfoSize();
     for (int64_t j = 0; j < total; ++j) {
         const auto label = labels[j];
         {
@@ -124,12 +127,17 @@ BruteForce::Add(const DatasetPtr& data) {
             }
         }
         if (this->build_pool_ != nullptr) {
-            auto future = this->build_pool_->GeneralEnqueue(
-                add_func, vectors + j * dim_, label, attrs == nullptr ? nullptr : attrs + j);
+            auto future = this->build_pool_->GeneralEnqueue(add_func,
+                                                            vectors + j * dim_,
+                                                            label,
+                                                            attrs == nullptr ? nullptr : attrs + j,
+                                                            extra_info + j * extra_info_size);
             futures.emplace_back(std::move(future));
         } else {
-            if (auto add_res =
-                    add_func(vectors + j * dim_, label, attrs == nullptr ? nullptr : attrs + j);
+            if (auto add_res = add_func(vectors + j * dim_,
+                                        label,
+                                        attrs == nullptr ? nullptr : attrs + j,
+                                        extra_info + j * extra_info_size);
                 add_res.has_value()) {
                 failed_ids.emplace_back(add_res.value());
             }
