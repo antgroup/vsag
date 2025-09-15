@@ -91,3 +91,101 @@ TEST_CASE("immutable index test", "[ut][index_impl]") {
     REQUIRE_FALSE(result_merge.has_value());
     REQUIRE(result_merge.error().type == vsag::ErrorType::UNSUPPORTED_INDEX_OPERATION);
 }
+
+TEST_CASE("index empty input test", "[ut][index_impl]") {
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 128;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    common_param.metric_ = vsag::MetricType::METRIC_TYPE_L2SQR;
+    common_param.allocator_ = vsag::Engine::CreateDefaultAllocator();
+    auto build_parameter_json = R"(
+        {
+            "base_quantization_type": "fp32",
+            "max_degree": 16,
+            "ef_construction": 100
+        }
+    )";
+
+    vsag::JsonType hgraph_json;
+    hgraph_json = vsag::JsonType::parse(build_parameter_json);
+    auto index = std::make_shared<vsag::IndexImpl<vsag::HGraph>>(hgraph_json, common_param);
+
+    vsag::DatasetPtr dataset = vsag::Dataset::Make();
+    vsag::BinarySet binary_set;
+
+    auto result_build = index->Build(dataset);
+    REQUIRE_FALSE(result_build.has_value());
+    REQUIRE(result_build.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+
+    auto result_train = index->Train(dataset);
+    REQUIRE_FALSE(result_train.has_value());
+    REQUIRE(result_train.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+
+    auto result_continue_build = index->ContinueBuild(dataset, binary_set);
+    REQUIRE_FALSE(result_continue_build.has_value());
+    REQUIRE(result_continue_build.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+
+    auto result_add = index->Add(dataset);
+    REQUIRE_FALSE(result_add.has_value());
+    REQUIRE(result_add.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+
+    auto result_update_vector = index->UpdateVector(0, dataset);
+    REQUIRE_FALSE(result_update_vector.has_value());
+    REQUIRE(result_update_vector.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+
+    auto result_update_extrainfo = index->UpdateExtraInfo(dataset);
+    REQUIRE_FALSE(result_update_extrainfo.has_value());
+    REQUIRE(result_update_extrainfo.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+
+    auto result_feedback = index->Feedback(dataset, 0, "");
+    REQUIRE_FALSE(result_feedback.has_value());
+    REQUIRE(result_feedback.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+
+    // test search empty dataset
+    int64_t k = 0;
+    float radius = 0.1;
+    int64_t limited_size = 0;
+    auto query = vsag::Dataset::Make();
+    std::string parameters = "";
+    auto invalid = vsag::Bitset::Make();
+    auto filter = [](int64_t) -> bool { return true; };
+    vsag::FilterPtr filter_ptr = nullptr;
+    vsag::IteratorContext* iter_ctx = nullptr;
+    vsag::SearchParam search_param(true, parameters, filter_ptr, nullptr);
+
+    auto search_result = index->KnnSearch(query, k, parameters, invalid);
+    REQUIRE_FALSE(search_result.has_value());
+    REQUIRE(search_result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+
+    search_result = index->KnnSearch(query, k, parameters, filter);
+    REQUIRE_FALSE(search_result.has_value());
+    REQUIRE(search_result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+
+    search_result = index->KnnSearch(query, k, parameters, filter_ptr);
+    REQUIRE_FALSE(search_result.has_value());
+    REQUIRE(search_result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+
+    search_result = index->KnnSearch(query, k, search_param);
+    REQUIRE_FALSE(search_result.has_value());
+    REQUIRE(search_result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+
+    search_result = index->KnnSearch(query, k, parameters, filter_ptr, iter_ctx, true);
+    REQUIRE_FALSE(search_result.has_value());
+    REQUIRE(search_result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+
+    search_result = index->RangeSearch(query, radius, parameters, limited_size);
+    REQUIRE_FALSE(search_result.has_value());
+    REQUIRE(search_result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+
+    search_result = index->RangeSearch(query, radius, parameters, invalid, limited_size);
+    REQUIRE_FALSE(search_result.has_value());
+    REQUIRE(search_result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+
+    search_result = index->RangeSearch(query, radius, parameters, filter, limited_size);
+    REQUIRE_FALSE(search_result.has_value());
+    REQUIRE(search_result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+
+    search_result = index->RangeSearch(query, radius, parameters, filter_ptr, limited_size);
+    REQUIRE_FALSE(search_result.has_value());
+    REQUIRE(search_result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+}
