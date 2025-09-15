@@ -67,6 +67,9 @@ BufferIO::ReadImpl(uint64_t size, uint64_t offset, uint8_t* data) const {
 
 [[nodiscard]] const uint8_t*
 BufferIO::DirectReadImpl(uint64_t size, uint64_t offset, bool& need_release) const {
+    if (not check_valid_offset(size + offset)) {
+        return nullptr;
+    }
     need_release = true;
     auto* buf = reinterpret_cast<uint8_t*>(allocator_->Allocate(size));
     ReadImpl(size, offset, buf);

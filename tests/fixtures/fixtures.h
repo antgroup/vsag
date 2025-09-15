@@ -239,7 +239,7 @@ public:
     }
 
     [[nodiscard]] std::string
-    GenerateRandomFile() const {
+    GenerateRandomFile(bool create_file = true) const {
         namespace fs = std::filesystem;
         const std::string chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
         std::string fileName;
@@ -250,9 +250,11 @@ public:
             }
         } while (fs::exists(path + fileName));
 
-        std::ofstream file(path + fileName);
-        if (file.is_open()) {
-            file.close();
+        if (create_file) {
+            std::ofstream file(path + fileName);
+            if (file.is_open()) {
+                file.close();
+            }
         }
         return path + fileName;
     }

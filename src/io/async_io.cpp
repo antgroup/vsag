@@ -82,6 +82,9 @@ AsyncIO::ReadImpl(uint64_t size, uint64_t offset, uint8_t* data) const {
 
 const uint8_t*
 AsyncIO::DirectReadImpl(uint64_t size, uint64_t offset, bool& need_release) const {
+    if (not check_valid_offset(size + offset)) {
+        return nullptr;
+    }
     need_release = true;
     if (size == 0) {
         return nullptr;

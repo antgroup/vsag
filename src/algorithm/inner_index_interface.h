@@ -174,7 +174,7 @@ public:
 
     [[nodiscard]] virtual int64_t
     GetMemoryUsage() const {
-        return this->CalSerializeSize();
+        return static_cast<int64_t>(this->CalSerializeSize());
     }
 
     [[nodiscard]] virtual std::string

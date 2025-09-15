@@ -25,7 +25,7 @@ using namespace vsag;
 
 TEST_CASE("BufferIO Read & Write", "[ut][BufferIO]") {
     fixtures::TempDir dir("buffer_io");
-    auto path = dir.GenerateRandomFile();
+    auto path = dir.GenerateRandomFile(false);
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     TestDistIOWrongInit<BufferIO>(allocator.get());
     auto io = std::make_unique<BufferIO>(path, allocator.get());
