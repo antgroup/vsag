@@ -121,18 +121,13 @@ public:
         return;
     }
 
-    InnerIndexPtr
-    Fork(const IndexCommonParam& param) override {
-        return nullptr;
-    }
-
     int64_t
     GetNumElements() const override {
         return 0;
     }
 };
 
-TEST_CASE("NOT Implemented", "[ut][InnerIndexInterface]") {
+TEST_CASE("InnerIndexInterface NOT Implemented", "[ut][InnerIndexInterface]") {
     InnerIndexPtr empty_index = std::make_shared<EmptyInnerIndex>();
     IndexCommonParam common_param;
     common_param.dim_ = 128;
@@ -174,4 +169,17 @@ TEST_CASE("NOT Implemented", "[ut][InnerIndexInterface]") {
     empty_index->Serialize(stream);
     stream.seekg(0);
     REQUIRE_NOTHROW(empty_index->Deserialize(stream));
+
+    REQUIRE_NOTHROW(empty_index->Train(nullptr));
+
+    SearchRequest req;
+    REQUIRE_THROWS(empty_index->AnalyzeIndexBySearch(req));
+    REQUIRE_THROWS(empty_index->SearchWithRequest(req));
+    REQUIRE_THROWS(empty_index->Fork(common_param));
+
+    REQUIRE_THROWS(empty_index->RangeSearch(nullptr, 0.0F, "", nullptr, nullptr));
+    REQUIRE_THROWS(empty_index->KnnSearch(nullptr, 0, "", nullptr, nullptr));
+
+    SearchParam param(true, "", nullptr, nullptr);
+    REQUIRE_THROWS(empty_index->KnnSearch(nullptr, 0, param));
 }

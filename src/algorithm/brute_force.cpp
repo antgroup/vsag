@@ -50,11 +50,6 @@ BruteForce::BruteForce(const BruteForceParameterPtr& param, const IndexCommonPar
     }
 }
 
-int64_t
-BruteForce::GetMemoryUsage() const {
-    return static_cast<int64_t>(this->CalSerializeSize());
-}
-
 uint64_t
 BruteForce::EstimateMemory(uint64_t num_elements) const {
     return num_elements *
@@ -420,7 +415,7 @@ static const std::string BRUTE_FORCE_PARAMS_TEMPLATE =
     {
         "type": "{INDEX_BRUTE_FORCE}",
         "{IO_PARAMS_KEY}": {
-            "{IO_TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}"
+            "{IO_TYPE_KEY}": "{IO_TYPE_VALUE_MEMORY_IO}"
         },
         "{QUANTIZATION_PARAMS_KEY}": {
             "{QUANTIZATION_TYPE_KEY}": "{QUANTIZATION_TYPE_VALUE_FP32}",

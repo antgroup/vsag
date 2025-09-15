@@ -73,6 +73,11 @@ TEST_CASE("Test BitsetHandler", "[ft][ext]") {
     delete bh;
 }
 
+TEST_CASE("Test IndexHandler With Exception", "[ft][ext]") {
+    auto make_indexhandler = vsag::ext::IndexHandler::Make("hgraph", "{}");
+    REQUIRE_FALSE(make_indexhandler.has_value());
+}
+
 TEST_CASE("Test IndexHandler", "[ft][ext]") {
     int num_vectors = 100;
     int dim = 16;

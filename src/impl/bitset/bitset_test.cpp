@@ -24,7 +24,7 @@ TEST_CASE("Test Bitset Basic", "[ut][bitset]") {
     REQUIRE(bitset->Count() == 0);
 
     // set to true
-    bitset->Set(100, true);
+    bitset->Set(100);
     REQUIRE(bitset->Test(100));
     REQUIRE(bitset->Count() == 1);
 

@@ -62,6 +62,9 @@ TestBasicReadWrite(BasicIO<T>& io) {
             }
         }
     }
+    // test invalid read
+    bool need_release = false;
+    REQUIRE(io.Read(10000000ULL, 10000000ULL, need_release) == nullptr);
 }
 
 template <typename T>

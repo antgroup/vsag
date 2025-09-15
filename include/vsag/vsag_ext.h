@@ -119,6 +119,7 @@ public:
             ret->index_ = index.value();
             return ret;
         } else {
+            delete ret;
             return tl::unexpected(index.error());
         }
     }
