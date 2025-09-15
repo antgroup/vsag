@@ -52,6 +52,8 @@ public:
         bool use_attr_filter = false;
         bool store_raw_vector = false;
         bool support_duplicate = false;
+        std::string graph_io_type = "block_memory_io";
+        std::string graph_file_path = "./graph_storage";
         HGraphBuildParam(const std::string& metric_type,
                          int64_t dim,
                          const std::string& quantization_str)
@@ -160,7 +162,9 @@ HGraphTestIndex::GenerateHGraphBuildParametersString(const HGraphBuildParam& par
             "support_remove": {},
             "use_attribute_filter": {},
             "store_raw_vector": {},
-            "support_duplicate": {}
+            "support_duplicate": {},
+            "graph_io_type": "{}",
+            "graph_file_path": "{}"
         }}
     }}
     )";
@@ -185,7 +189,9 @@ HGraphTestIndex::GenerateHGraphBuildParametersString(const HGraphBuildParam& par
             "support_remove": {},
             "use_attribute_filter": {},
             "store_raw_vector": {},
-            "support_duplicate": {}
+            "support_duplicate": {},
+            "graph_io_type": "{}",
+            "graph_file_path": "{}"
         }}
     }}
     )";
@@ -220,7 +226,9 @@ HGraphTestIndex::GenerateHGraphBuildParametersString(const HGraphBuildParam& par
                                            param.support_remove,
                                            param.use_attr_filter,
                                            param.store_raw_vector,
-                                           param.support_duplicate);
+                                           param.support_duplicate,
+                                           param.graph_io_type,
+                                           param.graph_file_path);
     } else {
         build_parameters_str = fmt::format(parameter_temp_origin,
                                            param.data_type,
@@ -235,7 +243,9 @@ HGraphTestIndex::GenerateHGraphBuildParametersString(const HGraphBuildParam& par
                                            param.support_remove,
                                            param.use_attr_filter,
                                            param.store_raw_vector,
-                                           param.support_duplicate);
+                                           param.support_duplicate,
+                                           param.graph_io_type,
+                                           param.graph_file_path);
     }
     return build_parameters_str;
 }
@@ -1849,6 +1859,7 @@ TestHGraphDiskIOType(const fixtures::HGraphTestIndexPtr& test_index,
         {"rabitq,fp16", "rabitq,fp16,async_io"},
         {"rabitq,fp16", "rabitq,fp16,mmap_io"},
     };
+    const std::vector<std::string> graph_io_types = {"block_memory_io", "mmap_io", "async_io"};
     for (auto metric_type : resource->metric_types) {
         for (auto dim : resource->dims) {
             for (auto& [memory_io_str, disk_io_str] : io_cases) {
@@ -1869,10 +1880,14 @@ TestHGraphDiskIOType(const fixtures::HGraphTestIndexPtr& test_index,
                     dim, resource->base_count, metric_type);
                 TestIndex::TestBuildIndex(index, dataset, true);
                 build_param.quantization_str = disk_io_str;
-                param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
-                auto disk_index = TestIndex::TestFactory(test_index->name, param, true);
-                TestIndex::TestSerializeFile(index, disk_index, dataset, search_param, true);
-                HGraphTestIndex::TestGeneral(disk_index, dataset, search_param, recall);
+
+                for (auto& graph_io_type : graph_io_types) {
+                    build_param.graph_io_type = graph_io_type;
+                    param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
+                    auto disk_index = TestIndex::TestFactory(test_index->name, param, true);
+                    TestIndex::TestSerializeFile(index, disk_index, dataset, search_param, true);
+                    HGraphTestIndex::TestGeneral(disk_index, dataset, search_param, recall);
+                }
                 vsag::Options::Instance().set_block_size_limit(origin_size);
             }
         }
