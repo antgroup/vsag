@@ -21,13 +21,13 @@
 #include "flatten_datacell_parameter.h"
 #include "flatten_interface_parameter.h"
 #include "impl/runtime_parameter.h"
-#include "index/index_common_param.h"
+#include "index_common_param.h"
 #include "io/reader_io.h"
-#include "pointer_define.h"
 #include "quantization/computer.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
 #include "typing.h"
+#include "utils/pointer_define.h"
 #include "vsag/constants.h"
 
 namespace vsag {

@@ -17,9 +17,9 @@
 
 #include "algorithm/inner_index_interface.h"
 #include "brute_force_parameter.h"
-#include "label_table.h"
-#include "pointer_define.h"
+#include "impl/label_table.h"
 #include "typing.h"
+#include "utils/pointer_define.h"
 #include "vsag/filter.h"
 
 namespace vsag {

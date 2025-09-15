@@ -15,8 +15,8 @@
 
 #include "transform_quantizer_parameter.h"
 
+#include "impl/logger/logger.h"
 #include "inner_string_params.h"
-#include "logger.h"
 
 namespace vsag {
 

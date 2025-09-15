@@ -15,8 +15,9 @@
 
 #include <iostream>
 
-#include "default_thread_pool.h"
-#include "safe_thread_pool.h"
+// TODO(LHT): don't use inner struct
+#include "impl/thread_pool/default_thread_pool.h"
+#include "impl/thread_pool/safe_thread_pool.h"
 #include "vsag/logger.h"
 #include "vsag/vsag.h"
 

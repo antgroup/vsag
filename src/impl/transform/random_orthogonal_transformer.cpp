@@ -21,7 +21,7 @@
 
 #include <random>
 
-#include "../../logger.h"
+#include "impl/logger/logger.h"
 
 namespace vsag {
 RandomOrthogonalMatrix::RandomOrthogonalMatrix(Allocator* allocator, int64_t dim, uint64_t retries)

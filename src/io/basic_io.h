@@ -19,10 +19,10 @@
 
 #include <cstdint>
 
-#include "byte_buffer.h"
 #include "io_parameter.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
+#include "utils/byte_buffer.h"
 #include "utils/function_exists_check.h"
 
 namespace vsag {

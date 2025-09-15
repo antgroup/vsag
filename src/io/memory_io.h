@@ -18,9 +18,9 @@
 #include <cstring>
 
 #include "basic_io.h"
-#include "index/index_common_param.h"
+#include "index_common_param.h"
 #include "memory_io_parameter.h"
-#include "prefetch.h"
+#include "utils/prefetch.h"
 
 namespace vsag {
 

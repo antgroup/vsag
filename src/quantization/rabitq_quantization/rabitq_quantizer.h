@@ -16,7 +16,7 @@
 #pragma once
 
 #include "impl/transform/pca_transformer.h"
-#include "index/index_common_param.h"
+#include "index_common_param.h"
 #include "inner_string_params.h"
 #include "quantization/quantizer.h"
 #include "rabitq_quantizer_parameter.h"

@@ -19,7 +19,7 @@
 #include <cmath>
 #include <string>
 
-#include "index/index_common_param.h"
+#include "index_common_param.h"
 #include "vsag/dataset.h"
 #include "vsag/expected.hpp"
 #include "vsag_exception.h"

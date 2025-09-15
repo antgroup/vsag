@@ -15,8 +15,8 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include "factory/resource_owner_wrapper.h"
 #include "index_common_param.h"
-#include "resource_owner_wrapper.h"
 
 TEST_CASE("IndexCommonParam Basic Test", "[ut][IndexCommonParam]") {
     std::shared_ptr<vsag::Resource> resource =

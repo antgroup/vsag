@@ -18,10 +18,10 @@
 
 #include "impl/allocator/safe_allocator.h"
 #include "multi_bitset_manager.h"
-#include "pointer_define.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
 #include "typing.h"
+#include "utils/pointer_define.h"
 #include "vsag/attribute.h"
 #include "vsag_exception.h"
 

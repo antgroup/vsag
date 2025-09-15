@@ -17,7 +17,7 @@
 
 #include "data_type.h"
 #include "inner_index_parameter.h"
-#include "pointer_define.h"
+#include "utils/pointer_define.h"
 #include "vsag/constants.h"
 
 namespace vsag {

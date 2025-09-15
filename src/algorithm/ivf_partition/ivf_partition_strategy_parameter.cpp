@@ -19,8 +19,8 @@
 
 #include <iostream>
 
+#include "impl/logger/logger.h"
 #include "inner_string_params.h"
-#include "logger.h"
 #include "vsag/constants.h"
 
 namespace vsag {

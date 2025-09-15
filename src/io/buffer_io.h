@@ -17,7 +17,7 @@
 
 #include "basic_io.h"
 #include "buffer_io_parameter.h"
-#include "index/index_common_param.h"
+#include "index_common_param.h"
 
 namespace vsag {
 

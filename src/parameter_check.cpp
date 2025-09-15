@@ -15,9 +15,9 @@
 
 #include <stdexcept>
 
+#include "factory/resource_owner_wrapper.h"
 #include "index/diskann_zparameters.h"
 #include "index/hnsw_zparameters.h"
-#include "resource_owner_wrapper.h"
 #include "utils/util_functions.h"
 #include "vsag/constants.h"
 #include "vsag/errors.h"
