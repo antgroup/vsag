@@ -48,6 +48,22 @@ public:
         this->inner_index_.reset();
     }
 
+#define CHECK_AND_RETURN_EMPTY_DATASET          \
+    if (GetNumElements() == 0) {                \
+        return DatasetImpl::MakeEmptyDataset(); \
+    }
+
+#define CHECK_IMMUTABLE_INDEX(operation_str)                                       \
+    if (this->inner_index_->immutable_) {                                          \
+        return tl::unexpected(Error(ErrorType::UNSUPPORTED_INDEX_OPERATION,        \
+                                    "immutable index no support " operation_str)); \
+    }
+
+#define CHECK_NONEMPTY_DATASET(dataset)                                               \
+    if ((dataset)->GetNumElements() == 0) {                                           \
+        LOG_ERROR_AND_RETURNS(ErrorType::INVALID_ARGUMENT, "input dataset is empty"); \
+    }
+
 public:
     tl::expected<std::vector<int64_t>, Error>
     Build(const DatasetPtr& base) override {
@@ -55,6 +71,7 @@ public:
             return tl::unexpected(
                 Error(ErrorType::UNSUPPORTED_INDEX_OPERATION, "immutable index no support build"));
         }
+        CHECK_NONEMPTY_DATASET(base);
         SAFE_CALL(return this->inner_index_->Build(base));
     }
 
@@ -69,6 +86,7 @@ public:
             return tl::unexpected(
                 Error(ErrorType::UNSUPPORTED_INDEX_OPERATION, "immutable index no support train"));
         }
+        CHECK_NONEMPTY_DATASET(data);
         SAFE_CALL(this->inner_index_->Train(data));
     }
 
@@ -78,6 +96,7 @@ public:
             return tl::unexpected(Error(ErrorType::UNSUPPORTED_INDEX_OPERATION,
                                         "immutable index no support continue build"));
         }
+        CHECK_NONEMPTY_DATASET(base);
         SAFE_CALL(return this->inner_index_->ContinueBuild(base, binary_set));
     }
 
@@ -87,6 +106,7 @@ public:
             return tl::unexpected(
                 Error(ErrorType::UNSUPPORTED_INDEX_OPERATION, "immutable index no support add"));
         }
+        CHECK_NONEMPTY_DATASET(base);
         SAFE_CALL(return this->inner_index_->Add(base));
     }
 
@@ -114,6 +134,7 @@ public:
             return tl::unexpected(Error(ErrorType::UNSUPPORTED_INDEX_OPERATION,
                                         "immutable index no support update vector"));
         }
+        CHECK_NONEMPTY_DATASET(new_base);
         SAFE_CALL(return this->inner_index_->UpdateVector(id, new_base, force_update));
     }
 
@@ -144,6 +165,7 @@ public:
             return tl::unexpected(Error(ErrorType::UNSUPPORTED_INDEX_OPERATION,
                                         "immutable index no support update extra info"));
         }
+        CHECK_NONEMPTY_DATASET(new_base);
         SAFE_CALL(return this->inner_index_->UpdateExtraInfo(new_base));
     }
 
@@ -160,6 +182,7 @@ public:
               int64_t k,
               const std::string& parameters,
               BitsetPtr invalid = nullptr) const override {
+        CHECK_NONEMPTY_DATASET(query);
         if (GetNumElements() == 0) {
             return DatasetImpl::MakeEmptyDataset();
         }
@@ -171,6 +194,7 @@ public:
               int64_t k,
               const std::string& parameters,
               const std::function<bool(int64_t)>& filter) const override {
+        CHECK_NONEMPTY_DATASET(query);
         if (GetNumElements() == 0) {
             return DatasetImpl::MakeEmptyDataset();
         }
@@ -182,6 +206,7 @@ public:
               int64_t k,
               const std::string& parameters,
               const FilterPtr& filter) const override {
+        CHECK_NONEMPTY_DATASET(query);
         if (GetNumElements() == 0) {
             return DatasetImpl::MakeEmptyDataset();
         }
@@ -190,6 +215,7 @@ public:
 
     tl::expected<DatasetPtr, Error>
     KnnSearch(const DatasetPtr& query, int64_t k, SearchParam& search_param) const override {
+        CHECK_NONEMPTY_DATASET(query);
         if (GetNumElements() == 0) {
             return DatasetImpl::MakeEmptyDataset();
         }
@@ -214,6 +240,7 @@ public:
               const FilterPtr& filter,
               IteratorContext*& iter_ctx,
               bool is_last_filter) const override {
+        CHECK_NONEMPTY_DATASET(query);
         if (GetNumElements() == 0) {
             return DatasetImpl::MakeEmptyDataset();
         }
@@ -226,6 +253,7 @@ public:
                 float radius,
                 const std::string& parameters,
                 int64_t limited_size = -1) const override {
+        CHECK_NONEMPTY_DATASET(query);
         if (GetNumElements() == 0) {
             return DatasetImpl::MakeEmptyDataset();
         }
@@ -238,6 +266,7 @@ public:
                 const std::string& parameters,
                 BitsetPtr invalid,
                 int64_t limited_size = -1) const override {
+        CHECK_NONEMPTY_DATASET(query);
         if (GetNumElements() == 0) {
             return DatasetImpl::MakeEmptyDataset();
         }
@@ -251,6 +280,7 @@ public:
                 const std::string& parameters,
                 const std::function<bool(int64_t)>& filter,
                 int64_t limited_size = -1) const override {
+        CHECK_NONEMPTY_DATASET(query);
         if (GetNumElements() == 0) {
             return DatasetImpl::MakeEmptyDataset();
         }
@@ -264,6 +294,7 @@ public:
                 const std::string& parameters,
                 const FilterPtr& filter,
                 int64_t limited_size = -1) const override {
+        CHECK_NONEMPTY_DATASET(query);
         if (GetNumElements() == 0) {
             return DatasetImpl::MakeEmptyDataset();
         }
@@ -291,6 +322,7 @@ public:
             return tl::unexpected(Error(ErrorType::UNSUPPORTED_INDEX_OPERATION,
                                         "immutable index no support feedback"));
         }
+        CHECK_NONEMPTY_DATASET(query);
         SAFE_CALL(return this->inner_index_->Feedback(query, k, parameters, global_optimum_tag_id));
     }
 
