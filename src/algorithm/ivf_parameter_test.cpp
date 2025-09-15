@@ -37,7 +37,7 @@ std::string
 generate_ivf_param(const IVFDefaultParam& param) {
     static constexpr auto param_str = R"({{
         "type": "ivf",
-        "thread_count": 3,
+        "build_thread_count": 3,
         "buckets_params": {{
             "io_params": {{
                 "type": "{}"
@@ -96,8 +96,8 @@ TEST_CASE("IVF Parameters Test", "[ut][IVFParameter]") {
             vsag::IVFNearestPartitionTrainerType::KMeansTrainer);
     REQUIRE(param->buckets_per_data == 1);
     REQUIRE(param->use_reorder == true);
-    REQUIRE(param->thread_count == 3);
-    REQUIRE(param->flatten_param->quantizer_parameter->GetTypeName() == "fp32");
+    REQUIRE(param->build_thread_count == 3);
+    REQUIRE(param->precise_codes_param->quantizer_parameter->GetTypeName() == "fp32");
 
     index_param.ivf_train_type = "random";
     index_param.partition_strategy_type = "gno_imi";

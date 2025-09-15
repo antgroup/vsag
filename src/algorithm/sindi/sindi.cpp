@@ -53,6 +53,8 @@ SINDI::Add(const DatasetPtr& base) {
 
     const auto* sparse_vectors = base->GetSparseVectors();
     const auto* ids = base->GetIds();
+    const auto* extra_info = base->GetExtraInfos();
+    const auto extra_info_size = base->GetExtraInfoSize();
 
     // adjust window
     int64_t final_add_window = ceil_int(cur_element_count_ + data_num, window_size_) / window_size_;
@@ -74,6 +76,10 @@ SINDI::Add(const DatasetPtr& base) {
         }
 
         label_table_->Insert(cur_element_count_, ids[i]);  // todo(zxy): check id exists
+        if (extra_info_size > 0) {
+            extra_infos_->InsertExtraInfo(extra_info + i * extra_info_size, cur_element_count_);
+        }
+
         uint32_t inner_id = cur_element_count_ - window_start_id;
         window_term_list_[cur_window]->InsertVector(sparse_vector, inner_id);
 

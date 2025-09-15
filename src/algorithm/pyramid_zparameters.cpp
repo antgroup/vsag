@@ -44,8 +44,8 @@ PyramidParameters::FromJson(const JsonType& json) {
             std::make_shared<FP32QuantizerParameter>();
     }
 
-    if (json.contains(BUILD_EF_CONSTRUCTION)) {
-        this->ef_construction = json[BUILD_EF_CONSTRUCTION];
+    if (json.contains(HGRAPH_EF_CONSTRUCTION_KEY)) {
+        this->ef_construction = json[HGRAPH_EF_CONSTRUCTION_KEY];
     }
 
     if (json.contains(NO_BUILD_LEVELS)) {
@@ -61,7 +61,7 @@ PyramidParameters::FromJson(const JsonType& json) {
 }
 JsonType
 PyramidParameters::ToJson() const {
-    JsonType json;
+    JsonType json = InnerIndexParameter::ToJson();
     json[GRAPH_TYPE_ODESCENT] = graph_param->ToJson();
     json[GRAPH_TYPE_ODESCENT].update(odescent_param->ToJson());
     json[PYRAMID_PARAMETER_BASE_CODES] = flatten_data_cell_param->ToJson();

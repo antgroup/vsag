@@ -46,13 +46,10 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
       use_elp_optimizer_(hgraph_param->use_elp_optimizer),
       ignore_reorder_(hgraph_param->ignore_reorder),
       build_by_base_(hgraph_param->build_by_base),
-      use_attribute_filter_(hgraph_param->use_attribute_filter),
       ef_construct_(hgraph_param->ef_construction),
-      build_thread_count_(hgraph_param->build_thread_count),
       odescent_param_(hgraph_param->odescent_param),
       graph_type_(hgraph_param->graph_type),
       hierarchical_datacell_param_(hgraph_param->hierarchical_graph_param) {
-    this->use_reorder_ = hgraph_param->use_reorder;
     this->label_table_->compress_duplicate_data_ = hgraph_param->support_duplicate;
     this->label_table_->support_tombstone_ = hgraph_param->support_tombstone;
     neighbors_mutex_ = std::make_shared<PointsMutex>(0, common_param.allocator_.get());
@@ -67,12 +64,6 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
     this->bottom_graph_ =
         GraphInterface::MakeInstance(hgraph_param->bottom_graph_param, common_param);
     mult_ = 1 / log(1.0 * static_cast<double>(this->bottom_graph_->MaximumDegree()));
-
-    this->extra_info_size_ = common_param.extra_info_size_;
-    if (this->extra_info_size_ > 0) {
-        this->extra_infos_ =
-            ExtraInfoInterface::MakeInstance(hgraph_param->extra_info_param, common_param);
-    }
 
     auto step_block_size = Options::Instance().block_size_limit();
     auto block_size_per_vector = this->basic_flatten_codes_->code_size_;
@@ -92,11 +83,6 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
         DEFAULT_RESIZE_BIT, static_cast<uint64_t>(log2(static_cast<double>(increase_count))));
 
     resize(bottom_graph_->max_capacity_);
-    this->build_pool_ = common_param.thread_pool_;
-    if (this->build_thread_count_ > 1 && this->build_pool_ == nullptr) {
-        this->build_pool_ = SafeThreadPool::FactoryDefaultThreadPool();
-        this->build_pool_->SetPoolSize(build_thread_count_);
-    }
 
     UnorderedMap<std::string, float> default_param(common_param.allocator_.get());
     default_param.insert(
@@ -106,7 +92,7 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
     if (use_elp_optimizer_) {
         optimizer_ = std::make_shared<Optimizer<BasicSearcher>>(common_param);
     }
-    if (use_attribute_filter_) {
+    if (this->use_attribute_filter_) {
         this->attr_filter_index_ =
             AttributeInvertedInterface::MakeInstance(allocator_, false /*have_bucket*/);
     }
@@ -963,18 +949,6 @@ HGraph::GetMinAndMaxId() const {
 }
 
 void
-HGraph::GetExtraInfoByIds(const int64_t* ids, int64_t count, char* extra_infos) const {
-    if (this->extra_infos_ == nullptr) {
-        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION, "extra_info is NULL");
-    }
-    for (int64_t i = 0; i < count; ++i) {
-        std::shared_lock<std::shared_mutex> lock(this->label_lookup_mutex_);
-        auto inner_id = this->label_table_->GetIdByLabel(ids[i]);
-        this->extra_infos_->GetExtraInfoById(inner_id, extra_infos + i * extra_info_size_);
-    }
-}
-
-void
 HGraph::add_one_point(const void* data, int level, InnerIdType inner_id) {
     this->basic_flatten_codes_->InsertVector(data, inner_id);
     if (use_reorder_) {
@@ -1198,12 +1172,11 @@ static const std::string HGRAPH_PARAMS_TEMPLATE =
     R"(
     {
         "type": "{INDEX_TYPE_HGRAPH}",
-        "{HGRAPH_USE_REORDER_KEY}": false,
+        "{USE_REORDER_KEY}": false,
         "{HGRAPH_USE_ENV_OPTIMIZER}": false,
         "{HGRAPH_IGNORE_REORDER_KEY}": false,
         "{HGRAPH_BUILD_BY_BASE_QUANTIZATION_KEY}": false,
         "{HGRAPH_USE_ATTRIBUTE_FILTER_KEY}": false,
-        "{STORE_RAW_VECTOR_KEY}": false,
         "{HGRAPH_GRAPH_KEY}": {
             "{IO_PARAMS_KEY}": {
                 "{IO_TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
@@ -1237,7 +1210,7 @@ static const std::string HGRAPH_PARAMS_TEMPLATE =
                 "{HOLD_MOLDS}": false
             }
         },
-        "{HGRAPH_PRECISE_CODES_KEY}": {
+        "{PRECISE_CODES_KEY}": {
             "{IO_PARAMS_KEY}": {
                 "{IO_TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
                 "{IO_FILE_PATH}": "{DEFAULT_FILE_PATH_VALUE}"
@@ -1251,6 +1224,7 @@ static const std::string HGRAPH_PARAMS_TEMPLATE =
                 "{HOLD_MOLDS}": false
             }
         },
+        "{STORE_RAW_VECTOR_KEY}": false,
         "{RAW_VECTOR_KEY}": {
             "{IO_PARAMS_KEY}": {
                 "{IO_TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
@@ -1261,18 +1235,16 @@ static const std::string HGRAPH_PARAMS_TEMPLATE =
                 "{HOLD_MOLDS}": true
             }
         },
-        "{BUILD_PARAMS_KEY}": {
-            "{BUILD_EF_CONSTRUCTION}": 400,
-            "{BUILD_THREAD_COUNT}": 100
-        },
-        "{HGRAPH_EXTRA_INFO_KEY}": {
+        "{BUILD_THREAD_COUNT_KEY}": 100,
+        "{EXTRA_INFO_KEY}": {
             "{IO_PARAMS_KEY}": {
                 "{IO_TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
                 "{IO_FILE_PATH}": "{DEFAULT_FILE_PATH_VALUE}"
             }
         },
         "{HGRAPH_SUPPORT_DUPLICATE}": false,
-        "{HGRAPH_SUPPORT_TOMBSTONE}": false
+        "{HGRAPH_SUPPORT_TOMBSTONE}": false,
+        "{HGRAPH_EF_CONSTRUCTION_KEY}": 400
     })";
 
 ParamPtr
@@ -1281,7 +1253,7 @@ HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
     const ConstParamMap external_mapping = {{
                                                 HGRAPH_USE_REORDER,
                                                 {
-                                                    HGRAPH_USE_REORDER_KEY,
+                                                    USE_REORDER_KEY,
                                                 },
                                             },
                                             {
@@ -1335,7 +1307,7 @@ HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
                                             {
                                                 HGRAPH_PRECISE_IO_TYPE,
                                                 {
-                                                    HGRAPH_PRECISE_CODES_KEY,
+                                                    PRECISE_CODES_KEY,
                                                     IO_PARAMS_KEY,
                                                     IO_TYPE_KEY,
                                                 },
@@ -1351,7 +1323,7 @@ HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
                                             {
                                                 HGRAPH_PRECISE_FILE_PATH,
                                                 {
-                                                    HGRAPH_PRECISE_CODES_KEY,
+                                                    PRECISE_CODES_KEY,
                                                     IO_PARAMS_KEY,
                                                     IO_FILE_PATH,
                                                 },
@@ -1359,7 +1331,7 @@ HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
                                             {
                                                 HGRAPH_PRECISE_QUANTIZATION_TYPE,
                                                 {
-                                                    HGRAPH_PRECISE_CODES_KEY,
+                                                    PRECISE_CODES_KEY,
                                                     QUANTIZATION_PARAMS_KEY,
                                                     QUANTIZATION_TYPE_KEY,
                                                 },
@@ -1367,7 +1339,7 @@ HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
                                             {
                                                 STORE_RAW_VECTOR,
                                                 {
-                                                    HGRAPH_PRECISE_CODES_KEY,
+                                                    PRECISE_CODES_KEY,
                                                     QUANTIZATION_PARAMS_KEY,
                                                     HOLD_MOLDS,
                                                 },
@@ -1404,8 +1376,7 @@ HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
                                             {
                                                 HGRAPH_BUILD_EF_CONSTRUCTION,
                                                 {
-                                                    BUILD_PARAMS_KEY,
-                                                    BUILD_EF_CONSTRUCTION,
+                                                    HGRAPH_EF_CONSTRUCTION_KEY,
                                                 },
                                             },
                                             {
@@ -1467,8 +1438,7 @@ HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
                                             {
                                                 HGRAPH_BUILD_THREAD_COUNT,
                                                 {
-                                                    BUILD_PARAMS_KEY,
-                                                    BUILD_THREAD_COUNT,
+                                                    BUILD_THREAD_COUNT_KEY,
                                                 },
                                             },
                                             {
@@ -1666,24 +1636,7 @@ HGraph::Merge(const std::vector<MergeUnit>& merge_units) {
         this->entry_point_id_ = ids.back();
     }
 }
-bool
-HGraph::UpdateExtraInfo(const DatasetPtr& new_base) {
-    CHECK_ARGUMENT(new_base != nullptr, "new_base is nullptr");
-    CHECK_ARGUMENT(new_base->GetExtraInfos() != nullptr, "extra_infos is nullptr");
-    CHECK_ARGUMENT(new_base->GetExtraInfoSize() == extra_info_size_, "extra_infos size mismatch");
-    CHECK_ARGUMENT(new_base->GetNumElements() == 1, "new_base size must be one");
-    auto label = new_base->GetIds()[0];
-    if (this->extra_infos_ != nullptr) {
-        std::shared_lock label_lock(this->label_lookup_mutex_);
-        if (not this->label_table_->CheckLabel(label)) {
-            return false;
-        }
-        const auto inner_id = this->label_table_->GetIdByLabel(label);
-        this->extra_infos_->InsertExtraInfo(new_base->GetExtraInfos(), inner_id);
-        return true;
-    }
-    throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION, "extra_infos is not initialized");
-}
+
 void
 HGraph::GetVectorByInnerId(InnerIdType inner_id, float* data) const {
     auto codes = (use_reorder_) ? high_precise_codes_ : basic_flatten_codes_;

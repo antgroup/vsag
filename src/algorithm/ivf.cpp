@@ -40,8 +40,8 @@ static constexpr const char* IVF_PARAMS_TEMPLATE =
         "type": "{INDEX_TYPE_IVF}",
         "{IVF_TRAIN_TYPE_KEY}": "{IVF_TRAIN_TYPE_KMEANS}",
         "{IVF_USE_ATTRIBUTE_FILTER_KEY}": false,
-        "{IVF_USE_REORDER_KEY}": false,
-        "{IVF_THREAD_COUNT_KEY}": 1,
+        "{USE_REORDER_KEY}": false,
+        "{BUILD_THREAD_COUNT_KEY}": 1,
         "{BUCKET_PARAMS_KEY}": {
             "{IO_PARAMS_KEY}": {
                 "{IO_TYPE_KEY}": "{IO_TYPE_VALUE_MEMORY_IO}"
@@ -65,8 +65,8 @@ static constexpr const char* IVF_PARAMS_TEMPLATE =
             }
         },
         "{BUCKET_PER_DATA_KEY}": 1,
-        "{IVF_USE_REORDER_KEY}": false,
-        "{IVF_PRECISE_CODES_KEY}": {
+        "{USE_REORDER_KEY}": false,
+        "{PRECISE_CODES_KEY}": {
             "{IO_PARAMS_KEY}": {
                 "{IO_TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
                 "{IO_FILE_PATH}": "{DEFAULT_FILE_PATH_VALUE}"
@@ -102,7 +102,7 @@ IVF::CheckAndMappingExternalParam(const JsonType& external_param,
         {
             IVF_PRECISE_QUANTIZATION_TYPE,
             {
-                IVF_PRECISE_CODES_KEY,
+                PRECISE_CODES_KEY,
                 QUANTIZATION_PARAMS_KEY,
                 QUANTIZATION_TYPE_KEY,
             },
@@ -110,7 +110,7 @@ IVF::CheckAndMappingExternalParam(const JsonType& external_param,
         {
             IVF_PRECISE_IO_TYPE,
             {
-                IVF_PRECISE_CODES_KEY,
+                PRECISE_CODES_KEY,
                 IO_PARAMS_KEY,
                 IO_TYPE_KEY,
             },
@@ -118,7 +118,7 @@ IVF::CheckAndMappingExternalParam(const JsonType& external_param,
         {
             IVF_PRECISE_FILE_PATH,
             {
-                IVF_PRECISE_CODES_KEY,
+                PRECISE_CODES_KEY,
                 IO_PARAMS_KEY,
                 IO_FILE_PATH,
             },
@@ -169,7 +169,7 @@ IVF::CheckAndMappingExternalParam(const JsonType& external_param,
         {
             IVF_USE_REORDER,
             {
-                IVF_USE_REORDER_KEY,
+                USE_REORDER_KEY,
             },
         },
         {
@@ -196,7 +196,7 @@ IVF::CheckAndMappingExternalParam(const JsonType& external_param,
         {
             IVF_THREAD_COUNT,
             {
-                IVF_THREAD_COUNT_KEY,
+                BUILD_THREAD_COUNT_KEY,
             },
         },
     };
@@ -235,7 +235,8 @@ IVF::IVF(const IVFParameterPtr& param, const IndexCommonParam& common_param)
     }
     this->use_reorder_ = param->use_reorder;
     if (this->use_reorder_) {
-        this->reorder_codes_ = FlattenInterface::MakeInstance(param->flatten_param, common_param);
+        this->reorder_codes_ =
+            FlattenInterface::MakeInstance(param->precise_codes_param, common_param);
     }
     this->use_residual_ = param->bucket_param->use_residual_;
     this->use_attribute_filter_ = param->use_attribute_filter;
@@ -246,9 +247,9 @@ IVF::IVF(const IVFParameterPtr& param, const IndexCommonParam& common_param)
     }
 
     this->thread_pool_ = common_param.thread_pool_;
-    if (param->thread_count > 1 and this->thread_pool_ == nullptr) {
+    if (param->build_thread_count > 1 and this->thread_pool_ == nullptr) {
         this->thread_pool_ = SafeThreadPool::FactoryDefaultThreadPool();
-        this->thread_pool_->SetPoolSize(param->thread_count);
+        this->thread_pool_->SetPoolSize(param->build_thread_count);
     }
 
     if (bucket_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32) {
@@ -376,6 +377,8 @@ IVF::Add(const DatasetPtr& base) {
     const auto* ids = base->GetIds();
     const auto* vectors = base->GetFloat32Vectors();
     const auto* attr_sets = base->GetAttributeSets();
+    const auto* extra_info = base->GetExtraInfos();
+    const auto extra_info_size = base->GetExtraInfoSize();
     auto buckets = partition_strategy_->ClassifyDatas(vectors, num_element, buckets_per_data_);
 
     int64_t current_num;
@@ -426,6 +429,10 @@ IVF::Add(const DatasetPtr& base) {
                 attr_sets != nullptr) {
                 const auto& attr_set = attr_sets[i];
                 this->attr_filter_index_->Insert(attr_set, offset_id, buckets[idx]);
+            }
+            if (extra_info_size > 0) {
+                this->extra_infos_->InsertExtraInfo(extra_info + i * extra_info_size,
+                                                    i + current_num);
             }
         }
     };
