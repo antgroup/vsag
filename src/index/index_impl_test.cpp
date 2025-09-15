@@ -133,6 +133,10 @@ TEST_CASE("index empty input test", "[ut][index_impl]") {
     REQUIRE_FALSE(result_update_vector.has_value());
     REQUIRE(result_update_vector.error().type == vsag::ErrorType::INVALID_ARGUMENT);
 
+    auto result_update_extrainfo = index->UpdateExtraInfo(dataset);
+    REQUIRE_FALSE(result_update_extrainfo.has_value());
+    REQUIRE(result_update_extrainfo.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+
     auto result_feedback = index->Feedback(dataset, 0, "");
     REQUIRE_FALSE(result_feedback.has_value());
     REQUIRE(result_feedback.error().type == vsag::ErrorType::INVALID_ARGUMENT);
