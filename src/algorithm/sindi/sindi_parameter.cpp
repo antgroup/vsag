@@ -55,8 +55,25 @@ SINDIParameter::ToJson() const {
     json[SPARSE_DOC_PRUNE_RATIO] = doc_prune_ratio;
     json[SPARSE_USE_REORDER] = use_reorder;
     json[SPARSE_WINDOW_SIZE] = window_size;
-
     return json;
+}
+
+bool
+SINDIParameter::CheckCompatibility(const vsag::ParamPtr& other) const {
+    auto sindi_param = std::dynamic_pointer_cast<SINDIParameter>(other);
+    if (sindi_param == nullptr) {
+        return false;
+    }
+    if (this->window_size != sindi_param->window_size) {
+        return false;
+    }
+    if (this->doc_prune_ratio != sindi_param->doc_prune_ratio) {
+        return false;
+    }
+    if (this->use_reorder != sindi_param->use_reorder) {
+        return false;
+    }
+    return true;
 }
 
 void

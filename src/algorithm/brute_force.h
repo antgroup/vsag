@@ -137,8 +137,6 @@ private:
 
     uint64_t resize_increase_count_bit_{DEFAULT_RESIZE_BIT};
 
-    std::shared_ptr<SafeThreadPool> build_pool_{nullptr};
-
     mutable std::shared_mutex global_mutex_;
     mutable std::shared_mutex add_mutex_;
 
@@ -146,7 +144,6 @@ private:
 
     static constexpr uint64_t DEFAULT_RESIZE_BIT = 10;
 
-    bool use_attribute_filter_{false};
     AttrInvertedInterfacePtr attr_filter_index_{nullptr};
 };
 }  // namespace vsag

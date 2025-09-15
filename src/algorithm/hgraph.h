@@ -88,8 +88,10 @@ public:
     void
     GetCodeByInnerId(InnerIdType inner_id, uint8_t* data) const override;
 
-    void
-    GetExtraInfoByIds(const int64_t* ids, int64_t count, char* extra_infos) const override;
+    int64_t
+    GetMemoryUsage() const override {
+        return static_cast<int64_t>(this->CalSerializeSize());
+    }
 
     std::string
     GetMemoryUsageDetail() const override;
@@ -203,9 +205,6 @@ public:
     UpdateAttribute(int64_t id,
                     const AttributeSet& new_attrs,
                     const AttributeSet& origin_attrs) override;
-
-    bool
-    UpdateExtraInfo(const DatasetPtr& new_base) override;
 
 private:
     const void*
@@ -324,7 +323,6 @@ private:
     bool use_elp_optimizer_{false};
     bool ignore_reorder_{false};
     bool build_by_base_{false};
-    bool use_attribute_filter_{false};
 
     BasicSearcherPtr searcher_;
 
@@ -345,9 +343,6 @@ private:
     mutable std::shared_mutex global_mutex_;
     mutable MutexArrayPtr neighbors_mutex_;
     mutable std::shared_mutex add_mutex_;
-
-    std::shared_ptr<SafeThreadPool> build_pool_{nullptr};
-    uint64_t build_thread_count_{100};
 
     std::atomic<InnerIdType> max_capacity_{0};
 

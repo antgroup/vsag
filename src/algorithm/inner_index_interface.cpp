@@ -30,16 +30,31 @@
 
 namespace vsag {
 
-InnerIndexInterface::InnerIndexInterface(ParamPtr index_param, const IndexCommonParam& common_param)
+InnerIndexInterface::InnerIndexInterface(const InnerIndexParameterPtr& index_param,
+                                         const IndexCommonParam& common_param)
     : allocator_(common_param.allocator_.get()),
-      create_param_ptr_(std::move(index_param)),
+      create_param_ptr_(index_param),
       dim_(common_param.dim_),
       metric_(common_param.metric_),
-      data_type_(common_param.data_type_) {
+      data_type_(common_param.data_type_),
+      build_thread_count_(index_param->build_thread_count),
+      use_attribute_filter_(index_param->use_attribute_filter),
+      use_reorder_(index_param->use_reorder) {
     this->label_table_ = std::make_shared<LabelTable>(allocator_);
     this->tomb_label_table_ = std::make_shared<LabelTable>(allocator_);
     this->index_feature_list_ = std::make_shared<IndexFeatureList>();
     this->index_feature_list_->SetFeature(SUPPORT_EXPORT_IDS);
+    this->extra_info_size_ = common_param.extra_info_size_;
+    if (this->extra_info_size_ > 0) {
+        this->extra_infos_ =
+            ExtraInfoInterface::MakeInstance(index_param->extra_info_param, common_param);
+    }
+
+    this->build_pool_ = common_param.thread_pool_;
+    if (this->build_thread_count_ > 1 && this->build_pool_ == nullptr) {
+        this->build_pool_ = SafeThreadPool::FactoryDefaultThreadPool();
+        this->build_pool_->SetPoolSize(build_thread_count_);
+    }
 }
 
 std::vector<int64_t>
@@ -478,6 +493,37 @@ InnerIndexInterface::GetDataByIdsWithFlag(const int64_t* ids,
     }
     this->allocator_->Deallocate(inner_ids);
     return dataset;
+}
+
+void
+InnerIndexInterface::GetExtraInfoByIds(const int64_t* ids, int64_t count, char* extra_infos) const {
+    if (this->extra_infos_ == nullptr) {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION, "extra_info is NULL");
+    }
+    for (int64_t i = 0; i < count; ++i) {
+        std::shared_lock<std::shared_mutex> lock(this->label_lookup_mutex_);
+        auto inner_id = this->label_table_->GetIdByLabel(ids[i]);
+        this->extra_infos_->GetExtraInfoById(inner_id, extra_infos + i * extra_info_size_);
+    }
+}
+
+bool
+InnerIndexInterface::UpdateExtraInfo(const DatasetPtr& new_base) {
+    CHECK_ARGUMENT(new_base != nullptr, "new_base is nullptr");
+    CHECK_ARGUMENT(new_base->GetExtraInfos() != nullptr, "extra_infos is nullptr");
+    CHECK_ARGUMENT(new_base->GetExtraInfoSize() == extra_info_size_, "extra_infos size mismatch");
+    CHECK_ARGUMENT(new_base->GetNumElements() == 1, "new_base size must be one");
+    auto label = new_base->GetIds()[0];
+    if (this->extra_infos_ != nullptr) {
+        std::shared_lock label_lock(this->label_lookup_mutex_);
+        if (not this->label_table_->CheckLabel(label)) {
+            return false;
+        }
+        const auto inner_id = this->label_table_->GetIdByLabel(label);
+        this->extra_infos_->InsertExtraInfo(new_base->GetExtraInfos(), inner_id);
+        return true;
+    }
+    throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION, "extra_infos is not initialized");
 }
 
 void
