@@ -39,6 +39,9 @@ public:
     void
     DeleteNeighborsById(InnerIdType id) override;
 
+    void
+    RecoverDeleteNeighborsById(vsag::InnerIdType id) override;
+
     uint32_t
     GetNeighborSize(InnerIdType id) const override;
 
