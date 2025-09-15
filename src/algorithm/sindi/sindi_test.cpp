@@ -63,7 +63,7 @@ TEST_CASE("SINDI Basic Test", "[ut][SINDI]") {
         "use_reorder": {},
         "doc_prune_ratio": 0.0,
         "term_prune_ratio": 0.0,
-        "window_size": 1000
+        "window_size": 10000
     }})";
 
     vsag::JsonType param_json = vsag::JsonType::parse(fmt::format(param_str, use_reorder));
