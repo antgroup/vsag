@@ -58,6 +58,14 @@ GetRaBitQSQ4UBinaryIP() {
 #if defined(ENABLE_AVX512)
         return avx512::RaBitQSQ4UBinaryIP;
 #endif
+    } else if (SimdStatus::SupportSVE()) {
+#if defined(ENABLE_SVE)
+        return sve::RaBitQSQ4UBinaryIP;
+#endif
+    } else if (SimdStatus::SupportNEON()) {
+#if defined(ENABLE_NEON)
+        return neon::RaBitQSQ4UBinaryIP;
+#endif
     }
     return generic::RaBitQSQ4UBinaryIP;
 }

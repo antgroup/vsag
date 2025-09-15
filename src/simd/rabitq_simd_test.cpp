@@ -1,4 +1,3 @@
-
 // Copyright 2024-present the vsag project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -71,6 +70,10 @@ using namespace vsag;
             float sve = sve::Func(codes.data(), bits.data(), dim);             \
             REQUIRE(fixtures::dist_t(gt) == fixtures::dist_t(sve));            \
         }                                                                      \
+        if (SimdStatus::SupportNEON()) {                                       \
+            float neon = neon::Func(codes.data(), bits.data(), dim);           \
+            REQUIRE(fixtures::dist_t(gt) == fixtures::dist_t(neon));           \
+        }                                                                      \
     }
 
 #define BENCHMARK_SIMD_COMPUTE_SQ4(Simd, Comp)          \
@@ -96,18 +99,19 @@ TEST_CASE("RaBitQ SQ4U-BQ Compute Benchmark", "[ut][simd][!benchmark]") {
 
     int count = 10000;
     int dim = 32;
+
     BENCHMARK_SIMD_COMPUTE_SQ4(generic, RaBitQSQ4UBinaryIP);
     if (SimdStatus::SupportAVX512()) {
         BENCHMARK_SIMD_COMPUTE_SQ4(avx512, RaBitQSQ4UBinaryIP);
+    }
+    if (SimdStatus::SupportAVX512VPOPCNTDQ()) {
+        BENCHMARK_SIMD_COMPUTE_SQ4(avx512vpopcntdq, RaBitQSQ4UBinaryIP);
     }
     if (SimdStatus::SupportSVE()) {
         BENCHMARK_SIMD_COMPUTE_SQ4(sve, RaBitQSQ4UBinaryIP);
     }
     if (SimdStatus::SupportNEON()) {
         BENCHMARK_SIMD_COMPUTE_SQ4(neon, RaBitQSQ4UBinaryIP);
-    }
-    if (SimdStatus::SupportAVX512VPOPCNTDQ()) {
-        BENCHMARK_SIMD_COMPUTE_SQ4(avx512vpopcntdq, RaBitQSQ4UBinaryIP);
     }
 }
 
@@ -142,12 +146,14 @@ TEST_CASE("RaBitQ SQ4U-BQ Compute Codes", "[ut][simd]") {
 TEST_CASE("RaBitQ FP32-BQ SIMD Compute Codes", "[ut][simd]") {
     auto dims = fixtures::get_common_used_dims();
     int64_t count = 100;
+
     for (const auto& dim : dims) {
         uint32_t code_size = (dim + 7) / 8;
         float inv_sqrt_d = 1.0f / sqrt(dim);
         std::vector<float> queries;
         std::vector<uint8_t> bases;
         std::tie(queries, bases) = fixtures::GenerateBinaryVectorsAndCodes(count, dim);
+
         for (uint64_t i = 0; i < count; ++i) {
             auto* query = queries.data() + i * dim;
             auto* base = bases.data() + i * code_size;
@@ -196,9 +202,11 @@ TEST_CASE("RaBitQ FP32-BQ SIMD Compute Benchmark", "[ut][simd][!benchmark]") {
         BENCHMARK_SIMD_COMPUTE(sve, RaBitQFloatBinaryIP);
     }
 }
+
 TEST_CASE("SIMD test for rescale", "[ut][simd]") {
     auto dims = fixtures::get_common_used_dims();
     int64_t count = 100;
+
     for (const auto& dim : dims) {
         std::vector<float> gt = fixtures::GenerateVectors<float>(count, dim);
 
@@ -227,6 +235,7 @@ TEST_CASE("SIMD test for rescale", "[ut][simd]") {
 
             const float delta = 1e-5;
             generic::VecRescale(gt_data, dim, 0.5);
+
             if (SimdStatus::SupportAVX512()) {
                 avx512::VecRescale(avx512_data, dim, 0.5);
                 for (int j = 0; j < dim; j++) {
@@ -251,14 +260,12 @@ TEST_CASE("SIMD test for rescale", "[ut][simd]") {
                     REQUIRE(std::abs(gt_data[j] - sse_data[j]) < delta);
                 }
             }
-
             if (SimdStatus::SupportNEON()) {
                 neon::VecRescale(neon_data, dim, 0.5);
                 for (int j = 0; j < dim; j++) {
                     REQUIRE(std::abs(gt_data[j] - neon_data[j]) < delta);
                 }
             }
-
             if (SimdStatus::SupportSVE()) {
                 sve::VecRescale(sve_data, dim, 0.5);
                 for (int j = 0; j < dim; j++) {
@@ -272,6 +279,7 @@ TEST_CASE("SIMD test for rescale", "[ut][simd]") {
 TEST_CASE("SIMD test for kacs_walk", "[ut][simd]") {
     auto dims = fixtures::get_common_used_dims();
     int64_t count = 100;
+
     for (const auto& dim : dims) {
         std::vector<float> gt = fixtures::GenerateVectors<float>(count, dim);
 
@@ -293,6 +301,7 @@ TEST_CASE("SIMD test for kacs_walk", "[ut][simd]") {
         for (int i = 0; i < count; i++) {
             auto* gt_data = gt.data() + i * dim;
             generic::KacsWalk(gt_data, dim);
+
             if (SimdStatus::SupportAVX512()) {
                 auto* avx512_data = avx512_datas.data() + i * dim;
                 avx512::KacsWalk(avx512_data, dim);
@@ -321,7 +330,6 @@ TEST_CASE("SIMD test for kacs_walk", "[ut][simd]") {
                     REQUIRE(std::abs(gt_data[j] - sse_data[j]) < delta);
                 }
             }
-
             if (SimdStatus::SupportNEON()) {
                 auto* neon_data = neon_datas.data() + i * dim;
                 neon::KacsWalk(neon_data, dim);
@@ -329,7 +337,6 @@ TEST_CASE("SIMD test for kacs_walk", "[ut][simd]") {
                     REQUIRE(std::abs(gt_data[j] - neon_data[j]) < delta);
                 }
             }
-
             if (SimdStatus::SupportSVE()) {
                 auto* sve_data = sve_datas.data() + i * dim;
                 sve::KacsWalk(sve_data, dim);
@@ -344,6 +351,7 @@ TEST_CASE("SIMD test for kacs_walk", "[ut][simd]") {
 TEST_CASE("SIMD test for rotate", "[ut][simd]") {
     auto dims = fixtures::get_common_used_dims();
     int64_t count = 100;
+
     for (const auto& dim : dims) {
         std::vector<float> gt = fixtures::GenerateVectors<float>(count, dim);
 
@@ -407,7 +415,6 @@ TEST_CASE("SIMD test for rotate", "[ut][simd]") {
                     REQUIRE(std::abs(gt_data[j] - sse_data[j]) < delta);
                 }
             }
-
             if (SimdStatus::SupportNEON()) {
                 auto* neon_data = neon_datas.data() + i * dim;
                 neon::FHTRotate(neon_data, trunc_dim);
@@ -416,7 +423,6 @@ TEST_CASE("SIMD test for rotate", "[ut][simd]") {
                     REQUIRE(std::abs(gt_data[j] - neon_data[j]) < delta);
                 }
             }
-
             if (SimdStatus::SupportSVE()) {
                 auto* sve_data = sve_datas.data() + i * dim;
                 sve::FHTRotate(sve_data, trunc_dim);
@@ -428,9 +434,11 @@ TEST_CASE("SIMD test for rotate", "[ut][simd]") {
         }
     }
 }
+
 TEST_CASE("SIMD test for flip_sign", "[ut][simd]") {
     auto dims = fixtures::get_common_used_dims();
     int64_t count = 100;
+
     for (const auto& dim : dims) {
         uint32_t flip_size = (dim + 7) / 8;
         std::vector<float> gt = fixtures::GenerateVectors<float>(count, dim);
@@ -463,7 +471,6 @@ TEST_CASE("SIMD test for flip_sign", "[ut][simd]") {
                     REQUIRE(std::abs(gt_data[j] - avx512_data[j]) < delta);
                 }
             }
-
             if (SimdStatus::SupportNEON()) {
                 auto* neon_data = neon_datas.data() + i * dim;
                 neon::FlipSign(flip, neon_data, dim);
@@ -471,7 +478,6 @@ TEST_CASE("SIMD test for flip_sign", "[ut][simd]") {
                     REQUIRE(std::abs(gt_data[j] - neon_data[j]) < delta);
                 }
             }
-
             if (SimdStatus::SupportSVE()) {
                 auto* sve_data = sve_datas.data() + i * dim;
                 sve::FlipSign(flip, sve_data, dim);
@@ -500,7 +506,6 @@ TEST_CASE("SIMD FlipSign Benchmark", "[ut][simd][!benchmark]") {
     std::vector<uint8_t> flips = fixtures::GenerateVectors<uint8_t>(count, flip_size);
 
     BENCHMARK_SIMD_FLIP_SIGN(generic, FlipSign);
-
     if (SimdStatus::SupportAVX512()) {
         BENCHMARK_SIMD_FLIP_SIGN(avx512, FlipSign);
     }
@@ -551,14 +556,12 @@ TEST_CASE("SIMD FlipSign Correctness with Patterns", "[ut][simd]") {
                     REQUIRE(std::abs(gt_data[i] - avx512_data[i]) < delta);
                 }
             }
-
             if (SimdStatus::SupportNEON()) {
                 neon::FlipSign(test.flip_pattern.data(), neon_data.data(), dim);
                 for (int i = 0; i < dim; i++) {
                     REQUIRE(std::abs(gt_data[i] - neon_data[i]) < delta);
                 }
             }
-
             if (SimdStatus::SupportSVE()) {
                 sve::FlipSign(test.flip_pattern.data(), sve_data.data(), dim);
                 for (int i = 0; i < dim; i++) {
