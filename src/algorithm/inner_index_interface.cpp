@@ -229,7 +229,7 @@ InnerIndexInterface::CheckIdExist(int64_t id) const {
 
 void
 InnerIndexInterface::Serialize(std::ostream& out_stream) const {
-    std::string time_record_name = this->GetName() + " Deserialize";
+    std::string time_record_name = this->GetName() + " Serialize";
     SlowTaskTimer t(time_record_name);
 
     if (GetNumElements() == 0) {
