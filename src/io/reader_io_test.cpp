@@ -58,9 +58,10 @@ TEST_CASE("ReaderIO Read Test", "[ut][ReaderIO]") {
     common_param.allocator_ = vsag::Engine::CreateDefaultAllocator();
     auto reader_param = std::make_shared<vsag::ReaderIOParameter>();
     reader_param->reader = std::make_shared<TestReader>(all_data.data(), all_data.size());
+    IOParamPtr io_param = reader_param;
 
-    ReaderIO reader_io(reader_param, common_param);
-    reader_io.InitIOImpl(reader_param);
+    ReaderIO reader_io(io_param, common_param);
+    reader_io.InitIOImpl(io_param);
     reader_io.start_ = 0;
     reader_io.size_ = kTestSize;
 

@@ -26,7 +26,7 @@ using namespace vsag;
 
 TEST_CASE("MMapIO Read & Write", "[ut][MMapIO]") {
     fixtures::TempDir dir("mmap_io");
-    auto path = dir.GenerateRandomFile();
+    auto path = dir.GenerateRandomFile(false);
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     TestDistIOWrongInit<MMapIO>(allocator.get());
     auto io = std::make_unique<MMapIO>(path, allocator.get());

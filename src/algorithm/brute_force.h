@@ -71,10 +71,7 @@ public:
         return IndexType::BRUTEFORCE;
     }
 
-    [[nodiscard]] int64_t
-    GetMemoryUsage() const override;
-
-    [[nodiscard]] std::string
+    std::string
     GetName() const override {
         return INDEX_BRUTE_FORCE;
     }
