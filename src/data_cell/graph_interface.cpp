@@ -36,9 +36,20 @@ GraphInterface::MakeInstance(const GraphInterfaceParamPtr& graph_param,
             if (io_string == IO_TYPE_VALUE_BLOCK_MEMORY_IO) {
                 return std::make_shared<GraphDataCell<MemoryBlockIO>>(graph_param, common_param);
             }
-
             if (io_string == IO_TYPE_VALUE_MEMORY_IO) {
                 return std::make_shared<GraphDataCell<MemoryIO>>(graph_param, common_param);
+            }
+            if (io_string == IO_TYPE_VALUE_MMAP_IO) {
+                return std::make_shared<GraphDataCell<MMapIO>>(graph_param, common_param);
+            }
+            if (io_string == IO_TYPE_VALUE_BUFFER_IO) {
+                return std::make_shared<GraphDataCell<BufferIO>>(graph_param, common_param);
+            }
+            if (io_string == IO_TYPE_VALUE_ASYNC_IO) {
+                return std::make_shared<GraphDataCell<AsyncIO>>(graph_param, common_param);
+            }
+            if (io_string == IO_TYPE_VALUE_READER_IO) {
+                return std::make_shared<GraphDataCell<ReaderIO>>(graph_param, common_param);
             }
             return nullptr;
     }
