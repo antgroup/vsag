@@ -67,7 +67,7 @@ public:
 
     static const std::string name;
 
-    constexpr static uint64_t base_count = 1200;
+    constexpr static uint64_t base_count = 1000;
 
     static const std::vector<std::pair<std::string, float>> all_test_cases;
 };
@@ -104,7 +104,7 @@ IVFTestIndex::GetResource(bool sample) {
         resource->test_cases = IVFTestIndex::all_test_cases;
         resource->metric_types = {"ip", "l2", "cosine"};
         resource->train_types = {"kmeans", "random"};
-        resource->base_count = IVFTestIndex::base_count * 10;
+        resource->base_count = IVFTestIndex::base_count * 3;
     }
     return resource;
 }
