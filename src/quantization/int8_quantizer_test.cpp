@@ -45,14 +45,14 @@ TestQuantizerEncodeDecodeINT8(Quantizer<INT8Quantizer<metric>>& quant,
                               bool retrain = true) {
     auto vecs = fixtures::generate_int8_codes(count, dim);
     if (retrain) {
-        quant.ReTrain(reinterpret_cast<DataTypePtr>(vecs.data()), count);
+        quant.ReTrain(reinterpret_cast<DataType*>(vecs.data()), count);
     }
     // Test EncodeOne & DecodeOne
     for (uint64_t i = 0; i < count; ++i) {
         std::vector<uint8_t> codes(quant.GetCodeSize());
-        quant.EncodeOne(reinterpret_cast<DataTypePtr>(vecs.data() + i * dim), codes.data());
+        quant.EncodeOne(reinterpret_cast<DataType*>(vecs.data() + i * dim), codes.data());
         std::vector<int8_t> out_vec(dim);
-        quant.DecodeOne(codes.data(), reinterpret_cast<DataTypePtr>(out_vec.data()));
+        quant.DecodeOne(codes.data(), reinterpret_cast<DataType*>(out_vec.data()));
         float sum = 0.0F;
         for (int j = 0; j < dim; ++j) {
             sum += std::abs(static_cast<DataType>(vecs[i * dim + j]) -
@@ -63,9 +63,9 @@ TestQuantizerEncodeDecodeINT8(Quantizer<INT8Quantizer<metric>>& quant,
 
     // Test EncodeBatch & DecodeBatch
     std::vector<uint8_t> codes(quant.GetCodeSize() * count);
-    quant.EncodeBatch(reinterpret_cast<DataTypePtr>(vecs.data()), codes.data(), count);
+    quant.EncodeBatch(reinterpret_cast<DataType*>(vecs.data()), codes.data(), count);
     std::vector<int8_t> out_vec(dim * count);
-    quant.DecodeBatch(codes.data(), reinterpret_cast<DataTypePtr>(out_vec.data()), count);
+    quant.DecodeBatch(codes.data(), reinterpret_cast<DataType*>(out_vec.data()), count);
     for (int64_t i = 0; i < count; ++i) {
         float sum = 0.0F;
         for (int j = 0; j < dim; ++j) {
@@ -106,15 +106,15 @@ TestComputeCodesINT8(Quantizer<INT8Quantizer<metric>>& quantizer,
                      bool retrain = true) {
     auto vecs = fixtures::generate_int8_codes(count, dim);
     if (retrain) {
-        quantizer.ReTrain(reinterpret_cast<DataTypePtr>(vecs.data()), count);
+        quantizer.ReTrain(reinterpret_cast<DataType*>(vecs.data()), count);
     }
     for (int i = 0; i < count; ++i) {
         auto idx1 = random() % count;
         auto idx2 = random() % count;
         std::vector<uint8_t> codes1(quantizer.GetCodeSize());
         std::vector<uint8_t> codes2(quantizer.GetCodeSize());
-        quantizer.EncodeOne(reinterpret_cast<DataTypePtr>(vecs.data() + idx1 * dim), codes1.data());
-        quantizer.EncodeOne(reinterpret_cast<DataTypePtr>(vecs.data() + idx2 * dim), codes2.data());
+        quantizer.EncodeOne(reinterpret_cast<DataType*>(vecs.data() + idx1 * dim), codes1.data());
+        quantizer.EncodeOne(reinterpret_cast<DataType*>(vecs.data() + idx2 * dim), codes2.data());
         float gt = 1.0F;
         float value = quantizer.Compute(codes1.data(), codes2.data());
         if constexpr (metric == vsag::MetricType::METRIC_TYPE_IP) {
@@ -156,7 +156,7 @@ TestComputerINT8(Quantizer<INT8Quantizer<metric>>& quant,
     auto queries = fixtures::generate_int8_codes(query_count, dim, 165);
 
     if (retrain) {
-        quant.ReTrain(reinterpret_cast<DataTypePtr>(vecs.data()), count);
+        quant.ReTrain(reinterpret_cast<DataType*>(vecs.data()), count);
     }
 
     auto gt_func = [&](int base_idx, int query_idx) -> float {
@@ -187,7 +187,7 @@ TestComputerINT8(Quantizer<INT8Quantizer<metric>>& quant,
     for (int i = 0; i < query_count; ++i) {
         std::shared_ptr<Computer<INT8Quantizer<metric>>> computer;
         computer = quant.FactoryComputer();
-        computer->SetQuery(reinterpret_cast<DataTypePtr>(queries.data() + i * dim));
+        computer->SetQuery(reinterpret_cast<DataType*>(queries.data() + i * dim));
 
         //Test Compute One Dist;
         std::vector<uint8_t> codes1(quant.GetCodeSize() * count, 0);
@@ -195,7 +195,7 @@ TestComputerINT8(Quantizer<INT8Quantizer<metric>>& quant,
         for (int j = 0; j < count; ++j) {
             auto gt = gt_func(j, i);
             uint8_t* code = codes1.data() + j * quant.GetCodeSize();
-            quant.EncodeOne(reinterpret_cast<DataTypePtr>(vecs.data() + j * dim), code);
+            quant.EncodeOne(reinterpret_cast<DataType*>(vecs.data() + j * dim), code);
             quant.ComputeDist(*computer, code, dists1.data() + j);
             REQUIRE(gt == dists1[j]);
             if (std::abs(gt - dists1[j]) > error) {
@@ -209,7 +209,7 @@ TestComputerINT8(Quantizer<INT8Quantizer<metric>>& quant,
         // Test Compute Batch
         std::vector<uint8_t> codes2(quant.GetCodeSize() * count, 0);
         std::vector<float> dists2(count, 0);
-        quant.EncodeBatch(reinterpret_cast<DataTypePtr>(vecs.data()), codes2.data(), count);
+        quant.EncodeBatch(reinterpret_cast<DataType*>(vecs.data()), codes2.data(), count);
         quant.ScanBatchDists(*computer, count, codes2.data(), dists2.data());
         for (int j = 0; j < count; ++j) {
             REQUIRE(fixtures::dist_t(dists1[j]) == fixtures::dist_t(dists2[j]));
@@ -252,7 +252,7 @@ TestSerializeAndDeserializeINT8(Quantizer<INT8Quantizer<metric>>& quant1,
                                 float unbounded_numeric_error_rate = 1.0f,
                                 float unbounded_related_error_rate = 1.0f) {
     auto vecs = fixtures::generate_int8_codes(count, dim);
-    quant1.ReTrain(reinterpret_cast<DataTypePtr>(vecs.data()), count);
+    quant1.ReTrain(reinterpret_cast<DataType*>(vecs.data()), count);
 
     test_serializion(quant1, quant2);
 

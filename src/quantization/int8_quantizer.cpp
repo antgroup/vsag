@@ -78,7 +78,7 @@ template <MetricType metric>
 bool
 INT8Quantizer<metric>::EncodeBatchImpl(const DataType* data, uint8_t* codes, uint64_t count) {
     const int8_t* dataPtr = reinterpret_cast<const int8_t*>(data);
-    for (uint64_t i{0}; i < count; ++i) {
+    for (uint64_t i = 0; i < count; ++i) {
         EncodeOneImpl(reinterpret_cast<const float*>(dataPtr + i * this->dim_),
                       codes + i * this->code_size_);
     }
@@ -96,7 +96,7 @@ template <MetricType metric>
 bool
 INT8Quantizer<metric>::DecodeBatchImpl(const uint8_t* codes, DataType* data, uint64_t count) {
     int8_t* dataPtr = reinterpret_cast<int8_t*>(data);
-    for (uint64_t i{0}; i < count; ++i) {
+    for (uint64_t i = 0; i < count; ++i) {
         memcpy(dataPtr + i * this->dim_, codes + i * this->code_size_, this->dim_);
     }
     return true;
@@ -113,14 +113,14 @@ INT8Quantizer<metric>::ComputeImpl(const uint8_t* codes1, const uint8_t* codes2)
         const auto* mold1 = reinterpret_cast<const float*>(codes1 + this->dim_ * sizeof(uint8_t));
         const auto* mold2 = reinterpret_cast<const float*>(codes2 + this->dim_ * sizeof(uint8_t));
 
-        if (*mold1 == 0 || *mold2 == 0) {
-            return 1.0F;
+        if (*mold1 == 0 or *mold2 == 0) {
+            return 1.0f;
         }
         auto similarity = INT8ComputeIP(reinterpret_cast<const int8_t*>(codes1),
                                         reinterpret_cast<const int8_t*>(codes2),
                                         this->dim_);
         similarity /= mold1[0] * mold2[0];
-        return 1.0F - std::max(-1.0f, std::min(1.0f, similarity));
+        return 1.0f - std::max(-1.0f, std::min(1.0f, similarity));
     } else if (metric == MetricType::METRIC_TYPE_L2SQR) {
         return INT8ComputeL2Sqr(reinterpret_cast<const int8_t*>(codes1),
                                 reinterpret_cast<const int8_t*>(codes2),
@@ -163,8 +163,8 @@ INT8Quantizer<metric>::ComputeDistImpl(Computer<INT8Quantizer<metric>>& computer
         const auto* mold = reinterpret_cast<const float*>(codes + this->dim_ * sizeof(uint8_t));
         const auto* query_mold =
             reinterpret_cast<const float*>(computer.buf_ + this->dim_ * sizeof(uint8_t));
-        if (*mold == 0 || *query_mold == 0) {
-            *dists = 1.0F;
+        if (*mold == 0 or *query_mold == 0) {
+            *dists = 1.0f;
             return;
         }
         const auto similarity = INT8ComputeIP(reinterpret_cast<const int8_t*>(codes),
