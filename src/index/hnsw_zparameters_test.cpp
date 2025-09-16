@@ -29,7 +29,7 @@ TEST_CASE("create hnsw with correct parameter", "[ut][hnsw]") {
         }
         )";
 
-    nlohmann::json parsed_params = nlohmann::json::parse(build_parameter_json);
+    auto parsed_params = vsag::JsonType::Parse(build_parameter_json);
     vsag::HnswParameters::FromJson(parsed_params, common_param);
 }
 
@@ -46,28 +46,28 @@ TEST_CASE("create hnsw with wrong parameter", "[ut][hnsw]") {
         )";
     SECTION("small max_degree") {
         auto param_str = fmt::format(build_parameter_json, 3, 100);
-        nlohmann::json parsed_params = nlohmann::json::parse(param_str);
+        auto parsed_params = vsag::JsonType::Parse(param_str);
         REQUIRE_THROWS(vsag::HnswParameters::FromJson(parsed_params, common_param));
     }
     SECTION("big max_degree") {
         auto wrong_param_str = fmt::format(build_parameter_json, common_param.dim_ + 1, 200);
-        nlohmann::json wrong_parsed_params = nlohmann::json::parse(wrong_param_str);
+        auto wrong_parsed_params = vsag::JsonType::Parse(wrong_param_str);
         REQUIRE_THROWS(vsag::HnswParameters::FromJson(wrong_parsed_params, common_param));
         auto correct_param_str = fmt::format(build_parameter_json, common_param.dim_, 200);
-        nlohmann::json correct_parsed_params = nlohmann::json::parse(correct_param_str);
+        auto correct_parsed_params = vsag::JsonType::Parse(correct_param_str);
         vsag::HnswParameters::FromJson(correct_parsed_params, common_param);
     }
     SECTION("small ef_construction") {
         auto param_str = fmt::format(build_parameter_json, 16, 15);
-        nlohmann::json parsed_params = nlohmann::json::parse(param_str);
+        auto parsed_params = vsag::JsonType::Parse(param_str);
         REQUIRE_THROWS(vsag::HnswParameters::FromJson(parsed_params, common_param));
     }
     SECTION("big max_degree") {
         auto wrong_param_str = fmt::format(build_parameter_json, 16, 1001);
-        nlohmann::json wrong_parsed_params = nlohmann::json::parse(wrong_param_str);
+        auto wrong_parsed_params = vsag::JsonType::Parse(wrong_param_str);
         REQUIRE_THROWS(vsag::HnswParameters::FromJson(wrong_parsed_params, common_param));
         auto correct_param_str = fmt::format(build_parameter_json, 16, 1000);
-        nlohmann::json correct_parsed_params = nlohmann::json::parse(correct_param_str);
+        auto correct_parsed_params = vsag::JsonType::Parse(correct_param_str);
         vsag::HnswParameters::FromJson(correct_parsed_params, common_param);
     }
 }

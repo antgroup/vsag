@@ -38,48 +38,59 @@ DEFINE_POINTER(Metadata);
 class Metadata {
 public:
     [[nodiscard]] JsonType
-    Get(std::string_view name) const {
+    Get(const std::string& name) const {
         return metadata_[name];
     }
 
+    template <typename T>
     void
-    Set(const std::string& name, JsonType jsonify_obj) {
+    Set(const std::string& name, T value) {
         // name `_[0-9a-z_]*` is reserved
         if (name.empty() or name[0] == '_') {
             return;
         }
-        metadata_[name] = std::move(jsonify_obj);
+        if constexpr (std::is_same_v<T, std::string>) {
+            metadata_[name].SetString(value);
+        } else if constexpr (std::is_same_v<T, bool>) {
+            metadata_[name].SetBool(value);
+        } else if constexpr (std::is_integral_v<T>) {
+            metadata_[name].SetInt(value);
+        } else if constexpr (std::is_same_v<T, float>) {
+            metadata_[name].SetFloat(value);
+        } else if constexpr (std::is_same_v<T, JsonType>) {
+            metadata_[name].SetJson(value);
+        }
     }
 
 public:
     [[nodiscard]] std::string
     Version() const {
-        if (metadata_.contains("_version")) {
-            return metadata_["_version"];
+        if (metadata_.Contains("_version")) {
+            return metadata_["_version"].GetString();
         }
         return "";
     }
 
     void
     SetVersion(const std::string& version) {
-        metadata_["_version"] = version;
+        metadata_["_version"].SetString(version);
     }
 
     [[nodiscard]] bool
     EmptyIndex() const {
-        return metadata_.contains("_empty") && metadata_["_empty"];
+        return metadata_.Contains("_empty") and metadata_["_empty"].GetBool();
     }
 
     void
     SetEmptyIndex(bool empty) {
-        metadata_["_empty"] = empty;
+        metadata_["_empty"].SetBool(empty);
     }
 
 public:
     std::string
     ToString() {
         make_sure_metadata_not_null();
-        return metadata_.dump();
+        return metadata_.Dump();
     }
 
     Binary
@@ -98,11 +109,11 @@ public:
 
 public:
     Metadata(std::string str) {
-        metadata_ = JsonType::parse(str);
+        metadata_ = JsonType::Parse(str);
     }
     Metadata(const Binary& binary) {
         auto str = std::string((char*)binary.data.get(), binary.size);
-        metadata_ = JsonType::parse(str);
+        metadata_ = JsonType::Parse(str);
     }
     Metadata(JsonType metadata) : metadata_(std::move(metadata)) {
     }

@@ -16,7 +16,6 @@
 #pragma once
 
 #include <fmt/format.h>
-#include <spdlog/spdlog.h>
 
 #include "vsag/logger.h"
 #include "vsag/options.h"

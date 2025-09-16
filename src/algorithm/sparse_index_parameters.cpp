@@ -21,15 +21,15 @@ namespace vsag {
 
 void
 SparseIndexParameters::FromJson(const JsonType& json) {
-    if (json.contains(SPARSE_NEED_SORT)) {
-        need_sort = json[SPARSE_NEED_SORT];
+    if (json.Contains(SPARSE_NEED_SORT)) {
+        need_sort = json[SPARSE_NEED_SORT].GetBool();
     }
 }
 
 JsonType
 SparseIndexParameters::ToJson() const {
     JsonType json;
-    json[SPARSE_NEED_SORT] = need_sort;
+    json[SPARSE_NEED_SORT].SetBool(need_sort);
     return json;
 }
 

@@ -35,7 +35,7 @@ public:
     JsonType
     ToJson() const override {
         JsonType json;
-        json[QUANTIZATION_TYPE_KEY] = this->GetTypeName();
+        json[QUANTIZATION_TYPE_KEY].SetString(this->GetTypeName());
         return json;
     }
 };
