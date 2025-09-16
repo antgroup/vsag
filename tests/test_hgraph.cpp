@@ -13,8 +13,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <spdlog/spdlog.h>
-
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
 #include <limits>
@@ -283,10 +281,10 @@ HGraphTestIndex::TestGeneral(const TestIndex::IndexPtr& index,
 
 void
 HGraphTestIndex::TestMemoryUsageDetail(const IndexPtr& index) {
-    auto memory_detail = vsag::JsonType::parse(index->GetMemoryUsageDetail());
-    REQUIRE(memory_detail.contains("basic_flatten_codes"));
-    REQUIRE(memory_detail.contains("bottom_graph"));
-    REQUIRE(memory_detail.contains("route_graph"));
+    auto memory_detail = vsag::JsonType::Parse(index->GetMemoryUsageDetail());
+    REQUIRE(memory_detail.Contains("basic_flatten_codes"));
+    REQUIRE(memory_detail.Contains("bottom_graph"));
+    REQUIRE(memory_detail.Contains("route_graph"));
 }
 }  // namespace fixtures
 

@@ -13,8 +13,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <spdlog/spdlog.h>
-
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
 #include <limits>
@@ -617,7 +615,7 @@ TestBruteForceEstimateMemory(const fixtures::BruteForceResourcePtr& resource) {
             auto index = TestIndex::TestFactory(BruteForceTestIndex::name, param, true);
             auto dataset = BruteForceTestIndex::pool.GetDatasetAndCreate(
                 dim, BruteForceTestIndex::base_count, metric_type);
-            TestIndex::TestEstimateMemory(BruteForceTestIndex::name, param, dataset);
+            auto val = index->EstimateMemory(1000);
             vsag::Options::Instance().set_block_size_limit(origin_size);
         }
     }

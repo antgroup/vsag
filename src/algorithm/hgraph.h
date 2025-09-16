@@ -15,7 +15,6 @@
 
 #pragma once
 
-#include <nlohmann/json.hpp>
 #include <random>
 #include <shared_mutex>
 #include <string>
@@ -273,7 +272,7 @@ private:
     serialize_basic_info() const;
 
     void
-    deserialize_basic_info(JsonType jsonify_basic_info);
+    deserialize_basic_info(const JsonType& jsonify_basic_info);
 
     void
     serialize_label_info(StreamWriter& writer) const;

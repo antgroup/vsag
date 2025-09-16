@@ -116,7 +116,7 @@ SINDI::KnnSearch(const DatasetPtr& query,
 
     // search parameter
     SINDISearchParameter search_param;
-    search_param.FromJson(JsonType::parse(parameters));
+    search_param.FromJson(JsonType::Parse(parameters));
     CHECK_ARGUMENT(search_param.n_candidate <= AMPLIFICATION_FACTOR * k,
                    fmt::format("n_candidate ({}) should be less than {} * k ({})",
                                search_param.n_candidate,
@@ -253,7 +253,7 @@ SINDI::RangeSearch(const DatasetPtr& query,
 
     // search parameter
     SINDISearchParameter search_param;
-    search_param.FromJson(JsonType::parse(parameters));
+    search_param.FromJson(JsonType::Parse(parameters));
     InnerSearchParam inner_param;
 
     inner_param.range_search_limit_size = static_cast<int>(limited_size);
@@ -289,7 +289,7 @@ SINDI::Serialize(StreamWriter& writer) const {
 
     JsonType jsonify_basic_info;
     auto metadata = std::make_shared<Metadata>();
-    jsonify_basic_info[INDEX_PARAM] = this->create_param_ptr_->ToString();
+    jsonify_basic_info[INDEX_PARAM].SetString(this->create_param_ptr_->ToString());
     metadata->Set("basic_info", jsonify_basic_info);
     auto footer = std::make_shared<Footer>(metadata);
     footer->Write(writer);

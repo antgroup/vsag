@@ -24,7 +24,7 @@ TEST_CASE("GNO-IMI Parameters Test", "[ut][GNOIMIParameter]") {
         "first_order_buckets_count": 200,
         "second_order_buckets_count": 50
     })";
-    vsag::JsonType param_json = vsag::JsonType::parse(param_str);
+    vsag::JsonType param_json = vsag::JsonType::Parse(param_str);
     auto param = std::make_shared<vsag::GNOIMIParameter>();
     param->FromJson(param_json);
     REQUIRE(param->first_order_buckets_count == 200);

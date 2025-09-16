@@ -27,12 +27,14 @@ GNOIMIParameter::GNOIMIParameter() = default;
 void
 GNOIMIParameter::FromJson(const JsonType& json) {
     CHECK_ARGUMENT(
-        json.contains(GNO_IMI_FIRST_ORDER_BUCKETS_COUNT_KEY),
+        json.Contains(GNO_IMI_FIRST_ORDER_BUCKETS_COUNT_KEY),
         fmt::format("ivf parameters must contains {}", GNO_IMI_FIRST_ORDER_BUCKETS_COUNT_KEY));
-    this->first_order_buckets_count = json[GNO_IMI_FIRST_ORDER_BUCKETS_COUNT_KEY];
+    this->first_order_buckets_count =
+        static_cast<int32_t>(json[GNO_IMI_FIRST_ORDER_BUCKETS_COUNT_KEY].GetInt());
 
-    if (json.contains(GNO_IMI_SECOND_ORDER_BUCKETS_COUNT_KEY)) {
-        this->second_order_buckets_count = json[GNO_IMI_SECOND_ORDER_BUCKETS_COUNT_KEY];
+    if (json.Contains(GNO_IMI_SECOND_ORDER_BUCKETS_COUNT_KEY)) {
+        this->second_order_buckets_count =
+            static_cast<int32_t>(json[GNO_IMI_SECOND_ORDER_BUCKETS_COUNT_KEY].GetInt());
     } else {
         this->second_order_buckets_count = this->first_order_buckets_count;
     }
@@ -41,8 +43,8 @@ GNOIMIParameter::FromJson(const JsonType& json) {
 JsonType
 GNOIMIParameter::ToJson() const {
     JsonType json;
-    json[GNO_IMI_FIRST_ORDER_BUCKETS_COUNT_KEY] = this->first_order_buckets_count;
-    json[GNO_IMI_SECOND_ORDER_BUCKETS_COUNT_KEY] = this->second_order_buckets_count;
+    json[GNO_IMI_FIRST_ORDER_BUCKETS_COUNT_KEY].SetInt(this->first_order_buckets_count);
+    json[GNO_IMI_SECOND_ORDER_BUCKETS_COUNT_KEY].SetInt(this->second_order_buckets_count);
     return json;
 }
 bool

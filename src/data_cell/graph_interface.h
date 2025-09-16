@@ -18,7 +18,6 @@
 #include <cstdint>
 #include <memory>
 #include <mutex>
-#include <nlohmann/json.hpp>
 #include <vector>
 
 #include "graph_interface_parameter.h"

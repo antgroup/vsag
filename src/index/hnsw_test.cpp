@@ -41,7 +41,7 @@ parse_hnsw_params(IndexCommonParam index_common_param) {
             "ef_construction": 100
         }
     )";
-    nlohmann::json parsed_params = nlohmann::json::parse(build_parameter_json);
+    auto parsed_params = vsag::JsonType::Parse(build_parameter_json);
     return HnswParameters::FromJson(parsed_params, index_common_param);
 }
 
@@ -147,34 +147,33 @@ TEST_CASE("knn_search", "[ut][hnsw]") {
     auto query = Dataset::Make();
     query->NumElements(1)->Dim(dim)->Float32Vectors(vectors.data())->Owner(false);
     int64_t k = 10;
-    JsonType params{
-        {"hnsw", {{"ef_search", 100}}},
-    };
+
+    JsonType params;
+    params["hnsw"]["ef_search"].SetInt(100);
 
     SECTION("invalid parameters k is 0") {
-        auto result = index->KnnSearch(query, 0, params.dump());
+        auto result = index->KnnSearch(query, 0, params.Dump());
         REQUIRE_FALSE(result.has_value());
         REQUIRE(result.error().type == ErrorType::INVALID_ARGUMENT);
     }
 
     SECTION("invalid parameters k less than 0") {
-        auto result = index->KnnSearch(query, -1, params.dump());
+        auto result = index->KnnSearch(query, -1, params.Dump());
         REQUIRE_FALSE(result.has_value());
         REQUIRE(result.error().type == ErrorType::INVALID_ARGUMENT);
     }
 
     SECTION("invalid parameters hnsw not found") {
         JsonType invalid_params{};
-        auto result = index->KnnSearch(query, k, invalid_params.dump());
+        auto result = index->KnnSearch(query, k, invalid_params.Dump());
         REQUIRE_FALSE(result.has_value());
         REQUIRE(result.error().type == ErrorType::INVALID_ARGUMENT);
     }
 
     SECTION("invalid parameters ef_search not found") {
-        JsonType invalid_params{
-            {"hnsw", {}},
-        };
-        auto result = index->KnnSearch(query, k, invalid_params.dump());
+        JsonType invalid_params;
+        invalid_params["hnsw"].SetJson(JsonType());
+        auto result = index->KnnSearch(query, k, invalid_params.Dump());
         REQUIRE_FALSE(result.has_value());
         REQUIRE(result.error().type == ErrorType::INVALID_ARGUMENT);
     }
@@ -182,7 +181,7 @@ TEST_CASE("knn_search", "[ut][hnsw]") {
     SECTION("query length is not 1") {
         auto query2 = Dataset::Make();
         query2->NumElements(2)->Dim(dim)->Float32Vectors(vectors.data())->Owner(false);
-        auto result = index->KnnSearch(query2, k, params.dump());
+        auto result = index->KnnSearch(query2, k, params.Dump());
         REQUIRE_FALSE(result.has_value());
         REQUIRE(result.error().type == ErrorType::INVALID_ARGUMENT);
     }
@@ -190,7 +189,7 @@ TEST_CASE("knn_search", "[ut][hnsw]") {
     SECTION("dimension not equal") {
         auto query2 = Dataset::Make();
         query2->NumElements(1)->Dim(dim - 1)->Float32Vectors(vectors.data())->Owner(false);
-        auto result = index->KnnSearch(query2, k, params.dump());
+        auto result = index->KnnSearch(query2, k, params.Dump());
         REQUIRE_FALSE(result.has_value());
         REQUIRE(result.error().type == ErrorType::INVALID_ARGUMENT);
     }
@@ -227,61 +226,59 @@ TEST_CASE("range_search", "[ut][hnsw]") {
     auto query = Dataset::Make();
     query->NumElements(1)->Dim(dim)->Float32Vectors(vectors.data())->Owner(false);
     float radius = 9.9f;
-    JsonType params{
-        {"hnsw", {{"ef_search", 100}}},
-    };
+    JsonType params;
+    params["hnsw"]["ef_search"].SetInt(100);
 
     SECTION("successful case with smaller range_search_limit") {
         int64_t range_search_limit = num_elements - 1;
-        auto result = index->RangeSearch(query, 100, params.dump(), range_search_limit);
+        auto result = index->RangeSearch(query, 100, params.Dump(), range_search_limit);
         REQUIRE(result.has_value());
         REQUIRE((*result)->GetDim() == range_search_limit);
     }
 
     SECTION("successful case with larger range_search_limit") {
         int64_t range_search_limit = num_elements + 1;
-        auto result = index->RangeSearch(query, 100, params.dump(), range_search_limit);
+        auto result = index->RangeSearch(query, 100, params.Dump(), range_search_limit);
         REQUIRE(result.has_value());
         REQUIRE((*result)->GetDim() == num_elements);
     }
 
     SECTION("invalid parameter range_search_limit less than 0") {
         int64_t range_search_limit = -1;
-        auto result = index->RangeSearch(query, 1000, params.dump(), range_search_limit);
+        auto result = index->RangeSearch(query, 1000, params.Dump(), range_search_limit);
         REQUIRE(result.has_value());
         REQUIRE((*result)->GetDim() == num_elements);
     }
 
     SECTION("invalid parameter range_search_limit equals to 0") {
         int64_t range_search_limit = 0;
-        auto result = index->RangeSearch(query, 1000, params.dump(), range_search_limit);
+        auto result = index->RangeSearch(query, 1000, params.Dump(), range_search_limit);
         REQUIRE_FALSE(result.has_value());
         REQUIRE(result.error().type == ErrorType::INVALID_ARGUMENT);
     }
 
     SECTION("invalid parameter radius equals to 0") {
-        auto result = index->RangeSearch(query, 0, params.dump());
+        auto result = index->RangeSearch(query, 0, params.Dump());
         REQUIRE(result.has_value());
     }
 
     SECTION("invalid parameter radius less than 0") {
-        auto result = index->RangeSearch(query, -1, params.dump());
+        auto result = index->RangeSearch(query, -1, params.Dump());
         REQUIRE_FALSE(result.has_value());
         REQUIRE(result.error().type == ErrorType::INVALID_ARGUMENT);
     }
 
     SECTION("invalid parameters hnsw not found") {
         JsonType invalid_params{};
-        auto result = index->RangeSearch(query, radius, invalid_params.dump());
+        auto result = index->RangeSearch(query, radius, invalid_params.Dump());
         REQUIRE_FALSE(result.has_value());
         REQUIRE(result.error().type == ErrorType::INVALID_ARGUMENT);
     }
 
     SECTION("invalid parameters ef_search not found") {
-        JsonType invalid_params{
-            {"hnsw", {}},
-        };
-        auto result = index->RangeSearch(query, radius, invalid_params.dump());
+        JsonType invalid_params;
+        invalid_params["hnsw"].SetJson(JsonType());
+        auto result = index->RangeSearch(query, radius, invalid_params.Dump());
         REQUIRE_FALSE(result.has_value());
         REQUIRE(result.error().type == ErrorType::INVALID_ARGUMENT);
     }
@@ -289,7 +286,7 @@ TEST_CASE("range_search", "[ut][hnsw]") {
     SECTION("query length is not 1") {
         auto query2 = Dataset::Make();
         query2->NumElements(2)->Dim(dim)->Float32Vectors(vectors.data())->Owner(false);
-        auto result = index->RangeSearch(query2, radius, params.dump());
+        auto result = index->RangeSearch(query2, radius, params.Dump());
         REQUIRE_FALSE(result.has_value());
         REQUIRE(result.error().type == ErrorType::INVALID_ARGUMENT);
     }
@@ -428,14 +425,13 @@ TEST_CASE("static hnsw", "[ut][hnsw]") {
     REQUIRE_FALSE(result.has_value());
     REQUIRE(result.error().type == ErrorType::UNSUPPORTED_INDEX_OPERATION);
 
-    JsonType params{
-        {"hnsw", {{"ef_search", 100}}},
-    };
+    JsonType params;
+    params["hnsw"]["ef_search"].SetInt(100);
 
-    auto knn_result = index->KnnSearch(one_vector, 1, params.dump());
+    auto knn_result = index->KnnSearch(one_vector, 1, params.Dump());
     REQUIRE(knn_result.has_value());
 
-    auto range_result = index->RangeSearch(one_vector, 1, params.dump());
+    auto range_result = index->RangeSearch(one_vector, 1, params.Dump());
     REQUIRE_FALSE(range_result.has_value());
     REQUIRE(range_result.error().type == ErrorType::UNSUPPORTED_INDEX_OPERATION);
 
@@ -615,23 +611,23 @@ TEST_CASE("feedback with invalid argument", "[ut][hnsw]") {
     hnsw_obj.use_conjugate_graph = true;
     auto index = std::make_shared<HNSW>(hnsw_obj, common_param);
     index->InitMemorySpace();
-    JsonType search_parameters{
-        {"hnsw", {{"ef_search", 200}}},
-    };
+
+    JsonType search_parameters;
+    search_parameters["hnsw"]["ef_search"].SetInt(200);
 
     auto [ids, vectors] = fixtures::generate_ids_and_vectors(num_vectors, dim);
     auto query = Dataset::Make();
     query->NumElements(1)->Dim(dim)->Float32Vectors(vectors.data())->Owner(false);
 
     SECTION("index feedback with k = 0") {
-        REQUIRE(index->Feedback(query, 0, search_parameters.dump(), -1).error().type ==
+        REQUIRE(index->Feedback(query, 0, search_parameters.Dump(), -1).error().type ==
                 ErrorType::INVALID_ARGUMENT);
-        REQUIRE(index->Feedback(query, 0, search_parameters.dump()).error().type ==
+        REQUIRE(index->Feedback(query, 0, search_parameters.Dump()).error().type ==
                 ErrorType::INVALID_ARGUMENT);
     }
 
     SECTION("index feedback with invalid global optimum tag id") {
-        auto feedback_result = index->Feedback(query, k, search_parameters.dump(), -1000);
+        auto feedback_result = index->Feedback(query, k, search_parameters.Dump(), -1000);
         REQUIRE(feedback_result.error().type == ErrorType::INVALID_ARGUMENT);
     }
 }
@@ -669,29 +665,29 @@ TEST_CASE("redundant feedback and empty enhancement", "[ut][hnsw]") {
     auto buildindex = index->Build(base);
     REQUIRE(buildindex.has_value());
 
-    JsonType search_parameters{
-        {"hnsw", {{"ef_search", 200}, {"use_conjugate_graph", true}}},
-    };
+    JsonType search_parameters;
+    search_parameters["hnsw"]["ef_search"].SetInt(200);
+    search_parameters["hnsw"]["use_conjugate_graph"].SetBool(true);
 
     auto [ids, vectors] = fixtures::generate_ids_and_vectors(num_query, dim);
     auto query = Dataset::Make();
     query->NumElements(1)->Dim(dim)->Float32Vectors(vectors.data())->Owner(false);
 
-    auto search_result = index->KnnSearch(query, k, search_parameters.dump());
+    auto search_result = index->KnnSearch(query, k, search_parameters.Dump());
     REQUIRE(search_result.has_value());
 
     SECTION("index redundant feedback") {
         auto feedback_result =
-            index->Feedback(query, k, search_parameters.dump(), search_result.value()->GetIds()[0]);
+            index->Feedback(query, k, search_parameters.Dump(), search_result.value()->GetIds()[0]);
         REQUIRE(*feedback_result == k - 1);
 
         auto redundant_feedback_result =
-            index->Feedback(query, k, search_parameters.dump(), search_result.value()->GetIds()[0]);
+            index->Feedback(query, k, search_parameters.Dump(), search_result.value()->GetIds()[0]);
         REQUIRE(*redundant_feedback_result == 0);
     }
 
     SECTION("index search with empty enhancement") {
-        auto enhanced_search_result = index->KnnSearch(query, k, search_parameters.dump());
+        auto enhanced_search_result = index->KnnSearch(query, k, search_parameters.Dump());
         REQUIRE(enhanced_search_result.has_value());
         for (int i = 0; i < search_result.value()->GetNumElements(); i++) {
             REQUIRE(search_result.value()->GetIds()[i] ==
@@ -731,20 +727,19 @@ TEST_CASE("feedback and pretrain without use conjugate graph", "[ut][hnsw]") {
     auto buildindex = index->Build(base);
     REQUIRE(buildindex.has_value());
 
-    JsonType search_parameters{
-        {"hnsw", {{"ef_search", 200}}},
-    };
+    JsonType search_parameters;
+    search_parameters["hnsw"]["ef_search"].SetInt(200);
 
     auto [ids, vectors] = fixtures::generate_ids_and_vectors(num_query, dim);
     auto query = Dataset::Make();
     query->NumElements(1)->Dim(dim)->Float32Vectors(vectors.data())->Owner(false);
 
-    auto feedback_result = index->Feedback(query, k, search_parameters.dump());
+    auto feedback_result = index->Feedback(query, k, search_parameters.Dump());
     REQUIRE(feedback_result.error().type == ErrorType::UNSUPPORTED_INDEX_OPERATION);
 
     std::vector<int64_t> base_tag_ids;
     base_tag_ids.push_back(10000);
-    auto pretrain_result = index->Pretrain(base_tag_ids, 10, search_parameters.dump());
+    auto pretrain_result = index->Pretrain(base_tag_ids, 10, search_parameters.Dump());
     REQUIRE(pretrain_result.error().type == ErrorType::UNSUPPORTED_INDEX_OPERATION);
 }
 
@@ -781,20 +776,19 @@ TEST_CASE("feedback and pretrain on empty index", "[ut][hnsw]") {
     auto buildindex = index->Build(base);
     REQUIRE(buildindex.has_value());
 
-    JsonType search_parameters{
-        {"hnsw", {{"ef_search", 200}}},
-    };
+    JsonType search_parameters;
+    search_parameters["hnsw"]["ef_search"].SetInt(200);
 
     auto [ids, vectors] = fixtures::generate_ids_and_vectors(num_query, dim);
     auto query = Dataset::Make();
     query->NumElements(1)->Dim(dim)->Float32Vectors(vectors.data())->Owner(false);
 
-    auto feedback_result = index->Feedback(query, k, search_parameters.dump());
+    auto feedback_result = index->Feedback(query, k, search_parameters.Dump());
     REQUIRE(*feedback_result == 0);
 
     std::vector<int64_t> base_tag_ids;
     base_tag_ids.push_back(10000);
-    auto pretrain_result = index->Pretrain(base_tag_ids, k, search_parameters.dump());
+    auto pretrain_result = index->Pretrain(base_tag_ids, k, search_parameters.Dump());
     REQUIRE(*pretrain_result == 0);
 }
 
@@ -831,31 +825,30 @@ TEST_CASE("invalid pretrain", "[ut][hnsw]") {
     auto buildindex = index->Build(base);
     REQUIRE(buildindex.has_value());
 
-    JsonType search_parameters{
-        {"hnsw", {{"ef_search", 200}}},
-    };
+    JsonType search_parameters;
+    search_parameters["hnsw"]["ef_search"].SetInt(200);
 
     SECTION("invalid base tag id") {
         std::vector<int64_t> base_tag_ids;
         base_tag_ids.push_back(10000);
-        auto pretrain_result = index->Pretrain(base_tag_ids, 10, search_parameters.dump());
+        auto pretrain_result = index->Pretrain(base_tag_ids, 10, search_parameters.Dump());
         REQUIRE(pretrain_result.error().type == ErrorType::INVALID_ARGUMENT);
     }
 
     SECTION("invalid k") {
         std::vector<int64_t> base_tag_ids;
         base_tag_ids.push_back(0);
-        auto pretrain_result = index->Pretrain(base_tag_ids, 0, search_parameters.dump());
+        auto pretrain_result = index->Pretrain(base_tag_ids, 0, search_parameters.Dump());
         REQUIRE(pretrain_result.error().type == ErrorType::INVALID_ARGUMENT);
     }
 
     SECTION("invalid search parameter") {
-        JsonType invalid_search_parameters{
-            {"hnsw", {{"ef_search", -1}}},
-        };
+        JsonType invalid_search_parameters;
+        invalid_search_parameters["hnsw"]["ef_search"].SetInt(-1);
+
         std::vector<int64_t> base_tag_ids;
         base_tag_ids.push_back(0);
-        auto pretrain_result = index->Pretrain(base_tag_ids, 10, invalid_search_parameters.dump());
+        auto pretrain_result = index->Pretrain(base_tag_ids, 10, invalid_search_parameters.Dump());
         REQUIRE(pretrain_result.error().type == ErrorType::INVALID_ARGUMENT);
     }
 }
@@ -1047,14 +1040,14 @@ TEST_CASE("extract/set data and graph", "[ut][hnsw]") {
         ->Owner(false);
     another_index->Add(dataset);
 
-    JsonType search_parameters{
-        {"hnsw", {{"ef_search", 200}}},
-    };
+    JsonType search_parameters;
+
+    search_parameters["hnsw"]["ef_search"].SetInt(200);
     int correct = 0;
     for (int i = 0; i < num_elements; ++i) {
         auto query = Dataset::Make();
         query->Dim(dim)->Float32Vectors(vectors.data() + i * dim)->NumElements(1)->Owner(false);
-        auto query_result = another_index->KnnSearch(query, 10, search_parameters.dump());
+        auto query_result = another_index->KnnSearch(query, 10, search_parameters.Dump());
         REQUIRE(query_result.has_value());
         correct += query_result.value()->GetIds()[0] == ids[i] ? 1 : 0;
     }

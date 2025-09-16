@@ -31,7 +31,7 @@ TEST_CASE("ODescent Parameyers Test", "[ut][pyramid_param]") {
             "build_block_size": 100
         }
     )";
-    vsag::JsonType param_json = vsag::JsonType::parse(param_str);
+    vsag::JsonType param_json = vsag::JsonType::Parse(param_str);
     auto param = std::make_shared<vsag::ODescentParameter>();
     param->FromJson(param_json);
     fixtures::dist_t alpha = param->alpha;

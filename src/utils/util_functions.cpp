@@ -15,6 +15,8 @@
 
 #include "util_functions.h"
 
+#include <iomanip>
+#include <nlohmann/json.hpp>
 #include <random>
 
 #include "vsag_exception.h"
@@ -39,7 +41,9 @@ void
 mapping_external_param_to_inner(const JsonType& external_json,
                                 ConstParamMap& param_map,
                                 JsonType& inner_json) {
-    for (const auto& [key, value] : external_json.items()) {
+    auto* external_raw_json = external_json.GetInnerJson();
+    auto* inner_raw_json = inner_json.GetInnerJson();
+    for (const auto& [key, value] : external_raw_json->items()) {
         auto ranges = param_map.equal_range(key);
         if (ranges.first == ranges.second) {
             throw VsagException(ErrorType::INVALID_ARGUMENT,
@@ -47,7 +51,7 @@ mapping_external_param_to_inner(const JsonType& external_json,
         }
         for (auto iter = ranges.first; iter != ranges.second; ++iter) {
             const auto& vec = iter->second;
-            auto* json = &inner_json;
+            auto* json = inner_raw_json;
             for (const auto& str : vec) {
                 json = &(json->operator[](str));
             }

@@ -32,7 +32,7 @@ TEST_CASE("SparseVectorDataCellParameter ToJson Test", "[ut][SparseVectorDataCel
         }
     })";
     auto param = std::make_shared<SparseVectorDataCellParameter>();
-    auto json = JsonType::parse(param_str);
+    auto json = JsonType::Parse(param_str);
     param->FromJson(json);
     ParameterTest::TestToJson(param);
 }

@@ -42,7 +42,7 @@ TEST_CASE("BufferIO Parameter", "[ut][BufferIO]") {
         "file_path" : "{}"
     }}
     )";
-    auto json = JsonType::parse(fmt::format(param_str, path));
+    auto json = JsonType::Parse(fmt::format(param_str, path));
     auto io_param = IOParameter::GetIOParameterByJson(json);
     IndexCommonParam common_param;
     common_param.allocator_ = allocator;

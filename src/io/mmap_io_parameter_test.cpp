@@ -31,7 +31,7 @@ TEST_CASE("MMapIO Parameters Test", "[ut][MMapIOParameters]") {
             "file_path": "{}"
         }}
     )";
-    auto param_json = JsonType::parse(fmt::format(param_str, path));
+    auto param_json = JsonType::Parse(fmt::format(param_str, path));
     auto param = std::make_shared<MMapIOParameter>();
     param->FromJson(param_json);
     ParameterTest::TestToJson(param);

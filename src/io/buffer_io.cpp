@@ -18,6 +18,8 @@
 #include <fcntl.h>
 #include <unistd.h>
 
+#include <filesystem>
+
 namespace vsag {
 
 BufferIO::BufferIO(std::string filename, Allocator* allocator)

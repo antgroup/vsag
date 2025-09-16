@@ -25,17 +25,17 @@ void
 IVFParameter::FromJson(const JsonType& json) {
     InnerIndexParameter::FromJson(json);
 
-    if (json.contains(BUCKET_PER_DATA_KEY)) {
-        this->buckets_per_data = json[BUCKET_PER_DATA_KEY];
+    if (json.Contains(BUCKET_PER_DATA_KEY)) {
+        this->buckets_per_data = static_cast<BucketIdType>(json[BUCKET_PER_DATA_KEY].GetInt());
     }
 
     this->bucket_param = std::make_shared<BucketDataCellParameter>();
-    CHECK_ARGUMENT(json.contains(BUCKET_PARAMS_KEY),
+    CHECK_ARGUMENT(json.Contains(BUCKET_PARAMS_KEY),
                    fmt::format("ivf parameters must contains {}", BUCKET_PARAMS_KEY));
     this->bucket_param->FromJson(json[BUCKET_PARAMS_KEY]);
 
     this->ivf_partition_strategy_parameter = std::make_shared<IVFPartitionStrategyParameters>();
-    if (json.contains(IVF_PARTITION_STRATEGY_PARAMS_KEY)) {
+    if (json.Contains(IVF_PARTITION_STRATEGY_PARAMS_KEY)) {
         this->ivf_partition_strategy_parameter->FromJson(json[IVF_PARTITION_STRATEGY_PARAMS_KEY]);
     }
 
@@ -50,10 +50,11 @@ IVFParameter::FromJson(const JsonType& json) {
 JsonType
 IVFParameter::ToJson() const {
     JsonType json = InnerIndexParameter::ToJson();
-    json[TYPE_KEY] = INDEX_IVF;
-    json[BUCKET_PARAMS_KEY] = this->bucket_param->ToJson();
-    json[IVF_PARTITION_STRATEGY_PARAMS_KEY] = this->ivf_partition_strategy_parameter->ToJson();
-    json[BUCKET_PER_DATA_KEY] = this->buckets_per_data;
+    json[TYPE_KEY].SetString(INDEX_IVF);
+    json[BUCKET_PARAMS_KEY].SetJson(this->bucket_param->ToJson());
+    json[IVF_PARTITION_STRATEGY_PARAMS_KEY].SetJson(
+        this->ivf_partition_strategy_parameter->ToJson());
+    json[BUCKET_PER_DATA_KEY].SetInt(this->buckets_per_data);
     return json;
 }
 bool

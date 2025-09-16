@@ -15,8 +15,9 @@
 
 #include "vsag/options.h"
 
-#include "impl/logger/default_logger.h"
+#include <fmt/format.h>
 
+#include "impl/logger/default_logger.h"
 namespace vsag {
 
 Options&

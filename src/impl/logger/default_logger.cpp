@@ -15,6 +15,8 @@
 
 #include "default_logger.h"
 
+#include <spdlog/spdlog.h>
+
 namespace vsag {
 
 void

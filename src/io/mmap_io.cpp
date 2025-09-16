@@ -15,7 +15,9 @@
 
 #include "mmap_io.h"
 
+#include <fcntl.h>
 #include <sys/mman.h>
+#include <unistd.h>
 
 #include <filesystem>
 #include <utility>

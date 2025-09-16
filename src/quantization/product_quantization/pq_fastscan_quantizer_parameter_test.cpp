@@ -28,7 +28,7 @@ TEST_CASE("PQFS Parameter ToJson Test", "[ut][PQFastScanQuantizerParameter]") {
         }
     )";
     auto param = std::make_shared<PQFastScanQuantizerParameter>();
-    param->FromJson(JsonType::parse(param_str));
+    param->FromJson(JsonType::Parse(param_str));
     ParameterTest::TestToJson(param);
     REQUIRE(param->pq_dim_ == 64);
 

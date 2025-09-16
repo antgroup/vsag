@@ -26,34 +26,34 @@ namespace vsag {
 
 void
 InnerIndexParameter::FromJson(const JsonType& json) {
-    if (json.contains(USE_REORDER_KEY)) {
-        this->use_reorder = json[USE_REORDER_KEY];
+    if (json.Contains(USE_REORDER_KEY)) {
+        this->use_reorder = json[USE_REORDER_KEY].GetBool();
     }
 
-    if (json.contains(USE_ATTRIBUTE_FILTER_KEY)) {
-        this->use_attribute_filter = json[USE_ATTRIBUTE_FILTER_KEY];
+    if (json.Contains(USE_ATTRIBUTE_FILTER_KEY)) {
+        this->use_attribute_filter = json[USE_ATTRIBUTE_FILTER_KEY].GetBool();
     }
 
-    if (json.contains(BUILD_THREAD_COUNT_KEY)) {
-        this->build_thread_count = json[BUILD_THREAD_COUNT_KEY];
+    if (json.Contains(BUILD_THREAD_COUNT_KEY)) {
+        this->build_thread_count = json[BUILD_THREAD_COUNT_KEY].GetInt();
     }
 
     if (this->use_reorder) {
         CHECK_ARGUMENT(
-            json.contains(PRECISE_CODES_KEY),
+            json.Contains(PRECISE_CODES_KEY),
             fmt::format("ivf parameters must contains {} when enable reorder", PRECISE_CODES_KEY));
         this->precise_codes_param = CreateFlattenParam(json[PRECISE_CODES_KEY]);
     }
 
-    if (json.contains(STORE_RAW_VECTOR_KEY)) {
-        this->store_raw_vector = json[STORE_RAW_VECTOR_KEY];
+    if (json.Contains(STORE_RAW_VECTOR_KEY)) {
+        this->store_raw_vector = json[STORE_RAW_VECTOR_KEY].GetBool();
     }
 
     if (this->store_raw_vector) {
         this->raw_vector_param = CreateFlattenParam(json[RAW_VECTOR_KEY]);
     }
 
-    if (json.contains(EXTRA_INFO_KEY)) {
+    if (json.Contains(EXTRA_INFO_KEY)) {
         this->extra_info_param = std::make_shared<ExtraInfoDataCellParameter>();
         this->extra_info_param->FromJson(json[EXTRA_INFO_KEY]);
     }
@@ -62,20 +62,20 @@ InnerIndexParameter::FromJson(const JsonType& json) {
 JsonType
 InnerIndexParameter::ToJson() const {
     JsonType json;
-    json[USE_REORDER_KEY] = this->use_reorder;
-    json[BUILD_THREAD_COUNT_KEY] = this->build_thread_count;
-    json[USE_ATTRIBUTE_FILTER_KEY] = this->use_attribute_filter;
+    json[USE_REORDER_KEY].SetBool(this->use_reorder);
+    json[BUILD_THREAD_COUNT_KEY].SetInt(this->build_thread_count);
+    json[USE_ATTRIBUTE_FILTER_KEY].SetBool(this->use_attribute_filter);
     if (use_reorder) {
-        json[PRECISE_CODES_KEY] = this->precise_codes_param->ToJson();
+        json[PRECISE_CODES_KEY].SetJson(this->precise_codes_param->ToJson());
     }
-    json[STORE_RAW_VECTOR_KEY] = this->store_raw_vector;
+    json[STORE_RAW_VECTOR_KEY].SetBool(this->store_raw_vector);
     if (this->store_raw_vector) {
-        json[RAW_VECTOR_KEY] = this->raw_vector_param->ToJson();
+        json[RAW_VECTOR_KEY].SetJson(this->raw_vector_param->ToJson());
     }
     if (this->extra_info_param) {
-        json[EXTRA_INFO_KEY] = this->extra_info_param->ToJson();
+        json[EXTRA_INFO_KEY].SetJson(this->extra_info_param->ToJson());
     }
-
+    auto str = json.Dump(4);
     return json;
 }
 bool

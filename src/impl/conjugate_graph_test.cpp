@@ -102,9 +102,9 @@ TEST_CASE("ConjugateGraph Serialize and Deserialize with Binary", "[ut][Conjugat
         vsag::Binary binary = *conjugate_graph->Serialize();
 
         vsag::JsonType json;
-        json[vsag::SERIALIZE_MAGIC_NUM] = std::to_string(0xABCD1234);
-        json[vsag::SERIALIZE_VERSION] = vsag::VERSION;
-        std::string json_str = json.dump();
+        json[vsag::SERIALIZE_MAGIC_NUM].SetString(std::to_string(0xABCD1234));
+        json[vsag::SERIALIZE_VERSION].SetString(vsag::VERSION);
+        std::string json_str = json.Dump();
         uint32_t serialized_data_size = json_str.size();
         std::memcpy(binary.data.get() + binary.size - vsag::FOOTER_SIZE,
                     reinterpret_cast<const char*>(&serialized_data_size),
@@ -126,9 +126,9 @@ TEST_CASE("ConjugateGraph Serialize and Deserialize with Binary", "[ut][Conjugat
         vsag::Binary binary = *conjugate_graph->Serialize();
 
         vsag::JsonType json;
-        json[vsag::SERIALIZE_MAGIC_NUM] = vsag::MAGIC_NUM;
-        json[vsag::SERIALIZE_VERSION] = std::to_string(2);
-        std::string json_str = json.dump();
+        json[vsag::SERIALIZE_MAGIC_NUM].SetString(vsag::MAGIC_NUM);
+        json[vsag::SERIALIZE_VERSION].SetString(std::to_string(2));
+        std::string json_str = json.Dump();
         uint32_t serialized_data_size = json_str.size();
         std::memcpy(binary.data.get() + binary.size - vsag::FOOTER_SIZE,
                     reinterpret_cast<const char*>(&serialized_data_size),
@@ -185,9 +185,9 @@ TEST_CASE("ConjugateGraph Serialize and Deserialize with Stream", "[ut][Conjugat
         out_stream.seekg(conjugate_graph->GetMemoryUsage() - vsag::FOOTER_SIZE, std::ios::beg);
 
         vsag::JsonType json;
-        json[vsag::SERIALIZE_MAGIC_NUM] = std::to_string(0xABCD1234);
-        json[vsag::SERIALIZE_VERSION] = vsag::VERSION;
-        std::string json_str = json.dump();
+        json[vsag::SERIALIZE_MAGIC_NUM].SetString(std::to_string(0xABCD1234));
+        json[vsag::SERIALIZE_VERSION].SetString(vsag::VERSION);
+        std::string json_str = json.Dump();
         uint32_t serialized_data_size = json_str.size();
         out_stream.write(reinterpret_cast<const char*>(&serialized_data_size),
                          sizeof(serialized_data_size));
@@ -208,9 +208,9 @@ TEST_CASE("ConjugateGraph Serialize and Deserialize with Stream", "[ut][Conjugat
         out_stream.seekg(conjugate_graph->GetMemoryUsage() - vsag::FOOTER_SIZE, std::ios::beg);
 
         vsag::JsonType json;
-        json[vsag::SERIALIZE_MAGIC_NUM] = vsag::MAGIC_NUM;
-        json[vsag::SERIALIZE_VERSION] = std::to_string(2);
-        std::string json_str = json.dump();
+        json[vsag::SERIALIZE_MAGIC_NUM].SetString(vsag::MAGIC_NUM);
+        json[vsag::SERIALIZE_VERSION].SetString(std::to_string(2));
+        std::string json_str = json.Dump();
         uint32_t serialized_data_size = json_str.size();
         out_stream.write(reinterpret_cast<const char*>(&serialized_data_size),
                          sizeof(serialized_data_size));

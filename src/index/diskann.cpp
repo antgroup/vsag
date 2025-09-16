@@ -772,7 +772,7 @@ DiskANN::deserialize(const BinarySet& binary_set) {
         convert_binary_to_stream(binary_set.Get(DISKANN_LAYOUT_FILE), disk_layout_stream_);
         auto graph = binary_set.Get(DISKANN_GRAPH);
         if (/* trying to use graph-preload mode if parameter sets */ preload_) {
-            if (not metadata->Get("support_preload")) {
+            if (not metadata->Get("support_preload").GetBool()) {
                 LOG_ERROR_AND_RETURNS(
                     ErrorType::MISSING_FILE,
                     fmt::format("missing file: {} when deserialize diskann index", DISKANN_GRAPH));
@@ -881,7 +881,7 @@ DiskANN::deserialize(const ReaderSet& reader_set) {
 
         auto graph_reader = reader_set.Get(DISKANN_GRAPH);
         if (/* trying to use graph-preload mode, if parameter sets */ preload_) {
-            if (not metadata->Get("support_preload")) {
+            if (not metadata->Get("support_preload").GetBool()) {
                 LOG_ERROR_AND_RETURNS(
                     ErrorType::MISSING_FILE,
                     fmt::format("miss file: {} when deserialize diskann index", DISKANN_GRAPH));
@@ -977,9 +977,9 @@ DiskANN::deserialize(const ReaderSet& reader_set) {
     }
 
 #define WRITE_DATACELL_WITH_NAME(out_stream, name, datacell_stream)                    \
-    datacell_offsets[(name)] = offset;                                                 \
+    datacell_offsets[(name)].SetInt(offset);                                           \
     auto datacell_stream##_size = get_stringstream_size((datacell_stream));            \
-    datacell_sizes[(name)] = datacell_stream##_size;                                   \
+    datacell_sizes[(name)].SetInt(datacell_stream##_size);                             \
     copy_stringstream_to_ostream(out_stream, datacell_stream, datacell_stream##_size); \
     offset += datacell_stream##_size;
 
@@ -1017,9 +1017,8 @@ DiskANN::serialize(std::ostream& out_stream) {
 }
 
 #define READ_DATACELL_WITH_NAME(in_stream, name, datacell_stream) \
-    in_stream.seekg(datacell_offsets[(name)].get<uint64_t>());    \
-    copy_istream_to_stringstream(                                 \
-        (datacell_stream), in_stream, datacell_sizes[(name)].get<uint64_t>());
+    in_stream.seekg(datacell_offsets[(name)].GetInt());           \
+    copy_istream_to_stringstream((datacell_stream), in_stream, datacell_sizes[(name)].GetInt());
 
 tl::expected<void, Error>
 DiskANN::deserialize(std::istream& in_stream) {
@@ -1038,9 +1037,9 @@ DiskANN::deserialize(std::istream& in_stream) {
         }
 
         JsonType datacell_offsets = metadata->Get("datacell_offsets");
-        logger::debug("datacell_offsets: {}", datacell_offsets.dump());
+        logger::debug("datacell_offsets: {}", datacell_offsets.Dump());
         JsonType datacell_sizes = metadata->Get("datacell_sizes");
-        logger::debug("datacell_sizes: {}", datacell_sizes.dump());
+        logger::debug("datacell_sizes: {}", datacell_sizes.Dump());
 
         std::stringstream pq_pivots_stream;
         std::stringstream disk_pq_compressed_vectors;
@@ -1053,8 +1052,8 @@ DiskANN::deserialize(std::istream& in_stream) {
 
         disk_layout_reader_ =
             std::make_shared<IStreamReader>(in_stream,
-                                            datacell_offsets[DISKANN_LAYOUT_FILE].get<uint64_t>(),
-                                            datacell_sizes[DISKANN_LAYOUT_FILE].get<uint64_t>());
+                                            datacell_offsets[DISKANN_LAYOUT_FILE].GetInt(),
+                                            datacell_sizes[DISKANN_LAYOUT_FILE].GetInt());
 
         reader_.reset(new LocalFileReader(batch_read_));
         index_.reset(new diskann::PQFlashIndex<float, int64_t>(
@@ -1062,7 +1061,7 @@ DiskANN::deserialize(std::istream& in_stream) {
         index_->load_from_separate_paths(pq_pivots_stream, disk_pq_compressed_vectors, tag_stream);
 
         if (preload_) {
-            if (not metadata->Get("support_preload")) {
+            if (not metadata->Get("support_preload").GetBool()) {
                 LOG_ERROR_AND_RETURNS(
                     ErrorType::MISSING_FILE,
                     fmt::format("miss file: {} when deserialize diskann index", DISKANN_GRAPH));
@@ -1085,18 +1084,18 @@ DiskANN::deserialize(std::istream& in_stream) {
 std::string
 DiskANN::GetStats() const {
     JsonType j;
-    j[STATSTIC_DATA_NUM] = GetNumElements();
-    j[STATSTIC_INDEX_NAME] = INDEX_DISKANN;
-    j[STATSTIC_MEMORY] = GetMemoryUsage();
+    j[STATSTIC_DATA_NUM].SetInt(GetNumElements());
+    j[STATSTIC_INDEX_NAME].SetString(INDEX_DISKANN);
+    j[STATSTIC_MEMORY].SetInt(GetMemoryUsage());
 
     {
         std::lock_guard<std::mutex> lock(stats_mutex_);
         for (auto& item : result_queues_) {
-            j[item.first] = item.second.GetAvgResult();
+            j[item.first].SetFloat(item.second.GetAvgResult());
         }
     }
 
-    return j.dump();
+    return j.Dump(4);
 }
 
 int64_t

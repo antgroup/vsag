@@ -25,32 +25,32 @@ BucketDataCellParameter::BucketDataCellParameter() = default;
 
 void
 BucketDataCellParameter::FromJson(const JsonType& json) {
-    CHECK_ARGUMENT(json.contains(IO_PARAMS_KEY),
+    CHECK_ARGUMENT(json.Contains(IO_PARAMS_KEY),
                    fmt::format("bucket interface parameters must contains {}", IO_PARAMS_KEY));
     this->io_parameter = IOParameter::GetIOParameterByJson(json[IO_PARAMS_KEY]);
 
     CHECK_ARGUMENT(
-        json.contains(QUANTIZATION_PARAMS_KEY),
+        json.Contains(QUANTIZATION_PARAMS_KEY),
         fmt::format("bucket interface parameters must contains {}", QUANTIZATION_PARAMS_KEY));
     this->quantizer_parameter =
         QuantizerParameter::GetQuantizerParameterByJson(json[QUANTIZATION_PARAMS_KEY]);
 
-    if (json.contains(BUCKETS_COUNT_KEY)) {
-        this->buckets_count = json[BUCKETS_COUNT_KEY];
+    if (json.Contains(BUCKETS_COUNT_KEY)) {
+        this->buckets_count = json[BUCKETS_COUNT_KEY].GetInt();
     }
 
-    if (json.contains(BUCKET_USE_RESIDUAL)) {
-        this->use_residual_ = json[BUCKET_USE_RESIDUAL];
+    if (json.Contains(BUCKET_USE_RESIDUAL)) {
+        this->use_residual_ = json[BUCKET_USE_RESIDUAL].GetBool();
     }
 }
 
 JsonType
 BucketDataCellParameter::ToJson() const {
     JsonType json;
-    json[IO_PARAMS_KEY] = this->io_parameter->ToJson();
-    json[BUCKET_USE_RESIDUAL] = this->use_residual_;
-    json[QUANTIZATION_PARAMS_KEY] = this->quantizer_parameter->ToJson();
-    json[BUCKETS_COUNT_KEY] = this->buckets_count;
+    json[IO_PARAMS_KEY].SetJson(this->io_parameter->ToJson());
+    json[BUCKET_USE_RESIDUAL].SetBool(this->use_residual_);
+    json[QUANTIZATION_PARAMS_KEY].SetJson(this->quantizer_parameter->ToJson());
+    json[BUCKETS_COUNT_KEY].SetInt(this->buckets_count);
     return json;
 }
 bool

@@ -15,7 +15,6 @@
 
 #pragma once
 
-#include <nlohmann/json.hpp>
 #include <queue>
 
 #include "impl/logger/logger.h"

@@ -637,62 +637,61 @@ HGraph::deserialize_basic_info_v0_14(StreamReader& reader) {
     }
 }
 
-#define TO_JSON(json_obj, var) json_obj[#var] = this->var##_;
-
-#define TO_JSON_BASE64(json_obj, var) json_obj[#var] = base64_encode_obj(this->var##_);
-
-#define TO_JSON_ATOMIC(json_obj, var) json_obj[#var] = this->var##_.load();
+#define TO_JSON_BASE64(json_obj, var) json_obj[#var].SetString(base64_encode_obj(this->var##_));
 
 JsonType
 HGraph::serialize_basic_info() const {
     JsonType jsonify_basic_info;
-    TO_JSON(jsonify_basic_info, use_reorder);
-    TO_JSON(jsonify_basic_info, dim);
-    TO_JSON(jsonify_basic_info, metric);
-    TO_JSON(jsonify_basic_info, entry_point_id);
-    TO_JSON(jsonify_basic_info, ef_construct);
-    TO_JSON(jsonify_basic_info, extra_info_size);
-    TO_JSON(jsonify_basic_info, data_type);
+    jsonify_basic_info["use_reorder"].SetBool(this->use_reorder_);
+    jsonify_basic_info["dim"].SetInt(this->dim_);
+    jsonify_basic_info["metric"].SetInt(static_cast<int64_t>(this->metric_));
+    jsonify_basic_info["entry_point_id"].SetInt(this->entry_point_id_);
+    jsonify_basic_info["ef_construct"].SetInt(this->ef_construct_);
+    jsonify_basic_info["extra_info_size"].SetInt(this->extra_info_size_);
+    jsonify_basic_info["data_type"].SetInt(static_cast<int64_t>(this->data_type_));
     // logger::debug("mult: {}", this->mult_);
     TO_JSON_BASE64(jsonify_basic_info, mult);
-    TO_JSON_ATOMIC(jsonify_basic_info, max_capacity);
-    jsonify_basic_info["max_level"] = this->route_graphs_.size();
-    jsonify_basic_info[INDEX_PARAM] = this->create_param_ptr_->ToString();
+    jsonify_basic_info["max_capacity"].SetInt(this->max_capacity_.load());
+    jsonify_basic_info["max_level"].SetInt(this->route_graphs_.size());
+    jsonify_basic_info[INDEX_PARAM].SetString(this->create_param_ptr_->ToString());
 
     return jsonify_basic_info;
 }
 
-#define FROM_JSON(json_obj, var)             \
-    do {                                     \
-        if ((json_obj).contains(#var)) {     \
-            this->var##_ = (json_obj)[#var]; \
-        }                                    \
+#define FROM_JSON(json_obj, var, type)                   \
+    do {                                                 \
+        if ((json_obj).Contains(#var)) {                 \
+            this->var##_ = (json_obj)[#var].Get##type(); \
+        }                                                \
     } while (0)
 
-#define FROM_JSON_BASE64(json_obj, var) base64_decode_obj((json_obj)[#var], this->var##_);
-
-#define FROM_JSON_ATOMIC(json_obj, var) this->var##_.store((json_obj)[#var]);
+#define FROM_JSON_BASE64(json_obj, var) \
+    base64_decode_obj((json_obj)[#var].GetString(), this->var##_);
 
 void
-HGraph::deserialize_basic_info(JsonType jsonify_basic_info) {
-    logger::debug("jsonify_basic_info: {}", jsonify_basic_info.dump());
-    FROM_JSON(jsonify_basic_info, use_reorder);
-    FROM_JSON(jsonify_basic_info, dim);
-    FROM_JSON(jsonify_basic_info, metric);
-    FROM_JSON(jsonify_basic_info, entry_point_id);
-    FROM_JSON(jsonify_basic_info, ef_construct);
-    FROM_JSON(jsonify_basic_info, extra_info_size);
-    FROM_JSON(jsonify_basic_info, data_type);
+HGraph::deserialize_basic_info(const JsonType& jsonify_basic_info) {
+    logger::debug("jsonify_basic_info: {}", jsonify_basic_info.Dump());
+    FROM_JSON(jsonify_basic_info, use_reorder, Bool);
+    FROM_JSON(jsonify_basic_info, dim, Int);
+    if (jsonify_basic_info.Contains("metric")) {
+        this->metric_ = static_cast<MetricType>(jsonify_basic_info["metric"].GetInt());
+    }
+    FROM_JSON(jsonify_basic_info, entry_point_id, Int);
+    FROM_JSON(jsonify_basic_info, ef_construct, Int);
+    FROM_JSON(jsonify_basic_info, extra_info_size, Int);
+    if (jsonify_basic_info.Contains("data_type")) {
+        this->data_type_ = static_cast<DataTypes>(jsonify_basic_info["data_type"].GetInt());
+    }
     FROM_JSON_BASE64(jsonify_basic_info, mult);
     // logger::debug("mult: {}", this->mult_);
-    FROM_JSON_ATOMIC(jsonify_basic_info, max_capacity);
+    this->max_capacity_.store(jsonify_basic_info["max_capacity"].GetInt());
 
-    uint64_t max_level = jsonify_basic_info["max_level"];
-    for (uint64_t i = 0; i < max_level; ++i) {
+    auto max_level = jsonify_basic_info["max_level"].GetInt();
+    for (int64_t i = 0; i < max_level; ++i) {
         this->route_graphs_.emplace_back(this->generate_one_route_graph());
     }
-    if (jsonify_basic_info.contains(INDEX_PARAM)) {
-        std::string index_param_string = jsonify_basic_info[INDEX_PARAM];
+    if (jsonify_basic_info.Contains(INDEX_PARAM)) {
+        std::string index_param_string = jsonify_basic_info[INDEX_PARAM].GetString();
         HGraphParameterPtr index_param = std::make_shared<HGraphParameter>();
         index_param->data_type = this->data_type_;
         index_param->FromString(index_param_string);
@@ -789,7 +788,7 @@ HGraph::Serialize(StreamWriter& writer) const {
     auto jsonify_basic_info = this->serialize_basic_info();
     auto metadata = std::make_shared<Metadata>();
     metadata->Set(BASIC_INFO, jsonify_basic_info);
-    logger::debug(jsonify_basic_info.dump());
+    logger::debug(jsonify_basic_info.Dump());
 
     auto footer = std::make_shared<Footer>(metadata);
     footer->Write(writer);
@@ -881,21 +880,21 @@ HGraph::GetMemoryUsageDetail() const {
     if (this->ignore_reorder_) {
         this->use_reorder_ = false;
     }
-    memory_usage["basic_flatten_codes"] = this->basic_flatten_codes_->CalcSerializeSize();
-    memory_usage["bottom_graph"] = this->bottom_graph_->CalcSerializeSize();
+    memory_usage["basic_flatten_codes"].SetInt(this->basic_flatten_codes_->CalcSerializeSize());
+    memory_usage["bottom_graph"].SetInt(this->bottom_graph_->CalcSerializeSize());
     if (this->use_reorder_) {
-        memory_usage["high_precise_codes"] = this->high_precise_codes_->CalcSerializeSize();
+        memory_usage["high_precise_codes"].SetInt(this->high_precise_codes_->CalcSerializeSize());
     }
     size_t route_graph_size = 0;
     for (const auto& route_graph : this->route_graphs_) {
         route_graph_size += route_graph->CalcSerializeSize();
     }
-    memory_usage["route_graph"] = route_graph_size;
+    memory_usage["route_graph"].SetInt(route_graph_size);
     if (this->extra_info_size_ > 0 && this->extra_infos_ != nullptr) {
-        memory_usage["extra_infos"] = this->extra_infos_->CalcSerializeSize();
+        memory_usage["extra_infos"].SetInt(this->extra_infos_->CalcSerializeSize());
     }
-    memory_usage["__total_size__"] = this->CalSerializeSize();
-    return memory_usage.dump();
+    memory_usage["__total_size__"].SetInt(this->CalSerializeSize());
+    return memory_usage.Dump();
 }
 
 float
@@ -1558,12 +1557,12 @@ HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
     }
 
     std::string str = format_map(HGRAPH_PARAMS_TEMPLATE, DEFAULT_MAP);
-    auto inner_json = JsonType::parse(str);
+    auto inner_json = JsonType::Parse(str);
     mapping_external_param_to_inner(external_param, external_mapping, inner_json);
     if (common_param.data_type_ == DataTypes::DATA_TYPE_SPARSE) {
-        inner_json[HGRAPH_BASE_CODES_KEY][CODES_TYPE_KEY] = SPARSE_CODES;
-        inner_json[PRECISE_CODES_KEY][CODES_TYPE_KEY] = SPARSE_CODES;
-        inner_json[RAW_VECTOR_KEY][CODES_TYPE_KEY] = SPARSE_CODES;
+        inner_json[HGRAPH_BASE_CODES_KEY][CODES_TYPE_KEY].SetString(SPARSE_CODES);
+        inner_json[PRECISE_CODES_KEY][CODES_TYPE_KEY].SetString(SPARSE_CODES);
+        inner_json[RAW_VECTOR_KEY][CODES_TYPE_KEY].SetString(SPARSE_CODES);
     }
 
     auto hgraph_parameter = std::make_shared<HGraphParameter>();
@@ -1935,8 +1934,8 @@ HGraph::GetStats() const {
     uint64_t sample_size = std::min(QUERY_SAMPLE_SIZE, this->total_count_);
     Vector<float> sample_base_datas(dim_ * sample_size, 0.0F, allocator_);
     if (this->total_count_ == 0) {
-        stats["total_count"] = 0;
-        return stats.dump();
+        stats["total_count"].SetInt(0);
+        return stats.Dump();
     }
     constexpr static const char* search_params_template = R"({{
         "hgraph": {{
@@ -1944,7 +1943,7 @@ HGraph::GetStats() const {
         }}
     }})";
     std::string search_params = fmt::format(search_params_template, ef_construct_);
-    stats["total_count"] = this->total_count_;
+    stats["total_count"].SetInt(this->total_count_);
     // duplicate rate
     size_t duplicate_num = 0;
     if (this->label_table_->CompressDuplicateData()) {
@@ -1954,13 +1953,13 @@ HGraph::GetStats() const {
             }
         }
     }
-    stats["duplicate_rate"] =
-        static_cast<float>(duplicate_num) / static_cast<float>(this->total_count_);
-    stats["deleted_count"] = delete_count_.load();
+    stats["duplicate_rate"].SetFloat(static_cast<float>(duplicate_num) /
+                                     static_cast<float>(this->total_count_));
+    stats["deleted_count"].SetInt(delete_count_.load());
     this->analyze_graph_connection(stats);
     this->analyze_graph_recall(stats, sample_base_datas, sample_size, topk, search_params);
     this->analyze_quantizer(stats, sample_base_datas.data(), sample_size, topk, search_params);
-    return stats.dump(4);
+    return stats.Dump(4);
 }
 
 void
@@ -2032,12 +2031,12 @@ HGraph::analyze_graph_recall(JsonType& stats,
             }
         }
     }
-    stats["recall_base"] =
-        static_cast<float>(hit_count) / static_cast<float>(sample_data_size * topk);
-    stats["proximity_recall_neighbor"] =
-        static_cast<float>(hit_neighbor_count) / static_cast<float>(all_neighbor_count);
-    stats["avg_distance_base"] =
-        avg_distance_base / static_cast<float>(sample_data_size * (topk - 1));
+    stats["recall_base"].SetFloat(static_cast<float>(hit_count) /
+                                  static_cast<float>(sample_data_size * topk));
+    stats["proximity_recall_neighbor"].SetFloat(static_cast<float>(hit_neighbor_count) /
+                                                static_cast<float>(all_neighbor_count));
+    stats["avg_distance_base"].SetFloat(avg_distance_base /
+                                        static_cast<float>(sample_data_size * (topk - 1)));
 }
 
 void
@@ -2077,7 +2076,7 @@ HGraph::analyze_graph_connection(JsonType& stats) const {
             }
         }
     }
-    stats["connect_components"] = connect_components;
+    stats["connect_components"].SetInt(connect_components);
 }
 
 void
@@ -2235,7 +2234,7 @@ HGraph::AnalyzeIndexBySearch(const SearchRequest& request) {
         }
     }
     dist /= static_cast<float>(num_elements * topk);
-    stats["avg_distance_query"] = dist;
+    stats["avg_distance_query"].SetFloat(dist);
     auto param_str = request.params_str_;
     double time_cost = 0.0;
     int64_t result_hit = 0;
@@ -2265,11 +2264,12 @@ HGraph::AnalyzeIndexBySearch(const SearchRequest& request) {
         result_hit += hit_count;
         time_cost += single_query_time;
     }
-    stats["recall_query"] =
-        static_cast<double>(result_hit) / static_cast<double>(num_elements * topk);
-    stats["time_cost_query"] = time_cost / static_cast<double>(num_elements);
+    stats["recall_query"].SetFloat(static_cast<float>(result_hit) /
+                                   static_cast<float>(num_elements * topk));
+    stats["time_cost_query"].SetFloat(static_cast<float>(time_cost) /
+                                      static_cast<float>(num_elements));
     this->analyze_quantizer(stats, querys->GetFloat32Vectors(), num_elements, topk, param_str);
-    return stats.dump(4);
+    return stats.Dump(4);
 }
 
 void

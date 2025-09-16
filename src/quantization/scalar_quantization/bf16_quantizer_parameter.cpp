@@ -30,7 +30,7 @@ BF16QuantizerParameter::FromJson(const JsonType& json) {
 JsonType
 BF16QuantizerParameter::ToJson() const {
     JsonType json;
-    json[QUANTIZATION_TYPE_KEY] = QUANTIZATION_TYPE_VALUE_BF16;
+    json[QUANTIZATION_TYPE_KEY].SetString(QUANTIZATION_TYPE_VALUE_BF16);
     return json;
 }
 }  // namespace vsag

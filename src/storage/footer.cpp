@@ -23,27 +23,27 @@ SerializationFooter::SerializationFooter() {
 
 void
 SerializationFooter::Clear() {
-    json_.clear();
+    json_.Clear();
     this->SetMetadata(SERIALIZE_MAGIC_NUM, MAGIC_NUM);
     this->SetMetadata(SERIALIZE_VERSION, VERSION);
 }
 
 void
 SerializationFooter::SetMetadata(const std::string& key, const std::string& value) {
+    bool has_key = json_.Contains(key);
     std::string old_value;
-    auto iter = json_.find(key);
-    if (iter != json_.end()) {
-        old_value = iter.value();
+    if (has_key) {
+        old_value = json_[key].GetString();
     }
 
-    json_[key] = value;
-    std::string new_json_str = json_.dump();
+    json_[key].SetString(value);
+    std::string new_json_str = json_.Dump();
 
     if (new_json_str.size() >= FOOTER_SIZE - sizeof(uint32_t)) {
-        if (iter != json_.end()) {
-            json_[key] = old_value;
+        if (has_key) {
+            json_[key].SetString(old_value);
         } else {
-            json_.erase(key);
+            json_.Erase(key);
         }
         throw std::runtime_error("Serialized footer size exceeds 4KB");
     }
@@ -51,16 +51,15 @@ SerializationFooter::SetMetadata(const std::string& key, const std::string& valu
 
 std::string
 SerializationFooter::GetMetadata(const std::string& key) const {
-    auto iter = json_.find(key);
-    if (iter == json_.end()) {
+    if (not json_.Contains(key)) {
         throw std::runtime_error(fmt::format("Footer doesn't contain key ({})", key));
     }
-    return iter->get<std::string>();
+    return json_[key].GetString();
 }
 
 void
 SerializationFooter::Serialize(std::ostream& out_stream) const {
-    std::string serialized_data = json_.dump();
+    std::string serialized_data = json_.Dump();
     uint32_t serialized_data_size = serialized_data.size();
 
     out_stream.write(reinterpret_cast<const char*>(&serialized_data_size),
@@ -91,8 +90,8 @@ SerializationFooter::Deserialize(StreamReader& in_stream) {
 
     // parse json
     std::string serialized_data(buffer.begin(), buffer.begin() + FOOTER_SIZE - sizeof(uint32_t));
-    json_ = JsonType::parse(serialized_data, nullptr, false);
-    if (json_.is_discarded()) {
+    json_ = JsonType::Parse(serialized_data, false);
+    if (json_.IsDiscarded()) {
         throw std::runtime_error("Failed to parse JSON data");
     }
 
