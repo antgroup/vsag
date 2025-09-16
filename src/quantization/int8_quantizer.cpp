@@ -114,13 +114,13 @@ INT8Quantizer<metric>::ComputeImpl(const uint8_t* codes1, const uint8_t* codes2)
         const auto* mold2 = reinterpret_cast<const float*>(codes2 + this->dim_ * sizeof(uint8_t));
 
         if (*mold1 == 0 or *mold2 == 0) {
-            return 1.0f;
+            return 1.0F;
         }
         auto similarity = INT8ComputeIP(reinterpret_cast<const int8_t*>(codes1),
                                         reinterpret_cast<const int8_t*>(codes2),
                                         this->dim_);
         similarity /= mold1[0] * mold2[0];
-        return 1.0f - std::max(-1.0f, std::min(1.0f, similarity));
+        return 1.0F - std::max(-1.0F, std::min(1.0F, similarity));
     } else if (metric == MetricType::METRIC_TYPE_L2SQR) {
         return INT8ComputeL2Sqr(reinterpret_cast<const int8_t*>(codes1),
                                 reinterpret_cast<const int8_t*>(codes2),
@@ -164,7 +164,7 @@ INT8Quantizer<metric>::ComputeDistImpl(Computer<INT8Quantizer<metric>>& computer
         const auto* query_mold =
             reinterpret_cast<const float*>(computer.buf_ + this->dim_ * sizeof(uint8_t));
         if (*mold == 0 or *query_mold == 0) {
-            *dists = 1.0f;
+            *dists = 1.0F;
             return;
         }
         const auto similarity = INT8ComputeIP(reinterpret_cast<const int8_t*>(codes),
