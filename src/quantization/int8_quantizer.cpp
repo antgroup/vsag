@@ -26,6 +26,7 @@
 #include "quantization/int8_quantizer_parameter.h"
 #include "quantization/quantizer.h"
 #include "simd/int8_simd.h"
+#include "vsag_exception.h"
 
 namespace vsag {
 
@@ -155,11 +156,15 @@ void
 INT8Quantizer<metric>::ComputeDistImpl(Computer<INT8Quantizer<metric>>& computer,
                                        const uint8_t* codes,
                                        float* dists) const {
-    if (metric == MetricType::METRIC_TYPE_IP) {
+    static_assert(metric == MetricType::METRIC_TYPE_IP ||
+                      metric == MetricType::METRIC_TYPE_COSINE ||
+                      metric == MetricType::METRIC_TYPE_L2SQR,
+                  "Unsupported metric type for INT8Quantizer");
+    if constexpr (metric == MetricType::METRIC_TYPE_IP) {
         *dists = 1.0F - INT8ComputeIP(reinterpret_cast<const int8_t*>(codes),
                                       reinterpret_cast<const int8_t*>(computer.buf_),
                                       this->dim_);
-    } else if (metric == MetricType::METRIC_TYPE_COSINE) {
+    } else if constexpr (metric == MetricType::METRIC_TYPE_COSINE) {
         const auto* mold = reinterpret_cast<const float*>(codes + this->dim_ * sizeof(uint8_t));
         const auto* query_mold =
             reinterpret_cast<const float*>(computer.buf_ + this->dim_ * sizeof(uint8_t));
@@ -171,12 +176,12 @@ INT8Quantizer<metric>::ComputeDistImpl(Computer<INT8Quantizer<metric>>& computer
                                               reinterpret_cast<const int8_t*>(computer.buf_),
                                               this->dim_);
         *dists = 1.0F - std::max(-1.0F, std::min(1.0F, similarity / (mold[0] * query_mold[0])));
-    } else if (metric == MetricType::METRIC_TYPE_L2SQR) {
+    } else if constexpr (metric == MetricType::METRIC_TYPE_L2SQR) {
         *dists = INT8ComputeL2Sqr(reinterpret_cast<const int8_t*>(codes),
                                   reinterpret_cast<const int8_t*>(computer.buf_),
                                   this->dim_);
     } else {
-        *dists = -404.0F;
+        throw VsagException(ErrorType::INVALID_ARGUMENT, "invalid metric type");
     }
 }
 
