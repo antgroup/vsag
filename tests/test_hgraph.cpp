@@ -1200,7 +1200,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HGraphTestIndex,
     auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
     auto index = TestFactory(name, param, true);
     TestConcurrentAdd(index, dataset, true);
-    TestKnnSearch(index, dataset, search_param, true);
+    TestGeneral(index, dataset, search_param, true);
     auto index2 = TestIndex::TestFactory(name, param, true);
     TestIndex::TestSerializeFile(index, index2, dataset, search_param, true);
     vsag::Options::Instance().set_block_size_limit(origin_size);

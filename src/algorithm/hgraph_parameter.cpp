@@ -53,23 +53,13 @@ HGraphParameter::FromJson(const JsonType& json) {
     CHECK_ARGUMENT(json.contains(HGRAPH_BASE_CODES_KEY),
                    fmt::format("hgraph parameters must contains {}", HGRAPH_BASE_CODES_KEY));
     const auto& base_codes_json = json[HGRAPH_BASE_CODES_KEY];
-    if (data_type == DataTypes::DATA_TYPE_SPARSE) {
-        this->base_codes_param = std::make_shared<SparseVectorDataCellParameter>();
-    } else {
-        this->base_codes_param = std::make_shared<FlattenDataCellParameter>();
-    }
-    this->base_codes_param->FromJson(base_codes_json);
+    this->base_codes_param = CreateFlattenParam(base_codes_json);
 
     if (use_reorder) {
         CHECK_ARGUMENT(json.contains(PRECISE_CODES_KEY),
                        fmt::format("hgraph parameters must contains {}", PRECISE_CODES_KEY));
         const auto& precise_codes_json = json[PRECISE_CODES_KEY];
-        if (data_type == DataTypes::DATA_TYPE_SPARSE) {
-            this->precise_codes_param = std::make_shared<SparseVectorDataCellParameter>();
-        } else {
-            this->precise_codes_param = std::make_shared<FlattenDataCellParameter>();
-        }
-        this->precise_codes_param->FromJson(precise_codes_json);
+        this->precise_codes_param = CreateFlattenParam(precise_codes_json);
     }
 
     CHECK_ARGUMENT(json.contains(HGRAPH_GRAPH_KEY),

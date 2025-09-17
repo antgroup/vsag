@@ -43,6 +43,7 @@ JsonType
 FlattenDataCellParameter::ToJson() const {
     JsonType json;
     json[IO_PARAMS_KEY] = this->io_parameter->ToJson();
+    json[CODES_TYPE_KEY] = FLATTEN_CODES;
     json[QUANTIZATION_PARAMS_KEY] = this->quantizer_parameter->ToJson();
     return json;
 }
