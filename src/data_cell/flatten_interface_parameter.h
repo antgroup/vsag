@@ -17,9 +17,11 @@
 
 #include "io/io_parameter.h"
 #include "parameter.h"
+#include "pointer_define.h"
 #include "quantization/quantizer_parameter.h"
 
 namespace vsag {
+DEFINE_POINTER2(FlattenInterfaceParam, FlattenInterfaceParameter);
 
 class FlattenInterfaceParameter : public Parameter {
 public:
@@ -32,7 +34,4 @@ public:
 
     std::string name;
 };
-
-using FlattenInterfaceParamPtr = std::shared_ptr<FlattenInterfaceParameter>;
-
 }  // namespace vsag

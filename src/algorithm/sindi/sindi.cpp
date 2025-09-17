@@ -16,6 +16,7 @@
 #include "sindi.h"
 
 #include "impl/heap/standard_heap.h"
+#include "index_feature_list.h"
 #include "storage/serialization.h"
 #include "utils/util_functions.h"
 
@@ -33,7 +34,8 @@ SINDI::SINDI(const SINDIParameterPtr& param, const IndexCommonParam& common_para
       use_reorder_(param->use_reorder),
       window_size_(param->window_size),
       doc_retain_ratio_(1.0F - param->doc_prune_ratio),
-      window_term_list_(common_param.allocator_.get()) {
+      window_term_list_(common_param.allocator_.get()),
+      deserialize_without_footer_(param->deserialize_without_footer) {
     if (use_reorder_) {
         SparseIndexParameterPtr rerank_param = std::make_shared<SparseIndexParameters>();
         rerank_param->need_sort = true;
@@ -43,13 +45,16 @@ SINDI::SINDI(const SINDIParameterPtr& param, const IndexCommonParam& common_para
 
 std::vector<int64_t>
 SINDI::Add(const DatasetPtr& base) {
-    std::unique_lock wlock(this->global_mutex_);
+    std::scoped_lock wlock(this->global_mutex_);
+    std::vector<int64_t> failed_ids;
 
     auto data_num = base->GetNumElements();
     CHECK_ARGUMENT(data_num > 0, "data_num is zero when add vectors");
 
     const auto* sparse_vectors = base->GetSparseVectors();
     const auto* ids = base->GetIds();
+    const auto* extra_info = base->GetExtraInfos();
+    const auto extra_info_size = base->GetExtraInfoSize();
 
     // adjust window
     int64_t final_add_window = ceil_int(cur_element_count_ + data_num, window_size_) / window_size_;
@@ -63,8 +68,18 @@ SINDI::Add(const DatasetPtr& base) {
         auto cur_window = cur_element_count_ / window_size_;
         auto window_start_id = cur_window * window_size_;
         const auto& sparse_vector = sparse_vectors[i];
+        if (sparse_vectors->len_ <= 0) {
+            failed_ids.push_back(ids[i]);
+            logger::warn(
+                "sparse_vectors.len_ ({}) is invalid for id ({})", sparse_vectors->len_, ids[i]);
+            continue;
+        }
 
         label_table_->Insert(cur_element_count_, ids[i]);  // todo(zxy): check id exists
+        if (extra_info_size > 0) {
+            extra_infos_->InsertExtraInfo(extra_info + i * extra_info_size, cur_element_count_);
+        }
+
         uint32_t inner_id = cur_element_count_ - window_start_id;
         window_term_list_[cur_window]->InsertVector(sparse_vector, inner_id);
 
@@ -75,7 +90,7 @@ SINDI::Add(const DatasetPtr& base) {
         rerank_flat_index_->Add(base);
     }
 
-    return {};
+    return failed_ids;
 }
 
 std::vector<int64_t>
@@ -96,15 +111,19 @@ SINDI::KnnSearch(const DatasetPtr& query,
     const auto* sparse_vectors = query->GetSparseVectors();
     CHECK_ARGUMENT(query->GetNumElements() == 1, "num of query should be 1");
     auto sparse_query = sparse_vectors[0];
+    CHECK_ARGUMENT(sparse_vectors->len_ > 0,
+                   fmt::format("sparse_vectors.len_ ({}) is invalid", sparse_vectors->len_));
 
     // search parameter
     SINDISearchParameter search_param;
     search_param.FromJson(JsonType::parse(parameters));
+    CHECK_ARGUMENT(search_param.n_candidate <= AMPLIFICATION_FACTOR * k,
+                   fmt::format("n_candidate ({}) should be less than {} * k ({})",
+                               search_param.n_candidate,
+                               AMPLIFICATION_FACTOR,
+                               k));
     InnerSearchParam inner_param;
-    inner_param.ef = search_param.n_candidate;
-    if (search_param.n_candidate == DEFAULT_N_CANDIDATE or search_param.n_candidate <= k) {
-        inner_param.ef = k;
-    }
+    inner_param.ef = std::max(static_cast<int64_t>(search_param.n_candidate), k);
     inner_param.topk = k;
 
     FilterPtr ft = nullptr;
@@ -123,7 +142,7 @@ SINDI::search_impl(const SparseTermComputerPtr& computer,
                    const InnerSearchParam& inner_param) const {
     // computer and heap
     MaxHeap heap(this->allocator_);
-    uint32_t k = 0;
+    int64_t k = 0;
 
     if constexpr (mode == KNN_SEARCH) {
         k = inner_param.topk;
@@ -146,14 +165,6 @@ SINDI::search_impl(const SparseTermComputerPtr& computer,
         } else {
             term_list->InsertHeap<mode, PURE>(
                 dists.data(), computer, heap, inner_param, window_start_id);
-        }
-    }
-
-    if constexpr (mode == KNN_SEARCH) {
-        // fill up to k
-        while (heap.size() < k) {
-            heap.push(
-                {std::numeric_limits<float>::max(), 0});  // TODO(ZXY): replace with random points
         }
     }
 
@@ -198,20 +209,24 @@ SINDI::search_impl(const SparseTermComputerPtr& computer,
 
     // low precision
     if constexpr (mode == RANGE_SEARCH) {
-        k = heap.size();
+        k = static_cast<int64_t>(heap.size());
         if (inner_param.range_search_limit_size != -1) {
             k = inner_param.range_search_limit_size;
         }
     }
-    auto [results, ret_dists, ret_ids] = create_fast_dataset(static_cast<int64_t>(k), allocator_);
+
+    int64_t cur_size = std::min(static_cast<int64_t>(heap.size()), k);
+
+    auto [results, ret_dists, ret_ids] = create_fast_dataset(cur_size, allocator_);
+    if (cur_size == 0) {
+        return results;
+    }
 
     while (heap.size() > k) {
         heap.pop();
     }
 
-    int cur_size = static_cast<int>(heap.size());
-
-    for (int j = cur_size - 1; j >= 0; j--) {
+    for (auto j = cur_size - 1; j >= 0; j--) {
         ret_dists[j] = 1 + heap.top().first;  // dist = -ip -> 1 + dist = 1 - ip
         ret_ids[j] = label_table_->GetLabelById(heap.top().second);
         heap.pop();
@@ -233,6 +248,8 @@ SINDI::RangeSearch(const DatasetPtr& query,
     const auto* sparse_vectors = query->GetSparseVectors();
     CHECK_ARGUMENT(query->GetNumElements() == 1, "num of query should be 1");
     auto sparse_query = sparse_vectors[0];
+    CHECK_ARGUMENT(sparse_vectors->len_ > 0,
+                   fmt::format("query.len_ ({}) is invalid", sparse_vectors->len_));
 
     // search parameter
     SINDISearchParameter search_param;
@@ -280,17 +297,19 @@ SINDI::Serialize(StreamWriter& writer) const {
 
 void
 SINDI::Deserialize(StreamReader& reader) {
-    std::unique_lock wlock(this->global_mutex_);
+    std::scoped_lock wlock(this->global_mutex_);
 
-    auto footer = Footer::Parse(reader);
-    auto metadata = footer->GetMetadata();
-    JsonType jsonify_basic_info = metadata->Get("basic_info");
-    // Check if the index parameter is compatible
-    {
-        auto param = jsonify_basic_info[INDEX_PARAM];
-        SINDIParameterPtr index_param = std::make_shared<SINDIParameter>();
-        index_param->FromJson(param);
-        this->create_param_ptr_->CheckCompatibility(index_param);
+    if (not deserialize_without_footer_) {
+        auto footer = Footer::Parse(reader);
+        auto metadata = footer->GetMetadata();
+        JsonType jsonify_basic_info = metadata->Get("basic_info");
+        // Check if the index parameter is compatible
+        {
+            auto param = jsonify_basic_info[INDEX_PARAM];
+            SINDIParameterPtr index_param = std::make_shared<SINDIParameter>();
+            index_param->FromJson(param);
+            this->create_param_ptr_->CheckCompatibility(index_param);
+        }
     }
 
     StreamReader::ReadObj(reader, cur_element_count_);
@@ -308,6 +327,80 @@ SINDI::Deserialize(StreamReader& reader) {
     if (use_reorder_) {
         rerank_flat_index_->Deserialize(reader);
     }
+}
+
+bool
+SINDI::UpdateId(int64_t old_id, int64_t new_id) {
+    if (old_id == new_id) {
+        return true;
+    }
+
+    std::scoped_lock wlock(this->global_mutex_);
+    label_table_->UpdateLabel(old_id, new_id);
+    return true;
+}
+
+std::pair<int64_t, int64_t>
+SINDI::GetMinAndMaxId() const {
+    int64_t min_id = INT64_MAX;
+    int64_t max_id = INT64_MIN;
+    std::shared_lock<std::shared_mutex> lock(this->label_lookup_mutex_);
+    if (this->cur_element_count_ == 0) {
+        throw VsagException(ErrorType::INTERNAL_ERROR, "Label map size is zero");
+    }
+    for (int i = 0; i < this->cur_element_count_; ++i) {
+        if (this->label_table_->IsRemoved(i)) {
+            continue;
+        }
+        auto label = this->label_table_->label_table_[i];
+        max_id = std::max(label, max_id);
+        min_id = std::min(label, min_id);
+    }
+    return {min_id, max_id};
+}
+
+uint64_t
+SINDI::EstimateMemory(uint64_t num_elements) const {
+    uint64_t mem = 0;
+    // size of label table
+    mem += 2 * sizeof(int64_t) * num_elements;
+
+    // size of term id + term data
+    mem += ESTIMATE_DOC_TERM * num_elements * sizeof(float) * 2;
+
+    // size of rerank index is same as sindi
+    if (use_reorder_) {
+        mem *= 2;
+    }
+
+    return mem;
+}
+
+float
+SINDI::CalcDistanceById(const DatasetPtr& vector, int64_t id) const {
+    std::shared_lock rlock(this->global_mutex_);
+
+    if (use_reorder_) {
+        return this->rerank_flat_index_->CalcDistanceById(vector, id);
+    }
+
+    auto inner_id = this->label_table_->GetIdByLabel(id);
+    auto cur_window = inner_id / window_size_;
+    auto window_start_id = cur_window * window_size_;
+    auto term_list = this->window_term_list_[cur_window];
+
+    const auto sparse_query = vector->GetSparseVectors()[0];
+    SINDISearchParameter search_param;
+    search_param.query_prune_ratio = 0;
+    search_param.term_prune_ratio = 0;
+    auto computer = std::make_shared<SparseTermComputer>(sparse_query, search_param, allocator_);
+    return term_list->CalcDistanceByInnerId(computer, inner_id - window_start_id);
+}
+
+void
+SINDI::SetImmutable() {
+    std::scoped_lock wlock(this->global_mutex_);
+    this->immutable_ = true;
 }
 
 void
@@ -336,11 +429,15 @@ SINDI::InitFeatures() {
         IndexFeature::SUPPORT_SERIALIZE_FILE,
     });
 
+    // info
+    this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_CAL_DISTANCE_BY_ID);
+    this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_ESTIMATE_MEMORY);
+
     // concurrency
-    this->index_feature_list_->SetFeatures({
-        IndexFeature::SUPPORT_SEARCH_CONCURRENT,
-        IndexFeature::SUPPORT_ADD_CONCURRENT,
-    });
+    this->index_feature_list_->SetFeatures({IndexFeature::SUPPORT_SEARCH_CONCURRENT,
+                                            IndexFeature::SUPPORT_ADD_CONCURRENT,
+                                            IndexFeature::SUPPORT_ADD_CONCURRENT,
+                                            IndexFeature::SUPPORT_UPDATE_ID_CONCURRENT});
 
     // metric
     this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_METRIC_TYPE_INNER_PRODUCT);

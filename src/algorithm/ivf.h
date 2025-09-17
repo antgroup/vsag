@@ -46,10 +46,26 @@ public:
 
     ~IVF() override = default;
 
-    [[nodiscard]] std::string
-    GetName() const override {
-        return INDEX_IVF;
-    }
+    std::vector<int64_t>
+    Add(const DatasetPtr& base) override;
+
+    std::string
+    AnalyzeIndexBySearch(const vsag::SearchRequest& request) override;
+
+    std::vector<int64_t>
+    Build(const DatasetPtr& base) override;
+
+    DatasetPtr
+    CalDistanceById(const float* query, const int64_t* ids, int64_t count) const override;
+
+    float
+    CalcDistanceById(const float* query, int64_t id) const override;
+
+    void
+    Deserialize(StreamReader& reader) override;
+
+    [[nodiscard]] InnerIndexPtr
+    ExportModel(const IndexCommonParam& param) const override;
 
     [[nodiscard]] InnerIndexPtr
     Fork(const IndexCommonParam& param) override {
@@ -57,43 +73,57 @@ public:
     }
 
     void
-    InitFeatures() override;
+    GetAttributeSetByInnerId(InnerIdType inner_id, AttributeSet* attr) const override;
 
-    std::vector<int64_t>
-    Build(const DatasetPtr& base) override;
+    void
+    GetCodeByInnerId(InnerIdType inner_id, uint8_t* data) const override;
 
-    IndexType
+    [[nodiscard]] IndexType
     GetIndexType() override {
         return IndexType::IVF;
     }
 
-    std::vector<int64_t>
-    Add(const DatasetPtr& base) override;
+    [[nodiscard]] std::string
+    GetName() const override {
+        return INDEX_IVF;
+    }
+
+    [[nodiscard]] int64_t
+    GetNumElements() const override;
 
     void
-    Train(const DatasetPtr& data) override;
+    GetVectorByInnerId(InnerIdType inner_id, float* data) const override;
 
-    InnerIndexPtr
-    ExportModel(const IndexCommonParam& param) const override;
+    std::string
+    GetStats() const override;
 
-    DatasetPtr
+    void
+    InitFeatures() override;
+
+    [[nodiscard]] DatasetPtr
     KnnSearch(const DatasetPtr& query,
               int64_t k,
               const std::string& parameters,
               const FilterPtr& filter) const override;
 
-    [[nodiscard]] DatasetPtr
-    SearchWithRequest(const SearchRequest& request) const override;
+    void
+    Merge(const std::vector<MergeUnit>& merge_units) override;
 
-    DatasetPtr
+    [[nodiscard]] DatasetPtr
     RangeSearch(const DatasetPtr& query,
                 float radius,
                 const std::string& parameters,
                 const FilterPtr& filter,
                 int64_t limited_size = -1) const override;
 
+    [[nodiscard]] DatasetPtr
+    SearchWithRequest(const SearchRequest& request) const override;
+
     void
-    Merge(const std::vector<MergeUnit>& merge_units) override;
+    Serialize(StreamWriter& writer) const override;
+
+    void
+    Train(const DatasetPtr& data) override;
 
     void
     UpdateAttribute(int64_t id, const AttributeSet& new_attrs) override;
@@ -102,15 +132,6 @@ public:
     UpdateAttribute(int64_t id,
                     const AttributeSet& new_attrs,
                     const AttributeSet& origin_attrs) override;
-
-    void
-    Serialize(StreamWriter& writer) const override;
-
-    void
-    Deserialize(StreamReader& reader) override;
-
-    int64_t
-    GetNumElements() const override;
 
 private:
     InnerSearchParam
@@ -133,7 +154,7 @@ private:
     fill_location_map();
 
     std::pair<BucketIdType, InnerIdType>
-    get_location(InnerIdType inner_id);
+    get_location(InnerIdType inner_id) const;
 
 private:
     BucketInterfacePtr bucket_{nullptr};
@@ -142,8 +163,6 @@ private:
     BucketIdType buckets_per_data_;
 
     int64_t total_elements_{0};
-
-    bool use_reorder_{false};
 
     bool is_trained_{false};
     bool use_residual_{false};

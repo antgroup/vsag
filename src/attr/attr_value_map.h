@@ -18,6 +18,7 @@
 
 #include "impl/allocator/safe_allocator.h"
 #include "multi_bitset_manager.h"
+#include "pointer_define.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
 #include "typing.h"
@@ -26,8 +27,7 @@
 
 namespace vsag {
 
-class AttrValueMap;
-using ValueMapPtr = std::shared_ptr<AttrValueMap>;
+DEFINE_POINTER2(ValueMap, AttrValueMap);
 
 class AttrValueMap {
 public:
@@ -89,6 +89,27 @@ public:
                 }
             }
         }
+    }
+
+    template <class T>
+    Attribute*
+    GetAttr(InnerIdType inner_id, BucketIdType bucket_id = 0) {
+        auto& map = this->get_map_by_type<T>();
+        AttributeValue<T>* result = nullptr;
+        bool is_new = true;
+        for (auto& [key, manager] : map) {
+            if (manager != nullptr) {
+                auto* bitset = manager->GetOneBitset(bucket_id);
+                if (bitset != nullptr and bitset->Test(inner_id)) {
+                    if (is_new) {
+                        result = new AttributeValue<T>();
+                        is_new = false;
+                    }
+                    result->GetValue().emplace_back(key);
+                }
+            }
+        }
+        return result;
     }
 
     void

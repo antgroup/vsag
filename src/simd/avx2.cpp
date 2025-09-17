@@ -13,6 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "simd/int8_simd.h"
+#include "vsag/attribute.h"
 #if defined(ENABLE_AVX2)
 #include <immintrin.h>
 #endif
@@ -52,13 +54,16 @@ float
 INT8L2Sqr(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
     auto* pVect1 = (int8_t*)pVect1v;
     auto* pVect2 = (int8_t*)pVect2v;
-    auto qty = *((size_t*)qty_ptr);
+    auto qty = *((uint64_t*)qty_ptr);
     return avx2::INT8ComputeL2Sqr(pVect1, pVect2, qty);
 }
 
 float
 INT8InnerProduct(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
-    return avx::INT8InnerProduct(pVect1v, pVect2v, qty_ptr);  // TODO(LHT): implement
+    auto* pVect1 = (int8_t*)pVect1v;
+    auto* pVect2 = (int8_t*)pVect2v;
+    auto qty = *((size_t*)qty_ptr);
+    return avx2::INT8ComputeIP(pVect1, pVect2, qty);
 }
 
 float
@@ -548,6 +553,47 @@ INT8ComputeL2Sqr(const int8_t* RESTRICT query, const int8_t* RESTRICT codes, uin
 }
 
 float
+INT8ComputeIP(const int8_t* __restrict query, const int8_t* __restrict codes, uint64_t dim) {
+#if defined(ENABLE_AVX2)
+    constexpr int64_t BATCH_SIZE{16};
+
+    const int n = dim / BATCH_SIZE;
+
+    if (n == 0) {
+        return avx::INT8ComputeIP(query, codes, dim);
+    }
+
+    __m256i sum_sq = _mm256_setzero_si256();
+
+    for (int i{0}; i < n; ++i) {
+        __m128i q = _mm_loadu_si128(reinterpret_cast<const __m128i*>(query + BATCH_SIZE * i));
+        __m128i c = _mm_loadu_si128(reinterpret_cast<const __m128i*>(codes + BATCH_SIZE * i));
+
+        __m256i q_int16 = _mm256_cvtepi8_epi16(q);
+        __m256i c_int16 = _mm256_cvtepi8_epi16(c);
+
+        __m256i sq = _mm256_madd_epi16(q_int16, c_int16);
+
+        sum_sq = _mm256_add_epi32(sum_sq, sq);
+    }
+
+    alignas(32) int32_t result[BATCH_SIZE / 2];
+    _mm256_store_si256(reinterpret_cast<__m256i*>(result), sum_sq);
+
+    int32_t ip = 0;
+    for (int i = 0; i < BATCH_SIZE / 2; ++i) {
+        ip += result[i];
+    }
+
+    ip += avx::INT8ComputeIP(query + BATCH_SIZE * n, codes + BATCH_SIZE * n, dim - BATCH_SIZE * n);
+
+    return static_cast<float>(ip);
+#else
+    return avx::INT8ComputeIP(query, codes, dim);
+#endif
+}
+
+float
 SQ8ComputeIP(const float* RESTRICT query,
              const uint8_t* RESTRICT codes,
              const float* RESTRICT lower_bound,
@@ -912,7 +958,7 @@ PQFastScanLookUp32(const uint8_t* RESTRICT lookup_table,
         return;
     }
     __m256i sum[4];
-    for (size_t i = 0; i < 4; i++) {
+    for (uint64_t i = 0; i < 4; i++) {
         sum[i] = _mm256_setzero_si256();
     }
     const auto sign4 = _mm256_set1_epi8(0x0F);
@@ -1043,7 +1089,7 @@ BitNot(const uint8_t* x, const uint64_t num_byte, uint8_t* result) {
 }
 
 void
-VecRescale(float* data, size_t dim, float val) {
+VecRescale(float* data, uint64_t dim, float val) {
 #if defined(ENABLE_AVX2)
     int i = 0;
     __m256 val_vec = _mm256_set1_ps(val);
@@ -1076,10 +1122,10 @@ RotateOp(float* data, int idx, int dim_, int step) {
 }
 
 void
-FHTRotate(float* data, size_t dim_) {
+FHTRotate(float* data, uint64_t dim_) {
 #if defined(ENABLE_AVX2)
-    size_t n = dim_;
-    size_t step = 1;
+    uint64_t n = dim_;
+    uint64_t step = 1;
     while (step < n) {
         if (step >= 8) {
             avx2::RotateOp(data, 0, dim_, step);
@@ -1096,11 +1142,11 @@ FHTRotate(float* data, size_t dim_) {
 }
 
 void
-KacsWalk(float* data, size_t len) {
+KacsWalk(float* data, uint64_t len) {
 #if defined(ENABLE_AVX2)
-    size_t base = len % 2;
-    size_t offset = base + (len / 2);  // for odd dim
-    size_t i = 0;
+    uint64_t base = len % 2;
+    uint64_t offset = base + (len / 2);  // for odd dim
+    uint64_t i = 0;
     for (; i + 8 < len / 2; i += 8) {
         __m256 x = _mm256_loadu_ps(&data[i]);
         __m256 y = _mm256_loadu_ps(&data[i + offset]);

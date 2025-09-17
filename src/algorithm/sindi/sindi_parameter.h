@@ -15,8 +15,9 @@
 
 #pragma once
 
+#include "algorithm/inner_index_parameter.h"
 #include "index/index_common_param.h"
-#include "parameter.h"
+#include "pointer_define.h"
 
 namespace vsag {
 
@@ -27,7 +28,9 @@ static constexpr float DEFAULT_DOC_PRUNE_RATIO = 0.0F;
 static constexpr float DEFAULT_TERM_PRUNE_RATIO = 0.0F;
 static constexpr uint32_t DEFAULT_N_CANDIDATE = 0;
 
-struct SINDIParameter : public Parameter {
+DEFINE_POINTER(SINDIParameter);
+
+class SINDIParameter : public InnerIndexParameter {
 public:
     void
     FromJson(const JsonType& json) override;
@@ -35,19 +38,22 @@ public:
     JsonType
     ToJson() const override;
 
+    bool
+    CheckCompatibility(const vsag::ParamPtr& other) const override;
+
     SINDIParameter() = default;
 
 public:
     // index
     uint32_t window_size{0};
-    bool use_reorder{false};
 
     float doc_prune_ratio{0};
+
+    // temporal parameter
+    bool deserialize_without_footer{false};
 };
 
-using SINDIParameterPtr = std::shared_ptr<SINDIParameter>;
-
-struct SINDISearchParameter : public Parameter {
+class SINDISearchParameter : public Parameter {
 public:
     void
     FromJson(const JsonType& json) override;

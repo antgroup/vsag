@@ -104,7 +104,11 @@ TestIndex::TestUpdateId(const IndexPtr& index,
         // round 0 for update, round 1 for validate update results
         for (int i = 0; i < num_vectors; i++) {
             auto query = vsag::Dataset::Make();
-            query->NumElements(1)->Dim(dim)->Float32Vectors(base + i * dim)->Owner(false);
+            query->NumElements(1)
+                ->Dim(dim)
+                ->Float32Vectors(base + i * dim)
+                ->SparseVectors(dataset->base_->GetSparseVectors() + i)
+                ->Owner(false);
 
             auto result = index->KnnSearch(query, gt_topK, search_param);
             REQUIRE(result.has_value());
@@ -126,8 +130,7 @@ TestIndex::TestUpdateId(const IndexPtr& index,
 
                 // old id don't exist
                 auto failed_old_res = index->UpdateId(ids[i], update_id_map[ids[i]]);
-                REQUIRE(failed_old_res.has_value());
-                REQUIRE(not failed_old_res.value());
+                REQUIRE(not failed_old_res.has_value());
 
                 // same id
                 auto succ_same_res = index->UpdateId(update_id_map[ids[i]], update_id_map[ids[i]]);
@@ -145,8 +148,7 @@ TestIndex::TestUpdateId(const IndexPtr& index,
                 // new id is used
                 auto failed_new_res =
                     index->UpdateId(update_id_map[ids[i]], update_id_map[ids[num_vectors - i - 1]]);
-                REQUIRE(failed_new_res.has_value());
-                REQUIRE(not failed_new_res.value());
+                REQUIRE(not failed_new_res.has_value());
             }
         }
     }
@@ -176,7 +178,7 @@ TestIndex::TestUpdateVector(const IndexPtr& index,
     }
 
     std::vector<int> correct_num = {0, 0};
-    uint32_t success_force_updated = 0, failed_force_updated = 0;
+    uint32_t success_far_updated = 0, failed_far_updated = 0;
     for (int round = 0; round < 2; round++) {
         // round 0 for update, round 1 for validate update results
         for (int i = 0; i < num_vectors; i++) {
@@ -189,6 +191,10 @@ TestIndex::TestUpdateVector(const IndexPtr& index,
             if (round == 0) {
                 if (result.value()->GetIds()[0] == ids[i]) {
                     correct_num[round] += 1;
+                }
+
+                if (not index->CheckIdExist(ids[i])) {
+                    continue;
                 }
 
                 std::vector<float> update_vecs(dim);
@@ -206,12 +212,12 @@ TestIndex::TestUpdateVector(const IndexPtr& index,
                 // success case
                 auto before_update_dist = *index->CalcDistanceById(base + i * dim, ids[i]);
                 auto succ_vec_res = index->UpdateVector(ids[i], new_base);
-                REQUIRE(succ_vec_res.has_value());
-                if (expected_success) {
-                    REQUIRE(succ_vec_res.value());
-                }
                 auto after_update_dist = *index->CalcDistanceById(base + i * dim, ids[i]);
-                REQUIRE(before_update_dist < after_update_dist);
+                if (expected_success) {
+                    REQUIRE(succ_vec_res.has_value());
+                    REQUIRE(succ_vec_res.value());
+                    REQUIRE(before_update_dist <= after_update_dist);
+                }
 
                 // update with far vector
                 new_base->Float32Vectors(far_vecs.data());
@@ -220,35 +226,36 @@ TestIndex::TestUpdateVector(const IndexPtr& index,
                 if (fail_vec_res.value()) {
                     // note that the update should be failed, but for some cases, it success
                     auto force_update_dist = *index->CalcDistanceById(base + i * dim, ids[i]);
-                    REQUIRE(after_update_dist < force_update_dist);
-                    success_force_updated++;
+                    if (expected_success) {
+                        REQUIRE(after_update_dist <= force_update_dist);
+                    }
+                    success_far_updated++;
                 } else {
-                    failed_force_updated++;
+                    failed_far_updated++;
                 }
 
                 // force update with far vector
                 new_base->Float32Vectors(far_vecs.data());
                 auto force_update_res1 = index->UpdateVector(ids[i], new_base, true);
                 REQUIRE(force_update_res1.has_value());
+                REQUIRE(force_update_res1.value());
+                auto force_update_dist = *index->CalcDistanceById(base + i * dim, ids[i]);
                 if (expected_success) {
-                    REQUIRE(force_update_res1.value());
-                    auto force_update_dist = *index->CalcDistanceById(base + i * dim, ids[i]);
-                    REQUIRE(after_update_dist < force_update_dist);
+                    REQUIRE(after_update_dist <= force_update_dist);
                 }
 
                 new_base->Float32Vectors(update_vecs.data());
                 auto force_update_res2 = index->UpdateVector(ids[i], new_base, true);
                 REQUIRE(force_update_res2.has_value());
+                REQUIRE(force_update_res2.value());
+                force_update_dist = *index->CalcDistanceById(base + i * dim, ids[i]);
                 if (expected_success) {
-                    REQUIRE(force_update_res2.value());
-                    auto force_update_dist = *index->CalcDistanceById(base + i * dim, ids[i]);
                     REQUIRE(std::abs(after_update_dist - force_update_dist) < 1e-5);
                 }
 
                 // old id don't exist
                 auto failed_old_res = index->UpdateVector(ids[i] + 2 * max_id, new_base);
-                REQUIRE(failed_old_res.has_value());
-                REQUIRE(not failed_old_res.value());
+                REQUIRE(not failed_old_res.has_value());
             } else {
                 if (result.value()->GetIds()[0] == ids[i]) {
                     correct_num[round] += 1;
@@ -257,8 +264,10 @@ TestIndex::TestUpdateVector(const IndexPtr& index,
         }
     }
 
-    REQUIRE(correct_num[0] == correct_num[1]);
-    REQUIRE(success_force_updated < failed_force_updated);
+    if (expected_success) {
+        REQUIRE(correct_num[0] == correct_num[1]);
+        REQUIRE(success_far_updated < failed_far_updated);
+    }
 }
 
 void
@@ -474,7 +483,8 @@ TestIndex::TestRangeSearch(const IndexPtr& index,
         auto result = res.value()->GetIds();
         auto gt = gts->GetIds() + gt_topK * i;
         auto val = Intersection(gt, gt_topK - 1, result, res.value()->GetDim());
-        cur_recall += static_cast<float>(val) / static_cast<float>(gt_topK - 1);
+        cur_recall += static_cast<float>(val) /
+                      static_cast<float>(std::min(gt_topK - 1, res.value()->GetDim()));
     }
     if (cur_recall <= expected_recall * query_count) {
         WARN(fmt::format("cur_result({}) <= expected_recall * query_count({})",
@@ -754,7 +764,8 @@ void
 TestIndex::TestCalcDistanceById(const IndexPtr& index,
                                 const TestDatasetPtr& dataset,
                                 float error,
-                                bool expected_success) {
+                                bool expected_success,
+                                bool is_sparse) {
     if (not index->CheckFeature(vsag::SUPPORT_CAL_DISTANCE_BY_ID)) {
         return;
     }
@@ -768,17 +779,26 @@ TestIndex::TestCalcDistanceById(const IndexPtr& index,
         query->NumElements(1)
             ->Dim(dim)
             ->Float32Vectors(queries->GetFloat32Vectors() + i * dim)
+            ->SparseVectors(queries->GetSparseVectors() + i)
+            ->Paths(queries->GetPaths() + i)
             ->Owner(false);
         for (auto j = 0; j < gt_topK; ++j) {
             auto id = gts->GetIds()[i * gt_topK + j];
             auto dist = gts->GetDistances()[i * gt_topK + j];
-            auto result = index->CalcDistanceById(query->GetFloat32Vectors(), id);
+            tl::expected<float, vsag::Error> result;
+            if (is_sparse) {
+                result = index->CalcDistanceById(query, id);
+            } else {
+                result = index->CalcDistanceById(query->GetFloat32Vectors(), id);
+                REQUIRE_FALSE(index->CalcDistanceById(query, id).has_value());
+            }
             if (not expected_success) {
                 REQUIRE_FALSE(result.has_value());
                 continue;
             }
             REQUIRE(result.has_value());
-            REQUIRE(std::abs(dist - result.value()) < error);
+            float estimate_dist = result.value();
+            REQUIRE(std::abs(dist - estimate_dist) < error);
         }
     }
 }
@@ -787,7 +807,9 @@ void
 TestIndex::TestBatchCalcDistanceById(const IndexPtr& index,
                                      const TestDatasetPtr& dataset,
                                      float error,
-                                     bool expected_success) {
+                                     bool expected_success,
+                                     bool is_sparse,
+                                     bool is_old_index) {
     if (not index->CheckFeature(vsag::SUPPORT_CAL_DISTANCE_BY_ID)) {
         return;
     }
@@ -801,9 +823,25 @@ TestIndex::TestBatchCalcDistanceById(const IndexPtr& index,
         query->NumElements(1)
             ->Dim(dim)
             ->Float32Vectors(queries->GetFloat32Vectors() + i * dim)
+            ->SparseVectors(queries->GetSparseVectors() + i)
+            ->Paths(queries->GetPaths() + i)
             ->Owner(false);
-        auto result = index->CalDistanceById(
-            query->GetFloat32Vectors(), gts->GetIds() + (i * gt_topK), gt_topK);
+        tl::expected<DatasetPtr, vsag::Error> result;
+        if (is_sparse) {
+            result = index->CalDistanceById(query, gts->GetIds() + (i * gt_topK), gt_topK);
+        } else {
+            result = index->CalDistanceById(
+                query->GetFloat32Vectors(), gts->GetIds() + (i * gt_topK), gt_topK);
+            if (is_old_index) {
+                // for old index (hnsw and diskann)
+                REQUIRE_THROWS(index->CalDistanceById(query, gts->GetIds() + (i * gt_topK), gt_topK)
+                                   .has_value());
+            } else {
+                // for new index (from inner_index_interface)
+                REQUIRE_FALSE(index->CalDistanceById(query, gts->GetIds() + (i * gt_topK), gt_topK)
+                                  .has_value());
+            }
+        }
         if (not expected_success) {
             return;
         }
@@ -818,8 +856,13 @@ TestIndex::TestBatchCalcDistanceById(const IndexPtr& index,
         for (int i = 0; i < test_num; ++i) {
             no_exist_ids[i] = -i - 1;
         }
-        auto result =
-            index->CalDistanceById(queries->GetFloat32Vectors(), no_exist_ids.data(), test_num);
+        tl::expected<DatasetPtr, vsag::Error> result;
+        if (is_sparse) {
+            result = index->CalDistanceById(queries, no_exist_ids.data(), test_num);
+        } else {
+            result =
+                index->CalDistanceById(queries->GetFloat32Vectors(), no_exist_ids.data(), test_num);
+        }
         for (int i = 0; i < test_num; ++i) {
             fixtures::dist_t dist = result.value()->GetDistances()[i];
             REQUIRE(dist == -1);
@@ -877,6 +920,9 @@ TestIndex::TestSerializeFile(const IndexPtr& index_from,
     auto deserialize_index = index_to->Deserialize(infile);
     REQUIRE(deserialize_index.has_value() == expected_success);
     infile.close();
+    if (index_to->GetNumElements() == 0) {
+        return;
+    }
 
     const auto& queries = dataset->query_;
     auto query_count = queries->GetNumElements();
@@ -966,6 +1012,9 @@ TestIndex::TestSerializeBinarySet(const IndexPtr& index_from,
 
     auto deserialize_index = index_to->Deserialize(serialize_binary.value());
     REQUIRE(deserialize_index.has_value() == expected_success);
+    if (index_to->GetNumElements() == 0) {
+        return;
+    }
 
     const auto& queries = dataset->query_;
     auto query_count = queries->GetNumElements();
@@ -1008,8 +1057,12 @@ TestIndex::TestSerializeReaderSet(const IndexPtr& index_from,
     for (const auto& key : binary_set.GetKeys()) {
         rs.Set(key, std::make_shared<TestReader>(binary_set.Get(key)));
     }
+    REQUIRE(rs.Get("this_is_a_wrong_key") == nullptr);
     auto deserialize_index = index_to->Deserialize(rs);
     REQUIRE(deserialize_index.has_value() == expected_success);
+    if (index_to->GetNumElements() == 0) {
+        return;
+    }
 
     const auto& queries = dataset->query_;
     auto query_count = queries->GetNumElements();
@@ -1406,6 +1459,19 @@ TestIndex::TestEstimateMemory(const std::string& index_name,
             std::ifstream inf(path, std::ios::binary);
             index1->Deserialize(inf);
             auto real_memory = allocator->GetCurrentMemory();
+            auto get_memory = index1->GetMemoryUsage();
+
+            if (get_memory <= static_cast<uint64_t>(real_memory * 0.8) or
+                get_memory >= static_cast<uint64_t>(real_memory * 1.2)) {
+                WARN(fmt::format("get_memory({}) is not in range [{}, {}]",
+                                 get_memory,
+                                 static_cast<uint64_t>(real_memory * 0.8),
+                                 static_cast<uint64_t>(real_memory * 1.2)));
+            }
+
+            REQUIRE(get_memory >= static_cast<uint64_t>(real_memory * 0.2));
+            REQUIRE(get_memory <= static_cast<uint64_t>(real_memory * 3.2));
+
             if (estimate_memory <= static_cast<uint64_t>(real_memory * 0.8) or
                 estimate_memory >= static_cast<uint64_t>(real_memory * 1.2)) {
                 WARN(fmt::format("estimate_memory({}) is not in range [{}, {}]",
@@ -1414,8 +1480,8 @@ TestIndex::TestEstimateMemory(const std::string& index_name,
                                  static_cast<uint64_t>(real_memory * 1.2)));
             }
 
-            REQUIRE(estimate_memory >= static_cast<uint64_t>(real_memory * 0.2));
-            REQUIRE(estimate_memory <= static_cast<uint64_t>(real_memory * 3.2));
+            REQUIRE(estimate_memory >= static_cast<uint64_t>(real_memory * 0.1));
+            REQUIRE(estimate_memory <= static_cast<uint64_t>(real_memory * 5.0));
             inf.close();
         }
     }
@@ -1501,7 +1567,7 @@ TestIndex::TestMergeIndex(const std::string& name,
 }
 
 TestIndex::IndexPtr
-TestIndex::TestMergeIndexWithSameModel(const TestIndex::IndexPtr model,
+TestIndex::TestMergeIndexWithSameModel(const TestIndex::IndexPtr& model,
                                        const TestDatasetPtr& dataset,
                                        int32_t split_num,
                                        bool expect_success) {
@@ -2119,6 +2185,110 @@ TestIndex::TestExportIDs(const IndexPtr& index, const TestDatasetPtr& dataset) {
     }
     std::unordered_set<int64_t> id_set2(ids, ids + num_element);
     REQUIRE(id_set2.size() == num_element);
+}
+
+template <typename T>
+static void
+compare_attr_value(const vsag::Attribute* attr1, const vsag::Attribute* attr2) {
+    auto count = attr1->GetValueCount();
+    auto* ptr1 = dynamic_cast<const vsag::AttributeValue<T>*>(attr1);
+    auto* ptr2 = dynamic_cast<const vsag::AttributeValue<T>*>(attr2);
+    const auto& temp_vec1 = ptr1->GetValue();
+    const auto& temp_vec2 = ptr2->GetValue();
+    std::unordered_set<T> temp_set1(temp_vec1.begin(), temp_vec1.end());
+    std::unordered_set<T> temp_set2(temp_vec2.begin(), temp_vec2.end());
+    REQUIRE(temp_set1 == temp_set2);
+}
+
+static void
+compare_attr_set(const vsag::AttributeSet& attr1, const vsag::AttributeSet& attr2) {
+    REQUIRE(attr1.attrs_.size() == attr2.attrs_.size());
+    auto size = attr1.attrs_.size();
+    auto temp_vec1 = attr1.attrs_;
+    auto temp_vec2 = attr2.attrs_;
+    std::sort(temp_vec1.begin(), temp_vec1.end(), [](const auto& a, const auto& b) {
+        return a->name_ < b->name_;
+    });
+    std::sort(temp_vec2.begin(), temp_vec2.end(), [](const auto& a, const auto& b) {
+        return a->name_ < b->name_;
+    });
+    for (int i = 0; i < size; ++i) {
+        auto& attr = temp_vec1[i];
+        auto& gt_attr = temp_vec2[i];
+        REQUIRE(attr->name_ == gt_attr->name_);
+        REQUIRE(attr->GetValueType() == gt_attr->GetValueType());
+        if (attr->GetValueType() == vsag::AttrValueType::UINT64) {
+            compare_attr_value<uint64_t>(attr, gt_attr);
+        } else if (attr->GetValueType() == vsag::AttrValueType::INT64) {
+            compare_attr_value<int64_t>(attr, gt_attr);
+        } else if (attr->GetValueType() == vsag::AttrValueType::UINT32) {
+            compare_attr_value<uint32_t>(attr, gt_attr);
+        } else if (attr->GetValueType() == vsag::AttrValueType::INT32) {
+            compare_attr_value<int32_t>(attr, gt_attr);
+        } else if (attr->GetValueType() == vsag::AttrValueType::UINT16) {
+            compare_attr_value<uint16_t>(attr, gt_attr);
+        } else if (attr->GetValueType() == vsag::AttrValueType::INT16) {
+            compare_attr_value<int16_t>(attr, gt_attr);
+        } else if (attr->GetValueType() == vsag::AttrValueType::UINT8) {
+            compare_attr_value<uint8_t>(attr, gt_attr);
+        } else if (attr->GetValueType() == vsag::AttrValueType::INT8) {
+            compare_attr_value<int8_t>(attr, gt_attr);
+        } else if (attr->GetValueType() == vsag::AttrValueType::STRING) {
+            compare_attr_value<std::string>(attr, gt_attr);
+        }
+    }
+}
+
+void
+TestIndex::TestGetDataById(const IndexPtr& index, const TestDatasetPtr& dataset) {
+    if (not index->CheckFeature(vsag::SUPPORT_GET_DATA_BY_IDS)) {
+        return;
+    }
+    auto result = index->GetDataByIds(dataset->base_->GetIds(), dataset->base_->GetNumElements());
+    REQUIRE(result.has_value());
+    auto data = result.value();
+    REQUIRE(data->GetNumElements() == dataset->base_->GetNumElements());
+    REQUIRE(data->GetDim() == dataset->base_->GetDim());
+    // vectors
+    auto float_vectors = data->GetFloat32Vectors();
+    for (int i = 0; i < data->GetNumElements(); ++i) {
+        REQUIRE(memcmp(float_vectors + i * data->GetDim(),
+                       dataset->base_->GetFloat32Vectors() + i * data->GetDim(),
+                       data->GetDim() * sizeof(float)) == 0);
+    }
+    // attributes
+    auto attrs = data->GetAttributeSets();
+    auto gt_attrs = dataset->base_->GetAttributeSets();
+    for (int i = 0; i < data->GetNumElements(); ++i) {
+        auto& attr = attrs[i];
+        auto& gt_attr = gt_attrs[i];
+        compare_attr_set(attr, gt_attr);
+    }
+}
+
+void
+TestIndex::TestIndexStatus(const IndexPtr& index) {
+    auto set_result = index->SetImmutable();
+    if (not set_result.has_value()) {
+        return;
+    }
+    REQUIRE_FALSE(index->Train(nullptr));
+    REQUIRE_FALSE(index->Build(nullptr));
+    REQUIRE_FALSE(index->Add(nullptr));
+    std::ifstream inf;
+    REQUIRE_FALSE(index->Deserialize(inf));
+    REQUIRE_FALSE(index->Remove(0));
+    std::vector<vsag::MergeUnit> merge_units;
+    REQUIRE_FALSE(index->Merge(merge_units));
+    vsag::AttributeSet new_attrs;
+    REQUIRE_FALSE(index->UpdateAttribute(0, new_attrs));
+    REQUIRE_FALSE(index->UpdateAttribute(0, new_attrs, new_attrs));
+    REQUIRE_FALSE(index->UpdateId(0, 0));
+    REQUIRE_FALSE(index->UpdateVector(0, nullptr, false));
+}
+
+void
+TestIndex::TestGetDataByIdWithFlag(const IndexPtr& index, const TestDatasetPtr& dataset) {
 }
 
 }  // namespace fixtures

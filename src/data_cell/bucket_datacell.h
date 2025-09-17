@@ -115,6 +115,9 @@ public:
         return this->bucket_sizes_[bucket_id];
     }
 
+    void
+    GetCodesById(BucketIdType bucket_id, InnerIdType offset_id, uint8_t* data) const override;
+
 private:
     inline void
     check_valid_bucket_id(BucketIdType bucket_id) {
@@ -203,6 +206,9 @@ BucketDataCell<QuantTmpl, IOTmpl>::query_one_by_id(
     computer->ComputeDist(codes, &ret);
     if (need_release) {
         this->datas_[bucket_id]->Release(codes);
+    }
+    if (use_residual_ && this->quantizer_->Metric() == MetricType::METRIC_TYPE_L2SQR) {
+        ret -= residual_bias_[bucket_id][offset_id];
     }
     return ret;
 }
@@ -409,6 +415,24 @@ BucketDataCell<QuantTmpl, IOTmpl>::MergeOther(const BucketInterfacePtr& other, I
             this->inner_ids_[i].emplace_back(id + bias);
         }
     }
+}
+
+template <typename QuantTmpl, typename IOTmpl>
+void
+BucketDataCell<QuantTmpl, IOTmpl>::GetCodesById(BucketIdType bucket_id,
+                                                InnerIdType offset_id,
+                                                uint8_t* data) const {
+    if (bucket_id >= this->bucket_count_) {
+        throw VsagException(
+            ErrorType::INTERNAL_ERROR,
+            fmt::format("Get code by inner id failed: bucket id ({}) is invalid", bucket_id));
+    }
+    if (offset_id >= this->bucket_sizes_[bucket_id]) {
+        throw VsagException(
+            ErrorType::INTERNAL_ERROR,
+            fmt::format("Get code by inner id failed: offset id ({}) is invalid", offset_id));
+    }
+    this->datas_[bucket_id]->Read(this->code_size_, offset_id * this->code_size_, data);
 }
 
 }  // namespace vsag

@@ -74,22 +74,23 @@ SparseTermDataCell::InsertHeap(float* dists,
         uint32_t i = 0;
         auto term_size = static_cast<uint32_t>(static_cast<float>(term_sizes_[term]) *
                                                computer->term_retain_ratio_);
-        bool is_valid = true;
         if constexpr (mode == InnerSearchMode::KNN_SEARCH) {
             if (heap.size() < n_candidate) {
                 for (; i < term_size; i++) {
                     id = term_ids_[term][i];
 
                     if constexpr (type == InnerSearchType::WITH_FILTER) {
-                        if (filter and not filter->CheckValid(id + offset_id)) {
+                        if (not filter->CheckValid(id + offset_id)) {
                             dists[id] = 0;
                             continue;
                         }
                     }
 
-                    heap.emplace(dists[id], id + offset_id);
-                    cur_heap_top = heap.top().first;
-                    dists[id] = 0;
+                    if (dists[id] != 0) {
+                        heap.emplace(dists[id], id + offset_id);
+                        cur_heap_top = heap.top().first;
+                        dists[id] = 0;
+                    }
 
                     if (heap.size() == n_candidate) {
                         break;
@@ -102,18 +103,28 @@ SparseTermDataCell::InsertHeap(float* dists,
             id = term_ids_[term][i];
 
             if constexpr (type == InnerSearchType::WITH_FILTER) {
-                is_valid = (filter and filter->CheckValid(id + offset_id));
-            }
-            if (dists[id] > cur_heap_top or not is_valid) [[likely]] {
-                dists[id] = 0;
-                continue;
-            } else {
-                heap.emplace(dists[id], id + offset_id);
-            }
-            if constexpr (mode == InnerSearchMode::KNN_SEARCH) {
-                if (heap.size() > n_candidate) [[likely]] {
-                    heap.pop();
+#if __cplusplus >= 202002L
+                if (dists[id] > cur_heap_top or not filter->CheckValid(id + offset_id)) [[likely]] {
+#else
+                if (__builtin_expect(
+                        dists[id] > cur_heap_top or not filter->CheckValid(id + offset_id), 1)) {
+#endif
+                    dists[id] = 0;
+                    continue;
                 }
+            } else {
+#if __cplusplus >= 202002L
+                if (dists[id] > cur_heap_top) [[likely]] {
+#else
+                if (__builtin_expect(dists[id] > cur_heap_top, 1)) {
+#endif
+                    dists[id] = 0;
+                    continue;
+                }
+            }
+            heap.emplace(dists[id], id + offset_id);
+            if constexpr (mode == InnerSearchMode::KNN_SEARCH) {
+                heap.pop();
                 cur_heap_top = heap.top().first;
             }
             if constexpr (mode == InnerSearchMode::RANGE_SEARCH) {
@@ -171,6 +182,31 @@ SparseTermDataCell::ResizeTermList(InnerIdType new_term_capacity) {
     term_ids_.resize(term_capacity_, Vector<uint32_t>(allocator_));
     term_datas_.resize(term_capacity_, Vector<float>(allocator_));
     term_sizes_.resize(term_capacity_, 0);
+}
+
+float
+SparseTermDataCell::CalcDistanceByInnerId(const SparseTermComputerPtr& computer, uint32_t base_id) {
+    float ip = 0;
+    while (computer->HasNextTerm()) {
+        auto it = computer->NextTermIter();
+        auto term = computer->GetTerm(it);
+        if (computer->HasNextTerm()) {
+            auto next_it = it + 1;
+            auto next_term = computer->GetTerm(next_it);
+            if (next_term >= term_ids_.size()) {
+                continue;
+            }
+            __builtin_prefetch(term_ids_[next_term].data(), 0, 3);
+            __builtin_prefetch(term_datas_[next_term].data(), 0, 3);
+        }
+        if (term >= term_ids_.size()) {
+            continue;
+        }
+        computer->ScanForCalculateDist(
+            it, term_ids_[term].data(), term_datas_[term].data(), term_sizes_[term], base_id, &ip);
+    }
+    computer->ResetTerm();
+    return 1 + ip;
 }
 
 void

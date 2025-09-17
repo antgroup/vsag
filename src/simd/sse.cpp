@@ -13,6 +13,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <cstdint>
+
+#include "simd/int8_simd.h"
 #if defined(ENABLE_SSE)
 #include <x86intrin.h>
 #endif
@@ -30,7 +33,7 @@ float
 L2Sqr(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
     auto* pVect1 = (float*)pVect1v;
     auto* pVect2 = (float*)pVect2v;
-    auto qty = *((size_t*)qty_ptr);
+    auto qty = *((uint64_t*)qty_ptr);
     return sse::FP32ComputeL2Sqr(pVect1, pVect2, qty);
 }
 
@@ -38,7 +41,7 @@ float
 InnerProduct(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
     auto* pVect1 = (float*)pVect1v;
     auto* pVect2 = (float*)pVect2v;
-    auto qty = *((size_t*)qty_ptr);
+    auto qty = *((uint64_t*)qty_ptr);
     return sse::FP32ComputeIP(pVect1, pVect2, qty);
 }
 
@@ -51,13 +54,16 @@ float
 INT8L2Sqr(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
     auto* pVect1 = (int8_t*)pVect1v;
     auto* pVect2 = (int8_t*)pVect2v;
-    auto qty = *((size_t*)qty_ptr);
+    auto qty = *((uint64_t*)qty_ptr);
     return sse::INT8ComputeL2Sqr(pVect1, pVect2, qty);
 }
 
 float
 INT8InnerProduct(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
-    return generic::INT8InnerProduct(pVect1v, pVect2v, qty_ptr);  // TODO(LHT): implement
+    auto* pVect1 = (int8_t*)pVect1v;
+    auto* pVect2 = (int8_t*)pVect2v;
+    auto qty = *((size_t*)qty_ptr);
+    return sse::INT8ComputeIP(pVect1, pVect2, qty);
 }
 
 float
@@ -70,7 +76,7 @@ PQDistanceFloat256(const void* single_dim_centers, float single_dim_val, void* r
 #if defined(ENABLE_SSE)
     const auto* float_centers = (const float*)single_dim_centers;
     auto* float_result = (float*)result;
-    for (size_t idx = 0; idx < 256; idx += 4) {
+    for (uint64_t idx = 0; idx < 256; idx += 4) {
         __m128 v_centers_dim = _mm_loadu_ps(float_centers + idx);
         __m128 v_query_vec = _mm_set1_ps(single_dim_val);
         __m128 v_diff = _mm_sub_ps(v_centers_dim, v_query_vec);
@@ -499,6 +505,43 @@ INT8ComputeL2Sqr(const int8_t* RESTRICT query, const int8_t* RESTRICT codes, uin
 }
 
 float
+INT8ComputeIP(const int8_t* __restrict query, const int8_t* __restrict codes, uint64_t dim) {
+#if defined(ENABLE_SSE)
+    constexpr int BATCH_SIZE = 8;
+    const uint64_t n = dim / BATCH_SIZE;
+
+    if (n == 0) {
+        return generic::INT8ComputeIP(query, codes, dim);
+    }
+
+    __m128i sum_sq = _mm_setzero_si128();
+
+    for (uint64_t i = 0; i < n; ++i) {
+        __m128i q = _mm_loadl_epi64(reinterpret_cast<const __m128i*>(query + BATCH_SIZE * i));
+        __m128i c = _mm_loadl_epi64(reinterpret_cast<const __m128i*>(codes + BATCH_SIZE * i));
+
+        __m128i q_low = _mm_cvtepi8_epi16(q);
+        __m128i c_low = _mm_cvtepi8_epi16(c);
+
+        __m128i sq = _mm_madd_epi16(q_low, c_low);
+
+        sum_sq = _mm_add_epi32(sum_sq, sq);
+    }
+
+    alignas(32) int32_t result[BATCH_SIZE / 2];
+    _mm_store_si128(reinterpret_cast<__m128i*>(result), sum_sq);
+    int64_t ip = static_cast<int64_t>(result[0]) + result[1] + result[2] + result[3];
+
+    ip += generic::INT8ComputeIP(
+        query + BATCH_SIZE * n, codes + BATCH_SIZE * n, dim - BATCH_SIZE * n);
+
+    return static_cast<float>(ip);
+#else
+    return generic::INT8ComputeIP(query, codes, dim);
+#endif
+}
+
+float
 SQ8ComputeIP(const float* RESTRICT query,
              const uint8_t* RESTRICT codes,
              const float* RESTRICT lower_bound,
@@ -825,12 +868,12 @@ PQFastScanLookUp32(const uint8_t* RESTRICT lookup_table,
                    int32_t* RESTRICT result) {
 #if defined(ENABLE_SSE)
     __m128i sum[4];
-    for (size_t i = 0; i < 4; i++) {
+    for (uint64_t i = 0; i < 4; i++) {
         sum[i] = _mm_setzero_si128();
     }
     const auto sign4 = _mm_set1_epi8(0x0F);
     const auto sign8 = _mm_set1_epi16(0xFF);
-    for (size_t i = 0; i < pq_dim; i++) {
+    for (uint64_t i = 0; i < pq_dim; i++) {
         auto dict = _mm_loadu_si128((__m128i*)(lookup_table));
         lookup_table += 16;
         auto code = _mm_loadu_si128((__m128i*)(codes));
@@ -968,10 +1011,10 @@ RotateOp(float* data, int idx, int dim_, int step) {
 }
 
 void
-FHTRotate(float* data, size_t dim_) {
+FHTRotate(float* data, uint64_t dim_) {
 #if defined(ENABLE_SSE)
-    size_t n = dim_;
-    size_t step = 1;
+    uint64_t n = dim_;
+    uint64_t step = 1;
     while (step < n) {
         if (step >= 4) {
             sse::RotateOp(data, 0, dim_, step);
@@ -986,7 +1029,7 @@ FHTRotate(float* data, size_t dim_) {
 }
 
 void
-VecRescale(float* data, size_t dim, float val) {
+VecRescale(float* data, uint64_t dim, float val) {
 #if defined(ENABLE_SSE)
     int i = 0;
     __m128 val_vec = _mm_set1_ps(val);
@@ -1004,11 +1047,11 @@ VecRescale(float* data, size_t dim, float val) {
 }
 
 void
-KacsWalk(float* data, size_t len) {
+KacsWalk(float* data, uint64_t len) {
 #if defined(ENABLE_SSE)
-    size_t base = len % 2;
-    size_t offset = base + (len / 2);  // for odd dim
-    size_t i = 0;
+    uint64_t base = len % 2;
+    uint64_t offset = base + (len / 2);  // for odd dim
+    uint64_t i = 0;
     for (; i + 4 < len / 2; i += 4) {
         __m128 x = _mm_loadu_ps(&data[i]);
         __m128 y = _mm_loadu_ps(&data[i + offset]);

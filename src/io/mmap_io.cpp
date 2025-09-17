@@ -15,6 +15,13 @@
 
 #include "mmap_io.h"
 
+#include <sys/mman.h>
+
+#include <filesystem>
+#include <utility>
+
+#include "index/index_common_param.h"
+
 namespace vsag {
 
 MMapIO::MMapIO(std::string filename, Allocator* allocator)
@@ -42,7 +49,7 @@ MMapIO::MMapIO(std::string filename, Allocator* allocator)
     this->start_ = static_cast<uint8_t*>(addr);
 }
 
-MMapIO::MMapIO(const MMapIOParameterPtr& io_param, const IndexCommonParam& common_param)
+MMapIO::MMapIO(const MMapIOParamPtr& io_param, const IndexCommonParam& common_param)
     : MMapIO(io_param->path_, common_param.allocator_.get()){};
 
 MMapIO::MMapIO(const IOParamPtr& param, const IndexCommonParam& common_param)
@@ -89,12 +96,10 @@ MMapIO::ReadImpl(uint64_t size, uint64_t offset, uint8_t* data) const {
 
 [[nodiscard]] const uint8_t*
 MMapIO::DirectReadImpl(uint64_t size, uint64_t offset, bool& need_release) const {
-    need_release = false;
-    if (offset + size > this->size_) {
-        throw VsagException(
-            ErrorType::INTERNAL_ERROR,
-            fmt::format("read offset {} + size {} > size {}", offset, size, this->size_));
+    if (not check_valid_offset(size + offset)) {
+        return nullptr;
     }
+    need_release = false;
     return reinterpret_cast<const uint8_t*>(this->start_ + offset);
 }
 

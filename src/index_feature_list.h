@@ -19,12 +19,18 @@
 #include <memory>
 #include <vector>
 
+#include "pointer_define.h"
 #include "vsag/index_features.h"
 
 namespace vsag {
+
+DEFINE_POINTER(IndexFeatureList);
+
 class IndexFeatureList {
 public:
     explicit IndexFeatureList();
+
+    ~IndexFeatureList() = default;
 
     [[nodiscard]] bool
     CheckFeature(IndexFeature feature) const;
@@ -40,7 +46,4 @@ private:
 
     const uint32_t feature_count_{0};
 };
-
-using IndexFeatureListPtr = std::shared_ptr<IndexFeatureList>;
-
 }  // namespace vsag

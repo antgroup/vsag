@@ -15,6 +15,8 @@
 
 #include "hgraph_parameter.h"
 
+#include <fmt/format.h>
+
 #include <catch2/catch_test_macros.hpp>
 
 #include "parameter_test.h"
@@ -52,7 +54,6 @@ struct HGraphDefaultParam {
     bool use_attribute_filter = false;
     bool support_duplicate = false;
     bool use_reorder = true;
-    bool have_extro_info = false;
 };
 
 std::string

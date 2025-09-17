@@ -17,12 +17,14 @@
 
 #include "algorithm/sindi/sindi_parameter.h"
 #include "impl/basic_searcher.h"
+#include "pointer_define.h"
 #include "quantization/sparse_quantization//sparse_term_computer.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
 #include "vsag/dataset.h"
 
 namespace vsag {
+DEFINE_POINTER(SparseTermDataCell);
 class SparseTermDataCell {
 public:
     SparseTermDataCell() = default;
@@ -62,6 +64,9 @@ public:
     void
     Deserialize(StreamReader& reader);
 
+    float
+    CalcDistanceByInnerId(const SparseTermComputerPtr& computer, uint32_t base_id);
+
 public:
     float doc_prune_ratio_{0};
 
@@ -75,7 +80,4 @@ public:
 
     Allocator* const allocator_{nullptr};
 };
-
-using SparseTermDataCellPtr = std::shared_ptr<SparseTermDataCell>;
-
 }  // namespace vsag

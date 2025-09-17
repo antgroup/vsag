@@ -15,9 +15,10 @@
 
 #pragma once
 
+#include "pointer_define.h"
 #include "quantization/quantizer_parameter.h"
-
 namespace vsag {
+DEFINE_POINTER2(PQFastScanQuantizerParam, PQFastScanQuantizerParameter);
 class PQFastScanQuantizerParameter : public QuantizerParameter {
 public:
     PQFastScanQuantizerParameter();
@@ -36,7 +37,4 @@ public:
 public:
     int64_t pq_dim_{1};
 };
-
-using PQFastScanQuantizerParamPtr = std::shared_ptr<PQFastScanQuantizerParameter>;
-
 }  // namespace vsag

@@ -23,6 +23,7 @@
 #include "impl/heap/standard_heap.h"
 #include "impl/reorder.h"
 #include "index/index_impl.h"
+#include "index_feature_list.h"
 #include "inner_string_params.h"
 #include "ivf_partition/gno_imi_partition.h"
 #include "ivf_partition/ivf_nearest_partition.h"
@@ -39,8 +40,8 @@ static constexpr const char* IVF_PARAMS_TEMPLATE =
         "type": "{INDEX_TYPE_IVF}",
         "{IVF_TRAIN_TYPE_KEY}": "{IVF_TRAIN_TYPE_KMEANS}",
         "{IVF_USE_ATTRIBUTE_FILTER_KEY}": false,
-        "{IVF_USE_REORDER_KEY}": false,
-        "{IVF_THREAD_COUNT_KEY}": 1,
+        "{USE_REORDER_KEY}": false,
+        "{BUILD_THREAD_COUNT_KEY}": 1,
         "{BUCKET_PARAMS_KEY}": {
             "{IO_PARAMS_KEY}": {
                 "{IO_TYPE_KEY}": "{IO_TYPE_VALUE_MEMORY_IO}"
@@ -64,8 +65,8 @@ static constexpr const char* IVF_PARAMS_TEMPLATE =
             }
         },
         "{BUCKET_PER_DATA_KEY}": 1,
-        "{IVF_USE_REORDER_KEY}": false,
-        "{IVF_PRECISE_CODES_KEY}": {
+        "{USE_REORDER_KEY}": false,
+        "{PRECISE_CODES_KEY}": {
             "{IO_PARAMS_KEY}": {
                 "{IO_TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
                 "{IO_FILE_PATH}": "{DEFAULT_FILE_PATH_VALUE}"
@@ -101,7 +102,7 @@ IVF::CheckAndMappingExternalParam(const JsonType& external_param,
         {
             IVF_PRECISE_QUANTIZATION_TYPE,
             {
-                IVF_PRECISE_CODES_KEY,
+                PRECISE_CODES_KEY,
                 QUANTIZATION_PARAMS_KEY,
                 QUANTIZATION_TYPE_KEY,
             },
@@ -109,7 +110,7 @@ IVF::CheckAndMappingExternalParam(const JsonType& external_param,
         {
             IVF_PRECISE_IO_TYPE,
             {
-                IVF_PRECISE_CODES_KEY,
+                PRECISE_CODES_KEY,
                 IO_PARAMS_KEY,
                 IO_TYPE_KEY,
             },
@@ -117,7 +118,7 @@ IVF::CheckAndMappingExternalParam(const JsonType& external_param,
         {
             IVF_PRECISE_FILE_PATH,
             {
-                IVF_PRECISE_CODES_KEY,
+                PRECISE_CODES_KEY,
                 IO_PARAMS_KEY,
                 IO_FILE_PATH,
             },
@@ -168,7 +169,7 @@ IVF::CheckAndMappingExternalParam(const JsonType& external_param,
         {
             IVF_USE_REORDER,
             {
-                IVF_USE_REORDER_KEY,
+                USE_REORDER_KEY,
             },
         },
         {
@@ -195,7 +196,7 @@ IVF::CheckAndMappingExternalParam(const JsonType& external_param,
         {
             IVF_THREAD_COUNT,
             {
-                IVF_THREAD_COUNT_KEY,
+                BUILD_THREAD_COUNT_KEY,
             },
         },
     };
@@ -234,20 +235,32 @@ IVF::IVF(const IVFParameterPtr& param, const IndexCommonParam& common_param)
     }
     this->use_reorder_ = param->use_reorder;
     if (this->use_reorder_) {
-        this->reorder_codes_ = FlattenInterface::MakeInstance(param->flatten_param, common_param);
+        this->reorder_codes_ =
+            FlattenInterface::MakeInstance(param->precise_codes_param, common_param);
     }
     this->use_residual_ = param->bucket_param->use_residual_;
     this->use_attribute_filter_ = param->use_attribute_filter;
     if (this->use_attribute_filter_) {
         this->attr_filter_index_ =
             AttributeInvertedInterface::MakeInstance(allocator_, true /*have_bucket*/);
+        this->has_attribute_ = true;
     }
 
     this->thread_pool_ = common_param.thread_pool_;
-    if (param->thread_count > 1 and this->thread_pool_ == nullptr) {
+    if (param->build_thread_count > 1 and this->thread_pool_ == nullptr) {
         this->thread_pool_ = SafeThreadPool::FactoryDefaultThreadPool();
-        this->thread_pool_->SetPoolSize(param->thread_count);
+        this->thread_pool_->SetPoolSize(param->build_thread_count);
     }
+
+    if (bucket_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32) {
+        this->has_raw_vector_ = true;
+    }
+}
+
+void
+IVF::GetCodeByInnerId(InnerIdType inner_id, uint8_t* data) const {
+    auto [bucket_id, offset_id] = this->get_location(inner_id);
+    this->bucket_->GetCodesById(bucket_id, offset_id, data);
 }
 
 void
@@ -278,7 +291,8 @@ IVF::InitFeatures() {
     });
 
     auto name = this->bucket_->GetQuantizerName();
-    if (name != QUANTIZATION_TYPE_VALUE_FP32 and name != QUANTIZATION_TYPE_VALUE_BF16) {
+    if (name != QUANTIZATION_TYPE_VALUE_FP32 and name != QUANTIZATION_TYPE_VALUE_BF16 and
+        name != QUANTIZATION_TYPE_VALUE_FP16) {
         this->index_feature_list_->SetFeature(IndexFeature::NEED_TRAIN);
     } else {
         this->index_feature_list_->SetFeatures({
@@ -286,11 +300,24 @@ IVF::InitFeatures() {
             IndexFeature::SUPPORT_RANGE_SEARCH_WITH_ID_FILTER,
         });
     }
-    this->index_feature_list_->SetFeatures({
-        IndexFeature::SUPPORT_CLONE,
-        IndexFeature::SUPPORT_EXPORT_MODEL,
-        IndexFeature::SUPPORT_MERGE_INDEX,
-    });
+
+    bool has_fp32 = false;
+    if (use_reorder_ && reorder_codes_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32) {
+        has_fp32 = true;
+    }
+    if (name == QUANTIZATION_TYPE_VALUE_FP32 or has_fp32) {
+        this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_CAL_DISTANCE_BY_ID);
+    }
+
+    if (name == QUANTIZATION_TYPE_VALUE_FP32 and
+        this->bucket_->GetMetricType() != MetricType::METRIC_TYPE_COSINE and
+        not this->use_residual_) {
+        this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_GET_DATA_BY_IDS);
+    }
+
+    this->index_feature_list_->SetFeatures({IndexFeature::SUPPORT_CLONE,
+                                            IndexFeature::SUPPORT_EXPORT_MODEL,
+                                            IndexFeature::SUPPORT_MERGE_INDEX});
 
     if (this->bucket_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_PQFS) {
         this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_ADD_AFTER_BUILD, false);
@@ -302,7 +329,6 @@ IVF::Build(const DatasetPtr& base) {
     this->Train(base);
     // TODO(LHT): duplicate
     auto result = this->Add(base);
-    this->fill_location_map();
     return result;
 }
 
@@ -351,6 +377,8 @@ IVF::Add(const DatasetPtr& base) {
     const auto* ids = base->GetIds();
     const auto* vectors = base->GetFloat32Vectors();
     const auto* attr_sets = base->GetAttributeSets();
+    const auto* extra_info = base->GetExtraInfos();
+    const auto extra_info_size = base->GetExtraInfoSize();
     auto buckets = partition_strategy_->ClassifyDatas(vectors, num_element, buckets_per_data_);
 
     int64_t current_num;
@@ -365,6 +393,7 @@ IVF::Add(const DatasetPtr& base) {
         }
         current_num = this->total_elements_;
         this->total_elements_ += num_element;
+        location_map_.resize(this->total_elements_);
     }
 
     auto add_func = [&](int64_t i) -> void {
@@ -390,10 +419,20 @@ IVF::Add(const DatasetPtr& base) {
                 offset_id = bucket_->InsertVector(
                     data_ptr, buckets[idx], idx + current_num * buckets_per_data_);
             }
+            if (j == 0) {
+                std::lock_guard lock(label_lookup_mutex_);
+                location_map_[i + current_num] =
+                    (static_cast<uint64_t>(buckets[idx]) << LOCATION_SPLIT_BIT) |
+                    static_cast<uint64_t>(offset_id);
+            }
             if (use_attribute_filter_ and this->attr_filter_index_ != nullptr and
                 attr_sets != nullptr) {
                 const auto& attr_set = attr_sets[i];
                 this->attr_filter_index_->Insert(attr_set, offset_id, buckets[idx]);
+            }
+            if (extra_info_size > 0) {
+                this->extra_infos_->InsertExtraInfo(extra_info + i * extra_info_size,
+                                                    i + current_num);
             }
         }
     };
@@ -481,11 +520,12 @@ IVF::Merge(const std::vector<MergeUnit>& merge_units) {
     for (const auto& unit : merge_units) {
         this->merge_one_unit(unit);
     }
+    this->fill_location_map();
     this->bucket_->Package();
 }
 
 std::pair<BucketIdType, InnerIdType>
-IVF::get_location(InnerIdType inner_id) {
+IVF::get_location(InnerIdType inner_id) const {
     auto loc = this->location_map_[inner_id];
     constexpr uint64_t mask = (1ULL << LOCATION_SPLIT_BIT) - 1ULL;
     auto bucket_id = static_cast<BucketIdType>(loc >> LOCATION_SPLIT_BIT);
@@ -538,7 +578,11 @@ IVF::Serialize(StreamWriter& writer) const {
     basic_info["total_elements"] = this->total_elements_;
     basic_info["use_reorder"] = this->use_reorder_;
     basic_info["is_trained"] = this->is_trained_;
+    basic_info[DIM] = this->dim_;
+    basic_info[EXTRA_INFO_SIZE] = 0;
     basic_info[INDEX_PARAM] = this->create_param_ptr_->ToString();
+    basic_info["data_type"] = this->data_type_;
+    basic_info["metric"] = this->metric_;
 
     auto metadata = std::make_shared<Metadata>();
     metadata->Set(BASIC_INFO, basic_info);
@@ -578,6 +622,7 @@ IVF::Deserialize(StreamReader& reader) {
 
         if (use_attribute_filter_) {
             this->attr_filter_index_->Deserialize(buffer_reader);
+            this->has_attribute_ = true;
         }
     } else {  // create like `else if ( ver in [v0.15, v0.17] )` here if need in the future
         logger::debug("parse with new version format");
@@ -617,6 +662,10 @@ IVF::Deserialize(StreamReader& reader) {
         }
         if (use_attribute_filter_) {
             READ_DATACELL_WITH_NAME(buffer_reader, "attr_filter_index", this->attr_filter_index_);
+            this->has_attribute_ = true;
+        }
+        if (this->bucket_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32) {
+            this->has_raw_vector_ = true;
         }
     }
     this->fill_location_map();
@@ -939,10 +988,183 @@ IVF::fill_location_map() {
             if (ids[j] >= this->total_elements_ * buckets_per_data_) {
                 throw VsagException(ErrorType::INTERNAL_ERROR, "invalid inner_id");
             }
-            this->location_map_[ids[j]] =
+            this->location_map_[ids[j] / buckets_per_data_] =
                 (static_cast<uint64_t>(i) << LOCATION_SPLIT_BIT) | static_cast<uint64_t>(j);
         }
     }
+}
+
+void
+IVF::GetAttributeSetByInnerId(InnerIdType inner_id, AttributeSet* attr) const {
+    auto [bucket_id, bucket_offset] = this->get_location(inner_id);
+    this->attr_filter_index_->GetAttribute(bucket_id, bucket_offset, attr);
+}
+
+DatasetPtr
+IVF::CalDistanceById(const float* query, const int64_t* ids, int64_t count) const {
+    auto result = Dataset::Make();
+    result->Owner(true, allocator_);
+    auto* distances = (float*)allocator_->Allocate(sizeof(float) * count);
+    result->Distances(distances);
+    if (this->use_reorder_) {
+        auto computer = this->reorder_codes_->FactoryComputer(query);
+        Vector<InnerIdType> inner_ids(count, allocator_);
+        for (int64_t i = 0; i < count; ++i) {
+            inner_ids[i] = this->label_table_->GetIdByLabel(ids[i]);
+        }
+        this->reorder_codes_->Query(distances, computer, inner_ids.data(), count);
+        return result;
+    }
+    Vector<float> normalize_data(dim_, allocator_);
+    Vector<float> centroid(dim_, allocator_);
+    if (use_residual_ && metric_ == MetricType::METRIC_TYPE_COSINE) {
+        Normalize(query, normalize_data.data(), dim_);
+        query = normalize_data.data();
+    }
+    auto computer = this->bucket_->FactoryComputer(query);
+    for (int64_t i = 0; i < count; ++i) {
+        auto inner_id = this->label_table_->GetIdByLabel(ids[i]);
+        auto location = this->get_location(inner_id);
+        auto ip_distance = 0.0F;
+        if (use_residual_) {
+            partition_strategy_->GetCentroid(location.first, centroid);
+            ip_distance = FP32ComputeIP(query, centroid.data(), dim_);
+            if (metric_ == MetricType::METRIC_TYPE_L2SQR) {
+                ip_distance *= 2;
+            }
+        }
+        distances[i] =
+            this->bucket_->QueryOneById(computer, location.first, location.second) - ip_distance;
+    }
+    return result;
+}
+float
+IVF::CalcDistanceById(const float* query, int64_t id) const {
+    if (this->use_reorder_) {
+        float dist = 0.0F;
+        auto computer = this->reorder_codes_->FactoryComputer(query);
+        auto inner_id = this->label_table_->GetIdByLabel(id);
+        this->reorder_codes_->Query(&dist, computer, &inner_id, 1);
+        return dist;
+    }
+    Vector<float> normalize_data(dim_, allocator_);
+    Vector<float> centroid(dim_, allocator_);
+    if (use_residual_ && metric_ == MetricType::METRIC_TYPE_COSINE) {
+        Normalize(query, normalize_data.data(), dim_);
+        query = normalize_data.data();
+    }
+    auto computer = this->bucket_->FactoryComputer(query);
+    auto inner_id = this->label_table_->GetIdByLabel(id);
+    auto location = this->get_location(inner_id);
+    auto ip_distance = 0.0F;
+    if (use_residual_) {
+        partition_strategy_->GetCentroid(location.first, centroid);
+        ip_distance = FP32ComputeIP(query, centroid.data(), dim_);
+        if (metric_ == MetricType::METRIC_TYPE_L2SQR) {
+            ip_distance *= 2;
+        }
+    }
+    return this->bucket_->QueryOneById(computer, location.first, location.second) - ip_distance;
+}
+
+void
+IVF::GetVectorByInnerId(InnerIdType inner_id, float* data) const {
+    auto [bucket_id, bucket_offset] = this->get_location(inner_id);
+    this->bucket_->GetCodesById(bucket_id, bucket_offset, reinterpret_cast<uint8_t*>(data));
+}
+
+float
+calculate_percentile(const std::vector<float>& sorted_data, float percentile) {
+    size_t n = sorted_data.size();
+    float index = percentile * static_cast<float>(n - 1);
+    auto floor_index = static_cast<size_t>(std::floor(index));
+    size_t ceil_index = floor_index + 1;
+
+    if (ceil_index >= n) {
+        return sorted_data[floor_index];
+    }
+
+    float fractional = index - static_cast<float>(floor_index);
+    return sorted_data[floor_index] * (1.0F - fractional) + sorted_data[ceil_index] * fractional;
+}
+
+void
+get_data_stats(const Vector<float>& data, JsonType& json) {
+    if (data.empty()) {
+        throw std::invalid_argument("Vector cannot be empty.");
+    }
+
+    float sum = 0.0;
+    for (float val : data) {
+        sum += val;
+    }
+    float mean = sum / static_cast<float>(data.size());
+    json["mean"] = mean;
+
+    float sq_diff_sum = 0.0;
+    for (float val : data) {
+        sq_diff_sum += (val - mean) * (val - mean);
+    }
+    float variance = sq_diff_sum / static_cast<float>(data.size());
+    json["std"] = std::sqrt(variance);
+
+    float min_val = *std::min_element(data.begin(), data.end());
+    json["min"] = min_val;
+    float max_val = *std::max_element(data.begin(), data.end());
+    json["max"] = max_val;
+
+    std::vector<float> sorted_data(data.begin(), data.end());
+    std::sort(sorted_data.begin(), sorted_data.end());
+
+    float q25 = calculate_percentile(sorted_data, 0.25);
+    float q50 = calculate_percentile(sorted_data, 0.5);
+    float q75 = calculate_percentile(sorted_data, 0.75);
+    json["q25"] = q25;
+    json["q50"] = q50;
+    json["q75"] = q75;
+}
+
+std::string
+IVF::GetStats() const {
+    JsonType stats;
+    // bucket_radius
+    stats["bucket_count"] = this->bucket_->bucket_count_;
+    Vector<float> centroids(this->dim_, allocator_);
+    Vector<float> bucket_counts(allocator_);
+    Vector<float> bucket_radius(allocator_);
+    for (int i = 0; i < this->bucket_->bucket_count_; ++i) {
+        auto size = bucket_->GetBucketSize(i);
+        if (size == 0) {
+            bucket_counts.push_back(0);
+            continue;
+        }
+        bucket_counts.push_back(static_cast<float>(size));
+        Vector<float> dists(size, allocator_);
+        partition_strategy_->GetCentroid(i, centroids);
+        auto computer = bucket_->FactoryComputer(centroids.data());
+        bucket_->ScanBucketById(dists.data(), computer, i);
+        float max_distance = *std::max_element(dists.begin(), dists.end());
+        bucket_radius.push_back(max_distance);
+    }
+    // bucket_count_std
+    stats["bucket_num"] = JsonType();
+    get_data_stats(bucket_counts, stats["bucket_num"]);
+    // bucket_radius
+    stats["bucket_radius"] = JsonType();
+    get_data_stats(bucket_radius, stats["bucket_radius"]);
+    return stats.dump(4);
+}
+
+std::string
+IVF::AnalyzeIndexBySearch(const SearchRequest& request) {
+    JsonType stats;
+    auto querys = request.query_;
+    auto topk = std::min(request.topk_, GetNumElements());
+    auto num_elements = querys->GetNumElements();
+    auto param_str = request.params_str_;
+    // quantization error
+    this->analyze_quantizer(stats, querys->GetFloat32Vectors(), num_elements, topk, param_str);
+    return stats.dump(4);
 }
 
 }  // namespace vsag

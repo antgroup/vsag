@@ -16,11 +16,13 @@
 #pragma once
 
 #include "index/index_common_param.h"
-#include "parameter.h"
+#include "inner_index_parameter.h"
+#include "pointer_define.h"
 
 namespace vsag {
+DEFINE_POINTER2(SparseIndexParameter, SparseIndexParameters);
 
-struct SparseIndexParameters : public Parameter {
+struct SparseIndexParameters : public InnerIndexParameter {
 public:
     void
     FromJson(const JsonType& json) override;
@@ -33,7 +35,4 @@ public:
 public:
     bool need_sort{true};
 };
-
-using SparseIndexParameterPtr = std::shared_ptr<SparseIndexParameters>;
-
 }  // namespace vsag

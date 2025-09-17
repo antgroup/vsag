@@ -19,9 +19,13 @@
 
 #include "attr/argparse.h"
 #include "attr/executor/executor.h"
+#include "data_cell/attribute_inverted_interface.h"
 #include "data_cell/flatten_datacell.h"
+#include "data_cell/flatten_interface.h"
 #include "fmt/chrono.h"
 #include "impl/heap/standard_heap.h"
+#include "index/index_common_param.h"
+#include "index_feature_list.h"
 #include "inner_string_params.h"
 #include "storage/serialization.h"
 #include "utils/slow_task_timer.h"
@@ -44,11 +48,6 @@ BruteForce::BruteForce(const BruteForceParameterPtr& param, const IndexCommonPar
         this->attr_filter_index_ =
             AttributeInvertedInterface::MakeInstance(allocator_, true /*have_bucket*/);
     }
-}
-
-int64_t
-BruteForce::GetMemoryUsage() const {
-    return static_cast<int64_t>(this->CalSerializeSize());
 }
 
 uint64_t
@@ -85,7 +84,8 @@ BruteForce::Add(const DatasetPtr& data) {
 
     auto add_func = [&](const float* data,
                         const int64_t label,
-                        const AttributeSet* attr) -> std::optional<int64_t> {
+                        const AttributeSet* attr,
+                        const char* extra_info) -> std::optional<int64_t> {
         {
             std::scoped_lock add_lock(this->label_lookup_mutex_, this->add_mutex_);
             if (this->label_table_->CheckLabel(label)) {
@@ -110,6 +110,8 @@ BruteForce::Add(const DatasetPtr& data) {
     const auto* labels = data->GetIds();
     const auto* vectors = data->GetFloat32Vectors();
     const auto* attrs = data->GetAttributeSets();
+    const auto* extra_info = data->GetExtraInfos();
+    const auto extra_info_size = data->GetExtraInfoSize();
     for (int64_t j = 0; j < total; ++j) {
         const auto label = labels[j];
         {
@@ -120,12 +122,17 @@ BruteForce::Add(const DatasetPtr& data) {
             }
         }
         if (this->build_pool_ != nullptr) {
-            auto future = this->build_pool_->GeneralEnqueue(
-                add_func, vectors + j * dim_, label, attrs == nullptr ? nullptr : attrs + j);
+            auto future = this->build_pool_->GeneralEnqueue(add_func,
+                                                            vectors + j * dim_,
+                                                            label,
+                                                            attrs == nullptr ? nullptr : attrs + j,
+                                                            extra_info + j * extra_info_size);
             futures.emplace_back(std::move(future));
         } else {
-            if (auto add_res =
-                    add_func(vectors + j * dim_, label, attrs == nullptr ? nullptr : attrs + j);
+            if (auto add_res = add_func(vectors + j * dim_,
+                                        label,
+                                        attrs == nullptr ? nullptr : attrs + j,
+                                        extra_info + j * extra_info_size);
                 add_res.has_value()) {
                 failed_ids.emplace_back(add_res.value());
             }
@@ -324,7 +331,7 @@ BruteForce::Deserialize(StreamReader& reader) {
         auto basic_info = metadata->Get("basic_info");
         if (basic_info.contains(INDEX_PARAM)) {
             std::string index_param_string = basic_info[INDEX_PARAM];
-            BruteForceParameterPtr index_param = std::make_shared<BruteForceParameter>();
+            auto index_param = std::make_shared<BruteForceParameter>();
             index_param->FromString(index_param_string);
             if (not this->create_param_ptr_->CheckCompatibility(index_param)) {
                 auto message =
@@ -408,7 +415,7 @@ static const std::string BRUTE_FORCE_PARAMS_TEMPLATE =
     {
         "type": "{INDEX_BRUTE_FORCE}",
         "{IO_PARAMS_KEY}": {
-            "{IO_TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}"
+            "{IO_TYPE_KEY}": "{IO_TYPE_VALUE_MEMORY_IO}"
         },
         "{QUANTIZATION_PARAMS_KEY}": {
             "{QUANTIZATION_TYPE_KEY}": "{QUANTIZATION_TYPE_VALUE_FP32}",
@@ -506,6 +513,11 @@ BruteForce::UpdateAttribute(int64_t id,
                             const AttributeSet& origin_attrs) {
     auto inner_id = this->label_table_->GetIdByLabel(id);
     this->attr_filter_index_->UpdateBitsetsByAttr(new_attrs, inner_id, 0, origin_attrs);
+}
+
+void
+BruteForce::GetAttributeSetByInnerId(InnerIdType inner_id, AttributeSet* attr) const {
+    this->attr_filter_index_->GetAttribute(0, inner_id, attr);
 }
 
 }  // namespace vsag

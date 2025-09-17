@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "simd/int8_simd.h"
 #if defined(ENABLE_NEON)
 #include <arm_neon.h>
 #endif
@@ -30,7 +31,7 @@ float
 L2Sqr(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
     auto* pVect1 = (float*)pVect1v;
     auto* pVect2 = (float*)pVect2v;
-    auto qty = *((size_t*)qty_ptr);
+    auto qty = *((uint64_t*)qty_ptr);
     return neon::FP32ComputeL2Sqr(pVect1, pVect2, qty);
 }
 
@@ -38,7 +39,7 @@ float
 InnerProduct(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
     auto* pVect1 = (float*)pVect1v;
     auto* pVect2 = (float*)pVect2v;
-    auto qty = *((size_t*)qty_ptr);
+    auto qty = *((uint64_t*)qty_ptr);
     return neon::FP32ComputeIP(pVect1, pVect2, qty);
 }
 
@@ -51,19 +52,17 @@ float
 INT8L2Sqr(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
     auto* pVect1 = (int8_t*)pVect1v;
     auto* pVect2 = (int8_t*)pVect2v;
-    auto qty = *((size_t*)qty_ptr);
+    auto qty = *((uint64_t*)qty_ptr);
 
     return neon::INT8ComputeL2Sqr(pVect1, pVect2, qty);
 }
 
 float
 INT8InnerProduct(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
-#if defined(ENABLE_NEON)
-    // TODO: NEON implementation here
-    return generic::INT8InnerProduct(pVect1v, pVect2v, qty_ptr);
-#else
-    return generic::INT8InnerProduct(pVect1v, pVect2v, qty_ptr);
-#endif
+    auto* pVect1 = (int8_t*)pVect1v;
+    auto* pVect2 = (int8_t*)pVect2v;
+    auto qty = *((size_t*)qty_ptr);
+    return neon::INT8ComputeIP(pVect1, pVect2, qty);
 }
 
 float
@@ -113,7 +112,7 @@ PQDistanceFloat256(const void* single_dim_centers, float single_dim_val, void* r
 #if defined(ENABLE_NEON)
     const auto* float_centers = (const float*)single_dim_centers;
     auto* float_result = (float*)result;
-    for (size_t idx = 0; idx < 256; idx += 8) {
+    for (uint64_t idx = 0; idx < 256; idx += 8) {
         float32x4x2_t v_centers_dim = vld1q_f32_x2(float_centers + idx);
         float32x4x2_t v_query_vec = {vdupq_n_f32(single_dim_val), vdupq_n_f32(single_dim_val)};
 
@@ -882,6 +881,53 @@ INT8ComputeL2Sqr(const int8_t* __restrict query, const int8_t* __restrict codes,
 }
 
 float
+INT8ComputeIP(const int8_t* __restrict query, const int8_t* __restrict codes, uint64_t dim) {
+#if defined(ENABLE_NEON)
+    constexpr int BATCH_SIZE = 8;
+
+    const uint64_t n = dim / BATCH_SIZE;
+
+    if (n == 0) {
+        return generic::INT8ComputeIP(query, codes, dim);
+    }
+
+    int32x4_t sum_0 = vdupq_n_s32(0);
+    int32x4_t sum_1 = vdupq_n_s32(0);
+
+    for (uint64_t i = 0; i < n; ++i) {
+        int8x8_t q_vec = vld1_s8(query + BATCH_SIZE * i);
+        int8x8_t c_vec = vld1_s8(codes + BATCH_SIZE * i);
+
+        int16x8_t q_16 = vmovl_s8(q_vec);
+        int16x8_t c_16 = vmovl_s8(c_vec);
+
+        int16x8_t prod_16 = vmulq_s16(q_16, c_16);
+
+        int32x4_t prod_low = vmovl_s16(vget_low_s16(prod_16));
+        int32x4_t prod_high = vmovl_s16(vget_high_s16(prod_16));
+
+        sum_0 = vaddq_s32(sum_0, prod_low);
+        sum_1 = vaddq_s32(sum_1, prod_high);
+    }
+
+    int32x4_t sum_total = vaddq_s32(sum_0, sum_1);
+
+    int32_t result[4];
+    vst1q_s32(result, sum_total);
+
+    int64_t dot = static_cast<int64_t>(result[0]) + static_cast<int64_t>(result[1]) +
+                  static_cast<int64_t>(result[2]) + static_cast<int64_t>(result[3]);
+
+    dot += generic::INT8ComputeIP(
+        query + BATCH_SIZE * n, codes + BATCH_SIZE * n, dim - BATCH_SIZE * n);
+
+    return static_cast<float>(dot);
+#else
+    return generic::INT8ComputeIP(query, codes, dim);
+#endif
+}
+
+float
 SQ8ComputeIP(const float* RESTRICT query,
              const uint8_t* RESTRICT codes,
              const float* RESTRICT lower_bound,
@@ -1405,8 +1451,57 @@ SQ4ComputeIP(const float* RESTRICT query,
              const float* RESTRICT diff,
              uint64_t dim) {
 #if defined(ENABLE_NEON)
-    // TODO: NEON implementation here
-    return generic::SQ4ComputeIP(query, codes, lower_bound, diff, dim);
+    float32x4_t sum = vdupq_n_f32(0.0f);
+    uint64_t d = 0;
+
+    const float inv15 = 1.0f / 15.0f;
+    float32x4_t v_inv15 = vdupq_n_f32(inv15);
+
+    for (; d + 7 < dim; d += 8) {
+        uint8_t byte0 = codes[d >> 1];
+        uint8_t byte1 = codes[(d >> 1) + 1];
+        uint8_t byte2 = codes[(d >> 1) + 2];
+        uint8_t byte3 = codes[(d >> 1) + 3];
+
+        float32x4_t code_low = {
+            static_cast<float>(byte0 & 0x0f),
+            static_cast<float>(byte0 >> 4),
+            static_cast<float>(byte1 & 0x0f),
+            static_cast<float>(byte1 >> 4),
+        };
+
+        float32x4_t code_high = {
+            static_cast<float>(byte2 & 0x0f),
+            static_cast<float>(byte2 >> 4),
+            static_cast<float>(byte3 & 0x0f),
+            static_cast<float>(byte3 >> 4),
+        };
+
+        code_low = vmulq_f32(code_low, v_inv15);
+        code_high = vmulq_f32(code_high, v_inv15);
+
+        float32x4_t query_low = vld1q_f32(query + d);
+        float32x4_t query_high = vld1q_f32(query + d + 4);
+        float32x4_t diff_low = vld1q_f32(diff + d);
+        float32x4_t diff_high = vld1q_f32(diff + d + 4);
+        float32x4_t lb_low = vld1q_f32(lower_bound + d);
+        float32x4_t lb_high = vld1q_f32(lower_bound + d + 4);
+
+        code_low = vmlaq_f32(lb_low, code_low, diff_low);
+        code_high = vmlaq_f32(lb_high, code_high, diff_high);
+
+        sum = vmlaq_f32(sum, query_low, code_low);
+        sum = vmlaq_f32(sum, query_high, code_high);
+    }
+
+    float result = vaddvq_f32(sum);
+
+    if (d < dim) {
+        result +=
+            generic::SQ4ComputeIP(query + d, codes + (d >> 1), lower_bound + d, diff + d, dim - d);
+    }
+
+    return result;
 #else
     return generic::SQ4ComputeIP(query, codes, lower_bound, diff, dim);
 #endif
@@ -1419,8 +1514,60 @@ SQ4ComputeL2Sqr(const float* RESTRICT query,
                 const float* RESTRICT diff,
                 uint64_t dim) {
 #if defined(ENABLE_NEON)
-    // TODO: NEON implementation here
-    return generic::SQ4ComputeL2Sqr(query, codes, lower_bound, diff, dim);
+    float32x4_t sum = vdupq_n_f32(0.0f);
+    uint64_t d = 0;
+
+    const float inv15 = 1.0f / 15.0f;
+    float32x4_t v_inv15 = vdupq_n_f32(inv15);
+
+    for (; d + 7 < dim; d += 8) {
+        uint8_t byte0 = codes[d >> 1];
+        uint8_t byte1 = codes[(d >> 1) + 1];
+        uint8_t byte2 = codes[(d >> 1) + 2];
+        uint8_t byte3 = codes[(d >> 1) + 3];
+
+        float32x4_t code_low = {
+            static_cast<float>(byte0 & 0x0f),
+            static_cast<float>(byte0 >> 4),
+            static_cast<float>(byte1 & 0x0f),
+            static_cast<float>(byte1 >> 4),
+        };
+
+        float32x4_t code_high = {
+            static_cast<float>(byte2 & 0x0f),
+            static_cast<float>(byte2 >> 4),
+            static_cast<float>(byte3 & 0x0f),
+            static_cast<float>(byte3 >> 4),
+        };
+
+        code_low = vmulq_f32(code_low, v_inv15);
+        code_high = vmulq_f32(code_high, v_inv15);
+
+        float32x4_t query_low = vld1q_f32(query + d);
+        float32x4_t query_high = vld1q_f32(query + d + 4);
+        float32x4_t diff_low = vld1q_f32(diff + d);
+        float32x4_t diff_high = vld1q_f32(diff + d + 4);
+        float32x4_t lb_low = vld1q_f32(lower_bound + d);
+        float32x4_t lb_high = vld1q_f32(lower_bound + d + 4);
+
+        code_low = vmlaq_f32(lb_low, code_low, diff_low);
+        code_high = vmlaq_f32(lb_high, code_high, diff_high);
+
+        float32x4_t diff_vec_low = vsubq_f32(query_low, code_low);
+        float32x4_t diff_vec_high = vsubq_f32(query_high, code_high);
+
+        sum = vmlaq_f32(sum, diff_vec_low, diff_vec_low);
+        sum = vmlaq_f32(sum, diff_vec_high, diff_vec_high);
+    }
+
+    float result = vaddvq_f32(sum);
+
+    if (d < dim) {
+        result += generic::SQ4ComputeL2Sqr(
+            query + d, codes + (d >> 1), lower_bound + d, diff + d, dim - d);
+    }
+
+    return result;
 #else
     return generic::SQ4ComputeL2Sqr(query, codes, lower_bound, diff, dim);
 #endif
@@ -1433,8 +1580,69 @@ SQ4ComputeCodesIP(const uint8_t* RESTRICT codes1,
                   const float* RESTRICT diff,
                   uint64_t dim) {
 #if defined(ENABLE_NEON)
-    // TODO: NEON implementation here
-    return generic::SQ4ComputeCodesIP(codes1, codes2, lower_bound, diff, dim);
+    float32x4_t sum = vdupq_n_f32(0.0f);
+    uint64_t d = 0;
+    const float inv15 = 1.0f / 15.0f;
+    float32x4_t v_inv15 = vdupq_n_f32(inv15);
+
+    for (; d + 7 < dim; d += 8) {
+        uint8_t byte1_0 = codes1[d >> 1];
+        uint8_t byte1_1 = codes1[(d >> 1) + 1];
+        uint8_t byte1_2 = codes1[(d >> 1) + 2];
+        uint8_t byte1_3 = codes1[(d >> 1) + 3];
+
+        uint8_t byte2_0 = codes2[d >> 1];
+        uint8_t byte2_1 = codes2[(d >> 1) + 1];
+        uint8_t byte2_2 = codes2[(d >> 1) + 2];
+        uint8_t byte2_3 = codes2[(d >> 1) + 3];
+
+        float32x4_t code1_low = {static_cast<float>(byte1_0 & 0x0f),
+                                 static_cast<float>(byte1_0 >> 4),
+                                 static_cast<float>(byte1_1 & 0x0f),
+                                 static_cast<float>(byte1_1 >> 4)};
+
+        float32x4_t code1_high = {static_cast<float>(byte1_2 & 0x0f),
+                                  static_cast<float>(byte1_2 >> 4),
+                                  static_cast<float>(byte1_3 & 0x0f),
+                                  static_cast<float>(byte1_3 >> 4)};
+
+        float32x4_t code2_low = {static_cast<float>(byte2_0 & 0x0f),
+                                 static_cast<float>(byte2_0 >> 4),
+                                 static_cast<float>(byte2_1 & 0x0f),
+                                 static_cast<float>(byte2_1 >> 4)};
+
+        float32x4_t code2_high = {static_cast<float>(byte2_2 & 0x0f),
+                                  static_cast<float>(byte2_2 >> 4),
+                                  static_cast<float>(byte2_3 & 0x0f),
+                                  static_cast<float>(byte2_3 >> 4)};
+
+        code1_low = vmulq_f32(code1_low, v_inv15);
+        code1_high = vmulq_f32(code1_high, v_inv15);
+        code2_low = vmulq_f32(code2_low, v_inv15);
+        code2_high = vmulq_f32(code2_high, v_inv15);
+
+        float32x4_t diff_low = vld1q_f32(diff + d);
+        float32x4_t diff_high = vld1q_f32(diff + d + 4);
+        float32x4_t lb_low = vld1q_f32(lower_bound + d);
+        float32x4_t lb_high = vld1q_f32(lower_bound + d + 4);
+
+        code1_low = vmlaq_f32(lb_low, code1_low, diff_low);
+        code1_high = vmlaq_f32(lb_high, code1_high, diff_high);
+        code2_low = vmlaq_f32(lb_low, code2_low, diff_low);
+        code2_high = vmlaq_f32(lb_high, code2_high, diff_high);
+
+        sum = vmlaq_f32(sum, code1_low, code2_low);
+        sum = vmlaq_f32(sum, code1_high, code2_high);
+    }
+
+    float result = vaddvq_f32(sum);
+
+    if (d < dim) {
+        result += generic::SQ4ComputeCodesIP(
+            codes1 + (d >> 1), codes2 + (d >> 1), lower_bound + d, diff + d, dim - d);
+    }
+
+    return result;
 #else
     return generic::SQ4ComputeCodesIP(codes1, codes2, lower_bound, diff, dim);
 #endif
@@ -1447,8 +1655,73 @@ SQ4ComputeCodesL2Sqr(const uint8_t* RESTRICT codes1,
                      const float* RESTRICT diff,
                      uint64_t dim) {
 #if defined(ENABLE_NEON)
-    // TODO: NEON implementation here
-    return generic::SQ4ComputeCodesL2Sqr(codes1, codes2, lower_bound, diff, dim);
+    float32x4_t sum = vdupq_n_f32(0.0f);
+    uint64_t d = 0;
+
+    const float inv15 = 1.0f / 15.0f;
+    float32x4_t v_inv15 = vdupq_n_f32(inv15);
+
+    for (; d + 7 < dim; d += 8) {
+        uint8_t byte1_0 = codes1[d >> 1];
+        uint8_t byte1_1 = codes1[(d >> 1) + 1];
+        uint8_t byte1_2 = codes1[(d >> 1) + 2];
+        uint8_t byte1_3 = codes1[(d >> 1) + 3];
+
+        uint8_t byte2_0 = codes2[d >> 1];
+        uint8_t byte2_1 = codes2[(d >> 1) + 1];
+        uint8_t byte2_2 = codes2[(d >> 1) + 2];
+        uint8_t byte2_3 = codes2[(d >> 1) + 3];
+
+        float32x4_t code1_low = {static_cast<float>(byte1_0 & 0x0f),
+                                 static_cast<float>(byte1_0 >> 4),
+                                 static_cast<float>(byte1_1 & 0x0f),
+                                 static_cast<float>(byte1_1 >> 4)};
+
+        float32x4_t code1_high = {static_cast<float>(byte1_2 & 0x0f),
+                                  static_cast<float>(byte1_2 >> 4),
+                                  static_cast<float>(byte1_3 & 0x0f),
+                                  static_cast<float>(byte1_3 >> 4)};
+
+        float32x4_t code2_low = {static_cast<float>(byte2_0 & 0x0f),
+                                 static_cast<float>(byte2_0 >> 4),
+                                 static_cast<float>(byte2_1 & 0x0f),
+                                 static_cast<float>(byte2_1 >> 4)};
+
+        float32x4_t code2_high = {static_cast<float>(byte2_2 & 0x0f),
+                                  static_cast<float>(byte2_2 >> 4),
+                                  static_cast<float>(byte2_3 & 0x0f),
+                                  static_cast<float>(byte2_3 >> 4)};
+
+        code1_low = vmulq_f32(code1_low, v_inv15);
+        code1_high = vmulq_f32(code1_high, v_inv15);
+        code2_low = vmulq_f32(code2_low, v_inv15);
+        code2_high = vmulq_f32(code2_high, v_inv15);
+
+        float32x4_t diff_low = vld1q_f32(diff + d);
+        float32x4_t diff_high = vld1q_f32(diff + d + 4);
+        float32x4_t lb_low = vld1q_f32(lower_bound + d);
+        float32x4_t lb_high = vld1q_f32(lower_bound + d + 4);
+
+        code1_low = vmlaq_f32(lb_low, code1_low, diff_low);
+        code1_high = vmlaq_f32(lb_high, code1_high, diff_high);
+        code2_low = vmlaq_f32(lb_low, code2_low, diff_low);
+        code2_high = vmlaq_f32(lb_high, code2_high, diff_high);
+
+        float32x4_t diff_vec_low = vsubq_f32(code1_low, code2_low);
+        float32x4_t diff_vec_high = vsubq_f32(code1_high, code2_high);
+
+        sum = vmlaq_f32(sum, diff_vec_low, diff_vec_low);
+        sum = vmlaq_f32(sum, diff_vec_high, diff_vec_high);
+    }
+
+    float result = vaddvq_f32(sum);
+
+    if (d < dim) {
+        result += generic::SQ4ComputeCodesL2Sqr(
+            codes1 + (d >> 1), codes2 + (d >> 1), lower_bound + d, diff + d, dim - d);
+    }
+
+    return result;
 #else
     return generic::SQ4ComputeCodesL2Sqr(codes1, codes2, lower_bound, diff, dim);
 #endif
@@ -1577,7 +1850,7 @@ SQ8UniformComputeCodesIP(const uint8_t* codes1, const uint8_t* codes2, uint64_t 
         d -= 4;
     }
     int32_t rem_sum = 0;
-    for (size_t i = 0; i < d; ++i) {
+    for (uint64_t i = 0; i < d; ++i) {
         rem_sum += static_cast<int32_t>(codes1[i]) * static_cast<int32_t>(codes2[i]);
     }
 
@@ -1653,9 +1926,9 @@ __inline void __attribute__((__always_inline__)) extract_8_bits_to_mask(const ui
 }
 
 __inline uint32x4_t __attribute__((__always_inline__))
-extract_4_bits_to_mask(const uint8_t* bits, size_t bit_offset) {
-    size_t byte_idx = bit_offset / 8;
-    size_t bit_start = bit_offset % 8;
+extract_4_bits_to_mask(const uint8_t* bits, uint64_t bit_offset) {
+    uint64_t byte_idx = bit_offset / 8;
+    uint64_t bit_start = bit_offset % 8;
 
     uint8_t mask_bits;
     if (bit_start <= 4) {
@@ -1670,7 +1943,45 @@ extract_4_bits_to_mask(const uint8_t* bits, size_t bit_offset) {
                         (mask_bits & 0x8) ? 0xFFFFFFFF : 0};
 }
 #endif
+uint32_t
+RaBitQSQ4UBinaryIP(const uint8_t* codes, const uint8_t* bits, uint64_t dim) {
+#if defined(ENABLE_NEON)
+    if (dim == 0)
+        return 0;
 
+    uint32_t result = 0;
+    size_t num_bytes = (dim + 7) / 8;
+
+    for (uint64_t bit_pos = 0; bit_pos < 4; ++bit_pos) {
+        const uint8_t* codes_ptr = codes + bit_pos * num_bytes;
+        uint32x4_t popcnt_sum = vdupq_n_u32(0);
+
+        size_t i = 0;
+        for (; i + 15 < num_bytes; i += 16) {
+            uint8x16_t code_vec = vld1q_u8(codes_ptr + i);
+            uint8x16_t bits_vec = vld1q_u8(bits + i);
+            uint8x16_t and_vec = vandq_u8(code_vec, bits_vec);
+            uint8x16_t cnt_vec = vcntq_u8(and_vec);
+            uint16x8_t sum_low = vpaddlq_u8(cnt_vec);
+            uint32x4_t sum_32 = vpaddlq_u16(sum_low);
+            popcnt_sum = vaddq_u32(popcnt_sum, sum_32);
+        }
+
+        uint32_t bit_count = vaddvq_u32(popcnt_sum);
+
+        for (; i < num_bytes; i++) {
+            uint8_t bitwise_and = codes_ptr[i] & bits[i];
+            bit_count += __builtin_popcount(bitwise_and);
+        }
+
+        result += bit_count << bit_pos;
+    }
+
+    return result;
+#else
+    return generic::RaBitQSQ4UBinaryIP(codes, bits, dim);
+#endif
+}
 float
 RaBitQFloatBinaryIP(const float* vector, const uint8_t* bits, uint64_t dim, float inv_sqrt_d) {
 #if defined(ENABLE_NEON)
@@ -1740,8 +2051,8 @@ RaBitQFloatBinaryIP(const float* vector, const uint8_t* bits, uint64_t dim, floa
 
     if (remaining >= 3) {
         res_vec = vld1q_lane_f32(vector + d, res_vec, 2);
-        size_t byte_idx = d / 8;
-        size_t bit_idx = d % 8;
+        uint64_t byte_idx = d / 8;
+        uint64_t bit_idx = d % 8;
         bool bit_set = (bits[byte_idx] & (1 << bit_idx)) != 0;
         res_b = vsetq_lane_f32(bit_set ? inv_sqrt_d : -inv_sqrt_d, res_b, 2);
         d++;
@@ -1750,8 +2061,8 @@ RaBitQFloatBinaryIP(const float* vector, const uint8_t* bits, uint64_t dim, floa
 
     if (remaining >= 2) {
         res_vec = vld1q_lane_f32(vector + d, res_vec, 1);
-        size_t byte_idx = d / 8;
-        size_t bit_idx = d % 8;
+        uint64_t byte_idx = d / 8;
+        uint64_t bit_idx = d % 8;
         bool bit_set = (bits[byte_idx] & (1 << bit_idx)) != 0;
         res_b = vsetq_lane_f32(bit_set ? inv_sqrt_d : -inv_sqrt_d, res_b, 1);
         d++;
@@ -1760,8 +2071,8 @@ RaBitQFloatBinaryIP(const float* vector, const uint8_t* bits, uint64_t dim, floa
 
     if (remaining >= 1) {
         res_vec = vld1q_lane_f32(vector + d, res_vec, 0);
-        size_t byte_idx = d / 8;
-        size_t bit_idx = d % 8;
+        uint64_t byte_idx = d / 8;
+        uint64_t bit_idx = d % 8;
         bool bit_set = (bits[byte_idx] & (1 << bit_idx)) != 0;
         res_b = vsetq_lane_f32(bit_set ? inv_sqrt_d : -inv_sqrt_d, res_b, 0);
     }
@@ -1828,13 +2139,13 @@ PQFastScanLookUp32(const uint8_t* RESTRICT lookup_table,
                    int32_t* RESTRICT result) {
 #if defined(ENABLE_NEON)
     uint32x4_t sum[4];
-    for (size_t i = 0; i < 4; ++i) {
+    for (uint64_t i = 0; i < 4; ++i) {
         sum[i] = vdupq_n_u32(0);
     }
     const auto sign4 = vdupq_n_u8(0x0F);
     const auto sign8 = vdupq_n_u16(0xFF);
 
-    for (size_t i = 0; i < pq_dim; ++i) {
+    for (uint64_t i = 0; i < pq_dim; ++i) {
         auto dict = vld1q_u8(lookup_table);
         auto code = vld1q_u8(codes);
         lookup_table += 16;
@@ -1955,42 +2266,90 @@ BitNot(const uint8_t* x, const uint64_t num_byte, uint8_t* result) {
     return generic::BitNot(x, num_byte, result);
 #endif
 }
-
-uint32_t
-RaBitQSQ4UBinaryIP(const uint8_t* codes, const uint8_t* bits, uint64_t dim) {
-#if defined(ENABLE_SVE)
-    // TODO: SVE implementation here
-    return generic::RaBitQSQ4UBinaryIP(codes, bits, dim);
-#else
-    return generic::RaBitQSQ4UBinaryIP(codes, bits, dim);
-#endif
-}
-
 void
-KacsWalk(float* data, size_t len) {
+KacsWalk(float* data, uint64_t len) {
 #if defined(ENABLE_NEON)
-    // TODO: NEON implementation here
+    size_t base = len % 2;
+    size_t offset = base + (len / 2);
+
+    size_t i = 0;
+    for (; i + 3 < len / 2; i += 4) {
+        float32x4_t first = vld1q_f32(data + i);
+        float32x4_t second = vld1q_f32(data + i + offset);
+
+        float32x4_t add = vaddq_f32(first, second);
+        float32x4_t sub = vsubq_f32(first, second);
+
+        vst1q_f32(data + i, add);
+        vst1q_f32(data + i + offset, sub);
+    }
+
+    for (; i < len / 2; i++) {
+        float add = data[i] + data[i + offset];
+        float sub = data[i] - data[i + offset];
+        data[i] = add;
+        data[i + offset] = sub;
+    }
+
+    if (base != 0) {
+        data[len / 2] *= std::sqrt(2.0f);
+    }
+#else
     generic::KacsWalk(data, len);
-#else
-    generic::KacsWalk(data, len);
 #endif
 }
 
 void
-FlipSign(const uint8_t* flip, float* data, size_t dim) {
+FlipSign(const uint8_t* flip, float* data, uint64_t dim) {
 #if defined(ENABLE_NEON)
-    // TODO: NEON implementation here
-    generic::FlipSign(flip, data, dim);
+    size_t i = 0;
+
+    for (; i + 3 < dim; i += 4) {
+        uint8_t byte_val = flip[i / 8];
+        uint8_t bit_offset = i % 8;
+
+        uint8_t four_bits = byte_val >> bit_offset;
+        if (bit_offset > 4 && (i / 8 + 1) < (dim + 7) / 8) {
+            four_bits |= flip[i / 8 + 1] << (8 - bit_offset);
+        }
+
+        float32x4_t vec = vld1q_f32(data + i);
+
+        uint32x4_t sign_mask = {(four_bits & 1) ? 0x80000000 : 0,
+                                (four_bits & 2) ? 0x80000000 : 0,
+                                (four_bits & 4) ? 0x80000000 : 0,
+                                (four_bits & 8) ? 0x80000000 : 0};
+
+        vec = vreinterpretq_f32_u32(veorq_u32(vreinterpretq_u32_f32(vec), sign_mask));
+        vst1q_f32(data + i, vec);
+    }
+
+    for (; i < dim; i++) {
+        bool mask = (flip[i / 8] & (1 << (i % 8))) != 0;
+        if (mask) {
+            data[i] = -data[i];
+        }
+    }
 #else
     generic::FlipSign(flip, data, dim);
 #endif
 }
 
 void
-VecRescale(float* data, size_t dim, float val) {
+VecRescale(float* data, uint64_t dim, float val) {
 #if defined(ENABLE_NEON)
-    // TODO: NEON implementation here
-    generic::VecRescale(data, dim, val);
+    float32x4_t scale = vdupq_n_f32(val);
+    size_t i = 0;
+
+    for (; i + 3 < dim; i += 4) {
+        float32x4_t vec = vld1q_f32(data + i);
+        vec = vmulq_f32(vec, scale);
+        vst1q_f32(data + i, vec);
+    }
+
+    for (; i < dim; i++) {
+        data[i] *= val;
+    }
 #else
     generic::VecRescale(data, dim, val);
 #endif
@@ -1999,21 +2358,43 @@ VecRescale(float* data, size_t dim, float val) {
 void
 RotateOp(float* data, int idx, int dim_, int step) {
 #if defined(ENABLE_NEON)
-    // TODO: NEON implementation here
-    generic::RotateOp(data, idx, dim_, step);
+    for (int i = idx; i < dim_; i += 2 * step) {
+        int j = 0;
+
+        for (; j + 3 < step; j += 4) {
+            float32x4_t x = vld1q_f32(data + i + j);
+            float32x4_t y = vld1q_f32(data + i + j + step);
+
+            float32x4_t sum = vaddq_f32(x, y);
+            float32x4_t diff = vsubq_f32(x, y);
+
+            vst1q_f32(data + i + j, sum);
+            vst1q_f32(data + i + j + step, diff);
+        }
+
+        for (; j < step; j++) {
+            float x = data[i + j];
+            float y = data[i + j + step];
+            data[i + j] = x + y;
+            data[i + j + step] = x - y;
+        }
+    }
 #else
     generic::RotateOp(data, idx, dim_, step);
 #endif
 }
 
 void
-FHTRotate(float* data, size_t dim_) {
+FHTRotate(float* data, uint64_t dim_) {
 #if defined(ENABLE_NEON)
-    // TODO: NEON implementation here
-    generic::FHTRotate(data, dim_);
+    size_t n = dim_;
+    size_t step = 1;
+    while (step < n) {
+        neon::RotateOp(data, 0, dim_, step);
+        step *= 2;
+    }
 #else
     generic::FHTRotate(data, dim_);
 #endif
 }
-
 }  // namespace vsag::neon

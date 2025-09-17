@@ -21,21 +21,17 @@
 
 namespace fixtures {
 
+struct SINDIParam {
+    bool use_reorder = true;
+    float doc_prune_ratio = 0.0;
+    int window_size = 10000;
+    bool deserialize_without_footer = false;
+};
+
 class SINDITestIndex : public fixtures::TestIndex {
 public:
     static TestDatasetPool pool;
     constexpr static uint64_t base_count = 1000;
-    constexpr static const char* build_param = R"(
-        {
-            "dim": 16,
-            "dtype": "sparse",
-            "metric_type": "ip",
-            "index_param": {
-                "use_reorder": true,
-                "doc_prune_ratio": 0.0,
-                "window_size": 100
-            }
-        })";
     constexpr static const char* search_param = R"(
         {
             "sindi":
@@ -45,12 +41,105 @@ public:
                 "term_prune_ratio": 0.0
             }
         })";
+
+    static std::string
+    GenerateBuildParameter(const SINDIParam& param) {
+        constexpr static const char* build_param_template = R"(
+        {{
+            "dim": 16,
+            "dtype": "sparse",
+            "metric_type": "ip",
+            "index_param": {{
+                "use_reorder": {},
+                "doc_prune_ratio": {},
+                "window_size": {},
+                "deserialize_without_footer": {}
+
+            }}
+        }})";
+        return fmt::format(build_param_template,
+                           param.use_reorder,
+                           param.doc_prune_ratio,
+                           param.window_size,
+                           param.deserialize_without_footer);
+    }
 };
 TestDatasetPool SINDITestIndex::pool{};
 
 }  // namespace fixtures
 
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex,
+                             "Invalid Build and Search Parameter",
+                             "[ft][sindi]") {
+    SECTION("invalid doc_prune_ratio") {
+        fixtures::SINDIParam param;
+        param.doc_prune_ratio = 0.6;
+        REQUIRE_THROWS(
+            TestFactory("sindi", fixtures::SINDITestIndex::GenerateBuildParameter(param), false));
+        param.doc_prune_ratio = -0.1;
+        REQUIRE_THROWS(
+            TestFactory("sindi", fixtures::SINDITestIndex::GenerateBuildParameter(param), false));
+    }
+
+    SECTION("invalid window_size") {
+        fixtures::SINDIParam param;
+        param.window_size = 5000;
+        REQUIRE_THROWS(
+            TestFactory("sindi", fixtures::SINDITestIndex::GenerateBuildParameter(param), false));
+        param.window_size = 1100000;
+        REQUIRE_THROWS(
+            TestFactory("sindi", fixtures::SINDITestIndex::GenerateBuildParameter(param), false));
+    }
+    fixtures::SINDIParam param;
+    param.window_size = 10000;
+    auto build_param = fixtures::SINDITestIndex::GenerateBuildParameter(param);
+    auto index = TestFactory("sindi", build_param, true);
+    auto dataset = pool.GetSparseDatasetAndCreate(base_count, 128, 0.8);
+    REQUIRE(index->GetIndexType() == vsag::IndexType::SINDI);
+    TestBuildIndex(index, dataset, true);
+    {
+        auto invalid_search_param = R"({
+            "sindi": {
+                "n_candidate": -1,
+                "query_prune_ratio": 0.0,
+                "term_prune_ratio": 0.0
+            }
+        })";
+        TestKnnSearch(index, dataset, invalid_search_param, 0.99, false);
+        invalid_search_param = R"({
+            "sindi":{
+                "n_candidate": 10,
+                "query_prune_ratio": 1.2,
+                "term_prune_ratio": 0.0
+            }
+        })";
+        TestKnnSearch(index, dataset, invalid_search_param, 0.99, false);
+        invalid_search_param = R"({
+            "sindi":{
+                "n_candidate": 10,
+                "query_prune_ratio": 0.0,
+                "term_prune_ratio": -0.1
+            }
+        })";
+        TestKnnSearch(index, dataset, invalid_search_param, 0.99, false);
+    }
+    vsag::SparseVector sparse_vector;
+    int64_t id = 7777;
+    sparse_vector.len_ = 0;
+    auto data = vsag::Dataset::Make();
+    data->NumElements(1)->Owner(false)->SparseVectors(&sparse_vector)->Ids(&id);
+    auto insert_result = index->Add(data);
+    REQUIRE(insert_result.has_value());
+    auto failed_ids = insert_result.value();
+    REQUIRE(failed_ids[0] == id);
+    auto search_result = index->KnnSearch(data, 1, search_param);
+    REQUIRE_FALSE(search_result.has_value());
+}
+
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex, "SINDI Build and Search", "[ft][sindi]") {
+    fixtures::SINDIParam param;
+    param.use_reorder = GENERATE(true, false);
+    auto build_param = fixtures::SINDITestIndex::GenerateBuildParameter(param);
     auto index = TestFactory("sindi", build_param, true);
     auto dataset = pool.GetSparseDatasetAndCreate(base_count, 128, 0.8);
     REQUIRE(index->GetIndexType() == vsag::IndexType::SINDI);
@@ -60,9 +149,18 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex, "SINDI Build and Search",
     TestRangeSearch(index, dataset, search_param, 0.49, 5, true);
     TestFilterSearch(index, dataset, search_param, 0.99, true);
     TestConcurrentKnnSearch(index, dataset, search_param, 0.99, true);
+    TestGetMinAndMaxId(index, dataset, true);
+    TestCalcDistanceById(index, dataset, 1e-4, true, true);
+    TestBatchCalcDistanceById(index, dataset, 1e-4, true, true);
+    TestUpdateId(index, dataset, search_param, true);
+    TestEstimateMemory("sindi", build_param, dataset);
+    TestIndexStatus(index);
 }
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex, "SINDI Concurrent", "[ft][sindi]") {
+    fixtures::SINDIParam param;
+    param.use_reorder = GENERATE(true, false);
+    auto build_param = fixtures::SINDITestIndex::GenerateBuildParameter(param);
     auto index = TestFactory("sindi", build_param, true);
     auto dataset = pool.GetSparseDatasetAndCreate(base_count, 128, 0.8);
     REQUIRE(index->GetIndexType() == vsag::IndexType::SINDI);
@@ -70,6 +168,10 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex, "SINDI Concurrent", "[ft]
 }
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex, "SINDI Serialize File", "[ft][sindi]") {
+    fixtures::SINDIParam param;
+    param.deserialize_without_footer = GENERATE(true, false);
+    param.use_reorder = GENERATE(true, false);
+    auto build_param = fixtures::SINDITestIndex::GenerateBuildParameter(param);
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
     auto metric_type = GENERATE("ip");

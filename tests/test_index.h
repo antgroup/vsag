@@ -159,13 +159,16 @@ public:
     TestCalcDistanceById(const IndexPtr& index,
                          const TestDatasetPtr& dataset,
                          float error = 1e-5,
-                         bool expected_success = true);
+                         bool expected_success = true,
+                         bool is_sparse = false);
 
     static void
     TestBatchCalcDistanceById(const IndexPtr& index,
                               const TestDatasetPtr& dataset,
                               float error = 1e-5,
-                              bool expected_success = true);
+                              bool expected_success = true,
+                              bool is_sparse = false,
+                              bool is_old_index = false);
 
     static void
     TestGetMinAndMaxId(const IndexPtr& index,
@@ -213,7 +216,7 @@ public:
                    bool expect_success = true);
 
     static IndexPtr
-    TestMergeIndexWithSameModel(const IndexPtr model,
+    TestMergeIndexWithSameModel(const IndexPtr& model,
                                 const TestDatasetPtr& dataset,
                                 int32_t split_num = 1,
                                 bool expect_success = true);
@@ -285,6 +288,15 @@ public:
 
     static void
     TestExportIDs(const IndexPtr& index, const TestDatasetPtr& dataset);
+
+    static void
+    TestGetDataById(const IndexPtr& index, const TestDatasetPtr& dataset);
+
+    static void
+    TestGetDataByIdWithFlag(const IndexPtr& index, const TestDatasetPtr& dataset);
+
+    static void
+    TestIndexStatus(const IndexPtr& index);
 
     constexpr static float RECALL_THRESHOLD = 0.95;
 };

@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "simd/int8_simd.h"
 #if defined(ENABLE_SVE)
 #include <arm_sve.h>
 #endif
@@ -45,21 +46,21 @@ float
 L2Sqr(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
     auto* pVect1 = (float*)pVect1v;
     auto* pVect2 = (float*)pVect2v;
-    auto qty = *((size_t*)qty_ptr);
+    auto qty = *((uint64_t*)qty_ptr);
     return sve::FP32ComputeL2Sqr(pVect1, pVect2, qty);
 }
 float
 INT8L2Sqr(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
     auto* pVect1 = (int8_t*)pVect1v;
     auto* pVect2 = (int8_t*)pVect2v;
-    auto qty = *((size_t*)qty_ptr);
+    auto qty = *((uint64_t*)qty_ptr);
     return sve::INT8ComputeL2Sqr(pVect1, pVect2, qty);
 }
 float
 InnerProduct(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
     auto* pVect1 = (float*)pVect1v;
     auto* pVect2 = (float*)pVect2v;
-    auto qty = *((size_t*)qty_ptr);
+    auto qty = *((uint64_t*)qty_ptr);
     return sve::FP32ComputeIP(pVect1, pVect2, qty);
 }
 
@@ -70,29 +71,12 @@ InnerProductDistance(const void* pVect1, const void* pVect2, const void* qty_ptr
 
 float
 INT8InnerProduct(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
-#if defined(ENABLE_SVE)
-    auto* pVect1 = (const int8_t*)pVect1v;
-    auto* pVect2 = (const int8_t*)pVect2v;
+    auto* pVect1 = (int8_t*)pVect1v;
+    auto* pVect2 = (int8_t*)pVect2v;
     auto qty = *((size_t*)qty_ptr);
-
-    svint32_t sum = svdup_s32(0);
-    uint64_t i = 0;
-    const uint64_t step = svcntb();
-
-    svbool_t predicate = svwhilelt_b8(i, qty);
-    do {
-        svint8_t vec1 = svld1_s8(predicate, pVect1 + i);
-        svint8_t vec2 = svld1_s8(predicate, pVect2 + i);
-        sum = svdot_s32(sum, vec1, vec2);
-        i += step;
-        predicate = svwhilelt_b8(i, qty);
-    } while (svptest_first(svptrue_b8(), predicate));
-
-    return static_cast<float>(svaddv_s32(svptrue_b32(), sum));
-#else
-    return neon::INT8InnerProduct(pVect1v, pVect2v, qty_ptr);
-#endif
+    return sve::INT8ComputeIP(pVect1, pVect2, qty);
 }
+
 float
 INT8ComputeL2Sqr(const int8_t* RESTRICT query, const int8_t* RESTRICT codes, uint64_t dim) {
 #if defined(ENABLE_SVE)
@@ -118,6 +102,29 @@ INT8ComputeL2Sqr(const int8_t* RESTRICT query, const int8_t* RESTRICT codes, uin
     return neon::INT8ComputeL2Sqr(query, codes, dim);
 #endif
 }
+
+float
+INT8ComputeIP(const int8_t* __restrict query, const int8_t* __restrict codes, uint64_t dim) {
+#if defined(ENABLE_SVE)
+    svint32_t sum = svdup_s32(0);
+    uint64_t i = 0;
+    const uint64_t step = svcntb();
+
+    svbool_t predicate = svwhilelt_b8(i, dim);
+    do {
+        svint8_t vec1 = svld1_s8(predicate, query + i);
+        svint8_t vec2 = svld1_s8(predicate, codes + i);
+        sum = svdot_s32(sum, vec1, vec2);
+        i += step;
+        predicate = svwhilelt_b8(i, dim);
+    } while (svptest_first(svptrue_b8(), predicate));
+
+    return static_cast<float>(svaddv_s32(svptrue_b32(), sum));
+#else
+    return neon::INT8ComputeIP(query, codes, dim);
+#endif
+}
+
 float
 INT8InnerProductDistance(const void* pVect1, const void* pVect2, const void* qty_ptr) {
     return -sve::INT8InnerProduct(pVect1, pVect2, qty_ptr);
@@ -1070,10 +1077,10 @@ RaBitQSQ4UBinaryIP(const uint8_t* codes, const uint8_t* bits, uint64_t dim) {
     }
 
     uint32_t result = 0;
-    size_t num_bytes = (dim + 7) / 8;
+    uint64_t num_bytes = (dim + 7) / 8;
 
     for (uint64_t bit_pos = 0; bit_pos < 4; ++bit_pos) {
-        size_t i = 0;
+        uint64_t i = 0;
         uint64_t sum = 0;
 
         const uint8_t* current_codes = codes + bit_pos * num_bytes;
@@ -1310,10 +1317,10 @@ PQFastScanLookUp32(const uint8_t* RESTRICT lookup_table,
 }
 
 void
-KacsWalk(float* data, size_t len) {
+KacsWalk(float* data, uint64_t len) {
 #if defined(ENABLE_SVE)
-    size_t n = len / 2;
-    size_t offset = (len % 2) + n;
+    uint64_t n = len / 2;
+    uint64_t offset = (len % 2) + n;
     uint64_t i = 0;
     const uint64_t step = svcntw();
     svbool_t predicate = svwhilelt_b32(i, n);
@@ -1337,7 +1344,7 @@ KacsWalk(float* data, size_t len) {
 }
 
 void
-FlipSign(const uint8_t* flip, float* data, size_t dim) {
+FlipSign(const uint8_t* flip, float* data, uint64_t dim) {
 #if defined(ENABLE_SVE)
     auto predicate_array = std::make_unique<uint8_t[]>(dim);
     const uint64_t num_bytes = dim / 8;
@@ -1371,7 +1378,7 @@ FlipSign(const uint8_t* flip, float* data, size_t dim) {
 }
 
 void
-VecRescale(float* data, size_t dim, float val) {
+VecRescale(float* data, uint64_t dim, float val) {
 #if defined(ENABLE_SVE)
     svfloat32_t scale = svdup_f32(val);
     uint64_t i = 0;
@@ -1411,10 +1418,10 @@ RotateOp(float* data, int idx, int dim_, int step) {
 }
 
 void
-FHTRotate(float* data, size_t dim_) {
+FHTRotate(float* data, uint64_t dim_) {
 #if defined(ENABLE_SVE)
-    size_t n = dim_;
-    size_t step = 1;
+    uint64_t n = dim_;
+    uint64_t step = 1;
     while (step < n) {
         sve::RotateOp(data, 0, dim_, step);
         step *= 2;

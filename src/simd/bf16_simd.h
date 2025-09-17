@@ -16,7 +16,6 @@
 #pragma once
 
 #include <cstdint>
-#include <string>
 
 #include "simd_marco.h"
 

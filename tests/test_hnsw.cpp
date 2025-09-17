@@ -441,7 +441,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex, "HNSW Batch Calc Dis Id", 
         auto index = TestFactory(name, param, true);
         auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
         TestBuildIndex(index, dataset, true);
-        TestBatchCalcDistanceById(index, dataset);
+        TestBatchCalcDistanceById(index, dataset, 1e-5, true, false, true);
         vsag::Options::Instance().set_block_size_limit(origin_size);
     }
 }
@@ -464,7 +464,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex,
         auto index = TestFactory(name, param, true);
         auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
         TestBuildIndex(index, dataset, true);
-        TestBatchCalcDistanceById(index, dataset);
+        TestBatchCalcDistanceById(index, dataset, 1e-5, true, false, true);
         vsag::Options::Instance().set_block_size_limit(origin_size);
     }
 }

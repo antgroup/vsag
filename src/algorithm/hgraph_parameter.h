@@ -15,18 +15,20 @@
 
 #pragma once
 
-#include "data_cell/extra_info_datacell_parameter.h"
-#include "data_cell/flatten_datacell_parameter.h"
-#include "data_cell/graph_interface_parameter.h"
-#include "data_cell/sparse_graph_datacell_parameter.h"
 #include "data_type.h"
-#include "impl/odescent_graph_parameter.h"
-#include "parameter.h"
+#include "inner_index_parameter.h"
+#include "pointer_define.h"
 #include "vsag/constants.h"
 
 namespace vsag {
+DEFINE_POINTER2(ExtraInfoDataCellParam, ExtraInfoDataCellParameter);
+DEFINE_POINTER2(FlattenInterfaceParam, FlattenInterfaceParameter);
+DEFINE_POINTER2(GraphInterfaceParam, GraphInterfaceParameter);
+DEFINE_POINTER2(SparseGraphDatacellParam, SparseGraphDatacellParameter);
+DEFINE_POINTER(ODescentParameter);
 
-class HGraphParameter : public Parameter {
+DEFINE_POINTER(HGraphParameter);
+class HGraphParameter : public InnerIndexParameter {
 public:
     explicit HGraphParameter(const JsonType& json);
 
@@ -43,33 +45,26 @@ public:
 
 public:
     FlattenInterfaceParamPtr base_codes_param{nullptr};
-    FlattenInterfaceParamPtr precise_codes_param{nullptr};
-    FlattenInterfaceParamPtr raw_vector_param{nullptr};
     GraphInterfaceParamPtr bottom_graph_param{nullptr};
     SparseGraphDatacellParamPtr hierarchical_graph_param{nullptr};
-    ExtraInfoDataCellParamPtr extra_info_param{nullptr};
+
     ODescentParameterPtr odescent_param{nullptr};
 
     std::string graph_type{GRAPH_TYPE_NSW};
 
-    bool use_reorder{false};
     bool use_elp_optimizer{false};
     bool ignore_reorder{false};
     bool build_by_base{false};
-    bool store_raw_vector{false};
 
-    bool use_attribute_filter{false};
     uint64_t ef_construction{400};
-    uint64_t build_thread_count{100};
 
     bool support_duplicate{false};
+    bool support_tombstone{false};
 
     DataTypes data_type{DataTypes::DATA_TYPE_FLOAT};
 
     std::string name;
 };
-
-using HGraphParameterPtr = std::shared_ptr<HGraphParameter>;
 
 class HGraphSearchParameters {
 public:

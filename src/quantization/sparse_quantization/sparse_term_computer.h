@@ -20,12 +20,12 @@
 
 #include "algorithm/sindi/sindi_parameter.h"
 #include "metric_type.h"
+#include "pointer_define.h"
 #include "utils/sparse_vector_transform.h"
-
 namespace vsag {
 
 static constexpr int INVALID_TERM = -1;
-
+DEFINE_POINTER(SparseTermComputer)
 class SparseTermComputer {
 public:
     ~SparseTermComputer() = default;
@@ -85,6 +85,23 @@ public:
         }
     }
 
+    inline void
+    ScanForCalculateDist(uint32_t term_iterator,
+                         const uint32_t* term_ids,
+                         const float* term_datas,
+                         uint32_t term_count,
+                         uint32_t target_id,
+                         float* dist) {
+        float query_val = sorted_query_[term_iterator].second;
+
+        for (auto i = 0; i < term_count; i++) {
+            if (term_ids[i] == target_id) {
+                *dist += query_val * term_datas[i];
+                break;
+            }
+        }
+    }
+
     inline bool
     HasNextTerm() {
         return term_iterator_ < pruned_len_;
@@ -120,7 +137,4 @@ public:
 
     Allocator* const allocator_{nullptr};
 };
-
-using SparseTermComputerPtr = std::shared_ptr<SparseTermComputer>;
-
 }  // namespace vsag

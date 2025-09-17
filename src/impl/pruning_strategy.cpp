@@ -15,15 +15,18 @@
 
 #include "pruning_strategy.h"
 
+#include "data_cell/flatten_datacell.h"
+#include "data_cell/graph_interface.h"
 #include "impl/heap/standard_heap.h"
-
+#include "lock_strategy.h"
 namespace vsag {
 
 void
 select_edges_by_heuristic(const DistHeapPtr& edges,
                           uint64_t max_size,
                           const FlattenInterfacePtr& flatten,
-                          Allocator* allocator) {
+                          Allocator* allocator,
+                          float alpha) {
     if (edges->Size() < max_size) {
         return;
     }
@@ -46,7 +49,7 @@ select_edges_by_heuristic(const DistHeapPtr& edges,
 
         for (const auto& second_pair : return_list) {
             float curdist = flatten->ComputePairVectors(second_pair.second, current_pair.second);
-            if (curdist < float_query) {
+            if (alpha * curdist < float_query) {
                 good = false;
                 break;
             }

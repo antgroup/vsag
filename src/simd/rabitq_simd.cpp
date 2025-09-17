@@ -14,6 +14,8 @@
 
 #include "rabitq_simd.h"
 
+#include "simd_status.h"
+
 namespace vsag {
 
 static RaBitQFloatBinaryType
@@ -55,6 +57,14 @@ GetRaBitQSQ4UBinaryIP() {
     } else if (SimdStatus::SupportAVX512()) {
 #if defined(ENABLE_AVX512)
         return avx512::RaBitQSQ4UBinaryIP;
+#endif
+    } else if (SimdStatus::SupportSVE()) {
+#if defined(ENABLE_SVE)
+        return sve::RaBitQSQ4UBinaryIP;
+#endif
+    } else if (SimdStatus::SupportNEON()) {
+#if defined(ENABLE_NEON)
+        return neon::RaBitQSQ4UBinaryIP;
 #endif
     }
     return generic::RaBitQSQ4UBinaryIP;

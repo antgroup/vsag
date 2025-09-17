@@ -21,22 +21,43 @@
 #include "empty_index_binary_set.h"
 #include "hgraph.h"
 #include "impl/filter/filter_headers.h"
+#include "index/index_common_param.h"
+#include "index_feature_list.h"
+#include "label_table.h"
 #include "storage/serialization.h"
 #include "utils/slow_task_timer.h"
 #include "utils/util_functions.h"
 
 namespace vsag {
 
-InnerIndexInterface::InnerIndexInterface(ParamPtr index_param, const IndexCommonParam& common_param)
+InnerIndexInterface::InnerIndexInterface(const InnerIndexParameterPtr& index_param,
+                                         const IndexCommonParam& common_param)
     : allocator_(common_param.allocator_.get()),
-      create_param_ptr_(std::move(index_param)),
+      create_param_ptr_(index_param),
       dim_(common_param.dim_),
       metric_(common_param.metric_),
-      data_type_(common_param.data_type_) {
+      data_type_(common_param.data_type_),
+      build_thread_count_(index_param->build_thread_count),
+      use_attribute_filter_(index_param->use_attribute_filter),
+      use_reorder_(index_param->use_reorder) {
     this->label_table_ = std::make_shared<LabelTable>(allocator_);
-    this->index_feature_list_ = std::make_shared<IndexFeatureList>();
+    this->tomb_label_table_ = std::make_shared<LabelTable>(allocator_);
+    this->index_feature_list_ = std::make_unique<IndexFeatureList>();
     this->index_feature_list_->SetFeature(SUPPORT_EXPORT_IDS);
+    this->extra_info_size_ = common_param.extra_info_size_;
+    if (this->extra_info_size_ > 0) {
+        this->extra_infos_ =
+            ExtraInfoInterface::MakeInstance(index_param->extra_info_param, common_param);
+    }
+
+    this->build_pool_ = common_param.thread_pool_;
+    if (this->build_thread_count_ > 1 && this->build_pool_ == nullptr) {
+        this->build_pool_ = SafeThreadPool::FactoryDefaultThreadPool();
+        this->build_pool_->SetPoolSize(build_thread_count_);
+    }
 }
+
+InnerIndexInterface::~InnerIndexInterface() = default;
 
 std::vector<int64_t>
 InnerIndexInterface::Build(const DatasetPtr& base) {
@@ -178,9 +199,25 @@ InnerIndexInterface::Deserialize(const BinarySet& binary_set) {
 void
 InnerIndexInterface::Deserialize(const ReaderSet& reader_set) {
     CHECK_SELF_EMPTY;
-
     std::string time_record_name = this->GetName() + " Deserialize";
     SlowTaskTimer t(time_record_name);
+    if (reader_set.Contains(SERIAL_META_KEY)) {
+        logger::debug("parse with new version format");
+        const auto& meta_reader = reader_set.Get(SERIAL_META_KEY);
+        uint64_t size = meta_reader->Size();
+        Binary binary{.data = std::shared_ptr<int8_t[]>(new int8_t[size]), .size = size};
+        meta_reader->Read(0, size, binary.data.get());
+        auto metadata = std::make_shared<Metadata>(binary);
+        if (metadata->EmptyIndex()) {
+            return;
+        }
+    } else {
+        logger::debug("parse with v0.14 version format");
+        // check if binary set is an empty index
+        if (reader_set.Contains(BLANK_INDEX)) {
+            return;
+        }
+    }
 
     try {
         auto index_reader = reader_set.Get(this->GetName());
@@ -197,9 +234,19 @@ InnerIndexInterface::Deserialize(const ReaderSet& reader_set) {
     }
 }
 
+bool
+InnerIndexInterface::CheckFeature(IndexFeature feature) const {
+    return this->index_feature_list_->CheckFeature(feature);
+}
+
+bool
+InnerIndexInterface::CheckIdExist(int64_t id) const {
+    return this->label_table_->CheckLabel(id);
+}
+
 void
 InnerIndexInterface::Serialize(std::ostream& out_stream) const {
-    std::string time_record_name = this->GetName() + " Deserialize";
+    std::string time_record_name = this->GetName() + " Serialize";
     SlowTaskTimer t(time_record_name);
 
     if (GetNumElements() == 0) {
@@ -228,6 +275,14 @@ InnerIndexInterface::Deserialize(std::istream& in_stream) {
     SlowTaskTimer t(time_record_name);
     try {
         IOStreamReader reader(in_stream);
+
+        auto footer = Footer::Parse(reader);
+        if (footer != nullptr) {
+            auto metadata = footer->GetMetadata();
+            if (metadata->EmptyIndex()) {
+                return;
+            }
+        }
         this->Deserialize(reader);
         return;
     } catch (const std::bad_alloc& e) {
@@ -251,6 +306,25 @@ InnerIndexInterface::CalDistanceById(const float* query, const int64_t* ids, int
     result->Distances(distances);
     for (int64_t i = 0; i < count; ++i) {
         distances[i] = this->CalcDistanceById(query, ids[i]);
+    }
+    return result;
+}
+
+DatasetPtr
+InnerIndexInterface::CalDistanceById(const DatasetPtr& query,
+                                     const int64_t* ids,
+                                     int64_t count) const {
+    auto result = Dataset::Make();
+    result->Owner(true, allocator_);
+    auto* distances = (float*)allocator_->Allocate(sizeof(float) * count);
+    result->Distances(distances);
+    for (int64_t i = 0; i < count; ++i) {
+        try {
+            distances[i] = this->CalcDistanceById(query, ids[i]);
+        } catch (std::runtime_error& e) {
+            logger::debug(fmt::format("failed to find id: {}", ids[i]));
+            distances[i] = -1;
+        }
     }
     return result;
 }
@@ -345,6 +419,167 @@ InnerIndexInterface::ExportIDs() const {
     memcpy(labels, origin_label, sizeof(LabelType) * num_element);
     result->NumElements(num_element)->Ids(labels)->Dim(1)->Owner(true, allocator_);
     return result;
+}
+
+DatasetPtr
+InnerIndexInterface::GetDataByIds(const int64_t* ids, int64_t count) const {
+    uint64_t selected_flag = DATA_FLAG_ID;
+    if (this->has_raw_vector_) {
+        selected_flag |= DATA_FLAG_FLOAT32_VECTOR;
+    }
+    if (this->has_attribute_) {
+        selected_flag |= DATA_FLAG_ATTRIBUTE;
+    }
+    if (this->extra_info_size_ > 0) {
+        selected_flag |= DATA_FLAG_EXTRA_INFO;
+    }
+    return this->GetDataByIdsWithFlag(ids, count, selected_flag);
+}
+
+DatasetPtr
+InnerIndexInterface::GetDataByIdsWithFlag(const int64_t* ids,
+                                          int64_t count,
+                                          uint64_t selected_data_flag) const {
+    auto* inner_ids =
+        reinterpret_cast<InnerIdType*>(this->allocator_->Allocate(count * sizeof(InnerIdType)));
+    {
+        std::shared_lock lock(this->label_lookup_mutex_);
+        for (int64_t i = 0; i < count; ++i) {
+            inner_ids[i] = this->label_table_->GetIdByLabel(ids[i]);
+        }
+    }
+    auto dataset = Dataset::Make();
+    dataset->NumElements(count)->Dim(dim_)->Owner(true, allocator_);
+    if ((selected_data_flag & DATA_FLAG_FLOAT32_VECTOR) != 0U) {
+        if (not this->has_raw_vector_) {
+            throw VsagException(ErrorType::INVALID_ARGUMENT, "has_raw_vector_ is false");
+        }
+        auto* fp32_data = reinterpret_cast<float*>(
+            this->allocator_->Allocate(count * this->dim_ * sizeof(float)));
+        dataset->Float32Vectors(fp32_data);
+        for (int64_t i = 0; i < count; ++i) {
+            auto inner_id = this->label_table_->GetIdByLabel(ids[i]);
+            this->GetVectorByInnerId(inner_id, fp32_data + i * this->dim_);
+        }
+    }
+
+    if ((selected_data_flag & DATA_FLAG_ATTRIBUTE) != 0U) {
+        if (not this->has_attribute_) {
+            throw VsagException(ErrorType::INVALID_ARGUMENT, "has_attribute_ is false");
+        }
+        auto* attribute_data = new AttributeSet[count];
+        dataset->AttributeSets(attribute_data);
+        for (int64_t i = 0; i < count; ++i) {
+            auto inner_id = this->label_table_->GetIdByLabel(ids[i]);
+            this->GetAttributeSetByInnerId(inner_id, attribute_data + i);
+        }
+    }
+
+    if ((selected_data_flag & DATA_FLAG_EXTRA_INFO) != 0U) {
+        if (extra_info_size_ == 0) {
+            throw VsagException(ErrorType::INVALID_ARGUMENT, "extra_info_size_ is 0");
+        }
+        auto* extra_info =
+            reinterpret_cast<char*>(this->allocator_->Allocate(count * extra_info_size_));
+        dataset->ExtraInfos(extra_info);
+        for (int64_t i = 0; i < count; ++i) {
+            auto inner_id = this->label_table_->GetIdByLabel(ids[i]);
+            this->extra_infos_->GetExtraInfoById(inner_id, extra_info + i * extra_info_size_);
+        }
+    }
+    if ((selected_data_flag & DATA_FLAG_ID) != 0U) {
+        auto* new_ids =
+            reinterpret_cast<int64_t*>(this->allocator_->Allocate(count * sizeof(int64_t)));
+        memcpy(new_ids, ids, count * sizeof(int64_t));
+        dataset->Ids(new_ids);
+    }
+    this->allocator_->Deallocate(inner_ids);
+    return dataset;
+}
+
+void
+InnerIndexInterface::GetExtraInfoByIds(const int64_t* ids, int64_t count, char* extra_infos) const {
+    if (this->extra_infos_ == nullptr) {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION, "extra_info is NULL");
+    }
+    for (int64_t i = 0; i < count; ++i) {
+        std::shared_lock<std::shared_mutex> lock(this->label_lookup_mutex_);
+        auto inner_id = this->label_table_->GetIdByLabel(ids[i]);
+        this->extra_infos_->GetExtraInfoById(inner_id, extra_infos + i * extra_info_size_);
+    }
+}
+
+bool
+InnerIndexInterface::UpdateExtraInfo(const DatasetPtr& new_base) {
+    CHECK_ARGUMENT(new_base != nullptr, "new_base is nullptr");
+    CHECK_ARGUMENT(new_base->GetExtraInfos() != nullptr, "extra_infos is nullptr");
+    CHECK_ARGUMENT(new_base->GetExtraInfoSize() == extra_info_size_, "extra_infos size mismatch");
+    CHECK_ARGUMENT(new_base->GetNumElements() == 1, "new_base size must be one");
+    auto label = new_base->GetIds()[0];
+    if (this->extra_infos_ != nullptr) {
+        std::shared_lock label_lock(this->label_lookup_mutex_);
+        if (not this->label_table_->CheckLabel(label)) {
+            return false;
+        }
+        const auto inner_id = this->label_table_->GetIdByLabel(label);
+        this->extra_infos_->InsertExtraInfo(new_base->GetExtraInfos(), inner_id);
+        return true;
+    }
+    throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION, "extra_infos is not initialized");
+}
+
+void
+InnerIndexInterface::analyze_quantizer(JsonType& stats,
+                                       const float* data,
+                                       uint64_t sample_data_size,
+                                       int64_t topk,
+                                       const std::string& search_param) const {
+    // record quantized information
+    if (this->use_reorder_) {
+        logger::info("analyze_quantizer: sample_data_size = {}, topk = {}", sample_data_size, topk);
+        float bias_ratio = 0.0F;
+        float inversion_count_rate = 0.0F;
+        for (uint64_t i = 0; i < sample_data_size; ++i) {
+            float tmp_bias_ratio = 0.0F;
+            float tmp_inversion_count_rate = 0.0F;
+            this->use_reorder_ = false;
+            const auto* query_data = data + i * dim_;
+            auto query = Dataset::Make();
+            FilterPtr filter = nullptr;
+            query->Owner(false)->NumElements(1)->Float32Vectors(query_data)->Dim(dim_);
+            auto search_result = this->KnnSearch(query, topk, search_param, filter);
+            this->use_reorder_ = true;
+            auto distance_result =
+                this->CalDistanceById(query_data, search_result->GetIds(), search_result->GetDim());
+            const auto* ground_distances = distance_result->GetDistances();
+            const auto* approximate_distances = search_result->GetDistances();
+            for (int64_t j = 0; j < topk; ++j) {
+                if (ground_distances[j] > 0) {
+                    tmp_bias_ratio += std::abs(approximate_distances[j] - ground_distances[j]) /
+                                      ground_distances[j];
+                }
+            }
+            tmp_bias_ratio /= static_cast<float>(topk);
+            bias_ratio += tmp_bias_ratio;
+            // calculate inversion count rate
+            int64_t inversion_count = 0;
+            for (int64_t j = 0; j < search_result->GetDim() - 1; ++j) {
+                for (int64_t k = j + 1; k < search_result->GetDim(); ++k) {
+                    if (ground_distances[j] > ground_distances[k]) {
+                        inversion_count++;
+                    }
+                }
+            }
+            int64_t search_count = search_result->GetDim();
+            tmp_inversion_count_rate =
+                static_cast<float>(inversion_count) /
+                (static_cast<float>(search_count * (search_count - 1)) / 2.0F);
+            inversion_count_rate += tmp_inversion_count_rate;
+        }
+        stats["quantization_bias_ratio"] = bias_ratio / static_cast<float>(sample_data_size);
+        stats["quantization_inversion_count_rate"] =
+            inversion_count_rate / static_cast<float>(sample_data_size);
+    }
 }
 
 }  // namespace vsag

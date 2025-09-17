@@ -16,13 +16,11 @@
 #pragma once
 
 #include <cstring>
-#include <nlohmann/json.hpp>
 
 #include "basic_io.h"
 #include "index/index_common_param.h"
 #include "memory_io_parameter.h"
 #include "prefetch.h"
-#include "vsag/allocator.h"
 
 namespace vsag {
 

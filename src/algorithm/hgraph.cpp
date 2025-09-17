@@ -43,19 +43,15 @@ namespace vsag {
 HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonParam& common_param)
     : InnerIndexInterface(hgraph_param, common_param),
       route_graphs_(common_param.allocator_.get()),
-      use_reorder_(hgraph_param->use_reorder),
       use_elp_optimizer_(hgraph_param->use_elp_optimizer),
       ignore_reorder_(hgraph_param->ignore_reorder),
       build_by_base_(hgraph_param->build_by_base),
-      use_attribute_filter_(hgraph_param->use_attribute_filter),
       ef_construct_(hgraph_param->ef_construction),
-      build_thread_count_(hgraph_param->build_thread_count),
       odescent_param_(hgraph_param->odescent_param),
       graph_type_(hgraph_param->graph_type),
-      hierarchical_datacell_param_(hgraph_param->hierarchical_graph_param),
-      extra_info_size_(common_param.extra_info_size_),
-      deleted_ids_(allocator_) {
+      hierarchical_datacell_param_(hgraph_param->hierarchical_graph_param) {
     this->label_table_->compress_duplicate_data_ = hgraph_param->support_duplicate;
+    this->label_table_->support_tombstone_ = hgraph_param->support_tombstone;
     neighbors_mutex_ = std::make_shared<PointsMutex>(0, common_param.allocator_.get());
     this->basic_flatten_codes_ =
         FlattenInterface::MakeInstance(hgraph_param->base_codes_param, common_param);
@@ -69,11 +65,6 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
         GraphInterface::MakeInstance(hgraph_param->bottom_graph_param, common_param);
     mult_ = 1 / log(1.0 * static_cast<double>(this->bottom_graph_->MaximumDegree()));
 
-    if (extra_info_size_ > 0) {
-        this->extra_infos_ =
-            ExtraInfoInterface::MakeInstance(hgraph_param->extra_info_param, common_param);
-    }
-
     auto step_block_size = Options::Instance().block_size_limit();
     auto block_size_per_vector = this->basic_flatten_codes_->code_size_;
     block_size_per_vector =
@@ -83,7 +74,7 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
         block_size_per_vector =
             std::max(block_size_per_vector, this->high_precise_codes_->code_size_);
     }
-    if (extra_infos_ != nullptr) {
+    if (this->extra_infos_ != nullptr) {
         block_size_per_vector =
             std::max(block_size_per_vector, static_cast<uint32_t>(this->extra_info_size_));
     }
@@ -92,11 +83,6 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
         DEFAULT_RESIZE_BIT, static_cast<uint64_t>(log2(static_cast<double>(increase_count))));
 
     resize(bottom_graph_->max_capacity_);
-    this->build_pool_ = common_param.thread_pool_;
-    if (this->build_thread_count_ > 1 && this->build_pool_ == nullptr) {
-        this->build_pool_ = SafeThreadPool::FactoryDefaultThreadPool();
-        this->build_pool_->SetPoolSize(build_thread_count_);
-    }
 
     this->parallel_searcher_ =
         std::make_shared<ParallelSearcher>(common_param, build_pool_, neighbors_mutex_);
@@ -109,7 +95,7 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
     if (use_elp_optimizer_) {
         optimizer_ = std::make_shared<Optimizer<BasicSearcher>>(common_param);
     }
-    if (use_attribute_filter_) {
+    if (this->use_attribute_filter_) {
         this->attr_filter_index_ =
             AttributeInvertedInterface::MakeInstance(allocator_, false /*have_bucket*/);
     }
@@ -701,6 +687,7 @@ HGraph::deserialize_basic_info(JsonType jsonify_basic_info) {
     if (jsonify_basic_info.contains(INDEX_PARAM)) {
         std::string index_param_string = jsonify_basic_info[INDEX_PARAM];
         HGraphParameterPtr index_param = std::make_shared<HGraphParameter>();
+        index_param->data_type = this->data_type_;
         index_param->FromString(index_param_string);
         if (not this->create_param_ptr_->CheckCompatibility(index_param)) {
             auto message = fmt::format("HGraph index parameter not match, current: {}, new: {}",
@@ -870,6 +857,9 @@ HGraph::Deserialize(StreamReader& reader) {
         if (create_new_raw_vector_) {
             this->raw_vector_->Deserialize(buffer_reader);
         }
+        if (this->raw_vector_ != nullptr) {
+            this->has_raw_vector_ = true;
+        }
     }
 
     // post serialize procedure
@@ -957,7 +947,7 @@ HGraph::GetMinAndMaxId() const {
         throw VsagException(ErrorType::INTERNAL_ERROR, "Label map size is zero");
     }
     for (int i = 0; i < this->total_count_; ++i) {
-        if (not deleted_ids_.empty() && deleted_ids_.count(i) != 0) {
+        if (this->label_table_->IsRemoved(i)) {
             continue;
         }
         auto label = this->label_table_->label_table_[i];
@@ -965,18 +955,6 @@ HGraph::GetMinAndMaxId() const {
         min_id = std::min(label, min_id);
     }
     return {min_id, max_id};
-}
-
-void
-HGraph::GetExtraInfoByIds(const int64_t* ids, int64_t count, char* extra_infos) const {
-    if (this->extra_infos_ == nullptr) {
-        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION, "extra_info is NULL");
-    }
-    for (int64_t i = 0; i < count; ++i) {
-        std::shared_lock<std::shared_mutex> lock(this->label_lookup_mutex_);
-        auto inner_id = this->label_table_->GetIdByLabel(ids[i]);
-        this->extra_infos_->GetExtraInfoById(inner_id, extra_infos + i * extra_info_size_);
-    }
 }
 
 void
@@ -1098,6 +1076,9 @@ HGraph::InitFeatures() {
         IndexFeature::SUPPORT_KNN_SEARCH_WITH_ID_FILTER,
         IndexFeature::SUPPORT_KNN_ITERATOR_FILTER_SEARCH,
     });
+    // update
+    this->index_feature_list_->SetFeatures({IndexFeature::SUPPORT_UPDATE_ID_CONCURRENT,
+                                            IndexFeature::SUPPORT_UPDATE_VECTOR_CONCURRENT});
     // concurrency
     this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_SEARCH_CONCURRENT);
     this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_ADD_CONCURRENT);
@@ -1200,12 +1181,11 @@ static const std::string HGRAPH_PARAMS_TEMPLATE =
     R"(
     {
         "type": "{INDEX_TYPE_HGRAPH}",
-        "{HGRAPH_USE_REORDER_KEY}": false,
+        "{USE_REORDER_KEY}": false,
         "{HGRAPH_USE_ENV_OPTIMIZER}": false,
         "{HGRAPH_IGNORE_REORDER_KEY}": false,
         "{HGRAPH_BUILD_BY_BASE_QUANTIZATION_KEY}": false,
         "{HGRAPH_USE_ATTRIBUTE_FILTER_KEY}": false,
-        "{STORE_RAW_VECTOR_KEY}": false,
         "{HGRAPH_GRAPH_KEY}": {
             "{IO_PARAMS_KEY}": {
                 "{IO_TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
@@ -1239,7 +1219,7 @@ static const std::string HGRAPH_PARAMS_TEMPLATE =
                 "{HOLD_MOLDS}": false
             }
         },
-        "{HGRAPH_PRECISE_CODES_KEY}": {
+        "{PRECISE_CODES_KEY}": {
             "{IO_PARAMS_KEY}": {
                 "{IO_TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
                 "{IO_FILE_PATH}": "{DEFAULT_FILE_PATH_VALUE}"
@@ -1253,6 +1233,7 @@ static const std::string HGRAPH_PARAMS_TEMPLATE =
                 "{HOLD_MOLDS}": false
             }
         },
+        "{STORE_RAW_VECTOR_KEY}": false,
         "{RAW_VECTOR_KEY}": {
             "{IO_PARAMS_KEY}": {
                 "{IO_TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
@@ -1263,17 +1244,16 @@ static const std::string HGRAPH_PARAMS_TEMPLATE =
                 "{HOLD_MOLDS}": true
             }
         },
-        "{BUILD_PARAMS_KEY}": {
-            "{BUILD_EF_CONSTRUCTION}": 400,
-            "{BUILD_THREAD_COUNT}": 100
-        },
-        "{HGRAPH_EXTRA_INFO_KEY}": {
+        "{BUILD_THREAD_COUNT_KEY}": 100,
+        "{EXTRA_INFO_KEY}": {
             "{IO_PARAMS_KEY}": {
                 "{IO_TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
                 "{IO_FILE_PATH}": "{DEFAULT_FILE_PATH_VALUE}"
             }
         },
-        "{HGRAPH_SUPPORT_DUPLICATE}": false
+        "{HGRAPH_SUPPORT_DUPLICATE}": false,
+        "{HGRAPH_SUPPORT_TOMBSTONE}": false,
+        "{HGRAPH_EF_CONSTRUCTION_KEY}": 400
     })";
 
 ParamPtr
@@ -1282,7 +1262,7 @@ HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
     const ConstParamMap external_mapping = {{
                                                 HGRAPH_USE_REORDER,
                                                 {
-                                                    HGRAPH_USE_REORDER_KEY,
+                                                    USE_REORDER_KEY,
                                                 },
                                             },
                                             {
@@ -1336,7 +1316,7 @@ HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
                                             {
                                                 HGRAPH_PRECISE_IO_TYPE,
                                                 {
-                                                    HGRAPH_PRECISE_CODES_KEY,
+                                                    PRECISE_CODES_KEY,
                                                     IO_PARAMS_KEY,
                                                     IO_TYPE_KEY,
                                                 },
@@ -1352,7 +1332,7 @@ HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
                                             {
                                                 HGRAPH_PRECISE_FILE_PATH,
                                                 {
-                                                    HGRAPH_PRECISE_CODES_KEY,
+                                                    PRECISE_CODES_KEY,
                                                     IO_PARAMS_KEY,
                                                     IO_FILE_PATH,
                                                 },
@@ -1360,15 +1340,31 @@ HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
                                             {
                                                 HGRAPH_PRECISE_QUANTIZATION_TYPE,
                                                 {
-                                                    HGRAPH_PRECISE_CODES_KEY,
+                                                    PRECISE_CODES_KEY,
                                                     QUANTIZATION_PARAMS_KEY,
                                                     QUANTIZATION_TYPE_KEY,
                                                 },
                                             },
                                             {
+                                                HGRAPH_GRAPH_IO_TYPE,
+                                                {
+                                                    HGRAPH_GRAPH_KEY,
+                                                    IO_PARAMS_KEY,
+                                                    IO_TYPE_KEY,
+                                                },
+                                            },
+                                            {
+                                                HGRAPH_GRAPH_FILE_PATH,
+                                                {
+                                                    HGRAPH_GRAPH_KEY,
+                                                    IO_PARAMS_KEY,
+                                                    IO_FILE_PATH,
+                                                },
+                                            },
+                                            {
                                                 STORE_RAW_VECTOR,
                                                 {
-                                                    HGRAPH_PRECISE_CODES_KEY,
+                                                    PRECISE_CODES_KEY,
                                                     QUANTIZATION_PARAMS_KEY,
                                                     HOLD_MOLDS,
                                                 },
@@ -1405,8 +1401,7 @@ HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
                                             {
                                                 HGRAPH_BUILD_EF_CONSTRUCTION,
                                                 {
-                                                    BUILD_PARAMS_KEY,
-                                                    BUILD_EF_CONSTRUCTION,
+                                                    HGRAPH_EF_CONSTRUCTION_KEY,
                                                 },
                                             },
                                             {
@@ -1468,8 +1463,7 @@ HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
                                             {
                                                 HGRAPH_BUILD_THREAD_COUNT,
                                                 {
-                                                    BUILD_PARAMS_KEY,
-                                                    BUILD_THREAD_COUNT,
+                                                    BUILD_THREAD_COUNT_KEY,
                                                 },
                                             },
                                             {
@@ -1524,6 +1518,12 @@ HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
                                                 HGRAPH_SUPPORT_DUPLICATE,
                                                 {
                                                     SUPPORT_DUPLICATE,
+                                                },
+                                            },
+                                            {
+                                                HGRAPH_SUPPORT_TOMBSTONE,
+                                                {
+                                                    SUPPORT_TOMBSTONE,
                                                 },
                                             }};
     if (common_param.data_type_ == DataTypes::DATA_TYPE_INT8) {
@@ -1606,7 +1606,6 @@ HGraph::Remove(int64_t id) {
     }
     this->bottom_graph_->DeleteNeighborsById(inner_id);
     this->label_table_->Remove(id);
-    this->deleted_ids_.insert(inner_id);
     delete_count_++;
     return true;
 }
@@ -1662,24 +1661,7 @@ HGraph::Merge(const std::vector<MergeUnit>& merge_units) {
         this->entry_point_id_ = ids.back();
     }
 }
-bool
-HGraph::UpdateExtraInfo(const DatasetPtr& new_base) {
-    CHECK_ARGUMENT(new_base != nullptr, "new_base is nullptr");
-    CHECK_ARGUMENT(new_base->GetExtraInfos() != nullptr, "extra_infos is nullptr");
-    CHECK_ARGUMENT(new_base->GetExtraInfoSize() == extra_info_size_, "extra_infos size mismatch");
-    CHECK_ARGUMENT(new_base->GetNumElements() == 1, "new_base size must be one");
-    auto label = new_base->GetIds()[0];
-    if (this->extra_infos_ != nullptr) {
-        std::shared_lock label_lock(this->label_lookup_mutex_);
-        if (not this->label_table_->CheckLabel(label)) {
-            return false;
-        }
-        const auto inner_id = this->label_table_->GetIdByLabel(label);
-        this->extra_infos_->InsertExtraInfo(new_base->GetExtraInfos(), inner_id);
-        return true;
-    }
-    throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION, "extra_infos is not initialized");
-}
+
 void
 HGraph::GetVectorByInnerId(InnerIdType inner_id, float* data) const {
     auto codes = (use_reorder_) ? high_precise_codes_ : basic_flatten_codes_;
@@ -1824,7 +1806,7 @@ HGraph::UpdateAttribute(int64_t id,
     this->attr_filter_index_->UpdateBitsetsByAttr(new_attrs, inner_id, 0, origin_attrs);
 }
 
-const static uint64_t QUERY_SAMPLE_SIZE = 100;
+const static uint64_t QUERY_SAMPLE_SIZE = 10;
 const static int64_t DEFAULT_TOPK = 100;
 
 std::string
@@ -1837,12 +1819,12 @@ HGraph::GetStats() const {
         stats["total_count"] = 0;
         return stats.dump();
     }
-    // TODO(inabao): configure in next pr
-    std::string search_params = R"({
-        "hgraph": {
-            "ef_search": 200
-        }
-    })";
+    constexpr static const char* search_params_template = R"({{
+        "hgraph": {{
+            "ef_search": {}
+        }}
+    }})";
+    std::string search_params = fmt::format(search_params_template, ef_construct_);
     stats["total_count"] = this->total_count_;
     // duplicate rate
     size_t duplicate_num = 0;
@@ -1858,61 +1840,8 @@ HGraph::GetStats() const {
     stats["deleted_count"] = delete_count_.load();
     this->analyze_graph_connection(stats);
     this->analyze_graph_recall(stats, sample_base_datas, sample_size, topk, search_params);
-    this->analyze_quantizer(stats, sample_base_datas, sample_size, topk, search_params);
+    this->analyze_quantizer(stats, sample_base_datas.data(), sample_size, topk, search_params);
     return stats.dump(4);
-}
-
-void
-HGraph::analyze_quantizer(JsonType& stats,
-                          const Vector<float>& data,
-                          uint64_t sample_data_size,
-                          int64_t topk,
-                          const std::string& search_param) const {
-    // record quantized information
-    if (this->use_reorder_) {
-        logger::info("analyze_quantizer: sample_data_size = {}, topk = {}", sample_data_size, topk);
-        float bias_ratio = 0.0F;
-        float inversion_count_rate = 0.0F;
-        for (uint64_t i = 0; i < sample_data_size; ++i) {
-            float tmp_bias_ratio = 0.0F;
-            float tmp_inversion_count_rate = 0.0F;
-            this->use_reorder_ = false;
-            const auto* query_data = data.data() + i * dim_;
-            auto query = Dataset::Make();
-            query->Owner(false)->NumElements(1)->Float32Vectors(query_data)->Dim(dim_);
-            auto search_result = this->KnnSearch(query, topk, search_param, nullptr);
-            this->use_reorder_ = true;
-            auto distance_result =
-                this->CalDistanceById(query_data, search_result->GetIds(), search_result->GetDim());
-            const auto* ground_distances = distance_result->GetDistances();
-            const auto* approximate_distances = search_result->GetDistances();
-            for (int64_t j = 0; j < topk; ++j) {
-                if (ground_distances[j] > 0) {
-                    tmp_bias_ratio += std::abs(approximate_distances[j] - ground_distances[j]) /
-                                      ground_distances[j];
-                }
-            }
-            tmp_bias_ratio /= static_cast<float>(topk);
-            bias_ratio += tmp_bias_ratio;
-            // calculate inversion count rate
-            int64_t inversion_count = 0;
-            for (int64_t j = 0; j < search_result->GetDim() - 1; ++j) {
-                for (int64_t k = j + 1; k < search_result->GetDim(); ++k) {
-                    if (ground_distances[j] > ground_distances[k]) {
-                        inversion_count++;
-                    }
-                }
-            }
-            int64_t search_count = search_result->GetDim();
-            tmp_inversion_count_rate =
-                static_cast<float>(inversion_count) /
-                (static_cast<float>(search_count * (search_count - 1)) / 2.0F);
-            inversion_count_rate += tmp_inversion_count_rate;
-        }
-        stats["quantization_bias_ratio"] = bias_ratio / static_cast<float>(sample_data_size);
-        stats["quantization_inversion_count_rate"] =
-            inversion_count_rate / static_cast<float>(sample_data_size);
-    }
 }
 
 void
@@ -1921,6 +1850,11 @@ HGraph::analyze_graph_recall(JsonType& stats,
                              uint64_t sample_data_size,
                              int64_t topk,
                              const std::string& search_param) const {
+    if (this->use_reorder_ && not this->high_precise_codes_->InMemory()) {
+        logger::info(
+            "analyze_graph_recall: high_precise_codes_ is not in memory, skip base recall test");
+        return;
+    }
     // recall of "base" when searching for "base"
     logger::info("analyze_graph_recall: sample_data_size = {}, topk = {}", sample_data_size, topk);
     auto codes = this->use_reorder_ ? this->high_precise_codes_ : this->basic_flatten_codes_;
@@ -1941,8 +1875,8 @@ HGraph::analyze_graph_recall(JsonType& stats,
             if (groundtruth->Size() < topk) {
                 groundtruth->Push({dist, j});
             } else if (dist < groundtruth->Top().first) {
-                groundtruth->Pop();
                 groundtruth->Push({dist, j});
+                groundtruth->Pop();
             }
         }
         // neighbors of a point and the proximity relationship of a point
@@ -2003,7 +1937,7 @@ HGraph::analyze_graph_connection(JsonType& stats) const {
         }
     }
     for (int64_t i = 0; i < total_count_; ++i) {
-        if (not visited[i] and (deleted_ids_.count(i) == 0)) {
+        if (not visited[i] and this->label_table_->IsRemoved(i)) {
             connect_components++;
             int64_t component_size = 0;
             std::queue<int64_t> q;
@@ -2016,7 +1950,7 @@ HGraph::analyze_graph_connection(JsonType& stats) const {
                 Vector<InnerIdType> neighbors(allocator_);
                 this->bottom_graph_->GetNeighbors(node, neighbors);
                 for (const auto& nb : neighbors) {
-                    if (not visited[nb] and (deleted_ids_.count(nb) == 0)) {
+                    if (not visited[nb] and this->label_table_->IsRemoved(nb)) {
                         visited[nb] = true;
                         q.push(nb);
                     }
@@ -2038,6 +1972,7 @@ HGraph::check_and_init_raw_vector(const FlattenInterfaceParamPtr& raw_vector_par
         high_precise_codes_ == nullptr) {
         raw_vector_ = FlattenInterface::MakeInstance(raw_vector_param, common_param);
         create_new_raw_vector_ = true;
+        has_raw_vector_ = true;
         return;
     }
     if (basic_flatten_codes_->GetQuantizerName() != QUANTIZATION_TYPE_VALUE_FP32 and
@@ -2045,6 +1980,7 @@ HGraph::check_and_init_raw_vector(const FlattenInterfaceParamPtr& raw_vector_par
         high_precise_codes_->GetQuantizerName() != QUANTIZATION_TYPE_VALUE_FP32) {
         raw_vector_ = FlattenInterface::MakeInstance(raw_vector_param, common_param);
         create_new_raw_vector_ = true;
+        has_raw_vector_ = true;
         return;
     }
 
@@ -2052,19 +1988,174 @@ HGraph::check_and_init_raw_vector(const FlattenInterfaceParamPtr& raw_vector_par
     if (io_type_name != IO_TYPE_VALUE_BLOCK_MEMORY_IO and io_type_name != IO_TYPE_VALUE_MEMORY_IO) {
         raw_vector_ = FlattenInterface::MakeInstance(raw_vector_param, common_param);
         create_new_raw_vector_ = true;
+        has_raw_vector_ = true;
         return;
     }
 
     if (basic_flatten_codes_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32) {
         raw_vector_ = basic_flatten_codes_;
+        has_raw_vector_ = true;
         return;
     }
 
     if (high_precise_codes_ != nullptr and
         high_precise_codes_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32) {
         raw_vector_ = high_precise_codes_;
+        has_raw_vector_ = true;
         return;
     }
+}
+
+bool
+HGraph::UpdateId(int64_t old_id, int64_t new_id) {
+    if (old_id == new_id) {
+        return true;
+    }
+
+    std::scoped_lock label_lock(this->label_lookup_mutex_);
+    this->label_table_->UpdateLabel(old_id, new_id);
+
+    return true;
+}
+
+bool
+HGraph::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) {
+    // check if id exists and get copied base data
+    uint32_t inner_id = 0;
+    {
+        std::shared_lock label_lock(this->label_lookup_mutex_);
+        inner_id = this->label_table_->GetIdByLabel(id);
+    }
+
+    // the validation of the new vector
+    void* new_base_vec = nullptr;
+    size_t data_size = 0;
+    get_vectors(data_type_, dim_, new_base, &new_base_vec, &data_size);
+
+    if (not force_update) {
+        Vector<int8_t> base_data(data_size, allocator_);
+        auto base = Dataset::Make();
+
+        GetVectorByInnerId(inner_id, (float*)base_data.data());
+        set_dataset(data_type_, dim_, base, base_data.data(), 1);
+
+        // search neighbors
+        auto neighbors = this->KnnSearch(
+            base,
+            UPDATE_CHECK_SEARCH_K,
+            fmt::format(R"({{"hgraph": {{ "ef_search": {} }} }})", UPDATE_CHECK_SEARCH_L),
+            nullptr);
+
+        // check whether the neighborhood relationship is same
+        float self_dist = 0;
+        self_dist = this->CalcDistanceById((float*)new_base_vec, id);
+        for (int i = 0; i < neighbors->GetDim(); i++) {
+            // don't compare with itself
+            if (neighbors->GetIds()[i] == id) {
+                continue;
+            }
+
+            float neighbor_dist = 0;
+            try {
+                neighbor_dist =
+                    this->CalcDistanceById((float*)new_base_vec, neighbors->GetIds()[i]);
+            } catch (const std::runtime_error& e) {
+                // incase that neighbor has been deleted
+                continue;
+            }
+            if (neighbor_dist < self_dist) {
+                return false;
+            }
+        }
+    }
+
+    // note that only modify vector need to obtain unique lock
+    // and the lock has been obtained inside datacell
+    auto codes = (use_reorder_) ? high_precise_codes_ : basic_flatten_codes_;
+    bool update_status = basic_flatten_codes_->UpdateVector(new_base_vec, inner_id);
+    if (use_reorder_) {
+        update_status = update_status && high_precise_codes_->UpdateVector(new_base_vec, inner_id);
+    }
+    return update_status;
+}
+
+std::string
+HGraph::AnalyzeIndexBySearch(const SearchRequest& request) {
+    JsonType stats;
+    Vector<float> distances(this->total_count_, allocator_);
+    Vector<InnerIdType> ids(this->total_count_, allocator_);
+    std::iota(ids.begin(), ids.end(), 0);
+    auto codes = (this->use_reorder_) ? this->high_precise_codes_ : this->basic_flatten_codes_;
+    auto querys = request.query_;
+    auto topk = std::min(request.topk_, GetNumElements());
+
+    int64_t num_elements = querys->GetNumElements();
+    DistHeapPtr heap = std::make_shared<StandardHeap<true, false>>(allocator_, -1);
+    Vector<UnorderedSet<InnerIdType>> ground_truths(
+        num_elements, UnorderedSet<InnerIdType>(allocator_), allocator_);
+    float dist = 0.0F;
+    for (int64_t i = 0; i < num_elements; i++) {
+        const auto* query_data = get_data(querys, i);
+        auto computer = codes->FactoryComputer(query_data);
+        if (i % 10 == 0) {
+            logger::info("calculate groundtruth for query data {} of {}", i, i + 10);
+        }
+        codes->Query(distances.data(), computer, ids.data(), this->total_count_);
+        for (int64_t j = 0; j < this->total_count_; ++j) {
+            if (heap->Size() < topk) {
+                heap->Push({distances[j], ids[j]});
+            } else if (distances[j] < heap->Top().first) {
+                heap->Push({distances[j], ids[j]});
+                heap->Pop();
+            }
+        }
+        while (not heap->Empty()) {
+            ground_truths[i].insert(heap->Top().second);
+            dist += heap->Top().first;
+            heap->Pop();
+        }
+    }
+    dist /= static_cast<float>(num_elements * topk);
+    stats["avg_distance_query"] = dist;
+    auto param_str = request.params_str_;
+    double time_cost = 0.0;
+    int64_t result_hit = 0;
+    for (int64_t i = 0; i < num_elements; ++i) {
+        auto query = Dataset::Make();
+        query->NumElements(1)
+            ->Dim(dim_)
+            ->Float32Vectors((const float*)get_data(querys, i))
+            ->Owner(false);
+        DatasetPtr search_result;
+        double single_query_time;
+        {
+            Timer t(single_query_time);
+            search_result = this->KnnSearch(query, topk, param_str, nullptr);
+        }
+        if (search_result->GetDim() != topk) {
+            logger::error(
+                "search result size mismatch: expected {}, got {}", topk, search_result->GetDim());
+            continue;
+        }
+        int64_t hit_count = 0;
+        for (int64_t j = 0; j < search_result->GetDim(); ++j) {
+            if (ground_truths[i].count(search_result->GetIds()[j]) > 0) {
+                hit_count++;
+            }
+        }
+        result_hit += hit_count;
+        time_cost += single_query_time;
+    }
+    stats["recall_query"] =
+        static_cast<double>(result_hit) / static_cast<double>(num_elements * topk);
+    stats["time_cost_query"] = time_cost / static_cast<double>(num_elements);
+    this->analyze_quantizer(stats, querys->GetFloat32Vectors(), num_elements, topk, param_str);
+    return stats.dump(4);
+}
+
+void
+HGraph::GetAttributeSetByInnerId(InnerIdType inner_id, AttributeSet* attr) const {
+    this->attr_filter_index_->GetAttribute(0, inner_id, attr);
 }
 
 }  // namespace vsag

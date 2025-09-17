@@ -23,6 +23,7 @@
 #include "impl/runtime_parameter.h"
 #include "index/index_common_param.h"
 #include "io/reader_io.h"
+#include "pointer_define.h"
 #include "quantization/computer.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
@@ -30,8 +31,7 @@
 #include "vsag/constants.h"
 
 namespace vsag {
-class FlattenInterface;
-using FlattenInterfacePtr = std::shared_ptr<FlattenInterface>;
+DEFINE_POINTER(FlattenInterface);
 
 class FlattenInterface {
 public:
@@ -56,6 +56,12 @@ public:
 
     virtual void
     InsertVector(const void* vector, InnerIdType idx = std::numeric_limits<InnerIdType>::max()) = 0;
+
+    virtual bool
+    UpdateVector(const void* vector, InnerIdType idx = std::numeric_limits<InnerIdType>::max()) {
+        throw VsagException(ErrorType::INTERNAL_ERROR,
+                            "UpdateVector not implemented in FlattenInterface");
+    };
 
     virtual void
     BatchInsertVector(const void* vectors, InnerIdType count, InnerIdType* idx_vec = nullptr) = 0;

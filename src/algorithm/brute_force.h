@@ -17,14 +17,17 @@
 
 #include "algorithm/inner_index_interface.h"
 #include "brute_force_parameter.h"
-#include "data_cell/attribute_inverted_interface.h"
-#include "data_cell/flatten_interface.h"
 #include "label_table.h"
+#include "pointer_define.h"
 #include "typing.h"
 #include "vsag/filter.h"
 
 namespace vsag {
 
+class SafeThreadPool;
+
+DEFINE_POINTER2(AttrInvertedInterface, AttributeInvertedInterface);
+DEFINE_POINTER(FlattenInterface);
 // BruteForce index was introduced since v0.13
 class BruteForce : public InnerIndexInterface {
 public:
@@ -40,10 +43,20 @@ public:
 
     ~BruteForce() override = default;
 
-    [[nodiscard]] std::string
-    GetName() const override {
-        return INDEX_BRUTE_FORCE;
-    }
+    std::vector<int64_t>
+    Add(const DatasetPtr& data) override;
+
+    std::vector<int64_t>
+    Build(const DatasetPtr& data) override;
+
+    float
+    CalcDistanceById(const float* vector, int64_t id) const override;
+
+    void
+    Deserialize(StreamReader& reader) override;
+
+    uint64_t
+    EstimateMemory(uint64_t num_elements) const override;
 
     [[nodiscard]] InnerIndexPtr
     Fork(const IndexCommonParam& param) override {
@@ -51,63 +64,53 @@ public:
     }
 
     void
-    InitFeatures() override;
+    GetAttributeSetByInnerId(InnerIdType inner_id, AttributeSet* attr) const override;
 
-    std::vector<int64_t>
-    Build(const DatasetPtr& data) override;
-
-    IndexType
+    [[nodiscard]] IndexType
     GetIndexType() override {
         return IndexType::BRUTEFORCE;
     }
 
-    void
-    Train(const DatasetPtr& data) override;
-
-    std::vector<int64_t>
-    Add(const DatasetPtr& data) override;
-
-    bool
-    Remove(int64_t label) override;
-
-    DatasetPtr
-    KnnSearch(const DatasetPtr& query,
-              int64_t k,
-              const std::string& parameters,
-              const FilterPtr& filter) const override;
-
-    DatasetPtr
-    RangeSearch(const DatasetPtr& query,
-                float radius,
-                const std::string& parameters,
-                const FilterPtr& filter,
-                int64_t limited_size = -1) const override;
-
-    float
-    CalcDistanceById(const float* vector, int64_t id) const override;
-
-    void
-    Serialize(StreamWriter& writer) const override;
-
-    void
-    Deserialize(StreamReader& reader) override;
+    std::string
+    GetName() const override {
+        return INDEX_BRUTE_FORCE;
+    }
 
     [[nodiscard]] int64_t
     GetNumElements() const override {
         return this->total_count_;
     }
 
-    [[nodiscard]] int64_t
-    GetMemoryUsage() const override;
-
-    [[nodiscard]] uint64_t
-    EstimateMemory(uint64_t num_elements) const override;
-
     void
     GetVectorByInnerId(InnerIdType inner_id, float* data) const override;
 
-    [[nodiscard]] virtual DatasetPtr
+    void
+    InitFeatures() override;
+
+    [[nodiscard]] DatasetPtr
+    KnnSearch(const DatasetPtr& query,
+              int64_t k,
+              const std::string& parameters,
+              const FilterPtr& filter) const override;
+
+    [[nodiscard]] DatasetPtr
+    RangeSearch(const DatasetPtr& query,
+                float radius,
+                const std::string& parameters,
+                const FilterPtr& filter,
+                int64_t limited_size = -1) const override;
+
+    bool
+    Remove(int64_t label) override;
+
+    [[nodiscard]] DatasetPtr
     SearchWithRequest(const SearchRequest& request) const override;
+
+    void
+    Serialize(StreamWriter& writer) const override;
+
+    void
+    Train(const DatasetPtr& data) override;
 
     void
     UpdateAttribute(int64_t id, const AttributeSet& new_attrs) override;
@@ -131,8 +134,6 @@ private:
 
     uint64_t resize_increase_count_bit_{DEFAULT_RESIZE_BIT};
 
-    std::shared_ptr<SafeThreadPool> build_pool_{nullptr};
-
     mutable std::shared_mutex global_mutex_;
     mutable std::shared_mutex add_mutex_;
 
@@ -140,7 +141,6 @@ private:
 
     static constexpr uint64_t DEFAULT_RESIZE_BIT = 10;
 
-    bool use_attribute_filter_{false};
     AttrInvertedInterfacePtr attr_filter_index_{nullptr};
 };
 }  // namespace vsag

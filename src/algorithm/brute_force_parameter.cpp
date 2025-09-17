@@ -17,6 +17,7 @@
 
 #include <fmt/format.h>
 
+#include "data_cell/flatten_datacell_parameter.h"
 #include "inner_string_params.h"
 #include "logger.h"
 #include "vsag/constants.h"
@@ -38,7 +39,7 @@ BruteForceParameter::FromJson(const JsonType& json) {
 JsonType
 BruteForceParameter::ToJson() const {
     auto json = this->flatten_param->ToJson();
-    json["type"] = INDEX_BRUTE_FORCE;
+    json[TYPE_KEY] = INDEX_BRUTE_FORCE;
     json[USE_ATTRIBUTE_FILTER_KEY] = this->use_attribute_filter;
     return json;
 }

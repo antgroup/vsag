@@ -20,14 +20,17 @@
 #include "algorithm/ivf_partition/ivf_partition_strategy_parameter.h"
 #include "data_cell/bucket_datacell_parameter.h"
 #include "data_cell/flatten_datacell_parameter.h"
+#include "inner_index_parameter.h"
 #include "inner_string_params.h"
-#include "parameter.h"
+#include "pointer_define.h"
 #include "typing.h"
 
 namespace vsag {
-class IVFParameter : public Parameter {
+
+DEFINE_POINTER(IVFParameter);
+class IVFParameter : public InnerIndexParameter {
 public:
-    explicit IVFParameter();
+    explicit IVFParameter() = default;
 
     void
     FromJson(const JsonType& json) override;
@@ -42,17 +45,7 @@ public:
     BucketDataCellParamPtr bucket_param{nullptr};
     IVFPartitionStrategyParametersPtr ivf_partition_strategy_parameter{nullptr};
     BucketIdType buckets_per_data{1};
-
-    bool use_reorder{false};
-
-    bool use_attribute_filter{false};
-
-    int thread_count{1};
-
-    FlattenDataCellParamPtr flatten_param{nullptr};
 };
-
-using IVFParameterPtr = std::shared_ptr<IVFParameter>;
 
 class IVFSearchParameters {
 public:
