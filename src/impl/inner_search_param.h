@@ -39,6 +39,8 @@ public:
     InnerSearchMode search_mode{KNN_SEARCH};
     int range_search_limit_size{-1};
     int64_t parallel_search_thread_count{1};
+
+    //​​Multi-threaded search for a single query​
     bool use_muti_threads_for_one_query{false};
     uint64_t parallel_search_thread_count_per_query{4};
     bool level_0{false};
