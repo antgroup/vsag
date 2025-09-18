@@ -8,4 +8,4 @@ set (FACTORY_SRC
 
 add_library (factory OBJECT ${FACTORY_SRC})
 target_link_libraries (factory PUBLIC fmt::fmt coverage_config)
-maybe_add_dependencies (factory spdlog)
+maybe_add_dependencies (factory spdlog diskann)
