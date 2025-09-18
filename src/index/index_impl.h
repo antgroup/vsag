@@ -166,10 +166,6 @@ public:
 
     tl::expected<DatasetPtr, Error>
     GetDataByIds(const int64_t* ids, int64_t count) const override {
-        if (not CheckFeature(IndexFeature::SUPPORT_GET_DATA_BY_IDS)) {
-            return tl::unexpected(Error(ErrorType::UNSUPPORTED_INDEX_OPERATION,
-                                        "index no support to get data by ids"));
-        }
         SAFE_CALL(return this->inner_index_->GetDataByIds(ids, count));
     };
 
