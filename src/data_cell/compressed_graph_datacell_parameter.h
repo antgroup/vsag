@@ -17,7 +17,7 @@
 
 #include "graph_interface_parameter.h"
 #include "inner_string_params.h"
-#include "pointer_define.h"
+#include "utils/pointer_define.h"
 
 namespace vsag {
 DEFINE_POINTER2(CompressedGraphDatacellParam, CompressedGraphDatacellParameter);

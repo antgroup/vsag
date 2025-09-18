@@ -26,7 +26,7 @@
 #include "data_cell/sparse_graph_datacell.h"
 #include "dataset_impl.h"
 #include "impl/heap/standard_heap.h"
-#include "impl/odescent_graph_builder.h"
+#include "impl/odescent/odescent_graph_builder.h"
 #include "impl/pruning_strategy.h"
 #include "impl/reorder.h"
 #include "index/index_impl.h"
@@ -1077,8 +1077,10 @@ HGraph::InitFeatures() {
         IndexFeature::SUPPORT_KNN_ITERATOR_FILTER_SEARCH,
     });
     // update
-    this->index_feature_list_->SetFeatures({IndexFeature::SUPPORT_UPDATE_ID_CONCURRENT,
-                                            IndexFeature::SUPPORT_UPDATE_VECTOR_CONCURRENT});
+    if (data_type_ != DataTypes::DATA_TYPE_SPARSE) {
+        this->index_feature_list_->SetFeatures({IndexFeature::SUPPORT_UPDATE_VECTOR_CONCURRENT});
+    }
+    this->index_feature_list_->SetFeatures({IndexFeature::SUPPORT_UPDATE_ID_CONCURRENT});
     // concurrency
     this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_SEARCH_CONCURRENT);
     this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_ADD_CONCURRENT);
@@ -1208,7 +1210,7 @@ static const std::string HGRAPH_PARAMS_TEMPLATE =
                 "{IO_TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
                 "{IO_FILE_PATH}": "{DEFAULT_FILE_PATH_VALUE}"
             },
-            "codes_type": "flatten_codes",
+            "{CODES_TYPE_KEY}": "flatten",
             "{QUANTIZATION_PARAMS_KEY}": {
                 "{QUANTIZATION_TYPE_KEY}": "{QUANTIZATION_TYPE_VALUE_FP32}",
                 "{SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE}": 0.05,
@@ -1224,7 +1226,7 @@ static const std::string HGRAPH_PARAMS_TEMPLATE =
                 "{IO_TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
                 "{IO_FILE_PATH}": "{DEFAULT_FILE_PATH_VALUE}"
             },
-            "codes_type": "flatten_codes",
+            "{CODES_TYPE_KEY}": "flatten",
             "{QUANTIZATION_PARAMS_KEY}": {
                 "{QUANTIZATION_TYPE_KEY}": "{QUANTIZATION_TYPE_VALUE_FP32}",
                 "{SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE}": 0.05,
@@ -1239,6 +1241,7 @@ static const std::string HGRAPH_PARAMS_TEMPLATE =
                 "{IO_TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
                 "{IO_FILE_PATH}": "{DEFAULT_FILE_PATH_VALUE}"
             },
+            "{CODES_TYPE_KEY}": "flatten",
             "{QUANTIZATION_PARAMS_KEY}": {
                 "{QUANTIZATION_TYPE_KEY}": "{QUANTIZATION_TYPE_VALUE_FP32}",
                 "{HOLD_MOLDS}": true
@@ -1534,6 +1537,11 @@ HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
     std::string str = format_map(HGRAPH_PARAMS_TEMPLATE, DEFAULT_MAP);
     auto inner_json = JsonType::parse(str);
     mapping_external_param_to_inner(external_param, external_mapping, inner_json);
+    if (common_param.data_type_ == DataTypes::DATA_TYPE_SPARSE) {
+        inner_json[HGRAPH_BASE_CODES_KEY][CODES_TYPE_KEY] = SPARSE_CODES;
+        inner_json[PRECISE_CODES_KEY][CODES_TYPE_KEY] = SPARSE_CODES;
+        inner_json[RAW_VECTOR_KEY][CODES_TYPE_KEY] = SPARSE_CODES;
+    }
 
     auto hgraph_parameter = std::make_shared<HGraphParameter>();
     hgraph_parameter->data_type = common_param.data_type_;

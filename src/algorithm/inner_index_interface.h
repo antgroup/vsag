@@ -24,10 +24,10 @@
 #include "inner_index_parameter.h"
 #include "metric_type.h"
 #include "parameter.h"
-#include "pointer_define.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
 #include "utils/function_exists_check.h"
+#include "utils/pointer_define.h"
 #include "vsag/dataset.h"
 #include "vsag/index.h"
 

@@ -13,28 +13,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#pragma once
+#include "int8_quantizer_parameter.h"
 
-#include "parameter.h"
-#include "pointer_define.h"
-namespace vsag {
-DEFINE_POINTER(ODescentParameter);
-class ODescentParameter : public Parameter {
-public:
-    ODescentParameter() = default;
+#include <catch2/catch_test_macros.hpp>
 
-    void
-    FromJson(const JsonType& json) override;
+#include "parameter_test.h"
 
-    JsonType
-    ToJson() const override;
+using namespace vsag;
 
-public:
-    int64_t turn{30};
-    float alpha{1};
-    float sample_rate{0.3};
-    int64_t min_in_degree{1};
-    int64_t max_degree{32};
-    int64_t block_size{10000};
-};
-}  // namespace vsag
+TEST_CASE("INT8 Quantizer Parameter ToJson Test", "[ut][INT8QuantizerParameter]") {
+    std::string param_str = "{}";
+    auto param = std::make_shared<INT8QuantizerParameter>();
+    param->FromJson(param_str);
+    ParameterTest::TestToJson(param);
+}

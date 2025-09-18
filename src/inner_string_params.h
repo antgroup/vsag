@@ -68,6 +68,7 @@ const char* const QUANTIZATION_TYPE_VALUE_SQ4_UNIFORM = "sq4_uniform";
 const char* const QUANTIZATION_TYPE_VALUE_FP32 = "fp32";
 const char* const QUANTIZATION_TYPE_VALUE_FP16 = "fp16";
 const char* const QUANTIZATION_TYPE_VALUE_BF16 = "bf16";
+const char* const QUANTIZATION_TYPE_VALUE_INT8 = "int8";
 const char* const QUANTIZATION_TYPE_VALUE_PQ = "pq";
 const char* const QUANTIZATION_TYPE_VALUE_PQFS = "pqfs";
 const char* const QUANTIZATION_TYPE_VALUE_RABITQ = "rabitq";
@@ -150,6 +151,10 @@ const char* const DATACELL_OFFSETS = "datacell_offsets";
 const char* const DATACELL_SIZES = "datacell_sizes";
 const char* const BASIC_INFO = "basic_info";
 const char* const INDEX_TYPE = "type";
+
+const char* const CODES_TYPE_KEY = "codes_type";
+const char* const FLATTEN_CODES = "flatten";
+const char* const SPARSE_CODES = "sparse";
 
 const std::unordered_map<std::string, std::string> DEFAULT_MAP = {
     {"INDEX_TYPE_HGRAPH", INDEX_TYPE_HGRAPH},

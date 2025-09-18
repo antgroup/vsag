@@ -24,7 +24,7 @@
 #include <mutex>
 #include <string>
 
-#include "safe_thread_pool.h"
+#include "impl/thread_pool/safe_thread_pool.h"
 #include "vsag/engine.h"
 #include "vsag/options.h"
 

@@ -14,7 +14,6 @@
 // limitations under the License.
 
 #include "basic_searcher.h"
-
 #include "searcher_test.h"
 
 using namespace vsag;

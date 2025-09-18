@@ -18,8 +18,8 @@
 #include "common.h"
 #include "data_cell/extra_info_datacell_parameter.h"
 #include "data_cell/flatten_datacell_parameter.h"
+#include "impl/logger/logger.h"
 #include "inner_string_params.h"
-#include "logger.h"
 #include "vsag/constants.h"
 
 namespace vsag {
@@ -42,8 +42,7 @@ InnerIndexParameter::FromJson(const JsonType& json) {
         CHECK_ARGUMENT(
             json.contains(PRECISE_CODES_KEY),
             fmt::format("ivf parameters must contains {} when enable reorder", PRECISE_CODES_KEY));
-        this->precise_codes_param = std::make_shared<FlattenDataCellParameter>();
-        this->precise_codes_param->FromJson(json[PRECISE_CODES_KEY]);
+        this->precise_codes_param = CreateFlattenParam(json[PRECISE_CODES_KEY]);
     }
 
     if (json.contains(STORE_RAW_VECTOR_KEY)) {
@@ -51,8 +50,7 @@ InnerIndexParameter::FromJson(const JsonType& json) {
     }
 
     if (this->store_raw_vector) {
-        this->raw_vector_param = std::make_shared<FlattenDataCellParameter>();
-        this->raw_vector_param->FromJson(json[RAW_VECTOR_KEY]);
+        this->raw_vector_param = CreateFlattenParam(json[RAW_VECTOR_KEY]);
     }
 
     if (json.contains(EXTRA_INFO_KEY)) {

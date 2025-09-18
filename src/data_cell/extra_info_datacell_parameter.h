@@ -17,7 +17,7 @@
 
 #include "io/io_parameter.h"
 #include "parameter.h"
-#include "pointer_define.h"
+#include "utils/pointer_define.h"
 
 namespace vsag {
 DEFINE_POINTER2(ExtraInfoDataCellParam, ExtraInfoDataCellParameter);

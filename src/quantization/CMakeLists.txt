@@ -1,6 +1,7 @@
 
 set (QUANTIZER_SRC
         fp32_quantizer.cpp
+        int8_quantizer.cpp
         scalar_quantization/bf16_quantizer.cpp
         scalar_quantization/fp16_quantizer.cpp
         scalar_quantization/sq4_quantizer.cpp
@@ -12,6 +13,7 @@ set (QUANTIZER_SRC
         rabitq_quantization/rabitq_quantizer.cpp
         quantizer_parameter.cpp
         fp32_quantizer_parameter.cpp
+        int8_quantizer_parameter.cpp
         scalar_quantization/sq8_quantizer_parameter.cpp
         scalar_quantization/sq8_uniform_quantizer_parameter.cpp
         scalar_quantization/sq4_quantizer_parameter.cpp

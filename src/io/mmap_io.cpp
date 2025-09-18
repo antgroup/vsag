@@ -20,7 +20,7 @@
 #include <filesystem>
 #include <utility>
 
-#include "index/index_common_param.h"
+#include "index_common_param.h"
 
 namespace vsag {
 

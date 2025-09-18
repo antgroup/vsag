@@ -19,7 +19,7 @@
 
 #include "flatten_interface.h"
 #include "inner_string_params.h"
-#include "pointer_define.h"
+#include "utils/pointer_define.h"
 
 namespace vsag {
 DEFINE_POINTER2(SparseVectorDataCellParam, SparseVectorDataCellParameter);
@@ -48,6 +48,7 @@ public:
         JsonType json;
         json[IO_PARAMS_KEY] = this->io_parameter->ToJson();
         json[QUANTIZATION_PARAMS_KEY] = this->quantizer_parameter->ToJson();
+        json[CODES_TYPE_KEY] = SPARSE_CODES;
         return json;
     }
 

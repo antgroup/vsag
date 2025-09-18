@@ -17,7 +17,7 @@
 
 #include <fmt/format.h>
 
-#include "../../logger.h"
+#include "impl/logger/logger.h"
 
 namespace vsag {
 #ifndef NDEBUG

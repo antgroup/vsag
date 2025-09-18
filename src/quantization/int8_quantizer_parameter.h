@@ -15,25 +15,25 @@
 
 #pragma once
 
-#include <cstdint>
+#include "quantizer_parameter.h"
 
-#include "data_type.h"
-#include "metric_type.h"
-#include "safe_thread_pool.h"
-#include "typing.h"
-#include "vsag/resource.h"
-
+// TODO: refactor with FP32QuantizerParameter
 namespace vsag {
-class IndexCommonParam {
+class INT8QuantizerParameter : public QuantizerParameter {
 public:
-    MetricType metric_{MetricType::METRIC_TYPE_L2SQR};
-    DataTypes data_type_{DataTypes::DATA_TYPE_FLOAT};
-    int64_t dim_{0};
-    int64_t extra_info_size_{0};
-    std::shared_ptr<Allocator> allocator_{nullptr};
-    std::shared_ptr<SafeThreadPool> thread_pool_{nullptr};
+    INT8QuantizerParameter();
 
-    static IndexCommonParam
-    CheckAndCreate(JsonType& params, const std::shared_ptr<Resource>& resource);
+    ~INT8QuantizerParameter() override = default;
+
+    void
+    FromJson(const JsonType& json) override;
+
+    JsonType
+    ToJson() const override;
+
+public:
+    bool hold_molds{false};
 };
+
+using INT8QuantizerParamPtr = std::shared_ptr<INT8QuantizerParameter>;
 }  // namespace vsag
