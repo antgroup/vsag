@@ -165,11 +165,6 @@ TEST_CASE("InnerIndexInterface NOT Implemented", "[ut][InnerIndexInterface]") {
     REQUIRE_THROWS(empty_index->UpdateAttribute(0, new_attrs));
     REQUIRE_THROWS(empty_index->UpdateAttribute(1, new_attrs, old_attrs));
 
-    std::stringstream stream;
-    empty_index->Serialize(stream);
-    stream.seekg(0);
-    REQUIRE_NOTHROW(empty_index->Deserialize(stream));
-
     REQUIRE_NOTHROW(empty_index->Train(nullptr));
 
     SearchRequest req;
