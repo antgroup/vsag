@@ -17,7 +17,7 @@
 
 #include <cstdint>
 
-#include "index/index_common_param.h"
+#include "index_common_param.h"
 #include "inner_string_params.h"
 #include "int8_quantizer_parameter.h"
 #include "quantization/computer.h"
