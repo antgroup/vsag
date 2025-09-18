@@ -20,10 +20,10 @@
 
 #include "algorithm/hnswlib/hnswalg.h"
 #include "algorithm/hnswlib/space_l2.h"
-#include "basic_optimizer.h"
 #include "data_cell/flatten_datacell.h"
 #include "fixtures.h"
 #include "impl/allocator/safe_allocator.h"
+#include "impl/basic_optimizer.h"
 #include "io/memory_io.h"
 #include "quantization/fp32_quantizer.h"
 #include "quantization/scalar_quantization/sq4_uniform_quantizer.h"

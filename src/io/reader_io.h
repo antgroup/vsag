@@ -16,7 +16,7 @@
 #pragma once
 
 #include "basic_io.h"
-#include "index/index_common_param.h"
+#include "index_common_param.h"
 #include "reader_io_parameter.h"
 
 namespace vsag {

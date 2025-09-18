@@ -18,7 +18,7 @@
 #include "data_cell/attribute_inverted_interface.h"
 #include "impl/bitset/computable_bitset.h"
 #include "impl/filter/filter_headers.h"
-#include "pointer_define.h"
+#include "utils/pointer_define.h"
 
 namespace vsag {
 DEFINE_POINTER(Executor);

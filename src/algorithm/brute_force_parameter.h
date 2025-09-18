@@ -15,8 +15,8 @@
 
 #pragma once
 #include "inner_index_parameter.h"
-#include "pointer_define.h"
 #include "typing.h"
+#include "utils/pointer_define.h"
 namespace vsag {
 DEFINE_POINTER2(FlattenDataCellParam, FlattenDataCellParameter);
 class BruteForceParameter : public InnerIndexParameter {

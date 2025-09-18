@@ -15,8 +15,8 @@
 
 #pragma once
 
-#include "pointer_define.h"
 #include "typing.h"
+#include "utils/pointer_define.h"
 #include "utils/timer.h"
 
 namespace vsag {

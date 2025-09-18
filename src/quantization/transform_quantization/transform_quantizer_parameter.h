@@ -15,8 +15,8 @@
 
 #pragma once
 
-#include "pointer_define.h"
 #include "quantization/quantizer_parameter.h"
+#include "utils/pointer_define.h"
 namespace vsag {
 DEFINE_POINTER2(TransformQuantizerParam, TransformQuantizerParameter)
 class TransformQuantizerParameter : public QuantizerParameter {

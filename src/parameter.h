@@ -16,8 +16,8 @@
 #pragma once
 
 #include "common.h"
-#include "pointer_define.h"
 #include "typing.h"
+#include "utils/pointer_define.h"
 namespace vsag {
 
 DEFINE_POINTER2(Param, Parameter);

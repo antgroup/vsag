@@ -16,9 +16,9 @@
 #pragma once
 
 #include "graph_interface_parameter.h"
+#include "impl/logger/logger.h"
 #include "inner_string_params.h"
-#include "logger.h"
-#include "pointer_define.h"
+#include "utils/pointer_define.h"
 #include "vsag/constants.h"
 
 namespace vsag {

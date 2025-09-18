@@ -18,12 +18,12 @@
 #include <string>
 
 #include "bucket_datacell_parameter.h"
-#include "index/index_common_param.h"
-#include "pointer_define.h"
+#include "index_common_param.h"
 #include "quantization/computer.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
 #include "typing.h"
+#include "utils/pointer_define.h"
 
 namespace vsag {
 DEFINE_POINTER(BucketInterface);

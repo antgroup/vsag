@@ -15,7 +15,7 @@
 
 #pragma once
 
-#include "safe_thread_pool.h"
+#include "impl/thread_pool/safe_thread_pool.h"
 #include "typing.h"
 
 namespace vsag {

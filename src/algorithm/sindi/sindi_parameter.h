@@ -16,8 +16,8 @@
 #pragma once
 
 #include "algorithm/inner_index_parameter.h"
-#include "index/index_common_param.h"
-#include "pointer_define.h"
+#include "index_common_param.h"
+#include "utils/pointer_define.h"
 
 namespace vsag {
 

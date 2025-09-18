@@ -7,6 +7,8 @@ set (UTILS_SRC
         timer.cpp
         window_result_queue.cpp
         sparse_vector_transform.cpp
+        prefetch.cpp
+        lock_strategy.cpp
 )
 
 add_library (utils OBJECT ${UTILS_SRC})

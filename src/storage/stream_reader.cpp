@@ -21,8 +21,8 @@
 #include <fstream>
 #include <iostream>
 
-#include "../logger.h"
 #include "footer.h"
+#include "impl/logger/logger.h"
 #include "vsag/options.h"
 #include "vsag_exception.h"
 

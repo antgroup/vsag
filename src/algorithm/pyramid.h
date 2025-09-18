@@ -19,10 +19,10 @@
 
 #include "data_cell/graph_interface.h"
 #include "impl/allocator/safe_allocator.h"
-#include "impl/basic_searcher.h"
 #include "impl/filter/filter_headers.h"
 #include "impl/heap/distance_heap.h"
-#include "impl/odescent_graph_builder.h"
+#include "impl/odescent/odescent_graph_builder.h"
+#include "impl/searcher/basic_searcher.h"
 #include "index_feature_list.h"
 #include "inner_index_interface.h"
 #include "io/memory_io_parameter.h"

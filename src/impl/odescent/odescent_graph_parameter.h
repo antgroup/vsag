@@ -15,25 +15,26 @@
 
 #pragma once
 
-#include <cstdint>
-
-#include "data_type.h"
-#include "metric_type.h"
-#include "safe_thread_pool.h"
-#include "typing.h"
-#include "vsag/resource.h"
-
+#include "parameter.h"
+#include "utils/pointer_define.h"
 namespace vsag {
-class IndexCommonParam {
+DEFINE_POINTER(ODescentParameter);
+class ODescentParameter : public Parameter {
 public:
-    MetricType metric_{MetricType::METRIC_TYPE_L2SQR};
-    DataTypes data_type_{DataTypes::DATA_TYPE_FLOAT};
-    int64_t dim_{0};
-    int64_t extra_info_size_{0};
-    std::shared_ptr<Allocator> allocator_{nullptr};
-    std::shared_ptr<SafeThreadPool> thread_pool_{nullptr};
+    ODescentParameter() = default;
 
-    static IndexCommonParam
-    CheckAndCreate(JsonType& params, const std::shared_ptr<Resource>& resource);
+    void
+    FromJson(const JsonType& json) override;
+
+    JsonType
+    ToJson() const override;
+
+public:
+    int64_t turn{30};
+    float alpha{1};
+    float sample_rate{0.3};
+    int64_t min_in_degree{1};
+    int64_t max_degree{32};
+    int64_t block_size{10000};
 };
 }  // namespace vsag

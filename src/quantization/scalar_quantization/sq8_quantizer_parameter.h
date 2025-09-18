@@ -15,8 +15,8 @@
 
 #pragma once
 
-#include "pointer_define.h"
 #include "quantization/quantizer_parameter.h"
+#include "utils/pointer_define.h"
 namespace vsag {
 DEFINE_POINTER2(SQ8QuantizerParam, SQ8QuantizerParameter)
 class SQ8QuantizerParameter : public QuantizerParameter {

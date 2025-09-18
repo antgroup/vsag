@@ -15,9 +15,9 @@
 
 #pragma once
 
-#include "pointer_define.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
+#include "utils/pointer_define.h"
 #include "vsag/bitset.h"
 namespace vsag {
 DEFINE_POINTER(ComputableBitset);

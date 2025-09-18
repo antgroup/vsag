@@ -26,7 +26,7 @@
 #include "data_cell/sparse_graph_datacell.h"
 #include "dataset_impl.h"
 #include "impl/heap/standard_heap.h"
-#include "impl/odescent_graph_builder.h"
+#include "impl/odescent/odescent_graph_builder.h"
 #include "impl/pruning_strategy.h"
 #include "impl/reorder.h"
 #include "index/index_impl.h"

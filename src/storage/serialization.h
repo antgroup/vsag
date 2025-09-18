@@ -22,12 +22,12 @@
 #include <memory>
 #include <string>
 
-#include "../logger.h"
 #include "../typing.h"
-#include "pointer_define.h"
+#include "impl/logger/logger.h"
 #include "stream_reader.h"
 #include "stream_writer.h"
 #include "utils/function_exists_check.h"
+#include "utils/pointer_define.h"
 #include "vsag/binaryset.h"
 #include "vsag/constants.h"
 

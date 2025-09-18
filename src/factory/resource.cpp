@@ -16,7 +16,7 @@
 #include "vsag/resource.h"
 
 #include "impl/allocator/safe_allocator.h"
-#include "safe_thread_pool.h"
+#include "impl/thread_pool/safe_thread_pool.h"
 
 namespace vsag {
 

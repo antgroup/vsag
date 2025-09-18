@@ -17,8 +17,8 @@
 #include <cmath>
 #include <sstream>
 
+#include "impl/logger/logger.h"
 #include "index/hnsw_zparameters.h"
-#include "logger.h"
 #include "utils/number.h"
 #include "utils/util_functions.h"
 #include "vsag/errors.h"

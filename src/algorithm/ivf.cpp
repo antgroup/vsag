@@ -19,9 +19,9 @@
 
 #include "attr/argparse.h"
 #include "attr/executor/executor.h"
-#include "impl/basic_searcher.h"
 #include "impl/heap/standard_heap.h"
 #include "impl/reorder.h"
+#include "impl/searcher/basic_searcher.h"
 #include "index/index_impl.h"
 #include "index_feature_list.h"
 #include "inner_string_params.h"

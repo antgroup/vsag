@@ -15,11 +15,11 @@
 
 #pragma once
 
-#include "pointer_define.h"
-#include "prefetch.h"
 #include "resource_object.h"
 #include "resource_object_pool.h"
 #include "typing.h"
+#include "utils/pointer_define.h"
+#include "utils/prefetch.h"
 
 namespace vsag {
 class Allocator;

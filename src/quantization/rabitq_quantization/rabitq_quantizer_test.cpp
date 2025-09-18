@@ -21,7 +21,7 @@
 
 #include "fixtures.h"
 #include "impl/allocator/safe_allocator.h"
-#include "logger.h"
+#include "impl/logger/logger.h"
 #include "quantization/quantizer_test.h"
 #include "quantization/scalar_quantization/sq4_uniform_quantizer.h"
 #include "utils/util_functions.h"

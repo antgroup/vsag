@@ -8,6 +8,7 @@ add_subdirectory (attr)
 add_subdirectory (data_cell)
 add_subdirectory (algorithm)
 add_subdirectory (utils)
+add_subdirectory (factory)
 
 file (GLOB CPP_SRCS "*.cpp")
 list (FILTER CPP_SRCS EXCLUDE REGEX "_test.cpp")
@@ -20,7 +21,7 @@ set (VSAG_SRCS ${CPP_SRCS} ${CPP_INDEX_SRCS})
 add_library (vsag SHARED ${VSAG_SRCS})
 add_library (vsag_static STATIC ${VSAG_SRCS})
 
-set (VSAG_DEP_LIBS antlr4-autogen antlr4-runtime diskann simd io quantizer storage utils
+set (VSAG_DEP_LIBS antlr4-autogen antlr4-runtime diskann simd io quantizer storage utils factory
       datacell ${IMPL_LIBS} ${ALGORITHM_LIBS} attr pthread m dl fmt::fmt nlohmann_json::nlohmann_json roaring)
 
 target_link_libraries (vsag ${VSAG_DEP_LIBS} coverage_config)
