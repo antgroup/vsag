@@ -28,9 +28,9 @@
 #include "impl/allocator/safe_allocator.h"
 #include "impl/heap/standard_heap.h"
 #include "io/memory_io_parameter.h"
-#include "lock_strategy.h"
 #include "quantization/fp32_quantizer_parameter.h"
 #include "typing.h"
+#include "utils/lock_strategy.h"
 #include "vsag/engine.h"
 
 namespace vsag {

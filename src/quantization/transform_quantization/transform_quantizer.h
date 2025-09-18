@@ -19,7 +19,7 @@
 #include <string>
 
 #include "impl/transform/transformer_headers.h"
-#include "index/index_common_param.h"
+#include "index_common_param.h"
 #include "inner_string_params.h"
 #include "quantization/quantizer.h"
 #include "transform_quantizer_parameter.h"

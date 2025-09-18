@@ -15,9 +15,9 @@
 
 #pragma once
 
-#include "pointer_define.h"
 #include "quantization/quantizer_parameter.h"
 #include "typing.h"
+#include "utils/pointer_define.h"
 namespace vsag {
 DEFINE_POINTER2(SparseQuantizerParam, SparseQuantizerParameter);
 

@@ -21,11 +21,11 @@
 #include "data_cell/flatten_interface.h"
 #include "data_cell/graph_datacell_parameter.h"
 #include "data_cell/graph_interface.h"
-#include "impl/odescent_graph_parameter.h"
-#include "index/index_common_param.h"
+#include "impl/odescent/odescent_graph_parameter.h"
+#include "index_common_param.h"
 #include "inner_index_parameter.h"
-#include "pointer_define.h"
 #include "typing.h"
+#include "utils/pointer_define.h"
 #include "vsag/index.h"
 
 namespace vsag {

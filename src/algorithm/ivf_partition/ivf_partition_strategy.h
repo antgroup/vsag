@@ -18,7 +18,7 @@
 #include <iostream>
 #include <vector>
 
-#include "impl/basic_searcher.h"
+#include "impl/searcher/basic_searcher.h"
 #include "ivf_partition_strategy_parameter.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"

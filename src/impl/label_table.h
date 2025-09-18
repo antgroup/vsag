@@ -19,10 +19,10 @@
 
 #include <atomic>
 
-#include "pointer_define.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
 #include "typing.h"
+#include "utils/pointer_define.h"
 
 namespace vsag {
 

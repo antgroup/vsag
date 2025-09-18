@@ -20,7 +20,7 @@
 
 #include <sstream>
 
-#include "logger.h"
+#include "impl/logger/logger.h"
 #include "simd/simd.h"
 #include "version.h"
 

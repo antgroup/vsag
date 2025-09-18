@@ -19,7 +19,7 @@
 
 #include "fixtures.h"
 #include "impl/allocator/safe_allocator.h"
-#include "safe_thread_pool.h"
+#include "impl/thread_pool/safe_thread_pool.h"
 #include "storage/serialization_template_test.h"
 
 using namespace vsag;

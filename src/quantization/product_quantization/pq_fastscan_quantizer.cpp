@@ -18,14 +18,14 @@
 #include <cblas.h>
 
 #include "impl/cluster/kmeans_cluster.h"
-#include "index/index_common_param.h"
+#include "index_common_param.h"
 #include "pq_fastscan_quantizer_parameter.h"
-#include "prefetch.h"
 #include "quantization/quantizer.h"
 #include "quantization/scalar_quantization/scalar_quantization_trainer.h"
 #include "simd/fp32_simd.h"
 #include "simd/normalize.h"
 #include "simd/pqfs_simd.h"
+#include "utils/prefetch.h"
 
 namespace vsag {
 

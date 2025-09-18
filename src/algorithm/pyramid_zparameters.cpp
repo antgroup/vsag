@@ -16,9 +16,9 @@
 #include "algorithm/pyramid_zparameters.h"
 
 #include "common.h"
+#include "impl/logger/logger.h"
 #include "index/diskann_zparameters.h"
 #include "io/memory_io_parameter.h"
-#include "logger.h"
 #include "quantization/fp32_quantizer_parameter.h"
 
 // NOLINTBEGIN(readability-simplify-boolean-expr)

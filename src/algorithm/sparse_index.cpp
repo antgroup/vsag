@@ -16,8 +16,8 @@
 #include "sparse_index.h"
 
 #include "impl/heap/standard_heap.h"
+#include "impl/label_table.h"
 #include "index_feature_list.h"
-#include "label_table.h"
 #include "utils/util_functions.h"
 
 namespace vsag {

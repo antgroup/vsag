@@ -25,7 +25,7 @@
 #include "graph_datacell_parameter.h"
 #include "graph_interface.h"
 #include "graph_interface_parameter.h"
-#include "index/index_common_param.h"
+#include "index_common_param.h"
 #include "io/basic_io.h"
 #include "vsag/constants.h"
 

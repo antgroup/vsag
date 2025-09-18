@@ -19,7 +19,7 @@
 #include <memory>
 
 #include "metric_type.h"
-#include "pointer_define.h"
+#include "utils/pointer_define.h"
 #include "vsag/allocator.h"
 
 namespace vsag {

@@ -15,10 +15,10 @@
 
 #include "fp16_quantizer.h"
 
-#include "byte_buffer.h"
 #include "simd/fp16_simd.h"
 #include "simd/normalize.h"
 #include "typing.h"
+#include "utils/byte_buffer.h"
 
 namespace vsag {
 

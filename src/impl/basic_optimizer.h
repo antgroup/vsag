@@ -18,7 +18,7 @@
 #include <random>
 
 #include "common.h"
-#include "index/index_common_param.h"
+#include "index_common_param.h"
 #include "runtime_parameter.h"
 #include "typing.h"
 

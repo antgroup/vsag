@@ -20,7 +20,7 @@
 
 #include "algorithm/sindi/sindi_parameter.h"
 #include "metric_type.h"
-#include "pointer_define.h"
+#include "utils/pointer_define.h"
 #include "utils/sparse_vector_transform.h"
 namespace vsag {
 

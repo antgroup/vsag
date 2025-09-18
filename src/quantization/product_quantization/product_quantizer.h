@@ -15,7 +15,7 @@
 
 #pragma once
 
-#include "index/index_common_param.h"
+#include "index_common_param.h"
 #include "inner_string_params.h"
 #include "product_quantizer_parameter.h"
 #include "quantization/quantizer.h"

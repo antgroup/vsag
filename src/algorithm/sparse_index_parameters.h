@@ -15,9 +15,9 @@
 
 #pragma once
 
-#include "index/index_common_param.h"
+#include "index_common_param.h"
 #include "inner_index_parameter.h"
-#include "pointer_define.h"
+#include "utils/pointer_define.h"
 
 namespace vsag {
 DEFINE_POINTER2(SparseIndexParameter, SparseIndexParameters);

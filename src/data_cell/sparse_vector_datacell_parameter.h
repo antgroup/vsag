@@ -19,7 +19,7 @@
 
 #include "flatten_interface.h"
 #include "inner_string_params.h"
-#include "pointer_define.h"
+#include "utils/pointer_define.h"
 
 namespace vsag {
 DEFINE_POINTER2(SparseVectorDataCellParam, SparseVectorDataCellParameter);

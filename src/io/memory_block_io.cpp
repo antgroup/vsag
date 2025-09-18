@@ -19,9 +19,9 @@
 #include <cstring>
 
 #include "common.h"
-#include "index/index_common_param.h"
+#include "index_common_param.h"
 #include "inner_string_params.h"
-#include "prefetch.h"
+#include "utils/prefetch.h"
 
 namespace vsag {
 

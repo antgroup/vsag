@@ -20,7 +20,7 @@
 #include "algorithm/ivf_parameter.h"
 #include "fixtures.h"
 #include "impl/allocator/safe_allocator.h"
-#include "impl/basic_searcher.h"
+#include "impl/searcher/basic_searcher.h"
 #include "storage/serialization_template_test.h"
 
 using namespace vsag;

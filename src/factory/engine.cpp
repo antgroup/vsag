@@ -27,14 +27,14 @@
 #include "algorithm/sindi/sindi.h"
 #include "algorithm/sparse_index.h"
 #include "common.h"
+#include "impl/thread_pool/safe_thread_pool.h"
 #include "index/diskann.h"
 #include "index/diskann_zparameters.h"
 #include "index/hnsw.h"
 #include "index/hnsw_zparameters.h"
-#include "index/index_common_param.h"
 #include "index/index_impl.h"
+#include "index_common_param.h"
 #include "resource_owner_wrapper.h"
-#include "safe_thread_pool.h"
 #include "typing.h"
 
 // NOLINTBEGIN(readability-else-after-return )

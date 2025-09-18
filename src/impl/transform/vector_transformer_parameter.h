@@ -15,7 +15,7 @@
 
 #pragma once
 
-#include "index/index_common_param.h"
+#include "index_common_param.h"
 #include "quantization/quantizer_parameter.h"
 
 namespace vsag {
