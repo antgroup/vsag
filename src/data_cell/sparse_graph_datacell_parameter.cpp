@@ -15,7 +15,7 @@
 
 #include "sparse_graph_datacell_parameter.h"
 
-#include "logger.h"
+#include "impl/logger/logger.h"
 
 namespace vsag {
 SparseGraphDatacellParameter::SparseGraphDatacellParameter()

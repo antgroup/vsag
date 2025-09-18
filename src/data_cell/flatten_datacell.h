@@ -19,12 +19,12 @@
 #include <limits>
 #include <memory>
 
-#include "byte_buffer.h"
 #include "common.h"
 #include "flatten_interface.h"
 #include "io/basic_io.h"
 #include "io/memory_block_io.h"
 #include "quantization/quantizer.h"
+#include "utils/byte_buffer.h"
 
 namespace vsag {
 /*

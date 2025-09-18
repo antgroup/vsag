@@ -17,7 +17,7 @@
 
 #include "async_io_parameter.h"
 #include "basic_io.h"
-#include "index/index_common_param.h"
+#include "index_common_param.h"
 #include "io_context.h"
 
 namespace vsag {

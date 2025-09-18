@@ -19,7 +19,7 @@
 #include <memory>
 #include <vector>
 
-#include "pointer_define.h"
+#include "utils/pointer_define.h"
 #include "vsag/index_features.h"
 
 namespace vsag {

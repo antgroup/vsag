@@ -16,7 +16,7 @@
 #pragma once
 
 #include "algorithm/inner_index_interface.h"
-#include "index/index_common_param.h"
+#include "index_common_param.h"
 #include "ivf_partition_strategy.h"
 #include "ivf_partition_strategy_parameter.h"
 #include "vsag/index.h"

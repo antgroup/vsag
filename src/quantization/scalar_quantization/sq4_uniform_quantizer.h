@@ -17,8 +17,8 @@
 
 #include "inner_string_params.h"
 #include "metric_type.h"
-#include "pointer_define.h"
 #include "quantization/quantizer.h"
+#include "utils/pointer_define.h"
 
 namespace vsag {
 

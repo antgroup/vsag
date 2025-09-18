@@ -17,7 +17,7 @@
 
 #include "inner_string_params.h"
 #include "io_parameter.h"
-#include "pointer_define.h"
+#include "utils/pointer_define.h"
 #include "vsag/readerset.h"
 namespace vsag {
 DEFINE_POINTER2(ReaderIOParam, ReaderIOParameter);

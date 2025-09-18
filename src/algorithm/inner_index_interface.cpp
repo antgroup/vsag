@@ -18,12 +18,12 @@
 #include <fmt/format.h>
 
 #include "brute_force.h"
-#include "empty_index_binary_set.h"
 #include "hgraph.h"
 #include "impl/filter/filter_headers.h"
-#include "index/index_common_param.h"
+#include "impl/label_table.h"
+#include "index_common_param.h"
 #include "index_feature_list.h"
-#include "label_table.h"
+#include "storage/empty_index_binary_set.h"
 #include "storage/serialization.h"
 #include "utils/slow_task_timer.h"
 #include "utils/util_functions.h"

@@ -20,8 +20,8 @@
 #include <istream>
 #include <stack>
 
-#include "../logger.h"
 #include "../typing.h"
+#include "impl/logger/logger.h"
 
 class SliceStreamReader;
 

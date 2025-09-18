@@ -19,8 +19,8 @@
 #include <fstream>
 #include <nlohmann/json.hpp>
 
-#include "logger.h"
-#include "safe_thread_pool.h"
+#include "impl/logger/logger.h"
+#include "impl/thread_pool/safe_thread_pool.h"
 #include "typing.h"
 #include "vsag/errors.h"
 

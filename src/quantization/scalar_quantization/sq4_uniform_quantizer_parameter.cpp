@@ -15,8 +15,8 @@
 
 #include "sq4_uniform_quantizer_parameter.h"
 
+#include "impl/logger/logger.h"
 #include "inner_string_params.h"
-#include "logger.h"
 
 namespace vsag {
 SQ4UniformQuantizerParameter::SQ4UniformQuantizerParameter()

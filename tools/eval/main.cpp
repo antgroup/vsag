@@ -29,7 +29,7 @@
 #include "common.h"
 #include "exporter/exporter.h"
 #include "exporter/formatter.h"
-#include "logger.h"
+#include "impl/logger/logger.h"
 #include "typing.h"
 #include "vsag/options.h"
 

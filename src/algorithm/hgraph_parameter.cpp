@@ -21,7 +21,7 @@
 #include "data_cell/graph_interface_parameter.h"
 #include "data_cell/sparse_graph_datacell_parameter.h"
 #include "data_cell/sparse_vector_datacell_parameter.h"
-#include "impl/odescent_graph_parameter.h"
+#include "impl/odescent/odescent_graph_parameter.h"
 #include "inner_string_params.h"
 #include "vsag/constants.h"
 

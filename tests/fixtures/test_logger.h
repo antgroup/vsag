@@ -18,7 +18,7 @@
 #include <sstream>
 #include <string>
 
-#include "default_logger.h"
+#include "impl/logger/default_logger.h"
 #include "vsag/logger.h"
 #include "vsag/vsag.h"
 

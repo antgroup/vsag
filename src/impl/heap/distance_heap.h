@@ -18,8 +18,8 @@
 #include <type_traits>
 #include <utility>
 
-#include "pointer_define.h"
 #include "typing.h"
+#include "utils/pointer_define.h"
 
 namespace vsag {
 

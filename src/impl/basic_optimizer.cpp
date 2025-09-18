@@ -15,7 +15,7 @@
 
 #include "basic_optimizer.h"
 
-#include "basic_searcher.h"
+#include "searcher/basic_searcher.h"
 
 namespace vsag {
 

@@ -15,7 +15,7 @@
 
 #pragma once
 
-#include "label_table.h"
+#include "impl/label_table.h"
 #include "vsag/filter.h"
 
 namespace vsag {

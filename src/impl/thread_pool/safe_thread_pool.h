@@ -16,8 +16,9 @@
 #pragma once
 
 #include "default_thread_pool.h"
-#include "logger.h"
-#include "pointer_define.h"
+#include "impl/logger/logger.h"
+#include "utils/pointer_define.h"
+
 namespace vsag {
 DEFINE_POINTER(SafeThreadPool);
 

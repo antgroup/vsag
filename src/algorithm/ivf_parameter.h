@@ -22,8 +22,8 @@
 #include "data_cell/flatten_datacell_parameter.h"
 #include "inner_index_parameter.h"
 #include "inner_string_params.h"
-#include "pointer_define.h"
 #include "typing.h"
+#include "utils/pointer_define.h"
 
 namespace vsag {
 

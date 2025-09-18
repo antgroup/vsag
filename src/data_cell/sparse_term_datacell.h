@@ -16,11 +16,11 @@
 #pragma once
 
 #include "algorithm/sindi/sindi_parameter.h"
-#include "impl/basic_searcher.h"
-#include "pointer_define.h"
+#include "impl/searcher/basic_searcher.h"
 #include "quantization/sparse_quantization//sparse_term_computer.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
+#include "utils/pointer_define.h"
 #include "vsag/dataset.h"
 
 namespace vsag {

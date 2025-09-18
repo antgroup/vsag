@@ -18,9 +18,9 @@
 #include <shared_mutex>
 
 #include "bucket_interface.h"
-#include "byte_buffer.h"
 #include "quantization/product_quantization/pq_fastscan_quantizer.h"
 #include "simd/fp32_simd.h"
+#include "utils/byte_buffer.h"
 
 namespace vsag {
 
