@@ -152,6 +152,10 @@ const char* const DATACELL_SIZES = "datacell_sizes";
 const char* const BASIC_INFO = "basic_info";
 const char* const INDEX_TYPE = "type";
 
+const char* const CODES_TYPE_KEY = "codes_type";
+const char* const FLATTEN_CODES = "flatten";
+const char* const SPARSE_CODES = "sparse";
+
 const std::unordered_map<std::string, std::string> DEFAULT_MAP = {
     {"INDEX_TYPE_HGRAPH", INDEX_TYPE_HGRAPH},
     {"INDEX_TYPE_IVF", INDEX_TYPE_IVF},

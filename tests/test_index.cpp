@@ -561,6 +561,7 @@ TestIndex::TestKnnSearchIter(const IndexPtr& index,
             ->Dim(dim)
             ->Float32Vectors(queries->GetFloat32Vectors() + i * dim)
             ->Paths(queries->GetPaths() + i)
+            ->SparseVectors(queries->GetSparseVectors() + i)
             ->Owner(false);
         auto res = index->KnnSearch(query, first_top, search_param, filter, filter_ctx, false);
         if (not expected_success) {
