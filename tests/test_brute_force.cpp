@@ -617,7 +617,7 @@ TestBruteForceEstimateMemory(const fixtures::BruteForceResourcePtr& resource) {
             auto index = TestIndex::TestFactory(BruteForceTestIndex::name, param, true);
             auto dataset = BruteForceTestIndex::pool.GetDatasetAndCreate(
                 dim, BruteForceTestIndex::base_count, metric_type);
-            index->EstimateMemory(1000);
+            TestIndex::TestEstimateMemory(BruteForceTestIndex::name, param, dataset);
             vsag::Options::Instance().set_block_size_limit(origin_size);
         }
     }

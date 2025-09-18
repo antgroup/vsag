@@ -13,28 +13,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#pragma once
+#include "flatten_interface_parameter.h"
 
-#include "io/io_parameter.h"
-#include "parameter.h"
-#include "quantization/quantizer_parameter.h"
-#include "utils/pointer_define.h"
+#include "flatten_datacell_parameter.h"
+#include "inner_string_params.h"
+#include "sparse_vector_datacell_parameter.h"
 
 namespace vsag {
-DEFINE_POINTER2(FlattenInterfaceParam, FlattenInterfaceParameter);
-
-class FlattenInterfaceParameter : public Parameter {
-public:
-    FlattenInterfaceParameter(std::string name) : name(std::move(name)) {
-    }
-
-    QuantizerParamPtr quantizer_parameter{nullptr};
-
-    IOParamPtr io_parameter{nullptr};
-
-    std::string name;
-};
 
 FlattenInterfaceParamPtr
-CreateFlattenParam(const JsonType& json);
+CreateFlattenParam(const JsonType& json) {
+    FlattenInterfaceParamPtr param = nullptr;
+    if (json.contains(CODES_TYPE_KEY) && json[CODES_TYPE_KEY] == SPARSE_CODES) {
+        param = std::make_shared<SparseVectorDataCellParameter>();
+    } else {
+        param = std::make_shared<FlattenDataCellParameter>();
+    }
+    param->FromJson(json);
+    return param;
+}
+
 }  // namespace vsag
