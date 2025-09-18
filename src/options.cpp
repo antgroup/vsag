@@ -47,8 +47,8 @@ Options::set_direct_IO_object_align_bit(size_t align_bit) {
 
 void
 Options::set_block_size_limit(size_t size) {
-    if (size < 2ULL * 1024 * 1024) {
-        throw std::runtime_error(fmt::format("size ({}) should be greater than 2M.", size));
+    if (size < 256UL * 1024) {
+        throw std::runtime_error(fmt::format("size ({}) should be greater than 256K.", size));
     }
     block_size_limit_.store(size, std::memory_order_release);
 }
