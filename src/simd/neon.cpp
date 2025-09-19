@@ -1833,22 +1833,6 @@ SQ8UniformComputeCodesIP(const uint8_t* codes1, const uint8_t* codes2, uint64_t 
         d -= 8;
     }
 
-    if (d >= 4) {
-        uint8x8_t a = vld1_u8(codes1);
-        uint8x8_t b = vld1_u8(codes2);
-
-        uint16x8_t a_ext = vmovl_u8(a);
-        uint16x8_t b_ext = vmovl_u8(b);
-
-        uint32x4_t a_low = vmovl_u16(vget_low_u16(a_ext));
-        uint32x4_t b_low = vmovl_u16(vget_low_u16(b_ext));
-
-        sum_ = vaddq_u32(sum_, vmulq_u32(a_low, b_low));
-
-        codes1 += 4;
-        codes2 += 4;
-        d -= 4;
-    }
     int32_t rem_sum = 0;
     for (uint64_t i = 0; i < d; ++i) {
         rem_sum += static_cast<int32_t>(codes1[i]) * static_cast<int32_t>(codes2[i]);
