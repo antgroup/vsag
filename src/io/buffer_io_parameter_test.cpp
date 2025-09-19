@@ -31,7 +31,7 @@ TEST_CASE("BufferIO Parameters Test", "[ut][BufferIOParameters]") {
             "file_path": "{}"
         }}
     )";
-    auto param_json = JsonType::parse(fmt::format(param_str, path));
+    auto param_json = JsonType::Parse(fmt::format(param_str, path));
     auto param = std::make_shared<BufferIOParameter>();
     param->FromJson(param_json);
     ParameterTest::TestToJson(param);

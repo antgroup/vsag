@@ -24,15 +24,15 @@ FP32QuantizerParameter::FP32QuantizerParameter()
 
 void
 FP32QuantizerParameter::FromJson(const JsonType& json) {
-    if (json.contains(HOLD_MOLDS)) {
-        hold_molds = json[HOLD_MOLDS];
+    if (json.Contains(HOLD_MOLDS)) {
+        hold_molds = json[HOLD_MOLDS].GetBool();
     }
 }
 
 JsonType
 FP32QuantizerParameter::ToJson() const {
     JsonType json;
-    json[QUANTIZATION_TYPE_KEY] = QUANTIZATION_TYPE_VALUE_FP32;
+    json[QUANTIZATION_TYPE_KEY].SetString(QUANTIZATION_TYPE_VALUE_FP32);
     return json;
 }
 }  // namespace vsag

@@ -23,14 +23,14 @@
 #include <queue>
 
 #include "impl/allocator/allocator_wrapper.h"
-#include "nlohmann/json.hpp"
+#include "json_wrapper.h"
 
 namespace vsag {
 
 using InnerIdType = uint32_t;  // inner id's type; index's vector count may less than 2^31 - 1
 using LabelType = int64_t;     // external id's type
 
-using JsonType = nlohmann::json;  // alias for nlohmann::json type
+using JsonType = JsonWrapper;  // alias for nlohmann::json type
 using BucketIdType = int32_t;
 
 template <typename T>

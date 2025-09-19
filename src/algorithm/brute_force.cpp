@@ -303,9 +303,9 @@ BruteForce::Serialize(StreamWriter& writer) const {
     // serialize footer (introduced since v0.15)
     auto metadata = std::make_shared<Metadata>();
     JsonType basic_info;
-    basic_info["dim"] = dim_;
-    basic_info["total_count"] = total_count_;
-    basic_info[INDEX_PARAM] = this->create_param_ptr_->ToString();
+    basic_info["dim"].SetInt(dim_);
+    basic_info["total_count"].SetInt(total_count_);
+    basic_info[INDEX_PARAM].SetString(this->create_param_ptr_->ToString());
     metadata->Set("basic_info", basic_info);
     auto footer = std::make_shared<Footer>(metadata);
     footer->Write(writer);
@@ -329,8 +329,8 @@ BruteForce::Deserialize(StreamReader& reader) {
 
         auto metadata = footer->GetMetadata();
         auto basic_info = metadata->Get("basic_info");
-        if (basic_info.contains(INDEX_PARAM)) {
-            std::string index_param_string = basic_info[INDEX_PARAM];
+        if (basic_info.Contains(INDEX_PARAM)) {
+            std::string index_param_string = basic_info[INDEX_PARAM].GetString();
             auto index_param = std::make_shared<BruteForceParameter>();
             index_param->FromString(index_param_string);
             if (not this->create_param_ptr_->CheckCompatibility(index_param)) {
@@ -342,8 +342,8 @@ BruteForce::Deserialize(StreamReader& reader) {
                 throw VsagException(ErrorType::INVALID_ARGUMENT, message);
             }
         }
-        dim_ = basic_info["dim"];
-        total_count_ = basic_info["total_count"];
+        dim_ = basic_info["dim"].GetInt();
+        total_count_ = basic_info["total_count"].GetInt();
 
         if (this->use_attribute_filter_ and this->attr_filter_index_ != nullptr) {
             this->attr_filter_index_->Deserialize(buffer_reader);
@@ -465,7 +465,7 @@ BruteForce::CheckAndMappingExternalParam(const JsonType& external_param,
     }
 
     std::string str = format_map(BRUTE_FORCE_PARAMS_TEMPLATE, DEFAULT_MAP);
-    auto inner_json = JsonType::parse(str);
+    auto inner_json = JsonType::Parse(str);
     mapping_external_param_to_inner(external_param, external_mapping, inner_json);
 
     auto brute_force_parameter = std::make_shared<BruteForceParameter>();

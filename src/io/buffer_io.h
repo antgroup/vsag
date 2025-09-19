@@ -15,6 +15,10 @@
 
 #pragma once
 
+#include <unistd.h>
+
+#include <filesystem>
+
 #include "basic_io.h"
 #include "buffer_io_parameter.h"
 #include "index_common_param.h"
