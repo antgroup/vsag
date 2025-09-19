@@ -297,6 +297,15 @@ private:
     void
     elp_optimize();
 
+    void
+    recover_remove(int64_t id);
+
+    bool
+    try_recover_tombstone(const DatasetPtr& data, std::vector<int64_t>& failed_ids);
+
+    DatasetPtr
+    get_single_dataset(const DatasetPtr& data, uint32_t j);
+
 private:
     void
     analyze_graph_recall(JsonType& stats,

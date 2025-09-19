@@ -117,6 +117,7 @@ GraphInterfaceTest::BasicTest(uint64_t max_id,
     if (test_delete) {
         SECTION("Delete") {
             std::unordered_set<InnerIdType> keys_to_delete;
+            std::uniform_int_distribution<> dis(0, 1);
             for (const auto& item : maps) {
                 if (keys_to_delete.size() > count / 2) {
                     Vector<InnerIdType> neighbors(allocator.get());
@@ -127,6 +128,14 @@ GraphInterfaceTest::BasicTest(uint64_t max_id,
                 } else {
                     this->graph_->DeleteNeighborsById(item.first);
                     keys_to_delete.insert(item.first);
+
+                    // test tombstone recovery
+                    REQUIRE_THROWS(this->graph_->RecoverDeleteNeighborsById(item.first + 10000000));
+                    if (dis(rng)) {
+                        this->graph_->RecoverDeleteNeighborsById(item.first);
+                        REQUIRE_THROWS(this->graph_->RecoverDeleteNeighborsById(item.first));
+                        keys_to_delete.erase(item.first);
+                    }
                 }
             }
             for (const auto& key : keys_to_delete) {

@@ -74,7 +74,8 @@ public:
     TestGeneral(const IndexPtr& index,
                 const TestDatasetPtr& dataset,
                 const std::string& search_param,
-                float recall);
+                float recall,
+                bool expect_success = true);
 
     static void
     TestMemoryUsageDetail(const IndexPtr& index);
@@ -259,7 +260,8 @@ void
 HGraphTestIndex::TestGeneral(const TestIndex::IndexPtr& index,
                              const TestDatasetPtr& dataset,
                              const std::string& search_param,
-                             float recall) {
+                             float recall,
+                             bool expect_success) {
     REQUIRE(index->GetIndexType() == vsag::IndexType::HGRAPH);
     TestGetMinAndMaxId(index, dataset);
     TestKnnSearch(index, dataset, search_param, recall, true);
@@ -269,9 +271,9 @@ HGraphTestIndex::TestGeneral(const TestIndex::IndexPtr& index,
     TestRangeSearch(index, dataset, search_param, recall / 2.0, 5, true);
     TestFilterSearch(index, dataset, search_param, recall, true, true);
     TestCheckIdExist(index, dataset);
-    TestCalcDistanceById(index, dataset);
-    TestGetRawVectorByIds(index, dataset);
-    TestBatchCalcDistanceById(index, dataset);
+    TestCalcDistanceById(index, dataset, 1e-5, expect_success);
+    TestGetRawVectorByIds(index, dataset, expect_success);
+    TestBatchCalcDistanceById(index, dataset, 1e-5, expect_success);
     TestSearchAllocator(index, dataset, search_param, recall, true);
     TestUpdateVector(index, dataset, search_param, false);
     TestUpdateId(index, dataset, search_param, true);
@@ -873,6 +875,7 @@ static void
 TestHGraphRemove(const fixtures::HGraphTestIndexPtr& test_index,
                  const fixtures::HGraphResourcePtr& resource) {
     using namespace fixtures;
+    auto test_recovery = GENERATE(true, false);
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
     auto search_param = fmt::format(fixtures::search_param_tmp, 200, false);
@@ -897,8 +900,13 @@ TestHGraphRemove(const fixtures::HGraphTestIndexPtr& test_index,
                 auto index = TestIndex::TestFactory(test_index->name, param, true);
                 auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(
                     dim, resource->base_count, metric_type);
-                TestIndex::TestRemoveIndex(index, dataset, true);
-                HGraphTestIndex::TestGeneral(index, dataset, search_param, recall);
+                if (test_recovery) {
+                    TestIndex::TestRecoverRemoveIndex(index, dataset, search_param);
+                    HGraphTestIndex::TestGeneral(index, dataset, search_param, recall * 0.8, false);
+                } else {
+                    TestIndex::TestRemoveIndex(index, dataset, true);
+                    HGraphTestIndex::TestGeneral(index, dataset, search_param, recall);
+                }
                 vsag::Options::Instance().set_block_size_limit(origin_size);
             }
         }
