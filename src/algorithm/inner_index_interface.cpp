@@ -120,20 +120,6 @@ InnerIndexInterface::Serialize() const {
     std::string time_record_name = this->GetName() + " Serialize";
     SlowTaskTimer t(time_record_name);
 
-    if (GetNumElements() == 0) {
-        // TODO(wxyu): remove this if condition
-        // if (not Options::Instance().new_version()) {
-        //     return EmptyIndexBinarySet::Make(this->GetName());
-        // }
-
-        auto metadata = std::make_shared<Metadata>();
-        metadata->SetEmptyIndex(true);
-
-        BinarySet bs;
-        bs.Set(SERIAL_META_KEY, metadata->ToBinary());
-        return bs;
-    }
-
     uint64_t num_bytes = this->CalSerializeSize();
     // TODO(LHT): use try catch
 
@@ -151,16 +137,8 @@ InnerIndexInterface::Serialize() const {
     return bs;
 }
 
-#define CHECK_SELF_EMPTY                                                  \
-    if (this->GetNumElements() > 0) {                                     \
-        throw VsagException(ErrorType::INDEX_NOT_EMPTY,                   \
-                            "failed to Deserialize: index is not empty"); \
-    }
-
 void
 InnerIndexInterface::Deserialize(const BinarySet& binary_set) {
-    CHECK_SELF_EMPTY;
-
     std::string time_record_name = this->GetName() + " Deserialize";
     SlowTaskTimer t(time_record_name);
 
@@ -198,7 +176,6 @@ InnerIndexInterface::Deserialize(const BinarySet& binary_set) {
 
 void
 InnerIndexInterface::Deserialize(const ReaderSet& reader_set) {
-    CHECK_SELF_EMPTY;
     std::string time_record_name = this->GetName() + " Deserialize";
     SlowTaskTimer t(time_record_name);
     if (reader_set.Contains(SERIAL_META_KEY)) {
@@ -248,29 +225,12 @@ void
 InnerIndexInterface::Serialize(std::ostream& out_stream) const {
     std::string time_record_name = this->GetName() + " Serialize";
     SlowTaskTimer t(time_record_name);
-
-    if (GetNumElements() == 0) {
-        // TODO(wxyu): remove this if condition
-        // if (not Options::Instance().new_version()) {
-        //     return;
-        // }
-
-        auto metadata = std::make_shared<Metadata>();
-        metadata->SetEmptyIndex(true);
-        auto footer = std::make_shared<Footer>(metadata);
-        IOStreamWriter writer(out_stream);
-        footer->Write(writer);
-        return;
-    }
-
     IOStreamWriter writer(out_stream);
     this->Serialize(writer);
 }
 
 void
 InnerIndexInterface::Deserialize(std::istream& in_stream) {
-    CHECK_SELF_EMPTY;
-
     std::string time_record_name = this->GetName() + " Deserialize";
     SlowTaskTimer t(time_record_name);
     try {
