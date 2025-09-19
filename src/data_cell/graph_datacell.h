@@ -54,6 +54,9 @@ public:
     void
     DeleteNeighborsById(vsag::InnerIdType id) override;
 
+    void
+    RecoverDeleteNeighborsById(vsag::InnerIdType id) override;
+
     [[nodiscard]] uint32_t
     GetNeighborSize(InnerIdType id) const override;
 
@@ -290,6 +293,27 @@ GraphDataCell<IOTmpl>::DeleteNeighborsById(vsag::InnerIdType id) {
                                 fmt::format("remove point {} not exist in GraphDatacell", id));
         }
         node_versions_[id]++;
+    } else {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "disable delete in graph datacell");
+    }
+}
+
+template <typename IOTmpl>
+void
+GraphDataCell<IOTmpl>::RecoverDeleteNeighborsById(vsag::InnerIdType id) {
+    if (is_support_delete_) {
+        if (id <= max_capacity_) {
+            if (node_versions_[id] == 0) {
+                throw VsagException(ErrorType::INTERNAL_ERROR,
+                                    "recover remove point too many times in GraphDatacell");
+            }
+        } else {
+            throw VsagException(
+                ErrorType::INTERNAL_ERROR,
+                fmt::format("recover remove point {} not exist in GraphDatacell", id));
+        }
+        node_versions_[id]--;
     } else {
         throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
                             "disable delete in graph datacell");

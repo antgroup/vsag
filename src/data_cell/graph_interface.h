@@ -50,6 +50,12 @@ public:
         throw VsagException(ErrorType::INTERNAL_ERROR, "DeleteNeighborsById is not implemented");
     }
 
+    virtual void
+    RecoverDeleteNeighborsById(InnerIdType id) {
+        throw VsagException(ErrorType::INTERNAL_ERROR,
+                            "RecoverDeleteNeighborsById is not implemented");
+    }
+
     virtual uint32_t
     GetNeighborSize(InnerIdType id) const = 0;
 

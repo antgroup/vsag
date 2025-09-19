@@ -78,6 +78,11 @@ public:
                     bool expected_success = true);
 
     static void
+    TestRecoverRemoveIndex(const IndexPtr& index,
+                           const TestDatasetPtr& dataset,
+                           const std::string& search_parameters);
+
+    static void
     TestUpdateId(const IndexPtr& index,
                  const TestDatasetPtr& dataset,
                  const std::string& search_param,
