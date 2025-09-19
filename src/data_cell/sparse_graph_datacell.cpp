@@ -174,6 +174,29 @@ SparseGraphDataCell::DeleteNeighborsById(vsag::InnerIdType id) {
 }
 
 void
+SparseGraphDataCell::RecoverDeleteNeighborsById(vsag::InnerIdType id) {
+    if (is_support_delete_) {
+        std::unique_lock<std::shared_mutex> wlock(this->neighbors_map_mutex_);
+        auto iter = node_version_.find(id);
+        if (iter != node_version_.end()) {
+            if (iter->second == 0) {
+                throw VsagException(
+                    ErrorType::INTERNAL_ERROR,
+                    "remove point too many times in SparseGraphDatacell, please rebuild index");
+            }
+            iter.value()--;
+        } else {
+            throw VsagException(
+                ErrorType::INTERNAL_ERROR,
+                fmt::format("recover point {} not exist in SparseGraphDatacell", id));
+        }
+    } else {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "disable delete in sparse graph datacell");
+    }
+}
+
+void
 SparseGraphDataCell::MergeOther(GraphInterfacePtr other, uint64_t bias) {
     auto other_graph = std::dynamic_pointer_cast<SparseGraphDataCell>(other);
     if (!other_graph) {

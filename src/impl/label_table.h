@@ -84,13 +84,43 @@ public:
     }
 
     inline bool
+    RecoverRemove(LabelType label) {
+        // 1. check is removed
+        if (not use_reverse_map_) {
+            return false;
+        }
+        auto iter = label_remap_.find(label);
+        if (iter == label_remap_.end() or iter->second != std::numeric_limits<InnerIdType>::max()) {
+            return false;
+        }
+
+        // 2. find inner_id
+        auto inner_id = GetIdByLabel(label, true);
+
+        // 3. recover
+        deleted_ids_.erase(inner_id);
+        label_remap_[label] = inner_id;
+        return true;
+    }
+
+    inline bool
+    IsTombstoneLabel(LabelType label) {
+        if (not use_reverse_map_) {
+            return false;
+        }
+        auto iter = label_remap_.find(label);
+        return (iter != label_remap_.end() and
+                iter->second == std::numeric_limits<InnerIdType>::max());
+    }
+
+    inline bool
     IsRemoved(InnerIdType id) {
         return not deleted_ids_.empty() && deleted_ids_.count(id) != 0;
     }
 
     inline InnerIdType
-    GetIdByLabel(LabelType label) const {
-        if (use_reverse_map_) {
+    GetIdByLabel(LabelType label, bool return_even_removed = false) const {
+        if (use_reverse_map_ and not return_even_removed) {
             if (this->label_remap_.count(label) == 0) {
                 throw std::runtime_error(fmt::format("label {} is not exists", label));
             }
@@ -110,6 +140,7 @@ public:
 
     inline bool
     CheckLabel(LabelType label) const {
+        // return true when label exists and not been deleted
         if (use_reverse_map_) {
             auto iter = label_remap_.find(label);
             return iter != label_remap_.end() and
@@ -127,7 +158,6 @@ public:
         }
 
         // 2. update label_table_
-
         auto result = std::find(label_table_.begin(), label_table_.end(), old_label);
         if (result == label_table_.end()) {
             throw std::runtime_error(fmt::format("old label {} is not exists", old_label));

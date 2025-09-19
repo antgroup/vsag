@@ -76,7 +76,11 @@ RecallMonitor::Record(void* input) {
         distances[i] = distance_func(query_data, dataset->GetOneTrain(neighbors[i]), &dim);
         gt_distances[i] = distance_func(query_data, dataset->GetOneTrain(gt_neighbors[i]), &dim);
     }
-    auto val = get_recall(distances.get(), gt_distances.get(), topk, topk);
+
+    float val = 0;
+    if (topk != 0) {
+        val = get_recall(distances.get(), gt_distances.get(), topk, topk);
+    }
     this->recall_records_.emplace_back(val);
 }
 void

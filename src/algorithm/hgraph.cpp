@@ -192,7 +192,7 @@ HGraph::Add(const DatasetPtr& data) {
     CHECK_ARGUMENT(get_data(data) != nullptr, "base.float_vector is nullptr");
 
     {
-        std::lock_guard lock(this->add_mutex_);
+        std::scoped_lock lock(this->add_mutex_);
         if (this->total_count_ == 0) {
             this->Train(data);
         }
@@ -219,28 +219,34 @@ HGraph::Add(const DatasetPtr& data) {
     const auto* attr_sets = data->GetAttributeSets();
     Vector<std::pair<InnerIdType, LabelType>> inner_ids(allocator_);
     for (int64_t j = 0; j < total; ++j) {
-        auto label = labels[j];
         InnerIdType inner_id;
-        {
-            std::lock_guard label_lock(this->label_lookup_mutex_);
-            if (this->label_table_->CheckLabel(label)) {
-                failed_ids.emplace_back(label);
+
+        // try recover tombstone
+        if (this->data_type_ != DataTypes::DATA_TYPE_SPARSE) {
+            auto one_base = get_single_dataset(data, j);
+            bool is_process_finished = try_recover_tombstone(one_base, failed_ids);
+            if (is_process_finished) {
                 continue;
             }
-            {
-                std::lock_guard lock(this->add_mutex_);
-                inner_id = this->get_unique_inner_ids(1).at(0);
-                uint64_t new_count = total_count_;
-                this->resize(new_count);
-            }
-            this->label_table_->Insert(inner_id, label);
+        }
+
+        {
+            std::scoped_lock lock(this->add_mutex_);
+            inner_id = this->get_unique_inner_ids(1).at(0);
+            uint64_t new_count = total_count_;
+            this->resize(new_count);
+        }
+
+        {
+            std::scoped_lock label_lock(this->label_lookup_mutex_);
+            this->label_table_->Insert(inner_id, labels[j]);
             inner_ids.emplace_back(inner_id, j);
         }
     }
     for (auto& [inner_id, local_idx] : inner_ids) {
         int level;
         {
-            std::lock_guard label_lock(this->label_lookup_mutex_);
+            std::scoped_lock label_lock(this->label_lookup_mutex_);
             level = this->get_random_level() - 1;
         }
         const auto* extra_info = extra_infos + local_idx * extra_info_size_;
@@ -959,7 +965,7 @@ HGraph::add_one_point(const void* data, int level, InnerIdType inner_id) {
     }
     std::unique_lock add_lock(add_mutex_);
     if (level >= static_cast<int>(this->route_graphs_.size()) || bottom_graph_->TotalCount() == 0) {
-        std::lock_guard<std::shared_mutex> wlock(this->global_mutex_);
+        std::scoped_lock<std::shared_mutex> wlock(this->global_mutex_);
         // level maybe a negative number(-1)
         for (auto j = static_cast<int>(this->route_graphs_.size()); j <= level; ++j) {
             this->route_graphs_.emplace_back(this->generate_one_route_graph());
@@ -1034,7 +1040,7 @@ HGraph::resize(uint64_t new_size) {
     if (cur_size >= new_size_power_2) {
         return;
     }
-    std::lock_guard lock(this->global_mutex_);
+    std::scoped_lock lock(this->global_mutex_);
     cur_size = this->max_capacity_.load();
     if (cur_size < new_size_power_2) {
         this->neighbors_mutex_->Resize(new_size_power_2);
@@ -1610,6 +1616,94 @@ HGraph::Remove(int64_t id) {
 }
 
 void
+HGraph::recover_remove(int64_t id) {
+    // note:
+    // 1. this function doesn't recover entry_point and route_graphs caused by Remove()
+    // 2. use this function only when is_tombstone is checked
+
+    std::shared_lock label_lock(this->label_lookup_mutex_);
+    auto inner_id = this->label_table_->GetIdByLabel(id, true);
+    this->bottom_graph_->RecoverDeleteNeighborsById(inner_id);
+    this->label_table_->RecoverRemove(id);
+    delete_count_--;
+}
+
+DatasetPtr
+HGraph::get_single_dataset(const DatasetPtr& data, uint32_t j) {
+    void* vectors = nullptr;
+    size_t data_size = 0;
+    get_vectors(data_type_, dim_, data, &vectors, &data_size);
+    const auto* labels = data->GetIds();
+    auto one_data = Dataset::Make();
+    one_data->Ids(labels + j)
+        ->Float32Vectors((float*)((char*)vectors + data_size * j))
+        ->Int8Vectors((int8_t*)((char*)vectors + data_size * j))
+        ->NumElements(1)
+        ->Owner(false);
+    return one_data;
+}
+
+bool
+HGraph::try_recover_tombstone(const DatasetPtr& data, std::vector<int64_t>& failed_ids) {
+    /*
+     * return:
+     *      True : No processing required — data already exists or was recovered successfully
+     *      False: Processing required — data not found or recovery failed
+     *
+     *
+     * [case 1] fail to insert -> continue + record failed id
+     * 1. exist + not delete : is_label_valid = true, is_tombstone = false
+     * 2. exist + delete + not recovery: is_label_valid = false, is_tombstone = ture, is_recover = false
+     *
+     * [case 2] tombstone recovery -> continue
+     * exist + delete + recovery: is_label_valid = false, is_tombstone = ture, is_recover = true
+     *
+     * [case 3] add -> no continue
+     * not exists + not delete: is_label_valid = false, is_tombstone = false
+     *
+     * [case 4] error
+     * exists + deleted: is_label_valid = true, is_tombstone = true
+     */
+
+    auto label = data->GetIds()[0];
+
+    bool is_label_valid = false;
+    bool is_tombstone = false;
+    bool is_recover = false;
+    {
+        std::scoped_lock label_lock(this->label_lookup_mutex_);
+        is_label_valid = this->label_table_->CheckLabel(label);
+        if (not is_label_valid) {
+            is_tombstone = this->label_table_->IsTombstoneLabel(label);
+        }
+    }
+
+    if (is_tombstone) {
+        try {
+            // try update
+            recover_remove(label);
+            auto update_res = UpdateVector(label, data, false);
+            if (update_res) {
+                is_recover = true;
+                return true;
+            }
+        } catch (std::runtime_error& e) {
+            // recover failed: delete again
+            Remove(label);
+        }
+    }
+
+    if (is_label_valid or is_tombstone) {
+        if (not is_recover) {
+            failed_ids.emplace_back(label);
+        }
+        return true;
+    }
+
+    return false;
+}
+
+void
 HGraph::Merge(const std::vector<MergeUnit>& merge_units) {
     int64_t total_count = this->GetNumElements();
     for (const auto& unit : merge_units) {
@@ -1674,7 +1768,7 @@ HGraph::SetImmutable() {
     if (this->immutable_) {
         return;
     }
-    std::lock_guard<std::shared_mutex> wlock(this->global_mutex_);
+    std::scoped_lock<std::shared_mutex> wlock(this->global_mutex_);
     this->neighbors_mutex_.reset();
     this->neighbors_mutex_ = std::make_shared<EmptyMutex>();
     this->searcher_->SetMutexArray(this->neighbors_mutex_);
@@ -1936,7 +2030,7 @@ HGraph::analyze_graph_connection(JsonType& stats) const {
         }
     }
     for (int64_t i = 0; i < total_count_; ++i) {
-        if (not visited[i] and this->label_table_->IsRemoved(i)) {
+        if (not visited[i] and not this->label_table_->IsRemoved(i)) {
             connect_components++;
             int64_t component_size = 0;
             std::queue<int64_t> q;
@@ -1949,7 +2043,7 @@ HGraph::analyze_graph_connection(JsonType& stats) const {
                 Vector<InnerIdType> neighbors(allocator_);
                 this->bottom_graph_->GetNeighbors(node, neighbors);
                 for (const auto& nb : neighbors) {
-                    if (not visited[nb] and this->label_table_->IsRemoved(nb)) {
+                    if (not visited[nb] and not this->label_table_->IsRemoved(nb)) {
                         visited[nb] = true;
                         q.push(nb);
                     }
