@@ -16,12 +16,12 @@
 #pragma once
 
 #include "attr/executor/executor.h"
+#include "basic_searcher.h"
 #include "data_cell/flatten_interface.h"
 #include "data_cell/graph_interface.h"
-#include "impl/basic_searcher.h"
 #include "impl/heap/distance_heap.h"
-#include "index/index_common_param.h"
-#include "lock_strategy.h"
+#include "index_common_param.h"
+#include "utils/lock_strategy.h"
 #include "utils/visited_list.h"
 
 namespace vsag {
