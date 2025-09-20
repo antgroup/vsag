@@ -1,0 +1,59 @@
+global:
+    exporters:
+        e1: # give a name you like, will not be used
+            format: "text"
+            to: "stdout"
+        e2:
+            format: "json"
+            to: "file://tmp/gist-960d-r90.json"
+    num_threads_building: 16
+    num_threads_searching: 16
+
+90/HNSW:
+    datapath: "/tmp/data/gist-960-euclidean.hdf5"
+    type: "build,search" # build, search
+    index_name: "hnsw"
+    create_params: '{"dim":960,"dtype":"float32","metric_type":"l2","index_param":{"base_quantization_type":"sq8_uniform","max_degree":64, "graph_type":"odescent", "alpha": 1.2, "graph_iter_turn": 60, "neighbor_sample_rate": 0.2, "precise_quantization_type":"fp32", "use_reorder":true}}'
+    search_params: '{"hgraph":{"ef_search":60}}'
+    index_path: "/tmp/gist-960-euclidean/r90/hnsw"
+    topk: 10
+    search_mode: "knn" # ["knn", "range", "knn_filter", "range_filter"]
+    range: 0.5
+    delete_index_after_search: false
+ 
+90/DiskANN:
+    datapath: "/tmp/data/gist-960-euclidean.hdf5"
+    type: "build,search" # build, search
+    index_name: "hgraph"
+    create_params: '{"dim":960,"dtype":"float32","metric_type":"l2","index_param":{"base_quantization_type":"sq8_uniform","max_degree":64, "graph_type":"odescent", "alpha": 1.2, "graph_iter_turn": 60, "neighbor_sample_rate": 0.2, "precise_quantization_type":"fp32", "use_reorder":true}}'
+    search_params: '{"hgraph":{"ef_search":60}}'
+    index_path: "/tmp/gist-960-euclidean/r90/DiskANN"
+    topk: 10
+    search_mode: "knn" # ["knn", "range", "knn_filter", "range_filter"]
+    range: 0.5
+    delete_index_after_search: false
+ 
+90/HGraph:
+    datapath: "/tmp/data/gist-960-euclidean.hdf5"
+    type: "build,search" # build, search
+    index_name: "hgraph"
+    create_params: '{"dim":960,"dtype":"float32","metric_type":"l2","index_param":{"base_quantization_type":"sq8_uniform","max_degree":64, "graph_type":"odescent", "alpha": 1.2, "graph_iter_turn": 60, "neighbor_sample_rate": 0.2, "precise_quantization_type":"fp32", "use_reorder":true}}'
+    search_params: '{"hgraph":{"ef_search":60}}'
+    index_path: "/tmp/gist-960-euclidean/r90/hgraph"
+    topk: 10
+    search_mode: "knn" # ["knn", "range", "knn_filter", "range_filter"]
+    range: 0.5
+    delete_index_after_search: false
+ 
+90/IVF:
+    datapath: "/tmp/data/gist-960-euclidean.hdf5"
+    type: "build,search" # build, search
+    index_name: "hgraph"
+    create_params: '{"dim":960,"dtype":"float32","metric_type":"l2","index_param":{"base_quantization_type":"sq8_uniform","max_degree":64, "graph_type":"odescent", "alpha": 1.2, "graph_iter_turn": 60, "neighbor_sample_rate": 0.2, "precise_quantization_type":"fp32", "use_reorder":true}}'
+    search_params: '{"hgraph":{"ef_search":60}}'
+    index_path: "/tmp/gist-960-euclidean/r90/ivf"
+    topk: 10
+    search_mode: "knn" # ["knn", "range", "knn_filter", "range_filter"]
+    range: 0.5
+    delete_index_after_search: false
+ 
