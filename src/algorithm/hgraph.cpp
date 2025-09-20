@@ -84,6 +84,9 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
 
     resize(bottom_graph_->max_capacity_);
 
+    this->parallel_searcher_ =
+        std::make_shared<ParallelSearcher>(common_param, build_pool_, neighbors_mutex_);
+
     UnorderedMap<std::string, float> default_param(common_param.allocator_.get());
     default_param.insert(
         {PREFETCH_DEPTH_CODE, (this->basic_flatten_codes_->code_size_ + 63.0) / 64.0});
@@ -477,8 +480,14 @@ HGraph::search_one_graph(const void* query,
                          const FlattenInterfacePtr& flatten,
                          InnerSearchParam& inner_search_param) const {
     auto visited_list = this->pool_->TakeOne();
-    auto result = this->searcher_->Search(
-        graph, flatten, visited_list, query, inner_search_param, this->label_table_);
+    DistHeapPtr result = nullptr;
+    if (inner_search_param.use_muti_threads_for_one_query && inner_search_param.level_0) {
+        result = this->parallel_searcher_->Search(
+            graph, flatten, visited_list, query, inner_search_param);
+    } else {
+        result = this->searcher_->Search(
+            graph, flatten, visited_list, query, inner_search_param, this->label_table_);
+    }
     this->pool_->ReturnOne(visited_list);
     return result;
 }
