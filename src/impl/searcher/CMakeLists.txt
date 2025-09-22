@@ -2,6 +2,8 @@
 set (SEARCHER_SRC
     basic_searcher.cpp
     basic_searcher.h
+    parallel_searcher.cpp
+    parallel_searcher.h
 )
 
 add_library (searcher OBJECT ${SEARCHER_SRC})
