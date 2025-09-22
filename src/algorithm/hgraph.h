@@ -29,6 +29,7 @@
 #include "impl/basic_optimizer.h"
 #include "impl/heap/distance_heap.h"
 #include "impl/searcher/basic_searcher.h"
+#include "impl/searcher/parallel_searcher.h"
 #include "impl/thread_pool/default_thread_pool.h"
 #include "index/iterator_filter.h"
 #include "index_common_param.h"
@@ -334,6 +335,7 @@ private:
     bool build_by_base_{false};
 
     BasicSearcherPtr searcher_;
+    ParallelSearcherPtr parallel_searcher_;
 
     std::default_random_engine level_generator_{2021};
     double mult_{1.0};
