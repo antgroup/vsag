@@ -40,6 +40,11 @@ public:
     int range_search_limit_size{-1};
     int64_t parallel_search_thread_count{1};
 
+    //​​Multi-threaded search for a single query​
+    bool use_muti_threads_for_one_query{false};
+    uint64_t parallel_search_thread_count_per_query{4};
+    bool level_0{false};
+
     // for ivf
     int scan_bucket_size{1};
     float factor{2.0F};
@@ -66,6 +71,9 @@ public:
             scan_bucket_size = other.scan_bucket_size;
             factor = other.factor;
             first_order_scan_ratio = other.first_order_scan_ratio;
+            use_muti_threads_for_one_query = other.use_muti_threads_for_one_query;
+            parallel_search_thread_count_per_query = other.parallel_search_thread_count_per_query;
+            level_0 = other.level_0;
         }
         return *this;
     }
