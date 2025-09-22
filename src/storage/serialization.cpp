@@ -15,6 +15,7 @@
 
 #include "serialization.h"
 
+#include <cstring>
 namespace vsag {
 
 void
@@ -45,20 +46,19 @@ Metadata::make_sure_metadata_not_null() {
 FooterPtr
 Footer::Parse(StreamReader& reader) {
     // check cigam
-    reader.PushSeek(reader.Length() - 8);
+    reader.PushSeek(reader.Length() - 16);
+    char buffer[16] = {};
+    reader.Read(buffer, 16);
     char cigam[9] = {};
-    reader.Read(cigam, 8);
+    memcpy(cigam, buffer + 8, 8);
     logger::debug("deserial cigam: {}", cigam);
     if (strcmp(cigam, SERIAL_MAGIC_END) != 0) {
         reader.PopSeek();
         return nullptr;
     }
-    reader.PopSeek();
 
-    // get footer length
-    reader.PushSeek(reader.Length() - 16);
     uint64_t length;
-    StreamReader::ReadObj(reader, length);
+    memcpy(&length, buffer, 8);
     logger::debug("deserial length: {}", length);
     if (length > reader.Length()) {
         reader.PopSeek();
@@ -68,8 +68,10 @@ Footer::Parse(StreamReader& reader) {
 
     // check magic
     reader.PushSeek(reader.Length() - length);
+    std::vector<char> meta_buffer(length);
+    reader.Read(meta_buffer.data(), length);
     char magic[9] = {};
-    reader.Read(magic, 8);
+    memcpy(magic, meta_buffer.data(), 8);
     logger::debug("deserial magic: {}", magic);
     if (strcmp(magic, SERIAL_MAGIC_BEGIN) != 0) {
         reader.PopSeek();
@@ -77,9 +79,12 @@ Footer::Parse(StreamReader& reader) {
     }
     // no popseek, continue to parse
 
-    auto metadata_string = StreamReader::ReadString(reader);
+    size_t metadata_string_length = 0;
+    std::vector<char> string_buffer(length);
+    memcpy(&metadata_string_length, meta_buffer.data() + 8, 8);
+    std::string metadata_string(meta_buffer.data() + 16, metadata_string_length);
     uint32_t checksum;
-    StreamReader::ReadObj(reader, checksum);
+    memcpy(&checksum, meta_buffer.data() + 16 + metadata_string_length, 4);
     logger::debug("deserial checksum: 0x{:x}", checksum);
     if (calculate_checksum(metadata_string) != checksum) {
         reader.PopSeek();
