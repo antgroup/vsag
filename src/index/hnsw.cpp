@@ -32,7 +32,6 @@
 #include "impl/odescent/odescent_graph_builder.h"
 #include "index/hnsw_zparameters.h"
 #include "io/memory_block_io_parameter.h"
-#include "omp.h"
 #include "quantization/fp32_quantizer_parameter.h"
 #include "storage/empty_index_binary_set.h"
 #include "storage/serialization.h"
@@ -130,12 +129,7 @@ HNSW::build(const DatasetPtr& base) {
         std::vector<int64_t> failed_ids;
         {
             SlowTaskTimer t("hnsw graph");
-            omp_set_num_threads(32);
-#pragma omp parallel for schedule(dynamic, 100)
             for (int64_t i = 0; i < num_elements; ++i) {
-                if (i % 10000 == 0) {
-                    std::cout << i << std::endl;
-                }
                 // noexcept runtime
                 if (!alg_hnsw_->addPoint((const void*)((char*)vectors + data_size * i), ids[i])) {
                     logger::debug("duplicate point: {}", ids[i]);
