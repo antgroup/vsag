@@ -143,6 +143,7 @@ extern const char* const HGRAPH_BUILD_BY_BASE_QUANTIZATION;
 extern const char* const HGRAPH_BASE_QUANTIZATION_TYPE;
 extern const char* const HGRAPH_GRAPH_MAX_DEGREE;
 extern const char* const HGRAPH_BUILD_EF_CONSTRUCTION;
+extern const char* const HGRAPH_BUILD_ALPHA;
 extern const char* const HGRAPH_INIT_CAPACITY;
 extern const char* const HGRAPH_GRAPH_TYPE;
 extern const char* const HGRAPH_GRAPH_STORAGE_TYPE;
