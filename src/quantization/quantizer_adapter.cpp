@@ -98,5 +98,9 @@ QuantizerAdapter<QuantT, DataT>::DecodeBatchImpl(const uint8_t* codes,
     }
     return true;
 }
-
+template <typename QuantT, typename DataT>
+float
+QuantizerAdapter<QuantT, DataT>::ComputeImpl(const uint8_t* codes1, const uint8_t* codes2) {
+    return this->inner_quantizer_->Compute(codes1, codes2);
+}
 }  // namespace vsag

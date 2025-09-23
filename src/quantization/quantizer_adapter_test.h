@@ -15,11 +15,13 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <cmath>
+#include <iostream>
 #include <vector>
 
 #include "fixtures.h"
 #include "quantization/computer.h"
 #include "quantizer.h"
+#include "simd/basic_func.h"
 
 using namespace vsag;
 
@@ -64,5 +66,45 @@ TestQuantizerAdapterEncodeDecode(
                             static_cast<DataType>(out_vec[i * dim + j]));
         }
         REQUIRE(sum < error * dim);
+    }
+}
+
+template <typename T, MetricType metric, typename DataT = float>
+void
+TestQuantizerAdapterComputeCodes(
+    Quantizer<T>& quantizer, size_t dim, uint32_t count, float error = 1e-4f, bool retrain = true) {
+    std::vector<DataT> vecs;
+    if constexpr (std::is_same<DataT, float>::value == true) {
+        vecs = fixtures::generate_vectors(count, dim, false);
+    } else if constexpr (std::is_same<DataT, int8_t>::value == true) {
+        vecs = fixtures::generate_int8_codes(count, dim, false);
+    } else {
+        static_assert("Unsupported DataT type");
+    }
+
+    if (retrain) {
+        quantizer.ReTrain(reinterpret_cast<DataType*>(vecs.data()), count);
+    }
+
+    for (int64_t i = 0; i < count; ++i) {
+        auto idx1 = random() % count;
+        auto idx2 = random() % count;
+        std::vector<uint8_t> codes1(quantizer.GetCodeSize());
+        std::vector<uint8_t> codes2(quantizer.GetCodeSize());
+        quantizer.EncodeOne(reinterpret_cast<DataType*>(vecs.data() + idx1 * dim), codes1.data());
+        quantizer.EncodeOne(reinterpret_cast<DataType*>(vecs.data() + idx2 * dim), codes2.data());
+        float gt = 0.0;
+        float value = quantizer.Compute(codes1.data(), codes2.data());
+        if constexpr (metric == MetricType::METRIC_TYPE_IP ||
+                      metric == MetricType::METRIC_TYPE_COSINE) {
+            gt = 1 - INT8InnerProduct(vecs.data() + idx1 * dim, vecs.data() + idx2 * dim, &dim);
+        } else if constexpr (metric == MetricType::METRIC_TYPE_L2SQR) {
+            gt = INT8L2Sqr(vecs.data() + idx1 * dim, vecs.data() + idx2 * dim, &dim);
+        }
+        if (gt != 0.0) {
+            REQUIRE(std::abs((gt - value) / gt) < error);
+        } else {
+            REQUIRE(std::abs(gt - value) < error);
+        }
     }
 }

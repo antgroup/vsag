@@ -84,13 +84,42 @@ TestQuantizerAdapterEncodeDecodeINT8(std::string metric,
     }
 }
 
-TEST_CASE("QuantizerAdapter Encode and Decode", "[ut][QuantizerAdapter]") {
+TEST_CASE("QuantizerAdapter Encode and Decode", "[ut][QuantizerAdapter][EncodeDecode]") {
     constexpr MetricType metrics[2] = {MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_IP};
     float error = 8.0F / 255.0F * 10.0F;
     for (auto dim : dims) {
         for (auto count : counts) {
             TestQuantizerAdapterEncodeDecodeINT8<ProductQuantizer<MetricType::METRIC_TYPE_L2SQR>>(
                 "l2", dim, count, error);
+        }
+    }
+}
+
+template <typename QuantT, MetricType metric>
+void
+TestQuantizerAdapterCompute(uint64_t dim, int count, float error = 1e-5) {
+    vsag::Resource resource(vsag::Engine::CreateDefaultAllocator(), nullptr);
+    try {
+        const QuantizerParamPtr quantizer_param =
+            CreateQuantizerParam(QuantizerType::QUANTIZER_TYPE_PQ, dim);
+        const IndexCommonParam common_param =
+            CreateIndexCommonParam(dim, std::make_shared<Resource>(resource));
+        auto adapter =
+            std::make_shared<QuantizerAdapter<QuantT, int8_t>>(quantizer_param, common_param);
+        TestQuantizerAdapterComputeCodes<QuantizerAdapter<QuantT, int8_t>, metric, int8_t>(
+            *adapter, dim, count, error);
+    } catch (const vsag::VsagException& e) {
+        std::cerr << "Exception: " << e.what() << std::endl;
+        throw;
+    }
+}
+TEST_CASE("QuantizerAdapter Compute", "[ut][QuantizerAdapter][Compute]") {
+    constexpr MetricType metrics[2] = {MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_IP};
+    float error = 8.0F / 255.0F;
+    for (auto dim : dims) {
+        for (auto count : counts) {
+            TestQuantizerAdapterCompute<ProductQuantizer<MetricType::METRIC_TYPE_L2SQR>,
+                                        MetricType::METRIC_TYPE_L2SQR>(dim, count, error);
         }
     }
 }
