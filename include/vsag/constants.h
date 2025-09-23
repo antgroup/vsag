@@ -25,6 +25,8 @@ extern const char* const INDEX_SPARSE;
 extern const char* const INDEX_SINDI;
 extern const char* const INDEX_BRUTE_FORCE;
 extern const char* const INDEX_IVF;
+extern const char* const INDEX_FAISS;
+
 extern const char* const DIM;
 extern const char* const NUM_ELEMENTS;
 extern const char* const IDS;
@@ -103,6 +105,8 @@ extern const char* const PYRAMID_PARAMETER_BASE_CODES;
 extern const char* const INDEX_PARAM;
 
 extern const char PART_SLASH;
+extern const char* const FAISS_STRING;
+extern const char* const FAISS_INDEX_PATH;
 
 // statstic key
 extern const char* const STATSTIC_MEMORY;
