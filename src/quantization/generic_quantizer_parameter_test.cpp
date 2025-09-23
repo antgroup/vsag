@@ -13,9 +13,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "generic_quantizer_parameter.h"
+
 #include <catch2/catch_test_macros.hpp>
 
-#include "generic_quantizer_parameter.h"
 #include "parameter_test.h"
 
 using namespace vsag;
