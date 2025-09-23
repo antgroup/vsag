@@ -20,7 +20,7 @@
 
 #include "algorithm/hnswlib/hnswalg.h"
 #include "algorithm/hnswlib/space_l2.h"
-#include "data_cell/flatten_datacell.h"
+#include "datacell/flatten_datacell.h"
 #include "fixtures.h"
 #include "impl/allocator/safe_allocator.h"
 #include "impl/basic_optimizer.h"

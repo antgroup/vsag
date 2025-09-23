@@ -16,8 +16,8 @@
 #include "inner_index_parameter.h"
 
 #include "common.h"
-#include "data_cell/extra_info_datacell_parameter.h"
-#include "data_cell/flatten_datacell_parameter.h"
+#include "datacell/extra_info_datacell_parameter.h"
+#include "datacell/flatten_datacell_parameter.h"
 #include "impl/logger/logger.h"
 #include "inner_string_params.h"
 #include "vsag/constants.h"

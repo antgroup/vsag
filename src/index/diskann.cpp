@@ -26,7 +26,7 @@
 #include <stdexcept>
 #include <utility>
 
-#include "data_cell/flatten_datacell.h"
+#include "datacell/flatten_datacell.h"
 #include "dataset_impl.h"
 #include "impl/odescent/odescent_graph_builder.h"
 #include "io/memory_io_parameter.h"

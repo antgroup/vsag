@@ -16,7 +16,7 @@
 #include <catch2/catch_template_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
 
-#include "data_cell/sparse_vector_datacell_parameter.h"
+#include "datacell/sparse_vector_datacell_parameter.h"
 #include "fixtures.h"
 #include "impl/allocator/safe_allocator.h"
 #include "index_common_param.h"
