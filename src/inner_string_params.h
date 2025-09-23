@@ -42,6 +42,7 @@ const char* const HGRAPH_BUILD_BY_BASE_QUANTIZATION_KEY = "build_by_base";
 const char* const HGRAPH_GRAPH_KEY = "graph";
 const char* const HGRAPH_BASE_CODES_KEY = "base_codes";
 const char* const HGRAPH_EF_CONSTRUCTION_KEY = "ef_construction";
+const char* const HGRAPH_ALPHA_KEY = "alpha";
 
 // IO param key
 const char* const IO_PARAMS_KEY = "io_params";
@@ -192,6 +193,7 @@ const std::unordered_map<std::string, std::string> DEFAULT_MAP = {
     {"GRAPH_PARAM_INIT_MAX_CAPACITY", GRAPH_PARAM_INIT_MAX_CAPACITY},
     {"BUILD_THREAD_COUNT_KEY", BUILD_THREAD_COUNT_KEY},
     {"HGRAPH_EF_CONSTRUCTION_KEY", HGRAPH_EF_CONSTRUCTION_KEY},
+    {"HGRAPH_ALPHA_KEY", HGRAPH_ALPHA_KEY},
     {"BUCKETS_COUNT_KEY", BUCKETS_COUNT_KEY},
     {"BUCKET_PARAMS_KEY", BUCKET_PARAMS_KEY},
     {"IO_FILE_PATH", IO_FILE_PATH},

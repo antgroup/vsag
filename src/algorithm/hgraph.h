@@ -346,6 +346,7 @@ private:
     std::string graph_type_{GRAPH_TYPE_NSW};
 
     uint64_t ef_construct_{400};
+    float alpha_{1.0};
 
     uint64_t total_count_{0};
 

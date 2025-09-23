@@ -48,6 +48,10 @@ PyramidParameters::FromJson(const JsonType& json) {
         this->ef_construction = json[HGRAPH_EF_CONSTRUCTION_KEY];
     }
 
+    if (json.contains(HGRAPH_ALPHA_KEY)) {
+        this->alpha = json[HGRAPH_ALPHA_KEY];
+    }
+
     if (json.contains(NO_BUILD_LEVELS)) {
         const auto& no_build_levels_json = json[NO_BUILD_LEVELS];
         CHECK_ARGUMENT(no_build_levels_json.is_array(),
