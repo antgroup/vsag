@@ -18,6 +18,7 @@
 #include <catch2/reporters/catch_reporter_event_listener.hpp>
 #include <catch2/reporters/catch_reporter_registrars.hpp>
 #include <chrono>
+#include <iomanip>
 
 #include "./fixtures/test_logger.h"
 #include "vsag/vsag.h"
@@ -36,9 +37,9 @@ struct LogListener : Catch::EventListenerBase {
     void
     testCaseEnded(Catch::TestCaseStats const& testCaseStats) override {
         auto end = std::chrono::high_resolution_clock::now();
-        auto duration = std::chrono::duration_cast<std::chrono::seconds>(end - start_).count();
-        std::cout << testCaseStats.testInfo->name << ": Executed in " << duration << " seconds"
-                  << std::endl;
+        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start_).count();
+        std::cout << std::fixed << std::setprecision(3) << testCaseStats.testInfo->name
+                  << ": Executed in " << duration / 1000.0F << " seconds" << std::endl;
     }
 
 private:
