@@ -47,7 +47,9 @@ BruteForce::BruteForce(const BruteForceParameterPtr& param, const IndexCommonPar
     if (this->use_attribute_filter_) {
         this->attr_filter_index_ =
             AttributeInvertedInterface::MakeInstance(allocator_, true /*have_bucket*/);
+        this->has_attribute_ = true;
     }
+    this->has_raw_vector_ = true;
 }
 
 uint64_t
