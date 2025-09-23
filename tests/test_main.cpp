@@ -30,15 +30,15 @@ struct LogListener : Catch::EventListenerBase {
     void
     testCaseStarting(Catch::TestCaseInfo const& testInfo) override {
         start_ = std::chrono::high_resolution_clock::now();
-        std::cout << "Starting test: (" << testInfo.name << ")" << std::endl;
+        std::cout << testInfo.name << ": Test Begin" << std::endl;
     }
 
     void
     testCaseEnded(Catch::TestCaseStats const& testCaseStats) override {
         auto end = std::chrono::high_resolution_clock::now();
         auto duration = std::chrono::duration_cast<std::chrono::seconds>(end - start_).count();
-        std::cout << "Test: (" << testCaseStats.testInfo->name << ") Executed in " << duration
-                  << " seconds" << std::endl;
+        std::cout << testCaseStats.testInfo->name << ": Executed in " << duration << " seconds"
+                  << std::endl;
     }
 
 private:
