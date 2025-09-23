@@ -540,10 +540,9 @@ TEST_CASE("(Daily) HGraph Build & ContinueAdd Test", "[ft][hgraph][daily]") {
     TestHGraphBuildAndContinueAdd(test_index, resource);
 }
 
-
 static void
 TestHGraphFactor(const fixtures::HGraphTestIndexPtr& test_index,
-                              const fixtures::HGraphResourcePtr& resource) {
+                 const fixtures::HGraphResourcePtr& resource) {
     using namespace fixtures;
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
