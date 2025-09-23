@@ -15,12 +15,15 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <cmath>
+#include <cstdint>
 #include <vector>
 
 #include "fixtures.h"
+#include "metric_type.h"
 #include "quantization/computer.h"
 #include "quantizer.h"
 #include "simd/basic_func.h"
+#include "storage/serialization_template_test.h"
 
 using namespace vsag;
 
@@ -198,4 +201,36 @@ TestQuantizerAdapterComputer(Quantizer<T>& quant,
     }
     REQUIRE(count_unbounded_numeric_error / (query_count * count) <= unbounded_numeric_error_rate);
     REQUIRE(count_unbounded_related_error / (query_count * count) <= unbounded_related_error_rate);
+}
+
+template <typename QuantT, MetricType metric, typename DataT>
+void
+TestQuantizerAdapterSerializeAndDeserialize(Quantizer<QuantT>& quant1,
+                                            Quantizer<QuantT>& quant2,
+                                            int dim,
+                                            int count,
+                                            float error = 1e-5f,
+                                            float related_error = 1.0f,
+                                            float unbounded_numeric_error_rate = 1.0f,
+                                            float unbounded_related_error_rate = 1.0f,
+                                            bool retrain = true) {
+    std::vector<DataT> vecs;
+    if constexpr (std::is_same<DataT, float>::value == true) {
+        vecs = fixtures::generate_vectors(count, dim, false);
+    } else if constexpr (std::is_same<DataT, int8_t>::value == true) {
+        vecs = fixtures::generate_int8_codes(count, dim, false);
+    } else {
+        static_assert("Unsupported DataT type");
+    }
+
+    quant1.ReTrain(reinterpret_cast<DataType*>(vecs.data()), count);
+
+    test_serializion(quant1, quant2);
+
+    REQUIRE(quant1.GetCodeSize() == quant2.GetCodeSize());
+    REQUIRE(quant1.GetDim() == quant2.GetDim());
+
+    TestQuantizerAdapterEncodeDecode<QuantT, int8_t>(quant2, dim, count, error);
+    TestQuantizerAdapterComputeCodes<QuantT, metric, int8_t>(quant2, dim, count, error);
+    TestQuantizerAdapterComputer<QuantT, metric, int8_t>(quant2, dim, count, error);
 }

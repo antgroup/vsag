@@ -125,3 +125,36 @@ TEST_CASE("QuantizerAdapter Compute", "[ut][QuantizerAdapter][Compute]") {
         }
     }
 }
+
+template <typename QuantT, MetricType metric>
+void
+TestAdapterSerializeAndDeserialize(uint64_t dim, int count, float error = 1e-5) {
+    vsag::Resource resource(vsag::Engine::CreateDefaultAllocator(), nullptr);
+    try {
+        const QuantizerParamPtr quantizer_param =
+            CreateQuantizerParam(QuantizerType::QUANTIZER_TYPE_PQ, dim);
+        const IndexCommonParam common_param =
+            CreateIndexCommonParam(dim, std::make_shared<Resource>(resource));
+        auto adapter1 =
+            std::make_shared<QuantizerAdapter<QuantT, int8_t>>(quantizer_param, common_param);
+        auto adapter2 =
+            std::make_shared<QuantizerAdapter<QuantT, int8_t>>(quantizer_param, common_param);
+        TestQuantizerAdapterSerializeAndDeserialize<QuantizerAdapter<QuantT, int8_t>,
+                                                    metric,
+                                                    int8_t>(
+            *adapter1, *adapter2, dim, count, error);
+    } catch (const vsag::VsagException& e) {
+        std::cerr << "Exception: " << e.what() << std::endl;
+        throw;
+    }
+}
+TEST_CASE("QuantizerAdapter Serialize AND Deserialize", "[ut][QuantizerAdapter][Serialize]") {
+    constexpr MetricType metrics[2] = {MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_IP};
+    float error = 8.0F / 255.0F * 5.0F;
+    for (auto dim : dims) {
+        for (auto count : counts) {
+            TestAdapterSerializeAndDeserialize<ProductQuantizer<MetricType::METRIC_TYPE_L2SQR>,
+                                               MetricType::METRIC_TYPE_L2SQR>(dim, count, error);
+        }
+    }
+}
