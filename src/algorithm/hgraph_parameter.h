@@ -74,6 +74,7 @@ public:
 
 public:
     int64_t ef_search{30};
+    float topk_factor{0.0F};
     bool use_reorder{false};
     bool use_extra_info_filter{false};
     bool enable_time_record{false};

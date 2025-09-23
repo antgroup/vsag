@@ -122,7 +122,7 @@ const char* const NO_BUILD_LEVELS = "no_build_levels";
 const char* const BUCKETS_COUNT_KEY = "buckets_count";
 const char* const BUCKET_USE_RESIDUAL = "use_residual";
 const char* const IVF_SEARCH_PARAM_SCAN_BUCKETS_COUNT = "scan_buckets_count";
-const char* const IVF_SEARCH_PARAM_FACTOR = "factor";
+const char* const SEARCH_PARAM_FACTOR = "factor";
 const char* const IVF_SEARCH_PARALLELISM = "parallelism";
 const char* const SEARCH_MAX_TIME_COST_MS = "timeout_ms";
 
@@ -213,7 +213,7 @@ const std::unordered_map<std::string, std::string> DEFAULT_MAP = {
     {"ODESCENT_PARAMETER_GRAPH_ITER_TURN", ODESCENT_PARAMETER_GRAPH_ITER_TURN},
     {"ODESCENT_PARAMETER_NEIGHBOR_SAMPLE_RATE", ODESCENT_PARAMETER_NEIGHBOR_SAMPLE_RATE},
     {"EXTRA_INFO_KEY", EXTRA_INFO_KEY},
-    {"IVF_SEARCH_PARAM_FACTOR", IVF_SEARCH_PARAM_FACTOR},
+    {"SEARCH_PARAM_FACTOR", SEARCH_PARAM_FACTOR},
     {"BUCKET_PER_DATA_KEY", BUCKET_PER_DATA_KEY},
     {"IVF_PARTITION_STRATEGY_PARAMS_KEY", IVF_PARTITION_STRATEGY_PARAMS_KEY},
     {"IVF_PARTITION_STRATEGY_TYPE_KEY", IVF_PARTITION_STRATEGY_TYPE_KEY},
