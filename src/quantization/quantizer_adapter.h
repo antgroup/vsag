@@ -19,6 +19,7 @@
 #include <string>
 
 #include "index_common_param.h"
+#include "quantization/computer.h"
 #include "quantization/product_quantization/product_quantizer.h"
 #include "quantization/quantizer.h"
 #include "quantization/quantizer_parameter.h"
@@ -51,18 +52,19 @@ public:
     ComputeImpl(const uint8_t* codes1, const uint8_t* codes2);
 
     void
-    SerializeImpl(StreamWriter& writer) {};
+    SerializeImpl(StreamWriter& writer);
 
     void
-    DeserializeImpl(StreamReader& reader) {};
+    DeserializeImpl(StreamReader& reader);
 
-    // void
-    // ProcessQueryImpl(const DataType* query, Computer<FP32Quantizer<metric>>& computer) const;
+    void
+    ProcessQueryImpl(const DataType* query,
+                     Computer<QuantizerAdapter<QuantT, DataT>>& computer) const;
 
-    // void
-    // ComputeDistImpl(Computer<FP32Quantizer<metric>>& computer,
-    //                 const uint8_t* codes,
-    //                 float* dists) const;
+    void
+    ComputeDistImpl(Computer<QuantizerAdapter<QuantT, DataT>>& computer,
+                    const uint8_t* codes,
+                    float* dists) const;
 
     // void
     // ScanBatchDistImpl(Computer<FP32Quantizer<metric>>& computer,
@@ -80,8 +82,8 @@ public:
     //                        float& dists3,
     //                        float& dists4) const;
 
-    // void
-    // ReleaseComputerImpl(Computer<FP32Quantizer<metric>>& computer) const;
+    void
+    ReleaseComputerImpl(Computer<QuantizerAdapter<QuantT, DataT>>& computer) const;
 
     [[nodiscard]] std::string
     NameImpl() const {
@@ -90,8 +92,9 @@ public:
 
 private:
     using Base = Quantizer<QuantT>;
-    std::shared_ptr<Quantizer<QuantT>> inner_quantizer_{nullptr};
+    std::shared_ptr<QuantT> inner_quantizer_{nullptr};
 };
 
 template class QuantizerAdapter<ProductQuantizer<MetricType::METRIC_TYPE_L2SQR>, int8_t>;
+// template class QuantizerAdapter<FP32Quantizer<MetricType::METRIC_TYPE_L2SQR>, int8_t>;
 }  // namespace vsag

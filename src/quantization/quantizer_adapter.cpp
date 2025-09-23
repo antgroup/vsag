@@ -101,4 +101,45 @@ float
 QuantizerAdapter<QuantT, DataT>::ComputeImpl(const uint8_t* codes1, const uint8_t* codes2) {
     return this->inner_quantizer_->ComputeImpl(codes1, codes2);
 }
+
+template <typename QuantT, typename DataT>
+void
+QuantizerAdapter<QuantT, DataT>::SerializeImpl(StreamWriter& writer) {
+    this->inner_quantizer_->SerializeImpl(writer);
+}
+
+template <typename QuantT, typename DataT>
+void
+QuantizerAdapter<QuantT, DataT>::DeserializeImpl(StreamReader& reader) {
+    this->inner_quantizer_->DeserializeImpl(reader);
+}
+
+template <typename QuantT, typename DataT>
+void
+QuantizerAdapter<QuantT, DataT>::ProcessQueryImpl(
+    const DataType* query, Computer<QuantizerAdapter<QuantT, DataT>>& computer) const {
+    auto query_int8 = reinterpret_cast<const int8_t*>(query);
+    Vector<DataType> vec(this->dim_, this->allocator_);
+    for (int64_t i = 0; i < this->dim_; i++) {
+        vec[i] = static_cast<DataType>(query_int8[i]);
+    }
+    Computer<QuantT>& inner_computer = reinterpret_cast<Computer<QuantT>&>(computer);
+    this->inner_quantizer_->ProcessQueryImpl(vec.data(), inner_computer);
+}
+
+template <typename QuantT, typename DataT>
+void
+QuantizerAdapter<QuantT, DataT>::ComputeDistImpl(
+    Computer<QuantizerAdapter<QuantT, DataT>>& computer, const uint8_t* codes, float* dists) const {
+    Computer<QuantT>& inner_computer = reinterpret_cast<Computer<QuantT>&>(computer);
+    this->inner_quantizer_->ComputeDistImpl(inner_computer, codes, dists);
+}
+
+template <typename QuantT, typename DataT>
+void
+QuantizerAdapter<QuantT, DataT>::ReleaseComputerImpl(
+    Computer<QuantizerAdapter<QuantT, DataT>>& computer) const {
+    this->allocator_->Deallocate(computer.buf_);
+}
+
 }  // namespace vsag

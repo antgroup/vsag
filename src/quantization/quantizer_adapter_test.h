@@ -15,7 +15,6 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <cmath>
-#include <iostream>
 #include <vector>
 
 #include "fixtures.h"
@@ -107,4 +106,96 @@ TestQuantizerAdapterComputeCodes(
             REQUIRE(std::abs(gt - value) < error);
         }
     }
+}
+
+template <typename T, MetricType metric, typename DataT = float>
+void
+TestQuantizerAdapterComputer(Quantizer<T>& quant,
+                             size_t dim,
+                             uint32_t count,
+                             float error = 1e-5f,
+                             float related_error = 1.0f,
+                             bool retrain = true,
+                             float unbounded_numeric_error_rate = 1.0f,
+                             float unbounded_related_error_rate = 1.0f) {
+    auto query_count = 10;
+    bool need_normalize = false;
+    std::vector<DataT> vecs;
+    std::vector<DataT> queries;
+    if constexpr (std::is_same<DataT, float>::value == true) {
+        vecs = fixtures::generate_vectors(count, dim, need_normalize);
+        queries = fixtures::generate_vectors(query_count, dim, need_normalize, 165);
+    } else if constexpr (std::is_same<DataT, int8_t>::value == true) {
+        vecs = fixtures::generate_int8_codes(count, dim);
+        queries = fixtures::generate_int8_codes(query_count, dim, 165);
+    } else {
+        static_assert("Unsupported DataT type");
+    }
+
+    for (int d = 0; d < dim; d++) {
+        vecs[d] = 0.0f;
+    }
+    for (int d = 0; d < dim; d++) {
+        queries[query_count * dim / 2 + d] = 0.0f;
+    }
+
+    if (retrain) {
+        quant.ReTrain(reinterpret_cast<DataType*>(vecs.data()), count);
+    }
+
+    auto gt_func = [&](int base_idx, int query_idx) -> float {
+        if constexpr (metric == vsag::MetricType::METRIC_TYPE_IP or
+                      metric == vsag::MetricType::METRIC_TYPE_COSINE) {
+            if constexpr (std::is_same<DataT, int8_t>::value == true) {
+                return 1 - INT8InnerProduct(vecs.data() + base_idx * dim,
+                                            queries.data() + query_idx * dim,
+                                            &dim);
+            } else {
+                return 1 - InnerProduct(vecs.data() + base_idx * dim,
+                                        queries.data() + query_idx * dim,
+                                        &dim);
+            }
+        } else if constexpr (metric == vsag::MetricType::METRIC_TYPE_L2SQR) {
+            if constexpr (std::is_same<DataT, int8_t>::value == true) {
+                return INT8L2Sqr(
+                    vecs.data() + base_idx * dim, queries.data() + query_idx * dim, &dim);
+            } else {
+                return L2Sqr(vecs.data() + base_idx * dim, queries.data() + query_idx * dim, &dim);
+            }
+        }
+    };
+
+    float count_unbounded_related_error = 0, count_unbounded_numeric_error = 0;
+    for (int i = 0; i < query_count; ++i) {
+        auto computer = quant.FactoryComputer();
+        computer->SetQuery(reinterpret_cast<DataType*>(queries.data() + i * dim));
+
+        // Test Compute One Dist;
+        std::vector<uint8_t> codes1(quant.GetCodeSize() * count, 0);
+        std::vector<float> dists1(count);
+        for (int j = 0; j < count; ++j) {
+            auto gt = gt_func(j, i);
+            uint8_t* code = codes1.data() + j * quant.GetCodeSize();
+            quant.EncodeOne(reinterpret_cast<DataType*>(vecs.data() + j * dim), code);
+            quant.ComputeDist(*computer, code, dists1.data() + j);
+            REQUIRE(quant.ComputeDist(*computer, code) == dists1[j]);
+            if (std::abs(gt - dists1[j]) > error) {
+                count_unbounded_numeric_error++;
+            }
+            if (std::abs(gt - dists1[j]) > std::abs(related_error * gt)) {
+                count_unbounded_related_error++;
+            }
+        }
+
+        // Test Compute Batch
+        // std::vector<uint8_t> codes2(quant.GetCodeSize() * count);
+        // std::vector<float> dists2(count);
+        // quant.EncodeBatch(reinterpret_cast<DataType*>(vecs.data()), codes2.data(), count);
+        // quant.ScanBatchDists(*computer, count, codes2.data(), dists2.data());
+        // for (int j = 0; j < count; ++j) {
+        //     REQUIRE(fixtures::dist_t(dists1[j]) == fixtures::dist_t(dists2[j]));
+        // }
+    }
+    REQUIRE(count_unbounded_numeric_error / (query_count * count) <= unbounded_numeric_error_rate);
+    REQUIRE(count_unbounded_related_error / (query_count * count) <= unbounded_related_error_rate);
 }

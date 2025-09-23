@@ -108,6 +108,8 @@ TestQuantizerAdapterCompute(uint64_t dim, int count, float error = 1e-5) {
             std::make_shared<QuantizerAdapter<QuantT, int8_t>>(quantizer_param, common_param);
         TestQuantizerAdapterComputeCodes<QuantizerAdapter<QuantT, int8_t>, metric, int8_t>(
             *adapter, dim, count, error);
+        TestQuantizerAdapterComputer<QuantizerAdapter<QuantT, int8_t>, metric, int8_t>(
+            *adapter, dim, count, error);
     } catch (const vsag::VsagException& e) {
         std::cerr << "Exception: " << e.what() << std::endl;
         throw;
