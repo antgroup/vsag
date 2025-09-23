@@ -17,11 +17,10 @@
 
 #include <cmath>
 #include <cstdint>
-#include <iostream>
 #include <memory>
-#include <vector>
 
 #include "quantization/computer.h"
+#include "quantization/quantizer.h"
 #include "typing.h"
 
 namespace vsag {
@@ -43,7 +42,7 @@ QuantizerAdapter<QuantT, DataT>::TrainImpl(const DataType* data, size_t count) {
     for (int64_t i = 0; i < this->dim_ * count; ++i) {
         vec[i] = static_cast<DataType>(reinterpret_cast<const DataT*>(data)[i]);
     }
-    return this->inner_quantizer_->Train(vec.data(), count);
+    return this->inner_quantizer_->TrainImpl(vec.data(), count);
 }
 
 template <typename QuantT, typename DataT>
@@ -54,8 +53,7 @@ QuantizerAdapter<QuantT, DataT>::EncodeOneImpl(const DataType* data, uint8_t* co
     for (int64_t i = 0; i < this->dim_; i++) {
         vec[i] = static_cast<DataType>(data_int8[i]);
     }
-    this->inner_quantizer_->EncodeOne(vec.data(), codes);
-    return true;
+    return this->inner_quantizer_->EncodeOneImpl(vec.data(), codes);
 }
 
 template <typename QuantT, typename DataT>
@@ -68,14 +66,14 @@ QuantizerAdapter<QuantT, DataT>::EncodeBatchImpl(const DataType* data,
     for (int64_t i = 0; i < this->dim_ * count; ++i) {
         vec[i] = static_cast<DataType>(data_int8[i]);
     }
-    return this->inner_quantizer_->EncodeBatch(vec.data(), codes, count);
+    return this->inner_quantizer_->EncodeBatchImpl(vec.data(), codes, count);
 }
 
 template <typename QuantT, typename DataT>
 bool
 QuantizerAdapter<QuantT, DataT>::DecodeOneImpl(const uint8_t* codes, DataType* data) {
     Vector<DataType> vec(this->dim_, this->allocator_);
-    if (!this->inner_quantizer_->DecodeOne(codes, vec.data())) {
+    if (!this->inner_quantizer_->DecodeOneImpl(codes, vec.data())) {
         return false;
     }
     for (int64_t i = 0; i < this->dim_; i++) {
@@ -90,7 +88,7 @@ QuantizerAdapter<QuantT, DataT>::DecodeBatchImpl(const uint8_t* codes,
                                                  DataType* data,
                                                  uint64_t count) {
     Vector<DataType> vec(this->dim_ * count, this->allocator_);
-    if (!this->inner_quantizer_->DecodeBatch(codes, vec.data(), count)) {
+    if (!this->inner_quantizer_->DecodeBatchImpl(codes, vec.data(), count)) {
         return false;
     }
     for (int64_t i = 0; i < this->dim_ * count; i++) {
@@ -101,6 +99,6 @@ QuantizerAdapter<QuantT, DataT>::DecodeBatchImpl(const uint8_t* codes,
 template <typename QuantT, typename DataT>
 float
 QuantizerAdapter<QuantT, DataT>::ComputeImpl(const uint8_t* codes1, const uint8_t* codes2) {
-    return this->inner_quantizer_->Compute(codes1, codes2);
+    return this->inner_quantizer_->ComputeImpl(codes1, codes2);
 }
 }  // namespace vsag
