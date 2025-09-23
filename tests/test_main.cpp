@@ -14,9 +14,38 @@
 // limitations under the License.
 
 #include <catch2/catch_session.hpp>
+#include <catch2/catch_test_case_info.hpp>
+#include <catch2/reporters/catch_reporter_event_listener.hpp>
+#include <catch2/reporters/catch_reporter_registrars.hpp>
+#include <chrono>
 
 #include "./fixtures/test_logger.h"
 #include "vsag/vsag.h"
+
+struct LogListener : Catch::EventListenerBase {
+    using EventListenerBase::EventListenerBase;
+    ~LogListener() override {
+    }
+
+    void
+    testCaseStarting(Catch::TestCaseInfo const& testInfo) override {
+        start_ = std::chrono::high_resolution_clock::now();
+        std::cout << "Starting test: (" << testInfo.name << ")" << std::endl;
+    }
+
+    void
+    testCaseEnded(Catch::TestCaseStats const& testCaseStats) override {
+        auto end = std::chrono::high_resolution_clock::now();
+        auto duration = std::chrono::duration_cast<std::chrono::seconds>(end - start_).count();
+        std::cout << "Test: (" << testCaseStats.testInfo->name << ") Executed in " << duration
+                  << " seconds" << std::endl;
+    }
+
+private:
+    std::chrono::high_resolution_clock::time_point start_;
+};
+
+CATCH_REGISTER_LISTENER(LogListener);
 
 int
 main(int argc, char** argv) {
