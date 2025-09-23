@@ -38,9 +38,11 @@ QuantizerAdapter<QuantT, DataT>::QuantizerAdapter(const QuantizerParamPtr& param
 template <typename QuantT, typename DataT>
 bool
 QuantizerAdapter<QuantT, DataT>::TrainImpl(const DataType* data, size_t count) {
+    auto data_int8 = reinterpret_cast<const int8_t*>(data);
     Vector<DataType> vec(this->dim_ * count, this->allocator_);
+#pragma omp simd
     for (int64_t i = 0; i < this->dim_ * count; ++i) {
-        vec[i] = static_cast<DataType>(reinterpret_cast<const DataT*>(data)[i]);
+        vec[i] = static_cast<DataType>(data_int8[i]);
     }
     return this->inner_quantizer_->TrainImpl(vec.data(), count);
 }
@@ -49,6 +51,7 @@ template <typename QuantT, typename DataT>
 bool
 QuantizerAdapter<QuantT, DataT>::EncodeOneImpl(const DataType* data, uint8_t* codes) {
     auto data_int8 = reinterpret_cast<const int8_t*>(data);
+#pragma omp simd
     Vector<DataType> vec(this->dim_, this->allocator_);
     for (int64_t i = 0; i < this->dim_; i++) {
         vec[i] = static_cast<DataType>(data_int8[i]);
@@ -63,6 +66,7 @@ QuantizerAdapter<QuantT, DataT>::EncodeBatchImpl(const DataType* data,
                                                  uint64_t count) {
     auto data_int8 = reinterpret_cast<const int8_t*>(data);
     Vector<DataType> vec(this->dim_ * count, this->allocator_);
+#pragma omp simd
     for (int64_t i = 0; i < this->dim_ * count; ++i) {
         vec[i] = static_cast<DataType>(data_int8[i]);
     }
@@ -76,6 +80,7 @@ QuantizerAdapter<QuantT, DataT>::DecodeOneImpl(const uint8_t* codes, DataType* d
     if (!this->inner_quantizer_->DecodeOneImpl(codes, vec.data())) {
         return false;
     }
+#pragma omp simd
     for (int64_t i = 0; i < this->dim_; i++) {
         reinterpret_cast<DataT*>(data)[i] = static_cast<DataT>(std::round(vec[i]));
     }
@@ -91,6 +96,7 @@ QuantizerAdapter<QuantT, DataT>::DecodeBatchImpl(const uint8_t* codes,
     if (!this->inner_quantizer_->DecodeBatchImpl(codes, vec.data(), count)) {
         return false;
     }
+#pragma omp simd
     for (int64_t i = 0; i < this->dim_ * count; i++) {
         reinterpret_cast<DataT*>(data)[i] = static_cast<DataT>(std::round(vec[i]));
     }
@@ -120,6 +126,7 @@ QuantizerAdapter<QuantT, DataT>::ProcessQueryImpl(
     const DataType* query, Computer<QuantizerAdapter<QuantT, DataT>>& computer) const {
     auto query_int8 = reinterpret_cast<const int8_t*>(query);
     Vector<DataType> vec(this->dim_, this->allocator_);
+#pragma omp simd
     for (int64_t i = 0; i < this->dim_; i++) {
         vec[i] = static_cast<DataType>(query_int8[i]);
     }
