@@ -788,8 +788,11 @@ HNSW::update_vector(int64_t id, const DatasetPtr& new_base, bool force_update) {
             auto base = Dataset::Make();
 
             // check if id exists and get copied base data
-            std::reinterpret_pointer_cast<hnswlib::HierarchicalNSW>(alg_hnsw_)->copyDataByLabel(
-                id, base_data.get());
+            {
+                std::shared_lock lock(rw_mutex_);
+                std::reinterpret_pointer_cast<hnswlib::HierarchicalNSW>(alg_hnsw_)->copyDataByLabel(
+                    id, base_data.get());
+            }
             set_dataset(base, base_data.get(), 1);
 
             // search neighbors
@@ -805,6 +808,7 @@ HNSW::update_vector(int64_t id, const DatasetPtr& new_base, bool force_update) {
                                                nullptr);
 
             // check whether the neighborhood relationship is same
+            std::shared_lock lock(rw_mutex_);
             float self_dist = 0;
             try {
                 self_dist = std::reinterpret_pointer_cast<hnswlib::HierarchicalNSW>(alg_hnsw_)
@@ -827,6 +831,7 @@ HNSW::update_vector(int64_t id, const DatasetPtr& new_base, bool force_update) {
             }
         }
 
+        std::scoped_lock lock(rw_mutex_);
         // note that the validation of old_id is handled within updatePoint.
         std::reinterpret_pointer_cast<hnswlib::HierarchicalNSW>(alg_hnsw_)->updateVector(
             id, new_base_vec);
@@ -913,6 +918,7 @@ HNSW::feedback(const DatasetPtr& query,
 
 tl::expected<uint32_t, Error>
 HNSW::feedback(const DatasetPtr& result, int64_t global_optimum_tag_id, int64_t k) {
+    // use lock outside
     if (not alg_hnsw_->isValidLabel(global_optimum_tag_id)) {
         LOG_ERROR_AND_RETURNS(
             ErrorType::INVALID_ARGUMENT,
@@ -1026,6 +1032,7 @@ HNSW::pretrain(const std::vector<int64_t>& base_tag_ids,
 
     for (const int64_t& base_tag_id : base_tag_ids) {
         try {
+            std::shared_lock lock(rw_mutex_);
             std::reinterpret_pointer_cast<hnswlib::HierarchicalNSW>(alg_hnsw_)->copyDataByLabel(
                 base_tag_id, base_data.get());
             set_dataset(base, base_data.get(), 1);
@@ -1053,9 +1060,11 @@ HNSW::pretrain(const std::vector<int64_t>& base_tag_ids,
             if (topk_neighbor_tag_id == base_tag_id) {
                 continue;
             }
-
-            std::reinterpret_pointer_cast<hnswlib::HierarchicalNSW>(alg_hnsw_)->copyDataByLabel(
-                topk_neighbor_tag_id, topk_data.get());
+            {
+                std::shared_lock lock(rw_mutex_);
+                std::reinterpret_pointer_cast<hnswlib::HierarchicalNSW>(alg_hnsw_)->copyDataByLabel(
+                    topk_neighbor_tag_id, topk_data.get());
+            }
 
             for (int d = 0; d < dim_; d++) {
                 if (type_ == DataTypes::DATA_TYPE_INT8) {
@@ -1280,6 +1289,7 @@ HNSW::merge(const std::vector<MergeUnit>& merge_units) {
 tl::expected<float, Error>
 HNSW::calc_distance_by_id(const float* vector, int64_t id) const {
     std::shared_lock status_lock(index_status_mutex_);
+    std::shared_lock lock(rw_mutex_);
     if (not this->IsValidStatus()) {
         LOG_ERROR_AND_RETURNS(
             ErrorType::WRONG_STATUS, "index is in the wrong status({})", PrintStatus());
@@ -1290,6 +1300,7 @@ HNSW::calc_distance_by_id(const float* vector, int64_t id) const {
 tl::expected<DatasetPtr, Error>
 HNSW::calc_distance_by_id(const float* vector, const int64_t* ids, int64_t count) const {
     std::shared_lock status_lock(index_status_mutex_);
+    std::shared_lock lock(rw_mutex_);
     if (not this->IsValidStatus()) {
         LOG_ERROR_AND_RETURNS(
             ErrorType::WRONG_STATUS, "index is in the wrong status({})", PrintStatus());
@@ -1301,6 +1312,7 @@ HNSW::calc_distance_by_id(const float* vector, const int64_t* ids, int64_t count
 tl::expected<std::pair<int64_t, int64_t>, Error>
 HNSW::get_min_and_max_id() const {
     std::shared_lock status_lock(index_status_mutex_);
+    std::shared_lock lock(rw_mutex_);
     if (not this->IsValidStatus()) {
         LOG_ERROR_AND_RETURNS(
             ErrorType::WRONG_STATUS, "index is in the wrong status({})", PrintStatus());
@@ -1312,6 +1324,7 @@ HNSW::get_min_and_max_id() const {
 bool
 HNSW::check_id_exist(int64_t id) const {
     std::shared_lock status_lock(index_status_mutex_);
+    std::shared_lock lock(rw_mutex_);
     if (not this->IsValidStatus()) {
         return false;
     }
@@ -1322,6 +1335,7 @@ HNSW::check_id_exist(int64_t id) const {
 int64_t
 HNSW::get_num_removed_elements() const {
     std::shared_lock status_lock(index_status_mutex_);
+    std::shared_lock lock(rw_mutex_);
     if (not this->IsValidStatus()) {
         return 0;
     }
@@ -1332,6 +1346,7 @@ HNSW::get_num_removed_elements() const {
 int64_t
 HNSW::get_num_elements() const {
     std::shared_lock status_lock(index_status_mutex_);
+    std::shared_lock lock(rw_mutex_);
     if (not this->IsValidStatus()) {
         return 0;
     }
@@ -1342,6 +1357,7 @@ HNSW::get_num_elements() const {
 int64_t
 HNSW::get_memory_usage() const {
     std::shared_lock status_lock(index_status_mutex_);
+    std::shared_lock lock(rw_mutex_);
     if (not this->IsValidStatus()) {
         return 0;
     }
@@ -1356,6 +1372,7 @@ HNSW::get_memory_usage() const {
 
 uint64_t
 HNSW::estimate_memory(uint64_t num_elements) const {
+    std::shared_lock lock(rw_mutex_);
     return alg_hnsw_->estimateMemory(num_elements);
 }
 

@@ -1129,8 +1129,7 @@ HierarchicalNSW::copyDataByLabel(LabelType label, void* data_point) {
     */
 void
 HierarchicalNSW::markDelete(LabelType label) {
-    // lock all operations with element by label
-    std::unique_lock lock_table(label_lookup_lock_);
+    // no need to use lock since we use global rw lock in hnsw.cpp
     auto search = label_lookup_.find(label);
     if (search == label_lookup_.end()) {
         throw std::runtime_error("Label not found");
