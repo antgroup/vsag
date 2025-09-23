@@ -25,6 +25,10 @@ namespace vsag {
 const char* const INDEX_TYPE_HGRAPH = "hgraph";
 const char* const INDEX_TYPE_IVF = "ivf";
 const char* const INDEX_TYPE_GNO_IMI = "gno_imi";
+const char* const INDEX_TYPE_FAISS = "faiss";
+
+const char* const FAISS_STRING_KEY = "faiss_string";
+const char* const FAISS_INDEX_PATH_KEY = "index_path";
 
 const char* const TYPE_KEY = "type";
 const char* const USE_REORDER_KEY = "use_reorder";
@@ -164,6 +168,9 @@ const std::unordered_map<std::string, std::string> DEFAULT_MAP = {
     {"INDEX_TYPE_HGRAPH", INDEX_TYPE_HGRAPH},
     {"INDEX_TYPE_IVF", INDEX_TYPE_IVF},
     {"INDEX_TYPE_GNO_IMI", INDEX_TYPE_GNO_IMI},
+    {"INDEX_TYPE_FAISS", INDEX_TYPE_FAISS},
+    {"FAISS_STRING_KEY", FAISS_STRING_KEY},
+    {"FAISS_INDEX_PATH_KEY", FAISS_INDEX_PATH_KEY},
     {"HGRAPH_USE_ELP_OPTIMIZER_KEY", HGRAPH_USE_ELP_OPTIMIZER_KEY},
     {"HGRAPH_IGNORE_REORDER_KEY", HGRAPH_IGNORE_REORDER_KEY},
     {"HGRAPH_BUILD_BY_BASE_QUANTIZATION_KEY", HGRAPH_BUILD_BY_BASE_QUANTIZATION_KEY},
