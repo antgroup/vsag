@@ -49,6 +49,7 @@ public:
 
     std::vector<int32_t> no_build_levels;
     uint64_t ef_construction{100};
+    float alpha{1.0F};
 };
 
 class PyramidSearchParameters {
