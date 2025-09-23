@@ -57,6 +57,7 @@ public:
     bool build_by_base{false};
 
     uint64_t ef_construction{400};
+    float alpha{1.0F};
 
     bool support_duplicate{false};
     bool support_tombstone{false};

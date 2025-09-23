@@ -85,7 +85,8 @@ public:
     Pyramid(const PyramidParamPtr& pyramid_param, const IndexCommonParam& common_param)
         : InnerIndexInterface(pyramid_param, common_param),
           pyramid_param_(pyramid_param),
-          common_param_(common_param) {
+          common_param_(common_param),
+          alpha_(pyramid_param->alpha) {
         searcher_ = std::make_unique<BasicSearcher>(common_param_);
         flatten_interface_ptr_ =
             FlattenInterface::MakeInstance(pyramid_param_->flatten_data_cell_param, common_param_);
@@ -159,6 +160,7 @@ private:
     std::unique_ptr<BasicSearcher> searcher_ = nullptr;
     int64_t max_capacity_{0};
     int64_t cur_element_count_{0};
+    float alpha_{1.0F};
 
     std::shared_mutex resize_mutex_;
     std::mutex cur_element_count_mutex_;

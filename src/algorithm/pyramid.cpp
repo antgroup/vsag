@@ -415,7 +415,8 @@ Pyramid::Add(const DatasetPtr& base) {
                                              node->graph_,
                                              flatten_interface_ptr_,
                                              empty_mutex,
-                                             allocator_);
+                                             allocator_,
+                                             alpha_);
             }
         }
     }

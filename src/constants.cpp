@@ -146,6 +146,7 @@ const char* const HGRAPH_BUILD_BY_BASE_QUANTIZATION = "build_by_base";
 const char* const HGRAPH_BASE_QUANTIZATION_TYPE = "base_quantization_type";
 const char* const HGRAPH_GRAPH_MAX_DEGREE = "max_degree";
 const char* const HGRAPH_BUILD_EF_CONSTRUCTION = "ef_construction";
+const char* const HGRAPH_BUILD_ALPHA = "alpha";
 const char* const HGRAPH_INIT_CAPACITY = "hgraph_init_capacity";
 const char* const HGRAPH_GRAPH_TYPE = "graph_type";
 const char* const HGRAPH_GRAPH_STORAGE_TYPE = "graph_storage_type";
