@@ -1,4 +1,5 @@
 
+
 # Copyright 2024-present the vsag project
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -14,6 +15,7 @@
 # limitations under the License.
 
 
+add_subdirectory (faiss)
 add_subdirectory (simd)
 add_subdirectory (io)
 add_subdirectory (quantization)
@@ -36,7 +38,7 @@ set (VSAG_SRCS ${CPP_SRCS} ${CPP_INDEX_SRCS})
 add_library (vsag SHARED ${VSAG_SRCS})
 add_library (vsag_static STATIC ${VSAG_SRCS})
 
-set (VSAG_DEP_LIBS antlr4-autogen antlr4-runtime diskann simd io quantizer storage utils factory
+set (VSAG_DEP_LIBS antlr4-autogen antlr4-runtime diskann simd io quantizer storage utils factory faiss_avx512
       datacell ${IMPL_LIBS} ${ALGORITHM_LIBS} attr pthread m dl fmt::fmt nlohmann_json::nlohmann_json roaring)
 
 target_link_libraries (vsag ${VSAG_DEP_LIBS} coverage_config)

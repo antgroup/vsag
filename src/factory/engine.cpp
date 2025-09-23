@@ -20,6 +20,7 @@
 #include <string>
 
 #include "algorithm/brute_force.h"
+#include "algorithm/faiss.h"
 #include "algorithm/hgraph.h"
 #include "algorithm/ivf.h"
 #include "algorithm/pyramid.h"
@@ -148,6 +149,13 @@ Engine::CreateIndex(const std::string& origin_name, const std::string& parameter
             auto sparse_index =
                 std::make_shared<IndexImpl<SINDI>>(sparse_json, index_common_params);
             return sparse_index;
+        } else if (name == INDEX_FAISS) {
+            JsonType faiss_json;
+            if (parsed_params.Contains(INDEX_PARAM)) {
+                faiss_json = std::move(parsed_params[INDEX_PARAM]);
+            }
+            auto faiss_index = std::make_shared<IndexImpl<Faiss>>(faiss_json, index_common_params);
+            return faiss_index;
         } else {
             LOG_ERROR_AND_RETURNS(
                 ErrorType::UNSUPPORTED_INDEX, "failed to create index(unsupported): ", name);
