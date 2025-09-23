@@ -166,7 +166,6 @@ private:
 
     bool is_trained_{false};
     bool use_residual_{false};
-    bool use_attribute_filter_{false};
 
     FlattenInterfacePtr reorder_codes_{nullptr};
 
