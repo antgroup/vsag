@@ -39,7 +39,7 @@ static constexpr const char* IVF_PARAMS_TEMPLATE =
     {
         "type": "{INDEX_TYPE_IVF}",
         "{IVF_TRAIN_TYPE_KEY}": "{IVF_TRAIN_TYPE_KMEANS}",
-        "{IVF_USE_ATTRIBUTE_FILTER_KEY}": false,
+        "{USE_ATTRIBUTE_FILTER_KEY}": false,
         "{USE_REORDER_KEY}": false,
         "{BUILD_THREAD_COUNT_KEY}": 1,
         "{BUCKET_PARAMS_KEY}": {
@@ -233,13 +233,11 @@ IVF::IVF(const IVFParameterPtr& param, const IndexCommonParam& common_param)
         this->partition_strategy_ = std::make_shared<GNOIMIPartition>(
             common_param, param->ivf_partition_strategy_parameter);
     }
-    this->use_reorder_ = param->use_reorder;
     if (this->use_reorder_) {
         this->reorder_codes_ =
             FlattenInterface::MakeInstance(param->precise_codes_param, common_param);
     }
     this->use_residual_ = param->bucket_param->use_residual_;
-    this->use_attribute_filter_ = param->use_attribute_filter;
     if (this->use_attribute_filter_) {
         this->attr_filter_index_ =
             AttributeInvertedInterface::MakeInstance(allocator_, true /*have_bucket*/);
