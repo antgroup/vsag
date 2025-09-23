@@ -137,6 +137,20 @@ QuantizerAdapter<QuantT, DataT>::ComputeDistImpl(
 
 template <typename QuantT, typename DataT>
 void
+QuantizerAdapter<QuantT, DataT>::ScanBatchDistImpl(
+    Computer<QuantizerAdapter<QuantT, DataT>>& computer,
+    uint64_t count,
+    const uint8_t* codes,
+    float* dists) const {
+    Computer<QuantT>& inner_computer = reinterpret_cast<Computer<QuantT>&>(computer);
+    for (uint64_t i = 0; i < count; ++i) {
+        this->inner_quantizer_->ComputeDistImpl(
+            inner_computer, codes + i * this->code_size_, dists + i);
+    }
+}
+
+template <typename QuantT, typename DataT>
+void
 QuantizerAdapter<QuantT, DataT>::ReleaseComputerImpl(
     Computer<QuantizerAdapter<QuantT, DataT>>& computer) const {
     this->allocator_->Deallocate(computer.buf_);

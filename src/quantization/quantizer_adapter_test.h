@@ -188,13 +188,13 @@ TestQuantizerAdapterComputer(Quantizer<T>& quant,
         }
 
         // Test Compute Batch
-        // std::vector<uint8_t> codes2(quant.GetCodeSize() * count);
-        // std::vector<float> dists2(count);
-        // quant.EncodeBatch(reinterpret_cast<DataType*>(vecs.data()), codes2.data(), count);
-        // quant.ScanBatchDists(*computer, count, codes2.data(), dists2.data());
-        // for (int j = 0; j < count; ++j) {
-        //     REQUIRE(fixtures::dist_t(dists1[j]) == fixtures::dist_t(dists2[j]));
-        // }
+        std::vector<uint8_t> codes2(quant.GetCodeSize() * count);
+        std::vector<float> dists2(count);
+        quant.EncodeBatch(reinterpret_cast<DataType*>(vecs.data()), codes2.data(), count);
+        quant.ScanBatchDists(*computer, count, codes2.data(), dists2.data());
+        for (int j = 0; j < count; ++j) {
+            REQUIRE(fixtures::dist_t(dists1[j]) == fixtures::dist_t(dists2[j]));
+        }
     }
     REQUIRE(count_unbounded_numeric_error / (query_count * count) <= unbounded_numeric_error_rate);
     REQUIRE(count_unbounded_related_error / (query_count * count) <= unbounded_related_error_rate);
