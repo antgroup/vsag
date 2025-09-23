@@ -381,9 +381,9 @@ public:
     */
     bool
     isMarkedDeleted(InnerIdType internal_id) const {
-        std::shared_ptr<char[]> data = std::shared_ptr<char[]>(new char[size_links_level0_]);
-        getLinklistAtLevel(internal_id, 0, data.get());
-        unsigned char* ll_cur = ((unsigned char*)data.get()) + 2;
+        // no need to use fine-grained lock
+        auto src = data_level0_memory_->GetElementPtr(internal_id, offsetLevel0_);
+        unsigned char* ll_cur = ((unsigned char*)src) + 2;
         return *ll_cur & DELETE_MARK;
     }
 
