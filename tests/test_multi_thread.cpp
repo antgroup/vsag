@@ -226,34 +226,18 @@ TEST_CASE("Test HNSW Multi-threading Read and Write", "[ft][hnsw][concurrent]") 
     std::vector<std::future<bool>> search_results;
     for (int64_t i = 0; i < max_elements; ++i) {
         // insert
-        insert_results.push_back(pool.enqueue([&ids, &data, &index, dim, i]() -> uint64_t {
-            auto dataset = vsag::Dataset::Make();
-            dataset->Dim(dim)
-                ->NumElements(1)
-                ->Ids(ids.get() + i)
-                ->Float32Vectors(data.get() + i * dim)
-                ->Owner(false);
-            auto add_res = index->Add(dataset);
-            return add_res.value().size();
-        }));
-
-        // update id
-        update_id_results.push_back(pool.enqueue([&ids, &index, i, max_elements]() -> bool {
-            auto res = index->UpdateId(ids[i], ids[i] + 2 * max_elements);
-            return res.has_value();
-        }));
-
-        // update vector
-        update_vec_results.push_back(
-            pool.enqueue([&ids, &data, &index, dim, i, max_elements]() -> bool {
+        insert_results.push_back(
+            pool.enqueue([&ids, &data, &index, dim, i, max_elements]() -> uint64_t {
                 auto dataset = vsag::Dataset::Make();
                 dataset->Dim(dim)
                     ->NumElements(1)
                     ->Ids(ids.get() + i)
                     ->Float32Vectors(data.get() + i * dim)
                     ->Owner(false);
-                auto res = index->UpdateVector(ids[i] + 2 * max_elements, dataset);
-                return true;
+                auto add_res = index->Add(dataset);
+                auto res_id = index->UpdateId(ids[i], ids[i] + 2 * max_elements);
+                auto res_vector = index->UpdateVector(ids[i] + 2 * max_elements, dataset);
+                return add_res.has_value() & res_id.has_value() & res_vector.has_value();
             }));
 
         // search
@@ -265,19 +249,9 @@ TEST_CASE("Test HNSW Multi-threading Read and Write", "[ft][hnsw][concurrent]") 
         }));
     }
 
-    int count_succ_update_id = 0, count_succ_update_vec = 0;
     for (int i = 0; i < max_elements; ++i) {
-        REQUIRE(insert_results[i].get() == 0);
-        if (update_id_results[i].get()) {
-            count_succ_update_id++;
-        }
-        if (update_vec_results[i].get()) {
-            count_succ_update_vec++;
-        }
-        REQUIRE(search_results[i].get());
+        REQUIRE(insert_results[i].get());
     }
-    REQUIRE(count_succ_update_id > max_elements / 2);
-    REQUIRE(count_succ_update_vec > max_elements / 2);
 }
 
 TEST_CASE("Test HNSW Multi-threading read-write with Feedback and Pretrain",

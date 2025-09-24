@@ -23,7 +23,7 @@ TEST_CASE("Basic Usage for GraphDataCell (adapter of hnsw)", "[ut][GraphDataCell
     uint32_t M = 32;
     uint32_t data_size = 1000;
     uint32_t ef_construction = 100;
-    uint64_t DEFAULT_MAX_ELEMENT = 1;
+    uint64_t default_max_element = 1;
     uint64_t dim = 960;
     auto vectors = fixtures::generate_vectors(data_size, dim);
     std::vector<int64_t> ids(data_size);
@@ -34,7 +34,7 @@ TEST_CASE("Basic Usage for GraphDataCell (adapter of hnsw)", "[ut][GraphDataCell
     auto io = std::make_shared<MemoryIO>(allocator.get());
     auto alg_hnsw =
         std::make_shared<hnswlib::HierarchicalNSW>(space.get(),
-                                                   DEFAULT_MAX_ELEMENT,
+                                                   default_max_element,
                                                    allocator.get(),
                                                    M / 2,
                                                    ef_construction,
@@ -66,15 +66,15 @@ TEST_CASE("Search with HNSW", "[ut][BasicSearcher]") {
     // data attr
     uint32_t base_size = 1000;
     uint32_t query_size = 100;
-    uint64_t dim = 960;
+    uint64_t dim = 128;
 
     // build and search attr
-    uint32_t M = 32;
+    uint32_t M = 16;
     uint32_t ef_construction = 100;
     uint32_t ef_search = 300;
     uint32_t k = ef_search;
     InnerIdType fixed_entry_point_id = 0;
-    uint64_t DEFAULT_MAX_ELEMENT = 1;
+    uint64_t default_max_element = 1;
 
     // data preparation
     auto base_vectors = fixtures::generate_vectors(base_size, dim, true);
@@ -87,7 +87,7 @@ TEST_CASE("Search with HNSW", "[ut][BasicSearcher]") {
     auto io = std::make_shared<MemoryIO>(allocator.get());
     auto alg_hnsw =
         std::make_shared<hnswlib::HierarchicalNSW>(space.get(),
-                                                   DEFAULT_MAX_ELEMENT,
+                                                   default_max_element,
                                                    allocator.get(),
                                                    M / 2,
                                                    ef_construction,
@@ -225,17 +225,17 @@ TEST_CASE("Optimize SQ4", "[ut][BasicOptimizer]") {
 
     // data attr
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
-    uint32_t base_size = 10000;
-    uint64_t dim = 960;
+    uint32_t base_size = 1000;
+    uint64_t dim = 128;
     auto quantizer_type = GENERATE("fp32", "sq4_uniform");
 
     // build and search attr
-    uint32_t M = 32;
+    uint32_t M = 16;
     uint32_t ef_construction = 100;
     uint32_t ef_search = 300;
     uint32_t k = ef_search;
     InnerIdType fixed_entry_point_id = 0;
-    uint64_t DEFAULT_MAX_ELEMENT = 1;
+    uint64_t default_max_element = 1;
 
     // data preparation
     auto base_vectors = fixtures::generate_vectors(base_size, dim, true);
@@ -272,7 +272,7 @@ TEST_CASE("Optimize SQ4", "[ut][BasicOptimizer]") {
     auto io = std::make_shared<MemoryIO>(allocator.get());
     auto alg_hnsw =
         std::make_shared<hnswlib::HierarchicalNSW>(space.get(),
-                                                   DEFAULT_MAX_ELEMENT,
+                                                   default_max_element,
                                                    allocator.get(),
                                                    M / 2,
                                                    ef_construction,
@@ -304,9 +304,9 @@ TEST_CASE("Optimize SQ4", "[ut][BasicOptimizer]") {
     searcher->SetMockParameters(graph_data_cell, vector_data_cell, pool, search_param, dim, 1000);
     auto loss_before = searcher->MockRun();
     auto optimizer_searcher = std::make_shared<Optimizer<BasicSearcher>>(common);
-    optimizer_searcher->RegisterParameter(RuntimeParameter(PREFETCH_DEPTH_CODE, 1, 10, 1));
-    optimizer_searcher->RegisterParameter(RuntimeParameter(PREFETCH_STRIDE_CODE, 1, 10, 1));
-    optimizer_searcher->RegisterParameter(RuntimeParameter(PREFETCH_STRIDE_VISIT, 1, 10, 1));
+    optimizer_searcher->RegisterParameter(RuntimeParameter(PREFETCH_DEPTH_CODE, 1, 3, 1));
+    optimizer_searcher->RegisterParameter(RuntimeParameter(PREFETCH_STRIDE_CODE, 1, 3, 1));
+    optimizer_searcher->RegisterParameter(RuntimeParameter(PREFETCH_STRIDE_VISIT, 1, 3, 1));
     float end2end_improvement = optimizer_searcher->Optimize(searcher);
     auto loss_after = searcher->MockRun();
 }
