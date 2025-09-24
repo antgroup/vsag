@@ -64,7 +64,7 @@ TEST_CASE("create hnsw with wrong parameter", "[ut][hnsw]") {
     }
     SECTION("big max_degree") {
         auto wrong_param_str = fmt::format(build_parameter_json, 16, 1601);
-        nlohmann::json wrong_parsed_params = nlohmann::json::parse(wrong_param_str);
+        auto wrong_parsed_params = vsag::JsonType::Parse(wrong_param_str);
         REQUIRE_THROWS(vsag::HnswParameters::FromJson(wrong_parsed_params, common_param));
         auto correct_param_str = fmt::format(build_parameter_json, 16, 1600);
         auto correct_parsed_params = vsag::JsonType::Parse(correct_param_str);
