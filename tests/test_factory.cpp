@@ -15,7 +15,6 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <iostream>
-#include <nlohmann/json.hpp>
 
 #include "vsag/vsag.h"
 
@@ -26,15 +25,20 @@ TEST_CASE("Test Factory", "[ft][factory]") {
     int ef_construction = 100;
     int ef_search = 100;
 
-    nlohmann::json hnsw_parameters{
-        {"max_degree", max_degree},
-        {"ef_construction", ef_construction},
-        {"ef_search", ef_search},
-    };
-    nlohmann::json index_parameters{
-        {"dtype", "float32"}, {"metric_type", "l2"}, {"dim", dim}, {"hnsw", hnsw_parameters}};
+    auto index_parameters = R"(
+        {
+            "dim": 16,
+            "dtype": "float32",
+            "hnsw": {
+                "ef_construction": 100,
+                "ef_search": 100,
+                "max_degree": 16
+            },
+            "metric_type": "l2"
+        }
+    )";
     std::shared_ptr<vsag::Index> hnsw;
-    auto index = vsag::Factory::CreateIndex("hnsw", index_parameters.dump());
+    auto index = vsag::Factory::CreateIndex("hnsw", index_parameters);
     REQUIRE(index.has_value());
     hnsw = index.value();
     // Generate random data
@@ -60,11 +64,15 @@ TEST_CASE("Test Factory", "[ft][factory]") {
         auto query = vsag::Dataset::Make();
         query->NumElements(1)->Dim(dim)->Float32Vectors(data + i * dim)->Owner(false);
 
-        nlohmann::json parameters{
-            {"hnsw", {{"ef_search", ef_search}}},
-        };
+        std::string parameters = R"(
+            {
+                "hnsw": {
+                    "ef_search": 100
+                }
+            }
+        )";
         int64_t k = 10;
-        if (auto result = hnsw->KnnSearch(query, k, parameters.dump()); result.has_value()) {
+        if (auto result = hnsw->KnnSearch(query, k, parameters); result.has_value()) {
             if (result.value()->GetIds()[0] == i) {
                 correct++;
             }

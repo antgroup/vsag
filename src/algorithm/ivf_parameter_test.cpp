@@ -86,7 +86,7 @@ TEST_CASE("IVF Parameters Test", "[ut][IVFParameter]") {
     IVFDefaultParam index_param;
     auto param_str = generate_ivf_param(index_param);
 
-    vsag::JsonType param_json = vsag::JsonType::parse(param_str);
+    vsag::JsonType param_json = vsag::JsonType::Parse(param_str);
     auto param = std::make_shared<vsag::IVFParameter>();
     param->FromJson(param_json);
     REQUIRE(param->bucket_param->buckets_count == 3);
@@ -103,7 +103,7 @@ TEST_CASE("IVF Parameters Test", "[ut][IVFParameter]") {
     index_param.partition_strategy_type = "gno_imi";
     index_param.buckets_per_data = 2;
     param_str = generate_ivf_param(index_param);
-    param_json = vsag::JsonType::parse(param_str);
+    param_json = vsag::JsonType::Parse(param_str);
     param = std::make_shared<vsag::IVFParameter>();
     param->FromJson(param_json);
     REQUIRE(param->bucket_param->buckets_count == 200 * 50);

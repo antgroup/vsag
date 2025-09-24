@@ -68,7 +68,7 @@ TEST_CASE("Transformer Parameter ToJson Test", "[ut][VectorTransformerParameter]
         }
     )";
     auto param = std::make_shared<VectorTransformerParameter>();
-    param->FromJson(JsonType::parse(param_str));
+    param->FromJson(JsonType::Parse(param_str));
     REQUIRE(param->input_dim_ == 960);
     REQUIRE(param->pca_dim_ == 480);
     ParameterTest::TestToJson(param);

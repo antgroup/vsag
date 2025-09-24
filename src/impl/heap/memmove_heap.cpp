@@ -15,6 +15,7 @@
 
 #include "memmove_heap.h"
 
+#include <cstring>
 namespace vsag {
 template <bool max_heap, bool fixed_size>
 MemmoveHeap<max_heap, fixed_size>::MemmoveHeap(Allocator* allocator, int64_t max_size)
@@ -37,9 +38,9 @@ MemmoveHeap<max_heap, fixed_size>::Push(float dist, InnerIdType id) {
                                         CompareType()) -
                        this->ordered_buffer_.begin();
             // NOLINTNEXTLINE(bugprone-undefined-memory-manipulation)
-            std::memmove(ordered_buffer_.data() + pos + 1,
-                         ordered_buffer_.data() + pos,
-                         (max_size_ - pos) * sizeof(DistanceRecord));
+            memmove(ordered_buffer_.data() + pos + 1,
+                    ordered_buffer_.data() + pos,
+                    (max_size_ - pos) * sizeof(DistanceRecord));
             ordered_buffer_[pos] = record;
             this->cur_size_++;
             if (this->Size() > this->max_size_) {
@@ -54,9 +55,9 @@ MemmoveHeap<max_heap, fixed_size>::Push(float dist, InnerIdType id) {
             this->ordered_buffer_.begin();
         ordered_buffer_.emplace_back(record);
         // NOLINTNEXTLINE(bugprone-undefined-memory-manipulation)
-        std::memmove(ordered_buffer_.data() + pos + 1,
-                     ordered_buffer_.data() + pos,
-                     (cur_size_ - pos) * sizeof(DistanceRecord));
+        memmove(ordered_buffer_.data() + pos + 1,
+                ordered_buffer_.data() + pos,
+                (cur_size_ - pos) * sizeof(DistanceRecord));
         ordered_buffer_[pos] = record;
         cur_size_++;
     }

@@ -24,23 +24,23 @@ SparseGraphDatacellParameter::SparseGraphDatacellParameter()
 
 void
 SparseGraphDatacellParameter::FromJson(const JsonType& json) {
-    if (json.contains(GRAPH_PARAM_MAX_DEGREE)) {
-        this->max_degree_ = json[GRAPH_PARAM_MAX_DEGREE];
+    if (json.Contains(GRAPH_PARAM_MAX_DEGREE)) {
+        this->max_degree_ = json[GRAPH_PARAM_MAX_DEGREE].GetInt();
     }
-    if (json.contains(GRAPH_SUPPORT_REMOVE)) {
-        this->support_delete_ = json[GRAPH_SUPPORT_REMOVE];
+    if (json.Contains(GRAPH_SUPPORT_REMOVE)) {
+        this->support_delete_ = json[GRAPH_SUPPORT_REMOVE].GetBool();
     }
-    if (json.contains(REMOVE_FLAG_BIT)) {
-        this->remove_flag_bit_ = json[REMOVE_FLAG_BIT];
+    if (json.Contains(REMOVE_FLAG_BIT)) {
+        this->remove_flag_bit_ = static_cast<uint32_t>(json[REMOVE_FLAG_BIT].GetInt());
     }
 }
 
 JsonType
 SparseGraphDatacellParameter::ToJson() const {
     JsonType json;
-    json[GRAPH_PARAM_MAX_DEGREE] = this->max_degree_;
-    json[GRAPH_SUPPORT_REMOVE] = support_delete_;
-    json[REMOVE_FLAG_BIT] = remove_flag_bit_;
+    json[GRAPH_PARAM_MAX_DEGREE].SetInt(this->max_degree_);
+    json[GRAPH_SUPPORT_REMOVE].SetBool(this->support_delete_);
+    json[REMOVE_FLAG_BIT].SetInt(this->remove_flag_bit_);
     return json;
 }
 

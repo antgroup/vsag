@@ -24,7 +24,7 @@ ExtraInfoDataCellParameter::ExtraInfoDataCellParameter() = default;
 
 void
 ExtraInfoDataCellParameter::FromJson(const JsonType& json) {
-    CHECK_ARGUMENT(json.contains(IO_PARAMS_KEY),
+    CHECK_ARGUMENT(json.Contains(IO_PARAMS_KEY),
                    fmt::format("extra info interface parameters must contains {}", IO_PARAMS_KEY));
     this->io_parameter = IOParameter::GetIOParameterByJson(json[IO_PARAMS_KEY]);
 }
@@ -32,7 +32,7 @@ ExtraInfoDataCellParameter::FromJson(const JsonType& json) {
 JsonType
 ExtraInfoDataCellParameter::ToJson() const {
     JsonType json;
-    json[IO_PARAMS_KEY] = this->io_parameter->ToJson();
+    json[IO_PARAMS_KEY].SetJson(this->io_parameter->ToJson());
     return json;
 }
 bool

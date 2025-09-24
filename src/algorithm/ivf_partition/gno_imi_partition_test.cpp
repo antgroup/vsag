@@ -40,7 +40,7 @@ TEST_CASE("GNO-IMI Partition Basic Test", "[ut][GNOIMIPartition]") {
             "second_order_buckets_count": 10
         }
     })";
-    vsag::JsonType param_json = vsag::JsonType::parse(param_str);
+    vsag::JsonType param_json = vsag::JsonType::Parse(param_str);
     auto strategy_param = std::make_shared<vsag::IVFPartitionStrategyParameters>();
     strategy_param->FromJson(param_json);
     auto partition = std::make_unique<GNOIMIPartition>(param, strategy_param);
@@ -126,7 +126,7 @@ TEST_CASE("GNO-IMI Partition Serialize Test", "[ut][GNOIMIPartition]") {
             "second_order_buckets_count": 10
         }
     })";
-    vsag::JsonType param_json = vsag::JsonType::parse(param_str);
+    vsag::JsonType param_json = vsag::JsonType::Parse(param_str);
     auto strategy_param = std::make_shared<vsag::IVFPartitionStrategyParameters>();
     strategy_param->FromJson(param_json);
     auto partition = std::make_unique<GNOIMIPartition>(param, strategy_param);

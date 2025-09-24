@@ -29,22 +29,23 @@ IVFPartitionStrategyParameters::IVFPartitionStrategyParameters() = default;
 
 void
 IVFPartitionStrategyParameters::FromJson(const JsonType& json) {
-    if (json[IVF_TRAIN_TYPE_KEY] == IVF_TRAIN_TYPE_KMEANS) {
+    if (json[IVF_TRAIN_TYPE_KEY].GetString() == IVF_TRAIN_TYPE_KMEANS) {
         this->partition_train_type = IVFNearestPartitionTrainerType::KMeansTrainer;
-    } else if (json[IVF_TRAIN_TYPE_KEY] == IVF_TRAIN_TYPE_RANDOM) {
+    } else if (json[IVF_TRAIN_TYPE_KEY].GetString() == IVF_TRAIN_TYPE_RANDOM) {
         this->partition_train_type = IVFNearestPartitionTrainerType::RandomTrainer;
     }
 
-    if (json[IVF_PARTITION_STRATEGY_TYPE_KEY] == IVF_PARTITION_STRATEGY_TYPE_NEAREST) {
+    if (json[IVF_PARTITION_STRATEGY_TYPE_KEY].GetString() == IVF_PARTITION_STRATEGY_TYPE_NEAREST) {
         this->partition_strategy_type = IVFPartitionStrategyType::IVF;
-    } else if (json[IVF_PARTITION_STRATEGY_TYPE_KEY] == IVF_PARTITION_STRATEGY_TYPE_GNO_IMI) {
+    } else if (json[IVF_PARTITION_STRATEGY_TYPE_KEY].GetString() ==
+               IVF_PARTITION_STRATEGY_TYPE_GNO_IMI) {
         this->partition_strategy_type = IVFPartitionStrategyType::GNO_IMI;
     }
 
     this->gnoimi_param = std::make_shared<GNOIMIParameter>();
     if (this->partition_strategy_type == IVFPartitionStrategyType::GNO_IMI) {
         CHECK_ARGUMENT(
-            json.contains(IVF_PARTITION_STRATEGY_TYPE_GNO_IMI),
+            json.Contains(IVF_PARTITION_STRATEGY_TYPE_GNO_IMI),
             fmt::format("partition strategy parameters must contains {} when strategy type is {}",
                         IVF_PARTITION_STRATEGY_TYPE_GNO_IMI,
                         IVF_PARTITION_STRATEGY_TYPE_GNO_IMI));
@@ -56,18 +57,18 @@ JsonType
 IVFPartitionStrategyParameters::ToJson() const {
     JsonType json;
     if (this->partition_train_type == IVFNearestPartitionTrainerType::KMeansTrainer) {
-        json[IVF_TRAIN_TYPE_KEY] = IVF_TRAIN_TYPE_KMEANS;
+        json[IVF_TRAIN_TYPE_KEY].SetString(IVF_TRAIN_TYPE_KMEANS);
     } else if (this->partition_train_type == IVFNearestPartitionTrainerType::RandomTrainer) {
-        json[IVF_TRAIN_TYPE_KEY] = IVF_TRAIN_TYPE_RANDOM;
+        json[IVF_TRAIN_TYPE_KEY].SetString(IVF_TRAIN_TYPE_RANDOM);
     }
 
     if (this->partition_strategy_type == IVFPartitionStrategyType::IVF) {
-        json[IVF_PARTITION_STRATEGY_TYPE_KEY] = IVF_PARTITION_STRATEGY_TYPE_NEAREST;
+        json[IVF_PARTITION_STRATEGY_TYPE_KEY].SetString(IVF_PARTITION_STRATEGY_TYPE_NEAREST);
     } else if (this->partition_strategy_type == IVFPartitionStrategyType::GNO_IMI) {
-        json[IVF_PARTITION_STRATEGY_TYPE_KEY] = IVF_PARTITION_STRATEGY_TYPE_GNO_IMI;
+        json[IVF_PARTITION_STRATEGY_TYPE_KEY].SetString(IVF_PARTITION_STRATEGY_TYPE_GNO_IMI);
     }
     if (this->partition_strategy_type == IVFPartitionStrategyType::GNO_IMI) {
-        json[IVF_PARTITION_STRATEGY_TYPE_GNO_IMI] = this->gnoimi_param->ToJson();
+        json[IVF_PARTITION_STRATEGY_TYPE_GNO_IMI].SetJson(this->gnoimi_param->ToJson());
     }
     return json;
 }

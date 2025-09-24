@@ -13,6 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "json_wrapper.h"
 #include "simd/simd.h"
 #include "test_index.h"
 
@@ -22,12 +23,19 @@ TEST_CASE("hnsw int8 recall", "[ft][index][hnsw]") {
     int64_t num_vectors = 1000;
     int64_t dim = 104;
 
-    nlohmann::json hnsw_parameters{{"max_degree", 12}, {"ef_construction", 50}, {"ef_search", 50}};
-    nlohmann::json index_parameters{
-        {"dtype", "int8"}, {"metric_type", "ip"}, {"dim", dim}, {"hnsw", hnsw_parameters}};
+    std::string index_parameters = R"({
+        "dim": 104,
+        "dtype": "int8",
+        "hnsw": {
+            "ef_construction": 50,
+            "ef_search": 50,
+            "max_degree": 12
+        },
+        "metric_type": "ip"
+    })";
+
     std::shared_ptr<vsag::Index> hnsw;
-    if (auto index = vsag::Factory::CreateIndex("hnsw", index_parameters.dump());
-        index.has_value()) {
+    if (auto index = vsag::Factory::CreateIndex("hnsw", index_parameters); index.has_value()) {
         hnsw = index.value();
     } else {
         std::cout << "Build HNSW Error" << std::endl;
@@ -939,9 +947,9 @@ TEST_CASE("generate build parameters", "[ft][index]") {
     auto parameters = vsag::generate_build_parameters(metric_type, num_elements, dim);
 
     REQUIRE(parameters.has_value());
-    auto json = nlohmann::json::parse(parameters.value());
-    REQUIRE(json["dim"] == dim);
-    REQUIRE(json["diskann"]["pq_dims"] == dim / 4);
+    auto json = vsag::JsonWrapper::Parse(parameters.value());
+    REQUIRE(json["dim"].GetInt() == dim);
+    REQUIRE(json["diskann"]["pq_dims"].GetInt() == dim / 4);
 }
 
 TEST_CASE("estimate search cost", "[ft][index]") {

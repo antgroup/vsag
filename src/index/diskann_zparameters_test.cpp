@@ -32,6 +32,6 @@ TEST_CASE("create diskann with correct parameter", "[ut][diskann]") {
             "pq_sample_rate": 0.5
         }
         )";
-    nlohmann::json parsed_params = nlohmann::json::parse(build_parameter_json);
+    vsag::JsonType parsed_params = vsag::JsonType::Parse(build_parameter_json);
     vsag::DiskannParameters::FromJson(parsed_params, common_param);
 }

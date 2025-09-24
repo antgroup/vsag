@@ -728,7 +728,7 @@ HNSW::deserialize(std::istream& in_stream) {
 
         alg_hnsw_->loadIndex(reader, this->space_.get());
 
-        if (use_conjugate_graph_ and footer->GetMetadata()->Get("has_conjugate_graph")) {
+        if (use_conjugate_graph_ and footer->GetMetadata()->Get("has_conjugate_graph").GetBool()) {
             if (not conjugate_graph_->Deserialize(reader).has_value()) {
                 throw std::runtime_error("error in deserialize conjugate graph");
             }
@@ -745,17 +745,17 @@ HNSW::deserialize(std::istream& in_stream) {
 std::string
 HNSW::GetStats() const {
     JsonType j;
-    j[STATSTIC_DATA_NUM] = GetNumElements();
-    j[STATSTIC_INDEX_NAME] = INDEX_HNSW;
-    j[STATSTIC_MEMORY] = GetMemoryUsage();
+    j[STATSTIC_DATA_NUM].SetInt(GetNumElements());
+    j[STATSTIC_INDEX_NAME].SetString(INDEX_HNSW);
+    j[STATSTIC_MEMORY].SetInt(GetMemoryUsage());
 
     {
         std::lock_guard<std::mutex> lock(stats_mutex_);
         for (auto& item : result_queues_) {
-            j[item.first] = item.second.GetAvgResult();
+            j[item.first].SetFloat(item.second.GetAvgResult());
         }
     }
-    return j.dump();
+    return j.Dump(4);
 }
 
 tl::expected<bool, Error>
@@ -1209,8 +1209,8 @@ extract_data_and_graph(const std::vector<MergeUnit>& merge_units,
                        Allocator* allocator) {
     for (const auto& merge_unit : merge_units) {
         auto stat_string = merge_unit.index->GetStats();
-        auto stats = JsonType::parse(stat_string);
-        std::string index_name = stats[STATSTIC_INDEX_NAME];
+        auto stats = JsonType::Parse(stat_string);
+        std::string index_name = stats[STATSTIC_INDEX_NAME].GetString();
         auto hnsw = std::dynamic_pointer_cast<HNSW>(merge_unit.index);
         hnsw->ExtractDataAndGraph(data, graph, ids, merge_unit.id_map_func, allocator);
     }

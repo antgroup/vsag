@@ -29,7 +29,7 @@ namespace vsag {
 
 tl::expected<bool, Error>
 check_diskann_hnsw_build_parameters(const std::string& json_string) {
-    JsonType parsed_params = JsonType::parse(json_string);
+    JsonType parsed_params = JsonType::Parse(json_string);
     std::shared_ptr<vsag::Resource> resource =
         std::make_shared<vsag::ResourceOwnerWrapper>(new vsag::Resource(), true);
 
@@ -40,12 +40,12 @@ check_diskann_hnsw_build_parameters(const std::string& json_string) {
         return tl::unexpected<Error>(e.error_);
     }
 
-    if (not parsed_params.contains(INDEX_HNSW)) {
+    if (not parsed_params.Contains(INDEX_HNSW)) {
         LOG_ERROR_AND_RETURNS(ErrorType::INVALID_ARGUMENT,
                               fmt::format("parameters must contains {}", INDEX_HNSW));
     }
 
-    if (not parsed_params.contains(INDEX_DISKANN)) {
+    if (not parsed_params.Contains(INDEX_DISKANN)) {
         LOG_ERROR_AND_RETURNS(ErrorType::INVALID_ARGUMENT,
                               fmt::format("parameters must contains {}", INDEX_DISKANN));
     }

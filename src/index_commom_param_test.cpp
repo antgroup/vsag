@@ -29,7 +29,7 @@ TEST_CASE("IndexCommonParam Basic Test", "[ut][IndexCommonParam]") {
             "dim": 12
         }
         )";
-        auto parsed_params = nlohmann::json::parse(build_parameter_json);
+        auto parsed_params = vsag::JsonType::Parse(build_parameter_json);
         REQUIRE_THROWS(vsag::IndexCommonParam::CheckAndCreate(parsed_params, resource));
     }
 
@@ -41,7 +41,7 @@ TEST_CASE("IndexCommonParam Basic Test", "[ut][IndexCommonParam]") {
             "dim": 12
         }
         )";
-        auto parsed_params = nlohmann::json::parse(build_parameter_json);
+        auto parsed_params = vsag::JsonType::Parse(build_parameter_json);
         REQUIRE_THROWS(vsag::IndexCommonParam::CheckAndCreate(parsed_params, resource));
     }
 
@@ -53,7 +53,7 @@ TEST_CASE("IndexCommonParam Basic Test", "[ut][IndexCommonParam]") {
             "dim": -1
         }
         )";
-        auto parsed_params = nlohmann::json::parse(build_parameter_json);
+        auto parsed_params = vsag::JsonType::Parse(build_parameter_json);
         REQUIRE_THROWS(vsag::IndexCommonParam::CheckAndCreate(parsed_params, resource));
     }
 
@@ -66,7 +66,7 @@ TEST_CASE("IndexCommonParam Basic Test", "[ut][IndexCommonParam]") {
             "extra_info_size": 38
         }
         )";
-        auto parsed_params = nlohmann::json::parse(build_parameter_json);
+        auto parsed_params = vsag::JsonType::Parse(build_parameter_json);
         auto param = vsag::IndexCommonParam::CheckAndCreate(parsed_params, resource);
         REQUIRE(param.metric_ == vsag::MetricType::METRIC_TYPE_L2SQR);
         REQUIRE(param.dim_ == 12);

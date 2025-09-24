@@ -24,7 +24,7 @@ namespace vsag {
 FlattenInterfaceParamPtr
 CreateFlattenParam(const JsonType& json) {
     FlattenInterfaceParamPtr param = nullptr;
-    if (json.contains(CODES_TYPE_KEY) && json[CODES_TYPE_KEY] == SPARSE_CODES) {
+    if (json.Contains(CODES_TYPE_KEY) && json[CODES_TYPE_KEY].GetString() == SPARSE_CODES) {
         param = std::make_shared<SparseVectorDataCellParameter>();
     } else {
         param = std::make_shared<FlattenDataCellParameter>();

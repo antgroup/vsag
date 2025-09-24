@@ -69,7 +69,7 @@ generate_pyramid(const PyramidDefaultParam& param) {
 TEST_CASE("Pyramid Parameters Test", "[ut][PyramidParameters]") {
     PyramidDefaultParam index_param;
     auto param_str = generate_pyramid(index_param);
-    vsag::JsonType param_json = vsag::JsonType::parse(param_str);
+    vsag::JsonType param_json = vsag::JsonType::Parse(param_str);
     auto param = std::make_shared<vsag::PyramidParameters>();
     param->FromJson(param_json);
     vsag::ParameterTest::TestToJson(param);
@@ -86,7 +86,8 @@ TEST_CASE("Pyramid Parameters Test", "[ut][PyramidParameters]") {
             "no_build_levels": 2
         }
         )";
-        REQUIRE_THROWS(param->FromJson(invalid_param_str1));
+        auto invalid_param_json = vsag::JsonType::Parse(invalid_param_str1);
+        REQUIRE_THROWS(param->FromJson(invalid_param_json));
         auto invalid_param_str2 = R"(
         {
             "odescent": {
@@ -98,7 +99,8 @@ TEST_CASE("Pyramid Parameters Test", "[ut][PyramidParameters]") {
             "no_build_levels": [1,2, "hehehe"]
         }
         )";
-        REQUIRE_THROWS(param->FromJson(invalid_param_str2));
+        invalid_param_json = vsag::JsonType::Parse(invalid_param_str2);
+        REQUIRE_THROWS(param->FromJson(invalid_param_json));
     }
 }
 

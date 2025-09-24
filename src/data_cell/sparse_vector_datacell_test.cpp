@@ -41,7 +41,7 @@ TEST_CASE("SparseDataCell Basic Test", "[ut][SparseDataCell] ") {
         )";
     int64_t max_dim = 100;
     auto param_str = fmt::format(param_temp, io_type);
-    JsonType parsed_json = JsonType::parse(param_str);
+    JsonType parsed_json = JsonType::Parse(param_str);
     auto param = std::make_shared<SparseVectorDataCellParameter>();
     param->FromJson(parsed_json);
     IndexCommonParam index_common_param;
@@ -122,7 +122,7 @@ TEST_CASE("SparseDataCell Concurrent Test", "[ut][SparseDataCell][concurrent] ")
         )";
     int64_t max_dim = 100;
     auto param_str = fmt::format(param_temp, io_type);
-    JsonType parsed_json = JsonType::parse(param_str);
+    JsonType parsed_json = JsonType::Parse(param_str);
     auto param = std::make_shared<SparseVectorDataCellParameter>();
     param->FromJson(parsed_json);
     IndexCommonParam index_common_param;

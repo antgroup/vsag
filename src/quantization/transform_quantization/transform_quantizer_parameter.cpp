@@ -27,13 +27,13 @@ TransformQuantizerParameter::TransformQuantizerParameter()
 void
 TransformQuantizerParameter::FromJson(const JsonType& json) {
     std::string chain_str;
-    if (json.contains(TQ_CHAIN)) {
-        chain_str = json[TQ_CHAIN];
+    if (json.Contains(TQ_CHAIN)) {
+        chain_str = json[TQ_CHAIN].GetString();
         this->tq_chain_ = SplitString(chain_str);
     }
 
     base_quantizer_json_ = json;
-    base_quantizer_json_[QUANTIZATION_TYPE_KEY] = tq_chain_.back();
+    base_quantizer_json_[QUANTIZATION_TYPE_KEY].SetString(tq_chain_.back());
     tq_chain_.pop_back();
 }
 
@@ -77,8 +77,8 @@ JsonType
 TransformQuantizerParameter::ToJson() const {
     JsonType json = base_quantizer_json_;
     auto tmp_tq_chain = tq_chain_;
-    tmp_tq_chain.emplace_back(json[QUANTIZATION_TYPE_KEY]);
-    json[TQ_CHAIN] = MergeStrings(tmp_tq_chain);
+    tmp_tq_chain.emplace_back(json[QUANTIZATION_TYPE_KEY].GetString());
+    json[TQ_CHAIN].SetString(MergeStrings(tmp_tq_chain));
     return json;
 }
 
@@ -99,7 +99,7 @@ TransformQuantizerParameter::CheckCompatibility(const ParamPtr& other) const {
             return false;
         }
     }
-    return this->base_quantizer_json_[QUANTIZATION_TYPE_KEY] ==
-           tq_param->base_quantizer_json_[QUANTIZATION_TYPE_KEY];
+    return this->base_quantizer_json_[QUANTIZATION_TYPE_KEY].GetString() ==
+           tq_param->base_quantizer_json_[QUANTIZATION_TYPE_KEY].GetString();
 }
 }  // namespace vsag

@@ -207,7 +207,7 @@ IVF::CheckAndMappingExternalParam(const JsonType& external_param,
     }
 
     std::string str = format_map(IVF_PARAMS_TEMPLATE, DEFAULT_MAP);
-    auto inner_json = JsonType::parse(str);
+    auto inner_json = JsonType::Parse(str);
     mapping_external_param_to_inner(external_param, external_mapping, inner_json);
 
     auto ivf_parameter = std::make_shared<IVFParameter>();
@@ -546,11 +546,11 @@ IVF::UpdateAttribute(int64_t id, const AttributeSet& new_attrs, const AttributeS
 }
 
 #define WRITE_DATACELL_WITH_NAME(writer, name, datacell)            \
-    datacell_offsets[(name)] = offset;                              \
+    datacell_offsets[(name)].SetInt(offset);                        \
     auto datacell##_start = (writer).GetCursor();                   \
     (datacell)->Serialize(writer);                                  \
     auto datacell##_size = (writer).GetCursor() - datacell##_start; \
-    datacell_sizes[(name)] = datacell##_size;                       \
+    datacell_sizes[(name)].SetInt(datacell##_size);                 \
     offset += datacell##_size;
 
 void
@@ -573,14 +573,14 @@ IVF::Serialize(StreamWriter& writer) const {
 
     // serialize footer (introduced since v0.15)
     JsonType basic_info;
-    basic_info["total_elements"] = this->total_elements_;
-    basic_info["use_reorder"] = this->use_reorder_;
-    basic_info["is_trained"] = this->is_trained_;
-    basic_info[DIM] = this->dim_;
-    basic_info[EXTRA_INFO_SIZE] = 0;
-    basic_info[INDEX_PARAM] = this->create_param_ptr_->ToString();
-    basic_info["data_type"] = this->data_type_;
-    basic_info["metric"] = this->metric_;
+    basic_info["total_elements"].SetInt(this->total_elements_);
+    basic_info["use_reorder"].SetBool(this->use_reorder_);
+    basic_info["is_trained"].SetBool(this->is_trained_);
+    basic_info[DIM].SetInt(this->dim_);
+    basic_info[EXTRA_INFO_SIZE].SetInt(0);
+    basic_info[INDEX_PARAM].SetString(this->create_param_ptr_->ToString());
+    basic_info["data_type"].SetInt(static_cast<int64_t>(this->data_type_));
+    basic_info["metric"].SetInt(static_cast<int64_t>(this->metric_));
 
     auto metadata = std::make_shared<Metadata>();
     metadata->Set(BASIC_INFO, basic_info);
@@ -591,9 +591,9 @@ IVF::Serialize(StreamWriter& writer) const {
     footer->Write(writer);
 }
 
-#define READ_DATACELL_WITH_NAME(reader, name, datacell)              \
-    reader.PushSeek(datacell_offsets[(name)].get<uint64_t>());       \
-    (datacell)->Deserialize((reader).Slice(datacell_sizes[(name)])); \
+#define READ_DATACELL_WITH_NAME(reader, name, datacell)                       \
+    reader.PushSeek(datacell_offsets[(name)].GetInt());                       \
+    (datacell)->Deserialize((reader).Slice(datacell_sizes[(name)].GetInt())); \
     (reader).PopSeek();
 
 void
@@ -631,11 +631,11 @@ IVF::Deserialize(StreamReader& reader) {
         }
 
         auto basic_info = metadata->Get(BASIC_INFO);
-        this->total_elements_ = basic_info["total_elements"];
-        this->use_reorder_ = basic_info["use_reorder"];
-        this->is_trained_ = basic_info["is_trained"];
-        if (basic_info.contains(INDEX_PARAM)) {
-            auto param_str = basic_info[INDEX_PARAM];
+        this->total_elements_ = basic_info["total_elements"].GetInt();
+        this->use_reorder_ = basic_info["use_reorder"].GetBool();
+        this->is_trained_ = basic_info["is_trained"].GetBool();
+        if (basic_info.Contains(INDEX_PARAM)) {
+            auto param_str = basic_info[INDEX_PARAM].GetString();
             auto index_param = std::make_shared<IVFParameter>();
             index_param->FromString(param_str);
             if (not this->create_param_ptr_->CheckCompatibility(index_param)) {
@@ -648,9 +648,9 @@ IVF::Deserialize(StreamReader& reader) {
         }
 
         JsonType datacell_offsets = metadata->Get(DATACELL_OFFSETS);
-        logger::debug("datacell_offsets: {}", datacell_offsets.dump());
+        logger::debug("datacell_offsets: {}", datacell_offsets.Dump());
         JsonType datacell_sizes = metadata->Get(DATACELL_SIZES);
-        logger::debug("datacell_sizes: {}", datacell_sizes.dump());
+        logger::debug("datacell_sizes: {}", datacell_sizes.Dump());
 
         READ_DATACELL_WITH_NAME(buffer_reader, "bucket", this->bucket_);
         READ_DATACELL_WITH_NAME(buffer_reader, "partition_strategy", this->partition_strategy_);
@@ -1086,8 +1086,9 @@ calculate_percentile(const std::vector<float>& sorted_data, float percentile) {
     return sorted_data[floor_index] * (1.0F - fractional) + sorted_data[ceil_index] * fractional;
 }
 
-void
-get_data_stats(const Vector<float>& data, JsonType& json) {
+JsonType
+get_data_stats(const Vector<float>& data) {
+    JsonType json;
     if (data.empty()) {
         throw std::invalid_argument("Vector cannot be empty.");
     }
@@ -1097,19 +1098,19 @@ get_data_stats(const Vector<float>& data, JsonType& json) {
         sum += val;
     }
     float mean = sum / static_cast<float>(data.size());
-    json["mean"] = mean;
+    json["mean"].SetFloat(mean);
 
     float sq_diff_sum = 0.0;
     for (float val : data) {
         sq_diff_sum += (val - mean) * (val - mean);
     }
     float variance = sq_diff_sum / static_cast<float>(data.size());
-    json["std"] = std::sqrt(variance);
+    json["std"].SetFloat(std::sqrt(variance));
 
     float min_val = *std::min_element(data.begin(), data.end());
-    json["min"] = min_val;
+    json["min"].SetFloat(min_val);
     float max_val = *std::max_element(data.begin(), data.end());
-    json["max"] = max_val;
+    json["max"].SetFloat(max_val);
 
     std::vector<float> sorted_data(data.begin(), data.end());
     std::sort(sorted_data.begin(), sorted_data.end());
@@ -1117,16 +1118,18 @@ get_data_stats(const Vector<float>& data, JsonType& json) {
     float q25 = calculate_percentile(sorted_data, 0.25);
     float q50 = calculate_percentile(sorted_data, 0.5);
     float q75 = calculate_percentile(sorted_data, 0.75);
-    json["q25"] = q25;
-    json["q50"] = q50;
-    json["q75"] = q75;
+    json["q25"].SetFloat(q25);
+    json["q50"].SetFloat(q50);
+    json["q75"].SetFloat(q75);
+
+    return json;
 }
 
 std::string
 IVF::GetStats() const {
     JsonType stats;
     // bucket_radius
-    stats["bucket_count"] = this->bucket_->bucket_count_;
+    stats["bucket_count"].SetInt(this->bucket_->bucket_count_);
     Vector<float> centroids(this->dim_, allocator_);
     Vector<float> bucket_counts(allocator_);
     Vector<float> bucket_radius(allocator_);
@@ -1145,12 +1148,10 @@ IVF::GetStats() const {
         bucket_radius.push_back(max_distance);
     }
     // bucket_count_std
-    stats["bucket_num"] = JsonType();
-    get_data_stats(bucket_counts, stats["bucket_num"]);
+    stats["bucket_num"].SetJson(get_data_stats(bucket_counts));
     // bucket_radius
-    stats["bucket_radius"] = JsonType();
-    get_data_stats(bucket_radius, stats["bucket_radius"]);
-    return stats.dump(4);
+    stats["bucket_radius"].SetJson(get_data_stats(bucket_radius));
+    return stats.Dump(4);
 }
 
 std::string
@@ -1162,7 +1163,7 @@ IVF::AnalyzeIndexBySearch(const SearchRequest& request) {
     auto param_str = request.params_str_;
     // quantization error
     this->analyze_quantizer(stats, querys->GetFloat32Vectors(), num_elements, topk, param_str);
-    return stats.dump(4);
+    return stats.Dump(4);
 }
 
 }  // namespace vsag

@@ -40,7 +40,7 @@ try_parse_parameters(const std::string& json_string) {
 
 template <typename IndexOpParameters>
 tl::expected<IndexOpParameters, Error>
-try_parse_parameters(JsonType& param_obj, IndexCommonParam index_common_param) {
+try_parse_parameters(JsonType param_obj, IndexCommonParam index_common_param) {
     try {
         return IndexOpParameters::FromJson(param_obj, index_common_param);
     } catch (const VsagException& e) {

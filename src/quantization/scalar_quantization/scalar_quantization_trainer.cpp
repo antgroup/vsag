@@ -15,6 +15,7 @@
 
 #include "scalar_quantization_trainer.h"
 
+#include <cstring>
 #include <queue>
 #include <random>
 

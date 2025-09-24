@@ -167,23 +167,23 @@ private:
         }
         auto meta_data = footer->GetMetadata();
         auto basic_info = meta_data->Get(BASIC_INFO);
-        if (not basic_info.contains(INDEX_PARAM)) {
+        if (not basic_info.Contains(INDEX_PARAM)) {
             logger::error("Index parameter not found in metadata");
             return false;
         }
         // parse basic info
-        dim_ = basic_info[DIM];
-        extra_info_size_ = basic_info["extra_info_size"];
-        data_type_ = static_cast<DataTypes>(basic_info["data_type"].get<int64_t>());
-        metric_type_ = static_cast<MetricType>(basic_info["metric"].get<int64_t>());
-        std::string inner_param = basic_info[INDEX_PARAM];
-        index_param_ = JsonType::parse(inner_param);
-        index_name_ = index_param_[INDEX_TYPE];
+        dim_ = basic_info[DIM].GetInt();
+        extra_info_size_ = basic_info["extra_info_size"].GetInt();
+        data_type_ = static_cast<DataTypes>(basic_info["data_type"].GetInt());
+        metric_type_ = static_cast<MetricType>(basic_info["metric"].GetInt());
+        std::string inner_param = basic_info[INDEX_PARAM].GetString();
+        index_param_ = JsonType::Parse(inner_param);
+        index_name_ = index_param_[INDEX_TYPE].GetString();
         logger::info("index name: {}", index_name_);
         logger::info("index dim: {}", dim_);
         logger::info("index data type: {}", DataTypesToString(data_type_));
         logger::info("index metric: {}", MetricTypeToString(metric_type_));
-        logger::info("index param: {}", index_param_.dump(4));
+        logger::info("index param: {}", index_param_.Dump(4));
         return true;
     }
 

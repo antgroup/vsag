@@ -28,7 +28,7 @@ namespace vsag {
 void
 PyramidParameters::FromJson(const JsonType& json) {
     // init graph param
-    CHECK_ARGUMENT(json.contains(GRAPH_TYPE_ODESCENT),
+    CHECK_ARGUMENT(json.Contains(GRAPH_TYPE_ODESCENT),
                    fmt::format("pyramid parameters must contains {}", GRAPH_TYPE_ODESCENT));
     const auto& graph_json = json[GRAPH_TYPE_ODESCENT];
     graph_param = GraphInterfaceParameter::GetGraphParameterByJson(
@@ -36,7 +36,7 @@ PyramidParameters::FromJson(const JsonType& json) {
     odescent_param = std::make_shared<ODescentParameter>();
     odescent_param->FromJson(graph_json);
     this->flatten_data_cell_param = std::make_shared<FlattenDataCellParameter>();
-    if (json.contains(PYRAMID_PARAMETER_BASE_CODES)) {
+    if (json.Contains(PYRAMID_PARAMETER_BASE_CODES)) {
         this->flatten_data_cell_param->FromJson(json[PYRAMID_PARAMETER_BASE_CODES]);
     } else {
         this->flatten_data_cell_param->io_parameter = std::make_shared<MemoryIOParameter>();
@@ -44,32 +44,28 @@ PyramidParameters::FromJson(const JsonType& json) {
             std::make_shared<FP32QuantizerParameter>();
     }
 
-    if (json.contains(HGRAPH_EF_CONSTRUCTION_KEY)) {
-        this->ef_construction = json[HGRAPH_EF_CONSTRUCTION_KEY];
+    if (json.Contains(HGRAPH_EF_CONSTRUCTION_KEY)) {
+        this->ef_construction = json[HGRAPH_EF_CONSTRUCTION_KEY].GetInt();
     }
 
-    if (json.contains(HGRAPH_ALPHA_KEY)) {
-        this->alpha = json[HGRAPH_ALPHA_KEY];
+    if (json.Contains(HGRAPH_ALPHA_KEY)) {
+        this->alpha = json[HGRAPH_ALPHA_KEY].GetFloat();
     }
 
-    if (json.contains(NO_BUILD_LEVELS)) {
+    if (json.Contains(NO_BUILD_LEVELS)) {
         const auto& no_build_levels_json = json[NO_BUILD_LEVELS];
-        CHECK_ARGUMENT(no_build_levels_json.is_array(),
+        CHECK_ARGUMENT(no_build_levels_json.IsArray(),
                        fmt::format("build_without_levels must be a list of integers"));
-        for (const auto& item : no_build_levels_json) {
-            CHECK_ARGUMENT(item.is_number_integer(),
-                           "build_without_levels must be a list of integers");
-        }
-        this->no_build_levels = no_build_levels_json.get<std::vector<int32_t>>();
+        this->no_build_levels = no_build_levels_json.GetVector();
     }
 }
 JsonType
 PyramidParameters::ToJson() const {
     JsonType json = InnerIndexParameter::ToJson();
-    json[GRAPH_TYPE_ODESCENT] = graph_param->ToJson();
-    json[GRAPH_TYPE_ODESCENT].update(odescent_param->ToJson());
-    json[PYRAMID_PARAMETER_BASE_CODES] = flatten_data_cell_param->ToJson();
-    json[NO_BUILD_LEVELS] = no_build_levels;
+    json[GRAPH_TYPE_ODESCENT].SetJson(graph_param->ToJson());
+    json[GRAPH_TYPE_ODESCENT].SetJson(odescent_param->ToJson());
+    json[PYRAMID_PARAMETER_BASE_CODES].SetJson(flatten_data_cell_param->ToJson());
+    json[NO_BUILD_LEVELS].SetVector(no_build_levels);
     return json;
 }
 
@@ -105,18 +101,18 @@ PyramidParameters::CheckCompatibility(const ParamPtr& other) const {
 
 PyramidSearchParameters
 PyramidSearchParameters::FromJson(const std::string& json_string) {
-    JsonType params = JsonType::parse(json_string);
+    JsonType params = JsonType::Parse(json_string);
 
     PyramidSearchParameters obj;
 
     // set obj.ef_search
-    CHECK_ARGUMENT(params.contains(INDEX_PYRAMID),
+    CHECK_ARGUMENT(params.Contains(INDEX_PYRAMID),
                    fmt::format("parameters must contains {}", INDEX_PYRAMID));
 
     CHECK_ARGUMENT(
-        params[INDEX_PYRAMID].contains(HNSW_PARAMETER_EF_RUNTIME),
+        params[INDEX_PYRAMID].Contains(HNSW_PARAMETER_EF_RUNTIME),
         fmt::format("parameters[{}] must contains {}", INDEX_PYRAMID, HNSW_PARAMETER_EF_RUNTIME));
-    obj.ef_search = params[INDEX_PYRAMID][HNSW_PARAMETER_EF_RUNTIME];
+    obj.ef_search = params[INDEX_PYRAMID][HNSW_PARAMETER_EF_RUNTIME].GetInt();
     CHECK_ARGUMENT((1 <= obj.ef_search) and (obj.ef_search <= 1000),
                    fmt::format("ef_search({}) must in range[1, 1000]", obj.ef_search));
     return obj;

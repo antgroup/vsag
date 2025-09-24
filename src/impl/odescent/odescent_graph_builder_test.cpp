@@ -82,7 +82,7 @@ TEST_CASE("ODescent Build Test", "[ut][ODescent]") {
         }}
         )";
     auto param_str = fmt::format(graph_param_temp, max_degree);
-    auto graph_param_json = vsag::JsonType::parse(param_str);
+    auto graph_param_json = vsag::JsonType::Parse(param_str);
 
     vsag::FlattenDataCellParamPtr flatten_param =
         std::make_shared<vsag::FlattenDataCellParameter>();

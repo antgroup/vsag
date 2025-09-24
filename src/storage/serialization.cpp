@@ -16,6 +16,7 @@
 #include "serialization.h"
 
 #include <cstring>
+#include <sstream>
 namespace vsag {
 
 void
@@ -40,7 +41,7 @@ Metadata::make_sure_metadata_not_null() {
     // two models not to be equal, remove this line after supporting comparing two indexes in memory
     formatted_datetime = "1970-01-01 00:00:00";
 
-    metadata_["_update_time"] = formatted_datetime;
+    metadata_["_update_time"].SetString(formatted_datetime);
 }
 
 FooterPtr
@@ -92,7 +93,7 @@ Footer::Parse(StreamReader& reader) {
     }
     reader.PopSeek();
 
-    auto metadata = std::make_shared<Metadata>(JsonType::parse(metadata_string));
+    auto metadata = std::make_shared<Metadata>(JsonType::Parse(metadata_string));
     auto footer = std::make_shared<Footer>(metadata);
     footer->length_ = metadata_string.length() + /* wrapper.length= */ 36;
     return footer;
