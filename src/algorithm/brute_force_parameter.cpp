@@ -31,16 +31,16 @@ void
 BruteForceParameter::FromJson(const JsonType& json) {
     this->flatten_param = std::make_shared<FlattenDataCellParameter>();
     this->flatten_param->FromJson(json);
-    if (json.contains(USE_ATTRIBUTE_FILTER_KEY)) {
-        this->use_attribute_filter = json[USE_ATTRIBUTE_FILTER_KEY];
+    if (json.Contains(USE_ATTRIBUTE_FILTER_KEY)) {
+        this->use_attribute_filter = json[USE_ATTRIBUTE_FILTER_KEY].GetBool();
     }
 }
 
 JsonType
 BruteForceParameter::ToJson() const {
     auto json = this->flatten_param->ToJson();
-    json[TYPE_KEY] = INDEX_BRUTE_FORCE;
-    json[USE_ATTRIBUTE_FILTER_KEY] = this->use_attribute_filter;
+    json[TYPE_KEY].SetString(INDEX_BRUTE_FORCE);
+    json[USE_ATTRIBUTE_FILTER_KEY].SetBool(this->use_attribute_filter);
     return json;
 }
 

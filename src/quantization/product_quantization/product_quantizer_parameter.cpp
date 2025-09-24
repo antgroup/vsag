@@ -26,23 +26,23 @@ ProductQuantizerParameter::ProductQuantizerParameter()
 
 void
 ProductQuantizerParameter::FromJson(const JsonType& json) {
-    if (json.contains(PRODUCT_QUANTIZATION_DIM) &&
-        json[PRODUCT_QUANTIZATION_DIM].is_number_integer()) {
-        this->pq_dim_ = json[PRODUCT_QUANTIZATION_DIM];
+    if (json.Contains(PRODUCT_QUANTIZATION_DIM) &&
+        json[PRODUCT_QUANTIZATION_DIM].IsNumberInteger()) {
+        this->pq_dim_ = json[PRODUCT_QUANTIZATION_DIM].GetInt();
     }
 
-    if (json.contains(PRODUCT_QUANTIZATION_BITS) &&
-        json[PRODUCT_QUANTIZATION_BITS].is_number_integer()) {
-        this->pq_bits_ = json[PRODUCT_QUANTIZATION_BITS];
+    if (json.Contains(PRODUCT_QUANTIZATION_BITS) &&
+        json[PRODUCT_QUANTIZATION_BITS].IsNumberInteger()) {
+        this->pq_bits_ = json[PRODUCT_QUANTIZATION_BITS].GetInt();
     }
 }
 
 JsonType
 ProductQuantizerParameter::ToJson() const {
     JsonType json;
-    json[QUANTIZATION_TYPE_KEY] = QUANTIZATION_TYPE_VALUE_PQ;
-    json[PRODUCT_QUANTIZATION_DIM] = this->pq_dim_;
-    json[PRODUCT_QUANTIZATION_BITS] = this->pq_bits_;
+    json[QUANTIZATION_TYPE_KEY].SetString(QUANTIZATION_TYPE_VALUE_PQ);
+    json[PRODUCT_QUANTIZATION_DIM].SetInt(this->pq_dim_);
+    json[PRODUCT_QUANTIZATION_BITS].SetInt(this->pq_bits_);
     return json;
 }
 

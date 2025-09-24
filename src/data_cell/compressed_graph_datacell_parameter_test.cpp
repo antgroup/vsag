@@ -30,7 +30,7 @@ TEST_CASE("CompressedGraphDatacellParameter ToJson Test",
         }
         )";
     auto param = std::make_shared<CompressedGraphDatacellParameter>();
-    auto json = JsonType::parse(param_str);
+    auto json = JsonType::Parse(param_str);
     param->FromJson(json);
     ParameterTest::TestToJson(param);
 }

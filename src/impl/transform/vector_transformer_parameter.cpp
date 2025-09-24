@@ -21,20 +21,20 @@ namespace vsag {
 
 void
 VectorTransformerParameter::FromJson(const JsonType& json) {
-    if (json.contains(INPUT_DIM)) {
-        input_dim_ = json[INPUT_DIM];
+    if (json.Contains(INPUT_DIM)) {
+        input_dim_ = json[INPUT_DIM].GetInt();
     }
 
-    if (json.contains(PCA_DIM)) {
-        pca_dim_ = json[PCA_DIM];
+    if (json.Contains(PCA_DIM)) {
+        pca_dim_ = json[PCA_DIM].GetInt();
     }
 }
 
 JsonType
 VectorTransformerParameter::ToJson() const {
     JsonType json;
-    json[PCA_DIM] = pca_dim_;
-    json[INPUT_DIM] = input_dim_;
+    json[PCA_DIM].SetInt(pca_dim_);
+    json[INPUT_DIM].SetInt(input_dim_);
     return json;
 }
 

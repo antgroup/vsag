@@ -40,7 +40,7 @@ TestComputeMetricTQ(std::string tq_chain, uint64_t dim, int count, float error =
         }}
     )";
     auto param_str = fmt::format(param_template, tq_chain, dim - 1);
-    auto param_json = vsag::JsonType::parse(param_str);
+    auto param_json = vsag::JsonType::Parse(param_str);
     param->FromJson(param_json);
 
     IndexCommonParam common_param;

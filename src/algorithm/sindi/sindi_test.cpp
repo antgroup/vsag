@@ -66,7 +66,7 @@ TEST_CASE("SINDI Basic Test", "[ut][SINDI]") {
         "window_size": 10000
     }})";
 
-    vsag::JsonType param_json = vsag::JsonType::parse(fmt::format(param_str, use_reorder));
+    vsag::JsonType param_json = vsag::JsonType::Parse(fmt::format(param_str, use_reorder));
     auto index_param = std::make_shared<vsag::SINDIParameter>();
     index_param->FromJson(param_json);
     auto index = std::make_unique<SINDI>(index_param, common_param);

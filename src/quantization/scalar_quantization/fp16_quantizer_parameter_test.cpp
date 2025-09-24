@@ -24,6 +24,6 @@ using namespace vsag;
 TEST_CASE("FP16 Quantizer Parameter ToJson Test", "[ut][FP16QuantizerParameter]") {
     std::string param_str = "{}";
     auto param = std::make_shared<FP16QuantizerParameter>();
-    param->FromJson(JsonType::parse(param_str));
+    param->FromJson(JsonType::Parse(param_str));
     ParameterTest::TestToJson(param);
 }

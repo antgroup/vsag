@@ -61,7 +61,7 @@ TEST_CASE("FlattenDataCell Basic Test", "[ut][FlattenDataCell] ") {
     for (auto& quantizer_error : quantizer_errors) {
         for (auto& metric : metrics) {
             auto param_str = fmt::format(param_temp, io_type, quantizer_error.first);
-            auto param_json = JsonType::parse(param_str);
+            auto param_json = JsonType::Parse(param_str);
             auto param = std::make_shared<FlattenDataCellParameter>();
             param->FromJson(param_json);
             IndexCommonParam common_param;

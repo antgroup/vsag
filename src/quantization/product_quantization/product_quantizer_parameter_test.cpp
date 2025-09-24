@@ -29,7 +29,7 @@ TEST_CASE("Product Quantizer Parameter ToJson Test", "[ut][ProductQuantizerParam
         }
     )";
     auto param = std::make_shared<ProductQuantizerParameter>();
-    param->FromJson(JsonType::parse(param_str));
+    param->FromJson(JsonType::Parse(param_str));
     ParameterTest::TestToJson(param);
     REQUIRE(param->pq_bits_ == 8);
     REQUIRE(param->pq_dim_ == 64);

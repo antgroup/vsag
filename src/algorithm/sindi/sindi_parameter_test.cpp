@@ -49,16 +49,16 @@ struct SINDIDefaultParam {
 std::string
 generate_sindi_param(const SINDIDefaultParam& param) {
     vsag::JsonType json;
-    json["use_reorder"] = param.use_reorder;
-    json["doc_prune_ratio"] = param.doc_prune_ratio;
-    json["window_size"] = param.window_size;
-    return json.dump();
+    json["use_reorder"].SetBool(param.use_reorder);
+    json["doc_prune_ratio"].SetFloat(param.doc_prune_ratio);
+    json["window_size"].SetInt(param.window_size);
+    return json.Dump();
 }
 
 TEST_CASE("SINDI Index Parameters Test", "[ut][SINDIParameter]") {
     SINDIDefaultParam default_param;
     std::string param_str = generate_sindi_param(default_param);
-    vsag::JsonType param_json = vsag::JsonType::parse(param_str);
+    vsag::JsonType param_json = vsag::JsonType::Parse(param_str);
     auto param = std::make_shared<vsag::SINDIParameter>();
     param->FromJson(param_json);
     REQUIRE(param->use_reorder == true);
@@ -67,15 +67,16 @@ TEST_CASE("SINDI Index Parameters Test", "[ut][SINDIParameter]") {
 
     vsag::ParameterTest::TestToJson(param);
 
-    auto search_param_str = R"(
+    auto search_param_str = R"({
         "sindi": {
             "query_prune_ratio": 0.2,
             "n_candidate": 20,
             "term_prune_ratio": 0.1
         }
-    )";
+    })";
     auto search_param = std::make_shared<vsag::SINDIParameter>();
-    search_param->FromJson(search_param_str);
+    vsag::JsonType search_param_json = vsag::JsonType::Parse(search_param_str);
+    search_param->FromJson(search_param_json);
     vsag::ParameterTest::TestToJson(search_param);
 }
 

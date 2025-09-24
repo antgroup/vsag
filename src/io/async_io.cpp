@@ -15,6 +15,9 @@
 
 #include "async_io.h"
 
+#include <fcntl.h>
+#include <unistd.h>
+
 #include <filesystem>
 
 #include "direct_io_object.h"

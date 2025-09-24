@@ -34,7 +34,7 @@ MemoryIOParameter::FromJson(const JsonType& json) {
 JsonType
 MemoryIOParameter::ToJson() const {
     JsonType json;
-    json[IO_TYPE_KEY] = IO_TYPE_VALUE_MEMORY_IO;
+    json[IO_TYPE_KEY].SetString(IO_TYPE_VALUE_MEMORY_IO);
     return json;
 }
 }  // namespace vsag

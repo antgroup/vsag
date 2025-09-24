@@ -29,15 +29,15 @@ AsyncIOParameter::AsyncIOParameter(const vsag::JsonType& json)
 
 void
 AsyncIOParameter::FromJson(const JsonType& json) {
-    CHECK_ARGUMENT(json.contains(IO_FILE_PATH), "miss file_path param in async io type");
-    this->path_ = json[IO_FILE_PATH];
+    CHECK_ARGUMENT(json.Contains(IO_FILE_PATH), "miss file_path param in async io type");
+    this->path_ = json[IO_FILE_PATH].GetString();
 }
 
 JsonType
 AsyncIOParameter::ToJson() const {
     JsonType json;
-    json[IO_TYPE_KEY] = IO_TYPE_VALUE_ASYNC_IO;
-    json[IO_FILE_PATH] = this->path_;
+    json[IO_TYPE_KEY].SetString(IO_TYPE_VALUE_ASYNC_IO);
+    json[IO_FILE_PATH].SetString(this->path_);
     return json;
 }
 }  // namespace vsag

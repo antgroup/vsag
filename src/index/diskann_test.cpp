@@ -37,7 +37,7 @@ parse_diskann_params(vsag::IndexCommonParam index_common_param) {
             "pq_sample_rate": 1.0
         }
     )";
-    nlohmann::json parsed_params = nlohmann::json::parse(build_parameter_json);
+    auto parsed_params = vsag::JsonType::Parse(build_parameter_json);
     return vsag::DiskannParameters::FromJson(parsed_params, index_common_param);
 }
 
@@ -221,23 +221,26 @@ TEST_CASE("diskann knn_search", "[ut][diskann]") {
         ->Float32Vectors(vectors.data())
         ->Owner(false);
     int64_t k = 10;
-    vsag::JsonType params{{"diskann", {{"ef_search", 100}, {"beam_search", 4}, {"io_limit", 200}}}};
+    vsag::JsonType params;
+    params["diskann"]["ef_search"].SetInt(100);
+    params["diskann"]["beam_search"].SetInt(4);
+    params["diskann"]["io_limit"].SetInt(200);
 
     SECTION("index empty") {
         auto empty_index = std::make_shared<vsag::DiskANN>(diskann_obj, common_param);
-        auto result = empty_index->KnnSearch(query, k, params.dump());
+        auto result = empty_index->KnnSearch(query, k, params.Dump());
         REQUIRE_FALSE(result.has_value());
         REQUIRE(result.error().type == vsag::ErrorType::INDEX_EMPTY);
     }
 
     SECTION("invalid parameters k is 0") {
-        auto result = index->KnnSearch(query, 0, params.dump());
+        auto result = index->KnnSearch(query, 0, params.Dump());
         REQUIRE_FALSE(result.has_value());
         REQUIRE(result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
     }
 
     SECTION("invalid parameters k less than 0") {
-        auto result = index->KnnSearch(query, -1, params.dump());
+        auto result = index->KnnSearch(query, -1, params.Dump());
         REQUIRE_FALSE(result.has_value());
         REQUIRE(result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
     }
@@ -248,38 +251,44 @@ TEST_CASE("diskann knn_search", "[ut][diskann]") {
             ->Dim(common_param.dim_ - 1)
             ->Float32Vectors(vectors.data())
             ->Owner(false);
-        auto result = index->KnnSearch(query2, k, params.dump());
+        auto result = index->KnnSearch(query2, k, params.Dump());
         REQUIRE_FALSE(result.has_value());
         REQUIRE(result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
     }
 
     SECTION("invalid parameters diskann not found") {
         vsag::JsonType invalid_params{};
-        auto result = index->KnnSearch(query, k, invalid_params.dump());
+        auto result = index->KnnSearch(query, k, invalid_params.Dump());
         REQUIRE_FALSE(result.has_value());
         REQUIRE(result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
     }
 
     SECTION("invalid parameters beam_search not found") {
-        vsag::JsonType invalid_params{{"diskann", {{"ef_search", 100}, {"io_limit", 200}}}};
+        vsag::JsonType invalid_params;
+        invalid_params["diskann"]["ef_search"].SetInt(100);
+        invalid_params["diskann"]["io_limit"].SetInt(200);
 
-        auto result = index->KnnSearch(query, k, invalid_params.dump());
+        auto result = index->KnnSearch(query, k, invalid_params.Dump());
         REQUIRE_FALSE(result.has_value());
         REQUIRE(result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
     }
 
     SECTION("invalid parameters io_limit not found") {
-        vsag::JsonType invalid_params{{"diskann", {{"ef_search", 100}, {"beam_search", 4}}}};
+        vsag::JsonType invalid_params;
+        invalid_params["diskann"]["ef_search"].SetInt(100);
+        invalid_params["diskann"]["beam_search"].SetInt(4);
 
-        auto result = index->KnnSearch(query, k, invalid_params.dump());
+        auto result = index->KnnSearch(query, k, invalid_params.Dump());
         REQUIRE_FALSE(result.has_value());
         REQUIRE(result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
     }
 
     SECTION("invalid parameters ef_search not found") {
-        vsag::JsonType invalid_params{{"diskann", {{"beam_search", 4}, {"io_limit", 200}}}};
+        vsag::JsonType invalid_params;
+        invalid_params["diskann"]["beam_search"].SetInt(4);
+        invalid_params["diskann"]["io_limit"].SetInt(200);
 
-        auto result = index->KnnSearch(query, k, invalid_params.dump());
+        auto result = index->KnnSearch(query, k, invalid_params.Dump());
         REQUIRE_FALSE(result.has_value());
         REQUIRE(result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
     }
@@ -322,39 +331,42 @@ TEST_CASE("range_search", "[ut][diskann]") {
         ->Float32Vectors(vectors.data())
         ->Owner(false);
     float radius = 9.9f;
-    vsag::JsonType params{{"diskann", {{"ef_search", 100}, {"beam_search", 4}, {"io_limit", 200}}}};
+    vsag::JsonType params;
+    params["diskann"]["ef_search"].SetInt(100);
+    params["diskann"]["beam_search"].SetInt(4);
+    params["diskann"]["io_limit"].SetInt(200);
 
     SECTION("successful case with smaller range_search_limit") {
         int64_t range_search_limit = num_elements - 1;
-        auto result = index->RangeSearch(query, 1000, params.dump(), range_search_limit);
+        auto result = index->RangeSearch(query, 1000, params.Dump(), range_search_limit);
         REQUIRE(result.has_value());
         REQUIRE((*result)->GetDim() == range_search_limit);
     }
 
     SECTION("successful case with larger range_search_limit") {
         int64_t range_search_limit = num_elements + 1;
-        auto result = index->RangeSearch(query, 1000, params.dump(), range_search_limit);
+        auto result = index->RangeSearch(query, 1000, params.Dump(), range_search_limit);
         REQUIRE(result.has_value());
         REQUIRE((*result)->GetDim() == num_elements);
     }
 
     SECTION("invalid parameter range_search_limit less than 0") {
         int64_t range_search_limit = -1;
-        auto result = index->RangeSearch(query, 1000, params.dump(), range_search_limit);
+        auto result = index->RangeSearch(query, 1000, params.Dump(), range_search_limit);
         REQUIRE(result.has_value());
         REQUIRE((*result)->GetDim() == num_elements);
     }
 
     SECTION("invalid parameter range_search_limit equals to 0") {
         int64_t range_search_limit = 0;
-        auto result = index->RangeSearch(query, 1000, params.dump(), range_search_limit);
+        auto result = index->RangeSearch(query, 1000, params.Dump(), range_search_limit);
         REQUIRE_FALSE(result.has_value());
         REQUIRE(result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
     }
 
     SECTION("index empty") {
         auto empty_index = std::make_shared<vsag::DiskANN>(diskann_obj, common_param);
-        auto result = empty_index->RangeSearch(query, radius, params.dump());
+        auto result = empty_index->RangeSearch(query, radius, params.Dump());
         REQUIRE_FALSE(result.has_value());
         REQUIRE(result.error().type == vsag::ErrorType::INDEX_EMPTY);
     }
@@ -365,7 +377,7 @@ TEST_CASE("range_search", "[ut][diskann]") {
             ->Dim(common_param.dim_)
             ->Float32Vectors(vectors.data())
             ->Owner(false);
-        auto result = index->RangeSearch(query2, 0, params.dump());
+        auto result = index->RangeSearch(query2, 0, params.Dump());
         REQUIRE(result.has_value());
     }
 
@@ -375,7 +387,7 @@ TEST_CASE("range_search", "[ut][diskann]") {
             ->Dim(common_param.dim_)
             ->Float32Vectors(vectors.data())
             ->Owner(false);
-        auto result = index->RangeSearch(query2, -1, params.dump());
+        auto result = index->RangeSearch(query2, -1, params.Dump());
         REQUIRE_FALSE(result.has_value());
         REQUIRE(result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
     }
@@ -386,7 +398,7 @@ TEST_CASE("range_search", "[ut][diskann]") {
             ->Dim(common_param.dim_ - 1)
             ->Float32Vectors(vectors.data())
             ->Owner(false);
-        auto result = index->RangeSearch(query2, radius, params.dump());
+        auto result = index->RangeSearch(query2, radius, params.Dump());
         REQUIRE_FALSE(result.has_value());
         REQUIRE(result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
     }
@@ -397,38 +409,44 @@ TEST_CASE("range_search", "[ut][diskann]") {
             ->Dim(common_param.dim_)
             ->Float32Vectors(vectors.data())
             ->Owner(false);
-        auto result = index->RangeSearch(query2, radius, params.dump());
+        auto result = index->RangeSearch(query2, radius, params.Dump());
         REQUIRE_FALSE(result.has_value());
         REQUIRE(result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
     }
 
     SECTION("invalid parameters diskann not found") {
         vsag::JsonType invalid_params{};
-        auto result = index->RangeSearch(query, radius, invalid_params.dump());
+        auto result = index->RangeSearch(query, radius, invalid_params.Dump());
         REQUIRE_FALSE(result.has_value());
         REQUIRE(result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
     }
 
     SECTION("invalid parameters beam_search not found") {
-        vsag::JsonType invalid_params{{"diskann", {{"ef_search", 100}, {"io_limit", 200}}}};
+        vsag::JsonType invalid_params;
+        invalid_params["diskann"]["ef_search"].SetInt(100);
+        invalid_params["diskann"]["io_limit"].SetInt(200);
 
-        auto result = index->RangeSearch(query, radius, invalid_params.dump());
+        auto result = index->RangeSearch(query, radius, invalid_params.Dump());
         REQUIRE_FALSE(result.has_value());
         REQUIRE(result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
     }
 
     SECTION("invalid parameters io_limit not found") {
-        vsag::JsonType invalid_params{{"diskann", {{"ef_search", 100}, {"beam_search", 4}}}};
+        vsag::JsonType invalid_params;
+        invalid_params["diskann"]["ef_search"].SetInt(100);
+        invalid_params["diskann"]["beam_search"].SetInt(4);
 
-        auto result = index->RangeSearch(query, radius, invalid_params.dump());
+        auto result = index->RangeSearch(query, radius, invalid_params.Dump());
         REQUIRE_FALSE(result.has_value());
         REQUIRE(result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
     }
 
     SECTION("invalid parameters ef_search not found") {
-        vsag::JsonType invalid_params{{"diskann", {{"beam_search", 4}, {"io_limit", 200}}}};
+        vsag::JsonType invalid_params;
+        invalid_params["diskann"]["beam_search"].SetInt(4);
+        invalid_params["diskann"]["io_limit"].SetInt(200);
 
-        auto result = index->RangeSearch(query, radius, invalid_params.dump());
+        auto result = index->RangeSearch(query, radius, invalid_params.Dump());
         REQUIRE_FALSE(result.has_value());
         REQUIRE(result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
     }
@@ -531,8 +549,10 @@ TEST_CASE("split building process", "[ut][diskann]") {
         }
     }
 
-    vsag::JsonType parameters{
-        {"diskann", {{"ef_search", 10}, {"beam_search", 4}, {"io_limit", 20}}}};
+    vsag::JsonType parameters;
+    parameters["diskann"]["ef_search"].SetInt(10);
+    parameters["diskann"]["beam_search"].SetInt(4);
+    parameters["diskann"]["io_limit"].SetInt(20);
     float correct = 0;
     for (int i = 0; i < num_elements; i++) {
         auto query = vsag::Dataset::Make();
@@ -541,7 +561,7 @@ TEST_CASE("split building process", "[ut][diskann]") {
             ->Float32Vectors(vectors.data() + i * common_param.dim_)
             ->Owner(false);
         int64_t k = 2;
-        if (auto result = partial_index->KnnSearch(query, k, parameters.dump());
+        if (auto result = partial_index->KnnSearch(query, k, parameters.Dump());
             result.has_value()) {
             if (result.value()->GetNumElements() == 1) {
                 REQUIRE(!std::isinf(result.value()->GetDistances()[0]));
@@ -571,7 +591,7 @@ TEST_CASE("split building process", "[ut][diskann]") {
             ->Float32Vectors(vectors.data() + i * common_param.dim_)
             ->Owner(false);
         int64_t k = 2;
-        if (auto result = partial_index->KnnSearch(query, k, parameters.dump());
+        if (auto result = partial_index->KnnSearch(query, k, parameters.Dump());
             result.has_value()) {
             if (result.value()->GetNumElements() == 1) {
                 REQUIRE(!std::isinf(result.value()->GetDistances()[0]));

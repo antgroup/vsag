@@ -15,7 +15,9 @@
 
 #include "logger.h"
 
-namespace vsag::logger {
+#include <spdlog/spdlog.h>
+
+namespace vsag ::logger {
 void
 set_level(level log_level) {
     Options::Instance().logger()->SetLevel((Logger::Level)log_level);

@@ -105,9 +105,9 @@ TEST_CASE("Search with HNSW", "[ut][BasicSearcher]") {
     // vector data cell
     constexpr const char* param_temp = R"({{"type": "{}"}})";
     auto fp32_param = QuantizerParameter::GetQuantizerParameterByJson(
-        JsonType::parse(fmt::format(param_temp, "fp32")));
+        JsonType::Parse(fmt::format(param_temp, "fp32")));
     auto io_param =
-        IOParameter::GetIOParameterByJson(JsonType::parse(fmt::format(param_temp, "memory_io")));
+        IOParameter::GetIOParameterByJson(JsonType::Parse(fmt::format(param_temp, "memory_io")));
     IndexCommonParam common;
     common.dim_ = dim;
     common.allocator_ = allocator;
@@ -245,9 +245,9 @@ TEST_CASE("Optimize SQ4", "[ut][BasicOptimizer]") {
     // vector data cell
     constexpr const char* param_temp = R"({{"type": "{}"}})";
     auto quantizer_param = QuantizerParameter::GetQuantizerParameterByJson(
-        JsonType::parse(fmt::format(param_temp, quantizer_type)));
+        JsonType::Parse(fmt::format(param_temp, quantizer_type)));
     auto io_param =
-        IOParameter::GetIOParameterByJson(JsonType::parse(fmt::format(param_temp, "memory_io")));
+        IOParameter::GetIOParameterByJson(JsonType::Parse(fmt::format(param_temp, "memory_io")));
     IndexCommonParam common;
     common.dim_ = dim;
     common.allocator_ = allocator;

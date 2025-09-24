@@ -24,15 +24,15 @@ INT8QuantizerParameter::INT8QuantizerParameter()
 
 void
 INT8QuantizerParameter::FromJson(const JsonType& json) {
-    if (json.contains(HOLD_MOLDS)) {
-        hold_molds = json[HOLD_MOLDS];
+    if (json.Contains(HOLD_MOLDS)) {
+        hold_molds = json[HOLD_MOLDS].GetBool();
     }
 }
 
 JsonType
 INT8QuantizerParameter::ToJson() const {
     JsonType json;
-    json[QUANTIZATION_TYPE_KEY] = QUANTIZATION_TYPE_VALUE_INT8;
+    json[QUANTIZATION_TYPE_KEY].SetString(QUANTIZATION_TYPE_VALUE_INT8);
     return json;
 }
 }  // namespace vsag

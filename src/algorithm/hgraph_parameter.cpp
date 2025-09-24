@@ -38,37 +38,37 @@ void
 HGraphParameter::FromJson(const JsonType& json) {
     InnerIndexParameter::FromJson(json);
 
-    if (json.contains(HGRAPH_USE_ELP_OPTIMIZER_KEY)) {
-        this->use_elp_optimizer = json[HGRAPH_USE_ELP_OPTIMIZER_KEY];
+    if (json.Contains(HGRAPH_USE_ELP_OPTIMIZER_KEY)) {
+        this->use_elp_optimizer = json[HGRAPH_USE_ELP_OPTIMIZER_KEY].GetBool();
     }
 
-    if (json.contains(HGRAPH_IGNORE_REORDER_KEY)) {
-        this->ignore_reorder = json[HGRAPH_IGNORE_REORDER_KEY];
+    if (json.Contains(HGRAPH_IGNORE_REORDER_KEY)) {
+        this->ignore_reorder = json[HGRAPH_IGNORE_REORDER_KEY].GetBool();
     }
 
-    if (json.contains(HGRAPH_BUILD_BY_BASE_QUANTIZATION_KEY)) {
-        this->build_by_base = json[HGRAPH_BUILD_BY_BASE_QUANTIZATION_KEY];
+    if (json.Contains(HGRAPH_BUILD_BY_BASE_QUANTIZATION_KEY)) {
+        this->build_by_base = json[HGRAPH_BUILD_BY_BASE_QUANTIZATION_KEY].GetBool();
     }
 
-    CHECK_ARGUMENT(json.contains(HGRAPH_BASE_CODES_KEY),
+    CHECK_ARGUMENT(json.Contains(HGRAPH_BASE_CODES_KEY),
                    fmt::format("hgraph parameters must contains {}", HGRAPH_BASE_CODES_KEY));
     const auto& base_codes_json = json[HGRAPH_BASE_CODES_KEY];
     this->base_codes_param = CreateFlattenParam(base_codes_json);
 
     if (use_reorder) {
-        CHECK_ARGUMENT(json.contains(PRECISE_CODES_KEY),
+        CHECK_ARGUMENT(json.Contains(PRECISE_CODES_KEY),
                        fmt::format("hgraph parameters must contains {}", PRECISE_CODES_KEY));
         const auto& precise_codes_json = json[PRECISE_CODES_KEY];
         this->precise_codes_param = CreateFlattenParam(precise_codes_json);
     }
 
-    CHECK_ARGUMENT(json.contains(HGRAPH_GRAPH_KEY),
+    CHECK_ARGUMENT(json.Contains(HGRAPH_GRAPH_KEY),
                    fmt::format("hgraph parameters must contains {}", HGRAPH_GRAPH_KEY));
     const auto& graph_json = json[HGRAPH_GRAPH_KEY];
 
     GraphStorageTypes graph_storage_type = GraphStorageTypes::GRAPH_STORAGE_TYPE_FLAT;
-    if (graph_json.contains(GRAPH_STORAGE_TYPE_KEY)) {
-        const auto& graph_storage_type_str = graph_json[GRAPH_STORAGE_TYPE_KEY];
+    if (graph_json.Contains(GRAPH_STORAGE_TYPE_KEY)) {
+        const auto graph_storage_type_str = graph_json[GRAPH_STORAGE_TYPE_KEY].GetString();
         if (graph_storage_type_str == GRAPH_STORAGE_TYPE_COMPRESSED) {
             graph_storage_type = GraphStorageTypes::GRAPH_STORAGE_TYPE_COMPRESSED;
         }
@@ -77,7 +77,7 @@ HGraphParameter::FromJson(const JsonType& json) {
             graph_storage_type_str != GRAPH_STORAGE_TYPE_FLAT) {
             throw VsagException(
                 ErrorType::INVALID_ARGUMENT,
-                fmt::format("invalid graph_storage_type: {}", graph_storage_type_str.dump()));
+                fmt::format("invalid graph_storage_type: {}", graph_storage_type_str));
         }
     }
     this->bottom_graph_param =
@@ -98,45 +98,45 @@ HGraphParameter::FromJson(const JsonType& json) {
         hierarchical_graph_param->support_delete_ = false;
     }
 
-    if (json.contains(HGRAPH_EF_CONSTRUCTION_KEY)) {
-        this->ef_construction = json[HGRAPH_EF_CONSTRUCTION_KEY];
+    if (json.Contains(HGRAPH_EF_CONSTRUCTION_KEY)) {
+        this->ef_construction = json[HGRAPH_EF_CONSTRUCTION_KEY].GetInt();
     }
 
-    if (json.contains(HGRAPH_ALPHA_KEY)) {
-        this->alpha = json[HGRAPH_ALPHA_KEY];
+    if (json.Contains(HGRAPH_ALPHA_KEY)) {
+        this->alpha = json[HGRAPH_ALPHA_KEY].GetFloat();
     }
 
-    if (json.contains(BUILD_THREAD_COUNT_KEY)) {
-        this->build_thread_count = json[BUILD_THREAD_COUNT_KEY];
+    if (json.Contains(BUILD_THREAD_COUNT_KEY)) {
+        this->build_thread_count = json[BUILD_THREAD_COUNT_KEY].GetInt();
     }
 
-    if (graph_json.contains(GRAPH_TYPE_KEY)) {
-        graph_type = graph_json[GRAPH_TYPE_KEY];
+    if (graph_json.Contains(GRAPH_TYPE_KEY)) {
+        graph_type = graph_json[GRAPH_TYPE_KEY].GetString();
         if (graph_type == GRAPH_TYPE_ODESCENT) {
             odescent_param = std::make_shared<ODescentParameter>();
             odescent_param->FromJson(graph_json);
         }
     }
 
-    if (json.contains(SUPPORT_DUPLICATE)) {
-        this->support_duplicate = json[SUPPORT_DUPLICATE];
+    if (json.Contains(SUPPORT_DUPLICATE)) {
+        this->support_duplicate = json[SUPPORT_DUPLICATE].GetBool();
     }
-    if (json.contains(SUPPORT_TOMBSTONE)) {
-        this->support_tombstone = json[SUPPORT_TOMBSTONE];
+    if (json.Contains(SUPPORT_TOMBSTONE)) {
+        this->support_tombstone = json[SUPPORT_TOMBSTONE].GetBool();
     }
 }
 
 JsonType
 HGraphParameter::ToJson() const {
     JsonType json = InnerIndexParameter::ToJson();
-    json[TYPE_KEY] = INDEX_TYPE_HGRAPH;
+    json[TYPE_KEY].SetString(INDEX_TYPE_HGRAPH);
 
-    json[HGRAPH_USE_ELP_OPTIMIZER_KEY] = this->use_elp_optimizer;
-    json[HGRAPH_BASE_CODES_KEY] = this->base_codes_param->ToJson();
-    json[HGRAPH_GRAPH_KEY] = this->bottom_graph_param->ToJson();
-    json[HGRAPH_EF_CONSTRUCTION_KEY] = this->ef_construction;
-    json[HGRAPH_ALPHA_KEY] = this->alpha;
-    json[SUPPORT_DUPLICATE] = this->support_duplicate;
+    json[HGRAPH_USE_ELP_OPTIMIZER_KEY].SetBool(this->use_elp_optimizer);
+    json[HGRAPH_BASE_CODES_KEY].SetJson(this->base_codes_param->ToJson());
+    json[HGRAPH_GRAPH_KEY].SetJson(this->bottom_graph_param->ToJson());
+    json[HGRAPH_EF_CONSTRUCTION_KEY].SetInt(this->ef_construction);
+    json[HGRAPH_ALPHA_KEY].SetFloat(this->alpha);
+    json[SUPPORT_DUPLICATE].SetBool(this->support_duplicate);
     return json;
 }
 
@@ -183,25 +183,26 @@ HGraphParameter::CheckCompatibility(const ParamPtr& other) const {
 
 HGraphSearchParameters
 HGraphSearchParameters::FromJson(const std::string& json_string) {
-    JsonType params = JsonType::parse(json_string);
+    auto params = JsonType::Parse(json_string);
 
     HGraphSearchParameters obj;
 
     // set obj.ef_search
-    CHECK_ARGUMENT(params.contains(INDEX_TYPE_HGRAPH),
+    CHECK_ARGUMENT(params.Contains(INDEX_TYPE_HGRAPH),
                    fmt::format("parameters must contains {}", INDEX_TYPE_HGRAPH));
 
     CHECK_ARGUMENT(
-        params[INDEX_TYPE_HGRAPH].contains(HGRAPH_PARAMETER_EF_RUNTIME),
+        params[INDEX_TYPE_HGRAPH].Contains(HGRAPH_PARAMETER_EF_RUNTIME),
         fmt::format(
             "parameters[{}] must contains {}", INDEX_TYPE_HGRAPH, HGRAPH_PARAMETER_EF_RUNTIME));
-    obj.ef_search = params[INDEX_TYPE_HGRAPH][HGRAPH_PARAMETER_EF_RUNTIME];
-    if (params[INDEX_TYPE_HGRAPH].contains(HGRAPH_USE_EXTRA_INFO_FILTER)) {
-        obj.use_extra_info_filter = params[INDEX_TYPE_HGRAPH][HGRAPH_USE_EXTRA_INFO_FILTER];
+    obj.ef_search = params[INDEX_TYPE_HGRAPH][HGRAPH_PARAMETER_EF_RUNTIME].GetInt();
+    if (params[INDEX_TYPE_HGRAPH].Contains(HGRAPH_USE_EXTRA_INFO_FILTER)) {
+        obj.use_extra_info_filter =
+            params[INDEX_TYPE_HGRAPH][HGRAPH_USE_EXTRA_INFO_FILTER].GetBool();
     }
 
-    if (params[INDEX_TYPE_HGRAPH].contains(SEARCH_MAX_TIME_COST_MS)) {
-        obj.timeout_ms = params[INDEX_TYPE_HGRAPH][SEARCH_MAX_TIME_COST_MS];
+    if (params[INDEX_TYPE_HGRAPH].Contains(SEARCH_MAX_TIME_COST_MS)) {
+        obj.timeout_ms = params[INDEX_TYPE_HGRAPH][SEARCH_MAX_TIME_COST_MS].GetFloat();
         obj.enable_time_record = true;
     }
 

@@ -31,7 +31,7 @@ TEST_CASE("AsyncIO Parameters Test", "[ut][AsyncIOParameters]") {
             "file_path": "{}"
         }}
     )";
-    auto param_json = JsonType::parse(fmt::format(param_str, path));
+    auto param_json = JsonType::Parse(fmt::format(param_str, path));
     auto param = std::make_shared<AsyncIOParameter>();
     param->FromJson(param_json);
     ParameterTest::TestToJson(param);

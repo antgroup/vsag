@@ -29,16 +29,16 @@ public:
 
     void
     FromJson(const JsonType& json) override {
-        if (json.contains(GRAPH_PARAM_MAX_DEGREE)) {
-            this->max_degree_ = json[GRAPH_PARAM_MAX_DEGREE];
+        if (json.Contains(GRAPH_PARAM_MAX_DEGREE)) {
+            this->max_degree_ = json[GRAPH_PARAM_MAX_DEGREE].GetInt();
         }
     }
 
     JsonType
     ToJson() const override {
         JsonType json;
-        json[GRAPH_PARAM_MAX_DEGREE] = this->max_degree_;
-        json[GRAPH_STORAGE_TYPE_KEY] = GRAPH_STORAGE_TYPE_COMPRESSED;
+        json[GRAPH_PARAM_MAX_DEGREE].SetInt(this->max_degree_);
+        json[GRAPH_STORAGE_TYPE_KEY].SetString(GRAPH_STORAGE_TYPE_COMPRESSED);
         return json;
     }
 };

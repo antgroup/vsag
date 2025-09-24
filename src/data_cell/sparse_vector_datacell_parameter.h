@@ -30,11 +30,11 @@ public:
 
     void
     FromJson(const JsonType& json) override {
-        CHECK_ARGUMENT(json.contains(IO_PARAMS_KEY),
+        CHECK_ARGUMENT(json.Contains(IO_PARAMS_KEY),
                        fmt::format("sparse datacell parameters must contains {}", IO_PARAMS_KEY));
         this->io_parameter = IOParameter::GetIOParameterByJson(json[IO_PARAMS_KEY]);
         CHECK_ARGUMENT(
-            json.contains(QUANTIZATION_PARAMS_KEY),
+            json.Contains(QUANTIZATION_PARAMS_KEY),
             fmt::format("sparse datacell parameters must contains {}", QUANTIZATION_PARAMS_KEY));
         this->quantizer_parameter =
             QuantizerParameter::GetQuantizerParameterByJson(json[QUANTIZATION_PARAMS_KEY]);
@@ -46,9 +46,10 @@ public:
     JsonType
     ToJson() const override {
         JsonType json;
-        json[IO_PARAMS_KEY] = this->io_parameter->ToJson();
-        json[QUANTIZATION_PARAMS_KEY] = this->quantizer_parameter->ToJson();
-        json[CODES_TYPE_KEY] = SPARSE_CODES;
+        json[IO_PARAMS_KEY].SetJson(this->io_parameter->ToJson());
+        json[QUANTIZATION_PARAMS_KEY].SetJson(this->quantizer_parameter->ToJson());
+        json[CODES_TYPE_KEY].SetString(SPARSE_CODES);
+
         return json;
     }
 

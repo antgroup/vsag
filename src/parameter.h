@@ -26,8 +26,8 @@ class Parameter {
 public:
     static std::string
     TryToParseType(const JsonType& json) {
-        CHECK_ARGUMENT(json.contains("type"), "params must have type");  // TODO(LHT): "type" rename
-        return json["type"];
+        CHECK_ARGUMENT(json.Contains("type"), "params must have type");  // TODO(LHT): "type" rename
+        return json["type"].GetString();
     }
 
 public:
@@ -40,7 +40,7 @@ public:
 
     void
     FromString(const std::string& str) {
-        auto json = JsonType::parse(str);  // TODO(LHT129): try catch
+        auto json = JsonType::Parse(str);  // TODO(LHT129): try catch
         this->FromJson(json);
     }
 
@@ -49,7 +49,7 @@ public:
 
     std::string
     ToString() const {
-        return this->ToJson().dump(4);
+        return this->ToJson().Dump(4);
     }
 
     virtual bool

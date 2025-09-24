@@ -19,6 +19,7 @@
 #include <fmt/format.h>
 
 #include <fstream>
+#include <numeric>
 #include <vector>
 
 #include "impl/allocator/safe_allocator.h"
@@ -76,13 +77,11 @@ GNOIMIPartition::GNOIMIPartition(const IndexCommonParam& common_param,
 
     param_ptr_ = std::make_shared<BruteForceParameter>();
     param_ptr_->flatten_param = std::make_shared<FlattenDataCellParameter>();
-    JsonType memory_json = {
-        {"type", IO_TYPE_VALUE_BLOCK_MEMORY_IO},
-    };
+    JsonType memory_json;
+    memory_json["type"].SetString(IO_TYPE_VALUE_BLOCK_MEMORY_IO);
     param_ptr_->flatten_param->io_parameter = IOParameter::GetIOParameterByJson(memory_json);
-    JsonType quantizer_json = {
-        {"type", QUANTIZATION_TYPE_VALUE_FP32},
-    };
+    JsonType quantizer_json;
+    quantizer_json["type"].SetString(QUANTIZATION_TYPE_VALUE_FP32);
     param_ptr_->flatten_param->quantizer_parameter =
         QuantizerParameter::GetQuantizerParameterByJson(quantizer_json);
 }
