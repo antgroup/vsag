@@ -23,35 +23,35 @@ namespace vsag {
 
 void
 ODescentParameter::FromJson(const vsag::JsonType& json) {
-    CHECK_ARGUMENT(json.contains(HGRAPH_GRAPH_MAX_DEGREE),
+    CHECK_ARGUMENT(json.Contains(HGRAPH_GRAPH_MAX_DEGREE),
                    fmt::format("odescent parameters must contains {}", HGRAPH_GRAPH_MAX_DEGREE));
-    max_degree = json[HGRAPH_GRAPH_MAX_DEGREE];
-    if (json.contains(ODESCENT_PARAMETER_ALPHA)) {
-        alpha = json[ODESCENT_PARAMETER_ALPHA];
+    max_degree = json[HGRAPH_GRAPH_MAX_DEGREE].GetInt();
+    if (json.Contains(ODESCENT_PARAMETER_ALPHA)) {
+        alpha = json[ODESCENT_PARAMETER_ALPHA].GetFloat();
     }
-    if (json.contains(ODESCENT_PARAMETER_NEIGHBOR_SAMPLE_RATE)) {
-        sample_rate = json[ODESCENT_PARAMETER_NEIGHBOR_SAMPLE_RATE];
+    if (json.Contains(ODESCENT_PARAMETER_NEIGHBOR_SAMPLE_RATE)) {
+        sample_rate = json[ODESCENT_PARAMETER_NEIGHBOR_SAMPLE_RATE].GetFloat();
     }
-    if (json.contains(ODESCENT_PARAMETER_GRAPH_ITER_TURN)) {
-        turn = json[ODESCENT_PARAMETER_GRAPH_ITER_TURN];
+    if (json.Contains(ODESCENT_PARAMETER_GRAPH_ITER_TURN)) {
+        turn = json[ODESCENT_PARAMETER_GRAPH_ITER_TURN].GetInt();
     }
-    if (json.contains(ODESCENT_PARAMETER_MIN_IN_DEGREE)) {
-        min_in_degree = json[ODESCENT_PARAMETER_MIN_IN_DEGREE];
+    if (json.Contains(ODESCENT_PARAMETER_MIN_IN_DEGREE)) {
+        min_in_degree = json[ODESCENT_PARAMETER_MIN_IN_DEGREE].GetInt();
     }
-    if (json.contains(ODESCENT_PARAMETER_BUILD_BLOCK_SIZE)) {
-        block_size = json[ODESCENT_PARAMETER_BUILD_BLOCK_SIZE];
+    if (json.Contains(ODESCENT_PARAMETER_BUILD_BLOCK_SIZE)) {
+        block_size = json[ODESCENT_PARAMETER_BUILD_BLOCK_SIZE].GetInt();
     }
 }
 
 JsonType
 ODescentParameter::ToJson() const {
     JsonType json;
-    json[ODESCENT_PARAMETER_ALPHA] = alpha;
-    json[ODESCENT_PARAMETER_NEIGHBOR_SAMPLE_RATE] = sample_rate;
-    json[ODESCENT_PARAMETER_GRAPH_ITER_TURN] = turn;
-    json[HGRAPH_GRAPH_MAX_DEGREE] = max_degree;
-    json[ODESCENT_PARAMETER_MIN_IN_DEGREE] = min_in_degree;
-    json[ODESCENT_PARAMETER_BUILD_BLOCK_SIZE] = block_size;
+    json[ODESCENT_PARAMETER_ALPHA].SetFloat(alpha);
+    json[ODESCENT_PARAMETER_NEIGHBOR_SAMPLE_RATE].SetFloat(sample_rate);
+    json[ODESCENT_PARAMETER_GRAPH_ITER_TURN].SetInt(turn);
+    json[HGRAPH_GRAPH_MAX_DEGREE].SetInt(max_degree);
+    json[ODESCENT_PARAMETER_MIN_IN_DEGREE].SetInt(min_in_degree);
+    json[ODESCENT_PARAMETER_BUILD_BLOCK_SIZE].SetInt(block_size);
     return json;
 }
 

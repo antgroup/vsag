@@ -24,11 +24,11 @@ namespace vsag {
 
 constexpr static const int64_t MAX_DIM_SPARSE = 4096;
 
-inline void
-fill_datatype(IndexCommonParam& result, JsonType::const_reference datatype_obj) {
-    CHECK_ARGUMENT(datatype_obj.is_string(),
+static void
+fill_datatype(IndexCommonParam& result, const JsonType& datatype_obj) {
+    CHECK_ARGUMENT(datatype_obj.IsString(),
                    fmt::format("parameters[{}] must string type", PARAMETER_DTYPE));
-    std::string datatype = datatype_obj;
+    std::string datatype = datatype_obj.GetString();
     if (datatype == DATATYPE_FLOAT32) {
         result.data_type_ = DataTypes::DATA_TYPE_FLOAT;
     } else if (datatype == DATATYPE_INT8) {
@@ -47,10 +47,10 @@ fill_datatype(IndexCommonParam& result, JsonType::const_reference datatype_obj) 
 }
 
 inline void
-fill_metrictype(IndexCommonParam& result, JsonType::const_reference metric_obj) {
-    CHECK_ARGUMENT(metric_obj.is_string(),
+fill_metrictype(IndexCommonParam& result, const JsonType& metric_obj) {
+    CHECK_ARGUMENT(metric_obj.IsString(),
                    fmt::format("parameters[{}] must string type", PARAMETER_METRIC_TYPE));
-    std::string metric = metric_obj;
+    std::string metric = metric_obj.GetString();
     if (metric == METRIC_L2) {
         result.metric_ = MetricType::METRIC_TYPE_L2SQR;
     } else if (metric == METRIC_IP) {
@@ -69,19 +69,19 @@ fill_metrictype(IndexCommonParam& result, JsonType::const_reference metric_obj) 
 }
 
 inline void
-fill_dim(IndexCommonParam& result, JsonType::const_reference dim_obj) {
-    CHECK_ARGUMENT(dim_obj.is_number_integer(),
+fill_dim(IndexCommonParam& result, const JsonType& dim_obj) {
+    CHECK_ARGUMENT(dim_obj.IsNumberInteger(),
                    fmt::format("parameters[{}] must be integer type", PARAMETER_DIM));
-    int64_t dim = dim_obj.get<int64_t>();
+    int64_t dim = dim_obj.GetInt();
     CHECK_ARGUMENT(dim > 0, fmt::format("parameters[{}] must be greater than 0", PARAMETER_DIM));
     result.dim_ = dim;
 }
 
 inline void
-fill_extra_info_size(IndexCommonParam& result, JsonType::const_reference extra_info_size_obj) {
-    CHECK_ARGUMENT(extra_info_size_obj.is_number_integer(),
+fill_extra_info_size(IndexCommonParam& result, const JsonType& extra_info_size_obj) {
+    CHECK_ARGUMENT(extra_info_size_obj.IsNumberInteger(),
                    fmt::format("parameters[{}] must be integer type", EXTRA_INFO_SIZE));
-    int64_t extra_info_size = extra_info_size_obj.get<int64_t>();
+    int64_t extra_info_size = extra_info_size_obj.GetInt();
     result.extra_info_size_ = extra_info_size;
 }
 
@@ -92,21 +92,18 @@ IndexCommonParam::CheckAndCreate(JsonType& params, const std::shared_ptr<Resourc
     result.thread_pool_ = std::dynamic_pointer_cast<SafeThreadPool>(resource->GetThreadPool());
 
     // Check and Fill DataType
-    CHECK_ARGUMENT(params.contains(PARAMETER_DTYPE),
+    CHECK_ARGUMENT(params.Contains(PARAMETER_DTYPE),
                    fmt::format("parameters must contains {}", PARAMETER_DTYPE));
-    const auto datatype_obj = params[PARAMETER_DTYPE];
-    fill_datatype(result, datatype_obj);
+    fill_datatype(result, params[PARAMETER_DTYPE]);
 
     // Check and Fill MetricType
-    CHECK_ARGUMENT(params.contains(PARAMETER_METRIC_TYPE),
+    CHECK_ARGUMENT(params.Contains(PARAMETER_METRIC_TYPE),
                    fmt::format("parameters must contains {}", PARAMETER_METRIC_TYPE));
-    const auto metric_obj = params[PARAMETER_METRIC_TYPE];
-    fill_metrictype(result, metric_obj);
+    fill_metrictype(result, params[PARAMETER_METRIC_TYPE]);
 
     // Check and Fill Dim
-    if (params.contains(PARAMETER_DIM)) {
-        const auto dim_obj = params[PARAMETER_DIM];
-        fill_dim(result, dim_obj);
+    if (params.Contains(PARAMETER_DIM)) {
+        fill_dim(result, params[PARAMETER_DIM]);
     } else {
         if (result.data_type_ != DataTypes::DATA_TYPE_SPARSE) {
             throw vsag::VsagException(ErrorType::INVALID_ARGUMENT,
@@ -115,9 +112,8 @@ IndexCommonParam::CheckAndCreate(JsonType& params, const std::shared_ptr<Resourc
         result.dim_ = MAX_DIM_SPARSE;
     }
 
-    if (params.contains(EXTRA_INFO_SIZE)) {
-        const auto extra_info_size_obj = params[EXTRA_INFO_SIZE];
-        fill_extra_info_size(result, extra_info_size_obj);
+    if (params.Contains(EXTRA_INFO_SIZE)) {
+        fill_extra_info_size(result, params[EXTRA_INFO_SIZE]);
     }
 
     return result;

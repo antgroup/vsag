@@ -330,7 +330,7 @@ InnerIndexInterface::FastCreateIndex(const std::string& index_fast_str,
             use_reorder = true;
             precise_quantization_type = strs[3];
         }
-        JsonType json = JsonType::parse(fmt::format(build_string_temp,
+        JsonType json = JsonType::Parse(fmt::format(build_string_temp,
                                                     max_degree,
                                                     base_quantization_type,
                                                     use_reorder,
@@ -344,7 +344,7 @@ InnerIndexInterface::FastCreateIndex(const std::string& index_fast_str,
             "quantization_type": "{}"
         }}
         )";
-        JsonType json = JsonType::parse(fmt::format(build_string_temp, strs[1]));
+        JsonType json = JsonType::Parse(fmt::format(build_string_temp, strs[1]));
         auto param_ptr = BruteForce::CheckAndMappingExternalParam(json, common_param);
         return std::make_shared<BruteForce>(param_ptr, common_param);
     }
@@ -536,9 +536,10 @@ InnerIndexInterface::analyze_quantizer(JsonType& stats,
                 (static_cast<float>(search_count * (search_count - 1)) / 2.0F);
             inversion_count_rate += tmp_inversion_count_rate;
         }
-        stats["quantization_bias_ratio"] = bias_ratio / static_cast<float>(sample_data_size);
-        stats["quantization_inversion_count_rate"] =
-            inversion_count_rate / static_cast<float>(sample_data_size);
+        stats["quantization_bias_ratio"].SetFloat(bias_ratio /
+                                                  static_cast<float>(sample_data_size));
+        stats["quantization_inversion_count_rate"].SetFloat(inversion_count_rate /
+                                                            static_cast<float>(sample_data_size));
     }
 }
 

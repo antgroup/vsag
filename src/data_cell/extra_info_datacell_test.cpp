@@ -60,12 +60,12 @@ TEST_CASE("ExtraInfoDataCell Basic Test", "[ut][ExtraInfoDataCell] ") {
         )";
     int i = 0;
     for (auto& extra_info_size : extra_info_sizes) {
-        auto param_json = JsonType::parse(param_str);
-        logger::debug("param_json: {}", param_json.dump());
+        auto param_json = JsonType::Parse(param_str);
+        logger::debug("param_json: {}", param_json.Dump());
         auto param = std::make_shared<ExtraInfoDataCellParameter>();
         param->FromJson(param_json);
         vsag::ParameterTest::TestToJson(param);
-        logger::debug("param->ToJson(): {}", param->ToJson().dump());
+        logger::debug("param->ToJson(): {}", param->ToJson().Dump());
 
         IndexCommonParam common_param;
         common_param.allocator_ = allocator;

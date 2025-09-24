@@ -28,7 +28,7 @@ TEST_CASE("IVF Partition Strategy Parameters Test", "[ut][IVFPartitionStrategyPa
             "second_order_buckets_count": 50
         }
     })";
-    vsag::JsonType param_json = vsag::JsonType::parse(param_str);
+    vsag::JsonType param_json = vsag::JsonType::Parse(param_str);
     auto param = std::make_shared<vsag::IVFPartitionStrategyParameters>();
     param->FromJson(param_json);
     REQUIRE(param->partition_strategy_type == vsag::IVFPartitionStrategyType::GNO_IMI);

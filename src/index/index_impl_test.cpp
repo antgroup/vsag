@@ -36,7 +36,7 @@ TEST_CASE("immutable index test", "[ut][index_impl]") {
     )";
 
     vsag::JsonType hgraph_json;
-    hgraph_json = vsag::JsonType::parse(build_parameter_json);
+    hgraph_json = vsag::JsonType::Parse(build_parameter_json);
     auto index = std::make_shared<vsag::IndexImpl<vsag::HGraph>>(hgraph_json, common_param);
 
     vsag::DatasetPtr dataset = vsag::Dataset::Make();
@@ -107,7 +107,7 @@ TEST_CASE("index empty input test", "[ut][index_impl]") {
     )";
 
     vsag::JsonType hgraph_json;
-    hgraph_json = vsag::JsonType::parse(build_parameter_json);
+    hgraph_json = vsag::JsonType::Parse(build_parameter_json);
     auto index = std::make_shared<vsag::IndexImpl<vsag::HGraph>>(hgraph_json, common_param);
 
     vsag::DatasetPtr dataset = vsag::Dataset::Make();

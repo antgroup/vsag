@@ -62,9 +62,9 @@ TEST_CASE("Parallel search with HNSW", "[ut][ParallelSearcher][concurrent]") {
     // vector data cell
     constexpr const char* param_temp = R"({{"type": "{}"}})";
     auto fp32_param = QuantizerParameter::GetQuantizerParameterByJson(
-        JsonType::parse(fmt::format(param_temp, "fp32")));
+        JsonType::Parse(fmt::format(param_temp, "fp32")));
     auto io_param =
-        IOParameter::GetIOParameterByJson(JsonType::parse(fmt::format(param_temp, "memory_io")));
+        IOParameter::GetIOParameterByJson(JsonType::Parse(fmt::format(param_temp, "memory_io")));
     IndexCommonParam common;
     common.dim_ = dim;
     common.allocator_ = allocator;

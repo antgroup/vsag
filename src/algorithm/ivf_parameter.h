@@ -51,35 +51,37 @@ class IVFSearchParameters {
 public:
     static IVFSearchParameters
     FromJson(const std::string& json_string) {
-        JsonType params = JsonType::parse(json_string);
+        JsonType params = JsonType::Parse(json_string);
 
         IVFSearchParameters obj;
 
         // set obj.scan_buckets_count
-        CHECK_ARGUMENT(params.contains(INDEX_TYPE_IVF),
+        CHECK_ARGUMENT(params.Contains(INDEX_TYPE_IVF),
                        fmt::format("parameters must contains {}", INDEX_TYPE_IVF));
 
-        CHECK_ARGUMENT(params[INDEX_TYPE_IVF].contains(IVF_SEARCH_PARAM_SCAN_BUCKETS_COUNT),
+        CHECK_ARGUMENT(params[INDEX_TYPE_IVF].Contains(IVF_SEARCH_PARAM_SCAN_BUCKETS_COUNT),
                        fmt::format("parameters[{}] must contains {}",
                                    INDEX_TYPE_IVF,
                                    IVF_SEARCH_PARAM_SCAN_BUCKETS_COUNT));
-        obj.scan_buckets_count = params[INDEX_TYPE_IVF][IVF_SEARCH_PARAM_SCAN_BUCKETS_COUNT];
+        obj.scan_buckets_count =
+            params[INDEX_TYPE_IVF][IVF_SEARCH_PARAM_SCAN_BUCKETS_COUNT].GetInt();
 
-        if (params[INDEX_TYPE_IVF].contains(IVF_SEARCH_PARAM_FACTOR)) {
-            obj.topk_factor = params[INDEX_TYPE_IVF][IVF_SEARCH_PARAM_FACTOR];
+        if (params[INDEX_TYPE_IVF].Contains(IVF_SEARCH_PARAM_FACTOR)) {
+            obj.topk_factor = params[INDEX_TYPE_IVF][IVF_SEARCH_PARAM_FACTOR].GetFloat();
         }
 
-        if (params[INDEX_TYPE_IVF].contains(GNO_IMI_SEARCH_PARAM_FIRST_ORDER_SCAN_RATIO)) {
+        if (params[INDEX_TYPE_IVF].Contains(GNO_IMI_SEARCH_PARAM_FIRST_ORDER_SCAN_RATIO)) {
             obj.first_order_scan_ratio =
-                params[INDEX_TYPE_IVF][GNO_IMI_SEARCH_PARAM_FIRST_ORDER_SCAN_RATIO];
+                params[INDEX_TYPE_IVF][GNO_IMI_SEARCH_PARAM_FIRST_ORDER_SCAN_RATIO].GetFloat();
         }
 
-        if (params[INDEX_TYPE_IVF].contains(IVF_SEARCH_PARALLELISM)) {
-            obj.parallel_search_thread_count = params[INDEX_TYPE_IVF][IVF_SEARCH_PARALLELISM];
+        if (params[INDEX_TYPE_IVF].Contains(IVF_SEARCH_PARALLELISM)) {
+            obj.parallel_search_thread_count =
+                params[INDEX_TYPE_IVF][IVF_SEARCH_PARALLELISM].GetInt();
         }
 
-        if (params[INDEX_TYPE_IVF].contains(SEARCH_MAX_TIME_COST_MS)) {
-            obj.timeout_ms = params[INDEX_TYPE_IVF][SEARCH_MAX_TIME_COST_MS];
+        if (params[INDEX_TYPE_IVF].Contains(SEARCH_MAX_TIME_COST_MS)) {
+            obj.timeout_ms = params[INDEX_TYPE_IVF][SEARCH_MAX_TIME_COST_MS].GetInt();
             obj.enable_time_record = true;
         }
 
