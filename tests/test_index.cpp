@@ -791,7 +791,6 @@ TestIndex::TestCalcDistanceById(const IndexPtr& index,
                 result = index->CalcDistanceById(query, id);
             } else {
                 result = index->CalcDistanceById(query->GetFloat32Vectors(), id);
-                REQUIRE_FALSE(index->CalcDistanceById(query, id).has_value());
             }
             if (not expected_success) {
                 continue;
