@@ -39,10 +39,7 @@ public:
     Add(const DatasetPtr& base) override;
 
     DatasetPtr
-    CalDistanceById(const float* query, const int64_t* ids, int64_t count) const override {
-        throw VsagException(vsag::ErrorType::UNSUPPORTED_INDEX_OPERATION,
-                            "no support CalDistanceById in " + GetName());
-    }
+    CalDistanceById(const DatasetPtr& query, const int64_t* ids, int64_t count) const override;
 
     float
     CalcDistanceById(const DatasetPtr& vector, int64_t id) const override;

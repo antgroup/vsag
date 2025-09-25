@@ -239,6 +239,26 @@ SparseIndex::CalcDistanceById(const DatasetPtr& vector, int64_t id) const {
     return CalDistanceByIdUnsafe(sorted_ids, sorted_vals, inner_id);
 }
 
+DatasetPtr
+SparseIndex::CalDistanceById(const DatasetPtr& query, const int64_t* ids, int64_t count) const {
+    // prepare result
+    auto result = Dataset::Make();
+    result->Owner(true, allocator_);
+    auto* distances = (float*)allocator_->Allocate(sizeof(float) * count);
+    result->Distances(distances);
+
+    // key optimization: only sort once for one query
+    const auto* sparse_vectors = query->GetSparseVectors();
+    auto [sorted_ids, sorted_vals] = sort_sparse_vector(sparse_vectors[0]);
+
+    // cal distances one by one
+    for (int64_t i = 0; i < count; i++) {
+        uint32_t inner_id = this->label_table_->GetIdByLabel(ids[i]);
+        distances[i] = CalDistanceByIdUnsafe(sorted_ids, sorted_vals, inner_id);
+    }
+    return result;
+}
+
 void
 SparseIndex::InitFeatures() {
     // build & add
