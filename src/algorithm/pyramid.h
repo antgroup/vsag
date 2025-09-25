@@ -17,7 +17,7 @@
 
 #include <utility>
 
-#include "data_cell/graph_interface.h"
+#include "datacell/graph_interface.h"
 #include "impl/allocator/safe_allocator.h"
 #include "impl/filter/filter_headers.h"
 #include "impl/heap/distance_heap.h"

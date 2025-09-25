@@ -18,9 +18,9 @@
 #include <functional>
 
 #include "algorithm/hgraph_parameter.h"
-#include "data_cell/flatten_interface.h"
-#include "data_cell/graph_datacell_parameter.h"
-#include "data_cell/graph_interface.h"
+#include "datacell/flatten_interface.h"
+#include "datacell/graph_datacell_parameter.h"
+#include "datacell/graph_interface.h"
 #include "impl/odescent/odescent_graph_parameter.h"
 #include "index_common_param.h"
 #include "inner_index_parameter.h"

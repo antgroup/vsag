@@ -20,8 +20,8 @@
 #include <nlohmann/json.hpp>
 #include <vector>
 
-#include "data_cell/graph_datacell_parameter.h"
 #include "data_type.h"
+#include "datacell/graph_datacell_parameter.h"
 #include "fixtures.h"
 #include "impl/logger/logger.h"
 #include "io/memory_io_parameter.h"

@@ -21,9 +21,9 @@
 #include <unordered_set>
 #include <vector>
 
-#include "data_cell/flatten_datacell.h"
-#include "data_cell/graph_datacell.h"
-#include "data_cell/sparse_graph_datacell.h"
+#include "datacell/flatten_datacell.h"
+#include "datacell/graph_datacell.h"
+#include "datacell/sparse_graph_datacell.h"
 #include "diskann_logger.h"
 #include "impl/allocator/safe_allocator.h"
 #include "impl/logger/logger.h"

@@ -17,7 +17,7 @@
 
 #include <memory>
 
-#include "data_cell/flatten_interface.h"
+#include "datacell/flatten_interface.h"
 #include "heap/distance_heap.h"
 
 namespace vsag {

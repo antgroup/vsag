@@ -19,9 +19,9 @@
 
 #include "attr/argparse.h"
 #include "attr/executor/executor.h"
-#include "data_cell/attribute_inverted_interface.h"
-#include "data_cell/flatten_datacell.h"
-#include "data_cell/flatten_interface.h"
+#include "datacell/attribute_inverted_interface.h"
+#include "datacell/flatten_datacell.h"
+#include "datacell/flatten_interface.h"
 #include "fmt/chrono.h"
 #include "impl/heap/standard_heap.h"
 #include "index_common_param.h"

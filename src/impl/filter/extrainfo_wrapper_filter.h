@@ -17,7 +17,7 @@
 
 #include <functional>
 
-#include "data_cell/extra_info_interface.h"
+#include "datacell/extra_info_interface.h"
 #include "typing.h"
 #include "vsag/bitset.h"
 #include "vsag/filter.h"
