@@ -17,7 +17,7 @@
 
 #include <memory>
 
-#include "data_cell/graph_interface.h"
+#include "datacell/graph_interface.h"
 #include "impl/searcher/basic_searcher.h"
 #include "utils/linear_congruential_generator.h"
 #include "utils/prefetch.h"

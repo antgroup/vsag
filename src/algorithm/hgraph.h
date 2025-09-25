@@ -20,10 +20,10 @@
 #include <string>
 
 #include "common.h"
-#include "data_cell/attribute_inverted_interface.h"
-#include "data_cell/flatten_interface.h"
-#include "data_cell/graph_interface.h"
-#include "data_cell/sparse_graph_datacell_parameter.h"
+#include "datacell/attribute_inverted_interface.h"
+#include "datacell/flatten_interface.h"
+#include "datacell/graph_interface.h"
+#include "datacell/sparse_graph_datacell_parameter.h"
 #include "hgraph_parameter.h"
 #include "impl/basic_optimizer.h"
 #include "impl/heap/distance_heap.h"

@@ -16,8 +16,8 @@
 #pragma once
 
 #include "attr/executor/executor.h"
-#include "data_cell/flatten_interface.h"
-#include "data_cell/graph_interface.h"
+#include "datacell/flatten_interface.h"
+#include "datacell/graph_interface.h"
 #include "impl/heap/distance_heap.h"
 #include "impl/inner_search_param.h"
 #include "index/iterator_filter.h"

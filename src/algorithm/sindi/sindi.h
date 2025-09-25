@@ -17,7 +17,7 @@
 
 #include "algorithm/inner_index_interface.h"
 #include "algorithm/sparse_index.h"
-#include "data_cell/sparse_term_datacell.h"
+#include "datacell/sparse_term_datacell.h"
 
 namespace vsag {
 

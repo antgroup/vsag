@@ -20,8 +20,8 @@
 #include <filesystem>
 #include <set>
 
-#include "data_cell/flatten_interface.h"
-#include "data_cell/graph_interface.h"
+#include "datacell/flatten_interface.h"
+#include "datacell/graph_interface.h"
 #include "fixtures.h"
 #include "impl/allocator/safe_allocator.h"
 #include "io/memory_io_parameter.h"

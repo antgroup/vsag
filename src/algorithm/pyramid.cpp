@@ -15,7 +15,7 @@
 
 #include "pyramid.h"
 
-#include "data_cell/flatten_interface.h"
+#include "datacell/flatten_interface.h"
 #include "impl/heap/standard_heap.h"
 #include "impl/odescent/odescent_graph_builder.h"
 #include "impl/pruning_strategy.h"

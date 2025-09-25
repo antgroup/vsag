@@ -18,8 +18,8 @@
 #include <shared_mutex>
 #include <vector>
 
-#include "data_cell/extra_info_interface.h"
 #include "data_type.h"
+#include "datacell/extra_info_interface.h"
 #include "dataset_impl.h"
 #include "inner_index_parameter.h"
 #include "metric_type.h"

@@ -28,9 +28,9 @@
 
 #include "algorithm/hnswlib/hnswlib.h"
 #include "common.h"
-#include "data_cell/flatten_interface.h"
-#include "data_cell/graph_interface.h"
 #include "data_type.h"
+#include "datacell/flatten_interface.h"
+#include "datacell/graph_interface.h"
 #include "hnsw_zparameters.h"
 #include "impl/allocator/safe_allocator.h"
 #include "impl/conjugate_graph.h"

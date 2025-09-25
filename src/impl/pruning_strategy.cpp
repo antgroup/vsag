@@ -15,8 +15,8 @@
 
 #include "pruning_strategy.h"
 
-#include "data_cell/flatten_datacell.h"
-#include "data_cell/graph_interface.h"
+#include "datacell/flatten_datacell.h"
+#include "datacell/graph_interface.h"
 #include "impl/heap/standard_heap.h"
 #include "utils/lock_strategy.h"
 namespace vsag {

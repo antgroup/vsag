@@ -26,8 +26,8 @@
 
 #include "algorithm/hnswlib/hnswlib.h"
 #include "common.h"
-#include "data_cell/flatten_datacell.h"
-#include "data_cell/graph_datacell_parameter.h"
+#include "datacell/flatten_datacell.h"
+#include "datacell/graph_datacell_parameter.h"
 #include "impl/allocator/safe_allocator.h"
 #include "impl/odescent/odescent_graph_builder.h"
 #include "index/hnsw_zparameters.h"
