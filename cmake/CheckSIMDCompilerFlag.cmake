@@ -1,4 +1,19 @@
 
+# Copyright 2024-present the vsag project
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+
 file(WRITE ${CMAKE_BINARY_DIR}/instructions_test_avx512.cpp "#include <immintrin.h>\nint main() { __m512 a, b; a = _mm512_sub_ps(a, b); return 0; }")
 try_compile(COMPILER_AVX512_SUPPORTED
     ${CMAKE_BINARY_DIR}/instructions_test_avx512
@@ -147,7 +162,7 @@ if (COMPILER_SVE_SUPPORTED)
   set (COMPILER_SUPPORTED "${COMPILER_SUPPORTED} SVE")
 endif ()
 
-message (${COMPILER_SUPPORTED})
+message (STATUS ${COMPILER_SUPPORTED})
 
 # RUNTIME just output for debugging
 set (RUNTIME_SUPPORTED "runtime support instructions: ")
@@ -173,7 +188,7 @@ if (RUNTIME_SVE_SUPPORTED)
   set (RUNTIME_SUPPORTED "${RUNTIME_SUPPORTED} SVE")
 endif ()
 
-message (${RUNTIME_SUPPORTED})
+message (STATUS ${RUNTIME_SUPPORTED})
 
 # important distribution logic:
 #       (not force disable) and (compiler support) and (lower instructions contained)
@@ -207,4 +222,4 @@ if (NOT DISABLE_SVE_FORCE AND COMPILER_SVE_SUPPORTED)
   set (DIST_CONTAINS_INSTRUCTIONS "${DIST_CONTAINS_INSTRUCTIONS} SVE")
 endif ()
 
-message (${DIST_CONTAINS_INSTRUCTIONS})
+message (STATUS ${DIST_CONTAINS_INSTRUCTIONS})
