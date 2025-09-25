@@ -1763,6 +1763,12 @@ HGraph::Merge(const std::vector<MergeUnit>& merge_units) {
 
     auto build_data = (use_reorder_ and not build_by_base_) ? this->high_precise_codes_
                                                             : this->basic_flatten_codes_;
+    for (InnerIdType inner_id = 0; inner_id < this->total_count_; ++inner_id) {
+        Vector<InnerIdType> neighbors(this->allocator_);
+        this->bottom_graph_->GetNeighbors(inner_id, neighbors);
+        neighbors.resize(neighbors.size() / 2);
+        this->bottom_graph_->InsertNeighborsById(inner_id, neighbors);
+    }
     {
         odescent_param_->max_degree = bottom_graph_->MaximumDegree();
         ODescent odescent_builder(odescent_param_, build_data, allocator_, this->build_pool_.get());
