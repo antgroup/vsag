@@ -66,8 +66,8 @@ public:
         obj.scan_buckets_count =
             params[INDEX_TYPE_IVF][IVF_SEARCH_PARAM_SCAN_BUCKETS_COUNT].GetInt();
 
-        if (params[INDEX_TYPE_IVF].Contains(IVF_SEARCH_PARAM_FACTOR)) {
-            obj.topk_factor = params[INDEX_TYPE_IVF][IVF_SEARCH_PARAM_FACTOR].GetFloat();
+        if (params[INDEX_TYPE_IVF].Contains(SEARCH_PARAM_FACTOR)) {
+            obj.topk_factor = params[INDEX_TYPE_IVF][SEARCH_PARAM_FACTOR].GetFloat();
         }
 
         if (params[INDEX_TYPE_IVF].Contains(GNO_IMI_SEARCH_PARAM_FIRST_ORDER_SCAN_RATIO)) {

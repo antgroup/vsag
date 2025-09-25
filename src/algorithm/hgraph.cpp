@@ -1877,6 +1877,10 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     search_param.ef = std::max(params.ef_search, k);
     search_param.is_inner_id_allowed = ft;
     search_param.topk = static_cast<int64_t>(search_param.ef);
+    if (params.topk_factor > 1.0F) {
+        search_param.topk = std::min(
+            search_param.topk, static_cast<int64_t>(static_cast<float>(k) * params.topk_factor));
+    }
     search_param.consider_duplicate = true;
     if (params.enable_time_record) {
         search_param.time_cost = std::make_shared<Timer>();
