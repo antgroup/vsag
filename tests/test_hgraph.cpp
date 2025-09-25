@@ -574,16 +574,9 @@ TestHGraphFactor(const fixtures::HGraphTestIndexPtr& test_index,
                 auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(
                     dim, resource->base_count, metric_type);
                 TestIndex::TestContinueAdd(index, dataset, true);
-                {
-                    auto search_param = fmt::format(fixtures::search_param_tmp, 4, false);
-                    TestIndex::TestKnnSearch(index, dataset, search_param, recall, true);
-                }
-                {
-                    auto search_param = fmt::format(fixtures::search_param_tmp, 0.5, false);
-                    TestIndex::TestKnnSearch(index, dataset, search_param, recall, true);
-                }
-                {
-                    auto search_param = fmt::format(fixtures::search_param_tmp, 100, false);
+                float factors[4]{4, 0.5, -2.0F, 100};
+                for (int i = 0; i < 4; i++) {
+                    auto search_param = fmt::format(search_param_template, factors[i], false);
                     TestIndex::TestKnnSearch(index, dataset, search_param, recall, true);
                 }
                 vsag::Options::Instance().set_block_size_limit(origin_size);
@@ -595,7 +588,7 @@ TestHGraphFactor(const fixtures::HGraphTestIndexPtr& test_index,
 TEST_CASE("HGraph Factor Test", "[ft][hgraph][pr]") {
     auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
     auto resource = test_index->GetResource(true);
-    TestHGraphBuildAndContinueAdd(test_index, resource);
+    TestHGraphFactor(test_index, resource);
 }
 
 void
