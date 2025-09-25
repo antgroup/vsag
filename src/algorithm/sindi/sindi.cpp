@@ -416,7 +416,7 @@ SINDI::CalDistanceById(const DatasetPtr& query, const int64_t* ids, int64_t coun
     for (auto i = 0; i < count; i++) {
         valid_ids[ids[i]] = i;
     }
-    auto filter = [valid_ids](int64_t id) -> bool { return valid_ids.count(id) != 0; };
+    auto filter = [&valid_ids](int64_t id) -> bool { return valid_ids.count(id) != 0; };
     auto filter_ptr = std::make_shared<WhiteListFilter>(filter);
 
     // search
