@@ -540,6 +540,57 @@ TEST_CASE("(Daily) HGraph Build & ContinueAdd Test", "[ft][hgraph][daily]") {
     TestHGraphBuildAndContinueAdd(test_index, resource);
 }
 
+static void
+TestHGraphFactor(const fixtures::HGraphTestIndexPtr& test_index,
+                 const fixtures::HGraphResourcePtr& resource) {
+    using namespace fixtures;
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    auto size = GENERATE(1024 * 1024 * 2);
+
+    constexpr static const char* search_param_template = R"(
+        {{
+            "hgraph": {{
+                "ef_search": 200,
+                "factor": {}
+            }}
+        }})";
+    for (auto metric_type : resource->metric_types) {
+        for (auto dim : resource->dims) {
+            for (auto& [base_quantization_str, recall] : resource->test_cases) {
+                INFO(fmt::format("metric_type: {}, dim: {}, base_quantization_str: {}, recall: {}",
+                                 metric_type,
+                                 dim,
+                                 base_quantization_str,
+                                 recall));
+                if (HGraphTestIndex::IsRaBitQ(base_quantization_str) &&
+                    dim < fixtures::RABITQ_MIN_RACALL_DIM) {
+                    continue;  // Skip invalid RaBitQ configurations
+                }
+                vsag::Options::Instance().set_block_size_limit(size);
+                HGraphTestIndex::HGraphBuildParam build_param(
+                    metric_type, dim, base_quantization_str);
+                auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
+                auto index = TestIndex::TestFactory(test_index->name, param, true);
+                auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(
+                    dim, resource->base_count, metric_type);
+                TestIndex::TestContinueAdd(index, dataset, true);
+                float factors[4]{4, 0.5, -2.0F, 100};
+                for (int i = 0; i < 4; i++) {
+                    auto search_param = fmt::format(search_param_template, factors[i], false);
+                    TestIndex::TestKnnSearch(index, dataset, search_param, recall, true);
+                }
+                vsag::Options::Instance().set_block_size_limit(origin_size);
+            }
+        }
+    }
+}
+
+TEST_CASE("HGraph Factor Test", "[ft][hgraph][pr]") {
+    auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
+    auto resource = test_index->GetResource(true);
+    TestHGraphFactor(test_index, resource);
+}
+
 void
 TestHGraphTrainAndAddTest(const fixtures::HGraphTestIndexPtr& test_index,
                           const fixtures::HGraphResourcePtr& resource) {
