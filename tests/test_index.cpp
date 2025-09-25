@@ -850,13 +850,13 @@ TestIndex::TestBatchCalcDistanceById(const IndexPtr& index,
         }
     }
     SECTION("test non-existing id") {
-        queries->NumElements(1);
         int64_t test_num = 10;
         std::vector<int64_t> no_exist_ids(test_num);
         for (int i = 0; i < test_num; ++i) {
             no_exist_ids[i] = -i - 1;
         }
         tl::expected<DatasetPtr, vsag::Error> result;
+        queries->NumElements(1);
         if (is_sparse) {
             result = index->CalDistanceById(queries, no_exist_ids.data(), test_num);
         } else {
@@ -867,6 +867,7 @@ TestIndex::TestBatchCalcDistanceById(const IndexPtr& index,
             fixtures::dist_t dist = result.value()->GetDistances()[i];
             REQUIRE(dist == -1);
         }
+        queries->NumElements(query_count);
     }
 }
 

@@ -408,7 +408,7 @@ SINDI::CalDistanceById(const DatasetPtr& query, const int64_t* ids, int64_t coun
     auto result = Dataset::Make();
     result->Owner(true, allocator_);
     auto* distances = (float*)allocator_->Allocate(sizeof(float) * count);
-    std::fill_n(distances, count, -1.0f);
+    std::fill_n(distances, count, -1.0F);
     result->Distances(distances);
 
     // assume count is small, otherwise we should use bitmap to construct filter function
