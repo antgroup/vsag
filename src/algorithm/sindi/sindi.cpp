@@ -408,6 +408,7 @@ SINDI::CalDistanceById(const DatasetPtr& query, const int64_t* ids, int64_t coun
     auto result = Dataset::Make();
     result->Owner(true, allocator_);
     auto* distances = (float*)allocator_->Allocate(sizeof(float) * count);
+    std::fill_n(distances, count, -1.0f);
     result->Distances(distances);
 
     // assume count is small, otherwise we should use bitmap to construct filter function
@@ -419,7 +420,7 @@ SINDI::CalDistanceById(const DatasetPtr& query, const int64_t* ids, int64_t coun
     auto filter_ptr = std::make_shared<WhiteListFilter>(filter);
 
     // search
-    auto search_param_fmt = R"(
+    const auto* search_param_fmt = R"(
     {{
         "sindi": {{
             "query_prune_ratio": 0,
@@ -431,7 +432,7 @@ SINDI::CalDistanceById(const DatasetPtr& query, const int64_t* ids, int64_t coun
         this->KnnSearch(query, count, fmt::format(search_param_fmt, count), filter_ptr);
 
     // flush results
-    for (auto i = 0; i < search_res->GetNumElements(); i++) {
+    for (auto i = 0; i < search_res->GetDim(); i++) {
         float dist = search_res->GetDistances()[i];
         int64_t id = search_res->GetIds()[i];
         distances[valid_ids[id]] = dist;

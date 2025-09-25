@@ -253,8 +253,12 @@ SparseIndex::CalDistanceById(const DatasetPtr& query, const int64_t* ids, int64_
 
     // cal distances one by one
     for (int64_t i = 0; i < count; i++) {
-        uint32_t inner_id = this->label_table_->GetIdByLabel(ids[i]);
-        distances[i] = CalDistanceByIdUnsafe(sorted_ids, sorted_vals, inner_id);
+        try {
+            uint32_t inner_id = this->label_table_->GetIdByLabel(ids[i]);
+            distances[i] = CalDistanceByIdUnsafe(sorted_ids, sorted_vals, inner_id);
+        } catch (std::runtime_error& e) {
+            distances[i] = -1;
+        }
     }
     return result;
 }

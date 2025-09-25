@@ -850,6 +850,7 @@ TestIndex::TestBatchCalcDistanceById(const IndexPtr& index,
         }
     }
     SECTION("test non-existing id") {
+        queries->NumElements(1);
         int64_t test_num = 10;
         std::vector<int64_t> no_exist_ids(test_num);
         for (int i = 0; i < test_num; ++i) {
