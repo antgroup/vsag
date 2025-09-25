@@ -120,8 +120,8 @@ HGraphResourcePtr
 HGraphTestIndex::GetResource(bool sample) {
     auto resource = std::make_shared<HGraphTestResource>();
     if (sample) {
-        resource->dims = fixtures::get_common_used_dims(1, RandomValue(0, 999));
-        resource->test_cases = fixtures::RandomSelect(HGraphTestIndex::all_test_cases, 3);
+        resource->dims = fixtures::get_common_used_dims(1, RandomValue(0, 999), 257);
+        resource->test_cases = fixtures::RandomSelect(HGraphTestIndex::all_test_cases, 2);
         resource->metric_types = fixtures::RandomSelect<std::string>({"ip", "l2", "cosine"}, 1);
         resource->base_count = HGraphTestIndex::base_count;
     } else {

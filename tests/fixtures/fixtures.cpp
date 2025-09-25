@@ -31,7 +31,7 @@ namespace fixtures {
 const int RABITQ_MIN_RACALL_DIM = 960;
 
 std::vector<int>
-get_common_used_dims(uint64_t count, int seed) {
+get_common_used_dims(uint64_t count, int seed, int limited_dim) {
     const std::vector<int> dims = {
         7,    8,   9,    // generic (dim < 32)
         32,   33,  48,   // sse(32) + generic(dim < 16)
@@ -46,6 +46,20 @@ get_common_used_dims(uint64_t count, int seed) {
         1024, 1536};     // common used dims
     if (count == -1 || count >= dims.size()) {
         return dims;
+    }
+    if (limited_dim > 0) {
+        // find dim less than or equal to limited_dim (binary search)
+        auto it = std::upper_bound(dims.begin(), dims.end(), limited_dim);
+        if (it != dims.begin()) {
+            std::vector<int> result(dims.begin(), it);
+            if (result.size() < count) {
+                return result;
+            } else {
+                std::shuffle(result.begin(), result.end(), std::mt19937(seed));
+                result.resize(count);
+                return result;
+            }
+        }
     }
     std::vector<int> result(dims.begin(), dims.end());
     std::shuffle(result.begin(), result.end(), std::mt19937(seed));

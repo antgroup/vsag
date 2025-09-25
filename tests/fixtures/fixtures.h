@@ -32,7 +32,7 @@ namespace fixtures {
 extern const int RABITQ_MIN_RACALL_DIM;
 
 std::vector<int>
-get_common_used_dims(uint64_t count = -1, int seed = 369);
+get_common_used_dims(uint64_t count = -1, int seed = 369, int limited_dim = -1);
 
 template <typename T>
 T*
