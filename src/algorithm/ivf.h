@@ -15,9 +15,9 @@
 
 #pragma once
 
-#include "data_cell/attribute_bucket_inverted_datacell.h"
-#include "data_cell/bucket_datacell.h"
-#include "data_cell/flatten_interface.h"
+#include "datacell/attribute_bucket_inverted_datacell.h"
+#include "datacell/bucket_datacell.h"
+#include "datacell/flatten_interface.h"
 #include "impl/heap/distance_heap.h"
 #include "impl/searcher/basic_searcher.h"
 #include "index_common_param.h"

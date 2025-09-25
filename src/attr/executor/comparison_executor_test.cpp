@@ -18,7 +18,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "attr/argparse.h"
-#include "data_cell/attribute_inverted_interface.h"
+#include "datacell/attribute_inverted_interface.h"
 #include "executor_test.h"
 #include "impl/allocator/safe_allocator.h"
 

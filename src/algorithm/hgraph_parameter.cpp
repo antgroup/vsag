@@ -15,12 +15,12 @@
 
 #include "hgraph_parameter.h"
 
-#include "data_cell/extra_info_datacell_parameter.h"
-#include "data_cell/flatten_datacell_parameter.h"
-#include "data_cell/graph_datacell_parameter.h"
-#include "data_cell/graph_interface_parameter.h"
-#include "data_cell/sparse_graph_datacell_parameter.h"
-#include "data_cell/sparse_vector_datacell_parameter.h"
+#include "datacell/extra_info_datacell_parameter.h"
+#include "datacell/flatten_datacell_parameter.h"
+#include "datacell/graph_datacell_parameter.h"
+#include "datacell/graph_interface_parameter.h"
+#include "datacell/sparse_graph_datacell_parameter.h"
+#include "datacell/sparse_vector_datacell_parameter.h"
 #include "impl/odescent/odescent_graph_parameter.h"
 #include "inner_string_params.h"
 #include "vsag/constants.h"

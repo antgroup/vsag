@@ -17,8 +17,8 @@
 
 #include "attr/executor/executor.h"
 #include "basic_searcher.h"
-#include "data_cell/flatten_interface.h"
-#include "data_cell/graph_interface.h"
+#include "datacell/flatten_interface.h"
+#include "datacell/graph_interface.h"
 #include "impl/heap/distance_heap.h"
 #include "index_common_param.h"
 #include "utils/lock_strategy.h"

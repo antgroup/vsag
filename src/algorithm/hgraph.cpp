@@ -15,7 +15,7 @@
 
 #include "hgraph.h"
 
-#include <data_cell/compressed_graph_datacell_parameter.h>
+#include <datacell/compressed_graph_datacell_parameter.h>
 #include <fmt/format.h>
 
 #include <memory>
@@ -23,7 +23,7 @@
 
 #include "attr/argparse.h"
 #include "common.h"
-#include "data_cell/sparse_graph_datacell.h"
+#include "datacell/sparse_graph_datacell.h"
 #include "dataset_impl.h"
 #include "impl/heap/standard_heap.h"
 #include "impl/odescent/odescent_graph_builder.h"
