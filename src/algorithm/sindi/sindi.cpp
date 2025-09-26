@@ -397,6 +397,50 @@ SINDI::CalcDistanceById(const DatasetPtr& vector, int64_t id) const {
     return term_list->CalcDistanceByInnerId(computer, inner_id - window_start_id);
 }
 
+DatasetPtr
+SINDI::CalDistanceById(const DatasetPtr& query, const int64_t* ids, int64_t count) const {
+    if (use_reorder_) {
+        std::shared_lock rlock(this->global_mutex_);
+        return this->rerank_flat_index_->CalDistanceById(query, ids, count);
+    }
+
+    // prepare result
+    auto result = Dataset::Make();
+    result->Owner(true, allocator_);
+    auto* distances = (float*)allocator_->Allocate(sizeof(float) * count);
+    std::fill_n(distances, count, -1.0F);
+    result->Distances(distances);
+
+    // assume count is small, otherwise we should use bitmap to construct filter function
+    std::unordered_map<int64_t, uint32_t> valid_ids;
+    for (auto i = 0; i < count; i++) {
+        valid_ids[ids[i]] = i;
+    }
+    auto filter = [&valid_ids](int64_t id) -> bool { return valid_ids.count(id) != 0; };
+    auto filter_ptr = std::make_shared<WhiteListFilter>(filter);
+
+    // search
+    const auto* search_param_fmt = R"(
+    {{
+        "sindi": {{
+            "query_prune_ratio": 0,
+            "n_candidate": {}
+        }}
+    }}
+    )";
+    auto search_res =
+        this->KnnSearch(query, count, fmt::format(search_param_fmt, count), filter_ptr);
+
+    // flush results
+    for (auto i = 0; i < search_res->GetDim(); i++) {
+        float dist = search_res->GetDistances()[i];
+        int64_t id = search_res->GetIds()[i];
+        distances[valid_ids[id]] = dist;
+    }
+
+    return result;
+}
+
 void
 SINDI::SetImmutable() {
     std::scoped_lock wlock(this->global_mutex_);

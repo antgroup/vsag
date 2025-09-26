@@ -856,6 +856,7 @@ TestIndex::TestBatchCalcDistanceById(const IndexPtr& index,
             no_exist_ids[i] = -i - 1;
         }
         tl::expected<DatasetPtr, vsag::Error> result;
+        queries->NumElements(1);
         if (is_sparse) {
             result = index->CalDistanceById(queries, no_exist_ids.data(), test_num);
         } else {
@@ -866,6 +867,7 @@ TestIndex::TestBatchCalcDistanceById(const IndexPtr& index,
             fixtures::dist_t dist = result.value()->GetDistances()[i];
             REQUIRE(dist == -1);
         }
+        queries->NumElements(query_count);
     }
 }
 
