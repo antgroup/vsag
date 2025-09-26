@@ -16,7 +16,6 @@
 #include "transform_quantizer_parameter.h"
 
 #include "impl/logger/logger.h"
-#include "inner_string_params.h"
 
 namespace vsag {
 
@@ -79,6 +78,7 @@ TransformQuantizerParameter::ToJson() const {
     auto tmp_tq_chain = tq_chain_;
     tmp_tq_chain.emplace_back(json[QUANTIZATION_TYPE_KEY].GetString());
     json[TQ_CHAIN].SetString(MergeStrings(tmp_tq_chain));
+    json[QUANTIZATION_TYPE_KEY].SetString(QUANTIZATION_TYPE_VALUE_TQ);
     return json;
 }
 
