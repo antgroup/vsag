@@ -93,6 +93,9 @@ public:
     float
     CalcDistanceById(const DatasetPtr& vector, int64_t id) const override;
 
+    DatasetPtr
+    CalDistanceById(const DatasetPtr& query, const int64_t* ids, int64_t count) const override;
+
     bool
     UpdateId(int64_t old_id, int64_t new_id) override;
 
