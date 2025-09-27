@@ -27,6 +27,7 @@
 #include "quantization/quantizer_parameter.h"
 #include "quantizer_adapter_test.h"
 #include "typing.h"
+#include "vsag/constants.h"
 #include "vsag/engine.h"
 #include "vsag/resource.h"
 #include "vsag_exception.h"
@@ -42,7 +43,7 @@ QuantizerParamPtr
 CreateQuantizerParam(const QuantizerType& quantization_type, uint64_t dim) {
     if (quantization_type == QuantizerType::QUANTIZER_TYPE_PQ) {
         JsonType params;
-        params[PRODUCT_QUANTIZATION_DIM] = dim;
+        params[PRODUCT_QUANTIZATION_DIM].SetInt(dim);
         auto pq_param = std::make_shared<ProductQuantizerParameter>();
         pq_param->FromJson(params);
         return pq_param;
@@ -55,9 +56,9 @@ CreateIndexCommonParam(uint64_t dim,
                        std::shared_ptr<Resource> res,
                        std::string metric = std::string("l2")) {
     JsonType params;
-    params[PARAMETER_DTYPE] = DATATYPE_INT8;
-    params[PARAMETER_METRIC_TYPE] = metric;
-    params[PARAMETER_DIM] = dim;
+    params[PARAMETER_DTYPE].SetString(DATATYPE_INT8);
+    params[PARAMETER_METRIC_TYPE].SetString(metric);
+    params[PARAMETER_DIM].SetInt(dim);
     return IndexCommonParam::CheckAndCreate(params, res);
 }
 
