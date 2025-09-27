@@ -18,6 +18,7 @@
 #include <cmath>
 #include <cstdint>
 #include <memory>
+#include <type_traits>
 
 #include "quantization/computer.h"
 #include "quantization/quantizer.h"
@@ -38,25 +39,37 @@ QuantizerAdapter<QuantT, DataT>::QuantizerAdapter(const QuantizerParamPtr& param
 template <typename QuantT, typename DataT>
 bool
 QuantizerAdapter<QuantT, DataT>::TrainImpl(const DataType* data, size_t count) {
-    auto data_int8 = reinterpret_cast<const int8_t*>(data);
-    Vector<DataType> vec(this->dim_ * count, this->allocator_);
+    if constexpr (std::is_same_v<DataT, int8_t>) {
+        auto data_int8 = reinterpret_cast<const int8_t*>(data);
+        Vector<DataType> vec(this->dim_ * count, this->allocator_);
 #pragma omp simd
-    for (int64_t i = 0; i < this->dim_ * count; ++i) {
-        vec[i] = static_cast<DataType>(data_int8[i]);
+        for (int64_t i = 0; i < this->dim_ * count; ++i) {
+            vec[i] = static_cast<DataType>(data_int8[i]);
+        }
+        return this->inner_quantizer_->TrainImpl(vec.data(), count);
+    } else {
+        static_assert(std::is_same_v<DataT, int8_t>,
+                      "QuantizerAdapter::TrainImpl only supports int8_t data type");
+        return false;
     }
-    return this->inner_quantizer_->TrainImpl(vec.data(), count);
 }
 
 template <typename QuantT, typename DataT>
 bool
 QuantizerAdapter<QuantT, DataT>::EncodeOneImpl(const DataType* data, uint8_t* codes) {
-    auto data_int8 = reinterpret_cast<const int8_t*>(data);
+    if constexpr (std::is_same_v<DataT, int8_t>) {
+        auto data_int8 = reinterpret_cast<const int8_t*>(data);
 #pragma omp simd
-    Vector<DataType> vec(this->dim_, this->allocator_);
-    for (int64_t i = 0; i < this->dim_; i++) {
-        vec[i] = static_cast<DataType>(data_int8[i]);
+        Vector<DataType> vec(this->dim_, this->allocator_);
+        for (int64_t i = 0; i < this->dim_; i++) {
+            vec[i] = static_cast<DataType>(data_int8[i]);
+        }
+        return this->inner_quantizer_->EncodeOneImpl(vec.data(), codes);
+    } else {
+        static_assert(std::is_same_v<DataT, int8_t>,
+                      "QuantizerAdapter::EncodeOneImpl only supports int8_t data type");
+        return false;
     }
-    return this->inner_quantizer_->EncodeOneImpl(vec.data(), codes);
 }
 
 template <typename QuantT, typename DataT>
@@ -64,27 +77,39 @@ bool
 QuantizerAdapter<QuantT, DataT>::EncodeBatchImpl(const DataType* data,
                                                  uint8_t* codes,
                                                  uint64_t count) {
-    auto data_int8 = reinterpret_cast<const int8_t*>(data);
-    Vector<DataType> vec(this->dim_ * count, this->allocator_);
+    if constexpr (std::is_same_v<DataT, int8_t>) {
+        auto data_int8 = reinterpret_cast<const int8_t*>(data);
+        Vector<DataType> vec(this->dim_ * count, this->allocator_);
 #pragma omp simd
-    for (int64_t i = 0; i < this->dim_ * count; ++i) {
-        vec[i] = static_cast<DataType>(data_int8[i]);
+        for (int64_t i = 0; i < this->dim_ * count; ++i) {
+            vec[i] = static_cast<DataType>(data_int8[i]);
+        }
+        return this->inner_quantizer_->EncodeBatchImpl(vec.data(), codes, count);
+    } else {
+        static_assert(std::is_same_v<DataT, int8_t>,
+                      "QuantizerAdapter::EncodeBatchImpl only supports int8_t data type");
+        return false;
     }
-    return this->inner_quantizer_->EncodeBatchImpl(vec.data(), codes, count);
 }
 
 template <typename QuantT, typename DataT>
 bool
 QuantizerAdapter<QuantT, DataT>::DecodeOneImpl(const uint8_t* codes, DataType* data) {
-    Vector<DataType> vec(this->dim_, this->allocator_);
-    if (!this->inner_quantizer_->DecodeOneImpl(codes, vec.data())) {
+    if constexpr (std::is_same_v<DataT, int8_t>) {
+        Vector<DataType> vec(this->dim_, this->allocator_);
+        if (!this->inner_quantizer_->DecodeOneImpl(codes, vec.data())) {
+            return false;
+        }
+#pragma omp simd
+        for (int64_t i = 0; i < this->dim_; i++) {
+            reinterpret_cast<DataT*>(data)[i] = static_cast<DataT>(std::round(vec[i]));
+        }
+        return true;
+    } else {
+        static_assert(std::is_same_v<DataT, int8_t>,
+                      "QuantizerAdapter::DecodeOneImpl only supports int8_t data type");
         return false;
     }
-#pragma omp simd
-    for (int64_t i = 0; i < this->dim_; i++) {
-        reinterpret_cast<DataT*>(data)[i] = static_cast<DataT>(std::round(vec[i]));
-    }
-    return true;
 }
 
 template <typename QuantT, typename DataT>
@@ -92,15 +117,21 @@ bool
 QuantizerAdapter<QuantT, DataT>::DecodeBatchImpl(const uint8_t* codes,
                                                  DataType* data,
                                                  uint64_t count) {
-    Vector<DataType> vec(this->dim_ * count, this->allocator_);
-    if (!this->inner_quantizer_->DecodeBatchImpl(codes, vec.data(), count)) {
+    if constexpr (std::is_same_v<DataT, int8_t>) {
+        Vector<DataType> vec(this->dim_ * count, this->allocator_);
+        if (!this->inner_quantizer_->DecodeBatchImpl(codes, vec.data(), count)) {
+            return false;
+        }
+#pragma omp simd
+        for (int64_t i = 0; i < this->dim_ * count; i++) {
+            reinterpret_cast<DataT*>(data)[i] = static_cast<DataT>(std::round(vec[i]));
+        }
+        return true;
+    } else {
+        static_assert(std::is_same_v<DataT, int8_t>,
+                      "QuantizerAdapter::DecodeBatchImpl only supports int8_t data type");
         return false;
     }
-#pragma omp simd
-    for (int64_t i = 0; i < this->dim_ * count; i++) {
-        reinterpret_cast<DataT*>(data)[i] = static_cast<DataT>(std::round(vec[i]));
-    }
-    return true;
 }
 template <typename QuantT, typename DataT>
 float
@@ -124,14 +155,19 @@ template <typename QuantT, typename DataT>
 void
 QuantizerAdapter<QuantT, DataT>::ProcessQueryImpl(
     const DataType* query, Computer<QuantizerAdapter<QuantT, DataT>>& computer) const {
-    auto query_int8 = reinterpret_cast<const int8_t*>(query);
-    Vector<DataType> vec(this->dim_, this->allocator_);
+    if constexpr (std::is_same_v<DataT, int8_t>) {
+        auto query_int8 = reinterpret_cast<const int8_t*>(query);
+        Vector<DataType> vec(this->dim_, this->allocator_);
 #pragma omp simd
-    for (int64_t i = 0; i < this->dim_; i++) {
-        vec[i] = static_cast<DataType>(query_int8[i]);
+        for (int64_t i = 0; i < this->dim_; i++) {
+            vec[i] = static_cast<DataType>(query_int8[i]);
+        }
+        Computer<QuantT>& inner_computer = reinterpret_cast<Computer<QuantT>&>(computer);
+        this->inner_quantizer_->ProcessQueryImpl(vec.data(), inner_computer);
+    } else {
+        static_assert(std::is_same_v<DataT, int8_t>,
+                      "QuantizerAdapter::ProcessQueryImpl only supports int8_t data type");
     }
-    Computer<QuantT>& inner_computer = reinterpret_cast<Computer<QuantT>&>(computer);
-    this->inner_quantizer_->ProcessQueryImpl(vec.data(), inner_computer);
 }
 
 template <typename QuantT, typename DataT>

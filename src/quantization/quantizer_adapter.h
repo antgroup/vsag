@@ -17,6 +17,7 @@
 
 #include <memory>
 #include <string>
+#include <type_traits>
 
 #include "index_common_param.h"
 #include "quantization/computer.h"
@@ -28,6 +29,9 @@ namespace vsag {
 
 template <typename QuantT, typename DataT>
 class QuantizerAdapter : public Quantizer<QuantizerAdapter<QuantT, DataT>> {
+    static_assert(std::is_same_v<DataT, int8_t>,
+                  "QuantizerAdapter currently only supports int8_t data type");
+
 public:
     explicit QuantizerAdapter(const QuantizerParamPtr& param, const IndexCommonParam& common_param);
 
