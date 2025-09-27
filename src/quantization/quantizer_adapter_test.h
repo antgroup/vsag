@@ -42,7 +42,7 @@ enum class QuantizerType {
     QUANTIZER_TYPE_SPARSE = 11,
     QUANTIZER_TYPE_TQ = 12,
 };
-}
+}  // namespace vsag
 
 using namespace vsag;
 

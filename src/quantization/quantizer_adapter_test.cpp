@@ -47,17 +47,15 @@ struct QuantizerTestConfig {
 };
 
 static const std::vector<QuantizerTestConfig> quantizer_test_configs = {
-    {
-        QuantizerType::QUANTIZER_TYPE_PQ,
-        "l2",
-        MetricType::METRIC_TYPE_L2SQR,
-        {128, 256},
-        {300},
-        8.0F / 255.0F,
-        10.0F,
-        1.0F,
-        5.0F
-    },
+    {QuantizerType::QUANTIZER_TYPE_PQ,
+     "l2",
+     MetricType::METRIC_TYPE_L2SQR,
+     {128, 256},
+     {300},
+     8.0F / 255.0F,
+     10.0F,
+     1.0F,
+     5.0F},
     // TODO: Add configurations for other quantizer types:
     // - SQ8: dims from fixtures::get_common_used_dims(), counts {10, 101}, error 1e-2f
     // - FP32: dims {64, 128}, counts {10, 101}, error 2e-5f
@@ -155,9 +153,9 @@ TEST_CASE("QuantizerAdapter Encode and Decode", "[ut][QuantizerAdapter][EncodeDe
         for (auto dim : config.dims) {
             for (auto count : config.counts) {
                 float error = config.error_threshold * config.error_multiplier_encode_decode;
-                TestQuantizerAdapterEncodeDecodeINT8<ProductQuantizer<MetricType::METRIC_TYPE_L2SQR>,
-                                                     MetricType::METRIC_TYPE_L2SQR>(
-                    config.quantizer_type, dim, count, error);
+                TestQuantizerAdapterEncodeDecodeINT8<
+                    ProductQuantizer<MetricType::METRIC_TYPE_L2SQR>,
+                    MetricType::METRIC_TYPE_L2SQR>(config.quantizer_type, dim, count, error);
                 // TODO: Add tests for IP and COSINE metrics when needed
             }
         }
@@ -166,7 +164,10 @@ TEST_CASE("QuantizerAdapter Encode and Decode", "[ut][QuantizerAdapter][EncodeDe
 
 template <typename QuantT, MetricType metric>
 void
-TestQuantizerAdapterCompute(QuantizerType quantizer_type, uint64_t dim, int count, float error = 1e-5) {
+TestQuantizerAdapterCompute(QuantizerType quantizer_type,
+                            uint64_t dim,
+                            int count,
+                            float error = 1e-5) {
     vsag::Resource resource(vsag::Engine::CreateDefaultAllocator(), nullptr);
     try {
         const QuantizerParamPtr quantizer_param = CreateQuantizerParam(quantizer_type, dim);
@@ -201,7 +202,10 @@ TEST_CASE("QuantizerAdapter Compute", "[ut][QuantizerAdapter][Compute]") {
 
 template <typename QuantT, MetricType metric>
 void
-TestAdapterSerializeAndDeserialize(QuantizerType quantizer_type, uint64_t dim, int count, float error = 1e-5) {
+TestAdapterSerializeAndDeserialize(QuantizerType quantizer_type,
+                                   uint64_t dim,
+                                   int count,
+                                   float error = 1e-5) {
     vsag::Resource resource(vsag::Engine::CreateDefaultAllocator(), nullptr);
     try {
         const QuantizerParamPtr quantizer_param = CreateQuantizerParam(quantizer_type, dim);
