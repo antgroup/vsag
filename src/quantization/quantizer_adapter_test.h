@@ -25,6 +25,25 @@
 #include "simd/basic_func.h"
 #include "storage/serialization_template_test.h"
 
+namespace vsag {
+// NOTE(Coien.rr): Just used in CreateQuantizerParam in tests, escalated if needed in the future.
+enum class QuantizerType {
+    QUANTIZER_TYPE_SQ8 = 0,
+    QUANTIZER_TYPE_SQ8_UNIFORM = 1,
+    QUANTIZER_TYPE_SQ4 = 2,
+    QUANTIZER_TYPE_SQ4_UNIFORM = 3,
+    QUANTIZER_TYPE_FP32 = 4,
+    QUANTIZER_TYPE_FP16 = 5,
+    QUANTIZER_TYPE_BF16 = 6,
+    QUANTIZER_TYPE_INT8 = 7,
+    QUANTIZER_TYPE_PQ = 8,
+    QUANTIZER_TYPE_PQFS = 9,
+    QUANTIZER_TYPE_RABITQ = 10,
+    QUANTIZER_TYPE_SPARSE = 11,
+    QUANTIZER_TYPE_TQ = 12,
+};
+}
+
 using namespace vsag;
 
 template <typename T, typename DataT = float>

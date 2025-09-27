@@ -25,7 +25,6 @@
 #include "metric_type.h"
 #include "quantization/product_quantization/product_quantizer.h"
 #include "quantization/quantizer_parameter.h"
-#include "quantization/quantizer_type.h"
 #include "quantizer_adapter_test.h"
 #include "typing.h"
 #include "vsag/engine.h"
