@@ -26,6 +26,10 @@
 #include "utils/function_exists_check.h"
 
 namespace vsag {
+
+template <typename Q, typename D>
+class QuantizerAdapter;
+
 using DataType = float;
 
 /**
@@ -259,6 +263,9 @@ private:
     }
 
     friend QuantT;
+
+    template <typename Q, typename D>
+    friend class QuantizerAdapter;
 
 private:
     uint64_t dim_{0};
