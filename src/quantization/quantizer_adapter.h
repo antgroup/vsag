@@ -95,6 +95,10 @@ private:
     std::shared_ptr<QuantT> inner_quantizer_{nullptr};
 };
 
-template class QuantizerAdapter<ProductQuantizer<MetricType::METRIC_TYPE_L2SQR>, int8_t>;
-// template class QuantizerAdapter<FP32Quantizer<MetricType::METRIC_TYPE_L2SQR>, int8_t>;
+#define TEMPLATE_QUANTIZER_ADAPTER(QuantType, DataT)                                  \
+    template class QuantizerAdapter<QuantType<MetricType::METRIC_TYPE_L2SQR>, DataT>; \
+    template class QuantizerAdapter<QuantType<MetricType::METRIC_TYPE_IP>, DataT>;    \
+    template class QuantizerAdapter<QuantType<MetricType::METRIC_TYPE_COSINE>, DataT>;
+
+TEMPLATE_QUANTIZER_ADAPTER(ProductQuantizer, int8_t);
 }  // namespace vsag
