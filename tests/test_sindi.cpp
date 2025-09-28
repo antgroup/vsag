@@ -145,6 +145,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex, "SINDI Build and Search",
     REQUIRE(index->GetIndexType() == vsag::IndexType::SINDI);
     TestContinueAdd(index, dataset, true);
     TestKnnSearch(index, dataset, search_param, 0.99, true);
+    TestSearchAllocator(index, dataset, search_param, 0.99, true);
     TestRangeSearch(index, dataset, search_param, 0.99, 10, true);
     TestRangeSearch(index, dataset, search_param, 0.49, 5, true);
     TestFilterSearch(index, dataset, search_param, 0.99, true);

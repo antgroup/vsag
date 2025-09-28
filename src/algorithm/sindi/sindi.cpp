@@ -104,6 +104,15 @@ SINDI::KnnSearch(const DatasetPtr& query,
                  int64_t k,
                  const std::string& parameters,
                  const FilterPtr& filter) const {
+    return KnnSearch(query, k, parameters, filter, allocator_);
+}
+
+DatasetPtr
+SINDI::KnnSearch(const DatasetPtr& query,
+                 int64_t k,
+                 const std::string& parameters,
+                 const FilterPtr& filter,
+                 vsag::Allocator* allocator) const {
     std::shared_lock rlock(this->global_mutex_);
 
     // Due to concerns about the performance of this index
@@ -133,15 +142,16 @@ SINDI::KnnSearch(const DatasetPtr& query,
     inner_param.is_inner_id_allowed = ft;
 
     auto computer = std::make_shared<SparseTermComputer>(sparse_query, search_param, allocator_);
-    return search_impl<KNN_SEARCH>(computer, inner_param);
+    return search_impl<KNN_SEARCH>(computer, inner_param, allocator);
 }
 
 template <InnerSearchMode mode>
 DatasetPtr
 SINDI::search_impl(const SparseTermComputerPtr& computer,
-                   const InnerSearchParam& inner_param) const {
+                   const InnerSearchParam& inner_param,
+                   Allocator* allocator) const {
     // computer and heap
-    MaxHeap heap(this->allocator_);
+    MaxHeap heap(allocator);
     int64_t k = 0;
 
     if constexpr (mode == KNN_SEARCH) {
@@ -149,7 +159,7 @@ SINDI::search_impl(const SparseTermComputerPtr& computer,
     }
 
     // window iteration
-    std::vector<float> dists(window_size_, 0.0);
+    Vector<float> dists(window_size_, 0.0, allocator);
 
     for (auto cur = 0; cur < window_term_list_.size(); cur++) {
         auto window_start_id = cur * window_size_;
@@ -266,7 +276,7 @@ SINDI::RangeSearch(const DatasetPtr& query,
     inner_param.is_inner_id_allowed = ft;
 
     auto computer = std::make_shared<SparseTermComputer>(sparse_query, search_param, allocator_);
-    return search_impl<RANGE_SEARCH>(computer, inner_param);
+    return search_impl<RANGE_SEARCH>(computer, inner_param, allocator_);
 }
 
 void
@@ -420,7 +430,7 @@ SINDI::CalDistanceById(const DatasetPtr& query, const int64_t* ids, int64_t coun
     auto filter_ptr = std::make_shared<WhiteListFilter>(filter);
 
     // search
-    const auto* search_param_fmt = R"(
+    constexpr auto* search_param_fmt = R"(
     {{
         "sindi": {{
             "query_prune_ratio": 0,
