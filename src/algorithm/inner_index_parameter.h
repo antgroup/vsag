@@ -23,6 +23,7 @@ namespace vsag {
 DEFINE_POINTER(InnerIndexParameter);
 DEFINE_POINTER2(ExtraInfoDataCellParam, ExtraInfoDataCellParameter);
 DEFINE_POINTER2(FlattenInterfaceParam, FlattenInterfaceParameter);
+DEFINE_POINTER2(AttributeInvertedInterfaceParam, AttributeInvertedInterfaceParameter);
 
 class InnerIndexParameter : public Parameter {
 public:
@@ -51,5 +52,7 @@ public:
     FlattenInterfaceParamPtr raw_vector_param{nullptr};
 
     ExtraInfoDataCellParamPtr extra_info_param{nullptr};
+
+    AttributeInvertedInterfaceParamPtr attr_inverted_interface_param{nullptr};
 };
 }  // namespace vsag

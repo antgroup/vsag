@@ -19,6 +19,7 @@
 
 #include "attr/attr_type_schema.h"
 #include "attr/multi_bitset_manager.h"
+#include "attribute_inverted_interface_parameter.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
 #include "typing.h"
@@ -32,6 +33,9 @@ class AttributeInvertedInterface {
 public:
     static AttrInvertedInterfacePtr
     MakeInstance(Allocator* allocator, bool have_bucket = false);
+
+    static AttrInvertedInterfacePtr
+    MakeInstance(Allocator* allocator, const AttributeInvertedInterfaceParamPtr& param);
 
 public:
     AttributeInvertedInterface(Allocator* allocator, ComputableBitsetType bitset_type)

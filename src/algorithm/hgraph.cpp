@@ -96,10 +96,6 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
     if (use_elp_optimizer_) {
         optimizer_ = std::make_shared<Optimizer<BasicSearcher>>(common_param);
     }
-    if (this->use_attribute_filter_) {
-        this->attr_filter_index_ =
-            AttributeInvertedInterface::MakeInstance(allocator_, false /*have_bucket*/);
-    }
     check_and_init_raw_vector(hgraph_param->raw_vector_param, common_param);
 }
 void
@@ -1269,6 +1265,9 @@ static const std::string HGRAPH_PARAMS_TEMPLATE =
                 "{IO_TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
                 "{IO_FILE_PATH}": "{DEFAULT_FILE_PATH_VALUE}"
             }
+        },
+        "{ATTR_PARAMS_KEY}": {
+            "{HAS_BUCKETS_KEY}": false
         },
         "{HGRAPH_SUPPORT_DUPLICATE}": false,
         "{HGRAPH_SUPPORT_TOMBSTONE}": false,
