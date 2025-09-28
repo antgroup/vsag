@@ -80,6 +80,9 @@ public:
 public:
     Vector<DataType> diff_;
     Vector<DataType> lower_bound_;
+
+private:
+    uint64_t trunc_dim_;
 };
 
 }  // namespace vsag

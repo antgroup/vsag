@@ -5,23 +5,249 @@ global:
         to: "stdout"
       save-to-file:
         format: "json"
-        to: "file://tmp/eval_example_output.json"
-      send-to-influxdb:
-        format: "line_protocol"
-        to: "influxdb://127.0.0.1:8086/api/v2/write?org=7d71a0eb85deafbe&bucket=583a2fd8dd85e66c&precision=ns"
-        vars:
-          token: "Token mlIiP-zVfcooHhMbGG9Yk-KfrkHyDc2h-rphnIBda8UMe_6Qocy8tNmV323yxOPEAsC8uIs6_nb-XUSMEAO76A=="
+        to: "appendfile://tmp/eval_example_output.json"
 
-eval_case1:
-    datapath: "/tmp/sift-128-euclidean.hdf5"
-    type: "search" # `build` or `search` or `build,search`
-    index_name: "hgraph"
-    create_params: '{"dim":128,"dtype":"float32","metric_type":"l2","index_param":{"base_quantization_type":"fp32","max_degree":32,"ef_construction":300}}'
-    search_params: '{"hgraph":{"ef_search":60}}'
-    index_path: "/tmp/sift-128-euclidean/index/hgraph_index"
-    search_mode: "knn" # ["knn", "range", "knn_filter", "range_filter"]
-    topk: 10
-    range: 0.5
-    delete_index_after_search: false # free up storage space used by index
-    num_threads_building: 16
-    num_threads_searching: 16
+#RABITQ/SQ8:
+#    datapath: "/tbase-project/github/vsag/data/internet/internet-512-5m-euclidean.hdf5"
+#    type: "search" # `build` or `search` or `build,search`
+#    index_name: "hgraph"
+#    create_params: '{"dim":1024,"dtype":"float32","metric_type":"l2","index_param":{"base_quantization_type":"rabitq","max_degree":64,"ef_construction":300, "precise_quantization_type": "sq8", "use_reorder": true, "rabitq_use_fht": true}}'
+#    search_params: '{"hgraph":{"ef_search":2000}}'
+#    index_path: "/tmp/internet-512-5m-euclidean/index/hgraph_index"
+#    search_mode: "knn" # ["knn", "range", "knn_filter", "range_filter"]
+#    topk: 10
+#    range: 0.5
+#    delete_index_after_search: false # free up storage space used by index
+#    num_threads_building: 16
+#    num_threads_searching: 16
+
+
+
+#SQ4/FP32/BUILD:
+#  datapath: "/tbase-project/github/vsag/data/internet/internet-512-5m-euclidean.hdf5"
+#  type: "build" # `build` or `search` or `build,search`
+#  index_name: "hgraph"
+#  create_params: '{"dim":1024,"dtype":"float32","metric_type":"l2","index_param":{"base_quantization_type":"sq4_uniform","max_degree":128,"ef_construction":1500, "precise_quantization_type": "fp32", "use_reorder": true}}'
+#  search_params: '{"hgraph":{"ef_search":2000, "factor": 5}}'
+#  index_path: "/tmp/internet-512-5m-euclidean/index/hgraph_index_sq4_1500"
+#  search_mode: "knn" # ["knn", "range", "knn_filter", "range_filter"]
+#  topk: 50
+#  range: 0.5
+#  delete_index_after_search: false # free up storage space used by index
+#  num_threads_building: 16
+#  num_threads_searching: 16
+#
+#SQ4/FP32/SEARCH:
+#  datapath: "/tbase-project/github/vsag/data/internet/internet-512-5m-euclidean.hdf5"
+#  type: "search" # `build` or `search` or `build,search`
+#  index_name: "hgraph"
+#  create_params: '{"dim":1024,"dtype":"float32","metric_type":"l2","index_param":{"base_quantization_type":"sq4_uniform","max_degree":128,"ef_construction":1500, "precise_quantization_type": "fp32", "use_reorder": true, "precise_io_type": "async_io"}}'
+#  search_params: '{"hgraph":{"ef_search":2000, "factor": 5}}'
+#  index_path: "/tmp/internet-512-5m-euclidean/index/hgraph_index_sq4_1500"
+#  search_mode: "knn" # ["knn", "range", "knn_filter", "range_filter"]
+#  topk: 50
+#  range: 0.5
+#  delete_index_after_search: false # free up storage space used by index
+#  num_threads_building: 16
+#  num_threads_searching: 16
+
+
+SQ4/FP32/BUILD:
+  datapath: "/tbase-project/github/vsag/data/internet/internet-512-5m-euclidean.hdf5"
+  type: "build" # `build` or `search` or `build,search`
+  index_name: "hgraph"
+  create_params: '{"dim":1024,"dtype":"float32","metric_type":"l2","index_param":{"base_quantization_type":"sq4", "alpha": 1.2,"max_degree":128,"ef_construction":1500, "precise_quantization_type": "fp32", "use_reorder": true}}'
+  search_params: '{"hgraph":{"ef_search":1000, "factor": 8}}'
+  index_path: "/tmp/internet-512-5m-euclidean/index/hgraph_index_sq4_fp32"
+  search_mode: "knn" # ["knn", "range", "knn_filter", "range_filter"]
+  topk: 50
+  range: 0.5
+  delete_index_after_search: false # free up storage space used by index
+  num_threads_building: 16
+  num_threads_searching: 16
+
+
+SQ4/FP32/SEARCH:
+  datapath: "/tbase-project/github/vsag/data/internet/internet-512-5m-euclidean.hdf5"
+  type: "search" # `build` or `search` or `build,search`
+  index_name: "hgraph"
+  create_params: '{"dim":1024,"dtype":"float32","metric_type":"l2","index_param":{"base_quantization_type":"sq4", "alpha": 1.2, "max_degree":128,"ef_construction":1500, "precise_quantization_type": "fp32", "use_reorder": true, "precise_io_type": "async_io"}}'
+  search_params: '{"hgraph":{"ef_search":1000, "factor": 8}}'
+  index_path: "/tmp/internet-512-5m-euclidean/index/hgraph_index_sq4_fp32"
+  search_mode: "knn" # ["knn", "range", "knn_filter", "range_filter"]
+  topk: 50
+  range: 0.5
+  delete_index_after_search: false # free up storage space used by index
+  num_threads_building: 16
+  num_threads_searching: 16
+
+#RABITQ/64/700:
+#    datapath: "/tbase-project/github/vsag/data/internet/internet-512-5m-euclidean.hdf5"
+#    type: "search" # `build` or `search` or `build,search`
+#    index_name: "hgraph"
+#    create_params: '{"dim":1024,"dtype":"float32","metric_type":"l2","index_param":{"base_quantization_type":"rabitq","max_degree":64,"ef_construction":700, "precise_quantization_type": "fp32", "use_reorder": true}}'
+#    search_params: '{"hgraph":{"ef_search":3000}}'
+#    index_path: "/tmp/internet-512-5m-euclidean/index/hgraph_index_700"
+#    search_mode: "knn" # ["knn", "range", "knn_filter", "range_filter"]
+#    topk: 3
+#    range: 0.5
+#    delete_index_after_search: false # free up storage space used by index
+#    num_threads_building: 16
+#    num_threads_searching: 16
+
+#RABITQ/64/1000:
+#  datapath: "/tbase-project/github/vsag/data/internet/internet-512-5m-euclidean.hdf5"
+#  type: "search" # `build` or `search` or `build,search`
+#  index_name: "hgraph"
+#  create_params: '{"dim":1024,"dtype":"float32","metric_type":"l2","index_param":{"base_quantization_type":"rabitq","max_degree":64,"ef_construction":1000, "precise_quantization_type": "fp32", "use_reorder": true}}'
+#  search_params: '{"hgraph":{"ef_search":2000}}'
+#  index_path: "/tmp/internet-512-5m-euclidean/index/hgraph_index_64_1000"
+#  search_mode: "knn" # ["knn", "range", "knn_filter", "range_filter"]
+#  topk: 50
+#  range: 0.5
+#  delete_index_after_search: false # free up storage space used by index
+#  num_threads_building: 16
+#  num_threads_searching: 16
+#
+#RABITQ/128/1000:
+#  datapath: "/tbase-project/github/vsag/data/internet/internet-512-5m-euclidean.hdf5"
+#  type: "search" # `build` or `search` or `build,search`
+#  index_name: "hgraph"
+#  create_params: '{"dim":1024,"dtype":"float32","metric_type":"l2","index_param":{"base_quantization_type":"rabitq","max_degree":128,"ef_construction":1000, "precise_quantization_type": "fp32", "use_reorder": true}}'
+#  search_params: '{"hgraph":{"ef_search":2000}}'
+#  index_path: "/tmp/internet-512-5m-euclidean/index/hgraph_index_128_1000"
+#  search_mode: "knn" # ["knn", "range", "knn_filter", "range_filter"]
+#  topk: 50
+#  range: 0.5
+#  delete_index_after_search: false # free up storage space used by index
+#  num_threads_building: 16
+#  num_threads_searching: 16
+#
+#RABITQ/128/1500/BUILD:
+#  datapath: "/tbase-project/github/vsag/data/internet/internet-512-5m-euclidean.hdf5"
+#  type: "build" # `build` or `search` or `build,search`
+#  index_name: "hgraph"
+#  create_params: '{"dim":1024,"dtype":"float32","metric_type":"l2","index_param":{"base_quantization_type":"rabitq", "alpha": 1.2, "max_degree":128,"ef_construction":1500, "precise_quantization_type": "fp32", "use_reorder": true}}'
+#  search_params: '{"hgraph":{"ef_search":4000, "factor":10}}'
+#  index_path: "/tmp/internet-512-5m-euclidean/index/hgraph_index_128_1500"
+#  search_mode: "knn" # ["knn", "range", "knn_filter", "range_filter"]
+#  topk: 50
+#  range: 0.5
+#  delete_index_after_search: false # free up storage space used by index
+#  num_threads_building: 16
+#  num_threads_searching: 16
+
+#RABITQ/128/1500/SEARCH:
+#  datapath: "/tbase-project/github/vsag/data/internet/internet-512-5m-euclidean.hdf5"
+#  type: "search" # `build` or `search` or `build,search`
+#  index_name: "hgraph"
+#  create_params: '{"dim":1024,"dtype":"float32","metric_type":"l2","index_param":{"base_quantization_type":"rabitq", "alpha": 1.2, "max_degree":128,"ef_construction":1500, "precise_quantization_type": "fp32", "use_reorder": true, "precise_io_type": "async_io"}}'
+#  search_params: '{"hgraph":{"ef_search":3000, "factor": 8}}'
+#  index_path: "/tmp/internet-512-5m-euclidean/index/hgraph_index_128_1500"
+#  search_mode: "knn" # ["knn", "range", "knn_filter", "range_filter"]
+#  topk: 50
+#  range: 0.5
+#  delete_index_after_search: false # free up storage space used by index
+#  num_threads_building: 16
+#  num_threads_searching: 16
+
+#FP32/128/1000:
+#  datapath: "/tbase-project/github/vsag/data/internet/internet-512-5m-euclidean.hdf5"
+#  type: "build,search" # `build` or `search` or `build,search`
+#  index_name: "hgraph"
+#  create_params: '{"dim":1024,"dtype":"float32","metric_type":"l2","index_param":{"base_quantization_type":"fp32","max_degree":128,"ef_construction":1000}}'
+#  search_params: '{"hgraph":{"ef_search":1000}}'
+#  index_path: "/tmp/internet-512-5m-euclidean/index/hgraph_index_fp32_1000"
+#  search_mode: "knn" # ["knn", "range", "knn_filter", "range_filter"]
+#  topk: 50
+#  range: 0.5
+#  delete_index_after_search: false # free up storage space used by index
+#  num_threads_building: 16
+#  num_threads_searching: 16
+#
+#FP32/128/1200:
+#  datapath: "/tbase-project/github/vsag/data/internet/internet-512-5m-euclidean.hdf5"
+#  type: "build,search" # `build` or `search` or `build,search`
+#  index_name: "hgraph"
+#  create_params: '{"dim":1024,"dtype":"float32","metric_type":"l2","index_param":{"base_quantization_type":"fp32","max_degree":128,"ef_construction":1200}}'
+#  search_params: '{"hgraph":{"ef_search":1000}}'
+#  index_path: "/tmp/internet-512-5m-euclidean/index/hgraph_index_fp32_1200"
+#  search_mode: "knn" # ["knn", "range", "knn_filter", "range_filter"]
+#  topk: 50
+#  range: 0.5
+#  delete_index_after_search: false # free up storage space used by index
+#  num_threads_building: 16
+#  num_threads_searching: 16
+
+
+#FP32/SQ8/FP32/NOREORDER:
+#  datapath: "/tbase-project/github/vsag/data/internet/internet-512-5m-euclidean.hdf5"
+#  type: "build,search" # `build` or `search` or `build,search`
+#  index_name: "hgraph"
+#  create_params: '{"dim":1024,"dtype":"float32","metric_type":"l2","index_param":{"base_quantization_type":"sq8","max_degree":128,"ef_construction":1200, "use_reorder": true, "precise_quantization_type": "fp32", "ignore_reorder": true}}'
+#  search_params: '{"hgraph":{"ef_search":1000}}'
+#  index_path: "/tmp/internet-512-5m-euclidean/index/hgraph_index_sq8_fp32_noreorder"
+#  search_mode: "knn" # ["knn", "range", "knn_filter", "range_filter"]
+#  topk: 50
+#  range: 0.5
+#  delete_index_after_search: false # free up storage space used by index
+#  num_threads_building: 16
+#  num_threads_searching: 16
+#
+#FP32/SQ8:
+#  datapath: "/tbase-project/github/vsag/data/internet/internet-512-5m-euclidean.hdf5"
+#  type: "build,search" # `build` or `search` or `build,search`
+#  index_name: "hgraph"
+#  create_params: '{"dim":1024,"dtype":"float32","metric_type":"l2","index_param":{"base_quantization_type":"sq8","max_degree":128,"ef_construction":1200}}'
+#  search_params: '{"hgraph":{"ef_search":1000}}'
+#  index_path: "/tmp/internet-512-5m-euclidean/index/hgraph_index_sq8"
+#  search_mode: "knn" # ["knn", "range", "knn_filter", "range_filter"]
+#  topk: 50
+#  range: 0.5
+#  delete_index_after_search: false # free up storage space used by index
+#  num_threads_building: 16
+#  num_threads_searching: 16
+#
+#FP32/SQ4_UNIFORM/FP32:
+#  datapath: "/tbase-project/github/vsag/data/internet/internet-512-5m-euclidean.hdf5"
+#  type: "build,search" # `build` or `search` or `build,search`
+#  index_name: "hgraph"
+#  create_params: '{"dim":1024,"dtype":"float32","metric_type":"l2","index_param":{"base_quantization_type":"sq4_uniform","max_degree":128,"ef_construction":1200, "use_reorder": true, "precise_quantization_type": "fp32" }}'
+#  search_params: '{"hgraph":{"ef_search":1000}}'
+#  index_path: "/tmp/internet-512-5m-euclidean/index/hgraph_index_sq4_uniform_fp32"
+#  search_mode: "knn" # ["knn", "range", "knn_filter", "range_filter"]
+#  topk: 50
+#  range: 0.5
+#  delete_index_after_search: false # free up storage space used by index
+#  num_threads_building: 16
+#  num_threads_searching: 16
+
+
+#
+#SQ8/FP16/BUILD:
+#  datapath: "/tbase-project/github/vsag/data/internet/internet-512-5m-euclidean.hdf5"
+#  type: "build" # `build` or `search` or `build,search`
+#  index_name: "hgraph"
+#  create_params: '{"dim":1024,"dtype":"float32","metric_type":"l2","index_param":{"base_quantization_type":"sq8","max_degree":128,"ef_construction":1200, "use_reorder": true, "precise_quantization_type": "fp16"}}'
+#  search_params: '{"hgraph":{"ef_search":1000}}'
+#  index_path: "/tmp/internet-512-5m-euclidean/index/hgraph_index_sq8_fp16"
+#  search_mode: "knn" # ["knn", "range", "knn_filter", "range_filter"]
+#  topk: 50
+#  range: 0.5
+#  delete_index_after_search: false # free up storage space used by index
+#  num_threads_building: 16
+#  num_threads_searching: 16
+
+#SQ8/FP16/SEARCH:
+#  datapath: "/tbase-project/github/vsag/data/internet/internet-512-5m-euclidean.hdf5"
+#  type: "search" # `build` or `search` or `build,search`
+#  index_name: "hgraph"
+#  create_params: '{"dim":1024,"dtype":"float32","metric_type":"l2","index_param":{"base_quantization_type":"sq8","max_degree":128,"ef_construction":1200, "use_reorder": true, "precise_quantization_type": "fp16", "precise_io_type": "async_io"}}'
+#  search_params: '{"hgraph":{"ef_search":400, "factor": 2}}'
+#  index_path: "/tmp/internet-512-5m-euclidean/index/hgraph_index_sq8_fp16"
+#  search_mode: "knn" # ["knn", "range", "knn_filter", "range_filter"]
+#  topk: 50
+#  range: 0.5
+#  delete_index_after_search: false # free up storage space used by index
+#  num_threads_building: 16
+#  num_threads_searching: 16

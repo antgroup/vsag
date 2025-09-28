@@ -25,10 +25,11 @@ template <MetricType metric>
 SQ8Quantizer<metric>::SQ8Quantizer(int dim, Allocator* allocator)
     : Quantizer<SQ8Quantizer<metric>>(dim, allocator), diff_(allocator), lower_bound_(allocator) {
     // align 64 bytes (512 bits) to avoid illegal memory access in SIMD
-    this->code_size_ = this->dim_;
-    this->query_code_size_ = this->dim_ * sizeof(float);
+    this->trunc_dim_ = this->dim_ / 4;
+    this->code_size_ = this->trunc_dim_;
+    this->query_code_size_ = this->trunc_dim_ * sizeof(float);
     this->metric_ = metric;
-    this->diff_.resize(dim, 0);
+    this->diff_.resize(this->trunc_dim_, 0);
     this->lower_bound_.resize(dim, std::numeric_limits<DataType>::max());
 }
 
@@ -58,7 +59,7 @@ SQ8Quantizer<metric>::TrainImpl(const vsag::DataType* data, uint64_t count) {
     ScalarQuantizationTrainer trainer(this->dim_, 8);
     trainer.Train(data, count, this->diff_.data(), this->lower_bound_.data(), need_normalize);
 
-    for (uint64_t i = 0; i < this->dim_; ++i) {
+    for (uint64_t i = 0; i < this->trunc_dim_; ++i) {
         this->diff_[i] -= this->lower_bound_[i];
     }
     this->is_trained_ = true;
@@ -71,11 +72,11 @@ SQ8Quantizer<metric>::EncodeOneImpl(const DataType* data, uint8_t* codes) {
     const DataType* cur = data;
     Vector<float> tmp(this->allocator_);
     if constexpr (metric == MetricType::METRIC_TYPE_COSINE) {
-        tmp.resize(this->dim_);
-        Normalize(data, tmp.data(), this->dim_);
+        tmp.resize(this->trunc_dim_);
+        Normalize(data, tmp.data(), this->trunc_dim_);
         cur = tmp.data();
     }
-    for (int i = 0; i < this->dim_; ++i) {
+    for (int i = 0; i < this->trunc_dim_; ++i) {
         float xi = 0;
         if (diff_[i] != 0) {
             xi = (cur[i] - lower_bound_[i]) / diff_[i];
@@ -112,7 +113,7 @@ SQ8Quantizer<metric>::DecodeBatchImpl(const uint8_t* codes, DataType* data, uint
 template <MetricType metric>
 bool
 SQ8Quantizer<metric>::DecodeOneImpl(const uint8_t* codes, DataType* data) {
-    for (uint64_t i = 0; i < this->dim_; ++i) {
+    for (uint64_t i = 0; i < this->trunc_dim_; ++i) {
         data[i] = static_cast<DataType>(static_cast<float>(codes[i]) / 255.0 * diff_[i] +
                                         lower_bound_[i]);
     }
@@ -124,11 +125,11 @@ float
 SQ8Quantizer<metric>::ComputeImpl(const uint8_t* codes1, const uint8_t* codes2) {
     if constexpr (metric == MetricType::METRIC_TYPE_L2SQR) {
         return SQ8ComputeCodesL2Sqr(
-            codes1, codes2, this->lower_bound_.data(), this->diff_.data(), this->dim_);
+            codes1, codes2, this->lower_bound_.data(), this->diff_.data(), this->trunc_dim_);
     } else if constexpr (metric == MetricType::METRIC_TYPE_IP or
                          metric == MetricType::METRIC_TYPE_COSINE) {
         return 1 - SQ8ComputeCodesIP(
-                       codes1, codes2, this->lower_bound_.data(), this->diff_.data(), this->dim_);
+                       codes1, codes2, this->lower_bound_.data(), this->diff_.data(), this->trunc_dim_);
     } else {
         return 0.0F;
     }
@@ -148,9 +149,9 @@ SQ8Quantizer<metric>::ProcessQueryImpl(const DataType* query,
         throw VsagException(ErrorType::NO_ENOUGH_MEMORY, "bad alloc when init computer buf");
     }
     if constexpr (metric == MetricType::METRIC_TYPE_COSINE) {
-        Normalize(query, reinterpret_cast<float*>(computer.buf_), this->dim_);
+        Normalize(query, reinterpret_cast<float*>(computer.buf_), this->trunc_dim_);
     } else {
-        memcpy(computer.buf_, query, this->dim_ * sizeof(float));
+        memcpy(computer.buf_, query, this->trunc_dim_ * sizeof(float));
     }
 }
 
@@ -163,11 +164,11 @@ SQ8Quantizer<metric>::ComputeDistImpl(Computer<SQ8Quantizer>& computer,
 
     if constexpr (metric == MetricType::METRIC_TYPE_L2SQR) {
         *dists = SQ8ComputeL2Sqr(
-            query, codes, this->lower_bound_.data(), this->diff_.data(), this->dim_);
+            query, codes, this->lower_bound_.data(), this->diff_.data(), this->trunc_dim_);
     } else if constexpr (metric == MetricType::METRIC_TYPE_IP or
                          metric == MetricType::METRIC_TYPE_COSINE) {
         *dists = 1 - SQ8ComputeIP(
-                         query, codes, this->lower_bound_.data(), this->diff_.data(), this->dim_);
+                         query, codes, this->lower_bound_.data(), this->diff_.data(), this->trunc_dim_);
     } else {
         *dists = 0.0F;
     }

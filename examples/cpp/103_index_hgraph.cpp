@@ -22,21 +22,26 @@ main(int argc, char** argv) {
     vsag::init();
 
     /******************* Prepare Base Dataset *****************/
-    int64_t num_vectors = 10000;
+    int64_t num_vectors = 1000;
     int64_t dim = 128;
     std::vector<int64_t> ids(num_vectors);
-    std::vector<float> datas(num_vectors * dim);
+    std::vector<float> datas(num_vectors * dim * 4);
     std::mt19937 rng(47);
     std::uniform_real_distribution<float> distrib_real;
     for (int64_t i = 0; i < num_vectors; ++i) {
         ids[i] = i;
     }
-    for (int64_t i = 0; i < dim * num_vectors; ++i) {
-        datas[i] = distrib_real(rng);
+    for (int i = 0; i < num_vectors; ++i) {
+        for (int j = 0; j < dim; ++j) {
+            datas[i * 4 * dim + j] = distrib_real(rng);
+        }
+        for (int j = dim; j < 4 * dim; ++j) {
+            datas[i * 4 * dim + j] = 0.0F;
+        }
     }
     auto base = vsag::Dataset::Make();
     base->NumElements(num_vectors)
-        ->Dim(dim)
+        ->Dim(dim * 4)
         ->Ids(ids.data())
         ->Float32Vectors(datas.data())
         ->Owner(false);
@@ -46,7 +51,7 @@ main(int argc, char** argv) {
     {
         "dtype": "float32",
         "metric_type": "l2",
-        "dim": 128,
+        "dim": 512,
         "index_param": {
             "base_quantization_type": "sq8",
             "max_degree": 26,
@@ -69,12 +74,12 @@ main(int argc, char** argv) {
     }
 
     /******************* Prepare Query Dataset *****************/
-    std::vector<float> query_vector(dim);
+    std::vector<float> query_vector(dim * 4);
     for (int64_t i = 0; i < dim; ++i) {
         query_vector[i] = distrib_real(rng);
     }
     auto query = vsag::Dataset::Make();
-    query->NumElements(1)->Dim(dim)->Float32Vectors(query_vector.data())->Owner(false);
+    query->NumElements(1)->Dim(dim * 4)->Float32Vectors(query_vector.data())->Owner(false);
 
     /******************* KnnSearch For HGraph Index *****************/
     auto hgraph_search_parameters = R"(
