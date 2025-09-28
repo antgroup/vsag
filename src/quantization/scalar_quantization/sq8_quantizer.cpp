@@ -29,8 +29,8 @@ SQ8Quantizer<metric>::SQ8Quantizer(int dim, Allocator* allocator)
     this->code_size_ = this->trunc_dim_;
     this->query_code_size_ = this->trunc_dim_ * sizeof(float);
     this->metric_ = metric;
-    this->diff_.resize(this->trunc_dim_, 0);
-    this->lower_bound_.resize(dim, std::numeric_limits<DataType>::max());
+    this->diff_.resize(this->dim_, 0);
+    this->lower_bound_.resize(this->dim_, std::numeric_limits<DataType>::max());
 }
 
 template <MetricType metric>
@@ -59,7 +59,7 @@ SQ8Quantizer<metric>::TrainImpl(const vsag::DataType* data, uint64_t count) {
     ScalarQuantizationTrainer trainer(this->dim_, 8);
     trainer.Train(data, count, this->diff_.data(), this->lower_bound_.data(), need_normalize);
 
-    for (uint64_t i = 0; i < this->trunc_dim_; ++i) {
+    for (uint64_t i = 0; i < this->dim_; ++i) {
         this->diff_[i] -= this->lower_bound_[i];
     }
     this->is_trained_ = true;
@@ -128,8 +128,9 @@ SQ8Quantizer<metric>::ComputeImpl(const uint8_t* codes1, const uint8_t* codes2) 
             codes1, codes2, this->lower_bound_.data(), this->diff_.data(), this->trunc_dim_);
     } else if constexpr (metric == MetricType::METRIC_TYPE_IP or
                          metric == MetricType::METRIC_TYPE_COSINE) {
-        return 1 - SQ8ComputeCodesIP(
-                       codes1, codes2, this->lower_bound_.data(), this->diff_.data(), this->trunc_dim_);
+        return 1 -
+               SQ8ComputeCodesIP(
+                   codes1, codes2, this->lower_bound_.data(), this->diff_.data(), this->trunc_dim_);
     } else {
         return 0.0F;
     }
@@ -167,8 +168,9 @@ SQ8Quantizer<metric>::ComputeDistImpl(Computer<SQ8Quantizer>& computer,
             query, codes, this->lower_bound_.data(), this->diff_.data(), this->trunc_dim_);
     } else if constexpr (metric == MetricType::METRIC_TYPE_IP or
                          metric == MetricType::METRIC_TYPE_COSINE) {
-        *dists = 1 - SQ8ComputeIP(
-                         query, codes, this->lower_bound_.data(), this->diff_.data(), this->trunc_dim_);
+        *dists =
+            1 - SQ8ComputeIP(
+                    query, codes, this->lower_bound_.data(), this->diff_.data(), this->trunc_dim_);
     } else {
         *dists = 0.0F;
     }
