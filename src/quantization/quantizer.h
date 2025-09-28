@@ -19,16 +19,12 @@
 #include <memory>
 
 #include "computer.h"
-#include "impl/logger/logger.h"
 #include "metric_type.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
 #include "utils/function_exists_check.h"
 
 namespace vsag {
-
-template <typename Q, typename D>
-class QuantizerAdapter;
 
 using DataType = float;
 
@@ -263,9 +259,6 @@ private:
     }
 
     friend QuantT;
-
-    template <typename Q, typename D>
-    friend class QuantizerAdapter;
 
 private:
     uint64_t dim_{0};
