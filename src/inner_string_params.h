@@ -75,7 +75,6 @@ const char* const QUANTIZATION_TYPE_VALUE_PQFS = "pqfs";
 const char* const QUANTIZATION_TYPE_VALUE_RABITQ = "rabitq";
 const char* const QUANTIZATION_TYPE_VALUE_SPARSE = "sparse";
 const char* const QUANTIZATION_TYPE_VALUE_TQ = "tq";
-const char* const QUANTIZATION_TYPE_VALUE_GQ = "gq";  // NOTE: GQ is short for Generic Quantizer
 
 // vector transformer type
 const char* const TRANSFORMER_TYPE_VALUE_PCA = "pca";
