@@ -1796,6 +1796,7 @@ TestIndex::TestClone(const TestIndex::IndexPtr& index,
 
 void
 TestIndex::TestExportModel(const TestIndex::IndexPtr& index,
+                           const TestIndex::IndexPtr& index2,
                            const TestDatasetPtr& dataset,
                            const std::string& search_param) {
     if (not index->CheckFeature(vsag::SUPPORT_EXPORT_MODEL)) {
@@ -1803,7 +1804,9 @@ TestIndex::TestExportModel(const TestIndex::IndexPtr& index,
     }
     auto index_model_result = index->ExportModel();
     REQUIRE(index_model_result.has_value() == true);
-    auto& index_model = index_model_result.value();
+    auto index_model = index_model_result.value();
+    fixtures::test_serializion_file(*index_model, *index2, "export_model_test");
+    index_model = index2;
     tl::expected<std::vector<int64_t>, vsag::Error> add_index;
     if (index->CheckFeature(vsag::SUPPORT_ADD_AFTER_BUILD)) {
         add_index = index_model->Add(dataset->base_);

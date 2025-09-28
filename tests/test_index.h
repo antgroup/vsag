@@ -275,6 +275,7 @@ public:
 
     static void
     TestExportModel(const IndexPtr& index,
+                    const IndexPtr& index2,
                     const TestDatasetPtr& dataset,
                     const std::string& search_param);
 

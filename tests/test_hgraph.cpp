@@ -1519,6 +1519,7 @@ TestHGraphExportModel(const fixtures::HGraphTestIndexPtr& test_index,
                 build_param.extra_info_size = extra_info_size;
                 auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
                 auto index = TestIndex::TestFactory(test_index->name, param, true);
+                auto index2 = TestIndex::TestFactory(test_index->name, param, true);
                 auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(dim,
                                                                          resource->base_count,
                                                                          metric_type,
@@ -1526,7 +1527,7 @@ TestHGraphExportModel(const fixtures::HGraphTestIndexPtr& test_index,
                                                                          0.8 /*valid_ratio*/,
                                                                          extra_info_size);
                 TestIndex::TestBuildIndex(index, dataset, true);
-                TestIndex::TestExportModel(index, dataset, search_param);
+                TestIndex::TestExportModel(index, index2, dataset, search_param);
                 vsag::Options::Instance().set_block_size_limit(origin_size);
             }
         }
