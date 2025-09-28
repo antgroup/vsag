@@ -29,6 +29,13 @@ set (IO_SRC
         reader_io_parameter.cpp
 )
 
-add_library (io OBJECT ${IO_SRC})
+add_library (io STATIC ${IO_SRC})
 target_link_libraries (io PUBLIC fmt::fmt aio coverage_config)
 maybe_add_dependencies (io spdlog)
+
+if (ENABLE_TESTS)
+    file (GLOB_RECURSE IO_TESTS "*_test.cpp")
+    add_library (io_test STATIC ${IO_TESTS})
+    target_link_libraries (io_test PRIVATE Catch2::Catch2 vsag)
+    add_dependencies (io_test spdlog Catch2)
+endif ()

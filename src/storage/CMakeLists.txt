@@ -24,3 +24,10 @@ set (STORAGE_SRC
 add_library (storage OBJECT ${STORAGE_SRC})
 target_link_libraries (storage PUBLIC fmt::fmt coverage_config)
 add_dependencies (storage spdlog)
+
+if (ENABLE_TESTS)
+    file (GLOB_RECURSE STORAGE_TESTS "*_test.cpp")
+    add_library (storage_test STATIC ${STORAGE_TESTS})
+    target_link_libraries (storage_test PRIVATE Catch2::Catch2 vsag)
+    add_dependencies (storage_test spdlog Catch2)
+endif ()
