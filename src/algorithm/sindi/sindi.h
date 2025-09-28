@@ -60,6 +60,13 @@ public:
               const FilterPtr& filter) const override;
 
     DatasetPtr
+    KnnSearch(const vsag::DatasetPtr& query,
+              int64_t k,
+              const std::string& parameters,
+              const vsag::FilterPtr& filter,
+              vsag::Allocator* allocator) const override;
+
+    DatasetPtr
     RangeSearch(const DatasetPtr& query,
                 float radius,
                 const std::string& parameters,
@@ -108,7 +115,9 @@ public:
 private:
     template <InnerSearchMode mode>
     DatasetPtr
-    search_impl(const SparseTermComputerPtr& computer, const InnerSearchParam& inner_param) const;
+    search_impl(const SparseTermComputerPtr& computer,
+                const InnerSearchParam& inner_param,
+                Allocator* allocator) const;
 
 private:
     mutable std::shared_mutex global_mutex_;
