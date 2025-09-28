@@ -1,14 +1,34 @@
+
+# Copyright 2024-present the vsag project
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+
 cmake_minimum_required (VERSION 3.18)
 if (CMAKE_VERSION VERSION_GREATER_EQUAL "3.24.0")
     cmake_policy (SET CMP0135 NEW)
 endif ()
+if (CMAKE_VERSION VERSION_GREATER_EQUAL "3.30.0")
+    cmake_policy (SET CMP0169 OLD)
+endif ()
 
 project (VSAG
-        VERSION 0.9.0
         LANGUAGES C CXX
 )
 
-message ("CPU ARCH: ${CMAKE_HOST_SYSTEM_PROCESSOR}")
+include (cmake/ColorizeMessage.cmake)
+
+message (STATUS "CPU ARCH: ${Yellow}${CMAKE_HOST_SYSTEM_PROCESSOR}${CR}")
 
 macro (vsag_add_exe_linker_flag flag)
     set (CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${flag}")
@@ -55,10 +75,10 @@ option (DISABLE_SVE_FORCE "Force disable sve instructions" OFF)
 
 if (ENABLE_CXX11_ABI)
     add_definitions (-D_GLIBCXX_USE_CXX11_ABI=1)
-    message (STATUS "Using libstdc++ with C++11 ABI")
+    message (STATUS "Using libstdc++ with ${Yellow}C++11 ABI${CR}")
 else ()
     add_definitions (-D_GLIBCXX_USE_CXX11_ABI=0)
-    message (STATUS "Using libstdc++ with pre-C++11 ABI")
+    message (STATUS "Using libstdc++ with ${Yellow}pre-C++11 ABI${CR}")
 
     # for avoiding symbol conflict: _Rep::_S_create
     vsag_add_shared_linker_flag(-fvisibility-inlines-hidden)
@@ -281,7 +301,6 @@ endif ()
 if (ENABLE_TOOLS AND ENABLE_CXX11_ABI)
     add_subdirectory (tools)
 endif ()
-
 
 # tests
 if (ENABLE_TESTS)
