@@ -40,7 +40,7 @@ template <typename QuantT, typename DataT>
 bool
 QuantizerAdapter<QuantT, DataT>::TrainImpl(const DataType* data, size_t count) {
     if constexpr (std::is_same_v<DataT, int8_t>) {
-        auto data_int8 = reinterpret_cast<const int8_t*>(data);
+        const auto* data_int8 = reinterpret_cast<const int8_t*>(data);
         Vector<DataType> vec(this->dim_ * count, this->allocator_);
 #pragma omp simd
         for (int64_t i = 0; i < this->dim_ * count; ++i) {
@@ -58,7 +58,7 @@ template <typename QuantT, typename DataT>
 bool
 QuantizerAdapter<QuantT, DataT>::EncodeOneImpl(const DataType* data, uint8_t* codes) {
     if constexpr (std::is_same_v<DataT, int8_t>) {
-        auto data_int8 = reinterpret_cast<const int8_t*>(data);
+        const auto* data_int8 = reinterpret_cast<const int8_t*>(data);
 #pragma omp simd
         Vector<DataType> vec(this->dim_, this->allocator_);
         for (int64_t i = 0; i < this->dim_; i++) {
@@ -78,7 +78,7 @@ QuantizerAdapter<QuantT, DataT>::EncodeBatchImpl(const DataType* data,
                                                  uint8_t* codes,
                                                  uint64_t count) {
     if constexpr (std::is_same_v<DataT, int8_t>) {
-        auto data_int8 = reinterpret_cast<const int8_t*>(data);
+        const auto* data_int8 = reinterpret_cast<const int8_t*>(data);
         Vector<DataType> vec(this->dim_ * count, this->allocator_);
 #pragma omp simd
         for (int64_t i = 0; i < this->dim_ * count; ++i) {
@@ -156,13 +156,13 @@ void
 QuantizerAdapter<QuantT, DataT>::ProcessQueryImpl(
     const DataType* query, Computer<QuantizerAdapter<QuantT, DataT>>& computer) const {
     if constexpr (std::is_same_v<DataT, int8_t>) {
-        auto query_int8 = reinterpret_cast<const int8_t*>(query);
+        const auto* query_int8 = reinterpret_cast<const int8_t*>(query);
         Vector<DataType> vec(this->dim_, this->allocator_);
 #pragma omp simd
         for (int64_t i = 0; i < this->dim_; i++) {
             vec[i] = static_cast<DataType>(query_int8[i]);
         }
-        Computer<QuantT>& inner_computer = reinterpret_cast<Computer<QuantT>&>(computer);
+        auto& inner_computer = reinterpret_cast<Computer<QuantT>&>(computer);
         this->inner_quantizer_->ProcessQueryImpl(vec.data(), inner_computer);
     } else {
         static_assert(std::is_same_v<DataT, int8_t>,
@@ -174,7 +174,7 @@ template <typename QuantT, typename DataT>
 void
 QuantizerAdapter<QuantT, DataT>::ComputeDistImpl(
     Computer<QuantizerAdapter<QuantT, DataT>>& computer, const uint8_t* codes, float* dists) const {
-    Computer<QuantT>& inner_computer = reinterpret_cast<Computer<QuantT>&>(computer);
+    auto& inner_computer = reinterpret_cast<Computer<QuantT>&>(computer);
     this->inner_quantizer_->ComputeDistImpl(inner_computer, codes, dists);
 }
 
@@ -185,7 +185,7 @@ QuantizerAdapter<QuantT, DataT>::ScanBatchDistImpl(
     uint64_t count,
     const uint8_t* codes,
     float* dists) const {
-    Computer<QuantT>& inner_computer = reinterpret_cast<Computer<QuantT>&>(computer);
+    auto& inner_computer = reinterpret_cast<Computer<QuantT>&>(computer);
     for (uint64_t i = 0; i < count; ++i) {
         this->inner_quantizer_->ComputeDistImpl(
             inner_computer, codes + i * this->code_size_, dists + i);
