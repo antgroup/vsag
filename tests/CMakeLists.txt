@@ -15,33 +15,22 @@
 
 
 #  unittests
-file (GLOB_RECURSE UNIT_TESTS "../src/*_test.cpp")
-add_executable (unittests ${UNIT_TESTS}
+add_executable (unittests
         test_main.cpp
         fixtures/fixtures.cpp
         fixtures/test_logger.cpp
 )
-if (DIST_CONTAINS_SSE)
-    target_compile_definitions (unittests PRIVATE ENABLE_SSE=1)
-endif ()
-if (DIST_CONTAINS_AVX)
-    target_compile_definitions (unittests PRIVATE ENABLE_AVX=1)
-endif ()
-if (DIST_CONTAINS_AVX2)
-    target_compile_definitions (unittests PRIVATE ENABLE_AVX2=1)
-endif ()
-if (DIST_CONTAINS_AVX512)
-    target_compile_definitions (unittests PRIVATE ENABLE_AVX512=1)
-endif ()
-if (DIST_CONTAINS_AVX512VPOPCNTDQ)
-    target_compile_definitions (unittests PRIVATE DENABLE_AVX512VPOPCNTDQ=1)
-endif ()
-if (DIST_CONTAINS_NEON)
-    target_compile_definitions (unittests PRIVATE ENABLE_NEON=1)
-endif ()
-target_include_directories (unittests PRIVATE "./fixtures")
-target_link_libraries (unittests PRIVATE Catch2::Catch2 vsag simd)
-add_dependencies (unittests spdlog Catch2)
+
+target_link_libraries (unittests
+                       PRIVATE
+                       Catch2::Catch2 
+                       "-Wl,--whole-archive"
+                       simd_test vsag_test algorithm_test factory_test attr_test
+                       datacell_test quantizer_test storage_test io_test utils_test impl_test
+                       "-Wl,--no-whole-archive"
+                       vsag
+)
+add_dependencies (unittests spdlog Catch2 vsag)
 
 # function tests
 file (GLOB FUNCTION_TESTS "test_*.cpp")

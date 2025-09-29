@@ -32,3 +32,10 @@ set (ALGORITHM_LIBS
         ivf_partition
         sindi
         PARENT_SCOPE)
+
+if (ENABLE_TESTS)
+    file (GLOB_RECURSE ALGORITHM_TESTS "*_test.cpp")
+    add_library (algorithm_test STATIC ${ALGORITHM_TESTS})
+    target_link_libraries (algorithm_test PRIVATE Catch2::Catch2 vsag)
+    add_dependencies (algorithm_test spdlog Catch2 antlr4)
+endif ()
