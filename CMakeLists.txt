@@ -291,6 +291,11 @@ if (ENABLE_TSAN)
     set (CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fsanitize=thread")
 endif ()
 
+# tests
+if (ENABLE_TESTS)
+    include_directories(tests/fixtures/)
+endif ()
+
 # sources
 add_subdirectory (src)
 add_subdirectory (mockimpl)
@@ -302,10 +307,9 @@ if (ENABLE_TOOLS AND ENABLE_CXX11_ABI)
     add_subdirectory (tools)
 endif ()
 
-# tests
 if (ENABLE_TESTS)
-    target_compile_definitions(vsag PRIVATE ENABLE_TESTS)
     add_subdirectory (tests)
+    target_compile_definitions(vsag PRIVATE ENABLE_TESTS)
 endif ()
 
 # pybinds
