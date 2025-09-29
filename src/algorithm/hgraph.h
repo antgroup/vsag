@@ -366,8 +366,6 @@ private:
 
     std::shared_ptr<Optimizer<BasicSearcher>> optimizer_;
 
-    AttrInvertedInterfacePtr attr_filter_index_{nullptr};
-
     bool create_new_raw_vector_{false};
     FlattenInterfacePtr raw_vector_{nullptr};
 };

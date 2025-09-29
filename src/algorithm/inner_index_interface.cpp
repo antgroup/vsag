@@ -55,6 +55,12 @@ InnerIndexInterface::InnerIndexInterface(const InnerIndexParameterPtr& index_par
         this->build_pool_ = SafeThreadPool::FactoryDefaultThreadPool();
         this->build_pool_->SetPoolSize(build_thread_count_);
     }
+
+    if (this->use_attribute_filter_) {
+        this->attr_filter_index_ = AttributeInvertedInterface::MakeInstance(
+            allocator_, index_param->attr_inverted_interface_param);
+        this->has_attribute_ = true;
+    }
 }
 
 InnerIndexInterface::~InnerIndexInterface() = default;
