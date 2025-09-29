@@ -13,20 +13,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+file(WRITE ${CMAKE_BINARY_DIR}/instructions_test_avx512vpopcntdq.cpp "#include <immintrin.h>\nint main() { __m512i a, b; b = _mm512_popcnt_epi64(a); return 0; }")
+try_compile(COMPILER_AVX512VPOPCNTDQ_SUPPORTED
+    ${CMAKE_BINARY_DIR}/instructions_test_avx512vpopcntdq
+    ${CMAKE_BINARY_DIR}/instructions_test_avx512vpopcntdq.cpp
+    COMPILE_DEFINITIONS "-mavx512vpopcntdq"
+    OUTPUT_VARIABLE COMPILE_OUTPUT
+    )
 
 file(WRITE ${CMAKE_BINARY_DIR}/instructions_test_avx512.cpp "#include <immintrin.h>\nint main() { __m512 a, b; a = _mm512_sub_ps(a, b); return 0; }")
 try_compile(COMPILER_AVX512_SUPPORTED
     ${CMAKE_BINARY_DIR}/instructions_test_avx512
     ${CMAKE_BINARY_DIR}/instructions_test_avx512.cpp
     COMPILE_DEFINITIONS "-mavx512f"
-    OUTPUT_VARIABLE COMPILE_OUTPUT
-    )
-
-file(WRITE ${CMAKE_BINARY_DIR}/instructions_test_avx512vpopcntdq.cpp "#include <immintrin.h>\nint main() { __m512i a, b; b = _mm512_popcnt_epi64(a); return 0; }")
-try_compile(COMPILER_AVX512VPOPCNTDQ_SUPPORTED
-    ${CMAKE_BINARY_DIR}/instructions_test_avx512vpopcntdq
-    ${CMAKE_BINARY_DIR}/instructions_test_avx512vpopcntdq.cpp
-    COMPILE_DEFINITIONS "-mavx512vpopcntdq"
     OUTPUT_VARIABLE COMPILE_OUTPUT
     )
 
@@ -54,6 +53,23 @@ try_compile(COMPILER_SSE_SUPPORTED
     OUTPUT_VARIABLE COMPILE_OUTPUT
     )
 
+file(WRITE ${CMAKE_BINARY_DIR}/instructions_test_sve.cpp
+    "#include <arm_sve.h>\n"
+    "int main() {\n"
+    "    svbool_t pg = svptrue_b32();\n"
+    "    svfloat32_t a = svdup_f32(1.0f);\n"
+    "    svfloat32_t b = svdup_f32(2.0f);\n"
+    "    a = svadd_f32_x(pg, a, b);\n"
+    "    return 0;\n"
+    "}"
+)
+try_compile(COMPILER_SVE_SUPPORTED
+    ${CMAKE_BINARY_DIR}/instructions_test_sve
+    ${CMAKE_BINARY_DIR}/instructions_test_sve.cpp
+    COMPILE_DEFINITIONS "-march=armv8-a+sve" 
+    OUTPUT_VARIABLE COMPILE_OUTPUT
+)
+
 file(WRITE ${CMAKE_BINARY_DIR}/instructions_test_neon.cpp "#include <arm_neon.h>\nint main() { float32x4_t a, b; a = vdupq_n_f32(1.0f); b = vdupq_n_f32(2.0f); a = vaddq_f32(a, b); return 0; }")
 try_compile(COMPILER_NEON_SUPPORTED
     ${CMAKE_BINARY_DIR}/instructions_test_neon
@@ -62,19 +78,19 @@ try_compile(COMPILER_NEON_SUPPORTED
     OUTPUT_VARIABLE COMPILE_OUTPUT
     )
 
+file(WRITE ${CMAKE_BINARY_DIR}/instructions_test_avx512vpopcntdq.cpp "#include <immintrin.h>\nint main() { __m512i a, b; b = _mm512_popcnt_epi64(a); return 0; }")
+try_compile(RUNTIME_AVX512VPOPCNTDQ_SUPPORTED
+    ${CMAKE_BINARY_DIR}/instructions_test_avx512vpopcntdq
+    ${CMAKE_BINARY_DIR}/instructions_test_avx512vpopcntdq.cpp
+    COMPILE_DEFINITIONS "-march=native"
+    OUTPUT_VARIABLE COMPILE_OUTPUT
+    )
+
 file(WRITE ${CMAKE_BINARY_DIR}/instructions_test_avx512.cpp "#include <immintrin.h>\nint main() { __m512 a, b; a = _mm512_sub_ps(a, b); return 0; }")
 try_compile(RUNTIME_AVX512_SUPPORTED
     ${CMAKE_BINARY_DIR}/instructions_test_avx512
     ${CMAKE_BINARY_DIR}/instructions_test_avx512.cpp
     COMPILE_DEFINITIONS "-march=native"
-    OUTPUT_VARIABLE COMPILE_OUTPUT
-    )
-
-file(WRITE ${CMAKE_BINARY_DIR}/instructions_test_avx512vpopcntdq.cpp "#include <immintrin.h>\nint main() { __m512i a, b; b = _mm512_popcnt_epi64(a); return 0; }")
-try_compile(RUNTIME_AVX512VPOPCNTDQ_SUPPORTED
-    ${CMAKE_BINARY_DIR}/instructions_test_avx512vpopcntdq
-    ${CMAKE_BINARY_DIR}/instructions_test_avx512vpopcntdq.cpp
-    COMPILE_DEFINITIONS "-mavx512vpopcntdq"
     OUTPUT_VARIABLE COMPILE_OUTPUT
     )
 
@@ -102,32 +118,6 @@ try_compile(RUNTIME_SSE_SUPPORTED
     OUTPUT_VARIABLE COMPILE_OUTPUT
     )
 
-file(WRITE ${CMAKE_BINARY_DIR}/instructions_test_neon.cpp "#include <arm_neon.h>\nint main() { float32x4_t a, b; a = vdupq_n_f32(1.0f); b = vdupq_n_f32(2.0f); a = vaddq_f32(a, b); return 0; }")
-try_compile(RUNTIME_NEON_SUPPORTED
-    ${CMAKE_BINARY_DIR}/instructions_test_neon
-    ${CMAKE_BINARY_DIR}/instructions_test_neon.cpp
-    COMPILE_DEFINITIONS "-march=armv8-a"
-    OUTPUT_VARIABLE COMPILE_OUTPUT
-    )
-
-file(WRITE ${CMAKE_BINARY_DIR}/instructions_test_sve.cpp
-    "#include <arm_sve.h>\n"
-    "int main() {\n"
-    "    svbool_t pg = svptrue_b32();\n"
-    "    svfloat32_t a = svdup_f32(1.0f);\n"
-    "    svfloat32_t b = svdup_f32(2.0f);\n"
-    "    a = svadd_f32_x(pg, a, b);\n"
-    "    return 0;\n"
-    "}"
-)
-try_compile(COMPILER_SVE_SUPPORTED
-    ${CMAKE_BINARY_DIR}/instructions_test_sve
-    ${CMAKE_BINARY_DIR}/instructions_test_sve.cpp
-    COMPILE_DEFINITIONS "-march=armv8-a+sve" 
-    OUTPUT_VARIABLE COMPILE_OUTPUT
-)
-
-
 try_compile(RUNTIME_SVE_SUPPORTED
     ${CMAKE_BINARY_DIR}/instructions_test_sve
     ${CMAKE_BINARY_DIR}/instructions_test_sve.cpp
@@ -135,8 +125,13 @@ try_compile(RUNTIME_SVE_SUPPORTED
     OUTPUT_VARIABLE COMPILE_OUTPUT
 )
 
-
-
+file(WRITE ${CMAKE_BINARY_DIR}/instructions_test_neon.cpp "#include <arm_neon.h>\nint main() { float32x4_t a, b; a = vdupq_n_f32(1.0f); b = vdupq_n_f32(2.0f); a = vaddq_f32(a, b); return 0; }")
+try_compile(RUNTIME_NEON_SUPPORTED
+    ${CMAKE_BINARY_DIR}/instructions_test_neon
+    ${CMAKE_BINARY_DIR}/instructions_test_neon.cpp
+    COMPILE_DEFINITIONS "-march=armv8-a"
+    OUTPUT_VARIABLE COMPILE_OUTPUT
+    )
 
 # determine which instructions can be package into distribution
 set (COMPILER_SUPPORTED "compiler support instructions: ")
