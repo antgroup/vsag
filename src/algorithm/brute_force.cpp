@@ -44,11 +44,6 @@ BruteForce::BruteForce(const BruteForceParameterPtr& param, const IndexCommonPar
         this->build_pool_ = SafeThreadPool::FactoryDefaultThreadPool();
     }
     this->use_attribute_filter_ = param->use_attribute_filter;
-    if (this->use_attribute_filter_) {
-        this->attr_filter_index_ =
-            AttributeInvertedInterface::MakeInstance(allocator_, true /*have_bucket*/);
-        this->has_attribute_ = true;
-    }
     this->has_raw_vector_ = true;
 }
 
@@ -425,7 +420,10 @@ static const std::string BRUTE_FORCE_PARAMS_TEMPLATE =
             "nbits": 8,
             "{HOLD_MOLDS}": false
         },
-        "{USE_ATTRIBUTE_FILTER_KEY}": false
+        "{USE_ATTRIBUTE_FILTER_KEY}": false,
+        "{ATTR_PARAMS_KEY}": {
+            "{HAS_BUCKETS_KEY}": true
+        }
     })";
 
 ParamPtr

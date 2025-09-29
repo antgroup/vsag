@@ -16,6 +16,7 @@
 #include "inner_index_parameter.h"
 
 #include "common.h"
+#include "datacell/attribute_inverted_interface_parameter.h"
 #include "datacell/extra_info_datacell_parameter.h"
 #include "datacell/flatten_datacell_parameter.h"
 #include "impl/logger/logger.h"
@@ -32,6 +33,14 @@ InnerIndexParameter::FromJson(const JsonType& json) {
 
     if (json.Contains(USE_ATTRIBUTE_FILTER_KEY)) {
         this->use_attribute_filter = json[USE_ATTRIBUTE_FILTER_KEY].GetBool();
+    }
+
+    if (this->use_attribute_filter) {
+        this->attr_inverted_interface_param =
+            std::make_shared<AttributeInvertedInterfaceParameter>();
+        if (json.Contains(ATTR_PARAMS_KEY)) {
+            this->attr_inverted_interface_param->FromJson(json[ATTR_PARAMS_KEY]);
+        }
     }
 
     if (json.Contains(BUILD_THREAD_COUNT_KEY)) {
@@ -74,6 +83,9 @@ InnerIndexParameter::ToJson() const {
     }
     if (this->extra_info_param) {
         json[EXTRA_INFO_KEY].SetJson(this->extra_info_param->ToJson());
+    }
+    if (this->use_attribute_filter) {
+        json[ATTR_PARAMS_KEY].SetJson(this->attr_inverted_interface_param->ToJson());
     }
     auto str = json.Dump(4);
     return json;

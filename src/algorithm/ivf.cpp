@@ -76,6 +76,9 @@ static constexpr const char* IVF_PARAMS_TEMPLATE =
                 "{QUANTIZATION_TYPE_KEY}": "{QUANTIZATION_TYPE_VALUE_FP32}",
                 "{PRODUCT_QUANTIZATION_DIM}": 0
             }
+        },
+        "{ATTR_PARAMS_KEY}": {
+            "{HAS_BUCKETS_KEY}": true
         }
     })";
 
@@ -238,11 +241,6 @@ IVF::IVF(const IVFParameterPtr& param, const IndexCommonParam& common_param)
             FlattenInterface::MakeInstance(param->precise_codes_param, common_param);
     }
     this->use_residual_ = param->bucket_param->use_residual_;
-    if (this->use_attribute_filter_) {
-        this->attr_filter_index_ =
-            AttributeInvertedInterface::MakeInstance(allocator_, true /*have_bucket*/);
-        this->has_attribute_ = true;
-    }
 
     this->thread_pool_ = common_param.thread_pool_;
     if (param->build_thread_count > 1 and this->thread_pool_ == nullptr) {

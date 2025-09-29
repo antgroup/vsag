@@ -27,4 +27,14 @@ AttributeInvertedInterface::MakeInstance(Allocator* allocator, bool have_bucket)
     return std::make_shared<AttributeBucketInvertedDataCell>(allocator,
                                                              ComputableBitsetType::FastBitset);
 }
+
+AttrInvertedInterfacePtr
+AttributeInvertedInterface::MakeInstance(Allocator* allocator,
+                                         const AttributeInvertedInterfaceParamPtr& param) {
+    if (param == nullptr) {
+        return MakeInstance(allocator, false);
+    }
+    return MakeInstance(allocator, param->has_buckets_);
+}
+
 }  // namespace vsag

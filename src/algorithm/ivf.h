@@ -169,8 +169,6 @@ private:
 
     FlattenInterfacePtr reorder_codes_{nullptr};
 
-    AttrInvertedInterfacePtr attr_filter_index_{nullptr};
-
     std::shared_ptr<SafeThreadPool> thread_pool_{nullptr};
 
     Vector<uint64_t> location_map_;

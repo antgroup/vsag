@@ -140,7 +140,5 @@ private:
     std::atomic<InnerIdType> max_capacity_{0};
 
     static constexpr uint64_t DEFAULT_RESIZE_BIT = 10;
-
-    AttrInvertedInterfacePtr attr_filter_index_{nullptr};
 };
 }  // namespace vsag

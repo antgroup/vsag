@@ -19,6 +19,7 @@
 #include <vector>
 
 #include "data_type.h"
+#include "datacell/attribute_inverted_interface.h"
 #include "datacell/extra_info_interface.h"
 #include "dataset_impl.h"
 #include "inner_index_parameter.h"
@@ -413,6 +414,8 @@ protected:
     uint64_t build_thread_count_{100};
 
     std::shared_ptr<SafeThreadPool> build_pool_{nullptr};
+
+    AttrInvertedInterfacePtr attr_filter_index_{nullptr};
 };
 
 }  // namespace vsag
