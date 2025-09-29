@@ -47,3 +47,12 @@ add_dependencies (vsag_static spdlog)
 
 maybe_add_dependencies (vsag antlr4 spdlog roaring openblas boost mkl)
 maybe_add_dependencies (vsag_static antlr4 spdlog roaring openblas boost mkl)
+
+if (ENABLE_TESTS)
+    file (GLOB VSAG_TESTS "*_test.cpp")
+    file (GLOB INDEX_TESTS "index/*_test.cpp")
+    list (APPEND VSAG_TESTS ${INDEX_TESTS})
+    add_library (vsag_test STATIC ${VSAG_TESTS})
+    target_link_libraries (vsag_test PRIVATE Catch2::Catch2 vsag)
+    add_dependencies (vsag_test spdlog Catch2)
+endif ()
