@@ -34,6 +34,8 @@ const char* const BUILD_THREAD_COUNT_KEY = "build_thread_count";
 const char* const PRECISE_CODES_KEY = "precise_codes";
 const char* const STORE_RAW_VECTOR_KEY = "store_raw_vector";
 const char* const RAW_VECTOR_KEY = "raw_vector";
+const char* const ATTR_HAS_BUCKETS_KEY = "has_buckets";
+const char* const ATTR_PARAMS_KEY = "attr_params";
 
 // Parameter key for hgraph
 const char* const HGRAPH_USE_ELP_OPTIMIZER_KEY = "use_elp_optimizer";
@@ -227,6 +229,8 @@ const std::unordered_map<std::string, std::string> DEFAULT_MAP = {
     {"IVF_PARTITION_STRATEGY_TYPE_GNO_IMI", IVF_PARTITION_STRATEGY_TYPE_GNO_IMI},
     {"STORE_RAW_VECTOR_KEY", STORE_RAW_VECTOR_KEY},
     {"RAW_VECTOR_KEY", RAW_VECTOR_KEY},
+    {"ATTR_HAS_BUCKETS_KEY", ATTR_HAS_BUCKETS_KEY},
+    {"ATTR_PARAMS_KEY", ATTR_PARAMS_KEY},
 };
 
 }  // namespace vsag
