@@ -65,6 +65,7 @@ extern const char* const PARAMETER_DIM;
 extern const char* const PARAMETER_METRIC_TYPE;
 extern const char* const PARAMETER_USE_CONJUGATE_GRAPH;
 extern const char* const PARAMETER_USE_CONJUGATE_GRAPH_SEARCH;
+extern const char* const PARAMETER_USE_OLD_SERIAL_FORMAT;
 
 extern const char* const DISKANN_PARAMETER_L;
 extern const char* const DISKANN_PARAMETER_R;
