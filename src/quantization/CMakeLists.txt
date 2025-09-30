@@ -15,6 +15,7 @@
 
 
 set (QUANTIZER_SRC
+        quantizer_adapter.cpp
         fp32_quantizer.cpp
         int8_quantizer.cpp
         scalar_quantization/bf16_quantizer.cpp
