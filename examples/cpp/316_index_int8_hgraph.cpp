@@ -50,7 +50,7 @@ main(int argc, char** argv) {
         "metric_type": "l2",
         "dim": 128,
         "index_param": {
-            "base_quantization_type": "int8",
+            "base_quantization_type": "pq",
             "max_degree": 26,
             "ef_construction": 100,
             "alpha":1.2
