@@ -211,6 +211,8 @@ private:
     get_data(const DatasetPtr& dataset, uint32_t index = 0) const {
         if (data_type_ == DataTypes::DATA_TYPE_FLOAT) {
             return dataset->GetFloat32Vectors() + index * dim_;
+        } else if (data_type_ == DataTypes::DATA_TYPE_INT8) {
+            return dataset->GetInt8Vectors() + index * dim_;
         } else if (data_type_ == DataTypes::DATA_TYPE_SPARSE) {
             return dataset->GetSparseVectors() + index;
         }
