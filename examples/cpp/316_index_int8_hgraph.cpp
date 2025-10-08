@@ -16,6 +16,7 @@
 #include <vsag/vsag.h>
 
 #include <iostream>
+#include <random>
 
 int
 main(int argc, char** argv) {
@@ -25,30 +26,31 @@ main(int argc, char** argv) {
     int64_t num_vectors = 10000;
     int64_t dim = 128;
     std::vector<int64_t> ids(num_vectors);
-    std::vector<float> datas(num_vectors * dim);
+    std::vector<int8_t> datas(num_vectors * dim);
     std::mt19937 rng(47);
-    std::uniform_real_distribution<float> distrib_real;
+    std::uniform_int_distribution<int8_t> distrib_int8(std::numeric_limits<int8_t>::min(),
+                                                       std::numeric_limits<int8_t>::max());
     for (int64_t i = 0; i < num_vectors; ++i) {
         ids[i] = i;
     }
     for (int64_t i = 0; i < dim * num_vectors; ++i) {
-        datas[i] = distrib_real(rng);
+        datas[i] = distrib_int8(rng);
     }
     auto base = vsag::Dataset::Make();
     base->NumElements(num_vectors)
         ->Dim(dim)
         ->Ids(ids.data())
-        ->Float32Vectors(datas.data())
+        ->Int8Vectors(datas.data())
         ->Owner(false);
 
     /******************* Create HGraph Index *****************/
     std::string hgraph_build_parameters = R"(
     {
-        "dtype": "float32",
+        "dtype": "int8",
         "metric_type": "l2",
         "dim": 128,
         "index_param": {
-            "base_quantization_type": "sq8",
+            "base_quantization_type": "int8",
             "max_degree": 26,
             "ef_construction": 100,
             "alpha":1.2
@@ -69,12 +71,12 @@ main(int argc, char** argv) {
     }
 
     /******************* Prepare Query Dataset *****************/
-    std::vector<float> query_vector(dim);
+    std::vector<int8_t> query_vector(dim);
     for (int64_t i = 0; i < dim; ++i) {
-        query_vector[i] = distrib_real(rng);
+        query_vector[i] = distrib_int8(rng);
     }
     auto query = vsag::Dataset::Make();
-    query->NumElements(1)->Dim(dim)->Float32Vectors(query_vector.data())->Owner(false);
+    query->NumElements(1)->Dim(dim)->Int8Vectors(query_vector.data())->Owner(false);
 
     /******************* KnnSearch For HGraph Index *****************/
     auto hgraph_search_parameters = R"(

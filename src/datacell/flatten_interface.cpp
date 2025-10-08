@@ -18,6 +18,7 @@
 #include "flatten_datacell.h"
 #include "inner_string_params.h"
 #include "io/io_headers.h"
+#include "quantization/int8_quantizer.h"
 #include "quantization/quantizer_headers.h"
 #include "quantization/sparse_quantization/sparse_quantizer.h"
 #include "sparse_vector_datacell.h"
@@ -75,6 +76,9 @@ make_instance(const FlattenInterfaceParamPtr& param, const IndexCommonParam& com
     }
     if (quantization_string == QUANTIZATION_TYPE_VALUE_SPARSE) {
         return make_instance<SparseQuantizer<metric>, IOTemp>(param, common_param);
+    }
+    if (quantization_string == QUANTIZATION_TYPE_VALUE_INT8) {
+        return make_instance<INT8Quantizer<metric>, IOTemp>(param, common_param);
     }
     return nullptr;
 }
