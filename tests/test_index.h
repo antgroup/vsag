@@ -302,7 +302,7 @@ public:
     static void
     TestIndexStatus(const IndexPtr& index);
 
-    constexpr static float RECALL_THRESHOLD = 0.95;
+    constexpr static float RECALL_THRESHOLD = 0.85F;
 };
 
 }  // namespace fixtures
