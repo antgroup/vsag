@@ -55,7 +55,8 @@ HNSW::HNSW(HnswParameters hnsw_params, const IndexCommonParam& index_common_para
       type_(hnsw_params.type),
       max_degree_(hnsw_params.max_degree),
       dim_(index_common_param.dim_),
-      index_common_param_(index_common_param) {
+      index_common_param_(index_common_param),
+      use_old_serial_format_(index_common_param.use_old_serial_format_) {
     auto M = std::min(  // NOLINT(readability-identifier-naming)
         std::max((int)hnsw_params.max_degree, MINIMAL_M),
         MAXIMAL_M);
@@ -699,8 +700,10 @@ HNSW::serialize(std::ostream& out_stream) {
     }
 
     // serialize footer (introduced since v0.15)
-    auto footer = std::make_shared<Footer>(metadata);
-    footer->Write(writer);
+    if (not use_old_serial_format_) {
+        auto footer = std::make_shared<Footer>(metadata);
+        footer->Write(writer);
+    }
 
     return {};
 }

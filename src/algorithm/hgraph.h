@@ -368,5 +368,7 @@ private:
 
     bool create_new_raw_vector_{false};
     FlattenInterfacePtr raw_vector_{nullptr};
+
+    bool use_old_serial_format_{false};
 };
 }  // namespace vsag
