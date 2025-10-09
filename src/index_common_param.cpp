@@ -116,6 +116,11 @@ IndexCommonParam::CheckAndCreate(JsonType& params, const std::shared_ptr<Resourc
         fill_extra_info_size(result, params[EXTRA_INFO_SIZE]);
     }
 
+    if (params.Contains(PARAMETER_USE_OLD_SERIAL_FORMAT) and
+        params[PARAMETER_USE_OLD_SERIAL_FORMAT].GetBool()) {
+        result.use_old_serial_format_ = true;
+    }
+
     return result;
 }
 
