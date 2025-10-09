@@ -31,11 +31,11 @@ jobs:
       - name: Make Asan
         run: export CMAKE_GENERATOR="Ninja"; make release
       - name: Clean
-        run: find ./build -type f -name "*.o" -exec rm -f {} +
+        run: find ./build-release -type f -name "*.o" -exec rm -f {} +
       - name: Save Test
         uses: actions/upload-artifact@v4
         with:
-          path: ./build
+          path: ./build-release
           name: test_x86-${{ github.run_id }}
           compression-level: 1
           retention-days: 2
@@ -64,11 +64,11 @@ jobs:
       - name: Make Asan
         run: export CMAKE_GENERATOR="Ninja"; make release
       - name: Clean
-        run: find ./build -type f -name "*.o" -exec rm -f {} +
+        run: find ./build-release -type f -name "*.o" -exec rm -f {} +
       - name: Save Test
         uses: actions/upload-artifact@v4
         with:
-          path: ./build/
+          path: ./build-release/
           name: test_aarch64-${{ github.run_id }}
           compression-level: 1
           retention-days: 2
@@ -95,18 +95,18 @@ jobs:
         with:
           ref: main
       - name: Clean Env
-        run: rm -rf ./build
+        run: rm -rf ./build-release
       - name: Download Test
         uses: actions/download-artifact@v4
         with:
           name: test_x86-${{ github.run_id }}
-          path: ./build
+          path: ./build-release
       - name: Do Asan Test In ${{ matrix.test_type }}
         run: |
           echo leak:libomp.so > omp.supp
           export LSAN_OPTIONS=suppressions=omp.supp
-          chmod +x ./build/tests/${{ matrix.test_type }}
-          ./scripts/test_parallel_by_name.sh ${{ matrix.test_type }} ~[pr]
+          chmod +x ./build-release/tests/${{ matrix.test_type }}
+          ./scripts/test_parallel_by_name_daily.sh ${{ matrix.test_type }} ~[pr]
       - name: Upload Log
         uses: actions/upload-artifact@v4
         with:
@@ -135,18 +135,18 @@ jobs:
       - name: Prepare Env
         run: sudo bash ./scripts/deps/install_deps_ubuntu.sh
       - name: Clean Build
-        run: rm -rf ./build
+        run: rm -rf ./build-release
       - name: Download Test
         uses: actions/download-artifact@v4
         with:
           name: test_aarch64-${{ github.run_id }}
-          path: ./build
+          path: ./build-release
       - name: Do Asan Test In ${{ matrix.test_type }}
         run: |
           echo leak:libomp.so > omp.supp
           export LSAN_OPTIONS=suppressions=omp.supp
-          chmod +x ./build/tests/${{ matrix.test_type }}
-          ./scripts/test_parallel_by_name.sh ${{ matrix.test_type }} ~[pr]
+          chmod +x ./build-release/tests/${{ matrix.test_type }}
+          ./scripts/test_parallel_by_name_daily.sh ${{ matrix.test_type }} ~[pr]
       - name: Upload Log
         uses: actions/upload-artifact@v4
         with:
@@ -213,11 +213,11 @@ jobs:
           echo "SIMD_KEY=${EXTRA_KEY}" >> $GITHUB_ENV
           export CMAKE_GENERATOR="Ninja"; make release
       - name: Clean
-        run: find ./build -type f -name "*.o" -exec rm -f {} +
+        run: find ./build-release -type f -name "*.o" -exec rm -f {} +
       - name: Save Test
         uses: actions/upload-artifact@v4
         with:
-          path: ./build
+          path: ./build-release
           name: daily_test_simd-${{ env.SIMD_KEY }}-${{ github.run_id }}
           compression-level: 1
           retention-days: 1
@@ -250,18 +250,18 @@ jobs:
         with:
           ref: main
       - name: Clean Env
-        run: rm -rf ./build
+        run: rm -rf ./build-release
       - name: Download Test
         uses: actions/download-artifact@v4
         with:
           name: daily_test_simd-${{ matrix.simd_key }}-${{ github.run_id }}
-          path: ./build/
+          path: ./build-release/
       - name: Do Asan Test In ${{ matrix.test_type }}
         run: |
           echo leak:libomp.so > omp.supp
           export LSAN_OPTIONS=suppressions=omp.supp
-          chmod +x ./build/tests/${{ matrix.test_type }}
-          ./scripts/test_parallel_by_name.sh ${{ matrix.test_type }} ~[pr]
+          chmod +x ./build-release/tests/${{ matrix.test_type }}
+          ./scripts/test_parallel_by_name_daily.sh ${{ matrix.test_type }} ~[pr]
 
   daily_clean_up_simd:
     name: Clean Up
