@@ -28,6 +28,7 @@ namespace vsag {
 class BufferIO : public BasicIO<BufferIO> {
 public:
     static constexpr bool InMemory = false;
+    static constexpr bool SkipDeserialize = false;
 
 public:
     BufferIO(std::string filename, Allocator* allocator);

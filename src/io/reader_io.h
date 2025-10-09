@@ -24,6 +24,7 @@ namespace vsag {
 class ReaderIO : public BasicIO<ReaderIO> {
 public:
     static constexpr bool InMemory = false;
+    static constexpr bool SkipDeserialize = true;
 
 public:
     explicit ReaderIO(Allocator* allocator) : BasicIO<ReaderIO>(allocator) {
