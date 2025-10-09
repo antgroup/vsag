@@ -227,6 +227,7 @@ public:
         if (support_tombstone_) {
             StreamReader::ReadObj(reader, deleted_ids_);
         }
+        this->total_count_.store(label_table_.size());
     }
 
     void
