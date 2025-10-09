@@ -17,7 +17,7 @@ build() {
            bash -c "\
            export COMPILE_JOBS=48 && \
            export CMAKE_INSTALL_PREFIX=/tmp/vsag && \
-           make clean-release && make $makefile_target && make install && \
+           make clean-release && make $makefile_target && make run-dist-tests && make install && \
            mkdir -p ./dist && \
            cp -r /tmp/vsag ./dist/ && \
            cd ./dist && \
