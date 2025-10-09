@@ -116,13 +116,23 @@ release:                 ## Build vsag with release options.
 
 .PHONY: dist-old-abi
 dist-pre-cxx11-abi:      ## Build vsag with distribution options.
+	echo "building dist-pre-cxx11-abi..."
 	cmake ${VSAG_CMAKE_ARGS} -B${RELEASE_BUILD_DIR} -DCMAKE_BUILD_TYPE=Release -DENABLE_INTEL_MKL=off -DENABLE_CXX11_ABI=off -DENABLE_LIBCXX=off
 	cmake --build ${RELEASE_BUILD_DIR} --parallel ${COMPILE_JOBS}
+	echo "running tests..."
+	${RELEASE_BUILD_DIR}/tests/unittests -d yes
+	${RELEASE_BUILD_DIR}/tests/functests -d yes
+	${RELEASE_BUILD_DIR}/mockimpl/tests_mockimpl -d yes
 
 .PHONY: dist-cxx11-abi
 dist-cxx11-abi:          ## Build vsag with distribution options.
+	echo "building dist-pre-cxx11-abi..."
 	cmake ${VSAG_CMAKE_ARGS} -B${RELEASE_BUILD_DIR} -DCMAKE_BUILD_TYPE=Release -DENABLE_INTEL_MKL=off -DENABLE_CXX11_ABI=on -DENABLE_LIBCXX=off
 	cmake --build ${RELEASE_BUILD_DIR} --parallel ${COMPILE_JOBS}
+	echo "running tests..."
+	${RELEASE_BUILD_DIR}/tests/unittests -d yes
+	${RELEASE_BUILD_DIR}/tests/functests -d yes
+	${RELEASE_BUILD_DIR}/mockimpl/tests_mockimpl -d yes
 
 .PHONY: dist-libcxx
 dist-libcxx:             ## Build vsag using libc++.
