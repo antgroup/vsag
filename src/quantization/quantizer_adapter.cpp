@@ -191,6 +191,5 @@ QuantizerAdapter<QuantT, DataT>::ReleaseComputerImpl(
     this->allocator_->Deallocate(computer.buf_);
 }
 
-
 TEMPLATE_QUANTIZER_ADAPTER(ProductQuantizer, int8_t);
 }  // namespace vsag
