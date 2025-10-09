@@ -50,7 +50,8 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
       alpha_(hgraph_param->alpha),
       odescent_param_(hgraph_param->odescent_param),
       graph_type_(hgraph_param->graph_type),
-      hierarchical_datacell_param_(hgraph_param->hierarchical_graph_param) {
+      hierarchical_datacell_param_(hgraph_param->hierarchical_graph_param),
+      use_old_serial_format_(common_param.use_old_serial_format_) {
     this->label_table_->compress_duplicate_data_ = hgraph_param->support_duplicate;
     this->label_table_->support_tombstone_ = hgraph_param->support_tombstone;
     neighbors_mutex_ = std::make_shared<PointsMutex>(0, common_param.allocator_.get());
@@ -741,25 +742,25 @@ HGraph::Serialize(StreamWriter& writer) const {
         this->use_reorder_ = false;
     }
 
-    // FIXME(wxyu): only for testing, remove before merge into the main branch
-    // if (not Options::Instance().new_version()) {
-    //     this->serialize_basic_info_v0_14(writer);
-    //     this->basic_flatten_codes_->Serialize(writer);
-    //     this->bottom_graph_->Serialize(writer);
-    //     if (this->use_reorder_) {
-    //         this->high_precise_codes_->Serialize(writer);
-    //     }
-    //     for (const auto& route_graph : this->route_graphs_) {
-    //         route_graph->Serialize(writer);
-    //     }
-    //     if (this->extra_info_size_ > 0 && this->extra_infos_ != nullptr) {
-    //         this->extra_infos_->Serialize(writer);
-    //     }
-    //     if (this->use_attribute_filter_ and this->attr_filter_index_ != nullptr) {
-    //         this->attr_filter_index_->Serialize(writer);
-    //     }
-    //     return;
-    // }
+    // FIXME(wxyu): this option is used for special purposes, like compatibility testing
+    if (this->use_old_serial_format_) {
+        this->serialize_basic_info_v0_14(writer);
+        this->basic_flatten_codes_->Serialize(writer);
+        this->bottom_graph_->Serialize(writer);
+        if (this->use_reorder_) {
+            this->high_precise_codes_->Serialize(writer);
+        }
+        for (const auto& route_graph : this->route_graphs_) {
+            route_graph->Serialize(writer);
+        }
+        if (this->extra_info_size_ > 0 && this->extra_infos_ != nullptr) {
+            this->extra_infos_->Serialize(writer);
+        }
+        if (this->use_attribute_filter_ and this->attr_filter_index_ != nullptr) {
+            this->attr_filter_index_->Serialize(writer);
+        }
+        return;
+    }
 
     this->serialize_label_info(writer);
     this->basic_flatten_codes_->Serialize(writer);
@@ -795,22 +796,19 @@ HGraph::Deserialize(StreamReader& reader) {
     // try to deserialize footer (only in new version)
     auto footer = Footer::Parse(reader);
 
-    BufferStreamReader buffer_reader(
-        &reader, std::numeric_limits<uint64_t>::max(), this->allocator_);
-
     if (footer == nullptr) {  // old format, DON'T EDIT, remove in the future
         logger::debug("parse with v0.14 version format");
 
-        this->deserialize_basic_info_v0_14(buffer_reader);
+        this->deserialize_basic_info_v0_14(reader);
 
-        this->basic_flatten_codes_->Deserialize(buffer_reader);
-        this->bottom_graph_->Deserialize(buffer_reader);
+        this->basic_flatten_codes_->Deserialize(reader);
+        this->bottom_graph_->Deserialize(reader);
         if (this->use_reorder_) {
-            this->high_precise_codes_->Deserialize(buffer_reader);
+            this->high_precise_codes_->Deserialize(reader);
         }
 
         for (auto& route_graph : this->route_graphs_) {
-            route_graph->Deserialize(buffer_reader);
+            route_graph->Deserialize(reader);
         }
         auto new_size = max_capacity_.load();
         this->neighbors_mutex_->Resize(new_size);
@@ -818,15 +816,18 @@ HGraph::Deserialize(StreamReader& reader) {
         pool_ = std::make_shared<VisitedListPool>(1, allocator_, new_size, allocator_);
 
         if (this->extra_info_size_ > 0 && this->extra_infos_ != nullptr) {
-            this->extra_infos_->Deserialize(buffer_reader);
+            this->extra_infos_->Deserialize(reader);
         }
         this->total_count_ = this->basic_flatten_codes_->TotalCount();
 
         if (this->use_attribute_filter_ and this->attr_filter_index_ != nullptr) {
-            this->attr_filter_index_->Deserialize(buffer_reader);
+            this->attr_filter_index_->Deserialize(reader);
         }
     } else {  // create like `else if ( ver in [v0.15, v0.17] )` here if need in the future
         logger::debug("parse with new version format");
+
+        BufferStreamReader buffer_reader(
+            &reader, std::numeric_limits<uint64_t>::max(), this->allocator_);
 
         auto metadata = footer->GetMetadata();
         // metadata should NOT be nullptr if footer is not nullptr

@@ -462,6 +462,8 @@ private:
     VSAGIndexStatus index_status_{VSAGIndexStatus::ALIVE};
     IndexFeatureList feature_list_{};
     const IndexCommonParam index_common_param_;
+
+    bool use_old_serial_format_{false};
 };
 
 }  // namespace vsag

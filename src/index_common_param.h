@@ -33,6 +33,9 @@ public:
     std::shared_ptr<Allocator> allocator_{nullptr};
     std::shared_ptr<SafeThreadPool> thread_pool_{nullptr};
 
+    // FIXME(wxyu): this option is used for special purposes, like compatibility testing
+    bool use_old_serial_format_{false};
+
     static IndexCommonParam
     CheckAndCreate(JsonType& params, const std::shared_ptr<Resource>& resource);
 };
