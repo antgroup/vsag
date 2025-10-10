@@ -153,7 +153,7 @@ DatasetImpl::DeepCopy(Allocator* allocator) const {
     auto* paths = new std::string[num_elements];
     copy_dataset->Paths(paths);
     for (int i = 0; i < num_elements; ++i) {
-        paths[i] = this->GetPaths()[i];
+        paths[i] += this->GetPaths()[i];
     }
 
     if (this->GetAttributeSets() != nullptr) {
@@ -223,12 +223,12 @@ DatasetImpl::Append(const DatasetPtr& other) {
         auto* ptr = const_cast<std::string*>(std::get<const std::string*>(iter->second));
         auto* paths_copy = new std::string[old_num_elements + new_num_elements];
         for (int i = 0; i < old_num_elements; ++i) {
-            paths_copy[i] = ptr[i];
+            paths_copy[i] += ptr[i];
         }
         delete[] ptr;  // Free the old memory if it was allocated with new[]
         ptr = nullptr;
         for (int i = 0; i < new_num_elements; ++i) {
-            paths_copy[old_num_elements + i] = other->GetPaths()[i];
+            paths_copy[old_num_elements + i] += other->GetPaths()[i];
         }
         this->Paths(paths_copy);
     }
