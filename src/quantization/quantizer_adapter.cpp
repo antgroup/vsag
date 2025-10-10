@@ -16,13 +16,11 @@
 #include "quantization/quantizer_adapter.h"
 
 #include <cmath>
-#include <cstdint>
 #include <memory>
 #include <type_traits>
 
 #include "quantization/computer.h"
 #include "quantization/quantizer.h"
-#include "typing.h"
 
 namespace vsag {
 
@@ -42,7 +40,6 @@ QuantizerAdapter<QuantT, DataT>::TrainImpl(const DataType* data, size_t count) {
     if constexpr (std::is_same_v<DataT, int8_t>) {
         const auto* data_int8 = reinterpret_cast<const int8_t*>(data);
         Vector<DataType> vec(this->dim_ * count, this->allocator_);
-#pragma omp simd
         for (int64_t i = 0; i < this->dim_ * count; ++i) {
             vec[i] = static_cast<DataType>(data_int8[i]);
         }
@@ -59,7 +56,6 @@ bool
 QuantizerAdapter<QuantT, DataT>::EncodeOneImpl(const DataType* data, uint8_t* codes) {
     if constexpr (std::is_same_v<DataT, int8_t>) {
         const auto* data_int8 = reinterpret_cast<const int8_t*>(data);
-#pragma omp simd
         Vector<DataType> vec(this->dim_, this->allocator_);
         for (int64_t i = 0; i < this->dim_; i++) {
             vec[i] = static_cast<DataType>(data_int8[i]);
@@ -80,7 +76,6 @@ QuantizerAdapter<QuantT, DataT>::EncodeBatchImpl(const DataType* data,
     if constexpr (std::is_same_v<DataT, int8_t>) {
         const auto* data_int8 = reinterpret_cast<const int8_t*>(data);
         Vector<DataType> vec(this->dim_ * count, this->allocator_);
-#pragma omp simd
         for (int64_t i = 0; i < this->dim_ * count; ++i) {
             vec[i] = static_cast<DataType>(data_int8[i]);
         }
@@ -100,7 +95,6 @@ QuantizerAdapter<QuantT, DataT>::DecodeOneImpl(const uint8_t* codes, DataType* d
         if (!this->inner_quantizer_->DecodeOneImpl(codes, vec.data())) {
             return false;
         }
-#pragma omp simd
         for (int64_t i = 0; i < this->dim_; i++) {
             reinterpret_cast<DataT*>(data)[i] = static_cast<DataT>(std::round(vec[i]));
         }
@@ -122,7 +116,6 @@ QuantizerAdapter<QuantT, DataT>::DecodeBatchImpl(const uint8_t* codes,
         if (!this->inner_quantizer_->DecodeBatchImpl(codes, vec.data(), count)) {
             return false;
         }
-#pragma omp simd
         for (int64_t i = 0; i < this->dim_ * count; i++) {
             reinterpret_cast<DataT*>(data)[i] = static_cast<DataT>(std::round(vec[i]));
         }
@@ -158,7 +151,6 @@ QuantizerAdapter<QuantT, DataT>::ProcessQueryImpl(
     if constexpr (std::is_same_v<DataT, int8_t>) {
         const auto* query_int8 = reinterpret_cast<const int8_t*>(query);
         Vector<DataType> vec(this->dim_, this->allocator_);
-#pragma omp simd
         for (int64_t i = 0; i < this->dim_; i++) {
             vec[i] = static_cast<DataType>(query_int8[i]);
         }
@@ -199,4 +191,5 @@ QuantizerAdapter<QuantT, DataT>::ReleaseComputerImpl(
     this->allocator_->Deallocate(computer.buf_);
 }
 
+TEMPLATE_QUANTIZER_ADAPTER(ProductQuantizer, int8_t);
 }  // namespace vsag

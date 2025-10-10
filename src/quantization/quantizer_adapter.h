@@ -75,16 +75,6 @@ public:
                       uint64_t count,
                       const uint8_t* codes,
                       float* dists) const;
-    // void
-    // ComputeDistsBatch4Impl(Computer<QuantizerAdapter<QuantT, DataT>>& computer,
-    //                        const uint8_t* codes1,
-    //                        const uint8_t* codes2,
-    //                        const uint8_t* codes3,
-    //                        const uint8_t* codes4,
-    //                        float& dists1,
-    //                        float& dists2,
-    //                        float& dists3,
-    //                        float& dists4) const;
 
     void
     ReleaseComputerImpl(Computer<QuantizerAdapter<QuantT, DataT>>& computer) const;
@@ -103,6 +93,4 @@ private:
     template class QuantizerAdapter<QuantType<MetricType::METRIC_TYPE_L2SQR>, DataT>; \
     template class QuantizerAdapter<QuantType<MetricType::METRIC_TYPE_IP>, DataT>;    \
     template class QuantizerAdapter<QuantType<MetricType::METRIC_TYPE_COSINE>, DataT>;
-
-TEMPLATE_QUANTIZER_ADAPTER(ProductQuantizer, int8_t);
 }  // namespace vsag
