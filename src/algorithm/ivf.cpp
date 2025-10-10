@@ -78,7 +78,7 @@ static constexpr const char* IVF_PARAMS_TEMPLATE =
             }
         },
         "{ATTR_PARAMS_KEY}": {
-            "{HAS_BUCKETS_KEY}": true
+            "{ATTR_HAS_BUCKETS_KEY}": true
         }
     })";
 
