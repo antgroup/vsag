@@ -422,7 +422,7 @@ static const std::string BRUTE_FORCE_PARAMS_TEMPLATE =
         },
         "{USE_ATTRIBUTE_FILTER_KEY}": false,
         "{ATTR_PARAMS_KEY}": {
-            "{HAS_BUCKETS_KEY}": true
+            "{ATTR_HAS_BUCKETS_KEY}": true
         }
     })";
 

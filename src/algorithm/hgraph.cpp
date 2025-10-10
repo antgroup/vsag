@@ -1268,7 +1268,7 @@ static const std::string HGRAPH_PARAMS_TEMPLATE =
             }
         },
         "{ATTR_PARAMS_KEY}": {
-            "{HAS_BUCKETS_KEY}": false
+            "{ATTR_HAS_BUCKETS_KEY}": false
         },
         "{HGRAPH_SUPPORT_DUPLICATE}": false,
         "{HGRAPH_SUPPORT_TOMBSTONE}": false,
