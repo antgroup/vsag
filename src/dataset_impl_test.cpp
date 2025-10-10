@@ -243,6 +243,17 @@ EqualDataset(const vsag::DatasetPtr& data1, const vsag::DatasetPtr& data2) {
     return true;
 }
 
+template <typename T>
+bool
+AreAllPointersDifferent(T* original, T* copy, size_t num_elements) {
+    for (size_t i = 0; i < num_elements; ++i) {
+        if (std::memcmp(original + i, copy + i, sizeof(T)) == 0) {
+            return false;
+        }
+    }
+    return true;
+}
+
 TEST_CASE("Dataset Copy and Append Test", "[ut][Dataset]") {
     std::random_device rd;
     std::mt19937 gen(rd());
@@ -264,15 +275,13 @@ TEST_CASE("Dataset Copy and Append Test", "[ut][Dataset]") {
             use_allocator ? vsag::Engine::CreateDefaultAllocator() : nullptr;
         auto copy = original->DeepCopy(copy_allocator.get());
         REQUIRE(EqualDataset(original, copy));
-        REQUIRE(memcmp(original->GetSparseVectors(),
-                       copy->GetSparseVectors(),
-                       sizeof(vsag::SparseVector) * num_elements) != 0);
-        REQUIRE(memcmp(original->GetAttributeSets(),
-                       copy->GetAttributeSets(),
-                       sizeof(vsag::AttributeSet) * num_elements) != 0);
-        REQUIRE(memcmp(original->GetPaths(),
-                       copy->GetPaths(),
-                       sizeof(std::string) * num_elements) != 0);
+        REQUIRE(AreAllPointersDifferent(
+            original->GetSparseVectors(), copy->GetSparseVectors(), num_elements));
+
+        REQUIRE(AreAllPointersDifferent(
+            original->GetAttributeSets(), copy->GetAttributeSets(), num_elements));
+
+        REQUIRE(AreAllPointersDifferent(original->GetPaths(), copy->GetPaths(), num_elements));
     }
     SECTION("Append") {
         auto copy = original->DeepCopy();
