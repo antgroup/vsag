@@ -189,3 +189,57 @@ TEST_CASE("index empty input test", "[ut][index_impl]") {
     REQUIRE_FALSE(search_result.has_value());
     REQUIRE(search_result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
 }
+
+class IdentifyAllocator : public vsag::Allocator {
+public:
+    IdentifyAllocator(uint64_t id) : allocator_id(id) {
+    }
+
+    std::string
+    Name() override {
+        return "identify-allocator";
+    }
+
+    void*
+    Allocate(size_t size) override {
+        auto addr = (void*)malloc(size);
+        return addr;
+    }
+
+    void
+    Deallocate(void* p) override {
+        return free(p);
+    }
+
+    void*
+    Reallocate(void* p, size_t size) override {
+        auto addr = (void*)realloc(p, size);
+        return addr;
+    }
+
+private:
+    uint64_t allocator_id;
+};
+
+TEST_CASE("index clone with allocator", "[ut][index_impl]") {
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 128;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    common_param.metric_ = vsag::MetricType::METRIC_TYPE_L2SQR;
+    common_param.allocator_ = std::make_shared<IdentifyAllocator>(1ULL);
+    auto build_parameter_json = R"(
+        {
+            "base_quantization_type": "fp32",
+            "max_degree": 16,
+            "ef_construction": 100
+        }
+    )";
+
+    vsag::JsonType hgraph_json;
+    hgraph_json = vsag::JsonType::Parse(build_parameter_json);
+    auto index = std::make_shared<vsag::IndexImpl<vsag::HGraph>>(hgraph_json, common_param);
+
+    auto allocator = std::make_shared<IdentifyAllocator>(2ULL);
+
+    auto cloned_index = index->Clone(allocator).value();
+}
