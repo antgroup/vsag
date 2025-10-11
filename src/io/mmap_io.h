@@ -26,6 +26,7 @@ class Allocator;
 class MMapIO : public BasicIO<MMapIO> {
 public:
     static constexpr bool InMemory = false;
+    static constexpr bool SkipDeserialize = false;
 
 public:
     MMapIO(std::string filename, Allocator* allocator);
