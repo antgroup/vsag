@@ -20,7 +20,7 @@
 #include "utils/pointer_define.h"
 
 namespace vsag {
-
+static constexpr uint32_t DEFAULT_TERM_ID_LIMIT = 100000;
 static constexpr uint32_t DEFAULT_WINDOW_SIZE = 100000;
 static constexpr bool DEFAULT_USE_REORDER = false;
 static constexpr float DEFAULT_QUERY_PRUNE_RATIO = 0.0F;
@@ -45,6 +45,8 @@ public:
 
 public:
     // index
+    uint32_t term_id_limit{0};
+
     uint32_t window_size{0};
 
     float doc_prune_ratio{0};
