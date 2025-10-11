@@ -85,29 +85,15 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Generate version file for Python 3.6
-        run: |
-          pip install setuptools_scm
-          python -c "
-          import setuptools_scm
-          version = setuptools_scm.get_version()
-          with open('python/pyvsag/_version.py', 'w') as f:
-              f.write(f'__version__ = \"{version}\"\\n')
-          "
-          cat python/pyvsag/_version.py
-    
+
+    # 只保留对 setuptools 和 setuptools_scm 版本的限制
       - name: Patch pyproject.toml for Python 3.6
         run: |
           sed -i 's/setuptools>=61.0/setuptools<60/g' python/pyproject.toml
           sed -i 's/setuptools_scm\[toml\]>=6.2/setuptools_scm[toml]<7/g' python/pyproject.toml
-          # 移除 setuptools_scm 配置，因为我们已经生成了版本文件
-          sed -i '/\[tool.setuptools_scm\]/,/^$/d' python/pyproject.toml
-      - name: Patch pyproject.toml for Python 3.6
-        run: |
-          sed -i 's/setuptools>=61.0/setuptools<60/g' python/pyproject.toml
-          sed -i 's/setuptools_scm\[toml\]>=6.2/setuptools_scm[toml]<7/g' python/pyproject.toml
+
       - name: Build wheels
-        uses: pypa/cibuildwheel@v2.11.4
+        uses: pypa/cibuildwheel@v2.11.4 # 保持旧版本以兼容 py3.6
         with:
           package-dir: python
         env:
