@@ -24,15 +24,15 @@ namespace fixtures {
 struct SINDIParam {
     bool use_reorder = true;
     float doc_prune_ratio = 0.0;
-    int window_size = 10001;
+    int window_size = 10000;
     bool deserialize_without_footer = false;
-    int term_id_limit = 100;
+    int term_id_limit = 2000;
 };
 
 class SINDITestIndex : public fixtures::TestIndex {
 public:
     static TestDatasetPool pool;
-    constexpr static uint64_t base_count = 10000;
+    constexpr static uint64_t base_count = 1000;
     constexpr static const char* search_param = R"(
         {
             "sindi":
