@@ -100,48 +100,38 @@ Thrive together in VSAG community with users and developers from all around the 
   - support attributes stored in vector index
   - support graph structure compression
 
+## Our Publications
+
+1. VSAG: An Optimized Search Framework for Graph-based Approximate Nearest Neighbor Search [_VLDB (industry)_, 2025]  
+   **Xiaoyao Zhong, Haotian Li, Jiabao Jin, Mingyu Yang, Deming Chu, Xiangyu Wang, Zhitao Shen, Wei Jia**, George Gu, Yi Xie, Xuemin Lin, Heng Tao Shen, Jingkuan Song, Peng Cheng  
+   [PDF](https://www.vldb.org/pvldb/vol18/p5017-cheng.pdf) | [DOI](https://doi.org/10.14778/3750601.3750624)
+
+2. Effective and General Distance Computation for Approximate Nearest Neighbor Search [_ICDE_, 2025]  
+   **Mingyu Yang**, Wentao Li, **Jiabao Jin, Xiaoyao Zhong, Xiangyu Wang, Zhitao Shen**, **Wei Jia,** Wei Wang \
+   [PDF](https://arxiv.org/pdf/2404.16322) | [DOI](https://doi.org/10.1109/ICDE65448.2025.00087)  
+
+3. SINDI: an Efficient Index for Approximate Maximum Inner Product Search on Sparse Vectors [_arxiv_, 2025]  
+   **Ruoxuan Li, Xiaoyao Zhong, Jiabao Jin**, Peng Cheng, Wangze Ni, Lei Chen, **Zhitao Shen, Wei Jia, Xiangyu Wang**, Xuemin Lin, Heng Tao Shen, Jingkuan Song  
+   [PDF](https://arxiv.org/pdf/2509.08395)
+
+4. EnhanceGraph: A Continuously Enhanced Graph-based Index for High-dimensional Approximate Nearest Neighbor Search [_arxiv_, 2025]  
+   **Xiaoyao Zhong, Jiabao Jin**, Peng Cheng, **Mingyu Yang**, Lei Chen, Haoyang Li, **Zhitao Shen**, Xuemin Lin, Heng Tao Shen, Jingkuan Song  
+   [PDF](https://arxiv.org/pdf/2506.13144)
+
+5. Fast High-dimensional Approximate Nearest Neighbor Search with Efficient Index Time and Space [_arxiv_, 2025]  
+   **Mingyu Yang**, Wentao Li, Wei Wang  
+   [PDF](https://arxiv.org/pdf/2411.06158)
+
 ## Reference
-Reference to cite when you use VSAG in a research paper:
-```
-@article{Yang2024EffectiveAG,
-  title={Effective and General Distance Computation for Approximate Nearest Neighbor Search},
-  author={Mingyu Yang and Wentao Li and Jiabao Jin and Xiaoyao Zhong and Xiangyu Wang and Zhitao Shen and Wei Jia and Wei Wang},
-  year={2024},
-  url={https://arxiv.org/abs/2404.16322}
-}
+VSAG referenced the following works during its implementation:
+1. RaBitQ: Quantizing High-Dimensional Vectors with a Theoretical Error Bound for Approximate Nearest Neighbor Search [_SIGMOD_, 2024]  
+  Jianyang Gao, Cheng Long  
+   [PDF](https://dl.acm.org/doi/pdf/10.1145/3654970) | [DOI](https://doi.org/10.1145/3654970) | [CODE](https://github.com/VectorDB-NTU/RaBitQ-Library)
 
-@article{zhong2025vsag,
-  title={VSAG: An Optimized Search Framework for Graph-based Approximate Nearest Neighbor Search},
-  author={Zhong, Xiaoyao and Li, Haotian and Jin, Jiabao and Yang, Mingyu and Chu, Deming and Wang, Xiangyu and Shen, Zhitao and Jia, Wei and Gu, George and Xie, Yi and others},
-  journal={arXiv preprint arXiv:2503.17911},
-  year={2025}
-}
-```
 
-For the implementation of RaBitQ quantization in VSAG, please cite:
-```
-@article{10.1145/3654970,
-author = {Gao, Jianyang and Long, Cheng},
-title = {RaBitQ: Quantizing High-Dimensional Vectors with a Theoretical Error Bound for Approximate Nearest Neighbor Search},
-year = {2024},
-issue_date = {June 2024},
-publisher = {Association for Computing Machinery},
-address = {New York, NY, USA},
-volume = {2},
-number = {3},
-url = {https://doi.org/10.1145/3654970},
-doi = {10.1145/3654970},
-abstract = {Searching for approximate nearest neighbors (ANN) in the high-dimensional Euclidean space is a pivotal problem. Recently, with the help of fast SIMD-based implementations, Product Quantization (PQ) and its variants can often efficiently and accurately estimate the distances between the vectors and have achieved great success in the in-memory ANN search. Despite their empirical success, we note that these methods do not have a theoretical error bound and are observed to fail disastrously on some real-world datasets. Motivated by this, we propose a new randomized quantization method named RaBitQ, which quantizes D-dimensional vectors into D-bit strings. RaBitQ guarantees a sharp theoretical error bound and provides good empirical accuracy at the same time. In addition, we introduce efficient implementations of RaBitQ, supporting to estimate the distances with bitwise operations or SIMD-based operations. Extensive experiments on real-world datasets confirm that (1) our method outperforms PQ and its variants in terms of accuracy-efficiency trade-off by a clear margin and (2) its empirical performance is well-aligned with our theoretical analysis.},
-journal = {Proc. ACM Manag. Data},
-month = may,
-articleno = {167},
-numpages = {27},
-keywords = {Johnson-Lindenstrauss transformation, approximate nearest neighbor search, quantization}
-}
-```
-
-Here is the official implementation of RabitQ: https://github.com/VectorDB-NTU/RaBitQ-Library.
-
+2. Quasi-succinct Indices [_WSDM_, 2013]  
+  Sebastiano Vigna  
+   [PDF](https://dl.acm.org/doi/pdf/10.1145/2433396.2433409) | [DOI](https://doi.org/10.1145/2433396.2433409)
 ## Star History
 
 [![Star History Chart](https://api.star-history.com/svg?repos=antgroup/vsag&type=Date)](https://star-history.com/#antgroup/vsag&Date)
