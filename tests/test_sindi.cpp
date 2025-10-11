@@ -31,7 +31,7 @@ struct SINDIParam {
 class SINDITestIndex : public fixtures::TestIndex {
 public:
     static TestDatasetPool pool;
-    constexpr static uint64_t base_count = 1000;
+    constexpr static uint64_t base_count = 10000;
     constexpr static const char* search_param = R"(
         {
             "sindi":

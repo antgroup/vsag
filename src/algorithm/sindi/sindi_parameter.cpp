@@ -25,7 +25,7 @@ SINDIParameter::FromJson(const JsonType& json) {
         term_id_limit = json[SPARSE_TERM_ID_LIMIT].GetInt();
 
         CHECK_ARGUMENT(
-            (10'000 <= term_id_limit and term_id_limit <= 1'000'000),
+            (0 < term_id_limit and term_id_limit <= 1'000'000),
             fmt::format("term_id_limit must in (0, 1'000'000], but now is {}", term_id_limit));
     } else {
         term_id_limit = DEFAULT_TERM_ID_LIMIT;
