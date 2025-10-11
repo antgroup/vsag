@@ -20,13 +20,6 @@
 #include "utils/pointer_define.h"
 
 namespace vsag {
-static constexpr uint32_t DEFAULT_TERM_ID_LIMIT = 100000;
-static constexpr uint32_t DEFAULT_WINDOW_SIZE = 100000;
-static constexpr bool DEFAULT_USE_REORDER = false;
-static constexpr float DEFAULT_QUERY_PRUNE_RATIO = 0.0F;
-static constexpr float DEFAULT_DOC_PRUNE_RATIO = 0.0F;
-static constexpr float DEFAULT_TERM_PRUNE_RATIO = 0.0F;
-static constexpr uint32_t DEFAULT_N_CANDIDATE = 0;
 
 DEFINE_POINTER(SINDIParameter);
 

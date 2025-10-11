@@ -399,6 +399,9 @@ SINDI::EstimateMemory(uint64_t num_elements) const {
         mem *= 2;
     }
 
+    // size of term list
+    mem += sizeof(std::vector<float>) * 2 * term_id_limit_;
+
     return mem;
 }
 
