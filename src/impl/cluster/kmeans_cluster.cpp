@@ -252,8 +252,10 @@ KMeansCluster::find_nearest_one_with_hgraph(const float* query,
     param.allocator_ = std::make_shared<SafeAllocator>(this->allocator_);
     param.thread_pool_ = this->thread_pool_;
     param.metric_ = MetricType::METRIC_TYPE_L2SQR;
+    auto max_degree = std::max(32, dim_ / 8);
 
-    auto hgraph = InnerIndexInterface::FastCreateIndex("hgraph|32|fp32", param);
+    auto hgraph =
+        InnerIndexInterface::FastCreateIndex(fmt::format("hgraph|{}|fp32", max_degree), param);
     auto base = Dataset::Make();
     Vector<int64_t> ids(k, allocator_);
     std::iota(ids.begin(), ids.end(), 0);
@@ -263,6 +265,7 @@ KMeansCluster::find_nearest_one_with_hgraph(const float* query,
         ->Ids(ids.data())
         ->Owner(false);
     hgraph->Build(base);
+    hgraph->SetImmutable();
     FilterPtr filter = nullptr;
     constexpr const char* search_param = R"({"hgraph":{"ef_search":10}})";
     auto func = [&](const uint64_t begin, const uint64_t end) -> void {

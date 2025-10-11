@@ -67,26 +67,40 @@ public:
 
     std::shared_ptr<T>
     TakeOne() {
-        std::unique_lock<std::mutex> lock(mutex_);
-        if (pool_->empty()) {
-            lock.unlock();
-            return this->constructor_();
+        auto& local_pool = this->get_local_pool();
+        if (not local_pool.empty()) {
+            std::shared_ptr<T> obj = local_pool.front();
+            local_pool.pop_front();
+            return obj;
         }
-        std::shared_ptr<T> obj = pool_->front();
-        pool_->pop_front();
-        pool_size_--;
-        lock.unlock();
-        obj->Reset();
-        return obj;
+        {
+            std::unique_lock<std::mutex> lock(mutex_);
+            if (pool_->empty()) {
+                lock.unlock();
+                return this->constructor_();
+            }
+            std::shared_ptr<T> obj = pool_->front();
+            pool_->pop_front();
+            pool_size_.fetch_sub(1);
+            lock.unlock();
+            obj->Reset();
+            return obj;
+        }
     }
 
     void
     ReturnOne(std::shared_ptr<T>& obj) {
-        std::lock_guard<std::mutex> lock(mutex_);
-        pool_->emplace_back(obj);
-        pool_size_++;
+        auto& local_pool = this->get_local_pool();
+        if (local_pool.size() < kLocalPoolCapacity) {
+            local_pool.emplace_back(obj);
+            return;
+        }
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            pool_->emplace_back(obj);
+            pool_size_.fetch_add(1);
+        }
     }
-
     [[nodiscard]] inline uint64_t
     GetSize() const {
         return this->pool_size_;
@@ -95,6 +109,7 @@ public:
 private:
     inline void
     resize(uint64_t size) {
+
         std::lock_guard<std::mutex> lock(mutex_);
         int count = size - pool_->size();
         while (count > 0) {
@@ -107,6 +122,13 @@ private:
         }
     }
 
+    inline std::deque<std::shared_ptr<T>>&
+    get_local_pool() {
+        thread_local static std::deque<std::shared_ptr<T>> local_pool_;
+        return local_pool_;
+    }
+
+private:
     std::unique_ptr<Deque<std::shared_ptr<T>>> pool_{nullptr};
     std::atomic<uint64_t> pool_size_;
 
@@ -116,6 +138,6 @@ private:
 
 private:
     std::shared_ptr<Allocator> owned_allocator_{nullptr};
+    static const uint64_t kLocalPoolCapacity = 4;  // Tunable parameter
 };
-
 }  // namespace vsag
