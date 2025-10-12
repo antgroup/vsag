@@ -48,14 +48,16 @@ make_instance(const FlattenInterfaceParamPtr& param, const IndexCommonParam& com
     if (common_param.data_type_ == DataTypes::DATA_TYPE_INT8) {
         if (quantization_string == QUANTIZATION_TYPE_VALUE_INT8) {
             return make_instance<INT8Quantizer<metric>, IOTemp>(param, common_param);
-        } else if (quantization_string == QUANTIZATION_TYPE_VALUE_PQ) {
+        }
+
+        if (quantization_string == QUANTIZATION_TYPE_VALUE_PQ) {
             return make_instance<QuantizerAdapter<ProductQuantizer<metric>, int8_t>, IOTemp>(
                 param, common_param);
-        } else {
-            throw VsagException(
-                ErrorType::INVALID_ARGUMENT,
-                fmt::format("INT8 data type unsupport {} quantization", quantization_string));
         }
+
+        throw VsagException(
+            ErrorType::INVALID_ARGUMENT,
+            fmt::format("INT8 data type unsupport {} quantization", quantization_string));
     }
     if (quantization_string == QUANTIZATION_TYPE_VALUE_SQ8) {
         return make_instance<SQ8Quantizer<metric>, IOTemp>(param, common_param);
