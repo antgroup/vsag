@@ -40,6 +40,7 @@ class BasicIO {
 public:
     /// Checks if the IO object is in-memory.
     static constexpr bool InMemory = IOTmpl::InMemory;
+    static constexpr bool SkipDeserialize = IOTmpl::SkipDeserialize;
 
 public:
     /**
@@ -170,11 +171,16 @@ public:
         ByteBuffer buffer(SERIALIZE_BUFFER_SIZE, this->allocator_);
         uint64_t offset = 0;
         this->start_ = reader.GetCursor();
-        while (offset < size) {
-            auto cur_size = std::min(SERIALIZE_BUFFER_SIZE, size - offset);
-            reader.Read(reinterpret_cast<char*>(buffer.data), cur_size);
-            this->Write(buffer.data, cur_size, offset);
-            offset += cur_size;
+        if constexpr (SkipDeserialize) {
+            reader.Seek(reader.GetCursor() + size);
+            this->Write(nullptr, size, offset);
+        } else {
+            while (offset < size) {
+                auto cur_size = std::min(SERIALIZE_BUFFER_SIZE, size - offset);
+                reader.Read(reinterpret_cast<char*>(buffer.data), cur_size);
+                this->Write(buffer.data, cur_size, offset);
+                offset += cur_size;
+            }
         }
     }
 
