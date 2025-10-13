@@ -25,6 +25,7 @@ namespace vsag {
 class AsyncIO : public BasicIO<AsyncIO> {
 public:
     static constexpr bool InMemory = false;
+    static constexpr bool SkipDeserialize = false;
 
 public:
     explicit AsyncIO(std::string filename, Allocator* allocator);
