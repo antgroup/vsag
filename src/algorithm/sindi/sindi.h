@@ -95,6 +95,8 @@ private:
 private:
     mutable std::shared_mutex global_mutex_;
 
+    uint32_t term_id_limit_{0};
+
     uint32_t window_size_{0};
 
     Vector<SparseTermDataCellPtr> window_term_list_;

@@ -63,7 +63,8 @@ TEST_CASE("SINDI Basic Test", "[ut][SINDI]") {
         "use_reorder": {},
         "doc_prune_ratio": 0.0,
         "term_prune_ratio": 0.0,
-        "window_size": 1000
+        "window_size": 10000,
+        "term_id_limit": 30001
     }})";
 
     vsag::JsonType param_json = vsag::JsonType::parse(fmt::format(param_str, use_reorder));
@@ -75,14 +76,32 @@ TEST_CASE("SINDI Basic Test", "[ut][SINDI]") {
     bf_param->need_sort = true;
     auto bf_index = std::make_unique<SparseIndex>(bf_param, common_param);
 
+    // test build
     bf_index->Build(base);
     auto build_res = index->Build(base);
     REQUIRE(build_res.size() == 0);
     REQUIRE(index->GetNumElements() == num_base);
 
+    // test add failed
+    SparseVector invalid_sv;
+    int64_t tmp_id = 999999;
+    uint32_t invalid_term_id = 30002;
+    invalid_sv.ids_ = &invalid_term_id;
+    invalid_sv.len_ = 1;
+    auto invalid_data = vsag::Dataset::Make();
+    invalid_data->NumElements(invalid_sv.len_)
+        ->SparseVectors(&invalid_sv)
+        ->Ids(&tmp_id)
+        ->Owner(false);
+    auto add_res = index->Add(invalid_data);
+    REQUIRE(add_res.size() == 1);
+    REQUIRE(index->GetNumElements() == num_base);
+
+    // test serialize
     test_serializion(*index, *another_index);
     REQUIRE(another_index->GetNumElements() == num_base);
 
+    // test search process
     std::string search_param_str = R"(
     {
         "sindi": {

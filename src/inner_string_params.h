@@ -79,6 +79,7 @@ const char* const SPARSE_NEED_SORT = "need_sort";
 const char* const SPARSE_QUERY_PRUNE_RATIO = "query_prune_ratio";
 const char* const SPARSE_DOC_PRUNE_RATIO = "doc_prune_ratio";
 const char* const SPARSE_TERM_PRUNE_RATIO = "term_prune_ratio";
+const char* const SPARSE_TERM_ID_LIMIT = "term_id_limit";
 const char* const SPARSE_WINDOW_SIZE = "window_size";
 const char* const SPARSE_USE_REORDER = "use_reorder";
 const char* const SPARSE_N_CANDIDATE = "n_candidate";

@@ -41,3 +41,13 @@
 constexpr static const int64_t INIT_CAPACITY = 10;
 constexpr static const int64_t MAX_CAPACITY_EXTEND = 10000;
 constexpr static const int64_t AMPLIFICATION_FACTOR = 10;
+
+// sindi related
+constexpr static const uint32_t ESTIMATE_DOC_TERM = 100;
+constexpr static const uint32_t DEFAULT_TERM_ID_LIMIT = 100000;
+constexpr static const uint32_t DEFAULT_WINDOW_SIZE = 100000;
+constexpr static const bool DEFAULT_USE_REORDER = false;
+constexpr static const float DEFAULT_QUERY_PRUNE_RATIO = 0.0F;
+constexpr static const float DEFAULT_DOC_PRUNE_RATIO = 0.0F;
+constexpr static const float DEFAULT_TERM_PRUNE_RATIO = 0.0F;
+constexpr static const uint32_t DEFAULT_N_CANDIDATE = 0;

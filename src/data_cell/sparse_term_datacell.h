@@ -27,8 +27,9 @@ class SparseTermDataCell {
 public:
     SparseTermDataCell() = default;
 
-    SparseTermDataCell(float doc_prune_ratio, Allocator* allocator)
+    SparseTermDataCell(float doc_prune_ratio, uint32_t term_id_limit, Allocator* allocator)
         : doc_prune_ratio_(doc_prune_ratio),
+          term_id_limit_(term_id_limit),
           allocator_(allocator),
           term_ids_(0, Vector<uint32_t>(allocator), allocator),
           term_datas_(0, Vector<float>(allocator), allocator),
@@ -63,6 +64,8 @@ public:
     Deserialize(StreamReader& reader);
 
 public:
+    uint32_t term_id_limit_{0};
+
     float doc_prune_ratio_{0};
 
     uint32_t term_capacity_{0};

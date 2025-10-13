@@ -21,6 +21,16 @@ namespace vsag {
 
 void
 SINDIParameter::FromJson(const JsonType& json) {
+    if (json.contains(SPARSE_TERM_ID_LIMIT)) {
+        term_id_limit = json[SPARSE_TERM_ID_LIMIT];
+
+        CHECK_ARGUMENT(
+            (0 < term_id_limit and term_id_limit <= 1'000'000),
+            fmt::format("term_id_limit must in (0, 1'000'000], but now is {}", term_id_limit));
+    } else {
+        term_id_limit = DEFAULT_TERM_ID_LIMIT;
+    }
+
     if (json.contains(SPARSE_DOC_PRUNE_RATIO)) {
         doc_prune_ratio = json[SPARSE_DOC_PRUNE_RATIO];
     } else {
@@ -46,11 +56,33 @@ SINDIParameter::FromJson(const JsonType& json) {
 JsonType
 SINDIParameter::ToJson() const {
     JsonType json;
+    json[SPARSE_TERM_ID_LIMIT] = term_id_limit;
     json[SPARSE_DOC_PRUNE_RATIO] = doc_prune_ratio;
     json[SPARSE_USE_REORDER] = use_reorder;
     json[SPARSE_WINDOW_SIZE] = window_size;
 
     return json;
+}
+
+bool
+SINDIParameter::CheckCompatibility(const vsag::ParamPtr& other) const {
+    auto sindi_param = std::dynamic_pointer_cast<SINDIParameter>(other);
+    if (sindi_param == nullptr) {
+        return false;
+    }
+    if (this->term_id_limit != sindi_param->term_id_limit) {
+        return false;
+    }
+    if (this->window_size != sindi_param->window_size) {
+        return false;
+    }
+    if (this->doc_prune_ratio != sindi_param->doc_prune_ratio) {
+        return false;
+    }
+    if (this->use_reorder != sindi_param->use_reorder) {
+        return false;
+    }
+    return true;
 }
 
 void
