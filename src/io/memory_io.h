@@ -27,6 +27,7 @@ namespace vsag {
 class MemoryIO : public BasicIO<MemoryIO> {
 public:
     static constexpr bool InMemory = true;
+    static constexpr bool SkipDeserialize = false;
 
 public:
     explicit MemoryIO(Allocator* allocator) : BasicIO<MemoryIO>(allocator) {

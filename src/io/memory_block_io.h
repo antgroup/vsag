@@ -24,6 +24,7 @@ class IndexCommonParam;
 class MemoryBlockIO : public BasicIO<MemoryBlockIO> {
 public:
     static constexpr bool InMemory = true;
+    static constexpr bool SkipDeserialize = false;
 
 public:
     explicit MemoryBlockIO(Allocator* allocator, uint64_t block_size);
