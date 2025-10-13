@@ -15,6 +15,7 @@
 
 #include "eval_dataset.h"
 
+using namespace H5;
 namespace vsag::eval {
 
 void
@@ -238,6 +239,7 @@ EvalDataset::Load(const std::string& filename) {
         H5::StrType str_type = attr.getStrType();
         std::string metric;
         attr.read(str_type, metric);
+        obj->metric_ = metric;
         if (obj->vector_type_ == DENSE_VECTORS) {
             if (metric == "euclidean") {
                 // the distance in the ground truth (provided by public datasets), is L2 distance,
@@ -322,5 +324,144 @@ EvalDataset::Load(const std::string& filename) {
     }
 
     return obj;
+}
+
+std::vector<char>
+serialize_sparse_vectors(const std::vector<SparseVector>& vectors, size_t& total_size_out) {
+    size_t total_size = 0;
+    for (const auto& vec : vectors) {
+        total_size += sizeof(uint32_t);  // len_
+        if (vec.len_ > 0) {
+            total_size += vec.len_ * sizeof(uint32_t);  // ids
+            total_size += vec.len_ * sizeof(float);     // vals
+        }
+    }
+    total_size_out = total_size;
+    std::vector<char> buffer(total_size);
+    char* ptr = buffer.data();
+    for (const auto& vec : vectors) {
+        memcpy(ptr, &vec.len_, sizeof(uint32_t));
+        ptr += sizeof(uint32_t);
+        if (vec.len_ > 0) {
+            memcpy(ptr, vec.ids_, vec.len_ * sizeof(uint32_t));
+            ptr += vec.len_ * sizeof(uint32_t);
+            memcpy(ptr, vec.vals_, vec.len_ * sizeof(float));
+            ptr += vec.len_ * sizeof(float);
+        }
+    }
+    return buffer;
+}
+
+void
+EvalDataset::Save(const EvalDatasetPtr& dataset, const std::string& filename) {
+    H5File file(filename, H5F_ACC_TRUNC);
+
+    // write vector type attribute
+    {
+        std::string type_str = (dataset->vector_type_ == DENSE_VECTORS) ? "dense" : "sparse";
+        StrType str_type(PredType::C_S1, H5T_VARIABLE);
+        auto attr = file.createAttribute("type", str_type, DataSpace(H5S_SCALAR));
+        attr.write(str_type, type_str);
+    }
+
+    // write distance attribute
+    {
+        StrType str_type(PredType::C_S1, H5T_VARIABLE);
+        auto attr = file.createAttribute("distance", str_type, DataSpace(H5S_SCALAR));
+        std::string distance_str = dataset->metric_;
+        attr.write(str_type, distance_str);
+    }
+
+    // write train dataset
+    if (dataset->vector_type_ == DENSE_VECTORS) {
+        hsize_t dims[2] = {static_cast<hsize_t>(dataset->number_of_base_),
+                           static_cast<hsize_t>(dataset->dim_)};
+        DataSpace dataspace(2, dims);
+        if (dataset->train_data_type_ == DATATYPE_INT8) {
+            DataSet dataset_h5 = file.createDataSet("/train", PredType::ALPHA_I8, dataspace);
+            dataset_h5.write(dataset->train_.get(), PredType::ALPHA_I8);
+        } else if (dataset->train_data_type_ == DATATYPE_FLOAT32) {
+            DataSet dataset_h5 = file.createDataSet("/train", PredType::NATIVE_FLOAT, dataspace);
+            dataset_h5.write(dataset->train_.get(), PredType::NATIVE_FLOAT);
+        } else {
+            throw std::runtime_error("Unsupported train data type");
+        }
+
+    } else {
+        size_t total_size;
+        std::vector<char> buffer = serialize_sparse_vectors(dataset->sparse_train_, total_size);
+        hsize_t dims[1] = {static_cast<hsize_t>(total_size)};
+        DataSpace dataspace(1, dims);
+        DataSet dataset_h5 = file.createDataSet("/train", PredType::ALPHA_I8, dataspace);
+        dataset_h5.write(buffer.data(), PredType::NATIVE_CHAR);
+    }
+
+    // write test dataset
+    if (dataset->vector_type_ == DENSE_VECTORS) {
+        hsize_t dims[2] = {static_cast<hsize_t>(dataset->number_of_query_),
+                           static_cast<hsize_t>(dataset->dim_)};
+        DataSpace dataspace(2, dims);
+        if (dataset->test_data_type_ == DATATYPE_INT8) {
+            DataSet dataset_h5 = file.createDataSet("/test", PredType::ALPHA_I8, dataspace);
+            dataset_h5.write(dataset->test_.get(), PredType::ALPHA_I8);
+        } else if (dataset->test_data_type_ == DATATYPE_FLOAT32) {
+            DataSet dataset_h5 = file.createDataSet("/test", PredType::NATIVE_FLOAT, dataspace);
+            dataset_h5.write(dataset->test_.get(), PredType::NATIVE_FLOAT);
+        } else {
+            throw std::runtime_error("Unsupported test data type");
+        }
+    } else {
+        size_t total_size;
+        std::vector<char> buffer = serialize_sparse_vectors(dataset->sparse_test_, total_size);
+        hsize_t dims[1] = {static_cast<hsize_t>(total_size)};
+        DataSpace dataspace(1, dims);
+        DataSet dataset_h5 = file.createDataSet("/test", PredType::ALPHA_I8, dataspace);
+        dataset_h5.write(buffer.data(), PredType::NATIVE_CHAR);
+    }
+
+    // write neighbors dataset
+    {
+        hsize_t dims[2] = {static_cast<hsize_t>(dataset->neighbors_shape_.first),
+                           static_cast<hsize_t>(dataset->neighbors_shape_.second)};
+        DataSpace dataspace(2, dims);
+        DataSet dataset_h5 = file.createDataSet("/neighbors", PredType::NATIVE_INT64, dataspace);
+        dataset_h5.write(dataset->neighbors_.get(), PredType::NATIVE_INT64);
+    }
+
+    // write distances dataset
+    {
+        hsize_t dims[2] = {static_cast<hsize_t>(dataset->neighbors_shape_.first),
+                           static_cast<hsize_t>(dataset->neighbors_shape_.second)};
+        DataSpace dataspace(2, dims);
+        DataSet dataset_h5 = file.createDataSet("/distances", PredType::NATIVE_FLOAT, dataspace);
+        dataset_h5.write(dataset->distances_.get(), PredType::NATIVE_FLOAT);
+    }
+
+    // write labels dataset(if exists)
+    if (dataset->train_labels_ && dataset->test_labels_) {
+        {
+            hsize_t dims[1] = {static_cast<hsize_t>(dataset->number_of_base_)};
+            DataSpace dataspace(1, dims);
+            DataSet dataset_h5 =
+                file.createDataSet("/train_labels", PredType::NATIVE_INT64, dataspace);
+            dataset_h5.write(dataset->train_labels_.get(), PredType::NATIVE_INT64);
+        }
+
+        {
+            hsize_t dims[1] = {static_cast<hsize_t>(dataset->number_of_query_)};
+            DataSpace dataspace(1, dims);
+            DataSet dataset_h5 =
+                file.createDataSet("/test_labels", PredType::NATIVE_INT64, dataspace);
+            dataset_h5.write(dataset->test_labels_.get(), PredType::NATIVE_INT64);
+        }
+
+        if (dataset->valid_ratio_) {
+            hsize_t dims[1] = {static_cast<hsize_t>(dataset->number_of_label_)};
+            DataSpace dataspace(1, dims);
+            DataSet dataset_h5 =
+                file.createDataSet("/valid_ratios", PredType::NATIVE_FLOAT, dataspace);
+            dataset_h5.write(dataset->valid_ratio_.get(), PredType::NATIVE_FLOAT);
+        }
+    }
 }
 }  // namespace vsag::eval
