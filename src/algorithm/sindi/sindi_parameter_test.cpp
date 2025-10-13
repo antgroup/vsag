@@ -17,6 +17,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include "inner_string_params.h"
 #include "parameter_test.h"
 
 using namespace vsag;
@@ -44,14 +45,18 @@ struct SINDIDefaultParam {
     bool use_reorder = true;
     float doc_prune_ratio = 0.8F;
     int window_size = 66666;
+    int term_id_limit = 10000;
 };
 
 std::string
 generate_sindi_param(const SINDIDefaultParam& param) {
     vsag::JsonType json;
-    json["use_reorder"] = param.use_reorder;
-    json["doc_prune_ratio"] = param.doc_prune_ratio;
-    json["window_size"] = param.window_size;
+
+    json[SPARSE_USE_REORDER] = param.use_reorder;
+    json[SPARSE_DOC_PRUNE_RATIO] = param.doc_prune_ratio;
+    json[SPARSE_WINDOW_SIZE] = param.window_size;
+    json[SPARSE_TERM_ID_LIMIT] = param.term_id_limit;
+
     return json.dump();
 }
 
@@ -83,4 +88,5 @@ TEST_CASE("SINDI Index Parameters Compatibility Test", "[ut][SINDIParameter]") {
     TEST_COMPATIBILITY_CASE("use_reorder compatibility", use_reorder, true, false, false);
     TEST_COMPATIBILITY_CASE("doc_prune_ratio compatibility", doc_prune_ratio, 0.8F, 0.9F, false);
     TEST_COMPATIBILITY_CASE("window_size compatibility", window_size, 66666, 77777, false);
+    TEST_COMPATIBILITY_CASE("term_id_limit compatibility", term_id_limit, 10000, 10001, false);
 }
