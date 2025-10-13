@@ -21,6 +21,16 @@ namespace vsag {
 
 void
 SINDIParameter::FromJson(const JsonType& json) {
+    if (json.Contains(SPARSE_TERM_ID_LIMIT)) {
+        term_id_limit = json[SPARSE_TERM_ID_LIMIT].GetInt();
+
+        CHECK_ARGUMENT(
+            (0 < term_id_limit and term_id_limit <= 1'000'000),
+            fmt::format("term_id_limit must in (0, 1'000'000], but now is {}", term_id_limit));
+    } else {
+        term_id_limit = DEFAULT_TERM_ID_LIMIT;
+    }
+
     if (json.Contains(SPARSE_DOC_PRUNE_RATIO)) {
         doc_prune_ratio = json[SPARSE_DOC_PRUNE_RATIO].GetFloat();
         CHECK_ARGUMENT((0.0F <= doc_prune_ratio and doc_prune_ratio <= 0.5F),
@@ -52,6 +62,7 @@ SINDIParameter::FromJson(const JsonType& json) {
 JsonType
 SINDIParameter::ToJson() const {
     JsonType json;
+    json[SPARSE_TERM_ID_LIMIT].SetInt(term_id_limit);
     json[SPARSE_DOC_PRUNE_RATIO].SetFloat(doc_prune_ratio);
     json[SPARSE_USE_REORDER].SetBool(use_reorder);
     json[SPARSE_WINDOW_SIZE].SetInt(window_size);
@@ -62,6 +73,9 @@ bool
 SINDIParameter::CheckCompatibility(const vsag::ParamPtr& other) const {
     auto sindi_param = std::dynamic_pointer_cast<SINDIParameter>(other);
     if (sindi_param == nullptr) {
+        return false;
+    }
+    if (this->term_id_limit != sindi_param->term_id_limit) {
         return false;
     }
     if (this->window_size != sindi_param->window_size) {

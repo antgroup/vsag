@@ -26,6 +26,7 @@ struct SINDIParam {
     float doc_prune_ratio = 0.0;
     int window_size = 10000;
     bool deserialize_without_footer = false;
+    int term_id_limit = 2000;
 };
 
 class SINDITestIndex : public fixtures::TestIndex {
@@ -53,14 +54,15 @@ public:
                 "use_reorder": {},
                 "doc_prune_ratio": {},
                 "window_size": {},
+                "term_id_limit": {},
                 "deserialize_without_footer": {}
-
             }}
         }})";
         return fmt::format(build_param_template,
                            param.use_reorder,
                            param.doc_prune_ratio,
                            param.window_size,
+                           param.term_id_limit,
                            param.deserialize_without_footer);
     }
 };

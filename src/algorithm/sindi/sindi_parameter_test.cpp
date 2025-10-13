@@ -17,6 +17,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include "inner_string_params.h"
 #include "parameter_test.h"
 
 using namespace vsag;
@@ -44,14 +45,16 @@ struct SINDIDefaultParam {
     bool use_reorder = true;
     float doc_prune_ratio = 0.1F;
     int window_size = 66666;
+    int term_id_limit = 10000;
 };
 
 std::string
 generate_sindi_param(const SINDIDefaultParam& param) {
     vsag::JsonType json;
-    json["use_reorder"].SetBool(param.use_reorder);
-    json["doc_prune_ratio"].SetFloat(param.doc_prune_ratio);
-    json["window_size"].SetInt(param.window_size);
+    json[SPARSE_USE_REORDER].SetBool(param.use_reorder);
+    json[SPARSE_DOC_PRUNE_RATIO].SetFloat(param.doc_prune_ratio);
+    json[SPARSE_WINDOW_SIZE].SetInt(param.window_size);
+    json[SPARSE_TERM_ID_LIMIT].SetInt(param.term_id_limit);
     return json.Dump();
 }
 
@@ -61,9 +64,10 @@ TEST_CASE("SINDI Index Parameters Test", "[ut][SINDIParameter]") {
     vsag::JsonType param_json = vsag::JsonType::Parse(param_str);
     auto param = std::make_shared<vsag::SINDIParameter>();
     param->FromJson(param_json);
-    REQUIRE(param->use_reorder == true);
-    REQUIRE(std::abs(param->doc_prune_ratio - 0.1F) < 1e-3);
-    REQUIRE(param->window_size == 66666);
+    REQUIRE(param->use_reorder == default_param.use_reorder);
+    REQUIRE(std::abs(param->doc_prune_ratio - default_param.doc_prune_ratio) < 1e-3);
+    REQUIRE(param->window_size == default_param.window_size);
+    REQUIRE(param->term_id_limit == default_param.term_id_limit);
 
     vsag::ParameterTest::TestToJson(param);
 
@@ -84,4 +88,5 @@ TEST_CASE("SINDI Index Parameters Compatibility Test", "[ut][SINDIParameter]") {
     TEST_COMPATIBILITY_CASE("use_reorder compatibility", use_reorder, true, false, false);
     TEST_COMPATIBILITY_CASE("doc_prune_ratio compatibility", doc_prune_ratio, 0.2F, 0.3F, false);
     TEST_COMPATIBILITY_CASE("window_size compatibility", window_size, 66666, 77777, false);
+    TEST_COMPATIBILITY_CASE("term_id_limit compatibility", term_id_limit, 10000, 10001, false);
 }

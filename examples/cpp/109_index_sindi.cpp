@@ -114,6 +114,7 @@ main(int argc, char** argv) {
      * - index_param: Parameters specific to sparse indexing:
      *   - use_reorder: If true, enables full-precision re-ranking of results. This requires storing additional data.
      *     When doc_prune_ratio is 0, use_reorder can be false while still maintaining full-precision results.
+     *   - term_id_limit: Maximum term id (e.g., when term_id_limit = 10, then, term [15: 0.1] in sparse vector is not allowed)
      *   - doc_prune_ratio: Ratio of term pruning in documents (0 = no pruning).
      *   - window_size: Window size for table scanning. Related to L3 cache size; 100000 is an empirically optimal value.
      */
@@ -124,6 +125,7 @@ main(int argc, char** argv) {
         "metric_type": "ip",
         "index_param": {
             "use_reorder": true,
+            "term_id_limit": 1000000,
             "doc_prune_ratio": 0.0,
             "window_size": 100000
         }
