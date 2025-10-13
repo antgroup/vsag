@@ -155,6 +155,12 @@ SparseTermDataCell::InsertVector(const SparseVector& sparse_base, uint32_t base_
         auto term_id = sparse_base.ids_[i];
         max_term_id = std::max(max_term_id, term_id);
     }
+    if (max_term_id > term_id_limit_) {
+        throw std::runtime_error(
+            fmt::format("max term id of sparse vector {} is greater than term id limit {}",
+                        max_term_id,
+                        term_id_limit_));
+    }
     ResizeTermList(max_term_id + 1);
 
     Vector<std::pair<uint32_t, float>> sorted_base(allocator_);

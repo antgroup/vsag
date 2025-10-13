@@ -61,7 +61,8 @@ TEST_CASE("SparseTermDatacell Basic Test", "[ut][SparseTermDatacell]") {
     float doc_prune_ratio = 0.5;
     float term_prune_ratio = 0.0;
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
-    auto data_cell = std::make_shared<SparseTermDataCell>(doc_prune_ratio, allocator.get());
+    auto data_cell = std::make_shared<SparseTermDataCell>(
+        doc_prune_ratio, DEFAULT_TERM_ID_LIMIT, allocator.get());
     REQUIRE(std::abs(data_cell->doc_prune_ratio_ - doc_prune_ratio) < 1e-3);
 
     // test factory computer
