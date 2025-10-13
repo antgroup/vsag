@@ -30,20 +30,8 @@ namespace fixtures {
 
 const int RABITQ_MIN_RACALL_DIM = 960;
 
-std::vector<int>
-get_common_used_dims(uint64_t count, int seed, int limited_dim) {
-    const std::vector<int> dims = {
-        7,    8,   9,    // generic (dim < 32)
-        32,   33,  48,   // sse(32) + generic(dim < 16)
-        64,   65,  70,   // avx(64) + generic(dim < 16)
-        96,   97,  109,  // avx(64) + sse(32) + generic(dim < 16)
-        128,  129,       // avx512(128) + generic(dim < 16)
-        160,  161,       // avx512(128) + sse(32) + generic(dim < 16)
-        192,  193,       // avx512(128) + avx(64) + generic(dim < 16)
-        224,  225,       // avx512(128) + avx(64) + sse(32) + generic(dim < 16)
-        256,  512,       // common used dims
-        784,  960,       // common used dims
-        1024, 1536};     // common used dims
+static std::vector<int>
+select_dims(const std::vector<int>& dims, uint64_t count, int seed, int limited_dim) {
     if (count == -1 || count >= dims.size()) {
         return dims;
     }
@@ -65,6 +53,28 @@ get_common_used_dims(uint64_t count, int seed, int limited_dim) {
     std::shuffle(result.begin(), result.end(), std::mt19937(seed));
     result.resize(count);
     return result;
+}
+std::vector<int>
+get_common_used_dims(uint64_t count, int seed, int limited_dim) {
+    const std::vector<int> dims = {
+        7,    8,   9,    // generic (dim < 32)
+        32,   33,  48,   // sse(32) + generic(dim < 16)
+        64,   65,  70,   // avx(64) + generic(dim < 16)
+        96,   97,  109,  // avx(64) + sse(32) + generic(dim < 16)
+        128,  129,       // avx512(128) + generic(dim < 16)
+        160,  161,       // avx512(128) + sse(32) + generic(dim < 16)
+        192,  193,       // avx512(128) + avx(64) + generic(dim < 16)
+        224,  225,       // avx512(128) + avx(64) + sse(32) + generic(dim < 16)
+        256,  512,       // common used dims
+        784,  960,       // common used dims
+        1024, 1536};     // common used dims
+    return select_dims(dims, count, seed, limited_dim);
+}
+
+std::vector<int>
+get_index_test_dims(uint64_t count, int seed, int limited_dim) {
+    const std::vector<int> dims = {32, 57, 128, 256, 768, 1536};
+    return select_dims(dims, count, seed, limited_dim);
 }
 
 std::vector<vsag::SparseVector>
