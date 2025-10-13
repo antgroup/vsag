@@ -125,7 +125,7 @@ HGraphTestIndex::GetResource(bool sample) {
         resource->metric_types = fixtures::RandomSelect<std::string>({"ip", "l2", "cosine"}, 1);
         resource->base_count = HGraphTestIndex::base_count;
     } else {
-        resource->dims = fixtures::get_common_used_dims();
+        resource->dims = fixtures::get_index_test_dims();
         resource->test_cases = HGraphTestIndex::all_test_cases;
         resource->metric_types = {"ip", "l2", "cosine"};
         resource->base_count = HGraphTestIndex::base_count * 10;
