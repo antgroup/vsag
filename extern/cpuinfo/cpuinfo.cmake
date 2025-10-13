@@ -30,6 +30,4 @@ include_directories (${cpuinfo_SOURCE_DIR}/include)
 install (
   TARGETS cpuinfo
   ARCHIVE DESTINATION lib
-  # we don't need this, but CMake is always warning
-  PUBLIC_HEADER DESTINATION /dev/null
 )
