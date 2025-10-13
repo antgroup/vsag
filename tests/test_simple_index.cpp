@@ -16,6 +16,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <fstream>
 
+#include "fixtures/fixtures.h"
 #include "fixtures/test_dataset_pool.h"
 #include "vsag/index.h"
 
@@ -146,10 +147,11 @@ TEST_CASE("Test Simple Index", "[ft][simple_index]") {
     std::vector<MergeUnit> units;
     REQUIRE_THROWS(index->Merge(units));
 
-    std::ofstream o_file("1234", std::ios::binary);
+    fixtures::TempDir dir("test_simple_index");
+    std::ofstream o_file(dir.path + "1234", std::ios::binary);
     REQUIRE_THROWS(index->Serialize(o_file));
 
-    std::ifstream i_file("1234", std::ios::binary);
+    std::ifstream i_file(dir.path + "1234", std::ios::binary);
     REQUIRE_THROWS(index->Deserialize(i_file));
 
     REQUIRE_THROWS(index->GetDataByIds(nullptr, 1));
