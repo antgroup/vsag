@@ -35,6 +35,9 @@ extern const int RABITQ_MIN_RACALL_DIM;
 std::vector<int>
 get_common_used_dims(uint64_t count = -1, int seed = 369, int limited_dim = -1);
 
+std::vector<int>
+get_index_test_dims(uint64_t count = -1, int seed = 369, int limited_dim = -1);
+
 template <typename T>
 T*
 CopyVector(const std::vector<T>& vec) {
