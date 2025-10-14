@@ -100,10 +100,10 @@ IVFTestIndex::GetResource(bool sample) {
         resource->train_types = fixtures::RandomSelect<std::string>({"kmeans", "random"}, 1);
         resource->base_count = IVFTestIndex::base_count;
     } else {
-        resource->dims = fixtures::get_index_test_dims();
+        resource->dims = fixtures::get_index_test_dims(3, RandomValue(0, 999));
         resource->test_cases = IVFTestIndex::all_test_cases;
-        resource->metric_types = {"ip", "l2", "cosine"};
-        resource->train_types = {"kmeans", "random"};
+        resource->metric_types = fixtures::RandomSelect<std::string>({"ip", "l2", "cosine"}, 2);
+        resource->train_types = fixtures::RandomSelect<std::string>({"kmeans", "random"}, 1);
         resource->base_count = IVFTestIndex::base_count * 3;
     }
     return resource;
