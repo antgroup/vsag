@@ -256,7 +256,8 @@ private:
     search_one_graph(const void* query,
                      const GraphInterfacePtr& graph,
                      const FlattenInterfacePtr& flatten,
-                     InnerSearchParam& inner_search_param) const;
+                     InnerSearchParam& inner_search_param,
+                     const VisitedListPtr& vt = nullptr) const;
 
     template <InnerSearchMode mode = InnerSearchMode::KNN_SEARCH>
     DistHeapPtr
