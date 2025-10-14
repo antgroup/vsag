@@ -82,13 +82,11 @@ BruteForceTestIndex::GetResource(bool sample) {
         resource->dims = fixtures::get_common_used_dims(1, RandomValue(0, 999));
         resource->test_cases = fixtures::RandomSelect(BruteForceTestIndex::all_test_cases, 3);
         resource->metric_types = fixtures::RandomSelect<std::string>({"ip", "l2", "cosine"}, 1);
-        resource->train_types = fixtures::RandomSelect<std::string>({"kmeans", "random"}, 1);
         resource->base_count = BruteForceTestIndex::base_count;
     } else {
-        resource->dims = fixtures::get_common_used_dims();
+        resource->dims = fixtures::get_index_test_dims(3, RandomValue(0, 999));
         resource->test_cases = BruteForceTestIndex::all_test_cases;
-        resource->metric_types = {"ip", "l2", "cosine"};
-        resource->train_types = {"kmeans", "random"};
+        resource->metric_types = fixtures::RandomSelect<std::string>({"ip", "l2", "cosine"}, 2);
         resource->base_count = BruteForceTestIndex::base_count * 3;
     }
     return resource;
