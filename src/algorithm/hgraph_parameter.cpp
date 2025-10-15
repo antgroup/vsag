@@ -191,6 +191,8 @@ HGraphSearchParameters::FromJson(const std::string& json_string) {
     CHECK_ARGUMENT(params.Contains(INDEX_TYPE_HGRAPH),
                    fmt::format("parameters must contains {}", INDEX_TYPE_HGRAPH));
 
+    obj.IndexSearchParameter::FromJson(params[INDEX_TYPE_HGRAPH]);
+
     CHECK_ARGUMENT(
         params[INDEX_TYPE_HGRAPH].Contains(HGRAPH_PARAMETER_EF_RUNTIME),
         fmt::format(
@@ -199,11 +201,6 @@ HGraphSearchParameters::FromJson(const std::string& json_string) {
     if (params[INDEX_TYPE_HGRAPH].Contains(HGRAPH_USE_EXTRA_INFO_FILTER)) {
         obj.use_extra_info_filter =
             params[INDEX_TYPE_HGRAPH][HGRAPH_USE_EXTRA_INFO_FILTER].GetBool();
-    }
-
-    if (params[INDEX_TYPE_HGRAPH].Contains(SEARCH_MAX_TIME_COST_MS)) {
-        obj.timeout_ms = params[INDEX_TYPE_HGRAPH][SEARCH_MAX_TIME_COST_MS].GetFloat();
-        obj.enable_time_record = true;
     }
 
     if (params[INDEX_TYPE_HGRAPH].Contains(SEARCH_PARAM_FACTOR)) {

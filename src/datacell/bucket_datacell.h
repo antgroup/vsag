@@ -37,7 +37,7 @@ public:
     ScanBucketById(float* result_dists,
                    const ComputerInterfacePtr& computer,
                    const BucketIdType& bucket_id) override {
-        auto comp = std::static_pointer_cast<Computer<QuantTmpl>>(computer);
+        auto comp = static_cast<Computer<QuantTmpl>*>(computer.get());
         return this->scan_bucket_by_id(result_dists, comp, bucket_id);
     }
 
@@ -128,7 +128,7 @@ private:
 
     inline void
     scan_bucket_by_id(float* result_dists,
-                      const std::shared_ptr<Computer<QuantTmpl>>& computer,
+                      Computer<QuantTmpl>* computer,
                       const BucketIdType& bucket_id);
 
     inline float
@@ -215,10 +215,9 @@ BucketDataCell<QuantTmpl, IOTmpl>::query_one_by_id(
 
 template <typename QuantTmpl, typename IOTmpl>
 void
-BucketDataCell<QuantTmpl, IOTmpl>::scan_bucket_by_id(
-    float* result_dists,
-    const std::shared_ptr<Computer<QuantTmpl>>& computer,
-    const BucketIdType& bucket_id) {
+BucketDataCell<QuantTmpl, IOTmpl>::scan_bucket_by_id(float* result_dists,
+                                                     Computer<QuantTmpl>* computer,
+                                                     const BucketIdType& bucket_id) {
     if (bucket_id >= this->bucket_count_ or bucket_id < 0) {
         throw VsagException(ErrorType::INTERNAL_ERROR, "visited invalid bucket id");
     }
