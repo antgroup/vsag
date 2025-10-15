@@ -82,6 +82,9 @@ public:
     [[nodiscard]] virtual const DistanceRecord*
     GetData() const = 0;
 
+    virtual void
+    Merge(const DistanceHeap& other);
+
 protected:
     Allocator* allocator_{nullptr};
     int64_t max_size_{-1};
