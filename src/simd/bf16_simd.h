@@ -21,58 +21,30 @@
 
 namespace vsag {
 
+#define DECLARE_BF16_FUNCTIONS(ns)                                                                \
+    namespace ns {                                                                                \
+    float                                                                                         \
+    BF16ComputeIP(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim);    \
+    float                                                                                         \
+    BF16ComputeL2Sqr(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim); \
+    }  // namespace ns
+
 namespace generic {
-float
-BF16ComputeIP(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim);
-float
-BF16ComputeL2Sqr(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim);
 float
 BF16ToFloat(const uint16_t bf16_value);
 uint16_t
 FloatToBF16(const float fp32_value);
 }  // namespace generic
 
-namespace sse {
-float
-BF16ComputeIP(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim);
-float
-BF16ComputeL2Sqr(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim);
-}  // namespace sse
+DECLARE_BF16_FUNCTIONS(generic)
+DECLARE_BF16_FUNCTIONS(sse)
+DECLARE_BF16_FUNCTIONS(avx)
+DECLARE_BF16_FUNCTIONS(avx2)
+DECLARE_BF16_FUNCTIONS(avx512)
+DECLARE_BF16_FUNCTIONS(neon)
+DECLARE_BF16_FUNCTIONS(sve)
 
-namespace avx {
-float
-BF16ComputeIP(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim);
-float
-BF16ComputeL2Sqr(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim);
-}  // namespace avx
-
-namespace avx2 {
-float
-BF16ComputeIP(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim);
-float
-BF16ComputeL2Sqr(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim);
-}  // namespace avx2
-
-namespace avx512 {
-float
-BF16ComputeIP(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim);
-float
-BF16ComputeL2Sqr(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim);
-}  // namespace avx512
-
-namespace neon {
-float
-BF16ComputeIP(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim);
-float
-BF16ComputeL2Sqr(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim);
-}  // namespace neon
-
-namespace sve {
-float
-BF16ComputeIP(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim);
-float
-BF16ComputeL2Sqr(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim);
-}  // namespace sve
+#undef DECLARE_BF16_FUNCTIONS
 
 using BF16ComputeType = float (*)(const uint8_t* RESTRICT query,
                                   const uint8_t* RESTRICT codes,

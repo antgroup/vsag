@@ -19,82 +19,26 @@
 
 namespace vsag {
 
-namespace generic {
-void
-BitAnd(const uint8_t* x, const uint8_t* y, const uint64_t num_byte, uint8_t* result);
-void
-BitOr(const uint8_t* x, const uint8_t* y, const uint64_t num_byte, uint8_t* result);
-void
-BitXor(const uint8_t* x, const uint8_t* y, const uint64_t num_byte, uint8_t* result);
-void
-BitNot(const uint8_t* x, const uint64_t num_byte, uint8_t* result);
-}  // namespace generic
+#define DECLARE_BIT_FUNCTIONS(ns)                                                         \
+    namespace ns {                                                                        \
+    void                                                                                  \
+    BitAnd(const uint8_t* x, const uint8_t* y, const uint64_t num_byte, uint8_t* result); \
+    void                                                                                  \
+    BitOr(const uint8_t* x, const uint8_t* y, const uint64_t num_byte, uint8_t* result);  \
+    void                                                                                  \
+    BitXor(const uint8_t* x, const uint8_t* y, const uint64_t num_byte, uint8_t* result); \
+    void                                                                                  \
+    BitNot(const uint8_t* x, const uint64_t num_byte, uint8_t* result);                   \
+    }  // namespace ns
+DECLARE_BIT_FUNCTIONS(generic)
+DECLARE_BIT_FUNCTIONS(sse)
+DECLARE_BIT_FUNCTIONS(avx)
+DECLARE_BIT_FUNCTIONS(avx2)
+DECLARE_BIT_FUNCTIONS(avx512)
+DECLARE_BIT_FUNCTIONS(neon)
+DECLARE_BIT_FUNCTIONS(sve)
 
-namespace sse {
-void
-BitAnd(const uint8_t* x, const uint8_t* y, const uint64_t num_byte, uint8_t* result);
-void
-BitOr(const uint8_t* x, const uint8_t* y, const uint64_t num_byte, uint8_t* result);
-void
-BitXor(const uint8_t* x, const uint8_t* y, const uint64_t num_byte, uint8_t* result);
-void
-BitNot(const uint8_t* x, const uint64_t num_byte, uint8_t* result);
-}  // namespace sse
-
-namespace avx {
-void
-BitAnd(const uint8_t* x, const uint8_t* y, const uint64_t num_byte, uint8_t* result);
-void
-BitOr(const uint8_t* x, const uint8_t* y, const uint64_t num_byte, uint8_t* result);
-void
-BitXor(const uint8_t* x, const uint8_t* y, const uint64_t num_byte, uint8_t* result);
-void
-BitNot(const uint8_t* x, const uint64_t num_byte, uint8_t* result);
-}  // namespace avx
-
-namespace avx2 {
-void
-BitAnd(const uint8_t* x, const uint8_t* y, const uint64_t num_byte, uint8_t* result);
-void
-BitOr(const uint8_t* x, const uint8_t* y, const uint64_t num_byte, uint8_t* result);
-void
-BitXor(const uint8_t* x, const uint8_t* y, const uint64_t num_byte, uint8_t* result);
-void
-BitNot(const uint8_t* x, const uint64_t num_byte, uint8_t* result);
-}  // namespace avx2
-
-namespace avx512 {
-void
-BitAnd(const uint8_t* x, const uint8_t* y, const uint64_t num_byte, uint8_t* result);
-void
-BitOr(const uint8_t* x, const uint8_t* y, const uint64_t num_byte, uint8_t* result);
-void
-BitXor(const uint8_t* x, const uint8_t* y, const uint64_t num_byte, uint8_t* result);
-void
-BitNot(const uint8_t* x, const uint64_t num_byte, uint8_t* result);
-}  // namespace avx512
-
-namespace neon {
-void
-BitAnd(const uint8_t* x, const uint8_t* y, const uint64_t num_byte, uint8_t* result);
-void
-BitOr(const uint8_t* x, const uint8_t* y, const uint64_t num_byte, uint8_t* result);
-void
-BitXor(const uint8_t* x, const uint8_t* y, const uint64_t num_byte, uint8_t* result);
-void
-BitNot(const uint8_t* x, const uint64_t num_byte, uint8_t* result);
-}  // namespace neon
-
-namespace sve {
-void
-BitAnd(const uint8_t* x, const uint8_t* y, const uint64_t num_byte, uint8_t* result);
-void
-BitOr(const uint8_t* x, const uint8_t* y, const uint64_t num_byte, uint8_t* result);
-void
-BitXor(const uint8_t* x, const uint8_t* y, const uint64_t num_byte, uint8_t* result);
-void
-BitNot(const uint8_t* x, const uint64_t num_byte, uint8_t* result);
-}  // namespace sve
+#undef DECLARE_BIT_FUNCTIONS
 
 using BitOperatorType = void (*)(const uint8_t* x,
                                  const uint8_t* y,

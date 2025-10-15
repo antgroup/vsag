@@ -19,194 +19,44 @@
 
 #include "simd_marco.h"
 namespace vsag {
-namespace generic {
-float
-SQ8ComputeIP(const float* RESTRICT query,
-             const uint8_t* RESTRICT codes,
-             const float* RESTRICT lower_bound,
-             const float* RESTRICT diff,
-             uint64_t dim);
-float
-SQ8ComputeL2Sqr(const float* RESTRICT query,
-                const uint8_t* RESTRICT codes,
-                const float* RESTRICT lower_bound,
-                const float* RESTRICT diff,
-                uint64_t dim);
-float
-SQ8ComputeCodesIP(const uint8_t* RESTRICT codes1,
-                  const uint8_t* RESTRICT codes2,
-                  const float* RESTRICT lower_bound,
-                  const float* RESTRICT diff,
-                  uint64_t dim);
-float
-SQ8ComputeCodesL2Sqr(const uint8_t* RESTRICT codes1,
-                     const uint8_t* RESTRICT codes2,
-                     const float* RESTRICT lower_bound,
-                     const float* RESTRICT diff,
-                     uint64_t dim);
-}  // namespace generic
 
-namespace sse {
-float
-SQ8ComputeIP(const float* RESTRICT query,
-             const uint8_t* RESTRICT codes,
-             const float* RESTRICT lower_bound,
-             const float* RESTRICT diff,
-             uint64_t dim);
-float
-SQ8ComputeL2Sqr(const float* RESTRICT query,
-                const uint8_t* RESTRICT codes,
-                const float* RESTRICT lower_bound,
-                const float* RESTRICT diff,
-                uint64_t dim);
-float
-SQ8ComputeCodesIP(const uint8_t* RESTRICT codes1,
-                  const uint8_t* RESTRICT codes2,
-                  const float* RESTRICT lower_bound,
-                  const float* RESTRICT diff,
-                  uint64_t dim);
-float
-SQ8ComputeCodesL2Sqr(const uint8_t* RESTRICT codes1,
-                     const uint8_t* RESTRICT codes2,
-                     const float* RESTRICT lower_bound,
-                     const float* RESTRICT diff,
-                     uint64_t dim);
-}  // namespace sse
+#define DECLARE_SQ8_FUNCTIONS(ns)                           \
+    namespace ns {                                          \
+    float                                                   \
+    SQ8ComputeIP(const float* RESTRICT query,               \
+                 const uint8_t* RESTRICT codes,             \
+                 const float* RESTRICT lower_bound,         \
+                 const float* RESTRICT diff,                \
+                 uint64_t dim);                             \
+    float                                                   \
+    SQ8ComputeL2Sqr(const float* RESTRICT query,            \
+                    const uint8_t* RESTRICT codes,          \
+                    const float* RESTRICT lower_bound,      \
+                    const float* RESTRICT diff,             \
+                    uint64_t dim);                          \
+    float                                                   \
+    SQ8ComputeCodesIP(const uint8_t* RESTRICT codes1,       \
+                      const uint8_t* RESTRICT codes2,       \
+                      const float* RESTRICT lower_bound,    \
+                      const float* RESTRICT diff,           \
+                      uint64_t dim);                        \
+    float                                                   \
+    SQ8ComputeCodesL2Sqr(const uint8_t* RESTRICT codes1,    \
+                         const uint8_t* RESTRICT codes2,    \
+                         const float* RESTRICT lower_bound, \
+                         const float* RESTRICT diff,        \
+                         uint64_t dim);                     \
+    }  // namespace ns
 
-namespace avx {
-float
-SQ8ComputeIP(const float* RESTRICT query,
-             const uint8_t* RESTRICT codes,
-             const float* RESTRICT lower_bound,
-             const float* RESTRICT diff,
-             uint64_t dim);
-float
-SQ8ComputeL2Sqr(const float* RESTRICT query,
-                const uint8_t* RESTRICT codes,
-                const float* RESTRICT lower_bound,
-                const float* RESTRICT diff,
-                uint64_t dim);
-float
-SQ8ComputeCodesIP(const uint8_t* RESTRICT codes1,
-                  const uint8_t* RESTRICT codes2,
-                  const float* RESTRICT lower_bound,
-                  const float* RESTRICT diff,
-                  uint64_t dim);
-float
-SQ8ComputeCodesL2Sqr(const uint8_t* RESTRICT codes1,
-                     const uint8_t* RESTRICT codes2,
-                     const float* RESTRICT lower_bound,
-                     const float* RESTRICT diff,
-                     uint64_t dim);
-}  // namespace avx
+DECLARE_SQ8_FUNCTIONS(generic)
+DECLARE_SQ8_FUNCTIONS(sse)
+DECLARE_SQ8_FUNCTIONS(avx)
+DECLARE_SQ8_FUNCTIONS(avx2)
+DECLARE_SQ8_FUNCTIONS(avx512)
+DECLARE_SQ8_FUNCTIONS(neon)
+DECLARE_SQ8_FUNCTIONS(sve)
 
-namespace avx2 {
-float
-SQ8ComputeIP(const float* RESTRICT query,
-             const uint8_t* RESTRICT codes,
-             const float* RESTRICT lower_bound,
-             const float* RESTRICT diff,
-             uint64_t dim);
-float
-SQ8ComputeL2Sqr(const float* RESTRICT query,
-                const uint8_t* RESTRICT codes,
-                const float* RESTRICT lower_bound,
-                const float* RESTRICT diff,
-                uint64_t dim);
-float
-SQ8ComputeCodesIP(const uint8_t* RESTRICT codes1,
-                  const uint8_t* RESTRICT codes2,
-                  const float* RESTRICT lower_bound,
-                  const float* RESTRICT diff,
-                  uint64_t dim);
-float
-SQ8ComputeCodesL2Sqr(const uint8_t* RESTRICT codes1,
-                     const uint8_t* RESTRICT codes2,
-                     const float* RESTRICT lower_bound,
-                     const float* RESTRICT diff,
-                     uint64_t dim);
-}  // namespace avx2
-
-namespace avx512 {
-float
-SQ8ComputeIP(const float* RESTRICT query,
-             const uint8_t* RESTRICT codes,
-             const float* RESTRICT lower_bound,
-             const float* RESTRICT diff,
-             uint64_t dim);
-float
-SQ8ComputeL2Sqr(const float* RESTRICT query,
-                const uint8_t* RESTRICT codes,
-                const float* RESTRICT lower_bound,
-                const float* RESTRICT diff,
-                uint64_t dim);
-float
-SQ8ComputeCodesIP(const uint8_t* RESTRICT codes1,
-                  const uint8_t* RESTRICT codes2,
-                  const float* RESTRICT lower_bound,
-                  const float* RESTRICT diff,
-                  uint64_t dim);
-float
-SQ8ComputeCodesL2Sqr(const uint8_t* RESTRICT codes1,
-                     const uint8_t* RESTRICT codes2,
-                     const float* RESTRICT lower_bound,
-                     const float* RESTRICT diff,
-                     uint64_t dim);
-}  // namespace avx512
-
-namespace neon {
-float
-SQ8ComputeIP(const float* RESTRICT query,
-             const uint8_t* RESTRICT codes,
-             const float* RESTRICT lower_bound,
-             const float* RESTRICT diff,
-             uint64_t dim);
-float
-SQ8ComputeL2Sqr(const float* RESTRICT query,
-                const uint8_t* RESTRICT codes,
-                const float* RESTRICT lower_bound,
-                const float* RESTRICT diff,
-                uint64_t dim);
-float
-SQ8ComputeCodesIP(const uint8_t* RESTRICT codes1,
-                  const uint8_t* RESTRICT codes2,
-                  const float* RESTRICT lower_bound,
-                  const float* RESTRICT diff,
-                  uint64_t dim);
-float
-SQ8ComputeCodesL2Sqr(const uint8_t* RESTRICT codes1,
-                     const uint8_t* RESTRICT codes2,
-                     const float* RESTRICT lower_bound,
-                     const float* RESTRICT diff,
-                     uint64_t dim);
-}  // namespace neon
-
-namespace sve {
-float
-SQ8ComputeIP(const float* RESTRICT query,
-             const uint8_t* RESTRICT codes,
-             const float* RESTRICT lower_bound,
-             const float* RESTRICT diff,
-             uint64_t dim);
-float
-SQ8ComputeL2Sqr(const float* RESTRICT query,
-                const uint8_t* RESTRICT codes,
-                const float* RESTRICT lower_bound,
-                const float* RESTRICT diff,
-                uint64_t dim);
-float
-SQ8ComputeCodesIP(const uint8_t* RESTRICT codes1,
-                  const uint8_t* RESTRICT codes2,
-                  const float* RESTRICT lower_bound,
-                  const float* RESTRICT diff,
-                  uint64_t dim);
-float
-SQ8ComputeCodesL2Sqr(const uint8_t* RESTRICT codes1,
-                     const uint8_t* RESTRICT codes2,
-                     const float* RESTRICT lower_bound,
-                     const float* RESTRICT diff,
-                     uint64_t dim);
-}  // namespace sve
+#undef DECLARE_SQ8_FUNCTIONS
 
 using SQ8ComputeType = float (*)(const float* RESTRICT query,
                                  const uint8_t* RESTRICT codes,

@@ -20,58 +20,30 @@
 #include "simd_marco.h"
 namespace vsag {
 
+#define DECLARE_FP16_FUNCTIONS(ns)                                                                \
+    namespace ns {                                                                                \
+    float                                                                                         \
+    FP16ComputeIP(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim);    \
+    float                                                                                         \
+    FP16ComputeL2Sqr(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim); \
+    }  // namespace ns
+
 namespace generic {
-float
-FP16ComputeIP(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim);
-float
-FP16ComputeL2Sqr(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim);
 float
 FP16ToFloat(const uint16_t bf16_value);
 uint16_t
 FloatToFP16(const float fp32_value);
 }  // namespace generic
 
-namespace sse {
-float
-FP16ComputeIP(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim);
-float
-FP16ComputeL2Sqr(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim);
-}  // namespace sse
+DECLARE_FP16_FUNCTIONS(generic)
+DECLARE_FP16_FUNCTIONS(sse)
+DECLARE_FP16_FUNCTIONS(avx)
+DECLARE_FP16_FUNCTIONS(avx2)
+DECLARE_FP16_FUNCTIONS(avx512)
+DECLARE_FP16_FUNCTIONS(neon)
+DECLARE_FP16_FUNCTIONS(sve)
 
-namespace avx {
-float
-FP16ComputeIP(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim);
-float
-FP16ComputeL2Sqr(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim);
-}  // namespace avx
-
-namespace avx2 {
-float
-FP16ComputeIP(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim);
-float
-FP16ComputeL2Sqr(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim);
-}  // namespace avx2
-
-namespace avx512 {
-float
-FP16ComputeIP(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim);
-float
-FP16ComputeL2Sqr(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim);
-}  // namespace avx512
-
-namespace neon {
-float
-FP16ComputeIP(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim);
-float
-FP16ComputeL2Sqr(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim);
-}  // namespace neon
-
-namespace sve {
-float
-FP16ComputeIP(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim);
-float
-FP16ComputeL2Sqr(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim);
-}  // namespace sve
+#undef DECLARE_FP16_FUNCTIONS
 
 using FP16ComputeType = float (*)(const uint8_t* RESTRICT query,
                                   const uint8_t* RESTRICT codes,
