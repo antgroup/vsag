@@ -20,54 +20,23 @@
 #include "simd_marco.h"
 
 namespace vsag {
-namespace generic {
-float
-SQ8UniformComputeCodesIP(const uint8_t* RESTRICT codes1,
-                         const uint8_t* RESTRICT codes2,
-                         uint64_t dim);
-}  // namespace generic
 
-namespace sse {
-float
-SQ8UniformComputeCodesIP(const uint8_t* RESTRICT codes1,
-                         const uint8_t* RESTRICT codes2,
-                         uint64_t dim);
-}  // namespace sse
+#define DECLARE_SQ8_UNIFORM_FUNCTIONS(ns)                    \
+    namespace ns {                                           \
+    float                                                    \
+    SQ8UniformComputeCodesIP(const uint8_t* RESTRICT codes1, \
+                             const uint8_t* RESTRICT codes2, \
+                             uint64_t dim);                  \
+    }  // namespace ns
+DECLARE_SQ8_UNIFORM_FUNCTIONS(generic)
+DECLARE_SQ8_UNIFORM_FUNCTIONS(sse)
+DECLARE_SQ8_UNIFORM_FUNCTIONS(avx)
+DECLARE_SQ8_UNIFORM_FUNCTIONS(avx2)
+DECLARE_SQ8_UNIFORM_FUNCTIONS(avx512)
+DECLARE_SQ8_UNIFORM_FUNCTIONS(neon)
+DECLARE_SQ8_UNIFORM_FUNCTIONS(sve)
 
-namespace avx {
-float
-SQ8UniformComputeCodesIP(const uint8_t* RESTRICT codes1,
-                         const uint8_t* RESTRICT codes2,
-                         uint64_t dim);
-}  // namespace avx
-
-namespace avx2 {
-float
-SQ8UniformComputeCodesIP(const uint8_t* RESTRICT codes1,
-                         const uint8_t* RESTRICT codes2,
-                         uint64_t dim);
-}  // namespace avx2
-
-namespace avx512 {
-float
-SQ8UniformComputeCodesIP(const uint8_t* RESTRICT codes1,
-                         const uint8_t* RESTRICT codes2,
-                         uint64_t dim);
-}  // namespace avx512
-
-namespace neon {
-float
-SQ8UniformComputeCodesIP(const uint8_t* RESTRICT codes1,
-                         const uint8_t* RESTRICT codes2,
-                         uint64_t dim);
-}  // namespace neon
-
-namespace sve {
-float
-SQ8UniformComputeCodesIP(const uint8_t* RESTRICT codes1,
-                         const uint8_t* RESTRICT codes2,
-                         uint64_t dim);
-}  // namespace sve
+#undef DECLARE_SQ8_UNIFORM_FUNCTIONS
 
 using SQ8UniformComputeCodesType = float (*)(const uint8_t* RESTRICT codes1,
                                              const uint8_t* RESTRICT codes2,

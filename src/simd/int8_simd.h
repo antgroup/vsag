@@ -20,61 +20,23 @@
 #include "simd_marco.h"
 namespace vsag {
 
-namespace generic {
-float
-INT8ComputeL2Sqr(const int8_t* RESTRICT query, const int8_t* RESTRICT codes, uint64_t dim);
+#define DECLARE_INT8_FUNCTIONS(ns)                                                              \
+    namespace ns {                                                                              \
+    float                                                                                       \
+    INT8ComputeIP(const int8_t* RESTRICT query, const int8_t* RESTRICT codes, uint64_t dim);    \
+    float                                                                                       \
+    INT8ComputeL2Sqr(const int8_t* RESTRICT query, const int8_t* RESTRICT codes, uint64_t dim); \
+    }  // namespace ns
 
-float
-INT8ComputeIP(const int8_t* RESTRICT query, const int8_t* RESTRICT codes, uint64_t dim);
-}  // namespace generic
+DECLARE_INT8_FUNCTIONS(generic)
+DECLARE_INT8_FUNCTIONS(sse)
+DECLARE_INT8_FUNCTIONS(avx)
+DECLARE_INT8_FUNCTIONS(avx2)
+DECLARE_INT8_FUNCTIONS(avx512)
+DECLARE_INT8_FUNCTIONS(neon)
+DECLARE_INT8_FUNCTIONS(sve)
+#undef DECLARE_INT8_FUNCTIONS
 
-namespace sse {
-float
-INT8ComputeL2Sqr(const int8_t* RESTRICT query, const int8_t* RESTRICT codes, uint64_t dim);
-
-float
-INT8ComputeIP(const int8_t* RESTRICT query, const int8_t* RESTRICT codes, uint64_t dim);
-}  // namespace sse
-
-namespace avx {
-float
-INT8ComputeL2Sqr(const int8_t* RESTRICT query, const int8_t* RESTRICT codes, uint64_t dim);
-
-float
-INT8ComputeIP(const int8_t* RESTRICT query, const int8_t* RESTRICT codes, uint64_t dim);
-}  // namespace avx
-
-namespace avx2 {
-float
-INT8ComputeL2Sqr(const int8_t* RESTRICT query, const int8_t* RESTRICT codes, uint64_t dim);
-
-float
-INT8ComputeIP(const int8_t* RESTRICT query, const int8_t* RESTRICT codes, uint64_t dim);
-}  // namespace avx2
-
-namespace avx512 {
-float
-INT8ComputeL2Sqr(const int8_t* RESTRICT query, const int8_t* RESTRICT codes, uint64_t dim);
-
-float
-INT8ComputeIP(const int8_t* RESTRICT query, const int8_t* RESTRICT codes, uint64_t dim);
-}  // namespace avx512
-
-namespace neon {
-float
-INT8ComputeL2Sqr(const int8_t* RESTRICT query, const int8_t* RESTRICT codes, uint64_t dim);
-
-float
-INT8ComputeIP(const int8_t* RESTRICT query, const int8_t* RESTRICT codes, uint64_t dim);
-}  // namespace neon
-
-namespace sve {
-float
-INT8ComputeL2Sqr(const int8_t* RESTRICT query, const int8_t* RESTRICT codes, uint64_t dim);
-
-float
-INT8ComputeIP(const int8_t* RESTRICT query, const int8_t* RESTRICT codes, uint64_t dim);
-}  // namespace sve
 using INT8ComputeType = float (*)(const int8_t* RESTRICT query,
                                   const int8_t* RESTRICT codes,
                                   uint64_t dim);

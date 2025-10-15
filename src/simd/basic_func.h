@@ -19,132 +19,35 @@
 
 namespace vsag {
 
-namespace generic {
-float
-L2Sqr(const void* pVect1v, const void* pVect2v, const void* qty_ptr);
-float
-InnerProduct(const void* pVect1, const void* pVect2, const void* qty_ptr);
-float
-InnerProductDistance(const void* pVect1, const void* pVect2, const void* qty_ptr);
-float
-INT8L2Sqr(const void* pVect1v, const void* pVect2v, const void* qty_ptr);
-float
-INT8InnerProduct(const void* pVect1, const void* pVect2, const void* qty_ptr);
-float
-INT8InnerProductDistance(const void* pVect1, const void* pVect2, const void* qty_ptr);
-void
-PQDistanceFloat256(const void* single_dim_centers, float single_dim_val, void* result);
-void
-Prefetch(const void* data);
-}  // namespace generic
+#define DECLARE_BASIC_FUNCTIONS(ns)                                                         \
+    namespace ns {                                                                          \
+    float                                                                                   \
+    L2Sqr(const void* pVect1v, const void* pVect2v, const void* qty_ptr);                   \
+    float                                                                                   \
+    InnerProduct(const void* pVect1, const void* pVect2, const void* qty_ptr);              \
+    float                                                                                   \
+    InnerProductDistance(const void* pVect1, const void* pVect2, const void* qty_ptr);      \
+    float                                                                                   \
+    INT8L2Sqr(const void* pVect1v, const void* pVect2v, const void* qty_ptr);               \
+    float                                                                                   \
+    INT8InnerProduct(const void* pVect1, const void* pVect2, const void* qty_ptr);          \
+    float                                                                                   \
+    INT8InnerProductDistance(const void* pVect1, const void* pVect2, const void* qty_ptr);  \
+    void                                                                                    \
+    PQDistanceFloat256(const void* single_dim_centers, float single_dim_val, void* result); \
+    void                                                                                    \
+    Prefetch(const void* data);                                                             \
+    }  // namespace ns
 
-namespace sse {
-float
-L2Sqr(const void* pVect1v, const void* pVect2v, const void* qty_ptr);
-float
-InnerProduct(const void* pVect1, const void* pVect2, const void* qty_ptr);
-float
-InnerProductDistance(const void* pVect1, const void* pVect2, const void* qty_ptr);
-float
-INT8L2Sqr(const void* pVect1v, const void* pVect2v, const void* qty_ptr);
-float
-INT8InnerProduct(const void* pVect1, const void* pVect2, const void* qty_ptr);
-float
-INT8InnerProductDistance(const void* pVect1, const void* pVect2, const void* qty_ptr);
-void
-PQDistanceFloat256(const void* single_dim_centers, float single_dim_val, void* result);
-void
-Prefetch(const void* data);
-}  // namespace sse
+DECLARE_BASIC_FUNCTIONS(generic)
+DECLARE_BASIC_FUNCTIONS(sse)
+DECLARE_BASIC_FUNCTIONS(avx)
+DECLARE_BASIC_FUNCTIONS(avx2)
+DECLARE_BASIC_FUNCTIONS(avx512)
+DECLARE_BASIC_FUNCTIONS(neon)
+DECLARE_BASIC_FUNCTIONS(sve)
 
-namespace avx {
-float
-L2Sqr(const void* pVect1v, const void* pVect2v, const void* qty_ptr);
-float
-InnerProduct(const void* pVect1, const void* pVect2, const void* qty_ptr);
-float
-InnerProductDistance(const void* pVect1, const void* pVect2, const void* qty_ptr);
-float
-INT8L2Sqr(const void* pVect1v, const void* pVect2v, const void* qty_ptr);
-float
-INT8InnerProduct(const void* pVect1, const void* pVect2, const void* qty_ptr);
-float
-INT8InnerProductDistance(const void* pVect1, const void* pVect2, const void* qty_ptr);
-void
-PQDistanceFloat256(const void* single_dim_centers, float single_dim_val, void* result);
-}  // namespace avx
-
-namespace avx2 {
-float
-L2Sqr(const void* pVect1v, const void* pVect2v, const void* qty_ptr);
-float
-InnerProduct(const void* pVect1, const void* pVect2, const void* qty_ptr);
-float
-InnerProductDistance(const void* pVect1, const void* pVect2, const void* qty_ptr);
-float
-INT8L2Sqr(const void* pVect1v, const void* pVect2v, const void* qty_ptr);
-float
-INT8InnerProduct(const void* pVect1, const void* pVect2, const void* qty_ptr);
-float
-INT8InnerProductDistance(const void* pVect1, const void* pVect2, const void* qty_ptr);
-void
-PQDistanceFloat256(const void* single_dim_centers, float single_dim_val, void* result);
-}  // namespace avx2
-
-namespace avx512 {
-float
-L2Sqr(const void* pVect1v, const void* pVect2v, const void* qty_ptr);
-float
-InnerProduct(const void* pVect1, const void* pVect2, const void* qty_ptr);
-float
-InnerProductDistance(const void* pVect1, const void* pVect2, const void* qty_ptr);
-float
-INT8L2Sqr(const void* pVect1v, const void* pVect2v, const void* qty_ptr);
-float
-INT8InnerProduct(const void* pVect1, const void* pVect2, const void* qty_ptr);
-float
-INT8InnerProductDistance(const void* pVect1, const void* pVect2, const void* qty_ptr);
-void
-PQDistanceFloat256(const void* single_dim_centers, float single_dim_val, void* result);
-}  // namespace avx512
-
-namespace neon {
-float
-L2Sqr(const void* pVect1v, const void* pVect2v, const void* qty_ptr);
-float
-InnerProduct(const void* pVect1, const void* pVect2, const void* qty_ptr);
-float
-InnerProductDistance(const void* pVect1, const void* pVect2, const void* qty_ptr);
-float
-INT8L2Sqr(const void* pVect1v, const void* pVect2v, const void* qty_ptr);
-float
-INT8InnerProduct(const void* pVect1, const void* pVect2, const void* qty_ptr);
-float
-INT8InnerProductDistance(const void* pVect1, const void* pVect2, const void* qty_ptr);
-void
-PQDistanceFloat256(const void* single_dim_centers, float single_dim_val, void* result);
-void
-Prefetch(const void* data);
-}  // namespace neon
-
-namespace sve {
-float
-L2Sqr(const void* pVect1v, const void* pVect2v, const void* qty_ptr);
-float
-InnerProduct(const void* pVect1, const void* pVect2, const void* qty_ptr);
-float
-InnerProductDistance(const void* pVect1, const void* pVect2, const void* qty_ptr);
-float
-INT8L2Sqr(const void* pVect1v, const void* pVect2v, const void* qty_ptr);
-float
-INT8InnerProduct(const void* pVect1, const void* pVect2, const void* qty_ptr);
-float
-INT8InnerProductDistance(const void* pVect1, const void* pVect2, const void* qty_ptr);
-void
-PQDistanceFloat256(const void* single_dim_centers, float single_dim_val, void* result);
-void
-Prefetch(const void* data);
-}  // namespace sve
+#undef DECLARE_BASIC_FUNCTIONS
 
 using DistanceFuncType = float (*)(const void* query1, const void* query2, const void* qty_ptr);
 extern DistanceFuncType L2Sqr;
