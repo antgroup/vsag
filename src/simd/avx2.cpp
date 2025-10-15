@@ -90,6 +90,11 @@ PQDistanceFloat256(const void* single_dim_centers, float single_dim_val, void* r
 #endif
 }
 
+void
+Prefetch(const void* data) {
+    avx::Prefetch(data);
+}
+
 #if defined(ENABLE_AVX2)
 __inline __m128i __attribute__((__always_inline__)) load_8_char(const uint8_t* data) {
     return _mm_loadl_epi64(reinterpret_cast<const __m128i*>(data));

@@ -72,6 +72,11 @@ PQDistanceFloat256(const void* single_dim_centers, float single_dim_val, void* r
     return avx2::PQDistanceFloat256(single_dim_centers, single_dim_val, result);
 }
 
+void
+Prefetch(const void* data) {
+    avx2::Prefetch(data);
+}
+
 float
 FP32ComputeIP(const float* RESTRICT query, const float* RESTRICT codes, uint64_t dim) {
 #if defined(ENABLE_AVX512)
