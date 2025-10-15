@@ -21,61 +21,24 @@
 
 namespace vsag {
 
-namespace generic {
-void
-PQFastScanLookUp32(const uint8_t* RESTRICT lookup_table,
-                   const uint8_t* RESTRICT codes,
-                   uint64_t pq_dim,
-                   int32_t* RESTRICT result);
-}  // namespace generic
+#define DECLARE_PQFS_FUNCTIONS(ns)                           \
+    namespace ns {                                           \
+    void                                                     \
+    PQFastScanLookUp32(const uint8_t* RESTRICT lookup_table, \
+                       const uint8_t* RESTRICT codes,        \
+                       uint64_t pq_dim,                      \
+                       int32_t* RESTRICT result);            \
+    }  // namespace ns
 
-namespace sse {
-void
-PQFastScanLookUp32(const uint8_t* RESTRICT lookup_table,
-                   const uint8_t* RESTRICT codes,
-                   uint64_t pq_dim,
-                   int32_t* RESTRICT result);
-}  // namespace sse
+DECLARE_PQFS_FUNCTIONS(generic)
+DECLARE_PQFS_FUNCTIONS(sse)
+DECLARE_PQFS_FUNCTIONS(avx)
+DECLARE_PQFS_FUNCTIONS(avx2)
+DECLARE_PQFS_FUNCTIONS(avx512)
+DECLARE_PQFS_FUNCTIONS(neon)
+DECLARE_PQFS_FUNCTIONS(sve)
 
-namespace avx {
-void
-PQFastScanLookUp32(const uint8_t* RESTRICT lookup_table,
-                   const uint8_t* RESTRICT codes,
-                   uint64_t pq_dim,
-                   int32_t* RESTRICT result);
-}  // namespace avx
-
-namespace avx2 {
-void
-PQFastScanLookUp32(const uint8_t* RESTRICT lookup_table,
-                   const uint8_t* RESTRICT codes,
-                   uint64_t pq_dim,
-                   int32_t* RESTRICT result);
-}  // namespace avx2
-
-namespace avx512 {
-void
-PQFastScanLookUp32(const uint8_t* RESTRICT lookup_table,
-                   const uint8_t* RESTRICT codes,
-                   uint64_t pq_dim,
-                   int32_t* RESTRICT result);
-}  // namespace avx512
-
-namespace neon {
-void
-PQFastScanLookUp32(const uint8_t* RESTRICT lookup_table,
-                   const uint8_t* RESTRICT codes,
-                   uint64_t pq_dim,
-                   int32_t* RESTRICT result);
-}  // namespace neon
-
-namespace sve {
-void
-PQFastScanLookUp32(const uint8_t* RESTRICT lookup_table,
-                   const uint8_t* RESTRICT codes,
-                   uint64_t pq_dim,
-                   int32_t* RESTRICT result);
-}  // namespace sve
+#undef DECLARE_PQFS_FUNCTIONS
 
 using PQFastScanLookUp32Type = void (*)(const uint8_t* RESTRICT lookup_table,
                                         const uint8_t* RESTRICT codes,
