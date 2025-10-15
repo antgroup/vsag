@@ -36,6 +36,9 @@ public:
     static EvalDatasetPtr
     Load(const std::string& filename);
 
+    static void
+    Save(const EvalDatasetPtr& dataset, const std::string& filename);
+
 public:
     [[nodiscard]] const void*
     GetTrain() const {
@@ -229,6 +232,7 @@ private:
     std::string train_data_type_;
     std::string test_data_type_;
     std::string file_path_;
+    std::string metric_;
 
     std::vector<SparseVector> sparse_train_;
     std::vector<SparseVector> sparse_test_;
