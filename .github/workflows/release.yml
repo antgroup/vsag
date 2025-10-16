@@ -1,22 +1,55 @@
 # .github/workflows/release.yml
-name: Release
+name: Create Release
 
 on:
-  push:
-    tags:
-      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'The branch to create the release from'
+        required: true
+        default: 'main'
+        type: string
+      tag_name:
+        description: 'The tag for the new release (e.g., v1.0.0)'
+        required: true
+        type: string
 
 jobs:
-  build:
+  build-and-release:
+    name: Build and Release
     runs-on: ubuntu-22.04
+
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Build
-        run: bash ./scripts/release/dist.sh
-      - name: Upload vsag distributions
-        uses: softprops/action-gh-release@2
-        if: github.ref_type == 'tag'
+      - name: Free Disk Space (Ubuntu)
+        uses: jlumbroso/free-disk-space@54081f138730dfa15788a46383842cd2f914a1be
         with:
-          files: |
-            dist/*.tar.gz
+          tool-cache: false
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: false
+          docker-images: false
+          swap-storage: true
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.branch }}
+          fetch-depth: 0
+
+      - name: Package release assets
+        run: |
+          echo "Packaging release assets..."
+          bash ./scripts/release/dist.sh
+
+      - name: Create GitHub Release and Upload Assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag_name }}
+          name: ${{ github.event.inputs.tag_name }}
+          generate_release_notes: true
+          files: dist/*.tar.gz
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
