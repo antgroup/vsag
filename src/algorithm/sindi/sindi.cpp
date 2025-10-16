@@ -82,11 +82,11 @@ SINDI::Add(const DatasetPtr& base) {
             window_term_list_[cur_window]->InsertVector(sparse_vector, inner_id);
         } catch (const std::runtime_error& e) {
             failed_ids.push_back(ids[i]);
-            logger::warn(std::string("runtime error: ") + e.what());
+            logger::warn("runtime error: {}", e.what());
             continue;
         } catch (const std::bad_alloc& e) {
             failed_ids.push_back(ids[i]);
-            logger::warn(std::string("memory allocation failed: ") + e.what());
+            logger::warn("memory allocation failed: {}", e.what());
             continue;
         }
 
