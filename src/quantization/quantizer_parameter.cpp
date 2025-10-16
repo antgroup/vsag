@@ -36,7 +36,7 @@ QuantizerParameter::GetQuantizerParameterByJson(const JsonType& json) {
         quantizer_param = std::make_shared<FP32QuantizerParameter>();
         quantizer_param->FromJson(json);
     } else if (type_name == QUANTIZATION_TYPE_VALUE_SQ8) {
-        quantizer_param = std::make_shared<SQ8QuantizerParameter>();
+        quantizer_param = std::make_shared<ScalarQuantizerParameter<8>>();
         quantizer_param->FromJson(json);
     } else if (type_name == QUANTIZATION_TYPE_VALUE_SQ8_UNIFORM) {
         quantizer_param = std::make_shared<SQ8UniformQuantizerParameter>();
@@ -45,7 +45,7 @@ QuantizerParameter::GetQuantizerParameterByJson(const JsonType& json) {
         quantizer_param = std::make_shared<ProductQuantizerParameter>();
         quantizer_param->FromJson(json);
     } else if (type_name == QUANTIZATION_TYPE_VALUE_SQ4) {
-        quantizer_param = std::make_shared<SQ4QuantizerParameter>();
+        quantizer_param = std::make_shared<ScalarQuantizerParameter<4>>();
         quantizer_param->FromJson(json);
     } else if (type_name == QUANTIZATION_TYPE_VALUE_SQ4_UNIFORM) {
         quantizer_param = std::make_shared<SQ4UniformQuantizerParameter>();
