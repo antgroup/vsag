@@ -25,16 +25,16 @@ SINDIParameter::FromJson(const JsonType& json) {
         term_id_limit = json[SPARSE_TERM_ID_LIMIT].GetInt();
 
         CHECK_ARGUMENT(
-            (0 < term_id_limit and term_id_limit <= 1'000'000),
-            fmt::format("term_id_limit must in (0, 1'000'000], but now is {}", term_id_limit));
+            (0 < term_id_limit and term_id_limit <= 10'000'000),
+            fmt::format("term_id_limit must in (0, 10'000'000], but now is {}", term_id_limit));
     } else {
         term_id_limit = DEFAULT_TERM_ID_LIMIT;
     }
 
     if (json.Contains(SPARSE_DOC_PRUNE_RATIO)) {
         doc_prune_ratio = json[SPARSE_DOC_PRUNE_RATIO].GetFloat();
-        CHECK_ARGUMENT((0.0F <= doc_prune_ratio and doc_prune_ratio <= 0.5F),
-                       fmt::format("doc_prune_ratio must in [0, 0.5], got {}", doc_prune_ratio));
+        CHECK_ARGUMENT((0.0F <= doc_prune_ratio and doc_prune_ratio <= 0.9F),
+                       fmt::format("doc_prune_ratio must in [0, 0.9], got {}", doc_prune_ratio));
     } else {
         doc_prune_ratio = DEFAULT_DOC_PRUNE_RATIO;
     }
@@ -96,8 +96,8 @@ SINDISearchParameter::FromJson(const JsonType& json) {
                    fmt::format("parameters must contains {}", INDEX_SINDI));
     if (json[INDEX_SINDI].Contains(SPARSE_TERM_PRUNE_RATIO)) {
         term_prune_ratio = json[INDEX_SINDI][SPARSE_TERM_PRUNE_RATIO].GetFloat();
-        CHECK_ARGUMENT((0.0F <= term_prune_ratio and term_prune_ratio <= 0.5F),
-                       fmt::format("term_prune_ratio must in [0, 0.5], got {}", term_prune_ratio));
+        CHECK_ARGUMENT((0.0F <= term_prune_ratio and term_prune_ratio <= 0.9F),
+                       fmt::format("term_prune_ratio must in [0, 0.9], got {}", term_prune_ratio));
     } else {
         term_prune_ratio = DEFAULT_TERM_PRUNE_RATIO;
     }
@@ -105,8 +105,8 @@ SINDISearchParameter::FromJson(const JsonType& json) {
     if (json[INDEX_SINDI].Contains(SPARSE_QUERY_PRUNE_RATIO)) {
         query_prune_ratio = json[INDEX_SINDI][SPARSE_QUERY_PRUNE_RATIO].GetFloat();
         CHECK_ARGUMENT(
-            (0.0F <= query_prune_ratio and query_prune_ratio <= 0.5F),
-            fmt::format("query_prune_ratio must in [0, 0.5], got {}", query_prune_ratio));
+            (0.0F <= query_prune_ratio and query_prune_ratio <= 0.9F),
+            fmt::format("query_prune_ratio must in [0, 0.9], got {}", query_prune_ratio));
     } else {
         query_prune_ratio = DEFAULT_QUERY_PRUNE_RATIO;
     }
