@@ -75,7 +75,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex,
                              "[ft][sindi]") {
     SECTION("invalid doc_prune_ratio") {
         fixtures::SINDIParam param;
-        param.doc_prune_ratio = 0.6;
+        param.doc_prune_ratio = 0.99;
         REQUIRE_THROWS(
             TestFactory("sindi", fixtures::SINDITestIndex::GenerateBuildParameter(param), false));
         param.doc_prune_ratio = -0.1;
