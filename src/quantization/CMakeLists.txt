@@ -18,11 +18,10 @@ set (QUANTIZER_SRC
         quantizer_adapter.cpp
         fp32_quantizer.cpp
         int8_quantizer.cpp
+        scalar_quantization/scalar_quantizer.cpp
         scalar_quantization/bf16_quantizer.cpp
         scalar_quantization/fp16_quantizer.cpp
-        scalar_quantization/sq4_quantizer.cpp
         scalar_quantization/sq4_uniform_quantizer.cpp
-        scalar_quantization/sq8_quantizer.cpp
         scalar_quantization/sq8_uniform_quantizer.cpp
         product_quantization/pq_fastscan_quantizer.cpp
         product_quantization/product_quantizer.cpp
@@ -30,9 +29,7 @@ set (QUANTIZER_SRC
         quantizer_parameter.cpp
         fp32_quantizer_parameter.cpp
         int8_quantizer_parameter.cpp
-        scalar_quantization/sq8_quantizer_parameter.cpp
         scalar_quantization/sq8_uniform_quantizer_parameter.cpp
-        scalar_quantization/sq4_quantizer_parameter.cpp
         scalar_quantization/sq4_uniform_quantizer_parameter.cpp
         scalar_quantization/bf16_quantizer_parameter.cpp
         scalar_quantization/scalar_quantization_trainer.cpp
