@@ -185,19 +185,13 @@ SparseTermDataCell::ResizeTermList(InnerIdType new_term_capacity) {
         return;
     }
 
-    Vector<Vector<uint32_t>> new_ids(allocator_);
-    Vector<Vector<float>> new_datas(allocator_);
-    Vector<uint32_t> new_sizes(allocator_);
+    Vector<Vector<uint32_t>> new_ids(new_term_capacity, Vector<uint32_t>(allocator_), allocator_);
+    Vector<Vector<float>> new_datas(new_term_capacity, Vector<float>(allocator_), allocator_);
+    Vector<uint32_t> new_sizes(new_term_capacity, 0, allocator_);
 
-    new_ids.resize(new_term_capacity, Vector<uint32_t>(allocator_));
-    new_datas.resize(new_term_capacity, Vector<float>(allocator_));
-    new_sizes.resize(new_term_capacity, 0);
-
-    for (uint32_t i = 0; i < term_ids_.size(); ++i) {
-        new_ids[i] = std::move(term_ids_[i]);
-        new_datas[i] = std::move(term_datas_[i]);
-        new_sizes[i] = term_sizes_[i];
-    }
+    std::move(term_ids_.begin(), term_ids_.end(), new_ids.begin());
+    std::move(term_datas_.begin(), term_datas_.end(), new_datas.begin());
+    std::copy(term_sizes_.begin(), term_sizes_.end(), new_sizes.begin());
 
     term_ids_.swap(new_ids);
     term_datas_.swap(new_datas);
