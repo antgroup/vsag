@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "sq4_quantizer_parameter.h"
+#include "scalar_quantizer_parameter.h"
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -21,9 +21,21 @@
 
 using namespace vsag;
 
+TEST_CASE("SQ8 Quantizer Parameter ToJson Test", "[ut][SQ8QuantizerParameter]") {
+    std::string param_str = "{}";
+    auto param = std::make_shared<ScalarQuantizerParameter<8>>();
+    REQUIRE(param->GetTypeName() == "sq8");
+
+    JsonType param_json = JsonType::Parse(param_str);
+    param->FromJson(param_json);
+    ParameterTest::TestToJson(param);
+}
+
 TEST_CASE("SQ4 Quantizer Parameter ToJson Test", "[ut][SQ4QuantizerParameter]") {
     std::string param_str = "{}";
-    auto param = std::make_shared<SQ4QuantizerParameter>();
+    auto param = std::make_shared<ScalarQuantizerParameter<4>>();
+    REQUIRE(param->GetTypeName() == "sq4");
+
     JsonType param_json = JsonType::Parse(param_str);
     param->FromJson(param_json);
     ParameterTest::TestToJson(param);

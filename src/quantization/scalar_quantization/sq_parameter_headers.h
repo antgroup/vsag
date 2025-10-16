@@ -17,7 +17,6 @@
 
 #include "bf16_quantizer_parameter.h"
 #include "fp16_quantizer_parameter.h"
-#include "sq4_quantizer_parameter.h"
+#include "scalar_quantizer_parameter.h"
 #include "sq4_uniform_quantizer_parameter.h"
-#include "sq8_quantizer_parameter.h"
 #include "sq8_uniform_quantizer_parameter.h"

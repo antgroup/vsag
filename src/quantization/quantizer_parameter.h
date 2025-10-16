@@ -34,7 +34,6 @@ public:
 protected:
     explicit QuantizerParameter(std::string name);
 
-private:
     std::string name_{};
 };
 
