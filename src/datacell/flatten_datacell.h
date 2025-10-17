@@ -45,7 +45,7 @@ public:
           const InnerIdType* idx,
           InnerIdType id_count,
           Allocator* allocator = nullptr) override {
-        auto comp = std::static_pointer_cast<Computer<QuantTmpl>>(computer);
+        auto comp = static_cast<Computer<QuantTmpl>*>(computer.get());
         this->query(result_dists, comp, idx, id_count, allocator);
     }
 
@@ -159,7 +159,7 @@ public:
 private:
     inline void
     query(float* result_dists,
-          const std::shared_ptr<Computer<QuantTmpl>>& computer,
+          Computer<QuantTmpl>* computer,
           const InnerIdType* idx,
           InnerIdType id_count,
           Allocator* allocator);
@@ -274,7 +274,7 @@ FlattenDataCell<QuantTmpl, IOTmpl>::InMemory() const {
 template <typename QuantTmpl, typename IOTmpl>
 void
 FlattenDataCell<QuantTmpl, IOTmpl>::query(float* result_dists,
-                                          const std::shared_ptr<Computer<QuantTmpl>>& computer,
+                                          Computer<QuantTmpl>* computer,
                                           const InnerIdType* idx,
                                           InnerIdType id_count,
                                           Allocator* allocator) {
