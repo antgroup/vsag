@@ -49,6 +49,9 @@ public:
      */
     bool
     Train(const DataType* data, uint64_t count) {
+        if (this->is_trained_) {
+            return true;
+        }
         return cast().TrainImpl(data, count);
     }
 
