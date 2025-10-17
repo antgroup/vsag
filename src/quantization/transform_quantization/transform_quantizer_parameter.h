@@ -43,9 +43,9 @@ public:
     MergeStrings(const std::vector<std::string>& vec, char delimiter = ',');
 
     std::string
-    GetBottomQuantizationName() {
+    GetBottomQuantizationName() const {
         return base_quantizer_json_[QUANTIZATION_TYPE_KEY].GetString();
-    };
+    }
 
 public:
     std::vector<std::string> tq_chain_;

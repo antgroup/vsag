@@ -49,7 +49,7 @@ main(int argc, char** argv) {
         "dim": 960,
         "index_param": {
             "base_quantization_type": "tq",
-            "tq_chain": "pca, sq8_uniform",
+            "tq_chain": "pca, rom, sq8_uniform",
             "rabitq_pca_dim": 512,
             "max_degree": 32,
             "ef_construction": 300,
@@ -69,7 +69,7 @@ main(int argc, char** argv) {
                   << std::endl;
     } else if (build_result.error().type == vsag::ErrorType::INTERNAL_ERROR) {
         std::cerr << "Failed to build index: internalError" << std::endl;
-        exit(-1);
+        return -1;
     }
 
     /******************* Prepare Query Dataset *****************/
