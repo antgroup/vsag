@@ -27,7 +27,7 @@ public:
     static constexpr bool SkipDeserialize = false;
 
 public:
-    explicit MemoryBlockIO(Allocator* allocator, uint64_t block_size);
+    explicit MemoryBlockIO(uint64_t block_size, Allocator* allocator);
 
     explicit MemoryBlockIO(const MemoryBlockIOParamPtr& param,
                            const IndexCommonParam& common_param);
