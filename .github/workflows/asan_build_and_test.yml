@@ -19,8 +19,8 @@ jobs:
       group: asan_build_x86-${{ github.event.pull_request.number }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     steps:
-      - name: Free Disk Space
-        run: rm -rf /useless/hostedtoolcache
+      - name: Free Disk Space (Ubuntu)
+        run: rm -rf /useless/*
       - uses: actions/checkout@v4
       - name: Load Cache
         uses: hendrikmuhs/ccache-action@v1.2
@@ -48,8 +48,8 @@ jobs:
       group: asan_build_aarch-${{ github.event.pull_request.number }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     steps:
-      - name: Free Disk Space
-        run: rm -rf /opt/hostedtoolcache
+      - name: Free Disk Space (Ubuntu)
+        run: rm -rf /useless/*
       - uses: actions/checkout@v4
       - name: Prepare Env
         run: sudo bash ./scripts/deps/install_deps_ubuntu.sh
@@ -87,8 +87,8 @@ jobs:
       volumes:
         - /opt:/useless
     steps:
-      - name: Free Disk Space
-        run: rm -rf /opt/hostedtoolcache
+      - name: Free Disk Space (Ubuntu)
+        run: rm -rf /useless/*
       - uses: actions/checkout@v4
       - name: Clean Env
         run: rm -rf ./build
@@ -123,8 +123,8 @@ jobs:
       group: test_asan_aarch64-${{ matrix.test_type }}-${{ github.event.pull_request.number }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     steps:
-      - name: Free Disk Space
-        run: rm -rf /opt/hostedtoolcache
+      - name: Free Disk Space (Ubuntu)
+        run: rm -rf /useless/*
       - uses: actions/checkout@v4
       - name: Prepare Env
         run: sudo bash ./scripts/deps/install_deps_ubuntu.sh
