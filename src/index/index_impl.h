@@ -115,7 +115,7 @@ public:
     }
 
     tl::expected<IndexPtr, Error>
-    Clone(std::shared_ptr<Allocator> allocator = nullptr) const override {
+    Clone(const std::shared_ptr<Allocator>& allocator = nullptr) const override {
         IndexCommonParam common_param = this->common_param_;
         if (allocator != nullptr) {
             common_param.allocator_ = allocator;
