@@ -115,12 +115,16 @@ public:
     }
 
     tl::expected<IndexPtr, Error>
-    Clone() const override {
-        auto clone_value = this->clone_inner_index();
+    Clone(const std::shared_ptr<Allocator>& allocator = nullptr) const override {
+        IndexCommonParam common_param = this->common_param_;
+        if (allocator != nullptr) {
+            common_param.allocator_ = allocator;
+        }
+        auto clone_value = this->clone_inner_index(common_param);
         if (not clone_value.has_value()) {
             LOG_ERROR_AND_RETURNS(clone_value.error().type, clone_value.error().message);
         }
-        return std::make_shared<IndexImpl<T>>(clone_value.value(), this->common_param_);
+        return std::make_shared<IndexImpl<T>>(clone_value.value(), common_param);
     }
 
     tl::expected<Checkpoint, Error>
@@ -442,8 +446,8 @@ public:
 
 private:
     tl::expected<InnerIndexPtr, Error>
-    clone_inner_index() const {
-        SAFE_CALL(return this->inner_index_->Clone(this->common_param_));
+    clone_inner_index(const IndexCommonParam& common_param) const {
+        SAFE_CALL(return this->inner_index_->Clone(common_param));
     }
 
     tl::expected<InnerIndexPtr, Error>
