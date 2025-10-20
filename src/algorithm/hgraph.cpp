@@ -1561,10 +1561,6 @@ HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
                                                     SUPPORT_TOMBSTONE,
                                                 },
                                             }};
-    if (common_param.data_type_ == DataTypes::DATA_TYPE_INT8) {
-        throw VsagException(ErrorType::INVALID_ARGUMENT,
-                            fmt::format("HGraph not support {} datatype", DATATYPE_INT8));
-    }
 
     std::string str = format_map(HGRAPH_PARAMS_TEMPLATE, DEFAULT_MAP);
     auto inner_json = JsonType::Parse(str);
