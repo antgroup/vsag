@@ -21,6 +21,7 @@
 #include "inner_string_params.h"
 #include "product_quantization/pq_fastscan_quantizer_parameter.h"
 #include "product_quantization/product_quantizer_parameter.h"
+#include "quantization/int8_quantizer_parameter.h"
 #include "rabitq_quantization/rabitq_quantizer_parameter.h"
 #include "scalar_quantization/sq_parameter_headers.h"
 #include "sparse_quantization/sparse_quantizer_parameter.h"
@@ -67,6 +68,9 @@ QuantizerParameter::GetQuantizerParameterByJson(const JsonType& json) {
         quantizer_param->FromJson(json);
     } else if (type_name == QUANTIZATION_TYPE_VALUE_TQ) {
         quantizer_param = std::make_shared<TransformQuantizerParameter>();
+        quantizer_param->FromJson(json);
+    } else if (type_name == QUANTIZATION_TYPE_VALUE_INT8) {
+        quantizer_param = std::make_shared<INT8QuantizerParameter>();
         quantizer_param->FromJson(json);
     } else {
         throw VsagException(ErrorType::INVALID_ARGUMENT,

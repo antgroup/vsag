@@ -18,6 +18,8 @@
 #include "flatten_datacell.h"
 #include "inner_string_params.h"
 #include "io/io_headers.h"
+#include "quantization/int8_quantizer.h"
+#include "quantization/quantizer_adapter.h"
 #include "quantization/quantizer_headers.h"
 #include "quantization/sparse_quantization/sparse_quantizer.h"
 #include "sparse_vector_datacell.h"
@@ -43,6 +45,20 @@ template <MetricType metric, typename IOTemp>
 static FlattenInterfacePtr
 make_instance(const FlattenInterfaceParamPtr& param, const IndexCommonParam& common_param) {
     std::string quantization_string = param->quantizer_parameter->GetTypeName();
+    if (common_param.data_type_ == DataTypes::DATA_TYPE_INT8) {
+        if (quantization_string == QUANTIZATION_TYPE_VALUE_INT8) {
+            return make_instance<INT8Quantizer<metric>, IOTemp>(param, common_param);
+        }
+
+        if (quantization_string == QUANTIZATION_TYPE_VALUE_PQ) {
+            return make_instance<QuantizerAdapter<ProductQuantizer<metric>, int8_t>, IOTemp>(
+                param, common_param);
+        }
+
+        throw VsagException(
+            ErrorType::INVALID_ARGUMENT,
+            fmt::format("INT8 data type unsupport {} quantization", quantization_string));
+    }
     if (quantization_string == QUANTIZATION_TYPE_VALUE_SQ8) {
         return make_instance<SQ8Quantizer<metric>, IOTemp>(param, common_param);
     }
@@ -76,6 +92,7 @@ make_instance(const FlattenInterfaceParamPtr& param, const IndexCommonParam& com
     if (quantization_string == QUANTIZATION_TYPE_VALUE_SPARSE) {
         return make_instance<SparseQuantizer<metric>, IOTemp>(param, common_param);
     }
+
     return nullptr;
 }
 
