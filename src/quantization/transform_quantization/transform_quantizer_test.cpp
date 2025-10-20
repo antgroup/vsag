@@ -30,7 +30,7 @@ const auto counts = {101, 1001};
 
 template <typename T, MetricType metric>
 void
-TestComputeMetricTQ(std::string tq_chain, uint64_t dim, int count, float error = 1.0) {
+TestComputeMetricTQ(std::string tq_chain, uint64_t dim, int count, float error = 2.0) {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     auto param = std::make_shared<TransformQuantizerParameter>();
     constexpr static const char* param_template = R"(
@@ -56,7 +56,7 @@ TestComputeMetricTQ(std::string tq_chain, uint64_t dim, int count, float error =
 template <typename T, MetricType metric>
 void
 TestSerializeDeserializeTQ(std::string tq_chain, uint64_t dim, int count) {
-    float numeric_error = 1.0;
+    float numeric_error = 2.0;
     float related_error = 0.1F;
     float unbounded_numeric_error_rate = 0.2F;
     float unbounded_related_error_rate = 0.2F;

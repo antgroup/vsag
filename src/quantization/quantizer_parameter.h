@@ -31,7 +31,7 @@ public:
         return this->name_;
     }
 
-    bool
+    static bool
     IsValidQuantizationType(const std::string& type_name);
 
 protected:
