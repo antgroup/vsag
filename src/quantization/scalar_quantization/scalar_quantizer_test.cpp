@@ -82,7 +82,7 @@ TestSerializeAndDeserializeMetricSQ4(uint64_t dim, int count, float error = 1e-5
     SQ4Quantizer<metric> quantizer1(dim, allocator.get());
     SQ4Quantizer<metric> quantizer2(dim, allocator.get());
     TestSerializeAndDeserialize<SQ4Quantizer<metric>, metric>(
-        quantizer1, quantizer2, dim, count, error, 1.0, true, 1.0, 1.0);
+        quantizer1, quantizer2, dim, count, error, 1.0, 1.0, 1.0);
     // TODO(LHT): fix quantize error
 }
 
@@ -154,7 +154,7 @@ TestSerializeAndDeserializeMetricSQ8(uint64_t dim, int count, float error = 1e-5
     SQ8Quantizer<metric> quantizer1(dim, allocator.get());
     SQ8Quantizer<metric> quantizer2(dim, allocator.get());
     TestSerializeAndDeserialize<SQ8Quantizer<metric>, metric>(
-        quantizer1, quantizer2, dim, count, error, 1.0, true, 1.0, 1.0);
+        quantizer1, quantizer2, dim, count, error, 1.0, 1.0, 1.0);
     // TODO(lht): fix error
 }
 

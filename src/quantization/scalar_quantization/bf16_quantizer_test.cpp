@@ -78,7 +78,7 @@ TestSerializeAndDeserializeMetricBF16(uint64_t dim, int count, float error = 1e-
     BF16Quantizer<metric> quantizer1(dim, allocator.get());
     BF16Quantizer<metric> quantizer2(dim, allocator.get());
     TestSerializeAndDeserialize<BF16Quantizer<metric>, metric>(
-        quantizer1, quantizer2, dim, count, error, 1.0, true, 1.0, 1.0);
+        quantizer1, quantizer2, dim, count, error, 1.0, 1.0, 1.0);
     // TODO(LHT): fix quantize error
 }
 
