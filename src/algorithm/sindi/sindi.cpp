@@ -66,10 +66,10 @@ SINDI::Add(const DatasetPtr& base) {
         auto cur_window = cur_element_count_ / window_size_;
         auto window_start_id = cur_window * window_size_;
         const auto& sparse_vector = sparse_vectors[i];
-        if (sparse_vectors->len_ <= 0) {
+        if (sparse_vector.len_ <= 0) {
             failed_ids.push_back(ids[i]);
             logger::warn(
-                "sparse_vectors.len_ ({}) is invalid for id ({})", sparse_vectors->len_, ids[i]);
+                "sparse_vectors.len_ ({}) is invalid for id ({})", sparse_vector.len_, ids[i]);
             continue;
         }
 
@@ -119,17 +119,20 @@ SINDI::KnnSearch(const DatasetPtr& query,
     const auto* sparse_vectors = query->GetSparseVectors();
     CHECK_ARGUMENT(query->GetNumElements() == 1, "num of query should be 1");
     auto sparse_query = sparse_vectors[0];
-    CHECK_ARGUMENT(sparse_vectors->len_ > 0,
-                   fmt::format("sparse_vectors.len_ ({}) is invalid", sparse_vectors->len_));
+    CHECK_ARGUMENT(
+        sparse_query.len_ > 0,
+        fmt::format("query->GetSparseVectors()->len_ ({}) is invalid", sparse_query.len_));
 
     // search parameter
     SINDISearchParameter search_param;
     search_param.FromJson(JsonType::parse(parameters));
+    CHECK_ARGUMENT(search_param.n_candidate <= AMPLIFICATION_FACTOR * k,
+                   fmt::format("n_candidate ({}) should be less than {} * k ({})",
+                               search_param.n_candidate,
+                               AMPLIFICATION_FACTOR,
+                               k));
     InnerSearchParam inner_param;
-    inner_param.ef = search_param.n_candidate;
-    if (search_param.n_candidate == DEFAULT_N_CANDIDATE or search_param.n_candidate <= k) {
-        inner_param.ef = k;
-    }
+    inner_param.ef = std::max(static_cast<int64_t>(search_param.n_candidate), k);
     inner_param.topk = k;
 
     FilterPtr ft = nullptr;
@@ -254,8 +257,9 @@ SINDI::RangeSearch(const DatasetPtr& query,
     const auto* sparse_vectors = query->GetSparseVectors();
     CHECK_ARGUMENT(query->GetNumElements() == 1, "num of query should be 1");
     auto sparse_query = sparse_vectors[0];
-    CHECK_ARGUMENT(sparse_vectors->len_ > 0,
-                   fmt::format("query.len_ ({}) is invalid", sparse_vectors->len_));
+    CHECK_ARGUMENT(
+        sparse_query.len_ > 0,
+        fmt::format("query->GetSparseVectors()->len_ ({}) is invalid", sparse_query.len_));
 
     // search parameter
     SINDISearchParameter search_param;
