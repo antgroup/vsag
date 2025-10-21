@@ -83,6 +83,7 @@ TestSerializeAndDeserializeMetricSQ4(uint64_t dim, int count, float error = 1e-5
     SQ4Quantizer<metric> quantizer2(dim, allocator.get());
     TestSerializeAndDeserialize<SQ4Quantizer<metric>, metric>(
         quantizer1, quantizer2, dim, count, error, 1.0, true, 1.0, 1.0);
+    // TODO(LHT): fix quantize error
 }
 
 TEST_CASE("SQ4 Serialize and Deserialize", "[ut][SQ4Quantizer]") {
