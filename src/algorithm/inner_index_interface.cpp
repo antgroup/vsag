@@ -423,6 +423,8 @@ InnerIndexInterface::GetDataByIdsWithFlag(const int64_t* ids,
             inner_ids[i] = this->label_table_->GetIdByLabel(ids[i]);
         }
     }
+    auto thread_count = static_cast<int64_t>(this->build_thread_count_);
+    auto item_per_thread = (count + thread_count - 1) / thread_count;
     auto dataset = Dataset::Make();
     dataset->NumElements(count)->Dim(dim_)->Owner(true, allocator_);
     if ((selected_data_flag & DATA_FLAG_FLOAT32_VECTOR) != 0U) {
@@ -432,9 +434,24 @@ InnerIndexInterface::GetDataByIdsWithFlag(const int64_t* ids,
         auto* fp32_data = reinterpret_cast<float*>(
             this->allocator_->Allocate(count * this->dim_ * sizeof(float)));
         dataset->Float32Vectors(fp32_data);
-        for (int64_t i = 0; i < count; ++i) {
-            auto inner_id = this->label_table_->GetIdByLabel(ids[i]);
-            this->GetVectorByInnerId(inner_id, fp32_data + i * this->dim_);
+        auto get_vec_func = [&](int64_t begin, int64_t end) {
+            for (int64_t i = begin; i < end; ++i) {
+                auto inner_id = this->label_table_->GetIdByLabel(ids[i]);
+                this->GetVectorByInnerId(inner_id, fp32_data + i * this->dim_);
+            }
+        };
+        if (this->build_pool_ != nullptr) {
+            std::vector<std::future<void>> futures;
+            for (int64_t i = 0; i < thread_count; ++i) {
+                int64_t begin = i * item_per_thread;
+                int64_t end = std::min(begin + item_per_thread, count);
+                futures.emplace_back(this->build_pool_->GeneralEnqueue(get_vec_func, begin, end));
+            }
+            for (auto& future : futures) {
+                future.get();
+            }
+        } else {
+            get_vec_func(0, count);
         }
     }
 
@@ -444,9 +461,24 @@ InnerIndexInterface::GetDataByIdsWithFlag(const int64_t* ids,
         }
         auto* attribute_data = new AttributeSet[count];
         dataset->AttributeSets(attribute_data);
-        for (int64_t i = 0; i < count; ++i) {
-            auto inner_id = this->label_table_->GetIdByLabel(ids[i]);
-            this->GetAttributeSetByInnerId(inner_id, attribute_data + i);
+        auto get_attr_func = [&](int64_t begin, int64_t end) {
+            for (int64_t i = begin; i < end; ++i) {
+                auto inner_id = this->label_table_->GetIdByLabel(ids[i]);
+                this->GetAttributeSetByInnerId(inner_id, attribute_data + i);
+            }
+        };
+        if (this->build_pool_ != nullptr) {
+            std::vector<std::future<void>> futures;
+            for (int64_t i = 0; i < thread_count; ++i) {
+                int64_t begin = i * item_per_thread;
+                int64_t end = std::min(begin + item_per_thread, count);
+                futures.emplace_back(this->build_pool_->GeneralEnqueue(get_attr_func, begin, end));
+            }
+            for (auto& future : futures) {
+                future.get();
+            }
+        } else {
+            get_attr_func(0, count);
         }
     }
 
@@ -457,9 +489,25 @@ InnerIndexInterface::GetDataByIdsWithFlag(const int64_t* ids,
         auto* extra_info =
             reinterpret_cast<char*>(this->allocator_->Allocate(count * extra_info_size_));
         dataset->ExtraInfos(extra_info);
-        for (int64_t i = 0; i < count; ++i) {
-            auto inner_id = this->label_table_->GetIdByLabel(ids[i]);
-            this->extra_infos_->GetExtraInfoById(inner_id, extra_info + i * extra_info_size_);
+        auto get_extra_info_func = [&](int64_t begin, int64_t end) {
+            for (int64_t i = begin; i < end; ++i) {
+                auto inner_id = this->label_table_->GetIdByLabel(ids[i]);
+                this->extra_infos_->GetExtraInfoById(inner_id, extra_info + i * extra_info_size_);
+            }
+        };
+        if (this->build_pool_ != nullptr) {
+            std::vector<std::future<void>> futures;
+            for (int64_t i = 0; i < thread_count; ++i) {
+                int64_t begin = i * item_per_thread;
+                int64_t end = std::min(begin + item_per_thread, count);
+                futures.emplace_back(
+                    this->build_pool_->GeneralEnqueue(get_extra_info_func, begin, end));
+            }
+            for (auto& future : futures) {
+                future.get();
+            }
+        } else {
+            get_extra_info_func(0, count);
         }
     }
     if ((selected_data_flag & DATA_FLAG_ID) != 0U) {
