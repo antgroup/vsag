@@ -1239,6 +1239,7 @@ static const std::string HGRAPH_PARAMS_TEMPLATE =
                 "{SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE}": 0.05,
                 "{PCA_DIM}": 0,
                 "{RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY}": 32,
+                "{TQ_CHAIN}": "",
                 "nbits": 8,
                 "{PRODUCT_QUANTIZATION_DIM}": 1,
                 "{HOLD_MOLDS}": false
@@ -1515,6 +1516,14 @@ HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
                                                     HGRAPH_BASE_CODES_KEY,
                                                     QUANTIZATION_PARAMS_KEY,
                                                     PCA_DIM,
+                                                },
+                                            },
+                                            {
+                                                INDEX_TQ_CHAIN,
+                                                {
+                                                    HGRAPH_BASE_CODES_KEY,
+                                                    QUANTIZATION_PARAMS_KEY,
+                                                    TQ_CHAIN,
                                                 },
                                             },
                                             {

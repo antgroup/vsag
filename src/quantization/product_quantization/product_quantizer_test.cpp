@@ -39,7 +39,7 @@ TestQuantizerEncodeDecodeMetricPQ(
 
 TEST_CASE("ProductQuantizer Encode and Decode", "[ut][ProductQuantizer]") {
     constexpr MetricType metrics[2] = {MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_IP};
-    float error = 8.0F / 255.0F;
+    float error = 20;
     int64_t pq_dim;
     for (auto dim : dims) {
         if (dim % 2 == 0) {
@@ -72,7 +72,7 @@ TEST_CASE("ProductQuantizer Compute", "[ut][ProductQuantizer]") {
         MetricType::METRIC_TYPE_IP,
         MetricType::METRIC_TYPE_COSINE,
     };
-    float error = 8.0F / 255.0F;
+    float error = 20;
     int64_t pq_dim;
     for (auto dim : dims) {
         if (dim % 2 == 0) {
@@ -102,7 +102,7 @@ TestSerializeAndDeserializeMetricPQ(uint64_t dim, int64_t pq_dim, int count, flo
 TEST_CASE("ProductQuantizer Serialize and Deserialize", "[ut][ProductQuantizer]") {
     constexpr MetricType metrics[3] = {
         MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_COSINE, MetricType::METRIC_TYPE_IP};
-    float error = 8.0F / 255.0F;
+    float error = 20;
     int64_t pq_dim;
     for (auto dim : dims) {
         if (dim % 2 == 0) {

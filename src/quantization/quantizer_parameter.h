@@ -31,6 +31,9 @@ public:
         return this->name_;
     }
 
+    static bool
+    IsValidQuantizationType(const std::string& type_name);
+
 protected:
     explicit QuantizerParameter(std::string name);
 

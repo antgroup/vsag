@@ -76,14 +76,10 @@ public:
     ReleaseComputerImpl(Computer<TransformQuantizer<QuantTmpl, metric>>& computer) const;
 
     void
-    SerializeImpl(StreamWriter& writer) {
-        return;
-    }
+    SerializeImpl(StreamWriter& writer);
 
     void
-    DeserializeImpl(StreamReader& reader) {
-        return;
-    };
+    DeserializeImpl(StreamReader& reader);
 
     [[nodiscard]] std::string
     NameImpl() const {
@@ -130,12 +126,7 @@ TransformQuantizer<QuantTmpl, metric>::TransformQuantizer(const TransformQuantiz
                                                        common_param.allocator_.get()),
       base_meta_offsets_(common_param.allocator_.get()),
       query_meta_offsets_(common_param.allocator_.get()) {
-    // 1. init quantizer
-    auto detailed_quantizer_param =
-        QuantizerParameter::GetQuantizerParameterByJson(param->base_quantizer_json_);
-    this->quantizer_ = std::make_shared<QuantTmpl>(detailed_quantizer_param, common_param);
-
-    // 2. init transform chain
+    // 1. init transform chain
     VectorTransformerParameter transformer_param;
     transformer_param.FromJson(param->base_quantizer_json_);
     transformer_param.input_dim_ = this->dim_;
@@ -143,6 +134,13 @@ TransformQuantizer<QuantTmpl, metric>::TransformQuantizer(const TransformQuantiz
         transform_chain_.emplace_back(MakeTransformerInstance(transform_str, transformer_param));
         transformer_param.input_dim_ = transform_chain_.back()->GetOutputDim();
     }
+
+    // 2. init quantizer
+    IndexCommonParam copy_common_param = common_param;
+    copy_common_param.dim_ = transformer_param.input_dim_;
+    auto detailed_quantizer_param =
+        QuantizerParameter::GetQuantizerParameterByJson(param->base_quantizer_json_);
+    this->quantizer_ = std::make_shared<QuantTmpl>(detailed_quantizer_param, copy_common_param);
 
     // 3. compute align_size
     align_size_ = sizeof(float);
@@ -195,6 +193,8 @@ TransformQuantizer<QuantTmpl, metric>::MakeTransformerInstance(
 template <typename QuantTmpl, MetricType metric>
 bool
 TransformQuantizer<QuantTmpl, metric>::TrainImpl(const DataType* data, uint64_t count) {
+    count = std::min(count, (uint64_t)TQ_MAX_TRAIN_COUNT);
+
     // 1. train transformer based on original data
     for (const auto& vector_transformer : this->transform_chain_) {
         vector_transformer->Train(data, count);
@@ -210,7 +210,8 @@ TransformQuantizer<QuantTmpl, metric>::TrainImpl(const DataType* data, uint64_t 
     }
 
     // 3. train quantizer based on transformed data
-    return quantizer_->Train(transformed_data.data(), count);
+    this->is_trained_ = quantizer_->Train(transformed_data.data(), count);
+    return this->is_trained_;
 }
 
 template <typename QuantTmpl, MetricType metric>
@@ -249,21 +250,22 @@ TransformQuantizer<QuantTmpl, metric>::ProcessQueryImpl(
     const vsag::DataType* query, Computer<TransformQuantizer>& computer) const {
     // 0. allocate
     try {
-        computer.buf_ =
+        computer.inner_computer_->buf_ =
             reinterpret_cast<uint8_t*>(this->allocator_->Allocate(this->query_code_size_));
     } catch (const std::bad_alloc& e) {
-        computer.buf_ = nullptr;
+        computer.inner_computer_->buf_ = nullptr;
         throw VsagException(ErrorType::NO_ENOUGH_MEMORY, "bad alloc when init computer buf");
     }
 
     // 1. execute transform
     Vector<DataType> data_buffer(this->code_size_, 0, this->allocator_);
     data_buffer.assign(query, query + this->dim_);
-    ExecuteChainTransform(data_buffer.data(), query_meta_offsets_.data(), computer.buf_);
+    ExecuteChainTransform(
+        data_buffer.data(), query_meta_offsets_.data(), computer.inner_computer_->buf_);
 
     // 2. execute quantize
     // note that only when computer.buf_ == nullptr, quantizer_ will allocate data to buf_
-    quantizer_->ProcessQuery(query, *computer.inner_computer_);
+    quantizer_->ProcessQuery(data_buffer.data(), *computer.inner_computer_);
 };
 
 template <typename QuantTmpl, MetricType metric>
@@ -293,7 +295,7 @@ TransformQuantizer<QuantTmpl, metric>::ComputeDistImpl(Computer<TransformQuantiz
     const auto* meta_offset_1 = query_meta_offsets_.data();
     const auto* meta_offset_2 = base_meta_offsets_.data();
 
-    const auto* codes_1 = computer.buf_;
+    const auto* codes_1 = computer.inner_computer_->buf_;
     const auto* codes_2 = codes;
 
     auto quantize_dist = quantizer_->ComputeDist(*(computer.inner_computer_), codes);
@@ -342,6 +344,34 @@ TransformQuantizer<QuantTmpl, metric>::EncodeBatchImpl(const DataType* data,
         EncodeOneImpl(data + i * this->dim_, codes + i * this->code_size_);
     }
     return true;
+}
+
+template <typename QuantTmpl, MetricType metric>
+void
+TransformQuantizer<QuantTmpl, metric>::SerializeImpl(StreamWriter& writer) {
+    StreamWriter::WriteVector(writer, this->base_meta_offsets_);
+    StreamWriter::WriteVector(writer, this->query_meta_offsets_);
+    StreamWriter::WriteObj(writer, this->align_size_);
+
+    for (const auto& transformer : this->transform_chain_) {
+        transformer->Serialize(writer);
+    }
+
+    this->quantizer_->Serialize(writer);
+}
+
+template <typename QuantTmpl, MetricType metric>
+void
+TransformQuantizer<QuantTmpl, metric>::DeserializeImpl(StreamReader& reader) {
+    StreamReader::ReadVector(reader, this->base_meta_offsets_);
+    StreamReader::ReadVector(reader, this->query_meta_offsets_);
+    StreamReader::ReadObj(reader, this->align_size_);
+
+    for (const auto& transformer : this->transform_chain_) {
+        transformer->Deserialize(reader);
+    }
+
+    this->quantizer_->Deserialize(reader);
 }
 
 }  // namespace vsag

@@ -15,8 +15,10 @@
 
 #pragma once
 
+#include "inner_string_params.h"
 #include "quantization/quantizer_parameter.h"
 #include "utils/pointer_define.h"
+
 namespace vsag {
 DEFINE_POINTER2(TransformQuantizerParam, TransformQuantizerParameter)
 class TransformQuantizerParameter : public QuantizerParameter {
@@ -39,6 +41,11 @@ public:
 
     static std::string
     MergeStrings(const std::vector<std::string>& vec, char delimiter = ',');
+
+    std::string
+    GetBottomQuantizationName() const {
+        return base_quantizer_json_[QUANTIZATION_TYPE_KEY].GetString();
+    }
 
 public:
     std::vector<std::string> tq_chain_;

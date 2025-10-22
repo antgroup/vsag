@@ -87,3 +87,22 @@ TEST_CASE("TQ parameter Split Merge String Test", "[ut][TransformQuantizerParame
     auto recover_str = TransformQuantizerParameter::MergeStrings(chain_str);
     REQUIRE(str == recover_str);
 }
+
+TEST_CASE("Invalid Cases Test", "[ut][TransformQuantizerParameter]") {
+    constexpr static const char* param_template = R"(
+        {{
+            "tq_chain": "{}"
+        }}
+    )";
+    auto invalid_chain1 = fmt::format(param_template, "pca");
+    auto invalid_chain2 = fmt::format(param_template, "fp32");
+    auto invalid_chain3 = fmt::format(param_template, "pca,pf32");
+    auto invalid_chain4 = fmt::format(param_template, "fp32,pca");
+
+    auto param = std::make_shared<TransformQuantizerParameter>();
+
+    REQUIRE_THROWS(param->FromString(invalid_chain1));
+    REQUIRE_THROWS(param->FromString(invalid_chain2));
+    REQUIRE_THROWS(param->FromString(invalid_chain3));
+    REQUIRE_THROWS(param->FromString(invalid_chain4));
+}
