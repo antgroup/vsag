@@ -16,6 +16,7 @@
 #pragma once
 
 #include "data_type.h"
+#include "index_search_parameter.h"
 #include "inner_index_parameter.h"
 #include "utils/pointer_define.h"
 #include "vsag/constants.h"
@@ -67,7 +68,7 @@ public:
     std::string name;
 };
 
-class HGraphSearchParameters {
+class HGraphSearchParameters : public IndexSearchParameter {
 public:
     static HGraphSearchParameters
     FromJson(const std::string& json_string);
@@ -77,8 +78,6 @@ public:
     float topk_factor{0.0F};
     bool use_reorder{false};
     bool use_extra_info_filter{false};
-    bool enable_time_record{false};
-    double timeout_ms{std::numeric_limits<double>::max()};
 
 private:
     HGraphSearchParameters() = default;

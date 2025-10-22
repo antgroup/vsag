@@ -25,6 +25,8 @@ class StandardHeap : public DistanceHeap {
 public:
     explicit StandardHeap(Allocator* allocator, int64_t max_size);
 
+    ~StandardHeap() override = default;
+
     void
     Push(float dist, InnerIdType id) override;
 

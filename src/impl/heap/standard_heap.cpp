@@ -24,6 +24,19 @@ StandardHeap<max_heap, fixed_size>::StandardHeap(Allocator* allocator, int64_t m
 template <bool max_heap, bool fixed_size>
 void
 StandardHeap<max_heap, fixed_size>::Push(float dist, InnerIdType id) {
+    if constexpr (fixed_size) {
+        if (this->queue_.size() == this->max_size_) {
+            if constexpr (max_heap) {
+                if (dist > this->queue_.front().first) {
+                    return;
+                }
+            } else {
+                if (dist < this->queue_.front().first) {
+                    return;
+                }
+            }
+        }
+    }
     DistanceRecord record{dist, id};
     this->queue_.emplace_back(std::move(record));
     if constexpr (max_heap) {

@@ -181,33 +181,28 @@ BruteForce::KnnSearch(const DatasetPtr& query,
                       int64_t k,
                       const std::string& parameters,
                       const FilterPtr& filter) const {
-    std::shared_lock read_lock(this->global_mutex_);
-    auto computer = this->inner_codes_->FactoryComputer(query->GetFloat32Vectors());
-    auto heap = std::make_shared<StandardHeap<true, true>>(this->allocator_, k);
-    for (InnerIdType i = 0; i < total_count_; ++i) {
-        float dist;
-        if (filter == nullptr or filter->CheckValid(this->label_table_->GetLabelById(i))) {
-            inner_codes_->Query(&dist, computer, &i, 1);
-            heap->Push(dist, i);
-        }
+    SearchRequest req;
+    req.query_ = query;
+    req.topk_ = k;
+    req.params_str_ = parameters;
+    if (filter != nullptr) {
+        req.filter_ = filter;
     }
-    auto [dataset_results, dists, ids] =
-        create_fast_dataset(static_cast<int64_t>(heap->Size()), allocator_);
-    for (auto j = static_cast<int64_t>(heap->Size() - 1); j >= 0; --j) {
-        dists[j] = heap->Top().first;
-        ids[j] = this->label_table_->GetLabelById(heap->Top().second);
-        heap->Pop();
-    }
-    return std::move(dataset_results);
+    return this->SearchWithRequest(req);
 }
 
 DatasetPtr
 BruteForce::SearchWithRequest(const SearchRequest& request) const {
     std::shared_lock read_lock(this->global_mutex_);
+
     auto computer = this->inner_codes_->FactoryComputer(request.query_->GetFloat32Vectors());
-    auto heap = DistanceHeap::MakeInstanceBySize<true, true>(this->allocator_, request.topk_);
+    DistHeapPtr heap = nullptr;
     ExecutorPtr executor = nullptr;
     Filter* attr_filter = nullptr;
+    Filter* filter = nullptr;
+    if (request.filter_ != nullptr) {
+        filter = request.filter_.get();
+    }
     if (request.enable_attribute_filter_) {
         auto& schema = this->attr_filter_index_->field_type_map_;
         auto expr = AstParse(request.attribute_filter_str_, &schema);
@@ -217,15 +212,44 @@ BruteForce::SearchWithRequest(const SearchRequest& request) const {
         attr_filter = executor->Run();
     }
 
-    for (InnerIdType i = 0; i < total_count_; ++i) {
-        float dist;
-        if (attr_filter != nullptr and not attr_filter->CheckValid(i)) {
-            continue;
+    auto brute_force_params = BruteForceSearchParameters::FromJson(request.params_str_);
+    auto parallel_count = brute_force_params.parallel_search_thread_count;
+    std::vector<DistHeapPtr> heaps(parallel_count);
+    for (auto& cur_heap : heaps) {
+        cur_heap = DistanceHeap::MakeInstanceBySize<true, true>(this->allocator_, request.topk_);
+    }
+    auto search_func = [&](InnerIdType start, InnerIdType end, const DistHeapPtr& cur_heap) {
+        float cur_min_dist = std::numeric_limits<float>::max();
+        for (InnerIdType i = start; i < end; ++i) {
+            float dist = 0.0F;
+            if (attr_filter != nullptr and not attr_filter->CheckValid(i)) {
+                continue;
+            }
+            if (filter == nullptr or filter->CheckValid(this->label_table_->GetLabelById(i))) {
+                inner_codes_->Query(&dist, computer, &i, 1);
+                cur_heap->Push(dist, i);
+            }
         }
-        if (request.filter_ == nullptr or
-            request.filter_->CheckValid(this->label_table_->GetLabelById(i))) {
-            inner_codes_->Query(&dist, computer, &i, 1);
-            heap->Push(dist, i);
+    };
+
+    if (parallel_count == 1) {
+        search_func(0, total_count_, heaps[0]);
+        heap = heaps[0];
+    } else {
+        std::vector<std::future<void>> futures;
+        auto chunk_size = (total_count_ + parallel_count - 1) / parallel_count;
+        for (auto i = 0; i < parallel_count; ++i) {
+            auto start = i * chunk_size;
+            auto end = std::min(start + chunk_size, total_count_);
+            auto future = this->build_pool_->GeneralEnqueue(search_func, start, end, heaps[i]);
+            futures.emplace_back(std::move(future));
+        }
+        for (auto& future : futures) {
+            future.get();
+        }
+        heap = heaps[0];
+        for (auto i = 1; i < parallel_count; ++i) {
+            heap->Merge(*heaps[i]);
         }
     }
 
@@ -236,6 +260,7 @@ BruteForce::SearchWithRequest(const SearchRequest& request) const {
         ids[j] = this->label_table_->GetLabelById(heap->Top().second);
         heap->Pop();
     }
+
     return std::move(dataset_results);
 }
 
@@ -420,6 +445,7 @@ static const std::string BRUTE_FORCE_PARAMS_TEMPLATE =
             "nbits": 8,
             "{HOLD_MOLDS}": false
         },
+        "{BUILD_THREAD_COUNT_KEY}": 10,
         "{USE_ATTRIBUTE_FILTER_KEY}": false,
         "{ATTR_PARAMS_KEY}": {
             "{ATTR_HAS_BUCKETS_KEY}": true

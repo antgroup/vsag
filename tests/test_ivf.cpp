@@ -537,6 +537,7 @@ TestIVFBuild(const fixtures::IVFResourcePtr& resource) {
     using namespace fixtures;
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
+    std::vector<int32_t> search_threads_counts{1, 3};
     constexpr static const char* search_param_tmp2 = R"(
         {{
             "ivf": {{
@@ -557,9 +558,7 @@ TestIVFBuild(const fixtures::IVFResourcePtr& resource) {
                     if (base_quantization_str == "fp16") {
                         recall *= (1 - dim / 8192.0F);
                     }
-                    auto search_thread_count = GENERATE(1, 3);
-                    auto search_param =
-                        fmt::format(search_param_tmp2, std::max(200, count), search_thread_count);
+
                     INFO(
                         fmt::format("metric_type: {}, dim: {}, base_quantization_str: {}, "
                                     "train_type: {}, recall: {}",
@@ -584,7 +583,11 @@ TestIVFBuild(const fixtures::IVFResourcePtr& resource) {
                         dim, resource->base_count, metric_type);
                     IVFTestIndex::TestBuildIndex(index, dataset, true);
                     if (index->CheckFeature(vsag::SUPPORT_BUILD)) {
-                        IVFTestIndex::TestGeneral(index, dataset, search_param, recall);
+                        for (auto search_thread_count : search_threads_counts) {
+                            auto search_param = fmt::format(
+                                search_param_tmp2, std::max(200, count), search_thread_count);
+                            IVFTestIndex::TestGeneral(index, dataset, search_param, recall);
+                        }
                     }
                     vsag::Options::Instance().set_block_size_limit(origin_size);
                 }
