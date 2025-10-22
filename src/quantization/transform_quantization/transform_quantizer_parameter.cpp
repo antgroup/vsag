@@ -16,7 +16,6 @@
 #include "transform_quantizer_parameter.h"
 
 #include "impl/logger/logger.h"
-#include "inner_string_params.h"
 
 namespace vsag {
 
@@ -31,9 +30,23 @@ TransformQuantizerParameter::FromJson(const JsonType& json) {
         chain_str = json[TQ_CHAIN].GetString();
         this->tq_chain_ = SplitString(chain_str);
     }
+    if (this->tq_chain_.size() <= 1) {
+        throw VsagException(
+            ErrorType::INVALID_ARGUMENT,
+            fmt::format("tq_chain: \"{}\" must contains 1 or more transformer and 1 quantizer, "
+                        "e.g., tq_chain: \"rom, fp32\""),
+            chain_str);
+    }
+
+    auto quantizer_type = tq_chain_.back();
+    if (not TransformQuantizerParameter::IsValidQuantizationType(quantizer_type)) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            fmt::format("base quantizer: \"{}\" is invalid"),
+                            quantizer_type);
+    }
 
     base_quantizer_json_ = json;
-    base_quantizer_json_[QUANTIZATION_TYPE_KEY].SetString(tq_chain_.back());
+    base_quantizer_json_[QUANTIZATION_TYPE_KEY].SetString(quantizer_type);
     tq_chain_.pop_back();
 }
 
@@ -79,6 +92,7 @@ TransformQuantizerParameter::ToJson() const {
     auto tmp_tq_chain = tq_chain_;
     tmp_tq_chain.emplace_back(json[QUANTIZATION_TYPE_KEY].GetString());
     json[TQ_CHAIN].SetString(MergeStrings(tmp_tq_chain));
+    json[QUANTIZATION_TYPE_KEY].SetString(QUANTIZATION_TYPE_VALUE_TQ);
     return json;
 }
 

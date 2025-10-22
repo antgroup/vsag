@@ -17,6 +17,8 @@
 
 #include <fmt/format.h>
 
+#include <unordered_set>
+
 #include "fp32_quantizer_parameter.h"
 #include "inner_string_params.h"
 #include "product_quantization/pq_fastscan_quantizer_parameter.h"
@@ -79,6 +81,24 @@ QuantizerParameter::GetQuantizerParameterByJson(const JsonType& json) {
 
     return quantizer_param;
 }
+
+bool
+QuantizerParameter::IsValidQuantizationType(const std::string& type_name) {
+    static const std::unordered_set<std::string> valid_types = {QUANTIZATION_TYPE_VALUE_FP32,
+                                                                QUANTIZATION_TYPE_VALUE_SQ8,
+                                                                QUANTIZATION_TYPE_VALUE_SQ8_UNIFORM,
+                                                                QUANTIZATION_TYPE_VALUE_PQ,
+                                                                QUANTIZATION_TYPE_VALUE_SQ4,
+                                                                QUANTIZATION_TYPE_VALUE_SQ4_UNIFORM,
+                                                                QUANTIZATION_TYPE_VALUE_BF16,
+                                                                QUANTIZATION_TYPE_VALUE_FP16,
+                                                                QUANTIZATION_TYPE_VALUE_RABITQ,
+                                                                QUANTIZATION_TYPE_VALUE_SPARSE,
+                                                                QUANTIZATION_TYPE_VALUE_PQFS};
+
+    return valid_types.find(type_name) != valid_types.end();
+}
+
 QuantizerParameter::QuantizerParameter(std::string name) : name_(std::move(name)) {
 }
 }  // namespace vsag

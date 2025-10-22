@@ -19,10 +19,10 @@
 
 #include "data_type.h"
 #include "fixtures.h"
-#include "fp32_quantizer.h"
 #include "iostream"
 #include "quantization/computer.h"
 #include "quantizer.h"
+#include "quantizer_headers.h"
 #include "simd/normalize.h"
 #include "simd/simd.h"
 #include "storage/serialization_template_test.h"
@@ -310,8 +310,8 @@ TestComputer(Quantizer<T>& quant,
              float error = 1e-5f,
              float related_error = 1.0f,
              bool retrain = true,
-             float unbounded_numeric_error_rate = 1.0f,
-             float unbounded_related_error_rate = 1.0f) {
+             float unbounded_numeric_error_rate = 0.5f,
+             float unbounded_related_error_rate = 0.5f) {
     auto query_count = 10;
     bool need_normalize = false;
     auto vecs = fixtures::generate_vectors(count, dim, need_normalize);
@@ -384,8 +384,8 @@ TestSerializeAndDeserialize(Quantizer<T>& quant1,
                             uint32_t count,
                             float error = 1e-5f,
                             float related_error = 1.0f,
-                            float unbounded_numeric_error_rate = 1.0f,
-                            float unbounded_related_error_rate = 1.0f,
+                            float unbounded_numeric_error_rate = 0.5f,
+                            float unbounded_related_error_rate = 0.5f,
                             bool is_rabitq = false) {
     auto vecs = fixtures::generate_vectors(count, dim);
     quant1.ReTrain(vecs.data(), count);
