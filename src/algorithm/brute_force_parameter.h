@@ -14,6 +14,7 @@
 // limitations under the License.
 
 #pragma once
+#include "index_search_parameter.h"
 #include "inner_index_parameter.h"
 #include "typing.h"
 #include "utils/pointer_define.h"
@@ -37,5 +38,19 @@ public:
 };
 
 DEFINE_POINTER(BruteForceParameter);
+
+class BruteForceSearchParameters : public IndexSearchParameter {
+public:
+    static BruteForceSearchParameters
+    FromJson(const std::string& json_string) {
+        if (json_string.empty()) {
+            return BruteForceSearchParameters();
+        }
+        auto params = JsonType::Parse(json_string);
+        BruteForceSearchParameters obj;
+        obj.IndexSearchParameter::FromJson(params);
+        return obj;
+    }
+};
 
 }  // namespace vsag

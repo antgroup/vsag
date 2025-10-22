@@ -87,4 +87,35 @@ IVFParameter::CheckCompatibility(const ParamPtr& other) const {
     }
     return true;
 }
+
+IVFSearchParameters
+IVFSearchParameters::FromJson(const std::string& json_string) {
+    JsonType params = JsonType::Parse(json_string);
+
+    IVFSearchParameters obj;
+
+    CHECK_ARGUMENT(params.Contains(INDEX_TYPE_IVF),
+                   fmt::format("parameters must contains {}", INDEX_TYPE_IVF));
+
+    obj.IndexSearchParameter::FromJson(params[INDEX_TYPE_IVF]);
+
+    // set obj.scan_buckets_count
+    CHECK_ARGUMENT(params[INDEX_TYPE_IVF].Contains(IVF_SEARCH_PARAM_SCAN_BUCKETS_COUNT),
+                   fmt::format("parameters[{}] must contains {}",
+                               INDEX_TYPE_IVF,
+                               IVF_SEARCH_PARAM_SCAN_BUCKETS_COUNT));
+    obj.scan_buckets_count = params[INDEX_TYPE_IVF][IVF_SEARCH_PARAM_SCAN_BUCKETS_COUNT].GetInt();
+
+    // set obj.topk_factor
+    if (params[INDEX_TYPE_IVF].Contains(SEARCH_PARAM_FACTOR)) {
+        obj.topk_factor = params[INDEX_TYPE_IVF][SEARCH_PARAM_FACTOR].GetFloat();
+    }
+
+    // set obj.first_order_scan_ratio
+    if (params[INDEX_TYPE_IVF].Contains(GNO_IMI_SEARCH_PARAM_FIRST_ORDER_SCAN_RATIO)) {
+        obj.first_order_scan_ratio =
+            params[INDEX_TYPE_IVF][GNO_IMI_SEARCH_PARAM_FIRST_ORDER_SCAN_RATIO].GetFloat();
+    }
+    return obj;
+}
 }  // namespace vsag
