@@ -421,11 +421,9 @@ TestIndex::TestKnnSearch(const IndexPtr& index,
             if (res.has_value()) {
                 REQUIRE(res.value()->GetDim() == 0);
             }
+            return;
         } else {
             REQUIRE(res.has_value() == expected_success);
-        }
-        if (!expected_success) {
-            return;
         }
         REQUIRE(res.value()->GetDim() == topk);
         auto result = res.value()->GetIds();
