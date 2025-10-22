@@ -231,6 +231,7 @@ const std::unordered_map<std::string, std::string> DEFAULT_MAP = {
     {"RAW_VECTOR_KEY", RAW_VECTOR_KEY},
     {"ATTR_HAS_BUCKETS_KEY", ATTR_HAS_BUCKETS_KEY},
     {"ATTR_PARAMS_KEY", ATTR_PARAMS_KEY},
-};
+    {"RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY", RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY},
+    {"TQ_CHAIN", TQ_CHAIN}};
 
 }  // namespace vsag

@@ -65,9 +65,6 @@ SQ4UniformQuantizer<metric>::SQ4UniformQuantizer(int dim, Allocator* allocator, 
         this->code_size_ += ceil_int(sizeof(sum_type), static_cast<int64_t>(align_size));
     }
 
-    // align 64 bytes (512 bits) to avoid illegal memory access in SIMD
-    this->code_size_ = ceil_int(this->code_size_, 64);
-
     this->query_code_size_ = this->code_size_;
 }
 
