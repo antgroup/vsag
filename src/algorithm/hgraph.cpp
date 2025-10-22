@@ -1107,6 +1107,7 @@ HGraph::InitFeatures() {
     // concurrency
     this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_SEARCH_CONCURRENT);
     this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_ADD_CONCURRENT);
+    this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_ADD_SEARCH_DELETE_CONCURRENT);
     // serialize
     this->index_feature_list_->SetFeatures({
         IndexFeature::SUPPORT_DESERIALIZE_BINARY_SET,
@@ -1615,7 +1616,6 @@ HGraph::GetCodeByInnerId(InnerIdType inner_id, uint8_t* data) const {
 
 bool
 HGraph::Remove(int64_t id) {
-    // TODO(inbao): support thread safe remove
     auto inner_id = this->label_table_->GetIdByLabel(id);
     if (inner_id == this->entry_point_id_) {
         bool find_new_ep = false;
@@ -1637,12 +1637,15 @@ HGraph::Remove(int64_t id) {
             route_graphs_.pop_back();
         }
     }
-    for (int level = static_cast<int>(route_graphs_.size()) - 1; level >= 0; --level) {
-        this->route_graphs_[level]->DeleteNeighborsById(inner_id);
+    {
+        std::scoped_lock label_lock(this->label_lookup_mutex_);
+        for (int level = static_cast<int>(route_graphs_.size()) - 1; level >= 0; --level) {
+            this->route_graphs_[level]->DeleteNeighborsById(inner_id);
+        }
+        this->bottom_graph_->DeleteNeighborsById(inner_id);
+        this->label_table_->Remove(id);
+        delete_count_++;
     }
-    this->bottom_graph_->DeleteNeighborsById(inner_id);
-    this->label_table_->Remove(id);
-    delete_count_++;
     return true;
 }
 
