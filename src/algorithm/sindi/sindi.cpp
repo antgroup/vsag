@@ -334,10 +334,16 @@ SINDI::Deserialize(StreamReader& reader) {
         JsonType jsonify_basic_info = metadata->Get("basic_info");
         // Check if the index parameter is compatible
         {
-            auto param = jsonify_basic_info[INDEX_PARAM];
+            auto param = jsonify_basic_info[INDEX_PARAM].GetString();
             SINDIParameterPtr index_param = std::make_shared<SINDIParameter>();
-            index_param->FromJson(param);
-            this->create_param_ptr_->CheckCompatibility(index_param);
+            index_param->FromString(param);
+            if (not this->create_param_ptr_->CheckCompatibility(index_param)) {
+                auto message = fmt::format("SINDI index parameter not match, current: {}, new: {}",
+                                           this->create_param_ptr_->ToString(),
+                                           index_param->ToString());
+                logger::error(message);
+                throw VsagException(ErrorType::INVALID_ARGUMENT, message);
+            }
         }
     }
 
