@@ -69,7 +69,7 @@ SINDI::Add(const DatasetPtr& base) {
         if (sparse_vector.len_ <= 0) {
             failed_ids.push_back(ids[i]);
             logger::warn(
-                "sparse_vectors.len_ ({}) is invalid for id ({})", sparse_vector.len_, ids[i]);
+                "sparse_vector.len_ ({}) is invalid for id ({})", sparse_vector.len_, ids[i]);
             continue;
         }
 
