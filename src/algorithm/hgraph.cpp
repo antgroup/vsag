@@ -1958,7 +1958,7 @@ std::string
 HGraph::GetStats() const {
     JsonType stats;
     int64_t topk = DEFAULT_TOPK;
-    uint64_t sample_size = std::min(QUERY_SAMPLE_SIZE, this->total_count_);
+    uint64_t sample_size = std::min(QUERY_SAMPLE_SIZE, this->total_count_.load());
     Vector<float> sample_base_datas(dim_ * sample_size, 0.0F, allocator_);
     if (this->total_count_ == 0) {
         stats["total_count"].SetInt(0);
