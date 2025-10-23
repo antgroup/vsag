@@ -1639,7 +1639,7 @@ HGraph::Remove(int64_t id) {
     }
     {
         {
-            LockGuard lock(neighbors_mutex_, inner_id);
+            std::scoped_lock lock(this->global_mutex_);
             for (int level = static_cast<int>(route_graphs_.size()) - 1; level >= 0; --level) {
                 this->route_graphs_[level]->DeleteNeighborsById(inner_id);
             }
