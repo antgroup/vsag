@@ -1638,11 +1638,14 @@ HGraph::Remove(int64_t id) {
         }
     }
     {
-        std::scoped_lock label_lock(this->label_lookup_mutex_);
-        for (int level = static_cast<int>(route_graphs_.size()) - 1; level >= 0; --level) {
-            this->route_graphs_[level]->DeleteNeighborsById(inner_id);
+        {
+            LockGuard lock(neighbors_mutex_, inner_id);
+            for (int level = static_cast<int>(route_graphs_.size()) - 1; level >= 0; --level) {
+                this->route_graphs_[level]->DeleteNeighborsById(inner_id);
+            }
+            this->bottom_graph_->DeleteNeighborsById(inner_id);
         }
-        this->bottom_graph_->DeleteNeighborsById(inner_id);
+        std::scoped_lock label_lock(this->label_lookup_mutex_);
         this->label_table_->Remove(id);
         delete_count_++;
     }
