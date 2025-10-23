@@ -26,12 +26,12 @@ GenerateDataset(int32_t k, int32_t dim, uint64_t count, std::vector<int>& labels
     labels.clear();
     labels.resize(k, 0);
 
-    auto centroids = fixtures::generate_vectors(k, dim, false, 315);
+    auto centroids = fixtures::generate_vectors(k, dim, /*normalize=*/true, /*seed=*/315);
 
     for (int64_t i = 0; i < count; ++i) {
         auto label = random() % k;
         for (int64_t j = 0; j < dim; ++j) {
-            result[i * dim + j] = centroids[label * dim + j] + 0.0002;
+            result[i * dim + j] = centroids[label * dim + j] + /*bias*/ 0.00001F;
         }
         labels[label]++;
     }
