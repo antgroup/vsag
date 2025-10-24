@@ -56,10 +56,7 @@ public:
     Train(const void* data, uint64_t count) override;
 
     InnerIdType
-    InsertVector(const void* vector,
-                 BucketIdType bucket_id,
-                 InnerIdType inner_id,
-                 const float* centroid = nullptr) override;
+    InsertVector(const void* vector, BucketIdType bucket_id, InnerIdType inner_id) override;
 
     InnerIdType*
     GetInnerIds(BucketIdType bucket_id) override {
@@ -262,19 +259,32 @@ template <typename QuantTmpl, typename IOTmpl>
 InnerIdType
 BucketDataCell<QuantTmpl, IOTmpl>::InsertVector(const void* vector,
                                                 BucketIdType bucket_id,
-                                                InnerIdType inner_id,
-                                                const float* centroid) {
+                                                InnerIdType inner_id) {
     check_valid_bucket_id(bucket_id);
+
+    Vector<float> centroid(this->quantizer_->GetDim(), this->allocator_);
+    Vector<float> sub_data(this->quantizer_->GetDim(), this->allocator_);
+    Vector<float> normalize_data(this->quantizer_->GetDim(), this->allocator_);
+    float res_score = 0.0F;
+    auto vector_ptr = static_cast<const float*>(vector);
+    if (use_residual_) {
+        strategy_->GetCentroid(bucket_id, centroid);
+        if (quantizer_->Metric() == MetricType::METRIC_TYPE_COSINE ||
+            quantizer_->Metric() == MetricType::METRIC_TYPE_IP) {
+            Normalize(vector_ptr, normalize_data.data(), quantizer_->GetDim());
+            vector_ptr = normalize_data.data();
+        }
+        FP32Sub(vector_ptr, centroid.data(), sub_data.data(), quantizer_->GetDim());
+        vector_ptr = sub_data.data();
+    }
     InnerIdType offset_id;
     ByteBuffer codes(static_cast<uint64_t>(code_size_), this->allocator_);
-    this->quantizer_->EncodeOne(static_cast<const float*>(vector), codes.data);
-    float res_score = 0.0F;
-    if (use_residual_ && this->quantizer_->Metric() == MetricType::METRIC_TYPE_L2SQR && centroid) {
-        Vector<float> compress_vector(this->quantizer_->GetDim(), this->allocator_);
-        this->quantizer_->DecodeOne(codes.data, compress_vector.data());
+    this->quantizer_->EncodeOne(static_cast<const float*>(vector_ptr), codes.data);
+    if (use_residual_ && quantizer_->Metric() == MetricType::METRIC_TYPE_L2SQR) {
+        this->quantizer_->DecodeOne(codes.data, normalize_data.data());
         res_score =
-            -2 * FP32ComputeIP(centroid, compress_vector.data(), this->quantizer_->GetDim()) -
-            FP32ComputeIP(centroid, centroid, this->quantizer_->GetDim());
+            -2 * FP32ComputeIP(centroid.data(), normalize_data.data(), this->quantizer_->GetDim()) -
+            FP32ComputeIP(centroid.data(), centroid.data(), this->quantizer_->GetDim());
     }
     {
         std::unique_lock lock(this->bucket_mutexes_[bucket_id]);

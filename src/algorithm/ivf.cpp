@@ -241,6 +241,9 @@ IVF::IVF(const IVFParameterPtr& param, const IndexCommonParam& common_param)
             FlattenInterface::MakeInstance(param->precise_codes_param, common_param);
     }
     this->use_residual_ = param->bucket_param->use_residual_;
+    if (this->use_residual_) {
+        this->bucket_->SetStrategy(partition_strategy_);
+    }
 
     this->thread_pool_ = common_param.thread_pool_;
     if (param->build_thread_count > 1 and this->thread_pool_ == nullptr) {
@@ -399,22 +402,8 @@ IVF::Add(const DatasetPtr& base) {
         for (int64_t j = 0; j < buckets_per_data_; ++j) {
             const auto* data_ptr = vectors + i * dim_;
             auto idx = i * buckets_per_data_ + j;
-            InnerIdType offset_id;
-            if (use_residual_) {
-                partition_strategy_->GetCentroid(buckets[idx], centroid);
-                if (metric_ == MetricType::METRIC_TYPE_COSINE) {
-                    Normalize(data_ptr, normalize_data.data(), dim_);
-                    data_ptr = normalize_data.data();
-                }
-                FP32Sub(data_ptr, centroid.data(), residual_data.data(), dim_);
-                offset_id = bucket_->InsertVector(residual_data.data(),
-                                                  buckets[idx],
-                                                  idx + current_num * buckets_per_data_,
-                                                  centroid.data());
-            } else {
-                offset_id = bucket_->InsertVector(
-                    data_ptr, buckets[idx], idx + current_num * buckets_per_data_);
-            }
+            InnerIdType offset_id = bucket_->InsertVector(
+                data_ptr, buckets[idx], idx + current_num * buckets_per_data_);
             if (j == 0) {
                 std::lock_guard lock(label_lookup_mutex_);
                 location_map_[i + current_num] =
