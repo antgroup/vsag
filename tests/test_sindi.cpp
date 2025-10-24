@@ -125,14 +125,33 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex,
         })";
         TestKnnSearch(index, dataset, invalid_search_param, 0.99, false);
     }
+    // invalid multi data
+    int64_t ids[2] = {114, 514};
+    vsag::SparseVector invalid_sv_array[2];
+    std::vector<uint32_t> sv_ids = {100};
+    std::vector<float> sv_vals = {0.5};
+    invalid_sv_array[0].len_ = 1;
+    invalid_sv_array[0].ids_ = sv_ids.data();
+    invalid_sv_array[0].vals_ = sv_vals.data();
+    invalid_sv_array[1].len_ = 0;
+
+    auto invalid_data = vsag::Dataset::Make();
+    invalid_data->NumElements(2)->SparseVectors(invalid_sv_array)->Ids(ids)->Owner(false);
+    auto insert_result = index->Add(invalid_data);
+    REQUIRE(insert_result.has_value());
+    auto failed_ids = insert_result.value();
+    REQUIRE(failed_ids.size() == 1);
+    REQUIRE(failed_ids[0] == ids[1]);
+
+    // invalid single data
     vsag::SparseVector sparse_vector;
     int64_t id = 7777;
     sparse_vector.len_ = 0;
     auto data = vsag::Dataset::Make();
     data->NumElements(1)->Owner(false)->SparseVectors(&sparse_vector)->Ids(&id);
-    auto insert_result = index->Add(data);
+    insert_result = index->Add(data);
     REQUIRE(insert_result.has_value());
-    auto failed_ids = insert_result.value();
+    failed_ids = insert_result.value();
     REQUIRE(failed_ids[0] == id);
     auto search_result = index->KnnSearch(data, 1, search_param);
     REQUIRE_FALSE(search_result.has_value());
