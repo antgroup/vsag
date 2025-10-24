@@ -13,16 +13,9 @@
 #  limitations under the License.
 
 import numpy as np
-import pickle
-import sys
 import json
-import os
-
 import sys
-sys.path.append('/tbase-project/vsag/build-release')  # 当前目录
-
-import _pyvsag
-print(dir(_pyvsag))
+import pyvsag
 
 def cal_recall(index, index_pointers, indices, values, ids, k, search_params):
     correct = 0
@@ -50,7 +43,7 @@ def SINDI_test():
             "window_size": 100000
         }
     })
-    index = _pyvsag.Index("sindi", index_params)
+    index = pyvsag.Index("sindi", index_params)
 
     index.build(index_pointers=index_pointers,
                 indices=indices,
@@ -67,10 +60,10 @@ def SINDI_test():
     # cal recall
     print("[build] sindi recall:", cal_recall(index, index_pointers, indices, values, ids, 1, search_params))
     filename = "./python_example_sindi.index"
-    file_sizes = index.save(filename)
+    index.save(filename)
 
     # deserialize and cal recall
-    index = _pyvsag.Index("sindi", index_params)
+    index = pyvsag.Index("sindi", index_params)
     index.load(filename)
     print("[deserialize] sindi recall:", cal_recall(index, index_pointers, indices, values, ids, 1, search_params))
 
