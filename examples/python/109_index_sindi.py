@@ -26,12 +26,84 @@ def cal_recall(index, index_pointers, indices, values, ids, k, search_params):
 
     return correct / len(ids)
 
+def convert_to_csr(vectors_with_metadata):
+    """
+    Convert a list of metadata-augmented sparse vectors to CSR format.
+
+    Args:
+        vectors_with_metadata (list of dict): Each item has:
+            {
+                "id": int,              # Business-level vector ID (e.g., item/user ID)
+                "features": dict        # Sparse features: {feature_dim_index: value}
+            }
+
+    Returns:
+        tuple:
+            - index_pointers (np.ndarray, uint32): CSR index_pointers array, shape (batch_size + 1,)
+            - indices (np.ndarray, uint32): Feature column indices, shape (nnz,)
+            - values (np.ndarray, float32): Non-zero values, shape (nnz,)
+            - ids (np.ndarray, int64): Original IDs for result mapping, shape (batch_size,)
+    """
+    index_pointers = [0]
+    indices = []
+    values = []
+    ids = []
+
+    for item in vectors_with_metadata:
+        vid = item["id"]
+        features = item["features"]
+
+        ids.append(vid)
+
+        sorted_features = sorted(features.items())
+
+        for feat_idx, feat_val in sorted_features:
+            indices.append(int(feat_idx))
+            values.append(float(feat_val))
+
+        index_pointers.append(len(indices))
+
+    return (
+        np.array(index_pointers, dtype=np.uint32),
+        np.array(indices, dtype=np.uint32),
+        np.array(values, dtype=np.float32),
+        np.array(ids, dtype=np.int64)
+    )
+
 def sindi_test():
-    # 3 elements with CSR format
-    index_pointers = np.array([0, 2, 5, 8], dtype=np.int32)
-    indices = np.array([0, 3, 1, 2, 4, 0, 1, 2])
-    values = np.array([1.0, 2.0, 1.5, 1.0, 3.0, 0.8, 0.9, 1.1], dtype=np.float32)
-    ids = np.array([1001, 1002, 1003], dtype=np.int64)
+    # Sparse vectors in DICT format.
+    vectors_in_dict = [
+        {"id": 1001, "features": {0: 1.0, 3: 2.0}},
+        {"id": 1002, "features": {1: 1.5, 2: 1.0, 4: 3.0}},
+        {"id": 1003, "features": {0: 0.8, 1: 0.9, 2: 1.1}}
+    ]
+
+    index_pointers, indices, values, ids = convert_to_csr(vectors_in_dict)
+
+    # Sparse vectors in CSR (Compressed Sparse Row) format.
+    # This format is used to represent multiple sparse vectors efficiently.
+
+    # index_pointers: array of start/end positions in `indices` and `values` for each vector.
+    #   Shape: (batch_size + 1,)
+    #   Example: [0, 2, 5, 8] means:
+    #       Vector 0: uses values[0:2]   -> 2 non-zero elements
+    #       Vector 1: uses values[2:5]   -> 3 non-zero elements
+    #       Vector 2: uses values[5:8]   -> 3 non-zero elements
+    assert list(index_pointers) == [0, 2, 5, 8]
+
+    # indices: column indices (feature dimensions) of non-zero values.
+    #   These are the "internal feature IDs" (e.g., vocabulary indices).
+    #   Must be uint32 to match C++ interface requirements.
+    assert list(indices) == [0, 3, 1, 2, 4, 0, 1, 2]
+
+    # values: actual floating-point values of non-zero elements.
+    #   Corresponds to TF-IDF weights, counts, or other sparse features.
+    assert np.allclose(values, [1.0, 2.0, 1.5, 1.0, 3.0, 0.8, 0.9, 1.1])
+
+    # ids: user-defined identifiers (labels) for each vector.
+    #   Not used in computation; only for tracking results (e.g., mapping ANN results back to business entities).
+    #   Example: item IDs, user IDs, document IDs.
+    assert list(ids) == [1001, 1002, 1003]
 
     # build index
     index_params = json.dumps({
