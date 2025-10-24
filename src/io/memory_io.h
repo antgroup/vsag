@@ -46,19 +46,19 @@ public:
         this->allocator_->Deallocate(start_);
     }
 
-    inline void
+    void
     WriteImpl(const uint8_t* data, uint64_t size, uint64_t offset);
 
-    inline bool
+    bool
     ReadImpl(uint64_t size, uint64_t offset, uint8_t* data) const;
 
-    [[nodiscard]] inline const uint8_t*
+    [[nodiscard]] const uint8_t*
     DirectReadImpl(uint64_t size, uint64_t offset, bool& need_release) const;
 
-    inline bool
+    bool
     MultiReadImpl(uint8_t* datas, uint64_t* sizes, uint64_t* offsets, uint64_t count) const;
 
-    inline void
+    void
     PrefetchImpl(uint64_t offset, uint64_t cache_line = 64);
 
 private:
@@ -74,41 +74,4 @@ private:
 private:
     uint8_t* start_{nullptr};
 };
-
-void
-MemoryIO::WriteImpl(const uint8_t* data, uint64_t size, uint64_t offset) {
-    check_and_realloc(size + offset);
-    memcpy(start_ + offset, data, size);
-}
-
-bool
-MemoryIO::ReadImpl(uint64_t size, uint64_t offset, uint8_t* data) const {
-    bool ret = check_valid_offset(size + offset);
-    if (ret) {
-        memcpy(data, start_ + offset, size);
-    }
-    return ret;
-}
-
-const uint8_t*
-MemoryIO::DirectReadImpl(uint64_t size, uint64_t offset, bool& need_release) const {
-    need_release = false;
-    if (check_valid_offset(size + offset)) {
-        return start_ + offset;
-    }
-    return nullptr;
-}
-bool
-MemoryIO::MultiReadImpl(uint8_t* datas, uint64_t* sizes, uint64_t* offsets, uint64_t count) const {
-    bool ret = true;
-    for (uint64_t i = 0; i < count; ++i) {
-        ret &= this->ReadImpl(sizes[i], offsets[i], datas);
-        datas += sizes[i];
-    }
-    return ret;
-}
-void
-MemoryIO::PrefetchImpl(uint64_t offset, uint64_t cache_line) {
-    PrefetchLines(this->start_ + offset, cache_line);
-}
 }  // namespace vsag
