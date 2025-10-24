@@ -337,28 +337,8 @@ IVF::Train(const DatasetPtr& data) {
         return;
     }
     partition_strategy_->Train(data);
-    const auto* data_ptr = data->GetFloat32Vectors();
-    Vector<float> train_data_buffer(allocator_);
     auto num_element = std::min(data->GetNumElements(), MAX_TRAIN_SIZE);
-    if (use_residual_) {
-        train_data_buffer.resize(num_element * dim_);
-        if (metric_ == MetricType::METRIC_TYPE_COSINE) {
-            for (int i = 0; i < num_element; ++i) {
-                Normalize(data_ptr + i * dim_, train_data_buffer.data() + i * dim_, dim_);
-            }
-            data_ptr = train_data_buffer.data();
-        }
-        Vector<float> centroid(dim_, allocator_);
-        auto buckets = partition_strategy_->ClassifyDatas(data_ptr, num_element, 1);
-        for (int i = 0; i < num_element; ++i) {
-            partition_strategy_->GetCentroid(buckets[i], centroid);
-            for (int j = 0; j < dim_; ++j) {
-                train_data_buffer[i * dim_ + j] = data_ptr[i * dim_ + j] - centroid[j];
-            }
-        }
-        data_ptr = train_data_buffer.data();
-    }
-    this->bucket_->Train(data_ptr, num_element);
+    this->bucket_->Train(data->GetFloat32Vectors(), num_element);
     if (use_reorder_) {
         this->reorder_codes_->Train(data->GetFloat32Vectors(), data->GetNumElements());
     }
@@ -985,26 +965,12 @@ IVF::CalDistanceById(const float* query, const int64_t* ids, int64_t count) cons
         this->reorder_codes_->Query(distances, computer, inner_ids.data(), count);
         return result;
     }
-    Vector<float> normalize_data(dim_, allocator_);
-    Vector<float> centroid(dim_, allocator_);
-    if (use_residual_ && metric_ == MetricType::METRIC_TYPE_COSINE) {
-        Normalize(query, normalize_data.data(), dim_);
-        query = normalize_data.data();
-    }
     auto computer = this->bucket_->FactoryComputer(query);
     for (int64_t i = 0; i < count; ++i) {
         auto inner_id = this->label_table_->GetIdByLabel(ids[i]);
         auto location = this->get_location(inner_id);
-        auto ip_distance = 0.0F;
-        if (use_residual_) {
-            partition_strategy_->GetCentroid(location.first, centroid);
-            ip_distance = FP32ComputeIP(query, centroid.data(), dim_);
-            if (metric_ == MetricType::METRIC_TYPE_L2SQR) {
-                ip_distance *= 2;
-            }
-        }
         distances[i] =
-            this->bucket_->QueryOneById(computer, location.first, location.second) - ip_distance;
+            this->bucket_->QueryOneById(computer, location.first, location.second);
     }
     return result;
 }
@@ -1017,24 +983,10 @@ IVF::CalcDistanceById(const float* query, int64_t id) const {
         this->reorder_codes_->Query(&dist, computer, &inner_id, 1);
         return dist;
     }
-    Vector<float> normalize_data(dim_, allocator_);
-    Vector<float> centroid(dim_, allocator_);
-    if (use_residual_ && metric_ == MetricType::METRIC_TYPE_COSINE) {
-        Normalize(query, normalize_data.data(), dim_);
-        query = normalize_data.data();
-    }
     auto computer = this->bucket_->FactoryComputer(query);
     auto inner_id = this->label_table_->GetIdByLabel(id);
     auto location = this->get_location(inner_id);
-    auto ip_distance = 0.0F;
-    if (use_residual_) {
-        partition_strategy_->GetCentroid(location.first, centroid);
-        ip_distance = FP32ComputeIP(query, centroid.data(), dim_);
-        if (metric_ == MetricType::METRIC_TYPE_L2SQR) {
-            ip_distance *= 2;
-        }
-    }
-    return this->bucket_->QueryOneById(computer, location.first, location.second) - ip_distance;
+    return this->bucket_->QueryOneById(computer, location.first, location.second);
 }
 
 void
