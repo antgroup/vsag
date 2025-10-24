@@ -449,7 +449,13 @@ IVF::Train(const DatasetPtr& data) {
             for (int64_t i = 0; i < sample_count; ++i) {
                 sampled_ids.push_back(original_ids[sampled_indices[i]]);
             }
-            sampled_dataset->Ids(sampled_ids.data())->Owner(false);
+            // Only set Ids if there are sampled ids
+            if (!sampled_ids.empty()) {
+                sampled_dataset->Ids(sampled_ids.data())->Owner(false);
+            } else {
+                // Optionally, clear Ids or handle empty case explicitly if needed
+                sampled_dataset->Ids(nullptr)->Owner(false);
+            }
         }
 
         train_data = sampled_dataset;
