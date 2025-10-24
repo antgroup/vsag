@@ -26,7 +26,7 @@ def cal_recall(index, index_pointers, indices, values, ids, k, search_params):
 
     return correct / len(ids)
 
-def SINDI_test():
+def sindi_test():
     # 3 elements with CSR format
     index_pointers = np.array([0, 2, 5, 8], dtype=np.int32)
     indices = np.array([0, 3, 1, 2, 4, 0, 1, 2])
@@ -69,5 +69,5 @@ def SINDI_test():
 
 
 if __name__ == '__main__':
-    SINDI_test()
+    sindi_test()
 

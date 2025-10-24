@@ -76,10 +76,10 @@ BuildSparseVectorsFromCSR(py::array_t<uint32_t> index_pointers,
         throw std::invalid_argument("all inputs must be 1-dimensional");
     }
 
-    uint32_t num_elements = buf_ptr.shape[0] - 1;
-    if (num_elements <= 0) {
+    if (buf_ptr.shape[0] < 2) {
         throw std::invalid_argument("index_pointers length must be at least 2");
     }
+    uint32_t num_elements = buf_ptr.shape[0] - 1;
 
     const uint32_t* ptr_data = index_pointers.data();
     const uint32_t* idx_data = indices.data();
@@ -123,8 +123,8 @@ BuildSparseVectorsFromCSR(py::array_t<uint32_t> index_pointers,
         uint32_t len = end - start;
 
         svs.sparse_vectors[i].len_ = len;
-        svs.sparse_vectors[i].ids_ = const_cast<uint32_t*>(idx_data + start);
-        svs.sparse_vectors[i].vals_ = const_cast<float*>(val_data + start);
+        svs.sparse_vectors[i].ids_ = idx_data + start;
+        svs.sparse_vectors[i].vals_ = val_data + start;
     }
 
     return svs;
