@@ -16,7 +16,7 @@
 #include "ivf.h"
 
 #include <set>
-
+#include <random>
 #include "attr/argparse.h"
 #include "attr/executor/executor.h"
 #include "impl/heap/standard_heap.h"
@@ -202,6 +202,18 @@ IVF::CheckAndMappingExternalParam(const JsonType& external_param,
                 BUILD_THREAD_COUNT_KEY,
             },
         },
+        {
+            IVF_TRAIN_SAMPLE_RATE_KEY,
+            {
+                IVF_TRAIN_SAMPLE_RATE_KEY,
+            },
+        },
+        {
+            IVF_TRAIN_SAMPLE_COUNT_KEY,
+            {
+                IVF_TRAIN_SAMPLE_COUNT_KEY,
+            },
+        },
     };
 
     if (common_param.data_type_ == DataTypes::DATA_TYPE_INT8) {
@@ -222,6 +234,8 @@ IVF::CheckAndMappingExternalParam(const JsonType& external_param,
 IVF::IVF(const IVFParameterPtr& param, const IndexCommonParam& common_param)
     : InnerIndexInterface(param, common_param),
       buckets_per_data_(param->buckets_per_data),
+      train_sample_rate_(param->train_sample_rate),
+      train_sample_count_(param->train_sample_count),
       location_map_(common_param.allocator_.get()) {
     this->bucket_ = BucketInterface::MakeInstance(param->bucket_param, common_param);
     if (this->bucket_ == nullptr) {
@@ -328,26 +342,123 @@ IVF::Build(const DatasetPtr& base) {
     return result;
 }
 
+namespace {
+
+// Generate random sampling index
+std::vector<int64_t>
+sample_indices_random(int64_t total_size, int64_t sample_count, std::shared_ptr<Allocator> allocator) {
+    std::vector<int64_t> indices;
+    indices.reserve(total_size);
+    for (int64_t i = 0; i < total_size; ++i) {
+        indices.push_back(i);
+    }
+
+    // Using modern random number generators
+    std::random_device rd;
+    std::mt19937 gen(rd());
+
+    // Fisher Yates shuffle algorithm, only shuffling the first sample_count elements
+    for (int64_t i = 0; i < sample_count && i < total_size; ++i) {
+        std::uniform_int_distribution<int64_t> dist(i, total_size - 1);
+        int64_t j = dist(gen);
+        std::swap(indices[i], indices[j]);
+    }
+
+    // Return the previous sample_count index
+    indices.resize(sample_count);
+    return indices;
+}
+
+// Calculate the actual number of samples based on the sampling rate or quantity
+int64_t
+calculate_sample_count(int64_t total_size, float sample_rate, int64_t sample_count) {
+    if (sample_count > 0) {
+        // If a sampling quantity is specified, use the sampling quantity
+        return std::min(sample_count, total_size);
+    } else if (sample_rate > 0.0f && sample_rate <= 1.0f) {
+        // If a sampling ratio is specified, calculate the sampling quantity
+        return static_cast<int64_t>(total_size * sample_rate);
+    } else {
+        // Default to using all data
+        return total_size;
+    }
+}
+
+} // anonymous namespace
+
 void
 IVF::Train(const DatasetPtr& data) {
     if (this->is_trained_) {
         return;
     }
-    partition_strategy_->Train(data);
-    const auto* data_ptr = data->GetFloat32Vectors();
+
+    int64_t total_elements = data->GetNumElements();
+
+    // calculate sample count
+    int64_t sample_count = calculate_sample_count(total_elements, train_sample_rate_, train_sample_count_);
+    
+    // Not exceeding the maximum training data limit
+    sample_count = std::min(sample_count, MAX_TRAIN_SIZE);  
+
+    DatasetPtr train_data = data;
+    Vector<float> sampled_data_buffer(allocator_);
+
+    // If sampling is needed and the sample count is less than the total data size
+    if (sample_count < total_elements) {
+        // Generate random sampling indices
+        auto sampled_indices = sample_indices_random(
+            total_elements,
+            sample_count,
+            std::shared_ptr<Allocator>(allocator_, [](Allocator*){}));
+
+        // Create a new dataset for training using the sampled data
+        sampled_data_buffer.resize(sample_count * dim_);
+        const auto* original_data = data->GetFloat32Vectors();
+
+        // Copy the sampled data
+        for (int64_t i = 0; i < sample_count; ++i) {
+            std::copy(original_data + sampled_indices[i] * dim_,
+                      original_data + (sampled_indices[i] + 1) * dim_,
+                      sampled_data_buffer.data() + i * dim_);
+        }
+
+        // Create a new dataset for training using the sampled data 
+        auto sampled_dataset = std::make_shared<DatasetImpl>();
+        sampled_dataset->NumElements(sample_count)
+                       ->Dim(dim_)
+                       ->Float32Vectors(sampled_data_buffer.data())
+                       ->Owner(false);
+
+        if (data->GetIds() != nullptr) {
+            Vector<int64_t> sampled_ids(allocator_);
+            sampled_ids.reserve(sample_count);
+            const auto* original_ids = data->GetIds();
+            for (int64_t i = 0; i < sample_count; ++i) {
+                sampled_ids.push_back(original_ids[sampled_indices[i]]);
+            }
+            sampled_dataset->Ids(sampled_ids.data())->Owner(false);
+        }
+
+        train_data = sampled_dataset;
+    }
+
+    // Use the sampled data to train the partition strategy
+    partition_strategy_->Train(train_data);
+
+    const auto* data_ptr = train_data->GetFloat32Vectors();
     Vector<float> train_data_buffer(allocator_);
-    auto num_element = std::min(data->GetNumElements(), MAX_TRAIN_SIZE);
+
     if (use_residual_) {
-        train_data_buffer.resize(num_element * dim_);
+        train_data_buffer.resize(sample_count * dim_);
         if (metric_ == MetricType::METRIC_TYPE_COSINE) {
-            for (int i = 0; i < num_element; ++i) {
+            for (int i = 0; i < sample_count; ++i) {
                 Normalize(data_ptr + i * dim_, train_data_buffer.data() + i * dim_, dim_);
             }
             data_ptr = train_data_buffer.data();
         }
         Vector<float> centroid(dim_, allocator_);
-        auto buckets = partition_strategy_->ClassifyDatas(data_ptr, num_element, 1);
-        for (int i = 0; i < num_element; ++i) {
+        auto buckets = partition_strategy_->ClassifyDatas(data_ptr, sample_count, 1);
+        for (int i = 0; i < sample_count; ++i) {
             partition_strategy_->GetCentroid(buckets[i], centroid);
             for (int j = 0; j < dim_; ++j) {
                 train_data_buffer[i * dim_ + j] = data_ptr[i * dim_ + j] - centroid[j];
@@ -355,12 +466,18 @@ IVF::Train(const DatasetPtr& data) {
         }
         data_ptr = train_data_buffer.data();
     }
-    this->bucket_->Train(data_ptr, num_element);
+
+    // Use the sampled data to train the bucket quantizer
+    this->bucket_->Train(data_ptr, sample_count);
+
     if (use_reorder_) {
+        // Reorder codes use the original data to train for better accuracy
         this->reorder_codes_->Train(data->GetFloat32Vectors(), data->GetNumElements());
     }
+
     this->is_trained_ = true;
 }
+
 
 std::vector<int64_t>
 IVF::Add(const DatasetPtr& base) {
