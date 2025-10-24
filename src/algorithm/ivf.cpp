@@ -345,13 +345,11 @@ IVF::Build(const DatasetPtr& base) {
 namespace {
 
 // Generate random sampling index
-std::vector<int64_t>
+Vector<int64_t>
 sample_indices_random(int64_t total_size, int64_t sample_count, std::shared_ptr<Allocator> allocator) {
-    std::vector<int64_t> indices;
-    indices.reserve(total_size);
-    for (int64_t i = 0; i < total_size; ++i) {
-        indices.push_back(i);
-    }
+    Vector<int64_t> indices(allocator.get());
+    indices.resize(total_size);
+    std::iota(indices.begin(), indices.end(), 0LL);
 
     // Using modern random number generators
     std::random_device rd;
