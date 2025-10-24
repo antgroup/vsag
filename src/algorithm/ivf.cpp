@@ -369,10 +369,23 @@ sample_indices_random(int64_t total_size, int64_t sample_count, std::shared_ptr<
     return indices;
 }
 
-// Calculate the actual number of samples based on the sampling rate or quantity
+/**
+ * Calculate the actual number of samples based on the sampling rate or quantity.
+ * If both sample_count and sample_rate are set, sample_count takes precedence.
+ * 
+ * @param total_size The total number of available samples.
+ * @param sample_rate The sampling rate (ratio, between 0.0 and 1.0).
+ * @param sample_count The explicit number of samples to use.
+ * @return The number of samples to use.
+ */
 int64_t
 calculate_sample_count(int64_t total_size, float sample_rate, int64_t sample_count) {
     if (sample_count > 0) {
+        // If both sample_count and sample_rate are set, sample_count overrides sample_rate.
+        if (sample_rate > 0.0f && sample_rate <= 1.0f) {
+            // Optionally log a warning to clarify override behavior
+            std::cerr << "[Warning] Both sample_count and sample_rate are set. sample_count overrides sample_rate." << std::endl;
+        }
         // If a sampling quantity is specified, use the sampling quantity
         return std::min(sample_count, total_size);
     } else if (sample_rate > 0.0f && sample_rate <= 1.0f) {
