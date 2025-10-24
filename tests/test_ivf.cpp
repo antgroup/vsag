@@ -913,7 +913,7 @@ TestIVFExportModel(const fixtures::IVFResourcePtr& resource) {
                         dim, resource->base_count, metric_type);
 
                     IVFTestIndex::TestBuildIndex(index, dataset, true);
-                    IVFTestIndex::TestExportModel(index, index2, dataset, search_param);
+                    IVFTestIndex::TestExportModel(index, index, dataset, search_param);
 
                     vsag::Options::Instance().set_block_size_limit(origin_size);
                 }
