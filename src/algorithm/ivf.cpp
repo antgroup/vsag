@@ -240,8 +240,7 @@ IVF::IVF(const IVFParameterPtr& param, const IndexCommonParam& common_param)
         this->reorder_codes_ =
             FlattenInterface::MakeInstance(param->precise_codes_param, common_param);
     }
-    this->use_residual_ = param->bucket_param->use_residual_;
-    if (this->use_residual_) {
+    if (param->bucket_param->use_residual_) {
         this->bucket_->SetStrategy(partition_strategy_);
     }
 
@@ -310,7 +309,7 @@ IVF::InitFeatures() {
 
     if (name == QUANTIZATION_TYPE_VALUE_FP32 and
         this->bucket_->GetMetricType() != MetricType::METRIC_TYPE_COSINE and
-        not this->use_residual_) {
+        not bucket_->use_residual_) {
         this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_GET_DATA_BY_IDS);
     }
 
@@ -376,9 +375,6 @@ IVF::Add(const DatasetPtr& base) {
     }
 
     auto add_func = [&](int64_t i) -> void {
-        Vector<float> normalize_data(dim_, allocator_);
-        Vector<float> residual_data(dim_, allocator_);
-        Vector<float> centroid(dim_, allocator_);
         for (int64_t j = 0; j < buckets_per_data_; ++j) {
             const auto* data_ptr = vectors + i * dim_;
             auto idx = i * buckets_per_data_ + j;
@@ -969,8 +965,7 @@ IVF::CalDistanceById(const float* query, const int64_t* ids, int64_t count) cons
     for (int64_t i = 0; i < count; ++i) {
         auto inner_id = this->label_table_->GetIdByLabel(ids[i]);
         auto location = this->get_location(inner_id);
-        distances[i] =
-            this->bucket_->QueryOneById(computer, location.first, location.second);
+        distances[i] = this->bucket_->QueryOneById(computer, location.first, location.second);
     }
     return result;
 }

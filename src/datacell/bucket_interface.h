@@ -118,6 +118,7 @@ public:
     BucketIdType bucket_count_{0};
     uint32_t code_size_{0};
     IVFPartitionStrategyPtr strategy_{nullptr};
+    bool use_residual_{false};
 };
 
 }  // namespace vsag

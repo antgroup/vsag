@@ -152,8 +152,6 @@ private:
 
     Allocator* const allocator_{nullptr};
 
-    bool use_residual_{false};
-
     Vector<Vector<float>> residual_bias_;
 
     MetricType metric_{MetricType::METRIC_TYPE_L2SQR};
@@ -174,11 +172,11 @@ BucketDataCell<QuantTmpl, IOTmpl>::BucketDataCell(const QuantizerParamPtr& quant
       bucket_mutexes_(bucket_count, common_param.allocator_.get()),
       allocator_(common_param.allocator_.get()),
       residual_bias_(bucket_count, Vector<float>(allocator_), allocator_),
-      use_residual_(use_residual),
-      metric_(common_param.metric_){
+      metric_(common_param.metric_) {
     this->bucket_count_ = bucket_count;
     this->quantizer_ = std::make_shared<QuantTmpl>(quantization_param, common_param);
     this->code_size_ = quantizer_->GetCodeSize();
+    this->use_residual_ = use_residual;
 
     for (int i = 0; i < bucket_count; ++i) {
         this->datas_.emplace_back(std::make_shared<IOTmpl>(io_param, common_param));
@@ -212,7 +210,8 @@ BucketDataCell<QuantTmpl, IOTmpl>::query_one_by_id(
         auto ip_distance = 0.0F;
         Vector<float> centroid(this->quantizer_->GetDim(), allocator_);
         strategy_->GetCentroid(bucket_id, centroid);
-        ip_distance = FP32ComputeIP(computer->raw_query_.data(), centroid.data(), this->quantizer_->GetDim());
+        ip_distance =
+            FP32ComputeIP(computer->raw_query_.data(), centroid.data(), this->quantizer_->GetDim());
         if (metric_ == MetricType::METRIC_TYPE_L2SQR) {
             ip_distance *= 2;
             ret = ret - residual_bias_[bucket_id][offset_id];
@@ -252,7 +251,8 @@ BucketDataCell<QuantTmpl, IOTmpl>::scan_bucket_by_id(float* result_dists,
     Vector<float> centroid(this->quantizer_->GetDim(), allocator_);
     if (use_residual_) {
         strategy_->GetCentroid(bucket_id, centroid);
-        ip_distance = FP32ComputeIP(computer->raw_query_.data(), centroid.data(), this->quantizer_->GetDim());
+        ip_distance =
+            FP32ComputeIP(computer->raw_query_.data(), centroid.data(), this->quantizer_->GetDim());
         if (metric_ == MetricType::METRIC_TYPE_L2SQR) {
             ip_distance *= 2;
             FP32Sub(result_dists, residual_bias_[bucket_id].data(), result_dists, offset);
@@ -275,9 +275,8 @@ BucketDataCell<QuantTmpl, IOTmpl>::FactoryComputer(const void* query) {
         if (metric_ == MetricType::METRIC_TYPE_COSINE) {
             Normalize(float_query, comp->raw_query_.data(), this->quantizer_->GetDim());
         } else {
-            memcpy(comp->raw_query_.data(),
-                   float_query,
-                   sizeof(float) * this->quantizer_->GetDim());
+            memcpy(
+                comp->raw_query_.data(), float_query, sizeof(float) * this->quantizer_->GetDim());
         }
         float_query = comp->raw_query_.data();
     }
@@ -291,7 +290,7 @@ BucketDataCell<QuantTmpl, IOTmpl>::Train(const void* data, uint64_t count) {
     Vector<float> train_data_buffer(allocator_);
     if (use_residual_) {
         auto data_ptr = static_cast<const float*>(data);
-        auto dim =  this->quantizer_->GetDim();
+        auto dim = this->quantizer_->GetDim();
         train_data_buffer.resize(count * dim);
         if (metric_ == MetricType::METRIC_TYPE_COSINE) {
             for (int i = 0; i < count; ++i) {
