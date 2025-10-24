@@ -294,8 +294,6 @@ public:
     }
 
 private:
-    std::shared_ptr<vsag::Resource> resource_;
-    std::shared_ptr<vsag::Engine> engine_;
     std::shared_ptr<vsag::Index> index_;
 };
 
