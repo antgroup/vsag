@@ -207,8 +207,17 @@ BucketDataCell<QuantTmpl, IOTmpl>::query_one_by_id(
     if (need_release) {
         this->datas_[bucket_id]->Release(codes);
     }
-    if (use_residual_ && metric_ == MetricType::METRIC_TYPE_L2SQR) {
-        ret -= residual_bias_[bucket_id][offset_id];
+
+    if (use_residual_) {
+        auto ip_distance = 0.0F;
+        Vector<float> centroid(this->quantizer_->GetDim(), allocator_);
+        strategy_->GetCentroid(bucket_id, centroid);
+        ip_distance = FP32ComputeIP(computer->raw_query_.data(), centroid.data(), this->quantizer_->GetDim());
+        if (metric_ == MetricType::METRIC_TYPE_L2SQR) {
+            ip_distance *= 2;
+            ret = ret - residual_bias_[bucket_id][offset_id];
+        }
+        ret -= ip_distance;
     }
     return ret;
 }
@@ -279,6 +288,27 @@ BucketDataCell<QuantTmpl, IOTmpl>::FactoryComputer(const void* query) {
 template <typename QuantTmpl, typename IOTmpl>
 void
 BucketDataCell<QuantTmpl, IOTmpl>::Train(const void* data, uint64_t count) {
+    Vector<float> train_data_buffer(allocator_);
+    if (use_residual_) {
+        auto data_ptr = static_cast<const float*>(data);
+        auto dim =  this->quantizer_->GetDim();
+        train_data_buffer.resize(count * dim);
+        if (metric_ == MetricType::METRIC_TYPE_COSINE) {
+            for (int i = 0; i < count; ++i) {
+                Normalize(data_ptr + i * dim, train_data_buffer.data() + i * dim, dim);
+            }
+            data_ptr = train_data_buffer.data();
+        }
+        Vector<float> centroid(this->quantizer_->GetDim(), allocator_);
+        auto buckets = strategy_->ClassifyDatas(data_ptr, count, 1);
+        for (int i = 0; i < count; ++i) {
+            strategy_->GetCentroid(buckets[i], centroid);
+            for (int j = 0; j < dim; ++j) {
+                train_data_buffer[i * dim + j] = data_ptr[i * dim + j] - centroid[j];
+            }
+        }
+        data = train_data_buffer.data();
+    }
     this->quantizer_->Train(reinterpret_cast<const float*>(data), count);
 }
 
