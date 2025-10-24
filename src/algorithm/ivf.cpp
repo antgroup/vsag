@@ -345,45 +345,40 @@ IVF::Build(const DatasetPtr& base) {
 namespace {
 
 // Generate random sampling index
-Vector<int64_t>
-sample_indices_random(int64_t total_size, int64_t sample_count, std::shared_ptr<Allocator> allocator) {
-    Vector<int64_t> indices(allocator.get());
-    indices.resize(total_size);
-    std::iota(indices.begin(), indices.end(), 0LL);
+vsag::Vector<int64_t>
+sample_indices_random(int64_t total_size,
+                      int64_t sample_count,
+                      std::shared_ptr<Allocator> allocator)
+{
+    //  Reservoir sampling: only save sample_count elements
+    vsag::Vector<int64_t> indices(allocator.get());
+    indices.reserve(sample_count);
 
-    // Using modern random number generators
+    // 0 .. sample_count-1 先全部放入蓄水池 
+    int64_t actual_size = std::min(sample_count, total_size);
+    indices.resize(actual_size);
+    std::iota(indices.begin(), indices.end(), 0);
+
+    // 使用现代 RNG 
     std::random_device rd;
-    std::mt19937 gen(rd());
+    std::mt19937_64 gen(rd());
 
-    // Fisher Yates shuffle algorithm, only shuffling the first sample_count elements
-    for (int64_t i = 0; i < sample_count && i < total_size; ++i) {
-        std::uniform_int_distribution<int64_t> dist(i, total_size - 1);
+    //顺序扫描剩余元素，以概率替换蓄水池中的样本
+    for (int64_t i = sample_count; i < total_size; ++i) {
+        std::uniform_int_distribution<int64_t> dist(0, i);   // [0, i]
         int64_t j = dist(gen);
-        std::swap(indices[i], indices[j]);
+        if (j < sample_count) {                              // 被选中
+            indices[j] = i;
+        }
     }
-
-    // Return the previous sample_count index
-    indices.resize(sample_count);
+    // 最终 indices 大小 == sample_count，无需再 resize 
     return indices;
 }
 
-/**
- * Calculate the actual number of samples based on the sampling rate or quantity.
- * If both sample_count and sample_rate are set, sample_count takes precedence.
- * 
- * @param total_size The total number of available samples.
- * @param sample_rate The sampling rate (ratio, between 0.0 and 1.0).
- * @param sample_count The explicit number of samples to use.
- * @return The number of samples to use.
- */
+// Calculate the actual number of samples based on the sampling rate or quantity
 int64_t
 calculate_sample_count(int64_t total_size, float sample_rate, int64_t sample_count) {
     if (sample_count > 0) {
-        // If both sample_count and sample_rate are set, sample_count overrides sample_rate.
-        if (sample_rate > 0.0f && sample_rate <= 1.0f) {
-            // Optionally log a warning to clarify override behavior
-            std::cerr << "[Warning] Both sample_count and sample_rate are set. sample_count overrides sample_rate." << std::endl;
-        }
         // If a sampling quantity is specified, use the sampling quantity
         return std::min(sample_count, total_size);
     } else if (sample_rate > 0.0f && sample_rate <= 1.0f) {
@@ -413,7 +408,7 @@ IVF::Train(const DatasetPtr& data) {
 
     DatasetPtr train_data = data;
     Vector<float> sampled_data_buffer(allocator_);
-    Vector<int64_t> sampled_ids(allocator_);
+    Vector<int64_t> sampled_ids(allocator_);  // Move to outer scope to extend lifetime
 
     // If sampling is needed and the sample count is less than the total data size
     if (sample_count < total_elements) {
@@ -442,29 +437,15 @@ IVF::Train(const DatasetPtr& data) {
                        ->Owner(false);
 
         if (data->GetIds() != nullptr) {
-            
             sampled_ids.reserve(sample_count);
             const auto* original_ids = data->GetIds();
             for (int64_t i = 0; i < sample_count; ++i) {
                 sampled_ids.push_back(original_ids[sampled_indices[i]]);
             }
-            // Only set Ids if there are sampled ids
-            if (!sampled_ids.empty()) {
-                sampled_dataset->Ids(sampled_ids.data())->Owner(false);
-            } else {
-                // Optionally, clear Ids or handle empty case explicitly if needed
-                sampled_dataset->Ids(nullptr)->Owner(false);
-            }
+            sampled_dataset->Ids(sampled_ids.data())->Owner(false);
         }
 
         train_data = sampled_dataset;
-    }
-
-    // Warn if sample_count is very small
-    constexpr int64_t kMinSampleCountWarning = 100;
-    if (sample_count < kMinSampleCountWarning) {
-        LOG(WARNING) << "Sample count (" << sample_count << ") is very small. "
-                     << "This may lead to unstable or ineffective partition training.";
     }
 
     // Use the sampled data to train the partition strategy
