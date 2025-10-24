@@ -413,6 +413,7 @@ IVF::Train(const DatasetPtr& data) {
 
     DatasetPtr train_data = data;
     Vector<float> sampled_data_buffer(allocator_);
+    Vector<int64_t> sampled_ids(allocator_);
 
     // If sampling is needed and the sample count is less than the total data size
     if (sample_count < total_elements) {
@@ -441,7 +442,7 @@ IVF::Train(const DatasetPtr& data) {
                        ->Owner(false);
 
         if (data->GetIds() != nullptr) {
-            Vector<int64_t> sampled_ids(allocator_);
+            
             sampled_ids.reserve(sample_count);
             const auto* original_ids = data->GetIds();
             for (int64_t i = 0; i < sample_count; ++i) {
