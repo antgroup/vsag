@@ -123,8 +123,8 @@ BuildSparseVectorsFromCSR(py::array_t<uint32_t> index_pointers,
         uint32_t len = end - start;
 
         svs.sparse_vectors[i].len_ = len;
-        svs.sparse_vectors[i].ids_ = idx_data + start;
-        svs.sparse_vectors[i].vals_ = val_data + start;
+        svs.sparse_vectors[i].ids_ = const_cast<uint32_t*>(idx_data + start);
+        svs.sparse_vectors[i].vals_ = const_cast<float*>(val_data + start);
     }
 
     return svs;
