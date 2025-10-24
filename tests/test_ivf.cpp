@@ -483,14 +483,9 @@ TestIVFBuildWithResidual(const fixtures::IVFResourcePtr& resource) {
         {"pqfs,fp32", 0.82},
     };
     for (auto metric_type : resource->metric_types) {
-        metric_type = "cosine";
         for (auto dim : resource->dims) {
-            dim = 9;
             for (auto train_type : resource->train_types) {
-                train_type = "random";
                 for (auto [base_quantization_str, recall] : tmp_test_cases) {
-                    base_quantization_str = "fp32";
-                    recall = 0.90F;
                     auto count = std::min(300, static_cast<int32_t>(dim / 4));
                     if (train_type == "kmeans") {
                         recall *= 0.8F;  // Kmeans may not achieve high recall in random datasets

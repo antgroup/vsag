@@ -709,10 +709,6 @@ DistHeapPtr
 IVF::search(const DatasetPtr& query, const InnerSearchParam& param) const {
     const auto* query_data = query->GetFloat32Vectors();
     Vector<float> normalize_data(dim_, allocator_);
-    if (use_residual_ && metric_ == MetricType::METRIC_TYPE_COSINE) {
-        Normalize(query_data, normalize_data.data(), dim_);
-        query_data = normalize_data.data();
-    }
     auto candidate_buckets = partition_strategy_->ClassifyDatasForSearch(query_data, 1, param);
     auto computer = bucket_->FactoryComputer(query_data);
 
@@ -765,15 +761,6 @@ IVF::search(const DatasetPtr& query, const InnerSearchParam& param) const {
             if (bucket_size > dist.size()) {
                 dist.resize(bucket_size);
             }
-            auto ip_distance = 0.0F;
-
-            if (use_residual_) {
-                partition_strategy_->GetCentroid(bucket_id, centroid);
-                ip_distance = FP32ComputeIP(query_data, centroid.data(), dim_);
-                if (metric_ == MetricType::METRIC_TYPE_L2SQR) {
-                    ip_distance *= 2;
-                }
-            }
 
             bucket_->ScanBucketById(dist.data(), computer, bucket_id);
             Filter* attr_ft = nullptr;
@@ -787,8 +774,6 @@ IVF::search(const DatasetPtr& query, const InnerSearchParam& param) const {
                     continue;
                 }
                 if (ft == nullptr or ft->CheckValid(origin_id)) {
-                    dist[j] -= ip_distance;
-
                     if constexpr (mode == KNN_SEARCH) {
                         if (heap->Size() < topk or dist[j] < cur_heap_top) {
                             heap->Push(dist[j], ids[j]);
