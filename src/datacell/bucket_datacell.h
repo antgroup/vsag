@@ -207,10 +207,9 @@ BucketDataCell<QuantTmpl, IOTmpl>::query_one_by_id(
     }
 
     if (use_residual_) {
-        auto ip_distance = 0.0F;
         Vector<float> centroid(this->quantizer_->GetDim(), allocator_);
         strategy_->GetCentroid(bucket_id, centroid);
-        ip_distance =
+        auto ip_distance =
             FP32ComputeIP(computer->raw_query_.data(), centroid.data(), this->quantizer_->GetDim());
         if (metric_ == MetricType::METRIC_TYPE_L2SQR) {
             ip_distance *= 2;
