@@ -239,6 +239,7 @@ IVF::IVF(const IVFParameterPtr& param, const IndexCommonParam& common_param)
     if (this->use_reorder_) {
         this->reorder_codes_ =
             FlattenInterface::MakeInstance(param->precise_codes_param, common_param);
+        reorder_ = std::make_shared<FlattenReorder>(this->reorder_codes_, allocator_);
     }
     this->use_residual_ = param->bucket_param->use_residual_;
 
@@ -693,7 +694,7 @@ IVF::create_search_param(const std::string& parameters, const FilterPtr& filter)
 DatasetPtr
 IVF::reorder(int64_t topk, DistHeapPtr& input, const float* query) const {
     auto [dataset_results, dists, labels] = create_fast_dataset(topk, allocator_);
-    auto reorder_heap = Reorder::ReorderByFlatten(input, reorder_codes_, query, allocator_, topk);
+    auto reorder_heap = reorder_->Reorder(input, query, topk, allocator_);
     auto size = static_cast<int64_t>(reorder_heap->Size());
     for (int64_t j = size - 1; j >= 0; --j) {
         dists[j] = reorder_heap->Top().first;

@@ -250,7 +250,7 @@ TestBruteForceBuild(const fixtures::BruteForceResourcePtr& resource) {
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
     std::vector<int32_t> search_threads_counts{1, 3};
-    std::string search_param_tmp2 = R"(
+    constexpr static const char* search_param_tmp2 = R"(
     {{
         "parallelism": {}
     }})";
