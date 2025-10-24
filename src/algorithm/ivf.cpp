@@ -459,6 +459,13 @@ IVF::Train(const DatasetPtr& data) {
         train_data = sampled_dataset;
     }
 
+    // Warn if sample_count is very small
+    constexpr int64_t kMinSampleCountWarning = 100;
+    if (sample_count < kMinSampleCountWarning) {
+        LOG(WARNING) << "Sample count (" << sample_count << ") is very small. "
+                     << "This may lead to unstable or ineffective partition training.";
+    }
+
     // Use the sampled data to train the partition strategy
     partition_strategy_->Train(train_data);
 
