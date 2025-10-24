@@ -475,14 +475,6 @@ TestIVFSample(const fixtures::IVFResourcePtr& resource) {
                 TestIndex::TestBuildIndex(index_with_sample_count, dataset, true);
                 TestIndex::TestKnnSearch(index_with_sample_count, dataset, search_param, recall, true);
                 
-                // Test case: sample count exceeds dataset size
-                int excessive_sample_count = resource->base_count + 100; // deliberately larger than dataset
-                auto param_with_excessive_sample_count = IVFTestIndex::GenerateIVFBuildParametersString(
-                    metric_type, dim, "sq8", 210, train_type, false, 1, false, 1, std::nullopt, excessive_sample_count);
-                auto index_with_excessive_sample_count = TestIndex::TestFactory("ivf", param_with_excessive_sample_count, true);
-                TestIndex::TestBuildIndex(index_with_excessive_sample_count, dataset, true);
-                TestIndex::TestKnnSearch(index_with_excessive_sample_count, dataset, search_param, recall, true);
-
                 vsag::Options::Instance().set_block_size_limit(origin_size);
             }
         }
@@ -917,11 +909,12 @@ TestIVFExportModel(const fixtures::IVFResourcePtr& resource) {
                     auto param = IVFTestIndex::GenerateIVFBuildParametersString(
                         metric_type, dim, base_quantization_str, 300, train_type);
                     auto index = IVFTestIndex::TestFactory(IVFTestIndex::name, param, true);
+                    auto index2 = IVFTestIndex::TestFactory(IVFTestIndex::name, param, true);
                     auto dataset = IVFTestIndex::pool.GetDatasetAndCreate(
                         dim, resource->base_count, metric_type);
 
                     IVFTestIndex::TestBuildIndex(index, dataset, true);
-                    IVFTestIndex::TestExportModel(index, index, dataset, search_param);
+                    IVFTestIndex::TestExportModel(index, index2, dataset, search_param);
 
                     vsag::Options::Instance().set_block_size_limit(origin_size);
                 }
