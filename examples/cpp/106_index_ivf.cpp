@@ -22,7 +22,7 @@ main(int argc, char** argv) {
     vsag::init();
 
     /******************* Prepare Base Dataset *****************/
-    int64_t num_vectors = 10000;
+    int64_t num_vectors = 1000;
     int64_t dim = 128;
     std::vector<int64_t> ids(num_vectors);
     std::vector<float> datas(num_vectors * dim);
@@ -45,13 +45,14 @@ main(int argc, char** argv) {
     std::string ivf_build_params = R"(
     {
         "dtype": "float32",
-        "metric_type": "l2",
+        "metric_type": "cosine",
         "dim": 128,
         "index_param": {
             "buckets_count": 50,
             "base_quantization_type": "fp32",
             "partition_strategy_type": "ivf",
-            "ivf_train_type": "kmeans"
+            "ivf_train_type": "kmeans",
+            "use_residual": true
         }
     }
     )";
