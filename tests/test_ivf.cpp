@@ -443,12 +443,12 @@ TestIVFSample(const fixtures::IVFResourcePtr& resource) {
                 float recall = 0.84f; 
                 
                 if (train_type == "kmeans") {
-                    recall *= 0.8F;  
+                    recall *= 0.8f;  
                 }
                 
                 // Additional adjustment for random training type with sampling
                 if (train_type == "random") {
-                    recall *= 0.6F;  
+                    recall *= 0.6f;  
                 }
                 
                 INFO(fmt::format("Testing sample rate with metric_type: {}, dim: {}, train_type: {}, recall: {}", 
@@ -459,18 +459,7 @@ TestIVFSample(const fixtures::IVFResourcePtr& resource) {
                 std::string search_param = fmt::format(search_param_tmp, 30);
                 
                 // Test sampling ratio method using the extended parameter generator
-                // Use sampling rate instead of fixed sampling count for better adaptability
-                float sampling_rate;
-                if (resource->base_count <= 1000) {
-                    // PR test: 70% sampling rate
-                    sampling_rate = 0.7f;
-                } else {
-                    // Daily test: dynamic sampling based on dimension
-                    sampling_rate = 0.5f + (dim <= 32 ? 0.2f : 0.1f); 
-                    if (train_type == "kmeans" && sampling_rate < 0.5f) {
-                        sampling_rate = 0.5f; 
-                    }
-                }
+                float sampling_rate=0.6f;
                 auto param_with_sample_rate = IVFTestIndex::GenerateIVFBuildParametersString(
                     metric_type, dim, "sq8", 210, train_type, false, 1, false, 1, sampling_rate, std::nullopt);
                 auto index_with_sample_rate = TestIndex::TestFactory("ivf", param_with_sample_rate, true);
