@@ -30,6 +30,11 @@ PQFastScanQuantizerParameter::FromJson(const JsonType& json) {
         json[PRODUCT_QUANTIZATION_DIM].IsNumberInteger()) {
         this->pq_dim_ = json[PRODUCT_QUANTIZATION_DIM].GetInt();
     }
+    
+    if (json.Contains(PRODUCT_QUANTIZATION_TRAIN_SAMPLE_SIZE) &&
+        json[PRODUCT_QUANTIZATION_TRAIN_SAMPLE_SIZE].IsNumberInteger()) {
+        this->train_sample_size_ = json[PRODUCT_QUANTIZATION_TRAIN_SAMPLE_SIZE].GetInt();
+    }
 }
 
 JsonType
@@ -37,6 +42,7 @@ PQFastScanQuantizerParameter::ToJson() const {
     JsonType json;
     json[QUANTIZATION_TYPE_KEY].SetString(QUANTIZATION_TYPE_VALUE_PQFS);
     json[PRODUCT_QUANTIZATION_DIM].SetInt(this->pq_dim_);
+    json[PRODUCT_QUANTIZATION_TRAIN_SAMPLE_SIZE].SetInt(this->train_sample_size_);
     return json;
 }
 
@@ -55,6 +61,14 @@ PQFastScanQuantizerParameter::CheckCompatibility(const ParamPtr& other) const {
             "pq_dim mismatch, this: {}, other: {}",
             this->pq_dim_,
             pq_fast_param->pq_dim_);
+        return false;
+    }
+    if (this->train_sample_size_ != pq_fast_param->train_sample_size_) {
+        logger::error(
+            "PQFastScanQuantizerParameter::CheckCompatibility: "
+            "train_sample_size mismatch, this: {}, other: {}",
+            this->train_sample_size_,
+            pq_fast_param->train_sample_size_);
         return false;
     }
     return true;
