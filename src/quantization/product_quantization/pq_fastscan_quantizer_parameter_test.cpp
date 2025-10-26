@@ -24,13 +24,15 @@ using namespace vsag;
 TEST_CASE("PQFS Parameter ToJson Test", "[ut][PQFastScanQuantizerParameter]") {
     std::string param_str = R"(
         {
-            "pq_dim": 64
+            "pq_dim": 64,
+            "pq_train_sample_size": 65535
         }
     )";
     auto param = std::make_shared<PQFastScanQuantizerParameter>();
     param->FromJson(JsonType::Parse(param_str));
     ParameterTest::TestToJson(param);
     REQUIRE(param->pq_dim_ == 64);
+    REQUIRE(param->train_sample_size_ == 65535);
 
     TestParamCheckCompatibility<PQFastScanQuantizerParameter>(param_str);
 }
