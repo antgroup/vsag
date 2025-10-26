@@ -101,6 +101,7 @@ public:
 public:
     int64_t pq_dim_{1};
     int64_t subspace_dim_{1};  // equal to dim/pq_dim_;
+    uint64_t train_sample_size_{65536UL};
 
     Vector<float> codebooks_;
 };
