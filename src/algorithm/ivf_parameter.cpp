@@ -29,14 +29,15 @@ IVFParameter::FromJson(const JsonType& json) {
         this->buckets_per_data = static_cast<BucketIdType>(json[BUCKET_PER_DATA_KEY].GetInt());
     }
 
-    // Analyze the training sampling rate parameter
+    this->bucket_param = std::make_shared<BucketDataCellParameter>();
+        // Analyze the training sampling rate parameter
     if (json.Contains(IVF_TRAIN_SAMPLE_RATE_KEY)) {
         this->train_sample_rate = json[IVF_TRAIN_SAMPLE_RATE_KEY].GetFloat();
         CHECK_ARGUMENT(this->train_sample_rate > 0.0f && this->train_sample_rate <= 1.0f,
                        fmt::format("ivf_train_sample_rate must be in range (0, 1], got: {}", 
                                    this->train_sample_rate));
     }
-    
+
     if (json.Contains(IVF_TRAIN_SAMPLE_COUNT_KEY)) {
         this->train_sample_count = json[IVF_TRAIN_SAMPLE_COUNT_KEY].GetInt();
         CHECK_ARGUMENT(this->train_sample_count > 0 || this->train_sample_count == -1,
@@ -44,7 +45,6 @@ IVFParameter::FromJson(const JsonType& json) {
                                    this->train_sample_count));
     }
 
-    this->bucket_param = std::make_shared<BucketDataCellParameter>();
     CHECK_ARGUMENT(json.Contains(BUCKET_PARAMS_KEY),
                    fmt::format("ivf parameters must contains {}", BUCKET_PARAMS_KEY));
     this->bucket_param->FromJson(json[BUCKET_PARAMS_KEY]);
@@ -70,11 +70,10 @@ IVFParameter::ToJson() const {
     json[IVF_PARTITION_STRATEGY_PARAMS_KEY].SetJson(
         this->ivf_partition_strategy_parameter->ToJson());
     json[BUCKET_PER_DATA_KEY].SetInt(this->buckets_per_data);
-    
     // Serialize training sampling rate parameter
     json[IVF_TRAIN_SAMPLE_RATE_KEY].SetFloat(this->train_sample_rate);
     json[IVF_TRAIN_SAMPLE_COUNT_KEY].SetInt(this->train_sample_count);
-    
+
     return json;
 }
 bool
@@ -92,20 +91,19 @@ IVFParameter::CheckCompatibility(const ParamPtr& other) const {
         logger::error("IVFParameter::CheckCompatibility: buckets_per_data mismatch");
         return false;
     }
-    
+
+    if (not this->bucket_param->CheckCompatibility(ivf_param->bucket_param)) {
+        logger::error("IVFParameter::CheckCompatibility: bucket_param mismatch");
+        return false;
+    }
     // Check the compatibility of training sampling rate parameters
     if (this->train_sample_rate != ivf_param->train_sample_rate) {
         logger::error("IVFParameter::CheckCompatibility: train_sample_rate mismatch");
         return false;
     }
-    
+
     if (this->train_sample_count != ivf_param->train_sample_count) {
         logger::error("IVFParameter::CheckCompatibility: train_sample_count mismatch");
-        return false;
-    }
-
-    if (not this->bucket_param->CheckCompatibility(ivf_param->bucket_param)) {
-        logger::error("IVFParameter::CheckCompatibility: bucket_param mismatch");
         return false;
     }
 
@@ -117,5 +115,36 @@ IVFParameter::CheckCompatibility(const ParamPtr& other) const {
         return false;
     }
     return true;
+}
+
+IVFSearchParameters
+IVFSearchParameters::FromJson(const std::string& json_string) {
+    JsonType params = JsonType::Parse(json_string);
+
+    IVFSearchParameters obj;
+
+    CHECK_ARGUMENT(params.Contains(INDEX_TYPE_IVF),
+                   fmt::format("parameters must contains {}", INDEX_TYPE_IVF));
+
+    obj.IndexSearchParameter::FromJson(params[INDEX_TYPE_IVF]);
+
+    // set obj.scan_buckets_count
+    CHECK_ARGUMENT(params[INDEX_TYPE_IVF].Contains(IVF_SEARCH_PARAM_SCAN_BUCKETS_COUNT),
+                   fmt::format("parameters[{}] must contains {}",
+                               INDEX_TYPE_IVF,
+                               IVF_SEARCH_PARAM_SCAN_BUCKETS_COUNT));
+    obj.scan_buckets_count = params[INDEX_TYPE_IVF][IVF_SEARCH_PARAM_SCAN_BUCKETS_COUNT].GetInt();
+
+    // set obj.topk_factor
+    if (params[INDEX_TYPE_IVF].Contains(SEARCH_PARAM_FACTOR)) {
+        obj.topk_factor = params[INDEX_TYPE_IVF][SEARCH_PARAM_FACTOR].GetFloat();
+    }
+
+    // set obj.first_order_scan_ratio
+    if (params[INDEX_TYPE_IVF].Contains(GNO_IMI_SEARCH_PARAM_FIRST_ORDER_SCAN_RATIO)) {
+        obj.first_order_scan_ratio =
+            params[INDEX_TYPE_IVF][GNO_IMI_SEARCH_PARAM_FIRST_ORDER_SCAN_RATIO].GetFloat();
+    }
+    return obj;
 }
 }  // namespace vsag
