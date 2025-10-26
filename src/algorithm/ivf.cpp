@@ -78,7 +78,7 @@ static constexpr const char* IVF_PARAMS_TEMPLATE =
             }
         },
         "{ATTR_PARAMS_KEY}": {
-            "{HAS_BUCKETS_KEY}": true
+            "{ATTR_HAS_BUCKETS_KEY}": true
         }
     })";
 
@@ -202,7 +202,7 @@ IVF::CheckAndMappingExternalParam(const JsonType& external_param,
                 BUILD_THREAD_COUNT_KEY,
             },
         },
-        {
+            {
             IVF_TRAIN_SAMPLE_RATE_KEY,
             {
                 IVF_TRAIN_SAMPLE_RATE_KEY,
@@ -341,7 +341,6 @@ IVF::Build(const DatasetPtr& base) {
     auto result = this->Add(base);
     return result;
 }
-
 namespace {
 
 // Generate random sampling index
@@ -392,6 +391,7 @@ calculate_sample_count(int64_t total_size, float sample_rate, int64_t sample_cou
 
 } // anonymous namespace
 
+
 void
 IVF::Train(const DatasetPtr& data) {
     if (this->is_trained_) {
@@ -402,7 +402,7 @@ IVF::Train(const DatasetPtr& data) {
 
     // calculate sample count
     int64_t sample_count = calculate_sample_count(total_elements, train_sample_rate_, train_sample_count_);
-    
+
     // Not exceeding the maximum training data limit
     sample_count = std::min(sample_count, MAX_TRAIN_SIZE);  
 
@@ -453,7 +453,6 @@ IVF::Train(const DatasetPtr& data) {
 
     const auto* data_ptr = train_data->GetFloat32Vectors();
     Vector<float> train_data_buffer(allocator_);
-
     if (use_residual_) {
         train_data_buffer.resize(sample_count * dim_);
         if (metric_ == MetricType::METRIC_TYPE_COSINE) {
@@ -472,18 +471,12 @@ IVF::Train(const DatasetPtr& data) {
         }
         data_ptr = train_data_buffer.data();
     }
-
-    // Use the sampled data to train the bucket quantizer
     this->bucket_->Train(data_ptr, sample_count);
-
     if (use_reorder_) {
-        // Reorder codes use the original data to train for better accuracy
         this->reorder_codes_->Train(data->GetFloat32Vectors(), data->GetNumElements());
     }
-
     this->is_trained_ = true;
 }
-
 
 std::vector<int64_t>
 IVF::Add(const DatasetPtr& base) {
