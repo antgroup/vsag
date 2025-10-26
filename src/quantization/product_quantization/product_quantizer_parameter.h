@@ -37,5 +37,6 @@ public:
 public:
     int64_t pq_dim_{1};
     int64_t pq_bits_{8};
+    int64_t train_sample_size_{65536};
 };
 }  // namespace vsag
