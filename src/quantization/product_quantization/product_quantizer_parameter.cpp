@@ -35,6 +35,10 @@ ProductQuantizerParameter::FromJson(const JsonType& json) {
         json[PRODUCT_QUANTIZATION_BITS].IsNumberInteger()) {
         this->pq_bits_ = json[PRODUCT_QUANTIZATION_BITS].GetInt();
     }
+    if (json.Contains(PRODUCT_QUANTIZATION_TRAIN_SAMPLE_SIZE) &&
+        json[PRODUCT_QUANTIZATION_TRAIN_SAMPLE_SIZE].IsNumberInteger()) {
+        this->train_sample_size_ = json[PRODUCT_QUANTIZATION_TRAIN_SAMPLE_SIZE].GetInt();
+    }
 }
 
 JsonType
@@ -43,6 +47,7 @@ ProductQuantizerParameter::ToJson() const {
     json[QUANTIZATION_TYPE_KEY].SetString(QUANTIZATION_TYPE_VALUE_PQ);
     json[PRODUCT_QUANTIZATION_DIM].SetInt(this->pq_dim_);
     json[PRODUCT_QUANTIZATION_BITS].SetInt(this->pq_bits_);
+    json[PRODUCT_QUANTIZATION_TRAIN_SAMPLE_SIZE].SetInt(this->train_sample_size_);
     return json;
 }
 
@@ -69,6 +74,14 @@ ProductQuantizerParameter::CheckCompatibility(const ParamPtr& other) const {
             "pq_bits mismatch: {} vs {}",
             this->pq_bits_,
             pq_other->pq_bits_);
+        return false;
+    }
+    if (this->train_sample_size_ != pq_other->train_sample_size_) {
+        logger::error(
+            "ProductQuantizerParameter::CheckCompatibility: "
+            "train_sample_size mismatch: {} vs {}",
+            this->train_sample_size_,
+            pq_other->train_sample_size_);
         return false;
     }
     return true;
