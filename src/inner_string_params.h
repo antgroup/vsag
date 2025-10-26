@@ -96,12 +96,14 @@ const char* const RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY = "rabitq_bits_per_dim_
 const char* const SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE = "sq4_uniform_trunc_rate";
 const char* const PRODUCT_QUANTIZATION_DIM = "pq_dim";
 const char* const PRODUCT_QUANTIZATION_BITS = "pq_bits";
+const char* const PRODUCT_QUANTIZATION_TRAIN_SAMPLE_SIZE = "pq_train_sample_size";
 
 // sparse index param
 const char* const SPARSE_NEED_SORT = "need_sort";
 const char* const SPARSE_QUERY_PRUNE_RATIO = "query_prune_ratio";
 const char* const SPARSE_DOC_PRUNE_RATIO = "doc_prune_ratio";
 const char* const SPARSE_TERM_PRUNE_RATIO = "term_prune_ratio";
+const char* const SPARSE_TERM_ID_LIMIT = "term_id_limit";
 const char* const SPARSE_WINDOW_SIZE = "window_size";
 const char* const SPARSE_USE_REORDER = "use_reorder";
 const char* const SPARSE_N_CANDIDATE = "n_candidate";
@@ -125,7 +127,7 @@ const char* const BUCKETS_COUNT_KEY = "buckets_count";
 const char* const BUCKET_USE_RESIDUAL = "use_residual";
 const char* const IVF_SEARCH_PARAM_SCAN_BUCKETS_COUNT = "scan_buckets_count";
 const char* const SEARCH_PARAM_FACTOR = "factor";
-const char* const IVF_SEARCH_PARALLELISM = "parallelism";
+const char* const SEARCH_PARALLELISM = "parallelism";
 const char* const SEARCH_MAX_TIME_COST_MS = "timeout_ms";
 
 const char* const IVF_TRAIN_TYPE_KEY = "ivf_train_type";
@@ -134,7 +136,6 @@ const char* const IVF_TRAIN_TYPE_KMEANS = "kmeans";
 
 const char* const IVF_TRAIN_SAMPLE_RATE_KEY = "ivf_train_sample_rate";
 const char* const IVF_TRAIN_SAMPLE_COUNT_KEY = "ivf_train_sample_count";
-
 const char* const IVF_PARTITION_STRATEGY_PARAMS_KEY = "partition_strategy";
 const char* const IVF_PARTITION_STRATEGY_TYPE_KEY = "partition_strategy_type";
 const char* const IVF_PARTITION_STRATEGY_TYPE_NEAREST = "ivf";
@@ -189,6 +190,7 @@ const std::unordered_map<std::string, std::string> DEFAULT_MAP = {
     {"QUANTIZATION_TYPE_VALUE_RABITQ", QUANTIZATION_TYPE_VALUE_RABITQ},
     {"PRODUCT_QUANTIZATION_DIM", PRODUCT_QUANTIZATION_DIM},
     {"PRODUCT_QUANTIZATION_BITS", PRODUCT_QUANTIZATION_BITS},
+    {"PRODUCT_QUANTIZATION_TRAIN_SAMPLE_SIZE", PRODUCT_QUANTIZATION_TRAIN_SAMPLE_SIZE},
     {"GRAPH_TYPE_NSW", GRAPH_TYPE_NSW},
     {"GRAPH_STORAGE_TYPE_KEY", GRAPH_STORAGE_TYPE_KEY},
     {"GRAPH_STORAGE_TYPE_FLAT", GRAPH_STORAGE_TYPE_FLAT},
@@ -196,7 +198,6 @@ const std::unordered_map<std::string, std::string> DEFAULT_MAP = {
     {"QUANTIZATION_PARAMS_KEY", QUANTIZATION_PARAMS_KEY},
     {"GRAPH_PARAM_MAX_DEGREE", GRAPH_PARAM_MAX_DEGREE},
     {"GRAPH_PARAM_INIT_MAX_CAPACITY", GRAPH_PARAM_INIT_MAX_CAPACITY},
-    {"BUILD_THREAD_COUNT_KEY", BUILD_THREAD_COUNT_KEY},
     {"HGRAPH_EF_CONSTRUCTION_KEY", HGRAPH_EF_CONSTRUCTION_KEY},
     {"HGRAPH_ALPHA_KEY", HGRAPH_ALPHA_KEY},
     {"BUCKETS_COUNT_KEY", BUCKETS_COUNT_KEY},
@@ -225,7 +226,7 @@ const std::unordered_map<std::string, std::string> DEFAULT_MAP = {
     {"IVF_PARTITION_STRATEGY_TYPE_NEAREST", IVF_PARTITION_STRATEGY_TYPE_NEAREST},
     {"IVF_TRAIN_TYPE_KMEANS", IVF_TRAIN_TYPE_KMEANS},
     {"BUILD_THREAD_COUNT_KEY", BUILD_THREAD_COUNT_KEY},
-    {"IVF_SEARCH_PARALLELISM", IVF_SEARCH_PARALLELISM},
+    {"SEARCH_PARALLELISM", SEARCH_PARALLELISM},
     {"GRAPH_SUPPORT_REMOVE", GRAPH_SUPPORT_REMOVE},
     {"REMOVE_FLAG_BIT", REMOVE_FLAG_BIT},
     {"HOLD_MOLDS", HOLD_MOLDS},
@@ -234,6 +235,7 @@ const std::unordered_map<std::string, std::string> DEFAULT_MAP = {
     {"RAW_VECTOR_KEY", RAW_VECTOR_KEY},
     {"ATTR_HAS_BUCKETS_KEY", ATTR_HAS_BUCKETS_KEY},
     {"ATTR_PARAMS_KEY", ATTR_PARAMS_KEY},
-};
+    {"RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY", RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY},
+    {"TQ_CHAIN", TQ_CHAIN}};
 
 }  // namespace vsag
