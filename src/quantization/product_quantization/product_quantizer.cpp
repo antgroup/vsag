@@ -21,7 +21,7 @@
 #include "simd/fp32_simd.h"
 #include "simd/normalize.h"
 #include "utils/prefetch.h"
-
+#include<iostream>
 namespace vsag {
 
 template <MetricType metric>
@@ -47,6 +47,8 @@ template <MetricType metric>
 ProductQuantizer<metric>::ProductQuantizer(const ProductQuantizerParamPtr& param,
                                            const IndexCommonParam& common_param)
     : ProductQuantizer<metric>(common_param.dim_, param->pq_dim_, common_param.allocator_.get()) {
+
+    this->train_sample_size_ = param->train_sample_size_;
 }
 
 template <MetricType metric>
@@ -62,7 +64,7 @@ ProductQuantizer<metric>::TrainImpl(const vsag::DataType* data, uint64_t count) 
     if (this->is_trained_) {
         return true;
     }
-    count = std::min(count, 65536UL);
+    count = std::min(count, static_cast<uint64_t> (this->train_sample_size_));
     Vector<float> slice(this->allocator_);
     slice.resize(count * subspace_dim_);
     Vector<float> norm_data(this->allocator_);
