@@ -8,6 +8,7 @@
 ![GitHub Contributors](https://img.shields.io/github/contributors/antgroup/vsag)
 [![arXiv](https://badgen.net/static/arXiv/2404.16322/red)](http://arxiv.org/abs/2404.16322)
 [![arXiv](https://badgen.net/static/arXiv/2503.17911/red)](http://arxiv.org/abs/2503.17911)
+[![arXiv](https://badgen.net/static/arXiv/2509.08395/red)](https://arxiv.org/abs/2509.08395)
 
 ![PyPI - Version](https://img.shields.io/pypi/v/pyvsag)
 ![PyPI - Python Version](https://img.shields.io/pypi/pyversions/pyvsag)
