@@ -25,7 +25,7 @@
 
 namespace vsag {
 
-MemoryBlockIO::MemoryBlockIO(Allocator* allocator, uint64_t block_size)
+MemoryBlockIO::MemoryBlockIO(uint64_t block_size, Allocator* allocator)
     : BasicIO<MemoryBlockIO>(allocator),
       block_size_(MemoryBlockIOParameter::NearestPowerOfTwo(block_size)),
       blocks_(0, allocator) {
@@ -34,7 +34,7 @@ MemoryBlockIO::MemoryBlockIO(Allocator* allocator, uint64_t block_size)
 
 MemoryBlockIO::MemoryBlockIO(const MemoryBlockIOParamPtr& param,
                              const IndexCommonParam& common_param)
-    : MemoryBlockIO(common_param.allocator_.get(), param->block_size_) {
+    : MemoryBlockIO(param->block_size_, common_param.allocator_.get()) {
 }
 
 MemoryBlockIO::MemoryBlockIO(const IOParamPtr& param, const IndexCommonParam& common_param)
