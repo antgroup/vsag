@@ -33,7 +33,7 @@ lcov --remove ${COVERAGE_DIR}/coverage.info \
      --ignore-errors unused,unused \
      --output-file ${COVERAGE_DIR}/coverage.info
 lcov --list ${COVERAGE_DIR}/coverage.info \
-     --ignore-errors inconsistent,inconsistent
+     --ignore-errors inconsistent,inconsistent,child
 
 pushd "${COVERAGE_DIR}"
 coverages=$(ls coverage.info)
