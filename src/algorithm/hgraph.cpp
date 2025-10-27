@@ -1076,6 +1076,8 @@ HGraph::InitFeatures() {
     // concurrency
     this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_SEARCH_CONCURRENT);
     this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_ADD_CONCURRENT);
+    this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_ADD_SEARCH_CONCURRENT);
+    this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_ADD_SEARCH_DELETE_CONCURRENT);
     // serialize
     this->index_feature_list_->SetFeatures({
         IndexFeature::SUPPORT_DESERIALIZE_BINARY_SET,
@@ -1512,8 +1514,11 @@ HGraph::GetCodeByInnerId(InnerIdType inner_id, uint8_t* data) const {
 
 bool
 HGraph::Remove(int64_t id) {
-    // TODO(inbao): support thread safe remove
-    auto inner_id = this->label_table_->GetIdByLabel(id);
+    InnerIdType inner_id;
+    {
+        std::shared_lock<std::shared_mutex> lock(this->label_lookup_mutex_);
+        inner_id = this->label_table_->GetIdByLabel(id);
+    }
     if (inner_id == this->entry_point_id_) {
         bool find_new_ep = false;
         while (not route_graphs_.empty()) {
@@ -1534,13 +1539,19 @@ HGraph::Remove(int64_t id) {
             route_graphs_.pop_back();
         }
     }
-    for (int level = static_cast<int>(route_graphs_.size()) - 1; level >= 0; --level) {
-        this->route_graphs_[level]->DeleteNeighborsById(inner_id);
+    {
+        {
+            std::scoped_lock<std::shared_mutex> wlock(this->global_mutex_);
+            for (int level = static_cast<int>(route_graphs_.size()) - 1; level >= 0; --level) {
+                this->route_graphs_[level]->DeleteNeighborsById(inner_id);
+            }
+            this->bottom_graph_->DeleteNeighborsById(inner_id);
+        }
+        std::scoped_lock label_lock(this->label_lookup_mutex_);
+        this->label_table_->Remove(id);
+        this->deleted_ids_.insert(inner_id);
+        delete_count_++;
     }
-    this->bottom_graph_->DeleteNeighborsById(inner_id);
-    this->label_table_->Remove(id);
-    this->deleted_ids_.insert(inner_id);
-    delete_count_++;
     return true;
 }
 
@@ -1666,6 +1677,7 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
         (1 <= params.ef_search) and (params.ef_search <= ef_search_threshold),
         fmt::format("ef_search({}) must in range[1, {}]", params.ef_search, ef_search_threshold));
 
+    std::shared_lock shared_lock(this->global_mutex_);
     // check k
     CHECK_ARGUMENT(k > 0, fmt::format("k({}) must be greater than 0", k));
     k = std::min(k, GetNumElements());
@@ -1757,6 +1769,359 @@ HGraph::UpdateAttribute(int64_t id,
                         const AttributeSet& origin_attrs) {
     auto inner_id = this->label_table_->GetIdByLabel(id);
     this->attr_filter_index_->UpdateBitsetsByAttr(new_attrs, inner_id, 0, origin_attrs);
+}
+
+const static uint64_t QUERY_SAMPLE_SIZE = 10;
+const static int64_t DEFAULT_TOPK = 100;
+
+std::string
+HGraph::GetStats() const {
+    JsonType stats;
+    int64_t topk = DEFAULT_TOPK;
+    uint64_t sample_size = std::min(QUERY_SAMPLE_SIZE, this->total_count_.load());
+    Vector<float> sample_base_datas(dim_ * sample_size, 0.0F, allocator_);
+    if (this->total_count_ == 0) {
+        stats["total_count"].SetInt(0);
+        return stats.Dump();
+    }
+    constexpr static const char* search_params_template = R"({{
+        "hgraph": {{
+            "ef_search": {}
+        }}
+    }})";
+    std::string search_params = fmt::format(search_params_template, ef_construct_);
+    stats["total_count"].SetInt(this->total_count_);
+    // duplicate rate
+    size_t duplicate_num = 0;
+    if (this->label_table_->CompressDuplicateData()) {
+        for (int i = 0; i < this->total_count_; ++i) {
+            if (this->label_table_->duplicate_records_[i] != nullptr) {
+                duplicate_num += this->label_table_->duplicate_records_[i]->duplicate_ids.size();
+            }
+        }
+    }
+    stats["duplicate_rate"].SetFloat(static_cast<float>(duplicate_num) /
+                                     static_cast<float>(this->total_count_));
+    stats["deleted_count"].SetInt(delete_count_.load());
+    this->analyze_graph_connection(stats);
+    this->analyze_graph_recall(stats, sample_base_datas, sample_size, topk, search_params);
+    this->analyze_quantizer(stats, sample_base_datas.data(), sample_size, topk, search_params);
+    return stats.Dump(4);
+}
+
+void
+HGraph::analyze_graph_recall(JsonType& stats,
+                             Vector<float>& data,
+                             uint64_t sample_data_size,
+                             int64_t topk,
+                             const std::string& search_param) const {
+    if (this->use_reorder_ && not this->high_precise_codes_->InMemory()) {
+        logger::info(
+            "analyze_graph_recall: high_precise_codes_ is not in memory, skip base recall test");
+        return;
+    }
+    // recall of "base" when searching for "base"
+    logger::info("analyze_graph_recall: sample_data_size = {}, topk = {}", sample_data_size, topk);
+    auto codes = this->use_reorder_ ? this->high_precise_codes_ : this->basic_flatten_codes_;
+    int64_t hit_count = 0;
+    size_t all_neighbor_count = 0;
+    int64_t hit_neighbor_count = 0;
+    float avg_distance_base = 0.0F;
+    for (uint64_t i = 0; i < sample_data_size; ++i) {
+        InnerIdType sample_id = rand() % this->total_count_;
+        GetVectorByInnerId(sample_id, data.data() + i * dim_);
+        // generate groundtruth
+        DistHeapPtr groundtruth = std::make_shared<StandardHeap<true, false>>(allocator_, -1);
+        if (i % 10 == 0) {
+            logger::info("calculate groundtruth for sample {} of {}", i, i + 10);
+        }
+        for (uint64_t j = 0; j < this->total_count_; ++j) {
+            float dist = codes->ComputePairVectors(sample_id, j);
+            if (groundtruth->Size() < topk) {
+                groundtruth->Push({dist, j});
+            } else if (dist < groundtruth->Top().first) {
+                groundtruth->Push({dist, j});
+                groundtruth->Pop();
+            }
+        }
+        // neighbors of a point and the proximity relationship of a point
+        Vector<InnerIdType> neighbors(allocator_);
+        this->bottom_graph_->GetNeighbors(sample_id, neighbors);
+        size_t neighbor_size = neighbors.size();
+        UnorderedSet<LabelType> groundtruth_ids(allocator_);
+        UnorderedSet<LabelType> neighbor_groundtruth_ids(allocator_);
+        while (not groundtruth->Empty()) {
+            auto id = groundtruth->Top().second;
+            groundtruth_ids.insert(this->label_table_->GetLabelById(id));
+            if (groundtruth->Size() <= neighbor_size) {
+                neighbor_groundtruth_ids.insert(this->label_table_->GetLabelById(id));
+            }
+            avg_distance_base += groundtruth->Top().first;
+            groundtruth->Pop();
+        }
+        all_neighbor_count += neighbor_size;
+        for (const auto& id : neighbors) {
+            if (neighbor_groundtruth_ids.count(this->label_table_->GetLabelById(id)) > 0) {
+                hit_neighbor_count++;
+            }
+        }
+
+        // search
+        auto query = Dataset::Make();
+        query->Owner(false)->NumElements(1)->Float32Vectors(data.data() + i * dim_)->Dim(dim_);
+        auto result = this->KnnSearch(query, topk, search_param, nullptr);
+        // calculate recall
+        for (int64_t j = 0; j < result->GetDim(); ++j) {
+            auto id = result->GetIds()[j];
+            if (groundtruth_ids.count(id) > 0) {
+                hit_count++;
+            }
+        }
+    }
+    stats["recall_base"].SetFloat(static_cast<float>(hit_count) /
+                                  static_cast<float>(sample_data_size * topk));
+    stats["proximity_recall_neighbor"].SetFloat(static_cast<float>(hit_neighbor_count) /
+                                                static_cast<float>(all_neighbor_count));
+    stats["avg_distance_base"].SetFloat(avg_distance_base /
+                                        static_cast<float>(sample_data_size * (topk - 1)));
+}
+
+void
+HGraph::analyze_graph_connection(JsonType& stats) const {
+    // graph connection
+    Vector<bool> visited(total_count_, false, allocator_);
+    int64_t connect_components = 0;
+    if (this->label_table_->CompressDuplicateData()) {
+        for (int i = 0; i < this->total_count_; ++i) {
+            if (this->label_table_->duplicate_records_[i] != nullptr) {
+                for (const auto& dup_id :
+                     this->label_table_->duplicate_records_[i]->duplicate_ids) {
+                    visited[dup_id] = true;
+                }
+            }
+        }
+    }
+    for (int64_t i = 0; i < total_count_; ++i) {
+        if (not visited[i] and not this->label_table_->IsRemoved(i)) {
+            connect_components++;
+            int64_t component_size = 0;
+            std::queue<int64_t> q;
+            q.push(i);
+            visited[i] = true;
+            while (not q.empty()) {
+                auto node = q.front();
+                q.pop();
+                component_size++;
+                Vector<InnerIdType> neighbors(allocator_);
+                this->bottom_graph_->GetNeighbors(node, neighbors);
+                for (const auto& nb : neighbors) {
+                    if (not visited[nb] and not this->label_table_->IsRemoved(nb)) {
+                        visited[nb] = true;
+                        q.push(nb);
+                    }
+                }
+            }
+        }
+    }
+    stats["connect_components"].SetInt(connect_components);
+}
+
+void
+HGraph::check_and_init_raw_vector(const FlattenInterfaceParamPtr& raw_vector_param,
+                                  const IndexCommonParam& common_param) {
+    if (raw_vector_param == nullptr) {
+        return;
+    }
+
+    if (basic_flatten_codes_->GetQuantizerName() != QUANTIZATION_TYPE_VALUE_FP32 and
+        high_precise_codes_ == nullptr) {
+        raw_vector_ = FlattenInterface::MakeInstance(raw_vector_param, common_param);
+        create_new_raw_vector_ = true;
+        has_raw_vector_ = true;
+        return;
+    }
+    if (basic_flatten_codes_->GetQuantizerName() != QUANTIZATION_TYPE_VALUE_FP32 and
+        high_precise_codes_ != nullptr and
+        high_precise_codes_->GetQuantizerName() != QUANTIZATION_TYPE_VALUE_FP32) {
+        raw_vector_ = FlattenInterface::MakeInstance(raw_vector_param, common_param);
+        create_new_raw_vector_ = true;
+        has_raw_vector_ = true;
+        return;
+    }
+
+    auto io_type_name = raw_vector_param->io_parameter->GetTypeName();
+    if (io_type_name != IO_TYPE_VALUE_BLOCK_MEMORY_IO and io_type_name != IO_TYPE_VALUE_MEMORY_IO) {
+        raw_vector_ = FlattenInterface::MakeInstance(raw_vector_param, common_param);
+        create_new_raw_vector_ = true;
+        has_raw_vector_ = true;
+        return;
+    }
+
+    if (basic_flatten_codes_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32) {
+        raw_vector_ = basic_flatten_codes_;
+        has_raw_vector_ = true;
+        return;
+    }
+
+    if (high_precise_codes_ != nullptr and
+        high_precise_codes_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32) {
+        raw_vector_ = high_precise_codes_;
+        has_raw_vector_ = true;
+        return;
+    }
+}
+
+bool
+HGraph::UpdateId(int64_t old_id, int64_t new_id) {
+    if (old_id == new_id) {
+        return true;
+    }
+
+    std::scoped_lock label_lock(this->label_lookup_mutex_);
+    this->label_table_->UpdateLabel(old_id, new_id);
+
+    return true;
+}
+
+bool
+HGraph::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) {
+    // check if id exists and get copied base data
+    uint32_t inner_id = 0;
+    {
+        std::shared_lock label_lock(this->label_lookup_mutex_);
+        inner_id = this->label_table_->GetIdByLabel(id);
+    }
+
+    // the validation of the new vector
+    void* new_base_vec = nullptr;
+    size_t data_size = 0;
+    get_vectors(data_type_, dim_, new_base, &new_base_vec, &data_size);
+
+    if (not force_update) {
+        Vector<int8_t> base_data(data_size, allocator_);
+        auto base = Dataset::Make();
+
+        GetVectorByInnerId(inner_id, (float*)base_data.data());
+        set_dataset(data_type_, dim_, base, base_data.data(), 1);
+
+        // search neighbors
+        auto neighbors = this->KnnSearch(
+            base,
+            UPDATE_CHECK_SEARCH_K,
+            fmt::format(R"({{"hgraph": {{ "ef_search": {} }} }})", UPDATE_CHECK_SEARCH_L),
+            nullptr);
+
+        // check whether the neighborhood relationship is same
+        float self_dist = 0;
+        self_dist = this->CalcDistanceById((float*)new_base_vec, id);
+        for (int i = 0; i < neighbors->GetDim(); i++) {
+            // don't compare with itself
+            if (neighbors->GetIds()[i] == id) {
+                continue;
+            }
+
+            float neighbor_dist = 0;
+            try {
+                neighbor_dist =
+                    this->CalcDistanceById((float*)new_base_vec, neighbors->GetIds()[i]);
+            } catch (const std::runtime_error& e) {
+                // incase that neighbor has been deleted
+                continue;
+            }
+            if (neighbor_dist < self_dist) {
+                return false;
+            }
+        }
+    }
+
+    // note that only modify vector need to obtain unique lock
+    // and the lock has been obtained inside datacell
+    auto codes = (use_reorder_) ? high_precise_codes_ : basic_flatten_codes_;
+    bool update_status = basic_flatten_codes_->UpdateVector(new_base_vec, inner_id);
+    if (use_reorder_) {
+        update_status = update_status && high_precise_codes_->UpdateVector(new_base_vec, inner_id);
+    }
+    return update_status;
+}
+
+std::string
+HGraph::AnalyzeIndexBySearch(const SearchRequest& request) {
+    JsonType stats;
+    Vector<float> distances(this->total_count_, allocator_);
+    Vector<InnerIdType> ids(this->total_count_, allocator_);
+    std::iota(ids.begin(), ids.end(), 0);
+    auto codes = (this->use_reorder_) ? this->high_precise_codes_ : this->basic_flatten_codes_;
+    auto querys = request.query_;
+    auto topk = std::min(request.topk_, GetNumElements());
+
+    int64_t num_elements = querys->GetNumElements();
+    DistHeapPtr heap = std::make_shared<StandardHeap<true, false>>(allocator_, -1);
+    Vector<UnorderedSet<InnerIdType>> ground_truths(
+        num_elements, UnorderedSet<InnerIdType>(allocator_), allocator_);
+    float dist = 0.0F;
+    for (int64_t i = 0; i < num_elements; i++) {
+        const auto* query_data = get_data(querys, i);
+        auto computer = codes->FactoryComputer(query_data);
+        if (i % 10 == 0) {
+            logger::info("calculate groundtruth for query data {} of {}", i, i + 10);
+        }
+        codes->Query(distances.data(), computer, ids.data(), this->total_count_);
+        for (int64_t j = 0; j < this->total_count_; ++j) {
+            if (heap->Size() < topk) {
+                heap->Push({distances[j], ids[j]});
+            } else if (distances[j] < heap->Top().first) {
+                heap->Push({distances[j], ids[j]});
+                heap->Pop();
+            }
+        }
+        while (not heap->Empty()) {
+            ground_truths[i].insert(heap->Top().second);
+            dist += heap->Top().first;
+            heap->Pop();
+        }
+    }
+    dist /= static_cast<float>(num_elements * topk);
+    stats["avg_distance_query"].SetFloat(dist);
+    auto param_str = request.params_str_;
+    double time_cost = 0.0;
+    int64_t result_hit = 0;
+    for (int64_t i = 0; i < num_elements; ++i) {
+        auto query = Dataset::Make();
+        query->NumElements(1)
+            ->Dim(dim_)
+            ->Float32Vectors((const float*)get_data(querys, i))
+            ->Owner(false);
+        DatasetPtr search_result;
+        double single_query_time;
+        {
+            Timer t(single_query_time);
+            search_result = this->KnnSearch(query, topk, param_str, nullptr);
+        }
+        if (search_result->GetDim() != topk) {
+            logger::error(
+                "search result size mismatch: expected {}, got {}", topk, search_result->GetDim());
+            continue;
+        }
+        int64_t hit_count = 0;
+        for (int64_t j = 0; j < search_result->GetDim(); ++j) {
+            if (ground_truths[i].count(search_result->GetIds()[j]) > 0) {
+                hit_count++;
+            }
+        }
+        result_hit += hit_count;
+        time_cost += single_query_time;
+    }
+    stats["recall_query"].SetFloat(static_cast<float>(result_hit) /
+                                   static_cast<float>(num_elements * topk));
+    stats["time_cost_query"].SetFloat(static_cast<float>(time_cost) /
+                                      static_cast<float>(num_elements));
+    this->analyze_quantizer(stats, querys->GetFloat32Vectors(), num_elements, topk, param_str);
+    return stats.Dump(4);
+}
+
+void
+HGraph::GetAttributeSetByInnerId(InnerIdType inner_id, AttributeSet* attr) const {
+    this->attr_filter_index_->GetAttribute(0, inner_id, attr);
 }
 
 }  // namespace vsag

@@ -2123,4 +2123,179 @@ TestIndex::TestSearchOvertime(const IndexPtr& index,
         REQUIRE(res.has_value());
     }
 }
+
+void
+TestIndex::TestExportIDs(const IndexPtr& index, const TestDatasetPtr& dataset) {
+    if (not index->CheckFeature(vsag::SUPPORT_EXPORT_IDS)) {
+        return;
+    }
+    auto result = index->ExportIDs();
+    REQUIRE(result.has_value());
+    const auto* ids = result.value()->GetIds();
+    auto num_element = result.value()->GetNumElements();
+    REQUIRE(num_element == dataset->base_->GetNumElements());
+    auto* origin_ids = dataset->base_->GetIds();
+    // check ids, no order
+    std::unordered_set<int64_t> id_set(origin_ids, origin_ids + num_element);
+    for (int64_t i = 0; i < num_element; ++i) {
+        REQUIRE(id_set.find(ids[i]) != id_set.end());
+    }
+    std::unordered_set<int64_t> id_set2(ids, ids + num_element);
+    REQUIRE(id_set2.size() == num_element);
+}
+
+template <typename T>
+static void
+compare_attr_value(const vsag::Attribute* attr1, const vsag::Attribute* attr2) {
+    auto count = attr1->GetValueCount();
+    auto* ptr1 = dynamic_cast<const vsag::AttributeValue<T>*>(attr1);
+    auto* ptr2 = dynamic_cast<const vsag::AttributeValue<T>*>(attr2);
+    const auto& temp_vec1 = ptr1->GetValue();
+    const auto& temp_vec2 = ptr2->GetValue();
+    std::unordered_set<T> temp_set1(temp_vec1.begin(), temp_vec1.end());
+    std::unordered_set<T> temp_set2(temp_vec2.begin(), temp_vec2.end());
+    REQUIRE(temp_set1 == temp_set2);
+}
+
+static void
+compare_attr_set(const vsag::AttributeSet& attr1, const vsag::AttributeSet& attr2) {
+    REQUIRE(attr1.attrs_.size() == attr2.attrs_.size());
+    auto size = attr1.attrs_.size();
+    auto temp_vec1 = attr1.attrs_;
+    auto temp_vec2 = attr2.attrs_;
+    std::sort(temp_vec1.begin(), temp_vec1.end(), [](const auto& a, const auto& b) {
+        return a->name_ < b->name_;
+    });
+    std::sort(temp_vec2.begin(), temp_vec2.end(), [](const auto& a, const auto& b) {
+        return a->name_ < b->name_;
+    });
+    for (int i = 0; i < size; ++i) {
+        auto& attr = temp_vec1[i];
+        auto& gt_attr = temp_vec2[i];
+        REQUIRE(attr->name_ == gt_attr->name_);
+        REQUIRE(attr->GetValueType() == gt_attr->GetValueType());
+        if (attr->GetValueType() == vsag::AttrValueType::UINT64) {
+            compare_attr_value<uint64_t>(attr, gt_attr);
+        } else if (attr->GetValueType() == vsag::AttrValueType::INT64) {
+            compare_attr_value<int64_t>(attr, gt_attr);
+        } else if (attr->GetValueType() == vsag::AttrValueType::UINT32) {
+            compare_attr_value<uint32_t>(attr, gt_attr);
+        } else if (attr->GetValueType() == vsag::AttrValueType::INT32) {
+            compare_attr_value<int32_t>(attr, gt_attr);
+        } else if (attr->GetValueType() == vsag::AttrValueType::UINT16) {
+            compare_attr_value<uint16_t>(attr, gt_attr);
+        } else if (attr->GetValueType() == vsag::AttrValueType::INT16) {
+            compare_attr_value<int16_t>(attr, gt_attr);
+        } else if (attr->GetValueType() == vsag::AttrValueType::UINT8) {
+            compare_attr_value<uint8_t>(attr, gt_attr);
+        } else if (attr->GetValueType() == vsag::AttrValueType::INT8) {
+            compare_attr_value<int8_t>(attr, gt_attr);
+        } else if (attr->GetValueType() == vsag::AttrValueType::STRING) {
+            compare_attr_value<std::string>(attr, gt_attr);
+        }
+    }
+}
+
+void
+TestIndex::TestGetDataById(const IndexPtr& index, const TestDatasetPtr& dataset) {
+    if (not index->CheckFeature(vsag::SUPPORT_GET_DATA_BY_IDS)) {
+        return;
+    }
+    auto result = index->GetDataByIds(dataset->base_->GetIds(), dataset->base_->GetNumElements());
+    REQUIRE(result.has_value());
+    auto data = result.value();
+    REQUIRE(data->GetNumElements() == dataset->base_->GetNumElements());
+    REQUIRE(data->GetDim() == dataset->base_->GetDim());
+    // vectors
+    auto float_vectors = data->GetFloat32Vectors();
+    for (int i = 0; i < data->GetNumElements(); ++i) {
+        REQUIRE(memcmp(float_vectors + i * data->GetDim(),
+                       dataset->base_->GetFloat32Vectors() + i * data->GetDim(),
+                       data->GetDim() * sizeof(float)) == 0);
+    }
+    // attributes
+    auto attrs = data->GetAttributeSets();
+    auto gt_attrs = dataset->base_->GetAttributeSets();
+    for (int i = 0; i < data->GetNumElements(); ++i) {
+        auto& attr = attrs[i];
+        auto& gt_attr = gt_attrs[i];
+        compare_attr_set(attr, gt_attr);
+    }
+}
+
+void
+TestIndex::TestIndexStatus(const IndexPtr& index) {
+    auto set_result = index->SetImmutable();
+    if (not set_result.has_value()) {
+        return;
+    }
+    REQUIRE_FALSE(index->Train(nullptr));
+    REQUIRE_FALSE(index->Build(nullptr));
+    REQUIRE_FALSE(index->Add(nullptr));
+    std::ifstream inf;
+    REQUIRE_FALSE(index->Deserialize(inf));
+    REQUIRE_FALSE(index->Remove(0));
+    std::vector<vsag::MergeUnit> merge_units;
+    REQUIRE_FALSE(index->Merge(merge_units));
+    vsag::AttributeSet new_attrs;
+    REQUIRE_FALSE(index->UpdateAttribute(0, new_attrs));
+    REQUIRE_FALSE(index->UpdateAttribute(0, new_attrs, new_attrs));
+    REQUIRE_FALSE(index->UpdateId(0, 0));
+    REQUIRE_FALSE(index->UpdateVector(0, nullptr, false));
+}
+
+void
+TestIndex::TestGetDataByIdWithFlag(const IndexPtr& index, const TestDatasetPtr& dataset) {
+}
+
+void
+TestIndex::TestConcurrentAddSearchRemove(const TestIndex::IndexPtr& index,
+                                         const TestDatasetPtr& dataset,
+                                         const std::string& search_param,
+                                         bool expected_success) {
+    if (not index->CheckFeature(vsag::SUPPORT_ADD_SEARCH_DELETE_CONCURRENT)) {
+        return;
+    }
+    fixtures::logger::LoggerReplacer _;
+
+    auto base_count = dataset->base_->GetNumElements();
+    auto temp_count = static_cast<int64_t>(base_count * 0.8);
+    auto dim = dataset->base_->GetDim();
+    auto temp_dataset = vsag::Dataset::Make();
+    temp_dataset->Dim(dim)
+        ->Ids(dataset->base_->GetIds())
+        ->NumElements(temp_count)
+        ->Paths(dataset->base_->GetPaths())
+        ->Float32Vectors(dataset->base_->GetFloat32Vectors())
+        ->SparseVectors(dataset->base_->GetSparseVectors())
+        ->Owner(false);
+    index->Build(temp_dataset);
+    fixtures::ThreadPool pool(5);
+    std::vector<std::future<bool>> futures;
+
+    auto func = [&](uint64_t i) -> bool {
+        auto data_one = vsag::Dataset::Make();
+        data_one->Dim(dim)
+            ->Ids(dataset->base_->GetIds() + i)
+            ->NumElements(1)
+            ->Paths(dataset->base_->GetPaths() + i)
+            ->Float32Vectors(dataset->base_->GetFloat32Vectors() + i * dim)
+            ->SparseVectors(dataset->base_->GetSparseVectors() + i)
+            ->Owner(false);
+        auto add_index = index->Add(data_one);
+        auto search_index = index->KnnSearch(data_one, 1, search_param);
+        auto remove_index = index->Remove(*(dataset->base_->GetIds() + i));
+        return add_index.has_value() & search_index.has_value() & remove_index.has_value();
+    };
+
+    for (uint64_t j = temp_count; j < base_count; ++j) {
+        futures.emplace_back(pool.enqueue(func, j));
+    }
+
+    for (auto& res : futures) {
+        auto val = res.get();
+        REQUIRE(val);
+    }
+}
+
 }  // namespace fixtures
