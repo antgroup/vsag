@@ -309,7 +309,7 @@ IVF::InitFeatures() {
 
     if (name == QUANTIZATION_TYPE_VALUE_FP32 and
         this->bucket_->GetMetricType() != MetricType::METRIC_TYPE_COSINE and
-        not bucket_->use_residual_) {
+        not bucket_->UseResidual()) {
         this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_GET_DATA_BY_IDS);
     }
 

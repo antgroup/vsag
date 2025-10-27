@@ -71,6 +71,11 @@ public:
     [[nodiscard]] virtual MetricType
     GetMetricType() = 0;
 
+    [[nodiscard]] virtual bool
+    UseResidual() const {
+        return this->use_residual_;
+    }
+
     [[nodiscard]] virtual InnerIdType
     GetBucketSize(BucketIdType bucket_id) = 0;
 
@@ -81,7 +86,7 @@ public:
     MergeOther(const BucketInterfacePtr& other, InnerIdType bias) = 0;
 
     virtual void
-    SetStrategy(IVFPartitionStrategyPtr strategy) {
+    SetStrategy(const IVFPartitionStrategyPtr& strategy) {
         strategy_ = strategy;
     }
 
