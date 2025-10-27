@@ -46,9 +46,6 @@ public:
     BucketDataCellParamPtr bucket_param{nullptr};
     IVFPartitionStrategyParametersPtr ivf_partition_strategy_parameter{nullptr};
     BucketIdType buckets_per_data{1};
-    // Training sampling rate parameter
-    float train_sample_rate{1.0f};     // Sampling ratio (0.0-1.0)
-    int64_t train_sample_count{-1};    // Sampling quantity (-1 represents proportional sampling)
 };
 
 class IVFSearchParameters : public IndexSearchParameter {
