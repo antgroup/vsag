@@ -18,68 +18,32 @@
 #include <cstdint>
 
 namespace vsag {
+
+#define DECLARE_NORMALIZE_FUNCTIONS(ns)                                  \
+    namespace ns {                                                       \
+    void                                                                 \
+    DivScalar(const float* from, float* to, uint64_t dim, float scalar); \
+    float                                                                \
+    Normalize(const float* from, float* to, uint64_t dim);               \
+    }  // namespace ns
+
 namespace generic {
-void
-DivScalar(const float* from, float* to, uint64_t dim, float scalar);
-
-float
-Normalize(const float* from, float* to, uint64_t dim);
-
 float
 NormalizeWithCentroid(const float* from, const float* centroid, float* to, uint64_t dim);
-
 void
 InverseNormalizeWithCentroid(
     const float* from, const float* centroid, float* to, uint64_t dim, float norm);
 }  // namespace generic
 
-namespace sse {
-void
-DivScalar(const float* from, float* to, uint64_t dim, float scalar);
+DECLARE_NORMALIZE_FUNCTIONS(generic)
+DECLARE_NORMALIZE_FUNCTIONS(sse)
+DECLARE_NORMALIZE_FUNCTIONS(avx)
+DECLARE_NORMALIZE_FUNCTIONS(avx2)
+DECLARE_NORMALIZE_FUNCTIONS(avx512)
+DECLARE_NORMALIZE_FUNCTIONS(neon)
+DECLARE_NORMALIZE_FUNCTIONS(sve)
 
-float
-Normalize(const float* from, float* to, uint64_t dim);
-}  // namespace sse
-
-namespace avx {
-void
-DivScalar(const float* from, float* to, uint64_t dim, float scalar);
-
-float
-Normalize(const float* from, float* to, uint64_t dim);
-}  // namespace avx
-
-namespace avx2 {
-void
-DivScalar(const float* from, float* to, uint64_t dim, float scalar);
-
-float
-Normalize(const float* from, float* to, uint64_t dim);
-}  // namespace avx2
-
-namespace avx512 {
-void
-DivScalar(const float* from, float* to, uint64_t dim, float scalar);
-
-float
-Normalize(const float* from, float* to, uint64_t dim);
-}  // namespace avx512
-
-namespace neon {
-void
-DivScalar(const float* from, float* to, uint64_t dim, float scalar);
-
-float
-Normalize(const float* from, float* to, uint64_t dim);
-}  // namespace neon
-
-namespace sve {
-void
-DivScalar(const float* from, float* to, uint64_t dim, float scalar);
-
-float
-Normalize(const float* from, float* to, uint64_t dim);
-}  // namespace sve
+#undef DECLARE_NORMALIZE_FUNCTIONS
 
 using NormalizeType = float (*)(const float* from, float* to, uint64_t dim);
 extern NormalizeType Normalize;

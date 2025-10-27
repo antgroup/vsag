@@ -21,13 +21,6 @@
 
 namespace vsag {
 
-static constexpr uint32_t DEFAULT_WINDOW_SIZE = 100000;
-static constexpr bool DEFAULT_USE_REORDER = false;
-static constexpr float DEFAULT_QUERY_PRUNE_RATIO = 0.0F;
-static constexpr float DEFAULT_DOC_PRUNE_RATIO = 0.0F;
-static constexpr float DEFAULT_TERM_PRUNE_RATIO = 0.0F;
-static constexpr uint32_t DEFAULT_N_CANDIDATE = 0;
-
 DEFINE_POINTER(SINDIParameter);
 
 class SINDIParameter : public InnerIndexParameter {
@@ -45,6 +38,8 @@ public:
 
 public:
     // index
+    uint32_t term_id_limit{0};
+
     uint32_t window_size{0};
 
     float doc_prune_ratio{0};

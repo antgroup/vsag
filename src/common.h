@@ -52,7 +52,14 @@ constexpr static const uint32_t UPDATE_CHECK_SEARCH_K = 10;
 constexpr static const uint32_t GENERATE_SEARCH_L = 400;
 constexpr static const uint32_t UPDATE_CHECK_SEARCH_L = 100;
 constexpr static const float GENERATE_OMEGA = 0.51;
+constexpr static const uint32_t TQ_MAX_TRAIN_COUNT = 10000;
 
 // sindi related
 constexpr static const uint32_t ESTIMATE_DOC_TERM = 100;
-constexpr static const uint32_t ESTIMATE_DOC_DIM = 50000;
+constexpr static const uint32_t DEFAULT_TERM_ID_LIMIT = 1000000;
+constexpr static const uint32_t DEFAULT_WINDOW_SIZE = 100000;
+constexpr static const bool DEFAULT_USE_REORDER = false;
+constexpr static const float DEFAULT_QUERY_PRUNE_RATIO = 0.0F;
+constexpr static const float DEFAULT_DOC_PRUNE_RATIO = 0.0F;
+constexpr static const float DEFAULT_TERM_PRUNE_RATIO = 0.0F;
+constexpr static const uint32_t DEFAULT_N_CANDIDATE = 0;

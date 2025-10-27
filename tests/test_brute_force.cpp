@@ -82,13 +82,11 @@ BruteForceTestIndex::GetResource(bool sample) {
         resource->dims = fixtures::get_common_used_dims(1, RandomValue(0, 999));
         resource->test_cases = fixtures::RandomSelect(BruteForceTestIndex::all_test_cases, 3);
         resource->metric_types = fixtures::RandomSelect<std::string>({"ip", "l2", "cosine"}, 1);
-        resource->train_types = fixtures::RandomSelect<std::string>({"kmeans", "random"}, 1);
         resource->base_count = BruteForceTestIndex::base_count;
     } else {
-        resource->dims = fixtures::get_common_used_dims();
+        resource->dims = fixtures::get_index_test_dims(3, RandomValue(0, 999));
         resource->test_cases = BruteForceTestIndex::all_test_cases;
-        resource->metric_types = {"ip", "l2", "cosine"};
-        resource->train_types = {"kmeans", "random"};
+        resource->metric_types = fixtures::RandomSelect<std::string>({"ip", "l2", "cosine"}, 2);
         resource->base_count = BruteForceTestIndex::base_count * 3;
     }
     return resource;
@@ -251,7 +249,11 @@ TestBruteForceBuild(const fixtures::BruteForceResourcePtr& resource) {
     using namespace fixtures;
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
-
+    std::vector<int32_t> search_threads_counts{1, 3};
+    std::string search_param_tmp2 = R"(
+    {{
+        "parallelism": {}
+    }})";
     for (const auto& metric_type : resource->metric_types) {
         for (auto dim : resource->dims) {
             for (const auto& [base_quantization_str, recall] : resource->test_cases) {
@@ -262,7 +264,10 @@ TestBruteForceBuild(const fixtures::BruteForceResourcePtr& resource) {
                 auto dataset = BruteForceTestIndex::pool.GetDatasetAndCreate(
                     dim, BruteForceTestIndex::base_count, metric_type);
                 TestIndex::TestBuildIndex(index, dataset, true);
-                BruteForceTestIndex::TestGeneral(index, dataset, search_param_tmp, recall);
+                for (auto search_thread_count : search_threads_counts) {
+                    auto search_param = fmt::format(search_param_tmp2, search_thread_count);
+                    BruteForceTestIndex::TestGeneral(index, dataset, search_param, recall);
+                }
                 vsag::Options::Instance().set_block_size_limit(origin_size);
             }
         }

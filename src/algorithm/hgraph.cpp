@@ -476,8 +476,16 @@ DistHeapPtr
 HGraph::search_one_graph(const void* query,
                          const GraphInterfacePtr& graph,
                          const FlattenInterfacePtr& flatten,
-                         InnerSearchParam& inner_search_param) const {
-    auto visited_list = this->pool_->TakeOne();
+                         InnerSearchParam& inner_search_param,
+                         const VisitedListPtr& vt) const {
+    bool new_visited_list = vt == nullptr;
+    VisitedListPtr visited_list;
+    if (new_visited_list) {
+        visited_list = this->pool_->TakeOne();
+    } else {
+        visited_list = vt;
+        visited_list->Reset();
+    }
     DistHeapPtr result = nullptr;
     if (inner_search_param.use_muti_threads_for_one_query && inner_search_param.level_0) {
         result = this->parallel_searcher_->Search(
@@ -486,7 +494,9 @@ HGraph::search_one_graph(const void* query,
         result = this->searcher_->Search(
             graph, flatten, visited_list, query, inner_search_param, this->label_table_);
     }
-    this->pool_->ReturnOne(visited_list);
+    if (new_visited_list) {
+        this->pool_->ReturnOne(visited_list);
+    }
     return result;
 }
 
@@ -1229,6 +1239,7 @@ static const std::string HGRAPH_PARAMS_TEMPLATE =
                 "{SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE}": 0.05,
                 "{PCA_DIM}": 0,
                 "{RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY}": 32,
+                "{TQ_CHAIN}": "",
                 "nbits": 8,
                 "{PRODUCT_QUANTIZATION_DIM}": 1,
                 "{HOLD_MOLDS}": false
@@ -1268,7 +1279,7 @@ static const std::string HGRAPH_PARAMS_TEMPLATE =
             }
         },
         "{ATTR_PARAMS_KEY}": {
-            "{HAS_BUCKETS_KEY}": false
+            "{ATTR_HAS_BUCKETS_KEY}": false
         },
         "{HGRAPH_SUPPORT_DUPLICATE}": false,
         "{HGRAPH_SUPPORT_TOMBSTONE}": false,
@@ -1508,6 +1519,14 @@ HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
                                                 },
                                             },
                                             {
+                                                INDEX_TQ_CHAIN,
+                                                {
+                                                    HGRAPH_BASE_CODES_KEY,
+                                                    QUANTIZATION_PARAMS_KEY,
+                                                    TQ_CHAIN,
+                                                },
+                                            },
+                                            {
                                                 RABITQ_BITS_PER_DIM_QUERY,
                                                 {
                                                     HGRAPH_BASE_CODES_KEY,
@@ -1551,10 +1570,6 @@ HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
                                                     SUPPORT_TOMBSTONE,
                                                 },
                                             }};
-    if (common_param.data_type_ == DataTypes::DATA_TYPE_INT8) {
-        throw VsagException(ErrorType::INVALID_ARGUMENT,
-                            fmt::format("HGraph not support {} datatype", DATATYPE_INT8));
-    }
 
     std::string str = format_map(HGRAPH_PARAMS_TEMPLATE, DEFAULT_MAP);
     auto inner_json = JsonType::Parse(str);
@@ -1850,10 +1865,12 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     search_param.ef = 1;
     search_param.is_inner_id_allowed = nullptr;
     search_param.search_alloc = search_allocator;
+
+    auto vt = this->pool_->TakeOne();
     const auto* raw_query = get_data(query);
     for (auto i = static_cast<int64_t>(this->route_graphs_.size() - 1); i >= 0; --i) {
         auto result = this->search_one_graph(
-            raw_query, this->route_graphs_[i], this->basic_flatten_codes_, search_param);
+            raw_query, this->route_graphs_[i], this->basic_flatten_codes_, search_param, vt);
         search_param.ep = result->Top().second;
     }
 
@@ -1886,8 +1903,11 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
         search_param.time_cost = std::make_shared<Timer>();
         search_param.time_cost->SetThreshold(params.timeout_ms);
     }
+
     auto search_result = this->search_one_graph(
-        raw_query, this->bottom_graph_, this->basic_flatten_codes_, search_param);
+        raw_query, this->bottom_graph_, this->basic_flatten_codes_, search_param, vt);
+
+    this->pool_->ReturnOne(vt);
 
     if (use_reorder_) {
         this->reorder(raw_query, this->high_precise_codes_, search_result, k);

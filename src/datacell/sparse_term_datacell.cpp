@@ -155,6 +155,12 @@ SparseTermDataCell::InsertVector(const SparseVector& sparse_base, uint32_t base_
         auto term_id = sparse_base.ids_[i];
         max_term_id = std::max(max_term_id, term_id);
     }
+    if (max_term_id > term_id_limit_) {
+        throw std::runtime_error(
+            fmt::format("max term id of sparse vector {} is greater than term id limit {}",
+                        max_term_id,
+                        term_id_limit_));
+    }
     ResizeTermList(max_term_id + 1);
 
     Vector<std::pair<uint32_t, float>> sorted_base(allocator_);
@@ -175,13 +181,22 @@ SparseTermDataCell::InsertVector(const SparseVector& sparse_base, uint32_t base_
 
 void
 SparseTermDataCell::ResizeTermList(InnerIdType new_term_capacity) {
-    if (new_term_capacity <= this->term_capacity_) {
+    if (new_term_capacity <= term_capacity_) {
         return;
     }
-    this->term_capacity_ = new_term_capacity;
-    term_ids_.resize(term_capacity_, Vector<uint32_t>(allocator_));
-    term_datas_.resize(term_capacity_, Vector<float>(allocator_));
-    term_sizes_.resize(term_capacity_, 0);
+
+    Vector<Vector<uint32_t>> new_ids(new_term_capacity, Vector<uint32_t>(allocator_), allocator_);
+    Vector<Vector<float>> new_datas(new_term_capacity, Vector<float>(allocator_), allocator_);
+    Vector<uint32_t> new_sizes(new_term_capacity, 0, allocator_);
+
+    std::move(term_ids_.begin(), term_ids_.end(), new_ids.begin());
+    std::move(term_datas_.begin(), term_datas_.end(), new_datas.begin());
+    std::copy(term_sizes_.begin(), term_sizes_.end(), new_sizes.begin());
+
+    term_ids_.swap(new_ids);
+    term_datas_.swap(new_datas);
+    term_sizes_.swap(new_sizes);
+    term_capacity_ = new_term_capacity;
 }
 
 float

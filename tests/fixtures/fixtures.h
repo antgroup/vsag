@@ -23,6 +23,7 @@
 #include <tuple>
 #include <vector>
 
+#include "common.h"
 #include "simd/normalize.h"
 #include "typing.h"
 #include "vsag/vsag.h"
@@ -33,6 +34,9 @@ extern const int RABITQ_MIN_RACALL_DIM;
 
 std::vector<int>
 get_common_used_dims(uint64_t count = -1, int seed = 369, int limited_dim = -1);
+
+std::vector<int>
+get_index_test_dims(uint64_t count = -1, int seed = 369, int limited_dim = -1);
 
 template <typename T>
 T*
@@ -125,7 +129,7 @@ vsag::Vector<vsag::SparseVector>
 GenerateSparseVectors(vsag::Allocator* allocator,
                       uint32_t count,
                       uint32_t max_dim = 100,
-                      uint32_t max_id = 10000,
+                      uint32_t max_id = 1000,
                       float min_val = -1,
                       float max_val = 1,
                       int seed = 47);

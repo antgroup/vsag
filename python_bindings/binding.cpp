@@ -20,6 +20,7 @@
 #include <fstream>
 #include <map>
 
+#include "fmt/format.h"
 #include "iostream"
 #include "vsag/dataset.h"
 #include "vsag/vsag.h"
@@ -53,6 +54,82 @@ readBinaryPOD(std::istream& in, T& podRef) {
     in.read((char*)&podRef, sizeof(T));
 }
 
+struct SparseVectors {
+    std::vector<vsag::SparseVector> sparse_vectors;
+    uint32_t num_elements;
+    uint32_t num_non_zeros;
+
+    SparseVectors(uint32_t num_elements)
+        : sparse_vectors(num_elements), num_elements(num_elements), num_non_zeros(0) {
+    }
+};
+
+SparseVectors
+BuildSparseVectorsFromCSR(py::array_t<uint32_t> index_pointers,
+                          py::array_t<uint32_t> indices,
+                          py::array_t<float> values) {
+    auto buf_ptr = index_pointers.request();
+    auto buf_idx = indices.request();
+    auto buf_val = values.request();
+
+    if (buf_ptr.ndim != 1 || buf_idx.ndim != 1 || buf_val.ndim != 1) {
+        throw std::invalid_argument("all inputs must be 1-dimensional");
+    }
+
+    if (buf_ptr.shape[0] < 2) {
+        throw std::invalid_argument("index_pointers length must be at least 2");
+    }
+    uint32_t num_elements = buf_ptr.shape[0] - 1;
+
+    const uint32_t* ptr_data = index_pointers.data();
+    const uint32_t* idx_data = indices.data();
+    const float* val_data = values.data();
+
+    uint32_t num_non_zeros = ptr_data[num_elements];
+
+    if (static_cast<size_t>(num_non_zeros) != buf_idx.shape[0]) {
+        throw std::invalid_argument(
+            fmt::format("Size of 'indices'({}) must equal index_pointers[last]",
+                        buf_idx.shape[0],
+                        num_non_zeros));
+    }
+    if (static_cast<size_t>(num_non_zeros) != buf_val.shape[0]) {
+        throw std::invalid_argument(
+            fmt::format("Size of 'values'({}) must equal index_pointers[last]({})",
+                        buf_val.shape[0],
+                        num_non_zeros));
+    }
+
+    if (ptr_data[0] != 0) {
+        throw std::invalid_argument("index_pointers[0] must be 0");
+    }
+    for (uint32_t i = 1; i <= num_elements; ++i) {
+        if (ptr_data[i] < ptr_data[i - 1]) {
+            throw std::invalid_argument(
+                fmt::format("index_pointers[{}]({}) > index_pointers[{}]({})",
+                            i - 1,
+                            ptr_data[i - 1],
+                            i,
+                            ptr_data[i]));
+        }
+    }
+
+    SparseVectors svs(num_elements);
+    svs.num_non_zeros = num_non_zeros;
+
+    for (uint32_t i = 0; i < num_elements; ++i) {
+        uint32_t start = ptr_data[i];
+        uint32_t end = ptr_data[i + 1];
+        uint32_t len = end - start;
+
+        svs.sparse_vectors[i].len_ = len;
+        svs.sparse_vectors[i].ids_ = const_cast<uint32_t*>(idx_data + start);
+        svs.sparse_vectors[i].vals_ = const_cast<float*>(val_data + start);
+    }
+
+    return svs;
+}
+
 class Index {
 public:
     Index(std::string name, const std::string& parameters) {
@@ -82,6 +159,33 @@ public:
         index_->Build(dataset);
     }
 
+    void
+    SparseBuild(py::array_t<uint32_t> index_pointers,
+                py::array_t<uint32_t> indices,
+                py::array_t<float> values,
+                py::array_t<int64_t> ids) {
+        auto batch = BuildSparseVectorsFromCSR(index_pointers, indices, values);
+
+        auto buf_id = ids.request();
+        if (buf_id.ndim != 1) {
+            throw std::invalid_argument("all inputs must be 1-dimensional");
+        }
+        if (batch.num_elements != buf_id.shape[0]) {
+            throw std::invalid_argument(
+                fmt::format("Length of 'ids'({}) must match number of vectors({})",
+                            buf_id.shape[0],
+                            batch.num_elements));
+        }
+
+        auto dataset = vsag::Dataset::Make();
+        dataset->Owner(false)
+            ->NumElements(batch.num_elements)
+            ->Ids(ids.data())
+            ->SparseVectors(batch.sparse_vectors.data());
+
+        index_->Build(dataset);
+    }
+
     py::object
     KnnSearch(py::array_t<float> vector, size_t k, std::string& parameters) {
         auto query = vsag::Dataset::Make();
@@ -104,13 +208,46 @@ public:
 
             auto vsag_ids = result.value()->GetIds();
             auto vsag_distances = result.value()->GetDistances();
-            for (int i = 0; i < data_num * k; ++i) {
+            for (uint32_t i = 0; i < data_num * k; ++i) {
                 ids_view(i) = vsag_ids[i];
                 dists_view(i) = vsag_distances[i];
             }
         }
 
         return py::make_tuple(ids, dists);
+    }
+
+    py::tuple
+    SparseKnnSearch(py::array_t<uint32_t> index_pointers,
+                    py::array_t<uint32_t> indices,
+                    py::array_t<float> values,
+                    uint32_t k,
+                    const std::string& parameters) {
+        auto batch = BuildSparseVectorsFromCSR(index_pointers, indices, values);
+
+        std::vector<uint32_t> shape{batch.num_elements, k};
+        auto res_ids = py::array_t<int64_t>(shape);
+        auto res_dists = py::array_t<float>(shape);
+
+        auto ids_view = res_ids.mutable_unchecked<2>();
+        auto dists_view = res_dists.mutable_unchecked<2>();
+
+        for (uint32_t i = 0; i < batch.num_elements; ++i) {
+            auto query = vsag::Dataset::Make();
+            query->Owner(false)->NumElements(1)->SparseVectors(batch.sparse_vectors.data() + i);
+
+            auto result = index_->KnnSearch(query, k, parameters);
+            if (result.has_value()) {
+                for (uint32_t j = 0; j < k; ++j) {
+                    if (j < result.value()->GetDim()) {
+                        ids_view(i, j) = result.value()->GetIds()[j];
+                        dists_view(i, j) = result.value()->GetDistances()[j];
+                    }
+                }
+            }
+        }
+
+        return py::make_tuple(res_ids, res_dists);
     }
 
     py::object
@@ -132,7 +269,7 @@ public:
             dists.resize({k});
             auto labels_data = labels.mutable_data();
             auto dists_data = dists.mutable_data();
-            for (int i = 0; i < data_num * k; ++i) {
+            for (uint32_t i = 0; i < data_num * k; ++i) {
                 labels_data[i] = ids[i];
                 dists_data[i] = distances[i];
             }
@@ -172,8 +309,21 @@ PYBIND11_MODULE(_pyvsag, m) {
              py::arg("ids"),
              py::arg("num_elements"),
              py::arg("dim"))
+        .def("build",
+             &Index::SparseBuild,
+             py::arg("index_pointers"),
+             py::arg("indices"),
+             py::arg("values"),
+             py::arg("ids"))
         .def(
             "knn_search", &Index::KnnSearch, py::arg("vector"), py::arg("k"), py::arg("parameters"))
+        .def("knn_search",
+             &Index::SparseKnnSearch,
+             py::arg("index_pointers"),
+             py::arg("indices"),
+             py::arg("values"),
+             py::arg("k"),
+             py::arg("parameters"))
         .def("range_search",
              &Index::RangeSearch,
              py::arg("vector"),

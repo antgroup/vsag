@@ -589,7 +589,7 @@ public:
      * @return IndexPtr A pointer to the cloned index.
      */
     virtual tl::expected<IndexPtr, Error>
-    Clone() const {
+    Clone(const std::shared_ptr<Allocator>& allocator = nullptr) const {
         throw std::runtime_error("Index doesn't support Clone");
     }
 

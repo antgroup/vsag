@@ -18,37 +18,43 @@
 #include "inner_string_params.h"
 #include "quantization/quantizer_parameter.h"
 #include "utils/pointer_define.h"
-
 namespace vsag {
-DEFINE_POINTER2(TransformQuantizerParam, TransformQuantizerParameter)
-class TransformQuantizerParameter : public QuantizerParameter {
+template <int bit = 8>
+class ScalarQuantizerParameter : public QuantizerParameter {
 public:
-    TransformQuantizerParameter();
+    ScalarQuantizerParameter();
 
-    ~TransformQuantizerParameter() override = default;
+    ~ScalarQuantizerParameter() override = default;
 
     void
     FromJson(const JsonType& json) override;
 
     JsonType
     ToJson() const override;
-
-    bool
-    CheckCompatibility(const vsag::ParamPtr& other) const override;
-
-    static std::vector<std::string>
-    SplitString(const std::string& input, char delimiter = ',');
-
-    static std::string
-    MergeStrings(const std::vector<std::string>& vec, char delimiter = ',');
-
-    std::string
-    GetBottomQuantizationName() const {
-        return base_quantizer_json_[QUANTIZATION_TYPE_KEY].GetString();
-    }
-
-public:
-    std::vector<std::string> tq_chain_;
-    JsonType base_quantizer_json_;  // store param of base quantizer
 };
+
+template <int bit>
+ScalarQuantizerParameter<bit>::ScalarQuantizerParameter()
+    : QuantizerParameter(QUANTIZATION_TYPE_VALUE_SQ8) {
+    static_assert(bit == 4 || bit == 8, "bit must be 4 or 8");
+    if constexpr (bit == 8) {
+        this->name_ = QUANTIZATION_TYPE_VALUE_SQ8;
+    } else if constexpr (bit == 4) {
+        this->name_ = QUANTIZATION_TYPE_VALUE_SQ4;
+    }
+}
+
+template <int bit>
+void
+ScalarQuantizerParameter<bit>::FromJson(const JsonType& json) {
+}
+
+template <int bit>
+JsonType
+ScalarQuantizerParameter<bit>::ToJson() const {
+    JsonType json;
+    json[QUANTIZATION_TYPE_KEY].SetString(this->GetTypeName());
+    return json;
+}
+
 }  // namespace vsag

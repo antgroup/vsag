@@ -32,6 +32,7 @@ SINDI::CheckAndMappingExternalParam(const JsonType& external_param,
 SINDI::SINDI(const SINDIParameterPtr& param, const IndexCommonParam& common_param)
     : InnerIndexInterface(param, common_param),
       use_reorder_(param->use_reorder),
+      term_id_limit_(param->term_id_limit),
       window_size_(param->window_size),
       doc_retain_ratio_(1.0F - param->doc_prune_ratio),
       window_term_list_(common_param.allocator_.get()),
@@ -60,7 +61,7 @@ SINDI::Add(const DatasetPtr& base) {
     int64_t final_add_window = ceil_int(cur_element_count_ + data_num, window_size_) / window_size_;
     while (window_term_list_.size() < final_add_window) {
         window_term_list_.emplace_back(
-            std::make_shared<SparseTermDataCell>(doc_retain_ratio_, allocator_));
+            std::make_shared<SparseTermDataCell>(doc_retain_ratio_, term_id_limit_, allocator_));
     }
 
     // add process
@@ -68,26 +69,44 @@ SINDI::Add(const DatasetPtr& base) {
         auto cur_window = cur_element_count_ / window_size_;
         auto window_start_id = cur_window * window_size_;
         const auto& sparse_vector = sparse_vectors[i];
-        if (sparse_vectors->len_ <= 0) {
+        if (sparse_vector.len_ <= 0) {
             failed_ids.push_back(ids[i]);
             logger::warn(
-                "sparse_vectors.len_ ({}) is invalid for id ({})", sparse_vectors->len_, ids[i]);
+                "sparse_vector.len_ ({}) is invalid for id ({})", sparse_vector.len_, ids[i]);
+            continue;
+        }
+
+        uint32_t inner_id = cur_element_count_ - window_start_id;
+
+        try {
+            window_term_list_[cur_window]->InsertVector(sparse_vector, inner_id);
+        } catch (const std::runtime_error& e) {
+            failed_ids.push_back(ids[i]);
+            logger::warn("runtime error: {}", e.what());
+            continue;
+        } catch (const std::bad_alloc& e) {
+            failed_ids.push_back(ids[i]);
+            logger::warn("memory allocation failed: {}", e.what());
             continue;
         }
 
         label_table_->Insert(cur_element_count_, ids[i]);  // todo(zxy): check id exists
+
         if (extra_info_size > 0) {
             extra_infos_->InsertExtraInfo(extra_info + i * extra_info_size, cur_element_count_);
         }
 
-        uint32_t inner_id = cur_element_count_ - window_start_id;
-        window_term_list_[cur_window]->InsertVector(sparse_vector, inner_id);
-
         cur_element_count_++;
-    }
-    // high precision part
-    if (use_reorder_) {
-        rerank_flat_index_->Add(base);
+
+        // high precision part
+        if (use_reorder_) {
+            auto single_base = Dataset::Make();
+            single_base->NumElements(1)
+                ->SparseVectors(sparse_vectors + i)
+                ->Ids(ids + i)
+                ->Owner(false);
+            rerank_flat_index_->Add(single_base);
+        }
     }
 
     return failed_ids;
@@ -120,8 +139,9 @@ SINDI::KnnSearch(const DatasetPtr& query,
     const auto* sparse_vectors = query->GetSparseVectors();
     CHECK_ARGUMENT(query->GetNumElements() == 1, "num of query should be 1");
     auto sparse_query = sparse_vectors[0];
-    CHECK_ARGUMENT(sparse_vectors->len_ > 0,
-                   fmt::format("sparse_vectors.len_ ({}) is invalid", sparse_vectors->len_));
+    CHECK_ARGUMENT(
+        sparse_query.len_ > 0,
+        fmt::format("query->GetSparseVectors()->len_ ({}) is invalid", sparse_query.len_));
 
     // search parameter
     SINDISearchParameter search_param;
@@ -258,8 +278,9 @@ SINDI::RangeSearch(const DatasetPtr& query,
     const auto* sparse_vectors = query->GetSparseVectors();
     CHECK_ARGUMENT(query->GetNumElements() == 1, "num of query should be 1");
     auto sparse_query = sparse_vectors[0];
-    CHECK_ARGUMENT(sparse_vectors->len_ > 0,
-                   fmt::format("query.len_ ({}) is invalid", sparse_vectors->len_));
+    CHECK_ARGUMENT(
+        sparse_query.len_ > 0,
+        fmt::format("query->GetSparseVectors()->len_ ({}) is invalid", sparse_query.len_));
 
     // search parameter
     SINDISearchParameter search_param;
@@ -315,10 +336,16 @@ SINDI::Deserialize(StreamReader& reader) {
         JsonType jsonify_basic_info = metadata->Get("basic_info");
         // Check if the index parameter is compatible
         {
-            auto param = jsonify_basic_info[INDEX_PARAM];
+            auto param = jsonify_basic_info[INDEX_PARAM].GetString();
             SINDIParameterPtr index_param = std::make_shared<SINDIParameter>();
-            index_param->FromJson(param);
-            this->create_param_ptr_->CheckCompatibility(index_param);
+            index_param->FromString(param);
+            if (not this->create_param_ptr_->CheckCompatibility(index_param)) {
+                auto message = fmt::format("SINDI index parameter not match, current: {}, new: {}",
+                                           this->create_param_ptr_->ToString(),
+                                           index_param->ToString());
+                logger::error(message);
+                throw VsagException(ErrorType::INVALID_ARGUMENT, message);
+            }
         }
     }
 
@@ -328,7 +355,8 @@ SINDI::Deserialize(StreamReader& reader) {
     StreamReader::ReadObj(reader, window_term_list_size);
     window_term_list_.resize(window_term_list_size);
     for (auto& window : window_term_list_) {
-        window = std::make_shared<SparseTermDataCell>(doc_retain_ratio_, allocator_);
+        window =
+            std::make_shared<SparseTermDataCell>(doc_retain_ratio_, term_id_limit_, allocator_);
         window->Deserialize(reader);
     }
 
@@ -382,6 +410,9 @@ SINDI::EstimateMemory(uint64_t num_elements) const {
     if (use_reorder_) {
         mem *= 2;
     }
+
+    // size of term list
+    mem += sizeof(std::vector<float>) * 2 * term_id_limit_;
 
     return mem;
 }

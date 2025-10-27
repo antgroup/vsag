@@ -92,8 +92,14 @@ target_link_libraries(314_feature_hgraph_search_allocator vsag)
 add_executable(315_feature_hgraph_merge 315_feature_hgraph_merge.cpp)
 target_link_libraries(315_feature_hgraph_merge vsag)
 
+add_executable (316_index_int8_hgraph 316_index_int8_hgraph.cpp)
+target_link_libraries (316_index_int8_hgraph vsag)
+
 add_executable (401_persistent_kv 401_persistent_kv.cpp)
 target_link_libraries (401_persistent_kv vsag)
 
 add_executable (402_persistent_streaming 402_persistent_streaming.cpp)
 target_link_libraries (402_persistent_streaming vsag)
+
+add_executable (501_quantization_transform 501_quantization_transform.cpp)
+target_link_libraries (501_quantization_transform vsag)

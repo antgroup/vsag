@@ -47,4 +47,13 @@ void
 DistanceHeap::Push(const DistanceRecord& record) {
     return this->Push(record.first, record.second);
 }
+
+void
+DistanceHeap::Merge(const DistanceHeap& other) {
+    const auto* data = other.GetData();
+    for (auto i = 0; i < other.Size(); ++i) {
+        this->Push(data[i]);
+    }
+}
+
 }  // namespace vsag

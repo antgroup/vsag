@@ -211,6 +211,8 @@ private:
     get_data(const DatasetPtr& dataset, uint32_t index = 0) const {
         if (data_type_ == DataTypes::DATA_TYPE_FLOAT) {
             return dataset->GetFloat32Vectors() + index * dim_;
+        } else if (data_type_ == DataTypes::DATA_TYPE_INT8) {
+            return dataset->GetInt8Vectors() + index * dim_;
         } else if (data_type_ == DataTypes::DATA_TYPE_SPARSE) {
             return dataset->GetSparseVectors() + index;
         }
@@ -256,7 +258,8 @@ private:
     search_one_graph(const void* query,
                      const GraphInterfacePtr& graph,
                      const FlattenInterfacePtr& flatten,
-                     InnerSearchParam& inner_search_param) const;
+                     InnerSearchParam& inner_search_param,
+                     const VisitedListPtr& vt = nullptr) const;
 
     template <InnerSearchMode mode = InnerSearchMode::KNN_SEARCH>
     DistHeapPtr
