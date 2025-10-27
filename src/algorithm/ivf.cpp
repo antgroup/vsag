@@ -353,24 +353,22 @@ sample_indices_random(int64_t total_size,
     vsag::Vector<int64_t> indices(allocator.get());
     indices.reserve(sample_count);
 
-    // 0 .. sample_count-1 先全部放入蓄水池 
     int64_t actual_size = std::min(sample_count, total_size);
     indices.resize(actual_size);
     std::iota(indices.begin(), indices.end(), 0);
 
-    // 使用现代 RNG 
     std::random_device rd;
     std::mt19937_64 gen(rd());
 
-    //顺序扫描剩余元素，以概率替换蓄水池中的样本
+    //Scan the remaining elements in sequence to replace the samples in the reservoir with probabilities
     for (int64_t i = sample_count; i < total_size; ++i) {
-        std::uniform_int_distribution<int64_t> dist(0, i);   // [0, i]
+        std::uniform_int_distribution<int64_t> dist(0, i); 
         int64_t j = dist(gen);
-        if (j < sample_count) {                              // 被选中
+        if (j < sample_count) {                             
             indices[j] = i;
         }
     }
-    // 最终 indices 大小 == sample_count，无需再 resize 
+
     return indices;
 }
 
