@@ -350,7 +350,7 @@ private:
     uint64_t ef_construct_{400};
     float alpha_{1.0};
 
-    uint64_t total_count_{0};
+    std::atomic<uint64_t> total_count_{0};
 
     std::shared_ptr<VisitedListPool> pool_{nullptr};
 
