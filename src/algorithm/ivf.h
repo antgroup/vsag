@@ -166,9 +166,7 @@ private:
 
     bool is_trained_{false};
     bool use_residual_{false};
-    // Training sampling rate parameter
-    float train_sample_rate_{1.0f};     // Sampling ratio (0.0-1.0)
-    int64_t train_sample_count_{-1};    // Sampling quantity (-1 represents proportional sampling)
+
     FlattenInterfacePtr reorder_codes_{nullptr};
 
     std::shared_ptr<SafeThreadPool> thread_pool_{nullptr};
