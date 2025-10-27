@@ -19,7 +19,7 @@
 #include "datacell/bucket_datacell.h"
 #include "datacell/flatten_interface.h"
 #include "impl/heap/distance_heap.h"
-#include "impl/reorder.h"
+#include "impl/reorder/reorder.h"
 #include "impl/searcher/basic_searcher.h"
 #include "index_common_param.h"
 #include "inner_index_interface.h"

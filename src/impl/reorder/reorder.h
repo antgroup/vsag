@@ -15,10 +15,7 @@
 
 #pragma once
 
-#include <memory>
-
-#include "datacell/flatten_interface.h"
-#include "heap/distance_heap.h"
+#include "impl/heap/distance_heap.h"
 #include "utils/pointer_define.h"
 
 namespace vsag {
@@ -34,20 +31,4 @@ public:
             Allocator* allocator = nullptr) = 0;
 };
 
-class FlattenReorder : public ReorderInterface {
-public:
-    FlattenReorder(const FlattenInterfacePtr& flatten, Allocator* allocator)
-        : flatten_(flatten), allocator_(allocator) {
-    }
-
-    DistHeapPtr
-    Reorder(const DistHeapPtr& input,
-            const float* query,
-            int64_t topk,
-            Allocator* allocator = nullptr) override;
-
-private:
-    const FlattenInterfacePtr& flatten_;
-    Allocator* allocator_{nullptr};
-};
 }  // namespace vsag

@@ -20,7 +20,7 @@
 #include "attr/argparse.h"
 #include "attr/executor/executor.h"
 #include "impl/heap/standard_heap.h"
-#include "impl/reorder.h"
+#include "impl/reorder/flatten_reorder.h"
 #include "impl/searcher/basic_searcher.h"
 #include "index/index_impl.h"
 #include "index_feature_list.h"

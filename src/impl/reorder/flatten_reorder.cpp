@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "reorder.h"
+#include "impl/reorder/flatten_reorder.h"
 
 namespace vsag {
 
