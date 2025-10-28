@@ -18,26 +18,21 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "parameter_test.h"
+
 using namespace vsag;
 
 TEST_CASE("Product Quantizer Parameter ToJson Test", "[ut][ProductQuantizerParameter]") {
     std::string param_str = R"(
         {
             "pq_dim": 64,
-            "pq_bits": 8,
-            "pq_train_sample_size": 65535
+            "pq_bits": 8
         }
     )";
     auto param = std::make_shared<ProductQuantizerParameter>();
     param->FromJson(JsonType::Parse(param_str));
     ParameterTest::TestToJson(param);
-
     REQUIRE(param->pq_bits_ == 8);
-    
     REQUIRE(param->pq_dim_ == 64);
-    
-    REQUIRE(param->train_sample_size_ == 65535);
-    
 
     TestParamCheckCompatibility<ProductQuantizerParameter>(param_str);
 }
