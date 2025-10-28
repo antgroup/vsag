@@ -33,16 +33,15 @@ TransformQuantizerParameter::FromJson(const JsonType& json) {
     if (this->tq_chain_.size() <= 1) {
         throw VsagException(
             ErrorType::INVALID_ARGUMENT,
-            fmt::format("tq_chain: \"{}\" must contains 1 or more transformer and 1 quantizer, "
-                        "e.g., tq_chain: \"rom, fp32\""),
-            chain_str);
+            fmt::format("tq_chain: ({}) must contains 1 or more transformer and 1 quantizer, "
+                        "e.g., tq_chain: \"rom, fp32\"",
+                        chain_str));
     }
 
     auto quantizer_type = tq_chain_.back();
     if (not TransformQuantizerParameter::IsValidQuantizationType(quantizer_type)) {
         throw VsagException(ErrorType::INVALID_ARGUMENT,
-                            fmt::format("base quantizer: \"{}\" is invalid"),
-                            quantizer_type);
+                            fmt::format("base quantizer: \"{}\" is invalid", quantizer_type));
     }
 
     base_quantizer_json_ = json;

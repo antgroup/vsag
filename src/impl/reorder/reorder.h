@@ -15,19 +15,20 @@
 
 #pragma once
 
-#include <memory>
-
-#include "datacell/flatten_interface.h"
-#include "heap/distance_heap.h"
+#include "impl/heap/distance_heap.h"
+#include "utils/pointer_define.h"
 
 namespace vsag {
-class Reorder {
+
+DEFINE_POINTER(ReorderInterface)
+
+class ReorderInterface {
 public:
-    static DistHeapPtr
-    ReorderByFlatten(const DistHeapPtr& input,
-                     const FlattenInterfacePtr& flatten,
-                     const float* query,
-                     Allocator* allocator,
-                     int64_t topk);
+    virtual DistHeapPtr
+    Reorder(const DistHeapPtr& input,
+            const float* query,
+            int64_t topk,
+            Allocator* allocator = nullptr) = 0;
 };
+
 }  // namespace vsag
