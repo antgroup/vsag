@@ -678,6 +678,8 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HGraphTestIndex,
     TestIndex::TestSerializeBinarySet(index, index2, dataset, search_param, true);
     index2 = TestIndex::TestFactory(name, param, true);
     TestIndex::TestSerializeReaderSet(index, index2, dataset, search_param, name, true);
+    index2 = TestIndex::TestFactory(name, param, true);
+    TestIndex::TestSerializeWriteFunc(index, index2, dataset, search_param, true);
     vsag::Options::Instance().set_block_size_limit(origin_size);
 }
 static void
@@ -1413,6 +1415,8 @@ TestHGraphSerialize(const fixtures::HGraphTestIndexPtr& test_index,
                 index2 = TestIndex::TestFactory(test_index->name, param, true);
                 TestIndex::TestSerializeReaderSet(
                     index, index2, dataset, search_param, test_index->name, true);
+                index2 = TestIndex::TestFactory(test_index->name, param, true);
+                TestIndex::TestSerializeWriteFunc(index, index2, dataset, search_param, true);
                 vsag::Options::Instance().set_block_size_limit(origin_size);
             }
         }

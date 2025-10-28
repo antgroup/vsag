@@ -1116,6 +1116,7 @@ HGraph::InitFeatures() {
         IndexFeature::SUPPORT_DESERIALIZE_READER_SET,
         IndexFeature::SUPPORT_SERIALIZE_BINARY_SET,
         IndexFeature::SUPPORT_SERIALIZE_FILE,
+        IndexFeature::SUPPORT_SERIALIZE_WRITE_FUNC,
     });
     // other
     this->index_feature_list_->SetFeatures({
