@@ -18,6 +18,7 @@
 #include <shared_mutex>
 
 #include "bucket_interface.h"
+#include "io/io_array.h"
 #include "quantization/product_quantization/pq_fastscan_quantizer.h"
 #include "simd/fp32_simd.h"
 #include "utils/byte_buffer.h"
@@ -70,7 +71,7 @@ public:
     void
     Prefetch(BucketIdType bucket_id, InnerIdType offset_id) override {
         this->check_valid_bucket_id(bucket_id);
-        this->datas_[bucket_id]->Prefetch(offset_id * code_size_, code_size_);
+        this->datas_[bucket_id].Prefetch(offset_id * code_size_, code_size_);
     }
 
     void
@@ -145,7 +146,7 @@ private:
 private:
     std::shared_ptr<QuantTmpl> quantizer_{nullptr};
 
-    Vector<std::shared_ptr<IOTmpl>> datas_;
+    IOArray<IOTmpl> datas_;
 
     Vector<InnerIdType> bucket_sizes_;
 
@@ -167,7 +168,7 @@ BucketDataCell<QuantTmpl, IOTmpl>::BucketDataCell(const QuantizerParamPtr& quant
                                                   BucketIdType bucket_count,
                                                   bool use_residual)
     : BucketInterface(),
-      datas_(common_param.allocator_.get()),
+      datas_(common_param.allocator_.get(), io_param, common_param),
       bucket_sizes_(bucket_count, 0, common_param.allocator_.get()),
       inner_ids_(bucket_count,
                  Vector<InnerIdType>(common_param.allocator_.get()),
@@ -180,9 +181,7 @@ BucketDataCell<QuantTmpl, IOTmpl>::BucketDataCell(const QuantizerParamPtr& quant
     this->quantizer_ = std::make_shared<QuantTmpl>(quantization_param, common_param);
     this->code_size_ = quantizer_->GetCodeSize();
 
-    for (int i = 0; i < bucket_count; ++i) {
-        this->datas_.emplace_back(std::make_shared<IOTmpl>(io_param, common_param));
-    }
+    datas_.Resize(bucket_count);
 }
 
 template <typename QuantTmpl, typename IOTmpl>
@@ -202,10 +201,10 @@ BucketDataCell<QuantTmpl, IOTmpl>::query_one_by_id(
     float ret;
     bool need_release = false;
     const auto* codes =
-        this->datas_[bucket_id]->Read(code_size_, offset_id * code_size_, need_release);
+        this->datas_[bucket_id].Read(code_size_, offset_id * code_size_, need_release);
     computer->ComputeDist(codes, &ret);
     if (need_release) {
-        this->datas_[bucket_id]->Release(codes);
+        this->datas_[bucket_id].Release(codes);
     }
     if (use_residual_ && this->quantizer_->Metric() == MetricType::METRIC_TYPE_L2SQR) {
         ret -= residual_bias_[bucket_id][offset_id];
@@ -229,11 +228,11 @@ BucketDataCell<QuantTmpl, IOTmpl>::scan_bucket_by_id(float* result_dists,
     while (data_count > 0) {
         auto compute_count = std::min(data_count, scan_block_size);
         bool need_release = false;
-        const auto* codes = this->datas_[bucket_id]->Read(
+        const auto* codes = this->datas_[bucket_id].Read(
             code_size_ * compute_count, offset * code_size_, need_release);
         computer->ScanBatchDists(compute_count, codes, result_dists + offset);
         if (need_release) {
-            this->datas_[bucket_id]->Release(codes);
+            this->datas_[bucket_id].Release(codes);
         }
         data_count -= compute_count;
         offset += compute_count;
@@ -279,10 +278,10 @@ BucketDataCell<QuantTmpl, IOTmpl>::InsertVector(const void* vector,
     {
         std::unique_lock lock(this->bucket_mutexes_[bucket_id]);
         offset_id = this->bucket_sizes_[bucket_id];
-        this->datas_[bucket_id]->Write(codes.data,
-                                       code_size_,
-                                       static_cast<uint64_t>(this->bucket_sizes_[bucket_id]) *
-                                           static_cast<uint64_t>(code_size_));
+        this->datas_[bucket_id].Write(codes.data,
+                                      code_size_,
+                                      static_cast<uint64_t>(this->bucket_sizes_[bucket_id]) *
+                                          static_cast<uint64_t>(code_size_));
         this->bucket_sizes_[bucket_id]++;
         inner_ids_[bucket_id].emplace_back(inner_id);
         if (use_residual_ && this->quantizer_->Metric() == MetricType::METRIC_TYPE_L2SQR) {
@@ -298,7 +297,7 @@ BucketDataCell<QuantTmpl, IOTmpl>::Serialize(StreamWriter& writer) {
     BucketInterface::Serialize(writer);
     quantizer_->Serialize(writer);
     for (BucketIdType i = 0; i < this->bucket_count_; ++i) {
-        datas_[i]->Serialize(writer);
+        datas_[i].Serialize(writer);
         StreamWriter::WriteVector(writer, inner_ids_[i]);
         if (use_residual_) {
             StreamWriter::WriteVector(writer, residual_bias_[i]);
@@ -313,7 +312,7 @@ BucketDataCell<QuantTmpl, IOTmpl>::Deserialize(lvalue_or_rvalue<StreamReader> re
     BucketInterface::Deserialize(reader);
     quantizer_->Deserialize(reader);
     for (BucketIdType i = 0; i < this->bucket_count_; ++i) {
-        datas_[i]->Deserialize(reader);
+        datas_[i].Deserialize(reader);
         StreamReader::ReadVector(reader, inner_ids_[i]);
         if (use_residual_) {
             StreamReader::ReadVector(reader, residual_bias_[i]);
@@ -332,7 +331,7 @@ BucketDataCell<QuantTmpl, IOTmpl>::package_fastscan() {
             continue;
         }
         bool need_release = false;
-        const auto* codes = this->datas_[i]->Read(code_size_ * bucket_size, 0, need_release);
+        const auto* codes = this->datas_[i].Read(code_size_ * bucket_size, 0, need_release);
         InnerIdType begin = 0;
         while (begin < bucket_size) {
             auto valid_size = bucket_size - begin;
@@ -340,11 +339,11 @@ BucketDataCell<QuantTmpl, IOTmpl>::package_fastscan() {
                 valid_size = 32;
             }
             quantizer_->Package32(codes + begin * code_size_, buffer.data, valid_size);
-            this->datas_[i]->Write(buffer.data, code_size_ * 32, begin * code_size_);
+            this->datas_[i].Write(buffer.data, code_size_ * 32, begin * code_size_);
             begin += 32;
         }
         if (need_release) {
-            this->datas_[i]->Release(codes);
+            this->datas_[i].Release(codes);
         }
     }
 }
@@ -359,16 +358,16 @@ BucketDataCell<QuantTmpl, IOTmpl>::unpack_fastscan() {
             continue;
         }
         bool need_release = false;
-        const auto* codes = this->datas_[i]->Read(code_size_ * bucket_size, 0, need_release);
+        const auto* codes = this->datas_[i].Read(code_size_ * bucket_size, 0, need_release);
         InnerIdType begin = 0;
         while (begin < bucket_size) {
             const uint8_t* src_block = codes + begin * code_size_;
             quantizer_->Unpack32(src_block, buffer.data);
-            this->datas_[i]->Write(buffer.data, code_size_ * 32, begin * code_size_);
+            this->datas_[i].Write(buffer.data, code_size_ * 32, begin * code_size_);
             begin += 32;
         }
         if (need_release) {
-            this->datas_[i]->Release(codes);
+            this->datas_[i].Release(codes);
         }
     }
 }
@@ -401,12 +400,12 @@ BucketDataCell<QuantTmpl, IOTmpl>::MergeOther(const BucketInterfacePtr& other, I
             continue;
         }
         auto* other_data =
-            ptr->datas_[i]->Read(ptr->bucket_sizes_[i] * this->code_size_, 0, need_release);
-        this->datas_[i]->Write(other_data,
-                               ptr->bucket_sizes_[i] * this->code_size_,
-                               this->bucket_sizes_[i] * this->code_size_);
+            ptr->datas_[i].Read(ptr->bucket_sizes_[i] * this->code_size_, 0, need_release);
+        this->datas_[i].Write(other_data,
+                              ptr->bucket_sizes_[i] * this->code_size_,
+                              this->bucket_sizes_[i] * this->code_size_);
         if (need_release) {
-            ptr->datas_[i]->Release(other_data);
+            ptr->datas_[i].Release(other_data);
         }
         this->bucket_sizes_[i] += ptr->bucket_sizes_[i];
         this->inner_ids_[i].reserve(this->bucket_sizes_[i]);
@@ -431,7 +430,7 @@ BucketDataCell<QuantTmpl, IOTmpl>::GetCodesById(BucketIdType bucket_id,
             ErrorType::INTERNAL_ERROR,
             fmt::format("Get code by inner id failed: offset id ({}) is invalid", offset_id));
     }
-    this->datas_[bucket_id]->Read(this->code_size_, offset_id * this->code_size_, data);
+    this->datas_[bucket_id].Read(this->code_size_, offset_id * this->code_size_, data);
 }
 
 }  // namespace vsag
