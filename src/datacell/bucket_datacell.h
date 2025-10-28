@@ -57,10 +57,7 @@ public:
     Train(const void* data, uint64_t count) override;
 
     InnerIdType
-    InsertVector(const void* vector,
-                 BucketIdType bucket_id,
-                 InnerIdType inner_id,
-                 const float* centroid = nullptr) override;
+    InsertVector(const void* vector, BucketIdType bucket_id, InnerIdType inner_id) override;
 
     InnerIdType*
     GetInnerIds(BucketIdType bucket_id) override {
@@ -107,7 +104,7 @@ public:
 
     [[nodiscard]] MetricType
     GetMetricType() override {
-        return this->quantizer_->Metric();
+        return metric_;
     }
 
     [[nodiscard]] InnerIdType
@@ -156,9 +153,9 @@ private:
 
     Allocator* const allocator_{nullptr};
 
-    bool use_residual_{false};
-
     Vector<Vector<float>> residual_bias_;
+
+    MetricType metric_{MetricType::METRIC_TYPE_L2SQR};
 };
 
 template <typename QuantTmpl, typename IOTmpl>
@@ -176,10 +173,11 @@ BucketDataCell<QuantTmpl, IOTmpl>::BucketDataCell(const QuantizerParamPtr& quant
       bucket_mutexes_(bucket_count, common_param.allocator_.get()),
       allocator_(common_param.allocator_.get()),
       residual_bias_(bucket_count, Vector<float>(allocator_), allocator_),
-      use_residual_(use_residual) {
+      metric_(common_param.metric_) {
     this->bucket_count_ = bucket_count;
     this->quantizer_ = std::make_shared<QuantTmpl>(quantization_param, common_param);
     this->code_size_ = quantizer_->GetCodeSize();
+    this->use_residual_ = use_residual;
 
     datas_.Resize(bucket_count);
 }
@@ -206,8 +204,17 @@ BucketDataCell<QuantTmpl, IOTmpl>::query_one_by_id(
     if (need_release) {
         this->datas_[bucket_id].Release(codes);
     }
-    if (use_residual_ && this->quantizer_->Metric() == MetricType::METRIC_TYPE_L2SQR) {
-        ret -= residual_bias_[bucket_id][offset_id];
+
+    if (use_residual_) {
+        Vector<float> centroid(this->quantizer_->GetDim(), allocator_);
+        strategy_->GetCentroid(bucket_id, centroid);
+        auto ip_distance =
+            FP32ComputeIP(computer->raw_query_.data(), centroid.data(), this->quantizer_->GetDim());
+        if (metric_ == MetricType::METRIC_TYPE_L2SQR) {
+            ip_distance *= 2;
+            ret = ret - residual_bias_[bucket_id][offset_id];
+        }
+        ret -= ip_distance;
     }
     return ret;
 }
@@ -237,8 +244,21 @@ BucketDataCell<QuantTmpl, IOTmpl>::scan_bucket_by_id(float* result_dists,
         data_count -= compute_count;
         offset += compute_count;
     }
-    if (use_residual_ && this->quantizer_->Metric() == MetricType::METRIC_TYPE_L2SQR) {
-        FP32Sub(result_dists, residual_bias_[bucket_id].data(), result_dists, offset);
+
+    auto ip_distance = 0.0F;
+    Vector<float> centroid(this->quantizer_->GetDim(), allocator_);
+    if (use_residual_) {
+        strategy_->GetCentroid(bucket_id, centroid);
+        ip_distance =
+            FP32ComputeIP(computer->raw_query_.data(), centroid.data(), this->quantizer_->GetDim());
+        if (metric_ == MetricType::METRIC_TYPE_L2SQR) {
+            ip_distance *= 2;
+            FP32Sub(result_dists, residual_bias_[bucket_id].data(), result_dists, offset);
+        }
+        // TODO(inabao): optimize this loop with simd
+        for (InnerIdType i = 0; i < offset; ++i) {
+            result_dists[i] -= ip_distance;
+        }
     }
 }
 
@@ -247,13 +267,45 @@ ComputerInterfacePtr
 BucketDataCell<QuantTmpl, IOTmpl>::FactoryComputer(const void* query) {
     const auto* float_query = reinterpret_cast<const float*>(query);
     auto computer = this->quantizer_->FactoryComputer();
-    computer->SetQuery(float_query);
+    auto comp = std::static_pointer_cast<Computer<QuantTmpl>>(computer);
+    if (use_residual_) {
+        comp->raw_query_.resize(this->quantizer_->GetDim());
+        if (metric_ == MetricType::METRIC_TYPE_COSINE) {
+            Normalize(float_query, comp->raw_query_.data(), this->quantizer_->GetDim());
+        } else {
+            memcpy(
+                comp->raw_query_.data(), float_query, sizeof(float) * this->quantizer_->GetDim());
+        }
+        float_query = comp->raw_query_.data();
+    }
+    comp->SetQuery(float_query);
     return computer;
 }
 
 template <typename QuantTmpl, typename IOTmpl>
 void
 BucketDataCell<QuantTmpl, IOTmpl>::Train(const void* data, uint64_t count) {
+    Vector<float> train_data_buffer(allocator_);
+    if (use_residual_) {
+        auto data_ptr = static_cast<const float*>(data);
+        auto dim = this->quantizer_->GetDim();
+        train_data_buffer.resize(count * dim);
+        if (metric_ == MetricType::METRIC_TYPE_COSINE) {
+            for (int i = 0; i < count; ++i) {
+                Normalize(data_ptr + i * dim, train_data_buffer.data() + i * dim, dim);
+            }
+            data_ptr = train_data_buffer.data();
+        }
+        Vector<float> centroid(this->quantizer_->GetDim(), allocator_);
+        auto buckets = strategy_->ClassifyDatas(data_ptr, count, 1);
+        for (int i = 0; i < count; ++i) {
+            strategy_->GetCentroid(buckets[i], centroid);
+            for (int j = 0; j < dim; ++j) {
+                train_data_buffer[i * dim + j] = data_ptr[i * dim + j] - centroid[j];
+            }
+        }
+        data = train_data_buffer.data();
+    }
     this->quantizer_->Train(reinterpret_cast<const float*>(data), count);
 }
 
@@ -261,19 +313,31 @@ template <typename QuantTmpl, typename IOTmpl>
 InnerIdType
 BucketDataCell<QuantTmpl, IOTmpl>::InsertVector(const void* vector,
                                                 BucketIdType bucket_id,
-                                                InnerIdType inner_id,
-                                                const float* centroid) {
+                                                InnerIdType inner_id) {
     check_valid_bucket_id(bucket_id);
+
+    Vector<float> centroid(this->quantizer_->GetDim(), this->allocator_);
+    Vector<float> sub_data(this->quantizer_->GetDim(), this->allocator_);
+    Vector<float> normalize_data(this->quantizer_->GetDim(), this->allocator_);
+    float res_score = 0.0F;
+    auto vector_ptr = static_cast<const float*>(vector);
+    if (use_residual_) {
+        strategy_->GetCentroid(bucket_id, centroid);
+        if (metric_ == MetricType::METRIC_TYPE_COSINE) {
+            Normalize(vector_ptr, normalize_data.data(), quantizer_->GetDim());
+            vector_ptr = normalize_data.data();
+        }
+        FP32Sub(vector_ptr, centroid.data(), sub_data.data(), quantizer_->GetDim());
+        vector_ptr = sub_data.data();
+    }
     InnerIdType offset_id;
     ByteBuffer codes(static_cast<uint64_t>(code_size_), this->allocator_);
-    this->quantizer_->EncodeOne(static_cast<const float*>(vector), codes.data);
-    float res_score = 0.0F;
-    if (use_residual_ && this->quantizer_->Metric() == MetricType::METRIC_TYPE_L2SQR && centroid) {
-        Vector<float> compress_vector(this->quantizer_->GetDim(), this->allocator_);
-        this->quantizer_->DecodeOne(codes.data, compress_vector.data());
+    this->quantizer_->EncodeOne(static_cast<const float*>(vector_ptr), codes.data);
+    if (use_residual_ && metric_ == MetricType::METRIC_TYPE_L2SQR) {
+        this->quantizer_->DecodeOne(codes.data, normalize_data.data());
         res_score =
-            -2 * FP32ComputeIP(centroid, compress_vector.data(), this->quantizer_->GetDim()) -
-            FP32ComputeIP(centroid, centroid, this->quantizer_->GetDim());
+            -2 * FP32ComputeIP(centroid.data(), normalize_data.data(), this->quantizer_->GetDim()) -
+            FP32ComputeIP(centroid.data(), centroid.data(), this->quantizer_->GetDim());
     }
     {
         std::unique_lock lock(this->bucket_mutexes_[bucket_id]);
@@ -284,7 +348,7 @@ BucketDataCell<QuantTmpl, IOTmpl>::InsertVector(const void* vector,
                                           static_cast<uint64_t>(code_size_));
         this->bucket_sizes_[bucket_id]++;
         inner_ids_[bucket_id].emplace_back(inner_id);
-        if (use_residual_ && this->quantizer_->Metric() == MetricType::METRIC_TYPE_L2SQR) {
+        if (use_residual_ && metric_ == MetricType::METRIC_TYPE_L2SQR) {
             residual_bias_[bucket_id].emplace_back(res_score);
         }
     }
