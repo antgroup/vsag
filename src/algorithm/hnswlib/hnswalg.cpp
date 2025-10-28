@@ -201,6 +201,11 @@ HierarchicalNSW::getDistanceByInternalId(uint32_t internal_id, const void* data_
     return dist;
 }
 
+float
+HierarchicalNSW::getSelfDistanceByInternalId(uint32_t internal_id) {
+    return getDistanceByInternalId(internal_id, getDataByInternalId(internal_id));
+}
+
 uint32_t
 HierarchicalNSW::getInternalId(LabelType label) {
     std::shared_lock lock_table(label_lookup_lock_);

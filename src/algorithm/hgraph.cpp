@@ -2194,12 +2194,19 @@ HGraph::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) 
 
     if (not force_update) {
         std::shared_lock label_lock(this->label_lookup_mutex_);
+
+        // 1. check whether vectors are same
+        Vector<int8_t> base_data(data_size, allocator_);
+        GetVectorByInnerId(inner_id, (float*)base_data.data());
+        float old_self_dist = this->CalcDistanceById((float*)base_data.data(), id);
+        float self_dist = this->CalcDistanceById((float*)new_base_vec, id);
+        if (std::abs(old_self_dist - self_dist) < 1e-3) {
+            return true;
+        }
+
+        // 2. check whether the neighborhood relationship is same
         Vector<InnerIdType> neighbors(allocator_);
         this->bottom_graph_->GetNeighbors(inner_id, neighbors);
-
-        // check whether the neighborhood relationship is same
-        float self_dist = 0;
-        self_dist = this->CalcDistanceById((float*)new_base_vec, id);
         for (auto i = 0; i < neighbors.size(); i++) {
             // don't compare with itself
             if (neighbors[i] == inner_id) {

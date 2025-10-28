@@ -807,12 +807,16 @@ HNSW::update_vector(int64_t id, const DatasetPtr& new_base, bool force_update) {
     index->getNeighborsInternalId(internal_id, neighbors_internal_id);
 
     if (not force_update) {
-        // check whether the neighborhood relationship is same
         std::shared_lock lock(rw_mutex_);
-        float self_dist = 0;
-        self_dist = index->getDistanceByLabel(id, new_base_vec);
 
-        // get neighbors
+        // 1. check whether vectors are same
+        float old_self_dist = index->getSelfDistanceByInternalId(id);
+        float self_dist = index->getDistanceByLabel(id, new_base_vec);
+        if (std::abs(old_self_dist - self_dist) < 1e-3) {
+            return true;
+        }
+
+        // 2. check whether the neighborhood relationship is same
         for (uint32_t i = 0; i < neighbors_internal_id.size(); i++) {
             // don't compare with itself
             if (neighbors_internal_id[i] == internal_id) {

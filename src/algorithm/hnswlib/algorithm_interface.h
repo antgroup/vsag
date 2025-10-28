@@ -78,6 +78,11 @@ public:
         return 0;
     }
 
+    virtual float
+    getSelfDistanceByInternalId(uint32_t internal_id) {
+        return 0;
+    }
+
     virtual tl::expected<vsag::DatasetPtr, vsag::Error>
     getBatchDistanceByLabel(const int64_t* ids, const void* data_point, int64_t count) = 0;
 
