@@ -41,7 +41,9 @@ public:
     WriteVector(StreamWriter& writer, const std::vector<T>& val) {
         uint64_t size = val.size();
         WriteObj(writer, size);
-        writer.Write(reinterpret_cast<const char*>(val.data()), size * sizeof(T));
+        if (size > 0) {
+            writer.Write(reinterpret_cast<const char*>(val.data()), size * sizeof(T));
+        }
     }
 
     template <typename T>
@@ -49,7 +51,9 @@ public:
     WriteVector(StreamWriter& writer, const vsag::Vector<T>& val) {
         uint64_t size = val.size();
         WriteObj(writer, size);
-        writer.Write(reinterpret_cast<const char*>(val.data()), size * sizeof(T));
+        if (size > 0) {
+            writer.Write(reinterpret_cast<const char*>(val.data()), size * sizeof(T));
+        }
     }
 
 public:
@@ -72,13 +76,13 @@ protected:
 
 class BufferStreamWriter : public StreamWriter {
 public:
-    explicit BufferStreamWriter(char*& buffer);
+    explicit BufferStreamWriter(char* buffer);
 
     void
     Write(const char* data, uint64_t size) override;
 
 private:
-    char*& buffer_;
+    char* buffer_{nullptr};
 };
 
 class IOStreamWriter : public StreamWriter {
