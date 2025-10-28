@@ -802,40 +802,32 @@ HNSW::update_vector(int64_t id, const DatasetPtr& new_base, bool force_update) {
     get_vectors(type_, dim_, new_base, &new_base_vec, &data_size);
 
     if (not force_update) {
-        Vector<int8_t> base_data(data_size, allocator_.get());
-        auto base = Dataset::Make();
-
-        // check if id exists and get copied base data
-        {
-            std::shared_lock lock(rw_mutex_);
-            std::reinterpret_pointer_cast<hnswlib::HierarchicalNSW>(alg_hnsw_)->copyDataByLabel(
-                id, base_data.data());
-        }
-        set_dataset(type_, dim_, base, base_data.data(), 1);
-
-        // search neighbors
-        auto neighbors = *this->knn_search(
-            base,
-            UPDATE_CHECK_SEARCH_K,
-            fmt::format(R"({{"hnsw": {{ "ef_search": {} }} }})", UPDATE_CHECK_SEARCH_L),
-            nullptr);
-
         // check whether the neighborhood relationship is same
         std::shared_lock lock(rw_mutex_);
         float self_dist = 0;
         self_dist =
             std::reinterpret_pointer_cast<hnswlib::HierarchicalNSW>(alg_hnsw_)->getDistanceByLabel(
                 id, new_base_vec);
-        for (int i = 0; i < neighbors->GetDim(); i++) {
+
+        // get neighbors
+        int* data =
+            (int*)std::reinterpret_pointer_cast<hnswlib::HierarchicalNSW>(alg_hnsw_)->get_linklist0(
+                id);
+        uint32_t size =
+            std::reinterpret_pointer_cast<hnswlib::HierarchicalNSW>(alg_hnsw_)->getListCount(
+                (hnswlib::linklistsizeint*)data);
+        for (uint32_t i = 0; i < size; i++) {
+            auto neighbor_id = *(data + i + 1);
+
             // don't compare with itself
-            if (neighbors->GetIds()[i] == id) {
+            if (neighbor_id == id) {
                 continue;
             }
 
             float neighbor_dist = 0;
             try {
                 neighbor_dist = std::reinterpret_pointer_cast<hnswlib::HierarchicalNSW>(alg_hnsw_)
-                                    ->getDistanceByLabel(neighbors->GetIds()[i], new_base_vec);
+                                    ->getDistanceByLabel(neighbor_id, new_base_vec);
             } catch (const std::runtime_error& e) {
                 // incase that neighbor has been deleted
                 continue;

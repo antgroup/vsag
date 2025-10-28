@@ -2193,32 +2193,21 @@ HGraph::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) 
     get_vectors(data_type_, dim_, new_base, &new_base_vec, &data_size);
 
     if (not force_update) {
-        Vector<int8_t> base_data(data_size, allocator_);
-        auto base = Dataset::Make();
-
-        GetVectorByInnerId(inner_id, (float*)base_data.data());
-        set_dataset(data_type_, dim_, base, base_data.data(), 1);
-
-        // search neighbors
-        auto neighbors = this->KnnSearch(
-            base,
-            UPDATE_CHECK_SEARCH_K,
-            fmt::format(R"({{"hgraph": {{ "ef_search": {} }} }})", UPDATE_CHECK_SEARCH_L),
-            nullptr);
+        Vector<InnerIdType> neighbors(allocator_);
+        this->bottom_graph_->GetNeighbors(inner_id, neighbors);
 
         // check whether the neighborhood relationship is same
         float self_dist = 0;
         self_dist = this->CalcDistanceById((float*)new_base_vec, id);
-        for (int i = 0; i < neighbors->GetDim(); i++) {
+        for (int i = 0; i < neighbors.size(); i++) {
             // don't compare with itself
-            if (neighbors->GetIds()[i] == id) {
+            if (neighbors[i] == id) {
                 continue;
             }
 
             float neighbor_dist = 0;
             try {
-                neighbor_dist =
-                    this->CalcDistanceById((float*)new_base_vec, neighbors->GetIds()[i]);
+                neighbor_dist = this->CalcDistanceById((float*)new_base_vec, neighbors[i]);
             } catch (const std::runtime_error& e) {
                 // incase that neighbor has been deleted
                 continue;
