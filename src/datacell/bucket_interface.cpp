@@ -100,6 +100,15 @@ BucketInterface::MakeInstance(const BucketDataCellParamPtr& param,
     if (io_type_name == IO_TYPE_VALUE_MEMORY_IO) {
         return make_instance<MemoryIO>(param, common_param);
     }
+    if (io_type_name == IO_TYPE_VALUE_MMAP_IO) {
+        return make_instance<NonContinuousIO<MMapIO>>(param, common_param);
+    }
+    if (io_type_name == IO_TYPE_VALUE_ASYNC_IO) {
+        return make_instance<NonContinuousIO<AsyncIO>>(param, common_param);
+    }
+    if (io_type_name == IO_TYPE_VALUE_BUFFER_IO) {
+        return make_instance<NonContinuousIO<BufferIO>>(param, common_param);
+    }
     return nullptr;
 }
 }  // namespace vsag
