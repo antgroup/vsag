@@ -172,9 +172,7 @@ TEST_CASE("Product Quantizer Parameter Invalid Values Test", "[ut][ProductQuanti
         }
     )";
     auto param_zero_dim = std::make_shared<ProductQuantizerParameter>();
-    param_zero_dim->FromJson(JsonType::Parse(param_str_invalid_pq_dim_zero));
-    // Should keep default value
-    REQUIRE(param_zero_dim->pq_dim_ == 1);
+    REQUIRE_THROWS_AS(param_zero_dim->FromJson(JsonType::Parse(param_str_invalid_pq_dim_zero)), VsagException);
     
     std::string param_str_invalid_pq_dim_negative = R"(
         {
@@ -184,9 +182,7 @@ TEST_CASE("Product Quantizer Parameter Invalid Values Test", "[ut][ProductQuanti
         }
     )";
     auto param_negative_dim = std::make_shared<ProductQuantizerParameter>();
-    param_negative_dim->FromJson(JsonType::Parse(param_str_invalid_pq_dim_negative));
-    // Should keep default value
-    REQUIRE(param_negative_dim->pq_dim_ == 1);
+    REQUIRE_THROWS_AS(param_negative_dim->FromJson(JsonType::Parse(param_str_invalid_pq_dim_negative)), VsagException);
     
     // Test with invalid pq_bits (zero, negative and too large values)
     std::string param_str_invalid_pq_bits_zero = R"(
