@@ -44,7 +44,8 @@ static constexpr const char* IVF_PARAMS_TEMPLATE =
         "{BUILD_THREAD_COUNT_KEY}": 1,
         "{BUCKET_PARAMS_KEY}": {
             "{IO_PARAMS_KEY}": {
-                "{IO_TYPE_KEY}": "{IO_TYPE_VALUE_MEMORY_IO}"
+                "{IO_TYPE_KEY}": "{IO_TYPE_VALUE_MEMORY_IO}",
+                "{IO_FILE_PATH}": "{DEFAULT_FILE_PATH_VALUE}"
             },
             "{QUANTIZATION_PARAMS_KEY}": {
                 "{QUANTIZATION_TYPE_KEY}": "{QUANTIZATION_TYPE_VALUE_FP32}",
@@ -100,6 +101,14 @@ IVF::CheckAndMappingExternalParam(const JsonType& external_param,
                 BUCKET_PARAMS_KEY,
                 IO_PARAMS_KEY,
                 IO_TYPE_KEY,
+            },
+        },
+        {
+            IVF_BASE_FILE_PATH,
+            {
+                BUCKET_PARAMS_KEY,
+                IO_PARAMS_KEY,
+                IO_FILE_PATH,
             },
         },
         {

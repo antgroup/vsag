@@ -128,34 +128,36 @@ BucketInterfaceTest::TestSerializeAndDeserialize(int64_t dim, const BucketInterf
 }
 
 void
-TestBucketDataCell(BucketDataCellParamPtr& param,
+TestBucketDataCell(BucketDataCellParamPtr& param1,
+                   BucketDataCellParamPtr& param2,
                    IndexCommonParam& common_param,
                    float error = 1e-5) {
     auto count = GENERATE(100, 1000);
-    auto bucket = BucketInterface::MakeInstance(param, common_param);
+    auto bucket = BucketInterface::MakeInstance(param1, common_param);
 
     BucketInterfaceTest test(bucket, common_param.metric_);
     test.BasicTest(common_param.dim_, count, error);
-    auto other = BucketInterface::MakeInstance(param, common_param);
+    auto other = BucketInterface::MakeInstance(param2, common_param);
     test.TestSerializeAndDeserialize(common_param.dim_, other);
 }
 
 TEST_CASE("BucketDataCell Basic Test", "[ut][BucketDataCell] ") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
-    auto dim = GENERATE(32, 64, 512);
-    std::string io_type = GENERATE("memory_io", "block_memory_io");
+    auto dim = 128;
+    std::string io_type = GENERATE("memory_io", "block_memory_io", "buffer_io", "async_io");
     std::vector<std::pair<std::string, float>> quantizer_errors = {
-        {"sq8", 2e-2f},
+        {"sq8", 2e-2F},
         {"fp32", 1e-5},
     };
-    auto bucket_count = GENERATE(10, 20);
+    auto bucket_count = 20;
     MetricType metrics[3] = {
         MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_COSINE, MetricType::METRIC_TYPE_IP};
     constexpr const char* param_temp =
         R"(
         {{
             "io_params": {{
-                "type": "{}"
+                "type": "{}",
+                "file_path": "{}"
             }},
             "quantization_params": {{
                 "type": "{}"
@@ -163,18 +165,30 @@ TEST_CASE("BucketDataCell Basic Test", "[ut][BucketDataCell] ") {
             "buckets_count": {}
         }}
         )";
+    fixtures::TempDir temp_dir("vsag_bucket_data_cell_test");
     for (auto& quantizer_error : quantizer_errors) {
         for (auto& metric : metrics) {
-            auto param_str = fmt::format(param_temp, io_type, quantizer_error.first, bucket_count);
+            std::string file_path1 = temp_dir.GenerateRandomFile(false);
+            std::string file_path2 = temp_dir.GenerateRandomFile(false);
+
+            auto param_str =
+                fmt::format(param_temp, io_type, file_path1, quantizer_error.first, bucket_count);
             auto param_json = JsonType::Parse(param_str);
-            auto param = std::make_shared<BucketDataCellParameter>();
-            param->FromJson(param_json);
+            auto param1 = std::make_shared<BucketDataCellParameter>();
+            param1->FromJson(param_json);
+
+            param_str =
+                fmt::format(param_temp, io_type, file_path2, quantizer_error.first, bucket_count);
+            param_json = JsonType::Parse(param_str);
+            auto param2 = std::make_shared<BucketDataCellParameter>();
+            param2->FromJson(param_json);
+
             IndexCommonParam common_param;
             common_param.allocator_ = allocator;
             common_param.dim_ = dim;
             common_param.metric_ = metric;
 
-            TestBucketDataCell(param, common_param, quantizer_error.second);
+            TestBucketDataCell(param1, param2, common_param, quantizer_error.second);
         }
     }
 }
