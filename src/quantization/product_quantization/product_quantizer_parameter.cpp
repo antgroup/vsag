@@ -32,7 +32,8 @@ ProductQuantizerParameter::FromJson(const JsonType& json) {
         if (pq_dim > 0) {
             this->pq_dim_ = pq_dim;
         } else {
-            logger::error("Invalid pq_dim value: {}, using default value: {}", pq_dim, this->pq_dim_);
+            logger::warn("Invalid pq_dim value: {}, using default value: {}", pq_dim, this->pq_dim_);
+            this->pq_dim_ = 1; 
             throw VsagException(ErrorType::INVALID_ARGUMENT, "Invalid pq_dim value in ProductQuantizerParameter");
         }
     }
