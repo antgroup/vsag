@@ -377,4 +377,3 @@ ProductQuantizer<metric>::ProcessQueryImpl(const DataType* query,
 
 TEMPLATE_QUANTIZER(ProductQuantizer)
 }  // namespace vsag
-
