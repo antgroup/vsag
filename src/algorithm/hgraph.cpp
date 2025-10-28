@@ -28,7 +28,6 @@
 #include "impl/heap/standard_heap.h"
 #include "impl/odescent/odescent_graph_builder.h"
 #include "impl/pruning_strategy.h"
-#include "impl/reorder.h"
 #include "index/index_impl.h"
 #include "index/iterator_filter.h"
 #include "io/reader_io_parameter.h"
@@ -75,6 +74,7 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
     if (use_reorder_) {
         block_size_per_vector =
             std::max(block_size_per_vector, this->high_precise_codes_->code_size_);
+        reorder_ = std::make_shared<FlattenReorder>(this->high_precise_codes_, allocator_);
     }
     if (this->extra_infos_ != nullptr) {
         block_size_per_vector =
@@ -1199,8 +1199,8 @@ HGraph::reorder(const void* query,
     if (k <= 0) {
         k = static_cast<int64_t>(size);
     }
-    auto reorder_heap = Reorder::ReorderByFlatten(
-        candidate_heap, flatten, static_cast<const float*>(query), allocator_, k);
+    auto reorder_heap =
+        reorder_->Reorder(candidate_heap, static_cast<const float*>(query), k, allocator_);
     candidate_heap = reorder_heap;
 }
 

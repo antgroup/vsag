@@ -24,6 +24,7 @@ add_subdirectory (cluster)
 add_subdirectory (logger)
 add_subdirectory (searcher)
 add_subdirectory (odescent)
+add_subdirectory (reorder)
 
 file (GLOB IMPL_SRCS "*.cpp")
 list (FILTER IMPL_SRCS EXCLUDE REGEX "_test.cpp")
@@ -31,11 +32,11 @@ list (FILTER IMPL_SRCS EXCLUDE REGEX kmeans_cluster.cpp)
 
 add_library (impl OBJECT ${IMPL_SRCS})
 target_link_libraries (impl PUBLIC transform thread_pool allocator heap 
-    bitset logger filter cluster searcher odescent fmt::fmt coverage_config)
+    bitset logger filter cluster searcher odescent reorder fmt::fmt coverage_config)
 maybe_add_dependencies (impl spdlog)
 
 set (IMPL_LIBS transform thread_pool allocator heap bitset 
-    logger filter impl cluster searcher odescent PARENT_SCOPE)
+    logger filter impl cluster searcher odescent reorder PARENT_SCOPE)
 
 if (ENABLE_TESTS)
     file (GLOB_RECURSE IMPL_TESTS "*_test.cpp")

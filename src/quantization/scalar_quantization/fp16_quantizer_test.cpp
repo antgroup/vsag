@@ -53,7 +53,7 @@ TestComputeMetricFP16(uint64_t dim, int count, float error = 1e-5) {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     FP16Quantizer<metric> quantizer(dim, allocator.get());
     TestComputeCodes<FP16Quantizer<metric>, metric>(quantizer, dim, count, error);
-    TestComputer<FP16Quantizer<metric>, metric>(quantizer, dim, count, error, true, 1.0, 1.0);
+    TestComputer<FP16Quantizer<metric>, metric>(quantizer, dim, count, error, 1.0, true, 1.0, 1.0);
     // TODO(LHT): fix quantize error
 }
 
