@@ -2200,7 +2200,7 @@ HGraph::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) 
         // check whether the neighborhood relationship is same
         float self_dist = 0;
         self_dist = this->CalcDistanceById((float*)new_base_vec, id);
-        for (int i = 0; i < neighbors.size(); i++) {
+        for (auto i = 0; i < neighbors.size(); i++) {
             // don't compare with itself
             if (neighbors[i] == inner_id) {
                 continue;

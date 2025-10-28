@@ -2055,5 +2055,10 @@ TEST_CASE("HNSW tombstone recovery", "[ft][index][hnsw]") {
         }
     }
     float recall_after = ((float)correct) / num_vectors;
-    REQUIRE(std::abs(recall_before - recall_after) < 0.05);
+    if (result2.value().size() == num_vectors) {
+        REQUIRE(std::abs(recall_before - recall_after) < 1e-5);
+    } else {
+        // if alter_ids are added by tombstone recovery, then recall may be lower
+        REQUIRE(std::abs(recall_before - recall_after) < 0.1);
+    }
 }
