@@ -800,24 +800,20 @@ HNSW::update_vector(int64_t id, const DatasetPtr& new_base, bool force_update) {
     void* new_base_vec = nullptr;
     size_t data_size = 0;
     get_vectors(type_, dim_, new_base, &new_base_vec, &data_size);
+    auto index = std::reinterpret_pointer_cast<hnswlib::HierarchicalNSW>(alg_hnsw_);
 
     if (not force_update) {
         // check whether the neighborhood relationship is same
         std::shared_lock lock(rw_mutex_);
         float self_dist = 0;
-        self_dist =
-            std::reinterpret_pointer_cast<hnswlib::HierarchicalNSW>(alg_hnsw_)->getDistanceByLabel(
-                id, new_base_vec);
+        self_dist = index->getDistanceByLabel(id, new_base_vec);
 
         // get neighbors
-        int* data =
-            (int*)std::reinterpret_pointer_cast<hnswlib::HierarchicalNSW>(alg_hnsw_)->get_linklist0(
-                id);
-        uint32_t size =
-            std::reinterpret_pointer_cast<hnswlib::HierarchicalNSW>(alg_hnsw_)->getListCount(
-                (hnswlib::linklistsizeint*)data);
+        int* data = (int*)index->get_linklist0(id);
+        uint32_t size = index->getListCount((hnswlib::linklistsizeint*)data);
         for (uint32_t i = 0; i < size; i++) {
-            auto neighbor_id = *(data + i + 1);
+            auto neighbor_inner_id = *(data + i + 1);
+            auto neighbor_id = index->getExternalLabel(neighbor_inner_id);
 
             // don't compare with itself
             if (neighbor_id == id) {
@@ -826,8 +822,7 @@ HNSW::update_vector(int64_t id, const DatasetPtr& new_base, bool force_update) {
 
             float neighbor_dist = 0;
             try {
-                neighbor_dist = std::reinterpret_pointer_cast<hnswlib::HierarchicalNSW>(alg_hnsw_)
-                                    ->getDistanceByLabel(neighbor_id, new_base_vec);
+                neighbor_dist = index->getDistanceByLabel(neighbor_id, new_base_vec);
             } catch (const std::runtime_error& e) {
                 // incase that neighbor has been deleted
                 continue;
@@ -840,8 +835,7 @@ HNSW::update_vector(int64_t id, const DatasetPtr& new_base, bool force_update) {
 
     // note that the validation of old_id is handled within updatePoint.
     std::scoped_lock lock(rw_mutex_);
-    std::reinterpret_pointer_cast<hnswlib::HierarchicalNSW>(alg_hnsw_)->updateVector(id,
-                                                                                     new_base_vec);
+    index->updateVector(id, new_base_vec);
 
     return true;
 }

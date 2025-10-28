@@ -2193,6 +2193,7 @@ HGraph::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) 
     get_vectors(data_type_, dim_, new_base, &new_base_vec, &data_size);
 
     if (not force_update) {
+        std::shared_lock label_lock(this->label_lookup_mutex_);
         Vector<InnerIdType> neighbors(allocator_);
         this->bottom_graph_->GetNeighbors(inner_id, neighbors);
 
@@ -2201,13 +2202,14 @@ HGraph::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) 
         self_dist = this->CalcDistanceById((float*)new_base_vec, id);
         for (int i = 0; i < neighbors.size(); i++) {
             // don't compare with itself
-            if (neighbors[i] == id) {
+            if (neighbors[i] == inner_id) {
                 continue;
             }
 
             float neighbor_dist = 0;
             try {
-                neighbor_dist = this->CalcDistanceById((float*)new_base_vec, neighbors[i]);
+                neighbor_dist = this->CalcDistanceById(
+                    (float*)new_base_vec, this->label_table_->GetLabelById(neighbors[i]));
             } catch (const std::runtime_error& e) {
                 // incase that neighbor has been deleted
                 continue;
