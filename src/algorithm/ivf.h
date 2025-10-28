@@ -165,7 +165,6 @@ private:
     int64_t total_elements_{0};
 
     bool is_trained_{false};
-    bool use_residual_{false};
 
     FlattenInterfacePtr reorder_codes_{nullptr};
 

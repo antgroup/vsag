@@ -17,6 +17,7 @@
 
 #include <string>
 
+#include "algorithm/ivf_partition/ivf_partition_strategy.h"
 #include "bucket_datacell_parameter.h"
 #include "index_common_param.h"
 #include "quantization/computer.h"
@@ -53,10 +54,7 @@ public:
     Train(const void* data, uint64_t count) = 0;
 
     virtual InnerIdType
-    InsertVector(const void* vector,
-                 BucketIdType bucket_id,
-                 InnerIdType inner_id,
-                 const float* centroid = nullptr) = 0;
+    InsertVector(const void* vector, BucketIdType bucket_id, InnerIdType inner_id) = 0;
 
     virtual InnerIdType*
     GetInnerIds(BucketIdType bucket_id) = 0;
@@ -73,6 +71,11 @@ public:
     [[nodiscard]] virtual MetricType
     GetMetricType() = 0;
 
+    [[nodiscard]] virtual bool
+    UseResidual() const {
+        return this->use_residual_;
+    }
+
     [[nodiscard]] virtual InnerIdType
     GetBucketSize(BucketIdType bucket_id) = 0;
 
@@ -81,6 +84,11 @@ public:
 
     virtual void
     MergeOther(const BucketInterfacePtr& other, InnerIdType bias) = 0;
+
+    virtual void
+    SetStrategy(const IVFPartitionStrategyPtr& strategy) {
+        strategy_ = strategy;
+    }
 
 public:
     virtual void
@@ -114,6 +122,8 @@ public:
 public:
     BucketIdType bucket_count_{0};
     uint32_t code_size_{0};
+    IVFPartitionStrategyPtr strategy_{nullptr};
+    bool use_residual_{false};
 };
 
 }  // namespace vsag
