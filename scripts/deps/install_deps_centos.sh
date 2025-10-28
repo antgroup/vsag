@@ -2,7 +2,7 @@
 yum install -y gfortran python3-devel libaio-devel libcurl-devel
 
 # install openmp for alibaba clang 11
-yum install -b current -y libomp11-devel libomp11
+yum install -y current -y libomp11-devel libomp11
 
 # install Intel MKL
 yum install -y ca-certificates
