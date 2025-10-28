@@ -27,6 +27,7 @@
 #include "hgraph_parameter.h"
 #include "impl/basic_optimizer.h"
 #include "impl/heap/distance_heap.h"
+#include "impl/reorder/flatten_reorder.h"
 #include "impl/searcher/basic_searcher.h"
 #include "impl/searcher/parallel_searcher.h"
 #include "impl/thread_pool/default_thread_pool.h"
@@ -371,6 +372,8 @@ private:
 
     bool create_new_raw_vector_{false};
     FlattenInterfacePtr raw_vector_{nullptr};
+
+    ReorderInterfacePtr reorder_{nullptr};
 
     bool use_old_serial_format_{false};
 };

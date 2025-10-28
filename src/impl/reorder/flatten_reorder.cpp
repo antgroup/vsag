@@ -13,18 +13,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "reorder.h"
+#include "impl/reorder/flatten_reorder.h"
 
 namespace vsag {
 
 DistHeapPtr
-Reorder::ReorderByFlatten(const DistHeapPtr& input,
-                          const FlattenInterfacePtr& flatten,
-                          const float* query,
-                          Allocator* allocator,
-                          int64_t topk) {
+FlattenReorder::Reorder(const DistHeapPtr& input,
+                        const float* query,
+                        int64_t topk,
+                        Allocator* allocator) {
+    if (allocator == nullptr) {
+        allocator = allocator_;
+    }
     auto reorder_heap = DistanceHeap::MakeInstanceBySize<true, true>(allocator, topk);
-    auto computer = flatten->FactoryComputer(query);
+    auto computer = flatten_->FactoryComputer(query);
     size_t candidate_size = input->Size();
     const auto* candidate_result = input->GetData();
     Vector<InnerIdType> ids(candidate_size, allocator);
@@ -32,7 +34,7 @@ Reorder::ReorderByFlatten(const DistHeapPtr& input,
     for (int i = 0; i < candidate_size; ++i) {
         ids[i] = candidate_result[i].second;
     }
-    flatten->Query(dists.data(), computer, ids.data(), candidate_size);
+    flatten_->Query(dists.data(), computer, ids.data(), candidate_size);
     for (int i = 0; i < candidate_size; ++i) {
         if (reorder_heap->Size() < topk || dists[i] < reorder_heap->Top().first) {
             reorder_heap->Push(dists[i], candidate_result[i].second);
@@ -43,5 +45,4 @@ Reorder::ReorderByFlatten(const DistHeapPtr& input,
     }
     return reorder_heap;
 }
-
 }  // namespace vsag
