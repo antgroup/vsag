@@ -18,7 +18,7 @@
 #include <cstring>
 #include <utility>
 
-BufferStreamWriter::BufferStreamWriter(char*& buffer) : buffer_(buffer) {
+BufferStreamWriter::BufferStreamWriter(char* buffer) : buffer_(buffer) {
 }
 
 void

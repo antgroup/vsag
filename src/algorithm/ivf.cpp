@@ -20,7 +20,7 @@
 #include "attr/argparse.h"
 #include "attr/executor/executor.h"
 #include "impl/heap/standard_heap.h"
-#include "impl/reorder.h"
+#include "impl/reorder/flatten_reorder.h"
 #include "impl/searcher/basic_searcher.h"
 #include "index/index_impl.h"
 #include "index_feature_list.h"
@@ -44,7 +44,8 @@ static constexpr const char* IVF_PARAMS_TEMPLATE =
         "{BUILD_THREAD_COUNT_KEY}": 1,
         "{BUCKET_PARAMS_KEY}": {
             "{IO_PARAMS_KEY}": {
-                "{IO_TYPE_KEY}": "{IO_TYPE_VALUE_MEMORY_IO}"
+                "{IO_TYPE_KEY}": "{IO_TYPE_VALUE_MEMORY_IO}",
+                "{IO_FILE_PATH}": "{DEFAULT_FILE_PATH_VALUE}"
             },
             "{QUANTIZATION_PARAMS_KEY}": {
                 "{QUANTIZATION_TYPE_KEY}": "{QUANTIZATION_TYPE_VALUE_FP32}",
@@ -100,6 +101,14 @@ IVF::CheckAndMappingExternalParam(const JsonType& external_param,
                 BUCKET_PARAMS_KEY,
                 IO_PARAMS_KEY,
                 IO_TYPE_KEY,
+            },
+        },
+        {
+            IVF_BASE_FILE_PATH,
+            {
+                BUCKET_PARAMS_KEY,
+                IO_PARAMS_KEY,
+                IO_FILE_PATH,
             },
         },
         {
@@ -253,8 +262,11 @@ IVF::IVF(const IVFParameterPtr& param, const IndexCommonParam& common_param)
     if (this->use_reorder_) {
         this->reorder_codes_ =
             FlattenInterface::MakeInstance(param->precise_codes_param, common_param);
+        reorder_ = std::make_shared<FlattenReorder>(this->reorder_codes_, allocator_);
     }
-    this->use_residual_ = param->bucket_param->use_residual_;
+    if (param->bucket_param->use_residual_) {
+        this->bucket_->SetStrategy(partition_strategy_);
+    }
 
     this->thread_pool_ = common_param.thread_pool_;
     if (param->build_thread_count > 1 and this->thread_pool_ == nullptr) {
@@ -321,7 +333,7 @@ IVF::InitFeatures() {
 
     if (name == QUANTIZATION_TYPE_VALUE_FP32 and
         this->bucket_->GetMetricType() != MetricType::METRIC_TYPE_COSINE and
-        not this->use_residual_) {
+        not bucket_->UseResidual()) {
         this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_GET_DATA_BY_IDS);
     }
 
@@ -507,28 +519,11 @@ IVF::Add(const DatasetPtr& base) {
     }
 
     auto add_func = [&](int64_t i) -> void {
-        Vector<float> normalize_data(dim_, allocator_);
-        Vector<float> residual_data(dim_, allocator_);
-        Vector<float> centroid(dim_, allocator_);
         for (int64_t j = 0; j < buckets_per_data_; ++j) {
             const auto* data_ptr = vectors + i * dim_;
             auto idx = i * buckets_per_data_ + j;
-            InnerIdType offset_id;
-            if (use_residual_) {
-                partition_strategy_->GetCentroid(buckets[idx], centroid);
-                if (metric_ == MetricType::METRIC_TYPE_COSINE) {
-                    Normalize(data_ptr, normalize_data.data(), dim_);
-                    data_ptr = normalize_data.data();
-                }
-                FP32Sub(data_ptr, centroid.data(), residual_data.data(), dim_);
-                offset_id = bucket_->InsertVector(residual_data.data(),
-                                                  buckets[idx],
-                                                  idx + current_num * buckets_per_data_,
-                                                  centroid.data());
-            } else {
-                offset_id = bucket_->InsertVector(
-                    data_ptr, buckets[idx], idx + current_num * buckets_per_data_);
-            }
+            InnerIdType offset_id = bucket_->InsertVector(
+                data_ptr, buckets[idx], idx + current_num * buckets_per_data_);
             if (j == 0) {
                 std::lock_guard lock(label_lookup_mutex_);
                 location_map_[i + current_num] =
@@ -807,7 +802,7 @@ IVF::create_search_param(const std::string& parameters, const FilterPtr& filter)
 DatasetPtr
 IVF::reorder(int64_t topk, DistHeapPtr& input, const float* query) const {
     auto [dataset_results, dists, labels] = create_fast_dataset(topk, allocator_);
-    auto reorder_heap = Reorder::ReorderByFlatten(input, reorder_codes_, query, allocator_, topk);
+    auto reorder_heap = reorder_->Reorder(input, query, topk, allocator_);
     auto size = static_cast<int64_t>(reorder_heap->Size());
     for (int64_t j = size - 1; j >= 0; --j) {
         dists[j] = reorder_heap->Top().first;
@@ -834,10 +829,6 @@ DistHeapPtr
 IVF::search(const DatasetPtr& query, const InnerSearchParam& param) const {
     const auto* query_data = query->GetFloat32Vectors();
     Vector<float> normalize_data(dim_, allocator_);
-    if (use_residual_ && metric_ == MetricType::METRIC_TYPE_COSINE) {
-        Normalize(query_data, normalize_data.data(), dim_);
-        query_data = normalize_data.data();
-    }
     auto candidate_buckets = partition_strategy_->ClassifyDatasForSearch(query_data, 1, param);
     auto computer = bucket_->FactoryComputer(query_data);
 
@@ -890,15 +881,6 @@ IVF::search(const DatasetPtr& query, const InnerSearchParam& param) const {
             if (bucket_size > dist.size()) {
                 dist.resize(bucket_size);
             }
-            auto ip_distance = 0.0F;
-
-            if (use_residual_) {
-                partition_strategy_->GetCentroid(bucket_id, centroid);
-                ip_distance = FP32ComputeIP(query_data, centroid.data(), dim_);
-                if (metric_ == MetricType::METRIC_TYPE_L2SQR) {
-                    ip_distance *= 2;
-                }
-            }
 
             bucket_->ScanBucketById(dist.data(), computer, bucket_id);
             Filter* attr_ft = nullptr;
@@ -912,8 +894,6 @@ IVF::search(const DatasetPtr& query, const InnerSearchParam& param) const {
                     continue;
                 }
                 if (ft == nullptr or ft->CheckValid(origin_id)) {
-                    dist[j] -= ip_distance;
-
                     if constexpr (mode == KNN_SEARCH) {
                         if (heap->Size() < topk or dist[j] < cur_heap_top) {
                             heap->Push(dist[j], ids[j]);
@@ -1125,26 +1105,11 @@ IVF::CalDistanceById(const float* query, const int64_t* ids, int64_t count) cons
         this->reorder_codes_->Query(distances, computer, inner_ids.data(), count);
         return result;
     }
-    Vector<float> normalize_data(dim_, allocator_);
-    Vector<float> centroid(dim_, allocator_);
-    if (use_residual_ && metric_ == MetricType::METRIC_TYPE_COSINE) {
-        Normalize(query, normalize_data.data(), dim_);
-        query = normalize_data.data();
-    }
     auto computer = this->bucket_->FactoryComputer(query);
     for (int64_t i = 0; i < count; ++i) {
         auto inner_id = this->label_table_->GetIdByLabel(ids[i]);
         auto location = this->get_location(inner_id);
-        auto ip_distance = 0.0F;
-        if (use_residual_) {
-            partition_strategy_->GetCentroid(location.first, centroid);
-            ip_distance = FP32ComputeIP(query, centroid.data(), dim_);
-            if (metric_ == MetricType::METRIC_TYPE_L2SQR) {
-                ip_distance *= 2;
-            }
-        }
-        distances[i] =
-            this->bucket_->QueryOneById(computer, location.first, location.second) - ip_distance;
+        distances[i] = this->bucket_->QueryOneById(computer, location.first, location.second);
     }
     return result;
 }
@@ -1157,24 +1122,10 @@ IVF::CalcDistanceById(const float* query, int64_t id) const {
         this->reorder_codes_->Query(&dist, computer, &inner_id, 1);
         return dist;
     }
-    Vector<float> normalize_data(dim_, allocator_);
-    Vector<float> centroid(dim_, allocator_);
-    if (use_residual_ && metric_ == MetricType::METRIC_TYPE_COSINE) {
-        Normalize(query, normalize_data.data(), dim_);
-        query = normalize_data.data();
-    }
     auto computer = this->bucket_->FactoryComputer(query);
     auto inner_id = this->label_table_->GetIdByLabel(id);
     auto location = this->get_location(inner_id);
-    auto ip_distance = 0.0F;
-    if (use_residual_) {
-        partition_strategy_->GetCentroid(location.first, centroid);
-        ip_distance = FP32ComputeIP(query, centroid.data(), dim_);
-        if (metric_ == MetricType::METRIC_TYPE_L2SQR) {
-            ip_distance *= 2;
-        }
-    }
-    return this->bucket_->QueryOneById(computer, location.first, location.second) - ip_distance;
+    return this->bucket_->QueryOneById(computer, location.first, location.second);
 }
 
 void

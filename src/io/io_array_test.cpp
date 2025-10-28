@@ -33,7 +33,8 @@ class IOArrayTest {
 public:
     template <typename... Args>
     IOArrayTest(Allocator* allocator, Args&&... args)
-        : array_(std::make_unique<IOArray<IOType>>(allocator, std::forward<Args>(args)...)) {
+        : array_(std::make_unique<IOArray<IOType>>(allocator, std::forward<Args>(args)...)),
+          array2_(std::make_unique<IOArray<IOType>>(allocator, std::forward<Args>(args)...)) {
     }
 
     void
@@ -49,9 +50,14 @@ public:
         for (size_t i = 5; i < 10; ++i) {
             TestBasicReadWrite(this->array_->At(i));
         }
+        this->array2_->Resize(10);
+        for (size_t i = 0; i < 10; ++i) {
+            TestSerializeAndDeserialize((*this->array_)[i], (*this->array2_)[i]);
+        }
     }
 
     std::unique_ptr<IOArray<IOType>> array_{nullptr};
+    std::unique_ptr<IOArray<IOType>> array2_{nullptr};
 };
 }  // namespace vsag
 

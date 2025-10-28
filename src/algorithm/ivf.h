@@ -19,6 +19,7 @@
 #include "datacell/bucket_datacell.h"
 #include "datacell/flatten_interface.h"
 #include "impl/heap/distance_heap.h"
+#include "impl/reorder/reorder.h"
 #include "impl/searcher/basic_searcher.h"
 #include "index_common_param.h"
 #include "inner_index_interface.h"
@@ -170,6 +171,7 @@ private:
     float train_sample_rate_{1.0f};     // Sampling ratio (0.0-1.0)
     int64_t train_sample_count_{-1};    // Sampling quantity (-1 represents proportional sampling)
     FlattenInterfacePtr reorder_codes_{nullptr};
+    ReorderInterfacePtr reorder_{nullptr};
 
     std::shared_ptr<SafeThreadPool> thread_pool_{nullptr};
 
