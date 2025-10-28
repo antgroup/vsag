@@ -802,31 +802,29 @@ HNSW::update_vector(int64_t id, const DatasetPtr& new_base, bool force_update) {
     get_vectors(type_, dim_, new_base, &new_base_vec, &data_size);
     auto index = std::reinterpret_pointer_cast<hnswlib::HierarchicalNSW>(alg_hnsw_);
 
-    uint32_t internal_id = index->getInternalId(id);
-    vsag::Vector<uint32_t> neighbors_internal_id(allocator_.get());
-    index->getNeighborsInternalId(internal_id, neighbors_internal_id);
-
     if (not force_update) {
         std::shared_lock lock(rw_mutex_);
 
         // 1. check whether vectors are same
-        float old_self_dist = index->getSelfDistanceByInternalId(id);
-        float self_dist = index->getDistanceByLabel(id, new_base_vec);
+        uint32_t internal_id = index->getInternalId(id);
+        float old_self_dist = index->getSelfDistanceByInternalId(internal_id);
+        float self_dist = index->getDistanceByInternalId(internal_id, new_base_vec);
         if (std::abs(old_self_dist - self_dist) < 1e-3) {
             return true;
         }
 
         // 2. check whether the neighborhood relationship is same
-        for (uint32_t i = 0; i < neighbors_internal_id.size(); i++) {
+        vsag::Vector<uint32_t> neighbors(allocator_.get());
+        index->getNeighborsInternalId(internal_id, neighbors);
+        for (auto neighbor_internal_id : neighbors) {
             // don't compare with itself
-            if (neighbors_internal_id[i] == internal_id) {
+            if (neighbor_internal_id == internal_id) {
                 continue;
             }
 
             float neighbor_dist = 0;
             try {
-                neighbor_dist =
-                    index->getDistanceByInternalId(neighbors_internal_id[i], new_base_vec);
+                neighbor_dist = index->getDistanceByInternalId(neighbor_internal_id, new_base_vec);
             } catch (const std::runtime_error& e) {
                 // incase that neighbor has been deleted
                 continue;

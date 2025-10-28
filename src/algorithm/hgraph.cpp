@@ -2207,16 +2207,16 @@ HGraph::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) 
         // 2. check whether the neighborhood relationship is same
         Vector<InnerIdType> neighbors(allocator_);
         this->bottom_graph_->GetNeighbors(inner_id, neighbors);
-        for (auto i = 0; i < neighbors.size(); i++) {
+        for (auto neighbor_inner_id : neighbors) {
             // don't compare with itself
-            if (neighbors[i] == inner_id) {
+            if (neighbor_inner_id == inner_id) {
                 continue;
             }
 
             float neighbor_dist = 0;
             try {
                 neighbor_dist = this->CalcDistanceById(
-                    (float*)new_base_vec, this->label_table_->GetLabelById(neighbors[i]));
+                    (float*)new_base_vec, this->label_table_->GetLabelById(neighbor_inner_id));
             } catch (const std::runtime_error& e) {
                 // incase that neighbor has been deleted
                 continue;
