@@ -140,13 +140,17 @@ dist-libcxx:             ## Build vsag using libc++.
 	cmake ${VSAG_CMAKE_ARGS} -B${RELEASE_BUILD_DIR} -DCMAKE_BUILD_TYPE=Release -DENABLE_LIBCXX=on
 	cmake --build ${RELEASE_BUILD_DIR} --parallel ${COMPILE_JOBS}
 
-PARAM1 := "-DNUM_BUILDING_JOBS=${COMPILE_JOBS} -DENABLE_PYBINDS=1 -S. -B${RELEASE_BUILD_DIR} -DCMAKE_BUILD_TYPE=Release"
-PARAM2 := "--build ${RELEASE_BUILD_DIR} --parallel ${COMPILE_JOBS}"
-PARAM3 := "${RELEASE_BUILD_DIR}"
+PY_VERSION ?= 3.10
 
-.PHONY: pyvsag
-pyvsag:                  ## Build pyvsag wheel.
-	bash ./scripts/build_pyvsag_multiple_version.sh $(PARAM1) $(PARAM2) $(PARAM3)
+.PHONY: pyvsag pyvsag-all
+
+pyvsag:                  ## Build a specific Python version wheel. Usage: make pyvsag PY_VERSION=3.10
+	@echo "Building wheel for Python $(PY_VERSION)..."
+	bash ./scripts/local_build_wheel.sh $(PY_VERSION)
+
+pyvsag-all:              ## Build wheels for all supported versions. Usage: make pyvsag-all
+	@echo "Building wheels for all supported versions..."
+	bash ./scripts/local_build_wheel.sh
 
 .PHONY: clean-release
 clean-release:           ## Clear build-release/ directory.
