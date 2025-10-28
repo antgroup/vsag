@@ -803,7 +803,7 @@ HNSW::update_vector(int64_t id, const DatasetPtr& new_base, bool force_update) {
     auto index = std::reinterpret_pointer_cast<hnswlib::HierarchicalNSW>(alg_hnsw_);
 
     uint32_t internal_id = index->getInternalId(id);
-    vsag::Vector<uint32_t> neighbors_internal_id;
+    vsag::Vector<uint32_t> neighbors_internal_id(allocator_.get());
     index->getNeighborsInternalId(internal_id, neighbors_internal_id);
 
     if (not force_update) {
