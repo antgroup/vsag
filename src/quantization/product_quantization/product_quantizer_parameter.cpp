@@ -51,7 +51,7 @@ ProductQuantizerParameter::FromJson(const JsonType& json) {
     if (json.Contains(PRODUCT_QUANTIZATION_TRAIN_SAMPLE_SIZE) &&
         json[PRODUCT_QUANTIZATION_TRAIN_SAMPLE_SIZE].IsNumberInteger()) {
         int train_sample_size = json[PRODUCT_QUANTIZATION_TRAIN_SAMPLE_SIZE].GetInt();
-        if (train_sample_size > 0) {
+        if (train_sample_size > 0 && train_sample_size <= 65536) {
             this->train_sample_size_ = train_sample_size;
         } else {
             logger::warn("Invalid train_sample_size value: {}, using default value: {}", train_sample_size, this->train_sample_size_);
