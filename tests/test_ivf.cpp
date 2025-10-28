@@ -13,11 +13,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <optional>
+
 #include "fixtures/fixtures.h"
 #include "fixtures/test_dataset_pool.h"
 #include "storage/serialization_template_test.h"
 #include "test_index.h"
-#include <optional>
 namespace fixtures {
 
 class IVFTestResource {
@@ -435,41 +436,70 @@ TestIVFSample(const fixtures::IVFResourcePtr& resource) {
         for (auto dim : resource->dims) {
             for (auto train_type : resource->train_types) {
                 // Since we're using sq8 quantization type, use its base recall value
-                float recall = 0.84f; 
+                float recall = 0.84f;
 
                 if (train_type == "kmeans") {
-                    recall *= 0.5f;  
+                    recall *= 0.5f;
                 }
 
                 // Additional adjustment for random training type with sampling
                 if (train_type == "random") {
-                    recall *= 0.4f;  
+                    recall *= 0.4f;
                 }
 
-                INFO(fmt::format("Testing sample rate with metric_type: {}, dim: {}, train_type: {}, recall: {}", 
-                                metric_type, dim, train_type, recall));
+                INFO(fmt::format(
+                    "Testing sample rate with metric_type: {}, dim: {}, train_type: {}, recall: {}",
+                    metric_type,
+                    dim,
+                    train_type,
+                    recall));
 
                 vsag::Options::Instance().set_block_size_limit(size);
-                auto dataset = IVFTestIndex::pool.GetDatasetAndCreate(dim, resource->base_count, metric_type);
+                auto dataset =
+                    IVFTestIndex::pool.GetDatasetAndCreate(dim, resource->base_count, metric_type);
                 std::string search_param = fmt::format(search_param_tmp, 30);
 
                 // Test sampling ratio method using the extended parameter generator
-                float sampling_rate=0.6f;
-                auto param_with_sample_rate = IVFTestIndex::GenerateIVFBuildParametersString(
-                    metric_type, dim, "sq8", 210, train_type, false, 1, false, 1, sampling_rate, std::nullopt);
-                auto index_with_sample_rate = TestIndex::TestFactory("ivf", param_with_sample_rate, true);
+                float sampling_rate = 0.6f;
+                auto param_with_sample_rate =
+                    IVFTestIndex::GenerateIVFBuildParametersString(metric_type,
+                                                                   dim,
+                                                                   "sq8",
+                                                                   210,
+                                                                   train_type,
+                                                                   false,
+                                                                   1,
+                                                                   false,
+                                                                   1,
+                                                                   sampling_rate,
+                                                                   std::nullopt);
+                auto index_with_sample_rate =
+                    TestIndex::TestFactory("ivf", param_with_sample_rate, true);
                 TestIndex::TestBuildIndex(index_with_sample_rate, dataset, true);
-                TestIndex::TestKnnSearch(index_with_sample_rate, dataset, search_param, recall, true);
-                // Test sampling quantity method using the extended parameter generator  
+                TestIndex::TestKnnSearch(
+                    index_with_sample_rate, dataset, search_param, recall, true);
+                // Test sampling quantity method using the extended parameter generator
                 // Also test with fixed sampling count for comparison
                 int fixed_sample_count = (resource->base_count <= 1000) ? 900 : 2000;
-                auto param_with_sample_count = IVFTestIndex::GenerateIVFBuildParametersString(
-                    metric_type, dim, "sq8", 210, train_type, false, 1, false, 1, std::nullopt, fixed_sample_count);
-                auto index_with_sample_count = TestIndex::TestFactory("ivf", param_with_sample_count, true);
+                auto param_with_sample_count =
+                    IVFTestIndex::GenerateIVFBuildParametersString(metric_type,
+                                                                   dim,
+                                                                   "sq8",
+                                                                   210,
+                                                                   train_type,
+                                                                   false,
+                                                                   1,
+                                                                   false,
+                                                                   1,
+                                                                   std::nullopt,
+                                                                   fixed_sample_count);
+                auto index_with_sample_count =
+                    TestIndex::TestFactory("ivf", param_with_sample_count, true);
                 TestIndex::TestBuildIndex(index_with_sample_count, dataset, true);
-                TestIndex::TestKnnSearch(index_with_sample_count, dataset, search_param, recall, true);
+                TestIndex::TestKnnSearch(
+                    index_with_sample_count, dataset, search_param, recall, true);
                 vsag::Options::Instance().set_block_size_limit(origin_size);
-                 }
+            }
         }
     }
 }
