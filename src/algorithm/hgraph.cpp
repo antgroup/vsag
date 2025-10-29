@@ -985,12 +985,11 @@ HGraph::add_one_point(const void* data, int level, InnerIdType inner_id) {
 bool
 HGraph::graph_add_one(const void* data, int level, InnerIdType inner_id) {
     DistHeapPtr result = nullptr;
-    InnerSearchParam param{
-        .topk = 1,
-        .ep = this->entry_point_id_,
-        .ef = 1,
-        .is_inner_id_allowed = nullptr,
-    };
+    InnerSearchParam param;
+    param.topk = 1;
+    param.ep = this->entry_point_id_;
+    param.ef = 1;
+    param.is_inner_id_allowed = nullptr;
 
     LockGuard cur_lock(neighbors_mutex_, inner_id);
     auto flatten_codes = basic_flatten_codes_;
@@ -1675,6 +1674,7 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     search_param.ef = 1;
     search_param.is_inner_id_allowed = nullptr;
     search_param.search_alloc = search_allocator;
+
     const auto* raw_query = get_data(query);
     for (auto i = static_cast<int64_t>(this->route_graphs_.size() - 1); i >= 0; --i) {
         auto result = this->search_one_graph(
@@ -1706,6 +1706,7 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     if (params.enable_time_record) {
         search_param.time_cost = std::make_shared<Timer>();
         search_param.time_cost->SetThreshold(params.timeout_ms);
+        (*search_param.stats)["is_timeout"] = false;
     }
     auto search_result = this->search_one_graph(
         raw_query, this->bottom_graph_, this->basic_flatten_codes_, search_param);
@@ -1738,6 +1739,7 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
         }
         search_result->Pop();
     }
+    dataset_results->Statstics(search_param.stats->dump());
     return std::move(dataset_results);
 }
 

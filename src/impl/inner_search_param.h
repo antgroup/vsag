@@ -28,6 +28,11 @@ enum InnerSearchType { PURE = 1, WITH_FILTER = 2 };
 
 class InnerSearchParam {
 public:
+    InnerSearchParam() {
+        stats = std::make_shared<JsonType>();
+    }
+
+public:
     int64_t topk{0};
     float radius{0.0f};
     InnerIdType ep{0};
@@ -49,6 +54,8 @@ public:
 
     // time record
     std::shared_ptr<Timer> time_cost{nullptr};
+
+    std::shared_ptr<JsonType> stats{nullptr};
 
     InnerSearchParam&
     operator=(const InnerSearchParam& other) {

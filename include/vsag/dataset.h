@@ -270,6 +270,32 @@ public:
      */
     virtual int64_t
     GetExtraInfoSize() const = 0;
+
+    /*
+     * @brief Sets the Statstics for the dataset.
+     *
+     * @param Statstics The Statstics string.
+     * @return DatasetPtr A shared pointer to the dataset with updated Statstics.
+     */
+    virtual DatasetPtr
+    Statstics(const std::string& Statstics) = 0;
+
+    /**
+     * @brief Retrieves the all Statstics of the dataset.
+     *
+     * @return std::string The Statstics string.
+     */
+    virtual std::string
+    GetStatstics() const = 0;
+
+    /**
+     * @brief Retrieves the Statstics of the dataset.
+     *
+     * @param stat_keys The vector of stat keys.
+     * @return std::vector<std::string> The vector of stat values.
+     */
+    virtual std::vector<std::string>
+    GetStatstics(const std::vector<std::string>& stat_keys) const = 0;
 };
 
 };  // namespace vsag
