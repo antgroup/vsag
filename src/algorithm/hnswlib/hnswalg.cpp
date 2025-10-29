@@ -193,6 +193,8 @@ HierarchicalNSW::getDistanceByLabel(LabelType label, const void* data_point) {
 
 float
 HierarchicalNSW::getDistanceByInternalId(uint32_t internal_id, const void* data_point) {
+    std::shared_lock resize_lock(resize_mutex_);
+    
     std::shared_ptr<float[]> normalize_query;
     normalizeVector(data_point, normalize_query);
     float dist = fstdistfunc_(data_point, getDataByInternalId(internal_id), dist_func_param_);
