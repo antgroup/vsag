@@ -59,7 +59,7 @@ jobs:
           path: ./build/
       - name: Run TSAN tests
         run: |
-          echo leak:libomp.so > omp.supp
-          export LSAN_OPTIONS=suppressions=omp.supp
+          echo race:libomp.so > omp.supp
+          export TSAN_OPTIONS=suppressions=omp.supp
           chmod +x ./build/tests/functests
           ./build/tests/functests "[concurrent]~[daily]"
