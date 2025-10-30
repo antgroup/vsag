@@ -73,6 +73,16 @@ public:
     virtual float
     getDistanceByLabel(LabelType label, const void* data_point) = 0;
 
+    virtual float
+    getDistanceByInternalId(uint32_t internal_id, const void* data_point) {
+        return 0;
+    }
+
+    virtual float
+    getSelfDistanceByInternalId(uint32_t internal_id) {
+        return 0;
+    }
+
     virtual tl::expected<vsag::DatasetPtr, vsag::Error>
     getBatchDistanceByLabel(const int64_t* ids, const void* data_point, int64_t count) = 0;
 
@@ -115,6 +125,16 @@ public:
     isTombLabel(LabelType label) {
         return false;
     };
+
+    virtual uint32_t
+    getInternalId(LabelType label) {
+        return 0;
+    }
+
+    virtual void
+    getNeighborsInternalId(uint32_t internal_id, vsag::Vector<InnerIdType>& neighbor_ids) {
+        return;
+    }
 
     virtual bool
     init_memory_space() = 0;

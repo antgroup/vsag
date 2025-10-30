@@ -2193,32 +2193,30 @@ HGraph::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) 
     get_vectors(data_type_, dim_, new_base, &new_base_vec, &data_size);
 
     if (not force_update) {
+        std::shared_lock label_lock(this->label_lookup_mutex_);
+
+        // 1. check whether vectors are same
         Vector<int8_t> base_data(data_size, allocator_);
-        auto base = Dataset::Make();
-
         GetVectorByInnerId(inner_id, (float*)base_data.data());
-        set_dataset(data_type_, dim_, base, base_data.data(), 1);
+        float old_self_dist = this->CalcDistanceById((float*)base_data.data(), id);
+        float self_dist = this->CalcDistanceById((float*)new_base_vec, id);
+        if (std::abs(old_self_dist - self_dist) < 1e-3) {
+            return true;
+        }
 
-        // search neighbors
-        auto neighbors = this->KnnSearch(
-            base,
-            UPDATE_CHECK_SEARCH_K,
-            fmt::format(R"({{"hgraph": {{ "ef_search": {} }} }})", UPDATE_CHECK_SEARCH_L),
-            nullptr);
-
-        // check whether the neighborhood relationship is same
-        float self_dist = 0;
-        self_dist = this->CalcDistanceById((float*)new_base_vec, id);
-        for (int i = 0; i < neighbors->GetDim(); i++) {
+        // 2. check whether the neighborhood relationship is same
+        Vector<InnerIdType> neighbors(allocator_);
+        this->bottom_graph_->GetNeighbors(inner_id, neighbors);
+        for (auto neighbor_inner_id : neighbors) {
             // don't compare with itself
-            if (neighbors->GetIds()[i] == id) {
+            if (neighbor_inner_id == inner_id) {
                 continue;
             }
 
             float neighbor_dist = 0;
             try {
-                neighbor_dist =
-                    this->CalcDistanceById((float*)new_base_vec, neighbors->GetIds()[i]);
+                neighbor_dist = this->CalcDistanceById(
+                    (float*)new_base_vec, this->label_table_->GetLabelById(neighbor_inner_id));
             } catch (const std::runtime_error& e) {
                 // incase that neighbor has been deleted
                 continue;
