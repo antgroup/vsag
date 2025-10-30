@@ -48,12 +48,7 @@ public:
 
     void
     GetNeighbors(InnerIdType id, Vector<InnerIdType>& neighbor_ids) const override {
-        int* data = (int*)alg_hnsw_->get_linklist0(id);
-        uint32_t size = alg_hnsw_->getListCount((hnswlib::linklistsizeint*)data);
-        neighbor_ids.resize(size);
-        for (uint32_t i = 0; i < size; i++) {
-            neighbor_ids[i] = *(data + i + 1);
-        }
+        alg_hnsw_->getNeighborsInternalId(id, neighbor_ids);
     }
 
     uint32_t

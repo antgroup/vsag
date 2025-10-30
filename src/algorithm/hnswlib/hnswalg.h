@@ -155,6 +155,12 @@ public:
     float
     getDistanceByLabel(LabelType label, const void* data_point) override;
 
+    float
+    getDistanceByInternalId(uint32_t internal_id, const void* data_point) override;
+
+    float
+    getSelfDistanceByInternalId(uint32_t internal_id) override;
+
     tl::expected<vsag::DatasetPtr, vsag::Error>
     getBatchDistanceByLabel(const int64_t* ids, const void* data_point, int64_t count) override;
     std::pair<int64_t, int64_t>
@@ -164,6 +170,12 @@ public:
 
     bool
     isTombLabel(LabelType label) override;
+
+    virtual uint32_t
+    getInternalId(LabelType label) override;
+
+    virtual void
+    getNeighborsInternalId(uint32_t internal_id, vsag::Vector<InnerIdType>& neighbor_ids) override;
 
     size_t
     getMaxDegree() {
