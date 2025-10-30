@@ -187,17 +187,48 @@ HierarchicalNSW::normalizeVector(const void*& data_point,
 
 float
 HierarchicalNSW::getDistanceByLabel(LabelType label, const void* data_point) {
+    InnerIdType internal_id = getInternalId(label);
+    return getDistanceByInternalId(internal_id, data_point);
+}
+
+float
+HierarchicalNSW::getDistanceByInternalId(uint32_t internal_id, const void* data_point) {
+    std::shared_lock resize_lock(resize_mutex_);
+
+    std::shared_ptr<float[]> normalize_query;
+    normalizeVector(data_point, normalize_query);
+    float dist = fstdistfunc_(data_point, getDataByInternalId(internal_id), dist_func_param_);
+    return dist;
+}
+
+float
+HierarchicalNSW::getSelfDistanceByInternalId(uint32_t internal_id) {
+    return getDistanceByInternalId(internal_id, getDataByInternalId(internal_id));
+}
+
+uint32_t
+HierarchicalNSW::getInternalId(LabelType label) {
     std::shared_lock lock_table(label_lookup_lock_);
 
     auto search = label_lookup_.find(label);
     if (search == label_lookup_.end()) {
         throw std::runtime_error("Label not found");
     }
-    InnerIdType internal_id = search->second;
-    std::shared_ptr<float[]> normalize_query;
-    normalizeVector(data_point, normalize_query);
-    float dist = fstdistfunc_(data_point, getDataByInternalId(internal_id), dist_func_param_);
-    return dist;
+
+    return search->second;
+}
+
+void
+HierarchicalNSW::getNeighborsInternalId(uint32_t internal_id,
+                                        vsag::Vector<InnerIdType>& neighbor_ids) {
+    vsag::Vector<uint32_t> neighbors_id(allocator_);
+
+    int* data = (int*)get_linklist0(internal_id);
+    uint32_t size = getListCount((hnswlib::linklistsizeint*)data);
+    neighbor_ids.resize(size);
+    for (uint32_t i = 0; i < size; i++) {
+        neighbor_ids[i] = *(data + i + 1);
+    }
 }
 
 tl::expected<vsag::DatasetPtr, vsag::Error>

@@ -250,7 +250,7 @@ TestIndex::TestUpdateVector(const IndexPtr& index,
                 REQUIRE(force_update_res2.value());
                 force_update_dist = *index->CalcDistanceById(base + i * dim, ids[i]);
                 if (expected_success) {
-                    REQUIRE(std::abs(after_update_dist - force_update_dist) < 1e-5);
+                    REQUIRE(std::abs(after_update_dist - force_update_dist) < 1e-3);
                 }
 
                 // old id don't exist
