@@ -130,11 +130,6 @@ SINDI::KnnSearch(const DatasetPtr& query,
     // search parameter
     SINDISearchParameter search_param;
     search_param.FromJson(JsonType::parse(parameters));
-    CHECK_ARGUMENT(search_param.n_candidate <= AMPLIFICATION_FACTOR * k,
-                   fmt::format("n_candidate ({}) should be less than {} * k ({})",
-                               search_param.n_candidate,
-                               AMPLIFICATION_FACTOR,
-                               k));
     InnerSearchParam inner_param;
     inner_param.ef = std::max(static_cast<int64_t>(search_param.n_candidate), k);
     inner_param.topk = k;
