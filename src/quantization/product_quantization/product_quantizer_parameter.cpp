@@ -28,35 +28,16 @@ void
 ProductQuantizerParameter::FromJson(const JsonType& json) {
     if (json.Contains(PRODUCT_QUANTIZATION_DIM) &&
         json[PRODUCT_QUANTIZATION_DIM].IsNumberInteger()) {
-        int pq_dim = json[PRODUCT_QUANTIZATION_DIM].GetInt();
-        if (pq_dim > 0) {
-            this->pq_dim_ = pq_dim;
-        } else {
-            logger::error("Invalid pq_dim value: {}, using default value: {}", pq_dim, this->pq_dim_);
-            throw VsagException(ErrorType::INVALID_ARGUMENT, "Invalid pq_dim value in ProductQuantizerParameter");
-        }
+        this->pq_dim_ = json[PRODUCT_QUANTIZATION_DIM].GetInt();
     }
 
     if (json.Contains(PRODUCT_QUANTIZATION_BITS) &&
         json[PRODUCT_QUANTIZATION_BITS].IsNumberInteger()) {
-        int pq_bits = json[PRODUCT_QUANTIZATION_BITS].GetInt();
-        if (pq_bits > 0 && pq_bits <= 32) {
-            this->pq_bits_ = pq_bits;
-        } else {
-            logger::warn("Invalid pq_bits value: {}, using default value: {}", pq_bits, this->pq_bits_);
-            this->pq_bits_ = 8; // Explicitly set to default value
-        }
+        this->pq_bits_ = json[PRODUCT_QUANTIZATION_BITS].GetInt();
     }
-    
     if (json.Contains(PRODUCT_QUANTIZATION_TRAIN_SAMPLE_SIZE) &&
         json[PRODUCT_QUANTIZATION_TRAIN_SAMPLE_SIZE].IsNumberInteger()) {
-        int train_sample_size = json[PRODUCT_QUANTIZATION_TRAIN_SAMPLE_SIZE].GetInt();
-        if (train_sample_size > 0 && train_sample_size <= 65536) {
-            this->train_sample_size_ = train_sample_size;
-        } else {
-            logger::warn("Invalid train_sample_size value: {}, using default value: {}", train_sample_size, this->train_sample_size_);
-            this->train_sample_size_ = 65536; // Explicitly set to default value
-        }
+        this->train_sample_size_ = json[PRODUCT_QUANTIZATION_TRAIN_SAMPLE_SIZE].GetInt();
     }
 }
 
@@ -85,22 +66,6 @@ ProductQuantizerParameter::CheckCompatibility(const ParamPtr& other) const {
             "pq_dim mismatch: {} vs {}",
             this->pq_dim_,
             pq_other->pq_dim_);
-        return false;
-    }
-    if (this->pq_bits_ != pq_other->pq_bits_) {
-        logger::error(
-            "ProductQuantizerParameter::CheckCompatibility: "
-            "pq_bits mismatch: {} vs {}",
-            this->pq_bits_,
-            pq_other->pq_bits_);
-        return false;
-    }
-    if (this->train_sample_size_ != pq_other->train_sample_size_) {
-        logger::error(
-            "ProductQuantizerParameter::CheckCompatibility: "
-            "train_sample_size mismatch: {} vs {}",
-            this->train_sample_size_,
-            pq_other->train_sample_size_);
         return false;
     }
     return true;
