@@ -52,6 +52,8 @@ public:
         bool support_duplicate = false;
         std::string graph_io_type = "block_memory_io";
         std::string graph_file_path = "./graph_storage";
+        std::string reorder_type = "flatten_reorder";
+        std::string reorder_codes_quantization_type = "fp32";
         HGraphBuildParam(const std::string& metric_type,
                          int64_t dim,
                          const std::string& quantization_str)
@@ -163,7 +165,9 @@ HGraphTestIndex::GenerateHGraphBuildParametersString(const HGraphBuildParam& par
             "store_raw_vector": {},
             "support_duplicate": {},
             "graph_io_type": "{}",
-            "graph_file_path": "{}"
+            "graph_file_path": "{}",
+            "reorder_type": "{}",
+            "reorder_codes_quantization_type": "{}"
         }}
     }}
     )";
@@ -190,7 +194,9 @@ HGraphTestIndex::GenerateHGraphBuildParametersString(const HGraphBuildParam& par
             "store_raw_vector": {},
             "support_duplicate": {},
             "graph_io_type": "{}",
-            "graph_file_path": "{}"
+            "graph_file_path": "{}",
+            "reorder_type": "{}",
+            "reorder_codes_quantization_type": "{}"
         }}
     }}
     )";
@@ -227,7 +233,9 @@ HGraphTestIndex::GenerateHGraphBuildParametersString(const HGraphBuildParam& par
                                            param.store_raw_vector,
                                            param.support_duplicate,
                                            param.graph_io_type,
-                                           param.graph_file_path);
+                                           param.graph_file_path,
+                                           param.reorder_type,
+                                           param.reorder_codes_quantization_type);
     } else {
         build_parameters_str = fmt::format(parameter_temp_origin,
                                            param.data_type,
@@ -244,7 +252,9 @@ HGraphTestIndex::GenerateHGraphBuildParametersString(const HGraphBuildParam& par
                                            param.store_raw_vector,
                                            param.support_duplicate,
                                            param.graph_io_type,
-                                           param.graph_file_path);
+                                           param.graph_file_path,
+                                           param.reorder_type,
+                                           param.reorder_codes_quantization_type);
     }
     return build_parameters_str;
 }
@@ -538,6 +548,57 @@ TEST_CASE("(Daily) HGraph Build & ContinueAdd Test", "[ft][hgraph][daily]") {
     auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
     auto resource = test_index->GetResource(false);
     TestHGraphBuildAndContinueAdd(test_index, resource);
+}
+
+static void
+TestHGraphPQR(const fixtures::HGraphTestIndexPtr& test_index,
+              const fixtures::HGraphResourcePtr& resource) {
+    using namespace fixtures;
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    auto size = GENERATE(1024 * 1024 * 2);
+    auto search_param = fmt::format(fixtures::search_param_tmp, 200, false);
+    for (auto metric_type : resource->metric_types) {
+        for (auto dim : resource->dims) {
+            for (auto& [base_quantization_str, recall] : resource->test_cases) {
+                if (base_quantization_str.find(',') == std::string::npos) {
+                    continue;  // Skip non PQR configurations
+                }
+                INFO(fmt::format("metric_type: {}, dim: {}, base_quantization_str: {}, recall: {}",
+                                 metric_type,
+                                 dim,
+                                 base_quantization_str,
+                                 recall));
+                if (HGraphTestIndex::IsRaBitQ(base_quantization_str) &&
+                    dim < fixtures::RABITQ_MIN_RACALL_DIM) {
+                    continue;  // Skip invalid RaBitQ configurations
+                }
+                vsag::Options::Instance().set_block_size_limit(size);
+                HGraphTestIndex::HGraphBuildParam build_param(
+                    metric_type, dim, base_quantization_str);
+                build_param.reorder_type = "pqr_reorder";
+                build_param.reorder_codes_quantization_type = "sq8";
+                auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
+                auto index = TestIndex::TestFactory(test_index->name, param, true);
+                auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(
+                    dim, resource->base_count, metric_type);
+                TestIndex::TestContinueAdd(index, dataset, true);
+                HGraphTestIndex::TestGeneral(index, dataset, search_param, recall);
+                vsag::Options::Instance().set_block_size_limit(origin_size);
+            }
+        }
+    }
+}
+
+TEST_CASE("(PR) HGraph PQR", "[ft][hgraph][pr]") {
+    auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
+    auto resource = test_index->GetResource(true);
+    TestHGraphPQR(test_index, resource);
+}
+
+TEST_CASE("(Daily) HGraph PQR", "[ft][hgraph][daily]") {
+    auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
+    auto resource = test_index->GetResource(false);
+    TestHGraphPQR(test_index, resource);
 }
 
 static void

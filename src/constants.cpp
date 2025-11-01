@@ -164,6 +164,8 @@ const char* const HGRAPH_EXTRA_INFO_SIZE = "extra_info_size";
 const char* const HGRAPH_SUPPORT_DUPLICATE = "support_duplicate";
 const char* const HGRAPH_SUPPORT_TOMBSTONE = "support_tomb_stone";
 const char* const HGRAPH_USE_EXTRA_INFO_FILTER = "use_extra_info_filter";
+const char* const HGRAPH_REORDER_TYPE = "reorder_type";
+
 const char* const STORE_RAW_VECTOR = "store_raw_vector";
 const char* const RAW_VECTOR_IO_TYPE = "raw_vector_io_type";
 const char* const RAW_VECTOR_FILE_PATH = "raw_vector_file_path";

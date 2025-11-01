@@ -15,9 +15,13 @@
 
 
 set (REORDER_SRC
+        pqr_reorder.cpp
+        pqr_reorder.h
         flatten_reorder.cpp
         flatten_reorder.h
         reorder.h
+        reorder_parameter.h
+        reorder_parameter.cpp
 )
 
 add_library (reorder OBJECT ${REORDER_SRC})

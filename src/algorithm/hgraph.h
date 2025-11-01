@@ -293,10 +293,7 @@ private:
 
 private:
     void
-    reorder(const void* query,
-            const FlattenInterfacePtr& flatten,
-            DistHeapPtr& candidate_heap,
-            int64_t k) const;
+    reorder(const void* query, DistHeapPtr& candidate_heap, int64_t k) const;
 
     void
     elp_optimize();

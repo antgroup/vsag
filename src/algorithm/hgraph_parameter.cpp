@@ -22,9 +22,9 @@
 #include "datacell/sparse_graph_datacell_parameter.h"
 #include "datacell/sparse_vector_datacell_parameter.h"
 #include "impl/odescent/odescent_graph_parameter.h"
+#include "impl/reorder/reorder_parameter.h"
 #include "inner_string_params.h"
 #include "vsag/constants.h"
-
 namespace vsag {
 
 HGraphParameter::HGraphParameter(const JsonType& json) : HGraphParameter() {
@@ -124,6 +124,8 @@ HGraphParameter::FromJson(const JsonType& json) {
     if (json.Contains(SUPPORT_TOMBSTONE)) {
         this->support_tombstone = json[SUPPORT_TOMBSTONE].GetBool();
     }
+
+    this->reorder_param = CreateReorderParam(json[REORDER_KEY]);
 }
 
 JsonType
@@ -137,6 +139,7 @@ HGraphParameter::ToJson() const {
     json[EF_CONSTRUCTION_KEY].SetInt(this->ef_construction);
     json[ALPHA_KEY].SetFloat(this->alpha);
     json[SUPPORT_DUPLICATE].SetBool(this->support_duplicate);
+    json[REORDER_KEY].SetJson(this->reorder_param->ToJson());
     return json;
 }
 
@@ -176,6 +179,11 @@ HGraphParameter::CheckCompatibility(const ParamPtr& other) const {
     }
     if (support_duplicate != hgraph_param->support_duplicate) {
         logger::error("HGraphParameter::CheckCompatibility: support_duplicate must be the same");
+        return false;
+    }
+    if (this->use_reorder and
+        not this->reorder_param->CheckCompatibility(hgraph_param->reorder_param)) {
+        logger::error("HGraphParameter::CheckCompatibility: reorder_param is not compatible");
         return false;
     }
     return true;
