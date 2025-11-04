@@ -161,6 +161,9 @@ public:
     [[nodiscard]] virtual DatasetPtr
     GetDataByIdsWithFlag(const int64_t* ids, int64_t count, uint64_t selected_data_flag) const;
 
+    virtual std::vector<IndexDetailInfo>
+    GetIndexDetailInfos() const;
+
     [[nodiscard]] virtual int64_t
     GetEstimateBuildMemory(const int64_t num_elements) const {
         throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,

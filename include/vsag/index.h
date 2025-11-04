@@ -25,6 +25,7 @@
 #include "vsag/errors.h"
 #include "vsag/expected.hpp"
 #include "vsag/filter.h"
+#include "vsag/index_detail_info.h"
 #include "vsag/index_features.h"
 #include "vsag/iterator_context.h"
 #include "vsag/readerset.h"
@@ -527,6 +528,23 @@ public:
     virtual tl::expected<DatasetPtr, Error>
     GetDataByIdsWithFlag(const int64_t* ids, int64_t count, uint64_t selected_data_flag) const {
         throw std::runtime_error("Index doesn't support GetDataByIdsWithFlag");
+    };
+
+    /*
+     * @brief Retrieve all detail information associated with the index.
+     *
+     * This method fetches all detail information stored with the index for following get detail datas by name
+     * @see IndexDetailInfo
+     *
+     * @return tl::expected<std::vector<IndexDetailInfo>, Error>
+     *         - On success: A vector of IndexDetailInfo structs containing the detail information.
+     *         - On failure: An error object (e.g., out of memory).
+     * @throws std::runtime_error If the index implementation does not support this operation
+     *            (default behavior for base class).
+     */
+    virtual tl::expected<std::vector<IndexDetailInfo>, Error>
+    GetIndexDetailInfos() const {
+        throw std::runtime_error("Index doesn't support GetIndexDetailInfo");
     };
 
     /**
