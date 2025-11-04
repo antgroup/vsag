@@ -180,6 +180,11 @@ public:
         SAFE_CALL(return this->inner_index_->GetDataByIdsWithFlag(ids, count, selected_data_flag));
     };
 
+    tl::expected<std::vector<IndexDetailInfo>, Error>
+    GetIndexDetailInfos() const override {
+        SAFE_CALL(return this->inner_index_->GetIndexDetailInfos());
+    }
+
     [[nodiscard]] int64_t
     GetEstimateBuildMemory(const int64_t num_elements) const override {
         return this->inner_index_->GetEstimateBuildMemory(num_elements);
