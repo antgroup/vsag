@@ -55,6 +55,22 @@ PQFastScanQuantizerParameter::CheckCompatibility(const ParamPtr& other) const {
             "other is not PQFastScanQuantizerParameter");
         return false;
     }
+    if (this->pq_dim_ != pq_fast_param->pq_dim_) {
+        logger::error(
+            "PQFastScanQuantizerParameter::CheckCompatibility: "
+            "pq_dim mismatch, this: {}, other: {}",
+            this->pq_dim_,
+            pq_fast_param->pq_dim_);
+        return false;
+    }
+    if (this->train_sample_size_ != pq_fast_param->train_sample_size_) {
+        logger::error(
+            "PQFastScanQuantizerParameter::CheckCompatibility: "
+            "train_sample_size mismatch, this: {}, other: {}",
+            this->train_sample_size_,
+            pq_fast_param->train_sample_size_);
+        return false;
+    }
     return true;
 }
 }  // namespace vsag
