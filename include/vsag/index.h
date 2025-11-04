@@ -548,7 +548,23 @@ public:
      */
     virtual tl::expected<std::vector<IndexDetailInfo>, Error>
     GetIndexDetailInfos() const {
-        throw std::runtime_error("Index doesn't support GetIndexDetailInfo");
+        throw std::runtime_error("Index doesn't support GetIndexDetailInfos");
+    };
+
+    /*
+     * @brief Retrieve one detail data associated with the index.
+     *
+     * @param name The detail information name to retrieve.
+     * @param info The detail information struct to retrieve, as return value.
+     * @return tl::expected<DetailDataPtr, Error>
+     *         - On success: A DetailDataPtr containing the detail data.
+     *         - On failure: An error object (e.g., no such detail information name).
+     * @throws std::runtime_error If the index implementation does not support this operation
+     *            (default behavior for base class).
+     */
+    virtual tl::expected<DetailDataPtr, Error>
+    GetDetailDataByName(const std::string& name, IndexDetailInfo& info) const {
+        throw std::runtime_error("Index doesn't support GetDetailDataByName");
     };
 
     /**

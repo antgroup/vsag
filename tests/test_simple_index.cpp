@@ -160,4 +160,8 @@ TEST_CASE("Test Simple Index", "[ft][simple_index]") {
     REQUIRE_THROWS(index->GetIndexType());
     REQUIRE_THROWS(index->GetIndexDetailInfos());
     REQUIRE_THROWS(index->Serialize(WriteFuncType(nullptr)));
+
+    IndexDetailInfo info;
+    std::string name = INDEX_DETAIL_NAME_NUM_ELEMENTS;
+    REQUIRE_THROWS(index->GetDetailDataByName(name, info));
 }
