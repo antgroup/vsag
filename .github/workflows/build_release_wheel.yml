@@ -1,12 +1,6 @@
 name: Build and Publish Wheels
 
 on:
-  push:
-    branches:
-      - main
-  pull_request:
-  release:
-    types: [published]
   workflow_dispatch:
     inputs:
       python-version:
