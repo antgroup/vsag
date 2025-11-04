@@ -32,9 +32,10 @@ ProductQuantizerParameter::FromJson(const JsonType& json) {
         if (pq_dim > 0) {
             this->pq_dim_ = pq_dim;
         } else {
-            logger::warn(
+            logger::error(
                 "Invalid pq_dim value: {}, using default value: {}", pq_dim, this->pq_dim_);
-            this->pq_dim_ = 1;  // Explicitly set to default value
+            throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                "Invalid pq_dim value in ProductQuantizerParameter");
         }
     }
 
@@ -89,6 +90,22 @@ ProductQuantizerParameter::CheckCompatibility(const ParamPtr& other) const {
             "pq_dim mismatch: {} vs {}",
             this->pq_dim_,
             pq_other->pq_dim_);
+        return false;
+    }
+    if (this->pq_bits_ != pq_other->pq_bits_) {
+        logger::error(
+            "ProductQuantizerParameter::CheckCompatibility: "
+            "pq_bits mismatch: {} vs {}",
+            this->pq_bits_,
+            pq_other->pq_bits_);
+        return false;
+    }
+    if (this->train_sample_size_ != pq_other->train_sample_size_) {
+        logger::error(
+            "ProductQuantizerParameter::CheckCompatibility: "
+            "train_sample_size mismatch: {} vs {}",
+            this->train_sample_size_,
+            pq_other->train_sample_size_);
         return false;
     }
     return true;
