@@ -463,6 +463,11 @@ InnerIndexInterface::GetDataByIdsWithFlag(const int64_t* ids,
     return dataset;
 }
 
+std::vector<IndexDetailInfo>
+InnerIndexInterface::GetIndexDetailInfos() const {
+    return {};
+}
+
 void
 InnerIndexInterface::GetExtraInfoByIds(const int64_t* ids, int64_t count, char* extra_infos) const {
     if (this->extra_infos_ == nullptr) {
