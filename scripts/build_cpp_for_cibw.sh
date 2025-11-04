@@ -32,7 +32,7 @@ cmake -S. -B$CMAKE_BUILD_DIR \
     -DPython3_EXECUTABLE="$PYTHON_EXECUTABLE" \
     -DPython3_ROOT_DIR="$(dirname $(dirname $PYTHON_EXECUTABLE))" \
     -DPython3_FIND_STRATEGY=LOCATION \
-    -DMKL_STATIC_LINK=ON
+    -DMKL_STATIC_LINK=OFF
 
 echo "=== Building project ==="
 cmake --build $CMAKE_BUILD_DIR --parallel $(nproc || sysctl -n hw.ncpu)
