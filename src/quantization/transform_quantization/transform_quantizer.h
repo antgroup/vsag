@@ -89,8 +89,7 @@ public:
 public:
     VectorTransformerPtr
     MakeTransformerInstance(std::string transform_str,
-                            const VectorTransformerParameter& param,
-                            const IndexCommonParam& common_param) const;
+                            const VectorTransformerParameter& param) const;
 
     void
     ExecuteChainTransform(DataType* prev_data, const uint32_t* meta_offsets, uint8_t* codes) const;
@@ -333,7 +332,7 @@ template <typename QuantTmpl, MetricType metric>
 void
 TransformQuantizer<QuantTmpl, metric>::ReleaseComputerImpl(
     Computer<TransformQuantizer<QuantTmpl, metric>>& computer) const {
-    this->allocator_->Deallocate(computer.buf_);
+    this->allocator_->Deallocate(computer.inner_computer_->buf_);
 }
 
 template <typename QuantTmpl, MetricType metric>

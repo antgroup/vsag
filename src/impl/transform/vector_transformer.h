@@ -19,25 +19,16 @@
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
 #include "utils/pointer_define.h"
+#include "vsag_exception.h"
 
 namespace vsag {
-
-class InnerTransformParam {
-public:
-    int64_t target_centroid = -1;
-    bool is_base = true;
-};
-
-using InnerTransformParamPtr = std::shared_ptr<InnerTransformParam>;
-
-class VectorTransformer;
-using VectorTransformerPtr = std::shared_ptr<VectorTransformer>;
 
 class Allocator;
 DEFINE_POINTER(VectorTransformer);
 DEFINE_POINTER(TransformerMeta);
 
-enum class VectorTransformerType { NONE, PCA, RANDOM_ORTHOGONAL, FHT, RESIDUAL, NORMALIZE };
+// TODO(zxy): add normalize transformer
+enum class VectorTransformerType { NONE, PCA, RANDOM_ORTHOGONAL, FHT, NORMALIZE };
 
 struct TransformerMeta {
     virtual void
@@ -53,7 +44,9 @@ struct TransformerMeta {
 
 class VectorTransformer {
 public:
-    explicit VectorTransformer(Allocator* allocator, int64_t input_dim, int64_t output_dim);
+    explicit VectorTransformer(Allocator* allocator, int64_t input_dim, int64_t output_dim)
+        : allocator_(allocator), input_dim_(input_dim), output_dim_(output_dim) {
+    }
 
     explicit VectorTransformer(Allocator* allocator, int64_t input_dim)
         : VectorTransformer(allocator, input_dim, input_dim) {
@@ -62,11 +55,14 @@ public:
     virtual ~VectorTransformer() = default;
 
     virtual TransformerMetaPtr
-    Transform(const float* input_vec,
-              float* output_vec,
-              const InnerTransformParamPtr param = nullptr) const {
+    Transform(const float* input_vec, float* output_vec) const {
         return nullptr;
     };
+
+    virtual void
+    InverseTransform(const float* input_vec, float* output_vec) const {
+        throw VsagException(ErrorType::INTERNAL_ERROR, "InverseTransform not implement");
+    }
 
     virtual void
     Serialize(StreamWriter& writer) const = 0;
@@ -97,11 +93,6 @@ public:
 public:
     virtual void
     Train(const float* data, uint64_t count){};
-
-    virtual void
-    InverseTransform(const float* input_vec,
-                     float* output_vec,
-                     const InnerTransformParamPtr param = nullptr) const;
 
     [[nodiscard]] int64_t
     GetInputDim() const {

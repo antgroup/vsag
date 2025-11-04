@@ -30,14 +30,10 @@ public:
     virtual ~RandomOrthogonalMatrix() override = default;
 
     TransformerMetaPtr
-    Transform(const float* original_vec,
-              float* transformed_vec,
-              const InnerTransformParamPtr param = nullptr) const override;
+    Transform(const float* original_vec, float* transformed_vec) const override;
 
     void
-    InverseTransform(const float* transformed_vec,
-                     float* original_vec,
-                     const InnerTransformParamPtr param = nullptr) const override;
+    InverseTransform(const float* transformed_vec, float* original_vec) const override;
 
     void
     Serialize(StreamWriter& writer) const override;

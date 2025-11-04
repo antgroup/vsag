@@ -63,14 +63,7 @@ public:
     Deserialize(StreamReader& reader) override;
 
     TransformerMetaPtr
-    Transform(const float* input_vec,
-              float* output_vec,
-              const InnerTransformParamPtr param = nullptr) const override;
-
-    void
-    InverseTransform(const float* input_vec,
-                     float* output_vec,
-                     const InnerTransformParamPtr param = nullptr) const override;
+    Transform(const float* input_vec, float* output_vec) const override;
 
     float
     RecoveryDistance(float dist, const uint8_t* meta1, const uint8_t* meta2) const override {

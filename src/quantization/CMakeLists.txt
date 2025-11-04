@@ -38,6 +38,7 @@ set (QUANTIZER_SRC
         product_quantization/product_quantizer_parameter.cpp
         product_quantization/pq_fastscan_quantizer_parameter.cpp
         transform_quantization/transform_quantizer_parameter.cpp
+        residual_quantization/residual_quantizer_parameter.cpp
 )
 
 add_library (quantizer OBJECT ${QUANTIZER_SRC})

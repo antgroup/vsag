@@ -29,14 +29,10 @@ public:
     ~FhtKacRotator() override = default;
 
     TransformerMetaPtr
-    Transform(const float* data,
-              float* rotated_vec,
-              const InnerTransformParamPtr param = nullptr) const override;
+    Transform(const float* data, float* rotated_vec) const override;
 
     void
-    InverseTransform(const float* data,
-                     float* rotated_vec,
-                     const InnerTransformParamPtr param = nullptr) const override;
+    InverseTransform(const float* data, float* rotated_vec) const override;
 
     void
     Serialize(StreamWriter& writer) const override;

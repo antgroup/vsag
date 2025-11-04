@@ -62,9 +62,7 @@ FhtKacRotator::Train(const float* data, uint64_t count) {
 }
 
 TransformerMetaPtr
-FhtKacRotator::Transform(const float* data,
-                         float* rotated_vec,
-                         const InnerTransformParamPtr param) const {
+FhtKacRotator::Transform(const float* data, float* rotated_vec) const {
     auto meta = std::make_shared<FHTMeta>();
     auto dim = static_cast<uint64_t>(this->input_dim_);
     std::memcpy(rotated_vec, data, sizeof(float) * dim);
@@ -96,9 +94,7 @@ FhtKacRotator::Transform(const float* data,
     return meta;
 }
 void
-FhtKacRotator::InverseTransform(float const* data,
-                                float* rotated_vec,
-                                const InnerTransformParamPtr param) const {
+FhtKacRotator::InverseTransform(float const* data, float* rotated_vec) const {
     auto dim = static_cast<uint64_t>(this->input_dim_);
 
     std::memcpy(rotated_vec, data, sizeof(float) * dim);
