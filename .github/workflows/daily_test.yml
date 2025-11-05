@@ -106,7 +106,7 @@ jobs:
           echo leak:libomp.so > omp.supp
           export LSAN_OPTIONS=suppressions=omp.supp
           chmod +x ./build/tests/${{ matrix.test_type }}
-          ./scripts/test_parallel_by_name.sh ${{ matrix.test_type }} ~[pr]
+          ./scripts/testing/test_parallel_by_name.sh ${{ matrix.test_type }} ~[pr]
       - name: Upload Log
         uses: actions/upload-artifact@v4
         with:
@@ -146,7 +146,7 @@ jobs:
           echo leak:libomp.so > omp.supp
           export LSAN_OPTIONS=suppressions=omp.supp
           chmod +x ./build/tests/${{ matrix.test_type }}
-          ./scripts/test_parallel_by_name.sh ${{ matrix.test_type }} ~[pr]
+          ./scripts/testing/test_parallel_by_name.sh ${{ matrix.test_type }} ~[pr]
       - name: Upload Log
         uses: actions/upload-artifact@v4
         with:
@@ -261,7 +261,7 @@ jobs:
           echo leak:libomp.so > omp.supp
           export LSAN_OPTIONS=suppressions=omp.supp
           chmod +x ./build/tests/${{ matrix.test_type }}
-          ./scripts/test_parallel_by_name.sh ${{ matrix.test_type }} ~[pr]
+          ./scripts/testing/test_parallel_by_name.sh ${{ matrix.test_type }} ~[pr]
 
   daily_clean_up_simd:
     name: Clean Up

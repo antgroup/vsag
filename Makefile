@@ -75,7 +75,7 @@ clean:                   ## Clear build/ directory.
 ## ================ integration ================
 .PHONY: fmt
 fmt:                     ## Format codes.
-	@./scripts/format-cpp.sh
+	@./scripts/format/format-cpp.sh
 
 .PHONY: cov
 cov:                     ## Build unit tests with code coverage enabled.
@@ -94,17 +94,17 @@ fix-lint:                ## Fix coding style issues in-place via clang-apply-rep
 test_parallel:           ## Run all tests parallel (used in CI).
 	cmake ${VSAG_CMAKE_ARGS} -B${DEBUG_BUILD_DIR} -DCMAKE_BUILD_TYPE=Sanitize -DENABLE_ASAN=OFF -DENABLE_CCACHE=OFF
 	cmake --build ${DEBUG_BUILD_DIR} --parallel ${COMPILE_JOBS}
-	@./scripts/test_parallel_bg.sh
+	@./scripts/testing/test_parallel_bg.sh
 	./build/mockimpl/tests_mockimpl -d yes ${UT_FILTER} --allow-running-no-tests ${UT_SHARD}
 
 .PHONY: test_asan_parallel
 test_asan_parallel: asan ## Run unit tests parallel with AddressSanitizer option.
-	@./scripts/test_parallel_bg.sh
+	@./scripts/testing/test_parallel_bg.sh
 	./build/mockimpl/tests_mockimpl -d yes ${UT_FILTER} --allow-running-no-tests ${UT_SHARD}
 
 .PHONY: test_tsan_parallel
 test_tsan_parallel: tsan ## Run unit tests parallel with ThreadSanitizer option.
-	@./scripts/test_parallel_bg.sh
+	@./scripts/testing/test_parallel_bg.sh
 	./build/mockimpl/tests_mockimpl -d yes ${UT_FILTER} --allow-running-no-tests ${UT_SHARD}
 
 ##
@@ -146,11 +146,11 @@ PY_VERSION ?= 3.10
 
 pyvsag:                  ## Build a specific Python version wheel. Usage: make pyvsag PY_VERSION=3.10
 	@echo "Building wheel for Python $(PY_VERSION)..."
-	bash ./scripts/local_build_wheel.sh $(PY_VERSION)
+	bash ./scripts/python/local_build_wheel.sh $(PY_VERSION)
 
 pyvsag-all:              ## Build wheels for all supported versions. Usage: make pyvsag-all
 	@echo "Building wheels for all supported versions..."
-	bash ./scripts/local_build_wheel.sh
+	bash ./scripts/python/local_build_wheel.sh
 
 .PHONY: clean-release
 clean-release:           ## Clear build-release/ directory.
