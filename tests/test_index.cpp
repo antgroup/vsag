@@ -1684,10 +1684,10 @@ TestIndex::TestGetExtraInfoById(const TestIndex::IndexPtr& index,
     auto result = index->GetExtraInfoByIds(ids.data(), count, extra_infos.data());
     REQUIRE(result.has_value());
     for (int64_t i = 0; i < count; ++i) {
-        REQUIRE(
-            memcmp(extra_infos.data() + i * extra_info_size,
-                   dataset->base_->GetExtraInfos() + (ids[i] - dataset->ID_BIAS) * extra_info_size,
-                   extra_info_size) == 0);
+        REQUIRE(memcmp(extra_infos.data() + i * extra_info_size,
+                       dataset->base_->GetExtraInfos() +
+                           (ids[i] >> dataset->id_shift) * extra_info_size,
+                       extra_info_size) == 0);
     }
 }
 

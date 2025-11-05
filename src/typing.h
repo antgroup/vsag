@@ -49,6 +49,14 @@ using UnorderedMap = tsl::robin_map<KeyType,
                                     std::equal_to<KeyType>,
                                     vsag::AllocatorWrapper<std::pair<const KeyType, ValType>>>;
 
+template <typename KeyType, typename ValType>
+using STLUnorderedMap =
+    std::unordered_map<KeyType,
+                       ValType,
+                       std::hash<KeyType>,
+                       std::equal_to<KeyType>,
+                       vsag::AllocatorWrapper<std::pair<const KeyType, ValType>>>;
+
 template <typename T, typename... Args>
 inline auto
 AllocateShared(Allocator* allocator, Args&&... args) {
