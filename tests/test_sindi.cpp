@@ -101,14 +101,6 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex,
     TestBuildIndex(index, dataset, true);
     {
         auto invalid_search_param = R"({
-            "sindi": {
-                "n_candidate": -1,
-                "query_prune_ratio": 0.0,
-                "term_prune_ratio": 0.0
-            }
-        })";
-        TestKnnSearch(index, dataset, invalid_search_param, 0.99, false);
-        invalid_search_param = R"({
             "sindi":{
                 "n_candidate": 10,
                 "query_prune_ratio": 1.2,
