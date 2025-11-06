@@ -6,6 +6,7 @@ set -e
 # --- Configuration ---
 VENV_DIR=".venv"
 SUPPORTED_VERSIONS=("3.6" "3.7" "3.8" "3.9" "3.10" "3.11" "3.12")
+HAVE_DOCKER=true
 
 # --- Prerequisite Checks ---
 echo "🔎 Checking prerequisites..."
@@ -13,13 +14,13 @@ if ! command -v python3 &> /dev/null; then
     echo "❌ 'python3' command not found. Please ensure Python 3 is installed."
     exit 1
 fi
-if ! docker info > /dev/null 2>&1; then
-  echo "❌ Docker daemon is not running. Please start Docker and try again."
-  exit 1
-fi
 if [ ! -f "scripts/prepare_python_build.sh" ]; then
     echo "❌ Preparation script not found at 'scripts/prepare_python_build.sh'."
     exit 1
+fi
+if ! docker info > /dev/null 2>&1; then
+  echo "⚠️ Docker daemon is not running. Build without Docker."
+  HAVE_DOCKER=false
 fi
 echo "✅ Prerequisites met."
 
@@ -62,7 +63,11 @@ run_build() {
   echo "🚀 Starting wheel build for Python ${py_version}"
   echo "========================================================================"
 
-  pip install -q "cibuildwheel==${cibw_version}"
+  if $HAVE_DOCKER; then
+    pip install -q "cibuildwheel==${cibw_version}"
+  else
+    pip install build
+  fi
 
   # Set trap to call cleanup on exit/error
   trap cleanup EXIT INT TERM
@@ -70,13 +75,31 @@ run_build() {
   # Call the reusable script
   bash ./scripts/prepare_python_build.sh "$py_version"
 
-  echo "🛠️  Starting cibuildwheel..."
   PIP_DEFAULT_TIMEOUT="100" \
-  PIP_INDEX_URL="https://pypi.tuna.tsinghua.edu.cn/simple" \
-  CIBW_BUILD="${cibw_build_pattern}" \
-  CIBW_ARCHS="${ARCH}" \
-  CIBW_TEST_COMMAND="pip install numpy && ls -alF /project/ && python /project/examples/python/example_hnsw.py" \
-  cibuildwheel --platform linux --output-dir wheelhouse python
+  PIP_INDEX_URL="https://pypi.tuna.tsinghua.edu.cn/simple"
+  if $HAVE_DOCKER; then
+    echo "🛠️  Starting cibuildwheel... "
+    CIBW_BUILD="${cibw_build_pattern}" \
+    CIBW_ARCHS="${ARCH}" \
+    CIBW_TEST_COMMAND="pip install numpy && ls -alF /project/ && python /project/examples/python/example_hnsw.py" \
+    cibuildwheel --platform linux --output-dir wheelhouse python
+  else 
+    echo "🛠️  Starting build..."
+    bash scripts/build_cpp_for_cibw.sh
+    python -m build --wheel --outdir wheelhouse python
+    echo "✅ Build complete. Starting test..."
+    # Find the most recently created wheel
+    LATEST_WHEEL=$(ls -t wheelhouse/pyvsag-*.whl | head -n 1)
+    if [ -z "$LATEST_WHEEL" ]; then
+        echo "❌ Failed to find the built wheel."
+        exit 1
+    fi
+    echo "   - Installing wheel: ${LATEST_WHEEL}"
+    pip install "${LATEST_WHEEL}" --force-reinstall
+    echo "   - Running tests..."
+    pip install numpy
+    python examples/python/example_hnsw.py
+  fi
 
   cleanup
   trap - EXIT INT TERM # Clear the trap
