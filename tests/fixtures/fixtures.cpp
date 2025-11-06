@@ -383,7 +383,7 @@ CreateAttribute(std::string term_name,
 vsag::AttributeSet*
 generate_attributes(uint64_t count, uint32_t max_term_count, uint32_t max_value_count, int seed) {
     auto* results = new vsag::AttributeSet[count];
-    std::mt19937 gen(seed);
+    thread_local std::mt19937 gen(seed);
     std::uniform_int_distribution<int> term_count_dist(1, max_term_count);
     auto term_count = term_count_dist(gen);
     std::vector<std::pair<std::string, vsag::AttrValueType>> terms(term_count);

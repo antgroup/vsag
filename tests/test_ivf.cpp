@@ -1078,6 +1078,12 @@ TestIVFSerialize(const fixtures::IVFResourcePtr& resource) {
                             IVFTestIndex::TestSerializeReaderSet(
                                 index, index2, dataset, search_param, IVFTestIndex::name, true);
                         }
+                        if (index->CheckFeature(vsag::SUPPORT_SERIALIZE_WRITE_FUNC)) {
+                            auto index2 =
+                                IVFTestIndex::TestFactory(IVFTestIndex::name, param, true);
+                            IVFTestIndex::TestSerializeWriteFunc(
+                                index, index2, dataset, search_param, true);
+                        }
                     }
                     vsag::Options::Instance().set_block_size_limit(origin_size);
                 }

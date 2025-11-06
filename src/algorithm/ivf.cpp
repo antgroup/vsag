@@ -296,6 +296,7 @@ IVF::InitFeatures() {
         IndexFeature::SUPPORT_DESERIALIZE_READER_SET,
         IndexFeature::SUPPORT_SERIALIZE_BINARY_SET,
         IndexFeature::SUPPORT_SERIALIZE_FILE,
+        IndexFeature::SUPPORT_SERIALIZE_WRITE_FUNC,
     });
 
     auto name = this->bucket_->GetQuantizerName();

@@ -193,6 +193,13 @@ public:
                            bool expected_success = true);
 
     static void
+    TestSerializeWriteFunc(const IndexPtr& index_from,
+                           const IndexPtr& index_to,
+                           const TestDatasetPtr& dataset,
+                           const std::string& search_param,
+                           bool expected_success = true);
+
+    static void
     TestSerializeReaderSet(const IndexPtr& index_from,
                            const IndexPtr& index_to,
                            const TestDatasetPtr& dataset,

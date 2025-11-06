@@ -159,4 +159,5 @@ TEST_CASE("Test Simple Index", "[ft][simple_index]") {
     REQUIRE_THROWS(index->AnalyzeIndexBySearch(req));
     REQUIRE_THROWS(index->GetIndexType());
     REQUIRE_THROWS(index->GetIndexDetailInfos());
+    REQUIRE_THROWS(index->Serialize(WriteFuncType(nullptr)));
 }

@@ -333,6 +333,9 @@ public:
     Serialize(std::ostream& out_stream) const;
 
     virtual void
+    Serialize(const WriteFuncType& write_func) const;
+
+    virtual void
     Serialize(StreamWriter& writer) const = 0;
 
     [[nodiscard]] virtual BinarySet

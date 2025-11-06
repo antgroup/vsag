@@ -52,6 +52,10 @@ enum class IndexType { HNSW, DISKANN, HGRAPH, IVF, PYRAMID, BRUTEFORCE, SPARSE, 
 #define DATA_FLAG_ATTRIBUTE 0x20
 #define DATA_FLAG_ID 0x40
 
+using OffsetType = uint64_t;
+using SizeType = uint64_t;
+using WriteFuncType = std::function<void(OffsetType, SizeType, const void*)>;
+
 class Index {
 public:
     // [basic methods]
@@ -654,6 +658,16 @@ public:
       */
     [[nodiscard]] virtual tl::expected<BinarySet, Error>
     Serialize() const = 0;
+
+    /**
+      * @brief Serialize index by write function
+      *
+      * @param write_func is a function to write serialized index
+      */
+    [[nodiscard]] virtual tl::expected<void, Error>
+    Serialize(WriteFuncType write_func) const {
+        throw std::runtime_error("Index doesn't support Serialize with write function");
+    }
 
     /**
       * @brief Deserialize index from a set of byte array. Causing exception if this index is not empty
