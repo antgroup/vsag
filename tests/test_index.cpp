@@ -1087,6 +1087,58 @@ TestIndex::TestSerializeReaderSet(const IndexPtr& index_from,
 }
 
 void
+TestIndex::TestSerializeWriteFunc(const IndexPtr& index_from,
+                                  const IndexPtr& index_to,
+                                  const TestDatasetPtr& dataset,
+                                  const std::string& search_param,
+                                  bool expected_success) {
+    if (not index_from->CheckFeature(vsag::SUPPORT_SERIALIZE_WRITE_FUNC)) {
+        return;
+    }
+    auto dir = fixtures::TempDir("serialize");
+    auto path = dir.GenerateRandomFile();
+    std::ofstream outfile(path, std::ios::out | std::ios::binary);
+    vsag::WriteFuncType write_func =
+        [&outfile](vsag::OffsetType offset, vsag::SizeType size, const void* data) -> void {
+        outfile.seekp(offset);
+        outfile.write(reinterpret_cast<const char*>(data), size);
+    };
+    auto serialize_index = index_from->Serialize(write_func);
+    REQUIRE(serialize_index.has_value() == expected_success);
+    outfile.close();
+
+    std::ifstream infile(path, std::ios::in | std::ios::binary);
+    auto deserialize_index = index_to->Deserialize(infile);
+    REQUIRE(deserialize_index.has_value() == expected_success);
+    infile.close();
+    if (index_to->GetNumElements() == 0) {
+        return;
+    }
+
+    const auto& queries = dataset->query_;
+    auto query_count = queries->GetNumElements();
+    auto dim = queries->GetDim();
+    auto topk = 10;
+    for (auto i = 0; i < query_count; ++i) {
+        auto query = vsag::Dataset::Make();
+        query->NumElements(1)
+            ->Dim(dim)
+            ->Paths(queries->GetPaths() + i)
+            ->SparseVectors(queries->GetSparseVectors() + i)
+            ->Float32Vectors(queries->GetFloat32Vectors() + i * dim)
+            ->Owner(false);
+        auto res_from = index_from->KnnSearch(query, topk, search_param);
+        auto res_to = index_to->KnnSearch(query, topk, search_param);
+        REQUIRE(res_from.has_value());
+        REQUIRE(res_to.has_value());
+        REQUIRE(res_from.value()->GetDim() == res_to.value()->GetDim());
+        for (auto j = 0; j < topk; ++j) {
+            REQUIRE(res_to.value()->GetIds()[j] == res_from.value()->GetIds()[j]);
+        }
+    }
+}
+
+void
 TestIndex::TestConcurrentAddSearch(const TestIndex::IndexPtr& index,
                                    const TestDatasetPtr& dataset,
                                    const std::string& search_param,
