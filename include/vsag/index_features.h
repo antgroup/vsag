@@ -35,6 +35,7 @@ enum IndexFeature {
     SUPPORT_METRIC_TYPE_COSINE,          /**< Supports cosine metric type */
     SUPPORT_SERIALIZE_FILE,              /**< Supports serialization to a file */
     SUPPORT_SERIALIZE_BINARY_SET,        /**< Supports serialization to a binary set */
+    SUPPORT_SERIALIZE_WRITE_FUNC,        /**< Supports serialization to a write function */
     SUPPORT_DESERIALIZE_FILE,            /**< Supports deserialization from a file */
     SUPPORT_DESERIALIZE_BINARY_SET,      /**< Supports deserialization from a binary set */
     SUPPORT_DESERIALIZE_READER_SET,      /**< Supports deserialization from a reader set */

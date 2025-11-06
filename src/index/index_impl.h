@@ -381,6 +381,11 @@ public:
         SAFE_CALL(return this->inner_index_->Serialize());
     }
 
+    [[nodiscard]] tl::expected<void, Error>
+    Serialize(WriteFuncType write_func) const override {
+        SAFE_CALL(this->inner_index_->Serialize(write_func));
+    }
+
     tl::expected<void, Error>
     Serialize(std::ostream& out_stream) override {
         SAFE_CALL(this->inner_index_->Serialize(out_stream));
