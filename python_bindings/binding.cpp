@@ -19,6 +19,7 @@
 #include <filesystem>
 #include <fstream>
 #include <map>
+#include <omp.h>
 
 #include "fmt/format.h"
 #include "iostream"
@@ -222,7 +223,8 @@ public:
                     py::array_t<uint32_t> indices,
                     py::array_t<float> values,
                     uint32_t k,
-                    const std::string& parameters) {
+                    const std::string& parameters,
+                    uint32_t num_threads) {
         auto batch = BuildSparseVectorsFromCSR(index_pointers, indices, values);
 
         std::vector<uint32_t> shape{batch.num_elements, k};
@@ -232,6 +234,8 @@ public:
         auto ids_view = res_ids.mutable_unchecked<2>();
         auto dists_view = res_dists.mutable_unchecked<2>();
 
+        omp_set_num_threads(num_threads);
+#pragma omp parallel for schedule(dynamic)
         for (uint32_t i = 0; i < batch.num_elements; ++i) {
             auto query = vsag::Dataset::Make();
             query->Owner(false)->NumElements(1)->SparseVectors(batch.sparse_vectors.data() + i);
@@ -323,7 +327,8 @@ PYBIND11_MODULE(_pyvsag, m) {
              py::arg("indices"),
              py::arg("values"),
              py::arg("k"),
-             py::arg("parameters"))
+             py::arg("parameters"),
+             py::arg("num_threads"))
         .def("range_search",
              &Index::RangeSearch,
              py::arg("vector"),
