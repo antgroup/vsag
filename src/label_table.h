@@ -192,7 +192,7 @@ public:
 
 public:
     Vector<LabelType> label_table_;
-    UnorderedMap<LabelType, InnerIdType> label_remap_;
+    STLUnorderedMap<LabelType, InnerIdType> label_remap_;
 
     bool compress_duplicate_data_{true};
 

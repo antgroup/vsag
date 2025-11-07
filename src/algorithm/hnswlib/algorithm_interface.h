@@ -105,7 +105,7 @@ public:
     virtual size_t
     getDeletedCount() = 0;
 
-    virtual vsag::UnorderedMap<LabelType, InnerIdType>
+    virtual vsag::STLUnorderedMap<LabelType, InnerIdType>
     getDeletedElements() = 0;
 
     virtual bool

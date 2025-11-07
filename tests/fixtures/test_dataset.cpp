@@ -87,7 +87,8 @@ GenerateRandomDataset(uint64_t dim,
                       bool is_query = false,
                       uint64_t extra_info_size = 0,
                       std::string vector_type = "dense",
-                      bool has_duplicate = false) {
+                      bool has_duplicate = false,
+                      int64_t id_shift = 16) {
     auto base = vsag::Dataset::Make();
     bool need_normalize = (metric_str != "cosine");
     auto vecs =
@@ -99,7 +100,9 @@ GenerateRandomDataset(uint64_t dim,
         paths[i] = create_random_string(!is_query);
     }
     std::vector<int64_t> ids(count);
-    std::iota(ids.begin(), ids.end(), TestDataset::ID_BIAS);
+    for (int64_t i = 0; i < count; ++i) {
+        ids[i] = (i << id_shift);
+    }
     base->Dim(dim)
         ->Ids(CopyVector(ids))
         ->Paths(paths)
@@ -149,7 +152,7 @@ GenerateNanRandomDataset(uint64_t dim, uint64_t count, std::string metric_str = 
     }
 
     std::vector<int64_t> ids(count);
-    std::iota(ids.begin(), ids.end(), 10086);
+    std::iota(ids.begin(), ids.end(), 16);
     base->Dim(dim)
         ->Ids(CopyVector(ids))
         ->Float32Vectors(CopyVector(vecs))
@@ -318,7 +321,8 @@ CalGroundTruthWithPath(const std::pair<float*, int64_t*>& result,
                        uint64_t top_k,
                        const vsag::DatasetPtr base,
                        const vsag::DatasetPtr query,
-                       std::function<bool(int64_t)> filter = nullptr) {
+                       std::function<bool(int64_t)> filter = nullptr,
+                       int64_t id_shift = 16) {
     auto base_count = base->GetNumElements();
     auto query_count = query->GetNumElements();
     auto base_paths = base->GetPaths();
@@ -331,7 +335,7 @@ CalGroundTruthWithPath(const std::pair<float*, int64_t*>& result,
         for (int j = 0; j < top_k; ++j) {
             while (start < base_count) {
                 auto base_id = result.second[i * base_count + start];
-                if (is_path_belong_to(query_paths[i], base_paths[base_id - TestDataset::ID_BIAS]) &&
+                if (is_path_belong_to(query_paths[i], base_paths[base_id >> id_shift]) &&
                     (not filter || not filter(base_id))) {
                     ids[i * top_k + j] = base_id;
                     dists[i * top_k + j] = result.first[i * base_count + start];
@@ -354,12 +358,20 @@ TestDataset::CreateTestDataset(uint64_t dim,
                                float valid_ratio,
                                std::string vector_type,
                                uint64_t extra_info_size,
-                               bool has_duplicate) {
+                               bool has_duplicate,
+                               int64_t id_shift) {
     TestDatasetPtr dataset = std::shared_ptr<TestDataset>(new TestDataset);
     dataset->dim_ = dim;
+    dataset->id_shift = id_shift;
     dataset->count_ = count;
-    dataset->base_ = GenerateRandomDataset(
-        dim, count, metric_str, false /*is_query*/, extra_info_size, vector_type, has_duplicate);
+    dataset->base_ = GenerateRandomDataset(dim,
+                                           count,
+                                           metric_str,
+                                           false /*is_query*/,
+                                           extra_info_size,
+                                           vector_type,
+                                           has_duplicate,
+                                           dataset->id_shift);
     constexpr uint64_t query_count = 100;
     dataset->query_ =
         GenerateRandomDataset(dim, query_count, metric_str, true, extra_info_size, vector_type);
@@ -371,8 +383,9 @@ TestDataset::CreateTestDataset(uint64_t dim,
             CalDistanceFloatMetrix(dataset->query_, dataset->base_, metric_str, vector_type);
         dataset->top_k = 10;
 
-        dataset->filter_function_ = [valid_ratio, count](int64_t id) -> bool {
-            return id - ID_BIAS > valid_ratio * count;
+        dataset->filter_function_ =
+            [valid_ratio, count, shift = dataset->id_shift](int64_t id) -> bool {
+            return (id >> shift) > valid_ratio * count;
         };
 
         dataset->ex_filter_function_ = [valid_ratio, count](const char* data) -> bool {
@@ -383,12 +396,24 @@ TestDataset::CreateTestDataset(uint64_t dim,
             dataset->query_, dataset->base_, metric_str, dataset->ex_filter_function_, vector_type);
 
         if (with_path) {
-            dataset->ground_truth_ =
-                CalGroundTruthWithPath(result, dataset->top_k, dataset->base_, dataset->query_);
-            dataset->filter_ground_truth_ = CalGroundTruthWithPath(
-                result, dataset->top_k, dataset->base_, dataset->query_, dataset->filter_function_);
-            dataset->ex_filter_ground_truth_ =
-                CalGroundTruthWithPath(ex_result, dataset->top_k, dataset->base_, dataset->query_);
+            dataset->ground_truth_ = CalGroundTruthWithPath(result,
+                                                            dataset->top_k,
+                                                            dataset->base_,
+                                                            dataset->query_,
+                                                            nullptr,
+                                                            dataset->id_shift);
+            dataset->filter_ground_truth_ = CalGroundTruthWithPath(result,
+                                                                   dataset->top_k,
+                                                                   dataset->base_,
+                                                                   dataset->query_,
+                                                                   dataset->filter_function_,
+                                                                   dataset->id_shift);
+            dataset->ex_filter_ground_truth_ = CalGroundTruthWithPath(ex_result,
+                                                                      dataset->top_k,
+                                                                      dataset->base_,
+                                                                      dataset->query_,
+                                                                      nullptr,
+                                                                      dataset->id_shift);
         } else {
             dataset->ground_truth_ = CalTopKGroundTruth(result, dataset->top_k, count, query_count);
             dataset->filter_ground_truth_ = CalFilterGroundTruth(
