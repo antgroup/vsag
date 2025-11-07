@@ -332,7 +332,7 @@ template <typename QuantTmpl, MetricType metric>
 void
 TransformQuantizer<QuantTmpl, metric>::ReleaseComputerImpl(
     Computer<TransformQuantizer<QuantTmpl, metric>>& computer) const {
-    this->allocator_->Deallocate(computer.inner_computer_->buf_);
+    this->allocator_->Deallocate(computer.buf_);
 }
 
 template <typename QuantTmpl, MetricType metric>

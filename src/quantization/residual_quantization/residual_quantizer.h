@@ -74,7 +74,7 @@ namespace vsag {
 template <typename QuantTmpl, MetricType metric = MetricType::METRIC_TYPE_L2SQR>
 class ResidualQuantizer : public Quantizer<ResidualQuantizer<QuantTmpl, metric>> {
 public:
-    explicit ResidualQuantizer(const ResidualQuantizerParameter& param,
+    explicit ResidualQuantizer(const ResidualQuantizerParamPtr& param,
                                const IndexCommonParam& common_param);
 
     explicit ResidualQuantizer(const QuantizerParamPtr& param,
@@ -158,7 +158,7 @@ ResidualQuantizer<QuantTmpl, metric>::ResidualQuantizer(const ResidualQuantizerP
     : Quantizer<ResidualQuantizer<QuantTmpl, metric>>(common_param.dim_,
                                                       common_param.allocator_.get()),
       centroids_count_(param->centroids_count_),
-      centroids_norm_(common_param.allocator_.get()) {
+      centroids_norm_(param->centroids_count_, common_param.allocator_.get()) {
     /*
      * USAGE:
      * 1. when centroids_count == 0, centroids_storage != nullptr: use outside centroids (e.g., QG)
@@ -185,7 +185,7 @@ ResidualQuantizer<QuantTmpl, metric>::ResidualQuantizer(const ResidualQuantizerP
     // 3. compute norm offset
     align_size_ = sizeof(float);
     this->res_norm_offset_ =
-        (this->quantizer_->code_size_ + align_size_ - 1) / align_size_ * align_size_;
+        (this->quantizer_->GetCodeSize() + align_size_ - 1) / align_size_ * align_size_;
 
     // 4. compute code size
     this->code_size_ = this->res_norm_offset_ + sizeof(float) * 2;
@@ -206,7 +206,7 @@ ResidualQuantizer<QuantTmpl, metric>::TrainImpl(const DataType* data, uint64_t c
     Vector<float> centroid_vec(this->dim_, 0, this->allocator_);
     for (auto i = 0; i < centroids_count_; i++) {
         this->partition_strategy_->GetCentroid(i, centroid_vec);
-        centroids_norm_[i] = FP32ComputeIP(centroid_vec.data(), centroid_vec.data(), this->dim_)
+        centroids_norm_[i] = FP32ComputeIP(centroid_vec.data(), centroid_vec.data(), this->dim_);
     }
 
     // 3. train quantizer
@@ -224,7 +224,7 @@ ResidualQuantizer<QuantTmpl, metric>::EncodeOneImpl(const DataType* data, uint8_
 
     // 2. compute residual part and norm
     Vector<float> data_buffer(this->dim_, 0, this->allocator_);
-    for (int i = 0; i < this->input_dim_; i++) {
+    for (int i = 0; i < this->dim_; i++) {
         data_buffer[i] = data[i] - centroid_vec[i];
     }
     float norm = FP32ComputeIP(data_buffer.data(), data_buffer.data(), this->dim_) +
@@ -252,14 +252,14 @@ ResidualQuantizer<QuantTmpl, metric>::ProcessQueryImpl(
     }
 
     // 1. pre-compute all |q - c|^2 and store them into meta
-    Vector<float> centroid_vec(this->input_dim_, 0, this->allocator_);
+    Vector<float> centroid_vec(this->dim_, 0, this->allocator_);
     for (auto i = 0; i < centroids_count_; i++) {
         uint32_t centroid_id = this->partition_strategy_->ClassifyDatas(query, 1, 1)[0];
         this->partition_strategy_->GetCentroid(centroid_id, centroid_vec);
         auto norm = FP32ComputeL2Sqr(query, (const float*)(centroid_vec.data()), this->dim_);
-        *(float*)(computer.inner_computer->buf_ + res_norm_offset_ + i * sizeof(float)) = norm;
+        *(float*)(computer.inner_computer_->buf_ + res_norm_offset_ + i * sizeof(float)) = norm;
     }
-    *(float*)(computer.inner_computer->buf_ + this->query_code_size_ - sizeof(float)) =
+    *(float*)(computer.inner_computer_->buf_ + this->query_code_size_ - sizeof(float)) =
         FP32ComputeL2Sqr(query, query, this->dim_);
 
     // 2. execute quantize
@@ -275,14 +275,14 @@ ResidualQuantizer<QuantTmpl, metric>::ComputeDistImpl(Computer<ResidualQuantizer
     auto n1_n2 = *(float*)(codes + res_norm_offset_);
     auto centroid_id = *(uint32_t*)(codes + res_norm_offset_ + sizeof(float));
     auto n_3 =
-        *(float*)(computer.inner_computer->buf_ + res_norm_offset_ + centroid_id * sizeof(float));
+        *(float*)(computer.inner_computer_->buf_ + res_norm_offset_ + centroid_id * sizeof(float));
     auto quantize_dist = quantizer_->ComputeDist(*(computer.inner_computer_), codes);
 
     if constexpr (metric == MetricType::METRIC_TYPE_L2SQR) {
         dists[0] = n1_n2 + n_3 - 2 * quantize_dist;
     } else {
         auto q_sqr =
-            *(float*)(computer.inner_computer->buf_ + this->query_code_size_ - sizeof(float));
+            *(float*)(computer.inner_computer_->buf_ + this->query_code_size_ - sizeof(float));
         auto c_sqr = centroids_norm_[centroid_id];
         auto qc = (n_3 - q_sqr - c_sqr) / 2.0;
 
@@ -313,7 +313,7 @@ template <typename QuantTmpl, MetricType metric>
 void
 ResidualQuantizer<QuantTmpl, metric>::ReleaseComputerImpl(
     Computer<ResidualQuantizer<QuantTmpl, metric>>& computer) const {
-    this->allocator_->Deallocate(computer.inner_computer_->buf_);
+    this->allocator_->Deallocate(computer.buf_);
 }
 
 template <typename QuantTmpl, MetricType metric>

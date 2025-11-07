@@ -20,18 +20,33 @@
 namespace vsag {
 
 ResidualQuantizerParameter::ResidualQuantizerParameter()
-    : QuantizerParameter(QUANTIZATION_TYPE_VALUE_TQ) {
+    : QuantizerParameter(QUANTIZATION_TYPE_VALUE_RQ) {
 }
 
 void
 ResidualQuantizerParameter::FromJson(const JsonType& json) {
     base_quantizer_json_ = json;
+
+    if (json.Contains(RQ_CENTROIDS_COUNT)) {
+        this->centroids_count_ = json[RQ_CENTROIDS_COUNT].GetInt();
+    }
+
+    if (json.Contains(RQ_BASE_QUANTIZATION_TYPE)) {
+        auto quantizer_type = json[RQ_BASE_QUANTIZATION_TYPE].GetString();
+        base_quantizer_json_[QUANTIZATION_TYPE_KEY].SetString(quantizer_type);
+    } else {
+        throw VsagException(
+            ErrorType::INVALID_ARGUMENT,
+            fmt::format(
+                "inner_param: \"{}\" must contains \"rq_base_quantization_type\" when use rq"),
+            json.GetString());
+    }
 }
 
 JsonType
 ResidualQuantizerParameter::ToJson() const {
     JsonType json = base_quantizer_json_;
-
+    json[QUANTIZATION_TYPE_KEY].SetString(QUANTIZATION_TYPE_VALUE_RQ);
     return json;
 }
 
@@ -44,6 +59,11 @@ ResidualQuantizerParameter::CheckCompatibility(const ParamPtr& other) const {
             "ResidualQuantizerParameter");
         return false;
     }
+
+    if (this->centroids_count_ != rq_param->centroids_count_) {
+        return false;
+    }
+
     return this->base_quantizer_json_[QUANTIZATION_TYPE_KEY].GetString() ==
            rq_param->base_quantizer_json_[QUANTIZATION_TYPE_KEY].GetString();
 }

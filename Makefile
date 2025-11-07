@@ -35,7 +35,7 @@ help:                    ## Show the help.
 .PHONY: debug
 debug:                   ## Build vsag with debug options.
 	cmake ${VSAG_CMAKE_ARGS} -B${DEBUG_BUILD_DIR} -DCMAKE_BUILD_TYPE=Debug -DENABLE_ASAN=OFF -DENABLE_CCACHE=ON
-	cmake --build ${DEBUG_BUILD_DIR} --parallel ${COMPILE_JOBS}
+	cmake --build ${DEBUG_BUILD_DIR} --parallel ${COMPILE_JOBS} --verbose
 
 .PHONY: test
 test:                    ## Build and run unit tests.

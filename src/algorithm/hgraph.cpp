@@ -1242,6 +1242,8 @@ static const std::string HGRAPH_PARAMS_TEMPLATE =
                 "{PCA_DIM}": 0,
                 "{RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY}": 32,
                 "{TQ_CHAIN}": "",
+                "{INDEX_RQ_QUANTIZATION_TYPE}": "",
+                "{INDEX_RQ_CENTROIDS_COUNT}": "",
                 "nbits": 8,
                 "{PRODUCT_QUANTIZATION_DIM}": 1,
                 "{HOLD_MOLDS}": false
@@ -1526,6 +1528,22 @@ HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
                                                     HGRAPH_BASE_CODES_KEY,
                                                     QUANTIZATION_PARAMS_KEY,
                                                     TQ_CHAIN,
+                                                },
+                                            },
+                                            {
+                                                INDEX_RQ_CENTROIDS_COUNT,
+                                                {
+                                                    HGRAPH_BASE_CODES_KEY,
+                                                    QUANTIZATION_PARAMS_KEY,
+                                                    RQ_CENTROIDS_COUNT,
+                                                },
+                                            },
+                                            {
+                                                INDEX_RQ_BASE_QUANTIZATION_TYPE,
+                                                {
+                                                    HGRAPH_BASE_CODES_KEY,
+                                                    QUANTIZATION_PARAMS_KEY,
+                                                    RQ_BASE_QUANTIZATION_TYPE,
                                                 },
                                             },
                                             {

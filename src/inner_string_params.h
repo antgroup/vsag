@@ -92,6 +92,8 @@ const char* const PCA_DIM = "pca_dim";
 const char* const USE_FHT = "use_fht";
 
 // quantization param
+const char* const RQ_BASE_QUANTIZATION_TYPE = "rq_base_quantization_type";
+const char* const RQ_CENTROIDS_COUNT = "rq_centroids_count";
 const char* const TQ_CHAIN = "tq_chain";
 const char* const RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY = "rabitq_bits_per_dim_query";
 const char* const SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE = "sq4_uniform_trunc_rate";
@@ -233,6 +235,7 @@ const std::unordered_map<std::string, std::string> DEFAULT_MAP = {
     {"ATTR_HAS_BUCKETS_KEY", ATTR_HAS_BUCKETS_KEY},
     {"ATTR_PARAMS_KEY", ATTR_PARAMS_KEY},
     {"RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY", RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY},
-    {"TQ_CHAIN", TQ_CHAIN}};
-
+    {"TQ_CHAIN", TQ_CHAIN},
+    {"RQ_BASE_QUANTIZATION_TYPE", RQ_BASE_QUANTIZATION_TYPE},
+    {"RQ_CENTROIDS_COUNT", RQ_CENTROIDS_COUNT}};
 }  // namespace vsag

@@ -20,6 +20,7 @@
 #include "product_quantization/product_quantizer.h"
 #include "quantizer.h"
 #include "rabitq_quantization/rabitq_quantizer.h"
+#include "residual_quantization/residual_quantizer.h"
 #include "scalar_quantization/sq_headers.h"
 #include "sparse_quantization/sparse_quantizer.h"
 #include "transform_quantization/transform_quantizer.h"

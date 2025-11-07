@@ -25,6 +25,46 @@
 #include "quantization/transform_quantization/transform_quantizer_parameter.h"
 #include "sparse_vector_datacell.h"
 
+#define FOR_EACH_DENSE_QUANTIZER(MACRO)     \
+    MACRO(SQ8, SQ8Quantizer)                \
+    MACRO(FP32, FP32Quantizer)              \
+    MACRO(SQ4, SQ4Quantizer)                \
+    MACRO(SQ4_UNIFORM, SQ4UniformQuantizer) \
+    MACRO(SQ8_UNIFORM, SQ8UniformQuantizer) \
+    MACRO(BF16, BF16Quantizer)              \
+    MACRO(FP16, FP16Quantizer)              \
+    MACRO(PQ, ProductQuantizer)             \
+    MACRO(PQFS, PQFastScanQuantizer)        \
+    MACRO(RABITQ, RaBitQuantizer)
+
+#define FOR_EACH_ALL_QUANTIZER(MACRO) \
+    FOR_EACH_DENSE_QUANTIZER(MACRO)   \
+    MACRO(SPARSE, SparseQuantizer)
+
+#define GENERATE_QUANTIZER_CASE(type_suffix, quantizer_class)                       \
+    if (quantization_string == QUANTIZATION_TYPE_VALUE_##type_suffix) {             \
+        return make_instance<quantizer_class<metric>, IOTemp>(param, common_param); \
+    }
+
+#define GENERATE_TQ_CASE(type_suffix, quantizer_class)                                     \
+    if (tq_bottom_quantization_string == QUANTIZATION_TYPE_VALUE_##type_suffix) {          \
+        return make_instance<TransformQuantizer<quantizer_class<metric>, metric>, IOTemp>( \
+            param, common_param);                                                          \
+    }
+
+#define GENERATE_RQ_CASE(type_suffix, quantizer_class)                                    \
+    if (rq_bottom_quantization_string == QUANTIZATION_TYPE_VALUE_##type_suffix) {         \
+        return make_instance<ResidualQuantizer<quantizer_class<metric>, metric>, IOTemp>( \
+            param, common_param);                                                         \
+    }
+
+#define GENERATE_TRQ_QUANTIZER_CASE(type_suffix, quantizer_class)                           \
+    if (trq_bottom_quantization_string == QUANTIZATION_TYPE_VALUE_##type_suffix) {          \
+        return make_instance<                                                               \
+            TransformQuantizer<ResidualQuantizer<quantizer_class<metric>, metric>, metric>, \
+            IOTemp>(param, common_param);                                                   \
+    }
+
 namespace vsag {
 template <typename QuantTemp, typename IOTemp>
 static FlattenInterfacePtr
@@ -64,82 +104,27 @@ make_instance(const FlattenInterfaceParamPtr& param, const IndexCommonParam& com
     if (quantization_string == QUANTIZATION_TYPE_VALUE_TQ) {
         auto tq_param =
             std::dynamic_pointer_cast<TransformQuantizerParameter>(param->quantizer_parameter);
-        auto bottom_quantization_string = tq_param->GetBottomQuantizationName();
-        if (bottom_quantization_string == QUANTIZATION_TYPE_VALUE_SQ8) {
-            return make_instance<TransformQuantizer<SQ8Quantizer<metric>, metric>, IOTemp>(
-                param, common_param);
+        auto tq_bottom_quantization_string = tq_param->GetBottomQuantizationName();
+
+        if (tq_bottom_quantization_string == QUANTIZATION_TYPE_VALUE_RQ) {
+            auto rq_param = std::make_shared<ResidualQuantizerParameter>();
+            rq_param->FromJson(tq_param->base_quantizer_json_);
+            auto trq_bottom_quantization_string = rq_param->GetBottomQuantizationName();
+
+            FOR_EACH_DENSE_QUANTIZER(GENERATE_TRQ_QUANTIZER_CASE)
         }
-        if (bottom_quantization_string == QUANTIZATION_TYPE_VALUE_FP32) {
-            return make_instance<TransformQuantizer<FP32Quantizer<metric>, metric>, IOTemp>(
-                param, common_param);
-        }
-        if (bottom_quantization_string == QUANTIZATION_TYPE_VALUE_SQ4) {
-            return make_instance<TransformQuantizer<SQ4Quantizer<metric>, metric>, IOTemp>(
-                param, common_param);
-        }
-        if (bottom_quantization_string == QUANTIZATION_TYPE_VALUE_SQ4_UNIFORM) {
-            return make_instance<TransformQuantizer<SQ4UniformQuantizer<metric>, metric>, IOTemp>(
-                param, common_param);
-        }
-        if (bottom_quantization_string == QUANTIZATION_TYPE_VALUE_SQ8_UNIFORM) {
-            return make_instance<TransformQuantizer<SQ8UniformQuantizer<metric>, metric>, IOTemp>(
-                param, common_param);
-        }
-        if (bottom_quantization_string == QUANTIZATION_TYPE_VALUE_BF16) {
-            return make_instance<TransformQuantizer<BF16Quantizer<metric>, metric>, IOTemp>(
-                param, common_param);
-        }
-        if (bottom_quantization_string == QUANTIZATION_TYPE_VALUE_FP16) {
-            return make_instance<TransformQuantizer<FP16Quantizer<metric>, metric>, IOTemp>(
-                param, common_param);
-        }
-        if (bottom_quantization_string == QUANTIZATION_TYPE_VALUE_PQ) {
-            return make_instance<TransformQuantizer<ProductQuantizer<metric>, metric>, IOTemp>(
-                param, common_param);
-        }
-        if (bottom_quantization_string == QUANTIZATION_TYPE_VALUE_PQFS) {
-            return make_instance<TransformQuantizer<PQFastScanQuantizer<metric>, metric>, IOTemp>(
-                param, common_param);
-        }
-        if (bottom_quantization_string == QUANTIZATION_TYPE_VALUE_RABITQ) {
-            return make_instance<TransformQuantizer<RaBitQuantizer<metric>, metric>, IOTemp>(
-                param, common_param);
-        }
+
+        FOR_EACH_DENSE_QUANTIZER(GENERATE_TQ_CASE)
     }
 
-    if (quantization_string == QUANTIZATION_TYPE_VALUE_SQ8) {
-        return make_instance<SQ8Quantizer<metric>, IOTemp>(param, common_param);
+    if (quantization_string == QUANTIZATION_TYPE_VALUE_RQ) {
+        auto rq_param =
+            std::dynamic_pointer_cast<ResidualQuantizerParameter>(param->quantizer_parameter);
+        auto rq_bottom_quantization_string = rq_param->GetBottomQuantizationName();
+        FOR_EACH_DENSE_QUANTIZER(GENERATE_RQ_CASE)
     }
-    if (quantization_string == QUANTIZATION_TYPE_VALUE_FP32) {
-        return make_instance<FP32Quantizer<metric>, IOTemp>(param, common_param);
-    }
-    if (quantization_string == QUANTIZATION_TYPE_VALUE_SQ4) {
-        return make_instance<SQ4Quantizer<metric>, IOTemp>(param, common_param);
-    }
-    if (quantization_string == QUANTIZATION_TYPE_VALUE_SQ4_UNIFORM) {
-        return make_instance<SQ4UniformQuantizer<metric>, IOTemp>(param, common_param);
-    }
-    if (quantization_string == QUANTIZATION_TYPE_VALUE_SQ8_UNIFORM) {
-        return make_instance<SQ8UniformQuantizer<metric>, IOTemp>(param, common_param);
-    }
-    if (quantization_string == QUANTIZATION_TYPE_VALUE_BF16) {
-        return make_instance<BF16Quantizer<metric>, IOTemp>(param, common_param);
-    }
-    if (quantization_string == QUANTIZATION_TYPE_VALUE_FP16) {
-        return make_instance<FP16Quantizer<metric>, IOTemp>(param, common_param);
-    }
-    if (quantization_string == QUANTIZATION_TYPE_VALUE_PQ) {
-        return make_instance<ProductQuantizer<metric>, IOTemp>(param, common_param);
-    }
-    if (quantization_string == QUANTIZATION_TYPE_VALUE_PQFS) {
-        return make_instance<PQFastScanQuantizer<metric>, IOTemp>(param, common_param);
-    }
-    if (quantization_string == QUANTIZATION_TYPE_VALUE_RABITQ) {
-        return make_instance<RaBitQuantizer<metric>, IOTemp>(param, common_param);
-    }
-    if (quantization_string == QUANTIZATION_TYPE_VALUE_SPARSE) {
-        return make_instance<SparseQuantizer<metric>, IOTemp>(param, common_param);
-    }
+
+    FOR_EACH_ALL_QUANTIZER(GENERATE_QUANTIZER_CASE)
 
     return nullptr;
 }

@@ -131,4 +131,55 @@ public:
     Computer<QuantImpl>* inner_computer_{nullptr};
 };
 
+template <typename QuantImpl, MetricType metric>
+class ResidualQuantizer;
+
+template <typename QuantImpl, MetricType metric>
+class Computer<ResidualQuantizer<QuantImpl, metric>> : public ComputerInterface {
+public:
+    explicit Computer(const ResidualQuantizer<QuantImpl, metric>* quantizer, Allocator* allocator)
+        : quantizer_(quantizer), allocator_(allocator) {
+        inner_computer_ = new Computer<QuantImpl>(quantizer_->quantizer_.get(), allocator);
+    }
+
+    ~Computer() override {
+        quantizer_->ReleaseComputer(*this);
+        delete inner_computer_;
+    }
+
+    void
+    SetQuery(const DataType* query) {
+        quantizer_->ProcessQuery(query, *this);
+    }
+
+    inline void
+    ComputeDist(const uint8_t* codes, float* dists) {
+        quantizer_->ComputeDist(*this, codes, dists);
+    }
+
+    inline void
+    ScanBatchDists(uint64_t count, const uint8_t* codes, float* dists) {
+        quantizer_->ScanBatchDists(*this, count, codes, dists);
+    }
+
+    inline void
+    ComputeDistsBatch4(const uint8_t* codes1,
+                       const uint8_t* codes2,
+                       const uint8_t* codes3,
+                       const uint8_t* codes4,
+                       float& dists1,
+                       float& dists2,
+                       float& dists3,
+                       float& dists4) {
+        quantizer_->ComputeDistsBatch4(
+            *this, codes1, codes2, codes3, codes4, dists1, dists2, dists3, dists4);
+    }
+
+public:
+    Allocator* const allocator_{nullptr};
+    const ResidualQuantizer<QuantImpl, metric>* quantizer_{nullptr};
+    uint8_t* buf_{nullptr};
+    Computer<QuantImpl>* inner_computer_{nullptr};
+};
+
 }  // namespace vsag
