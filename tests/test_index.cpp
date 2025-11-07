@@ -1684,10 +1684,10 @@ TestIndex::TestGetExtraInfoById(const TestIndex::IndexPtr& index,
     auto result = index->GetExtraInfoByIds(ids.data(), count, extra_infos.data());
     REQUIRE(result.has_value());
     for (int64_t i = 0; i < count; ++i) {
-        REQUIRE(
-            memcmp(extra_infos.data() + i * extra_info_size,
-                   dataset->base_->GetExtraInfos() + (ids[i] - dataset->ID_BIAS) * extra_info_size,
-                   extra_info_size) == 0);
+        REQUIRE(memcmp(extra_infos.data() + i * extra_info_size,
+                       dataset->base_->GetExtraInfos() +
+                           (ids[i] >> dataset->id_shift) * extra_info_size,
+                       extra_info_size) == 0);
     }
 }
 
@@ -1911,9 +1911,10 @@ TestIndex::TestRemoveIndex(const TestIndex::IndexPtr& index,
     auto base_dim = dataset->base_->GetDim();
     for (int64_t i = 0; i < base_num; ++i) {
         auto new_data = vsag::Dataset::Make();
+        int64_t id = base_num + i;
         new_data->NumElements(1)
             ->Dim(base_dim)
-            ->Ids(&i)
+            ->Ids(&id)
             ->Float32Vectors(dataset->base_->GetFloat32Vectors() + i * base_dim)
             ->Owner(false);
         auto add_results = index->Add(new_data);
@@ -1928,10 +1929,10 @@ TestIndex::TestRemoveIndex(const TestIndex::IndexPtr& index,
             ->Owner(false);
         auto add_results = index->Add(new_data);
         REQUIRE(add_results.has_value());
-        auto remove_results = index->Remove(i);
+        auto remove_results = index->Remove(i + base_num);
         REQUIRE(index->GetNumberRemoved() == i + 1);
         REQUIRE(remove_results.has_value());
-        remove_results = index->Remove(i);
+        remove_results = index->Remove(i + base_num);
         REQUIRE_FALSE(remove_results.has_value());
         REQUIRE(index->GetNumElements() == dataset->base_->GetNumElements());
     }
