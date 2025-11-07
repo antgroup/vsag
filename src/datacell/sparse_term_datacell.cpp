@@ -139,11 +139,33 @@ SparseTermDataCell::InsertHeap(float* dists,
 void
 SparseTermDataCell::DocPrune(Vector<std::pair<uint32_t, float>>& sorted_base) const {
     // use this function when inserting
-    if (sorted_base.size() <= 1) {
+    if (sorted_base.size() <= 1 || doc_retain_ratio_ == 1) {
         return;
     }
     auto pruned_doc_len =
-        static_cast<uint32_t>(static_cast<float>(sorted_base.size()) * doc_prune_ratio_);
+        static_cast<uint32_t>(static_cast<float>(sorted_base.size()) * doc_retain_ratio_);
+    sorted_base.resize(pruned_doc_len);
+}
+
+void
+SparseTermDataCell::DocPruneMass(Vector<std::pair<uint32_t, float>>& sorted_base) const {
+    // use this function when inserting
+    if (sorted_base.size() <= 1 || doc_retain_ratio_ == 1) {
+        return;
+    }
+    float total_mass = 0.0f;
+    for (auto i = 0; i < sorted_base.size(); ++i) {
+        total_mass += sorted_base[i].second;
+    }
+
+    float part_mass = total_mass * doc_retain_ratio_;
+    float temp_mass = 0.0f;
+    int pruned_doc_len = 0;
+
+    while(temp_mass < part_mass) {
+        temp_mass += sorted_base[pruned_doc_len++].second;
+    }
+
     sorted_base.resize(pruned_doc_len);
 }
 
@@ -167,7 +189,7 @@ SparseTermDataCell::InsertVector(const SparseVector& sparse_base, uint32_t base_
     sort_sparse_vector(sparse_base, sorted_base);
 
     // doc prune
-    DocPrune(sorted_base);
+    DocPruneMass(sorted_base);
 
     // insert vector
     for (auto& item : sorted_base) {

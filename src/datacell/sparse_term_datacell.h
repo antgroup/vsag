@@ -29,8 +29,8 @@ class SparseTermDataCell {
 public:
     SparseTermDataCell() = default;
 
-    SparseTermDataCell(float doc_prune_ratio, uint32_t term_id_limit, Allocator* allocator)
-        : doc_prune_ratio_(doc_prune_ratio),
+    SparseTermDataCell(float doc_retain_ratio, uint32_t term_id_limit, Allocator* allocator)
+        : doc_retain_ratio_(doc_retain_ratio),
           term_id_limit_(term_id_limit),
           allocator_(allocator),
           term_ids_(0, Vector<uint32_t>(allocator), allocator),
@@ -54,6 +54,9 @@ public:
     DocPrune(Vector<std::pair<uint32_t, float>>& sorted_base) const;
 
     void
+    DocPruneMass(Vector<std::pair<uint32_t, float>>& sorted_base) const;
+
+    void
     InsertVector(const SparseVector& sparse_base, uint32_t base_id);
 
     void
@@ -71,7 +74,7 @@ public:
 public:
     uint32_t term_id_limit_{0};
 
-    float doc_prune_ratio_{0};
+    float doc_retain_ratio_{0};
 
     uint32_t term_capacity_{0};
 
