@@ -23,7 +23,8 @@ namespace vsag {
 DEFINE_POINTER2(GraphDataCellParam, GraphDataCellParameter);
 class GraphDataCellParameter : public GraphInterfaceParameter {
 public:
-    GraphDataCellParameter() : GraphInterfaceParameter(GraphStorageTypes::GRAPH_STORAGE_TYPE_FLAT) {
+    GraphDataCellParameter()
+        : GraphInterfaceParameter(GraphStorageTypes::GRAPH_STORAGE_TYPE_VALUE_FLAT) {
     }
 
     void

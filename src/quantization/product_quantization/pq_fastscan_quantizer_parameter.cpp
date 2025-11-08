@@ -26,17 +26,17 @@ PQFastScanQuantizerParameter::PQFastScanQuantizerParameter()
 
 void
 PQFastScanQuantizerParameter::FromJson(const JsonType& json) {
-    if (json.Contains(PRODUCT_QUANTIZATION_DIM) &&
-        json[PRODUCT_QUANTIZATION_DIM].IsNumberInteger()) {
-        this->pq_dim_ = json[PRODUCT_QUANTIZATION_DIM].GetInt();
+    if (json.Contains(PRODUCT_QUANTIZATION_DIM_KEY) &&
+        json[PRODUCT_QUANTIZATION_DIM_KEY].IsNumberInteger()) {
+        this->pq_dim_ = json[PRODUCT_QUANTIZATION_DIM_KEY].GetInt();
     }
 }
 
 JsonType
 PQFastScanQuantizerParameter::ToJson() const {
     JsonType json;
-    json[QUANTIZATION_TYPE_KEY].SetString(QUANTIZATION_TYPE_VALUE_PQFS);
-    json[PRODUCT_QUANTIZATION_DIM].SetInt(this->pq_dim_);
+    json[TYPE_KEY].SetString(QUANTIZATION_TYPE_VALUE_PQFS);
+    json[PRODUCT_QUANTIZATION_DIM_KEY].SetInt(this->pq_dim_);
     return json;
 }
 

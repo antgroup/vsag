@@ -32,7 +32,7 @@ FP32QuantizerParameter::FromJson(const JsonType& json) {
 JsonType
 FP32QuantizerParameter::ToJson() const {
     JsonType json;
-    json[QUANTIZATION_TYPE_KEY].SetString(QUANTIZATION_TYPE_VALUE_FP32);
+    json[TYPE_KEY].SetString(QUANTIZATION_TYPE_VALUE_FP32);
     return json;
 }
 }  // namespace vsag

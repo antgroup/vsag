@@ -346,7 +346,7 @@ private:
     InnerIdType entry_point_id_{std::numeric_limits<InnerIdType>::max()};
 
     ODescentParameterPtr odescent_param_{nullptr};
-    std::string graph_type_{GRAPH_TYPE_NSW};
+    std::string graph_type_{GRAPH_TYPE_VALUE_NSW};
 
     uint64_t ef_construct_{400};
     float alpha_{1.0};

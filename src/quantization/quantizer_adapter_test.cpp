@@ -72,7 +72,7 @@ CreateQuantizerParam(const QuantizerType& quantization_type, uint64_t dim) {
     switch (quantization_type) {
         case QuantizerType::QUANTIZER_TYPE_PQ: {
             JsonType params;
-            params[PRODUCT_QUANTIZATION_DIM].SetInt(dim);
+            params[PRODUCT_QUANTIZATION_DIM_KEY].SetInt(dim);
             auto pq_param = std::make_shared<ProductQuantizerParameter>();
             pq_param->FromJson(params);
             return pq_param;

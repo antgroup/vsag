@@ -76,7 +76,7 @@ TEST_CASE("TQ Parameter ToJson Test", "[ut][TransformQuantizerParameter]") {
     )";
     auto param = std::make_shared<TransformQuantizerParameter>();
     param->FromJson(JsonType::Parse(param_str));
-    REQUIRE(param->base_quantizer_json_[QUANTIZATION_TYPE_KEY].GetString() == "rabitq");
+    REQUIRE(param->base_quantizer_json_[TYPE_KEY].GetString() == "rabitq");
     REQUIRE(param->tq_chain_.size() == 2);
     ParameterTest::TestToJson(param);
 }

@@ -95,7 +95,7 @@ TEST_CASE("ODescent Build Test", "[ut][ODescent]") {
 
     // prepare graph param
     auto graph_type = partial_data ? vsag::GraphStorageTypes::GRAPH_STORAGE_TYPE_SPARSE
-                                   : vsag::GraphStorageTypes::GRAPH_STORAGE_TYPE_FLAT;
+                                   : vsag::GraphStorageTypes::GRAPH_STORAGE_TYPE_VALUE_FLAT;
     vsag::GraphInterfaceParamPtr graph_param_ptr =
         vsag::GraphInterfaceParameter::GetGraphParameterByJson(graph_type, graph_param_json);
     // build graph

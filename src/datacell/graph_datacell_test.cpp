@@ -63,7 +63,7 @@ TEST_CASE("GraphDataCell Basic Test", "[ut][GraphDataCell]") {
         fmt::format(graph_param_temp, io_type, max_degree, max_capacity, is_support_delete);
     auto param_json = JsonType::Parse(param_str);
     auto graph_param = GraphInterfaceParameter::GetGraphParameterByJson(
-        GraphStorageTypes::GRAPH_STORAGE_TYPE_FLAT, param_json);
+        GraphStorageTypes::GRAPH_STORAGE_TYPE_VALUE_FLAT, param_json);
     TestGraphDataCell(graph_param, common_param, is_support_delete);
 }
 
@@ -92,7 +92,7 @@ TEST_CASE("GraphDataCell Remove Test", "[ut][GraphDataCell]") {
     auto param_str = fmt::format(graph_param_temp, io_type, max_degree, remove_flag_bit);
     auto param_json = JsonType::Parse(param_str);
     auto graph_param = GraphInterfaceParameter::GetGraphParameterByJson(
-        GraphStorageTypes::GRAPH_STORAGE_TYPE_FLAT, param_json);
+        GraphStorageTypes::GRAPH_STORAGE_TYPE_VALUE_FLAT, param_json);
     TestGraphDataCell(graph_param, common_param, is_support_delete);
 }
 
@@ -122,7 +122,7 @@ TEST_CASE("GraphDataCell Merge", "[ut][GraphDataCell]") {
         fmt::format(graph_param_temp, io_type, max_degree, max_capacity, is_support_delete);
     auto param_json = JsonType::Parse(param_str);
     auto graph_param = GraphInterfaceParameter::GetGraphParameterByJson(
-        GraphStorageTypes::GRAPH_STORAGE_TYPE_FLAT, param_json);
+        GraphStorageTypes::GRAPH_STORAGE_TYPE_VALUE_FLAT, param_json);
 
     auto graph = GraphInterface::MakeInstance(graph_param, common_param);
     GraphInterfaceTest test(graph);

@@ -51,7 +51,7 @@ struct SINDIDefaultParam {
 std::string
 generate_sindi_param(const SINDIDefaultParam& param) {
     vsag::JsonType json;
-    json[SPARSE_USE_REORDER].SetBool(param.use_reorder);
+    json[USE_REORDER_KEY].SetBool(param.use_reorder);
     json[SPARSE_DOC_PRUNE_RATIO].SetFloat(param.doc_prune_ratio);
     json[SPARSE_WINDOW_SIZE].SetInt(param.window_size);
     json[SPARSE_TERM_ID_LIMIT].SetInt(param.term_id_limit);

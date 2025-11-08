@@ -44,7 +44,7 @@ public:
 
     std::string
     GetBottomQuantizationName() const {
-        return base_quantizer_json_[QUANTIZATION_TYPE_KEY].GetString();
+        return base_quantizer_json_[TYPE_KEY].GetString();
     }
 
 public:

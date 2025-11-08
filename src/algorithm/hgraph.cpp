@@ -113,7 +113,7 @@ HGraph::Build(const DatasetPtr& data) {
     CHECK_ARGUMENT(GetNumElements() == 0, "index is not empty");
     this->Train(data);
     std::vector<int64_t> ret;
-    if (graph_type_ == GRAPH_TYPE_NSW) {
+    if (graph_type_ == GRAPH_TYPE_VALUE_NSW) {
         ret = this->Add(data);
     } else {
         ret = this->build_by_odescent(data);
@@ -1215,69 +1215,69 @@ static const std::string HGRAPH_PARAMS_TEMPLATE =
         "{HGRAPH_USE_ATTRIBUTE_FILTER_KEY}": false,
         "{HGRAPH_GRAPH_KEY}": {
             "{IO_PARAMS_KEY}": {
-                "{IO_TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
-                "{IO_FILE_PATH}": "{DEFAULT_FILE_PATH_VALUE}"
+                "{TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
+                "{IO_FILE_PATH_KEY}": "{DEFAULT_FILE_PATH_VALUE}"
             },
-            "{GRAPH_TYPE_KEY}": "{GRAPH_TYPE_NSW}",
-            "{GRAPH_STORAGE_TYPE_KEY}": "{GRAPH_STORAGE_TYPE_FLAT}",
+            "{GRAPH_TYPE_KEY}": "{GRAPH_TYPE_VALUE_NSW}",
+            "{GRAPH_STORAGE_TYPE_KEY}": "{GRAPH_STORAGE_TYPE_VALUE_FLAT}",
             "{ODESCENT_PARAMETER_BUILD_BLOCK_SIZE}": 10000,
             "{ODESCENT_PARAMETER_MIN_IN_DEGREE}": 1,
             "{ODESCENT_PARAMETER_ALPHA}": 1.2,
             "{ODESCENT_PARAMETER_GRAPH_ITER_TURN}": 30,
             "{ODESCENT_PARAMETER_NEIGHBOR_SAMPLE_RATE}": 0.2,
-            "{GRAPH_PARAM_MAX_DEGREE}": 64,
-            "{GRAPH_PARAM_INIT_MAX_CAPACITY}": 100,
+            "{GRAPH_PARAM_MAX_DEGREE_KEY}": 64,
+            "{GRAPH_PARAM_INIT_MAX_CAPACITY_KEY}": 100,
             "{GRAPH_SUPPORT_REMOVE}": false,
             "{REMOVE_FLAG_BIT}": 8
         },
-        "{HGRAPH_BASE_CODES_KEY}": {
+        "{BASE_CODES_KEY}": {
             "{IO_PARAMS_KEY}": {
-                "{IO_TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
-                "{IO_FILE_PATH}": "{DEFAULT_FILE_PATH_VALUE}"
+                "{TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
+                "{IO_FILE_PATH_KEY}": "{DEFAULT_FILE_PATH_VALUE}"
             },
             "{CODES_TYPE_KEY}": "flatten",
             "{QUANTIZATION_PARAMS_KEY}": {
-                "{QUANTIZATION_TYPE_KEY}": "{QUANTIZATION_TYPE_VALUE_FP32}",
-                "{SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE}": 0.05,
-                "{PCA_DIM}": 0,
-                "{RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY}": 32,
-                "{TQ_CHAIN}": "",
+                "{TYPE_KEY}": "{QUANTIZATION_TYPE_VALUE_FP32}",
+                "{SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE_KEY}": 0.05,
+                "{PCA_DIM_KEY}": 0,
+                "{RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY_KEY}": 32,
+                "{TQ_CHAIN_KEY}": "",
                 "nbits": 8,
-                "{PRODUCT_QUANTIZATION_DIM}": 1,
+                "{PRODUCT_QUANTIZATION_DIM_KEY}": 1,
                 "{HOLD_MOLDS}": false
             }
         },
         "{PRECISE_CODES_KEY}": {
             "{IO_PARAMS_KEY}": {
-                "{IO_TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
-                "{IO_FILE_PATH}": "{DEFAULT_FILE_PATH_VALUE}"
+                "{TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
+                "{IO_FILE_PATH_KEY}": "{DEFAULT_FILE_PATH_VALUE}"
             },
             "{CODES_TYPE_KEY}": "flatten",
             "{QUANTIZATION_PARAMS_KEY}": {
-                "{QUANTIZATION_TYPE_KEY}": "{QUANTIZATION_TYPE_VALUE_FP32}",
-                "{SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE}": 0.05,
-                "{PCA_DIM}": 0,
-                "{PRODUCT_QUANTIZATION_DIM}": 1,
+                "{TYPE_KEY}": "{QUANTIZATION_TYPE_VALUE_FP32}",
+                "{SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE_KEY}": 0.05,
+                "{PCA_DIM_KEY}": 0,
+                "{PRODUCT_QUANTIZATION_DIM_KEY}": 1,
                 "{HOLD_MOLDS}": false
             }
         },
         "{STORE_RAW_VECTOR_KEY}": false,
         "{RAW_VECTOR_KEY}": {
             "{IO_PARAMS_KEY}": {
-                "{IO_TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
-                "{IO_FILE_PATH}": "{DEFAULT_FILE_PATH_VALUE}"
+                "{TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
+                "{IO_FILE_PATH_KEY}": "{DEFAULT_FILE_PATH_VALUE}"
             },
             "{CODES_TYPE_KEY}": "flatten",
             "{QUANTIZATION_PARAMS_KEY}": {
-                "{QUANTIZATION_TYPE_KEY}": "{QUANTIZATION_TYPE_VALUE_FP32}",
+                "{TYPE_KEY}": "{QUANTIZATION_TYPE_VALUE_FP32}",
                 "{HOLD_MOLDS}": true
             }
         },
         "{BUILD_THREAD_COUNT_KEY}": 100,
         "{EXTRA_INFO_KEY}": {
             "{IO_PARAMS_KEY}": {
-                "{IO_TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
-                "{IO_FILE_PATH}": "{DEFAULT_FILE_PATH_VALUE}"
+                "{TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
+                "{IO_FILE_PATH_KEY}": "{DEFAULT_FILE_PATH_VALUE}"
             }
         },
         "{ATTR_PARAMS_KEY}": {
@@ -1324,15 +1324,15 @@ HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
                                             {
                                                 HGRAPH_BASE_QUANTIZATION_TYPE,
                                                 {
-                                                    HGRAPH_BASE_CODES_KEY,
+                                                    BASE_CODES_KEY,
                                                     QUANTIZATION_PARAMS_KEY,
-                                                    QUANTIZATION_TYPE_KEY,
+                                                    TYPE_KEY,
                                                 },
                                             },
                                             {
                                                 STORE_RAW_VECTOR,
                                                 {
-                                                    HGRAPH_BASE_CODES_KEY,
+                                                    BASE_CODES_KEY,
                                                     QUANTIZATION_PARAMS_KEY,
                                                     HOLD_MOLDS,
                                                 },
@@ -1340,9 +1340,9 @@ HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
                                             {
                                                 HGRAPH_BASE_IO_TYPE,
                                                 {
-                                                    HGRAPH_BASE_CODES_KEY,
+                                                    BASE_CODES_KEY,
                                                     IO_PARAMS_KEY,
-                                                    IO_TYPE_KEY,
+                                                    TYPE_KEY,
                                                 },
                                             },
                                             {
@@ -1350,15 +1350,15 @@ HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
                                                 {
                                                     PRECISE_CODES_KEY,
                                                     IO_PARAMS_KEY,
-                                                    IO_TYPE_KEY,
+                                                    TYPE_KEY,
                                                 },
                                             },
                                             {
                                                 HGRAPH_BASE_FILE_PATH,
                                                 {
-                                                    HGRAPH_BASE_CODES_KEY,
+                                                    BASE_CODES_KEY,
                                                     IO_PARAMS_KEY,
-                                                    IO_FILE_PATH,
+                                                    IO_FILE_PATH_KEY,
                                                 },
                                             },
                                             {
@@ -1366,7 +1366,7 @@ HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
                                                 {
                                                     PRECISE_CODES_KEY,
                                                     IO_PARAMS_KEY,
-                                                    IO_FILE_PATH,
+                                                    IO_FILE_PATH_KEY,
                                                 },
                                             },
                                             {
@@ -1374,7 +1374,7 @@ HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
                                                 {
                                                     PRECISE_CODES_KEY,
                                                     QUANTIZATION_PARAMS_KEY,
-                                                    QUANTIZATION_TYPE_KEY,
+                                                    TYPE_KEY,
                                                 },
                                             },
                                             {
@@ -1382,7 +1382,7 @@ HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
                                                 {
                                                     HGRAPH_GRAPH_KEY,
                                                     IO_PARAMS_KEY,
-                                                    IO_TYPE_KEY,
+                                                    TYPE_KEY,
                                                 },
                                             },
                                             {
@@ -1390,7 +1390,7 @@ HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
                                                 {
                                                     HGRAPH_GRAPH_KEY,
                                                     IO_PARAMS_KEY,
-                                                    IO_FILE_PATH,
+                                                    IO_FILE_PATH_KEY,
                                                 },
                                             },
                                             {
@@ -1412,7 +1412,7 @@ HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
                                                 {
                                                     RAW_VECTOR_KEY,
                                                     IO_PARAMS_KEY,
-                                                    IO_TYPE_KEY,
+                                                    TYPE_KEY,
                                                 },
                                             },
                                             {
@@ -1420,14 +1420,14 @@ HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
                                                 {
                                                     RAW_VECTOR_KEY,
                                                     IO_PARAMS_KEY,
-                                                    IO_FILE_PATH,
+                                                    IO_FILE_PATH_KEY,
                                                 },
                                             },
                                             {
                                                 HGRAPH_GRAPH_MAX_DEGREE,
                                                 {
                                                     HGRAPH_GRAPH_KEY,
-                                                    GRAPH_PARAM_MAX_DEGREE,
+                                                    GRAPH_PARAM_MAX_DEGREE_KEY,
                                                 },
                                             },
                                             {
@@ -1446,7 +1446,7 @@ HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
                                                 HGRAPH_INIT_CAPACITY,
                                                 {
                                                     HGRAPH_GRAPH_KEY,
-                                                    GRAPH_PARAM_INIT_MAX_CAPACITY,
+                                                    GRAPH_PARAM_INIT_MAX_CAPACITY_KEY,
                                                 },
                                             },
                                             {
@@ -1507,49 +1507,49 @@ HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
                                             {
                                                 SQ4_UNIFORM_TRUNC_RATE,
                                                 {
-                                                    HGRAPH_BASE_CODES_KEY,
+                                                    BASE_CODES_KEY,
                                                     QUANTIZATION_PARAMS_KEY,
-                                                    SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE,
+                                                    SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE_KEY,
                                                 },
                                             },
                                             {
                                                 RABITQ_PCA_DIM,
                                                 {
-                                                    HGRAPH_BASE_CODES_KEY,
+                                                    BASE_CODES_KEY,
                                                     QUANTIZATION_PARAMS_KEY,
-                                                    PCA_DIM,
+                                                    PCA_DIM_KEY,
                                                 },
                                             },
                                             {
                                                 INDEX_TQ_CHAIN,
                                                 {
-                                                    HGRAPH_BASE_CODES_KEY,
+                                                    BASE_CODES_KEY,
                                                     QUANTIZATION_PARAMS_KEY,
-                                                    TQ_CHAIN,
+                                                    TQ_CHAIN_KEY,
                                                 },
                                             },
                                             {
                                                 RABITQ_BITS_PER_DIM_QUERY,
                                                 {
-                                                    HGRAPH_BASE_CODES_KEY,
+                                                    BASE_CODES_KEY,
                                                     QUANTIZATION_PARAMS_KEY,
-                                                    RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY,
+                                                    RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY_KEY,
                                                 },
                                             },
                                             {
                                                 HGRAPH_BASE_PQ_DIM,
                                                 {
-                                                    HGRAPH_BASE_CODES_KEY,
+                                                    BASE_CODES_KEY,
                                                     QUANTIZATION_PARAMS_KEY,
-                                                    PRODUCT_QUANTIZATION_DIM,
+                                                    PRODUCT_QUANTIZATION_DIM_KEY,
                                                 },
                                             },
                                             {
                                                 RABITQ_USE_FHT,
                                                 {
-                                                    HGRAPH_BASE_CODES_KEY,
+                                                    BASE_CODES_KEY,
                                                     QUANTIZATION_PARAMS_KEY,
-                                                    USE_FHT,
+                                                    USE_FHT_KEY,
                                                 },
                                             },
                                             {
@@ -1577,7 +1577,7 @@ HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
     auto inner_json = JsonType::Parse(str);
     mapping_external_param_to_inner(external_param, external_mapping, inner_json);
     if (common_param.data_type_ == DataTypes::DATA_TYPE_SPARSE) {
-        inner_json[HGRAPH_BASE_CODES_KEY][CODES_TYPE_KEY].SetString(SPARSE_CODES);
+        inner_json[BASE_CODES_KEY][CODES_TYPE_KEY].SetString(SPARSE_CODES);
         inner_json[PRECISE_CODES_KEY][CODES_TYPE_KEY].SetString(SPARSE_CODES);
         inner_json[RAW_VECTOR_KEY][CODES_TYPE_KEY].SetString(SPARSE_CODES);
     }

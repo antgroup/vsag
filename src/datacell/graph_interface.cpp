@@ -28,9 +28,9 @@ GraphInterface::MakeInstance(const GraphInterfaceParamPtr& graph_param,
     switch (graph_param->graph_storage_type_) {
         case GraphStorageTypes::GRAPH_STORAGE_TYPE_SPARSE:
             return std::make_shared<SparseGraphDataCell>(graph_param, common_param);
-        case GraphStorageTypes::GRAPH_STORAGE_TYPE_COMPRESSED:
+        case GraphStorageTypes::GRAPH_STORAGE_TYPE_VALUE_COMPRESSED:
             return std::make_shared<CompressedGraphDataCell>(graph_param, common_param);
-        case GraphStorageTypes::GRAPH_STORAGE_TYPE_FLAT:
+        case GraphStorageTypes::GRAPH_STORAGE_TYPE_VALUE_FLAT:
             auto io_string = std::dynamic_pointer_cast<GraphDataCellParameter>(graph_param)
                                  ->io_parameter_->GetTypeName();
             if (io_string == IO_TYPE_VALUE_BLOCK_MEMORY_IO) {
