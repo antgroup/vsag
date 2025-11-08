@@ -76,13 +76,13 @@ GNOIMIPartition::GNOIMIPartition(const IndexCommonParam& common_param,
     precomputed_terms_st_.resize(static_cast<long>(bucket_count_s_) * bucket_count_t_);
 
     param_ptr_ = std::make_shared<BruteForceParameter>();
-    param_ptr_->flatten_param = std::make_shared<FlattenDataCellParameter>();
+    param_ptr_->base_codes_param = std::make_shared<FlattenDataCellParameter>();
     JsonType memory_json;
     memory_json["type"].SetString(IO_TYPE_VALUE_BLOCK_MEMORY_IO);
-    param_ptr_->flatten_param->io_parameter = IOParameter::GetIOParameterByJson(memory_json);
+    param_ptr_->base_codes_param->io_parameter = IOParameter::GetIOParameterByJson(memory_json);
     JsonType quantizer_json;
     quantizer_json["type"].SetString(QUANTIZATION_TYPE_VALUE_FP32);
-    param_ptr_->flatten_param->quantizer_parameter =
+    param_ptr_->base_codes_param->quantizer_parameter =
         QuantizerParameter::GetQuantizerParameterByJson(quantizer_json);
 }
 

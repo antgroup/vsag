@@ -139,7 +139,6 @@ const char* const INDEX_TQ_CHAIN = "tq_chain";
 
 const char* const HGRAPH_SUPPORT_REMOVE = "support_remove";
 const char* const HGRAPH_REMOVE_FLAG_BIT = "remove_flag_bit";
-
 const char* const HGRAPH_USE_REORDER = USE_REORDER_KEY;
 const char* const HGRAPH_USE_ELP_OPTIMIZER = HGRAPH_USE_ELP_OPTIMIZER_KEY;
 const char* const HGRAPH_IGNORE_REORDER = "ignore_reorder";
@@ -169,9 +168,15 @@ const char* const STORE_RAW_VECTOR = "store_raw_vector";
 const char* const RAW_VECTOR_IO_TYPE = "raw_vector_io_type";
 const char* const RAW_VECTOR_FILE_PATH = "raw_vector_file_path";
 
-const char* const BRUTE_FORCE_QUANTIZATION_TYPE = "quantization_type";
-const char* const BRUTE_FORCE_IO_TYPE = "io_type";
+const char* const BRUTE_FORCE_BASE_QUANTIZATION_TYPE = "base_quantization_type";
+const char* const BRUTE_FORCE_BASE_IO_TYPE = "base_io_type";
+const char* const BRUTE_FORCE_BASE_PQ_DIM = "base_pq_dim";
+const char* const BRUTE_FORCE_BASE_FILE_PATH = "base_file_path";
+const char* const BRUTE_FORCE_PRECISE_QUANTIZATION_TYPE = "precise_quantization_type";
+const char* const BRUTE_FORCE_PRECISE_IO_TYPE = "precise_io_type";
+const char* const BRUTE_FORCE_PRECISE_FILE_PATH = "precise_file_path";
 const char* const BRUTE_FORCE_THREAD_COUNT = "thread_count";
+const char* const BRUTE_FORCE_USE_RESIDUAL = "use_residual";
 
 const char* const IVF_USE_RESIDUAL = "use_residual";
 const char* const IVF_USE_REORDER = "use_reorder";

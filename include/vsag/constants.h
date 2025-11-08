@@ -181,9 +181,15 @@ extern const char* const STORE_RAW_VECTOR;
 extern const char* const RAW_VECTOR_IO_TYPE;
 extern const char* const RAW_VECTOR_FILE_PATH;
 
-extern const char* const BRUTE_FORCE_QUANTIZATION_TYPE;
-extern const char* const BRUTE_FORCE_IO_TYPE;
+extern const char* const BRUTE_FORCE_BASE_QUANTIZATION_TYPE;
+extern const char* const BRUTE_FORCE_BASE_IO_TYPE;
+extern const char* const BRUTE_FORCE_BASE_PQ_DIM;
+extern const char* const BRUTE_FORCE_BASE_FILE_PATH;
+extern const char* const BRUTE_FORCE_PRECISE_QUANTIZATION_TYPE;
+extern const char* const BRUTE_FORCE_PRECISE_IO_TYPE;
+extern const char* const BRUTE_FORCE_PRECISE_FILE_PATH;
 extern const char* const BRUTE_FORCE_THREAD_COUNT;
+extern const char* const BRUTE_FORCE_USE_RESIDUAL;
 
 extern const char* const IVF_USE_RESIDUAL;
 extern const char* const IVF_USE_REORDER;
