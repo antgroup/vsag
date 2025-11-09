@@ -15,19 +15,17 @@
 
 #pragma once
 
-#include <memory>
-
-#include "datacell/flatten_interface.h"
-#include "heap/distance_heap.h"
-
+#include <string>
 namespace vsag {
-class Reorder {
-public:
-    static DistHeapPtr
-    ReorderByFlatten(const DistHeapPtr& input,
-                     const FlattenInterfacePtr& flatten,
-                     const float* query,
-                     Allocator* allocator,
-                     int64_t topk);
+
+enum class IndexDetailDataType {
+    TYPE_2DArray_INT64,
+    TYPE_1DArray_INT64,
+};
+
+struct IndexDetailInfo {
+    std::string name;
+    std::string description;
+    IndexDetailDataType type;
 };
 }  // namespace vsag

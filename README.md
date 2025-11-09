@@ -70,8 +70,10 @@ Please read the [DEVELOPMENT](./DEVELOPMENT.md) guide for instructions on how to
 - [OceanBase](https://github.com/oceanbase/oceanbase)
 - [TuGraph](https://github.com/TuGraph-family/tugraph-db)
 - [GreptimeDB](https://github.com/GreptimeTeam/greptimedb)
+- [Hologres](https://www.aliyun.com/product/bigdata/hologram)
+- [PolarDB](https://www.aliyun.com/product/polardb/mysql)
 
-![vsag_users](./docs/vsag_users.svg)
+![vsag_users](./docs/vsag_users_20251106.svg)
 
 If your system uses VSAG, then feel free to make a pull request to add it to the list.
 

@@ -227,7 +227,6 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex,
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
     auto metric_type = GENERATE("l2", "ip", "cosine");
-    std::string base_quantization_str = GENERATE("sq8", "fp32");
     const std::string name = "hnsw";
     auto search_param = fmt::format(search_param_tmp, 100);
     for (auto& dim : dims) {
@@ -248,13 +247,50 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex,
     vsag::Options::Instance().set_block_size_limit(origin_size);
 }
 
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex, "HNSW Test non-standard IDs", "[ft][hnsw]") {
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    auto size = GENERATE(1024 * 1024 * 2);
+    auto metric_type = GENERATE("l2");
+
+    const std::string name = "hnsw";
+    auto search_param = fmt::format(search_param_tmp, 200);
+    auto id_shift = 48;
+    constexpr auto parameter_temp = R"(
+    {{
+        "dtype": "float32",
+        "metric_type": "{}",
+        "dim": {},
+        "hnsw": {{
+            "max_degree": 64,
+            "ef_construction": 200,
+            "use_static": {}
+        }}
+    }}
+    )";
+    for (auto& dim : dims) {
+        vsag::Options::Instance().set_block_size_limit(size);
+        auto param = fmt::format(parameter_temp, metric_type, dim, false);
+        auto index = TestFactory(name, param, true);
+        REQUIRE(index->GetIndexType() == vsag::IndexType::HNSW);
+        auto dataset = pool.GetDatasetAndCreate(dim, 10000, metric_type, false, 0.8, 0, id_shift);
+        TestContinueAdd(index, dataset, true);
+        TestKnnSearch(index, dataset, search_param, 0.99, true);
+        TestKnnSearchIter(index, dataset, search_param, 0.99, true);
+        TestConcurrentKnnSearch(index, dataset, search_param, 0.99, true);
+        TestRangeSearch(index, dataset, search_param, 0.99, 10, true);
+        TestRangeSearch(index, dataset, search_param, 0.49, 5, true);
+        TestFilterSearch(index, dataset, search_param, 0.99, true);
+        TestSearchAllocator(index, dataset, search_param, 0.99, true);
+    }
+    vsag::Options::Instance().set_block_size_limit(origin_size);
+}
+
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex,
                              "HNSW Continue Destruct V.S. All Test",
                              "[ft][hnsw]") {
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
     auto metric_type = GENERATE("l2");
-    std::string base_quantization_str = GENERATE("fp32");
     const std::string name = "hnsw";
     auto search_param = fmt::format(search_param_tmp, 100);
 

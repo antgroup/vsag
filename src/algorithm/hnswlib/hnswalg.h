@@ -114,7 +114,7 @@ private:
     DISTFUNC fstdistfunc_{nullptr};
     void* dist_func_param_{nullptr};
 
-    vsag::UnorderedMap<LabelType, InnerIdType> label_lookup_;
+    vsag::STLUnorderedMap<LabelType, InnerIdType> label_lookup_;
 
     std::default_random_engine level_generator_{2021};
     mutable std::default_random_engine update_probability_generator_;
@@ -130,7 +130,7 @@ private:
     bool allow_replace_deleted_{false};
 
     std::mutex deleted_elements_lock_{};  // lock for deleted_elements_
-    vsag::UnorderedMap<LabelType, InnerIdType>
+    vsag::STLUnorderedMap<LabelType, InnerIdType>
         deleted_elements_;  // contains labels and internal ids of deleted elements
 
     bool immutable_{false};
@@ -155,6 +155,12 @@ public:
     float
     getDistanceByLabel(LabelType label, const void* data_point) override;
 
+    float
+    getDistanceByInternalId(uint32_t internal_id, const void* data_point) override;
+
+    float
+    getSelfDistanceByInternalId(uint32_t internal_id) override;
+
     tl::expected<vsag::DatasetPtr, vsag::Error>
     getBatchDistanceByLabel(const int64_t* ids, const void* data_point, int64_t count) override;
     std::pair<int64_t, int64_t>
@@ -164,6 +170,12 @@ public:
 
     bool
     isTombLabel(LabelType label) override;
+
+    virtual uint32_t
+    getInternalId(LabelType label) override;
+
+    virtual void
+    getNeighborsInternalId(uint32_t internal_id, vsag::Vector<InnerIdType>& neighbor_ids) override;
 
     size_t
     getMaxDegree() {
@@ -252,7 +264,7 @@ public:
         return num_deleted_;
     }
 
-    vsag::UnorderedMap<LabelType, InnerIdType>
+    vsag::STLUnorderedMap<LabelType, InnerIdType>
     getDeletedElements() override {
         return deleted_elements_;
     }

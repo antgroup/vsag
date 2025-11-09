@@ -28,7 +28,6 @@
 #include "impl/heap/standard_heap.h"
 #include "impl/odescent/odescent_graph_builder.h"
 #include "impl/pruning_strategy.h"
-#include "impl/reorder.h"
 #include "index/index_impl.h"
 #include "index/iterator_filter.h"
 #include "io/reader_io_parameter.h"
@@ -75,6 +74,7 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
     if (use_reorder_) {
         block_size_per_vector =
             std::max(block_size_per_vector, this->high_precise_codes_->code_size_);
+        reorder_ = std::make_shared<FlattenReorder>(this->high_precise_codes_, allocator_);
     }
     if (this->extra_infos_ != nullptr) {
         block_size_per_vector =
@@ -1116,6 +1116,7 @@ HGraph::InitFeatures() {
         IndexFeature::SUPPORT_DESERIALIZE_READER_SET,
         IndexFeature::SUPPORT_SERIALIZE_BINARY_SET,
         IndexFeature::SUPPORT_SERIALIZE_FILE,
+        IndexFeature::SUPPORT_SERIALIZE_WRITE_FUNC,
     });
     // other
     this->index_feature_list_->SetFeatures({
@@ -1199,8 +1200,8 @@ HGraph::reorder(const void* query,
     if (k <= 0) {
         k = static_cast<int64_t>(size);
     }
-    auto reorder_heap = Reorder::ReorderByFlatten(
-        candidate_heap, flatten, static_cast<const float*>(query), allocator_, k);
+    auto reorder_heap =
+        reorder_->Reorder(candidate_heap, static_cast<const float*>(query), k, allocator_);
     candidate_heap = reorder_heap;
 }
 
@@ -2193,32 +2194,30 @@ HGraph::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) 
     get_vectors(data_type_, dim_, new_base, &new_base_vec, &data_size);
 
     if (not force_update) {
+        std::shared_lock label_lock(this->label_lookup_mutex_);
+
+        // 1. check whether vectors are same
         Vector<int8_t> base_data(data_size, allocator_);
-        auto base = Dataset::Make();
-
         GetVectorByInnerId(inner_id, (float*)base_data.data());
-        set_dataset(data_type_, dim_, base, base_data.data(), 1);
+        float old_self_dist = this->CalcDistanceById((float*)base_data.data(), id);
+        float self_dist = this->CalcDistanceById((float*)new_base_vec, id);
+        if (std::abs(old_self_dist - self_dist) < 1e-3) {
+            return true;
+        }
 
-        // search neighbors
-        auto neighbors = this->KnnSearch(
-            base,
-            UPDATE_CHECK_SEARCH_K,
-            fmt::format(R"({{"hgraph": {{ "ef_search": {} }} }})", UPDATE_CHECK_SEARCH_L),
-            nullptr);
-
-        // check whether the neighborhood relationship is same
-        float self_dist = 0;
-        self_dist = this->CalcDistanceById((float*)new_base_vec, id);
-        for (int i = 0; i < neighbors->GetDim(); i++) {
+        // 2. check whether the neighborhood relationship is same
+        Vector<InnerIdType> neighbors(allocator_);
+        this->bottom_graph_->GetNeighbors(inner_id, neighbors);
+        for (auto neighbor_inner_id : neighbors) {
             // don't compare with itself
-            if (neighbors->GetIds()[i] == id) {
+            if (neighbor_inner_id == inner_id) {
                 continue;
             }
 
             float neighbor_dist = 0;
             try {
-                neighbor_dist =
-                    this->CalcDistanceById((float*)new_base_vec, neighbors->GetIds()[i]);
+                neighbor_dist = this->CalcDistanceById(
+                    (float*)new_base_vec, this->label_table_->GetLabelById(neighbor_inner_id));
             } catch (const std::runtime_error& e) {
                 // incase that neighbor has been deleted
                 continue;

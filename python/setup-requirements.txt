@@ -1,2 +1,0 @@
-setuptools_scm
-pep440

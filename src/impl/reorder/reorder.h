@@ -15,11 +15,20 @@
 
 #pragma once
 
-#include "async_io.h"
-#include "basic_io.h"
-#include "buffer_io.h"
-#include "memory_block_io.h"
-#include "memory_io.h"
-#include "mmap_io.h"
-#include "noncontinuous_io.h"
-#include "reader_io.h"
+#include "impl/heap/distance_heap.h"
+#include "utils/pointer_define.h"
+
+namespace vsag {
+
+DEFINE_POINTER(ReorderInterface)
+
+class ReorderInterface {
+public:
+    virtual DistHeapPtr
+    Reorder(const DistHeapPtr& input,
+            const float* query,
+            int64_t topk,
+            Allocator* allocator = nullptr) = 0;
+};
+
+}  // namespace vsag

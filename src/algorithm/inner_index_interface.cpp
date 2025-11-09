@@ -144,6 +144,15 @@ InnerIndexInterface::Serialize() const {
 }
 
 void
+InnerIndexInterface::Serialize(const WriteFuncType& write_func) const {
+    std::string time_record_name = this->GetName() + " Serialize";
+    SlowTaskTimer t(time_record_name);
+
+    WriteFuncStreamWriter writer(write_func, 0);
+    this->Serialize(writer);
+}
+
+void
 InnerIndexInterface::Deserialize(const BinarySet& binary_set) {
     std::string time_record_name = this->GetName() + " Deserialize";
     SlowTaskTimer t(time_record_name);
@@ -461,6 +470,11 @@ InnerIndexInterface::GetDataByIdsWithFlag(const int64_t* ids,
     }
     this->allocator_->Deallocate(inner_ids);
     return dataset;
+}
+
+std::vector<IndexDetailInfo>
+InnerIndexInterface::GetIndexDetailInfos() const {
+    return {};
 }
 
 void

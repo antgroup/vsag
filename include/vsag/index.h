@@ -25,6 +25,7 @@
 #include "vsag/errors.h"
 #include "vsag/expected.hpp"
 #include "vsag/filter.h"
+#include "vsag/index_detail_info.h"
 #include "vsag/index_features.h"
 #include "vsag/iterator_context.h"
 #include "vsag/readerset.h"
@@ -50,6 +51,10 @@ enum class IndexType { HNSW, DISKANN, HGRAPH, IVF, PYRAMID, BRUTEFORCE, SPARSE, 
 #define DATA_FLAG_EXTRA_INFO 0x10
 #define DATA_FLAG_ATTRIBUTE 0x20
 #define DATA_FLAG_ID 0x40
+
+using OffsetType = uint64_t;
+using SizeType = uint64_t;
+using WriteFuncType = std::function<void(OffsetType, SizeType, const void*)>;
 
 class Index {
 public:
@@ -529,6 +534,23 @@ public:
         throw std::runtime_error("Index doesn't support GetDataByIdsWithFlag");
     };
 
+    /*
+     * @brief Retrieve all detail information associated with the index.
+     *
+     * This method fetches all detail information stored with the index for following get detail datas by name
+     * @see IndexDetailInfo
+     *
+     * @return tl::expected<std::vector<IndexDetailInfo>, Error>
+     *         - On success: A vector of IndexDetailInfo structs containing the detail information.
+     *         - On failure: An error object (e.g., out of memory).
+     * @throws std::runtime_error If the index implementation does not support this operation
+     *            (default behavior for base class).
+     */
+    virtual tl::expected<std::vector<IndexDetailInfo>, Error>
+    GetIndexDetailInfos() const {
+        throw std::runtime_error("Index doesn't support GetIndexDetailInfo");
+    };
+
     /**
      * @brief Retrieve all data associated with vectors identified by given IDs.
      *
@@ -636,6 +658,16 @@ public:
       */
     [[nodiscard]] virtual tl::expected<BinarySet, Error>
     Serialize() const = 0;
+
+    /**
+      * @brief Serialize index by write function
+      *
+      * @param write_func is a function to write serialized index
+      */
+    [[nodiscard]] virtual tl::expected<void, Error>
+    Serialize(WriteFuncType write_func) const {
+        throw std::runtime_error("Index doesn't support Serialize with write function");
+    }
 
     /**
       * @brief Deserialize index from a set of byte array. Causing exception if this index is not empty

@@ -19,6 +19,7 @@
 #include <memory>
 
 #include "metric_type.h"
+#include "typing.h"
 #include "utils/pointer_define.h"
 #include "vsag/allocator.h"
 
@@ -38,7 +39,7 @@ template <typename T>
 class Computer : public ComputerInterface {
 public:
     explicit Computer(const T* quantizer, Allocator* allocator)
-        : quantizer_(quantizer), allocator_(allocator){};
+        : quantizer_(quantizer), allocator_(allocator), raw_query_(allocator){};
 
     ~Computer() override {
         quantizer_->ReleaseComputer(*this);
@@ -76,6 +77,7 @@ public:
     Allocator* const allocator_{nullptr};
     const T* quantizer_{nullptr};
     uint8_t* buf_{nullptr};
+    Vector<float> raw_query_;
 };
 
 template <typename QuantImpl, MetricType metric>
