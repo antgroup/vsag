@@ -212,7 +212,7 @@ private:
 private:
     vsag::DistanceFuncType distance_func_;
 
-private:
+public:
     std::shared_ptr<char[]> train_;
     std::shared_ptr<char[]> test_;
     std::shared_ptr<int64_t[]> neighbors_;
@@ -233,6 +233,9 @@ private:
     std::string test_data_type_;
     std::string file_path_;
     std::string metric_;
+
+    std::vector<std::string> train_paths;
+    std::vector<std::string> test_paths;
 
     std::vector<SparseVector> sparse_train_;
     std::vector<SparseVector> sparse_test_;

@@ -16,14 +16,14 @@
 #include <vsag/vsag.h>
 
 #include <iostream>
-
+#include <fstream>
 int
 main(int argc, char** argv) {
     vsag::init();
 
     /******************* Prepare Base Dataset *****************/
     int64_t num_vectors = 10000;
-    int64_t dim = 128;
+    int64_t dim = 768;
     std::vector<int64_t> ids(num_vectors);
     std::vector<float> datas(num_vectors * dim);
     std::mt19937 rng(47);
@@ -43,31 +43,15 @@ main(int argc, char** argv) {
 
     /******************* Create HGraph Index *****************/
     std::string hgraph_build_parameters = R"(
-    {
-        "dtype": "float32",
-        "metric_type": "l2",
-        "dim": 128,
-        "index_param": {
-            "base_quantization_type": "sq8",
-            "max_degree": 26,
-            "ef_construction": 100,
-            "alpha":1.2
-        }
-    }
+    {"dim":  768,"dtype":  "float32","index_param":  {  "base_quantization_type":    "rabitq",  "build_thread_count":    32,  "ef_construction":    300,  "graph_storage_type":    "compressed",  "max_degree":    64,      "precise_quantization_type":    "sq8",  "use_reorder":    true  },"metric_type":  "l2"}
     )";
     vsag::Resource resource(vsag::Engine::CreateDefaultAllocator(), nullptr);
     vsag::Engine engine(&resource);
     auto index = engine.CreateIndex("hgraph", hgraph_build_parameters).value();
 
     /******************* Build HGraph Index *****************/
-    if (auto build_result = index->Build(base); build_result.has_value()) {
-        std::cout << "After Build(), Index HGraph contains: " << index->GetNumElements()
-                  << std::endl;
-    } else if (build_result.error().type == vsag::ErrorType::INTERNAL_ERROR) {
-        std::cerr << "Failed to build index: internalError" << std::endl;
-        exit(-1);
-    }
-
+    std::fstream file("/tbase-project/github/vsag/data/high-quality/hgraph.index.bin");
+    index->Deserialize(file);
     /******************* Prepare Query Dataset *****************/
     std::vector<float> query_vector(dim);
     for (int64_t i = 0; i < dim; ++i) {

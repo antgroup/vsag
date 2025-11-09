@@ -12,16 +12,54 @@ global:
         vars:
           token: "Token mlIiP-zVfcooHhMbGG9Yk-KfrkHyDc2h-rphnIBda8UMe_6Qocy8tNmV323yxOPEAsC8uIs6_nb-XUSMEAO76A=="
 
+#eval_case1:
+#    datapath: "/tbase-project/github/vsag/data/codefilter-3m-384-angular.hdf5"
+#    type: "search" # `build` or `search` or `build,search`
+#    index_name: "pyramid"
+#    create_params: '{"dim":384,"dtype":"float32","metric_type":"cosine","index_param":{
+#            "odescent": {
+#                "io_params": {
+#                    "type": "memory"
+#                },
+#                "max_degree": 32,
+#                "alpha": 1.2,
+#                "graph_iter_turn": 15,
+#                "neighbor_sample_rate": 0.2
+#            }
+#        }
+#        }'
+#    search_params: '{"pyramid":{"ef_search":200}}'
+#    index_path: "/tmp/codefilter-3m-384-angular/index/pyramid_index"
+#    search_mode: "knn" # ["knn", "range", "knn_filter", "range_filter"]
+#    topk: 10
+#    range: 0.5
+#    delete_index_after_search: false # free up storage space used by index
+#    num_threads_building: 16
+#    num_threads_searching: 16
+
+
 eval_case1:
-    datapath: "/tmp/sift-128-euclidean.hdf5"
-    type: "search" # `build` or `search` or `build,search`
-    index_name: "hgraph"
-    create_params: '{"dim":128,"dtype":"float32","metric_type":"l2","index_param":{"base_quantization_type":"fp32","max_degree":32,"ef_construction":300}}'
-    search_params: '{"hgraph":{"ef_search":60}}'
-    index_path: "/tmp/sift-128-euclidean/index/hgraph_index"
-    search_mode: "knn" # ["knn", "range", "knn_filter", "range_filter"]
-    topk: 10
-    range: 0.5
-    delete_index_after_search: false # free up storage space used by index
-    num_threads_building: 16
-    num_threads_searching: 16
+  datapath: "/tbase-project/github/vsag/data/high-quality/random.hdf5"
+  type: "build,search" # `build` or `search` or `build,search`
+  index_name: "pyramid"
+  create_params: '{"dim":784,"dtype":"float32","metric_type":"l2","index_param":{
+            "odescent": {
+                "io_params": {
+                    "type": "memory"
+                },
+                "max_degree": 32,
+                "alpha": 1.2,
+                "graph_iter_turn": 15,
+                "neighbor_sample_rate": 0.2
+            }
+        }
+        }'
+  search_params: '{"pyramid":{"ef_search":200}}'
+  index_path: "/tmp/random/index/pyramid_index"
+  search_mode: "knn" # ["knn", "range", "knn_filter", "range_filter"]
+  topk: 10
+  range: 0.5
+  delete_index_after_search: false # free up storage space used by index
+  num_threads_building: 16
+  num_threads_searching: 16
+

@@ -32,23 +32,21 @@ split(const std::string& str, char delimiter) {
     size_t start = 0;
     size_t end = str.find(delimiter);
     if (str.empty()) {
-        throw std::runtime_error("fail to parse empty path");
+        return tokens;
     }
 
     while (end != std::string::npos) {
         std::string token = str.substr(start, end - start);
-        if (token.empty()) {
-            throw std::runtime_error("fail to parse path:" + str);
+        if (not token.empty()) {
+            tokens.push_back(str.substr(start, end - start));
         }
-        tokens.push_back(str.substr(start, end - start));
         start = end + 1;
         end = str.find(delimiter, start);
     }
     std::string last_token = str.substr(start);
-    if (last_token.empty()) {
-        throw std::runtime_error("fail to parse path:" + str);
+    if (not last_token.empty()) {
+        tokens.push_back(str.substr(start, end - start));
     }
-    tokens.push_back(str.substr(start, end - start));
     return tokens;
 }
 
@@ -257,15 +255,16 @@ Pyramid::RangeSearch(const DatasetPtr& query,
 DatasetPtr
 Pyramid::search_impl(const DatasetPtr& query, int64_t limit, const SearchFunc& search_func) const {
     const auto* path = query->GetPaths();
-    CHECK_ARGUMENT(path != nullptr, "path is required");
     CHECK_ARGUMENT(query->GetFloat32Vectors() != nullptr, "query vectors is required");
-    std::string current_path = path[0];
-    auto path_slices = split(current_path, PART_SLASH);
     std::shared_ptr<IndexNode> node = root_;
-    for (auto& path_slice : path_slices) {
-        node = node->GetChild(path_slice, false);
-        if (node == nullptr) {
-            return DatasetImpl::MakeEmptyDataset();
+    if (path != nullptr) {
+        std::string current_path = path[0];
+        auto path_slices = split(current_path, PART_SLASH);
+        for (auto& path_slice : path_slices) {
+            node = node->GetChild(path_slice, false);
+            if (node == nullptr) {
+                return DatasetImpl::MakeEmptyDataset();
+            }
         }
     }
     auto search_result = node->SearchGraph(search_func);

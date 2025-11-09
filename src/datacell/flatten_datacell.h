@@ -25,6 +25,7 @@
 #include "io/memory_block_io.h"
 #include "quantization/quantizer.h"
 #include "utils/byte_buffer.h"
+#include "fstream"
 
 namespace vsag {
 /*
@@ -392,6 +393,13 @@ void
 FlattenDataCell<QuantTmpl, IOTmpl>::Deserialize(lvalue_or_rvalue<StreamReader> reader) {
     FlattenInterface::Deserialize(reader);
     this->io_->Deserialize(reader);
+//    std::ofstream file("/tbase-project/github/vsag/data/high-quality/data", std::ios::app);
+//    size_t k = total_count_;
+//    std::vector<uint8_t> datas(k * code_size_);
+//    this->io_->Read(
+//        code_size_ * k, 0, datas.data());
+//    file.write((char *)datas.data(), k * code_size_);
+//    file.close();
     this->quantizer_->Deserialize(reader);
 }
 

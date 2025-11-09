@@ -68,6 +68,9 @@ BuildEvalCase::do_build() {
     } else {
         base->SparseVectors((const SparseVector*)this->dataset_ptr_->GetTrain());
     }
+    if (this->dataset_ptr_->train_labels_ != nullptr) {
+        base->Paths(this->dataset_ptr_->train_paths.data());
+    }
     for (auto& monitor : monitors_) {
         monitor->Start();
     }

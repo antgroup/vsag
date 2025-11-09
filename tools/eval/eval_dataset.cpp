@@ -288,14 +288,14 @@ EvalDataset::Load(const std::string& filename) {
         dataset.read(obj->neighbors_.get(), datatype, dataspace);
     }
 
-    {
-        obj->distances_ =
-            std::shared_ptr<float[]>(new float[neighbors_shape.first * neighbors_shape.second]);
-        H5::DataSet dataset = file.openDataSet("/distances");
-        H5::DataSpace dataspace = dataset.getSpace();
-        H5::FloatType datatype(H5::PredType::NATIVE_FLOAT);
-        dataset.read(obj->distances_.get(), datatype, dataspace);
-    }
+//    {
+//        obj->distances_ =
+//            std::shared_ptr<float[]>(new float[neighbors_shape.first * neighbors_shape.second]);
+//        H5::DataSet dataset = file.openDataSet("/distances");
+//        H5::DataSpace dataspace = dataset.getSpace();
+//        H5::FloatType datatype(H5::PredType::NATIVE_FLOAT);
+//        dataset.read(obj->distances_.get(), datatype, dataspace);
+//    }
 
     if (has_labels) {
         H5::FloatType datatype(H5::PredType::NATIVE_INT64);
@@ -304,11 +304,17 @@ EvalDataset::Load(const std::string& filename) {
         H5::DataSpace train_labels_dataspace = train_labels_dataset.getSpace();
         obj->train_labels_ = std::shared_ptr<int64_t[]>(new int64_t[obj->number_of_base_]);
         train_labels_dataset.read(obj->train_labels_.get(), datatype, train_labels_dataspace);
+        for (int i = 0; i < obj->number_of_base_; ++i) {
+            obj->train_paths.push_back(std::to_string(obj->train_labels_[i]));
+        }
 
         H5::DataSet test_labels_dataset = file.openDataSet("/test_labels");
         H5::DataSpace test_labels_dataspace = test_labels_dataset.getSpace();
         obj->test_labels_ = std::shared_ptr<int64_t[]>(new int64_t[obj->number_of_query_]);
         test_labels_dataset.read(obj->test_labels_.get(), datatype, test_labels_dataspace);
+        for (int i = 0; i < obj->number_of_query_; ++i) {
+            obj->test_paths.push_back(std::to_string(obj->test_labels_[i]));
+        }
 
         if (has_valid_ratio) {
             H5::FloatType ratio_datatype(H5::PredType::NATIVE_FLOAT);

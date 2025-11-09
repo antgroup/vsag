@@ -174,6 +174,9 @@ SearchEvalCase::do_knn_search() {
             } else {
                 query->SparseVectors((const SparseVector*)query_vector);
             }
+            if (this->dataset_ptr_->test_labels_ != nullptr && this->dataset_ptr_->test_labels_[i] != -1) {
+                query->Paths(this->dataset_ptr_->test_paths.data() + i);
+            }
             auto result = this->index_->KnnSearch(query, topk, config_.search_param);
             if (not result.has_value()) {
                 std::cerr << "query error: " << result.error().message << std::endl;

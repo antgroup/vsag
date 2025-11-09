@@ -20,6 +20,7 @@
 #include "nlohmann/json.hpp"
 #include "vsag/index.h"
 #include "vsag/logger.h"
+#include "vsag/engine.h"
 
 namespace vsag::eval {
 using JsonType = nlohmann::json;
@@ -63,6 +64,7 @@ protected:
     vsag::IndexPtr index_{nullptr};
 
     Logger logger_{nullptr};
+    std::shared_ptr<vsag::Engine> engine_{nullptr};
 
     JsonType basic_info_{};
 };

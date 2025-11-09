@@ -16,6 +16,7 @@
 #include <vsag/vsag.h>
 
 #include <iostream>
+#include "fstream"
 
 int
 main(int argc, char** argv) {
@@ -23,7 +24,7 @@ main(int argc, char** argv) {
 
     /******************* Prepare Base Dataset *****************/
     int64_t num_vectors = 10000;
-    int64_t dim = 128;
+    int64_t dim = 768;
     std::vector<int64_t> ids(num_vectors);
     std::vector<float> datas(num_vectors * dim);
     std::mt19937 rng(47);
@@ -46,38 +47,36 @@ main(int argc, char** argv) {
     {
         "dtype": "float32",
         "metric_type": "l2",
-        "dim": 128
+        "dim": 768
     }
     )";
-    auto index = vsag::Factory::CreateIndex("brute_force", brute_force_build_parameters).value();
 
     /******************* Build BruteForce Index *****************/
-    if (auto build_result = index->Build(base); build_result.has_value()) {
-        std::cout << "After Build(), Index BruteForce contains: " << index->GetNumElements()
-                  << std::endl;
-    } else if (build_result.error().type == vsag::ErrorType::INTERNAL_ERROR) {
-        std::cerr << "Failed to build index: internalError" << std::endl;
-        exit(-1);
+    for (int i = 0; i < 36; ++i) {
+        std::cout << "Loading part " << i << std::endl;
+        auto index = vsag::Factory::CreateIndex("brute_force", brute_force_build_parameters).value();
+        std::fstream file("/tbase-project/github/vsag/data/high-quality/brute_force_for_recall.index.bin.part" + std::to_string(i));
+        index->Deserialize(file);
     }
-
-    /******************* Prepare Query Dataset *****************/
-    std::vector<float> query_vector(dim);
-    for (int64_t i = 0; i < dim; ++i) {
-        query_vector[i] = distrib_real(rng);
-    }
-    auto query = vsag::Dataset::Make();
-    query->NumElements(1)->Dim(dim)->Float32Vectors(query_vector.data())->Owner(false);
-
-    /******************* KnnSearch For BruteForce Index *****************/
-    auto brute_force_search_parameters = R"({})";
-    int64_t topk = 10;
-    auto result = index->KnnSearch(query, topk, brute_force_search_parameters).value();
-
-    /******************* Print Search Result *****************/
-    std::cout << "results: " << std::endl;
-    for (int64_t i = 0; i < result->GetDim(); ++i) {
-        std::cout << result->GetIds()[i] << ": " << result->GetDistances()[i] << std::endl;
-    }
+//
+//    /******************* Prepare Query Dataset *****************/
+//    std::vector<float> query_vector(dim);
+//    for (int64_t i = 0; i < dim; ++i) {
+//        query_vector[i] = distrib_real(rng);
+//    }
+//    auto query = vsag::Dataset::Make();
+//    query->NumElements(1)->Dim(dim)->Float32Vectors(query_vector.data())->Owner(false);
+//
+//    /******************* KnnSearch For BruteForce Index *****************/
+//    auto brute_force_search_parameters = R"({})";
+//    int64_t topk = 10;
+//    auto result = index->KnnSearch(query, topk, brute_force_search_parameters).value();
+//
+//    /******************* Print Search Result *****************/
+//    std::cout << "results: " << std::endl;
+//    for (int64_t i = 0; i < result->GetDim(); ++i) {
+//        std::cout << result->GetIds()[i] << ": " << result->GetDistances()[i] << std::endl;
+//    }
 
     return 0;
 }

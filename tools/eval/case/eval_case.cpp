@@ -31,6 +31,7 @@ EvalCase::EvalCase(std::string dataset_path, std::string index_path, vsag::Index
     this->dataset_ptr_ = EvalDataset::Load(dataset_path_);
     this->logger_ = vsag::Options::Instance().logger();
     this->basic_info_ = this->dataset_ptr_->GetInfo();
+    this->engine_ = std::make_shared<vsag::Engine>(nullptr);
 }
 
 EvalCasePtr

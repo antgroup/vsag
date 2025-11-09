@@ -128,7 +128,7 @@ main(int argc, char** argv) {
 
     /******************* KnnSearch For Pyramid Index *****************/
     auto query_path = new std::string[1];
-    query_path[0] = create_random_string(false);
+    query_path[0] = "";
     auto query_vector = new float[dim];
     for (int64_t i = 0; i < dim; ++i) {
         query_vector[i] = distrib_real(rng);
