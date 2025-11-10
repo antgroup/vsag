@@ -32,7 +32,8 @@
 /src/simd/               @LHT129 @ShawnShawnYou
 
 # pybinds
-/python_bindings/        @wxyucs @LHT129
+/python/                 @wxyucs @LHT129 @jac0626
+/python_bindings/        @wxyucs @LHT129 @jac0626
 
 # scripts
 /scripts/                @LHT129 @wxyucs @inabao
