@@ -142,7 +142,10 @@ private:
     search(const DatasetPtr& query, const InnerSearchParam& param) const;
 
     DatasetPtr
-    reorder(int64_t topk, DistHeapPtr& input, const float* query) const;
+    reorder(int64_t topk,
+            DistHeapPtr& input,
+            const float* query,
+            const InnerSearchParam& param) const;
 
     void
     merge_one_unit(const MergeUnit& unit);
