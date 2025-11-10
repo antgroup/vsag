@@ -179,7 +179,7 @@ TestIndex::TestUpdateVector(const IndexPtr& index,
 
     std::vector<int> correct_num = {0, 0};
     uint32_t success_far_updated = 0, failed_far_updated = 0;
-    for (int round = 0; round < 2; round++) {
+    for (int round = 1; round >= 0; round--) {
         // round 0 for update, round 1 for validate update results
         for (int i = 0; i < num_vectors; i++) {
             auto query = vsag::Dataset::Make();
@@ -200,8 +200,8 @@ TestIndex::TestUpdateVector(const IndexPtr& index,
                 std::vector<float> update_vecs(dim);
                 std::vector<float> far_vecs(dim);
                 for (int d = 0; d < dim; d++) {
-                    update_vecs[d] = base[i * dim + d] + 0.001f;
-                    far_vecs[d] = base[i * dim + d] + 1.0f;
+                    update_vecs[d] = base[i * dim + d] + 0.0001F;
+                    far_vecs[d] = base[i * dim + d] + 1.0F;
                 }
                 auto new_base = vsag::Dataset::Make();
                 new_base->NumElements(1)

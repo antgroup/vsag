@@ -161,9 +161,12 @@ std::string
 get_current_time() {
     auto now = std::chrono::system_clock::now();
     auto now_c = std::chrono::system_clock::to_time_t(now);
-    std::tm* now_tm = std::localtime(&now_c);
+    std::tm now_tm{};
+    if (localtime_r(&now_c, &now_tm) == nullptr) {
+        return "invalid time";
+    }
     std::ostringstream oss;
-    oss << std::put_time(now_tm, "%Y-%m-%d %H:%M:%S");
+    oss << std::put_time(&now_tm, "%Y-%m-%d %H:%M:%S");
     return oss.str();
 }
 

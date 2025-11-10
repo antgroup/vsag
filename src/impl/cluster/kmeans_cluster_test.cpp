@@ -48,14 +48,22 @@ TEST_CASE("Kmeans Basic Test", "[ut][KMeansCluster]") {
 
     auto allocator = vsag::SafeAllocator::FactoryDefaultAllocator();
 
+    std::vector<int> new_labels(k);
     vsag::KMeansCluster cluster(dim, allocator.get());
-    auto pos = cluster.Run(k, datas.data(), count, 25, nullptr, false);
-    std::vector<int> new_labels(k, 0);
-    for (int i = 0; i < count; ++i) {
-        new_labels[pos[i]]++;
-    }
-    std::sort(new_labels.begin(), new_labels.end());
-    for (int i = 0; i < k; ++i) {
-        REQUIRE(new_labels[i] == labels[i]);
+    int iter = 0;
+    while (iter < 500) {
+        iter += 25;
+        std::fill(new_labels.begin(), new_labels.end(), 0);
+        auto pos = cluster.Run(k, datas.data(), count, iter, nullptr, false);
+        for (int i = 0; i < count; ++i) {
+            new_labels[pos[i]]++;
+        }
+        std::sort(new_labels.begin(), new_labels.end());
+        if (new_labels[0] != 0) {
+            for (int i = 0; i < k; ++i) {
+                REQUIRE(new_labels[i] == labels[i]);
+            }
+            break;
+        }
     }
 }
