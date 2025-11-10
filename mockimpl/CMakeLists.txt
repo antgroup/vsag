@@ -23,6 +23,7 @@ set (MOCK_SRCS
   ../src/impl/bitset/fast_bitset.cpp
   ../src/constants.cpp
   ../src/dataset_impl.cpp
+  ../src/json_wrapper.cpp
 )
 
 add_library (vsag_mockimpl SHARED ${MOCK_SRCS})
