@@ -96,13 +96,19 @@ TEST_CASE("RQ Compute", "[ut][ResidualQuantizer]") {
 
     for (auto dim : dims) {
         for (auto count : counts) {
-            TestComputeMetricRQ<FP32Quantizer<metrics[0]>, metrics[0]>("fp32", dim, count);
-            TestComputeMetricRQ<FP32Quantizer<metrics[1]>, metrics[1]>("fp32", dim, count);
-            TestComputeMetricRQ<FP32Quantizer<metrics[1]>, metrics[1]>("fp32", dim, count);
+            TestComputeMetricRQ<FP32Quantizer<MetricType::METRIC_TYPE_IP>, metrics[0]>(
+                "fp32", dim, count);
+            TestComputeMetricRQ<FP32Quantizer<MetricType::METRIC_TYPE_IP>, metrics[1]>(
+                "fp32", dim, count);
+            TestComputeMetricRQ<FP32Quantizer<MetricType::METRIC_TYPE_IP>, metrics[2]>(
+                "fp32", dim, count);
 
-            TestComputeMetricRQ<SQ8Quantizer<metrics[0]>, metrics[0]>("sq8", dim, count);
-            TestComputeMetricRQ<SQ8Quantizer<metrics[1]>, metrics[1]>("sq8", dim, count);
-            TestComputeMetricRQ<SQ8Quantizer<metrics[1]>, metrics[1]>("sq8", dim, count);
+            TestComputeMetricRQ<SQ8Quantizer<MetricType::METRIC_TYPE_IP>, metrics[0]>(
+                "sq8", dim, count);
+            TestComputeMetricRQ<SQ8Quantizer<MetricType::METRIC_TYPE_IP>, metrics[1]>(
+                "sq8", dim, count);
+            TestComputeMetricRQ<SQ8Quantizer<MetricType::METRIC_TYPE_IP>, metrics[2]>(
+                "sq8", dim, count);
         }
     }
 }
@@ -113,13 +119,19 @@ TEST_CASE("RQ Serialize and Deserialize", "[ut][ResidualQuantizer]") {
 
     for (auto dim : dims) {
         for (auto count : counts) {
-            TestSerializeDeserializeRQ<FP32Quantizer<metrics[0]>, metrics[0]>("fp32", dim, count);
-            TestSerializeDeserializeRQ<FP32Quantizer<metrics[1]>, metrics[1]>("fp32", dim, count);
-            TestSerializeDeserializeRQ<FP32Quantizer<metrics[1]>, metrics[1]>("fp32", dim, count);
+            TestSerializeDeserializeRQ<FP32Quantizer<MetricType::METRIC_TYPE_IP>, metrics[0]>(
+                "fp32", dim, count);
+            TestSerializeDeserializeRQ<FP32Quantizer<MetricType::METRIC_TYPE_IP>, metrics[1]>(
+                "fp32", dim, count);
+            TestSerializeDeserializeRQ<FP32Quantizer<MetricType::METRIC_TYPE_IP>, metrics[2]>(
+                "fp32", dim, count);
 
-            TestSerializeDeserializeRQ<SQ8Quantizer<metrics[0]>, metrics[0]>("sq8", dim, count);
-            TestSerializeDeserializeRQ<SQ8Quantizer<metrics[1]>, metrics[1]>("sq8", dim, count);
-            TestSerializeDeserializeRQ<SQ8Quantizer<metrics[1]>, metrics[1]>("sq8", dim, count);
+            TestSerializeDeserializeRQ<SQ8Quantizer<MetricType::METRIC_TYPE_IP>, metrics[0]>(
+                "sq8", dim, count);
+            TestSerializeDeserializeRQ<SQ8Quantizer<MetricType::METRIC_TYPE_IP>, metrics[1]>(
+                "sq8", dim, count);
+            TestSerializeDeserializeRQ<SQ8Quantizer<MetricType::METRIC_TYPE_IP>, metrics[2]>(
+                "sq8", dim, count);
         }
     }
 }

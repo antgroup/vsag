@@ -1,7 +1,7 @@
 
 CMAKE_GENERATOR ?= "Unix Makefiles"
 CMAKE_INSTALL_PREFIX ?= "/usr/local/"
-COMPILE_JOBS ?= 32
+COMPILE_JOBS ?= 6
 DEBUG_BUILD_DIR ?= "./build/"
 RELEASE_BUILD_DIR ?= "./build-release/"
 
@@ -35,7 +35,7 @@ help:                    ## Show the help.
 .PHONY: debug
 debug:                   ## Build vsag with debug options.
 	cmake ${VSAG_CMAKE_ARGS} -B${DEBUG_BUILD_DIR} -DCMAKE_BUILD_TYPE=Debug -DENABLE_ASAN=OFF -DENABLE_CCACHE=ON
-	cmake --build ${DEBUG_BUILD_DIR} --parallel ${COMPILE_JOBS} --verbose
+	cmake --build ${DEBUG_BUILD_DIR} --parallel ${COMPILE_JOBS}
 
 .PHONY: test
 test:                    ## Build and run unit tests.

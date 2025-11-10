@@ -54,15 +54,18 @@
 
 #define GENERATE_RQ_CASE(type_suffix, quantizer_class)                                    \
     if (rq_bottom_quantization_string == QUANTIZATION_TYPE_VALUE_##type_suffix) {         \
-        return make_instance<ResidualQuantizer<quantizer_class<metric>, metric>, IOTemp>( \
-            param, common_param);                                                         \
+        return make_instance<                                                             \
+            ResidualQuantizer<quantizer_class<vsag::MetricType::METRIC_TYPE_IP>, metric>, \
+            IOTemp>(param, common_param);                                                 \
     }
 
-#define GENERATE_TRQ_QUANTIZER_CASE(type_suffix, quantizer_class)                           \
-    if (trq_bottom_quantization_string == QUANTIZATION_TYPE_VALUE_##type_suffix) {          \
-        return make_instance<                                                               \
-            TransformQuantizer<ResidualQuantizer<quantizer_class<metric>, metric>, metric>, \
-            IOTemp>(param, common_param);                                                   \
+#define GENERATE_TRQ_QUANTIZER_CASE(type_suffix, quantizer_class)                             \
+    if (trq_bottom_quantization_string == QUANTIZATION_TYPE_VALUE_##type_suffix) {            \
+        return make_instance<                                                                 \
+            TransformQuantizer<                                                               \
+                ResidualQuantizer<quantizer_class<vsag::MetricType::METRIC_TYPE_IP>, metric>, \
+                metric>,                                                                      \
+            IOTemp>(param, common_param);                                                     \
     }
 
 namespace vsag {

@@ -223,15 +223,17 @@ ResidualQuantizer<QuantTmpl, metric>::EncodeOneImpl(const DataType* data, uint8_
     this->partition_strategy_->GetCentroid(centroid_id, centroid_vec);
 
     // 2. compute residual part and norm
-    Vector<float> data_buffer(this->dim_, 0, this->allocator_);
+    Vector<float> data_buffer(this->dim_, 0, this->allocator_);  // x - c
     for (int i = 0; i < this->dim_; i++) {
         data_buffer[i] = data[i] - centroid_vec[i];
     }
-    float norm = FP32ComputeIP(data_buffer.data(), data_buffer.data(), this->dim_) +
-                 FP32ComputeIP(data_buffer.data(), (const float*)(centroid_vec.data()), this->dim_);
+    float n1 = FP32ComputeIP(data_buffer.data(), data_buffer.data(), this->dim_);  // (x - c)^2
+    float n2 = 2 * FP32ComputeIP(data_buffer.data(),
+                                 (const float*)(centroid_vec.data()),
+                                 this->dim_);  // 2c * (x - c)
 
     // 3. store norm data
-    *(float*)(codes + res_norm_offset_) = norm;
+    *(float*)(codes + res_norm_offset_) = n1 + n2;
     *(uint32_t*)(codes + res_norm_offset_ + sizeof(float)) = centroid_id;
 
     // 4. execute quantize
@@ -254,8 +256,7 @@ ResidualQuantizer<QuantTmpl, metric>::ProcessQueryImpl(
     // 1. pre-compute all |q - c|^2 and store them into meta
     Vector<float> centroid_vec(this->dim_, 0, this->allocator_);
     for (auto i = 0; i < centroids_count_; i++) {
-        uint32_t centroid_id = this->partition_strategy_->ClassifyDatas(query, 1, 1)[0];
-        this->partition_strategy_->GetCentroid(centroid_id, centroid_vec);
+        this->partition_strategy_->GetCentroid(i, centroid_vec);
         auto norm = FP32ComputeL2Sqr(query, (const float*)(centroid_vec.data()), this->dim_);
         *(float*)(computer.inner_computer_->buf_ + res_norm_offset_ + i * sizeof(float)) = norm;
     }
