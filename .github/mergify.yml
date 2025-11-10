@@ -1,14 +1,81 @@
 
 pull_request_rules:
+  - name: add module/cicd label
+    conditions:
+      - files~=^\.circleci/.*$
+      - files~=^\.github/.*$
+      - files~=^\scripts/.*$
+    actions:
+      label:
+        add:
+          - module/cicd
+
+  - name: add module/docker label
+    conditions:
+      - files~=^docker/.*$
+    actions:
+      label:
+        add:
+          - module/docker
+
+  - name: add module/docs label
+    conditions:
+      - files~=^docs/.*$
+    actions:
+      label:
+        add:
+          - module/docs
+
+  - name: add module/example label
+    conditions:
+      - files~=^examples/.*$
+    actions:
+      label:
+        add:
+          - module/example
+
+  - name: add module/thirdparty label
+    conditions:
+      - files~=^extern/.*$
+    actions:
+      label:
+        add:
+          - module/thirdparty
+
+  - name: add module/api label
+    conditions:
+      - files~=^include/.*$
+    actions:
+      label:
+        add:
+          - module/api
+
+  - name: add module/attr label
+    conditions:
+      - files~=^src/attr/.*$
+    actions:
+      label:
+        add:
+          - module/attr
+
   - name: add module/datacell label
     conditions:
-      - files~=^src/data_cell/.*$
-      - files~=^src/io/*$
-      - files~=^src/quantization/*$
+      - files~=^src/datacell/.*$
+      - files~=^src/io/.*$
+      - files~=^src/quantization/.*$
     actions:
       label:
         add:
           - module/datacell
+
+  - name: add module/index label
+    conditions:
+      - files~=^src/index/.*$
+    actions:
+      label:
+        add:
+          - module/index
+
   - name: add module/simd label
     conditions:
       - files~=^src/simd/.*$
@@ -16,6 +83,7 @@ pull_request_rules:
       label:
         add:
           - module/simd
+
   - name: add module/pyvsag label
     conditions:
       - files~=^python/.*$
@@ -24,6 +92,7 @@ pull_request_rules:
       label:
         add:
           - module/pyvsag
+
   - name: add module/tools label
     conditions:
       - files~=^tools/.*$
@@ -31,13 +100,7 @@ pull_request_rules:
       label:
         add:
           - module/tools
-  - name: add module/index label
-    conditions:
-      - files~=^index/.*$
-    actions:
-      label:
-        add:
-          - module/index
+
   - name: add module/testing label
     conditions:
       - files~=^tests/.*$
