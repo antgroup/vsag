@@ -300,6 +300,7 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
 
         if (inner_search_param.time_cost != nullptr and
             inner_search_param.time_cost->CheckOvertime()) {
+            (*inner_search_param.stats)["is_timeout"].SetBool(true);
             break;
         }
 

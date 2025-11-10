@@ -17,6 +17,7 @@
 
 #include <cstring>
 
+#include "typing.h"
 #include "vsag_exception.h"
 
 namespace vsag {
@@ -270,6 +271,20 @@ DatasetImpl::Append(const DatasetPtr& other) {
         }
     }
     return shared_from_this();
+}
+
+std::vector<std::string>
+DatasetImpl::GetStatistics(const std::vector<std::string>& stat_keys) const {
+    auto json = JsonType::Parse(this->statistics_);
+    std::vector<std::string> result;
+    for (const auto& key : stat_keys) {
+        if (json.Contains(key)) {
+            result.emplace_back(json[key].Dump());
+        } else {
+            result.emplace_back("");
+        }
+    }
+    return result;
 }
 
 };  // namespace vsag
