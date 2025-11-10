@@ -54,9 +54,6 @@ public:
     DocPrune(Vector<std::pair<uint32_t, float>>& sorted_base) const;
 
     void
-    DocPruneMass(Vector<std::pair<uint32_t, float>>& sorted_base) const;
-
-    void
     InsertVector(const SparseVector& sparse_base, uint32_t base_id);
 
     void
