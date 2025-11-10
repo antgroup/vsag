@@ -45,7 +45,7 @@ root = ".."
 skip = ["*-musllinux*", "*i686*", "pp*"]
 before-build = '''
                 bash scripts/deps/install_deps_centos.sh 
-                bash scripts/build_cpp_for_cibw.sh
+                bash scripts/python/build_cpp_for_cibw.sh
               '''
 before-all = '''
     sed -i 's/mirrorlist/#mirrorlist/g' /etc/yum.repos.d/CentOS-*.repo

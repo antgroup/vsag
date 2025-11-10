@@ -97,7 +97,7 @@ jobs:
           fetch-depth: 0
 
       - name: Prepare build environment
-        run: bash ./scripts/prepare_python_build.sh ${{ matrix.python-version }}
+        run: bash ./scripts/python/prepare_python_build.sh ${{ matrix.python-version }}
 
       - name: Build wheels
         uses: pypa/cibuildwheel@v2.19.1
@@ -132,7 +132,7 @@ jobs:
           fetch-depth: 0
 
       - name: Prepare build environment for Python 3.6
-        run: bash ./scripts/prepare_python_build.sh 3.6
+        run: bash ./scripts/python/prepare_python_build.sh 3.6
 
       - name: Build wheels for Python 3.6
         uses: pypa/cibuildwheel@v2.11.4

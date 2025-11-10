@@ -14,8 +14,8 @@ if ! command -v python3 &> /dev/null; then
     echo "❌ 'python3' command not found. Please ensure Python 3 is installed."
     exit 1
 fi
-if [ ! -f "scripts/prepare_python_build.sh" ]; then
-    echo "❌ Preparation script not found at 'scripts/prepare_python_build.sh'."
+if [ ! -f "scripts/python/prepare_python_build.sh" ]; then
+    echo "❌ Preparation script not found at 'scripts/python/prepare_python_build.sh'."
     exit 1
 fi
 if ! docker info > /dev/null 2>&1; then
@@ -85,7 +85,7 @@ run_build() {
     cibuildwheel --platform linux --output-dir wheelhouse python
   else 
     echo "🛠️  Starting build..."
-    bash scripts/build_cpp_for_cibw.sh
+    bash scripts/python/build_cpp_for_cibw.sh
     python -m build --wheel --outdir wheelhouse python
     echo "✅ Build complete. Starting test..."
     # Find the most recently created wheel
