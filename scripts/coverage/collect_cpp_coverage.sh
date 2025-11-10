@@ -4,7 +4,7 @@ set -e
 set -x
 
 SCRIPTS_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-ROOT_DIR="$( cd "${SCRIPTS_DIR}/../" && pwd )"
+ROOT_DIR="$( cd "${SCRIPTS_DIR}/../../" && pwd )"
 
 COVERAGE_DIR="${ROOT_DIR}/coverage"
 if [ -d "${COVERAGE_DIR}" ]; then

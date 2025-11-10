@@ -37,10 +37,10 @@ jobs:
         run: export CMAKE_GENERATOR="Ninja"; make cov
       - name: Run Test
         run: |
-          ./scripts/test_parallel_bg.sh
+          ./scripts/testing/test_parallel_bg.sh
       - name: Collect Coverage Info
         run: |
-          bash scripts/collect_cpp_coverage.sh
+          bash scripts/coverage/collect_cpp_coverage.sh
           head -n10 coverage/coverage.info
       - name: Upload Coverage to Codecov
         uses: codecov/codecov-action@v5
