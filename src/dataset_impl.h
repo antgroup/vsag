@@ -273,6 +273,20 @@ public:
         return 0;
     }
 
+    DatasetPtr
+    Statistics(const std::string& statisticss) override {
+        this->statistics_ = statisticss;
+        return shared_from_this();
+    }
+
+    std::vector<std::string>
+    GetStatistics(const std::vector<std::string>& stat_keys) const override;
+
+    std::string
+    GetStatistics() const override {
+        return this->statistics_;
+    }
+
     static DatasetPtr
     MakeEmptyDataset();
 
@@ -280,6 +294,8 @@ private:
     bool owner_{true};
     std::unordered_map<std::string, var> data_;
     Allocator* allocator_ = nullptr;
+
+    std::string statistics_{"{}"};
 };
 
 };  // namespace vsag

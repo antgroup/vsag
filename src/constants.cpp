@@ -109,7 +109,7 @@ const char* const INDEX_PARAM = "index_param";
 
 const char PART_SLASH = '/';
 
-// statstic key
+// statistics key
 const char* const STATSTIC_MEMORY = "memory";
 const char* const STATSTIC_INDEX_NAME = "index_name";
 const char* const STATSTIC_DATA_NUM = "data_num";
