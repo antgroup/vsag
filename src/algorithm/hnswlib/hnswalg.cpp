@@ -673,10 +673,13 @@ HierarchicalNSW::searchBaseLayerST(InnerIdType ep_id,
         for (size_t j = 1; j <= size; j++) {
             int candidate_id = *(data + j);
             size_t pre_l = std::min(j, size - 2);
-            vector_data_ptr =
-                data_level0_memory_->GetElementPtr((*(data + pre_l + 1)), offset_data_);
-            vsag::PrefetchLines((char*)(visited_array + *(data + pre_l + 1)), 64);
-            vsag::PrefetchLines(vector_data_ptr, 64);
+            if (pre_l + prefetch_jump_code_size_ <= size) {
+                vector_data_ptr = data_level0_memory_->GetElementPtr(
+                    (*(data + pre_l + prefetch_jump_code_size_)), offset_data_);
+                vsag::PrefetchLines(
+                    (char*)(visited_array + *(data + pre_l + prefetch_jump_code_size_)), 64);
+                vsag::PrefetchLines(vector_data_ptr, data_size_);
+            }
             if (visited_array[candidate_id] != visited_array_tag) {
                 visited_array[candidate_id] = visited_array_tag;
                 ++visited_count;

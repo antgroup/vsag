@@ -103,11 +103,11 @@ GenerateNanRandomDataset(uint64_t dim, uint64_t count, std::string metric_str = 
     std::uniform_real_distribution real;
     for (int i = 0; i < count; ++i) {
         float r = real(g);
-        if (r < 0.01) {
+        if (r < 0.001) {
             vecs[i * dim] = std::numeric_limits<float>::quiet_NaN();
-        } else if (r < 0.02) {
+        } else if (r < 0.002) {
             for (int j = 0; j < dim; ++j) {
-                vecs[i * dim + j] = 0.0f;
+                vecs[i * dim + j] = 0.0F;
             }
         }
     }
