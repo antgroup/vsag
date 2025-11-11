@@ -1,0 +1,45 @@
+# .github/workflows/sync-docs.yml
+name: Sync Docs to Repo VSAGIO
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'docs/**'
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repo VSAG
+        uses: actions/checkout@v4
+        with:
+          path: repo-vsag
+
+      - name: Checkout Repo VSAGIO
+        uses: actions/checkout@v4
+        with:
+          repository: vsag-io/vsag-io.github.io
+          token: ${{ secrets.GH_PAT }}
+          path: repo-vsagio
+
+      - name: Sync docs directory
+        run: |
+          rsync -av --delete --exclude='.git/' repo-vsag/docs/ repo-vsagio/
+
+      - name: Commit and Push to Repo VSAGIO
+        run: |
+          cd repo-VSAGIO
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          if [[ -z $(git status --porcelain) ]]; then
+            echo "No changes to commit."
+            exit 0
+          fi
+
+          git checkout -B sync
+          git add .
+          git commit -m "docs: Sync from repo VSAG commit ${{ github.sha }}"
+          git push --force origin sync
