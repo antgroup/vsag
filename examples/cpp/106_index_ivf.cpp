@@ -51,7 +51,8 @@ main(int argc, char** argv) {
             "buckets_count": 50,
             "base_quantization_type": "fp32",
             "partition_strategy_type": "ivf",
-            "ivf_train_type": "kmeans"
+            "ivf_train_type": "kmeans",
+            "ivf_train_sample_count": 8000
         }
     }
     )";

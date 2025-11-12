@@ -46,6 +46,7 @@ public:
     BucketDataCellParamPtr bucket_param{nullptr};
     IVFPartitionStrategyParametersPtr ivf_partition_strategy_parameter{nullptr};
     BucketIdType buckets_per_data{1};
+    int64_t train_sample_count{65536L};
 };
 
 class IVFSearchParameters : public IndexSearchParameter {
