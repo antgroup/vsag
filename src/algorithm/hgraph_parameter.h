@@ -51,7 +51,7 @@ public:
 
     ODescentParameterPtr odescent_param{nullptr};
 
-    std::string graph_type{GRAPH_TYPE_NSW};
+    std::string graph_type{GRAPH_TYPE_VALUE_NSW};
 
     bool use_elp_optimizer{false};
     bool ignore_reorder{false};

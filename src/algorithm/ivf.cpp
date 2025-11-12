@@ -44,18 +44,18 @@ static constexpr const char* IVF_PARAMS_TEMPLATE =
         "{BUILD_THREAD_COUNT_KEY}": 1,
         "{BUCKET_PARAMS_KEY}": {
             "{IO_PARAMS_KEY}": {
-                "{IO_TYPE_KEY}": "{IO_TYPE_VALUE_MEMORY_IO}",
-                "{IO_FILE_PATH}": "{DEFAULT_FILE_PATH_VALUE}"
+                "{TYPE_KEY}": "{IO_TYPE_VALUE_MEMORY_IO}",
+                "{IO_FILE_PATH_KEY}": "{DEFAULT_FILE_PATH_VALUE}"
             },
             "{QUANTIZATION_PARAMS_KEY}": {
-                "{QUANTIZATION_TYPE_KEY}": "{QUANTIZATION_TYPE_VALUE_FP32}",
-                "{SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE}": 0.05,
-                "{PCA_DIM}": 0,
-                "{RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY}": 32,
-                "{PRODUCT_QUANTIZATION_DIM}": 1
+                "{TYPE_KEY}": "{QUANTIZATION_TYPE_VALUE_FP32}",
+                "{SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE_KEY}": 0.05,
+                "{PCA_DIM_KEY}": 0,
+                "{RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY_KEY}": 32,
+                "{PRODUCT_QUANTIZATION_DIM_KEY}": 1
             },
             "{BUCKETS_COUNT_KEY}": 10,
-            "{BUCKET_USE_RESIDUAL}": false
+            "{BUCKET_USE_RESIDUAL_KEY}": false
         },
         "{IVF_PARTITION_STRATEGY_PARAMS_KEY}": {
             "{IVF_PARTITION_STRATEGY_TYPE_KEY}": "{IVF_PARTITION_STRATEGY_TYPE_NEAREST}",
@@ -69,13 +69,13 @@ static constexpr const char* IVF_PARAMS_TEMPLATE =
         "{USE_REORDER_KEY}": false,
         "{PRECISE_CODES_KEY}": {
             "{IO_PARAMS_KEY}": {
-                "{IO_TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
-                "{IO_FILE_PATH}": "{DEFAULT_FILE_PATH_VALUE}"
+                "{TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
+                "{IO_FILE_PATH_KEY}": "{DEFAULT_FILE_PATH_VALUE}"
             },
             "codes_type": "flatten_codes",
             "{QUANTIZATION_PARAMS_KEY}": {
-                "{QUANTIZATION_TYPE_KEY}": "{QUANTIZATION_TYPE_VALUE_FP32}",
-                "{PRODUCT_QUANTIZATION_DIM}": 0
+                "{TYPE_KEY}": "{QUANTIZATION_TYPE_VALUE_FP32}",
+                "{PRODUCT_QUANTIZATION_DIM_KEY}": 0
             }
         },
         "{ATTR_PARAMS_KEY}": {
@@ -92,7 +92,7 @@ IVF::CheckAndMappingExternalParam(const JsonType& external_param,
             {
                 BUCKET_PARAMS_KEY,
                 QUANTIZATION_PARAMS_KEY,
-                QUANTIZATION_TYPE_KEY,
+                TYPE_KEY,
             },
         },
         {
@@ -100,7 +100,7 @@ IVF::CheckAndMappingExternalParam(const JsonType& external_param,
             {
                 BUCKET_PARAMS_KEY,
                 IO_PARAMS_KEY,
-                IO_TYPE_KEY,
+                TYPE_KEY,
             },
         },
         {
@@ -108,7 +108,7 @@ IVF::CheckAndMappingExternalParam(const JsonType& external_param,
             {
                 BUCKET_PARAMS_KEY,
                 IO_PARAMS_KEY,
-                IO_FILE_PATH,
+                IO_FILE_PATH_KEY,
             },
         },
         {
@@ -116,7 +116,7 @@ IVF::CheckAndMappingExternalParam(const JsonType& external_param,
             {
                 PRECISE_CODES_KEY,
                 QUANTIZATION_PARAMS_KEY,
-                QUANTIZATION_TYPE_KEY,
+                TYPE_KEY,
             },
         },
         {
@@ -124,7 +124,7 @@ IVF::CheckAndMappingExternalParam(const JsonType& external_param,
             {
                 PRECISE_CODES_KEY,
                 IO_PARAMS_KEY,
-                IO_TYPE_KEY,
+                TYPE_KEY,
             },
         },
         {
@@ -132,7 +132,7 @@ IVF::CheckAndMappingExternalParam(const JsonType& external_param,
             {
                 PRECISE_CODES_KEY,
                 IO_PARAMS_KEY,
-                IO_FILE_PATH,
+                IO_FILE_PATH_KEY,
             },
         },
         {
@@ -188,7 +188,7 @@ IVF::CheckAndMappingExternalParam(const JsonType& external_param,
             IVF_USE_RESIDUAL,
             {
                 BUCKET_PARAMS_KEY,
-                BUCKET_USE_RESIDUAL,
+                BUCKET_USE_RESIDUAL_KEY,
             },
         },
         {
@@ -202,7 +202,7 @@ IVF::CheckAndMappingExternalParam(const JsonType& external_param,
             {
                 BUCKET_PARAMS_KEY,
                 QUANTIZATION_PARAMS_KEY,
-                PRODUCT_QUANTIZATION_DIM,
+                PRODUCT_QUANTIZATION_DIM_KEY,
             },
         },
         {

@@ -25,10 +25,10 @@ GraphInterfaceParameter::GetGraphParameterByJson(GraphStorageTypes graph_type,
                                                  const JsonType& json) {
     GraphInterfaceParamPtr param{nullptr};
     switch (graph_type) {
-        case GraphStorageTypes::GRAPH_STORAGE_TYPE_FLAT:
+        case GraphStorageTypes::GRAPH_STORAGE_TYPE_VALUE_FLAT:
             param = std::make_shared<GraphDataCellParameter>();
             break;
-        case GraphStorageTypes::GRAPH_STORAGE_TYPE_COMPRESSED:
+        case GraphStorageTypes::GRAPH_STORAGE_TYPE_VALUE_COMPRESSED:
             param = std::make_shared<CompressedGraphDatacellParameter>();
             break;
         case GraphStorageTypes::GRAPH_STORAGE_TYPE_SPARSE:

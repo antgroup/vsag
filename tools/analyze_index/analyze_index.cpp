@@ -178,7 +178,7 @@ private:
         metric_type_ = static_cast<MetricType>(basic_info["metric"].GetInt());
         std::string inner_param = basic_info[INDEX_PARAM].GetString();
         index_param_ = JsonType::Parse(inner_param);
-        index_name_ = index_param_[INDEX_TYPE].GetString();
+        index_name_ = index_param_[TYPE_KEY].GetString();
         logger::info("index name: {}", index_name_);
         logger::info("index dim: {}", dim_);
         logger::info("index data type: {}", DataTypesToString(data_type_));

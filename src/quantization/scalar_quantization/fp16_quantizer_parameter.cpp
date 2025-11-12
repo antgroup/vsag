@@ -30,7 +30,7 @@ FP16QuantizerParameter::FromJson(const JsonType& json) {
 JsonType
 FP16QuantizerParameter::ToJson() const {
     JsonType json;
-    json[QUANTIZATION_TYPE_KEY].SetString(QUANTIZATION_TYPE_VALUE_FP16);
+    json[TYPE_KEY].SetString(QUANTIZATION_TYPE_VALUE_FP16);
     return json;
 }
 }  // namespace vsag
