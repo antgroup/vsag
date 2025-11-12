@@ -17,18 +17,40 @@
 
 extern "C" {
 #include <stdint.h>
+
+#define VSAG_SUCCESS 0
+#define VSAG_UNKNOWN_ERROR -1
+#define VSAG_INTERNAL_ERROR -2
+#define VSAG_INVALID_ARGUMENT -3
+#define VSAG_WRONG_STATUS -4
+#define VSAG_BUILD_TWICE -5
+#define VSAG_INDEX_NOT_EMPTY -6
+#define VSAG_UNSUPPORTED_INDEX -7
+#define VSAG_UNSUPPORTED_INDEX_OPERATION -8
+#define VSAG_DIMENSION_NOT_EQUAL -9
+#define VSAG_INDEX_EMPTY -10
+#define VSAG_NO_ENOUGH_MEMORY -11
+#define VSAG_READ_ERROR -12
+#define VSAG_MISSING_FILE -13
+#define VSAG_INVALID_BINARY -14
+
+typedef struct Error {
+    int code;
+    char message[1024];
+} Error_t;
+
 typedef void* vsag_index_t;
 vsag_index_t
 vsag_index_factory(const char* index_name, const char* index_param);
 
-bool
+Error_t
 vsag_index_destroy(vsag_index_t index);
 
-bool
+Error_t
 vsag_index_build(
     vsag_index_t index, const float* data, const int64_t* ids, uint64_t dim, uint64_t count);
 
-bool
+Error_t
 vsag_index_knn_search(vsag_index_t index,
                       const float* query,
                       uint64_t dim,
@@ -37,9 +59,9 @@ vsag_index_knn_search(vsag_index_t index,
                       float* results,
                       int64_t* ids);
 
-bool
+Error_t
 vsag_serialize_file(vsag_index_t index, const char* file_path);
 
-bool
+Error_t
 vsag_deserialize_file(vsag_index_t index, const char* file_path);
 }

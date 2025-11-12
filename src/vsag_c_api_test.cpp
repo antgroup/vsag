@@ -48,8 +48,8 @@ TEST_CASE("vsag_c_api basic test", "[vsag_c_api][ut]") {
     for (int64_t i = 0; i < dim * num_vectors; ++i) {
         datas[i] = distrib_real(rng);
     }
-    bool ret = vsag_index_build(index, datas.data(), ids.data(), dim, num_vectors);
-    REQUIRE(ret);
+    Error_t ret = vsag_index_build(index, datas.data(), ids.data(), dim, num_vectors);
+    REQUIRE(ret.code == VSAG_SUCCESS);
     auto func = [&](vsag_index_t index1) {
         const char* hgraph_search_parameters = R"(
             {
@@ -69,7 +69,7 @@ TEST_CASE("vsag_c_api basic test", "[vsag_c_api][ut]") {
                                         hgraph_search_parameters,
                                         scores.data(),
                                         results.data());
-            REQUIRE(ret);
+            REQUIRE(ret.code == VSAG_SUCCESS);
             bool in_results = false;
             for (int64_t j = 0; j < topk; ++j) {
                 if (results[j] == i) {
@@ -84,10 +84,10 @@ TEST_CASE("vsag_c_api basic test", "[vsag_c_api][ut]") {
 
     const char* file_name = "/tmp/test_c_api.vsag";
     ret = vsag_serialize_file(index, file_name);
-    REQUIRE(ret);
+    REQUIRE(ret.code == VSAG_SUCCESS);
     vsag_index_t index2 = vsag_index_factory(index_name, index_param);
     ret = vsag_deserialize_file(index2, file_name);
-    REQUIRE(ret);
+    REQUIRE(ret.code == VSAG_SUCCESS);
     REQUIRE(index2 != nullptr);
 
     func(index2);
