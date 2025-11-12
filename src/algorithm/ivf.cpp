@@ -15,6 +15,7 @@
 
 #include "ivf.h"
 
+#include <random>
 #include <set>
 
 #include "attr/argparse.h"
@@ -33,7 +34,6 @@
 #include "utils/util_functions.h"
 
 namespace vsag {
-static constexpr const int64_t MAX_TRAIN_SIZE = 65536L;
 static constexpr const char* IVF_PARAMS_TEMPLATE =
     R"(
     {
@@ -211,6 +211,12 @@ IVF::CheckAndMappingExternalParam(const JsonType& external_param,
                 BUILD_THREAD_COUNT_KEY,
             },
         },
+        {
+            IVF_TRAIN_SAMPLE_COUNT_KEY,
+            {
+                IVF_TRAIN_SAMPLE_COUNT_KEY,
+            },
+        },
     };
 
     if (common_param.data_type_ == DataTypes::DATA_TYPE_INT8) {
@@ -231,6 +237,7 @@ IVF::CheckAndMappingExternalParam(const JsonType& external_param,
 IVF::IVF(const IVFParameterPtr& param, const IndexCommonParam& common_param)
     : InnerIndexInterface(param, common_param),
       buckets_per_data_(param->buckets_per_data),
+      train_sample_count_(param->train_sample_count),
       location_map_(common_param.allocator_.get()) {
     this->bucket_ = BucketInterface::MakeInstance(param->bucket_param, common_param);
     if (this->bucket_ == nullptr) {
@@ -253,7 +260,6 @@ IVF::IVF(const IVFParameterPtr& param, const IndexCommonParam& common_param)
     if (param->bucket_param->use_residual_) {
         this->bucket_->SetStrategy(partition_strategy_);
     }
-
     this->thread_pool_ = common_param.thread_pool_;
     if (param->build_thread_count > 1 and this->thread_pool_ == nullptr) {
         this->thread_pool_ = SafeThreadPool::FactoryDefaultThreadPool();
@@ -346,9 +352,17 @@ IVF::Train(const DatasetPtr& data) {
     if (this->is_trained_) {
         return;
     }
-    partition_strategy_->Train(data);
-    auto num_element = std::min(data->GetNumElements(), MAX_TRAIN_SIZE);
-    this->bucket_->Train(data->GetFloat32Vectors(), num_element);
+
+    int64_t total_elements = data->GetNumElements();
+    int64_t dim = data->GetDim();
+    DatasetPtr train_data =
+        vsag::sample_train_data(data, total_elements, dim, train_sample_count_, allocator_);
+    int64_t sample_count = train_data->GetNumElements();
+
+    partition_strategy_->Train(train_data);
+
+    const auto* data_ptr = train_data->GetFloat32Vectors();
+    this->bucket_->Train(data_ptr, sample_count);
     if (use_reorder_) {
         this->reorder_codes_->Train(data->GetFloat32Vectors(), data->GetNumElements());
     }
