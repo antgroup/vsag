@@ -217,6 +217,9 @@ ResidualQuantizer<QuantTmpl, metric>::TrainImpl(const DataType* data, uint64_t c
 template <typename QuantTmpl, MetricType metric>
 bool
 ResidualQuantizer<QuantTmpl, metric>::EncodeOneImpl(const DataType* data, uint8_t* codes) const {
+    // 0. init code space
+    std::fill_n(codes, this->code_size_, 0);
+
     // 1. get centroid
     Vector<float> centroid_vec(this->dim_, 0, this->allocator_);
     uint32_t centroid_id = this->partition_strategy_->ClassifyDatas(data, 1, 1)[0];
@@ -252,6 +255,7 @@ ResidualQuantizer<QuantTmpl, metric>::ProcessQueryImpl(
         computer.inner_computer_->buf_ = nullptr;
         throw VsagException(ErrorType::NO_ENOUGH_MEMORY, "bad alloc when init computer buf");
     }
+    std::fill_n(computer.inner_computer_->buf_, this->query_code_size_, 0);
 
     // 1. pre-compute all |q - c|^2 and store them into meta
     Vector<float> centroid_vec(this->dim_, 0, this->allocator_);
@@ -261,7 +265,7 @@ ResidualQuantizer<QuantTmpl, metric>::ProcessQueryImpl(
         *(float*)(computer.inner_computer_->buf_ + res_norm_offset_ + i * sizeof(float)) = norm;
     }
     *(float*)(computer.inner_computer_->buf_ + this->query_code_size_ - sizeof(float)) =
-        FP32ComputeL2Sqr(query, query, this->dim_);
+        FP32ComputeIP(query, query, this->dim_);
 
     // 2. execute quantize
     // note that only when computer.buf_ == nullptr, quantizer_ will allocate data to buf_
@@ -277,7 +281,14 @@ ResidualQuantizer<QuantTmpl, metric>::ComputeDistImpl(Computer<ResidualQuantizer
     auto centroid_id = *(uint32_t*)(codes + res_norm_offset_ + sizeof(float));
     auto n_3 =
         *(float*)(computer.inner_computer_->buf_ + res_norm_offset_ + centroid_id * sizeof(float));
-    auto quantize_dist = quantizer_->ComputeDist(*(computer.inner_computer_), codes);
+    auto quantize_dist = 1.0f - quantizer_->ComputeDist(*(computer.inner_computer_), codes);    // note that ComputeDist returns 1 - ip
+
+    auto valid_dist =
+        FP32ComputeIP((float*)codes, (float*)computer.inner_computer_->buf_, this->dim_);
+    Vector<float> centroid_vec(this->dim_, 0, this->allocator_);
+    this->partition_strategy_->GetCentroid(centroid_id, centroid_vec);
+    auto valid_dist2 =
+        FP32ComputeIP(centroid_vec.data(), (float*)computer.inner_computer_->buf_, this->dim_);
 
     if constexpr (metric == MetricType::METRIC_TYPE_L2SQR) {
         dists[0] = n1_n2 + n_3 - 2 * quantize_dist;
