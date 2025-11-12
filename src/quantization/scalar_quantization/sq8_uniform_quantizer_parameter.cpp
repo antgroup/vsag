@@ -29,7 +29,7 @@ SQ8UniformQuantizerParameter::FromJson(const JsonType& json) {
 JsonType
 SQ8UniformQuantizerParameter::ToJson() const {
     JsonType json;
-    json[QUANTIZATION_TYPE_KEY].SetString(QUANTIZATION_TYPE_VALUE_SQ8_UNIFORM);
+    json[TYPE_KEY].SetString(QUANTIZATION_TYPE_VALUE_SQ8_UNIFORM);
     return json;
 }
 }  // namespace vsag

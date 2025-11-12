@@ -53,7 +53,7 @@ template <int bit>
 JsonType
 ScalarQuantizerParameter<bit>::ToJson() const {
     JsonType json;
-    json[QUANTIZATION_TYPE_KEY].SetString(this->GetTypeName());
+    json[TYPE_KEY].SetString(this->GetTypeName());
     return json;
 }
 

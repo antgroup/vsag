@@ -56,10 +56,11 @@ TEST_CASE("CompressedGraphDataCell Basic Test", "[ut][CompressedGraphDataCell]")
         }}
         )";
 
-    auto param_str = fmt::format(graph_param_temp, max_degree, GRAPH_STORAGE_TYPE_COMPRESSED);
+    auto param_str = fmt::format(graph_param_temp, max_degree, GRAPH_STORAGE_TYPE_VALUE_COMPRESSED);
     auto param_json = JsonType::Parse(param_str);
     auto graph_param = std::make_shared<CompressedGraphDatacellParameter>();
     graph_param->FromJson(param_json);
-    REQUIRE(graph_param->graph_storage_type_ == GraphStorageTypes::GRAPH_STORAGE_TYPE_COMPRESSED);
+    REQUIRE(graph_param->graph_storage_type_ ==
+            GraphStorageTypes::GRAPH_STORAGE_TYPE_VALUE_COMPRESSED);
     TestCompressedGraphDataCell(graph_param, common_param);
 }

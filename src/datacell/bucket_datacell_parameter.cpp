@@ -39,8 +39,8 @@ BucketDataCellParameter::FromJson(const JsonType& json) {
         this->buckets_count = json[BUCKETS_COUNT_KEY].GetInt();
     }
 
-    if (json.Contains(BUCKET_USE_RESIDUAL)) {
-        this->use_residual_ = json[BUCKET_USE_RESIDUAL].GetBool();
+    if (json.Contains(BUCKET_USE_RESIDUAL_KEY)) {
+        this->use_residual_ = json[BUCKET_USE_RESIDUAL_KEY].GetBool();
     }
 }
 
@@ -48,7 +48,7 @@ JsonType
 BucketDataCellParameter::ToJson() const {
     JsonType json;
     json[IO_PARAMS_KEY].SetJson(this->io_parameter->ToJson());
-    json[BUCKET_USE_RESIDUAL].SetBool(this->use_residual_);
+    json[BUCKET_USE_RESIDUAL_KEY].SetBool(this->use_residual_);
     json[QUANTIZATION_PARAMS_KEY].SetJson(this->quantizer_parameter->ToJson());
     json[BUCKETS_COUNT_KEY].SetInt(this->buckets_count);
     return json;

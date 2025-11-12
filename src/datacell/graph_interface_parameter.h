@@ -21,8 +21,8 @@ namespace vsag {
 DEFINE_POINTER2(GraphInterfaceParam, GraphInterfaceParameter);
 
 enum class GraphStorageTypes {
-    GRAPH_STORAGE_TYPE_FLAT = 0,
-    GRAPH_STORAGE_TYPE_COMPRESSED = 1,
+    GRAPH_STORAGE_TYPE_VALUE_FLAT = 0,
+    GRAPH_STORAGE_TYPE_VALUE_COMPRESSED = 1,
     GRAPH_STORAGE_TYPE_SPARSE = 2
 };
 
@@ -32,7 +32,7 @@ public:
     GetGraphParameterByJson(GraphStorageTypes graph_type, const JsonType& json);
 
 public:
-    GraphStorageTypes graph_storage_type_{GraphStorageTypes::GRAPH_STORAGE_TYPE_FLAT};
+    GraphStorageTypes graph_storage_type_{GraphStorageTypes::GRAPH_STORAGE_TYPE_VALUE_FLAT};
 
     uint64_t max_degree_{64};
 

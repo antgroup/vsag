@@ -39,8 +39,8 @@ SINDIParameter::FromJson(const JsonType& json) {
         doc_prune_ratio = DEFAULT_DOC_PRUNE_RATIO;
     }
 
-    if (json.Contains(SPARSE_USE_REORDER)) {
-        use_reorder = json[SPARSE_USE_REORDER].GetBool();
+    if (json.Contains(USE_REORDER_KEY)) {
+        use_reorder = json[USE_REORDER_KEY].GetBool();
     } else {
         use_reorder = DEFAULT_USE_REORDER;
     }
@@ -64,7 +64,7 @@ SINDIParameter::ToJson() const {
     JsonType json;
     json[SPARSE_TERM_ID_LIMIT].SetInt(term_id_limit);
     json[SPARSE_DOC_PRUNE_RATIO].SetFloat(doc_prune_ratio);
-    json[SPARSE_USE_REORDER].SetBool(use_reorder);
+    json[USE_REORDER_KEY].SetBool(use_reorder);
     json[SPARSE_WINDOW_SIZE].SetInt(window_size);
     return json;
 }

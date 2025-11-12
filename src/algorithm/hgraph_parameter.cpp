@@ -50,9 +50,9 @@ HGraphParameter::FromJson(const JsonType& json) {
         this->build_by_base = json[HGRAPH_BUILD_BY_BASE_QUANTIZATION_KEY].GetBool();
     }
 
-    CHECK_ARGUMENT(json.Contains(HGRAPH_BASE_CODES_KEY),
-                   fmt::format("hgraph parameters must contains {}", HGRAPH_BASE_CODES_KEY));
-    const auto& base_codes_json = json[HGRAPH_BASE_CODES_KEY];
+    CHECK_ARGUMENT(json.Contains(BASE_CODES_KEY),
+                   fmt::format("hgraph parameters must contains {}", BASE_CODES_KEY));
+    const auto& base_codes_json = json[BASE_CODES_KEY];
     this->base_codes_param = CreateFlattenParam(base_codes_json);
 
     if (use_reorder) {
@@ -66,15 +66,15 @@ HGraphParameter::FromJson(const JsonType& json) {
                    fmt::format("hgraph parameters must contains {}", HGRAPH_GRAPH_KEY));
     const auto& graph_json = json[HGRAPH_GRAPH_KEY];
 
-    GraphStorageTypes graph_storage_type = GraphStorageTypes::GRAPH_STORAGE_TYPE_FLAT;
+    GraphStorageTypes graph_storage_type = GraphStorageTypes::GRAPH_STORAGE_TYPE_VALUE_FLAT;
     if (graph_json.Contains(GRAPH_STORAGE_TYPE_KEY)) {
         const auto graph_storage_type_str = graph_json[GRAPH_STORAGE_TYPE_KEY].GetString();
-        if (graph_storage_type_str == GRAPH_STORAGE_TYPE_COMPRESSED) {
-            graph_storage_type = GraphStorageTypes::GRAPH_STORAGE_TYPE_COMPRESSED;
+        if (graph_storage_type_str == GRAPH_STORAGE_TYPE_VALUE_COMPRESSED) {
+            graph_storage_type = GraphStorageTypes::GRAPH_STORAGE_TYPE_VALUE_COMPRESSED;
         }
 
-        if (graph_storage_type_str != GRAPH_STORAGE_TYPE_COMPRESSED &&
-            graph_storage_type_str != GRAPH_STORAGE_TYPE_FLAT) {
+        if (graph_storage_type_str != GRAPH_STORAGE_TYPE_VALUE_COMPRESSED &&
+            graph_storage_type_str != GRAPH_STORAGE_TYPE_VALUE_FLAT) {
             throw VsagException(
                 ErrorType::INVALID_ARGUMENT,
                 fmt::format("invalid graph_storage_type: {}", graph_storage_type_str));
@@ -85,7 +85,7 @@ HGraphParameter::FromJson(const JsonType& json) {
 
     hierarchical_graph_param = std::make_shared<SparseGraphDatacellParameter>();
     hierarchical_graph_param->max_degree_ = this->bottom_graph_param->max_degree_ / 2;
-    if (graph_storage_type == GraphStorageTypes::GRAPH_STORAGE_TYPE_FLAT) {
+    if (graph_storage_type == GraphStorageTypes::GRAPH_STORAGE_TYPE_VALUE_FLAT) {
         auto graph_param =
             std::dynamic_pointer_cast<GraphDataCellParameter>(this->bottom_graph_param);
         if (graph_param != nullptr) {
@@ -112,7 +112,7 @@ HGraphParameter::FromJson(const JsonType& json) {
 
     if (graph_json.Contains(GRAPH_TYPE_KEY)) {
         graph_type = graph_json[GRAPH_TYPE_KEY].GetString();
-        if (graph_type == GRAPH_TYPE_ODESCENT) {
+        if (graph_type == GRAPH_TYPE_VALUE_ODESCENT) {
             odescent_param = std::make_shared<ODescentParameter>();
             odescent_param->FromJson(graph_json);
         }
@@ -132,7 +132,7 @@ HGraphParameter::ToJson() const {
     json[TYPE_KEY].SetString(INDEX_TYPE_HGRAPH);
 
     json[HGRAPH_USE_ELP_OPTIMIZER_KEY].SetBool(this->use_elp_optimizer);
-    json[HGRAPH_BASE_CODES_KEY].SetJson(this->base_codes_param->ToJson());
+    json[BASE_CODES_KEY].SetJson(this->base_codes_param->ToJson());
     json[HGRAPH_GRAPH_KEY].SetJson(this->bottom_graph_param->ToJson());
     json[HGRAPH_EF_CONSTRUCTION_KEY].SetInt(this->ef_construction);
     json[HGRAPH_ALPHA_KEY].SetFloat(this->alpha);
