@@ -438,10 +438,10 @@ static const std::string BRUTE_FORCE_PARAMS_TEMPLATE =
     {
         "type": "{INDEX_BRUTE_FORCE}",
         "{IO_PARAMS_KEY}": {
-            "{IO_TYPE_KEY}": "{IO_TYPE_VALUE_MEMORY_IO}"
+            "{TYPE_KEY}": "{IO_TYPE_VALUE_MEMORY_IO}"
         },
         "{QUANTIZATION_PARAMS_KEY}": {
-            "{QUANTIZATION_TYPE_KEY}": "{QUANTIZATION_TYPE_VALUE_FP32}",
+            "{TYPE_KEY}": "{QUANTIZATION_TYPE_VALUE_FP32}",
             "subspace": 64,
             "nbits": 8,
             "{HOLD_MOLDS}": false
@@ -461,14 +461,14 @@ BruteForce::CheckAndMappingExternalParam(const JsonType& external_param,
             BRUTE_FORCE_QUANTIZATION_TYPE,
             {
                 QUANTIZATION_PARAMS_KEY,
-                QUANTIZATION_TYPE_KEY,
+                TYPE_KEY,
             },
         },
         {
             BRUTE_FORCE_IO_TYPE,
             {
                 IO_PARAMS_KEY,
-                IO_TYPE_KEY,
+                TYPE_KEY,
             },
         },
         {

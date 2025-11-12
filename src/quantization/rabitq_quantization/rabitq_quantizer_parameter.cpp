@@ -26,24 +26,24 @@ RaBitQuantizerParameter::RaBitQuantizerParameter()
 
 void
 RaBitQuantizerParameter::FromJson(const JsonType& json) {
-    if (json.Contains(PCA_DIM)) {
-        this->pca_dim_ = json[PCA_DIM].GetInt();
+    if (json.Contains(PCA_DIM_KEY)) {
+        this->pca_dim_ = json[PCA_DIM_KEY].GetInt();
     }
-    if (json.Contains(RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY)) {
-        this->num_bits_per_dim_query_ = json[RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY].GetInt();
+    if (json.Contains(RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY_KEY)) {
+        this->num_bits_per_dim_query_ = json[RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY_KEY].GetInt();
     }
-    if (json.Contains(USE_FHT)) {
-        this->use_fht_ = json[USE_FHT].GetBool();
+    if (json.Contains(USE_FHT_KEY)) {
+        this->use_fht_ = json[USE_FHT_KEY].GetBool();
     }
 }
 
 JsonType
 RaBitQuantizerParameter::ToJson() const {
     JsonType json;
-    json[QUANTIZATION_TYPE_KEY].SetString(QUANTIZATION_TYPE_VALUE_RABITQ);
-    json[PCA_DIM].SetInt(this->pca_dim_);
-    json[RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY].SetInt(this->num_bits_per_dim_query_);
-    json[USE_FHT].SetBool(this->use_fht_);
+    json[TYPE_KEY].SetString(QUANTIZATION_TYPE_VALUE_RABITQ);
+    json[PCA_DIM_KEY].SetInt(this->pca_dim_);
+    json[RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY_KEY].SetInt(this->num_bits_per_dim_query_);
+    json[USE_FHT_KEY].SetBool(this->use_fht_);
     return json;
 }
 
