@@ -40,7 +40,8 @@ public:
                                      bool use_residual = false,
                                      int buckets_per_data = 1,
                                      bool use_attr_filter = false,
-                                     int thread_count = 1);
+                                     int thread_count = 1,
+                                     int64_t sample_count = 65536L);
 
     static IVFResourcePtr
     GetResource(bool sample = true);
@@ -127,9 +128,9 @@ IVFTestIndex::GenerateIVFBuildParametersString(const std::string& metric_type,
                                                bool use_residual,
                                                int buckets_per_data,
                                                bool use_attr_filter,
-                                               int thread_count) {
+                                               int thread_count,
+                                               int64_t sample_count) {
     std::string build_parameters_str;
-
     constexpr auto parameter_temp = R"(
     {{
         "dtype": "float32",
@@ -145,7 +146,8 @@ IVFTestIndex::GenerateIVFBuildParametersString(const std::string& metric_type,
             "use_residual": {},
             "buckets_per_data": {},
             "use_attribute_filter": {},
-            "thread_count": {}
+            "thread_count": {},
+            "ivf_train_sample_count": {}
         }}
     }}
     )";
@@ -174,7 +176,8 @@ IVFTestIndex::GenerateIVFBuildParametersString(const std::string& metric_type,
                                        use_residual,
                                        buckets_per_data,
                                        use_attr_filter,
-                                       thread_count);
+                                       thread_count,
+                                       sample_count);
     INFO(build_parameters_str);
     return build_parameters_str;
 }

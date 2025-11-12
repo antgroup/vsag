@@ -127,6 +127,7 @@ const char* const IVF_TRAIN_TYPE_KEY = "ivf_train_type";
 const char* const IVF_TRAIN_TYPE_RANDOM = "random";
 const char* const IVF_TRAIN_TYPE_KMEANS = "kmeans";
 
+const char* const IVF_TRAIN_SAMPLE_COUNT_KEY = "ivf_train_sample_count";
 const char* const IVF_PARTITION_STRATEGY_PARAMS_KEY = "partition_strategy";
 const char* const IVF_PARTITION_STRATEGY_TYPE_KEY = "partition_strategy_type";
 const char* const IVF_PARTITION_STRATEGY_TYPE_NEAREST = "ivf";

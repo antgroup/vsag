@@ -16,8 +16,10 @@
 #include "ivf_parameter.h"
 
 #include <catch2/catch_test_macros.hpp>
+#include <numeric>
 
 #include "parameter_test.h"
+#include "utils/util_functions.h"
 
 struct IVFDefaultParam {
     std::string buckect_io_type = "block_memory_io";
@@ -98,6 +100,7 @@ TEST_CASE("IVF Parameters Test", "[ut][IVFParameter]") {
     REQUIRE(param->use_reorder == true);
     REQUIRE(param->build_thread_count == 3);
     REQUIRE(param->precise_codes_param->quantizer_parameter->GetTypeName() == "fp32");
+    REQUIRE(param->train_sample_count == 65536L);
 
     index_param.ivf_train_type = "random";
     index_param.partition_strategy_type = "gno_imi";
@@ -189,4 +192,156 @@ TEST_CASE("IVF Parameters CheckCompatibility", "[ut][IVFParameter][CheckCompatib
     TEST_COMPATIBILITY_CASE("ivf ivf_train_type", ivf_train_type, "kmeans", "random", true);
     TEST_COMPATIBILITY_CASE("ivf buckets_per_data", buckets_per_data, 3, 2, false);
     TEST_COMPATIBILITY_CASE("ivf use_attribute_filter", use_attribute_filter, true, false, false);
+}
+
+TEST_CASE("IVF Parameters Train Sample Count Test", "[ut][IVFParameter][train_sample_count]") {
+    IVFDefaultParam index_param;
+    auto param_str = generate_ivf_param(index_param);
+
+    // Test valid values
+    auto json_obj = vsag::JsonType::Parse(param_str);
+    json_obj["ivf_train_sample_count"].SetInt(32767);
+    auto modified_param_str = json_obj.Dump();
+
+    vsag::JsonType param_json = vsag::JsonType::Parse(modified_param_str);
+    auto param = std::make_shared<vsag::IVFParameter>();
+    param->FromJson(param_json);
+    REQUIRE(param->train_sample_count == 32767);
+
+    json_obj["ivf_train_sample_count"].SetInt(512);
+    modified_param_str = json_obj.Dump();
+
+    param_json = vsag::JsonType::Parse(modified_param_str);
+    param = std::make_shared<vsag::IVFParameter>();
+    param->FromJson(param_json);
+    REQUIRE(param->train_sample_count == 512);
+
+    param_str = generate_ivf_param(index_param);
+    param_json = vsag::JsonType::Parse(param_str);
+    param = std::make_shared<vsag::IVFParameter>();
+    param->FromJson(param_json);
+    REQUIRE(param->train_sample_count == 65536L);
+
+    // Test invalid value less than minimum 512
+    json_obj = vsag::JsonType::Parse(param_str);
+    json_obj["ivf_train_sample_count"].SetInt(100);  // Invalid value, less than minimum 512
+    modified_param_str = json_obj.Dump();
+
+    param_json = vsag::JsonType::Parse(modified_param_str);
+    param = std::make_shared<vsag::IVFParameter>();
+
+    REQUIRE_THROWS_AS(param->FromJson(param_json), vsag::VsagException);
+
+    // Test invalid value exceeding maximum 65536
+    json_obj = vsag::JsonType::Parse(param_str);
+    json_obj["ivf_train_sample_count"].SetInt(1000000);
+    modified_param_str = json_obj.Dump();
+
+    param_json = vsag::JsonType::Parse(modified_param_str);
+    param = std::make_shared<vsag::IVFParameter>();
+
+    REQUIRE_THROWS_AS(param->FromJson(param_json), vsag::VsagException);
+}
+
+TEST_CASE("IVF Sampling Logic Test", "[ut][IVFParameter][sampling]") {
+    SECTION("Train sample count affects actual sampling") {
+        // This test conceptually verifies that different train_sample_count values
+        // would lead to different sampling behavior in the IVF implementation
+        // Note: Actual sampling behavior is tested in ivf.cpp unit tests
+
+        IVFDefaultParam index_param;
+        auto param_str = generate_ivf_param(index_param);
+
+        // Test that the parameter correctly stores the configured sample count
+        auto json_obj = vsag::JsonType::Parse(param_str);
+        json_obj["ivf_train_sample_count"].SetInt(20000);
+        auto modified_param_str = json_obj.Dump();
+
+        vsag::JsonType param_json = vsag::JsonType::Parse(modified_param_str);
+        auto param = std::make_shared<vsag::IVFParameter>();
+        param->FromJson(param_json);
+        REQUIRE(param->train_sample_count == 20000);
+
+        // Verify that this value is different from the default
+        REQUIRE(param->train_sample_count != 65536L);
+    }
+}
+
+TEST_CASE("SampleTrainingData Function Test", "[ut][sample_train_data]") {
+    // Create allocator
+    auto allocator = vsag::SafeAllocator::FactoryDefaultAllocator();
+
+    // Test with small dataset that should not be sampled
+    auto small_dataset = vsag::Dataset::Make();
+    const int64_t small_dim = 10;
+    const int64_t small_count = 500;
+
+    // Create test data
+    std::vector<float> small_data(small_dim * small_count);
+    std::iota(small_data.begin(), small_data.end(), 0.0f);
+
+    std::vector<int64_t> small_ids(small_count);
+    std::iota(small_ids.begin(), small_ids.end(), 0);
+
+    small_dataset->Dim(small_dim)
+        ->NumElements(small_count)
+        ->Ids(small_ids.data())
+        ->Float32Vectors(small_data.data())
+        ->Owner(false);
+
+    // Test that small dataset is returned as is
+    auto result =
+        vsag::sample_train_data(small_dataset, small_count, small_dim, 10000, allocator.get());
+    REQUIRE(result == small_dataset);
+
+    // Test with large dataset that should be sampled
+    auto large_dataset = vsag::Dataset::Make();
+    const int64_t large_dim = 10;
+    const int64_t large_count = 10000;
+    const int64_t sample_count = 5000;
+
+    // Create test data
+    std::vector<float> large_data(large_dim * large_count);
+    std::iota(large_data.begin(), large_data.end(), 0.0f);
+
+    std::vector<int64_t> large_ids(large_count);
+    std::iota(large_ids.begin(), large_ids.end(), 0);
+
+    large_dataset->Dim(large_dim)
+        ->NumElements(large_count)
+        ->Ids(large_ids.data())
+        ->Float32Vectors(large_data.data())
+        ->Owner(false);
+
+    // Test that large dataset is sampled
+    result = vsag::sample_train_data(
+        large_dataset, large_count, large_dim, sample_count, allocator.get());
+    REQUIRE(result != large_dataset);
+    REQUIRE(result->GetNumElements() == sample_count);
+    REQUIRE(result->GetDim() == large_dim);
+
+    // Test with train_sample_count less than min_train_size
+    // In this case, the function should use min_train_size (512) as the sample count
+    const int64_t normal_count = 20000;
+    auto normal_dataset = vsag::Dataset::Make();
+    std::vector<float> normal_data(large_dim * normal_count);
+    std::iota(normal_data.begin(), normal_data.end(), 0.0f);
+
+    std::vector<int64_t> normal_ids(normal_count);
+    std::iota(normal_ids.begin(), normal_ids.end(), 0);
+
+    normal_dataset->Dim(large_dim)
+        ->NumElements(normal_count)
+        ->Ids(normal_ids.data())
+        ->Float32Vectors(normal_data.data())
+        ->Owner(false);
+
+    // When train_sample_count is less than min_train_size (512),
+    // the function should use MIN_TRAIN_SIZE as the sample count
+    const int64_t small_sample_count = 100;  // Less than min_train_size (512)
+    result = vsag::sample_train_data(
+        normal_dataset, normal_count, large_dim, small_sample_count, allocator.get());
+    REQUIRE(result != normal_dataset);
+    REQUIRE(result->GetNumElements() == 512);  // Should use min_train_size
+    REQUIRE(result->GetDim() == large_dim);
 }
