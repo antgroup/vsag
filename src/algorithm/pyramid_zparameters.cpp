@@ -65,7 +65,7 @@ PyramidParameters::ToJson() const {
     json[BASE_CODES_KEY].SetJson(base_codes_param->ToJson());
 
     auto graph_json = graph_param->ToJson();
-    graph_json[ALPHA_KEY].SetBool(this->alpha);
+    graph_json[ALPHA_KEY].SetFloat(this->alpha);
     graph_json[GRAPH_TYPE_KEY].SetString(this->graph_type);
     if (this->graph_type == GRAPH_TYPE_ODESCENT) {
         graph_json.UpdateJson(odescent_param->ToJson());
