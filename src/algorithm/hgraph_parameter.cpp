@@ -62,9 +62,9 @@ HGraphParameter::FromJson(const JsonType& json) {
         this->precise_codes_param = CreateFlattenParam(precise_codes_json);
     }
 
-    CHECK_ARGUMENT(json.Contains(HGRAPH_GRAPH_KEY),
-                   fmt::format("hgraph parameters must contains {}", HGRAPH_GRAPH_KEY));
-    const auto& graph_json = json[HGRAPH_GRAPH_KEY];
+    CHECK_ARGUMENT(json.Contains(GRAPH_KEY),
+                   fmt::format("hgraph parameters must contains {}", GRAPH_KEY));
+    const auto& graph_json = json[GRAPH_KEY];
 
     GraphStorageTypes graph_storage_type = GraphStorageTypes::GRAPH_STORAGE_TYPE_VALUE_FLAT;
     if (graph_json.Contains(GRAPH_STORAGE_TYPE_KEY)) {
@@ -98,12 +98,12 @@ HGraphParameter::FromJson(const JsonType& json) {
         hierarchical_graph_param->support_delete_ = false;
     }
 
-    if (json.Contains(HGRAPH_EF_CONSTRUCTION_KEY)) {
-        this->ef_construction = json[HGRAPH_EF_CONSTRUCTION_KEY].GetInt();
+    if (json.Contains(EF_CONSTRUCTION_KEY)) {
+        this->ef_construction = json[EF_CONSTRUCTION_KEY].GetInt();
     }
 
-    if (json.Contains(HGRAPH_ALPHA_KEY)) {
-        this->alpha = json[HGRAPH_ALPHA_KEY].GetFloat();
+    if (json.Contains(ALPHA_KEY)) {
+        this->alpha = json[ALPHA_KEY].GetFloat();
     }
 
     if (json.Contains(BUILD_THREAD_COUNT_KEY)) {
@@ -133,9 +133,9 @@ HGraphParameter::ToJson() const {
 
     json[HGRAPH_USE_ELP_OPTIMIZER_KEY].SetBool(this->use_elp_optimizer);
     json[BASE_CODES_KEY].SetJson(this->base_codes_param->ToJson());
-    json[HGRAPH_GRAPH_KEY].SetJson(this->bottom_graph_param->ToJson());
-    json[HGRAPH_EF_CONSTRUCTION_KEY].SetInt(this->ef_construction);
-    json[HGRAPH_ALPHA_KEY].SetFloat(this->alpha);
+    json[GRAPH_KEY].SetJson(this->bottom_graph_param->ToJson());
+    json[EF_CONSTRUCTION_KEY].SetInt(this->ef_construction);
+    json[ALPHA_KEY].SetFloat(this->alpha);
     json[SUPPORT_DUPLICATE].SetBool(this->support_duplicate);
     return json;
 }

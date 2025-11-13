@@ -103,8 +103,6 @@ const char* const HNSW_PARAMETER_USE_STATIC = "use_static";
 const char* const HNSW_PARAMETER_REVERSED_EDGES = "use_reversed_edges";
 const char* const HNSW_PARAMETER_SKIP_RATIO = "skip_ratio";
 
-const char* const PYRAMID_PARAMETER_BASE_CODES = "base_codes";
-
 const char* const INDEX_PARAM = "index_param";
 
 const char PART_SLASH = '/';
@@ -181,6 +179,23 @@ const char* const IVF_BASE_QUANTIZATION_TYPE = "base_quantization_type";
 const char* const IVF_BASE_IO_TYPE = "base_io_type";
 const char* const IVF_BASE_PQ_DIM = "base_pq_dim";
 const char* const IVF_BASE_FILE_PATH = "base_file_path";
+
+const char* const PYRAMID_EF_CONSTRUCTION = EF_CONSTRUCTION_KEY;
+const char* const PYRAMID_USE_REORDER = USE_REORDER_KEY;
+const char* const PYRAMID_BASE_QUANTIZATION_TYPE = "base_quantization_type";
+const char* const PYRAMID_GRAPH_MAX_DEGREE = "max_degree";
+const char* const PYRAMID_BUILD_ALPHA = "alpha";
+const char* const PYRAMID_GRAPH_TYPE = "graph_type";
+const char* const PYRAMID_GRAPH_STORAGE_TYPE = "graph_storage_type";
+const char* const PYRAMID_BUILD_THREAD_COUNT = "build_thread_count";
+const char* const PYRAMID_PRECISE_QUANTIZATION_TYPE = "precise_quantization_type";
+const char* const PYRAMID_BASE_IO_TYPE = "base_io_type";
+const char* const PYRAMID_BASE_PQ_DIM = "base_pq_dim";
+const char* const PYRAMID_BASE_FILE_PATH = "base_file_path";
+const char* const PYRAMID_PRECISE_IO_TYPE = "precise_io_type";
+const char* const PYRAMID_PRECISE_FILE_PATH = "precise_file_path";
+const char* const PYRAMID_PARAMETER_EF_SEARCH = "ef_search";
+const char* const PYRAMID_NO_BUILD_LEVELS = "no_build_levels";
 
 const char* const GNO_IMI_FIRST_ORDER_BUCKETS_COUNT = "first_order_buckets_count";
 const char* const GNO_IMI_SECOND_ORDER_BUCKETS_COUNT = "second_order_buckets_count";

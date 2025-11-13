@@ -89,7 +89,7 @@ public:
           alpha_(pyramid_param->alpha) {
         searcher_ = std::make_unique<BasicSearcher>(common_param_);
         flatten_interface_ptr_ =
-            FlattenInterface::MakeInstance(pyramid_param_->flatten_data_cell_param, common_param_);
+            FlattenInterface::MakeInstance(pyramid_param_->base_codes_param, common_param_);
         root_ = std::make_shared<IndexNode>(&common_param_, pyramid_param_->graph_param);
     }
 

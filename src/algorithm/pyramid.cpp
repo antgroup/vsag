@@ -15,6 +15,8 @@
 
 #include "pyramid.h"
 
+#include <iostream>
+
 #include "datacell/flatten_interface.h"
 #include "impl/heap/standard_heap.h"
 #include "impl/odescent/odescent_graph_builder.h"
@@ -23,6 +25,7 @@
 #include "storage/empty_index_binary_set.h"
 #include "storage/serialization.h"
 #include "utils/slow_task_timer.h"
+#include "utils/util_functions.h"
 
 namespace vsag {
 
@@ -473,11 +476,95 @@ Pyramid::InitFeatures() {
     });
 }
 
+static const std::string HGRAPH_PARAMS_TEMPLATE =
+    R"(
+    {
+        "type": "{INDEX_TYPE_PYRAMID}",
+        "{USE_REORDER_KEY}": false,
+        "{GRAPH_KEY}": {
+            "{IO_PARAMS_KEY}": {
+                "{TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
+                "{IO_FILE_PATH_KEY}": "{DEFAULT_FILE_PATH_VALUE}"
+            },
+            "{GRAPH_TYPE_KEY}": "{GRAPH_TYPE_VALUE_NSW}",
+            "{GRAPH_STORAGE_TYPE_KEY}": "{GRAPH_STORAGE_TYPE_VALUE_FLAT}",
+            "{ODESCENT_PARAMETER_BUILD_BLOCK_SIZE}": 10000,
+            "{ODESCENT_PARAMETER_MIN_IN_DEGREE}": 1,
+            "{ODESCENT_PARAMETER_ALPHA}": 1.2,
+            "{ODESCENT_PARAMETER_GRAPH_ITER_TURN}": 30,
+            "{ODESCENT_PARAMETER_NEIGHBOR_SAMPLE_RATE}": 0.2,
+            "{GRAPH_PARAM_MAX_DEGREE_KEY}": 64,
+            "{GRAPH_PARAM_INIT_MAX_CAPACITY_KEY}": 100,
+            "{GRAPH_SUPPORT_REMOVE}": false,
+            "{REMOVE_FLAG_BIT}": 8
+        },
+        "{BASE_CODES_KEY}": {
+            "{IO_PARAMS_KEY}": {
+                "{TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
+                "{IO_FILE_PATH_KEY}": "{DEFAULT_FILE_PATH_VALUE}"
+            },
+            "{CODES_TYPE_KEY}": "flatten",
+            "{QUANTIZATION_PARAMS_KEY}": {
+                "{TYPE_KEY}": "{QUANTIZATION_TYPE_VALUE_FP32}",
+                "{SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE_KEY}": 0.05,
+                "{PCA_DIM_KEY}": 0,
+                "{RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY_KEY}": 32,
+                "{TQ_CHAIN_KEY}": "",
+                "nbits": 8,
+                "{PRODUCT_QUANTIZATION_DIM_KEY}": 1,
+                "{HOLD_MOLDS}": false
+            }
+        },
+        "{PRECISE_CODES_KEY}": {
+            "{IO_PARAMS_KEY}": {
+                "{TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
+                "{IO_FILE_PATH_KEY}": "{DEFAULT_FILE_PATH_VALUE}"
+            },
+            "{CODES_TYPE_KEY}": "flatten",
+            "{QUANTIZATION_PARAMS_KEY}": {
+                "{TYPE_KEY}": "{QUANTIZATION_TYPE_VALUE_FP32}",
+                "{SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE_KEY}": 0.05,
+                "{PCA_DIM_KEY}": 0,
+                "{PRODUCT_QUANTIZATION_DIM_KEY}": 1,
+                "{HOLD_MOLDS}": false
+            }
+        },
+        "{BUILD_THREAD_COUNT_KEY}": 16,
+        "{EF_CONSTRUCTION_KEY}": 400,
+        "{NO_BUILD_LEVELS}":[]
+    })";
+
 ParamPtr
 Pyramid::CheckAndMappingExternalParam(const JsonType& external_param,
                                       const IndexCommonParam& common_param) {
+    const ConstParamMap external_mapping = {
+        {PYRAMID_EF_CONSTRUCTION, {EF_CONSTRUCTION_KEY}},
+        {PYRAMID_USE_REORDER, {USE_REORDER_KEY}},
+        {PYRAMID_BASE_QUANTIZATION_TYPE, {BASE_CODES_KEY, QUANTIZATION_PARAMS_KEY, TYPE_KEY}},
+        {PYRAMID_PRECISE_QUANTIZATION_TYPE, {PRECISE_CODES_KEY, QUANTIZATION_PARAMS_KEY, TYPE_KEY}},
+        {PYRAMID_GRAPH_MAX_DEGREE, {GRAPH_KEY, GRAPH_PARAM_MAX_DEGREE_KEY}},
+        {PYRAMID_BASE_IO_TYPE, {BASE_CODES_KEY, IO_PARAMS_KEY, TYPE_KEY}},
+        {PYRAMID_BUILD_ALPHA, {GRAPH_KEY, ODESCENT_PARAMETER_ALPHA}},
+        {PYRAMID_GRAPH_TYPE, {GRAPH_KEY, GRAPH_TYPE_KEY}},
+        {PYRAMID_GRAPH_STORAGE_TYPE, {GRAPH_KEY, GRAPH_STORAGE_TYPE_KEY}},
+        {PYRAMID_PRECISE_IO_TYPE, {PRECISE_CODES_KEY, IO_PARAMS_KEY, TYPE_KEY}},
+        {PYRAMID_BUILD_THREAD_COUNT, {BUILD_THREAD_COUNT_KEY}},
+        {PYRAMID_NO_BUILD_LEVELS, {NO_BUILD_LEVELS}},
+        {PYRAMID_BASE_PQ_DIM,
+         {BASE_CODES_KEY, QUANTIZATION_PARAMS_KEY, PRODUCT_QUANTIZATION_DIM_KEY}},
+        {PYRAMID_BASE_FILE_PATH, {BASE_CODES_KEY, IO_PARAMS_KEY, IO_FILE_PATH_KEY}},
+        {PYRAMID_PRECISE_FILE_PATH, {PRECISE_CODES_KEY, IO_PARAMS_KEY, IO_FILE_PATH_KEY}},
+        {ODESCENT_PARAMETER_BUILD_BLOCK_SIZE, {GRAPH_KEY, ODESCENT_PARAMETER_BUILD_BLOCK_SIZE}},
+        {ODESCENT_PARAMETER_MIN_IN_DEGREE, {GRAPH_KEY, ODESCENT_PARAMETER_MIN_IN_DEGREE}},
+        {ODESCENT_PARAMETER_GRAPH_ITER_TURN, {GRAPH_KEY, ODESCENT_PARAMETER_GRAPH_ITER_TURN}},
+        {ODESCENT_PARAMETER_NEIGHBOR_SAMPLE_RATE,
+         {GRAPH_KEY, ODESCENT_PARAMETER_NEIGHBOR_SAMPLE_RATE}}};
+
+    std::string str = format_map(HGRAPH_PARAMS_TEMPLATE, DEFAULT_MAP);
+    auto inner_json = JsonType::Parse(str);
+    mapping_external_param_to_inner(external_param, external_mapping, inner_json);
     auto pyramid_params = std::make_shared<PyramidParameters>();
-    pyramid_params->FromJson(external_param);
+    pyramid_params->FromJson(inner_json);
     return pyramid_params;
 }
 
