@@ -19,6 +19,8 @@
 
 #include <cstring>
 #include <fstream>
+#include <streambuf>
+#include <type_traits>
 
 Error_t success = {VSAG_SUCCESS, "success"};
 
@@ -162,6 +164,113 @@ vsag_deserialize_file(vsag_index_t index, const char* file_path) {
             std::ifstream file(file_path, std::ios::binary);
             vsag_index->index_->Deserialize(file);
             file.close();
+        }
+        return success;
+    } catch (const std::exception& e) {
+        return make_error(e);
+    }
+}
+
+Error_t
+vsag_serialize_write_func(vsag_index_t index,
+                          void (*write_func)(OffsetType offset, SizeType size, const void* data)) {
+    try {
+        auto* vsag_index = static_cast<VsagIndex*>(index);
+        if (vsag_index != nullptr) {
+            vsag_index->index_->Serialize(write_func);
+        }
+        return success;
+    } catch (const std::exception& e) {
+        return make_error(e);
+    }
+}
+
+class RandomAccessStreamBuf : public std::streambuf {
+public:
+    using ReadFunc = void (*)(OffsetType offset, SizeType size, void* data);
+    using SizeCallback = std::function<OffsetType()>;
+
+    explicit RandomAccessStreamBuf(ReadFunc read_func, SizeCallback size_cb = nullptr)
+        : read_func_(read_func), size_cb_(std::move(size_cb)) {
+    }
+
+protected:
+    std::streamsize
+    xsgetn(char* s, std::streamsize count) override {
+        if (read_func_ == nullptr or count <= 0) {
+            return 0;
+        }
+
+        auto n = static_cast<SizeType>(count);
+
+        read_func_(current_pos_, n, s);
+
+        current_pos_ += n;
+        return count;
+    }
+
+    pos_type
+    seekoff(off_type off,
+            std::ios_base::seekdir way,
+            std::ios_base::openmode which = std::ios_base::in) override {
+        if (which != std::ios_base::in) {
+            return {-1};
+        }
+
+        OffsetType new_pos;
+        switch (way) {
+            case std::ios_base::beg:
+                if (off < 0) {
+                    return {-1};
+                }
+                new_pos = static_cast<OffsetType>(off);
+                break;
+            case std::ios_base::cur:
+                if (off >= 0) {
+                    new_pos = current_pos_ + static_cast<OffsetType>(off);
+                } else {
+                    auto abs_off = static_cast<OffsetType>(-off);
+                    if (abs_off > current_pos_) {
+                        return {-1};
+                    }
+                    new_pos = current_pos_ - abs_off;
+                }
+                break;
+            case std::ios_base::end:
+                if (!size_cb_) {
+                    return {-1};
+                }
+                new_pos = size_cb_() + static_cast<OffsetType>(off);
+                break;
+            default:
+                return {-1};
+        }
+
+        current_pos_ = new_pos;
+        return {static_cast<off_type>(new_pos)};
+    }
+
+    pos_type
+    seekpos(pos_type sp, std::ios_base::openmode which = std::ios_base::in) override {
+        return seekoff(off_type(sp), std::ios_base::beg, which);
+    }
+
+private:
+    ReadFunc read_func_;
+    SizeCallback size_cb_;
+    OffsetType current_pos_{0};
+};
+
+Error_t
+vsag_deserialize_read_func(vsag_index_t index,
+                           void (*read_func)(OffsetType offset, SizeType size, void* data),
+                           SizeType (*size_func)()) {
+    try {
+        auto* vsag_index = static_cast<VsagIndex*>(index);
+        if (vsag_index != nullptr) {
+            RandomAccessStreamBuf stream_buf(read_func, size_func);
+            std::istream stream(&stream_buf);
+            vsag_index->index_->Deserialize(stream);
         }
         return success;
     } catch (const std::exception& e) {
