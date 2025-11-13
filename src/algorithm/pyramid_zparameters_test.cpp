@@ -16,7 +16,6 @@
 #include "algorithm/pyramid_zparameters.h"
 
 #include <catch2/catch_test_macros.hpp>
-#include <iostream>
 
 #include "parameter_test.h"
 
