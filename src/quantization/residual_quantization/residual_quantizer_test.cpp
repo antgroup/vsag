@@ -92,7 +92,6 @@ TestSerializeDeserializeRQ(std::string base_quantizer_type, uint64_t dim, int co
 TEST_CASE("RQ Compute", "[ut][ResidualQuantizer]") {
     constexpr MetricType metrics[3] = {
         MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_IP, MetricType::METRIC_TYPE_COSINE};
-    std::string base_quantizer_type = GENERATE("rom, pca, fp32", "rom, fp32", "fht, fp32");
 
     for (auto dim : dims) {
         for (auto count : counts) {
@@ -103,12 +102,12 @@ TEST_CASE("RQ Compute", "[ut][ResidualQuantizer]") {
             TestComputeMetricRQ<FP32Quantizer<MetricType::METRIC_TYPE_IP>, metrics[2]>(
                 "fp32", dim, count);
 
-            TestComputeMetricRQ<SQ8Quantizer<MetricType::METRIC_TYPE_IP>, metrics[0]>(
-                "sq8", dim, count);
-            TestComputeMetricRQ<SQ8Quantizer<MetricType::METRIC_TYPE_IP>, metrics[1]>(
-                "sq8", dim, count);
-            TestComputeMetricRQ<SQ8Quantizer<MetricType::METRIC_TYPE_IP>, metrics[2]>(
-                "sq8", dim, count);
+            TestComputeMetricRQ<FP16Quantizer<MetricType::METRIC_TYPE_IP>, metrics[0]>(
+                "fp16", dim, count);
+            TestComputeMetricRQ<FP16Quantizer<MetricType::METRIC_TYPE_IP>, metrics[1]>(
+                "fp16", dim, count);
+            TestComputeMetricRQ<FP16Quantizer<MetricType::METRIC_TYPE_IP>, metrics[2]>(
+                "fp16", dim, count);
         }
     }
 }

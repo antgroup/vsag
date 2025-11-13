@@ -103,3 +103,6 @@ target_link_libraries (402_persistent_streaming vsag)
 
 add_executable (501_quantization_transform 501_quantization_transform.cpp)
 target_link_libraries (501_quantization_transform vsag)
+
+add_executable (502_quantization_residual 502_quantization_residual.cpp)
+target_link_libraries (502_quantization_residual vsag)

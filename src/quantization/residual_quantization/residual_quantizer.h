@@ -40,6 +40,7 @@ namespace vsag {
 // | code (quantizer)        | uint8_t[m]          | m            | 0                      |
 // | (x - c3)^2 + 2c(x - c3) | float               | 4            | m                      |
 // | centroid_id (e.g., c3)  | uint32_t            | 4            | m + 4                  |
+// | x_norm                  | float               | 4            | m + 8                  |
 // +-------------------------+---------------------+--------------+------------------------+
 //
 // Notes:
@@ -61,7 +62,7 @@ namespace vsag {
 // | (q - c1)^2              | float               | 4            | m                      |
 // | (q - c2)^2              | float               | 4            | m + 4                  |
 // | ...                     | float               | 4 each       | m + 4 * k (k >= 1)     |
-// | q^2                     | float               | 4            | m + 4 * n              |
+// | q_norm                  | float               | 4            | m + 4 * n              |
 // +-------------------------+---------------------+--------------+------------------------+
 //
 // Notes:
@@ -188,7 +189,7 @@ ResidualQuantizer<QuantTmpl, metric>::ResidualQuantizer(const ResidualQuantizerP
         (this->quantizer_->GetCodeSize() + align_size_ - 1) / align_size_ * align_size_;
 
     // 4. compute code size
-    this->code_size_ = this->res_norm_offset_ + sizeof(float) * 2;
+    this->code_size_ = this->res_norm_offset_ + sizeof(float) * 3;
     this->query_code_size_ =
         this->res_norm_offset_ + sizeof(float) * centroids_count_ + sizeof(float);
 }
@@ -233,11 +234,13 @@ ResidualQuantizer<QuantTmpl, metric>::EncodeOneImpl(const DataType* data, uint8_
     float n1 = FP32ComputeIP(data_buffer.data(), data_buffer.data(), this->dim_);  // (x - c)^2
     float n2 = 2 * FP32ComputeIP(data_buffer.data(),
                                  (const float*)(centroid_vec.data()),
-                                 this->dim_);  // 2c * (x - c)
+                                 this->dim_);                    // 2c * (x - c)
+    float x_norm = sqrt(FP32ComputeIP(data, data, this->dim_));  // |x|
 
     // 3. store norm data
     *(float*)(codes + res_norm_offset_) = n1 + n2;
     *(uint32_t*)(codes + res_norm_offset_ + sizeof(float)) = centroid_id;
+    *(float*)(codes + this->code_size_ - sizeof(float)) = x_norm;
 
     // 4. execute quantize
     return quantizer_->EncodeOne(data_buffer.data(), codes);
@@ -265,7 +268,7 @@ ResidualQuantizer<QuantTmpl, metric>::ProcessQueryImpl(
         *(float*)(computer.inner_computer_->buf_ + res_norm_offset_ + i * sizeof(float)) = norm;
     }
     *(float*)(computer.inner_computer_->buf_ + this->query_code_size_ - sizeof(float)) =
-        FP32ComputeIP(query, query, this->dim_);
+        std::sqrt(FP32ComputeIP(query, query, this->dim_));
 
     // 2. execute quantize
     // note that only when computer.buf_ == nullptr, quantizer_ will allocate data to buf_
@@ -295,8 +298,9 @@ ResidualQuantizer<QuantTmpl, metric>::ComputeDistImpl(Computer<ResidualQuantizer
     if constexpr (metric == MetricType::METRIC_TYPE_L2SQR) {
         dists[0] = n1_n2 + n_3 - 2 * quantize_dist;
     } else {
-        auto q_sqr =
+        auto q_norm =
             *(float*)(computer.inner_computer_->buf_ + this->query_code_size_ - sizeof(float));
+        auto q_sqr = q_norm * q_norm;
         auto c_sqr = centroids_norm_[centroid_id];
         auto qc = (q_sqr + c_sqr - n_3) / 2.0;
 
@@ -306,7 +310,12 @@ ResidualQuantizer<QuantTmpl, metric>::ComputeDistImpl(Computer<ResidualQuantizer
             dists[0] = 1 - ip;
         }
         if constexpr (metric == MetricType::METRIC_TYPE_COSINE) {
-            dists[0] = ip;
+            auto x_norm = *(float*)(codes + this->code_size_ - sizeof(float));
+            if (ip < 1e-3 or q_norm < 1e-3 or x_norm < 1e-3) {
+                dists[0] = 1;
+            } else {
+                dists[0] = 1 - ip / (q_norm * x_norm);
+            }
         }
     }
 };

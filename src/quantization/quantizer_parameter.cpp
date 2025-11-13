@@ -25,6 +25,7 @@
 #include "product_quantization/product_quantizer_parameter.h"
 #include "quantization/int8_quantizer_parameter.h"
 #include "rabitq_quantization/rabitq_quantizer_parameter.h"
+#include "residual_quantization/residual_quantizer_parameter.h"
 #include "scalar_quantization/sq_parameter_headers.h"
 #include "sparse_quantization/sparse_quantizer_parameter.h"
 #include "transform_quantization/transform_quantizer_parameter.h"
@@ -71,6 +72,9 @@ QuantizerParameter::GetQuantizerParameterByJson(const JsonType& json) {
     } else if (type_name == QUANTIZATION_TYPE_VALUE_TQ) {
         quantizer_param = std::make_shared<TransformQuantizerParameter>();
         quantizer_param->FromJson(json);
+    } else if (type_name == QUANTIZATION_TYPE_VALUE_RQ) {
+        quantizer_param = std::make_shared<ResidualQuantizerParameter>();
+        quantizer_param->FromJson(json);
     } else if (type_name == QUANTIZATION_TYPE_VALUE_INT8) {
         quantizer_param = std::make_shared<INT8QuantizerParameter>();
         quantizer_param->FromJson(json);
@@ -94,7 +98,8 @@ QuantizerParameter::IsValidQuantizationType(const std::string& type_name) {
                                                                 QUANTIZATION_TYPE_VALUE_FP16,
                                                                 QUANTIZATION_TYPE_VALUE_RABITQ,
                                                                 QUANTIZATION_TYPE_VALUE_SPARSE,
-                                                                QUANTIZATION_TYPE_VALUE_PQFS};
+                                                                QUANTIZATION_TYPE_VALUE_PQFS,
+                                                                QUANTIZATION_TYPE_VALUE_RQ};
 
     return valid_types.find(type_name) != valid_types.end();
 }
