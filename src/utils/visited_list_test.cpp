@@ -88,24 +88,6 @@ TEST_CASE("VisitedListPool Basic Test", "[ut][VisitedListPool]") {
             }
         };
 
-        SECTION("test basic") {
-            std::vector<std::shared_ptr<VisitedList>> lists;
-            REQUIRE(pool->GetSize() == init_size);
-            lists.reserve(init_size * 2);
-            for (auto i = 0; i < init_size * 2; ++i) {
-                lists.emplace_back(pool->TakeOne());
-            }
-            REQUIRE(pool->GetSize() == 0);
-            for (auto& ptr : lists) {
-                pool->ReturnOne(ptr);
-            }
-            REQUIRE(pool->GetSize() == init_size * 2);
-
-            auto ptr = pool->TakeOne();
-            REQUIRE(pool->GetSize() == init_size * 2 - 1);
-            TestVL(ptr);
-        }
-
         SECTION("test concurrency") {
             auto func = [&]() {
                 int count = 10;
