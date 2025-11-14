@@ -1213,7 +1213,7 @@ static const std::string HGRAPH_PARAMS_TEMPLATE =
         "{HGRAPH_IGNORE_REORDER_KEY}": false,
         "{HGRAPH_BUILD_BY_BASE_QUANTIZATION_KEY}": false,
         "{HGRAPH_USE_ATTRIBUTE_FILTER_KEY}": false,
-        "{HGRAPH_GRAPH_KEY}": {
+        "{GRAPH_KEY}": {
             "{IO_PARAMS_KEY}": {
                 "{TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
                 "{IO_FILE_PATH_KEY}": "{DEFAULT_FILE_PATH_VALUE}"
@@ -1285,7 +1285,7 @@ static const std::string HGRAPH_PARAMS_TEMPLATE =
         },
         "{HGRAPH_SUPPORT_DUPLICATE}": false,
         "{HGRAPH_SUPPORT_TOMBSTONE}": false,
-        "{HGRAPH_EF_CONSTRUCTION_KEY}": 400
+        "{EF_CONSTRUCTION_KEY}": 400
     })";
 
 ParamPtr
@@ -1380,7 +1380,7 @@ HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
                                             {
                                                 HGRAPH_GRAPH_IO_TYPE,
                                                 {
-                                                    HGRAPH_GRAPH_KEY,
+                                                    GRAPH_KEY,
                                                     IO_PARAMS_KEY,
                                                     TYPE_KEY,
                                                 },
@@ -1388,7 +1388,7 @@ HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
                                             {
                                                 HGRAPH_GRAPH_FILE_PATH,
                                                 {
-                                                    HGRAPH_GRAPH_KEY,
+                                                    GRAPH_KEY,
                                                     IO_PARAMS_KEY,
                                                     IO_FILE_PATH_KEY,
                                                 },
@@ -1426,75 +1426,75 @@ HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
                                             {
                                                 HGRAPH_GRAPH_MAX_DEGREE,
                                                 {
-                                                    HGRAPH_GRAPH_KEY,
+                                                    GRAPH_KEY,
                                                     GRAPH_PARAM_MAX_DEGREE_KEY,
                                                 },
                                             },
                                             {
                                                 HGRAPH_BUILD_EF_CONSTRUCTION,
                                                 {
-                                                    HGRAPH_EF_CONSTRUCTION_KEY,
+                                                    EF_CONSTRUCTION_KEY,
                                                 },
                                             },
                                             {
                                                 HGRAPH_BUILD_ALPHA,
                                                 {
-                                                    HGRAPH_ALPHA_KEY,
+                                                    ALPHA_KEY,
                                                 },
                                             },
                                             {
                                                 HGRAPH_INIT_CAPACITY,
                                                 {
-                                                    HGRAPH_GRAPH_KEY,
+                                                    GRAPH_KEY,
                                                     GRAPH_PARAM_INIT_MAX_CAPACITY_KEY,
                                                 },
                                             },
                                             {
                                                 HGRAPH_GRAPH_TYPE,
                                                 {
-                                                    HGRAPH_GRAPH_KEY,
+                                                    GRAPH_KEY,
                                                     GRAPH_TYPE_KEY,
                                                 },
                                             },
                                             {
                                                 HGRAPH_GRAPH_STORAGE_TYPE,
                                                 {
-                                                    HGRAPH_GRAPH_KEY,
+                                                    GRAPH_KEY,
                                                     GRAPH_STORAGE_TYPE_KEY,
                                                 },
                                             },
                                             {
                                                 ODESCENT_PARAMETER_ALPHA,
                                                 {
-                                                    HGRAPH_GRAPH_KEY,
+                                                    GRAPH_KEY,
                                                     ODESCENT_PARAMETER_ALPHA,
                                                 },
                                             },
                                             {
                                                 ODESCENT_PARAMETER_GRAPH_ITER_TURN,
                                                 {
-                                                    HGRAPH_GRAPH_KEY,
+                                                    GRAPH_KEY,
                                                     ODESCENT_PARAMETER_GRAPH_ITER_TURN,
                                                 },
                                             },
                                             {
                                                 ODESCENT_PARAMETER_NEIGHBOR_SAMPLE_RATE,
                                                 {
-                                                    HGRAPH_GRAPH_KEY,
+                                                    GRAPH_KEY,
                                                     ODESCENT_PARAMETER_NEIGHBOR_SAMPLE_RATE,
                                                 },
                                             },
                                             {
                                                 ODESCENT_PARAMETER_MIN_IN_DEGREE,
                                                 {
-                                                    HGRAPH_GRAPH_KEY,
+                                                    GRAPH_KEY,
                                                     ODESCENT_PARAMETER_MIN_IN_DEGREE,
                                                 },
                                             },
                                             {
                                                 ODESCENT_PARAMETER_BUILD_BLOCK_SIZE,
                                                 {
-                                                    HGRAPH_GRAPH_KEY,
+                                                    GRAPH_KEY,
                                                     ODESCENT_PARAMETER_BUILD_BLOCK_SIZE,
                                                 },
                                             },
@@ -1554,11 +1554,11 @@ HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
                                             },
                                             {
                                                 HGRAPH_SUPPORT_REMOVE,
-                                                {HGRAPH_GRAPH_KEY, GRAPH_SUPPORT_REMOVE},
+                                                {GRAPH_KEY, GRAPH_SUPPORT_REMOVE},
                                             },
                                             {
                                                 HGRAPH_REMOVE_FLAG_BIT,
-                                                {HGRAPH_GRAPH_KEY, REMOVE_FLAG_BIT},
+                                                {GRAPH_KEY, REMOVE_FLAG_BIT},
                                             },
                                             {
                                                 HGRAPH_SUPPORT_DUPLICATE,

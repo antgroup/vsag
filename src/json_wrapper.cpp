@@ -171,4 +171,9 @@ JsonWrapper::Erase(const std::string& key) {
     json_->erase(key);
 }
 
+void
+JsonWrapper::UpdateJson(const JsonWrapper& json) {
+    (*json_).update(*json.json_);
+}
+
 }  // namespace vsag

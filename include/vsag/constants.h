@@ -98,9 +98,24 @@ extern const char* const HNSW_PARAMETER_USE_STATIC;
 extern const char* const HNSW_PARAMETER_REVERSED_EDGES;
 extern const char* const HNSW_PARAMETER_SKIP_RATIO;
 
-extern const char* const PYRAMID_PARAMETER_BASE_CODES;
-
 extern const char* const INDEX_PARAM;
+
+extern const char* const PYRAMID_EF_CONSTRUCTION;
+extern const char* const PYRAMID_USE_REORDER;
+extern const char* const PYRAMID_BASE_QUANTIZATION_TYPE;
+extern const char* const PYRAMID_GRAPH_MAX_DEGREE;
+extern const char* const PYRAMID_BUILD_ALPHA;
+extern const char* const PYRAMID_GRAPH_TYPE;
+extern const char* const PYRAMID_GRAPH_STORAGE_TYPE;
+extern const char* const PYRAMID_BUILD_THREAD_COUNT;
+extern const char* const PYRAMID_PRECISE_QUANTIZATION_TYPE;
+extern const char* const PYRAMID_BASE_IO_TYPE;
+extern const char* const PYRAMID_BASE_PQ_DIM;
+extern const char* const PYRAMID_BASE_FILE_PATH;
+extern const char* const PYRAMID_PRECISE_IO_TYPE;
+extern const char* const PYRAMID_PRECISE_FILE_PATH;
+extern const char* const PYRAMID_PARAMETER_EF_SEARCH;
+extern const char* const PYRAMID_NO_BUILD_LEVELS;
 
 extern const char PART_SLASH;
 

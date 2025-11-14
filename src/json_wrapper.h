@@ -73,6 +73,9 @@ public:
     void
     SetVector(const std::vector<int32_t>& value);
 
+    void
+    UpdateJson(const JsonWrapper& json);
+
     std::string
     GetString() const;
 
