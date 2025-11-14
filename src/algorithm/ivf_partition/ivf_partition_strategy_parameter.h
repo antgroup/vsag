@@ -52,6 +52,8 @@ public:
         IVFNearestPartitionTrainerType::KMeansTrainer};
     IVFPartitionStrategyType partition_strategy_type{IVFPartitionStrategyType::IVF};
     GNOIMIParameterPtr gnoimi_param{nullptr};
+
+    bool use_graph_acceleration_{true};
 };
 
 using IVFPartitionStrategyParametersPtr = std::shared_ptr<IVFPartitionStrategyParameters>;

@@ -529,6 +529,11 @@ BruteForce::GetVectorByInnerId(InnerIdType inner_id, float* data) const {
 }
 
 void
+BruteForce::GetCodeByInnerId(InnerIdType inner_id, uint8_t* data) const {
+    inner_codes_->GetCodesById(inner_id, data);
+}
+
+void
 BruteForce::UpdateAttribute(int64_t id, const AttributeSet& new_attrs) {
     auto inner_id = this->label_table_->GetIdByLabel(id);
     this->attr_filter_index_->UpdateBitsetsByAttr(new_attrs, inner_id, 0);

@@ -85,6 +85,9 @@ public:
     GetVectorByInnerId(InnerIdType inner_id, float* data) const override;
 
     void
+    GetCodeByInnerId(InnerIdType inner_id, uint8_t* data) const override;
+
+    void
     InitFeatures() override;
 
     [[nodiscard]] DatasetPtr

@@ -17,6 +17,7 @@
 
 #include <fmt/format.h>
 
+#include "algorithm/brute_force.h"
 #include "algorithm/hgraph.h"
 #include "impl/allocator/safe_allocator.h"
 #include "impl/cluster/kmeans_cluster.h"
@@ -38,7 +39,8 @@ IVFNearestPartition::IVFNearestPartition(BucketIdType bucket_count,
                                          IVFPartitionStrategyParametersPtr param)
     : IVFPartitionStrategy(common_param, bucket_count),
       ivf_partition_strategy_param_(std::move(param)) {
-    this->factory_router_index(common_param);
+    this->factory_router_index(common_param,
+                               ivf_partition_strategy_param_->use_graph_acceleration_);
 }
 
 void
@@ -129,17 +131,28 @@ IVFNearestPartition::Deserialize(lvalue_or_rvalue<StreamReader> reader) {
     IVFPartitionStrategy::Deserialize(reader);
     this->route_index_ptr_->Deserialize(reader);
 }
-void
-IVFNearestPartition::factory_router_index(const IndexCommonParam& common_param) {
-    ParamPtr param_ptr;
-    JsonType hgraph_json;
-    hgraph_json["base_quantization_type"].SetString("fp32");
-    hgraph_json["max_degree"].SetInt(64);
-    hgraph_json["ef_construction"].SetInt(300);
 
-    param_ptr = HGraph::CheckAndMappingExternalParam(hgraph_json, common_param);
-    this->route_index_ptr_ = std::make_shared<HGraph>(param_ptr, common_param);
+void
+IVFNearestPartition::factory_router_index(const IndexCommonParam& common_param,
+                                          bool use_graph_acceleration) {
+    if (use_graph_acceleration) {
+        ParamPtr param_ptr;
+        JsonType hgraph_json;
+        hgraph_json["base_quantization_type"].SetString("fp32");
+        hgraph_json["max_degree"].SetInt(64);
+        hgraph_json["ef_construction"].SetInt(300);
+
+        param_ptr = HGraph::CheckAndMappingExternalParam(hgraph_json, common_param);
+        this->route_index_ptr_ = std::make_shared<HGraph>(param_ptr, common_param);
+    } else {
+        ParamPtr param_ptr;
+        JsonType bf_json;
+
+        param_ptr = BruteForce::CheckAndMappingExternalParam(bf_json, common_param);
+        this->route_index_ptr_ = std::make_shared<BruteForce>(param_ptr, common_param);
+    }
 }
+
 void
 IVFNearestPartition::GetCentroid(BucketIdType bucket_id, Vector<float>& centroid) {
     if (!is_trained_ || bucket_id >= bucket_count_) {

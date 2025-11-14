@@ -175,6 +175,7 @@ ResidualQuantizer<QuantTmpl, metric>::ResidualQuantizer(const ResidualQuantizerP
     json[IVF_TRAIN_TYPE_KEY].SetString(IVF_TRAIN_TYPE_KMEANS);
     auto ivf_partition_strategy_parameter = std::make_shared<IVFPartitionStrategyParameters>();
     ivf_partition_strategy_parameter->FromJson(json);
+    ivf_partition_strategy_parameter->use_graph_acceleration_ = false;
     this->partition_strategy_ = std::make_shared<IVFNearestPartition>(
         centroids_count_, common_param, ivf_partition_strategy_parameter);
 
@@ -231,10 +232,20 @@ ResidualQuantizer<QuantTmpl, metric>::EncodeOneImpl(const DataType* data, uint8_
     for (int i = 0; i < this->dim_; i++) {
         data_buffer[i] = data[i] - centroid_vec[i];
     }
+
+    // 3. execute quantize
+    auto res = quantizer_->EncodeOne(data_buffer.data(), codes);
+
     float n1 = FP32ComputeIP(data_buffer.data(), data_buffer.data(), this->dim_);  // (x - c)^2
     float n2 = 2 * FP32ComputeIP(data_buffer.data(),
                                  (const float*)(centroid_vec.data()),
-                                 this->dim_);                    // 2c * (x - c)
+                                 this->dim_);  // 2c * (x - c)
+
+    auto computer = this->quantizer_->FactoryComputer();
+    this->quantizer_->ProcessQuery(centroid_vec.data(), *computer);
+    n2 = 1.0f - quantizer_->ComputeDist(*computer, codes);  // note that ComputeDist returns 1 - ip
+    n2 *= 2;
+
     float x_norm = sqrt(FP32ComputeIP(data, data, this->dim_));  // |x|
 
     // 3. store norm data
@@ -242,8 +253,7 @@ ResidualQuantizer<QuantTmpl, metric>::EncodeOneImpl(const DataType* data, uint8_
     *(uint32_t*)(codes + res_norm_offset_ + sizeof(float)) = centroid_id;
     *(float*)(codes + this->code_size_ - sizeof(float)) = x_norm;
 
-    // 4. execute quantize
-    return quantizer_->EncodeOne(data_buffer.data(), codes);
+    return res;
 };
 
 template <typename QuantTmpl, MetricType metric>
@@ -287,13 +297,6 @@ ResidualQuantizer<QuantTmpl, metric>::ComputeDistImpl(Computer<ResidualQuantizer
     auto quantize_dist =
         1.0f - quantizer_->ComputeDist(*(computer.inner_computer_),
                                        codes);  // note that ComputeDist returns 1 - ip
-
-    auto valid_dist =
-        FP32ComputeIP((float*)codes, (float*)computer.inner_computer_->buf_, this->dim_);
-    Vector<float> centroid_vec(this->dim_, 0, this->allocator_);
-    this->partition_strategy_->GetCentroid(centroid_id, centroid_vec);
-    auto valid_dist2 =
-        FP32ComputeIP(centroid_vec.data(), (float*)computer.inner_computer_->buf_, this->dim_);
 
     if constexpr (metric == MetricType::METRIC_TYPE_L2SQR) {
         dists[0] = n1_n2 + n_3 - 2 * quantize_dist;

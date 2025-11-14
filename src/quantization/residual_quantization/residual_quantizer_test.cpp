@@ -102,6 +102,13 @@ TEST_CASE("RQ Compute", "[ut][ResidualQuantizer]") {
             TestComputeMetricRQ<FP32Quantizer<MetricType::METRIC_TYPE_IP>, metrics[2]>(
                 "fp32", dim, count);
 
+            TestComputeMetricRQ<SQ4UniformQuantizer<MetricType::METRIC_TYPE_IP>, metrics[0]>(
+                "sq4_uniform", dim, count, 20);
+            TestComputeMetricRQ<SQ4UniformQuantizer<MetricType::METRIC_TYPE_IP>, metrics[1]>(
+                "sq4_uniform", dim, count, 20);
+            TestComputeMetricRQ<SQ4UniformQuantizer<MetricType::METRIC_TYPE_IP>, metrics[2]>(
+                "sq4_uniform", dim, count, 20);
+
             TestComputeMetricRQ<FP16Quantizer<MetricType::METRIC_TYPE_IP>, metrics[0]>(
                 "fp16", dim, count);
             TestComputeMetricRQ<FP16Quantizer<MetricType::METRIC_TYPE_IP>, metrics[1]>(

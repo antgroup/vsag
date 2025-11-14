@@ -50,7 +50,7 @@ public:
 
 private:
     void
-    factory_router_index(const IndexCommonParam& common_param);
+    factory_router_index(const IndexCommonParam& common_param, bool factory_router_index);
 };
 
 }  // namespace vsag
