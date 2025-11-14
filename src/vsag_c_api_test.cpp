@@ -13,9 +13,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <sys/stat.h>
 #include <vsag/vsag_c_api.h>
 
 #include <catch2/catch_test_macros.hpp>
+#include <fstream>
 #include <random>
 
 TEST_CASE("vsag_c_api basic test", "[vsag_c_api][ut]") {
@@ -82,16 +84,53 @@ TEST_CASE("vsag_c_api basic test", "[vsag_c_api][ut]") {
     };
     func(index);
 
-    const char* file_name = "/tmp/test_c_api.vsag";
-    ret = vsag_serialize_file(index, file_name);
-    REQUIRE(ret.code == VSAG_SUCCESS);
-    vsag_index_t index2 = vsag_index_factory(index_name, index_param);
-    ret = vsag_deserialize_file(index2, file_name);
-    REQUIRE(ret.code == VSAG_SUCCESS);
-    REQUIRE(index2 != nullptr);
+    // for test serialize and deserialize file
+    {
+        const char* file_name = "/tmp/test_c_api.vsag";
+        ret = vsag_serialize_file(index, file_name);
+        REQUIRE(ret.code == VSAG_SUCCESS);
+        vsag_index_t index2 = vsag_index_factory(index_name, index_param);
+        ret = vsag_deserialize_file(index2, file_name);
+        REQUIRE(ret.code == VSAG_SUCCESS);
+        REQUIRE(index2 != nullptr);
+        func(index2);
+        vsag_index_destroy(index2);
+    }
 
-    func(index2);
+    // for test serialize and deserialize write func and read func
+    {
+        thread_local const char* file_name2 = "/tmp/test_c_api.vsag2";
+        using WriteFuncType = void (*)(OffsetType offset, SizeType size, const void* data);
+        WriteFuncType write_func = [](OffsetType offset, SizeType size, const void* data) {
+            std::ofstream ofile(file_name2, std::ios::binary | std::ios::app);
+            ofile.seekp(offset);
+            ofile.write(reinterpret_cast<const char*>(data), size);
+            ofile.close();
+        };
+        ret = vsag_serialize_write_func(index, write_func);
+        REQUIRE(ret.code == VSAG_SUCCESS);
+
+        using SizeFuncType = SizeType (*)();
+        SizeFuncType size_func = []() {
+            struct stat st;
+            stat(file_name2, &st);
+            return static_cast<SizeType>(st.st_size);
+        };
+
+        using ReadFuncType = void (*)(OffsetType offset, SizeType size, void* data);
+        ReadFuncType read_func = [](OffsetType offset, SizeType size, void* data) {
+            std::ifstream ifile(file_name2, std::ios::binary);
+            ifile.seekg(offset);
+            ifile.read(reinterpret_cast<char*>(data), size);
+            ifile.close();
+        };
+        vsag_index_t index2 = vsag_index_factory(index_name, index_param);
+        ret = vsag_deserialize_read_func(index2, read_func, size_func);
+        REQUIRE(ret.code == VSAG_SUCCESS);
+        REQUIRE(index2 != nullptr);
+        func(index2);
+        vsag_index_destroy(index2);
+    }
 
     vsag_index_destroy(index);
-    vsag_index_destroy(index2);
 }
