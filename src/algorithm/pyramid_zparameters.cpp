@@ -47,6 +47,14 @@ PyramidParameters::FromJson(const JsonType& json) {
 
     this->base_codes_param = CreateFlattenParam(json[BASE_CODES_KEY]);
 
+    if (json.Contains(ALPHA_KEY)) {
+        this->alpha = json[ALPHA_KEY].GetFloat();
+        this->selectedgeparam = "alpha";
+    } else if (json.Contains(TAU_KEY)) {
+        this->tau = json[TAU_KEY].GetFloat();
+        this->selectedgeparam = "tau";
+    }
+
     if (json.Contains(NO_BUILD_LEVELS)) {
         const auto& no_build_levels_json = json[NO_BUILD_LEVELS];
         CHECK_ARGUMENT(no_build_levels_json.IsArray(),

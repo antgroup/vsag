@@ -49,10 +49,13 @@ public:
     ODescentParameterPtr odescent_param{nullptr};
 
     std::vector<int32_t> no_build_levels;
+
     uint64_t ef_construction{400};
     int64_t max_degree{64};
     std::string graph_type{GRAPH_TYPE_VALUE_NSW};
     float alpha{1.2F};
+    float tau{0.0F};
+    std::string selectedgeparam{"alpha"};
     uint32_t index_min_size{0};
 };
 

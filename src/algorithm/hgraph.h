@@ -355,6 +355,8 @@ private:
 
     uint64_t ef_construct_{400};
     float alpha_{1.0};
+    float tau_{0.0F};
+    std::string select_edge_param{"alpha"};
 
     std::atomic<uint64_t> total_count_{0};
 

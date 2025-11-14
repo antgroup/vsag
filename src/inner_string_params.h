@@ -46,6 +46,7 @@ const char* const HGRAPH_IGNORE_REORDER_KEY = "ignore_reorder";
 const char* const HGRAPH_BUILD_BY_BASE_QUANTIZATION_KEY = "build_by_base";
 const char* const GRAPH_KEY = "graph";
 const char* const ALPHA_KEY = "alpha";
+const char* const TAU_KEY = "tau";
 
 // IO param key
 const char* const IO_PARAMS_KEY = "io_params";
