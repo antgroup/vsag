@@ -47,6 +47,8 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
       build_by_base_(hgraph_param->build_by_base),
       ef_construct_(hgraph_param->ef_construction),
       alpha_(hgraph_param->alpha),
+      tau_(hgraph_param->tau),
+      select_edge_param(hgraph_param->selectedgeparam),
       odescent_param_(hgraph_param->odescent_param),
       graph_type_(hgraph_param->graph_type),
       hierarchical_datacell_param_(hgraph_param->hierarchical_graph_param),
@@ -1029,13 +1031,24 @@ HGraph::graph_add_one(const void* data, int level, InnerIdType inner_id) {
             label_table_->SetDuplicateId(static_cast<InnerIdType>(param.duplicate_id), inner_id);
             return false;
         }
-        mutually_connect_new_element(inner_id,
-                                     result,
-                                     this->bottom_graph_,
-                                     flatten_codes,
-                                     neighbors_mutex_,
-                                     allocator_,
-                                     alpha_);
+        if (select_edge_param == "alpha") {
+            mutually_connect_new_element<EdgeSelectionParam::ALPHA>(inner_id,
+                                                                    result,
+                                                                    this->bottom_graph_,
+                                                                    flatten_codes,
+                                                                    neighbors_mutex_,
+                                                                    allocator_,
+                                                                    alpha_);
+        } else if (select_edge_param == "tau") {
+            mutually_connect_new_element<EdgeSelectionParam::TAU>(inner_id,
+                                                                  result,
+                                                                  this->bottom_graph_,
+                                                                  flatten_codes,
+                                                                  neighbors_mutex_,
+                                                                  allocator_,
+                                                                  tau_);
+        }
+
     } else {
         bottom_graph_->InsertNeighborsById(inner_id, Vector<InnerIdType>(allocator_));
     }
@@ -1043,13 +1056,23 @@ HGraph::graph_add_one(const void* data, int level, InnerIdType inner_id) {
     for (int64_t j = 0; j <= level; ++j) {
         if (route_graphs_[j]->TotalCount() != 0) {
             result = search_one_graph(data, route_graphs_[j], flatten_codes, param);
-            mutually_connect_new_element(inner_id,
-                                         result,
-                                         route_graphs_[j],
-                                         flatten_codes,
-                                         neighbors_mutex_,
-                                         allocator_,
-                                         alpha_);
+            if (select_edge_param == "alpha") {
+                mutually_connect_new_element<EdgeSelectionParam::ALPHA>(inner_id,
+                                                                        result,
+                                                                        this->bottom_graph_,
+                                                                        flatten_codes,
+                                                                        neighbors_mutex_,
+                                                                        allocator_,
+                                                                        alpha_);
+            } else if (select_edge_param == "tau") {
+                mutually_connect_new_element<EdgeSelectionParam::TAU>(inner_id,
+                                                                      result,
+                                                                      this->bottom_graph_,
+                                                                      flatten_codes,
+                                                                      neighbors_mutex_,
+                                                                      allocator_,
+                                                                      tau_);
+            }
         } else {
             route_graphs_[j]->InsertNeighborsById(inner_id, Vector<InnerIdType>(allocator_));
         }
@@ -1440,6 +1463,12 @@ HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
                                                 HGRAPH_BUILD_ALPHA,
                                                 {
                                                     ALPHA_KEY,
+                                                },
+                                            },
+                                            {
+                                                HGRAPH_BUILD_TAU,
+                                                {
+                                                    TAU_KEY,
                                                 },
                                             },
                                             {

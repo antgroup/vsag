@@ -403,13 +403,23 @@ Pyramid::Add(const DatasetPtr& base) {
                                                  data_vectors + dim_ * i,
                                                  search_param);
                 pool_->ReturnOne(vl);
-                mutually_connect_new_element(inner_id,
-                                             results,
-                                             node->graph_,
-                                             flatten_interface_ptr_,
-                                             empty_mutex,
-                                             allocator_,
-                                             alpha_);
+                if (select_edge_param == "alpha") {
+                    mutually_connect_new_element<EdgeSelectionParam::ALPHA>(inner_id,
+                                                                            results,
+                                                                            node->graph_,
+                                                                            flatten_interface_ptr_,
+                                                                            empty_mutex,
+                                                                            allocator_,
+                                                                            alpha_);
+                } else if (select_edge_param == "tau") {
+                    mutually_connect_new_element<EdgeSelectionParam::ALPHA>(inner_id,
+                                                                            results,
+                                                                            node->graph_,
+                                                                            flatten_interface_ptr_,
+                                                                            empty_mutex,
+                                                                            allocator_,
+                                                                            tau_);
+                }
             }
         }
     }

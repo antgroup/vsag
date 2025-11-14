@@ -15,6 +15,7 @@
 
 #pragma once
 
+#include "inner_search_param.h"
 #include "typing.h"
 #include "utils/pointer_define.h"
 
@@ -24,13 +25,17 @@ DEFINE_POINTER(FlattenInterface);
 DEFINE_POINTER(GraphInterface);
 DEFINE_POINTER(MutexArray);
 
+enum class EdgeSelectionParam { ALPHA, TAU };
+
+template <EdgeSelectionParam Param>
 void
 select_edges_by_heuristic(const DistHeapPtr& edges,
                           uint64_t max_size,
                           const FlattenInterfacePtr& flatten,
                           Allocator* allocator,
-                          float alpha = 1.0F);
+                          float param_value = (Param == EdgeSelectionParam::ALPHA) ? 1.0F : 0.0F);
 
+template <EdgeSelectionParam Param>
 InnerIdType
 mutually_connect_new_element(InnerIdType cur_c,
                              const DistHeapPtr& top_candidates,
@@ -38,6 +43,33 @@ mutually_connect_new_element(InnerIdType cur_c,
                              const FlattenInterfacePtr& flatten,
                              const MutexArrayPtr& neighbors_mutexes,
                              Allocator* allocator,
-                             float alpha = 1.0F);
+                             float param_value = (Param == EdgeSelectionParam::ALPHA) ? 1.0F
+                                                                                      : 0.0F);
+
+extern template void
+select_edges_by_heuristic<EdgeSelectionParam::ALPHA>(
+    const DistHeapPtr&, uint64_t, const FlattenInterfacePtr&, Allocator*, float);
+
+extern template void
+select_edges_by_heuristic<EdgeSelectionParam::TAU>(
+    const DistHeapPtr&, uint64_t, const FlattenInterfacePtr&, Allocator*, float);
+
+extern template InnerIdType
+mutually_connect_new_element<EdgeSelectionParam::ALPHA>(InnerIdType,
+                                                        const DistHeapPtr&,
+                                                        const GraphInterfacePtr&,
+                                                        const FlattenInterfacePtr&,
+                                                        const MutexArrayPtr&,
+                                                        Allocator*,
+                                                        float);
+
+extern template InnerIdType
+mutually_connect_new_element<EdgeSelectionParam::TAU>(InnerIdType,
+                                                      const DistHeapPtr&,
+                                                      const GraphInterfacePtr&,
+                                                      const FlattenInterfacePtr&,
+                                                      const MutexArrayPtr&,
+                                                      Allocator*,
+                                                      float);
 
 }  // namespace vsag
