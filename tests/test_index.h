@@ -315,6 +315,9 @@ public:
     static void
     TestIndexStatus(const IndexPtr& index);
 
+    static void
+    TestIndexDetailData(const IndexPtr& index);
+
     constexpr static float RECALL_THRESHOLD = 0.85F;
 };
 

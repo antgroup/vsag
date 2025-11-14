@@ -522,6 +522,7 @@ TestHGraphBuildAndContinueAdd(const fixtures::HGraphTestIndexPtr& test_index,
                     dim, resource->base_count, metric_type);
                 TestIndex::TestContinueAdd(index, dataset, true);
                 HGraphTestIndex::TestGeneral(index, dataset, search_param, recall);
+                TestIndex::TestIndexDetailData(index);
                 vsag::Options::Instance().set_block_size_limit(origin_size);
             }
         }
