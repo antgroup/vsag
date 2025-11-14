@@ -44,12 +44,13 @@ public:
 
 public:
     GraphInterfaceParamPtr graph_param{nullptr};
-    FlattenDataCellParamPtr flatten_data_cell_param{nullptr};
+    FlattenInterfaceParamPtr base_codes_param{nullptr};
     ODescentParameterPtr odescent_param{nullptr};
 
     std::vector<int32_t> no_build_levels;
-    uint64_t ef_construction{100};
-    float alpha{1.0F};
+    uint64_t ef_construction{400};
+    std::string graph_type{GRAPH_TYPE_VALUE_NSW};
+    float alpha{1.2F};
 };
 
 class PyramidSearchParameters {

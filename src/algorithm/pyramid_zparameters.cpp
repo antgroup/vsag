@@ -28,29 +28,23 @@ namespace vsag {
 void
 PyramidParameters::FromJson(const JsonType& json) {
     // init graph param
-    CHECK_ARGUMENT(json.Contains(GRAPH_TYPE_ODESCENT),
-                   fmt::format("pyramid parameters must contains {}", GRAPH_TYPE_ODESCENT));
-    const auto& graph_json = json[GRAPH_TYPE_ODESCENT];
+    const auto& graph_json = json[GRAPH_KEY];
+
     graph_param = GraphInterfaceParameter::GetGraphParameterByJson(
         GraphStorageTypes::GRAPH_STORAGE_TYPE_SPARSE, graph_json);
-    odescent_param = std::make_shared<ODescentParameter>();
-    odescent_param->FromJson(graph_json);
-    this->flatten_data_cell_param = std::make_shared<FlattenDataCellParameter>();
-    if (json.Contains(PYRAMID_PARAMETER_BASE_CODES)) {
-        this->flatten_data_cell_param->FromJson(json[PYRAMID_PARAMETER_BASE_CODES]);
+    this->alpha = graph_json[ALPHA_KEY].GetFloat();
+
+    this->graph_type = graph_json[GRAPH_TYPE_KEY].GetString();
+    if (this->graph_type == GRAPH_TYPE_ODESCENT) {
+        this->odescent_param = std::make_shared<ODescentParameter>();
+        this->odescent_param->FromJson(graph_json);
     } else {
-        this->flatten_data_cell_param->io_parameter = std::make_shared<MemoryIOParameter>();
-        this->flatten_data_cell_param->quantizer_parameter =
-            std::make_shared<FP32QuantizerParameter>();
+        if (json.Contains(EF_CONSTRUCTION_KEY)) {
+            this->ef_construction = json[EF_CONSTRUCTION_KEY].GetInt();
+        }
     }
 
-    if (json.Contains(HGRAPH_EF_CONSTRUCTION_KEY)) {
-        this->ef_construction = json[HGRAPH_EF_CONSTRUCTION_KEY].GetInt();
-    }
-
-    if (json.Contains(HGRAPH_ALPHA_KEY)) {
-        this->alpha = json[HGRAPH_ALPHA_KEY].GetFloat();
-    }
+    this->base_codes_param = CreateFlattenParam(json[BASE_CODES_KEY]);
 
     if (json.Contains(NO_BUILD_LEVELS)) {
         const auto& no_build_levels_json = json[NO_BUILD_LEVELS];
@@ -58,14 +52,27 @@ PyramidParameters::FromJson(const JsonType& json) {
                        fmt::format("build_without_levels must be a list of integers"));
         this->no_build_levels = no_build_levels_json.GetVector();
     }
+
+    this->use_reorder = json[USE_REORDER_KEY].GetBool();
+    if (this->use_reorder) {
+        this->precise_codes_param = CreateFlattenParam(json[PRECISE_CODES_KEY]);
+    }
 }
 JsonType
 PyramidParameters::ToJson() const {
     JsonType json = InnerIndexParameter::ToJson();
-    json[GRAPH_TYPE_ODESCENT].SetJson(graph_param->ToJson());
-    json[GRAPH_TYPE_ODESCENT].SetJson(odescent_param->ToJson());
-    json[PYRAMID_PARAMETER_BASE_CODES].SetJson(flatten_data_cell_param->ToJson());
     json[NO_BUILD_LEVELS].SetVector(no_build_levels);
+    json[BASE_CODES_KEY].SetJson(base_codes_param->ToJson());
+
+    auto graph_json = graph_param->ToJson();
+    graph_json[ALPHA_KEY].SetFloat(this->alpha);
+    graph_json[GRAPH_TYPE_KEY].SetString(this->graph_type);
+    if (this->graph_type == GRAPH_TYPE_ODESCENT) {
+        graph_json.UpdateJson(odescent_param->ToJson());
+    } else {
+        json[EF_CONSTRUCTION_KEY].SetInt(this->ef_construction);
+    }
+    json[GRAPH_KEY].SetJson(graph_json);
     return json;
 }
 
@@ -82,7 +89,7 @@ PyramidParameters::CheckCompatibility(const ParamPtr& other) const {
         return false;
     }
 
-    if (not flatten_data_cell_param->CheckCompatibility(pyramid_param->flatten_data_cell_param)) {
+    if (not base_codes_param->CheckCompatibility(pyramid_param->base_codes_param)) {
         logger::error(
             "PyramidParameters::CheckCompatibility: flatten data cell parameters are not "
             "compatible");
@@ -93,6 +100,19 @@ PyramidParameters::CheckCompatibility(const ParamPtr& other) const {
                                 no_build_levels.end(),
                                 pyramid_param->no_build_levels.begin())) {
         logger::error("PyramidParameters::CheckCompatibility: no_build_levels are not compatible");
+        return false;
+    }
+
+    if (pyramid_param->use_reorder != this->use_reorder) {
+        logger::error(
+            "PyramidParameters::CheckCompatibility: use_reorder settings are not compatible");
+        return false;
+    }
+
+    if (this->use_reorder &&
+        not precise_codes_param->CheckCompatibility(pyramid_param->precise_codes_param)) {
+        logger::error(
+            "PyramidParameters::CheckCompatibility: precise_codes_param are not compatible");
         return false;
     }
 

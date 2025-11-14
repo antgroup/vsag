@@ -59,16 +59,12 @@ PyramidTestIndex::GeneratePyramidBuildParametersString(const std::string& metric
         "metric_type": "{}",
         "dim": {},
         "index_param": {{
-            "odescent": {{
-                "io_params": {{
-                    "type": "memory"
-                }},
-                "max_degree": 32,
-                "alpha": 1.2,
-                "graph_iter_turn": 15,
-                "neighbor_sample_rate": 0.2
-            }},
-            "no_build_levels": [{}]
+            "max_degree": 32,
+            "alpha": 1.2,
+            "graph_iter_turn": 15,
+            "neighbor_sample_rate": 0.2,
+            "no_build_levels": [{}],
+            "graph_type": "odescent"
         }}
     }}
     )";
