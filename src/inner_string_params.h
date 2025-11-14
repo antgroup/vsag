@@ -25,6 +25,7 @@ namespace vsag {
 const char* const INDEX_TYPE_HGRAPH = "hgraph";
 const char* const INDEX_TYPE_IVF = "ivf";
 const char* const INDEX_TYPE_GNO_IMI = "gno_imi";
+const char* const INDEX_TYPE_PYRAMID = "pyramid";
 
 const char* const TYPE_KEY = "type";
 const char* const USE_REORDER_KEY = "use_reorder";
@@ -42,9 +43,8 @@ const char* const ATTR_PARAMS_KEY = "attr_params";
 const char* const HGRAPH_USE_ELP_OPTIMIZER_KEY = "use_elp_optimizer";
 const char* const HGRAPH_IGNORE_REORDER_KEY = "ignore_reorder";
 const char* const HGRAPH_BUILD_BY_BASE_QUANTIZATION_KEY = "build_by_base";
-const char* const HGRAPH_GRAPH_KEY = "graph";
-const char* const HGRAPH_EF_CONSTRUCTION_KEY = "ef_construction";
-const char* const HGRAPH_ALPHA_KEY = "alpha";
+const char* const GRAPH_KEY = "graph";
+const char* const ALPHA_KEY = "alpha";
 
 // IO param key
 const char* const IO_PARAMS_KEY = "io_params";
@@ -108,6 +108,7 @@ const char* const SPARSE_DESERIALIZE_WITHOUT_FOOTER = "deserialize_without_foote
 // graph param value
 const char* const GRAPH_PARAM_MAX_DEGREE_KEY = "max_degree";
 const char* const GRAPH_PARAM_INIT_MAX_CAPACITY_KEY = "init_capacity";
+const char* const EF_CONSTRUCTION_KEY = "ef_construction";
 
 const char* const GRAPH_TYPE_KEY = "graph_type";
 const char* const GRAPH_TYPE_VALUE_ODESCENT = "odescent";
@@ -167,11 +168,12 @@ const std::unordered_map<std::string, std::string> DEFAULT_MAP = {
     {"INDEX_TYPE_HGRAPH", INDEX_TYPE_HGRAPH},
     {"INDEX_TYPE_IVF", INDEX_TYPE_IVF},
     {"INDEX_TYPE_GNO_IMI", INDEX_TYPE_GNO_IMI},
+    {"INDEX_TYPE_PYRAMID", INDEX_TYPE_PYRAMID},
     {"TYPE_KEY", TYPE_KEY},
     {"HGRAPH_USE_ELP_OPTIMIZER_KEY", HGRAPH_USE_ELP_OPTIMIZER_KEY},
     {"HGRAPH_IGNORE_REORDER_KEY", HGRAPH_IGNORE_REORDER_KEY},
     {"HGRAPH_BUILD_BY_BASE_QUANTIZATION_KEY", HGRAPH_BUILD_BY_BASE_QUANTIZATION_KEY},
-    {"HGRAPH_GRAPH_KEY", HGRAPH_GRAPH_KEY},
+    {"GRAPH_KEY", GRAPH_KEY},
     {"BASE_CODES_KEY", BASE_CODES_KEY},
     {"PRECISE_CODES_KEY", PRECISE_CODES_KEY},
     {"HGRAPH_SUPPORT_DUPLICATE", HGRAPH_SUPPORT_DUPLICATE},
@@ -200,8 +202,8 @@ const std::unordered_map<std::string, std::string> DEFAULT_MAP = {
     {"QUANTIZATION_PARAMS_KEY", QUANTIZATION_PARAMS_KEY},
     {"GRAPH_PARAM_MAX_DEGREE_KEY", GRAPH_PARAM_MAX_DEGREE_KEY},
     {"GRAPH_PARAM_INIT_MAX_CAPACITY_KEY", GRAPH_PARAM_INIT_MAX_CAPACITY_KEY},
-    {"HGRAPH_EF_CONSTRUCTION_KEY", HGRAPH_EF_CONSTRUCTION_KEY},
-    {"HGRAPH_ALPHA_KEY", HGRAPH_ALPHA_KEY},
+    {"EF_CONSTRUCTION_KEY", EF_CONSTRUCTION_KEY},
+    {"ALPHA_KEY", ALPHA_KEY},
     {"BUCKETS_COUNT_KEY", BUCKETS_COUNT_KEY},
     {"BUCKET_PARAMS_KEY", BUCKET_PARAMS_KEY},
     {"IO_FILE_PATH_KEY", IO_FILE_PATH_KEY},
@@ -220,6 +222,7 @@ const std::unordered_map<std::string, std::string> DEFAULT_MAP = {
     {"ODESCENT_PARAMETER_ALPHA", ODESCENT_PARAMETER_ALPHA},
     {"ODESCENT_PARAMETER_GRAPH_ITER_TURN", ODESCENT_PARAMETER_GRAPH_ITER_TURN},
     {"ODESCENT_PARAMETER_NEIGHBOR_SAMPLE_RATE", ODESCENT_PARAMETER_NEIGHBOR_SAMPLE_RATE},
+    {"ODESCENT_PARAMETER_MIN_IN_DEGREE", ODESCENT_PARAMETER_MIN_IN_DEGREE},
     {"EXTRA_INFO_KEY", EXTRA_INFO_KEY},
     {"CODES_TYPE_KEY", CODES_TYPE_KEY},
     {"SEARCH_PARAM_FACTOR", SEARCH_PARAM_FACTOR},
@@ -239,6 +242,8 @@ const std::unordered_map<std::string, std::string> DEFAULT_MAP = {
     {"ATTR_HAS_BUCKETS_KEY", ATTR_HAS_BUCKETS_KEY},
     {"ATTR_PARAMS_KEY", ATTR_PARAMS_KEY},
     {"RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY_KEY", RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY_KEY},
-    {"TQ_CHAIN_KEY", TQ_CHAIN_KEY}};
+    {"TQ_CHAIN_KEY", TQ_CHAIN_KEY},
+    {"NO_BUILD_LEVELS", NO_BUILD_LEVELS},
+    {"GRAPH_TYPE_KEY", GRAPH_TYPE_KEY}};
 
 }  // namespace vsag

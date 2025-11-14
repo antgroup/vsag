@@ -102,16 +102,14 @@ main(int argc, char** argv) {
         "metric_type": "l2",
         "dim": 128,
         "index_param": {
-            "odescent": {
-                "io_params": {
-                    "type": "memory"
-                },
-                "max_degree": 32,
-                "alpha": 1.2,
-                "graph_iter_turn": 15,
-                "neighbor_sample_rate": 0.2
-            },
-            "no_build_levels": [0, 1]
+            "base_quantization_type": "sq8",
+            "max_degree": 32,
+            "alpha": 1.2,
+            "graph_iter_turn": 15,
+            "neighbor_sample_rate": 0.2,
+            "no_build_levels": [0, 1],
+            "use_reorder": true,
+            "graph_type": "odescent"
         }
     }
     )";
