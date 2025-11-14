@@ -742,6 +742,7 @@ TestIVFWithAttr(const fixtures::IVFResourcePtr& resource) {
     std::vector<std::pair<std::string, float>> tmp_test_cases = {
         {"fp32", 0.75},
     };
+    auto thread_count = GENERATE(1, 3);
     for (auto metric_type : resource->metric_types) {
         for (auto dim : resource->dims) {
             for (auto train_type : resource->train_types) {
@@ -772,7 +773,8 @@ TestIVFWithAttr(const fixtures::IVFResourcePtr& resource) {
                                                                        train_type,
                                                                        false,
                                                                        1,
-                                                                       use_attribute_filter);
+                                                                       use_attribute_filter,
+                                                                       thread_count);
                     auto index1 = IVFTestIndex::TestFactory(IVFTestIndex::name, param, true);
                     auto dataset = IVFTestIndex::pool.GetDatasetAndCreate(
                         dim, resource->base_count, metric_type);
