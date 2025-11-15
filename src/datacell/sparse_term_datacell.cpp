@@ -139,11 +139,22 @@ SparseTermDataCell::InsertHeap(float* dists,
 void
 SparseTermDataCell::DocPrune(Vector<std::pair<uint32_t, float>>& sorted_base) const {
     // use this function when inserting
-    if (sorted_base.size() <= 1) {
+    if (sorted_base.size() <= 1 || doc_retain_ratio_ == 1) {
         return;
     }
-    auto pruned_doc_len =
-        static_cast<uint32_t>(static_cast<float>(sorted_base.size()) * doc_prune_ratio_);
+    float total_mass = 0.0F;
+    for (const auto& pair : sorted_base) {
+        total_mass += pair.second;
+    }
+
+    float part_mass = total_mass * doc_retain_ratio_;
+    float temp_mass = 0.0F;
+    int pruned_doc_len = 0;
+
+    while (temp_mass < part_mass) {
+        temp_mass += sorted_base[pruned_doc_len++].second;
+    }
+
     sorted_base.resize(pruned_doc_len);
 }
 
