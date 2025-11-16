@@ -33,6 +33,7 @@ PyramidParameters::FromJson(const JsonType& json) {
     graph_param = GraphInterfaceParameter::GetGraphParameterByJson(
         GraphStorageTypes::GRAPH_STORAGE_TYPE_SPARSE, graph_json);
     this->alpha = graph_json[ALPHA_KEY].GetFloat();
+    this->max_degree = graph_json[GRAPH_PARAM_MAX_DEGREE_KEY].GetInt();
 
     this->graph_type = graph_json[GRAPH_TYPE_KEY].GetString();
     if (this->graph_type == GRAPH_TYPE_ODESCENT) {

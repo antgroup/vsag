@@ -21,13 +21,17 @@
 #include "test_index.h"
 #include "vsag/vsag.h"
 
+struct PyramidParam {
+    std::vector<int> no_build_levels = std::vector<int>{0, 1, 2};
+};
+
 namespace fixtures {
 class PyramidTestIndex : public fixtures::TestIndex {
 public:
     static std::string
     GeneratePyramidBuildParametersString(const std::string& metric_type,
                                          int64_t dim,
-                                         const std::vector<int>& default_levels);
+                                         const PyramidParam& param);
 
     static TestDatasetPool pool;
 
@@ -47,12 +51,11 @@ public:
 
 TestDatasetPool PyramidTestIndex::pool{};
 std::vector<int> PyramidTestIndex::dims = fixtures::get_common_used_dims(1, RandomValue(0, 999));
-std::vector<std::vector<int>> PyramidTestIndex::levels{{0, 1}, {0}, {1}};
-
+std::vector<std::vector<int>> PyramidTestIndex::levels{{0, 1}, {0, 2}, {0, 1, 2}};
 std::string
 PyramidTestIndex::GeneratePyramidBuildParametersString(const std::string& metric_type,
                                                        int64_t dim,
-                                                       const std::vector<int>& default_levels) {
+                                                       const PyramidParam& param) {
     constexpr auto parameter_temp = R"(
     {{
         "dtype": "float32",
@@ -69,7 +72,7 @@ PyramidTestIndex::GeneratePyramidBuildParametersString(const std::string& metric
     }}
     )";
     auto build_parameters_str =
-        fmt::format(parameter_temp, metric_type, dim, fmt::join(default_levels, ","));
+        fmt::format(parameter_temp, metric_type, dim, fmt::join(param.no_build_levels, ","));
     return build_parameters_str;
 }
 }  // namespace fixtures
@@ -80,11 +83,12 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
     auto metric_type = GENERATE("l2", "ip", "cosine");
     std::string metric_type_str = metric_type;
     std::string base_quantization_str = GENERATE("fp32");
-    const std::vector<int> level{0, 1, 2};
+    PyramidParam pyramid_param;
+    pyramid_param.no_build_levels = {0, 1, 2};
     const std::string name = "pyramid";
     auto search_param = fmt::format(search_param_tmp, 20);
     for (auto& dim : dims) {
-        auto param = GeneratePyramidBuildParametersString(metric_type, dim, level);
+        auto param = GeneratePyramidBuildParametersString(metric_type, dim, pyramid_param);
         auto index = TestFactory(name, param, true);
         REQUIRE(index->GetIndexType() == vsag::IndexType::PYRAMID);
         auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type, /*with_path=*/true);
@@ -99,11 +103,12 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex, "Pyramid Add Test", "[ft][pyramid]") {
     auto metric_type = GENERATE("l2");
     std::string base_quantization_str = GENERATE("fp32");
-    const std::vector<int> level{0, 1, 2};
+    PyramidParam pyramid_param;
+    pyramid_param.no_build_levels = {0, 1, 2};
     const std::string name = "pyramid";
     auto search_param = fmt::format(search_param_tmp, 20);
     for (auto& dim : dims) {
-        auto param = GeneratePyramidBuildParametersString(metric_type, dim, level);
+        auto param = GeneratePyramidBuildParametersString(metric_type, dim, pyramid_param);
         auto index = TestFactory(name, param, true);
         auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type, /*with_path=*/true);
         TestAddIndex(index, dataset, true);
@@ -121,9 +126,11 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
     std::string base_quantization_str = GENERATE("fp32");
     const std::string name = "pyramid";
     auto search_param = fmt::format(search_param_tmp, 100);
+    PyramidParam pyramid_param;
     for (auto& dim : dims) {
         for (const auto& level : levels) {
-            auto param = GeneratePyramidBuildParametersString(metric_type, dim, level);
+            pyramid_param.no_build_levels = level;
+            auto param = GeneratePyramidBuildParametersString(metric_type, dim, pyramid_param);
             auto index = TestFactory(name, param, true);
             auto dataset =
                 pool.GetDatasetAndCreate(dim, base_count, metric_type, /*with_path=*/true);
@@ -141,13 +148,14 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
     auto metric_type = GENERATE("l2");
-    const std::vector<int> level{0, 1, 2};
+    PyramidParam pyramid_param;
+    pyramid_param.no_build_levels = {0, 1, 2};
     const std::string name = "pyramid";
     auto search_param = fmt::format(search_param_tmp, 20);
 
     for (auto& dim : dims) {
         vsag::Options::Instance().set_block_size_limit(size);
-        auto param = GeneratePyramidBuildParametersString(metric_type, dim, level);
+        auto param = GeneratePyramidBuildParametersString(metric_type, dim, pyramid_param);
         auto index = TestFactory(name, param, true);
         SECTION("serialize empty index") {
             auto index2 = TestFactory(name, param, true);
@@ -178,13 +186,14 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex, "Pyramid Clone", "[ft][
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
     auto metric_type = GENERATE("l2");
-    const std::vector<int> level{0, 1, 2};
+    PyramidParam pyramid_param;
+    pyramid_param.no_build_levels = {0, 1, 2};
     const std::string name = "pyramid";
     auto search_param = fmt::format(search_param_tmp, 20);
 
     for (auto& dim : dims) {
         vsag::Options::Instance().set_block_size_limit(size);
-        auto param = GeneratePyramidBuildParametersString(metric_type, dim, level);
+        auto param = GeneratePyramidBuildParametersString(metric_type, dim, pyramid_param);
         auto index = TestFactory(name, param, true);
         auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type, /*with_path=*/true);
         TestBuildIndex(index, dataset, true);
@@ -200,11 +209,12 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
     auto metric_type = GENERATE("l2", "ip", "cosine");
-    const std::vector<int> level{0, 1, 2};
+    PyramidParam pyramid_param;
+    pyramid_param.no_build_levels = {0, 1, 2};
     const std::string name = "pyramid";
     for (auto& dim : dims) {
         vsag::Options::Instance().set_block_size_limit(size);
-        auto param = GeneratePyramidBuildParametersString(metric_type, dim, level);
+        auto param = GeneratePyramidBuildParametersString(metric_type, dim, pyramid_param);
         auto index = vsag::Factory::CreateIndex(name, param, allocator.get());
         if (not index.has_value()) {
             continue;
@@ -218,11 +228,12 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
                              "Pyramid Concurrent Test",
                              "[ft][pyramid][concurrent]") {
     auto metric_type = GENERATE("l2");
-    const std::vector<int> level{0, 1, 2};
+    PyramidParam pyramid_param;
+    pyramid_param.no_build_levels = {0, 1, 2};
     const std::string name = "pyramid";
     auto search_param = fmt::format(search_param_tmp, 20);
     for (auto& dim : dims) {
-        auto param = GeneratePyramidBuildParametersString(metric_type, dim, level);
+        auto param = GeneratePyramidBuildParametersString(metric_type, dim, pyramid_param);
         auto index = TestFactory(name, param, true);
         auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type, /*with_path=*/true);
         TestConcurrentAdd(index, dataset, true);
