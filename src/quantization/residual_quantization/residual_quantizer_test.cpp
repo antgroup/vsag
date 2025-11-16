@@ -96,11 +96,25 @@ TEST_CASE("RQ Compute", "[ut][ResidualQuantizer]") {
     for (auto dim : dims) {
         for (auto count : counts) {
             TestComputeMetricRQ<FP32Quantizer<MetricType::METRIC_TYPE_IP>, metrics[0]>(
-                "fp32", dim, count);
+                "fp32", dim, count, 0.1);
             TestComputeMetricRQ<FP32Quantizer<MetricType::METRIC_TYPE_IP>, metrics[1]>(
-                "fp32", dim, count);
+                "fp32", dim, count, 0.1);
             TestComputeMetricRQ<FP32Quantizer<MetricType::METRIC_TYPE_IP>, metrics[2]>(
-                "fp32", dim, count);
+                "fp32", dim, count, 0.1);
+
+            TestComputeMetricRQ<FP16Quantizer<MetricType::METRIC_TYPE_IP>, metrics[0]>(
+                "fp16", dim, count, 0.1);
+            TestComputeMetricRQ<FP16Quantizer<MetricType::METRIC_TYPE_IP>, metrics[1]>(
+                "fp16", dim, count, 0.1);
+            TestComputeMetricRQ<FP16Quantizer<MetricType::METRIC_TYPE_IP>, metrics[2]>(
+                "fp16", dim, count, 0.1);
+
+            TestComputeMetricRQ<SQ8Quantizer<MetricType::METRIC_TYPE_IP>, metrics[0]>(
+                "sq8", dim, count, 20);
+            TestComputeMetricRQ<SQ8Quantizer<MetricType::METRIC_TYPE_IP>, metrics[1]>(
+                "sq8", dim, count, 20);
+            TestComputeMetricRQ<SQ8Quantizer<MetricType::METRIC_TYPE_IP>, metrics[2]>(
+                "sq8", dim, count, 20);
 
             TestComputeMetricRQ<SQ4UniformQuantizer<MetricType::METRIC_TYPE_IP>, metrics[0]>(
                 "sq4_uniform", dim, count, 20);
@@ -108,13 +122,6 @@ TEST_CASE("RQ Compute", "[ut][ResidualQuantizer]") {
                 "sq4_uniform", dim, count, 20);
             TestComputeMetricRQ<SQ4UniformQuantizer<MetricType::METRIC_TYPE_IP>, metrics[2]>(
                 "sq4_uniform", dim, count, 20);
-
-            TestComputeMetricRQ<FP16Quantizer<MetricType::METRIC_TYPE_IP>, metrics[0]>(
-                "fp16", dim, count);
-            TestComputeMetricRQ<FP16Quantizer<MetricType::METRIC_TYPE_IP>, metrics[1]>(
-                "fp16", dim, count);
-            TestComputeMetricRQ<FP16Quantizer<MetricType::METRIC_TYPE_IP>, metrics[2]>(
-                "fp16", dim, count);
         }
     }
 }
@@ -132,12 +139,12 @@ TEST_CASE("RQ Serialize and Deserialize", "[ut][ResidualQuantizer]") {
             TestSerializeDeserializeRQ<FP32Quantizer<MetricType::METRIC_TYPE_IP>, metrics[2]>(
                 "fp32", dim, count);
 
-            TestSerializeDeserializeRQ<SQ8Quantizer<MetricType::METRIC_TYPE_IP>, metrics[0]>(
-                "sq8", dim, count);
-            TestSerializeDeserializeRQ<SQ8Quantizer<MetricType::METRIC_TYPE_IP>, metrics[1]>(
-                "sq8", dim, count);
-            TestSerializeDeserializeRQ<SQ8Quantizer<MetricType::METRIC_TYPE_IP>, metrics[2]>(
-                "sq8", dim, count);
+            TestSerializeDeserializeRQ<FP16Quantizer<MetricType::METRIC_TYPE_IP>, metrics[0]>(
+                "fp16", dim, count);
+            TestSerializeDeserializeRQ<FP16Quantizer<MetricType::METRIC_TYPE_IP>, metrics[1]>(
+                "fp16", dim, count);
+            TestSerializeDeserializeRQ<FP16Quantizer<MetricType::METRIC_TYPE_IP>, metrics[2]>(
+                "fp16", dim, count);
         }
     }
 }

@@ -139,7 +139,9 @@ public:
 
     IVFPartitionStrategyPtr partition_strategy_{nullptr};
 
-    uint32_t res_norm_offset_{0};
+    uint32_t base_res_norm_offset_{0};
+
+    uint32_t query_res_norm_offset_{0};
 
     uint32_t align_size_{0};
 
@@ -186,13 +188,15 @@ ResidualQuantizer<QuantTmpl, metric>::ResidualQuantizer(const ResidualQuantizerP
 
     // 3. compute norm offset
     align_size_ = sizeof(float);
-    this->res_norm_offset_ =
+    this->base_res_norm_offset_ =
         (this->quantizer_->GetCodeSize() + align_size_ - 1) / align_size_ * align_size_;
+    this->query_res_norm_offset_ =
+        (this->quantizer_->GetQueryCodeSize() + align_size_ - 1) / align_size_ * align_size_;
 
     // 4. compute code size
-    this->code_size_ = this->res_norm_offset_ + sizeof(float) * 3;
+    this->code_size_ = this->base_res_norm_offset_ + sizeof(float) * 3;
     this->query_code_size_ =
-        this->res_norm_offset_ + sizeof(float) * centroids_count_ + sizeof(float);
+        this->query_res_norm_offset_ + sizeof(float) * centroids_count_ + sizeof(float);
 }
 
 template <typename QuantTmpl, MetricType metric>
@@ -237,20 +241,21 @@ ResidualQuantizer<QuantTmpl, metric>::EncodeOneImpl(const DataType* data, uint8_
     auto res = quantizer_->EncodeOne(data_buffer.data(), codes);
 
     float n1 = FP32ComputeIP(data_buffer.data(), data_buffer.data(), this->dim_);  // (x - c)^2
-    float n2 = 2 * FP32ComputeIP(data_buffer.data(),
-                                 (const float*)(centroid_vec.data()),
-                                 this->dim_);  // 2c * (x - c)
+    float n2_valid = 2 * FP32ComputeIP(data_buffer.data(),
+                                       (const float*)(centroid_vec.data()),
+                                       this->dim_);  // 2c * (x - c)
 
     auto computer = this->quantizer_->FactoryComputer();
     this->quantizer_->ProcessQuery(centroid_vec.data(), *computer);
-    n2 = 1.0f - quantizer_->ComputeDist(*computer, codes);  // note that ComputeDist returns 1 - ip
+    auto n2 =
+        1.0f - quantizer_->ComputeDist(*computer, codes);  // note that ComputeDist returns 1 - ip
     n2 *= 2;
 
     float x_norm = sqrt(FP32ComputeIP(data, data, this->dim_));  // |x|
 
     // 3. store norm data
-    *(float*)(codes + res_norm_offset_) = n1 + n2;
-    *(uint32_t*)(codes + res_norm_offset_ + sizeof(float)) = centroid_id;
+    *(float*)(codes + base_res_norm_offset_) = n1 + n2;
+    *(uint32_t*)(codes + base_res_norm_offset_ + sizeof(float)) = centroid_id;
     *(float*)(codes + this->code_size_ - sizeof(float)) = x_norm;
 
     return res;
@@ -275,7 +280,8 @@ ResidualQuantizer<QuantTmpl, metric>::ProcessQueryImpl(
     for (auto i = 0; i < centroids_count_; i++) {
         this->partition_strategy_->GetCentroid(i, centroid_vec);
         auto norm = FP32ComputeL2Sqr(query, (const float*)(centroid_vec.data()), this->dim_);
-        *(float*)(computer.inner_computer_->buf_ + res_norm_offset_ + i * sizeof(float)) = norm;
+        *(float*)(computer.inner_computer_->buf_ + query_res_norm_offset_ + i * sizeof(float)) =
+            norm;
     }
     *(float*)(computer.inner_computer_->buf_ + this->query_code_size_ - sizeof(float)) =
         std::sqrt(FP32ComputeIP(query, query, this->dim_));
@@ -290,10 +296,10 @@ void
 ResidualQuantizer<QuantTmpl, metric>::ComputeDistImpl(Computer<ResidualQuantizer>& computer,
                                                       const uint8_t* codes,
                                                       float* dists) const {
-    auto n1_n2 = *(float*)(codes + res_norm_offset_);
-    auto centroid_id = *(uint32_t*)(codes + res_norm_offset_ + sizeof(float));
-    auto n_3 =
-        *(float*)(computer.inner_computer_->buf_ + res_norm_offset_ + centroid_id * sizeof(float));
+    auto n1_n2 = *(float*)(codes + base_res_norm_offset_);
+    auto centroid_id = *(uint32_t*)(codes + base_res_norm_offset_ + sizeof(float));
+    auto n_3 = *(float*)(computer.inner_computer_->buf_ + query_res_norm_offset_ +
+                         centroid_id * sizeof(float));
     auto quantize_dist =
         1.0f - quantizer_->ComputeDist(*(computer.inner_computer_),
                                        codes);  // note that ComputeDist returns 1 - ip
