@@ -520,14 +520,6 @@ IVF::UpdateAttribute(int64_t id, const AttributeSet& new_attrs, const AttributeS
     this->attr_filter_index_->UpdateBitsetsByAttr(new_attrs, offset_id, bucket_id, origin_attrs);
 }
 
-#define WRITE_DATACELL_WITH_NAME(writer, name, datacell)            \
-    datacell_offsets[(name)].SetInt(offset);                        \
-    auto datacell##_start = (writer).GetCursor();                   \
-    (datacell)->Serialize(writer);                                  \
-    auto datacell##_size = (writer).GetCursor() - datacell##_start; \
-    datacell_sizes[(name)].SetInt(datacell##_size);                 \
-    offset += datacell##_size;
-
 void
 IVF::Serialize(StreamWriter& writer) const {
     JsonType datacell_offsets;
@@ -565,11 +557,6 @@ IVF::Serialize(StreamWriter& writer) const {
     auto footer = std::make_shared<Footer>(metadata);
     footer->Write(writer);
 }
-
-#define READ_DATACELL_WITH_NAME(reader, name, datacell)                       \
-    reader.PushSeek(datacell_offsets[(name)].GetInt());                       \
-    (datacell)->Deserialize((reader).Slice(datacell_sizes[(name)].GetInt())); \
-    (reader).PopSeek();
 
 void
 IVF::Deserialize(StreamReader& reader) {

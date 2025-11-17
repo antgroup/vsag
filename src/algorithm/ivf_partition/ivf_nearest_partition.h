@@ -48,9 +48,13 @@ public:
 
     InnerIndexPtr route_index_ptr_{nullptr};
 
+    FlattenInterfacePtr centroids_{nullptr};
+
+    bool use_graph_acceleration_{false};
+
 private:
     void
-    factory_router_index(const IndexCommonParam& common_param, bool factory_router_index);
+    factory_router_index(const IndexCommonParam& common_param);
 };
 
 }  // namespace vsag

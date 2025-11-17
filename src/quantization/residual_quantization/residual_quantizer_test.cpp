@@ -78,15 +78,16 @@ TestSerializeDeserializeRQ(std::string base_quantizer_type, uint64_t dim, int co
     ResidualQuantizer<T, metric> quantizer1(param, common_param);
     ResidualQuantizer<T, metric> quantizer2(param, common_param);
 
-    TestSerializeAndDeserialize<ResidualQuantizer<T, metric>, metric>(quantizer1,
-                                                                      quantizer2,
-                                                                      dim,
-                                                                      count,
-                                                                      numeric_error,
-                                                                      related_error,
-                                                                      unbounded_numeric_error_rate,
-                                                                      unbounded_related_error_rate,
-                                                                      false);
+    TestSerializeAndDeserialize<ResidualQuantizer<T, metric>, metric, false, false>(
+        quantizer1,
+        quantizer2,
+        dim,
+        count,
+        numeric_error,
+        related_error,
+        unbounded_numeric_error_rate,
+        unbounded_related_error_rate,
+        false);
 }
 
 TEST_CASE("RQ Compute", "[ut][ResidualQuantizer]") {

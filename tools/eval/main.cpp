@@ -174,7 +174,7 @@ main(int argc, char** argv) {
     using vsag::eval::Exporter;
     using vsag::eval::Formatter;
 
-    vsag::Options::Instance().logger()->SetLevel(vsag::Logger::kOFF);
+    vsag::Options::Instance().logger()->SetLevel(vsag::Logger::kDEBUG);
     vsag::eval::EvalConfig config;
     if (argc == 2) {
         std::string yaml_file = argv[1];

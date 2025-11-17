@@ -376,7 +376,7 @@ TestComputer(Quantizer<T>& quant,
     REQUIRE(count_unbounded_related_error / (query_count * count) <= unbounded_related_error_rate);
 }
 
-template <typename T, MetricType metric, bool uniform = false>
+template <typename T, MetricType metric, bool uniform = false, bool support_compute_codes = true>
 void
 TestSerializeAndDeserialize(Quantizer<T>& quant1,
                             Quantizer<T>& quant2,
@@ -406,7 +406,9 @@ TestSerializeAndDeserialize(Quantizer<T>& quant1,
                                     false,
                                     unbounded_numeric_error_rate,
                                     unbounded_related_error_rate);
-            TestComputeCodes<T, metric>(quant2, dim, count, error * dim * 2.0F, false);
+            if constexpr (support_compute_codes) {
+                TestComputeCodes<T, metric>(quant2, dim, count, error * dim * 2.0F, false);
+            }
         } else {
             TestComputeCodesSame<T, metric>(quant2, dim, count, error, false);
         }

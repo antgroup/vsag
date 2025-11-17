@@ -38,6 +38,19 @@ DEFINE_POINTER2(InnerIndex, InnerIndexInterface);
 DEFINE_POINTER(LabelTable);
 DEFINE_POINTER(IndexFeatureList);
 
+#define WRITE_DATACELL_WITH_NAME(writer, name, datacell)            \
+    datacell_offsets[(name)].SetInt(offset);                        \
+    auto datacell##_start = (writer).GetCursor();                   \
+    (datacell)->Serialize(writer);                                  \
+    auto datacell##_size = (writer).GetCursor() - datacell##_start; \
+    datacell_sizes[(name)].SetInt(datacell##_size);                 \
+    offset += datacell##_size;
+
+#define READ_DATACELL_WITH_NAME(reader, name, datacell)                       \
+    reader.PushSeek(datacell_offsets[(name)].GetInt());                       \
+    (datacell)->Deserialize((reader).Slice(datacell_sizes[(name)].GetInt())); \
+    (reader).PopSeek();
+
 class IndexCommonParam;
 
 class InnerIndexInterface {

@@ -371,9 +371,9 @@ void
 ResidualQuantizer<QuantTmpl, metric>::SerializeImpl(StreamWriter& writer) {
     StreamWriter::WriteVector(writer, this->centroids_norm_);
 
-    this->partition_strategy_->Serialize(writer);
-
     this->quantizer_->Serialize(writer);
+
+    this->partition_strategy_->Serialize(writer);
 }
 
 template <typename QuantTmpl, MetricType metric>
@@ -381,9 +381,9 @@ void
 ResidualQuantizer<QuantTmpl, metric>::DeserializeImpl(StreamReader& reader) {
     StreamReader::ReadVector(reader, this->centroids_norm_);
 
-    this->partition_strategy_->Deserialize(reader);
-
     this->quantizer_->Deserialize(reader);
+
+    this->partition_strategy_->Deserialize(reader);
 }
 
 }  // namespace vsag
