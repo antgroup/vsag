@@ -154,7 +154,7 @@ private:
     DatasetPtr
     search_impl(const DatasetPtr& query, int64_t limit, const SearchFunc& search_func) const;
 
-    int
+    bool
     is_update_entry_point(uint64_t total_count) {
         std::uniform_real_distribution<double> distribution(0.0, 1.0);
         double rand_value = distribution(level_generator_);
@@ -178,6 +178,8 @@ private:
     std::shared_mutex resize_mutex_;
     std::mutex cur_element_count_mutex_;
     std::string graph_type_{GRAPH_TYPE_VALUE_NSW};
+
+    std::mutex entry_point_mutex_;
     std::default_random_engine level_generator_{2021};
 };
 

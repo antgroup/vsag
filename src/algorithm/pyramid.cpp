@@ -390,7 +390,11 @@ Pyramid::Add(const DatasetPtr& base) {
                 node->graph_->InsertNeighborsById(inner_id, Vector<InnerIdType>(allocator_));
                 node->entry_point_ = inner_id;
             } else {
-                bool update_entry_point = is_update_entry_point(node->graph_->TotalCount());
+                bool update_entry_point;
+                {
+                    std::scoped_lock<std::mutex> entry_point_lock(entry_point_mutex_);
+                    update_entry_point = is_update_entry_point(node->graph_->TotalCount());
+                }
                 search_param.ep = node->entry_point_;
                 auto vl = pool_->TakeOne();
                 auto results = searcher_->Search(
