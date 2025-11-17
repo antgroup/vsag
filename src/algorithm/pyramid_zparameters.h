@@ -49,7 +49,7 @@ public:
 
     std::vector<int32_t> no_build_levels;
     uint64_t ef_construction{400};
-    uint64_t max_degree{64};
+    int64_t max_degree{64};
     std::string graph_type{GRAPH_TYPE_VALUE_NSW};
     float alpha{1.2F};
 };
