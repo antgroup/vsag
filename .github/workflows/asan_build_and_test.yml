@@ -103,7 +103,7 @@ jobs:
       - name: Extract Build
         run: |
           mkdir -p ./build
-          tar -xzvf build.tar.gz -C ./build
+          tar -xzf build.tar.gz -C ./build
           rm build.tar.gz
       - name: Do Asan Test In ${{ matrix.test_type }}
         run: |
