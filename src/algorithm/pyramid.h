@@ -28,11 +28,12 @@
 #include "io/memory_io_parameter.h"
 #include "pyramid_zparameters.h"
 #include "quantization/fp32_quantizer_parameter.h"
+#include "utils/lock_strategy.h"
 
 namespace vsag {
 
 class IndexNode;
-using SearchFunc = std::function<DistHeapPtr(const IndexNode* node)>;
+using SearchFunc = std::function<DistHeapPtr(const IndexNode* node, VisitedListPtr vl)>;
 
 class IndexNode {
 public:
@@ -45,7 +46,7 @@ public:
     InitGraph();
 
     DistHeapPtr
-    SearchGraph(const SearchFunc& search_func) const;
+    SearchGraph(const SearchFunc& search_func, VisitedListPtr vl) const;
 
     void
     AddChild(const std::string& key);
@@ -63,7 +64,7 @@ public:
     GraphInterfacePtr graph_{nullptr};
     InnerIdType entry_point_{0};
     uint32_t level_{0};
-    mutable std::mutex mutex_;
+    mutable std::shared_mutex mutex_;
 
     Vector<InnerIdType> ids_;
     bool has_index_{false};
@@ -87,10 +88,11 @@ public:
           pyramid_param_(pyramid_param),
           common_param_(common_param),
           alpha_(pyramid_param->alpha) {
-        searcher_ = std::make_unique<BasicSearcher>(common_param_);
         base_codes_ =
             FlattenInterface::MakeInstance(pyramid_param_->base_codes_param, common_param_);
         root_ = std::make_shared<IndexNode>(&common_param_, pyramid_param_->graph_param);
+        points_mutex_ = std::make_shared<PointsMutex>(max_capacity_, allocator_);
+        searcher_ = std::make_unique<BasicSearcher>(common_param_, points_mutex_);
     }
 
     explicit Pyramid(const ParamPtr& param, const IndexCommonParam& common_param)
@@ -181,6 +183,8 @@ private:
 
     std::mutex entry_point_mutex_;
     std::default_random_engine level_generator_{2021};
+
+    MutexArrayPtr points_mutex_{nullptr};
 };
 
 }  // namespace vsag
