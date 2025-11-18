@@ -224,7 +224,7 @@ template <typename QuantTmpl, MetricType metric>
 bool
 ResidualQuantizer<QuantTmpl, metric>::EncodeOneImpl(const DataType* data, uint8_t* codes) const {
     // 0. init code space
-    std::fill_n(codes, this->code_size_, 0);
+    std::fill_n(codes, this->code_size_, 0);  // Q(x - c)
 
     // 1. get centroid
     Vector<float> centroid_vec(this->dim_, 0, this->allocator_);
@@ -237,23 +237,24 @@ ResidualQuantizer<QuantTmpl, metric>::EncodeOneImpl(const DataType* data, uint8_
         data_buffer[i] = data[i] - centroid_vec[i];
     }
 
-    // 3. execute quantize
+    // 3. store Q(x - c)
     auto res = quantizer_->EncodeOne(data_buffer.data(), codes);
 
-    float n1 = FP32ComputeIP(data_buffer.data(), data_buffer.data(), this->dim_);  // (x - c)^2
-    float n2_valid = 2 * FP32ComputeIP(data_buffer.data(),
-                                       (const float*)(centroid_vec.data()),
-                                       this->dim_);  // 2c * (x - c)
+    // 4. factory computers of c and (x - c)
+    auto c_computer = this->quantizer_->FactoryComputer();
+    quantizer_->ProcessQuery(centroid_vec.data(), *c_computer);
+    auto x_computer = this->quantizer_->FactoryComputer();
+    quantizer_->ProcessQuery(data_buffer.data(), *x_computer);
 
-    auto computer = this->quantizer_->FactoryComputer();
-    this->quantizer_->ProcessQuery(centroid_vec.data(), *computer);
-    auto n2 =
-        1.0f - quantizer_->ComputeDist(*computer, codes);  // note that ComputeDist returns 1 - ip
+    // 5. compute term
+    float n1 = 1.0f - quantizer_->ComputeDist(*x_computer, codes);  // Q(x - c)^2
+
+    float n2 = 1.0f - quantizer_->ComputeDist(*c_computer, codes);  // 2 * Q(x - c) * c
     n2 *= 2;
 
     float x_norm = sqrt(FP32ComputeIP(data, data, this->dim_));  // |x|
 
-    // 3. store norm data
+    // 6. store norm data
     *(float*)(codes + base_res_norm_offset_) = n1 + n2;
     *(uint32_t*)(codes + base_res_norm_offset_ + sizeof(float)) = centroid_id;
     *(float*)(codes + this->code_size_ - sizeof(float)) = x_norm;
@@ -276,10 +277,16 @@ ResidualQuantizer<QuantTmpl, metric>::ProcessQueryImpl(
     std::fill_n(computer.inner_computer_->buf_, this->query_code_size_, 0);
 
     // 1. pre-compute all |q - c|^2 and store them into meta
+    Vector<uint8_t> query_codes(this->code_size_, 0, this->allocator_);
+    Vector<float> query_decodes(this->dim_, 0, this->allocator_);
+    quantizer_->EncodeOne(query, query_codes.data());
+    quantizer_->DecodeOne(query_codes.data(), query_decodes.data());
+
     Vector<float> centroid_vec(this->dim_, 0, this->allocator_);
     for (auto i = 0; i < centroids_count_; i++) {
         this->partition_strategy_->GetCentroid(i, centroid_vec);
-        auto norm = FP32ComputeL2Sqr(query, (const float*)(centroid_vec.data()), this->dim_);
+        auto norm =
+            FP32ComputeL2Sqr(query_decodes.data(), (const float*)(centroid_vec.data()), this->dim_);
         *(float*)(computer.inner_computer_->buf_ + query_res_norm_offset_ + i * sizeof(float)) =
             norm;
     }
