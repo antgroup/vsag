@@ -15,6 +15,7 @@
 
 #include "pyramid.h"
 
+#include "algorithm/inner_index_interface.h"
 #include "datacell/flatten_interface.h"
 #include "impl/heap/standard_heap.h"
 #include "impl/odescent/odescent_graph_builder.h"
@@ -201,14 +202,23 @@ Pyramid::KnnSearch(const DatasetPtr& query,
         search_param.is_inner_id_allowed =
             std::make_shared<InnerIdWrapperFilter>(filter, *label_table_);
     }
+    Statistics stats;
     SearchFunc search_func = [&](const IndexNode* node, const VisitedListPtr& vl) {
         std::shared_lock lock(node->mutex_);
         search_param.ep = node->entry_point_;
-        auto results = searcher_->Search(
-            node->graph_, base_codes_, vl, query->GetFloat32Vectors(), search_param);
+        auto results = searcher_->Search(node->graph_,
+                                         base_codes_,
+                                         vl,
+                                         query->GetFloat32Vectors(),
+                                         search_param,
+                                         (LabelTablePtr) nullptr,
+                                         stats);
         return results;
     };
-    return this->search_impl(query, k, search_func, parsed_param.ef_search);
+
+    auto result = this->search_impl(query, k, search_func, parsed_param.ef_search);
+    result->Statistics(stats.Dump());
+    return result;
 }
 
 DatasetPtr
@@ -226,15 +236,24 @@ Pyramid::RangeSearch(const DatasetPtr& query,
         search_param.is_inner_id_allowed =
             std::make_shared<InnerIdWrapperFilter>(filter, *label_table_);
     }
+    Statistics stats;
     SearchFunc search_func = [&](const IndexNode* node, const VisitedListPtr& vl) {
         std::shared_lock lock(node->mutex_);
         search_param.ep = node->entry_point_;
-        auto results = searcher_->Search(
-            node->graph_, base_codes_, vl, query->GetFloat32Vectors(), search_param);
+        auto results = searcher_->Search(node->graph_,
+                                         base_codes_,
+                                         vl,
+                                         query->GetFloat32Vectors(),
+                                         search_param,
+                                         (LabelTablePtr) nullptr,
+                                         stats);
         return results;
     };
     int64_t final_limit = limited_size == -1 ? std::numeric_limits<int64_t>::max() : limited_size;
-    return this->search_impl(query, final_limit, search_func, parsed_param.ef_search);
+
+    auto result = this->search_impl(query, final_limit, search_func, parsed_param.ef_search);
+    result->Statistics(stats.Dump());
+    return result;
 }
 
 DatasetPtr
@@ -593,7 +612,14 @@ Pyramid::add_one_point(const std::shared_ptr<IndexNode>& node,
         }
 
         auto vl = pool_->TakeOne();
-        auto results = searcher_->Search(node->graph_, base_codes_, vl, vector, search_param);
+        Statistics discard_stats;
+        auto results = searcher_->Search(node->graph_,
+                                         base_codes_,
+                                         vl,
+                                         vector,
+                                         search_param,
+                                         (LabelTablePtr) nullptr,
+                                         discard_stats);
         pool_->ReturnOne(vl);
         mutually_connect_new_element(
             inner_id, results, node->graph_, base_codes_, points_mutex_, allocator_, alpha_);

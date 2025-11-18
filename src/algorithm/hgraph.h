@@ -257,7 +257,8 @@ private:
                      const GraphInterfacePtr& graph,
                      const FlattenInterfacePtr& flatten,
                      InnerSearchParam& inner_search_param,
-                     const VisitedListPtr& vt = nullptr) const;
+                     const VisitedListPtr& vt,
+                     Statistics& stats) const;
 
     template <InnerSearchMode mode = InnerSearchMode::KNN_SEARCH>
     DistHeapPtr
@@ -265,7 +266,8 @@ private:
                      const GraphInterfacePtr& graph,
                      const FlattenInterfacePtr& flatten,
                      InnerSearchParam& inner_search_param,
-                     IteratorFilterContext* iter_ctx) const;
+                     IteratorFilterContext* iter_ctx,
+                     Statistics& stats) const;
 
 private:
     // since v0.15

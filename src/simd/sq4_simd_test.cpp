@@ -20,6 +20,7 @@
 
 #include "fixtures.h"
 #include "simd_status.h"
+
 using namespace vsag;
 
 #define TEST_ACCURACY(Func)                                        \
