@@ -296,6 +296,8 @@ ResidualQuantizer<QuantTmpl, metric>::ProcessQueryImpl(
     // 2. execute quantize
     // note that only when computer.buf_ == nullptr, quantizer_ will allocate data to buf_
     quantizer_->ProcessQuery(query, *computer.inner_computer_);
+//    memcpy(computer.inner_computer_->buf_, query, this->dim_ * sizeof(float));
+
 };
 
 template <typename QuantTmpl, MetricType metric>
@@ -303,6 +305,23 @@ void
 ResidualQuantizer<QuantTmpl, metric>::ComputeDistImpl(Computer<ResidualQuantizer>& computer,
                                                       const uint8_t* codes,
                                                       float* dists) const {
+
+//    Vector<float> centroid_vec(this->dim_, 0, this->allocator_);
+//    auto c = *(uint32_t*)(codes + base_res_norm_offset_ + sizeof(float));
+//    this->partition_strategy_->GetCentroid(c, centroid_vec);
+//    Vector<float> data_buffer(this->dim_, 0, this->allocator_);  // x - c
+//    for (int i = 0; i < this->dim_; i++) {
+//        data_buffer[i] = ((float*)(computer.inner_computer_->buf_))[i] - centroid_vec[i];
+//    }
+//
+//    auto computer_alter = this->quantizer_->FactoryComputer();
+//    quantizer_->ProcessQuery(data_buffer.data(), *computer_alter);
+//    dists[0] = quantizer_->ComputeDist(*(computer_alter),
+//                                        codes);
+//
+//    return ;
+
+
     auto n1_n2 = *(float*)(codes + base_res_norm_offset_);
     auto centroid_id = *(uint32_t*)(codes + base_res_norm_offset_ + sizeof(float));
     auto n_3 = *(float*)(computer.inner_computer_->buf_ + query_res_norm_offset_ +
