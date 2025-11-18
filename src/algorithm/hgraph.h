@@ -265,7 +265,8 @@ private:
                      const GraphInterfacePtr& graph,
                      const FlattenInterfacePtr& flatten,
                      InnerSearchParam& inner_search_param,
-                     IteratorFilterContext* iter_ctx) const;
+                     IteratorFilterContext* iter_ctx,
+                     statistics& stats) const;
 
 private:
     // since v0.15

@@ -15,12 +15,15 @@
 
 #include "ivf.h"
 
+#include <atomic>
 #include <random>
 #include <set>
 
+#include "algorithm/inner_index_interface.h"
 #include "attr/argparse.h"
 #include "attr/executor/executor.h"
 #include "impl/heap/standard_heap.h"
+#include "impl/inner_search_param.h"
 #include "impl/reorder/flatten_reorder.h"
 #include "impl/searcher/basic_searcher.h"
 #include "index/index_impl.h"
@@ -382,7 +385,9 @@ IVF::Add(const DatasetPtr& base) {
     const auto* attr_sets = base->GetAttributeSets();
     const auto* extra_info = base->GetExtraInfos();
     const auto extra_info_size = base->GetExtraInfoSize();
-    auto buckets = partition_strategy_->ClassifyDatas(vectors, num_element, buckets_per_data_);
+    statistics discard_stats;
+    auto buckets =
+        partition_strategy_->ClassifyDatas(vectors, num_element, buckets_per_data_, discard_stats);
 
     int64_t current_num;
     {
@@ -463,7 +468,7 @@ IVF::KnnSearch(const DatasetPtr& query,
         labels[j] = label_table_->GetLabelById(search_result->Top().second);
         search_result->Pop();
     }
-    dataset_results->Statistics(param.stats->Dump());
+    dataset_results->Statistics(stats_.Dump());
     return std::move(dataset_results);
 }
 
@@ -677,7 +682,7 @@ IVF::create_search_param(const std::string& parameters, const FilterPtr& filter)
     if (search_param.enable_time_record) {
         param.time_cost = std::make_shared<Timer>();
         param.time_cost->SetThreshold(search_param.timeout_ms);
-        (*param.stats)["is_timeout"].SetBool(false);
+        stats_.is_timeout.store(false, std::memory_order_relaxed);
     }
     return param;
 }
@@ -695,7 +700,7 @@ IVF::reorder(int64_t topk,
         labels[j] = label_table_->GetLabelById(reorder_heap->Top().second);
         reorder_heap->Pop();
     }
-    dataset_results->Statistics(param.stats->Dump());
+    dataset_results->Statistics(stats_.Dump());
     return std::move(dataset_results);
 }
 
@@ -716,7 +721,8 @@ DistHeapPtr
 IVF::search(const DatasetPtr& query, const InnerSearchParam& param) const {
     const auto* query_data = query->GetFloat32Vectors();
     Vector<float> normalize_data(dim_, allocator_);
-    auto candidate_buckets = partition_strategy_->ClassifyDatasForSearch(query_data, 1, param);
+    auto candidate_buckets =
+        partition_strategy_->ClassifyDatasForSearch(query_data, 1, param, stats_);
     auto computer = bucket_->FactoryComputer(query_data);
 
     auto cur_heap_top = std::numeric_limits<float>::max();
@@ -754,7 +760,7 @@ IVF::search(const DatasetPtr& query, const InnerSearchParam& param) const {
         Vector<float> dist(allocator_);
         for (uint64_t i = 0; i < bucket_count; ++i) {
             if (param.time_cost != nullptr and param.time_cost->CheckOvertime()) {
-                (*param.stats)["is_timeout"].SetBool(true);
+                stats_.is_timeout.store(true, std::memory_order_relaxed);
                 break;
             }
             if (i % search_thread_count != thread_id) {
@@ -952,7 +958,7 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
         labels[j] = label_table_->GetLabelById(search_result->Top().second);
         search_result->Pop();
     }
-    dataset_results->Statistics(param.stats->Dump());
+    dataset_results->Statistics(stats_.Dump());
     return std::move(dataset_results);
 }
 

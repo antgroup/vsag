@@ -33,12 +33,16 @@ public:
     Train(const DatasetPtr dataset) override;
 
     Vector<BucketIdType>
-    ClassifyDatas(const void* datas, int64_t count, BucketIdType buckets_per_data) const override;
+    ClassifyDatas(const void* datas,
+                  int64_t count,
+                  BucketIdType buckets_per_data,
+                  statistics& stats) const override;
 
     Vector<BucketIdType>
     ClassifyDatasForSearch(const void* datas,
                            int64_t count,
-                           const InnerSearchParam& param) override;
+                           const InnerSearchParam& param,
+                           statistics& stats) override;
 
     void
     GetCentroid(BucketIdType bucket_id, Vector<float>& centroid) override;
@@ -70,7 +74,8 @@ private:
     inner_joint_classify_datas(const float* data,
                                int64_t count,
                                BucketIdType buckets_per_data,
-                               BucketIdType* result) const;
+                               BucketIdType* result,
+                               statistics& stats) const;
 };
 
 }  // namespace vsag

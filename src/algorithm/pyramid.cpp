@@ -15,6 +15,7 @@
 
 #include "pyramid.h"
 
+#include "algorithm/inner_index_interface.h"
 #include "datacell/flatten_interface.h"
 #include "impl/heap/standard_heap.h"
 #include "impl/odescent/odescent_graph_builder.h"
@@ -218,8 +219,13 @@ Pyramid::KnnSearch(const DatasetPtr& query,
         search_param.ep = node->entry_point_;
         std::lock_guard<std::mutex> lock(node->mutex_);
         auto vl = pool_->TakeOne();
-        auto results = searcher_->Search(
-            node->graph_, base_codes_, vl, query->GetFloat32Vectors(), search_param);
+        auto results = searcher_->Search(node->graph_,
+                                         base_codes_,
+                                         vl,
+                                         query->GetFloat32Vectors(),
+                                         search_param,
+                                         nullptr,
+                                         stats_);
         pool_->ReturnOne(vl);
         return results;
     };
@@ -245,8 +251,13 @@ Pyramid::RangeSearch(const DatasetPtr& query,
         search_param.ep = node->entry_point_;
         std::lock_guard<std::mutex> lock(node->mutex_);
         auto vl = pool_->TakeOne();
-        auto results = searcher_->Search(
-            node->graph_, base_codes_, vl, query->GetFloat32Vectors(), search_param);
+        auto results = searcher_->Search(node->graph_,
+                                         base_codes_,
+                                         vl,
+                                         query->GetFloat32Vectors(),
+                                         search_param,
+                                         nullptr,
+                                         stats_);
         pool_->ReturnOne(vl);
         return results;
     };
@@ -397,8 +408,14 @@ Pyramid::Add(const DatasetPtr& base) {
                 }
                 search_param.ep = node->entry_point_;
                 auto vl = pool_->TakeOne();
-                auto results = searcher_->Search(
-                    node->graph_, base_codes_, vl, data_vectors + dim_ * i, search_param);
+                statistics discard_stats;
+                auto results = searcher_->Search(node->graph_,
+                                                 base_codes_,
+                                                 vl,
+                                                 data_vectors + dim_ * i,
+                                                 search_param,
+                                                 nullptr,
+                                                 discard_stats);
                 pool_->ReturnOne(vl);
                 mutually_connect_new_element(
                     inner_id, results, node->graph_, base_codes_, empty_mutex, allocator_, alpha_);
