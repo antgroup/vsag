@@ -32,12 +32,15 @@ jobs:
         run: export CMAKE_GENERATOR="Ninja"; make asan
       - name: Clean
         run: find ./build -type f -name "*.o" -exec rm -f {} +
+      - name: Compress Build Directory
+        run: |
+          tar -czvf build.tar.gz -C ./build .
       - name: Save Test
         uses: actions/upload-artifact@v5
         with:
-          path: ./build
+          path: build.tar.gz  # 上传压缩后的文件
           name: test_x86-${{ github.run_id }}
-          compression-level: 1
+          compression-level: 0  # 禁用自动压缩（因为我们已经手动压缩）
           retention-days: 1
           overwrite: 'true'
 
@@ -96,7 +99,12 @@ jobs:
         uses: actions/download-artifact@v5
         with:
           name: test_x86-${{ github.run_id }}
-          path: ./build
+          path: .
+      - name: Extract Build
+        run: |
+          mkdir -p ./build
+          tar -xzvf build.tar.gz -C ./build
+          rm build.tar.gz
       - name: Do Asan Test In ${{ matrix.test_type }}
         run: |
           echo leak:libomp.so > omp.supp
