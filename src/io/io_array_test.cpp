@@ -77,13 +77,16 @@ TEST_CASE("IOArrayTest MemoryBlockIO Basic Test", "[IOArray][ut]") {
 
 TEST_CASE("IOArrayTest BufferIO Basic Test", "[IOArray][ut]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
-    IOArrayTest<NonContinuousIO<BufferIO>> test(
-        allocator.get(), "./test_buffer_io", allocator.get());
+    auto dir = fixtures::TempDir("test_buffer_io");
+    auto path = dir.GenerateRandomFile();
+    IOArrayTest<NonContinuousIO<BufferIO>> test(allocator.get(), path, allocator.get());
     test.TestBasic();
 }
 
 TEST_CASE("IOArrayTest AsyncIO Basic Test", "[IOArray][ut]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
-    IOArrayTest<NonContinuousIO<AsyncIO>> test(allocator.get(), "./test_async_io", allocator.get());
+    auto dir = fixtures::TempDir("test_async_io");
+    auto path = dir.GenerateRandomFile();
+    IOArrayTest<NonContinuousIO<AsyncIO>> test(allocator.get(), path, allocator.get());
     test.TestBasic();
 }
