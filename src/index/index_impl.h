@@ -196,7 +196,7 @@ public:
     };
 
     IndexType
-    GetIndexType() override {
+    GetIndexType() const override {
         return this->inner_index_->GetIndexType();
     }
 

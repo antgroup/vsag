@@ -372,16 +372,35 @@ InnerIndexInterface::FastCreateIndex(const std::string& index_fast_str,
 DatasetPtr
 InnerIndexInterface::GetVectorByIds(const int64_t* ids, int64_t count) const {
     DatasetPtr vectors = Dataset::Make();
-    auto* float_vectors = (float*)allocator_->Allocate(sizeof(float) * count * dim_);
-    if (float_vectors == nullptr) {
-        throw VsagException(ErrorType::NO_ENOUGH_MEMORY, "failed to allocate memory for vectors");
+
+    if (GetIndexType() == IndexType::SINDI or GetIndexType() == IndexType::SPARSE) {
+        auto* sparse_vectors = (SparseVector*)allocator_->Allocate(sizeof(SparseVector) * count);
+        if (sparse_vectors == nullptr) {
+            throw VsagException(ErrorType::NO_ENOUGH_MEMORY,
+                                "failed to allocate memory for vectors");
+        }
+        vectors->NumElements(count)->SparseVectors(sparse_vectors)->Owner(true, allocator_);
+        for (int i = 0; i < count; ++i) {
+            InnerIdType inner_id = this->label_table_->GetIdByLabel(ids[i]);
+            this->GetSparseVectorByInnerId(inner_id, sparse_vectors + i);
+        }
+        return vectors;
+    } else {
+        auto* float_vectors = (float*)allocator_->Allocate(sizeof(float) * count * dim_);
+        if (float_vectors == nullptr) {
+            throw VsagException(ErrorType::NO_ENOUGH_MEMORY,
+                                "failed to allocate memory for vectors");
+        }
+        vectors->NumElements(count)
+            ->Dim(dim_)
+            ->Float32Vectors(float_vectors)
+            ->Owner(true, allocator_);
+        for (int i = 0; i < count; ++i) {
+            InnerIdType inner_id = this->label_table_->GetIdByLabel(ids[i]);
+            this->GetVectorByInnerId(inner_id, float_vectors + i * dim_);
+        }
+        return vectors;
     }
-    vectors->NumElements(count)->Dim(dim_)->Float32Vectors(float_vectors)->Owner(true, allocator_);
-    for (int i = 0; i < count; ++i) {
-        InnerIdType inner_id = this->label_table_->GetIdByLabel(ids[i]);
-        this->GetVectorByInnerId(inner_id, float_vectors + i * dim_);
-    }
-    return vectors;
 }
 
 DatasetPtr
