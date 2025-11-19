@@ -28,6 +28,8 @@ jobs:
           max-size: "2G"
           save: ${{ github.event_name != 'pull_request' }}
           key: build-${{ hashFiles('./CMakeLists.txt') }}-${{ hashFiles('./.circleci/fresh_ci_cache.commit') }}
+      - name: Debug with SSH
+        uses: mxschmitt/action-tmate@v4
       - name: Make Asan
         run: export CMAKE_GENERATOR="Ninja"; make asan
       - name: Clean
@@ -99,6 +101,8 @@ jobs:
         with:
           name: test_x86-${{ github.run_id }}
           path: ./build
+      - name: Debug with SSH
+        uses: mxschmitt/action-tmate@v4
       - name: Do Asan Test In ${{ matrix.test_type }}
         run: |
           echo leak:libomp.so > omp.supp
