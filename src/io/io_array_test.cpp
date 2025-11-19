@@ -84,7 +84,6 @@ TEST_CASE("IOArrayTest BufferIO Basic Test", "[IOArray][ut]") {
 
 TEST_CASE("IOArrayTest AsyncIO Basic Test", "[IOArray][ut]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
-    IOArrayTest<NonContinuousIO<AsyncIO>> test(
-        allocator.get(), "./test_async_io", allocator.get());
+    IOArrayTest<NonContinuousIO<AsyncIO>> test(allocator.get(), "./test_async_io", allocator.get());
     test.TestBasic();
 }
