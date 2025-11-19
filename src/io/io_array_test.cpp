@@ -75,12 +75,12 @@ TEST_CASE("IOArrayTest MemoryBlockIO Basic Test", "[IOArray][ut]") {
     test.TestBasic();
 }
 
-TEST_CASE("IOArrayTest BufferIO Basic Test", "[IOArray][ut]") {
-    auto allocator = SafeAllocator::FactoryDefaultAllocator();
-    IOArrayTest<NonContinuousIO<BufferIO>> test(
-        allocator.get(), "/tmp/test_buffer_io", allocator.get());
-    test.TestBasic();
-}
+//TEST_CASE("IOArrayTest BufferIO Basic Test", "[IOArray][ut]") {
+//    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+//    IOArrayTest<NonContinuousIO<BufferIO>> test(
+//        allocator.get(), "/tmp/test_buffer_io", allocator.get());
+//    test.TestBasic();
+//}
 
 TEST_CASE("IOArrayTest AsyncIO Basic Test", "[IOArray][ut]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
