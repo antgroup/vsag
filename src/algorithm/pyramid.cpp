@@ -104,9 +104,10 @@ IndexNode::Deserialize(StreamReader& reader) {
     // deserialize `level_`
     StreamReader::ReadObj(reader, level_);
     // serialize `has_index_`
-    StreamReader::ReadObj(reader, has_index_);
+    bool has_index;
+    StreamReader::ReadObj(reader, has_index);
     // deserialize `graph`
-    if (has_index_) {
+    if (has_index) {
         InitGraph();
         graph_->Deserialize(reader);
     }
@@ -127,9 +128,10 @@ IndexNode::Serialize(StreamWriter& writer) const {
     // serialize `level_`
     StreamWriter::WriteObj(writer, level_);
     // serialize `has_index_`
-    StreamWriter::WriteObj(writer, has_index_);
+    bool has_index = this->graph_ != nullptr;
+    StreamWriter::WriteObj(writer, has_index);
     // serialize `graph_`
-    if (has_index_) {
+    if (has_index) {
         graph_->Serialize(writer);
     }
     // serialize `children`
@@ -166,7 +168,7 @@ IndexNode::SearchGraph(const SearchFunc& search_func) const {
 }
 
 std::vector<int64_t>
-Pyramid::Build(const DatasetPtr& base) {
+Pyramid::build_by_odescent(const DatasetPtr& base) {
     const auto* path = base->GetPaths();
     CHECK_ARGUMENT(path != nullptr, "path is required");
     int64_t data_num = base->GetNumElements();
@@ -177,13 +179,10 @@ Pyramid::Build(const DatasetPtr& base) {
     resize(data_num);
     std::memcpy(label_table_->label_table_.data(), data_ids, sizeof(LabelType) * data_num);
 
-    flatten_interface_ptr_->Train(data_vectors, data_num);
-    flatten_interface_ptr_->BatchInsertVector(data_vectors, data_num);
+    base_codes_->BatchInsertVector(data_vectors, data_num);
 
-    ODescent graph_builder(pyramid_param_->odescent_param,
-                           flatten_interface_ptr_,
-                           allocator_,
-                           common_param_.thread_pool_.get());
+    ODescent graph_builder(
+        pyramid_param_->odescent_param, base_codes_, allocator_, common_param_.thread_pool_.get());
     for (int i = 0; i < data_num; ++i) {
         std::string current_path = path[i];
         auto path_slices = split(current_path, PART_SLASH);
@@ -220,7 +219,7 @@ Pyramid::KnnSearch(const DatasetPtr& query,
         std::lock_guard<std::mutex> lock(node->mutex_);
         auto vl = pool_->TakeOne();
         auto results = searcher_->Search(
-            node->graph_, flatten_interface_ptr_, vl, query->GetFloat32Vectors(), search_param);
+            node->graph_, base_codes_, vl, query->GetFloat32Vectors(), search_param);
         pool_->ReturnOne(vl);
         return results;
     };
@@ -247,7 +246,7 @@ Pyramid::RangeSearch(const DatasetPtr& query,
         std::lock_guard<std::mutex> lock(node->mutex_);
         auto vl = pool_->TakeOne();
         auto results = searcher_->Search(
-            node->graph_, flatten_interface_ptr_, vl, query->GetFloat32Vectors(), search_param);
+            node->graph_, base_codes_, vl, query->GetFloat32Vectors(), search_param);
         pool_->ReturnOne(vl);
         return results;
     };
@@ -298,21 +297,13 @@ Pyramid::search_impl(const DatasetPtr& query, int64_t limit, const SearchFunc& s
 
 int64_t
 Pyramid::GetNumElements() const {
-    return flatten_interface_ptr_->TotalCount();
+    return base_codes_->TotalCount();
 }
 
 void
 Pyramid::Serialize(StreamWriter& writer) const {
-    // FIXME(wxyu): only for testing, remove before merge into the main branch
-    // if (not Options::Instance().new_version()) {
-    //     StreamWriter::WriteVector(writer, label_table_->label_table_);
-    //     flatten_interface_ptr_->Serialize(writer);
-    //     root_->Serialize(writer);
-    //     return;
-    // }
-
     StreamWriter::WriteVector(writer, label_table_->label_table_);
-    flatten_interface_ptr_->Serialize(writer);
+    base_codes_->Serialize(writer);
     root_->Serialize(writer);
 
     // serialize footer (introduced since v0.15)
@@ -333,10 +324,9 @@ Pyramid::Deserialize(StreamReader& reader) {
     auto metadata = footer->GetMetadata();
 
     StreamReader::ReadVector(buffer_reader, label_table_->label_table_);
-    flatten_interface_ptr_->Deserialize(buffer_reader);
+    base_codes_->Deserialize(buffer_reader);
     root_->Deserialize(buffer_reader);
-    pool_ = std::make_unique<VisitedListPool>(
-        1, allocator_, flatten_interface_ptr_->TotalCount(), allocator_);
+    pool_ = std::make_unique<VisitedListPool>(1, allocator_, base_codes_->TotalCount(), allocator_);
 }
 
 std::vector<int64_t>
@@ -361,7 +351,7 @@ Pyramid::Add(const DatasetPtr& base) {
             resize(new_capacity);
         }
         cur_element_count_ += data_num;
-        flatten_interface_ptr_->BatchInsertVector(data_vectors, data_num);
+        base_codes_->BatchInsertVector(data_vectors, data_num);
     }
     std::shared_lock<std::shared_mutex> lock(resize_mutex_);
 
@@ -371,7 +361,7 @@ Pyramid::Add(const DatasetPtr& base) {
 
     InnerSearchParam search_param;
     search_param.ef = pyramid_param_->ef_construction;
-    search_param.topk = pyramid_param_->odescent_param->max_degree;
+    search_param.topk = pyramid_param_->max_degree;
     search_param.search_mode = KNN_SEARCH;
     auto empty_mutex = std::make_shared<EmptyMutex>();
     for (auto i = 0; i < data_num; ++i) {
@@ -379,38 +369,44 @@ Pyramid::Add(const DatasetPtr& base) {
         auto path_slices = split(current_path, PART_SLASH);
         std::shared_ptr<IndexNode> node = root_;
         auto inner_id = static_cast<InnerIdType>(i + local_cur_element_count);
-        for (auto& path_slice : path_slices) {
-            node = node->GetChild(path_slice, true);
+        int no_build_level_index = 0;
+        for (int j = 0; j <= path_slices.size(); ++j) {
+            std::shared_ptr<IndexNode> new_node = nullptr;
+            if (j != path_slices.size()) {
+                new_node = node->GetChild(path_slices[j], true);
+            }
+            if (no_build_level_index < no_build_levels.size() &&
+                j == no_build_levels[no_build_level_index]) {
+                node = new_node;
+                no_build_level_index++;
+                continue;
+            }
             std::lock_guard<std::mutex> graph_lock(node->mutex_);
             // add one point
             if (node->graph_ == nullptr) {
-                node->has_index_ =
-                    std::find(no_build_levels.begin(), no_build_levels.end(), node->level_) ==
-                    no_build_levels.end();
                 node->InitGraph();
             }
             if (node->graph_->TotalCount() == 0) {
-                if (node->has_index_) {
-                    node->graph_->InsertNeighborsById(inner_id, Vector<InnerIdType>(allocator_));
-                    node->entry_point_ = inner_id;
-                }
+                node->graph_->InsertNeighborsById(inner_id, Vector<InnerIdType>(allocator_));
+                node->entry_point_ = inner_id;
             } else {
+                bool update_entry_point;
+                {
+                    std::scoped_lock<std::mutex> entry_point_lock(entry_point_mutex_);
+                    update_entry_point = is_update_entry_point(node->graph_->TotalCount());
+                }
                 search_param.ep = node->entry_point_;
                 auto vl = pool_->TakeOne();
-                auto results = searcher_->Search(node->graph_,
-                                                 flatten_interface_ptr_,
-                                                 vl,
-                                                 data_vectors + dim_ * i,
-                                                 search_param);
+                auto results = searcher_->Search(
+                    node->graph_, base_codes_, vl, data_vectors + dim_ * i, search_param);
                 pool_->ReturnOne(vl);
-                mutually_connect_new_element(inner_id,
-                                             results,
-                                             node->graph_,
-                                             flatten_interface_ptr_,
-                                             empty_mutex,
-                                             allocator_,
-                                             alpha_);
+                mutually_connect_new_element(
+                    inner_id, results, node->graph_, base_codes_, empty_mutex, allocator_, alpha_);
+                if (update_entry_point) {
+                    node->entry_point_ = inner_id;
+                }
             }
+            node = new_node;
         }
     }
     return {};
@@ -424,7 +420,7 @@ Pyramid::resize(int64_t new_max_capacity) {
     }
     pool_ = std::make_unique<VisitedListPool>(1, allocator_, new_max_capacity, allocator_);
     label_table_->label_table_.resize(new_max_capacity);
-    flatten_interface_ptr_->Resize(new_max_capacity);
+    base_codes_->Resize(new_max_capacity);
     max_capacity_ = new_max_capacity;
 }
 
@@ -556,6 +552,23 @@ Pyramid::CheckAndMappingExternalParam(const JsonType& external_param,
     auto pyramid_params = std::make_shared<PyramidParameters>();
     pyramid_params->FromJson(inner_json);
     return pyramid_params;
+}
+
+void
+Pyramid::Train(const DatasetPtr& base) {
+    this->base_codes_->Train(base->GetFloat32Vectors(), base->GetNumElements());
+}
+std::vector<int64_t>
+Pyramid::Build(const DatasetPtr& base) {
+    CHECK_ARGUMENT(GetNumElements() == 0, "index is not empty");
+    this->Train(base);
+    std::vector<int64_t> ret;
+    if (graph_type_ == GRAPH_TYPE_VALUE_NSW) {
+        ret = this->Add(base);
+    } else {
+        ret = this->build_by_odescent(base);
+    }
+    return ret;
 }
 
 }  // namespace vsag

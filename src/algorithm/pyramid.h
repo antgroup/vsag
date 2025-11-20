@@ -88,7 +88,7 @@ public:
           common_param_(common_param),
           alpha_(pyramid_param->alpha) {
         searcher_ = std::make_unique<BasicSearcher>(common_param_);
-        flatten_interface_ptr_ =
+        base_codes_ =
             FlattenInterface::MakeInstance(pyramid_param_->base_codes_param, common_param_);
         root_ = std::make_shared<IndexNode>(&common_param_, pyramid_param_->graph_param);
     }
@@ -144,6 +144,9 @@ public:
     void
     Serialize(StreamWriter& writer) const override;
 
+    void
+    Train(const vsag::DatasetPtr& base) override;
+
 private:
     void
     resize(int64_t new_max_capacity);
@@ -151,11 +154,21 @@ private:
     DatasetPtr
     search_impl(const DatasetPtr& query, int64_t limit, const SearchFunc& search_func) const;
 
+    bool
+    is_update_entry_point(uint64_t total_count) {
+        std::uniform_real_distribution<double> distribution(0.0, 1.0);
+        double rand_value = distribution(level_generator_);
+        return static_cast<double>(total_count) * rand_value < 1.0;
+    }
+
+    std::vector<int64_t>
+    build_by_odescent(const DatasetPtr& base);
+
 private:
     IndexCommonParam common_param_;
     PyramidParamPtr pyramid_param_{nullptr};
     std::shared_ptr<IndexNode> root_{nullptr};
-    FlattenInterfacePtr flatten_interface_ptr_{nullptr};
+    FlattenInterfacePtr base_codes_{nullptr};
     std::unique_ptr<VisitedListPool> pool_ = nullptr;
     std::unique_ptr<BasicSearcher> searcher_ = nullptr;
     int64_t max_capacity_{0};
@@ -164,6 +177,10 @@ private:
 
     std::shared_mutex resize_mutex_;
     std::mutex cur_element_count_mutex_;
+    std::string graph_type_{GRAPH_TYPE_VALUE_NSW};
+
+    std::mutex entry_point_mutex_;
+    std::default_random_engine level_generator_{2021};
 };
 
 }  // namespace vsag
