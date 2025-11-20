@@ -52,6 +52,7 @@ PyramidParameters::FromJson(const JsonType& json) {
         CHECK_ARGUMENT(no_build_levels_json.IsArray(),
                        fmt::format("build_without_levels must be a list of integers"));
         this->no_build_levels = no_build_levels_json.GetVector();
+        std::sort(this->no_build_levels.begin(), this->no_build_levels.end());
     }
 
     this->use_reorder = json[USE_REORDER_KEY].GetBool();
