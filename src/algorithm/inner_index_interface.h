@@ -423,7 +423,7 @@ protected:
     uint64_t extra_info_size_{0};
     ExtraInfoInterfacePtr extra_infos_{nullptr};
 
-    uint64_t build_thread_count_{100};
+    uint64_t build_thread_count_{1};
 
     std::shared_ptr<SafeThreadPool> build_pool_{nullptr};
 
