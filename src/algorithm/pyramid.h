@@ -166,6 +166,9 @@ private:
     std::vector<int64_t>
     build_by_odescent(const DatasetPtr& base);
 
+    void
+    add_one_point(std::shared_ptr<IndexNode> node, InnerIdType inner_id, const float* vector);
+
 private:
     IndexCommonParam common_param_;
     PyramidParamPtr pyramid_param_{nullptr};
