@@ -328,6 +328,7 @@ Pyramid::Deserialize(StreamReader& reader) {
     base_codes_->Deserialize(buffer_reader);
     root_->Deserialize(buffer_reader);
     pool_ = std::make_unique<VisitedListPool>(1, allocator_, base_codes_->TotalCount(), allocator_);
+    resize(base_codes_->TotalCount());
 }
 
 std::vector<int64_t>
@@ -383,7 +384,7 @@ Pyramid::Add(const DatasetPtr& base) {
         }
     };
 
-    Vector<std::future<void>> futures;
+    Vector<std::future<void>> futures(allocator_);
     for (auto i = 0; i < data_num; ++i) {
         if (this->build_pool_ != nullptr) {
             futures.push_back(this->build_pool_->GeneralEnqueue(add_func, i));
