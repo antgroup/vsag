@@ -33,6 +33,7 @@ PyramidParameters::FromJson(const JsonType& json) {
     graph_param = GraphInterfaceParameter::GetGraphParameterByJson(
         GraphStorageTypes::GRAPH_STORAGE_TYPE_SPARSE, graph_json);
     this->alpha = graph_json[ALPHA_KEY].GetFloat();
+    this->max_degree = graph_json[GRAPH_PARAM_MAX_DEGREE_KEY].GetInt();
 
     this->graph_type = graph_json[GRAPH_TYPE_KEY].GetString();
     if (this->graph_type == GRAPH_TYPE_ODESCENT) {
@@ -51,6 +52,7 @@ PyramidParameters::FromJson(const JsonType& json) {
         CHECK_ARGUMENT(no_build_levels_json.IsArray(),
                        fmt::format("build_without_levels must be a list of integers"));
         this->no_build_levels = no_build_levels_json.GetVector();
+        std::sort(this->no_build_levels.begin(), this->no_build_levels.end());
     }
 
     this->use_reorder = json[USE_REORDER_KEY].GetBool();
