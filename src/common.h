@@ -19,16 +19,18 @@
 
 #include "vsag_exception.h"
 
-#define SAFE_CALL(stmt)                                                              \
-    try {                                                                            \
-        stmt;                                                                        \
-        return {};                                                                   \
-    } catch (const vsag::VsagException& e) {                                         \
-        LOG_ERROR_AND_RETURNS(e.error_.type, e.error_.message);                      \
-    } catch (const std::exception& e) {                                              \
-        LOG_ERROR_AND_RETURNS(ErrorType::UNKNOWN_ERROR, "unknownError: ", e.what()); \
-    } catch (...) {                                                                  \
-        LOG_ERROR_AND_RETURNS(ErrorType::UNKNOWN_ERROR, "unknown error");            \
+#define SAFE_CALL(stmt)                                                                      \
+    try {                                                                                    \
+        stmt;                                                                                \
+        return {};                                                                           \
+    } catch (const vsag::VsagException& e) {                                                 \
+        LOG_ERROR_AND_RETURNS(e.error_.type, e.error_.message);                              \
+    } catch (const std::bad_alloc& e) {                                                      \
+        LOG_ERROR_AND_RETURNS(ErrorType::NO_ENOUGH_MEMORY, "not enough memory: ", e.what()); \
+    } catch (const std::exception& e) {                                                      \
+        LOG_ERROR_AND_RETURNS(ErrorType::UNKNOWN_ERROR, "unknownError: ", e.what());         \
+    } catch (...) {                                                                          \
+        LOG_ERROR_AND_RETURNS(ErrorType::UNKNOWN_ERROR, "unknown error");                    \
     }
 
 #define CHECK_ARGUMENT(expr, message)                                        \
