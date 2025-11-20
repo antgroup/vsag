@@ -18,6 +18,8 @@
 #include <catch2/catch_test_macros.hpp>
 #include <random>
 
+#include "fixtures.h"
+
 TEST_CASE("vsag_c_api basic test", "[vsag_c_api][ut]") {
     const char* index_name = "hgraph";
     const char* index_param = R"(
@@ -82,11 +84,12 @@ TEST_CASE("vsag_c_api basic test", "[vsag_c_api][ut]") {
     };
     func(index);
 
-    const char* file_name = "/tmp/test_c_api.vsag";
-    ret = vsag_serialize_file(index, file_name);
+    auto dir = fixtures::TempDir("vsag_c_api");
+    auto path = dir.GenerateRandomFile();
+    ret = vsag_serialize_file(index, path.data());
     REQUIRE(ret.code == VSAG_SUCCESS);
     vsag_index_t index2 = vsag_index_factory(index_name, index_param);
-    ret = vsag_deserialize_file(index2, file_name);
+    ret = vsag_deserialize_file(index2, path.data());
     REQUIRE(ret.code == VSAG_SUCCESS);
     REQUIRE(index2 != nullptr);
 
