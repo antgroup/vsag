@@ -69,9 +69,18 @@ PqrReorder::InsertVector(const void* vector, vsag::InnerIdType id) {
     flatten_->Decode(codes, code_vector.data());
     FP32Sub(float_vector, code_vector.data(), residual_vector.data(), dim_);
     reorder_code_->InsertVector(residual_vector.data(), id);
+    // get decoded_residual_vector
+    Vector<float> decode_residual_vector(dim_, allocator_);
+    bool residual_need_release = false;
+    const auto* residual_codes = flatten_->GetCodesById(id, need_release);
+    reorder_code_->Decode(residual_codes, decode_residual_vector.data());
     if (metric_ == MetricType::METRIC_TYPE_L2SQR) {
-        bias_[id] = 2 * FP32ComputeIP(residual_vector.data(), code_vector.data(), dim_) +
-                    FP32ComputeIP(residual_vector.data(), residual_vector.data(), dim_);
+        bias_[id] =
+            2 * FP32ComputeIP(decode_residual_vector.data(), code_vector.data(), dim_) +
+            FP32ComputeIP(decode_residual_vector.data(), decode_residual_vector.data(), dim_);
+    }
+    if (residual_need_release) {
+        allocator_->Deallocate((void*)residual_codes);
     }
     if (need_release) {
         allocator_->Deallocate((void*)codes);
