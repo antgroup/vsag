@@ -51,7 +51,7 @@ jobs:
       - name: Clean
         run: find ./build -type f -name "*.o" -exec rm -f {} +
       - name: Save Test
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           path: ./build
           name: test-x86-${{ env.SIMD_KEY }}-${{ github.run_id }}
@@ -86,7 +86,7 @@ jobs:
       - name: Clean Env
         run: rm -rf ./build
       - name: Download Test
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           name: test-x86-${{ matrix.simd_key }}-${{ github.run_id }}
           path: ./build/
@@ -113,7 +113,7 @@ jobs:
       - name: Create Empty File
         run: touch /tmp/clean_up
       - name: Overwrite Test Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           path: /tmp/clean_up
           name: test-x86-${{ matrix.simd_key }}-${{ github.run_id }}
