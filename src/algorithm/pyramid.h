@@ -172,6 +172,8 @@ private:
     std::shared_ptr<IndexNode> root_{nullptr};
     FlattenInterfacePtr base_codes_{nullptr};
     std::unique_ptr<VisitedListPool> pool_ = nullptr;
+
+    MutexArrayPtr points_mutex_{nullptr};
     std::unique_ptr<BasicSearcher> searcher_ = nullptr;
     int64_t max_capacity_{0};
     int64_t cur_element_count_{0};
@@ -183,8 +185,6 @@ private:
 
     std::mutex entry_point_mutex_;
     std::default_random_engine level_generator_{2021};
-
-    MutexArrayPtr points_mutex_{nullptr};
 };
 
 }  // namespace vsag

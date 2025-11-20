@@ -395,10 +395,11 @@ Pyramid::Add(const DatasetPtr& base) {
                     std::scoped_lock<std::mutex> entry_point_lock(entry_point_mutex_);
                     update_entry_point = is_update_entry_point(node->graph_->TotalCount());
                 }
+                search_param.ep = node->entry_point_;
                 if (not update_entry_point) {
                     graph_lock.unlock();
                 }
-                search_param.ep = node->entry_point_;
+
                 auto vl = pool_->TakeOne();
                 auto results = searcher_->Search(
                     node->graph_, base_codes_, vl, data_vectors + dim_ * i, search_param);

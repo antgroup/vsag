@@ -120,6 +120,7 @@ public:
 
     [[nodiscard]] virtual InnerIdType
     TotalCount() const {
+        std::shared_lock lock(mutex_);
         return this->total_count_;
     }
 
@@ -161,7 +162,7 @@ public:
     }
 
 public:
-    std::shared_mutex mutex_;
+    mutable std::shared_mutex mutex_;
 
     InnerIdType total_count_{0};
     InnerIdType max_capacity_{800};
