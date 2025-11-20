@@ -39,7 +39,7 @@ TestComputeMetricRQ(std::string base_quantizer_type, uint64_t dim, int count, fl
                     "rq_centroids_count": {}
                 }}
             )";
-    auto param_str = fmt::format(param_template, base_quantizer_type, 1);
+    auto param_str = fmt::format(param_template, base_quantizer_type, 100);
     auto param_json = vsag::JsonType::Parse(param_str);
     param->FromJson(param_json);
 
@@ -68,7 +68,7 @@ TestSerializeDeserializeRQ(std::string base_quantizer_type, uint64_t dim, int co
                     "rq_centroids_count": {}
                 }}
             )";
-    auto param_str = fmt::format(param_template, base_quantizer_type, 1);
+    auto param_str = fmt::format(param_template, base_quantizer_type, 100);
     auto param_json = vsag::JsonType::Parse(param_str);
     param->FromJson(param_json);
 
@@ -97,33 +97,30 @@ TEST_CASE("RQ Compute", "[ut][ResidualQuantizer]") {
     for (auto dim : dims) {
         for (auto count : counts) {
             std::cout << dim << " " << count << std::endl;
-            TestComputeMetricRQ<FP32Quantizer<metrics[0]>, metrics[0]>(
-                "fp32", dim, count, 0.1);
-//            TestComputeMetricRQ<FP32Quantizer<metrics[1]>, metrics[1]>(
-//                "fp32", dim, count, 0.1);
-//            TestComputeMetricRQ<FP32Quantizer<metrics[2]>, metrics[2]>(
-//                "fp32", dim, count, 0.1);
+            TestComputeMetricRQ<FP32Quantizer<metrics[0]>, metrics[0]>("fp32", dim, count, 0.1);
+            //            TestComputeMetricRQ<FP32Quantizer<metrics[1]>, metrics[1]>(
+            //                "fp32", dim, count, 0.1);
+            //            TestComputeMetricRQ<FP32Quantizer<metrics[2]>, metrics[2]>(
+            //                "fp32", dim, count, 0.1);
 
-            TestComputeMetricRQ<FP16Quantizer<metrics[0]>, metrics[0]>(
-                "fp16", dim, count, 1);
-//            TestComputeMetricRQ<FP16Quantizer<metrics[1]>, metrics[1]>(
-//                "fp16", dim, count, 0.1);
-//            TestComputeMetricRQ<FP16Quantizer<metrics[2]>, metrics[2]>(
-//                "fp16", dim, count, 0.1);
+            TestComputeMetricRQ<FP16Quantizer<metrics[0]>, metrics[0]>("fp16", dim, count, 1);
+            //            TestComputeMetricRQ<FP16Quantizer<metrics[1]>, metrics[1]>(
+            //                "fp16", dim, count, 0.1);
+            //            TestComputeMetricRQ<FP16Quantizer<metrics[2]>, metrics[2]>(
+            //                "fp16", dim, count, 0.1);
 
-            TestComputeMetricRQ<SQ8Quantizer<metrics[0]>, metrics[0]>(
-                "sq8", dim, count, 10);
-//            TestComputeMetricRQ<SQ8Quantizer<metrics[1]>, metrics[1]>(
-//                "sq8", dim, count, 10);
-//            TestComputeMetricRQ<SQ8Quantizer<metrics[2]>, metrics[2]>(
-//                "sq8", dim, count, 10);
+            TestComputeMetricRQ<SQ8Quantizer<metrics[0]>, metrics[0]>("sq8", dim, count, 10);
+            //            TestComputeMetricRQ<SQ8Quantizer<metrics[1]>, metrics[1]>(
+            //                "sq8", dim, count, 10);
+            //            TestComputeMetricRQ<SQ8Quantizer<metrics[2]>, metrics[2]>(
+            //                "sq8", dim, count, 10);
 
-//            TestComputeMetricRQ<SQ4UniformQuantizer<metrics[0]>, metrics[0]>(
-//                "sq4_uniform", dim, count, 20);
-//            TestComputeMetricRQ<SQ4UniformQuantizer<metrics[1]>, metrics[1]>(
-//                "sq4_uniform", dim, count, 20);
-//            TestComputeMetricRQ<SQ4UniformQuantizer<metrics[2]>, metrics[2]>(
-//                "sq4_uniform", dim, count, 20);
+            TestComputeMetricRQ<SQ4UniformQuantizer<metrics[0]>, metrics[0]>(
+                "sq4_uniform", dim, count, 20);
+            //            TestComputeMetricRQ<SQ4UniformQuantizer<metrics[1]>, metrics[1]>(
+            //                "sq4_uniform", dim, count, 20);
+            //            TestComputeMetricRQ<SQ4UniformQuantizer<metrics[2]>, metrics[2]>(
+            //                "sq4_uniform", dim, count, 20);
         }
     }
 }

@@ -215,8 +215,19 @@ ResidualQuantizer<QuantTmpl, metric>::TrainImpl(const DataType* data, uint64_t c
         centroids_norm_[i] = FP32ComputeIP(centroid_vec.data(), centroid_vec.data(), this->dim_);
     }
 
+    // 3. get x - c
+    Vector<DataType> res_data(this->dim_ * count, 0, this->allocator_);
+    for (auto i = 0; i < count; i++) {
+        uint32_t centroid_id =
+            this->partition_strategy_->ClassifyDatas(data + i * this->dim_, 1, 1)[0];
+        this->partition_strategy_->GetCentroid(centroid_id, centroid_vec);
+        for (auto d = 0; d < this->dim_; d++) {
+            res_data[i * this->dim_ + d] = data[i * this->dim_ + d] - centroid_vec[d];
+        }
+    }
+
     // 3. train quantizer
-    this->is_trained_ = quantizer_->Train(data, count);
+    this->is_trained_ = quantizer_->Train(res_data.data(), count);
     return this->is_trained_;
 }
 
@@ -229,7 +240,7 @@ ResidualQuantizer<QuantTmpl, metric>::EncodeOneImpl(const DataType* data, uint8_
     // 1. get centroid
     Vector<float> centroid_vec(this->dim_, 0, this->allocator_);
     uint32_t centroid_id = this->partition_strategy_->ClassifyDatas(data, 1, 1)[0];
-//    this->partition_strategy_->GetCentroid(centroid_id, centroid_vec);
+    this->partition_strategy_->GetCentroid(centroid_id, centroid_vec);
 
     // 2. compute residual part and norm
     Vector<float> data_buffer(this->dim_, 0, this->allocator_);  // x - c
@@ -309,7 +320,7 @@ ResidualQuantizer<QuantTmpl, metric>::ComputeDistImpl(Computer<ResidualQuantizer
     // 1. get c
     Vector<float> centroid_vec(this->dim_, 0, this->allocator_);
     auto c = *(uint32_t*)(codes + base_res_norm_offset_ + sizeof(float));
-//    this->partition_strategy_->GetCentroid(c, centroid_vec);
+    this->partition_strategy_->GetCentroid(c, centroid_vec);
     // 2. compute q - c
     Vector<float> data_buffer(this->dim_, 0, this->allocator_);
     for (int i = 0; i < this->dim_; i++) {
