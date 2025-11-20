@@ -48,9 +48,12 @@ public:
     ODescentParameterPtr odescent_param{nullptr};
 
     std::vector<int32_t> no_build_levels;
+
     uint64_t ef_construction{400};
     std::string graph_type{GRAPH_TYPE_VALUE_NSW};
     float alpha{1.2F};
+    float tau{0.0F};
+    std::string selectedgeparam{"alpha"};
 };
 
 class PyramidSearchParameters {

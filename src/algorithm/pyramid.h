@@ -86,7 +86,9 @@ public:
         : InnerIndexInterface(pyramid_param, common_param),
           pyramid_param_(pyramid_param),
           common_param_(common_param),
-          alpha_(pyramid_param->alpha) {
+          alpha_(pyramid_param->alpha),
+          tau_(pyramid_param->tau),
+          select_edge_param(pyramid_param->selectedgeparam) {
         searcher_ = std::make_unique<BasicSearcher>(common_param_);
         flatten_interface_ptr_ =
             FlattenInterface::MakeInstance(pyramid_param_->base_codes_param, common_param_);
@@ -161,6 +163,8 @@ private:
     int64_t max_capacity_{0};
     int64_t cur_element_count_{0};
     float alpha_{1.0F};
+    float tau_{0.0F};
+    std::string select_edge_param{"alpha"};
 
     std::shared_mutex resize_mutex_;
     std::mutex cur_element_count_mutex_;
