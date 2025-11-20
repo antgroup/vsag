@@ -248,6 +248,7 @@ ResidualQuantizer<QuantTmpl, metric>::EncodeOneImpl(const DataType* data, uint8_
 
     // 5. compute term
     float n1 = 1.0f - quantizer_->ComputeDist(*x_computer, codes);  // Q(x - c)^2
+    n1 = FP32ComputeIP(data_buffer.data(), data_buffer.data(), this->dim_);
 
     float n2 = 1.0f - quantizer_->ComputeDist(*c_computer, codes);  // 2 * Q(x - c) * c
     n2 *= 2;
@@ -285,8 +286,9 @@ ResidualQuantizer<QuantTmpl, metric>::ProcessQueryImpl(
     Vector<float> centroid_vec(this->dim_, 0, this->allocator_);
     for (auto i = 0; i < centroids_count_; i++) {
         this->partition_strategy_->GetCentroid(i, centroid_vec);
-        auto norm =
-            FP32ComputeL2Sqr(query_decodes.data(), (const float*)(centroid_vec.data()), this->dim_);
+        //        auto norm =
+        //            FP32ComputeL2Sqr(query_decodes.data(), (const float*)(centroid_vec.data()), this->dim_);
+        auto norm = FP32ComputeL2Sqr(query, (const float*)(centroid_vec.data()), this->dim_);
         *(float*)(computer.inner_computer_->buf_ + query_res_norm_offset_ + i * sizeof(float)) =
             norm;
     }
@@ -296,8 +298,7 @@ ResidualQuantizer<QuantTmpl, metric>::ProcessQueryImpl(
     // 2. execute quantize
     // note that only when computer.buf_ == nullptr, quantizer_ will allocate data to buf_
     quantizer_->ProcessQuery(query, *computer.inner_computer_);
-//    memcpy(computer.inner_computer_->buf_, query, this->dim_ * sizeof(float));
-
+    //    memcpy(computer.inner_computer_->buf_, query, this->dim_ * sizeof(float));
 };
 
 template <typename QuantTmpl, MetricType metric>
@@ -305,22 +306,20 @@ void
 ResidualQuantizer<QuantTmpl, metric>::ComputeDistImpl(Computer<ResidualQuantizer>& computer,
                                                       const uint8_t* codes,
                                                       float* dists) const {
-
-//    Vector<float> centroid_vec(this->dim_, 0, this->allocator_);
-//    auto c = *(uint32_t*)(codes + base_res_norm_offset_ + sizeof(float));
-//    this->partition_strategy_->GetCentroid(c, centroid_vec);
-//    Vector<float> data_buffer(this->dim_, 0, this->allocator_);  // x - c
-//    for (int i = 0; i < this->dim_; i++) {
-//        data_buffer[i] = ((float*)(computer.inner_computer_->buf_))[i] - centroid_vec[i];
-//    }
-//
-//    auto computer_alter = this->quantizer_->FactoryComputer();
-//    quantizer_->ProcessQuery(data_buffer.data(), *computer_alter);
-//    dists[0] = quantizer_->ComputeDist(*(computer_alter),
-//                                        codes);
-//
-//    return ;
-
+    //    Vector<float> centroid_vec(this->dim_, 0, this->allocator_);
+    //    auto c = *(uint32_t*)(codes + base_res_norm_offset_ + sizeof(float));
+    //    this->partition_strategy_->GetCentroid(c, centroid_vec);
+    //    Vector<float> data_buffer(this->dim_, 0, this->allocator_);  // x - c
+    //    for (int i = 0; i < this->dim_; i++) {
+    //        data_buffer[i] = ((float*)(computer.inner_computer_->buf_))[i] - centroid_vec[i];
+    //    }
+    //
+    //    auto computer_alter = this->quantizer_->FactoryComputer();
+    //    quantizer_->ProcessQuery(data_buffer.data(), *computer_alter);
+    //    dists[0] = quantizer_->ComputeDist(*(computer_alter),
+    //                                        codes);
+    //
+    //    return ;
 
     auto n1_n2 = *(float*)(codes + base_res_norm_offset_);
     auto centroid_id = *(uint32_t*)(codes + base_res_norm_offset_ + sizeof(float));

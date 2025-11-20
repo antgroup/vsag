@@ -39,7 +39,7 @@ TestComputeMetricRQ(std::string base_quantizer_type, uint64_t dim, int count, fl
                     "rq_centroids_count": {}
                 }}
             )";
-    auto param_str = fmt::format(param_template, base_quantizer_type, 10);
+    auto param_str = fmt::format(param_template, base_quantizer_type, 100);
     auto param_json = vsag::JsonType::Parse(param_str);
     param->FromJson(param_json);
 
@@ -68,7 +68,7 @@ TestSerializeDeserializeRQ(std::string base_quantizer_type, uint64_t dim, int co
                     "rq_centroids_count": {}
                 }}
             )";
-    auto param_str = fmt::format(param_template, base_quantizer_type, 10);
+    auto param_str = fmt::format(param_template, base_quantizer_type, 100);
     auto param_json = vsag::JsonType::Parse(param_str);
     param->FromJson(param_json);
 
@@ -96,6 +96,7 @@ TEST_CASE("RQ Compute", "[ut][ResidualQuantizer]") {
 
     for (auto dim : dims) {
         for (auto count : counts) {
+            std::cout << dim << " " << count << std::endl;
             TestComputeMetricRQ<FP32Quantizer<MetricType::METRIC_TYPE_IP>, metrics[0]>(
                 "fp32", dim, count, 0.1);
             TestComputeMetricRQ<FP32Quantizer<MetricType::METRIC_TYPE_IP>, metrics[1]>(
@@ -111,11 +112,11 @@ TEST_CASE("RQ Compute", "[ut][ResidualQuantizer]") {
                 "fp16", dim, count, 0.1);
 
             TestComputeMetricRQ<SQ8Quantizer<MetricType::METRIC_TYPE_IP>, metrics[0]>(
-                "sq8", dim, count, 20);
+                "sq8", dim, count, 1);
             TestComputeMetricRQ<SQ8Quantizer<MetricType::METRIC_TYPE_IP>, metrics[1]>(
-                "sq8", dim, count, 20);
+                "sq8", dim, count, 1);
             TestComputeMetricRQ<SQ8Quantizer<MetricType::METRIC_TYPE_IP>, metrics[2]>(
-                "sq8", dim, count, 20);
+                "sq8", dim, count, 1);
 
             TestComputeMetricRQ<SQ4UniformQuantizer<MetricType::METRIC_TYPE_IP>, metrics[0]>(
                 "sq4_uniform", dim, count, 20);
