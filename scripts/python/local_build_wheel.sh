@@ -26,12 +26,21 @@ echo "✅ Prerequisites met."
 
 # --- Virtual Environment Setup ---
 echo "🔎 Setting up Python virtual environment..."
-if [ ! -d "$VENV_DIR" ]; then
-  echo "   - Virtual environment not found, creating at './${VENV_DIR}'..."
-  python3 -m venv "$VENV_DIR"
+if [ -z "$VIRTUAL_ENV" ] && [ -z "$CONDA_PREFIX" ]; then
+  # Not in any virtual environment, create and activate .venv
+  if [ ! -d "$VENV_DIR" ]; then
+    echo "   - Virtual environment not found, creating at './${VENV_DIR}'..."
+    python3 -m venv "$VENV_DIR"
+  fi
+  source "${VENV_DIR}/bin/activate"
+  echo "✅ Virtual environment activated."
+else
+  if [ -n "$VIRTUAL_ENV" ]; then
+    echo "✅ Already in virtual environment: $VIRTUAL_ENV"
+  elif [ -n "$CONDA_PREFIX" ]; then
+    echo "✅ Already in conda environment: $CONDA_PREFIX"
+  fi
 fi
-source "${VENV_DIR}/bin/activate"
-echo "✅ Virtual environment activated."
 
 # --- Auto-detect Architecture ---
 ARCH=$(uname -m)
@@ -73,7 +82,7 @@ run_build() {
   trap cleanup EXIT INT TERM
 
   # Call the reusable script
-  bash ./scripts/prepare_python_build.sh "$py_version"
+  bash ./scripts/python/prepare_python_build.sh "$py_version"
 
   PIP_DEFAULT_TIMEOUT="100" \
   PIP_INDEX_URL="https://pypi.tuna.tsinghua.edu.cn/simple"
@@ -129,3 +138,4 @@ echo ""
 echo "✅ All tasks completed."
 echo "📦 Wheels have been generated in the 'wheelhouse' directory:"
 ls -l wheelhouse
+
