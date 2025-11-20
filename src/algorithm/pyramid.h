@@ -46,7 +46,7 @@ public:
     InitGraph();
 
     DistHeapPtr
-    SearchGraph(const SearchFunc& search_func, VisitedListPtr vl) const;
+    SearchGraph(const SearchFunc& search_func, const VisitedListPtr& vl) const;
 
     void
     AddChild(const std::string& key);
@@ -167,7 +167,9 @@ private:
     build_by_odescent(const DatasetPtr& base);
 
     void
-    add_one_point(std::shared_ptr<IndexNode> node, InnerIdType inner_id, const float* vector);
+    add_one_point(const std::shared_ptr<IndexNode>& node,
+                  InnerIdType inner_id,
+                  const float* vector);
 
 private:
     IndexCommonParam common_param_;

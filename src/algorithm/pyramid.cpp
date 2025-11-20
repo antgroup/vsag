@@ -150,7 +150,7 @@ IndexNode::InitGraph() {
 }
 
 DistHeapPtr
-IndexNode::SearchGraph(const SearchFunc& search_func, VisitedListPtr vl) const {
+IndexNode::SearchGraph(const SearchFunc& search_func, const VisitedListPtr& vl) const {
     if (graph_ != nullptr && graph_->TotalCount() > 0) {
         return search_func(this, vl);
     }
@@ -215,7 +215,7 @@ Pyramid::KnnSearch(const DatasetPtr& query,
         search_param.is_inner_id_allowed =
             std::make_shared<InnerIdWrapperFilter>(filter, *label_table_);
     }
-    SearchFunc search_func = [&](const IndexNode* node, VisitedListPtr vl) {
+    SearchFunc search_func = [&](const IndexNode* node, const VisitedListPtr& vl) {
         std::shared_lock lock(node->mutex_);
         search_param.ep = node->entry_point_;
         auto results = searcher_->Search(
@@ -240,7 +240,7 @@ Pyramid::RangeSearch(const DatasetPtr& query,
         search_param.is_inner_id_allowed =
             std::make_shared<InnerIdWrapperFilter>(filter, *label_table_);
     }
-    SearchFunc search_func = [&](const IndexNode* node, VisitedListPtr vl) {
+    SearchFunc search_func = [&](const IndexNode* node, const VisitedListPtr& vl) {
         std::shared_lock lock(node->mutex_);
         search_param.ep = node->entry_point_;
         auto results = searcher_->Search(
@@ -366,7 +366,7 @@ Pyramid::Add(const DatasetPtr& base) {
         auto path_slices = split(current_path, PART_SLASH);
         std::shared_ptr<IndexNode> node = root_;
         auto inner_id = static_cast<InnerIdType>(i + local_cur_element_count);
-        auto vector = data_vectors + dim_ * i;
+        const auto* vector = data_vectors + dim_ * i;
         int no_build_level_index = 0;
         for (int j = 0; j <= path_slices.size(); ++j) {
             std::shared_ptr<IndexNode> new_node = nullptr;
@@ -560,7 +560,9 @@ Pyramid::Build(const DatasetPtr& base) {
 }
 
 void
-Pyramid::add_one_point(std::shared_ptr<IndexNode> node, InnerIdType inner_id, const float* vector) {
+Pyramid::add_one_point(const std::shared_ptr<IndexNode>& node,
+                       InnerIdType inner_id,
+                       const float* vector) {
     std::unique_lock graph_lock(node->mutex_);
     InnerSearchParam search_param;
     search_param.ef = pyramid_param_->ef_construction;
