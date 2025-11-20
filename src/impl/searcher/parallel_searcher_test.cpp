@@ -19,19 +19,21 @@
 
 using namespace vsag;
 
-TEST_CASE("Parallel search with HNSW", "[ut][ParallelSearcher][concurrent]") {
+TEST_CASE("Parallel search with HNSW", "[ut][ParallelSearcher]") {
     // data attr
     uint32_t base_size = 1000;
     uint32_t query_size = 100;
-    uint64_t dim = 960;
+    uint64_t dim = 128;
+
+    auto thread_pool = SafeThreadPool::FactoryDefaultThreadPool();
 
     // build and search attr
-    uint32_t M = 32;
+    uint32_t M = 16;
     uint32_t ef_construction = 100;
     uint32_t ef_search = 300;
     uint32_t k = ef_search;
     InnerIdType fixed_entry_point_id = 0;
-    uint64_t DEFAULT_MAX_ELEMENT = 1;
+    uint64_t default_max_element = 1;
 
     // data preparation
     auto base_vectors = fixtures::generate_vectors(base_size, dim, true);
@@ -44,7 +46,7 @@ TEST_CASE("Parallel search with HNSW", "[ut][ParallelSearcher][concurrent]") {
     auto io = std::make_shared<MemoryIO>(allocator.get());
     auto alg_hnsw =
         std::make_shared<hnswlib::HierarchicalNSW>(space.get(),
-                                                   DEFAULT_MAX_ELEMENT,
+                                                   default_max_element,
                                                    allocator.get(),
                                                    M / 2,
                                                    ef_construction,
@@ -84,17 +86,14 @@ TEST_CASE("Parallel search with HNSW", "[ut][ParallelSearcher][concurrent]") {
     auto pool = std::make_shared<VisitedListPool>(
         init_size, allocator.get(), vector_data_cell->TotalCount(), allocator.get());
 
-    auto thread_pool = SafeThreadPool::FactoryDefaultThreadPool();
-    thread_pool->SetPoolSize(16);
-
     auto exception_func = [&](const InnerSearchParam& search_param) -> void {
         // init searcher
         auto searcher = std::make_shared<ParallelSearcher>(common, thread_pool);
         {
             // search with empty graph_data_cell
             auto vl = pool->TakeOne();
-            auto failed_without_vector =
-                searcher->Search(graph_data_cell, nullptr, vl, base_vectors.data(), search_param);
+            auto failed_without_vector = searcher->Search(
+                graph_data_cell, nullptr, vl, base_vectors.data(), search_param, nullptr);
             pool->ReturnOne(vl);
             REQUIRE(failed_without_vector->Size() == 0);
         }
@@ -119,8 +118,6 @@ TEST_CASE("Parallel search with HNSW", "[ut][ParallelSearcher][concurrent]") {
     search_param_temp.topk = k;
     search_param_temp.is_inner_id_allowed = nullptr;
     search_param_temp.radius = range;
-    search_param_temp.use_muti_threads_for_one_query = true;
-    search_param_temp.level_0 = true;
 
     std::vector<InnerSearchParam> params(4);
     params[0] = search_param_temp;
@@ -170,19 +167,12 @@ TEST_CASE("Parallel search with HNSW", "[ut][ParallelSearcher][concurrent]") {
                 }
             }
 
-            uint32_t res_in_valid_num = 0;
-            uint32_t valid_in_res_num = 0;
-
             for (auto id : set) {
-                if (valid_set.count(id) > 0)
-                    res_in_valid_num++;
+                REQUIRE(valid_set.count(id) > 0);
             }
-
             for (auto id : valid_set) {
-                if (set.count(id) > 0)
-                    valid_in_res_num++;
+                REQUIRE(set.count(id) > 0);
             }
-            REQUIRE(res_in_valid_num == valid_in_res_num);
         }
     }
 }
