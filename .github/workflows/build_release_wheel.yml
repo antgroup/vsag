@@ -108,7 +108,7 @@ jobs:
           CIBW_BUILD: ${{ matrix.cibw-build-id }}
           CIBW_TEST_COMMAND: "pip install numpy && ls -alF /project/ && python /project/examples/python/example_hnsw.py"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: wheels-${{ matrix.python-version }}-${{ matrix.arch }}
           path: ./wheelhouse/*.whl
@@ -143,7 +143,7 @@ jobs:
           CIBW_BUILD: "cp36-*"
           CIBW_TEST_COMMAND: "pip install numpy && ls -alF /project/ && python /project/examples/python/example_hnsw.py"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: wheels-3.6-${{ matrix.arch }}
           path: ./wheelhouse/*.whl
@@ -157,7 +157,7 @@ jobs:
     # because its matrix was empty. We check for files later.
     if: always() && (github.event_name == 'release' || (github.event_name == 'push' && github.ref == 'refs/heads/main'))
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v5
         with:
           path: dist
           merge-multiple: true
