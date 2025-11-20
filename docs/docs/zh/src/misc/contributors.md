@@ -23,3 +23,4 @@
 - 2025-08-18 [HeHuMing](https://github.com/HeHuMing)
 - 2025-10-22 [cubicc](https://github.com/cubicc) from ByteDance
 - 2025-10-29 [Roxanne0321](https://github.com/Roxanne0321) from AntGroup
+- 2025-11-20 [hhy3](https://github.com/hhy3)
