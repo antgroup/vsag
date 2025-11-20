@@ -229,7 +229,7 @@ ResidualQuantizer<QuantTmpl, metric>::EncodeOneImpl(const DataType* data, uint8_
     // 1. get centroid
     Vector<float> centroid_vec(this->dim_, 0, this->allocator_);
     uint32_t centroid_id = this->partition_strategy_->ClassifyDatas(data, 1, 1)[0];
-    this->partition_strategy_->GetCentroid(centroid_id, centroid_vec);
+//    this->partition_strategy_->GetCentroid(centroid_id, centroid_vec);
 
     // 2. compute residual part and norm
     Vector<float> data_buffer(this->dim_, 0, this->allocator_);  // x - c
@@ -270,35 +270,35 @@ ResidualQuantizer<QuantTmpl, metric>::ProcessQueryImpl(
     // 0. allocate
     try {
         computer.inner_computer_->buf_ =
-            reinterpret_cast<uint8_t*>(this->allocator_->Allocate(this->query_code_size_));
+            reinterpret_cast<uint8_t*>(this->allocator_->Allocate(this->dim_ * sizeof(float)));
     } catch (const std::bad_alloc& e) {
         computer.inner_computer_->buf_ = nullptr;
         throw VsagException(ErrorType::NO_ENOUGH_MEMORY, "bad alloc when init computer buf");
     }
-    std::fill_n(computer.inner_computer_->buf_, this->query_code_size_, 0);
-
-    // 1. pre-compute all |q - c|^2 and store them into meta
-    Vector<uint8_t> query_codes(this->code_size_, 0, this->allocator_);
-    Vector<float> query_decodes(this->dim_, 0, this->allocator_);
-    quantizer_->EncodeOne(query, query_codes.data());
-    quantizer_->DecodeOne(query_codes.data(), query_decodes.data());
-
-    Vector<float> centroid_vec(this->dim_, 0, this->allocator_);
-    for (auto i = 0; i < centroids_count_; i++) {
-        this->partition_strategy_->GetCentroid(i, centroid_vec);
-        //        auto norm =
-        //            FP32ComputeL2Sqr(query_decodes.data(), (const float*)(centroid_vec.data()), this->dim_);
-        auto norm = FP32ComputeL2Sqr(query, (const float*)(centroid_vec.data()), this->dim_);
-        *(float*)(computer.inner_computer_->buf_ + query_res_norm_offset_ + i * sizeof(float)) =
-            norm;
-    }
-    *(float*)(computer.inner_computer_->buf_ + this->query_code_size_ - sizeof(float)) =
-        std::sqrt(FP32ComputeIP(query, query, this->dim_));
+    //    std::fill_n(computer.inner_computer_->buf_, this->query_code_size_, 0);
+    //
+    //    // 1. pre-compute all |q - c|^2 and store them into meta
+    //    Vector<uint8_t> query_codes(this->code_size_, 0, this->allocator_);
+    //    Vector<float> query_decodes(this->dim_, 0, this->allocator_);
+    //    quantizer_->EncodeOne(query, query_codes.data());
+    //    quantizer_->DecodeOne(query_codes.data(), query_decodes.data());
+    //
+    //    Vector<float> centroid_vec(this->dim_, 0, this->allocator_);
+    //    for (auto i = 0; i < centroids_count_; i++) {
+    //        this->partition_strategy_->GetCentroid(i, centroid_vec);
+    //        //        auto norm =
+    //        //            FP32ComputeL2Sqr(query_decodes.data(), (const float*)(centroid_vec.data()), this->dim_);
+    //        auto norm = FP32ComputeL2Sqr(query, (const float*)(centroid_vec.data()), this->dim_);
+    //        *(float*)(computer.inner_computer_->buf_ + query_res_norm_offset_ + i * sizeof(float)) =
+    //            norm;
+    //    }
+    //    *(float*)(computer.inner_computer_->buf_ + this->query_code_size_ - sizeof(float)) =
+    //        std::sqrt(FP32ComputeIP(query, query, this->dim_));
 
     // 2. execute quantize
     // note that only when computer.buf_ == nullptr, quantizer_ will allocate data to buf_
-    quantizer_->ProcessQuery(query, *computer.inner_computer_);
-    //    memcpy(computer.inner_computer_->buf_, query, this->dim_ * sizeof(float));
+    //    quantizer_->ProcessQuery(query, *computer.inner_computer_);
+    memcpy(computer.inner_computer_->buf_, query, this->dim_ * sizeof(float));
 };
 
 template <typename QuantTmpl, MetricType metric>
@@ -306,20 +306,24 @@ void
 ResidualQuantizer<QuantTmpl, metric>::ComputeDistImpl(Computer<ResidualQuantizer>& computer,
                                                       const uint8_t* codes,
                                                       float* dists) const {
-    //    Vector<float> centroid_vec(this->dim_, 0, this->allocator_);
-    //    auto c = *(uint32_t*)(codes + base_res_norm_offset_ + sizeof(float));
-    //    this->partition_strategy_->GetCentroid(c, centroid_vec);
-    //    Vector<float> data_buffer(this->dim_, 0, this->allocator_);  // x - c
-    //    for (int i = 0; i < this->dim_; i++) {
-    //        data_buffer[i] = ((float*)(computer.inner_computer_->buf_))[i] - centroid_vec[i];
-    //    }
-    //
-    //    auto computer_alter = this->quantizer_->FactoryComputer();
-    //    quantizer_->ProcessQuery(data_buffer.data(), *computer_alter);
-    //    dists[0] = quantizer_->ComputeDist(*(computer_alter),
-    //                                        codes);
-    //
-    //    return ;
+    // 1. get c
+    Vector<float> centroid_vec(this->dim_, 0, this->allocator_);
+    auto c = *(uint32_t*)(codes + base_res_norm_offset_ + sizeof(float));
+//    this->partition_strategy_->GetCentroid(c, centroid_vec);
+    // 2. compute q - c
+    Vector<float> data_buffer(this->dim_, 0, this->allocator_);
+    for (int i = 0; i < this->dim_; i++) {
+        data_buffer[i] = ((float*)(computer.inner_computer_->buf_))[i] - centroid_vec[i];
+    }
+
+    // 3. get Q(q - c)
+    auto computer_alter = this->quantizer_->FactoryComputer();
+    quantizer_->ProcessQuery(data_buffer.data(), *computer_alter);
+
+    // 4. compute dist(Q(q - c), Q(x - c))
+    dists[0] = quantizer_->ComputeDist(*(computer_alter), codes);
+
+    return;
 
     auto n1_n2 = *(float*)(codes + base_res_norm_offset_);
     auto centroid_id = *(uint32_t*)(codes + base_res_norm_offset_ + sizeof(float));
