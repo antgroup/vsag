@@ -18,9 +18,11 @@
 #include <datacell/compressed_graph_datacell_parameter.h>
 #include <fmt/format.h>
 
+#include <atomic>
 #include <memory>
 #include <stdexcept>
 
+#include "algorithm/inner_index_interface.h"
 #include "attr/argparse.h"
 #include "common.h"
 #include "datacell/sparse_graph_datacell.h"
@@ -378,7 +380,8 @@ HGraph::KnnSearch(const DatasetPtr& query,
                                                this->bottom_graph_,
                                                this->basic_flatten_codes_,
                                                search_param,
-                                               iter_filter_ctx);
+                                               iter_filter_ctx,
+                                               stats_);
     }
 
     if (use_reorder_) {
@@ -492,7 +495,7 @@ HGraph::search_one_graph(const void* query,
             graph, flatten, visited_list, query, inner_search_param);
     } else {
         result = this->searcher_->Search(
-            graph, flatten, visited_list, query, inner_search_param, this->label_table_);
+            graph, flatten, visited_list, query, inner_search_param, this->label_table_, stats_);
     }
     if (new_visited_list) {
         this->pool_->ReturnOne(visited_list);
@@ -506,10 +509,11 @@ HGraph::search_one_graph(const void* query,
                          const GraphInterfacePtr& graph,
                          const FlattenInterfacePtr& flatten,
                          InnerSearchParam& inner_search_param,
-                         IteratorFilterContext* iter_ctx) const {
+                         IteratorFilterContext* iter_ctx,
+                         statistics& stats) const {
     auto visited_list = this->pool_->TakeOne();
-    auto result =
-        this->searcher_->Search(graph, flatten, visited_list, query, inner_search_param, iter_ctx);
+    auto result = this->searcher_->Search(
+        graph, flatten, visited_list, query, inner_search_param, iter_ctx, stats);
     this->pool_->ReturnOne(visited_list);
     return result;
 }
@@ -1915,7 +1919,7 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     if (params.enable_time_record) {
         search_param.time_cost = std::make_shared<Timer>();
         search_param.time_cost->SetThreshold(params.timeout_ms);
-        (*search_param.stats)["is_timeout"].SetBool(false);
+        stats_.is_timeout.store(false, std::memory_order_relaxed);
     }
 
     auto search_result = this->search_one_graph(
@@ -1934,7 +1938,7 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     // return an empty dataset directly if searcher returns nothing
     if (search_result->Empty()) {
         auto dataset_result = DatasetImpl::MakeEmptyDataset();
-        dataset_result->Statistics(search_param.stats->Dump());
+        dataset_result->Statistics(stats_.Dump());
         return dataset_result;
     }
     auto count = static_cast<const int64_t>(search_result->Size());
@@ -1953,7 +1957,7 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
         }
         search_result->Pop();
     }
-    dataset_results->Statistics(search_param.stats->Dump());
+    dataset_results->Statistics(stats_.Dump());
     return std::move(dataset_results);
 }
 
