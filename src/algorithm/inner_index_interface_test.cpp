@@ -80,7 +80,7 @@ public:
     }
 
     IndexType
-    GetIndexType() override {
+    GetIndexType() const override {
         throw std::runtime_error("Index not support GetIndexType");
     }
 

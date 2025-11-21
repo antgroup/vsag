@@ -239,6 +239,16 @@ SparseIndex::CalcDistanceById(const DatasetPtr& vector, int64_t id) const {
     return CalDistanceByIdUnsafe(sorted_ids, sorted_vals, inner_id);
 }
 
+void
+SparseIndex::GetSparseVectorByInnerId(InnerIdType inner_id, SparseVector* data) const {
+    data->len_ = datas_[inner_id][0];
+    data->ids_ = (uint32_t*)allocator_->Allocate(sizeof(uint32_t) * data->len_);
+    data->vals_ = (float*)allocator_->Allocate(sizeof(float) * data->len_);
+
+    memcpy(data->ids_, datas_[inner_id] + 1, data->len_ * sizeof(uint32_t));
+    memcpy(data->vals_, datas_[inner_id] + 1 + datas_[inner_id][0], data->len_ * sizeof(float));
+}
+
 DatasetPtr
 SparseIndex::CalDistanceById(const DatasetPtr& query, const int64_t* ids, int64_t count) const {
     // prepare result
@@ -290,6 +300,7 @@ SparseIndex::InitFeatures() {
 
     // info
     this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_CAL_DISTANCE_BY_ID);
+    this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_GET_RAW_VECTOR_BY_IDS);
 
     // metric
     this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_METRIC_TYPE_INNER_PRODUCT);

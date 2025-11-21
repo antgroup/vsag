@@ -84,8 +84,11 @@ public:
     void
     Deserialize(StreamReader& reader) override;
 
+    void
+    GetSparseVectorByInnerId(InnerIdType inner_id, SparseVector* data) const override;
+
     IndexType
-    GetIndexType() override {
+    GetIndexType() const override {
         return IndexType::SINDI;
     }
 

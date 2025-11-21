@@ -80,7 +80,7 @@ public:
     GetCodeByInnerId(InnerIdType inner_id, uint8_t* data) const override;
 
     [[nodiscard]] IndexType
-    GetIndexType() override {
+    GetIndexType() const override {
         return IndexType::IVF;
     }
 
