@@ -218,11 +218,16 @@ ResidualQuantizer<QuantTmpl, metric>::TrainImpl(const DataType* data, uint64_t c
     // 3. get x - c
     Vector<DataType> res_data(this->dim_ * count, 0, this->allocator_);
     for (auto i = 0; i < count; i++) {
+        Vector<DataType> single_data(this->dim_, 0, this->allocator_);
+        single_data.assign(data + i * this->dim_, data + (i + 1) * this->dim_);
+
         uint32_t centroid_id =
             this->partition_strategy_->ClassifyDatas(data + i * this->dim_, 1, 1)[0];
+        centroid_vec.assign(this->dim_, 0);
         this->partition_strategy_->GetCentroid(centroid_id, centroid_vec);
         for (auto d = 0; d < this->dim_; d++) {
-            res_data[i * this->dim_ + d] = data[i * this->dim_ + d] - centroid_vec[d];
+            assert(std::abs(single_data[d] - data[i * this->dim_ + d]) < 0.1);
+            res_data[i * this->dim_ + d] = single_data[d] - centroid_vec[d];
         }
     }
 

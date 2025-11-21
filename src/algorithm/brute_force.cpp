@@ -308,6 +308,10 @@ BruteForce::CalcDistanceById(const float* vector, int64_t id) const {
 
 void
 BruteForce::Serialize(StreamWriter& writer) const {
+    JsonType datacell_offsets;
+    JsonType datacell_sizes;
+    uint64_t offset = 0;
+
     // FIXME(wxyu): only for testing, remove before merge into the main branch
     // if (not Options::Instance().new_version()) {
     //     StreamWriter::WriteObj(writer, dim_);
@@ -317,18 +321,22 @@ BruteForce::Serialize(StreamWriter& writer) const {
     //     return;
     // }
     if (this->use_attribute_filter_ and this->attr_filter_index_ != nullptr) {
-        this->attr_filter_index_->Serialize(writer);
+        WRITE_DATACELL_WITH_NAME(writer, "attr_filter_index", attr_filter_index_);
     }
-    this->inner_codes_->Serialize(writer);
-    this->label_table_->Serialize(writer);
+    WRITE_DATACELL_WITH_NAME(writer, "inner_codes", inner_codes_);
+    WRITE_DATACELL_WITH_NAME(writer, "label_table", label_table_);
 
     // serialize footer (introduced since v0.15)
-    auto metadata = std::make_shared<Metadata>();
     JsonType basic_info;
     basic_info["dim"].SetInt(dim_);
     basic_info["total_count"].SetInt(total_count_);
     basic_info[INDEX_PARAM].SetString(this->create_param_ptr_->ToString());
+
+    auto metadata = std::make_shared<Metadata>();
     metadata->Set("basic_info", basic_info);
+    metadata->Set("datacell_offsets", datacell_offsets);
+    metadata->Set("datacell_sizes", datacell_sizes);
+
     auto footer = std::make_shared<Footer>(metadata);
     footer->Write(writer);
 }
@@ -367,12 +375,17 @@ BruteForce::Deserialize(StreamReader& reader) {
         dim_ = basic_info["dim"].GetInt();
         total_count_ = basic_info["total_count"].GetInt();
 
+        JsonType datacell_offsets = metadata->Get(DATACELL_OFFSETS);
+        logger::debug("datacell_offsets: {}", datacell_offsets.Dump());
+        JsonType datacell_sizes = metadata->Get(DATACELL_SIZES);
+        logger::debug("datacell_sizes: {}", datacell_sizes.Dump());
+
         if (this->use_attribute_filter_ and this->attr_filter_index_ != nullptr) {
-            this->attr_filter_index_->Deserialize(buffer_reader);
+            READ_DATACELL_WITH_NAME(buffer_reader, "attr_filter_index", this->attr_filter_index_);
         }
 
-        this->inner_codes_->Deserialize(buffer_reader);
-        this->label_table_->Deserialize(buffer_reader);
+        READ_DATACELL_WITH_NAME(buffer_reader, "inner_codes", this->inner_codes_);
+        READ_DATACELL_WITH_NAME(buffer_reader, "label_table", this->label_table_);
     }
 
     // post serialize procedure

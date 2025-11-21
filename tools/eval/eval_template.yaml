@@ -13,15 +13,85 @@ global:
           token: "Token mlIiP-zVfcooHhMbGG9Yk-KfrkHyDc2h-rphnIBda8UMe_6Qocy8tNmV323yxOPEAsC8uIs6_nb-XUSMEAO76A=="
 
 eval_case1:
-    datapath: "/tmp/sift-128-euclidean.hdf5"
-    type: "search" # `build` or `search` or `build,search`
+    datapath: "/tbase-project/ann-benchmarks/data/sift-128-euclidean.hdf5"
+    type: "build,search" # `build` or `search` or `build,search`
     index_name: "hgraph"
-    create_params: '{"dim":128,"dtype":"float32","metric_type":"l2","index_param":{"base_quantization_type":"fp32","max_degree":32,"ef_construction":300}}'
-    search_params: '{"hgraph":{"ef_search":60}}'
-    index_path: "/tmp/sift-128-euclidean/index/hgraph_index"
+    create_params: '{"dim":128,"dtype":"float32","metric_type":"l2","index_param":{
+    "base_quantization_type":"rq",
+    "rq_base_quantization_type": "sq8",
+    "rq_centroids_count": 1,
+    "use_reorder": true,
+    "precise_quantization_type":"fp32",
+    "max_degree":32,
+    "ef_construction":300
+    }}'
+    search_params: '{"hgraph":{"ef_search":80}}'
+    index_path: "/tmp/sift-128-euclidean/rq_sq4_20"
     search_mode: "knn" # ["knn", "range", "knn_filter", "range_filter"]
     topk: 10
     range: 0.5
     delete_index_after_search: false # free up storage space used by index
     num_threads_building: 16
-    num_threads_searching: 16
+    num_threads_searching: 1
+
+eval_case2:
+  datapath: "/tbase-project/ann-benchmarks/data/sift-128-euclidean.hdf5"
+  type: "build,search" # `build` or `search` or `build,search`
+  index_name: "hgraph"
+  create_params: '{"dim":128,"dtype":"float32","metric_type":"l2","index_param":{
+    "base_quantization_type":"sq8",
+    "precise_quantization_type":"fp32",
+    "use_reorder": true,
+    "max_degree":32,
+    "ef_construction":300
+    }}'
+  search_params: '{"hgraph":{"ef_search":80}}'
+  index_path: "/tmp/sift-128-euclidean/sq4"
+  search_mode: "knn" # ["knn", "range", "knn_filter", "range_filter"]
+  topk: 10
+  range: 0.5
+  delete_index_after_search: false # free up storage space used by index
+  num_threads_building: 16
+  num_threads_searching: 1
+
+#eval_case3:
+#    datapath: "/tbase-project/ann-benchmarks/data/gist-960-euclidean.hdf5"
+#    type: "build,search" # `build` or `search` or `build,search`
+#    index_name: "hgraph"
+#    create_params: '{"dim":960,"dtype":"float32","metric_type":"l2","index_param":{
+#    "base_quantization_type":"rq",
+#    "rq_base_quantization_type": "fp16",
+#    "rq_centroids_count": 100,
+#    "use_reorder": true,
+#    "precise_quantization_type":"fp32",
+#    "max_degree":32,
+#    "ef_construction":300
+#    }}'
+#    search_params: '{"hgraph":{"ef_search":80}}'
+#    index_path: "/tmp/gist-960-euclidean/rq_fp16_20"
+#    search_mode: "knn" # ["knn", "range", "knn_filter", "range_filter"]
+#    topk: 10
+#    range: 0.5
+#    delete_index_after_search: false # free up storage space used by index
+#    num_threads_building: 1
+#    num_threads_searching: 1
+#
+#eval_case4:
+#  datapath: "/tbase-project/ann-benchmarks/data/gist-960-euclidean.hdf5"
+#  type: "build,search" # `build` or `search` or `build,search`
+#  index_name: "hgraph"
+#  create_params: '{"dim":960,"dtype":"float32","metric_type":"l2","index_param":{
+#    "base_quantization_type":"fp16",
+#    "precise_quantization_type":"fp32",
+#    "use_reorder": true,
+#    "max_degree":32,
+#    "ef_construction":300
+#    }}'
+#  search_params: '{"hgraph":{"ef_search":80}}'
+#  index_path: "/tmp/gist-960-euclidean/sq4"
+#  search_mode: "knn" # ["knn", "range", "knn_filter", "range_filter"]
+#  topk: 10
+#  range: 0.5
+#  delete_index_after_search: false # free up storage space used by index
+#  num_threads_building: 16
+#  num_threads_searching: 1

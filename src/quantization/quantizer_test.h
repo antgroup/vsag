@@ -303,7 +303,7 @@ TestInversePair(Quantizer<T>& quantizer, size_t dim, uint32_t count, Allocator* 
 }
 
 template <typename T, MetricType metric>
-void
+float
 TestComputer(Quantizer<T>& quant,
              size_t dim,
              uint32_t count,
@@ -342,6 +342,7 @@ TestComputer(Quantizer<T>& quant,
     };
 
     float count_unbounded_related_error = 0, count_unbounded_numeric_error = 0;
+    float avg_quant_error = 0;
     for (int i = 0; i < query_count; ++i) {
         auto computer = quant.FactoryComputer();
         computer->SetQuery(queries.data() + i * dim);
@@ -355,6 +356,7 @@ TestComputer(Quantizer<T>& quant,
             quant.EncodeOne(vecs.data() + j * dim, code);
             quant.ComputeDist(*computer, code, dists1.data() + j);
             REQUIRE(quant.ComputeDist(*computer, code) == dists1[j]);
+            avg_quant_error += std::abs(gt - dists1[j]);
             if (std::abs(gt - dists1[j]) > error) {
                 count_unbounded_numeric_error++;
             }
@@ -374,6 +376,7 @@ TestComputer(Quantizer<T>& quant,
     }
     REQUIRE(count_unbounded_numeric_error / (query_count * count) <= unbounded_numeric_error_rate);
     REQUIRE(count_unbounded_related_error / (query_count * count) <= unbounded_related_error_rate);
+    return avg_quant_error;
 }
 
 template <typename T, MetricType metric, bool uniform = false, bool support_compute_codes = true>

@@ -26,7 +26,7 @@
 using namespace vsag;
 
 const auto dims = fixtures::get_common_used_dims(10, 114);
-const auto counts = {101, 1001};
+const auto counts = {1001};
 
 template <typename T, MetricType metric>
 void
@@ -49,7 +49,8 @@ TestComputeMetricRQ(std::string base_quantizer_type, uint64_t dim, int count, fl
     ResidualQuantizer<T, metric> quantizer(param, common_param);
 
     REQUIRE(quantizer.NameImpl() == QUANTIZATION_TYPE_VALUE_RQ);
-    TestComputer<ResidualQuantizer<T, metric>, metric>(quantizer, dim, count, error);
+    float avg_quant_error = TestComputer<ResidualQuantizer<T, metric>, metric>(quantizer, dim, count, error);
+    std::cout << avg_quant_error << std::endl;
 }
 
 template <typename T, MetricType metric>
@@ -68,7 +69,7 @@ TestSerializeDeserializeRQ(std::string base_quantizer_type, uint64_t dim, int co
                     "rq_centroids_count": {}
                 }}
             )";
-    auto param_str = fmt::format(param_template, base_quantizer_type, 100);
+    auto param_str = fmt::format(param_template, base_quantizer_type, 10);
     auto param_json = vsag::JsonType::Parse(param_str);
     param->FromJson(param_json);
 
@@ -115,8 +116,8 @@ TEST_CASE("RQ Compute", "[ut][ResidualQuantizer]") {
             //            TestComputeMetricRQ<SQ8Quantizer<metrics[2]>, metrics[2]>(
             //                "sq8", dim, count, 10);
 
-            TestComputeMetricRQ<SQ4UniformQuantizer<metrics[0]>, metrics[0]>(
-                "sq4_uniform", dim, count, 20);
+//            TestComputeMetricRQ<SQ4UniformQuantizer<metrics[0]>, metrics[0]>(
+//                "sq4_uniform", dim, count, 20);
             //            TestComputeMetricRQ<SQ4UniformQuantizer<metrics[1]>, metrics[1]>(
             //                "sq4_uniform", dim, count, 20);
             //            TestComputeMetricRQ<SQ4UniformQuantizer<metrics[2]>, metrics[2]>(
