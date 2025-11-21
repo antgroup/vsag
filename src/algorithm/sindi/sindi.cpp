@@ -146,7 +146,7 @@ SINDI::KnnSearch(const DatasetPtr& query,
     // search parameter
     SINDISearchParameter search_param;
     search_param.FromJson(JsonType::Parse(parameters));
-    CHECK_ARGUMENT(search_param.n_candidate <= AMPLIFICATION_FACTOR * k,
+    CHECK_ARGUMENT(search_param.n_candidate <= SPARSE_AMPLIFICATION_FACTOR * k,
                    fmt::format("n_candidate ({}) should be less than {} * k ({})",
                                search_param.n_candidate,
                                AMPLIFICATION_FACTOR,
