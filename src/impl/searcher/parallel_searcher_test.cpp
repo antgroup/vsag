@@ -31,7 +31,6 @@ TEST_CASE("Parallel search with HNSW", "[ut][ParallelSearcher][concurrent]") {
     uint32_t ef_search = 300;
     uint32_t k = ef_search;
     InnerIdType fixed_entry_point_id = 0;
-    uint64_t DEFAULT_MAX_ELEMENT = 1;
 
     // data preparation
     auto base_vectors = fixtures::generate_vectors(base_size, dim, true);
@@ -119,8 +118,7 @@ TEST_CASE("Parallel search with HNSW", "[ut][ParallelSearcher][concurrent]") {
     search_param_temp.topk = k;
     search_param_temp.is_inner_id_allowed = nullptr;
     search_param_temp.radius = range;
-    search_param_temp.use_muti_threads_for_one_query = true;
-    search_param_temp.level_0 = true;
+    search_param_temp.parallel_search_thread_count = 2;
 
     std::vector<InnerSearchParam> params(4);
     params[0] = search_param_temp;
