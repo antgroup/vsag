@@ -31,11 +31,16 @@ TEST_CASE("SparseTermDatacell Basic Test", "[ut][SparseTermDatacell]") {
         sparse_vectors[i].len_ = len_base;
         sparse_vectors[i].ids_ = new uint32_t[sparse_vectors[i].len_];
         sparse_vectors[i].vals_ = new float[sparse_vectors[i].len_];
-        // base[0] = [0:0, 1:1, 2:2, ..., 9:9] = after_prune = [5:5, 6:6, 7:7, 8:8, 9:9]
-        // base[1] = [1:1, 2:2, 3:3, ..., 10:10] = after_prune = [6:6, 7:7, 8:8, 9:9, 10:10]
-        // ...
+        // base[0] = [0:0, 1:1, 2:2, ..., 9:9] = after_prune = [7:7, 8:8, 9:9]
+        // base[1] = [1:1, 2:2, 3:3, ..., 10:10] = after_prune = [7:7, 8:8, 9:9, 10:10]
+        // base[2] = [2:2, 3:3, 4:4, ..., 11:11] = after_prune = [8:8, 9:9, 10:10, 11:11]
+        // base[3] = [3:3, 4:4, 5:5, ..., 12:12] = after_prune = [9:9, 10:10, 11:11, 12:12]
+        // base[4] = [4:4, 5:5, 6:6, ..., 13:13] = after_prune = [10:10, 11:11, 12:12, 13:13]
+        // base[5] = [5:5, 6:6, 7:7, ..., 14:14] = after_prune = [11:11, 12:12, 13:13, 14:14]
+        // base[6] = [6:6, 7:7, 8:8, ..., 15:15] = after_prune = [12:12, 13:13, 14:14, 15:15]
+        // base[7] = [7:7, 8:8, 9:9, ..., 16:16] = after_prune = [13:13, 14:14, 15:15, 16:16]
         // base[8] = [8:8, 9:9, 10:10, ..., 17:17] = after_prune = [13:13, 14:14, 15:15, 16:16, 17:17]
-        // base[9] = [9:9, 10:10, ..., 18:18] = after_prune = [14:14, 15:15, 16:16, 17:17, 18:18]
+        // base[9] = [9:9, 10:10, 11:11, ..., 18:18] = after_prune = [14:14, 15:15, 16:16, 17:17, 18:18]
         for (int d = 0; d < sparse_vectors[i].len_; d++) {
             sparse_vectors[i].ids_[d] = i + d;
             sparse_vectors[i].vals_[d] = i + d;
@@ -43,8 +48,8 @@ TEST_CASE("SparseTermDatacell Basic Test", "[ut][SparseTermDatacell]") {
     }
 
     // query: [0:1, 1:1, 2:1 .... 18:1]
-    // dis(q, b0) = 9 + 8 + 7 + 6 + 5 = 35
-    // dis(q, b1) = 10 + 9 + 8 + 7 + 6 = 40
+    // dis(q, b0) = 9 + 8 + 7 = 24
+    // dis(q, b1) = 10 + 9 + 8 + 7 = 34
     // ...
     // dis(q, b9) = 80
     SparseVector query_sv;
@@ -58,12 +63,12 @@ TEST_CASE("SparseTermDatacell Basic Test", "[ut][SparseTermDatacell]") {
 
     // prepare data_cell
     float query_prune_ratio = 0.0;
-    float doc_prune_ratio = 0.5;
+    float doc_retain_ratio = 0.5;
     float term_prune_ratio = 0.0;
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     auto data_cell = std::make_shared<SparseTermDataCell>(
-        doc_prune_ratio, DEFAULT_TERM_ID_LIMIT, allocator.get());
-    REQUIRE(std::abs(data_cell->doc_prune_ratio_ - doc_prune_ratio) < 1e-3);
+        doc_retain_ratio, DEFAULT_TERM_ID_LIMIT, allocator.get());
+    REQUIRE(std::abs(data_cell->doc_retain_ratio_ - doc_retain_ratio) < 1e-3);
 
     // test factory computer
     SINDISearchParameter search_params;
@@ -74,7 +79,7 @@ TEST_CASE("SparseTermDatacell Basic Test", "[ut][SparseTermDatacell]") {
 
     // test insert
     auto exp_id_size = 19;
-    std::vector<uint32_t> exp_size = {0, 0, 0, 0, 0, 1, 2, 3, 4, 5, 5, 5, 5, 5, 5, 4, 3, 2, 1};
+    std::vector<uint32_t> exp_size = {0, 0, 0, 0, 0, 0, 0, 2, 3, 4, 4, 4, 4, 5, 5, 4, 3, 2, 1};
     for (auto i = 0; i < count_base; i++) {
         data_cell->InsertVector(sparse_vectors[i], i);
     }
@@ -87,7 +92,7 @@ TEST_CASE("SparseTermDatacell Basic Test", "[ut][SparseTermDatacell]") {
         REQUIRE(data_cell->term_datas_[i].size() == exp_size[i]);
     }
 
-    std::vector<float> exp_dists = {35, 40, 45, 50, 55, 60, 65, 70, 75, 80};
+    std::vector<float> exp_dists = {24, 34, 38, 42, 46, 50, 54, 58, 75, 80};
     SECTION("test query") {
         std::vector<float> dists(count_base, 0);
         data_cell->Query(dists.data(), computer);
