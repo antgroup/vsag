@@ -62,7 +62,7 @@ IndexNode::IndexNode(IndexCommonParam* common_param, GraphInterfaceParamPtr grap
 
 void
 IndexNode::BuildGraph(ODescent& odescent) {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::unique_lock lock(mutex_);
     // Build an index when the level corresponding to the current node requires indexing
     if (has_index_ && not ids_.empty()) {
         InitGraph();
@@ -85,7 +85,7 @@ IndexNode::AddChild(const std::string& key) {
 
 std::shared_ptr<IndexNode>
 IndexNode::GetChild(const std::string& key, bool need_init) {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::unique_lock lock(mutex_);
     auto result = children_.find(key);
     if (result != children_.end()) {
         return result->second;
@@ -150,14 +150,15 @@ IndexNode::InitGraph() {
 }
 
 DistHeapPtr
-IndexNode::SearchGraph(const SearchFunc& search_func) const {
+IndexNode::SearchGraph(const SearchFunc& search_func, const VisitedListPtr& vl) const {
     if (graph_ != nullptr && graph_->TotalCount() > 0) {
-        return search_func(this);
+        return search_func(this, vl);
     }
     auto search_result =
         std::make_shared<StandardHeap<true, false>>(common_param_->allocator_.get(), -1);
+
     for (const auto& [key, node] : children_) {
-        DistHeapPtr child_search_result = node->SearchGraph(search_func);
+        DistHeapPtr child_search_result = node->SearchGraph(search_func, vl);
         while (not child_search_result->Empty()) {
             auto result = child_search_result->Top();
             child_search_result->Pop();
@@ -214,13 +215,11 @@ Pyramid::KnnSearch(const DatasetPtr& query,
         search_param.is_inner_id_allowed =
             std::make_shared<InnerIdWrapperFilter>(filter, *label_table_);
     }
-    SearchFunc search_func = [&](const IndexNode* node) {
+    SearchFunc search_func = [&](const IndexNode* node, const VisitedListPtr& vl) {
+        std::shared_lock lock(node->mutex_);
         search_param.ep = node->entry_point_;
-        std::lock_guard<std::mutex> lock(node->mutex_);
-        auto vl = pool_->TakeOne();
         auto results = searcher_->Search(
             node->graph_, base_codes_, vl, query->GetFloat32Vectors(), search_param);
-        pool_->ReturnOne(vl);
         return results;
     };
     return this->search_impl(query, k, search_func);
@@ -241,13 +240,11 @@ Pyramid::RangeSearch(const DatasetPtr& query,
         search_param.is_inner_id_allowed =
             std::make_shared<InnerIdWrapperFilter>(filter, *label_table_);
     }
-    SearchFunc search_func = [&](const IndexNode* node) {
+    SearchFunc search_func = [&](const IndexNode* node, const VisitedListPtr& vl) {
+        std::shared_lock lock(node->mutex_);
         search_param.ep = node->entry_point_;
-        std::lock_guard<std::mutex> lock(node->mutex_);
-        auto vl = pool_->TakeOne();
         auto results = searcher_->Search(
             node->graph_, base_codes_, vl, query->GetFloat32Vectors(), search_param);
-        pool_->ReturnOne(vl);
         return results;
     };
     int64_t final_limit = limited_size == -1 ? std::numeric_limits<int64_t>::max() : limited_size;
@@ -268,7 +265,11 @@ Pyramid::search_impl(const DatasetPtr& query, int64_t limit, const SearchFunc& s
             return DatasetImpl::MakeEmptyDataset();
         }
     }
-    auto search_result = node->SearchGraph(search_func);
+
+    auto vl = pool_->TakeOne();
+    auto search_result = node->SearchGraph(search_func, vl);
+    pool_->ReturnOne(vl);
+
     while (search_result->Size() > limit) {
         search_result->Pop();
     }
@@ -327,6 +328,7 @@ Pyramid::Deserialize(StreamReader& reader) {
     base_codes_->Deserialize(buffer_reader);
     root_->Deserialize(buffer_reader);
     pool_ = std::make_unique<VisitedListPool>(1, allocator_, base_codes_->TotalCount(), allocator_);
+    resize(base_codes_->TotalCount());
 }
 
 std::vector<int64_t>
@@ -359,16 +361,12 @@ Pyramid::Add(const DatasetPtr& base) {
                 data_ids,
                 sizeof(LabelType) * data_num);
 
-    InnerSearchParam search_param;
-    search_param.ef = pyramid_param_->ef_construction;
-    search_param.topk = pyramid_param_->max_degree;
-    search_param.search_mode = KNN_SEARCH;
-    auto empty_mutex = std::make_shared<EmptyMutex>();
-    for (auto i = 0; i < data_num; ++i) {
+    auto add_func = [&](int i) {
         std::string current_path = path[i];
         auto path_slices = split(current_path, PART_SLASH);
         std::shared_ptr<IndexNode> node = root_;
         auto inner_id = static_cast<InnerIdType>(i + local_cur_element_count);
+        const auto* vector = data_vectors + dim_ * i;
         int no_build_level_index = 0;
         for (int j = 0; j <= path_slices.size(); ++j) {
             std::shared_ptr<IndexNode> new_node = nullptr;
@@ -381,32 +379,22 @@ Pyramid::Add(const DatasetPtr& base) {
                 no_build_level_index++;
                 continue;
             }
-            std::lock_guard<std::mutex> graph_lock(node->mutex_);
-            // add one point
-            if (node->graph_ == nullptr) {
-                node->InitGraph();
-            }
-            if (node->graph_->TotalCount() == 0) {
-                node->graph_->InsertNeighborsById(inner_id, Vector<InnerIdType>(allocator_));
-                node->entry_point_ = inner_id;
-            } else {
-                bool update_entry_point;
-                {
-                    std::scoped_lock<std::mutex> entry_point_lock(entry_point_mutex_);
-                    update_entry_point = is_update_entry_point(node->graph_->TotalCount());
-                }
-                search_param.ep = node->entry_point_;
-                auto vl = pool_->TakeOne();
-                auto results = searcher_->Search(
-                    node->graph_, base_codes_, vl, data_vectors + dim_ * i, search_param);
-                pool_->ReturnOne(vl);
-                mutually_connect_new_element(
-                    inner_id, results, node->graph_, base_codes_, empty_mutex, allocator_, alpha_);
-                if (update_entry_point) {
-                    node->entry_point_ = inner_id;
-                }
-            }
+            add_one_point(node, inner_id, vector);
             node = new_node;
+        }
+    };
+
+    Vector<std::future<void>> futures(allocator_);
+    for (auto i = 0; i < data_num; ++i) {
+        if (this->build_pool_ != nullptr) {
+            futures.push_back(this->build_pool_->GeneralEnqueue(add_func, i));
+        } else {
+            add_func(i);
+        }
+    }
+    if (this->build_pool_ != nullptr) {
+        for (auto& future : futures) {
+            future.get();
         }
     }
     return {};
@@ -421,6 +409,7 @@ Pyramid::resize(int64_t new_max_capacity) {
     pool_ = std::make_unique<VisitedListPool>(1, allocator_, new_max_capacity, allocator_);
     label_table_->label_table_.resize(new_max_capacity);
     base_codes_->Resize(new_max_capacity);
+    points_mutex_->Resize(new_max_capacity);
     max_capacity_ = new_max_capacity;
 }
 
@@ -442,10 +431,9 @@ Pyramid::InitFeatures() {
     });
 
     // concurrency
-    this->index_feature_list_->SetFeatures({
-        IndexFeature::SUPPORT_SEARCH_CONCURRENT,
-        IndexFeature::SUPPORT_ADD_CONCURRENT,
-    });
+    this->index_feature_list_->SetFeatures({IndexFeature::SUPPORT_SEARCH_CONCURRENT,
+                                            IndexFeature::SUPPORT_ADD_CONCURRENT,
+                                            IndexFeature::SUPPORT_ADD_SEARCH_CONCURRENT});
 
     // serialize
     this->index_feature_list_->SetFeatures({
@@ -569,6 +557,44 @@ Pyramid::Build(const DatasetPtr& base) {
         ret = this->build_by_odescent(base);
     }
     return ret;
+}
+
+void
+Pyramid::add_one_point(const std::shared_ptr<IndexNode>& node,
+                       InnerIdType inner_id,
+                       const float* vector) {
+    std::unique_lock graph_lock(node->mutex_);
+    InnerSearchParam search_param;
+    search_param.ef = pyramid_param_->ef_construction;
+    search_param.topk = pyramid_param_->max_degree;
+    search_param.search_mode = KNN_SEARCH;
+    // add one point
+    if (node->graph_ == nullptr) {
+        node->InitGraph();
+    }
+    if (node->graph_->TotalCount() == 0) {
+        node->graph_->InsertNeighborsById(inner_id, Vector<InnerIdType>(allocator_));
+        node->entry_point_ = inner_id;
+    } else {
+        bool update_entry_point;
+        {
+            std::scoped_lock<std::mutex> entry_point_lock(entry_point_mutex_);
+            update_entry_point = is_update_entry_point(node->graph_->TotalCount());
+        }
+        search_param.ep = node->entry_point_;
+        if (not update_entry_point) {
+            graph_lock.unlock();
+        }
+
+        auto vl = pool_->TakeOne();
+        auto results = searcher_->Search(node->graph_, base_codes_, vl, vector, search_param);
+        pool_->ReturnOne(vl);
+        mutually_connect_new_element(
+            inner_id, results, node->graph_, base_codes_, points_mutex_, allocator_, alpha_);
+        if (update_entry_point) {
+            node->entry_point_ = inner_id;
+        }
+    }
 }
 
 }  // namespace vsag

@@ -229,7 +229,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
                              "[ft][pyramid][concurrent]") {
     auto metric_type = GENERATE("l2");
     PyramidParam pyramid_param;
-    pyramid_param.no_build_levels = {0, 1, 2};
+    pyramid_param.no_build_levels = {0, 1};
     const std::string name = "pyramid";
     auto search_param = fmt::format(search_param_tmp, 20);
     for (auto& dim : dims) {
@@ -238,5 +238,11 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
         auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type, /*with_path=*/true);
         TestConcurrentAdd(index, dataset, true);
         TestConcurrentKnnSearch(index, dataset, search_param, 0.99, true);
+    }
+    for (auto& dim : dims) {
+        auto param = GeneratePyramidBuildParametersString(metric_type, dim, pyramid_param);
+        auto index = TestFactory(name, param, true);
+        auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type, /*with_path=*/true);
+        TestConcurrentAddSearch(index, dataset, search_param, 0.99, true);
     }
 }
