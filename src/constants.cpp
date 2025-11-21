@@ -106,6 +106,7 @@ const char* const HNSW_PARAMETER_SKIP_RATIO = "skip_ratio";
 const char* const INDEX_PARAM = "index_param";
 
 const char PART_SLASH = '/';
+const char PART_BAR = '|';
 
 // statistics key
 const char* const STATSTIC_MEMORY = "memory";
