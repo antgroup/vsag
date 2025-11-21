@@ -52,8 +52,11 @@ public:
         return std::make_shared<SparseIndex>(this->create_param_ptr_, param);
     }
 
+    void
+    GetSparseVectorByInnerId(InnerIdType inner_id, SparseVector* data) const override;
+
     IndexType
-    GetIndexType() override {
+    GetIndexType() const override {
         return IndexType::SPARSE;
     }
 

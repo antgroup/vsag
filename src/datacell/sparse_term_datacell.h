@@ -68,6 +68,9 @@ public:
     float
     CalcDistanceByInnerId(const SparseTermComputerPtr& computer, uint32_t base_id);
 
+    void
+    GetSparseVector(uint32_t base_id, SparseVector* data);
+
 public:
     uint32_t term_id_limit_{0};
 

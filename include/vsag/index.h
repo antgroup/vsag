@@ -74,7 +74,7 @@ public:
      * @return IndexType
      */
     virtual IndexType
-    GetIndexType() {
+    GetIndexType() const {
         throw std::runtime_error("Index not support GetIndexType");
     }
 

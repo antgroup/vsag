@@ -165,6 +165,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex, "SINDI Build and Search",
     auto dataset = pool.GetSparseDatasetAndCreate(base_count, 128, 0.8);
     REQUIRE(index->GetIndexType() == vsag::IndexType::SINDI);
     TestContinueAdd(index, dataset, true);
+    TestGetRawVectorByIds(index, dataset, true);
     TestKnnSearch(index, dataset, search_param, 0.99, true);
     TestSearchAllocator(index, dataset, search_param, 0.99, true);
     TestRangeSearch(index, dataset, search_param, 0.99, 10, true);

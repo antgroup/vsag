@@ -225,6 +225,28 @@ SparseTermDataCell::CalcDistanceByInnerId(const SparseTermComputerPtr& computer,
 }
 
 void
+SparseTermDataCell::GetSparseVector(uint32_t base_id, SparseVector* data) {
+    Vector<uint32_t> ids(allocator_);
+    Vector<float> vals(allocator_);
+
+    for (auto term = 0; term < term_ids_.size(); term++) {
+        for (auto i = 0; i < term_sizes_[term]; i++) {
+            if (term_ids_[term][i] == base_id) {
+                ids.push_back(term);
+                vals.push_back(term_datas_[term][i]);
+            }
+        }
+    }
+
+    data->len_ = ids.size();
+    data->ids_ = (uint32_t*)allocator_->Allocate(sizeof(uint32_t) * data->len_);
+    data->vals_ = (float*)allocator_->Allocate(sizeof(float) * data->len_);
+
+    memcpy(data->ids_, ids.data(), data->len_ * sizeof(uint32_t));
+    memcpy(data->vals_, vals.data(), data->len_ * sizeof(float));
+}
+
+void
 SparseTermDataCell::Serialize(StreamWriter& writer) const {
     StreamWriter::WriteObj(writer, term_capacity_);
     for (auto i = 0; i < term_capacity_; i++) {

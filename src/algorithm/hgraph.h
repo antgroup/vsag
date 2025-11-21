@@ -121,11 +121,8 @@ public:
     void
     GetVectorByInnerId(InnerIdType inner_id, float* data) const override;
 
-    DatasetPtr
-    GetVectorByIds(const int64_t* ids, int64_t count) const;
-
     IndexType
-    GetIndexType() override {
+    GetIndexType() const override {
         return IndexType::HGRAPH;
     }
 
