@@ -177,6 +177,7 @@ extern const char* const HGRAPH_EXTRA_INFO_SIZE;
 extern const char* const HGRAPH_SUPPORT_DUPLICATE;
 extern const char* const HGRAPH_SUPPORT_TOMBSTONE;
 extern const char* const HGRAPH_USE_EXTRA_INFO_FILTER;
+extern const char* const HGRAPH_REORDER_TYPE;
 extern const char* const STORE_RAW_VECTOR;
 extern const char* const RAW_VECTOR_IO_TYPE;
 extern const char* const RAW_VECTOR_FILE_PATH;

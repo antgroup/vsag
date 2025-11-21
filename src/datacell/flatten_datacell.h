@@ -24,6 +24,7 @@
 #include "io/basic_io.h"
 #include "io/memory_block_io.h"
 #include "quantization/quantizer.h"
+#include "simd/simd.h"
 #include "utils/byte_buffer.h"
 
 namespace vsag {
@@ -150,6 +151,9 @@ public:
         this->io_->InitIO(io_param);
     }
 
+    void
+    CalResidual(const void* vector, void* residual, InnerIdType count) override;
+
 public:
     std::shared_ptr<Quantizer<QuantTmpl>> quantizer_{nullptr};
     std::shared_ptr<BasicIO<IOTmpl>> io_{nullptr};
@@ -171,6 +175,20 @@ private:
         return computer;
     }
 };
+
+template <typename QuantTmpl, typename IOTmpl>
+void
+FlattenDataCell<QuantTmpl, IOTmpl>::CalResidual(const void* vector,
+                                                void* residual,
+                                                InnerIdType count) {
+    auto float_vector = static_cast<const float*>(vector);
+    auto float_residual = static_cast<float*>(residual);
+    ByteBuffer codes(this->quantizer_->GetCodeSize() * count, allocator_);
+    this->quantizer_->EncodeBatch(float_vector, codes.data, count);
+    this->quantizer_->DecodeBatch(codes.data, float_residual, count);
+    FP32Sub(float_vector, float_residual, float_residual, this->quantizer_->GetDim() * count);
+}
+
 template <typename QuantTmpl, typename IOTmpl>
 bool
 FlattenDataCell<QuantTmpl, IOTmpl>::HoldMolds() const {

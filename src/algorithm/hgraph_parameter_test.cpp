@@ -54,6 +54,7 @@ struct HGraphDefaultParam {
     bool use_attribute_filter = false;
     bool support_duplicate = false;
     bool use_reorder = true;
+    std::string reorder_type = "flatten_reorder";
 };
 
 std::string
@@ -107,7 +108,22 @@ generate_hgraph_param(const HGraphDefaultParam& param) {
         "type": "hgraph",
         "use_attribute_filter": {},
         "use_reorder": {},
-        "support_duplicate": {}
+        "support_duplicate": {},
+        "reorder": {{
+            "codes_type": "flatten",
+            "io_params": {{
+                "file_path": "./default_file_path",
+                "type": "block_memory_io"
+            }},
+            "quantization_params": {{
+                "hold_molds": false,
+                "pca_dim": 0,
+                "pq_dim": 1,
+                "sq4_uniform_trunc_rate": 0.05,
+                "type": "sq8"
+            }},
+            "reorder_type": "{}"
+        }}
     }})";
 
     return fmt::format(param_str,
@@ -122,7 +138,8 @@ generate_hgraph_param(const HGraphDefaultParam& param) {
                        param.precise_codes_quantization_type,
                        param.use_attribute_filter,
                        param.use_reorder,
-                       param.support_duplicate);
+                       param.support_duplicate,
+                       param.reorder_type);
 }
 
 TEST_CASE("HGraph Parameters CheckCompatibility", "[ut][HGraphParameter][CheckCompatibility]") {
@@ -158,4 +175,6 @@ TEST_CASE("HGraph Parameters CheckCompatibility", "[ut][HGraphParameter][CheckCo
     TEST_COMPATIBILITY_CASE(
         "different use attribute filter", use_attribute_filter, true, false, false)
     TEST_COMPATIBILITY_CASE("different support duplicate", support_duplicate, true, false, false)
+    TEST_COMPATIBILITY_CASE(
+        "different reorder type", reorder_type, "flatten_reorder", "pqr_reorder", false)
 }

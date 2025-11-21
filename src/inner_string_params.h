@@ -141,6 +141,16 @@ const char* const GNO_IMI_SEARCH_PARAM_FIRST_ORDER_SCAN_RATIO = "first_order_sca
 const char* const FLATTEN_DATA_CELL = "flatten_data_cell";
 const char* const SPARSE_VECTOR_DATA_CELL = "sparse_vector_data_cell";
 
+const char* const PQR_REORDER = "pqr_reorder";
+const char* const FLATTEN_REORDER = "flatten_reorder";
+const char* const REORDER_TYPE = "reorder_type";
+const char* const REORDER_KEY = "reorder";
+const char* const REORDER_CODES_KEY = "reorder_codes";
+const char* const REORDER_CODES_IO_TYPE = "reorder_codes_io_type";
+const char* const REORDER_CODES_IO_FILE = "reorder_codes_io_file";
+const char* const REORDER_CODES_TYPE = "reorder_codes_type";
+const char* const REORDER_CODES_QUANTIZATION_TYPE = "reorder_codes_quantization_type";
+
 // for pyramid index
 const char* const NO_BUILD_LEVELS = "no_build_levels";
 
@@ -244,6 +254,13 @@ const std::unordered_map<std::string, std::string> DEFAULT_MAP = {
     {"RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY_KEY", RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY_KEY},
     {"TQ_CHAIN_KEY", TQ_CHAIN_KEY},
     {"NO_BUILD_LEVELS", NO_BUILD_LEVELS},
-    {"GRAPH_TYPE_KEY", GRAPH_TYPE_KEY}};
+    {"GRAPH_TYPE_KEY", GRAPH_TYPE_KEY},
+    {"REORDER_KEY", REORDER_KEY},
+    {"REORDER_CODES_KEY", REORDER_CODES_KEY},
+    {"REORDER_CODES_IO_TYPE", REORDER_CODES_IO_TYPE},
+    {"REORDER_CODES_IO_FILE", REORDER_CODES_IO_FILE},
+    {"REORDER_CODES_TYPE", REORDER_CODES_TYPE},
+    {"REORDER_CODES_QUANTIZATION_TYPE", REORDER_CODES_QUANTIZATION_TYPE},
+    {"REORDER_TYPE", REORDER_TYPE}};
 
 }  // namespace vsag
