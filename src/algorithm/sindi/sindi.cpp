@@ -417,6 +417,21 @@ SINDI::EstimateMemory(uint64_t num_elements) const {
     return mem;
 }
 
+void
+SINDI::GetSparseVectorByInnerId(InnerIdType inner_id, SparseVector* data) const {
+    std::shared_lock rlock(this->global_mutex_);
+
+    if (use_reorder_) {
+        return this->rerank_flat_index_->GetSparseVectorByInnerId(inner_id, data);
+    }
+
+    auto cur_window = inner_id / window_size_;
+    auto window_start_id = cur_window * window_size_;
+    auto term_list = this->window_term_list_[cur_window];
+
+    term_list->GetSparseVector(inner_id - window_start_id, data);
+}
+
 float
 SINDI::CalcDistanceById(const DatasetPtr& vector, int64_t id) const {
     std::shared_lock rlock(this->global_mutex_);
@@ -517,6 +532,7 @@ SINDI::InitFeatures() {
     // info
     this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_CAL_DISTANCE_BY_ID);
     this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_ESTIMATE_MEMORY);
+    this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_GET_RAW_VECTOR_BY_IDS);
 
     // concurrency
     this->index_feature_list_->SetFeatures({IndexFeature::SUPPORT_SEARCH_CONCURRENT,
