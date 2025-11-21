@@ -118,7 +118,7 @@ extern const char* const PYRAMID_PARAMETER_EF_SEARCH;
 extern const char* const PYRAMID_NO_BUILD_LEVELS;
 
 extern const char PART_SLASH;
-
+extern const char PART_BAR;
 // statstic key
 extern const char* const STATSTIC_MEMORY;
 extern const char* const STATSTIC_INDEX_NAME;
