@@ -156,7 +156,8 @@ Engine::CreateIndex(const std::string& origin_name, const std::string& parameter
         LOG_ERROR_AND_RETURNS(
             ErrorType::INVALID_ARGUMENT, "failed to create index(invalid argument): ", e.what());
     } catch (const std::bad_alloc& e) {
-        LOG_ERROR_AND_RETURNS(ErrorType::NO_ENOUGH_MEMORY, "not enough memory: ", e.what());
+        LOG_ERROR_AND_RETURNS(
+            ErrorType::NO_ENOUGH_MEMORY, "failed to create index(not enough memory): ", e.what());
     } catch (const std::exception& e) {
         LOG_ERROR_AND_RETURNS(
             ErrorType::UNSUPPORTED_INDEX, "failed to create index(unknown error): ", e.what());
