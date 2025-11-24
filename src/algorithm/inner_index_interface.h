@@ -174,7 +174,7 @@ public:
     GetExtraInfoByIds(const int64_t* ids, int64_t count, char* extra_infos) const;
 
     [[nodiscard]] virtual IndexType
-    GetIndexType() = 0;
+    GetIndexType() const = 0;
 
     [[nodiscard]] virtual int64_t
     GetMemoryUsage() const {
@@ -218,7 +218,13 @@ public:
                             "Index doesn't support GetVectorByInnerId");
     }
 
-    DatasetPtr
+    virtual void
+    GetSparseVectorByInnerId(InnerIdType inner_id, SparseVector* data) const {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "Index doesn't support GetSparseVectorByInnerId");
+    }
+
+    virtual DatasetPtr
     GetVectorByIds(const int64_t* ids, int64_t count) const;
 
     virtual void
