@@ -180,8 +180,8 @@ private:
                   InnerIdType inner_id,
                   const float* vector);
 
-    std::vector<std::vector<std::string>>
-    parse_path(const std::string& path) const;
+    static std::vector<std::vector<std::string>>
+    parse_path(const std::string& path);
 
 private:
     IndexCommonParam common_param_;

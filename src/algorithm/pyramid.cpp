@@ -259,7 +259,7 @@ Pyramid::search_impl(const DatasetPtr& query,
                      const SearchFunc& search_func,
                      int64_t ef_search) const {
     const auto* query_path = query->GetPaths();
-    CHECK_ARGUMENT(query_path != nullptr || root_->graph_ != nullptr,
+    CHECK_ARGUMENT(query_path != nullptr || root_->graph_ != nullptr,  // NOLINT
                    "query_path is required when level0 is not built");
     CHECK_ARGUMENT(query->GetFloat32Vectors() != nullptr, "query vectors is required");
 
@@ -620,9 +620,9 @@ Pyramid::add_one_point(const std::shared_ptr<IndexNode>& node,
 }
 
 std::vector<std::vector<std::string>>
-Pyramid::parse_path(const std::string& path) const {
-    std::vector<std::vector<std::string>> parsed_paths;
+Pyramid::parse_path(const std::string& path) {
     auto multi_paths = split(path, PART_BAR);
+    std::vector<std::vector<std::string>> parsed_paths(multi_paths.size());
     for (const auto& single_path : multi_paths) {
         parsed_paths.push_back(split(single_path, PART_SLASH));
     }
