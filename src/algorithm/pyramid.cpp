@@ -622,7 +622,8 @@ Pyramid::add_one_point(const std::shared_ptr<IndexNode>& node,
 std::vector<std::vector<std::string>>
 Pyramid::parse_path(const std::string& path) {
     auto multi_paths = split(path, PART_BAR);
-    std::vector<std::vector<std::string>> parsed_paths(multi_paths.size());
+    std::vector<std::vector<std::string>> parsed_paths;
+    parsed_paths.reserve(multi_paths.size());
     for (const auto& single_path : multi_paths) {
         parsed_paths.push_back(split(single_path, PART_SLASH));
     }
