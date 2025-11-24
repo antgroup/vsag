@@ -155,13 +155,14 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex, "Pyramid No Path Test",
             auto param = GeneratePyramidBuildParametersString(metric_type, dim, pyramid_param);
             auto index = TestFactory(name, param, true);
             auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
-            delete[] dataset->query_->GetPaths();
+            auto tmp_paths = dataset->query_->GetPaths();
             dataset->query_->Paths(nullptr);
             TestContinueAdd(index, dataset, true);
             auto has_root = level[0] != 0;
             TestKnnSearch(index, dataset, search_param, 0.99, has_root);
             TestFilterSearch(index, dataset, search_param, 0.99, has_root);
             TestRangeSearch(index, dataset, search_param, 0.99, 10, has_root);
+            dataset->query_->Paths(tmp_paths);
         }
     }
 }
