@@ -1,4 +1,3 @@
-
 // Copyright 2024-present the vsag project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -28,120 +27,129 @@
 namespace vsag {
 template <typename QuantTemp, typename IOTemp>
 static FlattenInterfacePtr
-make_instance(const FlattenInterfaceParamPtr& param, const IndexCommonParam& common_param) {
+make_instance_flatten(const FlattenInterfaceParamPtr& param, const IndexCommonParam& common_param) {
     auto& io_param = param->io_parameter;
     auto& quantizer_param = param->quantizer_parameter;
-    if (param->name == SPARSE_VECTOR_DATA_CELL) {
-        return std::make_shared<SparseVectorDataCell<QuantTemp, IOTemp>>(
-            quantizer_param, io_param, common_param);
-    }
     if (param->name == FLATTEN_DATA_CELL) {
         return std::make_shared<FlattenDataCell<QuantTemp, IOTemp>>(
             quantizer_param, io_param, common_param);
     }
-    return nullptr;
+    throw VsagException(ErrorType::INVALID_ARGUMENT,
+                        fmt::format("Unknown flatten interface name: {}", param->name));
+}
+template <typename QuantTemp, typename IOTemp>
+static FlattenInterfacePtr
+make_instance_sparse(const FlattenInterfaceParamPtr& param, const IndexCommonParam& common_param) {
+    auto& io_param = param->io_parameter;
+    auto& quantizer_param = param->quantizer_parameter;
+
+    if (param->name == SPARSE_VECTOR_DATA_CELL) {
+        return std::make_shared<SparseVectorDataCell<QuantTemp, IOTemp>>(
+            quantizer_param, io_param, common_param);
+    }
+    throw VsagException(ErrorType::INVALID_ARGUMENT,
+                        fmt::format("Unknown flatten interface name: {}", param->name));
+}
+
+template <typename QuantizerType, typename IOTemp, MetricType metric>
+static FlattenInterfacePtr
+make_instance_with_tq(const FlattenInterfaceParamPtr& param,
+                      const IndexCommonParam& common_param,
+                      bool is_transform_quantizer) {
+    if (is_transform_quantizer) {
+        return make_instance_flatten<TransformQuantizer<QuantizerType, metric>, IOTemp>(
+            param, common_param);
+    }
+    return make_instance_flatten<QuantizerType, IOTemp>(param, common_param);
 }
 
 template <MetricType metric, typename IOTemp>
 static FlattenInterfacePtr
 make_instance(const FlattenInterfaceParamPtr& param, const IndexCommonParam& common_param) {
     std::string quantization_string = param->quantizer_parameter->GetTypeName();
+
+    // Handle INT8 data type specially
     if (common_param.data_type_ == DataTypes::DATA_TYPE_INT8) {
         if (quantization_string == QUANTIZATION_TYPE_VALUE_INT8) {
-            return make_instance<INT8Quantizer<metric>, IOTemp>(param, common_param);
+            return make_instance_flatten<INT8Quantizer<metric>, IOTemp>(param, common_param);
         }
-
         if (quantization_string == QUANTIZATION_TYPE_VALUE_PQ) {
-            return make_instance<QuantizerAdapter<ProductQuantizer<metric>, int8_t>, IOTemp>(
-                param, common_param);
+            return make_instance_flatten<QuantizerAdapter<ProductQuantizer<metric>, int8_t>,
+                                         IOTemp>(param, common_param);
         }
-
         throw VsagException(
             ErrorType::INVALID_ARGUMENT,
-            fmt::format("INT8 data type unsupport {} quantization", quantization_string));
+            fmt::format("INT8 data type does not support {} quantization", quantization_string));
     }
 
-    if (quantization_string == QUANTIZATION_TYPE_VALUE_TQ) {
+    // Determine the actual quantization type to use
+    auto actual_quant_type = quantization_string;
+    bool is_transform_quantizer = (quantization_string == QUANTIZATION_TYPE_VALUE_TQ);
+
+    if (is_transform_quantizer) {
         auto tq_param =
             std::dynamic_pointer_cast<TransformQuantizerParameter>(param->quantizer_parameter);
-        auto bottom_quantization_string = tq_param->GetBottomQuantizationName();
-        if (bottom_quantization_string == QUANTIZATION_TYPE_VALUE_SQ8) {
-            return make_instance<TransformQuantizer<SQ8Quantizer<metric>, metric>, IOTemp>(
-                param, common_param);
+        if (not tq_param) {
+            throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                "Expected TransformQuantizerParameter for TQ quantization");
         }
-        if (bottom_quantization_string == QUANTIZATION_TYPE_VALUE_FP32) {
-            return make_instance<TransformQuantizer<FP32Quantizer<metric>, metric>, IOTemp>(
-                param, common_param);
-        }
-        if (bottom_quantization_string == QUANTIZATION_TYPE_VALUE_SQ4) {
-            return make_instance<TransformQuantizer<SQ4Quantizer<metric>, metric>, IOTemp>(
-                param, common_param);
-        }
-        if (bottom_quantization_string == QUANTIZATION_TYPE_VALUE_SQ4_UNIFORM) {
-            return make_instance<TransformQuantizer<SQ4UniformQuantizer<metric>, metric>, IOTemp>(
-                param, common_param);
-        }
-        if (bottom_quantization_string == QUANTIZATION_TYPE_VALUE_SQ8_UNIFORM) {
-            return make_instance<TransformQuantizer<SQ8UniformQuantizer<metric>, metric>, IOTemp>(
-                param, common_param);
-        }
-        if (bottom_quantization_string == QUANTIZATION_TYPE_VALUE_BF16) {
-            return make_instance<TransformQuantizer<BF16Quantizer<metric>, metric>, IOTemp>(
-                param, common_param);
-        }
-        if (bottom_quantization_string == QUANTIZATION_TYPE_VALUE_FP16) {
-            return make_instance<TransformQuantizer<FP16Quantizer<metric>, metric>, IOTemp>(
-                param, common_param);
-        }
-        if (bottom_quantization_string == QUANTIZATION_TYPE_VALUE_PQ) {
-            return make_instance<TransformQuantizer<ProductQuantizer<metric>, metric>, IOTemp>(
-                param, common_param);
-        }
-        if (bottom_quantization_string == QUANTIZATION_TYPE_VALUE_PQFS) {
-            return make_instance<TransformQuantizer<PQFastScanQuantizer<metric>, metric>, IOTemp>(
-                param, common_param);
-        }
-        if (bottom_quantization_string == QUANTIZATION_TYPE_VALUE_RABITQ) {
-            return make_instance<TransformQuantizer<RaBitQuantizer<metric>, metric>, IOTemp>(
-                param, common_param);
+        actual_quant_type = tq_param->GetBottomQuantizationName();
+    }
+
+    // Dispatch based on the resolved quantization type
+    if (actual_quant_type == QUANTIZATION_TYPE_VALUE_SQ8) {
+        return make_instance_with_tq<SQ8Quantizer<metric>, IOTemp, metric>(
+            param, common_param, is_transform_quantizer);
+    }
+    if (actual_quant_type == QUANTIZATION_TYPE_VALUE_FP32) {
+        return make_instance_with_tq<FP32Quantizer<metric>, IOTemp, metric>(
+            param, common_param, is_transform_quantizer);
+    }
+    if (actual_quant_type == QUANTIZATION_TYPE_VALUE_SQ4) {
+        return make_instance_with_tq<SQ4Quantizer<metric>, IOTemp, metric>(
+            param, common_param, is_transform_quantizer);
+    }
+    if (actual_quant_type == QUANTIZATION_TYPE_VALUE_SQ4_UNIFORM) {
+        return make_instance_with_tq<SQ4UniformQuantizer<metric>, IOTemp, metric>(
+            param, common_param, is_transform_quantizer);
+    }
+    if (actual_quant_type == QUANTIZATION_TYPE_VALUE_SQ8_UNIFORM) {
+        return make_instance_with_tq<SQ8UniformQuantizer<metric>, IOTemp, metric>(
+            param, common_param, is_transform_quantizer);
+    }
+    if (actual_quant_type == QUANTIZATION_TYPE_VALUE_BF16) {
+        return make_instance_with_tq<BF16Quantizer<metric>, IOTemp, metric>(
+            param, common_param, is_transform_quantizer);
+    }
+    if (actual_quant_type == QUANTIZATION_TYPE_VALUE_FP16) {
+        return make_instance_with_tq<FP16Quantizer<metric>, IOTemp, metric>(
+            param, common_param, is_transform_quantizer);
+    }
+    if (actual_quant_type == QUANTIZATION_TYPE_VALUE_PQ) {
+        return make_instance_with_tq<ProductQuantizer<metric>, IOTemp, metric>(
+            param, common_param, is_transform_quantizer);
+    }
+    if (actual_quant_type == QUANTIZATION_TYPE_VALUE_PQFS) {
+        return make_instance_with_tq<PQFastScanQuantizer<metric>, IOTemp, metric>(
+            param, common_param, is_transform_quantizer);
+    }
+    if (actual_quant_type == QUANTIZATION_TYPE_VALUE_RABITQ) {
+        return make_instance_with_tq<RaBitQuantizer<metric>, IOTemp, metric>(
+            param, common_param, is_transform_quantizer);
+    }
+    if (actual_quant_type == QUANTIZATION_TYPE_VALUE_SPARSE and not is_transform_quantizer) {
+        if constexpr (metric == MetricType::METRIC_TYPE_IP) {
+            return make_instance_sparse<SparseQuantizer<metric>, IOTemp>(param, common_param);
+        } else {
+            throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                fmt::format("Sparse quantization only supports IP metric, got {}",
+                                            static_cast<int>(metric)));
         }
     }
 
-    if (quantization_string == QUANTIZATION_TYPE_VALUE_SQ8) {
-        return make_instance<SQ8Quantizer<metric>, IOTemp>(param, common_param);
-    }
-    if (quantization_string == QUANTIZATION_TYPE_VALUE_FP32) {
-        return make_instance<FP32Quantizer<metric>, IOTemp>(param, common_param);
-    }
-    if (quantization_string == QUANTIZATION_TYPE_VALUE_SQ4) {
-        return make_instance<SQ4Quantizer<metric>, IOTemp>(param, common_param);
-    }
-    if (quantization_string == QUANTIZATION_TYPE_VALUE_SQ4_UNIFORM) {
-        return make_instance<SQ4UniformQuantizer<metric>, IOTemp>(param, common_param);
-    }
-    if (quantization_string == QUANTIZATION_TYPE_VALUE_SQ8_UNIFORM) {
-        return make_instance<SQ8UniformQuantizer<metric>, IOTemp>(param, common_param);
-    }
-    if (quantization_string == QUANTIZATION_TYPE_VALUE_BF16) {
-        return make_instance<BF16Quantizer<metric>, IOTemp>(param, common_param);
-    }
-    if (quantization_string == QUANTIZATION_TYPE_VALUE_FP16) {
-        return make_instance<FP16Quantizer<metric>, IOTemp>(param, common_param);
-    }
-    if (quantization_string == QUANTIZATION_TYPE_VALUE_PQ) {
-        return make_instance<ProductQuantizer<metric>, IOTemp>(param, common_param);
-    }
-    if (quantization_string == QUANTIZATION_TYPE_VALUE_PQFS) {
-        return make_instance<PQFastScanQuantizer<metric>, IOTemp>(param, common_param);
-    }
-    if (quantization_string == QUANTIZATION_TYPE_VALUE_RABITQ) {
-        return make_instance<RaBitQuantizer<metric>, IOTemp>(param, common_param);
-    }
-    if (quantization_string == QUANTIZATION_TYPE_VALUE_SPARSE) {
-        return make_instance<SparseQuantizer<metric>, IOTemp>(param, common_param);
-    }
-
-    return nullptr;
+    // Unsupported quantization type
+    throw VsagException(ErrorType::INVALID_ARGUMENT,
+                        fmt::format("Unsupported quantization type: {}", actual_quant_type));
 }
 
 template <typename IOTemp>
