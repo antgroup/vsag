@@ -64,4 +64,16 @@ vsag_serialize_file(vsag_index_t index, const char* file_path);
 
 Error_t
 vsag_deserialize_file(vsag_index_t index, const char* file_path);
+
+typedef uint64_t OffsetType;
+typedef uint64_t SizeType;
+
+Error_t
+vsag_serialize_write_func(vsag_index_t index,
+                          void (*write_func)(OffsetType offset, SizeType size, const void* data));
+
+Error_t
+vsag_deserialize_read_func(vsag_index_t index,
+                           void (*read_func)(OffsetType offset, SizeType size, void* data),
+                           SizeType (*size_func)());
 }

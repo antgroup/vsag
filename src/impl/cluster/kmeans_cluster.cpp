@@ -85,11 +85,6 @@ KMeansCluster::Run(uint32_t k,
     }
 
     for (int it = 0; it < iter; ++it) {
-        logger::trace("[{}] KMeansCluster::Run iter: {}/{}, cur loss is {}",
-                      get_current_time(),
-                      it,
-                      iter,
-                      total_err);
         if (k < THRESHOLD_FOR_HGRAPH) {
             total_err = this->find_nearest_one_with_blas(datas, count, k, y_sqr, distances, labels);
         } else {
@@ -125,11 +120,6 @@ KMeansCluster::Run(uint32_t k,
         }
         futures.clear();
 
-        if (it > 0 && use_mse_for_convergence &&
-            std::fabs(last_err - total_err) / static_cast<double>(count) < threshold) {
-            break;
-        }
-
         for (int j = 0; j < k; ++j) {
             if (counts[j] > 0) {
                 cblas_sscal(dim_,
@@ -146,6 +136,17 @@ KMeansCluster::Run(uint32_t k,
                 }
             }
         }
+
+        logger::trace("[{}] KMeansCluster::Run iter: {}/{} finished, cur loss is {}",
+                      get_current_time(),
+                      static_cast<int>(it),
+                      static_cast<int>(iter),
+                      static_cast<double>(total_err));
+        if (it > 0 && use_mse_for_convergence &&
+            std::fabs(last_err - total_err) / static_cast<double>(count) < threshold) {
+            break;
+        }
+
         last_err = total_err;
     }
     if (err != nullptr) {
