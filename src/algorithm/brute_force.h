@@ -67,7 +67,7 @@ public:
     GetAttributeSetByInnerId(InnerIdType inner_id, AttributeSet* attr) const override;
 
     [[nodiscard]] IndexType
-    GetIndexType() override {
+    GetIndexType() const override {
         return IndexType::BRUTEFORCE;
     }
 

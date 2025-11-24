@@ -72,7 +72,7 @@ public:
     }
 
     IndexType
-    GetIndexType() override {
+    GetIndexType() const override {
         return IndexType::DISKANN;
     }
 
