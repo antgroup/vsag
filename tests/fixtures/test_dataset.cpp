@@ -19,6 +19,7 @@
 #include <cstring>
 #include <functional>
 
+#include "algorithm/pyramid.h"
 #include "fixtures.h"
 #include "simd/fp32_simd.h"
 
@@ -36,33 +37,9 @@ using MaxHeap = std::priority_queue<std::pair<float, int64_t>,
                                     std::vector<std::pair<float, int64_t>>,
                                     CompareByFirst>;
 
-std::vector<std::string>
-split(const std::string& str, char delimiter) {
-    std::vector<std::string> tokens;
-    size_t start = 0;
-    size_t end = str.find(delimiter);
-
-    while (end != std::string::npos) {
-        std::string token = str.substr(start, end - start);
-        if (!token.empty()) {
-            tokens.push_back(token);
-        }
-        start = end + 1;
-        end = str.find(delimiter, start);
-    }
-
-    // Handle the last token
-    std::string last_token = str.substr(start);
-    if (!last_token.empty()) {
-        tokens.push_back(last_token);
-    }
-
-    return tokens;
-}
-
 bool
 is_path_belong_to(const std::string& a, const std::string& b) {
-    auto paths = split(a, '|');
+    auto paths = vsag::split(a, '|');
     for (const auto& path : paths) {
         if (b.compare(0, path.size(), path) == 0) {
             return true;

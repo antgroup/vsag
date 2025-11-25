@@ -24,31 +24,15 @@
 #include "storage/serialization.h"
 #include "utils/slow_task_timer.h"
 #include "utils/util_functions.h"
-
 namespace vsag {
 
 std::vector<std::string>
 split(const std::string& str, char delimiter) {
-    std::vector<std::string> tokens;
-    size_t start = 0;
-    size_t end = str.find(delimiter);
-
-    while (end != std::string::npos) {
-        std::string token = str.substr(start, end - start);
-        if (!token.empty()) {
-            tokens.push_back(token);
-        }
-        start = end + 1;
-        end = str.find(delimiter, start);
-    }
-
-    // Handle the last token
-    std::string last_token = str.substr(start);
-    if (!last_token.empty()) {
-        tokens.push_back(last_token);
-    }
-
-    return tokens;
+    auto vec = split_string(str, delimiter);
+    vec.erase(
+        std::remove_if(vec.begin(), vec.end(), [](const std::string& s) { return s.empty(); }),
+        vec.end());
+    return vec;
 }
 
 IndexNode::IndexNode(IndexCommonParam* common_param, GraphInterfaceParamPtr graph_param)
