@@ -53,15 +53,19 @@ public:
         return DatasetImpl::MakeEmptyDataset(); \
     }
 
+#define CHECK_QUERY_RETURN_EMPTY_DATASET(query) \
+    if ((query)->GetNumElements() == 0) {       \
+        return DatasetImpl::MakeEmptyDataset(); \
+    }
 #define CHECK_IMMUTABLE_INDEX(operation_str)                                       \
     if (this->inner_index_->immutable_) {                                          \
         return tl::unexpected(Error(ErrorType::UNSUPPORTED_INDEX_OPERATION,        \
                                     "immutable index no support " operation_str)); \
     }
 
-#define CHECK_NONEMPTY_DATASET(dataset)                                               \
-    if ((dataset)->GetNumElements() == 0) {                                           \
-        LOG_ERROR_AND_RETURNS(ErrorType::INVALID_ARGUMENT, "input dataset is empty"); \
+#define CHECK_NONEMPTY_DATASET(dataset)     \
+    if ((dataset)->GetNumElements() == 0) { \
+        return std::vector<int64_t>();      \
     }
 
 public:
@@ -130,7 +134,6 @@ public:
     tl::expected<Checkpoint, Error>
     ContinueBuild(const DatasetPtr& base, const BinarySet& binary_set) override {
         CHECK_IMMUTABLE_INDEX("continue build");
-        CHECK_NONEMPTY_DATASET(base);
         SAFE_CALL(return this->inner_index_->ContinueBuild(base, binary_set));
     }
 
@@ -244,7 +247,7 @@ public:
               int64_t k,
               const std::string& parameters,
               BitsetPtr invalid = nullptr) const override {
-        CHECK_NONEMPTY_DATASET(query);
+        CHECK_QUERY_RETURN_EMPTY_DATASET(query);
         CHECK_AND_RETURN_EMPTY_DATASET;
         SAFE_CALL(return this->inner_index_->KnnSearch(query, k, parameters, invalid));
     }
@@ -254,7 +257,7 @@ public:
               int64_t k,
               const std::string& parameters,
               const std::function<bool(int64_t)>& filter) const override {
-        CHECK_NONEMPTY_DATASET(query);
+        CHECK_QUERY_RETURN_EMPTY_DATASET(query);
         CHECK_AND_RETURN_EMPTY_DATASET;
         SAFE_CALL(return this->inner_index_->KnnSearch(query, k, parameters, filter));
     }
@@ -264,14 +267,14 @@ public:
               int64_t k,
               const std::string& parameters,
               const FilterPtr& filter) const override {
-        CHECK_NONEMPTY_DATASET(query);
+        CHECK_QUERY_RETURN_EMPTY_DATASET(query);
         CHECK_AND_RETURN_EMPTY_DATASET;
         SAFE_CALL(return this->inner_index_->KnnSearch(query, k, parameters, filter));
     }
 
     tl::expected<DatasetPtr, Error>
     KnnSearch(const DatasetPtr& query, int64_t k, SearchParam& search_param) const override {
-        CHECK_NONEMPTY_DATASET(query);
+        CHECK_QUERY_RETURN_EMPTY_DATASET(query);
         CHECK_AND_RETURN_EMPTY_DATASET;
         if (search_param.is_iter_filter) {
             SAFE_CALL(return this->inner_index_->KnnSearch(query,
@@ -294,7 +297,7 @@ public:
               const FilterPtr& filter,
               IteratorContext*& iter_ctx,
               bool is_last_filter) const override {
-        CHECK_NONEMPTY_DATASET(query);
+        CHECK_QUERY_RETURN_EMPTY_DATASET(query);
         CHECK_AND_RETURN_EMPTY_DATASET;
         SAFE_CALL(return this->inner_index_->KnnSearch(
             query, k, parameters, filter, nullptr, iter_ctx, is_last_filter));
@@ -320,7 +323,9 @@ public:
              const std::string& parameters,
              int64_t global_optimum_tag_id = std::numeric_limits<int64_t>::max()) override {
         CHECK_IMMUTABLE_INDEX("feedback");
-        CHECK_NONEMPTY_DATASET(query);
+        if (query->GetNumElements() == 0) {
+            return 0;
+        }
         SAFE_CALL(return this->inner_index_->Feedback(query, k, parameters, global_optimum_tag_id));
     }
 
@@ -329,7 +334,7 @@ public:
                 float radius,
                 const std::string& parameters,
                 int64_t limited_size = -1) const override {
-        CHECK_NONEMPTY_DATASET(query);
+        CHECK_QUERY_RETURN_EMPTY_DATASET(query);
         CHECK_AND_RETURN_EMPTY_DATASET;
         SAFE_CALL(return this->inner_index_->RangeSearch(query, radius, parameters, limited_size));
     }
@@ -340,7 +345,7 @@ public:
                 const std::string& parameters,
                 BitsetPtr invalid,
                 int64_t limited_size = -1) const override {
-        CHECK_NONEMPTY_DATASET(query);
+        CHECK_QUERY_RETURN_EMPTY_DATASET(query);
         CHECK_AND_RETURN_EMPTY_DATASET;
         SAFE_CALL(return this->inner_index_->RangeSearch(
             query, radius, parameters, invalid, limited_size));
@@ -352,7 +357,7 @@ public:
                 const std::string& parameters,
                 const std::function<bool(int64_t)>& filter,
                 int64_t limited_size = -1) const override {
-        CHECK_NONEMPTY_DATASET(query);
+        CHECK_QUERY_RETURN_EMPTY_DATASET(query);
         CHECK_AND_RETURN_EMPTY_DATASET;
         SAFE_CALL(return this->inner_index_->RangeSearch(
             query, radius, parameters, filter, limited_size));
@@ -364,7 +369,7 @@ public:
                 const std::string& parameters,
                 const FilterPtr& filter,
                 int64_t limited_size = -1) const override {
-        CHECK_NONEMPTY_DATASET(query);
+        CHECK_QUERY_RETURN_EMPTY_DATASET(query);
         CHECK_AND_RETURN_EMPTY_DATASET;
         SAFE_CALL(return this->inner_index_->RangeSearch(
             query, radius, parameters, filter, limited_size));
@@ -405,8 +410,10 @@ public:
     tl::expected<void, Error>
     Train(const DatasetPtr& data) override {
         CHECK_IMMUTABLE_INDEX("train");
-        CHECK_NONEMPTY_DATASET(data);
-        SAFE_CALL(this->inner_index_->Train(data));
+        if (data->GetNumElements() != 0) {
+            SAFE_CALL(this->inner_index_->Train(data));
+        }
+        return {};
     }
 
     virtual tl::expected<void, Error>
@@ -426,7 +433,9 @@ public:
     virtual tl::expected<bool, Error>
     UpdateExtraInfo(const DatasetPtr& new_base) override {
         CHECK_IMMUTABLE_INDEX("update extra info");
-        CHECK_NONEMPTY_DATASET(new_base);
+        if (new_base->GetNumElements() == 0) {
+            return false;
+        }
         SAFE_CALL(return this->inner_index_->UpdateExtraInfo(new_base));
     }
 
@@ -439,7 +448,9 @@ public:
     tl::expected<bool, Error>
     UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update = false) override {
         CHECK_IMMUTABLE_INDEX("update vector");
-        CHECK_NONEMPTY_DATASET(new_base);
+        if (new_base->GetNumElements() == 0) {
+            return false;
+        }
         SAFE_CALL(return this->inner_index_->UpdateVector(id, new_base, force_update));
     }
 
