@@ -61,7 +61,7 @@ jobs:
         run: |
           echo race:libomp.so > omp.supp
           echo race:libomp.so.5 >> omp.supp
-          echo 'race:fmt::v10::detail::format_decimal' >> omp.supp
+          echo race:fmt::v10::detail::format_decimal >> omp.supp
           export TSAN_OPTIONS=suppressions=omp.supp
           chmod +x ./build/tests/functests
           ./build/tests/functests "[concurrent]~[daily]"
