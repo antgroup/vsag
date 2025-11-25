@@ -36,10 +36,11 @@ TestComputeMetricTQ(std::string tq_chain, uint64_t dim, int count, float error =
     constexpr static const char* param_template = R"(
         {{
             "tq_chain": "{}",
-            "pca_dim": {}
+            "pca_dim": {},
+            "mrle_dim": {}
         }}
     )";
-    auto param_str = fmt::format(param_template, tq_chain, dim - 1);
+    auto param_str = fmt::format(param_template, tq_chain, dim, dim - 1);
     auto param_json = vsag::JsonType::Parse(param_str);
     param->FromJson(param_json);
 
@@ -66,10 +67,11 @@ TestSerializeDeserializeTQ(std::string tq_chain, uint64_t dim, int count) {
     constexpr static const char* param_template = R"(
                 {{
                     "tq_chain": "{}",
-                    "pca_dim": {}
+                    "pca_dim": {},
+                    "mrle_dim": {}
                 }}
             )";
-    auto param_str = fmt::format(param_template, tq_chain, dim - 2);
+    auto param_str = fmt::format(param_template, tq_chain, dim, dim - 1);
     auto param_json = vsag::JsonType::Parse(param_str);
     param->FromJson(param_json);
 
@@ -92,7 +94,7 @@ TestSerializeDeserializeTQ(std::string tq_chain, uint64_t dim, int count) {
 
 TEST_CASE("TQ Compute", "[ut][TransformQuantizer]") {
     constexpr MetricType metrics[1] = {MetricType::METRIC_TYPE_L2SQR};
-    std::string tq_chain = GENERATE("rom, pca, fp32", "rom, fp32", "fht, fp32");
+    std::string tq_chain = GENERATE("rom, pca, fp32", "rom, fp32", "fht, fp32", "mrle, fp32");
 
     for (auto dim : dims) {
         if (dim < 100) {
