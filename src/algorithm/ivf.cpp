@@ -746,19 +746,17 @@ IVF::search(const DatasetPtr& query, const InnerSearchParam& param) const {
         search_thread_count = 1;
     }
     std::vector<DistHeapPtr> heaps(search_thread_count);
-
+    std::atomic<uint64_t> cur_bucket_num(0);
     auto search_func = [&](int64_t thread_id) -> void {
         heaps[thread_id] = DistanceHeap::MakeInstanceBySize<true, false>(this->allocator_, topk);
         auto& heap = heaps[thread_id];
         Vector<float> centroid(dim_, allocator_);
         Vector<float> dist(allocator_);
-        for (uint64_t i = 0; i < bucket_count; ++i) {
+        uint64_t i = cur_bucket_num.fetch_add(1);
+        for (; i < bucket_count; i = cur_bucket_num.fetch_add(1)) {
             if (param.time_cost != nullptr and param.time_cost->CheckOvertime()) {
                 (*param.stats)["is_timeout"].SetBool(true);
                 break;
-            }
-            if (i % search_thread_count != thread_id) {
-                continue;
             }
             auto bucket_id = candidate_buckets[i];
             if (bucket_id == -1) {
