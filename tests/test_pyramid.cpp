@@ -142,6 +142,31 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
     }
 }
 
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex, "Pyramid No Path Test", "[ft][pyramid]") {
+    auto metric_type = GENERATE("l2");
+    std::string base_quantization_str = GENERATE("fp32");
+    const std::string name = "pyramid";
+    auto search_param = fmt::format(search_param_tmp, 100);
+    PyramidParam pyramid_param;
+    std::vector<std::vector<int>> tmp_levels = {{1, 2}, {0, 1, 2}};
+    for (auto& dim : dims) {
+        for (const auto& level : tmp_levels) {
+            pyramid_param.no_build_levels = level;
+            auto param = GeneratePyramidBuildParametersString(metric_type, dim, pyramid_param);
+            auto index = TestFactory(name, param, true);
+            auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
+            auto tmp_paths = dataset->query_->GetPaths();
+            dataset->query_->Paths(nullptr);
+            TestContinueAdd(index, dataset, true);
+            auto has_root = level[0] != 0;
+            TestKnnSearch(index, dataset, search_param, 0.99, has_root);
+            TestFilterSearch(index, dataset, search_param, 0.99, has_root);
+            TestRangeSearch(index, dataset, search_param, 0.99, 10, has_root);
+            dataset->query_->Paths(tmp_paths);
+        }
+    }
+}
+
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
                              "Pyramid Serialize File",
                              "[ft][pyramid][serialization]") {

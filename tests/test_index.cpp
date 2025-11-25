@@ -39,6 +39,20 @@ Intersection(const int64_t* x, int64_t x_count, const int64_t* y, int64_t y_coun
     return result;
 }
 
+vsag::DatasetPtr
+get_one_query(const vsag::DatasetPtr& queries, int i) {
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)
+        ->Dim(queries->GetDim())
+        ->Float32Vectors(queries->GetFloat32Vectors() + i * queries->GetDim())
+        ->SparseVectors(queries->GetSparseVectors() + i)
+        ->Owner(false);
+    if (queries->GetPaths() != nullptr) {
+        query->Paths(queries->GetPaths() + i);
+    }
+    return query;
+}
+
 void
 TestIndex::TestBuildIndex(const IndexPtr& index,
                           const TestDatasetPtr& dataset,
@@ -366,13 +380,7 @@ TestIndex::TestKnnSearchCompare(const IndexPtr& index_weak,
     auto topk = dataset->top_k;
     for (auto round = 0; round < 2; round++) {
         for (auto i = 0; i < query_count; ++i) {
-            auto query = vsag::Dataset::Make();
-            query->NumElements(1)
-                ->Dim(dim)
-                ->Float32Vectors(queries->GetFloat32Vectors() + i * dim)
-                ->SparseVectors(queries->GetSparseVectors() + i)
-                ->Paths(queries->GetPaths() + i)
-                ->Owner(false);
+            auto query = get_one_query(queries, i);
 
             if (round == 0) {
                 auto st = std::chrono::high_resolution_clock::now();
@@ -409,13 +417,7 @@ TestIndex::TestKnnSearch(const IndexPtr& index,
     float cur_recall = 0.0f;
     auto topk = gt_topK;
     for (auto i = 0; i < query_count; ++i) {
-        auto query = vsag::Dataset::Make();
-        query->NumElements(1)
-            ->Dim(dim)
-            ->Float32Vectors(queries->GetFloat32Vectors() + i * dim)
-            ->SparseVectors(queries->GetSparseVectors() + i)
-            ->Paths(queries->GetPaths() + i)
-            ->Owner(false);
+        auto query = get_one_query(queries, i);
         auto res = index->KnnSearch(query, topk, search_param);
         if (not expected_success) {
             if (res.has_value()) {
@@ -457,13 +459,7 @@ TestIndex::TestRangeSearch(const IndexPtr& index,
     const auto& radius = dataset->range_radius_;
     float cur_recall = 0.0f;
     for (auto i = 0; i < query_count; ++i) {
-        auto query = vsag::Dataset::Make();
-        query->NumElements(1)
-            ->Dim(dim)
-            ->Float32Vectors(queries->GetFloat32Vectors() + i * dim)
-            ->SparseVectors(queries->GetSparseVectors() + i)
-            ->Paths(queries->GetPaths() + i)
-            ->Owner(false);
+        auto query = get_one_query(queries, i);
         auto res = index->RangeSearch(query, radius[i], search_param, limited_size);
         if (not expected_success) {
             if (res.has_value()) {
@@ -554,13 +550,7 @@ TestIndex::TestKnnSearchIter(const IndexPtr& index,
     std::vector<int64_t> ids(topk);
     for (auto i = 0; i < query_count; ++i) {
         vsag::IteratorContext* filter_ctx = nullptr;
-        auto query = vsag::Dataset::Make();
-        query->NumElements(1)
-            ->Dim(dim)
-            ->Float32Vectors(queries->GetFloat32Vectors() + i * dim)
-            ->Paths(queries->GetPaths() + i)
-            ->SparseVectors(queries->GetSparseVectors() + i)
-            ->Owner(false);
+        auto query = get_one_query(queries, i);
         auto res = index->KnnSearch(query, first_top, search_param, filter, filter_ctx, false);
         if (not expected_success) {
             if (res.has_value()) {
@@ -622,13 +612,7 @@ TestIndex::TestFilterSearch(const TestIndex::IndexPtr& index,
     float cur_recall = 0.0f;
     auto topk = gt_topK;
     for (auto i = 0; i < query_count; ++i) {
-        auto query = vsag::Dataset::Make();
-        query->NumElements(1)
-            ->Dim(dim)
-            ->Float32Vectors(queries->GetFloat32Vectors() + i * dim)
-            ->SparseVectors(queries->GetSparseVectors() + i)
-            ->Paths(queries->GetPaths() + i)
-            ->Owner(false);
+        auto query = get_one_query(queries, i);
         tl::expected<DatasetPtr, vsag::Error> res;
         res = index->KnnSearch(query, topk, search_param, dataset->filter_function_);
         if (support_filter_obj) {
@@ -722,13 +706,7 @@ TestIndex::TestSearchAllocator(const TestIndex::IndexPtr& index,
     };
 
     for (auto i = 0; i < query_count; ++i) {
-        auto query = vsag::Dataset::Make();
-        query->NumElements(1)
-            ->Dim(dim)
-            ->Float32Vectors(queries->GetFloat32Vectors() + i * dim)
-            ->SparseVectors(queries->GetSparseVectors() + i)
-            ->Paths(queries->GetPaths() + i)
-            ->Owner(false);
+        auto query = get_one_query(queries, i);
         ExampleAllocator allocator;
         vsag::SearchParam search_params(false, search_param, nullptr, &allocator);
         auto res = index->KnnSearch(query, topk, search_params);
@@ -774,13 +752,7 @@ TestIndex::TestCalcDistanceById(const IndexPtr& index,
     auto gts = dataset->ground_truth_;
     auto gt_topK = dataset->top_k;
     for (auto i = 0; i < query_count; ++i) {
-        auto query = vsag::Dataset::Make();
-        query->NumElements(1)
-            ->Dim(dim)
-            ->Float32Vectors(queries->GetFloat32Vectors() + i * dim)
-            ->SparseVectors(queries->GetSparseVectors() + i)
-            ->Paths(queries->GetPaths() + i)
-            ->Owner(false);
+        auto query = get_one_query(queries, i);
         for (auto j = 0; j < gt_topK; ++j) {
             auto id = gts->GetIds()[i * gt_topK + j];
             auto dist = gts->GetDistances()[i * gt_topK + j];
@@ -816,13 +788,7 @@ TestIndex::TestBatchCalcDistanceById(const IndexPtr& index,
     auto gts = dataset->ground_truth_;
     auto gt_topK = dataset->top_k;
     for (auto i = 0; i < query_count; ++i) {
-        auto query = vsag::Dataset::Make();
-        query->NumElements(1)
-            ->Dim(dim)
-            ->Float32Vectors(queries->GetFloat32Vectors() + i * dim)
-            ->SparseVectors(queries->GetSparseVectors() + i)
-            ->Paths(queries->GetPaths() + i)
-            ->Owner(false);
+        auto query = get_one_query(queries, i);
         tl::expected<DatasetPtr, vsag::Error> result;
         if (is_sparse) {
             result = index->CalDistanceById(query, gts->GetIds() + (i * gt_topK), gt_topK);
@@ -928,13 +894,7 @@ TestIndex::TestSerializeFile(const IndexPtr& index_from,
     auto dim = queries->GetDim();
     auto topk = 10;
     for (auto i = 0; i < query_count; ++i) {
-        auto query = vsag::Dataset::Make();
-        query->NumElements(1)
-            ->Dim(dim)
-            ->Paths(queries->GetPaths() + i)
-            ->SparseVectors(queries->GetSparseVectors() + i)
-            ->Float32Vectors(queries->GetFloat32Vectors() + i * dim)
-            ->Owner(false);
+        auto query = get_one_query(queries, i);
         auto res_from = index_from->KnnSearch(query, topk, search_param);
         auto res_to = index_to->KnnSearch(query, topk, search_param);
         REQUIRE(res_from.has_value());
@@ -1020,13 +980,7 @@ TestIndex::TestSerializeBinarySet(const IndexPtr& index_from,
     auto dim = queries->GetDim();
     auto topk = 10;
     for (auto i = 0; i < query_count; ++i) {
-        auto query = vsag::Dataset::Make();
-        query->NumElements(1)
-            ->Dim(dim)
-            ->Paths(queries->GetPaths() + i)
-            ->SparseVectors(queries->GetSparseVectors() + i)
-            ->Float32Vectors(queries->GetFloat32Vectors() + i * dim)
-            ->Owner(false);
+        auto query = get_one_query(queries, i);
         auto res_from = index_from->KnnSearch(query, topk, search_param);
         auto res_to = index_to->KnnSearch(query, topk, search_param);
         REQUIRE(res_from.has_value());
@@ -1068,13 +1022,7 @@ TestIndex::TestSerializeReaderSet(const IndexPtr& index_from,
     auto dim = queries->GetDim();
     auto topk = 10;
     for (auto i = 0; i < query_count; ++i) {
-        auto query = vsag::Dataset::Make();
-        query->NumElements(1)
-            ->Dim(dim)
-            ->Paths(queries->GetPaths() + i)
-            ->SparseVectors(queries->GetSparseVectors() + i)
-            ->Float32Vectors(queries->GetFloat32Vectors() + i * dim)
-            ->Owner(false);
+        auto query = get_one_query(queries, i);
         auto res_from = index_from->KnnSearch(query, topk, search_param);
         auto res_to = index_to->KnnSearch(query, topk, search_param);
         REQUIRE(res_from.has_value());
@@ -1120,13 +1068,7 @@ TestIndex::TestSerializeWriteFunc(const IndexPtr& index_from,
     auto dim = queries->GetDim();
     auto topk = 10;
     for (auto i = 0; i < query_count; ++i) {
-        auto query = vsag::Dataset::Make();
-        query->NumElements(1)
-            ->Dim(dim)
-            ->Paths(queries->GetPaths() + i)
-            ->SparseVectors(queries->GetSparseVectors() + i)
-            ->Float32Vectors(queries->GetFloat32Vectors() + i * dim)
-            ->Owner(false);
+        auto query = get_one_query(queries, i);
         auto res_from = index_from->KnnSearch(query, topk, search_param);
         auto res_to = index_to->KnnSearch(query, topk, search_param);
         REQUIRE(res_from.has_value());
@@ -1279,13 +1221,7 @@ TestIndex::TestConcurrentKnnSearch(const TestIndex::IndexPtr& index,
     fixtures::ThreadPool pool(5);
 
     auto func = [&](uint64_t i) -> RetType {
-        auto query = vsag::Dataset::Make();
-        query->NumElements(1)
-            ->Dim(dim)
-            ->Paths(queries->GetPaths() + i)
-            ->Float32Vectors(queries->GetFloat32Vectors() + i * dim)
-            ->SparseVectors(queries->GetSparseVectors() + i)
-            ->Owner(false);
+        auto query = get_one_query(queries, i);
         auto res = index->KnnSearch(query, topk, search_param);
         return {res, i};
     };
@@ -1769,12 +1705,7 @@ TestIndex::TestKnnSearchExFilter(const IndexPtr& index,
         dataset->filter_function_, dataset->ex_filter_function_, dataset->valid_ratio_);
     for (auto i = 0; i < query_count; ++i) {
         auto query_recall = 0.0f;
-        auto query = vsag::Dataset::Make();
-        query->NumElements(1)
-            ->Dim(dim)
-            ->Float32Vectors(queries->GetFloat32Vectors() + i * dim)
-            ->Paths(queries->GetPaths() + i)
-            ->Owner(false);
+        auto query = get_one_query(queries, i);
         auto res = index->KnnSearch(query, topk, search_param, filter);
         if (not expected_success) {
             if (res.has_value()) {
@@ -1826,13 +1757,7 @@ TestIndex::TestClone(const TestIndex::IndexPtr& index,
     auto dim = queries->GetDim();
     auto topk = 10;
     for (auto i = 0; i < query_count; ++i) {
-        auto query = vsag::Dataset::Make();
-        query->NumElements(1)
-            ->Dim(dim)
-            ->Paths(queries->GetPaths() + i)
-            ->SparseVectors(queries->GetSparseVectors() + i)
-            ->Float32Vectors(queries->GetFloat32Vectors() + i * dim)
-            ->Owner(false);
+        auto query = get_one_query(queries, i);
         auto res_from = index->KnnSearch(query, topk, search_param);
         auto res_to = index_clone->KnnSearch(query, topk, search_param);
         REQUIRE(res_from.has_value());
@@ -1877,13 +1802,7 @@ TestIndex::TestExportModel(const TestIndex::IndexPtr& index,
     float recall2 = 0.0F;
     auto topk = gt_topK;
     for (auto i = 0; i < query_count; ++i) {
-        auto query = vsag::Dataset::Make();
-        query->NumElements(1)
-            ->Dim(dim)
-            ->Paths(queries->GetPaths() + i)
-            ->SparseVectors(queries->GetSparseVectors() + i)
-            ->Float32Vectors(queries->GetFloat32Vectors() + i * dim)
-            ->Owner(false);
+        auto query = get_one_query(queries, i);
         auto res1 = index->KnnSearch(query, topk, search_param);
         REQUIRE(res1.has_value());
         auto result1 = res1.value()->GetIds();
