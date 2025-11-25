@@ -35,6 +35,9 @@ namespace vsag {
 class IndexNode;
 using SearchFunc = std::function<DistHeapPtr(const IndexNode* node, const VisitedListPtr& vl)>;
 
+std::vector<std::string>
+split(const std::string& str, char delimiter);
+
 class IndexNode {
 public:
     IndexNode(IndexCommonParam* common_param, GraphInterfaceParamPtr graph_param);
@@ -45,8 +48,11 @@ public:
     void
     InitGraph();
 
-    DistHeapPtr
-    SearchGraph(const SearchFunc& search_func, const VisitedListPtr& vl) const;
+    void
+    SearchGraph(const SearchFunc& search_func,
+                const VisitedListPtr& vl,
+                const DistHeapPtr& search_result,
+                int64_t ef_search) const;
 
     void
     AddChild(const std::string& key);
@@ -154,7 +160,10 @@ private:
     resize(int64_t new_max_capacity);
 
     DatasetPtr
-    search_impl(const DatasetPtr& query, int64_t limit, const SearchFunc& search_func) const;
+    search_impl(const DatasetPtr& query,
+                int64_t limit,
+                const SearchFunc& search_func,
+                int64_t ef_search) const;
 
     bool
     is_update_entry_point(uint64_t total_count) {
@@ -170,6 +179,9 @@ private:
     add_one_point(const std::shared_ptr<IndexNode>& node,
                   InnerIdType inner_id,
                   const float* vector);
+
+    static std::vector<std::vector<std::string>>
+    parse_path(const std::string& path);
 
 private:
     IndexCommonParam common_param_;

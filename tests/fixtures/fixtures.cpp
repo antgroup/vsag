@@ -180,27 +180,27 @@ create_random_string(bool is_full) {
         selected_levels.push_back(level1[distr(mt) % level1.size()]);
         selected_levels.push_back(level2[distr(mt) % level2.size()]);
         selected_levels.push_back(level3[distr(mt) % level3.size()]);
+        return fmt::to_string(fmt::join(selected_levels, "/"));
     } else {
         std::uniform_int_distribution<> dist(1, 3);
-        int num_levels = dist(mt);
-
-        if (num_levels >= 1) {
-            selected_levels.push_back(level1[distr(mt) % level1.size()]);
+        int num_path = dist(mt);
+        std::vector<std::string> paths;
+        for (int i = 0; i < num_path; ++i) {
+            selected_levels.clear();
+            int num_levels = dist(mt);
+            if (num_levels >= 1) {
+                selected_levels.push_back(level1[distr(mt) % level1.size()]);
+            }
+            if (num_levels >= 2) {
+                selected_levels.push_back(level2[distr(mt) % level2.size()]);
+            }
+            if (num_levels == 3) {
+                selected_levels.push_back(level3[distr(mt) % level3.size()]);
+            }
+            paths.push_back(fmt::to_string(fmt::join(selected_levels, "/")));
         }
-        if (num_levels >= 2) {
-            selected_levels.push_back(level2[distr(mt) % level2.size()]);
-        }
-        if (num_levels == 3) {
-            selected_levels.push_back(level3[distr(mt) % level3.size()]);
-        }
+        return fmt::to_string(fmt::join(paths, "|"));
     }
-
-    std::string random_string = selected_levels.empty() ? "" : selected_levels[0];
-    for (size_t i = 1; i < selected_levels.size(); ++i) {
-        random_string += "/" + selected_levels[i];
-    }
-
-    return random_string;
 }
 
 std::vector<float>

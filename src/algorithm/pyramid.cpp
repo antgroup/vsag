@@ -24,33 +24,15 @@
 #include "storage/serialization.h"
 #include "utils/slow_task_timer.h"
 #include "utils/util_functions.h"
-
 namespace vsag {
 
 std::vector<std::string>
 split(const std::string& str, char delimiter) {
-    std::vector<std::string> tokens;
-    size_t start = 0;
-    size_t end = str.find(delimiter);
-    if (str.empty()) {
-        throw std::runtime_error("fail to parse empty path");
-    }
-
-    while (end != std::string::npos) {
-        std::string token = str.substr(start, end - start);
-        if (token.empty()) {
-            throw std::runtime_error("fail to parse path:" + str);
-        }
-        tokens.push_back(str.substr(start, end - start));
-        start = end + 1;
-        end = str.find(delimiter, start);
-    }
-    std::string last_token = str.substr(start);
-    if (last_token.empty()) {
-        throw std::runtime_error("fail to parse path:" + str);
-    }
-    tokens.push_back(str.substr(start, end - start));
-    return tokens;
+    auto vec = split_string(str, delimiter);
+    vec.erase(
+        std::remove_if(vec.begin(), vec.end(), [](const std::string& s) { return s.empty(); }),
+        vec.end());
+    return vec;
 }
 
 IndexNode::IndexNode(IndexCommonParam* common_param, GraphInterfaceParamPtr graph_param)
@@ -149,23 +131,27 @@ IndexNode::InitGraph() {
     graph_ = GraphInterface::MakeInstance(graph_param_, *common_param_);
 }
 
-DistHeapPtr
-IndexNode::SearchGraph(const SearchFunc& search_func, const VisitedListPtr& vl) const {
+void
+IndexNode::SearchGraph(const SearchFunc& search_func,
+                       const VisitedListPtr& vl,
+                       const DistHeapPtr& search_result,
+                       int64_t ef_search) const {
     if (graph_ != nullptr && graph_->TotalCount() > 0) {
-        return search_func(this, vl);
+        auto self_search_result = search_func(this, vl);
+        while (not self_search_result->Empty()) {
+            auto result = self_search_result->Top();
+            self_search_result->Pop();
+            search_result->Push(result.first, result.second);
+            if (search_result->Size() > ef_search) {
+                search_result->Pop();
+            }
+        }
+        return;
     }
-    auto search_result =
-        std::make_shared<StandardHeap<true, false>>(common_param_->allocator_.get(), -1);
 
     for (const auto& [key, node] : children_) {
-        DistHeapPtr child_search_result = node->SearchGraph(search_func, vl);
-        while (not child_search_result->Empty()) {
-            auto result = child_search_result->Top();
-            child_search_result->Pop();
-            search_result->Push(result.first, result.second);
-        }
+        node->SearchGraph(search_func, vl, search_result, ef_search);
     }
-    return search_result;
 }
 
 std::vector<int64_t>
@@ -222,7 +208,7 @@ Pyramid::KnnSearch(const DatasetPtr& query,
             node->graph_, base_codes_, vl, query->GetFloat32Vectors(), search_param);
         return results;
     };
-    return this->search_impl(query, k, search_func);
+    return this->search_impl(query, k, search_func, parsed_param.ef_search);
 }
 
 DatasetPtr
@@ -248,27 +234,47 @@ Pyramid::RangeSearch(const DatasetPtr& query,
         return results;
     };
     int64_t final_limit = limited_size == -1 ? std::numeric_limits<int64_t>::max() : limited_size;
-    return this->search_impl(query, final_limit, search_func);
+    return this->search_impl(query, final_limit, search_func, parsed_param.ef_search);
 }
 
 DatasetPtr
-Pyramid::search_impl(const DatasetPtr& query, int64_t limit, const SearchFunc& search_func) const {
-    const auto* path = query->GetPaths();
-    CHECK_ARGUMENT(path != nullptr, "path is required");
+Pyramid::search_impl(const DatasetPtr& query,
+                     int64_t limit,
+                     const SearchFunc& search_func,
+                     int64_t ef_search) const {
+    const auto* query_path = query->GetPaths();
+    CHECK_ARGUMENT(query_path != nullptr || root_->graph_ != nullptr,  // NOLINT
+                   "query_path is required when level0 is not built");
     CHECK_ARGUMENT(query->GetFloat32Vectors() != nullptr, "query vectors is required");
-    std::string current_path = path[0];
-    auto path_slices = split(current_path, PART_SLASH);
-    std::shared_ptr<IndexNode> node = root_;
-    for (auto& path_slice : path_slices) {
-        node = node->GetChild(path_slice, false);
-        if (node == nullptr) {
-            return DatasetImpl::MakeEmptyDataset();
-        }
-    }
+
+    auto search_result = std::make_shared<StandardHeap<true, false>>(allocator_, -1);
 
     auto vl = pool_->TakeOne();
-    auto search_result = node->SearchGraph(search_func, vl);
+    if (query_path != nullptr) {
+        const std::string& current_path = query_path[0];
+        auto parsed_path = parse_path(current_path);
+        for (const auto& one_path : parsed_path) {
+            std::shared_ptr<IndexNode> node = root_;
+            bool valid = true;
+            for (const auto& item : one_path) {
+                node = node->GetChild(item, false);
+                if (node == nullptr) {
+                    valid = false;
+                    break;
+                }
+            }
+            if (valid) {
+                node->SearchGraph(search_func, vl, search_result, ef_search);
+            }
+        }
+    } else {
+        root_->SearchGraph(search_func, vl, search_result, ef_search);
+    }
     pool_->ReturnOne(vl);
+
+    if (search_result->Empty()) {
+        return DatasetImpl::MakeEmptyDataset();
+    }
 
     while (search_result->Size() > limit) {
         search_result->Pop();
@@ -595,6 +601,17 @@ Pyramid::add_one_point(const std::shared_ptr<IndexNode>& node,
             node->entry_point_ = inner_id;
         }
     }
+}
+
+std::vector<std::vector<std::string>>
+Pyramid::parse_path(const std::string& path) {
+    auto multi_paths = split(path, PART_BAR);
+    std::vector<std::vector<std::string>> parsed_paths;
+    parsed_paths.reserve(multi_paths.size());
+    for (const auto& single_path : multi_paths) {
+        parsed_paths.push_back(split(single_path, PART_SLASH));
+    }
+    return parsed_paths;
 }
 
 }  // namespace vsag
