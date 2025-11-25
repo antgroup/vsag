@@ -39,10 +39,6 @@ BruteForce::BruteForce(const BruteForceParameterPtr& param, const IndexCommonPar
     auto increase_count = Options::Instance().block_size_limit() / code_size;
     this->resize_increase_count_bit_ = std::max(
         DEFAULT_RESIZE_BIT, static_cast<uint64_t>(log2(static_cast<double>(increase_count))));
-    this->build_pool_ = common_param.thread_pool_;
-    if (this->build_pool_ == nullptr) {
-        this->build_pool_ = SafeThreadPool::FactoryDefaultThreadPool();
-    }
     this->use_attribute_filter_ = param->use_attribute_filter;
     this->has_raw_vector_ = true;
 }
@@ -446,7 +442,7 @@ static const std::string BRUTE_FORCE_PARAMS_TEMPLATE =
             "nbits": 8,
             "{HOLD_MOLDS}": false
         },
-        "{BUILD_THREAD_COUNT_KEY}": 10,
+        "{BUILD_THREAD_COUNT_KEY}": 1,
         "{USE_ATTRIBUTE_FILTER_KEY}": false,
         "{ATTR_PARAMS_KEY}": {
             "{ATTR_HAS_BUCKETS_KEY}": true
@@ -469,6 +465,12 @@ BruteForce::CheckAndMappingExternalParam(const JsonType& external_param,
             {
                 IO_PARAMS_KEY,
                 TYPE_KEY,
+            },
+        },
+        {
+            BRUTE_FORCE_THREAD_COUNT,
+            {
+                BUILD_THREAD_COUNT_KEY,
             },
         },
         {
