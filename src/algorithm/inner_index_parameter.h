@@ -46,7 +46,7 @@ public:
 
     bool use_attribute_filter{false};
 
-    uint64_t build_thread_count{100};
+    uint64_t build_thread_count{1};
 
     bool store_raw_vector{false};
     FlattenInterfaceParamPtr raw_vector_param{nullptr};

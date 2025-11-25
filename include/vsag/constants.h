@@ -183,6 +183,7 @@ extern const char* const RAW_VECTOR_FILE_PATH;
 
 extern const char* const BRUTE_FORCE_QUANTIZATION_TYPE;
 extern const char* const BRUTE_FORCE_IO_TYPE;
+extern const char* const BRUTE_FORCE_THREAD_COUNT;
 
 extern const char* const IVF_USE_RESIDUAL;
 extern const char* const IVF_USE_REORDER;
