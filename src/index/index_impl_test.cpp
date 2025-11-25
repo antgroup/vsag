@@ -114,32 +114,27 @@ TEST_CASE("index empty input test", "[ut][index_impl]") {
     vsag::BinarySet binary_set;
 
     auto result_build = index->Build(dataset);
-    REQUIRE_FALSE(result_build.has_value());
-    REQUIRE(result_build.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+    REQUIRE(result_build.has_value());
+    REQUIRE(result_build.value().size() == 0);
 
     auto result_train = index->Train(dataset);
-    REQUIRE_FALSE(result_train.has_value());
-    REQUIRE(result_train.error().type == vsag::ErrorType::INVALID_ARGUMENT);
-
-    auto result_continue_build = index->ContinueBuild(dataset, binary_set);
-    REQUIRE_FALSE(result_continue_build.has_value());
-    REQUIRE(result_continue_build.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+    REQUIRE(result_train.has_value());
 
     auto result_add = index->Add(dataset);
-    REQUIRE_FALSE(result_add.has_value());
-    REQUIRE(result_add.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+    REQUIRE(result_add.has_value());
+    REQUIRE(result_add.value().size() == 0);
 
     auto result_update_vector = index->UpdateVector(0, dataset);
-    REQUIRE_FALSE(result_update_vector.has_value());
-    REQUIRE(result_update_vector.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+    REQUIRE(result_update_vector.has_value());
+    REQUIRE(result_update_vector.value() == false);
 
     auto result_update_extrainfo = index->UpdateExtraInfo(dataset);
-    REQUIRE_FALSE(result_update_extrainfo.has_value());
-    REQUIRE(result_update_extrainfo.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+    REQUIRE(result_update_extrainfo.has_value());
+    REQUIRE(result_update_extrainfo.value() == false);
 
     auto result_feedback = index->Feedback(dataset, 0, "");
-    REQUIRE_FALSE(result_feedback.has_value());
-    REQUIRE(result_feedback.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+    REQUIRE(result_feedback.has_value());
+    REQUIRE(result_feedback.value() == 0);
 
     // test search empty dataset
     int64_t k = 0;
@@ -154,38 +149,38 @@ TEST_CASE("index empty input test", "[ut][index_impl]") {
     vsag::SearchParam search_param(true, parameters, filter_ptr, nullptr);
 
     auto search_result = index->KnnSearch(query, k, parameters, invalid);
-    REQUIRE_FALSE(search_result.has_value());
-    REQUIRE(search_result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+    REQUIRE(search_result.has_value());
+    REQUIRE(search_result.value()->GetDim() == 0);
 
     search_result = index->KnnSearch(query, k, parameters, filter);
-    REQUIRE_FALSE(search_result.has_value());
-    REQUIRE(search_result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+    REQUIRE(search_result.has_value());
+    REQUIRE(search_result.value()->GetDim() == 0);
 
     search_result = index->KnnSearch(query, k, parameters, filter_ptr);
-    REQUIRE_FALSE(search_result.has_value());
-    REQUIRE(search_result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+    REQUIRE(search_result.has_value());
+    REQUIRE(search_result.value()->GetDim() == 0);
 
     search_result = index->KnnSearch(query, k, search_param);
-    REQUIRE_FALSE(search_result.has_value());
-    REQUIRE(search_result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+    REQUIRE(search_result.has_value());
+    REQUIRE(search_result.value()->GetDim() == 0);
 
     search_result = index->KnnSearch(query, k, parameters, filter_ptr, iter_ctx, true);
-    REQUIRE_FALSE(search_result.has_value());
-    REQUIRE(search_result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+    REQUIRE(search_result.has_value());
+    REQUIRE(search_result.value()->GetDim() == 0);
 
     search_result = index->RangeSearch(query, radius, parameters, limited_size);
-    REQUIRE_FALSE(search_result.has_value());
-    REQUIRE(search_result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+    REQUIRE(search_result.has_value());
+    REQUIRE(search_result.value()->GetDim() == 0);
 
     search_result = index->RangeSearch(query, radius, parameters, invalid, limited_size);
-    REQUIRE_FALSE(search_result.has_value());
-    REQUIRE(search_result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+    REQUIRE(search_result.has_value());
+    REQUIRE(search_result.value()->GetDim() == 0);
 
     search_result = index->RangeSearch(query, radius, parameters, filter, limited_size);
-    REQUIRE_FALSE(search_result.has_value());
-    REQUIRE(search_result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+    REQUIRE(search_result.has_value());
+    REQUIRE(search_result.value()->GetDim() == 0);
 
     search_result = index->RangeSearch(query, radius, parameters, filter_ptr, limited_size);
-    REQUIRE_FALSE(search_result.has_value());
-    REQUIRE(search_result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+    REQUIRE(search_result.has_value());
+    REQUIRE(search_result.value()->GetDim() == 0);
 }
