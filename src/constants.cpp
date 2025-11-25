@@ -171,6 +171,7 @@ const char* const RAW_VECTOR_FILE_PATH = "raw_vector_file_path";
 
 const char* const BRUTE_FORCE_QUANTIZATION_TYPE = "quantization_type";
 const char* const BRUTE_FORCE_IO_TYPE = "io_type";
+const char* const BRUTE_FORCE_THREAD_COUNT = "thread_count";
 
 const char* const IVF_USE_RESIDUAL = "use_residual";
 const char* const IVF_USE_REORDER = "use_reorder";
