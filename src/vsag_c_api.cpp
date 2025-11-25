@@ -177,7 +177,10 @@ vsag_serialize_write_func(vsag_index_t index,
     try {
         auto* vsag_index = static_cast<VsagIndex*>(index);
         if (vsag_index != nullptr) {
-            vsag_index->index_->Serialize(write_func);
+            auto result = vsag_index->index_->Serialize(write_func);
+            if (not result.has_value()) {
+                return make_error(result.error());
+            }
         }
         return success;
     } catch (const std::exception& e) {
