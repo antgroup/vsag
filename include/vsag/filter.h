@@ -61,7 +61,7 @@ public:
       */
     [[nodiscard]] virtual float
     ValidRatio() const {
-        return 1.0f;  // (default) all vectors is valid
+        return 1.0F;  // (default) all vectors is valid
     }
 
     /**
