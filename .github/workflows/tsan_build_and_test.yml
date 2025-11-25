@@ -57,6 +57,8 @@ jobs:
         with:
           name: test_x86-${{ github.run_id }}-tsan
           path: ./build/
+      - name: Debug with SSH
+        uses: mxschmitt/action-tmate@v3
       - name: Run TSAN tests
         run: |
           echo race:libomp.so > omp.supp
