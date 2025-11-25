@@ -21,6 +21,7 @@
 #include "vsag/thread_pool.h"
 
 namespace vsag {
+
 /**
  * @class Resource
  * @brief A class for managing resources, primarily focused on memory allocation.
@@ -68,6 +69,7 @@ public:
     /// Virtual destructor for proper cleanup of derived classes.
     virtual ~Resource() = default;
 
+public:
     /**
      * @brief Retrieves the allocator associated with this resource.
      *
@@ -76,9 +78,9 @@ public:
      * @return std::shared_ptr<Allocator> A shared pointer to the allocator. If no allocator was provided,
      *                                    a default allocator will be returned.
      */
-    virtual std::shared_ptr<Allocator>
+    [[nodiscard]] virtual std::shared_ptr<Allocator>
     GetAllocator() const {
-        return this->allocator;
+        return this->allocator_;
     }
 
     /**
@@ -89,16 +91,17 @@ public:
      * @return std::shared_ptr<ThreadPool> A shared pointer to the thread pool. If no thread pool was provided,
      *                                     a null shared pointer will be returned.
      */
-    virtual std::shared_ptr<ThreadPool>
+    [[nodiscard]] virtual std::shared_ptr<ThreadPool>
     GetThreadPool() const {
-        return this->thread_pool;
+        return this->thread_pool_;
     }
 
 private:
     ///< Shared pointer to the allocator associated with this resource.
-    std::shared_ptr<Allocator> allocator;
+    std::shared_ptr<Allocator> allocator_ = nullptr;
 
     ///< Shared pointer to the thread pool associated with this resource.
-    std::shared_ptr<ThreadPool> thread_pool;
+    std::shared_ptr<ThreadPool> thread_pool_ = nullptr;
 };
+
 }  // namespace vsag
