@@ -1834,11 +1834,13 @@ HGraph::SetImmutable() {
 
 void
 HGraph::SetIO(const std::shared_ptr<Reader> reader) {
+    auto reader_param = std::make_shared<ReaderIOParameter>();
+    reader_param->reader = reader;
     if (use_reorder_) {
-        auto reader_param = std::make_shared<ReaderIOParameter>();
-        reader_param->reader = reader;
         high_precise_codes_->InitIO(reader_param);
     }
+    basic_flatten_codes_->InitIO(reader_param);
+    bottom_graph_->InitIO(reader_param);
 }
 
 [[nodiscard]] DatasetPtr
