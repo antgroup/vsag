@@ -68,7 +68,7 @@ public:
     const std::vector<T>&
     GetValue() const;
 
-    Attribute*
+    [[nodiscard]] Attribute*
     DeepCopy() const override;
 
     bool
