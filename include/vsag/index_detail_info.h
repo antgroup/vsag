@@ -18,6 +18,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+
 namespace vsag {
 
 enum class IndexDetailDataType {
@@ -37,45 +38,44 @@ public:
 
     IndexDetailInfo() = default;
 
-    explicit IndexDetailInfo(const std::string& name,
-                             const std::string& description,
-                             IndexDetailDataType type)
-        : name(name), description(description), type(type) {
+    explicit IndexDetailInfo(std::string name, std::string description, IndexDetailDataType type)
+        : name(std::move(name)), description(std::move(description)), type(type) {
     }
 };
 
 extern const char* INDEX_DETAIL_NAME_NUM_ELEMENTS;
 extern const char* INDEX_DETAIL_NAME_LABEL_TABLE;
 extern const char* INDEX_DETAIL_DATA_TYPE;
+
 class DetailData {
 public:
     virtual ~DetailData() = default;
 
-    virtual std::vector<int64_t>
+    [[nodiscard]] virtual std::vector<int64_t>
     GetData1DArrayInt64() = 0;
 
-    virtual const std::vector<int64_t>&
+    [[nodiscard]] virtual const std::vector<int64_t>&
     GetData1DArrayInt64() const = 0;
 
-    virtual std::vector<std::vector<int64_t>>
+    [[nodiscard]] virtual std::vector<std::vector<int64_t>>
     GetData2DArrayInt64() = 0;
 
-    virtual const std::vector<std::vector<int64_t>>&
+    [[nodiscard]] virtual const std::vector<std::vector<int64_t>>&
     GetData2DArrayInt64() const = 0;
 
-    virtual std::string
+    [[nodiscard]] virtual std::string
     GetDataScalarString() = 0;
 
-    virtual const std::string&
+    [[nodiscard]] virtual const std::string&
     GetDataScalarString() const = 0;
 
-    virtual bool
+    [[nodiscard]] virtual bool
     GetDataScalarBool() = 0;
 
-    virtual int64_t
+    [[nodiscard]] virtual int64_t
     GetDataScalarInt64() = 0;
 
-    virtual double
+    [[nodiscard]] virtual double
     GetDataScalarDouble() = 0;
 };
 

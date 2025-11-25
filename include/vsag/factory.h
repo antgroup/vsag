@@ -24,50 +24,35 @@ namespace vsag {
 
 class Factory {
 public:
-    /*
-     *  HNSW.parameters:
-     *    - dtype: string, required, one of [float32]
-     *    - metric_type: string, required, one of [l2, ip]
-     *    - dim: integer, required
-     *    - hnsw.max_degree: integer, required
-     *    - hnsw.ef_construction: integer, required
-     *  e.g.,
-     *  {
-     *      "dtype": "float32",
-     *      "metric_type": "l2",
-     *      "dim": 128,
-     *      "hnsw": {
-     *          "max_degree": 16,
-     *          "ef_construction": 200
-     *      }
-     *  }
+    /**
+     * @brief Creates an index with the specified name and parameters.
      *
-     *  DiskANN.parameters:
-     *    - dtype: string, required, one of [float32]
-     *    - metric_type: string, required, one of [l2, ip]
-     *    - dim: integer, required
-     *    - diskann.max_degree: integer, required
-     *    - diskann.ef_construction: integer, required
-     *    - diskann.pq_dims: integer, required
-     *    - diskann.pq_sample_rate: floating number, required, in range (0.0, 1.0]
-     *  e.g.,
-     *  {
-     *      "dtype": "float32",
-     *      "metric_type": "l2",
-     *      "dim": 128,
-     *      "diskann": {
-     *          "max_degree": 16,
-     *          "ef_construction": 200,
-     *          "pq_dims": 64,
-     *          "pq_sample_rate": 0.5
-     *      }
-     *  }
+     * This function attempts to create an index using the provided `name` and `parameters`.
+     * It returns a result which may either contain a shared pointer to the created `Index`
+     * or an `Error` object indicating failure conditions.
+     *
+     * @param name The name assigned to the index type, like "hnsw", "diskann", "hgraph" ...
+     * @param parameters A string containing configuration parameters for the index. For details on the parameters,
+     *  please refer to the example codes in: https://github.com/antgroup/vsag/tree/main/examples/cpp
+     * @param allocator An optional allocator for memory management. If not provided, a default allocator will be used.
+     * @return tl::expected<std::shared_ptr<Index>, Error> A result containing either the created index or an error.
      */
     static tl::expected<std::shared_ptr<Index>, Error>
     CreateIndex(const std::string& name,
                 const std::string& parameters,
                 Allocator* allocator = nullptr);
 
+    /**
+     * @brief Creates a local file reader for the specified file.
+     *
+     * This function creates a reader that can read data from a local file,
+     * starting from a specified base offset and reading a defined size.
+     *
+     * @param filename The path to the local file to be read.
+     * @param base_offset The offset in the file from which to start reading.
+     * @param size The number of bytes to read from the file.
+     * @return std::shared_ptr<Reader> A shared pointer to the created local file reader.
+     */
     static std::shared_ptr<Reader>
     CreateLocalFileReader(const std::string& filename, int64_t base_offset, int64_t size);
 

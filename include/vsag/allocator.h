@@ -28,6 +28,9 @@ namespace vsag {
  */
 class Allocator {
 public:
+    virtual ~Allocator() = default;
+
+public:
     /**
      * @brief Returns the name of the allocator.
      *
@@ -115,9 +118,6 @@ public:
             Deallocate(static_cast<void*>(p));
         }
     }
-
-public:
-    virtual ~Allocator() = default;
 };
 
 }  // namespace vsag

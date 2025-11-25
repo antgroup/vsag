@@ -47,6 +47,9 @@ enum class IOErrorCode {
  */
 using CallBack = std::function<void(IOErrorCode code, const std::string& message)>;
 
+class Reader;
+using ReaderPtr = std::shared_ptr<Reader>;
+
 /**
  * @class Reader
  * @brief An abstract base class for reading data from various sources.
@@ -143,6 +146,7 @@ public:
     ReaderSet() = default;
     ~ReaderSet() = default;
 
+public:
     /**
      * @brief Associates a `Reader` with a name and stores it in the set.
      *
@@ -153,7 +157,7 @@ public:
      * @param reader Shared pointer to the `Reader` to store.
      */
     void
-    Set(const std::string& name, std::shared_ptr<Reader> reader) {
+    Set(const std::string& name, ReaderPtr reader) {
         data_[name] = std::move(reader);
     }
 
@@ -166,7 +170,7 @@ public:
      * @param name The name associated with the `Reader` to retrieve.
      * @return std::shared_ptr<Reader> Shared pointer to the `Reader` associated with the name, or `nullptr`.
      */
-    std::shared_ptr<Reader>
+    ReaderPtr
     Get(const std::string& name) const {
         if (data_.find(name) == data_.end()) {
             return nullptr;
@@ -210,4 +214,5 @@ private:
     ///< Map storing `Reader` objects associated with names.
     std::unordered_map<std::string, std::shared_ptr<Reader>> data_;
 };
+
 }  // namespace vsag

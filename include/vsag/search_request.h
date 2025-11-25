@@ -13,13 +13,17 @@
 // limitations under the License.
 
 #pragma once
+
 #include <cstdint>
 #include <string>
 
+#include "vsag/bitset.h"
 #include "vsag/dataset.h"
 #include "vsag/filter.h"
+#include "vsag/iterator_context.h"
 
 namespace vsag {
+
 enum class SearchMode {
     KNN_SEARCH = 1,
     RANGE_SEARCH = 2,

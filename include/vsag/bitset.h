@@ -75,7 +75,7 @@ public:
      * @param pos The position of the bit.
      * @return true If the bit is set (true), false otherwise.
      */
-    virtual bool
+    [[nodiscard]] virtual bool
     Test(int64_t pos) const = 0;
 
     /**
@@ -83,7 +83,7 @@ public:
      *
      * @return uint64_t The number of bits set to true.
      */
-    virtual uint64_t
+    [[nodiscard]] virtual uint64_t
     Count() = 0;
 
 public:
