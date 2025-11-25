@@ -439,6 +439,11 @@ public:
         return this->inner_index_->GetMemoryUsageDetail();
     }
 
+    [[nodiscard]] uint64_t
+    EstimateMemory(uint64_t num_elements) const override {
+        return this->inner_index_->EstimateMemory(num_elements);
+    }
+
     [[nodiscard]] int64_t
     GetEstimateBuildMemory(const int64_t num_elements) const override {
         return this->inner_index_->GetEstimateBuildMemory(num_elements);
