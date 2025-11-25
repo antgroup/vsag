@@ -16,8 +16,10 @@
 #include <cstdint>
 #include <string>
 
+#include "vsag/bitset.h"
 #include "vsag/dataset.h"
 #include "vsag/filter.h"
+#include "vsag/iterator_context.h"
 
 namespace vsag {
 enum class SearchMode {

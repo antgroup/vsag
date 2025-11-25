@@ -75,7 +75,7 @@ public:
      * @param pos The position of the bit.
      * @return true If the bit is set (true), false otherwise.
      */
-    virtual bool
+    [[nodiscard]] virtual bool
     Test(int64_t pos) const = 0;
 
     /**
