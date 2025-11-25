@@ -27,6 +27,9 @@ namespace vsag {
  */
 class Logger {
 public:
+    virtual ~Logger() = default;
+
+public:
     /**
      * @enum Level
      * @brief Enumeration of logging levels.
@@ -120,9 +123,6 @@ public:
      */
     virtual void
     Critical(const std::string& msg) = 0;
-
-public:
-    virtual ~Logger() = default;
 };
 
 }  // namespace vsag

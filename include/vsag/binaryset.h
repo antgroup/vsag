@@ -63,10 +63,12 @@ public:
      */
     Binary
     Get(const std::string& name) const {
-        if (data_.find(name) == data_.end()) {
-            return Binary();
+        auto it = data_.find(name);
+        if (it == data_.end()) {
+            return {nullptr, 0};
         }
-        return data_.at(name);
+
+        return it->second;
     }
 
     /**
