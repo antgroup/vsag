@@ -23,6 +23,7 @@
 #include "graph_interface_parameter.h"
 #include "index_common_param.h"
 #include "inner_string_params.h"
+#include "io/io_parameter.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
 #include "typing.h"
@@ -136,6 +137,10 @@ public:
     SetMaxCapacity(InnerIdType capacity) {
         this->max_capacity_ = std::max(capacity, this->total_count_.load());
     };
+
+    virtual void
+    InitIO(const IOParamPtr& io_param) {
+    }
 
 public:
     InnerIdType max_capacity_{100};
