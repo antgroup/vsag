@@ -203,6 +203,12 @@ Pyramid::KnnSearch(const DatasetPtr& query,
     search_param.ef = parsed_param.ef_search;
     search_param.topk = k;
     search_param.search_mode = KNN_SEARCH;
+
+    if (parsed_param.enable_time_record) {
+        search_param.time_cost = std::make_shared<Timer>();
+        search_param.time_cost->SetThreshold(parsed_param.timeout_ms);
+    }
+
     if (filter != nullptr) {
         search_param.is_inner_id_allowed =
             std::make_shared<InnerIdWrapperFilter>(filter, *label_table_);
@@ -238,6 +244,12 @@ Pyramid::RangeSearch(const DatasetPtr& query,
     search_param.ef = parsed_param.ef_search;
     search_param.radius = radius;
     search_param.search_mode = RANGE_SEARCH;
+
+    if (parsed_param.enable_time_record) {
+        search_param.time_cost = std::make_shared<Timer>();
+        search_param.time_cost->SetThreshold(parsed_param.timeout_ms);
+    }
+
     if (filter != nullptr) {
         search_param.is_inner_id_allowed =
             std::make_shared<InnerIdWrapperFilter>(filter, *label_table_);

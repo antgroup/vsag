@@ -37,6 +37,9 @@ public:
                                          int64_t dim,
                                          const PyramidParam& param);
 
+    static std::string
+    GeneratePyramidSearchParametersString(int64_t ef_search, double timeout_ms = 100);
+
     static TestDatasetPool pool;
 
     static std::vector<int> dims;
@@ -48,7 +51,8 @@ public:
     constexpr static const char* search_param_tmp = R"(
         {{
             "pyramid": {{
-                "ef_search": 100
+                "ef_search": {},
+                "timeout_ms": {}
             }}
         }})";
 };
@@ -88,6 +92,12 @@ PyramidTestIndex::GeneratePyramidBuildParametersString(const std::string& metric
                                             param.use_reorder);
     return build_parameters_str;
 }
+
+std::string
+PyramidTestIndex::GeneratePyramidSearchParametersString(int64_t ef_search, double timeout_ms) {
+    return fmt::format(search_param_tmp, ef_search, timeout_ms);
+}
+
 }  // namespace fixtures
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
@@ -103,7 +113,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
         pyramid_param.precise_quantization_type = "fp32";
     }
     const std::string name = "pyramid";
-    auto search_param = fmt::format(search_param_tmp, 20);
+    auto search_param = GeneratePyramidSearchParametersString(100);
     for (auto& dim : dims) {
         auto param = GeneratePyramidBuildParametersString(metric_type, dim, pyramid_param);
         auto index = TestFactory(name, param, true);
@@ -123,7 +133,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex, "Pyramid Add Test", "[f
     PyramidParam pyramid_param;
     pyramid_param.no_build_levels = {0, 1, 2};
     const std::string name = "pyramid";
-    auto search_param = fmt::format(search_param_tmp, 20);
+    auto search_param = GeneratePyramidSearchParametersString(100);
     for (auto& dim : dims) {
         auto param = GeneratePyramidBuildParametersString(metric_type, dim, pyramid_param);
         auto index = TestFactory(name, param, true);
@@ -142,7 +152,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
     auto metric_type = GENERATE("l2");
     std::string base_quantization_str = GENERATE("fp32");
     const std::string name = "pyramid";
-    auto search_param = fmt::format(search_param_tmp, 100);
+    auto search_param = GeneratePyramidSearchParametersString(100);
     PyramidParam pyramid_param;
     for (auto& dim : dims) {
         for (const auto& level : levels) {
@@ -163,7 +173,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex, "Pyramid No Path Test",
     auto metric_type = GENERATE("l2");
     std::string base_quantization_str = GENERATE("fp32");
     const std::string name = "pyramid";
-    auto search_param = fmt::format(search_param_tmp, 100);
+    auto search_param = GeneratePyramidSearchParametersString(100);
     PyramidParam pyramid_param;
     std::vector<std::vector<int>> tmp_levels = {{1, 2}, {0, 1, 2}};
     for (auto& dim : dims) {
@@ -199,8 +209,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
         pyramid_param.precise_quantization_type = "fp32";
     }
     const std::string name = "pyramid";
-    auto search_param = fmt::format(search_param_tmp, 20);
-
+    auto search_param = GeneratePyramidSearchParametersString(100);
     for (auto& dim : dims) {
         vsag::Options::Instance().set_block_size_limit(size);
         auto param = GeneratePyramidBuildParametersString(metric_type, dim, pyramid_param);
@@ -237,8 +246,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex, "Pyramid Clone", "[ft][
     PyramidParam pyramid_param;
     pyramid_param.no_build_levels = {0, 1, 2};
     const std::string name = "pyramid";
-    auto search_param = fmt::format(search_param_tmp, 20);
-
+    auto search_param = GeneratePyramidSearchParametersString(100);
     for (auto& dim : dims) {
         vsag::Options::Instance().set_block_size_limit(size);
         auto param = GeneratePyramidBuildParametersString(metric_type, dim, pyramid_param);
@@ -279,7 +287,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
     PyramidParam pyramid_param;
     pyramid_param.no_build_levels = {0, 1};
     const std::string name = "pyramid";
-    auto search_param = fmt::format(search_param_tmp, 20);
+    auto search_param = GeneratePyramidSearchParametersString(100);
     for (auto& dim : dims) {
         auto param = GeneratePyramidBuildParametersString(metric_type, dim, pyramid_param);
         auto index = TestFactory(name, param, true);
@@ -292,5 +300,36 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
         auto index = TestFactory(name, param, true);
         auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type, /*with_path=*/true);
         TestConcurrentAddSearch(index, dataset, search_param, 0.99, true);
+    }
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex, "Pyramid OverTime Test", "[ft][pyramid]") {
+    auto metric_type = GENERATE("l2");
+    PyramidParam pyramid_param;
+    pyramid_param.no_build_levels = {0, 1};
+    const std::string name = "pyramid";
+    auto search_param = GeneratePyramidSearchParametersString(100, 20);
+    for (auto& dim : dims) {
+        auto param = GeneratePyramidBuildParametersString(metric_type, dim, pyramid_param);
+        auto index = TestFactory(name, param, true);
+        auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type, /*with_path=*/true);
+        TestContinueAdd(index, dataset, true);
+        TestSearchOvertime(index, dataset, search_param);
+        auto timeout_search_param = GeneratePyramidSearchParametersString(100, 0.1);
+
+        auto query = vsag::Dataset::Make();
+        query->NumElements(1)
+            ->Dim(dim)
+            ->Float32Vectors(dataset->query_->GetFloat32Vectors())
+            ->Paths(dataset->query_->GetPaths())
+            ->Owner(false);
+        auto res = index->KnnSearch(query, 10, timeout_search_param);
+        REQUIRE(res.has_value());
+        auto result = res.value();
+        REQUIRE(result->GetStatistics() != "{}");
+        auto stats = result->GetStatistics({"is_timeout"});
+        REQUIRE(stats.size() == 1);
+        bool is_timeout = stats[0] == "true";
+        REQUIRE(is_timeout);
     }
 }

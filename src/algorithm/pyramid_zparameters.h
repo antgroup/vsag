@@ -18,6 +18,7 @@
 #include <functional>
 
 #include "algorithm/hgraph_parameter.h"
+#include "algorithm/index_search_parameter.h"
 #include "datacell/flatten_interface.h"
 #include "datacell/graph_datacell_parameter.h"
 #include "datacell/graph_interface.h"
@@ -54,7 +55,7 @@ public:
     float alpha{1.2F};
 };
 
-class PyramidSearchParameters {
+class PyramidSearchParameters : public IndexSearchParameter {
 public:
     static PyramidSearchParameters
     FromJson(const std::string& json_string);
