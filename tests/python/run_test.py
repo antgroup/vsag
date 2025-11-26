@@ -1,4 +1,3 @@
-
 # Copyright 2024-present the vsag project
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -13,15 +12,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import os
-import sys
+from test_ivf import run_ivf_test
+from test_hnsw import run_hnsw_test
+from test_hgraph import run_hgraph_test
+from test_bruteforce import run_bruteforce_test
 
-_cur_file_dir = os.path.dirname(os.path.realpath(__file__))
-sys.path.append(_cur_file_dir)
 
-from _pyvsag import *
-from ._version import __version__
+def run():
+    run_ivf_test()
+    run_hnsw_test()
+    run_hgraph_test()
+    run_bruteforce_test()
 
-import _pyvsag
-__doc__ = _pyvsag.__doc__
 
+if __name__ == "__main__":
+    run()

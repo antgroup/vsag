@@ -1,0 +1,154 @@
+name: Python Build & Test
+
+on:
+  push:
+    branches: [ "main", "0.*" ]
+  pull_request:
+    branches: [ "main", "0.*" ]
+
+jobs:
+  build_python_wheel_x86:
+    name: Python Wheel Build X86
+    runs-on: ubuntu-22.04
+    concurrency:
+      group: python_build_x86-${{ github.event.pull_request.number }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    steps:
+      - name: Free Disk Space
+        run: rm -rf /useless/hostedtoolcache
+    
+      - uses: actions/checkout@v4
+      - name: Prepare Env
+        run: sudo bash ./scripts/deps/install_deps_ubuntu.sh
+      - name: Load Cache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          max-size: "2G"
+          save: ${{ github.event_name != 'pull_request' }}
+          key: build-${{ hashFiles('./CMakeLists.txt') }}-${{ hashFiles('./.circleci/fresh_ci_cache.commit') }}
+      - name: Make Python Wheel
+        run: |
+            sudo apt update
+            sudo apt install -y python3-venv
+            export CMAKE_GENERATOR="Ninja"; make pyvsag
+      - name: Save Wheel
+        uses: actions/upload-artifact@v5
+        with:
+          path: ./wheelhouse
+          name: wheelhouse_x86-${{ github.run_id }}
+          compression-level: 1
+          retention-days: 1
+          overwrite: 'true'
+
+  build_python_wheel_aarch64:
+    name: Python Wheel Build Aarch64
+    runs-on: ubuntu-22.04-arm
+    concurrency:
+      group: python_build_aarch-${{ github.event.pull_request.number }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    steps:
+      - name: Free Disk Space
+        run: rm -rf /opt/hostedtoolcache
+      - uses: actions/checkout@v4
+      - name: Prepare Env
+        run: sudo bash ./scripts/deps/install_deps_ubuntu.sh
+      - name: Load Cache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          max-size: "2G"
+          save: ${{ github.event_name != 'pull_request' }}
+          key: build-aarch-${{ hashFiles('./CMakeLists.txt') }}-${{ hashFiles('./.circleci/fresh_ci_cache.commit') }}
+      - name: Make Python Wheel
+        run: |
+            sudo apt update
+            sudo apt install -y python3-venv
+            export CMAKE_GENERATOR="Ninja"; make pyvsag
+      - name: Save Wheel
+        uses: actions/upload-artifact@v5
+        with:
+          path: ./wheelhouse
+          name: wheelhouse_aarch64-${{ github.run_id }}
+          compression-level: 1
+          retention-days: 1
+          overwrite: 'true'
+
+  test_python_x86:
+    name: Test Python X86
+    needs: build_python_wheel_x86
+    runs-on: ubuntu-22.04
+    concurrency:
+      group: test_python_x86-${{ github.event.pull_request.number }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    steps:
+      - name: Free Disk Space
+        run: rm -rf /opt/hostedtoolcache
+      - uses: actions/checkout@v4
+    
+      - name: Prepare Env
+        run: sudo bash ./scripts/deps/install_deps_ubuntu.sh
+      - name: Download Test
+        uses: actions/download-artifact@v5
+        with:
+          name: wheelhouse_x86-${{ github.run_id }}
+          path: ./wheelhouse
+      - name: Install Python Wheel
+        run: |
+            pip3 uninstall pyvsag -y
+            pip3 install ./wheelhouse/*.whl
+            pip3 install numpy pyjson
+      - name: Run Python Test
+        run: |
+            cd ./tests/python/
+            python3 run_test.py
+
+  test_python_aarch64:
+    name: Test Python Aarch64
+    needs: build_python_wheel_aarch64
+    runs-on: ubuntu-22.04-arm
+    concurrency:
+      group: test_python_aarch64-${{ github.event.pull_request.number }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    steps:
+      - name: Free Disk Space
+        run: rm -rf /opt/hostedtoolcache
+      - uses: actions/checkout@v4
+      - name: Prepare Env
+        run: sudo bash ./scripts/deps/install_deps_ubuntu.sh
+      - name: Download Test
+        uses: actions/download-artifact@v5
+        with:
+          name: wheelhouse_aarch64-${{ github.run_id }}
+          path: ./wheelhouse
+      - name: Install Python Wheel  
+        run: |
+          pip3 uninstall pyvsag -y
+          pip3 install ./wheelhouse/*.whl
+          pip3 install numpy pyjson
+      - name: Run Python Test
+        run: |
+            cd ./tests/python/
+            python3 run_test.py
+        
+  clean_up:
+    name: Clean Up
+    needs: [ test_python_x86, test_python_aarch64 ]
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Create Empty File
+        run: touch /tmp/clean_up
+      - name: Overwrite Test Artifact X86
+        uses: actions/upload-artifact@v5
+        with:
+          path: /tmp/clean_up
+          name: wheelhouse_x86-${{ github.run_id }}
+          compression-level: 1
+          retention-days: 1
+          overwrite: 'true'
+      - name: Overwrite Test Artifact Aarch64
+        uses: actions/upload-artifact@v5
+        with:
+          path: /tmp/clean_up
+          name: wheelhouse_aarch64-${{ github.run_id }}
+          compression-level: 1
+          retention-days: 1
+          overwrite: 'true'
