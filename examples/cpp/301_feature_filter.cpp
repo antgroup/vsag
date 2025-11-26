@@ -94,7 +94,7 @@ main(int argc, char** argv) {
 
         float
         ValidRatio() const override {
-            return 0.618f;
+            return 0.618F;
         }
     };
     auto filter_object = std::make_shared<MyFilter>();

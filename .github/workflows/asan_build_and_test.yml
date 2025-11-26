@@ -158,6 +158,70 @@ jobs:
           retention-days: 3
           overwrite: 'true'
 
+  test_example_x86:
+    name: Test Example X86
+    needs: build_asan_x86
+    runs-on: ubuntu-22.04
+    container:
+      image: vsaglib/vsag:ci-x86
+      volumes:
+        - /opt:/useless
+    concurrency:
+      group: test_example_x86-${{ matrix.test_type }}-${{ github.event.pull_request.number || github.sha }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    steps:
+      - name: Free Disk Space
+        run: rm -rf /opt/hostedtoolcache
+      - uses: actions/checkout@v4
+      - name: Clean Env
+        run: rm -rf ./build
+      - name: Download Test
+        uses: actions/download-artifact@v5
+        with:
+          name: test_x86-${{ github.run_id }}
+          path: ./build
+      - name: Do Test In example
+        run: |
+          cd ./build/examples/cpp
+          for example in ./*; do
+            filename=$(basename "$example")
+            if [[ $filename =~ ^[0-9]{3} ]]; then
+              chmod +x $example
+              echo "Run $example"
+              $example
+            fi
+          done
+  
+  test_example_aarch64:
+    name: Test Example Aarch64
+    needs: build_asan_aarch64
+    runs-on: ubuntu-22.04-arm
+    concurrency:
+      group: test_example_aarch64-${{ matrix.test_type }}-${{ github.event.pull_request.number || github.sha }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    steps:
+      - name: Free Disk Space
+        run: rm -rf /opt/hostedtoolcache
+      - uses: actions/checkout@v4
+      - name: Clean Env
+        run: rm -rf ./build
+      - name: Download Test
+        uses: actions/download-artifact@v5
+        with:
+          name: test_aarch64-${{ github.run_id }}
+          path: ./build
+      - name: Do Test In example
+        run: |
+          cd ./build/examples/cpp
+          for example in ./*; do
+            filename=$(basename "$example")
+            if [[ $filename =~ ^[0-9]{3} ]]; then
+              chmod +x $example
+              echo "Run $example"
+              $example
+            fi
+          done
+
   clean_up:
     name: Clean Up
     needs: [ test_asan_x86, test_asan_aarch64 ]

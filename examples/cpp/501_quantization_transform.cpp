@@ -23,7 +23,7 @@ main(int argc, char** argv) {
 
     /******************* Prepare Base Dataset *****************/
     int64_t num_vectors = 1000;
-    int64_t dim = 960;
+    int64_t dim = 128;
     std::vector<int64_t> ids(num_vectors);
     std::vector<float> datas(num_vectors * dim);
     std::mt19937 rng(47);
@@ -46,11 +46,11 @@ main(int argc, char** argv) {
     {
         "dtype": "float32",
         "metric_type": "l2",
-        "dim": 960,
+        "dim": 128,
         "index_param": {
             "base_quantization_type": "tq",
             "tq_chain": "pca, rom, sq8_uniform",
-            "rabitq_pca_dim": 512,
+            "rabitq_pca_dim": 64,
             "max_degree": 32,
             "ef_construction": 300,
             "alpha":1.2,

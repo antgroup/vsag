@@ -78,7 +78,7 @@ main(int argc, char** argv) {
     if (auto update_status = index->UpdateVector(update_id, update_dataset, false);
         not update_status.has_value()) { /* update returns an error */
         std::cerr << "update vector failed: " << update_status.error().message << std::endl;
-        abort();
+        exit(-1);
     } else if (*update_status) { /* updated, new vector is near to the old vector */
         std::cout << "updated, new vector is near to the old vector" << std::endl;
     } else { /* not update, new vector is far away from the old vector */
@@ -88,20 +88,20 @@ main(int argc, char** argv) {
         if (auto remove = index->Remove(update_id);
             not remove.has_value()) { /* remove returns an error */
             std::cerr << "delete vector failed: " << remove.error().message << std::endl;
-            abort();
+            exit(-1);
         } else if (not *remove) { /* id not exists, should NOT happend in this example */
             std::cerr << "example error" << std::endl;
-            abort();
+            exit(-1);
         } else { /* delete vector success */
             std::cout << "delete old vector" << std::endl;
-            if (auto add = index->Add(update_dataset);
-                not add.has_value()) { /* add returns an error */
-                std::cout << "insert vector failed: " << add.error().message << std::endl;
-                abort();
+            if (auto add_result = index->Add(update_dataset);
+                not add_result.has_value()) { /* add returns an error */
+                std::cout << "insert vector failed: " << add_result.error().message << std::endl;
             } else if (
-                not add->empty()) { /* not insert, id is already exist in index, shoud NOT happen in this example */
-                std::cerr << "example error" << std::endl;
-                abort();
+                not add_result.value()
+                        .empty()) { /* not insert, id is already exist in index, shoud NOT happen in this example */
+                std::cerr << "Error: add failed, the failed id is " << add_result.value().front()
+                          << std::endl;
             } else {
                 std::cout << "insert new vector" << std::endl;
             }

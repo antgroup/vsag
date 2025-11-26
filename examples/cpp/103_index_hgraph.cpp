@@ -22,7 +22,7 @@ main(int argc, char** argv) {
     vsag::init();
 
     /******************* Prepare Base Dataset *****************/
-    int64_t num_vectors = 10000;
+    int64_t num_vectors = 1000;
     int64_t dim = 128;
     std::vector<int64_t> ids(num_vectors);
     std::vector<float> datas(num_vectors * dim);
@@ -57,6 +57,7 @@ main(int argc, char** argv) {
     )";
     vsag::Resource resource(vsag::Engine::CreateDefaultAllocator(), nullptr);
     vsag::Engine engine(&resource);
+    vsag::Options::Instance().set_block_size_limit(2 * 1024 * 1024);
     auto index = engine.CreateIndex("hgraph", hgraph_build_parameters).value();
 
     /******************* Build HGraph Index *****************/
