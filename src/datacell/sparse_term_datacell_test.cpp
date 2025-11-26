@@ -154,3 +154,56 @@ TEST_CASE("SparseTermDatacell Basic Test", "[ut][SparseTermDatacell]") {
     delete[] query_sv.ids_;
     delete[] query_sv.vals_;
 }
+
+TEST_CASE("SparseTermDatacell Last Term Test", "[ut][SparseTermDatacell]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+
+    std::vector<vsag::SparseVector> sv_base(2);
+    std::vector<int64_t> ids = {0, 1};
+
+    sv_base[0].len_ = 2;
+    sv_base[0].ids_ = new uint32_t[2];
+    sv_base[0].vals_ = new float[2];
+    sv_base[0].ids_[0] = 1;
+    sv_base[0].vals_[0] = 0.1f;
+    sv_base[0].ids_[1] = 2;
+    sv_base[0].vals_[1] = 0.0f;
+
+    sv_base[1].len_ = 1;
+    sv_base[1].ids_ = new uint32_t[1];
+    sv_base[1].vals_ = new float[1];
+    sv_base[1].ids_[0] = 1;
+    sv_base[1].vals_[0] = 0.1f;
+
+    vsag::SparseVector sv_query;
+    sv_query.len_ = 2;
+    sv_query.ids_ = new uint32_t[2];
+    sv_query.vals_ = new float[2];
+    sv_query.ids_[0] = 1;
+    sv_query.vals_[0] = 1.0f;
+    sv_query.ids_[1] = 4;
+    sv_query.vals_[1] = 1.0f;
+
+    SINDISearchParameter search_params;
+    search_params.term_prune_ratio = 0;
+    search_params.query_prune_ratio = 0;
+    auto computer = std::make_shared<SparseTermComputer>(sv_query, search_params, allocator.get());
+
+    auto data_cell =
+        std::make_shared<SparseTermDataCell>(1, DEFAULT_TERM_ID_LIMIT, allocator.get());
+
+    data_cell->InsertVector(sv_base[0], ids[0]);
+    data_cell->InsertVector(sv_base[1], ids[1]);
+
+    std::vector<float> dists(2, 0);
+    data_cell->Query(dists.data(), computer);
+    REQUIRE(std::abs(dists[0] - (-1 * 0.1)) < 1e-3);
+    REQUIRE(std::abs(dists[1] - (-1 * 0.1)) < 1e-3);
+
+    delete[] sv_query.ids_;
+    delete[] sv_query.vals_;
+    for (auto& item : sv_base) {
+        delete[] item.ids_;
+        delete[] item.vals_;
+    }
+}

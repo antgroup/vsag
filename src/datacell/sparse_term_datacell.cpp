@@ -25,11 +25,10 @@ SparseTermDataCell::Query(float* global_dists, const SparseTermComputerPtr& comp
         if (computer->HasNextTerm()) {
             auto next_it = it + 1;
             auto next_term = computer->GetTerm(next_it);
-            if (next_term >= term_ids_.size()) {
-                continue;
+            if (next_term < term_ids_.size()) {
+                __builtin_prefetch(term_ids_[next_term].data(), 0, 3);
+                __builtin_prefetch(term_datas_[next_term].data(), 0, 3);
             }
-            __builtin_prefetch(term_ids_[next_term].data(), 0, 3);
-            __builtin_prefetch(term_datas_[next_term].data(), 0, 3);
         }
         if (term >= term_ids_.size()) {
             continue;
