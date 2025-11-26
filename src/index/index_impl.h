@@ -188,6 +188,11 @@ public:
         SAFE_CALL(return this->inner_index_->GetIndexDetailInfos());
     }
 
+    tl::expected<DetailDataPtr, Error>
+    GetDetailDataByName(const std::string& name, IndexDetailInfo& info) const override {
+        SAFE_CALL(return this->inner_index_->GetDetailDataByName(name, info));
+    }
+
     [[nodiscard]] int64_t
     GetEstimateBuildMemory(const int64_t num_elements) const override {
         return this->inner_index_->GetEstimateBuildMemory(num_elements);

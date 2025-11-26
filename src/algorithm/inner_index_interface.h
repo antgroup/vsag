@@ -164,6 +164,9 @@ public:
     virtual std::vector<IndexDetailInfo>
     GetIndexDetailInfos() const;
 
+    virtual DetailDataPtr
+    GetDetailDataByName(const std::string& name, IndexDetailInfo& info) const;
+
     [[nodiscard]] virtual int64_t
     GetEstimateBuildMemory(const int64_t num_elements) const {
         throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
@@ -394,6 +397,9 @@ protected:
                       uint64_t sample_data_size,
                       int64_t topk,
                       const std::string& search_param) const;
+
+    virtual DetailDataPtr
+    get_detail_data_by_info(const IndexDetailInfo& info) const;
 
 public:
     LabelTablePtr label_table_{nullptr};

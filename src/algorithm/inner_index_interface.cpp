@@ -22,6 +22,7 @@
 #include "impl/filter/filter_headers.h"
 #include "impl/label_table.h"
 #include "index_common_param.h"
+#include "index_detail_data.h"
 #include "index_feature_list.h"
 #include "storage/empty_index_binary_set.h"
 #include "storage/serialization.h"
@@ -539,7 +540,15 @@ InnerIndexInterface::GetDataByIdsWithFlag(const int64_t* ids,
 
 std::vector<IndexDetailInfo>
 InnerIndexInterface::GetIndexDetailInfos() const {
-    return {};
+    std::vector<IndexDetailInfo> infos;
+    infos.emplace_back(INDEX_DETAIL_NAME_NUM_ELEMENTS,
+                       "How many elements in current index",
+                       IndexDetailDataType::TYPE_SCALAR_INT64);
+    infos.emplace_back(INDEX_DETAIL_NAME_LABEL_TABLE,
+                       "Label table of current index, label table is a 2D array, "
+                       "table[x][0] is label, table[x][1] is inner id",
+                       IndexDetailDataType::TYPE_2DArray_INT64);
+    return infos;
 }
 
 void
@@ -626,6 +635,35 @@ InnerIndexInterface::analyze_quantizer(JsonType& stats,
         stats["quantization_inversion_count_rate"].SetFloat(inversion_count_rate /
                                                             static_cast<float>(sample_data_size));
     }
+}
+
+DetailDataPtr
+InnerIndexInterface::GetDetailDataByName(const std::string& name, IndexDetailInfo& info) const {
+    auto infos = this->GetIndexDetailInfos();
+    for (const auto& detail_info : infos) {
+        if (detail_info.name == name) {
+            info = detail_info;
+            return this->get_detail_data_by_info(detail_info);
+        }
+    }
+    throw VsagException(ErrorType::INVALID_ARGUMENT,
+                        "Index doesn't have detail data name: " + name);
+}
+
+DetailDataPtr
+InnerIndexInterface::get_detail_data_by_info(const IndexDetailInfo& info) const {
+    const std::string& name = info.name;
+    auto data = std::make_shared<DetailDataImpl>();
+    if (name == INDEX_DETAIL_NAME_NUM_ELEMENTS) {
+        data->SetDataScalarInt64(this->GetNumElements());
+    } else if (name == INDEX_DETAIL_NAME_LABEL_TABLE) {
+        std::vector<std::vector<int64_t>> label_tables;
+        for (const auto& [key, value] : this->label_table_->label_remap_) {
+            label_tables.emplace_back(std::vector<int64_t>{key, value});
+        }
+        data->SetData2DArrayInt64(label_tables);
+    }
+    return data;
 }
 
 }  // namespace vsag
