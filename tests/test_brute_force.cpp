@@ -105,7 +105,7 @@ BruteForceTestIndex::GenerateBruteForceBuildParametersString(const std::string& 
         "metric_type": "{}",
         "dim": {},
         "index_param": {{
-            "quantization_type": "{}",
+            "base_quantization_type": "{}",
             "store_raw_vector": true,
             "use_attribute_filter": {}
         }}

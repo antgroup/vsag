@@ -37,7 +37,7 @@ namespace vsag {
 static constexpr const char* IVF_PARAMS_TEMPLATE =
     R"(
     {
-        "type": "{INDEX_TYPE_IVF}",
+        "{TYPE_KEY}": "{INDEX_TYPE_IVF}",
         "{IVF_TRAIN_TYPE_KEY}": "{IVF_TRAIN_TYPE_KMEANS}",
         "{USE_ATTRIBUTE_FILTER_KEY}": false,
         "{USE_REORDER_KEY}": false,

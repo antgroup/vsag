@@ -24,6 +24,7 @@ namespace vsag {
 // Index Type
 const char* const INDEX_TYPE_HGRAPH = "hgraph";
 const char* const INDEX_TYPE_IVF = "ivf";
+const char* const INDEX_TYPE_BRUTE_FORCE = "brute_force";
 const char* const INDEX_TYPE_GNO_IMI = "gno_imi";
 const char* const INDEX_TYPE_PYRAMID = "pyramid";
 

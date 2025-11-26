@@ -24,25 +24,31 @@
 
 namespace vsag {
 
-BruteForceParameter::BruteForceParameter() : flatten_param(nullptr) {
+BruteForceParameter::BruteForceParameter() : base_codes_param(nullptr) {
 }
 
 void
 BruteForceParameter::FromJson(const JsonType& json) {
     InnerIndexParameter::FromJson(json);
-    this->flatten_param = std::make_shared<FlattenDataCellParameter>();
-    this->flatten_param->FromJson(json);
+    CHECK_ARGUMENT(json.Contains(BASE_CODES_KEY),
+                   fmt::format("bruteforce parameters must contains {}", BASE_CODES_KEY));
+    const auto& base_codes_json = json[BASE_CODES_KEY];
+    this->base_codes_param = CreateFlattenParam(base_codes_json);
 }
 
 JsonType
 BruteForceParameter::ToJson() const {
-    auto json = this->flatten_param->ToJson();
-    json[TYPE_KEY].SetString(INDEX_BRUTE_FORCE);
+    JsonType json = InnerIndexParameter::ToJson();
+    json[TYPE_KEY].SetString(INDEX_TYPE_BRUTE_FORCE);
+    json[BASE_CODES_KEY].SetJson(this->base_codes_param->ToJson());
     return json;
 }
 
 bool
 BruteForceParameter::CheckCompatibility(const ParamPtr& other) const {
+    if (not InnerIndexParameter::CheckCompatibility(other)) {
+        return false;
+    }
     auto brute_force_param = std::dynamic_pointer_cast<BruteForceParameter>(other);
     if (not brute_force_param) {
         logger::error(
@@ -50,6 +56,6 @@ BruteForceParameter::CheckCompatibility(const ParamPtr& other) const {
             "other parameter is not a BruteForceParameter");
         return false;
     }
-    return this->flatten_param->CheckCompatibility(brute_force_param->flatten_param);
+    return this->base_codes_param->CheckCompatibility(brute_force_param->base_codes_param);
 }
 }  // namespace vsag

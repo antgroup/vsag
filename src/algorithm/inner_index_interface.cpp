@@ -359,7 +359,7 @@ InnerIndexInterface::FastCreateIndex(const std::string& index_fast_str,
     if (strs[0] == INDEX_BRUTE_FORCE) {
         constexpr const char* build_string_temp = R"(
         {{
-            "quantization_type": "{}"
+            "base_quantization_type": "{}"
         }}
         )";
         JsonType json = JsonType::Parse(fmt::format(build_string_temp, strs[1]));

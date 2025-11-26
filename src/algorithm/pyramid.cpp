@@ -459,7 +459,7 @@ Pyramid::InitFeatures() {
 static const std::string HGRAPH_PARAMS_TEMPLATE =
     R"(
     {
-        "type": "{INDEX_TYPE_PYRAMID}",
+        "{TYPE_KEY}": "{INDEX_TYPE_PYRAMID}",
         "{USE_REORDER_KEY}": false,
         "{GRAPH_KEY}": {
             "{IO_PARAMS_KEY}": {

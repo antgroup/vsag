@@ -34,7 +34,7 @@ namespace vsag {
 
 BruteForce::BruteForce(const BruteForceParameterPtr& param, const IndexCommonParam& common_param)
     : InnerIndexInterface(param, common_param) {
-    inner_codes_ = FlattenInterface::MakeInstance(param->flatten_param, common_param);
+    inner_codes_ = FlattenInterface::MakeInstance(param->base_codes_param, common_param);
     auto code_size = this->inner_codes_->code_size_;
     auto increase_count = Options::Instance().block_size_limit() / code_size;
     this->resize_increase_count_bit_ = std::max(
@@ -432,15 +432,38 @@ BruteForce::InitFeatures() {
 static const std::string BRUTE_FORCE_PARAMS_TEMPLATE =
     R"(
     {
-        "type": "{INDEX_BRUTE_FORCE}",
-        "{IO_PARAMS_KEY}": {
-            "{TYPE_KEY}": "{IO_TYPE_VALUE_MEMORY_IO}"
+        "{TYPE_KEY}": "{INDEX_BRUTE_FORCE}",
+        "{USE_REORDER_KEY}": false,
+        "{BASE_CODES_KEY}": {
+            "{IO_PARAMS_KEY}": {
+                "{TYPE_KEY}": "{IO_TYPE_VALUE_MEMORY_IO}",
+                "{IO_FILE_PATH_KEY}": "{DEFAULT_FILE_PATH_VALUE}"
+            },
+            "{CODES_TYPE_KEY}": "flatten",
+            "{QUANTIZATION_PARAMS_KEY}": {
+                "{TYPE_KEY}": "{QUANTIZATION_TYPE_VALUE_FP32}",
+                "{SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE_KEY}": 0.05,
+                "{PCA_DIM_KEY}": 0,
+                "{RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY_KEY}": 32,
+                "{TQ_CHAIN_KEY}": "",
+                "nbits": 8,
+                "{PRODUCT_QUANTIZATION_DIM_KEY}": 1,
+                "{HOLD_MOLDS}": false
+            }
         },
-        "{QUANTIZATION_PARAMS_KEY}": {
-            "{TYPE_KEY}": "{QUANTIZATION_TYPE_VALUE_FP32}",
-            "subspace": 64,
-            "nbits": 8,
-            "{HOLD_MOLDS}": false
+        "{PRECISE_CODES_KEY}": {
+            "{IO_PARAMS_KEY}": {
+                "{TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
+                "{IO_FILE_PATH_KEY}": "{DEFAULT_FILE_PATH_VALUE}"
+            },
+            "{CODES_TYPE_KEY}": "flatten",
+            "{QUANTIZATION_PARAMS_KEY}": {
+                "{TYPE_KEY}": "{QUANTIZATION_TYPE_VALUE_FP32}",
+                "{SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE_KEY}": 0.05,
+                "{PCA_DIM_KEY}": 0,
+                "{PRODUCT_QUANTIZATION_DIM_KEY}": 1,
+                "{HOLD_MOLDS}": false
+            }
         },
         "{BUILD_THREAD_COUNT_KEY}": 1,
         "{USE_ATTRIBUTE_FILTER_KEY}": false,
@@ -454,17 +477,59 @@ BruteForce::CheckAndMappingExternalParam(const JsonType& external_param,
                                          const IndexCommonParam& common_param) {
     const ConstParamMap external_mapping = {
         {
-            BRUTE_FORCE_QUANTIZATION_TYPE,
+            BRUTE_FORCE_BASE_QUANTIZATION_TYPE,
             {
+                BASE_CODES_KEY,
                 QUANTIZATION_PARAMS_KEY,
                 TYPE_KEY,
             },
         },
         {
-            BRUTE_FORCE_IO_TYPE,
+            BRUTE_FORCE_BASE_IO_TYPE,
             {
+                BASE_CODES_KEY,
                 IO_PARAMS_KEY,
                 TYPE_KEY,
+            },
+        },
+        {
+            BRUTE_FORCE_BASE_PQ_DIM,
+            {
+                BASE_CODES_KEY,
+                QUANTIZATION_PARAMS_KEY,
+                PRODUCT_QUANTIZATION_DIM_KEY,
+            },
+        },
+        {
+            BRUTE_FORCE_BASE_FILE_PATH,
+            {
+                BASE_CODES_KEY,
+                IO_PARAMS_KEY,
+                IO_FILE_PATH_KEY,
+            },
+        },
+        {
+            BRUTE_FORCE_PRECISE_QUANTIZATION_TYPE,
+            {
+                PRECISE_CODES_KEY,
+                QUANTIZATION_PARAMS_KEY,
+                TYPE_KEY,
+            },
+        },
+        {
+            BRUTE_FORCE_PRECISE_IO_TYPE,
+            {
+                PRECISE_CODES_KEY,
+                IO_PARAMS_KEY,
+                TYPE_KEY,
+            },
+        },
+        {
+            BRUTE_FORCE_PRECISE_FILE_PATH,
+            {
+                PRECISE_CODES_KEY,
+                IO_PARAMS_KEY,
+                IO_FILE_PATH_KEY,
             },
         },
         {
@@ -484,6 +549,12 @@ BruteForce::CheckAndMappingExternalParam(const JsonType& external_param,
             USE_ATTRIBUTE_FILTER,
             {
                 USE_ATTRIBUTE_FILTER_KEY,
+            },
+        },
+        {
+            BRUTE_FORCE_USE_RESIDUAL,
+            {
+                USE_REORDER_KEY,
             },
         },
     };
