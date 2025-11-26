@@ -22,11 +22,14 @@
 TEST_CASE("BruteForce Parameters CheckCompatibility",
           "[ut][BruteForceParameter][CheckCompatibility]") {
     auto param_str = R"({
-        "io_params": {
-            "type": "block_memory_io"
-        },
-        "quantization_params": {
-            "type": "sq8"
+        "base_codes": {
+            "codes_type": "flatten_codes",
+            "io_params": {
+                "type": "block_memory_io"
+            },
+            "quantization_params": {
+                "type": "fp32"
+            }
         },
         "type": "brute_force",
         "use_attribute_filter": true

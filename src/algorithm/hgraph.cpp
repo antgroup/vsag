@@ -1207,7 +1207,7 @@ HGraph::reorder(const void* query,
 static const std::string HGRAPH_PARAMS_TEMPLATE =
     R"(
     {
-        "type": "{INDEX_TYPE_HGRAPH}",
+        "{TYPE_KEY}": "{INDEX_TYPE_HGRAPH}",
         "{USE_REORDER_KEY}": false,
         "{HGRAPH_USE_ENV_OPTIMIZER}": false,
         "{HGRAPH_IGNORE_REORDER_KEY}": false,
