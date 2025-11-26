@@ -16,6 +16,7 @@
 #pragma once
 
 #include "common.h"
+#include "inner_string_params.h"
 #include "typing.h"
 #include "utils/pointer_define.h"
 namespace vsag {
@@ -26,8 +27,9 @@ class Parameter {
 public:
     static std::string
     TryToParseType(const JsonType& json) {
-        CHECK_ARGUMENT(json.Contains("type"), "params must have type");  // TODO(LHT): "type" rename
-        return json["type"].GetString();
+        CHECK_ARGUMENT(json.Contains(TYPE_KEY),
+                       "params must have type");  // TODO(LHT): "type" rename
+        return json[TYPE_KEY].GetString();
     }
 
 public:
