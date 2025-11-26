@@ -22,6 +22,7 @@
 #include "impl/filter/filter_headers.h"
 #include "impl/heap/distance_heap.h"
 #include "impl/odescent/odescent_graph_builder.h"
+#include "impl/reorder/flatten_reorder.h"
 #include "impl/searcher/basic_searcher.h"
 #include "index_feature_list.h"
 #include "inner_index_interface.h"
@@ -99,6 +100,11 @@ public:
         root_ = std::make_shared<IndexNode>(&common_param_, pyramid_param_->graph_param);
         points_mutex_ = std::make_shared<PointsMutex>(max_capacity_, allocator_);
         searcher_ = std::make_unique<BasicSearcher>(common_param_, points_mutex_);
+        if (use_reorder_) {
+            precise_codes_ =
+                FlattenInterface::MakeInstance(pyramid_param_->precise_codes_param, common_param_);
+            reorder_ = std::make_shared<FlattenReorder>(precise_codes_, allocator_);
+        }
     }
 
     explicit Pyramid(const ParamPtr& param, const IndexCommonParam& common_param)
@@ -188,6 +194,7 @@ private:
     PyramidParamPtr pyramid_param_{nullptr};
     std::shared_ptr<IndexNode> root_{nullptr};
     FlattenInterfacePtr base_codes_{nullptr};
+    FlattenInterfacePtr precise_codes_{nullptr};
     std::unique_ptr<VisitedListPool> pool_ = nullptr;
 
     MutexArrayPtr points_mutex_{nullptr};
@@ -202,6 +209,7 @@ private:
 
     std::mutex entry_point_mutex_;
     std::default_random_engine level_generator_{2021};
+    ReorderInterfacePtr reorder_{nullptr};
 };
 
 }  // namespace vsag

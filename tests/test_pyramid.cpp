@@ -23,6 +23,10 @@
 
 struct PyramidParam {
     std::vector<int> no_build_levels = std::vector<int>{0, 1, 2};
+    std::string base_quantization_type = "fp32";
+    std::string precise_quantization_type = "fp32";
+    std::string graph_type = "nsw";
+    bool use_reorder = false;
 };
 
 namespace fixtures {
@@ -67,12 +71,21 @@ PyramidTestIndex::GeneratePyramidBuildParametersString(const std::string& metric
             "graph_iter_turn": 15,
             "neighbor_sample_rate": 0.2,
             "no_build_levels": [{}],
-            "graph_type": "odescent"
+            "graph_type": "{}",
+            "base_quantization_type": "{}",
+            "precise_quantization_type": "{}",
+            "use_reorder": {}
         }}
     }}
     )";
-    auto build_parameters_str =
-        fmt::format(parameter_temp, metric_type, dim, fmt::join(param.no_build_levels, ","));
+    auto build_parameters_str = fmt::format(parameter_temp,
+                                            metric_type,
+                                            dim,
+                                            fmt::join(param.no_build_levels, ","),
+                                            param.graph_type,
+                                            param.base_quantization_type,
+                                            param.precise_quantization_type,
+                                            param.use_reorder);
     return build_parameters_str;
 }
 }  // namespace fixtures
@@ -81,10 +94,14 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
                              "Pyramid Build & ContinueAdd Test",
                              "[ft][pyramid]") {
     auto metric_type = GENERATE("l2", "ip", "cosine");
-    std::string metric_type_str = metric_type;
-    std::string base_quantization_str = GENERATE("fp32");
+    auto use_reorder = GENERATE(true, false);
     PyramidParam pyramid_param;
     pyramid_param.no_build_levels = {0, 1, 2};
+    pyramid_param.use_reorder = use_reorder;
+    if (use_reorder) {
+        pyramid_param.base_quantization_type = "rabitq";
+        pyramid_param.precise_quantization_type = "fp32";
+    }
     const std::string name = "pyramid";
     auto search_param = fmt::format(search_param_tmp, 20);
     for (auto& dim : dims) {
@@ -173,8 +190,14 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
     auto metric_type = GENERATE("l2");
+    auto use_reorder = GENERATE(true, false);
     PyramidParam pyramid_param;
     pyramid_param.no_build_levels = {0, 1, 2};
+    pyramid_param.use_reorder = use_reorder;
+    if (use_reorder) {
+        pyramid_param.base_quantization_type = "rabitq";
+        pyramid_param.precise_quantization_type = "fp32";
+    }
     const std::string name = "pyramid";
     auto search_param = fmt::format(search_param_tmp, 20);
 
