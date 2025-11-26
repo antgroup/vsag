@@ -22,7 +22,7 @@ PointsMutex::PointsMutex(uint32_t element_num, Allocator* allocator)
       neighbors_mutex_(element_num, nullptr, allocator),
       element_num_(element_num) {
     for (int i = 0; i < element_num_; ++i) {
-        neighbors_mutex_[i] = std::make_shared<std::shared_mutex>();
+        neighbors_mutex_[i] = AllocateShared<std::shared_mutex>(allocator_);
     }
 }
 

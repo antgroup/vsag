@@ -48,6 +48,7 @@ mapping_external_param_to_inner(const JsonType& external_json,
     for (const auto& [key, value] : external_raw_json->items()) {
         auto ranges = param_map.equal_range(key);
         if (ranges.first == ranges.second) {
+            // key not found in param_map
             throw VsagException(ErrorType::INVALID_ARGUMENT,
                                 fmt::format("invalid config param: {}", key));
         }
