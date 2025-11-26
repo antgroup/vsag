@@ -152,6 +152,54 @@ jobs:
           retention-days: 1
           overwrite: 'true'
 
+  test_example_x86:
+    name: Test Example X86
+    needs: build_asan_x86
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Free Disk Space
+        run: rm -rf /opt/hostedtoolcache
+      - uses: actions/checkout@v4
+      - name: Clean Env
+        run: rm -rf ./build
+      - name: Download Test
+        uses: actions/download-artifact@v5
+        with:
+          name: test_x86-${{ github.run_id }}
+          path: ./build
+      - name: Do Asan Test In example
+        run: |
+          cd ./build/examples/cpp
+          for example in ./*; do
+            chmod +x $example
+            echo "Run $example"
+            $example
+          done
+  
+  test_example_aarch64:
+    name: Test Example Aarch64
+    needs: build_asan_aarch64
+    runs-on: ubuntu-22.04-arm
+    steps:
+      - name: Free Disk Space
+        run: rm -rf /opt/hostedtoolcache
+      - uses: actions/checkout@v4
+      - name: Clean Env
+        run: rm -rf ./build
+      - name: Download Test
+        uses: actions/download-artifact@v5
+        with:
+          name: test_aarch64-${{ github.run_id }}
+          path: ./build
+      - name: Do Asan Test In example
+        run: |
+          cd ./build/examples/cpp
+          for example in ./*; do
+            chmod +x $example
+            echo "Run $example"
+            $example
+          done
+
   clean_up:
     name: Clean Up
     needs: [ test_asan_x86, test_asan_aarch64 ]
