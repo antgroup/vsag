@@ -2454,4 +2454,37 @@ TestIndex::TestConcurrentAddSearchRemove(const TestIndex::IndexPtr& index,
     }
 }
 
+void
+TestIndex::TestIndexDetailData(const IndexPtr& index) {
+    auto infos = index->GetIndexDetailInfos();
+    REQUIRE(infos.has_value());
+    const auto& detail_infos = infos.value();
+    REQUIRE(detail_infos.size() > 0);
+    for (const auto& info : detail_infos) {
+        vsag::IndexDetailInfo r_info;
+        auto detail_data_value = index->GetDetailDataByName(info.name, r_info);
+        REQUIRE(info.name == r_info.name);
+        REQUIRE(info.type == r_info.type);
+        REQUIRE(info.description == r_info.description);
+
+        REQUIRE(detail_data_value.has_value());
+        auto detail_data = detail_data_value.value();
+        if (info.type == vsag::IndexDetailDataType::TYPE_SCALAR_INT64) {
+            REQUIRE_NOTHROW(detail_data->GetDataScalarInt64());
+        } else if (info.type == vsag::IndexDetailDataType::TYPE_SCALAR_DOUBLE) {
+            REQUIRE_NOTHROW(detail_data->GetDataScalarDouble());
+        } else if (info.type == vsag::IndexDetailDataType::TYPE_SCALAR_STRING) {
+            REQUIRE_NOTHROW(detail_data->GetDataScalarString());
+        } else if (info.type == vsag::IndexDetailDataType::TYPE_SCALAR_BOOL) {
+            REQUIRE_NOTHROW(detail_data->GetDataScalarBool());
+        } else if (info.type == vsag::IndexDetailDataType::TYPE_1DArray_INT64) {
+            REQUIRE_NOTHROW(detail_data->GetData1DArrayInt64());
+        } else if (info.type == vsag::IndexDetailDataType::TYPE_2DArray_INT64) {
+            REQUIRE_NOTHROW(detail_data->GetData2DArrayInt64());
+        } else {
+            REQUIRE(false);
+        }
+    }
+}
+
 }  // namespace fixtures
