@@ -90,11 +90,12 @@ run_build() {
     echo "🛠️  Starting cibuildwheel... "
     CIBW_BUILD="${cibw_build_pattern}" \
     CIBW_ARCHS="${ARCH}" \
-    CIBW_TEST_COMMAND="pip install numpy && ls -alF /project/ && python /project/examples/python/example_hnsw.py" \
+    CIBW_TEST_COMMAND="pip install numpy && ls -alF /project/ && python /project/tests/python/run_test.py" \
     cibuildwheel --platform linux --output-dir wheelhouse python
   else 
     echo "🛠️  Starting build..."
-    bash scripts/python/build_cpp_for_cibw.sh
+    ENABLE_MKL_STATIC_LINK=$HAVE_DOCKER
+    bash scripts/python/build_cpp_for_cibw.sh $ENABLE_MKL_STATIC_LINK
     python -m build --wheel --outdir wheelhouse python
     echo "✅ Build complete. Starting test..."
     # Find the most recently created wheel
