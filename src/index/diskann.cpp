@@ -705,14 +705,8 @@ DiskANN::serialize() const {
     metadata->SetVersion("v0.15");
 
     if (status_ == IndexStatus::EMPTY) {
-        // TODO(wxyu): remove this if condition
-        // if (not Options::Instance().new_version()) {
-        //     // return a special binaryset means empty
-        //     return EmptyIndexBinarySet::Make("EMPTY_DISKANN");
-        // }
-
         metadata->SetEmptyIndex(true);
-        BinarySet bs;
+        BinarySet bs = EmptyIndexBinarySet::Make("EMPTY_DISKANN");
         bs.Set(SERIAL_META_KEY, metadata->ToBinary());
         return bs;
     }
