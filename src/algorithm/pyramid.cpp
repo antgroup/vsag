@@ -381,7 +381,6 @@ Pyramid::Deserialize(StreamReader& reader) {
     }
     cur_element_count_ = base_codes_->TotalCount();
     root_->Deserialize(buffer_reader);
-    pool_ = std::make_unique<VisitedListPool>(1, allocator_, cur_element_count_, allocator_);
     resize(max_capacity);
 }
 
