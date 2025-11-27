@@ -15,6 +15,7 @@
 
 #pragma once
 
+#include "algorithm/inner_index_interface.h"
 #include "attr/executor/executor.h"
 #include "datacell/flatten_interface.h"
 #include "datacell/graph_interface.h"
@@ -44,7 +45,8 @@ public:
            const VisitedListPtr& vl,
            const void* query,
            const InnerSearchParam& inner_search_param,
-           const LabelTablePtr& label_table = nullptr) const;
+           const LabelTablePtr& label_table,
+           Statistics& stats) const;
 
     virtual DistHeapPtr
     Search(const GraphInterfacePtr& graph,
@@ -52,7 +54,8 @@ public:
            const VisitedListPtr& vl,
            const void* query,
            const InnerSearchParam& inner_search_param,
-           IteratorFilterContext* iter_ctx) const;
+           IteratorFilterContext* iter_ctx,
+           Statistics& stats) const;
 
     virtual bool
     SetRuntimeParameters(const UnorderedMap<std::string, float>& new_params);
@@ -66,7 +69,7 @@ public:
                       const uint32_t n_trials = OPTIMIZE_SEARCHER_SAMPLE_SIZE);
 
     virtual double
-    MockRun() const;
+    MockRun(Statistics& stats) const;
 
     void
     SetMutexArray(MutexArrayPtr new_mutex_array);
@@ -91,7 +94,8 @@ private:
                 const VisitedListPtr& vl,
                 const void* query,
                 const InnerSearchParam& inner_search_param,
-                const LabelTablePtr& label_table) const;
+                const LabelTablePtr& label_table,
+                Statistics& stats) const;
 
     template <InnerSearchMode mode = KNN_SEARCH>
     DistHeapPtr
@@ -100,7 +104,8 @@ private:
                 const VisitedListPtr& vl,
                 const void* query,
                 const InnerSearchParam& inner_search_param,
-                IteratorFilterContext* iter_ctx) const;
+                IteratorFilterContext* iter_ctx,
+                Statistics& stats) const;
 
 private:
     Allocator* allocator_{nullptr};

@@ -17,9 +17,11 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include "algorithm/inner_index_interface.h"
 #include "algorithm/ivf_parameter.h"
 #include "fixtures.h"
 #include "impl/allocator/safe_allocator.h"
+#include "impl/inner_search_param.h"
 #include "impl/searcher/basic_searcher.h"
 #include "storage/serialization_template_test.h"
 
@@ -51,7 +53,8 @@ TEST_CASE("GNO-IMI Partition Basic Test", "[ut][GNOIMIPartition]") {
     dataset->Float32Vectors(vec.data())->Dim(dim)->NumElements(data_count)->Owner(false);
 
     partition->Train(dataset);
-    auto class_result = partition->ClassifyDatas(vec.data(), data_count, 1);
+    Statistics stats;
+    auto class_result = partition->ClassifyDatas(vec.data(), data_count, 1, stats);
     REQUIRE(class_result.size() == data_count);
 
     param_str = R"(
@@ -72,7 +75,7 @@ TEST_CASE("GNO-IMI Partition Basic Test", "[ut][GNOIMIPartition]") {
         auto query = Dataset::Make();
         query->Dim(dim)->Float32Vectors(vec.data() + i * dim)->NumElements(1)->Owner(false);
         auto result =
-            partition->ClassifyDatasForSearch(vec.data() + i * dim, 1, inner_search_param);
+            partition->ClassifyDatasForSearch(vec.data() + i * dim, 1, inner_search_param, stats);
         auto id = result[0];
         if (id == class_result[i]) {
             match_count++;
@@ -86,7 +89,7 @@ TEST_CASE("GNO-IMI Partition Basic Test", "[ut][GNOIMIPartition]") {
         auto query = Dataset::Make();
         query->Dim(dim)->Float32Vectors(vec.data() + i * dim)->NumElements(1)->Owner(false);
         auto result =
-            partition->ClassifyDatasForSearch(vec.data() + i * dim, 1, inner_search_param);
+            partition->ClassifyDatasForSearch(vec.data() + i * dim, 1, inner_search_param, stats);
         auto id = result[0];
         if (id == class_result[i]) {
             match_count++;
@@ -100,7 +103,7 @@ TEST_CASE("GNO-IMI Partition Basic Test", "[ut][GNOIMIPartition]") {
         auto query = Dataset::Make();
         query->Dim(dim)->Float32Vectors(vec.data() + i * dim)->NumElements(1)->Owner(false);
         auto result =
-            partition->ClassifyDatasForSearch(vec.data() + i * dim, 1, inner_search_param);
+            partition->ClassifyDatasForSearch(vec.data() + i * dim, 1, inner_search_param, stats);
         auto id = result[0];
         // REQUIRE(id == class_result[i]);
         if (id == class_result[i]) {
@@ -137,7 +140,8 @@ TEST_CASE("GNO-IMI Partition Serialize Test", "[ut][GNOIMIPartition]") {
     dataset->Float32Vectors(vec.data())->Dim(dim)->NumElements(data_count)->Owner(false);
 
     partition->Train(dataset);
-    auto class_result = partition->ClassifyDatas(vec.data(), data_count, 1);
+    Statistics stats;
+    auto class_result = partition->ClassifyDatas(vec.data(), data_count, 1, stats);
     REQUIRE(class_result.size() == data_count);
 
     auto partition2 = std::make_unique<GNOIMIPartition>(param, strategy_param);
@@ -162,7 +166,7 @@ TEST_CASE("GNO-IMI Partition Serialize Test", "[ut][GNOIMIPartition]") {
         auto query = Dataset::Make();
         query->Dim(dim)->Float32Vectors(vec.data() + i * dim)->NumElements(1)->Owner(false);
         auto result =
-            partition2->ClassifyDatasForSearch(vec.data() + i * dim, 1, inner_search_param);
+            partition2->ClassifyDatasForSearch(vec.data() + i * dim, 1, inner_search_param, stats);
         auto id = result[0];
         if (id == class_result[i]) {
             match_count++;

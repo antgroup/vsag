@@ -18,10 +18,12 @@
 #include <cblas.h>
 #include <fmt/format.h>
 
+#include <atomic>
 #include <fstream>
 #include <numeric>
 #include <vector>
 
+#include "algorithm/inner_index_interface.h"
 #include "impl/allocator/safe_allocator.h"
 #include "impl/cluster/kmeans_cluster.h"
 #include "inner_string_params.h"
@@ -202,17 +204,19 @@ GNOIMIPartition::Train(const DatasetPtr dataset) {
 Vector<BucketIdType>
 GNOIMIPartition::ClassifyDatas(const void* datas,
                                int64_t count,
-                               BucketIdType buckets_per_data) const {
+                               BucketIdType buckets_per_data,
+                               Statistics& stats) const {
     Vector<BucketIdType> result(buckets_per_data * count, this->allocator_);
     inner_joint_classify_datas(
-        reinterpret_cast<const float*>(datas), count, buckets_per_data, result.data());
+        reinterpret_cast<const float*>(datas), count, buckets_per_data, result.data(), stats);
     return result;
 }
 
 Vector<BucketIdType>
 GNOIMIPartition::ClassifyDatasForSearch(const void* datas,
                                         int64_t count,
-                                        const InnerSearchParam& param) {
+                                        const InnerSearchParam& param,
+                                        Statistics& stats) {
     Vector<float> norm_vectors(allocator_);
     if (metric_type_ == MetricType::METRIC_TYPE_COSINE) {
         norm_vectors.resize(count * dim_);
@@ -351,7 +355,8 @@ void
 GNOIMIPartition::inner_joint_classify_datas(const float* datas,
                                             int64_t count,
                                             BucketIdType buckets_per_data,
-                                            BucketIdType* result) const {
+                                            BucketIdType* result,
+                                            Statistics& stats) const {
     Vector<float> dist_to_s(bucket_count_s_ * count, this->allocator_);
     Vector<float> dist_to_t(bucket_count_t_ * count, this->allocator_);
     Vector<std::pair<float, BucketIdType>> precomputed_terms_s(bucket_count_s_, this->allocator_);
@@ -362,6 +367,7 @@ GNOIMIPartition::inner_joint_classify_datas(const float* datas,
     // precomputed_terms_s: |x - s|^2 = |s|^2 - 2xs + |x|^2
     // precomputed_terms_st: |t|^2 + 2st
     float total_err = 0.0;
+    uint32_t dist_cmp = 0;
     for (size_t i = 0; i < count; ++i) {
         auto data_norm = FP32ComputeIP(datas + i * dim_, datas + i * dim_, dim_);
         for (BucketIdType j = 0; j < bucket_count_s_; ++j) {
@@ -387,6 +393,7 @@ GNOIMIPartition::inner_joint_classify_datas(const float* datas,
                 int cur_bucket_id_global = cur_bucket_id_s * bucket_count_t_ + cur_bucket_id_t;
                 float dist = cur_precomputed_term_s - dist_to_t[i * bucket_count_t_ + k] +
                              precomputed_terms_st_[cur_bucket_id_global];
+                ++dist_cmp;
 
                 if (heap.size() < buckets_per_data || dist < heap.top().first) {
                     heap.emplace(dist, cur_bucket_id_global);
@@ -405,6 +412,8 @@ GNOIMIPartition::inner_joint_classify_datas(const float* datas,
             heap.pop();
         }
     }
+
+    stats.dist_cmp.fetch_add(dist_cmp, std::memory_order_relaxed);
 }
 
 void

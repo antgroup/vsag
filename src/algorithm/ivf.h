@@ -140,13 +140,14 @@ private:
 
     template <InnerSearchMode mode = KNN_SEARCH>
     DistHeapPtr
-    search(const DatasetPtr& query, const InnerSearchParam& param) const;
+    search(const DatasetPtr& query, const InnerSearchParam& param, Statistics& stats) const;
 
     DatasetPtr
     reorder(int64_t topk,
             DistHeapPtr& input,
             const float* query,
-            const InnerSearchParam& param) const;
+            const InnerSearchParam& param,
+            Statistics& stats) const;
 
     void
     merge_one_unit(const MergeUnit& unit);
