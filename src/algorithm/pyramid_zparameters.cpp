@@ -130,6 +130,7 @@ PyramidSearchParameters::FromJson(const std::string& json_string) {
     // set obj.ef_search
     CHECK_ARGUMENT(params.Contains(INDEX_PYRAMID),
                    fmt::format("parameters must contains {}", INDEX_PYRAMID));
+    obj.IndexSearchParameter::FromJson(params[INDEX_PYRAMID]);
 
     CHECK_ARGUMENT(
         params[INDEX_PYRAMID].Contains(HNSW_PARAMETER_EF_RUNTIME),
