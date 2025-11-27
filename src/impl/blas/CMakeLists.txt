@@ -14,11 +14,6 @@
 # limitations under the License.
 
 
-set (SINDI_SRCS
-        sindi.cpp
-        sindi_parameter.cpp
-)
+add_library (vsag_blas OBJECT blas_function.cpp)
+maybe_add_dependencies (vsag_blas openblas mkl)
 
-add_library (sindi OBJECT ${SINDI_SRCS})
-target_link_libraries (sindi PUBLIC coverage_config)
-maybe_add_dependencies (sindi spdlog fmt::fmt)
