@@ -15,6 +15,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <shared_mutex>
 #include <vector>
 
@@ -27,6 +28,7 @@
 #include "parameter.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
+#include "typing.h"
 #include "utils/function_exists_check.h"
 #include "utils/pointer_define.h"
 #include "vsag/dataset.h"
@@ -39,6 +41,23 @@ DEFINE_POINTER(LabelTable);
 DEFINE_POINTER(IndexFeatureList);
 
 class IndexCommonParam;
+
+class Statistics {
+public:
+    [[nodiscard]] std::string
+    Dump() const {
+        JsonType j;
+        j["is_timeout"].SetBool(is_timeout.load(std::memory_order_relaxed));
+        j["dist_cmp"].SetInt(dist_cmp.load(std::memory_order_relaxed));
+        j["hops"].SetInt(hops.load(std::memory_order_relaxed));
+        return j.Dump();
+    }
+
+public:
+    std::atomic<bool> is_timeout{false};
+    std::atomic<uint32_t> dist_cmp{0};
+    std::atomic<uint32_t> hops{0};
+};
 
 class InnerIndexInterface {
 public:

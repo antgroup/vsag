@@ -15,6 +15,8 @@
 
 #include "brute_force.h"
 
+#include <atomic>
+#include <mutex>
 #include <optional>
 
 #include "attr/argparse.h"
@@ -28,6 +30,7 @@
 #include "index_feature_list.h"
 #include "inner_string_params.h"
 #include "storage/serialization.h"
+#include "typing.h"
 #include "utils/slow_task_timer.h"
 #include "utils/util_functions.h"
 namespace vsag {
@@ -208,6 +211,8 @@ BruteForce::SearchWithRequest(const SearchRequest& request) const {
         attr_filter = executor->Run();
     }
 
+    std::atomic<uint32_t> dist_cmp{0};
+
     auto brute_force_params = BruteForceSearchParameters::FromJson(request.params_str_);
     auto parallel_count = brute_force_params.parallel_search_thread_count;
     std::vector<DistHeapPtr> heaps(parallel_count);
@@ -216,6 +221,7 @@ BruteForce::SearchWithRequest(const SearchRequest& request) const {
     }
     auto search_func = [&](InnerIdType start, InnerIdType end, const DistHeapPtr& cur_heap) {
         float cur_min_dist = std::numeric_limits<float>::max();
+        uint32_t dist_cmp_local = 0;
         for (InnerIdType i = start; i < end; ++i) {
             float dist = 0.0F;
             if (attr_filter != nullptr and not attr_filter->CheckValid(i)) {
@@ -223,9 +229,12 @@ BruteForce::SearchWithRequest(const SearchRequest& request) const {
             }
             if (filter == nullptr or filter->CheckValid(this->label_table_->GetLabelById(i))) {
                 inner_codes_->Query(&dist, computer, &i, 1);
+                ++dist_cmp_local;
                 cur_heap->Push(dist, i);
             }
         }
+
+        dist_cmp.fetch_add(dist_cmp_local, std::memory_order_relaxed);
     };
 
     if (parallel_count == 1) {
@@ -256,6 +265,10 @@ BruteForce::SearchWithRequest(const SearchRequest& request) const {
         ids[j] = this->label_table_->GetLabelById(heap->Top().second);
         heap->Pop();
     }
+
+    JsonType stats;
+    stats["dist_cmp"].SetInt(dist_cmp.load(std::memory_order_relaxed));
+    dataset_results->Statistics(stats.Dump());
 
     return std::move(dataset_results);
 }
