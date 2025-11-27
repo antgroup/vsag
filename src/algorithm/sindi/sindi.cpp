@@ -349,21 +349,24 @@ SINDI::Deserialize(StreamReader& reader) {
         }
     }
 
-    StreamReader::ReadObj(reader, cur_element_count_);
+    BufferStreamReader buffer_reader(
+        &reader, std::numeric_limits<uint64_t>::max(), this->allocator_);
+
+    StreamReader::ReadObj(buffer_reader, cur_element_count_);
 
     uint32_t window_term_list_size = 0;
-    StreamReader::ReadObj(reader, window_term_list_size);
+    StreamReader::ReadObj(buffer_reader, window_term_list_size);
     window_term_list_.resize(window_term_list_size);
     for (auto& window : window_term_list_) {
         window =
             std::make_shared<SparseTermDataCell>(doc_retain_ratio_, term_id_limit_, allocator_);
-        window->Deserialize(reader);
+        window->Deserialize(buffer_reader);
     }
 
-    label_table_->Deserialize(reader);
+    label_table_->Deserialize(buffer_reader);
 
     if (use_reorder_) {
-        rerank_flat_index_->Deserialize(reader);
+        rerank_flat_index_->Deserialize(buffer_reader);
     }
 }
 

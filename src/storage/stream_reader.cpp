@@ -40,6 +40,7 @@ void
 ReadFuncStreamReader::Read(char* data, uint64_t size) {
     readFunc_(cursor_, size, data);
     cursor_ += size;
+    io_count_++;
 }
 
 void
@@ -58,6 +59,10 @@ ReadFuncStreamReader::ReadFuncStreamReader(std::function<void(uint64_t, uint64_t
     : StreamReader(length), readFunc_(std::move(read_func)), cursor_(cursor) {
 }
 
+ReadFuncStreamReader::~ReadFuncStreamReader() {
+    vsag::logger::info("ReadFuncStreamReader io count ({}) in deserialize process", io_count_);
+}
+
 void
 IOStreamReader::Read(char* data, uint64_t size) {
     auto offset = std::to_string(istream_.tellg());
@@ -70,6 +75,7 @@ IOStreamReader::Read(char* data, uint64_t size) {
             fmt::format(
                 "Attempted to read: {} bytes. Remaining content size: {} bytes.", size, remaining));
     }
+    io_count_++;
 }
 
 void
@@ -89,6 +95,10 @@ IOStreamReader::IOStreamReader(std::istream& istream) : istream_(istream) {
     istream.seekg(0, std::ios::end);
     length_ = istream.tellg() - cur_pos;
     istream.seekg(cur_pos);
+}
+
+IOStreamReader::~IOStreamReader() {
+    vsag::logger::info("IOStreamReader io count ({}) in deserialize process", io_count_);
 }
 
 uint64_t
