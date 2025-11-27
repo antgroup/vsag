@@ -82,23 +82,24 @@ BruteForce::Add(const DatasetPtr& data) {
                         const int64_t label,
                         const AttributeSet* attr,
                         const char* extra_info) -> std::optional<int64_t> {
+        InnerIdType inner_id;
         {
             std::scoped_lock add_lock(this->label_lookup_mutex_, this->add_mutex_);
             if (this->label_table_->CheckLabel(label)) {
                 return label;
             }
-            const InnerIdType inner_id = this->total_count_;
-            total_count_++;
-
-            if (use_attribute_filter_ && attr != nullptr) {
-                this->attr_filter_index_->Insert(*attr, inner_id);
-            }
-
+            inner_id = this->total_count_;
+            this->total_count_++;
             this->resize(total_count_);
-            this->add_one(data, inner_id);
             this->label_table_->Insert(inner_id, label);
-            return std::nullopt;
         }
+        std::shared_lock global_lock(this->global_mutex_);
+        if (use_attribute_filter_ && attr != nullptr) {
+            this->attr_filter_index_->Insert(*attr, inner_id);
+        }
+
+        this->add_one(data, inner_id);
+        return std::nullopt;
     };
 
     std::vector<std::future<std::optional<int64_t>>> futures;
@@ -599,6 +600,7 @@ BruteForce::resize(uint64_t new_size) {
     cur_size = this->max_capacity_.load();
     if (cur_size < new_size_power_2) {
         this->inner_codes_->Resize(new_size_power_2);
+        this->max_capacity_.store(new_size_power_2);
     }
 }
 
