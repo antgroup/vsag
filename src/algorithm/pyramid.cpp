@@ -168,9 +168,13 @@ Pyramid::build_by_odescent(const DatasetPtr& base) {
     std::memcpy(label_table_->label_table_.data(), data_ids, sizeof(LabelType) * data_num);
 
     base_codes_->BatchInsertVector(data_vectors, data_num);
+    if (use_reorder_) {
+        precise_codes_->BatchInsertVector(data_vectors, data_num);
+    }
+    auto codes = use_reorder_ ? precise_codes_ : base_codes_;
 
     ODescent graph_builder(
-        pyramid_param_->odescent_param, base_codes_, allocator_, common_param_.thread_pool_.get());
+        pyramid_param_->odescent_param, codes, allocator_, common_param_.thread_pool_.get());
     for (int i = 0; i < data_num; ++i) {
         std::string current_path = path[i];
         auto path_slices = split(current_path, PART_SLASH);
@@ -185,6 +189,7 @@ Pyramid::build_by_odescent(const DatasetPtr& base) {
     }
     root_->BuildGraph(graph_builder);
     cur_element_count_ = data_num;
+    max_capacity_ = data_num;
     return {};
 }
 
@@ -198,16 +203,23 @@ Pyramid::KnnSearch(const DatasetPtr& query,
     search_param.ef = parsed_param.ef_search;
     search_param.topk = k;
     search_param.search_mode = KNN_SEARCH;
+
+    if (parsed_param.enable_time_record) {
+        search_param.time_cost = std::make_shared<Timer>();
+        search_param.time_cost->SetThreshold(parsed_param.timeout_ms);
+    }
+
     if (filter != nullptr) {
         search_param.is_inner_id_allowed =
             std::make_shared<InnerIdWrapperFilter>(filter, *label_table_);
     }
     Statistics stats;
+    auto codes = use_reorder_ ? precise_codes_ : base_codes_;
     SearchFunc search_func = [&](const IndexNode* node, const VisitedListPtr& vl) {
         std::shared_lock lock(node->mutex_);
         search_param.ep = node->entry_point_;
         auto results = searcher_->Search(node->graph_,
-                                         base_codes_,
+                                         codes,
                                          vl,
                                          query->GetFloat32Vectors(),
                                          search_param,
@@ -232,16 +244,23 @@ Pyramid::RangeSearch(const DatasetPtr& query,
     search_param.ef = parsed_param.ef_search;
     search_param.radius = radius;
     search_param.search_mode = RANGE_SEARCH;
+
+    if (parsed_param.enable_time_record) {
+        search_param.time_cost = std::make_shared<Timer>();
+        search_param.time_cost->SetThreshold(parsed_param.timeout_ms);
+    }
+
     if (filter != nullptr) {
         search_param.is_inner_id_allowed =
             std::make_shared<InnerIdWrapperFilter>(filter, *label_table_);
     }
     Statistics stats;
+    auto codes = use_reorder_ ? precise_codes_ : base_codes_;
     SearchFunc search_func = [&](const IndexNode* node, const VisitedListPtr& vl) {
         std::shared_lock lock(node->mutex_);
         search_param.ep = node->entry_point_;
         auto results = searcher_->Search(node->graph_,
-                                         base_codes_,
+                                         codes,
                                          vl,
                                          query->GetFloat32Vectors(),
                                          search_param,
@@ -330,10 +349,16 @@ void
 Pyramid::Serialize(StreamWriter& writer) const {
     StreamWriter::WriteVector(writer, label_table_->label_table_);
     base_codes_->Serialize(writer);
+    if (use_reorder_) {
+        precise_codes_->Serialize(writer);
+    }
     root_->Serialize(writer);
 
     // serialize footer (introduced since v0.15)
+    JsonType basic_info;
+    basic_info["max_capacity"].SetInt(max_capacity_);
     auto metadata = std::make_shared<Metadata>();
+    metadata->Set(BASIC_INFO, basic_info);
     auto footer = std::make_shared<Footer>(metadata);
     footer->Write(writer);
 }
@@ -342,18 +367,21 @@ void
 Pyramid::Deserialize(StreamReader& reader) {
     // try to deserialize footer (only in new version)
     auto footer = Footer::Parse(reader);
+    auto metadata = footer->GetMetadata();
+    auto basic_info = metadata->Get(BASIC_INFO);
+    auto max_capacity = basic_info["max_capacity"].GetInt();
 
     BufferStreamReader buffer_reader(
         &reader, std::numeric_limits<uint64_t>::max(), this->allocator_);
 
-    logger::debug("parse with new version format");
-    auto metadata = footer->GetMetadata();
-
     StreamReader::ReadVector(buffer_reader, label_table_->label_table_);
     base_codes_->Deserialize(buffer_reader);
+    if (use_reorder_) {
+        precise_codes_->Deserialize(buffer_reader);
+    }
+    cur_element_count_ = base_codes_->TotalCount();
     root_->Deserialize(buffer_reader);
-    pool_ = std::make_unique<VisitedListPool>(1, allocator_, base_codes_->TotalCount(), allocator_);
-    resize(base_codes_->TotalCount());
+    resize(max_capacity);
 }
 
 std::vector<int64_t>
@@ -379,6 +407,9 @@ Pyramid::Add(const DatasetPtr& base) {
         }
         cur_element_count_ += data_num;
         base_codes_->BatchInsertVector(data_vectors, data_num);
+        if (use_reorder_) {
+            precise_codes_->BatchInsertVector(data_vectors, data_num);
+        }
     }
     std::shared_lock<std::shared_mutex> lock(resize_mutex_);
 
@@ -434,6 +465,9 @@ Pyramid::resize(int64_t new_max_capacity) {
     pool_ = std::make_unique<VisitedListPool>(1, allocator_, new_max_capacity, allocator_);
     label_table_->label_table_.resize(new_max_capacity);
     base_codes_->Resize(new_max_capacity);
+    if (use_reorder_) {
+        precise_codes_->Resize(new_max_capacity);
+    }
     points_mutex_->Resize(new_max_capacity);
     max_capacity_ = new_max_capacity;
 }
@@ -570,6 +604,9 @@ Pyramid::CheckAndMappingExternalParam(const JsonType& external_param,
 void
 Pyramid::Train(const DatasetPtr& base) {
     this->base_codes_->Train(base->GetFloat32Vectors(), base->GetNumElements());
+    if (use_reorder_) {
+        this->precise_codes_->Train(base->GetFloat32Vectors(), base->GetNumElements());
+    }
 }
 std::vector<int64_t>
 Pyramid::Build(const DatasetPtr& base) {
@@ -593,6 +630,8 @@ Pyramid::add_one_point(const std::shared_ptr<IndexNode>& node,
     search_param.ef = pyramid_param_->ef_construction;
     search_param.topk = pyramid_param_->max_degree;
     search_param.search_mode = KNN_SEARCH;
+
+    auto codes = use_reorder_ ? precise_codes_ : base_codes_;
     // add one point
     if (node->graph_ == nullptr) {
         node->InitGraph();
@@ -613,16 +652,11 @@ Pyramid::add_one_point(const std::shared_ptr<IndexNode>& node,
 
         auto vl = pool_->TakeOne();
         Statistics discard_stats;
-        auto results = searcher_->Search(node->graph_,
-                                         base_codes_,
-                                         vl,
-                                         vector,
-                                         search_param,
-                                         (LabelTablePtr) nullptr,
-                                         discard_stats);
+        auto results = searcher_->Search(
+            node->graph_, codes, vl, vector, search_param, (LabelTablePtr) nullptr, discard_stats);
         pool_->ReturnOne(vl);
         mutually_connect_new_element(
-            inner_id, results, node->graph_, base_codes_, points_mutex_, allocator_, alpha_);
+            inner_id, results, node->graph_, codes, points_mutex_, allocator_, alpha_);
         if (update_entry_point) {
             node->entry_point_ = inner_id;
         }
