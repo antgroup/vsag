@@ -15,7 +15,6 @@
 
 #include "kmeans_cluster.h"
 
-#include <cblas.h>
 #include <omp.h>
 
 #include <random>
@@ -23,6 +22,7 @@
 #include "algorithm/inner_index_interface.h"
 #include "diskann_logger.h"
 #include "impl/allocator/safe_allocator.h"
+#include "impl/blas/blas_function.h"
 #include "simd/fp32_simd.h"
 #include "utils/byte_buffer.h"
 #include "utils/util_functions.h"
@@ -102,12 +102,12 @@ KMeansCluster::Run(uint32_t k,
                 {
                     std::lock_guard<std::mutex> lock(mutexes[label]);
                     counts[label]++;
-                    cblas_saxpy(dim_,
-                                1.0F,
-                                datas + i * dim_,
-                                1,
-                                new_centroids.data() + label * static_cast<uint64_t>(dim_),
-                                1);
+                    BlasFunction::Saxpy(dim_,
+                                        1.0F,
+                                        datas + i * dim_,
+                                        1,
+                                        new_centroids.data() + label * static_cast<uint64_t>(dim_),
+                                        1);
                 }
             }
         };
@@ -122,10 +122,10 @@ KMeansCluster::Run(uint32_t k,
 
         for (int j = 0; j < k; ++j) {
             if (counts[j] > 0) {
-                cblas_sscal(dim_,
-                            1.0F / static_cast<float>(counts[j]),
-                            new_centroids.data() + j * static_cast<uint64_t>(dim_),
-                            1);
+                BlasFunction::Sscal(dim_,
+                                    1.0F / static_cast<float>(counts[j]),
+                                    new_centroids.data() + j * static_cast<uint64_t>(dim_),
+                                    1);
                 std::copy(new_centroids.data() + j * static_cast<uint64_t>(dim_),
                           new_centroids.data() + (j + 1) * static_cast<uint64_t>(dim_),
                           k_centroids_ + j * static_cast<uint64_t>(dim_));
@@ -195,26 +195,26 @@ KMeansCluster::find_nearest_one_with_blas(const float* query,
         auto cur_query_count = end - i;
         auto* cur_label = labels.data() + i;
 
-        cblas_sgemm(CblasColMajor,
-                    CblasTrans,
-                    CblasNoTrans,
-                    static_cast<blasint>(k),
-                    static_cast<blasint>(cur_query_count),
-                    dim_,
-                    -2.0F,
-                    k_centroids_,
-                    dim_,
-                    query + i * dim_,
-                    dim_,
-                    0.0F,
-                    distances,
-                    static_cast<blasint>(k));
+        BlasFunction::Sgemm(BlasFunction::ColMajor,
+                            BlasFunction::Trans,
+                            BlasFunction::NoTrans,
+                            static_cast<int32_t>(k),
+                            static_cast<int32_t>(cur_query_count),
+                            dim_,
+                            -2.0F,
+                            k_centroids_,
+                            dim_,
+                            query + i * dim_,
+                            dim_,
+                            0.0F,
+                            distances,
+                            static_cast<int32_t>(k));
 
         auto assign_labels_func = [&](uint64_t start, uint64_t end) -> void {
             omp_set_num_threads(1);
             double thread_local_error = 0.0;
             for (uint64_t i = start; i < end; ++i) {
-                cblas_saxpy(static_cast<blasint>(k), 1.0, y_sqr, 1, distances + i * k, 1);
+                BlasFunction::Saxpy(static_cast<int32_t>(k), 1.0, y_sqr, 1, distances + i * k, 1);
                 auto* min_elem = std::min_element(distances + i * k, distances + i * k + k);
                 auto x_sqr = FP32ComputeIP(query + i * dim_, query + i * dim_, dim_);
                 auto min_index = std::distance(distances + i * k, min_elem);

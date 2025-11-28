@@ -1,4 +1,3 @@
-
 // Copyright 2024-present the vsag project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -15,12 +14,11 @@
 
 #include "random_orthogonal_transformer.h"
 
-#include <cblas.h>
 #include <fmt/format.h>
-#include <lapacke.h>
 
 #include <random>
 
+#include "impl/blas/blas_function.h"
 #include "impl/logger/logger.h"
 
 namespace vsag {
@@ -61,19 +59,19 @@ TransformerMetaPtr
 RandomOrthogonalMatrix::Transform(const float* original_vec, float* transformed_vec) const {
     auto meta = std::make_shared<ROMMeta>();
     // perform matrix-vector multiplication: y = Q * x
-    auto dim = static_cast<blasint>(this->input_dim_);
-    cblas_sgemv(CblasRowMajor,
-                CblasNoTrans,
-                static_cast<blasint>(dim),
-                static_cast<blasint>(dim),
-                1.0F,
-                orthogonal_matrix_.data(),
-                static_cast<blasint>(dim),
-                original_vec,
-                1,
-                0.0F,
-                transformed_vec,
-                1);
+    auto dim = static_cast<int32_t>(this->input_dim_);
+    BlasFunction::Sgemv(BlasFunction::RowMajor,
+                        BlasFunction::NoTrans,
+                        dim,
+                        dim,
+                        1.0F,
+                        orthogonal_matrix_.data(),
+                        dim,
+                        original_vec,
+                        1,
+                        0.0F,
+                        transformed_vec,
+                        1);
 
     return meta;
 }
@@ -81,19 +79,19 @@ RandomOrthogonalMatrix::Transform(const float* original_vec, float* transformed_
 void
 RandomOrthogonalMatrix::InverseTransform(const float* transformed_vec, float* original_vec) const {
     // perform matrix-vector multiplication: x = Q^T * y
-    auto dim = static_cast<blasint>(this->input_dim_);
-    cblas_sgemv(CblasRowMajor,
-                CblasTrans,
-                static_cast<blasint>(dim),
-                static_cast<blasint>(dim),
-                1.0F,
-                orthogonal_matrix_.data(),
-                static_cast<blasint>(dim),
-                transformed_vec,
-                1,
-                0.0F,
-                original_vec,
-                1);
+    auto dim = static_cast<int32_t>(this->input_dim_);
+    BlasFunction::Sgemv(BlasFunction::RowMajor,
+                        BlasFunction::Trans,
+                        dim,
+                        dim,
+                        1.0F,
+                        orthogonal_matrix_.data(),
+                        dim,
+                        transformed_vec,
+                        1,
+                        0.0F,
+                        original_vec,
+                        1);
 }
 
 bool
@@ -110,27 +108,27 @@ RandomOrthogonalMatrix::GenerateRandomOrthogonalMatrix() {
 
     // QR decomposition with LAPACK
     std::vector<float> tau(dim, 0.0);
-    auto lda = static_cast<blasint>(dim);
+    auto lda = static_cast<int32_t>(dim);
 
-    int sgeqrf_result = LAPACKE_sgeqrf(LAPACK_ROW_MAJOR,
-                                       static_cast<blasint>(dim),
-                                       static_cast<blasint>(dim),
-                                       orthogonal_matrix_.data(),
-                                       lda,
-                                       tau.data());
+    int32_t sgeqrf_result = BlasFunction::Sgeqrf(BlasFunction::RowMajor,
+                                                 static_cast<int32_t>(dim),
+                                                 static_cast<int32_t>(dim),
+                                                 orthogonal_matrix_.data(),
+                                                 lda,
+                                                 tau.data());
     if (sgeqrf_result != 0) {
         logger::error(fmt::format("Error in sgeqrf: {}", sgeqrf_result));
         return false;
     }
 
     // generate Q matrix
-    int sorgqr_result = LAPACKE_sorgqr(LAPACK_ROW_MAJOR,
-                                       static_cast<blasint>(dim),
-                                       static_cast<blasint>(dim),
-                                       static_cast<blasint>(dim),
-                                       orthogonal_matrix_.data(),
-                                       lda,
-                                       tau.data());
+    int32_t sorgqr_result = BlasFunction::Sorgqr(BlasFunction::RowMajor,
+                                                 static_cast<int32_t>(dim),
+                                                 static_cast<int32_t>(dim),
+                                                 static_cast<int32_t>(dim),
+                                                 orthogonal_matrix_.data(),
+                                                 lda,
+                                                 tau.data());
     if (sorgqr_result != 0) {
         logger::error(fmt::format("Error in sorgqr: {}", sorgqr_result));
         return false;
@@ -167,12 +165,12 @@ RandomOrthogonalMatrix::ComputeDeterminant() const {
     // copy matrix
     std::vector<float> mat(orthogonal_matrix_.data(), orthogonal_matrix_.data() + dim * dim);
     std::vector<int> ipiv(dim);
-    int sgetrf_result = LAPACKE_sgetrf(LAPACK_ROW_MAJOR,
-                                       static_cast<blasint>(dim),
-                                       static_cast<blasint>(dim),
-                                       mat.data(),
-                                       static_cast<blasint>(dim),
-                                       ipiv.data());
+    int32_t sgetrf_result = BlasFunction::Sgetrf(BlasFunction::RowMajor,
+                                                 static_cast<int32_t>(dim),
+                                                 static_cast<int32_t>(dim),
+                                                 mat.data(),
+                                                 static_cast<int32_t>(dim),
+                                                 ipiv.data());
     if (sgetrf_result != 0) {
         logger::error(fmt::format("Error in sgetrf: {}", sgetrf_result));
         return 0;
