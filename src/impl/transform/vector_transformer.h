@@ -26,7 +26,7 @@ class Allocator;
 DEFINE_POINTER(VectorTransformer);
 DEFINE_POINTER(TransformerMeta);
 
-enum class VectorTransformerType { NONE, PCA, RANDOM_ORTHOGONAL, FHT, RESIDUAL, NORMALIZE };
+enum class VectorTransformerType { NONE, PCA, RANDOM_ORTHOGONAL, FHT, RESIDUAL, NORMALIZE, MRLE };
 
 struct TransformerMeta {
     virtual void
