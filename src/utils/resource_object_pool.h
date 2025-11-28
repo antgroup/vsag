@@ -20,6 +20,7 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <thread>
 #include <type_traits>
 
 #include "impl/allocator/safe_allocator.h"
@@ -60,34 +61,35 @@ public:
 
     std::shared_ptr<T>
     TakeOne() {
+        thread_local static uint64_t prefer_pool_id_{
+            std::hash<std::thread::id>()(std::this_thread::get_id()) % kSubPoolCount};
+        auto pool_id = prefer_pool_id_;
         while (true) {
-            for (int i = 0; i < kSubPoolCount; ++i) {
-                if (sub_pool_mutexes_[i].try_lock()) {
-                    if (pool_[i]->empty()) {
-                        sub_pool_mutexes_[i].unlock();
-                        return this->constructor_();
-                    }
-                    std::shared_ptr<T> obj = pool_[i]->front();
-                    pool_[i]->pop_front();
-                    sub_pool_mutexes_[i].unlock();
-                    obj->Reset();
+            if (sub_pool_mutexes_[pool_id].try_lock()) {
+                prefer_pool_id_ = pool_id;
+                if (pool_[pool_id]->empty()) {
+                    sub_pool_mutexes_[pool_id].unlock();
+                    auto obj = this->constructor_();
+                    obj->source_pool_id_ = pool_id;
                     return obj;
                 }
+                std::shared_ptr<T> obj = pool_[pool_id]->front();
+                pool_[pool_id]->pop_front();
+                sub_pool_mutexes_[pool_id].unlock();
+                obj->source_pool_id_ = pool_id;
+                obj->Reset();
+                return obj;
             }
+            ++pool_id;
+            pool_id %= kSubPoolCount;
         }
     }
 
     void
     ReturnOne(std::shared_ptr<T>& obj) {
-        while (true) {
-            for (int i = 0; i < kSubPoolCount; ++i) {
-                if (sub_pool_mutexes_[i].try_lock()) {
-                    pool_[i]->emplace_back(obj);
-                    sub_pool_mutexes_[i].unlock();
-                    return;
-                }
-            }
-        }
+        auto pool_id = obj->source_pool_id_;
+        std::lock_guard<std::mutex> lock(sub_pool_mutexes_[pool_id]);
+        pool_[pool_id]->emplace_back(obj);
     }
 
 private:
