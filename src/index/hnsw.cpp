@@ -58,6 +58,8 @@ const static uint32_t UPDATE_CHECK_SEARCH_L = 100;
 const static float GENERATE_OMEGA = 0.51;
 static const std::string EMPTY_HNSW = "EMPTY_HNSW";
 
+static const std::string EMPTY_HNSW = "EMPTY_HNSW";
+
 HNSW::HNSW(HnswParameters hnsw_params, const IndexCommonParam& index_common_param)
     : space_(std::move(hnsw_params.space)),
       use_static_(hnsw_params.use_static),
