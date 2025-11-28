@@ -56,6 +56,7 @@ const static std::string BUILD_STATUS = "status";
 const static std::string BUILD_CURRENT_ROUND = "round";
 const static std::string BUILD_NODES = "builded_nodes";
 const static std::string BUILD_FAILED_LOC = "failed_loc";
+const static std::string EMPTY_DISKANN = "EMPTY_DISKANN";
 
 template <typename T>
 Binary
@@ -705,14 +706,8 @@ DiskANN::serialize() const {
     metadata->SetVersion("v0.15");
 
     if (status_ == IndexStatus::EMPTY) {
-        // TODO(wxyu): remove this if condition
-        // if (not Options::Instance().new_version()) {
-        //     // return a special binaryset means empty
-        //     return EmptyIndexBinarySet::Make("EMPTY_DISKANN");
-        // }
-
         metadata->SetEmptyIndex(true);
-        BinarySet bs;
+        BinarySet bs = EmptyIndexBinarySet::Make(EMPTY_DISKANN);
         bs.Set(SERIAL_META_KEY, metadata->ToBinary());
         return bs;
     }
