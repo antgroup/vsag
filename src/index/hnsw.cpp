@@ -57,6 +57,8 @@ const static uint32_t GENERATE_SEARCH_L = 400;
 const static uint32_t UPDATE_CHECK_SEARCH_L = 100;
 const static float GENERATE_OMEGA = 0.51;
 
+static const std::string EMPTY_HNSW = "EMPTY_HNSW";
+
 HNSW::HNSW(HnswParameters hnsw_params, const IndexCommonParam& index_common_param)
     : space_(std::move(hnsw_params.space)),
       use_static_(hnsw_params.use_static),
@@ -488,14 +490,8 @@ HNSW::serialize() const {
     auto metadata = std::make_shared<Metadata>();
 
     if (GetNumElements() == 0) {
-        // TODO(wxyu): remove this if condition
-        // if (not Options::Instance().new_version()) {
-        //     // return a special binaryset means empty
-        //     return EmptyIndexBinarySet::Make("EMPTY_HNSW");
-        // }
-
         metadata->SetEmptyIndex(true);
-        BinarySet bs;
+        auto bs = EmptyIndexBinarySet::Make(EMPTY_HNSW);
         bs.Set(SERIAL_META_KEY, metadata->ToBinary());
         return bs;
     }
