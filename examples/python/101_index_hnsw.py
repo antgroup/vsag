@@ -14,27 +14,18 @@
 
 import pyvsag
 import numpy as np
-import pickle
-import sys
 import json
 
 
-def cal_recall(index, ids, data, k, search_params):
-    correct = 0
-    for _id, vector in zip(ids, data):
-        _ids, dists = index.knn_search(vector=vector, k=k, parameters=search_params)
-        if _id in _ids:
-            correct += 1
-    return correct / len(ids)
-
-
-def float32_hnsw_test():
+def hnsw_test():
     dim = 128
     num_elements = 10000
+    query_elements = 1
 
     # Generating sample data
     ids = range(num_elements)
     data = np.float32(np.random.random((num_elements, dim)))
+    query = np.float32(np.random.random((query_elements, dim)))
 
     # Declaring index
     index_params = json.dumps(
@@ -45,20 +36,22 @@ def float32_hnsw_test():
             "hnsw": {"max_degree": 16, "ef_construction": 100},
         }
     )
+
+    print("[Create] hnsw index")
     index = pyvsag.Index("hnsw", index_params)
 
+    print("[Build] hnsw index")
     index.build(vectors=data, ids=ids, num_elements=num_elements, dim=dim)
 
+    print("[Search] hnsw index")
     search_params = json.dumps({"hnsw": {"ef_search": 100}})
-
-    print("[build] float32 recall:", cal_recall(index, ids, data, 11, search_params))
-    filename = "./example_hnsw.index"
-    file_sizes = index.save(filename)
-
-    index = pyvsag.Index("hnsw", index_params)
-    index.load(filename)
-    print("float32 recall:", cal_recall(index, ids, data, 11, search_params))
+    for q in query:
+        result_ids, result_dists = index.knn_search(
+            vector=q, k=10, parameters=search_params
+        )
+        print("result_ids:", result_ids)
+        print("result_dists:", result_dists)
 
 
 if __name__ == "__main__":
-    float32_hnsw_test()
+    hnsw_test()
