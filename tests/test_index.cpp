@@ -2121,6 +2121,12 @@ TestIndex::TestSearchOvertime(const IndexPtr& index,
             ->Owner(false);
         auto res = index->KnnSearch(query, 10, search_param);
         REQUIRE(res.has_value());
+        auto result = res.value();
+        REQUIRE(result->GetStatstics() != "{}");
+        auto stats = result->GetStatstics({"is_timeout"});
+        REQUIRE(stats.size() == 1);
+        bool has_timeout_result = (stats[0] == "true" or stats[0] == "false");
+        REQUIRE(has_timeout_result);
     }
 }
 }  // namespace fixtures
