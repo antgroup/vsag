@@ -15,28 +15,24 @@
 
 #pragma once
 
-#include <memory>
-
-#include "datacell/flatten_interface.h"
-#include "impl/heap/distance_heap.h"
-#include "impl/reorder/reorder.h"
+#include "inner_string_params.h"
+#include "reorder_parameter.h"
 #include "utils/pointer_define.h"
-
 namespace vsag {
-class FlattenReorder : public ReorderInterface {
+
+DEFINE_POINTER(FlattenReorderParameter);
+class FlattenReorderParameter : public ReorderParameter {
 public:
-    FlattenReorder(const FlattenInterfacePtr& flatten, Allocator* allocator)
-        : flatten_(flatten), allocator_(allocator) {
+    explicit FlattenReorderParameter() : ReorderParameter(std::move(FLATTEN_REORDER)) {
     }
-
-    DistHeapPtr
-    Reorder(const DistHeapPtr& input,
-            const float* query,
-            int64_t topk,
-            Allocator* allocator = nullptr) const override;
-
-private:
-    const FlattenInterfacePtr flatten_;
-    Allocator* allocator_{nullptr};
+    void
+    FromJson(const vsag::JsonType& json) override {
+    }
+    JsonType
+    ToJson() const override {
+        JsonType json;
+        json[REORDER_TYPE].SetString(this->name_);
+        return json;
+    }
 };
 }  // namespace vsag
