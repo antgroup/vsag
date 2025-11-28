@@ -71,7 +71,8 @@ option (DISABLE_AVX512_FORCE "Force disable avx512 instructions" OFF)
 option (DISABLE_AVX512VPOPCNTDQ_FORCE "Force disable avx512vpopcntdq instructions" OFF)
 option (DISABLE_NEON_FORCE "Force disable neon instructions" OFF)
 option (DISABLE_SVE_FORCE "Force disable sve instructions" OFF)
-
+# AIO library configuration
+option (ENABLE_LIBAIO "Whether to enable libaio support" ON)
 
 if (ENABLE_CXX11_ABI)
     add_definitions (-D_GLIBCXX_USE_CXX11_ABI=1)
@@ -130,6 +131,26 @@ else ()
     if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
         set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -stdlib=libstdc++")
     endif ()
+endif ()
+
+# AIO library detection
+if (ENABLE_LIBAIO)
+    find_library (AIO_LIBRARY aio)
+    if (AIO_LIBRARY)
+        message (STATUS "Found libaio: ${AIO_LIBRARY}")
+        set (HAVE_LIBAIO 1)
+        add_definitions (-DHAVE_LIBAIO=1)
+    else ()
+        message (WARNING "libaio not found, disabling async I/O support")
+        set (HAVE_LIBAIO 0)
+        add_definitions (-DHAVE_LIBAIO=0)
+        add_definitions (-DNO_LIBAIO=1)
+    endif ()
+else ()
+    message (STATUS "libaio support disabled by user")
+    set (HAVE_LIBAIO 0)
+    add_definitions (-DHAVE_LIBAIO=0)
+    add_definitions (-DNO_LIBAIO=1)
 endif ()
 
 # ccache
