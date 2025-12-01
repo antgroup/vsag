@@ -21,7 +21,7 @@ DistHeapPtr
 FlattenReorder::Reorder(const DistHeapPtr& input,
                         const float* query,
                         int64_t topk,
-                        Allocator* allocator) {
+                        Allocator* allocator) const {
     if (allocator == nullptr) {
         allocator = allocator_;
     }

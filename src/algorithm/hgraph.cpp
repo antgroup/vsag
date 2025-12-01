@@ -30,6 +30,7 @@
 #include "impl/heap/standard_heap.h"
 #include "impl/odescent/odescent_graph_builder.h"
 #include "impl/pruning_strategy.h"
+#include "impl/reorder/pqr_reorder.h"
 #include "index/index_impl.h"
 #include "index/iterator_filter.h"
 #include "io/reader_io_parameter.h"
@@ -77,7 +78,12 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
     if (use_reorder_) {
         block_size_per_vector =
             std::max(block_size_per_vector, this->high_precise_codes_->code_size_);
-        reorder_ = std::make_shared<FlattenReorder>(this->high_precise_codes_, allocator_);
+        if (hgraph_param->reorder_param->name_ == PQR_REORDER) {
+            reorder_ = std::make_shared<PqrReorder>(
+                this->basic_flatten_codes_, common_param, hgraph_param->reorder_param);
+        } else {
+            reorder_ = std::make_shared<FlattenReorder>(this->high_precise_codes_, allocator_);
+        }
     }
     if (this->extra_infos_ != nullptr) {
         block_size_per_vector =
@@ -108,6 +114,7 @@ HGraph::Train(const DatasetPtr& base) {
     this->basic_flatten_codes_->Train(base_data, base->GetNumElements());
     if (use_reorder_) {
         this->high_precise_codes_->Train(base_data, base->GetNumElements());
+        this->reorder_->Train(base_data, base->GetNumElements());
     }
 }
 
@@ -392,7 +399,7 @@ HGraph::KnnSearch(const DatasetPtr& query,
     }
 
     if (use_reorder_) {
-        this->reorder(query_data, this->high_precise_codes_, search_result, k);
+        this->reorder(query_data, search_result, k);
     }
 
     while (search_result->Size() > k) {
@@ -588,7 +595,7 @@ HGraph::RangeSearch(const DatasetPtr& query,
                                                 (VisitedListPtr) nullptr,
                                                 stats);
     if (use_reorder_) {
-        this->reorder(raw_query, this->high_precise_codes_, search_result, limited_size);
+        this->reorder(raw_query, search_result, limited_size);
     }
 
     if (limited_size > 0) {
@@ -803,6 +810,7 @@ HGraph::Serialize(StreamWriter& writer) const {
     this->bottom_graph_->Serialize(writer);
     if (this->use_reorder_) {
         this->high_precise_codes_->Serialize(writer);
+        reorder_->Serialize(writer);
     }
     for (const auto& route_graph : this->route_graphs_) {
         route_graph->Serialize(writer);
@@ -874,6 +882,7 @@ HGraph::Deserialize(StreamReader& reader) {
         this->bottom_graph_->Deserialize(buffer_reader);
         if (this->use_reorder_) {
             this->high_precise_codes_->Deserialize(buffer_reader);
+            reorder_->Deserialize(buffer_reader);
         }
 
         for (auto& route_graph : this->route_graphs_) {
@@ -1001,6 +1010,7 @@ HGraph::add_one_point(const void* data, int level, InnerIdType inner_id) {
     this->basic_flatten_codes_->InsertVector(data, inner_id);
     if (use_reorder_) {
         this->high_precise_codes_->InsertVector(data, inner_id);
+        reorder_->InsertVector(data, inner_id);
     }
     if (create_new_raw_vector_) {
         raw_vector_->InsertVector(data, inner_id);
@@ -1116,6 +1126,7 @@ HGraph::resize(uint64_t new_size) {
         this->basic_flatten_codes_->Resize(new_size_power_2);
         if (use_reorder_) {
             this->high_precise_codes_->Resize(new_size_power_2);
+            this->reorder_->Resize(new_size_power_2);
         }
         if (this->extra_infos_ != nullptr) {
             this->extra_infos_->Resize(new_size_power_2);
@@ -1231,10 +1242,7 @@ HGraph::elp_optimize() {
 }
 
 void
-HGraph::reorder(const void* query,
-                const FlattenInterfacePtr& flatten,
-                DistHeapPtr& candidate_heap,
-                int64_t k) const {
+HGraph::reorder(const void* query, DistHeapPtr& candidate_heap, int64_t k) const {
     uint64_t size = candidate_heap->Size();
     if (k <= 0) {
         k = static_cast<int64_t>(size);
@@ -1325,13 +1333,60 @@ static const std::string HGRAPH_PARAMS_TEMPLATE =
         },
         "{HGRAPH_SUPPORT_DUPLICATE}": false,
         "{HGRAPH_SUPPORT_TOMBSTONE}": false,
-        "{EF_CONSTRUCTION_KEY}": 400
+        "{EF_CONSTRUCTION_KEY}": 400,
+        "{REORDER_KEY}": {
+            "{IO_PARAMS_KEY}": {
+                "{TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
+                "{IO_FILE_PATH_KEY}": "{DEFAULT_FILE_PATH_VALUE}"
+            },
+            "{CODES_TYPE_KEY}": "flatten",
+            "{QUANTIZATION_PARAMS_KEY}": {
+                "{TYPE_KEY}": "{QUANTIZATION_TYPE_VALUE_FP32}",
+                "{SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE_KEY}": 0.05,
+                "{PCA_DIM_KEY}": 0,
+                "{PRODUCT_QUANTIZATION_DIM_KEY}": 1,
+                "{HOLD_MOLDS}": false
+            },
+            "{REORDER_TYPE}": "flatten_reorder"
+        }
     })";
 
 ParamPtr
 HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
                                      const IndexCommonParam& common_param) {
     const ConstParamMap external_mapping = {{
+                                                REORDER_CODES_IO_TYPE,
+                                                {
+                                                    REORDER_KEY,
+                                                    IO_PARAMS_KEY,
+                                                    TYPE_KEY,
+                                                },
+                                            },
+                                            {
+                                                REORDER_CODES_IO_FILE,
+                                                {
+                                                    REORDER_KEY,
+                                                    IO_PARAMS_KEY,
+                                                    IO_FILE_PATH_KEY,
+                                                },
+                                            },
+                                            {
+                                                REORDER_CODES_QUANTIZATION_TYPE,
+                                                {
+                                                    REORDER_KEY,
+                                                    QUANTIZATION_PARAMS_KEY,
+                                                    TYPE_KEY,
+                                                },
+                                            },
+                                            {
+                                                HGRAPH_REORDER_TYPE,
+                                                {
+                                                    REORDER_KEY,
+                                                    REORDER_TYPE,
+                                                },
+                                            },
+
+                                            {
                                                 HGRAPH_USE_REORDER,
                                                 {
                                                     USE_REORDER_KEY,
@@ -1968,7 +2023,7 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     this->pool_->ReturnOne(vt);
 
     if (use_reorder_) {
-        this->reorder(raw_query, this->high_precise_codes_, search_result, k);
+        this->reorder(raw_query, search_result, k);
     }
 
     while (search_result->Size() > k) {
