@@ -17,11 +17,11 @@
 
 #include <string.h>
 
+#include <chrono>
+#include <thread>
+
 #include "vsag/binaryset.h"
 #include "vsag/readerset.h"
-
-#include <thread>
-#include <chrono>
 
 namespace fixtures {
 
