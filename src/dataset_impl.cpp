@@ -15,6 +15,8 @@
 
 #include "dataset_impl.h"
 
+#include "typing.h"
+
 namespace vsag {
 
 DatasetPtr
@@ -26,6 +28,20 @@ DatasetPtr
 DatasetImpl::MakeEmptyDataset() {
     auto result = std::make_shared<DatasetImpl>();
     result->Dim(0)->NumElements(1);
+    return result;
+}
+
+std::vector<std::string>
+DatasetImpl::GetStatstics(const std::vector<std::string>& stat_keys) const {
+    auto json = JsonType::parse(this->statstics_);
+    std::vector<std::string> result;
+    for (const auto& key : stat_keys) {
+        if (json.contains(key)) {
+            result.emplace_back(json[key].dump());
+        } else {
+            result.emplace_back("");
+        }
+    }
     return result;
 }
 
