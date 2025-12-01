@@ -14,63 +14,61 @@
 
 import pyvsag
 import numpy as np
-import pickle
-import sys
 import json
 
 
-def cal_recall(index, ids, data, k, search_params):
-    correct = 0
-    for _id, vector in zip(ids, data):
-        _ids, dists = index.knn_search(vector=vector, k=k, parameters=search_params)
-        if _id in _ids:
-            correct += 1
-    return correct / len(ids)
-
-
-def float32_diskann_test():
+def bruteforce_example():
     dim = 128
-    num_elements = 1000
+    num_elements = 10000
+    query_elements = 1
 
     # Generating sample data
     ids = range(num_elements)
     data = np.float32(np.random.random((num_elements, dim)))
+    query = np.float32(np.random.random((query_elements, dim)))
 
     # Declaring index
     index_params = json.dumps(
         {
             "dtype": "float32",
             "metric_type": "l2",
-            "dim": dim,
+            "dim": 128,
             "diskann": {
-                "max_degree": 32,
-                "ef_construction": 100,
+                "max_degree": 16,
+                "ef_construction": 200,
                 "pq_sample_rate": 0.5,
-                "pq_dims": 32,
+                "pq_dims": 9,
                 "use_pq_search": True,
+                "use_async_io": True,
+                "use_bsa": True,
             },
         }
     )
+
+    print("[Create] diskann index")
     index = pyvsag.Index("diskann", index_params)
 
+    print("[Build] diskann index")
     index.build(vectors=data, ids=ids, num_elements=num_elements, dim=dim)
 
+    print("[Search] diskann index")
     search_params = json.dumps(
-        {"diskann": {"ef_search": 100, "beam_search": 4, "io_limit": 200}}
+        {
+            "diskann": {
+                "ef_search": 100,
+                "beam_search": 4,
+                "io_limit": 50,
+                "use_reorder": True,
+            }
+        }
     )
-    print("[build] float32 recall:", cal_recall(index, ids, data, 11, search_params))
-
-    root_dir = "/tmp/"
-    file_sizes = index.save(root_dir)
-
-    index = pyvsag.Index("diskann", index_params)
-    index.load(root_dir, file_sizes, True)
-    print("[memory] float32 recall:", cal_recall(index, ids, data, 11, search_params))
-
-    index = pyvsag.Index("diskann", index_params)
-    index.load(root_dir, file_sizes, False)
-    print("[disk] float32 recall:", cal_recall(index, ids, data, 11, search_params))
+    for q in query:
+        result_ids, result_dists = index.knn_search(
+            vector=q, k=10, parameters=search_params
+        )
+        print("result_ids:", result_ids)
+        print("result_dists:", result_dists)
 
 
 if __name__ == "__main__":
-    float32_diskann_test()
+    bruteforce_example()
