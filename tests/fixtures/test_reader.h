@@ -17,6 +17,9 @@
 
 #include <string.h>
 
+#include <chrono>
+#include <thread>
+
 #include "vsag/binaryset.h"
 #include "vsag/readerset.h"
 
@@ -29,6 +32,7 @@ public:
 
     void
     Read(uint64_t offset, uint64_t len, void* dest) override {
+        std::this_thread::sleep_for(std::chrono::milliseconds(30));
         memcpy((char*)dest, binary_.data.get() + offset, len);
     }
 
