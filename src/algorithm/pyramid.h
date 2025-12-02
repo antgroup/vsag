@@ -81,7 +81,7 @@ public:
     Status status_{Status::NO_INDEX};
 
 private:
-    STLUnorderedMap<std::string, std::shared_ptr<IndexNode>> children_;
+    UnorderedMap<std::string, std::shared_ptr<IndexNode>> children_;
     Allocator* allocator_{nullptr};
     GraphInterfaceParamPtr graph_param_{nullptr};
 };
