@@ -78,7 +78,8 @@ PyramidTestIndex::GeneratePyramidBuildParametersString(const std::string& metric
             "graph_type": "{}",
             "base_quantization_type": "{}",
             "precise_quantization_type": "{}",
-            "use_reorder": {}
+            "use_reorder": {},
+            "index_min_size": 28
         }}
     }}
     )";

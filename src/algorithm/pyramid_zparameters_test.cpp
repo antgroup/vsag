@@ -20,9 +20,9 @@
 #include "parameter_test.h"
 
 struct PyramidDefaultParam {
-    int max_degree = 16;
-    float alpha = 1.2f;
-    int ef_construction = 200;
+    int max_degree = 32;
+    float alpha = 1.3f;
+    int ef_construction = 400;
     bool use_reorder = true;
     std::string base_quantization_type = "fp32";
     std::vector<int> no_build_levels = {0, 1, 2};
@@ -33,8 +33,9 @@ struct PyramidDefaultParam {
     std::string precise_quantization_type = "fp32";
     int base_pq_dim = 0;
     std::string base_file_path = "base_path";
-    std::string precise_io_type = "memory_io";
+    std::string precise_io_type = "block_memory_io";
     std::string precise_file_path = "precise_path";
+    uint32_t index_min_size = 1000;
 };
 
 std::string
@@ -93,7 +94,8 @@ generate_pyramid(const PyramidDefaultParam& param) {
                 }}
             }},
             "type": "pyramid",
-            "use_reorder": {}
+            "use_reorder": {},
+            "index_min_size": {}
         }}
     )";
     return fmt::format(param_str,
@@ -111,7 +113,8 @@ generate_pyramid(const PyramidDefaultParam& param) {
                        param.precise_file_path,
                        param.precise_io_type,
                        param.precise_quantization_type,
-                       param.use_reorder);
+                       param.use_reorder,
+                       param.index_min_size);
 }
 
 TEST_CASE("Pyramid Parameters Test", "[ut][PyramidParameters]") {
@@ -170,4 +173,5 @@ TEST_CASE("Pyramid Parameters CheckCompatibility", "[ut][PyramidParameter][Check
     TEST_COMPATIBILITY_CASE("different build thread count", build_thread_count, 4, 8, true);
     TEST_COMPATIBILITY_CASE(
         "different precise quantization type", precise_quantization_type, "fp32", "fp16", false);
+    TEST_COMPATIBILITY_CASE("different index min size", index_min_size, 500, 1500, false);
 }

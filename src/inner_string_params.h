@@ -144,6 +144,7 @@ const char* const SPARSE_VECTOR_DATA_CELL = "sparse_vector_data_cell";
 
 // for pyramid index
 const char* const NO_BUILD_LEVELS = "no_build_levels";
+const char* const INDEX_MIN_SIZE = "index_min_size";
 
 const char* const GRAPH_SUPPORT_REMOVE = "support_remove";
 const char* const REMOVE_FLAG_BIT = "remove_flag_bit";
