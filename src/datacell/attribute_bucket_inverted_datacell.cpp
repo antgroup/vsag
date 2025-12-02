@@ -239,7 +239,14 @@ AttributeBucketInvertedDataCell::UpdateBitsetsByAttr(const AttributeSet& attribu
 
     for (const auto* attr : attributes.attrs_) {
         const auto& name = attr->name_;
+        auto iter = field_2_value_map_.find(name);
+        if (iter == field_2_value_map_.end()) {
+            field_2_value_map_[name] =
+                std::make_shared<AttrValueMap>(allocator_, this->bitset_type_);
+        }
         auto& value_map = this->field_2_value_map_[name];
+        auto value_type = attr->GetValueType();
+        this->field_type_map_.SetTypeOfField(name, value_type);
         insert_by_type(value_map, attr, offset_id, bucket_id);
     }
 }
