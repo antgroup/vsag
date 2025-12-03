@@ -50,7 +50,7 @@ void
 IndexNode::Build(ODescent& odescent) {
     std::unique_lock lock(mutex_);
     // Build an index when the level corresponding to the current node requires indexing
-    if (ids_.size() > 0) {
+    if (not ids_.empty()) {
         Init();
     }
     if (status_ == Status::GRAPH) {
@@ -262,8 +262,8 @@ Pyramid::search_impl(const DatasetPtr& query,
                      const SearchFunc& search_func,
                      int64_t ef_search) const {
     const auto* query_path = query->GetPaths();
-    CHECK_ARGUMENT(
-        query_path != nullptr || root_->status_ != IndexNode::Status::NO_INDEX,  // NOLINT
+    CHECK_ARGUMENT(  // NOLINT
+        query_path != nullptr || root_->status_ != IndexNode::Status::NO_INDEX,
         "query_path is required when level0 is not built");
     CHECK_ARGUMENT(query->GetFloat32Vectors() != nullptr, "query vectors is required");
 
@@ -693,12 +693,12 @@ Pyramid::search_node(const IndexNode* node,
 
     if (node->status_ == IndexNode::Status::FLAT) {
         results = std::make_shared<StandardHeap<true, false>>(allocator_, -1);
-        auto ids_ptr = node->ids_.data();
+        const auto* ids_ptr = node->ids_.data();
         auto id_count = node->ids_.size();
         Vector<InnerIdType> valid_ids(allocator_);
 
         if (search_param.is_inner_id_allowed != nullptr) {
-            auto& inner_filter = search_param.is_inner_id_allowed;
+            const auto& inner_filter = search_param.is_inner_id_allowed;
             valid_ids.reserve(node->ids_.size());
             for (size_t i = 0; i < id_count; ++i) {
                 if (inner_filter->CheckValid(ids_ptr[i])) {
