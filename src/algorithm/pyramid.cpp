@@ -603,6 +603,10 @@ Pyramid::Build(const DatasetPtr& base) {
         std::string current_path = path[i];
         auto path_slices = split(current_path, PART_SLASH);
         std::shared_ptr<IndexNode> node = root_;
+        if (std::find(no_build_levels_.begin(), no_build_levels_.end(), node->level_) ==
+            no_build_levels_.end()) {
+            node->ids_.push_back(i);
+        }
         for (auto& path_slice : path_slices) {
             node = node->GetChild(path_slice, true);
             if (std::find(no_build_levels_.begin(), no_build_levels_.end(), node->level_) ==
