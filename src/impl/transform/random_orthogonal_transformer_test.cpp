@@ -15,12 +15,11 @@
 
 #include "random_orthogonal_transformer.h"
 
-#include <cblas.h>
-
 #include <catch2/catch_test_macros.hpp>
 
 #include "fixtures.h"
 #include "impl/allocator/safe_allocator.h"
+#include "impl/blas/blas_function.h"
 #include "storage/serialization_template_test.h"
 
 using namespace vsag;
@@ -71,20 +70,20 @@ TestOrthogonality(RandomOrthogonalMatrix& rom, uint64_t dim) {
 
     // compute Q ^ T * Q
     std::vector<float> result(dim * dim, 0.0);
-    cblas_sgemm(CblasRowMajor,
-                CblasTrans,
-                CblasNoTrans,
-                dim,
-                dim,
-                dim,
-                1.0f,
-                Q.data(),
-                dim,
-                Q.data(),
-                dim,
-                0.0f,
-                result.data(),
-                dim);
+    BlasFunction::Sgemm(BlasFunction::RowMajor,
+                        BlasFunction::Trans,
+                        BlasFunction::NoTrans,
+                        dim,
+                        dim,
+                        dim,
+                        1.0F,
+                        Q.data(),
+                        dim,
+                        Q.data(),
+                        dim,
+                        0.0F,
+                        result.data(),
+                        dim);
 
     // constructing unit matrices
     std::vector<float> identity(dim * dim, 0.0);
