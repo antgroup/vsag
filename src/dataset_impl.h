@@ -274,8 +274,8 @@ public:
     }
 
     DatasetPtr
-    Statistics(const std::string& statisticss) override {
-        this->statistics_ = statisticss;
+    Statistics(const std::string& Statisticss) override {
+        this->Statistics_ = Statisticss;
         return shared_from_this();
     }
 
@@ -284,7 +284,7 @@ public:
 
     std::string
     GetStatistics() const override {
-        return this->statistics_;
+        return this->Statistics_;
     }
 
     static DatasetPtr
@@ -295,7 +295,7 @@ private:
     std::unordered_map<std::string, var> data_;
     Allocator* allocator_ = nullptr;
 
-    std::string statistics_{"{}"};
+    std::string Statistics_{"{}"};
 };
 
 };  // namespace vsag

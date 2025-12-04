@@ -15,6 +15,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <shared_mutex>
 #include <vector>
 
@@ -27,6 +28,7 @@
 #include "parameter.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
+#include "typing.h"
 #include "utils/function_exists_check.h"
 #include "utils/pointer_define.h"
 #include "vsag/dataset.h"
@@ -39,6 +41,23 @@ DEFINE_POINTER(LabelTable);
 DEFINE_POINTER(IndexFeatureList);
 
 class IndexCommonParam;
+
+class Statistics {
+public:
+    [[nodiscard]] std::string
+    Dump() const {
+        JsonType j;
+        j["is_timeout"].SetBool(is_timeout.load(std::memory_order_relaxed));
+        j["dist_cmp"].SetInt(dist_cmp.load(std::memory_order_relaxed));
+        j["hops"].SetInt(hops.load(std::memory_order_relaxed));
+        return j.Dump();
+    }
+
+public:
+    std::atomic<bool> is_timeout{false};
+    std::atomic<uint32_t> dist_cmp{0};
+    std::atomic<uint32_t> hops{0};
+};
 
 class InnerIndexInterface {
 public:
@@ -163,6 +182,9 @@ public:
 
     virtual std::vector<IndexDetailInfo>
     GetIndexDetailInfos() const;
+
+    virtual DetailDataPtr
+    GetDetailDataByName(const std::string& name, IndexDetailInfo& info) const;
 
     [[nodiscard]] virtual int64_t
     GetEstimateBuildMemory(const int64_t num_elements) const {
@@ -395,6 +417,9 @@ protected:
                       int64_t topk,
                       const std::string& search_param) const;
 
+    virtual DetailDataPtr
+    get_detail_data_by_info(const IndexDetailInfo& info) const;
+
 public:
     LabelTablePtr label_table_{nullptr};
     mutable std::shared_mutex label_lookup_mutex_{};  // lock for label_lookup_ & labels_
@@ -423,7 +448,7 @@ protected:
     uint64_t extra_info_size_{0};
     ExtraInfoInterfacePtr extra_infos_{nullptr};
 
-    uint64_t build_thread_count_{100};
+    uint64_t build_thread_count_{1};
 
     std::shared_ptr<SafeThreadPool> build_pool_{nullptr};
 

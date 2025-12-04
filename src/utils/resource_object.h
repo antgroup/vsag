@@ -15,6 +15,8 @@
 
 #pragma once
 
+#include <cstdint>
+
 namespace vsag {
 
 class ResourceObject {
@@ -34,6 +36,14 @@ public:
      */
     virtual void
     Reset() = 0;
+
+    /**
+     * @brief The ID of the sub-pool this resource object belongs to.
+     *
+     * This is used to ensure an object is returned to the same sub-pool it was
+     * taken from, preventing pool imbalance under concurrent access.
+     */
+    int64_t source_pool_id_{0};
 };
 
 }  // namespace vsag
