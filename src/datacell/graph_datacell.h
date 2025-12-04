@@ -70,6 +70,11 @@ public:
         this->io_ = io;
     }
 
+    virtual void
+    InitIO(const IOParamPtr& io_param) override {
+        this->io_->InitIO(io_param);
+    }
+
     /****
      * prefetch neighbors of a base point with id
      * @param id of base point

@@ -17,7 +17,11 @@
 
 #include <fmt/format.h>
 
+#include <atomic>
+#include <cstdlib>
+
 #include "algorithm/hgraph.h"
+#include "algorithm/inner_index_interface.h"
 #include "impl/allocator/safe_allocator.h"
 #include "impl/cluster/kmeans_cluster.h"
 #include "inner_string_params.h"
@@ -85,7 +89,10 @@ IVFNearestPartition::Train(const DatasetPtr dataset) {
 Vector<BucketIdType>
 IVFNearestPartition::ClassifyDatas(const void* datas,
                                    int64_t count,
-                                   BucketIdType buckets_per_data) const {
+                                   BucketIdType buckets_per_data,
+                                   Statistics& stats) const {
+    std::mutex dist_cmp_reduce_mutex;
+    uint32_t dist_cmp = 0;
     Vector<BucketIdType> result(buckets_per_data * count, -1, this->allocator_);
     auto task = [&](int64_t i) {
         auto query = Dataset::Make();
@@ -103,6 +110,11 @@ IVFNearestPartition::ClassifyDatas(const void* datas,
         for (int64_t j = 0; j < search_result->GetDim(); ++j) {
             result[i * buckets_per_data + j] = static_cast<BucketIdType>(result_ids[j]);
         }
+
+        std::scoped_lock lock(dist_cmp_reduce_mutex);
+        // the return value of GetStatistics always has the same length as the input keys, and
+        // atoi("") returns a `0`.
+        dist_cmp += std::atoi(search_result->GetStatistics({"dist_cmp"})[0].c_str());
     };
     if (thread_pool_ == nullptr) {
         for (int64_t i = 0; i < count; ++i) {
@@ -117,8 +129,12 @@ IVFNearestPartition::ClassifyDatas(const void* datas,
             item.get();
         }
     }
+
+    stats.dist_cmp.fetch_add(dist_cmp, std::memory_order_relaxed);
+
     return std::move(result);
 }
+
 void
 IVFNearestPartition::Serialize(StreamWriter& writer) {
     IVFPartitionStrategy::Serialize(writer);

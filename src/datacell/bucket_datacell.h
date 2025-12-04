@@ -17,7 +17,9 @@
 
 #include <shared_mutex>
 
+#include "algorithm/inner_index_interface.h"
 #include "bucket_interface.h"
+#include "impl/inner_search_param.h"
 #include "io/io_array.h"
 #include "quantization/product_quantization/pq_fastscan_quantizer.h"
 #include "simd/fp32_simd.h"
@@ -297,7 +299,8 @@ BucketDataCell<QuantTmpl, IOTmpl>::Train(const void* data, uint64_t count) {
             data_ptr = train_data_buffer.data();
         }
         Vector<float> centroid(this->quantizer_->GetDim(), allocator_);
-        auto buckets = strategy_->ClassifyDatas(data_ptr, count, 1);
+        Statistics stats;
+        auto buckets = strategy_->ClassifyDatas(data_ptr, count, 1, stats);
         for (int i = 0; i < count; ++i) {
             strategy_->GetCentroid(buckets[i], centroid);
             for (int j = 0; j < dim; ++j) {

@@ -15,6 +15,7 @@
 
 #include "basic_optimizer.h"
 
+#include "algorithm/inner_index_interface.h"
 #include "searcher/basic_searcher.h"
 
 namespace vsag {
@@ -24,13 +25,14 @@ double
 Optimizer<OptimizableOBJ>::Optimize(std::shared_ptr<OptimizableOBJ> obj) {
     vsag::logger::info(fmt::format("============Start Optimize==========="));
     bool have_improvement = false;
-    double original_loss = obj->MockRun();
+    Statistics stats;
+    double original_loss = obj->MockRun(stats);
 
     // generate a group of runtime params
     UnorderedMap<std::string, float> current_params(allocator_);
     for (auto& param : parameters_) {
         bool successful_optimized = false;
-        double before_loss = obj->MockRun();
+        double before_loss = obj->MockRun(stats);
         double best_loss = before_loss;
         double best_improve = 0;
 
@@ -42,7 +44,7 @@ Optimizer<OptimizableOBJ>::Optimize(std::shared_ptr<OptimizableOBJ> obj) {
             }
 
             // evaluate
-            double loss = obj->MockRun();
+            double loss = obj->MockRun(stats);
             double improvement = (before_loss - loss) / before_loss * 100;
             vsag::logger::info(
                 fmt::format("setting {} -> {}, get new loss = {:.3f} from before = {:.3f}, "
@@ -90,7 +92,7 @@ Optimizer<OptimizableOBJ>::Optimize(std::shared_ptr<OptimizableOBJ> obj) {
     double end2end_improvement = 0;
     if (have_improvement) {
         obj->SetRuntimeParameters(best_params_);
-        double optimized_loss = obj->MockRun();
+        double optimized_loss = obj->MockRun(stats);
         end2end_improvement = (original_loss - optimized_loss) / original_loss * 100;
         for (const auto& param : best_params_) {
             vsag::logger::info(fmt::format("setting {} -> {:.1f}", param.first, param.second));

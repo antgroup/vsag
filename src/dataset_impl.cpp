@@ -275,7 +275,7 @@ DatasetImpl::Append(const DatasetPtr& other) {
 
 std::vector<std::string>
 DatasetImpl::GetStatistics(const std::vector<std::string>& stat_keys) const {
-    auto json = JsonType::Parse(this->statistics_);
+    auto json = JsonType::Parse(this->Statistics_);
     std::vector<std::string> result;
     for (const auto& key : stat_keys) {
         if (json.Contains(key)) {

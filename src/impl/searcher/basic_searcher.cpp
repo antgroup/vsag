@@ -15,8 +15,10 @@
 
 #include "basic_searcher.h"
 
+#include <atomic>
 #include <limits>
 
+#include "algorithm/inner_index_interface.h"
 #include "impl/heap/standard_heap.h"
 #include "utils/linear_congruential_generator.h"
 
@@ -73,13 +75,14 @@ BasicSearcher::Search(const GraphInterfacePtr& graph,
                       const VisitedListPtr& vl,
                       const void* query,
                       const InnerSearchParam& inner_search_param,
-                      const LabelTablePtr& label_table) const {
+                      const LabelTablePtr& label_table,
+                      Statistics& stats) const {
     if (inner_search_param.search_mode == KNN_SEARCH) {
         return this->search_impl<KNN_SEARCH>(
-            graph, flatten, vl, query, inner_search_param, label_table);
+            graph, flatten, vl, query, inner_search_param, label_table, stats);
     }
     return this->search_impl<RANGE_SEARCH>(
-        graph, flatten, vl, query, inner_search_param, label_table);
+        graph, flatten, vl, query, inner_search_param, label_table, stats);
 }
 
 DistHeapPtr
@@ -88,8 +91,10 @@ BasicSearcher::Search(const GraphInterfacePtr& graph,
                       const VisitedListPtr& vl,
                       const void* query,
                       const InnerSearchParam& inner_search_param,
-                      IteratorFilterContext* iter_ctx) const {
-    return this->search_impl<KNN_SEARCH>(graph, flatten, vl, query, inner_search_param, iter_ctx);
+                      IteratorFilterContext* iter_ctx,
+                      Statistics& stats) const {
+    return this->search_impl<KNN_SEARCH>(
+        graph, flatten, vl, query, inner_search_param, iter_ctx, stats);
 }
 
 template <InnerSearchMode mode>
@@ -99,7 +104,8 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                            const VisitedListPtr& vl,
                            const void* query,
                            const InnerSearchParam& inner_search_param,
-                           IteratorFilterContext* iter_ctx) const {
+                           IteratorFilterContext* iter_ctx,
+                           Statistics& stats) const {
     Allocator* alloc =
         inner_search_param.search_alloc == nullptr ? allocator_ : inner_search_param.search_alloc;
     auto top_candidates = std::make_shared<StandardHeap<true, false>>(alloc, -1);
@@ -240,7 +246,8 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                            const VisitedListPtr& vl,
                            const void* query,
                            const InnerSearchParam& inner_search_param,
-                           const LabelTablePtr& label_table) const {
+                           const LabelTablePtr& label_table,
+                           Statistics& stats) const {
     Allocator* alloc =
         inner_search_param.search_alloc == nullptr ? allocator_ : inner_search_param.search_alloc;
     auto top_candidates = std::make_shared<StandardHeap<true, false>>(alloc, -1);
@@ -279,6 +286,7 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
     };
 
     flatten->Query(&dist, computer, &ep, 1, alloc);
+    ++dist_cmp;
     if (check_func(ep)) {
         top_candidates->Push(dist, ep);
         lower_bound = top_candidates->Top().first;
@@ -295,12 +303,12 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
     vl->Set(ep);
 
     while (not candidate_set->Empty()) {
-        hops++;
+        ++hops;
         auto current_node_pair = candidate_set->Top();
 
         if (inner_search_param.time_cost != nullptr and
             inner_search_param.time_cost->CheckOvertime()) {
-            (*inner_search_param.stats)["is_timeout"].SetBool(true);
+            stats.is_timeout.store(true, std::memory_order_relaxed);
             break;
         }
 
@@ -324,10 +332,9 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                                  to_be_visited_id,
                                  neighbors);
 
-        dist_cmp += count_no_visited;
-
         flatten->Query(
             line_dists.data(), computer, to_be_visited_id.data(), count_no_visited, alloc);
+        dist_cmp += count_no_visited;
 
         for (uint32_t i = 0; i < count_no_visited; i++) {
             dist = line_dists[i];
@@ -380,6 +387,9 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
         }
     }
 
+    stats.dist_cmp.fetch_add(dist_cmp, std::memory_order_relaxed);
+    stats.hops.fetch_add(hops, std::memory_order_relaxed);
+
     return top_candidates;
 }
 
@@ -412,7 +422,7 @@ BasicSearcher::SetMockParameters(const GraphInterfacePtr& graph,
 }
 
 double
-BasicSearcher::MockRun() const {
+BasicSearcher::MockRun(Statistics& stats) const {
     uint64_t n_trials = std::min(mock_n_trials_, mock_flatten_->TotalCount());
 
     double time_cost = 0;
@@ -427,7 +437,13 @@ BasicSearcher::MockRun() const {
 
         // mock run
         auto st = std::chrono::high_resolution_clock::now();
-        Search(mock_graph_, mock_flatten_, vl, raw_data.data(), mock_inner_search_param_);
+        Search(mock_graph_,
+               mock_flatten_,
+               vl,
+               raw_data.data(),
+               mock_inner_search_param_,
+               (LabelTablePtr) nullptr,
+               stats);
         auto ed = std::chrono::high_resolution_clock::now();
         time_cost += std::chrono::duration<double>(ed - st).count();
 

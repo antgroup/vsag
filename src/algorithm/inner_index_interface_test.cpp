@@ -177,4 +177,6 @@ TEST_CASE("InnerIndexInterface NOT Implemented", "[ut][InnerIndexInterface]") {
 
     SearchParam param(true, "", nullptr, nullptr);
     REQUIRE_THROWS(empty_index->KnnSearch(nullptr, 0, param));
+
+    REQUIRE_NOTHROW(empty_index->GetIndexDetailInfos());
 }
