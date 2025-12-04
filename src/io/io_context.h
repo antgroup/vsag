@@ -15,6 +15,8 @@
 
 #pragma once
 
+#if HAVE_LIBAIO
+
 #include "libaio.h"
 #include "utils/resource_object.h"
 #include "utils/resource_object_pool.h"
@@ -53,3 +55,5 @@ public:
 using IOContextPool = ResourceObjectPool<IOContext>;
 
 }  // namespace vsag
+
+#endif  // HAVE_LIBAIO
