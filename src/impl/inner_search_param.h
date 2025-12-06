@@ -56,7 +56,12 @@ public:
     float first_order_scan_ratio{1.0F};
     Allocator* search_alloc{nullptr};
     std::vector<ExecutorPtr> executors;
+
+    // deal with duplicate ids
     mutable int64_t duplicate_id{-1};
+    int64_t query_id{-1};
+
+    // use in search process with duplicate ids
     bool consider_duplicate{false};
 
     // time record
