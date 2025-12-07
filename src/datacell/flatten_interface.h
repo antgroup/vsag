@@ -64,6 +64,12 @@ public:
     };
 
     virtual void
+    CalResidual(const void* vector, void* residual, InnerIdType count) {
+        throw VsagException(ErrorType::INTERNAL_ERROR,
+                            "CalResidual not implemented in FlattenInterface");
+    };
+
+    virtual void
     BatchInsertVector(const void* vectors, InnerIdType count, InnerIdType* idx_vec = nullptr) = 0;
 
     virtual float

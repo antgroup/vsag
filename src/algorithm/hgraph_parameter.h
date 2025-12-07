@@ -16,6 +16,7 @@
 #pragma once
 
 #include "data_type.h"
+#include "impl/reorder/reorder_parameter.h"
 #include "index_search_parameter.h"
 #include "inner_index_parameter.h"
 #include "utils/pointer_define.h"
@@ -48,6 +49,7 @@ public:
     FlattenInterfaceParamPtr base_codes_param{nullptr};
     GraphInterfaceParamPtr bottom_graph_param{nullptr};
     SparseGraphDatacellParamPtr hierarchical_graph_param{nullptr};
+    ReorderParameterPtr reorder_param{nullptr};
 
     ODescentParameterPtr odescent_param{nullptr};
 

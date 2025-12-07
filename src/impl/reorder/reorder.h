@@ -28,7 +28,35 @@ public:
     Reorder(const DistHeapPtr& input,
             const float* query,
             int64_t topk,
-            Allocator* allocator = nullptr) = 0;
+            Allocator* allocator = nullptr) const = 0;
+
+    virtual void
+    InsertVector(const void* vector, vsag::InnerIdType id) {
+        // do nothing
+    }
+
+    virtual void
+    Train(const void* vector, uint64_t count) {
+        // do nothing
+    }
+
+    virtual void
+    Resize(uint64_t new_size) {
+        // do nothing
+    }
+
+    virtual void
+    Serialize(StreamWriter& writer) const {
+        // do nothing
+    }
+
+    virtual void
+    Deserialize(StreamReader& reader) {
+        // do nothing
+    }
+
+protected:
+    uint64_t size_{0};
 };
 
 }  // namespace vsag
