@@ -33,6 +33,7 @@ jobs:
       - name: Clean
         run: |
           find ./build -type f -name "*.o" -exec rm -f {} +
+          find ./build -type f -name "*.cpp" -exec rm -f {} +
           rm -rf ./build/tools
       - name: Save Test
         uses: actions/upload-artifact@v5
