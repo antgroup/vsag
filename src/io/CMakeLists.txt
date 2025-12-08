@@ -31,7 +31,16 @@ set (IO_SRC
 )
 
 add_library (io STATIC ${IO_SRC})
-target_link_libraries (io PUBLIC fmt::fmt aio coverage_config)
+if (HAVE_LIBAIO)
+    target_compile_definitions (io PUBLIC -DHAVE_LIBAIO=1)
+    target_link_libraries (io PUBLIC fmt::fmt aio coverage_config)
+    message (STATUS "io module: linking with libaio")
+else ()
+    target_compile_definitions (io PUBLIC -DHAVE_LIBAIO=0)
+    target_link_libraries (io PUBLIC fmt::fmt coverage_config)
+    message (STATUS "io module: libaio not available, async I/O disabled")
+endif ()
+
 maybe_add_dependencies (io spdlog)
 
 if (ENABLE_TESTS)
