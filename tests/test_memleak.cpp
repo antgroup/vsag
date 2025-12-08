@@ -95,13 +95,12 @@ private:
 class ScopedIndex {
 public:
     explicit ScopedIndex(const std::string& name,
-                         const std::string& parameter,
+                         const std::string& build_parameters,
                          int64_t num_vectors,
                          int64_t dim,
                          Allocator* allocator) {
         resource_ = std::make_unique<vsag::Resource>(allocator, nullptr);
         engine_ = std::make_unique<vsag::Engine>(resource_.get());
-        std::string build_parameters = fmt::format(parameter, dim);
 
         index_ = engine_->CreateIndex(name, build_parameters).value();
 
@@ -135,61 +134,57 @@ private:
     std::shared_ptr<vsag::Index> index_;
 };
 
+std::string
+generate_param(const std::string& index_name, const std::string& base_quantization_type, int dim) {
+    if (index_name == "hgraph") {
+        return fmt::format(
+            R"({{
+            "dtype": "float32",
+            "metric_type": "l2",
+            "dim": {},
+            "index_param": {{
+                "base_quantization_type": "{}",
+                "max_degree": 48,
+                "ef_construction": 100
+            }}
+            }})",
+            dim,
+            base_quantization_type);
+    } else if (index_name == "ivf") {
+        return fmt::format(
+            R"({{
+            "dtype": "float32",
+            "metric_type": "l2",
+            "dim": {},
+            "index_param": {{
+                "buckets_count": 50,
+                "base_quantization_type": "{}",
+                "partition_strategy_type": "ivf",
+                "ivf_train_type": "kmeans",
+                "ivf_train_sample_count": 1000
+            }}
+            }})",
+            dim,
+            base_quantization_type);
+    }
+    throw std::runtime_error("Unsupported index name: " + index_name);
+}
+
 const std::tuple<std::string, std::string, std::string, int64_t, int64_t> INDEX_PARAMS[] = {
-    {"hgraph",
-     R"({{
-                    "dtype": "float32",
-                    "metric_type": "l2",
-                    "dim": {},
-                    "index_param": {{
-                        "base_quantization_type": "fp32",
-                        "max_degree": 48,
-                        "ef_construction": 100
-                    }}
-                }})",
-     R"({"hgraph": {"ef_search": 100}})",
-     10000,
-     128},
+    {"hgraph", "fp32", R"({"hgraph": {"ef_search": 100}})", 10000, 128},
 
-    {"hgraph",
-     R"({{
-                    "dtype": "float32",
-                    "metric_type": "l2",
-                    "dim": {},
-                    "index_param": {{
-                        "base_quantization_type": "sq8_uniform",
-                        "max_degree": 48,
-                        "ef_construction": 100
-                    }}
-                }})",
-     R"({"hgraph": {"ef_search": 100}})",
-     10000,
-     128},
+    {"hgraph", "sq8_uniform", R"({"hgraph": {"ef_search": 100}})", 10000, 128},
 
-    {"ivf",
-     R"({{
-                    "dtype": "float32",
-                    "metric_type": "l2",
-                    "dim": {},
-                    "index_param": {{
-                        "buckets_count": 50,
-                        "base_quantization_type": "fp32",
-                        "partition_strategy_type": "ivf",
-                        "ivf_train_type": "kmeans",
-                        "ivf_train_sample_count": 1000
-                    }}
-                }})",
-     R"({"ivf": {"scan_buckets_count": 10}})",
-     10000,
-     128},
+    {"ivf", "fp32", R"({"ivf": {"scan_buckets_count": 10}})", 10000, 128},
 };
 
 TEST_CASE("Test Classic Index Memory Leak", "[ft][memleak]") {
     Options::Instance().set_block_size_limit(4ULL * 1024 * 1024);
     auto* allocator = new MyAllocator();
     REQUIRE(allocator->UsedMemory() == 0);
-    for (const auto& [index_name, index_parameter, search_parameter, num_vectors, dim] :
+    for (const auto& [index_name, base_quantization_type, search_parameter, num_vectors, dim] :
          INDEX_PARAMS) {
+        auto index_parameter = generate_param(index_name, base_quantization_type, dim);
         ScopedIndex scoped_index(index_name, index_parameter, num_vectors, dim, allocator);
 
         const int64_t num_queries = 1'000;
