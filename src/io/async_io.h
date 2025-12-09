@@ -15,11 +15,11 @@
 
 #pragma once
 
+#if HAVE_LIBAIO
 #include "async_io_parameter.h"
 #include "basic_io.h"
 #include "index_common_param.h"
 #include "io_context.h"
-
 namespace vsag {
 
 class AsyncIO : public BasicIO<AsyncIO> {
@@ -64,4 +64,10 @@ private:
 
     bool exist_file_{false};
 };
+
 }  // namespace vsag
+
+#else
+#include "buffer_io.h"
+#define AsyncIO BufferIO
+#endif  // HAVE_LIBAIO
