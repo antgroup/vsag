@@ -29,6 +29,13 @@ public:
                                       int64_t dim,
                                       bool use_static = false);
 
+    static void
+    TestGeneral(const IndexPtr& index,
+                const TestDatasetPtr& dataset,
+                const std::string& search_param,
+                float recall,
+                bool expect_success = true);
+
     static TestDatasetPool pool;
 
     static std::vector<int> dims;
@@ -54,14 +61,15 @@ std::string
 HNSWTestIndex::GenerateHNSWBuildParametersString(const std::string& metric_type,
                                                  int64_t dim,
                                                  bool use_static) {
+    // should be aligned with HGraphTestIndex::GenerateHGraphBuildParametersString
     constexpr auto parameter_temp = R"(
     {{
         "dtype": "float32",
         "metric_type": "{}",
         "dim": {},
         "hnsw": {{
-            "max_degree": 16,
-            "ef_construction": 200,
+            "max_degree": 96,
+            "ef_construction": 500,
             "use_static": {}
         }}
     }}
@@ -69,6 +77,26 @@ HNSWTestIndex::GenerateHNSWBuildParametersString(const std::string& metric_type,
     auto build_parameters_str = fmt::format(parameter_temp, metric_type, dim, use_static);
     return build_parameters_str;
 }
+
+void
+HNSWTestIndex::TestGeneral(const TestIndex::IndexPtr& index,
+                           const TestDatasetPtr& dataset,
+                           const std::string& search_param,
+                           float recall,
+                           bool expect_success) {
+    REQUIRE(index->GetIndexType() == vsag::IndexType::HNSW);
+    TestKnnSearch(index, dataset, search_param, recall, true);
+    TestConcurrentKnnSearch(index, dataset, search_param, recall, true);
+    TestRangeSearch(index, dataset, search_param, recall, 10, true);
+    TestRangeSearch(index, dataset, search_param, recall / 2.0, 5, true);
+    TestFilterSearch(index, dataset, search_param, recall, true, true);
+    TestCheckIdExist(index, dataset);
+    TestBatchCalcDistanceById(index, dataset, 1e-5, true, false, true);
+    TestSearchAllocator(index, dataset, search_param, recall, true);
+    TestUpdateVector(index, dataset, search_param, false);
+    TestUpdateId(index, dataset, search_param, true);
+}
+
 }  // namespace fixtures
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex,
@@ -440,6 +468,31 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex, "HNSW Concurrent Add", "[f
         TestFilterSearch(index, dataset, search_param, 0.95, true);
         if (index->CheckFeature(vsag::IndexFeature::SUPPORT_CHECK_ID_EXIST)) {
             TestCheckIdExist(index, dataset);
+        }
+
+        vsag::Options::Instance().set_block_size_limit(origin_size);
+    }
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex, "HNSW Remove", "[ft][hnsw]") {
+    auto test_recovery = GENERATE(true, false);
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    auto size = GENERATE(1024 * 1024 * 2);
+    auto metric_type = GENERATE("l2", "ip", "cosine");
+    const std::string name = "hnsw";
+    auto search_param = fmt::format(search_param_tmp, 100);
+    for (auto& dim : dims) {
+        vsag::Options::Instance().set_block_size_limit(size);
+        auto param = GenerateHNSWBuildParametersString(metric_type, dim);
+        auto index = TestFactory(name, param, true);
+        auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
+
+        if (test_recovery) {
+            TestIndex::TestRecoverRemoveIndex(index, dataset, search_param);
+            HNSWTestIndex::TestGeneral(index, dataset, search_param, 0.9, false);
+        } else {
+            TestIndex::TestRemoveIndex(index, dataset, true);
+            HNSWTestIndex::TestGeneral(index, dataset, search_param, 0.9);
         }
 
         vsag::Options::Instance().set_block_size_limit(origin_size);

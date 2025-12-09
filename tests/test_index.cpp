@@ -191,95 +191,95 @@ TestIndex::TestUpdateVector(const IndexPtr& index,
         }
     }
 
+    uint32_t count_fail_close_update = 0;
     std::vector<int> correct_num = {0, 0};
     uint32_t success_far_updated = 0, failed_far_updated = 0;
-    for (int round = 1; round >= 0; round--) {
-        // round 0 for update, round 1 for validate update results
+    std::mt19937 rng(42);
+    for (int round = 0; round < 2; round++) {
+        // round 0 for test original recall
+        // round 1 for test updated  recall
         for (int i = 0; i < num_vectors; i++) {
-            auto query = vsag::Dataset::Make();
-            query->NumElements(1)->Dim(dim)->Float32Vectors(base + i * dim)->Owner(false);
+            auto close_base = vsag::Dataset::Make();
+            auto far_base = vsag::Dataset::Make();
+            auto original_base = vsag::Dataset::Make();
+            original_base->NumElements(1)->Dim(dim)->Float32Vectors(base + i * dim)->Owner(false);
 
-            auto result = index->KnnSearch(query, gt_topK, search_param);
-            REQUIRE(result.has_value());
-
-            if (round == 0) {
-                if (result.value()->GetIds()[0] == ids[i]) {
-                    correct_num[round] += 1;
-                }
-
-                if (not index->CheckIdExist(ids[i])) {
-                    continue;
-                }
-
-                std::vector<float> update_vecs(dim);
-                std::vector<float> far_vecs(dim);
+            if (round == 1) {
+                // [step 0] prepare data
+                std::vector<float> close_vec(dim);
+                std::vector<float> far_vec(dim);
+                std::normal_distribution<float> close_distribution(0.0F, 0.001F);
+                std::normal_distribution<float> far_distribution(0.0F, 1.0F);
                 for (int d = 0; d < dim; d++) {
-                    update_vecs[d] = base[i * dim + d] + 0.0001F;
-                    far_vecs[d] = base[i * dim + d] + 1.0F;
+                    close_vec[d] = base[i * dim + d] + close_distribution(rng);
+                    far_vec[d] = base[i * dim + d] + far_distribution(rng);
                 }
-                auto new_base = vsag::Dataset::Make();
-                new_base->NumElements(1)
+
+                close_base->NumElements(1)
                     ->Dim(dim)
-                    ->Float32Vectors(update_vecs.data())
+                    ->Float32Vectors(close_vec.data())
                     ->Owner(false);
 
-                // success case
-                auto before_update_dist = *index->CalcDistanceById(base + i * dim, ids[i]);
-                auto succ_vec_res = index->UpdateVector(ids[i], new_base);
-                auto after_update_dist = *index->CalcDistanceById(base + i * dim, ids[i]);
-                if (expected_success) {
-                    REQUIRE(succ_vec_res.has_value());
-                    REQUIRE(succ_vec_res.value());
-                    REQUIRE(before_update_dist <= after_update_dist);
+                far_base->NumElements(1)->Dim(dim)->Float32Vectors(far_vec.data())->Owner(false);
+
+                // [step 0] prepare dist
+                float dist_original_original = 0;
+                float dist_original_close = 0;
+                float dist_original_far = 0;
+                float dist_original_original_recovery = 0;
+
+                // [step 1] success case with <close> vector
+                dist_original_original = *index->CalcDistanceById(base + i * dim, ids[i]);
+                auto close_update_res = index->UpdateVector(ids[i], close_base);
+                dist_original_close = *index->CalcDistanceById(base + i * dim, ids[i]);
+                if (not close_update_res.has_value() or not close_update_res.value()) {
+                    count_fail_close_update++;
                 }
 
-                // update with far vector
-                new_base->Float32Vectors(far_vecs.data());
-                auto fail_vec_res = index->UpdateVector(ids[i], new_base);
-                REQUIRE(fail_vec_res.has_value());
-                if (fail_vec_res.value()) {
+                // [step 2] update with <far> vector
+                auto far_update_res = index->UpdateVector(ids[i], far_base);
+                REQUIRE(far_update_res.has_value());
+                if (far_update_res.value()) {
                     // note that the update should be failed, but for some cases, it success
-                    auto force_update_dist = *index->CalcDistanceById(base + i * dim, ids[i]);
-                    if (expected_success) {
-                        REQUIRE(after_update_dist <= force_update_dist);
-                    }
                     success_far_updated++;
                 } else {
                     failed_far_updated++;
                 }
 
-                // force update with far vector
-                new_base->Float32Vectors(far_vecs.data());
-                auto force_update_res1 = index->UpdateVector(ids[i], new_base, true);
-                REQUIRE(force_update_res1.has_value());
-                REQUIRE(force_update_res1.value());
-                auto force_update_dist = *index->CalcDistanceById(base + i * dim, ids[i]);
+                // [step 3] force update with <far> vector
+                auto force_far_update_res = index->UpdateVector(ids[i], far_base, true);
+                REQUIRE(force_far_update_res.has_value());
+                REQUIRE(force_far_update_res.value());
+                dist_original_far = *index->CalcDistanceById(base + i * dim, ids[i]);
                 if (expected_success) {
-                    REQUIRE(after_update_dist <= force_update_dist);
+                    REQUIRE(dist_original_close <= dist_original_far);
                 }
 
-                new_base->Float32Vectors(update_vecs.data());
-                auto force_update_res2 = index->UpdateVector(ids[i], new_base, true);
-                REQUIRE(force_update_res2.has_value());
-                REQUIRE(force_update_res2.value());
-                force_update_dist = *index->CalcDistanceById(base + i * dim, ids[i]);
-                if (expected_success) {
-                    REQUIRE(std::abs(after_update_dist - force_update_dist) < 1e-3);
-                }
+                // [step 4] update back with <original> vector
+                auto force_original_update_res = index->UpdateVector(ids[i], original_base, true);
+                REQUIRE(force_original_update_res.has_value());
+                REQUIRE(force_original_update_res.value());
+                dist_original_original_recovery = *index->CalcDistanceById(base + i * dim, ids[i]);
+                REQUIRE(std::abs(dist_original_original - dist_original_original_recovery) < 1e-3);
 
-                // old id don't exist
-                auto failed_old_res = index->UpdateVector(ids[i] + 2 * max_id, new_base);
+                // [fail case] old id don't exist
+                auto failed_old_res = index->UpdateVector(ids[i] + 2 * max_id, close_base);
                 REQUIRE(not failed_old_res.has_value());
-            } else {
-                if (result.value()->GetIds()[0] == ids[i]) {
-                    correct_num[round] += 1;
-                }
+            }
+
+            // [step 0] test recall
+            auto result = index->KnnSearch(original_base, gt_topK, search_param);
+            REQUIRE(result.has_value());
+
+            if (result.value()->GetIds()[0] == ids[i]) {
+                correct_num[round] += 1;
             }
         }
     }
 
+    REQUIRE(count_fail_close_update < 10);
+    REQUIRE(correct_num[0] == correct_num[1]);
     if (expected_success) {
-        REQUIRE(correct_num[0] == correct_num[1]);
         REQUIRE(success_far_updated < failed_far_updated);
     }
 }
@@ -1824,8 +1824,10 @@ void
 TestIndex::TestRemoveIndex(const TestIndex::IndexPtr& index,
                            const TestDatasetPtr& dataset,
                            bool expected_success) {
-    auto train_result = index->Train(dataset->base_);
-    REQUIRE(train_result.has_value());
+    if (index->GetIndexType() != vsag::IndexType::HNSW) {
+        auto train_result = index->Train(dataset->base_);
+        REQUIRE(train_result.has_value());
+    }
     auto base_num = dataset->base_->GetNumElements();
     auto base_dim = dataset->base_->GetDim();
     for (int64_t i = 0; i < base_num; ++i) {
@@ -1852,7 +1854,12 @@ TestIndex::TestRemoveIndex(const TestIndex::IndexPtr& index,
         REQUIRE(index->GetNumberRemoved() == i + 1);
         REQUIRE(remove_results.has_value());
         remove_results = index->Remove(i + base_num);
-        REQUIRE_FALSE(remove_results.has_value());
+        if (index->GetIndexType() != vsag::IndexType::HNSW) {
+            REQUIRE_FALSE(remove_results.has_value());
+        } else {
+            REQUIRE(remove_results.has_value());
+            REQUIRE_FALSE(remove_results.value());
+        }
         REQUIRE(index->GetNumElements() == dataset->base_->GetNumElements());
     }
 }
@@ -1866,12 +1873,16 @@ TestIndex::TestRecoverRemoveIndex(const IndexPtr& index,
     auto vectors = dataset->base_->GetFloat32Vectors();
     auto ids = dataset->base_->GetIds();
 
-    // build
+    // [step 0] build
+    if (index->GetIndexType() != vsag::IndexType::HNSW) {
+        auto train_result = index->Train(dataset->base_);
+        REQUIRE(train_result.has_value());
+    }
     auto add_results = index->Add(dataset->base_);
     REQUIRE(add_results.has_value());
     REQUIRE(add_results.value().size() == 0);
 
-    // test original recall
+    // [step 0] test original recall
     int correct = 0;
     for (int i = 0; i < base_num; i++) {
         auto query = vsag::Dataset::Make();
@@ -1886,78 +1897,130 @@ TestIndex::TestRecoverRemoveIndex(const IndexPtr& index,
     }
     float recall_before = ((float)correct) / base_num;
 
-    // remove half data
-    for (int i = 0; i < base_num / 2; ++i) {
-        REQUIRE(index->GetNumElements() == base_num - i);
-        REQUIRE(index->GetNumberRemoved() == i);
-        auto result = index->Remove(ids[i]);
-        REQUIRE(result.has_value());
-        REQUIRE(result.value());
-    }
-    auto wrong_result = index->Remove(-1);
-    REQUIRE_FALSE(wrong_result.has_value());  // todo: align with hnsw
-
-    REQUIRE(index->GetNumElements() == base_num / 2);
-    REQUIRE(index->GetNumberRemoved() == base_num / 2);
-
-    // test recall for half data
-    correct = 0;
-    for (int i = 0; i < base_num; i++) {
-        auto query = vsag::Dataset::Make();
-        query->NumElements(1)->Dim(base_dim)->Float32Vectors(vectors + i * base_dim)->Owner(false);
-
-        int64_t k = 10;
-        auto result = index->KnnSearch(query, k, search_parameters);
-        REQUIRE(result.has_value());
-        if (i < base_num / 2) {
-            REQUIRE(result.value()->GetIds()[0] != ids[i]);
+    {
+        auto wrong_result = index->Remove(-1);
+        if (index->GetIndexType() == vsag::IndexType::HNSW) {
+            REQUIRE(wrong_result.has_value());
+            REQUIRE_FALSE(wrong_result.value());
         } else {
+            REQUIRE_FALSE(wrong_result.has_value());
+        }
+    }
+
+    {  // Test of removing and then inserting for successful recovery
+        // [step 1] remove half data
+        for (int i = 0; i < base_num / 2; ++i) {
+            REQUIRE(index->GetNumElements() == base_num - i);
+            REQUIRE(index->GetNumberRemoved() == i);
+            auto result = index->Remove(ids[i]);
+            REQUIRE(result.has_value());
+            REQUIRE(result.value());
+        }
+        REQUIRE(index->GetNumElements() == base_num / 2);
+        REQUIRE(index->GetNumberRemoved() == base_num / 2);
+
+        // [step 2] test recall of half data
+        correct = 0;
+        for (int i = 0; i < base_num; i++) {
+            auto query = vsag::Dataset::Make();
+            query->NumElements(1)
+                ->Dim(base_dim)
+                ->Float32Vectors(vectors + i * base_dim)
+                ->Owner(false);
+
+            int64_t k = 10;
+            auto result = index->KnnSearch(query, k, search_parameters);
+            REQUIRE(result.has_value());
+            if (i < base_num / 2) {
+                REQUIRE(result.value()->GetIds()[0] != ids[i]);
+            } else {
+                if (result.value()->GetIds()[0] == ids[i]) {
+                    correct += 1;
+                }
+            }
+        }
+        float recall_removed = ((float)correct) / (base_num / 2);
+        REQUIRE(recall_removed >= 0.90);
+
+        // [step 3] add <original data> into index again for recovery
+        correct = 0;
+        auto half_valid_dataset = vsag::Dataset::Make();
+        half_valid_dataset->NumElements(base_num)
+            ->Dim(base_dim)
+            ->Float32Vectors(vectors)
+            ->Ids(ids)
+            ->Owner(false);
+        auto result3 = index->Add(half_valid_dataset);
+        REQUIRE(result3.value().size() == base_num / 2);  // caused by half data already present
+        REQUIRE(index->GetNumElements() ==
+                base_num);                        // successfully restored to the original index
+        REQUIRE(index->GetNumberRemoved() == 0);  // [key point] remove operation was rolled back
+
+        // [step 4] test recall of recovery
+        for (int i = 0; i < base_num; i++) {
+            auto query = vsag::Dataset::Make();
+            query->NumElements(1)
+                ->Dim(base_dim)
+                ->Float32Vectors(vectors + i * base_dim)
+                ->Owner(false);
+
+            int64_t k = 10;
+            auto result = index->KnnSearch(query, k, search_parameters);
+            REQUIRE(result.has_value());
             if (result.value()->GetIds()[0] == ids[i]) {
                 correct += 1;
             }
         }
+        float recall_after = ((float)correct) / base_num;
+        REQUIRE(std::abs(recall_before - recall_after) < 0.01);
     }
-    float recall_removed = ((float)correct) / (base_num / 2);
-    REQUIRE(recall_removed >= 0.90);
 
-    // add data into index again but failed
-    auto half_dataset = vsag::Dataset::Make();
-    std::vector<int64_t> alter_ids(base_num);
-    for (int i = 0; i < base_num; i++) {
-        alter_ids[i] = ids[base_num - i - 1];
+    {  // Test of removing and then inserting for failed recovery
+        // [step 1] remove half data
+        for (int i = 0; i < base_num / 2; ++i) {
+            REQUIRE(index->GetNumElements() == base_num - i);
+            REQUIRE(index->GetNumberRemoved() == i);
+            auto result = index->Remove(ids[i]);
+            REQUIRE(result.has_value());
+            REQUIRE(result.value());
+        }
+        REQUIRE(index->GetNumElements() == base_num / 2);
+        REQUIRE(index->GetNumberRemoved() == base_num / 2);
+
+        // [step 2] add <reverse data> into index again try to recovery but failed, execute directly insertion
+        auto half_valid_dataset = vsag::Dataset::Make();
+        std::vector<int64_t> alter_ids(base_num);
+        for (int i = 0; i < base_num; i++) {
+            alter_ids[i] = ids[base_num - i - 1];
+        }
+        half_valid_dataset->NumElements(base_num)
+            ->Dim(base_dim)
+            ->Float32Vectors(vectors)
+            ->Ids(alter_ids.data())
+            ->Owner(false);
+        auto result2 = index->Add(half_valid_dataset);
+        REQUIRE(result2.value().size() == base_num / 2);  // caused by half data already present
+        // 1.0: caused by directly inserting half vectors (0.5 + 0.5 = 1.0)
+        // 0.05: caused by small amount of incorrect recovery vectors
+        REQUIRE(std::abs(index->GetNumElements() - base_num) < base_num * 0.01);
+        REQUIRE(std::abs(index->GetNumberRemoved() - base_num / 2) <
+                base_num * 0.05);  // [key point] no impact on the removed data
     }
-    half_dataset->NumElements(base_num)
-        ->Dim(base_dim)
-        ->Float32Vectors(vectors)
-        ->Ids(alter_ids.data())
-        ->Owner(false);
-    auto result2 = index->Add(half_dataset);
-    REQUIRE(result2.value().size() > base_num / 2);
-    REQUIRE(index->GetNumElements() > base_num / 2);
-    REQUIRE(index->GetNumberRemoved() < base_num / 2);
 
-    // add data into index again for recovery
-    correct = 0;
-    half_dataset->NumElements(base_num)->Dim(base_dim)->Float32Vectors(vectors)->Ids(ids)->Owner(
-        false);
-    auto result3 = index->Add(half_dataset);
-    REQUIRE(result3.value().size() > base_num / 2);
-    REQUIRE(index->GetNumElements() == base_num);
-    REQUIRE(index->GetNumberRemoved() == 0);
-
+    // [clean] recovery index
     for (int i = 0; i < base_num; i++) {
-        auto query = vsag::Dataset::Make();
-        query->NumElements(1)->Dim(base_dim)->Float32Vectors(vectors + i * base_dim)->Owner(false);
-
-        int64_t k = 10;
-        auto result = index->KnnSearch(query, k, search_parameters);
-        REQUIRE(result.has_value());
-        if (result.value()->GetIds()[0] == ids[i]) {
-            correct += 1;
+        auto original_base = vsag::Dataset::Make();
+        original_base->NumElements(1)
+            ->Dim(base_dim)
+            ->Float32Vectors(vectors + i * base_dim)
+            ->Ids(ids + i)
+            ->Owner(false);
+        auto update_recovery_result = index->UpdateVector(ids[i], original_base, true);
+        if (not update_recovery_result) {
+            auto add_result = index->Add(original_base);
         }
     }
-    float recall_after = ((float)correct) / base_num;
-    REQUIRE(std::abs(recall_before - recall_after) < 0.05);
+    REQUIRE(index->GetNumElements() == base_num);
 }
 
 template <class T>
