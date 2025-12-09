@@ -158,18 +158,23 @@ public:
         }
 
         // 2. update label_table_
-        auto result = std::find(label_table_.begin(), label_table_.end(), old_label);
-        if (result == label_table_.end()) {
+        // Important: there may be multiple occurrences of old_label, so we need to update every one
+        bool found = false;
+        for (size_t i = 0; i < label_table_.size(); ++i) {
+            if (label_table_[i] == old_label) {
+                label_table_[i] = new_label;
+                found = true;
+            }
+        }
+        if (!found) {
             throw std::runtime_error(fmt::format("old label {} is not exists", old_label));
         }
-        InnerIdType internal_id = result - label_table_.begin();
-        label_table_[internal_id] = new_label;
 
         // 3. update label_remap_
         if (use_reverse_map_) {
             // note that currently, old_label must exist
             auto iter_old = label_remap_.find(old_label);
-            internal_id = iter_old->second;
+            auto internal_id = iter_old->second;
             label_remap_.erase(iter_old);
             label_remap_[new_label] = internal_id;
         }
