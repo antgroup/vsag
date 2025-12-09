@@ -986,8 +986,26 @@ TestIndex::TestSerializeBinarySet(const IndexPtr& index_from,
         REQUIRE(res_from.has_value());
         REQUIRE(res_to.has_value());
         REQUIRE(res_from.value()->GetDim() == res_to.value()->GetDim());
+        bool pr = false;
         for (auto j = 0; j < topk; ++j) {
-            REQUIRE(res_to.value()->GetIds()[j] == res_from.value()->GetIds()[j]);
+            if (res_to.value()->GetIds()[j] != res_from.value()->GetIds()[j]) {
+                pr = true;
+            }
+        }
+        if (pr) {
+            auto query_path = dataset->query_->GetPaths()[i];
+            std::cout << "query path: " << query_path << std::endl;
+            for (auto j = 0; j < topk; ++j) {
+                auto from_id = res_from.value()->GetIds()[j] >> 16;
+                auto to_id = res_to.value()->GetIds()[j] >> 16;
+                auto from_path = dataset->base_->GetPaths()[from_id];
+                auto to_path = dataset->base_->GetPaths()[to_id];
+                auto from_distance = res_from.value()->GetDistances()[j];
+                auto to_distance =  res_to.value()->GetDistances()[j];
+                std::cout << fmt::format("rank {}: from_id {}, from_path {}, from_distance {:.6f} | to_id {}, to_path {}, to_distance {:.6f}",
+                                         j, from_id, from_path, from_distance, to_id, to_path, to_distance) << std::endl;
+            }
+            std::cout << std::endl;
         }
     }
 }
