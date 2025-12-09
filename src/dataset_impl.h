@@ -54,8 +54,12 @@ public:
 
             if (DatasetImpl::GetSparseVectors() != nullptr) {
                 for (int i = 0; i < DatasetImpl::GetNumElements(); i++) {
-                    allocator_->Deallocate((void*)DatasetImpl::GetSparseVectors()[i].ids_);
-                    allocator_->Deallocate((void*)DatasetImpl::GetSparseVectors()[i].vals_);
+                    if ((void*)DatasetImpl::GetSparseVectors()[i].ids_ != nullptr) {
+                        allocator_->Deallocate((void*)DatasetImpl::GetSparseVectors()[i].ids_);
+                    }
+                    if ((void*)DatasetImpl::GetSparseVectors()[i].vals_ != nullptr) {
+                        allocator_->Deallocate((void*)DatasetImpl::GetSparseVectors()[i].vals_);
+                    }
                 }
                 allocator_->Deallocate((void*)DatasetImpl::GetSparseVectors());
             }
