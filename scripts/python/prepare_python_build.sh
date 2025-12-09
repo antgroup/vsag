@@ -25,7 +25,16 @@ pip install -q setuptools_scm
 echo "   - Generating python/pyvsag/_version.py..."
 python3 -c "
 import setuptools_scm
-version = setuptools_scm.get_version()
+try:
+    # Explicitly configure setuptools_scm since pyproject.toml is in a subdir
+    version = setuptools_scm.get_version(
+        root='.',
+        version_scheme='release-branch-semver',
+        local_scheme='no-local-version'
+    )
+except Exception:
+    version = '0.0.0'
+
 with open('python/pyvsag/_version.py', 'w') as f:
     f.write(f'__version__ = \"{version}\"\\n')
 print(f'   - Version generated: {version}')
