@@ -79,7 +79,7 @@ public:
     uint32_t term_capacity_{0};
 
     Vector<std::unique_ptr<Vector<uint32_t>>> term_ids_;
-    
+
     Vector<std::unique_ptr<Vector<float>>> term_datas_;
 
     Vector<uint32_t> term_sizes_;

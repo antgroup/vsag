@@ -184,7 +184,7 @@ SparseTermDataCell::InsertVector(const SparseVector& sparse_base, uint32_t base_
         auto term = item.first;
         auto val = item.second;
 
-        if (term_sizes_[term] == 0) { // create term until needed
+        if (term_sizes_[term] == 0) {  // create term until needed
             term_ids_[term] = std::make_unique<Vector<uint32_t>>(allocator_);
             term_datas_[term] = std::make_unique<Vector<float>>(allocator_);
         }
@@ -232,8 +232,12 @@ SparseTermDataCell::CalcDistanceByInnerId(const SparseTermComputerPtr& computer,
         if (term >= term_ids_.size()) {
             continue;
         }
-        computer->ScanForCalculateDist(
-            it, term_ids_[term]->data(), term_datas_[term]->data(), term_sizes_[term], base_id, &ip);
+        computer->ScanForCalculateDist(it,
+                                       term_ids_[term]->data(),
+                                       term_datas_[term]->data(),
+                                       term_sizes_[term],
+                                       base_id,
+                                       &ip);
     }
     computer->ResetTerm();
     return 1 + ip;
