@@ -15,7 +15,6 @@
 
 #include "gno_imi_partition.h"
 
-#include <cblas.h>
 #include <fmt/format.h>
 
 #include <atomic>
@@ -25,6 +24,7 @@
 
 #include "algorithm/inner_index_interface.h"
 #include "impl/allocator/safe_allocator.h"
+#include "impl/blas/blas_function.h"
 #include "impl/cluster/kmeans_cluster.h"
 #include "inner_string_params.h"
 #include "utils/util_functions.h"
@@ -42,20 +42,20 @@ static constexpr const char* SEARCH_PARAM_TEMPLATE_STR = R"(
 // C = A * B^T
 void
 matmul(const float* A, const float* B, float* C, int64_t M, int64_t N, int64_t K) {
-    cblas_sgemm(CblasColMajor,
-                CblasTrans,
-                CblasNoTrans,
-                static_cast<blasint>(N),
-                static_cast<blasint>(M),
-                static_cast<blasint>(K),
-                1.0F,
-                B,
-                static_cast<blasint>(K),
-                A,
-                static_cast<blasint>(K),
-                0.0F,
-                C,
-                static_cast<blasint>(N));
+    BlasFunction::Sgemm(BlasFunction::ColMajor,
+                        BlasFunction::Trans,
+                        BlasFunction::NoTrans,
+                        static_cast<int32_t>(N),
+                        static_cast<int32_t>(M),
+                        static_cast<int32_t>(K),
+                        1.0F,
+                        B,
+                        static_cast<int32_t>(K),
+                        A,
+                        static_cast<int32_t>(K),
+                        0.0F,
+                        C,
+                        static_cast<int32_t>(N));
 }
 
 GNOIMIPartition::GNOIMIPartition(const IndexCommonParam& common_param,
