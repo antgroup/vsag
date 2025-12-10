@@ -930,6 +930,10 @@ TestIndex::TestSerializeFile(const IndexPtr& index_from,
             }
             std::cout << std::endl;
         }
+
+        for (auto j = 0; j < topk; ++j) {
+            REQUIRE(res_to.value()->GetIds()[j] == res_from.value()->GetIds()[j]);
+        }
     }
 }
 void
@@ -1043,6 +1047,9 @@ TestIndex::TestSerializeBinarySet(const IndexPtr& index_from,
             }
             std::cout << std::endl;
         }
+        for (auto j = 0; j < topk; ++j) {
+            REQUIRE(res_to.value()->GetIds()[j] == res_from.value()->GetIds()[j]);
+        }
     }
 }
 
@@ -1111,6 +1118,9 @@ TestIndex::TestSerializeReaderSet(const IndexPtr& index_from,
                           << std::endl;
             }
             std::cout << std::endl;
+        }
+        for (auto j = 0; j < topk; ++j) {
+            REQUIRE(res_to.value()->GetIds()[j] == res_from.value()->GetIds()[j]);
         }
     }
 }
