@@ -52,10 +52,14 @@ public:
             allocator_->Deallocate((void*)(DatasetImpl::GetFloat32Vectors()));
             allocator_->Deallocate((void*)(DatasetImpl::GetExtraInfos()));
 
-            if (DatasetImpl::GetSparseVectors() != nullptr) {
+            if (const auto* sparse_vectors = GetSparseVectors(); sparse_vectors != nullptr) {
                 for (int i = 0; i < DatasetImpl::GetNumElements(); i++) {
-                    allocator_->Deallocate((void*)DatasetImpl::GetSparseVectors()[i].ids_);
-                    allocator_->Deallocate((void*)DatasetImpl::GetSparseVectors()[i].vals_);
+                    if (sparse_vectors[i].ids_ != nullptr) {
+                        allocator_->Deallocate((void*)sparse_vectors[i].ids_);
+                    }
+                    if (sparse_vectors[i].vals_ != nullptr) {
+                        allocator_->Deallocate((void*)sparse_vectors[i].vals_);
+                    }
                 }
                 allocator_->Deallocate((void*)DatasetImpl::GetSparseVectors());
             }
