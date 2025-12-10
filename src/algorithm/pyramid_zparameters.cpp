@@ -59,6 +59,10 @@ PyramidParameters::FromJson(const JsonType& json) {
     if (this->use_reorder) {
         this->precise_codes_param = CreateFlattenParam(json[PRECISE_CODES_KEY]);
     }
+
+    if (json.Contains(INDEX_MIN_SIZE)) {
+        this->index_min_size = json[INDEX_MIN_SIZE].GetInt();
+    }
 }
 JsonType
 PyramidParameters::ToJson() const {
@@ -75,6 +79,8 @@ PyramidParameters::ToJson() const {
         json[EF_CONSTRUCTION_KEY].SetInt(this->ef_construction);
     }
     json[GRAPH_KEY].SetJson(graph_json);
+    json[USE_REORDER_KEY].SetBool(this->use_reorder);
+    json[INDEX_MIN_SIZE].SetInt(index_min_size);
     return json;
 }
 
@@ -115,6 +121,11 @@ PyramidParameters::CheckCompatibility(const ParamPtr& other) const {
         not precise_codes_param->CheckCompatibility(pyramid_param->precise_codes_param)) {
         logger::error(
             "PyramidParameters::CheckCompatibility: precise_codes_param are not compatible");
+        return false;
+    }
+
+    if (this->index_min_size != pyramid_param->index_min_size) {
+        logger::error("PyramidParameters::CheckCompatibility: index_min_size are not compatible");
         return false;
     }
 

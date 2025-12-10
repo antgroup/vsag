@@ -15,12 +15,11 @@
 
 #include "pca_transformer.h"
 
-#include <cblas.h>
 #include <fmt/format.h>
-#include <lapacke.h>
 
 #include <random>
 
+#include "impl/blas/blas_function.h"
 #include "vsag_exception.h"
 
 namespace vsag {
@@ -70,18 +69,18 @@ PCATransformer::Transform(const float* input_vec, float* output_vec) const {
     //       [1, 0, 0,] * [1,]  = [1,]
     //       [0, 0, 1 ]   [2,]  = [3 ]
     //                    [3 ]
-    cblas_sgemv(CblasRowMajor,
-                CblasNoTrans,
-                static_cast<blasint>(output_dim_),
-                static_cast<blasint>(input_dim_),
-                1.0F,
-                pca_matrix_.data(),
-                static_cast<blasint>(input_dim_),
-                centralized_vec.data(),
-                1,
-                0.0F,
-                output_vec,
-                1);
+    BlasFunction::Sgemv(BlasFunction::RowMajor,
+                        BlasFunction::NoTrans,
+                        static_cast<int32_t>(output_dim_),
+                        static_cast<int32_t>(input_dim_),
+                        1.0F,
+                        pca_matrix_.data(),
+                        static_cast<int32_t>(input_dim_),
+                        centralized_vec.data(),
+                        1,
+                        0.0F,
+                        output_vec,
+                        1);
 
     return meta;
 }
@@ -155,13 +154,13 @@ PCATransformer::PerformEigenDecomposition(const float* covariance_matrix) {
         covariance_matrix, covariance_matrix + input_dim_ * input_dim_, eigen_vectors.begin());
 
     // 1. decomposition
-    int ssyev_result = LAPACKE_ssyev(LAPACK_ROW_MAJOR,
-                                     'V',
-                                     'U',
-                                     static_cast<blasint>(input_dim_),
-                                     eigen_vectors.data(),
-                                     static_cast<blasint>(input_dim_),
-                                     eigen_values.data());
+    int32_t ssyev_result = BlasFunction::Ssyev(BlasFunction::RowMajor,
+                                               BlasFunction::JobV,
+                                               BlasFunction::Upper,
+                                               static_cast<int32_t>(input_dim_),
+                                               eigen_vectors.data(),
+                                               static_cast<int32_t>(input_dim_),
+                                               eigen_values.data());
 
     if (ssyev_result != 0) {
         logger::error(fmt::format("Error in sgeqrf: {}", ssyev_result));
