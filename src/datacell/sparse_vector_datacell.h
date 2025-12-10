@@ -105,6 +105,9 @@ public:
     [[nodiscard]] const uint8_t*
     GetCodesById(InnerIdType id, bool& need_release) const override;
 
+    void
+    Release(const uint8_t* data) const override;
+
     [[nodiscard]] bool
     InMemory() const override;
 

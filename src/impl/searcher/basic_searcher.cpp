@@ -380,18 +380,16 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
 
     // set duplicate id for query vector
     if (inner_search_param.query_id != -1) {
-        auto data = top_candidates->GetData();
-        auto min_distance = std::numeric_limits<float>::max();
-        auto min_index = -1;
-        for (uint32_t i = 0; i < top_candidates->Size(); ++i) {
+        const auto* data = top_candidates->GetData();
+        auto min_distance = data[0].first;
+        auto min_index = data[0].second;
+        for (uint32_t i = 1; i < top_candidates->Size(); ++i) {
             if (data[i].first < min_distance) {
                 min_distance = data[i].first;
                 min_index = data[i].second;
             }
         }
-        auto quantization_min_distance =
-            flatten->ComputePairVectors(min_index, inner_search_param.query_id);
-        if (quantization_min_distance <= THRESHOLD_ERROR) {
+        if (flatten->CompareVectors(min_index, inner_search_param.query_id)) {
             inner_search_param.duplicate_id = min_index;
         }
     }
