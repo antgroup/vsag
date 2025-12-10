@@ -1179,10 +1179,6 @@ TestHGraphDuplicate(const fixtures::HGraphTestIndexPtr& test_index,
     for (auto metric_type : resource->metric_types) {
         for (auto dim : resource->dims) {
             for (auto& [base_quantization_str, recall] : resource->test_cases) {
-                if (base_quantization_str.find("bf16") != std::string::npos and
-                    (metric_type == "ip" or metric_type == "cosine")) {
-                    continue;
-                }
                 INFO(
                     fmt::format("metric_type: {}, dim: {}, base_quantization_str: {}, recall: {}, "
                                 "duplicate_pos: {}",
