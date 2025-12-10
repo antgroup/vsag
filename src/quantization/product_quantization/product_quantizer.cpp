@@ -15,8 +15,7 @@
 
 #include "product_quantizer.h"
 
-#include <cblas.h>
-
+#include "impl/blas/blas_function.h"
 #include "impl/cluster/kmeans_cluster.h"
 #include "simd/fp32_simd.h"
 #include "simd/normalize.h"
@@ -345,18 +344,18 @@ ProductQuantizer<metric>::ProcessQueryImpl(const DataType* query,
             auto* per_result = lookup_table + i * CENTROIDS_PER_SUBSPACE;
             if constexpr (metric == MetricType::METRIC_TYPE_IP or
                           metric == MetricType::METRIC_TYPE_COSINE) {
-                cblas_sgemv(CblasRowMajor,
-                            CblasNoTrans,
-                            CENTROIDS_PER_SUBSPACE,
-                            subspace_dim_,
-                            1.0F,
-                            per_code_book,
-                            subspace_dim_,
-                            per_query,
-                            1,
-                            0.0F,
-                            per_result,
-                            1);
+                BlasFunction::Sgemv(BlasFunction::RowMajor,
+                                    BlasFunction::NoTrans,
+                                    CENTROIDS_PER_SUBSPACE,
+                                    subspace_dim_,
+                                    1.0F,
+                                    per_code_book,
+                                    subspace_dim_,
+                                    per_query,
+                                    1,
+                                    0.0F,
+                                    per_result,
+                                    1);
             } else if constexpr (metric == MetricType::METRIC_TYPE_L2SQR) {
                 // TODO(LHT): use blas opt
                 for (int64_t j = 0; j < CENTROIDS_PER_SUBSPACE; ++j) {
