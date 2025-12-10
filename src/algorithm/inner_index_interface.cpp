@@ -382,6 +382,7 @@ InnerIndexInterface::GetVectorByIds(const int64_t* ids, int64_t count) const {
             throw VsagException(ErrorType::NO_ENOUGH_MEMORY,
                                 "failed to allocate memory for vectors");
         }
+        std::uninitialized_default_construct_n(sparse_vectors, count);
         vectors->NumElements(count)->SparseVectors(sparse_vectors)->Owner(true, allocator_);
         for (int i = 0; i < count; ++i) {
             InnerIdType inner_id = this->label_table_->GetIdByLabel(ids[i]);
