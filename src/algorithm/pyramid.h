@@ -41,19 +41,22 @@ split(const std::string& str, char delimiter);
 
 class IndexNode {
 public:
-    IndexNode(IndexCommonParam* common_param, GraphInterfaceParamPtr graph_param);
+    enum class Status { NO_INDEX = 0, GRAPH = 1, FLAT = 2 };
+
+public:
+    IndexNode(Allocator* allocator_, GraphInterfaceParamPtr graph_param, uint32_t index_min_size);
 
     void
-    BuildGraph(ODescent& odescent);
+    Build(ODescent& odescent);
 
     void
-    InitGraph();
+    Init();
 
     void
-    SearchGraph(const SearchFunc& search_func,
-                const VisitedListPtr& vl,
-                const DistHeapPtr& search_result,
-                int64_t ef_search) const;
+    Search(const SearchFunc& search_func,
+           const VisitedListPtr& vl,
+           const DistHeapPtr& search_result,
+           int64_t ef_search) const;
 
     void
     AddChild(const std::string& key);
@@ -74,11 +77,12 @@ public:
     mutable std::shared_mutex mutex_;
 
     Vector<InnerIdType> ids_;
-    bool has_index_{false};
+    uint32_t index_min_size_{0};
+    Status status_{Status::NO_INDEX};
 
 private:
     UnorderedMap<std::string, std::shared_ptr<IndexNode>> children_;
-    IndexCommonParam* common_param_{nullptr};
+    Allocator* allocator_{nullptr};
     GraphInterfaceParamPtr graph_param_{nullptr};
 };
 
@@ -92,17 +96,23 @@ public:
 public:
     Pyramid(const PyramidParamPtr& pyramid_param, const IndexCommonParam& common_param)
         : InnerIndexInterface(pyramid_param, common_param),
-          pyramid_param_(pyramid_param),
-          common_param_(common_param),
-          alpha_(pyramid_param->alpha) {
-        base_codes_ =
-            FlattenInterface::MakeInstance(pyramid_param_->base_codes_param, common_param_);
-        root_ = std::make_shared<IndexNode>(&common_param_, pyramid_param_->graph_param);
+          alpha_(pyramid_param->alpha),
+          no_build_levels_(common_param.allocator_.get()),
+          odescent_param_(pyramid_param->odescent_param),
+          ef_construction_(pyramid_param->ef_construction),
+          max_degree_(pyramid_param->max_degree),
+          index_min_size_(pyramid_param->index_min_size),
+          graph_type_(pyramid_param->graph_type) {
+        base_codes_ = FlattenInterface::MakeInstance(pyramid_param->base_codes_param, common_param);
+        root_ =
+            std::make_shared<IndexNode>(allocator_, pyramid_param->graph_param, index_min_size_);
         points_mutex_ = std::make_shared<PointsMutex>(max_capacity_, allocator_);
-        searcher_ = std::make_unique<BasicSearcher>(common_param_, points_mutex_);
+        searcher_ = std::make_unique<BasicSearcher>(common_param, points_mutex_);
+        no_build_levels_.assign(pyramid_param->no_build_levels.begin(),
+                                pyramid_param->no_build_levels.end());
         if (use_reorder_) {
             precise_codes_ =
-                FlattenInterface::MakeInstance(pyramid_param_->precise_codes_param, common_param_);
+                FlattenInterface::MakeInstance(pyramid_param->precise_codes_param, common_param);
             reorder_ = std::make_shared<FlattenReorder>(precise_codes_, allocator_);
         }
     }
@@ -189,9 +199,19 @@ private:
     static std::vector<std::vector<std::string>>
     parse_path(const std::string& path);
 
+    DistHeapPtr
+    search_node(const IndexNode* node,
+                const VisitedListPtr& vl,
+                const InnerSearchParam& search_param,
+                const DatasetPtr& query,
+                const FlattenInterfacePtr& codes,
+                Statistics& stats) const;
+
 private:
-    IndexCommonParam common_param_;
-    PyramidParamPtr pyramid_param_{nullptr};
+    ODescentParameterPtr odescent_param_{nullptr};
+    Vector<int32_t> no_build_levels_;
+    uint64_t ef_construction_{400};
+    int64_t max_degree_{64};
     std::shared_ptr<IndexNode> root_{nullptr};
     FlattenInterfacePtr base_codes_{nullptr};
     FlattenInterfacePtr precise_codes_{nullptr};
@@ -210,6 +230,9 @@ private:
     std::mutex entry_point_mutex_;
     std::default_random_engine level_generator_{2021};
     ReorderInterfacePtr reorder_{nullptr};
+
+    // static
+    uint32_t index_min_size_{0};
 };
 
 }  // namespace vsag

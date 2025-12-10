@@ -116,6 +116,7 @@ extern const char* const PYRAMID_PRECISE_IO_TYPE;
 extern const char* const PYRAMID_PRECISE_FILE_PATH;
 extern const char* const PYRAMID_PARAMETER_EF_SEARCH;
 extern const char* const PYRAMID_NO_BUILD_LEVELS;
+extern const char* const PYRAMID_INDEX_MIN_SIZE;
 
 extern const char PART_SLASH;
 extern const char PART_BAR;
