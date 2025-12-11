@@ -1,0 +1,214 @@
+
+// Copyright 2024-present the vsag project
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use hgraph_ file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+#include "hgraph_analyzer.h"
+
+#include "impl/heap/standard_heap.h"
+
+namespace vsag {
+
+Vector<int64_t>
+HGraphAnalyzer::GetComponentCount() {
+    // graph connection
+    Vector<bool> visited(total_count_, false, allocator_);
+    Vector<int64_t> component_sizes(allocator_);
+    if (hgraph_->label_table_->CompressDuplicateData()) {
+        for (int i = 0; i < hgraph_->total_count_; ++i) {
+            if (hgraph_->label_table_->duplicate_records_[i] != nullptr) {
+                for (const auto& dup_id :
+                     hgraph_->label_table_->duplicate_records_[i]->duplicate_ids) {
+                    visited[dup_id] = true;
+                }
+            }
+        }
+    }
+    for (int64_t i = 0; i < total_count_; ++i) {
+        if (not visited[i] and not hgraph_->label_table_->IsRemoved(i)) {
+            int64_t component_size = 0;
+            std::queue<int64_t> q;
+            q.push(i);
+            visited[i] = true;
+            while (not q.empty()) {
+                auto node = q.front();
+                q.pop();
+                component_size++;
+                Vector<InnerIdType> neighbors(allocator_);
+                hgraph_->bottom_graph_->GetNeighbors(node, neighbors);
+                for (const auto& nb : neighbors) {
+                    if (not visited[nb] and not hgraph_->label_table_->IsRemoved(nb)) {
+                        visited[nb] = true;
+                        q.push(nb);
+                    }
+                }
+            }
+            component_sizes.push_back(component_size);
+        }
+    }
+    return component_sizes;
+}
+
+void
+HGraphAnalyzer::calculate_base_groundtruth() {
+    if (not base_ground_truth_.empty()) {
+        return;
+    }
+    // calculate duplicate ratio while calculating groundtruth
+    uint32_t duplicate_count = 0;
+    Vector<float> distances_array(allocator_);
+
+    auto codes = hgraph_->reorder_ ? hgraph_->high_precise_codes_ : hgraph_->basic_flatten_codes_;
+    for (uint64_t i = 0; i < this->query_sample_size_; ++i) {
+        InnerIdType sample_id = rand() % this->total_count_;
+        hgraph_->GetVectorByInnerId(sample_id, base_sample_datas_.data() + i * dim_);
+        DistHeapPtr groundtruth = std::make_shared<StandardHeap<true, false>>(allocator_, -1);
+        if (i % 10 == 0) {
+            logger::info("calculate groundtruth for sample {} of {}", i, i + 10);
+        }
+        for (uint64_t j = 0; j < this->total_count_; ++j) {
+            float dist = codes->ComputePairVectors(sample_id, j);
+            if (groundtruth->Size() < top_k_) {
+                groundtruth->Push({dist, j});
+            } else if (dist < groundtruth->Top().first) {
+                groundtruth->Push({dist, j});
+                groundtruth->Pop();
+            }
+            distances_array.push_back(dist);
+        }
+        base_ground_truth_[sample_id] = groundtruth;
+        base_sample_ids_.push_back(sample_id);
+
+        std::sort(distances_array.begin(), distances_array.end());
+        for (uint64_t j = 0; j < this->total_count_; ++j) {
+            if (j > 0 and
+                std::abs(distances_array[j] - distances_array[j - 1]) <= THRESHOLD_ERROR) {
+                duplicate_count++;
+            }
+        }
+        distances_array.clear();
+        duplicate_ratio_ +=
+            static_cast<float>(duplicate_count) / static_cast<float>(this->total_count_);
+    }
+    duplicate_ratio_ /= static_cast<float>(this->query_sample_size_);
+}
+
+float
+HGraphAnalyzer::GetBaseAvgDistance() {
+    calculate_base_groundtruth();
+    float dist_sum = 0.0F;
+    uint32_t dist_count = 0;
+    for (const auto& id : base_sample_ids_) {
+        const auto& groundtruth = base_ground_truth_[id];
+        const auto* data = groundtruth->GetData();
+        for (uint32_t i = 0; i < groundtruth->Size(); ++i) {
+            dist_sum += data[i].first;
+            dist_count++;
+        }
+    }
+    return dist_sum / dist_count;
+}
+
+float
+HGraphAnalyzer::GetNeighborRecall() {
+    calculate_base_groundtruth();
+    float neighbor_recall = 0.0F;
+    for (const auto& id : base_sample_ids_) {
+        // get neighbors from graph
+        Vector<InnerIdType> neighbors(allocator_);
+        hgraph_->bottom_graph_->GetNeighbors(id, neighbors);
+
+        DistHeapPtr groundtruth = base_ground_truth_[id];
+        std::unordered_set<InnerIdType> gt_set;
+        const auto* gt_data = groundtruth->GetData();
+        auto neighbor_count = std::min(neighbors.size(), groundtruth->Size());
+        for (uint32_t i = 0; i < neighbor_count; ++i) {
+            gt_set.insert(gt_data[i].second);
+        }
+
+        uint32_t hit_count = 0;
+        for (const auto& nb : neighbors) {
+            if (gt_set.find(nb) != gt_set.end()) {
+                hit_count++;
+            }
+        }
+        neighbor_recall += static_cast<float>(hit_count) / static_cast<float>(neighbor_count);
+    }
+    return neighbor_recall / static_cast<float>(this->query_sample_size_);
+}
+
+float
+HGraphAnalyzer::GetDuplicateRatio() {
+    if (hgraph_->label_table_->CompressDuplicateData()) {
+        size_t duplicate_num = 0;
+        for (int i = 0; i < this->total_count_; ++i) {
+            if (hgraph_->label_table_->duplicate_records_[i] != nullptr) {
+                duplicate_num += hgraph_->label_table_->duplicate_records_[i]->duplicate_ids.size();
+            }
+        }
+        return static_cast<float>(duplicate_num) / static_cast<float>(this->total_count_);
+    } else {
+        calculate_base_groundtruth();
+        return duplicate_ratio_;
+    }
+}
+
+float
+HGraphAnalyzer::GetBaseSearchRecall(const std::string& search_param) {
+    calculate_base_groundtruth();
+    calculate_base_search_result(search_param);
+    float total_recall = 0.0F;
+    for (int i = 0; i < this->query_sample_size_; ++i) {
+        const auto& ground_truth = base_ground_truth_[base_sample_ids_[i]];
+        std::unordered_set<InnerIdType> gt_set;
+        const auto* gt_data = ground_truth->GetData();
+        for (uint32_t j = 0; j < ground_truth->Size(); ++j) {
+            gt_set.insert(hgraph_->label_table_->GetIdByLabel(gt_data[j].second));
+        }
+        uint32_t hit_count = 0;
+        const auto& search_result = base_search_result_.at(base_sample_ids_[i]);
+        for (uint32_t j = 0; j < search_result.size(); ++j) {
+            if (gt_set.find(search_result[j]) != gt_set.end()) {
+                hit_count++;
+            }
+        }
+        total_recall += static_cast<float>(hit_count) / static_cast<float>(ground_truth->Size());
+    }
+    return total_recall / static_cast<float>(this->query_sample_size_);
+}
+
+void
+HGraphAnalyzer::calculate_base_search_result(const std::string& search_param) {
+    if (not base_search_result_.empty()) {
+        return;
+    }
+    for (int i = 0; i < this->query_sample_size_; ++i) {
+        auto query = Dataset::Make();
+        query->Dim(dim_)->NumElements(1)->Owner(false)->Float32Vectors(base_sample_datas_.data() +
+                                                                       i * dim_);
+        auto result = hgraph_->KnnSearch(query, top_k_, search_param, nullptr);
+        auto result_size = result->GetDim();
+        auto ids = result->GetIds();
+        Vector<LabelType> result_labels(allocator_);
+        result_labels.resize(result_size);
+        std::memcpy(result_labels.data(), ids, result_size * sizeof(LabelType));
+        base_search_result_.insert({base_sample_ids_[i], result_labels});
+    }
+}
+
+float
+HGraphAnalyzer::GetQuantizationError(const std::string& search_param) {
+    calculate_base_search_result(search_param);
+    return 0;
+}
+}  // namespace vsag

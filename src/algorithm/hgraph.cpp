@@ -2259,46 +2259,6 @@ HGraph::analyze_graph_recall(JsonType& stats,
 }
 
 void
-HGraph::analyze_graph_connection(JsonType& stats) const {
-    // graph connection
-    Vector<bool> visited(total_count_, false, allocator_);
-    int64_t connect_components = 0;
-    if (this->label_table_->CompressDuplicateData()) {
-        for (int i = 0; i < this->total_count_; ++i) {
-            if (this->label_table_->duplicate_records_[i] != nullptr) {
-                for (const auto& dup_id :
-                     this->label_table_->duplicate_records_[i]->duplicate_ids) {
-                    visited[dup_id] = true;
-                }
-            }
-        }
-    }
-    for (int64_t i = 0; i < total_count_; ++i) {
-        if (not visited[i] and not this->label_table_->IsRemoved(i)) {
-            connect_components++;
-            int64_t component_size = 0;
-            std::queue<int64_t> q;
-            q.push(i);
-            visited[i] = true;
-            while (not q.empty()) {
-                auto node = q.front();
-                q.pop();
-                component_size++;
-                Vector<InnerIdType> neighbors(allocator_);
-                this->bottom_graph_->GetNeighbors(node, neighbors);
-                for (const auto& nb : neighbors) {
-                    if (not visited[nb] and not this->label_table_->IsRemoved(nb)) {
-                        visited[nb] = true;
-                        q.push(nb);
-                    }
-                }
-            }
-        }
-    }
-    stats["connect_components"].SetInt(connect_components);
-}
-
-void
 HGraph::check_and_init_raw_vector(const FlattenInterfaceParamPtr& raw_vector_param,
                                   const IndexCommonParam& common_param) {
     if (raw_vector_param == nullptr) {

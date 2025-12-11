@@ -51,6 +51,8 @@ public:
     CheckAndMappingExternalParam(const JsonType& external_param,
                                  const IndexCommonParam& common_param);
 
+    friend class HGraphAnalyzer;
+
 public:
     HGraph(const HGraphParameterPtr& param, const IndexCommonParam& common_param);
 
@@ -322,9 +324,6 @@ private:
                          uint64_t sample_data_size,
                          int64_t topk,
                          const std::string& search_param) const;
-
-    void
-    analyze_graph_connection(JsonType& stats) const;
 
     void
     check_and_init_raw_vector(const FlattenInterfaceParamPtr& raw_vector_param,
