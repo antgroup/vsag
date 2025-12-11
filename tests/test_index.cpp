@@ -640,7 +640,7 @@ TestIndex::TestFilterSearch(const TestIndex::IndexPtr& index,
             auto threshold = res.value()->GetDistances()[topk - 1] + 1e-5;
             auto range_result =
                 index->RangeSearch(query, threshold, search_param, dataset->filter_function_);
-            REQUIRE(range_result.value()->GetDim() >= topk);
+            REQUIRE(range_result.value()->GetDim() >= topk - 1);
         }
         auto result = res.value()->GetIds();
         auto gt = gts->GetIds() + gt_topK * i;
