@@ -1791,15 +1791,9 @@ HGraph::try_recover_tombstone(const DatasetPtr& data, std::vector<int64_t>& fail
 
     // is_recovered = false
     if (is_label_valid) {
-        if (not is_tombstone) {
-            // [case 1]
-            failed_ids.emplace_back(label);
-            return true;
-        } else {
-            // [case 5]
-            throw vsag::VsagException(ErrorType::INTERNAL_ERROR,
-                                      fmt::format("label {} is valid and deleted", label));
-        }
+        // [case 1]
+        failed_ids.emplace_back(label);
+        return true;
     }
 
     // [case 2, 4]

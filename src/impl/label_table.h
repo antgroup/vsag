@@ -122,7 +122,7 @@ public:
     GetIdByLabel(LabelType label, bool return_even_removed = false) const {
         if (use_reverse_map_ and not return_even_removed) {
             if (this->label_remap_.count(label) == 0) {
-                throw std::runtime_error(fmt::format("label {} is not exists", label));
+                throw std::runtime_error(fmt::format("label {} does not exist", label));
             }
             auto id = this->label_remap_.at(label);
             if (id != std::numeric_limits<InnerIdType>::max()) {
@@ -133,7 +133,7 @@ public:
         }
         auto result = std::find(label_table_.begin(), label_table_.end(), label);
         if (result == label_table_.end()) {
-            throw std::runtime_error(fmt::format("label {} is not exists", label));
+            throw std::runtime_error(fmt::format("label {} does not exist", label));
         }
         return result - label_table_.begin();
     }
@@ -167,7 +167,7 @@ public:
             }
         }
         if (!found) {
-            throw std::runtime_error(fmt::format("old label {} is not exists", old_label));
+            throw std::runtime_error(fmt::format("old label {} does not exist", old_label));
         }
 
         // 3. update label_remap_
