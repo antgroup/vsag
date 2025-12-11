@@ -207,7 +207,7 @@ TestIndex::TestUpdateVector(const IndexPtr& index,
                 // [step 0] prepare data
                 std::vector<float> close_vec(dim);
                 std::vector<float> far_vec(dim);
-                std::normal_distribution<float> close_distribution(0.0F, 0.01F);
+                std::normal_distribution<float> close_distribution(0.0F, 0.001F);
                 std::normal_distribution<float> far_distribution(0.0F, 1.0F);
                 for (int d = 0; d < dim; d++) {
                     close_vec[d] = base[i * dim + d] + close_distribution(rng);
