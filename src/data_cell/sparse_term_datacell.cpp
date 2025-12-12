@@ -77,15 +77,13 @@ SparseTermDataCell::InsertHeap(float* dists,
             if (heap.size() < n_candidate) {
                 for (; i < term_size; i++) {
                     id = term_ids_[term][i];
-
-                    if constexpr (type == InnerSearchType::WITH_FILTER) {
-                        if (not filter->CheckValid(id + offset_id)) {
-                            dists[id] = 0;
-                            continue;
-                        }
-                    }
-
                     if (dists[id] != 0) {
+                        if constexpr (type == InnerSearchType::WITH_FILTER) {
+                            if (not filter->CheckValid(id + offset_id)) {
+                                dists[id] = 0;
+                                continue;
+                            }
+                        }
                         heap.emplace(dists[id], id + offset_id);
                         cur_heap_top = heap.top().first;
                         dists[id] = 0;
@@ -133,6 +131,80 @@ SparseTermDataCell::InsertHeap(float* dists,
         }
     }
     computer->ResetTerm();
+}
+
+template <InnerSearchMode mode, InnerSearchType type>
+void
+SparseTermDataCell::InsertHeapWithoutPrune(float* dists,
+                                uint32_t dists_size,
+                                MaxHeap& heap,
+                                const InnerSearchParam& param,
+                                uint32_t offset_id) const {
+    float cur_heap_top = std::numeric_limits<float>::max();
+    auto n_candidate = param.ef;
+    auto radius = param.radius;
+    auto filter = param.is_inner_id_allowed;
+
+    if constexpr (mode == InnerSearchMode::RANGE_SEARCH) {
+        cur_heap_top = radius - 1;
+    }
+
+    uint32_t id = 0;
+    if constexpr (mode == InnerSearchMode::KNN_SEARCH) {
+        if (heap.size() < n_candidate) {
+            for (; id < dists_size; id++) {
+                if (dists[id] != 0) {
+                    if constexpr (type == InnerSearchType::WITH_FILTER) {
+                        if (not filter->CheckValid(id + offset_id)) {
+                            dists[id] = 0;
+                            continue;
+                        }
+                    }
+                    heap.emplace(dists[id], id + offset_id);
+                    cur_heap_top = heap.top().first;
+                    dists[id] = 0;
+
+                    if (heap.size() == n_candidate) {
+                        id++;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    for (; id < dists_size; id++) {
+
+        if constexpr (type == InnerSearchType::WITH_FILTER) {
+#if __cplusplus >= 202002L
+            if (dists[id] > cur_heap_top or not filter->CheckValid(id + offset_id)) [[likely]] {
+#else
+            if (__builtin_expect(
+                    dists[id] > cur_heap_top or not filter->CheckValid(id + offset_id), 1)) {
+#endif
+                dists[id] = 0;
+                continue;
+            }
+        } else {
+#if __cplusplus >= 202002L
+            if (dists[id] > cur_heap_top) [[likely]] {
+#else
+            if (__builtin_expect(dists[id] > cur_heap_top, 1)) {
+#endif
+                dists[id] = 0;
+                continue;
+            }
+        }
+        heap.emplace(dists[id], id + offset_id);
+        if constexpr (mode == InnerSearchMode::KNN_SEARCH) {
+            heap.pop();
+            cur_heap_top = heap.top().first;
+        }
+        if constexpr (mode == InnerSearchMode::RANGE_SEARCH) {
+            cur_heap_top = radius - 1;
+        }
+        dists[id] = 0;
+    }
 }
 
 void
@@ -248,6 +320,38 @@ template void
 SparseTermDataCell::InsertHeap<InnerSearchMode::RANGE_SEARCH, InnerSearchType::WITH_FILTER>(
     float* dists,
     const SparseTermComputerPtr& computer,
+    MaxHeap& heap,
+    const InnerSearchParam& param,
+    uint32_t offset_id) const;
+
+template void
+SparseTermDataCell::InsertHeapWithoutPrune<InnerSearchMode::KNN_SEARCH, InnerSearchType::PURE>(
+    float* dists,
+    uint32_t dists_size,
+    MaxHeap& heap,
+    const InnerSearchParam& param,
+    uint32_t offset_id) const;
+
+template void
+SparseTermDataCell::InsertHeapWithoutPrune<InnerSearchMode::KNN_SEARCH, InnerSearchType::WITH_FILTER>(
+    float* dists,
+    uint32_t dists_size,
+    MaxHeap& heap,
+    const InnerSearchParam& param,
+    uint32_t offset_id) const;
+
+template void
+SparseTermDataCell::InsertHeapWithoutPrune<InnerSearchMode::RANGE_SEARCH, InnerSearchType::PURE>(
+    float* dists,
+    uint32_t dists_size,
+    MaxHeap& heap,
+    const InnerSearchParam& param,
+    uint32_t offset_id) const;
+
+template void
+SparseTermDataCell::InsertHeapWithoutPrune<InnerSearchMode::RANGE_SEARCH, InnerSearchType::WITH_FILTER>(
+    float* dists,
+    uint32_t dists_size,
     MaxHeap& heap,
     const InnerSearchParam& param,
     uint32_t offset_id) const;
