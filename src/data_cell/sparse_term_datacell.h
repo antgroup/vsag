@@ -48,6 +48,15 @@ public:
                const InnerSearchParam& param,
                uint32_t offset_id) const;
 
+    template <InnerSearchMode mode = InnerSearchMode::KNN_SEARCH,
+              InnerSearchType type = InnerSearchType::PURE>
+    void
+    InsertHeapWithoutPrune(float* dists,
+                uint32_t dists_size,
+                MaxHeap& heap,
+                const InnerSearchParam& param,
+                uint32_t offset_id) const;
+
     void
     DocPrune(Vector<std::pair<uint32_t, float>>& sorted_base) const;
 

@@ -158,8 +158,33 @@ SINDI::search_impl(const SparseTermComputerPtr& computer,
 
     // window iteration
     std::vector<float> dists(window_size_, 0.0);
-
-    for (auto cur = 0; cur < window_term_list_.size(); cur++) {
+    auto filter = inner_param.is_inner_id_allowed;
+    int64_t min_window_id = 0;
+    int64_t max_window_id = window_term_list_.size() - 1;
+    // get min and max window id
+    if (filter) {
+        const int64_t *valid_ids = nullptr;
+        int64_t valid_count = 0;
+        filter->GetValidIds(&valid_ids, valid_count);
+        int64_t min_inner_id = INT64_MAX;
+        int64_t max_inner_id = INT64_MIN;
+        int64_t id;
+        for (int i = 0; i < valid_count; i++) {
+            if (__builtin_expect(not label_table_->CheckLabel(valid_ids[i]), 0)) {
+                continue;
+            }
+            id = label_table_->GetIdByLabel(valid_ids[i]);
+            min_inner_id = std::min(min_inner_id, id);
+            max_inner_id = std::max(max_inner_id, id);
+        }
+        if (min_inner_id != INT64_MAX) {
+            min_window_id = min_inner_id / window_size_;
+        }
+        if (max_inner_id != INT64_MIN) {
+            max_window_id = max_inner_id / window_size_;
+        }
+    }
+    for (auto cur = min_window_id; cur <= max_window_id; cur++) {
         auto window_start_id = cur * window_size_;
         auto term_list = this->window_term_list_[cur];
 
@@ -167,12 +192,22 @@ SINDI::search_impl(const SparseTermComputerPtr& computer,
         term_list->Query(dists.data(), computer);
 
         // insert heap
-        if (inner_param.is_inner_id_allowed) {
-            term_list->InsertHeap<mode, WITH_FILTER>(
-                dists.data(), computer, heap, inner_param, window_start_id);
+        if (doc_retain_ratio_ < 1.0) {
+            if (inner_param.is_inner_id_allowed) {
+                term_list->InsertHeap<mode, WITH_FILTER>(
+                    dists.data(), computer, heap, inner_param, window_start_id);
+            } else {
+                term_list->InsertHeap<mode, PURE>(
+                    dists.data(), computer, heap, inner_param, window_start_id);
+            }
         } else {
-            term_list->InsertHeap<mode, PURE>(
-                dists.data(), computer, heap, inner_param, window_start_id);
+            if (inner_param.is_inner_id_allowed) {
+                term_list->InsertHeapWithoutPrune<mode, WITH_FILTER>(
+                    dists.data(), dists.size(), heap, inner_param, window_start_id);
+            } else {
+                term_list->InsertHeapWithoutPrune<mode, PURE>(
+                    dists.data(), dists.size(), heap, inner_param, window_start_id);
+            }
         }
     }
 
