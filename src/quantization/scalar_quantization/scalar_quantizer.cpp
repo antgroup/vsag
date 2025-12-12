@@ -28,7 +28,7 @@ template <MetricType metric, int bit>
 ScalarQuantizer<metric, bit>::ScalarQuantizer(int dim, Allocator* allocator)
     : Quantizer<ScalarQuantizer<metric, bit>>(dim, allocator) {
     auto bit_count = static_cast<int64_t>(dim) * static_cast<int64_t>(BIT_PER_DIM);
-    this->code_size_ = ceil_int(bit_count, 8);
+    this->code_size_ = align_up(bit_count, 8) / 8;
     this->query_code_size_ = this->dim_ * sizeof(float);
     this->metric_ = metric;
     lower_bound_.resize(dim, std::numeric_limits<DataType>::max());
