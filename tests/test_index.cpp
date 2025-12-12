@@ -2171,6 +2171,11 @@ TestIndex::TestGetRawVectorByIds(const IndexPtr& index,
     if (not index->CheckFeature(vsag::SUPPORT_GET_RAW_VECTOR_BY_IDS)) {
         return;
     }
+
+    int64_t non_exist_id = -9999999;
+    auto failed_res = index->GetRawVectorByIds(&non_exist_id, 1);
+    REQUIRE(not failed_res.has_value());
+
     int64_t count = dataset->count_;
     auto vectors = index->GetRawVectorByIds(dataset->base_->GetIds(), count);
     REQUIRE(vectors.has_value());
