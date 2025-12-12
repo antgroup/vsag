@@ -106,7 +106,7 @@ jobs:
         env:
           CIBW_ARCHS: ${{ matrix.arch }}
           CIBW_BUILD: ${{ matrix.cibw-build-id }}
-          CIBW_TEST_COMMAND: "pip install numpy && ls -alF /project/ && python /project/examples/python/example_hnsw.py"
+          CIBW_TEST_COMMAND: "pip install numpy && ls -alF /project/ && python /project/tests/python/run_test.py"
 
       - uses: actions/upload-artifact@v5
         with:
@@ -141,7 +141,7 @@ jobs:
         env:
           CIBW_ARCHS: ${{ matrix.arch }}
           CIBW_BUILD: "cp36-*"
-          CIBW_TEST_COMMAND: "pip install numpy && ls -alF /project/ && python /project/examples/python/example_hnsw.py"
+          CIBW_TEST_COMMAND: "pip install numpy && ls -alF /project/ && python /project/tests/python/run_test.py"
 
       - uses: actions/upload-artifact@v5
         with:
