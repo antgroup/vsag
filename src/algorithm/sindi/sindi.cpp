@@ -76,7 +76,7 @@ SINDI::Add(const DatasetPtr& base) {
             continue;
         }
 
-        uint32_t inner_id = cur_element_count_ - window_start_id;
+        uint16_t inner_id = static_cast<uint16_t>(cur_element_count_ - window_start_id);
 
         try {
             window_term_list_[cur_window]->InsertVector(sparse_vector, inner_id);
@@ -407,7 +407,7 @@ SINDI::EstimateMemory(uint64_t num_elements) const {
     mem += 2 * sizeof(int64_t) * num_elements;
 
     // size of term id + term data
-    mem += ESTIMATE_DOC_TERM * num_elements * sizeof(float) * 2;
+    mem += ESTIMATE_DOC_TERM * num_elements * (sizeof(float) + sizeof(uint16_t));
 
     // size of rerank index is same as sindi
     if (use_reorder_) {
@@ -432,7 +432,7 @@ SINDI::GetSparseVectorByInnerId(InnerIdType inner_id, SparseVector* data) const 
     auto window_start_id = cur_window * window_size_;
     auto term_list = this->window_term_list_[cur_window];
 
-    term_list->GetSparseVector(inner_id - window_start_id, data);
+    term_list->GetSparseVector(static_cast<uint16_t>(inner_id - window_start_id), data);
 }
 
 float
@@ -453,7 +453,8 @@ SINDI::CalcDistanceById(const DatasetPtr& vector, int64_t id) const {
     search_param.query_prune_ratio = 0;
     search_param.term_prune_ratio = 0;
     auto computer = std::make_shared<SparseTermComputer>(sparse_query, search_param, allocator_);
-    return term_list->CalcDistanceByInnerId(computer, inner_id - window_start_id);
+    return term_list->CalcDistanceByInnerId(computer,
+                                            static_cast<uint16_t>(inner_id - window_start_id));
 }
 
 DatasetPtr

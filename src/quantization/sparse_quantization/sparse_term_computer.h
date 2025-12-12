@@ -69,7 +69,7 @@ public:
 
     inline void
     ScanForAccumulate(uint32_t term_iterator,
-                      const uint32_t* term_ids,
+                      const uint16_t* term_ids,
                       const float* term_datas,
                       uint32_t term_count,
                       float* global_dists) {
@@ -87,10 +87,10 @@ public:
 
     inline void
     ScanForCalculateDist(uint32_t term_iterator,
-                         const uint32_t* term_ids,
+                         const uint16_t* term_ids,
                          const float* term_datas,
                          uint32_t term_count,
-                         uint32_t target_id,
+                         uint16_t target_id,
                          float* dist) {
         float query_val = sorted_query_[term_iterator].second;
 
