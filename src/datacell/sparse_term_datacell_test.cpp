@@ -87,9 +87,14 @@ TEST_CASE("SparseTermDatacell Basic Test", "[ut][SparseTermDatacell]") {
     REQUIRE(data_cell->term_ids_.size() == exp_id_size);
     REQUIRE(data_cell->term_datas_.size() == exp_id_size);
     for (auto i = 0; i < data_cell->term_capacity_; i++) {
-        REQUIRE(data_cell->term_ids_[i].size() == data_cell->term_sizes_[i]);
-        REQUIRE(data_cell->term_ids_[i].size() == exp_size[i]);
-        REQUIRE(data_cell->term_datas_[i].size() == exp_size[i]);
+        if (exp_size[i] == 0) {
+            REQUIRE(data_cell->term_ids_[i] == nullptr);
+            REQUIRE(data_cell->term_datas_[i] == nullptr);
+        } else {
+            REQUIRE(data_cell->term_ids_[i]->size() == data_cell->term_sizes_[i]);
+            REQUIRE(data_cell->term_ids_[i]->size() == exp_size[i]);
+            REQUIRE(data_cell->term_datas_[i]->size() == exp_size[i]);
+        }
     }
 
     std::vector<float> exp_dists = {24, 34, 38, 42, 46, 50, 54, 58, 75, 80};

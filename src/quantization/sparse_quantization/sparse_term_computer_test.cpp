@@ -68,7 +68,7 @@ TEST_CASE("SparseTermComputer Basic Test", "[ut][SparseTermComputer]") {
     auto query_val = computer->sorted_query_[test_term_it].second;
     REQUIRE(std::abs(query_val - (-1.0 * query_id)) < 1e-3);
     std::vector<float> dists(10, 0);
-    std::vector<uint32_t> term_ids = {0, 2, 4, 6, 8};
+    std::vector<uint16_t> term_ids = {0, 2, 4, 6, 8};
     std::vector<float> term_vals = {0, 2, 4, 6, 8};
     computer->ScanForAccumulate(
         test_term_it, term_ids.data(), term_vals.data(), term_ids.size(), dists.data());
