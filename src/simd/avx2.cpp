@@ -47,7 +47,7 @@ InnerProduct(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
 
 float
 InnerProductDistance(const void* pVect1, const void* pVect2, const void* qty_ptr) {
-    return 1.0f - avx2::InnerProduct(pVect1, pVect2, qty_ptr);
+    return 1.0F - avx2::InnerProduct(pVect1, pVect2, qty_ptr);
 }
 
 float
@@ -616,7 +616,7 @@ SQ8ComputeIP(const float* RESTRICT query,
         __m256 lower_bound_values = _mm256_loadu_ps(lower_bound + i);
 
         __m256 scaled_codes =
-            _mm256_mul_ps(_mm256_div_ps(code_floats, _mm256_set1_ps(255.0f)), diff_values);
+            _mm256_mul_ps(_mm256_div_ps(code_floats, _mm256_set1_ps(255.0F)), diff_values);
         __m256 adjusted_codes = _mm256_add_ps(scaled_codes, lower_bound_values);
         __m256 val = _mm256_mul_ps(query_values, adjusted_codes);
         sum = _mm256_add_ps(sum, val);
@@ -651,7 +651,7 @@ SQ8ComputeL2Sqr(const float* RESTRICT query,
     for (; i + 7 < dim; i += 8) {
         // Load data into registers
         __m256i code_values = _mm256_cvtepu8_epi32(load_8_char(codes + i));
-        __m256 code_floats = _mm256_div_ps(_mm256_cvtepi32_ps(code_values), _mm256_set1_ps(255.0f));
+        __m256 code_floats = _mm256_div_ps(_mm256_cvtepi32_ps(code_values), _mm256_set1_ps(255.0F));
         __m256 diff_values = _mm256_loadu_ps(diff + i);
         __m256 lower_bound_values = _mm256_loadu_ps(lower_bound + i);
         __m256 query_values = _mm256_loadu_ps(query + i);
@@ -698,8 +698,8 @@ SQ8ComputeCodesIP(const uint8_t* RESTRICT codes1,
         __m128i code2_values = load_8_char(codes2 + i);
         __m256i codes1_256 = _mm256_cvtepu8_epi32(code1_values);
         __m256i codes2_256 = _mm256_cvtepu8_epi32(code2_values);
-        __m256 code1_floats = _mm256_div_ps(_mm256_cvtepi32_ps(codes1_256), _mm256_set1_ps(255.0f));
-        __m256 code2_floats = _mm256_div_ps(_mm256_cvtepi32_ps(codes2_256), _mm256_set1_ps(255.0f));
+        __m256 code1_floats = _mm256_div_ps(_mm256_cvtepi32_ps(codes1_256), _mm256_set1_ps(255.0F));
+        __m256 code2_floats = _mm256_div_ps(_mm256_cvtepi32_ps(codes2_256), _mm256_set1_ps(255.0F));
         __m256 diff_values = _mm256_loadu_ps(diff + i);
         __m256 lower_bound_values = _mm256_loadu_ps(lower_bound + i);
         // Perform calculations
@@ -741,9 +741,9 @@ SQ8ComputeCodesL2Sqr(const uint8_t* RESTRICT codes1,
         __m256i code1_values = _mm256_cvtepu8_epi32(load_8_char(codes1 + i));
         __m256i code2_values = _mm256_cvtepu8_epi32(load_8_char(codes2 + i));
         __m256 codes1_floats =
-            _mm256_div_ps(_mm256_cvtepi32_ps(code1_values), _mm256_set1_ps(255.0f));
+            _mm256_div_ps(_mm256_cvtepi32_ps(code1_values), _mm256_set1_ps(255.0F));
         __m256 codes2_floats =
-            _mm256_div_ps(_mm256_cvtepi32_ps(code2_values), _mm256_set1_ps(255.0f));
+            _mm256_div_ps(_mm256_cvtepi32_ps(code2_values), _mm256_set1_ps(255.0F));
         __m256 diff_values = _mm256_loadu_ps(diff + i);
         __m256 lower_bound_values = _mm256_loadu_ps(lower_bound + i);
         // Perform calculations
@@ -769,14 +769,95 @@ SQ8ComputeCodesL2Sqr(const uint8_t* RESTRICT codes1,
     return avx::SQ8ComputeCodesL2Sqr(codes1, codes2, lower_bound, diff, dim);
 #endif
 }
-
 float
 SQ4ComputeIP(const float* RESTRICT query,
              const uint8_t* RESTRICT codes,
              const float* RESTRICT lower_bound,
              const float* RESTRICT diff,
              uint64_t dim) {
-    return avx::SQ4ComputeIP(query, codes, lower_bound, diff, dim);
+#if defined(ENABLE_AVX2)
+    if (dim == 0) {
+        return 0;
+    }
+
+    float result = 0;
+    uint64_t d = 0;
+
+    // Process 16 values at a time (8 bytes containing 16 4-bit values)
+    for (; d + 15 < dim; d += 16) {
+        // Load 8 bytes (16 4-bit values)
+        __m128i code_vec = _mm_loadl_epi64((__m128i*)(codes + (d >> 1)));
+        __m128i code_vec2 = _mm_loadl_epi64((__m128i*)(codes + (d >> 1) + 4));
+
+        // Extract low nibbles (values 0,2,4,6,8,10,12,14) - even indices
+        __m128i low_nibbles1 = _mm_and_si128(code_vec, _mm_set1_epi8(0x0F));
+        __m128i low_nibbles2 = _mm_and_si128(code_vec2, _mm_set1_epi8(0x0F));
+
+        // Extract high nibbles (values 1,3,5,7,9,11,13,15) - odd indices
+        __m128i high_nibbles1 = _mm_and_si128(_mm_srli_epi16(code_vec, 4), _mm_set1_epi8(0x0F));
+        __m128i high_nibbles2 = _mm_and_si128(_mm_srli_epi16(code_vec2, 4), _mm_set1_epi8(0x0F));
+
+        // Interleave low and high nibbles to get correct order
+        __m128i interleaved1 = _mm_unpacklo_epi8(low_nibbles1, high_nibbles1);
+        __m128i interleaved2 = _mm_unpacklo_epi8(low_nibbles2, high_nibbles2);
+
+        // Convert to float and scale - first 8 values
+        __m128i low_part1 = _mm_cvtepu8_epi32(interleaved1);
+        __m128i high_part1 = _mm_cvtepu8_epi32(_mm_srli_si128(interleaved1, 4));
+        __m128 values0 = _mm_cvtepi32_ps(low_part1);
+        __m128 values1 = _mm_cvtepi32_ps(high_part1);
+
+        // Convert to float and scale - next 8 values
+        __m128i low_part2 = _mm_cvtepu8_epi32(interleaved2);
+        __m128i high_part2 = _mm_cvtepu8_epi32(_mm_srli_si128(interleaved2, 4));
+        __m128 values2 = _mm_cvtepi32_ps(low_part2);
+        __m128 values3 = _mm_cvtepi32_ps(high_part2);
+
+        // Combine into AVX vectors
+        __m256 values01 = _mm256_set_m128(values1, values0);
+        __m256 values23 = _mm256_set_m128(values3, values2);
+
+        // Scale by 1/15.0
+        __m256 scale = _mm256_set1_ps(1.0f / 15.0f);
+        values01 = _mm256_mul_ps(values01, scale);
+        values23 = _mm256_mul_ps(values23, scale);
+
+        // Apply diff and lower_bound
+        __m256 diff_vec0 = _mm256_loadu_ps(diff + d);
+        __m256 diff_vec1 = _mm256_loadu_ps(diff + d + 8);
+        __m256 lb_vec0 = _mm256_loadu_ps(lower_bound + d);
+        __m256 lb_vec1 = _mm256_loadu_ps(lower_bound + d + 8);
+
+        values01 = _mm256_fmadd_ps(values01, diff_vec0, lb_vec0);
+        values23 = _mm256_fmadd_ps(values23, diff_vec1, lb_vec1);
+
+        // Load query vectors
+        __m256 query_vec0 = _mm256_loadu_ps(query + d);
+        __m256 query_vec1 = _mm256_loadu_ps(query + d + 8);
+
+        // Compute dot products
+        __m256 prod0 = _mm256_mul_ps(query_vec0, values01);
+        __m256 prod1 = _mm256_mul_ps(query_vec1, values23);
+
+        // Horizontal sum
+        __m256 sum = _mm256_add_ps(prod0, prod1);
+        __m128 sum_low = _mm256_castps256_ps128(sum);
+        __m128 sum_high = _mm256_extractf128_ps(sum, 1);
+        __m128 sum01 = _mm_add_ps(sum_low, sum_high);
+        __m128 sum23 = _mm_shuffle_ps(sum01, sum01, _MM_SHUFFLE(2, 3, 0, 1));
+        __m128 sum0123 = _mm_add_ps(sum01, sum23);
+        __m128 sum4567 = _mm_movehl_ps(sum0123, sum0123);
+        __m128 total_sum = _mm_add_ss(sum0123, sum4567);
+
+        result += _mm_cvtss_f32(total_sum);
+    }
+
+    // Process remaining elements with SSE implementation
+    result += sse::SQ4ComputeIP(query + d, codes + (d >> 1), lower_bound + d, diff + d, dim - d);
+    return result;
+#else
+    return sse::SQ4ComputeIP(query, codes, lower_bound, diff, dim);
+#endif
 }
 
 float
@@ -785,7 +866,93 @@ SQ4ComputeL2Sqr(const float* RESTRICT query,
                 const float* RESTRICT lower_bound,
                 const float* RESTRICT diff,
                 uint64_t dim) {
-    return avx::SQ4ComputeL2Sqr(query, codes, lower_bound, diff, dim);
+#if defined(ENABLE_AVX2)
+    if (dim == 0) {
+        return 0;
+    }
+
+    float result = 0;
+    uint64_t d = 0;
+
+    // Process 16 values at a time (8 bytes containing 16 4-bit values)
+    for (; d + 15 < dim; d += 16) {
+        // Load 8 bytes (16 4-bit values)
+        __m128i code_vec = _mm_loadl_epi64((__m128i*)(codes + (d >> 1)));
+        __m128i code_vec2 = _mm_loadl_epi64((__m128i*)(codes + (d >> 1) + 4));
+
+        // Extract low nibbles (values 0,2,4,6,8,10,12,14) - even indices
+        __m128i low_nibbles1 = _mm_and_si128(code_vec, _mm_set1_epi8(0x0F));
+        __m128i low_nibbles2 = _mm_and_si128(code_vec2, _mm_set1_epi8(0x0F));
+
+        // Extract high nibbles (values 1,3,5,7,9,11,13,15) - odd indices
+        __m128i high_nibbles1 = _mm_and_si128(_mm_srli_epi16(code_vec, 4), _mm_set1_epi8(0x0F));
+        __m128i high_nibbles2 = _mm_and_si128(_mm_srli_epi16(code_vec2, 4), _mm_set1_epi8(0x0F));
+
+        // Interleave low and high nibbles to get correct order
+        __m128i interleaved1 = _mm_unpacklo_epi8(low_nibbles1, high_nibbles1);
+        __m128i interleaved2 = _mm_unpacklo_epi8(low_nibbles2, high_nibbles2);
+
+        // Convert to float and scale - first 8 values
+        __m128i low_part1 = _mm_cvtepu8_epi32(interleaved1);
+        __m128i high_part1 = _mm_cvtepu8_epi32(_mm_srli_si128(interleaved1, 4));
+        __m128 values0 = _mm_cvtepi32_ps(low_part1);
+        __m128 values1 = _mm_cvtepi32_ps(high_part1);
+
+        // Convert to float and scale - next 8 values
+        __m128i low_part2 = _mm_cvtepu8_epi32(interleaved2);
+        __m128i high_part2 = _mm_cvtepu8_epi32(_mm_srli_si128(interleaved2, 4));
+        __m128 values2 = _mm_cvtepi32_ps(low_part2);
+        __m128 values3 = _mm_cvtepi32_ps(high_part2);
+
+        // Combine into AVX vectors
+        __m256 values01 = _mm256_set_m128(values1, values0);
+        __m256 values23 = _mm256_set_m128(values3, values2);
+
+        // Scale by 1/15.0
+        __m256 scale = _mm256_set1_ps(1.0f / 15.0f);
+        values01 = _mm256_mul_ps(values01, scale);
+        values23 = _mm256_mul_ps(values23, scale);
+
+        // Apply diff and lower_bound
+        __m256 diff_vec0 = _mm256_loadu_ps(diff + d);
+        __m256 diff_vec1 = _mm256_loadu_ps(diff + d + 8);
+        __m256 lb_vec0 = _mm256_loadu_ps(lower_bound + d);
+        __m256 lb_vec1 = _mm256_loadu_ps(lower_bound + d + 8);
+
+        values01 = _mm256_fmadd_ps(values01, diff_vec0, lb_vec0);
+        values23 = _mm256_fmadd_ps(values23, diff_vec1, lb_vec1);
+
+        // Load query vectors
+        __m256 query_vec0 = _mm256_loadu_ps(query + d);
+        __m256 query_vec1 = _mm256_loadu_ps(query + d + 8);
+
+        // Compute differences
+        __m256 diff0 = _mm256_sub_ps(query_vec0, values01);
+        __m256 diff1 = _mm256_sub_ps(query_vec1, values23);
+
+        // Square differences
+        __m256 sq_diff0 = _mm256_mul_ps(diff0, diff0);
+        __m256 sq_diff1 = _mm256_mul_ps(diff1, diff1);
+
+        // Horizontal sum
+        __m256 sum = _mm256_add_ps(sq_diff0, sq_diff1);
+        __m128 sum_low = _mm256_castps256_ps128(sum);
+        __m128 sum_high = _mm256_extractf128_ps(sum, 1);
+        __m128 sum01 = _mm_add_ps(sum_low, sum_high);
+        __m128 sum23 = _mm_shuffle_ps(sum01, sum01, _MM_SHUFFLE(2, 3, 0, 1));
+        __m128 sum0123 = _mm_add_ps(sum01, sum23);
+        __m128 sum4567 = _mm_movehl_ps(sum0123, sum0123);
+        __m128 total_sum = _mm_add_ss(sum0123, sum4567);
+
+        result += _mm_cvtss_f32(total_sum);
+    }
+
+    // Process remaining elements with SSE implementation
+    result += sse::SQ4ComputeL2Sqr(query + d, codes + (d >> 1), lower_bound + d, diff + d, dim - d);
+    return result;
+#else
+    return sse::SQ4ComputeL2Sqr(query, codes, lower_bound, diff, dim);
+#endif
 }
 
 float
@@ -794,7 +961,114 @@ SQ4ComputeCodesIP(const uint8_t* RESTRICT codes1,
                   const float* RESTRICT lower_bound,
                   const float* RESTRICT diff,
                   uint64_t dim) {
-    return avx::SQ4ComputeCodesIP(codes1, codes2, lower_bound, diff, dim);
+#if defined(ENABLE_AVX2)
+    if (dim == 0) {
+        return 0;
+    }
+
+    float result = 0;
+    uint64_t d = 0;
+
+    // Process 16 values at a time (8 bytes containing 16 4-bit values)
+    for (; d + 15 < dim; d += 16) {
+        // Load 8 bytes from each code vector (16 4-bit values)
+        __m128i code1_vec = _mm_loadl_epi64((__m128i*)(codes1 + (d >> 1)));
+        __m128i code1_vec2 = _mm_loadl_epi64((__m128i*)(codes1 + (d >> 1) + 4));
+        __m128i code2_vec = _mm_loadl_epi64((__m128i*)(codes2 + (d >> 1)));
+        __m128i code2_vec2 = _mm_loadl_epi64((__m128i*)(codes2 + (d >> 1) + 4));
+
+        // Extract and interleave nibbles for code1
+        __m128i code1_low1 = _mm_and_si128(code1_vec, _mm_set1_epi8(0x0F));
+        __m128i code1_high1 = _mm_and_si128(_mm_srli_epi16(code1_vec, 4), _mm_set1_epi8(0x0F));
+        __m128i code1_interleaved1 = _mm_unpacklo_epi8(code1_low1, code1_high1);
+
+        __m128i code1_low2 = _mm_and_si128(code1_vec2, _mm_set1_epi8(0x0F));
+        __m128i code1_high2 = _mm_and_si128(_mm_srli_epi16(code1_vec2, 4), _mm_set1_epi8(0x0F));
+        __m128i code1_interleaved2 = _mm_unpacklo_epi8(code1_low2, code1_high2);
+
+        // Extract and interleave nibbles for code2
+        __m128i code2_low1 = _mm_and_si128(code2_vec, _mm_set1_epi8(0x0F));
+        __m128i code2_high1 = _mm_and_si128(_mm_srli_epi16(code2_vec, 4), _mm_set1_epi8(0x0F));
+        __m128i code2_interleaved1 = _mm_unpacklo_epi8(code2_low1, code2_high1);
+
+        __m128i code2_low2 = _mm_and_si128(code2_vec2, _mm_set1_epi8(0x0F));
+        __m128i code2_high2 = _mm_and_si128(_mm_srli_epi16(code2_vec2, 4), _mm_set1_epi8(0x0F));
+        __m128i code2_interleaved2 = _mm_unpacklo_epi8(code2_low2, code2_high2);
+
+        // Convert to float and scale for code1 - first 8 values
+        __m128i code1_low_part1 = _mm_cvtepu8_epi32(code1_interleaved1);
+        __m128i code1_high_part1 = _mm_cvtepu8_epi32(_mm_srli_si128(code1_interleaved1, 4));
+        __m128 code1_values0 = _mm_cvtepi32_ps(code1_low_part1);
+        __m128 code1_values1 = _mm_cvtepi32_ps(code1_high_part1);
+
+        // Convert to float and scale for code1 - next 8 values
+        __m128i code1_low_part2 = _mm_cvtepu8_epi32(code1_interleaved2);
+        __m128i code1_high_part2 = _mm_cvtepu8_epi32(_mm_srli_si128(code1_interleaved2, 4));
+        __m128 code1_values2 = _mm_cvtepi32_ps(code1_low_part2);
+        __m128 code1_values3 = _mm_cvtepi32_ps(code1_high_part2);
+
+        // Convert to float and scale for code2 - first 8 values
+        __m128i code2_low_part1 = _mm_cvtepu8_epi32(code2_interleaved1);
+        __m128i code2_high_part1 = _mm_cvtepu8_epi32(_mm_srli_si128(code2_interleaved1, 4));
+        __m128 code2_values0 = _mm_cvtepi32_ps(code2_low_part1);
+        __m128 code2_values1 = _mm_cvtepi32_ps(code2_high_part1);
+
+        // Convert to float and scale for code2 - next 8 values
+        __m128i code2_low_part2 = _mm_cvtepu8_epi32(code2_interleaved2);
+        __m128i code2_high_part2 = _mm_cvtepu8_epi32(_mm_srli_si128(code2_interleaved2, 4));
+        __m128 code2_values2 = _mm_cvtepi32_ps(code2_low_part2);
+        __m128 code2_values3 = _mm_cvtepi32_ps(code2_high_part2);
+
+        // Combine into AVX vectors for code1
+        __m256 code1_values01 = _mm256_set_m128(code1_values1, code1_values0);
+        __m256 code1_values23 = _mm256_set_m128(code1_values3, code1_values2);
+
+        // Combine into AVX vectors for code2
+        __m256 code2_values01 = _mm256_set_m128(code2_values1, code2_values0);
+        __m256 code2_values23 = _mm256_set_m128(code2_values3, code2_values2);
+
+        // Scale by 1/15.0
+        __m256 scale = _mm256_set1_ps(1.0f / 15.0f);
+        code1_values01 = _mm256_mul_ps(code1_values01, scale);
+        code1_values23 = _mm256_mul_ps(code1_values23, scale);
+        code2_values01 = _mm256_mul_ps(code2_values01, scale);
+        code2_values23 = _mm256_mul_ps(code2_values23, scale);
+
+        // Apply diff and lower_bound
+        __m256 diff_vec0 = _mm256_loadu_ps(diff + d);
+        __m256 diff_vec1 = _mm256_loadu_ps(diff + d + 8);
+        __m256 lb_vec0 = _mm256_loadu_ps(lower_bound + d);
+        __m256 lb_vec1 = _mm256_loadu_ps(lower_bound + d + 8);
+
+        code1_values01 = _mm256_fmadd_ps(code1_values01, diff_vec0, lb_vec0);
+        code1_values23 = _mm256_fmadd_ps(code1_values23, diff_vec1, lb_vec1);
+        code2_values01 = _mm256_fmadd_ps(code2_values01, diff_vec0, lb_vec0);
+        code2_values23 = _mm256_fmadd_ps(code2_values23, diff_vec1, lb_vec1);
+
+        // Compute dot products
+        __m256 prod0 = _mm256_mul_ps(code1_values01, code2_values01);
+        __m256 prod1 = _mm256_mul_ps(code1_values23, code2_values23);
+
+        // Horizontal sum
+        __m256 sum = _mm256_add_ps(prod0, prod1);
+        __m128 sum_low = _mm256_castps256_ps128(sum);
+        __m128 sum_high = _mm256_extractf128_ps(sum, 1);
+        __m128 sum01 = _mm_add_ps(sum_low, sum_high);
+        __m128 sum23 = _mm_shuffle_ps(sum01, sum01, _MM_SHUFFLE(2, 3, 0, 1));
+        __m128 sum0123 = _mm_add_ps(sum01, sum23);
+        __m128 sum4567 = _mm_movehl_ps(sum0123, sum0123);
+        __m128 total_sum = _mm_add_ss(sum0123, sum4567);
+
+        result += _mm_cvtss_f32(total_sum);
+    }
+
+    // Process remaining elements with SSE implementation
+    result += sse::SQ4ComputeCodesIP(
+        codes1 + (d >> 1), codes2 + (d >> 1), lower_bound + d, diff + d, dim - d);
+    return result;
+#else
+    return sse::SQ4ComputeCodesIP(codes1, codes2, lower_bound, diff, dim);
+#endif
 }
 
 float
@@ -803,7 +1077,118 @@ SQ4ComputeCodesL2Sqr(const uint8_t* RESTRICT codes1,
                      const float* RESTRICT lower_bound,
                      const float* RESTRICT diff,
                      uint64_t dim) {
-    return avx::SQ4ComputeCodesL2Sqr(codes1, codes2, lower_bound, diff, dim);
+#if defined(ENABLE_AVX2)
+    if (dim == 0) {
+        return 0;
+    }
+
+    float result = 0;
+    uint64_t d = 0;
+
+    // Process 16 values at a time (8 bytes containing 16 4-bit values)
+    for (; d + 15 < dim; d += 16) {
+        // Load 8 bytes from each code vector (16 4-bit values)
+        __m128i code1_vec = _mm_loadl_epi64((__m128i*)(codes1 + (d >> 1)));
+        __m128i code1_vec2 = _mm_loadl_epi64((__m128i*)(codes1 + (d >> 1) + 4));
+        __m128i code2_vec = _mm_loadl_epi64((__m128i*)(codes2 + (d >> 1)));
+        __m128i code2_vec2 = _mm_loadl_epi64((__m128i*)(codes2 + (d >> 1) + 4));
+
+        // Extract and interleave nibbles for code1
+        __m128i code1_low1 = _mm_and_si128(code1_vec, _mm_set1_epi8(0x0F));
+        __m128i code1_high1 = _mm_and_si128(_mm_srli_epi16(code1_vec, 4), _mm_set1_epi8(0x0F));
+        __m128i code1_interleaved1 = _mm_unpacklo_epi8(code1_low1, code1_high1);
+
+        __m128i code1_low2 = _mm_and_si128(code1_vec2, _mm_set1_epi8(0x0F));
+        __m128i code1_high2 = _mm_and_si128(_mm_srli_epi16(code1_vec2, 4), _mm_set1_epi8(0x0F));
+        __m128i code1_interleaved2 = _mm_unpacklo_epi8(code1_low2, code1_high2);
+
+        // Extract and interleave nibbles for code2
+        __m128i code2_low1 = _mm_and_si128(code2_vec, _mm_set1_epi8(0x0F));
+        __m128i code2_high1 = _mm_and_si128(_mm_srli_epi16(code2_vec, 4), _mm_set1_epi8(0x0F));
+        __m128i code2_interleaved1 = _mm_unpacklo_epi8(code2_low1, code2_high1);
+
+        __m128i code2_low2 = _mm_and_si128(code2_vec2, _mm_set1_epi8(0x0F));
+        __m128i code2_high2 = _mm_and_si128(_mm_srli_epi16(code2_vec2, 4), _mm_set1_epi8(0x0F));
+        __m128i code2_interleaved2 = _mm_unpacklo_epi8(code2_low2, code2_high2);
+
+        // Convert to float and scale for code1 - first 8 values
+        __m128i code1_low_part1 = _mm_cvtepu8_epi32(code1_interleaved1);
+        __m128i code1_high_part1 = _mm_cvtepu8_epi32(_mm_srli_si128(code1_interleaved1, 4));
+        __m128 code1_values0 = _mm_cvtepi32_ps(code1_low_part1);
+        __m128 code1_values1 = _mm_cvtepi32_ps(code1_high_part1);
+
+        // Convert to float and scale for code1 - next 8 values
+        __m128i code1_low_part2 = _mm_cvtepu8_epi32(code1_interleaved2);
+        __m128i code1_high_part2 = _mm_cvtepu8_epi32(_mm_srli_si128(code1_interleaved2, 4));
+        __m128 code1_values2 = _mm_cvtepi32_ps(code1_low_part2);
+        __m128 code1_values3 = _mm_cvtepi32_ps(code1_high_part2);
+
+        // Convert to float and scale for code2 - first 8 values
+        __m128i code2_low_part1 = _mm_cvtepu8_epi32(code2_interleaved1);
+        __m128i code2_high_part1 = _mm_cvtepu8_epi32(_mm_srli_si128(code2_interleaved1, 4));
+        __m128 code2_values0 = _mm_cvtepi32_ps(code2_low_part1);
+        __m128 code2_values1 = _mm_cvtepi32_ps(code2_high_part1);
+
+        // Convert to float and scale for code2 - next 8 values
+        __m128i code2_low_part2 = _mm_cvtepu8_epi32(code2_interleaved2);
+        __m128i code2_high_part2 = _mm_cvtepu8_epi32(_mm_srli_si128(code2_interleaved2, 4));
+        __m128 code2_values2 = _mm_cvtepi32_ps(code2_low_part2);
+        __m128 code2_values3 = _mm_cvtepi32_ps(code2_high_part2);
+
+        // Combine into AVX vectors for code1
+        __m256 code1_values01 = _mm256_set_m128(code1_values1, code1_values0);
+        __m256 code1_values23 = _mm256_set_m128(code1_values3, code1_values2);
+
+        // Combine into AVX vectors for code2
+        __m256 code2_values01 = _mm256_set_m128(code2_values1, code2_values0);
+        __m256 code2_values23 = _mm256_set_m128(code2_values3, code2_values2);
+
+        // Scale by 1/15.0
+        __m256 scale = _mm256_set1_ps(1.0f / 15.0f);
+        code1_values01 = _mm256_mul_ps(code1_values01, scale);
+        code1_values23 = _mm256_mul_ps(code1_values23, scale);
+        code2_values01 = _mm256_mul_ps(code2_values01, scale);
+        code2_values23 = _mm256_mul_ps(code2_values23, scale);
+
+        // Apply diff and lower_bound using FMA
+        __m256 diff_vec0 = _mm256_loadu_ps(diff + d);
+        __m256 diff_vec1 = _mm256_loadu_ps(diff + d + 8);
+        __m256 lb_vec0 = _mm256_loadu_ps(lower_bound + d);
+        __m256 lb_vec1 = _mm256_loadu_ps(lower_bound + d + 8);
+
+        code1_values01 = _mm256_fmadd_ps(code1_values01, diff_vec0, lb_vec0);
+        code1_values23 = _mm256_fmadd_ps(code1_values23, diff_vec1, lb_vec1);
+        code2_values01 = _mm256_fmadd_ps(code2_values01, diff_vec0, lb_vec0);
+        code2_values23 = _mm256_fmadd_ps(code2_values23, diff_vec1, lb_vec1);
+
+        // Compute differences
+        __m256 diff0 = _mm256_sub_ps(code1_values01, code2_values01);
+        __m256 diff1 = _mm256_sub_ps(code1_values23, code2_values23);
+
+        // Square differences
+        __m256 sq_diff0 = _mm256_mul_ps(diff0, diff0);
+        __m256 sq_diff1 = _mm256_mul_ps(diff1, diff1);
+
+        // Horizontal sum
+        __m256 sum = _mm256_add_ps(sq_diff0, sq_diff1);
+        __m128 sum_low = _mm256_castps256_ps128(sum);
+        __m128 sum_high = _mm256_extractf128_ps(sum, 1);
+        __m128 sum01 = _mm_add_ps(sum_low, sum_high);
+        __m128 sum23 = _mm_shuffle_ps(sum01, sum01, _MM_SHUFFLE(2, 3, 0, 1));
+        __m128 sum0123 = _mm_add_ps(sum01, sum23);
+        __m128 sum4567 = _mm_movehl_ps(sum0123, sum0123);
+        __m128 total_sum = _mm_add_ss(sum0123, sum4567);
+
+        result += _mm_cvtss_f32(total_sum);
+    }
+
+    // Process remaining elements with SSE implementation
+    result += sse::SQ4ComputeCodesL2Sqr(
+        codes1 + (d >> 1), codes2 + (d >> 1), lower_bound + d, diff + d, dim - d);
+    return result;
+#else
+    return sse::SQ4ComputeCodesL2Sqr(codes1, codes2, lower_bound, diff, dim);
+#endif
 }
 
 float
@@ -847,7 +1232,7 @@ SQ8UniformComputeCodesIP(const uint8_t* RESTRICT codes1,
                          uint64_t dim) {
 #if defined(ENABLE_AVX2)
     if (dim == 0) {
-        return 0.0f;
+        return 0.0F;
     }
 
     alignas(32) int32_t temp[8];
@@ -882,7 +1267,7 @@ float
 RaBitQFloatBinaryIP(const float* vector, const uint8_t* bits, uint64_t dim, float inv_sqrt_d) {
 #if defined(ENABLE_AVX2)
     if (dim == 0) {
-        return 0.0f;
+        return 0.0F;
     }
 
     if (dim < 8) {
@@ -890,7 +1275,7 @@ RaBitQFloatBinaryIP(const float* vector, const uint8_t* bits, uint64_t dim, floa
     }
 
     uint64_t d = 0;
-    float result = 0.0f;
+    float result = 0.0F;
     alignas(32) float temp[8];
     __m256 sum = _mm256_setzero_ps();
     const __m256 inv_sqrt_d_vec = _mm256_set1_ps(inv_sqrt_d);
@@ -931,7 +1316,7 @@ DivScalar(const float* from, float* to, uint64_t dim, float scalar) {
         return;
     }
     if (scalar == 0) {
-        scalar = 1.0f;  // TODO(LHT): logger?
+        scalar = 1.0F;  // TODO(LHT): logger?
     }
     int i = 0;
     __m256 scalarVec = _mm256_set1_ps(scalar);
