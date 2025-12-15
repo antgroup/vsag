@@ -39,7 +39,7 @@ IteratorFilterContext::init(InnerIdType max_size, int64_t ef_search, Allocator* 
         allocator_ = allocator;
         max_size_ = max_size;
         discard_ = std::make_unique<MaxHeap>(allocator);
-        size_t byte_len = ceil_int(max_size, BITS_PER_BYTE) / BITS_PER_BYTE;
+        size_t byte_len = align_up(max_size, BITS_PER_BYTE) / BITS_PER_BYTE;
         list_ = reinterpret_cast<uint8_t*>(allocator_->Allocate(byte_len));
         memset(list_, 0, byte_len);
     } catch (const std::bad_alloc& e) {
