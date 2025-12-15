@@ -58,7 +58,7 @@ SINDI::Add(const DatasetPtr& base) {
     const auto extra_info_size = base->GetExtraInfoSize();
 
     // adjust window
-    int64_t final_add_window = ceil_int(cur_element_count_ + data_num, window_size_) / window_size_;
+    int64_t final_add_window = align_up(cur_element_count_ + data_num, window_size_) / window_size_;
     while (window_term_list_.size() < final_add_window) {
         window_term_list_.emplace_back(
             std::make_shared<SparseTermDataCell>(doc_retain_ratio_, term_id_limit_, allocator_));
