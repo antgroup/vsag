@@ -82,6 +82,9 @@ public:
     void
     Deserialize(StreamReader& reader) override;
 
+    int64_t
+    GetCurrentMemoryUsage() const override;
+
     inline void
     SetIO(std::shared_ptr<BasicIO<IOTmpl>> io) {
         this->io_ = io;
@@ -169,5 +172,15 @@ void
 ExtraInfoDataCell<IOTmpl>::Deserialize(StreamReader& reader) {
     ExtraInfoInterface::Deserialize(reader);
     this->io_->Deserialize(reader);
+}
+
+template <typename IOTmpl>
+int64_t
+ExtraInfoDataCell<IOTmpl>::GetCurrentMemoryUsage() const {
+    int64_t memory = sizeof(ExtraInfoDataCell<IOTmpl>);
+    if (IOTmpl::InMemory) {
+        memory += this->io_->GetCurrentMemoryUsage();
+    }
+    return memory;
 }
 }  // namespace vsag

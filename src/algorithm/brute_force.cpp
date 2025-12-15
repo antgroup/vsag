@@ -384,8 +384,7 @@ BruteForce::Deserialize(StreamReader& reader) {
         this->inner_codes_->Deserialize(buffer_reader);
         this->label_table_->Deserialize(buffer_reader);
     }
-
-    // post serialize procedure
+    this->cal_memory_usage();
 }
 
 void
@@ -438,6 +437,7 @@ BruteForce::InitFeatures() {
     // others
     this->index_feature_list_->SetFeatures({
         IndexFeature::SUPPORT_ESTIMATE_MEMORY,
+        IndexFeature::SUPPORT_GET_MEMORY_USAGE,
         IndexFeature::SUPPORT_CHECK_ID_EXIST,
         IndexFeature::SUPPORT_CLONE,
     });
@@ -602,6 +602,7 @@ BruteForce::resize(uint64_t new_size) {
         this->inner_codes_->Resize(new_size_power_2);
         this->max_capacity_.store(new_size_power_2);
     }
+    this->cal_memory_usage();
 }
 
 void
@@ -633,6 +634,28 @@ BruteForce::UpdateAttribute(int64_t id,
 void
 BruteForce::GetAttributeSetByInnerId(InnerIdType inner_id, AttributeSet* attr) const {
     this->attr_filter_index_->GetAttribute(0, inner_id, attr);
+}
+
+void
+BruteForce::cal_memory_usage() {
+    auto memory_usage = this->inner_codes_->GetCurrentMemoryUsage();
+    memory_usage += sizeof(BruteForce);
+    memory_usage += this->label_table_->GetCurrentMemoryUsage();
+    std::unique_lock lock(this->memory_usage_mutex_);
+    this->current_memory_usage_.store(memory_usage);
+}
+
+int64_t
+BruteForce::GetMemoryUsage() const {
+    int64_t memory = 0;
+    {
+        std::shared_lock lock(this->memory_usage_mutex_);
+        memory = this->current_memory_usage_.load();
+    }
+    if (this->attr_filter_index_ != nullptr) {
+        memory += this->attr_filter_index_->GetCurrentMemoryUsage();
+    }
+    return memory;
 }
 
 }  // namespace vsag

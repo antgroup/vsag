@@ -118,6 +118,9 @@ public:
     void
     Deserialize(StreamReader& reader);
 
+    int64_t
+    GetCurrentMemoryUsage() const;
+
 private:
     template <class T>
     UnorderedMap<T, MultiBitsetManager*>&

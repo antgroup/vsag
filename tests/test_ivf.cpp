@@ -1215,7 +1215,7 @@ TEST_CASE("(Daily) IVF Build & ContinueAdd Test With Random Allocator", "[ft][iv
 }
 
 static void
-TestIVFEstimateMemory(const fixtures::IVFResourcePtr& resource) {
+TestIVFEstimateMemoryAndGetMemoryUsage(const fixtures::IVFResourcePtr& resource) {
     using namespace fixtures;
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
@@ -1245,6 +1245,7 @@ TestIVFEstimateMemory(const fixtures::IVFResourcePtr& resource) {
                     auto dataset =
                         IVFTestIndex::pool.GetDatasetAndCreate(dim, estimate_count, metric_type);
                     IVFTestIndex::TestEstimateMemory(IVFTestIndex::name, param, dataset);
+                    IVFTestIndex::TestGetMemoryUsage(IVFTestIndex::name, param, dataset);
                     vsag::Options::Instance().set_block_size_limit(origin_size);
                 }
             }
@@ -1252,16 +1253,16 @@ TestIVFEstimateMemory(const fixtures::IVFResourcePtr& resource) {
     }
 }
 
-TEST_CASE("(PR) IVF Estimate Memory", "[ft][ivf][pr]") {
+TEST_CASE("(PR) IVF Estimate Memory And Get Memory Usage", "[ft][ivf][pr]") {
     auto test_index = std::make_shared<fixtures::IVFTestIndex>();
     auto resource = test_index->GetResource(true);
-    TestIVFEstimateMemory(resource);
+    TestIVFEstimateMemoryAndGetMemoryUsage(resource);
 }
 
 TEST_CASE("(Daily) IVF Estimate Memory", "[ft][ivf][daily]") {
     auto test_index = std::make_shared<fixtures::IVFTestIndex>();
     auto resource = test_index->GetResource(false);
-    TestIVFEstimateMemory(resource);
+    TestIVFEstimateMemoryAndGetMemoryUsage(resource);
 }
 
 static void

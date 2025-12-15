@@ -42,6 +42,12 @@ public:
     void
     Reset() override{};
 
+    int64_t
+    MemoryUsage() const override {
+        return sizeof(IOContext) +
+               DEFAULT_REQUEST_COUNT * (sizeof(struct iocb) + sizeof(struct io_event));
+    }
+
 public:
     static constexpr int64_t DEFAULT_REQUEST_COUNT = 100;
 

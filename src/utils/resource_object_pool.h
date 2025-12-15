@@ -39,8 +39,13 @@ public:
 public:
     template <typename... Args>
     explicit ResourceObjectPool(uint64_t init_size, Allocator* allocator, Args... args)
-        : allocator_(allocator), init_size_(init_size) {
-        this->constructor_ = [=]() -> std::shared_ptr<T> { return std::make_shared<T>(args...); };
+        : allocator_(allocator), init_size_(init_size), memory_usage_(0) {
+        this->constructor_ = [=]() -> std::shared_ptr<T> {
+            auto ptr = std::make_shared<T>(args...);
+            auto value = ptr->MemoryUsage();
+            memory_usage_.fetch_add(value, std::memory_order_relaxed);
+            return ptr;
+        };
         if (allocator_ == nullptr) {
             this->owned_allocator_ = SafeAllocator::FactoryDefaultAllocator();
             this->allocator_ = owned_allocator_.get();
@@ -49,6 +54,8 @@ public:
             pool_[i] = std::make_unique<Deque<std::shared_ptr<T>>>(this->allocator_);
         }
         this->fill(init_size_);
+        memory_usage_ += kSubPoolCount * sizeof(Deque<std::shared_ptr<T>>);
+        memory_usage_ += sizeof(ResourceObjectPool<T>);
     }
 
     ~ResourceObjectPool() {
@@ -92,6 +99,11 @@ public:
         pool_[pool_id]->emplace_back(obj);
     }
 
+    inline int64_t
+    GetCurrentMemoryUsage() {
+        return memory_usage_.load(std::memory_order_relaxed);
+    }
+
 private:
     inline void
     fill(uint64_t size) {
@@ -105,6 +117,8 @@ private:
     std::unique_ptr<Deque<std::shared_ptr<T>>> pool_[kSubPoolCount];
     std::mutex sub_pool_mutexes_[kSubPoolCount];
     uint64_t init_size_{0};
+
+    std::atomic<int64_t> memory_usage_{0};
 
     ConstructFuncType constructor_{nullptr};
     Allocator* allocator_{nullptr};
