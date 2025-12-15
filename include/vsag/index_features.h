@@ -60,7 +60,8 @@ enum IndexFeature {
     SUPPORT_SEARCH_DELETE_CONCURRENT,     /**< Supports concurrent searching and deletion */
     SUPPORT_ADD_SEARCH_DELETE_CONCURRENT, /**< Supports concurrent addition, searching, and deletion */
 
-    SUPPORT_ESTIMATE_MEMORY, /**< Supports estimate memory usage by data count */
+    SUPPORT_ESTIMATE_MEMORY,  /**< Supports estimate memory usage by data count */
+    SUPPORT_GET_MEMORY_USAGE, /**< Supports get memory usage */
 
     SUPPORT_CHECK_ID_EXIST, /**< Supports check whether given id exists in index */
 
