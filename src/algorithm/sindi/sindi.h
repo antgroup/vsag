@@ -90,7 +90,12 @@ public:
 private:
     template <InnerSearchMode mode>
     DatasetPtr
-    search_impl(const SparseTermComputerPtr& computer, const InnerSearchParam& inner_param) const;
+    search_impl(const SparseTermComputerPtr& computer,
+                const InnerSearchParam& inner_param,
+                bool use_term_lists_heap_insert) const;
+
+    std::pair<int64_t, int64_t>
+    get_min_max_window_id(const FilterPtr& filter) const;
 
 private:
     mutable std::shared_mutex global_mutex_;

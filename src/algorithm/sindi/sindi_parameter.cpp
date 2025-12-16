@@ -116,6 +116,12 @@ SINDISearchParameter::FromJson(const JsonType& json) {
     } else {
         n_candidate = DEFAULT_N_CANDIDATE;
     }
+
+    if (json[INDEX_SINDI].contains(SPARSE_USE_TERM_LISTS_HEAP_INSERT)) {
+        use_term_lists_heap_insert = json[INDEX_SINDI][SPARSE_USE_TERM_LISTS_HEAP_INSERT];
+    } else {
+        use_term_lists_heap_insert = true;
+    }
 }
 JsonType
 SINDISearchParameter::ToJson() const {
@@ -124,6 +130,7 @@ SINDISearchParameter::ToJson() const {
     json[INDEX_SINDI][SPARSE_QUERY_PRUNE_RATIO] = query_prune_ratio;
     json[INDEX_SINDI][SPARSE_N_CANDIDATE] = n_candidate;
     json[INDEX_SINDI][SPARSE_TERM_PRUNE_RATIO] = term_prune_ratio;
+    json[INDEX_SINDI][SPARSE_USE_TERM_LISTS_HEAP_INSERT] = use_term_lists_heap_insert;
     return json;
 }
 

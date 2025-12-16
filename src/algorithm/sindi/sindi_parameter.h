@@ -62,6 +62,9 @@ public:
     // search
     uint32_t n_candidate{0};
 
+    // choose heap insert path during search
+    bool use_term_lists_heap_insert{true};
+
     // data cell
     float query_prune_ratio{0};
     float term_prune_ratio{0};

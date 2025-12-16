@@ -40,6 +40,11 @@ public:
         return filter_impl_->FilterDistribution();
     }
 
+    void
+    GetValidIds(const int64_t** valid_ids, int64_t& count) const override {
+        filter_impl_->GetValidIds(valid_ids, count);
+    }
+
 private:
     const FilterPtr filter_impl_;
     const LabelTable& label_table_;

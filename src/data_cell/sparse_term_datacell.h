@@ -39,14 +39,41 @@ public:
     void
     Query(float* global_dists, const SparseTermComputerPtr& computer) const;
 
+    /**
+     * @brief Insert candidates into heap by iterating through term lists
+     * 
+     * @param dists Pre-allocated distance array (will be modified during processing)
+     * @param computer SparseTermComputer for iterating through terms
+     * @param heap MaxHeap to store candidate results
+     * @param param Inner search parameters
+     * @param offset_id Offset to add to inner IDs when inserting into heap
+     */
     template <InnerSearchMode mode = InnerSearchMode::KNN_SEARCH,
               InnerSearchType type = InnerSearchType::PURE>
     void
-    InsertHeap(float* dists,
-               const SparseTermComputerPtr& computer,
-               MaxHeap& heap,
-               const InnerSearchParam& param,
-               uint32_t offset_id) const;
+    InsertHeapByTermLists(float* dists,
+                          const SparseTermComputerPtr& computer,
+                          MaxHeap& heap,
+                          const InnerSearchParam& param,
+                          uint32_t offset_id) const;
+
+    /**
+     * @brief Insert candidates into heap directly from precomputed distance array
+     * 
+     * @param dists Precomputed distance array (will be modified during processing)
+     * @param dists_size Size of the distance array
+     * @param heap MaxHeap to store candidate results
+     * @param param Inner search parameters
+     * @param offset_id Offset to add to inner IDs when inserting into heap
+     */
+    template <InnerSearchMode mode = InnerSearchMode::KNN_SEARCH,
+              InnerSearchType type = InnerSearchType::PURE>
+    void
+    InsertHeapByDists(float* dists,
+                      uint32_t dists_size,
+                      MaxHeap& heap,
+                      const InnerSearchParam& param,
+                      uint32_t offset_id) const;
 
     void
     DocPrune(Vector<std::pair<uint32_t, float>>& sorted_base) const;

@@ -107,7 +107,8 @@ TEST_CASE("SINDI Basic Test", "[ut][SINDI]") {
         "sindi": {
             "query_prune_ratio": 0.0,
             "term_prune_ratio": 0.0,
-            "n_candidate": 20
+            "n_candidate": 20,
+            "use_term_lists_heap_insert": false
         }
     }
     )";
