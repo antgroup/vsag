@@ -139,6 +139,7 @@ private:
 
     std::shared_ptr<SparseIndex> rerank_flat_index_{nullptr};
     bool deserialize_without_footer_{false};
+    bool deserialize_without_buffer_{false};
 };
 
 }  // namespace vsag
