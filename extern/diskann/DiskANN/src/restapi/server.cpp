@@ -66,14 +66,14 @@ diskann::SearchResult Server::aggregate_results(const unsigned K, const std::vec
         auto best_tags = results[0].tags_enabled() ? new std::string[K] : nullptr;
 
         auto numsearchers = _multi_searcher.size();
-        std::vector<size_t> pos(numsearchers, 0);
+        std::vector<uint64_t> pos(numsearchers, 0);
 
-        for (size_t k = 0; k < K; ++k)
+        for (uint64_t k = 0; k < K; ++k)
         {
             float best_distance = std::numeric_limits<float>::max();
             unsigned best_partition = 0;
 
-            for (size_t i = 0; i < numsearchers; ++i)
+            for (uint64_t i = 0; i < numsearchers; ++i)
             {
                 if (results[i].get_distances()[pos[i]] < best_distance)
                 {
@@ -91,7 +91,7 @@ diskann::SearchResult Server::aggregate_results(const unsigned K, const std::vec
         }
 
         unsigned int total_time = 0;
-        for (size_t i = 0; i < numsearchers; ++i)
+        for (uint64_t i = 0; i < numsearchers; ++i)
             total_time += results[i].get_time();
         diskann::SearchResult result =
             SearchResult(K, total_time, best_indices, best_distances, best_tags, best_partitions);
@@ -205,7 +205,7 @@ void Server::parseJson(const utility::string_t &body, unsigned int &k, int64_t &
     unsigned new_dim = ROUND_UP(dimensions, 8);
     diskann::alloc_aligned((void **)&queryVector, new_dim * sizeof(T), 8 * sizeof(T));
     memset(queryVector, 0, new_dim * sizeof(float));
-    for (size_t i = 0; i < queryArr.size(); i++)
+    for (uint64_t i = 0; i < queryArr.size(); i++)
     {
         queryVector[i] = (float)queryArr[i].as_double();
     }
@@ -215,7 +215,7 @@ template <typename T>
 web::json::value Server::toJsonArray(const std::vector<T> &v, std::function<web::json::value(const T &)> valConverter)
 {
     web::json::value rslts = web::json::value::array();
-    for (size_t i = 0; i < v.size(); i++)
+    for (uint64_t i = 0; i < v.size(); i++)
     {
         auto jsonVal = valConverter(v[i]);
         rslts[i] = jsonVal;
@@ -227,7 +227,7 @@ web::json::value Server::idsToJsonArray(const diskann::SearchResult &result)
 {
     web::json::value idArray = web::json::value::array();
     auto ids = result.get_indices();
-    for (size_t i = 0; i < ids.size(); i++)
+    for (uint64_t i = 0; i < ids.size(); i++)
     {
         auto idVal = web::json::value::number(ids[i]);
         idArray[i] = idVal;
@@ -240,7 +240,7 @@ web::json::value Server::distancesToJsonArray(const diskann::SearchResult &resul
 {
     web::json::value distArray = web::json::value::array();
     auto distances = result.get_distances();
-    for (size_t i = 0; i < distances.size(); i++)
+    for (uint64_t i = 0; i < distances.size(); i++)
     {
         distArray[i] = web::json::value::number(distances[i]);
     }
@@ -251,7 +251,7 @@ web::json::value Server::tagsToJsonArray(const diskann::SearchResult &result)
 {
     web::json::value tagArray = web::json::value::array();
     auto tags = result.get_tags();
-    for (size_t i = 0; i < tags.size(); i++)
+    for (uint64_t i = 0; i < tags.size(); i++)
     {
         tagArray[i] = web::json::value::string(tags[i]);
     }
@@ -262,7 +262,7 @@ web::json::value Server::partitionsToJsonArray(const diskann::SearchResult &resu
 {
     web::json::value partitionArray = web::json::value::array();
     auto partitions = result.get_partitions();
-    for (size_t i = 0; i < partitions.size(); i++)
+    for (uint64_t i = 0; i < partitions.size(); i++)
     {
         partitionArray[i] = web::json::value::number(partitions[i]);
     }

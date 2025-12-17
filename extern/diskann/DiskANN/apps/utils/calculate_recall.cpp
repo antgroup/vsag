@@ -23,9 +23,9 @@ int main(int argc, char **argv)
     float *gs_dist = nullptr;
     uint32_t *our_results = NULL;
     float *or_dist = nullptr;
-    size_t points_num, points_num_gs, points_num_or;
-    size_t dim_gs;
-    size_t dim_or;
+    uint64_t points_num, points_num_gs, points_num_or;
+    uint64_t dim_gs;
+    uint64_t dim_or;
     diskann::load_truthset(argv[1], gold_std, gs_dist, points_num_gs, dim_gs);
     diskann::load_truthset(argv[2], our_results, or_dist, points_num_or, dim_or);
 

@@ -66,9 +66,9 @@ SerializationFooter::Serialize(std::ostream& out_stream) const {
                      sizeof(serialized_data_size));
     out_stream.write(serialized_data.data(), serialized_data_size);
 
-    size_t padding_size = FOOTER_SIZE - sizeof(uint32_t) - serialized_data_size;
+    uint64_t padding_size = FOOTER_SIZE - sizeof(uint32_t) - serialized_data_size;
 
-    for (size_t i = 0; i < padding_size; ++i) {
+    for (uint64_t i = 0; i < padding_size; ++i) {
         out_stream.put(0);
     }
 

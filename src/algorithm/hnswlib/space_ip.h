@@ -22,11 +22,11 @@ namespace hnswlib {
 
 class InnerProductSpace : public SpaceInterface {
     DISTFUNC fstdistfunc_;
-    size_t data_size_;
-    size_t dim_;
+    uint64_t data_size_;
+    uint64_t dim_;
 
 public:
-    explicit InnerProductSpace(size_t dim, vsag::DataTypes type) {
+    explicit InnerProductSpace(uint64_t dim, vsag::DataTypes type) {
         dim_ = dim;
         if (type == vsag::DataTypes::DATA_TYPE_FLOAT) {
             fstdistfunc_ = vsag::InnerProductDistance;
@@ -39,7 +39,7 @@ public:
         }
     }
 
-    size_t
+    uint64_t
     get_data_size() override {
         return data_size_;
     }

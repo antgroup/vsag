@@ -49,7 +49,7 @@ public:
      * @return void* Pointer to the allocated memory block.
      */
     virtual void*
-    Allocate(size_t size) = 0;
+    Allocate(uint64_t size) = 0;
 
     /**
      * @brief Deallocates a previously allocated block of memory.
@@ -73,7 +73,7 @@ public:
      * @return void* Pointer to the reallocated memory block.
      */
     virtual void*
-    Reallocate(void* p, size_t size) = 0;
+    Reallocate(void* p, uint64_t size) = 0;
 
     /**
      * @brief Constructs a new object of type T.

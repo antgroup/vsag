@@ -63,7 +63,7 @@ template<typename U>
 struct is_power_of_two_policy: std::false_type {
 };
 
-template<std::size_t GrowthFactor>
+template<std::uint64_t GrowthFactor>
 struct is_power_of_two_policy<tsl::rh::power_of_two_growth_policy<GrowthFactor>>: std::true_type {
 };
 
@@ -77,7 +77,7 @@ using truncated_hash_type = std::uint_least32_t;
 template<bool StoreHash>
 class bucket_entry_hash {
 public:
-    bool bucket_hash_equal(std::size_t /*hash*/) const noexcept {
+    bool bucket_hash_equal(std::uint64_t /*hash*/) const noexcept {
         return true;
     }
     
@@ -93,7 +93,7 @@ protected:
 template<>
 class bucket_entry_hash<true> {
 public:
-    bool bucket_hash_equal(std::size_t hash) const noexcept {
+    bool bucket_hash_equal(std::uint64_t hash) const noexcept {
         return m_hash == truncated_hash_type(hash);
     }
     
@@ -263,7 +263,7 @@ public:
         }
     }
     
-    static truncated_hash_type truncate_hash(std::size_t hash) noexcept {
+    static truncated_hash_type truncate_hash(std::uint64_t hash) noexcept {
         return truncated_hash_type(hash);
     }
     
@@ -314,7 +314,7 @@ private:
     template<typename U>
     using has_mapped_type = typename std::integral_constant<bool, !std::is_same<U, void>::value>;
     
-    static_assert(noexcept(std::declval<GrowthPolicy>().bucket_for_hash(std::size_t(0))), "GrowthPolicy::bucket_for_hash must be noexcept.");
+    static_assert(noexcept(std::declval<GrowthPolicy>().bucket_for_hash(std::uint64_t(0))), "GrowthPolicy::bucket_for_hash must be noexcept.");
     static_assert(noexcept(std::declval<GrowthPolicy>().clear()), "GrowthPolicy::clear must be noexcept.");
     
 public:
@@ -323,7 +323,7 @@ public:
     
     using key_type = typename KeySelect::key_type;
     using value_type = ValueType;
-    using size_type = std::size_t;
+    using uint64_type = std::uint64_t;
     using difference_type = std::ptrdiff_t;
     using hasher = Hash;
     using key_equal = KeyEqual;
@@ -346,7 +346,7 @@ private:
                                          (sizeof(tsl::detail_robin_hash::bucket_entry<value_type, true>) ==
                                           sizeof(tsl::detail_robin_hash::bucket_entry<value_type, false>))
                                          &&
-                                         (sizeof(std::size_t) == sizeof(truncated_hash_type) ||
+                                         (sizeof(std::uint64_t) == sizeof(truncated_hash_type) ||
                                           is_power_of_two_policy<GrowthPolicy>::value)
                                          &&
                                           // Don't store the hash for primitive types with default hash.
@@ -366,9 +366,9 @@ private:
      * the least significant bytes, we just have to check that the truncated_hash_type didn't truncated
      * more bytes.
      */
-    static bool USE_STORED_HASH_ON_REHASH(size_type bucket_count) {
+    static bool USE_STORED_HASH_ON_REHASH(uint64_type bucket_count) {
         (void) bucket_count;
-        if(STORE_HASH && sizeof(std::size_t) == sizeof(truncated_hash_type)) {
+        if(STORE_HASH && sizeof(std::uint64_t) == sizeof(truncated_hash_type)) {
             return true;
         }
         else if(STORE_HASH && is_power_of_two_policy<GrowthPolicy>::value) {
@@ -482,7 +482,7 @@ public:
 
     
 public:
-    robin_hash(size_type bucket_count, 
+    robin_hash(uint64_type bucket_count, 
                const Hash& hash,
                const KeyEqual& equal,
                const Allocator& alloc,
@@ -501,11 +501,11 @@ public:
         
         if(m_bucket_count > 0) {
             /*
-            * We can't use the `vector(size_type count, const Allocator& alloc)` constructor
+            * We can't use the `vector(uint64_type count, const Allocator& alloc)` constructor
             * as it's only available in C++14 and we need to support C++11. We thus must resize after using
             * the `vector(const Allocator& alloc)` constructor.
             * 
-            * We can't use `vector(size_type count, const T& value, const Allocator& alloc)` as it requires the
+            * We can't use `vector(uint64_type count, const T& value, const Allocator& alloc)` as it requires the
             * value T to be copyable.
             */
             m_buckets.resize(m_bucket_count);
@@ -632,11 +632,11 @@ public:
         return m_nb_elements == 0;
     }
     
-    size_type size() const noexcept {
+    uint64_type size() const noexcept {
         return m_nb_elements;
     }
     
-    size_type max_size() const noexcept {
+    uint64_type max_size() const noexcept {
         return m_buckets.max_size();
     }
     
@@ -674,11 +674,11 @@ public:
                            typename std::iterator_traits<InputIt>::iterator_category>::value) 
         {
             const auto nb_elements_insert = std::distance(first, last);
-            const size_type nb_free_buckets = m_load_threshold - size();
+            const uint64_type nb_free_buckets = m_load_threshold - size();
             tsl_assert(m_load_threshold >= size());
             
-            if(nb_elements_insert > 0 && nb_free_buckets < size_type(nb_elements_insert)) {
-                reserve(size() + size_type(nb_elements_insert));
+            if(nb_elements_insert > 0 && nb_free_buckets < uint64_type(nb_elements_insert)) {
+                reserve(size() + uint64_type(nb_elements_insert));
             }
         }
         
@@ -741,7 +741,7 @@ public:
     }
     
     /**
-     * Here to avoid `template<class K> size_type erase(const K& key)` being used when
+     * Here to avoid `template<class K> uint64_type erase(const K& key)` being used when
      * we use an `iterator` instead of a `const_iterator`.
      */
     iterator erase(iterator pos) {
@@ -785,18 +785,18 @@ public:
          * Backward shift on the values which come after the deleted values.
          * We try to move the values closer to their ideal bucket.
          */
-        std::size_t icloser_bucket = std::size_t(std::distance(m_buckets.begin(), first_mutable.m_iterator));
-        std::size_t ito_move_closer_value = std::size_t(std::distance(m_buckets.begin(), last_mutable.m_iterator));
+        std::uint64_t icloser_bucket = std::uint64_t(std::distance(m_buckets.begin(), first_mutable.m_iterator));
+        std::uint64_t ito_move_closer_value = std::uint64_t(std::distance(m_buckets.begin(), last_mutable.m_iterator));
         tsl_assert(ito_move_closer_value > icloser_bucket);
         
-        const std::size_t ireturn_bucket = ito_move_closer_value - 
+        const std::uint64_t ireturn_bucket = ito_move_closer_value - 
                                            (std::min)(ito_move_closer_value - icloser_bucket, 
-                                                    std::size_t(m_buckets[ito_move_closer_value].dist_from_ideal_bucket()));
+                                                    std::uint64_t(m_buckets[ito_move_closer_value].dist_from_ideal_bucket()));
         
         while(ito_move_closer_value < m_buckets.size() && m_buckets[ito_move_closer_value].dist_from_ideal_bucket() > 0) {
             icloser_bucket = ito_move_closer_value - 
                              (std::min)(ito_move_closer_value - icloser_bucket, 
-                                      std::size_t(m_buckets[ito_move_closer_value].dist_from_ideal_bucket()));
+                                      std::uint64_t(m_buckets[ito_move_closer_value].dist_from_ideal_bucket()));
             
             
             tsl_assert(m_buckets[icloser_bucket].empty());
@@ -818,12 +818,12 @@ public:
     
     
     template<class K>
-    size_type erase(const K& key) {
+    uint64_type erase(const K& key) {
         return erase(key, hash_key(key));
     }
     
     template<class K>
-    size_type erase(const K& key, std::size_t hash) {
+    uint64_type erase(const K& key, std::uint64_t hash) {
         auto it = find(key, hash);
         if(it != end()) {
             erase_from_bucket(it);
@@ -864,7 +864,7 @@ public:
     }
     
     template<class K, class U = ValueSelect, typename std::enable_if<has_mapped_type<U>::value>::type* = nullptr>
-    typename U::value_type& at(const K& key, std::size_t hash) {
+    typename U::value_type& at(const K& key, std::uint64_t hash) {
         return const_cast<typename U::value_type&>(static_cast<const robin_hash*>(this)->at(key, hash));
     }
     
@@ -875,7 +875,7 @@ public:
     }
     
     template<class K, class U = ValueSelect, typename std::enable_if<has_mapped_type<U>::value>::type* = nullptr>
-    const typename U::value_type& at(const K& key, std::size_t hash) const {
+    const typename U::value_type& at(const K& key, std::uint64_t hash) const {
         auto it = find(key, hash);
         if(it != cend()) {
             return it.value();
@@ -892,12 +892,12 @@ public:
     
     
     template<class K>
-    size_type count(const K& key) const {
+    uint64_type count(const K& key) const {
         return count(key, hash_key(key));
     }
     
     template<class K>
-    size_type count(const K& key, std::size_t hash) const {
+    uint64_type count(const K& key, std::uint64_t hash) const {
         if(find(key, hash) != cend()) {
             return 1;
         }
@@ -913,7 +913,7 @@ public:
     }
     
     template<class K>
-    iterator find(const K& key, std::size_t hash) {
+    iterator find(const K& key, std::uint64_t hash) {
         return find_impl(key, hash);
     }
     
@@ -924,7 +924,7 @@ public:
     }
     
     template<class K>
-    const_iterator find(const K& key, std::size_t hash) const {
+    const_iterator find(const K& key, std::uint64_t hash) const {
         return find_impl(key, hash);
     }
     
@@ -935,7 +935,7 @@ public:
     }
     
     template<class K>
-    std::pair<iterator, iterator> equal_range(const K& key, std::size_t hash) {
+    std::pair<iterator, iterator> equal_range(const K& key, std::uint64_t hash) {
         iterator it = find(key, hash);
         return std::make_pair(it, (it == end())?it:std::next(it));
     }
@@ -947,7 +947,7 @@ public:
     }
     
     template<class K>
-    std::pair<const_iterator, const_iterator> equal_range(const K& key, std::size_t hash) const {
+    std::pair<const_iterator, const_iterator> equal_range(const K& key, std::uint64_t hash) const {
         const_iterator it = find(key, hash);
         return std::make_pair(it, (it == cend())?it:std::next(it));
     }
@@ -955,12 +955,12 @@ public:
     /*
      * Bucket interface 
      */
-    size_type bucket_count() const {
+    uint64_type bucket_count() const {
         return m_bucket_count; 
     }
     
-    size_type max_bucket_count() const {
-        return (std::min)(GrowthPolicy::max_bucket_count(), m_buckets.max_size());
+    uint64_type max_bucket_count() const {
+        return std::min<uint64_t>(GrowthPolicy::max_bucket_count(), m_buckets.max_size());
     }
     
     /*
@@ -980,16 +980,16 @@ public:
     
     void max_load_factor(float ml) {
         m_max_load_factor = (std::max)(0.1f, (std::min)(ml, 0.95f));
-        m_load_threshold = size_type(float(bucket_count())*m_max_load_factor);
+        m_load_threshold = uint64_type(float(bucket_count())*m_max_load_factor);
     }
     
-    void rehash(size_type count) {
-        count = (std::max)(count, size_type(std::ceil(float(size())/max_load_factor())));
+    void rehash(uint64_type count) {
+        count = (std::max)(count, uint64_type(std::ceil(float(size())/max_load_factor())));
         rehash_impl(count);
     }
     
-    void reserve(size_type count) {
-        rehash(size_type(std::ceil(float(count)/max_load_factor())));
+    void reserve(uint64_type count) {
+        rehash(uint64_type(std::ceil(float(count)/max_load_factor())));
     }    
     
     /*
@@ -1013,7 +1013,7 @@ public:
     
 private:
     template<class K>
-    std::size_t hash_key(const K& key) const {
+    std::uint64_t hash_key(const K& key) const {
         return Hash::operator()(key);
     }
     
@@ -1022,22 +1022,22 @@ private:
         return KeyEqual::operator()(key1, key2);
     }
     
-    std::size_t bucket_for_hash(std::size_t hash) const {
-        const std::size_t bucket = GrowthPolicy::bucket_for_hash(hash);
+    std::uint64_t bucket_for_hash(std::uint64_t hash) const {
+        const std::uint64_t bucket = GrowthPolicy::bucket_for_hash(hash);
         tsl_assert(bucket < m_buckets.size() || (bucket == 0 && m_buckets.empty()));
         
         return bucket;
     }
     
     template<class U = GrowthPolicy, typename std::enable_if<is_power_of_two_policy<U>::value>::type* = nullptr>
-    std::size_t next_bucket(std::size_t index) const noexcept {
+    std::uint64_t next_bucket(std::uint64_t index) const noexcept {
         tsl_assert(index < bucket_count());
         
         return (index + 1) & this->m_mask;
     }
     
     template<class U = GrowthPolicy, typename std::enable_if<!is_power_of_two_policy<U>::value>::type* = nullptr>
-    std::size_t next_bucket(std::size_t index) const noexcept {
+    std::uint64_t next_bucket(std::uint64_t index) const noexcept {
         tsl_assert(index < bucket_count());
         
         index++;
@@ -1047,13 +1047,13 @@ private:
     
     
     template<class K>
-    iterator find_impl(const K& key, std::size_t hash) {
+    iterator find_impl(const K& key, std::uint64_t hash) {
         return mutable_iterator(static_cast<const robin_hash*>(this)->find(key, hash));
     }
     
     template<class K>
-    const_iterator find_impl(const K& key, std::size_t hash) const {
-        std::size_t ibucket = bucket_for_hash(hash); 
+    const_iterator find_impl(const K& key, std::uint64_t hash) const {
+        std::uint64_t ibucket = bucket_for_hash(hash); 
         distance_type dist_from_ideal_bucket = 0;
         
         while(dist_from_ideal_bucket <= (m_first_or_empty_bucket + ibucket)->dist_from_ideal_bucket()) {
@@ -1080,8 +1080,8 @@ private:
          * 
          * We try to move the values closer to their ideal bucket.
          */
-        std::size_t previous_ibucket = std::size_t(std::distance(m_buckets.begin(), pos.m_iterator));
-        std::size_t ibucket = next_bucket(previous_ibucket);
+        std::uint64_t previous_ibucket = std::uint64_t(std::distance(m_buckets.begin(), pos.m_iterator));
+        std::uint64_t ibucket = next_bucket(previous_ibucket);
         
         while(m_buckets[ibucket].dist_from_ideal_bucket() > 0) {
             tsl_assert(m_buckets[previous_ibucket].empty());
@@ -1098,9 +1098,9 @@ private:
     
     template<class K, class... Args>
     std::pair<iterator, bool> insert_impl(const K& key, Args&&... value_type_args) {
-        const std::size_t hash = hash_key(key);
+        const std::uint64_t hash = hash_key(key);
         
-        std::size_t ibucket = bucket_for_hash(hash); 
+        std::uint64_t ibucket = bucket_for_hash(hash); 
         distance_type dist_from_ideal_bucket = 0;
         
         while(dist_from_ideal_bucket <= (m_first_or_empty_bucket + ibucket)->dist_from_ideal_bucket()) {
@@ -1145,13 +1145,13 @@ private:
     
     
     template<class... Args>
-    void insert_value(std::size_t ibucket, distance_type dist_from_ideal_bucket, 
+    void insert_value(std::uint64_t ibucket, distance_type dist_from_ideal_bucket, 
                       truncated_hash_type hash, Args&&... value_type_args) 
     {
         insert_value(ibucket, dist_from_ideal_bucket, hash, value_type(std::forward<Args>(value_type_args)...));
     }
 
-    void insert_value(std::size_t ibucket, distance_type dist_from_ideal_bucket, 
+    void insert_value(std::uint64_t ibucket, distance_type dist_from_ideal_bucket, 
                       truncated_hash_type hash, value_type&& value) 
     {
         m_buckets[ibucket].swap_with_value_in_bucket(dist_from_ideal_bucket, hash, value);
@@ -1181,7 +1181,7 @@ private:
     }
     
     
-    void rehash_impl(size_type count) {
+    void rehash_impl(uint64_type count) {
         robin_hash new_table(count, static_cast<Hash&>(*this), static_cast<KeyEqual&>(*this), 
                              get_allocator(), m_max_load_factor);
         
@@ -1191,7 +1191,7 @@ private:
                 continue; 
             }
             
-            const std::size_t hash = use_stored_hash?bucket.truncated_hash():
+            const std::uint64_t hash = use_stored_hash?bucket.truncated_hash():
                                                      new_table.hash_key(KeySelect()(bucket.value()));
                                                      
             new_table.insert_value_on_rehash(new_table.bucket_for_hash(hash), 0, 
@@ -1202,7 +1202,7 @@ private:
         new_table.swap(*this);
     }
     
-    void insert_value_on_rehash(std::size_t ibucket, distance_type dist_from_ideal_bucket, 
+    void insert_value_on_rehash(std::uint64_t ibucket, distance_type dist_from_ideal_bucket, 
                                 truncated_hash_type hash, value_type&& value) 
     {
         while(true) {
@@ -1239,7 +1239,7 @@ private:
 
     
 public:
-    static const size_type DEFAULT_INIT_BUCKETS_SIZE = 16;
+    static const uint64_type DEFAULT_INIT_BUCKETS_SIZE = 16;
     static constexpr float DEFAULT_MAX_LOAD_FACTOR = 0.5f;
     
 private:
@@ -1268,11 +1268,11 @@ private:
     /**
      * Used a lot in find, avoid the call to m_buckets.size() which is a bit slower.
      */
-    size_type m_bucket_count;
+    uint64_type m_bucket_count;
     
-    size_type m_nb_elements;
+    uint64_type m_nb_elements;
     
-    size_type m_load_threshold;
+    uint64_type m_load_threshold;
     float m_max_load_factor;
     
     bool m_grow_on_next_insert;

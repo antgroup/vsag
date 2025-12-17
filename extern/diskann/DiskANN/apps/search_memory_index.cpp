@@ -37,7 +37,7 @@ int search_memory_index(diskann::Metric &metric, const std::string &index_path, 
     T *query = nullptr;
     uint32_t *gt_ids = nullptr;
     float *gt_dists = nullptr;
-    size_t query_num, query_dim, query_aligned_dim, gt_num, gt_dim;
+    uint64_t query_num, query_dim, query_aligned_dim, gt_num, gt_dim;
     diskann::load_aligned_bin<T>(query_file, query, query_num, query_dim, query_aligned_dim);
 
     bool calc_recall_flag = false;
@@ -68,7 +68,7 @@ int search_memory_index(diskann::Metric &metric, const std::string &index_path, 
         }
     }
 
-    const size_t num_frozen_pts = diskann::get_graph_num_frozen_points(index_path);
+    const uint64_t num_frozen_pts = diskann::get_graph_num_frozen_points(index_path);
 
     auto config = diskann::IndexConfigBuilder()
                       .with_metric(metric)

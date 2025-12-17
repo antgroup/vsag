@@ -26,7 +26,7 @@ public:
     }
 
     void*
-    Allocate(size_t size) override {
+    Allocate(uint64_t size) override {
         vsag::Options::Instance().logger()->Debug("allocate " + std::to_string(size) + " bytes.");
         auto addr = (void*)malloc(size);
         sizes_[addr] = size;
@@ -44,7 +44,7 @@ public:
     }
 
     void*
-    Reallocate(void* p, size_t size) override {
+    Reallocate(void* p, uint64_t size) override {
         vsag::Options::Instance().logger()->Debug("reallocate " + std::to_string(size) + " bytes.");
         auto addr = (void*)realloc(p, size);
         sizes_.erase(p);
@@ -53,7 +53,7 @@ public:
     }
 
 private:
-    std::unordered_map<void*, size_t> sizes_;
+    std::unordered_map<void*, uint64_t> sizes_;
 };
 
 int

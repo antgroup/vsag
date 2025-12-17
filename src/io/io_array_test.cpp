@@ -40,18 +40,18 @@ public:
     void
     TestBasic() {
         this->array_->Resize(5);
-        for (size_t i = 0; i < 5; ++i) {
+        for (uint64_t i = 0; i < 5; ++i) {
             TestBasicReadWrite((*this->array_)[i]);
         }
-        for (size_t i = 0; i < 5; ++i) {
+        for (uint64_t i = 0; i < 5; ++i) {
             TestBasicReadWrite(this->array_->At(i));
         }
         this->array_->Resize(10);
-        for (size_t i = 5; i < 10; ++i) {
+        for (uint64_t i = 5; i < 10; ++i) {
             TestBasicReadWrite(this->array_->At(i));
         }
         this->array2_->Resize(10);
-        for (size_t i = 0; i < 10; ++i) {
+        for (uint64_t i = 0; i < 10; ++i) {
             TestSerializeAndDeserialize((*this->array_)[i], (*this->array2_)[i]);
         }
     }

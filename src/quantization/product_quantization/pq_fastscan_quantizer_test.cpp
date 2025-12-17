@@ -54,9 +54,9 @@ TestPackageUnpackMetricPQFS(uint64_t dim, int64_t pq_dim) {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     PQFastScanQuantizer<metric> quantizer(dim, pq_dim, allocator.get());
     constexpr int count = PQFastScanQuantizer<metric>::BLOCK_SIZE_PACKAGE;
-    size_t code_size = quantizer.GetCodeSize();
+    uint64_t code_size = quantizer.GetCodeSize();
     std::vector<uint8_t> original_codes(count * code_size);
-    for (size_t i = 0; i < original_codes.size(); ++i) {
+    for (uint64_t i = 0; i < original_codes.size(); ++i) {
         original_codes[i] = static_cast<uint8_t>(rand() % 256);
     }
 
@@ -64,7 +64,7 @@ TestPackageUnpackMetricPQFS(uint64_t dim, int64_t pq_dim) {
     quantizer.Package32(original_codes.data(), packaged.data(), -1);
     std::vector<uint8_t> unpacked_codes(count * code_size);
     quantizer.Unpack32(packaged.data(), unpacked_codes.data());
-    for (size_t i = 0; i < original_codes.size(); ++i) {
+    for (uint64_t i = 0; i < original_codes.size(); ++i) {
         REQUIRE(original_codes[i] == unpacked_codes[i]);
     }
 }
@@ -84,7 +84,7 @@ TEST_CASE("PQFSQuantizer Package32 and Unpack32", "[ut][PQFSQuantizer]") {
 template <MetricType metric>
 void
 TestComputerBatchPQFS(PQFastScanQuantizer<metric>& quant,
-                      size_t dim,
+                      uint64_t dim,
                       uint32_t count,
                       float error = 1e-5F,
                       bool retrain = true) {

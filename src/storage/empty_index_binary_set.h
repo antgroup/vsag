@@ -26,7 +26,7 @@ public:
     static BinarySet
     Make(const std::string& name = "EMPTY_INDEX") {
         const std::string empty_str = name;
-        size_t num_bytes = empty_str.length();
+        uint64_t num_bytes = empty_str.length();
         std::shared_ptr<int8_t[]> bin(new int8_t[num_bytes]);
         memcpy(bin.get(), empty_str.c_str(), empty_str.length());
         Binary b{

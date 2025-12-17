@@ -76,7 +76,7 @@ char *MemoryMapper::getBuf()
     return _buf;
 }
 
-size_t MemoryMapper::getFileSize()
+uint64_t MemoryMapper::getFileSize()
 {
     return _fileSize;
 }
