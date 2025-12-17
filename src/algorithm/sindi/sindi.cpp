@@ -404,12 +404,11 @@ SINDI::get_min_max_window_id(const FilterPtr& filter) const {
         int64_t max_inner_id = INT64_MIN;
         int64_t id;
         for (int i = 0; i < valid_count; i++) {
-            if (__builtin_expect(not label_table_->CheckLabel(valid_ids[i]), 0)) {
-                continue;
+            if (__builtin_expect(label_table_->CheckLabel(valid_ids[i]), 1)) {
+                id = label_table_->GetIdByLabel(valid_ids[i]);
+                min_inner_id = std::min(min_inner_id, id);
+                max_inner_id = std::max(max_inner_id, id);
             }
-            id = label_table_->GetIdByLabel(valid_ids[i]);
-            min_inner_id = std::min(min_inner_id, id);
-            max_inner_id = std::max(max_inner_id, id);
         }
         if (min_inner_id != INT64_MAX) {
             min_window_id = min_inner_id / window_size_;
