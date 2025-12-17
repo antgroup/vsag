@@ -28,8 +28,8 @@ int main(int argc, char **argv)
     int ndims_s32;
     readr.read((char *)&npts_s32, sizeof(int32_t));
     readr.read((char *)&ndims_s32, sizeof(int32_t));
-    size_t npts = npts_s32;
-    size_t ndims = ndims_s32;
+    uint64_t npts = npts_s32;
+    uint64_t ndims = ndims_s32;
     uint32_t ndims_u32 = (uint32_t)ndims_s32;
     //  uint64_t          fsize = writr.tellg();
     readr.seekg(0, std::ios::beg);

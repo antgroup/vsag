@@ -36,7 +36,9 @@ ExternalProject_Add(
 
 include_directories(${install_dir}/include)
 link_directories (${install_dir}/lib)
-link_directories (${install_dir}/lib64)
+if (NOT APPLE)
+    link_directories (${install_dir}/lib64)
+endif()
 
 file(GLOB LIB_DIR_EXIST CHECK_DIRECTORIES LIST_DIRECTORIES true ${install_dir}/lib)
 if(LIB_DIR_EXIST)
@@ -48,12 +50,14 @@ if(LIB_DIR_EXIST)
     endforeach()
 endif()
 
-file(GLOB LIB64_DIR_EXIST CHECK_DIRECTORIES LIST_DIRECTORIES true ${install_dir}/lib64)
-if(LIB64_DIR_EXIST)
-    file(GLOB LIB64_FILES ${install_dir}/lib64/lib*.a)
-    foreach(lib64_file ${LIB64_FILES})
-        install(FILES ${lib64_file}
-                DESTINATION ${CMAKE_INSTALL_PREFIX}/lib
-    )
-    endforeach()
+if (NOT APPLE)
+    file(GLOB LIB64_DIR_EXIST CHECK_DIRECTORIES LIST_DIRECTORIES true ${install_dir}/lib64)
+    if(LIB64_DIR_EXIST)
+        file(GLOB LIB64_FILES ${install_dir}/lib64/lib*.a)
+        foreach(lib64_file ${LIB64_FILES})
+            install(FILES ${lib64_file}
+                    DESTINATION ${CMAKE_INSTALL_PREFIX}/lib
+        )
+        endforeach()
+    endif()
 endif()

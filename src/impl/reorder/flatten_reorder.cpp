@@ -27,7 +27,7 @@ FlattenReorder::Reorder(const DistHeapPtr& input,
     }
     auto reorder_heap = DistanceHeap::MakeInstanceBySize<true, true>(allocator, topk);
     auto computer = flatten_->FactoryComputer(query);
-    size_t candidate_size = input->Size();
+    uint64_t candidate_size = input->Size();
     const auto* candidate_result = input->GetData();
     Vector<InnerIdType> ids(candidate_size, allocator);
     Vector<float> dists(candidate_size, allocator);

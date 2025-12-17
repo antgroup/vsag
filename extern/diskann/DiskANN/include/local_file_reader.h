@@ -3,7 +3,11 @@
 
 #ifndef _WINDOWS
 
+#ifdef __APPLE__
+#include <cstdlib>
+#else
 #include <malloc.h>
+#endif
 #include <cstdio>
 #include <mutex>
 #include <thread>

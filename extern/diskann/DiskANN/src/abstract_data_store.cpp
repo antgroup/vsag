@@ -9,7 +9,7 @@ namespace diskann
 {
 
 template <typename data_t>
-AbstractDataStore<data_t>::AbstractDataStore(const location_t capacity, const size_t dim)
+AbstractDataStore<data_t>::AbstractDataStore(const location_t capacity, const uint64_t dim)
     : _capacity(capacity), _dim(dim)
 {
 }
@@ -19,7 +19,7 @@ template <typename data_t> location_t AbstractDataStore<data_t>::capacity() cons
     return _capacity;
 }
 
-template <typename data_t> size_t AbstractDataStore<data_t>::get_dims() const
+template <typename data_t> uint64_t AbstractDataStore<data_t>::get_dims() const
 {
     return _dim;
 }

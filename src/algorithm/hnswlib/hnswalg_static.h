@@ -43,15 +43,15 @@ private:
     static const tableint MAX_LABEL_OPERATION_LOCKS = 65536;
     static const unsigned char DELETE_MARK = 0x01;
 
-    size_t max_elements_{0};
-    mutable std::atomic<size_t> cur_element_count_{0};  // current number of elements
-    size_t size_data_per_element_{0};
-    size_t size_links_per_element_{0};
-    mutable std::atomic<size_t> num_deleted_{0};  // number of deleted elements
-    size_t M_{0};
-    size_t maxM_{0};
-    size_t maxM0_{0};
-    size_t ef_construction_{0};
+    uint64_t max_elements_{0};
+    mutable std::atomic<uint64_t> cur_element_count_{0};  // current number of elements
+    uint64_t size_data_per_element_{0};
+    uint64_t size_links_per_element_{0};
+    mutable std::atomic<uint64_t> num_deleted_{0};  // number of deleted elements
+    uint64_t M_{0};
+    uint64_t maxM_{0};
+    uint64_t maxM0_{0};
+    uint64_t ef_construction_{0};
 
     double mult_{0.0}, revSize_{0.0};
     int maxlevel_{0};
@@ -66,16 +66,16 @@ private:
 
     tableint enterpoint_node_{0};
 
-    size_t size_links_level0_{0};
-    size_t offsetData_{0}, offsetLevel0_{0}, label_offset_{0};
+    uint64_t size_links_level0_{0};
+    uint64_t offsetData_{0}, offsetLevel0_{0}, label_offset_{0};
 
     BlockManager* data_level0_memory_{nullptr};
     char** linkLists_{nullptr};
     int* element_levels_;  // keeps level of each element
 
-    size_t data_size_{0};
+    uint64_t data_size_{0};
 
-    size_t data_element_per_block_{0};
+    uint64_t data_element_per_block_{0};
 
     vsag::Allocator* allocator_;
     DISTFUNC fstdistfunc_;
@@ -100,7 +100,7 @@ private:
      * PQ data only support float data
      */
     uint8_t* pq_map{nullptr};
-    size_t pq_chunk{0}, pq_cluster{0}, pq_sub_dim{0}, pq_dim{0}, pq_train_bound = 65536;
+    uint64_t pq_chunk{0}, pq_cluster{0}, pq_sub_dim{0}, pq_dim{0}, pq_train_bound = 65536;
     float* node_cluster_dist_{nullptr};
     float error_quantile = 0.995, err_quantile_value = 0.0;
     typedef std::vector<std::vector<std::vector<float>>> CodeBook;
@@ -114,12 +114,12 @@ public:
     }
 
     StaticHierarchicalNSW(SpaceInterface* s,
-                          size_t max_elements,
+                          uint64_t max_elements,
                           vsag::Allocator* allocator,
-                          size_t M = 16,
-                          size_t ef_construction = 200,
-                          size_t block_size_limit = 128 * 1024 * 1024,
-                          size_t random_seed = 100,
+                          uint64_t M = 16,
+                          uint64_t ef_construction = 200,
+                          uint64_t block_size_limit = 128 * 1024 * 1024,
+                          uint64_t random_seed = 100,
                           bool allow_replace_deleted = false)
         : allocator_(allocator),
           link_list_locks_(max_elements),
@@ -196,7 +196,7 @@ public:
     inline std::mutex&
     getLabelOpMutex(LabelType label) const {
         // calculate hash
-        size_t lock_id = label & (MAX_LABEL_OPERATION_LOCKS - 1);
+        uint64_t lock_id = label & (MAX_LABEL_OPERATION_LOCKS - 1);
         return label_op_locks_[lock_id];
     }
 
@@ -233,17 +233,17 @@ public:
         return (int)r;
     }
 
-    size_t
+    uint64_t
     getMaxElements() override {
         return max_elements_;
     }
 
-    size_t
+    uint64_t
     getCurrentElementCount() override {
         return cur_element_count_;
     }
 
-    size_t
+    uint64_t
     getDeletedCount() override {
         return num_deleted_;
     }
@@ -376,7 +376,7 @@ public:
                 data = (int*)get_linklist(curNodeNum, layer);
                 //                    data = (int *) (linkLists_[curNodeNum] + (layer - 1) * size_links_per_element_);
             }
-            size_t size = getListCount((linklistsizeint*)data);
+            uint64_t size = getListCount((linklistsizeint*)data);
             tableint* datal = (tableint*)(data + 1);
             auto tmp_data_ptr = getDataByInternalId(*datal);
             auto tmp_data_ptr2 = getDataByInternalId(*datal + 1);
@@ -387,10 +387,10 @@ public:
             _mm_prefetch(tmp_data_ptr2, _MM_HINT_T0);
 #endif
 
-            for (size_t j = 0; j < size; j++) {
+            for (uint64_t j = 0; j < size; j++) {
                 tableint candidate_id = *(datal + j);
                 //                    if (candidate_id == 0) continue;
-                size_t pre_l = std::min(j, size - 2);
+                uint64_t pre_l = std::min(j, size - 2);
                 auto tmp_data_ptr3 = getDataByInternalId(*(datal + pre_l + 1));
 #ifdef USE_SSE
                 _mm_prefetch((char*)(visited_array + *(datal + pre_l + 1)), _MM_HINT_T0);
@@ -432,8 +432,8 @@ public:
     searchBaseLayerPQSIMDinfer(tableint ep_id,
                                const void* data_point,
                                float*& dist_map,
-                               size_t ef,
-                               size_t k,
+                               uint64_t ef,
+                               uint64_t k,
                                const vsag::FilterPtr is_id_allowed = nullptr) const {
         VisitedListPtr vl = visited_list_pool_->getFreeVisitedList();
         vl_type* visited_array = vl->mass;
@@ -487,7 +487,7 @@ public:
             // Fetch the smallest object in S.
             tableint current_node_id = current_node_pair.second;
             int* data = (int*)get_linklist0(current_node_id);
-            size_t size = getListCount((linklistsizeint*)data);
+            uint64_t size = getListCount((linklistsizeint*)data);
             if (collect_metrics) {
                 metric_hops++;
                 metric_distance_computations += size;
@@ -497,7 +497,7 @@ public:
             std::vector<int> ids;
             std::vector<float> res;
             int not_vis_count = 0;
-            for (size_t j = 1; j <= size; j++) {
+            for (uint64_t j = 1; j <= size; j++) {
                 int candidate_id = *(data + j);
                 if (!(visited_array[candidate_id] == visited_array_tag)) {
                     not_vis_count++;
@@ -508,7 +508,7 @@ public:
             while (ids.size() % 4) ids.push_back(0);
             res.resize(ids.size());
             pq_scan(ids.data(), res.data(), dist_map, ids.size());
-            for (size_t j = 0; j < not_vis_count; j++) {
+            for (uint64_t j = 0; j < not_vis_count; j++) {
                 int candidate_id = ids[j];
                 // If the result set is not full, then calculate the exact distance. (i.e., assume the distance threshold to be infinity)
                 if (answers.size() < k) {
@@ -568,8 +568,8 @@ public:
     searchBaseLayerPQinfer(tableint ep_id,
                            const void* data_point,
                            float*& dist_map,
-                           size_t ef,
-                           size_t k,
+                           uint64_t ef,
+                           uint64_t k,
                            const vsag::FilterPtr is_id_allowed = nullptr) const {
         VisitedListPtr vl = visited_list_pool_->getFreeVisitedList();
         vl_type* visited_array = vl->mass;
@@ -623,14 +623,14 @@ public:
             // Fetch the smallest object in S.
             tableint current_node_id = current_node_pair.second;
             int* data = (int*)get_linklist0(current_node_id);
-            size_t size = getListCount((linklistsizeint*)data);
+            uint64_t size = getListCount((linklistsizeint*)data);
             if (collect_metrics) {
                 metric_hops++;
                 metric_distance_computations += size;
             }
 
             // Enumerate all the neighbors of the object and view them as candidates of KNNs.
-            for (size_t j = 1; j <= size; j++) {
+            for (uint64_t j = 1; j <= size; j++) {
                 int candidate_id = *(data + j);
                 if (!(visited_array[candidate_id] == visited_array_tag)) {
                     visited_array[candidate_id] = visited_array_tag;
@@ -731,7 +731,7 @@ public:
     //
     //            tableint current_node_id = current_node_pair.second;
     //            int* data = (int*)getLinklist0(current_node_id);
-    //            size_t size = getListCount((linklistsizeint*)data);
+    //            uint64_t size = getListCount((linklistsizeint*)data);
     //            //                bool cur_node_deleted = isMarkedDeleted(current_node_id);
     //            if (collect_metrics) {
     //                metric_hops_++;
@@ -746,7 +746,7 @@ public:
     //            _mm_prefetch((char*)(data + 2), _MM_HINT_T0);
     //#endif
     //
-    //            for (size_t j = 1; j <= size; j++) {
+    //            for (uint64_t j = 1; j <= size; j++) {
     //                int candidate_id = *(data + j);
     ////                    if (candidate_id == 0) continue;
     //#ifdef USE_SSE
@@ -791,7 +791,7 @@ public:
     getNeighborsByHeuristic2(std::priority_queue<std::pair<float, tableint>,
                                                  std::vector<std::pair<float, tableint>>,
                                                  CompareByFirst>& top_candidates,
-                             const size_t M) {
+                             const uint64_t M) {
         if (top_candidates.size() < M) {
             return;
         }
@@ -853,7 +853,7 @@ public:
                                                   CompareByFirst>& top_candidates,
                               int level,
                               bool isUpdate) {
-        size_t Mcurmax = level ? maxM_ : maxM0_;
+        uint64_t Mcurmax = level ? maxM_ : maxM0_;
         getNeighborsByHeuristic2(top_candidates, M_);
         if (top_candidates.size() > M_)
             throw std::runtime_error(
@@ -886,7 +886,7 @@ public:
             }
             setListCount(ll_cur, selectedNeighbors.size());
             tableint* data = (tableint*)(ll_cur + 1);
-            for (size_t idx = 0; idx < selectedNeighbors.size(); idx++) {
+            for (uint64_t idx = 0; idx < selectedNeighbors.size(); idx++) {
                 if (data[idx] && !isUpdate)
                     throw std::runtime_error("Possible memory corruption");
                 if (level > element_levels_[selectedNeighbors[idx]])
@@ -896,7 +896,7 @@ public:
             }
         }
 
-        for (size_t idx = 0; idx < selectedNeighbors.size(); idx++) {
+        for (uint64_t idx = 0; idx < selectedNeighbors.size(); idx++) {
             std::unique_lock<std::mutex> lock(link_list_locks_[selectedNeighbors[idx]]);
 
             linklistsizeint* ll_other;
@@ -905,7 +905,7 @@ public:
             else
                 ll_other = get_linklist(selectedNeighbors[idx], level);
 
-            size_t sz_link_list_other = getListCount(ll_other);
+            uint64_t sz_link_list_other = getListCount(ll_other);
 
             if (sz_link_list_other > Mcurmax)
                 throw std::runtime_error("Bad value of sz_link_list_other");
@@ -918,7 +918,7 @@ public:
 
             bool is_cur_c_present = false;
             if (isUpdate) {
-                for (size_t j = 0; j < sz_link_list_other; j++) {
+                for (uint64_t j = 0; j < sz_link_list_other; j++) {
                     if (data[j] == cur_c) {
                         is_cur_c_present = true;
                         break;
@@ -943,7 +943,7 @@ public:
                         candidates;
                     candidates.emplace(d_max, cur_c);
 
-                    for (size_t j = 0; j < sz_link_list_other; j++) {
+                    for (uint64_t j = 0; j < sz_link_list_other; j++) {
                         candidates.emplace(fstdistfunc_(getDataByInternalId(data[j]),
                                                         getDataByInternalId(selectedNeighbors[idx]),
                                                         dist_func_param_),
@@ -980,7 +980,7 @@ public:
     }
 
     void
-    resizeIndex(size_t new_max_elements) override {
+    resizeIndex(uint64_t new_max_elements) override {
         if (new_max_elements < cur_element_count_)
             throw std::runtime_error(
                 "Cannot Resize, max element is less than the current number of elements");
@@ -1014,16 +1014,16 @@ public:
     }
 
     static void
-    writeBinaryToMem(char*& dest, const char* src, size_t len) {
+    writeBinaryToMem(char*& dest, const char* src, uint64_t len) {
         std::memcpy(dest, src, len);
         dest += len;
     }
 
-    size_t
+    uint64_t
     calcSerializeSize() override {
         // std::ofstream output(location, std::ios::binary);
         // std::streampos position;
-        size_t size = 0;
+        uint64_t size = 0;
 
         // writeBinaryPOD(output, offsetLevel0_);
         size += sizeof(offsetLevel0_);
@@ -1062,7 +1062,7 @@ public:
         // output.write(data_level0_memory_, cur_element_count_ * size_data_per_element_);
         size += data_level0_memory_->GetSize();
 
-        for (size_t i = 0; i < cur_element_count_; i++) {
+        for (uint64_t i = 0; i < cur_element_count_; i++) {
             unsigned int linkListSize =
                 element_levels_[i] > 0 ? size_links_per_element_ * element_levels_[i] : 0;
             // writeBinaryPOD(output, linkListSize);
@@ -1118,7 +1118,7 @@ public:
 
         data_level0_memory_->Serialize(writer, cur_element_count_);
 
-        for (size_t i = 0; i < cur_element_count_; i++) {
+        for (uint64_t i = 0; i < cur_element_count_; i++) {
             unsigned int linkListSize =
                 element_levels_[i] > 0 ? size_links_per_element_ * element_levels_[i] : 0;
 
@@ -1140,12 +1140,12 @@ public:
 
     // load index from a file stream
     void
-    loadIndex(StreamReader& in_stream, SpaceInterface* s, size_t max_elements_i = 0) override {
+    loadIndex(StreamReader& in_stream, SpaceInterface* s, uint64_t max_elements_i = 0) override {
         readBinaryPOD(in_stream, offsetLevel0_);
         readBinaryPOD(in_stream, max_elements_);
         readBinaryPOD(in_stream, cur_element_count_);
 
-        size_t max_elements = max_elements_i;
+        uint64_t max_elements = max_elements_i;
         if (max_elements < cur_element_count_)
             max_elements = max_elements_;
         max_elements_ = max_elements;
@@ -1172,7 +1172,7 @@ public:
         /// Optional - check if index is ok:
         /*
         in_stream.seekg(cur_element_count_ * size_data_per_element_, in_stream.cur);
-        for (size_t i = 0; i < cur_element_count_; i++) {
+        for (uint64_t i = 0; i < cur_element_count_; i++) {
             if (in_stream.tellg() < 0 || in_stream.tellg() >= beg_pos + length) {
                 throw std::runtime_error("Index seems to be corrupted or unsupported");
             }
@@ -1202,7 +1202,7 @@ public:
         std::vector<std::mutex>(MAX_LABEL_OPERATION_LOCKS).swap(label_op_locks_);
 
         revSize_ = 1.0 / mult_;
-        for (size_t i = 0; i < cur_element_count_; i++) {
+        for (uint64_t i = 0; i < cur_element_count_; i++) {
             label_lookup_[getExternalLabel(i)] = i;
             unsigned int linkListSize;
             readBinaryPOD(in_stream, linkListSize);
@@ -1219,7 +1219,7 @@ public:
             }
         }
 
-        for (size_t i = 0; i < cur_element_count_; i++) {
+        for (uint64_t i = 0; i < cur_element_count_; i++) {
             if (isMarkedDeleted(i)) {
                 num_deleted_ += 1;
                 if (allow_replace_deleted_)
@@ -1404,7 +1404,7 @@ public:
 
     std::priority_queue<std::pair<float, LabelType>>
     searchKnn(const void* query_data,
-              size_t k,
+              uint64_t k,
               uint64_t ef,
               const vsag::FilterPtr is_id_allowed = nullptr,
               const float skip_ratio = 0.9f,
@@ -1620,12 +1620,12 @@ public:
         std::cout << "data dimension: " << dim << std::endl;
         in.seekg(0, std::ios::end);
         std::ios::pos_type ss = in.tellg();
-        size_t fsize = (size_t)ss;
+        uint64_t fsize = (uint64_t)ss;
         num = (unsigned)(fsize / (dim + 1) / 4);
         data = new float[num * dim * sizeof(float)];
 
         in.seekg(0, std::ios::beg);
-        for (size_t i = 0; i < num; i++) {
+        for (uint64_t i = 0; i < num; i++) {
             in.seekg(4, std::ios::cur);
             in.read((char*)(data + i * dim), dim * 4);
         }
@@ -1681,7 +1681,7 @@ public:
 
     void
     get_knn_error_quantile(
-        float* train_data, size_t dim, size_t num, size_t k = 20, float quantile = 0.995) {
+        float* train_data, uint64_t dim, uint64_t num, uint64_t k = 20, float quantile = 0.995) {
         error_quantile = quantile;
         std::cout << "get: " << k << " NN  quantile: " << quantile << " dim: " << dim
                   << " num: " << num << std::endl;
@@ -1759,8 +1759,8 @@ public:
     }
 
     void
-    encode_hnsw_data(size_t chunk_size = 0, size_t cluster_size = 256) {
-        size_t vec_dim = *((size_t*)dist_func_param_);
+    encode_hnsw_data(uint64_t chunk_size = 0, uint64_t cluster_size = 256) {
+        uint64_t vec_dim = *((uint64_t*)dist_func_param_);
         if (chunk_size == 0) {
             chunk_size = vec_dim;
             if (chunk_size > 512 && chunk_size % 8 == 0) {
@@ -1779,7 +1779,7 @@ public:
         if (cur_element_count_ < pq_train_bound)
             pq_train_bound = cur_element_count_;
         auto pq_training_data = std::shared_ptr<float[]>(new float[pq_train_bound * vec_dim]);
-        for (size_t i = 0; i < pq_train_bound; i++) {
+        for (uint64_t i = 0; i < pq_train_bound; i++) {
             memcpy(pq_training_data.get() + i * vec_dim, getDataByInternalId(i), data_size_);
         }
         // generate code book;
