@@ -21,6 +21,7 @@
 #include "impl/label_table.h"
 #include "index_feature_list.h"
 #include "utils/util_functions.h"
+#include "vsag/allocator.h"
 namespace vsag {
 
 static float
@@ -240,10 +241,14 @@ SparseIndex::CalcDistanceById(const DatasetPtr& vector, int64_t id) const {
 }
 
 void
-SparseIndex::GetSparseVectorByInnerId(InnerIdType inner_id, SparseVector* data) const {
+SparseIndex::GetSparseVectorByInnerId(InnerIdType inner_id,
+                                      SparseVector* data,
+                                      Allocator* specified_allocator) const {
+    Allocator* allocator = specified_allocator != nullptr ? specified_allocator : allocator_;
+
     data->len_ = datas_[inner_id][0];
-    data->ids_ = (uint32_t*)allocator_->Allocate(sizeof(uint32_t) * data->len_);
-    data->vals_ = (float*)allocator_->Allocate(sizeof(float) * data->len_);
+    data->ids_ = (uint32_t*)allocator->Allocate(sizeof(uint32_t) * data->len_);
+    data->vals_ = (float*)allocator->Allocate(sizeof(float) * data->len_);
 
     memcpy(data->ids_, datas_[inner_id] + 1, data->len_ * sizeof(uint32_t));
     memcpy(data->vals_, datas_[inner_id] + 1 + datas_[inner_id][0], data->len_ * sizeof(float));

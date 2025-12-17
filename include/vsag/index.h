@@ -492,6 +492,7 @@ public:
      *
      * @param ids Array of vector IDs for which raw data is requested.
      * @param count Number of IDs in the 'ids' array.
+     * @param specified_allocator Optional Allocator for memory management (default is nullptr).
      * @return tl::expected<DatasetPtr, Error>
      *         - On success: A DatasetPtr containing the raw vector data
      *           (format depends on implementation, but typically includes vector arrays).
@@ -510,7 +511,9 @@ public:
      * inserted ones, even if the IDs match.
      */
     virtual tl::expected<DatasetPtr, Error>
-    GetRawVectorByIds(const int64_t* ids, int64_t count) const {
+    GetRawVectorByIds(const int64_t* ids,
+                      int64_t count,
+                      Allocator* specified_allocator = nullptr) const {
         throw std::runtime_error("Index doesn't support GetRawVectorByIds");
     };
 

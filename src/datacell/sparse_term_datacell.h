@@ -21,6 +21,7 @@
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
 #include "utils/pointer_define.h"
+#include "vsag/allocator.h"
 #include "vsag/dataset.h"
 
 namespace vsag {
@@ -69,7 +70,7 @@ public:
     CalcDistanceByInnerId(const SparseTermComputerPtr& computer, uint32_t base_id);
 
     void
-    GetSparseVector(uint32_t base_id, SparseVector* data);
+    GetSparseVector(uint32_t base_id, SparseVector* data, Allocator* specified_allocator);
 
 public:
     uint32_t term_id_limit_{0};
