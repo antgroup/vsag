@@ -936,6 +936,9 @@ HGraph::CalcDistanceById(const float* query, int64_t id) const {
     if (use_reorder_) {
         flat = this->high_precise_codes_;
     }
+    if (raw_vector_) {
+        flat = this->raw_vector_;
+    }
     float result = 0.0F;
     auto computer = flat->FactoryComputer(query);
     {
@@ -951,6 +954,9 @@ HGraph::CalDistanceById(const float* query, const int64_t* ids, int64_t count) c
     auto flat = this->basic_flatten_codes_;
     if (use_reorder_) {
         flat = this->high_precise_codes_;
+    }
+    if (raw_vector_) {
+        flat = this->raw_vector_;
     }
     auto result = Dataset::Make();
     result->Owner(true, allocator_);
@@ -1854,6 +1860,10 @@ HGraph::Merge(const std::vector<MergeUnit>& merge_units) {
 
 void
 HGraph::GetVectorByInnerId(InnerIdType inner_id, float* data) const {
+    if (raw_vector_ != nullptr) {
+        raw_vector_->GetCodesById(inner_id, reinterpret_cast<uint8_t*>(data));
+        return;
+    }
     auto codes = (use_reorder_) ? high_precise_codes_ : basic_flatten_codes_;
     Vector<uint8_t> buffer(codes->code_size_, allocator_);
     codes->GetCodesById(inner_id, buffer.data());
