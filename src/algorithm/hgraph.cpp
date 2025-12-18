@@ -87,7 +87,6 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
     this->resize_increase_count_bit_ = std::max(
         DEFAULT_RESIZE_BIT, static_cast<uint64_t>(log2(static_cast<double>(increase_count))));
 
-    resize(bottom_graph_->max_capacity_);
 
     this->parallel_searcher_ =
         std::make_shared<ParallelSearcher>(common_param, build_pool_, neighbors_mutex_);
@@ -101,6 +100,7 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
         optimizer_ = std::make_shared<Optimizer<BasicSearcher>>(common_param);
     }
     check_and_init_raw_vector(hgraph_param->raw_vector_param, common_param);
+    resize(bottom_graph_->max_capacity_);
 }
 void
 HGraph::Train(const DatasetPtr& base) {
@@ -936,9 +936,6 @@ HGraph::CalcDistanceById(const float* query, int64_t id) const {
     if (use_reorder_) {
         flat = this->high_precise_codes_;
     }
-    if (raw_vector_) {
-        flat = this->raw_vector_;
-    }
     float result = 0.0F;
     auto computer = flat->FactoryComputer(query);
     {
@@ -954,9 +951,6 @@ HGraph::CalDistanceById(const float* query, const int64_t* ids, int64_t count) c
     auto flat = this->basic_flatten_codes_;
     if (use_reorder_) {
         flat = this->high_precise_codes_;
-    }
-    if (raw_vector_) {
-        flat = this->raw_vector_;
     }
     auto result = Dataset::Make();
     result->Owner(true, allocator_);
@@ -1120,6 +1114,9 @@ HGraph::resize(uint64_t new_size) {
         bottom_graph_->Resize(new_size_power_2);
         this->max_capacity_.store(new_size_power_2);
         this->basic_flatten_codes_->Resize(new_size_power_2);
+        if (raw_vector_) {
+            raw_vector_->Resize(new_size_power_2);
+        }
         if (use_reorder_) {
             this->high_precise_codes_->Resize(new_size_power_2);
         }
@@ -1202,7 +1199,6 @@ HGraph::InitFeatures() {
     }
 
     if (raw_vector_ != nullptr) {
-        this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_CAL_DISTANCE_BY_ID);
         this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_GET_RAW_VECTOR_BY_IDS);
     }
 
