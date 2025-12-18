@@ -87,7 +87,6 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
     this->resize_increase_count_bit_ = std::max(
         DEFAULT_RESIZE_BIT, static_cast<uint64_t>(log2(static_cast<double>(increase_count))));
 
-
     this->parallel_searcher_ =
         std::make_shared<ParallelSearcher>(common_param, build_pool_, neighbors_mutex_);
 
