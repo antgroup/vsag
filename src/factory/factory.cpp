@@ -71,7 +71,7 @@ public:
     void
     AsyncRead(uint64_t offset, uint64_t len, void* dest, CallBack callback) override {
         {
-            std::lock_guard<std::mutex> lock(mutex_);
+            std::scoped_lock lock(mutex_);
             if (not pool_) {
                 pool_ = SafeThreadPool::FactoryDefaultThreadPool();
             }
