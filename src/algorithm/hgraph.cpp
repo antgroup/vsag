@@ -1743,16 +1743,18 @@ HGraph::try_recover_tombstone(const DatasetPtr& data, std::vector<int64_t>& fail
      *
      *
      * [case 1] fail to insert -> continue + record failed id
-     * 1. exist + not delete : is_label_valid = true, is_tombstone = false
-     * 2. exist + delete + not recovery: is_label_valid = false, is_tombstone = ture, is_recover = false
+     * exist + not delete : is_label_valid = true, is_tombstone = false
      *
-     * [case 2] tombstone recovery -> continue
-     * exist + delete + recovery: is_label_valid = false, is_tombstone = ture, is_recover = true
+     * [case 2] fail to recovery -> add process
+     * exist + delete + not recovery: is_label_valid = false, is_tombstone = ture, is_recovered = false
      *
-     * [case 3] add -> no continue
+     * [case 3] tombstone recovery -> continue
+     * exist + delete + recovery: is_label_valid = false, is_tombstone = ture, is_recovered = true
+     *
+     * [case 4] no old point -> add process
      * not exists + not delete: is_label_valid = false, is_tombstone = false
      *
-     * [case 4] error
+     * [case 5] error
      * exists + deleted: is_label_valid = true, is_tombstone = true
      */
 
@@ -1760,7 +1762,7 @@ HGraph::try_recover_tombstone(const DatasetPtr& data, std::vector<int64_t>& fail
 
     bool is_label_valid = false;
     bool is_tombstone = false;
-    bool is_recover = false;
+    bool is_recovered = false;
     {
         std::scoped_lock label_lock(this->label_lookup_mutex_);
         is_label_valid = this->label_table_->CheckLabel(label);
@@ -1771,26 +1773,30 @@ HGraph::try_recover_tombstone(const DatasetPtr& data, std::vector<int64_t>& fail
 
     if (is_tombstone) {
         try {
-            // try update
+            // try recover and update
             recover_remove(label);
             auto update_res = UpdateVector(label, data, false);
             if (update_res) {
-                is_recover = true;
-                return true;
+                // [case 3]
+                is_recovered = true;
+                return is_recovered;
             }
+            // recover failed: roll back
+            Remove(label);
         } catch (std::runtime_error& e) {
-            // recover failed: delete again
+            // recover failed: roll back
             Remove(label);
         }
     }
 
-    if (is_label_valid or is_tombstone) {
-        if (not is_recover) {
-            failed_ids.emplace_back(label);
-        }
+    // is_recovered = false
+    if (is_label_valid) {
+        // [case 1]
+        failed_ids.emplace_back(label);
         return true;
     }
 
+    // [case 2, 4]
     return false;
 }
 
