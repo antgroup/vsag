@@ -349,7 +349,7 @@ SINDI::Deserialize(StreamReader& reader) {
             }
         }
     }
-    auto reader_ptr = &reader;
+    auto* reader_ptr = &reader;
 
     BufferStreamReader buffer_reader(
         &reader, std::numeric_limits<uint64_t>::max(), this->allocator_);
