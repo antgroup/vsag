@@ -105,6 +105,11 @@ public:
                             "InitIO not implemented in FlattenInterface");
     }
 
+    virtual IndexCommonParam
+    ExportCommonParam() {
+        throw VsagException(ErrorType::INTERNAL_ERROR, "ExportCommonParam is not implemented");
+    }
+
 public:
     virtual bool
     SetRuntimeParameters(const UnorderedMap<std::string, float>& new_params) {

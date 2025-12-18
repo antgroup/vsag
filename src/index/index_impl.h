@@ -88,6 +88,12 @@ public:
         SAFE_CALL(return this->inner_index_->Build(base));
     }
 
+    tl::expected<bool, Error>
+    Tune(const std::string& parameters, bool disable_future_tuning = false) override {
+        CHECK_IMMUTABLE_INDEX("tune");
+        SAFE_CALL(return this->inner_index_->Tune(parameters, disable_future_tuning));
+    }
+
     tl::expected<float, Error>
     CalcDistanceById(const DatasetPtr& vector, int64_t id) const override {
         SAFE_CALL(return this->inner_index_->CalcDistanceById(vector, id));

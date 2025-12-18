@@ -153,7 +153,14 @@ public:
         this->io_->InitIO(io_param);
     }
 
+    IndexCommonParam
+    ExportCommonParam() override {
+        return common_param_;
+    }
+
 public:
+    IndexCommonParam common_param_;
+
     std::shared_ptr<Quantizer<QuantTmpl>> quantizer_{nullptr};
     std::shared_ptr<BasicIO<IOTmpl>> io_{nullptr};
 
@@ -192,6 +199,7 @@ FlattenDataCell<QuantTmpl, IOTmpl>::FlattenDataCell(const QuantizerParamPtr& qua
                                                     const IOParamPtr& io_param,
                                                     const IndexCommonParam& common_param)
     : allocator_(common_param.allocator_.get()) {
+    this->common_param_ = common_param;
     this->quantizer_ = std::make_shared<QuantTmpl>(quantization_param, common_param);
     this->io_ = std::make_shared<IOTmpl>(io_param, common_param);
     this->code_size_ = quantizer_->GetCodeSize();
