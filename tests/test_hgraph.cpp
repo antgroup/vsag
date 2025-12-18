@@ -809,11 +809,10 @@ TestHGraphGetRawVector(const fixtures::HGraphTestIndexPtr& test_index,
     using namespace fixtures;
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
-    const std::vector<std::pair<std::string, float>> test_cases = {{"fp32", 0.99},
-                                                                   {"sq4_uniform,fp32", 0.95}};
+    const std::vector<std::pair<std::string, float>> test_cases = {
+        {"fp32", 0.99}, {"sq8", 0.99}, {"sq4_uniform,fp32", 0.95}};
     auto search_param = fmt::format(fixtures::search_param_tmp, 200, false);
     for (auto metric_type : resource->metric_types) {
-        metric_type = "cosine";
         for (auto dim : resource->dims) {
             for (auto& [base_quantization_str, recall] : test_cases) {
                 INFO(fmt::format("metric_type: {}, dim: {}, base_quantization_str: {}, recall: {}",
