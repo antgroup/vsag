@@ -214,9 +214,6 @@ HNSW::add(const DatasetPtr& base) {
                     std::scoped_lock lock(rw_mutex_);
                     index->markDelete(ids[i]);
                 }
-                logger::debug("duplicate point: {}", i);
-                failed_ids.push_back(ids[i]);
-                continue;
             }
 
             std::shared_lock lock(rw_mutex_);
@@ -814,7 +811,8 @@ HNSW::update_vector(int64_t id, const DatasetPtr& new_base, bool force_update) {
         index->getNeighborsInternalId(internal_id, neighbors);
         for (auto neighbor_internal_id : neighbors) {
             // don't compare with itself
-            if (neighbor_internal_id == internal_id) {
+            if (neighbor_internal_id == internal_id or
+                index->isMarkedDeleted(neighbor_internal_id)) {
                 continue;
             }
 
