@@ -107,6 +107,7 @@ const char* const SPARSE_WINDOW_SIZE = "window_size";
 const char* const SPARSE_USE_REORDER = "use_reorder";
 const char* const SPARSE_N_CANDIDATE = "n_candidate";
 const char* const SPARSE_DESERIALIZE_WITHOUT_FOOTER = "deserialize_without_footer";
+const char* const SPARSE_DESERIALIZE_WITHOUT_BUFFER = "deserialize_without_buffer";
 
 // graph param value
 const char* const GRAPH_PARAM_MAX_DEGREE = "max_degree";

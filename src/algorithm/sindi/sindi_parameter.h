@@ -46,6 +46,7 @@ public:
 
     // temporal parameter
     bool deserialize_without_footer{false};
+    bool deserialize_without_buffer{false};
 };
 
 class SINDISearchParameter : public Parameter {
