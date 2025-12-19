@@ -28,12 +28,17 @@ VectorTransformerParameter::FromJson(const JsonType& json) {
     if (json.Contains(PCA_DIM_KEY)) {
         pca_dim_ = json[PCA_DIM_KEY].GetInt();
     }
+
+    if (json.Contains(MRLE_DIM_KEY)) {
+        mrle_dim_ = json[MRLE_DIM_KEY].GetInt();
+    }
 }
 
 JsonType
 VectorTransformerParameter::ToJson() const {
     JsonType json;
     json[PCA_DIM_KEY].SetInt(pca_dim_);
+    json[MRLE_DIM_KEY].SetInt(mrle_dim_);
     json[INPUT_DIM_KEY].SetInt(input_dim_);
     return json;
 }
@@ -51,6 +56,9 @@ VectorTransformerParameter::CheckCompatibility(const ParamPtr& other) const {
         return false;
     }
     if (input_dim_ != param->input_dim_) {
+        return false;
+    }
+    if (mrle_dim_ != param->mrle_dim_) {
         return false;
     }
     return true;

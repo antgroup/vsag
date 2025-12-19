@@ -82,12 +82,14 @@ const char* const QUANTIZATION_TYPE_VALUE_TQ = "tq";
 const char* const TRANSFORMER_TYPE_VALUE_PCA = "pca";
 const char* const TRANSFORMER_TYPE_VALUE_ROM = "rom";
 const char* const TRANSFORMER_TYPE_VALUE_FHT = "fht";
+const char* const TRANSFORMER_TYPE_VALUE_MRLE = "mrle";
 const char* const TRANSFORMER_TYPE_VALUE_RESIDUAL = "residual";
 const char* const TRANSFORMER_TYPE_VALUE_NORMALIZE = "normalize";
 
 // vector transformer param
 const char* const INPUT_DIM_KEY = "input_dim";
 const char* const PCA_DIM_KEY = "pca_dim";
+const char* const MRLE_DIM_KEY = "mrle_dim";
 const char* const USE_FHT_KEY = "use_fht";
 
 // quantization param
