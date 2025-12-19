@@ -179,7 +179,8 @@ private:
     search_impl(const DatasetPtr& query,
                 int64_t limit,
                 const SearchFunc& search_func,
-                int64_t ef_search) const;
+                int64_t ef_search,
+                float radius = std::numeric_limits<float>::max()) const;
 
     bool
     is_update_entry_point(uint64_t total_count) {
