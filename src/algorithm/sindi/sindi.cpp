@@ -35,7 +35,8 @@ SINDI::SINDI(const SINDIParameterPtr& param, const IndexCommonParam& common_para
       window_size_(param->window_size),
       doc_retain_ratio_(1.0F - param->doc_prune_ratio),
       window_term_list_(common_param.allocator_.get()),
-      deserialize_without_footer_(param->deserialize_without_footer) {
+      deserialize_without_footer_(param->deserialize_without_footer),
+      deserialize_without_buffer_(param->deserialize_without_buffer) {
     if (use_reorder_) {
         SparseIndexParameterPtr rerank_param = std::make_shared<SparseIndexParameters>();
         rerank_param->need_sort = true;
@@ -332,25 +333,30 @@ SINDI::Deserialize(StreamReader& reader) {
             this->create_param_ptr_->CheckCompatibility(index_param);
         }
     }
+    auto* reader_ptr = &reader;
 
     BufferStreamReader buffer_reader(
         &reader, std::numeric_limits<uint64_t>::max(), this->allocator_);
+    if (not deserialize_without_buffer_) {
+        reader_ptr = &buffer_reader;
+    }
+    auto& reader_ref = *reader_ptr;
 
-    StreamReader::ReadObj(buffer_reader, cur_element_count_);
+    StreamReader::ReadObj(reader_ref, cur_element_count_);
 
     uint32_t window_term_list_size = 0;
-    StreamReader::ReadObj(buffer_reader, window_term_list_size);
+    StreamReader::ReadObj(reader_ref, window_term_list_size);
     window_term_list_.resize(window_term_list_size);
     for (auto& window : window_term_list_) {
         window =
             std::make_shared<SparseTermDataCell>(doc_retain_ratio_, term_id_limit_, allocator_);
-        window->Deserialize(buffer_reader);
+        window->Deserialize(reader_ref);
     }
 
-    label_table_->Deserialize(buffer_reader);
+    label_table_->Deserialize(reader_ref);
 
     if (use_reorder_) {
-        rerank_flat_index_->Deserialize(buffer_reader);
+        rerank_flat_index_->Deserialize(reader_ref);
     }
 }
 
