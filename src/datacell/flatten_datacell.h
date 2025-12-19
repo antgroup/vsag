@@ -51,7 +51,7 @@ public:
 
     ComputerInterfacePtr
     FactoryComputer(const void* query) override {
-        return this->factory_computer((const float*)query);
+        return this->factory_computer(static_cast<const float*>(query));
     }
 
     float
@@ -209,7 +209,7 @@ template <typename QuantTmpl, typename IOTmpl>
 void
 FlattenDataCell<QuantTmpl, IOTmpl>::Train(const void* data, uint64_t count) {
     if (this->quantizer_) {
-        this->quantizer_->Train((const float*)data, count);
+        this->quantizer_->Train(static_cast<const float*>(data), count);
     }
 }
 
@@ -226,7 +226,7 @@ FlattenDataCell<QuantTmpl, IOTmpl>::InsertVector(const void* vector, InnerIdType
         }
     }
     ByteBuffer codes(static_cast<uint64_t>(code_size_), allocator_);
-    quantizer_->EncodeOne((const float*)vector, codes.data);
+    quantizer_->EncodeOne(static_cast<const float*>(vector), codes.data);
     io_->Write(
         codes.data, code_size_, static_cast<uint64_t>(idx) * static_cast<uint64_t>(code_size_));
 }
@@ -239,7 +239,7 @@ FlattenDataCell<QuantTmpl, IOTmpl>::UpdateVector(const void* vector, InnerIdType
     }
     std::lock_guard lock(mutex_);
     ByteBuffer codes(static_cast<uint64_t>(code_size_), allocator_);
-    quantizer_->EncodeOne((const float*)vector, codes.data);
+    quantizer_->EncodeOne(static_cast<const float*>(vector), codes.data);
     io_->Write(
         codes.data, code_size_, static_cast<uint64_t>(idx) * static_cast<uint64_t>(code_size_));
     return true;
@@ -253,7 +253,7 @@ FlattenDataCell<QuantTmpl, IOTmpl>::BatchInsertVector(const void* vectors,
     if (idx_vec == nullptr) {
         ByteBuffer codes(static_cast<uint64_t>(count) * static_cast<uint64_t>(code_size_),
                          allocator_);
-        quantizer_->EncodeBatch((const float*)vectors, codes.data, count);
+        quantizer_->EncodeBatch(static_cast<const float*>(vectors), codes.data, count);
         uint64_t cur_count;
         {
             std::lock_guard lock(mutex_);
@@ -266,7 +266,7 @@ FlattenDataCell<QuantTmpl, IOTmpl>::BatchInsertVector(const void* vectors,
     } else {
         auto dim = quantizer_->GetDim();
         for (int64_t i = 0; i < count; ++i) {
-            this->InsertVector((const float*)vectors + dim * i, idx_vec[i]);
+            this->InsertVector(static_cast<const float*>(vectors) + dim * i, idx_vec[i]);
         }
     }
 }

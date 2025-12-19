@@ -55,7 +55,7 @@ TEST_CASE("Basic Usage for GraphDataCell (adapter of hnsw)", "[ut][GraphDataCell
         Vector<InnerIdType> neighbor_ids(neighbor_size, allocator.get());
         graph->GetNeighbors(i, neighbor_ids);
 
-        int* data = (int*)alg_hnsw->get_linklist0(i);
+        auto* data = alg_hnsw->get_linklist0(i);
         REQUIRE(neighbor_size == alg_hnsw->getListCount((hnswlib::linklistsizeint*)data));
 
         for (uint32_t j = 0; j < neighbor_size; j++) {
