@@ -767,7 +767,9 @@ HGraph::deserialize_label_info(StreamReader& reader) const {
         StreamReader::ReadObj(reader, key);
         InnerIdType value;
         StreamReader::ReadObj(reader, value);
-        this->label_table_->label_remap_.emplace(key, value);
+        if (not this->immutable_) {
+            this->label_table_->label_remap_.emplace(key, value);
+        }
     }
 }
 
@@ -1883,6 +1885,8 @@ HGraph::SetImmutable() {
     this->neighbors_mutex_.reset();
     this->neighbors_mutex_ = std::make_shared<EmptyMutex>();
     this->searcher_->SetMutexArray(this->neighbors_mutex_);
+    STLUnorderedMap<LabelType, InnerIdType> empty_remap(allocator_);
+    this->label_table_->label_remap_.swap(empty_remap);
     this->immutable_ = true;
 }
 
