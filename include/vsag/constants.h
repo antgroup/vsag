@@ -50,6 +50,7 @@ extern const char* const METRIC_L2;
 extern const char* const METRIC_COSINE;
 extern const char* const METRIC_IP;
 extern const char* const DATATYPE_FLOAT32;
+extern const char* const DATATYPE_FLOAT16;
 extern const char* const DATATYPE_INT8;
 extern const char* const DATATYPE_SPARSE;
 extern const char* const BLANK_INDEX;
