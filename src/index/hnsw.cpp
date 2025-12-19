@@ -31,6 +31,7 @@
 #include "impl/allocator/safe_allocator.h"
 #include "impl/odescent/odescent_graph_builder.h"
 #include "index/hnsw_zparameters.h"
+#include "index_detail_data.h"
 #include "io/memory_block_io_parameter.h"
 #include "quantization/fp32_quantizer_parameter.h"
 #include "storage/empty_index_binary_set.h"
@@ -1357,6 +1358,18 @@ void
 HNSW::set_immutable() {
     std::unique_lock lock(rw_mutex_);
     alg_hnsw_->setImmutable();
+}
+
+DetailDataPtr
+HNSW::get_detail_data_by_name(const std::string& name, IndexDetailInfo& info) const {
+    auto data = std::make_shared<DetailDataImpl>();
+    if (name == INDEX_DETAIL_DATA_TYPE) {
+        data->SetDataScalarString(ToString(type_));
+    } else {
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            "Index doesn't have detail data name: " + name);
+    }
+    return data;
 }
 
 }  // namespace vsag

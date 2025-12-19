@@ -41,6 +41,13 @@ TEST_CASE("hnsw int8 recall", "[ft][index][hnsw]") {
         std::cout << "Build HNSW Error" << std::endl;
         return;
     }
+
+    vsag::IndexDetailInfo info;
+    auto data_type = hnsw->GetDetailDataByName(vsag::INDEX_DETAIL_DATA_TYPE, info)
+                         .value()
+                         ->GetDataScalarString();
+    REQUIRE(data_type == vsag::DATATYPE_INT8);
+
     std::shared_ptr<int64_t[]> ids(new int64_t[num_vectors]);
     std::shared_ptr<int8_t[]> data(new int8_t[dim * num_vectors]);
 
@@ -1227,6 +1234,12 @@ TEST_CASE("hnsw + feedback with global optimum id + remove", "[ft][index][hnsw]"
     auto createindex = vsag::Factory::CreateIndex("hnsw", build_parameter);
     REQUIRE(createindex.has_value());
     auto index = createindex.value();
+
+    vsag::IndexDetailInfo info;
+    auto data_type = index->GetDetailDataByName(vsag::INDEX_DETAIL_DATA_TYPE, info)
+                         .value()
+                         ->GetDataScalarString();
+    REQUIRE(data_type == vsag::DATATYPE_FLOAT32);
 
     // generate dataset
     auto [base_ids, base_vectors] = fixtures::generate_ids_and_vectors(num_base, dim);

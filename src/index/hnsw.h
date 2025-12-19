@@ -216,6 +216,11 @@ public:
         SAFE_CALL(return this->get_min_and_max_id());
     };
 
+    tl::expected<DetailDataPtr, Error>
+    GetDetailDataByName(const std::string& name, IndexDetailInfo& info) const override {
+        SAFE_CALL(return this->get_detail_data_by_name(name, info));
+    }
+
 public:
     tl::expected<BinarySet, Error>
     Serialize() const override {
@@ -434,6 +439,9 @@ private:
 
     void
     set_immutable();
+
+    DetailDataPtr
+    get_detail_data_by_name(const std::string& name, IndexDetailInfo& info) const;
 
 private:
     std::shared_ptr<hnswlib::AlgorithmInterface<float>> alg_hnsw_;

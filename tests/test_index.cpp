@@ -2242,8 +2242,11 @@ TestIndex::TestGetRawVectorByIds(const IndexPtr& index,
     int64_t count = dataset->count_;
     auto vectors = index->GetRawVectorByIds(dataset->base_->GetIds(), count);
     REQUIRE(vectors.has_value());
-    if (index->GetIndexType() == vsag::IndexType::SINDI or
-        index->GetIndexType() == vsag::IndexType::SPARSE) {
+
+    vsag::IndexDetailInfo info;
+    auto data_type = index->GetDetailDataByName("data_type", info).value()->GetDataScalarString();
+
+    if (data_type == vsag::DATATYPE_SPARSE) {
         for (int i = 0; i < count; i++) {
             // get single data
             auto single_dataset = vsag::Dataset::Make();
@@ -2267,7 +2270,7 @@ TestIndex::TestGetRawVectorByIds(const IndexPtr& index,
             gt_dist = 1 - gt_dist;
             REQUIRE(std::abs(gt_dist - dist) < 1e-3);
         }
-    } else {
+    } else if (data_type == vsag::DATATYPE_FLOAT32) {
         auto float_vectors = vectors.value()->GetFloat32Vectors();
         auto dim = dataset->base_->GetDim();
         if (not expected_success) {
@@ -2278,6 +2281,8 @@ TestIndex::TestGetRawVectorByIds(const IndexPtr& index,
                                 dataset->base_->GetFloat32Vectors() + i * dim,
                                 dim * sizeof(float)) == 0);
         }
+    } else {
+        throw std::invalid_argument("Invalid data type: " + data_type);
     }
 }
 void
