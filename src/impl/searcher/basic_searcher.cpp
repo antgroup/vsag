@@ -195,9 +195,6 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
 
         for (uint32_t i = 0; i < count_no_visited; i++) {
             dist = line_dists[i];
-            if (dist < THRESHOLD_ERROR) {
-                inner_search_param.duplicate_id = to_be_visited_id[i];
-            }
             if (top_candidates->Size() < ef || lower_bound > dist ||
                 (mode == RANGE_SEARCH && dist <= inner_search_param.radius)) {
                 if (!iter_ctx->CheckPoint(to_be_visited_id[i])) {
@@ -296,9 +293,6 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
             top_candidates->Pop();
         }
     }
-    if (dist < THRESHOLD_ERROR) {
-        inner_search_param.duplicate_id = ep;
-    }
     candidate_set->Push(-dist, ep);
     vl->Set(ep);
 
@@ -338,9 +332,6 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
 
         for (uint32_t i = 0; i < count_no_visited; i++) {
             dist = line_dists[i];
-            if (dist < THRESHOLD_ERROR) {
-                inner_search_param.duplicate_id = to_be_visited_id[i];
-            }
             if (top_candidates->Size() < ef || lower_bound > dist ||
                 (mode == RANGE_SEARCH && dist <= inner_search_param.radius)) {
                 candidate_set->Push(-dist, to_be_visited_id[i]);
@@ -384,6 +375,22 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
         while (not top_candidates->Empty() &&
                top_candidates->Top().first > inner_search_param.radius + THRESHOLD_ERROR) {
             top_candidates->Pop();
+        }
+    }
+
+    // set duplicate id for query vector
+    if (inner_search_param.query_id != -1) {
+        const auto* data = top_candidates->GetData();
+        auto min_distance = data[0].first;
+        auto min_index = data[0].second;
+        for (uint32_t i = 1; i < top_candidates->Size(); ++i) {
+            if (data[i].first < min_distance) {
+                min_distance = data[i].first;
+                min_index = data[i].second;
+            }
+        }
+        if (flatten->CompareVectors(min_index, inner_search_param.query_id)) {
+            inner_search_param.duplicate_id = min_index;
         }
     }
 
