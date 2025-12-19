@@ -388,7 +388,8 @@ TestIndex::TestKnnSearch(const IndexPtr& index,
                          const TestDatasetPtr& dataset,
                          const std::string& search_param,
                          float expected_recall,
-                         bool expected_success) {
+                         bool expected_success,
+                         const std::string& debug_info) {
     if (not index->CheckFeature(vsag::SUPPORT_KNN_SEARCH)) {
         return;
     }
@@ -428,6 +429,7 @@ TestIndex::TestKnnSearch(const IndexPtr& index,
         WARN(fmt::format("cur_result({}) <= expected_recall * query_count({})",
                          cur_recall,
                          expected_recall * query_count));
+        WARN(debug_info);
     }
     REQUIRE(cur_recall > expected_recall * query_count * RECALL_THRESHOLD);
 }
@@ -438,7 +440,8 @@ TestIndex::TestRangeSearch(const IndexPtr& index,
                            const std::string& search_param,
                            float expected_recall,
                            int64_t limited_size,
-                           bool expected_success) {
+                           bool expected_success,
+                           const std::string& debug_info) {
     if (not index->CheckFeature(vsag::SUPPORT_RANGE_SEARCH)) {
         return;
     }
@@ -480,6 +483,7 @@ TestIndex::TestRangeSearch(const IndexPtr& index,
         WARN(fmt::format("cur_result({}) <= expected_recall * query_count({})",
                          cur_recall,
                          expected_recall * query_count));
+        WARN(debug_info);
     }
     REQUIRE(cur_recall > expected_recall * query_count * RECALL_THRESHOLD);
 }
@@ -601,7 +605,8 @@ TestIndex::TestFilterSearch(const TestIndex::IndexPtr& index,
                             const std::string& search_param,
                             float expected_recall,
                             bool expected_success,
-                            bool support_filter_obj) {
+                            bool support_filter_obj,
+                            const std::string& debug_info) {
     if (not index->CheckFeature(vsag::SUPPORT_KNN_SEARCH_WITH_ID_FILTER)) {
         return;
     }
@@ -658,6 +663,7 @@ TestIndex::TestFilterSearch(const TestIndex::IndexPtr& index,
         WARN(fmt::format("cur_result({}) <= expected_recall * query_count({})",
                          cur_recall,
                          expected_recall * query_count));
+        WARN(debug_info);
     }
     REQUIRE(cur_recall > expected_recall * query_count * RECALL_THRESHOLD);
 }
@@ -2223,6 +2229,26 @@ TestIndex::TestConcurrentAddSearchRemove(const TestIndex::IndexPtr& index,
     for (auto& res : futures) {
         auto val = res.get();
         REQUIRE(val);
+    }
+}
+
+void
+TestIndex::TestSearchUnrelatedParameter(const IndexPtr& index,
+                                        const TestDatasetPtr& dataset,
+                                        const std::string& search_param) {
+    auto queries = dataset->query_;
+    auto query_count = queries->GetNumElements();
+    auto dim = queries->GetDim();
+    for (auto i = 0; i < query_count; ++i) {
+        auto query = vsag::Dataset::Make();
+        query->NumElements(1)
+            ->Dim(dim)
+            ->Float32Vectors(queries->GetFloat32Vectors() + i * dim)
+            ->SparseVectors(queries->GetSparseVectors() + i)
+            ->Paths(queries->GetPaths() + i)
+            ->Owner(false);
+        auto res = index->KnnSearch(query, 10, search_param);
+        REQUIRE(res.has_value());
     }
 }
 

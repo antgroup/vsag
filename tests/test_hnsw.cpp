@@ -24,6 +24,16 @@
 #include "vsag/vsag.h"
 
 namespace fixtures {
+
+class HNSWTestResource {
+public:
+    std::vector<int> dims;
+    std::vector<std::pair<std::string, float>> test_cases;
+    std::vector<std::string> metric_types;
+    uint64_t base_count;
+};
+
+using HNSWResourcePtr = std::shared_ptr<HNSWTestResource>;
 class HNSWTestIndex : public fixtures::TestIndex {
 public:
     static std::string
@@ -31,13 +41,8 @@ public:
                                       int64_t dim,
                                       bool use_static = false);
 
-    static TestDatasetPool pool;
-
-    static std::vector<int> dims;
-
-    static std::vector<float> valid_ratios;
-
-    constexpr static uint64_t base_count = 1000;
+    static HNSWResourcePtr
+    GetResource(bool sample = true);
 
     constexpr static const char* search_param_tmp = R"(
         {{
@@ -46,11 +51,41 @@ public:
                 "skip_ratio": 0.3
             }}
         }})";
+
+    static TestDatasetPool pool;
+    static std::vector<int> dims;
+    static std::vector<float> valid_ratios;
+    static uint64_t base_count;
+    static const std::string name;
+    static const std::vector<std::pair<std::string, float>> all_test_cases;
 };
+using HNSWTestIndexPtr = std::shared_ptr<HNSWTestIndex>;
 
 TestDatasetPool HNSWTestIndex::pool{};
 std::vector<int> HNSWTestIndex::dims = fixtures::get_common_used_dims(2, RandomValue(0, 999));
 std::vector<float> HNSWTestIndex::valid_ratios{0.01, 0.05, 0.99};
+uint64_t HNSWTestIndex::base_count = 1200;
+const std::string HNSWTestIndex::name = "hnsw";
+const std::vector<std::pair<std::string, float>> HNSWTestIndex::all_test_cases = {
+    {"fp32", 0.99},
+};
+
+HNSWResourcePtr
+HNSWTestIndex::GetResource(bool sample) {
+    auto resource = std::make_shared<HNSWTestResource>();
+    if (sample) {
+        resource->dims = fixtures::get_common_used_dims(1, RandomValue(0, 999));
+        resource->test_cases = fixtures::RandomSelect(HNSWTestIndex::all_test_cases, 3);
+        resource->metric_types = fixtures::RandomSelect<std::string>({"ip", "l2", "cosine"}, 1);
+        resource->base_count = HNSWTestIndex::base_count;
+    } else {
+        resource->dims = fixtures::get_common_used_dims();
+        resource->test_cases = HNSWTestIndex::all_test_cases;
+        resource->metric_types = {"ip", "l2", "cosine"};
+        resource->base_count = HNSWTestIndex::base_count * 10;
+    }
+    return resource;
+}
 
 std::string
 HNSWTestIndex::GenerateHNSWBuildParametersString(const std::string& metric_type,
@@ -681,4 +716,58 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex,
     auto index = TestFactory(name, param, true);
     auto result_immutable = index->SetImmutable();
     REQUIRE_FALSE(result_immutable.has_value());
+}
+
+static void
+TestHNSWSearchUnrelatedParameter(const fixtures::HNSWTestIndexPtr& test_index,
+                                 const fixtures::HNSWResourcePtr& resource) {
+    using namespace fixtures;
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    auto size = GENERATE(1024 * 1024 * 2);
+    constexpr const char* search_param = R"({
+            "hnsw": {
+                "ef_search": 200,
+                "-------unrelated parameters below-------": true,
+                "use_reorder": true,
+                "scan_buckets_count": 10
+            },
+            "diskann": {
+                "parameters used in other index": "hnsw"
+            }
+        })";
+
+    for (auto metric_type : resource->metric_types) {
+        for (auto dim : resource->dims) {
+            for (auto& [base_quantization_str, recall] : resource->test_cases) {
+                INFO(fmt::format("metric_type: {}, dim: {}, base_quantization_str: {}, recall: {}",
+                                 metric_type,
+                                 dim,
+                                 base_quantization_str,
+                                 recall));
+                vsag::Options::Instance().set_block_size_limit(size);
+                auto param = HNSWTestIndex::GenerateHNSWBuildParametersString(metric_type, dim);
+                auto index = TestIndex::TestFactory(test_index->name, param, true);
+                auto dataset =
+                    HNSWTestIndex::pool.GetDatasetAndCreate(dim, resource->base_count, metric_type);
+                TestIndex::TestBuildIndex(index, dataset, true);
+                TestIndex::TestSearchUnrelatedParameter(index, dataset, search_param);
+            }
+        }
+    }
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex,
+                             "(PR) HNSW SearchUnrelatedParameter",
+                             "[ft][hnsw][pr]") {
+    auto test_index = std::make_shared<HNSWTestIndex>();
+    auto resource = test_index->GetResource(true);
+    TestHNSWSearchUnrelatedParameter(test_index, resource);
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex,
+                             "(Daily) HNSW SearchUnrelatedParameter",
+                             "[ft][hnsw][daily]") {
+    auto test_index = std::make_shared<HNSWTestIndex>();
+    auto resource = test_index->GetResource(false);
+    TestHNSWSearchUnrelatedParameter(test_index, resource);
 }

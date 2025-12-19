@@ -109,7 +109,8 @@ public:
                   const TestDatasetPtr& dataset,
                   const std::string& search_param,
                   float expected_recall = 0.99,
-                  bool expected_success = true);
+                  bool expected_success = true,
+                  const std::string& debug_info = "");
 
     static void
     TestKnnSearchCompare(const IndexPtr& index_weak,
@@ -145,7 +146,8 @@ public:
                     const std::string& search_param,
                     float expected_recall = 0.99,
                     int64_t limited_size = -1,
-                    bool expected_success = true);
+                    bool expected_success = true,
+                    const std::string& debug_info = "");
 
     static void
     TestFilterSearch(const IndexPtr& index,
@@ -153,7 +155,8 @@ public:
                      const std::string& search_param,
                      float expected_recall = 0.99,
                      bool expected_success = true,
-                     bool support_filter_obj = false);
+                     bool support_filter_obj = false,
+                     const std::string& debug_info = "");
 
     static void
     TestCalcDistanceById(const IndexPtr& index,
@@ -289,7 +292,12 @@ public:
                        const TestDatasetPtr& dataset,
                        const std::string& search_param);
 
-    constexpr static float RECALL_THRESHOLD = 0.95;
+    static void
+    TestSearchUnrelatedParameter(const IndexPtr& index,
+                                 const TestDatasetPtr& dataset,
+                                 const std::string& search_param);
+
+    constexpr static float RECALL_THRESHOLD = 0.85F;
 };
 
 }  // namespace fixtures

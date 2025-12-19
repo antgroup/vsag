@@ -213,3 +213,27 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex, "SINDI Serialize File", "
     }
     vsag::Options::Instance().set_block_size_limit(origin_size);
 }
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex,
+                             "SINDI Search Unreleated Param",
+                             "[ft][sindi]") {
+    fixtures::SINDIParam param;
+    param.use_reorder = GENERATE(true, false);
+    auto build_param = fixtures::SINDITestIndex::GenerateBuildParameter(param);
+    auto index = TestFactory("sindi", build_param, true);
+    auto dataset = pool.GetSparseDatasetAndCreate(base_count, 128, 0.8);
+    constexpr const char* search_param = R"(
+        {
+            "sindi":
+            {
+                "n_candidate": 20,
+                "query_prune_ratio": 0.0,
+                "term_prune_ratio": 0.0,
+                "-------unrelated parameters below-------": true,
+                "io_limit": 200,
+                "beam_search": 4,
+                "scan_buckets_count": 10
+            }
+        })";
+    TestSearchUnrelatedParameter(index, dataset, search_param);
+}
