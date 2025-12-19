@@ -73,6 +73,15 @@ public:
     FilterDistribution() const {
         return Distribution::NONE;  // (default) no distribution information hints provides
     }
+
+    /**
+      * @brief Get all the valid ids of pre-filter
+      * 
+      * @return valid ids of this filter
+      */
+    virtual void
+    GetValidIds(const int64_t** valid_ids, int64_t& count) const {
+    }
 };
 
 using FilterPtr = std::shared_ptr<Filter>;
