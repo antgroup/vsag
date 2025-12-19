@@ -75,7 +75,8 @@ TEST_CASE("SINDI Index Parameters Test", "[ut][SINDIParameter]") {
         "sindi": {
             "query_prune_ratio": 0.2,
             "n_candidate": 20,
-            "term_prune_ratio": 0.1
+            "term_prune_ratio": 0.1,
+            "use_term_lists_heap_insert": false
         }
     })";
     auto search_param = std::make_shared<vsag::SINDIParameter>();
