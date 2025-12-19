@@ -48,7 +48,7 @@ ExtraInfoInterfaceTest::BasicTest(uint64_t base_count) {
     REQUIRE(extra_info_->TotalCount() == base_count + old_count);
 
     // test Prefetch and GetExtraInfoById
-    char* extra_info = (char*)allocator->Allocate(extra_info_size);
+    char* extra_info = static_cast<char*>(allocator->Allocate(extra_info_size));
     REQUIRE(extra_info != nullptr);
 
     for (InnerIdType i = first_one; i <= last_one; ++i) {
@@ -89,7 +89,7 @@ ExtraInfoInterfaceTest::TestForceInMemory(uint64_t force_count) {
         extra_infos.data() + (force_count - 1) * extra_info_size, 1, &last_one);
     REQUIRE(extra_info_->TotalCount() == force_count + old_count);
 
-    char* extra_info = (char*)allocator->Allocate(extra_info_size);
+    char* extra_info = static_cast<char*>(allocator->Allocate(extra_info_size));
     REQUIRE(extra_info != nullptr);
     for (InnerIdType i = first_one; i <= last_one; ++i) {
         extra_info_->Prefetch(i);

@@ -46,22 +46,27 @@ public:
         }
 
         if (allocator_ != nullptr) {
-            allocator_->Deallocate((void*)(DatasetImpl::GetIds()));
-            allocator_->Deallocate((void*)(DatasetImpl::GetDistances()));
-            allocator_->Deallocate((void*)(DatasetImpl::GetInt8Vectors()));
-            allocator_->Deallocate((void*)(DatasetImpl::GetFloat32Vectors()));
-            allocator_->Deallocate((void*)(DatasetImpl::GetExtraInfos()));
+            allocator_->Deallocate(static_cast<void*>(const_cast<int64_t*>(DatasetImpl::GetIds())));
+            allocator_->Deallocate(
+                static_cast<void*>(const_cast<float*>(DatasetImpl::GetDistances())));
+            allocator_->Deallocate(
+                static_cast<void*>(const_cast<int8_t*>(DatasetImpl::GetInt8Vectors())));
+            allocator_->Deallocate(
+                static_cast<void*>(const_cast<float*>(DatasetImpl::GetFloat32Vectors())));
+            allocator_->Deallocate(
+                static_cast<void*>(const_cast<char*>(DatasetImpl::GetExtraInfos())));
 
             if (const auto* sparse_vectors = GetSparseVectors(); sparse_vectors != nullptr) {
                 for (int i = 0; i < DatasetImpl::GetNumElements(); i++) {
                     if (sparse_vectors[i].ids_ != nullptr) {
-                        allocator_->Deallocate((void*)sparse_vectors[i].ids_);
+                        allocator_->Deallocate(static_cast<void*>(sparse_vectors[i].ids_));
                     }
                     if (sparse_vectors[i].vals_ != nullptr) {
-                        allocator_->Deallocate((void*)sparse_vectors[i].vals_);
+                        allocator_->Deallocate(static_cast<void*>(sparse_vectors[i].vals_));
                     }
                 }
-                allocator_->Deallocate((void*)DatasetImpl::GetSparseVectors());
+                allocator_->Deallocate(
+                    static_cast<void*>(const_cast<SparseVector*>(DatasetImpl::GetSparseVectors())));
             }
 
         } else {
