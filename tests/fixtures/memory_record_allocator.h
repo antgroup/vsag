@@ -33,7 +33,7 @@ public:
     }
 
     void*
-    Allocate(size_t size) override {
+    Allocate(uint64_t size) override {
         auto ptr = malloc(size);
         {
             std::lock_guard lock(mutex_);
@@ -54,7 +54,7 @@ public:
     }
 
     void*
-    Reallocate(void* p, size_t size) override {
+    Reallocate(void* p, uint64_t size) override {
         {
             std::lock_guard lock(mutex_);
             memory_bytes_ -= records_[p];

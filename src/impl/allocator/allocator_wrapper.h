@@ -26,7 +26,7 @@ public:
     using pointer = T*;
     using void_pointer = void*;
     using const_void_pointer = const void*;
-    using size_type = size_t;
+    using size_type = uint64_t;
     using difference_type = std::ptrdiff_t;
 
     AllocatorWrapper(Allocator* allocator) {

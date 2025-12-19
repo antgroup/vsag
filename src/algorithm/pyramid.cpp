@@ -103,7 +103,7 @@ IndexNode::Deserialize(StreamReader& reader) {
         StreamReader::ReadVector(reader, ids_);
     }
     // deserialize `children`
-    size_t children_size = 0;
+    uint64_t children_size = 0;
     StreamReader::ReadObj(reader, children_size);
     for (int i = 0; i < children_size; ++i) {
         std::string key = StreamReader::ReadString(reader);
@@ -126,7 +126,7 @@ IndexNode::Serialize(StreamWriter& writer) const {
         StreamWriter::WriteVector(writer, ids_);
     }
     // serialize `children`
-    size_t children_size = children_.size();
+    uint64_t children_size = children_.size();
     StreamWriter::WriteObj(writer, children_size);
     for (const auto& item : children_) {
         // calculate size of `key`
@@ -711,7 +711,7 @@ Pyramid::search_node(const IndexNode* node,
         if (search_param.is_inner_id_allowed != nullptr) {
             const auto& inner_filter = search_param.is_inner_id_allowed;
             valid_ids.reserve(node->ids_.size());
-            for (size_t i = 0; i < id_count; ++i) {
+            for (uint64_t i = 0; i < id_count; ++i) {
                 if (inner_filter->CheckValid(ids_ptr[i])) {
                     valid_ids.push_back(ids_ptr[i]);
                 }

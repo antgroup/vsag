@@ -37,7 +37,7 @@ TEST_CASE("gh#369", "[ft][github]") {
         }
 
         void*
-        Allocate(size_t size) override {
+        Allocate(uint64_t size) override {
             if (size == 0) {
                 throw std::bad_alloc();
             }
@@ -50,7 +50,7 @@ TEST_CASE("gh#369", "[ft][github]") {
         }
 
         void*
-        Reallocate(void* p, size_t size) override {
+        Reallocate(void* p, uint64_t size) override {
             return realloc(p, size);
         }
     };

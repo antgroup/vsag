@@ -176,8 +176,11 @@ TestQuantizerEncodeDecodeSame(Quantizer<T>& quant,
 
 template <typename T, MetricType metric>
 void
-TestComputeCodes(
-    Quantizer<T>& quantizer, size_t dim, uint32_t count, float error = 1e-4f, bool retrain = true) {
+TestComputeCodes(Quantizer<T>& quantizer,
+                 uint64_t dim,
+                 uint32_t count,
+                 float error = 1e-4f,
+                 bool retrain = true) {
     auto vecs = fixtures::generate_vectors(count, dim, true);
     if (retrain) {
         quantizer.ReTrain(vecs.data(), count);
@@ -204,7 +207,7 @@ TestComputeCodes(
 template <typename T, MetricType metric>
 void
 TestComputeCodesSame(Quantizer<T>& quantizer,
-                     size_t dim,
+                     uint64_t dim,
                      uint32_t count,
                      uint32_t code_max = 15,
                      float error = 1e-5f,
@@ -268,7 +271,7 @@ ComputeAllDists(Quantizer<T>& quantizer, std::vector<float> data, uint32_t count
 
 template <typename T, MetricType metric>
 void
-TestInversePair(Quantizer<T>& quantizer, size_t dim, uint32_t count, Allocator* allocator) {
+TestInversePair(Quantizer<T>& quantizer, uint64_t dim, uint32_t count, Allocator* allocator) {
     auto logger = vsag::Options::Instance().logger();
     count = std::min(count, (uint32_t)100);
     auto data = fixtures::generate_vectors(count, dim, false);
@@ -305,7 +308,7 @@ TestInversePair(Quantizer<T>& quantizer, size_t dim, uint32_t count, Allocator* 
 template <typename T, MetricType metric>
 void
 TestComputer(Quantizer<T>& quant,
-             size_t dim,
+             uint64_t dim,
              uint32_t count,
              float error = 1e-5f,
              float related_error = 1.0f,
@@ -380,7 +383,7 @@ template <typename T, MetricType metric, bool uniform = false>
 void
 TestSerializeAndDeserialize(Quantizer<T>& quant1,
                             Quantizer<T>& quant2,
-                            size_t dim,
+                            uint64_t dim,
                             uint32_t count,
                             float error = 1e-5f,
                             float related_error = 1.0f,

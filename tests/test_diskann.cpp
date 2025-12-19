@@ -640,7 +640,7 @@ TEST_CASE("split building process", "[ft][diskann]") {
     int64_t ef_construction = 100;
     int64_t max_degree = 12;
     float pq_sample_rate = 1.0f;
-    size_t pq_dims = 16;
+    uint64_t pq_dims = 16;
 
     int64_t max_elements = 1000;
     // Initing index

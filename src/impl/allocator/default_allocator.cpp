@@ -34,7 +34,7 @@ DefaultAllocator::~DefaultAllocator() = default;
 #endif
 
 void*
-DefaultAllocator::Allocate(size_t size) {
+DefaultAllocator::Allocate(uint64_t size) {
     auto* ptr = malloc(size);
 #ifndef NDEBUG
     std::lock_guard<std::mutex> guard(set_mutex_);
@@ -60,7 +60,7 @@ DefaultAllocator::Deallocate(void* p) {
 }
 
 void*
-DefaultAllocator::Reallocate(void* p, size_t size) {
+DefaultAllocator::Reallocate(void* p, uint64_t size) {
 #ifndef NDEBUG
     if (p == nullptr) {
         return Allocate(size);

@@ -473,7 +473,7 @@ brute_force(const vsag::DatasetPtr& query,
 
     std::priority_queue<std::pair<float, int64_t>> bf_result;
 
-    size_t dim = query->GetDim();
+    uint64_t dim = query->GetDim();
     const void* query_vec = nullptr;
     const void* base_vec = nullptr;
     float dist = 0;
@@ -533,7 +533,7 @@ brute_force(const vsag::DatasetPtr& query,
 
     std::priority_queue<std::pair<float, int64_t>> bf_result;
 
-    size_t dim = query->GetDim();
+    uint64_t dim = query->GetDim();
     for (uint32_t i = 0; i < base->GetNumElements(); i++) {
         float dist = vsag::L2Sqr(
             query->GetFloat32Vectors(), base->GetFloat32Vectors() + i * base->GetDim(), &dim);

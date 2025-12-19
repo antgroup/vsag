@@ -31,7 +31,7 @@ public:
 
     static void
     WriteString(StreamWriter& writer, const std::string& str) {
-        size_t length = str.size();
+        uint64_t length = str.size();
         StreamWriter::WriteObj(writer, length);
         writer.Write(str.c_str(), length);
     }

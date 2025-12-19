@@ -680,7 +680,7 @@ TestIndex::TestSearchAllocator(const TestIndex::IndexPtr& index,
         }
 
         void*
-        Allocate(size_t size) override {
+        Allocate(uint64_t size) override {
             auto addr = (void*)malloc(size);
             sizes_[addr] = size;
             return addr;
@@ -695,7 +695,7 @@ TestIndex::TestSearchAllocator(const TestIndex::IndexPtr& index,
         }
 
         void*
-        Reallocate(void* p, size_t size) override {
+        Reallocate(void* p, uint64_t size) override {
             auto addr = (void*)realloc(p, size);
             sizes_.erase(p);
             sizes_[addr] = size;
@@ -703,7 +703,7 @@ TestIndex::TestSearchAllocator(const TestIndex::IndexPtr& index,
         }
 
     private:
-        std::unordered_map<void*, size_t> sizes_;
+        std::unordered_map<void*, uint64_t> sizes_;
     };
 
     for (auto i = 0; i < query_count; ++i) {
@@ -2037,7 +2037,7 @@ create_attr_string(const std::string& name, const std::vector<T>& values) {
         return ss.str();
     }
     std::ostringstream oss;
-    for (size_t i = 0; i < values.size(); ++i) {
+    for (uint64_t i = 0; i < values.size(); ++i) {
         if (i != 0) {
             oss << "|";
         }

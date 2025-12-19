@@ -87,7 +87,8 @@ public:
     }
 
     virtual void
-    GetResidual(size_t n, const float* x, float* residuals, float* centroids, BucketIdType* assign);
+    GetResidual(
+        uint64_t n, const float* x, float* residuals, float* centroids, BucketIdType* assign);
 
 public:
     bool is_trained_{false};

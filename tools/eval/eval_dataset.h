@@ -227,8 +227,8 @@ private:
     int64_t number_of_query_{};
     int64_t number_of_label_{};
     int64_t dim_{};
-    size_t train_data_size_{};
-    size_t test_data_size_{};
+    uint64_t train_data_size_{};
+    uint64_t test_data_size_{};
     std::string train_data_type_;
     std::string test_data_type_;
     std::string file_path_;

@@ -18,30 +18,30 @@
 #include <catch2/catch_test_macros.hpp>
 
 TEST_CASE("Options Test", "[ut][option]") {
-    size_t block_size_limit = 134217728;
+    uint64_t block_size_limit = 134217728;
     vsag::Options::Instance().set_block_size_limit(block_size_limit);
     REQUIRE(vsag::Option::Instance().block_size_limit() == block_size_limit);
 
     REQUIRE_THROWS(vsag::Option::Instance().set_block_size_limit(1));
 
-    size_t num_threads_io = 24;
+    uint64_t num_threads_io = 24;
     vsag::Options::Instance().set_num_threads_io(num_threads_io);
     REQUIRE(vsag::Option::Instance().num_threads_io() == num_threads_io);
 
     REQUIRE_THROWS(vsag::Option::Instance().set_num_threads_io(0));
     REQUIRE_THROWS(vsag::Option::Instance().set_num_threads_io(201));
 
-    size_t num_threads_building = 24;
+    uint64_t num_threads_building = 24;
     vsag::Options::Instance().set_num_threads_building(num_threads_building);
     REQUIRE(vsag::Option::Instance().num_threads_building() == num_threads_building);
 
     REQUIRE_THROWS(vsag::Option::Instance().set_num_threads_building(0));
     REQUIRE_THROWS(vsag::Option::Instance().set_num_threads_building(201));
 
-    size_t direct_IO_object_align_bit = 12;
+    uint64_t direct_IO_object_align_bit = 12;
     vsag::Options::Instance().set_direct_IO_object_align_bit(direct_IO_object_align_bit);
     REQUIRE(vsag::Option::Instance().direct_IO_object_align_bit() == direct_IO_object_align_bit);
-    size_t direct_IO_object_align_bit1 = 9;
+    uint64_t direct_IO_object_align_bit1 = 9;
     vsag::Options::Instance().set_direct_IO_object_align_bit(direct_IO_object_align_bit1);
     REQUIRE(vsag::Option::Instance().direct_IO_object_align_bit() == direct_IO_object_align_bit);
 

@@ -19,7 +19,7 @@
 
 namespace vsag {
 
-DefaultThreadPool::DefaultThreadPool(std::size_t threads) {
+DefaultThreadPool::DefaultThreadPool(std::uint64_t threads) {
     pool_ = std::make_unique<progschj::ThreadPool>(threads);
 }
 
@@ -35,12 +35,12 @@ DefaultThreadPool::WaitUntilEmpty() {
 }
 
 void
-DefaultThreadPool::SetPoolSize(std::size_t limit) {
+DefaultThreadPool::SetPoolSize(std::uint64_t limit) {
     pool_->set_pool_size(limit);
 }
 
 void
-DefaultThreadPool::SetQueueSizeLimit(std::size_t limit) {
+DefaultThreadPool::SetQueueSizeLimit(std::uint64_t limit) {
     pool_->set_queue_size_limit(limit);
 }
 

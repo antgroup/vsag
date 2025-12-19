@@ -29,7 +29,7 @@ namespace vsag {
  */
 struct Binary {
     std::shared_ptr<int8_t[]> data;  ///< The binary data.
-    size_t size = 0;                 ///< The size of the binary data.
+    uint64_t size = 0;               ///< The size of the binary data.
 };
 
 /**

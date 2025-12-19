@@ -28,23 +28,25 @@ namespace hnswlib {
 
 class BlockManager {
 public:
-    BlockManager(size_t size_data_per_element, size_t block_size_limit, vsag::Allocator* allocator);
+    BlockManager(uint64_t size_data_per_element,
+                 uint64_t block_size_limit,
+                 vsag::Allocator* allocator);
 
     ~BlockManager();
 
     char*
-    GetElementPtr(size_t index, size_t offset);
+    GetElementPtr(uint64_t index, uint64_t offset);
 
     bool
-    Resize(size_t new_max_elements);
+    Resize(uint64_t new_max_elements);
 
     bool
-    Serialize(StreamWriter& writer, size_t cur_element_count);
+    Serialize(StreamWriter& writer, uint64_t cur_element_count);
 
     bool
-    Deserialize(std::istream& ifs, size_t cur_element_count);
+    Deserialize(std::istream& ifs, uint64_t cur_element_count);
 
-    inline size_t
+    inline uint64_t
     GetSize() const {
         return max_elements_ * size_data_per_element_;
     }
@@ -57,11 +59,11 @@ public:
 
 private:
     std::vector<char*> blocks_ = {};
-    size_t data_num_per_block_ = 0;
-    size_t block_size_ = 0;
-    size_t size_data_per_element_ = 0;
-    size_t max_elements_ = 0;
-    std::vector<size_t> block_lens_ = {};
+    uint64_t data_num_per_block_ = 0;
+    uint64_t block_size_ = 0;
+    uint64_t size_data_per_element_ = 0;
+    uint64_t max_elements_ = 0;
+    std::vector<uint64_t> block_lens_ = {};
     vsag::Allocator* const allocator_ = nullptr;
 };
 }  // namespace hnswlib

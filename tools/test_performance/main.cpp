@@ -36,13 +36,13 @@ using namespace vsag::eval;
 static double
 get_recall(const float* distances,
            const float* ground_truth_distances,
-           size_t recall_num,
-           size_t top_k) {
+           uint64_t recall_num,
+           uint64_t top_k) {
     std::vector<float> gt_distances(ground_truth_distances, ground_truth_distances + top_k);
     std::sort(gt_distances.begin(), gt_distances.end());
     float threshold = gt_distances[top_k - 1];
-    size_t count = 0;
-    for (size_t i = 0; i < recall_num; ++i) {
+    uint64_t count = 0;
+    for (uint64_t i = 0; i < recall_num; ++i) {
         if (distances[i] <= threshold + 2e-6) {
             ++count;
         }
@@ -96,11 +96,11 @@ main(int argc, char* argv[]) {
 std::unordered_set<int64_t>
 get_intersection(const int64_t* neighbors,
                  const int64_t* ground_truth,
-                 size_t recall_num,
-                 size_t top_k) {
+                 uint64_t recall_num,
+                 uint64_t top_k) {
     std::unordered_set<int64_t> neighbors_set(neighbors, neighbors + recall_num);
     std::unordered_set<int64_t> intersection;
-    for (size_t i = 0; i < top_k; ++i) {
+    for (uint64_t i = 0; i < top_k; ++i) {
         if (i < top_k && neighbors_set.count(ground_truth[i])) {
             intersection.insert(ground_truth[i]);
         }
@@ -147,7 +147,7 @@ public:
         }
         vsag::BinarySet& binary_set = serialize_result.value();
         std::filesystem::path dir(DIR_NAME);
-        std::map<std::string, size_t> file_sizes;
+        std::map<std::string, uint64_t> file_sizes;
         for (const auto& key : binary_set.GetKeys()) {
             std::filesystem::path file_path(key);
             std::filesystem::path full_path = dir / file_path;
@@ -185,10 +185,10 @@ public:
            const std::string& search_parameters) {
         // deserialize
         std::filesystem::path dir(DIR_NAME);
-        std::map<std::string, size_t> file_sizes;
+        std::map<std::string, uint64_t> file_sizes;
         std::ifstream infile(dir / META_DATA_FILE);
         std::string filename;
-        size_t size;
+        uint64_t size;
         while (infile >> filename >> size) {
             file_sizes[filename] = size;
         }
@@ -249,7 +249,7 @@ public:
         }
         auto search_finish = std::chrono::steady_clock::now();
 
-        size_t dim = eval_dataset->GetDim();
+        uint64_t dim = eval_dataset->GetDim();
         // calculate recall
         for (int64_t i = 0; i < total; ++i) {
             // k@k

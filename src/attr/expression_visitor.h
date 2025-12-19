@@ -38,8 +38,8 @@ public:
     void
     syntaxError(antlr4::Recognizer* recognizer,
                 antlr4::Token* offendingSymbol,
-                size_t line,
-                size_t charPositionInLine,
+                uint64_t line,
+                uint64_t charPositionInLine,
                 const std::string& msg,
                 std::exception_ptr e) override {
         std::string offendingText;

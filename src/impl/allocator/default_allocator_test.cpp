@@ -34,7 +34,7 @@ TEST_CASE("DefaultAllocator Basic Test", "[ut][DefaultAllocator]") {
 TEST_CASE("DefaultAllocator Mismatch of Malloc and Free", "[ut][DefaultAllocator]") {
 #ifndef NDEBUG
     vsag::DefaultAllocator allocator;
-    size_t alloc_size = 1024;
+    uint64_t alloc_size = 1024;
     auto p = malloc(alloc_size);
     REQUIRE_THROWS(allocator.Reallocate(p, alloc_size));
     REQUIRE_THROWS(allocator.Deallocate(p));

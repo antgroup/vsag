@@ -318,7 +318,7 @@ public:
     std::string
     ToString() const override {
         std::string result = "[";
-        for (size_t i = 0; i < values.size(); ++i) {
+        for (uint64_t i = 0; i < values.size(); ++i) {
             if (i != 0)
                 result += ", ";
             result += '"' + values[i] + '"';
@@ -341,7 +341,7 @@ public:
     std::string
     ToString() const override {
         std::string result = "[";
-        for (size_t i = 0; i < values.size(); ++i) {
+        for (uint64_t i = 0; i < values.size(); ++i) {
             if (i != 0)
                 result += ", ";
             result += std::to_string(values[i]);

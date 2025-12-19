@@ -26,13 +26,13 @@ static const double THRESHOLD_ERROR = 2e-6;
 static double
 get_recall(const float* distances,
            const float* ground_truth_distances,
-           size_t recall_num,
-           size_t top_k) {
+           uint64_t recall_num,
+           uint64_t top_k) {
     std::vector<float> gt_distances(ground_truth_distances, ground_truth_distances + top_k);
     std::sort(gt_distances.begin(), gt_distances.end());
     float threshold = gt_distances[top_k - 1];
-    size_t count = 0;
-    for (size_t i = 0; i < recall_num; ++i) {
+    uint64_t count = 0;
+    for (uint64_t i = 0; i < recall_num; ++i) {
         if (distances[i] <= threshold + THRESHOLD_ERROR) {
             ++count;
         }
@@ -68,7 +68,7 @@ RecallMonitor::Record(void* input) {
     auto [neighbors, gt_neighbors, dataset, query_data, topk] =
         *(reinterpret_cast<std::tuple<int64_t*, int64_t*, EvalDataset*, const void*, uint64_t>*>(
             input));
-    size_t dim = dataset->GetDim();
+    uint64_t dim = dataset->GetDim();
     auto distance_func = dataset->GetDistanceFunc();
     auto gt_distances = std::shared_ptr<float[]>(new float[topk]);
     auto distances = std::shared_ptr<float[]>(new float[topk]);

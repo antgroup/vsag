@@ -919,7 +919,7 @@ HGraph::GetMemoryUsageDetail() const {
     if (this->use_reorder_) {
         memory_usage["high_precise_codes"].SetInt(this->high_precise_codes_->CalcSerializeSize());
     }
-    size_t route_graph_size = 0;
+    uint64_t route_graph_size = 0;
     for (const auto& route_graph : this->route_graphs_) {
         route_graph_size += route_graph->CalcSerializeSize();
     }
@@ -1728,7 +1728,7 @@ HGraph::recover_remove(int64_t id) {
 DatasetPtr
 HGraph::get_single_dataset(const DatasetPtr& data, uint32_t j) {
     void* vectors = nullptr;
-    size_t data_size = 0;
+    uint64_t data_size = 0;
     get_vectors(data_type_, dim_, data, &vectors, &data_size);
     const auto* labels = data->GetIds();
     auto one_data = Dataset::Make();
@@ -2054,7 +2054,7 @@ HGraph::GetStats() const {
     std::string search_params = fmt::format(search_params_template, ef_construct_);
     stats["total_count"].SetInt(this->total_count_);
     // duplicate rate
-    size_t duplicate_num = 0;
+    uint64_t duplicate_num = 0;
     if (this->label_table_->CompressDuplicateData()) {
         for (int i = 0; i < this->total_count_; ++i) {
             if (this->label_table_->duplicate_records_[i] != nullptr) {
@@ -2086,7 +2086,7 @@ HGraph::analyze_graph_recall(JsonType& stats,
     logger::info("analyze_graph_recall: sample_data_size = {}, topk = {}", sample_data_size, topk);
     auto codes = this->use_reorder_ ? this->high_precise_codes_ : this->basic_flatten_codes_;
     int64_t hit_count = 0;
-    size_t all_neighbor_count = 0;
+    uint64_t all_neighbor_count = 0;
     int64_t hit_neighbor_count = 0;
     float avg_distance_base = 0.0F;
     for (uint64_t i = 0; i < sample_data_size; ++i) {
@@ -2109,7 +2109,7 @@ HGraph::analyze_graph_recall(JsonType& stats,
         // neighbors of a point and the proximity relationship of a point
         Vector<InnerIdType> neighbors(allocator_);
         this->bottom_graph_->GetNeighbors(sample_id, neighbors);
-        size_t neighbor_size = neighbors.size();
+        uint64_t neighbor_size = neighbors.size();
         UnorderedSet<LabelType> groundtruth_ids(allocator_);
         UnorderedSet<LabelType> neighbor_groundtruth_ids(allocator_);
         while (not groundtruth->Empty()) {
@@ -2256,7 +2256,7 @@ HGraph::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) 
 
     // the validation of the new vector
     void* new_base_vec = nullptr;
-    size_t data_size = 0;
+    uint64_t data_size = 0;
     get_vectors(data_type_, dim_, new_base, &new_base_vec, &data_size);
 
     if (not force_update) {

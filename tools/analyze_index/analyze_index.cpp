@@ -105,7 +105,7 @@ load_query(const std::string& query_path) {
     uint32_t rows, cols;
     in_stream.read(reinterpret_cast<char*>(&rows), sizeof(rows));
     in_stream.read(reinterpret_cast<char*>(&cols), sizeof(cols));
-    size_t num_elements = static_cast<size_t>(rows) * cols;
+    uint64_t num_elements = static_cast<uint64_t>(rows) * cols;
     auto dataset = Dataset::Make();
     auto query_data = new float[num_elements];
     dataset->Float32Vectors(query_data)->Owner(true)->NumElements(rows)->Dim(cols);

@@ -49,7 +49,7 @@ create_random_string(bool is_full) {
     }
 
     std::string random_string = selected_levels.empty() ? "" : selected_levels[0];
-    for (size_t i = 1; i < selected_levels.size(); ++i) {
+    for (uint64_t i = 1; i < selected_levels.size(); ++i) {
         random_string += "/" + selected_levels[i];
     }
 

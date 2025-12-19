@@ -47,7 +47,7 @@ MemoryPeakMonitor::GetResult() {
     std::vector<std::string> metrics = {"B", "KB", "MB", "GB", "TB"};
     auto size =
         static_cast<float>((this->max_memory_ - this->init_memory_) * sysconf(_SC_PAGESIZE));
-    size_t i = 0;
+    uint64_t i = 0;
     while (size >= 1024.0F && i < metrics.size() - 1) {
         size /= 1024;
         i++;

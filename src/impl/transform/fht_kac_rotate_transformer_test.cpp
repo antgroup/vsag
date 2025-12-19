@@ -26,7 +26,7 @@ using namespace vsag;
 
 void
 TestRandomness(FhtKacRotator& rom1, FhtKacRotator& rom2, int dim) {
-    size_t flip_len = (dim + 7) / FhtKacRotator::BYTE_LEN * FhtKacRotator::ROUND;
+    uint64_t flip_len = (dim + 7) / FhtKacRotator::BYTE_LEN * FhtKacRotator::ROUND;
     std::vector<uint8_t> mat1(flip_len);
     rom1.CopyFlip(mat1.data());
 
@@ -46,7 +46,7 @@ TestRandomness(FhtKacRotator& rom1, FhtKacRotator& rom2, int dim) {
 
 void
 TestSame(FhtKacRotator& rom1, FhtKacRotator& rom2, uint64_t dim) {
-    size_t flip_len = (dim + 7) / FhtKacRotator::BYTE_LEN * FhtKacRotator::ROUND;
+    uint64_t flip_len = (dim + 7) / FhtKacRotator::BYTE_LEN * FhtKacRotator::ROUND;
     std::vector<uint8_t> mat1(flip_len);
     rom1.CopyFlip(mat1.data());
     std::vector<uint8_t> mat2(flip_len);

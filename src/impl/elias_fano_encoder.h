@@ -45,7 +45,7 @@ public:
         high_bits_size = 0;
     }
 
-    [[nodiscard]] size_t
+    [[nodiscard]] uint64_t
     SizeInBytes() const {
         return sizeof(EliasFanoEncoder) + (low_bits_size + high_bits_size) * sizeof(uint64_t);
     }
@@ -65,10 +65,10 @@ private:
     // requires "const" to pass lint check
     // set_low_bits modifies the values pointed by ${bits}, but not the pointer itself
     void
-    set_low_bits(size_t index, InnerIdType value) const;
+    set_low_bits(uint64_t index, InnerIdType value) const;
 
     [[nodiscard]] InnerIdType
-    get_low_bits(size_t index) const;
+    get_low_bits(uint64_t index) const;
 };
 
 }  // namespace vsag

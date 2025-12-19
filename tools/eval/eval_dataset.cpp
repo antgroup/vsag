@@ -20,7 +20,7 @@ namespace vsag::eval {
 
 void
 parse_sparse_vectors(const char* src_data,
-                     size_t data_size,
+                     uint64_t data_size,
                      std::vector<SparseVector>& parsed_vectors,
                      int64_t& max_len) {
     // parse the sparse vectors with ordered keys
@@ -40,8 +40,8 @@ parse_sparse_vectors(const char* src_data,
         }
         max_len = std::max(max_len, static_cast<int64_t>(vec.len_));
 
-        const size_t keys_size = vec.len_ * sizeof(uint32_t);
-        const size_t vals_size = vec.len_ * sizeof(float);
+        const uint64_t keys_size = vec.len_ * sizeof(uint32_t);
+        const uint64_t vals_size = vec.len_ * sizeof(float);
 
         if (ptr + keys_size + vals_size > end)
             break;
@@ -327,8 +327,8 @@ EvalDataset::Load(const std::string& filename) {
 }
 
 std::vector<char>
-serialize_sparse_vectors(const std::vector<SparseVector>& vectors, size_t& total_size_out) {
-    size_t total_size = 0;
+serialize_sparse_vectors(const std::vector<SparseVector>& vectors, uint64_t& total_size_out) {
+    uint64_t total_size = 0;
     for (const auto& vec : vectors) {
         total_size += sizeof(uint32_t);  // len_
         if (vec.len_ > 0) {
@@ -388,7 +388,7 @@ EvalDataset::Save(const EvalDatasetPtr& dataset, const std::string& filename) {
         }
 
     } else {
-        size_t total_size;
+        uint64_t total_size;
         std::vector<char> buffer = serialize_sparse_vectors(dataset->sparse_train_, total_size);
         hsize_t dims[1] = {static_cast<hsize_t>(total_size)};
         DataSpace dataspace(1, dims);
@@ -411,7 +411,7 @@ EvalDataset::Save(const EvalDatasetPtr& dataset, const std::string& filename) {
             throw std::runtime_error("Unsupported test data type");
         }
     } else {
-        size_t total_size;
+        uint64_t total_size;
         std::vector<char> buffer = serialize_sparse_vectors(dataset->sparse_test_, total_size);
         hsize_t dims[1] = {static_cast<hsize_t>(total_size)};
         DataSpace dataspace(1, dims);

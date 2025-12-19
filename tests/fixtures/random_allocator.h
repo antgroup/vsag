@@ -38,7 +38,7 @@ public:
     }
 
     void*
-    Allocate(size_t size) override {
+    Allocate(uint64_t size) override {
         auto number = dis_(*gen_);
         if (number < error_ratio_) {
             return nullptr;
@@ -52,7 +52,7 @@ public:
     }
 
     void*
-    Reallocate(void* p, size_t size) override {
+    Reallocate(void* p, uint64_t size) override {
         auto number = dis_(*gen_);
         if (number < error_ratio_) {
             return nullptr;

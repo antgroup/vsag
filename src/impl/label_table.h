@@ -160,7 +160,7 @@ public:
         // 2. update label_table_
         // Important: there may be multiple occurrences of old_label, so we need to update every one
         bool found = false;
-        for (size_t i = 0; i < label_table_.size(); ++i) {
+        for (uint64_t i = 0; i < label_table_.size(); ++i) {
             if (label_table_[i] == old_label) {
                 label_table_[i] = new_label;
                 found = true;

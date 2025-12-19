@@ -21,10 +21,10 @@ namespace vsag {
 
 void
 IVFPartitionStrategy::GetResidual(
-    size_t n, const float* x, float* residuals, float* centroids, BucketIdType* assign) {
+    uint64_t n, const float* x, float* residuals, float* centroids, BucketIdType* assign) {
     // TODO: Directly implement c = a - b.
     memcpy(residuals, x, sizeof(float) * n * dim_);
-    for (size_t i = 0; i < n; ++i) {
+    for (uint64_t i = 0; i < n; ++i) {
         BucketIdType bucket_id = assign[i];
         BlasFunction::Saxpy(static_cast<int32_t>(dim_),
                             -1.0,
