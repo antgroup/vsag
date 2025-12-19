@@ -316,7 +316,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex, "Pyramid OverTime Test"
         auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type, /*with_path=*/true);
         TestContinueAdd(index, dataset, true);
         TestSearchOvertime(index, dataset, search_param);
-        auto timeout_search_param = GeneratePyramidSearchParametersString(100, 0.1);
+        auto timeout_search_param = GeneratePyramidSearchParametersString(100, 0.0F);
 
         auto query = vsag::Dataset::Make();
         query->NumElements(1)

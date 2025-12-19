@@ -69,6 +69,21 @@ public:
     virtual float
     ComputePairVectors(InnerIdType id1, InnerIdType id2) = 0;
 
+    bool
+    CompareVectors(InnerIdType id1, InnerIdType id2) {
+        bool release1, release2;
+        const auto* codes1 = this->GetCodesById(id1, release1);
+        const auto* codes2 = this->GetCodesById(id2, release2);
+        bool result = (std::memcmp(codes1, codes2, this->code_size_) == 0);
+        if (release1) {
+            this->Release(codes1);
+        }
+        if (release2) {
+            this->Release(codes2);
+        }
+        return result;
+    }
+
     virtual void
     Prefetch(InnerIdType id) = 0;
 
@@ -114,6 +129,9 @@ public:
 
     [[nodiscard]] virtual const uint8_t*
     GetCodesById(InnerIdType id, bool& need_release) const = 0;
+
+    virtual void
+    Release(const uint8_t* data) const = 0;
 
     virtual bool
     GetCodesById(InnerIdType id, uint8_t* codes) const = 0;

@@ -119,6 +119,9 @@ public:
     [[nodiscard]] const uint8_t*
     GetCodesById(InnerIdType id, bool& need_release) const override;
 
+    void
+    Release(const uint8_t* data) const override;
+
     [[nodiscard]] bool
     InMemory() const override;
 
@@ -171,6 +174,13 @@ private:
         return computer;
     }
 };
+
+template <typename QuantTmpl, typename IOTmpl>
+void
+FlattenDataCell<QuantTmpl, IOTmpl>::Release(const uint8_t* data) const {
+    this->io_->Release(data);
+}
+
 template <typename QuantTmpl, typename IOTmpl>
 bool
 FlattenDataCell<QuantTmpl, IOTmpl>::HoldMolds() const {

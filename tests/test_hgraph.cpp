@@ -1175,18 +1175,9 @@ TestHGraphDuplicate(const fixtures::HGraphTestIndexPtr& test_index,
     auto search_param = fmt::format(fixtures::search_param_tmp, 200, false);
     std::unordered_map<std::string, float> ratios{
         {"prefix", 0.9}, {"suffix", 0.9}, {"middle", 1.0}};
-    const std::vector<std::pair<std::string, float>> all_test_cases =
-        fixtures::RandomSelect<std::pair<std::string, float>>(
-            {
-                {"fp32", 0.99},
-                {"rabitq,fp32", 0.3},
-                {"pq,fp32", 0.95},
-                {"sq8_uniform,fp32", 0.98},
-            },
-            2);
     for (auto metric_type : resource->metric_types) {
         for (auto dim : resource->dims) {
-            for (auto& [base_quantization_str, recall] : all_test_cases) {
+            for (auto& [base_quantization_str, recall] : resource->test_cases) {
                 INFO(
                     fmt::format("metric_type: {}, dim: {}, base_quantization_str: {}, recall: {}, "
                                 "duplicate_pos: {}",
