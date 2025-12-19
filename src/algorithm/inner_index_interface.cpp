@@ -281,7 +281,7 @@ DatasetPtr
 InnerIndexInterface::CalDistanceById(const float* query, const int64_t* ids, int64_t count) const {
     auto result = Dataset::Make();
     result->Owner(true, allocator_);
-    auto* distances = (float*)allocator_->Allocate(sizeof(float) * count);
+    auto* distances = static_cast<float*>(allocator_->Allocate(sizeof(float) * count));
     result->Distances(distances);
     for (int64_t i = 0; i < count; ++i) {
         distances[i] = this->CalcDistanceById(query, ids[i]);
@@ -295,7 +295,7 @@ InnerIndexInterface::CalDistanceById(const DatasetPtr& query,
                                      int64_t count) const {
     auto result = Dataset::Make();
     result->Owner(true, allocator_);
-    auto* distances = (float*)allocator_->Allocate(sizeof(float) * count);
+    auto* distances = static_cast<float*>(allocator_->Allocate(sizeof(float) * count));
     result->Distances(distances);
     for (int64_t i = 0; i < count; ++i) {
         try {
@@ -382,7 +382,8 @@ InnerIndexInterface::GetVectorByIds(const int64_t* ids,
 
     DatasetPtr vectors = Dataset::Make();
     if (GetIndexType() == IndexType::SINDI or GetIndexType() == IndexType::SPARSE) {
-        auto* sparse_vectors = (SparseVector*)allocator->Allocate(sizeof(SparseVector) * count);
+        auto* sparse_vectors =
+            static_cast<SparseVector*>(allocator->Allocate(sizeof(SparseVector) * count));
         if (sparse_vectors == nullptr) {
             throw VsagException(ErrorType::NO_ENOUGH_MEMORY,
                                 "failed to allocate memory for vectors");
@@ -398,7 +399,7 @@ InnerIndexInterface::GetVectorByIds(const int64_t* ids,
         return vectors;
     }
 
-    auto* float_vectors = (float*)allocator->Allocate(sizeof(float) * count * dim_);
+    auto* float_vectors = static_cast<float*>(allocator->Allocate(sizeof(float) * count * dim_));
     if (float_vectors == nullptr) {
         throw VsagException(ErrorType::NO_ENOUGH_MEMORY, "failed to allocate memory for vectors");
     }
@@ -418,7 +419,7 @@ InnerIndexInterface::ExportIDs() const {
     std::shared_lock lock(this->label_lookup_mutex_);
     DatasetPtr result = Dataset::Make();
     auto num_element = this->label_table_->GetTotalCount();
-    auto* labels = (LabelType*)allocator_->Allocate(sizeof(LabelType) * num_element);
+    auto* labels = static_cast<LabelType*>(allocator_->Allocate(sizeof(LabelType) * num_element));
     const auto* origin_label = this->label_table_->GetAllLabels();
     memcpy(labels, origin_label, sizeof(LabelType) * num_element);
     result->NumElements(num_element)->Ids(labels)->Dim(1)->Owner(true, allocator_);

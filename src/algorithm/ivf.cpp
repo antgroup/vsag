@@ -994,7 +994,7 @@ DatasetPtr
 IVF::CalDistanceById(const float* query, const int64_t* ids, int64_t count) const {
     auto result = Dataset::Make();
     result->Owner(true, allocator_);
-    auto* distances = (float*)allocator_->Allocate(sizeof(float) * count);
+    auto* distances = static_cast<float*>(allocator_->Allocate(sizeof(float) * count));
     result->Distances(distances);
     if (this->use_reorder_) {
         auto computer = this->reorder_codes_->FactoryComputer(query);

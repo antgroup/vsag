@@ -21,8 +21,8 @@ namespace vsag {
 
 float
 l2sqr(const void* vec1, const void* vec2, int64_t dim) {
-    auto* v1 = (float*)vec1;
-    auto* v2 = (float*)vec2;
+    const auto* v1 = static_cast<const float*>(vec1);
+    const auto* v2 = static_cast<const float*>(vec2);
 
     float res = 0;
     for (int64_t i = 0; i < dim; i++) {
