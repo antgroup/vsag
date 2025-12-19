@@ -1048,6 +1048,9 @@ HGraph::graph_add_one(const void* data, int level, InnerIdType inner_id) {
 
     param.ef = this->ef_construct_;
     param.topk = static_cast<int64_t>(ef_construct_);
+    if (this->label_table_->CompressDuplicateData()) {
+        param.query_id = inner_id;
+    }
 
     if (bottom_graph_->TotalCount() != 0) {
         result = search_one_graph(data,
