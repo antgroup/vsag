@@ -93,5 +93,6 @@ TEST_CASE("SINDI Index Parameters Compatibility Test", "[ut][SINDIParameter]") {
     TEST_COMPATIBILITY_CASE("doc_prune_ratio compatibility", doc_prune_ratio, 0.2F, 0.3F, false);
     TEST_COMPATIBILITY_CASE("window_size compatibility", window_size, 33333, 55555, false);
     TEST_COMPATIBILITY_CASE("term_id_limit compatibility", term_id_limit, 10000, 10001, false);
-    TEST_COMPATIBILITY_CASE("value_quantization_type compatibility", value_quantization_type, "fp32", "sq8", false);
+    TEST_COMPATIBILITY_CASE(
+        "value_quantization_type compatibility", value_quantization_type, "fp32", "sq8", false);
 }

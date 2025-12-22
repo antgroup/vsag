@@ -30,7 +30,7 @@ public:
     explicit SINDI(const SINDIParameterPtr& param, const IndexCommonParam& common_param);
 
     SINDI(const ParamPtr& param, const IndexCommonParam& common_param)
-        : SINDI(std::dynamic_pointer_cast<SINDIParameter>(param), common_param){};
+        : SINDI(std::dynamic_pointer_cast<SINDIParameter>(param), common_param) {};
 
     ~SINDI() = default;
 

@@ -163,9 +163,8 @@ TEST_CASE("SparseTermDatacell Basic Test", "[ut][SparseTermDatacell]") {
 
 TEST_CASE("SparseTermDatacell Encode/Decode Test", "[ut][SparseTermDatacell]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
-    auto quantization_type = GENERATE(QUANTIZATION_TYPE_VALUE_FP32,
-                                      QUANTIZATION_TYPE_VALUE_SQ8,
-                                      QUANTIZATION_TYPE_VALUE_FP16);
+    auto quantization_type = GENERATE(
+        QUANTIZATION_TYPE_VALUE_FP32, QUANTIZATION_TYPE_VALUE_SQ8, QUANTIZATION_TYPE_VALUE_FP16);
 
     // Prepare data
     std::vector<uint32_t> ids = {10, 20, 30};
@@ -244,8 +243,8 @@ TEST_CASE("SparseTermDatacell Last Term Test", "[ut][SparseTermDatacell]") {
         auto sv1 = make_sv(ids1, vals1);
 
         auto q_params = std::make_shared<QuantizationParams>();
-        auto data_cell =
-            std::make_shared<SparseTermDataCell>(1, DEFAULT_TERM_ID_LIMIT, allocator.get(), q_params);
+        auto data_cell = std::make_shared<SparseTermDataCell>(
+            1, DEFAULT_TERM_ID_LIMIT, allocator.get(), q_params);
         data_cell->InsertVector(sv0, ids[0]);
         data_cell->InsertVector(sv1, ids[1]);
 
@@ -322,7 +321,8 @@ TEST_CASE("SparseTermDatacell Quantization Test", "[ut][SparseTermDatacell]") {
         q_params->min_val = min_val;
         q_params->max_val = max_val;
         q_params->diff = max_val - min_val;
-        if (q_params->diff < 1e-6) q_params->diff = 1.0f;
+        if (q_params->diff < 1e-6)
+            q_params->diff = 1.0f;
 
         auto data_cell = std::make_shared<SparseTermDataCell>(
             1.0f, DEFAULT_TERM_ID_LIMIT, allocator.get(), q_params);

@@ -65,9 +65,10 @@ SINDIParameter::FromJson(const JsonType& json) {
     if (json.Contains(SPARSE_QUANTIZATION_TYPE)) {
         value_quantization_type = json[SPARSE_QUANTIZATION_TYPE].GetString();
         CHECK_ARGUMENT((value_quantization_type == QUANTIZATION_TYPE_VALUE_SQ8 or
-            value_quantization_type == QUANTIZATION_TYPE_VALUE_FP16 or
-            value_quantization_type == QUANTIZATION_TYPE_VALUE_FP32),
-            fmt::format("quantization_type must be sq8, fp16 or fp32, but now is {}", value_quantization_type));
+                        value_quantization_type == QUANTIZATION_TYPE_VALUE_FP16 or
+                        value_quantization_type == QUANTIZATION_TYPE_VALUE_FP32),
+                       fmt::format("quantization_type must be sq8, fp16 or fp32, but now is {}",
+                                   value_quantization_type));
     }
 }
 

@@ -59,9 +59,9 @@ SparseTermDataCell::Query(float* global_dists, const SparseTermComputerPtr& comp
 template <InnerSearchMode mode, InnerSearchType type>
 void
 SparseTermDataCell::InsertHeap(float* dists,
-                                          const SparseTermComputerPtr& computer,
-                                          MaxHeap& heap,
-                                          const InnerSearchParam& param,
+                               const SparseTermComputerPtr& computer,
+                               MaxHeap& heap,
+                               const InnerSearchParam& param,
                                uint32_t offset_id) const {
     uint32_t id = 0;
     float cur_heap_top = std::numeric_limits<float>::max();
@@ -275,12 +275,8 @@ SparseTermDataCell::CalcDistanceByInnerId(const SparseTermComputerPtr& computer,
             vals = temp_data.data();
         }
 
-        computer->ScanForCalculateDist(it,
-                                       term_ids_[term]->data(),
-                                       vals,
-                                       term_sizes_[term],
-                                       base_id,
-                                       &ip);
+        computer->ScanForCalculateDist(
+            it, term_ids_[term]->data(), vals, term_sizes_[term], base_id, &ip);
     }
     computer->ResetTerm();
     return 1 + ip;
