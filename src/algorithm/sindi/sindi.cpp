@@ -102,7 +102,7 @@ SINDI::Add(const DatasetPtr& base) {
             continue;
         }
 
-        uint16_t inner_id = static_cast<uint16_t>(cur_element_count_ - window_start_id);
+        auto inner_id = static_cast<uint16_t>(cur_element_count_ - window_start_id);
 
         try {
             window_term_list_[cur_window]->InsertVector(sparse_vector, inner_id);

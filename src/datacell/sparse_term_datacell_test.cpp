@@ -216,8 +216,8 @@ TEST_CASE("SparseTermDatacell Encode/Decode Test", "[ut][SparseTermDatacell]") {
         REQUIRE(std::abs(retrieved_map[sv.ids_[i]] - sv.vals_[i]) < tolerance);
     }
 
-    delete[] retrieved_sv.ids_;
-    delete[] retrieved_sv.vals_;
+    allocator->Deallocate(retrieved_sv.ids_);
+    allocator->Deallocate(retrieved_sv.vals_);
 }
 
 TEST_CASE("SparseTermDatacell Last Term Test", "[ut][SparseTermDatacell]") {
