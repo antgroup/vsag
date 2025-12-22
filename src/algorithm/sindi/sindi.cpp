@@ -36,7 +36,9 @@ SINDI::SINDI(const SINDIParameterPtr& param, const IndexCommonParam& common_para
       window_size_(param->window_size),
       doc_retain_ratio_(1.0F - param->doc_prune_ratio),
       window_term_list_(common_param.allocator_.get()),
-      deserialize_without_footer_(param->deserialize_without_footer) {
+      deserialize_without_footer_(param->deserialize_without_footer),
+      value_quantization_type_(param->value_quantization_type),
+      quantization_params_(std::make_shared<QuantizationParams>()) {
     if (use_reorder_) {
         SparseIndexParameterPtr rerank_param = std::make_shared<SparseIndexParameters>();
         rerank_param->need_sort = true;
@@ -57,11 +59,35 @@ SINDI::Add(const DatasetPtr& base) {
     const auto* extra_info = base->GetExtraInfos();
     const auto extra_info_size = base->GetExtraInfoSize();
 
+    if (cur_element_count_ == 0) {
+        quantization_params_->type = value_quantization_type_;
+        if (value_quantization_type_ == QUANTIZATION_TYPE_VALUE_SQ8) {
+            std::cout << "Using SQ8 quantization" << std::endl;
+            float min_val = std::numeric_limits<float>::max();
+            float max_val = std::numeric_limits<float>::lowest();
+            for (int64_t i = 0; i < data_num; ++i) {
+                const auto& vec = sparse_vectors[i];
+                for (int j = 0; j < vec.len_; ++j) {
+                    float val = vec.vals_[j];
+                    if (val < min_val)
+                        min_val = val;
+                    if (val > max_val)
+                        max_val = val;
+                }
+            }
+            quantization_params_->min_val = min_val;
+            quantization_params_->max_val = max_val;
+            quantization_params_->diff = max_val - min_val;
+            if (quantization_params_->diff < 1e-6)
+                quantization_params_->diff = 1.0f;
+        }
+    }
+
     // adjust window
     int64_t final_add_window = ceil_int(cur_element_count_ + data_num, window_size_) / window_size_;
     while (window_term_list_.size() < final_add_window) {
-        window_term_list_.emplace_back(
-            std::make_shared<SparseTermDataCell>(doc_retain_ratio_, term_id_limit_, allocator_));
+        window_term_list_.emplace_back(std::make_shared<SparseTermDataCell>(
+            doc_retain_ratio_, term_id_limit_, allocator_, quantization_params_));
     }
 
     // add process
@@ -306,6 +332,10 @@ SINDI::Serialize(StreamWriter& writer) const {
 
     StreamWriter::WriteObj(writer, cur_element_count_);
 
+    StreamWriter::WriteObj(writer, quantization_params_->min_val);
+    StreamWriter::WriteObj(writer, quantization_params_->max_val);
+    StreamWriter::WriteObj(writer, quantization_params_->diff);
+
     uint32_t window_term_list_size = window_term_list_.size();
     StreamWriter::WriteObj(writer, window_term_list_size);
     for (const auto& window : window_term_list_) {
@@ -354,12 +384,17 @@ SINDI::Deserialize(StreamReader& reader) {
 
     StreamReader::ReadObj(buffer_reader, cur_element_count_);
 
+    StreamReader::ReadObj(buffer_reader, quantization_params_->min_val);
+    StreamReader::ReadObj(buffer_reader, quantization_params_->max_val);
+    StreamReader::ReadObj(buffer_reader, quantization_params_->diff);
+    quantization_params_->type = value_quantization_type_;
+
     uint32_t window_term_list_size = 0;
     StreamReader::ReadObj(buffer_reader, window_term_list_size);
     window_term_list_.resize(window_term_list_size);
     for (auto& window : window_term_list_) {
-        window =
-            std::make_shared<SparseTermDataCell>(doc_retain_ratio_, term_id_limit_, allocator_);
+        window = std::make_shared<SparseTermDataCell>(
+            doc_retain_ratio_, term_id_limit_, allocator_, quantization_params_);
         window->Deserialize(buffer_reader);
     }
 

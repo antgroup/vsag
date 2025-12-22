@@ -64,7 +64,8 @@ TEST_CASE("SINDI Basic Test", "[ut][SINDI]") {
         "doc_prune_ratio": 0.0,
         "term_prune_ratio": 0.0,
         "window_size": 10000,
-        "term_id_limit": 30001
+        "term_id_limit": 30001,
+        "value_quantization_type": "fp32"
     }})";
 
     vsag::JsonType param_json = vsag::JsonType::Parse(fmt::format(param_str, use_reorder));

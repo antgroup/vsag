@@ -46,6 +46,7 @@ struct SINDIDefaultParam {
     float doc_prune_ratio = 0.1F;
     int window_size = 55555;
     int term_id_limit = 10000;
+    std::string value_quantization_type{"fp32"};
 };
 
 std::string
@@ -55,6 +56,7 @@ generate_sindi_param(const SINDIDefaultParam& param) {
     json[SPARSE_DOC_PRUNE_RATIO].SetFloat(param.doc_prune_ratio);
     json[SPARSE_WINDOW_SIZE].SetInt(param.window_size);
     json[SPARSE_TERM_ID_LIMIT].SetInt(param.term_id_limit);
+    json[SPARSE_QUANTIZATION_TYPE].SetString(param.value_quantization_type);
     return json.Dump();
 }
 
@@ -68,6 +70,7 @@ TEST_CASE("SINDI Index Parameters Test", "[ut][SINDIParameter]") {
     REQUIRE(std::abs(param->doc_prune_ratio - default_param.doc_prune_ratio) < 1e-3);
     REQUIRE(param->window_size == default_param.window_size);
     REQUIRE(param->term_id_limit == default_param.term_id_limit);
+    REQUIRE(param->value_quantization_type == default_param.value_quantization_type);
 
     vsag::ParameterTest::TestToJson(param);
 
@@ -75,7 +78,8 @@ TEST_CASE("SINDI Index Parameters Test", "[ut][SINDIParameter]") {
         "sindi": {
             "query_prune_ratio": 0.2,
             "n_candidate": 20,
-            "term_prune_ratio": 0.1
+            "term_prune_ratio": 0.1,
+            "value_quantization_type": "fp32"
         }
     })";
     auto search_param = std::make_shared<vsag::SINDIParameter>();
@@ -89,4 +93,5 @@ TEST_CASE("SINDI Index Parameters Compatibility Test", "[ut][SINDIParameter]") {
     TEST_COMPATIBILITY_CASE("doc_prune_ratio compatibility", doc_prune_ratio, 0.2F, 0.3F, false);
     TEST_COMPATIBILITY_CASE("window_size compatibility", window_size, 33333, 55555, false);
     TEST_COMPATIBILITY_CASE("term_id_limit compatibility", term_id_limit, 10000, 10001, false);
+    TEST_COMPATIBILITY_CASE("value_quantization_type compatibility", value_quantization_type, "fp32", "sq8", false);
 }

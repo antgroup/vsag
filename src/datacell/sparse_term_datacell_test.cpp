@@ -66,8 +66,9 @@ TEST_CASE("SparseTermDatacell Basic Test", "[ut][SparseTermDatacell]") {
     float doc_retain_ratio = 0.5;
     float term_prune_ratio = 0.0;
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    auto q_params = std::make_shared<QuantizationParams>();
     auto data_cell = std::make_shared<SparseTermDataCell>(
-        doc_retain_ratio, DEFAULT_TERM_ID_LIMIT, allocator.get());
+        doc_retain_ratio, DEFAULT_TERM_ID_LIMIT, allocator.get(), q_params);
     REQUIRE(std::abs(data_cell->doc_retain_ratio_ - doc_retain_ratio) < 1e-3);
 
     // test factory computer
@@ -93,7 +94,7 @@ TEST_CASE("SparseTermDatacell Basic Test", "[ut][SparseTermDatacell]") {
         } else {
             REQUIRE(data_cell->term_ids_[i]->size() == data_cell->term_sizes_[i]);
             REQUIRE(data_cell->term_ids_[i]->size() == exp_size[i]);
-            REQUIRE(data_cell->term_datas_[i]->size() == exp_size[i]);
+            REQUIRE(data_cell->term_datas_[i]->size() == exp_size[i] * 4);
         }
     }
 
@@ -160,6 +161,66 @@ TEST_CASE("SparseTermDatacell Basic Test", "[ut][SparseTermDatacell]") {
     delete[] query_sv.vals_;
 }
 
+TEST_CASE("SparseTermDatacell Encode/Decode Test", "[ut][SparseTermDatacell]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    auto quantization_type = GENERATE(QUANTIZATION_TYPE_VALUE_FP32,
+                                      QUANTIZATION_TYPE_VALUE_SQ8,
+                                      QUANTIZATION_TYPE_VALUE_FP16);
+
+    // Prepare data
+    std::vector<uint32_t> ids = {10, 20, 30};
+    std::vector<float> vals = {1.1f, 2.2f, 3.3f};
+    SparseVector sv;
+    sv.len_ = ids.size();
+    sv.ids_ = ids.data();
+    sv.vals_ = vals.data();
+
+    float min_val = 1.1f;
+    float max_val = 3.3f;
+
+    // Prepare datacell
+    auto q_params = std::make_shared<QuantizationParams>();
+    q_params->type = quantization_type;
+    if (quantization_type == QUANTIZATION_TYPE_VALUE_SQ8) {
+        q_params->min_val = min_val;
+        q_params->max_val = max_val;
+        q_params->diff = max_val - min_val;
+    }
+    auto data_cell = std::make_shared<SparseTermDataCell>(
+        1.0f, DEFAULT_TERM_ID_LIMIT, allocator.get(), q_params);
+
+    // Insert vector (tests Encode)
+    uint16_t base_id = 5;
+    data_cell->InsertVector(sv, base_id);
+
+    // Get vector (tests Decode)
+    SparseVector retrieved_sv;
+    data_cell->GetSparseVector(base_id, &retrieved_sv);
+
+    REQUIRE(retrieved_sv.len_ == sv.len_);
+
+    // Verify results
+    std::map<uint32_t, float> retrieved_map;
+    for (size_t i = 0; i < retrieved_sv.len_; ++i) {
+        retrieved_map[retrieved_sv.ids_[i]] = retrieved_sv.vals_[i];
+    }
+
+    float tolerance = 1e-5f;
+    if (quantization_type == QUANTIZATION_TYPE_VALUE_SQ8) {
+        tolerance = 0.1f;
+    } else if (quantization_type == QUANTIZATION_TYPE_VALUE_FP16) {
+        tolerance = 1e-2f;
+    }
+
+    for (size_t i = 0; i < sv.len_; ++i) {
+        REQUIRE(retrieved_map.count(sv.ids_[i]));
+        REQUIRE(std::abs(retrieved_map[sv.ids_[i]] - sv.vals_[i]) < tolerance);
+    }
+
+    delete[] retrieved_sv.ids_;
+    delete[] retrieved_sv.vals_;
+}
+
 TEST_CASE("SparseTermDatacell Last Term Test", "[ut][SparseTermDatacell]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
 
@@ -182,8 +243,9 @@ TEST_CASE("SparseTermDatacell Last Term Test", "[ut][SparseTermDatacell]") {
         auto sv0 = make_sv(ids0, vals0);
         auto sv1 = make_sv(ids1, vals1);
 
+        auto q_params = std::make_shared<QuantizationParams>();
         auto data_cell =
-            std::make_shared<SparseTermDataCell>(1, DEFAULT_TERM_ID_LIMIT, allocator.get());
+            std::make_shared<SparseTermDataCell>(1, DEFAULT_TERM_ID_LIMIT, allocator.get(), q_params);
         data_cell->InsertVector(sv0, ids[0]);
         data_cell->InsertVector(sv1, ids[1]);
 
@@ -203,4 +265,103 @@ TEST_CASE("SparseTermDatacell Last Term Test", "[ut][SparseTermDatacell]") {
         REQUIRE(std::abs(dists[0] - (-0.1f)) < 1e-3f);
         REQUIRE(std::abs(dists[1] - (-0.1f)) < 1e-3f);
     }
+}
+
+TEST_CASE("SparseTermDatacell Quantization Test", "[ut][SparseTermDatacell]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    int count_base = 10;
+    int len_base = 10;
+    std::vector<SparseVector> sparse_vectors(count_base);
+    float min_val = 0.0f;
+    float max_val = 0.0f;
+
+    for (int i = 0; i < count_base; i++) {
+        sparse_vectors[i].len_ = len_base;
+        sparse_vectors[i].ids_ = new uint32_t[len_base];
+        sparse_vectors[i].vals_ = new float[len_base];
+        for (int d = 0; d < len_base; d++) {
+            sparse_vectors[i].ids_[d] = d;
+            float val = static_cast<float>(i + d);
+            sparse_vectors[i].vals_[d] = val;
+            if (i == 0 && d == 0) {
+                min_val = val;
+                max_val = val;
+            } else {
+                min_val = std::min(min_val, val);
+                max_val = std::max(max_val, val);
+            }
+        }
+    }
+
+    SparseVector query_sv;
+    query_sv.len_ = len_base;
+    query_sv.ids_ = new uint32_t[len_base];
+    query_sv.vals_ = new float[len_base];
+    for (int d = 0; d < len_base; d++) {
+        query_sv.ids_[d] = d;
+        query_sv.vals_[d] = 1.0f;
+    }
+
+    SINDISearchParameter search_params;
+    search_params.term_prune_ratio = 0.0;
+    search_params.query_prune_ratio = 0.0;
+    auto computer = std::make_shared<SparseTermComputer>(query_sv, search_params, allocator.get());
+
+    std::vector<float> exp_dists(count_base);
+    for (int i = 0; i < count_base; ++i) {
+        // dist = -1 * sum(q * t)
+        // q = 1.0
+        // t = i + d
+        // sum(t) for d=0..9 = 10*i + 45
+        exp_dists[i] = -1.0f * (10.0f * i + 45.0f);
+    }
+
+    SECTION("SQ8 Quantization") {
+        auto q_params = std::make_shared<QuantizationParams>();
+        q_params->type = QUANTIZATION_TYPE_VALUE_SQ8;
+        q_params->min_val = min_val;
+        q_params->max_val = max_val;
+        q_params->diff = max_val - min_val;
+        if (q_params->diff < 1e-6) q_params->diff = 1.0f;
+
+        auto data_cell = std::make_shared<SparseTermDataCell>(
+            1.0f, DEFAULT_TERM_ID_LIMIT, allocator.get(), q_params);
+
+        for (int i = 0; i < count_base; i++) {
+            data_cell->InsertVector(sparse_vectors[i], i);
+        }
+
+        std::vector<float> dists(count_base, 0);
+        data_cell->Query(dists.data(), computer);
+
+        for (int i = 0; i < count_base; i++) {
+            REQUIRE(std::abs(dists[i] - exp_dists[i]) < 1.0f);
+        }
+    }
+
+    SECTION("FP16 Quantization") {
+        auto q_params = std::make_shared<QuantizationParams>();
+        q_params->type = QUANTIZATION_TYPE_VALUE_FP16;
+
+        auto data_cell = std::make_shared<SparseTermDataCell>(
+            1.0f, DEFAULT_TERM_ID_LIMIT, allocator.get(), q_params);
+
+        for (int i = 0; i < count_base; i++) {
+            data_cell->InsertVector(sparse_vectors[i], i);
+        }
+
+        std::vector<float> dists(count_base, 0);
+        data_cell->Query(dists.data(), computer);
+
+        for (int i = 0; i < count_base; i++) {
+            REQUIRE(std::abs(dists[i] - exp_dists[i]) < 1e-2f);
+        }
+    }
+
+    for (int i = 0; i < count_base; i++) {
+        delete[] sparse_vectors[i].ids_;
+        delete[] sparse_vectors[i].vals_;
+    }
+    delete[] query_sv.ids_;
+    delete[] query_sv.vals_;
 }

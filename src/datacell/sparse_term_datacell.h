@@ -24,18 +24,30 @@
 #include "vsag/dataset.h"
 
 namespace vsag {
+
+struct QuantizationParams {
+    std::string type = "fp32";
+    float min_val = 0.0f;
+    float max_val = 0.0f;
+    float diff = 1.0f;
+};
+
 DEFINE_POINTER(SparseTermDataCell);
 class SparseTermDataCell {
 public:
     SparseTermDataCell() = default;
 
-    SparseTermDataCell(float doc_retain_ratio, uint32_t term_id_limit, Allocator* allocator)
+    SparseTermDataCell(float doc_retain_ratio,
+                       uint32_t term_id_limit,
+                       Allocator* allocator,
+                       std::shared_ptr<QuantizationParams> quantization_params)
         : doc_retain_ratio_(doc_retain_ratio),
           term_id_limit_(term_id_limit),
           allocator_(allocator),
           term_ids_(allocator),
           term_datas_(allocator),
-          term_sizes_(allocator) {
+          term_sizes_(allocator),
+          quantization_params_(std::move(quantization_params)) {
     }
 
     void
@@ -71,6 +83,25 @@ public:
     void
     GetSparseVector(uint16_t base_id, SparseVector* data);
 
+private:
+    void
+    Encode(float val, uint8_t* dst);
+
+    void
+    Encodesq8(float val, uint8_t* dst);
+
+    void
+    Encodefp16(float val, uint8_t* dst);
+
+    void
+    Decode(const uint8_t* src, size_t size, float* dst) const;
+
+    void
+    Decodesq8(const uint8_t* src, size_t size, float* dst) const;
+
+    void
+    Decodefp16(const uint8_t* src, size_t size, float* dst) const;
+
 public:
     uint32_t term_id_limit_{0};
 
@@ -80,10 +111,12 @@ public:
 
     Vector<std::unique_ptr<Vector<uint16_t>>> term_ids_;
 
-    Vector<std::unique_ptr<Vector<float>>> term_datas_;
+    Vector<std::unique_ptr<Vector<uint8_t>>> term_datas_;
 
     Vector<uint32_t> term_sizes_;
 
     Allocator* const allocator_{nullptr};
+
+    std::shared_ptr<QuantizationParams> quantization_params_;
 };
 }  // namespace vsag
