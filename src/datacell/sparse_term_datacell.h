@@ -85,12 +85,12 @@ public:
 
 private:
     void
-    Encode(float val, uint8_t* dst);
+    Encode(float val, uint8_t* dst) const;
 
     void
-    Encodesq8(float val, uint8_t* dst);
+    Encodesq8(float val, uint8_t* dst) const;
 
-    void
+    static void
     Encodefp16(float val, uint8_t* dst);
 
     void
@@ -99,8 +99,8 @@ private:
     void
     Decodesq8(const uint8_t* src, size_t size, float* dst) const;
 
-    void
-    Decodefp16(const uint8_t* src, size_t size, float* dst) const;
+    static void
+    Decodefp16(const uint8_t* src, size_t size, float* dst);
 
 public:
     uint32_t term_id_limit_{0};

@@ -346,20 +346,20 @@ SparseTermDataCell::Deserialize(StreamReader& reader) {
 }
 
 void
-SparseTermDataCell::Encode(float val, uint8_t* dst) {
+SparseTermDataCell::Encode(float val, uint8_t* dst) const {
     if (quantization_params_->type == QUANTIZATION_TYPE_VALUE_SQ8) {
         Encodesq8(val, dst);
     } else if (quantization_params_->type == QUANTIZATION_TYPE_VALUE_FP16) {
-        Encodefp16(val, dst);
+        SparseTermDataCell::Encodefp16(val, dst);
     } else {
         std::memcpy(dst, &val, sizeof(float));
     }
 }
 
 void
-SparseTermDataCell::Encodesq8(float val, uint8_t* dst) {
-    float x = (val - quantization_params_->min_val) / quantization_params_->diff * 255.0f;
-    *dst = static_cast<uint8_t>(std::clamp(x, 0.0f, 255.0f));
+SparseTermDataCell::Encodesq8(float val, uint8_t* dst) const {
+    float x = (val - quantization_params_->min_val) / quantization_params_->diff * 255.0F;
+    *dst = static_cast<uint8_t>(std::clamp(x, 0.0F, 255.0F));
 }
 
 void
@@ -373,7 +373,7 @@ SparseTermDataCell::Decode(const uint8_t* src, size_t size, float* dst) const {
     if (quantization_params_->type == QUANTIZATION_TYPE_VALUE_SQ8) {
         Decodesq8(src, size, dst);
     } else if (quantization_params_->type == QUANTIZATION_TYPE_VALUE_FP16) {
-        Decodefp16(src, size, dst);
+        SparseTermDataCell::Decodefp16(src, size, dst);
     } else {
         std::memcpy(dst, src, size * sizeof(float));
     }
@@ -382,13 +382,13 @@ SparseTermDataCell::Decode(const uint8_t* src, size_t size, float* dst) const {
 void
 SparseTermDataCell::Decodesq8(const uint8_t* src, size_t size, float* dst) const {
     for (size_t i = 0; i < size; ++i) {
-        dst[i] = static_cast<float>(src[i]) / 255.0f * quantization_params_->diff +
+        dst[i] = static_cast<float>(src[i]) / 255.0F * quantization_params_->diff +
                  quantization_params_->min_val;
     }
 }
 
 void
-SparseTermDataCell::Decodefp16(const uint8_t* src, size_t size, float* dst) const {
+SparseTermDataCell::Decodefp16(const uint8_t* src, size_t size, float* dst) {
     for (size_t i = 0; i < size; ++i) {
         uint16_t v;
         std::memcpy(&v, src + i * sizeof(uint16_t), sizeof(uint16_t));

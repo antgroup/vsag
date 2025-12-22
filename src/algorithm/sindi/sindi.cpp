@@ -69,17 +69,20 @@ SINDI::Add(const DatasetPtr& base) {
                 const auto& vec = sparse_vectors[i];
                 for (int j = 0; j < vec.len_; ++j) {
                     float val = vec.vals_[j];
-                    if (val < min_val)
+                    if (val < min_val) {
                         min_val = val;
-                    if (val > max_val)
+                    }
+                    if (val > max_val) {
                         max_val = val;
+                    }
                 }
             }
             quantization_params_->min_val = min_val;
             quantization_params_->max_val = max_val;
             quantization_params_->diff = max_val - min_val;
-            if (quantization_params_->diff < 1e-6)
-                quantization_params_->diff = 1.0f;
+            if (quantization_params_->diff < 1e-6) {
+                quantization_params_->diff = 1.0F;
+            }
         }
     }
 
