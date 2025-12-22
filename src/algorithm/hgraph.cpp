@@ -2002,7 +2002,7 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     auto count = static_cast<const int64_t>(search_result->Size());
     auto [dataset_results, dists, ids] = create_fast_dataset(count, search_allocator);
     char* extra_infos = nullptr;
-    if (extra_info_size_ > 0) {
+    if (extra_info_size_ > 0 && this->extra_infos_ != nullptr) {
         extra_infos = (char*)search_allocator->Allocate(extra_info_size_ * search_result->Size());
         dataset_results->ExtraInfos(extra_infos);
     }
