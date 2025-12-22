@@ -48,8 +48,8 @@ SINDIParameter::FromJson(const JsonType& json) {
     if (json.Contains(SPARSE_WINDOW_SIZE)) {
         window_size = json[SPARSE_WINDOW_SIZE].GetInt();
         CHECK_ARGUMENT(
-            (10'000 <= window_size and window_size <= 1'000'000),
-            fmt::format("window_size must in [10000, 1000000], but now is {}", window_size));
+            (10'000 <= window_size and window_size <= 60'000),
+            fmt::format("window_size must in [10000, 60000], but now is {}", window_size));
     } else {
         window_size = DEFAULT_WINDOW_SIZE;
     }

@@ -44,7 +44,7 @@ using namespace vsag;
 struct SINDIDefaultParam {
     bool use_reorder = true;
     float doc_prune_ratio = 0.1F;
-    int window_size = 66666;
+    int window_size = 55555;
     int term_id_limit = 10000;
 };
 
@@ -87,6 +87,6 @@ TEST_CASE("SINDI Index Parameters Test", "[ut][SINDIParameter]") {
 TEST_CASE("SINDI Index Parameters Compatibility Test", "[ut][SINDIParameter]") {
     TEST_COMPATIBILITY_CASE("use_reorder compatibility", use_reorder, true, false, false);
     TEST_COMPATIBILITY_CASE("doc_prune_ratio compatibility", doc_prune_ratio, 0.2F, 0.3F, false);
-    TEST_COMPATIBILITY_CASE("window_size compatibility", window_size, 66666, 77777, false);
+    TEST_COMPATIBILITY_CASE("window_size compatibility", window_size, 33333, 55555, false);
     TEST_COMPATIBILITY_CASE("term_id_limit compatibility", term_id_limit, 10000, 10001, false);
 }
