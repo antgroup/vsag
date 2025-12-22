@@ -48,8 +48,8 @@ SINDIParameter::FromJson(const JsonType& json) {
     if (json.Contains(SPARSE_WINDOW_SIZE)) {
         window_size = json[SPARSE_WINDOW_SIZE].GetInt();
         CHECK_ARGUMENT(
-            (10'000 <= window_size and window_size <= 1'000'000),
-            fmt::format("window_size must in [10000, 1000000], but now is {}", window_size));
+            (10'000 <= window_size and window_size <= 60'000),
+            fmt::format("window_size must in [10000, 60000], but now is {}", window_size));
     } else {
         window_size = DEFAULT_WINDOW_SIZE;
     }
@@ -61,6 +61,15 @@ SINDIParameter::FromJson(const JsonType& json) {
     if (json.Contains(SPARSE_DESERIALIZE_WITHOUT_BUFFER)) {
         deserialize_without_buffer = json[SPARSE_DESERIALIZE_WITHOUT_BUFFER].GetBool();
     }
+
+    if (json.Contains(SPARSE_QUANTIZATION_TYPE)) {
+        value_quantization_type = json[SPARSE_QUANTIZATION_TYPE].GetString();
+        CHECK_ARGUMENT((value_quantization_type == QUANTIZATION_TYPE_VALUE_SQ8 or
+                        value_quantization_type == QUANTIZATION_TYPE_VALUE_FP16 or
+                        value_quantization_type == QUANTIZATION_TYPE_VALUE_FP32),
+                       fmt::format("quantization_type must be sq8, fp16 or fp32, but now is {}",
+                                   value_quantization_type));
+    }
 }
 
 JsonType
@@ -70,6 +79,7 @@ SINDIParameter::ToJson() const {
     json[SPARSE_DOC_PRUNE_RATIO].SetFloat(doc_prune_ratio);
     json[USE_REORDER_KEY].SetBool(use_reorder);
     json[SPARSE_WINDOW_SIZE].SetInt(window_size);
+    json[SPARSE_QUANTIZATION_TYPE].SetString(value_quantization_type);
     return json;
 }
 
@@ -89,6 +99,9 @@ SINDIParameter::CheckCompatibility(const vsag::ParamPtr& other) const {
         return false;
     }
     if (this->use_reorder != sindi_param->use_reorder) {
+        return false;
+    }
+    if (this->value_quantization_type != sindi_param->value_quantization_type) {
         return false;
     }
     return true;

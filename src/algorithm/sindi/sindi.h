@@ -138,8 +138,13 @@ private:
     float doc_retain_ratio_{0};
 
     std::shared_ptr<SparseIndex> rerank_flat_index_{nullptr};
+
     bool deserialize_without_footer_{false};
     bool deserialize_without_buffer_{false};
+
+    std::string value_quantization_type_;
+
+    std::shared_ptr<QuantizationParams> quantization_params_;
 };
 
 }  // namespace vsag

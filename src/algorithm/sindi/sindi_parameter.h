@@ -47,6 +47,8 @@ public:
     // temporal parameter
     bool deserialize_without_footer{false};
     bool deserialize_without_buffer{false};
+
+    std::string value_quantization_type{QUANTIZATION_TYPE_VALUE_FP32};
 };
 
 class SINDISearchParameter : public Parameter {
