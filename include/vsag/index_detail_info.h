@@ -46,6 +46,7 @@ public:
 
 extern const char* INDEX_DETAIL_NAME_NUM_ELEMENTS;
 extern const char* INDEX_DETAIL_NAME_LABEL_TABLE;
+extern const char* INDEX_DETAIL_DATA_TYPE;
 class DetailData {
 public:
     virtual ~DetailData() = default;
