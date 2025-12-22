@@ -319,13 +319,6 @@ private:
 
 private:
     void
-    analyze_graph_recall(JsonType& stats,
-                         Vector<float>& data,
-                         uint64_t sample_data_size,
-                         int64_t topk,
-                         const std::string& search_param) const;
-
-    void
     check_and_init_raw_vector(const FlattenInterfaceParamPtr& raw_vector_param,
                               const IndexCommonParam& common_param);
 

@@ -15,8 +15,15 @@
 
 #pragma once
 
+#include <memory>
+
+#include "algorithm/hgraph.h"
+#include "algorithm/inner_index_interface.h"
+#include "utils/pointer_define.h"
 #include "vsag/allocator.h"
 namespace vsag {
+
+DEFINE_POINTER(AnalyzerBase);
 
 class AnalyzerBase {
 public:
@@ -24,10 +31,30 @@ public:
         : allocator_(allocator), total_count_(total_count) {
     }
 
+    virtual JsonType GetStats() = 0;
+
+    virtual ~AnalyzerBase() = default;
+
 protected:
     Allocator* allocator_;
     uint32_t total_count_;
     uint32_t dim_;
 };
+
+struct AnalyzerParam {
+public:
+    AnalyzerParam(Allocator* allocator)
+        : allocator(allocator){
+    }
+
+public:
+    Allocator* allocator;
+    int64_t topk{100};
+    uint64_t base_sample_size{10};
+    std::string search_params;
+
+};
+
+AnalyzerBasePtr CreateAnalyzer(const InnerIndexInterface* index, const AnalyzerParam& param);
 
 }  // namespace vsag

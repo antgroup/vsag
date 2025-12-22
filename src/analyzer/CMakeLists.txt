@@ -17,6 +17,7 @@
 set (ANALYZER_SRC
         hgraph_analyzer.cpp
         hgraph_analyzer.h
+        analyzer.cpp
         analyzer.h
 )
 

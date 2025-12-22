@@ -85,17 +85,7 @@ HGraphAnalyzer::calculate_base_groundtruth() {
 float
 HGraphAnalyzer::GetBaseAvgDistance() {
     calculate_base_groundtruth();
-    float dist_sum = 0.0F;
-    uint32_t dist_count = 0;
-    for (const auto& id : base_sample_ids_) {
-        const auto& groundtruth = base_ground_truth_[id];
-        const auto* data = groundtruth->GetData();
-        for (uint32_t i = 0; i < groundtruth->Size(); ++i) {
-            dist_sum += data[i].first;
-            dist_count++;
-        }
-    }
-    return dist_sum / dist_count;
+    return get_avg_distance(base_sample_ids_, base_ground_truth_);
 }
 
 float
@@ -146,30 +136,14 @@ float
 HGraphAnalyzer::GetBaseSearchRecall(const std::string& search_param) {
     calculate_base_groundtruth();
     calculate_base_search_result(search_param);
-    float total_recall = 0.0F;
-    for (int i = 0; i < this->base_sample_size_; ++i) {
-        const auto& ground_truth = base_ground_truth_[base_sample_ids_[i]];
-        std::unordered_set<InnerIdType> gt_set;
-        const auto* gt_data = ground_truth->GetData();
-        for (uint32_t j = 0; j < ground_truth->Size(); ++j) {
-            gt_set.insert(hgraph_->label_table_->GetIdByLabel(gt_data[j].second));
-        }
-        uint32_t hit_count = 0;
-        const auto& search_result = base_search_result_.at(base_sample_ids_[i]);
-        for (uint32_t j = 0; j < search_result.size(); ++j) {
-            if (gt_set.find(search_result[j]) != gt_set.end()) {
-                hit_count++;
-            }
-        }
-        total_recall += static_cast<float>(hit_count) / static_cast<float>(ground_truth->Size());
-    }
-    return total_recall / static_cast<float>(this->base_sample_size_);
+    return get_search_recall(this->base_sample_size_, base_sample_ids_,
+                             base_ground_truth_, base_search_result_);
 }
 
 void
 HGraphAnalyzer::calculate_base_search_result(const std::string& search_param) {
         if (base_search_result_.empty()) {
-            calculate_search_result(base_sample_datas_, base_sample_ids_,
+            base_search_time_ms_ = calculate_search_result(base_sample_datas_, base_sample_ids_,
                                     base_search_result_, search_param, this->base_sample_size_);
         }
 }
@@ -196,23 +170,23 @@ HGraphAnalyzer::calculate_quantization_result(const Vector<float>& sample_datas,
         const auto& result = search_result.at(id);
         float sample_error = 0.0F;
         hgraph_->use_reorder_ = false;
-        auto base_result = hgraph_->CalDistanceById(sample_datas.data() + i, result.data(), top_k_);
+        auto base_result = hgraph_->CalDistanceById(sample_datas.data() + i, result.data(), topk_);
         auto base_distance = base_result->GetDistances();
         hgraph_->use_reorder_ = true;
-        auto precise_result = hgraph_->CalDistanceById(sample_datas.data() + i, result.data(), top_k_);
+        auto precise_result = hgraph_->CalDistanceById(sample_datas.data() + i, result.data(), topk_);
         auto precise_distance = precise_result->GetDistances();
         uint32_t inversion_count = 0;
-        for (uint32_t j = 0; j < top_k_; ++j) {
+        for (uint32_t j = 0; j < topk_; ++j) {
             sample_error += std::abs(base_distance[j] - precise_distance[j]);
-            for (uint32_t k = j + 1; k < top_k_; ++k) {
+            for (uint32_t k = j + 1; k < topk_; ++k) {
                 if ((base_distance[j] - base_distance[k]) * (precise_distance[j] - precise_distance[k]) < 0) {
                     inversion_count++;
                 }
             }
         }
-        total_quantization_error += sample_error / static_cast<float>(top_k_);
+        total_quantization_error += sample_error / static_cast<float>(topk_);
         total_quantization_inversion_count_rate += static_cast<float>(inversion_count) /
-                                                   static_cast<float>(top_k_ * (top_k_ - 1) / 2);
+                                                   static_cast<float>(topk_ * (topk_ - 1) / 2);
     }
     return {total_quantization_error / static_cast<float>(sample_size),
             total_quantization_inversion_count_rate / static_cast<float>(sample_size)};
@@ -267,7 +241,7 @@ HGraphAnalyzer::calculate_groundtruth(const Vector<float>& sample_datas,
         DistHeapPtr groundtruth = std::make_shared<StandardHeap<true, false>>(allocator_, -1);
         for (uint64_t j = 0; j < this->total_count_; ++j) {
             float dist = distances_array[j];
-            if (groundtruth->Size() < top_k_) {
+            if (groundtruth->Size() < topk_) {
                 groundtruth->Push({dist, j});
             } else if (dist < groundtruth->Top().first) {
                 groundtruth->Push({dist, j});
@@ -299,29 +273,37 @@ HGraphAnalyzer::calculate_query_groundtruth() {
 void
 HGraphAnalyzer::calculate_query_search_result(const std::string& search_param) {
     if (query_search_result_.empty()) {
-        calculate_search_result(query_sample_datas_, query_sample_ids_,
+        query_search_time_ms_ = calculate_search_result(query_sample_datas_, query_sample_ids_,
                                 query_search_result_, search_param, this->query_sample_size_);
     }
 }
 
-void
+float
 HGraphAnalyzer::calculate_search_result(const Vector<float>& sample_datas,
                                         const Vector<InnerIdType>& sample_ids,
                                         UnorderedMap<InnerIdType, Vector<LabelType>>& search_result,
                                         const std::string& search_param,
                                         int sample_size) {
+    auto time_cost = 0.0F;
     for (int i = 0; i < sample_size; ++i) {
         auto query = Dataset::Make();
         query->Dim(dim_)->NumElements(1)->Owner(false)->Float32Vectors(sample_datas.data() +
                                                                        i * dim_);
-        auto result = hgraph_->KnnSearch(query, top_k_, search_param, nullptr);
+        double single_query_time;
+        DatasetPtr result = nullptr;
+        {
+            Timer t(single_query_time);
+            result = hgraph_->KnnSearch(query, topk_, search_param, nullptr);
+        }
         auto result_size = result->GetDim();
         auto ids = result->GetIds();
         Vector<LabelType> result_labels(allocator_);
         result_labels.resize(result_size);
         std::memcpy(result_labels.data(), ids, result_size * sizeof(LabelType));
         search_result.insert({sample_ids[i], result_labels});
+        time_cost += static_cast<float>(single_query_time);
     }
+    return time_cost / static_cast<float>(sample_size);
 }
 
 float
@@ -347,12 +329,18 @@ HGraphAnalyzer::GetQueryQuantizationInversionRatio(const std::string& search_par
 float
 HGraphAnalyzer::GetQueryAvgDistance() {
     calculate_query_groundtruth();
+    return get_avg_distance(query_sample_ids_, query_ground_truth_);
+}
+
+float
+HGraphAnalyzer::get_avg_distance(const Vector<InnerIdType>& sample_ids,
+                                 const UnorderedMap<InnerIdType, DistHeapPtr>& ground_truth) {
     float dist_sum = 0.0F;
     uint32_t dist_count = 0;
-    for (const auto& id : query_sample_ids_) {
-        const auto& groundtruth = query_ground_truth_[id];
-        const auto* data = groundtruth->GetData();
-        for (uint32_t i = 0; i < groundtruth->Size(); ++i) {
+    for (const auto& id : sample_ids) {
+        const auto& result = ground_truth.at(id);
+        const auto* data = result->GetData();
+        for (uint32_t i = 0; i < result->Size(); ++i) {
             dist_sum += data[i].first;
             dist_count++;
         }
@@ -360,9 +348,56 @@ HGraphAnalyzer::GetQueryAvgDistance() {
     return dist_sum / dist_count;
 }
 float
-HGraphAnalyzer::get_avg_distance(Vector<InnerIdType> sample_ids,
-                                 UnorderedMap<InnerIdType, DistHeapPtr> ground_truth) {
-    return 0;
+HGraphAnalyzer::GetQuerySearchRecall(const std::string& search_param) {
+    calculate_query_groundtruth();
+    calculate_query_search_result(search_param);
+    return get_search_recall(this->query_sample_size_, query_sample_ids_,
+                             query_ground_truth_, query_search_result_);
+}
+
+float
+HGraphAnalyzer::get_search_recall(uint32_t sample_size,
+                                  const Vector<InnerIdType>& sample_ids,
+    const UnorderedMap<InnerIdType, DistHeapPtr>& ground_truth,
+    const UnorderedMap<InnerIdType, Vector<LabelType>>& search_result) {
+    float total_recall = 0.0F;
+    for (int i = 0; i < sample_size; ++i) {
+        const auto& real_result = ground_truth.at(sample_ids[i]);
+        std::unordered_set<InnerIdType> gt_set;
+        const auto* gt_data = real_result->GetData();
+        for (uint32_t j = 0; j < real_result->Size(); ++j) {
+            gt_set.insert(hgraph_->label_table_->GetIdByLabel(gt_data[j].second));
+        }
+        uint32_t hit_count = 0;
+        const auto& result = search_result.at(sample_ids[i]);
+        for (uint32_t j = 0; j < result.size(); ++j) {
+            if (gt_set.find(result[j]) != gt_set.end()) {
+                hit_count++;
+            }
+        }
+        total_recall += static_cast<float>(hit_count) / static_cast<float>(real_result->Size());
+    }
+    return total_recall / static_cast<float>(sample_size);
+}
+
+float
+HGraphAnalyzer::GetQuerySearchTimeCost(const std::string& search_param) {
+    calculate_query_search_result(search_param);
+    return query_search_time_ms_;
+}
+
+float
+HGraphAnalyzer::GetBaseSearchTimeCost(const std::string& search_param) {
+    calculate_base_search_result(search_param);
+    return base_search_time_ms_;
+
+}
+
+JsonType
+HGraphAnalyzer::GetStats() {
+    JsonType stats;
+    stats["avg_base_distance"].SetFloat(GetBaseAvgDistance());
+    return stats;
 }
 
 }  // namespace vsag

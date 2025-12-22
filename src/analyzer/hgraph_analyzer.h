@@ -20,9 +20,9 @@
 
 namespace vsag {
 
-class HGraphAnalyzer : AnalyzerBase {
+class HGraphAnalyzer : public AnalyzerBase {
 public:
-    HGraphAnalyzer(std::shared_ptr<HGraph> hgraph)
+    HGraphAnalyzer(HGraph* hgraph, const AnalyzerParam& param)
         : hgraph_(hgraph),
           base_ground_truth_(hgraph->allocator_),
           base_sample_ids_(hgraph->allocator_),
@@ -34,6 +34,9 @@ public:
           query_search_result_(hgraph->allocator_),
           AnalyzerBase(hgraph->allocator_, hgraph->total_count_) {
         this->dim_ = hgraph_->dim_;
+        this->topk_ = param.topk;
+        this->base_sample_size_ = param.base_sample_size;
+        this->search_params_ = param.search_params;
     }
 
     Vector<int64_t>
@@ -62,12 +65,20 @@ public:
 
     float GetQueryQuantizationError(const std::string& search_param);
 
-        float GetQueryQuantizationInversionRatio(const std::string& search_param);
+    float GetQueryQuantizationInversionRatio(const std::string& search_param);
 
-        float
-        GetQueryAvgDistance();
+    float
+    GetQueryAvgDistance();
+
+    float GetQuerySearchRecall(const std::string& search_param);
 
 
+    float GetQuerySearchTimeCost(const std::string& search_param);
+    float GetBaseSearchTimeCost(const std::string& search_param);
+
+//        float GetQueryGroundTruthInDegree();
+
+    JsonType GetStats() override;
 
 
 
@@ -95,37 +106,42 @@ private:
                           UnorderedMap<InnerIdType, DistHeapPtr>& ground_truth,
                           int sample_siz);
 
-        void calculate_search_result(const Vector<float>& sample_datas,
-                                         const Vector<InnerIdType>& sample_ids,
-                                         UnorderedMap<InnerIdType, Vector<LabelType>>& search_result,
-                                         const std::string& search_param,
-                                         int sample_size);
+    float calculate_search_result(const Vector<float>& sample_datas,
+                                     const Vector<InnerIdType>& sample_ids,
+                                     UnorderedMap<InnerIdType, Vector<LabelType>>& search_result,
+                                     const std::string& search_param,
+                                     int sample_size);
 
-        float get_avg_distance(Vector<InnerIdType> sample_ids, UnorderedMap<InnerIdType, DistHeapPtr> ground_truth);
+    float get_avg_distance(const Vector<InnerIdType>& sample_ids, const UnorderedMap<InnerIdType, DistHeapPtr>& ground_truth);
+
+    float get_search_recall(uint32_t sample_size, const Vector<InnerIdType>& sample_ids,
+                                  const UnorderedMap<InnerIdType, DistHeapPtr>& ground_truth,
+                                  const UnorderedMap<InnerIdType, Vector<LabelType>>& search_result);
 
 
 
 private:
-    std::shared_ptr<HGraph> hgraph_;
+    HGraph* hgraph_;
 
     uint32_t base_sample_size_{10};
     Vector<InnerIdType> base_sample_ids_;
     Vector<float> base_sample_datas_;
     UnorderedMap<InnerIdType, DistHeapPtr> base_ground_truth_;
     UnorderedMap<InnerIdType, Vector<LabelType>> base_search_result_;
+    float base_search_time_ms_{0.0F};
 
     uint32_t query_sample_size_{0};
     Vector<InnerIdType> query_sample_ids_;
     Vector<float> query_sample_datas_;
     UnorderedMap<InnerIdType, DistHeapPtr> query_ground_truth_;
     UnorderedMap<InnerIdType, Vector<LabelType>> query_search_result_;
+    float query_search_time_ms_{0.0F};
 
 
-    uint32_t top_k_{100};
-
+    uint32_t topk_{100};
     float duplicate_ratio_{0.0F};
-    float quantization_error_{0.0F};
-    float quantization_inversion_count_rate_{0.0F};
+    std::string search_params_;
+
 };
 
 }  // namespace vsag
