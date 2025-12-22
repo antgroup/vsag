@@ -14,6 +14,7 @@
 // limitations under the License.
 
 #pragma once
+#include "vsag/constants.h"
 
 namespace vsag {
 enum class DataTypes {
@@ -22,5 +23,20 @@ enum class DataTypes {
     DATA_TYPE_FP16 = 2,
     DATA_TYPE_SPARSE = 3
 };
+
+constexpr const char*
+ToString(DataTypes t) noexcept {
+    switch (t) {
+        case DataTypes::DATA_TYPE_FLOAT:
+            return DATATYPE_FLOAT32;
+        case DataTypes::DATA_TYPE_INT8:
+            return DATATYPE_INT8;
+        case DataTypes::DATA_TYPE_FP16:
+            return DATATYPE_FLOAT16;
+        case DataTypes::DATA_TYPE_SPARSE:
+            return DATATYPE_SPARSE;
+    }
+    return "unknown";
+}
 
 }  // namespace vsag
