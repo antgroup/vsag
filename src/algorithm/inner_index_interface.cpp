@@ -549,6 +549,10 @@ InnerIndexInterface::GetIndexDetailInfos() const {
                        "Label table of current index, label table is a 2D array, "
                        "table[x][0] is label, table[x][1] is inner id",
                        IndexDetailDataType::TYPE_2DArray_INT64);
+
+    infos.emplace_back(INDEX_DETAIL_DATA_TYPE,
+                       "Data type of current index (e.g., float32, int8, sparse...)",
+                       IndexDetailDataType::TYPE_SCALAR_STRING);
     return infos;
 }
 
@@ -663,6 +667,8 @@ InnerIndexInterface::get_detail_data_by_info(const IndexDetailInfo& info) const 
             label_tables.emplace_back(std::vector<int64_t>{key, value});
         }
         data->SetData2DArrayInt64(label_tables);
+    } else if (name == INDEX_DETAIL_DATA_TYPE) {
+        data->SetDataScalarString(ToString(data_type_));
     }
     return data;
 }
