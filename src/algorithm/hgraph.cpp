@@ -87,8 +87,6 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
     this->resize_increase_count_bit_ = std::max(
         DEFAULT_RESIZE_BIT, static_cast<uint64_t>(log2(static_cast<double>(increase_count))));
 
-    resize(bottom_graph_->max_capacity_);
-
     this->parallel_searcher_ =
         std::make_shared<ParallelSearcher>(common_param, build_pool_, neighbors_mutex_);
 
@@ -101,6 +99,7 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
         optimizer_ = std::make_shared<Optimizer<BasicSearcher>>(common_param);
     }
     check_and_init_raw_vector(hgraph_param->raw_vector_param, common_param);
+    resize(bottom_graph_->max_capacity_);
 }
 void
 HGraph::Train(const DatasetPtr& base) {
@@ -768,7 +767,9 @@ HGraph::deserialize_label_info(StreamReader& reader) const {
         StreamReader::ReadObj(reader, key);
         InnerIdType value;
         StreamReader::ReadObj(reader, value);
-        this->label_table_->label_remap_.emplace(key, value);
+        if (not this->immutable_) {
+            this->label_table_->label_remap_.emplace(key, value);
+        }
     }
 }
 
@@ -1049,6 +1050,9 @@ HGraph::graph_add_one(const void* data, int level, InnerIdType inner_id) {
 
     param.ef = this->ef_construct_;
     param.topk = static_cast<int64_t>(ef_construct_);
+    if (this->label_table_->CompressDuplicateData()) {
+        param.query_id = inner_id;
+    }
 
     if (bottom_graph_->TotalCount() != 0) {
         result = search_one_graph(data,
@@ -1114,6 +1118,9 @@ HGraph::resize(uint64_t new_size) {
         bottom_graph_->Resize(new_size_power_2);
         this->max_capacity_.store(new_size_power_2);
         this->basic_flatten_codes_->Resize(new_size_power_2);
+        if (raw_vector_) {
+            raw_vector_->Resize(new_size_power_2);
+        }
         if (use_reorder_) {
             this->high_precise_codes_->Resize(new_size_power_2);
         }
@@ -1196,7 +1203,6 @@ HGraph::InitFeatures() {
     }
 
     if (raw_vector_ != nullptr) {
-        this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_CAL_DISTANCE_BY_ID);
         this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_GET_RAW_VECTOR_BY_IDS);
     }
 
@@ -1743,16 +1749,18 @@ HGraph::try_recover_tombstone(const DatasetPtr& data, std::vector<int64_t>& fail
      *
      *
      * [case 1] fail to insert -> continue + record failed id
-     * 1. exist + not delete : is_label_valid = true, is_tombstone = false
-     * 2. exist + delete + not recovery: is_label_valid = false, is_tombstone = ture, is_recover = false
+     * exist + not delete : is_label_valid = true, is_tombstone = false
      *
-     * [case 2] tombstone recovery -> continue
-     * exist + delete + recovery: is_label_valid = false, is_tombstone = ture, is_recover = true
+     * [case 2] fail to recovery -> add process
+     * exist + delete + not recovery: is_label_valid = false, is_tombstone = ture, is_recovered = false
      *
-     * [case 3] add -> no continue
+     * [case 3] tombstone recovery -> continue
+     * exist + delete + recovery: is_label_valid = false, is_tombstone = ture, is_recovered = true
+     *
+     * [case 4] no old point -> add process
      * not exists + not delete: is_label_valid = false, is_tombstone = false
      *
-     * [case 4] error
+     * [case 5] error
      * exists + deleted: is_label_valid = true, is_tombstone = true
      */
 
@@ -1760,7 +1768,7 @@ HGraph::try_recover_tombstone(const DatasetPtr& data, std::vector<int64_t>& fail
 
     bool is_label_valid = false;
     bool is_tombstone = false;
-    bool is_recover = false;
+    bool is_recovered = false;
     {
         std::scoped_lock label_lock(this->label_lookup_mutex_);
         is_label_valid = this->label_table_->CheckLabel(label);
@@ -1771,26 +1779,30 @@ HGraph::try_recover_tombstone(const DatasetPtr& data, std::vector<int64_t>& fail
 
     if (is_tombstone) {
         try {
-            // try update
+            // try recover and update
             recover_remove(label);
             auto update_res = UpdateVector(label, data, false);
             if (update_res) {
-                is_recover = true;
-                return true;
+                // [case 3]
+                is_recovered = true;
+                return is_recovered;
             }
+            // recover failed: roll back
+            Remove(label);
         } catch (std::runtime_error& e) {
-            // recover failed: delete again
+            // recover failed: roll back
             Remove(label);
         }
     }
 
-    if (is_label_valid or is_tombstone) {
-        if (not is_recover) {
-            failed_ids.emplace_back(label);
-        }
+    // is_recovered = false
+    if (is_label_valid) {
+        // [case 1]
+        failed_ids.emplace_back(label);
         return true;
     }
 
+    // [case 2, 4]
     return false;
 }
 
@@ -1854,6 +1866,10 @@ HGraph::Merge(const std::vector<MergeUnit>& merge_units) {
 
 void
 HGraph::GetVectorByInnerId(InnerIdType inner_id, float* data) const {
+    if (raw_vector_ != nullptr) {
+        raw_vector_->GetCodesById(inner_id, reinterpret_cast<uint8_t*>(data));
+        return;
+    }
     auto codes = (use_reorder_) ? high_precise_codes_ : basic_flatten_codes_;
     Vector<uint8_t> buffer(codes->code_size_, allocator_);
     codes->GetCodesById(inner_id, buffer.data());
@@ -1869,6 +1885,8 @@ HGraph::SetImmutable() {
     this->neighbors_mutex_.reset();
     this->neighbors_mutex_ = std::make_shared<EmptyMutex>();
     this->searcher_->SetMutexArray(this->neighbors_mutex_);
+    STLUnorderedMap<LabelType, InnerIdType> empty_remap(allocator_);
+    this->label_table_->label_remap_.swap(empty_remap);
     this->immutable_ = true;
 }
 

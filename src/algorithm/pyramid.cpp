@@ -27,6 +27,8 @@
 #include "utils/util_functions.h"
 namespace vsag {
 
+const static float RADIUS_EPSILON = 1.1F;
+
 std::vector<std::string>
 split(const std::string& str, char delimiter) {
     auto vec = split_string(str, delimiter);
@@ -213,9 +215,8 @@ Pyramid::KnnSearch(const DatasetPtr& query,
             std::make_shared<InnerIdWrapperFilter>(filter, *label_table_);
     }
     Statistics stats;
-    auto codes = use_reorder_ ? precise_codes_ : base_codes_;
     SearchFunc search_func = [&](const IndexNode* node, const VisitedListPtr& vl) {
-        return this->search_node(node, vl, search_param, query, codes, stats);
+        return this->search_node(node, vl, search_param, query, base_codes_, stats);
     };
 
     auto result = this->search_impl(query, k, search_func, parsed_param.ef_search);
@@ -229,10 +230,12 @@ Pyramid::RangeSearch(const DatasetPtr& query,
                      const std::string& parameters,
                      const FilterPtr& filter,
                      int64_t limited_size) const {
+    CHECK_ARGUMENT(radius >= 0.0F, "radius must be non-negative");
+
     auto parsed_param = PyramidSearchParameters::FromJson(parameters);
     InnerSearchParam search_param;
     search_param.ef = parsed_param.ef_search;
-    search_param.radius = radius;
+    search_param.radius = radius * RADIUS_EPSILON;
     search_param.search_mode = RANGE_SEARCH;
 
     if (parsed_param.enable_time_record) {
@@ -245,9 +248,8 @@ Pyramid::RangeSearch(const DatasetPtr& query,
             std::make_shared<InnerIdWrapperFilter>(filter, *label_table_);
     }
     Statistics stats;
-    auto codes = use_reorder_ ? precise_codes_ : base_codes_;
     SearchFunc search_func = [&](const IndexNode* node, const VisitedListPtr& vl) {
-        return this->search_node(node, vl, search_param, query, codes, stats);
+        return this->search_node(node, vl, search_param, query, base_codes_, stats);
     };
     int64_t final_limit = limited_size == -1 ? std::numeric_limits<int64_t>::max() : limited_size;
 
@@ -260,14 +262,15 @@ DatasetPtr
 Pyramid::search_impl(const DatasetPtr& query,
                      int64_t limit,
                      const SearchFunc& search_func,
-                     int64_t ef_search) const {
+                     int64_t ef_search,
+                     float radius) const {
     const auto* query_path = query->GetPaths();
     CHECK_ARGUMENT(  // NOLINT
         query_path != nullptr || root_->status_ != IndexNode::Status::NO_INDEX,
         "query_path is required when level0 is not built");
     CHECK_ARGUMENT(query->GetFloat32Vectors() != nullptr, "query vectors is required");
 
-    auto search_result = std::make_shared<StandardHeap<true, false>>(allocator_, -1);
+    DistHeapPtr search_result = std::make_shared<StandardHeap<true, false>>(allocator_, -1);
 
     auto vl = pool_->TakeOne();
     if (query_path != nullptr) {
@@ -292,11 +295,15 @@ Pyramid::search_impl(const DatasetPtr& query,
     }
     pool_->ReturnOne(vl);
 
+    if (use_reorder_) {
+        search_result = this->reorder_->Reorder(search_result, query->GetFloat32Vectors(), limit);
+    }
+
     if (search_result->Empty()) {
         return DatasetImpl::MakeEmptyDataset();
     }
 
-    while (search_result->Size() > limit) {
+    while (search_result->Size() > limit || search_result->Top().first > radius) {
         search_result->Pop();
     }
 

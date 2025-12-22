@@ -58,6 +58,10 @@ SINDIParameter::FromJson(const JsonType& json) {
         deserialize_without_footer = json[SPARSE_DESERIALIZE_WITHOUT_FOOTER].GetBool();
     }
 
+    if (json.Contains(SPARSE_DESERIALIZE_WITHOUT_BUFFER)) {
+        deserialize_without_buffer = json[SPARSE_DESERIALIZE_WITHOUT_BUFFER].GetBool();
+    }
+
     if (json.Contains(SPARSE_QUANTIZATION_TYPE)) {
         value_quantization_type = json[SPARSE_QUANTIZATION_TYPE].GetString();
         CHECK_ARGUMENT((value_quantization_type == QUANTIZATION_TYPE_VALUE_SQ8 or
