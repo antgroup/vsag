@@ -35,8 +35,9 @@ public:
     CheckCompatibility(const vsag::ParamPtr& other) const override;
 
 public:
-    uint32_t input_dim_;
-    uint32_t pca_dim_;
+    uint32_t input_dim_{0};
+    uint32_t pca_dim_{0};
+    uint32_t mrle_dim_{0};
 };
 
 }  // namespace vsag

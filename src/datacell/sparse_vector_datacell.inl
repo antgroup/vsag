@@ -126,6 +126,12 @@ SparseVectorDataCell<QuantTmpl, IOTmpl>::GetCodesById(InnerIdType id, bool& need
 }
 
 template <typename QuantTmpl, typename IOTmpl>
+void
+SparseVectorDataCell<QuantTmpl, IOTmpl>::Release(const uint8_t* data) const {
+    io_->Release(data);
+}
+
+template <typename QuantTmpl, typename IOTmpl>
 MetricType
 SparseVectorDataCell<QuantTmpl, IOTmpl>::GetMetricType() {
     return this->quantizer_->Metric();
