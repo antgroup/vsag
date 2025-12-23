@@ -15,6 +15,8 @@
 
 #include "sparse_term_datacell.h"
 
+#include "vsag/allocator.h"
+
 namespace vsag {
 
 void
@@ -244,9 +246,13 @@ SparseTermDataCell::CalcDistanceByInnerId(const SparseTermComputerPtr& computer,
 }
 
 void
-SparseTermDataCell::GetSparseVector(uint32_t base_id, SparseVector* data) {
-    Vector<uint32_t> ids(allocator_);
-    Vector<float> vals(allocator_);
+SparseTermDataCell::GetSparseVector(uint32_t base_id,
+                                    SparseVector* data,
+                                    Allocator* specified_allocator) {
+    Allocator* allocator = specified_allocator != nullptr ? specified_allocator : allocator_;
+
+    Vector<uint32_t> ids(allocator);
+    Vector<float> vals(allocator);
 
     for (auto term = 0; term < term_ids_.size(); term++) {
         for (auto i = 0; i < term_sizes_[term]; i++) {
@@ -258,8 +264,8 @@ SparseTermDataCell::GetSparseVector(uint32_t base_id, SparseVector* data) {
     }
 
     data->len_ = ids.size();
-    data->ids_ = (uint32_t*)allocator_->Allocate(sizeof(uint32_t) * data->len_);
-    data->vals_ = (float*)allocator_->Allocate(sizeof(float) * data->len_);
+    data->ids_ = (uint32_t*)allocator->Allocate(sizeof(uint32_t) * data->len_);
+    data->vals_ = (float*)allocator->Allocate(sizeof(float) * data->len_);
 
     memcpy(data->ids_, ids.data(), data->len_ * sizeof(uint32_t));
     memcpy(data->vals_, vals.data(), data->len_ * sizeof(float));

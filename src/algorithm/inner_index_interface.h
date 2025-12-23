@@ -241,13 +241,15 @@ public:
     }
 
     virtual void
-    GetSparseVectorByInnerId(InnerIdType inner_id, SparseVector* data) const {
+    GetSparseVectorByInnerId(InnerIdType inner_id,
+                             SparseVector* data,
+                             Allocator* specified_allocator) const {
         throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
                             "Index doesn't support GetSparseVectorByInnerId");
     }
 
     virtual DatasetPtr
-    GetVectorByIds(const int64_t* ids, int64_t count) const;
+    GetVectorByIds(const int64_t* ids, int64_t count, Allocator* specified_allocator) const;
 
     virtual void
     InitFeatures() = 0;
