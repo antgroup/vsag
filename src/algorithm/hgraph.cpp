@@ -1869,7 +1869,7 @@ HGraph::GetVectorByInnerId(InnerIdType inner_id, float* data) const {
     auto codes = (use_reorder_) ? high_precise_codes_ : basic_flatten_codes_;
     codes = (raw_vector_) ? raw_vector_ : codes;
     bool release;
-    auto buffer = codes->GetCodesById(inner_id, release);
+    const auto* buffer = codes->GetCodesById(inner_id, release);
     codes->Decode(buffer, data);
     if (release) {
         codes->Release(buffer);

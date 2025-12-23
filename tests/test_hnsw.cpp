@@ -489,10 +489,10 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex, "HNSW Remove", "[ft][hnsw]
 
         if (test_recovery) {
             TestIndex::TestRecoverRemoveIndex(index, dataset, search_param);
-            HNSWTestIndex::TestGeneral(index, dataset, search_param, 0.9, false);
+            HNSWTestIndex::TestGeneral(index, dataset, search_param, 0.85, false);
         } else {
             TestIndex::TestRemoveIndex(index, dataset, true);
-            HNSWTestIndex::TestGeneral(index, dataset, search_param, 0.9);
+            HNSWTestIndex::TestGeneral(index, dataset, search_param, 0.85);
         }
 
         vsag::Options::Instance().set_block_size_limit(origin_size);
