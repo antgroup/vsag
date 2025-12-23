@@ -58,8 +58,8 @@ SINDIParameter::FromJson(const JsonType& json) {
         deserialize_without_footer = json[SPARSE_DESERIALIZE_WITHOUT_FOOTER];
     }
 
-    if (json.Contains(SPARSE_DESERIALIZE_WITHOUT_BUFFER)) {
-        deserialize_without_buffer = json[SPARSE_DESERIALIZE_WITHOUT_BUFFER].GetBool();
+    if (json.contains(SPARSE_DESERIALIZE_WITHOUT_BUFFER)) {
+        deserialize_without_buffer = json[SPARSE_DESERIALIZE_WITHOUT_BUFFER];
     }
 }
 
