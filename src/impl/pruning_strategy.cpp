@@ -21,7 +21,7 @@
 #include "utils/lock_strategy.h"
 namespace vsag {
 
-template <EdgeSelectionParam Param>
+template <EdgeSelectionParam param>
 void
 select_edges_by_heuristic(const DistHeapPtr& edges,
                           uint64_t max_size,
@@ -51,7 +51,7 @@ select_edges_by_heuristic(const DistHeapPtr& edges,
         for (const auto& second_pair : return_list) {
             float curdist = flatten->ComputePairVectors(second_pair.second, current_pair.second);
 
-            if constexpr (Param == EdgeSelectionParam::ALPHA) {
+            if constexpr (param == EdgeSelectionParam::ALPHA) {
                 if (param_value * curdist < float_query) {
                     good = false;
                     break;
@@ -77,7 +77,7 @@ select_edges_by_heuristic(const DistHeapPtr& edges,
     }
 }
 
-template <EdgeSelectionParam Param>
+template <EdgeSelectionParam param>
 InnerIdType
 mutually_connect_new_element(InnerIdType cur_c,
                              const DistHeapPtr& top_candidates,
@@ -88,7 +88,7 @@ mutually_connect_new_element(InnerIdType cur_c,
                              float param_value) {
     const size_t max_size = graph->MaximumDegree();
 
-    select_edges_by_heuristic<Param>(top_candidates, max_size, flatten, allocator, param_value);
+    select_edges_by_heuristic<param>(top_candidates, max_size, flatten, allocator, param_value);
 
     if (top_candidates->Size() > max_size) {
         throw VsagException(
@@ -139,7 +139,7 @@ mutually_connect_new_element(InnerIdType cur_c,
                                  neighbors[j]);
             }
 
-            select_edges_by_heuristic<Param>(candidates, max_size, flatten, allocator, param_value);
+            select_edges_by_heuristic<param>(candidates, max_size, flatten, allocator, param_value);
 
             Vector<InnerIdType> cand_neighbors(allocator);
             while (not candidates->Empty()) {
