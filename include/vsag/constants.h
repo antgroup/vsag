@@ -101,6 +101,7 @@ extern const char* const HNSW_PARAMETER_SKIP_RATIO;
 
 extern const char* const INDEX_PARAM;
 
+extern const char* const PYRAMID_SUPPORT_DUPLICATE;
 extern const char* const PYRAMID_EF_CONSTRUCTION;
 extern const char* const PYRAMID_USE_REORDER;
 extern const char* const PYRAMID_BASE_QUANTIZATION_TYPE;

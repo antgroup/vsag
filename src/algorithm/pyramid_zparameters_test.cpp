@@ -36,6 +36,7 @@ struct PyramidDefaultParam {
     std::string precise_io_type = "block_memory_io";
     std::string precise_file_path = "precise_path";
     uint32_t index_min_size = 1000;
+    bool support_duplicate = false;
 };
 
 std::string
@@ -95,7 +96,8 @@ generate_pyramid(const PyramidDefaultParam& param) {
             }},
             "type": "pyramid",
             "use_reorder": {},
-            "index_min_size": {}
+            "index_min_size": {},
+            "support_duplicate": {}
         }}
     )";
     return fmt::format(param_str,
@@ -114,7 +116,8 @@ generate_pyramid(const PyramidDefaultParam& param) {
                        param.precise_io_type,
                        param.precise_quantization_type,
                        param.use_reorder,
-                       param.index_min_size);
+                       param.index_min_size,
+                       param.support_duplicate);
 }
 
 TEST_CASE("Pyramid Parameters Test", "[ut][PyramidParameters]") {
@@ -174,4 +177,5 @@ TEST_CASE("Pyramid Parameters CheckCompatibility", "[ut][PyramidParameter][Check
     TEST_COMPATIBILITY_CASE(
         "different precise quantization type", precise_quantization_type, "fp32", "fp16", false);
     TEST_COMPATIBILITY_CASE("different index min size", index_min_size, 500, 1500, false);
+    TEST_COMPATIBILITY_CASE("different support duplicate", support_duplicate, false, true, false);
 }

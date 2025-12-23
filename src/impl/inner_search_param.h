@@ -54,7 +54,7 @@ public:
 
     // deal with duplicate ids
     mutable int64_t duplicate_id{-1};
-    int64_t query_id{-1};
+    bool find_duplicate{false};
 
     // use in search process with duplicate ids
     bool consider_duplicate{false};
