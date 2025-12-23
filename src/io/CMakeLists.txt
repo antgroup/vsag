@@ -30,7 +30,7 @@ set (IO_SRC
         reader_io_parameter.cpp
 )
 
-add_library (io STATIC ${IO_SRC})
+add_library (io OBJECT ${IO_SRC})
 if (HAVE_LIBAIO)
     target_compile_definitions (io PUBLIC -DHAVE_LIBAIO=1)
     target_link_libraries (io PUBLIC fmt::fmt aio coverage_config)
