@@ -1320,7 +1320,8 @@ HNSW::get_vectors_by_id(const int64_t* ids, int64_t count, Allocator* specified_
 
     for (auto i = 0; i < count; i++) {
         try {
-            alg_hnsw_->copyDataByLabel(ids[i], (char*)vectors_blob + i * data_size);
+            alg_hnsw_->copyDataByLabel(ids[i],
+                                       (char*)vectors_blob + static_cast<size_t>(i * data_size));
         } catch (std::runtime_error& e) {
             throw std::runtime_error(
                 fmt::format("fail to get vector by id({}): {}, ", ids[i], e.what()));
