@@ -53,7 +53,9 @@ public:
     }
 
     void
-    GetSparseVectorByInnerId(InnerIdType inner_id, SparseVector* data) const override;
+    GetSparseVectorByInnerId(InnerIdType inner_id,
+                             SparseVector* data,
+                             Allocator* specified_allocator) const override;
 
     IndexType
     GetIndexType() const override {

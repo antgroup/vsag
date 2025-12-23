@@ -19,6 +19,7 @@
 #include "index_feature_list.h"
 #include "storage/serialization.h"
 #include "utils/util_functions.h"
+#include "vsag/allocator.h"
 
 namespace vsag {
 ParamPtr
@@ -427,18 +428,21 @@ SINDI::EstimateMemory(uint64_t num_elements) const {
 }
 
 void
-SINDI::GetSparseVectorByInnerId(InnerIdType inner_id, SparseVector* data) const {
+SINDI::GetSparseVectorByInnerId(InnerIdType inner_id,
+                                SparseVector* data,
+                                Allocator* specified_allocator) const {
     std::shared_lock rlock(this->global_mutex_);
 
     if (use_reorder_) {
-        return this->rerank_flat_index_->GetSparseVectorByInnerId(inner_id, data);
+        return this->rerank_flat_index_->GetSparseVectorByInnerId(
+            inner_id, data, specified_allocator);
     }
 
     auto cur_window = inner_id / window_size_;
     auto window_start_id = cur_window * window_size_;
     auto term_list = this->window_term_list_[cur_window];
 
-    term_list->GetSparseVector(inner_id - window_start_id, data);
+    term_list->GetSparseVector(inner_id - window_start_id, data, specified_allocator);
 }
 
 float
