@@ -1866,14 +1866,14 @@ HGraph::Merge(const std::vector<MergeUnit>& merge_units) {
 
 void
 HGraph::GetVectorByInnerId(InnerIdType inner_id, float* data) const {
-    if (raw_vector_ != nullptr) {
-        raw_vector_->GetCodesById(inner_id, reinterpret_cast<uint8_t*>(data));
-        return;
-    }
     auto codes = (use_reorder_) ? high_precise_codes_ : basic_flatten_codes_;
-    Vector<uint8_t> buffer(codes->code_size_, allocator_);
-    codes->GetCodesById(inner_id, buffer.data());
-    codes->Decode(buffer.data(), data);
+    codes = (raw_vector_) ? raw_vector_ : codes;
+    bool release;
+    const auto* buffer = codes->GetCodesById(inner_id, release);
+    codes->Decode(buffer, data);
+    if (release) {
+        codes->Release(buffer);
+    }
 }
 
 void
