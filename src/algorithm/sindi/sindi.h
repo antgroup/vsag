@@ -18,6 +18,7 @@
 #include "algorithm/inner_index_interface.h"
 #include "algorithm/sparse_index.h"
 #include "datacell/sparse_term_datacell.h"
+#include "vsag/allocator.h"
 
 namespace vsag {
 
@@ -85,7 +86,9 @@ public:
     Deserialize(StreamReader& reader) override;
 
     void
-    GetSparseVectorByInnerId(InnerIdType inner_id, SparseVector* data) const override;
+    GetSparseVectorByInnerId(InnerIdType inner_id,
+                             SparseVector* data,
+                             Allocator* specified_allocator) const override;
 
     IndexType
     GetIndexType() const override {

@@ -19,6 +19,7 @@
 #include "fixtures/test_logger.h"
 #include "fixtures/test_reader.h"
 #include "fixtures/thread_pool.h"
+#include "impl/allocator/default_allocator.h"
 #include "index/hnsw.h"
 #include "simd/fp32_simd.h"
 #include "vsag/engine.h"
@@ -2235,11 +2236,49 @@ TestIndex::TestGetRawVectorByIds(const IndexPtr& index,
         return;
     }
 
-    int64_t non_exist_id = -9999999;
-    auto failed_res = index->GetRawVectorByIds(&non_exist_id, 1);
-    REQUIRE(not failed_res.has_value());
+    // get with not existed id
+    {
+        int64_t non_exist_id = -9999999;
+        auto failed_res = index->GetRawVectorByIds(&non_exist_id, 1);
+        REQUIRE(not failed_res.has_value());
+    }
 
-    int64_t count = dataset->count_;
+    auto count = static_cast<int64_t>(dataset->count_);
+
+    // get with specifed memory allocator
+    {
+        vsag::DefaultAllocator allocator;
+        void* mem = nullptr;
+        {
+            auto res =
+                index->GetRawVectorByIds(dataset->base_->GetIds(), count, &allocator).value();
+
+            if (index->GetIndexType() == vsag::IndexType::SINDI or
+                index->GetIndexType() == vsag::IndexType::SPARSE) {
+                mem = (void*)res->GetSparseVectors();
+            } else {
+                mem = (void*)res->GetFloat32Vectors();
+            }
+        }
+
+        // free the vector memory after the dataset released
+        if (index->GetIndexType() == vsag::IndexType::SINDI or
+            index->GetIndexType() == vsag::IndexType::SPARSE) {
+            auto* sparse_vectors = (vsag::SparseVector*)mem;
+            for (int64_t i = 0; i < count; ++i) {
+                allocator.Deallocate(sparse_vectors[i].ids_);
+                sparse_vectors[i].ids_ = nullptr;
+                allocator.Deallocate(sparse_vectors[i].vals_);
+                sparse_vectors[i].vals_ = nullptr;
+            }
+            allocator.Deallocate(sparse_vectors);
+        } else {
+            auto* vectors = (float*)mem;
+            allocator.Deallocate(vectors);
+        }
+    }
+
+    // common case
     auto vectors = index->GetRawVectorByIds(dataset->base_->GetIds(), count);
     REQUIRE(vectors.has_value());
 
