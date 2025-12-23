@@ -222,8 +222,10 @@ public:
     }
 
     tl::expected<DatasetPtr, Error>
-    GetRawVectorByIds(const int64_t* ids, int64_t count) const override {
-        SAFE_CALL(return this->get_vectors_by_id(ids, count));
+    GetRawVectorByIds(const int64_t* ids,
+                      int64_t count,
+                      Allocator* specified_allocator = nullptr) const override {
+        SAFE_CALL(return this->get_vectors_by_id(ids, count, specified_allocator));
     }
 
 public:
@@ -425,7 +427,7 @@ private:
     get_min_and_max_id() const;
 
     tl::expected<DatasetPtr, Error>
-    get_vectors_by_id(const int64_t* ids, int64_t count) const;
+    get_vectors_by_id(const int64_t* ids, int64_t count, Allocator* specified_allocator) const;
 
     bool
     check_id_exist(int64_t id) const;

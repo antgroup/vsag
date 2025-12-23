@@ -2244,6 +2244,8 @@ TestIndex::TestGetRawVectorByIds(const IndexPtr& index,
     }
 
     auto count = static_cast<int64_t>(dataset->count_);
+    vsag::IndexDetailInfo info;
+    auto data_type = index->GetDetailDataByName("data_type", info).value()->GetDataScalarString();
 
     // get with specifed memory allocator
     {
@@ -2253,17 +2255,18 @@ TestIndex::TestGetRawVectorByIds(const IndexPtr& index,
             auto res =
                 index->GetRawVectorByIds(dataset->base_->GetIds(), count, &allocator).value();
 
-            if (index->GetIndexType() == vsag::IndexType::SINDI or
-                index->GetIndexType() == vsag::IndexType::SPARSE) {
+            if (data_type == vsag::DATATYPE_SPARSE) {
                 mem = (void*)res->GetSparseVectors();
-            } else {
+            } else if (data_type == vsag::DATATYPE_FLOAT32) {
                 mem = (void*)res->GetFloat32Vectors();
+            } else {
+                // data_type == vsag::DATATYPE_INT8
+                mem = (void*)res->GetInt8Vectors();
             }
         }
 
         // free the vector memory after the dataset released
-        if (index->GetIndexType() == vsag::IndexType::SINDI or
-            index->GetIndexType() == vsag::IndexType::SPARSE) {
+        if (data_type == vsag::DATATYPE_SPARSE) {
             auto* sparse_vectors = (vsag::SparseVector*)mem;
             for (int64_t i = 0; i < count; ++i) {
                 allocator.Deallocate(sparse_vectors[i].ids_);
@@ -2273,6 +2276,7 @@ TestIndex::TestGetRawVectorByIds(const IndexPtr& index,
             }
             allocator.Deallocate(sparse_vectors);
         } else {
+            // data_type == vsag::DATATYPE_INT8 or data_type == vsag::DATATYPE_FLOAT32
             auto* vectors = (float*)mem;
             allocator.Deallocate(vectors);
         }
@@ -2281,9 +2285,6 @@ TestIndex::TestGetRawVectorByIds(const IndexPtr& index,
     // common case
     auto vectors = index->GetRawVectorByIds(dataset->base_->GetIds(), count);
     REQUIRE(vectors.has_value());
-
-    vsag::IndexDetailInfo info;
-    auto data_type = index->GetDetailDataByName("data_type", info).value()->GetDataScalarString();
 
     if (data_type == vsag::DATATYPE_SPARSE) {
         for (int i = 0; i < count; i++) {
@@ -2319,6 +2320,17 @@ TestIndex::TestGetRawVectorByIds(const IndexPtr& index,
             REQUIRE(std::memcmp(float_vectors + i * dim,
                                 dataset->base_->GetFloat32Vectors() + i * dim,
                                 dim * sizeof(float)) == 0);
+        }
+    } else if (data_type == vsag::DATATYPE_INT8) {
+        auto int8_vectors = vectors.value()->GetInt8Vectors();
+        auto dim = dataset->base_->GetDim();
+        if (not expected_success) {
+            return;
+        }
+        for (int i = 0; i < count; ++i) {
+            REQUIRE(std::memcmp(int8_vectors + i * dim,
+                                dataset->base_->GetInt8Vectors() + i * dim,
+                                dim) == 0);
         }
     } else {
         throw std::invalid_argument("Invalid data type: " + data_type);

@@ -1288,9 +1288,11 @@ HNSW::get_min_and_max_id() const {
 }
 
 tl::expected<DatasetPtr, Error>
-HNSW::get_vectors_by_id(const int64_t* ids, int64_t count) const {
+HNSW::get_vectors_by_id(const int64_t* ids, int64_t count, Allocator* specified_allocator) const {
     std::shared_lock status_lock(index_status_mutex_);
     std::shared_lock lock(rw_mutex_);
+    bool has_specified_allocator = specified_allocator != nullptr;
+    Allocator* allocator = has_specified_allocator ? specified_allocator : allocator_.get();
 
     if (not this->IsValidStatus()) {
         LOG_ERROR_AND_RETURNS(
@@ -1298,7 +1300,8 @@ HNSW::get_vectors_by_id(const int64_t* ids, int64_t count) const {
     }
 
     DatasetPtr vectors = Dataset::Make();
-    vectors->NumElements(count)->Dim(dim_)->Owner(true, allocator_.get());
+    vectors->NumElements(count)->Dim(dim_)->Owner(/*auto release=*/not has_specified_allocator,
+                                                  allocator);
 
     uint32_t data_size = 0;
     if (type_ == DataTypes::DATA_TYPE_INT8) {
@@ -1307,7 +1310,7 @@ HNSW::get_vectors_by_id(const int64_t* ids, int64_t count) const {
         data_size = dim_ * 4;
     }
 
-    auto* vectors_blob = allocator_->Allocate(data_size * count);
+    auto* vectors_blob = allocator->Allocate(data_size * count);
 
     if (type_ == DataTypes::DATA_TYPE_INT8) {
         vectors->Int8Vectors((int8_t*)vectors_blob);
