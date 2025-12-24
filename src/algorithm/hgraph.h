@@ -68,6 +68,9 @@ public:
     std::vector<int64_t>
     Build(const DatasetPtr& data) override;
 
+    bool
+    Tune(const std::string& parameters, bool disable_future_tuning) override;
+
     float
     CalcDistanceById(const float* query, int64_t id) const override;
 
@@ -205,6 +208,9 @@ public:
                     const AttributeSet& origin_attrs) override;
 
 private:
+    static JsonType
+    map_hgraph_param(const JsonType& hgraph_json);
+
     const void*
     get_data(const DatasetPtr& dataset, uint32_t index = 0) const {
         if (data_type_ == DataTypes::DATA_TYPE_FLOAT) {

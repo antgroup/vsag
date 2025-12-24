@@ -121,6 +121,11 @@ public:
                             "Index doesn't support ContinueBuild");
     }
 
+    virtual bool
+    Tune(const std::string& parameters, bool disable_future_tuning) {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION, "Index doesn't support Tune");
+    }
+
     virtual void
     Deserialize(const BinarySet& binary_set);
 

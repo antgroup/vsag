@@ -865,6 +865,84 @@ TEST_CASE("(Daily) HGraph Support Get Raw Vector", "[ft][hgraph][daily]") {
 }
 
 static void
+TestHGraphTune(const fixtures::HGraphTestIndexPtr& test_index,
+               const fixtures::HGraphResourcePtr& resource) {
+    using namespace fixtures;
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    auto size = GENERATE(1024 * 1024 * 2);
+    const std::vector<std::pair<std::string, std::string>> test_cases = {
+        {"sq8", "sq8"}, {"sq8", "sq4"}, {"fp32", "bf16"}, {"sq8", "fp32"}};
+
+    auto search_param = fmt::format(fixtures::search_param_tmp, 200, false);
+    for (auto metric_type : resource->metric_types) {
+        for (auto dim : resource->dims) {
+            for (auto& [base_quantization_str1, base_quantization_str2] : test_cases) {
+                INFO(
+                    fmt::format("metric_type: {}, dim: {}, base_quantization_str1: {}, "
+                                "base_quantization_str2: {}",
+                                metric_type,
+                                dim,
+                                base_quantization_str1,
+                                base_quantization_str2));
+                if (HGraphTestIndex::IsRaBitQ(base_quantization_str1) &&
+                    dim < fixtures::RABITQ_MIN_RACALL_DIM) {
+                    continue;  // Skip invalid RaBitQ configurations
+                }
+
+                // Set block size limit for current test iteration
+                vsag::Options::Instance().set_block_size_limit(size);
+
+                // Generate index parameters with attribute support enabled
+                HGraphTestIndex::HGraphBuildParam build_param1(
+                    metric_type, dim, base_quantization_str1);
+                build_param1.store_raw_vector = true;
+                auto param1 = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param1);
+
+                // Generate alter index param
+                HGraphTestIndex::HGraphBuildParam build_param2(
+                    metric_type, dim, base_quantization_str2);
+                build_param2.store_raw_vector = true;
+                auto param2 = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param2);
+
+                // Create index and dataset
+                auto index1 = TestIndex::TestFactory(test_index->name, param1, true);
+                auto index2 = TestIndex::TestFactory(test_index->name, param2, true);
+                auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(
+                    dim, resource->base_count, metric_type);
+                TestIndex::TestBuildIndex(index1, dataset, true);
+
+                // set index param
+                auto set_result = index1->Tune(param2);
+                REQUIRE(set_result.has_value());
+                REQUIRE(set_result.value());
+
+                // serialize test
+                TestIndex::TestSerializeFile(index1, index2, dataset, search_param, true);
+
+                // basic test
+                HGraphTestIndex::TestGeneral(index1, dataset, search_param, 0.9);
+                HGraphTestIndex::TestGeneral(index2, dataset, search_param, 0.9);
+
+                // Restore original block size limit
+                vsag::Options::Instance().set_block_size_limit(origin_size);
+            }
+        }
+    }
+}
+
+TEST_CASE("(PR) HGraph Tune", "[ft][hgraph][pr]") {
+    auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
+    auto resource = test_index->GetResource(true);
+    TestHGraphTune(test_index, resource);
+}
+
+TEST_CASE("(Daily) HGraph Tune", "[ft][hgraph][daily]") {
+    auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
+    auto resource = test_index->GetResource(false);
+    TestHGraphTune(test_index, resource);
+}
+
+static void
 TestHGraphODescentBuild(const fixtures::HGraphTestIndexPtr& test_index,
                         const fixtures::HGraphResourcePtr& resource) {
     using namespace fixtures;

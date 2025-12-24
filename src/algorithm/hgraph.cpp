@@ -108,6 +108,9 @@ HGraph::Train(const DatasetPtr& base) {
     if (use_reorder_) {
         this->high_precise_codes_->Train(base_data, base->GetNumElements());
     }
+    if (create_new_raw_vector_) {
+        this->raw_vector_->Train(base_data, base->GetNumElements());
+    }
 }
 
 std::vector<int64_t>
@@ -124,6 +127,464 @@ HGraph::Build(const DatasetPtr& data) {
         elp_optimize();
     }
     return ret;
+}
+
+JsonType
+HGraph::map_hgraph_param(const JsonType& hgraph_json) {
+    static const ConstParamMap external_mapping = {
+        {
+            HGRAPH_USE_REORDER,
+            {
+                USE_REORDER_KEY,
+            },
+        },
+        {
+            HGRAPH_USE_ELP_OPTIMIZER,
+            {
+                HGRAPH_USE_ELP_OPTIMIZER_KEY,
+            },
+        },
+        {
+            HGRAPH_IGNORE_REORDER,
+            {
+                HGRAPH_IGNORE_REORDER_KEY,
+            },
+        },
+        {
+            HGRAPH_BUILD_BY_BASE_QUANTIZATION,
+            {
+                HGRAPH_BUILD_BY_BASE_QUANTIZATION_KEY,
+            },
+        },
+        {
+            USE_ATTRIBUTE_FILTER,
+            {
+                USE_ATTRIBUTE_FILTER_KEY,
+            },
+        },
+        {
+            HGRAPH_BASE_QUANTIZATION_TYPE,
+            {
+                BASE_CODES_KEY,
+                QUANTIZATION_PARAMS_KEY,
+                TYPE_KEY,
+            },
+        },
+        {
+            STORE_RAW_VECTOR,
+            {
+                BASE_CODES_KEY,
+                QUANTIZATION_PARAMS_KEY,
+                HOLD_MOLDS,
+            },
+        },
+        {
+            HGRAPH_BASE_IO_TYPE,
+            {
+                BASE_CODES_KEY,
+                IO_PARAMS_KEY,
+                TYPE_KEY,
+            },
+        },
+        {
+            HGRAPH_PRECISE_IO_TYPE,
+            {
+                PRECISE_CODES_KEY,
+                IO_PARAMS_KEY,
+                TYPE_KEY,
+            },
+        },
+        {
+            HGRAPH_BASE_FILE_PATH,
+            {
+                BASE_CODES_KEY,
+                IO_PARAMS_KEY,
+                IO_FILE_PATH_KEY,
+            },
+        },
+        {
+            HGRAPH_PRECISE_FILE_PATH,
+            {
+                PRECISE_CODES_KEY,
+                IO_PARAMS_KEY,
+                IO_FILE_PATH_KEY,
+            },
+        },
+        {
+            HGRAPH_PRECISE_QUANTIZATION_TYPE,
+            {
+                PRECISE_CODES_KEY,
+                QUANTIZATION_PARAMS_KEY,
+                TYPE_KEY,
+            },
+        },
+        {
+            HGRAPH_GRAPH_IO_TYPE,
+            {
+                GRAPH_KEY,
+                IO_PARAMS_KEY,
+                TYPE_KEY,
+            },
+        },
+        {
+            HGRAPH_GRAPH_FILE_PATH,
+            {
+                GRAPH_KEY,
+                IO_PARAMS_KEY,
+                IO_FILE_PATH_KEY,
+            },
+        },
+        {
+            STORE_RAW_VECTOR,
+            {
+                PRECISE_CODES_KEY,
+                QUANTIZATION_PARAMS_KEY,
+                HOLD_MOLDS,
+            },
+        },
+        {
+            STORE_RAW_VECTOR,
+            {
+                STORE_RAW_VECTOR_KEY,
+            },
+        },
+        {
+            RAW_VECTOR_IO_TYPE,
+            {
+                RAW_VECTOR_KEY,
+                IO_PARAMS_KEY,
+                TYPE_KEY,
+            },
+        },
+        {
+            RAW_VECTOR_FILE_PATH,
+            {
+                RAW_VECTOR_KEY,
+                IO_PARAMS_KEY,
+                IO_FILE_PATH_KEY,
+            },
+        },
+        {
+            HGRAPH_GRAPH_MAX_DEGREE,
+            {
+                GRAPH_KEY,
+                GRAPH_PARAM_MAX_DEGREE_KEY,
+            },
+        },
+        {
+            HGRAPH_BUILD_EF_CONSTRUCTION,
+            {
+                EF_CONSTRUCTION_KEY,
+            },
+        },
+        {
+            HGRAPH_BUILD_ALPHA,
+            {
+                ALPHA_KEY,
+            },
+        },
+        {
+            HGRAPH_INIT_CAPACITY,
+            {
+                GRAPH_KEY,
+                GRAPH_PARAM_INIT_MAX_CAPACITY_KEY,
+            },
+        },
+        {
+            HGRAPH_GRAPH_TYPE,
+            {
+                GRAPH_KEY,
+                GRAPH_TYPE_KEY,
+            },
+        },
+        {
+            HGRAPH_GRAPH_STORAGE_TYPE,
+            {
+                GRAPH_KEY,
+                GRAPH_STORAGE_TYPE_KEY,
+            },
+        },
+        {
+            ODESCENT_PARAMETER_ALPHA,
+            {
+                GRAPH_KEY,
+                ODESCENT_PARAMETER_ALPHA,
+            },
+        },
+        {
+            ODESCENT_PARAMETER_GRAPH_ITER_TURN,
+            {
+                GRAPH_KEY,
+                ODESCENT_PARAMETER_GRAPH_ITER_TURN,
+            },
+        },
+        {
+            ODESCENT_PARAMETER_NEIGHBOR_SAMPLE_RATE,
+            {
+                GRAPH_KEY,
+                ODESCENT_PARAMETER_NEIGHBOR_SAMPLE_RATE,
+            },
+        },
+        {
+            ODESCENT_PARAMETER_MIN_IN_DEGREE,
+            {
+                GRAPH_KEY,
+                ODESCENT_PARAMETER_MIN_IN_DEGREE,
+            },
+        },
+        {
+            ODESCENT_PARAMETER_BUILD_BLOCK_SIZE,
+            {
+                GRAPH_KEY,
+                ODESCENT_PARAMETER_BUILD_BLOCK_SIZE,
+            },
+        },
+        {
+            HGRAPH_BUILD_THREAD_COUNT,
+            {
+                BUILD_THREAD_COUNT_KEY,
+            },
+        },
+        {
+            SQ4_UNIFORM_TRUNC_RATE,
+            {
+                BASE_CODES_KEY,
+                QUANTIZATION_PARAMS_KEY,
+                SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE_KEY,
+            },
+        },
+        {
+            RABITQ_PCA_DIM,
+            {
+                BASE_CODES_KEY,
+                QUANTIZATION_PARAMS_KEY,
+                PCA_DIM_KEY,
+            },
+        },
+        {
+            INDEX_TQ_CHAIN,
+            {
+                BASE_CODES_KEY,
+                QUANTIZATION_PARAMS_KEY,
+                TQ_CHAIN_KEY,
+            },
+        },
+        {
+            RABITQ_BITS_PER_DIM_QUERY,
+            {
+                BASE_CODES_KEY,
+                QUANTIZATION_PARAMS_KEY,
+                RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY_KEY,
+            },
+        },
+        {
+            HGRAPH_BASE_PQ_DIM,
+            {
+                BASE_CODES_KEY,
+                QUANTIZATION_PARAMS_KEY,
+                PRODUCT_QUANTIZATION_DIM_KEY,
+            },
+        },
+        {
+            RABITQ_USE_FHT,
+            {
+                BASE_CODES_KEY,
+                QUANTIZATION_PARAMS_KEY,
+                USE_FHT_KEY,
+            },
+        },
+        {
+            HGRAPH_SUPPORT_REMOVE,
+            {GRAPH_KEY, GRAPH_SUPPORT_REMOVE},
+        },
+        {
+            HGRAPH_REMOVE_FLAG_BIT,
+            {GRAPH_KEY, REMOVE_FLAG_BIT},
+        },
+        {
+            HGRAPH_SUPPORT_DUPLICATE,
+            {
+                SUPPORT_DUPLICATE,
+            },
+        },
+        {
+            HGRAPH_SUPPORT_TOMBSTONE,
+            {
+                SUPPORT_TOMBSTONE,
+            },
+        }};
+    const std::string hgraph_params_template =
+        R"(
+    {
+        "{TYPE_KEY}": "{INDEX_TYPE_HGRAPH}",
+        "{USE_REORDER_KEY}": false,
+        "{HGRAPH_USE_ENV_OPTIMIZER}": false,
+        "{HGRAPH_IGNORE_REORDER_KEY}": false,
+        "{HGRAPH_BUILD_BY_BASE_QUANTIZATION_KEY}": false,
+        "{HGRAPH_USE_ATTRIBUTE_FILTER_KEY}": false,
+        "{GRAPH_KEY}": {
+            "{IO_PARAMS_KEY}": {
+                "{TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
+                "{IO_FILE_PATH_KEY}": "{DEFAULT_FILE_PATH_VALUE}"
+            },
+            "{GRAPH_TYPE_KEY}": "{GRAPH_TYPE_VALUE_NSW}",
+            "{GRAPH_STORAGE_TYPE_KEY}": "{GRAPH_STORAGE_TYPE_VALUE_FLAT}",
+            "{ODESCENT_PARAMETER_BUILD_BLOCK_SIZE}": 10000,
+            "{ODESCENT_PARAMETER_MIN_IN_DEGREE}": 1,
+            "{ODESCENT_PARAMETER_ALPHA}": 1.2,
+            "{ODESCENT_PARAMETER_GRAPH_ITER_TURN}": 30,
+            "{ODESCENT_PARAMETER_NEIGHBOR_SAMPLE_RATE}": 0.2,
+            "{GRAPH_PARAM_MAX_DEGREE_KEY}": 64,
+            "{GRAPH_PARAM_INIT_MAX_CAPACITY_KEY}": 100,
+            "{GRAPH_SUPPORT_REMOVE}": false,
+            "{REMOVE_FLAG_BIT}": 8
+        },
+        "{BASE_CODES_KEY}": {
+            "{IO_PARAMS_KEY}": {
+                "{TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
+                "{IO_FILE_PATH_KEY}": "{DEFAULT_FILE_PATH_VALUE}"
+            },
+            "{CODES_TYPE_KEY}": "flatten",
+            "{QUANTIZATION_PARAMS_KEY}": {
+                "{TYPE_KEY}": "{QUANTIZATION_TYPE_VALUE_FP32}",
+                "{SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE_KEY}": 0.05,
+                "{PCA_DIM_KEY}": 0,
+                "{RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY_KEY}": 32,
+                "{TQ_CHAIN_KEY}": "",
+                "nbits": 8,
+                "{PRODUCT_QUANTIZATION_DIM_KEY}": 1,
+                "{HOLD_MOLDS}": false
+            }
+        },
+        "{PRECISE_CODES_KEY}": {
+            "{IO_PARAMS_KEY}": {
+                "{TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
+                "{IO_FILE_PATH_KEY}": "{DEFAULT_FILE_PATH_VALUE}"
+            },
+            "{CODES_TYPE_KEY}": "flatten",
+            "{QUANTIZATION_PARAMS_KEY}": {
+                "{TYPE_KEY}": "{QUANTIZATION_TYPE_VALUE_FP32}",
+                "{SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE_KEY}": 0.05,
+                "{PCA_DIM_KEY}": 0,
+                "{PRODUCT_QUANTIZATION_DIM_KEY}": 1,
+                "{HOLD_MOLDS}": false
+            }
+        },
+        "{STORE_RAW_VECTOR_KEY}": false,
+        "{RAW_VECTOR_KEY}": {
+            "{IO_PARAMS_KEY}": {
+                "{TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
+                "{IO_FILE_PATH_KEY}": "{DEFAULT_FILE_PATH_VALUE}"
+            },
+            "{CODES_TYPE_KEY}": "flatten",
+            "{QUANTIZATION_PARAMS_KEY}": {
+                "{TYPE_KEY}": "{QUANTIZATION_TYPE_VALUE_FP32}",
+                "{HOLD_MOLDS}": true
+            }
+        },
+        "{BUILD_THREAD_COUNT_KEY}": 100,
+        "{EXTRA_INFO_KEY}": {
+            "{IO_PARAMS_KEY}": {
+                "{TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
+                "{IO_FILE_PATH_KEY}": "{DEFAULT_FILE_PATH_VALUE}"
+            }
+        },
+        "{ATTR_PARAMS_KEY}": {
+            "{ATTR_HAS_BUCKETS_KEY}": false
+        },
+        "{HGRAPH_SUPPORT_DUPLICATE}": false,
+        "{HGRAPH_SUPPORT_TOMBSTONE}": false,
+        "{EF_CONSTRUCTION_KEY}": 400
+    })";
+
+    std::string str = format_map(hgraph_params_template, DEFAULT_MAP);
+    auto inner_json = JsonType::Parse(str);
+    mapping_external_param_to_inner(hgraph_json, external_mapping, inner_json);
+
+    return inner_json;
+}
+
+bool
+HGraph::Tune(const std::string& parameters, bool disable_future_tuning) {
+    if (not this->index_feature_list_->CheckFeature(IndexFeature::SUPPORT_TUNE)) {
+        return false;
+    }
+
+    // parse
+    auto parsed_params = JsonType::Parse(parameters);
+    JsonType hgraph_json;
+    if (parsed_params.Contains(INDEX_PARAM)) {
+        hgraph_json = parsed_params[INDEX_PARAM];
+    }
+
+    // map
+    auto inner_json = map_hgraph_param(hgraph_json);
+
+    // construct param obj
+    auto hgraph_parameter = std::make_shared<HGraphParameter>();
+    hgraph_parameter->FromJson(inner_json);
+
+    // TODO(zxy): process high_precision_code
+    // init new_basic_code obj
+    auto common_param = this->basic_flatten_codes_->ExportCommonParam();
+    auto new_basic_code =
+        FlattenInterface::MakeInstance(hgraph_parameter->base_codes_param, common_param);
+
+    // nothing need to do
+    if (basic_flatten_codes_->GetQuantizerName() == new_basic_code->GetQuantizerName()) {
+        return true;
+    }
+
+    // update create_param_ptr_
+    std::scoped_lock lock(this->add_mutex_);
+    auto param = std::dynamic_pointer_cast<HGraphParameter>(create_param_ptr_);
+    param->base_codes_param = hgraph_parameter->base_codes_param;
+
+    // export train data and train new_basic_code
+    auto train_count = std::min(MAX_TRAIN_COUNT, (uint32_t)this->total_count_);
+    Vector<float> train_data(train_count * dim_, 0, allocator_);
+    for (auto i = 0; i < train_count; i++) {
+        this->raw_vector_->GetCodesById(i, (uint8_t*)(train_data.data() + i * dim_));
+    }
+    new_basic_code->Train(train_data.data(), train_count);
+
+    // insert data into new_basic_code
+    Vector<float> insert_buffer(dim_, 0, allocator_);
+    for (auto i = 0; i < this->total_count_; i++) {
+        this->raw_vector_->GetCodesById(i, (uint8_t*)insert_buffer.data());
+        new_basic_code->InsertVector((const void*)insert_buffer.data(), i);
+    }
+
+    /**
+     * re-locate raw_vector logic (note that any != fp32):
+     * change basic:
+     * 1. quant1, any, fp32 -> quant2, any, fp32: no process
+     * 2. quant1, any, fp32 -> fp32, any, fp32: raw = basic
+     * 3. fp32, any, fp32 -> quant2, any, fp32: basic = quant2
+     *
+     * change high-precision
+     * 1. any, quant1, fp32 -> any, quant2, fp32: no process
+     * 2. any, quant1, fp32 -> any, fp32, fp32: raw = high
+     * 3. any, fp32, fp32 -> any, quant2, fp32: high = quant2
+     */
+    auto old_is_fp32 = basic_flatten_codes_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32;
+    auto new_is_fp32 = new_basic_code->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32;
+
+    if (!old_is_fp32 && new_is_fp32) {
+        // case 2: quant -> fp32
+        this->basic_flatten_codes_ = new_basic_code;
+        this->raw_vector_ = new_basic_code;
+        create_new_raw_vector_ = false;
+        has_raw_vector_ = true;
+    } else {  // quant -> quant OR fp32 -> quant
+        // case 1 and 3
+        this->basic_flatten_codes_ = new_basic_code;
+        create_new_raw_vector_ = true;
+        has_raw_vector_ = true;
+    }
+
+    // set status
+    return true;
 }
 
 std::vector<int64_t>
@@ -149,6 +610,9 @@ HGraph::build_by_odescent(const DatasetPtr& data) {
         this->basic_flatten_codes_->InsertVector(vectors + dim_ * i, inner_id);
         if (use_reorder_) {
             this->high_precise_codes_->InsertVector(vectors + dim_ * i, inner_id);
+        }
+        if (create_new_raw_vector_) {
+            this->raw_vector_->InsertVector(vectors + dim_ * i, inner_id);
         }
         auto level = this->get_random_level() - 1;
         if (level >= 0) {
@@ -937,6 +1401,9 @@ HGraph::CalcDistanceById(const float* query, int64_t id) const {
     if (use_reorder_) {
         flat = this->high_precise_codes_;
     }
+    if (create_new_raw_vector_) {
+        flat = this->raw_vector_;
+    }
     float result = 0.0F;
     auto computer = flat->FactoryComputer(query);
     {
@@ -952,6 +1419,9 @@ HGraph::CalDistanceById(const float* query, const int64_t* ids, int64_t count) c
     auto flat = this->basic_flatten_codes_;
     if (use_reorder_) {
         flat = this->high_precise_codes_;
+    }
+    if (create_new_raw_vector_) {
+        flat = this->raw_vector_;
     }
     auto result = Dataset::Make();
     result->Owner(true, allocator_);
@@ -1118,11 +1588,11 @@ HGraph::resize(uint64_t new_size) {
         bottom_graph_->Resize(new_size_power_2);
         this->max_capacity_.store(new_size_power_2);
         this->basic_flatten_codes_->Resize(new_size_power_2);
-        if (raw_vector_) {
-            raw_vector_->Resize(new_size_power_2);
-        }
         if (use_reorder_) {
             this->high_precise_codes_->Resize(new_size_power_2);
+        }
+        if (create_new_raw_vector_) {
+            this->raw_vector_->Resize(new_size_power_2);
         }
         if (this->extra_infos_ != nullptr) {
             this->extra_infos_->Resize(new_size_power_2);
@@ -1165,12 +1635,11 @@ HGraph::InitFeatures() {
         IndexFeature::SUPPORT_SERIALIZE_WRITE_FUNC,
     });
     // other
-    this->index_feature_list_->SetFeatures({
-        IndexFeature::SUPPORT_ESTIMATE_MEMORY,
-        IndexFeature::SUPPORT_CHECK_ID_EXIST,
-        IndexFeature::SUPPORT_CLONE,
-        IndexFeature::SUPPORT_EXPORT_MODEL,
-    });
+    this->index_feature_list_->SetFeatures({IndexFeature::SUPPORT_ESTIMATE_MEMORY,
+                                            IndexFeature::SUPPORT_CHECK_ID_EXIST,
+                                            IndexFeature::SUPPORT_CLONE,
+                                            IndexFeature::SUPPORT_EXPORT_MODEL,
+                                            IndexFeature::SUPPORT_TUNE});
 
     // About Train
     auto name = this->basic_flatten_codes_->GetQuantizerName();
@@ -1250,378 +1719,10 @@ HGraph::reorder(const void* query,
     candidate_heap = reorder_heap;
 }
 
-static const std::string HGRAPH_PARAMS_TEMPLATE =
-    R"(
-    {
-        "{TYPE_KEY}": "{INDEX_TYPE_HGRAPH}",
-        "{USE_REORDER_KEY}": false,
-        "{HGRAPH_USE_ENV_OPTIMIZER}": false,
-        "{HGRAPH_IGNORE_REORDER_KEY}": false,
-        "{HGRAPH_BUILD_BY_BASE_QUANTIZATION_KEY}": false,
-        "{HGRAPH_USE_ATTRIBUTE_FILTER_KEY}": false,
-        "{GRAPH_KEY}": {
-            "{IO_PARAMS_KEY}": {
-                "{TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
-                "{IO_FILE_PATH_KEY}": "{DEFAULT_FILE_PATH_VALUE}"
-            },
-            "{GRAPH_TYPE_KEY}": "{GRAPH_TYPE_VALUE_NSW}",
-            "{GRAPH_STORAGE_TYPE_KEY}": "{GRAPH_STORAGE_TYPE_VALUE_FLAT}",
-            "{ODESCENT_PARAMETER_BUILD_BLOCK_SIZE}": 10000,
-            "{ODESCENT_PARAMETER_MIN_IN_DEGREE}": 1,
-            "{ODESCENT_PARAMETER_ALPHA}": 1.2,
-            "{ODESCENT_PARAMETER_GRAPH_ITER_TURN}": 30,
-            "{ODESCENT_PARAMETER_NEIGHBOR_SAMPLE_RATE}": 0.2,
-            "{GRAPH_PARAM_MAX_DEGREE_KEY}": 64,
-            "{GRAPH_PARAM_INIT_MAX_CAPACITY_KEY}": 100,
-            "{GRAPH_SUPPORT_REMOVE}": false,
-            "{REMOVE_FLAG_BIT}": 8
-        },
-        "{BASE_CODES_KEY}": {
-            "{IO_PARAMS_KEY}": {
-                "{TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
-                "{IO_FILE_PATH_KEY}": "{DEFAULT_FILE_PATH_VALUE}"
-            },
-            "{CODES_TYPE_KEY}": "flatten",
-            "{QUANTIZATION_PARAMS_KEY}": {
-                "{TYPE_KEY}": "{QUANTIZATION_TYPE_VALUE_FP32}",
-                "{SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE_KEY}": 0.05,
-                "{PCA_DIM_KEY}": 0,
-                "{RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY_KEY}": 32,
-                "{TQ_CHAIN_KEY}": "",
-                "nbits": 8,
-                "{PRODUCT_QUANTIZATION_DIM_KEY}": 1,
-                "{HOLD_MOLDS}": false
-            }
-        },
-        "{PRECISE_CODES_KEY}": {
-            "{IO_PARAMS_KEY}": {
-                "{TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
-                "{IO_FILE_PATH_KEY}": "{DEFAULT_FILE_PATH_VALUE}"
-            },
-            "{CODES_TYPE_KEY}": "flatten",
-            "{QUANTIZATION_PARAMS_KEY}": {
-                "{TYPE_KEY}": "{QUANTIZATION_TYPE_VALUE_FP32}",
-                "{SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE_KEY}": 0.05,
-                "{PCA_DIM_KEY}": 0,
-                "{PRODUCT_QUANTIZATION_DIM_KEY}": 1,
-                "{HOLD_MOLDS}": false
-            }
-        },
-        "{STORE_RAW_VECTOR_KEY}": false,
-        "{RAW_VECTOR_KEY}": {
-            "{IO_PARAMS_KEY}": {
-                "{TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
-                "{IO_FILE_PATH_KEY}": "{DEFAULT_FILE_PATH_VALUE}"
-            },
-            "{CODES_TYPE_KEY}": "flatten",
-            "{QUANTIZATION_PARAMS_KEY}": {
-                "{TYPE_KEY}": "{QUANTIZATION_TYPE_VALUE_FP32}",
-                "{HOLD_MOLDS}": true
-            }
-        },
-        "{BUILD_THREAD_COUNT_KEY}": 100,
-        "{EXTRA_INFO_KEY}": {
-            "{IO_PARAMS_KEY}": {
-                "{TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
-                "{IO_FILE_PATH_KEY}": "{DEFAULT_FILE_PATH_VALUE}"
-            }
-        },
-        "{ATTR_PARAMS_KEY}": {
-            "{ATTR_HAS_BUCKETS_KEY}": false
-        },
-        "{HGRAPH_SUPPORT_DUPLICATE}": false,
-        "{HGRAPH_SUPPORT_TOMBSTONE}": false,
-        "{EF_CONSTRUCTION_KEY}": 400
-    })";
-
 ParamPtr
 HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
                                      const IndexCommonParam& common_param) {
-    const ConstParamMap external_mapping = {{
-                                                HGRAPH_USE_REORDER,
-                                                {
-                                                    USE_REORDER_KEY,
-                                                },
-                                            },
-                                            {
-                                                HGRAPH_USE_ELP_OPTIMIZER,
-                                                {
-                                                    HGRAPH_USE_ELP_OPTIMIZER_KEY,
-                                                },
-                                            },
-                                            {
-                                                HGRAPH_IGNORE_REORDER,
-                                                {
-                                                    HGRAPH_IGNORE_REORDER_KEY,
-                                                },
-                                            },
-                                            {
-                                                HGRAPH_BUILD_BY_BASE_QUANTIZATION,
-                                                {
-                                                    HGRAPH_BUILD_BY_BASE_QUANTIZATION_KEY,
-                                                },
-                                            },
-                                            {
-                                                USE_ATTRIBUTE_FILTER,
-                                                {
-                                                    USE_ATTRIBUTE_FILTER_KEY,
-                                                },
-                                            },
-                                            {
-                                                HGRAPH_BASE_QUANTIZATION_TYPE,
-                                                {
-                                                    BASE_CODES_KEY,
-                                                    QUANTIZATION_PARAMS_KEY,
-                                                    TYPE_KEY,
-                                                },
-                                            },
-                                            {
-                                                STORE_RAW_VECTOR,
-                                                {
-                                                    BASE_CODES_KEY,
-                                                    QUANTIZATION_PARAMS_KEY,
-                                                    HOLD_MOLDS,
-                                                },
-                                            },
-                                            {
-                                                HGRAPH_BASE_IO_TYPE,
-                                                {
-                                                    BASE_CODES_KEY,
-                                                    IO_PARAMS_KEY,
-                                                    TYPE_KEY,
-                                                },
-                                            },
-                                            {
-                                                HGRAPH_PRECISE_IO_TYPE,
-                                                {
-                                                    PRECISE_CODES_KEY,
-                                                    IO_PARAMS_KEY,
-                                                    TYPE_KEY,
-                                                },
-                                            },
-                                            {
-                                                HGRAPH_BASE_FILE_PATH,
-                                                {
-                                                    BASE_CODES_KEY,
-                                                    IO_PARAMS_KEY,
-                                                    IO_FILE_PATH_KEY,
-                                                },
-                                            },
-                                            {
-                                                HGRAPH_PRECISE_FILE_PATH,
-                                                {
-                                                    PRECISE_CODES_KEY,
-                                                    IO_PARAMS_KEY,
-                                                    IO_FILE_PATH_KEY,
-                                                },
-                                            },
-                                            {
-                                                HGRAPH_PRECISE_QUANTIZATION_TYPE,
-                                                {
-                                                    PRECISE_CODES_KEY,
-                                                    QUANTIZATION_PARAMS_KEY,
-                                                    TYPE_KEY,
-                                                },
-                                            },
-                                            {
-                                                HGRAPH_GRAPH_IO_TYPE,
-                                                {
-                                                    GRAPH_KEY,
-                                                    IO_PARAMS_KEY,
-                                                    TYPE_KEY,
-                                                },
-                                            },
-                                            {
-                                                HGRAPH_GRAPH_FILE_PATH,
-                                                {
-                                                    GRAPH_KEY,
-                                                    IO_PARAMS_KEY,
-                                                    IO_FILE_PATH_KEY,
-                                                },
-                                            },
-                                            {
-                                                STORE_RAW_VECTOR,
-                                                {
-                                                    PRECISE_CODES_KEY,
-                                                    QUANTIZATION_PARAMS_KEY,
-                                                    HOLD_MOLDS,
-                                                },
-                                            },
-                                            {
-                                                STORE_RAW_VECTOR,
-                                                {
-                                                    STORE_RAW_VECTOR_KEY,
-                                                },
-                                            },
-                                            {
-                                                RAW_VECTOR_IO_TYPE,
-                                                {
-                                                    RAW_VECTOR_KEY,
-                                                    IO_PARAMS_KEY,
-                                                    TYPE_KEY,
-                                                },
-                                            },
-                                            {
-                                                RAW_VECTOR_FILE_PATH,
-                                                {
-                                                    RAW_VECTOR_KEY,
-                                                    IO_PARAMS_KEY,
-                                                    IO_FILE_PATH_KEY,
-                                                },
-                                            },
-                                            {
-                                                HGRAPH_GRAPH_MAX_DEGREE,
-                                                {
-                                                    GRAPH_KEY,
-                                                    GRAPH_PARAM_MAX_DEGREE_KEY,
-                                                },
-                                            },
-                                            {
-                                                HGRAPH_BUILD_EF_CONSTRUCTION,
-                                                {
-                                                    EF_CONSTRUCTION_KEY,
-                                                },
-                                            },
-                                            {
-                                                HGRAPH_BUILD_ALPHA,
-                                                {
-                                                    ALPHA_KEY,
-                                                },
-                                            },
-                                            {
-                                                HGRAPH_INIT_CAPACITY,
-                                                {
-                                                    GRAPH_KEY,
-                                                    GRAPH_PARAM_INIT_MAX_CAPACITY_KEY,
-                                                },
-                                            },
-                                            {
-                                                HGRAPH_GRAPH_TYPE,
-                                                {
-                                                    GRAPH_KEY,
-                                                    GRAPH_TYPE_KEY,
-                                                },
-                                            },
-                                            {
-                                                HGRAPH_GRAPH_STORAGE_TYPE,
-                                                {
-                                                    GRAPH_KEY,
-                                                    GRAPH_STORAGE_TYPE_KEY,
-                                                },
-                                            },
-                                            {
-                                                ODESCENT_PARAMETER_ALPHA,
-                                                {
-                                                    GRAPH_KEY,
-                                                    ODESCENT_PARAMETER_ALPHA,
-                                                },
-                                            },
-                                            {
-                                                ODESCENT_PARAMETER_GRAPH_ITER_TURN,
-                                                {
-                                                    GRAPH_KEY,
-                                                    ODESCENT_PARAMETER_GRAPH_ITER_TURN,
-                                                },
-                                            },
-                                            {
-                                                ODESCENT_PARAMETER_NEIGHBOR_SAMPLE_RATE,
-                                                {
-                                                    GRAPH_KEY,
-                                                    ODESCENT_PARAMETER_NEIGHBOR_SAMPLE_RATE,
-                                                },
-                                            },
-                                            {
-                                                ODESCENT_PARAMETER_MIN_IN_DEGREE,
-                                                {
-                                                    GRAPH_KEY,
-                                                    ODESCENT_PARAMETER_MIN_IN_DEGREE,
-                                                },
-                                            },
-                                            {
-                                                ODESCENT_PARAMETER_BUILD_BLOCK_SIZE,
-                                                {
-                                                    GRAPH_KEY,
-                                                    ODESCENT_PARAMETER_BUILD_BLOCK_SIZE,
-                                                },
-                                            },
-                                            {
-                                                HGRAPH_BUILD_THREAD_COUNT,
-                                                {
-                                                    BUILD_THREAD_COUNT_KEY,
-                                                },
-                                            },
-                                            {
-                                                SQ4_UNIFORM_TRUNC_RATE,
-                                                {
-                                                    BASE_CODES_KEY,
-                                                    QUANTIZATION_PARAMS_KEY,
-                                                    SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE_KEY,
-                                                },
-                                            },
-                                            {
-                                                RABITQ_PCA_DIM,
-                                                {
-                                                    BASE_CODES_KEY,
-                                                    QUANTIZATION_PARAMS_KEY,
-                                                    PCA_DIM_KEY,
-                                                },
-                                            },
-                                            {
-                                                INDEX_TQ_CHAIN,
-                                                {
-                                                    BASE_CODES_KEY,
-                                                    QUANTIZATION_PARAMS_KEY,
-                                                    TQ_CHAIN_KEY,
-                                                },
-                                            },
-                                            {
-                                                RABITQ_BITS_PER_DIM_QUERY,
-                                                {
-                                                    BASE_CODES_KEY,
-                                                    QUANTIZATION_PARAMS_KEY,
-                                                    RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY_KEY,
-                                                },
-                                            },
-                                            {
-                                                HGRAPH_BASE_PQ_DIM,
-                                                {
-                                                    BASE_CODES_KEY,
-                                                    QUANTIZATION_PARAMS_KEY,
-                                                    PRODUCT_QUANTIZATION_DIM_KEY,
-                                                },
-                                            },
-                                            {
-                                                RABITQ_USE_FHT,
-                                                {
-                                                    BASE_CODES_KEY,
-                                                    QUANTIZATION_PARAMS_KEY,
-                                                    USE_FHT_KEY,
-                                                },
-                                            },
-                                            {
-                                                HGRAPH_SUPPORT_REMOVE,
-                                                {GRAPH_KEY, GRAPH_SUPPORT_REMOVE},
-                                            },
-                                            {
-                                                HGRAPH_REMOVE_FLAG_BIT,
-                                                {GRAPH_KEY, REMOVE_FLAG_BIT},
-                                            },
-                                            {
-                                                HGRAPH_SUPPORT_DUPLICATE,
-                                                {
-                                                    SUPPORT_DUPLICATE,
-                                                },
-                                            },
-                                            {
-                                                HGRAPH_SUPPORT_TOMBSTONE,
-                                                {
-                                                    SUPPORT_TOMBSTONE,
-                                                },
-                                            }};
-
-    std::string str = format_map(HGRAPH_PARAMS_TEMPLATE, DEFAULT_MAP);
-    auto inner_json = JsonType::Parse(str);
-    mapping_external_param_to_inner(external_param, external_mapping, inner_json);
+    auto inner_json = map_hgraph_param(external_param);
     if (common_param.data_type_ == DataTypes::DATA_TYPE_SPARSE) {
         inner_json[BASE_CODES_KEY][CODES_TYPE_KEY].SetString(SPARSE_CODES);
         inner_json[PRECISE_CODES_KEY][CODES_TYPE_KEY].SetString(SPARSE_CODES);
@@ -1867,7 +1968,7 @@ HGraph::Merge(const std::vector<MergeUnit>& merge_units) {
 void
 HGraph::GetVectorByInnerId(InnerIdType inner_id, float* data) const {
     auto codes = (use_reorder_) ? high_precise_codes_ : basic_flatten_codes_;
-    codes = (raw_vector_) ? raw_vector_ : codes;
+    codes = (create_new_raw_vector_) ? raw_vector_ : codes;
     bool release;
     const auto* buffer = codes->GetCodesById(inner_id, release);
     codes->Decode(buffer, data);

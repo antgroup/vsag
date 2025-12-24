@@ -79,6 +79,8 @@ enum IndexFeature {
 
     SUPPORT_EXPORT_MODEL, /**< Supports export model */
 
+    SUPPORT_TUNE, /**< Supports support tune index */
+
     INDEX_FEATURE_COUNT /** must be last one */
 };
 }  // namespace vsag

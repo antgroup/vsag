@@ -209,7 +209,7 @@ TransformQuantizer<QuantTmpl, metric>::MakeTransformerInstance(
 template <typename QuantTmpl, MetricType metric>
 bool
 TransformQuantizer<QuantTmpl, metric>::TrainImpl(const DataType* data, uint64_t count) {
-    count = std::min(count, (uint64_t)TQ_MAX_TRAIN_COUNT);
+    count = std::min(count, (uint64_t)MAX_TRAIN_COUNT);
 
     // 1. train transformer based on original data
     for (const auto& vector_transformer : this->transform_chain_) {
