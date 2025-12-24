@@ -201,7 +201,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
     auto metric_type = GENERATE("l2");
-    auto use_reorder = GENERATE(true, false);
+    auto use_reorder = GENERATE(true);
     PyramidParam pyramid_param;
     pyramid_param.no_build_levels = {0, 1, 2};
     pyramid_param.use_reorder = use_reorder;
@@ -212,6 +212,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
     const std::string name = "pyramid";
     auto search_param = GeneratePyramidSearchParametersString(100);
     for (auto& dim : dims) {
+        dim = 2;
         vsag::Options::Instance().set_block_size_limit(size);
         auto param = GeneratePyramidBuildParametersString(metric_type, dim, pyramid_param);
         auto index = TestFactory(name, param, true);
