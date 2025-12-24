@@ -70,8 +70,11 @@ public:
 
     void
     AsyncRead(uint64_t offset, uint64_t len, void* dest, CallBack callback) override {
-        if (not pool_) {
-            pool_ = SafeThreadPool::FactoryDefaultThreadPool();
+        {
+            std::scoped_lock lock(mutex_);
+            if (not pool_) {
+                pool_ = SafeThreadPool::FactoryDefaultThreadPool();
+            }
         }
         pool_->GeneralEnqueue([this,  // NOLINT(clang-analyzer-cplusplus.NewDeleteLeaks)
                                offset,
