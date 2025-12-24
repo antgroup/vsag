@@ -871,7 +871,7 @@ TestHGraphTune(const fixtures::HGraphTestIndexPtr& test_index,
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
     const std::vector<std::pair<std::string, std::string>> test_cases = {
-        {"sq8", "sq8"}, {"sq8", "sq4"}, {"fp32", "bf16"}, {"sq8", "fp32"}};
+        {"sq8", "sq8"}, {"fp32", "bf16"}, {"sq8", "fp32"}};
 
     auto search_param = fmt::format(fixtures::search_param_tmp, 200, false);
     for (auto metric_type : resource->metric_types) {

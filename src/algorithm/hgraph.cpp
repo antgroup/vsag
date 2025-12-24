@@ -543,15 +543,15 @@ HGraph::Tune(const std::string& parameters, bool disable_future_tuning) {
     // export train data and train new_basic_code
     auto train_count = std::min(MAX_TRAIN_COUNT, (uint32_t)this->total_count_);
     Vector<float> train_data(train_count * dim_, 0, allocator_);
-    for (auto i = 0; i < train_count; i++) {
-        this->raw_vector_->GetCodesById(i, (uint8_t*)(train_data.data() + i * dim_));
+    for (InnerIdType i = 0; i < train_count; i++) {
+        this->GetVectorByInnerId(i, (train_data.data() + i * dim_));
     }
     new_basic_code->Train(train_data.data(), train_count);
 
     // insert data into new_basic_code
     Vector<float> insert_buffer(dim_, 0, allocator_);
     for (auto i = 0; i < this->total_count_; i++) {
-        this->raw_vector_->GetCodesById(i, (uint8_t*)insert_buffer.data());
+        this->GetVectorByInnerId(i, insert_buffer.data());
         new_basic_code->InsertVector((const void*)insert_buffer.data(), i);
     }
 
