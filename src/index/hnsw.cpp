@@ -1135,6 +1135,7 @@ HNSW::init_feature_list() {
     // other
     feature_list_.SetFeatures({IndexFeature::SUPPORT_CAL_DISTANCE_BY_ID,
                                IndexFeature::SUPPORT_CHECK_ID_EXIST,
+                               IndexFeature::SUPPORT_GET_RAW_VECTOR_BY_IDS,
                                IndexFeature::SUPPORT_MERGE_INDEX,
                                IndexFeature::SUPPORT_ESTIMATE_MEMORY});
 }
@@ -1284,6 +1285,50 @@ HNSW::get_min_and_max_id() const {
     }
 
     return alg_hnsw_->getMinAndMaxId();
+}
+
+tl::expected<DatasetPtr, Error>
+HNSW::get_vectors_by_id(const int64_t* ids, int64_t count, Allocator* specified_allocator) const {
+    std::shared_lock status_lock(index_status_mutex_);
+    std::shared_lock lock(rw_mutex_);
+    bool has_specified_allocator = specified_allocator != nullptr;
+    Allocator* allocator = has_specified_allocator ? specified_allocator : allocator_.get();
+
+    if (not this->IsValidStatus()) {
+        LOG_ERROR_AND_RETURNS(
+            ErrorType::WRONG_STATUS, "index is in the wrong status({})", PrintStatus());
+    }
+
+    DatasetPtr vectors = Dataset::Make();
+    vectors->NumElements(count)->Dim(dim_)->Owner(/*auto release=*/not has_specified_allocator,
+                                                  allocator);
+
+    uint32_t data_size = 0;
+    if (type_ == DataTypes::DATA_TYPE_INT8) {
+        data_size = dim_;
+    } else {
+        data_size = dim_ * 4;
+    }
+
+    auto* vectors_blob = allocator->Allocate(data_size * count);
+
+    if (type_ == DataTypes::DATA_TYPE_INT8) {
+        vectors->Int8Vectors((int8_t*)vectors_blob);
+    } else {
+        vectors->Float32Vectors((float*)vectors_blob);
+    }
+
+    for (auto i = 0; i < count; i++) {
+        try {
+            alg_hnsw_->copyDataByLabel(ids[i],
+                                       (char*)vectors_blob + static_cast<size_t>(i * data_size));
+        } catch (std::runtime_error& e) {
+            throw std::runtime_error(
+                fmt::format("fail to get vector by id({}): {}, ", ids[i], e.what()));
+        }
+    }
+
+    return vectors;
 }
 
 bool
