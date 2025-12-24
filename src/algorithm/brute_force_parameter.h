@@ -34,7 +34,7 @@ public:
     CheckCompatibility(const vsag::ParamPtr& other) const override;
 
 public:
-    FlattenDataCellParamPtr flatten_param;
+    FlattenInterfaceParamPtr base_codes_param{nullptr};
 };
 
 DEFINE_POINTER(BruteForceParameter);

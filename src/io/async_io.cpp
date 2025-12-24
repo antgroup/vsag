@@ -13,6 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#if HAVE_LIBAIO
+
 #include "async_io.h"
 
 #include <fcntl.h>
@@ -24,6 +26,7 @@
 #include "io_context.h"
 
 namespace vsag {
+
 std::unique_ptr<IOContextPool> AsyncIO::io_context_pool =
     std::make_unique<IOContextPool>(10, nullptr);
 
@@ -164,3 +167,5 @@ AsyncIO::MultiReadImpl(uint8_t* datas, uint64_t* sizes, uint64_t* offsets, uint6
 }
 
 }  // namespace vsag
+
+#endif  // HAVE_LIBAIO

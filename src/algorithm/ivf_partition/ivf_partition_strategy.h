@@ -18,6 +18,7 @@
 #include <iostream>
 #include <vector>
 
+#include "algorithm/inner_index_interface.h"
 #include "impl/searcher/basic_searcher.h"
 #include "ivf_partition_strategy_parameter.h"
 #include "storage/stream_reader.h"
@@ -55,11 +56,17 @@ public:
     Train(const DatasetPtr dataset) = 0;
 
     virtual Vector<BucketIdType>
-    ClassifyDatas(const void* datas, int64_t count, BucketIdType buckets_per_data) const = 0;
+    ClassifyDatas(const void* datas,
+                  int64_t count,
+                  BucketIdType buckets_per_data,
+                  Statistics& stats) const = 0;
 
     virtual Vector<BucketIdType>
-    ClassifyDatasForSearch(const void* datas, int64_t count, const InnerSearchParam& param) {
-        return std::move(ClassifyDatas(datas, count, param.scan_bucket_size));
+    ClassifyDatasForSearch(const void* datas,
+                           int64_t count,
+                           const InnerSearchParam& param,
+                           Statistics& stats) {
+        return std::move(ClassifyDatas(datas, count, param.scan_bucket_size, stats));
     }
 
     virtual void
