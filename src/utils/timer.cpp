@@ -30,8 +30,8 @@ Timer::Timer() : Timer(nullptr){};
 double
 Timer::Record() {
     auto finish = std::chrono::steady_clock::now();
-    std::chrono::duration<double, std::milli> duration = finish - start;
-    return duration.count();
+    std::chrono::duration<double, std::micro> duration = finish - start;
+    return duration.count() / 1000.0;
 }
 
 bool
