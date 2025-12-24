@@ -700,6 +700,10 @@ Pyramid::search_node(const IndexNode* node,
 
     if (node->status_ == IndexNode::Status::FLAT) {
         results = std::make_shared<StandardHeap<true, false>>(allocator_, -1);
+        if (search_param.time_cost != nullptr and search_param.time_cost->CheckOvertime()) {
+            stats.is_timeout.store(true, std::memory_order_relaxed);
+            return results;
+        }
         const auto* ids_ptr = node->ids_.data();
         auto id_count = node->ids_.size();
         Vector<InnerIdType> valid_ids(allocator_);
